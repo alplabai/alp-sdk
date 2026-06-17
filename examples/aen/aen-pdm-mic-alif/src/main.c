@@ -116,13 +116,19 @@ int main(void)
 		    },
 	};
 
+	/* Enable the 76.8 MHz audio reference (HFOSCx2) at the CGU. The upstream Alif
+	 * clockctrl alp-sdk consumes only sets per-peripheral gates; it never enables
+	 * this master source, so the PDM has no functional clock and never samples
+	 * (FIFO=0 -> dmic_read -EAGAIN). CGU_CLK_ENA = CGU base 0x1A602000 + 0x14; bit
+	 * 24 = CLK76P8M. Reg + bit from the fork clock_control_alif_ensemble.c GEN2
+	 * path (ALIF_CLK_ENA_CLK76P8M_BIT) -- NOT invented. */
+	sys_set_bits(0x1A602014U, BIT(24));
+
 	/* The HP PDM lives in the EXPMST0 (expansion-master-0) domain: its functional
 	 * IP clock only RUNS when EXPMST0_CTRL IPCLK_FORCE (bit31) + PCLK_FORCE (bit30)
-	 * are set. The per-peripheral gate (EXPMST0_CTRL bit8, set by the driver's
-	 * clock_control_on) alone gates the source but does NOT start the IP clock, so
-	 * without this the block never samples (FIFO stays empty -> dmic_read -EAGAIN).
-	 * Reg 0x4902F000 (CLKCTL_PER_SLV + EXPMST0_CTRL) + the two force bits are from
-	 * the fork clock_control_alif_ensemble.c -- NOT invented. */
+	 * are set (the bit8 per-peripheral gate alone does not). Reg 0x4902F000
+	 * (CLKCTL_PER_SLV + EXPMST0_CTRL) + the force bits are from the same fork
+	 * driver -- NOT invented. */
 	sys_set_bits(0x4902F000U, BIT(30) | BIT(31));
 
 	int rc = dmic_configure(dmic, &cfg);

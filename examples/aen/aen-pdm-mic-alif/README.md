@@ -26,35 +26,37 @@ So two stereo data lines (D0→ch0/1, D2→ch4/5) = the 4 mics. Upstream Zephyr 
 
 ## Status
 
-**The PDM peripheral is fully + correctly configured on E8 — every bit SWD-verified
-— but it does not yet sample, because the 76.8 MHz audio clock SOURCE is not
-enabled (it is SE-managed).** RESULT PARTIAL.
+**WORKING on E8 — RESULT PASS: live PCM captured from the mics.** A bench run reads
+four 12800-byte blocks, each ~6300/6400 samples non-zero and **varying** (live
+acoustic data):
 
-| Register (SWD) | Value | Meaning |
-|---|---|---|
-| `PDM_CONFIG` (`0x4902D000`) low byte | `0x33` | channels 0,1,4,5 **enabled** |
-| `PDM_CONFIG` bit 16 (`PDM_CLK_MODE`) | `1` | mode `STANDARD_VOICE_512` (**not** sleep) |
-| `EXPMST0_CTRL` (`0x4902F000`) bit 8 | `1` | HP-PDM clock gate **on** |
-| `EXPMST0_CTRL` bits 30/31 (PCLK/IPCLK force) | `1` | EXPMST0 IP clock **forced on** |
-| `PDM_FIFO_STATUS` (`0x4902D00C`) | `0` | FIFO empty → **not sampling** |
+```
+[pdm] read[0] size=12800 nonzero=6288 first=0
+[pdm] read[1] size=12800 nonzero=6400 first=5
+...
+[pdm] RESULT PASS: varying PCM captured = live audio
+```
 
-Getting the config this correct took finding several real bugs (the first cut had
-*all* of them): wrong PDM **instance** (LPPDM → HP per the SoM TSV); wrong **pads**;
-the data pads lacked `input-enable` (the upstream pad REN bit); the app never called
-`pdm_mode()` / `pdm_channel_config()` (so the block sat in `MICROPHONE_SLEEP`); the
-channel mask wasn't the raw PDM mask; and the EXPMST0 `IPCLK/PCLK_FORCE` bits (from
-the fork clock driver) weren't set.
+Getting here required finding a chain of real issues (the first cut had all of
+them):
+1. **Wrong PDM instance** — the mics are on the **HP `pdm@4902d000`**, not the
+   LPPDM (per `from-alif.tsv`); with the wrong instance/pads nothing samples.
+2. **Wrong/missing pads** — now the SoM-TSV mic route (D0=P6_0/C0=P6_1,
+   D2=P5_4/C2=P11_4); data pads carry `input-enable` (pad REN).
+3. **`MICROPHONE_SLEEP`** — the app must call `pdm_channel_config()` (FIR/IIR/gain
+   from the Alif reference) per channel + `pdm_mode(STANDARD_VOICE_512)` before
+   START; channel mask is the raw PDM mask (`0x33` = ch 0,1,4,5).
+4. **EXPMST0 IP clock not forced** — set `EXPMST0_CTRL` (`0x4902F000`) bits 30/31
+   (PCLK/IPCLK force), not just the bit-8 gate.
+5. **The 76.8 MHz audio source was OFF** — the load-bearing fix. The upstream Alif
+   clockctrl only sets per-peripheral gates; it never enables the **HFOSCx2**
+   master source. Enabling it is a single CGU write: `CGU_CLK_ENA` (`0x1A602014`,
+   = CGU base `0x1A602000` + `0x14`) **bit 24** (`CLK76P8M`) — reg + bit from the
+   fork `clock_control_alif_ensemble.c` GEN2 path, not invented. (So it is *not*
+   SE-only as first feared; a direct register write suffices.) SWD before the
+   fix: `CGU_CLK_ENA=0xFE33FFF1` (bit24=0, source off); after: the FIFO fills.
 
-> **Root cause of no-capture (definitive, not inventable):** `FIFO=0` (rather than
-> a FIFO full of constant/DC samples) means the PDM is **not clocking** at all. The
-> 76.8 MHz PDM functional clock comes from **`CLKEN_HFOSCx2`**, which on the E8 is
-> owned by the **Secure Enclave** and must be requested via the `se_services` library
-> over the **MHU mailbox to the SE** (`SERVICES_clocks_enable_clock(...,
-> CLKEN_HFOSCx2)`). alp-sdk does **not** integrate `se_services`/MHU yet (no caller
-> anywhere), so the audio clock is off and the block never samples.
->
-> **To finish (a scoped follow-up, a new subsystem — not a peripheral fix):**
-> integrate `hal_alif/se_services` + the MHU-to-SE transport, get a services handle,
-> and enable `CLKEN_HFOSCx2` before `dmic_trigger(START)`. Then this example should
-> capture live PCM (RESULT PASS). Confirm the mic supply is on too. See
-> [[project_pending_hw_configs]].
+The example pokes the CGU 76.8 MHz enable + the EXPMST0 force directly (with
+grounded reg/bit references) because the upstream clockctrl driver does neither;
+folding both into a Tier-1.5 clockctrl patch is the clean follow-up.
+[[project_pending_hw_configs]]
