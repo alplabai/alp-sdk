@@ -18,8 +18,10 @@
  * This overlay pairs QEC0 with utimer0 (timer-id 0) as a documented default; the
  * exact QECn->UTIMER-instance routing is a TRM detail and the encoder's wiring to
  * the QEC0 pads is a schematic detail -- CONFIRM both before trusting the count.
- * (Inputs also want the pad read-enable, which is not in the upstream
- * alif,pinctrl binding; without it the count may stay static -> RESULT PARTIAL.)
+ *
+ * The QEC0 X/Y channel inputs carry `input-enable` (= the upstream pad REN bit 16,
+ * set by soc/alif/ensemble/pinctrl_soc.h) so their input buffers actually sense
+ * the encoder edges -- without it the count stays static regardless of motion.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
@@ -36,8 +38,10 @@
 
 &pinctrl {
 	pinctrl_qec0: pinctrl_qec0 {
+		/* QEC0 X/Y = encoder channel A/B INPUTS -> input-enable (pad REN). */
 		group0 {
 			pinmux = <PIN_P3_0__QEC0_X_A>, <PIN_P3_1__QEC0_Y_A>;
+			input-enable;
 		};
 	};
 };

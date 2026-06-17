@@ -9,18 +9,19 @@
  * as status="disabled"; this overlay enables it and supplies the RMII pin group +
  * a real MAC address.
  *
- * RMII pads = the "B" route on P11_x (refclk into P11_0, matching the on-module
- * 50 MHz oscillator), transcribed from the zephyr_alif fork's pinctrl_eth.
+ * RMII PADS: the AUTHORITATIVE E1M-AEN801 routing from
+ * metadata/e1m_modules/aen/alif-ethernet-phy.tsv (NOT the fork's reference route,
+ * which the first cut wrongly used):
+ *   REFCLK P11_0 | RXD0 P11_3 | RXD1 P1_1 | CRS_DV P6_7  (inputs)
+ *   TXD0  P10_4  | TXD1 P10_5 | TXEN  P1_5               (outputs)
+ * The input pads carry `input-enable` (the upstream pad REN bit, set by
+ * soc/alif/ensemble/pinctrl_soc.h) so the RMII RX buffers actually sense. The PHY
+ * is unmanaged (fixed-link) so MDC/MDIO (P11_2/P11_1) are not muxed.
  *
- * BENCH-PENDING blockers (none are driver bugs) -- see [[project_pending_hw_configs]]:
- *  - PHY power-enable: the on-module TI DP83825I needs a power-enable on a
- *    CC3501E-side line (driven over the SPI bridge); unpowered = no carrier.
- *  - RMII ref-clock source-select: ETH_CTRL_REG's ref-clk-source bit has no
- *    upstream clock-driver programming path (do NOT invent it); whether silicon
- *    needs it set before the MAC sees the P11_0 clock is unconfirmed.
- *  - Pad read-enable: the RMII *input* pads (REFCLK/RXD/CRS_DV) want read-enable,
- *    which is not in the upstream alif,pinctrl binding -- so the input buffers may
- *    stay disabled (the systemic upstream-pinctrl gap shared with I2S/PDM/qenc).
+ * PHY POWER/RESET are ALIF pins (per the SoM TSV), NOT CC3501E as the first cut
+ * claimed: E_PHY_PWRDWN = P15_4 (lpgpio) and E_PHY_RESET = P11_6 (gpio11). Both
+ * are added below and driven by main(); the alp-sdk E8 dtsi carries gpio0..gpio9
+ * only, so gpio11 + lpgpio are created here (reg/IRQ/ngpios from the fork dtsi).
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
@@ -33,17 +34,42 @@
 
 &pinctrl {
 	pinctrl_eth: pinctrl_eth {
-		/* RMII inputs: REFCLK / RXD0 / RXD1 / CRS_DV (read-enable, which the
-		 * input buffers need, is not in the upstream alif,pinctrl binding). */
+		/* RMII inputs (REFCLK + RX) -- input-enable sets the pad REN bit so the
+		 * RX/refclk input buffers sense. */
 		group0 {
 			pinmux = <PIN_P11_0__ETH_REFCLK_B>, <PIN_P11_3__ETH_RXD0_B>,
-				 <PIN_P11_4__ETH_RXD1_B>, <PIN_P11_5__ETH_CRS_DV_B>;
+				 <PIN_P1_1__ETH_RXD1_C>, <PIN_P6_7__ETH_CRS_DV_A>;
+			input-enable;
 		};
-		/* RMII outputs: TXD0 / TXD1 / TX_EN. */
+		/* RMII outputs (TX). */
 		group1 {
-			pinmux = <PIN_P6_0__ETH_TXD0_A>, <PIN_P10_5__ETH_TXD1_B>,
-				 <PIN_P10_6__ETH_TXEN_B>;
+			pinmux = <PIN_P10_4__ETH_TXD0_B>, <PIN_P10_5__ETH_TXD1_B>,
+				 <PIN_P1_5__ETH_TXEN_C>;
 		};
+	};
+};
+
+/* PHY reset line E_PHY_RESET = P11_6 (gpio11 pin 6). gpio11@4900b000 from the
+ * fork dts (snps,designware-gpio, ngpios 8, IRQ 267..). */
+&{/soc} {
+	gpio11: gpio@4900b000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900B000 0x1000>;
+		ngpios = <8>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+	};
+
+	/* PHY power-down line E_PHY_PWRDWN = P15_4 (lpgpio pin 4). lpgpio@42002000
+	 * (AON/LP domain) from the fork dts. */
+	lpgpio: gpio@42002000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x42002000 0x1000>;
+		ngpios = <8>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
 	};
 };
 

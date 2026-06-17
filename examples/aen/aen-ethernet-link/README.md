@@ -17,33 +17,43 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-et
 # flash + run per docs/aen-bench-bringup.md, then read ram_console_buf over SWD.
 ```
 
-The board overlay enables `&ethernet`, supplies `pinctrl_eth` (the RMII "B" route:
-REFCLK=P11_0, RXD0/1=P11_3/4, CRS_DV=P11_5, TXD0=P6_0, TXD1=P10_5, TXEN=P10_6),
-and sets a `local-mac-address`.
+The board overlay enables `&ethernet` with the **authoritative SoM RMII route**
+(`metadata/e1m_modules/aen/alif-ethernet-phy.tsv`, not the fork reference route the
+first cut wrongly used): REFCLK=P11_0, RXD0=P11_3, RXD1=P1_1, CRS_DV=P6_7,
+TXD0=P10_4, TXD1=P10_5, TXEN=P1_5 — with `input-enable` on the RX inputs. It also
+creates `gpio11` + `lpgpio` so main() can drive the PHY control pins.
 
 ## What it shows
 
-1. `net_if_get_default()` → the GMAC interface + its MAC.
-2. `net_if_up()` → start the MAC DMA (the eth_dwmac core's software reset runs).
-3. Sample `admin_up` + `carrier_ok`.
+1. Powers the PHY **early** (SYS_INIT pri 50, before the eth driver's refclk probe):
+   `E_PHY_PWRDWN`=P15_4 (lpgpio.4) + `E_PHY_RESET`=P11_6 (gpio11.6).
+2. Reads back `ETH_CTRL` bit 4 (the RMII ref-clock source the AUTO probe locked).
+3. `net_if_up()` + `net_dhcpv4_start()` → DHCP lease test off the bench switch.
 
 ## Status
 
-**GMAC + interface PROVEN on E8 (RESULT PARTIAL):** the interface registers, the
-MAC software-reset completes (so the on-module 50 MHz RMII ref-clock on P11_0 **is**
-present — the driver does not hang), and `net_if_up` returns `-EALREADY` (the
-fixed-link PHY brought it up at init).
+**Headline blocker RESOLVED + bench-validated:** the "Ethernet needs a power
+enable" the bench called out **is** the Alif `E_PHY_PWRDWN` = **P15_4** line (an
+**lpgpio** pin — *not* a CC3501E line as first assumed; confirmed against the SoM
+TSV). Driving it **before** the eth driver's RMII ref-clock AUTO probe flips the
+probe result from internal-PLL fallback to the **external 50 MHz oscillator**
+(`ETH_CTRL` bit 4: `1 → 0`, self-reported by the app + SWD-confirmed) — the PHY is
+now clocked and the MAC DMA-reset completes on the external osc.
 
-> **`carrier_ok=1` is NOT a real link.** The node uses `ethernet-phy-fixed-link`,
-> which reports carrier unconditionally. Real connectivity to the bench switch
-> (TX/RX, a ping) still pends — none are driver bugs:
-> 1. **PHY power-enable:** the on-module TI DP83825I needs a power-enable on a
->    **CC3501E**-side line (driven over the SPI bridge). Unpowered = no wire link.
-> 2. **RMII ref-clock source-select:** `ETH_CTRL_REG`'s ref-clk-source bit has no
->    upstream clock-driver programming path (do NOT invent it).
-> 3. **Pad read-enable:** the RMII *input* pads want `read-enable`, absent from the
->    upstream `alif,pinctrl` binding (the systemic gap shared with I2S/PDM/qenc).
-> 4. A managed-PHY (MDIO) driver + a ping test would escalate this beyond PARTIAL.
+Also fixed here: the RMII pins were wrong (fork route) → corrected to the SoM TSV
+route; `input-enable` added to the RX input pads (the upstream pad REN bit, via the
+standard property — the fork's `read-enable` does not exist upstream).
 
-See [[project_pending_hw_configs]]. The earlier "Ethernet PASS" was this same
-driver/interface-init level; this example makes the fixed-link caveat explicit.
+**RESULT PARTIAL** (no DHCP lease yet): with the PHY clocked + powered + pins
+corrected, a full bidirectional link is not yet up. Remaining (needs a scope or the
+schematic, not inventable):
+> - **PHY enable/reset polarity** — `PWRDWN`=high (enable) made the osc run; both
+>   `RST_N` polarities were bench-tried without a link, so the gating detail is
+>   elsewhere.
+> - **TX path / auto-negotiation** — DHCP DISCOVER must transmit and the DP83825I
+>   must auto-neg with the switch; a managed-PHY (MDIO) driver would let us read PHY
+>   link status directly.
+> - **Exact EVK PHY wiring** vs the SoM TSV.
+
+See [[project_pending_hw_configs]]. Run on the bench switch (dnsmasq,
+192.168.10.50–150); a `[eth] DHCP lease = …` line is the full-link PASS.

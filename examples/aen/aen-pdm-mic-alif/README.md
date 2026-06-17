@@ -43,12 +43,30 @@ captured — check mic routing / gain rather than the driver.
 
 ## Status
 
-**Driver path PROVEN on E8:** the device is ready and `dmic_configure` /
-`dmic_trigger(START)` / `dmic_read` all execute (`rc=0` on configure + start).
-Reads currently return `-EAGAIN` (no acoustic data) → reported **PARTIAL**.
+**Software path COMPLETE and register-verified on E8 (RESULT PARTIAL on acoustic
+capture).** The driver + clock + channel config are proven correct over SWD:
 
-> **BENCH-UNVERIFIED (acoustic):** confirm the E1M-AEN801 EVK routes its 4×
-> MP34DT05 mics to the **LPPDM** C0..C3 pads above (vs the HP `pdm@4902d000`), and
-> that the mic supply / `LR` select are correct. The pads are the SoC option, not
-> the EVK wiring — see [[project_pending_hw_configs]]. Tier-2 retires onto the
-> opt-in fork once acoustically validated (task #21).
+| Register (SWD) | Value | Meaning |
+|---|---|---|
+| `HE_CLK_ENA` (`0x43007010`) bit 8 | `1` | LPPDM 76.8 MHz clock gated **on** |
+| `PDM_CONFIG` (`0x43002000`) low byte | `0x0F` | channels 0–3 **enabled** |
+| `PDM_CONFIG` bit 16 (`PDM_CLK_MODE`) | `1` | clock mode `STANDARD_VOICE_512` (**not** sleep) |
+| `PDM_FIFO_STATUS` (`0x4300200C`) | `0` | FIFO empty → no PCM accumulated |
+
+Three real software bugs were fixed to get here (the first cut was missing all of
+these, which is why it was silent):
+1. the overlay wired only LPPDM **clock** pads and **no data** pads — now wires
+   `CO/C1` clocks + `DO/D1` data on the `_B` route (P3_4..P3_7);
+2. the data pads lacked `input-enable` (the upstream pad REN bit) — now set, so the
+   input buffers sense;
+3. the app never called `pdm_mode()` / per-channel `pdm_channel_config()`, so the
+   block sat in `MICROPHONE_SLEEP` — now configures each channel's FIR/IIR/gain
+   (from the Alif reference) and selects `STANDARD_VOICE_512` before START.
+
+> **Remaining (acoustic) — a SCHEMATIC fact, not a software bug:** with the clock
+> on and the config register-verified, `FIFO=0` means no mic bitstream reaches the
+> `DO/D1` pads (P3_5/P3_7). The E1M-AEN801 EVK must route its 4× MP34DT05 mics to
+> these LPPDM data pads (vs other `Dx` pads or the HP `pdm@4902d000`), with the mic
+> supply on. Confirm against the schematic ([[project_pending_hw_configs]]); only
+> then can a non-zero, varying PCM (RESULT PASS) be captured. Tier-2 retires onto
+> the opt-in fork once acoustically validated (task #21).

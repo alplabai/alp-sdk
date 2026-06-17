@@ -47,8 +47,7 @@ stays 0 because no encoder shaft is wired to the QEC0 pads on this bench.
 >    documented default. The exact `QECn`→UTIMER-instance mapping is a TRM detail,
 >    and which pads the encoder connects to is a schematic detail — confirm both
 >    ([[project_pending_hw_configs]], [[project_som_pad_map_lives_in_alp_sdk]]).
-> 2. **Pad read-enable:** quadrature *inputs* want the pad `read-enable`, which is
->    not in the upstream `alif,pinctrl` binding — without it the inputs may not
->    sense (count stays static even with a turning encoder).
+>    (The QEC0 X/Y input pads now carry `input-enable` — the upstream pad
+>    read-enable bit — so the input buffers sense; that part is no longer a gap.)
 
 Tier-2 retires onto the opt-in fork once a real encoder is decoded (task #21).
