@@ -55,6 +55,8 @@ into the topic-specific docs.
   peripheral matrix, and the NPU-from-MRAM path.
 - [aen-provisioning.md](aen-provisioning.md) — provisioning an
   E1M-AEN SoM (SES → MCUboot → slot0 chain + the SoM-maker policy).
+- [aen-se-services.md](aen-se-services.md) — runtime `se_service_*`
+  API (device/LCS/power queries + the gated DVFS / STOC-update path).
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
 - [bring-up-imx93.md](bring-up-imx93.md) — NXP i.MX 93.
