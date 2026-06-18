@@ -12,6 +12,7 @@ carries the exact SKU + board.
 | [`aen-eeprom-manifest`](aen-eeprom-manifest/) | Read + decode the on-module 24C128 Alp manifest over SoC I2C2 (DesignWare, upstream i2c_dw). |
 | [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M sanity + ECDSA-P256 sign over BRD_I2C (LPI2C0, owned by M55-HE), via the portable `<alp/...>` API. The AEN sibling of the V2N variant; the §5.2 bench OPTIGA check. |
 | [`aen-se-crypto`](aen-se-crypto/) | SHA-256 known-answer + AES-128-GCM round-trip + TRNG through the portable `<alp/security.h>` surface, backed by the on-die Secure Enclave CryptoCell (the `se_cryptocell` backend rides the same MHUv2 -> SE mailbox `aen-se-service-query` proves). TRNG is live via `se_service_get_rnd_num`; SHA/AES-GCM ride the SE once the generic send seam lands, else fall through to MbedTLS-PSA. |
+| [`aen-dma-regcheck`](aen-dma-regcheck/) | ARM PL330 DMA (upstream-native `arm,dma-pl330`, Tier-1) -- a real memory-to-memory copy through the RTSS-HE local DMA2, with the buffers + microcode in global AXI-visible SRAM0. |
 
 ## Why a separate index here
 
