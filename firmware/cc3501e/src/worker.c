@@ -95,6 +95,12 @@ static void worker_execute(uint8_t cmd)
 		 * cc3501e_hw_wifi_scan); blocks on the scan + event rendezvous. */
 		rv = cc3501e_hw_wifi_scan(buf, ALP_CC3501E_MAX_PAYLOAD, &len);
 		break;
+	case ALP_CC3501E_CMD_BLE_ENABLE:
+		/* Wi-Fi-first (shared HIF) then nimble_host_start -- blocks ~2s, so it
+		 * is worker-routed off the SPI ISR exactly like GET_MAC.  Argless: an
+		 * OK result carries no payload (len stays 0). */
+		rv = cc3501e_hw_ble_enable();
+		break;
 	default:
 		rv = CC3501E_HW_ERR_NOTIMPL;
 		break;

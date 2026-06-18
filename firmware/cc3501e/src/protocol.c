@@ -434,15 +434,17 @@ static alp_cc3501e_resp_t handle_wifi_get_ip(const uint8_t *req, size_t req_len,
 /* padding that the wire format does not.                             */
 /* --------------------------------------------------------------- */
 
+/* BLE_ENABLE (0x30): bring up the BLE stack.  Worker-routed (P0-4 seam): the
+ * real CC3501E_BLE body starts Wi-Fi first (shared HIF) then nimble_host_start,
+ * which blocks for SECONDS -- MUST NOT run in the SPI ISR that dispatches this
+ * handler.  Poll-by-repeat, identical to GET_MAC (see handle_worker_routed).
+ * Argless reply (the OK carries no data; min_cap 0). */
 static alp_cc3501e_resp_t handle_ble_enable(const uint8_t *req, size_t req_len, uint8_t *reply_data,
                                             size_t reply_cap, size_t *reply_data_len)
 {
 	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_enable());
+	return handle_worker_routed(
+	    ALP_CC3501E_CMD_BLE_ENABLE, 0u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
 static alp_cc3501e_resp_t handle_ble_disable(const uint8_t *req, size_t req_len, uint8_t *reply_data,

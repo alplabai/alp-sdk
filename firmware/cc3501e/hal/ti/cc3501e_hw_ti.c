@@ -65,6 +65,14 @@
 appControlBlock app_CB;
 #endif
 
+#ifdef CC3501E_BLE
+/* App-side NimBLE host adapter (cc3501e_nimble_host.c): the BLE bodies below
+ * drive advertising/enable through this seam so the raw NimBLE headers stay out
+ * of this TU.  CC3501E_BLE implies CC3501E_WIFI (the BLE controller shares the
+ * HIF, so Wlan_Start runs first via cc3501e_hw_wifi_lazy_start). */
+#include "cc3501e_nimble_host.h"
+#endif
+
 #include "alp/protocol/cc3501e.h"
 
 #include "../cc3501e_hw.h"
@@ -857,12 +865,79 @@ int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4])
 #endif /* CC3501E_WIFI */
 
 /* --------------------------------------------------------------- */
-/* BLE 5.4 (v0.3) -- real TI BLE host integration.                   */
+/* BLE 5.4 (v0.3) -- real TI BLE host integration (Apache NimBLE).   */
 /*                                                                   */
-/* TODO(cc3501e v0.3): route to the TI BLE 5.4 host (NimBLE,          */
-/* source/ti/net/ble_interface + source/third_party/nimble) for GAP  */
-/* (advertise/scan/connect) + GATT.  Until the BLE host is brought up */
-/* report NOTIMPL (-> RESP_ERR_NOT_READY); v0.1 stays radio-free. */
+/* Under CC3501E_BLE the enable + advertise bodies route to the      */
+/* NimBLE host glue (cc3501e_nimble_host.c -> third_party/nimble +   */
+/* ti/net/ble_interface).  BLE shares the HIF with Wi-Fi, so the      */
+/* enable path lazy-starts Wi-Fi FIRST (cc3501e_hw_wifi_lazy_start)  */
+/* exactly as the Wi-Fi bodies do, then re-opens the bridge SPI after */
+/* the radio op.  scan/connect/gatt stay NOTIMPL this rev.  The       */
+/* non-BLE build (#else) keeps every op NOTIMPL (-> RESP_ERR_NOT_READY)*/
+/* so the stub / silicon-free path is unchanged. */
+#ifdef CC3501E_BLE
+#ifndef CC3501E_WIFI
+#error "CC3501E_BLE requires CC3501E_WIFI (shared HIF -> Wlan_Start first); build with -Ble (which implies -WifiHostDriver)."
+#endif
+/* BLE_ENABLE: start Wi-Fi first (shared HIF), then bring up the NimBLE host.
+ * Reached ONLY from the async worker's drain (never the SPI ISR): both the
+ * Wlan_Start lazy-init and nimble_host_start() block for seconds.  Re-opens
+ * the bridge SPI after each radio op, exactly as the Wi-Fi bodies do. */
+int cc3501e_hw_ble_enable(void)
+{
+	/* Wi-Fi must be up before BLE (shared HIF).  lazy_start re-opens the
+	 * bridge SPI after the Wlan_Start HIF disruption (its own bench-proven
+	 * fix); we re-open again after the NimBLE bring-up below. */
+	const int wifi_rv = cc3501e_hw_wifi_lazy_start();
+	if (wifi_rv != CC3501E_HW_OK) {
+		return wifi_rv;
+	}
+
+	/* nimble_host_start = BleIf_EnableBLE + NimBLE host (blocks ~2s to sync).
+	 * Re-open the bridge after: BleIf_EnableBLE re-arbitrates the shared HIF,
+	 * which disrupts the bridge SPI slave just like Wlan_Start does. */
+	const int rc = cc3501e_nimble_host_start();
+	bridge_transport_spi_hw_reinit();
+	if (rc != 0 || !cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_IO;
+	}
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_ble_disable(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+/* BLE_ADVERTISE (ext-adv): configure + start the single adv set via the NimBLE
+ * glue, then re-open the bridge SPI (the adv config/start path issues HCI over
+ * the shared HIF).  adv_data_len==0 -> the glue builds a default (device name
+ * "ALP-CC3501E" + flags). */
+int cc3501e_hw_ble_adv_start(uint8_t        connectable,
+                             uint16_t       interval_min_ms,
+                             uint16_t       interval_max_ms,
+                             const uint8_t *adv_data,
+                             uint8_t        adv_data_len)
+{
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL; /* BLE not enabled yet -> NOT_READY */
+	}
+	const int rc = cc3501e_nimble_adv_config_and_start(
+	    connectable, interval_min_ms, interval_max_ms, adv_data, adv_data_len);
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+int cc3501e_hw_ble_adv_stop(void)
+{
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_adv_stop();
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+#else  /* !CC3501E_BLE -- stub / Wi-Fi-only / silicon-free build */
 int cc3501e_hw_ble_enable(void)
 {
 	return CC3501E_HW_ERR_NOTIMPL;
@@ -891,6 +966,7 @@ int cc3501e_hw_ble_adv_stop(void)
 {
 	return CC3501E_HW_ERR_NOTIMPL;
 }
+#endif /* CC3501E_BLE */
 
 int cc3501e_hw_ble_scan_start(void)
 {

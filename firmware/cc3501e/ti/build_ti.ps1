@@ -26,8 +26,15 @@ param(
     [string]$SysconfigCli = "C:\ti\sysconfig-1.28.0\sysconfig_cli.bat",
     [string]$Transport    = "spi",  # spi | sdio
     [switch]$OtaSelftest,           # build the OTA-self-install validation updater (embeds cc3501e_ota_candidate.c, -DCC3501E_OTA_SELFTEST)
-    [switch]$WifiHostDriver         # link the CC35xx Wi-Fi host driver (-DCC3501E_WIFI; enables GET_MAC / scan / connect bodies)
+    [switch]$WifiHostDriver,        # link the CC35xx Wi-Fi host driver (-DCC3501E_WIFI; enables GET_MAC / scan / connect bodies)
+    [switch]$Ble                    # ALSO link Apache NimBLE + ble_interface (-DCC3501E_BLE; enables BLE enable/advertise). Implies -WifiHostDriver (shared HIF -> Wlan_Start first).
 )
+
+# -Ble implies -WifiHostDriver: the BLE controller shares the HIF with Wi-Fi, so
+# Wlan_Start must run first (WIFI_BLE_INTEGRATION.md) and the NimBLE port reuses
+# the Wi-Fi OSI layer (osi_dpl.c) + Report() (uart_term.c) that the Wi-Fi path
+# compiles.  Force it on so the BLE bodies always have the Wi-Fi seam beneath them.
+if ($Ble) { $WifiHostDriver = $true }
 
 $ErrorActionPreference = 'Stop'
 $fw   = Split-Path $PSScriptRoot -Parent          # firmware/cc3501e
@@ -88,6 +95,56 @@ if ($WifiHostDriver) {
                            '-DMBEDTLS_CONFIG_FILE="config-hsm.h"',
                            '-DMBEDTLS_PSA_CRYPTO_CONFIG_FILE="config-psa-crypto-hsm.h"')
 }
+if ($Ble) {
+    # Apache NimBLE (BLE host) -- enables the BLE enable/advertise HAL bodies.
+    $txdef = @($txdef) + @('-DCC3501E_BLE=1')
+    # --- NimBLE host pool sizing for a bridge PERIPHERAL (memory-fit). ---
+    # The static nimble syscfg.h defaults target a 16-connection central+peripheral
+    # (msys 100x292B mbufs, 16 bonds/CCCDs, 6 multi-adv, COC x5): that host-side
+    # .bss (~0x38074) overflows the CC3501E vendor-app DRAM region (~0x2f250).  The
+    # bridge advertises + serves a tiny GATT to a couple of peers, so size the pools
+    # to that role.  Every knob is #ifndef-guarded in syscfg.h, so a command-line -D
+    # overrides it cleanly (the ACL/HCI buffers are #undef'd there = controller-side,
+    # not touched).  Functionally sufficient for enable+advertise (+ a small server);
+    # raise BLE_MAX_CONNECTIONS later if multi-link central is needed.
+    $txdef = @($txdef) + @('-DMYNEWT_VAL_BLE_MAX_CONNECTIONS=2',
+                           '-DMYNEWT_VAL_BLE_MULTI_ADV_INSTANCES=1',
+                           '-DMYNEWT_VAL_MSYS_1_BLOCK_COUNT=24',
+                           '-DMYNEWT_VAL_BLE_STORE_MAX_BONDS=4',
+                           '-DMYNEWT_VAL_BLE_STORE_MAX_CCCDS=4',
+                           '-DMYNEWT_VAL_BLE_L2CAP_COC_MAX_NUM=1')
+    # NimBLE include set MIRRORS the SDK nimble library build
+    # (source/third_party/nimble/CMakeLists.txt ${TARGET_NAME}_INCLUDES) -- the
+    # authoritative recipe for compiling the nimble-port sources.  The demo
+    # makefile's app-only subset is INSUFFICIENT for the port .c files (they
+    # pull <nimble/transport/hci_h4.h>, <sysinit/sysinit.h>, the cc3xxxhif +
+    # store headers).  ble_interface inc dirs come last (the CMake set inherits
+    # ble_interface's INCLUDE_DIRECTORIES).  The nimble syscfg.h is the static
+    # SysConfig-free ti_config/nimble-port/include/syscfg/syscfg.h -- BLE is NOT
+    # a SysConfig module, so no generated nimble config is needed.
+    $nimbleRoot = "$SdkDir\source\third_party\nimble"
+    $inc += @("-I$SdkDir\source\ti\net\ble_interface\inc_adapt",
+              "-I$SdkDir\source\ti\net\ble_interface\inc_common",
+              "-I$nimbleRoot\ti_config\nimble-port\include",
+              "-I$nimbleRoot\ti_config\nimble-port\include\console",
+              "-I$nimbleRoot\ti_config\nimble-port\include\hal",
+              "-I$nimbleRoot\ti_config\nimble-port\include\syscfg",
+              "-I$nimbleRoot\ti_config\nimble-port\porting\nimble\include",
+              "-I$nimbleRoot\ti_config\nimble-port\porting\npl\osi\include",
+              "-I$nimbleRoot\ti_config\nimble-port\transport\cc3xxxhif\include",
+              "-I$nimbleRoot\nimble-src\nimble\include",
+              "-I$nimbleRoot\nimble-src\nimble\host\include",
+              "-I$nimbleRoot\nimble-src\nimble\host\services\dis\include",
+              "-I$nimbleRoot\nimble-src\nimble\host\services\gap\include",
+              "-I$nimbleRoot\nimble-src\nimble\host\services\gatt\include",
+              "-I$nimbleRoot\nimble-src\nimble\host\store\config\include",
+              "-I$nimbleRoot\nimble-src\nimble\host\store\ram\include",
+              "-I$nimbleRoot\nimble-src\nimble\host\util\include",
+              "-I$nimbleRoot\nimble-src\nimble\transport\common\hci_h4\include",
+              "-I$nimbleRoot\nimble-src\nimble\transport\common\hci_ipc\include",
+              "-I$nimbleRoot\nimble-src\nimble\transport\include",
+              "-I$nimbleRoot\nimble-src\porting\nimble\include")
+}
 
 # App + the silicon-free layer + the ti HAL.
 $sources = @(
@@ -143,6 +200,25 @@ if ($WifiHostDriver) {
     #                       the DHCP server; STA-only builds never referenced it, so it
     #                       was previously dead-stripped.  Only lwIP + osi_kernel deps.
     $sources += "$ntDir\dhcpserver.c"
+}
+
+# BLE host integration (P0-7): the NimBLE port sources that ship as SOURCE only
+# (not in nimble.a -- it lists the OSI/HIF glue as undefined U), per the demo
+# makefile's nimble-port build, + the app-side adapter (cc3501e_nimble_host.c).
+#  - cc3xxxhif_ble_hci.c     : LL transport glue (ble_transport_ll_init /
+#                              ble_transport_to_ll_*); gc-strip risk -- the app
+#                              adapter references ble_transport_ll_init to keep it.
+#  - npl_os_osi.c            : NimBLE NPL -> OSI/FreeRTOS port (timers/eventq/mutex/sem)
+#  - nimble_osi_filesystem.c : NimBLE NV/FS shim over OSI
+#  - base64.c                : NimBLE base64 (store/util helper)
+# ble_store_ram.c / ble_store_config.c are inside nimble.a (ble_store_*_init()).
+if ($Ble) {
+    $nimblePort = "$SdkDir\source\third_party\nimble\ti_config\nimble-port"
+    $sources += "$nimblePort\transport\cc3xxxhif\src\cc3xxxhif_ble_hci.c"
+    $sources += "$nimblePort\porting\npl\osi\src\npl_os_osi.c"
+    $sources += "$nimblePort\porting\npl\osi\src\nimble_osi_filesystem.c"
+    $sources += "$nimblePort\porting\nimble\src\base64.c"
+    $sources += "$fw\hal\ti\cc3501e_nimble_host.c"
 }
 
 Write-Host "== Compile ($($sources.Count) sources) =="
@@ -229,10 +305,17 @@ if ($WifiHostDriver) {
           # BleTransport_BleEventHandler (cme.c / driver_cc35xx.c / control_cmd_fw.c) even on
           # the Wi-Fi-only path -- the shared HIF arbitration is co-owned by the BLE interface.
           # ble_interface.a resolves them; nimble.a is NOT needed unless a nimble symbol then
-          # comes up undefined (it does not for Wi-Fi-only).
+          # comes up undefined (it does not for Wi-Fi-only; -Ble adds nimble.a below).
           "$SdkDir\source\ti\net\ble_interface\lib\ticlang\ble_interface.a",
-          "$SdkDir\source\ti\utils\FWU\lib\ticlang\FWU.a",
-          '-Wl,--reread_libs')
+          "$SdkDir\source\ti\utils\FWU\lib\ticlang\FWU.a")
+    # -Ble: add the NimBLE host archive INSIDE the reread group (the compiled
+    # NimBLE port sources reference nimble.a's host/GAP/GATT impl, and nimble.a
+    # references the port's OSI/HIF glue + Report() -- a circular set the
+    # --reread_libs group resolves, exactly as the demo makefile links it).
+    if ($Ble) {
+        $wifilibs += "$SdkDir\source\third_party\nimble\lib\ticlang\nimble.a"
+    }
+    $wifilibs += '-Wl,--reread_libs'
     $link = @('-Wl,-u,_c_int00', '-mcpu=cortex-m33', '-mthumb', '-mfloat-abi=hard', '-mfpu=fpv5-sp-d16') +
             $objs +
             @("-L$SdkDir\source") + $wifilibs +
