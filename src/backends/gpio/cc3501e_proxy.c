@@ -50,7 +50,7 @@
 /* WEAK empty route table: a board that wants proxied IOs overrides these two
  * symbols (filled from the SoM pad map).  Default = nothing routed = every pin
  * delegates to the platform driver. */
-__attribute__((weak)) const cc3501e_gpio_route_t cc3501e_gpio_routes[] = { 0 };
+__attribute__((weak)) const cc3501e_gpio_route_t cc3501e_gpio_routes[]    = { 0 };
 __attribute__((weak)) const size_t               cc3501e_gpio_route_count = 0u;
 
 /* Live bridge handle, set by alp_gpio_cc3501e_attach().  NULL => proxied pins
@@ -134,8 +134,8 @@ px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *ca
 	return ALP_OK;
 }
 
-static alp_status_t px_configure(alp_gpio_backend_state_t *state, alp_gpio_dir_t dir,
-                                 alp_gpio_pull_t pull)
+static alp_status_t
+px_configure(alp_gpio_backend_state_t *state, alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 {
 	proxy_side_t *s = (proxy_side_t *)state->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;
@@ -170,8 +170,8 @@ static alp_status_t px_read(alp_gpio_backend_state_t *state, bool *level)
 	return alp_z_gpio_ops()->read(&s->inner, level);
 }
 
-static alp_status_t px_enable_irq(alp_gpio_backend_state_t *state, alp_gpio_edge_t edge,
-                                  alp_gpio_cb_t cb, void *user)
+static alp_status_t
+px_enable_irq(alp_gpio_backend_state_t *state, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user)
 {
 	proxy_side_t *s = (proxy_side_t *)state->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;

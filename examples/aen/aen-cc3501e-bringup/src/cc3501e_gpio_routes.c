@@ -28,8 +28,8 @@
 #include <alp/e1m_pinout.h>
 
 const cc3501e_gpio_route_t cc3501e_gpio_routes[] = {
-	{ E1M_GPIO_IO8,  30u }, /* I2S_EN           <- CC35 GPIO_30 */
-	{ E1M_GPIO_IO9,  12u }, /* PCIE_IO_EXP.RST  <- GPIO_12 */
+	{ E1M_GPIO_IO8, 30u },  /* I2S_EN           <- CC35 GPIO_30 */
+	{ E1M_GPIO_IO9, 12u },  /* PCIE_IO_EXP.RST  <- GPIO_12 */
 	{ E1M_GPIO_IO10, 35u }, /* PCIE0_I2C.EN     <- GPIO_35 */
 	{ E1M_GPIO_IO11, 2u },  /* USB2_SELECT      <- GPIO_2  */
 	{ E1M_GPIO_IO13, 13u }, /* I2S_SELECT       <- GPIO_13 */
@@ -41,4 +41,4 @@ const cc3501e_gpio_route_t cc3501e_gpio_routes[] = {
 };
 
 const size_t cc3501e_gpio_route_count =
-	sizeof(cc3501e_gpio_routes) / sizeof(cc3501e_gpio_routes[0]);
+    sizeof(cc3501e_gpio_routes) / sizeof(cc3501e_gpio_routes[0]);

@@ -281,8 +281,9 @@ ZTEST(cc3501e_bridge_transport, test_wifi_scan_start_not_ready)
 	size_t n = drain(reply, sizeof reply);
 	zassert_equal(n, 5u, "first scan reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_SCAN_START, 1u);
-	zassert_equal(
-	    reply[4], ALP_CC3501E_RESP_ERR_BUSY, "first SCAN_START submits the job -> BUSY (host retries)");
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_BUSY,
+	              "first SCAN_START submits the job -> BUSY (host retries)");
 
 	transaction(s, sizeof s);
 	n = drain(reply, sizeof reply);
@@ -304,8 +305,9 @@ ZTEST(cc3501e_bridge_transport, test_wifi_get_rssi_not_ready)
 	size_t n = drain(reply, sizeof reply);
 	zassert_equal(n, 5u, "first rssi reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u);
-	zassert_equal(
-	    reply[4], ALP_CC3501E_RESP_ERR_BUSY, "first GET_RSSI submits the job -> BUSY (host retries)");
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_BUSY,
+	              "first GET_RSSI submits the job -> BUSY (host retries)");
 
 	transaction(r, sizeof r);
 	n = drain(reply, sizeof reply);
@@ -523,8 +525,10 @@ ZTEST(cc3501e_bridge_transport, test_gpio_configure_write_read_roundtrip)
 	transport_spi_init();
 
 	/* CONFIGURE pad 13 as OUTPUT, no pull (payload = gpio_configure_t, 4 B). */
-	const uint8_t cfg[] = { ALP_CC3501E_CMD_GPIO_CONFIGURE, 0x00u, 0x04u, 0x00u,
-		                    13u, ALP_CC3501E_GPIO_DIR_OUTPUT, ALP_CC3501E_GPIO_PULL_NONE, 0u };
+	const uint8_t cfg[] = {
+		ALP_CC3501E_CMD_GPIO_CONFIGURE, 0x00u, 0x04u, 0x00u, 13u, ALP_CC3501E_GPIO_DIR_OUTPUT,
+		ALP_CC3501E_GPIO_PULL_NONE,     0u
+	};
 	transaction(cfg, sizeof cfg);
 	size_t n = drain(reply, sizeof reply);
 	zassert_equal(n, 5u, "CONFIGURE reply = header + status");

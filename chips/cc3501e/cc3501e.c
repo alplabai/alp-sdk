@@ -126,7 +126,7 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
 	 * bringup soak uses when a cold-booted module has not come up yet. */
 	(void)alp_gpio_write(ctx->reset_pin, false); /* assert nRESET; rails stay up */
 	alp_delay_ms(50u);
-	(void)alp_gpio_write(ctx->reset_pin, true);  /* release -> re-boot */
+	(void)alp_gpio_write(ctx->reset_pin, true); /* release -> re-boot */
 
 	/* BLIND boot settle -- NO clocking until the slave is armed.  This is the
 	 * cold first-contact fix: on the CS-less fixed-count link, any byte the host
@@ -182,9 +182,9 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
 	/* Worst case, clock through one full in-flight request+reply frame to
 	 * reach the slave's parked header boundary; "parked" = a run of two
 	 * header-widths of 0xA5 (rejects a stray 0xA5 byte inside reply data). */
-	const uint32_t walk_max  = 2u * (uint32_t)(ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD);
-	const uint32_t run_need  = 2u * (uint32_t)ALP_CC3501E_HEADER_BYTES;
-	const uint32_t attempts  = (timeout_ms > 0u) ? timeout_ms : 1u;
+	const uint32_t walk_max = 2u * (uint32_t)(ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD);
+	const uint32_t run_need = 2u * (uint32_t)ALP_CC3501E_HEADER_BYTES;
+	const uint32_t attempts = (timeout_ms > 0u) ? timeout_ms : 1u;
 
 	for (uint32_t a = 0u; a < attempts; a++) {
 		uint32_t run = 0u;
@@ -547,8 +547,14 @@ alp_status_t cc3501e_gpio_configure(cc3501e_t                   *ctx,
 		.pull         = (uint8_t)pull,
 		.reserved     = 0u,
 	};
-	return poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_GPIO_CONFIGURE, (const uint8_t *)&c, sizeof(c), NULL, 0, NULL, timeout_ms);
+	return poll_by_repeat(ctx,
+	                      ALP_CC3501E_CMD_GPIO_CONFIGURE,
+	                      (const uint8_t *)&c,
+	                      sizeof(c),
+	                      NULL,
+	                      0,
+	                      NULL,
+	                      timeout_ms);
 }
 
 alp_status_t cc3501e_gpio_write(cc3501e_t *ctx, uint8_t pad, bool level, uint32_t timeout_ms)
@@ -576,11 +582,8 @@ alp_status_t cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uin
 	return ALP_OK;
 }
 
-alp_status_t cc3501e_gpio_set_interrupt(cc3501e_t              *ctx,
-                                        uint8_t                 pad,
-                                        alp_cc3501e_gpio_edge_t edge,
-                                        bool                    enabled,
-                                        uint32_t                timeout_ms)
+alp_status_t cc3501e_gpio_set_interrupt(
+    cc3501e_t *ctx, uint8_t pad, alp_cc3501e_gpio_edge_t edge, bool enabled, uint32_t timeout_ms)
 {
 	alp_cc3501e_gpio_set_interrupt_t s = {
 		.cc3501e_gpio = pad,

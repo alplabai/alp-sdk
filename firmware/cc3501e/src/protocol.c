@@ -224,9 +224,11 @@ static alp_cc3501e_resp_t hw_to_resp(int rv)
 }
 
 /* GPIO_CONFIGURE (0x50): set direction + pull on a proxied CC3501E pad. */
-static alp_cc3501e_resp_t handle_gpio_configure(const uint8_t *req, size_t req_len,
-                                                uint8_t *reply_data, size_t reply_cap,
-                                                size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_gpio_configure(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply_data,
+                                                size_t         reply_cap,
+                                                size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -237,8 +239,11 @@ static alp_cc3501e_resp_t handle_gpio_configure(const uint8_t *req, size_t req_l
 }
 
 /* GPIO_WRITE (0x51): drive a proxied pad (open-drain semantics in the HAL). */
-static alp_cc3501e_resp_t handle_gpio_write(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                            size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_gpio_write(const uint8_t *req,
+                                            size_t         req_len,
+                                            uint8_t       *reply_data,
+                                            size_t         reply_cap,
+                                            size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -250,8 +255,11 @@ static alp_cc3501e_resp_t handle_gpio_write(const uint8_t *req, size_t req_len, 
 
 /* GPIO_READ (0x52): request payload = 1 byte (cc3501e_gpio); reply data =
  * the sampled level (1 byte). */
-static alp_cc3501e_resp_t handle_gpio_read(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                           size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_gpio_read(const uint8_t *req,
+                                           size_t         req_len,
+                                           uint8_t       *reply_data,
+                                           size_t         reply_cap,
+                                           size_t        *reply_data_len)
 {
 	*reply_data_len = 0u;
 	if (req_len != 1u) return ALP_CC3501E_RESP_ERR_INVALID;
@@ -268,9 +276,11 @@ static alp_cc3501e_resp_t handle_gpio_read(const uint8_t *req, size_t req_len, u
 /* GPIO_SET_INTERRUPT (0x53): arm/disable an edge IRQ on a proxied pad.  The
  * async EVT_GPIO_INTERRUPT delivery needs the next-rev host-IRQ line; this
  * rev accepts the config (event delivery lands with r2 -- see DESIGN.md). */
-static alp_cc3501e_resp_t handle_gpio_set_interrupt(const uint8_t *req, size_t req_len,
-                                                    uint8_t *reply_data, size_t reply_cap,
-                                                    size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_gpio_set_interrupt(const uint8_t *req,
+                                                    size_t         req_len,
+                                                    uint8_t       *reply_data,
+                                                    size_t         reply_cap,
+                                                    size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -282,8 +292,11 @@ static alp_cc3501e_resp_t handle_gpio_set_interrupt(const uint8_t *req, size_t r
 
 /* CAM_ENABLE (0x60) / CAM_DISABLE (0x61): drive CAM_EN_LDO0/1.  Request
  * payload = 1 byte (which: 0 -> LDO0, 1 -> LDO1). */
-static alp_cc3501e_resp_t handle_cam_enable(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                            size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_cam_enable(const uint8_t *req,
+                                            size_t         req_len,
+                                            uint8_t       *reply_data,
+                                            size_t         reply_cap,
+                                            size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -292,8 +305,11 @@ static alp_cc3501e_resp_t handle_cam_enable(const uint8_t *req, size_t req_len, 
 	return hw_to_resp(cc3501e_hw_cam_enable(req[0], 1u));
 }
 
-static alp_cc3501e_resp_t handle_cam_disable(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                             size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_cam_disable(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply_data,
+                                             size_t         reply_cap,
+                                             size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -311,18 +327,22 @@ static alp_cc3501e_resp_t handle_cam_disable(const uint8_t *req, size_t req_len,
  * then ssid_len SSID bytes -- the cc3501e_wifi_scan host parser's wire
  * format).  Worker-routed: the real Wlan_Scan + event rendezvous blocks
  * for seconds and MUST run off the SPI ISR (see handle_worker_routed). */
-static alp_cc3501e_resp_t handle_wifi_scan_start(const uint8_t *req, size_t req_len,
-                                                 uint8_t *reply_data, size_t reply_cap,
-                                                 size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_wifi_scan_start(const uint8_t *req,
+                                                 size_t         req_len,
+                                                 uint8_t       *reply_data,
+                                                 size_t         reply_cap,
+                                                 size_t        *reply_data_len)
 {
 	(void)req;
 	return handle_worker_routed(
 	    ALP_CC3501E_CMD_WIFI_SCAN_START, 0u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
-static alp_cc3501e_resp_t handle_wifi_scan_stop(const uint8_t *req, size_t req_len,
-                                                uint8_t *reply_data, size_t reply_cap,
-                                                size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_wifi_scan_stop(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply_data,
+                                                size_t         reply_cap,
+                                                size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -339,20 +359,22 @@ static alp_cc3501e_resp_t wifi_join(const uint8_t *req, size_t req_len, int ap)
 {
 	if (req_len < sizeof(alp_cc3501e_wifi_connect_t)) return ALP_CC3501E_RESP_ERR_INVALID;
 	const alp_cc3501e_wifi_connect_t *c = (const alp_cc3501e_wifi_connect_t *)req;
-	const size_t need =
+	const size_t                      need =
 	    sizeof(alp_cc3501e_wifi_connect_t) + (size_t)c->ssid_len + (size_t)c->psk_len;
 	if (req_len != need) return ALP_CC3501E_RESP_ERR_INVALID;
 	const uint8_t *ssid = req + sizeof(alp_cc3501e_wifi_connect_t);
 	const uint8_t *psk  = ssid + c->ssid_len;
 	const int      rv =
-	    ap ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
-	       : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
+        ap ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
+	            : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
 	return hw_to_resp(rv);
 }
 
-static alp_cc3501e_resp_t handle_wifi_connect_sta(const uint8_t *req, size_t req_len,
-                                                  uint8_t *reply_data, size_t reply_cap,
-                                                  size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_wifi_connect_sta(const uint8_t *req,
+                                                  size_t         req_len,
+                                                  uint8_t       *reply_data,
+                                                  size_t         reply_cap,
+                                                  size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -360,9 +382,11 @@ static alp_cc3501e_resp_t handle_wifi_connect_sta(const uint8_t *req, size_t req
 	return wifi_join(req, req_len, 0);
 }
 
-static alp_cc3501e_resp_t handle_wifi_ap_start(const uint8_t *req, size_t req_len,
-                                               uint8_t *reply_data, size_t reply_cap,
-                                               size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_wifi_ap_start(const uint8_t *req,
+                                               size_t         req_len,
+                                               uint8_t       *reply_data,
+                                               size_t         reply_cap,
+                                               size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -370,9 +394,11 @@ static alp_cc3501e_resp_t handle_wifi_ap_start(const uint8_t *req, size_t req_le
 	return wifi_join(req, req_len, 1);
 }
 
-static alp_cc3501e_resp_t handle_wifi_disconnect(const uint8_t *req, size_t req_len,
-                                                 uint8_t *reply_data, size_t reply_cap,
-                                                 size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_wifi_disconnect(const uint8_t *req,
+                                                 size_t         req_len,
+                                                 uint8_t       *reply_data,
+                                                 size_t         reply_cap,
+                                                 size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -382,9 +408,11 @@ static alp_cc3501e_resp_t handle_wifi_disconnect(const uint8_t *req, size_t req_
 	return hw_to_resp(cc3501e_hw_wifi_disconnect());
 }
 
-static alp_cc3501e_resp_t handle_wifi_ap_stop(const uint8_t *req, size_t req_len,
-                                              uint8_t *reply_data, size_t reply_cap,
-                                              size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_wifi_ap_stop(const uint8_t *req,
+                                              size_t         req_len,
+                                              uint8_t       *reply_data,
+                                              size_t         reply_cap,
+                                              size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -398,9 +426,11 @@ static alp_cc3501e_resp_t handle_wifi_ap_stop(const uint8_t *req, size_t req_len
  * Worker-routed: the real Wlan_Get(WLAN_GET_RSSI) lazy-starts the radio on
  * first use (seconds) and so MUST run off the SPI ISR (see
  * handle_worker_routed). */
-static alp_cc3501e_resp_t handle_wifi_get_rssi(const uint8_t *req, size_t req_len,
-                                               uint8_t *reply_data, size_t reply_cap,
-                                               size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_wifi_get_rssi(const uint8_t *req,
+                                               size_t         req_len,
+                                               uint8_t       *reply_data,
+                                               size_t         reply_cap,
+                                               size_t        *reply_data_len)
 {
 	(void)req;
 	return handle_worker_routed(
@@ -408,9 +438,11 @@ static alp_cc3501e_resp_t handle_wifi_get_rssi(const uint8_t *req, size_t req_le
 }
 
 /* WIFI_GET_IP (0x17): reply data = 4-byte IPv4 address. */
-static alp_cc3501e_resp_t handle_wifi_get_ip(const uint8_t *req, size_t req_len,
-                                             uint8_t *reply_data, size_t reply_cap,
-                                             size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_wifi_get_ip(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply_data,
+                                             size_t         reply_cap,
+                                             size_t        *reply_data_len)
 {
 	(void)req;
 	*reply_data_len = 0u;
@@ -439,16 +471,22 @@ static alp_cc3501e_resp_t handle_wifi_get_ip(const uint8_t *req, size_t req_len,
  * which blocks for SECONDS -- MUST NOT run in the SPI ISR that dispatches this
  * handler.  Poll-by-repeat, identical to GET_MAC (see handle_worker_routed).
  * Argless reply (the OK carries no data; min_cap 0). */
-static alp_cc3501e_resp_t handle_ble_enable(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                            size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_enable(const uint8_t *req,
+                                            size_t         req_len,
+                                            uint8_t       *reply_data,
+                                            size_t         reply_cap,
+                                            size_t        *reply_data_len)
 {
 	(void)req;
 	return handle_worker_routed(
 	    ALP_CC3501E_CMD_BLE_ENABLE, 0u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
-static alp_cc3501e_resp_t handle_ble_disable(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                             size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_disable(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply_data,
+                                             size_t         reply_cap,
+                                             size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -462,25 +500,30 @@ static alp_cc3501e_resp_t handle_ble_disable(const uint8_t *req, size_t req_len,
  * interval_min_ms(LE16) | interval_max_ms(LE16) | adv_data_len(1) |
  * adv_data[adv_data_len].  (7-byte header; the doc struct is 8 with pad.) */
 #define BLE_ADV_START_HDR 7u
-static alp_cc3501e_resp_t handle_ble_adv_start(const uint8_t *req, size_t req_len,
-                                               uint8_t *reply_data, size_t reply_cap,
-                                               size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_adv_start(const uint8_t *req,
+                                               size_t         req_len,
+                                               uint8_t       *reply_data,
+                                               size_t         reply_cap,
+                                               size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
 	*reply_data_len = 0u;
 	if (req_len < BLE_ADV_START_HDR) return ALP_CC3501E_RESP_ERR_INVALID;
-	const uint8_t  connectable = req[0];
+	const uint8_t  connectable  = req[0];
 	const uint16_t interval_min = (uint16_t)req[2] | ((uint16_t)req[3] << 8);
 	const uint16_t interval_max = (uint16_t)req[4] | ((uint16_t)req[5] << 8);
 	const uint8_t  adv_data_len = req[6];
 	if (req_len != (size_t)BLE_ADV_START_HDR + adv_data_len) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_adv_start(connectable, interval_min, interval_max,
-	                                           &req[BLE_ADV_START_HDR], adv_data_len));
+	return hw_to_resp(cc3501e_hw_ble_adv_start(
+	    connectable, interval_min, interval_max, &req[BLE_ADV_START_HDR], adv_data_len));
 }
 
-static alp_cc3501e_resp_t handle_ble_adv_stop(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                              size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_adv_stop(const uint8_t *req,
+                                              size_t         req_len,
+                                              uint8_t       *reply_data,
+                                              size_t         reply_cap,
+                                              size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -490,9 +533,11 @@ static alp_cc3501e_resp_t handle_ble_adv_stop(const uint8_t *req, size_t req_len
 	return hw_to_resp(cc3501e_hw_ble_adv_stop());
 }
 
-static alp_cc3501e_resp_t handle_ble_scan_start(const uint8_t *req, size_t req_len,
-                                                uint8_t *reply_data, size_t reply_cap,
-                                                size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_scan_start(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply_data,
+                                                size_t         reply_cap,
+                                                size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -502,9 +547,11 @@ static alp_cc3501e_resp_t handle_ble_scan_start(const uint8_t *req, size_t req_l
 	return hw_to_resp(cc3501e_hw_ble_scan_start());
 }
 
-static alp_cc3501e_resp_t handle_ble_scan_stop(const uint8_t *req, size_t req_len,
-                                               uint8_t *reply_data, size_t reply_cap,
-                                               size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_scan_stop(const uint8_t *req,
+                                               size_t         req_len,
+                                               uint8_t       *reply_data,
+                                               size_t         reply_cap,
+                                               size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -515,8 +562,11 @@ static alp_cc3501e_resp_t handle_ble_scan_stop(const uint8_t *req, size_t req_le
 }
 
 /* BLE_CONNECT (0x36): packed wire = addr_type(1) | addr[6]. */
-static alp_cc3501e_resp_t handle_ble_connect(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                             size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_connect(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply_data,
+                                             size_t         reply_cap,
+                                             size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -525,9 +575,11 @@ static alp_cc3501e_resp_t handle_ble_connect(const uint8_t *req, size_t req_len,
 	return hw_to_resp(cc3501e_hw_ble_connect(req[0], &req[1]));
 }
 
-static alp_cc3501e_resp_t handle_ble_disconnect(const uint8_t *req, size_t req_len,
-                                                uint8_t *reply_data, size_t reply_cap,
-                                                size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_disconnect(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply_data,
+                                                size_t         reply_cap,
+                                                size_t        *reply_data_len)
 {
 	(void)req;
 	(void)reply_data;
@@ -538,9 +590,11 @@ static alp_cc3501e_resp_t handle_ble_disconnect(const uint8_t *req, size_t req_l
 }
 
 /* BLE_GATT_REGISTER (0x38): opaque attribute-table descriptor (>= 1 byte). */
-static alp_cc3501e_resp_t handle_ble_gatt_register(const uint8_t *req, size_t req_len,
-                                                   uint8_t *reply_data, size_t reply_cap,
-                                                   size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_gatt_register(const uint8_t *req,
+                                                   size_t         req_len,
+                                                   uint8_t       *reply_data,
+                                                   size_t         reply_cap,
+                                                   size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -550,9 +604,11 @@ static alp_cc3501e_resp_t handle_ble_gatt_register(const uint8_t *req, size_t re
 }
 
 /* BLE_GATT_NOTIFY (0x39) / WRITE (0x3B): packed wire = handle(LE16) | data. */
-static alp_cc3501e_resp_t handle_ble_gatt_notify(const uint8_t *req, size_t req_len,
-                                                 uint8_t *reply_data, size_t reply_cap,
-                                                 size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_gatt_notify(const uint8_t *req,
+                                                 size_t         req_len,
+                                                 uint8_t       *reply_data,
+                                                 size_t         reply_cap,
+                                                 size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -562,9 +618,11 @@ static alp_cc3501e_resp_t handle_ble_gatt_notify(const uint8_t *req, size_t req_
 	return hw_to_resp(cc3501e_hw_ble_gatt_notify(handle, &req[2], (uint16_t)(req_len - 2u)));
 }
 
-static alp_cc3501e_resp_t handle_ble_gatt_write(const uint8_t *req, size_t req_len,
-                                                uint8_t *reply_data, size_t reply_cap,
-                                                size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_gatt_write(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply_data,
+                                                size_t         reply_cap,
+                                                size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -575,9 +633,11 @@ static alp_cc3501e_resp_t handle_ble_gatt_write(const uint8_t *req, size_t req_l
 }
 
 /* BLE_GATT_READ (0x3A): packed wire = handle(LE16); reply data = attr value. */
-static alp_cc3501e_resp_t handle_ble_gatt_read(const uint8_t *req, size_t req_len,
-                                               uint8_t *reply_data, size_t reply_cap,
-                                               size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_ble_gatt_read(const uint8_t *req,
+                                               size_t         req_len,
+                                               uint8_t       *reply_data,
+                                               size_t         reply_cap,
+                                               size_t        *reply_data_len)
 {
 	*reply_data_len = 0u;
 	if (req_len != 2u) return ALP_CC3501E_RESP_ERR_INVALID;
@@ -595,8 +655,11 @@ static alp_cc3501e_resp_t handle_ble_gatt_read(const uint8_t *req, size_t req_le
 
 /* POWER_POLICY (0x62): packed wire = policy(1) | wake_events(1) |
  * reserved(2) | idle_ms_before_sleep(LE32) = 8 bytes. */
-static alp_cc3501e_resp_t handle_power_policy(const uint8_t *req, size_t req_len, uint8_t *reply_data,
-                                              size_t reply_cap, size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_power_policy(const uint8_t *req,
+                                              size_t         req_len,
+                                              uint8_t       *reply_data,
+                                              size_t         reply_cap,
+                                              size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -604,15 +667,17 @@ static alp_cc3501e_resp_t handle_power_policy(const uint8_t *req, size_t req_len
 	if (req_len != 8u) return ALP_CC3501E_RESP_ERR_INVALID;
 	const uint8_t  policy      = req[0];
 	const uint8_t  wake_events = req[1];
-	const uint32_t idle_ms     = (uint32_t)req[4] | ((uint32_t)req[5] << 8) |
-	                         ((uint32_t)req[6] << 16) | ((uint32_t)req[7] << 24);
+	const uint32_t idle_ms = (uint32_t)req[4] | ((uint32_t)req[5] << 8) | ((uint32_t)req[6] << 16) |
+	                         ((uint32_t)req[7] << 24);
 	return hw_to_resp(cc3501e_hw_set_power_policy(policy, wake_events, idle_ms));
 }
 
 /* DIAG_LOG_LEVEL (0x71): packed wire = level(1). */
-static alp_cc3501e_resp_t handle_diag_log_level(const uint8_t *req, size_t req_len,
-                                                uint8_t *reply_data, size_t reply_cap,
-                                                size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_diag_log_level(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply_data,
+                                                size_t         reply_cap,
+                                                size_t        *reply_data_len)
 {
 	(void)reply_data;
 	(void)reply_cap;
@@ -622,9 +687,11 @@ static alp_cc3501e_resp_t handle_diag_log_level(const uint8_t *req, size_t req_l
 }
 
 /* DIAG_GET_STATS (0x70): reply data = frames_ok(LE32) | frames_err(LE32). */
-static alp_cc3501e_resp_t handle_diag_get_stats(const uint8_t *req, size_t req_len,
-                                                uint8_t *reply_data, size_t reply_cap,
-                                                size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_diag_get_stats(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply_data,
+                                                size_t         reply_cap,
+                                                size_t        *reply_data_len)
 {
 	(void)req;
 	*reply_data_len = 0u;
@@ -639,9 +706,11 @@ static alp_cc3501e_resp_t handle_diag_get_stats(const uint8_t *req, size_t req_l
 /* GET_DIAG_INFO (0x04): reply data = the 16-byte packed diag struct:
  * fw_version(LE16) | reset_cause(1) | role(1) | uptime_ms(LE32) |
  * free_heap_bytes(LE32) | last_error(1) | reserved(3). */
-static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req, size_t req_len,
-                                               uint8_t *reply_data, size_t reply_cap,
-                                               size_t *reply_data_len)
+static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
+                                               size_t         req_len,
+                                               uint8_t       *reply_data,
+                                               size_t         reply_cap,
+                                               size_t        *reply_data_len)
 {
 	(void)req;
 	*reply_data_len = 0u;
@@ -652,10 +721,10 @@ static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req, size_t req_le
 	reply_data[3] = (uint8_t)ALP_CC3501E_ROLE_OFF; /* v0.1: no radio role active */
 	put_le32(&reply_data[4], cc3501e_hw_uptime_ms());
 	put_le32(&reply_data[8], cc3501e_hw_free_heap_bytes());
-	reply_data[12] = g_last_error;
-	reply_data[13] = 0u;
-	reply_data[14] = 0u;
-	reply_data[15] = 0u;
+	reply_data[12]  = g_last_error;
+	reply_data[13]  = 0u;
+	reply_data[14]  = 0u;
+	reply_data[15]  = 0u;
 	*reply_data_len = 16u;
 	return ALP_CC3501E_RESP_OK;
 }

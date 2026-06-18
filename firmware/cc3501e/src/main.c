@@ -101,8 +101,13 @@ int main(void)
 {
 	cc3501e_hw_init();
 	worker_init();
-	(void)xTaskCreateStatic(bringup_task, "cc3501e_bringup", CC3501E_BRINGUP_STACK_WORDS, NULL,
-	                        configMAX_PRIORITIES - 1, bringup_stack, &bringup_tcb);
+	(void)xTaskCreateStatic(bringup_task,
+	                        "cc3501e_bringup",
+	                        CC3501E_BRINGUP_STACK_WORDS,
+	                        NULL,
+	                        configMAX_PRIORITIES - 1,
+	                        bringup_stack,
+	                        &bringup_tcb);
 	vTaskStartScheduler();
 	for (;;) {
 	}

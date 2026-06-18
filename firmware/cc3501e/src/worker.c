@@ -83,7 +83,8 @@ static void worker_execute(uint8_t cmd)
 	}
 	case ALP_CC3501E_CMD_WIFI_GET_RSSI: {
 		int8_t r = 0;
-		rv = cc3501e_hw_wifi_get_rssi(&r); /* WiFi build: lazy-starts radio, then Wlan_Get (blocks) */
+		rv       = cc3501e_hw_wifi_get_rssi(
+            &r); /* WiFi build: lazy-starts radio, then Wlan_Get (blocks) */
 		if (rv == CC3501E_HW_OK) {
 			buf[0] = (uint8_t)r;
 			len    = 1u;

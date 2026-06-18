@@ -40,25 +40,25 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "services/dis/ble_svc_dis.h"
 
-#include "ble_if.h"      /* BleIf_EnableBLE */
-#include "osi_kernel.h"  /* OsiSyncObj_t / osi_SyncObj* / OSI_WAIT_FOR_SECOND / OSI_OK */
+#include "ble_if.h"     /* BleIf_EnableBLE */
+#include "osi_kernel.h" /* OsiSyncObj_t / osi_SyncObj* / OSI_WAIT_FOR_SECOND / OSI_OK */
 
 #include "cc3501e_nimble_host.h"
 
 /* ------------------------------------------------------------------ */
 /* Tunables (mirror the demo's NimBLE thread + naming).                 */
 /* ------------------------------------------------------------------ */
-#define CC3501E_NIMBLE_THRD_PRIORITY    (3)   /* CC33XX branch in the demo */
-#define CC3501E_NIMBLE_THRD_STACK_SIZE  (4096)
-#define CC3501E_BLE_ADV_INSTANCE        (0)   /* the single ext-adv set we drive */
-#define CC3501E_BLE_DEFAULT_NAME        "ALP-CC3501E"
+#define CC3501E_NIMBLE_THRD_PRIORITY   (3) /* CC33XX branch in the demo */
+#define CC3501E_NIMBLE_THRD_STACK_SIZE (4096)
+#define CC3501E_BLE_ADV_INSTANCE       (0) /* the single ext-adv set we drive */
+#define CC3501E_BLE_DEFAULT_NAME       "ALP-CC3501E"
 
 /* ------------------------------------------------------------------ */
 /* Module state.                                                        */
 /* ------------------------------------------------------------------ */
 static struct ble_npl_task s_task_host;
 static uint8_t             s_own_addr_type = BLE_OWN_ADDR_PUBLIC;
-static OsiSyncObj_t        s_host_init_sync;   /* signalled by ble_sync_cb */
+static OsiSyncObj_t        s_host_init_sync; /* signalled by ble_sync_cb */
 
 /* nimble.a brings these in depending on BLE_STORE_CONFIG_PERSIST (syscfg.h
  * default = 1 -> persistent store).  Both symbols are in nimble.a; pick the
@@ -75,14 +75,16 @@ void ble_store_ram_init(void);
 /* in a later rev).  Read/write/notify characteristic, like the demo's  */
 /* TI Simple Peripheral but pared to a single characteristic.           */
 /* ------------------------------------------------------------------ */
-#define CC3501E_SVC_UUID16       0xFFF0u
-#define CC3501E_CHR_UUID16       0xFFF1u
+#define CC3501E_SVC_UUID16 0xFFF0u
+#define CC3501E_CHR_UUID16 0xFFF1u
 
 static uint16_t s_chr_val_handle;
 static uint8_t  s_chr_value = 0x00u;
 
-static int cc3501e_gatt_chr_access(uint16_t conn_handle, uint16_t attr_handle,
-                                   struct ble_gatt_access_ctxt *ctxt, void *arg)
+static int cc3501e_gatt_chr_access(uint16_t                     conn_handle,
+                                   uint16_t                     attr_handle,
+                                   struct ble_gatt_access_ctxt *ctxt,
+                                   void                        *arg)
 {
 	(void)conn_handle;
 	(void)attr_handle;
@@ -94,7 +96,7 @@ static int cc3501e_gatt_chr_access(uint16_t conn_handle, uint16_t attr_handle,
 	}
 	case BLE_GATT_ACCESS_OP_WRITE_CHR: {
 		uint16_t len = 0u;
-		int rc = ble_hs_mbuf_to_flat(ctxt->om, &s_chr_value, sizeof(s_chr_value), &len);
+		int      rc  = ble_hs_mbuf_to_flat(ctxt->om, &s_chr_value, sizeof(s_chr_value), &len);
 		return (rc == 0) ? 0 : BLE_ATT_ERR_UNLIKELY;
 	}
 	default:
@@ -104,17 +106,18 @@ static int cc3501e_gatt_chr_access(uint16_t conn_handle, uint16_t attr_handle,
 
 static const struct ble_gatt_svc_def s_gatt_svcs[] = {
 	{
-		.type = BLE_GATT_SVC_TYPE_PRIMARY,
-		.uuid = BLE_UUID16_DECLARE(CC3501E_SVC_UUID16),
-		.characteristics = (struct ble_gatt_chr_def[]){
-			{
-				.uuid       = BLE_UUID16_DECLARE(CC3501E_CHR_UUID16),
-				.access_cb  = cc3501e_gatt_chr_access,
-				.val_handle = &s_chr_val_handle,
-				.flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_NOTIFY,
-			},
-			{ 0 }, /* no more characteristics */
-		},
+	    .type = BLE_GATT_SVC_TYPE_PRIMARY,
+	    .uuid = BLE_UUID16_DECLARE(CC3501E_SVC_UUID16),
+	    .characteristics =
+	        (struct ble_gatt_chr_def[]){
+	            {
+	                .uuid       = BLE_UUID16_DECLARE(CC3501E_CHR_UUID16),
+	                .access_cb  = cc3501e_gatt_chr_access,
+	                .val_handle = &s_chr_val_handle,
+	                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_NOTIFY,
+	            },
+	            { 0 }, /* no more characteristics */
+	        },
 	},
 	{ 0 }, /* no more services */
 };
@@ -216,9 +219,14 @@ int cc3501e_nimble_host_start(void)
 	ble_store_ram_init();
 #endif
 
-	rc = ble_npl_task_init(&s_task_host, "nimble_host", cc3501e_nimble_host_task,
-	                       NULL, CC3501E_NIMBLE_THRD_PRIORITY, BLE_NPL_TIME_FOREVER,
-	                       NULL, CC3501E_NIMBLE_THRD_STACK_SIZE);
+	rc = ble_npl_task_init(&s_task_host,
+	                       "nimble_host",
+	                       cc3501e_nimble_host_task,
+	                       NULL,
+	                       CC3501E_NIMBLE_THRD_PRIORITY,
+	                       BLE_NPL_TIME_FOREVER,
+	                       NULL,
+	                       CC3501E_NIMBLE_THRD_STACK_SIZE);
 	if (rc != OSI_OK) {
 		return rc;
 	}
@@ -244,9 +252,9 @@ int cc3501e_nimble_adv_config_and_start(uint8_t        connectable,
                                         uint8_t        adv_data_len)
 {
 	struct ble_gap_ext_adv_params params;
-	struct os_mbuf              *adv_mbuf;
-	ble_addr_t                  addr;
-	int                          rc;
+	struct os_mbuf               *adv_mbuf;
+	ble_addr_t                    addr;
+	int                           rc;
 
 	if (!ble_hs_is_enabled()) {
 		return -1;
@@ -254,25 +262,25 @@ int cc3501e_nimble_adv_config_and_start(uint8_t        connectable,
 
 	/* --- Extended-advertising parameters (BLE_EXT_ADV=1). --- */
 	memset(&params, 0, sizeof(params));
-	params.connectable    = connectable ? 1u : 0u;
-	params.scannable      = 0u;          /* non-scannable ext-adv */
-	params.legacy_pdu     = 0u;
-	params.own_addr_type  = s_own_addr_type;
-	params.primary_phy    = BLE_HCI_LE_PHY_1M;
-	params.secondary_phy  = BLE_HCI_LE_PHY_1M;
-	params.tx_power       = 127;         /* "use the controller's default" */
-	params.sid            = 0u;
-	params.itvl_min       = BLE_GAP_ADV_ITVL_MS(interval_min_ms ? interval_min_ms : 100u);
-	params.itvl_max       = BLE_GAP_ADV_ITVL_MS(interval_max_ms ? interval_max_ms : 100u);
-	params.channel_map    = 0x07u;       /* all 3 primary channels */
+	params.connectable   = connectable ? 1u : 0u;
+	params.scannable     = 0u; /* non-scannable ext-adv */
+	params.legacy_pdu    = 0u;
+	params.own_addr_type = s_own_addr_type;
+	params.primary_phy   = BLE_HCI_LE_PHY_1M;
+	params.secondary_phy = BLE_HCI_LE_PHY_1M;
+	params.tx_power      = 127; /* "use the controller's default" */
+	params.sid           = 0u;
+	params.itvl_min      = BLE_GAP_ADV_ITVL_MS(interval_min_ms ? interval_min_ms : 100u);
+	params.itvl_max      = BLE_GAP_ADV_ITVL_MS(interval_max_ms ? interval_max_ms : 100u);
+	params.channel_map   = 0x07u; /* all 3 primary channels */
 
 	/* Remove any stale set on this instance, then (re)configure it. */
 	rc = ble_gap_ext_adv_remove(CC3501E_BLE_ADV_INSTANCE);
 	if ((rc != 0) && (rc != BLE_HS_EALREADY)) {
 		return rc;
 	}
-	rc = ble_gap_ext_adv_configure(CC3501E_BLE_ADV_INSTANCE, &params, NULL,
-	                               cc3501e_gap_event_cb, NULL);
+	rc = ble_gap_ext_adv_configure(
+	    CC3501E_BLE_ADV_INSTANCE, &params, NULL, cc3501e_gap_event_cb, NULL);
 	if (rc != 0) {
 		return rc;
 	}
@@ -280,7 +288,7 @@ int cc3501e_nimble_adv_config_and_start(uint8_t        connectable,
 	/* A RANDOM identity needs the address pushed to the adv set explicitly. */
 	if (s_own_addr_type != BLE_OWN_ADDR_PUBLIC) {
 		addr.type = BLE_ADDR_RANDOM;
-		rc = ble_hs_id_copy_addr(addr.type, addr.val, NULL);
+		rc        = ble_hs_id_copy_addr(addr.type, addr.val, NULL);
 		if (rc == 0) {
 			rc = ble_gap_ext_adv_set_addr(CC3501E_BLE_ADV_INSTANCE, &addr);
 		}
@@ -304,7 +312,7 @@ int cc3501e_nimble_adv_config_and_start(uint8_t        connectable,
 		fields.name             = (uint8_t *)name;
 		fields.name_len         = (uint8_t)strlen(name);
 		fields.name_is_complete = 1u;
-		rc = ble_hs_adv_set_fields_mbuf(&fields, adv_mbuf);
+		rc                      = ble_hs_adv_set_fields_mbuf(&fields, adv_mbuf);
 	} else {
 		/* Host-supplied raw AD bytes -> straight into the adv payload. */
 		rc = os_mbuf_append(adv_mbuf, adv_data, adv_data_len);

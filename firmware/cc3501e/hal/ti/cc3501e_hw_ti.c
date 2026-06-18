@@ -37,7 +37,7 @@
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/SPI.h>
 #include <ti/drivers/dpl/ClockP.h> /* uptime source for GET_DIAG_INFO (no radio needed) */
-#include <ti/utils/FWU/psa_fwu.h>  /* PSA Firmware Update: accept the MCUboot TRIAL image (cold-boot fix) */
+#include <ti/utils/FWU/psa_fwu.h> /* PSA Firmware Update: accept the MCUboot TRIAL image (cold-boot fix) */
 
 #ifdef CC3501E_WIFI
 /* CC35xx Wi-Fi host API (SDK 10.10 moved off the classic <.../simplelink.h>):
@@ -119,14 +119,14 @@ static bool wifi_sta_role_up;
  * reached from the worker drain (as GET_MAC is).  Wiring SCAN/CONNECT through
  * the worker needs an arg-carrying multi-job worker + poll-by-repeat handlers
  * (a wire/seam redesign) -- out of scope here (see RETURN notes). */
-static OsiSyncObj_t wifi_event_sync;        /* signalled by the event cb        */
-static volatile int wifi_last_status;       /* WLAN event Status (<0 = fail)    */
+static OsiSyncObj_t wifi_event_sync;  /* signalled by the event cb        */
+static volatile int wifi_last_status; /* WLAN event Status (<0 = fail)    */
 
 /* Scan-result cache: the whole AP list arrives in ONE WLAN_EVENT_SCAN_RESULT.
  * The cb snapshots it here; a SCAN body copies/packs it after the wait. */
 #define WIFI_SCAN_CACHE_MAX WLAN_MAX_SCAN_COUNT
-static volatile uint32_t   wifi_scan_count;
-static WlanNetworkEntry_t  wifi_scan_cache[WIFI_SCAN_CACHE_MAX];
+static volatile uint32_t  wifi_scan_count;
+static WlanNetworkEntry_t wifi_scan_cache[WIFI_SCAN_CACHE_MAX];
 
 /* Wi-Fi event callback -- runs on the host-driver task (NOT the SPI ISR, NOT
  * the worker).  Snapshots the result the issuing op is waiting on, then signals
@@ -146,8 +146,8 @@ static void wifi_event_cb(WlanEvent_t *event)
 		for (uint32_t i = 0; i < n; i++) {
 			wifi_scan_cache[i] = event->Data.ScanResult.NetworkListResult[i];
 		}
-		wifi_scan_count   = n;
-		wifi_last_status  = 0;
+		wifi_scan_count  = n;
+		wifi_last_status = 0;
 		osi_SyncObjSignal(&wifi_event_sync);
 		break;
 	}
@@ -325,8 +325,8 @@ extern const unsigned int  cc3501e_ota_candidate_len;
 static int cc3501e_ota_install(const unsigned char *img, unsigned int len)
 {
 	psa_fwu_component_info_t i1, i2, ti;
-	psa_fwu_component_t target;
-	unsigned int off;
+	psa_fwu_component_t      target;
+	unsigned int             off;
 
 	if (img == 0 || len <= TI_FWU_MANIFEST_SIZE) {
 		return -1;
@@ -362,7 +362,7 @@ static int cc3501e_ota_install(const unsigned char *img, unsigned int len)
 	if (psa_fwu_start(target, img, TI_FWU_MANIFEST_SIZE) != PSA_SUCCESS) {
 		return -5;
 	}
-	for (off = TI_FWU_MANIFEST_SIZE; off < len; ) {
+	for (off = TI_FWU_MANIFEST_SIZE; off < len;) {
 		unsigned int n = len - off;
 		if (n > CC3501E_OTA_WRITE_CHUNK) {
 			n = CC3501E_OTA_WRITE_CHUNK;
@@ -426,7 +426,7 @@ void cc3501e_hw_tick(void)
 	 * with the host's next 4-byte transfer.  Healthy traffic uses valid (cmd<0x80)
 	 * headers and does not bump g_resync_count, so this never fires when aligned. */
 	static uint32_t last_resync;
-	const uint32_t rc = g_resync_count;
+	const uint32_t  rc = g_resync_count;
 	if ((uint32_t)(rc - last_resync) >= 3u) {
 		bridge_transport_spi_hw_reinit(); /* flush FIFO+DMA, re-arm clean */
 		last_resync = 0u;                 /* reinit zeroes g_resync_count */
@@ -461,7 +461,7 @@ int cc3501e_hw_get_mac(uint8_t mac[6])
 	if (wifi_rv != CC3501E_HW_OK) {
 		return wifi_rv;
 	}
-	WlanMacAddress_t p = {.roleType = WLAN_ROLE_STA};
+	WlanMacAddress_t p = { .roleType = WLAN_ROLE_STA };
 	if (Wlan_Get(WLAN_GET_MACADDRESS, &p) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
@@ -796,7 +796,8 @@ int cc3501e_hw_wifi_connect_sta(
 	if (ssid == 0 || ssid_len == 0u) {
 		return CC3501E_HW_ERR_INVAL;
 	}
-	const int wifi_rv = cc3501e_hw_wifi_ensure_sta_role(); /* lazy-start + bounded STA role-up (shared) */
+	const int wifi_rv =
+	    cc3501e_hw_wifi_ensure_sta_role(); /* lazy-start + bounded STA role-up (shared) */
 	if (wifi_rv != CC3501E_HW_OK) {
 		return wifi_rv;
 	}
@@ -804,8 +805,13 @@ int cc3501e_hw_wifi_connect_sta(
 	wifi_last_status = 0;
 	/* Wlan_Connect(ssid,len,bssid=NULL,secType,pass,passlen,flags=0).  Open
 	 * networks pass a NULL/zero-length password. */
-	if (Wlan_Connect((const signed char *)ssid, (int)ssid_len, NULL, cc3501e_wifi_sec(security),
-	                 (const char *)psk, (char)psk_len, 0) != 0) {
+	if (Wlan_Connect((const signed char *)ssid,
+	                 (int)ssid_len,
+	                 NULL,
+	                 cc3501e_wifi_sec(security),
+	                 (const char *)psk,
+	                 (char)psk_len,
+	                 0) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
 	if (osi_SyncObjWait(&wifi_event_sync, OSI_WAIT_FOREVER) != OSI_OK) {
@@ -850,9 +856,9 @@ int cc3501e_hw_wifi_ap_start(
 	memcpy(ssid_buf, ssid, ssid_len);
 	ssid_buf[ssid_len] = 0u;
 
-	RoleUpApCmd_t ap = { 0 };
-	ap.ssid          = ssid_buf;
-	ap.channel       = 6u; /* common 2.4 GHz default */
+	RoleUpApCmd_t ap    = { 0 };
+	ap.ssid             = ssid_buf;
+	ap.channel          = 6u; /* common 2.4 GHz default */
 	ap.secParams.Type   = (uint8_t)cc3501e_wifi_sec(security);
 	ap.secParams.Key    = (int8_t *)psk;
 	ap.secParams.KeyLen = psk_len;
@@ -991,7 +997,8 @@ int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4])
 /* so the stub / silicon-free path is unchanged. */
 #ifdef CC3501E_BLE
 #ifndef CC3501E_WIFI
-#error "CC3501E_BLE requires CC3501E_WIFI (shared HIF -> Wlan_Start first); build with -Ble (which implies -WifiHostDriver)."
+#error                                                                                             \
+    "CC3501E_BLE requires CC3501E_WIFI (shared HIF -> Wlan_Start first); build with -Ble (which implies -WifiHostDriver)."
 #endif
 /* BLE_ENABLE: start Wi-Fi first (shared HIF), then bring up the NimBLE host.
  * Reached ONLY from the async worker's drain (never the SPI ISR): both the

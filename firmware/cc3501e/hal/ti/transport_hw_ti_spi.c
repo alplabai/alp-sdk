@@ -99,7 +99,7 @@ static uint16_t cur_payload_len;
  * chips/cc3501e/cc3501e.c cc3501e_sync()).  During the request PAYLOAD phase the
  * slave drives NULL (0x00) instead -- 0xA5 marks ONLY the header-phase boundary,
  * so the host can distinguish "parked at a clean boundary" from "mid-payload". */
-static uint8_t  sync_idle[ALP_CC3501E_HEADER_BYTES];
+static uint8_t sync_idle[ALP_CC3501E_HEADER_BYTES];
 
 /* P0-2 desync/probe re-arm counter (KEPT -- route through DIAG_GET_STATS for
  * link-health observability).  Counts header-phase re-arms triggered by a
@@ -226,7 +226,7 @@ static void spi_open_and_arm(void)
 
 	SPI_Params params;
 	SPI_Params_init(&params);
-	params.mode                = SPI_PERIPHERAL; /* CC35xx TI Drivers term for SPI slave */
+	params.mode                = SPI_PERIPHERAL;    /* CC35xx TI Drivers term for SPI slave */
 	params.transferMode        = SPI_MODE_CALLBACK; /* DMA on the free ch12/13 (see file header) */
 	params.transferCallbackFxn = on_transfer;
 	params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */

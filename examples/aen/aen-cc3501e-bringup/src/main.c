@@ -80,7 +80,8 @@
  * for the v0.1 instant-dispatch META path; slow Wi-Fi/BLE replies need the
  * next-rev host-IRQ line, not a faster clock.)
  */
-#define CC3501E_SPI_FREQ_HZ 1000000u /* 1 MHz: SILICON-VALIDATED cold-boot value.  At 8 MHz with the
+#define CC3501E_SPI_FREQ_HZ                                                                        \
+	1000000u /* 1 MHz: SILICON-VALIDATED cold-boot value.  At 8 MHz with the
                                       * Alif SSI rx_delay=0 the master sampled MISO before the CC35's bit
                                       * propagated back over the long on-SoM traces + the crossed-data
                                       * bodge -> reqhdr_rx=0xFFFFFFFF, cold link dead (8 MHz was only
@@ -442,16 +443,21 @@ int main(void)
 		 * first-contact misalignment window; retrying here lands the
 		 * worker-routed Wi-Fi identity read end-to-end on the stable link. */
 		if (g_cc3501e_witness.mac_ok == 0u && s == ALP_OK && g_cc3501e_witness.ping_ok >= 20u) {
-			uint8_t      mac[CC3501E_MAC_LEN] = {0};
-			alp_status_t ms = cc3501e_wifi_get_mac(&fw, mac, CC3501E_MAC_TIMEOUT_MS);
+			uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+			alp_status_t ms              = cc3501e_wifi_get_mac(&fw, mac, CC3501E_MAC_TIMEOUT_MS);
 			g_cc3501e_witness.mac_status = (uint32_t)ms;
 			if (ms == ALP_OK) {
 				g_cc3501e_witness.mac_ok = 1u;
 				g_cc3501e_witness.mac_lo = (uint32_t)mac[0] | ((uint32_t)mac[1] << 8) |
-							   ((uint32_t)mac[2] << 16) | ((uint32_t)mac[3] << 24);
+				                           ((uint32_t)mac[2] << 16) | ((uint32_t)mac[3] << 24);
 				g_cc3501e_witness.mac_hi = (uint32_t)mac[4] | ((uint32_t)mac[5] << 8);
 				printf("[cc3501e-bringup] soak GET_MAC ok %02x:%02x:%02x:%02x:%02x:%02x\n",
-				       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+				       mac[0],
+				       mac[1],
+				       mac[2],
+				       mac[3],
+				       mac[4],
+				       mac[5]);
 			}
 		}
 
@@ -462,9 +468,9 @@ int main(void)
 		static bool scan_done = false;
 		if (!scan_done && g_cc3501e_witness.mac_ok == 1u && s == ALP_OK) {
 			static cc3501e_scan_record_t scan[CC3501E_SCAN_MAX_RECORDS];
-			size_t       n  = 0u;
-			alp_status_t ss = cc3501e_wifi_scan(
-			    &fw, scan, CC3501E_SCAN_MAX_RECORDS, &n, CC3501E_SCAN_TIMEOUT_MS);
+			size_t                       n = 0u;
+			alp_status_t                 ss =
+			    cc3501e_wifi_scan(&fw, scan, CC3501E_SCAN_MAX_RECORDS, &n, CC3501E_SCAN_TIMEOUT_MS);
 			g_cc3501e_witness.scan_status = (uint32_t)ss;
 			if (ss == ALP_OK) {
 				g_cc3501e_witness.scan_count      = (uint32_t)n;

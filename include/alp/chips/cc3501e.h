@@ -72,7 +72,7 @@ struct cc3501e {
 	alp_gpio_t        *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t        *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
 	cc3501e_event_cb_t event_cb;
-	void              *event_user;
+	void	          *event_user;
 	uint8_t            rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	uint8_t            tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 };
@@ -317,11 +317,11 @@ alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms);
  * @return ALP_OK on success; ALP_ERR_INVAL if @p pad is reserved/out of
  *         range; ALP_ERR_NOT_READY on a firmware build without the proxy.
  */
-alp_status_t cc3501e_gpio_configure(cc3501e_t                    *ctx,
-                                    uint8_t                       pad,
-                                    alp_cc3501e_gpio_direction_t  dir,
-                                    alp_cc3501e_gpio_pull_t       pull,
-                                    uint32_t                      timeout_ms);
+alp_status_t cc3501e_gpio_configure(cc3501e_t                   *ctx,
+                                    uint8_t                      pad,
+                                    alp_cc3501e_gpio_direction_t dir,
+                                    alp_cc3501e_gpio_pull_t      pull,
+                                    uint32_t                     timeout_ms);
 
 /**
  * @brief Drive a proxied CC3501E GPIO (GPIO_WRITE, 0x51).
@@ -344,8 +344,7 @@ alp_status_t cc3501e_gpio_write(cc3501e_t *ctx, uint8_t pad, bool level, uint32_
  * @return ALP_OK on success; ALP_ERR_INVAL if @p level_out is NULL or the
  *         pad is reserved; otherwise the mapped error.
  */
-alp_status_t
-cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uint32_t timeout_ms);
+alp_status_t cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uint32_t timeout_ms);
 
 /**
  * @brief Arm/disable an edge interrupt on a proxied CC3501E GPIO
@@ -366,11 +365,8 @@ cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uint32_t timeout
  * @param timeout_ms  Caller budget.
  * @return ALP_OK once armed/disabled; otherwise the mapped error.
  */
-alp_status_t cc3501e_gpio_set_interrupt(cc3501e_t                *ctx,
-                                        uint8_t                   pad,
-                                        alp_cc3501e_gpio_edge_t   edge,
-                                        bool                      enabled,
-                                        uint32_t                  timeout_ms);
+alp_status_t cc3501e_gpio_set_interrupt(
+    cc3501e_t *ctx, uint8_t pad, alp_cc3501e_gpio_edge_t edge, bool enabled, uint32_t timeout_ms);
 
 /**
  * @brief Drive a CC3501E camera-enable LDO (CAM_ENABLE 0x60 / CAM_DISABLE 0x61).
