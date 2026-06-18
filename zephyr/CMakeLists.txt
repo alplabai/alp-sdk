@@ -294,6 +294,21 @@ zephyr_library_sources_ifdef(CONFIG_MIPI_DPHY_DW
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/isp_pico.c)
 
+# Alif Ensemble CAN-FD controller (CAST CAN-CTRL IP, compatible "cast,can",
+# CANFD0 base 0x49036000), vendored VERBATIM from the Apache-2.0 zephyr_alif
+# fork (drivers/can/can_cast.c + can_cast.h).  Upstream Zephyr v4.4 ships only
+# can_mcan.c (Bosch M_CAN), whose register map does NOT match the CAST IP, and
+# hal_alif ships no CAN class driver -- so this fork copy is the only Zephyr
+# can_* device for the part.  The alp-sdk portable <alp/can.h> backend
+# (src/backends/can/zephyr_drv.c) binds it through the alp_can0 alias.  The
+# driver is self-contained CMSIS-style register access via DEVICE_MMIO + the
+# Zephyr clock_control / pinctrl / can.h class APIs; it needs only the
+# soc_common.h supplied by our Ensemble soc-bridge above (no hal_alif lib, no
+# extra include path).  Binding under zephyr/dts/bindings/can/cast,can.yaml;
+# node in the E8 SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_CAN_ALIF_CAST
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/can/can_cast.c)
+
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.

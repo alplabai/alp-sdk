@@ -850,6 +850,50 @@
 		interrupt-names = "isp", "mi-isp";
 		status = "disabled";
 	};
+
+	/*
+	 * CAN-FD controller -- CANFD0 (CAST CAN-CTRL IP, compatible "cast,can",
+	 * base 0x49036000), bound by the Tier-2 fork driver
+	 * zephyr/drivers/can/can_cast.c as a standard Zephyr can_* device.  Upstream
+	 * Zephyr's only CAN driver is the Bosch M_CAN (can_mcan.c), whose register
+	 * map does NOT match the CAST IP; hal_alif ships no CAN class driver -- so
+	 * this fork copy is the only Zephyr can_* device for the part.  The portable
+	 * <alp/can.h> backend (src/backends/can/zephyr_drv.c) binds it via the
+	 * alp_can0 alias a board overlay supplies.
+	 *
+	 * reg/IRQ/FD facts transcribed from the fork's e1.dtsi (can@49036000,
+	 * IRQ 104) + the Alif DFP CMSIS headers:
+	 *   reg[0] 0x49036000 (CANFD0_BASE, soc.h)        -- register block
+	 *   reg[1] 0x49037000 (e1.dtsi "can_cnt_reg")     -- CANFD0 counter window
+	 *   can-fd-ctrl-reg 0x4902F00C = CLKCTL_PER_SLV(0x4902F000) + CANFD_CTRL(0xC)
+	 *   can-fd-bit 20  = CANFD0_CTRL_FD_ENA (sys_ctrl_canfd.h:47, the
+	 *                    SOC_FEAT_CANFD0_CANFD1_CTRL=0 / single-CANFD E8 layout)
+	 *
+	 * clock: ALIF_CANFD0_160M_CLK is re-authored into the UPSTREAM 8-arg
+	 * clockctrl encoding in alif-ensemble-clocks-ext.h (the fork's 7-arg packed
+	 * value MUST NOT be copied) -- gate CKEN=bit12, src-sel bit16=1 (160 MHz),
+	 * in CANFD_CTRL of CLKCTL_PER_SLV.  clock-frequency carries the controller's
+	 * input clock for the bit-timing math; the driver's set_rate is a no-op on
+	 * our upstream clockctrl, so this value is what the bit-timing uses (confirm
+	 * the divided rate vs the Alif TRM).  BENCH-UNVERIFIED.
+	 *
+	 * A board enables it (status="okay") + supplies pinctrl_can0 + the alp_can0
+	 * alias.  Declared disabled here.
+	 */
+	can0: can@49036000 {
+		compatible      = "cast,can";
+		reg             = <0x49036000 0x1000>, <0x49037000 0x1000>;
+		reg-names       = "can_reg", "can_cnt_reg";
+		interrupt-parent = <&nvic>;
+		interrupts      = <104 0>;
+		interrupt-names = "can_interrupt";
+		clocks          = <&clockctrl ALIF_CANFD0_160M_CLK>;
+		clock-frequency = <20000000>;
+		can-fd;
+		can-fd-ctrl-reg = <0x4902F00C>;
+		can-fd-bit      = <20>;
+		status          = "disabled";
+	};
 };
 
 /*

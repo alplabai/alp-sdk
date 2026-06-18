@@ -709,6 +709,53 @@ config VIDEO_ISP_VSI_INIT_PRIORITY
 	help
 	  System initialization priority for the Alif ISP-Pico driver.
 
+# ---------------------------------------------------------------------------
+# Alif Ensemble CAN-FD (CAST CAN-CTRL IP, compatible "cast,can"), vendored from
+# the Apache-2.0 zephyr_alif fork (zephyr/drivers/can/can_cast.c + can_cast.h).
+# Upstream Zephyr v4.4 ships only the Bosch M_CAN driver (can_mcan.c), whose
+# register map does NOT match the CAST IP, and hal_alif ships no CAN class
+# driver -- so this fork copy is the only Zephyr can_* device for the part.  The
+# portable <alp/can.h> backend (src/backends/can/zephyr_drv.c) binds it via the
+# alp_can0 alias.  ADR 0017 Tier-2 (fork-driver copy): INTERIM, retires onto the
+# opt-in sdk-alif fork once bench-verified.  Task #21.  BENCH-UNVERIFIED.
+# ---------------------------------------------------------------------------
+config CAN_ALIF_CAST
+	bool "Alif Ensemble CAN-FD controller (CAST IP, ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on CAN
+	depends on DT_HAS_CAST_CAN_ENABLED
+	select PINCTRL
+	select CAN_HAS_RX_TIMESTAMP if CAN_RX_TIMESTAMP
+	help
+	  Alif Ensemble CAN-FD controller (CAST CAN-CTRL IP, compatible "cast,can"),
+	  vendored from the Apache-2.0 zephyr_alif fork (drivers/can/can_cast.c).
+	  Upstream Zephyr v4.4 + hal_alif ship no CAN class driver for this IP
+	  (upstream's can_mcan.c is the Bosch M_CAN, a different register map).
+
+	  Driver: zephyr/drivers/can/can_cast.c.
+
+config CAN_MAX_FILTER
+	int "Maximum number of CAN acceptance filters (CAST IP)"
+	default 2
+	range 1 3
+	depends on CAN_ALIF_CAST
+	help
+	  Number of CAN-RX acceptance-filter slots the cast,can driver installs.
+	  The driver BUILD_ASSERTs CAN_MAX_ACCEPTANCE_FILTERS (= 16, can_cast.h:92)
+	  > CONFIG_CAN_MAX_FILTER, so up to 15 is legal; the fork's own loopback
+	  sample uses 3.  Capped at 3 here as a conservative default.  Fork-specific
+	  symbol (absent from upstream CAN).
+
+config CAN_RBUF_AFWL
+	int "CAN receive-buffer almost-full warning limit (CAST IP)"
+	default 1
+	range 1 15
+	depends on CAN_ALIF_CAST
+	help
+	  Receive-buffer almost-full warning limit (AFWL) the cast,can driver
+	  programs into CANFD_LIMIT.  The CAST IP maximum is CAN_RBUF_AFWL_MAX = 15
+	  (can_cast.h:98).  Fork-specific symbol (absent from upstream CAN).
+
 config ALP_SDK_MAX_UART_HANDLES
 	int "Maximum concurrent alp_uart_t handles"
 	default 4

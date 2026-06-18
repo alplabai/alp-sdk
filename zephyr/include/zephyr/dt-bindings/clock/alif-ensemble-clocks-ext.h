@@ -142,4 +142,23 @@
 #define ALIF_CSI_CLK      ALIF_CLK(2U)
 #define ALIF_CSI_DPHY_CLK ALIF_CLK(2U)
 
+/* CAN-FD (CANFD0, cast,can @0x49036000) peripheral clock.  Re-authored from the
+ * Alif DFP CMSIS sys_ctrl_canfd.h (the SOC_FEAT_CANFD0_CANFD1_CTRL=0 / single-
+ * CANFD E8 layout) into the upstream 8-arg clockctrl encoding: the CANFD_CTRL
+ * register (offset 0xC) in CLKCTL_PER_SLV holds CANFD0's clock-enable at bit 12
+ * (CANFD0_CTRL_CKEN, sys_ctrl_canfd.h:49) and a 1-bit clock-source select at
+ * bit 16 (CANFD0_CTRL_CLK_SEL_Pos, sys_ctrl_canfd.h:48); src_val=1 selects the
+ * 160 MHz source (vs 0 = 38.4 MHz).  The CKDIV field (bits 0..) is left at reset
+ * (the controller bit-timing uses the node's clock-frequency).  Per
+ * [[reference_alif_clock_encoding_fork_vs_upstream]] the fork's 7-arg packed
+ * ALIF_CLK_CFG(CLKCTL_PER_SLV, CANFD_CTRL, 8U, 1U, 1U, 1U, 9U) (its e1c clock
+ * header) must NOT be copied -- its en_bit/src_pos (8/9) are the e1c layout, not
+ * the E8 DFP layout used here (12/16).  parent_clk is a filler: the cast,can
+ * driver configure()/set_rate()/on()s this id but our upstream clockctrl has no
+ * .set_rate, so get_rate()'s parent is unused.  vendor-ext, BENCH-UNVERIFIED. */
+#define ALIF_CANFD_CTRL_REG 0x0CU /* CLKCTL_PER_SLV base 0x4902F000 */
+#define ALIF_CANFD0_160M_CLK                                                   \
+	ALIF_CLK_CFG(CLKCTL_PER_SLV, CANFD_CTRL, 12U, 1U, 1U, 1U, 16U,         \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
 #endif /* ALP_DT_BINDINGS_CLOCK_ALIF_ENSEMBLE_CLOCKS_EXT_H_ */
