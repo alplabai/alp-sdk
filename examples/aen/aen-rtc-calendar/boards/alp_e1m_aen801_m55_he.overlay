@@ -1,0 +1,57 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon calendar-RTC overlay for the E1M-AEN801 (Alif Ensemble E8,
+ * M55-HE), bench RAM-run via J-Link.
+ *
+ * Validates the alp-sdk "lprtc_calendar_shim" rtc backend
+ * (src/backends/rtc/lprtc_calendar_shim.c), which maps the always-on LPRTC
+ * COUNTER (lprtc@42000000, "snps,dw-apb-rtc", free-running CCVR @ 32768 Hz) onto
+ * the calendar alp_rtc_* surface.  The E8 has NO Zephyr-RTC-class peripheral, so
+ * the shim is what makes alp_rtc_set_time()/alp_rtc_get_time() work here.
+ *
+ * The shim resolves its counter time source via the `alp-lprtc-counter` alias
+ * (see the backend's ALP_LPRTC_COUNTER_DEV), so this overlay points that alias
+ * at rtc0 (the LPRTC node) -- NOT at an alp-rtc<N> alias (the zephyr_drv RTC
+ * backend would bind that, and the LPRTC has no RTC-class device to bind).
+ *
+ * Ground truth over J-Link: the LPRTC CCVR register at base+0x00 = 0x42000000
+ * (offset from the vendored counter_dw_rtc.h DW_RTC_REG_CCVR(0x00)); mem32
+ * 0x42000000 must advance ~32768 ticks/s across the read windows.
+ *
+ * CLOCK-GATE NOTE (BENCH-UNVERIFIED): the LPRTC clock is gated from VBAT
+ * (VBAT_LPRTC0_CLK_EN, 0x1A609010).  The bench has it on already (counter_start
+ * -> -EALREADY); if the calendar never advances, that gate is the cause.  Do NOT
+ * add a VBAT write without the Alif TRM confirming the bit -- see the backend
+ * header + aen-rtc-regcheck/README.md.
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		/* The lprtc_calendar_shim backend reads its counter time source from
+		 * this alias (DT_ALIAS(alp_lprtc_counter)).  Point it at the LPRTC
+		 * counter node so the calendar shim binds the free-running CCVR. */
+		alp-lprtc-counter = &rtc0;
+	};
+};
+
+/* Enable the LPRTC node so the snps,dw-apb-rtc counter driver instantiates a
+ * device for the shim to drive.  Okay'ing rtc0 is ALSO what the fork SoC layer
+ * keys its VBAT clock-gate on (see the note above); on the alp-sdk upstream
+ * build that gate is bench-TBD. */
+&rtc0 {
+	status = "okay";
+};

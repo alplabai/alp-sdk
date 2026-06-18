@@ -25,28 +25,33 @@ The alp-sdk on-silicon RTC backend
 example therefore exercises the **COUNTER** path only, surfacing the
 LPRTC via the `alp-counter` alias.
 
-### TBD: the counter -> calendar shim (NOT authored here)
+### The counter -> calendar shim (now authored: `aen-rtc-calendar`)
 
 Making `include/alp/rtc.h` work over the LPRTC needs a **counter ->
-calendar shim backend** that is deliberately **not** written in this
-change:
+calendar shim backend** -- now implemented in
+`src/backends/rtc/lprtc_calendar_shim.c` (selected on `silicon_ref`
+`"alif:ensemble:e8"`) and exercised by the
+[`aen-rtc-calendar`](../aen-rtc-calendar/) example. It works exactly as
+sketched here:
 
 - Store an **epoch base** (UNIX seconds at the moment the counter was
-  last set) in software / retained storage -- the DW-APB-RTC has no
-  hardware to hold it across resets.
+  last set) in software -- the DW-APB-RTC has no hardware to hold it
+  across resets.
 - `alp_rtc_set_time()` = compute the epoch from the supplied
-  `alp_rtc_time_t`, snapshot `counter_get_value()`, persist
+  `alp_rtc_time_t`, snapshot `counter_get_value()`, store
   `(epoch_base, tick_snapshot)`.
 - `alp_rtc_get_time()` = `epoch_base + (counter_get_value() -
   tick_snapshot) / 32768`, then `gmtime`-style decompose to
   `alp_rtc_time_t`.
-- Retained-storage target (battery-backed VBAT scratch vs MRAM vs
-  filesystem) is a SoM-policy decision and is **TBD**; without it the
-  clock resets to the epoch base on every cold boot.
 
-Until that shim lands, the LPRTC is reachable **only** as an
-`alp_counter` / Zephyr counter device, which is exactly what this
-regcheck validates.
+The **only** piece still TBD is **retained-storage persistence**: the
+shim keeps `(epoch_base, tick_snapshot)` in RAM, so the wall-clock
+resets to the epoch base on every cold boot until `set_time` runs again.
+The retained target (battery-backed VBAT scratch vs MRAM vs filesystem)
+is a SoM-policy decision and is **TBD**.
+
+This regcheck still validates the raw **counter** underneath that shim:
+the LPRTC reached as an `alp_counter` / Zephyr counter device.
 
 ## Grounded facts (every concrete value cited)
 

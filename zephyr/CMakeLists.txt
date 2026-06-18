@@ -522,6 +522,15 @@ zephyr_library_sources_ifdef(CONFIG_RTC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/zephyr_drv.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
+
+# E8 LPRTC counter -> calendar shim: backs the alp_rtc_* surface over the
+# always-on snps,dw-apb-rtc COUNTER device (lprtc@42000000) -- the E8 has no
+# Zephyr-RTC-class peripheral.  Needs the counter subsystem for the device.
+if(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8 AND CONFIG_COUNTER)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/lprtc_calendar_shim.c)
+endif()
+
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/wdt_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_WATCHDOG
