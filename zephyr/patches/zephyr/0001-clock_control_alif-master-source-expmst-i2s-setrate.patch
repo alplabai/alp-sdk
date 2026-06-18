@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Alp Lab AB <dev@alplab.example>
+From: Alp Lab AB <contact@alplab.ai>
 Date: Tue, 17 Jun 2026 00:00:00 +0000
 Subject: [PATCH] clock_control_alif: enable audio master source + EXPMST0
  force, add I2S divider set_rate
@@ -31,7 +31,7 @@ it regresses, without losing the (grounded, bench-proven) master/EXPMST enable.
 
 Non-Alif clock controllers are unaffected.
 
-Signed-off-by: Alp Lab AB <dev@alplab.example>
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
 diff --git a/drivers/clock_control/clock_control_alif.c b/drivers/clock_control/clock_control_alif.c
 index 4a7e002..109b345 100644

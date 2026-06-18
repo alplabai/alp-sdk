@@ -4,10 +4,10 @@
 # submitted upstream; drop it once the Zephyr mcuboot pin advances past it.
 patches:
   - path: mcuboot/0001-flash_map_extended-alif-mram-base.patch
-    sha256sum: 23c8036823716f1b4decaed2d612408ad8503b866cd3b8395d7e2d8f3220de58
+    sha256sum: 9933c296212da9c205d2a25c26555c97867309c83cbee95b349d2a26a9beb5be
     module: mcuboot
     author: Alp Lab AB
-    email: dev@alplab.example
+    email: contact@alplab.ai
     date: 2026-06-16
     upstreamable: true
     comments: |
@@ -16,10 +16,10 @@ patches:
       jump -> reboot loop. Derive the slot base from the alif,mram controller reg.
       Bench-proven on E1M-AEN801 (E8): SES->MCUboot->slot0->app RESULT PASS.
   - path: zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch
-    sha256sum: a49c980678b1d77cc510203272126a3b20a6948ea9d35f7ca4cfe9f52bfde69e
+    sha256sum: dd363a007acddc263e9168f4c75ac2b4bafd5a8ee438ce655b5f63a0398f2a76
     module: zephyr
     author: Alp Lab AB
-    email: dev@alplab.example
+    email: contact@alplab.ai
     date: 2026-06-17
     upstreamable: true
     comments: |
@@ -45,7 +45,7 @@ patches:
     sha256sum: 2412e7f6bcdbed10433cb7421be4166d75adadc31315f1423dde543fa99ecf9c
     module: zephyr
     author: Alp Lab AB
-    email: dev@alplab.example
+    email: contact@alplab.ai
     date: 2026-06-18
     upstreamable: true
     comments: |
@@ -61,7 +61,7 @@ patches:
     sha256sum: cb456dbc41d51385539bd59cc221e7861547021a2abe882e2df9ac044dc8e86b
     module: hal_alif
     author: Alp Lab AB
-    email: dev@alplab.example
+    email: contact@alplab.ai
     date: 2026-06-18
     upstreamable: true
     comments: |

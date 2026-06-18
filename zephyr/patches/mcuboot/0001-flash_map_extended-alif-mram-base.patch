@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Alp Lab AB <dev@alplab.example>
+From: Alp Lab AB <contact@alplab.ai>
 Date: Mon, 16 Jun 2026 00:00:00 +0000
 Subject: [PATCH] flash_map_extended: derive slot base from the alif,mram
  controller reg
@@ -16,7 +16,7 @@ alif,mram-flash-controller) that takes FLASH_DEVICE_BASE from the controller's
 own reg (0x80000000) -- mirroring the existing nxp_imx_flexspi / st_stm32 arms
 that read the controller's memory-mapped reg. Non-Alif boards are unaffected.
 
-Signed-off-by: Alp Lab AB <dev@alplab.example>
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
 diff --git a/boot/zephyr/flash_map_extended.c b/boot/zephyr/flash_map_extended.c
 index fbddd572..c19b7c66 100644
