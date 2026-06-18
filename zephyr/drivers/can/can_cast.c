@@ -270,21 +270,33 @@ static int can_cast_init(const struct device *dev)
 		return -ENODEV;
 	}
 
+	/*
+	 * alp-sdk divergence from the verbatim fork driver: the upstream Alif
+	 * clockctrl (drivers/clock_control/clock_control_alif.c) implements no
+	 * .configure op (-> -ENOSYS) and returns -ENOTSUP from .set_rate for any
+	 * non-I2S clock id, so these two calls are NO-OPs on our stack -- the actual
+	 * CANFD clock gate is applied by clock_control_on() below (the node's
+	 * ALIF_CANFD0_160M_CLK sets CKEN bit12 + src-sel bit16 in CLKCTL_PER_SLV).
+	 * The fork's own clockctrl implements both, so the fork driver treats them
+	 * as fatal; on upstream-Zephyr + hal_alif we tolerate the not-implemented
+	 * sentinels instead of bailing init (same lesson as i2s_dw.c:93-102 and the
+	 * SPI/PDM bring-up).  Without this, can0 binds but device_is_ready()=false.
+	 */
 	err = clock_control_configure(config->clk_dev, config->clk_id, NULL);
-	if (err != 0) {
+	if (err != 0 && err != -ENOSYS && err != -ENOTSUP) {
 		LOG_ERR("Unable to configure clock: err:%d", err);
 		return err;
 	}
 
 	err = clock_control_set_rate(config->clk_dev, config->clk_id,
 				     (clock_control_subsys_rate_t)config->clk_freq);
-	if (err != 0) {
+	if (err != 0 && err != -ENOSYS && err != -ENOTSUP) {
 		LOG_ERR("Unable to set clock rate: err:%d", err);
 		return err;
 	}
 
 	err = clock_control_on(config->clk_dev, config->clk_id);
-	if (err != 0) {
+	if (err != 0 && err != -EALREADY) {
 		LOG_ERR("Unable to turn on clock: err:%d", err);
 		return err;
 	}
