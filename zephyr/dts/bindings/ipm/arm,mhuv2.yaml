@@ -1,0 +1,33 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# ARM Message Handling Unit v2 (MHUv2), exposed through Zephyr's IPM API.
+#
+# Re-authored for the alp-sdk in-tree IPM driver (zephyr/drivers/ipm/
+# ipm_arm_mhuv2.c).  Property shape is identical to Alif's Apache-2.0
+# zephyr_alif fork binding (dts/bindings/mhu/arm,mhuv2.yaml) -- the same SoC
+# MHUv2 IP -- so the fork DT nodes bind unchanged.  Upstream Zephyr v4.4 ships
+# no MHUv2 IPM driver/binding; this is the alp-sdk vendor-ext that lets the
+# Secure-Enclave service client (hal_alif se_services/) reach the SE over the
+# RTSS<->SE mailboxes.  ADR 0017 Tier-2 (INTERIM, task #21).
+
+description: ARM MHUv2 (Message Handling Unit v2), exposed via the Zephyr IPM API
+
+compatible: "arm,mhuv2"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  interrupt-names:
+    required: true
+    description: |
+      Exactly one of 'tx' (sender-side MHU frame) or 'rx' (receiver-side MHU
+      frame).  The driver keys its sender/receiver role off this name
+      (DT_INST_IRQ_HAS_NAME(n, tx)): a 'tx' node is the outbound mailbox, a 'rx'
+      node the inbound one.

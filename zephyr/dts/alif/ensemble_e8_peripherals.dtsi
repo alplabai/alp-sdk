@@ -894,6 +894,58 @@
 		can-fd-bit      = <20>;
 		status          = "disabled";
 	};
+
+	/*
+	 * Secure-Enclave (SE) SERVICE mailboxes -- the RTSS <-> SE Arm MHUv2 pair.
+	 * The Apache-2.0 hal_alif SE client (se_services/zephyr/src/se_service.c,
+	 * compiled under CONFIG_HAS_ALIF_SE_SERVICES) talks to the SE over these two
+	 * mailboxes via Zephyr's IPM API, driven by the alp-sdk in-tree "arm,mhuv2"
+	 * IPM driver (zephyr/drivers/ipm/ipm_arm_mhuv2.c, CONFIG_ARM_MHUV2).  The
+	 * driver keys its sender/receiver role off interrupt-names "tx"/"rx".
+	 *
+	 * reg/IRQ transcribed VERBATIM from the Alif zephyr_alif fork
+	 * (dts/arm/alif/ensemble/common/e1.dtsi: seservice0r mhu@40040000 IRQ 37
+	 * "rx"; seservice0s mhu@40050000 IRQ 38 "tx") -- the same SoC, identical
+	 * addresses.  No clocks/pinctrl: the mailboxes are core-internal (no pads, no
+	 * peripheral clock gate).  status="disabled" by default; an app overlay okays
+	 * the pair + the se_service root node below.  ADR 0017 Tier-2 (INTERIM,
+	 * task #21).  BENCH-UNVERIFIED.
+	 *
+	 * (seservice1r/s @ 0x40060000/0x40070000 IRQ 39/40 are the SE<->second-RTSS
+	 * mailboxes; the rtsshp_rtsshe_* MHUs @ 0x40080000.. are inter-RTSS -- neither
+	 * is declared here.)
+	 */
+	seservice0r: mhu@40040000 {
+		compatible = "arm,mhuv2";
+		reg = <0x40040000 0x1000>;
+		interrupts = <37 3>;
+		interrupt-names = "rx";
+		status = "disabled";
+	};
+
+	seservice0s: mhu@40050000 {
+		compatible = "arm,mhuv2";
+		reg = <0x40050000 0x1000>;
+		interrupts = <38 3>;
+		interrupt-names = "tx";
+		status = "disabled";
+	};
+};
+
+/*
+ * SE-service root node -- ties the tx + rx MHUv2 mailboxes into one logical
+ * channel for the hal_alif SE client (se_service.c DEVICE_DT_GET_OR_NULLs both
+ * phandles at SYS_INIT).  Fork e1.dtsi root-level "se_service" node; placed at
+ * the root (not inside &soc) to match the fork.  status="disabled"; an app
+ * overlay okays it alongside the two mailboxes.
+ */
+&{/} {
+	se_service: se_service {
+		compatible = "alif,secure-enclave-services";
+		mhuv2-send-node = <&seservice0s>;
+		mhuv2-recv-node = <&seservice0r>;
+		status = "disabled";
+	};
 };
 
 /*

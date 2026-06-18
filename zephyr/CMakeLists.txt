@@ -159,6 +159,32 @@ if(CONFIG_SPI_DW_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/spi)
 endif()
 
+# Arm MHUv2 mailbox IPM driver (compatible "arm,mhuv2"), vendored from the
+# Apache-2.0 zephyr_alif fork (drivers/ipm/ipm_arm_mhuv2.c + ipm_arm_mhuv2.h).
+# Upstream Zephyr v4.4 ships only the MHUv1 ipm_mhu.c.  This is the v2 mailbox
+# the Ensemble Secure-Enclave service channel rides on: the Apache-2.0 hal_alif
+# SE client (se_services/zephyr/src/se_service.c, built by hal_alif itself under
+# CONFIG_HAS_ALIF_SE_SERVICES) drives it through Zephyr's IPM API.  Self-contained
+# (its register header sits beside it), so put drivers/ipm on the include path
+# for the driver's own "ipm_arm_mhuv2.h".  Nodes in the E8 SoC overlay
+# (seservice0r/seservice0s + the se_service root node).  ADR 0017 Tier-2.
+zephyr_library_sources_ifdef(CONFIG_ARM_MHUV2
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipm/ipm_arm_mhuv2.c)
+if(CONFIG_ARM_MHUV2)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipm)
+endif()
+
+# hal_alif's SE client (se_service.c, built by the hal_alif module itself under
+# CONFIG_HAS_ALIF_SE_SERVICES) does `#include <soc_memory_map.h>` for
+# local_to_global() (the SE message buffer's CPU->global address translation).
+# hal_alif only puts its common/include dir on the path under CONFIG_RTSS_HE/HP
+# (common/CMakeLists.txt) -- which holds here, but add it explicitly so the SE
+# client resolves the header on any Ensemble RTSS build (the video-driver
+# precedent above).
+if(CONFIG_HAS_ALIF_SE_SERVICES)
+    zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+endif()
+
 # Alif Ensemble UTIMER PWM + counter class drivers (compatibles alif,pwm /
 # alif,utimer-counter), over the hal_alif drivers/utimer register library
 # (the drivers select USE_ALIF_HAL_UTIMER).  Bindings under

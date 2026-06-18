@@ -41,3 +41,19 @@ patches:
             land the (a) enable and hold (b) if the divider regresses.
       Drop both once an Alif upstream clockctrl carries the master-source enable
       and a real I2S .set_rate.
+  - path: zephyr/0002-ipm-add-poll-out-poll-in.patch
+    sha256sum: 2412e7f6bcdbed10433cb7421be4166d75adadc31315f1423dde543fa99ecf9c
+    module: zephyr
+    author: Alp Lab AB
+    email: dev@alplab.example
+    date: 2026-06-18
+    upstreamable: true
+    comments: |
+      hal_alif's SE client (se_services/zephyr/src/se_service.c) calls
+      ipm_poll_out()/ipm_poll_in() on its pre-scheduler path, and the Alif
+      arm,mhuv2 IPM driver assigns .poll_out/.poll_in. Both are a zephyr_alif
+      FORK extension to Zephyr's IPM API; upstream v4.4 ipm.h lacks the two
+      ipm_driver_api fields + the matching syscalls, so the SE transport will
+      not compile without them. Add ipm_poll_out/ipm_poll_in (struct fields +
+      __syscall wrappers, returning -ENOSYS when the op is NULL). Pure additive
+      API extension; drop once the Zephyr IPM pin gains a polling API.
