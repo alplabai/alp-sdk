@@ -119,8 +119,7 @@ int main(void)
 
 	/* 4. read again, then re-mask cleanly. */
 	out1 = comparator_get_output(cmp);
-	printk("comparator_get_output() #2 = %d  (callbacks seen=%u)\n",
-	       out1, cb_count);
+	printk("comparator_get_output() #2 = %d  (callbacks seen=%u)\n", out1, cb_count);
 	if (out1 < 0) {
 		printk("RESULT FAIL: get_output #2 returned -errno %d\n", out1);
 		return 0;
@@ -140,7 +139,8 @@ int main(void)
 	printk("RESULT PASS: comparator_alif drove HSCMP cmp0 via the portable "
 	       "comparator_* API (out=%d/%d, internal DAC6 reference, "
 	       "external pin/threshold = bench TBD)\n",
-	       out0, out1);
+	       out0,
+	       out1);
 
 	return 0;
 }

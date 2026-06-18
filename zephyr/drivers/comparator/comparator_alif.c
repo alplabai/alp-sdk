@@ -74,13 +74,13 @@ LOG_MODULE_REGISTER(CMP, CONFIG_COMPARATOR_LOG_LEVEL);
  * HSCMP register offsets, transcribed (offset VALUES only) from the Alif DFP
  * CMP_Type (alif-dfp Device/soc/AE822FA0E5597/include/rtss_he/soc.h:2488).
  */
-#define CMP_COMP_REG1        0x00U /* CMP control register 1 (config + enable) */
-#define CMP_COMP_REG2        0x04U /* CMP control register 2; on AE822 (aliasing) NOT the DAC6 ref */
-#define CMP_POLARITY_CTRL    0x08U /* polarity control (invert result)         */
-#define CMP_WINDOW_CTRL      0x0CU /* window (gating) control                  */
-#define CMP_FILTER_CTRL      0x10U /* filter-tap control                       */
-#define CMP_PRESCALER_CTRL   0x14U /* filter prescaler                         */
-#define CMP_STATUS           0x18U /* status (CMP_VALUE output bit)            */
+#define CMP_COMP_REG1      0x00U /* CMP control register 1 (config + enable) */
+#define CMP_COMP_REG2      0x04U /* CMP control register 2; on AE822 (aliasing) NOT the DAC6 ref */
+#define CMP_POLARITY_CTRL  0x08U /* polarity control (invert result)         */
+#define CMP_WINDOW_CTRL    0x0CU /* window (gating) control                  */
+#define CMP_FILTER_CTRL    0x10U /* filter-tap control                       */
+#define CMP_PRESCALER_CTRL 0x14U /* filter prescaler                         */
+#define CMP_STATUS         0x18U /* status (CMP_VALUE output bit)            */
 #define CMP_INTERRUPT_STATUS 0x20U /* interrupt status + clear                 */
 #define CMP_INTERRUPT_MASK   0x24U /* interrupt mask                           */
 
