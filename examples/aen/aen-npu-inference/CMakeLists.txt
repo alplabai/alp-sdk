@@ -19,6 +19,13 @@
 #
 # The model-gen step (gen_model.py) runs vela from .venv-vela and writes
 # model.h into the build tree, so the source tree carries no generated blob.
+#
+# LICENSING (alp-sdk doctrine): the Alif Vela system-config (ensemble_vela.ini)
+# is ALIF PROPRIETARY and is NOT vendored / redistributed by alp-sdk.  It is
+# injected at build time from alp-sdk-internal via -DAEN_NPU_VELA_CONFIG=<path>
+# (default empty -> Vela's built-in system-config, which does NOT match the
+# bench-validated E8 RTSS-HE runtime).  See aen-npu-inference-alif for the
+# matched-runtime variant whose strong remap/config-select fixes ethosu_invoke=1.
 
 cmake_minimum_required(VERSION 3.20.0)
 
@@ -41,21 +48,41 @@ set(AEN_NPU_MODEL  "${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/fixtures/models/t
 set(AEN_NPU_MODEL_NAME "tiny_int8_fixture"
     CACHE STRING   "Embedded model identity string")
 
+# ALIF PROPRIETARY Vela config -- NOT redistributed by alp-sdk.  Obtain it from
+# alp-sdk-internal and pass it via -DAEN_NPU_VELA_CONFIG=<path>/ensemble_vela.ini.
+# When unset, Vela uses its built-in system-config (does NOT match the bench).
+set(AEN_NPU_VELA_CONFIG ""
+    CACHE FILEPATH "Path to the Alif Vela config .ini (ALIF PROPRIETARY -- from alp-sdk-internal)")
+if(NOT AEN_NPU_VELA_CONFIG)
+	message(WARNING
+		"aen-npu-inference: AEN_NPU_VELA_CONFIG unset -- Vela will use its built-in "
+		"system-config and the emitted command stream will NOT match the "
+		"bench-validated E8 runtime.  Pass -DAEN_NPU_VELA_CONFIG=<alp-sdk-internal>/ensemble_vela.ini.")
+endif()
+
 set(AEN_NPU_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/model-gen")
 set(AEN_NPU_MODEL_H "${AEN_NPU_GEN_DIR}/model.h")
+
+# Common gen_model.py args (the Vela --config is appended only when the
+# Alif-proprietary .ini is supplied, so an unset config omits the flag).
+set(_gen_args
+	--vela       ${AEN_NPU_VELA}
+	--accel      ${AEN_NPU_ACCEL}
+	--model      ${AEN_NPU_MODEL}
+	--name       ${AEN_NPU_MODEL_NAME}
+	--build-dir  ${AEN_NPU_GEN_DIR}
+	--out        ${AEN_NPU_MODEL_H}
+)
+if(AEN_NPU_VELA_CONFIG)
+	list(APPEND _gen_args --config ${AEN_NPU_VELA_CONFIG})
+endif()
 
 # Run at configure time so the header exists before the first compile, and
 # again as a build rule so editing the input model / gen script re-runs it.
 add_custom_command(
 	OUTPUT  ${AEN_NPU_MODEL_H}
 	COMMAND ${CMAKE_COMMAND} -E make_directory ${AEN_NPU_GEN_DIR}
-	COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gen_model.py
-	        --vela       ${AEN_NPU_VELA}
-	        --accel      ${AEN_NPU_ACCEL}
-	        --model      ${AEN_NPU_MODEL}
-	        --name       ${AEN_NPU_MODEL_NAME}
-	        --build-dir  ${AEN_NPU_GEN_DIR}
-	        --out        ${AEN_NPU_MODEL_H}
+	COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gen_model.py ${_gen_args}
 	DEPENDS ${AEN_NPU_MODEL} ${CMAKE_CURRENT_SOURCE_DIR}/gen_model.py
 	COMMENT "aen-npu-inference: Vela-compiling ${AEN_NPU_MODEL} for ${AEN_NPU_ACCEL}"
 	VERBATIM
@@ -65,10 +92,7 @@ add_custom_command(
 if(NOT EXISTS ${AEN_NPU_MODEL_H})
 	execute_process(
 		COMMAND ${CMAKE_COMMAND} -E make_directory ${AEN_NPU_GEN_DIR}
-		COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gen_model.py
-		        --vela ${AEN_NPU_VELA} --accel ${AEN_NPU_ACCEL}
-		        --model ${AEN_NPU_MODEL} --name ${AEN_NPU_MODEL_NAME}
-		        --build-dir ${AEN_NPU_GEN_DIR} --out ${AEN_NPU_MODEL_H}
+		COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gen_model.py ${_gen_args}
 		RESULT_VARIABLE _gen_rc
 	)
 	if(NOT _gen_rc EQUAL 0)
