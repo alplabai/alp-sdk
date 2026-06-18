@@ -1,0 +1,67 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-can-regcheck board overlay for the E1M-AEN801 (Ensemble E8, M55-HE).
+ *
+ * Enables the CAN-FD controller (cast,can, CANFD0 @0x49036000) that the E8 SoC
+ * overlay (zephyr/dts/alif/ensemble_e8_peripherals.dtsi) declares status=disabled,
+ * binds the alp_can0 portable alias to it, and supplies the pinctrl_can0 pad group.
+ *
+ * PIN ROUTING (E1M-AEN801 SoM, metadata/e1m_modules/aen/from-alif.tsv):
+ *   - CAN0_TX / CAN0H -> CAN_TXD_B on P0_5  (tsv row B18; PIN_P0_5__CAN_TXD_B, fn6)
+ *   - CAN0_RX / CAN0L -> CAN_RXD_B on P0_4  (tsv row B19; PIN_P0_4__CAN_RXD_B, fn6)
+ *
+ *   FLAG -- CAN_STBY pad/mux CONFLICT.  TXD/RXD use the *_B* mux (bank P0), but
+ *   from-alif.tsv routes the transceiver standby on CAN_STBY_A = P7_3 (tsv row
+ *   A19: "CAN_STBY / CAN_STBY_A / P7_3"), NOT the _B-bank CAN_STBY_B = P0_6.  So
+ *   STBY is on a DIFFERENT pad+mux family than RXD/TXD.  The cast,can driver does
+ *   NOT drive STBY via pinctrl (it has no STBY pad in its group on the fork EVK);
+ *   it toggles transceiver standby through the controller's own TCMD.STBY bit,
+ *   and the physical STBY pin is wired to the transceiver on the SoM.  We
+ *   therefore mux ONLY RXD_B + TXD_B here (the controller-driven pins) and leave
+ *   the STBY pad to the SoM/transceiver routing.  If a future bench bring-up needs
+ *   the M55 to drive STBY as a GPIO, add P7_3 (CAN_STBY_A) as a separate GPIO --
+ *   NOT into this CAN pad group.  BENCH-UNVERIFIED.
+ */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	/*
+	 * MANDATORY bench RAM-run retarget (Flow C): run from ITCM so J-Link can
+	 * loadbin+run without programming MRAM, and drop the MCUboot code-partition
+	 * fixup.  Same setup as the sibling *-regcheck examples.
+	 */
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		/* The portable <alp/can.h> backend (src/backends/can/zephyr_drv.c)
+		 * resolves bus 0 via DT_ALIAS(alp_can0). */
+		alp-can0 = &can0;
+	};
+};
+
+&pinctrl {
+	pinctrl_can0: pinctrl_can0 {
+		group0 {
+			pinmux = <PIN_P0_4__CAN_RXD_B>;
+			input-enable; /* RX pad: set the input buffer (REN bit) so the controller senses the bus */
+		};
+		group1 {
+			pinmux = <PIN_P0_5__CAN_TXD_B>;
+		};
+	};
+};
+
+&can0 {
+	pinctrl-0     = <&pinctrl_can0>;
+	pinctrl-names = "default";
+	status        = "okay";
+};
