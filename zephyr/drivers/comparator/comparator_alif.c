@@ -26,7 +26,12 @@
  *       CMP_STATUS.CMP_VALUE bit 0): alif-dfp Debug/SVD CMP block.
  *   - clock-gate + VREF / DAC6 internal-reference helpers:
  *       hal_alif drivers/analog/include/analog_ctrl.h (pulled in by
- *       CONFIG_USE_ALIF_HAL_ANALOG, shared with adc_alif/dac_alif).
+ *       CONFIG_USE_ALIF_HAL_ANALOG, shared with adc_alif/dac_alif).  AE822 is
+ *       aliasing-mode silicon (SOC_FEAT_HSCMP_REG_ALIASING=1), so the DAC6
+ *       internal reference uses the SEPARATE DAC6 / ADC_VREF register blocks
+ *       (the *_alias_mode helper), not CMP_COMP_REG2 -- and the CMP clock is
+ *       ungated FIRST, before any CMP/DAC6/ADC_VREF register access (the fork's
+ *       CMP_PowerControl order; both were init-fault root causes, see init).
  *
  * The v4.4 comparator class call sequence (set_trigger / set_trigger_callback /
  * get_output / trigger_is_pending) mirrors the sdk-alif reference sample
@@ -60,7 +65,7 @@ LOG_MODULE_REGISTER(CMP, CONFIG_COMPARATOR_LOG_LEVEL);
  * CMP_Type (alif-dfp Device/soc/AE822FA0E5597/include/rtss_he/soc.h:2488).
  */
 #define CMP_COMP_REG1        0x00U /* CMP control register 1 (config + enable) */
-#define CMP_COMP_REG2        0x04U /* CMP control register 2 (DAC6 / VREF)     */
+#define CMP_COMP_REG2        0x04U /* CMP control register 2; on AE822 (aliasing) NOT the DAC6 ref */
 #define CMP_POLARITY_CTRL    0x08U /* polarity control (invert result)         */
 #define CMP_WINDOW_CTRL      0x0CU /* window (gating) control                  */
 #define CMP_FILTER_CTRL      0x10U /* filter-tap control                       */
@@ -257,15 +262,18 @@ static int cmp_alif_init(const struct device *dev)
 {
 	const struct cmp_alif_config *config = dev->config;
 	struct cmp_alif_data         *data   = dev->data;
-	uintptr_t                     base, cfg_base;
+	uintptr_t                     base;
 	uint32_t                      reg1;
 	int                           err;
 
+	/* Map both reg windows.  config_reg (the CMP0 config block) is mapped to
+	 * keep the named-MMIO RAM/ROM slots consistent, but on AE822 it is NOT the
+	 * DAC6 reference register (see step 2) -- the internal reference is the
+	 * separate DAC6 / ADC_VREF blocks, so config_reg is unused at runtime. */
 	DEVICE_MMIO_NAMED_MAP(dev, cmp_reg, K_MEM_CACHE_NONE);
 	DEVICE_MMIO_NAMED_MAP(dev, config_reg, K_MEM_CACHE_NONE);
 
-	base     = cmp_base(dev);
-	cfg_base = DEVICE_MMIO_NAMED_GET(dev, config_reg);
+	base = cmp_base(dev);
 
 	/* Mux the comparator input pads if the node carries a pinctrl group
 	 * (the internal-reference smoke leaves it off). */
@@ -277,22 +285,39 @@ static int cmp_alif_init(const struct device *dev)
 		}
 	}
 
-	/* 1. Enable the analog LDO + precision bandgap (VBAT_ANA_REG2) and the
-	 *    CMP peripheral clock (CLKCTRL_PER_SLV->CMP_CTRL bit 0).  Same helper
-	 *    sequence adc_alif/dac_alif use; addresses from soc_common.h. */
+	/* 1. UNGATE THE CMP PERIPHERAL CLOCK FIRST.  The CMP / DAC6 / ADC_VREF
+	 *    register blocks (all in the 0x4902_xxxx Expansion-Slave region) are
+	 *    clock-gated out of reset; touching any of them before the clock is
+	 *    ungated faults.  The fork ungates the clock as its very first action
+	 *    (alif-dfp Alif_CMSIS/Source/Driver_CMP.c:170 CMP_PowerControl ->
+	 *    enable_cmp_clk(), BEFORE AnalogConfig() and any CMP register write),
+	 *    so we do the same here -- BEFORE the DAC6 / CMP register writes below.
+	 *    CLKCTRL_PER_SLV->CMP_CTRL bit 0 = CMP0 clock (analog_ctrl.h:84
+	 *    CMP_CTRL_CMP0_CLKEN (1U<<0); in AE822 aliasing mode each instance has
+	 *    its own bit, bit0=CMP0 -- alif-dfp drivers/include/sys_ctrl_cmp.h:37).
+	 *    Then enable the analog LDO + precision bandgap (VBAT_ANA_REG2).
+	 *    Addresses from soc_common.h; same helper library adc_alif/dac_alif use. */
 	unsigned int key = irq_lock();
 
-	enable_analog_peripherals((uintptr_t)ANA_VBAT_REG2);
 	enable_analog_periph_clk((uintptr_t)CLKCTRL_PER_SLV_CMP_CTRL);
+	enable_analog_peripherals((uintptr_t)ANA_VBAT_REG2);
 
 	irq_unlock(key);
 
 	/* 2. If the negative input is the on-chip DAC6 programmable reference,
 	 *    turn DAC6 on so the comparator has an INTERNAL reference -- no
-	 *    external pad needed.  enable_dac6_ref_voltage() programs DAC6 in the
-	 *    CMP control block (CMP_COMP_REG2). */
+	 *    external pad needed.  On AE822 (SOC_FEAT_HSCMP_REG_ALIASING=1) DAC6
+	 *    and the ADC VREF buffer are SEPARATE register blocks (0x4902A000 /
+	 *    0x4902B000), NOT CMP_COMP_REG2 -- the fork's aliasing-mode path writes
+	 *    ADC_VREF_REG |= ADC_VREF_BUF_EN then DAC6_REG |= DAC6_REF_VAL
+	 *    (alif-dfp drivers/include/sys_ctrl_analog.h:84-88, the
+	 *    SOC_FEAT_HSCMP_REG_ALIASING branch).  Use the matching hal_alif helper
+	 *    enable_dac6_ref_voltage_alias_mode(adc_vref_base, dac6_reg)
+	 *    (analog_ctrl.h:139); the previous enable_dac6_ref_voltage(cfg_base +
+	 *    CMP_COMP_REG2) is the NON-aliasing path and wrote the wrong block on
+	 *    AE822. */
 	if (config->in_m_sel == CMP_IN_M_SEL_DAC6) {
-		enable_dac6_ref_voltage(cfg_base + CMP_COMP_REG2);
+		enable_dac6_ref_voltage_alias_mode((uintptr_t)ADC_VREF_REG, (uintptr_t)DAC6_REG);
 	}
 
 	/* 3. Polarity (invert result) -- CMP_POLARITY_CTRL. */

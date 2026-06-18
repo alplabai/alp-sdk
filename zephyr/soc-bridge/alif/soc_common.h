@@ -56,6 +56,21 @@
 #define CLKCTRL_PER_SLV_OSPI_CTRL                (CLKCTRL_PER_SLV_BASE + 0x3C)
 #define CLKCTRL_PER_SLV_GPIO_CTRLn               (CLKCTRL_PER_SLV_BASE + 0x80)
 
+/*
+ * HSCMP internal-reference blocks.  On AE822 (SOC_FEAT_HSCMP_REG_ALIASING=1,
+ * alif-dfp Device/soc/AE822FA0E5597/include/soc_features.h:106) the DAC6
+ * programmable reference and the ADC VREF buffer are SEPARATE single-register
+ * blocks (not CMP_COMP_REG2) -- the HSCMP DAC6-reference path writes those,
+ * not the CMP block.  Bases transcribed from
+ * alif-dfp Device/soc/AE822FA0E5597/include/rtss_he/soc.h:3744-3745
+ * (DAC6_BASE 0x4902A000 / ADC_VREF_BASE 0x4902B000); each holds one register at
+ * offset 0x00 (soc.h:2528 DAC6_REG / soc.h:2542 ADC_VREF_REG).
+ */
+#define DAC6_BASE                                0x4902A000
+#define DAC6_REG                                 (DAC6_BASE)
+#define ADC_VREF_BASE                            0x4902B000
+#define ADC_VREF_REG                             (ADC_VREF_BASE)
+
 #define EVTRTR0_BASE                             0x49035000
 #define EVTRTR0_DMA_CTRL0                        (EVTRTR0_BASE)
 #define EVTRTR0_DMA_REQ_CTRL                     (EVTRTR0_BASE + 0x80)
