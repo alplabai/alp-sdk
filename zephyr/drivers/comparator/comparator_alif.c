@@ -138,6 +138,11 @@ struct cmp_alif_data {
 	enum comparator_trigger trigger;
 };
 
+/* DEVICE_MMIO_NAMED_* expand through DEV_CFG()/DEV_DATA(); the driver must
+ * provide them (Zephyr device_mmio.h does not auto-define them). */
+#define DEV_CFG(dev)  ((const struct cmp_alif_config *)((dev)->config))
+#define DEV_DATA(dev) ((struct cmp_alif_data *)((dev)->data))
+
 static inline uintptr_t cmp_base(const struct device *dev)
 {
 	return DEVICE_MMIO_NAMED_GET(dev, cmp_reg);
