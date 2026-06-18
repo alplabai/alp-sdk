@@ -1,0 +1,107 @@
+# Copyright (c) 2025 Alif Semiconductor
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Alif Ensemble analog comparator (HSCMP / LPCMP).  The compatible string and the
+# driver_instance / positive_input / negative_input / hysteresis_level property
+# names + enums are transcribed VERBATIM from the Apache-2.0 zephyr_alif fork
+# binding (dts/bindings/comparator/alif,cmp.yaml).  Binds the alp-sdk Tier-2
+# comparator_alif.c driver (zephyr/drivers/comparator/comparator_alif.c), which
+# implements the upstream Zephyr v4.4 comparator class API
+# (<zephyr/drivers/comparator.h>).
+#
+# This binding intentionally OMITS the fork's `clocks` / `cmp-gpios` properties:
+# the alp-sdk build gates the CMP clock through the hal_alif analog_ctrl helper
+# (CLKCTRL_PER_SLV->CMP_CTRL bit 0), not a DT clock phandle -- the fork's
+# ALIF_CMP*_CLK packed values are 7-arg encodings that MUST NOT be copied onto
+# the upstream alif,clockctrl (see reference_alif_clock_encoding_fork_vs_upstream).
+# A board that wires the comparator output to a GPIO can add cmp-gpios in its own
+# overlay; the internal-reference regcheck does not need it.
+
+description: Alif Ensemble analog comparator (HSCMP / LPCMP)
+
+compatible: "alif,cmp"
+
+include: [base.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  driver_instance:
+    type: string
+    required: true
+    description: Selects the comparator hardware instance.
+    enum:
+      - "CMP_INSTANCE_LP"
+      - "CMP_INSTANCE_0"
+      - "CMP_INSTANCE_1"
+      - "CMP_INSTANCE_2"
+      - "CMP_INSTANCE_3"
+
+  positive_input:
+    type: string
+    required: true
+    description: |
+      Select the input routed to the positive terminal of the comparator
+      (COMP_HS_IN_P_SEL, CMP_COMP_REG1 bits [1:0]).  CMP_POS_IN0..IN3 select the
+      CMPx_IN0..IN3 analog pads.
+    enum:
+      - "CMP_POS_IN0"
+      - "CMP_POS_IN1"
+      - "CMP_POS_IN2"
+      - "CMP_POS_IN3"
+
+  negative_input:
+    type: string
+    required: true
+    description: |
+      Select the input routed to the negative terminal of the comparator
+      (COMP_HS_IN_M_SEL, CMP_COMP_REG1 bits [3:2]).  CMP_NEG_IN0 = VREF_IN0 pin,
+      CMP_NEG_IN1 = VREF_IN1 pin, CMP_NEG_IN2 = internal Vref, CMP_NEG_IN3 = the
+      on-chip DAC6 programmable reference (the internal-reference path -- no
+      external wiring needed).
+    enum:
+      - "CMP_NEG_IN0"
+      - "CMP_NEG_IN1"
+      - "CMP_NEG_IN2"
+      - "CMP_NEG_IN3"
+
+  hysteresis_level:
+    type: string
+    required: true
+    description: |
+      Comparator hysteresis level (COMP_HS_HYST, CMP_COMP_REG1 bits [6:4]); 6 mV
+      per step.
+    enum:
+      - "0mV"
+      - "6mV"
+      - "12mV"
+      - "18mV"
+      - "24mV"
+      - "30mV"
+      - "36mV"
+      - "42mV"
+
+  polarity_en:
+    type: boolean
+    description: Invert the comparator result (CMP_POLARITY_CTRL).
+
+  prescaler:
+    type: int
+    description: |
+      Comparator filter prescaler -- number of clocks between filter-tap updates
+      (CMP_PRESCALER_CTRL).  Max 0x3F.
+
+  filter_taps:
+    type: int
+    description: |
+      Number of comparator filter taps, 2..8 (CMP_FILTER_CTRL).  Enabling the
+      filter also sets CMP_FILTER_CONTROL_ENABLE (bit 0).
+
+  cmp-gpios:
+    type: phandle-array
+    description: |
+      Optional GPIO(s) the comparator output is routed to on a board.  Carried
+      for parity with the fork binding; the internal-reference regcheck does not
+      use it.
