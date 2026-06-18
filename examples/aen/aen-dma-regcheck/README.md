@@ -108,7 +108,7 @@ RESULT PASS: PL330 DMA WORKS -- dma2 binds to arm,dma-pl330 at 0x400c0000 ...
 
 ## Bench status (E8, RAM-run, 2026-06-18)
 
-PARTIAL. Two real on-silicon findings:
+Three on-silicon findings; #1 + #2 led to the #3 fix (bench re-verify pending):
 
 1. **DMA2 is the M55-core-LOCAL DMA and its peripheral clock is gated off at
    reset.** Any access to the PL330 register block bus-faults (precise data bus
@@ -119,20 +119,32 @@ PARTIAL. Two real on-silicon findings:
    return 0 with no fault. The secure base `0x400C0000` is correct (the M55-HE
    boots secure on the RAM-run; the non-secure alias `0x400E0000` bus-faults the
    same way without the clock).
-2. **The M2M copy does not yet land** (`memcmp_match=0`). The PL330 fault
-   registers are all clean (FSRD/FSRC/FTR0 = 0 — no manager or channel fault),
-   but channel-0 is STOPPED with `SA0=DA0=CPC0=0`: the channel was never
-   programmed. The upstream polling driver launches the channel over the debug
-   interface (DMAGO → generated microcode at `0x023FE000`); that launch returns
-   cleanly but does not execute the transfer. **Open follow-up:** debug the
-   PL330 DMAGO/microcode-fetch launch (manager-secure vs channel-NS DMAGO bit,
-   microcode reachability) — task #21.
+2. **The M2M copy did not land with the clock-only prelude** (`memcmp_match=0`).
+   The PL330 fault registers were all clean (FSRD/FSRC/FTR0 = 0 — no manager or
+   channel fault), but channel-0 was STOPPED with `SA0=DA0=CPC0=0`: the channel
+   was never programmed. The upstream polling driver launches the channel with a
+   *secure* DMAGO over the debug interface (DBGINST0 `ns` bit clear, since
+   `nonsec_mode == 0`); that launch returned cleanly but the channel thread never
+   started.
+3. **Root cause + fix: the PL330 boot-manager security was never latched.** The
+   manager samples its boot security pins (`boot_manager_ns` / `boot_irq_ns[]` /
+   `boot_peripheral_ns[]`) **only out of reset**, from
+   `M55_CFG_Common.DMA_CTRL[0]` / `DMA_IRQ` / `DMA_PERIPH`. The upstream driver
+   never touches that system-control block, so a secure DMAGO requesting a
+   security state the manager had not booted into was treated as **DMANOP** (ARM
+   DMA-330 TRM) — accepted with no fault, channel never starts (exactly the #2
+   signature). `main.c` now mirrors the DFP `Driver_DMA.c` `DMA_INSTANCE_LOCAL`
+   power-up: after the clock it writes `DMA_CTRL` secure-manager (`&= ~BIT(0)`),
+   `DMA_IRQ = 0`, `DMA_PERIPH = 0`, then pulses `DMA_CTRL |= SW_RST (BIT16)` so
+   the manager re-boots into the secure domain and honours the secure DMAGO. All
+   reg/bit values transcribed from the DFP (`sys_ctrl_dma.h`,
+   `rtss_he/core_defines.h`, AE822 `RTE_Device.h`). **Bench re-verify pending.**
 
 ## Notes / caveats
 
 - The node + transfer are authored against the pinned Zephyr 4.4 PL330 driver
   and the DFP addresses. The clock-enable + secure base are bench-verified; the
-  channel launch is the open item above.
+  secure-boot-manager latch (finding #3) is the fix awaiting bench re-verify.
 - The `microcode` carve-out address (`0x023FE000`) and the SRAM0 shrink are an
   alp-sdk layout choice (top 8 KiB of the 4 MiB bank), not a DFP-fixed address.
 - The user-microcode helper API from the sdk-alif `dma_user_mcode` sample
