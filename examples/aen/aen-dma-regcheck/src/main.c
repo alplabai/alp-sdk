@@ -54,6 +54,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/dma.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/sys/sys_io.h>
 
 /* The PL330 controller node + the alp portable alias that must point at it. */
 #define DMA_NODE  DT_NODELABEL(dma2)
@@ -97,6 +98,28 @@ static uint8_t dst_buf[XFER_LEN] __attribute__((section("SRAM0")));
 int main(void)
 {
 	printk("\n=== aen-dma-regcheck ===\n");
+
+	/*
+	 * Alif E8 prelude: DMA2 is the M55-core-LOCAL DMA.  Its peripheral clock is
+	 * gated off at reset, so ANY access to the PL330 register block bus-faults
+	 * (precise data bus error at base+0xD00, DBGSTATUS) until the clock is
+	 * enabled.  The upstream arm,dma-pl330 driver is SoC-agnostic and knows
+	 * nothing about Alif clock gating, so we ungate it here (a clock-control
+	 * hook is the long-term home -- see TODO below).  Clean-room values from the
+	 * Alif DFP (proprietary; values transcribed, not the source):
+	 *   M55HE_CFG_BASE   0x43007000  -- DFP rtss_he/soc.h
+	 *   CLK_ENA          +0x10       -- DFP M55_CFG_Common_Type (core_defines.h)
+	 *   CLK_ENA_DMA_CKEN BIT(4)      -- DFP drivers/include/sys_ctrl_dma.h
+	 * DMA_CTRL.BOOT_MANAGER (BIT0 @ +0x00) is left 0 = secure, matching the
+	 * secure DMA2 base 0x400C0000 the M55-HE uses on the secure RAM-run.
+	 *
+	 * TODO(#21): fold this into the Tier-1.5 clockctrl so the device is clocked
+	 * by its DT `clocks` phandle instead of an app-level poke.
+	 */
+#define M55HE_CFG_CLK_ENA 0x43007010U
+#define CLK_ENA_DMA_CKEN  BIT(4)
+	sys_write32(sys_read32(M55HE_CFG_CLK_ENA) | CLK_ENA_DMA_CKEN, M55HE_CFG_CLK_ENA);
+	printk("prelude: enabled DMA2 local periph clock (M55HE_CFG.CLK_ENA |= BIT(4))\n");
 
 	/*
 	 * Step 1+2: report the node's binding + reg base + channel count.  These are
@@ -183,6 +206,27 @@ int main(void)
 	       rc_start,
 	       (int)xfer_ok,
 	       XFER_LEN);
+
+	/*
+	 * Diagnostic: dump the PL330 manager + channel-0 status after the transfer.
+	 * Standard ARM PL330 (DMA-330) register offsets (ARM DDI 0424 TRM):
+	 *   DSR  +0x000 manager status   DPC  +0x004 manager PC
+	 *   FSRD +0x030 fault-status mgr  FSRC +0x034 fault-status chan (bit n = chan n)
+	 *   FTRD +0x038 fault-type  mgr   FTR0 +0x040 fault-type  chan0
+	 *   CS0  +0x100 chan0 status (bits[3:0] state: 0=STOP 1=EXEC 7=WFE Eh=FAULTING Fh=FLT_COMPLETING)
+	 *   CPC0 +0x104 chan0 PC          SA0  +0x400 src addr     DA0 +0x404 dst addr
+	 * A faulting channel (CS0[3:0]=Eh/Fh, FSRC bit0=1) explains a clean dma_start
+	 * return with no bytes moved: the upstream polling driver treats "not running"
+	 * as done. CPC0 + FTR0 localize WHERE/WHY it stopped.
+	 */
+	const uint32_t pl330 = DMA_BASE_EXPECTED;
+
+	printk("pl330 : DSR=%08x DPC=%08x FSRD=%08x FSRC=%08x FTRD=%08x FTR0=%08x\n",
+	       sys_read32(pl330 + 0x000), sys_read32(pl330 + 0x004), sys_read32(pl330 + 0x030),
+	       sys_read32(pl330 + 0x034), sys_read32(pl330 + 0x038), sys_read32(pl330 + 0x040));
+	printk("pl330 : CS0=%08x CPC0=%08x SA0=%08x DA0=%08x\n",
+	       sys_read32(pl330 + 0x100), sys_read32(pl330 + 0x104), sys_read32(pl330 + 0x400),
+	       sys_read32(pl330 + 0x404));
 
 	/*
 	 * PASS gate: the PL330 BINDS (dma2 -> arm,dma-pl330 at 0x400C0000 with 8
