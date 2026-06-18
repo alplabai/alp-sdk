@@ -16,10 +16,21 @@ checked) and over J-Link (`mem32 0x49023018`, the `CMP_STATUS` register).
 The comparator's **negative input** is set, in the SoC dtsi node, to the
 on-chip **DAC6 programmable reference** (`negative_input = "CMP_NEG_IN3"`
 -> `COMP_HS_IN_M_SEL = 0x3 = DAC6`). The driver enables DAC6 through the
-hal_alif `analog_ctrl` helper (`enable_dac6_ref_voltage()`), so the minus
-terminal carries a known **internal** reference (~0.9 V) with **no bench
-wiring**. The smoke then drives the comparator through the portable API
-and confirms every call returns a valid, non-error result.
+hal_alif `analog_ctrl` helper -- on AE822 (aliasing-mode silicon) via
+`enable_dac6_ref_voltage_alias_mode()` against the separate DAC6 / ADC_VREF
+blocks -- so the minus terminal carries a known **internal** reference
+(~0.9 V) with **no bench wiring**. The smoke then drives the comparator
+through the portable API and confirms every call returns a valid,
+non-error result.
+
+The comparator's NVIC line is connected (`IRQ_CONNECT`) at device init but
+**not enabled** there: the HSCMP analog core is live the moment it is
+enabled, so an already-asserted event on a floating/unbiased input would
+self-retrigger an ISR storm if the line were enabled before a trigger is
+armed -- which previously hung POST_KERNEL init (no boot banner). The
+driver now enables the NVIC line only inside `comparator_set_trigger()`
+(for a non-`NONE` trigger) and disables it on `NONE`, mirroring the
+upstream `comparator_stm32_comp.c` convention.
 
 The **output level** is **not** asserted: the positive input is the
 `CMP0_IN0` analog pad, which is **unrouted** on this bench, so its voltage
@@ -60,7 +71,8 @@ internal DAC6 reference, which is exactly what this regcheck does.
 | `CMP_STATUS.CMP_VALUE` (output bit) | bit `0` | alif-dfp Debug/SVD `CMP_STATUS` |
 | `CMP_INTERRUPT_MASK`/`_STATUS` offsets | `+0x24` / `+0x20` | alif-dfp `CMP_Type`; mask=`0`=enabled, status write `0x01`=clear (`drivers/include/cmp.h`) |
 | CMP clock-gate | `CLKCTRL_PER_SLV->CMP_CTRL` (`0x4902F038`) bit 0 | `zephyr/soc-bridge/alif/soc_common.h:55` + alif-dfp `sys_ctrl_cmp.h` `CMP_CTRL_CMP0_CLKEN (1U<<0)` |
-| DAC6 internal ref / analog LDO | `enable_dac6_ref_voltage()` / `enable_analog_peripherals()` | hal_alif `drivers/analog/include/analog_ctrl.h` |
+| DAC6 internal ref (AE822 aliasing) / analog LDO | `enable_dac6_ref_voltage_alias_mode()` / `enable_analog_peripherals()` | hal_alif `drivers/analog/include/analog_ctrl.h`; aliasing branch `alif-dfp drivers/include/sys_ctrl_analog.h` |
+| NVIC line gating | `IRQ_CONNECT` at init, `irq_enable`/`irq_disable` in `set_trigger` | `zephyr/drivers/comparator/comparator_alif.c`; convention from upstream `comparator_stm32_comp.c` |
 | Class API | `comparator_get_output/set_trigger/...` | upstream Zephyr v4.4 `<zephyr/drivers/comparator.h>` |
 | Driver tier | clean-room driver (hal_alif + the available fork ship no comparator `.c`) | `zephyr/drivers/comparator/comparator_alif.c` |
 

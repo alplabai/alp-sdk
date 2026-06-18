@@ -37,6 +37,16 @@
  * get_output / trigger_is_pending) mirrors the sdk-alif reference sample
  * (samples/drivers/cmp/src/main.c).
  *
+ * INIT-HANG ROOT CAUSE (fixed) -- unlike a one-shot peripheral (adc/dac), the
+ * HSCMP analog compare is CONTINUOUS and LIVE the instant the core is enabled,
+ * so its event line can already be asserted at init (more so with a floating /
+ * unbiased input).  The init MUST NOT irq_enable() the NVIC line: an already-
+ * asserted event self-retriggers the ISR (priority 0) into a storm that starves
+ * the boot thread, so POST_KERNEL never completes and the boot banner never
+ * prints (RAM console stays empty).  Init therefore only IRQ_CONNECT()s the ISR;
+ * the NVIC line is enabled inside set_trigger() for a non-NONE trigger and
+ * disabled on NONE -- the upstream comparator_stm32_comp.c order.
+ *
  * vendor-ext, BENCH-UNVERIFIED.  Builds + links on the E8 he target; the
  * threshold/edge behaviour is a bench follow-up.  ADR 0017 Tier-2 INTERIM:
  * retire onto the fork comparator driver once it is repointed AND bench-verified
@@ -126,6 +136,7 @@ struct cmp_alif_config {
 	DEVICE_MMIO_NAMED_ROM(config_reg); /* CMP0 config block (REG2 / DAC6) */
 	const struct pinctrl_dev_config *pcfg;
 	void (*irq_config_func)(const struct device *dev);
+	uint32_t irqn;        /* NVIC line, gated in set_trigger (NOT at init) */
 	uint32_t drv_inst;    /* enum cmp_drv_instance */
 	uint32_t in_p_sel;    /* 0..3  (positive_input enum idx) */
 	uint32_t in_m_sel;    /* 0..3  (negative_input enum idx) */
@@ -165,15 +176,26 @@ static int cmp_alif_get_output(const struct device *dev)
 
 static int cmp_alif_set_trigger(const struct device *dev, enum comparator_trigger trigger)
 {
-	struct cmp_alif_data *data = dev->data;
-	uintptr_t             base = cmp_base(dev);
+	const struct cmp_alif_config *config = dev->config;
+	struct cmp_alif_data         *data   = dev->data;
+	uintptr_t                     base   = cmp_base(dev);
 
 	data->trigger = trigger;
 
-	/* Clear any latched event, then mask/unmask the single CMP interrupt.
-	 * The HSCMP IP raises one line on a configured edge; edge-direction
-	 * discrimination (RISING vs FALLING vs BOTH) is done in software in the
-	 * ISR by re-reading CMP_STATUS.  NONE simply masks the line. */
+	/* Gate the NVIC line FIRST -- the HSCMP analog compare is LIVE the moment
+	 * the comparator is enabled, so its event line can already be asserted (an
+	 * unbiased/floating input toggles continuously).  Disabling the NVIC line
+	 * before re-arming prevents a self-retriggering ISR storm.  Mirrors the
+	 * upstream comparator_stm32_comp.c set_trigger order (irq_disable -> arm ->
+	 * irq_enable).  The NVIC line is left DISABLED out of init -- it is enabled
+	 * here, and only for a non-NONE trigger. */
+	irq_disable(config->irqn);
+
+	/* Clear any latched event, then mask/unmask the single CMP interrupt at the
+	 * IP level.  The HSCMP raises one line on a configured edge; edge-direction
+	 * discrimination (RISING vs FALLING vs BOTH) is done in software in the ISR
+	 * by re-reading CMP_STATUS.  NONE leaves both the IP mask and the NVIC line
+	 * disabled. */
 	sys_write32(CMP_INT_CLEAR_BIT, base + CMP_INTERRUPT_STATUS);
 
 	if (trigger == COMPARATOR_TRIGGER_NONE) {
@@ -181,6 +203,7 @@ static int cmp_alif_set_trigger(const struct device *dev, enum comparator_trigge
 	} else {
 		/* cmp.h: writing 0 to the mask register ENABLES the interrupt. */
 		sys_write32(0U, base + CMP_INTERRUPT_MASK);
+		irq_enable(config->irqn);
 	}
 
 	return 0;
@@ -338,7 +361,12 @@ static int cmp_alif_init(const struct device *dev)
 	       ((config->hyst << CMP_REG1_HYST_POS) & CMP_REG1_HYST_MSK) | CMP_REG1_HS_EN;
 	sys_write32(reg1, base + CMP_COMP_REG1);
 
-	/* 6. Start masked; set_trigger() unmasks.  Wire + enable the IRQ. */
+	/* 6. Start with the IP interrupt MASKED and the latched event CLEARED.  The
+	 *    comparator core is now live (HS_EN set above) so get_output() polling
+	 *    works, but it must NOT deliver an interrupt yet: set_trigger() arms it.
+	 *    Only CONNECT the ISR here; the NVIC line is enabled later in
+	 *    set_trigger() -- enabling it now, while an unbiased input is toggling
+	 *    the event line, would self-retrigger an ISR storm that hangs boot. */
 	sys_write32(CMP_INT_MASK_BIT, base + CMP_INTERRUPT_MASK);
 	sys_write32(CMP_INT_CLEAR_BIT, base + CMP_INTERRUPT_STATUS);
 
@@ -369,9 +397,13 @@ static int cmp_alif_init(const struct device *dev)
                                                                                                    \
 	static void cmp_alif_irq_config_##n(const struct device *dev)                                  \
 	{                                                                                              \
+		/* Connect the ISR but DO NOT irq_enable() here: the comparator is live      \
+		 * once enabled, so enabling the NVIC line at init -- before any trigger is   \
+		 * armed -- lets an already-asserted event self-retrigger into an ISR storm   \
+		 * (priority 0) that starves the boot thread, so the banner never prints.     \
+		 * The line is enabled in set_trigger() once a real trigger is armed.  */             \
 		IRQ_CONNECT(                                                                               \
 		    DT_INST_IRQN(n), DT_INST_IRQ(n, priority), cmp_alif_isr, DEVICE_DT_INST_GET(n), 0);    \
-		irq_enable(DT_INST_IRQN(n));                                                               \
 	}                                                                                              \
                                                                                                    \
 	static struct cmp_alif_data cmp_alif_data_##n;                                                 \
@@ -382,6 +414,7 @@ static int cmp_alif_init(const struct device *dev)
 		IF_ENABLED(DT_INST_NODE_HAS_PROP(n, pinctrl_0),                                            \
 		           (.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n), ))                                  \
 		    .irq_config_func = cmp_alif_irq_config_##n,                                            \
+		.irqn                = DT_INST_IRQN(n),                                                    \
 		.drv_inst            = DT_INST_ENUM_IDX(n, driver_instance),                               \
 		.in_p_sel            = DT_INST_ENUM_IDX(n, positive_input),                                \
 		.in_m_sel            = DT_INST_ENUM_IDX(n, negative_input),                                \
