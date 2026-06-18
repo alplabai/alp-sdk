@@ -226,6 +226,20 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dac/dac_alif.c)
 
+# Alif Ensemble CRC engine driver (compatible "alif,crc"), a CLEAN-ROOM in-tree
+# driver implementing the UPSTREAM Zephyr v4.4 CRC class API
+# (<zephyr/drivers/crc.h>: crc_begin/update/finish over struct crc_ctx).  NOT
+# vendored: the Apache-2.0 zephyr_alif fork's CRC driver targets a fork-private
+# API (crc_compute()/struct crc_params, CONFIG_CRC_DRV) that does not exist
+# upstream, so it cannot be consumed verbatim -- the register model is instead
+# re-authored value-only from the Alif DFP (drivers/include/crc.h + soc.h).
+# Polled, memory-mapped block: no hal_alif library, no private upstream context
+# header, so no extra include dir is needed.  Binding
+# zephyr/dts/bindings/crc/alif,crc.yaml; nodes in the E8 SoC overlay.
+# ADR 0017 Tier-1.5 (in-tree-thin over the silicon).
+zephyr_library_sources_ifdef(CONFIG_CRC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/crc/crc_alif.c)
+
 # Alif Ensemble LPPDM / PDM mic-capture class driver (compatible "alif,alif-pdm"),
 # vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/audio/alif_pdm.c).
 # Upstream Zephyr v4.4 + hal_alif ship no Alif PDM driver.  Pure CMSIS + Zephyr
