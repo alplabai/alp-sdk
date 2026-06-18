@@ -219,6 +219,9 @@ static int counter_alif_lptimer_cancel_alarm(const struct device *dev, uint8_t c
 
 	data->alarm_cb  = NULL;
 	data->user_data = NULL;
+	/* set_alarm() set data->running; clear it so a later start() is not
+	 * rejected as -EALREADY after the alarm is cancelled. */
+	data->running = false;
 	return 0;
 }
 

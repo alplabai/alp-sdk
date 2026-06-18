@@ -7,6 +7,12 @@
  *   a. Maximum Rx buf slots = 16
  *   b. Rx buf Almost full warning limit maximum = 15
  *   c. Maximum Tx buf slots = 16
+ *
+ * ====== ADR 0017 Tier-2 (vendored fork-driver copy, INTERIM) ======
+ * Verbatim copy of the Apache-2.0 sdk-alif/zephyr_alif CAST CAN-CTRL driver
+ * (compatible "cast,can"); no upstream Zephyr CAST driver exists. Retire onto
+ * the sdk-alif fork compatible once the AEN CANFD0 clock-rate is confirmed vs
+ * the TRM + bench-verified on a live bus. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  */
 
 #define DT_DRV_COMPAT cast_can

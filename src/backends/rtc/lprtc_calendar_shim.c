@@ -216,7 +216,10 @@ static alp_status_t shim_get_time(alp_rtc_backend_state_t *st, alp_rtc_time_t *t
 	/* Unsigned 32-bit wrap gives the true elapsed ticks across one CCVR wrap. */
 	uint32_t elapsed_ticks = now - s->tick_snapshot;
 	int64_t  elapsed_s     = (int64_t)elapsed_ticks / (int64_t)s->freq_hz;
-	uint32_t rem_ticks     = elapsed_ticks - (uint32_t)elapsed_s * s->freq_hz;
+	/* 64-bit intermediate: elapsed_s * freq_hz can exceed UINT32_MAX near the
+	 * one-CCVR-wrap boundary (129600 s * 32768 Hz > 4.2e9), so a 32-bit product
+	 * would wrap and corrupt rem_ticks. The remainder (< freq_hz) still fits u32. */
+	uint32_t rem_ticks = elapsed_ticks - (uint32_t)(elapsed_s * (int64_t)s->freq_hz);
 
 	int64_t unix_s = s->epoch_base + elapsed_s;
 	_unix_to_calendar(unix_s, t);

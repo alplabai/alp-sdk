@@ -202,6 +202,16 @@ size_t protocol_build_reply(const uint8_t *req_frame,
 		}
 	}
 
+	/* Defence-in-depth: a handler must never report more data than the reply
+	 * buffer holds, but if one did, (uint16_t)(1u + data_len) would TRUNCATE the
+	 * length silently and frame a corrupt reply.  Clamp + fail closed instead. */
+	const size_t reply_data_cap =
+	    (reply_cap > CC3501E_REPLY_DATA_OFF) ? (reply_cap - CC3501E_REPLY_DATA_OFF) : 0u;
+	if (data_len > reply_data_cap) {
+		data_len = 0u;
+		status   = ALP_CC3501E_RESP_ERR_NO_MEM;
+	}
+
 	/* Frame the reply: [cmd | flags=0 | payload_len(LE) | status | data].
      * flags = 0 -> solicited reply (async events set FLAG_ASYNC_EVENT in
      * v0.2+).  payload = status(1) + data. */
