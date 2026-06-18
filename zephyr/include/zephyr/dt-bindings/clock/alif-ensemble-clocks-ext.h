@@ -142,6 +142,24 @@
 #define ALIF_CSI_CLK      ALIF_CLK(2U)
 #define ALIF_CSI_DPHY_CLK ALIF_CLK(2U)
 
+/*
+ * DISPLAY (C2-MIPI-DSI) clocks (CDC200 DPI / MIPI-DSI host / shared D-PHY TX) --
+ * FREQUENCY-ONLY DUMMY PLACEHOLDERS, same rationale as the CAMERA clocks above.
+ * The fork drives these blocks with ALIF_DPI_CLK / ALIF_DSI_CLK /
+ * ALIF_CDC200_PIX_SYST_ACLK / ALIF_MIPI_TXDPHY_CLK in the fork's 7-arg encoding,
+ * which MUST NOT be copied onto the upstream clockctrl (wrong register block),
+ * and the upstream gate/offset/parent for the display clocks are a TRM/bench
+ * unknown -- NOT re-authored here.  These IDs use the dummy clock (ALIF_CLK,
+ * module 0 / en_mask 0 -> alif_clock_control_on() no-ops at the !EN_MASK guard),
+ * so the cdc200/mipi_dsi DT nodes are well-formed without inventing a register
+ * gate.  Re-author the real IDs when the display stack gets a driver + bench
+ * bring-up (task #21).  vendor-ext, BENCH-UNVERIFIED.
+ */
+#define ALIF_DPI_CLK              ALIF_CLK(2U)
+#define ALIF_DSI_CLK              ALIF_CLK(2U)
+#define ALIF_CDC200_PIX_SYST_ACLK ALIF_CLK(2U)
+#define ALIF_MIPI_TXDPHY_CLK      ALIF_CLK(2U)
+
 /* CAN-FD (CANFD0, cast,can @0x49036000) peripheral clock.  Re-authored from the
  * Alif DFP CMSIS sys_ctrl_canfd.h (the SOC_FEAT_CANFD0_CANFD1_CTRL=0 / single-
  * CANFD E8 layout) into the upstream 8-arg clockctrl encoding: the CANFD_CTRL

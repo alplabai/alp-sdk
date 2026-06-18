@@ -1,0 +1,135 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-dsi-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Stages the C2-MIPI-DSI DISPLAY chain so every node BINDS on silicon:
+ *   - cdc200   (tes,cdc-2.1            @ 0x49031000) -- the DPI/RGB pixel pump
+ *   - mipi_dsi (snps,designware-dsi    @ 0x49032000) -- the MIPI-DSI host (TX)
+ *   - dphy     (snps,designware-dphy   @ 0x49033000) -- the shared D-PHY (TX role)
+ *
+ * The dphy node is already defined in zephyr/dts/alif/ensemble_e8_peripherals.dtsi
+ * (it is shared with the camera/CSI path); this overlay only flips it okay.  The
+ * cdc200 + mipi_dsi nodes are added HERE because the display-class drivers are
+ * not yet authored -- once they are, these two nodes move into the shared dtsi
+ * (the snippet in the deliverable) and this overlay shrinks to just status flips.
+ *
+ * reg / IRQ are transcribed from the Alif CMSIS DFP (CDC_BASE 0x49031000 /
+ * DSI_BASE 0x49032000, soc.h) and the fork e1.dtsi (cdc200 IRQs 333..342,
+ * mipi_dsi IRQ 343).  CLOCKS are FREQUENCY-ONLY DUMMY placeholders (ALIF_CLK,
+ * module 0 / en_mask 0 -> alif_clock_control_on() no-ops) -- the fork drives
+ * these with ALIF_DPI_CLK / ALIF_DSI_CLK / ALIF_CDC200_PIX_SYST_ACLK /
+ * ALIF_MIPI_TXDPHY_CLK in the fork 7-arg encoding, which MUST NOT be copied onto
+ * the upstream clockctrl (wrong register block) -- so the real IDs are deferred
+ * to the driver-port + bench bring-up (task #21).
+ *
+ * SCOPE: this proves the chain BINDS (DT_HAS_*_ENABLED + phandle wiring).  LIVE
+ * display is HW-blocked: no display-class driver yet, and the AEN801 panel part
+ * is TBD (the fork default focuslcds,mw405 is the Alif AppKit panel, NOT
+ * confirmed for AEN801) -- so no panel child + no panel reset/backlight GPIOs are
+ * asserted here (omitted, not invented).
+ */
+
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/* The shared D-PHY already lives in the SoC dtsi -- just enable it. */
+&dphy {
+	status = "okay";
+};
+
+/*
+ * C2-MIPI-DSI display chain.  These two nodes are added by the overlay until the
+ * display-class drivers are authored, after which they move into the shared
+ * ensemble_e8_peripherals.dtsi (see the deliverable snippet).  Placed under the
+ * SoC peripheral bus.
+ */
+&{/soc/} {
+	cdc200: cdc200@49031000 {
+		compatible = "tes,cdc-2.1";
+		reg = <0x49031000 0x1000>;
+		interrupts = <333 0>, <334 0>, <335 0>, <336 0>, <337 0>,
+			     <338 0>, <339 0>, <340 0>, <341 0>, <342 0>;
+		interrupt-names = "scanline_0", "scanline_1",
+				  "fifo_warning_0", "fifo_warning_1",
+				  "fifo_underrun_0", "fifo_underrun_1",
+				  "bus_error_0", "bus_error_1",
+				  "reg_reload_0", "reg_reload_1";
+
+		/* FREQUENCY-ONLY DUMMY clocks -- see header. */
+		clocks = <&clockctrl ALIF_DPI_CLK>, <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>;
+		clock-names = "dpi-clk-en", "pixel-clk";
+
+		/* Panel timing -- placeholder (AEN801 panel part TBD). */
+		width = <800>;
+		height = <480>;
+		hfront-porch = <210>;
+		hback-porch = <46>;
+		hsync-len = <1>;
+		vfront-porch = <22>;
+		vback-porch = <23>;
+		vsync-len = <1>;
+		hsync-active = <0>;
+		vsync-active = <0>;
+		de-active = <1>;
+		pixelclk-active = <0>;
+		clock-frequency = <2779910>;
+		bg-color = <0x5a5a5a>;
+
+		enable-l1 = <1>;
+		pixel-fmt-l1 = "rgb-565";
+		def-back-color-l1 = <0x00ff00>;
+		win-x0-l1 = <0>;
+		win-y0-l1 = <0>;
+		win-x1-l1 = <800>;
+		win-y1-l1 = <480>;
+		blend-factor1-l1 = <4>;
+		blend-factor2-l1 = <5>;
+		const-alpha-l1 = <0xff>;
+
+		status = "okay";
+	};
+
+	mipi_dsi: mipi-dsi@49032000 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "snps,designware-dsi";
+		reg = <0x49032000 0x1000>;
+		interrupts = <343 0>;
+		cdc-if = <&cdc200>;
+		phy-if = <&dphy 1>;
+
+		/* FREQUENCY-ONLY DUMMY clocks -- see header. */
+		clocks = <&clockctrl ALIF_DSI_CLK>,
+			 <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>,
+			 <&clockctrl ALIF_MIPI_TXDPHY_CLK>;
+		clock-names = "dsi-clk-en", "pixel-clk", "tx-dphy-clk";
+
+		dpi-shutdn-active = <1>;
+		dpi-colorm-active = <1>;
+		vid-pkt-size = <480>;
+		ecc-recv-en;
+		crc-recv-en;
+		frame-ack-en;
+
+		/*
+		 * NO panel child node.  The AEN801 panel part is TBD: the fork
+		 * default is focuslcds,mw405 (the Alif AppKit panel), unconfirmed
+		 * for the AEN801 SoM, and its reset/backlight GPIOs are
+		 * bench-unknown.  A board that wires a panel adds the child +
+		 * data-lanes/video-mode/pixel-format here.
+		 */
+		status = "okay";
+	};
+};
