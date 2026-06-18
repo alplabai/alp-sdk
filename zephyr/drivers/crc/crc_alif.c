@@ -170,12 +170,56 @@ static int crc_alif_begin(const struct device *dev, struct crc_ctx *ctx)
 		return ret;
 	}
 
-	/* The engine has no per-call output-INVERT mode the class API exposes;
-	 * only reflect (CRC_FLAG_REVERSE_*) maps to a hardware bit.  The class
-	 * API has no separate input/output polynomial-reflect, so both reverse
-	 * flags map to the single CRC_REFLECT bit (set if either is asked). */
-	if (ctx->reversed & (CRC_FLAG_REVERSE_INPUT | CRC_FLAG_REVERSE_OUTPUT)) {
+	/*
+	 * Map the upstream class-API reverse flags onto the Alif CRC_CONTROL
+	 * swap/reflect/invert bits.
+	 *
+	 * The Alif engine is an MSB-first CRC core: it shifts the accumulator
+	 * LEFT and XORs with the NORMAL polynomial (0x04C11DB7 for CRC_32).  The
+	 * canonical CRC-32/IEEE and CRC-32C are REFLECTED (LSB-first) algorithms
+	 * with a final one's-complement (XorOut = 0xFFFFFFFF).  To make the
+	 * MSB-first core emit the reflected result the silicon provides three
+	 * post/pre-processing bits that the fork couples together for the
+	 * "full-mode" reflected 32-bit CRC:
+	 *
+	 *   - REVERSE_INPUT  -> BYTE_SWAP | BIT_SWAP : reflect the INPUT word
+	 *       stream (byte order within the 32-bit word + bit order within
+	 *       each byte) so the MSB-first engine consumes the data as if it
+	 *       were fed LSB-first.
+	 *   - REVERSE_OUTPUT -> REFLECT             : reflect the final CRC_OUT.
+	 *
+	 * Source for the bit set: the Alif DFP bare-metal demo programs the
+	 * standard 32-bit CRC with
+	 *   ARM_CRC_ENABLE_BIT_SWAP | ARM_CRC_ENABLE_BYTE_SWAP |
+	 *   ARM_CRC_ENABLE_INVERT_OUTPUT | ARM_CRC_ENABLE_REFLECT_OUTPUT
+	 * (alif-dfp-ref/Boards/Templates/Baremetal/demo_crc.c, CRC_32_BIT case),
+	 * and the fork's HW/SW conformance test for canonical CRC-32 sets
+	 *   .bit_swap = .byte_swap = .reflect = .invert = CRC_TRUE, seed
+	 *   0xFFFFFFFF (sdk-alif-ref/tests/drivers/crc/src/test_crc_32.c,
+	 *   crc32_full_reference()).  The earlier "REFLECT-only" mapping left
+	 *   the input bit/byte order wrong AND omitted the final complement,
+	 *   which is why no plain refl/xor transform of the raw CRC_OUT could
+	 *   reach the zlib reference.
+	 */
+	if (ctx->reversed & CRC_FLAG_REVERSE_INPUT) {
+		ctrl |= CRC_CTRL_BYTE_SWAP | CRC_CTRL_BIT_SWAP;
+	}
+	if (ctx->reversed & CRC_FLAG_REVERSE_OUTPUT) {
 		ctrl |= CRC_CTRL_REFLECT;
+
+		/*
+		 * The class API exposes no separate XorOut flag, but the
+		 * reflected 32-bit CRCs (CRC-32/IEEE and CRC-32C) are DEFINED
+		 * with a final one's-complement.  The DFP demo + fork test
+		 * always pair INVERT with REFLECT for these, so couple the
+		 * engine's CRC_INVERT bit to the output-reverse request for the
+		 * 32-bit reflected types.  (8/16-bit CCITT-family algorithms
+		 * stay non-inverted: their canonical form is reflect-only, per
+		 * the fork's 8/16-bit reflect tests which set invert = FALSE.)
+		 */
+		if (ctx->type == CRC32_IEEE || ctx->type == CRC32_C) {
+			ctrl |= CRC_CTRL_INVERT;
+		}
 	}
 
 	k_sem_take(&data->lock, K_FOREVER);
@@ -216,7 +260,17 @@ crc_alif_update(const struct device *dev, struct crc_ctx *ctx, const void *buffe
 	}
 
 	if (ctx->type == CRC32_IEEE || ctx->type == CRC32_C) {
-		/* The 32-bit data-input register consumes whole 32-bit words. */
+		/*
+		 * The 32-bit data-input register consumes whole 32-bit words.
+		 * Feed the NATURAL little-endian word (alignment-safe load via
+		 * sys_get_le32) -- on the little-endian M55 this is the same
+		 * value the DFP crc_calculate_32bit() pushes as *(uint32_t *)
+		 * (alif-dfp-ref/drivers/source/crc.c).  Any input bit/byte
+		 * reflection needed for canonical CRC-32 is done in hardware by
+		 * the CRC_BYTE_SWAP | CRC_BIT_SWAP bits set in crc_alif_begin()
+		 * (from CRC_FLAG_REVERSE_INPUT); the word fed here must stay the
+		 * raw LE word so the engine's swap operates on the real bytes.
+		 */
 		const uint8_t *p     = buffer;
 		size_t         words = bufsize / 4U;
 

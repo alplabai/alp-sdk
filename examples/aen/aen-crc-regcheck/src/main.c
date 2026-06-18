@@ -33,17 +33,22 @@
  *     ...                    0x90,0xA0,0xB0,0xC0, 0xD0,0xE0,0xF0,0x00]))
  *     0x684FC31C
  *
- * BENCH NOTE -- reflect / final-XOR (BENCH-UNVERIFIED): the canonical CRC-32
- * applies bit-reflection on input+output AND a final one's-complement of the
- * result.  The Alif engine drives reflection from its CRC_CONTROL REFLECT bit
- * (this app sets CRC_FLAG_REVERSE_OUTPUT, which the driver maps to REFLECT) and
- * the final inversion from the CONTROL INVERT bit.  The exact ORDER the silicon
- * applies reflect vs. invert (and whether the seed is pre- or post-reflected)
- * is the one thing this regcheck settles on the bench: if the printed result
- * does NOT equal 0x684FC31C, read CRC_OUT over J-Link and compare the raw
- * (non-reflected, non-inverted) value to localise which post-processing step
- * the driver must add -- do NOT guess the order without the silicon answer.
- * This is a documented bench-confirm item, not a code defect.
+ * BENCH NOTE -- reflect / swap / final-XOR: the canonical CRC-32 applies
+ * bit-reflection on input AND output AND a final one's-complement of the
+ * result.  The Alif engine is MSB-first (shifts left, XORs the NORMAL poly), so
+ * to emit the reflected zlib value it needs FOUR CRC_CONTROL bits, not one:
+ * BYTE_SWAP + BIT_SWAP reflect the input word stream, REFLECT reflects CRC_OUT,
+ * and INVERT applies the final one's-complement.  The crc_alif driver derives
+ * them from the class-API reverse flags this app sets (REVERSE_INPUT ->
+ * BYTE_SWAP|BIT_SWAP, REVERSE_OUTPUT -> REFLECT, plus INVERT for the reflected
+ * 32-bit types).  This bit set is taken verbatim from the Alif DFP bare-metal
+ * demo (CRC_32_BIT case enables BIT_SWAP|BYTE_SWAP|INVERT|REFLECT) and the
+ * fork's HW/SW conformance test (bit_swap=byte_swap=reflect=invert=TRUE, seed
+ * 0xFFFFFFFF); the earlier REFLECT-only driver returned 0xA2176478, which no
+ * plain refl/xor of the raw CRC_OUT could turn into 0x684FC31C -- the input
+ * bit/byte order was wrong AND the final complement was missing.  If the
+ * printed result still does NOT equal 0x684FC31C, read CRC_OUT over J-Link
+ * (mem32 0x48107018) to see the raw engine value before any post-step.
  *
  * Console is the RAM buffer 'ram_console_buf' (see prj.conf); the bench UART is
  * not wired to USB.  BENCH-VALIDATION app -- not a customer teaching example.
@@ -100,7 +105,8 @@ int main(void)
 	    "input: %zu bytes, expected CRC32_IEEE = 0x%08x\n", sizeof(fixed_buf), EXPECTED_CRC32_IEEE);
 
 	/* 2. configure the engine for this algorithm (selects CRC_32 + size,
-	 *    maps the reverse flags to the REFLECT bit, loads seed + INIT). */
+	 *    maps REVERSE_INPUT -> BYTE_SWAP|BIT_SWAP and REVERSE_OUTPUT ->
+	 *    REFLECT|INVERT, loads seed + INIT). */
 	rc = crc_begin(crc_dev, &ctx);
 	printk("crc_begin() rc=%d\n", rc);
 	if (rc != 0) {
