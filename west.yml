@@ -187,6 +187,15 @@ manifest:
           # never fetches the module and the Kconfig select aborts
           # every MODEL_READER build.
           - zcbor
+          # open-amp + libmetal back the Zephyr ipc_service RPMsg
+          # (static-vrings) backend -- the HE<->HP dual-core RPC on
+          # AEN (examples/aen/aen-rpc-pingpong, the alif,mhuv2-mbox
+          # MBOX transport).  Pinned by Zephyr v4.4; allowlisted so the
+          # OpenAMP RPC builds out of the box without a manual
+          # -DEXTRA_ZEPHYR_MODULES.  libmetal (modules/hal/libmetal) is
+          # open-amp's HAL/OS-abstraction dependency.
+          - open-amp
+          - libmetal
           # nanopb is also pulled in by Zephyr's tree when ALP_NANOPB
           # is enabled.  Our SDK uses it via the upstream Zephyr
           # module (no extras-tier1 pin needed for v0.5).

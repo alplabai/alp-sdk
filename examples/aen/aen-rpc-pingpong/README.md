@@ -50,15 +50,15 @@ The transport rides the non-secure MHU-1 per-core alias (both cores TX
 `aen-dualcore-ipc`. `CONFIG_DCACHE=n` + `CONFIG_IPC_SERVICE_BACKEND_RPMSG_SHMEM_RESET=y`
 make the shared `sram_ipc0` vrings coherent + zeroed.
 
-## Build (open-amp + libmetal via EXTRA_ZEPHYR_MODULES)
+## Build
 
-`open-amp` and `libmetal` are not yet alp-sdk west projects — supply them
-explicitly (a follow-up should add them to `west.yml` for first-class support):
+`open-amp` + `libmetal` are alp-sdk west projects (the manifest allowlists the
+Zephyr-pinned modules), so a `west update` fetches them and they are
+auto-discovered — no manual `-DEXTRA_ZEPHYR_MODULES` for them:
 
 ```sh
-MODS="<alp-sdk>;<hal_alif>;<open-amp>;<libmetal>"   # Zephyr v4.4.0 modules
-west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-rpc-pingpong -d build/hp -- "-DEXTRA_ZEPHYR_MODULES=$MODS"
-west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-rpc-pingpong -d build/he -- "-DEXTRA_ZEPHYR_MODULES=$MODS"
+west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-rpc-pingpong -d build/hp -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
+west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-rpc-pingpong -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 ```
 
 Package as a dual ATOC (HP `["load","boot"]` @0x50000000 + HE `["load"]`
