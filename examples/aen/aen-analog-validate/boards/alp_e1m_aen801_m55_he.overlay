@@ -61,10 +61,22 @@
 	 * io-channels consumer the alp-adc0 alias resolves to.  ADC_DT_SPEC_GET on
 	 * the alias reads .dev from the referenced controller (adc12_0) and
 	 * .channel_id from the input cell (0), then pulls the channel@0 config.
-	 * No `compatible` -- this is a plain io-channels consumer container, the
-	 * same shape as Zephyr's canonical `zephyr,user` ADC consumer node.
+	 *
+	 * compatible = "alp,adc-input" is REQUIRED, not cosmetic.  A binding-LESS
+	 * consumer (the shape `zephyr,user` uses) only gets io-channels phandle-array
+	 * macros generated because gen_edt.py hard-codes "/zephyr,user" in
+	 * infer_binding_for_paths (gen_edt.py:52).  For ANY other path, edtlib's
+	 * no-binding fallback only type-infers the fixed _DEFAULT_PROP_TYPES whitelist
+	 * (edtlib.py:3653 -- compatible/status/reg/interrupts/..., NO io-channels), so
+	 * `io-channels` is silently dropped from node.props and gen_defines emits
+	 * neither DT_N_S_analog_loopback_P_io_channels_IDX_0_PH nor ..._VAL_input ->
+	 * ADC_DT_SPEC_GET fails to compile.  Giving the node a `compatible` whose
+	 * binding (zephyr/dts/bindings/adc/alp,adc-input.yaml) declares io-channels as
+	 * `type: phandle-array` makes edtlib build the ControllerAndData, so the
+	 * _PH (controller ord) + _VAL_input (cell 0) macros are generated.
 	 */
 	analog_loopback: analog-loopback {
+		compatible = "alp,adc-input";
 		io-channels = <&adc12_0 0>;
 	};
 

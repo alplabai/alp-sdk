@@ -107,8 +107,14 @@ channels via the `alp-dac0` / `alp-adc0` devicetree aliases:
   **io-channels consumer** node (`ADC_DT_SPEC_GET`), so the per-example
   `boards/alp_e1m_aen801_m55_he.overlay` repoints the aliases:
   `alp-dac0 = &dac0` and `alp-adc0 = &analog_loopback` (a consumer with
-  `io-channels = <&adc12_0 0>` and a `channel@0` config child carrying
-  `zephyr,vref-mv = <1800>`).
+  `compatible = "alp,adc-input"`, `io-channels = <&adc12_0 0>` and a
+  `channel@0` config child carrying `zephyr,vref-mv = <1800>`). The
+  `compatible` is **required**: only `/zephyr,user` gets binding-less
+  io-channels macros (it is hard-coded in `gen_edt.py`'s
+  `infer_binding_for_paths`); any other consumer needs a binding that
+  declares `io-channels` as `phandle-array`
+  (`zephyr/dts/bindings/adc/alp,adc-input.yaml`), or `ADC_DT_SPEC_GET`
+  fails to compile (`..._P_io_channels_IDX_0_PH` / `_VAL_input` undeclared).
 
 ## Follow-up
 
