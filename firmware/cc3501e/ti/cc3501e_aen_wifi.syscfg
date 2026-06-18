@@ -50,7 +50,7 @@ system.getScript("kernel_config_release.syscfg.js");
  * 193 KB region, so full connect-STA/sockets does NOT fit this vendor image --
  * defer to a PSRAM HW rev or shrink the wifi-lib RX/TX/control buffers
  * (conf_bin/Kconfig).  (Default/radio-free build keeps the 32 KB default.) */
-system.modules["/freertos/FreeRTOS"].$static.heapSize = 0x00016000; /* 88KB: WiFi GET_MAC needs ~60KB + NimBLE's heap use is small (its pools are static bss); trimmed from 0x22000 to fit the BLE static bss + .data in the 193KB vendor DRAM (-Ble build). WiFi+BLE RAM is at the edge here. */
+system.modules["/freertos/FreeRTOS"].$static.heapSize = 0x00022000; /* 136KB: required by WiFi GET_MAC's Wlan_Start at runtime (bench-proven: GET_MAC starves + the link dies at 88KB). The -Ble build's BLE static bss (~52KB) does NOT fit alongside this heap in the 193KB vendor DRAM -> WiFi+BLE concurrent exceed RAM (PSRAM-rev item, or drop lwIP/hostap from a BLE-focused build). Keep 136KB so the validated WiFi GET_MAC/scan path works; the -Ble build needs its own lighter config. */
 
 /* ======== Secure key store (HSM/PSA crypto) -> CryptoKeyKeyStore_PSA ========
  * Wlan_Start + Wlan_RoleUp(STA) bring up the WPA/TLS supplicant, which uses

@@ -160,6 +160,9 @@ typedef struct {
 	uint32_t scan_count;  /* +0x40  number of scan records parsed                       */
 	int32_t
 	    scan_first_rssi; /* +0x44 RSSI dBm of the first scan record (sign-extended); 0 if none */
+	/* --- BLE bring-up results (cc3501e_ble_* helpers) --- */
+	uint32_t ble_status;  /* +0x48  (uint32_t)alp_status_t from cc3501e_ble_enable        */
+	uint32_t ble_enabled; /* +0x4C  1 once the BLE controller + NimBLE host came up        */
 } cc3501e_witness_t;
 
 /* Bench debug instrumentation (2026-06-16, REVERT after the SPI1-no-clock root
@@ -579,6 +582,26 @@ int main(void)
 				printf("[cc3501e-bringup] soak WIFI_SCAN ok -> %u AP(s)\n", (unsigned)n);
 			} else {
 				printf("[cc3501e-bringup] soak WIFI_SCAN -> %d\n", (int)ss);
+			}
+		}
+
+		/* After the MAC is in, bring up BLE once (worker-routed: shared-HIF Wi-Fi
+		 * start + nimble_host_start ~2s).  ble_enabled=1 = the BLE controller +
+		 * NimBLE host came up through the bridge.  Gated/retried like the scan so
+		 * it runs on the stable link.  (Firmware without -Ble -> NOT_READY.) */
+		static bool ble_done = false;
+		if (!ble_done && g_cc3501e_witness.mac_ok == 1u && s == ALP_OK) {
+			alp_status_t bs              = cc3501e_ble_enable(&fw, CC3501E_MAC_TIMEOUT_MS);
+			g_cc3501e_witness.ble_status = (uint32_t)bs;
+			if (bs == ALP_OK) {
+				g_cc3501e_witness.ble_enabled = 1u;
+				ble_done                      = true;
+				printf("[cc3501e-bringup] soak BLE_ENABLE ok\n");
+			} else if (bs == ALP_ERR_NOT_READY) {
+				ble_done = true; /* firmware built without -Ble; stop retrying */
+				printf("[cc3501e-bringup] soak BLE_ENABLE -> NOT_READY (no -Ble build)\n");
+			} else {
+				printf("[cc3501e-bringup] soak BLE_ENABLE -> %d\n", (int)bs);
 			}
 		}
 

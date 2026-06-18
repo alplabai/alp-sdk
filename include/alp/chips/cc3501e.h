@@ -272,6 +272,22 @@ alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi);
  */
 alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);
 
+/**
+ * @brief Enable the CC3501E BLE controller + NimBLE host (BLE_ENABLE, 0x30).
+ *
+ * The firmware worker-routes BLE_ENABLE off the SPI ISR: it brings the Wi-Fi
+ * stack up first (shared HIF), then runs nimble_host_start (~2 s).  Like
+ * cc3501e_wifi_get_mac, the host re-issues until the radio op completes; the
+ * bridge is briefly down during the op, so @p timeout_ms is floored internally
+ * to cover the bring-up window.  No reply payload -- success is the OK status.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget (floored to the radio-down window).
+ * @return ALP_OK once the BLE host is up; ALP_ERR_NOT_READY if BLE is not built
+ *         in the firmware; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms);
+
 /** Issue a synchronous command + wait for the response.
  *
  *  @param ctx         CC3501E driver context (must be initialised first).

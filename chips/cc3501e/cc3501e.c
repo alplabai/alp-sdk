@@ -544,6 +544,16 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4])
 	return ALP_OK;
 }
 
+alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms)
+{
+	/* Worker-routed in the firmware (lazy Wi-Fi start [shared HIF] + nimble_host_start
+	 * ~2 s).  Like GET_MAC, poll-by-repeat across the radio-down window; floor the
+	 * budget so a short caller timeout can't give up mid bring-up.  No reply data. */
+	uint32_t budget = timeout_ms;
+	if (budget < CC3501E_WIFI_DOWN_WINDOW_MS) budget = CC3501E_WIFI_DOWN_WINDOW_MS;
+	return poll_by_repeat(ctx, ALP_CC3501E_CMD_BLE_ENABLE, NULL, 0, NULL, 0, NULL, budget);
+}
+
 alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
