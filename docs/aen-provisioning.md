@@ -6,7 +6,9 @@ path — the Alif-native way an image gets into MRAM — written from a real E8
 (`E1M-AEN801`) bench bring-up, including the wiring traps that cost us hours.
 
 > Peer docs: [`bring-up-aen.md`](bring-up-aen.md) (the per-subsystem bench
-> runbook). This guide is specifically the **SES → MRAM → boot** flow.
+> runbook); [`aen-se-services.md`](aen-se-services.md) (the runtime
+> `se_service_*` API — device/LCS/power queries + the gated DVFS / STOC-update
+> path). This guide is specifically the **SES → MRAM → boot** flow.
 
 ## 0. The model (read this first)
 
