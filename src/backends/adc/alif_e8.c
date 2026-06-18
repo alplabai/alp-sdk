@@ -281,6 +281,10 @@ alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_
 		return ALP_ERR_INVAL;
 	}
 	alif_e8_adc_state_t *s = (alif_e8_adc_state_t *)h->state.be_data;
-	s->trigger_source      = src;
+	/* NOTE: the source is RECORDED but the current read path (alif_e8_read_raw)
+	 * is software-triggered single-shot -- it does not yet wire an external HW
+	 * trigger, so a non-software src is stored for a future trigger-aware read
+	 * path, not applied now. Tracked for the HW-trigger follow-up (#21). */
+	s->trigger_source = src;
 	return ALP_OK;
 }

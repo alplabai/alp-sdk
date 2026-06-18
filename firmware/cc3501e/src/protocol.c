@@ -901,8 +901,19 @@ size_t protocol_build_reply(const uint8_t *req_frame,
 		}
 	}
 
+	/* Defence-in-depth: a handler must never report more data than the reply
+	 * buffer holds, but if one did, (uint16_t)(1u + data_len) would TRUNCATE the
+	 * length silently and frame a corrupt reply.  Clamp + fail closed instead. */
+	const size_t reply_data_cap =
+	    (reply_cap > CC3501E_REPLY_DATA_OFF) ? (reply_cap - CC3501E_REPLY_DATA_OFF) : 0u;
+	if (data_len > reply_data_cap) {
+		data_len = 0u;
+		status   = ALP_CC3501E_RESP_ERR_NO_MEM;
+	}
+
 	/* Diagnostics bookkeeping: count OK vs error replies and latch the last
-	 * non-OK status, for GET_DIAG_INFO / DIAG_GET_STATS. */
+	 * non-OK status, for GET_DIAG_INFO / DIAG_GET_STATS.  Runs AFTER the clamp so
+	 * a clamped NO_MEM is counted as the error it is. */
 	if (status == ALP_CC3501E_RESP_OK) {
 		g_frames_ok++;
 	} else {

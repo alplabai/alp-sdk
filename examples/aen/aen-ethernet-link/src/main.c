@@ -214,6 +214,10 @@ int main(void)
 	 * External => the MAC DMA-reset completed on the on-module 50 MHz oscillator,
 	 * i.e. the PHY power-enable made the external clock present BEFORE the probe --
 	 * the key "needs power enable" fix, and the PHY is now clocked. */
+	/* ETH_CTRL @ 0x4903F080, bit4 = RMII refclk source. Address + bit
+	 * bench-observed on the E8 over SWD during this eth bring-up (the AUTO probe
+	 * latched bit4 here); not transcribed from a public TRM -- treat as bench-
+	 * derived, confirm against the Alif HW config before reusing elsewhere. */
 	bool refclk_external = (sys_read32(0x4903F080U) & BIT(4)) == 0U;
 	printf("[eth] RMII refclk source = %s (ETH_CTRL bit4=%d)\n",
 	       refclk_external ? "EXTERNAL osc (PHY clocked -- power-enable worked)"
