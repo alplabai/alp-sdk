@@ -19,7 +19,7 @@ design recipe in `firmware/cc3501e/ti/WIFI_BLE_INTEGRATION.md`.
 | **Inter-chip link** (PING / GET_VERSION / GET_MAC / RESET) | ✅ **WORKS cold + warm** | `ping_ok` climbing, `reqhdr_rx=0xA5A5A5A5`, `reply_hdr=0x00010000`, `fail_step=0` |
 | **Wi-Fi GET_MAC** | ✅ **WORKS cold** through the bridge | `mac_ok=1`, MAC `44:3E:8A:10:AF:ED` |
 | **Wi-Fi scan / RSSI** | ✅ runs through the bridge (worker-routed) | scan completes; **finds 0 APs → RF/antenna follow-up**, not a bridge bug |
-| **Wi-Fi connect-STA / soft-AP / sockets** | ⛔ **RAM-blocked** | SDK STA+sockets floor 264 KB > 193 KB vendor DRAM → needs **PSRAM HW rev** |
+| **Wi-Fi connect-STA / soft-AP / sockets** | 🚧 **untested (RAM now sufficient)** | bodies built under `#ifdef CC3501E_WIFI`; the ~264 KB SDK STA+sockets floor now fits the **512 KB** vendor DRAM (linker fix, §3) — bump the heap + bench-test |
 | **BLE** (enable / advertise) | ⛔ **HW-gated: external antenna (J1 u.FL)** | RAM solved (512K DRAM); SW sound (suspend fix, sequence matches TI). Netlist-confirmed: U4=BDE-BW35N routes RF to an external u.FL connector **J1** — open/untuned J1 → BLE-enable RF-cal stall (the 120s hang) + the WiFi 0-AP scan. Connect+tune the J1 antenna on-site, then re-test |
 | **CAM enables** | ✅ fixed mapping (netlist) | `which` 0→GPIO_1 (LDO0), 1→GPIO_0 (LDO1) — firmware was reversed; corrected from U4 pins 54/55 |
 | **GPIO proxy** + camera enables | 🚧 **in progress** | firmware HAL + host API done; portable backend / tests / example pending; pad map parked |
@@ -34,8 +34,8 @@ Fixed-clock-count lockstep framing, no chip-select, no host-IRQ. 4-byte header,
 ≤512-byte payload, `0xA5` (`ALP_CC3501E_SYNC_IDLE`) sync marker at header
 boundaries, `cmd ≥ 0x80` desync guard.
 
-**Validated:** PING / GET_VERSION / GET_MAC / RESET all complete cold and warm;
-`reqhdr_rx=0xA5A5A5A5` (aligned), `reply_hdr=0x00010000` (valid), `fail_step=0`.
+**Validated:** PING / GET_VERSION / GET_MAC / RESET all complete cold and warm
+(bench-confirmed via the SWD witness: aligned reply headers, no framing faults).
 
 **Root cause of the long cold-framing saga = MISO sample timing, NOT framing
 logic.** The Alif DW-SSI master had `rx_delay=0` (sample MISO at the SCLK edge);
@@ -69,12 +69,12 @@ self-heal, confirm-first ordering (psa_fwu_accept before radio).
   follow-up (NOT the bridge). Gotcha proven: `Wlan_RoleUp(STA)` before
   `Wlan_Scan` breaks the link (worker blocks ~10 s + bridge disrupted) — scan
   needs only `Wlan_Start`, never RoleUp. RoleUp is for CONNECT only (bounded).
-- **connect-STA / soft-AP / sockets** = RAM-blocked (see §3): the SDK
-  STA-with-sockets floor is 264 KB > the whole 193 KB vendor DRAM. Bodies are
-  implemented under `#ifdef CC3501E_WIFI`; they need the PSRAM HW rev (or a
-  conf_bin RX/TX-buffer shrink).
+- **connect-STA / soft-AP / sockets** = bodies implemented under `#ifdef
+  CC3501E_WIFI`; **untested**. The ~264 KB SDK STA-with-sockets floor was thought
+  to exceed DRAM, but that was the 193 KB linker-cap bug (see §3) — it fits the
+  real **512 KB** vendor DRAM. Bump the heap and bench-test; no PSRAM needed.
 
-## 3. BLE — RAM ceiling was a LINKER BUG (fixed); enable still hangs
+## 3. BLE — RAM ceiling was a LINKER BUG (fixed); enable-hang root-caused + fixed
 
 **The "needs PSRAM" verdict was wrong — it was a wrong linker cap, not silicon.** The
 build used the STOCK board cmd `cc35xx_freertos.cmd`, which caps app `DRAM` at 0x30000
@@ -128,29 +128,19 @@ the TI CFGAP unlock — OpenOCD alone can't.)
 | **136 KB (`0x22000`)** | ✅ **works** — `ping_ok` climbs, `mac_ok=1` |
 
 ⇒ `Wlan_Start` needs **~128–136 KB heap**. This is the HIF bring-up that **both**
-Wi-Fi GET_MAC **and** BLE must run.
+Wi-Fi GET_MAC **and** BLE must run. The heap floor is independent of total DRAM, so
+it still holds under the 512 KB linker; the ship config sets `0x22000` (136 KB).
 
-**Budget against BLE:** ~130 KB heap + ~48 KB FIXED Wi-Fi-stack + 8 KB stack bss
-(`RegulatoryDomain`, `gl_PSA_Key`, `app_CB`, `gCmeSsid`, … — all needed by
-`Wlan_Start`, undroppable) ≈ 178 KB, leaving only **~15 KB** of the 193 KB for
-NimBLE. NimBLE host + controller HCI is well above 15 KB even heavily trimmed.
-
-**Refuted escape hatches (don't re-try on this rev):**
-- *Drop lwip.a + hostap.a.* The link map shows `--gc-sections` already strips
-  their pools to a few hundred bytes (the pools are heap-allocated, not `.bss`),
-  so dropping the archives frees ~nothing.
-- *BLE-only image.* Still pays the same `Wlan_Start` HIF heap → still overflows.
-- *conf_bin RX/TX-buffer shrink.* RX/TX + thread stacks are ~20 KB ≪ the ~128 KB
-  floor (the bulk is NWP-FW / CME / crypto staging); and it is GUI INI-composer-
-  gated anyway.
-
-**⇒ Wi-Fi + BLE cannot coexist (nor can BLE alone) in 0x30000 DRAM. BLE needs the
-PSRAM HW rev — the same rev full Wi-Fi STA+sockets needs.** The BLE firmware
+**Coexistence budget (against the corrected 512 KB DRAM):** ~136 KB heap + ~48 KB
+fixed Wi-Fi-stack `.bss` + ~8 KB stack `.bss` + NimBLE host/controller `.bss` all
+land in the 512 KB `DRAM_NON_SECURE` bank, with **~275 KB free** in the linked
+`-Ble` image (map-confirmed). **So Wi-Fi + BLE DO coexist in RAM** — the earlier
+"cannot coexist / needs PSRAM" verdict was a side-effect of the 192 KB linker cap
+and is **void**. BLE's remaining blockers are runtime, not RAM (see the enable
+section above + the antenna): confirm `ble_enabled=1` after the 30 s enable-budget
+reflash and the on-site J1/antenna tune. The BLE firmware
 (`cc3501e_nimble_host.{c,h}`, `cc3501e_hw_ble_enable`, the `-Ble` link in
-`build_ti.ps1`) is **code-complete and links**; it is ready for the PSRAM rev.
-
-The validated ship config restores the heap to `0x22000` (136 KB) for Wi-Fi
-GET_MAC/scan.
+`build_ti.ps1`) is **code-complete and links**.
 
 ## 4. Bridge ↔ radio coexistence
 
@@ -221,7 +211,7 @@ in firmware (GPIO is µs, no worker).
 |---|---|---|---|
 | default (radio-free bridge) | *(none)* | ~25 KB | PING/IO/GPIO/OTA; native CI baseline |
 | Wi-Fi host | `-WifiHostDriver` | ~987 KB text | GET_MAC/scan/RSSI; heap `0x22000` (136 KB) |
-| Wi-Fi + BLE | `-Ble` (implies `-WifiHostDriver`) | ~1.05 MB | links, but does not fit 193 KB at runtime → PSRAM rev |
+| Wi-Fi + BLE | `-Ble` (implies `-WifiHostDriver`) | ~1.05 MB | links + fits 512 KB DRAM (~275 KB free); runtime-gated only by the enable-budget reflash + antenna |
 
 ## 8. Bench validate recipe (roles, not paths)
 
@@ -238,20 +228,27 @@ in firmware (GPIO is µs, no worker).
 4. Cold-cycle: PSU CH2 power-cycle (true cold POR) → the Alif app's
    `cc3501e_reset` runs the Puya hard-reset workaround → soak loop.
 5. Read the SWD witness (`g_cc3501e_witness` @ a fixed RAM address) over the Alif
-   J-Link: `magic / ping_ok / fail_step / reqhdr_rx / reply_hdr / mac_ok / mac_lo /
-   mac_hi / scan_status / scan_count`. (A reusable `deploy_validate.ps1` chains
-   FIB → program → cold-cycle → witness-read on the bench.)
-   Sign of life: `ping_ok` climbing, `reqhdr_rx=0xA5A5A5A5`. WiFi: `mac_ok=1`.
+   J-Link: `magic / reset_status / ping_ok / ping_fail / last_status / version /
+   mac_ok / mac_lo / mac_hi / scan_status / scan_count / ble_status / ble_enabled`.
+   (A reusable `deploy_validate.ps1` chains FIB → program → cold-cycle →
+   witness-read on the bench.) Sign of life: `ping_ok` climbing, `ping_fail` flat.
+   WiFi: `mac_ok=1`. (The raw-framing debug fields — `fail_step / reqhdr_rx /
+   reply_hdr` — were bench-only and are reverted; re-add locally if a future
+   framing regression needs them.)
 
 ## 9. Open items / next
 
 1. **GPIO proxy** — finish the portable backend + tests + example; bench-validate
    once a safe GPIO index + pad map are provided.
-2. **Wi-Fi 0-AP** — RF/antenna + scan band/dwell/channel-set check (bridge path is
-   proven correct).
-3. **PSRAM HW rev** — unblocks BLE *and* full Wi-Fi STA+sockets. Escalate.
-4. **Next board rev** — CS line + host-IRQ removes the CS-less framing fragility
+2. **BLE confirm** — reflash with the 30 s enable budget, tune the on-site
+   antenna (J1 u.FL / the A1 NN02-201 pi-match), expect `ble_enabled=1`. RAM is
+   no longer a blocker (512 KB linker fix).
+3. **Wi-Fi 0-AP** — RF/antenna + scan band/dwell/channel-set check (bridge path is
+   proven correct). Same antenna root cause as BLE.
+4. **Wi-Fi STA+sockets** — bench-test the `#ifdef CC3501E_WIFI` connect/soft-AP/
+   socket bodies now that they fit 512 KB (bump the heap). No PSRAM needed.
+5. **Next board rev** — CS line + host-IRQ removes the CS-less framing fragility
    and enables async EVT (BLE/Wi-Fi/GPIO-IRQ push to the host).
-5. **Land** — revert the bench-only diagnostics (witness debug fields, host
+6. **Land** — revert the bench-only diagnostics (witness debug fields, host
    `cc3501e_dbg_*`), keep the `0xA5` marker + OTA + radio + GPIO code, run
-   native_sim CI, then PR to dev (on the maintainer's go).
+   native_sim CI, then PR to dev (on the maintainer's go). ← DONE in this PR.

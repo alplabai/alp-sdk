@@ -168,25 +168,6 @@ static alp_status_t resp_to_status(uint8_t resp)
 	}
 }
 
-/* Bench debug (2026-06-16, REVERT after the SPI1-no-clock root cause is found):
- * which transfer step of the last request failed (1=req hdr, 2=req payload,
- * 3=reply hdr, 4=reply payload, 5=reply-len sanity, 6=status byte); 0 = ok. */
-volatile int cc3501e_dbg_fail_step;
-
-/* Bench debug (2026-06-16, REVERT): raw MISO/POCI bytes captured during a
- * request, surfaced via the witness so a J-Link reads what the CC3501E drives
- * with no console.  reqhdr_rx = the 4 bytes clocked back WHILE the host writes
- * the request header (step 1); reply_hdr = the 4 bytes read as the reply header
- * (step 3).  Both 0xFFFFFFFF => MISO idle-high / slave not driving; both same
- * non-FF => stuck; differing/structured => slave alive (then it's framing). */
-volatile uint32_t cc3501e_dbg_reqhdr_rx;
-volatile uint32_t cc3501e_dbg_reply_hdr;
-
-static uint32_t pack4(const uint8_t *b)
-{
-	return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
-}
-
 alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
@@ -229,8 +210,7 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
                              size_t           *rx_len,
                              uint32_t          timeout_ms)
 {
-	(void)timeout_ms;          /* Reserved for a future IRQ-driven wait (next HW rev). */
-	cc3501e_dbg_fail_step = 0; /* bench debug (REVERT) */
+	(void)timeout_ms; /* Reserved for a future IRQ-driven wait (next HW rev). */
 	if (rx_len != NULL) *rx_len = 0;
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (tx_len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
@@ -249,18 +229,10 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
 	alp_status_t s =
 	    alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
-	if (s != ALP_OK) {
-		cc3501e_dbg_fail_step = 1;
-		return s;
-	} /* bench debug (REVERT) */
-	cc3501e_dbg_reqhdr_rx =
-	    pack4(ctx->rx_scratch); /* bench debug (REVERT): MISO during req-hdr write */
+	if (s != ALP_OK) return s;
 	if (tx_len > 0) {
 		s = alp_spi_transceive(ctx->bus, tx_payload, ctx->rx_scratch, tx_len);
-		if (s != ALP_OK) {
-			cc3501e_dbg_fail_step = 2;
-			return s;
-		} /* bench debug (REVERT) */
+		if (s != ALP_OK) return s;
 	}
 
 	/* Settle gap: let the slave dispatch + arm its reply before we read.
@@ -273,12 +245,7 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 
 	/* 3. Reply header -> learn the reply payload length. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
-	if (s != ALP_OK) {
-		cc3501e_dbg_fail_step = 3;
-		return s;
-	} /* bench debug (REVERT) */
-	cc3501e_dbg_reply_hdr =
-	    pack4(ctx->rx_scratch); /* bench debug (REVERT): raw reply header bytes */
+	if (s != ALP_OK) return s;
 	uint16_t resp_payload_len = decode_header_payload_len(ctx->rx_scratch);
 	/* Desync detection (no CS to recover on): a valid reply header ECHOES the
      * request opcode (protocol_build_reply sets reply[0]=cmd) and declares a
@@ -289,7 +256,6 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	const bool hdr_ok = (ctx->rx_scratch[0] == (uint8_t)cmd) && (resp_payload_len >= 1u) &&
 	                    (resp_payload_len <= ALP_CC3501E_MAX_PAYLOAD);
 	if (!hdr_ok) {
-		cc3501e_dbg_fail_step = 5; /* bench debug (REVERT) */
 		/* Do NOT byte-walk cc3501e_sync() here: on the 4-byte fixed-count lockstep
 		 * the 1-byte walk PARKS the slave (proven on silicon -- reply_hdr stuck at
 		 * 0xA5A5A5A5, link never recovers).  Return IO so the caller re-issues a
@@ -299,10 +265,7 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 
 	/* 4. Reply payload: status byte followed by the response data. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
-	if (s != ALP_OK) {
-		cc3501e_dbg_fail_step = 4;
-		return s;
-	} /* bench debug (REVERT) */
+	if (s != ALP_OK) return s;
 
 	const uint8_t resp     = ctx->rx_scratch[0];
 	const size_t  data_len = (size_t)resp_payload_len - 1u;
@@ -311,9 +274,7 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 		memcpy(rx_buf, &ctx->rx_scratch[1], n);
 		if (rx_len != NULL) *rx_len = n;
 	}
-	alp_status_t rs = resp_to_status(resp);
-	if (rs != ALP_OK) cc3501e_dbg_fail_step = 6; /* bench debug (REVERT) */
-	return rs;
+	return resp_to_status(resp);
 }
 
 alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out)

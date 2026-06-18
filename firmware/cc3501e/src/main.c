@@ -76,18 +76,6 @@ static void bringup_task(void *arg)
 	 * radio does. */
 	cc3501e_hw_tick();
 
-#ifdef CC3501E_BLE_SELFTEST
-	/* BLE BRING-UP SELFTEST (bench RF/antenna isolation, REVERT after) -- enable +
-	 * advertise at BOOT, directly from this task: NO host poll, NO worker job, NO
-	 * dependency on the inter-chip bridge.  If the unit then advertises "ALP-CC3501E"
-	 * (visible to a BLE scanner / the bench PC), the CC35 NimBLE stack + RF front-end
-	 * CAN bring BLE up -> the earlier worker/bridge-routed enable was the blocker.  If
-	 * it stays silent, the block is NWP/RF (antenna), not our firmware context.  Runs
-	 * once, then falls through to the normal loop. */
-	(void)cc3501e_hw_ble_enable();
-	(void)cc3501e_hw_ble_adv_start(1u /* connectable */, 100u, 100u, 0, 0u);
-#endif
-
 	/* Radio is brought up LAZILY on the first Wi-Fi op (from the worker drain),
 	 * NOT at boot.  Wlan_Start can be slow/blocking (host-driver + NWP FW
 	 * download); running it here would stall the bridge before any PING and, if it

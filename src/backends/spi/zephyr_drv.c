@@ -161,11 +161,6 @@ z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilitie
 	return ALP_OK;
 }
 
-/* Bench debug (2026-06-16, REVERT after the SPI1-no-clock root cause is found):
- * raw errno of the last spi_transceive(), surfaced via the AEN witness so a
- * J-Link can read the exact Zephyr failure with no console. */
-volatile int alp_spi_dbg_last_zerr;
-
 static alp_status_t
 z_transceive(alp_spi_backend_state_t *st, const uint8_t *tx, uint8_t *rx, size_t len)
 {
@@ -180,7 +175,6 @@ z_transceive(alp_spi_backend_state_t *st, const uint8_t *tx, uint8_t *rx, size_t
 
 	int err = spi_transceive(
 	    dev, &s->zspi_cfg, (tx != NULL) ? &tx_set : NULL, (rx != NULL) ? &rx_set : NULL);
-	alp_spi_dbg_last_zerr = err; /* bench debug: raw Zephyr errno (REVERT) */
 	return _errno_to_alp(err);
 }
 

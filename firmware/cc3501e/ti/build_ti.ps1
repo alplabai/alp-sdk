@@ -27,15 +27,13 @@ param(
     [string]$Transport    = "spi",  # spi | sdio
     [switch]$OtaSelftest,           # build the OTA-self-install validation updater (embeds cc3501e_ota_candidate.c, -DCC3501E_OTA_SELFTEST)
     [switch]$WifiHostDriver,        # link the CC35xx Wi-Fi host driver (-DCC3501E_WIFI; enables GET_MAC / scan / connect bodies)
-    [switch]$Ble,                   # ALSO link Apache NimBLE + ble_interface (-DCC3501E_BLE; enables BLE enable/advertise). Implies -WifiHostDriver (shared HIF -> Wlan_Start first).
-    [switch]$BleSelftest            # BENCH RF/antenna isolation (-DCC3501E_BLE_SELFTEST; implies -Ble): the CC35 enables BLE + advertises "ALP-CC3501E" at BOOT from the bringup task (no host/worker/bridge). REVERT after.
+    [switch]$Ble                    # ALSO link Apache NimBLE + ble_interface (-DCC3501E_BLE; enables BLE enable/advertise). Implies -WifiHostDriver (shared HIF -> Wlan_Start first).
 )
 
 # -Ble implies -WifiHostDriver: the BLE controller shares the HIF with Wi-Fi, so
 # Wlan_Start must run first (WIFI_BLE_INTEGRATION.md) and the NimBLE port reuses
 # the Wi-Fi OSI layer (osi_dpl.c) + Report() (uart_term.c) that the Wi-Fi path
 # compiles.  Force it on so the BLE bodies always have the Wi-Fi seam beneath them.
-if ($BleSelftest) { $Ble = $true }
 if ($Ble) { $WifiHostDriver = $true }
 
 $ErrorActionPreference = 'Stop'
@@ -100,7 +98,6 @@ if ($WifiHostDriver) {
 if ($Ble) {
     # Apache NimBLE (BLE host) -- enables the BLE enable/advertise HAL bodies.
     $txdef = @($txdef) + @('-DCC3501E_BLE=1')
-    if ($BleSelftest) { $txdef = @($txdef) + @('-DCC3501E_BLE_SELFTEST=1') }
     # --- NimBLE host pool sizing for a bridge PERIPHERAL (memory-fit). ---
     # The static nimble syscfg.h defaults target a 16-connection central+peripheral
     # (msys 100x292B mbufs, 16 bonds/CCCDs, 6 multi-adv, COC x5): that host-side

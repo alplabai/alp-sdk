@@ -532,19 +532,13 @@ static bool gpio_pad_ok(uint8_t pad)
 	return (pad <= GPIO_pinUpperBound) && !gpio_pad_reserved(pad);
 }
 
-/* Last edge captured by an armed cc3501e_hw_gpio_set_interrupt IRQ.
- * The async EVT_GPIO_INTERRUPT delivery to the host needs the next-rev
- * host-IRQ line (the CS-less 3-wire link has no slave->master attention
- * path), so the ISR only LATCHES here for a future poll/EVT path; the
- * HW arming itself is real.  `volatile` -- written in ISR ctx. */
-volatile uint32_t g_cc3501e_gpio_irq_pad   = 0xFFu;
-volatile uint32_t g_cc3501e_gpio_irq_count = 0u;
-
+/* GPIO interrupt handler.  Async EVT_GPIO_INTERRUPT delivery to the host needs
+ * the next-rev host-IRQ line (the CS-less 3-wire link has no slave->master
+ * attention path), so this only clears the pending edge for now; the HW arming
+ * (cc3501e_hw_gpio_set_interrupt) itself is real. */
 static void gpio_irq_cb(uint_least8_t index)
 {
-	g_cc3501e_gpio_irq_pad = (uint32_t)index;
-	g_cc3501e_gpio_irq_count++;
-	GPIO_clearInt((uint_least8_t)index);
+	GPIO_clearInt(index);
 }
 
 int cc3501e_hw_gpio_configure(uint8_t pad, uint8_t dir, uint8_t pull)

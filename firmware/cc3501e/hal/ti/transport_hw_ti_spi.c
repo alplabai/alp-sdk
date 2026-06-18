@@ -110,17 +110,6 @@ volatile uint32_t g_resync_count;
  * recovery (bridge_transport_spi_hw_reinit).  Observable for link-health. */
 volatile uint32_t g_spi_reopen_count;
 
-/* BENCH DEBUG (REVERT before dev PR): SWD-readable witness so a probe on the
- * CC35 (XDS110) can confirm our firmware runs + SPI_open succeeded + transfers
- * complete, with no console.  Read g_cc35_witness (resolve its addr in
- * firmware/cc3501e/build/ti/cc3501e-bridge.map):
- *   [0] magic 0xC35DEB00  -> firmware reached bridge_transport_spi_hw_init
- *   [1] spi_open: 1 = SPI_open() returned a handle, 2 = returned NULL
- *   [2] phase: 1 = init/reinit entered, 3 = header armed
- *   [3] completed-callback count (>0 => the SSI is shifting + completing)
- *   [4] last serviced phase (0=req hdr,1=req payload,2=reply hdr,3=reply payload) */
-volatile uint32_t g_cc35_witness[5] __attribute__((used));
-
 /* Arm a fixed-count slave transfer.  For RX, tx is the 0xA5 marker (header) or
  * NULL (payload -> 0x00 default fill on MISO); for TX, rx is NULL (the host's
  * MOSI dummies are discarded).  Non-blocking in SPI_MODE_CALLBACK: the DMA
@@ -140,8 +129,7 @@ static void arm_transfer(void *rx, const void *tx, size_t count)
  * for the normal next-frame re-arm and the P0-2 desync/probe no-op re-arm. */
 static void arm_request_header(void)
 {
-	phase             = PH_REQ_HEADER;
-	g_cc35_witness[4] = 0u;
+	phase = PH_REQ_HEADER;
 	arm_transfer(frame_buf, sync_idle, ALP_CC3501E_HEADER_BYTES);
 }
 
@@ -169,8 +157,6 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 	(void)h;
 	(void)t;
 
-	g_cc35_witness[3]++; /* bench debug (REVERT): a transfer completed */
-
 	switch (phase) {
 	case PH_REQ_HEADER: {
 		/* No-CS desync/probe guard (P0-2): a header whose cmd byte is in the
@@ -195,12 +181,10 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 		cur_payload_len = plen;
 		if (plen == 0u) {
 			dispatch_frame(ALP_CC3501E_HEADER_BYTES);
-			phase             = PH_REPLY_HEADER;
-			g_cc35_witness[4] = 2u;
+			phase = PH_REPLY_HEADER;
 			arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
 		} else {
-			phase             = PH_REQ_PAYLOAD;
-			g_cc35_witness[4] = 1u;
+			phase = PH_REQ_PAYLOAD;
 			/* NULL tx -> 0x00 on MISO during payload (0xA5 marks the header
 			 * boundary only). */
 			arm_transfer(&frame_buf[ALP_CC3501E_HEADER_BYTES], NULL, plen);
@@ -209,16 +193,14 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 	}
 	case PH_REQ_PAYLOAD:
 		dispatch_frame((size_t)ALP_CC3501E_HEADER_BYTES + cur_payload_len);
-		phase             = PH_REPLY_HEADER;
-		g_cc35_witness[4] = 2u;
+		phase = PH_REPLY_HEADER;
 		arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
 		break;
 
 	case PH_REPLY_HEADER:
 		/* Reply header clocked out; now the reply payload (status + data
 		 * = reply_len - 4 bytes, always >= 1). */
-		phase             = PH_REPLY_PAYLOAD;
-		g_cc35_witness[4] = 3u;
+		phase = PH_REPLY_PAYLOAD;
 		arm_transfer(
 		    NULL, &reply_buf[ALP_CC3501E_HEADER_BYTES], reply_len - ALP_CC3501E_HEADER_BYTES);
 		break;
@@ -250,8 +232,7 @@ static void spi_open_and_arm(void)
 	params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */
 	params.dataSize            = 8;
 
-	spi               = SPI_open(CONFIG_SPI_0, &params);
-	g_cc35_witness[1] = (spi != NULL) ? 1u : 2u; /* bench debug (REVERT): SPI_open result */
+	spi = SPI_open(CONFIG_SPI_0, &params);
 	g_spi_reopen_count++;
 	if (spi == NULL) {
 		/* No console this early; the host's PING simply never completes
@@ -261,7 +242,6 @@ static void spi_open_and_arm(void)
 
 	g_resync_count = 0u;
 	arm_request_header();
-	g_cc35_witness[2] = 3u; /* bench debug (REVERT): header armed */
 }
 
 /* Re-open + re-arm the bridge slave after a radio op (boot Wlan_Start or a
@@ -274,9 +254,6 @@ static void spi_open_and_arm(void)
  * host's next poll lands cleanly. */
 void bridge_transport_spi_hw_reinit(void)
 {
-	g_cc35_witness[0] = 0xC35DEB00u; /* bench debug (REVERT): firmware reached SPI init */
-	g_cc35_witness[2] = 1u;          /* reinit entered */
-
 	if (spi != NULL) {
 		SPI_close(spi);
 		spi = NULL;
@@ -300,13 +277,10 @@ void bridge_transport_spi_hw_suspend(void)
 		SPI_close(spi);
 		spi = NULL;
 	}
-	phase             = PH_REQ_HEADER;
-	g_cc35_witness[2] = 4u; /* bench debug (REVERT): bridge suspended for a radio op */
+	phase = PH_REQ_HEADER;
 }
 
 void bridge_transport_spi_hw_init(void)
 {
-	g_cc35_witness[0] = 0xC35DEB00u; /* bench debug (REVERT): firmware reached SPI init */
-	g_cc35_witness[2] = 1u;          /* init entered */
 	spi_open_and_arm();
 }

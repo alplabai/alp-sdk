@@ -19,6 +19,7 @@
 
 #include "alp/protocol/cc3501e.h"
 #include "transport.h"
+#include "worker.h" /* worker_init -- the worker `job` is a static; reset it per test */
 
 /* Replays one request CS transaction through the seams, the way the TI
  * HAL backend's ISR path does: reset staging, feed the bytes, decode. */
@@ -364,14 +365,29 @@ ZTEST(cc3501e_bridge_transport, test_wifi_connect_bad_len_invalid)
 
 /* BLE (v0.3): no BLE host on the stub -> well-formed requests parse and map
  * to NOT_READY; malformed ones are rejected (INVALID) at the protocol layer. */
+
+/* BLE_ENABLE is WORKER-ROUTED (the real body starts Wi-Fi + NimBLE, blocks for
+ * seconds -- must run off the SPI ISR), so it is poll-by-repeat exactly like
+ * GET_MAC: the first request submits the job and replies BUSY; the re-issue
+ * collects the cached result, which on the radio-less stub is NOT_READY. */
 ZTEST(cc3501e_bridge_transport, test_ble_enable_not_ready)
 {
 	uint8_t reply[32];
 	transport_spi_init();
 	const uint8_t e[] = { ALP_CC3501E_CMD_BLE_ENABLE, 0x00u, 0x00u, 0x00u };
+
 	transaction(e, sizeof e);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "ble enable reply = header + status");
+	zassert_equal(n, 5u, "first BLE_ENABLE reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_BLE_ENABLE, 1u);
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_BUSY,
+	              "first BLE_ENABLE submits the job -> BUSY (host retries)");
+
+	transaction(e, sizeof e);
+	n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "re-issued BLE_ENABLE reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_BLE_ENABLE, 1u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no BLE host on stub -> NOT_READY");
 }
 
@@ -565,4 +581,15 @@ ZTEST(cc3501e_bridge_transport, test_cam_enable_disable_ok)
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "CAM_DISABLE(0) -> OK");
 }
 
-ZTEST_SUITE(cc3501e_bridge_transport, NULL, NULL, NULL, NULL, NULL);
+/* The worker's `job` is a file-static singleton shared across the whole TU, so a
+ * worker-routed test that submits but never collects its result (the body runs
+ * synchronously on the stub and caches ERR) would leave the worker non-IDLE and
+ * make EVERY later worker-routed poll report "other cmd busy".  Reset it before
+ * each test so the cases are independent of order. */
+static void reset_worker(void *fixture)
+{
+	(void)fixture;
+	worker_init();
+}
+
+ZTEST_SUITE(cc3501e_bridge_transport, NULL, NULL, reset_worker, NULL, NULL);

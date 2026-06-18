@@ -50,6 +50,8 @@
 #include "alp/peripheral.h"
 #include "alp/chips/cc3501e.h"
 
+#include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up helper */
+
 /*
  * alp,pin-array positional indices for the two SoM-internal CC3501E
  * control nets (declared in boards/<board>.overlay).
@@ -147,32 +149,19 @@ typedef struct {
 	uint32_t last_status;  /* +0x10  (uint32_t)alp_status_t of the last PING   */
 	uint32_t version;      /* +0x14  protocol version (low 16b) | status<<16   */
 	uint32_t phase;        /* +0x18  progress checkpoint (see CC3501E_PHASE_*)  */
-	uint32_t zerr;         /* +0x1C  bench debug: raw Zephyr spi_transceive() errno (last PING) */
-	uint32_t fail_step;    /* +0x20  bench debug: cc3501e_request step that failed (1..6); 0=ok  */
-	uint32_t reqhdr_rx;    /* +0x24  bench debug: MISO bytes clocked back during req-hdr write   */
-	uint32_t reply_hdr;    /* +0x28  bench debug: raw 4 reply-header bytes the CC3501E drove     */
 	/* --- Wi-Fi bring-up results (cc3501e_wifi_* helpers) --- */
-	uint32_t mac_status;  /* +0x2C  (uint32_t)alp_status_t from cc3501e_wifi_get_mac    */
-	uint32_t mac_ok;      /* +0x30  1 once a 6-byte MAC was read; 0 otherwise           */
-	uint32_t mac_lo;      /* +0x34  MAC bytes [0..3] packed LE (mac[0] in bits 7:0)     */
-	uint32_t mac_hi;      /* +0x38  MAC bytes [4..5] in bits 15:0 (mac[4] in bits 7:0)  */
-	uint32_t scan_status; /* +0x3C  (uint32_t)alp_status_t from cc3501e_wifi_scan       */
-	uint32_t scan_count;  /* +0x40  number of scan records parsed                       */
+	uint32_t mac_status;  /* +0x1C  (uint32_t)alp_status_t from cc3501e_wifi_get_mac    */
+	uint32_t mac_ok;      /* +0x20  1 once a 6-byte MAC was read; 0 otherwise           */
+	uint32_t mac_lo;      /* +0x24  MAC bytes [0..3] packed LE (mac[0] in bits 7:0)     */
+	uint32_t mac_hi;      /* +0x28  MAC bytes [4..5] in bits 15:0 (mac[4] in bits 7:0)  */
+	uint32_t scan_status; /* +0x2C  (uint32_t)alp_status_t from cc3501e_wifi_scan       */
+	uint32_t scan_count;  /* +0x30  number of scan records parsed                       */
 	int32_t
-	    scan_first_rssi; /* +0x44 RSSI dBm of the first scan record (sign-extended); 0 if none */
+	    scan_first_rssi; /* +0x34 RSSI dBm of the first scan record (sign-extended); 0 if none */
 	/* --- BLE bring-up results (cc3501e_ble_* helpers) --- */
-	uint32_t ble_status;  /* +0x48  (uint32_t)alp_status_t from cc3501e_ble_enable        */
-	uint32_t ble_enabled; /* +0x4C  1 once the BLE controller + NimBLE host came up        */
+	uint32_t ble_status;  /* +0x38  (uint32_t)alp_status_t from cc3501e_ble_enable        */
+	uint32_t ble_enabled; /* +0x3C  1 once the BLE controller + NimBLE host came up        */
 } cc3501e_witness_t;
-
-/* Bench debug instrumentation (2026-06-16, REVERT after the SPI1-no-clock root
- * cause is found): surface the raw Zephyr SPI errno + the failing request step
- * through the witness so a J-Link can read the exact failure with no console.
- * Defined in src/backends/spi/zephyr_drv.c and chips/cc3501e/cc3501e.c. */
-extern volatile int      alp_spi_dbg_last_zerr;
-extern volatile int      cc3501e_dbg_fail_step;
-extern volatile uint32_t cc3501e_dbg_reqhdr_rx;
-extern volatile uint32_t cc3501e_dbg_reply_hdr;
 
 /* Progress checkpoints written to g_cc3501e_witness.phase so a J-Link can
  * localise where the app got to (read after a fault: .bss survives a halt).
@@ -191,44 +180,8 @@ extern volatile uint32_t cc3501e_dbg_reply_hdr;
 
 volatile cc3501e_witness_t g_cc3501e_witness __attribute__((used));
 
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HE)
-/*
- * AEN LP-pad bring-up shim (Alif Ensemble E8, M55-HE only).
- *
- * WIFI_EN (P15_5) and E_WIFI.NRST (P15_1) are on the Alif LP-GPIO island.
- * The lpgpio node is bound by the generic snps,designware-gpio driver, which
- * does NOT apply Alif pinctrl -- so the LP pads are left un-muxed and their
- * output drivers stay OFF.  Result (confirmed on silicon 2026-06-16): driving
- * the pins via the gpio controller alone leaves the physical pad un-driven,
- * so WIFI_EN never powers the CC3501E (its rail stayed at 0 V) until the LP
- * pad-control registers are programmed for LPGPIO output.
- *
- * The LP pad-control block is at 0x42007000, one 32-bit register per pin
- * (offset = pin*4), per the upstream Alif pinctrl driver
- * (zephyr/drivers/pinctrl/pinctrl_alif.c).  0x23 is the Alif GPIO-output pad
- * config (output driver + read-enable + drive strength) -- the same value the
- * main-domain GPIO pads use.  Verified on silicon: writing it to P15_5/P15_1
- * + driving the lpgpio data register brings the CC3501E rail up.
- *
- * TODO: replace this raw poke with a proper pinctrl path once the alp-sdk
- * Alif GPIO backend applies pinctrl for the LP island.
- */
-#include <zephyr/sys/sys_io.h>
-#define ALIF_LPGPIO_PADCTRL_BASE 0x42007000u
-#define ALIF_PAD_GPIO_OUTPUT     0x23u
-#define ALIF_LP_PIN_WIFI_EN      5u /* P15_5 */
-#define ALIF_LP_PIN_NRST         1u /* P15_1 */
-
-static void aen_lp_pads_enable_output(void)
-{
-	sys_write32(ALIF_PAD_GPIO_OUTPUT, ALIF_LPGPIO_PADCTRL_BASE + ALIF_LP_PIN_WIFI_EN * 4u);
-	sys_write32(ALIF_PAD_GPIO_OUTPUT, ALIF_LPGPIO_PADCTRL_BASE + ALIF_LP_PIN_NRST * 4u);
-}
-#else
-static inline void aen_lp_pads_enable_output(void)
-{
-}
-#endif
+/* The CC3501E SoM bring-up (control pins + inter-chip SPI + reset, incl. the AEN
+ * LP-pad mux) lives in cc3501e_bridge_bringup() (cc3501e_bridge.{c,h}). */
 
 /* Send a bare PING (META opcode 0x00).  The reply payload is just the
  * status byte -- no data -- so we pass a NULL/0 receive buffer.  Returns
@@ -374,92 +327,26 @@ int main(void)
 	g_cc3501e_witness.phase = CC3501E_PHASE_MAIN;
 
 	/*
-	 * Step 1 -- claim the two control GPIOs and make them outputs.
-	 *
-	 * cc3501e_reset() only WRITES these pins (it does not configure
-	 * direction), so we must set them to OUTPUT here first.  If either
-	 * cannot be opened the chip can never be powered, so bail loudly --
-	 * there is nothing useful to do without WIFI_EN.
+	 * Bring up the SoM's CC3501E coprocessor in ONE call -- cc3501e_bridge_bringup()
+	 * (cc3501e_bridge.{c,h}, the reusable SoM bring-up template): opens the inter-chip
+	 * SPI bridge + the WIFI_EN/nRESET control pins, binds them, attaches the GPIO proxy,
+	 * and runs the power+reset sequence (TI SWRU626 + the Puya cold-boot hard-reset).
+	 * An application just copies that pattern; here we wrap it with the SWD witness so
+	 * a console-less bench read sees where it got to.
 	 */
-	alp_gpio_t *wifi_en = alp_gpio_open(CC3501E_PIN_WIFI_EN);
-	alp_gpio_t *nrst    = alp_gpio_open(CC3501E_PIN_NRST);
-	if (wifi_en == NULL || nrst == NULL) {
-		/* BRING-UP DIAGNOSTIC: record which open failed + the last error into
-		 * the witness (no console).  reset_status = 0xE000_0000 | wifi<<8 |
-		 * nrst<<9 | (alp_last_error & 0xFF). */
-		g_cc3501e_witness.reset_status = 0xE0000000u | ((wifi_en == NULL) ? 0x100u : 0u) |
-		                                 ((nrst == NULL) ? 0x200u : 0u) |
-		                                 ((uint32_t)(uint8_t)alp_last_error());
-		printf("[cc3501e-bringup] alp_gpio_open failed (WIFI_EN=%p NRST=%p, err=%d) -- "
-		       "check the alp,pin-array in the board overlay\n",
-		       (void *)wifi_en,
-		       (void *)nrst,
-		       (int)alp_last_error());
-		return 0;
-	}
-	/* Enable the LP-GPIO pad output drivers before driving the pins (the
-	 * gpio_dw controller alone does not mux the Alif LP pads -- see
-	 * aen_lp_pads_enable_output).  No-op off the AEN board. */
-	aen_lp_pads_enable_output();
-	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-	(void)alp_gpio_configure(nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	g_cc3501e_witness.phase = CC3501E_PHASE_GPIO;
-
-	/*
-	 * Step 2 -- open the inter-chip SPI bus (Alif = master).
-	 *
-	 * ALP_SPI_NO_CS: this HW rev wires no chip-select; the driver clocks
-	 * the protocol as fixed-count lockstep transfers instead of framing on
-	 * a CS edge.  Passing a CS pin here would (wrongly) hand a pad to the
-	 * generic gpio-CS path.
-	 */
-	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
-	    .bus_id        = CC3501E_SPI_BUS_ID,
-	    .freq_hz       = CC3501E_SPI_FREQ_HZ,
-	    .mode          = ALP_SPI_MODE_0, /* mode 0 -- matches the CC3501E firmware frameFormat
-	                                      * (SPI_POL0_PHA0) and the on-silicon vendor image */
-	    .bits_per_word = 8u,
-	    .cs_pin_id     = ALP_SPI_NO_CS,
-	});
-	if (spi == NULL) {
-		printf("[cc3501e-bringup] alp_spi_open(bus %u) failed: err=%d -- check the "
-		       "alp-spi1 alias / SPI1 node in the board overlay\n",
-		       CC3501E_SPI_BUS_ID,
-		       (int)alp_last_error());
-		alp_gpio_close(wifi_en);
-		alp_gpio_close(nrst);
-		return 0;
-	}
-	g_cc3501e_witness.phase = CC3501E_PHASE_SPI_OPEN;
-
-	/*
-	 * Step 3 -- bind the driver and run the reset/power sequence.
-	 *
-	 * cc3501e_init() only records the bus; we then hand it the two control
-	 * pins so cc3501e_reset() can sequence WIFI_EN + nRESET per TI SWRU626
-	 * (assert reset, gate rails down, raise WIFI_EN, ~5 ms rail ramp,
-	 * release nRESET, ~900 ms boot budget).  reset() blocks ~905 ms and
-	 * leaves WIFI_EN HIGH (the chip stays powered).
-	 */
-	cc3501e_t fw;
-	(void)cc3501e_init(&fw, spi);
-	fw.enable_pin = wifi_en;
-	fw.reset_pin  = nrst;
-
-#ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
-	/* Hand the bridge handle to the GPIO proxy backend so alp_gpio_open() on a
-	 * proxied E1M IO (cc3501e_gpio_routes[] in cc3501e_gpio_routes.c) routes over
-	 * the inter-chip link.  Non-proxied pins (the Alif's own WIFI_EN/nRESET) still
-	 * delegate to the platform GPIO driver. */
-	(void)alp_gpio_cc3501e_attach(&fw);
-#endif
-
-	printf("[cc3501e-bringup] powering + resetting CC3501E (WIFI_EN high, nRESET pulse, "
-	       "~900 ms boot)...\n");
-	alp_status_t s                 = cc3501e_reset(&fw);
+	cc3501e_t    fw;
+	alp_status_t s                 = cc3501e_bridge_bringup(&fw);
 	g_cc3501e_witness.reset_status = (uint32_t)s;
 	g_cc3501e_witness.phase        = CC3501E_PHASE_RESET;
-	printf("[cc3501e-bringup] cc3501e_reset -> %d%s\n",
+	if (s == ALP_ERR_NOT_PRESENT_ON_THIS_SOC) {
+		printf("[cc3501e-bringup] bridge bring-up failed (SPI bus %u / WIFI_EN+nRESET "
+		       "absent? err=%d) -- check the board overlay\n",
+		       CC3501E_BRIDGE_SPI_BUS_ID,
+		       (int)alp_last_error());
+		return 0;
+	}
+	printf("[cc3501e-bringup] cc3501e bridge bring-up -> %d%s\n",
 	       (int)s,
 	       (s == ALP_ERR_NOSUPPORT) ? " (control pins not bound?)" : "");
 
@@ -543,10 +430,6 @@ int main(void)
 	for (uint32_t i = 0u;; ++i) {
 		s                             = cc3501e_ping(&fw);
 		g_cc3501e_witness.last_status = (uint32_t)s;
-		g_cc3501e_witness.zerr        = (uint32_t)alp_spi_dbg_last_zerr; /* bench debug */
-		g_cc3501e_witness.fail_step   = (uint32_t)cc3501e_dbg_fail_step; /* bench debug */
-		g_cc3501e_witness.reqhdr_rx   = cc3501e_dbg_reqhdr_rx;           /* bench debug */
-		g_cc3501e_witness.reply_hdr   = cc3501e_dbg_reply_hdr;           /* bench debug */
 		if (s == ALP_OK) {
 			g_cc3501e_witness.ping_ok++;
 		} else {
@@ -622,9 +505,8 @@ int main(void)
 		k_msleep(500);
 	}
 
-	/* not reached */
-	alp_spi_close(spi);
-	alp_gpio_close(wifi_en);
-	alp_gpio_close(nrst);
+	/* not reached -- the soak loops forever.  The bridge SPI + control pins are
+	 * owned by cc3501e_bridge_bringup(); a real app that tears down would add a
+	 * cc3501e_bridge_teardown() helper. */
 	return 0;
 }
