@@ -91,9 +91,14 @@ alp_status_t ina236_init(ina236_t         *ctx,
 	alp_status_t s = reg_read16(ctx, INA236_REG_MFG_ID, &id);
 	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 	if (id != INA236_MFG_ID) return ALP_ERR_NOT_READY;
+	/* DEVICE_ID (0x3F) packs DIEID[15:4] + REV[3:0], which varies across INA236
+	 * silicon lots/revisions -- e.g. 0xA480 read on the E1M-AEN801 bench vs the
+	 * 0xA080 some early datasheets cite. It is therefore NOT a reliable identity
+	 * gate; the MFG_ID (0x5449 = "TI") checked above is. Read it to confirm the
+	 * register interface responds, but do not reject the part on its value. */
 	s = reg_read16(ctx, INA236_REG_DEVICE_ID, &id);
 	if (s != ALP_OK) return s;
-	if (id != INA236_DEVICE_ID) return ALP_ERR_NOT_READY;
+	(void)id;
 
 	/* Apply ADCRANGE to the configuration register; leave
      * conversion-time / averaging at reset defaults (continuous

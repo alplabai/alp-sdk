@@ -1,0 +1,63 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * SD Host Controller overlay for the E1M-AEN801 (E8, M55-HE).
+ *
+ * sdhc@48102000 (compatible snps,dwc-sdhc, IRQ 102/103) is transcribed from the
+ * Apache-2.0 zephyr_alif fork -- the alp-sdk E8 SoC dtsi doesn't carry it, so it
+ * is created here.  Driver: zephyr/drivers/sdhc/sdhc_dwc.c (vendored Tier-2,
+ * CONFIG_SDHC_DWC) + the Zephyr SDMMC disk (zephyr,sdmmc-disk).
+ *
+ * PADS -- TBD, see [[project_pending_hw_configs]]: this overlay wires the SD "D"
+ * pad route (CLK=P4_1, CMD=P4_2, D0..D3=P6_0..P6_3) from the upstream
+ * alif-ensemble-pinctrl.h as a documented default; confirm the E1M-AEN801 SoM/EVK
+ * SD routing against the schematic.  (Data lines also want pad read-enable, not in
+ * the upstream alif,pinctrl binding -- needed for real reads, omitted here.)
+ *
+ * CARD REACHABILITY -- the EVK microSD is behind a 74LVC157 SDIO mux whose
+ * EN (IO20) + SEL (IO21) are BOTH on the CC3501E side (driven over the SPI
+ * bridge), so no card is reachable until that bridge routes the mux.  cd-gpios is
+ * omitted (the driver falls back to controller card-detect).
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&pinctrl {
+	pinctrl_sdmmc: pinctrl_sdmmc {
+		group0 {
+			pinmux = <PIN_P4_1__SD_CLK_D>, <PIN_P4_2__SD_CMD_D>,
+				 <PIN_P6_0__SD_D0_D>, <PIN_P6_1__SD_D1_D>,
+				 <PIN_P6_2__SD_D2_D>, <PIN_P6_3__SD_D3_D>;
+			drive-strength = <8>;
+		};
+	};
+};
+
+&{/soc} {
+	sdhc0: sdhc@48102000 {
+		compatible = "snps,dwc-sdhc";
+		reg = <0x48102000 0xF70>;
+		interrupts = <102 3>, <103 3>;
+		interrupt-names = "sdmmc", "sdmmc_wakeup";
+		max-bus-freq = <50000000>;
+		min-bus-freq = <400000>;
+		power-delay-ms = <500>;
+		bus-width = <4>;
+		pinctrl-0 = <&pinctrl_sdmmc>;
+		pinctrl-names = "default";
+		status = "okay";
+
+		sdmmc {
+			compatible = "zephyr,sdmmc-disk";
+			disk-name = "SD";
+			status = "okay";
+		};
+	};
+};

@@ -567,15 +567,25 @@ typedef enum {
 /*                                                                    */
 /* All on E1M_I2C0 (the sensor bus).  Strap values per the EVK        */
 /* schematic UG-E1M-001 + user-supplied confirmation:                 */
-/*   - ICM-42670-P  AD0/SD0 = high     -> 0x69                        */
-/*   - BMI323       SDO_MISO_ADR = low -> 0x68 (no collision)         */
-/*   - BMP581       SDO = high         -> 0x47                        */
-/*   - TCAL9538     A1=1, A0=0         -> 0x72                        */
+/*   - ICM-42670-P  (U12) AD0 -> VIO   -> 0x69  *** COLLISION, see note ***  */
+/*   - BMI323       (U13) SDO -> VIO   -> 0x69  *** COLLISION, see note ***  */
+/*   - BMP581       (U14) SDO -> VIO   -> 0x47  (SDO must not float)    */
+/*   - TCAL9538     A1=1, A0=0         -> 0x72                          */
 /* ================================================================== */
 
-#define EVK_I2C_ADDR_ICM42670 0x69u /**< U12 IMU (AD0=1). */
-#define EVK_I2C_ADDR_BMI323   0x68u /**< U13 IMU (SDO=0).  No collision with ICM. */
-#define EVK_I2C_ADDR_BMP581   0x47u /**< U14 barometer (SDO=1). */
+/* BENCH-CONFIRMED (2026-06-16, E1M-AEN801): U12 (ICM-42670) and U13 (BMI323) BOTH
+ * have their address pins tied to VIO, so both answer at 0x69 and COLLIDE on the bus
+ * -- each ACKs with a different read framing (ICM 8-bit direct vs BMI323 2-dummy-byte),
+ * so a read returns wired-AND garbage (seen: 0x0001) and neither IMU is individually
+ * addressable. Nothing answers at 0x68. The next batch must re-strap ONE of them -- e.g.
+ * tie the BMI323 SDO pin to GND -> 0x68 (its datasheet default). The macros below carry
+ * that de-conflicted target so firmware is correct post-respin; on the pre-respin batch
+ * the IMUs cannot be read (HW conflict, not a driver bug). */
+#define EVK_I2C_ADDR_ICM42670                                                                      \
+	0x69u /**< U12 IMU (AD0->VIO).  Collides with U13 @0x69 until the respin. */
+#define EVK_I2C_ADDR_BMI323                                                                        \
+	0x68u /**< U13 IMU; respin target (SDO->GND = datasheet default).  Pre-respin batch mis-straps it to 0x69 (collides w/ U12). */
+#define EVK_I2C_ADDR_BMP581 0x47u /**< U14 barometer (SDO->VIO; 0x46 if SDO->GND). */
 
 /* BMI323 INT1 (data-ready / motion / FIFO interrupt) routes to
  * E1M IO15, NOT through the main TCAL9538 expander (the expander's
@@ -601,6 +611,12 @@ typedef enum {
  *     evk_pcie_ioexp_pin_t above).  Strap A0=1, A1=0 -> 0x71. */
 #define EVK_I2C_ADDR_TCAL9538_MAIN 0x72u /**< U35 main I/O expander. */
 #define EVK_I2C_ADDR_TCAL9538_PCIE 0x71u /**< U37 PCIe I/O expander. */
+/* BENCH-CONFIRMED (2026-06-16): U35 can be assembled with the TCA6408ARSVR
+ * alternative (R112 fitted, R145 DNP) instead of the TCAL9538, which moves it to
+ * 0x20. It is PCA9538-register-compatible (0x00 input / 0x01 output / 0x02 polarity
+ * / 0x03 config), so the chips/tcal9538 driver drives it unchanged at 0x20 -- read
+ * back config=0xFF + a live input port on the bench. */
+#define EVK_I2C_ADDR_TCA6408A_MAIN 0x20u /**< U35 main I/O expander, TCA6408A variant. */
 /** Backward-compat alias -- legacy name for the main expander. */
 #define EVK_I2C_ADDR_TCAL9538 EVK_I2C_ADDR_TCAL9538_MAIN
 
@@ -625,9 +641,11 @@ typedef enum {
  *   U21  INA236A  3V3 rail     A0 = GND  -> 0x40
  *   U31  INA236A  1V8 rail     A0 = V+   -> 0x41
  *   U33  INA236A  VIO rail     A0 = SDA  -> 0x42
- *   U32  INA236B  +V_CAM0      A0 = GND  -> 0x44
- *   U34  INA236B  +V_CAM1      A0 = V+   -> 0x45
- *   U30  INA236B  5V  rail     A0 = SDA  -> 0x46
+ *   U32  INA236B  +V_CAM0      A0 = GND  -> 0x48  (CONFLICT: TAS2563 broadcast 0x48 --
+ *                                                  re-strap A0=SCL -> 0x4B, or use an
+ *                                                  A variant at 0x43, on the next respin)
+ *   U34  INA236B  +V_CAM1      A0 = V+   -> 0x49
+ *   U30  INA236B  +5V  rail    A0 = SDA  -> 0x4A
  */
 /* INA236A variants occupy 0x40..0x43 (A0 strap = GND/VS/SDA/SCL);
  * INA236B variants occupy 0x48..0x4B with the same A0 encoding.
@@ -644,7 +662,9 @@ typedef enum {
 #define EVK_I2C_ADDR_INA236_VIO                                                                    \
 	0x42u /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max).      */
 #define EVK_I2C_ADDR_INA236_VCAM0                                                                  \
-	0x48u /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max).   */
+	0x4Bu /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max).  Re-strapped A0=SCL
+	       *   -> 0x4B from the next batch; PRE-RESPIN boards had it at 0x48, which collides
+	       *   with the TAS2563 broadcast address (unreadable there).                       */
 #define EVK_I2C_ADDR_INA236_VCAM1                                                                  \
 	0x49u                            /**< U34 INA236B, +V_CAM1 rail (50 mOhm shunt, 1.6 A max).   */
 #define EVK_I2C_ADDR_INA236_5V 0x4Au /**< U30 INA236B, +5V rail  (20 mOhm shunt, 4.0 A max).      */

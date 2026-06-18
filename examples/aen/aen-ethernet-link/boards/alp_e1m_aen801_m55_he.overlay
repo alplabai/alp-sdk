@@ -1,0 +1,99 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Ethernet (GMAC) bring-up overlay for the E1M-AEN801 (E8, M55-HE).
+ *
+ * The ethernet@48100000 node (eth_dwmac core + the alp-sdk alif,ethernet glue,
+ * fixed-link RMII PHY) already lives in zephyr/dts/alif/ensemble_e8_peripherals.dtsi
+ * as status="disabled"; this overlay enables it and supplies the RMII pin group +
+ * a real MAC address.
+ *
+ * RMII PADS: the AUTHORITATIVE E1M-AEN801 routing from
+ * metadata/e1m_modules/aen/alif-ethernet-phy.tsv (NOT the fork's reference route,
+ * which the first cut wrongly used):
+ *   REFCLK P11_0 | RXD0 P11_3 | RXD1 P1_1 | CRS_DV P6_7  (inputs)
+ *   TXD0  P10_4  | TXD1 P10_5 | TXEN  P1_5               (outputs)
+ * The input pads carry `input-enable` (the upstream pad REN bit, set by
+ * soc/alif/ensemble/pinctrl_soc.h) so the RMII RX buffers actually sense. The PHY
+ * is unmanaged (fixed-link) so MDC/MDIO (P11_2/P11_1) are not muxed.
+ *
+ * PHY POWER/RESET are ALIF pins (per the SoM TSV), NOT CC3501E as the first cut
+ * claimed: E_PHY_PWRDWN = P15_4 (lpgpio) and E_PHY_RESET = P11_6 (gpio11). Both
+ * are added below and driven by main(); the alp-sdk E8 dtsi carries gpio0..gpio9
+ * only, so gpio11 + lpgpio are created here (reg/IRQ/ngpios from the fork dtsi).
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+		/*
+		 * Put SYSTEM RAM in the global on-chip SRAM0 (sram@2000000, 4 MiB,
+		 * @0x02000000 -- declared by the SoC dtsi, the same bank the NPU uses),
+		 * NOT the generated default `zephyr,sram = &dtcm`. The GMAC is a DMA bus
+		 * master: it fetches the descriptor rings and reads/writes the net_buf
+		 * packet pool over its own AXI master. The M55 DTCM (CPU-local alias
+		 * 0x20000000) is tightly-coupled and NOT on the GMAC DMA path, so rings +
+		 * buffers left in DTCM are invisible to the DMA -- no frames move in
+		 * EITHER direction (bench: SOM rx_bytes=0 AND the switch/server NIC RX=0).
+		 * SRAM0 is globally addressed (CPU addr == DMA addr), which is exactly
+		 * what the upstream DWMAC core needs (it hands the raw CPU pointer to the
+		 * DMA -- no local_to_global translation). With CONFIG_DCACHE=n (prj.conf)
+		 * the CPU and the DMA share a coherent view. This is the eth_dwmac glue's
+		 * documented Tier-1.5 placement gap (see eth_dwmac_alif_ensemble.c header).
+		 */
+		zephyr,sram = &sram0;
+	};
+};
+
+&pinctrl {
+	pinctrl_eth: pinctrl_eth {
+		/* RMII inputs (REFCLK + RX) + MDIO (bidirectional, read during MDIO
+		 * transactions) -- input-enable sets the pad REN bit so they sense.
+		 * MDC/MDIO = P11_2/P11_1 (SoM TSV) let us read the PHY status registers. */
+		group0 {
+			pinmux = <PIN_P11_0__ETH_REFCLK_B>, <PIN_P11_3__ETH_RXD0_B>,
+				 <PIN_P1_1__ETH_RXD1_C>, <PIN_P6_7__ETH_CRS_DV_A>,
+				 <PIN_P11_1__ETH_MDIO_B>;
+			input-enable;
+		};
+		/* RMII outputs (TX) + MDC (MDIO clock). */
+		group1 {
+			pinmux = <PIN_P10_4__ETH_TXD0_B>, <PIN_P10_5__ETH_TXD1_B>,
+				 <PIN_P1_5__ETH_TXEN_C>, <PIN_P11_2__ETH_MDC_B>;
+		};
+	};
+};
+
+/* PHY reset line E_PHY_RESET = P11_6 (gpio11 pin 6). gpio11@4900b000 from the
+ * fork dts (snps,designware-gpio, ngpios 8, IRQ 267..). */
+&{/soc} {
+	gpio11: gpio@4900b000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900B000 0x1000>;
+		ngpios = <8>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+	};
+
+	/* PHY power-down line E_PHY_PWRDWN = P15_4 (lpgpio pin 4). lpgpio@42002000
+	 * (AON/LP domain) from the fork dts. */
+	lpgpio: gpio@42002000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x42002000 0x1000>;
+		ngpios = <8>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+	};
+};
+
+&ethernet {
+	pinctrl-0 = <&pinctrl_eth>;
+	pinctrl-names = "default";
+	local-mac-address = [02 01 56 78 43 21];
+	status = "okay";
+};

@@ -1,0 +1,20 @@
+# Copyright (c) 2025 Alif Semiconductor
+# Copyright (c) 2026 Alp Lab AB
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR 0017 Tier-2 (vendored fork binding, INTERIM).  Binds the Alif Ensemble
+# on-die MRAM flash controller (compatible "alif,mram-flash-controller", base
+# 0x80000000) so the in-tree flash_mram_alif driver (a vendored copy of the
+# Apache-2.0 zephyr_alif drivers/flash/flash_mram_alif.c) can attach and set
+# FLASH_HAS_DRIVER_ENABLED for MCUboot's flash_map.  Upstream Zephyr v4.4 +
+# hal_alif expose the MRAM only as a "zephyr,memory-region"/"soc-nv-flash"
+# memory region (no flash driver).  Retire onto the opt-in sdk-alif fork once
+# the MRAM node is repointed AND bench-verified (task #21).
+# See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+
+description: Alif SoC MRAM flash controller
+
+compatible: "alif,mram-flash-controller"
+
+include: flash-controller.yaml

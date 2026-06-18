@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the GPU2D bench example on the REAL E8 board target,
+# BENCH-VERIFIED PASS on E8 2026-06-17: the portable <alp/gpu2d.h> sw_fallback
+# (fill_rect / blit / blend REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) runs on M55-HE
+# silicon with exact-value-correct output.
+#
+# This scenario compile-checks the example on the AEN801 M55-HE board (the
+# sw_fallback PIXEL logic itself is already unit-tested on native_sim in
+# tests/unit/gpu2d_registry; this adds the board-target build of the example +
+# its ITCM RAM-run overlay).  It is intentionally filtered OUT of the native_sim
+# PR gate: the only platform allowed is the AEN801 M55-HE board, which the
+# native_sim twister run never selects, so it adds a board-target build check
+# without slowing the gate.
+#
+# NOTE: the platform id below MUST match the board .yaml `identifier` exactly
+# (zephyr/boards/alp/e1m_aen801_m55_he/..._rtss_he.yaml) or twister silently
+# skips the scenario.
+
+sample:
+  name: aen-gpu2d-bench
+  description: |
+    Bench RAM-run GPU2D software-fallback proof for the E1M-AEN801 (Alif Ensemble
+    E8, Cortex-M55-HE): exercises the portable <alp/gpu2d.h> fill_rect / blit /
+    blend surface through the priority-0 pure-C sw_fallback backend and checks
+    every op against exact expected pixel values.  BENCH-VERIFIED PASS on E8
+    (2026-06-17).
+
+tests:
+  alp_sdk.examples.aen.gpu2d_bench.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - gpu2d
+    build_only: true   # the bench fill/blit/blend run is a flash, not a CI run.

@@ -15,8 +15,8 @@
  * with their own silicon-specific entries in
  * src/backends/camera/ at higher priority than this wildcard.
  * ISP-specific knobs (configure_isp) follow issue #21 separately
- * since the AEN Mali-C55 ISP fabric isn't wired by Zephyr's
- * portable video driver class yet.
+ * since the AEN VeriSilicon ISP Pico (vsi,isp-pico) fabric isn't
+ * wired by Zephyr's portable video driver class yet.
  *
  * @par Tracking: github.com/alplabai/alp-sdk/issues/20
  * @par Tracking: github.com/alplabai/alp-sdk/issues/21

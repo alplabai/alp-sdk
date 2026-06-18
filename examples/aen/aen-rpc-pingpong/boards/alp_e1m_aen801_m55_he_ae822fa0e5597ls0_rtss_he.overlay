@@ -1,0 +1,114 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-rpc-pingpong -- M55-HE (ipc0 REMOTE / vring slave) overlay.
+ *
+ * The mirror of the HP host overlay.  HE is the remote, so its tx/rx frames
+ * are the OPPOSITE windows of the same two MHU instances:
+ *   - tx (HE -> HP) : MHU1 HE-TX window @0x400B0000, HE IRQ 44
+ *   - rx (HP -> HE) : MHU0 HE-RX window @0x40080000, HE IRQ 41
+ *
+ * Addresses + IRQs are clean-room-transcribed from the Alif DFP E8 part
+ * (AE822FA0E5597, rtss_he/soc.h):
+ *   MHU_M55HE_M55HP_1_TX_BASE = 0x400B0000, MHU_M55HE_M55HP_1_TX_IRQn = 44
+ *   MHU_M55HP_M55HE_0_RX_BASE = 0x40080000, MHU_M55HP_M55HE_0_RX_IRQn = 41
+ * The HE -> HP TX window (0x400B0000) is bench-proven by aen-dualcore-doorbell
+ * (commit b81a3738): HE wrote CH0_SET @0x400B0000 and HP saw every ring at its
+ * paired RX @0x400A0000.
+ *
+ * The shared SRAM0 carve-out (sram_ipc0 @0x02010000, 64 KiB) and the ipc0
+ * buffer-size MUST match the HP overlay byte-for-byte -- the static vrings are
+ * laid out by address, so host and remote have to agree.
+ *
+ * SE-service nodes + itcm/dtcm global_base are enabled here too: the HE app
+ * does not itself call boot_cpu in this example, but keeping the SE transport
+ * + the HE global TCM aliases (ITCM 0x58000000 / DTCM 0x58800000, from the fork
+ * ensemble_rtss_he.dtsi) bound matches the proven aen-dualcore-doorbell HE
+ * overlay and keeps the two builds symmetric.
+ *
+ * vendor-ext, BENCH-UNVERIFIED for the ipc_service/RPMsg path.
+ */
+
+#include <zephyr/dt-bindings/ipc_service/static_vrings.h>
+
+/ {
+	chosen {
+		zephyr,ipc     = &ipc0;
+		zephyr,ipc-shm = &sram_ipc0;
+	};
+
+	sram_ipc0: memory@2010000 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x02010000 0x10000>;
+		zephyr,memory-region = "SRAM_IPC0";
+	};
+
+	soc {
+		/* HE -> HP sender frame (MHU1 TX window) -- bench-proven. */
+		mhu_he_tx: mhu@400b0000 {
+			compatible = "alif,mhuv2-mbox";
+			reg = <0x400B0000 0x1000>;
+			alif,direction = "tx";
+			#mbox-cells = <1>;
+			status = "okay";
+		};
+
+		/*
+		 * HP -> HE receiver frame. Per-core MHU-1 alias (proven in
+		 * aen-dualcore-ipc): from HE, 0x400A0000 = "my RX from HP", which the
+		 * fabric feeds from HP's TX @0x400B0000 -- the same pair both
+		 * directions, no separate MHU0.
+		 */
+		mhu_he_rx: mhu@400a0000 {
+			compatible = "alif,mhuv2-mbox";
+			reg = <0x400A0000 0x1000>;
+			interrupts = <43 3>;
+			alif,direction = "rx";
+			#mbox-cells = <1>;
+			status = "okay";
+		};
+
+		ipc0: ipc0 {
+			compatible = "zephyr,ipc-openamp-static-vrings";
+			memory-region = <&sram_ipc0>;
+			mboxes = <&mhu_he_tx 0>, <&mhu_he_rx 0>;
+			mbox-names = "tx", "rx";
+			role = "remote";
+			zephyr,buffer-size = <256>;
+			status = "okay";
+		};
+	};
+};
+
+/*
+ * RAM-run: retarget ROM to ITCM.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&itcm {
+	compatible = "alif,itcm";
+	global_base = <0x58000000>;
+};
+
+&dtcm {
+	compatible = "alif,dtcm";
+	global_base = <0x58800000>;
+};
+
+&seservice0r {
+	status = "okay";
+};
+
+&seservice0s {
+	status = "okay";
+};
+
+&se_service {
+	status = "okay";
+};

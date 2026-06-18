@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the clean-room alif,crc CRC-engine driver
+# (crc_alif.c).  BENCH-UNVERIFIED: the on-silicon reflect/invert post-processing
+# order is the open bench-confirm item (see the README / main.c note); the CI
+# gate only compile-checks the driver + DT node on the real E8 board target.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE board
+# only).
+
+sample:
+  name: aen-crc-regcheck
+  description: |
+    Bench RAM-run CRC-engine (alif,crc) proof for the E1M-AEN801 (Alif Ensemble
+    E8, Cortex-M55-HE): binds crc0@48107000 via the alp-sdk clean-room crc_alif
+    driver, computes CRC32_IEEE over a fixed 16-byte buffer through the portable
+    Zephyr CRC class API (crc_begin/update/finish), and compares against a
+    host-precomputed reference (0x684FC31C).  BENCH-UNVERIFIED.
+
+tests:
+  alp_sdk.examples.aen.crc_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - crc
+    build_only: true   # the CRC-value check is a bench flash, not a CI run.

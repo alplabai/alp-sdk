@@ -1,0 +1,88 @@
+diff --git a/se_services/zephyr/include/se_service.h b/se_services/zephyr/include/se_service.h
+index ca1ed53..71b22a4 100644
+--- a/se_services/zephyr/include/se_service.h
++++ b/se_services/zephyr/include/se_service.h
+@@ -278,6 +278,21 @@ int se_service_boot_reset_soc(void);
+  */
+ int se_service_boot_reset_cpu(uint32_t cpu_id);
+ 
++/**
++ * @brief Request SE to boot (release) a specific CPU at an address.
++ *
++ * Starts a CPU whose image the SES already loaded (e.g. a TOC entry flagged
++ * "load" without "boot"). The booted core uses this to release the other M55.
++ *
++ * @param cpu_id  Identifier of the CPU to boot (EXTSYS_0 = M55-HP, EXTSYS_1 = M55-HE).
++ * @param address Boot/VTOR address of the target image (0 = the SES-loaded address).
++ * @retval 0 Success.
++ * @retval -EAGAIN Operation timed out. Retry after a delay.
++ * @retval -EBUSY SE is busy. Retry after a delay.
++ * @return Positive error code returned by SE for a failed service request.
++ */
++int se_service_boot_cpu(uint32_t cpu_id, uint32_t address);
++
+ /**
+  * @brief Update the ALIF STOC using the provided image.
+  *
+diff --git a/se_services/zephyr/src/se_service.c b/se_services/zephyr/src/se_service.c
+index 4576a1d..562be5c 100644
+--- a/se_services/zephyr/src/se_service.c
++++ b/se_services/zephyr/src/se_service.c
+@@ -87,6 +87,7 @@ typedef union {
+ 	aipm_set_off_profile_svc_t set_off_d;
+ 	aipm_get_off_profile_svc_t get_off_d;
+ 	control_cpu_svc_t cpu_reboot_d;
++	boot_cpu_svc_t boot_cpu_d;
+ 	se_sleep_svc_t se_sleep_d;
+ 	update_stoc_svc_t update_stoc_svc_d;
+ 	clk_set_clk_divider_svc_t set_clk_divider_d;
+@@ -1344,6 +1345,49 @@ int se_service_boot_reset_cpu(uint32_t cpu_id)
+ 	return 0;
+ }
+ 
++int se_service_boot_cpu(uint32_t cpu_id, uint32_t address)
++{
++	int err, i = 0, resp_err = -1;
++
++	/* Ensure SE is ready to receive service calls */
++	err = se_service_ensure_ready();
++	if (err) {
++		return err;
++	}
++
++	err = k_mutex_lock(&svc_mutex, K_MSEC(MUTEX_TIMEOUT));
++	if (err) {
++		LOG_ERR("Unable to lock mutex (error = %d)\n", err);
++		return err;
++	}
++
++	memset(&se_service_all_svc_d, 0, sizeof(se_service_all_svc_d));
++	se_service_all_svc_d.boot_cpu_d.header.hdr_service_id = SERVICE_BOOT_CPU;
++	se_service_all_svc_d.boot_cpu_d.send_cpu_id = cpu_id;
++	se_service_all_svc_d.boot_cpu_d.send_address = address;
++
++	while (i < MAX_TRIES) {
++		err = send_msg_to_se((uint32_t *)&se_service_all_svc_d.service_header,
++				     sizeof(se_service_all_svc_d.service_header), SERVICE_TIMEOUT);
++		if (!err) {
++			break;
++		}
++		/* SE service timed out. Increment count */
++		++i;
++	}
++	resp_err = se_service_all_svc_d.boot_cpu_d.resp_error_code;
++	k_mutex_unlock(&svc_mutex);
++	if (i >= MAX_TRIES) {
++		LOG_ERR("Failed to boot cpu with SE (error = %d)\n", err);
++		return err;
++	}
++	if (resp_err) {
++		LOG_ERR("received response error = %d\n", resp_err);
++		return resp_err;
++	}
++	return 0;
++}
++
+ int se_service_clock_set_divider(clock_divider_t divider, uint32_t value)
+ {
+ 	int err, i = 0, resp_err = -1;

@@ -1,0 +1,21 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Sysbuild image overlay for the MCUboot domain on the E1M-AEN801 (Ensemble E8).
+ * The Alif Secure Enclave (SES) loads an ATOC image to RAM and jumps to it --
+ * its loadAddress CANNOT be an MRAM address (SETOOLS app-gen-toc rejects it).
+ * So MCUboot must be RAM-linked: retarget its ROM region to ITCM (the same trick
+ * the per-driver RAM-run apps use).  slot0/slot1 stay on the MRAM flash-controller
+ * (&mram_storage) for flash_map; MCUboot reads/verifies them via flash_mram_alif.
+ *
+ * Flash model (bench-derived 2026-06-16): SES loads this MCUboot to ITCM
+ * (ATOC loadAddress 0x58000000, load+boot) -> MCUboot runs from ITCM -> verifies
+ * slot0 (MRAM 0x80010000) -> chain-loads the slot0 app (XIP from MRAM).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

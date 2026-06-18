@@ -187,14 +187,29 @@ alif_e7_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capab
 
 static alp_status_t alif_e7_read_raw(alp_adc_backend_state_t *st, int32_t *raw_out)
 {
-	alif_e7_adc_state_t *s   = (alif_e7_adc_state_t *)st->be_data;
-	struct adc_sequence  seq = {
-		 .channels    = BIT(s->spec->channel_id),
-		 .buffer      = &s->sample_buf,
-		 .buffer_size = sizeof s->sample_buf,
-		 .resolution  = s->resolution_bits,
-		 .oversampling =
-            (s->oversample_ratio > 1u) ? (uint8_t)__builtin_ctz(s->oversample_ratio) : 0u,
+	alif_e7_adc_state_t *s = (alif_e7_adc_state_t *)st->be_data;
+
+	/* Same shared adc_alif driver as the E8 sibling: it UNCONDITIONALLY
+	 * dereferences sequence->options->user_data (adc_alif.c:728) and rejects a
+	 * non-zero adc_sequence.resolution with -ENOTSUP (:755).  So .options MUST be
+	 * non-NULL and .resolution MUST be 0 -- otherwise adc_read() NULL-faults
+	 * (empty console) or returns -ENOTSUP -> ALP_ERR_IO.  Mirror the E8 fix; the
+	 * raw->uV scale uses st->resolution_bits set from the DT channel at open. */
+	uint8_t                           cmp_status = 0;
+	const struct adc_sequence_options opts       = {
+		      .interval_us     = 0,
+		      .callback        = NULL,
+		      .user_data       = &cmp_status,
+		      .extra_samplings = 0,
+	};
+	struct adc_sequence seq = {
+		.options     = &opts,
+		.channels    = BIT(s->spec->channel_id),
+		.buffer      = &s->sample_buf,
+		.buffer_size = sizeof s->sample_buf,
+		.resolution  = 0,
+		.oversampling =
+		    (s->oversample_ratio > 1u) ? (uint8_t)__builtin_ctz(s->oversample_ratio) : 0u,
 	};
 	int err = adc_read(s->spec->dev, &seq);
 	if (err != 0) {

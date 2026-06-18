@@ -15,8 +15,21 @@
  * Copyright 2026 Alp Lab AB
  *
  * ============================== STATUS ==============================
- * ADR 0017 Tier-1.5 (in-tree thin glue over an UPSTREAM core) -- INTERIM,
- * BENCH-UNVERIFIED.
+ * ADR 0017 Tier-1.5 (in-tree thin glue over an UPSTREAM core) -- BENCH-VERIFIED
+ * PASS on E8 (2026-06-17).
+ *
+ * Proven end-to-end on the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): the
+ * aen-ethernet-link app pulled a real DHCP lease (192.168.10.137) off the bench
+ * switch and was server-side REACHABLE (dnsmasq lease + ARP). The decisive fix
+ * was a BUFFER-PLACEMENT one, owned by the board overlay rather than this glue:
+ * the GMAC descriptor rings AND the net_buf packet pool had to move OFF the M55
+ * DTCM (CPU-local alias 0x20000000, NOT on the GMAC DMA's AXI path) into the
+ * global on-chip SRAM0 @0x02000000 (CPU addr == DMA addr), with CONFIG_DCACHE=n
+ * so the CPU and the DMA master share a coherent view -- see the descriptor-ring
+ * placement note + BUILD_ASSERT below and the board overlay's
+ * `chosen { zephyr,sram = &sram0; }`. On the bench the RMII ref-clock came from
+ * the EXTERNAL 50 MHz oscillator (ETH_CTRL refclk-select = external pin); the
+ * AUTO internal-PLL fallback path is real code but was NOT the verified path.
  *
  * KEPT in-tree, NOT retired onto the sdk-alif fork: the fork forked the DWMAC
  * *core* (its local_to_global() is patched into the core's address path), so
@@ -32,10 +45,11 @@
  * (Apache-2.0) and adapted to the glue interface of the DWMAC core shipped in
  * OUR pinned upstream Zephyr v4.4. The MAC/DMA register writes are transcribed
  * verbatim from that source and from eth_dwmac_priv.h; no register value has
- * been invented. It has NOT been run on real silicon. Cannot build under
- * native_sim (Cortex-M55 target), hence bench-unverified in CI.  INTERIM until
- * the two E8 bench gates pass (address-translation placement + RMII ref-clk),
- * then promotes to permanent Tier-1.5.
+ * been invented. It RUNS ON REAL SILICON (E8 bench, 2026-06-17: DHCP lease +
+ * server-side REACHABLE). It cannot build under native_sim (Cortex-M55 target),
+ * so CI cannot exercise it; the build-only twister regression in
+ * examples/aen/aen-ethernet-link/testcase.yaml compile-checks the wire-up on
+ * the real board target instead (filtered out of the native_sim PR gate).
  *
  * Compatible: `alif,ethernet` (+ `snps,designware-ethernet`).
  * Driver:  zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c
@@ -105,10 +119,13 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
  *
  * Default (CONFIG_..._AUTO): try the external pin (production wiring), then
  * fall back to the internal PLL if no external clock is present -- detected by
- * whether a GMAC DMA soft-reset can complete.  Bench-validated on the E8: the
- * reduced-population bench board has no working external oscillator, so the
- * probe selects the internal PLL and the MAC comes up.  The two FORCE_* Kconfig
- * options skip the probe and pin a single source.
+ * whether a GMAC DMA soft-reset can complete.  Bench-verified on the E8
+ * (2026-06-17): the E1M-AEN801 bench board feeds the PHY a real EXTERNAL 50 MHz
+ * RMII oscillator, so the AUTO probe's first try (external REFCLK pin) succeeds
+ * and the MAC reset completes -- the verified path is the EXTERNAL source.  The
+ * internal-PLL fallback branch is real code but was NOT exercised on this bench;
+ * it remains bench-unverified.  The two FORCE_* Kconfig options skip the probe
+ * and pin a single source (FORCE_EXTERNAL matches the verified bench wiring).
  */
 #define ALIF_ETH_CTRL_REG 0x4903F080U
 #define ALIF_ETH_CTRL_RMII_REFCLK_SEL BIT(4)
@@ -222,12 +239,40 @@ int dwmac_bus_init(struct dwmac_priv *p)
  * header: with the upstream core these rings MUST resolve to the same address
  * for the CPU and the DMA, i.e. they must land in shared SRAM via its global
  * alias, which the SoC overlay's nocache region selection is responsible for.
+ *
+ * CACHE-COHERENCY / PLACEMENT REQUIREMENT (bench-proven, E8 2026-06-17):
+ * these rings AND the net_buf packet pool MUST live in the global on-chip SRAM0
+ * (sram@2000000, @0x02000000), NEVER in the M55 DTCM. The board overlay pins
+ * this via `chosen { zephyr,sram = &sram0; }`; the rings inherit system-RAM
+ * placement, and the project conf keeps CONFIG_DCACHE=n so the CPU and the GMAC
+ * DMA master share a coherent view. The DTCM (CPU-local alias 0x20000000) is
+ * tightly-coupled and is NOT on the GMAC DMA's AXI path: rings/buffers left
+ * there are invisible to the DMA and no frame moves in either direction (the
+ * original no-link, root-caused on the bench). This is the upstream-core
+ * placement gap (the core hands the raw CPU pointer to the DMA, no
+ * local_to_global translation), so the requirement is enforced at the
+ * board/SoC layer, not in this glue.
  */
 #if defined(CONFIG_NOCACHE_MEMORY)
 #define __desc_mem __nocache __aligned(4)
 #else
 #define __desc_mem __aligned(4)
 #endif
+
+/*
+ * Coherency guard for the descriptor rings / DMA buffers. The rings land in a
+ * nocache section when CONFIG_NOCACHE_MEMORY is available (ARCH_HAS_..._SUPPORT,
+ * which holds on the M55); when it is not, the ONLY coherent option left is a
+ * fully-disabled data cache (CONFIG_DCACHE=n), as on the bench-verified E8
+ * config. Reject the silent-corruption combination (cache on, no nocache region,
+ * cache-incoherent DMA) at build time -- it would compile but move garbage. The
+ * SRAM0-vs-DTCM placement itself is a `chosen zephyr,sram` (board overlay) fact
+ * the linker resolves to a runtime address, so it cannot be asserted here.
+ */
+BUILD_ASSERT(IS_ENABLED(CONFIG_NOCACHE_MEMORY) || !IS_ENABLED(CONFIG_DCACHE),
+	     "eth_dwmac_alif: GMAC DMA needs coherent descriptor/buffer memory -- "
+	     "enable CONFIG_NOCACHE_MEMORY or set CONFIG_DCACHE=n, and pin "
+	     "zephyr,sram=&sram0 (global SRAM0, NEVER DTCM) in the board overlay");
 
 static struct dwmac_dma_desc dwmac_tx_descs[NB_TX_DESCS] __desc_mem;
 static struct dwmac_dma_desc dwmac_rx_descs[NB_RX_DESCS] __desc_mem;

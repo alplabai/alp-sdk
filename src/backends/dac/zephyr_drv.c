@@ -47,11 +47,31 @@ static const struct device *const alp_dac_devs[] = {
 	ALP_DAC_DEV_OR_NULL(1),
 };
 
+/* DAC full-scale reference (millivolts), per channel, sourced from the DT node's
+ * `alif,reference-mv` property.  The mv->code conversion divides by this, so it
+ * MUST be the converter's true full-scale reference, NOT the 3.3 V supply rail:
+ * on the Alif Ensemble DAC12 the full-scale IS the DAC VREF (~0.9 V per the
+ * board notes -- a bench-pending value carried in DT, see the binding), so a
+ * hardcoded 3300 here would make every setpoint ~3.6x too low.  Channels whose
+ * alias node lacks the property (e.g. the 3.3 V GD32/V2N DAC route) default to
+ * 3300, preserving the historical rail-referenced behaviour for those SoCs. */
+#define ALP_DAC_REF_MV_OR_DEFAULT(idx)                                                             \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_dac, idx))),                                   \
+	            (DT_PROP_OR(DT_ALIAS(_CONCAT(alp_dac, idx)), alif_reference_mv, 3300)),            \
+	            (3300))
+
+static const uint16_t alp_dac_ref_mv[] = {
+	ALP_DAC_REF_MV_OR_DEFAULT(0),
+	ALP_DAC_REF_MV_OR_DEFAULT(1),
+};
+
 /* Per-handle setpoint cache.  The Zephyr DAC API is write-only, so
  * read-back returns the last value written through this backend. */
 typedef struct {
 	uint8_t  channel;
 	uint16_t last_mv;
+	uint16_t reference_mv; /* DAC full-scale reference (mV), from DT; see
+	                        * alp_dac_ref_mv[].  The mv->code divisor. */
 } zephyr_dac_state_t;
 
 #ifndef CONFIG_ALP_SDK_MAX_DAC_HANDLES
@@ -113,10 +133,11 @@ z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilitie
 		return ALP_ERR_NOT_READY;
 	}
 
-	/* Bring up the channel with the default 12-bit / 3.3 V reference
-     * config.  Boards that need a different setup can override via
-     * a future cfg->resolution_bits / reference field; today the
-     * defaults match every E1M-conformant SoC's documented DAC. */
+	/* Bring up the channel at 12-bit.  The full-scale reference is NOT
+     * assumed to be the 3.3 V rail -- it is read from the DT node's
+     * `alif,reference-mv` (the converter's true VREF; on the Alif
+     * Ensemble DAC12 that is the ~0.9 V DAC VREF, not the supply).
+     * Channels whose alias node lacks the property default to 3300 mV. */
 	const struct dac_channel_cfg dacfg = {
 		.channel_id = (uint8_t)cfg->channel_id,
 		.resolution = 12u,
@@ -133,6 +154,8 @@ z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilitie
 	}
 	bs->channel = (uint8_t)cfg->channel_id;
 	bs->last_mv = 0u;
+	bs->reference_mv =
+	    (cfg->channel_id < ARRAY_SIZE(alp_dac_ref_mv)) ? alp_dac_ref_mv[cfg->channel_id] : 3300u;
 
 	st->dev         = (void *)dev;
 	st->channel_id  = cfg->channel_id;
@@ -157,10 +180,12 @@ static alp_status_t z_write_mv(alp_dac_backend_state_t *st, uint16_t mv)
 	const struct device *dev = (const struct device *)st->dev;
 	zephyr_dac_state_t  *bs  = (zephyr_dac_state_t *)st->be_data;
 
-	/* Convert millivolts to a 12-bit code against the documented
-     * 3.3 V reference.  Saturate above 3300 mV (rail-clamped). */
-	const uint32_t mv_cap = (mv > 3300u) ? 3300u : (uint32_t)mv;
-	const uint32_t code   = (mv_cap * ((1u << 12) - 1u)) / 3300u;
+	/* Convert millivolts to a 12-bit code against the channel's DT-provided
+     * full-scale reference (bs->reference_mv -- the converter's VREF, NOT a
+     * hardcoded 3.3 V rail).  Saturate above the reference (rail-clamped). */
+	const uint32_t ref_mv = (bs->reference_mv != 0u) ? (uint32_t)bs->reference_mv : 3300u;
+	const uint32_t mv_cap = ((uint32_t)mv > ref_mv) ? ref_mv : (uint32_t)mv;
+	const uint32_t code   = (mv_cap * ((1u << 12) - 1u)) / ref_mv;
 	int            err    = dac_write_value(dev, bs->channel, code);
 	if (err != 0) return errno_to_alp(err);
 	bs->last_mv = mv;
@@ -175,7 +200,8 @@ static alp_status_t z_read_mv(alp_dac_backend_state_t *st, uint16_t *mv_out)
      * principle that the rounded hardware value matches the last
      * write to within one LSB and apps that care about exact
      * fidelity can recover the saturated value from the documented
-     * 12-bit / 3.3 V transfer function. */
+     * 12-bit transfer function against the channel's DT reference
+     * (bs->reference_mv -- the converter VREF, not a fixed 3.3 V). */
 	*mv_out = bs->last_mv;
 	return ALP_OK;
 }

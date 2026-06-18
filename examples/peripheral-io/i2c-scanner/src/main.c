@@ -32,9 +32,14 @@ int main(void)
 
 	int responders = 0;
 	for (uint8_t addr = 0x08; addr < 0x78; addr++) {
-		/* Zero-length write — the chip ACKs its address byte if
-         * present, NACKs otherwise. */
-		alp_status_t s = alp_i2c_write(bus, addr, NULL, 0);
+		/* Probe with a 1-byte read: a present chip ACKs its address
+         * byte (we discard the data), an empty address NACKs.  We use a
+         * read rather than a zero-length write because some controllers
+         * — e.g. the DesignWare i2c_dw on Alif Ensemble — put nothing on
+         * the bus for a zero-length transfer, so no device ever ACKs and
+         * the scan finds nothing.  A 1-byte read is the portable probe. */
+		uint8_t      scratch;
+		alp_status_t s = alp_i2c_read(bus, addr, &scratch, 1);
 		if (s == ALP_OK) {
 			printf("[i2c] addr 0x%02x acked\n", addr);
 			responders++;

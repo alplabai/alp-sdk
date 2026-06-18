@@ -1,0 +1,25 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon GPU2D software-fallback validation overlay for the E1M-AEN801 (Alif
+ * Ensemble E8, M55-HE), bench RAM-run via J-Link.
+ *
+ * GPU2D's sw_fallback is a pure-CPU backend with NO device-tree node (it
+ * registers as the priority-0 "*" wildcard), so this overlay only carries the
+ * mandatory bench RAM-run retarget -- no peripheral nodes are needed.
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

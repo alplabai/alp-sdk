@@ -17,6 +17,21 @@ if(CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif)
 endif()
 
+# Alif Ensemble on-die MRAM flash driver (compatible
+# "alif,mram-flash-controller", base 0x80000000), vendored VERBATIM from the
+# Apache-2.0 zephyr_alif fork.  Compiled into the DEFAULT Zephyr library via
+# zephyr_sources_ifdef -- and DELIBERATELY BEFORE the CONFIG_ALP_SDK
+# early-return below (the soc-bridge precedent) -- because the MCUboot
+# bootloader image needs it but never sets CONFIG_ALP_SDK.  Upstream Zephyr
+# v4.4 + hal_alif ship no flash-class driver for the MRAM (it is exposed only
+# as a memory region), so MCUboot's flash_map has no driver to read/write
+# slot0/slot1; this fork copy sets FLASH_HAS_DRIVER_ENABLED.  Pure CMSIS
+# register/memory access: no private upstream header and no hal_alif library,
+# so no extra include path.  Binding under zephyr/dts/bindings/flash_controller/;
+# node in the board overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_sources_ifdef(CONFIG_MRAM_FLASH_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_mram_alif.c)
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
@@ -117,6 +132,20 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
 
+# Alif Ensemble hardware-semaphore (HWSEM) driver -- vendor-ext, BENCH-UNVERIFIED.
+# AMP request/release latch shared between the two RTSS cores (M55-HE <-> M55-HP).
+# HWSEM has no upstream Zephyr device class, so this is a "misc" (no-class) driver
+# exposing a tiny take/give API (DT_DRV_COMPAT alif_hwsem).  Cannot build under
+# native_sim (Cortex-M55 target), hence bench-unverified in CI.  Driver:
+# zephyr/drivers/misc/alif_hwsem/hwsem_alif.c; binding:
+# zephyr/dts/bindings/misc/alif,hwsem.yaml.  Its own include dir is exposed so an
+# app (the regcheck example) can include "hwsem_alif.h" for the take/give API.
+zephyr_library_sources_ifdef(CONFIG_HWSEM_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/misc/alif_hwsem/hwsem_alif.c)
+if(CONFIG_HWSEM_ALIF)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/misc/alif_hwsem)
+endif()
+
 # (Retired, task #21 / ADR 0017) No Alif LPI2C driver: LPI2C0 is slave-only
 # (TRM §3.17.4), so a master driver is a dead end; the housekeeping trio is
 # Tier-3 (Alif SE services), edge I2C is Tier-1 upstream i2c_dw.
@@ -144,6 +173,32 @@ if(CONFIG_SPI_DW_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/spi)
 endif()
 
+# Arm MHUv2 mailbox IPM driver (compatible "arm,mhuv2"), vendored from the
+# Apache-2.0 zephyr_alif fork (drivers/ipm/ipm_arm_mhuv2.c + ipm_arm_mhuv2.h).
+# Upstream Zephyr v4.4 ships only the MHUv1 ipm_mhu.c.  This is the v2 mailbox
+# the Ensemble Secure-Enclave service channel rides on: the Apache-2.0 hal_alif
+# SE client (se_services/zephyr/src/se_service.c, built by hal_alif itself under
+# CONFIG_HAS_ALIF_SE_SERVICES) drives it through Zephyr's IPM API.  Self-contained
+# (its register header sits beside it), so put drivers/ipm on the include path
+# for the driver's own "ipm_arm_mhuv2.h".  Nodes in the E8 SoC overlay
+# (seservice0r/seservice0s + the se_service root node).  ADR 0017 Tier-2.
+zephyr_library_sources_ifdef(CONFIG_ARM_MHUV2
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipm/ipm_arm_mhuv2.c)
+if(CONFIG_ARM_MHUV2)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ipm)
+endif()
+
+# hal_alif's SE client (se_service.c, built by the hal_alif module itself under
+# CONFIG_HAS_ALIF_SE_SERVICES) does `#include <soc_memory_map.h>` for
+# local_to_global() (the SE message buffer's CPU->global address translation).
+# hal_alif only puts its common/include dir on the path under CONFIG_RTSS_HE/HP
+# (common/CMakeLists.txt) -- which holds here, but add it explicitly so the SE
+# client resolves the header on any Ensemble RTSS build (the video-driver
+# precedent above).
+if(CONFIG_HAS_ALIF_SE_SERVICES)
+    zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+endif()
+
 # Alif Ensemble UTIMER PWM + counter class drivers (compatibles alif,pwm /
 # alif,utimer-counter), over the hal_alif drivers/utimer register library
 # (the drivers select USE_ALIF_HAL_UTIMER).  Bindings under
@@ -152,6 +207,183 @@ zephyr_library_sources_ifdef(CONFIG_PWM_ALIF_UTIMER
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/pwm/pwm_alif_utimer.c)
 zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_UTIMER
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_alif_utimer.c)
+
+# Synopsys DesignWare APB RTC counter (compatible "snps,dw-apb-rtc"), the E8
+# always-on LPRTC at lprtc@42000000.  A free-running 32-bit up-counter with one
+# compare/alarm channel -- a DIFFERENT IP from upstream's counter_dw_timer.c
+# (snps,dw-timers = DW APB Timers).  Driver + register header vendored Tier-2
+# from the Apache-2.0 zephyr_alif fork; binding under
+# zephyr/dts/bindings/counter/; node in the E8 SoC overlay.
+zephyr_library_sources_ifdef(CONFIG_COUNTER_RTC_SNPS_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_dw_rtc.c)
+
+# Alif Ensemble LPTIMER counter (compatible "alif,lptimer"), the always-on
+# lptimer@42001000 block: four independent 32-bit DOWN-counters clocked from the
+# VBAT-domain LF source.  A DISTINCT always-on IP from the LPRTC (snps,dw-apb-rtc
+# above) and the UTIMER counter.  Clean-room Tier-1.5 driver written directly
+# over the memory-mapped registers (the zephyr_alif fork ships no LPTIMER driver
+# or "alif,lptimer" binding); binding under zephyr/dts/bindings/counter/; node in
+# the E8 SoC overlay.
+zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_LPTIMER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_alif_lptimer.c)
+
+# Alif Ensemble ADC class driver (compatible "alif,adc"), vendored VERBATIM from
+# the Apache-2.0 zephyr_alif fork; hal_alif ships no ADC class driver, only the
+# analog_ctrl VREF helper library (drivers/analog), so the driver selects
+# USE_ALIF_HAL_ANALOG to pull that in.  The driver reuses upstream's private
+# adc_context.h, so put drivers/adc on the include path (the spi_context.h
+# precedent above).  Bindings under zephyr/dts/bindings/adc/; nodes in the E8
+# SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_ADC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/adc/adc_alif.c)
+if(CONFIG_ADC_ALIF)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/adc)
+endif()
+
+# Alif Ensemble DAC12 class driver (compatible "alif,dac"), vendored VERBATIM
+# from the Apache-2.0 zephyr_alif fork; hal_alif ships no DAC class driver, only
+# the analog_ctrl VREF helper library (drivers/analog), so the driver selects
+# USE_ALIF_HAL_ANALOG to pull that in (shared with ADC_ALIF).  Unlike the ADC, the
+# DAC driver pulls in no private upstream context header, so no extra include dir
+# is needed.  Bindings under zephyr/dts/bindings/dac/; nodes in the E8 SoC
+# overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dac/dac_alif.c)
+
+# Alif Ensemble CRC engine driver (compatible "alif,crc"), a CLEAN-ROOM in-tree
+# driver implementing the UPSTREAM Zephyr v4.4 CRC class API
+# (<zephyr/drivers/crc.h>: crc_begin/update/finish over struct crc_ctx).  NOT
+# vendored: the Apache-2.0 zephyr_alif fork's CRC driver targets a fork-private
+# API (crc_compute()/struct crc_params, CONFIG_CRC_DRV) that does not exist
+# upstream, so it cannot be consumed verbatim -- the register model is instead
+# re-authored value-only from the Alif DFP (drivers/include/crc.h + soc.h).
+# Polled, memory-mapped block: no hal_alif library, no private upstream context
+# header, so no extra include dir is needed.  Binding
+# zephyr/dts/bindings/crc/alif,crc.yaml; nodes in the E8 SoC overlay.
+# ADR 0017 Tier-1.5 (in-tree-thin over the silicon).
+zephyr_library_sources_ifdef(CONFIG_CRC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/crc/crc_alif.c)
+
+# Alif Ensemble analog comparator class driver (compatible "alif,cmp"), a
+# clean-room driver (NOT a vendored fork copy: hal_alif + the available fork
+# checkout ship no comparator class driver `.c`, only the binding/nodes/sample).
+# Implements the upstream Zephyr v4.4 comparator API over the hal_alif analog_ctrl
+# VREF/clock helper library, so the driver selects USE_ALIF_HAL_ANALOG to pull
+# that in (shared with ADC_ALIF / DAC_ALIF).  No private upstream context header,
+# so no extra include dir is needed.  Binding under
+# zephyr/dts/bindings/comparator/; nodes in the E8 SoC overlay.  ADR 0017 Tier-2
+# (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_CMP_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/comparator/comparator_alif.c)
+
+# Alif Ensemble LPPDM / PDM mic-capture class driver (compatible "alif,alif-pdm"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/audio/alif_pdm.c).
+# Upstream Zephyr v4.4 + hal_alif ship no Alif PDM driver.  Pure CMSIS + Zephyr
+# clock_control/pinctrl (no hal_alif library, like flash_mram_alif); implements the
+# Zephyr DMIC API.  Binding zephyr/dts/bindings/audio/alif,alif-pdm.yaml + the
+# private header zephyr/include/zephyr/drivers/pdm/pdm_alif.h; node in the E8 SoC
+# overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_ALIF_PDM
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/audio/alif_pdm.c)
+if(CONFIG_ALIF_PDM)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+endif()
+
+# Alif Ensemble DesignWare I2S controller (compatible "snps,designware-i2s"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/i2s/i2s_dw.c)
+# + its private header i2s_dw.h.  Upstream Zephyr v4.4 + hal_alif ship no
+# DesignWare I2S driver.  Implements the standard Zephyr I2S API; FIFO/interrupt
+# driven (no DMA subsystem dependency -- see CONFIG_I2S_DW).  Binding
+# zephyr/dts/bindings/i2s/snps,designware-i2s.yaml; node in the app overlay.
+# ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_I2S_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2s/i2s_dw.c)
+if(CONFIG_I2S_DW)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2s)
+endif()
+
+# Alif Ensemble UTIMER quadrature decoder (compatible "alif,utimer-qdec"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork
+# (drivers/sensor/qdec_alif/qdec_alif_utimer.c).  Upstream Zephyr v4.4 + hal_alif
+# ship no Alif QDEC driver.  Sensor-class (SENSOR_CHAN_ROTATION), built on the
+# hal_alif utimer helpers (USE_ALIF_HAL_UTIMER); binds the "alif,utimer-qdec"
+# child + reaches the "alif,utimer" parent via DT_INST_PARENT.  Binding
+# zephyr/dts/bindings/sensor/alif,utimer-qdec.yaml.  ADR 0017 Tier-2 (INTERIM).
+zephyr_library_sources_ifdef(CONFIG_QDEC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c)
+
+# Alif Ensemble DesignWare SD Host Controller (compatible "snps,dwc-sdhc"),
+# vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/sdhc/sdhc_dwc.c
+# + its private header sdhc_dwc.h).  Upstream Zephyr v4.4 + hal_alif ship no
+# DesignWare SDHC driver.  Standard Zephyr SDHC API; the card's internal
+# ADMA2/SDMA engine moves data (no Alif system-DMA dependency).  The optional
+# soc_memory_map.h include is gated behind CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE
+# (off), so identity addressing is used and the itcm/dtcm global_base dtsi gap is
+# avoided.  Binding zephyr/dts/bindings/sdhc/snps,dwc-sdhc.yaml.  ADR 0017 Tier-2.
+zephyr_library_sources_ifdef(CONFIG_SDHC_DWC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/sdhc/sdhc_dwc.c)
+if(CONFIG_SDHC_DWC)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/sdhc)
+endif()
+
+# Alif Ensemble CAMERA CAPTURE path -- CPI controller (compatible "alif,cam"),
+# DesignWare MIPI CSI-2 bridge (compatible "snps,designware-csi"), DesignWare
+# MIPI D-PHY (compatible "snps,designware-dphy") + ON Semi ARX3A0 sensor
+# (compatible "onnn,arx3a0"), all vendored from the Apache-2.0 zephyr_alif fork.
+# Upstream Zephyr v4.4 + hal_alif ship NONE of these.  The sources, bindings
+# (zephyr/dts/bindings/{video,mipi-dphy}/) and DT nodes (E8 SoC overlay) are
+# carried in-tree so they survive a `west update`; the TUs build in directly
+# when their DT node is enabled (the former ALP_VIDEO_ALIF_BROKEN gate is
+# RETIRED -- the video drivers are now PORTED to the v4.4 video API by Alp Lab
+# AB; see the per-driver provenance headers).  The video drivers reuse
+# upstream's private drivers/video/video_common.c helpers + the public CSI
+# tables vendored to zephyr/include/zephyr/drivers/video/video_alif.h;
+# soc_memory_map.h resolves via the hal_alif common/include dir
+# (CONFIG_RTSS_HE/HP).  Put the vendored public include dir on the path so
+# <zephyr/drivers/video/video_alif.h> and <zephyr/drivers/mipi_dphy/dphy_dw.h>
+# resolve.  ADR 0017 Tier-2 (INTERIM).  The ISP (isp_pico.c, compatible
+# "vsi,isp-pico") rides on the same v4.4 video API + the hal_alif libisp wrapper;
+# it is Tier-2 opt-in (CONFIG_ALP_SDK_CAMERA_ALIF_ISP, default n).
+if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW OR CONFIG_VIDEO_ISP_VSI)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/video)
+    # video_alif.c / isp_pico.c use hal_alif's <soc_memory_map.h> (local_to_global
+    # for the CPI/ISP AXI buffer addresses).  hal_alif only puts its common/include
+    # dir on the path under CONFIG_RTSS_HE/HP (common/CMakeLists.txt); add it here
+    # explicitly so the CPI/ISP TUs resolve the header on any Ensemble RTSS build.
+    if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_ISP_VSI)
+        zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+    endif()
+endif()
+zephyr_library_sources_ifdef(CONFIG_VIDEO_ALIF_CAM
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_alif.c)
+zephyr_library_sources_ifdef(CONFIG_VIDEO_MIPI_CSI2_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_csi_dw.c)
+zephyr_library_sources_ifdef(CONFIG_VIDEO_ARX3A0
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/arx3a0.c)
+zephyr_library_sources_ifdef(CONFIG_MIPI_DPHY_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dphy/dphy_dw.c)
+# Alif Ensemble ISP (Pico, compatible "vsi,isp-pico"), vendored from the
+# Apache-2.0 zephyr_alif fork + PORTED to the v4.4 video API by Alp Lab AB.  It
+# is a video m2m device that links the hal_alif libisp wrapper (the Vivante
+# blob, opt-in via USE_ALIF_ISP_LIB).  ADR 0017 Tier-2, opt-in (default n).
+zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/isp_pico.c)
+
+# Alif Ensemble CAN-FD controller (CAST CAN-CTRL IP, compatible "cast,can",
+# CANFD0 base 0x49036000), vendored VERBATIM from the Apache-2.0 zephyr_alif
+# fork (drivers/can/can_cast.c + can_cast.h).  Upstream Zephyr v4.4 ships only
+# can_mcan.c (Bosch M_CAN), whose register map does NOT match the CAST IP, and
+# hal_alif ships no CAN class driver -- so this fork copy is the only Zephyr
+# can_* device for the part.  The alp-sdk portable <alp/can.h> backend
+# (src/backends/can/zephyr_drv.c) binds it through the alp_can0 alias.  The
+# driver is self-contained CMSIS-style register access via DEVICE_MMIO + the
+# Zephyr clock_control / pinctrl / can.h class APIs; it needs only the
+# soc_common.h supplied by our Ensemble soc-bridge above (no hal_alif lib, no
+# extra include path).  Binding under zephyr/dts/bindings/can/cast,can.yaml;
+# node in the E8 SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_CAN_ALIF_CAST
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/can/can_cast.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
@@ -206,6 +438,14 @@ zephyr_library_sources_ifdef(CONFIG_MBEDTLS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/zephyr_drv.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
+# SE-CryptoCell hardware-crypto backend (silicon_ref alif:ensemble:e8,
+# priority 110 -- outranks the priority-100 "*" PSA zephyr_drv).  Rides the
+# hal_alif SE-service MHUv2 -> SE mailbox the read-only se_service client
+# already drives live; RNG via the public se_service_get_rnd_num(), the
+# AES/SHA/CMAC/CCM/GCM/ChaCha20/Poly1305 wire requests gated behind the
+# generic-send seam (CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/se_cryptocell.c)
 # Update-log surface (<alp/update_log.h>) -- experimental, opt-in.
 # Pure engine + software tamper-evident tier + (compiled, unregistered)
 # Alif TF-M stub seam. Gated on CONFIG_ALP_SDK_UPDATE_LOG.  The dispatch
@@ -287,6 +527,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_video.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/v2n_n44_isp.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CAMERA_ALIF_ISP
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/alif_isp_pico.c)
 
 # v0.2 peripheral wrappers — opt-in per-class so apps that don't use
 # a given Zephyr subsystem don't link the wrapper.  Each defaults on
@@ -314,6 +556,15 @@ zephyr_library_sources_ifdef(CONFIG_RTC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/zephyr_drv.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
+
+# E8 LPRTC counter -> calendar shim: backs the alp_rtc_* surface over the
+# always-on snps,dw-apb-rtc COUNTER device (lprtc@42000000) -- the E8 has no
+# Zephyr-RTC-class peripheral.  Needs the counter subsystem for the device.
+if(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8 AND CONFIG_COUNTER)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/lprtc_calendar_shim.c)
+endif()
+
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/wdt_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_WATCHDOG
@@ -765,6 +1016,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_ADC
 # tree-shaken from the build.
 zephyr_library_sources_ifdef(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/alif_e7.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/alif_e8.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SOC_RENESAS_RZV2N_N44
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/gd32_bridge.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_ADC_SW_FALLBACK

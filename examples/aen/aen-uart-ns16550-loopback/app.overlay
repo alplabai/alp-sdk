@@ -1,0 +1,54 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Bench overlay for the ns16550 UART validation on the E1M-AEN801
+ * (Ensemble E8, M55-HE), RAM-run flow.
+ *
+ * 1. RAM-run retarget: the SoC select's an XIP/flash code-partition.  Point
+ *    zephyr,flash at ITCM and drop the code-partition so the image links + runs
+ *    from on-core RAM under a J-Link loadbin+go.  MUST use the PATH-REFERENCE
+ *    form `&itcm` -- the phandle-array form <&itcm> makes FLASH_SIZE=0 and the
+ *    link overflows (debugged on silicon).
+ *
+ * 2. Spare UART under test: Alif uart3 @ 0x4901b000, IRQ 127.  NOT uart5 (the
+ *    E1M carrier console) and NOT uart2 (the DevKit console) -- so this test
+ *    cannot disturb either console path.  Pins from the upstream pinctrl header:
+ *      P1_2 = UART3_RX_A (AF1), P1_3 = UART3_TX_A (AF1).
+ *    RX gets input-enable so the pad read-enable (REN, bit16) is on; without it
+ *    a SENSED pad reads dead -- required even for the internal-loopback path's
+ *    sanity, and mandatory if the human jumpers TX->RX for a real wire test.
+ *
+ * 3. loopback; sets the ns16550 MCR LOOP bit (bit4) so TXD is internally routed
+ *    to RXD inside the UART -- a real end-to-end byte round-trip with NO jumper
+ *    wire.  Remove `loopback;` (and jumper P1_3->P1_2) to validate the physical
+ *    pads instead.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&pinctrl {
+	pinctrl_uart3_test: pinctrl_uart3_test {
+		group0 {
+			pinmux = <PIN_P1_2__UART3_RX_A>;
+			input-enable;
+		};
+
+		group1 {
+			pinmux = <PIN_P1_3__UART3_TX_A>;
+		};
+	};
+};
+
+&uart3 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_uart3_test>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+	loopback;
+};

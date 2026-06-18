@@ -1,0 +1,78 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon I2C2 + EEPROM validation overlay for the E1M-AEN801 (Alif Ensemble
+ * E8, M55-HE), bench RAM-run via J-Link.
+ *
+ * Wires the on-module 24C128 EEPROM bus.  The EEPROM's interface is selected by
+ * bridge/DNP resistors onto SoC I2C2 (DesignWare master, upstream i2c_dw), pins
+ * P5_6 SCL_C / P5_7 SDA_C -- NOT the slave-only LPI2C0 (which carries the
+ * RTC/TMP on this board rev and is read-blocked).  Full master read+write via
+ * upstream Zephyr's i2c_dw, per ADR 0017 (Tier-1 upstream-native).
+ *
+ * i2c2 node: i2c@49012000 (compatible "snps,designware-i2c", IRQ 134) per the
+ * AE822 DFP device header.
+ *
+ * The pinctrl group below is copied VERBATIM from the aen-eeprom-manifest
+ * overlay -- the input-enable + bias-pull-down pair is BENCH-VALIDATED on the E8
+ * (2026-06-15).  Do NOT "correct" bias-pull-down to bias-pull-up: the upstream
+ * binding's pull naming is effectively inverted vs the Alif pad HW, and
+ * bias-pull-up gives a DEAD bus.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		alp-i2c0 = &i2c2;
+	};
+};
+
+&pinctrl {
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			/* I2C pad config -- BENCH-VALIDATED on the E8 (2026-06-15) and
+			 * matching Alif's own reference i2c pinctrl (sdk-alif
+			 * common/ensemble-pinctrl.dtsi: read-enable=1 +
+			 * driver-state-control=2):
+			 *   input-enable    -> pad REN bit: the i2c_dw controller MUST be
+			 *                      able to SENSE SDA/SCL or it reads every
+			 *                      address as a NACK (no ACK detect). Without
+			 *                      this the EEPROM never responds.
+			 *   bias-pull-down  -> upstream pinctrl_soc.h encodes the pad
+			 *                      driver-state-control (DSC) field as DSC=2
+			 *                      from bias-pull-down -- which is exactly the
+			 *                      value Alif's reference uses for I2C. (DSC=1
+			 *                      via bias-pull-up does NOT work -> dead bus;
+			 *                      the upstream binding's pull naming is
+			 *                      effectively inverted vs the Alif pad HW.)
+			 * Do NOT "correct" bias-pull-down to bias-pull-up.
+			 */
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	/* 100 kHz: bench-validated; the on-module bus has no fast-mode margin
+	 * unless external pull-ups are stuffed. */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};

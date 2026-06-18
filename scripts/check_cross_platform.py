@@ -183,6 +183,19 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "scripts/bootstrap.sh",
     "scripts/test-all.sh",
     "scripts/setup-clang-format.sh",
+    # AEN801 (E8) bench flash + RAM-run helpers.  These drive JLinkExe
+    # and the Alif SETOOLS (both Linux binaries on the bench) over SWD;
+    # they're Linux-side bench tooling, not customer-facing build
+    # scripts.  Each carries a "Cross-platform scope:" header note.
+    # bench-env.sh is sourced (no shebang) so it isn't flagged.
+    "scripts/bench/aen/build.sh",
+    "scripts/bench/aen/flash-jlink.sh",
+    "scripts/bench/aen/flash-jlink-mramxip.sh",
+    "scripts/bench/aen/flash-jlink-hp.sh",
+    "scripts/bench/aen/flash-run.sh",
+    "scripts/bench/aen/ram-run.sh",
+    "scripts/bench/aen/reread.sh",
+    "scripts/bench/aen/flash-all-flowd.sh",
 })
 
 # Markdown files that, by their very topic, MUST mention Linux-only

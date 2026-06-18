@@ -35,7 +35,14 @@
 	compatible = "alp,e1m-aen801-m55-hp";
 
 	chosen {
-		zephyr,flash = &mram;
+		zephyr,flash = &mram_storage;
+		/*
+		 * MCUboot's flash_map_extended.c derives FLASH_DEVICE_BASE /
+		 * FLASH_DEVICE_ID from zephyr,flash-controller (the controller
+		 * node, NOT the soc-nv-flash child) -- mirrors the fork's
+		 * e1.dtsi chosen.  Without it MCUboot's flash_map fails to link.
+		 */
+		zephyr,flash-controller = &mram;
 		zephyr,sram = &dtcm;
 		zephyr,console = &uart5;
 		zephyr,shell-uart = &uart5;
@@ -44,9 +51,63 @@
 };
 
 /*
- * On-die MRAM partition map (5632 KiB total).  Production layout for the
- * sysbuild/aen MCUboot profile (MCUboot + a signed application image,
- * swap-using-scratch):
+ * ITCM/DTCM global_base -- central CPU-local -> system-bus address translation.
+ *
+ * hal_alif's soc_memory_map.h local_to_global() translates a CPU-local TCM
+ * pointer into the address other bus masters (the Ethos-U NPU AXI master, the
+ * SD/DMA controllers) must be programmed with, by reading
+ * DT_PROP(DT_NODELABEL(itcm|dtcm), global_base).  Upstream Zephyr's
+ * arm,itcm/arm,dtcm bindings (ensemble_rtss_hp.dtsi, included above) declare no
+ * such property, so re-`compatible` the nodes onto the alp-sdk
+ * alif,itcm/alif,dtcm bindings (zephyr/dts/bindings/memory-controllers/), which
+ * require global_base.  Done here in the per-core board (not a per-example
+ * overlay) so every HP app on this board inherits the same translation.
+ *
+ * Values transcribed from the Apache-2.0 zephyr_alif fork
+ * dts/arm/alif/ensemble/common/ensemble_rtss_hp.dtsi:
+ *   itcm global_base = 0x50000000
+ *   dtcm global_base = 0x50800000
+ * These are the RTSS-HP global TCM aliases; the RTSS-HE core uses a different
+ * window (0x58000000 / 0x58800000), set in the _he board dts.
+ */
+&itcm {
+	/* fork ensemble_rtss_hp.dtsi: itcm compatible = "alif,itcm" */
+	compatible = "alif,itcm";
+	/* fork ensemble_rtss_hp.dtsi: itcm global_base = <0x50000000> */
+	global_base = <0x50000000>;
+};
+
+&dtcm {
+	/* fork ensemble_rtss_hp.dtsi: dtcm compatible = "alif,dtcm" */
+	compatible = "alif,dtcm";
+	/* fork ensemble_rtss_hp.dtsi: dtcm global_base = <0x50800000> */
+	global_base = <0x50800000>;
+};
+
+/*
+ * On-die MRAM as a real flash controller (ADR 0017 Tier-2).
+ *
+ * Upstream Zephyr's E8 SoC dtsi exposes the MRAM only as a memory region
+ * (`mram: flash@80000000`, compatible "zephyr,memory-region","soc-nv-flash"):
+ * XIP-readable but with NO flash driver, so FLASH_HAS_DRIVER_ENABLED stays
+ * unset and MCUboot's flash_map has nothing to read/write slot0 with.
+ *
+ * We retarget the upstream `&mram` node into the fork's flash-controller
+ * hierarchy WITHOUT editing upstream zephyr/: override `&mram`'s compatible to
+ * the controller compatible "alif,mram-flash-controller" (which the in-tree
+ * flash_mram_alif driver binds, setting FLASH_HAS_DRIVER_ENABLED), and add a
+ * `mram_storage` soc-nv-flash child carrying the program/erase geometry the
+ * driver reads (DT_NODELABEL(mram_storage): erase-block-size / write-block-size
+ * / reg).  This mirrors the fork e1.dtsi node structure exactly (controller
+ * `mram_flash@80000000` + `mram_storage@80000000` soc-nv-flash child); the only
+ * difference is we reuse the upstream `mram` nodelabel as the controller rather
+ * than declaring a fresh `mram_flash` node, since upstream owns the node.
+ * Kept byte-for-byte identical to the HE-sibling board so a future HE+HP AMP
+ * sysbuild sees one MRAM partition map.
+ *
+ * MRAM partition map (5632 KiB total) for the sysbuild/aen MCUboot profile
+ * (MCUboot + a signed application image, swap-using-scratch).  Offsets are
+ * relative to the soc-nv-flash child base (MRAM 0x80000000):
  *
  *   mcuboot  0x000000  64 KiB
  *   image-0  0x010000  2688 KiB   (primary slot, code-partition)
@@ -54,36 +115,59 @@
  *   scratch  0x550000  64 KiB
  *   storage  0x560000  128 KiB    (settings / NVS)
  *                      = 5632 KiB
+ *
+ * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so
+ * all of boot, both image slots, scratch, and storage live in MRAM.
  */
 &mram {
-	partitions {
-		compatible = "fixed-partitions";
-		#address-cells = <1>;
-		#size-cells = <1>;
+	compatible = "alif,mram-flash-controller";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	/*
+	 * Drop the upstream memory-region properties: this node is no longer a
+	 * "zephyr,memory-region" (it is a flash controller now), and the
+	 * controller addresses its soc-nv-flash child by absolute `reg`, not via
+	 * `ranges`.  flash-controller.yaml / base.yaml declare neither property,
+	 * so they must be removed or DT binding-check fails.
+	 */
+	/delete-property/ zephyr,memory-region;
+	/delete-property/ ranges;
 
-		boot_partition: partition@0 {
-			label = "mcuboot";
-			reg = <0x0 DT_SIZE_K(64)>;
-		};
+	mram_storage: mram_storage@80000000 {
+		compatible = "soc-nv-flash";
+		reg = <0x80000000 DT_SIZE_K(5632)>;
+		erase-block-size = <1024>;
+		write-block-size = <16>;
 
-		slot0_partition: partition@10000 {
-			label = "image-0";
-			reg = <0x10000 DT_SIZE_K(2688)>;
-		};
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
 
-		slot1_partition: partition@2b0000 {
-			label = "image-1";
-			reg = <0x2b0000 DT_SIZE_K(2688)>;
-		};
+			boot_partition: partition@0 {
+				label = "mcuboot";
+				reg = <0x0 DT_SIZE_K(64)>;
+			};
 
-		scratch_partition: partition@550000 {
-			label = "image-scratch";
-			reg = <0x550000 DT_SIZE_K(64)>;
-		};
+			slot0_partition: partition@10000 {
+				label = "image-0";
+				reg = <0x10000 DT_SIZE_K(2688)>;
+			};
 
-		storage_partition: partition@560000 {
-			label = "storage";
-			reg = <0x560000 DT_SIZE_K(128)>;
+			slot1_partition: partition@2b0000 {
+				label = "image-1";
+				reg = <0x2b0000 DT_SIZE_K(2688)>;
+			};
+
+			scratch_partition: partition@550000 {
+				label = "image-scratch";
+				reg = <0x550000 DT_SIZE_K(64)>;
+			};
+
+			storage_partition: partition@560000 {
+				label = "storage";
+				reg = <0x560000 DT_SIZE_K(128)>;
+			};
 		};
 	};
 };

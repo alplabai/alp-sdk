@@ -1,0 +1,42 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon UTIMER COMPARE-A alarm validation overlay for the E1M-AEN801 (Alif
+ * Ensemble E8, M55-HE), bench RAM-run via J-Link.  Identical node setup to
+ * aen-counter-utimer-regcheck: enable both the alif,utimer PARENT (utimer0 @
+ * 0x48001000, holding the timer + global reg windows + the comp_capt_a IRQ) and
+ * its alif,utimer-counter CHILD (utimer0_counter, the device the driver binds).
+ * The COMPARE-A match raises CHAN_INTERRUPT_COMPARE_A_BUF1 on comp_capt_a, which
+ * the driver wires to the alarm ISR.
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		/* The wildcard counter backend resolves alp-counter0; keep the
+		 * alias here so a portable alp_counter_open() path also works. */
+		alp-counter0 = &utimer0_counter;
+	};
+};
+
+/* Enable BOTH the parent timer block and its counter child -- the driver binds
+ * the child but reads the reg/IRQ/clock off the parent. */
+&utimer0 {
+	status = "okay";
+};
+
+&utimer0_counter {
+	status = "okay";
+};

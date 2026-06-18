@@ -2,3 +2,4 @@
 # Vendor prefixes registered by the alp-sdk Zephyr module.
 # Picked up by Zephyr via this module's `settings.dts_root: .`.
 alp	Alp Lab AB
+tes	Tes Electronic Solutions

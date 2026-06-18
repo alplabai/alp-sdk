@@ -1,0 +1,21 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * M55-HP first-light smoke overlay for the E1M-AEN801 (Alif Ensemble E8), SES-
+ * booted as an M55_HP ATOC.
+ *
+ * The image is ITCM-linked so the SES loads it to the HP ITCM global base
+ * (0x50000000, vs the HE core's 0x58000000) and boots the HP core.  No
+ * peripheral nodes are needed -- the app prints to the RAM console and writes
+ * the SRAM0 liveness beacon by absolute address.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm) so CONFIG_FLASH links into ITCM; the
+		 * SES HP ATOC loadAddress (0x50000000) puts it at the HP ITCM global
+		 * base.  Drop the code-partition fixup (this is not an MCUboot slot). */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

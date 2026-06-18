@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: aen-analog-validate
+  description: |
+    DAC0 -> ADC loopback on-silicon analog validation for the E1M-AEN801
+    (Alif Ensemble E8, M55-HE), driven through the SoM-portable <alp/dac.h> +
+    <alp/adc.h> surface.  Drives a millivolt setpoint on dac0 (alif,dac,
+    0.750 V VREF) and reads it back through adc12_0 (alif,adc, 1.8 V VREF),
+    asserting the readback tracks the setpoint within tolerance.
+
+tests:
+  # Compile-only on native_sim: the alp-dac0 / alp-adc0 aliases + the
+  # adc12_0/dac0 nodes only exist in the E8 board overlay (auto-applied by board
+  # name), so on native_sim the portable opens just return NOT_READY -- the value
+  # of the gate is that the portable <alp/*> source builds clean off-target.
+  # The real DAC->ADC loopback is a bench RAM-run on alp_e1m_aen801_m55_he.
+  alp_sdk.examples.aen.analog_validate.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - adc
+      - dac
+      - analog
+    build_only: true

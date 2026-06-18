@@ -1,0 +1,34 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-isp-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Enables the Alif ISP-Pico node so it BINDS on silicon:
+ *   - isp (vsi,isp-pico @ 0x49046000, IRQs 367 "isp" / 368 "mi-isp")
+ *
+ * SCOPE: this proves the ISP node BINDS (DT_HAS_VSI_ISP_PICO_ENABLED + the reg/
+ * irq match).  It does NOT build the isp_pico.c driver TU (CONFIG_VIDEO_ISP_VSI
+ * stays default n): that TU links the hal_alif libisp wrapper, and the locally
+ * vendored 2025 wrapper is API-incompatible with the 2026 isp_pico.c (no
+ * <zephyr/drivers/video/isp-vsi.h>; 2-arg vs 3-arg isp_vsi_bottom_half) -- a
+ * known EXTERNAL hal_alif blocker (task #21).  LIVE ISP processing also stays
+ * HW-blocked on this batch (no camera sensor wired): the ISP only does useful
+ * work inside a camera->csi->isp->memory media-controller graph, which this
+ * regcheck deliberately does not stand up.
+ */
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&isp {
+	status = "okay";
+};

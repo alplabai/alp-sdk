@@ -34,5 +34,5 @@ supplies `pinctrl_i2c2` (P5_6/P5_7), and aliases `alp-i2c0 → &i2c2`.
 Expected on a programmed module: `magic ... (OK)`, the SKU/serial/date, `crc32 ...
 (OK)`. An erased/unprogrammed module fails the magic check.
 
-> **BENCH-UNVERIFIED.** Confirm on the E8 that the populated bridge/DNP routes the
-> EEPROM to I2C2 (vs another instance) and that the manifest reads back.
+> **BENCH-VERIFIED (RESULT PASS).** On the E8 the populated bridge/DNP routes the
+> EEPROM to I2C2 (the 24C128 reads back at `0x50`, one of 12 devices on the bus).

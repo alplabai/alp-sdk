@@ -73,6 +73,9 @@ Makefile
 !firmware/gd32-bridge/cmake/*.cmake
 !cmake/**/*.cmake
 !toolchain/**/*.cmake
+# Checked-in Zephyr board flash/debug runner files (board.cmake) -- these
+# are source, not generated, and `west flash` needs them tracked.
+!zephyr/boards/**/board.cmake
 
 # Test results
 Testing/
@@ -122,3 +125,10 @@ meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpd
 
 # Local ARM Vela / NPU toolchain virtualenv (not redistributed)
 .venv-vela/
+
+# Alif-proprietary Vela system-config -- the NPU examples inject it at build
+# time via -DAEN_NPU_VELA_CONFIG=<path>/ensemble_vela.ini (the .ini ships in
+# alp-sdk-internal, NOT here).  This guard keeps a stray copy that an operator
+# drops next to an example from ever being committed to the public repo.
+ensemble_vela.ini
+**/ensemble_vela.ini

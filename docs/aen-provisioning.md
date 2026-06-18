@@ -6,7 +6,9 @@ path — the Alif-native way an image gets into MRAM — written from a real E8
 (`E1M-AEN801`) bench bring-up, including the wiring traps that cost us hours.
 
 > Peer docs: [`bring-up-aen.md`](bring-up-aen.md) (the per-subsystem bench
-> runbook). This guide is specifically the **SES → MRAM → boot** flow.
+> runbook); [`aen-se-services.md`](aen-se-services.md) (the runtime
+> `se_service_*` API — device/LCS/power queries + the gated DVFS / STOC-update
+> path). This guide is specifically the **SES → MRAM → boot** flow.
 
 ## 0. The model (read this first)
 
@@ -24,9 +26,26 @@ So "flashing" an Ensemble is not `west flash` to an address — it's:
    (`app-gen-toc`) and write it to MRAM (`app-write-mram`).
 3. On the next boot the SES validates the ATOC and launches your M55 image.
 
-`west flash` / J-Link SWD **cannot** bring up a *truly blank* board: until the
-SES releases the core, SWD reaches the SoC's SW-DP but the core's debug-AP is
-gated (`Could not find core in CoreSight setup`).
+Two host paths put an ATOC into MRAM (both go through the SES boot ROM ISP):
+
+- **Flow A — SETOOLS over the SE-UART** (the original path, detailed below).
+- **Flow D — J-Link DIRECT MRAM flash over SWD** (now the default burn path on
+  the bench). J-Link's built-in Alif MRAM loader activates when you select the
+  **part-number device profile** (`AE822FA0E5597LS0_M55_HE`), *not* the generic
+  `Cortex-M55`. It burns the signed ATOC over SWD in ~0.16 s, verifies, then
+  re-runs the SE boot ROM (reset via the nRESET pin) so the app boots from
+  MRAM. Helper: `bench-builds/flash-jlink.sh`. Needs the J-Link V9.46+ DLL
+  (bench has V9.50) and a probe on matched J-Link V13 firmware (May 2026).
+
+> The earlier blanket claim that *J-Link cannot write MRAM on this part* was
+> only ever true for the **generic** `Cortex-M55` profile — with the part
+> profile selected, J-Link's MRAM loader does burn Alif MRAM.
+
+What still requires the SES first is *debug-AP* access on a **truly blank**
+board: until the SES releases the core, SWD reaches the SoC's SW-DP but the
+core's debug-AP is gated (`Could not find core in CoreSight setup`). The Flow D
+MRAM loader works through the SES boot ROM ISP, so it does not depend on the
+core being released.
 
 ## 0.5 If your module came from Alp Lab — you probably don't need this
 
@@ -64,8 +83,11 @@ The rest of this document is that path.
   examples, and the user guide PDF.
 * **A 1.8 V-capable USB-UART** for the SE-UART (see §2 — this is the #1 trap).
 * The board powered (1 A bench supply is plenty; a fresh SoM idles ~80-150 mA).
-* *Optional:* a SWD/J-Link probe — useful **after** provisioning to confirm
-  the core came alive; not usable to provision a fresh board.
+* A **SWD/J-Link probe** — for **Flow D** it is the burn path itself (select
+  the part-number device profile so the built-in Alif MRAM loader activates),
+  and it confirms the core came alive after provisioning. Needs the J-Link
+  V9.46+ DLL and a probe on matched J-Link V13 firmware. *Optional* if you only
+  use the SETOOLS/SE-UART path (Flow A).
 
 ## 2. Wire the SE-UART — the part everyone gets wrong
 
@@ -187,6 +209,7 @@ core and full SWD debug is now available.
 | `app-write-mram` warns "device in SEROM Recovery mode" | No valid SES — recover the SES first (`maintenance` recovery), it's not a normal app-write. |
 | Image written but won't boot | ATOC built with the wrong **DEVICE** config for the part — re-run `tools-config` for the correct part and rebuild the ATOC (or write app-only, keeping the factory DEVICE config). |
 | J-Link `Could not find core in CoreSight setup` | Normal on a **fresh** board — the SES hasn't released the core. Provision an app first. |
+| J-Link hangs on a firmware update on first connect (Flow D) | A version-mismatched probe forces a J-Link firmware update that **times out over a USB hub** — connect the probe to a **direct root USB port**. |
 
 ## See also
 

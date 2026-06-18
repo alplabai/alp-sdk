@@ -1,0 +1,35 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Alif Ensemble CRC engine.
+
+  A polled, memory-mapped hardware CRC accelerator (no interrupt, no DMA used by
+  this driver).  Bound by the alp-sdk clean-room driver
+  zephyr/drivers/crc/crc_alif.c, which implements the UPSTREAM Zephyr v4.4 CRC
+  class API (<zephyr/drivers/crc.h>: crc_begin / crc_update / crc_finish over
+  struct crc_ctx).
+
+  The compatible "alif,crc" is alp-sdk-native.  Upstream Zephyr v4.4 ships no
+  Alif CRC binding, and the Apache-2.0 zephyr_alif fork's CRC driver targets a
+  fork-private API (crc_compute() + struct crc_params, CONFIG_CRC_DRV) that does
+  not exist upstream -- so there is no fork binding to consume or retire onto.
+  ADR 0017 Tier-1.5 (in-tree-thin over the silicon).  See docs/adr/0017 +
+  task #21.  vendor-ext, BENCH-UNVERIFIED.
+
+  Supported enum crc_type -> Alif hardware algorithm (others -> -ENOTSUP):
+    CRC8_CCITT  -> CRC_8_CCITT   (poly 0x07)
+    CRC16       -> CRC_16        (poly 0x8005)
+    CRC16_CCITT -> CRC_16_CCITT  (poly 0x1021)
+    CRC32_IEEE  -> CRC_32        (poly 0x04C11DB7)
+    CRC32_C     -> CRC_32C       (poly 0x1EDC6F41, via the custom-poly register)
+
+  On the E8 SoM this models crc0@48107000 / crc1@48108000.
+
+compatible: "alif,crc"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true
