@@ -1,0 +1,71 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-dualcore-ipc overlay for the E1M-AEN801 (Ensemble E8, M55-HP) RAM-run.
+ *
+ * Identical SE-service + TCM-global_base setup to aen-dualcore-master (proven on
+ * E8). The HP build is the master: it calls se_service_boot_cpu(EXTSYS_1=HE,
+ * 0x58000000) to release HE before running the responder loop, so it needs the
+ * SE-service transport bound.
+ *
+ * The SE SERVICE transport nodes live in the E8 SoC overlay
+ * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi) status="disabled" by default
+ * (SoC-fixed: the RTSS-HP <-> SE MHUv2 mailbox pair + the se_service root node).
+ * This overlay enables them for the RTSS-HP core:
+ *   - seservice0r (arm,mhuv2 @ 0x40040000, "rx") -- SE -> RTSS inbound
+ *   - seservice0s (arm,mhuv2 @ 0x40050000, "tx") -- RTSS -> SE outbound
+ *   - se_service  (alif,secure-enclave-services) -- ties the two via phandles
+ *
+ * No clocks / pinctrl: the MHUv2 mailboxes are core-internal (no pads, no
+ * peripheral clock gate); the driver only maps MMIO + wires the IRQ.
+ *
+ * The inter-RTSS HE<->HP MHU-1 pair (0x400A0000/0x400B0000) is NOT declared
+ * here: the app pokes those frames as raw MMIO (sys_read32/sys_write32), exactly
+ * like aen-dualcore-doorbell, so no DT node is needed for it.
+ */
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link) -- the camera-regcheck
+ * precedent.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/*
+ * itcm/dtcm `global_base` for local_to_global() -- hal_alif se_service.c puts
+ * its outbound SE message buffer through local_to_global() (soc_memory_map.h),
+ * which reads DT_PROP(itcm/dtcm, global_base) to translate the M55-local
+ * address into the global view the SE's DMA sees.  Upstream Zephyr's
+ * arm,itcm/arm,dtcm bindings have no such prop, so re-`compatible` the nodes
+ * onto the alp-sdk alif,itcm/alif,dtcm bindings (which declare global_base) and
+ * set the E8 RTSS-HP global TCM aliases (ITCM 0x50000000, DTCM 0x50800000),
+ * transcribed from the Apache-2.0 zephyr_alif fork ensemble_rtss_hp.dtsi -- the
+ * same values the NPU + camera + eth local_to_global paths use.
+ */
+&itcm {
+	compatible = "alif,itcm";
+	global_base = <0x50000000>;
+};
+
+&dtcm {
+	compatible = "alif,dtcm";
+	global_base = <0x50800000>;
+};
+
+&seservice0r {
+	status = "okay";
+};
+
+&seservice0s {
+	status = "okay";
+};
+
+&se_service {
+	status = "okay";
+};
