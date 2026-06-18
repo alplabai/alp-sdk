@@ -4,10 +4,21 @@ On-silicon analog validation for the **E1M-AEN801** (Alif Ensemble E8,
 M55-HE), via the bench RAM-run + RAM-console flow.
 
 Where `aen-dac-regcheck` and `aen-adc-regcheck` only prove the drivers
-*program their registers* (no analog path), this app **closes the analog
-loop**: it drives a known code on `dac0`, reads it back through an
-`adc12` instance, and asserts the readback matches the DAC setpoint
-scaled by the two converters' **VREF ratio**.
+*program their registers* (no analog path) over the **raw Zephyr API**,
+this app **closes the analog loop** AND drives it entirely through the
+**SoM-portable `<alp/dac.h>` + `<alp/adc.h>` surface** -- the surface a
+customer actually writes against. It drives a known millivolt setpoint on
+`dac0`, reads it back through an `adc12` instance, and asserts the
+readback **tracks the setpoint** within tolerance.
+
+Because the portable backends carry each converter's reference in
+devicetree, the app does **no ratio math**: `alp_dac_write_mv(V)` drives
+`V` mV at the DAC's 0.750 V VREF, `alp_adc_read_uv()` returns the reading
+already scaled to microvolts at the ADC's 1.8 V VREF, and the gate is a
+**direct voltage match** in the shared microvolt domain. (The raw-API
+sibling had to hand-derive the expected ADC code from the two VREF
+register codes; here the VREF bookkeeping lives once, in DT + the
+backends.)
 
 ## What it checks (and what it deliberately does not)
 
@@ -18,27 +29,27 @@ The two converters run at different, **register-fixed** references:
 | `dac0` | **0.750 V** full-scale (`DAC12_VREF_CONT = 0x4`) | `dac_alif.c` `CMP_COMP_REG2_DAC12_VREF_CONT = (0x4U << 17)` == hal_alif `analog_ctrl.h:41`; reference table `analog_ctrl.h:31-40` reads code `0x4` (`100b`) = 0.750 V |
 | `adc12` | **1.8 V** full-scale (`ADC_VREF_CONT = 0x10`, RDIV=0) | `adc_alif.c` `ADC_VREF_CONT = (0x10U << 10)` / `ADC_VREF_BUF_RDIV_EN = (0x0U << 16)` == hal_alif `analog_ctrl.h:63` / `:46` (RDIV=0 = 1.8 V) |
 
-For a DAC code `C`, the ideal pad voltage is `V = C * 0.750 / 0xFFF`,
-which the ADC digitises to `raw = V * 4096 / 1.8`. The voltage cancels,
-so the expected ADC raw depends **only on the two VREF register codes**
-(both verified vs hal_alif), not on the absolute pad voltage:
+Both references live in **devicetree** (the DAC node's
+`alif,reference-mv = <750>`; the ADC `channel@0`'s
+`zephyr,vref-mv = <1800>`), and the portable backends consume them:
+`alp_dac_write_mv(V)` converts `V` mV to a code against the 0.750 V VREF,
+and `alp_adc_read_uv()` converts the raw code back to microvolts against
+the 1.8 V VREF. So the app compares **two voltages in the same microvolt
+domain** -- the ideal readback equals the setpoint (the voltage is the
+same physical node), and no ratio appears in the app at all.
 
-```
-expected_raw = C * Vdac_ref * ADC_FS / (DAC_FS * Vadc_ref)
-            = C * 750 * 4096 / (4095 * 1800)
-```
+The PASS gate is: the opens + read all succeed **and** the
+`alp_adc_read_uv()` microvolts are within `TOLERANCE_UV` of the DAC
+setpoint microvolts (`RESULT PASS`).
 
-The PASS gate is: all four driver calls return 0 **and** the ADC
-readback is within tolerance of that VREF-ratio-scaled value
-(`RESULT PASS`).
-
-**This is a ratio match, not an absolute-accuracy spec.** The DAC output
+**This is a track match, not an absolute-accuracy spec.** The DAC output
 buffer offset/gain, the ADC input buffer, source impedance and trim all
 shift the absolute reading -- so the tolerance is deliberately generous
-(`+/-256 LSB`) and the test does **not** claim absolute on-pad mV
-accuracy (that needs the Alif TRM + a characterised bench). It catches a
-gross failure (wrong ratio, dead DAC, open jumper, wrong channel ->
-floating pad) without flagging a real-but-offset loopback.
+(`+/-120 mV` = `120000 uV`, ~`+/-273 LSB` at the 1.8 V / 4096 span) and
+the test does **not** claim absolute on-pad mV accuracy (that needs the
+Alif TRM + a characterised bench). It catches a gross failure (dead DAC,
+open jumper, wrong channel -> floating pad) without flagging a
+real-but-offset loopback.
 
 ## Bench wiring -- REQUIRED jumper (and the TBD)
 
@@ -60,15 +71,17 @@ as (same TSV):
 
 > **TBD (bench unknown -- do NOT invent):** which ADC12 **instance** and
 > **channel index** each `ANA_S` pad lands on is an Alif TRM detail that
-> is **not** present in the fetched fork source. This example defaults to
-> **`adc12_0`, channel 0** (a plausible pick: `ANA_S0` = `A15` = `P0_0`,
-> the lowest-numbered sense pad). If the jumper/TRM map says otherwise,
-> change **both**:
-> - the enabled instance in
->   `boards/alp_e1m_aen801_m55_he.overlay`, and
-> - `ADC_NODE` / `ADC_TEST_CHANNEL` in `src/main.c`.
+> is **not** present in the fetched fork source. This example defaults the
+> `alp-adc0` alias to **`adc12_0`, channel 0** (a plausible pick:
+> `ANA_S0` = `A15` = `P0_0`, the lowest-numbered sense pad). If the
+> jumper/TRM map says otherwise, repoint **both** in
+> `boards/alp_e1m_aen801_m55_he.overlay`:
+> - the `analog_loopback` node's `io-channels = <&adc12_0 0>` (the
+>   controller + channel the `alp-adc0` alias resolves to), and
+> - the `channel@0` child `reg` if the channel index differs.
 >
-> Also bench-confirm the tolerance window (`ADC_TOLERANCE_LSB`) once the
+> The app needs no change (it just opens `alp-adc0` / `alp-dac0`).
+> Also bench-confirm the tolerance window (`TOLERANCE_UV`) once the
 > converters are characterised.
 
 ## Build + run (bench)
@@ -79,9 +92,27 @@ into ITCM over J-Link, run, then read `ram_console_buf` over SWD and
 ASCII-decode -- the same flow as `aen-dac-regcheck` / `aen-adc-regcheck`.
 Look for the single `RESULT PASS` / `RESULT FAIL` line.
 
+## How the portable aliases are wired
+
+This app runs through `<alp/dac.h>` / `<alp/adc.h>`, which resolve their
+channels via the `alp-dac0` / `alp-adc0` devicetree aliases:
+
+- The `alp-adc0` / `alp-dac0` **alias scaffold** is now generated from
+  `board.yaml`: `scripts/alp_project.py` emits one `alp-adc<N>` /
+  `alp-dac<N>` per `e1m_routes.adc` / `.dac` channel (the same path that
+  already produced `alp-i2c<N>` / `alp-spi<N>`). Regenerate with
+  `python3 scripts/alp_project.py --input board.yaml --emit dts-overlay`.
+- The Alif Ensemble DT node-labels diverge from the convention default
+  (`adc12_0` not `adc0`), and the portable ADC backend wants an
+  **io-channels consumer** node (`ADC_DT_SPEC_GET`), so the per-example
+  `boards/alp_e1m_aen801_m55_he.overlay` repoints the aliases:
+  `alp-dac0 = &dac0` and `alp-adc0 = &analog_loopback` (a consumer with
+  `io-channels = <&adc12_0 0>` and a `channel@0` config child carrying
+  `zephyr,vref-mv = <1800>`).
+
 ## Follow-up
 
-- A portable `alp-dac0` / `alp-adc0` alias would let this run through the
-  `<alp/dac.h>` / `<alp/adc.h>` surface instead of the raw Zephyr API,
-  but board aliases are **generated from `board.yaml`** -- adding them is
-  a separate, YAML-side change (not done here).
+- Bench-verify the `analog_loopback` `io-channels` route + the
+  `TOLERANCE_UV` window against the Alif TRM once the converters are
+  characterised (the `adc12_0` / channel-0 default is a plausible pick,
+  not a verified ANA_S map).

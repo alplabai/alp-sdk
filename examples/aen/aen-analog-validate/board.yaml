@@ -1,0 +1,32 @@
+# board.yaml -- per-app project configuration for aen-analog-validate.
+#
+# DAC0 -> ADC loopback on the E1M-AEN801 (Alif Ensemble E8) SoM, driven through
+# the SoM-portable <alp/dac.h> + <alp/adc.h> surface.  CMakeLists.txt invokes
+# scripts/alp_project.py at configure time and layers the generated alp.conf
+# over prj.conf via OVERLAY_CONFIG.
+#
+# The `adc` peripheral token lights CONFIG_ADC + the <alp/adc.h> wrapper + the
+# alif_e8 ADC backend (gated on CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8, set here via the
+# E1M-AEN801 SKU).  The DAC half has no board.yaml peripheral token (the schema
+# enum carries only `adc` for the analog-converter family), so CONFIG_DAC is
+# turned on in prj.conf.  The per-example board overlay
+# (boards/alp_e1m_aen801_m55_he.overlay) enables dac0 + adc12_0 and declares the
+# alp-dac0 / alp-adc0 aliases the portable backends resolve.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  # The A32 cluster has nothing to do in this loopback demo -- mark it off so
+  # the orchestrator doesn't spin up a Yocto build for it.
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+    peripherals:
+      - adc
+
+diagnostics:
+  log_level: info

@@ -247,13 +247,18 @@ class TestDtsOverlayEmit(unittest.TestCase):
                         msg="overlay must terminate with `};`")
 
     def test_overlay_emits_expected_bus_aliases_for_evk(self) -> None:
-        """E1M-EVK wires I2C0+I2C1, SPI1, UART0+UART1, and PWM0..PWM6."""
+        """E1M-EVK wires I2C0+I2C1, SPI1, UART0+UART1, PWM0..PWM6,
+        ADC0..ADC7, and DAC0..DAC1.  The ADC/DAC aliases feed the
+        portable <alp/adc.h> / <alp/dac.h> backends, which resolve their
+        channels via the alp-adcN / alp-dacN DT aliases."""
         rv = _run_loader(input_path=TEMPLATE, emit="dts-overlay")
         out = rv.stdout
         for alias in ("alp-i2c0", "alp-i2c1",
                       "alp-spi1",
                       "alp-uart0", "alp-uart1",
-                      "alp-pwm0", "alp-pwm6"):
+                      "alp-pwm0", "alp-pwm6",
+                      "alp-adc0", "alp-adc7",
+                      "alp-dac0", "alp-dac1"):
             with self.subTest(alias=alias):
                 self.assertIn(alias, out)
 
@@ -386,10 +391,11 @@ class TestValidatorPeripheralCheck(unittest.TestCase):
 
     def test_real_example_passes(self) -> None:
         """The shipped adc-voltmeter example declares
-        `cores.m55_hp.peripherals: [adc]` against E1M-AEN701
-        (alif:ensemble:e7).  Schema + preset + hw_rev checks must all
-        be green; the SoM preset's partial_hw_config flag means the
-        validator exits 0 with a 'clean (with warnings)' tail."""
+        `cores.m55_hp.peripherals: [adc]` against E1M-AEN801
+        (alif:ensemble:e8, the lead part).  Schema + preset + hw_rev
+        checks must all be green; the SoM preset's partial_hw_config
+        flag means the validator exits 0 with a 'clean (with warnings)'
+        tail."""
         example = REPO / "examples" / "peripheral-io" / "adc-voltmeter" / "board.yaml"
         rv = subprocess.run(
             [sys.executable,
@@ -400,7 +406,7 @@ class TestValidatorPeripheralCheck(unittest.TestCase):
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
         self.assertIn(f"OK   schema:", rv.stdout)
         self.assertIn("OK   board preset: e1m-evk", rv.stdout)
-        self.assertIn("OK   som E1M-AEN701 hw_rev:", rv.stdout)
+        self.assertIn("OK   som E1M-AEN801 hw_rev:", rv.stdout)
 
 
 class TestHwBackendsLoader(unittest.TestCase):

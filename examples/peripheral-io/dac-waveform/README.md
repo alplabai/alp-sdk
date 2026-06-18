@@ -27,7 +27,12 @@ never names a form-factor-specific instance ID:
   GD32-bridged DAC0 channel.
 
 Either way the example sees a working DAC0 -- neither EVK lacks one.
-The GD32 dispatch on E1M-X is transparent to the `<alp/adc.h>` DAC API.
+The GD32 dispatch on E1M-X is transparent to the `<alp/dac.h>` DAC API.
+
+The shipped `board.yaml` defaults to the **E1M EVK** (Alif Ensemble E8,
+`som.sku: E1M-AEN801`) -- the native DAC12 path.  Switch to the V2N
+GD32-bridged path with `preset: e1m-x-evk` + a V2N SKU (both are listed
+under `supported_boards:`).
 
 ## What this shows
 

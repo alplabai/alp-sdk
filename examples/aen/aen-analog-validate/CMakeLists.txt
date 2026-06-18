@@ -1,17 +1,43 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # aen-analog-validate -- DAC0 -> ADC loopback on-silicon analog validation for
-# the E1M-AEN801 (Ensemble E8, M55-HE), via the bench RAM-run + RAM-console flow.
+# the E1M-AEN801 (Ensemble E8, M55-HE), driven through the SoM-portable
+# <alp/dac.h> + <alp/adc.h> surface.
 #
-# Drives a known code on dac0 (alif,dac, 0.750 V VREF) and reads it back on an
-# adc12 instance (alif,adc, 1.8 V VREF), asserting the ADC raw matches the
-# VREF-ratio-scaled DAC setpoint within tolerance.  See src/main.c + README.md.
-#
-# Plain prj.conf app (no alp_project.py board.yaml emit): the driver Kconfigs
-# (CONFIG_DAC_ALIF + CONFIG_ADC_ALIF, default y on DT_HAS_*_ENABLED) are sourced
-# under CONFIG_ALP_SDK, which prj.conf sets.
+# board.yaml-driven app (like aen-eeprom-manifest): scripts/alp_project.py
+# derives the CONFIG_* set (CONFIG_ADC, CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8, ...)
+# from board.yaml and layers it over prj.conf via OVERLAY_CONFIG.  The
+# device-only DT wiring (dac0 + adc12_0 + the alp-dac0/alp-adc0 aliases) lives in
+# boards/alp_e1m_aen801_m55_he.overlay, which Zephyr auto-applies by board name.
 
 cmake_minimum_required(VERSION 3.20)
+
+if(DEFINED ENV{ALP_SDK_ROOT})
+    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
+else()
+    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
+endif()
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
+            --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
+            --emit zephyr-conf
+            --output ${_alp_generated}
+    RESULT_VARIABLE _alp_rv
+    OUTPUT_VARIABLE _alp_stdout
+    ERROR_VARIABLE  _alp_stderr
+)
+if(NOT _alp_rv EQUAL 0)
+    message(FATAL_ERROR
+        "alp_project.py failed (rv=${_alp_rv}); "
+        "check ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml.\n"
+        "stderr: ${_alp_stderr}")
+endif()
+
+list(APPEND OVERLAY_CONFIG ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_analog_validate LANGUAGES C)

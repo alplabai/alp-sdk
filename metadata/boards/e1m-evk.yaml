@@ -190,6 +190,16 @@ e1m_routes:
         doc: "Arduino header CK_PWM3 = E1M_PWM5." }
     - { e1m: E1M_PWM6, macro: EVK_MB_PWM,
         doc: "mikroBUS PWM pin." }
+  # The adc: / dac: entries below also drive the portable analog DT
+  # aliases: scripts/alp_project.py emits one `alp-adc<N> = &adc<N>;` /
+  # `alp-dac<N> = &dac<N>;` per channel into the generated DTS overlay
+  # (the `alp-adcN` / `alp-dacN` aliases the <alp/adc.h> / <alp/dac.h>
+  # backends resolve their channels through).  The `&adc<N>` / `&dac<N>`
+  # phandle is the convention-default node-label; SoCs whose vendor DT
+  # node-labels diverge (the Alif Ensemble ADCs are `adc12_0..2`, DACs
+  # `dac0/dac1`) repoint the alias in the per-app board overlay
+  # (`aliases { alp-adc0 = &adc12_0; };`).  Regenerate after editing:
+  #   python3 scripts/alp_project.py --input <board.yaml> --emit dts-overlay
   adc:
     - { e1m: E1M_ADC0, macro: EVK_ADC_BOARD_ID,
         doc: "Carrier-side BOARD_ID resistor divider (see docs/board-id.md)." }

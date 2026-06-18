@@ -16,7 +16,7 @@
 #include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Defensive include: the Alif vendor-extension header only exists when
- * the build sees CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7 (or similar).  __has_include
+ * the build sees CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8 (or similar).  __has_include
  * lets the example compile on every SoM without per-SoC #ifdefs. */
 #ifdef __has_include
 #if __has_include(<alp/ext/alif/adc.h>)
