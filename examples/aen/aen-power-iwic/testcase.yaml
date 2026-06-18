@@ -36,8 +36,10 @@ tests:
   alp_sdk.examples.aen.power_iwic.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
-    extra_args:
-      - EXTRA_DTC_OVERLAY_FILE=boards/alp_e1m_aen801_m55_he.overlay
+    # The board overlay is applied by the app CMakeLists (set(DTC_OVERLAY_FILE));
+    # no EXTRA_DTC_OVERLAY_FILE here, else it would apply the same overlay twice
+    # (the /delete-property/ zephyr,code-partition would run on an already-deleted
+    # property).
     tags:
       - alp-sdk
       - example
