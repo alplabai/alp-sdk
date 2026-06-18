@@ -2,6 +2,12 @@
  * SPDX-FileCopyrightText: Copyright Alif Semiconductor
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * ====== ADR 0017 Tier-2 (vendored fork-driver copy, INTERIM) ======
+ * Verbatim copy of the Apache-2.0 sdk-alif/zephyr_alif DesignWare SDHC driver
+ * (compatible "snps,dwc-sdhc"); no upstream Zephyr DWC-SDHC class driver exists.
+ * Retire onto the sdk-alif fork compatible once the AEN SD/eMMC path is
+ * bench-verified. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  */
 
 #define DT_DRV_COMPAT snps_dwc_sdhc

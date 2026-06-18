@@ -250,6 +250,7 @@ static int
 crc_alif_update(const struct device *dev, struct crc_ctx *ctx, const void *buffer, size_t bufsize)
 {
 	const struct crc_alif_config *cfg = dev->config;
+	struct crc_alif_data         *data = dev->data;
 
 	if (ctx == NULL || (buffer == NULL && bufsize != 0U)) {
 		return -EINVAL;
@@ -275,6 +276,15 @@ crc_alif_update(const struct device *dev, struct crc_ctx *ctx, const void *buffe
 		size_t         words = bufsize / 4U;
 
 		if ((bufsize % 4U) != 0U) {
+			/*
+			 * The 32-bit engine only consumes whole words.  begin()
+			 * holds data->lock until finish(); a caller that bails on
+			 * this error would never call finish(), so release the
+			 * engine here (give + reset state) instead of deadlocking
+			 * every future crc_begin() on the single-count semaphore.
+			 */
+			ctx->state = CRC_STATE_IDLE;
+			k_sem_give(&data->lock);
 			return -ENOTSUP;
 		}
 
