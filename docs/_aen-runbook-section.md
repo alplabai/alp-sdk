@@ -84,13 +84,34 @@ M55-HE.)
 
 `west flash` on the carrier board does **not** use J-Link — it invokes the
 **`alif_flash`** runner, which wraps the SETOOLS `app-gen-toc` + `app-write-mram`
-sequence above. Use the sysbuild flow so MCUboot signs your image into slot0:
+sequence above (it stages the *same* signed-ATOC config, `loadAddress 0x58000000`
+for the M55-HE, that the manual path uses). Use the sysbuild flow so MCUboot
+signs your image into slot0:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
     --sysbuild --sysbuild-config <alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped
+export SE_UART=<your-serial-device>               # the SE-UART (host-specific)
 west flash      # -> alif_flash runner -> SETOOLS over the SE-UART
 ```
+
+**One-off runner setup.** The `alif_flash` runner is **not** in upstream
+Zephyr's `runners` package; alp-sdk ships it
+([`scripts/west_commands/runners/alif_flash.py`](../scripts/west_commands/runners/alif_flash.py))
+and surfaces it via `zephyr/module.yml`'s `runners:` list, so `west flash`
+discovers it from the alp-sdk module with **no edit to the pinned Zephyr tree**.
+Two host prerequisites:
+
+- `pip install fdt` — `app-gen-toc` depends on the `fdt` Python package, which
+  is not a Zephyr requirement; without it the toolkit fails. (The runner warns
+  if `fdt` is missing.)
+- Obtain the **Alif Security Toolkit** (license-gated, not redistributed by
+  alp-sdk) and point the runner at it with `--setools-dir` or `$SETOOLS_DIR`,
+  and at the SE-UART with `--se-uart` or `$SE_UART` (the same env vars
+  `scripts/bench/aen/flash-run.sh` uses, so a host already set up for the bench
+  helper needs no extra flags). Pass `--mram-xip` for a slot0-linked app that
+  overflows ITCM (e.g. an NPU model; `mramAddress 0x80010000`, flags `["boot"]`).
 
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
 > self-test in slot0 (LCS=DM), so the core is already released and `west flash`
