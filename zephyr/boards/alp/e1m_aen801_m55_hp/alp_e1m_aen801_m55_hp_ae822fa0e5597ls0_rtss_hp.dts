@@ -44,6 +44,40 @@
 };
 
 /*
+ * ITCM/DTCM global_base -- central CPU-local -> system-bus address translation.
+ *
+ * hal_alif's soc_memory_map.h local_to_global() translates a CPU-local TCM
+ * pointer into the address other bus masters (the Ethos-U NPU AXI master, the
+ * SD/DMA controllers) must be programmed with, by reading
+ * DT_PROP(DT_NODELABEL(itcm|dtcm), global_base).  Upstream Zephyr's
+ * arm,itcm/arm,dtcm bindings (ensemble_rtss_hp.dtsi, included above) declare no
+ * such property, so re-`compatible` the nodes onto the alp-sdk
+ * alif,itcm/alif,dtcm bindings (zephyr/dts/bindings/memory-controllers/), which
+ * require global_base.  Done here in the per-core board (not a per-example
+ * overlay) so every HP app on this board inherits the same translation.
+ *
+ * Values transcribed from the Apache-2.0 zephyr_alif fork
+ * dts/arm/alif/ensemble/common/ensemble_rtss_hp.dtsi:
+ *   itcm global_base = 0x50000000
+ *   dtcm global_base = 0x50800000
+ * These are the RTSS-HP global TCM aliases; the RTSS-HE core uses a different
+ * window (0x58000000 / 0x58800000), set in the _he board dts.
+ */
+&itcm {
+	/* fork ensemble_rtss_hp.dtsi: itcm compatible = "alif,itcm" */
+	compatible = "alif,itcm";
+	/* fork ensemble_rtss_hp.dtsi: itcm global_base = <0x50000000> */
+	global_base = <0x50000000>;
+};
+
+&dtcm {
+	/* fork ensemble_rtss_hp.dtsi: dtcm compatible = "alif,dtcm" */
+	compatible = "alif,dtcm";
+	/* fork ensemble_rtss_hp.dtsi: dtcm global_base = <0x50800000> */
+	global_base = <0x50800000>;
+};
+
+/*
  * On-die MRAM partition map (5632 KiB total).  Production layout for the
  * sysbuild/aen MCUboot profile (MCUboot + a signed application image,
  * swap-using-scratch):
