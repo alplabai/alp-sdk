@@ -80,7 +80,11 @@ This matches what `scripts/alp_orchestrate.py` writes into the
 emitted `system-manifest.yaml` per the heterogeneous-OS spec at
 `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`.
 
-AEN A32-class MACHINEs are deferred to v0.7 (Phase 5 CI gate).
+The AEN A32-class MACHINEs (`e1m-aen801-a32`, `e1m-aen701-a32`)
+ship the carrier scaffolding today -- they `require` the upstream
+Alif `devkit-e8` base and override the carrier specifics; the carrier
+DTB + TF-A memory map + full image-bake gate on the maintainer's AEN
+HW config (marked `# TBD(alif-hw-config)` in the machine confs).
 
 ## How customers consume it
 
@@ -203,6 +207,39 @@ MACHINE = "e1m-nx9101-a55"
 bitbake alp-image-edge
 ```
 
+### Alif Ensemble E8 — via meta-alif-ensemble
+
+The AEN801 (E8) A32 path rides on Alif's
+[`meta-alif-ensemble`](https://github.com/alifsemi/meta-alif-ensemble)
+BSP, branch **scarthgap** (matching alp-sdk's Yocto series).  That
+layer ships the upstream-complete `devkit-e8` MACHINE (+ `appkit-e8`)
+— linux-alif, the TF-A platform, and `devkit-e8.dtb` — which the
+`e1m-aen801-a32.conf` carrier `require`s and then overrides.  On the
+M55 side the same E8 platform builds on upstream Zephyr's
+`ensemble_e8_dk` board, so the heterogeneous E8 stack is
+upstream-native top to bottom; alp-sdk only adds the thin carrier
+overlay (ADR-0017).  alp-sdk does **not** redistribute or fork the
+Alif BSP.
+
+```bash
+# 1. Clone the Alif Ensemble BSP (scarthgap) under your own licence:
+git clone -b scarthgap https://github.com/alifsemi/meta-alif-ensemble ../meta-alif-ensemble
+bitbake-layers add-layer ../meta-alif-ensemble
+
+# 2. Add meta-alp-sdk (if not already) and pick the MACHINE:
+MACHINE = "e1m-aen801-a32"
+bitbake alp-image-edge
+```
+
+The `e1m-aen801-a32.conf` MACHINE ships the carrier scaffolding today;
+the carrier DTB, TF-A memory map, and boot-media routing are
+maintainer-supplied AEN HW-config inputs and are marked
+`# TBD(alif-hw-config)` until that config lands (E8 silicon is also
+flagged `status.preliminary` in `metadata/e1m_modules/E1M-AEN801.yaml`).
+The `e1m-aen701-a32.conf` (E7) MACHINE follows the same pattern but is
+deprioritised both ways — Alp Lab leads with AEN801/E8, and upstream
+Alif demotes E7 on scarthgap (only `devkit-e7.conf.orig` remains).
+
 ## Per-machine inference runtime
 
 The SDK's `<alp/inference.h>` compiles in the dispatcher for every
@@ -221,6 +258,8 @@ the in-kernel driver + UAPI headers from `meta-rz-drpai` (see below).
 | `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1  | DRP-AI3 as above; `dx-rt` via the image     |
 | `e1m-v2m102-a55`     | Same as V2M101         | Same as V2M101 (memory variant)             |
 | `e1m-nx9101-a55`     | Ethos-U65              | NXP i.MX 93 Ethos-U userspace via the image |
+| `e1m-aen801-a32`     | Ethos-U85 + 2x U55     | Ethos-U path inside the alp-sdk library     |
+| `e1m-aen701-a32`     | 2x Ethos-U55           | Ethos-U path inside the alp-sdk library     |
 
 Customer apps pick the active backend per-handle at runtime via
 `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
@@ -313,7 +352,10 @@ such in the matching recipes' `LICENSE` field.
   acknowledgement closes the legal review per
   [`docs/vendor-partnerships.md`](../docs/vendor-partnerships.md)
   §C.31.
-- AEN A32-class MACHINE (v0.7).
+- AEN A32-class MACHINE carrier scaffolding (`e1m-aen801-a32`,
+  `e1m-aen701-a32`) ships; the carrier DTB + TF-A memory map + full
+  image-bake await the maintainer's AEN HW config (the
+  `# TBD(alif-hw-config)` overrides in the machine confs).
 - `alp-image-edge.bb`'s minimal package set is documentary; the
   v1.0 sysbuild matrix in `docs/test-plan.md` adds the BLE
   provisioning layer + the certificate-pinning post-install hook.

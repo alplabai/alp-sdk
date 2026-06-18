@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Tier-2 alif,cmp HSCMP comparator driver
+# (comparator_alif.c) -- a clean-room driver implementing the upstream Zephyr
+# v4.4 comparator class API over cmp0@49023000, with the DAC6 on-chip reference
+# on the negative terminal (internal-reference smoke -- no external wiring).
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+# BENCH-UNVERIFIED.
+
+sample:
+  name: aen-cmp-regcheck
+  description: |
+    Bench RAM-run HSCMP (alif,cmp) analog-comparator proof for the E1M-AEN801
+    (Alif Ensemble E8, Cortex-M55-HE): binds cmp0@49023000 via the alp-sdk
+    Tier-2 comparator_alif driver and drives it through the portable Zephyr
+    comparator_* API against the on-chip DAC6 internal reference (no external
+    wiring).  BENCH-UNVERIFIED.
+
+tests:
+  alp_sdk.examples.aen.cmp_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - comparator
+      - cmp
+      - analog
+    build_only: true   # the HSCMP smoke is a bench flash, not a CI run.

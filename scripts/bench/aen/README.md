@@ -92,4 +92,34 @@ The four bench flows are defined and compared in
   `ram-run.sh`.
 - **Flow D — J-Link MRAM flash** (built-in Alif loader, no SE-UART; the
   fast day-to-day default) → `flash-jlink.sh` / `flash-all-flowd.sh`.
+
+## `west flash` (the `alif_flash` runner) = Flow A, productised
+
+These helpers are the bench harness. For the *customer* SES → MCUboot → slot0
+chain, alp-sdk also wires Flow A into **standard `west flash`** via the
+**`alif_flash`** west runner
+([`scripts/west_commands/runners/alif_flash.py`](../../west_commands/runners/alif_flash.py)).
+The AEN801 M55-HE/HP board files
+(`zephyr/boards/alp/e1m_aen801_m55_*/board.cmake`) wire it as the default
+flasher, so `west flash` runs the **same** `app-gen-toc` + `app-write-mram`
+recipe as `flash-run.sh` (it stages the identical signed-ATOC config,
+`loadAddress 0x58000000` for the M55-HE), and `jlink` stays the
+debug/attach runner.
+
+```sh
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> --sysbuild
+export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped
+export SE_UART=<your-serial-device>               # the SE-UART (host-specific)
+west flash                                        # -> alif_flash -> SETOOLS
+```
+
+The runner reads `SETOOLS_DIR` / `SE_UART` (the same env vars these helpers
+use), or takes `--setools-dir` / `--se-uart`; pass `--mram-xip` for a
+slot0-linked app that overflows ITCM (mramAddress `0x80010000`).
+
+**One-off setup.** `alif_flash` is **not** in upstream Zephyr's `runners`
+package — alp-sdk ships it and surfaces it through `zephyr/module.yml`'s
+`runners:` list (no edit to the pinned Zephyr tree). Also `pip install fdt`
+once: `app-gen-toc` needs the `fdt` Python package, which is not a Zephyr
+requirement (the runner warns if it is missing).
 <!-- cross-platform-lint:resume -->

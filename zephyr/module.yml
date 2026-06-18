@@ -21,6 +21,20 @@ build:
     # M33 system-manager board that drives the on-module GD32 bridge).
     board_root: zephyr
 
+# Module runners — extra `west flash`/`west debug` backends alp-sdk
+# surfaces over the vendor SDK. Zephyr's run_common imports each `file:`
+# (resolved from this module's root) at flash time, so the runner class
+# registers itself and `board_runner_args(<name> ...)` in a board.cmake
+# resolves WITHOUT any edit to the pinned Zephyr tree (ADR-0017).
+#
+#   alif_flash — flash an AEN801 (Alif Ensemble E8) image to MRAM via the
+#   Alif Security Toolkit (SETOOLS). The AEN801 M55-HE/HP board.cmake
+#   files (zephyr/boards/alp/e1m_aen801_m55_*) wire it as the default
+#   flasher, so plain `west flash` runs the proven SES->MCUboot->slot0
+#   recipe (== scripts/bench/aen/flash-run.sh, Flow A).
+runners:
+  - file: scripts/west_commands/runners/alif_flash.py
+
 # NOTE on `west alp-build`:
 #   The command lives in `scripts/west-commands.yml` and is surfaced
 #   via the *manifest's* west-commands -- the manifest's

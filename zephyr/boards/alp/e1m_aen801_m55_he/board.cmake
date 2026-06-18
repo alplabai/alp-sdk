@@ -21,18 +21,21 @@
 #       SES gates the part-specific AP).  See the runbook.
 #
 # NOTE on the alif_flash runner itself:
-#   The runner class (`scripts/west_commands/runners/alif_flash.py`,
-#   Apache-2.0, from alifsemi/zephyr_alif) is NOT part of upstream
-#   Zephyr's `runners` package.  `board_runner_args(alif_flash ...)`
-#   below is benign at CMake-configure time (it only records args);
-#   the runner is resolved by west lazily at `west flash` time.  To
-#   make `west flash -r alif_flash` work, the runner must be importable
-#   from the active Zephyr's `runners` package -- i.e. build against the
-#   Alif Zephyr fork, or drop alif_flash.py into the upstream Zephyr's
-#   scripts/west_commands/runners/.  Set ALIF_SE_TOOLS_DIR to the
-#   SETOOLS install dir before invoking.  The hand-run SETOOLS recipe
-#   (app-gen-toc -f <atoc.json>; app-write-mram -p) does not need the
-#   runner and is documented in docs/bring-up-aen.md.
+#   The runner class is shipped IN-TREE by alp-sdk at
+#   `scripts/west_commands/runners/alif_flash.py` (Apache-2.0) and is
+#   surfaced to `west flash` via `zephyr/module.yml`'s `runners:` list,
+#   so it resolves WITHOUT any edit to the pinned upstream Zephyr tree
+#   (it is NOT in upstream Zephyr's `runners` package).  It encodes the
+#   proven bench recipe (== scripts/bench/aen/flash-run.sh): stage a
+#   per-app signed-ATOC config (loadAddress 0x58000000, M55-HE),
+#   app-gen-toc, then app-write-mram -p over the SE-UART.
+#   `board_runner_args(alif_flash ...)` below only records args at
+#   CMake-configure time; the runner is created lazily at `west flash`.
+#   Setup: `pip install fdt` (an app-gen-toc dependency, not a Zephyr
+#   requirement) and export SETOOLS_DIR (license-gated; not shipped) +
+#   SE_UART before invoking, or pass --setools-dir/--se-uart.  See
+#   scripts/bench/aen/README.md and docs/_aen-runbook-section.md.  The
+#   hand-run SETOOLS recipe is documented in docs/aen-provisioning.md.
 
 # alif_flash: --device first-5-chars must match the SETOOLS
 # global-cfg.db Part# ("AE822...").  The runner compares only [:5].
