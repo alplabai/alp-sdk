@@ -200,18 +200,38 @@ alif_e8_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capab
 
 static alp_status_t alif_e8_read_raw(alp_adc_backend_state_t *st, int32_t *raw_out)
 {
-	alif_e8_adc_state_t *s   = (alif_e8_adc_state_t *)st->be_data;
-	struct adc_sequence  seq = {
-		 .channels    = BIT(s->spec->channel_id),
-		 .buffer      = &s->sample_buf,
-		 .buffer_size = sizeof s->sample_buf,
-		 /* MUST be 0: the Alif adc_alif driver programs resolution from the DT
-		  * channel config and returns -ENOTSUP for a non-zero adc_sequence.resolution
-		  * (read returned ALP_ERR_IO on E8 until this was zeroed).  The raw->uV scale
-		  * still uses st->resolution_bits, set from the channel at open. */
-		 .resolution = 0,
-		 .oversampling =
-            (s->oversample_ratio > 1u) ? (uint8_t)__builtin_ctz(s->oversample_ratio) : 0u,
+	alif_e8_adc_state_t *s = (alif_e8_adc_state_t *)st->be_data;
+
+	/* The Alif adc_alif driver UNCONDITIONALLY dereferences
+	 * sequence->options->user_data in adc_start_read() (adc_alif.c:728:
+	 * `data->comparator = sequence->options->user_data;` -- no NULL guard,
+	 * unlike check_buffer_size() at :683 which does test `sequence->options`).
+	 * So adc_read() with .options == NULL faults on a NULL deref before the
+	 * conversion ever runs -- which is exactly the early/empty-console fault the
+	 * <alp/*> loopback hit while the raw-API aen-adc-regcheck (which passes a
+	 * non-NULL options carrying a valid user_data, see its main.c) PASSed.
+	 * Pass a non-NULL options with a stack-byte user_data to satisfy the driver;
+	 * the comparator pointer is only read back by the driver's compare path,
+	 * which this single-shot read does not arm. */
+	uint8_t                           cmp_status = 0;
+	const struct adc_sequence_options opts       = {
+		      .interval_us     = 0,
+		      .callback        = NULL,
+		      .user_data       = &cmp_status,
+		      .extra_samplings = 0,
+	};
+	struct adc_sequence seq = {
+		.options     = &opts,
+		.channels    = BIT(s->spec->channel_id),
+		.buffer      = &s->sample_buf,
+		.buffer_size = sizeof s->sample_buf,
+		/* MUST be 0: the Alif adc_alif driver programs resolution from the DT
+		 * channel config and returns -ENOTSUP for a non-zero adc_sequence.resolution
+		 * (read returned ALP_ERR_IO on E8 until this was zeroed).  The raw->uV scale
+		 * still uses st->resolution_bits, set from the channel at open. */
+		.resolution = 0,
+		.oversampling =
+		    (s->oversample_ratio > 1u) ? (uint8_t)__builtin_ctz(s->oversample_ratio) : 0u,
 	};
 	int err = adc_read(s->spec->dev, &seq);
 	if (err != 0) {
