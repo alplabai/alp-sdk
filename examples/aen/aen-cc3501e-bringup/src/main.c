@@ -561,6 +561,27 @@ int main(void)
 			}
 		}
 
+		/* Once the MAC is in (link proven stable), do a one-shot worker-routed
+		 * SCAN -- proves a LIST-returning Wi-Fi op over the bridge.  scan_count>0
+		 * = the bench AP was seen.  Gated like GET_MAC so it runs on the stable
+		 * link, not the cold first-contact window; retried until it lands. */
+		static bool scan_done = false;
+		if (!scan_done && g_cc3501e_witness.mac_ok == 1u && s == ALP_OK) {
+			static cc3501e_scan_record_t scan[CC3501E_SCAN_MAX_RECORDS];
+			size_t       n  = 0u;
+			alp_status_t ss = cc3501e_wifi_scan(
+			    &fw, scan, CC3501E_SCAN_MAX_RECORDS, &n, CC3501E_SCAN_TIMEOUT_MS);
+			g_cc3501e_witness.scan_status = (uint32_t)ss;
+			if (ss == ALP_OK) {
+				g_cc3501e_witness.scan_count      = (uint32_t)n;
+				g_cc3501e_witness.scan_first_rssi = (n > 0u) ? (int32_t)scan[0].rssi_dbm : 0;
+				scan_done                         = true;
+				printf("[cc3501e-bringup] soak WIFI_SCAN ok -> %u AP(s)\n", (unsigned)n);
+			} else {
+				printf("[cc3501e-bringup] soak WIFI_SCAN -> %d\n", (int)ss);
+			}
+		}
+
 		if ((i % 8u) == 0u) {
 			uint16_t     v            = 0u;
 			alp_status_t vs           = cc3501e_get_version(&fw, &v);

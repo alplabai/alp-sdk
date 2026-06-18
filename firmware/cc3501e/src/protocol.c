@@ -106,25 +106,71 @@ static alp_cc3501e_resp_t handle_get_version(const uint8_t *req,
 	return ALP_CC3501E_RESP_OK;
 }
 
+/* Generic worker-routed handler for an ARGUMENT-FREE command whose HAL body
+ * may BLOCK for seconds (a radio op) and therefore must NOT run in the SPI
+ * ISR that dispatches the handler.  GET_MAC pioneered the seam (P0-4/P0-6);
+ * WIFI_SCAN_START and WIFI_GET_RSSI share it -- the only per-command knobs
+ * are the opcode and the reply-capacity floor.
+ *
+ * The command is POLL-BY-REPEAT: the host re-issues it (it maps
+ * RESP_ERR_BUSY -> ALP_ERR_BUSY and retries) until the worker has the
+ * result.  The state machine, identical to the original handle_get_mac:
+ *
+ *   - worker has DONE for @cmd -> copy the result bytes into the reply,
+ *     reset the worker to IDLE, return RESP_OK.
+ *   - worker has ERR for @cmd  -> reset, map the HAL code (NOTIMPL ->
+ *     NOT_READY, INVAL -> INVALID, else RADIO).  The stub backend lands
+ *     here (NOT_READY).
+ *   - worker IDLE              -> submit the job, return BUSY.
+ *   - worker QUEUED/RUNNING, or busy with another cmd -> return BUSY.
+ *
+ * @min_cap is the reply-data floor (NO_MEM below it -- the worker's DONE
+ * copy is capped at @reply_cap, so a too-small reply buffer must be caught
+ * up front).  @req_len must be 0 (the routed ops carry no request payload).
+ *
+ * On the stub/native backend worker_submit() runs the job synchronously,
+ * so the host needs exactly one extra poll (submit -> BUSY, re-issue ->
+ * the cached NOT_READY/RESP_OK). */
+static alp_cc3501e_resp_t handle_worker_routed(alp_cc3501e_cmd_t cmd,
+                                               size_t            min_cap,
+                                               size_t            req_len,
+                                               uint8_t          *reply_data,
+                                               size_t            reply_cap,
+                                               size_t           *reply_data_len)
+{
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	if (reply_cap < min_cap) return ALP_CC3501E_RESP_ERR_NO_MEM;
+
+	size_t                  n   = 0u;
+	int8_t                  err = 0;
+	const enum worker_state st  = worker_poll((uint8_t)cmd, reply_data, reply_cap, &n, &err);
+
+	switch (st) {
+	case WORKER_DONE:
+		worker_reset();
+		*reply_data_len = n; /* command-specific payload (6 for GET_MAC, etc.) */
+		return ALP_CC3501E_RESP_OK;
+	case WORKER_ERR:
+		worker_reset();
+		if (err == CC3501E_HW_ERR_NOTIMPL) return ALP_CC3501E_RESP_ERR_NOT_READY;
+		if (err == CC3501E_HW_ERR_INVAL) return ALP_CC3501E_RESP_ERR_INVALID;
+		return ALP_CC3501E_RESP_ERR_RADIO;
+	case WORKER_IDLE:
+		/* No job in flight: queue one and ask the host to re-issue. */
+		(void)worker_submit((uint8_t)cmd);
+		return ALP_CC3501E_RESP_ERR_BUSY;
+	default: /* WORKER_QUEUED / WORKER_RUNNING (incl. another cmd in flight) */
+		return ALP_CC3501E_RESP_ERR_BUSY;
+	}
+}
+
 /* GET_MAC (0x03): the CC3501E's factory MAC (6 bytes, big-endian wire
  * order as TI stores it).  Read from the radio subsystem via the HAL.
  *
  * Routed through the async worker (P0-4/P0-6): the real CC3501E_WIFI body
  * (Wlan_Get, preceded by a one-time Wi-Fi init) blocks for SECONDS, which
- * MUST NOT happen in the SPI ISR that runs this handler.  So GET_MAC is
- * POLL-BY-REPEAT -- the host re-issues the command (it maps RESP_ERR_BUSY
- * -> ALP_ERR_BUSY and retries) until the worker has the result:
- *
- *   - worker has DONE for GET_MAC -> copy the MAC into the reply, reset
- *     the worker to IDLE, return RESP_OK.
- *   - worker has ERR for GET_MAC  -> reset, map the HAL code (NOTIMPL ->
- *     NOT_READY, else RADIO).  The stub backend lands here (NOT_READY).
- *   - worker IDLE                 -> submit the job, return BUSY.
- *   - worker QUEUED/RUNNING, or busy with another cmd -> return BUSY.
- *
- * On the stub/native backend worker_submit() runs the job synchronously,
- * so the host needs exactly one extra poll (submit -> BUSY, re-issue ->
- * the cached NOT_READY/RESP_OK). */
+ * MUST NOT happen in the SPI ISR that runs this handler.  See
+ * handle_worker_routed for the poll-by-repeat state machine. */
 static alp_cc3501e_resp_t handle_get_mac(const uint8_t *req,
                                          size_t         req_len,
                                          uint8_t       *reply_data,
@@ -132,30 +178,8 @@ static alp_cc3501e_resp_t handle_get_mac(const uint8_t *req,
                                          size_t        *reply_data_len)
 {
 	(void)req;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 6u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-
-	size_t                  n   = 0u;
-	int8_t                  err = 0;
-	const enum worker_state st =
-	    worker_poll(ALP_CC3501E_CMD_GET_MAC, reply_data, reply_cap, &n, &err);
-
-	switch (st) {
-	case WORKER_DONE:
-		worker_reset();
-		*reply_data_len = n; /* 6 on success */
-		return ALP_CC3501E_RESP_OK;
-	case WORKER_ERR:
-		worker_reset();
-		if (err == CC3501E_HW_ERR_NOTIMPL) return ALP_CC3501E_RESP_ERR_NOT_READY;
-		return ALP_CC3501E_RESP_ERR_RADIO;
-	case WORKER_IDLE:
-		/* No job in flight: queue one and ask the host to re-issue. */
-		(void)worker_submit(ALP_CC3501E_CMD_GET_MAC);
-		return ALP_CC3501E_RESP_ERR_BUSY;
-	default: /* WORKER_QUEUED / WORKER_RUNNING (incl. another cmd in flight) */
-		return ALP_CC3501E_RESP_ERR_BUSY;
-	}
+	return handle_worker_routed(
+	    ALP_CC3501E_CMD_GET_MAC, 6u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
 /* RESET (0x02): host-requested soft reset.  Reply OK now; the HAL
@@ -282,16 +306,18 @@ static alp_cc3501e_resp_t handle_cam_disable(const uint8_t *req, size_t req_len,
 /* Wi-Fi (0x10..0x1F)                                                */
 /* --------------------------------------------------------------- */
 
+/* WIFI_SCAN_START (0x10): reply data = the packed AP-record list (each
+ * record = bssid[6] | rssi(1) | channel(1) | security(1) | ssid_len(1)
+ * then ssid_len SSID bytes -- the cc3501e_wifi_scan host parser's wire
+ * format).  Worker-routed: the real Wlan_Scan + event rendezvous blocks
+ * for seconds and MUST run off the SPI ISR (see handle_worker_routed). */
 static alp_cc3501e_resp_t handle_wifi_scan_start(const uint8_t *req, size_t req_len,
                                                  uint8_t *reply_data, size_t reply_cap,
                                                  size_t *reply_data_len)
 {
 	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_wifi_scan_start());
+	return handle_worker_routed(
+	    ALP_CC3501E_CMD_WIFI_SCAN_START, 0u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
 static alp_cc3501e_resp_t handle_wifi_scan_stop(const uint8_t *req, size_t req_len,
@@ -368,22 +394,17 @@ static alp_cc3501e_resp_t handle_wifi_ap_stop(const uint8_t *req, size_t req_len
 	return hw_to_resp(cc3501e_hw_wifi_ap_stop());
 }
 
-/* WIFI_GET_RSSI (0x16): reply data = signed RSSI in dBm (1 byte). */
+/* WIFI_GET_RSSI (0x16): reply data = signed RSSI in dBm (1 byte).
+ * Worker-routed: the real Wlan_Get(WLAN_GET_RSSI) lazy-starts the radio on
+ * first use (seconds) and so MUST run off the SPI ISR (see
+ * handle_worker_routed). */
 static alp_cc3501e_resp_t handle_wifi_get_rssi(const uint8_t *req, size_t req_len,
                                                uint8_t *reply_data, size_t reply_cap,
                                                size_t *reply_data_len)
 {
 	(void)req;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 1u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-	int8_t             rssi = 0;
-	alp_cc3501e_resp_t st   = hw_to_resp(cc3501e_hw_wifi_get_rssi(&rssi));
-	if (st == ALP_CC3501E_RESP_OK) {
-		reply_data[0]   = (uint8_t)rssi;
-		*reply_data_len = 1u;
-	}
-	return st;
+	return handle_worker_routed(
+	    ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
 /* WIFI_GET_IP (0x17): reply data = 4-byte IPv4 address. */

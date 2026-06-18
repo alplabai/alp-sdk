@@ -81,6 +81,20 @@ static void worker_execute(uint8_t cmd)
 		}
 		break;
 	}
+	case ALP_CC3501E_CMD_WIFI_GET_RSSI: {
+		int8_t r = 0;
+		rv = cc3501e_hw_wifi_get_rssi(&r); /* WiFi build: lazy-starts radio, then Wlan_Get (blocks) */
+		if (rv == CC3501E_HW_OK) {
+			buf[0] = (uint8_t)r;
+			len    = 1u;
+		}
+		break;
+	}
+	case ALP_CC3501E_CMD_WIFI_SCAN_START:
+		/* Packs the AP-record list into buf in the host's wire format (see
+		 * cc3501e_hw_wifi_scan); blocks on the scan + event rendezvous. */
+		rv = cc3501e_hw_wifi_scan(buf, ALP_CC3501E_MAX_PAYLOAD, &len);
+		break;
 	default:
 		rv = CC3501E_HW_ERR_NOTIMPL;
 		break;

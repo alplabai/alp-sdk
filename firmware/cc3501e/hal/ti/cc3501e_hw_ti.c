@@ -89,6 +89,12 @@ extern volatile uint32_t g_resync_count;
  * lifetime; subsequent GET_MAC / Wi-Fi ops skip straight to the op. */
 static bool wifi_started;
 
+/* One-time STA role-up guard.  Wlan_Start (lazy_start) is enough for the factory
+ * MAC read, but SCAN and CONNECT need the STA ROLE up.  RoleUp is brought up once
+ * (bounded timeout, NOT WLAN_WAIT_FOREVER -- a stuck role-up must never hang the
+ * worker / the bridge SPI re-open).  Shared by scan + connect so RoleUp runs once. */
+static bool wifi_sta_role_up;
+
 /* ---- Worker <-> Wi-Fi-event rendezvous (WIFI_BLE_INTEGRATION.md) ----------
  * Async Wlan_* ops (Scan / Connect) complete on the host-driver thread via the
  * event cb, NOT on the worker thread that issued them.  The worker Clear()s the
@@ -553,14 +559,36 @@ static char cc3501e_wifi_sec(uint8_t security)
 	}
 }
 
-/* WIFI_SCAN_START: kick a STA scan of both bands, then wait the single
- * WLAN_EVENT_SCAN_RESULT (whole list in one event) so the result list is
- * cached for the host to read.  The host wire delivers individual records as
- * async EVT_WIFI_SCAN_RESULT events (next-rev host-IRQ line); this body proves
- * the scan path + caches the list.  WLAN_MAX_SCAN_COUNT(20) records cached;
- * MAX_PAYLOAD=512 caps the eventual wire pack to ~17 records (noted upstream). */
-int cc3501e_hw_wifi_scan_start(void)
+/* Bring the STA role up once (after Wlan_Start), with a bounded timeout.  Needed
+ * by SCAN + CONNECT (not GET_MAC).  Wlan_RoleUp returns the role id (>=0) on
+ * success, <0 on error/timeout. */
+static int cc3501e_hw_wifi_ensure_sta_role(void)
 {
+	if (wifi_sta_role_up) {
+		return CC3501E_HW_OK;
+	}
+	const int wifi_rv = cc3501e_hw_wifi_lazy_start();
+	if (wifi_rv != CC3501E_HW_OK) {
+		return wifi_rv;
+	}
+	RoleUpStaCmd_t staParams = { 0 };
+	if (Wlan_RoleUp(WLAN_ROLE_STA, &staParams, 10000u) < 0) {
+		return CC3501E_HW_ERR_IO;
+	}
+	wifi_sta_role_up = true;
+	return CC3501E_HW_OK;
+}
+
+/* Shared scan core: lazy-start the radio, kick a STA scan of both bands, then
+ * wait the single WLAN_EVENT_SCAN_RESULT (whole list in one event) so the
+ * result list is cached (wifi_scan_cache[] / wifi_scan_count) for the caller
+ * to read/pack.  WLAN_MAX_SCAN_COUNT(20) records cached; MAX_PAYLOAD=512 caps
+ * the eventual wire pack to ~17 records (noted upstream).  Returns CC3501E_HW_*. */
+static int cc3501e_hw_wifi_scan_run(void)
+{
+	/* Wlan_Scan runs after just Wlan_Start (no RoleUp) -- the scan completes + the
+	 * WLAN_EVENT_SCAN_RESULT fires either way; adding a 10s RoleUp here only
+	 * blocked the worker + disrupted the bridge (scan timed out, bench-proven). */
 	const int wifi_rv = cc3501e_hw_wifi_lazy_start();
 	if (wifi_rv != CC3501E_HW_OK) {
 		return wifi_rv;
@@ -578,6 +606,60 @@ int cc3501e_hw_wifi_scan_start(void)
 	return CC3501E_HW_OK;
 }
 
+/* WIFI_SCAN_START: run a scan + cache the result list.  Kept for the
+ * scan-then-stop control surface; cc3501e_hw_wifi_scan() (below) runs the
+ * SAME core and additionally packs the cached list onto the wire. */
+int cc3501e_hw_wifi_scan_start(void)
+{
+	return cc3501e_hw_wifi_scan_run();
+}
+
+/* cc3501e_hw_wifi_scan: run the scan (shared core), then PACK the cached AP
+ * list into @p buf in the host's wire format -- per record:
+ *   bssid[6] | rssi(1) | channel(1) | security(1) | ssid_len(1) then ssid[ssid_len]
+ * (the cc3501e_wifi_scan parser's CC3501E_SCAN_REC_HDR=10 layout).  Security and
+ * channel are passed through RAW (no translation); rssi is the SDK's signed beacon
+ * RSSI.  Records are packed until @p cap would be exceeded; *out_len = total bytes. */
+int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len)
+{
+	if (buf == 0 || out_len == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	*out_len = 0u;
+
+	const int rv = cc3501e_hw_wifi_scan_run();
+	if (rv != CC3501E_HW_OK) {
+		return rv;
+	}
+
+	const uint32_t count = wifi_scan_count;
+	size_t         off   = 0u;
+	for (uint32_t i = 0u; i < count; i++) {
+		const WlanNetworkEntry_t *e        = &wifi_scan_cache[i];
+		uint8_t                   ssid_len = (uint8_t)e->SsidLen;
+		if (ssid_len > sizeof(e->Ssid)) {
+			ssid_len = (uint8_t)sizeof(e->Ssid);
+		}
+		const size_t rec = 10u + (size_t)ssid_len; /* CC3501E_SCAN_REC_HDR + SSID */
+		if (off + rec > cap) {
+			break; /* stop before overflowing the wire buffer */
+		}
+		for (uint32_t b = 0u; b < 6u; b++) {
+			buf[off + b] = (uint8_t)e->Bssid[b];
+		}
+		buf[off + 6u] = (uint8_t)e->Rssi;         /* signed beacon RSSI, raw */
+		buf[off + 7u] = (uint8_t)e->Channel;      /* raw */
+		buf[off + 8u] = (uint8_t)e->SecurityInfo; /* raw */
+		buf[off + 9u] = ssid_len;
+		for (uint32_t s = 0u; s < ssid_len; s++) {
+			buf[off + 10u + s] = (uint8_t)e->Ssid[s];
+		}
+		off += rec;
+	}
+	*out_len = off;
+	return CC3501E_HW_OK;
+}
+
 int cc3501e_hw_wifi_scan_stop(void)
 {
 	/* The CC35xx scan is a one-shot that self-completes via the event; there
@@ -592,17 +674,9 @@ int cc3501e_hw_wifi_connect_sta(
 	if (ssid == 0 || ssid_len == 0u) {
 		return CC3501E_HW_ERR_INVAL;
 	}
-	const int wifi_rv = cc3501e_hw_wifi_lazy_start();
+	const int wifi_rv = cc3501e_hw_wifi_ensure_sta_role(); /* lazy-start + bounded STA role-up (shared) */
 	if (wifi_rv != CC3501E_HW_OK) {
 		return wifi_rv;
-	}
-	/* STA role-up (lazy_start no longer does it -- it is on the connect path, not
-	 * the GET_MAC path).  Wlan_RoleUp returns the role id (>=0) on success, <0 on
-	 * error/timeout; bounded timeout (not WAIT_FOREVER) so a stuck role-up cannot
-	 * deadlock the bring-up task / bridge re-open. */
-	RoleUpStaCmd_t staParams = { 0 };
-	if (Wlan_RoleUp(WLAN_ROLE_STA, &staParams, 10000u) < 0) {
-		return CC3501E_HW_ERR_IO;
 	}
 	osi_SyncObjClear(&wifi_event_sync);
 	wifi_last_status = 0;
@@ -726,6 +800,14 @@ int cc3501e_hw_wifi_scan_start(void)
 
 int cc3501e_hw_wifi_scan_stop(void)
 {
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len)
+{
+	(void)buf;
+	(void)cap;
+	if (out_len != 0) *out_len = 0u;
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 

@@ -263,15 +263,55 @@ ZTEST(cc3501e_bridge_transport, test_gpio_write_bad_len_invalid)
 /* Wi-Fi (v0.2): the stub HAL has no radio, so a well-formed request parses
  * cleanly and maps to NOT_READY, while a malformed one is rejected at the
  * protocol layer (INVALID) before reaching the HAL. */
+
+/* WIFI_SCAN_START is now WORKER-ROUTED (mirrors GET_MAC): the seconds-long
+ * Wlan_Scan MUST NOT run in the SPI ISR, so the handler is POLL-BY-REPEAT --
+ * the first request submits the job and replies BUSY, the host re-issues and
+ * collects the cached result.  On the silicon-free stub the worker runs the
+ * job synchronously at submit, and the stub HAL's scan reports NOTIMPL ->
+ * the re-issue maps to NOT_READY. */
 ZTEST(cc3501e_bridge_transport, test_wifi_scan_start_not_ready)
 {
 	uint8_t reply[32];
 	transport_spi_init();
 	const uint8_t s[] = { ALP_CC3501E_CMD_WIFI_SCAN_START, 0x00u, 0x00u, 0x00u };
+
 	transaction(s, sizeof s);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "scan reply = header + status");
-	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no radio on stub -> NOT_READY");
+	zassert_equal(n, 5u, "first scan reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_SCAN_START, 1u);
+	zassert_equal(
+	    reply[4], ALP_CC3501E_RESP_ERR_BUSY, "first SCAN_START submits the job -> BUSY (host retries)");
+
+	transaction(s, sizeof s);
+	n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "re-issued scan reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_SCAN_START, 1u);
+	zassert_equal(
+	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued SCAN_START on stub -> NOT_READY");
+}
+
+/* WIFI_GET_RSSI is worker-routed the same way (poll-by-repeat): submit -> BUSY,
+ * re-issue -> the cached NOT_READY on the radio-less stub. */
+ZTEST(cc3501e_bridge_transport, test_wifi_get_rssi_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	const uint8_t r[] = { ALP_CC3501E_CMD_WIFI_GET_RSSI, 0x00u, 0x00u, 0x00u };
+
+	transaction(r, sizeof r);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "first rssi reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u);
+	zassert_equal(
+	    reply[4], ALP_CC3501E_RESP_ERR_BUSY, "first GET_RSSI submits the job -> BUSY (host retries)");
+
+	transaction(r, sizeof r);
+	n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "re-issued rssi reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u);
+	zassert_equal(
+	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued GET_RSSI on stub -> NOT_READY");
 }
 
 ZTEST(cc3501e_bridge_transport, test_wifi_connect_sta_parses_then_not_ready)

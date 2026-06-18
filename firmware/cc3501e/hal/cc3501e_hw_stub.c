@@ -116,6 +116,14 @@ int cc3501e_hw_wifi_scan_stop(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
+int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len)
+{
+	(void)buf;
+	(void)cap;
+	if (out_len != 0) *out_len = 0u;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
 int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
                                 uint8_t psk_len, uint8_t security)
 {

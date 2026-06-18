@@ -22,6 +22,7 @@
 #ifndef CC3501E_BRIDGE_HAL_CC3501E_HW_H
 #define CC3501E_BRIDGE_HAL_CC3501E_HW_H
 
+#include <stddef.h> /* size_t (cc3501e_hw_wifi_scan) */
 #include <stdint.h>
 
 /* Return codes.  0 = success; negatives are operation-independent
@@ -114,6 +115,16 @@ int cc3501e_hw_cam_enable(uint8_t which, uint8_t on);
  * terminated; the lengths are authoritative. */
 int cc3501e_hw_wifi_scan_start(void);
 int cc3501e_hw_wifi_scan_stop(void);
+
+/* Run a Wi-Fi scan and PACK the resulting AP list into @p buf in the host's
+ * wire format -- per record: bssid[6] | rssi(1) | channel(1) | security(1) |
+ * ssid_len(1) then ssid_len SSID bytes (the cc3501e_wifi_scan parser's
+ * CC3501E_SCAN_REC_HDR=10 layout).  Records are packed until @p cap would be
+ * exceeded; *out_len receives the total bytes written.  Worker-routed (the
+ * scan blocks for seconds), so this runs off the SPI ISR.  Returns
+ * CC3501E_HW_OK on success; the stub / silicon-free build reports
+ * CC3501E_HW_ERR_NOTIMPL with *out_len = 0. */
+int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len);
 int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk,
                                 uint8_t psk_len, uint8_t security);
 int cc3501e_hw_wifi_disconnect(void);
