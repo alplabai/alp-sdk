@@ -106,10 +106,33 @@ xfer  : dma_config rc=0 dma_start rc=0 memcmp_match=1 (1000 bytes M2M)
 RESULT PASS: PL330 DMA WORKS -- dma2 binds to arm,dma-pl330 at 0x400c0000 ...
 ```
 
+## Bench status (E8, RAM-run, 2026-06-18)
+
+PARTIAL. Two real on-silicon findings:
+
+1. **DMA2 is the M55-core-LOCAL DMA and its peripheral clock is gated off at
+   reset.** Any access to the PL330 register block bus-faults (precise data bus
+   error at base+0xD00, DBGSTATUS) until the clock is enabled. `main.c` ungates
+   it via `M55HE_CFG.CLK_ENA |= BIT(4)` (`0x43007010`, DFP `sys_ctrl_dma.h`
+   `CLK_ENA_DMA_CKEN` / `core_defines.h` `M55_CFG_Common_Type`). With that, the
+   node binds, `device_is_ready()` is true, and `dma_config()`/`dma_start()`
+   return 0 with no fault. The secure base `0x400C0000` is correct (the M55-HE
+   boots secure on the RAM-run; the non-secure alias `0x400E0000` bus-faults the
+   same way without the clock).
+2. **The M2M copy does not yet land** (`memcmp_match=0`). The PL330 fault
+   registers are all clean (FSRD/FSRC/FTR0 = 0 — no manager or channel fault),
+   but channel-0 is STOPPED with `SA0=DA0=CPC0=0`: the channel was never
+   programmed. The upstream polling driver launches the channel over the debug
+   interface (DMAGO → generated microcode at `0x023FE000`); that launch returns
+   cleanly but does not execute the transfer. **Open follow-up:** debug the
+   PL330 DMAGO/microcode-fetch launch (manager-secure vs channel-NS DMAGO bit,
+   microcode reachability) — task #21.
+
 ## Notes / caveats
 
-- **BENCH-UNVERIFIED.** The node + transfer are authored against the pinned
-  Zephyr 4.4 PL330 driver and the DFP addresses; not yet run on the E8.
+- The node + transfer are authored against the pinned Zephyr 4.4 PL330 driver
+  and the DFP addresses. The clock-enable + secure base are bench-verified; the
+  channel launch is the open item above.
 - The `microcode` carve-out address (`0x023FE000`) and the SRAM0 shrink are an
   alp-sdk layout choice (top 8 KiB of the 4 MiB bank), not a DFP-fixed address.
 - The user-microcode helper API from the sdk-alif `dma_user_mcode` sample
