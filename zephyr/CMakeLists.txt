@@ -226,6 +226,18 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dac/dac_alif.c)
 
+# Alif Ensemble analog comparator class driver (compatible "alif,cmp"), a
+# clean-room driver (NOT a vendored fork copy: hal_alif + the available fork
+# checkout ship no comparator class driver `.c`, only the binding/nodes/sample).
+# Implements the upstream Zephyr v4.4 comparator API over the hal_alif analog_ctrl
+# VREF/clock helper library, so the driver selects USE_ALIF_HAL_ANALOG to pull
+# that in (shared with ADC_ALIF / DAC_ALIF).  No private upstream context header,
+# so no extra include dir is needed.  Binding under
+# zephyr/dts/bindings/comparator/; nodes in the E8 SoC overlay.  ADR 0017 Tier-2
+# (INTERIM, task #21).
+zephyr_library_sources_ifdef(CONFIG_CMP_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/comparator/comparator_alif.c)
+
 # Alif Ensemble LPPDM / PDM mic-capture class driver (compatible "alif,alif-pdm"),
 # vendored VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/audio/alif_pdm.c).
 # Upstream Zephyr v4.4 + hal_alif ship no Alif PDM driver.  Pure CMSIS + Zephyr

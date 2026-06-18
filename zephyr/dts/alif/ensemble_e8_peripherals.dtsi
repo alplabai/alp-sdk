@@ -740,6 +740,66 @@
 	};
 
 	/*
+	 * CMP -- Alif Ensemble high-speed analog comparators (HSCMP: cmp0..cmp3).
+	 * Driven by the alp-sdk clean-room driver
+	 * (zephyr/drivers/comparator/comparator_alif.c, compatible "alif,cmp")
+	 * implementing the upstream Zephyr v4.4 comparator class API over the
+	 * hal_alif analog_ctrl VREF/clock library (CONFIG_CMP_ALIF selects
+	 * USE_ALIF_HAL_ANALOG, shared with ADC_ALIF / DAC_ALIF).
+	 *
+	 * reg / reg-names / IRQ / config properties are transcribed VERBATIM from
+	 * the Apache-2.0 zephyr_alif fork e1.dtsi (ensemble/common/e1.dtsi cmp0):
+	 *
+	 *   reg-names: "cmp_reg"    = per-instance HSCMP block (cmp0 0x49023000,
+	 *                             cmp1 0x49024000, cmp2 0x49025000, cmp3 0x49026000)
+	 *              "config_reg" = the CMP0 config block 0x49023000 (CMP_COMP_REG2:
+	 *                             DAC6 / VREF programming -- shared across HSCMP)
+	 *   IRQ:       cmp0 167, cmp1 168, cmp2 169, cmp3 170 (priority 0)
+	 *
+	 * The fork node's `clocks = <&clockctrl ALIF_CMP0_CLK>` and
+	 * `cmp-gpios`/dac6_reg/adc_vref reg entries are deliberately OMITTED here:
+	 *   - the CMP clock is gated through the analog_ctrl helper
+	 *     (CLKCTRL_PER_SLV->CMP_CTRL bit 0), NOT a DT clock phandle -- the fork
+	 *     ALIF_CMP*_CLK packed value is the 7-arg fork encoding that MUST NOT be
+	 *     copied onto the upstream alif,clockctrl
+	 *     (reference_alif_clock_encoding_fork_vs_upstream);
+	 *   - DAC6 is programmed in the CMP0 config block (config_reg + CMP_COMP_REG2),
+	 *     so no separate dac6_reg/adc_vref mapping is needed for the internal
+	 *     reference.
+	 *
+	 * negative_input = "CMP_NEG_IN3" selects the on-chip DAC6 programmable
+	 * reference (COMP_HS_IN_M_SEL = 0x3 = DAC6 per the DFP SVD) -- the
+	 * INTERNAL-reference path, which needs no external pad.  positive_input =
+	 * "CMP_POS_IN0" routes the CMP0_IN0 analog pad.  filter_taps/prescaler/hyst
+	 * match the fork cmp0 node defaults.
+	 *
+	 * NO pinctrl-0: the fork node references &pinctrl_cmp0 (the CMP0_IN0..IN3
+	 * analog pads), not defined in this tree.  The driver applies pinctrl only IF
+	 * the node carries it.  The internal-reference smoke does not need a muxed
+	 * input pad; a board that compares against an EXTERNAL voltage adds the
+	 * pinctrl group + the input-pad threshold per the Alif TRM (BENCH CONFIG --
+	 * external pin/threshold is TBD here).
+	 *
+	 * ADR 0017 Tier-2 (clean-room driver; hal_alif has no comparator class
+	 * driver) -- INTERIM, retires onto the fork once a fork comparator driver is
+	 * available + bench-verified (task #21).  BENCH-UNVERIFIED.
+	 */
+	cmp0: cmp@49023000 {
+		compatible = "alif,cmp";
+		reg = <0x49023000 0x1000>,
+		      <0x49023000 0x100>;
+		reg-names = "cmp_reg", "config_reg";
+		interrupts = <167 0>;
+		driver_instance = "CMP_INSTANCE_0";
+		positive_input = "CMP_POS_IN0";
+		negative_input = "CMP_NEG_IN3"; /* DAC6 internal reference */
+		hysteresis_level = "42mV";
+		filter_taps = <3>;
+		prescaler = <8>;
+		status = "disabled";
+	};
+
+	/*
 	 * CAMERA CAPTURE path -- CPI parallel-camera controller (cam) +
 	 * DesignWare MIPI CSI-2 host bridge (csi) + DesignWare MIPI D-PHY (dphy),
 	 * all driven by the alp-sdk vendored fork drivers (zephyr/drivers/video/

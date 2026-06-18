@@ -543,6 +543,32 @@ config DAC_ALIF
 	  are repointed to the fork compatible AND bench-verified.  Task #21.
 	  Driver: zephyr/drivers/dac/dac_alif.c.
 
+config CMP_ALIF
+	bool "Alif Ensemble analog comparator (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on COMPARATOR
+	depends on DT_HAS_ALIF_CMP_ENABLED
+	select PINCTRL
+	select USE_ALIF_HAL_ANALOG
+	help
+	  Alif Ensemble analog comparator (HSCMP: cmp0..cmp3) class driver,
+	  implementing the upstream Zephyr v4.4 comparator API
+	  (<zephyr/drivers/comparator.h>) over the fork-native compatible "alif,cmp"
+	  (no upstream Zephyr Alif comparator exists, so no collision).  Built over
+	  the hal_alif analog_ctrl VREF/clock helper library (USE_ALIF_HAL_ANALOG
+	  pulls in modules/hal/alif drivers/analog -- the same library ADC_ALIF /
+	  DAC_ALIF use): the CMP clock-gate (CLKCTRL_PER_SLV->CMP_CTRL) and the DAC6
+	  internal reference are programmed through that helper, so an
+	  internal-reference compare needs no external wiring.  Not silicon-validated.
+
+	  Unlike ADC_ALIF / DAC_ALIF, this is NOT a vendored fork copy: hal_alif and
+	  the available fork checkout ship no comparator class driver `.c` (only the
+	  binding + DT nodes + a sample), so the register sequencing was authored
+	  clean-room against the Alif DFP register definitions.  ADR 0017 Tier-2:
+	  INTERIM.  Retires onto the opt-in sdk-alif fork once a fork comparator
+	  driver is available, repointed AND bench-verified.  Task #21.
+	  Driver: zephyr/drivers/comparator/comparator_alif.c.
+
 config ALIF_PDM
 	bool "Alif Ensemble LPPDM PDM mic capture (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
 	default y
