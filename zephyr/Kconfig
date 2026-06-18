@@ -587,6 +587,36 @@ config DAC_ALIF
 	  are repointed to the fork compatible AND bench-verified.  Task #21.
 	  Driver: zephyr/drivers/dac/dac_alif.c.
 
+config CRC_ALIF
+	bool "Alif Ensemble CRC engine (ADR 0017 Tier-1.5 clean-room, BENCH-UNVERIFIED)"
+	default y
+	depends on CRC_DRIVER
+	depends on DT_HAS_ALIF_CRC_ENABLED
+	select CRC_DRIVER_HAS_CRC8_CCITT
+	select CRC_DRIVER_HAS_CRC16
+	select CRC_DRIVER_HAS_CRC16_CCITT
+	select CRC_DRIVER_HAS_CRC32_C
+	select CRC_DRIVER_HAS_CRC32_IEEE
+	help
+	  Alif Ensemble hardware CRC engine class driver (compatible "alif,crc"),
+	  implementing the UPSTREAM Zephyr v4.4 CRC class API
+	  (<zephyr/drivers/crc.h>: crc_begin / crc_update / crc_finish over
+	  struct crc_ctx).  CLEAN-ROOM, NOT vendored: the Apache-2.0 zephyr_alif
+	  fork's CRC driver targets a fork-private API (crc_compute() +
+	  struct crc_params, CONFIG_CRC_DRV) that does not exist upstream and so
+	  cannot be consumed verbatim -- the register model is re-authored
+	  value-only from the Alif DFP (drivers/include/crc.h + soc.h), with the
+	  programming sequence cross-checked against the fork CMSIS Driver_CRC.c.
+
+	  Polled, memory-mapped block (no interrupt, no DMA used by the driver),
+	  so it pulls in NO hal_alif library (like flash_mram_alif).  Maps the
+	  upstream enum crc_type onto the engine's CRC_8_CCITT / CRC_16 /
+	  CRC_16_CCITT / CRC_32 / CRC_32C algorithms; other types return -ENOTSUP.
+	  On the E8 SoM this binds crc0@48107000 / crc1@48108000.  Not
+	  silicon-validated.  ADR 0017 Tier-1.5 (in-tree-thin over the silicon;
+	  there is no Tier-2 fork path to retire onto).  Task #21.
+	  Driver: zephyr/drivers/crc/crc_alif.c.
+
 config ALIF_PDM
 	bool "Alif Ensemble LPPDM PDM mic capture (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
 	default y

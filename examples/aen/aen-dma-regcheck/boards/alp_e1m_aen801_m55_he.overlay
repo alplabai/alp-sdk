@@ -1,0 +1,78 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-dma-regcheck board overlay for the E1M-AEN801 (Ensemble E8, M55-HE)
+ * RAM-run.  Enables the ARM PL330 DMA controller (dma2) that the E8 SoC overlay
+ * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi) declares status=disabled, binds
+ * the alp_dma0 portable alias to it, gives the PL330 a real `microcode` scratch
+ * address in global SRAM0, and reserves that SRAM0 carve-out so it cannot
+ * collide with the source/destination buffers.
+ *
+ * ====================  DMA REACHABILITY: GLOBAL SRAM0 ONLY  ==================
+ * The PL330 is an AXI bus master.  It fetches its generated per-channel
+ * microcode AND reads/writes the copy buffers over its OWN AXI master, so EVERY
+ * address it touches must be GLOBAL (AXI-visible).  The M55's DTCM (local
+ * 0x20000000, where the generated board puts default RAM) is core-private and is
+ * NOT on the DMA path.  So:
+ *
+ *   - the buffers (src_buf/dst_buf) are tagged section("SRAM0") in main.c, which
+ *     lands them in the sram0 linker region @0x02000000 (global on-chip SRAM);
+ *   - the PL330 `microcode` scratch is pointed at a carve-out at the TOP of that
+ *     same 4 MiB bank.
+ *
+ * Unlike the NPU/eth paths, the UPSTREAM PL330 driver does NO Alif local->global
+ * remap -- it programs the addresses verbatim -- so the addresses the CPU hands
+ * it (the &src_buf/&dst_buf in SRAM0, and this `microcode` base) ARE the global
+ * addresses the engine fetches.  Combined with CONFIG_DCACHE=n (prj.conf) the
+ * CPU and DMA share one coherent view.
+ *
+ * SRAM0 CARVE-OUT (sram0 node = 0x02000000, DT_SIZE_M(4) = 0x400000):
+ *   - microcode region : top 8 KiB = 0x023FE000 .. 0x02400000
+ *                        (8 channels * MICROCODE_SIZE_MAX 0x400 = 0x2000, the
+ *                         minimum the PL330 driver carves -- dma_pl330.h);
+ *   - buffers (SRAM0)  : the sram0 node is SHRUNK to 0x02000000 + 0x3FE000
+ *                        (4 MiB - 8 KiB) so the linker keeps src_buf/dst_buf
+ *                        strictly BELOW the microcode region -- no overlap.
+ * ============================================================================
+ */
+
+/ {
+	/*
+	 * MANDATORY bench RAM-run retarget (Flow C): run from ITCM so J-Link can
+	 * loadbin+go without programming MRAM, and drop the MCUboot code-partition
+	 * fixup.  Same setup as the sibling *-regcheck examples.
+	 *
+	 * PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form: the
+	 * phandle-array form yields CONFIG_FLASH_SIZE=0 and the image overflows the
+	 * (empty) FLASH region at link time.
+	 */
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		/* The alp portable DMA alias resolves bus 0 via DT_ALIAS(alp_dma0). */
+		alp-dma0 = &dma2;
+	};
+};
+
+/*
+ * Shrink the global SRAM0 region by the top 8 KiB so the PL330 microcode
+ * carve-out (0x023FE000..0x02400000) never overlaps the section("SRAM0")
+ * buffers.  Base stays 0x02000000; size 0x400000 - 0x2000 = 0x3FE000.
+ */
+&sram0 {
+	reg = <0x02000000 0x3FE000>;
+};
+
+&dma2 {
+	/*
+	 * Real microcode scratch base: top 8 KiB of SRAM0 (global, AXI-visible),
+	 * just above the shrunk sram0 region.  The PL330 driver carves this into
+	 * 8 * 0x400 B per-channel ucode slots (dma_pl330_initialize()).
+	 */
+	microcode = <0x023FE000>;
+	status = "okay";
+};

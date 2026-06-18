@@ -323,6 +323,32 @@
 		channel = <0>;
 		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
 		clock-frequency = <32768>;
+	};
+
+	/*
+	 * CRC engine -- the Alif Ensemble hardware CRC accelerator (two
+	 * instances).  Bound by the alp-sdk clean-room driver crc_alif.c
+	 * (compatible "alif,crc"), which implements the UPSTREAM Zephyr v4.4 CRC
+	 * class API (crc_begin/update/finish over struct crc_ctx).  Polled,
+	 * memory-mapped block -- no interrupt line (the DFP CRC engine exposes no
+	 * dedicated IRQ; only an optional DMA path this driver does not use), so
+	 * the node carries reg only.
+	 *
+	 * reg transcribed VERBATIM (value-only, clean-room) from the Alif DFP SoC
+	 * header (AE822FA0E5597 rtss_he soc.h: CRC0_BASE 0x48107000,
+	 * CRC1_BASE 0x48108000; CRC_Type size 0x100).  Disabled by default; a
+	 * board / example enables an instance (status = "okay").  ADR 0017
+	 * Tier-1.5 (in-tree-thin over the silicon).  BENCH-UNVERIFIED, task #21.
+	 */
+	crc0: crc@48107000 {
+		compatible = "alif,crc";
+		reg = <0x48107000 0x100>;
+		status = "disabled";
+	};
+
+	crc1: crc@48108000 {
+		compatible = "alif,crc";
+		reg = <0x48108000 0x100>;
 		status = "disabled";
 	};
 
@@ -932,6 +958,67 @@
 		can-fd-ctrl-reg = <0x4902F00C>;
 		can-fd-bit      = <20>;
 		status          = "disabled";
+	};
+
+	/*
+	 * ARM PL330 DMA controller -- the RTSS-core-LOCAL DMA.  On the E8 (AE822)
+	 * each M55 cluster has its OWN PL330: the RTSS-HE core (this SoM's lead core)
+	 * sees it as "DMA2", the RTSS-HP core sees its own as "DMA1"; BOTH sit at the
+	 * same core-LOCAL register window 0x400C0000 (secure view) / 0x400E0000
+	 * (non-secure view).  This node uses the secure-view local base 0x400C0000 --
+	 * the address Alif's own PL330 driver instance prints ("Device
+	 * dma2@400c0000 initialized", sdk-alif samples/drivers/dma_user_mcode/
+	 * README.rst).  (The third controller, the GLOBAL "DMA0" at 0x49080000 sec /
+	 * 0x490A0000 ns, is shared/cross-core and is NOT declared here.)
+	 *
+	 * Bound by UPSTREAM Zephyr v4.4's ARM PL330 driver (drivers/dma/dma_pl330.c,
+	 * compatible "arm,dma-pl330") -- pure ADR 0017 Tier-1 (upstream-native): the
+	 * standard Zephyr dma_* class device, no vendored / forked code.  The driver
+	 * is a POLLING M2M DMA (dma_pl330_wait() spins on the channel-status CS0
+	 * register) and uses NO `interrupts` / `clocks` -- the arm,dma-pl330 binding
+	 * declares none, and the PL330 register block is always-clocked in the RTSS
+	 * core domain.  (The DFP enumerates DMA2_IRQ0..IRQ31 = the 32 per-request
+	 * event lines + DMA2_IRQ_ABORT_IRQn=32 in the RTSS-HE local IRQ space, used
+	 * only by an IRQ-driven driver; the upstream polling driver needs none.)
+	 *
+	 * AUTHORITATIVE VALUES (Alif AE822 DFP, Device/soc/AE822FA0E5597/include/
+	 * rtss_he/soc.h):
+	 *   reg base 0x400C0000  -- DMA2_SEC_BASE (HP-side DMA1_SEC_BASE is the same
+	 *                           0x400C0000).
+	 *   dma-channels = <8>   -- the PL330 has 8 execution channels: the DFP DMA2
+	 *                           register struct arrays DMA2_SEC_DMA_CHANNEL_RT_INFO
+	 *                           DMA_CHANNEL_RT_INFO[8] / DMA_RT_CHANNEL_CFG[8]
+	 *                           ([0..7]).
+	 *
+	 * `microcode` (required by arm,dma-pl330.yaml) -- a scratch RAM base the
+	 * driver writes the generated per-channel microcode into (mcode_base; each of
+	 * the 8 channels gets MICROCODE_SIZE_MAX=0x400 bytes -- dma_pl330.h -- so
+	 * 8 * 0x400 = 0x2000).  The PL330 FETCHES that microcode over its own AXI
+	 * master, so the region MUST be at a GLOBAL (AXI-visible) address -- NOT a
+	 * core-local TCM alias.  Left as a placeholder 0 here so the disabled SoC node
+	 * validates; an enabling board overlay sets it to a real carve-out in global
+	 * SRAM0 (0x02000000, the sram0 node) AND places the DMA source/destination
+	 * buffers there too (same global-address constraint -- the upstream PL330
+	 * driver does NOT do the Alif local->global remap that the NPU/ETH paths use;
+	 * see the aen-dma-regcheck overlay).
+	 *
+	 * A board enables this node (status="okay") + sets a real `microcode` address.
+	 * ADR 0017 Tier-1 (upstream-native), BENCH-UNVERIFIED.
+	 */
+	dma2: dma@400c0000 {
+		compatible = "arm,dma-pl330";
+		reg = <0x400C0000 0x1000>; /* AE822 DFP rtss_he/soc.h: DMA2_SEC_BASE (M55-HE boots secure on the RAM-run) */
+		/* AE822 DFP rtss_he/soc.h: DMA2_SEC DMA_CHANNEL_RT_INFO[8]/DMA_RT_CHANNEL_CFG[8] ([0..7]) */
+		dma-channels = <8>;
+		#dma-cells = <1>;
+		/*
+		 * microcode: AXI-visible scratch base for the 8*0x400 B generated channel
+		 * ucode.  Placeholder 0; an enabling board overlay MUST point this at a
+		 * real global-SRAM0 carve-out (the PL330 fetches ucode over AXI -- a
+		 * core-local TCM alias is NOT reachable).
+		 */
+		microcode = <0x0>;
+		status = "disabled";
 	};
 
 	/*
