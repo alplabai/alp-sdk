@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Tier-1.5 alif,lptimer LPTIMER counter driver
+# (counter_alif_lptimer.c).  BENCH-UNVERIFIED: the lptimer@42001000 channel-0
+# free-running DOWN-counter advance check is a bench flash, not a CI run.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-lptimer-regcheck
+  description: |
+    Bench RAM-run LPTIMER (alif,lptimer) counter proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): binds lptimer@42001000 channel 0 via the
+    alp-sdk Tier-1.5 counter_alif_lptimer driver and confirms the free-running
+    DOWN-counter advances through the portable Zephyr counter_* API.
+    BENCH-UNVERIFIED.
+
+tests:
+  alp_sdk.examples.aen.lptimer_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - counter
+      - lptimer
+    build_only: true   # the LPTIMER advance check is a bench flash, not a CI run.

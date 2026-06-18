@@ -203,6 +203,16 @@ zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_UTIMER
 zephyr_library_sources_ifdef(CONFIG_COUNTER_RTC_SNPS_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_dw_rtc.c)
 
+# Alif Ensemble LPTIMER counter (compatible "alif,lptimer"), the always-on
+# lptimer@42001000 block: four independent 32-bit DOWN-counters clocked from the
+# VBAT-domain LF source.  A DISTINCT always-on IP from the LPRTC (snps,dw-apb-rtc
+# above) and the UTIMER counter.  Clean-room Tier-1.5 driver written directly
+# over the memory-mapped registers (the zephyr_alif fork ships no LPTIMER driver
+# or "alif,lptimer" binding); binding under zephyr/dts/bindings/counter/; node in
+# the E8 SoC overlay.
+zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_LPTIMER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_alif_lptimer.c)
+
 # Alif Ensemble ADC class driver (compatible "alif,adc"), vendored VERBATIM from
 # the Apache-2.0 zephyr_alif fork; hal_alif ships no ADC class driver, only the
 # analog_ctrl VREF helper library (drivers/analog), so the driver selects
