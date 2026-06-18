@@ -288,6 +288,45 @@
 	};
 
 	/*
+	 * LPTIMER -- the always-on Alif Ensemble low-power timer at
+	 * lptimer@42001000 (a DISTINCT IP from the LPRTC above and the UTIMER
+	 * below).  The block holds four independent 32-bit DOWN-counters
+	 * (channels 0..3), each clocked from the VBAT-domain LF source and each
+	 * with its own NVIC line firing on underflow.  Bound by the alp-sdk
+	 * Tier-1.5 driver counter_alif_lptimer.c (compatible "alif,lptimer") as a
+	 * Zephyr COUNTER device; surfaced to app code as an alp_counter via the
+	 * alp-counter alias.
+	 *
+	 * reg base + the four channel IRQs are transcribed VERBATIM from the Alif
+	 * DFP for the E8 part AE822FA0E5597 (Device/soc/AE822FA0E5597/include/
+	 * rtss_he/soc.h: LPTIMER_BASE 0x42001000, size 0xC0; IRQn LPTIMER0..3 =
+	 * 60..63).  This single node selects channel 0 (IRQ 60); to use another
+	 * channel, set `channel` + its matching `interrupts` (ch1=61, ch2=62,
+	 * ch3=63).  IRQ priority is the repo literal 3 (as the rest of this
+	 * overlay does).
+	 *
+	 * clock-source 0 = 32 kHz (Alif DFP sys_ctrl_lptimer.h LPTIMER_CLK_SRC);
+	 * clock-frequency 32768 must match it.  These select the VBAT
+	 * TIMER_CLKSEL field only; they do not change whether the count advances.
+	 *
+	 * CLOCK NOTE (BENCH-UNVERIFIED): the driver selects this channel's clock
+	 * in the always-on VBAT TIMER_CLKSEL (0x1A609004) from the `clock-source`
+	 * prop.  Whether the chosen VBAT LF source is itself running on the
+	 * alp-sdk upstream-Zephyr build path is bench-TBD (read CURRENTVAL; if it
+	 * never advances, the source clock is the cause).  Tier-1.5, INTERIM,
+	 * task #21.
+	 */
+	lptimer0: lptimer@42001000 {
+		compatible = "alif,lptimer";
+		reg = <0x42001000 0xc0>;
+		interrupts = <60 3>;
+		channel = <0>;
+		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
+		clock-frequency = <32768>;
+		status = "disabled";
+	};
+
+	/*
 	 * UTIMER -- Alif Universal Timer.  The parent "alif,utimer" node is an
 	 * unbound container (reg = per-timer block 0x48001000+id*0x1000 + the shared
 	 * global block 0x48000000); a child binds the actual class driver:
@@ -928,6 +967,32 @@
 		reg = <0x40050000 0x1000>;
 		interrupts = <38 3>;
 		interrupt-names = "tx";
+		status = "disabled";
+	};
+
+	/*
+	 * Hardware semaphore (HWSEM) instance 0 -- the first of the 16 Ensemble
+	 * HWSEM latches.  An AMP request/release mutual-exclusion latch shared
+	 * between the two RTSS cores (M55-HE <-> M55-HP), keyed by a per-core
+	 * MASTER ID.  Driven by the alp-sdk in-tree "alif,hwsem" driver
+	 * (zephyr/drivers/misc/alif_hwsem/hwsem_alif.c, CONFIG_HWSEM_ALIF).
+	 *
+	 * reg transcribed CLEAN-ROOM (address only) from the Alif DFP
+	 * Device/soc/AE822FA0E5597/include/rtss_he/soc.h:
+	 *   HWSEM0_BASE 0x4902E000, struct HWSEM_Type size 0x0C, instance
+	 *   stride 0x10 (HWSEM1_BASE 0x4902E010 ..).  size = 0x10 (the per-
+	 *   instance stride; the three registers REQ/REL/RST occupy +0x00..+0x0B).
+	 * No clocks/pinctrl: the HWSEM block is core-internal (no pads, no
+	 * peripheral clock gate).  status="disabled" by default; an app overlay
+	 * okays it (see examples/aen/aen-hwsem-regcheck).  ADR 0017
+	 * vendor-native custom.  BENCH-UNVERIFIED.
+	 *
+	 * (HWSEM1..15 @ 0x4902E010..0x4902E0F0 -- the remaining 15 latches -- are
+	 * NOT declared here; add a node per latch as AMP locks are partitioned.)
+	 */
+	hwsem0: hwsem@4902e000 {
+		compatible = "alif,hwsem";
+		reg = <0x4902e000 0x10>;
 		status = "disabled";
 	};
 };

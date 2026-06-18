@@ -132,6 +132,20 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
 
+# Alif Ensemble hardware-semaphore (HWSEM) driver -- vendor-ext, BENCH-UNVERIFIED.
+# AMP request/release latch shared between the two RTSS cores (M55-HE <-> M55-HP).
+# HWSEM has no upstream Zephyr device class, so this is a "misc" (no-class) driver
+# exposing a tiny take/give API (DT_DRV_COMPAT alif_hwsem).  Cannot build under
+# native_sim (Cortex-M55 target), hence bench-unverified in CI.  Driver:
+# zephyr/drivers/misc/alif_hwsem/hwsem_alif.c; binding:
+# zephyr/dts/bindings/misc/alif,hwsem.yaml.  Its own include dir is exposed so an
+# app (the regcheck example) can include "hwsem_alif.h" for the take/give API.
+zephyr_library_sources_ifdef(CONFIG_HWSEM_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/misc/alif_hwsem/hwsem_alif.c)
+if(CONFIG_HWSEM_ALIF)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/misc/alif_hwsem)
+endif()
+
 # (Retired, task #21 / ADR 0017) No Alif LPI2C driver: LPI2C0 is slave-only
 # (TRM §3.17.4), so a master driver is a dead end; the housekeeping trio is
 # Tier-3 (Alif SE services), edge I2C is Tier-1 upstream i2c_dw.
@@ -202,6 +216,16 @@ zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_UTIMER
 # zephyr/dts/bindings/counter/; node in the E8 SoC overlay.
 zephyr_library_sources_ifdef(CONFIG_COUNTER_RTC_SNPS_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_dw_rtc.c)
+
+# Alif Ensemble LPTIMER counter (compatible "alif,lptimer"), the always-on
+# lptimer@42001000 block: four independent 32-bit DOWN-counters clocked from the
+# VBAT-domain LF source.  A DISTINCT always-on IP from the LPRTC (snps,dw-apb-rtc
+# above) and the UTIMER counter.  Clean-room Tier-1.5 driver written directly
+# over the memory-mapped registers (the zephyr_alif fork ships no LPTIMER driver
+# or "alif,lptimer" binding); binding under zephyr/dts/bindings/counter/; node in
+# the E8 SoC overlay.
+zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_LPTIMER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/counter/counter_alif_lptimer.c)
 
 # Alif Ensemble ADC class driver (compatible "alif,adc"), vendored VERBATIM from
 # the Apache-2.0 zephyr_alif fork; hal_alif ships no ADC class driver, only the
@@ -388,6 +412,14 @@ zephyr_library_sources_ifdef(CONFIG_MBEDTLS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/zephyr_drv.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
+# SE-CryptoCell hardware-crypto backend (silicon_ref alif:ensemble:e8,
+# priority 110 -- outranks the priority-100 "*" PSA zephyr_drv).  Rides the
+# hal_alif SE-service MHUv2 -> SE mailbox the read-only se_service client
+# already drives live; RNG via the public se_service_get_rnd_num(), the
+# AES/SHA/CMAC/CCM/GCM/ChaCha20/Poly1305 wire requests gated behind the
+# generic-send seam (CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/se_cryptocell.c)
 # Update-log surface (<alp/update_log.h>) -- experimental, opt-in.
 # Pure engine + software tamper-evident tier + (compiled, unregistered)
 # Alif TF-M stub seam. Gated on CONFIG_ALP_SDK_UPDATE_LOG.  The dispatch
@@ -498,6 +530,15 @@ zephyr_library_sources_ifdef(CONFIG_RTC
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/zephyr_drv.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/sw_fallback.c)
+
+# E8 LPRTC counter -> calendar shim: backs the alp_rtc_* surface over the
+# always-on snps,dw-apb-rtc COUNTER device (lprtc@42000000) -- the E8 has no
+# Zephyr-RTC-class peripheral.  Needs the counter subsystem for the device.
+if(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8 AND CONFIG_COUNTER)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/rtc/lprtc_calendar_shim.c)
+endif()
+
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/wdt_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_WATCHDOG

@@ -23,4 +23,5 @@ aen-pdm-mic-alif
 aen-i2s-amp-alif
 aen-gpu2d-bench
 aen-rtc-regcheck
+aen-hwsem-regcheck
 aen-power-smoke

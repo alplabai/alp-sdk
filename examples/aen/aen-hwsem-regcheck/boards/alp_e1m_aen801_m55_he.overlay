@@ -1,0 +1,41 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon HWSEM validation overlay for the E1M-AEN801 (Alif Ensemble E8,
+ * M55-HE), bench RAM-run via J-Link.
+ *
+ * Validates the alp-sdk in-tree "alif,hwsem" driver
+ * (zephyr/drivers/misc/alif_hwsem/hwsem_alif.c) on HWSEM instance 0
+ * (hwsem@4902e000).  The driver binds it as a bare register window (no Zephyr
+ * device class -- HWSEM has none) and exposes a take/give API (hwsem_alif.h):
+ * an atomic request/release latch keyed by a per-core MASTER ID.
+ *
+ * HWSEM register the human reads over J-Link to confirm the take/give tracks
+ * (ground truth, independent of any printk).  Offsets from the driver header
+ * zephyr/drivers/misc/alif_hwsem/hwsem_alif.c (transcribed from the Alif DFP
+ * struct HWSEM_Type):
+ *     REL (release/count) = base + HWSEM_REL_REG(0x04) = 0x4902E004
+ * mem32 0x4902E004 should read 0 (free) -> 1 (after take) -> 0 (after give).
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/* Enable HWSEM instance 0 so the alif,hwsem driver instantiates a device.
+ * reg = <0x4902e000 0x10> comes from the dtsi node (transcribed from the Alif
+ * DFP HWSEM0_BASE 0x4902E000); the bench reads HWSEM REL at 0x4902E004. */
+&hwsem0 {
+	status = "okay";
+};
