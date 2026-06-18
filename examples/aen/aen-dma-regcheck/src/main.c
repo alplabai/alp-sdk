@@ -271,10 +271,16 @@ int main(void)
 	const uint32_t pl330 = DMA_BASE_EXPECTED;
 
 	printk("pl330 : DSR=%08x DPC=%08x FSRD=%08x FSRC=%08x FTRD=%08x FTR0=%08x\n",
-	       sys_read32(pl330 + 0x000), sys_read32(pl330 + 0x004), sys_read32(pl330 + 0x030),
-	       sys_read32(pl330 + 0x034), sys_read32(pl330 + 0x038), sys_read32(pl330 + 0x040));
+	       sys_read32(pl330 + 0x000),
+	       sys_read32(pl330 + 0x004),
+	       sys_read32(pl330 + 0x030),
+	       sys_read32(pl330 + 0x034),
+	       sys_read32(pl330 + 0x038),
+	       sys_read32(pl330 + 0x040));
 	printk("pl330 : CS0=%08x CPC0=%08x SA0=%08x DA0=%08x\n",
-	       sys_read32(pl330 + 0x100), sys_read32(pl330 + 0x104), sys_read32(pl330 + 0x400),
+	       sys_read32(pl330 + 0x100),
+	       sys_read32(pl330 + 0x104),
+	       sys_read32(pl330 + 0x400),
 	       sys_read32(pl330 + 0x404));
 
 	/*
