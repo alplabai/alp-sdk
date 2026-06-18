@@ -132,6 +132,20 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MBOX_ALIF_MHUV2
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_alif_mhuv2.c)
 
+# Alif Ensemble hardware-semaphore (HWSEM) driver -- vendor-ext, BENCH-UNVERIFIED.
+# AMP request/release latch shared between the two RTSS cores (M55-HE <-> M55-HP).
+# HWSEM has no upstream Zephyr device class, so this is a "misc" (no-class) driver
+# exposing a tiny take/give API (DT_DRV_COMPAT alif_hwsem).  Cannot build under
+# native_sim (Cortex-M55 target), hence bench-unverified in CI.  Driver:
+# zephyr/drivers/misc/alif_hwsem/hwsem_alif.c; binding:
+# zephyr/dts/bindings/misc/alif,hwsem.yaml.  Its own include dir is exposed so an
+# app (the regcheck example) can include "hwsem_alif.h" for the take/give API.
+zephyr_library_sources_ifdef(CONFIG_HWSEM_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/misc/alif_hwsem/hwsem_alif.c)
+if(CONFIG_HWSEM_ALIF)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/misc/alif_hwsem)
+endif()
+
 # (Retired, task #21 / ADR 0017) No Alif LPI2C driver: LPI2C0 is slave-only
 # (TRM §3.17.4), so a master driver is a dead end; the housekeeping trio is
 # Tier-3 (Alif SE services), edge I2C is Tier-1 upstream i2c_dw.

@@ -969,6 +969,32 @@
 		interrupt-names = "tx";
 		status = "disabled";
 	};
+
+	/*
+	 * Hardware semaphore (HWSEM) instance 0 -- the first of the 16 Ensemble
+	 * HWSEM latches.  An AMP request/release mutual-exclusion latch shared
+	 * between the two RTSS cores (M55-HE <-> M55-HP), keyed by a per-core
+	 * MASTER ID.  Driven by the alp-sdk in-tree "alif,hwsem" driver
+	 * (zephyr/drivers/misc/alif_hwsem/hwsem_alif.c, CONFIG_HWSEM_ALIF).
+	 *
+	 * reg transcribed CLEAN-ROOM (address only) from the Alif DFP
+	 * Device/soc/AE822FA0E5597/include/rtss_he/soc.h:
+	 *   HWSEM0_BASE 0x4902E000, struct HWSEM_Type size 0x0C, instance
+	 *   stride 0x10 (HWSEM1_BASE 0x4902E010 ..).  size = 0x10 (the per-
+	 *   instance stride; the three registers REQ/REL/RST occupy +0x00..+0x0B).
+	 * No clocks/pinctrl: the HWSEM block is core-internal (no pads, no
+	 * peripheral clock gate).  status="disabled" by default; an app overlay
+	 * okays it (see examples/aen/aen-hwsem-regcheck).  ADR 0017
+	 * vendor-native custom.  BENCH-UNVERIFIED.
+	 *
+	 * (HWSEM1..15 @ 0x4902E010..0x4902E0F0 -- the remaining 15 latches -- are
+	 * NOT declared here; add a node per latch as AMP locks are partitioned.)
+	 */
+	hwsem0: hwsem@4902e000 {
+		compatible = "alif,hwsem";
+		reg = <0x4902e000 0x10>;
+		status = "disabled";
+	};
 };
 
 /*

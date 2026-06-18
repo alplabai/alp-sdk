@@ -1,0 +1,54 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# vendor-ext, BENCH-UNVERIFIED.
+#
+# Binding for ONE Alif Ensemble hardware-semaphore (HWSEM) instance, used to
+# arbitrate a shared resource between the two RTSS cores (M55-HE <-> M55-HP) in
+# AMP -- a mutual-exclusion primitive that survives the lack of cache coherency
+# and needs no spin-loop in shared SRAM. The Ensemble exposes 16 independent
+# HWSEM instances (HWSEM0..15), one per node; each is an atomic
+# request/release latch keyed by a per-core MASTER ID. The driver
+# (zephyr/drivers/misc/alif_hwsem/hwsem_alif.c) presents a tiny take/give API
+# (NOT a standard Zephyr device-class API -- HWSEM has no upstream class), so
+# the node is a bare register window with no bus, clocks, or pinctrl.
+#
+# A DISTINCT compatible `alif,hwsem` is used deliberately so this binding never
+# collides with the `arm,*`/`snps,*` semaphore bindings and the stack builds on
+# the DEFAULT upstream-Zephyr + hal_alif base with no fork.
+#
+# Register layout and the E8 node addresses were transcribed clean-room from the
+# Alif DFP HWSEM register header (drivers/include/hwsem.h, struct HWSEM_Type)
+# and the per-instance bases in Device/soc/AE822FA0E5597/include/rtss_he/soc.h
+# (HWSEM0_BASE 0x4902E000 .. HWSEM15_BASE 0x4902E0F0, stride 0x10). They have
+# NOT been validated on real silicon.
+
+description: |
+  Alif Ensemble hardware semaphore (HWSEM) -- one node = one of the 16 HWSEM
+  instances. An atomic request/release latch arbitrating a shared resource
+  between the two RTSS cores (M55-HE <-> M55-HP) under AMP. The take/give pair
+  is keyed by the caller's MASTER ID (the core's CPUID, e.g. 0x410FD222 for
+  RTSS-HE, 0x410FD221 for RTSS-HP), so a release only succeeds for the owner.
+
+  vendor-ext, BENCH-UNVERIFIED -- authored from the Alif DFP HWSEM register
+  header; not yet run on silicon.
+
+  Example (HWSEM0 at 0x4902E000):
+
+    hwsem0: hwsem@4902e000 {
+        compatible = "alif,hwsem";
+        reg = <0x4902e000 0x10>;
+        status = "okay";
+    };
+
+compatible: "alif,hwsem"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true
+    description: |
+      Base address and size (0x10) of this HWSEM instance's register window.
+      The three registers (REQ +0x00, REL +0x04, RST +0x08) occupy 0x0C; the
+      instance stride is 0x10 (the next instance begins at +0x10).

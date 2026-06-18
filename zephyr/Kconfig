@@ -190,6 +190,27 @@ config MBOX_ALIF_MHUV2
 	  vendor-ext, BENCH-UNVERIFIED -- authored from the ARM MHUv2 spec + the
 	  zephyr_alif fork DTS; not yet validated on real silicon.
 
+# Alif Ensemble hardware-semaphore (HWSEM) -- AMP mutual-exclusion latch shared
+# between the two RTSS cores (M55-HE <-> M55-HP).  HWSEM has NO upstream Zephyr
+# device class, so this is a "misc" (no-class) driver exposing a small take/give
+# API (zephyr/drivers/misc/alif_hwsem/hwsem_alif.h).  Distinct compatible
+# `alif,hwsem` keeps it collision-free on the default upstream-Zephyr + hal_alif
+# base.  Driver: zephyr/drivers/misc/alif_hwsem/hwsem_alif.c;
+# binding: zephyr/dts/bindings/misc/alif,hwsem.yaml.
+config HWSEM_ALIF
+	bool "Alif Ensemble hardware semaphore (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on DT_HAS_ALIF_HWSEM_ENABLED
+	help
+	  Enable the Alif Ensemble HWSEM driver -- an AMP request/release latch
+	  arbitrating a shared resource between the two RTSS cores (M55-HE and
+	  M55-HP).  The take/give pair is keyed by the calling core's MASTER ID
+	  (its CPUID), so a release only frees the latch for its owner.  Exposes a
+	  tiny take/give API (hwsem_alif.h), NOT a standard Zephyr device-class API
+	  (HWSEM has no upstream class).  vendor-ext, BENCH-UNVERIFIED -- authored
+	  clean-room from the Alif DFP HWSEM register header; not yet validated on
+	  real silicon.
+
 #
 # (Retired, task #21 / ADR 0017) There is intentionally NO Alif LPI2C driver.
 # The on-module LPI2C0 housekeeping bus is SLAVE-ONLY (TRM §3.17.4), so a
