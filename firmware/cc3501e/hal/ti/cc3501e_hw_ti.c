@@ -493,53 +493,173 @@ void cc3501e_hw_notify_reply_sent(void)
 }
 
 /* --------------------------------------------------------------- */
-/* GPIO proxy (v0.4) -- real CC3501E pad I/O.                        */
+/* GPIO proxy (v0.4) -- real CC3501E pad I/O via TI Drivers GPIO.    */
 /*                                                                   */
-/* TODO(cc3501e v0.4 bench): map the cc3501e GPIO index -> the       */
-/* SysConfig CONFIG_GPIO_* instances the AEN board file declares for */
-/* the proxied pads (IO11/IO13/IO15..IO21 + CAM_EN_LDO0/1 per        */
-/* metadata/e1m_modules/aen/from-cc3501e.tsv), then drive via TI     */
-/* Drivers GPIO_setConfig / GPIO_write / GPIO_read + GPIO_setCallback */
-/* for edge IRQs.  Until those pads are declared in the board file,  */
-/* report NOTIMPL (-> RESP_ERR_NOT_READY) rather than invent a pad    */
-/* map -- the protocol path stays honest on silicon. */
+/* The CC35xx TI Drivers GPIO layer is PIN-INDEXED: gpioPinConfigs[] */
+/* (ti_drivers_config.c) is indexed by the GPIO pad number directly  */
+/* (GPIO0..GPIO37, GPIO_pinUpperBound=37) and GPIO_setConfig/write/  */
+/* read(index,...) take that pad number.  So the protocol's raw      */
+/* cc3501e_gpio index drives the pad 1:1 -- NO logical IO11/IO13..    */
+/* -> pad map is needed in firmware (the host owns the logical map,  */
+/* metadata/e1m_modules/aen/from-cc3501e.tsv).  The guard below       */
+/* refuses the pads the bridge itself owns (the CONFIG_SPI_0 lines +  */
+/* the CONFIG_UART2_0 console glue) and the pads not bonded on        */
+/* CC35X1E, so a stray host GPIO command can never tear down the      */
+/* inter-chip link mid-transfer. */
+static bool gpio_pad_reserved(uint8_t pad)
+{
+	switch (pad) {
+	/* CONFIG_SPI_0 inter-chip bridge: CSN=16, SCLK=27, POCI=28, PICO=29. */
+	case 16u:
+	case 27u:
+	case 28u:
+	case 29u:
+	/* CONFIG_UART2_0 console glue: TX=5, RX=6. */
+	case 5u:
+	case 6u:
+	/* Not bonded on this device (gpioPinConfigs marks 7/8/9 unavailable). */
+	case 7u:
+	case 8u:
+	case 9u:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool gpio_pad_ok(uint8_t pad)
+{
+	return (pad <= GPIO_pinUpperBound) && !gpio_pad_reserved(pad);
+}
+
+/* Last edge captured by an armed cc3501e_hw_gpio_set_interrupt IRQ.
+ * The async EVT_GPIO_INTERRUPT delivery to the host needs the next-rev
+ * host-IRQ line (the CS-less 3-wire link has no slave->master attention
+ * path), so the ISR only LATCHES here for a future poll/EVT path; the
+ * HW arming itself is real.  `volatile` -- written in ISR ctx. */
+volatile uint32_t g_cc3501e_gpio_irq_pad   = 0xFFu;
+volatile uint32_t g_cc3501e_gpio_irq_count = 0u;
+
+static void gpio_irq_cb(uint_least8_t index)
+{
+	g_cc3501e_gpio_irq_pad = (uint32_t)index;
+	g_cc3501e_gpio_irq_count++;
+	GPIO_clearInt((uint_least8_t)index);
+}
+
 int cc3501e_hw_gpio_configure(uint8_t pad, uint8_t dir, uint8_t pull)
 {
-	(void)pad;
-	(void)dir;
-	(void)pull;
-	return CC3501E_HW_ERR_NOTIMPL;
+	if (!gpio_pad_ok(pad)) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	GPIO_PinConfig pull_cfg = (pull == ALP_CC3501E_GPIO_PULL_UP)     ? GPIO_CFG_PULL_UP_INTERNAL
+	                          : (pull == ALP_CC3501E_GPIO_PULL_DOWN) ? GPIO_CFG_PULL_DOWN_INTERNAL
+	                                                                 : GPIO_CFG_PULL_NONE_INTERNAL;
+	GPIO_PinConfig cfg;
+	switch (dir) {
+	case ALP_CC3501E_GPIO_DIR_OUTPUT:
+		/* push-pull, start low; host sets the level with GPIO_WRITE. */
+		cfg = GPIO_CFG_OUTPUT_INTERNAL | pull_cfg | GPIO_CFG_OUT_LOW;
+		break;
+	case ALP_CC3501E_GPIO_DIR_OPEN_DRAIN:
+		/* The CC35xx GPIOWFF3 controller has NO true open-drain output
+		 * (GPIO_CFG_OUTPUT_OPEN_DRAIN_INTERNAL is NOT_SUPPORTED).  Emulate
+		 * with a push-pull output idling HIGH: on a single-driver line --
+		 * the M.2 W_DISABLE contract (host drives low to assert; the board
+		 * pull-up holds high when released) -- this is electrically
+		 * equivalent.  NOT safe on a line with another active driver. */
+		cfg = GPIO_CFG_OUTPUT_INTERNAL | pull_cfg | GPIO_CFG_OUT_HIGH;
+		break;
+	case ALP_CC3501E_GPIO_DIR_INPUT:
+	default:
+		cfg = GPIO_CFG_INPUT_INTERNAL | pull_cfg | GPIO_CFG_IN_INT_NONE;
+		break;
+	}
+	return (GPIO_setConfig(pad, cfg) == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
 int cc3501e_hw_gpio_write(uint8_t pad, uint8_t level)
 {
-	(void)pad;
-	(void)level;
-	return CC3501E_HW_ERR_NOTIMPL;
+	if (!gpio_pad_ok(pad)) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	GPIO_write(pad, (level != 0u) ? 1u : 0u);
+	return CC3501E_HW_OK;
 }
 
 int cc3501e_hw_gpio_read(uint8_t pad, uint8_t *level_out)
 {
-	(void)pad;
-	if (level_out != 0) {
-		*level_out = 0u;
+	if (!gpio_pad_ok(pad)) {
+		if (level_out != 0) {
+			*level_out = 0u;
+		}
+		return CC3501E_HW_ERR_INVAL;
 	}
-	return CC3501E_HW_ERR_NOTIMPL;
+	uint8_t lvl = (GPIO_read(pad) != 0u) ? 1u : 0u;
+	if (level_out != 0) {
+		*level_out = lvl;
+	}
+	return CC3501E_HW_OK;
 }
 
 int cc3501e_hw_gpio_set_interrupt(uint8_t pad, uint8_t edge, uint8_t enabled)
 {
-	(void)pad;
-	(void)edge;
-	(void)enabled;
-	return CC3501E_HW_ERR_NOTIMPL;
+	if (!gpio_pad_ok(pad)) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (enabled == 0u || edge == ALP_CC3501E_GPIO_EDGE_NONE) {
+		/* Disable: back to a plain interrupt-free input. */
+		return (GPIO_setConfig(pad, GPIO_CFG_INPUT_INTERNAL | GPIO_CFG_IN_INT_NONE) == 0)
+		           ? CC3501E_HW_OK
+		           : CC3501E_HW_ERR_IO;
+	}
+	GPIO_PinConfig edge_cfg;
+	switch (edge) {
+	case ALP_CC3501E_GPIO_EDGE_RISING:
+		edge_cfg = GPIO_CFG_IN_INT_RISING;
+		break;
+	case ALP_CC3501E_GPIO_EDGE_FALLING:
+		edge_cfg = GPIO_CFG_IN_INT_FALLING;
+		break;
+	case ALP_CC3501E_GPIO_EDGE_BOTH:
+		/* GPIOWFF3 has no both-edges trigger (NOT_SUPPORTED) -- reject so
+		 * the host arms a single edge instead of getting a silent no-op. */
+		return CC3501E_HW_ERR_INVAL;
+	default:
+		return CC3501E_HW_ERR_INVAL;
+	}
+	/* Register the latch callback BEFORE enabling the edge (INT_ENABLE in
+	 * the config self-enables the line -- no separate GPIO_enableInt). */
+	GPIO_setCallback(pad, gpio_irq_cb);
+	return (GPIO_setConfig(pad, GPIO_CFG_INPUT_INTERNAL | edge_cfg | GPIO_CFG_INT_ENABLE) == 0)
+	           ? CC3501E_HW_OK
+	           : CC3501E_HW_ERR_IO;
 }
 
 int cc3501e_hw_cam_enable(uint8_t which, uint8_t on)
 {
-	(void)which;
-	(void)on;
-	return CC3501E_HW_ERR_NOTIMPL;
+	/* CAM_EN_LDO0 -> GPIO_1, CAM_EN_LDO1 -> GPIO_0 -- per the E1M-AEN (BDE-BW35N
+	 * module U4) netlist: pin54 GPIO_1 = R_CAM_EN_LDO0, pin55 GPIO_0 = R_CAM_EN_LDO1.
+	 * (Earlier code/header had this REVERSED; the SWRU626-era note was wrong.)
+	 * Push-pull, default-off at boot. */
+	uint8_t pad;
+	switch (which) {
+	case 0u:
+		pad = 1u; /* CAM_EN_LDO0 -> GPIO_1 */
+		break;
+	case 1u:
+		pad = 0u; /* CAM_EN_LDO1 -> GPIO_0 */
+		break;
+	default:
+		return CC3501E_HW_ERR_INVAL;
+	}
+	GPIO_PinConfig cfg = GPIO_CFG_OUTPUT_INTERNAL | GPIO_CFG_PULL_NONE_INTERNAL |
+	                     ((on != 0u) ? GPIO_CFG_OUT_HIGH : GPIO_CFG_OUT_LOW);
+	if (GPIO_setConfig(pad, cfg) != 0) {
+		return CC3501E_HW_ERR_IO;
+	}
+	GPIO_write(pad, (on != 0u) ? 1u : 0u);
+	return CC3501E_HW_OK;
 }
 
 /* --------------------------------------------------------------- */
@@ -894,8 +1014,15 @@ int cc3501e_hw_ble_enable(void)
 	}
 
 	/* nimble_host_start = BleIf_EnableBLE + NimBLE host (blocks ~2s to sync).
-	 * Re-open the bridge after: BleIf_EnableBLE re-arbitrates the shared HIF,
-	 * which disrupts the bridge SPI slave just like Wlan_Start does. */
+	 * BleIf_EnableBLE drives a control-cmd round-trip the NWP must command-complete
+	 * over the shared HIF.  Unlike Wlan_Start (which we recover from AFTER), the
+	 * bridge SPI slave's live DMA (ch12/13) CONTENDS with that HIF handshake DURING
+	 * the op -- and there is no host-driver mutex serialising them (ctrlCmdFw lock is
+	 * a no-op) -- so the NWP never command-completes and BleIf_EnableBLE blocks
+	 * (cmd_Send waits CMD_SEND_TIMEOUT_MS).  Stand the bridge DOWN for the duration so
+	 * the HIF is the sole DMA client, then re-open after (the host poll-retries on IO
+	 * across this window). */
+	bridge_transport_spi_hw_suspend();
 	const int rc = cc3501e_nimble_host_start();
 	bridge_transport_spi_hw_reinit();
 	if (rc != 0 || !cc3501e_nimble_host_is_enabled()) {

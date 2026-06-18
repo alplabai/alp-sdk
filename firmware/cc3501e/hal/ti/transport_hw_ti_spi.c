@@ -284,6 +284,26 @@ void bridge_transport_spi_hw_reinit(void)
 	spi_open_and_arm();
 }
 
+/* Quiesce the bridge slave + RELEASE its DMA (ch12/13) for the DURATION of a radio op
+ * that re-arbitrates the shared HIF DMA (BLE-controller enable).  Unlike reinit (which
+ * recovers AFTER an op), this runs BEFORE the op so the bridge SPI's DMA is not a live
+ * second client contending with the HIF handshake the NWP must command-complete.  On
+ * this rev there is NO host-driver mutex serialising bridge-HIF vs BLE-enable-HIF use
+ * (ctrlCmdFw_LockHostDriver is a no-op), so the bridge MUST stand down explicitly.
+ * SPI_transferCancel drops the armed CALLBACK transfer (frees its DMA) before SPI_close;
+ * the worker calls bridge_transport_spi_hw_reinit() after the op to bring the slave back
+ * (the host poll-retries on IO across the down-window). */
+void bridge_transport_spi_hw_suspend(void)
+{
+	if (spi != NULL) {
+		SPI_transferCancel(spi); /* cancel the in-flight lockstep transfer + its DMA */
+		SPI_close(spi);
+		spi = NULL;
+	}
+	phase             = PH_REQ_HEADER;
+	g_cc35_witness[2] = 4u; /* bench debug (REVERT): bridge suspended for a radio op */
+}
+
 void bridge_transport_spi_hw_init(void)
 {
 	g_cc35_witness[0] = 0xC35DEB00u; /* bench debug (REVERT): firmware reached SPI init */

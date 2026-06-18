@@ -50,7 +50,16 @@ system.getScript("kernel_config_release.syscfg.js");
  * 193 KB region, so full connect-STA/sockets does NOT fit this vendor image --
  * defer to a PSRAM HW rev or shrink the wifi-lib RX/TX/control buffers
  * (conf_bin/Kconfig).  (Default/radio-free build keeps the 32 KB default.) */
-system.modules["/freertos/FreeRTOS"].$static.heapSize = 0x00022000; /* 136KB: required by WiFi GET_MAC's Wlan_Start at runtime (bench-proven: GET_MAC starves + the link dies at 88KB). The -Ble build's BLE static bss (~52KB) does NOT fit alongside this heap in the 193KB vendor DRAM -> WiFi+BLE concurrent exceed RAM (PSRAM-rev item, or drop lwIP/hostap from a BLE-focused build). Keep 136KB so the validated WiFi GET_MAC/scan path works; the -Ble build needs its own lighter config. */
+system.modules["/freertos/FreeRTOS"].$static.heapSize = 0x00022000; /* 136KB -- the VALIDATED WiFi GET_MAC/scan config (bench-proven cold: ping_ok climbs, mac_ok=1).
+ * Wlan_Start's heap floor was pinned on silicon 2026-06-18 across four points: STARVES at 88KB/0x16000,
+ * 106KB/0x1A000, 120KB/0x1E000 (all: ping_ok stuck at the gate, reqhdr_rx->0, mac timeout); WORKS at
+ * 136KB/0x22000. So Wlan_Start needs ~128-136KB heap -- it is the HIF bring-up both WiFi GET_MAC AND BLE
+ * (shared HIF) must run. Consequence (BLE feasibility, settled): heap ~130KB + ~48KB fixed WiFi/stack bss
+ * leaves only ~15KB of the 193KB vendor DRAM for NimBLE (host+controller HCI >> 15KB even trimmed), and the
+ * lwIP/hostap drop frees ~nothing (gc-sections already strips their pools to a few KB -- they are heap-not-bss).
+ * => WiFi+BLE CANNOT coexist on this no-PSRAM rev; BLE needs the PSRAM HW rev (or a conf_bin RX/TX-buffer
+ * shrink to lower this floor -- GUI INI-composer-gated). 136KB is the max heap that links in 0x30000 with the
+ * 8KB bring-up stack. Full STA+sockets (264KB SDK floor) also doesn't fit -> same PSRAM rev. */
 
 /* ======== Secure key store (HSM/PSA crypto) -> CryptoKeyKeyStore_PSA ========
  * Wlan_Start + Wlan_RoleUp(STA) bring up the WPA/TLS supplicant, which uses

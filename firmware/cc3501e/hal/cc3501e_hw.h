@@ -100,8 +100,9 @@ int cc3501e_hw_gpio_write(uint8_t pad, uint8_t level);
 int cc3501e_hw_gpio_read(uint8_t pad, uint8_t *level_out);
 int cc3501e_hw_gpio_set_interrupt(uint8_t pad, uint8_t edge, uint8_t enabled);
 
-/* Camera-enable LDOs: @p which 0 -> CAM_EN_LDO0 (GPIO_0), 1 -> CAM_EN_LDO1
- * (GPIO_1); @p on != 0 asserts the enable.  Default OFF at boot. */
+/* Camera-enable LDOs (per the E1M-AEN BDE-BW35N U4 netlist): @p which 0 ->
+ * CAM_EN_LDO0 = GPIO_1 (pin54), 1 -> CAM_EN_LDO1 = GPIO_0 (pin55); @p on != 0
+ * asserts the enable.  Default OFF at boot. */
 int cc3501e_hw_cam_enable(uint8_t which, uint8_t on);
 
 /* --------------------------------------------------------------- */

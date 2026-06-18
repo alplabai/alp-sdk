@@ -497,4 +497,72 @@ ZTEST(cc3501e_bridge_transport, test_diag_log_level_ok)
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "DIAG_LOG_LEVEL accepted -> OK");
 }
 
+/* ---- GPIO proxy (0x50..0x53) + camera enables (0x60/0x61) ---- *
+ * The stub HAL simulates the pads in RAM, so these exercise the full
+ * wire contract: payload struct layout, dispatch, and the read-back. */
+
+ZTEST(cc3501e_bridge_transport, test_gpio_configure_write_read_roundtrip)
+{
+	uint8_t reply[16];
+	transport_spi_init();
+
+	/* CONFIGURE pad 13 as OUTPUT, no pull (payload = gpio_configure_t, 4 B). */
+	const uint8_t cfg[] = { ALP_CC3501E_CMD_GPIO_CONFIGURE, 0x00u, 0x04u, 0x00u,
+		                    13u, ALP_CC3501E_GPIO_DIR_OUTPUT, ALP_CC3501E_GPIO_PULL_NONE, 0u };
+	transaction(cfg, sizeof cfg);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "CONFIGURE reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_GPIO_CONFIGURE, 1u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "CONFIGURE -> OK");
+
+	/* WRITE pad 13 high (payload = gpio_write_t, 4 B). */
+	const uint8_t wr[] = { ALP_CC3501E_CMD_GPIO_WRITE, 0x00u, 0x04u, 0x00u, 13u, 1u, 0u, 0u };
+	transaction(wr, sizeof wr);
+	n = drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "WRITE -> OK");
+
+	/* READ pad 13 (request payload = 1 B); reply = header + status + level. */
+	const uint8_t rd[] = { ALP_CC3501E_CMD_GPIO_READ, 0x00u, 0x01u, 0x00u, 13u };
+	transaction(rd, sizeof rd);
+	n = drain(reply, sizeof reply);
+	zassert_equal(n, 6u, "READ reply = header + status + level");
+	assert_reply_header(reply, ALP_CC3501E_CMD_GPIO_READ, 2u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "READ -> OK");
+	zassert_equal(reply[5], 1u, "READ reflects the WRITE-high");
+
+	/* WRITE low, READ back 0. */
+	const uint8_t wr0[] = { ALP_CC3501E_CMD_GPIO_WRITE, 0x00u, 0x04u, 0x00u, 13u, 0u, 0u, 0u };
+	transaction(wr0, sizeof wr0);
+	(void)drain(reply, sizeof reply);
+	transaction(rd, sizeof rd);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[5], 0u, "READ reflects the WRITE-low");
+}
+
+ZTEST(cc3501e_bridge_transport, test_gpio_configure_bad_len_invalid)
+{
+	uint8_t reply[16];
+	transport_spi_init();
+	/* CONFIGURE with a 2-byte payload (gpio_configure_t is 4) -> INVALID. */
+	const uint8_t bad[] = { ALP_CC3501E_CMD_GPIO_CONFIGURE, 0x00u, 0x02u, 0x00u, 13u, 1u };
+	transaction(bad, sizeof bad);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "short CONFIGURE -> INVALID");
+}
+
+ZTEST(cc3501e_bridge_transport, test_cam_enable_disable_ok)
+{
+	uint8_t reply[16];
+	transport_spi_init();
+	const uint8_t en[] = { ALP_CC3501E_CMD_CAM_ENABLE, 0x00u, 0x01u, 0x00u, 0u };
+	transaction(en, sizeof en);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "CAM_ENABLE(0) -> OK");
+
+	const uint8_t dis[] = { ALP_CC3501E_CMD_CAM_DISABLE, 0x00u, 0x01u, 0x00u, 0u };
+	transaction(dis, sizeof dis);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "CAM_DISABLE(0) -> OK");
+}
+
 ZTEST_SUITE(cc3501e_bridge_transport, NULL, NULL, NULL, NULL, NULL);

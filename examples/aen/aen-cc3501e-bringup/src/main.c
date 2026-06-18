@@ -446,6 +446,14 @@ int main(void)
 	fw.enable_pin = wifi_en;
 	fw.reset_pin  = nrst;
 
+#ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
+	/* Hand the bridge handle to the GPIO proxy backend so alp_gpio_open() on a
+	 * proxied E1M IO (cc3501e_gpio_routes[] in cc3501e_gpio_routes.c) routes over
+	 * the inter-chip link.  Non-proxied pins (the Alif's own WIFI_EN/nRESET) still
+	 * delegate to the platform GPIO driver. */
+	(void)alp_gpio_cc3501e_attach(&fw);
+#endif
+
 	printf("[cc3501e-bringup] powering + resetting CC3501E (WIFI_EN high, nRESET pulse, "
 	       "~900 ms boot)...\n");
 	alp_status_t s                 = cc3501e_reset(&fw);

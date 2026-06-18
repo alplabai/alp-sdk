@@ -360,6 +360,11 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out)
  * caller timeout can't give up inside the down-window before the radio is up. */
 #define CC3501E_WIFI_DOWN_WINDOW_MS 10000u
 
+/* BLE enable stands the bridge down for the NWP BLE-controller cold-init (a HIF
+ * control-cmd round-trip, ~10-15 s) + the NimBLE host sync; floor the host poll well
+ * above that so a slow-but-working enable is not misread as a timeout. */
+#define CC3501E_BLE_ENABLE_WINDOW_MS 90000u
+
 /* Re-issue one request while the firmware is unavailable, until it resolves
  * (OK / hard error) or the budget elapses.  Two retryable conditions:
  *
@@ -546,12 +551,97 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4])
 
 alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms)
 {
-	/* Worker-routed in the firmware (lazy Wi-Fi start [shared HIF] + nimble_host_start
-	 * ~2 s).  Like GET_MAC, poll-by-repeat across the radio-down window; floor the
-	 * budget so a short caller timeout can't give up mid bring-up.  No reply data. */
+	/* Worker-routed: the firmware SUSPENDS the bridge SPI, runs BleIf_EnableBLE (the
+	 * NWP BLE-controller cold-init -- a control-cmd round-trip that can take ~10-15 s)
+	 * + nimble_host_start sync, then RE-OPENS the bridge.  The link is DOWN for that
+	 * whole window, so the host must poll-by-repeat (retry on IO) longer than the
+	 * 10 s Wi-Fi floor -- floor to 30 s so a working-but-slow enable is not misread as
+	 * a failure before the worker publishes the result + the bridge re-syncs. */
 	uint32_t budget = timeout_ms;
-	if (budget < CC3501E_WIFI_DOWN_WINDOW_MS) budget = CC3501E_WIFI_DOWN_WINDOW_MS;
+	if (budget < CC3501E_BLE_ENABLE_WINDOW_MS) budget = CC3501E_BLE_ENABLE_WINDOW_MS;
 	return poll_by_repeat(ctx, ALP_CC3501E_CMD_BLE_ENABLE, NULL, 0, NULL, 0, NULL, budget);
+}
+
+/* ------------------------------------------------------------------ */
+/* GPIO proxy (0x50..0x53) + camera enables (0x60/0x61).              */
+/*                                                                    */
+/* These ops are synchronous + fast in the firmware (no worker, no    */
+/* radio bring-up), so they take the caller's timeout with no down-   */
+/* window floor.  poll_by_repeat still absorbs a transient ALP_ERR_IO  */
+/* if a radio op happens to overlap (the bridge is briefly down then). */
+/* pad = the RAW CC3501E GPIO index; the firmware drives it 1:1 and    */
+/* refuses its own SPI/UART pads, so the logical IO11.. -> raw map can  */
+/* live entirely host-side in board metadata. */
+/* ------------------------------------------------------------------ */
+
+alp_status_t cc3501e_gpio_configure(cc3501e_t                   *ctx,
+                                    uint8_t                      pad,
+                                    alp_cc3501e_gpio_direction_t dir,
+                                    alp_cc3501e_gpio_pull_t      pull,
+                                    uint32_t                     timeout_ms)
+{
+	alp_cc3501e_gpio_configure_t c = {
+		.cc3501e_gpio = pad,
+		.direction    = (uint8_t)dir,
+		.pull         = (uint8_t)pull,
+		.reserved     = 0u,
+	};
+	return poll_by_repeat(
+	    ctx, ALP_CC3501E_CMD_GPIO_CONFIGURE, (const uint8_t *)&c, sizeof(c), NULL, 0, NULL, timeout_ms);
+}
+
+alp_status_t cc3501e_gpio_write(cc3501e_t *ctx, uint8_t pad, bool level, uint32_t timeout_ms)
+{
+	alp_cc3501e_gpio_write_t w = {
+		.cc3501e_gpio = pad,
+		.level        = level ? 1u : 0u,
+		.reserved     = { 0u, 0u },
+	};
+	return poll_by_repeat(
+	    ctx, ALP_CC3501E_CMD_GPIO_WRITE, (const uint8_t *)&w, sizeof(w), NULL, 0, NULL, timeout_ms);
+}
+
+alp_status_t cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uint32_t timeout_ms)
+{
+	if (level_out == NULL) return ALP_ERR_INVAL;
+	uint8_t      req      = pad;
+	uint8_t      reply[1] = { 0 };
+	size_t       got      = 0;
+	alp_status_t s        = poll_by_repeat(
+        ctx, ALP_CC3501E_CMD_GPIO_READ, &req, sizeof(req), reply, sizeof(reply), &got, timeout_ms);
+	if (s != ALP_OK) return s;
+	if (got < 1u) return ALP_ERR_IO;
+	*level_out = (reply[0] != 0u);
+	return ALP_OK;
+}
+
+alp_status_t cc3501e_gpio_set_interrupt(cc3501e_t              *ctx,
+                                        uint8_t                 pad,
+                                        alp_cc3501e_gpio_edge_t edge,
+                                        bool                    enabled,
+                                        uint32_t                timeout_ms)
+{
+	alp_cc3501e_gpio_set_interrupt_t s = {
+		.cc3501e_gpio = pad,
+		.edge         = (uint8_t)edge,
+		.enabled      = enabled ? 1u : 0u,
+		.reserved     = 0u,
+	};
+	return poll_by_repeat(ctx,
+	                      ALP_CC3501E_CMD_GPIO_SET_INTERRUPT,
+	                      (const uint8_t *)&s,
+	                      sizeof(s),
+	                      NULL,
+	                      0,
+	                      NULL,
+	                      timeout_ms);
+}
+
+alp_status_t cc3501e_cam_enable(cc3501e_t *ctx, uint8_t which, bool on, uint32_t timeout_ms)
+{
+	uint8_t           req = which;
+	alp_cc3501e_cmd_t cmd = on ? ALP_CC3501E_CMD_CAM_ENABLE : ALP_CC3501E_CMD_CAM_DISABLE;
+	return poll_by_repeat(ctx, cmd, &req, sizeof(req), NULL, 0, NULL, timeout_ms);
 }
 
 alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user)

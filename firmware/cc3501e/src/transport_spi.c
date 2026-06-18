@@ -50,6 +50,13 @@ __attribute__((weak)) void bridge_transport_spi_hw_reinit(void)
 {
 }
 
+/* Weak default for the bridge stand-down during a HIF-re-arbitrating radio op (BLE
+ * enable).  The ti backend (hal/ti/transport_hw_ti_spi.c) overrides it with the real
+ * SPI_transferCancel + SPI_close; no-op on any non-ti backend. */
+__attribute__((weak)) void bridge_transport_spi_hw_suspend(void)
+{
+}
+
 /* Receive-side staging buffer (filled byte-by-byte by the ISR). */
 static uint8_t spi_rx_buf[CC3501E_FRAME_MAX_BYTES];
 static size_t  spi_rx_len;

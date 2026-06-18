@@ -55,6 +55,13 @@ void bridge_transport_sdio_hw_init(void);
  * backend (the weak default below). */
 void bridge_transport_spi_hw_reinit(void);
 
+/* Stand the bridge slave DOWN (cancel the armed transfer + SPI_close, releasing its
+ * DMA) for the DURATION of a radio op that re-arbitrates the shared HIF DMA -- BLE
+ * controller enable, where the NWP HIF handshake hangs if the bridge DMA contends.
+ * Call BEFORE the op; pair with bridge_transport_spi_hw_reinit() AFTER.  No-op on the
+ * stub backend (weak default below). */
+void bridge_transport_spi_hw_suspend(void);
+
 /* ---- SPI slave seams (defined in transport_spi.c) -------------- */
 /* The HW backend (or a host test) drives one request transaction as
  * cs_low -> rx_byte* -> cs_high, then clocks the staged reply back via

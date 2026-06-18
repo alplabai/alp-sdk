@@ -27,13 +27,15 @@ param(
     [string]$Transport    = "spi",  # spi | sdio
     [switch]$OtaSelftest,           # build the OTA-self-install validation updater (embeds cc3501e_ota_candidate.c, -DCC3501E_OTA_SELFTEST)
     [switch]$WifiHostDriver,        # link the CC35xx Wi-Fi host driver (-DCC3501E_WIFI; enables GET_MAC / scan / connect bodies)
-    [switch]$Ble                    # ALSO link Apache NimBLE + ble_interface (-DCC3501E_BLE; enables BLE enable/advertise). Implies -WifiHostDriver (shared HIF -> Wlan_Start first).
+    [switch]$Ble,                   # ALSO link Apache NimBLE + ble_interface (-DCC3501E_BLE; enables BLE enable/advertise). Implies -WifiHostDriver (shared HIF -> Wlan_Start first).
+    [switch]$BleSelftest            # BENCH RF/antenna isolation (-DCC3501E_BLE_SELFTEST; implies -Ble): the CC35 enables BLE + advertises "ALP-CC3501E" at BOOT from the bringup task (no host/worker/bridge). REVERT after.
 )
 
 # -Ble implies -WifiHostDriver: the BLE controller shares the HIF with Wi-Fi, so
 # Wlan_Start must run first (WIFI_BLE_INTEGRATION.md) and the NimBLE port reuses
 # the Wi-Fi OSI layer (osi_dpl.c) + Report() (uart_term.c) that the Wi-Fi path
 # compiles.  Force it on so the BLE bodies always have the Wi-Fi seam beneath them.
+if ($BleSelftest) { $Ble = $true }
 if ($Ble) { $WifiHostDriver = $true }
 
 $ErrorActionPreference = 'Stop'
@@ -98,6 +100,7 @@ if ($WifiHostDriver) {
 if ($Ble) {
     # Apache NimBLE (BLE host) -- enables the BLE enable/advertise HAL bodies.
     $txdef = @($txdef) + @('-DCC3501E_BLE=1')
+    if ($BleSelftest) { $txdef = @($txdef) + @('-DCC3501E_BLE_SELFTEST=1') }
     # --- NimBLE host pool sizing for a bridge PERIPHERAL (memory-fit). ---
     # The static nimble syscfg.h defaults target a 16-connection central+peripheral
     # (msys 100x292B mbufs, 16 bonds/CCCDs, 6 multi-adv, COC x5): that host-side
@@ -230,47 +233,40 @@ foreach ($s in $sources) {
     $objs += $o
 }
 
-Write-Host "== Linker: VENDOR-APP map (cc35xx_freertos.cmd, FLASH@0x14000000, vectors@0x14002000) =="
-# *** ROOT CAUSE FIX (2026-06-17). ***  A CC35 VENDOR APP must link at FLASH base
-# 0x14000000 with its interrupt vector table at 0x14002000 -- that is exactly
-# where the secure boot (SES) sets VTOR and reads the reset vector.  We had been
-# using cc35xx.cmd (FLASH base 0x10000000, vectors 0x10001100), which is the WRONG
-# image type: the SES set VTOR=0x14002000, found no valid vectors at our 0x10001100
-# table, jumped to garbage, and faulted before main() (the app never ran -> no SPI
-# reply -> PING never passed).  Confirmed by dumping TI's reference vendor_app.out:
-# .resetVecs@0x14002000, .text@0x14002400.  cc35xx_freertos.cmd is the linker the
-# SDK's FreeRTOS vendor-app examples use; switch to it.
+Write-Host "== Linker: VENDOR-APP map (network_terminal connectivity cmd, FLASH@0x14000000, DRAM 512K) =="
+# *** ROOT CAUSE (2026-06-17) + RAM CEILING (2026-06-18). ***  A CC35 VENDOR APP links
+# at FLASH base 0x14000000 with its vector table at 0x14002000 -- exactly where the
+# secure boot (SES) sets VTOR and reads the reset vector (dumping TI's reference
+# vendor_app.out confirmed .resetVecs@0x14002000 / .text@0x14002400).
 #
-# It #includes a SysConfig MemoryConfigurator file (ti_build_linker.cmd.toolbox)
-# we don't generate -- emit a minimal stub with the two symbols it needs.  The
-# board cmd also uses --entry_point resetISR; our startup names it ResetISR.
-$stockCmd = "$SdkDir\source\ti\boards\cc35xx\cc35xx_freertos.cmd"
+# We use TI's CONNECTIVITY vendor linker (the network_terminal demo's linker.cmd), NOT
+# the stock board cmd (source/ti/boards/cc35xx/cc35xx_freertos.cmd).  WHY:
+#   * The stock board cmd caps app DRAM at 0x30000 (192K, "static only").  That 192K
+#     CAP -- not the silicon -- drove the entire "WiFi STA/sockets + BLE don't fit ->
+#     needs PSRAM" dead-end.  The CC3501E actually has a 512K DRAM bank
+#     (0x28000DB0-0x2807FFFF); BOTH connectivity vendor apps (network_terminal AND
+#     ble_wifi_provisioning -- same 0x14000000 FLASH base, same DRAM bank) use the full
+#     512K.  At 512K the FreeRTOS heap + ALL .bss (WiFi stack + NimBLE pools) fit with
+#     hundreds of KB to spare: no TCM split, no PSRAM, WiFi+BLE coexist.
+#   * It already links the INITIAL STACK into TCM_DRAM_NON_SECURE (0x20000000), which is
+#     alive the instant the core leaves cold reset -- the 2026-06-17 cold-boot fix (the
+#     stock cmd's `.stack : > DRAM` faulted at cold POR before Board_init, DRAM unpowered).
+#   * .data/.bss/.sysmem live in the 512K DRAM, powered by the early startup before the
+#     C-runtime touches them.  All DMA buffers (WiFi HIF + bridge SPI) are in DRAM
+#     (DMA-reachable).
+# Both connectivity cmds #include the SysConfig MemoryConfigurator file
+# (ti_build_linker.cmd.toolbox); emit the minimal stub with the two symbols it needs.
+$stockCmd = "$SdkDir\examples\rtos\LP_EM_CC35X1\demos\network_terminal\freertos\ticlang\linker.cmd"
 $localCmd = "$out\cc3501e_vendor.cmd"
 @'
-/* Stub for the SysConfig MemoryConfigurator output that cc35xx_freertos.cmd
+/* Stub for the SysConfig MemoryConfigurator output the connectivity linker.cmd
  * #includes.  CC3501E external flash = 8 MB (PY25Q64LB); no PSRAM populated. */
 #define build_linker_toolbox_FLASH_SIZE 0x00800000
 #define build_linker_toolbox_PSRAM_SIZE 0
 '@ | Set-Content "$out\ti_build_linker.cmd.toolbox"
-# Keep the stock `--entry_point resetISR` -- the SysConfig startup (in ti_freertos_config.c)
-# provides resetISR + the real vector table; no separate startup is linked.
-#
-# *** COLD-BOOT ROOT-CAUSE FIX (2026-06-17): put the INITIAL STACK in TCM, not DRAM. ***
-# The stock simple-example cmd places `.stack : > DRAM (HIGH)` (DRAM @ 0x28000000).  On a
-# cold power-on reset the DRAM bank is NOT powered/ready when the SES hands the core to our
-# vendor image, so the very first stack push (localProgramStart prologue / SetupTrimDevice)
-# writes to dead DRAM and the image faults BEFORE Board_init -- the app never runs, POCI is
-# never driven, the inter-chip PING never passes.  Warm reset "worked" only because the prior
-# session left DRAM powered.  TI's SHIPPABLE vendor app (network_terminal) links __stack into
-# TCM_DRAM_NON_SECURE (0x20000000), which is alive the instant the core leaves cold reset; the
-# early startup then enables DRAM before the C-runtime touches .data/.bss.  Match that: move
-# ONLY .stack to TCM (leave .data/.bss/.sysmem in DRAM -- they run after DRAM is up).
-# (Localised, witness-confirmed: cold POCI-after-Board_init probe read 0xFFFFFFFF = faulted
-# pre-Board_init; the only linker delta vs TI's cold-booting ref was the stack region.)
-(Get-Content $stockCmd) | ForEach-Object {
-    if ($_ -match '^\s*\.stack\s*:') { $_ -replace '>\s*DRAM\s*\(HIGH\)', '> TCM_DRAM_NON_SECURE (HIGH)' }
-    else { $_ }
-} | Set-Content $localCmd
+# Use the connectivity cmd verbatim (512K DRAM + stack-in-TCM already correct); copy it
+# into $out so its relative #include of the toolbox stub resolves alongside it.
+Copy-Item $stockCmd $localCmd -Force
 
 Write-Host "== Link =="
 if ($WifiHostDriver) {

@@ -390,6 +390,21 @@ config ALP_SDK_GPIO_SW_FALLBACK
 	  production firmware MUST NOT rely on this since no real pin
 	  is driven.
 
+config ALP_SDK_GPIO_CC3501E_PROXY
+	bool "Route proxied GPIOs through the CC3501E inter-chip bridge"
+	depends on ALP_SDK && GPIO && ALP_SDK_CHIP_CC3501E
+	default n
+	help
+	  Compiles the CC3501E GPIO proxy backend
+	  (src/backends/gpio/cc3501e_proxy.c).  On an E1M-AEN target it
+	  registers above the platform GPIO backend and, for pin_ids listed
+	  in the board's cc3501e_gpio_routes[] table, routes alp_gpio_open()
+	  through the inter-chip bridge (chips/cc3501e); every other pin_id
+	  delegates to the platform GPIO driver, so the Alif's own pins are
+	  unaffected.  Enable on AEN boards that populate the route table from
+	  the SoM pad map; with the shipped weak EMPTY table (and until
+	  alp_gpio_cc3501e_attach() is called) every pin delegates -- a no-op.
+
 config ALP_SDK_MAX_PWM_HANDLES
 	int "Maximum concurrent alp_pwm_t handles"
 	default 8

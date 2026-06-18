@@ -710,6 +710,10 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpio_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/zephyr_drv.c)
+# CC3501E GPIO proxy: routes proxied IOs through the inter-chip bridge,
+# delegates the rest to zephyr_drv.  AEN-only (CONFIG_ALP_SDK_GPIO_CC3501E_PROXY).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
 # PWM class dispatcher + backends.
