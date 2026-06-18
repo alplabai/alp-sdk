@@ -116,6 +116,23 @@ channels via the `alp-dac0` / `alp-adc0` devicetree aliases:
   (`zephyr/dts/bindings/adc/alp,adc-input.yaml`), or `ADC_DT_SPEC_GET`
   fails to compile (`..._P_io_channels_IDX_0_PH` / `_VAL_input` undeclared).
 
+## A driver quirk the portable read path now absorbs
+
+The vendored Alif ADC driver (`zephyr/drivers/adc/adc_alif.c`)
+**unconditionally** dereferences `sequence->options->user_data` in
+`adc_start_read()` (`adc_alif.c:728`) -- it stashes a comparator pointer
+there, with **no** `options != NULL` guard (unlike `check_buffer_size()`,
+which does test it). The raw-API sibling `aen-adc-regcheck` already works
+around this by passing a non-NULL `adc_sequence_options` with a valid
+`user_data` (see its `main.c`). The portable `<alp/adc.h>` E8 backend
+(`src/backends/adc/alif_e8.c`) originally issued the read with
+`.options = NULL`, so `alp_adc_read_uv()` NULL-faulted **before** the
+conversion ran -- the early / empty-console fault this example hit. The
+backend now passes the same non-NULL `options` the raw sibling does, so
+the customer-facing `<alp/*>` path reaches its `RESULT` line. (The
+sibling E7 backend carried the identical latent fault and was fixed in
+lockstep.)
+
 ## Follow-up
 
 - Bench-verify the `analog_loopback` `io-channels` route + the
