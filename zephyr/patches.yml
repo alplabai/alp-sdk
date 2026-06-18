@@ -57,3 +57,22 @@ patches:
       not compile without them. Add ipm_poll_out/ipm_poll_in (struct fields +
       __syscall wrappers, returning -ENOSYS when the op is NULL). Pure additive
       API extension; drop once the Zephyr IPM pin gains a polling API.
+  - path: hal_alif/0001-se-service-add-boot-cpu.patch
+    sha256sum: cb456dbc41d51385539bd59cc221e7861547021a2abe882e2df9ac044dc8e86b
+    module: hal_alif
+    author: Alp Lab AB
+    email: dev@alplab.example
+    date: 2026-06-18
+    upstreamable: true
+    comments: |
+      hal_alif's SE client (se_services/zephyr/src/se_service.c) ships
+      se_service_boot_reset_cpu() but NOT se_service_boot_cpu() -- the SE service
+      that RELEASES a second M55 core at runtime (SERVICE_BOOT_CPU=501). The
+      marshalling struct (boot_cpu_svc_t {send_cpu_id, send_address}) is already
+      in services_lib_protocol.h. Add the thin Zephyr wrapper (a copy of
+      se_service_boot_reset_cpu's body with the boot_cpu_d union member + the
+      send_address field). Bench-proven on E1M-AEN801 (E8): the SES-booted HP
+      core calls se_service_boot_cpu(EXTSYS_1, 0x58000000) -> rc=0 -> the HE core
+      runs (both M55s live from one power-on). Pure additive; upstream to hal_alif
+      then drop. See [[project_aen_he_hp_mhu_doorbell_blocked]] / examples/aen/
+      aen-dualcore-master.
