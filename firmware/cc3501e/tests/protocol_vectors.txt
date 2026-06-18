@@ -20,7 +20,9 @@ get_version_request                = 01000000
 get_version_reply_proto1           = 01000300000100
 # cmd=GET_MAC | flags=0 | len=0
 get_mac_request                    = 03000000
-# cmd=GET_MAC | len=1 | status=NOT_READY -- stub backend has no radio
+# cmd=GET_MAC | len=1 | status=BUSY -- job submitted, host re-issues
+get_mac_reply_busy_submitted       = 0300010002
+# cmd=GET_MAC | len=1 | status=NOT_READY -- re-issued; stub has no radio
 get_mac_reply_not_ready_stub       = 0300010005
 # cmd=RESET | flags=0 | len=0
 reset_request                      = 02000000

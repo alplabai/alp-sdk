@@ -42,6 +42,7 @@ FLAG_SOLICITED = 0x00
 
 RESP_OK = 0x00
 RESP_ERR_INVALID = 0x01
+RESP_ERR_BUSY = 0x02
 RESP_ERR_NOT_READY = 0x05
 RESP_ERR_PROTOCOL = 0x07
 
@@ -93,8 +94,12 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
 
     out.append(("get_mac_request", frame(CMD_GET_MAC, 0).hex().upper(),
                 "cmd=GET_MAC | flags=0 | len=0"))
+    # GET_MAC is async (P0-4/P0-6): the first request submits the worker job
+    # and replies BUSY; the host re-issues until the worker has the result.
+    out.append(("get_mac_reply_busy_submitted", reply(CMD_GET_MAC, RESP_ERR_BUSY).hex().upper(),
+                "cmd=GET_MAC | len=1 | status=BUSY -- job submitted, host re-issues"))
     out.append(("get_mac_reply_not_ready_stub", reply(CMD_GET_MAC, RESP_ERR_NOT_READY).hex().upper(),
-                "cmd=GET_MAC | len=1 | status=NOT_READY -- stub backend has no radio"))
+                "cmd=GET_MAC | len=1 | status=NOT_READY -- re-issued; stub has no radio"))
 
     out.append(("reset_request", frame(CMD_RESET, 0).hex().upper(),
                 "cmd=RESET | flags=0 | len=0"))

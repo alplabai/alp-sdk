@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "protocol.h"
+#include "worker.h"
 #include "../hal/cc3501e_hw.h"
 
 /* --------------------------------------------------------------- */
@@ -106,8 +107,24 @@ static alp_cc3501e_resp_t handle_get_version(const uint8_t *req,
 }
 
 /* GET_MAC (0x03): the CC3501E's factory MAC (6 bytes, big-endian wire
- * order as TI stores it).  Read from the radio subsystem via the HAL;
- * the stub backend returns the documented all-zero placeholder. */
+ * order as TI stores it).  Read from the radio subsystem via the HAL.
+ *
+ * Routed through the async worker (P0-4/P0-6): the real CC3501E_WIFI body
+ * (Wlan_Get, preceded by a one-time Wi-Fi init) blocks for SECONDS, which
+ * MUST NOT happen in the SPI ISR that runs this handler.  So GET_MAC is
+ * POLL-BY-REPEAT -- the host re-issues the command (it maps RESP_ERR_BUSY
+ * -> ALP_ERR_BUSY and retries) until the worker has the result:
+ *
+ *   - worker has DONE for GET_MAC -> copy the MAC into the reply, reset
+ *     the worker to IDLE, return RESP_OK.
+ *   - worker has ERR for GET_MAC  -> reset, map the HAL code (NOTIMPL ->
+ *     NOT_READY, else RADIO).  The stub backend lands here (NOT_READY).
+ *   - worker IDLE                 -> submit the job, return BUSY.
+ *   - worker QUEUED/RUNNING, or busy with another cmd -> return BUSY.
+ *
+ * On the stub/native backend worker_submit() runs the job synchronously,
+ * so the host needs exactly one extra poll (submit -> BUSY, re-issue ->
+ * the cached NOT_READY/RESP_OK). */
 static alp_cc3501e_resp_t handle_get_mac(const uint8_t *req,
                                          size_t         req_len,
                                          uint8_t       *reply_data,
@@ -117,11 +134,28 @@ static alp_cc3501e_resp_t handle_get_mac(const uint8_t *req,
 	(void)req;
 	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
 	if (reply_cap < 6u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-	const int rv = cc3501e_hw_get_mac(reply_data);
-	if (rv == CC3501E_HW_ERR_NOTIMPL) return ALP_CC3501E_RESP_ERR_NOT_READY;
-	if (rv != CC3501E_HW_OK) return ALP_CC3501E_RESP_ERR_RADIO;
-	*reply_data_len = 6u;
-	return ALP_CC3501E_RESP_OK;
+
+	size_t                  n   = 0u;
+	int8_t                  err = 0;
+	const enum worker_state st =
+	    worker_poll(ALP_CC3501E_CMD_GET_MAC, reply_data, reply_cap, &n, &err);
+
+	switch (st) {
+	case WORKER_DONE:
+		worker_reset();
+		*reply_data_len = n; /* 6 on success */
+		return ALP_CC3501E_RESP_OK;
+	case WORKER_ERR:
+		worker_reset();
+		if (err == CC3501E_HW_ERR_NOTIMPL) return ALP_CC3501E_RESP_ERR_NOT_READY;
+		return ALP_CC3501E_RESP_ERR_RADIO;
+	case WORKER_IDLE:
+		/* No job in flight: queue one and ask the host to re-issue. */
+		(void)worker_submit(ALP_CC3501E_CMD_GET_MAC);
+		return ALP_CC3501E_RESP_ERR_BUSY;
+	default: /* WORKER_QUEUED / WORKER_RUNNING (incl. another cmd in flight) */
+		return ALP_CC3501E_RESP_ERR_BUSY;
+	}
 }
 
 /* RESET (0x02): host-requested soft reset.  Reply OK now; the HAL

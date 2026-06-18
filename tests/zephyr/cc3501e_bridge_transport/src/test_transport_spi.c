@@ -90,14 +90,30 @@ ZTEST(cc3501e_bridge_transport, test_get_mac_not_ready_on_stub)
 	uint8_t       reply[32];
 
 	transport_spi_init();
+
+	/* GET_MAC is now POLL-BY-REPEAT through the async worker (P0-4/P0-6):
+	 * the first request submits the job and replies BUSY (the host maps
+	 * RESP_ERR_BUSY -> ALP_ERR_BUSY and re-issues).  On the silicon-free
+	 * stub the worker runs the job SYNCHRONOUSLY at submit, so a single
+	 * re-issue then returns the cached result.  The stub HAL has no radio
+	 * -> the job's HAL body reports NOTIMPL, which the handler maps to
+	 * NOT_READY rather than a fabricated MAC. */
 	transaction(gm, sizeof gm);
 	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "first GET_MAC reply is header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_GET_MAC, 1u);
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_BUSY,
+	              "first GET_MAC submits the job -> BUSY (host retries)");
 
-	/* The stub HAL has no radio -> the handler maps NOTIMPL to NOT_READY
-     * rather than returning a fabricated MAC. */
+	/* Host re-issues GET_MAC: the worker has the (synchronous-on-stub)
+	 * result cached -> NOT_READY. */
+	transaction(gm, sizeof gm);
+	n = drain(reply, sizeof reply);
 	zassert_equal(n, 5u, "GET_MAC error reply is header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_GET_MAC, 1u);
-	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "GET_MAC on stub -> NOT_READY");
+	zassert_equal(
+	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued GET_MAC on stub -> NOT_READY");
 }
 
 ZTEST(cc3501e_bridge_transport, test_unknown_opcode_rejected)

@@ -43,6 +43,23 @@ void cc3501e_hw_init(void);
  * this firmware rev; reserved for watchdog kick / deferred work. */
 void cc3501e_hw_tick(void);
 
+/* Bring the radio up ONCE at boot (radio<->SPI coexistence fix).
+ *
+ * The inter-chip bridge SPI slave cannot be serviced while the CC35 runs a
+ * radio op (there is no host-IRQ to defer to), so the bridge is DOWN for the
+ * duration of Wlan_Start / Wlan_RoleUp -- seconds.  Doing that radio init
+ * LAZILY on the first GET_MAC tears the link down mid-traffic (ping climbs a
+ * few, then reqhdr_rx -> 0x00000000 + desync).  Instead the bring-up task
+ * calls this ONCE, early -- after the FreeRTOS scheduler + the SPI slave poll
+ * task are up but BEFORE any host command is serviced -- so the long radio
+ * init happens while there is no host traffic to disrupt (the bridge-down
+ * window is then harmless).  After it returns the bridge is up AND the radio
+ * is up, so a later GET_MAC only does the SHORT Wlan_Get.
+ *
+ * Idempotent (one-time guard inside): a no-op on the second+ call and on the
+ * stub / silicon-free build (no radio -> nothing to start). */
+void cc3501e_hw_wifi_boot_start(void);
+
 /* --------------------------------------------------------------- */
 /* Meta operations                                                   */
 /* --------------------------------------------------------------- */

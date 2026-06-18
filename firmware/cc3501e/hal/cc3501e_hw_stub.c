@@ -27,6 +27,11 @@ void cc3501e_hw_tick(void)
 	/* no-op on the stub backend */
 }
 
+void cc3501e_hw_wifi_boot_start(void)
+{
+	/* No radio on the host stub -- nothing to bring up at boot. */
+}
+
 int cc3501e_hw_get_mac(uint8_t mac[6])
 {
 	/* No radio on the host stub -- zero the buffer and report NOTIMPL so

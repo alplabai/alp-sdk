@@ -12,6 +12,7 @@ target_sources(app PRIVATE
     ${BRIDGE_DIR}/src/transport_spi.c
     ${BRIDGE_DIR}/src/transport_sdio.c
     ${BRIDGE_DIR}/src/protocol.c
+    ${BRIDGE_DIR}/src/worker.c
     ${BRIDGE_DIR}/hal/cc3501e_hw_stub.c
 )
 # Firmware src + hal, plus the repo-root include/ so the firmware picks up

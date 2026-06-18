@@ -78,6 +78,17 @@ extern "C" {
  *  protocol revision (v2+) consumes the range. */
 #define ALP_CC3501E_CMD_RESERVED_VENDOR_BASE 0x80u
 
+/** Header-idle sync marker driven by the slave on MISO whenever it is
+ *  parked at a clean frame boundary (armed for a request header), and
+ *  used by the host to (re)establish byte alignment on the CS-less 3-wire
+ *  link.  RESERVED: no opcode and no reply-header byte may equal this
+ *  value -- it lies in the reserved vendor range (>= 0x80) and a reply
+ *  header's first byte always echoes the request's (in-range) opcode, so
+ *  0xA5 can never appear as a legitimate header byte.  The host clocks
+ *  dummy bytes and looks for a run of 0xA5 to know the slave is at a frame
+ *  boundary (see chips/cc3501e/cc3501e.c cc3501e_sync()). */
+#define ALP_CC3501E_SYNC_IDLE 0xA5u
+
 /**
  * @brief Command opcodes.
  *

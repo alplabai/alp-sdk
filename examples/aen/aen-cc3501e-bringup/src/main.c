@@ -86,6 +86,39 @@
 #define CC3501E_PING_RETRIES 25u
 #define CC3501E_PING_GAP_MS  200u
 
+/* Poll-by-repeat budgets for the Wi-Fi helpers (firmware kicks off a worker
+ * and answers BUSY until it finishes; the host re-issues until OK/timeout). */
+#define CC3501E_MAC_TIMEOUT_MS  2000u
+#define CC3501E_SCAN_TIMEOUT_MS 8000u
+#define CC3501E_CONN_TIMEOUT_MS 15000u
+
+/* Max scan records to collect into the witness-backed array. */
+#define CC3501E_SCAN_MAX_RECORDS 16u
+
+/*
+ * Wi-Fi STA credentials for the optional CONNECT step.  DELIBERATELY EMPTY
+ * by default -- do NOT hardcode bench credentials in a public example.  Set
+ * them at build time without editing this file, e.g.:
+ *
+ *   west build ... -- \
+ *     -DCONFIG_... is not used (these are plain C macros); pass via CFLAGS:
+ *   west build ... -- -DEXTRA_CFLAGS="-DCC3501E_WIFI_SSID=\\\"myssid\\\" \
+ *                                     -DCC3501E_WIFI_PASS=\\\"mypass\\\""
+ *
+ * or simply edit these two lines locally on the bench (never commit them).
+ * When CC3501E_WIFI_SSID is empty the CONNECT call is skipped entirely.
+ */
+#ifndef CC3501E_WIFI_SSID
+#define CC3501E_WIFI_SSID ""
+#endif
+#ifndef CC3501E_WIFI_PASS
+#define CC3501E_WIFI_PASS ""
+#endif
+/* Security: 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE (alp_cc3501e_wifi_connect_t). */
+#ifndef CC3501E_WIFI_SECURITY
+#define CC3501E_WIFI_SECURITY 1u
+#endif
+
 /*
  * SWD-readable bring-up witness.
  *
@@ -99,17 +132,26 @@
  * `used` keeps it through --gc-sections; volatile stops the compiler from
  * optimising the stores away (nothing in this TU reads the fields back). */
 typedef struct {
-	uint32_t magic;        /* 0x35334343 once main() starts            */
-	uint32_t reset_status; /* (uint32_t)alp_status_t from cc3501e_reset */
-	uint32_t ping_ok;      /* count of successful PINGs                 */
-	uint32_t ping_fail;    /* count of failed PINGs                     */
-	uint32_t last_status;  /* (uint32_t)alp_status_t of the last PING   */
-	uint32_t version;      /* protocol version (low 16b) | status<<16   */
-	uint32_t phase;        /* progress checkpoint (see CC3501E_PHASE_*)  */
-	uint32_t zerr;         /* bench debug: raw Zephyr spi_transceive() errno (last PING) */
-	uint32_t fail_step;    /* bench debug: cc3501e_request step that failed (1..6); 0=ok  */
-	uint32_t reqhdr_rx;    /* bench debug: MISO bytes clocked back during req-hdr write   */
-	uint32_t reply_hdr;    /* bench debug: raw 4 reply-header bytes the CC3501E drove     */
+	uint32_t magic;        /* +0x00  0x35334343 once main() starts            */
+	uint32_t reset_status; /* +0x04  (uint32_t)alp_status_t from cc3501e_reset */
+	uint32_t ping_ok;      /* +0x08  count of successful PINGs                 */
+	uint32_t ping_fail;    /* +0x0C  count of failed PINGs                     */
+	uint32_t last_status;  /* +0x10  (uint32_t)alp_status_t of the last PING   */
+	uint32_t version;      /* +0x14  protocol version (low 16b) | status<<16   */
+	uint32_t phase;        /* +0x18  progress checkpoint (see CC3501E_PHASE_*)  */
+	uint32_t zerr;         /* +0x1C  bench debug: raw Zephyr spi_transceive() errno (last PING) */
+	uint32_t fail_step;    /* +0x20  bench debug: cc3501e_request step that failed (1..6); 0=ok  */
+	uint32_t reqhdr_rx;    /* +0x24  bench debug: MISO bytes clocked back during req-hdr write   */
+	uint32_t reply_hdr;    /* +0x28  bench debug: raw 4 reply-header bytes the CC3501E drove     */
+	/* --- Wi-Fi bring-up results (cc3501e_wifi_* helpers) --- */
+	uint32_t mac_status;  /* +0x2C  (uint32_t)alp_status_t from cc3501e_wifi_get_mac    */
+	uint32_t mac_ok;      /* +0x30  1 once a 6-byte MAC was read; 0 otherwise           */
+	uint32_t mac_lo;      /* +0x34  MAC bytes [0..3] packed LE (mac[0] in bits 7:0)     */
+	uint32_t mac_hi;      /* +0x38  MAC bytes [4..5] in bits 15:0 (mac[4] in bits 7:0)  */
+	uint32_t scan_status; /* +0x3C  (uint32_t)alp_status_t from cc3501e_wifi_scan       */
+	uint32_t scan_count;  /* +0x40  number of scan records parsed                       */
+	int32_t
+	    scan_first_rssi; /* +0x44 RSSI dBm of the first scan record (sign-extended); 0 if none */
 } cc3501e_witness_t;
 
 /* Bench debug instrumentation (2026-06-16, REVERT after the SPI1-no-clock root
@@ -124,14 +166,15 @@ extern volatile uint32_t cc3501e_dbg_reply_hdr;
 /* Progress checkpoints written to g_cc3501e_witness.phase so a J-Link can
  * localise where the app got to (read after a fault: .bss survives a halt).
  * 1=entered main, 2=GPIOs configured, 3=SPI opened, 4=reset done,
- * 5=in PING-retry loop, 6=version read, 7=in soak loop. */
+ * 5=in PING-retry loop, 6=version read, 7=Wi-Fi probes, 8=in soak loop. */
 #define CC3501E_PHASE_MAIN     1u
 #define CC3501E_PHASE_GPIO     2u
 #define CC3501E_PHASE_SPI_OPEN 3u
 #define CC3501E_PHASE_RESET    4u
 #define CC3501E_PHASE_PING     5u
 #define CC3501E_PHASE_VERSION  6u
-#define CC3501E_PHASE_SOAK     7u
+#define CC3501E_PHASE_WIFI     7u
+#define CC3501E_PHASE_SOAK     8u
 
 #define CC3501E_WITNESS_MAGIC 0x35334343u /* "CC35" little-endian */
 
@@ -225,6 +268,92 @@ static void cc3501e_dump_diag(cc3501e_t *fw)
 	       diag.uptime_ms,
 	       diag.free_heap_bytes,
 	       diag.last_error);
+}
+
+/*
+ * Drive the Wi-Fi control path once the link is proven (PING/VERSION).
+ *
+ * This is the point of the bring-up beyond "the link answers": it exercises
+ * the firmware's Wi-Fi worker seam from the host -- GET_MAC and SCAN_START
+ * are poll-by-repeat (the firmware answers BUSY while a worker runs, the host
+ * driver re-issues until OK), so a successful MAC read / scan proves the whole
+ * submit -> worker -> reply round-trip, not just META dispatch.  Results are
+ * mirrored into the witness so a J-Link reads them with no console.
+ *
+ * CONNECT is wired but only attempted when CC3501E_WIFI_SSID is non-empty
+ * (set at build time on the bench -- never hardcode credentials here).
+ */
+static void cc3501e_wifi_probe(cc3501e_t *fw)
+{
+	g_cc3501e_witness.phase = CC3501E_PHASE_WIFI;
+
+	/* --- MAC (poll-by-repeat; proves the worker seam) --- */
+	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t ms                   = cc3501e_wifi_get_mac(fw, mac, CC3501E_MAC_TIMEOUT_MS);
+	g_cc3501e_witness.mac_status      = (uint32_t)ms;
+	if (ms == ALP_OK) {
+		g_cc3501e_witness.mac_ok = 1u;
+		g_cc3501e_witness.mac_lo = (uint32_t)mac[0] | ((uint32_t)mac[1] << 8) |
+		                           ((uint32_t)mac[2] << 16) | ((uint32_t)mac[3] << 24);
+		g_cc3501e_witness.mac_hi = (uint32_t)mac[4] | ((uint32_t)mac[5] << 8);
+		printf("[cc3501e-bringup] GET_MAC -> %02x:%02x:%02x:%02x:%02x:%02x\n",
+		       mac[0],
+		       mac[1],
+		       mac[2],
+		       mac[3],
+		       mac[4],
+		       mac[5]);
+	} else {
+		printf("[cc3501e-bringup] GET_MAC -> %d (worker seam not up yet?)\n", (int)ms);
+	}
+
+	/* --- SCAN (poll-by-repeat; collects packed records) --- */
+	static cc3501e_scan_record_t scan[CC3501E_SCAN_MAX_RECORDS];
+	size_t                       n = 0;
+	alp_status_t                 ss =
+	    cc3501e_wifi_scan(fw, scan, CC3501E_SCAN_MAX_RECORDS, &n, CC3501E_SCAN_TIMEOUT_MS);
+	g_cc3501e_witness.scan_status = (uint32_t)ss;
+	if (ss == ALP_OK) {
+		g_cc3501e_witness.scan_count      = (uint32_t)n;
+		g_cc3501e_witness.scan_first_rssi = (n > 0u) ? (int32_t)scan[0].rssi_dbm : 0;
+		printf("[cc3501e-bringup] WIFI_SCAN -> %u AP(s)\n", (unsigned)n);
+		for (size_t i = 0; i < n; ++i) {
+			printf("  [%u] \"%s\" ch%u %d dBm sec%u\n",
+			       (unsigned)i,
+			       scan[i].ssid,
+			       scan[i].channel,
+			       (int)scan[i].rssi_dbm,
+			       scan[i].security);
+		}
+	} else {
+		printf("[cc3501e-bringup] WIFI_SCAN -> %d\n", (int)ss);
+	}
+
+	/* --- CONNECT (opt-in; SSID set at build time, never hardcoded) --- */
+	if (CC3501E_WIFI_SSID[0] != '\0') {
+		printf("[cc3501e-bringup] WIFI_CONNECT_STA -> SSID \"%s\" (sec %u)...\n",
+		       CC3501E_WIFI_SSID,
+		       (unsigned)CC3501E_WIFI_SECURITY);
+		alp_status_t cs = cc3501e_wifi_connect(fw,
+		                                       CC3501E_WIFI_SSID,
+		                                       (uint8_t)CC3501E_WIFI_SECURITY,
+		                                       CC3501E_WIFI_PASS,
+		                                       CC3501E_CONN_TIMEOUT_MS);
+		printf("[cc3501e-bringup] WIFI_CONNECT_STA -> %d\n", (int)cs);
+		if (cs == ALP_OK) {
+			int8_t rssi = 0;
+			if (cc3501e_wifi_rssi(fw, &rssi) == ALP_OK) {
+				printf("[cc3501e-bringup] RSSI -> %d dBm\n", (int)rssi);
+			}
+			uint8_t ip[4] = { 0 };
+			if (cc3501e_wifi_get_ip(fw, ip) == ALP_OK) {
+				printf("[cc3501e-bringup] IP -> %u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
+			}
+		}
+	} else {
+		printf("[cc3501e-bringup] WIFI_CONNECT_STA skipped (CC3501E_WIFI_SSID empty -- "
+		       "set it at build time on the bench)\n");
+	}
 }
 
 int main(void)
@@ -369,7 +498,17 @@ int main(void)
 	cc3501e_dump_diag(&fw);
 
 	/*
-	 * Step 7 -- liveness soak.  Keep PINGing so the link is continuously
+	 * Step 7 -- drive the Wi-Fi control path (GET_MAC + SCAN, optional
+	 * CONNECT).  This is the bring-up's reason to exist beyond a bare PING:
+	 * GET_MAC / SCAN are poll-by-repeat, so a success proves the firmware's
+	 * Wi-Fi worker seam (submit -> worker -> reply) from the host.  Results
+	 * land in the witness for a console-less J-Link read.  Skipped harmlessly
+	 * if the link never came up (the helpers just time out and record it).
+	 */
+	cc3501e_wifi_probe(&fw);
+
+	/*
+	 * Step 8 -- liveness soak.  Keep PINGing so the link is continuously
 	 * verifiable over J-Link, and re-read the version every 8th cycle (an
 	 * odd-length reply that stresses the framing residue handling).  This
 	 * mirrors the v2n-gd32-bridge-ping soak.
@@ -389,6 +528,24 @@ int main(void)
 			g_cc3501e_witness.ping_fail++;
 		}
 		printf("[cc3501e-bringup] soak PING #%u -> %d\n", i, (int)s);
+
+		/* Once the link is aligned (PING ok), keep retrying GET_MAC until it
+		 * lands -- the boot-time probe can run during the CS-less cold
+		 * first-contact misalignment window; retrying here lands the
+		 * worker-routed Wi-Fi identity read end-to-end on the stable link. */
+		if (g_cc3501e_witness.mac_ok == 0u && s == ALP_OK) {
+			uint8_t      mac[CC3501E_MAC_LEN] = {0};
+			alp_status_t ms = cc3501e_wifi_get_mac(&fw, mac, CC3501E_MAC_TIMEOUT_MS);
+			g_cc3501e_witness.mac_status = (uint32_t)ms;
+			if (ms == ALP_OK) {
+				g_cc3501e_witness.mac_ok = 1u;
+				g_cc3501e_witness.mac_lo = (uint32_t)mac[0] | ((uint32_t)mac[1] << 8) |
+							   ((uint32_t)mac[2] << 16) | ((uint32_t)mac[3] << 24);
+				g_cc3501e_witness.mac_hi = (uint32_t)mac[4] | ((uint32_t)mac[5] << 8);
+				printf("[cc3501e-bringup] soak GET_MAC ok %02x:%02x:%02x:%02x:%02x:%02x\n",
+				       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+			}
+		}
 
 		if ((i % 8u) == 0u) {
 			uint16_t     v            = 0u;

@@ -76,3 +76,14 @@ spi0.spi.sclkPin.$assign = "GPIO27";  /* <- Alif SCLK/P14_6 (correctly wired) */
 spi0.spi.picoPin.$assign = "GPIO29";  /* peripheral data IN  (needs Alif MOSI here -- HW cross) */
 spi0.spi.pociPin.$assign = "GPIO28";  /* peripheral data OUT (needs Alif MISO here -- HW cross) */
 spi0.spi.csnPin.$assign  = "GPIO16";  /* CS -> GPIO16 (only silicon-legal CS of the W_DISABLE pair; GPIO17 = resource conflict). Must be tied/pulled LOW to assert (see note above). */
+
+/* host-DMA on the FREE channels 12/13 (SHIP-CRITICAL -- keep in sync with
+ * cc3501e_aen_wifi.syscfg).  The transport opens the slave SPI_MODE_CALLBACK so
+ * the driver DMAs the FIFO; the on-chip radio (a separate NWP) claims only
+ * host-DMA channels 0..11 (TRM swru626 §11: UART 0-3, SPI 4-5, TEMP 6-10, HIF
+ * ch11) of the 14, so channels 12/13 are FREE and the radio never remuxes them.
+ * Pin RX DMA to ch12, TX DMA to ch13 so Wlan_Start/scan/connect cannot steal the
+ * bridge's channels.  The default/radio-free build matches the Wi-Fi build so
+ * both run the one CALLBACK/DMA transport. */
+spi0.spi.dmaRxChannel.$assign = "DMA_CH12";
+spi0.spi.dmaTxChannel.$assign = "DMA_CH13";
