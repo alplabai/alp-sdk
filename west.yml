@@ -196,6 +196,12 @@ manifest:
           # open-amp's HAL/OS-abstraction dependency.
           - open-amp
           - libmetal
+          # tf-psa-crypto is mbedTLS 4.x's split-out PSA crypto core
+          # (modules/crypto/tf-psa-crypto, pinned by Zephyr v4.4, group
+          # crypto).  Allowlisted so the PSA crypto path (the SE-CryptoCell
+          # backend's MbedTLS-PSA fallthrough, examples/aen/aen-se-crypto)
+          # resolves on `west update` without the bench-side symlink.
+          - tf-psa-crypto
           # nanopb is also pulled in by Zephyr's tree when ALP_NANOPB
           # is enabled.  Our SDK uses it via the upstream Zephyr
           # module (no extras-tier1 pin needed for v0.5).
