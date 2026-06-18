@@ -70,6 +70,12 @@ appControlBlock app_CB;
 #include "../cc3501e_hw.h"
 #include "transport.h" /* bridge_transport_spi_hw_reinit (Wlan_Start DMA-coexistence fix) */
 
+/* Bridge SPI desync counter (transport_hw_ti_spi.c): increments each time the
+ * slave re-arms the header phase on a reserved-range/0xA5 header (a misframe).
+ * A burst in one housekeeping tick means the link is stuck desynced + the RX
+ * FIFO likely holds residue -- cc3501e_hw_tick() flushes via a full SPI re-open. */
+extern volatile uint32_t g_resync_count;
+
 #ifdef CC3501E_WIFI
 /* --------------------------------------------------------------- *
  * Lazy Wi-Fi bring-up (P0-6) -- the CC35xx host stack is started ONCE,    *
@@ -392,6 +398,26 @@ void cc3501e_hw_tick(void)
 			psa_fwu_request_reboot(); /* finalize commit; device reboots, image now permanent */
 		}
 		/* PSA_ERROR_BAD_STATE = nothing in trial (already permanent) -> continue. */
+	}
+
+	/* === Bridge SPI FIFO-flush recovery (cold-framing self-heal) ===
+	 * On the CS-less fixed-count link a 1-byte frame offset (RX FIFO residue from
+	 * the master over-clocking during a desync) cannot self-correct by more
+	 * clocking -- it persists until the FIFO is flushed.  g_resync_count bursts
+	 * while the slave is stuck re-arming garbage (each misframed header reads the
+	 * 0xA5 idle, which is in the reserved cmd range -> re-arm++).  A burst within
+	 * one ~10 ms housekeeping tick = the link is stuck: do a full SPI re-open
+	 * (SPI_close/open) which FLUSHES the RX FIFO + DMA and re-arms a fresh header.
+	 * If this lands in the host's inter-PING gap the slave's fresh RX then aligns
+	 * with the host's next 4-byte transfer.  Healthy traffic uses valid (cmd<0x80)
+	 * headers and does not bump g_resync_count, so this never fires when aligned. */
+	static uint32_t last_resync;
+	const uint32_t rc = g_resync_count;
+	if ((uint32_t)(rc - last_resync) >= 3u) {
+		bridge_transport_spi_hw_reinit(); /* flush FIFO+DMA, re-arm clean */
+		last_resync = 0u;                 /* reinit zeroes g_resync_count */
+	} else {
+		last_resync = rc;
 	}
 
 	/* Deferred self-reset, gated on reply_drained so the CMD_RESET ack has

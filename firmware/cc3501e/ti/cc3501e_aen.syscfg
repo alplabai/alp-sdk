@@ -66,9 +66,11 @@ spi0.$name                = "CONFIG_SPI_0";
  */
 spi0.mode                 = "Four Pin CS Active Low";
 spi0.duplex               = "Full";       /* both data lines (RX requests + TX replies) */
-spi0.defaultTxBufferValue = "0x5A";       /* BENCH DIAG 2026-06-17: recognizable idle MISO pattern so the
-                                           * Alif witness (reqhdr_rx) distinguishes "CC35 driving its idle"
-                                           * (0x5A5A5A5A) from "MISO not driven" (0xFFFFFFFF). REVERT to 0xFF. */
+spi0.defaultTxBufferValue = "0xA5";       /* idle MISO = the 0xA5 SYNC marker (ALP_CC3501E_SYNC_IDLE) so the
+                                           * slave drives 0xA5 even BETWEEN armed transfers (callback re-arm
+                                           * gap) -- the host's 0xA5 sync then never catches a stray idle byte
+                                           * mid-frame on cold first-contact. Ship value (was bench-diag 0x5A,
+                                           * which leaked into reqhdr_rx as 0x..005A and cold-byte-misaligned). */
 
 /* Silicon-legal pads (see HARDWARE NOTE).  The pin resources live under the
  * instance's `spi` peripheral group; $assign uses the device pad names. */

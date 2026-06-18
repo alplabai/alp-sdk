@@ -75,7 +75,11 @@ var spi0 = SPI.addInstance();
 spi0.$name                = "CONFIG_SPI_0";
 spi0.mode                 = "Four Pin CS Active Low";
 spi0.duplex               = "Full";       /* both data lines (RX requests + TX replies) */
-spi0.defaultTxBufferValue = "0x5A";       /* BENCH DIAG idle MISO pattern (REVERT to 0xFF) */
+spi0.defaultTxBufferValue = "0xA5";       /* idle MISO = the 0xA5 SYNC marker (ALP_CC3501E_SYNC_IDLE):
+                                           * the slave drives 0xA5 even BETWEEN armed transfers (callback
+                                           * re-arm gap), so the host never catches a stray idle byte mid-
+                                           * frame on cold first-contact (was 0x5A -> reqhdr_rx=0x..005A
+                                           * leak -> cold byte-misalign). Ship value. */
 
 spi0.spi.sclkPin.$assign = "GPIO27";  /* <- Alif SCLK/P14_6 (correctly wired) */
 spi0.spi.picoPin.$assign = "GPIO29";  /* peripheral data IN  (needs Alif MOSI here -- HW cross) */

@@ -127,7 +127,17 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
 	(void)alp_gpio_write(ctx->reset_pin, false); /* assert nRESET; rails stay up */
 	alp_delay_ms(50u);
 	(void)alp_gpio_write(ctx->reset_pin, true);  /* release -> re-boot */
-	alp_delay_ms(1500u);                          /* BL1+BL2+CoT boot budget */
+
+	/* BLIND boot settle -- NO clocking until the slave is armed.  This is the
+	 * cold first-contact fix: on the CS-less fixed-count link, any byte the host
+	 * clocks BEFORE the slave's SPI is armed (e.g. a readiness poll's probes) is
+	 * not consumed by the slave, which sets a permanent 1-byte frame offset that
+	 * cannot self-correct (clocking advances both sides equally).  So the host
+	 * stays QUIET while the module boots + arms; the slave then parks driving the
+	 * 0xA5 marker, and the caller's first PING lands at the slave's fresh frame
+	 * boundary = aligned.  The Wi-Fi build cold-boots (Puya double-boot + crypto
+	 * Board_init) in ~2-3 s; 3.5 s covers it with margin and no clocking. */
+	alp_delay_ms(3500u);
 	return ALP_OK;
 }
 

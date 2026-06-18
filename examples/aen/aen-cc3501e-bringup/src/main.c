@@ -78,7 +78,15 @@
  * for the v0.1 instant-dispatch META path; slow Wi-Fi/BLE replies need the
  * next-rev host-IRQ line, not a faster clock.)
  */
-#define CC3501E_SPI_FREQ_HZ 8000000u
+#define CC3501E_SPI_FREQ_HZ 1000000u /* 1 MHz: SILICON-VALIDATED cold-boot value.  At 8 MHz with the
+                                      * Alif SSI rx_delay=0 the master sampled MISO before the CC35's bit
+                                      * propagated back over the long on-SoM traces + the crossed-data
+                                      * bodge -> reqhdr_rx=0xFFFFFFFF, cold link dead (8 MHz was only
+                                      * marginally OK warm).  At 1 MHz the bit period (1 us) >> the MISO
+                                      * round-trip, so sampling is clean and cold-boot GET_MAC works
+                                      * end-to-end.  Plenty for the control/PING path (radio data rides
+                                      * Wi-Fi, not this bridge).  FUTURE: to raise the clock, set the SSI
+                                      * rx-delay (alif,dwc-ssi rx-delay DT prop) to cover the round-trip. */
 
 /* How long to keep retrying the first PING before falling through to the
  * soak loop anyway (the soak loop keeps logging, so a console-attached
@@ -505,7 +513,13 @@ int main(void)
 	 * land in the witness for a console-less J-Link read.  Skipped harmlessly
 	 * if the link never came up (the helpers just time out and record it).
 	 */
-	cc3501e_wifi_probe(&fw);
+	/* DEFERRED: do NOT read the radio (GET_MAC -> Wlan_Start) here -- that fires
+	 * the radio bring-up before the PING link is established, and Wlan_Start
+	 * disrupts the CS-less link before it has settled (cold first-contact never
+	 * recovers).  The soak below reads the MAC only AFTER the link is solidly up
+	 * (ping_ok >= threshold) -- "wait until ready to read".  Kept the function for
+	 * the scan/connect path, gated the same way later. */
+	(void)cc3501e_wifi_probe;
 
 	/*
 	 * Step 8 -- liveness soak.  Keep PINGing so the link is continuously
@@ -533,7 +547,7 @@ int main(void)
 		 * lands -- the boot-time probe can run during the CS-less cold
 		 * first-contact misalignment window; retrying here lands the
 		 * worker-routed Wi-Fi identity read end-to-end on the stable link. */
-		if (g_cc3501e_witness.mac_ok == 0u && s == ALP_OK) {
+		if (g_cc3501e_witness.mac_ok == 0u && s == ALP_OK && g_cc3501e_witness.ping_ok >= 20u) {
 			uint8_t      mac[CC3501E_MAC_LEN] = {0};
 			alp_status_t ms = cc3501e_wifi_get_mac(&fw, mac, CC3501E_MAC_TIMEOUT_MS);
 			g_cc3501e_witness.mac_status = (uint32_t)ms;
