@@ -412,6 +412,14 @@ zephyr_library_sources_ifdef(CONFIG_MBEDTLS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/zephyr_drv.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/sw_fallback.c)
+# SE-CryptoCell hardware-crypto backend (silicon_ref alif:ensemble:e8,
+# priority 110 -- outranks the priority-100 "*" PSA zephyr_drv).  Rides the
+# hal_alif SE-service MHUv2 -> SE mailbox the read-only se_service client
+# already drives live; RNG via the public se_service_get_rnd_num(), the
+# AES/SHA/CMAC/CCM/GCM/ChaCha20/Poly1305 wire requests gated behind the
+# generic-send seam (CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/se_cryptocell.c)
 # Update-log surface (<alp/update_log.h>) -- experimental, opt-in.
 # Pure engine + software tamper-evident tier + (compiled, unregistered)
 # Alif TF-M stub seam. Gated on CONFIG_ALP_SDK_UPDATE_LOG.  The dispatch

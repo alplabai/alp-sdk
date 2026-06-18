@@ -1985,6 +1985,58 @@ config ALP_SDK_SECURITY_V2N_TRNG_ENTROPY
 	  hardware_poll the active vendor's HAL registered, or falls
 	  back to ALP_ERR_IO on alp_random_bytes if nothing is wired.
 
+config ALP_SDK_SECURITY_SE_CRYPTOCELL
+	bool "Route <alp/security.h> to the Alif SE CryptoCell (hardware crypto)"
+	depends on ALP_SDK && HAS_ALIF_SE_SERVICES
+	default y if HAS_ALIF_SE_SERVICES
+	help
+	  Compiles the SE-CryptoCell hardware-crypto backend
+	  (src/backends/security/se_cryptocell.c).  It registers at
+	  silicon_ref="alif:ensemble:e8" priority 110 -- ahead of the
+	  silicon_ref="*" priority-100 MbedTLS-PSA zephyr_drv backend --
+	  so on the E8 the portable alp_hash_* / alp_aead_* /
+	  alp_random_bytes surface runs INSIDE the Secure Enclave's
+	  CryptoCell (CC-3xx) instead of on the M55 core, riding the same
+	  MHUv2 -> SE mailbox the read-only se_service client already
+	  drives live on the bench.
+
+	  Requires the hal_alif SE-service client (HAS_ALIF_SE_SERVICES,
+	  which compiles se_services/zephyr/src/se_service.c) plus its
+	  MHUv2 transport (ARM_MHUV2).  The E8 itcm/dtcm DT nodes must
+	  carry the `global_base` property the hal_alif local_to_global()
+	  helper reads (soc_memory_map.h) -- the board overlay supplies it
+	  (alif,itcm/alif,dtcm).
+
+	  RNG/TRNG runs end-to-end today through the public hal_alif
+	  se_service_get_rnd_num().  The AES / SHA / CMAC / CCM / GCM /
+	  ChaCha20 / Poly1305 compute requests are authored at the wire
+	  level (request structs from hal_alif services_lib_protocol.h,
+	  IDs 400-422 from services_lib_ids.h) but need a generic SE
+	  send-request seam that hal_alif does not yet export publicly
+	  (send_msg_to_se is static); until ALP_SDK_SECURITY_SE_CRYPTOCELL_
+	  SEND_SEAM is wired they return ALP_ERR_NOSUPPORT and the
+	  dispatcher falls through to the PSA backend.
+
+config ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
+	bool "SE CryptoCell generic send-request transport seam is available"
+	depends on ALP_SDK_SECURITY_SE_CRYPTOCELL
+	default n
+	help
+	  Enables the AES / SHA / CMAC / CCM / GCM / ChaCha20 / Poly1305
+	  compute paths in the SE-CryptoCell backend.  These build a fully
+	  populated CryptoCell request packet (transcribed wire structs +
+	  local_to_global() address translation) and hand it to
+	  alp_se_crypto_send_request().
+
+	  That seam needs a public hal_alif entry that sends an arbitrary
+	  SE service packet over the RTSS-HE <-> SE MHUv2 pair and blocks
+	  for the response -- the same work send_msg_to_se() does inside
+	  se_service.c, but that symbol is static.  Leave this OFF until
+	  the transport is exported (an upstreamable hal_alif change, or a
+	  Tier-1.5 in-tree send helper bound to the seservice0r/seservice0s
+	  IPM devices); with it OFF the compute ops return ALP_ERR_NOSUPPORT
+	  and only the RNG path (public se_service_get_rnd_num) is live.
+
 config ALP_SDK_MPROC
 	bool "Real multi-processor IPC for <alp/mproc.h>"
 	default y if MBOX
