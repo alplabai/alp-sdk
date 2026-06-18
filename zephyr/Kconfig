@@ -304,6 +304,53 @@ config SPI_DW_ALIF_USE_DMA
 	  only actually engaged when the node wires `dmas`/`dma-names`; left off
 	  by default (the DMAC channel/handshake encoding is a bench unknown).
 
+# ----------------------------------------------------------------------------
+# Secure-Enclave (SE) SERVICE transport -- Arm MHUv2 IPM driver + hal_alif client
+# ----------------------------------------------------------------------------
+# The SE service client lives in the Apache-2.0 hal_alif module
+# (se_services/zephyr/src/se_service.c) and talks to the SE over two Arm MHUv2
+# mailboxes via Zephyr's IPM API.  Two symbols gate it: ARM_MHUV2 (the in-tree
+# IPM driver) and HAS_ALIF_SE_SERVICES (which compiles the hal_alif client).
+# BOTH are `select`ed only by the Alif zephyr_alif FORK SoC Kconfig
+# (SOC_SUPPORT_ARM_MHUV2 / soc/alif/ensemble/Kconfig) -- upstream Zephyr v4.4
+# does NOT define or select either, so on the alp-sdk (upstream + hal_alif)
+# stack the whole SE path is dark.  alp-sdk, as the integration layer, DEFINES
+# both here (the USE_ALIF_HAL_UTIMER precedent below: define what hal_alif only
+# selects) so the in-tree MHUv2 driver builds and se_service.c links.
+
+config ARM_MHUV2
+	bool "Arm MHUv2 mailbox (IPM) -- SE service transport (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on DT_HAS_ARM_MHUV2_ENABLED
+	select IPM
+	help
+	  Arm Message Handling Unit v2 (MHUv2) mailbox driver, exposed through
+	  Zephyr's IPM API (compatible "arm,mhuv2"), vendored from the Apache-2.0
+	  zephyr_alif fork (drivers/ipm/ipm_arm_mhuv2.c).  Upstream Zephyr v4.4
+	  ships only the MHUv1 ipm_mhu.c; this is the v2 mailbox the Ensemble SE
+	  service channel uses.  Drives the RTSS <-> SE seservice0r/seservice0s
+	  mailboxes in the E8 SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+
+	  NOTE: hal_alif's se_service.c uses ipm_poll_out()/ipm_poll_in() on its
+	  pre-scheduler path.  Those are a fork extension to Zephyr's IPM API absent
+	  from upstream v4.4; the alp-sdk carries the small upstreamable Zephyr patch
+	  that adds them (zephyr/patches.yml).  Without that patch this driver's
+	  .poll_out/.poll_in tail (and se_service.c) will not compile.
+
+config HAS_ALIF_SE_SERVICES
+	bool "hal_alif Secure-Enclave service client (vendor-ext, BENCH-UNVERIFIED)"
+	default y if DT_HAS_ALIF_SECURE_ENCLAVE_SERVICES_ENABLED
+	depends on ARM_MHUV2
+	help
+	  Compile the Apache-2.0 hal_alif SE service client
+	  (se_services/zephyr/src/se_service.c -- gated by hal_alif on
+	  CONFIG_HAS_ALIF_SE_SERVICES, which only the fork SoC Kconfig otherwise
+	  selects).  Provides se_service_system_get_device_data() (the SoC
+	  lifecycle-state / LCS read), se_service_get_run_cfg(), the ES0 boot/run
+	  power-manager calls, and se_service_update_stoc().  Needs the SE mailboxes
+	  enabled (ARM_MHUV2 + the se_service DT node).  ADR 0017: alp-sdk CONSUMES
+	  the hal_alif client (does not reimplement the SE protocol).
+
 # hal_alif (drivers/CMakeLists.txt) gates its UTIMER HW library on
 # CONFIG_USE_ALIF_HAL_UTIMER but never DEFINES that symbol -- it only `select`s
 # it (under ALIF_BLE_HOST) and uses it in add_subdirectory_ifdef. On upstream
