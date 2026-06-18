@@ -100,26 +100,75 @@ int main(void)
 	printk("\n=== aen-dma-regcheck ===\n");
 
 	/*
-	 * Alif E8 prelude: DMA2 is the M55-core-LOCAL DMA.  Its peripheral clock is
-	 * gated off at reset, so ANY access to the PL330 register block bus-faults
-	 * (precise data bus error at base+0xD00, DBGSTATUS) until the clock is
-	 * enabled.  The upstream arm,dma-pl330 driver is SoC-agnostic and knows
-	 * nothing about Alif clock gating, so we ungate it here (a clock-control
-	 * hook is the long-term home -- see TODO below).  Clean-room values from the
-	 * Alif DFP (proprietary; values transcribed, not the source):
-	 *   M55HE_CFG_BASE   0x43007000  -- DFP rtss_he/soc.h
-	 *   CLK_ENA          +0x10       -- DFP M55_CFG_Common_Type (core_defines.h)
-	 *   CLK_ENA_DMA_CKEN BIT(4)      -- DFP drivers/include/sys_ctrl_dma.h
-	 * DMA_CTRL.BOOT_MANAGER (BIT0 @ +0x00) is left 0 = secure, matching the
-	 * secure DMA2 base 0x400C0000 the M55-HE uses on the secure RAM-run.
+	 * Alif E8 prelude: DMA2 is the M55-core-LOCAL DMA.  The upstream
+	 * arm,dma-pl330 driver is SoC-agnostic and never touches the Alif system-
+	 * control block, so before it can run we have to do here exactly what the
+	 * Alif CMSIS DMA driver does in its power-up path (DFP Driver_DMA.c
+	 * DMA_PowerControl ARM_POWER_FULL, case DMA_INSTANCE_LOCAL):
+	 *
+	 *   (1) dmalocal_enable_periph_clk()        CLK_ENA   |= BIT(4)
+	 *   (2) dmalocal_set_boot_manager_secure()  DMA_CTRL  &= ~BIT(0)   (0 = secure)
+	 *   (3) dmalocal_set_boot_irq_ns_mask(0)    DMA_IRQ    = 0
+	 *   (4) dmalocal_set_boot_periph_ns_mask(0) DMA_PERIPH = 0
+	 *   (5) dmalocal_reset()                    DMA_CTRL  |= BIT(16)   (SW_RST)
+	 *
+	 * These registers live in the per-core M55_CFG_Common block.  On the M55-HE
+	 * that block IS M55HE_CFG (DFP rtss_he/core_defines.h:
+	 * M55LOCAL_CFG == (M55_CFG_Common_Type *)M55HE_CFG_BASE).  Clean-room values
+	 * transcribed from the DFP (proprietary; values only, not source):
+	 *   M55HE_CFG_BASE        0x43007000  -- DFP rtss_he/soc.h
+	 *   DMA_CTRL    @ +0x00 |   DMA_IRQ @ +0x04 |  DMA_PERIPH @ +0x08
+	 *   DMA_SEL     @ +0x0C |   CLK_ENA @ +0x10   -- DFP M55_CFG_Common_Type
+	 *                                                (rtss_he/core_defines.h)
+	 *   CLK_ENA_DMA_CKEN      BIT(4)       -- DFP drivers/include/sys_ctrl_dma.h
+	 *   DMA_CTRL_BOOT_MANAGER BIT(0)  0=Secure 1=Non-Secure -- DFP sys_ctrl_dma.h
+	 *   DMA_CTRL_SW_RST       BIT(16)      -- DFP drivers/include/sys_ctrl_dma.h
+	 * Boot IRQ / boot peripheral non-secure masks are 0 (RTE_DMA2_BOOT_IRQ_NS_STATE
+	 * / RTE_DMA2_BOOT_PERIPH_NS_STATE == 0 for AE822, DFP soc/AE822.../rte/
+	 * RTE_Device.h) -- everything stays in the secure domain, matching the secure
+	 * DMA2 base 0x400C0000 (DMA2_SEC_BASE) the M55-HE uses on the secure RAM-run.
+	 *
+	 * WHY the M2M copy did not land before this fix (clock-only prelude):
+	 * step (1) alone clears the bus fault and lets the driver bind, but the PL330
+	 * manager samples its boot security pins (boot_manager_ns / boot_irq_ns[] /
+	 * boot_peripheral_ns[]) ONLY out of reset, from DMA_CTRL[0] / DMA_IRQ /
+	 * DMA_PERIPH.  The upstream driver launches channel 0 with a *secure* DMAGO
+	 * (DBGINST0 ns bit clear, since ch_handle->nonsec_mode == 0).  Per the ARM
+	 * DMA-330 TRM a DMAGO that requests a security state the manager has not
+	 * booted into is treated as DMANOP -- accepted with no fault, but the channel
+	 * thread never starts.  That is exactly the observed signature: DBGCMD goes
+	 * idle, FSRD/FSRC/FTR0 == 0, yet CS0 == STOP and SA0/DA0/CPC0 == 0 (channel
+	 * never programmed).  Writing the secure boot config in (2)-(4) and then
+	 * pulsing SW_RST in (5) re-boots the manager into the secure domain so the
+	 * secure DMAGO is honoured and the channel executes the generated microcode.
 	 *
 	 * TODO(#21): fold this into the Tier-1.5 clockctrl so the device is clocked
-	 * by its DT `clocks` phandle instead of an app-level poke.
+	 * and boot-configured by its DT `clocks` phandle instead of an app-level poke.
 	 */
-#define M55HE_CFG_CLK_ENA 0x43007010U
-#define CLK_ENA_DMA_CKEN  BIT(4)
+#define M55HE_CFG_DMA_CTRL    0x43007000U /* M55_CFG_Common.DMA_CTRL   (+0x00) */
+#define M55HE_CFG_DMA_IRQ     0x43007004U /* M55_CFG_Common.DMA_IRQ    (+0x04) */
+#define M55HE_CFG_DMA_PERIPH  0x43007008U /* M55_CFG_Common.DMA_PERIPH (+0x08) */
+#define M55HE_CFG_CLK_ENA     0x43007010U /* M55_CFG_Common.CLK_ENA    (+0x10) */
+#define CLK_ENA_DMA_CKEN      BIT(4)      /* DFP CLK_ENA_DMA_CKEN              */
+#define DMA_CTRL_BOOT_MANAGER BIT(0)      /* DFP DMA_CTRL_BOOT_MANAGER 0=Sec   */
+#define DMA_CTRL_SW_RST       BIT(16)     /* DFP DMA_CTRL_SW_RST               */
+
+	/* (1) ungate the DMA2 local peripheral clock. */
 	sys_write32(sys_read32(M55HE_CFG_CLK_ENA) | CLK_ENA_DMA_CKEN, M55HE_CFG_CLK_ENA);
-	printk("prelude: enabled DMA2 local periph clock (M55HE_CFG.CLK_ENA |= BIT(4))\n");
+
+	/* (2) boot the PL330 manager SECURE (clear BOOT_MANAGER), matching the
+	 * secure DMA2 base and the driver's secure DMAGO. */
+	sys_write32(sys_read32(M55HE_CFG_DMA_CTRL) & ~DMA_CTRL_BOOT_MANAGER, M55HE_CFG_DMA_CTRL);
+
+	/* (3)+(4) all boot IRQs and peripheral request lines stay secure. */
+	sys_write32(0U, M55HE_CFG_DMA_IRQ);
+	sys_write32(0U, M55HE_CFG_DMA_PERIPH);
+
+	/* (5) pulse SW_RST so the manager re-samples the secure boot config above. */
+	sys_write32(sys_read32(M55HE_CFG_DMA_CTRL) | DMA_CTRL_SW_RST, M55HE_CFG_DMA_CTRL);
+
+	printk("prelude: DMA2 local clock+secure-boot configured "
+	       "(CLK_ENA|=BIT4, DMA_CTRL secure-mgr, DMA_IRQ=DMA_PERIPH=0, SW_RST)\n");
 
 	/*
 	 * Step 1+2: report the node's binding + reg base + channel count.  These are
