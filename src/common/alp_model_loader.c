@@ -72,12 +72,12 @@ alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 
 	const alp_model_target_t *t   = &mdl.targets[sel.target_index];
 	alp_inference_config_t    cfg = {
-		   .model_data  = t->blob,
-		   .model_size  = t->blob_len,
-		   .format      = sel.format,
-		   .backend     = sel.backend,
-		   .arena_bytes = opts->arena_bytes ? opts->arena_bytes : sel.arena_bytes,
-		   .arena       = opts->arena,
+		.model_data  = t->blob,
+		.model_size  = t->blob_len,
+		.format      = sel.format,
+		.backend     = sel.backend,
+		.arena_bytes = opts->arena_bytes ? opts->arena_bytes : sel.arena_bytes,
+		.arena       = opts->arena,
 	};
 	return alp_inference_open(&cfg); /* relays its own last_error on failure */
 }

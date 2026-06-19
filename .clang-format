@@ -41,10 +41,10 @@ SpacesInSquareBrackets: false
 IncludeBlocks: Preserve
 ReflowComments: false
 
-# Pin behaviour across clang-format versions.  The LLVM default for
-# Cpp11BracedListStyle flipped between clang-format 14 (Ubuntu apt
-# default on the CI runner) and clang-format 18+, which makes the
-# `(alp_i2c_config_t){ .foo = ... }` designated-initialiser idiom
-# format differently on developer machines vs CI.  Locking it
-# explicitly keeps the formatter idempotent across the version skew.
+# Pin behaviour across clang-format versions.  CI pins clang-format-22 (via the
+# pip wheel -- see .github/workflows/pr-static-analysis.yml + scripts/setup-clang-format.sh),
+# but the LLVM default for Cpp11BracedListStyle has flipped between major versions
+# (v14 vs v18+), which formats the `(alp_i2c_config_t){ .foo = ... }`
+# designated-initialiser idiom differently.  Locking it explicitly keeps the output
+# reproducible regardless of whichever clang-format a developer has on PATH.
 Cpp11BracedListStyle: false

@@ -308,7 +308,7 @@ static void process_one_block(void)
 		if (s_fft_fill >= FFT_POINTS) {
 			size_t       got = 0;
 			alp_status_t st  = alp_dsp_chain_apply_bins(
-                g_state.dsp, s_fft_in, FFT_POINTS, s_bin_mag, FFT_POINTS, &got);
+			    g_state.dsp, s_fft_in, FFT_POINTS, s_bin_mag, FFT_POINTS, &got);
 			if (st != ALP_OK) {
 				LOG_WRN("dsp apply_bins failed: st=%d (block %u)",
 				        (int)st,

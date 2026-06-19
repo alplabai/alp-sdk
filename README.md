@@ -295,8 +295,8 @@ v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneou
 - Roadmap: [`VERSIONS.md`](VERSIONS.md).
 - What changed when: `CHANGELOG.md` (in the repo root).
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md).
-- Architecture decisions: [`docs/adr/`](docs/adr/) (14 ADRs, latest:
-  0013 TF-M trust boundary + 0014 build-plan emit CLI contract).
+- Architecture decisions: [`docs/adr/`](docs/adr/) (17 ADRs, latest:
+  0017 alp-sdk-over-the-vendor-sdk).
 
 ## Test it from scratch
 
@@ -338,7 +338,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 
 | Group | Headers + chip drivers |
 |---|---|
-| Peripherals | `peripheral.h` (GPIO/I²C/SPI/UART), `pwm.h`, `adc.h`, `counter.h`, `i2s.h`, `can.h`, `rtc.h`, `wdt.h`, `usb.h` |
+| Peripherals | `peripheral.h` (GPIO/I²C/SPI/UART), `pwm.h`, `adc.h`, `dac.h`, `counter.h`, `i2s.h`, `can.h`, `rtc.h`, `wdt.h`, `usb.h` |
 | Audio / camera / display | `audio.h` (PDM in + I²S out), `camera.h`, `gui.h` (LVGL), `display.h` (panels) — chip drivers: SSD1306, SSD1331, ST7789, OV5640, CAM_MUX, TAS2563, PDM mic |
 | Connectivity & security | `iot.h` (Wi-Fi/MQTT), `ble.h` (BLE 5.4), `security.h` (MbedTLS PSA Crypto), `storage.h` (LittleFS), OPTIGA Trust M chip driver |
 | DSP / graphics / power | `dsp.h` (FFT / FAC / IIR chain), `tmu.h` (trig-/math-unit offload), `gpu2d.h` (2D blit/fill), `power.h` (sleep + wake sources) — HW-accelerated where the SoC provides it, SW fallback (CMSIS-DSP / libm / Zephyr PM) otherwise |
@@ -446,7 +446,7 @@ All consumer-facing headers live under `include/alp/`:
 | Header               | Library                                    |
 |----------------------|--------------------------------------------|
 | `alp/peripheral.h`   | I²C, SPI, GPIO, UART                       |
-| `alp/pwm.h` / `adc.h` / `counter.h` / `i2s.h` / `can.h` / `rtc.h` / `wdt.h` / `usb.h` | one peripheral class per header |
+| `alp/pwm.h` / `adc.h` / `dac.h` / `counter.h` / `i2s.h` / `can.h` / `rtc.h` / `wdt.h` / `usb.h` | one peripheral class per header |
 | `alp/camera.h` / `gui.h` / `display.h` | camera · LVGL re-export · display-panel driver |
 | `alp/audio.h`        | PDM in / I²S out (+ smart-amp codecs, e.g. TAS2563) |
 | `alp/iot.h` / `ble.h` | Wi-Fi station + MQTT · BLE 5.4 peripheral + central |

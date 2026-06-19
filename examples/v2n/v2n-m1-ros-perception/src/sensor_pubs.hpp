@@ -18,29 +18,31 @@
 #include "alp/chips/ublox_neo_m9n.h"
 #include "alp/chips/ina236.h"
 
-namespace alp {
+namespace alp
+{
 
-class SensorPublishers {
-public:
-    explicit SensorPublishers(rclcpp::Node &parent);
-    ~SensorPublishers();
+class SensorPublishers
+{
+  public:
+	explicit SensorPublishers(rclcpp::Node &parent);
+	~SensorPublishers();
 
-private:
-    void tick_imu();         // 50 Hz.
-    void tick_slow_telem();  // 1 Hz GNSS + battery.
+  private:
+	void tick_imu();        // 50 Hz.
+	void tick_slow_telem(); // 1 Hz GNSS + battery.
 
-    rclcpp::Node                                              &parent_;
-    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr        imu_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::NavSatFix>::SharedPtr  gnss_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr batt_pub_;
-    rclcpp::TimerBase::SharedPtr                               imu_timer_;
-    rclcpp::TimerBase::SharedPtr                               telem_timer_;
+	rclcpp::Node                                                &parent_;
+	rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr          imu_pub_;
+	rclcpp::Publisher<sensor_msgs::msg::NavSatFix>::SharedPtr    gnss_pub_;
+	rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr batt_pub_;
+	rclcpp::TimerBase::SharedPtr                                 imu_timer_;
+	rclcpp::TimerBase::SharedPtr                                 telem_timer_;
 
-    alp_i2c_t      *i2c_     = nullptr;
-    alp_uart_t     *gps_uart_ = nullptr;
-    lsm6dso_t       imu_     {};
-    ublox_neo_m9n_t gps_     {};
-    ina236_t        batt_    {};
+	alp_i2c_t      *i2c_      = nullptr;
+	alp_uart_t     *gps_uart_ = nullptr;
+	lsm6dso_t       imu_{};
+	ublox_neo_m9n_t gps_{};
+	ina236_t        batt_{};
 };
 
-}  // namespace alp
+} // namespace alp

@@ -97,9 +97,9 @@ extern "C" {
 /* Mirror of the yocto dispatcher's struct alp_inference layout.  MUST
  * match inference_yocto.c exactly -- keep in sync with the dispatcher. */
 struct alp_inference_handle_layout {
-    bool                    in_use;
-    alp_inference_backend_t backend;
-    void                   *be_state;
+	bool                    in_use;
+	alp_inference_backend_t backend;
+	void                   *be_state;
 };
 
 namespace
@@ -117,11 +117,11 @@ constexpr uint64_t kDrpAiMemStart = 0x80000000ULL;
  *  result, so there is no untrusted input in the command. */
 void _rm_rf(const std::string &dir)
 {
-    if (dir.empty()) {
-        return;
-    }
-    std::string cmd = "rm -rf '" + dir + "'";
-    (void)std::system(cmd.c_str());
+	if (dir.empty()) {
+		return;
+	}
+	std::string cmd = "rm -rf '" + dir + "'";
+	(void)std::system(cmd.c_str());
 }
 
 /** Extract the `drpai_dir` tar @p data (@p len bytes) into a fresh private
@@ -132,50 +132,50 @@ void _rm_rf(const std::string &dir)
  */
 alp_status_t _stage_drpai_blob(const void *data, size_t len, std::string &out_dir)
 {
-    char        tmpl[] = "/tmp/alp-drpai-XXXXXX";
-    const char *dir    = ::mkdtemp(tmpl);
-    if (dir == nullptr) {
-        return ALP_ERR_IO;
-    }
+	char        tmpl[] = "/tmp/alp-drpai-XXXXXX";
+	const char *dir    = ::mkdtemp(tmpl);
+	if (dir == nullptr) {
+		return ALP_ERR_IO;
+	}
 
-    /* Pipe the tar bytes to `tar`'s stdin (-f -).  popen uses /bin/sh, but
+	/* Pipe the tar bytes to `tar`'s stdin (-f -).  popen uses /bin/sh, but
      * the only interpolated token is our mkdtemp() path, so the command is
      * not attacker-influenced. */
-    std::string cmd = "tar -xf - -C '" + std::string(dir) + "'";
-    FILE       *p   = ::popen(cmd.c_str(), "w");
-    if (p == nullptr) {
-        _rm_rf(dir);
-        return ALP_ERR_IO;
-    }
+	std::string cmd = "tar -xf - -C '" + std::string(dir) + "'";
+	FILE       *p   = ::popen(cmd.c_str(), "w");
+	if (p == nullptr) {
+		_rm_rf(dir);
+		return ALP_ERR_IO;
+	}
 
-    size_t wrote = (len > 0) ? std::fwrite(data, 1, len, p) : 0;
-    int    rc    = ::pclose(p);
-    if (wrote != len || rc != 0) {
-        _rm_rf(dir);
-        return ALP_ERR_IO;
-    }
+	size_t wrote = (len > 0) ? std::fwrite(data, 1, len, p) : 0;
+	int    rc    = ::pclose(p);
+	if (wrote != len || rc != 0) {
+		_rm_rf(dir);
+		return ALP_ERR_IO;
+	}
 
-    out_dir = dir;
-    return ALP_OK;
+	out_dir = dir;
+	return ALP_OK;
 }
 
 /** Per-handle DRP-AI state.  Owns the MERA runtime wrapper + SDK-owned
  *  input staging buffers + a snapshot of the I/O tensor metadata taken
  *  at open() time, plus the private staging dir extracted from the blob. */
 struct DrpaiState {
-    MeraDrpRuntimeWrapper runtime; /* default-constructed */
-    std::string           model_dir;
-    /* mkdtemp() staging dir holding the extracted .dat object files; removed
+	MeraDrpRuntimeWrapper runtime; /* default-constructed */
+	std::string           model_dir;
+	/* mkdtemp() staging dir holding the extracted .dat object files; removed
      * (after the runtime is torn down) in close(). Empty if not staged. */
-    std::string staged_dir;
+	std::string staged_dir;
 
-    /* One SDK-owned input staging buffer per input tensor; the app fills
+	/* One SDK-owned input staging buffer per input tensor; the app fills
      * these via get_input(), invoke() pushes them with SetInput(). */
-    std::vector<std::vector<uint8_t>> input_bufs;
+	std::vector<std::vector<uint8_t>> input_bufs;
 
-    /* I/O metadata snapshots: (name, size_bytes, dtype). */
-    std::vector<std::tuple<std::string, size_t, InOutDataType>> in_info;
-    std::vector<std::tuple<std::string, size_t, InOutDataType>> out_info;
+	/* I/O metadata snapshots: (name, size_bytes, dtype). */
+	std::vector<std::tuple<std::string, size_t, InOutDataType>> in_info;
+	std::vector<std::tuple<std::string, size_t, InOutDataType>> out_info;
 };
 
 /** Map a MERA InOutDataType onto the alp_inference dtype enum.  The DRP-AI
@@ -184,21 +184,21 @@ struct DrpaiState {
  *  respectively (the raw bytes stay reachable via the descriptor). */
 alp_inference_dtype_t mera_dtype_to_alp(InOutDataType t)
 {
-    switch (t) {
-    case InOutDataType::FLOAT32:
-        return ALP_INFERENCE_DTYPE_F32;
-    case InOutDataType::FLOAT16:
-        return ALP_INFERENCE_DTYPE_F16;
-    case InOutDataType::INT32:
-        return ALP_INFERENCE_DTYPE_INT32;
-    case InOutDataType::INT64:
-        /* No 64-bit slot in the portable enum; report as int32 (callers
+	switch (t) {
+	case InOutDataType::FLOAT32:
+		return ALP_INFERENCE_DTYPE_F32;
+	case InOutDataType::FLOAT16:
+		return ALP_INFERENCE_DTYPE_F16;
+	case InOutDataType::INT32:
+		return ALP_INFERENCE_DTYPE_INT32;
+	case InOutDataType::INT64:
+		/* No 64-bit slot in the portable enum; report as int32 (callers
          * needing true int64 read raw bytes via size_bytes). */
-        return ALP_INFERENCE_DTYPE_INT32;
-    case InOutDataType::OTHER:
-    default:
-        return ALP_INFERENCE_DTYPE_UINT8;
-    }
+		return ALP_INFERENCE_DTYPE_INT32;
+	case InOutDataType::OTHER:
+	default:
+		return ALP_INFERENCE_DTYPE_UINT8;
+	}
 }
 
 } /* namespace */
@@ -210,159 +210,161 @@ alp_inference_dtype_t mera_dtype_to_alp(InOutDataType t)
 extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h_,
                                                  const alp_inference_config_t *cfg)
 {
-    auto *h = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h = reinterpret_cast<alp_inference_handle_layout *>(h_);
 
-    /* For ALP_INFERENCE_MODEL_DRPAI the blob is the `drpai_dir` tar bytes
+	/* For ALP_INFERENCE_MODEL_DRPAI the blob is the `drpai_dir` tar bytes
      * (see the header comment).  Reject an empty blob early. */
-    if (cfg->model_data == nullptr || cfg->model_size == 0) {
-        return ALP_ERR_INVAL;
-    }
+	if (cfg->model_data == nullptr || cfg->model_size == 0) {
+		return ALP_ERR_INVAL;
+	}
 
-    auto *st = new (std::nothrow) DrpaiState();
-    if (st == nullptr) {
-        return ALP_ERR_NOMEM;
-    }
+	auto *st = new (std::nothrow) DrpaiState();
+	if (st == nullptr) {
+		return ALP_ERR_NOMEM;
+	}
 
-    /* Stage the tar out to a private dir; the .dat object files land flat. */
-    alp_status_t stage = _stage_drpai_blob(cfg->model_data, cfg->model_size, st->staged_dir);
-    if (stage != ALP_OK) {
-        delete st;
-        return stage;
-    }
-    st->model_dir = st->staged_dir;
+	/* Stage the tar out to a private dir; the .dat object files land flat. */
+	alp_status_t stage = _stage_drpai_blob(cfg->model_data, cfg->model_size, st->staged_dir);
+	if (stage != ALP_OK) {
+		delete st;
+		return stage;
+	}
+	st->model_dir = st->staged_dir;
 
-    /* LoadModel returns false on a missing/corrupt object dir or a DRP-AI
+	/* LoadModel returns false on a missing/corrupt object dir or a DRP-AI
      * memory-mapping failure. */
-    if (!st->runtime.LoadModel(st->model_dir, kDrpAiMemStart)) {
-        std::string dir = st->staged_dir;
-        delete st; /* tears down the runtime before we remove the dir */
-        _rm_rf(dir);
-        return ALP_ERR_IO;
-    }
+	if (!st->runtime.LoadModel(st->model_dir, kDrpAiMemStart)) {
+		std::string dir = st->staged_dir;
+		delete st; /* tears down the runtime before we remove the dir */
+		_rm_rf(dir);
+		return ALP_ERR_IO;
+	}
 
-    st->in_info  = st->runtime.GetInputInfo();
-    st->out_info = st->runtime.GetOutputInfo();
+	st->in_info  = st->runtime.GetInputInfo();
+	st->out_info = st->runtime.GetOutputInfo();
 
-    /* Stage one SDK-owned buffer per input tensor, sized from the
+	/* Stage one SDK-owned buffer per input tensor, sized from the
      * wrapper-reported byte size. */
-    st->input_bufs.resize(st->in_info.size());
-    for (size_t i = 0; i < st->in_info.size(); ++i) {
-        st->input_bufs[i].resize(std::get<1>(st->in_info[i]));
-    }
+	st->input_bufs.resize(st->in_info.size());
+	for (size_t i = 0; i < st->in_info.size(); ++i) {
+		st->input_bufs[i].resize(std::get<1>(st->in_info[i]));
+	}
 
-    h->be_state = st;
-    return ALP_OK;
+	h->be_state = st;
+	return ALP_OK;
 }
 
 extern "C" std::size_t alp_inference_drpai_num_inputs(struct alp_inference *h_)
 {
-    auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
-    auto *st = static_cast<DrpaiState *>(h->be_state);
-    return (st != nullptr) ? st->in_info.size() : 0u;
+	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *st = static_cast<DrpaiState *>(h->be_state);
+	return (st != nullptr) ? st->in_info.size() : 0u;
 }
 
 extern "C" std::size_t alp_inference_drpai_num_outputs(struct alp_inference *h_)
 {
-    auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
-    auto *st = static_cast<DrpaiState *>(h->be_state);
-    return (st != nullptr) ? st->out_info.size() : 0u;
+	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *st = static_cast<DrpaiState *>(h->be_state);
+	return (st != nullptr) ? st->out_info.size() : 0u;
 }
 
-extern "C" alp_status_t alp_inference_drpai_get_input(struct alp_inference *h_, std::size_t index,
+extern "C" alp_status_t alp_inference_drpai_get_input(struct alp_inference   *h_,
+                                                      std::size_t             index,
                                                       alp_inference_tensor_t *out)
 {
-    auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
-    auto *st = static_cast<DrpaiState *>(h->be_state);
-    if (st == nullptr) {
-        return ALP_ERR_NOT_READY;
-    }
-    if (index >= st->in_info.size()) {
-        return ALP_ERR_OUT_OF_RANGE;
-    }
+	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *st = static_cast<DrpaiState *>(h->be_state);
+	if (st == nullptr) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (index >= st->in_info.size()) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 
-    /* Hand back the SDK-owned staging buffer; the app fills it before
+	/* Hand back the SDK-owned staging buffer; the app fills it before
      * invoke().  The MERA wrapper does not expose per-input shape via the
      * public surface, so rank/shape stay 0 (size_bytes is authoritative
      * for buffer sizing). */
-    out->data       = st->input_bufs[index].data();
-    out->size_bytes = std::get<1>(st->in_info[index]);
-    out->dtype      = mera_dtype_to_alp(std::get<2>(st->in_info[index]));
-    out->rank       = 0u;
-    out->scale      = 1.0f;
-    out->zero_point = 0;
-    return ALP_OK;
+	out->data       = st->input_bufs[index].data();
+	out->size_bytes = std::get<1>(st->in_info[index]);
+	out->dtype      = mera_dtype_to_alp(std::get<2>(st->in_info[index]));
+	out->rank       = 0u;
+	out->scale      = 1.0f;
+	out->zero_point = 0;
+	return ALP_OK;
 }
 
-extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference *h_, std::size_t index,
+extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h_,
+                                                       std::size_t             index,
                                                        alp_inference_tensor_t *out)
 {
-    auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
-    auto *st = static_cast<DrpaiState *>(h->be_state);
-    if (st == nullptr) {
-        return ALP_ERR_NOT_READY;
-    }
-    if (index >= st->out_info.size()) {
-        return ALP_ERR_OUT_OF_RANGE;
-    }
+	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *st = static_cast<DrpaiState *>(h->be_state);
+	if (st == nullptr) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (index >= st->out_info.size()) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 
-    /* GetOutput(idx) -> (dtype, data ptr, elem_count).  Before the first
+	/* GetOutput(idx) -> (dtype, data ptr, elem_count).  Before the first
      * Run() the wrapper returns its zero-initialised output area; after
      * Run() it points at the live result buffer.  elem_count * dtype-size
      * gives the byte size; prefer the GetOutputInfo() byte size when the
      * dtype is known. */
-    InOutDataType dtype;
-    void         *data               = nullptr;
-    int64_t       num_elems          = 0;
-    std::tie(dtype, data, num_elems) = st->runtime.GetOutput(static_cast<int>(index));
+	InOutDataType dtype;
+	void         *data               = nullptr;
+	int64_t       num_elems          = 0;
+	std::tie(dtype, data, num_elems) = st->runtime.GetOutput(static_cast<int>(index));
 
-    out->data                        = data;
-    out->size_bytes                  = std::get<1>(st->out_info[index]);
-    out->dtype                       = mera_dtype_to_alp(dtype);
-    out->rank                        = 0u;
-    out->scale                       = 1.0f;
-    out->zero_point                  = 0;
-    return ALP_OK;
+	out->data       = data;
+	out->size_bytes = std::get<1>(st->out_info[index]);
+	out->dtype      = mera_dtype_to_alp(dtype);
+	out->rank       = 0u;
+	out->scale      = 1.0f;
+	out->zero_point = 0;
+	return ALP_OK;
 }
 
 extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 {
-    auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
-    auto *st = static_cast<DrpaiState *>(h->be_state);
-    if (st == nullptr) {
-        return ALP_ERR_NOT_READY;
-    }
+	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *st = static_cast<DrpaiState *>(h->be_state);
+	if (st == nullptr) {
+		return ALP_ERR_NOT_READY;
+	}
 
-    /* Push each SDK-owned input into the runtime.  SetInput is overloaded
+	/* Push each SDK-owned input into the runtime.  SetInput is overloaded
      * on fp32 vs fp16; pick by the reported input dtype so fp16 models
      * route through the uint16_t overload (raw half-float bytes). */
-    for (size_t i = 0; i < st->input_bufs.size(); ++i) {
-        const InOutDataType dt  = std::get<2>(st->in_info[i]);
-        const void         *buf = st->input_bufs[i].data();
-        if (dt == InOutDataType::FLOAT16) {
-            st->runtime.SetInput(static_cast<int>(i), static_cast<const uint16_t *>(buf));
-        } else {
-            st->runtime.SetInput(static_cast<int>(i), static_cast<const float *>(buf));
-        }
-    }
+	for (size_t i = 0; i < st->input_bufs.size(); ++i) {
+		const InOutDataType dt  = std::get<2>(st->in_info[i]);
+		const void         *buf = st->input_bufs[i].data();
+		if (dt == InOutDataType::FLOAT16) {
+			st->runtime.SetInput(static_cast<int>(i), static_cast<const uint16_t *>(buf));
+		} else {
+			st->runtime.SetInput(static_cast<int>(i), static_cast<const float *>(buf));
+		}
+	}
 
-    /* Run() is void and blocks until DRP-AI completes; it reports
+	/* Run() is void and blocks until DRP-AI completes; it reports
      * hard faults via its own logging/abort path, not a return code. */
-    st->runtime.Run();
-    return ALP_OK;
+	st->runtime.Run();
+	return ALP_OK;
 }
 
 extern "C" void alp_inference_drpai_close(struct alp_inference *h_)
 {
-    auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
-    auto *st = static_cast<DrpaiState *>(h->be_state);
-    if (st == nullptr) {
-        return;
-    }
-    /* MeraDrpRuntimeWrapper owns its DRP-AI mappings + releases them in
+	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *st = static_cast<DrpaiState *>(h->be_state);
+	if (st == nullptr) {
+		return;
+	}
+	/* MeraDrpRuntimeWrapper owns its DRP-AI mappings + releases them in
      * its dtor (unique_ptr<Impl>); deleting the state tears it down.  Remove
      * the staging dir AFTER the runtime is gone (it may hold the dir open). */
-    std::string dir = st->staged_dir;
-    delete st;
-    _rm_rf(dir);
-    h->be_state = nullptr;
+	std::string dir = st->staged_dir;
+	delete st;
+	_rm_rf(dir);
+	h->be_state = nullptr;
 }

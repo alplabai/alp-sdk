@@ -16,28 +16,30 @@
 
 #include "alp/inference.h"
 
-namespace alp {
+namespace alp
+{
 
-class DeepxDispatcher {
-public:
-    explicit DeepxDispatcher(rclcpp::Node &parent);
-    ~DeepxDispatcher();
+class DeepxDispatcher
+{
+  public:
+	explicit DeepxDispatcher(rclcpp::Node &parent);
+	~DeepxDispatcher();
 
-    /// Returns "deepx_dxm1" / "drpai" / "cpu" / "stub" depending on
-    /// which backend the AUTO selector resolved to at startup.
-    const char *backend_name() const;
+	/// Returns "deepx_dxm1" / "drpai" / "cpu" / "stub" depending on
+	/// which backend the AUTO selector resolved to at startup.
+	const char *backend_name() const;
 
-private:
-    void capture_loop();    // Owns its thread.
+  private:
+	void capture_loop(); // Owns its thread.
 
-    rclcpp::Node &parent_;
-    rclcpp::Publisher<vision_msgs::msg::Detection2DArray>::SharedPtr det_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr            img_pub_;
+	rclcpp::Node                                                    &parent_;
+	rclcpp::Publisher<vision_msgs::msg::Detection2DArray>::SharedPtr det_pub_;
+	rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr            img_pub_;
 
-    alp_inference_t        *inf_     = nullptr;
-    alp_inference_backend_t backend_ = ALP_INFERENCE_BACKEND_AUTO;
-    std::thread             thread_;
-    std::atomic<bool>       stop_{false};
+	alp_inference_t        *inf_     = nullptr;
+	alp_inference_backend_t backend_ = ALP_INFERENCE_BACKEND_AUTO;
+	std::thread             thread_;
+	std::atomic<bool>       stop_{ false };
 };
 
-}  // namespace alp
+} // namespace alp

@@ -374,8 +374,8 @@ static alp_cc3501e_resp_t wifi_join(const uint8_t *req, size_t req_len, int ap)
 	const uint8_t *ssid = req + sizeof(alp_cc3501e_wifi_connect_t);
 	const uint8_t *psk  = ssid + c->ssid_len;
 	const int      rv =
-        ap ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
-	            : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
+	    ap ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
+	       : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
 	return hw_to_resp(rv);
 }
 
@@ -1011,12 +1011,12 @@ size_t protocol_build_reply(const uint8_t *req_frame,
 		if ((size_t)ALP_CC3501E_HEADER_BYTES + (size_t)payload_len == req_len) {
 			const uint8_t *req = (payload_len > 0u) ? &req_frame[ALP_CC3501E_HEADER_BYTES] : NULL;
 			status             = protocol_dispatch(cmd_echo,
-                                       flags,
-                                       req,
-                                       payload_len,
-                                       &reply_frame[CC3501E_REPLY_DATA_OFF],
-                                       reply_cap - CC3501E_REPLY_DATA_OFF,
-                                       &data_len);
+			                                       flags,
+			                                       req,
+			                                       payload_len,
+			                                       &reply_frame[CC3501E_REPLY_DATA_OFF],
+			                                       reply_cap - CC3501E_REPLY_DATA_OFF,
+			                                       &data_len);
 		}
 	}
 

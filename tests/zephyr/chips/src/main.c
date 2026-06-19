@@ -215,11 +215,11 @@ ZTEST(alp_chips, test_button_led_init_valid_pair)
      * index 1 → LED on the chips test's gpio_emul. */
 	alp_button_led_t bl;
 	alp_status_t     s = alp_button_led_init(&bl,
-                                         &(alp_button_led_config_t){
+	                                         &(alp_button_led_config_t){
 	                                             .button_pin_id     = 0,
 	                                             .led_pin_id        = 1,
 	                                             .active_low_button = true,
-                                         });
+	                                         });
 	zassert_equal(s, ALP_OK, "init failed: %d", (int)s);
 
 	/* Verify is_pressed() returns ALP_OK and writes a defined
@@ -1200,9 +1200,9 @@ ZTEST(alp_chips, test_clk_5l35023b_init_null_args)
 {
 	clk_5l35023b_t ctx;
 	alp_i2c_t     *bus = alp_i2c_open(&(alp_i2c_config_t){
-	        .bus_id     = E1M_I2C0,
-	        .bitrate_hz = 100000,
-    });
+	    .bus_id     = E1M_I2C0,
+	    .bitrate_hz = 100000,
+	});
 	zassert_not_null(bus);
 
 	zassert_equal(clk_5l35023b_init(NULL, bus, CLK_5L35023B_I2C_ADDR_DEFAULT),
@@ -1661,9 +1661,9 @@ ZTEST(alp_chips, test_tps628640_init_null_args)
 {
 	tps628640_t ctx;
 	alp_i2c_t  *bus = alp_i2c_open(&(alp_i2c_config_t){
-	     .bus_id     = E1M_I2C0,
-	     .bitrate_hz = 400000,
-    });
+	    .bus_id     = E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
 	zassert_not_null(bus);
 
 	zassert_equal(tps628640_init(NULL, bus, 0x44u, 1050u), ALP_ERR_INVAL);
@@ -1863,9 +1863,9 @@ ZTEST(alp_chips, test_ina236_init_null_args)
 	                                ina236_adcrange_t adcrange);
 	ina236_t            ctx;
 	alp_i2c_t          *bus = alp_i2c_open(&(alp_i2c_config_t){
-	             .bus_id     = E1M_I2C0,
-	             .bitrate_hz = 400000,
-    });
+	    .bus_id     = E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
 	zassert_not_null(bus);
 
 	zassert_equal(ina236_init(NULL, bus, 0x40u, 0.010f, 1.0f, INA236_ADCRANGE_81MV), ALP_ERR_INVAL);
@@ -1886,9 +1886,9 @@ ZTEST(alp_chips, test_eeprom_24c128_init_null_args)
 {
 	eeprom_24c128_t ctx;
 	alp_i2c_t      *bus = alp_i2c_open(&(alp_i2c_config_t){
-	         .bus_id     = E1M_I2C0,
-	         .bitrate_hz = 400000,
-    });
+	    .bus_id     = E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
 	zassert_not_null(bus);
 
 	zassert_equal(eeprom_24c128_init(NULL, bus, EEPROM_24C128_I2C_ADDR_LOW), ALP_ERR_INVAL);
@@ -1985,9 +1985,9 @@ ZTEST(alp_chips, test_optiga_trust_m_init_null_args)
 {
 	optiga_trust_m_t ctx;
 	alp_i2c_t       *bus = alp_i2c_open(&(alp_i2c_config_t){
-	          .bus_id     = E1M_I2C0,
-	          .bitrate_hz = 400000,
-    });
+	    .bus_id     = E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
 	zassert_not_null(bus);
 
 	zassert_equal(optiga_trust_m_init(NULL, bus, OPTIGA_TRUST_M_I2C_ADDR), ALP_ERR_INVAL);

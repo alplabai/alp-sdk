@@ -17,7 +17,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **M55-HP core (second M55)** | ✅ first light (2026-06-17) | The HP core is held in reset at power-on (only the HE core's AP shows a CPUID); released by SES booting an **`M55_HP` ATOC** (`cpu_id=M55_HP`, `loadAddress=0x50000000` = HP ITCM global, vs HE's `0x58000000`). Proven alive by an advancing **SRAM0 liveness beacon** (`0x02000000`: magic `0xA11FE000` + CPUID `0x411FD220` + heartbeat that advances across a re-read) — read over the system/HE AP, not the HP AP. Example `examples/aen/aen-hp-core-smoke`; helper `scripts/bench/aen/flash-jlink-hp.sh`. Unblocks the HE↔HP MHUv2 doorbell. |
 | **UTIMER counter** (Tier-1.5) | ✅ PASS *after a fix* | As-merged it never counted (read 0); fixed in **PR #158** (missing `alif_utimer_enable_soft_counter_ctrl`). Re-validated: counter advances. |
 | **GPIO** (`gpio_dw`, Tier-1) | ✅ PASS (controller) | DDR/DR set+readback correct via the Zephyr GPIO API (J-Link ground truth). Driving an actual **pad** needs the GPIO pad-mux (gpio_dw doesn't apply it). |
-| **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM at 0x50 reads back (64 B, `0xff` = blank/unprogrammed) once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
+| **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM ACKs at 0x50 and returns a **populated Alp manifest** (not blank) — magic `ALPH`, SKU, serial, mfg date, CRC-32 all decode; one of 12 devices on the bus — once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
 | **PWM** (Tier-1.5) | ✅ PASS | pwm_set_cycles reg readback matches (CNTR_PTR/COMPARE/CTRL), shares the hal_alif UTIMER start-path the counter fix validated. |
 | **SPI** (`alif,dwc-ssi-spi`, Tier-2) | ✅ PASS *after a fix* | DWC-SSI stayed in slave mode → `spi_transceive` -116 (TX FIFO full, no SCLK). The Alif SoC gates master mode behind `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`), which upstream never sets. **PR #162** sets it in the driver. Re-validated: `rc=0`, internal-loopback `rx==tx`, CTRLR0=`0x80002007`. See §3. |
 | **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. Fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n`. The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE`). See §3. |
@@ -37,9 +37,17 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **SD card** (DWC SDHC) | 🟡 PARTIAL *(HW-gated)* | SDHC inits but the card is unreachable until the EVK SDIO 74LVC157 mux (EN=IO20 / SEL=IO21, both CC3501E-side) is routed and a card is inserted. Not a code/Flow-D bug. |
 | **GPU2D** (`<alp/gpu2d.h>` sw_fallback) | ✅ PASS (RAM-run, 2026-06-17) | Portable 2D surface on the M55-HE via the priority-0 pure-C software fallback (the D/AVE 2D HW backend is opt-in + bench-unverified). `fill_rect` + clip, `blit`, and all four `blend` modes (REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) produce **exact** expected pixels on silicon. Example: `examples/aen/aen-gpu2d-bench`. The D/AVE 2D hardware backend (`alif_dave2d.c`) is the separate bucket-C item. |
 | **Low-power (WFI/SysTick)** | ✅ PASS (RAM-run, 2026-06-17) | Stage-A baseline: the M55-HE enters architectural `__WFI()` via the kernel idle path (a k_timer beats the wake cadence; SysTick wakes it) for N rounds — proven by an advancing SRAM0 beacon + uptime (8 sleeps, 0→420 ms). No `CONFIG_PM` (pinned Zephyr 4.4 ships no Alif PM); the deep IWIC `pm_state_set` path (WICCONTROL HE `0x1A604010`) is the documented Stage-B follow-on. Example: `examples/aen/aen-power-smoke`. |
+| **SE CryptoCell compute** (`<alp/security.h>` SHA / AES-GCM) | ✅ PASS (RAM-run, 2026-06-19) | The portable hash/AEAD surface runs **inside the Secure Enclave's CryptoCell** on the E8: the `se_cryptocell` backend binds at priority 110 and pushes SHA-256 / AES-128-GCM into the SE over the RTSS-HE↔SE MHUv2 pair (the new public `se_service_send_request()` transport, hal_alif patch `0002`). Bench: SHA-256(`"abc"`) matched the NIST known-answer (`s=0`, MATCH) and the AES-128-GCM encrypt→decrypt round-trip matched (`enc=0 dec=0`, MATCH) — both computed in the SE, plus SE TRNG. `CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM` now defaults ON; algs the SE declines fall through to MbedTLS-PSA. Example: `examples/aen/aen-se-crypto`. |
+| **CRC engine** (`crc_alif` / `alif,crc`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | HW CRC32-IEEE on `crc0@48107000` via the Zephyr CRC class API — `crc_begin/update/finish` rc=0, computed `0x684fc31c` = the reference value over a 16-byte input. Example: `examples/aen/aen-crc-regcheck`. |
+| **HWSEM** (`hwsem_alif` / `alif,hwsem`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | `hwsem@4902e000` take/give/count over the in-tree driver: count `0→1→0` across `take_busy`/`give` (master_id `0x410fd222`). Example: `examples/aen/aen-hwsem-regcheck`. |
+| **LPTIMER** (`counter_alif_lptimer` / `alif,lptimer`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | Always-on `lptimer@42001000` ch0 — 32768 Hz down-counter advances (3456 ticks / ~100 ms) via the portable `counter_*` API. Example: `examples/aen/aen-lptimer-regcheck`. |
+| **Comparator (HSCMP)** (`comparator_alif` / `alif,cmp`, Tier-2) | ✅ PASS (RAM-run, 2026-06-19) | `cmp0@49023000` driven via the portable `comparator_*` API (output 1/1, internal DAC6 reference; the connect-but-don't-enable init held — no ISR storm). External pin/threshold edge-trigger = bench TBD (no analog stimulus). Example: `examples/aen/aen-cmp-regcheck`. |
 
-All 17 aen-* bench apps were flashed over flow D and booted on real E8: **15 PASS,
-2 PARTIAL** (both hardware-gated, not code/flow-D bugs).
+The flow-D batch (17 aen-* apps) booted on real E8 at **15 PASS, 2 PARTIAL** (both
+hardware-gated). A 2026-06-19 Flow-C RAM-run pass then **reconfirmed** the SE-crypto
+offload + the CRC / HWSEM / LPTIMER / HSCMP driver bodies (rows above) and the LPRTC
+counter (§ below); the quadrature encoder stays PARTIAL (live count needs the encoder
+physically spun — not a code bug).
 
 ## 2. The four flashing / observation flows
 
@@ -254,9 +262,11 @@ secure-boot verification — always write both consistent blobs.
   encodes this as the pad driver-state-control field **DSC=2**, exactly Alif's
   I2C value — `bias-pull-up` gives DSC=1 and a dead bus; the upstream binding's
   pull naming is effectively inverted vs the Alif pad HW). With that,
-  `examples/aen/aen-eeprom-manifest` reads the EEPROM at 0x50 (blank = `0xff`
-  until programmed). External pull-ups are only needed for fast-mode (400 kHz);
-  100 kHz works on the internal pulls.
+  `examples/aen/aen-eeprom-manifest` reads the EEPROM at 0x50 — which ACKs and
+  returns a **populated Alp manifest** (not blank): magic `ALPH`, SKU, serial,
+  mfg date, and a matching CRC-32 all decode (the EEPROM is one of 12 devices on
+  the bus). External pull-ups are only needed for fast-mode (400 kHz); 100 kHz
+  works on the internal pulls.
 - **UTIMER tick rate ≈ 400 MHz, not the 100 MHz placeholder.** The counter
   advanced ~800 k ticks per 2 ms busy-wait → real input ≈ 400 MHz, 4× the
   `clock-frequency = <100000000>` placeholder on the `utimer*` SoC nodes. The

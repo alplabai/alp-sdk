@@ -93,11 +93,11 @@ static void sensor_entry(void *p1, void *p2, void *p3)
 			if (s_mqtt != NULL) {
 				char payload[96];
 				int  n = snprintf(payload,
-                                 sizeof(payload),
-                                 "{\"t\":%.2f,\"h\":%.1f,\"p\":%.1f}",
-                                 (double)g_state.temp_c,
-                                 (double)g_state.humid_pct,
-                                 (double)g_state.pressure_hpa);
+				                  sizeof(payload),
+				                  "{\"t\":%.2f,\"h\":%.1f,\"p\":%.1f}",
+				                  (double)g_state.temp_c,
+				                  (double)g_state.humid_pct,
+				                  (double)g_state.pressure_hpa);
 				if (n > 0) {
 					(void)alp_mqtt_publish(s_mqtt,
 					                       "alp/env",
@@ -147,10 +147,10 @@ int main(void)
 	}
 	static const alp_mqtt_tls_config_t s_tls = { 0 }; /* defaults: OS CA, verify peer. */
 	s_mqtt                                   = alp_mqtt_open(&(alp_mqtt_config_t){
-	                                      .broker_uri = "mqtts://broker.example.com:8883",
-	                                      .client_id  = "alp-iot-dashboard-demo",
-	                                      .tls        = &s_tls,
-    });
+	    .broker_uri = "mqtts://broker.example.com:8883",
+	    .client_id  = "alp-iot-dashboard-demo",
+	    .tls        = &s_tls,
+	});
 	if (s_mqtt == NULL) {
 		LOG_WRN("MQTT broker unreachable; running standalone");
 	}

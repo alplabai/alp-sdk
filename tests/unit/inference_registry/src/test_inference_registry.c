@@ -89,12 +89,12 @@ ZTEST(alp_inference_registry, test_open_returns_null_on_zero_model_size)
 {
 	uint8_t                dummy_model[4] = { 0 };
 	alp_inference_config_t cfg            = {
-		           .model_data  = dummy_model,
-		           .model_size  = 0u,
-		           .format      = ALP_INFERENCE_MODEL_TFLITE,
-		           .backend     = ALP_INFERENCE_BACKEND_AUTO,
-		           .arena_bytes = 0u,
-		           .arena       = NULL,
+		.model_data  = dummy_model,
+		.model_size  = 0u,
+		.format      = ALP_INFERENCE_MODEL_TFLITE,
+		.backend     = ALP_INFERENCE_BACKEND_AUTO,
+		.arena_bytes = 0u,
+		.arena       = NULL,
 	};
 	alp_inference_t *inf = alp_inference_open(&cfg);
 	zassert_is_null(inf);
@@ -124,12 +124,12 @@ ZTEST(alp_inference_registry, test_open_via_sw_fallback_returns_nosupport)
      * the inference.smoke zephyr contract. */
 	uint8_t                dummy_model[16] = { 0 };
 	alp_inference_config_t cfg             = {
-		            .model_data  = dummy_model,
-		            .model_size  = sizeof(dummy_model),
-		            .format      = ALP_INFERENCE_MODEL_TFLITE,
-		            .backend     = ALP_INFERENCE_BACKEND_AUTO,
-		            .arena_bytes = 0u,
-		            .arena       = NULL,
+		.model_data  = dummy_model,
+		.model_size  = sizeof(dummy_model),
+		.format      = ALP_INFERENCE_MODEL_TFLITE,
+		.backend     = ALP_INFERENCE_BACKEND_AUTO,
+		.arena_bytes = 0u,
+		.arena       = NULL,
 	};
 	zassert_is_null(alp_inference_open(&cfg));
 	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT);

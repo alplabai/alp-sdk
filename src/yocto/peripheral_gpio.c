@@ -79,7 +79,7 @@
 #endif
 
 #define ALP_GPIO_PIN_CHIP(pin_id) (((pin_id) >> 16) & 0xFFFFu)
-#define ALP_GPIO_PIN_LINE(pin_id) ((pin_id)&0xFFFFu)
+#define ALP_GPIO_PIN_LINE(pin_id) ((pin_id) & 0xFFFFu)
 
 struct alp_gpio {
 	bool          in_use;
@@ -207,7 +207,8 @@ alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 		return ALP_ERR_INVAL;
 	}
 	struct gpio_v2_line_values vals = {
-		.bits = level ? 1ULL : 0ULL, .mask = 1ULL, /* line 0 in this request */
+		.bits = level ? 1ULL : 0ULL,
+		.mask = 1ULL, /* line 0 in this request */
 	};
 	if (ioctl(pin->line_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &vals) < 0) {
 		return alp_yocto_errno_to_alp(errno);

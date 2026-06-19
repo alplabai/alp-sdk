@@ -136,9 +136,9 @@ int autopilot_init(autopilot_state_t *s)
 	    .baudrate = 9600,
 	});
 	s_rc_uart  = alp_uart_open(&(alp_uart_config_t){
-	     .port_id  = E1M_UART1,
-	     .baudrate = 100000,
-    });
+	    .port_id  = E1M_UART1,
+	    .baudrate = 100000,
+	});
 	if (s_gps_uart) ublox_neo_m9n_init(&s_gps, s_gps_uart);
 
 	/* ESC PWM bank -- 400 Hz BLHeli-flavoured ESC compatibility.

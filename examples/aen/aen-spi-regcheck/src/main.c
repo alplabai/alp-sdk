@@ -45,33 +45,33 @@
 #include <zephyr/drivers/spi.h>
 #include <zephyr/sys/printk.h>
 
-#define SPI_NODE   DT_NODELABEL(spi0)
+#define SPI_NODE DT_NODELABEL(spi0)
 
 /* Absolute reg base straight from the dtsi reg = <0x48103000 0x1000>, pulled
  * from devicetree so this stays correct if the node ever moves. */
-#define SPI_BASE   ((uint32_t)DT_REG_ADDR(SPI_NODE))
+#define SPI_BASE ((uint32_t)DT_REG_ADDR(SPI_NODE))
 
 /* DWC_ssi register offsets -- VERBATIM from spi_dw_alif_regs.h. */
-#define OFF_CTRLR0   0x00U
-#define OFF_CTRLR1   0x04U
-#define OFF_SSIENR   0x08U
-#define OFF_BAUDR    0x14U
-#define OFF_SR       0x28U
+#define OFF_CTRLR0 0x00U
+#define OFF_CTRLR1 0x04U
+#define OFF_SSIENR 0x08U
+#define OFF_BAUDR  0x14U
+#define OFF_SR     0x28U
 
 /* Expected CTRLR0 after configure for 8-bit, mode-0, master, loopback (see the
  * file header derivation). Clock-independent. */
-#define EXP_CTRLR0   0x80002007U
+#define EXP_CTRLR0 0x80002007U
 
 /* SR bits (spi_dw_alif.h): bit0 BUSY, bit1 TFNF (tx fifo not full),
  * bit3 RFNE (rx fifo not empty). After completed() the controller is disabled
  * and idle, so we expect BUSY=0. */
-#define SR_BUSY_BIT  0U
+#define SR_BUSY_BIT 0U
 
 /* BAUDR is clk_freq / requested-freq. With the overlay's clock-frequency=100MHz
  * and a 1 MHz transfer, expect 100 (0x64). Clock-rate is a bench unknown, so
  * BAUDR is REPORTED, not part of the strict PASS gate. */
-#define TEST_FREQ_HZ        1000000U
-#define EXP_BAUDR_AT_100M   100U     /* 100e6 / 1e6 */
+#define TEST_FREQ_HZ      1000000U
+#define EXP_BAUDR_AT_100M 100U /* 100e6 / 1e6 */
 
 static inline uint32_t rd(uint32_t base, uint32_t off)
 {
@@ -94,17 +94,16 @@ int main(void)
 	/* 8-bit, MSB-first, SPI mode 0, master, INTERNAL loopback (SRL). */
 	struct spi_config cfg = {
 		.frequency = TEST_FREQ_HZ,
-		.operation = SPI_OP_MODE_MASTER | SPI_TRANSFER_MSB |
-			     SPI_WORD_SET(8) | SPI_MODE_LOOP,
-		.slave = 0,            /* HW SS0 (SS0_B on P5_2) */
-		.cs = { 0 },           /* no cs-gpios; controller SER drives SS */
+		.operation = SPI_OP_MODE_MASTER | SPI_TRANSFER_MSB | SPI_WORD_SET(8) | SPI_MODE_LOOP,
+		.slave     = 0,     /* HW SS0 (SS0_B on P5_2) */
+		.cs        = { 0 }, /* no cs-gpios; controller SER drives SS */
 	};
 
 	uint8_t tx[4] = { 0xA5, 0x5A, 0xC3, 0x3C };
 	uint8_t rx[4] = { 0, 0, 0, 0 };
 
-	const struct spi_buf txb = { .buf = tx, .len = sizeof(tx) };
-	const struct spi_buf rxb = { .buf = rx, .len = sizeof(rx) };
+	const struct spi_buf     txb    = { .buf = tx, .len = sizeof(tx) };
+	const struct spi_buf     rxb    = { .buf = rx, .len = sizeof(rx) };
 	const struct spi_buf_set tx_set = { .buffers = &txb, .count = 1 };
 	const struct spi_buf_set rx_set = { .buffers = &rxb, .count = 1 };
 
@@ -132,20 +131,21 @@ int main(void)
 	uint32_t sr     = rd(SPI_BASE, OFF_SR);
 
 	printk("-- readback --\n");
-	printk("CTRLR0  0x%08x = 0x%08x (exp 0x%08x)\n",
-	       SPI_BASE + OFF_CTRLR0, ctrlr0, EXP_CTRLR0);
+	printk("CTRLR0  0x%08x = 0x%08x (exp 0x%08x)\n", SPI_BASE + OFF_CTRLR0, ctrlr0, EXP_CTRLR0);
 	printk("CTRLR1  0x%08x = 0x%08x (NDF; full-duplex path writes 0)\n",
-	       SPI_BASE + OFF_CTRLR1, ctrlr1);
+	       SPI_BASE + OFF_CTRLR1,
+	       ctrlr1);
 	printk("SSIENR  0x%08x = 0x%08x (exp 0x0 after completion: ctrl disabled)\n",
-	       SPI_BASE + OFF_SSIENR, ssienr);
+	       SPI_BASE + OFF_SSIENR,
+	       ssienr);
 	printk("BAUDR   0x%08x = 0x%08x (exp %u @100MHz src; clk-rate is a bench unknown)\n",
-	       SPI_BASE + OFF_BAUDR, baudr, EXP_BAUDR_AT_100M);
-	printk("SR      0x%08x = 0x%08x (bit0 BUSY exp 0)\n",
-	       SPI_BASE + OFF_SR, sr);
+	       SPI_BASE + OFF_BAUDR,
+	       baudr,
+	       EXP_BAUDR_AT_100M);
+	printk("SR      0x%08x = 0x%08x (bit0 BUSY exp 0)\n", SPI_BASE + OFF_SR, sr);
 
 	/* Loopback data check: with SRL set, rx must echo tx exactly. */
-	bool data_ok = (rx[0] == tx[0]) && (rx[1] == tx[1]) &&
-		       (rx[2] == tx[2]) && (rx[3] == tx[3]);
+	bool data_ok = (rx[0] == tx[0]) && (rx[1] == tx[1]) && (rx[2] == tx[2]) && (rx[3] == tx[3]);
 
 	/*
 	 * PASS gate:
@@ -166,11 +166,17 @@ int main(void)
 
 	if (ok) {
 		printk("RESULT PASS: spi0 CTRLR0=0x%08x baudr=%u, transceive rc=0, "
-		       "loopback echo OK (rx==tx)\n", ctrlr0, baudr);
+		       "loopback echo OK (rx==tx)\n",
+		       ctrlr0,
+		       baudr);
 	} else {
 		printk("RESULT FAIL: rc=%d ctrlr0=0x%08x(exp 0x%08x) "
 		       "busy=%u baudr=%u loopback=%s\n",
-		       rc, ctrlr0, EXP_CTRLR0, (unsigned)(sr & 0x1U), baudr,
+		       rc,
+		       ctrlr0,
+		       EXP_CTRLR0,
+		       (unsigned)(sr & 0x1U),
+		       baudr,
 		       data_ok ? "OK" : "MISMATCH");
 	}
 

@@ -389,7 +389,7 @@ z_mbox_send(alp_mbox_backend_state_t *state, const void *data, size_t len, uint3
 	uint32_t     next_seq   = be->tx_sequence + 1u;
 	size_t       framed_len = 0;
 	alp_status_t s          = alp_mproc_frame_encode(
-        next_seq, data, len, be->tx_scratch, sizeof(be->tx_scratch), &framed_len);
+	    next_seq, data, len, be->tx_scratch, sizeof(be->tx_scratch), &framed_len);
 	if (s != ALP_OK) {
 		return s;
 	}

@@ -110,8 +110,10 @@ tabs rather than a fixed number of spaces.  Alignment stays in spaces, so
 columns line up at any tab width.  A `.editorconfig` sets this up
 automatically in most editors.
 
-The tree is formatted with **clang-format v14** (the Ubuntu 22.04 apt
-default that `pr-static-analysis` pins via `update-alternatives`).
+The tree is formatted with **clang-format v22**, pinned via the
+`clang-format` pip wheel (`clang-format==22.1.5`) that
+`pr-static-analysis` installs.  We pin via the wheel, not apt: apt's
+`clang-format` floats with the distro and v22 is not packaged at all.
 Mismatched versions reflow braces, trailing-comment columns, and
 `AlignConsecutive*` columns differently, which silently breaks the
 diff-only CI gate even when no source actually changed style.
@@ -119,7 +121,7 @@ diff-only CI gate even when no source actually changed style.
 Pin your local installation before pushing:
 
 ```bash
-bash scripts/setup-clang-format.sh           # install + verify (apt / brew)
+bash scripts/setup-clang-format.sh           # install + verify (pip wheel)
 bash scripts/setup-clang-format.sh --check   # verify only (no install)
 ```
 

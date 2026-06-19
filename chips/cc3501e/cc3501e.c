@@ -428,13 +428,13 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 	static uint8_t scan_buf[ALP_CC3501E_MAX_PAYLOAD];
 	size_t         got = 0;
 	alp_status_t   s   = poll_by_repeat(ctx,
-                                    ALP_CC3501E_CMD_WIFI_SCAN_START,
-                                    NULL,
-                                    0,
-                                    scan_buf,
-                                    sizeof(scan_buf),
-                                    &got,
-                                    timeout_ms);
+	                                    ALP_CC3501E_CMD_WIFI_SCAN_START,
+	                                    NULL,
+	                                    0,
+	                                    scan_buf,
+	                                    sizeof(scan_buf),
+	                                    &got,
+	                                    timeout_ms);
 	if (s != ALP_OK) return s;
 
 	/* Walk the packed records: each is a 10-byte fixed header immediately
@@ -501,13 +501,13 @@ alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi)
 	uint8_t      reply[1] = { 0 };
 	size_t       got      = 0;
 	alp_status_t s        = cc3501e_request(ctx,
-                                     ALP_CC3501E_CMD_WIFI_GET_RSSI,
-                                     NULL,
-                                     0,
-                                     reply,
-                                     sizeof(reply),
-                                     &got,
-                                     CC3501E_REQ_TMO_MS);
+	                                        ALP_CC3501E_CMD_WIFI_GET_RSSI,
+	                                        NULL,
+	                                        0,
+	                                        reply,
+	                                        sizeof(reply),
+	                                        &got,
+	                                        CC3501E_REQ_TMO_MS);
 	if (s != ALP_OK) return s;
 	if (got < 1u) return ALP_ERR_IO;
 	*rssi = (int8_t)reply[0];
@@ -520,7 +520,7 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4])
 	uint8_t      reply[4] = { 0 };
 	size_t       got      = 0;
 	alp_status_t s        = cc3501e_request(
-        ctx, ALP_CC3501E_CMD_WIFI_GET_IP, NULL, 0, reply, sizeof(reply), &got, CC3501E_REQ_TMO_MS);
+	    ctx, ALP_CC3501E_CMD_WIFI_GET_IP, NULL, 0, reply, sizeof(reply), &got, CC3501E_REQ_TMO_MS);
 	if (s != ALP_OK) return s;
 	if (got < 4u) return ALP_ERR_IO;
 	memcpy(ip, reply, 4);
@@ -592,7 +592,7 @@ alp_status_t cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uin
 	uint8_t      reply[1] = { 0 };
 	size_t       got      = 0;
 	alp_status_t s        = poll_by_repeat(
-        ctx, ALP_CC3501E_CMD_GPIO_READ, &req, sizeof(req), reply, sizeof(reply), &got, timeout_ms);
+	    ctx, ALP_CC3501E_CMD_GPIO_READ, &req, sizeof(req), reply, sizeof(reply), &got, timeout_ms);
 	if (s != ALP_OK) return s;
 	if (got < 1u) return ALP_ERR_IO;
 	*level_out = (reply[0] != 0u);

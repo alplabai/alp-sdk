@@ -128,7 +128,7 @@ static void t_tmu_q31_sqrt(void)
 {
 	uint32_t           out = 0;
 	const alp_status_t s   = gd32g553_tmu_compute(
-        &ctx, GD32G553_TMU_FN_SQRT, GD32G553_TMU_FMT_Q31, 0x20000000u, 0u, &out);
+	    &ctx, GD32G553_TMU_FN_SQRT, GD32G553_TMU_FMT_Q31, 0x20000000u, 0u, &out);
 	const int32_t err = (int32_t)out - 0x40000000;
 	record(s, (s == ALP_OK) && (err > -4096) && (err < 4096));
 }
