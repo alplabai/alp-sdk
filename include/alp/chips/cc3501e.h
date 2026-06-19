@@ -72,7 +72,7 @@ struct cc3501e {
 	alp_gpio_t        *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t        *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
 	cc3501e_event_cb_t event_cb;
-	void              *event_user;
+	void	          *event_user;
 	uint8_t            rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	uint8_t            tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 };
@@ -379,6 +379,60 @@ alp_status_t cc3501e_gpio_set_interrupt(
  * @return ALP_OK on success; ALP_ERR_INVAL on a bad @p which; otherwise mapped.
  */
 alp_status_t cc3501e_cam_enable(cc3501e_t *ctx, uint8_t which, bool on, uint32_t timeout_ms);
+
+/* ------------------------------------------------------------------ */
+/* OTA firmware update -- stream a new CC3501E image over the bridge.  */
+/*                                                                    */
+/* The Alif host obtains a signed GPE-format vendor image (via the     */
+/* device-side Mender contract; the OTA server is a separate repo) and */
+/* streams it into the CC3501E's non-primary vendor slot, which the    */
+/* CC35 then installs + swaps on reboot (PSA-FWU).  See                */
+/* docs/cc3501e-bridge.md "OTA".                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Push a complete signed CC3501E vendor image over the bridge + install.
+ *
+ * Runs the full cycle: OTA_BEGIN(len) -> chunked OTA_WRITE -> OTA_FINISH.  On
+ * success the CC3501E has staged the image into its non-primary vendor slot and
+ * reboots so BL2 swaps it to primary (TRIAL), after which it self-accepts.  THE
+ * BRIDGE LINK DROPS during that reboot: expect the link to go quiet, then
+ * re-establish (cc3501e_reset / the soak) and confirm the new GET_VERSION.
+ *
+ * Recovers from a missed per-chunk reply by re-syncing to the device's actual
+ * write cursor (CMD_OTA_STATUS) rather than blindly re-sending (OTA_WRITE is
+ * not idempotent -- a re-sent already-written offset is rejected).
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param image       Signed GPE-format vendor image (manifest + body).
+ * @param len         Image length in bytes (must exceed the manifest).
+ * @param timeout_ms  Per-frame budget for each BEGIN / WRITE / FINISH request.
+ * @return ALP_OK once FINISH is acked (the device reboots afterwards);
+ *         otherwise the first failing step's status (caller may
+ *         cc3501e_ota_abort() to reset the device session).
+ */
+alp_status_t
+cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t timeout_ms);
+
+/* Granular OTA controls (cc3501e_ota_update wraps these for the common path). */
+
+/** Open an OTA session: declare @p total_len; the device picks its non-primary
+ *  vendor slot and brings it READY. */
+alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t timeout_ms);
+
+/** Stream one sequential image chunk at absolute @p offset.  @p len must be
+ *  1..ALP_CC3501E_OTA_MAX_CHUNK and @p offset must equal the device cursor. */
+alp_status_t cc3501e_ota_write(
+    cc3501e_t *ctx, uint32_t offset, const uint8_t *data, size_t len, uint32_t timeout_ms);
+
+/** Finalize: the device installs the staged image + arms the swap reboot. */
+alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/** Cancel an in-flight session on the device. */
+alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/** Query device session state into @p out (state / bytes_written / total_len). */
+alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, uint32_t timeout_ms);
 
 /* ------------------------------------------------------------------ */
 /* Portable GPIO proxy wiring (CONFIG_ALP_SDK_GPIO_CC3501E_PROXY).     */

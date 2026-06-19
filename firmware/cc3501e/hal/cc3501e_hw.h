@@ -161,6 +161,41 @@ int cc3501e_hw_ble_gatt_read(uint16_t handle, uint8_t *out, uint16_t cap, uint16
 int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t data_len);
 
 /* --------------------------------------------------------------- */
+/* OTA firmware update (over-the-bridge PSA-FWU streaming)            */
+/* --------------------------------------------------------------- */
+
+/* Stream a new signed GPE vendor image into the CC3501E's NON-primary
+ * vendor slot via PSA-FWU, then install + reboot so the cold BL2/MCUboot
+ * swaps it to primary.  The Alif host drives the 0x40..0x44 OTA opcodes;
+ * these shims carry the session.  ONE session at a time; bytes arrive
+ * SEQUENTIALLY (offset == the running cursor).  Return CC3501E_HW_*
+ * (NOTIMPL -> the stub / silicon-free build maps it to RESP_ERR_NOT_READY).
+ * The real bodies live in the ti backend (psa_fwu_*). */
+
+/* Open a session: pick the non-primary vendor slot, bring it READY, latch
+ * @p total_len (full image size, must exceed the manifest). */
+int cc3501e_hw_ota_begin(uint32_t total_len);
+
+/* Accept a sequential image chunk at absolute @p offset (must equal the
+ * running write cursor).  The first TI_FWU_MANIFEST_SIZE bytes are buffered
+ * for psa_fwu_start; the remainder is psa_fwu_write()n into the slot. */
+int cc3501e_hw_ota_write(uint32_t offset, const uint8_t *data, uint32_t len);
+
+/* Finalize: psa_fwu_finish + psa_fwu_install (CANDIDATE -> STAGED), then arm
+ * a DEFERRED reboot (cc3501e_hw_tick performs it once the FINISH ack has
+ * clocked back, like CMD_RESET) so BL2 swaps the slot on the next boot.
+ * Errors if the stream is incomplete. */
+int cc3501e_hw_ota_finish(void);
+
+/* Cancel an in-flight session (psa_fwu_cancel) and return to IDLE. */
+int cc3501e_hw_ota_abort(void);
+
+/* Report session progress: @p state = alp_cc3501e_ota_state_t, @p
+ * bytes_written = bytes accepted so far, @p total_len = the BEGIN value.
+ * Any out pointer may be NULL. */
+int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len);
+
+/* --------------------------------------------------------------- */
 /* Power policy + diagnostics (configurability)                      */
 /* --------------------------------------------------------------- */
 

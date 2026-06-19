@@ -26,6 +26,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h> /* memcpy (OTA manifest buffering) */
 
 /* CMSIS core for NVIC_SystemReset (the CC35xx M33 core).  Pulled in via the
  * device's CMSIS header -- ti_drivers_config.h does NOT bring the core in
@@ -236,6 +237,11 @@ static volatile bool reset_pending;
  * reboot.  Gates reset_pending in cc3501e_hw_tick(). */
 static volatile bool reply_drained;
 
+/* Deferred OTA swap-reboot latch: cc3501e_hw_ota_finish() sets it; cc3501e_hw_tick()
+ * calls psa_fwu_request_reboot() once reply_drained confirms the FINISH ack has
+ * clocked back (same ack-before-reboot race fix as reset_pending). */
+static volatile bool ota_reboot_pending;
+
 /* Minimal OSI sleep shim for the PSA-FWU lib (FWU.a references osi_uSleep -- the Wi-Fi host
  * driver's OSI microsecond sleep -- for a flash-commit settle).  The full OSI layer lives in
  * the Wi-Fi platform we do NOT link in v0.1, and psa_fwu_accept() runs PRE-scheduler (from
@@ -442,6 +448,13 @@ void cc3501e_hw_tick(void)
 	if (reset_pending && reply_drained) {
 		NVIC_SystemReset(); /* CMSIS: M33 system reset -- does not return */
 	}
+
+	/* Deferred OTA reboot: once the FINISH ack has clocked back (reply_drained),
+	 * request the PSA-FWU reboot so the cold BL2/MCUboot swaps the STAGED slot to
+	 * primary (TRIAL).  Same ack-before-reboot race fix as CMD_RESET above. */
+	if (ota_reboot_pending && reply_drained) {
+		psa_fwu_request_reboot(); /* swap-reboot -- does not return */
+	}
 }
 
 int cc3501e_hw_get_mac(uint8_t mac[6])
@@ -490,6 +503,172 @@ void cc3501e_hw_request_reset(void)
 void cc3501e_hw_notify_reply_sent(void)
 {
 	reply_drained = true;
+}
+
+/* ===================================================================== */
+/* OTA firmware update (over-the-bridge PSA-FWU streaming) -- v0.2.       */
+/*                                                                       */
+/* The Alif host streams a signed GPE vendor image into the non-primary  */
+/* vendor slot (BEGIN -> WRITE* -> FINISH), then FINISH installs + arms a */
+/* deferred reboot so the cold BL2/MCUboot swaps the slot to primary.     */
+/* This is the streamed sibling of the SELFTEST cc3501e_ota_install()     */
+/* (which feeds the same psa_fwu_* sequence from an embedded array).      */
+/* Single session; bytes arrive sequentially (offset == cursor).         */
+
+static struct {
+	uint8_t             state; /* alp_cc3501e_ota_state_t */
+	psa_fwu_component_t target;
+	uint32_t            total_len;
+	uint32_t            cursor;        /* next expected absolute image offset */
+	uint32_t            manifest_have; /* bytes buffered toward the manifest  */
+	bool                started;       /* psa_fwu_start done                  */
+	uint8_t             manifest[TI_FWU_MANIFEST_SIZE];
+} ota;
+
+/* Pick the single NON-primary vendor slot as the OTA target + bring it READY
+ * (clean/cancel a stale candidate).  Returns CC3501E_HW_* and sets *out. */
+static int ota_pick_target(psa_fwu_component_t *out)
+{
+	psa_fwu_component_info_t i1, i2, ti;
+	psa_fwu_component_t      target;
+
+	if (psa_fwu_query((psa_fwu_component_t)Vendor_Image_Slot_1, &i1) != PSA_SUCCESS) {
+		return CC3501E_HW_ERR_IO;
+	}
+	if (psa_fwu_query((psa_fwu_component_t)Vendor_Image_Slot_2, &i2) != PSA_SUCCESS) {
+		return CC3501E_HW_ERR_IO;
+	}
+	if (i1.impl.Primary && !i2.impl.Primary) {
+		target = (psa_fwu_component_t)Vendor_Image_Slot_2;
+	} else if (i2.impl.Primary && !i1.impl.Primary) {
+		target = (psa_fwu_component_t)Vendor_Image_Slot_1;
+	} else {
+		return CC3501E_HW_ERR_IO; /* can't identify a single non-primary target */
+	}
+	if (psa_fwu_query(target, &ti) != PSA_SUCCESS) {
+		return CC3501E_HW_ERR_IO;
+	}
+	if (ti.state != PSA_FWU_READY) {
+		if (ti.state == PSA_FWU_WRITING || ti.state == PSA_FWU_CANDIDATE) {
+			psa_fwu_cancel(target);
+		} else {
+			psa_fwu_clean(target);
+		}
+	}
+	*out = target;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_ota_begin(uint32_t total_len)
+{
+	if (total_len <= (uint32_t)TI_FWU_MANIFEST_SIZE) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	psa_fwu_init(); /* idempotent; also run on the first hw_tick */
+	psa_fwu_component_t target;
+	const int           rv = ota_pick_target(&target);
+	if (rv != CC3501E_HW_OK) {
+		ota.state = ALP_CC3501E_OTA_STATE_ERROR;
+		return rv;
+	}
+	ota.state         = ALP_CC3501E_OTA_STATE_WRITING;
+	ota.target        = target;
+	ota.total_len     = total_len;
+	ota.cursor        = 0u;
+	ota.manifest_have = 0u;
+	ota.started       = false;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_ota_write(uint32_t offset, const uint8_t *data, uint32_t len)
+{
+	if (ota.state != ALP_CC3501E_OTA_STATE_WRITING) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (data == 0 || len == 0u) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (offset != ota.cursor || (uint64_t)ota.cursor + len > ota.total_len) {
+		return CC3501E_HW_ERR_INVAL; /* sequential, in-bounds only */
+	}
+
+	uint32_t consumed = 0u;
+
+	/* Phase 1: accumulate the first TI_FWU_MANIFEST_SIZE bytes, then start. */
+	if (!ota.started) {
+		uint32_t need = (uint32_t)TI_FWU_MANIFEST_SIZE - ota.manifest_have;
+		uint32_t take = (len < need) ? len : need;
+		memcpy(&ota.manifest[ota.manifest_have], data, take);
+		ota.manifest_have += take;
+		ota.cursor += take;
+		consumed += take;
+		if (ota.manifest_have == (uint32_t)TI_FWU_MANIFEST_SIZE) {
+			if (psa_fwu_start(ota.target, ota.manifest, TI_FWU_MANIFEST_SIZE) != PSA_SUCCESS) {
+				ota.state = ALP_CC3501E_OTA_STATE_ERROR;
+				return CC3501E_HW_ERR_IO;
+			}
+			ota.started = true;
+		}
+	}
+
+	/* Phase 2: stream the remainder into the slot at the absolute offset. */
+	if (consumed < len) {
+		const uint32_t n = len - consumed;
+		if (psa_fwu_write(ota.target, ota.cursor, data + consumed, n) != PSA_SUCCESS) {
+			ota.state = ALP_CC3501E_OTA_STATE_ERROR;
+			return CC3501E_HW_ERR_IO;
+		}
+		ota.cursor += n;
+	}
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_ota_finish(void)
+{
+	if (ota.state != ALP_CC3501E_OTA_STATE_WRITING || !ota.started || ota.cursor != ota.total_len) {
+		return CC3501E_HW_ERR_INVAL; /* incomplete stream */
+	}
+	if (psa_fwu_finish(ota.target) != PSA_SUCCESS) {
+		ota.state = ALP_CC3501E_OTA_STATE_ERROR;
+		return CC3501E_HW_ERR_IO;
+	}
+	if (psa_fwu_install() != PSA_SUCCESS) { /* CANDIDATE -> STAGED */
+		ota.state = ALP_CC3501E_OTA_STATE_ERROR;
+		return CC3501E_HW_ERR_IO;
+	}
+	ota.state = ALP_CC3501E_OTA_STATE_STAGED;
+	/* Defer the reboot until the FINISH ack has clocked back (CMD_RESET race
+	 * fix): clear reply_drained so only this reply re-arms it in hw_tick. */
+	reply_drained      = false;
+	ota_reboot_pending = true;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_ota_abort(void)
+{
+	if (ota.started) {
+		psa_fwu_cancel(ota.target);
+	}
+	ota.state         = ALP_CC3501E_OTA_STATE_IDLE;
+	ota.started       = false;
+	ota.cursor        = 0u;
+	ota.manifest_have = 0u;
+	ota.total_len     = 0u;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)
+{
+	if (state != 0) {
+		*state = ota.state;
+	}
+	if (bytes_written != 0) {
+		*bytes_written = ota.cursor;
+	}
+	if (total_len != 0) {
+		*total_len = ota.total_len;
+	}
+	return CC3501E_HW_OK;
 }
 
 /* --------------------------------------------------------------- */

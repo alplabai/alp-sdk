@@ -257,6 +257,43 @@ int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t dat
 }
 
 /* --------------------------------------------------------------- */
+/* OTA -- no PSA-FWU flash on the host stub: report NOTIMPL so the    */
+/* protocol layer maps it to RESP_ERR_NOT_READY (the ztests assert    */
+/* the handler framing/parse, not a real flash install).             */
+/* --------------------------------------------------------------- */
+int cc3501e_hw_ota_begin(uint32_t total_len)
+{
+	(void)total_len;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_ota_write(uint32_t offset, const uint8_t *data, uint32_t len)
+{
+	(void)offset;
+	(void)data;
+	(void)len;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_ota_finish(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_ota_abort(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)
+{
+	if (state != 0) *state = 0u;
+	if (bytes_written != 0) *bytes_written = 0u;
+	if (total_len != 0) *total_len = 0u;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+/* --------------------------------------------------------------- */
 /* Power policy + diagnostics -- firmware-side config (no radio), so */
 /* the stub accepts config and reports a cold-start diag.            */
 /* --------------------------------------------------------------- */
