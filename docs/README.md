@@ -42,10 +42,11 @@ into the topic-specific docs.
   SoM EEPROM manifest + BOARD_ID ADC cross-check.
 - [aen-accelerator-backends-design.md](aen-accelerator-backends-design.md)
   — integration design for the Alif Ensemble accelerator surfaces
-  (GPU2D / Mali-C55 ISP / SecAES / aiPM), each silicon + HAL-pack gated.
+  (GPU2D / VeriSilicon ISP Pico (vsi,isp-pico) / SecAES / aiPM), each
+  silicon + HAL-pack gated.
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (14 ADRs as of 2026-06-12).
+  index (17 ADRs).
 
 ## Per-SoM bring-up
 

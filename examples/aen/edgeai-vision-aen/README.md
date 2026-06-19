@@ -5,9 +5,9 @@ with an **E1M-AEN801** SoM (Alif Ensemble E8 -- the lead AEN part).
 
 ```
         ┌──────────────────┐    ┌──────────────┐    ┌────────────────┐
-        │  Camera          │    │  Mali-C55    │    │  Ethos-U55     │
-RPi CSI │  (e.g. OV5640    │ →  │  ISP         │ →  │  inference     │
-        │   on the EVK)    │    │  (format/3A) │    │  (Vela model)  │
+        │  Camera          │    │  ISP Pico    │    │  Ethos-U55     │
+RPi CSI │  (e.g. ARX3A0    │ →  │  (vsi,       │ →  │  inference     │
+        │   on the EVK)    │    │   isp-pico)  │    │  (Vela model)  │
         └──────────────────┘    └──────────────┘    └────────────────┘
                                                             │
                                                             ▼
@@ -19,13 +19,14 @@ RPi CSI │  (e.g. OV5640    │ →  │  ISP         │ →  │  inference  
                                                    └────────────────┘
 ```
 
-> **On-die Mali-C55 ISP on E8.**  Unlike E3 / E5 / E7, the E1M-AEN801
-> (Ensemble E8) ships the **Mali-C55 ISP** (E4 / E6 / E8 only) — so the
-> v0.2 camera path can offload debayer / format-convert / 3A to the ISP
-> once the Alif HAL pack lands (the `<alp/ext/alif/camera.h>` vendor
-> surface is a NOSUPPORT stub today — see
+> **On-die VeriSilicon ISP Pico (vsi,isp-pico) on E8.**  Unlike E3 / E5 / E7,
+> the E1M-AEN801 (Ensemble E8) ships the **VeriSilicon ISP Pico
+> (`vsi,isp-pico`)** (E4 / E6 / E8 only) — so the v0.2 camera path can
+> offload debayer / format-convert / 3A to the ISP Pico once the Alif HAL
+> pack lands (the `<alp/ext/alif/camera.h>` vendor surface is a NOSUPPORT
+> stub today — see
 > [`docs/aen-accelerator-backends-design.md`](../../../docs/aen-accelerator-backends-design.md)).
-> Until then the example configures the OV5640 to emit the model's pixel
+> Until then the example configures the ARX3A0 to emit the model's pixel
 > format (RGB888) directly via `<alp/camera.h>` and does crop / resize /
 > normalisation on the M55-HP with CMSIS-DSP.  See
 > [`docs/pipeline.md`](docs/pipeline.md) for the full data flow and
@@ -37,7 +38,7 @@ RPi CSI │  (e.g. OV5640    │ →  │  ISP         │ →  │  inference  
 | Version | Status   | What works                                                                                                |
 |---------|----------|-----------------------------------------------------------------------------------------------------------|
 | v0.1    | skeleton | Compiles under `native_sim/native/64` and on the EVK once the AEN board file lands.  Init flow is real (I²C, OLED, IMU init); camera + Ethos-U inference are stubbed. |
-| v0.2    | target   | Real OV5640 capture via `<alp/camera.h>`, Vela-compiled MobileNetV2 inference on Ethos-U55-HP, results overlay on OLED. **Acceptance ≥ 10 fps.** |
+| v0.2    | target   | Real ARX3A0 (ON Semi MIPI sensor) capture via `<alp/camera.h>`, Vela-compiled MobileNetV2 inference on Ethos-U55-HP, results overlay on OLED. **Acceptance ≥ 10 fps.** |
 
 The full pipeline is the v0.2 [EdgeAI Application Example](../../../VERSIONS.md#v020--richer-blocks--v2n-intro--6-weeks-after-v01)
 deliverable from the original quarterly roadmap.

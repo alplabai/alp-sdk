@@ -300,6 +300,7 @@ in [`docs/test-plan.md`](test-plan.md), not duplicated here.
 | UART             | `alp/peripheral.h`  | `uart_*`                                      |
 | PWM              | `alp/pwm.h`         | `pwm_*`                                       |
 | ADC              | `alp/adc.h`         | `adc_*` + `adc_dt_spec`                       |
+| DAC              | `alp/dac.h`         | `dac_*` (GD32 IO-MCU bridge on V2N)           |
 | Counter / Timer  | `alp/counter.h`     | `counter_*`                                   |
 | Quadrature decoder | `alp/counter.h`   | `sensor_*` (SENSOR_CHAN_ROTATION)             |
 | I2S / SAI        | `alp/i2s.h`         | `i2s_*` + memory slab                         |

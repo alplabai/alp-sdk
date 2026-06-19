@@ -36,10 +36,14 @@
 #include "alp/audio.h"
 #include "alp/e1m_pinout.h"
 
-/* EVK_I2S_AUDIO_CODEC (= E1M_I2S0) is a board-macro from the generated
- * routes header; the PDM mic stays on the raw E1M_PDM0 instance (no EVK
- * route maps it).  Rebind the codec in board.yaml `pins:`. */
-#include "alp/boards/alp_e1m_evk_routes.h"
+/* BOARD_I2S_AUDIO is a portable alias that resolves to the on-board
+ * audio I2S bus on whichever EVK is targeted:
+ *   E1M EVK  (AEN)  → E1M_I2S0  (TAS2563 amps via the 74LVC157 mux)
+ *   E1M-X EVK (V2N) → E1M_X_I2S0
+ * Include via <alp/board.h>; ALP_BOARD_* is emitted by the build
+ * system from the board.yaml preset.  The PDM mic stays on the raw
+ * E1M_PDM0 instance (no portable route maps it). */
+#include "alp/board.h"
 
 /* Loop budget -- 50 blocks of 256 frames @ 16 kHz = ~0.8 s.
  * Long enough to hear a "loopback works" cue on a real board,
@@ -73,7 +77,7 @@ int main(void)
 	}
 	printf("[audio]   alp_audio_in_open(PDM0)         ok\n");
 
-	cfg.peripheral_id    = EVK_I2S_AUDIO_CODEC;
+	cfg.peripheral_id    = BOARD_I2S_AUDIO; /* E1M EVK: E1M_I2S0; E1M-X EVK: E1M_X_I2S0 */
 	alp_audio_out_t *spk = alp_audio_out_open(&cfg);
 	if (spk == NULL) {
 		printf("[audio]   alp_audio_out_open              skip (no I2S, last_err=%d)\n",

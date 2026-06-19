@@ -1,11 +1,16 @@
 # Verification status
 
-> ⚠️ **`v0.6` carries the SDK's first silicon evidence — and only on
-> one board.**  The E1M-X **V2N** bench verified the GD32
-> supervisor-bridge stack end-to-end (link + soak + A/B OTA + analog
-> loopback; see the v0.6.0 section of
-> [`docs/test-plan.md`](test-plan.md)).  Every **other** family (AEN,
-> i.MX 93, V2M/DEEPX) remains `[UNTESTED]` on real hardware.
+> ⚠️ **Two families now carry silicon evidence; the rest do not.**  The
+> E1M-X **V2N** bench verified the GD32 supervisor-bridge stack
+> end-to-end (link + soak + A/B OTA + analog loopback; see the v0.6.0
+> section of [`docs/test-plan.md`](test-plan.md)).  The
+> **E1M-AEN801 (Alif Ensemble E8)** then ran an extensive on-silicon
+> bench campaign — Flow A/C/D flashing, the peripheral matrix, NPU
+> inference, dual-core RPC, and SE-crypto all `RESULT PASS` (see
+> [`docs/aen-bench-bringup.md`](aen-bench-bringup.md)).  The remaining
+> families (**i.MX 93, V2M/DEEPX**) remain `[UNTESTED]` on real
+> hardware, and the AEN **customer** production chain (full
+> MCUboot-slot0 OTA) is still bench-pending — see the ledger below.
 
 This page is the single source of truth for "what's been silicon-
 verified in the Alp SDK as of today".  It complements:
@@ -49,8 +54,16 @@ verified in the Alp SDK as of today".  It complements:
   campaign verified the supervisor link, OTA, and analog paths on
   the real board -- the per-row evidence lives in
   [`docs/test-plan.md`](test-plan.md).
-- **You should NOT ship production firmware against the other
-  families (AEN, i.MX 93, V2M) unless you've done your own HiL.**
+- **The AEN801 (E8) stack is bench-validated.**  An extensive
+  on-silicon campaign brought up the peripheral matrix, NPU
+  inference, dual-core RPC, and SE-crypto — all `RESULT PASS` (the
+  per-row evidence lives in
+  [`docs/aen-bench-bringup.md`](aen-bench-bringup.md)).  The full
+  **customer** secure-boot / OTA production chain (MCUboot-slot0) is
+  still bench-pending, so validate that path on your own HiL before
+  shipping it.
+- **You should NOT ship production firmware against the remaining
+  families (i.MX 93, V2M) unless you've done your own HiL.**
   Their register addresses, timing values, init sequences have not
   been silicon-validated.
 

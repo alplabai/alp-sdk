@@ -379,9 +379,9 @@ with one `#define <MACRO> E1M_<…>` line per entry.
 
 #### Preset mode (SDK-internal shortcut)
 
-The 61 example projects under `examples/` all target the EVK or
-X-EVK, so they share a single board definition each via the
-`preset:` field:
+Most example projects under `examples/` target the EVK or X-EVK
+(66 do today — 46 on `e1m-evk`, 20 on `e1m-x-evk`), so they share a
+single board definition each via the `preset:` field:
 
 ```yaml
 preset: e1m-evk             # or e1m-x-evk

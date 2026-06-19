@@ -10,10 +10,10 @@ quoted are v0.2 acceptance targets, not present-day measurements.
 │                         E1M-AEN801 SoC (E8)                         │
 │                                                                     │
 │  ┌──────────┐  ┌─────────┐  ┌───────────┐  ┌───────────┐  ┌──────┐  │
-│  │ Camera   │→ │ MIPI    │→ │ Mali-C55  │→ │ Tensor    │→ │ Eth- │  │
-│  │ (OV5640) │  │ CSI-2   │  │ ISP:      │  │ pre-proc  │  │ os-U │  │
-│  │ on EVK   │  │ 2-lane  │  │ debayer + │  │ (CMSIS-   │  │ -55  │  │
-│  └──────────┘  └─────────┘  │ format +  │  │  DSP)     │  │ HP   │  │
+│  │ Camera   │→ │ MIPI    │→ │ ISP Pico  │→ │ Tensor    │→ │ Eth- │  │
+│  │ (ARX3A0) │  │ CSI-2   │  │ (vsi,     │  │ pre-proc  │  │ os-U │  │
+│  │ on EVK   │  │ 2-lane  │  │  isp-pico)│  │ (CMSIS-   │  │ -55  │  │
+│  └──────────┘  └─────────┘  │ debayer + │  │  DSP)     │  │ HP   │  │
 │                             │ 3A (E8)   │  └───────────┘  └──┬───┘  │
 │                             └───────────┘                    │      │
 │                                                              ▼      │
@@ -39,15 +39,16 @@ on the same SoC.
 
 ### 1. Camera capture (v0.2)
 
-- Hardware: OV5640 on the EVK's RPi-CSI 15-pin connector.
+- Hardware: ARX3A0 (ON Semi MIPI sensor) on the EVK's RPi-CSI 15-pin
+  connector.
 - Bus: MIPI CSI-2, 2 lanes, ~480 Mbps/lane → 1.92 Gbps usable.
 - Resolution: 224 × 224 RGB888 for MobileNetV2 / 320 × 320 RGB888
-  for YOLOv8-nano.  E8 ships the on-die **Mali-C55 ISP**, so the v0.2
-  path can offload debayer / format-convert / 3A to the ISP once the
-  Alif HAL pack lands (the `<alp/ext/alif/camera.h>` vendor surface is a
-  NOSUPPORT stub today — see
+  for YOLOv8-nano.  E8 ships the on-die **VeriSilicon ISP Pico
+  (`vsi,isp-pico`)**, so the v0.2 path can offload debayer /
+  format-convert / 3A to the ISP Pico once the Alif HAL pack lands (the
+  `<alp/ext/alif/camera.h>` vendor surface is a NOSUPPORT stub today — see
   [`docs/aen-accelerator-backends-design.md`](../../../../docs/aen-accelerator-backends-design.md)).
-  Until then the SDK configures the OV5640 to emit RGB888 directly via
+  Until then the SDK configures the ARX3A0 to emit RGB888 directly via
   the `<alp/camera.h>` config and resizes on the M55.
 - API: `alp_camera_open` / `alp_camera_capture` / `alp_camera_release`.
 
@@ -120,7 +121,7 @@ The exact numbers land with v0.2 measurements on a real EVK.
 
 ## v0.2 acceptance bar
 
-- ≥ 10 fps end-to-end on a real E1M-AEN801 EVK with the OV5640
+- ≥ 10 fps end-to-end on a real E1M-AEN801 EVK with the ARX3A0
   camera + RK055HDMIPI4MA0 display omitted (OLED-only overlay).
 - Build produces a single `zephyr.elf` ≤ 1 MB.
 - HW-in-loop CI runs the loop for 60 s and asserts the output
