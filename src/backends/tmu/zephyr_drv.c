@@ -78,11 +78,11 @@ tmu_bridge_call(gd32g553_tmu_function_t function, float in_a, float in_b, float 
 
 	uint32_t result_bits = 0u;
 	s                    = gd32g553_tmu_compute(ctx,
-                             function,
-                             GD32G553_TMU_FMT_F32,
-                             f32_to_u32_bits(in_a),
-                             f32_to_u32_bits(in_b),
-                             &result_bits);
+	                                            function,
+	                                            GD32G553_TMU_FMT_F32,
+	                                            f32_to_u32_bits(in_a),
+	                                            f32_to_u32_bits(in_b),
+	                                            &result_bits);
 	alp_z_v2n_supervisor_release();
 	if (s != ALP_OK) return s;
 	*out = u32_to_f32_bits(result_bits);

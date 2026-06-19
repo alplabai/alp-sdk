@@ -253,7 +253,7 @@ static alp_status_t spi_xfer(gd32g553_t    *ctx,
 			if (reply[0] == GD32G553_BRIDGE_SOF) {
 				const uint16_t expect_crc = crc16_ccitt_false(reply, 2u + reply_payload_len);
 				const uint16_t got_crc    = (uint16_t)reply[2u + reply_payload_len] |
-				                         (uint16_t)reply[2u + reply_payload_len + 1u] << 8;
+				                            (uint16_t)reply[2u + reply_payload_len + 1u] << 8;
 				if (got_crc == expect_crc) {
 					reply_ok = true;
 					break;
@@ -829,12 +829,12 @@ alp_status_t gd32g553_adc_stream_read(
 	const size_t  reply_len = 1u + ((size_t)max_samples * 2u);
 	const uint8_t req[2]    = { stream_id, max_samples };
 	alp_status_t  s         = cmd_send(ctx,
-                              GD32G553_TRANSPORT_DEFAULT,
-                              GD32G553_CMD_ADC_STREAM_READ,
-                              req,
-                              sizeof(req),
-                              reply,
-                              reply_len);
+	                                   GD32G553_TRANSPORT_DEFAULT,
+	                                   GD32G553_CMD_ADC_STREAM_READ,
+	                                   req,
+	                                   sizeof(req),
+	                                   reply,
+	                                   reply_len);
 	if (s != ALP_OK) {
 		*got_samples = 0u;
 		return s;
@@ -905,12 +905,12 @@ alp_status_t gd32g553_tmu_compute(gd32g553_t             *ctx,
 
 	uint8_t      reply[4] = { 0 };
 	alp_status_t s        = cmd_send(ctx,
-                              GD32G553_TRANSPORT_DEFAULT,
-                              GD32G553_CMD_TMU_COMPUTE,
-                              req,
-                              sizeof(req),
-                              reply,
-                              sizeof(reply));
+	                                 GD32G553_TRANSPORT_DEFAULT,
+	                                 GD32G553_CMD_TMU_COMPUTE,
+	                                 req,
+	                                 sizeof(req),
+	                                 reply,
+	                                 sizeof(reply));
 	if (s != ALP_OK) return s;
 	*result_out = get_le32(reply);
 	return ALP_OK;
@@ -947,12 +947,12 @@ gd32g553_pwm_capture_read(gd32g553_t *ctx, uint8_t channel, uint32_t *period_ns,
 	uint8_t      req[1]   = { channel };
 	uint8_t      reply[8] = { 0 };
 	alp_status_t s        = cmd_send(ctx,
-                              GD32G553_TRANSPORT_DEFAULT,
-                              GD32G553_CMD_PWM_CAPTURE_READ,
-                              req,
-                              sizeof(req),
-                              reply,
-                              sizeof(reply));
+	                                 GD32G553_TRANSPORT_DEFAULT,
+	                                 GD32G553_CMD_PWM_CAPTURE_READ,
+	                                 req,
+	                                 sizeof(req),
+	                                 reply,
+	                                 sizeof(reply));
 	if (s != ALP_OK) return s;
 	if (period_ns != NULL) *period_ns = get_le32(&reply[0]);
 	if (pulse_ns != NULL) *pulse_ns = get_le32(&reply[4]);
@@ -1021,12 +1021,12 @@ alp_status_t gd32g553_adc_dsp_chain_open(gd32g553_t *ctx, uint8_t *chain_id_out)
 
 	uint8_t      reply[1] = { 0 };
 	alp_status_t s        = cmd_send(ctx,
-                              GD32G553_TRANSPORT_DEFAULT,
-                              GD32G553_CMD_ADC_DSP_CHAIN_OPEN,
-                              NULL,
-                              0u,
-                              reply,
-                              sizeof(reply));
+	                                 GD32G553_TRANSPORT_DEFAULT,
+	                                 GD32G553_CMD_ADC_DSP_CHAIN_OPEN,
+	                                 NULL,
+	                                 0u,
+	                                 reply,
+	                                 sizeof(reply));
 	if (s != ALP_OK) return s;
 	*chain_id_out = reply[0];
 	return ALP_OK;
@@ -1135,12 +1135,12 @@ alp_status_t gd32g553_ota_begin(gd32g553_t               *ctx,
 	/* Reply: chunk_max_bytes:u16 + target_slot:u8. */
 	uint8_t      reply[3] = { 0 };
 	alp_status_t s        = cmd_send(ctx,
-                              GD32G553_TRANSPORT_DEFAULT,
-                              GD32G553_CMD_OTA_BEGIN,
-                              req,
-                              req_len,
-                              reply,
-                              sizeof(reply));
+	                                 GD32G553_TRANSPORT_DEFAULT,
+	                                 GD32G553_CMD_OTA_BEGIN,
+	                                 req,
+	                                 req_len,
+	                                 reply,
+	                                 sizeof(reply));
 	if (s != ALP_OK) return s;
 	*chunk_max_bytes = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
 	*target_slot     = (gd32g553_ota_slot_t)reply[2];
@@ -1171,12 +1171,12 @@ alp_status_t gd32g553_ota_write_chunk(gd32g553_t    *ctx,
 
 	uint8_t      reply[4] = { 0 };
 	alp_status_t s        = cmd_send(ctx,
-                              GD32G553_TRANSPORT_DEFAULT,
-                              GD32G553_CMD_OTA_WRITE_CHUNK,
-                              req,
-                              5u + data_len,
-                              reply,
-                              sizeof(reply));
+	                                 GD32G553_TRANSPORT_DEFAULT,
+	                                 GD32G553_CMD_OTA_WRITE_CHUNK,
+	                                 req,
+	                                 5u + data_len,
+	                                 reply,
+	                                 sizeof(reply));
 	if (s != ALP_OK) return s;
 	*received_bytes = get_le32(reply);
 	return ALP_OK;
@@ -1190,7 +1190,7 @@ alp_status_t gd32g553_ota_verify(gd32g553_t *ctx, bool *verified, uint32_t *comp
 	/* Reply: computed_crc32(u32) + verified(u8). */
 	uint8_t      reply[5] = { 0 };
 	alp_status_t s        = cmd_send(
-        ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_VERIFY, NULL, 0u, reply, sizeof(reply));
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_OTA_VERIFY, NULL, 0u, reply, sizeof(reply));
 	if (s != ALP_OK) return s;
 	*computed_crc32 = get_le32(&reply[0]);
 	*verified       = (reply[4] != 0u);
@@ -1217,12 +1217,12 @@ alp_status_t gd32g553_ota_get_state(gd32g553_t *ctx, gd32g553_ota_state_info_t *
 	/* Reply: state(u8) + active(u8) + pending(u8) + boot_count(u16 LE). */
 	uint8_t      reply[5] = { 0 };
 	alp_status_t s        = cmd_send(ctx,
-                              GD32G553_TRANSPORT_DEFAULT,
-                              GD32G553_CMD_OTA_GET_STATE,
-                              NULL,
-                              0u,
-                              reply,
-                              sizeof(reply));
+	                                 GD32G553_TRANSPORT_DEFAULT,
+	                                 GD32G553_CMD_OTA_GET_STATE,
+	                                 NULL,
+	                                 0u,
+	                                 reply,
+	                                 sizeof(reply));
 	if (s != ALP_OK) return s;
 	out->state        = (gd32g553_ota_state_t)reply[0];
 	out->active_slot  = (gd32g553_ota_slot_t)reply[1];

@@ -73,7 +73,7 @@
  * forwarding here, so open() must populate it.  <zephyr/sys/util.h>'s
  * CONTAINER_OF is unavailable on Linux, so define the offset locally. */
 #define ALP_PWM_HANDLE_OF(st_ptr)                                                                  \
-	((struct alp_pwm *)((char *)(st_ptr)-offsetof(struct alp_pwm, state)))
+	((struct alp_pwm *)((char *)(st_ptr) - offsetof(struct alp_pwm, state)))
 
 /* Per-handle backend data: the channel's sysfs directory and channel
  * index, boxed onto the heap so the void* be_data slot owns it. */

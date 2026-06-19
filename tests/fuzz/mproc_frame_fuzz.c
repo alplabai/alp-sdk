@@ -172,7 +172,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		const uint8_t     *payload_ptr2 = NULL;
 		uint32_t           payload_len2 = 0;
 		const ref_status_t s2           = ref_decode(
-            buf, MPROC_FRAME_HEADER_LEN + payload_len, &seq2, &payload_ptr2, &payload_len2);
+		    buf, MPROC_FRAME_HEADER_LEN + payload_len, &seq2, &payload_ptr2, &payload_len2);
 		if (s2 != REF_OK) {
 			__builtin_trap();
 		}

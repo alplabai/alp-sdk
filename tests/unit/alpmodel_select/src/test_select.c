@@ -75,10 +75,10 @@ ZTEST(alp_model_select, test_no_fit_no_cpu_returns_no_fit)
 	m.targets[0]                   = T("ethos_u", "alif:ensemble:e7", "vela_tflite", 0, 512, b0, 4);
 	const char            *avail[] = { "alif:ensemble:e7" };
 	alp_model_select_env_t env     = {
-		    .soc_ref         = "alif:ensemble:e7",
-		    .avail_silicon   = avail,
-		    .n_avail_silicon = 1,
-		    .arena_sram_kib  = 256,
+		.soc_ref         = "alif:ensemble:e7",
+		.avail_silicon   = avail,
+		.n_avail_silicon = 1,
+		.arena_sram_kib  = 256,
 	};
 	alp_model_select_result_t r = { 0 };
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_NO_FIT);
@@ -93,10 +93,10 @@ ZTEST(alp_model_select, test_no_matching_backend_no_cpu_returns_no_backend)
 	m.targets[0]                   = T("drpai", "renesas:rzv2n:n44", "drpai_dir", 0, 0, b0, 4);
 	const char            *avail[] = { "alif:ensemble:e7" };
 	alp_model_select_env_t env     = {
-		    .soc_ref         = "alif:ensemble:e7",
-		    .avail_silicon   = avail,
-		    .n_avail_silicon = 1,
-		    .arena_sram_kib  = 0,
+		.soc_ref         = "alif:ensemble:e7",
+		.avail_silicon   = avail,
+		.n_avail_silicon = 1,
+		.arena_sram_kib  = 0,
 	};
 	alp_model_select_result_t r = { 0 };
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_NO_BACKEND);
@@ -110,9 +110,9 @@ ZTEST(alp_model_select, test_explicit_backend_absent_returns_not_found)
 	m.targets[0]                   = T("cpu", "*", "tflite", 0, 0, b0, 4);
 	const char            *avail[] = { "alif:ensemble:e7" };
 	alp_model_select_env_t env     = {
-		    .soc_ref         = "alif:ensemble:e7",
-		    .avail_silicon   = avail,
-		    .n_avail_silicon = 1,
+		.soc_ref         = "alif:ensemble:e7",
+		.avail_silicon   = avail,
+		.n_avail_silicon = 1,
 	};
 	alp_model_select_result_t r = { 0 };
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_DEEPX_DXM1, &r),

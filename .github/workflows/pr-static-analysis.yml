@@ -34,23 +34,19 @@ jobs:
         with:
           fetch-depth: 0  # need history so HEAD~ resolves
 
-      - name: Install clang-format-diff
-        # Pin to clang-format-14 (Ubuntu 22.04 LTS shipped this as
-        # `clang-format`; the project's existing committed code was
-        # formatted against it and our CI passed for months).
-        # Floating with `clang-format` lets Ubuntu's default flip
-        # with the runner image (24.04 ships v18) -- that flip is
-        # what just broke this workflow even though no source file
-        # actually changed its style.  Lock the version + lock the
-        # disputed Cpp11BracedListStyle option in /.clang-format
-        # together so the formatter's output is reproducible.
+      - name: Install clang-format 22 (pinned)
+        # Pinned to clang-format-22 via the pip wheel (clang-format==22.1.5),
+        # which ships BOTH the `clang-format` binary and `clang-format-diff.py`.
+        # We pin via pip, NOT apt: apt's `clang-format` floats with the runner
+        # image (22.04 -> v14, 24.04 -> v18) and reflows differently, which used
+        # to break this gate even when no source changed style.  The committed
+        # tree is formatted against v22; .clang-format also locks
+        # Cpp11BracedListStyle so designated-initialiser output stays
+        # reproducible across patch releases.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format-14
-          sudo update-alternatives --install /usr/bin/clang-format \
-              clang-format /usr/bin/clang-format-14 100
-          sudo update-alternatives --install /usr/bin/clang-format-diff \
-              clang-format-diff /usr/bin/clang-format-diff-14 100
+          python3 -m pip install --user 'clang-format==22.1.5'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/clang-format" --version
 
       - name: Determine diff base
         id: base
@@ -63,12 +59,12 @@ jobs:
 
       - name: Run clang-format-diff on changed lines
         run: |
-          # GitHub-hosted runners ship clang-format-diff at this path.
-          DIFF_TOOL=$(ls /usr/share/clang/clang-format*/clang-format-diff.py 2>/dev/null | head -1 \
-                       || which clang-format-diff)
-          if [ -z "$DIFF_TOOL" ]; then
-              echo "::warning::clang-format-diff not found; skipping diff check"
-              exit 0
+          # clang-format-diff.py from the pinned pip wheel; it shells out to the
+          # wheel's bundled v22 clang-format, so the diff check uses v22 too.
+          DIFF_TOOL="$HOME/.local/bin/clang-format-diff.py"
+          if [ ! -f "$DIFF_TOOL" ]; then
+              echo "::error::clang-format-diff.py not found after the pip install"
+              exit 1
           fi
           # vendors/** and zephyr/** are excluded: those subtrees keep
           # their UPSTREAM project's style (GigaDevice firmware library,
@@ -79,7 +75,7 @@ jobs:
               | python3 "$DIFF_TOOL" -p1 \
               | tee clang-format-diff.txt
           if [ -s clang-format-diff.txt ]; then
-              echo "::error::clang-format would change the diff above.  Run clang-format on your changes before pushing."
+              echo "::error::clang-format would change the diff above.  Run clang-format-22 on your changes before pushing."
               exit 1
           fi
           echo "clang-format clean on the diff."

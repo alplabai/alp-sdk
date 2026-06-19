@@ -59,33 +59,35 @@ extern "C" {
  */
 alp_status_t alp_ethosu_n93_register(void)
 {
-    /* TBD: NXP mcuxpresso-zephyr port call sequence (ethosu_init
+	/* TBD: NXP mcuxpresso-zephyr port call sequence (ethosu_init
      * against the i.MX 93 U65 reg-base + IRQ pair).  The upstream
      * NPU node lands in NXP's port; today the DT compatible
      * = "arm,ethos-u65" wiring is incomplete. */
-    return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT;
 }
 
 /* Compile-time sanity: building the N93 ethos-u backend without
  * the U65 variant selector means orchestrator drift -- U55 / U85
  * Vela models do not run on i.MX 93's U65 silicon. */
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93) && \
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93) &&                                       \
     !defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65)
 #error "ETHOS_U_N93 backend enabled without VARIANT_U65; orchestrator drift"
 #endif
 
 const char *alp_ethosu_variant_name(void)
 {
-    return "ethos-u65";
+	return "ethos-u65";
 }
 
-ALP_BACKEND_REGISTER(inference, ethos_u_n93, {
-    /* .silicon_ref */ "nxp:imx9:imx93",
-    /* .vendor      */ "nxp",
-    /* .base_caps   */ 0u,
-    /* .priority    */ 100,
-    /* .ops         */ &alp_inference_tflm_ops,
-    /* .probe       */ NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     ethos_u_n93,
+                     {
+                         /* .silicon_ref */ "nxp:imx9:imx93",
+                         /* .vendor      */ "nxp",
+                         /* .base_caps   */ 0u,
+                         /* .priority    */ 100,
+                         /* .ops         */ &alp_inference_tflm_ops,
+                         /* .probe       */ NULL,
+                     });
 
-}  /* extern "C" */
+} /* extern "C" */

@@ -95,11 +95,11 @@ ZTEST(alp_storage_registry, test_configure_inline_aes_rejects_bad_inputs)
 	static const uint8_t     _stub_key[16] = { 0 };
 	static const uint8_t     _stub_iv[16]  = { 0 };
 	alp_storage_aes_config_t bad_kb        = {
-		       .mode      = ALP_STORAGE_AES_XTS,
-		       .key       = _stub_key,
-		       .key_bytes = 7u,
-		       .iv        = _stub_iv,
-		       .iv_bytes  = 16u,
+		.mode      = ALP_STORAGE_AES_XTS,
+		.key       = _stub_key,
+		.key_bytes = 7u,
+		.iv        = _stub_iv,
+		.iv_bytes  = 16u,
 	};
 	zassert_equal(alp_storage_configure_inline_aes(NULL, &bad_kb), ALP_ERR_INVAL);
 
@@ -170,10 +170,10 @@ ZTEST(alp_storage_registry, test_sw_fallback_nosupport_contract)
 	memset(&st, 0, sizeof(st));
 	alp_capabilities_t   caps = { 0 };
 	alp_storage_config_t cfg  = {
-		 .kind        = ALP_STORAGE_KIND_QSPI_FLASH,
-		 .instance_id = 0u,
-		 .freq_hz     = 0u,
-		 .read_only   = false,
+		.kind        = ALP_STORAGE_KIND_QSPI_FLASH,
+		.instance_id = 0u,
+		.freq_hz     = 0u,
+		.read_only   = false,
 	};
 	zassert_equal(ops->open(&cfg, &st, &caps), ALP_OK);
 

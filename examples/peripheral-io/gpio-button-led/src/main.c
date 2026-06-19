@@ -39,11 +39,11 @@ int main(void)
 
 	alp_button_led_t bl;
 	alp_status_t     s = alp_button_led_init(&bl,
-                                         &(alp_button_led_config_t){
+	                                         &(alp_button_led_config_t){
 	                                             .button_pin_id     = BOARD_PIN_ENCODER_SW,
 	                                             .led_pin_id        = BOARD_PIN_LED_RED,
 	                                             .active_low_button = true,
-                                         });
+	                                         });
 	if (s != ALP_OK) {
 		printf("[gpio] init failed: status=%d\n", (int)s);
 		printf("[gpio] done\n");

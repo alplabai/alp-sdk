@@ -55,7 +55,7 @@
  * unknown SW pair is mapped to a generic "io error" -- the parser
  * must surface it, not crash. */
 #define SW_SUCCESS          0x9000
-#define SW_MORE_DATA(sw)    (((sw)&0xFF00u) == 0x6100u)
+#define SW_MORE_DATA(sw)    (((sw) & 0xFF00u) == 0x6100u)
 #define SW_WRONG_LENGTH     0x6700
 #define SW_SECURITY_NOT_MET 0x6982
 #define SW_AUTH_FAILED      0x6300

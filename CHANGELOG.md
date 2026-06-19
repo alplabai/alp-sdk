@@ -7,7 +7,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.8.0 candidate
 
-### Added — AEN801 (Alif Ensemble E8) bench bring-up: Flow D MRAM burn, Ethernet end-to-end, 15/17 peripheral apps PASS
+### Changed — clang-format pinned to v22 (was v14)
+
+- The C/C++ format gate now pins **clang-format-22** (was clang-format-14),
+  installed via the `clang-format==22.1.5` **pip wheel** in CI (apt does not
+  package v22; the wheel also ships `clang-format-diff.py`). `scripts/setup-clang-format.sh`
+  installs the same wheel locally so contributors match CI. The whole in-scope
+  tree (non-`zephyr/**`/`vendors/**`) was reformatted under v22 (66 files,
+  whitespace-only); `.clang-format` keeps `Cpp11BracedListStyle: false` so output
+  stays reproducible across versions, and `gen_soc_caps.py` now formats with v22.
 
 First full bench bring-up of the `E1M-AEN801` (Alif Ensemble E8, Cortex-M55-HE)
 on real silicon (alplab-gw).

@@ -349,16 +349,16 @@ static alp_status_t z_aead_encrypt(alp_aead_backend_state_t *state,
 	uint8_t      scratch[4096 + 16];
 	size_t       produced = 0;
 	psa_status_t st       = psa_aead_encrypt(be->key_id,
-                                       psa_alg,
-                                       iv,
-                                       iv_len,
-                                       aad,
-                                       aad_len,
-                                       plain,
-                                       plain_len,
-                                       scratch,
-                                       sizeof(scratch),
-                                       &produced);
+	                                         psa_alg,
+	                                         iv,
+	                                         iv_len,
+	                                         aad,
+	                                         aad_len,
+	                                         plain,
+	                                         plain_len,
+	                                         scratch,
+	                                         sizeof(scratch),
+	                                         &produced);
 	if (st != PSA_SUCCESS) return psa_to_alp(st);
 
 	if (produced < tag_len || produced - tag_len != plain_len) return ALP_ERR_IO;
@@ -408,16 +408,16 @@ static alp_status_t z_aead_decrypt(alp_aead_backend_state_t *state,
 
 	size_t       produced = 0;
 	psa_status_t st       = psa_aead_decrypt(be->key_id,
-                                       psa_alg,
-                                       iv,
-                                       iv_len,
-                                       aad,
-                                       aad_len,
-                                       scratch,
-                                       cipher_len + tag_len,
-                                       plain_out,
-                                       cipher_len,
-                                       &produced);
+	                                         psa_alg,
+	                                         iv,
+	                                         iv_len,
+	                                         aad,
+	                                         aad_len,
+	                                         scratch,
+	                                         cipher_len + tag_len,
+	                                         plain_out,
+	                                         cipher_len,
+	                                         &produced);
 	return psa_to_alp(st);
 #else
 	(void)state;

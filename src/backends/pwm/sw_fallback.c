@@ -40,7 +40,7 @@
  * headers.  offsetof comes from <stddef.h> above.  Guarded so a Zephyr build
  * that already defines it (transitively) keeps its own. */
 #ifndef CONTAINER_OF
-#define CONTAINER_OF(ptr, type, member) ((type *)((char *)(ptr)-offsetof(type, member)))
+#define CONTAINER_OF(ptr, type, member) ((type *)((char *)(ptr) - offsetof(type, member)))
 #endif
 
 #include <alp/backend.h>

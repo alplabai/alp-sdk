@@ -48,7 +48,7 @@ extern "C" {
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) || \
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) ||                                       \
     defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
 #include "tensorflow/lite/micro/kernels/ethos_u/ethosu.h"
 #define ALP_INFERENCE_TFLM_HAS_ETHOS_U 1
@@ -56,7 +56,8 @@ extern "C" {
 
 LOG_MODULE_REGISTER(alp_inference_tflm, CONFIG_LOG_DEFAULT_LEVEL);
 
-namespace {
+namespace
+{
 
 #if defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85)
 constexpr const char *kEthosUVariantName = "ethos-u85";
@@ -83,17 +84,17 @@ constexpr const char *kTflmKernelVariant = "scalar-ref-default";
 
 /* Per-handle TFLM state.  Lives in the backend state's be_data slot. */
 struct TflmState {
-    const tflite::Model *model = nullptr;
-    /* Op resolver -- 32 ops covers MobileNetV2-style models with
+	const tflite::Model *model = nullptr;
+	/* Op resolver -- 32 ops covers MobileNetV2-style models with
      * room for a couple of custom Ethos-U ops.  Bigger models can
      * raise the bound via CONFIG_ALP_SDK_INFERENCE_TFLM_MAX_OPS. */
-    tflite::MicroMutableOpResolver<32> resolver;
-    tflite::MicroInterpreter          *interp = nullptr;
-    /* Tensor arena -- caller-supplied via cfg.arena, or a built-in
+	tflite::MicroMutableOpResolver<32> resolver;
+	tflite::MicroInterpreter          *interp = nullptr;
+	/* Tensor arena -- caller-supplied via cfg.arena, or a built-in
      * static fall-back when cfg.arena is NULL. */
-    uint8_t *arena_buf  = nullptr;
-    size_t   arena_size = 0;
-    bool     own_arena  = false;
+	uint8_t *arena_buf  = nullptr;
+	size_t   arena_size = 0;
+	bool     own_arena  = false;
 };
 
 constexpr size_t kDefaultArenaBytes = 128 * 1024;
@@ -103,71 +104,71 @@ bool g_default_arena_in_use = false;
 /* Map a TFL data type onto the alp_inference dtype enum. */
 alp_inference_dtype_t tfl_dtype_to_alp(TfLiteType t)
 {
-    switch (t) {
-    case kTfLiteFloat32:
-        return ALP_INFERENCE_DTYPE_F32;
-    case kTfLiteFloat16:
-        return ALP_INFERENCE_DTYPE_F16;
-    case kTfLiteInt8:
-        return ALP_INFERENCE_DTYPE_INT8;
-    case kTfLiteUInt8:
-        return ALP_INFERENCE_DTYPE_UINT8;
-    case kTfLiteInt16:
-        return ALP_INFERENCE_DTYPE_INT16;
-    case kTfLiteInt32:
-        return ALP_INFERENCE_DTYPE_INT32;
-    default:
-        return ALP_INFERENCE_DTYPE_F32;
-    }
+	switch (t) {
+	case kTfLiteFloat32:
+		return ALP_INFERENCE_DTYPE_F32;
+	case kTfLiteFloat16:
+		return ALP_INFERENCE_DTYPE_F16;
+	case kTfLiteInt8:
+		return ALP_INFERENCE_DTYPE_INT8;
+	case kTfLiteUInt8:
+		return ALP_INFERENCE_DTYPE_UINT8;
+	case kTfLiteInt16:
+		return ALP_INFERENCE_DTYPE_INT16;
+	case kTfLiteInt32:
+		return ALP_INFERENCE_DTYPE_INT32;
+	default:
+		return ALP_INFERENCE_DTYPE_F32;
+	}
 }
 
 void register_default_ops(tflite::MicroMutableOpResolver<32> &r)
 {
-    /* Minimum op set for the v0.2 reference MobileNetV2.  Vela-
+	/* Minimum op set for the v0.2 reference MobileNetV2.  Vela-
      * compiled models replace the bulk of these with Ethos-U
      * custom ops; the fallback ones still need to be registered
      * for the layers Vela leaves in CPU-land. */
-    r.AddConv2D();
-    r.AddDepthwiseConv2D();
-    r.AddFullyConnected();
-    r.AddSoftmax();
-    r.AddReshape();
-    r.AddAveragePool2D();
-    r.AddMaxPool2D();
-    r.AddAdd();
-    r.AddMul();
-    r.AddQuantize();
-    r.AddDequantize();
-    r.AddPad();
-    r.AddMean();
-    r.AddRelu();
-    r.AddRelu6();
-    r.AddLogistic();
+	r.AddConv2D();
+	r.AddDepthwiseConv2D();
+	r.AddFullyConnected();
+	r.AddSoftmax();
+	r.AddReshape();
+	r.AddAveragePool2D();
+	r.AddMaxPool2D();
+	r.AddAdd();
+	r.AddMul();
+	r.AddQuantize();
+	r.AddDequantize();
+	r.AddPad();
+	r.AddMean();
+	r.AddRelu();
+	r.AddRelu6();
+	r.AddLogistic();
 #if defined(ALP_INFERENCE_TFLM_HAS_ETHOS_U)
-    r.AddEthosU();
+	r.AddEthosU();
 #endif
 }
 
 void fill_tensor_descriptor(const TfLiteTensor *t, alp_inference_tensor_t *out)
 {
-    out->data       = t->data.raw;
-    out->size_bytes = t->bytes;
-    out->dtype      = tfl_dtype_to_alp(t->type);
-    out->rank       = (uint8_t)((t->dims->size <= 4) ? t->dims->size : 4);
-    for (int i = 0; i < out->rank; ++i) {
-        out->shape[i] = (uint16_t)t->dims->data[i];
-    }
-    out->scale =
-        (t->quantization.type == kTfLiteAffineQuantization)
-            ? static_cast<TfLiteAffineQuantization *>(t->quantization.params)->scale->data[0]
-            : 1.0f;
-    out->zero_point =
-        (t->quantization.type == kTfLiteAffineQuantization)
-            ? static_cast<TfLiteAffineQuantization *>(t->quantization.params)->zero_point->data[0]
-            : 0;
+	out->data       = t->data.raw;
+	out->size_bytes = t->bytes;
+	out->dtype      = tfl_dtype_to_alp(t->type);
+	out->rank       = (uint8_t)((t->dims->size <= 4) ? t->dims->size : 4);
+	for (int i = 0; i < out->rank; ++i) {
+		out->shape[i] = (uint16_t)t->dims->data[i];
+	}
+	out->scale =
+	    (t->quantization.type == kTfLiteAffineQuantization)
+	        ? static_cast<TfLiteAffineQuantization *>(t->quantization.params)->scale->data[0]
+	        : 1.0f;
+	out->zero_point =
+	    (t->quantization.type == kTfLiteAffineQuantization)
+	        ? static_cast<TfLiteAffineQuantization *>(t->quantization.params)->zero_point->data[0]
+	        : 0;
 }
 
-}  // namespace
+} // namespace
 
 /* ------------------------------------------------------------------ */
 /* Backend ops bodies.  C++-linkage internally; the ops vtable is
@@ -177,122 +178,120 @@ void fill_tensor_descriptor(const TfLiteTensor *t, alp_inference_tensor_t *out)
 
 extern "C" {
 
-static alp_status_t tflm_open(const alp_inference_config_t *cfg,
+static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
                               alp_inference_backend_state_t *state,
-                              alp_capabilities_t *caps_out)
+                              alp_capabilities_t            *caps_out)
 {
-    /* One-shot variant log so HIL operators can confirm which
+	/* One-shot variant log so HIL operators can confirm which
      * kernel set the build actually linked against.  Drops to
      * LOG_DBG after the first call to keep per-model open() noise
      * down. */
-    static bool s_variant_logged = false;
-    if (!s_variant_logged) {
-        LOG_INF("tflm backend: cpu_kernels=%s npu_variant=%s",
-                kTflmKernelVariant, kEthosUVariantName);
-        s_variant_logged = true;
-    } else {
-        LOG_DBG("tflm backend: cpu_kernels=%s npu_variant=%s",
-                kTflmKernelVariant, kEthosUVariantName);
-    }
+	static bool s_variant_logged = false;
+	if (!s_variant_logged) {
+		LOG_INF(
+		    "tflm backend: cpu_kernels=%s npu_variant=%s", kTflmKernelVariant, kEthosUVariantName);
+		s_variant_logged = true;
+	} else {
+		LOG_DBG(
+		    "tflm backend: cpu_kernels=%s npu_variant=%s", kTflmKernelVariant, kEthosUVariantName);
+	}
 
-    auto *st = new (std::nothrow) TflmState();
-    if (st == nullptr) return ALP_ERR_NOMEM;
+	auto *st = new (std::nothrow) TflmState();
+	if (st == nullptr) return ALP_ERR_NOMEM;
 
-    if (cfg->arena != nullptr && cfg->arena_bytes > 0) {
-        st->arena_buf  = static_cast<uint8_t *>(cfg->arena);
-        st->arena_size = cfg->arena_bytes;
-        st->own_arena  = false;
-    } else {
-        if (g_default_arena_in_use) {
-            delete st;
-            return ALP_ERR_NOMEM;
-        }
-        g_default_arena_in_use = true;
-        st->arena_buf          = g_default_arena;
-        st->arena_size         = kDefaultArenaBytes;
-        st->own_arena          = true;
-    }
+	if (cfg->arena != nullptr && cfg->arena_bytes > 0) {
+		st->arena_buf  = static_cast<uint8_t *>(cfg->arena);
+		st->arena_size = cfg->arena_bytes;
+		st->own_arena  = false;
+	} else {
+		if (g_default_arena_in_use) {
+			delete st;
+			return ALP_ERR_NOMEM;
+		}
+		g_default_arena_in_use = true;
+		st->arena_buf          = g_default_arena;
+		st->arena_size         = kDefaultArenaBytes;
+		st->own_arena          = true;
+	}
 
-    st->model = tflite::GetModel(cfg->model_data);
-    if (st->model->version() != TFLITE_SCHEMA_VERSION) {
-        if (st->own_arena) g_default_arena_in_use = false;
-        delete st;
-        return ALP_ERR_INVAL;
-    }
+	st->model = tflite::GetModel(cfg->model_data);
+	if (st->model->version() != TFLITE_SCHEMA_VERSION) {
+		if (st->own_arena) g_default_arena_in_use = false;
+		delete st;
+		return ALP_ERR_INVAL;
+	}
 
-    register_default_ops(st->resolver);
+	register_default_ops(st->resolver);
 
-    st->interp = new (std::nothrow) tflite::MicroInterpreter(
-        st->model, st->resolver, st->arena_buf, st->arena_size);
-    if (st->interp == nullptr) {
-        if (st->own_arena) g_default_arena_in_use = false;
-        delete st;
-        return ALP_ERR_NOMEM;
-    }
+	st->interp = new (std::nothrow)
+	    tflite::MicroInterpreter(st->model, st->resolver, st->arena_buf, st->arena_size);
+	if (st->interp == nullptr) {
+		if (st->own_arena) g_default_arena_in_use = false;
+		delete st;
+		return ALP_ERR_NOMEM;
+	}
 
-    if (st->interp->AllocateTensors() != kTfLiteOk) {
-        delete st->interp;
-        if (st->own_arena) g_default_arena_in_use = false;
-        delete st;
-        return ALP_ERR_IO;
-    }
+	if (st->interp->AllocateTensors() != kTfLiteOk) {
+		delete st->interp;
+		if (st->own_arena) g_default_arena_in_use = false;
+		delete st;
+		return ALP_ERR_IO;
+	}
 
-    state->be_data  = st;
-    state->dev      = nullptr;
-    caps_out->flags = 0u;  /* per-instance flags layered by NPU backends */
-    return ALP_OK;
+	state->be_data  = st;
+	state->dev      = nullptr;
+	caps_out->flags = 0u; /* per-instance flags layered by NPU backends */
+	return ALP_OK;
 }
 
 static size_t tflm_num_inputs(alp_inference_backend_state_t *state)
 {
-    auto *st = static_cast<TflmState *>(state->be_data);
-    return (st != nullptr && st->interp != nullptr) ? st->interp->inputs_size() : 0u;
+	auto *st = static_cast<TflmState *>(state->be_data);
+	return (st != nullptr && st->interp != nullptr) ? st->interp->inputs_size() : 0u;
 }
 
 static size_t tflm_num_outputs(alp_inference_backend_state_t *state)
 {
-    auto *st = static_cast<TflmState *>(state->be_data);
-    return (st != nullptr && st->interp != nullptr) ? st->interp->outputs_size() : 0u;
+	auto *st = static_cast<TflmState *>(state->be_data);
+	return (st != nullptr && st->interp != nullptr) ? st->interp->outputs_size() : 0u;
 }
 
-static alp_status_t tflm_get_input(alp_inference_backend_state_t *state,
-                                   size_t index,
-                                   alp_inference_tensor_t *out)
+static alp_status_t
+tflm_get_input(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
-    auto *st = static_cast<TflmState *>(state->be_data);
-    if (st == nullptr || st->interp == nullptr) return ALP_ERR_NOT_READY;
-    if (index >= st->interp->inputs_size()) return ALP_ERR_OUT_OF_RANGE;
-    fill_tensor_descriptor(st->interp->input(index), out);
-    return ALP_OK;
+	auto *st = static_cast<TflmState *>(state->be_data);
+	if (st == nullptr || st->interp == nullptr) return ALP_ERR_NOT_READY;
+	if (index >= st->interp->inputs_size()) return ALP_ERR_OUT_OF_RANGE;
+	fill_tensor_descriptor(st->interp->input(index), out);
+	return ALP_OK;
 }
 
-static alp_status_t tflm_get_output(alp_inference_backend_state_t *state,
-                                    size_t index,
-                                    alp_inference_tensor_t *out)
+static alp_status_t
+tflm_get_output(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
-    auto *st = static_cast<TflmState *>(state->be_data);
-    if (st == nullptr || st->interp == nullptr) return ALP_ERR_NOT_READY;
-    if (index >= st->interp->outputs_size()) return ALP_ERR_OUT_OF_RANGE;
-    fill_tensor_descriptor(st->interp->output(index), out);
-    return ALP_OK;
+	auto *st = static_cast<TflmState *>(state->be_data);
+	if (st == nullptr || st->interp == nullptr) return ALP_ERR_NOT_READY;
+	if (index >= st->interp->outputs_size()) return ALP_ERR_OUT_OF_RANGE;
+	fill_tensor_descriptor(st->interp->output(index), out);
+	return ALP_OK;
 }
 
 static alp_status_t tflm_invoke(alp_inference_backend_state_t *state)
 {
-    auto *st = static_cast<TflmState *>(state->be_data);
-    if (st == nullptr || st->interp == nullptr) return ALP_ERR_NOT_READY;
-    return (st->interp->Invoke() == kTfLiteOk) ? ALP_OK : ALP_ERR_IO;
+	auto *st = static_cast<TflmState *>(state->be_data);
+	if (st == nullptr || st->interp == nullptr) return ALP_ERR_NOT_READY;
+	return (st->interp->Invoke() == kTfLiteOk) ? ALP_OK : ALP_ERR_IO;
 }
 
 static void tflm_close(alp_inference_backend_state_t *state)
 {
-    auto *st = static_cast<TflmState *>(state->be_data);
-    if (st == nullptr) return;
+	auto *st = static_cast<TflmState *>(state->be_data);
+	if (st == nullptr) return;
 
-    delete st->interp;
-    if (st->own_arena) g_default_arena_in_use = false;
-    delete st;
-    state->be_data = nullptr;
+	delete st->interp;
+	if (st->own_arena) g_default_arena_in_use = false;
+	delete st;
+	state->be_data = nullptr;
 }
 
 /* Shared ops vtable.  Exported via the C ABI as
@@ -301,23 +300,25 @@ static void tflm_close(alp_inference_backend_state_t *state)
  * duplicating it -- the only thing that changes across the
  * three registrations is silicon_ref + vendor + priority. */
 const alp_inference_ops_t alp_inference_tflm_ops = {
-    /* .open        */ tflm_open,
-    /* .num_inputs  */ tflm_num_inputs,
-    /* .num_outputs */ tflm_num_outputs,
-    /* .get_input   */ tflm_get_input,
-    /* .get_output  */ tflm_get_output,
-    /* .invoke      */ tflm_invoke,
-    /* .close       */ tflm_close,
+	/* .open        */ tflm_open,
+	/* .num_inputs  */ tflm_num_inputs,
+	/* .num_outputs */ tflm_num_outputs,
+	/* .get_input   */ tflm_get_input,
+	/* .get_output  */ tflm_get_output,
+	/* .invoke      */ tflm_invoke,
+	/* .close       */ tflm_close,
 };
 
-ALP_BACKEND_REGISTER(inference, tflm, {
-    /* .silicon_ref */ "*",
-    /* .vendor      */ "tflm",
-    /* .base_caps   */ 0u,
-    /* .priority    */ 50,
-    /* .ops         */ &alp_inference_tflm_ops,
-    /* .probe       */ NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     tflm,
+                     {
+                         /* .silicon_ref */ "*",
+                         /* .vendor      */ "tflm",
+                         /* .base_caps   */ 0u,
+                         /* .priority    */ 50,
+                         /* .ops         */ &alp_inference_tflm_ops,
+                         /* .probe       */ NULL,
+                     });
 
 /* ------------------------------------------------------------------ */
 /* Variant introspection.  Apps + integration tests can ask the SDK
@@ -333,19 +334,19 @@ ALP_BACKEND_REGISTER(inference, tflm, {
 
 const char *alp_inference_tflm_cpu_kernel_variant(void)
 {
-    return kTflmKernelVariant;
+	return kTflmKernelVariant;
 }
 
 const char *alp_inference_tflm_npu_variant_name(void)
 {
-    /* TODO(v0.7 + Arm driver vendor pack): when multiple Ethos-U
+	/* TODO(v0.7 + Arm driver vendor pack): when multiple Ethos-U
      * variants are linked (U55+U85 on E4/E6/E8), the active variant
      * for a given handle is decided by the Vela-compiled model's
      * accelerator-config tag -- not by build-time selection.  Surface
      * a per-handle variant query once the Arm driver pack lands.
      * Today we return the highest-tier variant the build linked,
      * which is the right answer for the headline log line. */
-    return kEthosUVariantName;
+	return kEthosUVariantName;
 }
 
-}  /* extern "C" */
+} /* extern "C" */

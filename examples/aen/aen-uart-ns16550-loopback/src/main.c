@@ -50,11 +50,11 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/sys/printk.h>
 
-#define UART_NODE   DT_NODELABEL(uart3)
+#define UART_NODE DT_NODELABEL(uart3)
 
 /* Absolute base straight from the dtsi reg cell, so it stays correct if the
  * node ever moves.  uart3: reg = <0x4901b000 0x1000>. */
-#define UART_BASE   ((uint32_t)DT_REG_ADDR(UART_NODE))
+#define UART_BASE ((uint32_t)DT_REG_ADDR(UART_NODE))
 
 /* ns16550 register byte offsets.  reg-shift=2 -> reg_interval = 1<<2 = 4 bytes,
  * so logical register N lives at byte offset N*4 (uart_ns16550.c REG_* * 4):
@@ -64,23 +64,23 @@
  *   REG_MDC (MCR)    = 4 -> 0x10
  *   REG_LSR          = 5 -> 0x14
  */
-#define OFF_DLL   0x00U
-#define OFF_DLH   0x04U
-#define OFF_LCR   0x0CU
-#define OFF_MCR   0x10U
-#define OFF_LSR   0x14U
+#define OFF_DLL 0x00U
+#define OFF_DLH 0x04U
+#define OFF_LCR 0x0CU
+#define OFF_MCR 0x10U
+#define OFF_LSR 0x14U
 
 /* 16550 bit defs (mirror uart_ns16550.c). */
-#define LCR_CS8   0x03U   /* 8 data bits */
-#define LCR_DLAB  0x80U   /* divisor latch access */
-#define MCR_LOOP  0x10U   /* internal loopback */
+#define LCR_CS8  0x03U /* 8 data bits */
+#define LCR_DLAB 0x80U /* divisor latch access */
+#define MCR_LOOP 0x10U /* internal loopback */
 
 /* Expected programmed values (see header derivation). */
-#define EXP_DLL   0x36U   /* 54 */
-#define EXP_DLH   0x00U
-#define EXP_LCR   LCR_CS8 /* 0x03, 8N1, DLAB clear */
+#define EXP_DLL 0x36U /* 54 */
+#define EXP_DLH 0x00U
+#define EXP_LCR LCR_CS8 /* 0x03, 8N1, DLAB clear */
 
-#define TEST_STR  "ALP-UART3-LOOPBACK-115200"
+#define TEST_STR "ALP-UART3-LOOPBACK-115200"
 
 static inline uint8_t rd8(uint32_t off)
 {
@@ -108,26 +108,25 @@ int main(void)
 	}
 
 	/* ---- A. Functional loopback round-trip via the public API. ---- */
-	const char *tx = TEST_STR;
-	size_t n = strlen(tx);
-	char rx[64] = {0};
-	size_t got = 0;
-	bool rx_ok = true;
+	const char *tx     = TEST_STR;
+	size_t      n      = strlen(tx);
+	char        rx[64] = { 0 };
+	size_t      got    = 0;
+	bool        rx_ok  = true;
 
 	for (size_t i = 0; i < n; i++) {
 		uart_poll_out(uart, (unsigned char)tx[i]);
 
 		/* In MCR-LOOP the TX'd byte appears in RDR almost immediately; poll a
 		 * bounded number of times so a broken RX path fails instead of hangs. */
-		unsigned char c = 0;
-		int rc = -1;
+		unsigned char c  = 0;
+		int           rc = -1;
 		for (int spin = 0; spin < 100000 && rc != 0; spin++) {
 			rc = uart_poll_in(uart, &c);
 		}
 		if (rc != 0) {
 			rx_ok = false;
-			printk("loopback: no RX byte for tx[%u]='%c' (timeout)\n",
-			       (unsigned)i, tx[i]);
+			printk("loopback: no RX byte for tx[%u]='%c' (timeout)\n", (unsigned)i, tx[i]);
 			break;
 		}
 		if (got < sizeof(rx) - 1) {
@@ -147,37 +146,48 @@ int main(void)
 	wr8(OFF_LCR, lcr_live | LCR_DLAB);
 	uint8_t dll = rd8(OFF_DLL);
 	uint8_t dlh = rd8(OFF_DLH);
-	wr8(OFF_LCR, lcr_live);                 /* restore exactly */
+	wr8(OFF_LCR, lcr_live); /* restore exactly */
 
 	uint8_t lcr_after = rd8(OFF_LCR);
-	uint8_t mcr = rd8(OFF_MCR);
-	uint8_t lsr = rd8(OFF_LSR);
+	uint8_t mcr       = rd8(OFF_MCR);
+	uint8_t lsr       = rd8(OFF_LSR);
 
 	printk("-- regs --\n");
 	printk("DLL  0x%08x = 0x%02x (exp 0x%02x)\n", UART_BASE + OFF_DLL, dll, EXP_DLL);
 	printk("DLH  0x%08x = 0x%02x (exp 0x%02x)\n", UART_BASE + OFF_DLH, dlh, EXP_DLH);
 	printk("LCR  0x%08x = 0x%02x (exp 0x%02x, 8N1 DLAB clear)\n",
-	       UART_BASE + OFF_LCR, lcr_after, EXP_LCR);
+	       UART_BASE + OFF_LCR,
+	       lcr_after,
+	       EXP_LCR);
 	printk("MCR  0x%08x = 0x%02x (LOOP bit4 exp 1)\n", UART_BASE + OFF_MCR, mcr);
 	printk("LSR  0x%08x = 0x%02x (no err bits 1..4 exp)\n", UART_BASE + OFF_LSR, lsr);
 
 	/* ---- Verdict. ---- */
 	bool regs_ok = (dll == EXP_DLL) && (dlh == EXP_DLH) &&
-		       ((lcr_after & 0x3FU) == EXP_LCR);   /* mask DLAB/break, check framing */
+	               ((lcr_after & 0x3FU) == EXP_LCR); /* mask DLAB/break, check framing */
 
 	if (match && regs_ok) {
 		printk("RESULT PASS: ns16550 uart3 looped \"%s\" back; "
 		       "DLL=0x%02x DLH=0x%02x LCR=0x%02x (115200 8N1)\n",
-		       TEST_STR, dll, dlh, lcr_after);
+		       TEST_STR,
+		       dll,
+		       dlh,
+		       lcr_after);
 	} else if (regs_ok && !match) {
 		/* Divisor/LCR correct but no byte came back: most likely MCR LOOP not
 		 * set, or (in the physical-wire variant) the TX->RX jumper is missing. */
 		printk("RESULT FAIL: divisor/LCR programmed OK but loopback round-trip "
-		       "failed (MCR=0x%02x; check LOOP bit / jumper)\n", mcr);
+		       "failed (MCR=0x%02x; check LOOP bit / jumper)\n",
+		       mcr);
 	} else {
 		printk("RESULT FAIL: register readback mismatch "
 		       "(DLL=0x%02x exp 0x%02x, DLH=0x%02x exp 0x%02x, LCR=0x%02x exp 0x%02x)\n",
-		       dll, EXP_DLL, dlh, EXP_DLH, lcr_after, EXP_LCR);
+		       dll,
+		       EXP_DLL,
+		       dlh,
+		       EXP_DLH,
+		       lcr_after,
+		       EXP_LCR);
 	}
 
 	return 0;

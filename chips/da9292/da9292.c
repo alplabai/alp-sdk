@@ -263,7 +263,7 @@ alp_status_t da9292_set_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t 
 	/* Round to 5 mV grid. */
 	uint16_t mv_q = mv - ((mv - DA9292_VSET_LO_MIN_MV) % DA9292_VSET_LO_STEP_MV);
 	uint8_t  byte = (uint8_t)(DA9292_VSET_LO_BASE_BYTE +
-                             (mv_q - DA9292_VSET_LO_MIN_MV) / DA9292_VSET_LO_STEP_MV);
+	                          (mv_q - DA9292_VSET_LO_MIN_MV) / DA9292_VSET_LO_STEP_MV);
 	return reg_write(ctx, vout_reg_for(ch), byte);
 }
 

@@ -101,7 +101,7 @@ static bool test_aes128_gcm_roundtrip(void)
 	const uint8_t key[16] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
 		                      0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
 	const uint8_t iv[12]  = {
-		 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b
+		0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b
 	};
 	const uint8_t aad[8]    = { 0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7 };
 	const uint8_t plain[19] = "alp-sdk SE crypto!";
@@ -115,7 +115,7 @@ static bool test_aes128_gcm_roundtrip(void)
 	uint8_t      cipher[sizeof(plain)] = { 0 };
 	uint8_t      tag[16]               = { 0 };
 	alp_status_t se                    = alp_aead_encrypt(
-        a, iv, sizeof(iv), aad, sizeof(aad), plain, sizeof(plain), cipher, tag, sizeof(tag));
+	    a, iv, sizeof(iv), aad, sizeof(aad), plain, sizeof(plain), cipher, tag, sizeof(tag));
 	if (se != ALP_OK) {
 		printk("aes128gcm encrypt    : s=%d FAILED\n", (int)se);
 		alp_aead_close(a);
@@ -124,7 +124,7 @@ static bool test_aes128_gcm_roundtrip(void)
 
 	uint8_t      recovered[sizeof(plain)] = { 0 };
 	alp_status_t sd                       = alp_aead_decrypt(
-        a, iv, sizeof(iv), aad, sizeof(aad), cipher, sizeof(cipher), tag, sizeof(tag), recovered);
+	    a, iv, sizeof(iv), aad, sizeof(aad), cipher, sizeof(cipher), tag, sizeof(tag), recovered);
 	alp_aead_close(a);
 
 	const bool ok = (sd == ALP_OK) && (memcmp(recovered, plain, sizeof(plain)) == 0);

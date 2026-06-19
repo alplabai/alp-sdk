@@ -65,12 +65,12 @@ static int call_fft_once(alp_rpc_channel_t *ch, float freq_hz)
 
 	size_t             mags_len = sizeof g_mags;
 	const alp_status_t rv       = alp_rpc_call(ch,
-                                         "fft",
-                                         g_samples,
-                                         sizeof g_samples,
-                                         g_mags,
-                                         &mags_len,
-                                         /* timeout_ms = */ 1000u);
+	                                           "fft",
+	                                           g_samples,
+	                                           sizeof g_samples,
+	                                           g_mags,
+	                                           &mags_len,
+	                                           /* timeout_ms = */ 1000u);
 	if (rv != ALP_OK) {
 		printf("[a55]   alp_rpc_call rv=%d\n", (int)rv);
 		return -1;

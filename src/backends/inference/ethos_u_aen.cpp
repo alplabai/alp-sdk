@@ -65,76 +65,88 @@ extern "C" {
  */
 alp_status_t alp_ethosu_aen_register(void)
 {
-    /* TBD: Alif Ethos-U HAL pack call sequence (ethosu_init
+	/* TBD: Alif Ethos-U HAL pack call sequence (ethosu_init
      * against the AEN U55/U85 reg-base + IRQ).  The Arm Ethos-U
      * driver Zephyr port can also register without an explicit
      * attach when the DT compatible = "arm,ethos-u" node carries
      * the AEN-specific properties. */
-    return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT;
 }
 
 /* Compile-time sanity: building the AEN ethos-u backend without a
  * U-variant selector almost certainly means an orchestrator drift.
  * The cross-check protects HIL from a build that links the wrong
  * Vela kernels for the model. */
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) && \
-    !defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55) && \
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) &&                                       \
+    !defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55) &&                                      \
     !defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85)
 #error "ETHOS_U_AEN backend enabled without VARIANT_U55 or _U85; orchestrator drift"
 #endif
 
-ALP_BACKEND_REGISTER(inference, ethos_u_aen_e3, {
-    /* .silicon_ref */ "alif:ensemble:e3",
-    /* .vendor      */ "alif",
-    /* .base_caps   */ 0u,
-    /* .priority    */ 100,
-    /* .ops         */ &alp_inference_tflm_ops,
-    /* .probe       */ NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     ethos_u_aen_e3,
+                     {
+                         /* .silicon_ref */ "alif:ensemble:e3",
+                         /* .vendor      */ "alif",
+                         /* .base_caps   */ 0u,
+                         /* .priority    */ 100,
+                         /* .ops         */ &alp_inference_tflm_ops,
+                         /* .probe       */ NULL,
+                     });
 
-ALP_BACKEND_REGISTER(inference, ethos_u_aen_e4, {
-    /* .silicon_ref */ "alif:ensemble:e4",
-    /* .vendor      */ "alif",
-    /* .base_caps   */ 0u,
-    /* .priority    */ 100,
-    /* .ops         */ &alp_inference_tflm_ops,
-    /* .probe       */ NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     ethos_u_aen_e4,
+                     {
+                         /* .silicon_ref */ "alif:ensemble:e4",
+                         /* .vendor      */ "alif",
+                         /* .base_caps   */ 0u,
+                         /* .priority    */ 100,
+                         /* .ops         */ &alp_inference_tflm_ops,
+                         /* .probe       */ NULL,
+                     });
 
-ALP_BACKEND_REGISTER(inference, ethos_u_aen_e5, {
-    /* .silicon_ref */ "alif:ensemble:e5",
-    /* .vendor      */ "alif",
-    /* .base_caps   */ 0u,
-    /* .priority    */ 100,
-    /* .ops         */ &alp_inference_tflm_ops,
-    /* .probe       */ NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     ethos_u_aen_e5,
+                     {
+                         /* .silicon_ref */ "alif:ensemble:e5",
+                         /* .vendor      */ "alif",
+                         /* .base_caps   */ 0u,
+                         /* .priority    */ 100,
+                         /* .ops         */ &alp_inference_tflm_ops,
+                         /* .probe       */ NULL,
+                     });
 
-ALP_BACKEND_REGISTER(inference, ethos_u_aen_e6, {
-    /* .silicon_ref */ "alif:ensemble:e6",
-    /* .vendor      */ "alif",
-    /* .base_caps   */ 0u,
-    /* .priority    */ 100,
-    /* .ops         */ &alp_inference_tflm_ops,
-    /* .probe       */ NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     ethos_u_aen_e6,
+                     {
+                         /* .silicon_ref */ "alif:ensemble:e6",
+                         /* .vendor      */ "alif",
+                         /* .base_caps   */ 0u,
+                         /* .priority    */ 100,
+                         /* .ops         */ &alp_inference_tflm_ops,
+                         /* .probe       */ NULL,
+                     });
 
-ALP_BACKEND_REGISTER(inference, ethos_u_aen_e7, {
-    /* .silicon_ref */ "alif:ensemble:e7",
-    /* .vendor      */ "alif",
-    /* .base_caps   */ 0u,
-    /* .priority    */ 100,
-    /* .ops         */ &alp_inference_tflm_ops,
-    /* .probe       */ NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     ethos_u_aen_e7,
+                     {
+                         /* .silicon_ref */ "alif:ensemble:e7",
+                         /* .vendor      */ "alif",
+                         /* .base_caps   */ 0u,
+                         /* .priority    */ 100,
+                         /* .ops         */ &alp_inference_tflm_ops,
+                         /* .probe       */ NULL,
+                     });
 
-ALP_BACKEND_REGISTER(inference, ethos_u_aen_e8, {
-    /* .silicon_ref */ "alif:ensemble:e8",
-    /* .vendor      */ "alif",
-    /* .base_caps   */ 0u,
-    /* .priority    */ 100,
-    /* .ops         */ &alp_inference_tflm_ops,
-    /* .probe       */ NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     ethos_u_aen_e8,
+                     {
+                         /* .silicon_ref */ "alif:ensemble:e8",
+                         /* .vendor      */ "alif",
+                         /* .base_caps   */ 0u,
+                         /* .priority    */ 100,
+                         /* .ops         */ &alp_inference_tflm_ops,
+                         /* .probe       */ NULL,
+                     });
 
-}  /* extern "C" */
+} /* extern "C" */

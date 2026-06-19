@@ -137,11 +137,11 @@ ZTEST(alp_spi_registry, test_sw_fallback_loopback_round_trip)
 	alp_spi_backend_state_t *st   = &h.state;
 	alp_capabilities_t       caps = { 0 };
 	alp_spi_config_t         cfg  = {
-		         .bus_id        = 0u,
-		         .freq_hz       = 1000000u,
-		         .mode          = ALP_SPI_MODE_0,
-		         .bits_per_word = 8u,
-		         .cs_pin_id     = 0xFFFFFFFFu,
+		.bus_id        = 0u,
+		.freq_hz       = 1000000u,
+		.mode          = ALP_SPI_MODE_0,
+		.bits_per_word = 8u,
+		.cs_pin_id     = 0xFFFFFFFFu,
 	};
 
 	zassert_equal(ops->open(&cfg, st, &caps), ALP_OK);

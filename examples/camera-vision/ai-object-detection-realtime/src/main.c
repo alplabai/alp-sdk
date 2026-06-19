@@ -145,12 +145,12 @@ int main(void)
      * NULL with alp_last_error() == ALP_ERR_NOSUPPORT; we
      * tolerate that so the harness can verify the build path. */
 	alp_camera_t *cam       = alp_camera_open(&(alp_camera_config_t){
-	          .camera_id = 0,
-	          .width     = FRAME_W,
-	          .height    = FRAME_H,
-	          .fps       = FRAME_FPS,
-	          .format    = ALP_PIXFMT_RGB565,
-    });
+	    .camera_id = 0,
+	    .width     = FRAME_W,
+	    .height    = FRAME_H,
+	    .fps       = FRAME_FPS,
+	    .format    = ALP_PIXFMT_RGB565,
+	});
 	const bool    camera_ok = (cam != NULL);
 	if (!camera_ok) {
 		LOG_WRN("camera open NOSUPPORT (err=%d) -- skeleton mode", (int)alp_last_error());
@@ -164,17 +164,17 @@ int main(void)
      * NPU -- DEEPX DX-M1 on V2M101, Ethos-U on AEN, DRPAI on
      * stock V2N, CPU fallback on native_sim. */
 	alp_inference_t *inf          = alp_inference_open(&(alp_inference_config_t){
-	             .backend = ALP_INFERENCE_BACKEND_AUTO,
-	             /* TODO(v0.6): the real model header switches format
+	    .backend = ALP_INFERENCE_BACKEND_AUTO,
+	    /* TODO(v0.6): the real model header switches format
          * based on the active backend; v0.5 leaves DXNN as the
          * stub default since this demo's flagship target is the
          * DEEPX path on V2M101. */
-	             .format      = ALP_INFERENCE_MODEL_DXNN,
-	             .model_data  = s_model,
-	             .model_size  = sizeof(s_model),
-	             .arena       = s_arena,
-	             .arena_bytes = sizeof(s_arena),
-    });
+	    .format      = ALP_INFERENCE_MODEL_DXNN,
+	    .model_data  = s_model,
+	    .model_size  = sizeof(s_model),
+	    .arena       = s_arena,
+	    .arena_bytes = sizeof(s_arena),
+	});
 	const bool       inference_ok = (inf != NULL);
 	if (!inference_ok) {
 		LOG_WRN("inference open NOSUPPORT (err=%d) -- skeleton mode", (int)alp_last_error());

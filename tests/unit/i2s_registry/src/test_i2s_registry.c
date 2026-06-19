@@ -141,13 +141,13 @@ ZTEST(alp_i2s_registry, test_sw_fallback_round_trip)
 	alp_i2s_backend_state_t *st   = &h.state;
 	alp_capabilities_t       caps = { 0 };
 	alp_i2s_config_t         cfg  = {
-		         .bus_id         = 0u,
-		         .sample_rate_hz = 48000u,
-		         .word_bits      = 16u,
-		         .channels       = 2u,
-		         .format         = ALP_I2S_FMT_I2S,
-		         .direction      = ALP_I2S_DIR_TX,
-		         .block_frames   = 64u,
+		.bus_id         = 0u,
+		.sample_rate_hz = 48000u,
+		.word_bits      = 16u,
+		.channels       = 2u,
+		.format         = ALP_I2S_FMT_I2S,
+		.direction      = ALP_I2S_DIR_TX,
+		.block_frames   = 64u,
 	};
 
 	zassert_equal(ops->open(&cfg, st, &caps), ALP_OK);

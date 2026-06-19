@@ -142,11 +142,11 @@ ZTEST(alp_uart_registry, test_sw_fallback_loopback_round_trip)
 	alp_uart_backend_state_t *st   = &h.state;
 	alp_capabilities_t        caps = { 0 };
 	alp_uart_config_t         cfg  = {
-		         .port_id   = 0u,
-		         .baudrate  = 115200u,
-		         .data_bits = 8u,
-		         .stop_bits = 1u,
-		         .parity    = ALP_UART_PARITY_NONE,
+		.port_id   = 0u,
+		.baudrate  = 115200u,
+		.data_bits = 8u,
+		.stop_bits = 1u,
+		.parity    = ALP_UART_PARITY_NONE,
 	};
 
 	zassert_equal(ops->open(&cfg, st, &caps), ALP_OK);
@@ -187,11 +187,11 @@ ZTEST(alp_uart_registry, test_rx_ringbuf_returns_nosupport_on_sw_fallback)
 	h.in_use                = true;
 	alp_capabilities_t caps = { 0 };
 	alp_uart_config_t  cfg  = {
-		  .port_id   = 0u,
-		  .baudrate  = 115200u,
-		  .data_bits = 8u,
-		  .stop_bits = 1u,
-		  .parity    = ALP_UART_PARITY_NONE,
+		.port_id   = 0u,
+		.baudrate  = 115200u,
+		.data_bits = 8u,
+		.stop_bits = 1u,
+		.parity    = ALP_UART_PARITY_NONE,
 	};
 	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
 	/* sw_fallback sets state.dev = NULL */
