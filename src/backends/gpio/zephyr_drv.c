@@ -256,6 +256,15 @@ static const alp_gpio_ops_t _ops = {
 	.close       = z_close,
 };
 
+/* Delegation hook for the CC3501E GPIO proxy backend
+ * (src/backends/gpio/cc3501e_proxy.c): pins NOT routed to the inter-chip
+ * bridge fall through to this platform driver.  Exposed so the proxy reuses
+ * the real Zephyr pin I/O instead of re-implementing it. */
+const alp_gpio_ops_t *alp_z_gpio_ops(void)
+{
+	return &_ops;
+}
+
 ALP_BACKEND_REGISTER(gpio,
                      zephyr_drv,
                      {

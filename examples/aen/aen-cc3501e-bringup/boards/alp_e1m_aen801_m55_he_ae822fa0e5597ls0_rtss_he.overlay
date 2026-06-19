@@ -1,0 +1,127 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Inter-chip wiring for the CC3501E bring-up on the E1M-AEN801 (Alif
+ * Ensemble E8, M55-HE).  Declares the SoM-internal Alif<->CC3501E link:
+ * the SPI1 master bus + the two host-driven control nets, all from
+ * metadata/e1m_modules/aen/inter-chip.tsv:
+ *
+ *   SPI1.SCK  P14_6   SPI1.MOSI P14_5   SPI1.MISO P14_4   (-> CC3501E GPIO_27/28/29)
+ *   WIFI_EN   P15_5 (lpgpio 5)          E_WIFI.NRST P15_1_FLEX (lpgpio 1)
+ *
+ * "P15" is the Alif low-power GPIO island (lpgpio @ 0x42002000); the
+ * _FLEX pads are its pins.  P14 is a main-domain port used here purely as
+ * the SPI1 function via pinctrl, so no gpio14 controller node is needed.
+ *
+ * BENCH-UNVERIFIED.  Like the rest of the alp-sdk Alif peripheral layer
+ * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi), the addresses/IRQs are
+ * transcribed from the Apache-2.0 alifsemi/zephyr_alif fork + the AE822
+ * TRM and have NOT been validated on silicon.  The SPI1 pinctrl macros are
+ * RESOLVED against zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h
+ * (SPI1 on P14_4/5/6 = alt-2, the `_C` suffix) and the LP-GPIO mux is the
+ * reset default (alt-0 = LPGPIO); the one remaining genuine unknown is the
+ * SPI1 IRQ number (upstream Zephyr declares no SPI node, so it is not in
+ * the build tree) -- confirm it against the AE822 TRM before relying on
+ * the interrupt-driven path on silicon.
+ */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	/*
+	 * SPI1 master on P14_6 (SCK) / P14_5 (MOSI) / P14_4 (MISO).
+	 *
+	 * RESOLVED against alif-ensemble-pinctrl.h: the SPI1 functions on these
+	 * three pads are alt-2, named with the `_C` suffix
+	 * (PIN_P14_6__SPI1_SCLK_C = ALIF_PINMUX(14, 6, 2), etc.).  input-enable
+	 * on MISO so the pad can sense the slave's drive (the same read-enable
+	 * requirement the I2C pads need on this SoC).
+	 */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+	};
+};
+
+/*
+ * DWC_ssi SPI1 (AHB) -- the on-SoM CC3501E inter-chip link.  Deliberately
+ * NOT in ensemble_e8_peripherals.dtsi (that dtsi declares only the
+ * customer-facing edge SPI0); this is the SoM-internal Wi-Fi link, so it
+ * lives in the consuming app's overlay.  Same driver + flags as spi0
+ * (compatible "alif,dwc-ssi-spi", dwc-ssi layout, fifo-depth 16,
+ * frequency-only ALIF_SPI_CLK).
+ *
+ * reg 0x48104000 = SPI1 base (spi0 is 0x48103000, +0x1000/instance).
+ * BENCH-TBD: interrupts = <138 3> follows the consecutive pattern from
+ * spi0's IRQ 137 -- confirm SPI1_IRQ against the fork's e1.dtsi / TRM.
+ *
+ * No cs-gpios / HW-SS: this rev runs CS-less 3-wire (the host driver
+ * clocks fixed-count lockstep transfers; see chips/cc3501e/cc3501e.c).
+ */
+&clockctrl {
+	status = "okay";
+};
+
+&soc {
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>;          /* BENCH-TBD: confirm SPI1 IRQ */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		/*
+		 * ROOT-CAUSE FIX 2026-06-16: spi_dw_alif's configure takes the
+		 * clock-control path when no clock-frequency is set, and that path
+		 * fails (-EINVAL) for the gateless dummy ALIF_SPI_CLK -> every
+		 * transceive returned ALP_ERR_INVAL with zero SCLK (witness fail_step=1,
+		 * zerr=-EINVAL). Providing the SSI input clock here makes the driver
+		 * use it directly and skip the failing clock-control path. SYST_HCLK =
+		 * AHB = 400 MHz (E8 HWRM); BAUDR = 400M/freq_hz (=50 for an 8 MHz SCLK).
+		 */
+		clock-frequency = <400000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/*
+ * Enable the LP GPIO island so WIFI_EN (P15_5) and E_WIFI.NRST
+ * (P15_1_FLEX) are drivable as outputs.  gpio_dw needs no clocks/pinctrl
+ * on the controller, and the pad->GPIO mux needs no pinctrl group either:
+ * RESOLVED against alif-ensemble-pinctrl.h -- P15_1/P15_5 function 0 (the
+ * reset default) IS LPGPIO (PIN_P15_x__LPGPIO = ALIF_PINMUX(15, x, 0)).
+ */
+&lpgpio {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		/* bus_id 1 in alp_spi_open() -> this controller. */
+		alp-spi1 = &cc3501e_spi;
+	};
+
+	/*
+	 * Compact 2-entry control array for the SoM-internal CC3501E nets, in
+	 * the order the app's CC3501E_PIN_* indices expect.  These are NOT E1M
+	 * edge pads, so this bring-up app intentionally does NOT use the
+	 * 52-slot positional E1M map; a production board file appends such
+	 * SoM-internal control nets after the E1M pad slots.
+	 */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+	};
+};

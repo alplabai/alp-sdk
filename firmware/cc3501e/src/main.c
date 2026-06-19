@@ -25,7 +25,96 @@
  */
 
 #include "transport.h"
+#include "worker.h"
 #include "../hal/cc3501e_hw.h"
+
+#if defined(CC3501E_RTOS_FREERTOS)
+/* ----------------------------------------------------------------- *
+ * ti bench build (FreeRTOS).  The bridge SPI slave runs WITHOUT host- *
+ * DMA (the on-chip radio claims all 12 host-DMA channels): it opens   *
+ * BLOCKING and is serviced by a dedicated blocking-poll TASK that     *
+ * transport_spi_init() spawns (hal/ti/transport_hw_ti_spi.c).  That   *
+ * poll task busy-waits the RX FIFO, so it is created ONE PRIORITY      *
+ * BELOW this bring-up task -- which therefore must stay higher so it   *
+ * can preempt the spinning poll task to drain the async worker (the   *
+ * seconds-long Wlan_* lazy-start) and run the housekeeping tick.      *
+ * (The native/stub build keeps the bare WFI loop below.)              *
+ * ----------------------------------------------------------------- */
+#include <FreeRTOS.h>
+#include <task.h>
+
+/* 2048 words = 8 KB.  Was 512 (2 KB), which OVERFLOWED on the Wi-Fi build: this
+ * task runs cc3501e_hw_wifi_boot_start -> Wlan_Start -> InitHostDriver ->
+ * init_device -> FW download, a deep CC35xx host-driver chain.  TI's
+ * network_terminal runs Wlan_Start on a 6048-byte thread (main_freertos.c
+ * THREADSTACKSIZE); 8 KB gives margin.  A 2 KB overflow faulted the task before
+ * Wlan_Start returned, leaving the bridge SPI dead from boot (ping_ok=0,
+ * reqhdr_rx=0x00000000) -- bench-proven.  (The transport + FW-event threads
+ * Wlan_Start spawns get their own 4096+1200-byte stacks from the FreeRTOS heap.) */
+#define CC3501E_BRINGUP_STACK_WORDS 2048u
+static StackType_t  bringup_stack[CC3501E_BRINGUP_STACK_WORDS];
+static StaticTask_t bringup_tcb;
+
+static void bringup_task(void *arg)
+{
+	(void)arg;
+#if defined(CC3501E_CONTROL_TRANSPORT_SDIO)
+	transport_sdio_init();
+#else
+	transport_spi_init();
+#endif
+
+	/* Confirm the MCUboot/PSA-FWU image FIRST (psa_fwu_accept, run by the first
+	 * cc3501e_hw_tick) -- BEFORE anything that might block.  SHIP-CRITICAL
+	 * ordering: a freshly-programmed vendor image boots as an unconfirmed TRIAL
+	 * and is REVERTED by the cold BL2/MCUboot on the next boot unless the running
+	 * app accepts it.  If a later step hangs (e.g. the radio bring-up) before the
+	 * accept runs, the trial is never confirmed -> every subsequent cold boot
+	 * reverts it -> the vendor image stops launching (host reads
+	 * reqhdr_rx=0xFFFFFFFF) -- bench-proven 2026-06-18.  Accepting here, right
+	 * after the bridge is armed, makes the image permanent regardless of what the
+	 * radio does. */
+	cc3501e_hw_tick();
+
+	/* Radio is brought up LAZILY on the first Wi-Fi op (from the worker drain),
+	 * NOT at boot.  Wlan_Start can be slow/blocking (host-driver + NWP FW
+	 * download); running it here would stall the bridge before any PING and, if it
+	 * ever hangs, take the whole link down.  Deferring keeps the PING / IO /
+	 * config link rock-solid and isolates the radio to the GET_MAC / Wi-Fi path
+	 * (which re-opens the bridge SPI after the op -- see cc3501e_hw_ti.c).
+	 * cc3501e_hw_wifi_boot_start() is left available but intentionally not called. */
+
+	for (;;) {
+		/* DRAIN the async worker OUTSIDE the SPI ISR: a QUEUED job (e.g.
+		 * GET_MAC submitted from the ISR's poll) runs its blocking HAL body
+		 * HERE, on the task, for as long as it needs (Wi-Fi init takes
+		 * seconds).  Meanwhile the SPI ISR keeps answering the host's poll
+		 * re-issues from the worker's shared state -- the whole point of the
+		 * submit/poll seam (P0-4). */
+		worker_run_pending();
+		cc3501e_hw_tick();
+		vTaskDelay(pdMS_TO_TICKS(10));
+	}
+}
+
+int main(void)
+{
+	cc3501e_hw_init();
+	worker_init();
+	(void)xTaskCreateStatic(bringup_task,
+	                        "cc3501e_bringup",
+	                        CC3501E_BRINGUP_STACK_WORDS,
+	                        NULL,
+	                        configMAX_PRIORITIES - 1,
+	                        bringup_stack,
+	                        &bringup_tcb);
+	vTaskStartScheduler();
+	for (;;) {
+	}
+	/* unreachable */
+}
+
+#else /* bare-loop: native/stub build (gd32-bridge model) */
 
 /* The Cortex-M intrinsic; weakly defined here so the scaffold compiles
  * under hosted toolchains where __WFI() is missing. */
@@ -38,6 +127,7 @@ __attribute__((weak)) void __WFI(void)
 int main(void)
 {
 	cc3501e_hw_init();
+	worker_init();
 
 #if defined(CC3501E_CONTROL_TRANSPORT_SDIO)
 	/* Opt-in: the board routes the Alif SDIO controller to the CC3501E
@@ -50,8 +140,14 @@ int main(void)
 
 	for (;;) {
 		__WFI();
+		/* Drain any QUEUED async job (the submit/poll seam) on this idle
+		 * wakeup, then run housekeeping.  On the silicon-free build the
+		 * drain is a no-op (the stub runs jobs synchronously at submit). */
+		worker_run_pending();
 		cc3501e_hw_tick();
 	}
 	/* unreachable */
 	return 0;
 }
+
+#endif /* CC3501E_RTOS_FREERTOS */

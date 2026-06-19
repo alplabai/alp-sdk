@@ -46,6 +46,22 @@ void transport_sdio_init(void);
 void bridge_transport_spi_hw_init(void);
 void bridge_transport_sdio_hw_init(void);
 
+/* Re-establish the armed SPI slave from a clean state (SPI_close + SPI_open +
+ * re-arm the first request header).  The ti backend (hal/ti/transport_hw_ti_spi.c)
+ * implements it; bridge_transport_spi_hw_init() is the first-time path through
+ * the same code.  Called by the ti HAL after Wlan_Start() so the bridge slave
+ * re-claims the host-DMA channel->peripheral mux the Wi-Fi HIF stole when it
+ * brought the radio up (the Wlan_Start DMA-coexistence fix).  No-op on the stub
+ * backend (the weak default below). */
+void bridge_transport_spi_hw_reinit(void);
+
+/* Stand the bridge slave DOWN (cancel the armed transfer + SPI_close, releasing its
+ * DMA) for the DURATION of a radio op that re-arbitrates the shared HIF DMA -- BLE
+ * controller enable, where the NWP HIF handshake hangs if the bridge DMA contends.
+ * Call BEFORE the op; pair with bridge_transport_spi_hw_reinit() AFTER.  No-op on the
+ * stub backend (weak default below). */
+void bridge_transport_spi_hw_suspend(void);
+
 /* ---- SPI slave seams (defined in transport_spi.c) -------------- */
 /* The HW backend (or a host test) drives one request transaction as
  * cs_low -> rx_byte* -> cs_high, then clocks the staged reply back via

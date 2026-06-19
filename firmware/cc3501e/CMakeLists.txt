@@ -59,6 +59,7 @@ set(CC3501E_CONTROL_TRANSPORT "spi" CACHE STRING "Active host-control transport 
 set(CC3501E_BRIDGE_SOURCES
     src/main.c
     src/protocol.c
+    src/worker.c
     src/transport_spi.c
     src/transport_sdio.c
 )

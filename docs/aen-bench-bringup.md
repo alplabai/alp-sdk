@@ -11,7 +11,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 
 | Subsystem | Result | Notes |
 |---|---|---|
-| **SE / debug access** | ✅ M55-HE reachable | Generic `Cortex-M55` J-Link device; CPUID `0x411FD220`, SW-DP IDR `0x4C013477`. The Alif part-number device profile fails to connect — use the generic one. |
+| **SE / debug access** | ✅ M55-HE reachable | Generic `Cortex-M55` J-Link device works (CPUID `0x411FD220`, SW-DP IDR `0x4C013477`). **Update (J-Link V9.46, 2026-06-16): the AE822 part-number device profile (`AE822FA0E5597LS0_M55_HE`) also connects fine** — and it is *required* for the Flow D MRAM flash loader (the generic profile has none). An older J-Link DLL may fail to connect with the part-number device; if so, update J-Link or use the generic profile for read/RAM-run (Flows B/C). |
 | **Production MRAM flash** | ✅ end-to-end | SETOOLS `app-gen-toc` + `app-write-mram` over the SE-UART; device auto-enters maintenance (no strap); SES loads + boots the ATOC (blink ran at `0x58000000`). |
 | **Zephyr boot (alp-sdk image)** | ✅ first light | Boots to the idle thread; "Hello World" read back via RAM console over SWD. |
 | **M55-HP core (second M55)** | ✅ first light (2026-06-17) | The HP core is held in reset at power-on (only the HE core's AP shows a CPUID); released by SES booting an **`M55_HP` ATOC** (`cpu_id=M55_HP`, `loadAddress=0x50000000` = HP ITCM global, vs HE's `0x58000000`). Proven alive by an advancing **SRAM0 liveness beacon** (`0x02000000`: magic `0xA11FE000` + CPUID `0x411FD220` + heartbeat that advances across a re-read) — read over the system/HE AP, not the HP AP. Example `examples/aen/aen-hp-core-smoke`; helper `scripts/bench/aen/flash-jlink-hp.sh`. Unblocks the HE↔HP MHUv2 doorbell. |

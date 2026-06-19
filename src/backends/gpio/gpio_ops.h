@@ -63,4 +63,10 @@ struct alp_gpio {
 	void                    *cb_user;
 };
 
+/* Platform (Zephyr) gpio backend ops accessor -- defined in zephyr_drv.c.
+ * The CC3501E GPIO proxy backend (cc3501e_proxy.c) delegates its non-bridge
+ * pins here so it reuses the real Zephyr pin I/O instead of re-implementing
+ * it.  NULL is never returned. */
+const alp_gpio_ops_t *alp_z_gpio_ops(void);
+
 #endif /* ALP_BACKENDS_GPIO_OPS_H */

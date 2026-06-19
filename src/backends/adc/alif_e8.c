@@ -208,7 +208,7 @@ static alp_status_t alif_e8_read_raw(alp_adc_backend_state_t *st, int32_t *raw_o
 	 * unlike check_buffer_size() at :683 which does test `sequence->options`).
 	 * So adc_read() with .options == NULL faults on a NULL deref before the
 	 * conversion ever runs -- which is exactly the early/empty-console fault the
-	 * <alp/*> loopback hit while the raw-API aen-adc-regcheck (which passes a
+	 * portable <alp/adc.h> loopback hit while the raw-API aen-adc-regcheck (which passes a
 	 * non-NULL options carrying a valid user_data, see its main.c) PASSed.
 	 * Pass a non-NULL options with a stack-byte user_data to satisfy the driver;
 	 * the comparator pointer is only read back by the driver's compare path,
