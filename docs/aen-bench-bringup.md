@@ -38,9 +38,16 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **GPU2D** (`<alp/gpu2d.h>` sw_fallback) | ✅ PASS (RAM-run, 2026-06-17) | Portable 2D surface on the M55-HE via the priority-0 pure-C software fallback (the D/AVE 2D HW backend is opt-in + bench-unverified). `fill_rect` + clip, `blit`, and all four `blend` modes (REPLACE/SRC_OVER/ADDITIVE/MULTIPLY) produce **exact** expected pixels on silicon. Example: `examples/aen/aen-gpu2d-bench`. The D/AVE 2D hardware backend (`alif_dave2d.c`) is the separate bucket-C item. |
 | **Low-power (WFI/SysTick)** | ✅ PASS (RAM-run, 2026-06-17) | Stage-A baseline: the M55-HE enters architectural `__WFI()` via the kernel idle path (a k_timer beats the wake cadence; SysTick wakes it) for N rounds — proven by an advancing SRAM0 beacon + uptime (8 sleeps, 0→420 ms). No `CONFIG_PM` (pinned Zephyr 4.4 ships no Alif PM); the deep IWIC `pm_state_set` path (WICCONTROL HE `0x1A604010`) is the documented Stage-B follow-on. Example: `examples/aen/aen-power-smoke`. |
 | **SE CryptoCell compute** (`<alp/security.h>` SHA / AES-GCM) | ✅ PASS (RAM-run, 2026-06-19) | The portable hash/AEAD surface runs **inside the Secure Enclave's CryptoCell** on the E8: the `se_cryptocell` backend binds at priority 110 and pushes SHA-256 / AES-128-GCM into the SE over the RTSS-HE↔SE MHUv2 pair (the new public `se_service_send_request()` transport, hal_alif patch `0002`). Bench: SHA-256(`"abc"`) matched the NIST known-answer (`s=0`, MATCH) and the AES-128-GCM encrypt→decrypt round-trip matched (`enc=0 dec=0`, MATCH) — both computed in the SE, plus SE TRNG. `CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM` now defaults ON; algs the SE declines fall through to MbedTLS-PSA. Example: `examples/aen/aen-se-crypto`. |
+| **CRC engine** (`crc_alif` / `alif,crc`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | HW CRC32-IEEE on `crc0@48107000` via the Zephyr CRC class API — `crc_begin/update/finish` rc=0, computed `0x684fc31c` = the reference value over a 16-byte input. Example: `examples/aen/aen-crc-regcheck`. |
+| **HWSEM** (`hwsem_alif` / `alif,hwsem`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | `hwsem@4902e000` take/give/count over the in-tree driver: count `0→1→0` across `take_busy`/`give` (master_id `0x410fd222`). Example: `examples/aen/aen-hwsem-regcheck`. |
+| **LPTIMER** (`counter_alif_lptimer` / `alif,lptimer`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | Always-on `lptimer@42001000` ch0 — 32768 Hz down-counter advances (3456 ticks / ~100 ms) via the portable `counter_*` API. Example: `examples/aen/aen-lptimer-regcheck`. |
+| **Comparator (HSCMP)** (`comparator_alif` / `alif,cmp`, Tier-2) | ✅ PASS (RAM-run, 2026-06-19) | `cmp0@49023000` driven via the portable `comparator_*` API (output 1/1, internal DAC6 reference; the connect-but-don't-enable init held — no ISR storm). External pin/threshold edge-trigger = bench TBD (no analog stimulus). Example: `examples/aen/aen-cmp-regcheck`. |
 
-All 17 aen-* bench apps were flashed over flow D and booted on real E8: **15 PASS,
-2 PARTIAL** (both hardware-gated, not code/flow-D bugs).
+The flow-D batch (17 aen-* apps) booted on real E8 at **15 PASS, 2 PARTIAL** (both
+hardware-gated). A 2026-06-19 Flow-C RAM-run pass then **reconfirmed** the SE-crypto
+offload + the CRC / HWSEM / LPTIMER / HSCMP driver bodies (rows above) and the LPRTC
+counter (§ below); the quadrature encoder stays PARTIAL (live count needs the encoder
+physically spun — not a code bug).
 
 ## 2. The four flashing / observation flows
 
