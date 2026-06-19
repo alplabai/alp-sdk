@@ -2086,14 +2086,14 @@ config ALP_SDK_SECURITY_SE_CRYPTOCELL
 	  public se_service_send_request() transport (added by
 	  zephyr/patches/hal_alif/0002-se-service-add-public-send-request.patch).
 	  They are gated by ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM, which
-	  builds + links but defaults OFF pending the on-silicon round-trip;
-	  with it OFF they return ALP_ERR_NOSUPPORT and the dispatcher falls
-	  through to the PSA backend.
+	  defaults ON (bench-validated on E8: SHA-256 + AES-128-GCM computed in
+	  the SE); with it OFF they return ALP_ERR_NOSUPPORT and the dispatcher
+	  falls through to the PSA backend.
 
 config ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
 	bool "SE CryptoCell generic send-request transport seam is available"
 	depends on ALP_SDK_SECURITY_SE_CRYPTOCELL
-	default n
+	default y
 	help
 	  Enables the AES / SHA / CMAC / CCM / GCM / ChaCha20 / Poly1305
 	  compute paths in the SE-CryptoCell backend.  These build a fully
@@ -2101,21 +2101,21 @@ config ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
 	  local_to_global() address translation) and hand it to
 	  alp_se_crypto_send_request().
 
-	  The seam's transport is now provided: the public
-	  se_service_send_request() sends an arbitrary caller-populated SE
-	  service packet over the RTSS-HE <-> SE MHUv2 pair and blocks for the
-	  response (the same work the static send_msg_to_se() does inside
-	  se_service.c), added by
+	  The seam's transport is the public se_service_send_request(), which
+	  sends an arbitrary caller-populated SE service packet over the
+	  RTSS-HE <-> SE MHUv2 pair and blocks for the response (the same work
+	  the static send_msg_to_se() does inside se_service.c), added by
 	  zephyr/patches/hal_alif/0002-se-service-add-public-send-request.patch
 	  and upstreamable to hal_alif.
 
-	  It still defaults OFF: the wire layout compiles + links, but the
-	  end-to-end SE crypto round-trip is bench-pending on real E8 silicon,
-	  and turning it ON makes the SE the default crypto path on the E8
-	  (priority 110, ahead of the PSA backend).  Enable it on the bench to
-	  validate; with it OFF the compute ops return ALP_ERR_NOSUPPORT, the
-	  dispatcher falls through to PSA, and only the RNG path (public
-	  se_service_get_rnd_num) rides the SE.  See #222.
+	  Defaults ON: bench-validated on real E8 silicon (aen-se-crypto, Flow C
+	  RAM-run) -- SHA-256("abc") matched the NIST known-answer and the
+	  AES-128-GCM round-trip matched, both computed in the SE CryptoCell
+	  (the SE backend binds at priority 110 ahead of PSA).  The remaining
+	  family algs ride the identical proven transport + service IDs.  An alg
+	  the SE declines (SHA-384/512, an over-ceiling single-shot input)
+	  returns ALP_ERR_NOSUPPORT and the dispatcher falls through to the PSA
+	  backend.  Turn OFF to force all crypto onto the M55 via PSA.  See #222.
 
 config ALP_SDK_MPROC
 	bool "Real multi-processor IPC for <alp/mproc.h>"

@@ -62,13 +62,14 @@
  * PUBLIC se_service_send_request() -- a generic SE-packet transport added to
  * hal_alif by zephyr/patches/hal_alif/0002-se-service-add-public-send-request
  * .patch (it runs the same se_service_ensure_ready + svc_mutex +
- * send_msg_to_se path the RNG entry rides).  The compute ops stay gated on
- * CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM, which builds + links but
- * defaults OFF until the on-silicon round-trip is bench-validated (turning it
- * ON makes the SE the default E8 crypto path ahead of PSA).  With it OFF they
- * return ALP_ERR_NOSUPPORT and the dispatcher falls through to the PSA
- * backend; flip the Kconfig on the bench and the wire requests below go live
- * unchanged.
+ * send_msg_to_se path the RNG entry rides).  The compute ops are gated on
+ * CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM, which DEFAULTS ON --
+ * bench-validated on real E8 silicon (aen-se-crypto, Flow C RAM-run): the SE
+ * backend binds at priority 110 and the SE CryptoCell computed SHA-256("abc")
+ * to the NIST known-answer and the AES-128-GCM round-trip, both MATCH.  With
+ * it OFF (or for an alg the SE declines -- SHA-384/512, an over-ceiling
+ * single-shot input) the op returns ALP_ERR_NOSUPPORT and the dispatcher
+ * falls through to the PSA backend.
  *
  * @par Address translation: every send_*_addr the SE dereferences is a
  *      GLOBAL address (the SE's view of M55-local memory), produced by
