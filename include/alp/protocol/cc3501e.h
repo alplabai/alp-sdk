@@ -155,6 +155,19 @@ typedef enum {
 	ALP_CC3501E_EVT_BLE_DISCONNECTED   = 0x3E, /* async */
 	ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, /* async */
 
+	/* OTA firmware update (over-the-bridge).  The Alif host streams a signed
+	 * GPE-format vendor image into the CC3501E's NON-primary vendor slot via
+	 * PSA-FWU; on FINISH the CC35 installs + reboots so the cold BL2/MCUboot
+	 * swaps the slot to primary (TRIAL boot), and the swapped image accepts
+	 * itself (cc3501e_hw_tick).  Streamed sequentially: BEGIN(total_len) ->
+	 * WRITE(offset,bytes)* -> FINISH.  See docs/cc3501e-bridge.md "OTA" + the
+	 * device-side Mender contract (the OTA server is a separate repo). */
+	ALP_CC3501E_CMD_OTA_BEGIN  = 0x40, /* req alp_cc3501e_ota_begin_t        */
+	ALP_CC3501E_CMD_OTA_WRITE  = 0x41, /* req alp_cc3501e_ota_write_t + bytes */
+	ALP_CC3501E_CMD_OTA_FINISH = 0x42, /* no payload; install + deferred reboot */
+	ALP_CC3501E_CMD_OTA_ABORT  = 0x43, /* no payload; cancel the session      */
+	ALP_CC3501E_CMD_OTA_STATUS = 0x44, /* reply alp_cc3501e_ota_status_t      */
+
 	/* GPIO proxy.  IO11 / IO13 / IO15..IO21 hang off CC3501E
      * GPIOs; these commands let the Alif read/write them via the
      * inter-chip bus. */
@@ -591,6 +604,46 @@ typedef struct {
 	uint8_t  reserved[2];
 	uint32_t timestamp_us;
 } alp_cc3501e_gpio_event_t;
+
+/* ---- OTA firmware update (over-the-bridge PSA-FWU streaming) ---------------- */
+
+/** Largest image-chunk byte count CMD_OTA_WRITE can carry: the wire payload is
+ *  a 4-byte LE offset followed by the raw bytes, bounded by the frame ceiling. */
+#define ALP_CC3501E_OTA_MAX_CHUNK (ALP_CC3501E_MAX_PAYLOAD - 4u)
+
+/** Payload of CMD_OTA_BEGIN: open an OTA session.  @ref total_len is the full
+ *  signed GPE vendor-image size (manifest + body) the host will stream.  The
+ *  firmware picks the non-primary vendor slot and brings it to READY. */
+typedef struct {
+	uint32_t total_len;
+} alp_cc3501e_ota_begin_t;
+
+/** Header of CMD_OTA_WRITE: a SEQUENTIAL image chunk.  @ref offset is the
+ *  absolute byte offset into the image and MUST equal the firmware's running
+ *  write cursor (out-of-order writes are rejected).  The chunk bytes follow
+ *  inline on the wire (length = payload_len - 4, <= ALP_CC3501E_OTA_MAX_CHUNK).
+ *  The firmware buffers the first TI_FWU_MANIFEST_SIZE bytes for psa_fwu_start,
+ *  then psa_fwu_write()s the remainder. */
+typedef struct {
+	uint32_t offset;
+	/* uint8_t data[] follows (payload_len - 4 bytes). */
+} alp_cc3501e_ota_write_t;
+
+/** OTA session state, reported in @ref alp_cc3501e_ota_status_t::state. */
+typedef enum {
+	ALP_CC3501E_OTA_STATE_IDLE    = 0u, /**< no session open. */
+	ALP_CC3501E_OTA_STATE_WRITING = 1u, /**< BEGIN done; streaming chunks. */
+	ALP_CC3501E_OTA_STATE_STAGED  = 2u, /**< FINISH done; reboot-to-swap pending. */
+	ALP_CC3501E_OTA_STATE_ERROR   = 3u, /**< a step failed; ABORT to reset. */
+} alp_cc3501e_ota_state_t;
+
+/** Reply payload of CMD_OTA_STATUS: lets the host resume / verify progress. */
+typedef struct {
+	uint8_t  state; /**< @ref alp_cc3501e_ota_state_t. */
+	uint8_t  reserved[3];
+	uint32_t bytes_written; /**< bytes accepted into the slot so far. */
+	uint32_t total_len;     /**< total declared at BEGIN. */
+} alp_cc3501e_ota_status_t;
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -48,6 +48,13 @@ static void put_le32(uint8_t *p, uint32_t v)
 	p[3] = (uint8_t)((v >> 24) & 0xFFu);
 }
 
+/* Read a 32-bit little-endian field from the wire byte-by-byte (the request
+ * buffer is not guaranteed 4-aligned, so don't cast through a u32 pointer). */
+static uint32_t get_le32(const uint8_t *p)
+{
+	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
 /* Firmware *release* version reported by GET_DIAG_INFO.fw_version (u16) --
  * distinct from ALP_CC3501E_PROTOCOL_VERSION (GET_VERSION).  Encodes
  * firmware-version.txt 0.1.0 as 0x0001 (the first release). */
@@ -214,6 +221,8 @@ static alp_cc3501e_resp_t hw_to_resp(int rv)
 	switch (rv) {
 	case CC3501E_HW_OK:
 		return ALP_CC3501E_RESP_OK;
+	case CC3501E_HW_BUSY:
+		return ALP_CC3501E_RESP_ERR_BUSY;
 	case CC3501E_HW_ERR_NOTIMPL:
 		return ALP_CC3501E_RESP_ERR_NOT_READY;
 	case CC3501E_HW_ERR_INVAL:
@@ -730,6 +739,100 @@ static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 }
 
 /* --------------------------------------------------------------- */
+/* OTA firmware update (over-the-bridge PSA-FWU streaming) -- v0.2    */
+/* --------------------------------------------------------------- */
+
+/* OTA_BEGIN (0x40): req = alp_cc3501e_ota_begin_t { total_len LE32 }.  Opens
+ * the streaming session; the HAL picks the non-primary vendor slot. */
+static alp_cc3501e_resp_t handle_ota_begin(const uint8_t *req,
+                                           size_t         req_len,
+                                           uint8_t       *reply_data,
+                                           size_t         reply_cap,
+                                           size_t        *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 4u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ota_begin(get_le32(&req[0])));
+}
+
+/* OTA_WRITE (0x41): req = offset(LE32) followed by 1..OTA_MAX_CHUNK image
+ * bytes.  Streams the chunk into the slot (sequential offsets enforced). */
+static alp_cc3501e_resp_t handle_ota_write(const uint8_t *req,
+                                           size_t         req_len,
+                                           uint8_t       *reply_data,
+                                           size_t         reply_cap,
+                                           size_t        *reply_data_len)
+{
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len < 5u || req_len > (size_t)(4u + ALP_CC3501E_OTA_MAX_CHUNK)) {
+		return ALP_CC3501E_RESP_ERR_INVALID;
+	}
+	const uint32_t offset = get_le32(&req[0]);
+	return hw_to_resp(cc3501e_hw_ota_write(offset, &req[4], (uint32_t)(req_len - 4u)));
+}
+
+/* OTA_FINISH (0x42): no payload.  Installs + arms the deferred swap reboot. */
+static alp_cc3501e_resp_t handle_ota_finish(const uint8_t *req,
+                                            size_t         req_len,
+                                            uint8_t       *reply_data,
+                                            size_t         reply_cap,
+                                            size_t        *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ota_finish());
+}
+
+/* OTA_ABORT (0x43): no payload.  Cancels the in-flight session. */
+static alp_cc3501e_resp_t handle_ota_abort(const uint8_t *req,
+                                           size_t         req_len,
+                                           uint8_t       *reply_data,
+                                           size_t         reply_cap,
+                                           size_t        *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ota_abort());
+}
+
+/* OTA_STATUS (0x44): reply = alp_cc3501e_ota_status_t
+ * { state(1) | reserved(3) | bytes_written(LE32) | total_len(LE32) }. */
+static alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
+                                            size_t         req_len,
+                                            uint8_t       *reply_data,
+                                            size_t         reply_cap,
+                                            size_t        *reply_data_len)
+{
+	(void)req;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	if (reply_cap < 12u) return ALP_CC3501E_RESP_ERR_NO_MEM;
+	uint8_t   state   = 0u;
+	uint32_t  written = 0u;
+	uint32_t  total   = 0u;
+	const int rv      = cc3501e_hw_ota_status(&state, &written, &total);
+	if (rv != CC3501E_HW_OK) return hw_to_resp(rv);
+	reply_data[0] = state;
+	reply_data[1] = 0u;
+	reply_data[2] = 0u;
+	reply_data[3] = 0u;
+	put_le32(&reply_data[4], written);
+	put_le32(&reply_data[8], total);
+	*reply_data_len = 12u;
+	return ALP_CC3501E_RESP_OK;
+}
+
+/* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
 
@@ -765,6 +868,22 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
 		break;
 	case ALP_CC3501E_CMD_GET_DIAG_INFO:
 		h = handle_get_diag_info;
+		break;
+	/* OTA firmware update (v0.2). */
+	case ALP_CC3501E_CMD_OTA_BEGIN:
+		h = handle_ota_begin;
+		break;
+	case ALP_CC3501E_CMD_OTA_WRITE:
+		h = handle_ota_write;
+		break;
+	case ALP_CC3501E_CMD_OTA_FINISH:
+		h = handle_ota_finish;
+		break;
+	case ALP_CC3501E_CMD_OTA_ABORT:
+		h = handle_ota_abort;
+		break;
+	case ALP_CC3501E_CMD_OTA_STATUS:
+		h = handle_ota_status;
 		break;
 	/* GPIO proxy + camera enables (v0.4). */
 	case ALP_CC3501E_CMD_GPIO_CONFIGURE:

@@ -164,16 +164,23 @@ $sources = @(
     # Required for the psa_fwu_accept() cold-boot fix (TRM §10.3.2 MCUboot trial-image commit).
     "$out\memcfg\ti_flash_map_config.c")
 
-# OTA-self-install validation updater: embed the signed candidate vendor image blob +
-# the OTFDE flash-decryption driver that psa_fwu_start() pulls in (FlashSetOTFDE is in
-# the already-linked drivers_cc35xx.a; otfde_driver.c just needs its 3 header dirs).
+# OTFDE flash-decryption driver: the over-the-bridge OTA session (psa_fwu_start /
+# psa_fwu_write in cc3501e_hw_ti.c) pulls it in to write the encrypted vendor image
+# into the alternate slot -- it provides otfdeDriver_Config, which FWU.a references.
+# Linked UNCONDITIONALLY now that OTA-over-bridge is a shipping bridge feature
+# (FlashSetOTFDE itself is in the already-linked drivers_cc35xx.a; otfde_driver.c
+# just needs its header dirs).
+$sources += "$SdkDir\source\ti\drivers\net\wifi\wifi_platform\cc35xx\plat\otfde_driver.c"
+$inc += @("-I$SdkDir\source\ti\drivers\net\wifi\wifi_host_driver\inc_adapt",
+          "-I$SdkDir\source\ti\drivers\net\wifi\wifi_host_driver\inc_common",
+          "-I$SdkDir\source\ti\drivers\net\wifi\wifi_platform\cc35xx\inc_common",
+          "-I$SdkDir\source\ti\drivers\xmem\flash")
+
+# OTA-self-install validation updater: also embed the signed candidate vendor image
+# blob (the streamed OTA path is driven over the bridge instead; this is the
+# embedded-blob self-test that validates the swap mechanism without a host).
 if ($OtaSelftest) {
     $sources += "$fw\hal\ti\cc3501e_ota_candidate.c"
-    $sources += "$SdkDir\source\ti\drivers\net\wifi\wifi_platform\cc35xx\plat\otfde_driver.c"
-    $inc += @("-I$SdkDir\source\ti\drivers\net\wifi\wifi_host_driver\inc_adapt",
-              "-I$SdkDir\source\ti\drivers\net\wifi\wifi_host_driver\inc_common",
-              "-I$SdkDir\source\ti\drivers\net\wifi\wifi_platform\cc35xx\inc_common",
-              "-I$SdkDir\source\ti\drivers\xmem\flash")
 }
 
 # Wi-Fi host integration (P0-5): the OSI/glue/app sources the wifi libs reference but

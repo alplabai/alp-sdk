@@ -585,6 +585,105 @@ ZTEST(cc3501e_bridge_transport, test_cam_enable_disable_ok)
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "CAM_DISABLE(0) -> OK");
 }
 
+/* OTA (v0.2): the OTA opcodes are SYNCHRONOUS handlers (no worker), so a
+ * well-formed request reaches the HAL and the radio-less stub reports NOTIMPL
+ * -> RESP_ERR_NOT_READY in a single transaction; malformed ones are rejected
+ * (INVALID) at the protocol layer before the HAL. */
+ZTEST(cc3501e_bridge_transport, test_ota_begin_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* total_len = 0x00010000 (LE) -> payload {00 00 01 00}. */
+	const uint8_t b[] = {
+		ALP_CC3501E_CMD_OTA_BEGIN, 0x00u, 0x04u, 0x00u, 0x00u, 0x00u, 0x01u, 0x00u
+	};
+	transaction(b, sizeof b);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "ota begin reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_BEGIN, 1u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no PSA-FWU on stub -> NOT_READY");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ota_begin_bad_len_invalid)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* declared 3-byte payload (total_len must be 4) -> INVALID. */
+	const uint8_t b[] = { ALP_CC3501E_CMD_OTA_BEGIN, 0x00u, 0x03u, 0x00u, 0x00u, 0x00u, 0x01u };
+	transaction(b, sizeof b);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "OTA_BEGIN wrong length -> INVALID");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ota_write_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* offset = 0 (LE32) + 4 image bytes -> payload_len 8. */
+	const uint8_t w[] = { ALP_CC3501E_CMD_OTA_WRITE,
+		                  0x00u,
+		                  0x08u,
+		                  0x00u,
+		                  0x00u,
+		                  0x00u,
+		                  0x00u,
+		                  0x00u,
+		                  0xDEu,
+		                  0xADu,
+		                  0xBEu,
+		                  0xEFu };
+	transaction(w, sizeof w);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "ota write reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_WRITE, 1u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no PSA-FWU on stub -> NOT_READY");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ota_write_no_data_invalid)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	/* offset only, no image bytes (req_len must be >= 5) -> INVALID. */
+	const uint8_t w[] = {
+		ALP_CC3501E_CMD_OTA_WRITE, 0x00u, 0x04u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
+	};
+	transaction(w, sizeof w);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "OTA_WRITE without data -> INVALID");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ota_finish_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	const uint8_t f[] = { ALP_CC3501E_CMD_OTA_FINISH, 0x00u, 0x00u, 0x00u };
+	transaction(f, sizeof f);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "ota finish reply = header + status");
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no session on stub -> NOT_READY");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ota_abort_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	const uint8_t a[] = { ALP_CC3501E_CMD_OTA_ABORT, 0x00u, 0x00u, 0x00u };
+	transaction(a, sizeof a);
+	(void)drain(reply, sizeof reply);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "OTA_ABORT on stub -> NOT_READY");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ota_status_not_ready)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	const uint8_t s[] = { ALP_CC3501E_CMD_OTA_STATUS, 0x00u, 0x00u, 0x00u };
+	transaction(s, sizeof s);
+	(void)drain(reply, sizeof reply);
+	/* stub ota_status returns NOTIMPL before the 12-byte body is framed. */
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "OTA_STATUS on stub -> NOT_READY");
+}
+
 /* The worker's `job` is a file-static singleton shared across the whole TU, so a
  * worker-routed test that submits but never collects its result (the body runs
  * synchronously on the stub and caches ERR) would leave the worker non-IDLE and

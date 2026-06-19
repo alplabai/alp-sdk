@@ -34,7 +34,9 @@
 #endif
 #ifndef CC3501E_BRIDGE_SPI_FREQ_HZ
 /* 1 MHz: SILICON-VALIDATED cold-boot value (8 MHz mis-sampled MISO over the on-SoM
- * traces -> cold first-contact failed).  Raise only with the dwc-ssi rx-delay tuned. */
+ * traces -> cold first-contact failed).  Raise only with the dwc-ssi rx-delay tuned.
+ * (Payload-request reliability is handled by the inter-phase settle in
+ * cc3501e_request -- CC3501E_PHASE_SETTLE_US -- not the clock.) */
 #define CC3501E_BRIDGE_SPI_FREQ_HZ 1000000u
 #endif
 

@@ -71,6 +71,7 @@
 #include "ti_drivers_config.h"
 
 #include <ti/drivers/SPI.h>
+#include <ti/drivers/dpl/ClockP.h> /* ClockP_usleep -- settle between SPI re-open retries */
 
 #include "../../src/protocol.h"
 #include "../../src/transport.h"
@@ -232,7 +233,17 @@ static void spi_open_and_arm(void)
 	params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */
 	params.dataSize            = 8;
 
-	spi = SPI_open(CONFIG_SPI_0, &params);
+	/* Retry SPI_open: right after a psa_fwu flash burst (OTA FINISH) the shared
+	 * DMA can be momentarily busy, so a single open intermittently returns NULL ->
+	 * the slave stays dead and the host's poll times out (the OTA-finish flakiness,
+	 * silicon 2026-06-19).  A few short-spaced retries make the re-arm reliable. */
+	for (int attempt = 0; attempt < 8; attempt++) {
+		spi = SPI_open(CONFIG_SPI_0, &params);
+		if (spi != NULL) {
+			break;
+		}
+		ClockP_usleep(2000); /* 2 ms settle */
+	}
 	g_spi_reopen_count++;
 	if (spi == NULL) {
 		/* No console this early; the host's PING simply never completes
