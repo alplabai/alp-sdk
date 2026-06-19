@@ -201,6 +201,12 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
 	return ALP_ERR_TIMEOUT;
 }
 
+/* Inter-phase settle (CS-less lockstep): time given to the CC3501E SPI-slave ISR
+ * to arm the next fixed-count transfer (request payload, reply payload) before
+ * the host clocks it.  ~µs is enough; 200 µs is comfortably safe and negligible
+ * vs the per-request budget.  The r2 bridge (CS + host-IRQ) removes the need. */
+#define CC3501E_PHASE_SETTLE_US 200u
+
 alp_status_t cc3501e_request(cc3501e_t        *ctx,
                              alp_cc3501e_cmd_t cmd,
                              const uint8_t    *tx_payload,
@@ -231,6 +237,14 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	    alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
 	if (s != ALP_OK) return s;
 	if (tx_len > 0) {
+		/* Inter-phase settle (CS-less lockstep): the slave arms the request-PAYLOAD
+		 * transfer in its SPI ISR only AFTER the header transfer completes.  Clocking
+		 * the payload back-to-back (no gap) races that re-arm -> the payload bytes are
+		 * dropped + the frame desyncs.  Header-only requests (PING / the argless worker
+		 * ops) have no payload phase so they were fine; payload requests (OTA_WRITE,
+		 * CONNECT, GPIO_WRITE) need this gap (root-caused on silicon 2026-06-19, where
+		 * OTA streaming timed out per-chunk without it). */
+		alp_delay_us(CC3501E_PHASE_SETTLE_US);
 		s = alp_spi_transceive(ctx->bus, tx_payload, ctx->rx_scratch, tx_len);
 		if (s != ALP_OK) return s;
 	}
@@ -263,6 +277,9 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 		return ALP_ERR_IO;
 	}
 
+	/* Same inter-phase settle before the reply PAYLOAD: the slave arms that
+	 * transfer in its ISR only after the reply-header transfer completes. */
+	alp_delay_us(CC3501E_PHASE_SETTLE_US);
 	/* 4. Reply payload: status byte followed by the response data. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
 	if (s != ALP_OK) return s;
@@ -634,6 +651,10 @@ alp_status_t cc3501e_ota_write(
 	buf[2] = (uint8_t)((offset >> 16) & 0xFFu);
 	buf[3] = (uint8_t)((offset >> 24) & 0xFFu);
 	memcpy(&buf[4], data, len);
+	/* The device stages each chunk synchronously into RAM (no flash until FINISH),
+	 * so a WRITE neither blocks nor disrupts the bridge -- a plain re-send poll is
+	 * safe + fast (the device is idempotent on the cursor).  ALL the OTA flash, and
+	 * thus the only bridge-DMA-disruption window, is FINISH. */
 	return poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_WRITE, buf, 4u + len, NULL, 0, NULL, timeout_ms);
 }
 
@@ -675,10 +696,17 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 	alp_status_t s = cc3501e_ota_begin(ctx, (uint32_t)len, timeout_ms);
 	if (s != ALP_OK) return s;
 
+	/* 256 B = the CC35 flash page / psa_fwu_write granularity (the validated
+	 * SELFTEST installer used CC3501E_OTA_WRITE_CHUNK 256).  Non-page-sized
+	 * chunks make the device psa_fwu_write fail -> the host loops on IO until the
+	 * per-frame timeout (silicon 2026-06-19).  Keep host chunks page-aligned.
+	 * (The final remainder chunk is < 256 B; psa_fwu accepts the partial tail,
+	 * as the selftest's last write did.) */
+	const size_t chunk = 256u;
 	for (size_t off = 0u; off < len;) {
 		size_t n = len - off;
-		if (n > ALP_CC3501E_OTA_MAX_CHUNK) {
-			n = ALP_CC3501E_OTA_MAX_CHUNK;
+		if (n > chunk) {
+			n = chunk;
 		}
 		s = cc3501e_ota_write(ctx, (uint32_t)off, image + off, n, timeout_ms);
 		if (s != ALP_OK) {

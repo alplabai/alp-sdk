@@ -221,6 +221,8 @@ static alp_cc3501e_resp_t hw_to_resp(int rv)
 	switch (rv) {
 	case CC3501E_HW_OK:
 		return ALP_CC3501E_RESP_OK;
+	case CC3501E_HW_BUSY:
+		return ALP_CC3501E_RESP_ERR_BUSY;
 	case CC3501E_HW_ERR_NOTIMPL:
 		return ALP_CC3501E_RESP_ERR_NOT_READY;
 	case CC3501E_HW_ERR_INVAL:

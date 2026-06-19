@@ -31,6 +31,7 @@
 #define CC3501E_HW_ERR_NOTIMPL -1 /* op not wired on this backend (stub)   */
 #define CC3501E_HW_ERR_IO      -2 /* peripheral / radio access failed       */
 #define CC3501E_HW_ERR_INVAL   -3 /* bad argument                           */
+#define CC3501E_HW_BUSY        1  /* op accepted, runs off-ISR; caller must re-poll */
 
 /* --------------------------------------------------------------- */
 /* Lifecycle                                                         */
