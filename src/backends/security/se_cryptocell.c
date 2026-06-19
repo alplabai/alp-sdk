@@ -55,20 +55,20 @@
  * returns the SE TRNG bytes.  This is the same call the query example pulls
  * 8 bytes through rc=0.
  *
- * AES / SHA / CMAC / CCM / GCM / ChaCha20 / Poly1305 -- AUTHORED, GATED.
+ * AES / SHA / CMAC / CCM / GCM / ChaCha20 / Poly1305 -- WIRED, GATED.
  * These build a fully populated CryptoCell request packet (correct ID,
  * struct layout, MbedTLS constants, and local_to_global() on every
- * send_*_addr) and hand it to alp_se_crypto_send_request().  That seam
- * needs a PUBLIC hal_alif entry that sends an arbitrary SE packet over the
- * MHUv2 pair and blocks for the response -- exactly what send_msg_to_se()
- * does inside se_service.c, but THAT symbol is static and hal_alif exports
- * no generic-send wrapper (only the per-service ones, none of which cover
- * the mbedtls_* compute services).  So the compute ops are gated on
- * CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM; with it OFF they return
- * ALP_ERR_NOSUPPORT and the dispatcher falls through to the PSA backend.
- * When the seam lands (an upstreamable hal_alif change exporting the send,
- * or an in-tree Tier-1.5 helper bound to the seservice0r/seservice0s IPM
- * devices) flip the Kconfig and the wire requests below go live unchanged.
+ * send_*_addr) and hand it to alp_se_crypto_send_request(), which calls the
+ * PUBLIC se_service_send_request() -- a generic SE-packet transport added to
+ * hal_alif by zephyr/patches/hal_alif/0002-se-service-add-public-send-request
+ * .patch (it runs the same se_service_ensure_ready + svc_mutex +
+ * send_msg_to_se path the RNG entry rides).  The compute ops stay gated on
+ * CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM, which builds + links but
+ * defaults OFF until the on-silicon round-trip is bench-validated (turning it
+ * ON makes the SE the default E8 crypto path ahead of PSA).  With it OFF they
+ * return ALP_ERR_NOSUPPORT and the dispatcher falls through to the PSA
+ * backend; flip the Kconfig on the bench and the wire requests below go live
+ * unchanged.
  *
  * @par Address translation: every send_*_addr the SE dereferences is a
  *      GLOBAL address (the SE's view of M55-local memory), produced by
@@ -246,20 +246,28 @@ static size_t alp_hash_digest_len(alp_hash_alg_t a)
  * @brief Send a fully populated CryptoCell request packet to the SE and
  *        block for the response.
  *
+ * Binds to the public hal_alif se_service_send_request() transport (added by
+ * zephyr/patches/hal_alif/0002-se-service-add-public-send-request.patch),
+ * which ensures the SE is ready, serialises on the SE service mutex, and
+ * hands the packet to the static send_msg_to_se() over the RTSS-HE <-> SE
+ * MHUv2 pair -- the identical path the public se_service_get_rnd_num() rides.
+ *
  * @param[in,out] packet   Packet whose header.hdr_service_id is set and
  *                          whose send_* fields are populated (with every
  *                          send_*_addr already run through
  *                          local_to_global()).  On return the resp_*
  *                          fields are filled by the SE.
  * @param[in]     size      sizeof the concrete *_svc_t.
- * @param[in]     svc_id    SERVICE_CRYPTOCELL_* id (must equal the header).
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO.
- *
- * TBD: bind to the exported hal_alif generic-send (or an in-tree Tier-1.5
- * helper over the seservice0r/seservice0s IPM devices).  NOT a value to
- * invent -- it is a transport call, wired when the symbol exists.
+ * @param[in]     svc_id    SERVICE_CRYPTOCELL_* id; already carried in the
+ *                          packet header, kept for call-site readability.
+ * @return 0 on a completed transport round-trip (the caller then reads the
+ *         packet's resp_error_code); a negative errno on transport failure.
  */
-extern int alp_se_crypto_send_request(void *packet, size_t size, uint16_t svc_id);
+static int alp_se_crypto_send_request(void *packet, size_t size, uint16_t svc_id)
+{
+	(void)svc_id; /* the id is already in packet->header.hdr_service_id */
+	return se_service_send_request((uint32_t *)packet, (uint32_t)size);
+}
 
 #endif /* CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM */
 
