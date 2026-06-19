@@ -674,7 +674,7 @@ alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, u
 	uint8_t      reply[12] = { 0 };
 	size_t       got       = 0;
 	alp_status_t s         = poll_by_repeat(
-        ctx, ALP_CC3501E_CMD_OTA_STATUS, NULL, 0, reply, sizeof(reply), &got, timeout_ms);
+	    ctx, ALP_CC3501E_CMD_OTA_STATUS, NULL, 0, reply, sizeof(reply), &got, timeout_ms);
 	if (s != ALP_OK) return s;
 	if (got < sizeof(reply)) return ALP_ERR_IO;
 	out->state         = reply[0];
