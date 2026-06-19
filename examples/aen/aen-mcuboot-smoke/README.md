@@ -38,15 +38,21 @@ cd <setools>/app-release-exec-linux
 ./app-write-mram -c /dev/ttyUSB0 -p
 ```
 
-**Status (bench, E8):**
+**Status (bench, E8): full chain RESULT PASS** (commit `7e3b2c58`, PR #170).
 - **SES → MCUboot: VALIDATED.** After flashing the MCUboot-only ATOC, J-Link halt
   shows PC inside MCUboot `main()` (ITCM) — the SES loads + boots the signed,
-  ITCM-linked MCUboot. (Previously bench-pending.)
-- **MCUboot → slot0 → app: pending the slot0 image write.** The signed app must be
-  written to MRAM slot0 (0x80010000) as a SES-authenticated user image. The
-  upstream `alif_flash` west runner does this (`tools-config` registers the image
-  paths); reconstructing it by hand (`app-sign-image` / `app-write-mram -i … -a`)
-  hit SETOOLS' build-dir path/registration convention. Wire the `alif_flash`
-  runner (or complete `tools-config`) to finish this leg; then this app's banner
-  appears in the RAM console with `VTOR` in `[0x80010000, 0x802b0000)` (slot0-XIP),
-  confirming the full chain.
+  ITCM-linked MCUboot.
+- **MCUboot → slot0 → app: BOOTS.** With the signed app written to MRAM slot0
+  (0x80010000) as a SES-authenticated user image, MCUboot chainloads it and this
+  app's banner appears in the RAM console with `VTOR` in slot0-XIP — the full
+  `SES → MCUboot → slot0 → app` cascade boots end-to-end. The final bug was
+  `do_boot()` using `CONFIG_FLASH_BASE_ADDRESS = 0x0` (ITCM) for the MRAM slot
+  vector; the fix is an upstreamable MCUboot `flash_map_extended.c` patch (the
+  `alif,mram` controller's `reg = 0x80000000`) carried via `west patch`
+  (`zephyr/patches.yml`), plus `+DCACHE=n` and `ROM_START_OFFSET = 0x800`.
+- **Trust model = SE root-of-trust.** This chain runs MCUboot as
+  `SINGLE_APP + SIGNATURE_TYPE_NONE`: the SES (Alif Secure Enclave) verifies the
+  signed slot0 ATOC content cert at the SES stage, and MCUboot acts as the A/B
+  chainloader on top. **Software ECDSA verification *inside* MCUboot stays
+  blocked** (the separate E8/M55 software-bignum non-convergence) and is not on
+  this path — the SE does the cryptographic verify, not the bootloader.

@@ -11,7 +11,8 @@ som:
   sku: E1M-AEN801          # Alif Ensemble E8 (the lead AEN part) -- carries
                             # a pair of Ethos-U55s (vision) + an Ethos-U85
                             # (generative) this example dispatches inference
-                            # to, plus the on-die Mali-C55 ISP + JPEG encoder.
+                            # to, plus the on-die VeriSilicon ISP Pico
+                            # (vsi,isp-pico) + JPEG encoder.
 
 preset: e1m-evk            # Forks the EVK preset.  lsm6dso + ssd1306 are
                            # NOT soldered on the EVK -- this demo attaches

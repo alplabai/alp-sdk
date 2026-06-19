@@ -8,8 +8,8 @@ surfaces flagged by the 2026-05-12 AEN feature audit as
 NEEDS-PORTABLE-SURFACE / vendor-ext gaps:
 
 1. **GPU2D (D/AVE 2D)** — fixed-function 2D blit / fill / blend.
-2. **Mali-C55 ISP** — image-signal-processor (3A, per-channel gain,
-   lens-shading correction).
+2. **VeriSilicon ISP Pico (`vsi,isp-pico`)** — image-signal-processor
+   (3A, per-channel gain, lens-shading correction).
 3. **OSPI SecAES** — inline-AES on-the-fly XIP encryption for
    external OctalSPI flash.
 4. **aiPM power management** — DVFS / run-profiles / PMIC sequencer
@@ -45,7 +45,7 @@ part:
 | Surface                | Populates on        | E7 (E1M-AEN701)?                       |
 |------------------------|---------------------|---------------------------------------|
 | GPU2D (D/AVE 2D)       | E6 / E7 / E8 only   | **Yes** — `gpu2d` + `dave2d` true in `e7.json` |
-| Mali-C55 ISP           | E4 / E6 / E8 only   | **No** — no `isp` / `mali_c55` key in `e7.json` |
+| ISP Pico (`vsi,isp-pico`) | E4 / E6 / E8 only | **No** — no `isp` key in `e7.json` |
 | OSPI SecAES (vendor)   | E4 / E6 / E8 only   | **No** SecAES fabric (see note below) |
 
 > **E7 inline-AES nuance.**  `e7.json` carries `inline_aes: true` and
@@ -60,11 +60,15 @@ part:
 > capability-bit-gated, the vendor surface is silicon-list-gated.
 
 The practical consequence for the EdgeAI vision example
-(`examples/aen/edgeai-vision-aen/`, an E7 target): it must **not**
-assume a Mali-C55 ISP.  It configures the camera sensor to emit the
-model's pixel format directly and does crop / resize / normalisation
-on the M55-HP — exactly the data flow in that example's
-`docs/pipeline.md`.
+(`examples/aen/edgeai-vision-aen/`, an **E8 target** — `som.sku:
+E1M-AEN801`): the E8 *does* carry the ISP Pico (it populates on E4 /
+E6 / E8), so the example may eventually offload debayer /
+format-convert / 3A to it. But that offload is **HAL-pack gated**
+(the `vsi,isp-pico` backend is a NOSUPPORT stub until the pack lands),
+so today the example must **not** rely on the ISP: it configures the
+camera sensor to emit the model's pixel format directly and does crop
+/ resize / normalisation on the M55-HP with CMSIS-DSP — exactly the
+data flow in that example's `docs/pipeline.md`.
 
 ---
 
@@ -140,7 +144,7 @@ neighbouring lines another context may own.
 
 ---
 
-## 2. Mali-C55 ISP dispatch path
+## 2. VeriSilicon ISP Pico (`vsi,isp-pico`) dispatch path
 
 **Vendor surface:** `<alp/ext/alif/camera.h>` —
 `alp_alif_camera_isp_3a_window_set` /
@@ -148,32 +152,32 @@ neighbouring lines another context may own.
 `alp_alif_camera_isp_lsc_lut_load`.
 **Stub it replaces:** `src/backends/ext/alif/camera.c` (vendor-handle
 gating today; bodies return `ALP_ERR_NOSUPPORT`).
-**Real backend:** `alif_mali_c55_isp` camera backend, priority 100,
+**Real backend:** `alif_isp_pico` camera backend, priority 100,
 registered against `alif:ensemble:e4` / `e6` / `e8` — **never E7**.
 
 These are the finer-grained ISP knobs that do not fit the portable
 `alp_camera_isp_config_t` (`alp_camera_configure_isp`): pixel-coordinate
 rectangles and kibibyte-scale LUT pointers would force every
-backend — including the Mali-C55-less E3 / E5 / E7 parts — to carry
+backend — including the ISP-Pico-less E3 / E5 / E7 parts — to carry
 the equivalent fields, so they live in the vendor-ext header behind
 the Alif-handle gate.
 
 ### Dispatch path
 
 1. App opens the camera via the portable `alp_camera_open`; the
-   dispatcher binds the `alif_mali_c55_isp` backend when the
+   dispatcher binds the `alif_isp_pico` backend when the
    silicon_ref is E4 / E6 / E8 and the Alif HAL pack is present.
 2. App includes `<alp/ext/alif/camera.h>` and calls the vendor knob.
    Each call re-checks the handle's backend vendor is `"alif"`
    (`_is_alif_backend`); a non-Alif handle returns
    `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` **before** any hardware touch.
-3. The real body programs the Mali-C55 statistics / gain / LSC
+3. The real body programs the ISP Pico statistics / gain / LSC
    registers through the HAL and returns `ALP_OK` (today: returns
    `ALP_ERR_NOSUPPORT` after argument validation).
 
 ### 3A / gain / LSC semantics
 
-- **3A windows** (`isp_3a_window_set`): the Mali-C55 carries a
+- **3A windows** (`isp_3a_window_set`): the ISP Pico carries a
   1024-cell weighted statistics grid per 3A loop (AE / AWB / AF).
   The portable rectangle selects which inclusive cell span feeds the
   loop; the API honours one rectangle per loop and a fresh call
@@ -316,8 +320,8 @@ here is what the backend must implement, not a stub.
   per op; a batched display-list flush would need a new public entry
   point.  Deferred until a real consumer (e.g. an LVGL/D/AVE 2D
   integration) needs it.
-- **Mali-C55 vs portable ISP overlap.**  How much of the portable
-  `alp_camera_configure_isp` the Mali-C55 backend serves vs. the
+- **ISP Pico vs portable ISP overlap.**  How much of the portable
+  `alp_camera_configure_isp` the ISP Pico backend serves vs. the
   vendor knobs is settled when the HAL pack lands; both surfaces are
   `[ABI-EXPERIMENTAL]` precisely so that boundary can move.
 - **SecAES key-slot count + lifecycle.**  Number of slots, whether
@@ -339,7 +343,7 @@ here is what the backend must implement, not a stub.
   — GPU2D surface + software fallback + D/AVE 2D real backend.
 - [`include/alp/ext/alif/camera.h`](../include/alp/ext/alif/camera.h) /
   [`src/backends/ext/alif/camera.c`](../src/backends/ext/alif/camera.c)
-  — Mali-C55 ISP vendor surface + stub.
+  — ISP Pico (`vsi,isp-pico`) vendor surface + stub.
 - [`include/alp/ext/alif/storage.h`](../include/alp/ext/alif/storage.h) /
   [`src/backends/ext/alif/storage.c`](../src/backends/ext/alif/storage.c)
   — SecAES vendor surface + stub.
@@ -349,4 +353,4 @@ here is what the backend must implement, not a stub.
   [`src/backends/power/zephyr_pm_policy.c`](../src/backends/power/zephyr_pm_policy.c)
   — aiPM portable surface + the wildcard backend that already serves AEN.
 - [`metadata/socs/alif/ensemble/e7.json`](../metadata/socs/alif/ensemble/e7.json)
-  — authoritative E7 capability set (no Mali-C55 ISP).
+  — authoritative E7 capability set (no ISP Pico).

@@ -51,8 +51,8 @@ the PR for experimental symbols.
 |-----------------------|--------------------|-------------------------------------------------------------------|
 | `peripheral.h` (I²C/SPI/UART/GPIO) | `[ABI-STABLE]` | v0.1 surface; locked across every since-then release. |
 | `pwm.h`               | `[ABI-STABLE]`     | v0.2 surface; locked.                                             |
-| `adc.h`               | `[ABI-STABLE]`     | v0.2 + v0.5 additive (filter/spectrum handle types).  Base surface stable; new `alp_adc_filter_t` / `alp_adc_spectrum_t` may evolve `[ABI-EXPERIMENTAL]` at function granularity.  v0.8: the DAC half (`alp_dac_*`) split out to `dac.h` (same signatures; a source-include move, not a symbol change). |
-| `dac.h`               | `[ABI-STABLE]`     | v0.1 surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`); split out of `adc.h` into its own header in v0.8 when DAC moved to the registry/dispatcher pattern.  Signatures unchanged. |
+| `adc.h`               | `[ABI-STABLE]`     | v0.2 + v0.5 additive (filter/spectrum handle types).  Base surface stable; new `alp_adc_filter_t` / `alp_adc_spectrum_t` may evolve `[ABI-EXPERIMENTAL]` at function granularity.  v0.8.0 (unreleased / current dev): the DAC half (`alp_dac_*`) split out to `dac.h` (same signatures; a source-include move, not a symbol change). |
+| `dac.h`               | `[ABI-STABLE]`     | v0.1 surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`); split out of `adc.h` into its own header in v0.8.0 (unreleased / current dev) when DAC moved to the registry/dispatcher pattern.  Signatures unchanged. |
 | `counter.h`           | `[ABI-STABLE]`     | v0.2.                                                              |
 | `i2s.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
 | `can.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
@@ -68,7 +68,7 @@ the PR for experimental symbols.
 | `e1m_pinout.h`        | `[ABI-STABLE]`     | v0.1 portable instance IDs (`E1M_I2C0`, etc.); pinned by e1m-spec. |
 | `soc_caps.h`          | `[ABI-STABLE]`     | v0.1 generated; capability constants.                              |
 | `gui.h`               | `[ABI-STABLE]`     | v0.2 LVGL re-export shim.                                          |
-| `camera.h`            | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_camera_configure_isp` (Mali-C55 toggles) — surface tentative pending real hardware feedback.  Base capture path stable; ISP block experimental. |
+| `camera.h`            | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_camera_configure_isp` (ISP-Pico toggles) — surface tentative pending real hardware feedback.  Base capture path stable; ISP block experimental. |
 | `storage.h`           | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_storage_configure_inline_aes` (SecAES on OSPI / HexSPI) -- surface tentative.  Base storage placeholders (v0.4 work) are still stubs. |
 | `display.h`           | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; no real backend impl yet.                       |
 | `usb.h`               | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; surface skeleton only.                          |
