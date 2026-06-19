@@ -625,9 +625,8 @@ alp_status_t cc3501e_cam_enable(cc3501e_t *ctx, uint8_t which, bool on, uint32_t
 	return poll_by_repeat(ctx, cmd, &req, sizeof(req), NULL, 0, NULL, timeout_ms);
 }
 
-alp_status_t cc3501e_power_policy(cc3501e_t                        *ctx,
-                                 const alp_cc3501e_power_policy_t *policy,
-                                 uint32_t                          timeout_ms)
+alp_status_t
+cc3501e_power_policy(cc3501e_t *ctx, const alp_cc3501e_power_policy_t *policy, uint32_t timeout_ms)
 {
 	if (policy == NULL) return ALP_ERR_INVAL;
 	/* Pack the 8-byte wire by hand (NOT via the doc struct, which carries u16/u32

@@ -401,9 +401,8 @@ alp_status_t cc3501e_cam_enable(cc3501e_t *ctx, uint8_t which, bool on, uint32_t
  *         unknown, or a low-power preset carries no wake source; otherwise the
  *         mapped error.
  */
-alp_status_t cc3501e_power_policy(cc3501e_t                        *ctx,
-                                 const alp_cc3501e_power_policy_t *policy,
-                                 uint32_t                          timeout_ms);
+alp_status_t
+cc3501e_power_policy(cc3501e_t *ctx, const alp_cc3501e_power_policy_t *policy, uint32_t timeout_ms);
 
 /* ------------------------------------------------------------------ */
 /* OTA firmware update -- stream a new CC3501E image over the bridge.  */
