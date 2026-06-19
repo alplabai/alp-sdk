@@ -365,8 +365,8 @@ static alp_cc3501e_resp_t wifi_join(const uint8_t *req, size_t req_len, int ap)
 	const uint8_t *ssid = req + sizeof(alp_cc3501e_wifi_connect_t);
 	const uint8_t *psk  = ssid + c->ssid_len;
 	const int      rv =
-        ap ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
-	            : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
+	    ap ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
+	       : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
 	return hw_to_resp(rv);
 }
 
