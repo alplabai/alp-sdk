@@ -2082,11 +2082,13 @@ config ALP_SDK_SECURITY_SE_CRYPTOCELL
 	  se_service_get_rnd_num().  The AES / SHA / CMAC / CCM / GCM /
 	  ChaCha20 / Poly1305 compute requests are authored at the wire
 	  level (request structs from hal_alif services_lib_protocol.h,
-	  IDs 400-422 from services_lib_ids.h) but need a generic SE
-	  send-request seam that hal_alif does not yet export publicly
-	  (send_msg_to_se is static); until ALP_SDK_SECURITY_SE_CRYPTOCELL_
-	  SEND_SEAM is wired they return ALP_ERR_NOSUPPORT and the
-	  dispatcher falls through to the PSA backend.
+	  IDs 400-422 from services_lib_ids.h) and reach the SE through the
+	  public se_service_send_request() transport (added by
+	  zephyr/patches/hal_alif/0002-se-service-add-public-send-request.patch).
+	  They are gated by ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM, which
+	  builds + links but defaults OFF pending the on-silicon round-trip;
+	  with it OFF they return ALP_ERR_NOSUPPORT and the dispatcher falls
+	  through to the PSA backend.
 
 config ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
 	bool "SE CryptoCell generic send-request transport seam is available"
@@ -2099,14 +2101,21 @@ config ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
 	  local_to_global() address translation) and hand it to
 	  alp_se_crypto_send_request().
 
-	  That seam needs a public hal_alif entry that sends an arbitrary
-	  SE service packet over the RTSS-HE <-> SE MHUv2 pair and blocks
-	  for the response -- the same work send_msg_to_se() does inside
-	  se_service.c, but that symbol is static.  Leave this OFF until
-	  the transport is exported (an upstreamable hal_alif change, or a
-	  Tier-1.5 in-tree send helper bound to the seservice0r/seservice0s
-	  IPM devices); with it OFF the compute ops return ALP_ERR_NOSUPPORT
-	  and only the RNG path (public se_service_get_rnd_num) is live.
+	  The seam's transport is now provided: the public
+	  se_service_send_request() sends an arbitrary caller-populated SE
+	  service packet over the RTSS-HE <-> SE MHUv2 pair and blocks for the
+	  response (the same work the static send_msg_to_se() does inside
+	  se_service.c), added by
+	  zephyr/patches/hal_alif/0002-se-service-add-public-send-request.patch
+	  and upstreamable to hal_alif.
+
+	  It still defaults OFF: the wire layout compiles + links, but the
+	  end-to-end SE crypto round-trip is bench-pending on real E8 silicon,
+	  and turning it ON makes the SE the default crypto path on the E8
+	  (priority 110, ahead of the PSA backend).  Enable it on the bench to
+	  validate; with it OFF the compute ops return ALP_ERR_NOSUPPORT, the
+	  dispatcher falls through to PSA, and only the RNG path (public
+	  se_service_get_rnd_num) rides the SE.  See #222.
 
 config ALP_SDK_MPROC
 	bool "Real multi-processor IPC for <alp/mproc.h>"

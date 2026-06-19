@@ -76,3 +76,25 @@ patches:
       runs (both M55s live from one power-on). Pure additive; upstream to hal_alif
       then drop. See [[project_aen_he_hp_mhu_doorbell_blocked]] / examples/aen/
       aen-dualcore-master.
+  - path: hal_alif/0002-se-service-add-public-send-request.patch
+    sha256sum: af2d7f5eb065c4eb6dc6f2d1a12b01d7fcf43ed2e1c15bf8d7eb8ecf78dc63b6
+    module: hal_alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-06-19
+    upstreamable: true
+    comments: |
+      hal_alif's SE client (se_services/zephyr/src/se_service.c) drives the
+      RTSS-HE <-> SE MHUv2 transport through a static send_msg_to_se(), and
+      exposes only per-service public wrappers (se_service_get_rnd_num(),
+      se_service_boot_cpu(), ...). It exports NO generic entry to send an
+      arbitrary, caller-populated SE service packet -- so the SE-CryptoCell
+      AES/SHA/AEAD compute backend (src/backends/security/se_cryptocell.c, which
+      builds its own CryptoCell request packets from the public
+      services_lib_protocol.h structs) had no way to reach the SE. Add a thin
+      public se_service_send_request(packet, size) that mirrors the get_rnd_num
+      preamble (se_service_ensure_ready + svc_mutex) and hands the packet to the
+      existing static send_msg_to_se(). Pure additive; the SE still enforces its
+      own service policy. Unblocks ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
+      (default off; runtime SE round-trip bench-pending). Upstream to hal_alif
+      then drop. See #222.
