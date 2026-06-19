@@ -140,9 +140,9 @@ ZTEST(alp_pwm_registry, test_sw_fallback_round_trip)
 	alp_pwm_backend_state_t *st   = &h.state;
 	alp_capabilities_t       caps = { 0 };
 	alp_pwm_config_t         cfg  = {
-		         .channel_id = 0u,
-		         .period_ns  = 1000000u,
-		         .polarity   = ALP_PWM_POLARITY_NORMAL,
+		.channel_id = 0u,
+		.period_ns  = 1000000u,
+		.polarity   = ALP_PWM_POLARITY_NORMAL,
 	};
 
 	zassert_equal(ops->open(&cfg, st, &caps), ALP_OK);
@@ -163,8 +163,8 @@ ZTEST(alp_pwm_registry, test_sw_fallback_round_trip)
 	alp_pwm_backend_state_t  cap_st   = { 0 };
 	alp_capabilities_t       cap_caps = { 0 };
 	alp_pwm_capture_config_t cap_cfg  = {
-		 .channel_id = 0u,
-		 .edge       = ALP_PWM_CAPTURE_EDGE_RISING,
+		.channel_id = 0u,
+		.edge       = ALP_PWM_CAPTURE_EDGE_RISING,
 	};
 	zassert_equal(ops->capture_open(&cap_cfg, &cap_st, &cap_caps), ALP_ERR_NOSUPPORT);
 

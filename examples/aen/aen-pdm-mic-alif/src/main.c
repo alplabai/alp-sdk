@@ -169,12 +169,12 @@ int main(void)
 	printf("[pdm] RESULT %s: %s\n",
 	       (got && varying) ? "PASS" : "PARTIAL",
 	       varying ? "varying PCM captured = live audio"
-	       : got   ? "non-zero but constant (check gain)"
-	               : "FIFO empty -- HP-PDM config register-verified (ch0,1,4,5 enabled, mode set; "
-	                 "the patched clockctrl forced EXPMST0 IPCLK/PCLK + set the CGU CLK_ENA bit); "
-	                 "not sampling -> the 76.8MHz audio source itself (HFOSCx2) is SE-managed: the "
-	                 "CGU CLK_ENA bit alone may not engage the oscillator. Needs the se_services/MHU "
-	                 "clock request to the SE (alp-sdk doesn't wire it yet).");
+	       : got ? "non-zero but constant (check gain)"
+	             : "FIFO empty -- HP-PDM config register-verified (ch0,1,4,5 enabled, mode set; "
+	               "the patched clockctrl forced EXPMST0 IPCLK/PCLK + set the CGU CLK_ENA bit); "
+	               "not sampling -> the 76.8MHz audio source itself (HFOSCx2) is SE-managed: the "
+	               "CGU CLK_ENA bit alone may not engage the oscillator. Needs the se_services/MHU "
+	               "clock request to the SE (alp-sdk doesn't wire it yet).");
 	printf("[pdm] done\n");
 	return 0;
 }

@@ -39,7 +39,7 @@ uint32_t alp_hw_info_crc32(const uint8_t *buf, size_t len)
 	for (size_t i = 0; i < len; ++i) {
 		crc ^= (uint32_t)buf[i];
 		for (unsigned b = 0; b < 8; ++b) {
-			uint32_t mask = (uint32_t) - (int32_t)(crc & 1u);
+			uint32_t mask = (uint32_t)-(int32_t)(crc & 1u);
 			crc           = (crc >> 1) ^ (0xEDB88320u & mask);
 		}
 	}

@@ -83,8 +83,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	if (size < 6u) return 0;
 	const uint8_t  hdr = data[0];
 	const uint32_t d   = (uint32_t)data[1] | ((uint32_t)data[2] << 8) | ((uint32_t)data[3] << 16) |
-	                   ((uint32_t)data[4] << 24);
-	const uint8_t parity = data[5];
+	                     ((uint32_t)data[4] << 24);
+	const uint8_t  parity = data[5];
 
 	(void)validate_header(hdr);
 	(void)validate_data_parity(d, parity);

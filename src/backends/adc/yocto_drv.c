@@ -108,11 +108,11 @@ _read_attr(unsigned device_id, unsigned channel, const char *suffix, char *buf, 
 {
 	char path[96];
 	int  n = snprintf(path,
-                     sizeof(path),
-                     "/sys/bus/iio/devices/iio:device%u/in_voltage%u_%s",
-                     device_id,
-                     channel,
-                     suffix);
+	                  sizeof(path),
+	                  "/sys/bus/iio/devices/iio:device%u/in_voltage%u_%s",
+	                  device_id,
+	                  channel,
+	                  suffix);
 	if (n < 0 || (size_t)n >= sizeof(path)) {
 		return ALP_ERR_INVAL;
 	}

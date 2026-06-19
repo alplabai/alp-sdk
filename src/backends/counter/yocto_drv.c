@@ -162,7 +162,7 @@ static alp_status_t y_open(const alp_counter_config_t  *cfg,
 
 	d->count_idx = Y_COUNTER_COUNT_INDEX;
 	int n        = snprintf(
-        d->dir, sizeof(d->dir), "/sys/bus/counter/devices/counter%u", (unsigned)cfg->counter_id);
+	    d->dir, sizeof(d->dir), "/sys/bus/counter/devices/counter%u", (unsigned)cfg->counter_id);
 	if (n < 0 || (size_t)n >= sizeof(d->dir)) {
 		free(d);
 		return ALP_ERR_INVAL;

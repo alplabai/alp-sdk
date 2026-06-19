@@ -38,66 +38,42 @@
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc0))
 #define ALIF_ADC_SPEC_0 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc0))
 #else
-#define ALIF_ADC_SPEC_0                                                                            \
-	{                                                                                              \
-		0                                                                                          \
-	}
+#define ALIF_ADC_SPEC_0 { 0 }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc1))
 #define ALIF_ADC_SPEC_1 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc1))
 #else
-#define ALIF_ADC_SPEC_1                                                                            \
-	{                                                                                              \
-		0                                                                                          \
-	}
+#define ALIF_ADC_SPEC_1 { 0 }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc2))
 #define ALIF_ADC_SPEC_2 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc2))
 #else
-#define ALIF_ADC_SPEC_2                                                                            \
-	{                                                                                              \
-		0                                                                                          \
-	}
+#define ALIF_ADC_SPEC_2 { 0 }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc3))
 #define ALIF_ADC_SPEC_3 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc3))
 #else
-#define ALIF_ADC_SPEC_3                                                                            \
-	{                                                                                              \
-		0                                                                                          \
-	}
+#define ALIF_ADC_SPEC_3 { 0 }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc4))
 #define ALIF_ADC_SPEC_4 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc4))
 #else
-#define ALIF_ADC_SPEC_4                                                                            \
-	{                                                                                              \
-		0                                                                                          \
-	}
+#define ALIF_ADC_SPEC_4 { 0 }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc5))
 #define ALIF_ADC_SPEC_5 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc5))
 #else
-#define ALIF_ADC_SPEC_5                                                                            \
-	{                                                                                              \
-		0                                                                                          \
-	}
+#define ALIF_ADC_SPEC_5 { 0 }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc6))
 #define ALIF_ADC_SPEC_6 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc6))
 #else
-#define ALIF_ADC_SPEC_6                                                                            \
-	{                                                                                              \
-		0                                                                                          \
-	}
+#define ALIF_ADC_SPEC_6 { 0 }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_adc7))
 #define ALIF_ADC_SPEC_7 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc7))
 #else
-#define ALIF_ADC_SPEC_7                                                                            \
-	{                                                                                              \
-		0                                                                                          \
-	}
+#define ALIF_ADC_SPEC_7 { 0 }
 #endif
 
 static const struct adc_dt_spec _alif_specs[8] = {
@@ -197,10 +173,10 @@ static alp_status_t alif_e7_read_raw(alp_adc_backend_state_t *st, int32_t *raw_o
 	 * raw->uV scale uses st->resolution_bits set from the DT channel at open. */
 	uint8_t                           cmp_status = 0;
 	const struct adc_sequence_options opts       = {
-		      .interval_us     = 0,
-		      .callback        = NULL,
-		      .user_data       = &cmp_status,
-		      .extra_samplings = 0,
+		.interval_us     = 0,
+		.callback        = NULL,
+		.user_data       = &cmp_status,
+		.extra_samplings = 0,
 	};
 	struct adc_sequence seq = {
 		.options     = &opts,
@@ -239,7 +215,7 @@ ALP_BACKEND_REGISTER(adc,
                          .silicon_ref = "alif:ensemble:e7",
                          .vendor      = "alif",
                          .base_caps   = (uint32_t)(ALP_INSTANCE_CAP_HW_OVERSAMPLE |
-                                                 ALP_INSTANCE_CAP_HW_TRIGGER),
+                                                   ALP_INSTANCE_CAP_HW_TRIGGER),
                          .priority    = 100,
                          .ops         = &alif_e7_ops,
                          .probe       = NULL,

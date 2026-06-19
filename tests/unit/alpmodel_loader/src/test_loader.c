@@ -27,9 +27,9 @@ ZTEST(alpmodel_loader, test_bad_magic_inval)
 {
 	static const uint8_t  junk[32] = { 'X', 'X', 'X', 'X' };
 	alp_model_open_opts_t o        = {
-		       .data    = junk,
-		       .size    = sizeof(junk),
-		       .backend = ALP_INFERENCE_BACKEND_AUTO,
+		.data    = junk,
+		.size    = sizeof(junk),
+		.backend = ALP_INFERENCE_BACKEND_AUTO,
 	};
 	zassert_is_null(alp_inference_open_alpmodel(&o));
 	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
@@ -68,9 +68,9 @@ ZTEST(alpmodel_loader, test_version_mismatch_returns_version)
      * alp_model_parse returns ALP_ERR_VERSION and the loader propagates it. */
 	static const uint8_t  buf[24] = { 'A', 'L', 'P', 'M', 2, 0 }; /* version u16 LE = 2 */
 	alp_model_open_opts_t o       = {
-		      .data    = buf,
-		      .size    = sizeof(buf),
-		      .backend = ALP_INFERENCE_BACKEND_AUTO,
+		.data    = buf,
+		.size    = sizeof(buf),
+		.backend = ALP_INFERENCE_BACKEND_AUTO,
 	};
 	zassert_is_null(alp_inference_open_alpmodel(&o));
 	zassert_equal(alp_last_error(), ALP_ERR_VERSION);

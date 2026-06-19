@@ -199,12 +199,12 @@ static void decode_and_dispatch(void)
 	const uint8_t              cmd = spi_rx_buf[1];
 	uint8_t                    reply_pl[GD32_BRIDGE_MAX_PAYLOAD_BYTES];
 	size_t                     reply_pl_len = 0u;
-	const gd32_bridge_status_t st           = protocol_dispatch(cmd,
-                                                      payload_len > 0u ? &spi_rx_buf[2] : NULL,
-                                                      payload_len,
-                                                      reply_pl,
-                                                      sizeof(reply_pl),
-                                                      &reply_pl_len);
+	const gd32_bridge_status_t st = protocol_dispatch(cmd,
+	                                                  payload_len > 0u ? &spi_rx_buf[2] : NULL,
+	                                                  payload_len,
+	                                                  reply_pl,
+	                                                  sizeof(reply_pl),
+	                                                  &reply_pl_len);
 	stage_reply((uint8_t)st, reply_pl, reply_pl_len);
 }
 

@@ -40,7 +40,12 @@ int main(void)
      * into whatever encoding the hardware uses (BCD on most SoCs,
      * Unix-seconds on Linux backends). */
 	alp_rtc_time_t set_t = {
-		.year = 2026, .month = 5, .day = 10, .hour = 14, .minute = 30, .second = 0,
+		.year   = 2026,
+		.month  = 5,
+		.day    = 10,
+		.hour   = 14,
+		.minute = 30,
+		.second = 0,
 		/* .weekday and .millisecond are optional; 0 means "unknown"
          * for weekday and "1 s resolution" for millisecond. */
 	};

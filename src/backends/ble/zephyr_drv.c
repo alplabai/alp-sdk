@@ -204,9 +204,9 @@ static alp_status_t z_advertise_start(alp_ble_radio_state_t *st, const alp_ble_a
 
 	static const uint8_t flags = BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR;
 	ad[ad_len++]               = (struct bt_data){
-		              .type     = BT_DATA_FLAGS,
-		              .data_len = 1,
-		              .data     = &flags,
+		.type     = BT_DATA_FLAGS,
+		.data_len = 1,
+		.data     = &flags,
 	};
 	if (cfg->name != NULL && cfg->name[0] != '\0') {
 		ad[ad_len++] = (struct bt_data){

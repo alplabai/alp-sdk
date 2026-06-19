@@ -398,7 +398,10 @@ def _clang_format(path: Path) -> None:
     script lays out whitespace.  No-op (with a warning) if clang-format is absent;
     the CI gate then catches any drift.
     """
-    exe = shutil.which("clang-format-14") or shutil.which("clang-format")
+    # Pinned to clang-format-22 (the CI version; installed via the pip wheel
+    # `clang-format==22.*`, which provides the unsuffixed `clang-format`).
+    # Prefer a v22-named binary if present, else the pinned `clang-format`.
+    exe = shutil.which("clang-format-22") or shutil.which("clang-format")
     if exe is None:
         print(f"  warning: clang-format not found; {path.name} left unformatted "
               "(CI will flag any drift)", file=sys.stderr)

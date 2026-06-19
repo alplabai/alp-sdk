@@ -28,8 +28,7 @@ bool copyOutput(const TfLiteTensor &src, InferenceProcess::DataPtr &dst)
 	}
 
 	if (src.bytes > dst.size) {
-		printk("Tensor size mismatch (bytes): actual=%d, expected%d.\n", src.bytes,
-		       dst.size);
+		printk("Tensor size mismatch (bytes): actual=%d, expected%d.\n", src.bytes, dst.size);
 		return true;
 	}
 
@@ -65,11 +64,13 @@ InferenceJob::InferenceJob()
 {
 }
 
-InferenceJob::InferenceJob(const string &_name, const DataPtr &_networkModel,
-			   const vector<DataPtr> &_input, const vector<DataPtr> &_output,
-			   const vector<DataPtr> &_expectedOutput)
-	: name(_name), networkModel(_networkModel), input(_input), output(_output),
-	  expectedOutput(_expectedOutput)
+InferenceJob::InferenceJob(const string          &_name,
+                           const DataPtr         &_networkModel,
+                           const vector<DataPtr> &_input,
+                           const vector<DataPtr> &_output,
+                           const vector<DataPtr> &_expectedOutput)
+    : name(_name), networkModel(_networkModel), input(_input), output(_output),
+      expectedOutput(_expectedOutput)
 {
 }
 
@@ -113,7 +114,8 @@ bool InferenceProcess::runJob(InferenceJob &job)
 	const tflite::Model *model = ::tflite::GetModel(job.networkModel.data);
 	if (model->version() != TFLITE_SCHEMA_VERSION) {
 		printk("Model schema version unsupported: version=%" PRIu32 ", supported=%d.\n",
-		       model->version(), TFLITE_SCHEMA_VERSION);
+		       model->version(),
+		       TFLITE_SCHEMA_VERSION);
 		return true;
 	}
 
@@ -132,7 +134,7 @@ bool InferenceProcess::runJob(InferenceJob &job)
 	 * is present in the model's operator_codes but unused by subgraph 0, so no
 	 * AddDequantize() is needed.
 	 */
-	tflite::MicroMutableOpResolver <6> resolver;
+	tflite::MicroMutableOpResolver<6> resolver;
 	resolver.AddEthosU();
 	resolver.AddSvdf();
 	resolver.AddFullyConnected();
@@ -150,22 +152,26 @@ bool InferenceProcess::runJob(InferenceJob &job)
 
 	if (job.input.size() != interpreter.inputs_size()) {
 		printk("Number of job and network inputs do not match. input=%zu, network=%zu\n",
-		       job.input.size(), interpreter.inputs_size());
+		       job.input.size(),
+		       interpreter.inputs_size());
 		return true;
 	}
 
 	/* Copy input data */
 	for (size_t i = 0; i < interpreter.inputs_size(); ++i) {
-		const DataPtr &input = job.input[i];
+		const DataPtr      &input  = job.input[i];
 		const TfLiteTensor *tensor = interpreter.input(i);
 
 		if (input.size != tensor->bytes) {
-			printk("Input tensor size mismatch. index=%zu, input=%zu, network=%u\n", i,
-			       input.size, tensor->bytes);
+			printk("Input tensor size mismatch. index=%zu, input=%zu, network=%u\n",
+			       i,
+			       input.size,
+			       tensor->bytes);
 			return true;
 		}
 
-		copy(static_cast<char *>(input.data), static_cast<char *>(input.data) + input.size,
+		copy(static_cast<char *>(input.data),
+		     static_cast<char *>(input.data) + input.size,
 		     tensor->data.uint8);
 	}
 
@@ -180,7 +186,8 @@ bool InferenceProcess::runJob(InferenceJob &job)
 	if (job.output.size() > 0) {
 		if (interpreter.outputs_size() != job.output.size()) {
 			printk("Number of job and network outputs do not match. job=%zu, network=%u\n",
-			       job.output.size(), interpreter.outputs_size());
+			       job.output.size(),
+			       interpreter.outputs_size());
 			return true;
 		}
 
@@ -193,26 +200,33 @@ bool InferenceProcess::runJob(InferenceJob &job)
 
 	if (job.expectedOutput.size() > 0) {
 		if (job.expectedOutput.size() != interpreter.outputs_size()) {
-			printk("Number of job and network expected outputs do not match. job=%zu, network=%zu\n",
-			       job.expectedOutput.size(), interpreter.outputs_size());
+			printk(
+			    "Number of job and network expected outputs do not match. job=%zu, network=%zu\n",
+			    job.expectedOutput.size(),
+			    interpreter.outputs_size());
 			return true;
 		}
 
 		for (unsigned int i = 0; i < interpreter.outputs_size(); i++) {
-			const DataPtr &expected = job.expectedOutput[i];
-			const TfLiteTensor *output = interpreter.output(i);
+			const DataPtr      &expected = job.expectedOutput[i];
+			const TfLiteTensor *output   = interpreter.output(i);
 
 			if (expected.size != output->bytes) {
-				printk("Expected output tensor size mismatch. index=%u, expected=%zu, network=%zu\n",
-				       i, expected.size, output->bytes);
+				printk(
+				    "Expected output tensor size mismatch. index=%u, expected=%zu, network=%zu\n",
+				    i,
+				    expected.size,
+				    output->bytes);
 				return true;
 			}
 
 			for (unsigned int j = 0; j < output->bytes; ++j) {
-				if (output->data.uint8[j] !=
-				    static_cast<uint8_t *>(expected.data)[j]) {
-					printk("Expected output tensor data mismatch. index=%u, offset=%u, expected=%02x, network=%02x\n",
-					       i, j, static_cast<uint8_t *>(expected.data)[j],
+				if (output->data.uint8[j] != static_cast<uint8_t *>(expected.data)[j]) {
+					printk("Expected output tensor data mismatch. index=%u, offset=%u, "
+					       "expected=%02x, network=%02x\n",
+					       i,
+					       j,
+					       static_cast<uint8_t *>(expected.data)[j],
 					       output->data.uint8[j]);
 					return true;
 				}

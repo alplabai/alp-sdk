@@ -83,7 +83,7 @@ static int bridge_stream_alloc_slot(void)
 static void bridge_stream_free_slot(uint8_t slot)
 {
 	k_mutex_lock(&bridge_stream_lock, K_FOREVER);
-	bridge_streams_used &= (uint8_t) ~(1u << slot);
+	bridge_streams_used &= (uint8_t)~(1u << slot);
 	k_mutex_unlock(&bridge_stream_lock);
 }
 #endif /* ALP_ADC_HAS_BRIDGE_PATH */
@@ -551,7 +551,7 @@ alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, si
 	/* Run the chain over the accumulated block. */
 	size_t       got_bins = 0u;
 	alp_status_t s        = alp_dsp_chain_apply_bins(
-        spec->chain, spec->samples, spec->fft_n_points, bins, cap, &got_bins);
+	    spec->chain, spec->samples, spec->fft_n_points, bins, cap, &got_bins);
 	/* Reset the accumulator for the next non-overlapping block. */
 	spec->accumulated = 0u;
 	if (s != ALP_OK) return s;

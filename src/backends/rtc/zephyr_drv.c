@@ -65,14 +65,14 @@ static alp_status_t z_set_time(alp_rtc_backend_state_t *st, const alp_rtc_time_t
 {
 	const struct device *dev = (const struct device *)st->dev;
 	struct rtc_time      zt  = {
-		      .tm_year = (int)t->year - 1900,
-		      .tm_mon  = (int)t->month - 1,
-		      .tm_mday = (int)t->day,
-		      .tm_wday = (int)t->weekday,
-		      .tm_hour = (int)t->hour,
-		      .tm_min  = (int)t->minute,
-		      .tm_sec  = (int)t->second,
-		      .tm_nsec = (int)t->millisecond * 1000000,
+		.tm_year = (int)t->year - 1900,
+		.tm_mon  = (int)t->month - 1,
+		.tm_mday = (int)t->day,
+		.tm_wday = (int)t->weekday,
+		.tm_hour = (int)t->hour,
+		.tm_min  = (int)t->minute,
+		.tm_sec  = (int)t->second,
+		.tm_nsec = (int)t->millisecond * 1000000,
 	};
 	return _errno_to_alp(rtc_set_time(dev, &zt));
 }

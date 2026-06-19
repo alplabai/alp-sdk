@@ -47,66 +47,42 @@
 #if DT_NODE_EXISTS(DT_ALIAS(alp_pwm0))
 #define ALP_PWM_SPEC_0_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm0))
 #else
-#define ALP_PWM_SPEC_0_INIT                                                                        \
-	{                                                                                              \
-		.dev = NULL                                                                                \
-	}
+#define ALP_PWM_SPEC_0_INIT { .dev = NULL }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_pwm1))
 #define ALP_PWM_SPEC_1_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm1))
 #else
-#define ALP_PWM_SPEC_1_INIT                                                                        \
-	{                                                                                              \
-		.dev = NULL                                                                                \
-	}
+#define ALP_PWM_SPEC_1_INIT { .dev = NULL }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_pwm2))
 #define ALP_PWM_SPEC_2_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm2))
 #else
-#define ALP_PWM_SPEC_2_INIT                                                                        \
-	{                                                                                              \
-		.dev = NULL                                                                                \
-	}
+#define ALP_PWM_SPEC_2_INIT { .dev = NULL }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_pwm3))
 #define ALP_PWM_SPEC_3_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm3))
 #else
-#define ALP_PWM_SPEC_3_INIT                                                                        \
-	{                                                                                              \
-		.dev = NULL                                                                                \
-	}
+#define ALP_PWM_SPEC_3_INIT { .dev = NULL }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_pwm4))
 #define ALP_PWM_SPEC_4_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm4))
 #else
-#define ALP_PWM_SPEC_4_INIT                                                                        \
-	{                                                                                              \
-		.dev = NULL                                                                                \
-	}
+#define ALP_PWM_SPEC_4_INIT { .dev = NULL }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_pwm5))
 #define ALP_PWM_SPEC_5_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm5))
 #else
-#define ALP_PWM_SPEC_5_INIT                                                                        \
-	{                                                                                              \
-		.dev = NULL                                                                                \
-	}
+#define ALP_PWM_SPEC_5_INIT { .dev = NULL }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_pwm6))
 #define ALP_PWM_SPEC_6_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm6))
 #else
-#define ALP_PWM_SPEC_6_INIT                                                                        \
-	{                                                                                              \
-		.dev = NULL                                                                                \
-	}
+#define ALP_PWM_SPEC_6_INIT { .dev = NULL }
 #endif
 #if DT_NODE_EXISTS(DT_ALIAS(alp_pwm7))
 #define ALP_PWM_SPEC_7_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm7))
 #else
-#define ALP_PWM_SPEC_7_INIT                                                                        \
-	{                                                                                              \
-		.dev = NULL                                                                                \
-	}
+#define ALP_PWM_SPEC_7_INIT { .dev = NULL }
 #endif
 
 static const struct pwm_dt_spec _specs[] = {

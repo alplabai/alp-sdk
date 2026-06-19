@@ -145,11 +145,11 @@ ZTEST(alp_can_registry, test_sw_fallback_round_trip)
 	alp_can_backend_state_t *st   = &h.state;
 	alp_capabilities_t       caps = { 0 };
 	alp_can_config_t         cfg  = {
-		         .bus_id             = 0u,
-		         .bitrate_nominal_hz = 500000u,
-		         .bitrate_data_hz    = 0u,
-		         .mode               = ALP_CAN_MODE_CLASSIC,
-		         .loopback           = false,
+		.bus_id             = 0u,
+		.bitrate_nominal_hz = 500000u,
+		.bitrate_data_hz    = 0u,
+		.mode               = ALP_CAN_MODE_CLASSIC,
+		.loopback           = false,
 	};
 
 	zassert_equal(ops->open(&cfg, st, &caps), ALP_OK);

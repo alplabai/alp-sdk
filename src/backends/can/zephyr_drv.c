@@ -213,10 +213,10 @@ z_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame, uint32_t timeo
 {
 	const struct device *dev = (const struct device *)st->dev;
 	struct can_frame     zf  = {
-		     .id    = frame->id,
-		     .dlc   = can_bytes_to_dlc(frame->dlc),
-		     .flags = (frame->ext_id ? CAN_FRAME_IDE : 0) | (frame->rtr ? CAN_FRAME_RTR : 0) |
-		              (frame->fd ? CAN_FRAME_FDF : 0) | (frame->brs ? CAN_FRAME_BRS : 0),
+		.id    = frame->id,
+		.dlc   = can_bytes_to_dlc(frame->dlc),
+		.flags = (frame->ext_id ? CAN_FRAME_IDE : 0) | (frame->rtr ? CAN_FRAME_RTR : 0) |
+		         (frame->fd ? CAN_FRAME_FDF : 0) | (frame->brs ? CAN_FRAME_BRS : 0),
 	};
 	memcpy(zf.data, frame->data, frame->dlc);
 	return _errno_to_alp(can_send(dev, &zf, K_MSEC(timeout_ms), NULL, NULL));

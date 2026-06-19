@@ -79,38 +79,38 @@
 #include <zephyr/sys/printk.h>
 
 /* The Ethos-U node added by app.overlay. */
-#define NPU_NODE   DT_NODELABEL(ethosu_npu)
+#define NPU_NODE DT_NODELABEL(ethosu_npu)
 
 /* Absolute reg base straight from the overlay reg = <0x49042000 0x1000>, pulled
  * from devicetree so this stays correct if the node ever moves. */
-#define NPU_BASE   ((uint32_t)DT_REG_ADDR(NPU_NODE))
+#define NPU_BASE ((uint32_t)DT_REG_ADDR(NPU_NODE))
 
 /* Register offsets -- VERBATIM from hal_ethos_u/src/ethosu85_interface.h. */
-#define OFF_ID       0x0000U   /* NPU_REG_ID     */
-#define OFF_STATUS   0x0004U   /* NPU_REG_STATUS */
-#define OFF_CONFIG   0x0028U   /* NPU_REG_CONFIG */
+#define OFF_ID     0x0000U /* NPU_REG_ID     */
+#define OFF_STATUS 0x0004U /* NPU_REG_STATUS */
+#define OFF_CONFIG 0x0028U /* NPU_REG_CONFIG */
 
 /* ID.arch_major_rev = bits [31:28]. U85 -> 2 (NNX_ARCH_VERSION_MAJOR). */
-#define ID_ARCH_MAJOR_SHIFT   28U
-#define ID_ARCH_MAJOR_MASK    0xFU
-#define EXP_ARCH_MAJOR_U85    2U
+#define ID_ARCH_MAJOR_SHIFT 28U
+#define ID_ARCH_MAJOR_MASK  0xFU
+#define EXP_ARCH_MAJOR_U85  2U
 
 /* ID sub-fields for reporting. */
-#define ID_ARCH_MINOR_SHIFT   20U
-#define ID_ARCH_MINOR_MASK    0xFFU
-#define ID_ARCH_PATCH_SHIFT   16U
-#define ID_ARCH_PATCH_MASK    0xFU
-#define ID_PRODUCT_MAJ_SHIFT  12U
-#define ID_PRODUCT_MAJ_MASK   0xFU
+#define ID_ARCH_MINOR_SHIFT  20U
+#define ID_ARCH_MINOR_MASK   0xFFU
+#define ID_ARCH_PATCH_SHIFT  16U
+#define ID_ARCH_PATCH_MASK   0xFU
+#define ID_PRODUCT_MAJ_SHIFT 12U
+#define ID_PRODUCT_MAJ_MASK  0xFU
 
 /* CONFIG.product = bits [31:28]. U85 -> 2 (ETHOSU_PRODUCT_U85). */
-#define CFG_PRODUCT_SHIFT     28U
-#define CFG_PRODUCT_MASK      0xFU
-#define EXP_PRODUCT_U85       2U   /* ETHOSU_PRODUCT_U85; U55=0, U65=1 */
+#define CFG_PRODUCT_SHIFT 28U
+#define CFG_PRODUCT_MASK  0xFU
+#define EXP_PRODUCT_U85   2U /* ETHOSU_PRODUCT_U85; U55=0, U65=1 */
 
 /* CONFIG.macs_per_cc = bits [3:0], log2(macs/cc) -- reported (sanity). */
-#define CFG_MACS_SHIFT        0U
-#define CFG_MACS_MASK         0xFU
+#define CFG_MACS_SHIFT 0U
+#define CFG_MACS_MASK  0xFU
 
 /*
  * Latched raw register words, in a known file-scope symbol the human can read by
@@ -158,7 +158,10 @@ int main(void)
 	printk("-- readback --\n");
 	printk("ID      0x%08x = 0x%08x\n", NPU_BASE + OFF_ID, id);
 	printk("  arch a.b.c = %u.%u.%u (U85 exp 2.0.0; arch_major exp %u)\n",
-	       arch_major, arch_minor, arch_patch, EXP_ARCH_MAJOR_U85);
+	       arch_major,
+	       arch_minor,
+	       arch_patch,
+	       EXP_ARCH_MAJOR_U85);
 	printk("  product_major = %u\n", prod_major);
 	printk("CONFIG  0x%08x = 0x%08x\n", NPU_BASE + OFF_CONFIG, cfg);
 	printk("  product = %u (U85 exp %u; U55=0 U65=1)\n", cfg_prod, EXP_PRODUCT_U85);
@@ -186,7 +189,7 @@ int main(void)
 	 * present-but-init-quirky NPU still PASSES the presence/clock check.
 	 */
 	bool id_sane = (id != 0x00000000U) && (id != 0xFFFFFFFFU);
-	bool ok = true;
+	bool ok      = true;
 
 	ok &= id_sane;
 	ok &= (arch_major == EXP_ARCH_MAJOR_U85);
@@ -195,14 +198,26 @@ int main(void)
 	if (ok) {
 		printk("RESULT PASS: Ethos-U85 present+clocked at 0x%08x "
 		       "ID=0x%08x (arch %u.%u.%u) CONFIG=0x%08x (product=%u) ready=%d\n",
-		       NPU_BASE, id, arch_major, arch_minor, arch_patch,
-		       cfg, cfg_prod, (int)drv_ready);
+		       NPU_BASE,
+		       id,
+		       arch_major,
+		       arch_minor,
+		       arch_patch,
+		       cfg,
+		       cfg_prod,
+		       (int)drv_ready);
 	} else {
 		printk("RESULT FAIL: ID=0x%08x (arch_major=%u exp %u, id_sane=%d) "
 		       "CONFIG=0x%08x (product=%u exp %u) ready=%d -- "
 		       "NPU absent / not clocked / wrong variant\n",
-		       id, arch_major, EXP_ARCH_MAJOR_U85, (int)id_sane,
-		       cfg, cfg_prod, EXP_PRODUCT_U85, (int)drv_ready);
+		       id,
+		       arch_major,
+		       EXP_ARCH_MAJOR_U85,
+		       (int)id_sane,
+		       cfg,
+		       cfg_prod,
+		       EXP_PRODUCT_U85,
+		       (int)drv_ready);
 	}
 
 	return 0;
