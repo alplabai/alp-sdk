@@ -147,6 +147,28 @@ within the capture window (treat as "no link / wrong port / app not running").
 command; it does **not** mean an asynchronous interrupt was delivered (that requires
 the r2 host-IRQ line).
 
+## Validation record
+
+**PASS — silicon-validated 2026-06-20 on E1M-AEN801 (Alif E8, M55-HE).** All eight
+proxy ops round-tripped over the 3-wire SPI bridge to the CC3501E:
+
+```
+[cc3501e-gpio] cc3501e bridge bring-up -> 0
+GPIO_TEST: gpio_config_out PASS   GPIO_TEST: gpio_write_high PASS
+GPIO_TEST: gpio_write_low  PASS   GPIO_TEST: gpio_config_in  PASS
+[cc3501e-gpio] pad 13 reads HIGH  GPIO_TEST: gpio_read   PASS
+GPIO_TEST: cam_enable PASS        GPIO_TEST: cam_disable PASS
+GPIO_TEST: gpio_irq_arm PASS      GPIO_TEST: SUMMARY pass=8 fail=0
+```
+
+This also validates the SPI1 data path (P14_4/5/6 pinctrl + the `spi@48104000` base
++ `clock-frequency` workaround) and the CC3501E cold-boot Puya double-boot. Flash flow
+used: the example is MRAM-slot0-linked (`CONFIG_FLASH_LOAD_OFFSET=0x10000`, reset
+vector `0x8001xxxx`), so it is flashed with the **two-blob** `flash-jlink-mramxip.sh`
+(app → `0x80010000` + signed ATOC), **not** the single-blob ITCM `flash-jlink.sh`.
+`bring-up -> 0` confirms the CC3501E launched and answered in lockstep. (`gpio_read`
+sensing HIGH is the configured internal pull-up; no external loopback is wired.)
+
 ## Known limitation: async GPIO-IRQ (r2)
 
 The asynchronous GPIO interrupt push (`EVT_GPIO_INTERRUPT`) is not validated here and

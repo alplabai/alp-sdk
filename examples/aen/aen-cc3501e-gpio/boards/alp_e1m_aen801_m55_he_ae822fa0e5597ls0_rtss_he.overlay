@@ -14,16 +14,16 @@
  * _FLEX pads are its pins.  P14 is a main-domain port used here purely as
  * the SPI1 function via pinctrl, so no gpio14 controller node is needed.
  *
- * BENCH-UNVERIFIED.  Like the rest of the alp-sdk Alif peripheral layer
- * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi), the addresses/IRQs are
- * transcribed from the Apache-2.0 alifsemi/zephyr_alif fork + the AE822
- * TRM and have NOT been validated on silicon.  The SPI1 pinctrl macros are
- * RESOLVED against zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h
- * (SPI1 on P14_4/5/6 = alt-2, the `_C` suffix) and the LP-GPIO mux is the
- * reset default (alt-0 = LPGPIO); the one remaining genuine unknown is the
- * SPI1 IRQ number (upstream Zephyr declares no SPI node, so it is not in
- * the build tree) -- confirm it against the AE822 TRM before relying on
- * the interrupt-driven path on silicon.
+ * SPI1 DATA PATH BENCH-VALIDATED 2026-06-20 (E1M-AEN801, M55-HE): the GPIO
+ * proxy round-trips over this link (docs/cc3501e-gpio-bench.md, pass=8 fail=0),
+ * confirming the P14_4/5/6 pinctrl (SPI1 alt-2, `_C` suffix), the
+ * `spi@48104000` base, the LP-GPIO mux (alt-0 default), and the
+ * `clock-frequency` workaround.  Still UNCONFIRMED: the SPI1 IRQ number
+ * (`interrupts = <138 3>` below) -- the bridge runs CS-less POLLED lockstep
+ * transfers, so the IRQ is never exercised; confirm it against the AE822 TRM
+ * before relying on any interrupt-driven SPI path.  Addresses/IRQs are still
+ * transcribed from the Apache-2.0 alifsemi/zephyr_alif fork + the AE822 TRM
+ * (as in zephyr/dts/alif/ensemble_e8_peripherals.dtsi).
  */
 
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
