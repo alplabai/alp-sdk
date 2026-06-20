@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: aen-cc3501e-gpio
+  description: |
+    Host (Alif M55-HE) side of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4
+    coprocessor GPIO proxy + camera-enable demo: bring up the inter-chip
+    SPI1 bridge, then configure / drive / read a proxied CC3501E GPIO and
+    enable + disable the camera-enable LDOs over the bridge via the
+    portable cc3501e_gpio_* / cc3501e_cam_enable host API.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_gpio.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - cc3501e
+      - gpio
+    build_only: true
