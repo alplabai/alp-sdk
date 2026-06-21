@@ -37,4 +37,25 @@ ZTEST(alp_console, test_board_reports_version)
 	zassert_not_null(strstr(out, CONFIG_ALP_SDK_VERSION), "version missing");
 }
 
+ZTEST(alp_console, test_mem_rd_reads_known_word)
+{
+	static volatile uint32_t probe = 0xCAFEF00Du;
+	char                     line[48];
+
+	snprintk(line, sizeof(line), "alp mem rd 0x%lx", (unsigned long)(uintptr_t)&probe);
+	const char *out = run(line);
+
+	zassert_not_null(strstr(out, "cafef00d"), "expected value in: %s", out);
+}
+
+ZTEST(alp_console, test_mem_wr_then_rd_roundtrips)
+{
+	static volatile uint32_t probe = 0;
+	char                     line[64];
+
+	snprintk(line, sizeof(line), "alp mem wr 0x%lx 0x12345678", (unsigned long)(uintptr_t)&probe);
+	(void)run(line);
+	zassert_equal(probe, 0x12345678u, "write did not land");
+}
+
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);
