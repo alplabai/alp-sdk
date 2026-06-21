@@ -77,7 +77,33 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/init.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/sys/sys_io.h>
+
+/*
+ * Program the CDC200 pixel-clock divider directly.  The upstream Alif clockctrl
+ * has no .set_rate for the CDC pixel clock, so CDC200_PIXCLK_CTRL[24:16] keeps
+ * its reset divisor 0x1FF (511) -> ~0.78 MHz pixel clock.  Set it for ~66.67 MHz
+ * (SYST_ACLK 400 MHz / 6; panel-native is 62.35 MHz -- nearest reachable, the
+ * exact rate is bench-tunable).  CDC200_PIXCLK_CTRL = CLKCTL_PER_MST(0x4903F000)
+ * + 0x04 (DFP sys_ctrl_cdc.h).
+ */
+#define CDC_PIXCLK_CTRL_ADDR 0x4903F004UL
+#define CDC_PIXCLK_DIV_POS   16U
+#define CDC_PIXCLK_DIV_MSK   (0x1FFUL << CDC_PIXCLK_DIV_POS)
+#define CDC_PIXCLK_DIV       6UL
+
+static int cdc_pixclk_div_fixup(void)
+{
+	uint32_t v = sys_read32(CDC_PIXCLK_CTRL_ADDR);
+
+	v = (v & ~CDC_PIXCLK_DIV_MSK) | (CDC_PIXCLK_DIV << CDC_PIXCLK_DIV_POS);
+	sys_write32(v, CDC_PIXCLK_CTRL_ADDR);
+	return 0;
+}
+
+SYS_INIT(cdc_pixclk_div_fixup, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 /* The display device (the cdc200 pixel pump) is the chosen render target. */
 #define DISPLAY_NODE DT_CHOSEN(zephyr_display)
