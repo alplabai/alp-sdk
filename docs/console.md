@@ -28,10 +28,10 @@ console UART — no custom pins needed.
 
 ## Safety tiers
 
-| Config symbol                  | Tier         | Commands unlocked                          |
-|--------------------------------|--------------|--------------------------------------------|
-| `CONFIG_ALP_SDK_CONSOLE=y`     | **Field**    | board, mem rd, gpio read, i2c scan/read, adc read, pwm get, clk, companion ver/ping |
-| `+CONFIG_ALP_SDK_CONSOLE_UNSAFE=y` | **Bench** | + mem wr/fill, gpio write, companion gpio write |
+| Config symbol                  | Tier         | Commands unlocked                                               |
+|--------------------------------|--------------|-----------------------------------------------------------------|
+| `CONFIG_ALP_SDK_CONSOLE=y`     | **Field**    | board, mem rd, gpio read, i2c scan/read, adc read, clk, companion ver/ping |
+| `+CONFIG_ALP_SDK_CONSOLE_UNSAFE=y` | **Bench** | + mem wr, gpio write, i2c write, pwm set, reboot, companion gpio write |
 
 Enable `_UNSAFE` only in bench / development builds.  Do not ship it in
 production firmware — there is no authentication on the serial port.
@@ -64,18 +64,23 @@ Print the SoM identity from the on-module EEPROM (requires
 
 ```
 uart:~$ alp board
-SKU:      E1M-AEN801
-HW rev:   v1.0
-Serial:   AEN801-0042
+Alp SDK 0.7.0  |  E1M-AEN801 v1.0  |  (c) Alp Lab AB
+  family : AEN
+  serial : AEN801-0042
+  mfg    : 2026-01-15
+  uptime : 4321 ms
 ```
 
 ### `alp mem rd <addr> [count]`
 
-Read raw memory (4-byte aligned).
+Read raw memory (32-bit words, one line per word).
 
 ```
 uart:~$ alp mem rd 0x80010000 4
-0x80010000: de ad be ef  01 00 00 20  05 01 08 80  09 01 08 80
+[80010000] = deadbeef
+[80010004] = 20000001
+[80010008] = 80080105
+[8001000c] = 80080109
 ```
 
 ### `alp mem wr <addr> <value>` *(UNSAFE)*
@@ -84,14 +89,7 @@ Write one 32-bit word.
 
 ```
 uart:~$ alp mem wr 0x40040000 0x1
-```
-
-### `alp mem fill <addr> <len> <byte>` *(UNSAFE)*
-
-Fill a byte range.
-
-```
-uart:~$ alp mem fill 0x20000000 64 0xff
+[40040000] <- 00000001
 ```
 
 ### `alp gpio read <pin>`
@@ -100,7 +98,7 @@ Sample a named E1M GPIO pin by its positional index in `alp,pin-array`.
 
 ```
 uart:~$ alp gpio read 0
-pin 0: 1
+pin 0 = 1
 ```
 
 ### `alp gpio write <pin> <0|1>` *(UNSAFE)*
@@ -109,6 +107,7 @@ Drive a GPIO pin.
 
 ```
 uart:~$ alp gpio write 0 1
+pin 0 <- 1
 ```
 
 ### `alp i2c scan <bus_id>`
@@ -117,71 +116,74 @@ Probe every 7-bit address on an I2C bus (1-byte read).
 
 ```
 uart:~$ alp i2c scan 0
-addr 0x1e  acked  (DA9292 PMIC)
-addr 0x4a  acked  (board ID ADC)
-scan done, 2 responder(s)
+  0x1e
+  0x4a
+scan complete, 2 responder(s)
 ```
 
-### `alp i2c read <bus_id> <addr> <reg> <len>`
+### `alp i2c read <bus_id> <addr> <reg> [len]`
 
-Read bytes from an I2C register.
+Read bytes from an I2C register (up to 16; `len` defaults to 1).
 
 ```
 uart:~$ alp i2c read 0 0x1e 0x00 4
-0x00: 81 02 00 00
+81 02 00 00
 ```
 
-### `alp i2c write <bus_id> <addr> <reg> <byte...>` *(UNSAFE)*
+### `alp i2c write <bus_id> <addr> <reg> <u8>` *(UNSAFE)*
 
-Write bytes to an I2C register.
+Write one byte to an I2C register.
 
 ```
 uart:~$ alp i2c write 0 0x1e 0x00 0x80
+0x1e[0x00] <- 0x80
 ```
 
 ### `alp adc read <channel>`
 
-Read a raw ADC channel (requires `CONFIG_ALP_SDK_PERIPH_ADC` or
-`CONFIG_ALP_SDK_ADC_SW_FALLBACK`; the command auto-gates on ADC support).
+Read a raw ADC channel (12-bit; requires `CONFIG_ALP_SDK_PERIPH_ADC` —
+the command compiles out on builds without ADC support).
 
 ```
 uart:~$ alp adc read 0
-ch 0: 2048  (12-bit raw, ~1.65 V @ 3.3 V ref)
+adc[0] raw = 2048
 ```
 
-### `alp pwm get <channel>`
+### `alp pwm set <channel> <period_ns> <duty_ns>` *(UNSAFE)*
 
-Read the current PWM period and pulse width on a channel.
-
-```
-uart:~$ alp pwm get 0
-ch 0: period=20000000 ns  pulse=1500000 ns
-```
-
-### `alp pwm set <channel> <period_ns> <pulse_ns>` *(UNSAFE)*
-
-Set PWM parameters.
+Set PWM period and duty cycle.
 
 ```
 uart:~$ alp pwm set 0 20000000 1000000
+pwm[0] period=20000000ns duty=1000000ns
 ```
 
 ### `alp clk`
 
-Report active clock tree nodes (SoC-specific; sub-commands vary by SoM).
+Report system clock and tick rate.
 
 ```
 uart:~$ alp clk
-cpu_clk:   400 MHz
-ahb_clk:   200 MHz
-apb_clk:   100 MHz
+sys clock : 400000000 Hz
+tick rate : 1000 Hz
 ```
+
+Note: a full per-IP clock tree (enable/rate-set verbs) is a documented follow-up.
 
 ### `alp companion ver`
 
 Query the companion chip firmware version.  On V2N this is the GD32
 supervisor; on Alif this is the CC3501E (must be bound first — see
 [Companion binding](#companion-binding) below).
+
+On V2N:
+
+```
+uart:~$ alp companion ver
+GD32 supervisor fw v0.2.6
+```
+
+On Alif / CC3501E:
 
 ```
 uart:~$ alp companion ver
@@ -190,12 +192,21 @@ CC3501E protocol v1
 
 ### `alp companion ping`
 
-Liveness round-trip to the companion.  On V2N a bare GD32 PING is sent;
-on Alif a `GET_VERSION` is used (proves the SPI framing end-to-end).
+Liveness round-trip to the companion.  On V2N a bare GD32 PING frame is
+sent and the result is printed:
 
 ```
 uart:~$ alp companion ping
 ping OK
+```
+
+On Alif / CC3501E there is no bare PING command; `ping` performs a
+`GET_VERSION` round-trip (the same operation as `alp companion ver`) and
+prints the CC3501E version string:
+
+```
+uart:~$ alp companion ping
+CC3501E protocol v1
 ```
 
 ### `alp companion gpio read <0..31>` (V2N only)
@@ -216,13 +227,13 @@ uart:~$ alp companion gpio write 3 1
 companion pin 3 <- 1
 ```
 
-### `alp reboot`
+### `alp reboot` *(UNSAFE)*
 
 Soft-reset the SoC (calls `sys_reboot(SYS_REBOOT_WARM)`).
 
 ```
 uart:~$ alp reboot
-*** rebooting ***
+rebooting...
 ```
 
 ---
@@ -291,7 +302,7 @@ west build -p -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/peripheral-io/alp-console
 ```
 
-After flashing (see [aen-bench-bringup.md](aen-bench-bringup.md)):
+After flashing (see [bring-up-aen.md](bring-up-aen.md)):
 open the console UART at 115200 8N1, wait for the boot banner, then
 type `help` to see `alp` in the command list.
 
@@ -312,6 +323,8 @@ type `help` to see `alp` in the command list.
 
 ## Documented follow-ups (out of scope for this release)
 
+- **`alp pwm get`** — read back current PWM period/duty; blocked on
+  portable `<alp/pwm.h>` having no duty-read surface (no `get` exists in v1).
 - **`alp companion ota status`** — query the CC3501E OTA slot state
   (blocked on the PSA FWU session being owned by the OTA library;
   re-enabling it from the shell needs a mutex, not yet wired).
@@ -322,6 +335,5 @@ type `help` to see `alp` in the command list.
   tool using `/dev/mem` and the SoM EEPROM sysfs node (deferred to the
   Yocto layer; no ETA).
 - **`alp adc read` auto-gate** — the ADC command compiles out when
-  neither `CONFIG_ALP_SDK_PERIPH_ADC` nor `CONFIG_ALP_SDK_ADC_SW_FALLBACK`
-  is set; builds without ADC support are clean (this is working as
-  designed, documented here for clarity).
+  `CONFIG_ALP_SDK_PERIPH_ADC` is not set; builds without ADC support are
+  clean (this is working as designed, documented here for clarity).
