@@ -38,6 +38,7 @@ int alp_console_parse_ulong(const char *s, unsigned long *out)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_BOARD)
 static int cmd_board(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -69,19 +70,22 @@ static int cmd_board(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "  uptime : %llu ms", (unsigned long long)k_uptime_get());
 	return 0;
 }
+#endif /* CONFIG_ALP_SDK_CONSOLE_CMD_BOARD */
 
 SHELL_SUBCMD_SET_CREATE(alp_subcmds, (alp));
 
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_BOARD)
 SHELL_SUBCMD_ADD((alp), board, NULL, "SoM identity, SDK version, uptime", cmd_board, 1, 0);
+#endif
 
 SHELL_CMD_REGISTER(alp, &alp_subcmds, "Alp SoM diagnostics console", NULL);
 
-#if !IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_COMPANION)
+#if !IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION)
 /*
  * No-op fallback: when no companion is configured, binding one is a no-op so
  * the public <alp/console.h> symbol always links on a console-enabled build.
  * The real definition lives in alp_console_companion.c under
- * CONFIG_ALP_SDK_CONSOLE_COMPANION.
+ * CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION.
  */
 void alp_console_companion_set(cc3501e_t *ctx)
 {

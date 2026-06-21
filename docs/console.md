@@ -321,6 +321,37 @@ type `help` to see `alp` in the command list.
 
 ---
 
+## Per-command footprint control
+
+Every command group has its own Kconfig toggle so a tight build can drop
+individual verbs without touching the rest.  All symbols default `y` when
+`CONFIG_ALP_SDK_CONSOLE=y`, so existing `prj.conf` files are unaffected.
+
+| Symbol                              | Default         | Controls              |
+|-------------------------------------|-----------------|-----------------------|
+| `CONFIG_ALP_SDK_CONSOLE_CMD_BOARD`  | y               | `alp board`           |
+| `CONFIG_ALP_SDK_CONSOLE_CMD_MEM`    | y               | `alp mem`             |
+| `CONFIG_ALP_SDK_CONSOLE_CMD_GPIO`   | y               | `alp gpio`            |
+| `CONFIG_ALP_SDK_CONSOLE_CMD_I2C`    | y               | `alp i2c`             |
+| `CONFIG_ALP_SDK_CONSOLE_CMD_ADC`    | y (needs `ALP_SDK_PERIPH_ADC`) | `alp adc` |
+| `CONFIG_ALP_SDK_CONSOLE_CMD_PWM`    | y               | `alp pwm`             |
+| `CONFIG_ALP_SDK_CONSOLE_CMD_CLK`    | y               | `alp clk`             |
+| `CONFIG_ALP_SDK_CONSOLE_CMD_REBOOT` | y               | `alp reboot`          |
+| `CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION` | y if V2N supervisor or CC3501E; else n | `alp companion` |
+
+`CMD_ADC` additionally requires `CONFIG_ALP_SDK_PERIPH_ADC`; it is
+automatically absent when ADC support is disabled.
+
+`CMD_REBOOT` and `CMD_PWM` both still require `CONFIG_ALP_SDK_CONSOLE_UNSAFE`
+to emit their verbs; the group toggle just controls whether the handler code
+is compiled at all.
+
+The dominant binary cost is `CONFIG_SHELL` itself, not individual command
+groups.  Dropping groups is most useful when code-size constraints are tight
+(e.g. MRAM-constrained Alif M55-HE builds).
+
+---
+
 ## Documented follow-ups (out of scope for this release)
 
 - **`alp pwm get`** — read back current PWM period/duty; blocked on

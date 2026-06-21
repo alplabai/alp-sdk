@@ -76,7 +76,7 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_periph.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_sys.c)
 
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_COMPANION
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion.c)
 
 # Storage class dispatcher + backends.

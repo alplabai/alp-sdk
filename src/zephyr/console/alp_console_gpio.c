@@ -17,6 +17,8 @@
 
 #include "alp_console.h"
 
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_GPIO)
+
 static int cmd_gpio_read(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -90,3 +92,5 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     SHELL_SUBCMD_SET_END);
 
 SHELL_SUBCMD_ADD((alp), gpio, &alp_gpio_subcmds, "GPIO read / write by pin_id", NULL, 1, 0);
+
+#endif /* CONFIG_ALP_SDK_CONSOLE_CMD_GPIO */

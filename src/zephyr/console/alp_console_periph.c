@@ -23,7 +23,7 @@
 
 #include "alp_console.h"
 
-#if defined(CONFIG_ALP_SDK_PERIPH_ADC)
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_ADC)
 #include <alp/adc.h>
 
 static int cmd_adc_read(const struct shell *sh, size_t argc, char **argv)
@@ -63,8 +63,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     SHELL_CMD_ARG(read, NULL, "read <ch> -- one-shot raw conversion", cmd_adc_read, 2, 0),
     SHELL_SUBCMD_SET_END);
 SHELL_SUBCMD_ADD((alp), adc, &alp_adc_subcmds, "ADC one-shot read", NULL, 1, 0);
-#endif /* CONFIG_ALP_SDK_PERIPH_ADC */
+#endif /* CONFIG_ALP_SDK_CONSOLE_CMD_ADC */
 
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_PWM)
 #if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE)
 static int cmd_pwm_set(const struct shell *sh, size_t argc, char **argv)
 {
@@ -103,12 +104,11 @@ static int cmd_pwm_set(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "pwm[%lu] period=%luns duty=%luns", ch, period_ns, duty_ns);
 	return 0;
 }
-#endif
 
-#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE)
 SHELL_STATIC_SUBCMD_SET_CREATE(
     alp_pwm_subcmds,
     SHELL_CMD_ARG(set, NULL, "set <ch> <period_ns> <duty_ns> (UNSAFE)", cmd_pwm_set, 4, 0),
     SHELL_SUBCMD_SET_END);
 SHELL_SUBCMD_ADD((alp), pwm, &alp_pwm_subcmds, "PWM set period/duty (UNSAFE)", NULL, 1, 0);
-#endif
+#endif /* CONFIG_ALP_SDK_CONSOLE_UNSAFE */
+#endif /* CONFIG_ALP_SDK_CONSOLE_CMD_PWM */

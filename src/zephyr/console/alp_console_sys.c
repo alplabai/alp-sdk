@@ -9,10 +9,12 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 
-#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE) && IS_ENABLED(CONFIG_REBOOT)
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_REBOOT) && IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE) && \
+    IS_ENABLED(CONFIG_REBOOT)
 #include <zephyr/sys/reboot.h>
 #endif
 
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_CLK)
 static int cmd_clk(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -24,8 +26,9 @@ static int cmd_clk(const struct shell *sh, size_t argc, char **argv)
 }
 
 SHELL_SUBCMD_ADD((alp), clk, NULL, "System clock facts", cmd_clk, 1, 0);
+#endif /* CONFIG_ALP_SDK_CONSOLE_CMD_CLK */
 
-#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE)
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_REBOOT) && IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE)
 static int cmd_reboot(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -42,4 +45,4 @@ static int cmd_reboot(const struct shell *sh, size_t argc, char **argv)
 }
 
 SHELL_SUBCMD_ADD((alp), reboot, NULL, "Warm reset (UNSAFE)", cmd_reboot, 1, 0);
-#endif
+#endif /* CONFIG_ALP_SDK_CONSOLE_CMD_REBOOT && CONFIG_ALP_SDK_CONSOLE_UNSAFE */

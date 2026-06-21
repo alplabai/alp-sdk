@@ -14,6 +14,8 @@
 
 #include "alp_console.h"
 
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_MEM)
+
 static int cmd_mem_rd(const struct shell *sh, size_t argc, char **argv)
 {
 	unsigned long addr;
@@ -65,3 +67,5 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     SHELL_SUBCMD_SET_END);
 
 SHELL_SUBCMD_ADD((alp), mem, &alp_mem_subcmds, "Memory / register peek-poke", NULL, 1, 0);
+
+#endif /* CONFIG_ALP_SDK_CONSOLE_CMD_MEM */

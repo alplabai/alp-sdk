@@ -51,8 +51,66 @@ config ALP_SDK_CONSOLE_UNSAFE
 	  builds so a mis-typed poke cannot brick a live unit; the verbs are
 	  then physically absent from the binary and from `help`.
 
-config ALP_SDK_CONSOLE_COMPANION
-	bool "Add `alp companion` (GD32 on V2N / CC3501E on Alif)"
+config ALP_SDK_CONSOLE_CMD_BOARD
+	bool "alp board command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp board` sub-command (SoM identity, SDK version,
+	  uptime).  Disable to shave the identity strings from tight builds.
+
+config ALP_SDK_CONSOLE_CMD_MEM
+	bool "alp mem command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp mem` sub-command (rd always; wr under UNSAFE).
+
+config ALP_SDK_CONSOLE_CMD_GPIO
+	bool "alp gpio command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp gpio` sub-command (read always; write under UNSAFE).
+
+config ALP_SDK_CONSOLE_CMD_I2C
+	bool "alp i2c command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp i2c` sub-command (scan/read always; write under UNSAFE).
+
+config ALP_SDK_CONSOLE_CMD_ADC
+	bool "alp adc command"
+	depends on ALP_SDK_CONSOLE && ALP_SDK_PERIPH_ADC
+	default y
+	help
+	  Compile the `alp adc` sub-command (one-shot raw read).  Requires
+	  ALP_SDK_PERIPH_ADC; automatically absent when ADC is disabled.
+
+config ALP_SDK_CONSOLE_CMD_PWM
+	bool "alp pwm command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp pwm` sub-command (set period/duty, UNSAFE only).
+
+config ALP_SDK_CONSOLE_CMD_CLK
+	bool "alp clk command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp clk` sub-command (system clock and tick rate).
+
+config ALP_SDK_CONSOLE_CMD_REBOOT
+	bool "alp reboot command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp reboot` sub-command (warm reset, UNSAFE only).
+
+config ALP_SDK_CONSOLE_CMD_COMPANION
+	bool "alp companion command (GD32 on V2N / CC3501E on Alif)"
 	depends on ALP_SDK_CONSOLE
 	default y if ALP_SDK_V2N_SUPERVISOR || ALP_SDK_CHIP_CC3501E
 	default n

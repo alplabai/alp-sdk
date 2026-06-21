@@ -15,6 +15,8 @@
 
 #include "alp_console.h"
 
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_I2C)
+
 static alp_i2c_t *open_bus(const struct shell *sh, const char *arg)
 {
 	unsigned long bus;
@@ -138,3 +140,5 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     SHELL_SUBCMD_SET_END);
 
 SHELL_SUBCMD_ADD((alp), i2c, &alp_i2c_subcmds, "I2C scan / register read-write", NULL, 1, 0);
+
+#endif /* CONFIG_ALP_SDK_CONSOLE_CMD_I2C */
