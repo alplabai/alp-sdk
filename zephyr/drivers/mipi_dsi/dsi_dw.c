@@ -203,22 +203,24 @@ int dw_calc_clocks(const struct device *dev,
 
 	uint32_t dpi_pix_clk;
 	uint8_t esc_clk_div;
-#if !DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks)
 	uint32_t htotal;
 	uint32_t vtotal;
-#endif /* !DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks) */
 	float hs_bit_clk;
-	int ret;
+	int ret = 0;
 
-#if DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks)
-	ret = clock_control_get_rate(config->clk_dev, config->pix_cid, &dpi_pix_clk);
-#else
-	htotal = timings->hsync + timings->hbp + timings->hactive +
-		timings->hfp;
-	vtotal = timings->vsync + timings->vbp + timings->vactive +
-		timings->vfp;
+	/*
+	 * ALP-SDK PORT FIX: derive the DPI pixel clock from the panel timings, NOT
+	 * from clock_control_get_rate(pix_cid).  The upstream Alif clockctrl's
+	 * get_rate returns the pixel clock's PARENT rate (SYST_ACLK, 400 MHz), not
+	 * the post-divider pixel rate -- feeding 400 MHz here drives the D-PHY HS
+	 * target to ~3.8 GHz and PHY config fails, so dsi attach (and the panel
+	 * init) never completes.  htotal*vtotal*frame-rate is the true pixel clock
+	 * (~60 MHz for 720x1280@60).  (The clocks are still wired for the gate
+	 * enable in dsi_dw_enable_clocks(); only the RATE source changed.)
+	 */
+	htotal = timings->hsync + timings->hbp + timings->hactive + timings->hfp;
+	vtotal = timings->vsync + timings->vbp + timings->vactive + timings->vfp;
 	dpi_pix_clk = htotal * vtotal * DPI_FRAME_RATE;
-#endif /* DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks) */
 
 	if (mdev->mode_flags & MIPI_DSI_MODE_VIDEO_BURST) {
 		LOG_DBG("Burst mode of clock calculation");

@@ -776,6 +776,13 @@ config MIPI_DPHY
 	  DesignWare CSI-2 driver can reach the D-PHY.  Selected by the CSI driver
 	  (VIDEO_MIPI_CSI2_DW).
 
+if MIPI_DPHY
+# Generates CONFIG_MIPI_DPHY_LOG_LEVEL (dphy_dw.c's LOG_MODULE_REGISTER needs it).
+module = MIPI_DPHY
+module-str = mipi_dphy
+source "subsys/logging/Kconfig.template.log_config"
+endif # MIPI_DPHY
+
 config MIPI_DPHY_DW
 	bool "DesignWare MIPI-DPHY host controller for Alif"
 	default y
