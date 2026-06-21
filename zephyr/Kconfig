@@ -51,6 +51,16 @@ config ALP_SDK_CONSOLE_UNSAFE
 	  builds so a mis-typed poke cannot brick a live unit; the verbs are
 	  then physically absent from the binary and from `help`.
 
+config ALP_SDK_CONSOLE_COMPANION
+	bool "Add `alp companion` (GD32 on V2N / CC3501E on Alif)"
+	depends on ALP_SDK_CONSOLE
+	default y if ALP_SDK_V2N_SUPERVISOR || ALP_SDK_CHIP_CC3501E
+	default n
+	help
+	  Compile the `alp companion` command group.  On V2N it binds the
+	  GD32 supervisor singleton automatically; on Alif the application
+	  registers its CC3501E handle via alp_console_companion_set().
+
 # Active SoC selection — drives <alp/soc_caps.h> capability checks.
 # When no choice is selected the SDK's runtime validation is permissive
 # (default macros = UINT16_MAX); selecting a SoC enables strict
