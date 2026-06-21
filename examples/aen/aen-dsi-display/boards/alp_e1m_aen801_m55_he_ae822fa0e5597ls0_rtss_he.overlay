@@ -15,15 +15,16 @@
  *       |  2 data lanes
  *   panel@0  (himax,hx8394)                        -- the HX8394 panel controller
  *
- * Panel power/reset is gated by a TI TCAL9538 I2C GPIO expander (U35) on I2C0
+ * Panel power/reset is gated by a TI TCAL9538 I2C GPIO expander (U35) on I2C2
  * @0x72: expander P0 = LCD_PWR_EN (active-high panel power, brings up the
  * on-module backlight boost too), P1 = LCD_RST (panel reset, active-LOW at the
- * panel through level-shifter U5).
+ * panel through level-shifter U5).  The expander's own \RESET (IO_EXP.RST) is
+ * SoC P3_6 -- released by the SYS_INIT in src/main.c.
  *
  * reg / IRQ are transcribed from the Alif CMSIS DFP (CDC_BASE 0x49031000 /
- * DSI_BASE 0x49032000 / I2C0_BASE 0x49010000) and the in-tree dtsi.  The panel
- * timings (720x1280, the porches, 62.346 MHz pixel clock) are transcribed from
- * the upstream NXP shield boards/shields/rk055hdmipi4ma0/rk055hdmipi4ma0.overlay.
+ * DSI_BASE 0x49032000) and the in-tree dtsi.  The panel timings (720x1280, the
+ * porches, 62.346 MHz pixel clock) are transcribed from the upstream NXP shield
+ * boards/shields/rk055hdmipi4ma0/rk055hdmipi4ma0.overlay.
  *
  * NOT INVENTED / TBD (see src/main.c header for the full list):
  *   - cdc200/mipi_dsi CLOCKS use the real re-authored ALIF_*_CLK ids now in
@@ -33,9 +34,8 @@
  *   - The exact 62.346 MHz DPI pixel clock is NOT reachable from the Alif
  *     400/480 MHz tree -- nearest is ~66.67/60 MHz.  clock-frequency is left at
  *     the panel-native value; the achieved rate is a bench-tunable.
- *   - The expander's own \RESET is on SoC ball N1 (pinmux "SPI0_CS1"); the
- *     Zephyr GPIO port/pin for that ball is UNKNOWN, so the expander reset-gpios
- *     are OMITTED (the TCAL9538 powers up functional).  TODO: wire when known.
+ *   - HARDWARE-BLOCKED: U35 is electrically silent on I2C2 (see src/main.c) --
+ *     a board-level fault on U35 SDA/SCL / the U6->U35 routing.
  */
 
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>

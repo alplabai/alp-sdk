@@ -31,16 +31,16 @@
  *                            -- the HX8394 panel controller.  Its driver runs the
  *                               panel reset sequence + DSI attach at POST_KERNEL.
  *
- * PANEL POWER / RESET (TI TCAL9538 expander, U35, on I2C0 @0x72):
+ * PANEL POWER / RESET (TI TCAL9538 expander, U35, on I2C2 @0x72):
  *   - expander P0 = LCD_PWR_EN (active-high) -- panel power; the on-module
  *     backlight boost comes up with it (no dedicated backlight GPIO).
  *   - expander P1 = LCD_RST -- panel reset; active-LOW at the panel through
  *     level-shifter U5.  Consumed by the hx8394 driver via reset-gpios.
- *   The boot order matters: power (P0) MUST be asserted before reset (P1) is
- *   deasserted.  We model P0 two ways for robustness: (1) a regulator-fixed
- *   (regulator-boot-on) in the overlay brings the rail up at boot, and (2) main()
- *   ALSO asserts P0 explicitly below before checking the panel -- a teaching
- *   demonstration of the sequence and a guard if init ordering surprises us.
+ *   The expander's own \RESET (IO_EXP.RST) is SoC P3_6 -- released by the
+ *   lcd_exp_reset_release() SYS_INIT below.  The boot order matters: power (P0)
+ *   MUST be asserted before reset (P1) is deasserted.  We model P0 two ways for
+ *   robustness: (1) a regulator-fixed (regulator-boot-on) in the overlay brings
+ *   the rail up at boot, and (2) main() ALSO asserts P0 explicitly below.
  *
  * FRAMEBUFFER PLACEMENT (RAM-run critical -- see CMakeLists.txt for the full
  * note): the cdc200 driver is built with -DNO_RELOCATE_SRAM0, which pins the L1
@@ -54,9 +54,14 @@
  *     rate is a bench knob; the overlay carries the panel-native value.
  *   - cdc200/mipi_dsi clock ids are the real re-authored ALIF_*_CLK values, but
  *     their on-silicon effect is BENCH-UNVERIFIED.
- *   - Expander \RESET (SoC ball N1 "SPI0_CS1") GPIO is UNKNOWN -- omitted.
  *   - The LCD_RST polarity through level-shifter U5 (overlay assumes the net is
  *     active-LOW at the panel) is bench-unconfirmed.
+ *   - HARDWARE-BLOCKED: U35 (the TCAL9538) is electrically silent on I2C2 (ACKs
+ *     at no address while 13 other devices on the bus respond), despite correct
+ *     part/addr(0x72)/bus/reset(P3_6) + +VIO present.  The EEPROM is SoM-side
+ *     (works); U35 is EVK-side through the U6 connector -- suspect open/cold
+ *     solder on U35 SDA/SCL (pins 13/12) or the U6->U35 routing.  Without U35
+ *     the panel cannot be powered/reset, so pixels-on-glass waits on that fix.
  *
  * The PASS gate: the expander, the DSI host, AND the cdc200 display device are
  * all device_is_ready, and display_write() of a solid-color frame returns 0.
@@ -102,20 +107,6 @@ static int lcd_exp_reset_release(void)
 
 SYS_INIT(lcd_exp_reset_release, PRE_KERNEL_2, 0);
 
-/*
- * NOTE on the panel-control expander (U35 = TI TCA6408A, nxp,pca6408-compatible,
- * on I2C2 / P5_6/P5_7 @ 0x21).  Its own \RESET (IO_EXP.RST) is pulled HIGH by
- * R141 to +VIO, so it powers up RELEASED -- no SoC reset drive is needed.
- *
- * BENCH STATUS: on this board the TCA6408A is electrically SILENT -- a full
- * i2c2 scan (0x00..0x7F, read + write probes) never sees it, while the EEPROM
- * (0x50) + 12 sensors on the SAME bus all ACK.  The netlist trace is
- * unambiguous (U35 SDA/SCL -> SoC balls AD2/AE2 -> P5_7/P5_6 -> I2C2), so this
- * is NOT a bus/address/config issue -- it is a hardware fault on U35 (DNP, a
- * TCA6408A populated in a footprint laid out for the 2-addr TCAL9538, or no
- * +VIO at its VCC).  The display pipeline below is fully up regardless; only
- * panel power/reset (hence pixels-on-glass) waits on U35.
- */
 
 /* The display device (the cdc200 pixel pump) is the chosen render target. */
 #define DISPLAY_NODE DT_CHOSEN(zephyr_display)
