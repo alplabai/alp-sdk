@@ -58,4 +58,14 @@ ZTEST(alp_console, test_mem_wr_then_rd_roundtrips)
 	zassert_equal(probe, 0x12345678u, "write did not land");
 }
 
+ZTEST(alp_console, test_gpio_read_runs)
+{
+	const char *out = run("alp gpio read 0");
+
+	/* On native_sim pin 0 of the emulated gpio_emul0 reads back a
+	 * defined level (the gpio-emul reset default is low = 0).
+	 * Assert the command resolved and printed a level, not an error. */
+	zassert_true(strstr(out, "= 0") || strstr(out, "= 1"), "got: %s", out);
+}
+
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);

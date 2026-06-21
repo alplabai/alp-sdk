@@ -70,7 +70,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BANNER
 # decentralized SHELL_SUBCMD_ADD section mechanism, so they list here flat.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_mem.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_mem.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_gpio.c)
 
 # Storage class dispatcher + backends.
 # The dispatcher compiles unconditionally so apps that depend on the
