@@ -89,4 +89,12 @@ ZTEST(alp_console, test_adc_read_registers)
 	             out);
 }
 
+ZTEST(alp_console, test_clk_dump_runs)
+{
+	const char *out = run("alp clk");
+
+	zassert_not_null(strstr(out, "Hz"), "clk dump missing: %s", out);
+	zassert_is_null(strstr(out, "Unknown command"), "clk cmd not registered: %s", out);
+}
+
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);
