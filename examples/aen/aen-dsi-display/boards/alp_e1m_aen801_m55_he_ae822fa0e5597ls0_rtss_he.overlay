@@ -133,16 +133,23 @@
 	clock-frequency = <I2C_BITRATE_STANDARD>;
 
 	/*
-	 * U35 = TI TCA6408A (8-bit I2C GPIO expander, nxp,pca6408-compatible).  The
-	 * boards as built populate a TCA6408A in a footprint laid out for the 2-addr
-	 * TCAL9538, which grounds a pin the TCA6408A needs at +VIO -> the chip is
-	 * dead; a board patch (pin 15 -> +VIO) revives it.  7-bit addr 0x21 (ADDR
-	 * high) -- CONFIRM via the i2c2 scan on the patched board.  P0=LCD_PWR_EN,
-	 * P1=LCD_RST, P3=touch-reset (touch deferred).
+	 * U35 = the footprint's intended part: TI TCAL9538 (ti,tca9538), 7-bit addr
+	 * 0x72 (1110_A1_A0, straps A0=0/A1=1).  P0=LCD_PWR_EN, P1=LCD_RST,
+	 * P3=touch-reset (deferred).
+	 *
+	 * BOARD BOM FAULT (bench-confirmed): the boards as built populate a TCA6408A
+	 * (TCA6408ARGTR) in this TCAL9538 footprint.  The pinouts differ, so the part
+	 * is mis-wired: as built a power pin is grounded (chip dead); even after the
+	 * pin-15->+VIO patch the part wakes electrically (acks at 0x68) but its
+	 * SDA/SCL/registers are on the wrong pads -> register access NACKs and it
+	 * cannot function as a GPIO expander.  FIX = populate the correct TCAL9538
+	 * (matches this footprint -> 0x72, register access works, drives the panel
+	 * reset).  Until then the hx8394 reset has no driver and the panel stays NOT
+	 * ready.
 	 */
-	lcd_exp: gpio@21 {
-		compatible = "nxp,pca6408";
-		reg = <0x21>;
+	lcd_exp: gpio@72 {
+		compatible = "ti,tca9538";
+		reg = <0x72>;
 		gpio-controller;
 		#gpio-cells = <2>;
 		ngpios = <8>;
