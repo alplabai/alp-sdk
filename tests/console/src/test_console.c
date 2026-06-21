@@ -75,4 +75,13 @@ ZTEST(alp_console, test_i2c_scan_runs)
 	zassert_not_null(strstr(out, "responder"), "scan summary missing: %s", out);
 }
 
+ZTEST(alp_console, test_adc_read_registers)
+{
+	const char *out = run("alp adc read 0");
+
+	/* Either a raw value or a clean "open failed" message -- never a crash
+	 * and never "command not found". */
+	zassert_is_null(strstr(out, "command not found"), "adc cmd missing: %s", out);
+}
+
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);
