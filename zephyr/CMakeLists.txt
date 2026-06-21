@@ -71,7 +71,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BANNER
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_mem.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_gpio.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_gpio.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_i2c.c)
 
 # Storage class dispatcher + backends.
 # The dispatcher compiles unconditionally so apps that depend on the

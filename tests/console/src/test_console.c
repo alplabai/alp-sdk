@@ -68,4 +68,11 @@ ZTEST(alp_console, test_gpio_read_runs)
 	zassert_true(strstr(out, "= 0") || strstr(out, "= 1"), "got: %s", out);
 }
 
+ZTEST(alp_console, test_i2c_scan_runs)
+{
+	const char *out = run("alp i2c scan 0");
+
+	zassert_not_null(strstr(out, "responder"), "scan summary missing: %s", out);
+}
+
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);
