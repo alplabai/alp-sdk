@@ -76,57 +76,17 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/display.h>
-#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
-#include <zephyr/drivers/pinctrl.h>
-#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
-#include <zephyr/init.h>
 #include <zephyr/sys/printk.h>
-
-#define LCD_EXP_PAD_REN (1U << 16) /* Alif pad receiver-enable (REN_BIT_POS=16) */
-
-/*
- * Release the TCAL9538 expander \RESET before its POST_KERNEL init.  The reset
- * is SoC P3_6 (gpio3.6) -- authoritative SoM trace: IO_EXP.RST -> ball N1 ->
- * net SPI0_SS2_B -> U6.V5 = P3_6.  Active-low, so drive HIGH (R141 also pulls it
- * up to +VIO).  gpio_dw applies no pad mux, so we mux P3_6 -> GPIO (+ REN) via
- * the Alif pinctrl SoC driver first.  gpio3 inits at PRE_KERNEL_1; run at
- * PRE_KERNEL_2, before the expander (POST_KERNEL / I2C_INIT_PRIORITY).
- */
-static int lcd_exp_reset_release(void)
-{
-	const struct device *gpio3 = DEVICE_DT_GET(DT_NODELABEL(gpio3));
-	pinctrl_soc_pin_t m[] = { PIN_P3_6__GPIO | LCD_EXP_PAD_REN };
-	int rc = pinctrl_configure_pins(m, ARRAY_SIZE(m), 0U);
-
-	if (rc != 0 || !device_is_ready(gpio3)) {
-		return rc ? rc : -ENODEV;
-	}
-	return gpio_pin_configure(gpio3, 6, GPIO_OUTPUT_HIGH);
-}
-
-SYS_INIT(lcd_exp_reset_release, PRE_KERNEL_2, 0);
-
 
 /* The display device (the cdc200 pixel pump) is the chosen render target. */
 #define DISPLAY_NODE DT_CHOSEN(zephyr_display)
 #define DSI_NODE     DT_NODELABEL(mipi_dsi)
-#define EXP_NODE     DT_NODELABEL(lcd_exp)
+#define PANEL_NODE   DT_NODELABEL(lcd_panel)
 
 /* Panel geometry (must match the overlay's cdc200 + panel nodes). */
 #define PANEL_W 720
 #define PANEL_H 1280
-
-/*
- * LCD_PWR_EN = expander P0, active-high.  A GPIO_DT_SPEC built directly on the
- * expander GPIO controller + pin 0, so main() can assert panel power explicitly
- * (the regulator-fixed in the overlay also drives this rail at boot).
- */
-static const struct gpio_dt_spec lcd_pwr_en = {
-	.port     = DEVICE_DT_GET(EXP_NODE),
-	.pin      = 0,
-	.dt_flags = GPIO_ACTIVE_HIGH,
-};
 
 /*
  * One scanline of solid color, reused for every row via display_write's
@@ -179,48 +139,27 @@ int main(void)
 
 	i2c2_scan();
 
-	const struct device *exp  = DEVICE_DT_GET_OR_NULL(EXP_NODE);
-	const struct device *dsi  = DEVICE_DT_GET_OR_NULL(DSI_NODE);
-	const struct device *disp = DEVICE_DT_GET(DISPLAY_NODE);
+	const struct device *panel = DEVICE_DT_GET(PANEL_NODE);
+	const struct device *dsi   = DEVICE_DT_GET(DSI_NODE);
+	const struct device *disp  = DEVICE_DT_GET(DISPLAY_NODE);
 
 	/*
-	 * Step 1: the TCA6408A panel-control expander (U35, nxp,pca6408 @ I2C2 0x21).
-	 * Must be ready before we can drive LCD_PWR_EN.  BENCH NOTE: this is silent
-	 * while its VCC rail +VIO is at 1.8 V; it scanned fine when +VIO was 3.3 V.
-	 * +VIO == the SoC I/O rail (== J-Link VTref); restoring it to 3.3 V brings
-	 * the expander (and the panel) back.
+	 * The panel power (LCD_PWR_EN) + reset (LCD_RST) are held released by the
+	 * board pull-ups R142/R66 to +VIO, so the panel powers up + comes out of
+	 * reset on its own -- no expander GPIO needed (U35 is board-faulty: a
+	 * TCA6408A in a TCAL9538 footprint with a power pin grounded).
+	 *
+	 * Step 1: the HX8394 panel.  Its POST_KERNEL init does mipi_dsi_attach +
+	 * the DCS power-on sequence over DSI (it skips the reset toggle because no
+	 * reset-gpios is wired -- the panel uses its power-on-reset).  device_ready
+	 * here means that DCS init succeeded.
 	 */
-	bool exp_ok = dev_ready("expander", exp);
+	bool panel_ok = dev_ready("panel", panel);
 
-	/*
-	 * Step 2: assert LCD_PWR_EN (expander P0) HIGH -- panel power on.  This must
-	 * precede reset deassertion; the on-module backlight boost rises with it.
-	 * The overlay's regulator-fixed already did this at boot, but we re-assert
-	 * explicitly as the canonical teaching sequence (and a guard).
-	 */
-	bool pwr_ok = false;
-	if (exp_ok && gpio_is_ready_dt(&lcd_pwr_en)) {
-		int rc = gpio_pin_configure_dt(&lcd_pwr_en, GPIO_OUTPUT_ACTIVE);
-		if (rc == 0) {
-			/* Give the rail + backlight boost a moment to settle. */
-			k_msleep(20);
-			pwr_ok = true;
-			printk("LCD_PWR_EN (exp P0): asserted HIGH\n");
-		} else {
-			printk("LCD_PWR_EN (exp P0): configure failed (%d)\n", rc);
-		}
-	} else if (exp_ok) {
-		printk("LCD_PWR_EN (exp P0): expander GPIO not ready\n");
-	}
-
-	/*
-	 * Step 3: the MIPI-DSI host.  (The hx8394 panel attached to it during its
-	 * POST_KERNEL init; if that failed, the host may still be ready but the
-	 * panel will not have come up -- the display write below is the real test.)
-	 */
+	/* Step 2: the MIPI-DSI host. */
 	bool dsi_ok = dev_ready("mipi-dsi", dsi);
 
-	/* Step 4: the cdc200 display device (the render target). */
+	/* Step 3: the cdc200 display device (the render target). */
 	bool disp_ok = dev_ready("display", disp);
 
 	/*
@@ -272,19 +211,18 @@ int main(void)
 		       caps.supported_pixel_formats);
 	}
 
-	bool pass = exp_ok && pwr_ok && dsi_ok && disp_ok && write_ok;
+	bool pass = panel_ok && dsi_ok && disp_ok && write_ok;
 
 	if (pass) {
-		printk("RESULT PASS: RK055HDMIPI4MA0 chain UP -- expander+power ready, "
-		       "mipi-dsi + cdc200 display ready, full-screen RGB565 frame written "
-		       "to the SRAM0 framebuffer.  Pixels-on-glass is bench-confirmed "
-		       "separately (pixel-clock + LCD_RST polarity are bench-tunable)\n");
+		printk("RESULT PASS: RK055HDMIPI4MA0 chain UP -- hx8394 panel + mipi-dsi "
+		       "+ cdc200 display ready, full-screen RGB565 frame written to the "
+		       "SRAM0 framebuffer.  Panel power/reset come from the board pull-ups "
+		       "(U35 bypassed) -- pixels-on-glass: confirm green on the panel\n");
 	} else {
 		printk("RESULT FAIL: DSI display chain not fully up "
-		       "(expander=%d power=%d mipi-dsi=%d display=%d write=%d) -- a device "
-		       "is not ready or display_write failed; see the per-stage lines above\n",
-		       (int)exp_ok,
-		       (int)pwr_ok,
+		       "(panel=%d mipi-dsi=%d display=%d write=%d) -- a device is not ready "
+		       "or display_write failed; see the per-stage lines above\n",
+		       (int)panel_ok,
 		       (int)dsi_ok,
 		       (int)disp_ok,
 		       (int)write_ok);

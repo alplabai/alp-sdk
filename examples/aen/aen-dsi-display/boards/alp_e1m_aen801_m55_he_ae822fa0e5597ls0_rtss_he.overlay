@@ -58,18 +58,10 @@
 	};
 
 	/*
-	 * LCD_PWR_EN (expander P0, active-high).  Modeled as a regulator-fixed so
-	 * the panel power rail comes up at boot (regulator-boot-on) before the
-	 * hx8394 driver's POST_KERNEL reset sequence runs.  The hx8394 binding has
-	 * no *-supply property, so the panel driver does NOT consume this directly;
-	 * main() ALSO asserts P0 explicitly (belt-and-suspenders + teaching).
+	 * No regulator/GPIO for LCD_PWR_EN: it is pulled HIGH by R142 to +VIO, so
+	 * the panel power rail (and the on-module backlight boost) come up at board
+	 * power-on, independent of the (board-faulty) U35 expander.
 	 */
-	lcd_pwr_en: lcd-pwr-en {
-		compatible = "regulator-fixed";
-		regulator-name = "lcd_pwr_en";
-		enable-gpios = <&lcd_exp 0 GPIO_ACTIVE_HIGH>;
-		regulator-boot-on;
-	};
 };
 
 /* The shared D-PHY already lives in the SoC dtsi -- just enable it (TX role). */
@@ -123,14 +115,16 @@
 	clock-frequency = <I2C_BITRATE_STANDARD>;
 
 	/*
-	 * U35 = TI TCAL9538 (8-bit I2C GPIO expander, ti,tca9538-compatible).  7-bit
-	 * addr 0x72 (= 1110_A1_A0, straps A0=0 / A1=1 via R112 to +VIO).
-	 * P0=LCD_PWR_EN, P1=LCD_RST, P3=touch-reset (touch deferred).  Its \RESET
-	 * (IO_EXP.RST) is pulled HIGH by R141 to +VIO, so it powers up released.
+	 * U35 = TI TCA6408A (8-bit I2C GPIO expander, nxp,pca6408-compatible).  The
+	 * boards as built populate a TCA6408A in a footprint laid out for the 2-addr
+	 * TCAL9538, which grounds a pin the TCA6408A needs at +VIO -> the chip is
+	 * dead; a board patch (pin 15 -> +VIO) revives it.  7-bit addr 0x21 (ADDR
+	 * high) -- CONFIRM via the i2c2 scan on the patched board.  P0=LCD_PWR_EN,
+	 * P1=LCD_RST, P3=touch-reset (touch deferred).
 	 */
-	lcd_exp: gpio@72 {
-		compatible = "ti,tca9538";
-		reg = <0x72>;
+	lcd_exp: gpio@21 {
+		compatible = "nxp,pca6408";
+		reg = <0x21>;
 		gpio-controller;
 		#gpio-cells = <2>;
 		ngpios = <8>;
@@ -227,11 +221,14 @@
 
 		/*
 		 * The RK055HDMIPI4MA0 panel: Himax HX8394 controller, 2 DSI data
-		 * lanes, RGB565.  reset-gpios = expander P1 (LCD_RST), active-LOW at
-		 * the panel through level-shifter U5.  No bl-gpios: the backlight boost
-		 * comes up with LCD_PWR_EN (expander P0), not a dedicated GPIO.
+		 * lanes, RGB565.  reset-gpios = expander P1 (LCD_RST), active-LOW at the
+		 * panel through level-shifter U5 -- the hx8394 driver pulses this to
+		 * reset the panel before its DCS init.  (Power-on-reset alone is NOT
+		 * enough: a bench test with reset-gpios omitted left the panel NOT
+		 * ready, so the expander reset pulse is required.)  Works once U35 is
+		 * functional (the production part / the pin-15 board patch).
 		 */
-		panel@0 {
+		lcd_panel: panel@0 {
 			compatible = "himax,hx8394";
 			reg = <0>;
 			reset-gpios = <&lcd_exp 1 GPIO_ACTIVE_LOW>;
