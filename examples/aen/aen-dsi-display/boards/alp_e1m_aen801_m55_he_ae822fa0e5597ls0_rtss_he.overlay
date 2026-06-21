@@ -107,14 +107,12 @@
 };
 
 /*
- * gpio10 (P10_x) -- candidate for the TCAL9538 \RESET (IO_EXP.RST).  The exact
- * SoC GPIO is BENCH-TBD: the EVK/SoM netlist ball labels (SPI0_CS1 / SPI0_SS2_B)
- * conflict with the AE822 DFP ball map (ball N1 = P10_2), and driving P10_2
- * (confirmed toggling on silicon) does NOT release the expander.  Until the
- * authoritative IO_EXP.RST -> SoC GPIO is confirmed, the expander stays held in
- * reset and the panel cannot power/reset.  See the example README.
+ * gpio3 carries the TCAL9538 \RESET (IO_EXP.RST) on P3_6 -- authoritative SoM
+ * trace: IO_EXP.RST -> ball N1 -> net SPI0_SS2_B -> U6.V5 = P3_6.  main.c muxes
+ * P3_6 -> GPIO (gpio_dw applies no pad mux) and drives it HIGH to release the
+ * active-low reset.
  */
-&gpio10 {
+&gpio3 {
 	status = "okay";
 };
 
@@ -125,18 +123,18 @@
 	clock-frequency = <I2C_BITRATE_STANDARD>;
 
 	/*
-	 * U35 = TI TCAL9538, 7-bit addr 0x72.  P0=LCD_PWR_EN, P1=LCD_RST,
-	 * P3=touch-reset (touch deferred).  Its \RESET (SoC ball N1 "SPI0_CS1")
-	 * GPIO port/pin is UNKNOWN -- reset-gpios OMITTED (powers up functional).
+	 * U35 = TI TCAL9538 (8-bit I2C GPIO expander, ti,tca9538-compatible).  7-bit
+	 * addr 0x72 (= 1110_A1_A0, straps A0=0 / A1=1 via R112 to +VIO).
+	 * P0=LCD_PWR_EN, P1=LCD_RST, P3=touch-reset (touch deferred).  Its \RESET
+	 * (IO_EXP.RST) is pulled HIGH by R141 to +VIO, so it powers up released.
 	 */
-	lcd_exp: tca9538@72 {
+	lcd_exp: gpio@72 {
 		compatible = "ti,tca9538";
 		reg = <0x72>;
 		gpio-controller;
 		#gpio-cells = <2>;
 		ngpios = <8>;
 		status = "okay";
-		/* TODO: expander \RESET on SoC ball N1 (SPI0_CS1) -- port/pin TBD. */
 	};
 };
 

@@ -78,43 +78,44 @@
 #include <zephyr/init.h>
 #include <zephyr/sys/printk.h>
 
-/*
- * Release the TCAL9538 expander's own \RESET (IO_EXP.RST) BEFORE the expander's
- * POST_KERNEL init -- otherwise the expander is held in reset and NACKs every
- * I2C address (bench-confirmed: an i2c2 scan saw 0x50/0x69/... but never 0x72).
- *
- * BENCH-TBD: the expander \RESET (IO_EXP.RST) SoC GPIO is NOT yet confirmed.
- * P10_2 (gpio10.2) is the AE822 DFP ball-N1 candidate and DOES toggle on silicon
- * (confirmed via REN read-back), but driving it HIGH does NOT release the
- * TCAL9538 (0x72 stays off the i2c2 bus) -- so this is a documented placeholder,
- * not the working pin.  The netlist ball labels (SPI0_CS1 / SPI0_SS2_B) conflict
- * with the DFP map, so the authoritative IO_EXP.RST -> SoC GPIO must come from
- * the schematic owner; drop it in below (mux + drive HIGH for an active-low
- * reset).  gpio_dw applies no pad mux, so -- like aen-gpio-bench -- mux the pad
- * to GPIO (+ REN) via the Alif pinctrl SoC driver, then drive via the gpio API.
- * gpio10 inits at PRE_KERNEL_1; we run at PRE_KERNEL_2, before the expander.
- */
-/*
- * The Alif pad RECEIVER-ENABLE bit (pinctrl_soc.h REN_BIT_POS=16).  gpio_dw
- * drives the output, but on the Alif pad the level only reaches the pin (and is
- * sense-able) with REN set -- the same bit aen-gpio-bench needs to drive P8_0.
- */
-#define LCD_EXP_PAD_REN (1U << 16)
-static const pinctrl_soc_pin_t lcd_exp_rst_gpio[] = { PIN_P10_2__GPIO | LCD_EXP_PAD_REN };
+#define LCD_EXP_PAD_REN (1U << 16) /* Alif pad receiver-enable (REN_BIT_POS=16) */
 
+/*
+ * Release the TCAL9538 expander \RESET before its POST_KERNEL init.  The reset
+ * is SoC P3_6 (gpio3.6) -- authoritative SoM trace: IO_EXP.RST -> ball N1 ->
+ * net SPI0_SS2_B -> U6.V5 = P3_6.  Active-low, so drive HIGH (R141 also pulls it
+ * up to +VIO).  gpio_dw applies no pad mux, so we mux P3_6 -> GPIO (+ REN) via
+ * the Alif pinctrl SoC driver first.  gpio3 inits at PRE_KERNEL_1; run at
+ * PRE_KERNEL_2, before the expander (POST_KERNEL / I2C_INIT_PRIORITY).
+ */
 static int lcd_exp_reset_release(void)
 {
-	const struct device *gpio10 = DEVICE_DT_GET(DT_NODELABEL(gpio10));
-	int rc = pinctrl_configure_pins(lcd_exp_rst_gpio, ARRAY_SIZE(lcd_exp_rst_gpio), 0U);
+	const struct device *gpio3 = DEVICE_DT_GET(DT_NODELABEL(gpio3));
+	pinctrl_soc_pin_t m[] = { PIN_P3_6__GPIO | LCD_EXP_PAD_REN };
+	int rc = pinctrl_configure_pins(m, ARRAY_SIZE(m), 0U);
 
-	if (rc != 0 || !device_is_ready(gpio10)) {
+	if (rc != 0 || !device_is_ready(gpio3)) {
 		return rc ? rc : -ENODEV;
 	}
-	/* P10_2 HIGH = expander \RESET deasserted (active-low). */
-	return gpio_pin_configure(gpio10, 2, GPIO_OUTPUT_HIGH);
+	return gpio_pin_configure(gpio3, 6, GPIO_OUTPUT_HIGH);
 }
 
 SYS_INIT(lcd_exp_reset_release, PRE_KERNEL_2, 0);
+
+/*
+ * NOTE on the panel-control expander (U35 = TI TCA6408A, nxp,pca6408-compatible,
+ * on I2C2 / P5_6/P5_7 @ 0x21).  Its own \RESET (IO_EXP.RST) is pulled HIGH by
+ * R141 to +VIO, so it powers up RELEASED -- no SoC reset drive is needed.
+ *
+ * BENCH STATUS: on this board the TCA6408A is electrically SILENT -- a full
+ * i2c2 scan (0x00..0x7F, read + write probes) never sees it, while the EEPROM
+ * (0x50) + 12 sensors on the SAME bus all ACK.  The netlist trace is
+ * unambiguous (U35 SDA/SCL -> SoC balls AD2/AE2 -> P5_7/P5_6 -> I2C2), so this
+ * is NOT a bus/address/config issue -- it is a hardware fault on U35 (DNP, a
+ * TCA6408A populated in a footprint laid out for the 2-addr TCAL9538, or no
+ * +VIO at its VCC).  The display pipeline below is fully up regardless; only
+ * panel power/reset (hence pixels-on-glass) waits on U35.
+ */
 
 /* The display device (the cdc200 pixel pump) is the chosen render target. */
 #define DISPLAY_NODE DT_CHOSEN(zephyr_display)
@@ -171,7 +172,7 @@ static void i2c2_scan(void)
 		return;
 	}
 	printk("i2c2 scan (ACK):");
-	for (uint16_t a = 0x08; a <= 0x77; a++) {
+	for (uint16_t a = 0x00; a <= 0x7F; a++) {
 		uint8_t b;
 
 		if (i2c_read(bus, &b, 1, a) == 0) {
@@ -185,27 +186,18 @@ int main(void)
 {
 	printk("\n=== aen-dsi-display ===\n");
 
-	/* Show which devices answer on i2c2 (EEPROM 0x50 + sensors; the panel
-	 * expander 0x72 is absent while held in reset). */
 	i2c2_scan();
-
-	/*
-	 * The i2c2 scan above shows the panel-control expander (TCAL9538 @0x72) is
-	 * NOT on the bus: it is held in reset.  Its \RESET (IO_EXP.RST) SoC GPIO is
-	 * BENCH-TBD (netlist ball labels conflict with the AE822 DFP map), so the
-	 * expander cannot be released here and the panel cannot be powered/reset.
-	 * The display PIPELINE below still comes up + scans a frame -- only the panel
-	 * power/reset (hence pixels-on-glass) is gated on the expander.
-	 */
 
 	const struct device *exp  = DEVICE_DT_GET_OR_NULL(EXP_NODE);
 	const struct device *dsi  = DEVICE_DT_GET_OR_NULL(DSI_NODE);
 	const struct device *disp = DEVICE_DT_GET(DISPLAY_NODE);
 
 	/*
-	 * Step 1: the TCAL9538 panel-control expander.  It must be ready before we
-	 * can drive LCD_PWR_EN.  (The hx8394 panel driver, which runs at
-	 * POST_KERNEL, also depends on this expander for its reset-gpios.)
+	 * Step 1: the TCA6408A panel-control expander (U35, nxp,pca6408 @ I2C2 0x21).
+	 * Must be ready before we can drive LCD_PWR_EN.  BENCH NOTE: this is silent
+	 * while its VCC rail +VIO is at 1.8 V; it scanned fine when +VIO was 3.3 V.
+	 * +VIO == the SoC I/O rail (== J-Link VTref); restoring it to 3.3 V brings
+	 * the expander (and the panel) back.
 	 */
 	bool exp_ok = dev_ready("expander", exp);
 
