@@ -1,0 +1,37 @@
+# board.yaml -- per-app project configuration for alp-console.
+#
+# Customer workflow: copy this directory, change `som.sku` to your SoM MPN,
+# and `west build`.  CMakeLists.txt invokes scripts/alp_project.py at
+# configure time and layers the generated alp.conf over prj.conf via
+# OVERLAY_CONFIG.  The console rides the board's existing
+# `chosen { zephyr,shell-uart }` / console UART -- no custom pins needed.
+
+som:
+  sku: E1M-AEN801          # Alif Ensemble E8 (the lead AEN part, bench-verified).
+                            # On V2N boards the CC3501E block compiles out and
+                            # the GD32 supervisor companion auto-binds via the SDK.
+
+preset: e1m-evk            # EVK preset: supplies the shell-uart / console UART
+                            # DTS and the GPIO / I2C / SPI / ADC aliases the
+                            # `alp` commands use.
+
+# The console rides the board's existing UART; the `alp` commands discover
+# the peripheral buses through the EVK preset aliases.  No custom pins needed.
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+    peripherals:
+      - gpio        # `alp gpio`  -- read / write named E1M pins
+      - i2c         # `alp i2c`  -- scan / read / write an I2C bus
+      - adc         # `alp adc`  -- read a raw ADC channel
+      - spi         # required by the CC3501E companion bridge
+
+chips:
+  - cc3501e           # on-module Wi-Fi 6 + BLE 5.4 coprocessor (AEN only).
+                      # The CC3501E guard in main.c compiles out when absent.
+
+diagnostics:
+  log_level: info

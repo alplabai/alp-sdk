@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: alp-console
+  description: |
+    Teaching example for the Alp SoM interactive console.  Enabling
+    CONFIG_ALP_SDK_CONSOLE registers the whole `alp` command tree
+    (board / gpio / i2c / adc / pwm / mem / clk / companion / reboot)
+    at link time -- main() registers no commands itself.  On Alif the
+    CC3501E companion is bound via alp_console_companion_set() so
+    `alp companion ver` / ping work.  On native_sim the companion
+    guard compiles out and the read-only console builds cleanly.
+
+tests:
+  alp_sdk.example.alp_console.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - console
+      - aen
+    build_only: true
