@@ -79,9 +79,14 @@ ZTEST(alp_console, test_adc_read_registers)
 {
 	const char *out = run("alp adc read 0");
 
-	/* Either a raw value or a clean "open failed" message -- never a crash
-	 * and never "command not found". */
-	zassert_is_null(strstr(out, "command not found"), "adc cmd missing: %s", out);
+	/* Command must be registered AND its handler must run: on native_sim the
+	 * sw-fallback adc open fails, so the handler prints "open ch ...". A raw
+	 * value ("raw") is the success token on real hardware. "Unknown command"
+	 * means the subcmd is absent. */
+	zassert_is_null(strstr(out, "Unknown command"), "adc cmd not registered: %s", out);
+	zassert_true(strstr(out, "open ch") != NULL || strstr(out, "raw") != NULL,
+	             "adc handler did not run: %s",
+	             out);
 }
 
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);
