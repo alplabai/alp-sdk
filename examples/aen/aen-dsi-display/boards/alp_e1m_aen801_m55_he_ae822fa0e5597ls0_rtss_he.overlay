@@ -1,0 +1,243 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-dsi-display overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Wires the FULL C2-MIPI-DSI DISPLAY chain to the RK055HDMIPI4MA0 panel
+ * (Rocktech 720x1280, Himax HX8394 controller, MIPI-DSI, 2 data lanes on DSI0):
+ *
+ *   cdc200   (tes,cdc-2.1            @ 0x49031000) -- DPI/RGB pixel pump (CDC200)
+ *       |  DPI
+ *   mipi_dsi (snps,designware-dsi    @ 0x49032000) -- the MIPI-DSI host (DSI-TX)
+ *       |  phy-if <&dphy 1>
+ *   dphy     (snps,designware-dphy   @ 0x49033000) -- the shared D-PHY (TX role)
+ *       |  2 data lanes
+ *   panel@0  (himax,hx8394)                        -- the HX8394 panel controller
+ *
+ * Panel power/reset is gated by a TI TCAL9538 I2C GPIO expander (U35) on I2C0
+ * @0x72: expander P0 = LCD_PWR_EN (active-high panel power, brings up the
+ * on-module backlight boost too), P1 = LCD_RST (panel reset, active-LOW at the
+ * panel through level-shifter U5).
+ *
+ * reg / IRQ are transcribed from the Alif CMSIS DFP (CDC_BASE 0x49031000 /
+ * DSI_BASE 0x49032000 / I2C0_BASE 0x49010000) and the in-tree dtsi.  The panel
+ * timings (720x1280, the porches, 62.346 MHz pixel clock) are transcribed from
+ * the upstream NXP shield boards/shields/rk055hdmipi4ma0/rk055hdmipi4ma0.overlay.
+ *
+ * NOT INVENTED / TBD (see src/main.c header for the full list):
+ *   - cdc200/mipi_dsi CLOCKS use the real re-authored ALIF_*_CLK ids now in
+ *     alif-ensemble-clocks-ext.h (NOT the fork's 7-arg packed values).  The
+ *     dsi_dw driver reads only the "pixel-clk" + "dsi-clk-en" cells (it gets the
+ *     D-PHY via phy-if), so only those two are supplied to mipi_dsi.
+ *   - The exact 62.346 MHz DPI pixel clock is NOT reachable from the Alif
+ *     400/480 MHz tree -- nearest is ~66.67/60 MHz.  clock-frequency is left at
+ *     the panel-native value; the achieved rate is a bench-tunable.
+ *   - The expander's own \RESET is on SoC ball N1 (pinmux "SPI0_CS1"); the
+ *     Zephyr GPIO port/pin for that ball is UNKNOWN, so the expander reset-gpios
+ *     are OMITTED (the TCAL9538 powers up functional).  TODO: wire when known.
+ */
+
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+#include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).  The 720x1280 RGB565
+ * framebuffer does NOT live here -- it is pinned in SRAM0 @0x02000000 by the
+ * cdc200 driver's fixed-address path (-DNO_RELOCATE_SRAM0, see CMakeLists.txt).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+		zephyr,display = &cdc200;
+	};
+
+	/*
+	 * LCD_PWR_EN (expander P0, active-high).  Modeled as a regulator-fixed so
+	 * the panel power rail comes up at boot (regulator-boot-on) before the
+	 * hx8394 driver's POST_KERNEL reset sequence runs.  The hx8394 binding has
+	 * no *-supply property, so the panel driver does NOT consume this directly;
+	 * main() ALSO asserts P0 explicitly (belt-and-suspenders + teaching).
+	 */
+	lcd_pwr_en: lcd-pwr-en {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_pwr_en";
+		enable-gpios = <&lcd_exp 0 GPIO_ACTIVE_HIGH>;
+		regulator-boot-on;
+	};
+};
+
+/* The shared D-PHY already lives in the SoC dtsi -- just enable it (TX role). */
+&dphy {
+	status = "okay";
+};
+
+/*
+ * I2C0 (DesignWare master, edge pads AD2=SDA / AE2=SCL) carries the TCAL9538
+ * panel-control expander.  i2c0 is declared (status disabled) in the shared
+ * ensemble_e8_peripherals.dtsi -- enable it + run at fast-mode (the TCAL9538 is
+ * a 400 kHz-capable part).
+ */
+&i2c0 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+
+	/*
+	 * U35 = TI TCAL9538, 7-bit addr 0x72.  P0=LCD_PWR_EN, P1=LCD_RST,
+	 * P3=touch-reset (touch deferred).  Its \RESET (SoC ball N1 "SPI0_CS1")
+	 * GPIO port/pin is UNKNOWN -- reset-gpios OMITTED (powers up functional).
+	 */
+	lcd_exp: tca9538@72 {
+		compatible = "ti,tca9538";
+		reg = <0x72>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		status = "okay";
+		/* TODO: expander \RESET on SoC ball N1 (SPI0_CS1) -- port/pin TBD. */
+	};
+};
+
+/*
+ * I2C2 (DesignWare master) -- the on-module "Alif I2C2" bus that carries the
+ * SoM identity EEPROM (24C128 @ 0x50).  Mapped to portable bus alp-i2c0 so the
+ * SDK boot banner reads the live SoM SKU + hw-rev from the EEPROM manifest
+ * (<alp/hw_info.h> / CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0).  Falls back to
+ * CONFIG_BOARD when the EEPROM is unprovisioned/unreadable.  100 kHz: the
+ * on-module bus has no fast-mode margin without stuffed external pull-ups.
+ */
+/*
+ * I2C2 pads = P5_6 (SCL) / P5_7 (SDA), the "_C" variant -- transcribed from the
+ * EVK netlist nets I2C2_SCL_C / I2C2_SDA_C and the upstream alif pinmux macros.
+ * Flags (read-enable + driver-state-control) follow the canonical alif i2c
+ * pinctrl group.
+ */
+&pinctrl {
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_7__I2C2_SDA_C>,
+				 <PIN_P5_6__I2C2_SCL_C>;
+			drive-open-drain;
+			input-enable;
+			bias-pull-up;
+		};
+	};
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+/ {
+	aliases {
+		alp-i2c0 = &i2c2;
+	};
+};
+
+/*
+ * C2-MIPI-DSI display chain.  cdc200 + mipi_dsi are added by the overlay (the
+ * display-class drivers are now authored + turned on by prj.conf); they move
+ * into the shared dtsi once bench-verified.  Placed under the SoC peripheral bus.
+ */
+&{/soc/} {
+	cdc200: cdc200@49031000 {
+		compatible = "tes,cdc-2.1";
+		reg = <0x49031000 0x1000>;
+		interrupts = <333 0>, <334 0>, <335 0>, <336 0>, <337 0>,
+			     <338 0>, <339 0>, <340 0>, <341 0>, <342 0>;
+		interrupt-names = "scanline_0", "scanline_1",
+				  "fifo_warning_0", "fifo_warning_1",
+				  "fifo_underrun_0", "fifo_underrun_1",
+				  "bus_error_0", "bus_error_1",
+				  "reg_reload_0", "reg_reload_1";
+
+		/*
+		 * Real re-authored clock ids (ALIF_DPI_CLK / ALIF_CDC200_PIX_SYST_ACLK)
+		 * from alif-ensemble-clocks-ext.h -- NOT the fork's 7-arg packed values.
+		 */
+		clocks = <&clockctrl ALIF_DPI_CLK>, <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>;
+		clock-names = "dpi-clk-en", "pixel-clk";
+
+		/* Panel timing -- transcribed from the NXP rk055hdmipi4ma0 shield. */
+		width = <720>;
+		height = <1280>;
+		hsync-len = <6>;
+		hfront-porch = <12>;
+		hback-porch = <24>;
+		vsync-len = <2>;
+		vfront-porch = <16>;
+		vback-porch = <14>;
+		hsync-active = <0>;
+		vsync-active = <0>;
+		de-active = <1>;
+		pixelclk-active = <0>;
+		/* Panel-native 62.346 MHz -- not exactly reachable, bench-tunable. */
+		clock-frequency = <62346240>;
+		bg-color = <0x000000>;
+
+		/* L1 only: a single full-screen RGB565 layer (FB pinned in SRAM0). */
+		enable-l1 = <1>;
+		pixel-fmt-l1 = "rgb-565";
+		win-x0-l1 = <0>;
+		win-y0-l1 = <0>;
+		win-x1-l1 = <720>;
+		win-y1-l1 = <1280>;
+		blend-factor1-l1 = <4>;
+		blend-factor2-l1 = <5>;
+		const-alpha-l1 = <0xff>;
+
+		status = "okay";
+	};
+
+	mipi_dsi: mipi-dsi@49032000 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "snps,designware-dsi";
+		reg = <0x49032000 0x1000>;
+		interrupts = <343 0>;
+		cdc-if = <&cdc200>;
+		phy-if = <&dphy 1>;
+
+		/*
+		 * The dsi_dw driver reads only "pixel-clk" + "dsi-clk-en" (it gets
+		 * the D-PHY through phy-if, NOT a "tx-dphy-clk" cell -- confirmed in
+		 * dsi_dw.c's DSI_GET_CLK macro).  Real re-authored ids.
+		 */
+		clocks = <&clockctrl ALIF_DSI_CLK>, <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>;
+		clock-names = "dsi-clk-en", "pixel-clk";
+
+		dpi-shutdn-active = <1>;
+		dpi-colorm-active = <1>;
+		vid-pkt-size = <720>;
+		ecc-recv-en;
+		crc-recv-en;
+		frame-ack-en;
+
+		status = "okay";
+
+		/*
+		 * The RK055HDMIPI4MA0 panel: Himax HX8394 controller, 2 DSI data
+		 * lanes, RGB565.  reset-gpios = expander P1 (LCD_RST), active-LOW at
+		 * the panel through level-shifter U5.  No bl-gpios: the backlight boost
+		 * comes up with LCD_PWR_EN (expander P0), not a dedicated GPIO.
+		 */
+		panel@0 {
+			compatible = "himax,hx8394";
+			reg = <0>;
+			reset-gpios = <&lcd_exp 1 GPIO_ACTIVE_LOW>;
+			data-lanes = <2>;
+			width = <720>;
+			height = <1280>;
+			pixel-format = <MIPI_DSI_PIXFMT_RGB565>;
+			status = "okay";
+		};
+	};
+};

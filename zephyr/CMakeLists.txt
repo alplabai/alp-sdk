@@ -58,6 +58,13 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
 )
 
+# Boot-identity banner (CONFIG_ALP_SDK_BANNER, default y) -- one line at
+# APPLICATION init naming the SDK + SoM + manufacturer.  Data-driven from
+# the SoM identity EEPROM when CONFIG_ALP_SDK_HW_INFO is on (see
+# src/zephyr/alp_banner.c).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BANNER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/alp_banner.c)
+
 # Storage class dispatcher + backends.
 # The dispatcher compiles unconditionally so apps that depend on the
 # <alp/storage.h> ABI always link cleanly; each backend gates on its
@@ -384,6 +391,38 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 # node in the E8 SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
 zephyr_library_sources_ifdef(CONFIG_CAN_ALIF_CAST
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/can/can_cast.c)
+
+# Alif Ensemble DISPLAY path -- TES CDC-2.1 (CDC200) DPI/RGB display controller
+# (compatible "tes,cdc-2.1"), vendored from the Apache-2.0 zephyr_alif fork
+# (drivers/display/display_cdc200.c) + PORTED to the v4.4 display API by Alp Lab
+# AB.  Upstream Zephyr v4.4 + hal_alif ship NO tes,cdc-2.1 (or any DPI display)
+# driver, so the source is carried in-tree to survive a `west update`.  The TU
+# uses hal_alif's <soc_memory_map.h> (local_to_global) ONLY under
+# CONFIG_FB_USES_DTCM_REGION; the default SRAM0 framebuffer path needs neither
+# it nor the hal_alif common include dir.  ADR 0017 Tier-2 (INTERIM).
+if(CONFIG_DISPLAY_CDC200 AND CONFIG_FB_USES_DTCM_REGION)
+    zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+endif()
+zephyr_library_sources_ifdef(CONFIG_DISPLAY_CDC200
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/display_cdc200.c)
+
+# Synopsys DesignWare MIPI-DSI host controller (compatible "snps,designware-dsi"),
+# the DSI-TX bridge from the CDC200 DPI source to the shared DesignWare MIPI
+# D-PHY (TX role) on the Alif Ensemble E8.  Vendored from the Apache-2.0
+# zephyr_alif fork (drivers/mipi_dsi/dsi_dw.c) + PORTED to the v4.4 MIPI-DSI host
+# API by Alp Lab AB.  Upstream Zephyr v4.4 has the mipi_dsi BUS class but ships
+# NO snps,designware-dsi host driver, and hal_alif ships no DSI driver -- so this
+# is the only Zephyr DSI device for the part.  Hard-depends on the in-tree
+# DesignWare D-PHY (dphy_dw_master_setup, TX role); the binding + DT node are
+# carried in-tree so they survive a `west update`.  Put the vendored public
+# include dir on the path so <zephyr/drivers/mipi_dphy/dphy_dw.h> resolves (the
+# co-located private dsi_dw.h resolves from the source dir).  ADR 0017 Tier-2
+# (INTERIM, task #21).  BENCH-UNVERIFIED.
+if(CONFIG_MIPI_DSI_DW)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+endif()
+zephyr_library_sources_ifdef(CONFIG_MIPI_DSI_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dsi/dsi_dw.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship

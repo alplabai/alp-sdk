@@ -173,11 +173,19 @@ properties:
     type: int
     description: Layer 1 constant alpha (0..255).
 
+  # The L2 (overlay-layer) window/blend props below are read UNCONDITIONALLY by
+  # the driver's CDC200_DEFINE macro (.layer[1] init: win-x0/y0-l2, blend-factor1/
+  # 2-l2, const-alpha-l2), so a node that declares only L1 (enable-l2 defaults 0)
+  # must still resolve them.  Without a default DT_INST_PROP(i, ...) fails to
+  # compile.  Defaults mirror the zephyr_alif fork's reset values so an L2-less
+  # node behaves identically to the fork.
   win-x0-l2:
     type: int
+    default: 0
     description: Layer 2 window horizontal start.
   win-y0-l2:
     type: int
+    default: 0
     description: Layer 2 window vertical start.
   win-x1-l2:
     type: int
@@ -187,10 +195,13 @@ properties:
     description: Layer 2 window vertical stop.
   blend-factor1-l2:
     type: int
+    default: 6
     description: Layer 2 blend factor F1.
   blend-factor2-l2:
     type: int
+    default: 7
     description: Layer 2 blend factor F2.
   const-alpha-l2:
     type: int
+    default: 0xff
     description: Layer 2 constant alpha (0..255).

@@ -10,6 +10,26 @@ config ALP_SDK
 
 if ALP_SDK
 
+config ALP_SDK_BANNER
+	bool "Print an Alp SDK identity banner at boot"
+	default y
+	help
+	  Print a one-line "Alp SDK <version> | <board> | (c) Alp Lab AB"
+	  banner to the console during APPLICATION-level init.  When
+	  CONFIG_ALP_SDK_HW_INFO is also enabled and the SoM identity
+	  EEPROM is readable, the board field shows the live SoM SKU +
+	  hardware revision from the EEPROM manifest; otherwise it falls
+	  back to the build-time board name (CONFIG_BOARD).
+
+config ALP_SDK_VERSION
+	string "Alp SDK version string (boot banner / runtime)"
+	default "0.6.0"
+	help
+	  Human-readable Alp SDK release shown in the boot banner and
+	  available to apps.  Tracks VERSIONS.md.  (The repo-root
+	  CMakeLists project() VERSION is build metadata and may lag
+	  this string.)
+
 # Active SoC selection — drives <alp/soc_caps.h> capability checks.
 # When no choice is selected the SDK's runtime validation is permissive
 # (default macros = UINT16_MAX); selecting a SoC enables strict
@@ -811,6 +831,28 @@ config VIDEO_ARX3A0
 	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Task #21.
 	  Driver: zephyr/drivers/video/arx3a0.c.
 
+config MIPI_DSI_DW
+	bool "DesignWare MIPI-DSI host controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on MIPI_DSI
+	depends on DT_HAS_SNPS_DESIGNWARE_DSI_ENABLED
+	select MIPI_DPHY
+	help
+	  Synopsys DesignWare MIPI-DSI host controller, the DSI-TX bridge from the
+	  CDC200 DPI source to the shared DesignWare MIPI D-PHY (TX role) on the Alif
+	  Ensemble E8.  Vendored from the Apache-2.0 zephyr_alif fork
+	  (drivers/mipi_dsi/dsi_dw.c, compatible "snps,designware-dsi") and PORTED to
+	  the v4.4 MIPI-DSI host API by Alp Lab AB.  Upstream Zephyr v4.4 has the
+	  mipi_dsi bus class but ships no snps,designware-dsi host driver, and
+	  hal_alif ships no DSI driver.
+
+	  Hard-depends on the in-tree DesignWare D-PHY driver (MIPI_DPHY_DW,
+	  dphy_dw_master_setup, TX role) -- selects MIPI_DPHY for it.
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Retires onto the opt-in
+	  sdk-alif fork once the dsi node is repointed AND bench-verified.  Task #21.
+	  Driver: zephyr/drivers/mipi_dsi/dsi_dw.c.
+
 # ---------------------------------------------------------------------------
 # Alif Ensemble ISP-Pico (Verisilicon ISP Nano "Pico", compatible
 # "vsi,isp-pico") -- ADR 0017 Tier-2, OPT-IN (default n).  An m2m video device
@@ -855,6 +897,37 @@ config VIDEO_ISP_VSI_INIT_PRIORITY
 	depends on VIDEO_ISP_VSI
 	help
 	  System initialization priority for the Alif ISP-Pico driver.
+
+# ---------------------------------------------------------------------------
+# Alif Ensemble DISPLAY -- TES CDC-2.1 (CDC200) DPI/RGB display controller --
+# ADR 0017 Tier-2, vendored from the Apache-2.0 zephyr_alif fork.  Upstream
+# Zephyr v4.4 + hal_alif ship NO tes,cdc-2.1 (nor any DPI display-controller)
+# driver, so it is carried in-tree so it survives a `west update`.
+#
+# Unlike the fork VIDEO drivers, the fork's use of the display API
+# (struct display_driver_api, enum display_pixel_format / display_orientation,
+# struct display_capabilities / display_buffer_descriptor) is UNCHANGED in v4.4;
+# the only v4.4 port forced was folding the fork's missing public
+# <zephyr/drivers/display/cdc200.h> extended-API header into the in-tree private
+# header (see the driver provenance banner).  vendor-ext, BENCH-UNVERIFIED (no
+# panel wired on this batch).
+# ---------------------------------------------------------------------------
+config DISPLAY_CDC200
+	bool "Alif Ensemble TES CDC-2.1 (CDC200) display controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on DISPLAY
+	depends on DT_HAS_TES_CDC_2_1_ENABLED
+	select PINCTRL
+	help
+	  TES CDC-2.1 (CDC200) DPI/RGB display controller -- the pixel-pump that
+	  feeds the MIPI-DSI bridge on the Alif Ensemble E8 -- vendored from the
+	  Apache-2.0 zephyr_alif fork (drivers/display/display_cdc200.c, compatible
+	  "tes,cdc-2.1") and PORTED to the v4.4 display API by Alp Lab AB.  Upstream
+	  Zephyr v4.4 + hal_alif ship no tes,cdc-2.1 (or any DPI display) driver.
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Retires onto the opt-in
+	  sdk-alif fork compatible once the cdc node is repointed AND bench-verified.
+	  Task #21.  Driver: zephyr/drivers/display/display_cdc200.c.
 
 # ---------------------------------------------------------------------------
 # Alif Ensemble CAN-FD (CAST CAN-CTRL IP, compatible "cast,can"), vendored from

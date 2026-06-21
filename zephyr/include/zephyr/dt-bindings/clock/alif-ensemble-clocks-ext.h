@@ -38,6 +38,13 @@
 #define ALIF_PERIPH_CLK_ENA_REG 0x0CU /* CLKCTL_PER_MST base 0x4903F000 */
 #define ALIF_HE_CLK_ENA_REG     0x10U /* M55HE_CFG      base 0x43007000 */
 
+/* DISPLAY clock-control register offsets in CLKCTL_PER_MST (base 0x4903F000),
+ * carried from the AE822 DFP CMSIS sys_ctrl_cdc.h / sys_ctrl_dphy.h.  Upstream's
+ * header names neither, so the ALIF_##reg##_REG paste in ALIF_CLK_CFG() needs
+ * these local definitions.  Same silicon, same offsets in both trees. */
+#define ALIF_CDC200_PIXCLK_CTRL_REG 0x04U /* CDC200 pixel-clock control */
+#define ALIF_MIPI_CKEN_REG          0x40U /* MIPI (TX-)D-PHY config-clock enable */
+
 /* I2S0..I2S3 control registers in CLKCTL_PER_SLV (base 0x4902F000); offsets
  * carried from the fork's alif_ensemble_clocks.h (I2S0=0x10 .. I2S3=0x1C, the
  * +4 stride).  Each holds the I2S clock-source select (bit 16) + the bit-clock
@@ -144,21 +151,27 @@
 
 /*
  * DISPLAY (C2-MIPI-DSI) clocks (CDC200 DPI / MIPI-DSI host / shared D-PHY TX) --
- * FREQUENCY-ONLY DUMMY PLACEHOLDERS, same rationale as the CAMERA clocks above.
- * The fork drives these blocks with ALIF_DPI_CLK / ALIF_DSI_CLK /
- * ALIF_CDC200_PIX_SYST_ACLK / ALIF_MIPI_TXDPHY_CLK in the fork's 7-arg encoding,
- * which MUST NOT be copied onto the upstream clockctrl (wrong register block),
- * and the upstream gate/offset/parent for the display clocks are a TRM/bench
- * unknown -- NOT re-authored here.  These IDs use the dummy clock (ALIF_CLK,
- * module 0 / en_mask 0 -> alif_clock_control_on() no-ops at the !EN_MASK guard),
- * so the cdc200/mipi_dsi DT nodes are well-formed without inventing a register
- * gate.  Re-author the real IDs when the display stack gets a driver + bench
- * bring-up (task #21).  vendor-ext, BENCH-UNVERIFIED.
+ * re-authored from the AE822 DFP CMSIS (sys_ctrl_cdc.h / sys_ctrl_dsi.h /
+ * sys_ctrl_dphy.h) into the upstream 8-arg ALIF_CLK_CFG() encoding.  All four
+ * gates live in CLKCTL_PER_MST (module 0x1, base 0x4903F000).  Per
+ * [[reference_alif_clock_encoding_fork_vs_upstream]] the fork's 7-arg packed
+ * values MUST NOT be copied (wrong module index/register block under the
+ * upstream decode driver); only the silicon offsets + enable/select bits are
+ * carried over.  vendor-ext, BENCH-UNVERIFIED (no panel wired on this batch).
  */
-#define ALIF_DPI_CLK              ALIF_CLK(2U)
-#define ALIF_DSI_CLK              ALIF_CLK(2U)
-#define ALIF_CDC200_PIX_SYST_ACLK ALIF_CLK(2U)
-#define ALIF_MIPI_TXDPHY_CLK      ALIF_CLK(2U)
+/* DPI (CDC) gate: PERIPH_CLK_ENA(0x4903F00C) bit1.  DFP sys_ctrl_cdc.h:29. */
+#define ALIF_DPI_CLK \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 1U, 1U, 0U, 0U, 0U, ALIF_PARENT_CLK_SYST_ACLK)
+/* DSI host gate: PERIPH_CLK_ENA(0x4903F00C) bit28.  DFP sys_ctrl_dsi.h:28. */
+#define ALIF_DSI_CLK \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 28U, 1U, 0U, 0U, 0U, ALIF_PARENT_CLK_SYST_ACLK)
+/* CDC200 pixel clk: CDC200_PIXCLK_CTRL(0x4903F004) CKEN bit0, CLK_SEL bit4
+ * (src_val 0 = SYST_ACLK 400MHz).  DFP sys_ctrl_cdc.h:32-35. */
+#define ALIF_CDC200_PIX_SYST_ACLK \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, CDC200_PIXCLK_CTRL, 0U, 1U, 0U, 1U, 4U, ALIF_PARENT_CLK_SYST_ACLK)
+/* MIPI TX-DPHY config-clk gate: MIPI_CKEN(0x4903F040) bit0.  DFP sys_ctrl_dphy.h:71. */
+#define ALIF_MIPI_TXDPHY_CLK \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, MIPI_CKEN, 0U, 1U, 0U, 0U, 0U, ALIF_PARENT_CLK_SYST_ACLK)
 
 /* CAN-FD (CANFD0, cast,can @0x49036000) peripheral clock.  Re-authored from the
  * Alif DFP CMSIS sys_ctrl_canfd.h (the SOC_FEAT_CANFD0_CANFD1_CTRL=0 / single-
