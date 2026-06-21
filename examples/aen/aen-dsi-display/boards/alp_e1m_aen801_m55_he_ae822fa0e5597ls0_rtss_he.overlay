@@ -78,14 +78,51 @@
 };
 
 /*
- * I2C0 (DesignWare master, edge pads AD2=SDA / AE2=SCL) carries the TCAL9538
- * panel-control expander.  i2c0 is declared (status disabled) in the shared
- * ensemble_e8_peripherals.dtsi -- enable it + run at fast-mode (the TCAL9538 is
- * a 400 kHz-capable part).
+ * I2C2 (DesignWare master) -- the shared on-module bus on SoC balls AD2/AE2 =
+ * port pins P5_6 (SCL) / P5_7 (SDA), the "_C" pinmux variant.  NOTE: the EVK
+ * schematic labels this net "I2C0" (the balls' default-function name), but the
+ * ONLY I2C function reachable on P5_6/P5_7 is I2C2_C -- so the peripheral is
+ * I2C2, per the SoM netlist (net I2C2_SCL_C / I2C2_SDA_C on balls AD2/AE2).  The
+ * bus carries BOTH:
+ *   - the TI TCAL9538 panel-control expander (U35 @0x72), and
+ *   - the SoM identity EEPROM (24C128 @0x50; mapped alp-i2c0 for the banner).
+ * 100 kHz: the on-module bus has no fast-mode margin without stuffed pull-ups.
  */
-&i2c0 {
+&pinctrl {
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_7__I2C2_SDA_C>,
+				 <PIN_P5_6__I2C2_SCL_C>;
+			/*
+			 * BENCH-VALIDATED i2c2 pad config (aen-i2c2-eeprom-regcheck,
+			 * 2026-06-15): input-enable = pad REN so i2c_dw can SENSE
+			 * SDA/SCL (else every address NACKs). bias-pull-down encodes
+			 * the Alif pad DSC=2 that I2C needs -- bias-pull-up (DSC=1)
+			 * gives a DEAD BUS.  Do NOT "correct" pull-down to pull-up.
+			 */
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+/*
+ * gpio10 (P10_x) -- candidate for the TCAL9538 \RESET (IO_EXP.RST).  The exact
+ * SoC GPIO is BENCH-TBD: the EVK/SoM netlist ball labels (SPI0_CS1 / SPI0_SS2_B)
+ * conflict with the AE822 DFP ball map (ball N1 = P10_2), and driving P10_2
+ * (confirmed toggling on silicon) does NOT release the expander.  Until the
+ * authoritative IO_EXP.RST -> SoC GPIO is confirmed, the expander stays held in
+ * reset and the panel cannot power/reset.  See the example README.
+ */
+&gpio10 {
 	status = "okay";
-	clock-frequency = <I2C_BITRATE_FAST>;
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
 
 	/*
 	 * U35 = TI TCAL9538, 7-bit addr 0x72.  P0=LCD_PWR_EN, P1=LCD_RST,
@@ -101,39 +138,6 @@
 		status = "okay";
 		/* TODO: expander \RESET on SoC ball N1 (SPI0_CS1) -- port/pin TBD. */
 	};
-};
-
-/*
- * I2C2 (DesignWare master) -- the on-module "Alif I2C2" bus that carries the
- * SoM identity EEPROM (24C128 @ 0x50).  Mapped to portable bus alp-i2c0 so the
- * SDK boot banner reads the live SoM SKU + hw-rev from the EEPROM manifest
- * (<alp/hw_info.h> / CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0).  Falls back to
- * CONFIG_BOARD when the EEPROM is unprovisioned/unreadable.  100 kHz: the
- * on-module bus has no fast-mode margin without stuffed external pull-ups.
- */
-/*
- * I2C2 pads = P5_6 (SCL) / P5_7 (SDA), the "_C" variant -- transcribed from the
- * EVK netlist nets I2C2_SCL_C / I2C2_SDA_C and the upstream alif pinmux macros.
- * Flags (read-enable + driver-state-control) follow the canonical alif i2c
- * pinctrl group.
- */
-&pinctrl {
-	pinctrl_i2c2: pinctrl_i2c2 {
-		group0 {
-			pinmux = <PIN_P5_7__I2C2_SDA_C>,
-				 <PIN_P5_6__I2C2_SCL_C>;
-			drive-open-drain;
-			input-enable;
-			bias-pull-up;
-		};
-	};
-};
-
-&i2c2 {
-	status = "okay";
-	pinctrl-0 = <&pinctrl_i2c2>;
-	pinctrl-names = "default";
-	clock-frequency = <I2C_BITRATE_STANDARD>;
 };
 
 / {
