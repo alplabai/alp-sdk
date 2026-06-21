@@ -15,6 +15,8 @@
 
 #include "alp_console.h"
 
+#include <alp/peripheral.h>
+
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 #include <alp/hw_info.h>
 #endif

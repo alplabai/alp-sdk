@@ -7,8 +7,6 @@
 #ifndef ALP_INTERNAL_ZEPHYR_CONSOLE_ALP_CONSOLE_H_
 #define ALP_INTERNAL_ZEPHYR_CONSOLE_ALP_CONSOLE_H_
 
-#include <stdbool.h>
-
 /**
  * @brief Parse a decimal or 0x-hex unsigned integer from a shell arg.
  * @return 0 on success, -EINVAL on a malformed / out-of-range token.
