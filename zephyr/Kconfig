@@ -30,6 +30,27 @@ config ALP_SDK_VERSION
 	  CMakeLists project() VERSION is build metadata and may lag
 	  this string.)
 
+config ALP_SDK_CONSOLE
+	bool "Alp SoM interactive console (Zephyr shell + `alp` commands)"
+	depends on ALP_SDK
+	select SHELL
+	help
+	  Register the `alp` command tree on the Zephyr shell: board
+	  identity, gpio / i2c / adc / pwm pokes via the portable <alp/*>
+	  API, a memory peek, a clock dump, and a companion-chip bridge.
+	  Read-only verbs only unless ALP_SDK_CONSOLE_UNSAFE is also set.
+
+config ALP_SDK_CONSOLE_UNSAFE
+	bool "Allow write / destructive `alp` console commands"
+	depends on ALP_SDK_CONSOLE
+	default n
+	help
+	  Compile the write / destructive verbs into the console:
+	  `mem wr`, `gpio write`, `gpio mode`, `i2c write`, `pwm set`,
+	  companion writes, and `reboot`.  Leave OFF for field / production
+	  builds so a mis-typed poke cannot brick a live unit; the verbs are
+	  then physically absent from the binary and from `help`.
+
 # Active SoC selection — drives <alp/soc_caps.h> capability checks.
 # When no choice is selected the SDK's runtime validation is permissive
 # (default macros = UINT16_MAX); selecting a SoC enables strict
