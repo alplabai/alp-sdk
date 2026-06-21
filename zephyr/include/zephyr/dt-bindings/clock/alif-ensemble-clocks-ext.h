@@ -173,6 +173,14 @@
 #define ALIF_MIPI_TXDPHY_CLK \
 	ALIF_CLK_CFG(CLKCTL_PER_MST, MIPI_CKEN, 0U, 1U, 0U, 0U, 0U, ALIF_PARENT_CLK_SYST_ACLK)
 
+/* MIPI D-PHY PLL reference (MIPI_CKEN bit8 PLLREF_CKEN) + bypass (bit12
+ * BYPASS_CKEN).  DFP sys_ctrl_dphy.h:73-74 (enable_dphy_pll_reference_clock).
+ * Needed for the D-PHY PLL to lock; the shared dtsi left these dummy. */
+#define ALIF_MIPI_PLLREF_CLK \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, MIPI_CKEN, 8U, 1U, 0U, 0U, 0U, ALIF_PARENT_CLK_SYST_ACLK)
+#define ALIF_MIPI_BYPASS_CLK \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, MIPI_CKEN, 12U, 1U, 0U, 0U, 0U, ALIF_PARENT_CLK_SYST_ACLK)
+
 /* CAN-FD (CANFD0, cast,can @0x49036000) peripheral clock.  Re-authored from the
  * Alif DFP CMSIS sys_ctrl_canfd.h (the SOC_FEAT_CANFD0_CANFD1_CTRL=0 / single-
  * CANFD E8 layout) into the upstream 8-arg clockctrl encoding: the CANFD_CTRL

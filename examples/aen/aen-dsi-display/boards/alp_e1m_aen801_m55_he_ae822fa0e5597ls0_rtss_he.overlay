@@ -80,10 +80,10 @@
  */
 &dphy {
 	status = "okay";
-	clocks = <&clockctrl ALIF_CSI_DPHY_CLK>,    /* pllref-clk  : dummy (TBD) */
-		 <&clockctrl ALIF_CSI_DPHY_CLK>,    /* pllbypass   : dummy (TBD) */
-		 <&clockctrl ALIF_MIPI_TXDPHY_CLK>, /* tx-dphy-clk : REAL gate   */
-		 <&clockctrl ALIF_CSI_DPHY_CLK>;    /* rx-dphy-clk : dummy (TBD) */
+	clocks = <&clockctrl ALIF_MIPI_PLLREF_CLK>, /* pllref-clk  : REAL (bit8)  */
+		 <&clockctrl ALIF_MIPI_BYPASS_CLK>, /* pllbypass   : REAL (bit12) */
+		 <&clockctrl ALIF_MIPI_TXDPHY_CLK>, /* tx-dphy-clk : REAL (bit0)  */
+		 <&clockctrl ALIF_CSI_DPHY_CLK>;    /* rx-dphy-clk : dummy (RX/camera only) */
 	clock-names = "pllref-clk", "pllbypass-clk", "tx-dphy-clk", "rx-dphy-clk";
 };
 
@@ -147,9 +147,9 @@
 	 * reset).  Until then the hx8394 reset has no driver and the panel stays NOT
 	 * ready.
 	 */
-	lcd_exp: gpio@72 {
-		compatible = "ti,tca9538";
-		reg = <0x72>;
+	lcd_exp: gpio@20 {
+		compatible = "nxp,pca6408";
+		reg = <0x20>;
 		gpio-controller;
 		#gpio-cells = <2>;
 		ngpios = <8>;
