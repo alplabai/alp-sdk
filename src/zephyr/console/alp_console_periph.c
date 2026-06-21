@@ -8,6 +8,9 @@
  * `alp pwm set` is gated behind CONFIG_ALP_SDK_CONSOLE_UNSAFE because it
  * drives hardware outputs; `alp adc read` is always-on (read-only).
  *
+ * `alp adc` is gated behind CONFIG_ALP_SDK_PERIPH_ADC so the console links
+ * on board builds where the ADC subsystem is absent.
+ *
  * Note: portable <alp/pwm.h> has no duty-read, so v1 exposes only
  * `pwm set <ch> <period_ns> <duty_ns>` (no `get`).
  */
@@ -16,10 +19,12 @@
 
 #include <zephyr/shell/shell.h>
 
-#include <alp/adc.h>
 #include <alp/pwm.h>
 
 #include "alp_console.h"
+
+#if defined(CONFIG_ALP_SDK_PERIPH_ADC)
+#include <alp/adc.h>
 
 static int cmd_adc_read(const struct shell *sh, size_t argc, char **argv)
 {
@@ -52,6 +57,13 @@ static int cmd_adc_read(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "adc[%lu] raw = %d", ch, raw);
 	return 0;
 }
+
+SHELL_STATIC_SUBCMD_SET_CREATE(
+    alp_adc_subcmds,
+    SHELL_CMD_ARG(read, NULL, "read <ch> -- one-shot raw conversion", cmd_adc_read, 2, 0),
+    SHELL_SUBCMD_SET_END);
+SHELL_SUBCMD_ADD((alp), adc, &alp_adc_subcmds, "ADC one-shot read", NULL, 1, 0);
+#endif /* CONFIG_ALP_SDK_PERIPH_ADC */
 
 #if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE)
 static int cmd_pwm_set(const struct shell *sh, size_t argc, char **argv)
@@ -92,12 +104,6 @@ static int cmd_pwm_set(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 #endif
-
-SHELL_STATIC_SUBCMD_SET_CREATE(
-    alp_adc_subcmds,
-    SHELL_CMD_ARG(read, NULL, "read <ch> -- one-shot raw conversion", cmd_adc_read, 2, 0),
-    SHELL_SUBCMD_SET_END);
-SHELL_SUBCMD_ADD((alp), adc, &alp_adc_subcmds, "ADC one-shot read", NULL, 1, 0);
 
 #if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE)
 SHELL_STATIC_SUBCMD_SET_CREATE(
