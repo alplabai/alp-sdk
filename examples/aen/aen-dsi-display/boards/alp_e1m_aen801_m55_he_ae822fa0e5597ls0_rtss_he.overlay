@@ -64,9 +64,27 @@
 	 */
 };
 
-/* The shared D-PHY already lives in the SoC dtsi -- just enable it (TX role). */
+/*
+ * The shared D-PHY (TX role for DSI).  Override its clocks: the shared dtsi
+ * wires ALL four to the DUMMY ALIF_CSI_DPHY_CLK (frequency-only placeholder),
+ * so dphy_dw_master_setup() enables a non-clock and then stalls the AXI on the
+ * unclocked D-PHY config registers -> a HARD core hang.  Set tx-dphy-clk to the
+ * REAL ALIF_MIPI_TXDPHY_CLK (MIPI_CKEN bit0 -- the D-PHY configure-clock gate,
+ * authored from the AE822 DFP) so the config register block is actually clocked.
+ *
+ * BENCH-TBD: pllref-clk / pllbypass-clk / rx-dphy-clk stay dummy -- the CSI/DPHY
+ * PLL-reference clock IDs are not yet authored for the upstream clockctrl
+ * (task #21).  Without a real pllref the D-PHY PLL will not lock, so the bring-up
+ * fails GRACEFULLY at the (bounded) PLL-lock wait instead of hanging the core --
+ * which is the next thing to chase (author pllref-clk from the DFP).
+ */
 &dphy {
 	status = "okay";
+	clocks = <&clockctrl ALIF_CSI_DPHY_CLK>,    /* pllref-clk  : dummy (TBD) */
+		 <&clockctrl ALIF_CSI_DPHY_CLK>,    /* pllbypass   : dummy (TBD) */
+		 <&clockctrl ALIF_MIPI_TXDPHY_CLK>, /* tx-dphy-clk : REAL gate   */
+		 <&clockctrl ALIF_CSI_DPHY_CLK>;    /* rx-dphy-clk : dummy (TBD) */
+	clock-names = "pllref-clk", "pllbypass-clk", "tx-dphy-clk", "rx-dphy-clk";
 };
 
 /*
