@@ -714,6 +714,20 @@ int cc3501e_hw_ota_begin(uint32_t total_len)
 	}
 	if (ota.op_rc == OTA_OP_INFLIGHT) return CC3501E_HW_BUSY;             /* op running */
 	if (ota.state == ALP_CC3501E_OTA_STATE_WRITING) return CC3501E_HW_OK; /* already begun */
+	if (ota.state == ALP_CC3501E_OTA_STATE_ERROR) {
+		/* The deferred begin (ota_do_begin, on the pump) FAILED -- e.g. the
+		 * psa_fwu vendor slots could not be resolved (query failed / ambiguous
+		 * primary).  Surface the REAL error to the host and clear the latch so a
+		 * later BEGIN starts fresh.  WITHOUT this, op_rc is no longer INFLIGHT and
+		 * state is not WRITING, so each host poll_by_repeat re-submit re-runs the
+		 * failing op and only ever sees BUSY -> the host times out (ALP_ERR_TIMEOUT)
+		 * instead of the true cause -- bench-observed 2026-06-21 (-4 on a unit whose
+		 * activation left the OTA slots unresolvable). */
+		const int rc = (int)ota.op_rc;
+		ota.state    = ALP_CC3501E_OTA_STATE_IDLE;
+		ota.op_rc    = (int8_t)CC3501E_HW_OK;
+		return rc;
+	}
 	ota.op_total = total_len; /* stage before the queue slot opens */
 	return ota_submit(OTA_OP_BEGIN);
 }
