@@ -46,7 +46,7 @@ config ALP_SDK_CONSOLE_UNSAFE
 	default n
 	help
 	  Compile the write / destructive verbs into the console:
-	  `mem wr`, `gpio write`, `gpio mode`, `i2c write`, `pwm set`,
+	  `mem wr`, `gpio write`, `i2c write`, `pwm set`,
 	  companion writes, and `reboot`.  Leave OFF for field / production
 	  builds so a mis-typed poke cannot brick a live unit; the verbs are
 	  then physically absent from the binary and from `help`.

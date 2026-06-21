@@ -16,6 +16,7 @@
 #include "alp_console.h"
 
 #include <alp/peripheral.h>
+#include <alp/console.h>
 
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 #include <alp/hw_info.h>
@@ -74,3 +75,16 @@ SHELL_SUBCMD_SET_CREATE(alp_subcmds, (alp));
 SHELL_SUBCMD_ADD((alp), board, NULL, "SoM identity, SDK version, uptime", cmd_board, 1, 0);
 
 SHELL_CMD_REGISTER(alp, &alp_subcmds, "Alp SoM diagnostics console", NULL);
+
+#if !IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_COMPANION)
+/*
+ * No-op fallback: when no companion is configured, binding one is a no-op so
+ * the public <alp/console.h> symbol always links on a console-enabled build.
+ * The real definition lives in alp_console_companion.c under
+ * CONFIG_ALP_SDK_CONSOLE_COMPANION.
+ */
+void alp_console_companion_set(cc3501e_t *ctx)
+{
+	ARG_UNUSED(ctx);
+}
+#endif
