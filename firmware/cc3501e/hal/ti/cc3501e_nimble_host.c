@@ -200,8 +200,22 @@ int cc3501e_nimble_host_start(void)
 
 	/* Enable the NWP BLE controller over the (already-up) shared HIF.  Gated
 	 * by the device conf_bin EnableBle -- times out if BLE is OFF in the conf
-	 * (see the conf_bin regen note in WIFI_BLE_INTEGRATION.md). */
-	rc = BleIf_EnableBLE();
+	 * (see the conf_bin regen note in WIFI_BLE_INTEGRATION.md).
+	 *
+	 * RETRY the enable: BleIf_EnableBLE blocks only 1 s (ble_if.c osi_SyncObjWait,
+	 * OSI_WAIT_FOR_SECOND) for the async 0x2A04 (BLE_INIT_DONE) event.  Right
+	 * after a Wi-Fi scan the NWP is busy and that first 1 s wait can expire even
+	 * though the controller comes up fine -- the wifi-scan -> ble-enable -4.  Each
+	 * call re-creates its own bleInitEventSyncObj + re-sends the enable cmd
+	 * (ble_if.c:194/211/230), so a retry is self-contained; loop until the
+	 * init-done lands.  This is BEFORE nimble_port_init so the one-time host init
+	 * below still runs exactly once. */
+	for (int attempt = 0; attempt < 8; attempt++) {
+		rc = BleIf_EnableBLE();
+		if (rc == OSI_OK) {
+			break;
+		}
+	}
 	if (rc != OSI_OK) {
 		return rc;
 	}

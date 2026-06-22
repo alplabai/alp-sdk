@@ -71,6 +71,13 @@ ISR-safe only: `osi_SyncObjSignalFromISR`, `osi_MsgQWrite(...,OSI_NO_WAIT)`. Cre
 - BLE_GATT server: static `ble_gatt_svc_def[]` + `ble_gatts_count_cfg`+`ble_gatts_add_svcs` (BEFORE host task); access cb read=`os_mbuf_append`, write=`ble_hs_mbuf_to_flat`; notify=`ble_gatts_notify_custom`. Client (no TI example): `ble_gattc_disc_all_svcs/chrs`, `ble_gattc_read`, `ble_gattc_write_flat`, subscribe by writing CCCD; add `BLE_GAP_EVENT_NOTIFY_RX` to `gap_event_cb`.
 
 ## Coexistence: concurrent Wi-Fi+BLE supported; Wi-Fi first (shared HIF). `ble_wifi_provisioning` demo = STA+BLE-peripheral simultaneously.
+- **BUT gated by the conf_bin, not just `EnableBle`.** Bench-proven 2026-06-22: with the
+  current `cc35xx-conf.bin` the radios are MUTUALLY EXCLUSIVE — `wifi scan`→`ble enable`
+  fails `-4` (0x2A04 never posts), `ble enable`→`wifi scan` fails `-1`; each works alone
+  from a clean boot. Concurrency needs **`CMN_KEY_BTH_WLAN_COEXIST_ENABLE`** (init table,
+  `drv_ti/uwd/export_inc/init_table_types.h`) set in the regenerated conf. The host path
+  is already hardened (idempotent `cc3501e_hw_ble_enable` + `BleIf_EnableBLE` 8× retry in
+  `nimble_host_start`); the remaining fix is the conf regen. See `docs/cc3501e-production.md`.
 
 ## Build order (P0-4..P0-6 then pillars)
 P0-4 worker (offload from ISR) → P0-5 link the full set + compile osi_dpl.c/network_lwip.c/adaptation

@@ -115,7 +115,18 @@ correctly-activated production units; it does not on the mis-activated bench uni
 - ⏳ **Production signing**: HSM step (key not on the bench).
 - ⏳ **OTA cold swap-boot**: requires a correctly-activated (`vendor_sbl_container_enable=0`)
   production unit; gated on the bench unit only.
-- ⚠️ **Known interaction**: a `wifi scan` immediately followed by `ble enable` returns
-  IO (`-4`) — two back-to-back heavy radio ops desync the CS-less bridge. Workaround:
-  enable BLE from a clean boot (or before a Wi-Fi scan). A firmware fix (sturdier
-  bridge re-sync across the enable) is tracked.
+- ⚠️ **Wi-Fi and BLE are NOT concurrent yet (conf_bin coexistence)**.  In the current
+  device config the two radios are **mutually exclusive**: `wifi scan` then
+  `ble enable` returns `-4` (the BLE controller init-done `0x2A04` never posts, even
+  with the 8× enable retry), and `ble enable` then `wifi scan` returns `-1`.  Each
+  works on its own from a clean boot.  **ROOT CAUSE: `cc35xx-conf.bin` does not enable
+  WLAN+BLE coexistence** (`CMN_KEY_BTH_WLAN_COEXIST_ENABLE` in the init table,
+  `init_table_types.h`).  The SDK *supports* concurrency (the `ble_wifi_provisioning`
+  demo runs STA + BLE-peripheral simultaneously; `ti/WIFI_BLE_INTEGRATION.md`), but it
+  is gated by the conf.  **FIX: regenerate `cc35xx-conf.bin` with the BLE+WLAN
+  coexistence key enabled** (a TI-toolbox conf regen — a config change, NOT code — then
+  re-warm-program).  The firmware host path is already hardened for it once coex is on:
+  `cc3501e_hw_ble_enable` is idempotent + re-syncs the bridge before the enable, and
+  `nimble_host_start` retries `BleIf_EnableBLE` 8× to absorb the slower post-radio init.
+  **Workaround until the conf regen: use one radio at a time — power-cycle between
+  Wi-Fi and BLE.**

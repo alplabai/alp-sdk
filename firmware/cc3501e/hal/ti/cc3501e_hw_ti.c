@@ -1380,6 +1380,19 @@ int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4])
  * the bridge SPI after each radio op, exactly as the Wi-Fi bodies do. */
 int cc3501e_hw_ble_enable(void)
 {
+	/* IDEMPOTENT first: if a prior pass already brought the NimBLE host up, do NOT
+	 * re-init it -- just re-sync the bridge for the reply and report OK.  The host
+	 * poll-by-repeat re-sends BLE_ENABLE on any transient IO, so without this a
+	 * second pass would double-init NimBLE (BleIf_EnableBLE + nimble_port_init
+	 * twice) and fail.  THIS is the wifi-scan -> ble-enable -4: the scan glitches
+	 * the bridge mid-enable so the (successful) first pass's OK never publishes,
+	 * the host retries, and the retry double-inits.  A clean boot never retries
+	 * (bridge stays synced), so it never hit this. */
+	if (cc3501e_nimble_host_is_enabled()) {
+		bridge_transport_spi_hw_reinit();
+		return CC3501E_HW_OK;
+	}
+
 	/* Wi-Fi must be up before BLE (shared HIF).  lazy_start re-opens the
 	 * bridge SPI after the Wlan_Start HIF disruption (its own bench-proven
 	 * fix); we re-open again after the NimBLE bring-up below. */
@@ -1387,6 +1400,15 @@ int cc3501e_hw_ble_enable(void)
 	if (wifi_rv != CC3501E_HW_OK) {
 		return wifi_rv;
 	}
+
+	/* Resync the bridge slave BEFORE the heavy BleIf_EnableBLE.  A prior radio op
+	 * (e.g. `wifi scan`) leaves the shared HIF / bridge DMA desynced, and the host
+	 * poll-by-repeat does NOT self-recover it -- so without this the enable starts
+	 * on a dead link and returns IO (the wifi-scan -> ble-enable -4).  On a clean
+	 * boot the bridge is already synced, so this reinit is a harmless no-op.  (When
+	 * Wi-Fi was just lazy-started above, lazy_start already reinit'd -- a second
+	 * reinit is still safe; the cost is one SPI re-open off the SPI ISR.) */
+	bridge_transport_spi_hw_reinit();
 
 	/* nimble_host_start = BleIf_OpenTransport + BleIf_EnableBLE + NimBLE host.
 	 * BleIf_EnableBLE sends the enable cmd then BLOCKS on an async 0x2A04
