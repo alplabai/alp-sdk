@@ -121,13 +121,18 @@ uart:~$ alp i2c scan 0
 scan complete, 2 responder(s)
 ```
 
-### `alp i2c read <bus_id> <addr> <reg> [len]`
+### `alp i2c read <bus_id> <addr> <reg> [len] [regbytes]`
 
-Read bytes from an I2C register (up to 16; `len` defaults to 1).
+Read bytes from an I2C register (up to 16; `len` defaults to 1). `regbytes`
+selects the register-address width: `1` (default) for 8-bit-register sensors,
+`2` for 16-bit-addressed parts such as the 24C128 EEPROM (the 2-byte address is
+sent MSB-first). `len` must be given to pass `regbytes`.
 
 ```
 uart:~$ alp i2c read 0 0x1e 0x00 4
 81 02 00 00
+uart:~$ alp i2c read 0 0x50 0x0010 8 2     # 16-bit EEPROM offset 0x0010
+00 11 22 33 44 55 66 77
 ```
 
 ### `alp i2c write <bus_id> <addr> <reg> <u8>` *(UNSAFE)*

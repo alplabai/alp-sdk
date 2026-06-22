@@ -75,6 +75,27 @@ ZTEST(alp_console, test_i2c_scan_runs)
 	zassert_not_null(strstr(out, "responder"), "scan summary missing: %s", out);
 }
 
+ZTEST(alp_console, test_i2c_read_2byte_reg)
+{
+	/* The sw_fallback echoes the written register-address bytes back on the
+	 * read phase.  With regbytes=2 and reg=0x1234 the 2-byte BIG-ENDIAN
+	 * address 0x12 0x34 must lead the readback -- proving the command issued
+	 * a 2-byte register address (needed for 16-bit-addressed parts like the
+	 * 24C128 EEPROM). */
+	const char *out = run("alp i2c read 0 0x50 0x1234 4 2");
+
+	zassert_not_null(strstr(out, "12 34"), "2-byte reg addr not issued: %s", out);
+}
+
+ZTEST(alp_console, test_i2c_read_1byte_default)
+{
+	/* No regbytes arg = 1-byte register (backward compatible); the single
+	 * address byte 0xab echoes back. */
+	const char *out = run("alp i2c read 0 0x50 0xab 2");
+
+	zassert_not_null(strstr(out, "ab"), "1-byte reg addr not issued: %s", out);
+}
+
 ZTEST(alp_console, test_adc_read_registers)
 {
 	const char *out = run("alp adc read 0");

@@ -65,12 +65,15 @@ static int cmd_i2c_read(const struct shell *sh, size_t argc, char **argv)
 {
 	unsigned long addr;
 	unsigned long reg;
-	unsigned long len = 1;
+	unsigned long len       = 1;
+	unsigned long reg_bytes = 1;
 
 	if (alp_console_parse_ulong(argv[2], &addr) != 0 ||
 	    alp_console_parse_ulong(argv[3], &reg) != 0 ||
-	    (argc == 5 && alp_console_parse_ulong(argv[4], &len) != 0) || len == 0 || len > 16) {
-		shell_error(sh, "usage: alp i2c read <bus> <addr> <reg> [len<=16]");
+	    (argc >= 5 && alp_console_parse_ulong(argv[4], &len) != 0) ||
+	    (argc == 6 && alp_console_parse_ulong(argv[5], &reg_bytes) != 0) || len == 0 || len > 16 ||
+	    reg_bytes == 0 || reg_bytes > 2) {
+		shell_error(sh, "usage: alp i2c read <bus> <addr> <reg> [len<=16] [regbytes 1|2]");
 		return -EINVAL;
 	}
 
@@ -80,9 +83,21 @@ static int cmd_i2c_read(const struct shell *sh, size_t argc, char **argv)
 		return -EIO;
 	}
 
-	uint8_t      r = (uint8_t)reg;
+	/* Register address, big-endian (MSB first) -- the convention 16-bit
+	 * EEPROMs (e.g. 24C128) and most I2C devices use.  reg_bytes defaults
+	 * to 1 (8-bit-register sensors); pass 2 for 16-bit-addressed parts. */
+	uint8_t r[2];
+	size_t  rlen = (size_t)reg_bytes;
+
+	if (reg_bytes == 2) {
+		r[0] = (uint8_t)(reg >> 8);
+		r[1] = (uint8_t)reg;
+	} else {
+		r[0] = (uint8_t)reg;
+	}
+
 	uint8_t      buf[16];
-	alp_status_t s = alp_i2c_write_read(bus, (uint8_t)addr, &r, 1, buf, (size_t)len);
+	alp_status_t s = alp_i2c_write_read(bus, (uint8_t)addr, r, rlen, buf, (size_t)len);
 
 	alp_i2c_close(bus);
 	if (s != ALP_OK) {
@@ -133,7 +148,7 @@ static int cmd_i2c_write(const struct shell *sh, size_t argc, char **argv)
 SHELL_STATIC_SUBCMD_SET_CREATE(
     alp_i2c_subcmds,
     SHELL_CMD_ARG(scan, NULL, "scan <bus>", cmd_i2c_scan, 2, 0),
-    SHELL_CMD_ARG(read, NULL, "read <bus> <addr> <reg> [len]", cmd_i2c_read, 4, 1),
+    SHELL_CMD_ARG(read, NULL, "read <bus> <addr> <reg> [len] [regbytes 1|2]", cmd_i2c_read, 4, 2),
 #if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE)
     SHELL_CMD_ARG(write, NULL, "write <bus> <addr> <reg> <u8> (UNSAFE)", cmd_i2c_write, 5, 0),
 #endif
