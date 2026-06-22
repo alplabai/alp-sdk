@@ -41,13 +41,24 @@ production firmware — there is no authentication on the serial port.
 ## Boot banner
 
 When `CONFIG_ALP_SDK_CONSOLE=y` is set, `alp_banner.c` (linked
-automatically) prints the board identity and Alp SDK version before the
-shell prompt appears:
+automatically) prints the SoM + SoC identity and a system summary before
+the shell prompt appears:
 
 ```
-*** Alp SDK v0.7.0 — E1M-AEN801 (Alif Ensemble E8)  ***
+Alp SDK 0.7.0  |  E1M-AEN801  |  Alif Ensemble E8  |  (c) Alp Lab AB
+  CPU: M55-HE @160MHz (active) + 2x Cortex-A32 @800MHz + M55-HP @400MHz
+  NPU: Ethos-U85 + 2x Ethos-U55   |   SRAM 9984 KB | MRAM 5.5 MB
 uart:~$
 ```
+
+The SoM column is the live EEPROM SKU + hardware revision when the module is
+provisioned (`CONFIG_ALP_SDK_HW_INFO=y`); otherwise it falls back to the
+build-time `CONFIG_ALP_SDK_SOM_SKU` (board.yaml `som.sku`), then the raw
+`CONFIG_BOARD`.  The SoC name, the per-core complement (with the active core
+marked), the NPU list, and the total on-chip SRAM/MRAM are data-driven from the
+SoC spec JSON (`CONFIG_ALP_SDK_SOC_*`, emitted by `scripts/alp_orchestrate.py`);
+a build without those configs falls back to the devicetree (the running-core
+clock and the chosen sram/flash region sizes).
 
 Type `alp` then Tab for sub-command completion, or `alp --help`.
 
@@ -174,6 +185,28 @@ tick rate : 1000 Hz
 ```
 
 Note: a full per-IP clock tree (enable/rate-set verbs) is a documented follow-up.
+
+### `alp res`
+
+Live resource snapshot: uptime, the SoC core complement (active core marked),
+this build's RAM region + the SoC's total on-chip SRAM/MRAM, and a per-thread
+stack used/free table.  Read-only.  The thread table needs
+`CONFIG_THREAD_MONITOR` + `CONFIG_THREAD_STACK_INFO`; the SoC fields come from
+`CONFIG_ALP_SDK_SOC_*` (the same SoC-spec source as the boot banner).
+
+```
+uart:~$ alp res
+uptime  : 12448 ms
+cores   : M55-HE @160MHz (active) + 2x Cortex-A32 @800MHz + M55-HP @400MHz
+          (this image runs the active core; other cores are not started by it)
+RAM     : 256 KB (this build's region)
+SoC mem : SRAM 9984 KB | MRAM 5632 KB (total on-chip)
+threads : stack used/free per thread
+    shell_uart         2048 B  used    936  free   1112
+    logging             768 B  used    200  free    568
+    idle                320 B  used     72  free    248
+    -- total stack 3136 B, free 1928 B
+```
 
 ### `alp companion ver`
 
@@ -341,6 +374,7 @@ individual verbs without touching the rest.  All symbols default `y` when
 | `CONFIG_ALP_SDK_CONSOLE_CMD_ADC`    | y (needs `ALP_SDK_PERIPH_ADC`) | `alp adc` |
 | `CONFIG_ALP_SDK_CONSOLE_CMD_PWM`    | y               | `alp pwm`             |
 | `CONFIG_ALP_SDK_CONSOLE_CMD_CLK`    | y               | `alp clk`             |
+| `CONFIG_ALP_SDK_CONSOLE_CMD_RES`    | y               | `alp res`             |
 | `CONFIG_ALP_SDK_CONSOLE_CMD_REBOOT` | y               | `alp reboot`          |
 | `CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION` | y if V2N supervisor or CC3501E; else n | `alp companion` |
 
