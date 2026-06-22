@@ -71,15 +71,47 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/display.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/mipi_dsi.h>
+#include <zephyr/drivers/pinctrl.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/init.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
+
+/*
+ * Release the panel-control expander's own \RESET (IO_EXP.RST).  AUTHORITATIVE
+ * EVK netlist trace: IO_EXP.RST -> SoC ball N1 -> P10_2 (gpio10.2) [DFP pins.h:
+ * "P10_2 on pin N1", func[0]=GPIO10_2].  NOT P3_6 -- an earlier SoM-side trace
+ * mis-identified the pad, so the firmware was toggling P3_6 (unconnected to U35)
+ * with zero effect on the expander.  \RESET is active-low (R141 pulls it high),
+ * so drive HIGH to release.  If P10_2 idles low/indeterminate it holds the
+ * expander in reset and it NACKs every address.  gpio_dw applies no pad mux, so
+ * mux P10_2 -> GPIO (+ REN) via the Alif pinctrl SoC driver first.  Run at
+ * PRE_KERNEL_2, before the expander (POST_KERNEL).
+ */
+#define LCD_EXP_PAD_REN (1U << 16) /* Alif pad receiver-enable (REN_BIT_POS=16) */
+
+static int lcd_exp_reset_release(void)
+{
+	const struct device *gpio10 = DEVICE_DT_GET(DT_NODELABEL(gpio10));
+	pinctrl_soc_pin_t m[] = { PIN_P10_2__GPIO | LCD_EXP_PAD_REN };
+	int rc = pinctrl_configure_pins(m, ARRAY_SIZE(m), 0U);
+
+	if (rc != 0 || !device_is_ready(gpio10)) {
+		return rc ? rc : -ENODEV;
+	}
+	return gpio_pin_configure(gpio10, 2, GPIO_OUTPUT_HIGH);
+}
+
+SYS_INIT(lcd_exp_reset_release, PRE_KERNEL_2, 0);
 
 /*
  * Program the CDC200 pixel-clock divider directly.  The upstream Alif clockctrl
@@ -104,6 +136,45 @@ static int cdc_pixclk_div_fixup(void)
 }
 
 SYS_INIT(cdc_pixclk_div_fixup, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+
+/*
+ * Bring up the MIPI D-PHY's clock SOURCES and analog power before any peripheral
+ * touches the PHY.  The CKEN gate bits in CLKCTL_PER_MST->MIPI_CKEN (set by the
+ * dphy driver) only gate clocks that must already be oscillating upstream; on a
+ * bare-metal/SE-less RAM-run those upstream enables are NOT done, so the D-PHY
+ * PLL has neither a 38.4 MHz reference nor analog supply and never locks
+ * (bench: DSI_PHY_STATUS stuck 0x1400, no LOCK bit -- even with the PLL m/n/VCO
+ * shadow registers correctly programmed).
+ *
+ * Two register-direct steps (mirrors the Alif sdk-alif display sample's CGU poke
+ * and the DevKit-e8 vbat_init(); no SE-services dependency):
+ *
+ *  1. CGU->CLK_ENA (0x1A602014): enable HFOSC (38.4 MHz, the PLL reference) on
+ *     bit21 and the CFG clock (100 MHz, source of the 25 MHz D-PHY cfg clock that
+ *     drives the PHY startup/lock state machine) on bit23.
+ *  2. VBAT->PWR_CTRL (0x1A609008): un-mask the MIPI TX/RX/PLL DPHY power rails
+ *     (bits 0/4/8) + the VPH-1P8 bypass (bit12) and drop the TX/RX/PLL isolation
+ *     (bits 1/5/9).  At reset these leave the DPHY analog islands powered-off and
+ *     isolated, so the PLL cannot lock regardless of config.
+ */
+#define CGU_CLK_ENA_ADDR  0x1A602014UL
+#define CGU_CLK_HFOSC_BIT 21U /* HFOSC 38.4 MHz -- D-PHY PLL reference */
+#define CGU_CLK_CFG_BIT   23U /* CFG 100 MHz -- source of the 25 MHz D-PHY cfg clk */
+
+#define VBAT_PWR_CTRL_ADDR 0x1A609008UL
+#define VBAT_DPHY_PWR_ISO_MSK                                                  \
+	(BIT(0) | BIT(1) | BIT(4) | BIT(5) | BIT(8) | BIT(9) | BIT(12))
+/* TX pwr/iso | RX pwr/iso | PLL pwr/iso | VPH-1P8 bypass */
+
+static int dphy_clock_power_enable(void)
+{
+	sys_set_bit(CGU_CLK_ENA_ADDR, CGU_CLK_HFOSC_BIT);
+	sys_set_bit(CGU_CLK_ENA_ADDR, CGU_CLK_CFG_BIT);
+	sys_clear_bits(VBAT_PWR_CTRL_ADDR, VBAT_DPHY_PWR_ISO_MSK);
+	return 0;
+}
+
+SYS_INIT(dphy_clock_power_enable, PRE_KERNEL_1, 0);
 
 /* The display device (the cdc200 pixel pump) is the chosen render target. */
 #define DISPLAY_NODE DT_CHOSEN(zephyr_display)
@@ -159,11 +230,160 @@ static void i2c2_scan(void)
 	printk("\n");
 }
 
+/*
+ * Identify each ACKing device: read the common WHO_AM_I / chip-ID / manufacturer-ID
+ * register candidates.  '--' = that register NACK'd (device has no register at that
+ * offset / read-without-pointer device like a raw EEPROM).
+ *	r00 - generic first register / many sensors' config or status
+ *	r0F - ST/TI WHO_AM_I (LSM*, TMP117 device-id high)
+ *	r75 - InvenSense WHO_AM_I (ICM-42670 = 0x67)
+ *	rD0 - Bosch chip-id (BMP/BME = 0x58/0x60, BMI*)
+ *	r3E - TI INA2xx manufacturer-id MSB (0x54 = 'T')
+ *	rFE - alt manufacturer-id (many TI/Maxim parts)
+ */
+static void i2c2_identify(void)
+{
+	const struct device *bus = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+	static const uint8_t addrs[] = {0x40, 0x41, 0x42, 0x47, 0x48, 0x49, 0x4a,
+					0x4d, 0x4e, 0x50, 0x58, 0x68, 0x69};
+	static const uint8_t idregs[] = {0x00, 0x0F, 0x75, 0xD0, 0x3E, 0xFE};
+
+	if (!device_is_ready(bus)) {
+		return;
+	}
+	printk("i2c2 identify (r00 r0F r75 rD0 r3E rFE):\n");
+	for (size_t i = 0; i < ARRAY_SIZE(addrs); i++) {
+		printk("  0x%02x:", addrs[i]);
+		for (size_t j = 0; j < ARRAY_SIZE(idregs); j++) {
+			uint8_t v;
+
+			if (i2c_reg_read_byte(bus, addrs[i], idregs[j], &v) == 0) {
+				printk(" %02x", v);
+			} else {
+				printk(" --");
+			}
+		}
+		printk("\n");
+	}
+}
+
+/*
+ * INA236 confirm: read the 16-bit manufacturer-id (reg 0x3E = 0x5449 'TI') and
+ * die-id (reg 0x3F) registers.  Compares 0x40 (known INA236) vs 0x48 (suspect).
+ */
+static void ina236_probe(void)
+{
+	const struct device *bus = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+	static const uint8_t addrs[] = {0x40, 0x48};
+
+	if (!device_is_ready(bus)) {
+		return;
+	}
+	printk("INA236 check (mfr-id r3E should=0x5449 'TI', die-id r3F):\n");
+	for (size_t i = 0; i < ARRAY_SIZE(addrs); i++) {
+		uint8_t m[2] = {0, 0}, d[2] = {0, 0};
+		int r1 = i2c_burst_read(bus, addrs[i], 0x3E, m, 2);
+		int r2 = i2c_burst_read(bus, addrs[i], 0x3F, d, 2);
+
+		printk("  0x%02x: mfr=%02x%02x (rc%d)  die=%02x%02x (rc%d)\n",
+		       addrs[i], m[0], m[1], r1, d[0], d[1], r2);
+	}
+}
+
+/*
+ * Characterise the mystery 0x58: dump regs 0x00..0x1F, then re-read reg 0x00
+ * a few times.  A real chip = structured + stable bytes; an address-decode
+ * ghost/alias = garbage or values that mirror a neighbouring device.  Dumps
+ * 0x50 (EEPROM) and 0x4d (TAS2563) alongside for an aliasing comparison.
+ */
+static void probe_dump(const struct device *bus, uint8_t addr)
+{
+	uint8_t buf[32] = {0};
+	int rc = i2c_burst_read(bus, addr, 0x00, buf, sizeof(buf));
+
+	printk("  0x%02x r00..1F (rc%d):", addr, rc);
+	for (size_t i = 0; i < sizeof(buf); i++) {
+		printk(" %02x", buf[i]);
+	}
+	printk("\n  0x%02x r00 x5:", addr);
+	for (int i = 0; i < 5; i++) {
+		uint8_t v = 0;
+
+		(void)i2c_reg_read_byte(bus, addr, 0x00, &v);
+		printk(" %02x", v);
+	}
+	printk("\n");
+}
+
+static void mystery_0x58(void)
+{
+	const struct device *bus = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+
+	if (!device_is_ready(bus)) {
+		return;
+	}
+	printk("0x58 characterise (vs 0x50 EEPROM, 0x4d TAS):\n");
+	probe_dump(bus, 0x58);
+	probe_dump(bus, 0x50);
+	probe_dump(bus, 0x4d);
+}
+
+/*
+ * Proof test: 16-bit-addressed (24C128-style) read of the first 32 manifest
+ * bytes from 0x50 and 0x58.  Identical bytes => 0x58 is the same EEPROM mirrored.
+ */
+static void eeprom_alias_compare(void)
+{
+	const struct device *bus = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+	uint8_t waddr[2] = {0x00, 0x00};
+	uint8_t a[32] = {0}, b[32] = {0};
+
+	if (!device_is_ready(bus)) {
+		return;
+	}
+	int r1 = i2c_write_read(bus, 0x50, waddr, 2, a, sizeof(a));
+	int r2 = i2c_write_read(bus, 0x58, waddr, 2, b, sizeof(b));
+
+	printk("EEPROM 16-bit manifest read (0x0000, 32B):\n  0x50 (rc%d):", r1);
+	for (size_t i = 0; i < sizeof(a); i++) {
+		printk(" %02x", a[i]);
+	}
+	printk("\n  0x58 (rc%d):", r2);
+	for (size_t i = 0; i < sizeof(b); i++) {
+		printk(" %02x", b[i]);
+	}
+	printk("\n  match: %s\n", (r1 == 0 && r2 == 0 && memcmp(a, b, sizeof(a)) == 0)
+				   ? "IDENTICAL -> 0x58 is the EEPROM mirrored"
+				   : "DIFFER -> 0x58 is a distinct device");
+}
+
 int main(void)
 {
 	printk("\n=== aen-dsi-display ===\n");
 
+	/*
+	 * Clean reset PULSE on the expander \RESET (P10_2/gpio10.2).  The TCA6408A
+	 * latches its I2C address straps on a reset edge; a strap patched live after
+	 * power-on (e.g. A0->VIO) is only picked up after a low->high \RESET edge.
+	 * The PRE_KERNEL hook drives it static-high; here (kernel up, k_sleep safe)
+	 * we toggle it low->high so the chip re-latches the patched address.
+	 */
+	{
+		const struct device *gpio10 = DEVICE_DT_GET(DT_NODELABEL(gpio10));
+
+		if (device_is_ready(gpio10)) {
+			gpio_pin_set(gpio10, 2, 0);
+			k_sleep(K_MSEC(10));
+			gpio_pin_set(gpio10, 2, 1);
+			k_sleep(K_MSEC(10));
+		}
+	}
+
 	i2c2_scan();
+	i2c2_identify();
+	ina236_probe();
+	mystery_0x58();
+	eeprom_alias_compare();
 
 	const struct device *panel = DEVICE_DT_GET(PANEL_NODE);
 	const struct device *dsi   = DEVICE_DT_GET(DSI_NODE);
@@ -187,6 +407,27 @@ int main(void)
 
 	/* Step 3: the cdc200 display device (the render target). */
 	bool disp_ok = dev_ready("display", disp);
+
+	/*
+	 * Step 4: TRUE panel-presence check.  DSI command WRITES are unacknowledged
+	 * -- they "succeed" even with no panel attached -- so a clean init alone does
+	 * NOT prove a panel is on the FFC.  A DCS READ does: it requires the panel to
+	 * drive data back over the link.  Read RDDID (0x04, 3-byte manufacturer/ID)
+	 * and RDDPM (0x0A, power/display-on status).  Non-zero/non-error = a real
+	 * panel is attached and responding.
+	 */
+	if (dsi_ok) {
+		uint8_t id[3] = {0};
+		uint8_t pm = 0;
+		int rid = mipi_dsi_dcs_read(dsi, 0, 0x04, id, sizeof(id));
+		int rpm = mipi_dsi_dcs_read(dsi, 0, 0x0A, &pm, 1);
+
+		printk("panel DCS read: RDDID rc=%d id=%02x %02x %02x | RDDPM rc=%d pm=0x%02x\n",
+		       rid, id[0], id[1], id[2], rpm, pm);
+		printk("panel presence: %s\n",
+		       (rid > 0 && (id[0] | id[1] | id[2])) ? "RESPONDING (real panel on FFC)"
+							    : "no read response (writes are unacked)");
+	}
 
 	/*
 	 * Step 5: render.  Fill the screen with a solid color, one row at a time.

@@ -1114,10 +1114,18 @@ static ssize_t dsi_dw_transfer(const struct device *dev,
 		return -EINVAL;
 	}
 
-	if (msg->rx_buf && msg->rx_len)
+	if (msg->rx_buf && msg->rx_len) {
 		dsi_dw_read_payload(regs, msg->rx_buf, msg->rx_len);
+		return msg->rx_len;
+	}
 
-	return 0;
+	/*
+	 * The MIPI-DSI API contract is to return the number of bytes
+	 * transferred, not 0.  Panel drivers rely on this: e.g. display_hx8394
+	 * gates its final SET_DISPLAY_ON on `if (ret_tx != 1)`, so returning 0
+	 * here makes a fully-successful init report failure (panel never ready).
+	 */
+	return msg->tx_len;
 }
 
 /* ISR Function */

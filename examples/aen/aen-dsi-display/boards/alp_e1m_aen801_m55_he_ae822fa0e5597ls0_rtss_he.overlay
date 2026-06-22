@@ -126,6 +126,11 @@
 	status = "okay";
 };
 
+/* gpio10: P10_2 (ball N1) drives the IO-expander \RESET (IO_EXP.RST). */
+&gpio10 {
+	status = "okay";
+};
+
 &i2c2 {
 	status = "okay";
 	pinctrl-0 = <&pinctrl_i2c2>;
