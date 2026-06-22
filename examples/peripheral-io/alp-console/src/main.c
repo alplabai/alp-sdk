@@ -2,12 +2,17 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * alp-console -- bring up the Alp SoM interactive console.
+ * alp-console -- the E1M-AEN801 "everything" demo: interactive console +
+ * CC3501E Wi-Fi/BLE + a live RGB status LED, in one shippable slot0 app.
  *
  * The console itself is SDK infrastructure: enabling CONFIG_ALP_SDK_CONSOLE
  * registers the whole `alp` command tree on the Zephyr shell at link time,
  * so an app gets board / gpio / i2c / adc / pwm / mem / clk / reboot
- * diagnostics for free -- main() does NOT register any commands.
+ * diagnostics for free -- main() does NOT register any commands.  On the
+ * AEN801 that tree includes `alp companion wifi scan|connect` and
+ * `alp companion ble enable|scan`, which reach the on-module CC3501E over the
+ * inter-chip bridge bound below.  A background thread breathes the on-board RGB
+ * LED so the board is visibly alive while the shell stays fully responsive.
  *
  * Boot sequence:
  *   1. Zephyr shell starts (via CONFIG_SHELL=y in prj.conf).
@@ -102,6 +107,71 @@ static void bind_companion(void)
 {
 }
 #endif /* CONFIG_ALP_SDK_CHIP_CC3501E */
+
+/* ---- RGB "board alive" status LED (E1M-AEN801 EVK) ---------------------- */
+/*
+ * A low-priority background thread breathes the on-module RGB LED through a
+ * rainbow so the demo is visibly alive while the `alp` shell stays fully
+ * responsive on the console.  Wiring + the breathe maths are lifted from the
+ * aen-rgb-led-fade example (RED=PWM3/P2_4, GREEN=PWM0/P12_7, BLUE=PWM1/P12_6 --
+ * the board overlay's pwm-leds children).  Device-tree-guarded: on a board
+ * without the led_red pwm-leds child (native_sim, V2N) the whole block compiles
+ * out and no thread is spawned.
+ */
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(led_red), okay)
+#include <zephyr/drivers/pwm.h>
+
+#define RGB_PERIOD_CYCLES 1000u
+
+/* 8-bit phase -> 0..255 triangle, smoothed by an integer smoothstep (also a
+ * perceptual gamma) so the breathe looks linear to the eye.  No float / libm. */
+static uint32_t rgb_breathe(uint32_t phase)
+{
+	uint32_t p = phase & 0xFFu;
+	uint32_t t = (p < 128u) ? (p * 2u) : ((255u - p) * 2u);
+	return (uint32_t)(((uint64_t)t * t * (765u - 2u * t)) / 65025u);
+}
+
+/* pulse = period * brightness / 255, clamped to >= 1 cycle (a 0 pulse takes the
+ * driver's full-off path, which perturbs the shared timer -> visible flicker). */
+static void rgb_set(const struct pwm_dt_spec *ch, uint32_t b8)
+{
+	uint32_t pulse = (RGB_PERIOD_CYCLES * b8) / 255u;
+
+	if (pulse == 0u) {
+		pulse = 1u;
+	}
+	(void)pwm_set_cycles(ch->dev, ch->channel, RGB_PERIOD_CYCLES, pulse, ch->flags);
+}
+
+static void rgb_status_thread(void *a, void *b, void *c)
+{
+	ARG_UNUSED(a);
+	ARG_UNUSED(b);
+	ARG_UNUSED(c);
+	const struct pwm_dt_spec red   = PWM_DT_SPEC_GET(DT_NODELABEL(led_red));
+	const struct pwm_dt_spec green = PWM_DT_SPEC_GET(DT_NODELABEL(led_green));
+	const struct pwm_dt_spec blue  = PWM_DT_SPEC_GET(DT_NODELABEL(led_blue));
+
+	if (!pwm_is_ready_dt(&red) || !pwm_is_ready_dt(&green) || !pwm_is_ready_dt(&blue)) {
+		return; /* controllers not ready -- leave the LED dark, console unaffected */
+	}
+
+	uint32_t phase = 0u;
+
+	for (;;) {
+		rgb_set(&red, rgb_breathe(phase));         /*   0 deg */
+		rgb_set(&green, rgb_breathe(phase + 85u));  /* +120 deg around the wheel */
+		rgb_set(&blue, rgb_breathe(phase + 170u));  /* +240 deg */
+		phase = (phase + 1u) & 0xFFu;
+		k_msleep(15);
+	}
+}
+
+/* Spawn at boot (priority 7 -- below the shell + main).  The shell + companion
+ * bring-up run independently; the LED just breathes in the background. */
+K_THREAD_DEFINE(rgb_status_tid, 1024, rgb_status_thread, NULL, NULL, NULL, 7, 0, 0);
+#endif /* led_red okay */
 
 int main(void)
 {

@@ -21,6 +21,7 @@
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
 
 &pinctrl {
 	/* SPI1 master (CC3501E bridge): SCK P14_6 / MOSI P14_5 / MISO P14_4 (alt-2, _C). */
@@ -40,6 +41,21 @@
 			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
 			input-enable;
 			bias-pull-down;
+		};
+	};
+
+	/* RGB-LED PWM outputs (from aen-rgb-led-fade): RED P2_4 = UT10_T0_A;
+	 * GREEN P12_7 = UT11_T1_C; BLUE P12_6 = UT11_T0_C.  Output pads -- no
+	 * input-enable/bias.  Distinct from the SPI1/I2C2 pads above (no conflict). */
+	pinctrl_pwm10: pinctrl_pwm10 {
+		group0 {
+			pinmux = <PIN_P2_4__UT10_T0_A>; /* RED  */
+		};
+	};
+	pinctrl_pwm11: pinctrl_pwm11 {
+		group0 {
+			pinmux = <PIN_P12_7__UT11_T1_C>, /* GREEN */
+				 <PIN_P12_6__UT11_T0_C>; /* BLUE  */
 		};
 	};
 };
@@ -91,5 +107,44 @@
 		compatible = "alp,pin-array";
 		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
 			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+	};
+
+	/* RGB "board alive" status LED.  Each pwm-leds child's `pwms` phandle is
+	 * what PWM_DT_SPEC_GET dereferences to reach the pwm10/pwm11 controller +
+	 * channel (never DEVICE_DT_GET on the controller node -- avoids the
+	 * "alif,pwm" #pwm-cells codegen phantom; see aen-rgb-led-fade). */
+	rgb_leds: pwm-leds {
+		compatible = "pwm-leds";
+
+		led_red: led_r {
+			label = "rgb-red";
+			pwms  = <&pwm10 0 PWM_USEC(100) PWM_POLARITY_NORMAL>;
+		};
+		led_green: led_g {
+			label = "rgb-green";
+			pwms  = <&pwm11 1 PWM_USEC(100) PWM_POLARITY_NORMAL>;
+		};
+		led_blue: led_b {
+			label = "rgb-blue";
+			pwms  = <&pwm11 0 PWM_USEC(100) PWM_POLARITY_NORMAL>;
+		};
+	};
+};
+
+&utimer10 {
+	status = "okay";
+	pwm10 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm10>;
+		pinctrl-names = "default";
+	};
+};
+
+&utimer11 {
+	status = "okay";
+	pwm11 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm11>;
+		pinctrl-names = "default";
 	};
 };

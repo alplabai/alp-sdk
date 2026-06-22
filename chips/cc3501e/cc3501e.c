@@ -410,8 +410,10 @@ alp_status_t cc3501e_wifi_get_mac(cc3501e_t *ctx, uint8_t mac[CC3501E_MAC_LEN], 
 }
 
 /* On-wire fixed header of a scan record (alp_cc3501e_scan_result_t without the
- * inline SSID): bssid[6] + rssi(1) + channel(1) + security(1) + ssid_len(1). */
-#define CC3501E_SCAN_REC_HDR 10u
+ * inline SSID): bssid[6] + rssi(1) + channel(1) + security(LE16) + ssid_len(1).
+ * security is the raw 16-bit TI SecurityInfo (the sec-type lives in the high
+ * byte) -- cc3501e_wifi_sec_kind() decodes it. */
+#define CC3501E_SCAN_REC_HDR 11u
 
 alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
                                cc3501e_scan_record_t *out_records,
@@ -443,16 +445,16 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 	size_t n   = 0;
 	while (off + CC3501E_SCAN_REC_HDR <= got && n < cap) {
 		const uint8_t *rec      = &scan_buf[off];
-		uint8_t        ssid_len = rec[9];
+		uint8_t        ssid_len = rec[10];
 		if (off + CC3501E_SCAN_REC_HDR + (size_t)ssid_len > got) {
 			break; /* truncated trailing record -- stop cleanly */
 		}
 		cc3501e_scan_record_t *out = &out_records[n];
 		memcpy(out->bssid, &rec[0], 6);
-		out->rssi_dbm = (int8_t)rec[6];
-		out->channel  = rec[7];
-		out->security = rec[8];
-		out->ssid_len = ssid_len;
+		out->rssi_dbm      = (int8_t)rec[6];
+		out->channel       = rec[7];
+		out->security_info = (uint16_t)rec[8] | ((uint16_t)rec[9] << 8); /* raw TI SecurityInfo, LE */
+		out->ssid_len      = ssid_len;
 		uint8_t copy  = (ssid_len > CC3501E_SSID_MAX) ? (uint8_t)CC3501E_SSID_MAX : ssid_len;
 		memcpy(out->ssid, &rec[CC3501E_SCAN_REC_HDR], copy);
 		out->ssid[copy] = '\0';
@@ -461,6 +463,55 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 	}
 	if (count != NULL) *count = n;
 	return ALP_OK;
+}
+
+cc3501e_wifi_sec_t cc3501e_wifi_sec_kind(uint16_t security_info)
+{
+	/* Decode the raw TI scan-result SecurityInfo.  The sec-type bitmap lives in
+	 * the HIGH byte (WLAN_SCAN_RESULT_SEC_TYPE_BITMAP = (info >> 8) & 0x3f):
+	 *   bit0 WEP, bit1 WPA, bit2 WPA2, bits3-4 WPA3/SAE (a CC33xx extension --
+	 *   bench-calibrated 2026-06-22: a WPA2/WPA3-transition modem reads 0x1c
+	 *   here = WPA2|WPA3 bits, plain WPA2 APs read 0x04, open reads 0x00).
+	 * The PMF-required bit (0x8000) is NOT a WPA3 tell -- it is set on PMF-capable
+	 * WPA2 networks too, so checking it first mislabels every secured AP as WPA3.
+	 * The low byte is only the group/unicast cipher and must NOT drive the label
+	 * (truncating to it was why the old 1-byte field always read "?"). */
+	const uint8_t sec_type = (uint8_t)((security_info >> 8) & 0x3fu);
+
+	if (sec_type == 0u) {
+		return CC3501E_WIFI_SEC_OPEN;
+	}
+	if ((sec_type & 0x18u) != 0u) {
+		return CC3501E_WIFI_SEC_WPA3; /* SAE / WPA3 (incl. WPA2/WPA3 transition) */
+	}
+	if ((sec_type & 0x04u) != 0u) {
+		return CC3501E_WIFI_SEC_WPA2;
+	}
+	if ((sec_type & 0x02u) != 0u) {
+		return CC3501E_WIFI_SEC_WPA;
+	}
+	if ((sec_type & 0x01u) != 0u) {
+		return CC3501E_WIFI_SEC_WEP;
+	}
+	return CC3501E_WIFI_SEC_UNKNOWN;
+}
+
+const char *cc3501e_wifi_sec_name(uint16_t security_info)
+{
+	switch (cc3501e_wifi_sec_kind(security_info)) {
+	case CC3501E_WIFI_SEC_OPEN:
+		return "open";
+	case CC3501E_WIFI_SEC_WEP:
+		return "wep";
+	case CC3501E_WIFI_SEC_WPA:
+		return "wpa";
+	case CC3501E_WIFI_SEC_WPA2:
+		return "wpa2";
+	case CC3501E_WIFI_SEC_WPA3:
+		return "wpa3";
+	default:
+		return "sec?";
+	}
 }
 
 alp_status_t cc3501e_wifi_connect(
@@ -529,15 +580,71 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4])
 
 alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms)
 {
-	/* Worker-routed: the firmware SUSPENDS the bridge SPI, runs BleIf_EnableBLE (the
-	 * NWP BLE-controller cold-init -- a control-cmd round-trip that can take ~10-15 s)
-	 * + nimble_host_start sync, then RE-OPENS the bridge.  The link is DOWN for that
-	 * whole window, so the host must poll-by-repeat (retry on IO) longer than the
-	 * 10 s Wi-Fi floor -- floor to 30 s so a working-but-slow enable is not misread as
-	 * a failure before the worker publishes the result + the bridge re-syncs. */
+	/* Worker-routed: the firmware brings Wi-Fi up first (shared HIF), forces the
+	 * NWP to Always-Active, then runs BleIf_EnableBLE + nimble_host_start.  The
+	 * BLE-controller cold-init blocks on an async 0x2A04 (BLE_INIT_DONE) event
+	 * delivered over the SAME shared HIF, so the firmware must NOT suspend the
+	 * bridge across it (suspending starves the event -- the root cause of the old
+	 * -4 hang); it re-opens the bridge SPI AFTER instead.  The bring-up still
+	 * perturbs the shared DMA, so the host poll-by-repeat (retry on IO) must
+	 * outlast it -- floor to the BLE-enable window so a working-but-slow enable is
+	 * not misread as a failure before the worker publishes + the bridge re-syncs. */
 	uint32_t budget = timeout_ms;
 	if (budget < CC3501E_BLE_ENABLE_WINDOW_MS) budget = CC3501E_BLE_ENABLE_WINDOW_MS;
 	return poll_by_repeat(ctx, ALP_CC3501E_CMD_BLE_ENABLE, NULL, 0, NULL, 0, NULL, budget);
+}
+
+/* On-wire fixed header of a BLE scan record: addr[6] + addr_type(1) + rssi(1) +
+ * name_len(1), then name_len inline device-name bytes. */
+#define CC3501E_BLE_SCAN_REC_HDR 9u
+/* The firmware GAP discovery blocks for its scan window (~4 s) + the bridge
+ * resync; floor the host poll budget well above it so a slow scan is not
+ * misread as IO before the worker publishes the advertiser list. */
+#define CC3501E_BLE_SCAN_WINDOW_MS 15000u
+
+alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
+                              cc3501e_ble_scan_record_t *out_records,
+                              size_t                     cap,
+                              size_t                    *count,
+                              uint32_t                   timeout_ms)
+{
+	if (out_records == NULL && cap > 0u) return ALP_ERR_INVAL;
+	if (count != NULL) *count = 0;
+
+	uint32_t budget = timeout_ms;
+	if (budget < CC3501E_BLE_SCAN_WINDOW_MS) budget = CC3501E_BLE_SCAN_WINDOW_MS;
+
+	/* Receive the packed record list into a scratch-sized buffer (mirrors
+	 * cc3501e_wifi_scan: keeps cc3501e_request's scratch free for the framing). */
+	static uint8_t scan_buf[ALP_CC3501E_MAX_PAYLOAD];
+	size_t         got = 0;
+	alp_status_t   s   = poll_by_repeat(
+        ctx, ALP_CC3501E_CMD_BLE_SCAN_START, NULL, 0, scan_buf, sizeof(scan_buf), &got, budget);
+	if (s != ALP_OK) return s;
+
+	/* Walk the packed records: addr[6] | addr_type | rssi | name_len then
+	 * name_len inline name bytes (no padding). */
+	size_t off = 0;
+	size_t n   = 0;
+	while (off + CC3501E_BLE_SCAN_REC_HDR <= got && n < cap) {
+		const uint8_t *rec      = &scan_buf[off];
+		uint8_t        name_len = rec[8];
+		if (off + CC3501E_BLE_SCAN_REC_HDR + (size_t)name_len > got) {
+			break; /* truncated trailing record -- stop cleanly */
+		}
+		cc3501e_ble_scan_record_t *out = &out_records[n];
+		memcpy(out->addr, &rec[0], 6);
+		out->addr_type = rec[6];
+		out->rssi_dbm  = (int8_t)rec[7];
+		out->name_len  = name_len;
+		uint8_t copy = (name_len > CC3501E_BLE_NAME_MAX) ? (uint8_t)CC3501E_BLE_NAME_MAX : name_len;
+		memcpy(out->name, &rec[CC3501E_BLE_SCAN_REC_HDR], copy);
+		out->name[copy] = '\0';
+		off += CC3501E_BLE_SCAN_REC_HDR + (size_t)name_len;
+		n++;
+	}
+	if (count != NULL) *count = n;
+	return ALP_OK;
 }
 
 /* ------------------------------------------------------------------ */
