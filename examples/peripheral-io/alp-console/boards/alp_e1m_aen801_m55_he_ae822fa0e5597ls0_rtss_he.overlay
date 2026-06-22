@@ -1,0 +1,95 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN801 EVK overlay for alp-console.  Two jobs:
+ *
+ * 1. CC3501E inter-chip bridge wiring (so `alp companion ver/ping` reaches the
+ *    on-module CC3501E) -- the SoM-internal Alif<->CC3501E SPI1 link + the two
+ *    host-driven control nets, from metadata/e1m_modules/aen/inter-chip.tsv.
+ *    This is the SAME proven wiring as examples/aen/aen-cc3501e-bringup; the
+ *    console copies cc3501e_bridge.{c,h} from there, so it needs the matching
+ *    overlay too (cc3501e_bridge_bringup opens bus_id 1 = &cc3501e_spi):
+ *      SPI1.SCK P14_6  MOSI P14_5  MISO P14_4   WIFI_EN P15_5  NRST P15_1_FLEX
+ *
+ * 2. Master I2C bus (so `alp i2c scan 0` has a live bus): portable bus 0 ->
+ *    SoC I2C2 (i2c_dw master, P5_6 SCL_C / P5_7 SDA_C), the on-module 24C128
+ *    EEPROM (0x50) + EVK sensor bank.  Pad config bench-validated in
+ *    aen-eeprom-manifest (input-enable for ACK-detect; bias-pull-down = the
+ *    pad DSC value Alif's reference uses -- do NOT "correct" to pull-up).
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	/* SPI1 master (CC3501E bridge): SCK P14_6 / MOSI P14_5 / MISO P14_4 (alt-2, _C). */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+	};
+
+	/* I2C2 master: SCL P5_6 / SDA P5_7 (_C). */
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+&clockctrl {
+	status = "okay";
+};
+
+&soc {
+	/* DWC_ssi SPI1 -- the on-SoM CC3501E inter-chip link (NOT the edge SPI0).
+	 * CS-less 3-wire; clock-frequency = SYST_HCLK (400 MHz) so spi_dw_alif
+	 * skips the failing clock-control path. Bench-proven by aen-cc3501e-gpio. */
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>;          /* BENCH-TBD: SPI1 IRQ */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		clock-frequency = <400000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/* LP GPIO island: WIFI_EN (P15_5) + E_WIFI.NRST (P15_1_FLEX) as outputs. */
+&lpgpio {
+	status = "okay";
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;   /* 100 kHz */
+};
+
+/ {
+	aliases {
+		alp-spi1 = &cc3501e_spi;   /* bus_id 1 in cc3501e_bridge_bringup() */
+		alp-i2c0 = &i2c2;          /* bus 0 for `alp i2c scan 0` */
+	};
+
+	/* SoM-internal CC3501E control nets, in CC3501E_PIN_* index order. */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+	};
+};
