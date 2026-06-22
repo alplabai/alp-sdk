@@ -542,6 +542,11 @@ static alp_cc3501e_resp_t handle_ble_adv_stop(const uint8_t *req,
 	return hw_to_resp(cc3501e_hw_ble_adv_stop());
 }
 
+/* BLE_SCAN_START (0x34): reply data = the packed advertiser list (each record
+ * addr[6] | addr_type(1) | rssi(1) | name_len(1) then name_len name bytes --
+ * the cc3501e_ble_scan host parser's wire format).  Worker-routed: the NimBLE
+ * GAP discovery blocks for the scan window and MUST run off the SPI ISR (see
+ * handle_worker_routed), exactly like WIFI_SCAN_START. */
 static alp_cc3501e_resp_t handle_ble_scan_start(const uint8_t *req,
                                                 size_t         req_len,
                                                 uint8_t       *reply_data,
@@ -549,11 +554,8 @@ static alp_cc3501e_resp_t handle_ble_scan_start(const uint8_t *req,
                                                 size_t        *reply_data_len)
 {
 	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_scan_start());
+	return handle_worker_routed(
+	    ALP_CC3501E_CMD_BLE_SCAN_START, 0u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
 static alp_cc3501e_resp_t handle_ble_scan_stop(const uint8_t *req,
@@ -715,6 +717,7 @@ static alp_cc3501e_resp_t handle_diag_get_stats(const uint8_t *req,
 /* GET_DIAG_INFO (0x04): reply data = the 16-byte packed diag struct:
  * fw_version(LE16) | reset_cause(1) | role(1) | uptime_ms(LE32) |
  * free_heap_bytes(LE32) | last_error(1) | reserved(3). */
+extern uint32_t cc3501e_hw_wifi_last_event_id(void); /* DEBUG: last Wi-Fi event Id */
 static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
                                                size_t         req_len,
                                                uint8_t       *reply_data,
@@ -729,7 +732,7 @@ static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 	reply_data[2] = cc3501e_hw_reset_cause();
 	reply_data[3] = (uint8_t)ALP_CC3501E_ROLE_OFF; /* v0.1: no radio role active */
 	put_le32(&reply_data[4], cc3501e_hw_uptime_ms());
-	put_le32(&reply_data[8], cc3501e_hw_free_heap_bytes());
+	put_le32(&reply_data[8], cc3501e_hw_wifi_last_event_id()); /* DEBUG: was free_heap; now the last Wi-Fi event Id */
 	reply_data[12]  = g_last_error;
 	reply_data[13]  = 0u;
 	reply_data[14]  = 0u;

@@ -182,13 +182,40 @@ cc3501e_wifi_get_mac(cc3501e_t *ctx, uint8_t mac[CC3501E_MAC_LEN], uint32_t time
  */
 #define CC3501E_SSID_MAX 32u
 typedef struct {
-	uint8_t bssid[6];                    /**< AP BSSID (MAC). */
-	int8_t  rssi_dbm;                    /**< Received signal strength, dBm. */
-	uint8_t channel;                     /**< Wi-Fi channel. */
-	uint8_t security;                    /**< 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE. */
-	uint8_t ssid_len;                    /**< SSID length as reported on the wire. */
-	char    ssid[CC3501E_SSID_MAX + 1u]; /**< NUL-terminated SSID copy. */
+	uint8_t  bssid[6];                    /**< AP BSSID (MAC). */
+	int8_t   rssi_dbm;                    /**< Received signal strength, dBm. */
+	uint8_t  channel;                     /**< Wi-Fi channel. */
+	uint16_t security_info;               /**< Raw TI scan-result SecurityInfo (16-bit, LE on
+	                                        *   the wire).  Decode with @ref cc3501e_wifi_sec_kind
+	                                        *   / @ref cc3501e_wifi_sec_name -- the sec-type lives
+	                                        *   in the high byte, so the old 1-byte field carried
+	                                        *   only the group cipher (always read "?"). */
+	uint8_t  ssid_len;                    /**< SSID length as reported on the wire. */
+	char     ssid[CC3501E_SSID_MAX + 1u]; /**< NUL-terminated SSID copy. */
 } cc3501e_scan_record_t;
+
+/**
+ * @brief Decoded Wi-Fi security kind (from a scan record's @c security_info).
+ *
+ * The CC3501E scan reports the raw TI 16-bit SecurityInfo; these are the
+ * human-meaningful buckets the console maps it to.  @c sec_type lives at
+ * @c (security_info >> 8) & 0x3f (TI WLAN_SCAN_RESULT_SEC_TYPE_BITMAP); the SAE
+ * bits (0x08|0x10) in that bitmap mark WPA3, the WPA2 bit is 0x04, open is 0.
+ */
+typedef enum {
+	CC3501E_WIFI_SEC_OPEN    = 0,
+	CC3501E_WIFI_SEC_WEP     = 1,
+	CC3501E_WIFI_SEC_WPA     = 2,
+	CC3501E_WIFI_SEC_WPA2    = 3,
+	CC3501E_WIFI_SEC_WPA3    = 4,
+	CC3501E_WIFI_SEC_UNKNOWN = 255,
+} cc3501e_wifi_sec_t;
+
+/** @brief Decode a scan record's raw @c security_info into a @ref cc3501e_wifi_sec_t. */
+cc3501e_wifi_sec_t cc3501e_wifi_sec_kind(uint16_t security_info);
+
+/** @brief Short human name ("open"/"wep"/"wpa"/"wpa2"/"wpa3"/"sec?") for @c security_info. */
+const char *cc3501e_wifi_sec_name(uint16_t security_info);
 
 /**
  * @brief Run a Wi-Fi scan and collect the results (WIFI_SCAN_START, 0x10).
@@ -287,6 +314,48 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);
  *         in the firmware; otherwise the mapped error.
  */
 alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief One parsed BLE scan (advertising-report) record handed to the caller.
+ *
+ * Mirrors the on-wire BLE scan record (addr[6] | addr_type | rssi(int8) |
+ * name_len | name[name_len]) with the inline device name copied out into a
+ * NUL-terminated buffer.  Names longer than @ref CC3501E_BLE_NAME_MAX are
+ * truncated.  A device that advertises no name leaves @c name empty.
+ */
+#define CC3501E_BLE_NAME_MAX 31u
+typedef struct {
+	uint8_t addr[6];                       /**< Advertiser address (LE order on the wire). */
+	uint8_t addr_type;                     /**< NimBLE own/peer addr type (0=public,1=random,...). */
+	int8_t  rssi_dbm;                      /**< Advertising-report RSSI, dBm. */
+	uint8_t name_len;                      /**< Name length as reported on the wire. */
+	char    name[CC3501E_BLE_NAME_MAX + 1u]; /**< NUL-terminated device-name copy ("" if none). */
+} cc3501e_ble_scan_record_t;
+
+/**
+ * @brief Run a BLE scan and collect discovered advertisers (BLE_SCAN_START, 0x34).
+ *
+ * Requires the BLE controller + NimBLE host to be up (call @ref cc3501e_ble_enable
+ * first).  Worker-routed in the firmware: a NimBLE @c ble_gap_disc runs for a
+ * fixed window (a few seconds), de-duplicating by advertiser address, then the
+ * collected reports are returned as the SCAN_START reply payload (a sequence of
+ * BLE scan records, no envelope).  Poll-by-repeat absorbs the bridge-down window
+ * while the radio scans, identical to @ref cc3501e_wifi_scan.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param out_records Caller array of @p cap @ref cc3501e_ble_scan_record_t.
+ * @param cap         Capacity of @p out_records.
+ * @param count       Receives the number of records parsed (may be NULL).
+ * @param timeout_ms  Upper bound on the poll-by-repeat budget (floored to the
+ *                    firmware scan window so a slow scan is not misread as IO).
+ * @return ALP_OK once the scan completed (even with zero records);
+ *         ALP_ERR_NOT_READY if BLE is not enabled / not built; mapped error otherwise.
+ */
+alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
+                              cc3501e_ble_scan_record_t *out_records,
+                              size_t                     cap,
+                              size_t                    *count,
+                              uint32_t                   timeout_ms);
 
 /* ------------------------------------------------------------------ */
 /* GPIO proxy (0x50..0x53) + camera enables (0x60/0x61).              */

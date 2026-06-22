@@ -102,6 +102,12 @@ static void worker_execute(uint8_t cmd)
 		 * OK result carries no payload (len stays 0). */
 		rv = cc3501e_hw_ble_enable();
 		break;
+	case ALP_CC3501E_CMD_BLE_SCAN_START:
+		/* Packs the discovered-advertiser list into buf (see cc3501e_hw_ble_scan);
+		 * runs a NimBLE GAP discovery that blocks for the scan window, so it is
+		 * worker-routed off the SPI ISR exactly like WIFI_SCAN_START. */
+		rv = cc3501e_hw_ble_scan(buf, ALP_CC3501E_MAX_PAYLOAD, &len);
+		break;
 	default:
 		rv = CC3501E_HW_ERR_NOTIMPL;
 		break;

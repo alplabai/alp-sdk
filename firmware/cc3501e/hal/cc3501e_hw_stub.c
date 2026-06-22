@@ -212,6 +212,16 @@ int cc3501e_hw_ble_scan_stop(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
+int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len)
+{
+	(void)buf;
+	(void)cap;
+	if (out_len != 0) {
+		*out_len = 0u;
+	}
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
 int cc3501e_hw_ble_connect(uint8_t addr_type, const uint8_t addr[6])
 {
 	(void)addr_type;

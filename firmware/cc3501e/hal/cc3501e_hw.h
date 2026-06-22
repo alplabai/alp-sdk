@@ -119,11 +119,12 @@ int cc3501e_hw_wifi_scan_start(void);
 int cc3501e_hw_wifi_scan_stop(void);
 
 /* Run a Wi-Fi scan and PACK the resulting AP list into @p buf in the host's
- * wire format -- per record: bssid[6] | rssi(1) | channel(1) | security(1) |
+ * wire format -- per record: bssid[6] | rssi(1) | channel(1) | security(LE16) |
  * ssid_len(1) then ssid_len SSID bytes (the cc3501e_wifi_scan parser's
- * CC3501E_SCAN_REC_HDR=10 layout).  Records are packed until @p cap would be
- * exceeded; *out_len receives the total bytes written.  Worker-routed (the
- * scan blocks for seconds), so this runs off the SPI ISR.  Returns
+ * CC3501E_SCAN_REC_HDR=11 layout; security is the raw 16-bit TI SecurityInfo so
+ * the host can decode open / WPA2 / WPA3).  Records are packed until @p cap
+ * would be exceeded; *out_len receives the total bytes written.  Worker-routed
+ * (the scan blocks for seconds), so this runs off the SPI ISR.  Returns
  * CC3501E_HW_OK on success; the stub / silicon-free build reports
  * CC3501E_HW_ERR_NOTIMPL with *out_len = 0. */
 int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len);
@@ -154,6 +155,11 @@ int cc3501e_hw_ble_adv_start(uint8_t        connectable,
 int cc3501e_hw_ble_adv_stop(void);
 int cc3501e_hw_ble_scan_start(void);
 int cc3501e_hw_ble_scan_stop(void);
+/* Worker-routed, record-returning BLE scan (the BLE mirror of
+ * cc3501e_hw_wifi_scan): PACK discovered advertisers into @p buf -- per record
+ * addr[6] | addr_type(1) | rssi(1) | name_len(1) then name_len name bytes.
+ * Requires the NimBLE host up (else NOTIMPL -> NOT_READY). */
+int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len);
 int cc3501e_hw_ble_connect(uint8_t addr_type, const uint8_t addr[6]);
 int cc3501e_hw_ble_disconnect(void);
 int cc3501e_hw_ble_gatt_register(const uint8_t *desc, uint16_t desc_len);
