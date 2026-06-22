@@ -21,6 +21,10 @@ preset: e1m-evk            # EVK preset: supplies the shell-uart / console UART
 cores:
   a32_cluster:
     os: "off"
+  m55_hp:
+    os: "off"          # single-core HE app: HP off so the per-core config
+                       # (and the SoC-complement banner's "active" marker)
+                       # scopes to M55-HE, the core this build runs on.
   m55_he:
     app: ./src
     peripherals:

@@ -30,6 +30,52 @@ config ALP_SDK_VERSION
 	  CMakeLists project() VERSION is build metadata and may lag
 	  this string.)
 
+config ALP_SDK_SOM_SKU
+	string "SoM SKU identity string (boot-banner fallback)"
+	default ""
+	help
+	  The SoM part number (board.yaml `som.sku`), emitted into the
+	  generated alp.conf by scripts/alp_orchestrate.py.  The boot banner
+	  shows this as the SoM identity when the on-module identity EEPROM is
+	  absent, unprovisioned, or unreadable (before falling back to the raw
+	  CONFIG_BOARD target).  Empty when built without alp_orchestrate.py.
+
+config ALP_SDK_SOC_NAME
+	string "SoC display name (boot banner)"
+	default ""
+	help
+	  Vendor + family + part (e.g. "Alif Ensemble E8"), emitted from the SoC
+	  spec JSON by scripts/alp_orchestrate.py.  Shown in the boot banner.
+
+config ALP_SDK_SOC_CPUS
+	string "SoC CPU complement description (boot banner)"
+	default ""
+	help
+	  Pre-formatted core list -- the active core marked and listed first --
+	  e.g. "M55-HE @160MHz (active) + M55-HP @400MHz + 2x Cortex-A32 @800MHz".
+	  Emitted from the SoC spec JSON cores[] by scripts/alp_orchestrate.py.
+
+config ALP_SDK_SOC_NPUS
+	string "SoC NPU complement description (boot banner)"
+	default ""
+	help
+	  Pre-formatted NPU list, e.g. "Ethos-U85 + 2x Ethos-U55".  Emitted from
+	  the SoC spec JSON npus[] by scripts/alp_orchestrate.py.
+
+config ALP_SDK_SOC_SRAM_KB
+	int "SoC total on-chip SRAM in KB (boot banner; 0 = unknown)"
+	default 0
+	help
+	  Total on-chip SRAM of the SoC (soc_ram_kb from the SoC spec JSON).  The
+	  boot banner prefers this over the build's chosen sram region size.
+
+config ALP_SDK_SOC_MRAM_KB
+	int "SoC on-chip MRAM/flash in KB (boot banner; 0 = unknown)"
+	default 0
+	help
+	  On-chip MRAM/flash of the SoC (soc_flash_mb from the SoC spec JSON,
+	  in KB).  The boot banner prefers this over the chosen flash region.
+
 config ALP_SDK_CONSOLE
 	bool "Alp SoM interactive console (Zephyr shell + `alp` commands)"
 	depends on ALP_SDK
