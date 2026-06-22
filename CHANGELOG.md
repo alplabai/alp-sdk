@@ -7,6 +7,23 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.8.0 candidate
 
+### Added — alp-console: interactive shell + CC3501E Wi-Fi/BLE scan + RGB demo (E1M-AEN801)
+
+- `examples/peripheral-io/alp-console` is now the E1M-AEN801 "everything" demo:
+  the `alp` console (`CONFIG_ALP_SDK_CONSOLE`) plus on-air CC3501E Wi-Fi/BLE and a
+  live RGB status LED, in one slot0 app. Silicon-validated 2026-06-22.
+- **`alp companion wifi scan`** lists APs with channel, RSSI, and **decoded
+  security** (open / WPA2 / WPA3): the scan packs the raw 16-bit TI `SecurityInfo`
+  (the sec-type bitmap lives in its high byte) and the host decodes it via the new
+  `cc3501e_wifi_sec_kind` / `cc3501e_wifi_sec_name`. `alp companion wifi connect
+  <ssid> [pass] [wpa3]` associates and reports the leased IP.
+- **`alp companion ble enable` / `ble scan`**: new `cc3501e_ble_scan` host API +
+  `cc3501e_ble_scan_record_t`, listing discovered advertisers (address, RSSI,
+  parsed device name). The bridge-firmware NimBLE `ble_gap_disc` + the BLE-enable
+  fix (no bridge suspend across `BleIf_EnableBLE`) land on `feat/cc3501e-ota-bridge`.
+- **RGB status LED**: a device-tree-guarded background thread breathes the
+  on-board RGB via the Alif UTIMER PWM (compiles out on native_sim / V2N).
+
 ### Changed — clang-format pinned to v22 (was v14)
 
 - The C/C++ format gate now pins **clang-format-22** (was clang-format-14),
