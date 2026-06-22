@@ -148,6 +148,16 @@ config ALP_SDK_CONSOLE_CMD_CLK
 	help
 	  Compile the `alp clk` sub-command (system clock and tick rate).
 
+config ALP_SDK_CONSOLE_CMD_RES
+	bool "alp res command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp res` sub-command -- a live resource view: the active
+	  CPU core + the SoC core complement, the SoC SRAM/MRAM totals + this
+	  build's RAM region, and a per-thread stack used/free table (needs
+	  CONFIG_THREAD_MONITOR + CONFIG_THREAD_STACK_INFO for the table).
+
 config ALP_SDK_CONSOLE_CMD_REBOOT
 	bool "alp reboot command"
 	depends on ALP_SDK_CONSOLE
