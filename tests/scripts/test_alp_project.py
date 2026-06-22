@@ -282,20 +282,50 @@ class TestDtsOverlayEmit(unittest.TestCase):
                         msg="overlay must terminate with `};`")
 
     def test_overlay_emits_expected_bus_aliases_for_evk(self) -> None:
-        """E1M-EVK wires I2C0+I2C1, SPI1, UART0+UART1, PWM0..PWM6,
-        ADC0..ADC7, and DAC0..DAC1.  The ADC/DAC aliases feed the
-        portable <alp/adc.h> / <alp/dac.h> backends, which resolve their
-        channels via the alp-adcN / alp-dacN DT aliases."""
+        """E1M-EVK wires SPI1, UART0+UART1, PWM0..PWM6, and DAC0..DAC1 as
+        generic controller aliases derived from the board header (SoM
+        mounting).  The ADC/DAC aliases feed the portable <alp/adc.h> /
+        <alp/dac.h> backends, which resolve their channels via the
+        alp-adcN / alp-dacN DT aliases.
+
+        I2C and ADC are EXCLUDED here: for the `aen` SoM family they are
+        owned by the _PERIPH_DT_WIRING catalog, which emits the correct
+        alias (the io-channels consumer for ADC, the &i2c2 controller for
+        I2C) ONLY when the peripheral is declared in board.yaml.  The
+        TEMPLATE declares no peripherals, so no i2c/adc alias is emitted
+        -- and the generic loop must NOT re-introduce the broken
+        controller-pointing alp-i2cN / alp-adcN (see
+        test_overlay_aen_family_does_not_emit_generic_i2c_adc_aliases)."""
         rv = _run_loader(input_path=TEMPLATE, emit="dts-overlay")
         out = rv.stdout
-        for alias in ("alp-i2c0", "alp-i2c1",
-                      "alp-spi1",
+        for alias in ("alp-spi1",
                       "alp-uart0", "alp-uart1",
                       "alp-pwm0", "alp-pwm6",
-                      "alp-adc0", "alp-adc7",
                       "alp-dac0", "alp-dac1"):
             with self.subTest(alias=alias):
                 self.assertIn(alias, out)
+
+    def test_overlay_aen_family_does_not_emit_generic_i2c_adc_aliases(
+        self,
+    ) -> None:
+        """For the `aen` SoM family the I2C/ADC buckets are catalog-owned:
+        the generic _BUS_BUCKETS alias loop must skip them so the only
+        alp-i2cN / alp-adcN aliases that ever appear are the correct ones
+        the _PERIPH_DT_WIRING catalog emits for DECLARED peripherals.
+
+        The TEMPLATE (E1M-AEN701, family `aen`) declares no peripherals,
+        so neither the generic loop nor the catalog should emit an i2c/adc
+        alias -- proving the generic controller-pointing alias is gone."""
+        rv = _run_loader(input_path=TEMPLATE, emit="dts-overlay")
+        out = rv.stdout
+        # No generic controller-pointing aliases for the catalog-owned
+        # peripherals (these are exactly the duplicates the fix removes).
+        self.assertNotIn("alp-i2c0 = &i2c", out)
+        self.assertNotIn("alp-adc0 = &adc", out)
+        # And since the template declares no peripherals, the catalog
+        # emits nothing either -- so the aliases are absent entirely.
+        self.assertNotIn("alp-i2c", out)
+        self.assertNotIn("alp-adc", out)
 
     def test_overlay_emits_alp_pin_array(self) -> None:
         rv = _run_loader(input_path=TEMPLATE, emit="dts-overlay")
