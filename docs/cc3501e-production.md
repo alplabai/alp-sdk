@@ -115,18 +115,30 @@ correctly-activated production units; it does not on the mis-activated bench uni
 - ⏳ **Production signing**: HSM step (key not on the bench).
 - ⏳ **OTA cold swap-boot**: requires a correctly-activated (`vendor_sbl_container_enable=0`)
   production unit; gated on the bench unit only.
-- ⚠️ **Wi-Fi and BLE are NOT concurrent yet (conf_bin coexistence)**.  In the current
-  device config the two radios are **mutually exclusive**: `wifi scan` then
-  `ble enable` returns `-4` (the BLE controller init-done `0x2A04` never posts, even
-  with the 8× enable retry), and `ble enable` then `wifi scan` returns `-1`.  Each
-  works on its own from a clean boot.  **ROOT CAUSE: `cc35xx-conf.bin` does not enable
-  WLAN+BLE coexistence** (`CMN_KEY_BTH_WLAN_COEXIST_ENABLE` in the init table,
-  `init_table_types.h`).  The SDK *supports* concurrency (the `ble_wifi_provisioning`
-  demo runs STA + BLE-peripheral simultaneously; `ti/WIFI_BLE_INTEGRATION.md`), but it
-  is gated by the conf.  **FIX: regenerate `cc35xx-conf.bin` with the BLE+WLAN
-  coexistence key enabled** (a TI-toolbox conf regen — a config change, NOT code — then
-  re-warm-program).  The firmware host path is already hardened for it once coex is on:
-  `cc3501e_hw_ble_enable` is idempotent + re-syncs the bridge before the enable, and
-  `nimble_host_start` retries `BleIf_EnableBLE` 8× to absorb the slower post-radio init.
-  **Workaround until the conf regen: use one radio at a time — power-cycle between
-  Wi-Fi and BLE.**
+- ⚠️ **Wi-Fi scan and BLE are NOT concurrent — use one radio at a time.**  With BLE up,
+  a `Wlan_Scan` is **rejected by the NWP** (`wifi scan` returns a positive/non-zero
+  reject; `ble enable` after a `wifi scan` returns `-4`).  Each radio works perfectly
+  on its own from a clean boot — `wifi scan` lists every AP with the correct security,
+  `ble enable` + `ble scan` discovers ~14 advertisers.  **This is the shipping behavior:
+  drive the two radios one-at-a-time (power-cycle, or just don't run a scan while BLE is
+  enabled).**
+
+  **ROOT CAUSE — exhausted to the closed NWP firmware, NOT a config we can change.**
+  The rejection lives in the closed NWP firmware (**FW 1.8.0.42**) SoftGemini (SG)
+  coexistence arbiter — TI known issue **OSPREY_MX-1518, "degraded scan performance in
+  coex"** (`CMD_STATUS_REJECT_MEAS_SG_ACTIVE = 11`).  All accessible host- and
+  config-side levers were tried on silicon (2026-06-22/23) and **none** lifted it:
+  - host firmware: re-sync the bridge before enable; idempotent enable; 8× `BleIf_EnableBLE`
+    retry; `WLAN_SET_SCAN_RESULTS_SIZE`; ELP vs Always-Active power mode (both placements);
+    no re-`RoleUp`; BLE-enable-at-boot; NimBLE thread prio 3→8.
+  - `cc35xx-conf.bin` regen (TI toolbox): raised the coex tie-breaker / group-scan
+    priorities; even `core.coex_configuration.Disable_coex = 1`.  No change — scan with
+    BLE up is still rejected, which confirms the gate is **below** the conf in the closed
+    NWP, not in it.
+
+  The combined demo therefore ships **one-at-a-time**; the NimBLE-prio-8 fix above is a
+  build-correctness fix, unrelated to this.  True coex needs a TI NWP firmware that
+  resolves OSPREY_MX-1518 (escalate to TI) — it is not reachable from alp-sdk code or the
+  device conf.  *(The `ble_wifi_provisioning` SDK demo runs STA-connected + BLE-peripheral
+  concurrently, but that is a connected STA holding a channel, not an active full-band
+  survey — the survey is what SG rejects.)*

@@ -48,7 +48,20 @@
 /* ------------------------------------------------------------------ */
 /* Tunables (mirror the demo's NimBLE thread + naming).                 */
 /* ------------------------------------------------------------------ */
-#define CC3501E_NIMBLE_THRD_PRIORITY   (3) /* CC33XX branch in the demo */
+/* OSI priority is INVERTED (0 = highest, 31 = lowest).  Use 8 -- this matches the
+ * reference vendor app's CC35XX branch (network_terminal/nimble_host.c is
+ * #ifdef CC33XX -> 3, #else -> 8; our build defines -DCC35XX, so 8 is the correct
+ * value for this part).  The old value 3 was the CC33XX-only branch: at 3 the
+ * NimBLE host task PREEMPTS the prio-7 HIF transport thread and the prio-8 shared
+ * WLAN/BLE event + CME threads, which is simply wrong for CC35XX -- the host must
+ * sit at or below the servicers it depends on, not above them.
+ *
+ * NOTE: this is a build-correctness fix, NOT a Wi-Fi+BLE concurrency fix.  Running
+ * a Wlan_Scan while BLE is up is still rejected by the closed NWP firmware
+ * (FW 1.8.0.42, SoftGemini coexistence arbiter -- TI OSPREY_MX-1518 "degraded scan
+ * in coex"); the priority value does not change that.  See docs/cc3501e-production.md
+ * "Wi-Fi + BLE concurrency".  Use the two radios one-at-a-time. */
+#define CC3501E_NIMBLE_THRD_PRIORITY   (8)
 #define CC3501E_NIMBLE_THRD_STACK_SIZE (4096)
 #define CC3501E_BLE_ADV_INSTANCE       (0) /* the single ext-adv set we drive */
 #define CC3501E_BLE_DEFAULT_NAME       "ALP-CC3501E"

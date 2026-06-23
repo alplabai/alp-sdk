@@ -70,14 +70,23 @@ ISR-safe only: `osi_SyncObjSignalFromISR`, `osi_MsgQWrite(...,OSI_NO_WAIT)`. Cre
 - BLE_CONNECT: `ble_addr_t peer; BLE_COPY_BD_ADDRESS(peer.val,bd)` (**byte-reverses!**); `ble_gap_ext_connect(own_addr,&peer,0,PHY_1M|2M,...,gap_event_cb,NULL)`; result `BLE_GAP_EVENT_CONNECT{status,conn_handle}`. Disconnect `ble_gap_terminate`.
 - BLE_GATT server: static `ble_gatt_svc_def[]` + `ble_gatts_count_cfg`+`ble_gatts_add_svcs` (BEFORE host task); access cb read=`os_mbuf_append`, write=`ble_hs_mbuf_to_flat`; notify=`ble_gatts_notify_custom`. Client (no TI example): `ble_gattc_disc_all_svcs/chrs`, `ble_gattc_read`, `ble_gattc_write_flat`, subscribe by writing CCCD; add `BLE_GAP_EVENT_NOTIFY_RX` to `gap_event_cb`.
 
-## Coexistence: concurrent Wi-Fi+BLE supported; Wi-Fi first (shared HIF). `ble_wifi_provisioning` demo = STA+BLE-peripheral simultaneously.
-- **BUT gated by the conf_bin, not just `EnableBle`.** Bench-proven 2026-06-22: with the
-  current `cc35xx-conf.bin` the radios are MUTUALLY EXCLUSIVE — `wifi scan`→`ble enable`
-  fails `-4` (0x2A04 never posts), `ble enable`→`wifi scan` fails `-1`; each works alone
-  from a clean boot. Concurrency needs **`CMN_KEY_BTH_WLAN_COEXIST_ENABLE`** (init table,
-  `drv_ti/uwd/export_inc/init_table_types.h`) set in the regenerated conf. The host path
-  is already hardened (idempotent `cc3501e_hw_ble_enable` + `BleIf_EnableBLE` 8× retry in
-  `nimble_host_start`); the remaining fix is the conf regen. See `docs/cc3501e-production.md`.
+## Coexistence: Wi-Fi SCAN + BLE are NOT concurrent — gated in the closed NWP firmware. Use one radio at a time.
+- Bench-proven 2026-06-22/23: with BLE up a `Wlan_Scan` is REJECTED by the NWP
+  (`wifi scan`→non-zero reject; `ble enable`→`wifi scan` fails `-1`; `wifi scan`→`ble enable`
+  fails `-4`). Each radio works alone perfectly from a clean boot.
+- **ROOT CAUSE = closed NWP firmware (FW 1.8.0.42) SoftGemini arbiter** — TI known issue
+  **OSPREY_MX-1518** "degraded scan in coex" (`CMD_STATUS_REJECT_MEAS_SG_ACTIVE = 11`).
+  Exhausted on silicon and NOT reachable from our side:
+  - host fw: bridge re-sync before enable; idempotent enable; 8× `BleIf_EnableBLE`; ELP vs
+    Always-Active (both placements); `WLAN_SET_SCAN_RESULTS_SIZE`; no re-`RoleUp`; BLE@boot;
+    NimBLE prio 3→8 — none lifted it.
+  - `cc35xx-conf.bin` regen (TI toolbox): raised coex tie-breaker / group-scan priorities;
+    even `core.coex_configuration.Disable_coex=1` — no change. So the gate is BELOW the conf
+    in the closed NWP, not `CMN_KEY_BTH_WLAN_COEXIST_ENABLE`.
+- `ble_wifi_provisioning` demo runs STA-CONNECTED + BLE-peripheral — a connected STA holding
+  a channel, NOT an active full-band survey; the survey is what SG rejects.
+- True coex needs a TI NWP FW that fixes OSPREY_MX-1518 (escalate to TI). Ship one-at-a-time.
+  See `docs/cc3501e-production.md` "Wi-Fi + BLE concurrency".
 
 ## Build order (P0-4..P0-6 then pillars)
 P0-4 worker (offload from ISR) → P0-5 link the full set + compile osi_dpl.c/network_lwip.c/adaptation
