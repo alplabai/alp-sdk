@@ -403,8 +403,8 @@ static alp_cc3501e_resp_t handle_wifi_scan_stop(const uint8_t *req,
  * blocks for seconds on the connect/IP event and so MUST NOT run in
  * protocol_dispatch's SPI-ISR context).  The raw req payload is forwarded to
  * the worker, which re-derives ssid/psk from the same struct in the drain. */
-static alp_cc3501e_resp_t wifi_join(const uint8_t *req, size_t req_len, int ap,
-                                    size_t *reply_data_len)
+static alp_cc3501e_resp_t
+wifi_join(const uint8_t *req, size_t req_len, int ap, size_t *reply_data_len)
 {
 	if (req_len < sizeof(alp_cc3501e_wifi_connect_t)) return ALP_CC3501E_RESP_ERR_INVALID;
 	const alp_cc3501e_wifi_connect_t *c = (const alp_cc3501e_wifi_connect_t *)req;

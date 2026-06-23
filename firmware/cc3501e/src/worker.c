@@ -63,8 +63,8 @@ static struct {
 	 * Parameterless jobs (GET_MAC / scan / ble) leave req_len 0.  Written by the
 	 * ISR in worker_submit_payload while state goes IDLE->QUEUED; read by the drain
 	 * while RUNNING -- the same state-ordered hand-off as result[]. */
-	volatile uint8_t           req[ALP_CC3501E_MAX_PAYLOAD];
-	volatile uint16_t          req_len;
+	volatile uint8_t  req[ALP_CC3501E_MAX_PAYLOAD];
+	volatile uint16_t req_len;
 } job;
 
 /* Run the blocking HAL body for @p cmd and publish DONE/ERR.  Called from
