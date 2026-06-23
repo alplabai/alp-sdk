@@ -102,10 +102,21 @@ correctly-activated production units; it does not on the mis-activated bench uni
 ## Status / open items (2026-06-22)
 
 - ✅ Full firmware (Wi-Fi+BLE+bridge+OTA) builds + links (`-Ble`, 0 errors).
-- ✅ **Wi-Fi ON-AIR validated** (2026-06-22, warm-programmed v0.0.161.0): `wifi scan`
+- ✅ **Wi-Fi SCAN ON-AIR validated** (2026-06-22, warm-programmed v0.0.161.0): `wifi scan`
   returns real APs with RSSI + decoded **open / WPA2 / WPA3** security (the scan packs
-  the raw 16-bit TI `SecurityInfo`; the sec-type lives in its high byte); `wifi connect`
-  associates with a WPA2 AP and leases an IP.
+  the raw 16-bit TI `SecurityInfo`; the sec-type lives in its high byte).
+- ⚠️ **Wi-Fi CONNECT — wired + associates, but gated on the r2 bridge transport.**
+  `wifi connect` is plumbed end-to-end (host → bridge → `Wlan_Connect`) and the L2
+  association completes on silicon, but the ~15 s association **desyncs the CS-less r1
+  SPI bridge permanently** (`GET_VERSION` IO-errors for >24 s after, no recovery without
+  a power-cycle).  Two follow-ups gate a usable connect: (1) the **r2 CS + host-IRQ**
+  transport (or an SDIO framed transport) so a busy radio cannot desync the link
+  (`docs/cc3501e-bridge.md` "Bench-validated"); (2) the **lwIP network stack**
+  (`network_stack_init` + `network_stack_add_if_sta`) for DHCP/IP — not yet integrated
+  in the bridge firmware (naïvely adding it at boot breaks the tuned radio bring-up).
+  Connect was also found to have been dispatched **synchronously in the SPI ISR** (every
+  other blocking radio op is worker-routed); that is now fixed (worker-routed), which is
+  why the association reaches the radio at all.
 - ✅ **BLE ON-AIR validated** (2026-06-22): `ble enable` brings the NimBLE host up;
   `ble scan` (`ble_gap_disc`) discovers real advertisers (address + RSSI + parsed name,
   e.g. an Epson "ET-2870 Series" printer). The enable hang was root-caused — the bridge

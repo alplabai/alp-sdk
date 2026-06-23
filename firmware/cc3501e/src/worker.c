@@ -59,6 +59,12 @@ static struct {
 	volatile uint8_t           result[ALP_CC3501E_MAX_PAYLOAD];
 	volatile uint16_t          result_len;
 	volatile int8_t            err;
+	/* Request payload for jobs that carry one (WIFI_CONNECT_STA / WIFI_AP_START).
+	 * Parameterless jobs (GET_MAC / scan / ble) leave req_len 0.  Written by the
+	 * ISR in worker_submit_payload while state goes IDLE->QUEUED; read by the drain
+	 * while RUNNING -- the same state-ordered hand-off as result[]. */
+	volatile uint8_t           req[ALP_CC3501E_MAX_PAYLOAD];
+	volatile uint16_t          req_len;
 } job;
 
 /* Run the blocking HAL body for @p cmd and publish DONE/ERR.  Called from
@@ -108,6 +114,24 @@ static void worker_execute(uint8_t cmd)
 		 * worker-routed off the SPI ISR exactly like WIFI_SCAN_START. */
 		rv = cc3501e_hw_ble_scan(buf, ALP_CC3501E_MAX_PAYLOAD, &len);
 		break;
+	case ALP_CC3501E_CMD_WIFI_CONNECT_STA:
+	case ALP_CC3501E_CMD_WIFI_AP_START: {
+		/* Association BLOCKS until the connect/IP event (seconds), so -- unlike the
+		 * other Wlan_* ops which were already worker-routed -- this MUST run here in
+		 * the drain, not in protocol_dispatch's SPI-ISR context (a blocking wait in
+		 * the ISR either hung the bridge or could not pend at all -> the -4/-2
+		 * connect failures).  The request payload (alp_cc3501e_wifi_connect_t header
+		 * + inline ssid + psk) was stashed in job.req by worker_submit_payload; its
+		 * length was already validated by the protocol handler before submit. */
+		const alp_cc3501e_wifi_connect_t *c =
+		    (const alp_cc3501e_wifi_connect_t *)(const void *)job.req;
+		const uint8_t *ssid = (const uint8_t *)job.req + sizeof(*c);
+		const uint8_t *psk  = ssid + c->ssid_len;
+		rv = (cmd == ALP_CC3501E_CMD_WIFI_AP_START)
+		         ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
+		         : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
+		break;
+	}
 	default:
 		rv = CC3501E_HW_ERR_NOTIMPL;
 		break;
@@ -159,6 +183,34 @@ int worker_submit(uint8_t cmd)
 	 * the host re-issues GET_MAC once and gets the (NOT_READY) answer.  The
 	 * REAL (CC3501E_WIFI) build leaves the job QUEUED for worker_run_pending,
 	 * so the SPI ISR is never blocked by the seconds-long Wlan_* body. */
+	job.state = WORKER_RUNNING;
+	worker_execute(cmd);
+#endif
+	return 1;
+}
+
+int worker_submit_payload(uint8_t cmd, const uint8_t *payload, uint16_t len)
+{
+	if (len > ALP_CC3501E_MAX_PAYLOAD) {
+		return 0; /* would overflow job.req -- caller validated, but stay defensive */
+	}
+	const unsigned long key = worker_critical_enter();
+	if (job.state != WORKER_IDLE) {
+		worker_critical_exit(key);
+		return 0; /* a job is already in flight (single in-flight, v0.2) */
+	}
+	job.job_cmd    = cmd;
+	job.result_len = 0u;
+	job.err        = 0;
+	if (len > 0u && payload != NULL) {
+		memcpy((void *)job.req, payload, len);
+	}
+	job.req_len = len;
+	job.state   = WORKER_QUEUED;
+	worker_critical_exit(key);
+
+#ifndef CC3501E_WIFI
+	/* Same synchronous stub path as worker_submit (see there). */
 	job.state = WORKER_RUNNING;
 	worker_execute(cmd);
 #endif

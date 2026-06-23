@@ -82,6 +82,33 @@ line is the standard SPI-coprocessor way to meet them without polling the
 bus, and it also removes the reply settle gap.  The current rev (r1) is
 unaffected.  See `firmware/cc3501e/DESIGN.md` "Next-rev hardening".
 
+#### Bench-validated: why r1 is one-operation-at-a-time (2026-06-23)
+
+The CS-less lockstep transport stays byte-aligned only while the radio is
+**quiet between short operations**.  A radio op that keeps the NWP busy
+**long enough that the SPI slave cannot be serviced** loses lockstep, and
+without a CS edge to re-frame, the link does **not** recover on its own.
+Measured on silicon:
+
+| Operation | Radio-busy window | r1 bridge |
+|---|---|---|
+| `wifi scan` | ~3 s | survives (the `worker_run_pending` post-op `bridge_transport_spi_hw_reinit` re-syncs) |
+| `ble scan` / `ble enable` | scan/enable window | survives |
+| `wifi connect` (STA associate) | **~15 s association** | **permanent desync** — `GET_VERSION` returned IO-error for >24 s after, no recovery without a power-cycle |
+| connected STA, or Wi-Fi + BLE both active | continuous | radio never goes quiet → same desync |
+
+This is the SAME root cause behind the Wi-Fi-scan + BLE coexistence wall
+(see `docs/cc3501e-production.md`): the limiter is the **transport**, not
+SoftGemini and not the firmware logic.  It is exactly what the r2 **CS +
+host-IRQ** lines fix — a CS edge re-frames every transaction so a busy
+radio can no longer desync the link, and the host-IRQ removes the polling
+that the lockstep depends on.  Until r2 (or an **SDIO** framed transport on
+a board that dedicates the Alif SDIO to the CC3501E), the supported model
+is **one radio operation at a time**: `wifi scan`, or `ble enable`+`ble
+scan`, each from a clean state.  `wifi connect` is wired end-to-end
+(host → bridge → `Wlan_Connect`, worker-routed off the SPI ISR) and the L2
+association completes, but it desyncs the r1 link, so it is gated on r2.
+
 ## Boot model
 
 The CC3501E has **no host-strap boot pin**.  Boot-mode selection

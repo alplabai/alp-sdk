@@ -171,6 +171,41 @@ static alp_cc3501e_resp_t handle_worker_routed(alp_cc3501e_cmd_t cmd,
 	}
 }
 
+/* As handle_worker_routed, but for a job that CARRIES a request payload
+ * (WIFI_CONNECT_STA / WIFI_AP_START).  The caller must have validated @p req /
+ * @p req_len already; on the IDLE edge the payload is stashed via
+ * worker_submit_payload so the drain runs the blocking association off the SPI
+ * ISR.  These ops carry no reply payload (min_cap 0). */
+static alp_cc3501e_resp_t handle_worker_routed_payload(alp_cc3501e_cmd_t cmd,
+                                                       const uint8_t    *req,
+                                                       size_t            req_len,
+                                                       size_t           *reply_data_len)
+{
+	*reply_data_len = 0u;
+
+	size_t                  n   = 0u;
+	int8_t                  err = 0;
+	const enum worker_state st  = worker_poll((uint8_t)cmd, NULL, 0u, &n, &err);
+
+	switch (st) {
+	case WORKER_DONE:
+		worker_reset();
+		return ALP_CC3501E_RESP_OK;
+	case WORKER_ERR:
+		worker_reset();
+		if (err == CC3501E_HW_ERR_NOTIMPL) return ALP_CC3501E_RESP_ERR_NOT_READY;
+		if (err == CC3501E_HW_ERR_INVAL) return ALP_CC3501E_RESP_ERR_INVALID;
+		return ALP_CC3501E_RESP_ERR_RADIO;
+	case WORKER_IDLE:
+		/* No job in flight: queue THIS one (with its payload) and ask the host to
+		 * re-issue.  The host's connect poll-by-repeat absorbs the BUSY answers. */
+		(void)worker_submit_payload((uint8_t)cmd, req, (uint16_t)req_len);
+		return ALP_CC3501E_RESP_ERR_BUSY;
+	default: /* QUEUED / RUNNING (incl. another cmd in flight) */
+		return ALP_CC3501E_RESP_ERR_BUSY;
+	}
+}
+
 /* GET_MAC (0x03): the CC3501E's factory MAC (6 bytes, big-endian wire
  * order as TI stores it).  Read from the radio subsystem via the HAL.
  *
@@ -364,19 +399,21 @@ static alp_cc3501e_resp_t handle_wifi_scan_stop(const uint8_t *req,
 /* WIFI_CONNECT_STA (0x12) / WIFI_AP_START (0x14): payload is an
  * alp_cc3501e_wifi_connect_t header followed by the inline ssid[ssid_len]
  * then psk[psk_len].  Validates the cumulative length exactly. */
-static alp_cc3501e_resp_t wifi_join(const uint8_t *req, size_t req_len, int ap)
+/* Validate the connect/AP wire payload, then WORKER-ROUTE the association (it
+ * blocks for seconds on the connect/IP event and so MUST NOT run in
+ * protocol_dispatch's SPI-ISR context).  The raw req payload is forwarded to
+ * the worker, which re-derives ssid/psk from the same struct in the drain. */
+static alp_cc3501e_resp_t wifi_join(const uint8_t *req, size_t req_len, int ap,
+                                    size_t *reply_data_len)
 {
 	if (req_len < sizeof(alp_cc3501e_wifi_connect_t)) return ALP_CC3501E_RESP_ERR_INVALID;
 	const alp_cc3501e_wifi_connect_t *c = (const alp_cc3501e_wifi_connect_t *)req;
 	const size_t                      need =
 	    sizeof(alp_cc3501e_wifi_connect_t) + (size_t)c->ssid_len + (size_t)c->psk_len;
 	if (req_len != need) return ALP_CC3501E_RESP_ERR_INVALID;
-	const uint8_t *ssid = req + sizeof(alp_cc3501e_wifi_connect_t);
-	const uint8_t *psk  = ssid + c->ssid_len;
-	const int      rv =
-	    ap ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
-	       : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
-	return hw_to_resp(rv);
+	const alp_cc3501e_cmd_t cmd =
+	    ap ? ALP_CC3501E_CMD_WIFI_AP_START : ALP_CC3501E_CMD_WIFI_CONNECT_STA;
+	return handle_worker_routed_payload(cmd, req, req_len, reply_data_len);
 }
 
 static alp_cc3501e_resp_t handle_wifi_connect_sta(const uint8_t *req,
@@ -387,8 +424,7 @@ static alp_cc3501e_resp_t handle_wifi_connect_sta(const uint8_t *req,
 {
 	(void)reply_data;
 	(void)reply_cap;
-	*reply_data_len = 0u;
-	return wifi_join(req, req_len, 0);
+	return wifi_join(req, req_len, 0, reply_data_len);
 }
 
 static alp_cc3501e_resp_t handle_wifi_ap_start(const uint8_t *req,
@@ -399,8 +435,7 @@ static alp_cc3501e_resp_t handle_wifi_ap_start(const uint8_t *req,
 {
 	(void)reply_data;
 	(void)reply_cap;
-	*reply_data_len = 0u;
-	return wifi_join(req, req_len, 1);
+	return wifi_join(req, req_len, 1, reply_data_len);
 }
 
 static alp_cc3501e_resp_t handle_wifi_disconnect(const uint8_t *req,

@@ -1188,7 +1188,16 @@ int cc3501e_hw_wifi_connect_sta(
 	                 0) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
-	if (osi_SyncObjWait(&wifi_event_sync, OSI_WAIT_FOREVER) != OSI_OK) {
+	/* BOUNDED wait (was OSI_WAIT_FOREVER) for the connect event.  This op is now
+	 * WORKER-ROUTED (see protocol.c wifi_join -> worker), so the wait correctly pends
+	 * off the SPI ISR; 15s < the host's 20s connect poll so the FW answers first.
+	 * The L2 association DOES complete on silicon (WLAN_EVENT_CONNECT fires ~15s in).
+	 * Two known gates remain (bench 2026-06-23): (1) the ~15s association desyncs the
+	 * CS-less r1 SPI bridge permanently -- gated on the r2 CS+host-IRQ transport
+	 * (docs/cc3501e-bridge.md); (2) DHCP/IP needs the lwIP stack brought up
+	 * (network_stack_init + add_if_sta) -- not yet integrated (naively adding it at
+	 * boot broke the radio bring-up).  Scan + BLE (L2, no IP stack) are unaffected. */
+	if (osi_SyncObjWait(&wifi_event_sync, 15u * OSI_WAIT_FOR_SECOND) != OSI_OK) {
 		return CC3501E_HW_ERR_IO;
 	}
 	if (wifi_last_status < 0) {
