@@ -97,17 +97,33 @@ Measured on silicon:
 | `wifi connect` (STA associate) | **~15 s association** | **permanent desync** — `GET_VERSION` returned IO-error for >24 s after, no recovery without a power-cycle |
 | connected STA, or Wi-Fi + BLE both active | continuous | radio never goes quiet → same desync |
 
-This is the SAME root cause behind the Wi-Fi-scan + BLE coexistence wall
-(see `docs/cc3501e-production.md`): the limiter is the **transport**, not
-SoftGemini and not the firmware logic.  It is exactly what the r2 **CS +
-host-IRQ** lines fix — a CS edge re-frames every transaction so a busy
-radio can no longer desync the link, and the host-IRQ removes the polling
-that the lockstep depends on.  Until r2 (or an **SDIO** framed transport on
-a board that dedicates the Alif SDIO to the CC3501E), the supported model
-is **one radio operation at a time**: `wifi scan`, or `ble enable`+`ble
-scan`, each from a clean state.  `wifi connect` is wired end-to-end
-(host → bridge → `Wlan_Connect`, worker-routed off the SPI ISR) and the L2
-association completes, but it desyncs the r1 link, so it is gated on r2.
+**There are TWO distinct concurrency limiters on r1 — don't conflate them:**
+
+1. **Transport desync (this section):** a radio op that keeps the radio busy
+   long enough that the SPI slave can't be serviced loses lockstep, and with
+   no CS edge to re-frame it never recovers.  This is what gates `wifi connect`
+   (~15 s association), a *connected* STA, and any *sustained* dual-radio
+   activity.  Fixed by the r2 **CS + host-IRQ** lines — a CS edge re-frames
+   every transaction so a busy radio can no longer desync the link, and the
+   host-IRQ removes the polling the lockstep depends on.
+2. **SoftGemini scan-reject (NWP, separate):** an *active Wi-Fi survey* is
+   rejected by the closed NWP firmware's coexistence arbiter while BLE is up
+   (`CMD_STATUS_REJECT_MEAS_SG_ACTIVE`, TI OSPREY_MX-1518).  This is a *fast
+   reject* — the bridge stays synced, the scan just returns non-zero.  It is
+   **not** a transport problem and r2 does not fix it; see
+   `docs/cc3501e-production.md` "Wi-Fi + BLE concurrency".
+
+The two interact for TI-parity concurrency: TI's `ble_wifi_provisioning`
+runs **connected-STA + BLE** (not scan + BLE), so the blocker for matching it
+is limiter #1 (transport) — connect must survive on the link before BLE can
+be added.  Limiter #2 only bites the *scan*-while-BLE case.
+
+Until r2 (or an **SDIO** framed transport on a board that dedicates the Alif
+SDIO to the CC3501E), the supported model is **one radio operation at a
+time**: `wifi scan`, or `ble enable`+`ble scan`, each from a clean state.
+`wifi connect` is wired end-to-end (host → bridge → `Wlan_Connect`,
+worker-routed off the SPI ISR) and the L2 association completes, but it
+desyncs the r1 link, so it is gated on r2.
 
 ## Boot model
 
