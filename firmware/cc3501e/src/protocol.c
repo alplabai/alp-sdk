@@ -786,7 +786,7 @@ static alp_cc3501e_resp_t handle_diag_get_stats(const uint8_t *req,
 /* GET_DIAG_INFO (0x04): reply data = the 16-byte packed diag struct:
  * fw_version(LE16) | reset_cause(1) | role(1) | uptime_ms(LE32) |
  * free_heap_bytes(LE32) | last_error(1) | reserved(3). */
-extern uint32_t cc3501e_hw_wifi_last_event_id(void); /* DEBUG: last Wi-Fi event Id */
+extern uint32_t           cc3501e_hw_wifi_last_event_id(void); /* DEBUG: last Wi-Fi event Id */
 static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
                                                size_t         req_len,
                                                uint8_t       *reply_data,
@@ -801,7 +801,9 @@ static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 	reply_data[2] = cc3501e_hw_reset_cause();
 	reply_data[3] = (uint8_t)ALP_CC3501E_ROLE_OFF; /* v0.1: no radio role active */
 	put_le32(&reply_data[4], cc3501e_hw_uptime_ms());
-	put_le32(&reply_data[8], cc3501e_hw_wifi_last_event_id()); /* DEBUG: was free_heap; now the last Wi-Fi event Id */
+	put_le32(
+	    &reply_data[8],
+	    cc3501e_hw_wifi_last_event_id()); /* DEBUG: was free_heap; now the last Wi-Fi event Id */
 	reply_data[12]  = g_last_error;
 	reply_data[13]  = 0u;
 	reply_data[14]  = 0u;

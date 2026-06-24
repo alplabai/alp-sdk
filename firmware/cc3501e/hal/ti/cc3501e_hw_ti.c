@@ -182,8 +182,9 @@ static void wifi_event_cb(WlanEvent_t *event)
 			wifi_scan_cache[i].SecurityInfo = e->SecurityInfo;
 			wifi_scan_cache[i].Channel      = e->Channel;
 		}
-		wifi_scan_count  = n;
-		wifi_last_status = ext_null ? -77 : 0; /* DIAG: -77 = EXTENDED event had a NULL data pointer */
+		wifi_scan_count = n;
+		wifi_last_status =
+		    ext_null ? -77 : 0; /* DIAG: -77 = EXTENDED event had a NULL data pointer */
 		osi_SyncObjSignal(&wifi_event_sync);
 		break;
 	}
@@ -967,8 +968,8 @@ static void ready_ensure_init(void)
 {
 	if (!ready_inited) {
 		(void)GPIO_setConfig(CC3501E_READY_GPIO,
-		                     GPIO_CFG_OUTPUT_INTERNAL | GPIO_CFG_PULL_NONE_INTERNAL
-		                         | GPIO_CFG_OUT_LOW);
+		                     GPIO_CFG_OUTPUT_INTERNAL | GPIO_CFG_PULL_NONE_INTERNAL |
+		                         GPIO_CFG_OUT_LOW);
 		ready_inited = true;
 	}
 }
@@ -1140,7 +1141,8 @@ static int cc3501e_hw_wifi_ensure_sta_role(void)
 	 * wifi_band_cfg (static init leaves it 0 -> the survey captured 0 frames).
 	 * BOTH TI references do this on every STA role-up (network_terminal
 	 * wlan_cmd.c:676, at_commands atcmd_wlan.c:805); ours omitted it. */
-	uint8_t sta_wifi_band = (uint8_t)BAND_SEL_ONLY_2_4GHZ; /* our antenna/AP are 2.4 GHz; BOTH made the kick fail (5G) */
+	uint8_t sta_wifi_band = (uint8_t)
+	    BAND_SEL_ONLY_2_4GHZ; /* our antenna/AP are 2.4 GHz; BOTH made the kick fail (5G) */
 	(void)Wlan_Set(WLAN_SET_STA_WIFI_BAND, &sta_wifi_band);
 	/* The STA netif is registered ONCE at boot (cc3501e_hw_net_init ->
 	 * network_stack_add_if_sta) -- it must NOT be done here: from this radio-path
@@ -1182,7 +1184,7 @@ static int cc3501e_hw_wifi_scan_run(void)
 	wifi_scan_count = 0u;
 	osi_SyncObjClear(&wifi_event_sync);
 	const uint32_t cb_before = wifi_cb_event_count; /* DIAG: did ANY wifi event fire? */
-	int scan_rv = -1;
+	int            scan_rv   = -1;
 	if (role_rv == CC3501E_HW_OK) {
 		scan_rv = Wlan_Scan(WLAN_ROLE_STA, &sc, (unsigned char)WLAN_MAX_SCAN_COUNT);
 	}
@@ -1298,13 +1300,15 @@ int cc3501e_hw_wifi_connect_sta(
 		/* The latch was armed CONNECTING at submit (mark_connecting); a bad arg must
 		 * still publish a TERMINAL outcome, else the latch stays stuck CONNECTING and
 		 * the host's status poll never resolves (spins to a misleading timeout). */
-		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
 		return CC3501E_HW_ERR_INVAL;
 	}
 	const int wifi_rv =
 	    cc3501e_hw_wifi_ensure_sta_role(); /* lazy-start + bounded STA role-up (shared) */
 	if (wifi_rv != CC3501E_HW_OK) {
-		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
 		return wifi_rv;
 	}
 	osi_SyncObjClear(&wifi_event_sync);
@@ -1318,7 +1322,8 @@ int cc3501e_hw_wifi_connect_sta(
 	                 (const char *)psk,
 	                 (char)psk_len,
 	                 0) != 0) {
-		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
 		return CC3501E_HW_ERR_IO;
 	}
 	/* BOUNDED wait for the connect event.  This op is WORKER-ROUTED (see protocol.c
@@ -1648,7 +1653,7 @@ int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len)
 	static cc3501e_nimble_scan_rec_t recs[24];
 	uint32_t                         n  = 0u;
 	const int                        rc = cc3501e_nimble_scan(
-        recs, (uint32_t)(sizeof(recs) / sizeof(recs[0])), &n, CC3501E_BLE_SCAN_MS);
+	    recs, (uint32_t)(sizeof(recs) / sizeof(recs[0])), &n, CC3501E_BLE_SCAN_MS);
 	bridge_transport_spi_hw_reinit();
 	if (rc != 0) {
 		return CC3501E_HW_ERR_IO;
