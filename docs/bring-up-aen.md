@@ -265,10 +265,7 @@ top of the per-subsystem checks.
 > **`…/rtss_hp`** (M55-HP).  It carries the carrier-accurate E1M-EVK
 > peripheral wiring (console on UART5, the MRAM MCUboot partition map,
 > the alp-sdk Alif drivers) and is what the commands below use.  It is
-> build-verified but **not yet bench-booted** for a Zephyr image -- the
-> SES provisioning + Alif stock-blink boot is proven (§4,
-> [`aen-provisioning.md`](aen-provisioning.md)); booting our own Zephyr
-> image on it is the next bench step.
+> build-verified and bench-validated (2026-06-15) for a Zephyr image — the GPIO-button-led example (§4) boots and runs on real E1M-AEN801 silicon. See [`aen-bench-bringup.md`](aen-bench-bringup.md) for the full validation matrix.
 >
 > **Upstream known-good fallback:** `boards/alif/ensemble_e8_dk` ships
 > the exact part, so `ensemble_e8_dk/ae822fa0e5597ls0/rtss_{he,hp}` is a

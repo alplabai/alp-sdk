@@ -7,10 +7,10 @@
  * @file gd32g553.h
  * @brief Host-side driver for the GD32G553MEY7TR supervisor MCU on
  *
- * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
- *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
- *   sequencing as paper-correct only until the v1.0 verification
- *   sweep lands.
+ * @par Verification status: [BENCH-VERIFIED] -- supervisor bridge SPI/I2C link
+ *   on V2N / V2N-M1 silicon-verified since v0.6 (26/26 functional on E1M-V2N101,
+ *   20-row HIL soak 253/253).  A/B OTA Path-A, Tier-B analog loopback 5/6,
+ *   protocol-v0.7 STATUS_SEQ functional.  GD32 DMAC-B fast path default-off (issue #84).
  *        the E1M-X V2N / V2N-M1 SoMs.
  *
  * The GD32G553 is the V2N module's general-purpose supervisor MCU.
