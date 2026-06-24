@@ -353,3 +353,8 @@ uint32_t cc3501e_hw_free_heap_bytes(void)
 {
 	return 0u;
 }
+
+uint32_t cc3501e_hw_wifi_last_event_id(void)
+{
+	return 0u;
+}
