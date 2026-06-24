@@ -7,6 +7,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Fixed
+
+- **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
+  SE-UART-only `alif_flash` runner burns only the signed ATOC (`app-write-mram
+  -p`); a slot0-XIP app is *not* embedded in that ATOC, so the runner left the
+  app blob at MRAM `0x80010000` blank/stale and the SE booted a garbage image.
+  Writing the raw slot0 app blob needs the J-Link Alif MRAM loader, which this
+  runner does not drive — `--mram-xip` now fails fast and points at the two-blob
+  bench Flow D helper (`scripts/bench/aen/flash-jlink-mramxip.sh`).
+
 ## [v0.8.0] - 2026-06-24
 
 ### Changed — clang-format pinned to v22 (was v14)
