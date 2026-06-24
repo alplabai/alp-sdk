@@ -325,10 +325,10 @@ alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms);
  */
 #define CC3501E_BLE_NAME_MAX 31u
 typedef struct {
-	uint8_t addr[6];                       /**< Advertiser address (LE order on the wire). */
-	uint8_t addr_type;                     /**< NimBLE own/peer addr type (0=public,1=random,...). */
-	int8_t  rssi_dbm;                      /**< Advertising-report RSSI, dBm. */
-	uint8_t name_len;                      /**< Name length as reported on the wire. */
+	uint8_t addr[6];   /**< Advertiser address (LE order on the wire). */
+	uint8_t addr_type; /**< NimBLE own/peer addr type (0=public,1=random,...). */
+	int8_t  rssi_dbm;  /**< Advertising-report RSSI, dBm. */
+	uint8_t name_len;  /**< Name length as reported on the wire. */
 	char    name[CC3501E_BLE_NAME_MAX + 1u]; /**< NUL-terminated device-name copy ("" if none). */
 } cc3501e_ble_scan_record_t;
 

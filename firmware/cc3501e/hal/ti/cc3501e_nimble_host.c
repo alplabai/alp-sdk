@@ -424,8 +424,7 @@ static int cc3501e_scan_gap_event_cb(struct ble_gap_event *event, void *arg)
 		 * carry none and the scan-response (active scan) the complete name. */
 		if (s_scan_cache[idx].name_len == 0u) {
 			struct ble_hs_adv_fields fields;
-			if (ble_hs_adv_parse_fields(
-			        &fields, event->disc.data, event->disc.length_data) == 0 &&
+			if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) == 0 &&
 			    fields.name != NULL && fields.name_len > 0u) {
 				uint8_t n = fields.name_len;
 				if (n > sizeof(s_scan_cache[idx].name) - 1u) {
