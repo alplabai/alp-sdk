@@ -115,7 +115,7 @@ suspect board routing or supervisor-not-ready
 
 ## Reference
 
-- [`<alp/adc.h>`](../../../include/alp/adc.h) -- DAC API lives here.
+- [`<alp/dac.h>`](../../../include/alp/dac.h) -- DAC API lives here.
 - [`<alp/board.h>`](../../../include/alp/board.h)
   -- `BOARD_DAC0` / `BOARD_DAC1` board-neutral aliases.
 - [`metadata/e1m_modules/E1M-V2N101.yaml`](../../../metadata/e1m_modules/E1M-V2N101.yaml)

@@ -9,7 +9,7 @@
  * @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC.
  *
  * @par Supported silicon: alif:ensemble:e7
- *      (e3 / e5 / e8 land in a v0.7.x follow-up.)
+ *      (e3 / e5 land in a follow-up.  e8 silicon-verified in v0.8.0: 15/17 aen-* apps PASS on real E8.)
  *
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0

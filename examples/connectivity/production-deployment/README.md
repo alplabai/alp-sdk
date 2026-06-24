@@ -167,7 +167,7 @@ Customer-side variants typically:
 - Fork this skeleton for V2N or i.MX 93 boards (`som.sku:` +
   `cores:` edits; the declarative blocks above stay portable).
 - Replace the Mender connection with a different OTA fabric
-  (`ota.provider:` -- `mcumgr` lands in v0.7 per ADR 0009).
+  (`ota.provider:` -- `mcumgr` support tracked in ADR 0009).
 - Add domain-specific business logic between the OTA poll +
   the attestation heartbeat.
 

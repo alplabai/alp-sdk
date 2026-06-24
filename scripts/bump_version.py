@@ -40,7 +40,7 @@ What this touches:
     CHANGELOG.md                    -- slice [Unreleased] into the new version section.
     docs/abi/v<MAJOR.MINOR>-snapshot.json  -- regenerated.
     README.md                       -- the current-state version labels (e.g.
-                                       "Mostly pre-silicon (`vX.Y`)", "vX.Y ramp");
+                                       "Partially silicon-verified (`vX.Y`)", "vX.Y ramp");
                                        enforced by scripts/check_version_doc_sync.py.
 
 What it does NOT touch:
@@ -138,7 +138,7 @@ def update_readme_version_labels(current: str, new_version: str, dry_run: bool) 
         return
     text = README.read_text(encoding="utf-8")
     subs = [
-        (rf"(Mostly pre-silicon \(`v){re.escape(old_mm)}(`\))", rf"\g<1>{new_mm}\g<2>"),
+        (rf"(Partially silicon-verified \(`v){re.escape(old_mm)}(`\))", rf"\g<1>{new_mm}\g<2>"),
         (rf"(\*\*v){re.escape(old_mm)}( ramp — paper-correct)", rf"\g<1>{new_mm}\g<2>"),
     ]
     total = 0
