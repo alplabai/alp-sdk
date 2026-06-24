@@ -30,5 +30,9 @@ families:
   - v2n-m1
 
 verification:
+  # INA236 mfg ID (0x5449), device ID (0xA080) and the bus-voltage
+  # (1.6 mV) / shunt-voltage (2.5 uV) register LSBs were confirmed
+  # against E1M-X-V2N silicon (on i2c-0, 2026-06); full current /
+  # power end-to-end HiL accuracy is still pending.
   hil_silicon:    untested
   smoke_tests:    null_arg_guard
