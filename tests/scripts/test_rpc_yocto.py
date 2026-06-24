@@ -36,7 +36,7 @@ import pytest
 
 
 REPO = Path(__file__).resolve().parents[2]
-RPC_SRC = REPO / "src" / "yocto" / "rpc_yocto.c"
+RPC_SRC = REPO / "src" / "backends" / "rpc" / "yocto_drv.c"
 RPC_HDR = REPO / "include" / "alp" / "rpc.h"
 ZEPHYR_SRC = REPO / "src" / "backends" / "rpc" / "zephyr_drv.c"
 
