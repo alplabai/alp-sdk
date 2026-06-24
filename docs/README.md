@@ -40,6 +40,10 @@ into the topic-specific docs.
 - [e1m-pinout.md](e1m-pinout.md) — E1M form-factor pinout reference.
 - [board-id.md](board-id.md) — boot-time board identification:
   SoM EEPROM manifest + BOARD_ID ADC cross-check.
+- [console.md](console.md) — interactive Alp SoM console: enabling
+  (`CONFIG_ALP_SDK_CONSOLE` / `_UNSAFE`), bench-vs-field profiles,
+  full `alp` command reference (board / mem / gpio / i2c / adc / pwm /
+  clk / companion / reboot), and companion binding for V2N + Alif.
 - [aen-accelerator-backends-design.md](aen-accelerator-backends-design.md)
   — integration design for the Alif Ensemble accelerator surfaces
   (GPU2D / VeriSilicon ISP Pico (vsi,isp-pico) / SecAES / aiPM), each

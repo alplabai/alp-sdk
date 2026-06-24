@@ -2849,6 +2849,61 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append(f"CONFIG_{kconfig}=y")
         lines.append("")
 
+    # SoM SKU identity string -- the boot banner shows this as the SoM identity
+    # when the on-module EEPROM is absent/unprovisioned (board.yaml som.sku).
+    lines.append(f'CONFIG_ALP_SDK_SOM_SKU="{project.sku}"')
+    lines.append("")
+
+    # SoC compute + memory complement (from the SoC spec JSON) for the boot
+    # banner's system-status lines.  Pre-formatted here so the banner stays a
+    # trivial printk; the active core (this slice) is marked and listed first.
+    soc = project.soc_spec or {}
+    _vendor = (soc.get("vendor") or "").split()
+    soc_name = " ".join(
+        p for p in [(_vendor[0] if _vendor else ""),
+                    soc.get("family", ""), soc.get("part", "")] if p)
+
+    def _core_label(c: dict) -> str:
+        t, sub = c.get("type", ""), c.get("subtype", "")
+        if t == "cortex-m55":
+            return {"high-perf": "M55-HP",
+                    "high-efficiency": "M55-HE"}.get(sub, "M55")
+        return {"cortex-a32": "Cortex-A32", "cortex-a55": "Cortex-A55",
+                "cortex-m33": "Cortex-M33"}.get(t, t or "core")
+
+    def _fmt_core(c: dict) -> str:
+        n = c.get("count", 1) or 1
+        s = (f"{n}x " if n > 1 else "") + \
+            f"{_core_label(c)} @{c.get('freq_mhz', '?')}MHz"
+        return s + " (active)" if c.get("id") == slice_.core_id else s
+
+    _cores = list(soc.get("cores") or [])
+    _ordered = ([c for c in _cores if c.get("id") == slice_.core_id]
+                + [c for c in _cores if c.get("id") != slice_.core_id])
+    cpus_desc = " + ".join(_fmt_core(c) for c in _ordered)
+
+    _npu_counts: dict[str, int] = {}
+    for _npu in (soc.get("npus") or []):
+        _label = (_npu.get("type") or "").replace("ethos-u", "Ethos-U")
+        if _label:
+            _npu_counts[_label] = _npu_counts.get(_label, 0) + 1
+    npus_desc = " + ".join((f"{n}x " if n > 1 else "") + lbl
+                           for lbl, n in _npu_counts.items())
+
+    sram_kb = int(soc.get("soc_ram_kb") or 0)
+    mram_kb = int(round((soc.get("soc_flash_mb") or 0) * 1024))
+    if soc_name:
+        lines.append(f'CONFIG_ALP_SDK_SOC_NAME="{soc_name}"')
+    if cpus_desc:
+        lines.append(f'CONFIG_ALP_SDK_SOC_CPUS="{cpus_desc}"')
+    if npus_desc:
+        lines.append(f'CONFIG_ALP_SDK_SOC_NPUS="{npus_desc}"')
+    if sram_kb:
+        lines.append(f"CONFIG_ALP_SDK_SOC_SRAM_KB={sram_kb}")
+    if mram_kb:
+        lines.append(f"CONFIG_ALP_SDK_SOC_MRAM_KB={mram_kb}")
+    lines.append("")
+
     # Cross-EVK board facade selector (<alp/board.h>).
     # Emitted only when the project resolves to a named board preset
     # (e.g. `preset: e1m-x-evk` -> board_name "E1M-X-EVK").

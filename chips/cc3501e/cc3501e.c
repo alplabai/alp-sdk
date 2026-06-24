@@ -13,11 +13,11 @@
  * alp_gpio_*; until then reset() returns NOSUPPORT cleanly.
  *
  * Wire framing matches the embedded firmware
- * (firmware/cc3501e/hal/ti/transport_hw_ti_spi.c): the current E1M-AEN
- * rev wires only SCLK/MOSI/MISO (no CS, no host IRQ -- both arrive next
- * rev), so a request/reply is clocked as four deterministic fixed-count
- * transfers in lockstep (request header, request payload, reply header,
- * reply payload) with a settle gap before the reply read.  The reply
+ * (firmware/cc3501e/hal/ti/transport_hw_ti_spi.c): the Alif master drives
+ * the dwc-ssi HARDWARE SS0 chip-select (P14_7 = SPI1_SS0_C) per transfer,
+ * so a request/reply is clocked as four SS0-framed fixed-count transfers
+ * in lockstep (request header, request payload, reply header, reply
+ * payload), each gated on the slave's per-phase READY re-arm.  The reply
  * payload's first byte is the response status (mapped via
  * resp_to_status); the data follows.
  */
@@ -129,10 +129,11 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
 	(void)alp_gpio_write(ctx->reset_pin, true); /* release -> re-boot */
 
 	/* BLIND boot settle -- NO clocking until the slave is armed.  This is the
-	 * cold first-contact fix: on the CS-less fixed-count link, any byte the host
-	 * clocks BEFORE the slave's SPI is armed (e.g. a readiness poll's probes) is
-	 * not consumed by the slave, which sets a permanent 1-byte frame offset that
-	 * cannot self-correct (clocking advances both sides equally).  So the host
+	 * cold first-contact fix: before the slave's SPI peripheral is armed its SS0
+	 * input is not yet framing transfers, so any byte the host clocks BEFORE it
+	 * arms (e.g. a readiness poll's probes) is not consumed by the slave, which
+	 * sets a permanent 1-byte frame offset that cannot self-correct (clocking
+	 * advances both sides equally).  So the host
 	 * stays QUIET while the module boots + arms; the slave then parks driving the
 	 * 0xA5 marker, and the caller's first PING lands at the slave's fresh frame
 	 * boundary = aligned.  The Wi-Fi build cold-boots (Puya double-boot + crypto
@@ -201,11 +202,173 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
 	return ALP_ERR_TIMEOUT;
 }
 
-/* Inter-phase settle (CS-less lockstep): time given to the CC3501E SPI-slave ISR
- * to arm the next fixed-count transfer (request payload, reply payload) before
- * the host clocks it.  ~µs is enough; 200 µs is comfortably safe and negligible
- * vs the per-request budget.  The r2 bridge (CS + host-IRQ) removes the need. */
-#define CC3501E_PHASE_SETTLE_US 200u
+/* Inter-phase settle (hardware-SS0 lockstep): time given to the CC3501E SPI-slave ISR
+ * to arm the next fixed-count transfer before the host clocks it.  This is the
+ * DOMINANT per-request cost (>> the ~64us of 1MHz SPI), so it is the first
+ * throughput lever.  RUNTIME-TUNABLE so the minimum safe value can be swept on the
+ * bench now the link runs hardware SS0 + the READY line.  Split into TWO independent levers because the
+ * two settle sites have DIFFERENT bench-proven minimums:
+ *
+ *   - g_req_payload_settle_us: the request-HEADER -> request-PAYLOAD gap.  LOAD-
+ *     BEARING: payload requests (CONNECT / AP / OTA_WRITE / GPIO_WRITE) DESYNC
+ *     (host sees -5) when this drops below ~200us, so it keeps the safe default.
+ *   - g_reply_settle_us: the gap before the reply-HEADER read.  Header-only
+ *     commands (GET_VERSION / scan / ble / the worker-routed ops -- the common
+ *     case) are reliable here at near-zero (the single-transfer reply already
+ *     removed the reply-PAYLOAD settle), so this is the throughput-sensitive one a
+ *     bench sweep can drive toward 0. */
+#define CC3501E_REQ_PAYLOAD_SETTLE_US 200u
+#define CC3501E_REPLY_SETTLE_US       50u /* ISR-fire-latency floor before the per-phase READY poll */
+static uint32_t g_req_payload_settle_us = CC3501E_REQ_PAYLOAD_SETTLE_US;
+static uint32_t g_reply_settle_us       = CC3501E_REPLY_SETTLE_US;
+
+void cc3501e_set_req_payload_settle_us(uint32_t us)
+{
+	g_req_payload_settle_us = us;
+}
+
+uint32_t cc3501e_get_req_payload_settle_us(void)
+{
+	return g_req_payload_settle_us;
+}
+
+void cc3501e_set_reply_settle_us(uint32_t us)
+{
+	g_reply_settle_us = us;
+}
+
+uint32_t cc3501e_get_reply_settle_us(void)
+{
+	return g_reply_settle_us;
+}
+
+/* Back-compat convenience over the two split levers: SET writes BOTH (a single knob
+ * for callers that don't care about the split), GET returns the throughput-sensitive
+ * reply settle. */
+void cc3501e_set_phase_settle_us(uint32_t us)
+{
+	g_req_payload_settle_us = us;
+	g_reply_settle_us       = us;
+}
+
+uint32_t cc3501e_get_phase_settle_us(void)
+{
+	return g_reply_settle_us;
+}
+
+/*
+ * Host-IRQ / READY flow-control hook.  Weak default: always ready (a board with
+ * no READY line has nothing to gate on).  A board that wires the READY line
+ * (CC35 GPIO17 -> an Alif input) provides a strong override that reads it; when
+ * it returns false the bridge is mid-radio-op (its SPI-slave DMA is dead) and we
+ * MUST NOT clock a transaction into it -- cc3501e_request returns ALP_ERR_BUSY so
+ * poll_by_repeat retries until READY (see cc3501e_bridge.c on the E1M-AEN bodge).
+ */
+__attribute__((weak)) bool cc3501e_bus_ready(void)
+{
+	return true;
+}
+
+/* Per-phase READY gate.  Under hardware per-transfer SS0 the slave re-arms EACH phase's
+ * DMA in its completion ISR (drop READY -> dispatch/arm -> raise READY); the host must
+ * wait for that armed edge before clocking the phase, else it races the in-ISR re-arm and
+ * the read lands shifted or empty.  The preceding settle (>= the slave's ISR-fire latency)
+ * guarantees READY already reflects THIS phase's re-arm (not a stale high from the prior
+ * one); this spin then waits out a slow dispatch.  cc3501e_bus_ready() is weak-true on a
+ * board with no READY line, so this returns on the first iteration there (no-op). */
+#define CC3501E_READY_POLL_US  10u
+#define CC3501E_READY_POLL_MAX 500u /* 10us * 500 = 5ms ceiling */
+static void cc3501e_wait_slave_armed(void)
+{
+	for (unsigned i = 0u; i < CC3501E_READY_POLL_MAX; i++) {
+		if (cc3501e_bus_ready()) return;
+		alp_delay_us(CC3501E_READY_POLL_US);
+	}
+}
+
+/*
+ * The 4-phase framed transaction.  Each phase is its OWN dwc-ssi hardware-SS0-framed
+ * transfer (the host opens the bus ALP_SPI_NO_CS, so spi_dw drives the SER/SS0 branch
+ * and asserts SS0 = the CC3501E's SPI1_SS0_C per transfer).
+ *
+ *   1. send request header (4)        3. read reply header (4)
+ *   2. send request payload (tx_len)  4. read reply payload (status+data)
+ *
+ * Fixed-count lockstep: each transfer's length is derived from a header already
+ * exchanged, and the inter-phase settles below cover the slave's in-ISR DMA re-arm
+ * between phases.  The per-transfer SS0 edge frames + realigns each phase on the
+ * hardware-CS-framed 4-wire slave (its SSI shift engine is gated by SS0), so a
+ * mid-stream desync self-heals on the caller's next transaction.  Matches the
+ * firmware SPI-slave state machine in firmware/cc3501e/hal/ti/transport_hw_ti_spi.c.
+ */
+static alp_status_t cc3501e_request_framed(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd,
+                                           const uint8_t *tx_payload, size_t tx_len,
+                                           uint8_t *rx_buf, size_t rx_cap, size_t *rx_len)
+{
+	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
+	alp_status_t s =
+	    alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	if (s != ALP_OK) return s;
+	if (tx_len > 0) {
+		/* Inter-phase settle: the slave arms the request-PAYLOAD transfer in its SPI
+		 * ISR only AFTER the header transfer completes.  Clocking the payload back-to-
+		 * back races that re-arm -> bytes dropped + the frame desyncs.  Header-only
+		 * requests have no payload phase; payload requests (OTA_WRITE, CONNECT,
+		 * GPIO_WRITE) need this gap (root-caused on silicon 2026-06-19).  LOAD-BEARING:
+		 * keep at g_req_payload_settle_us (the safe ~200us floor). */
+		alp_delay_us(g_req_payload_settle_us);
+		cc3501e_wait_slave_armed();
+		s = alp_spi_transceive(ctx->bus, tx_payload, ctx->rx_scratch, tx_len);
+		if (s != ALP_OK) return s;
+	}
+
+	/* Settle gap: let the slave dispatch + arm its reply before we read.  Header-only
+	 * commands (the common case) are reliable at near-zero here, so this uses the
+	 * throughput-sensitive g_reply_settle_us a bench sweep can drive toward 0. */
+	alp_delay_us(g_reply_settle_us);
+
+	/* Dummies for the read transactions (MOSI is don't-care on a read). */
+	memset(ctx->tx_scratch, 0xFF, sizeof(ctx->tx_scratch));
+
+	/* 3. Reply header -> learn the reply payload length.  Gate on the slave arming the
+	 * reply-header transfer (dispatch + arm happen in its completion ISR). */
+	cc3501e_wait_slave_armed();
+	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	if (s != ALP_OK) return s;
+	uint16_t resp_payload_len = decode_header_payload_len(ctx->rx_scratch);
+	/* Desync detection: a valid reply header ECHOES the request opcode
+	 * (protocol_build_reply sets reply[0]=cmd) and declares a payload in [1..MAX].  An
+	 * all-0xA5 header means the slave is parked at a frame boundary; any other mismatch
+	 * is lockstep drift.  Report IO: the per-transfer SS0 edge of the caller's next
+	 * transaction hardware-realigns the 4-wire slave (the CSN edge resets its SSI
+	 * frame boundary), so the retry lands clean. */
+	const bool hdr_ok = (ctx->rx_scratch[0] == (uint8_t)cmd) && (resp_payload_len >= 1u) &&
+	                    (resp_payload_len <= ALP_CC3501E_MAX_PAYLOAD);
+	if (!hdr_ok) {
+		/* Do NOT byte-walk cc3501e_sync() here: on the 4-byte fixed-count lockstep the
+		 * 1-byte walk PARKS the slave (proven on silicon).  Return IO; the CS edge
+		 * realigns the slave so the caller's re-issued transaction lands clean. */
+		return ALP_ERR_IO;
+	}
+
+	/* 4. Reply payload as its OWN SS0-framed transfer: under hardware per-transfer CS the
+	 * slave arms the reply payload separately (transport_hw_ti_spi.c PH_REPLY_HEADER ->
+	 * PH_REPLY_PAYLOAD), so settle + gate on its arm, then this transceive's CSN edge
+	 * frames it after the reply header. */
+	alp_delay_us(g_reply_settle_us);
+	cc3501e_wait_slave_armed();
+	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
+	if (s != ALP_OK) return s;
+
+	const uint8_t resp     = ctx->rx_scratch[0];
+	const size_t  data_len = (size_t)resp_payload_len - 1u;
+	if (data_len > 0u && rx_buf != NULL) {
+		const size_t n = (data_len > rx_cap) ? rx_cap : data_len;
+		memcpy(rx_buf, &ctx->rx_scratch[1], n);
+		if (rx_len != NULL) *rx_len = n;
+	}
+	return resp_to_status(resp);
+}
 
 alp_status_t cc3501e_request(cc3501e_t        *ctx,
                              alp_cc3501e_cmd_t cmd,
@@ -222,76 +385,20 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	if (tx_len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
 	if (tx_payload == NULL && tx_len > 0) return ALP_ERR_INVAL;
 
-	/*
-     * 3-wire deterministic framing (this HW rev wires only SCLK/MOSI/MISO
-     * -- no CS, no host IRQ; CS + IRQ arrive next rev).  Each transfer's
-     * length is derived from a header already exchanged, so master + slave
-     * stay in lockstep without a CS edge.  Matches the firmware SPI-slave
-     * state machine in firmware/cc3501e/hal/ti/transport_hw_ti_spi.c.
-     *
-     *   1. send request header (4)        3. read reply header (4)
-     *   2. send request payload (tx_len)  4. read reply payload (status+data)
-     */
-	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
-	alp_status_t s =
-	    alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
-	if (s != ALP_OK) return s;
-	if (tx_len > 0) {
-		/* Inter-phase settle (CS-less lockstep): the slave arms the request-PAYLOAD
-		 * transfer in its SPI ISR only AFTER the header transfer completes.  Clocking
-		 * the payload back-to-back (no gap) races that re-arm -> the payload bytes are
-		 * dropped + the frame desyncs.  Header-only requests (PING / the argless worker
-		 * ops) have no payload phase so they were fine; payload requests (OTA_WRITE,
-		 * CONNECT, GPIO_WRITE) need this gap (root-caused on silicon 2026-06-19, where
-		 * OTA streaming timed out per-chunk without it). */
-		alp_delay_us(CC3501E_PHASE_SETTLE_US);
-		s = alp_spi_transceive(ctx->bus, tx_payload, ctx->rx_scratch, tx_len);
-		if (s != ALP_OK) return s;
+	/* READY/host-IRQ gate: if the CC35 is mid-radio-op, its SPI-slave DMA is dead --
+	 * clocking now would desync the link.  Return BUSY (don't clock) BEFORE selecting,
+	 * so a BUSY return never leaves CS asserted; the poll_by_repeat loop retries.  Weak
+	 * cc3501e_bus_ready() is always-true when there is no READY line, so this is a
+	 * no-op there. */
+	if (!cc3501e_bus_ready()) {
+		return ALP_ERR_BUSY;
 	}
 
-	/* Settle gap: let the slave dispatch + arm its reply before we read.
-     * v0.1 META dispatch is instant; slow (Wi-Fi/BLE) replies + async
-     * events need the next-rev host IRQ line, not a fixed gap. */
-	alp_delay_us(200u);
-
-	/* Dummies for the read transactions (MOSI is don't-care on a read). */
-	memset(ctx->tx_scratch, 0xFF, sizeof(ctx->tx_scratch));
-
-	/* 3. Reply header -> learn the reply payload length. */
-	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
-	if (s != ALP_OK) return s;
-	uint16_t resp_payload_len = decode_header_payload_len(ctx->rx_scratch);
-	/* Desync detection (no CS to recover on): a valid reply header ECHOES the
-     * request opcode (protocol_build_reply sets reply[0]=cmd) and declares a
-     * payload in [1..MAX].  An all-0xA5 header means the slave is parked at a
-     * frame boundary (we were misaligned); any other mismatch is lockstep
-     * drift.  Either way, re-establish byte alignment so the NEXT request lands
-     * clean, and report IO so the caller retries (the soak/bring-up loops do). */
-	const bool hdr_ok = (ctx->rx_scratch[0] == (uint8_t)cmd) && (resp_payload_len >= 1u) &&
-	                    (resp_payload_len <= ALP_CC3501E_MAX_PAYLOAD);
-	if (!hdr_ok) {
-		/* Do NOT byte-walk cc3501e_sync() here: on the 4-byte fixed-count lockstep
-		 * the 1-byte walk PARKS the slave (proven on silicon -- reply_hdr stuck at
-		 * 0xA5A5A5A5, link never recovers).  Return IO so the caller re-issues a
-		 * clean 4-byte transaction instead (re-aligns when the slave is aligned). */
-		return ALP_ERR_IO;
-	}
-
-	/* Same inter-phase settle before the reply PAYLOAD: the slave arms that
-	 * transfer in its ISR only after the reply-header transfer completes. */
-	alp_delay_us(CC3501E_PHASE_SETTLE_US);
-	/* 4. Reply payload: status byte followed by the response data. */
-	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
-	if (s != ALP_OK) return s;
-
-	const uint8_t resp     = ctx->rx_scratch[0];
-	const size_t  data_len = (size_t)resp_payload_len - 1u;
-	if (data_len > 0u && rx_buf != NULL) {
-		const size_t n = (data_len > rx_cap) ? rx_cap : data_len;
-		memcpy(rx_buf, &ctx->rx_scratch[1], n);
-		if (rx_len != NULL) *rx_len = n;
-	}
-	return resp_to_status(resp);
+	/* CS framing is the dwc-ssi HARDWARE SS0 now (peripheral-driven, asserted per transfer)
+	 * -- no host CS bracket.  Each alp_spi_transceive in the framed body is its OWN
+	 * SS0-framed phase (req header / [req payload] / reply header / reply payload); the
+	 * CC3501E slave keys its lockstep off the per-transfer CSN edge. */
+	return cc3501e_request_framed(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len);
 }
 
 alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out)
@@ -410,8 +517,10 @@ alp_status_t cc3501e_wifi_get_mac(cc3501e_t *ctx, uint8_t mac[CC3501E_MAC_LEN], 
 }
 
 /* On-wire fixed header of a scan record (alp_cc3501e_scan_result_t without the
- * inline SSID): bssid[6] + rssi(1) + channel(1) + security(1) + ssid_len(1). */
-#define CC3501E_SCAN_REC_HDR 10u
+ * inline SSID): bssid[6] + rssi(1) + channel(1) + security(LE16) + ssid_len(1).
+ * security is the raw 16-bit TI SecurityInfo (the sec-type lives in the high
+ * byte) -- cc3501e_wifi_sec_kind() decodes it. */
+#define CC3501E_SCAN_REC_HDR 11u
 
 alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
                                cc3501e_scan_record_t *out_records,
@@ -443,16 +552,16 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 	size_t n   = 0;
 	while (off + CC3501E_SCAN_REC_HDR <= got && n < cap) {
 		const uint8_t *rec      = &scan_buf[off];
-		uint8_t        ssid_len = rec[9];
+		uint8_t        ssid_len = rec[10];
 		if (off + CC3501E_SCAN_REC_HDR + (size_t)ssid_len > got) {
 			break; /* truncated trailing record -- stop cleanly */
 		}
 		cc3501e_scan_record_t *out = &out_records[n];
 		memcpy(out->bssid, &rec[0], 6);
-		out->rssi_dbm = (int8_t)rec[6];
-		out->channel  = rec[7];
-		out->security = rec[8];
-		out->ssid_len = ssid_len;
+		out->rssi_dbm      = (int8_t)rec[6];
+		out->channel       = rec[7];
+		out->security_info = (uint16_t)rec[8] | ((uint16_t)rec[9] << 8); /* raw TI SecurityInfo, LE */
+		out->ssid_len      = ssid_len;
 		uint8_t copy  = (ssid_len > CC3501E_SSID_MAX) ? (uint8_t)CC3501E_SSID_MAX : ssid_len;
 		memcpy(out->ssid, &rec[CC3501E_SCAN_REC_HDR], copy);
 		out->ssid[copy] = '\0';
@@ -463,17 +572,66 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 	return ALP_OK;
 }
 
-alp_status_t cc3501e_wifi_connect(
-    cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms)
+cc3501e_wifi_sec_t cc3501e_wifi_sec_kind(uint16_t security_info)
 {
-	if (ssid == NULL) return ALP_ERR_INVAL;
+	/* Decode the raw TI scan-result SecurityInfo.  The sec-type bitmap lives in
+	 * the HIGH byte (WLAN_SCAN_RESULT_SEC_TYPE_BITMAP = (info >> 8) & 0x3f):
+	 *   bit0 WEP, bit1 WPA, bit2 WPA2, bits3-4 WPA3/SAE (a CC33xx extension --
+	 *   bench-calibrated 2026-06-22: a WPA2/WPA3-transition modem reads 0x1c
+	 *   here = WPA2|WPA3 bits, plain WPA2 APs read 0x04, open reads 0x00).
+	 * The PMF-required bit (0x8000) is NOT a WPA3 tell -- it is set on PMF-capable
+	 * WPA2 networks too, so checking it first mislabels every secured AP as WPA3.
+	 * The low byte is only the group/unicast cipher and must NOT drive the label
+	 * (truncating to it was why the old 1-byte field always read "?"). */
+	const uint8_t sec_type = (uint8_t)((security_info >> 8) & 0x3fu);
+
+	if (sec_type == 0u) {
+		return CC3501E_WIFI_SEC_OPEN;
+	}
+	if ((sec_type & 0x18u) != 0u) {
+		return CC3501E_WIFI_SEC_WPA3; /* SAE / WPA3 (incl. WPA2/WPA3 transition) */
+	}
+	if ((sec_type & 0x04u) != 0u) {
+		return CC3501E_WIFI_SEC_WPA2;
+	}
+	if ((sec_type & 0x02u) != 0u) {
+		return CC3501E_WIFI_SEC_WPA;
+	}
+	if ((sec_type & 0x01u) != 0u) {
+		return CC3501E_WIFI_SEC_WEP;
+	}
+	return CC3501E_WIFI_SEC_UNKNOWN;
+}
+
+const char *cc3501e_wifi_sec_name(uint16_t security_info)
+{
+	switch (cc3501e_wifi_sec_kind(security_info)) {
+	case CC3501E_WIFI_SEC_OPEN:
+		return "open";
+	case CC3501E_WIFI_SEC_WEP:
+		return "wep";
+	case CC3501E_WIFI_SEC_WPA:
+		return "wpa";
+	case CC3501E_WIFI_SEC_WPA2:
+		return "wpa2";
+	case CC3501E_WIFI_SEC_WPA3:
+		return "wpa3";
+	default:
+		return "sec?";
+	}
+}
+
+/* Build the on-wire CONNECT payload: alp_cc3501e_wifi_connect_t header (4 B) +
+ * inline SSID + inline passphrase, packed with no padding.  Returns the byte
+ * count, or 0 on an over-long SSID/passphrase (or a too-small @p buf). */
+static size_t wifi_build_connect_payload(
+    const char *ssid, uint8_t sec_type, const char *pass, uint8_t *buf, size_t cap)
+{
 	size_t ssid_len = strlen(ssid);
 	size_t psk_len  = (pass != NULL) ? strlen(pass) : 0u;
-	if (ssid_len > 32u || psk_len > 64u) return ALP_ERR_INVAL;
+	if (ssid_len > 32u || psk_len > 64u) return 0u;
+	if (cap < sizeof(alp_cc3501e_wifi_connect_t) + ssid_len + psk_len) return 0u;
 
-	/* On-wire payload: alp_cc3501e_wifi_connect_t header (4 B) + inline SSID +
-	 * inline passphrase, all packed with no padding. */
-	uint8_t                    payload[sizeof(alp_cc3501e_wifi_connect_t) + 32u + 64u];
 	alp_cc3501e_wifi_connect_t hdr = {
 		.ssid_len = (uint8_t)ssid_len,
 		.psk_len  = (uint8_t)psk_len,
@@ -481,18 +639,122 @@ alp_status_t cc3501e_wifi_connect(
 		.reserved = 0u,
 	};
 	size_t off = 0;
-	memcpy(&payload[off], &hdr, sizeof(hdr));
+	memcpy(&buf[off], &hdr, sizeof(hdr));
 	off += sizeof(hdr);
-	memcpy(&payload[off], ssid, ssid_len);
+	memcpy(&buf[off], ssid, ssid_len);
 	off += ssid_len;
 	if (psk_len > 0u) {
-		memcpy(&payload[off], pass, psk_len);
+		memcpy(&buf[off], pass, psk_len);
 		off += psk_len;
 	}
-	/* Poll status to connected/failed: the firmware reports BUSY while the
-	 * association runs, then OK (connected) or a hard error (auth/no-AP). */
-	return poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_WIFI_CONNECT_STA, payload, off, NULL, 0, NULL, timeout_ms);
+	return off;
+}
+
+alp_status_t
+cc3501e_wifi_connect_async(cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass)
+{
+	if (ssid == NULL) return ALP_ERR_INVAL;
+	uint8_t payload[sizeof(alp_cc3501e_wifi_connect_t) + 32u + 64u];
+	size_t  off = wifi_build_connect_payload(ssid, sec_type, pass, payload, sizeof(payload));
+	if (off == 0u) return ALP_ERR_INVAL;
+
+	/* SUBMIT one frame and RETURN -- do NOT block polling the association.  The
+	 * firmware accepts the connect into its worker (single in-flight) and answers
+	 * RESP_ERR_BUSY (-> ALP_ERR_BUSY) -- the submit ack; the seconds-long association
+	 * then runs in the CC35 background while the bridge READY line is held BUSY.  The
+	 * caller collects the OUTCOME later, non-blocking, via cc3501e_wifi_status().
+	 *
+	 * Submit ONLY while the bridge READY line is high, so an ALP_ERR_BUSY can ONLY be
+	 * the wire-level submit ack (the worker accepted the job) -- never the READY gate,
+	 * which returns ALP_ERR_BUSY WITHOUT clocking a frame.  Mistaking gate-BUSY for a
+	 * submit would arm NOTHING on the firmware (mark_connecting never runs) yet make
+	 * the caller believe it submitted -> the next status read returns the STALE latch
+	 * (a false connect result for an SSID never sent).  Bounded wait: normally READY is
+	 * already high (idle prompt) so this submits at once; if a radio op is in flight,
+	 * fail fast with ALP_ERR_BUSY rather than block the caller or falsely "submit".  A
+	 * transient ALP_ERR_IO (bridge desynced mid-frame) is retried. */
+	alp_status_t s = ALP_ERR_BUSY;
+	for (int attempt = 0; attempt < 10; attempt++) {
+		if (!cc3501e_bus_ready()) {
+			s = ALP_ERR_BUSY;                  /* bridge busy with a radio op */
+			alp_delay_ms(CC3501E_POLL_GAP_MS); /* wait for READY before sending */
+			continue;
+		}
+		s = cc3501e_request(ctx,
+		                    ALP_CC3501E_CMD_WIFI_CONNECT_STA,
+		                    payload,
+		                    off,
+		                    NULL,
+		                    0,
+		                    NULL,
+		                    CC3501E_REQ_TMO_MS);
+		if (s == ALP_ERR_BUSY || s == ALP_OK) {
+			return ALP_OK; /* READY was high -> this BUSY is the worker's submit ack */
+		}
+		if (s != ALP_ERR_IO) {
+			return s; /* INVAL / NO_MEM / etc. -- a real submit error, not transient */
+		}
+		alp_delay_ms(CC3501E_POLL_GAP_MS); /* bridge briefly desynced -- retry the submit */
+	}
+	return s; /* never got a READY window (BUSY) or stayed desynced (IO) -- not submitted */
+}
+
+alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
+{
+	if (out == NULL) return ALP_ERR_INVAL;
+	uint8_t      reply[4] = { 0 };
+	size_t       got      = 0;
+	/* SINGLE request (no poll-by-repeat): a non-blocking snapshot.  While the CC35
+	 * is mid-association the bridge READY line is BUSY, so cc3501e_request returns
+	 * ALP_ERR_BUSY (the gate) -- propagate it so the caller keeps waiting rather
+	 * than blocking. */
+	alp_status_t s = cc3501e_request(ctx,
+	                                 ALP_CC3501E_CMD_WIFI_STATUS,
+	                                 NULL,
+	                                 0,
+	                                 reply,
+	                                 sizeof(reply),
+	                                 &got,
+	                                 CC3501E_REQ_TMO_MS);
+	if (s != ALP_OK) return s;
+	if (got < 4u) return ALP_ERR_IO;
+	out->state       = reply[0];
+	out->fail_reason = reply[1];
+	out->rssi_dbm    = (int8_t)reply[2];
+	out->reserved    = reply[3];
+	return ALP_OK;
+}
+
+alp_status_t cc3501e_wifi_connect(
+    cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms)
+{
+	/* Blocking convenience wrapper over the async model: SUBMIT once, then poll the
+	 * non-blocking status latch to CONNECTED / FAILED.  A real association failure is
+	 * now TERMINAL (the firmware latch reports CONN_FAILED) -- it no longer loops the
+	 * old poll-by-repeat on RESP_ERR_RADIO until the budget elapsed (-> -4). */
+	alp_status_t s = cc3501e_wifi_connect_async(ctx, ssid, sec_type, pass);
+	if (s != ALP_OK) return s;
+
+	uint32_t remaining = (timeout_ms > 0u) ? timeout_ms : 1u;
+	for (;;) {
+		alp_cc3501e_wifi_status_t st;
+		alp_status_t              ss = cc3501e_wifi_status(ctx, &st);
+		if (ss == ALP_OK) {
+			if (st.state == ALP_CC3501E_WIFI_CONNECTED) return ALP_OK;
+			if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) return ALP_ERR_IO; /* terminal fail */
+			/* CONNECTING / DISCONNECTED -- still in progress, keep polling. */
+		} else if (ss != ALP_ERR_BUSY && ss != ALP_ERR_IO) {
+			/* A non-transient status error (e.g. ALP_ERR_INVAL: the firmware predates
+			 * CMD_WIFI_STATUS) -- fail fast rather than spin the full budget to a
+			 * misleading ALP_ERR_TIMEOUT.  BUSY (READY gate) / IO (bridge desync) stay
+			 * transient and keep polling. */
+			return ss;
+		}
+		if (remaining == 0u) return ALP_ERR_TIMEOUT;
+		uint32_t gap = (remaining < CC3501E_POLL_GAP_MS) ? remaining : CC3501E_POLL_GAP_MS;
+		alp_delay_ms(gap);
+		remaining -= gap;
+	}
 }
 
 alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi)
@@ -529,15 +791,71 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4])
 
 alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms)
 {
-	/* Worker-routed: the firmware SUSPENDS the bridge SPI, runs BleIf_EnableBLE (the
-	 * NWP BLE-controller cold-init -- a control-cmd round-trip that can take ~10-15 s)
-	 * + nimble_host_start sync, then RE-OPENS the bridge.  The link is DOWN for that
-	 * whole window, so the host must poll-by-repeat (retry on IO) longer than the
-	 * 10 s Wi-Fi floor -- floor to 30 s so a working-but-slow enable is not misread as
-	 * a failure before the worker publishes the result + the bridge re-syncs. */
+	/* Worker-routed: the firmware brings Wi-Fi up first (shared HIF), forces the
+	 * NWP to Always-Active, then runs BleIf_EnableBLE + nimble_host_start.  The
+	 * BLE-controller cold-init blocks on an async 0x2A04 (BLE_INIT_DONE) event
+	 * delivered over the SAME shared HIF, so the firmware must NOT suspend the
+	 * bridge across it (suspending starves the event -- the root cause of the old
+	 * -4 hang); it re-opens the bridge SPI AFTER instead.  The bring-up still
+	 * perturbs the shared DMA, so the host poll-by-repeat (retry on IO) must
+	 * outlast it -- floor to the BLE-enable window so a working-but-slow enable is
+	 * not misread as a failure before the worker publishes + the bridge re-syncs. */
 	uint32_t budget = timeout_ms;
 	if (budget < CC3501E_BLE_ENABLE_WINDOW_MS) budget = CC3501E_BLE_ENABLE_WINDOW_MS;
 	return poll_by_repeat(ctx, ALP_CC3501E_CMD_BLE_ENABLE, NULL, 0, NULL, 0, NULL, budget);
+}
+
+/* On-wire fixed header of a BLE scan record: addr[6] + addr_type(1) + rssi(1) +
+ * name_len(1), then name_len inline device-name bytes. */
+#define CC3501E_BLE_SCAN_REC_HDR 9u
+/* The firmware GAP discovery blocks for its scan window (~4 s) + the bridge
+ * resync; floor the host poll budget well above it so a slow scan is not
+ * misread as IO before the worker publishes the advertiser list. */
+#define CC3501E_BLE_SCAN_WINDOW_MS 15000u
+
+alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
+                              cc3501e_ble_scan_record_t *out_records,
+                              size_t                     cap,
+                              size_t                    *count,
+                              uint32_t                   timeout_ms)
+{
+	if (out_records == NULL && cap > 0u) return ALP_ERR_INVAL;
+	if (count != NULL) *count = 0;
+
+	uint32_t budget = timeout_ms;
+	if (budget < CC3501E_BLE_SCAN_WINDOW_MS) budget = CC3501E_BLE_SCAN_WINDOW_MS;
+
+	/* Receive the packed record list into a scratch-sized buffer (mirrors
+	 * cc3501e_wifi_scan: keeps cc3501e_request's scratch free for the framing). */
+	static uint8_t scan_buf[ALP_CC3501E_MAX_PAYLOAD];
+	size_t         got = 0;
+	alp_status_t   s   = poll_by_repeat(
+        ctx, ALP_CC3501E_CMD_BLE_SCAN_START, NULL, 0, scan_buf, sizeof(scan_buf), &got, budget);
+	if (s != ALP_OK) return s;
+
+	/* Walk the packed records: addr[6] | addr_type | rssi | name_len then
+	 * name_len inline name bytes (no padding). */
+	size_t off = 0;
+	size_t n   = 0;
+	while (off + CC3501E_BLE_SCAN_REC_HDR <= got && n < cap) {
+		const uint8_t *rec      = &scan_buf[off];
+		uint8_t        name_len = rec[8];
+		if (off + CC3501E_BLE_SCAN_REC_HDR + (size_t)name_len > got) {
+			break; /* truncated trailing record -- stop cleanly */
+		}
+		cc3501e_ble_scan_record_t *out = &out_records[n];
+		memcpy(out->addr, &rec[0], 6);
+		out->addr_type = rec[6];
+		out->rssi_dbm  = (int8_t)rec[7];
+		out->name_len  = name_len;
+		uint8_t copy = (name_len > CC3501E_BLE_NAME_MAX) ? (uint8_t)CC3501E_BLE_NAME_MAX : name_len;
+		memcpy(out->name, &rec[CC3501E_BLE_SCAN_REC_HDR], copy);
+		out->name[copy] = '\0';
+		off += CC3501E_BLE_SCAN_REC_HDR + (size_t)name_len;
+		n++;
+	}
+	if (count != NULL) *count = n;
+	return ALP_OK;
 }
 
 /* ------------------------------------------------------------------ */

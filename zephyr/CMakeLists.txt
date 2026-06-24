@@ -65,6 +65,20 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BANNER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/alp_banner.c)
 
+# Alp SoM console (CONFIG_ALP_SDK_CONSOLE) -- the `alp` Zephyr-shell command
+# tree.  Each group is its own TU and attaches to the `alp` root via the
+# decentralized SHELL_SUBCMD_ADD section mechanism, so they list here flat.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_mem.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_gpio.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_i2c.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_periph.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_sys.c)
+
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion.c)
+
 # Storage class dispatcher + backends.
 # The dispatcher compiles unconditionally so apps that depend on the
 # <alp/storage.h> ABI always link cleanly; each backend gates on its
