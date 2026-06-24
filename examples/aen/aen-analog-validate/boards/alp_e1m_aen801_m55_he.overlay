@@ -1,0 +1,130 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-analog-validate overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * DEVICE-ONLY wiring for the DAC0 -> ADC loopback driven through the portable
+ * <alp/dac.h> + <alp/adc.h> surface (no Kconfig here -- CONFIG_DCACHE=n is a
+ * board Kconfig.defconfig default, CONFIG_ADC/DAC come from board.yaml + prj.conf).
+ * Enables:
+ *   - dac0    (12-bit DAC @ 0x49028000, alif,dac; output = E1M pad A16 = Alif
+ *              P2_2 = DAC_0 per metadata/e1m_modules/aen/from-alif.tsv).
+ *              Driver-fixed reference = 0.750 V (DAC12_VREF_CONT=0x4; carried in
+ *              the SoC dtsi as alif,reference-mv=750).
+ *   - adc12_0 (12-bit SAR @ 0x49020000, alif,adc).  Driver-fixed reference =
+ *              1.8 V (ADC_VREF_CONT=0x10, RDIV=0).
+ *
+ * Both controller nodes carry their reg / reg-names / config props from the SoC
+ * dtsi (zephyr/dts/alif/ensemble_e8_peripherals.dtsi, transcribed VERBATIM from
+ * the Apache-2.0 zephyr_alif fork e1.dtsi); this overlay flips them okay, adds
+ * the io-channel plumbing the portable <alp/adc.h> backend needs, and declares
+ * the alp-dac0 / alp-adc0 aliases the portable backends resolve.
+ *
+ * Portable-alias wiring (this is what differs from the raw-API regcheck overlays):
+ *   - The <alp/dac.h> backend does DEVICE_DT_GET(DT_ALIAS(alp_dac0)), so the
+ *     alp-dac0 alias points DIRECTLY at the dac0 controller node.
+ *   - The <alp/adc.h> backend does ADC_DT_SPEC_GET(DT_ALIAS(alp_adc0)), which
+ *     expands to DT_IO_CHANNELS_CTLR/INPUT -- so the alp-adc0 alias must point at
+ *     an io-channels CONSUMER node (analog_loopback below), NOT at the controller.
+ *     The controller gets a channel@0 child carrying the standard zephyr,* ADC
+ *     channel config (the regcheck app builds that config in C; the portable path
+ *     reads it from DT).
+ *
+ * BENCH JUMPER REQUIRED: a wire from the DAC0 pad (A16 / P2_2) to an ANA_S input
+ * pad routed to the chosen ADC instance.  The from-alif.tsv routes the analog
+ * sense pads as: A12=ANA_S6 A13=ANA_S4 A14=ANA_S2(P0_2) A15=ANA_S0(P0_0)
+ * B12=ANA_S7 B13=ANA_S5 B14=ANA_S3(P0_3) B15=ANA_S1(P0_1).
+ *
+ * TBD (bench unknown, do NOT invent): which ADC12 INSTANCE + CHANNEL INDEX each
+ * ANA_S pad lands on is an Alif TRM detail not present in the fetched fork
+ * source.  This overlay defaults the alp-adc0 alias to adc12_0 channel 0 (a
+ * PLAUSIBLE DEFAULT: ANA_S0 = A15 = P0_0 is the lowest-numbered sense pad).  If
+ * the jumper/TRM map says otherwise, repoint analog_loopback's io-channels (and
+ * the channel@0 reg) at the right instance/channel.  See README.md.
+ */
+
+#include <zephyr/dt-bindings/adc/adc.h>
+
+/*
+ * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the image
+ * links + runs from RAM (J-Link loadbin+go, no reset). PATH-REFERENCE form
+ * (&itcm) -- the phandle-array form makes FLASH_SIZE=0 and overflows the link.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	/*
+	 * io-channels consumer the alp-adc0 alias resolves to.  ADC_DT_SPEC_GET on
+	 * the alias reads .dev from the referenced controller (adc12_0) and
+	 * .channel_id from the input cell (0), then pulls the channel@0 config.
+	 *
+	 * compatible = "alp,adc-input" is REQUIRED, not cosmetic.  A binding-LESS
+	 * consumer (the shape `zephyr,user` uses) only gets io-channels phandle-array
+	 * macros generated because gen_edt.py hard-codes "/zephyr,user" in
+	 * infer_binding_for_paths (gen_edt.py:52).  For ANY other path, edtlib's
+	 * no-binding fallback only type-infers the fixed _DEFAULT_PROP_TYPES whitelist
+	 * (edtlib.py:3653 -- compatible/status/reg/interrupts/..., NO io-channels), so
+	 * `io-channels` is silently dropped from node.props and gen_defines emits
+	 * neither DT_N_S_analog_loopback_P_io_channels_IDX_0_PH nor ..._VAL_input ->
+	 * ADC_DT_SPEC_GET fails to compile.  Giving the node a `compatible` whose
+	 * binding (zephyr/dts/bindings/adc/alp,adc-input.yaml) declares io-channels as
+	 * `type: phandle-array` makes edtlib build the ControllerAndData, so the
+	 * _PH (controller ord) + _VAL_input (cell 0) macros are generated.
+	 */
+	analog_loopback: analog-loopback {
+		compatible = "alp,adc-input";
+		io-channels = <&adc12_0 0>;
+	};
+
+	aliases {
+		/* Portable DAC channel 0 -> the dac0 controller (DEVICE_DT_GET). */
+		alp-dac0 = &dac0;
+		/* Portable ADC channel 0 -> the io-channels consumer (ADC_DT_SPEC_GET). */
+		alp-adc0 = &analog_loopback;
+	};
+};
+
+&dac0 {
+	status = "okay";
+};
+
+/*
+ * TBD: adc12_0 is the plausible-default loopback receiver.  If the bench jumper
+ * lands the DAC0 pad on an ANA_S input owned by adc12_1 / adc12_2, enable that
+ * instance instead and repoint analog_loopback's io-channels at it.
+ */
+&adc12_0 {
+	status = "okay";
+
+	/*
+	 * Channel 0 config for the portable <alp/adc.h> path (the raw-API regcheck
+	 * builds the equivalent adc_channel_cfg in C):
+	 *   - zephyr,gain = ADC_GAIN_1: unity (PGA only matters in differential mode).
+	 *   - zephyr,reference = ADC_REF_INTERNAL: the driver fixes the ADC reference
+	 *     in hardware (ADC_VREF_CONT=0x10, RDIV=0 = 1.8 V); this is the portable
+	 *     enum that maps onto it.
+	 *   - zephyr,vref-mv = 1800: the ADC full-scale reference in mV.  The
+	 *     <alp/adc.h> backend reads this (spec->vref_mv) to convert the raw code
+	 *     to microvolts -- it MUST match the 1.8 V the silicon is programmed to
+	 *     (adc_alif.c ADC_VREF_CONT=0x10 / RDIV=0 == hal_alif analog_ctrl.h:63/:46).
+	 *   - zephyr,acquisition-time = ADC_ACQ_TIME_DEFAULT: the adc_alif driver
+	 *     programs the sample-and-hold from its own DT props, so the portable
+	 *     channel cfg just asks for the default.
+	 *   - zephyr,resolution = 12: 12-bit SAR.
+	 *
+	 * The controller already declares #address-cells/#size-cells (= <1>/<0>)
+	 * in the SoC dtsi, so the channel@0 child resolves without redeclaring them.
+	 */
+	channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <1800>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+};

@@ -51,30 +51,30 @@ extern "C" {
 
 /** Operation mode.  CAN-FD enables higher data-phase bit rates. */
 typedef enum {
-    ALP_CAN_MODE_CLASSIC = 0,    /**< ISO 11898-1 classic CAN, ≤ 8 byte payload. */
-    ALP_CAN_MODE_FD      = 1     /**< CAN-FD, ≤ 64 byte payload + bit-rate switch. */
+	ALP_CAN_MODE_CLASSIC = 0, /**< ISO 11898-1 classic CAN, ≤ 8 byte payload. */
+	ALP_CAN_MODE_FD      = 1  /**< CAN-FD, ≤ 64 byte payload + bit-rate switch. */
 } alp_can_mode_t;
 
 /** Maximum payload bytes per frame, by mode. */
-#define ALP_CAN_MAX_DLC_CLASSIC  8
-#define ALP_CAN_MAX_DLC_FD       64
+#define ALP_CAN_MAX_DLC_CLASSIC 8
+#define ALP_CAN_MAX_DLC_FD      64
 
 /** A single CAN frame (TX or RX). */
 typedef struct {
-    uint32_t id;                    /**< 11-bit (standard) or 29-bit (extended). */
-    bool     ext_id;                /**< true = 29-bit, false = 11-bit. */
-    bool     rtr;                   /**< Remote-transmission request. */
-    bool     fd;                    /**< CAN-FD frame. */
-    bool     brs;                   /**< Bit-rate switch (FD only). */
-    uint8_t  dlc;                   /**< Data length, 0..@ref ALP_CAN_MAX_DLC_FD. */
-    uint8_t  data[ALP_CAN_MAX_DLC_FD];
+	uint32_t id;     /**< 11-bit (standard) or 29-bit (extended). */
+	bool     ext_id; /**< true = 29-bit, false = 11-bit. */
+	bool     rtr;    /**< Remote-transmission request. */
+	bool     fd;     /**< CAN-FD frame. */
+	bool     brs;    /**< Bit-rate switch (FD only). */
+	uint8_t  dlc;    /**< Data length, 0..@ref ALP_CAN_MAX_DLC_FD. */
+	uint8_t  data[ALP_CAN_MAX_DLC_FD];
 } alp_can_frame_t;
 
 /** Receive-side filter.  A frame matches when (frame.id & mask) == (id & mask). */
 typedef struct {
-    uint32_t id;                    /**< Filter pattern. */
-    uint32_t mask;                  /**< Bits to compare (1 = must match). */
-    bool     ext_id;                /**< true = match 29-bit IDs only. */
+	uint32_t id;     /**< Filter pattern. */
+	uint32_t mask;   /**< Bits to compare (1 = must match). */
+	bool     ext_id; /**< true = match 29-bit IDs only. */
 } alp_can_filter_t;
 
 /** Opaque CAN bus handle.  Allocate via @ref alp_can_open. */
@@ -82,11 +82,11 @@ typedef struct alp_can alp_can_t;
 
 /** Configuration passed to @ref alp_can_open. */
 typedef struct {
-    uint32_t       bus_id;
-    uint32_t       bitrate_nominal_hz; /**< Arbitration-phase bit rate. */
-    uint32_t       bitrate_data_hz;    /**< Data-phase rate (FD); 0 if classic. */
-    alp_can_mode_t mode;
-    bool           loopback;           /**< Local self-test mode. */
+	uint32_t       bus_id;
+	uint32_t       bitrate_nominal_hz; /**< Arbitration-phase bit rate. */
+	uint32_t       bitrate_data_hz;    /**< Data-phase rate (FD); 0 if classic. */
+	alp_can_mode_t mode;
+	bool           loopback; /**< Local self-test mode. */
 } alp_can_config_t;
 
 /**
@@ -119,7 +119,7 @@ typedef void (*alp_can_rx_cb_t)(const alp_can_frame_t *frame, void *user);
  *         - controller rejected the requested timing
  *         - CAN-FD requested but `CONFIG_CAN_FD_MODE=n`
  */
-alp_can_t   *alp_can_open(const alp_can_config_t *cfg);
+alp_can_t *alp_can_open(const alp_can_config_t *cfg);
 
 /**
  * @brief Enable bus RX/TX.  Required before send / receive succeeds.
@@ -152,9 +152,7 @@ alp_status_t alp_can_stop(alp_can_t *can);
  *         ALP_ERR_TIMEOUT if all TX mailboxes are occupied;
  *         ALP_ERR_IO on bus error (e.g. error-passive state).
  */
-alp_status_t alp_can_send(alp_can_t *can,
-                          const alp_can_frame_t *frame,
-                          uint32_t timeout_ms);
+alp_status_t alp_can_send(alp_can_t *can, const alp_can_frame_t *frame, uint32_t timeout_ms);
 
 /**
  * @brief Install a receive filter and dispatch matching frames to @p cb.
@@ -171,11 +169,11 @@ alp_status_t alp_can_send(alp_can_t *can,
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOMEM
  *         (filter slots exhausted) / ALP_ERR_IO.
  */
-alp_status_t alp_can_add_filter(alp_can_t *can,
+alp_status_t alp_can_add_filter(alp_can_t              *can,
                                 const alp_can_filter_t *filter,
-                                alp_can_rx_cb_t cb,
-                                void *user,
-                                int32_t *filter_id_out);
+                                alp_can_rx_cb_t         cb,
+                                void                   *user,
+                                int32_t                *filter_id_out);
 
 /**
  * @brief Remove a previously-installed filter by id.
@@ -192,7 +190,7 @@ alp_status_t alp_can_remove_filter(alp_can_t *can, int32_t filter_id);
  *
  * @param[in] can  Handle from @ref alp_can_open, or NULL.
  */
-void         alp_can_close(alp_can_t *can);
+void alp_can_close(alp_can_t *can);
 
 /**
  * @brief Query the capabilities of an opened CAN handle.
@@ -203,7 +201,7 @@ void         alp_can_close(alp_can_t *can);
 const alp_capabilities_t *alp_can_capabilities(const alp_can_t *can);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_CAN_H */
+#endif /* ALP_CAN_H */

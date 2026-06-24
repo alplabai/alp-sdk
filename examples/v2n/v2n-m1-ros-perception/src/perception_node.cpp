@@ -79,61 +79,61 @@
 
 using namespace std::chrono_literals;
 
-namespace alp {
+namespace alp
+{
 
 /// Main ROS 2 node combining the sensor publishers + the object-
 /// detection dispatcher.  All ROS traffic is asynchronous; sensor
 /// reads happen on a 50 Hz timer + the inference loop runs on its
 /// own thread (managed by DeepxDispatcher).
-class PerceptionNode : public rclcpp::Node {
-public:
-    PerceptionNode() : Node("alp_perception") {
-        RCLCPP_INFO(get_logger(),
-                    "alp_perception starting up on V2N family");
+class PerceptionNode : public rclcpp::Node
+{
+  public:
+	PerceptionNode() : Node("alp_perception")
+	{
+		RCLCPP_INFO(get_logger(), "alp_perception starting up on V2N family");
 
-        // Open the inference backend (AUTO -- the SDK picks DEEPX on
-        // V2M, DRP-AI on V2N).  The dispatcher publishes detections
-        // on /alp/detections.
-        dispatcher_ = std::make_unique<DeepxDispatcher>(*this);
+		// Open the inference backend (AUTO -- the SDK picks DEEPX on
+		// V2M, DRP-AI on V2N).  The dispatcher publishes detections
+		// on /alp/detections.
+		dispatcher_ = std::make_unique<DeepxDispatcher>(*this);
 
-        // Bring up the sensor publishers (IMU + GNSS + battery).
-        // sensor_pubs.cpp owns the alp_i2c_t handles + the 50 Hz
-        // sample timer.
-        sensors_ = std::make_unique<SensorPublishers>(*this);
+		// Bring up the sensor publishers (IMU + GNSS + battery).
+		// sensor_pubs.cpp owns the alp_i2c_t handles + the 50 Hz
+		// sample timer.
+		sensors_ = std::make_unique<SensorPublishers>(*this);
 
-        // Subscribe to /alp/cmd_vel so customer planning nodes can
-        // hand us motion commands.  We don't drive motors directly
-        // from here (that's the drone-autopilot demo's job); this
-        // subscription proves the bidirectional ROS contract.
-        cmd_sub_ = create_subscription<geometry_msgs::msg::Twist>(
-            "/alp/cmd_vel", 10,
-            [this](geometry_msgs::msg::Twist::SharedPtr msg) {
-                RCLCPP_DEBUG(get_logger(),
-                             "cmd_vel: linear=%.2f angular=%.2f",
-                             msg->linear.x, msg->angular.z);
-            });
+		// Subscribe to /alp/cmd_vel so customer planning nodes can
+		// hand us motion commands.  We don't drive motors directly
+		// from here (that's the drone-autopilot demo's job); this
+		// subscription proves the bidirectional ROS contract.
+		cmd_sub_ = create_subscription<geometry_msgs::msg::Twist>(
+		    "/alp/cmd_vel", 10, [this](geometry_msgs::msg::Twist::SharedPtr msg) {
+			    RCLCPP_DEBUG(get_logger(),
+			                 "cmd_vel: linear=%.2f angular=%.2f",
+			                 msg->linear.x,
+			                 msg->angular.z);
+		    });
 
-        // Watchdog: log node-up + the resolved inference backend.
-        watchdog_ = create_wall_timer(
-            5s, [this] {
-                RCLCPP_INFO(get_logger(),
-                            "alive -- inference backend %s",
-                            dispatcher_->backend_name());
-            });
-    }
+		// Watchdog: log node-up + the resolved inference backend.
+		watchdog_ = create_wall_timer(5s, [this] {
+			RCLCPP_INFO(get_logger(), "alive -- inference backend %s", dispatcher_->backend_name());
+		});
+	}
 
-private:
-    std::unique_ptr<DeepxDispatcher>   dispatcher_;
-    std::unique_ptr<SensorPublishers>  sensors_;
-    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
-    rclcpp::TimerBase::SharedPtr       watchdog_;
+  private:
+	std::unique_ptr<DeepxDispatcher>                           dispatcher_;
+	std::unique_ptr<SensorPublishers>                          sensors_;
+	rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
+	rclcpp::TimerBase::SharedPtr                               watchdog_;
 };
 
-}  // namespace alp
+} // namespace alp
 
-int main(int argc, char **argv) {
-    rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<alp::PerceptionNode>());
-    rclcpp::shutdown();
-    return 0;
+int main(int argc, char **argv)
+{
+	rclcpp::init(argc, argv);
+	rclcpp::spin(std::make_shared<alp::PerceptionNode>());
+	rclcpp::shutdown();
+	return 0;
 }

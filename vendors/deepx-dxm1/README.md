@@ -14,26 +14,30 @@ runtime on Linux (Yocto first-class target).
 
 ## Status
 
-**v0.3 / Yocto-side scaffolding.**  This directory ships:
+**Backend body written against the real dx_rt runtime
+(BENCH-UNVERIFIED).**  `src/yocto/inference_deepx.cpp` is implemented
+against DEEPX's *real* dx_rt C++ API -- `#include "dxrt/dxrt_api.h"`,
+namespace `dxrt` (`dxrt::InferenceEngine`, `dxrt::Tensor`,
+`dxrt::InferenceOption`).  It header-compiles against the real dx_rt
+headers; it has NOT been run on silicon (needs a V2N-M1 module with the
+DX-M1 on PCIe + the dx_rt runtime/driver on the sysroot).
 
-- A **clean-room stub header** at
-  `vendors/deepx-dxm1/include/dxnn/dxnn.h` that declares the minimum
-  types + entry points the SDK's backend hook
-  (`src/yocto/inference_deepx.cpp`) calls.  The stub is independent
-  of DEEPX's real headers -- it was written from the DEEPX runtime's
-  public API description, not by copying from
-  `github.com/DEEPX-AI/dx_rt/lib/include/`.  This is intentional and
-  necessary: dx_rt's LICENSE is proprietary (customer-only -- see
-  "Licensing" below), so the SDK cannot redistribute or derive from
-  those headers.
-- A `CMakeLists.txt` that publishes the include path so the backend
-  hook can `#include <dxnn/dxnn.h>` portably.
+dx_rt is **proprietary** (DEEPX EULA -- see "Licensing" below), so the
+SDK does **not** vendor its headers or libs.  This directory is now a
+**doc + detect-and-skip shim only** -- there is no clean-room `dxnn_*`
+stub header (the earlier scaffold's `include/dxnn/dxnn.h` declared a
+fictional C surface that does not exist in the real SDK and has been
+removed).  The backend resolves the real dx_rt headers + `libdxrt`:
 
-Real `do_compile` against the DEEPX runtime arrives in the v0.4
-cycle, gated behind the CMake option `ALP_SDK_USE_DEEPX_DXM1=ON`.
-When ON the backend hook calls `dxnn_*` entry points for real;
-when OFF (the default) the SDK dispatcher's auto-resolve skips
-DEEPX_DXM1 and the V2N-M1 host falls back to CPU.
+- inside a **Yocto cross-build**, from the sysroot (the
+  `meta-deepx-m1` `dx-rt` recipe); or
+- for a **maintainer header-check**, from a dx_rt clone pointed at by
+  `ALP_DEEPX_DXRT_HOME` (expects `<root>/lib/include` + `<root>/lib`).
+
+All of this is wired directly in `src/yocto/CMakeLists.txt`'s
+`ALP_SDK_USE_DEEPX_DXM1` block (default **OFF**).  When ON the backend
+links + calls dx_rt for real; when OFF the dispatcher's auto-resolve
+skips DEEPX_DXM1 and the V2N-M1 host falls back to CPU.
 
 ## Where to get the DEEPX software
 
@@ -43,7 +47,7 @@ integrating the DX-M1 into a V2N-M1 Yocto image:
 
 | Repo                                                                                          | Role                                                  |
 |-----------------------------------------------------------------------------------------------|-------------------------------------------------------|
-| [`dx_rt`](https://github.com/DEEPX-AI/dx_rt)                                                  | Userspace inference runtime (the source of `dxnn_*`). |
+| [`dx_rt`](https://github.com/DEEPX-AI/dx_rt)                                                  | Userspace inference runtime (the `dxrt::InferenceEngine` C++ API). |
 | [`dx_rt_npu_linux_driver`](https://github.com/DEEPX-AI/dx_rt_npu_linux_driver)                | **PCIe kernel driver** for the host <-> DX-M1 link.   |
 | [`meta-deepx-m1`](https://github.com/DEEPX-AI/meta-deepx-m1)                                  | DEEPX M1 Yocto recipes (packages the two above).      |
 
@@ -108,8 +112,9 @@ detect classifies both as "NOASSERTION").  In practical terms:
   is authorised to use the runtime + driver against that part.
 - **Source visibility is for transparency**, not for permissive
   redistribution.  The alp-sdk repo **does not** include any DEEPX
-  source or header content; the stub at `include/dxnn/dxnn.h` is a
-  clean-room declaration written against the public API description.
+  source or header content -- not even a clean-room stub.  The backend
+  body refers to the dx_rt types/methods by name only and links against
+  the real runtime resolved from the Yocto sysroot.
 
 DEEPX may also distribute the runtime via direct customer channels
 (developer portal / support email) outside the GitHub mirror; if
@@ -118,11 +123,12 @@ authoritative, follow that one.
 
 ### License compatibility
 
-The alp-sdk stub header is **Apache-2.0** (it's our code,
-declaring only a public ABI signature -- not protected by DEEPX's
-copyright).  The DEEPX runtime is linked at runtime via the
-sysroot, never bundled.  The dual-licensing arrangement is safe
-as long as no DEEPX source is committed to this repo.
+The alp-sdk backend body (`src/yocto/inference_deepx.cpp`) is
+**Apache-2.0** (it's our code, referencing only public dx_rt API
+names -- not protected by DEEPX's copyright).  The DEEPX runtime is
+linked via the sysroot at build time, never bundled.  The
+dual-licensing arrangement is safe as long as no DEEPX source is
+committed to this repo.
 
 ## See also
 

@@ -35,8 +35,8 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    bool        initialised;
+	alp_uart_t *port;
+	bool        initialised;
 } ublox_neo_m9n_t;
 
 /** @brief Bind context to caller-opened UART port. */
@@ -53,8 +53,8 @@ alp_status_t ublox_neo_m9n_init(ublox_neo_m9n_t *dev, alp_uart_t *port);
  *
  * @return `ALP_OK` on full line read.
  */
-alp_status_t ublox_neo_m9n_read_nmea_line(ublox_neo_m9n_t *dev, uint8_t *line_buf, size_t line_max,
-                                          size_t *len_out, uint32_t timeout_ms);
+alp_status_t ublox_neo_m9n_read_nmea_line(
+    ublox_neo_m9n_t *dev, uint8_t *line_buf, size_t line_max, size_t *len_out, uint32_t timeout_ms);
 
 /** @brief Release driver context. */
 void ublox_neo_m9n_deinit(ublox_neo_m9n_t *dev);

@@ -33,7 +33,7 @@ kconfig:
   yocto:          "kernel at24 EEPROM driver"
 
 families:
-  - aen                            # on Alif LPI2C
+  - aen                            # on SoC I2C2 (bridge/DNP-selected; upstream i2c_dw)
   - v2n                            # on E1M_I2C0 (Renesas RIIC0)
   - v2n-m1                         # inherited from V2N base
 

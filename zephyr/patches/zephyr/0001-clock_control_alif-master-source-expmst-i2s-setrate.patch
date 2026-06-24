@@ -1,0 +1,254 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Tue, 17 Jun 2026 00:00:00 +0000
+Subject: [PATCH] clock_control_alif: enable audio master source + EXPMST0
+ force, add I2S divider set_rate
+
+On the Alif Ensemble the audio blocks need more than the per-peripheral gate
+the upstream driver flips:
+
+  * I2S and the HP PDM derive their bit/functional clock from the CGU 76.8 MHz
+    (HFOSCx2) reference, which is a CGU master-source enable
+    (cgu_base + ALIF_CLK_ENA_REG 0x14, bit 24), NOT a per-peripheral gate.
+  * the EXPMST0-domain HP PDM additionally needs the EXPMST0_CTRL IPCLK_FORCE
+    (bit 31) + PCLK_FORCE (bit 30) bits set
+    (clkctl_per_slv_base + ALIF_EXPMST0_CTRL_REG 0x00).
+
+The upstream clock controller never touches either, so audio bring-up code had
+to poke the raw CGU / EXPMST0 addresses by hand. Fold both into the .on path
+(no-op for every non-audio clock), derived from the config register bases (no
+hardcoded absolute addresses). These offsets/bits are carried from the Alif
+Apache-2.0 zephyr_alif fork (soc/alif/ensemble/common/soc_common.c GEN2 path +
+dt-bindings/clock/alif_clocks_common.h).
+
+Also add an .set_rate that programs the I2Sx_CTRL bit-clock divider
+(76.8 MHz / sclk into the 10-bit CKDIV field) so i2s_dw.c's
+clock_control_set_rate() stops returning -ENOSYS and the I2S sample rate is
+actually programmed. The divider field layout is taken from the Alif i2s_sync
+reference register header but is BENCH-UNVERIFIED against the DFP/TRM for the
+DesignWare i2s_dw path -- it is a separable hunk so a bench step can hold it if
+it regresses, without losing the (grounded, bench-proven) master/EXPMST enable.
+
+Non-Alif clock controllers are unaffected.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+diff --git a/drivers/clock_control/clock_control_alif.c b/drivers/clock_control/clock_control_alif.c
+index 4a7e002..109b345 100644
+--- a/drivers/clock_control/clock_control_alif.c
++++ b/drivers/clock_control/clock_control_alif.c
+@@ -124,6 +124,93 @@ struct alif_clock_control_config {
+ #define ALIF_CLOCK_CFG_PARENT_CLK(id) \
+ 	(((id) >> ALIF_CLOCK_PARENT_CLK_SHIFT) & ALIF_CLOCK_PARENT_CLK_MASK)
+ 
++/*
++ * alp-sdk Tier-1.5 master-clock / EXPMST / I2S-divider extension.
++ *
++ * The upstream driver only flips per-peripheral gate bits.  On the Ensemble the
++ * audio blocks (I2S, the HP PDM) additionally need (a) the CGU master 76.8 MHz
++ * (HFOSCx2) reference enabled, and the PDM path needs (b) the EXPMST0 IP/PCLK
++ * force bits -- neither of which is a per-peripheral gate.  Folded here so the
++ * examples stop poking raw addresses.  Register offsets/bits are carried from
++ * the Alif Apache-2.0 zephyr_alif fork (NOT invented):
++ *
++ *   - CGU CLK_ENA reg = cgu_base + 0x14 (ALIF_CLK_ENA_REG,
++ *     fork dt-bindings/clock/alif_clocks_common.h), bit 24 = 76.8 MHz / HFOSCx2
++ *     (fork soc/alif/ensemble/common/soc_common.c GEN2 path:
++ *     `sys_set_bits(CGU_CLK_ENA, BIT(24))` for snps,designware-i2s and for pdm).
++ *   - EXPMST0_CTRL reg = clkctl_per_slv_base + 0x00 (ALIF_EXPMST0_CTRL_REG),
++ *     bit 31 = IPCLK_FORCE, bit 30 = PCLK_FORCE.
++ *   - I2Sx_CTRL regs in clkctl_per_slv: I2S0=0x10, I2S1=0x14, I2S2=0x18,
++ *     I2S3=0x1C (fork alif_clocks_common.h).
++ */
++#define ALIF_CGU_CLK_ENA_REG_OFF  0x14U   /* CGU_CLKCTL : CLK_ENA */
++#define ALIF_CGU_CLK76P8M_BIT     24U     /* CLK_ENA bit 24 = 76.8 MHz/HFOSCx2 */
++#define ALIF_EXPMST0_CTRL_REG_OFF 0x00U   /* CLKCTL_PER_SLV : EXPMST0_CTRL */
++#define ALIF_EXPMST0_IPCLK_FORCE  BIT(31) /* EXPMST0_CTRL : IPCLK_FORCE */
++#define ALIF_EXPMST0_PCLK_FORCE   BIT(30) /* EXPMST0_CTRL : PCLK_FORCE */
++#define ALIF_I2S0_CTRL_REG_OFF    0x10U   /* CLKCTL_PER_SLV : I2S0_CTRL */
++#define ALIF_I2S1_CTRL_REG_OFF    0x14U   /* CLKCTL_PER_SLV : I2S1_CTRL */
++#define ALIF_I2S2_CTRL_REG_OFF    0x18U   /* CLKCTL_PER_SLV : I2S2_CTRL */
++#define ALIF_I2S3_CTRL_REG_OFF    0x1CU   /* CLKCTL_PER_SLV : I2S3_CTRL */
++
++/**
++ * @brief Test whether an encoded clock ID is one of the I2S block clocks
++ * @param clk_id Encoded clock ID from device tree
++ * @return true if the ID decodes to a CLKCTL_PER_SLV I2Sx_CTRL register
++ */
++static inline bool alif_clk_is_i2s(uint32_t clk_id)
++{
++	uint32_t reg = ALIF_CLOCK_CFG_REG(clk_id);
++
++	return (ALIF_CLOCK_CFG_MODULE(clk_id) == ALIF_CLKCTL_PER_SLV_MODULE) &&
++	       (reg == ALIF_I2S0_CTRL_REG_OFF || reg == ALIF_I2S1_CTRL_REG_OFF ||
++		reg == ALIF_I2S2_CTRL_REG_OFF || reg == ALIF_I2S3_CTRL_REG_OFF);
++}
++
++/**
++ * @brief Test whether an encoded clock ID is the HP-PDM / EXPMST0 clock
++ * @param clk_id Encoded clock ID from device tree
++ * @return true if the ID decodes to the CLKCTL_PER_SLV EXPMST0_CTRL register
++ */
++static inline bool alif_clk_is_expmst0(uint32_t clk_id)
++{
++	return (ALIF_CLOCK_CFG_MODULE(clk_id) == ALIF_CLKCTL_PER_SLV_MODULE) &&
++	       (ALIF_CLOCK_CFG_REG(clk_id) == ALIF_EXPMST0_CTRL_REG_OFF);
++}
++
++/**
++ * @brief Enable the audio master source(s) a peripheral clock depends on
++ *
++ * For the audio blocks the per-peripheral gate alone is not enough: the I2S and
++ * HP PDM derive their bit/functional clock from the CGU 76.8 MHz (HFOSCx2)
++ * reference, and the EXPMST0-domain HP PDM additionally needs the EXPMST0
++ * IPCLK/PCLK force bits.  These live outside the encoded clock ID, so enable
++ * them here whenever an audio peripheral clock is turned on.  No-op for every
++ * non-audio clock.
++ *
++ * @param config Clock controller configuration (for the register bases)
++ * @param clk_id Encoded clock ID being enabled
++ */
++static void alif_clock_enable_audio_master(const struct alif_clock_control_config *config,
++					   uint32_t clk_id)
++{
++	bool is_i2s = alif_clk_is_i2s(clk_id);
++	bool is_expmst0 = alif_clk_is_expmst0(clk_id);
++
++	if (!is_i2s && !is_expmst0) {
++		return;
++	}
++
++	/* CGU master 76.8 MHz (HFOSCx2) -- required by both I2S and HP PDM. */
++	sys_set_bit(config->cgu_base + ALIF_CGU_CLK_ENA_REG_OFF, ALIF_CGU_CLK76P8M_BIT);
++
++	/* EXPMST0 IPCLK/PCLK force -- required by the EXPMST0-domain HP PDM. */
++	if (is_expmst0) {
++		sys_set_bits(config->clkctl_per_slv_base + ALIF_EXPMST0_CTRL_REG_OFF,
++			     ALIF_EXPMST0_IPCLK_FORCE | ALIF_EXPMST0_PCLK_FORCE);
++	}
++}
++
+ /**
+  * @brief Get the register address for a clock ID
+  * @param dev Clock control device
+@@ -205,11 +292,19 @@ static uint32_t alif_get_clock_freq(uint32_t clock_id)
+ static int alif_clock_control_on(const struct device *dev,
+ 			clock_control_subsys_t sub_system)
+ {
++	const struct alif_clock_control_config *config = dev->config;
+ 	uint32_t clk_id = (uint32_t)sub_system;
+ 	mem_addr_t reg_addr;
+ 	uint32_t reg_value;
+ 	uint32_t enable_mask;
+ 
++	/*
++	 * alp-sdk: enable the audio master source (CGU 76.8 MHz, and the EXPMST0
++	 * IPCLK/PCLK force for the HP PDM) BEFORE the per-peripheral gate below.
++	 * No-op for every non-audio clock.
++	 */
++	alif_clock_enable_audio_master(config, clk_id);
++
+ 	if (!ALIF_CLOCK_CFG_EN_MASK(clk_id)) {
+ 		/* Clock is always-on, already enabled */
+ 		return 0;
+@@ -291,6 +386,90 @@ static int alif_clock_control_get_rate(const struct device *dev,
+ 	return 0;
+ }
+ 
++/*
++ * I2S bit-clock divider source frequency: the 76.8 MHz (HFOSCx2) reference the
++ * I2Sx_CTRL divider runs from (enabled via alif_clock_enable_audio_master()).
++ */
++#define ALIF_I2S_CLK_SRC_HZ      76800000U
++
++/*
++ * BENCH-UNVERIFIED: I2Sx_CTRL bit-clock divider field layout.
++ *
++ * Field = CKDIV[9:0] at bit 0, 10 bits wide; the divider is written as N (NOT
++ * N-1): achieved bit clock = 76.8 MHz / CKDIV.  This layout + the N (not N-1)
++ * convention are taken from the Alif i2s_sync reference register header
++ * (sdk-alif drivers/i2s/i2s_sync/i2s_sync_int.h: I2S_CTRL_CKDIV_Pos=0,
++ * I2S_CTRL_CKDIV_Msk=(0x3FF<<0); div = I2S_CLK_SRC_HZ / bclk; valid 2..0x3FF) --
++ * but that is a DIFFERENT I2S driver path than the DesignWare i2s_dw this clock
++ * controller actually clocks, and the achieved SCLK has NOT been confirmed on
++ * the bench against the Alif DFP/TRM.  CONFIRM the field width/position and the
++ * N-vs-(N-1) convention against the authoritative Alif DFP/TRM before trusting
++ * the produced sample rate.  The integrator may hold THIS hunk independently of
++ * the (grounded, bench-proven) master/EXPMST enable above.
++ */
++#define ALIF_I2S_CKDIV_POS       0U
++#define ALIF_I2S_CKDIV_MASK      0x3FFU /* CKDIV[9:0] */
++#define ALIF_I2S_CKDIV_MIN       2U
++#define ALIF_I2S_CKDIV_MAX       ALIF_I2S_CKDIV_MASK
++
++/**
++ * @brief Set the bit-clock rate for an I2S peripheral clock
++ *
++ * Programs the I2Sx_CTRL bit-clock divider in CLKCTL_PER_SLV so the I2S block
++ * produces the requested serial bit clock (SCLK) from the 76.8 MHz audio
++ * reference.  Only the I2S clocks support a rate; every other clock ID returns
++ * -ENOTSUP, which i2s_dw.c (and the generic clock_control_set_rate() consumers)
++ * already tolerate.
++ *
++ * BENCH-UNVERIFIED divider field layout -- see the note above.
++ *
++ * @param dev Clock control device
++ * @param sub_system Encoded clock ID from device tree
++ * @param rate Requested bit clock (SCLK) in Hz, passed as a uintptr_t value
++ * @return 0 on success, -ENOTSUP for non-I2S clocks, -EINVAL if the rate cannot
++ *         be reached with a 10-bit divider
++ */
++static int alif_clock_control_set_rate(const struct device *dev,
++				clock_control_subsys_t sub_system,
++				clock_control_subsys_rate_t rate)
++{
++	uint32_t clk_id = (uint32_t)sub_system;
++	uint32_t sclk = (uint32_t)(uintptr_t)rate;
++	mem_addr_t reg_addr;
++	uint32_t reg_value;
++	uint32_t div;
++
++	if (!alif_clk_is_i2s(clk_id)) {
++		/* Only the I2S divider is programmable here. */
++		return -ENOTSUP;
++	}
++
++	if (sclk == 0U) {
++		return -EINVAL;
++	}
++
++	/* Divider written as N (not N-1): SCLK = 76.8 MHz / div. */
++	div = ALIF_I2S_CLK_SRC_HZ / sclk;
++	if (div < ALIF_I2S_CKDIV_MIN || div > ALIF_I2S_CKDIV_MAX) {
++		LOG_ERR("I2S sclk %u Hz needs divider %u out of range [%u..%u]",
++			sclk, div, ALIF_I2S_CKDIV_MIN, ALIF_I2S_CKDIV_MAX);
++		return -EINVAL;
++	}
++
++	if ((ALIF_I2S_CLK_SRC_HZ / div) != sclk) {
++		LOG_WRN("I2S sclk %u Hz not exactly reachable: actual %u Hz (div %u)",
++			sclk, ALIF_I2S_CLK_SRC_HZ / div, div);
++	}
++
++	reg_addr = alif_get_clk_reg_addr(dev, clk_id);
++	reg_value = sys_read32(reg_addr);
++	reg_value &= ~(ALIF_I2S_CKDIV_MASK << ALIF_I2S_CKDIV_POS);
++	reg_value |= (div & ALIF_I2S_CKDIV_MASK) << ALIF_I2S_CKDIV_POS;
++	sys_write32(reg_value, reg_addr);
++
++	return 0;
++}
++
+ /**
+  * @brief Get the status of a peripheral clock
+  *
+@@ -326,6 +505,8 @@ static DEVICE_API(clock_control, alif_clock_control_driver_api) = {
+ 	.on = alif_clock_control_on,
+ 	.off = alif_clock_control_off,
+ 	.get_rate = alif_clock_control_get_rate,
++	/* alp-sdk: I2S bit-clock divider (BENCH-UNVERIFIED layout). */
++	.set_rate = alif_clock_control_set_rate,
+ 	.get_status = alif_clock_control_get_status,
+ };
+ 
+-- 2.43.0

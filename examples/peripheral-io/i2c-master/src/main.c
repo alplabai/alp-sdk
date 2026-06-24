@@ -65,19 +65,19 @@
 
 int main(void)
 {
-    printf("[i2c-master] open BOARD_I2C_SENSORS @ 400 kHz\n");
+	printf("[i2c-master] open BOARD_I2C_SENSORS @ 400 kHz\n");
 
-    /* Open the bus at 400 kHz (I2C Fast-mode).  TMP112 supports up
+	/* Open the bus at 400 kHz (I2C Fast-mode).  TMP112 supports up
      * to 400 kHz per its datasheet; the SDK rounds DOWN to the
      * controller's closest achievable rate.  100 kHz is the safe
      * baseline for unknown devices; 1 MHz (Fast-mode Plus) needs
      * confirmation in the chip's datasheet and short bus traces. */
-    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
-        .bitrate_hz = 400000,
-    });
-    if (bus == NULL) {
-        /* No alp-i2c0 alias on this build -> NULL handle.
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
+	    .bitrate_hz = 400000,
+	});
+	if (bus == NULL) {
+		/* No alp-i2c0 alias on this build -> NULL handle.
          *
          * Common causes:
          *   * Board overlay forgot to set the alias.
@@ -85,12 +85,12 @@ int main(void)
          *     portable E1M baseline).
          *   * On native_sim without the emul overlay we ship,
          *     the alias is unset. */
-        printf("[i2c-master] open failed: alp_last_error=%d\n", (int)alp_last_error());
-        printf("[i2c-master] done\n");
-        return 0;
-    }
+		printf("[i2c-master] open failed: alp_last_error=%d\n", (int)alp_last_error());
+		printf("[i2c-master] done\n");
+		return 0;
+	}
 
-    /* Initialise the TMP112 driver.  This:
+	/* Initialise the TMP112 driver.  This:
      *   1. Issues a write to register 0x01 (CONF) to put the chip
      *      in continuous-conversion mode at 4 Hz.
      *   2. Verifies the write by reading back CONF -- catches the
@@ -99,10 +99,10 @@ int main(void)
      * isn't populated, maybe the address is wrong, maybe the
      * bus is held low by another device.  i2c-scanner can
      * confirm which devices ACK. */
-    tmp112_t     sensor;
-    alp_status_t s = tmp112_init(&sensor, bus, TMP112_ADDR_7BIT);
-    if (s != ALP_OK) {
-        /* Most-frequent failure modes:
+	tmp112_t     sensor;
+	alp_status_t s = tmp112_init(&sensor, bus, TMP112_ADDR_7BIT);
+	if (s != ALP_OK) {
+		/* Most-frequent failure modes:
          *   * ALP_ERR_IO   -- bus error or NACK.  No TMP112 here,
          *                     wrong address, or pull-ups missing
          *                     (the bus floats high without them).
@@ -110,56 +110,57 @@ int main(void)
          *
          * Use i2c-scanner to enumerate what IS on this bus before
          * chasing a TMP112 that may not be populated. */
-        printf("[i2c-master] tmp112_init @ 0x%02x -> %d "
-               "(populated? right address?)\n",
-               TMP112_ADDR_7BIT, (int)s);
-        alp_i2c_close(bus);
-        printf("[i2c-master] done\n");
-        return 0;
-    }
-    printf("[i2c-master] tmp112_init @ 0x%02x -> %d (OK)\n", TMP112_ADDR_7BIT, (int)s);
+		printf("[i2c-master] tmp112_init @ 0x%02x -> %d "
+		       "(populated? right address?)\n",
+		       TMP112_ADDR_7BIT,
+		       (int)s);
+		alp_i2c_close(bus);
+		printf("[i2c-master] done\n");
+		return 0;
+	}
+	printf("[i2c-master] tmp112_init @ 0x%02x -> %d (OK)\n", TMP112_ADDR_7BIT, (int)s);
 
-    /* Optional: tune the conversion rate.  4 Hz is the datasheet
+	/* Optional: tune the conversion rate.  4 Hz is the datasheet
      * default; reach for 8 Hz when you want lower latency at the
      * cost of more power, or 0.25 Hz for very low-power monitoring.
      * Skipping this call keeps the default. */
-    s = tmp112_set_rate(&sensor, TMP112_RATE_4_HZ);
-    if (s != ALP_OK) {
-        printf("[i2c-master] tmp112_set_rate -> %d\n", (int)s);
-        /* Non-fatal: the chip stays at whatever rate init set. */
-    }
+	s = tmp112_set_rate(&sensor, TMP112_RATE_4_HZ);
+	if (s != ALP_OK) {
+		printf("[i2c-master] tmp112_set_rate -> %d\n", (int)s);
+		/* Non-fatal: the chip stays at whatever rate init set. */
+	}
 
-    /* Sample loop: read SAMPLE_COUNT temperatures, one per second.
+	/* Sample loop: read SAMPLE_COUNT temperatures, one per second.
      * Real-life firmware would publish each reading over MQTT,
      * push to a ring buffer for trend analysis, or compare against
      * an alert threshold and pull a GPIO. */
-    for (uint32_t i = 0; i < SAMPLE_COUNT; i++) {
-        int32_t milli_c = 0;
-        s               = tmp112_read_temp_milli_c(&sensor, &milli_c);
-        if (s == ALP_OK) {
-            /* Format integer + fractional parts so we avoid float
+	for (uint32_t i = 0; i < SAMPLE_COUNT; i++) {
+		int32_t milli_c = 0;
+		s               = tmp112_read_temp_milli_c(&sensor, &milli_c);
+		if (s == ALP_OK) {
+			/* Format integer + fractional parts so we avoid float
              * printf on M-class targets.  milli_c is signed -- the
              * fractional part takes the absolute value so e.g.
              * -1750 milli-C prints as "-1.750 degC" (not
              * "-1.-750 degC"). */
-            int whole = milli_c / 1000;
-            int frac  = (milli_c < 0 ? -milli_c : milli_c) % 1000;
-            printf("[i2c-master] sample %u: %d.%03d degC\n", i, whole, frac);
-        } else {
-            /* Read errors during steady-state are rare -- usually
+			int whole = milli_c / 1000;
+			int frac  = (milli_c < 0 ? -milli_c : milli_c) % 1000;
+			printf("[i2c-master] sample %u: %d.%03d degC\n", i, whole, frac);
+		} else {
+			/* Read errors during steady-state are rare -- usually
              * a transient bus glitch (EMI, ground bounce).  Log
              * and continue rather than aborting; the next sample
              * will likely succeed. */
-            printf("[i2c-master] sample %u: read -> %d\n", i, (int)s);
-        }
-        k_msleep(SAMPLE_PERIOD_MS);
-    }
+			printf("[i2c-master] sample %u: read -> %d\n", i, (int)s);
+		}
+		k_msleep(SAMPLE_PERIOD_MS);
+	}
 
-    /* Clean shutdown -- deinit the chip driver (which leaves the
+	/* Clean shutdown -- deinit the chip driver (which leaves the
      * chip in continuous-conversion mode; harmless), then close
      * the bus handle (which releases the slot back to the pool). */
-    tmp112_deinit(&sensor);
-    alp_i2c_close(bus);
-    printf("[i2c-master] done\n");
-    return 0;
+	tmp112_deinit(&sensor);
+	alp_i2c_close(bus);
+	printf("[i2c-master] done\n");
+	return 0;
 }

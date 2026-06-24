@@ -1,0 +1,78 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Bench overlay: enable UTIMER3 + its PWM child (pwm3) for the scopeless
+ * register-readback validation of pwm_alif_utimer.c on the E1M-AEN801 (M55-HE),
+ * via a `pwm-leds` CONSUMER node + PWM_DT_SPEC_GET.
+ *
+ * WHY A CONSUMER NODE (the fix this app demonstrates):
+ *   DEVICE_DT_GET(DT_NODELABEL(pwm3)) on the controller node triggers a phantom
+ *   `pwm3_P_pwms_IDX_0` codegen reference -- the "alif,pwm" binding re-declares
+ *   #pwm-cells, so gen_defines treats the controller as if it had its own `pwms`
+ *   phandle.  Instead, the bench_pwm `pwm-leds` node below carries a real `pwms`
+ *   phandle to <&pwm3 0 ...>; PWM_DT_SPEC_GET on its LED child resolves the
+ *   controller device via DT_PWMS_CTLR_BY_IDX -> DEVICE_DT_GET(DT_PWMS_CTLR...),
+ *   i.e. it dereferences the phandle in the *consumer's* property.  That is the
+ *   path the earlier board build used.
+ *
+ * pwm3 channel 0 = driver A = UT3_T0 (E1M PWM7 per the driver pad map).  We mux
+ * UT3_T0_C onto P10_6 so the driver's pinctrl_apply_state() in pwm_alif_init has
+ * a real pin group to apply (init returns the pinctrl error otherwise).  P10_6
+ * is a PWM OUTPUT pad -- no input-enable / bias is needed (the REN/bias pad
+ * lesson applies only to SENSED pads: I2C SDA/SCL, UART RX, SPI MISO).  We do
+ * NOT observe the pin -- validation is by reading the UTIMER compare/period/
+ * control registers over J-Link mem32 (see the runPlan).
+ *
+ * The `pwms` cell period PWM_USEC(1000) is informational here: the test calls
+ * pwm_set_cycles() with EXACT cycle counts (not pwm_set_dt), so the readback is
+ * independent of the (still placeholder) UTIMER tick rate.
+ *
+ * RAM-RUN retarget (REQUIRED on this bench): the board normally XIP-runs from
+ * MRAM slot0 behind MCUboot; here we J-Link loadbin+run from ITCM, so retarget
+ * zephyr,flash to &itcm (PATH-REFERENCE form -- the <&itcm> phandle-array form
+ * makes FLASH_SIZE=0 and the link overflows) and drop the code-partition so the
+ * image links + runs from ITCM without programming MRAM.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	/*
+	 * The PWM consumer.  bench_pwm's LED child holds the `pwms` phandle that
+	 * PWM_DT_SPEC_GET dereferences to reach the pwm3 controller device --
+	 * this is what avoids the controller-node DEVICE_DT_GET codegen phantom.
+	 */
+	bench_pwm: pwm-leds {
+		compatible = "pwm-leds";
+
+		bench_pwm_ch0: pwm_ch0 {
+			label = "bench-pwm-ut3-drvA";
+			pwms = <&pwm3 0 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+		};
+	};
+};
+
+&pinctrl {
+	pinctrl_pwm3: pinctrl_pwm3 {
+		group0 {
+			/* UT3_T0_C -> P10_6 (E1M PWM7, channel A / driver 0). */
+			pinmux = <PIN_P10_6__UT3_T0_C>;
+		};
+	};
+};
+
+&utimer3 {
+	status = "okay";
+
+	pwm3 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm3>;
+		pinctrl-names = "default";
+	};
+};

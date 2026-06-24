@@ -1,0 +1,196 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# TES CDC-2.1 (CDC200) display controller -- the DPI/RGB pixel-pump feeding the
+# MIPI-DSI bridge on the Alif Ensemble E8.  re-authored, NOT vendored: the
+# property set is grounded in the Alif CMSIS DFP register map (drivers/include/
+# cdc.h: CDC_GLB_CTRL HSPOL/VSPOL/BLPOL/PCLKPOL polarity bits, the cdc_timing_info_t
+# hsync/hbp/hfp/hactive + vsync/vbp/vfp/vactive timing, the two CDC_LAYER_CFG
+# layers and the 8 CDC_PIXEL_FORMAT codes) and matches the property names the
+# zephyr_alif fork node carries so the same node text binds.  No upstream Zephyr
+# nor hal_alif ships a tes,cdc-2.1 (or any DPI display) driver -- ADR 0017 Tier-2
+# when a driver is authored.  BENCH-UNVERIFIED.
+
+description: TES CDC-2.1 (CDC200) display controller
+
+compatible: "tes,cdc-2.1"
+
+include: [display-controller.yaml, pinctrl-device.yaml]
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  interrupt-names:
+    required: true
+
+  hfront-porch:
+    type: int
+    required: true
+    description: Horizontal front porch in display clock cycles
+
+  hback-porch:
+    type: int
+    required: true
+    description: Horizontal back porch in display clock cycles
+
+  hsync-len:
+    type: int
+    required: true
+    description: HSYNC pulse width in display clock cycles
+
+  vfront-porch:
+    type: int
+    required: true
+    description: Vertical front porch in display clock cycles
+
+  vback-porch:
+    type: int
+    required: true
+    description: Vertical back porch in display clock cycles
+
+  vsync-len:
+    type: int
+    required: true
+    description: VSYNC pulse width in display clock cycles
+
+  hsync-active:
+    type: int
+    required: true
+    description:
+      Horizontal synchronization pulse polarity (CDC_GLB_CTRL.HSPOL, bit 31).
+      If HSYNC is active low, use 0, otherwise use 1.
+
+  vsync-active:
+    type: int
+    required: true
+    description:
+      Vertical synchronization pulse polarity (CDC_GLB_CTRL.VSPOL, bit 30).
+      If VSYNC is active low, use 0, otherwise use 1.
+
+  de-active:
+    type: int
+    required: true
+    description:
+      Data Enable (blank) pulse polarity (CDC_GLB_CTRL.BLPOL, bit 29).
+      If DE is active low, use 0, otherwise use 1.
+
+  pixelclk-active:
+    type: int
+    required: true
+    description:
+      Pixel Clock pulse polarity (CDC_GLB_CTRL.PCLKPOL, bit 28).
+      If PCLK is active low, use 0, otherwise use 1.
+
+  clock-frequency:
+    type: int
+    description: DPI pixel clock frequency in Hz.
+
+  bg-color:
+    type: int
+    description: 24-bit display background color (CDC_BACKGND_COLOR).
+
+  enable-l1:
+    type: int
+    required: false
+    default: 0
+    description: Enablement status of layer 1 (CDC_LAYER_CFG[0]).
+    enum:
+      - 0
+      - 1
+
+  enable-l2:
+    type: int
+    required: false
+    default: 0
+    description: Enablement status of layer 2 (CDC_LAYER_CFG[1]).
+    enum:
+      - 0
+      - 1
+
+  pixel-fmt-l1:
+    type: string
+    required: false
+    description: Pixel format for Layer 1 (CDC_PIXEL_FORMAT).
+    enum:
+      - "argb-8888"
+      - "rgb-888"
+      - "rgb-565"
+      - "rgba-8888"
+      - "al-44"
+      - "l-8"
+      - "argb-1555"
+      - "argb-4444"
+      - "undefined"
+
+  pixel-fmt-l2:
+    type: string
+    required: false
+    description: Pixel format for Layer 2 (CDC_PIXEL_FORMAT).
+    enum:
+      - "argb-8888"
+      - "rgb-888"
+      - "rgb-565"
+      - "rgba-8888"
+      - "al-44"
+      - "l-8"
+      - "argb-1555"
+      - "argb-4444"
+      - "undefined"
+
+  def-back-color-l1:
+    type: int
+    required: false
+    description: Default per-layer background color - layer 1.
+
+  def-back-color-l2:
+    type: int
+    required: false
+    description: Default per-layer background color - layer 2.
+
+  win-x0-l1:
+    type: int
+    description: Layer 1 window horizontal start (CDC_LAYER_CFG window).
+  win-y0-l1:
+    type: int
+    description: Layer 1 window vertical start.
+  win-x1-l1:
+    type: int
+    description: Layer 1 window horizontal stop.
+  win-y1-l1:
+    type: int
+    description: Layer 1 window vertical stop.
+  blend-factor1-l1:
+    type: int
+    description: Layer 1 blend factor F1 (CDC_BLEND_* selection).
+  blend-factor2-l1:
+    type: int
+    description: Layer 1 blend factor F2.
+  const-alpha-l1:
+    type: int
+    description: Layer 1 constant alpha (0..255).
+
+  win-x0-l2:
+    type: int
+    description: Layer 2 window horizontal start.
+  win-y0-l2:
+    type: int
+    description: Layer 2 window vertical start.
+  win-x1-l2:
+    type: int
+    description: Layer 2 window horizontal stop.
+  win-y1-l2:
+    type: int
+    description: Layer 2 window vertical stop.
+  blend-factor1-l2:
+    type: int
+    description: Layer 2 blend factor F1.
+  blend-factor2-l2:
+    type: int
+    description: Layer 2 blend factor F2.
+  const-alpha-l2:
+    type: int
+    description: Layer 2 constant alpha (0..255).

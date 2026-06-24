@@ -35,153 +35,172 @@
 /* Register addresses + bit constants are exported by the public
  * header; we keep the file's static helpers local. */
 
-static alp_status_t reg_read(tps628640_t *ctx, uint8_t reg, uint8_t *val) {
-    return alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1u, val, 1u);
+static alp_status_t reg_read(tps628640_t *ctx, uint8_t reg, uint8_t *val)
+{
+	return alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1u, val, 1u);
 }
 
-static alp_status_t reg_write(tps628640_t *ctx, uint8_t reg, uint8_t val) {
-    uint8_t buf[2] = {reg, val};
-    return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
+static alp_status_t reg_write(tps628640_t *ctx, uint8_t reg, uint8_t val)
+{
+	uint8_t buf[2] = { reg, val };
+	return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
 }
 
 /* Write the cached CONTROL shadow back to the chip; on success
  * leaves ctx->control_shadow consistent with the on-chip state. */
-static alp_status_t flush_control(tps628640_t *ctx) {
-    return reg_write(ctx, TPS628640_REG_CONTROL, ctx->control_shadow);
+static alp_status_t flush_control(tps628640_t *ctx)
+{
+	return reg_write(ctx, TPS628640_REG_CONTROL, ctx->control_shadow);
 }
 
-alp_status_t tps628640_init(tps628640_t *ctx, alp_i2c_t *bus,
-                            uint8_t addr_7bit, uint16_t default_voltage_mv) {
-    if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
-    if (addr_7bit > 0x7Fu) return ALP_ERR_INVAL;
+alp_status_t
+tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, uint16_t default_voltage_mv)
+{
+	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
+	if (addr_7bit > 0x7Fu) return ALP_ERR_INVAL;
 
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->bus                = bus;
-    ctx->addr               = addr_7bit;
-    ctx->default_voltage_mv = default_voltage_mv;
-    /* CONTROL is write-only on the chip -- seed the shadow to the
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->bus                = bus;
+	ctx->addr               = addr_7bit;
+	ctx->default_voltage_mv = default_voltage_mv;
+	/* CONTROL is write-only on the chip -- seed the shadow to the
      * datasheet's documented default (0x6E) so the typed helpers can
      * do read-modify-write semantics against the chip's actual
      * reset state. */
-    ctx->control_shadow     = TPS628640_CTRL_DEFAULT;
+	ctx->control_shadow = TPS628640_CTRL_DEFAULT;
 
-    /* ACK-probe via a read of VOUT1.  The TPS62864 family doesn't
+	/* ACK-probe via a read of VOUT1.  The TPS62864 family doesn't
      * carry a fixed device-id register, but every populated part
      * ACKs reads at any of the known register addresses, so a
      * successful read here is sufficient to confirm the chip is on
      * the bus at the expected address. */
-    uint8_t      v = 0;
-    alp_status_t s = reg_read(ctx, TPS628640_REG_VOUT1, &v);
-    if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	uint8_t      v = 0;
+	alp_status_t s = reg_read(ctx, TPS628640_REG_VOUT1, &v);
+	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 
-    ctx->initialised = true;
-    return ALP_OK;
+	ctx->initialised = true;
+	return ALP_OK;
 }
 
-alp_status_t tps628640_set_voltage_mv(tps628640_t *ctx, uint16_t mv) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (mv < TPS628640_VOUT_BASE_MV || mv > TPS628640_VOUT_MAX_MV) {
-        return ALP_ERR_OUT_OF_RANGE;
-    }
-    /* Encoding: byte = (mv - 400) / 5.  Round down on non-multiple
+alp_status_t tps628640_set_voltage_mv(tps628640_t *ctx, uint16_t mv)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (mv < TPS628640_VOUT_BASE_MV || mv > TPS628640_VOUT_MAX_MV) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+	/* Encoding: byte = (mv - 400) / 5.  Round down on non-multiple
      * of 5 mV input; the caller can read back via _get_voltage_mv
      * to see what landed. */
-    uint8_t reg = (uint8_t)((mv - TPS628640_VOUT_BASE_MV) / TPS628640_VOUT_STEP_MV);
-    return reg_write(ctx, TPS628640_REG_VOUT1, reg);
+	uint8_t reg = (uint8_t)((mv - TPS628640_VOUT_BASE_MV) / TPS628640_VOUT_STEP_MV);
+	return reg_write(ctx, TPS628640_REG_VOUT1, reg);
 }
 
-alp_status_t tps628640_get_voltage_mv(tps628640_t *ctx, uint16_t *mv) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (mv == NULL) return ALP_ERR_INVAL;
-    uint8_t      raw = 0;
-    alp_status_t s   = reg_read(ctx, TPS628640_REG_VOUT1, &raw);
-    if (s != ALP_OK) return s;
-    *mv = (uint16_t)(TPS628640_VOUT_BASE_MV + (uint32_t)raw * TPS628640_VOUT_STEP_MV);
-    return ALP_OK;
+alp_status_t tps628640_get_voltage_mv(tps628640_t *ctx, uint16_t *mv)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (mv == NULL) return ALP_ERR_INVAL;
+	uint8_t      raw = 0;
+	alp_status_t s   = reg_read(ctx, TPS628640_REG_VOUT1, &raw);
+	if (s != ALP_OK) return s;
+	*mv = (uint16_t)(TPS628640_VOUT_BASE_MV + (uint32_t)raw * TPS628640_VOUT_STEP_MV);
+	return ALP_OK;
 }
 
-alp_status_t tps628640_get_status(tps628640_t *ctx, uint8_t *status_byte) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (status_byte == NULL) return ALP_ERR_INVAL;
-    /* The STATUS register has read-and-clear semantics: every
+alp_status_t tps628640_get_status(tps628640_t *ctx, uint8_t *status_byte)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (status_byte == NULL) return ALP_ERR_INVAL;
+	/* The STATUS register has read-and-clear semantics: every
      * latched bit is reset to 0 after a successful I2C read.
      * Callers MUST treat the returned byte as the snapshot of
      * everything that happened since the last read. */
-    return reg_read(ctx, TPS628640_REG_STATUS, status_byte);
+	return reg_read(ctx, TPS628640_REG_STATUS, status_byte);
 }
 
-alp_status_t tps628640_set_voltage2_mv(tps628640_t *ctx, uint16_t mv) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (mv < TPS628640_VOUT_BASE_MV || mv > TPS628640_VOUT_MAX_MV) {
-        return ALP_ERR_OUT_OF_RANGE;
-    }
-    uint8_t reg = (uint8_t)((mv - TPS628640_VOUT_BASE_MV) / TPS628640_VOUT_STEP_MV);
-    return reg_write(ctx, TPS628640_REG_VOUT2, reg);
+alp_status_t tps628640_set_voltage2_mv(tps628640_t *ctx, uint16_t mv)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (mv < TPS628640_VOUT_BASE_MV || mv > TPS628640_VOUT_MAX_MV) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+	uint8_t reg = (uint8_t)((mv - TPS628640_VOUT_BASE_MV) / TPS628640_VOUT_STEP_MV);
+	return reg_write(ctx, TPS628640_REG_VOUT2, reg);
 }
 
-alp_status_t tps628640_get_voltage2_mv(tps628640_t *ctx, uint16_t *mv) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (mv == NULL) return ALP_ERR_INVAL;
-    uint8_t      raw = 0;
-    alp_status_t s   = reg_read(ctx, TPS628640_REG_VOUT2, &raw);
-    if (s != ALP_OK) return s;
-    *mv = (uint16_t)(TPS628640_VOUT_BASE_MV + (uint32_t)raw * TPS628640_VOUT_STEP_MV);
-    return ALP_OK;
+alp_status_t tps628640_get_voltage2_mv(tps628640_t *ctx, uint16_t *mv)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (mv == NULL) return ALP_ERR_INVAL;
+	uint8_t      raw = 0;
+	alp_status_t s   = reg_read(ctx, TPS628640_REG_VOUT2, &raw);
+	if (s != ALP_OK) return s;
+	*mv = (uint16_t)(TPS628640_VOUT_BASE_MV + (uint32_t)raw * TPS628640_VOUT_STEP_MV);
+	return ALP_OK;
 }
 
-alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (enable) ctx->control_shadow |= TPS628640_CTRL_SOFTWARE_ENABLE;
-    else        ctx->control_shadow &= (uint8_t)~TPS628640_CTRL_SOFTWARE_ENABLE;
-    return flush_control(ctx);
+alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (enable)
+		ctx->control_shadow |= TPS628640_CTRL_SOFTWARE_ENABLE;
+	else
+		ctx->control_shadow &= (uint8_t)~TPS628640_CTRL_SOFTWARE_ENABLE;
+	return flush_control(ctx);
 }
 
-alp_status_t tps628640_set_fpwm_mode(tps628640_t *ctx, bool fpwm) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (fpwm) ctx->control_shadow |= TPS628640_CTRL_FPWM_MODE;
-    else      ctx->control_shadow &= (uint8_t)~TPS628640_CTRL_FPWM_MODE;
-    return flush_control(ctx);
+alp_status_t tps628640_set_fpwm_mode(tps628640_t *ctx, bool fpwm)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (fpwm)
+		ctx->control_shadow |= TPS628640_CTRL_FPWM_MODE;
+	else
+		ctx->control_shadow &= (uint8_t)~TPS628640_CTRL_FPWM_MODE;
+	return flush_control(ctx);
 }
 
-alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx,
-                                      tps628640_ramp_speed_t speed) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if ((unsigned)speed > 3u) return ALP_ERR_INVAL;
-    ctx->control_shadow &= (uint8_t)~TPS628640_CTRL_RAMP_SPEED_MASK;
-    ctx->control_shadow |= (uint8_t)((unsigned)speed & TPS628640_CTRL_RAMP_SPEED_MASK);
-    return flush_control(ctx);
+alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx, tps628640_ramp_speed_t speed)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if ((unsigned)speed > 3u) return ALP_ERR_INVAL;
+	ctx->control_shadow &= (uint8_t)~TPS628640_CTRL_RAMP_SPEED_MASK;
+	ctx->control_shadow |= (uint8_t)((unsigned)speed & TPS628640_CTRL_RAMP_SPEED_MASK);
+	return flush_control(ctx);
 }
 
-alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    /* Issue a one-shot reset bit; the chip clears the bit
+alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	/* Issue a one-shot reset bit; the chip clears the bit
      * internally on the next clock + reverts every register to the
      * datasheet default.  Restore the shadow to match. */
-    alp_status_t s = reg_write(ctx, TPS628640_REG_CONTROL,
-                               TPS628640_CTRL_DEFAULT | TPS628640_CTRL_RESET);
-    if (s == ALP_OK) {
-        ctx->control_shadow = TPS628640_CTRL_DEFAULT;
-    }
-    return s;
+	alp_status_t s =
+	    reg_write(ctx, TPS628640_REG_CONTROL, TPS628640_CTRL_DEFAULT | TPS628640_CTRL_RESET);
+	if (s == ALP_OK) {
+		ctx->control_shadow = TPS628640_CTRL_DEFAULT;
+	}
+	return s;
 }
 
-alp_status_t tps628640_read_reg(tps628640_t *ctx, uint8_t reg, uint8_t *val) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (val == NULL) return ALP_ERR_INVAL;
-    return reg_read(ctx, reg, val);
+alp_status_t tps628640_read_reg(tps628640_t *ctx, uint8_t reg, uint8_t *val)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (val == NULL) return ALP_ERR_INVAL;
+	return reg_read(ctx, reg, val);
 }
 
-alp_status_t tps628640_write_reg(tps628640_t *ctx, uint8_t reg, uint8_t val) {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    /* If the caller bypasses the typed helpers to touch CONTROL
+alp_status_t tps628640_write_reg(tps628640_t *ctx, uint8_t reg, uint8_t val)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	/* If the caller bypasses the typed helpers to touch CONTROL
      * directly, mirror the write into the shadow so the next typed
      * call doesn't clobber it. */
-    if (reg == TPS628640_REG_CONTROL) ctx->control_shadow = val;
-    return reg_write(ctx, reg, val);
+	if (reg == TPS628640_REG_CONTROL) ctx->control_shadow = val;
+	return reg_write(ctx, reg, val);
 }
 
-void tps628640_deinit(tps628640_t *ctx) {
-    if (ctx == NULL) return;
-    ctx->initialised = false;
-    ctx->bus         = NULL;
+void tps628640_deinit(tps628640_t *ctx)
+{
+	if (ctx == NULL) return;
+	ctx->initialised = false;
+	ctx->bus         = NULL;
 }

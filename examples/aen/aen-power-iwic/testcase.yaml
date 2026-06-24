@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Stage-B PM deep-sleep (suspend-to-idle / IWIC)
+# example on the E1M-AEN801 (Alif Ensemble E8, M55-HE).  BENCH-PENDING: the
+# deep-IWIC-enter / SysTick-wake proof is a bench flash + SWD read, not a CI run.
+#
+# This scenario compile-checks the Stage-B PM bring-up on the REAL E8 board
+# target (it cannot run in CI -- the M55 has no native_sim host):
+#   - CONFIG_PM=y is REACHABLE (the app Kconfig `select HAS_PM` over the pinned
+#     tree, which neither selects HAS_PM nor ships a pm_state_set) and LINKS
+#     (src/alif_pm_iwic.c supplies pm_state_set/pm_state_exit_post_ops);
+#   - the suspend_idle zephyr,power-state + cpu0 cpu-power-states (board overlay)
+#     enter the devicetree, so the PM policy can select PM_STATE_SUSPEND_TO_IDLE;
+#   - the RAM-console retarget + ITCM RAM-run overlay link.
+# It is intentionally filtered to the AEN801 M55-HE board only, which the
+# native_sim PR gate never selects, so it adds a board-target build check
+# without slowing the gate.
+#
+# NOTE: the platform id below MUST match the board .yaml `identifier` exactly
+# (zephyr/boards/alp/e1m_aen801_m55_he/..._rtss_he.yaml) or twister silently
+# skips the scenario.
+
+sample:
+  name: aen-power-iwic
+  description: |
+    Stage-B PM deep-sleep for the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE):
+    brings a minimal Alif PM up over the pinned Zephyr 4.4.0 tree (which ships no
+    Alif pm_state_set and does not select HAS_PM) and enters the CONFIG_PM
+    suspend-to-idle (deep IWIC sleep) state repeatedly via the kernel idle path,
+    proving the core parks via the AON WICCONTROL register (0x1A604010, bit8 WIC
+    / bit9 IWIC) and SysTick wakes it (a beacon in global SRAM0 at 0x02000000 and
+    k_uptime_get advance across each sleep).  Stage-B of aen-power-smoke.
+    BENCH-PENDING.
+
+tests:
+  alp_sdk.examples.aen.power_iwic.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    # The board overlay is applied by the app CMakeLists (set(DTC_OVERLAY_FILE));
+    # no EXTRA_DTC_OVERLAY_FILE here, else it would apply the same overlay twice
+    # (the /delete-property/ zephyr,code-partition would run on an already-deleted
+    # property).
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+      - pm
+    build_only: true   # deep IWIC enter + SysTick wake is a bench flash, not a CI run.

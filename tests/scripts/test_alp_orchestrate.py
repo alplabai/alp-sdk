@@ -146,6 +146,32 @@ ipc:
 """
 
 
+# AEN801 (the lead E8 part) RESOLVES its mailbox controller
+# (alif_mhuv2), so it sails past the controller-TBD guard -- but its
+# memory map is DERIVED from the E8 SoC variant JSON, which carries no
+# per-region `base` yet.  Before the region.get("base") fix this
+# crashed resolve_carve_outs with `KeyError: 'base'`; it MUST instead
+# land a clean blocked carve-out.  Regression guard for that crash.
+AEN801_UNMAPPED = """
+som:
+  sku: E1M-AEN801
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
+
+ipc:
+  - kind: rpmsg
+    endpoints: [m55_hp, m55_he]
+    carve_out_kb: 64
+    name: alp_test_rpmsg
+"""
+
+
 # ---------------------------------------------------------------------
 # 1. load_board_yaml -- happy path
 # ---------------------------------------------------------------------
@@ -363,6 +389,24 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     assert entry.reason is not None
     assert "TBD" in entry.reason
     assert "E1M-AEN701" in entry.reason
+
+
+def test_resolve_carve_outs_blocks_on_unmapped_base(tmp_path: Path) -> None:
+    """AEN801 has a RESOLVED mailbox controller (alif_mhuv2), so it
+    proceeds past the controller-TBD guard into the region allocator --
+    but its memory map is derived from the E8 SoC variant JSON, which
+    has no per-region `base` yet.  resolve_carve_outs MUST emit a
+    blocked carve-out (base unmapped) rather than crash with
+    `KeyError: 'base'`."""
+    path = _write_board(tmp_path, AEN801_UNMAPPED)
+    project = load_board_yaml(path)
+    resolved = resolve_carve_outs(project)        # must not raise
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "blocked"
+    assert entry.reason is not None
+    assert "E1M-AEN801" in entry.reason
+    assert "HW-mapped" in entry.reason
 
 
 # ---------------------------------------------------------------------
@@ -701,7 +745,8 @@ def test_slugs_from_on_module_v2n101() -> None:
 
 def test_slugs_from_on_module_aen701() -> None:
     """AEN701 on_module: cc3501e, optiga_trust_m, rv3028c7, tmp112,
-    eeprom_24c128 present; TBD ospi entries excluded."""
+    eeprom_24c128 present; ospi_memories / hyperram storage MPNs are
+    excluded (they have no chips/<part>/ driver)."""
     import yaml
     with open(REPO / "metadata" / "e1m_modules" / "E1M-AEN701.yaml",
               encoding="utf-8") as f:
@@ -714,6 +759,11 @@ def test_slugs_from_on_module_aen701() -> None:
 
     assert "TBD" not in slugs, "TBD values must be excluded"
     assert "alif:ensemble:e7" not in slugs, "silicon field must be excluded"
+    # Storage MPNs (OSPI NOR flash + HyperRAM) are NOT chip-driver slugs:
+    # they have no chips/<part>/ driver, so emitting them as
+    # CONFIG_ALP_SDK_CHIP_<X> would trip Zephyr's undefined-symbol guard.
+    assert "MX25UM25645GXDI00" not in slugs, "OSPI flash MPN must not be a chip slug"
+    assert "W958D8NBYA5I" not in slugs, "HyperRAM MPN must not be a chip slug"
 
 
 def test_slugs_from_on_module_nx9101_tbd_filtered() -> None:
@@ -1426,17 +1476,18 @@ def test_resolve_storage_partitions_blocks_on_tbd_ospi(
     tmp_path: Path,
 ) -> None:
     """A partition pointing at an ospi_memories: entry with capacity_mbit
-    TBD must block with a clear reason -- AEN301 has this shape today
-    (capacity_mbit: TBD), so the storage emitter should not silently
-    allocate against unknown capacity."""
-    # AEN301 declares on_module.ospi_memories.ospi0 with capacity_mbit: TBD.
+    TBD must block with a clear reason -- AEN301 declares ospi1 with
+    capacity_mbit: TBD (ospi0 carries the known 256-Mbit NOR flash on
+    CS0), so the storage emitter should not silently allocate against the
+    unknown ospi1 capacity."""
+    # AEN301 declares on_module.ospi_memories.ospi1 with capacity_mbit: TBD.
     body = """
     name: test-aen-ospi-tbd
     som: { sku: E1M-AEN301 }
     cores:
       m55_hp: { os: zephyr, app: ./m55_hp }
     storage:
-      - { name: app_data, size_kib: 64, fs: littlefs, flash_device: ospi0 }
+      - { name: app_data, size_kib: 64, fs: littlefs, flash_device: ospi1 }
     """
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
@@ -1445,7 +1496,7 @@ def test_resolve_storage_partitions_blocks_on_tbd_ospi(
     assert parts[0].status == "blocked"
     reason = parts[0].reason or ""
     assert "TBD" in reason
-    assert "ospi0" in reason
+    assert "ospi1" in reason
 
 
 def test_emit_system_manifest_carries_storage(tmp_path: Path) -> None:
@@ -2471,6 +2522,46 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
         assert contents.strip()
 
 
+def test_emit_build_plan_stock_shim_skipped(tmp_path: Path) -> None:
+    """A core left on the stock M-core shim (app: alp-stock-shim) carries
+    command: null + a `stock-shim-unimplemented` warning (issue #49): the
+    shim image body is not in the SDK tree, so we must NOT emit a west
+    command pointing at a non-existent app dir.  The slice is still carried
+    (never dropped) with its config artefact."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    board = """
+name: stock-shim-board
+som:
+  sku: E1M-V2N101
+  hw_rev: r1
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: alp-stock-shim
+"""
+    path = _write_board(tmp_path, board)
+    project = load_board_yaml(path)
+    out = emit_build_plan(project, board_yaml=path, build_root=Path("build"))
+    plan = _json.loads(out)
+
+    m33 = next(s for s in plan["slices"] if s["coreId"] == "m33_sm")
+    assert m33["command"] is None
+
+    stock_warns = [w for w in plan["warnings"]
+                   if w["code"] == "stock-shim-unimplemented"]
+    assert len(stock_warns) == 1
+    assert stock_warns[0]["coreId"] == "m33_sm"
+    assert "alp-stock-shim" in stock_warns[0]["message"]
+    assert "m33_sm" in stock_warns[0]["message"]
+
+    # Carried, not dropped: the slice still ships its alp.conf artefact.
+    assert any(a["path"].endswith("alp.conf")
+               for a in m33["configArtefacts"])
+
+
 def test_emit_build_plan_deterministic(tmp_path: Path) -> None:
     """Spec parity with the other emits: byte-identical re-runs."""
     from alp_orchestrate import emit_build_plan
@@ -2544,6 +2635,10 @@ def test_emit_build_plan_off_core_excluded_commandless_warns(
     # permits `board: None` for zephyr -- only `app:` is enforced --
     # and _slice_command then has nothing to hand `west build -b`.
     project.cores["m33_sm"].board = None
+    # Use a real app so this isolates the board-missing -> no-command path;
+    # the SoM preset would otherwise default this M-core to the stock shim,
+    # which has its own warning code (see test_emit_build_plan_stock_shim_skipped).
+    project.cores["m33_sm"].app = "./m33"
     plan = _json.loads(emit_build_plan(
         project, board_yaml=path, build_root=Path("build")))
 

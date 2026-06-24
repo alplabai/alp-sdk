@@ -19,32 +19,32 @@
 typedef struct alp_wdt_ops alp_wdt_ops_t;
 
 typedef struct alp_wdt_backend_state {
-    void                 *dev;                /* opaque backend device pointer
+	void                *dev; /* opaque backend device pointer
                                                * (const struct device * on Zephyr;
                                                * kept void* so the portable handle
                                                * does not pull in <zephyr/device.h>) */
-    uint32_t              wdt_id;
-    int                   channel_id;          /* wdt_install_timeout return code */
-    alp_wdt_config_t      cfg;
-    void                 *be_data;
-    const alp_wdt_ops_t  *ops;
+	uint32_t             wdt_id;
+	int                  channel_id; /* wdt_install_timeout return code */
+	alp_wdt_config_t     cfg;
+	void                *be_data;
+	const alp_wdt_ops_t *ops;
 } alp_wdt_backend_state_t;
 
 struct alp_wdt_ops {
-    alp_status_t (*open)(uint32_t wdt_id,
-                         const alp_wdt_config_t *cfg,
-                         alp_wdt_backend_state_t *state,
-                         alp_capabilities_t *caps_out);
-    alp_status_t (*feed)(alp_wdt_backend_state_t *state);
-    alp_status_t (*disable)(alp_wdt_backend_state_t *state);
-    void         (*close)(alp_wdt_backend_state_t *state);
+	alp_status_t (*open)(uint32_t                 wdt_id,
+	                     const alp_wdt_config_t  *cfg,
+	                     alp_wdt_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
+	alp_status_t (*feed)(alp_wdt_backend_state_t *state);
+	alp_status_t (*disable)(alp_wdt_backend_state_t *state);
+	void (*close)(alp_wdt_backend_state_t *state);
 };
 
 struct alp_wdt {
-    alp_wdt_backend_state_t  state;
-    const alp_backend_t     *backend;
-    alp_capabilities_t       cached_caps;
-    bool                     in_use;
+	alp_wdt_backend_state_t state;
+	const alp_backend_t    *backend;
+	alp_capabilities_t      cached_caps;
+	bool                    in_use;
 };
 
 #endif /* ALP_BACKENDS_WDT_OPS_H */

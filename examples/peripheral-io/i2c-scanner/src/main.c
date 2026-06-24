@@ -18,31 +18,36 @@
 
 int main(void)
 {
-    printf("[i2c] open BOARD_I2C_SENSORS @ 100 kHz\n");
+	printf("[i2c] open BOARD_I2C_SENSORS @ 100 kHz\n");
 
-    alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
-        .bitrate_hz = 100000,
-    });
-    if (bus == NULL) {
-        printf("[i2c] open failed: alp_last_error=%d\n", (int)alp_last_error());
-        printf("[i2c] done\n");
-        return 0;
-    }
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
+	    .bitrate_hz = 100000,
+	});
+	if (bus == NULL) {
+		printf("[i2c] open failed: alp_last_error=%d\n", (int)alp_last_error());
+		printf("[i2c] done\n");
+		return 0;
+	}
 
-    int responders = 0;
-    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
-        /* Zero-length write — the chip ACKs its address byte if
-         * present, NACKs otherwise. */
-        alp_status_t s = alp_i2c_write(bus, addr, NULL, 0);
-        if (s == ALP_OK) {
-            printf("[i2c] addr 0x%02x acked\n", addr);
-            responders++;
-        }
-    }
-    printf("[i2c] scan complete, %d responder(s)\n", responders);
+	int responders = 0;
+	for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+		/* Probe with a 1-byte read: a present chip ACKs its address
+         * byte (we discard the data), an empty address NACKs.  We use a
+         * read rather than a zero-length write because some controllers
+         * — e.g. the DesignWare i2c_dw on Alif Ensemble — put nothing on
+         * the bus for a zero-length transfer, so no device ever ACKs and
+         * the scan finds nothing.  A 1-byte read is the portable probe. */
+		uint8_t      scratch;
+		alp_status_t s = alp_i2c_read(bus, addr, &scratch, 1);
+		if (s == ALP_OK) {
+			printf("[i2c] addr 0x%02x acked\n", addr);
+			responders++;
+		}
+	}
+	printf("[i2c] scan complete, %d responder(s)\n", responders);
 
-    alp_i2c_close(bus);
-    printf("[i2c] done\n");
-    return 0;
+	alp_i2c_close(bus);
+	printf("[i2c] done\n");
+	return 0;
 }

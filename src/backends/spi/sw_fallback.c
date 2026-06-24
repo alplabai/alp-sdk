@@ -30,43 +30,45 @@
 
 #include "spi_ops.h"
 
-static alp_status_t sw_open(const alp_spi_config_t *cfg,
-                            alp_spi_backend_state_t *st,
-                            alp_capabilities_t *caps_out) {
-    (void)cfg;
-    st->dev     = NULL;
-    st->bus_id  = 0u;
-    st->be_data = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+static alp_status_t
+sw_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilities_t *caps_out)
+{
+	(void)cfg;
+	st->dev         = NULL;
+	st->bus_id      = 0u;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
-static alp_status_t sw_transceive(alp_spi_backend_state_t *st,
-                                  const uint8_t *tx, uint8_t *rx,
-                                  size_t len) {
-    (void)st;
-    if (len == 0u) return ALP_OK;
-    if (tx != NULL && rx != NULL) {
-        memcpy(rx, tx, len);
-    } else if (rx != NULL) {
-        /* rx-only: no tx data -- zero-fill receive buffer */
-        memset(rx, 0, len);
-    }
-    /* tx-only (rx == NULL): no-op */
-    return ALP_OK;
+static alp_status_t
+sw_transceive(alp_spi_backend_state_t *st, const uint8_t *tx, uint8_t *rx, size_t len)
+{
+	(void)st;
+	if (len == 0u) return ALP_OK;
+	if (tx != NULL && rx != NULL) {
+		memcpy(rx, tx, len);
+	} else if (rx != NULL) {
+		/* rx-only: no tx data -- zero-fill receive buffer */
+		memset(rx, 0, len);
+	}
+	/* tx-only (rx == NULL): no-op */
+	return ALP_OK;
 }
 
 static const alp_spi_ops_t _ops = {
-    .open       = sw_open,
-    .transceive = sw_transceive,
-    .close      = NULL,
+	.open       = sw_open,
+	.transceive = sw_transceive,
+	.close      = NULL,
 };
 
-ALP_BACKEND_REGISTER(spi, sw_fallback, {
-    .silicon_ref = "*",
-    .vendor      = "sw_fallback",
-    .base_caps   = 0u,
-    .priority    = 0,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(spi,
+                     sw_fallback,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "sw_fallback",
+                         .base_caps   = 0u,
+                         .priority    = 0,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

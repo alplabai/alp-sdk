@@ -33,8 +33,8 @@ bool vref_ok = false;
 
 bool vref_ready_check(void)
 {
-    if (!vref_ok) {
-        vref_ok = (vref_status_get() == SET);
-    }
-    return vref_ok;
+	if (!vref_ok) {
+		vref_ok = (vref_status_get() == SET);
+	}
+	return vref_ok;
 }

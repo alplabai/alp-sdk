@@ -1,0 +1,128 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-rpc-pingpong -- M55-HP (ipc0 HOST / vring master) overlay.
+ *
+ * Wires the REAL OpenAMP ipc_service channel that backs alp_rpc on E8 (issues
+ * #45/#50).  Three pieces:
+ *
+ *   1. SE-service nodes + per-core itcm/dtcm global_base -- needed because the
+ *      HP app releases HE via se_service_boot_cpu() (hal_alif se_service.c puts
+ *      its outbound buffer through local_to_global(), which reads
+ *      DT_PROP(itcm/dtcm, global_base)).  HP global TCM aliases ITCM 0x50000000
+ *      / DTCM 0x50800000, transcribed from the zephyr_alif fork
+ *      ensemble_rtss_hp.dtsi (same values aen-dualcore-master uses).
+ *
+ *   2. The two MHUv2 frames this core drives, via the alif,mhuv2-mbox MBOX
+ *      driver (zephyr/drivers/mbox/mbox_alif_mhuv2.c).  HP is the host, so:
+ *        - tx (HP -> HE) : MHU0 HP-TX window @0x40090000, HP IRQ 42
+ *        - rx (HE -> HP) : MHU1 HP-RX window @0x400A0000, HP IRQ 43
+ *      Addresses + IRQs are clean-room-transcribed from the Alif DFP E8 part
+ *      (AE822FA0E5597, rtss_hp/soc.h):
+ *        MHU_M55HP_M55HE_0_TX_BASE = 0x40090000, MHU_M55HP_M55HE_0_TX_IRQn = 42
+ *        MHU_M55HE_M55HP_1_RX_BASE = 0x400A0000, MHU_M55HE_M55HP_1_RX_IRQn = 43
+ *      The HE -> HP direction (HE writes 0x400B0000 -> this 0x400A0000 RX) is
+ *      bench-proven by aen-dualcore-doorbell (commit b81a3738: HP received-count
+ *      tracked the HE sent-count exactly).
+ *
+ *   3. A shared-memory carve-out in global SRAM0 + the ipc0 node.  SRAM0 global
+ *      base 0x02000000 / size 4MB (DFP soc_features.h: SOC_FEAT_BULK_SRAM0_BASE
+ *      / _SIZE) is identically addressable from both M55 cores, so the RPMsg
+ *      static vrings live here.  Both overlays MUST agree on this region's base
+ *      + size + buffer-size.
+ *
+ * vendor-ext, BENCH-UNVERIFIED for the ipc_service/RPMsg path (the underlying
+ * MHU doorbell + boot_cpu are bench-proven; the full vring bring-up is not yet).
+ */
+
+#include <zephyr/dt-bindings/ipc_service/static_vrings.h>
+
+/ {
+	chosen {
+		/* alp_rpc's zephyr_drv.c resolves DT_CHOSEN(zephyr_ipc). */
+		zephyr,ipc     = &ipc0;
+		zephyr,ipc-shm = &sram_ipc0;
+	};
+
+	/*
+	 * Shared RPMsg region: SRAM0 @0x02010000, 64 KiB.  Placed 64 KiB above
+	 * the SRAM0 base so it never overlaps the 0x0200_00xx bench beacons the
+	 * app stamps.  zephyr,memory-region makes it a real linker region; both
+	 * cores map the SAME global address.
+	 */
+	sram_ipc0: memory@2010000 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x02010000 0x10000>;
+		zephyr,memory-region = "SRAM_IPC0";
+	};
+
+	soc {
+		/*
+		 * HP -> HE sender frame. The non-secure MHU-1 base is a CPU-RELATIVE
+		 * ALIAS (proven in aen-dualcore-ipc): from HP, 0x400B0000 = "my TX to
+		 * HE" and the fabric routes it into HE's RX @0x400A0000 -- the SAME
+		 * pair the HE->HP doorbell uses, no separate MHU0 needed.
+		 */
+		mhu_hp_tx: mhu@400b0000 {
+			compatible = "alif,mhuv2-mbox";
+			reg = <0x400B0000 0x1000>;
+			alif,direction = "tx";
+			#mbox-cells = <1>;
+			status = "okay";
+		};
+
+		/* HE -> HP receiver frame (MHU1 RX window). */
+		mhu_hp_rx: mhu@400a0000 {
+			compatible = "alif,mhuv2-mbox";
+			reg = <0x400A0000 0x1000>;
+			interrupts = <43 3>;
+			alif,direction = "rx";
+			#mbox-cells = <1>;
+			status = "okay";
+		};
+
+		ipc0: ipc0 {
+			compatible = "zephyr,ipc-openamp-static-vrings";
+			memory-region = <&sram_ipc0>;
+			mboxes = <&mhu_hp_tx 0>, <&mhu_hp_rx 0>;
+			mbox-names = "tx", "rx";
+			role = "host";
+			zephyr,buffer-size = <256>;
+			status = "okay";
+		};
+	};
+};
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&itcm {
+	compatible = "alif,itcm";
+	global_base = <0x50000000>;
+};
+
+&dtcm {
+	compatible = "alif,dtcm";
+	global_base = <0x50800000>;
+};
+
+&seservice0r {
+	status = "okay";
+};
+
+&seservice0s {
+	status = "okay";
+};
+
+&se_service {
+	status = "okay";
+};

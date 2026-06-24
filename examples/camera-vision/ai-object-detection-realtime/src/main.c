@@ -98,9 +98,9 @@ LOG_MODULE_REGISTER(obj_det, LOG_LEVEL_INF);
 #define MAX_BOXES 8u
 
 typedef struct {
-    uint16_t x, y, w, h;
-    uint16_t class_id;
-    float    score;
+	uint16_t x, y, w, h;
+	uint16_t class_id;
+	float    score;
 } bbox_t;
 
 /* Placeholder model bytes.  Customers replace with the actual
@@ -109,7 +109,7 @@ typedef struct {
  * the convert-and-include workflow.  Sized to one byte so the
  * inference_open path returns NOSUPPORT cleanly on v0.5
  * skeleton builds instead of segfaulting on an empty pointer. */
-static const uint8_t s_model[] = {0x00};
+static const uint8_t s_model[] = { 0x00 };
 
 /* Tensor arena for the on-chip backend.  Real YOLOv8-tiny needs
  * ~512 kB on Ethos-U; the DEEPX backend manages its own arena
@@ -120,66 +120,67 @@ static uint8_t s_arena[64 * 1024] __aligned(16);
  * v0.5 skeleton emits a single synthetic box so the display
  * overlay path has something to render; v0.6 wires the real
  * YOLOv8 head post-process (sigmoid + NMS). */
-static size_t decode_boxes(const alp_inference_tensor_t *out,
-                           bbox_t *boxes, size_t max)
+static size_t decode_boxes(const alp_inference_tensor_t *out, bbox_t *boxes, size_t max)
 {
-    (void)out;
-    if (max == 0) {
-        return 0;
-    }
-    boxes[0] = (bbox_t){
-        .x = 60, .y = 60, .w = 120, .h = 120,
-        .class_id = 0, .score = 0.92f,
-    };
-    return 1;
+	(void)out;
+	if (max == 0) {
+		return 0;
+	}
+	boxes[0] = (bbox_t){
+		.x        = 60,
+		.y        = 60,
+		.w        = 120,
+		.h        = 120,
+		.class_id = 0,
+		.score    = 0.92f,
+	};
+	return 1;
 }
 
 int main(void)
 {
-    LOG_INF("ai-object-detection-realtime starting");
+	LOG_INF("ai-object-detection-realtime starting");
 
-    /* Camera bring-up.  On native_sim alp_camera_open returns
+	/* Camera bring-up.  On native_sim alp_camera_open returns
      * NULL with alp_last_error() == ALP_ERR_NOSUPPORT; we
      * tolerate that so the harness can verify the build path. */
-    alp_camera_t *cam = alp_camera_open(&(alp_camera_config_t){
-        .camera_id = 0,
-        .width     = FRAME_W,
-        .height    = FRAME_H,
-        .fps       = FRAME_FPS,
-        .format    = ALP_PIXFMT_RGB565,
-    });
-    const bool camera_ok = (cam != NULL);
-    if (!camera_ok) {
-        LOG_WRN("camera open NOSUPPORT (err=%d) -- skeleton mode",
-                (int)alp_last_error());
-    } else {
-        /* Tolerate NOSUPPORT on stream-start too; the capture
+	alp_camera_t *cam       = alp_camera_open(&(alp_camera_config_t){
+	    .camera_id = 0,
+	    .width     = FRAME_W,
+	    .height    = FRAME_H,
+	    .fps       = FRAME_FPS,
+	    .format    = ALP_PIXFMT_RGB565,
+	});
+	const bool    camera_ok = (cam != NULL);
+	if (!camera_ok) {
+		LOG_WRN("camera open NOSUPPORT (err=%d) -- skeleton mode", (int)alp_last_error());
+	} else {
+		/* Tolerate NOSUPPORT on stream-start too; the capture
          * path inside the loop downgrades cleanly. */
-        (void)alp_camera_start(cam);
-    }
+		(void)alp_camera_start(cam);
+	}
 
-    /* Inference bring-up.  AUTO routes to the SoM's preferred
+	/* Inference bring-up.  AUTO routes to the SoM's preferred
      * NPU -- DEEPX DX-M1 on V2M101, Ethos-U on AEN, DRPAI on
      * stock V2N, CPU fallback on native_sim. */
-    alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
-        .backend     = ALP_INFERENCE_BACKEND_AUTO,
-        /* TODO(v0.6): the real model header switches format
+	alp_inference_t *inf          = alp_inference_open(&(alp_inference_config_t){
+	    .backend = ALP_INFERENCE_BACKEND_AUTO,
+	    /* TODO(v0.6): the real model header switches format
          * based on the active backend; v0.5 leaves DXNN as the
          * stub default since this demo's flagship target is the
          * DEEPX path on V2M101. */
-        .format      = ALP_INFERENCE_MODEL_DXNN,
-        .model_data  = s_model,
-        .model_size  = sizeof(s_model),
-        .arena       = s_arena,
-        .arena_bytes = sizeof(s_arena),
-    });
-    const bool inference_ok = (inf != NULL);
-    if (!inference_ok) {
-        LOG_WRN("inference open NOSUPPORT (err=%d) -- skeleton mode",
-                (int)alp_last_error());
-    }
+	    .format      = ALP_INFERENCE_MODEL_DXNN,
+	    .model_data  = s_model,
+	    .model_size  = sizeof(s_model),
+	    .arena       = s_arena,
+	    .arena_bytes = sizeof(s_arena),
+	});
+	const bool       inference_ok = (inf != NULL);
+	if (!inference_ok) {
+		LOG_WRN("inference open NOSUPPORT (err=%d) -- skeleton mode", (int)alp_last_error());
+	}
 
-    /* TODO(v0.6): display bring-up via <alp/display.h>.  The
+	/* TODO(v0.6): display bring-up via <alp/display.h>.  The
      * Zephyr backend's blit + get_caps land in v0.6 alongside the
      * LVGL flush integration the camera-viewer demo prototypes;
      * for now the demo streams the bounding-box list + FPS to
@@ -187,88 +188,90 @@ int main(void)
      * path.  Once the v0.6 surface lands, swap the printf below
      * for an alp_display_blit() of the rasterised overlay. */
 
-    /* Pipeline pass counter -- the v0.5 skeleton runs a single
+	/* Pipeline pass counter -- the v0.5 skeleton runs a single
      * full pass and exits so the harness regex catches the
      * `[obj-det] done` marker.  Real builds (V2N-M1 HiL) flip
      * to a perpetual loop. */
-    uint32_t frames = 0;
-    uint32_t window_start_ms = k_uptime_get_32();
-    uint32_t fps_x10 = 0;
+	uint32_t frames          = 0;
+	uint32_t window_start_ms = k_uptime_get_32();
+	uint32_t fps_x10         = 0;
 
-    /* One full capture -> infer -> display pass.  The
+	/* One full capture -> infer -> display pass.  The
      * surrounding `while (frames < 1)` form keeps the skeleton's
      * runtime bounded for native_sim; promote to `while (1)` on
      * real hardware. */
-    while (frames < 1) {
-        /* Capture.  When the camera is offline (native_sim) the
+	while (frames < 1) {
+		/* Capture.  When the camera is offline (native_sim) the
          * inference path runs on the zero-initialised input
          * tensor so the timing harness still ticks. */
-        if (camera_ok) {
-            alp_camera_frame_t frame = {0};
-            if (alp_camera_capture(cam, &frame, /*timeout_ms=*/100) == ALP_OK) {
-                /* TODO(v0.6): memcpy(frame.data, ...) into the
+		if (camera_ok) {
+			alp_camera_frame_t frame = { 0 };
+			if (alp_camera_capture(cam, &frame, /*timeout_ms=*/100) == ALP_OK) {
+				/* TODO(v0.6): memcpy(frame.data, ...) into the
                  * model's input tensor via
                  * alp_inference_get_input().  v0.5 skips the
                  * copy since the placeholder model has zero
                  * inputs. */
-                (void)alp_camera_release(cam, &frame);
-            }
-        }
+				(void)alp_camera_release(cam, &frame);
+			}
+		}
 
-        /* Invoke.  Time the call so the on-screen FPS strip can
+		/* Invoke.  Time the call so the on-screen FPS strip can
          * cross-check the per-invoke latency floor. */
-        uint32_t t0 = k_cycle_get_32();
-        if (inference_ok) {
-            (void)alp_inference_invoke(inf);
-        }
-        uint32_t t1 = k_cycle_get_32();
-        const uint32_t invoke_us = k_cyc_to_us_floor32(t1 - t0);
+		uint32_t t0 = k_cycle_get_32();
+		if (inference_ok) {
+			(void)alp_inference_invoke(inf);
+		}
+		uint32_t       t1        = k_cycle_get_32();
+		const uint32_t invoke_us = k_cyc_to_us_floor32(t1 - t0);
 
-        /* Decode bounding boxes from the model output tensor. */
-        bbox_t boxes[MAX_BOXES];
-        size_t n_boxes = 0;
-        if (inference_ok && alp_inference_num_outputs(inf) > 0) {
-            alp_inference_tensor_t out = {0};
-            if (alp_inference_get_output(inf, 0, &out) == ALP_OK) {
-                n_boxes = decode_boxes(&out, boxes, MAX_BOXES);
-            }
-        } else {
-            /* Skeleton fallback -- emit one synthetic box so the
+		/* Decode bounding boxes from the model output tensor. */
+		bbox_t boxes[MAX_BOXES];
+		size_t n_boxes = 0;
+		if (inference_ok && alp_inference_num_outputs(inf) > 0) {
+			alp_inference_tensor_t out = { 0 };
+			if (alp_inference_get_output(inf, 0, &out) == ALP_OK) {
+				n_boxes = decode_boxes(&out, boxes, MAX_BOXES);
+			}
+		} else {
+			/* Skeleton fallback -- emit one synthetic box so the
              * overlay path renders something visible. */
-            n_boxes = decode_boxes(NULL, boxes, MAX_BOXES);
-        }
+			n_boxes = decode_boxes(NULL, boxes, MAX_BOXES);
+		}
 
-        /* v0.6: rasterise each bbox_t into the framebuffer here
+		/* v0.6: rasterise each bbox_t into the framebuffer here
          * and call alp_display_blit() to push the strip out to
          * the ST7789.  v0.5 just walks the list so the unused-
          * variable warning stays quiet. */
-        for (size_t i = 0; i < n_boxes; i++) {
-            (void)boxes[i];
-        }
+		for (size_t i = 0; i < n_boxes; i++) {
+			(void)boxes[i];
+		}
 
-        /* FPS estimate over a rolling 1 s window. */
-        frames++;
-        const uint32_t now_ms = k_uptime_get_32();
-        if (now_ms - window_start_ms >= 1000) {
-            fps_x10 = frames * 10u;
-            frames = 0;
-            window_start_ms = now_ms;
-        }
+		/* FPS estimate over a rolling 1 s window. */
+		frames++;
+		const uint32_t now_ms = k_uptime_get_32();
+		if (now_ms - window_start_ms >= 1000) {
+			fps_x10         = frames * 10u;
+			frames          = 0;
+			window_start_ms = now_ms;
+		}
 
-        printf("[obj-det] frame invoke=%uus boxes=%zu fps=%u.%u\n",
-               (unsigned)invoke_us, n_boxes,
-               (unsigned)(fps_x10 / 10u), (unsigned)(fps_x10 % 10u));
-    }
+		printf("[obj-det] frame invoke=%uus boxes=%zu fps=%u.%u\n",
+		       (unsigned)invoke_us,
+		       n_boxes,
+		       (unsigned)(fps_x10 / 10u),
+		       (unsigned)(fps_x10 % 10u));
+	}
 
-    /* Tidy up so the v0.5 skeleton's NOSUPPORT path closes the
+	/* Tidy up so the v0.5 skeleton's NOSUPPORT path closes the
      * surfaces in the same order real hardware will: inference,
      * camera.  Display close lands in v0.6. */
-    alp_inference_close(inf);
-    if (camera_ok) {
-        (void)alp_camera_stop(cam);
-    }
-    alp_camera_close(cam);
+	alp_inference_close(inf);
+	if (camera_ok) {
+		(void)alp_camera_stop(cam);
+	}
+	alp_camera_close(cam);
 
-    printf("[obj-det] done\n");
-    return 0;
+	printf("[obj-det] done\n");
+	return 0;
 }

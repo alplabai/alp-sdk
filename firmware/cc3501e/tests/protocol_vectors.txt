@@ -1,0 +1,34 @@
+# cc3501e-bridge canonical wire-test vectors
+#
+# Consumed by the firmware transport tests
+# (tests/zephyr/cc3501e_bridge_transport/) and any future host-driver
+# tests (tests/zephyr/chips/cc3501e/), so the two sides cannot diverge.
+#
+# Frame: 4-byte LE header [cmd | flags | payload_len(LE16)] + payload.
+# No SOF, no CRC.  Reply payload[0] is the response status.
+#
+# Format: one `<name> = <hex>` vector per non-comment line; `#` comments.
+# Regenerate with `python3 firmware/cc3501e/tests/gen_protocol_vectors.py`.
+
+# cmd=PING | flags=0 | len=0
+ping_request                       = 00000000
+# cmd=PING | flags=0 | len=1 | status=OK
+ping_reply_ok                      = 0000010000
+# cmd=GET_VERSION | flags=0 | len=0
+get_version_request                = 01000000
+# cmd=GET_VERSION | len=3 | status=OK | version=1 (LE16)
+get_version_reply_proto1           = 01000300000100
+# cmd=GET_MAC | flags=0 | len=0
+get_mac_request                    = 03000000
+# cmd=GET_MAC | len=1 | status=BUSY -- job submitted, host re-issues
+get_mac_reply_busy_submitted       = 0300010002
+# cmd=GET_MAC | len=1 | status=NOT_READY -- re-issued; stub has no radio
+get_mac_reply_not_ready_stub       = 0300010005
+# cmd=RESET | flags=0 | len=0
+reset_request                      = 02000000
+# cmd=RESET | len=1 | status=OK -- firmware reboots after the ack is read
+reset_reply_ok                     = 0200010000
+# cmd=WIFI_SCAN_START | len=1 | status=INVALID -- v1 opcode not implemented in v0.1
+wifi_scan_start_reply_invalid      = 1000010001
+# reply to a frame whose payload_len mismatches the byte count -> PROTOCOL error
+ping_bad_len_reply_protocol        = 0000010007

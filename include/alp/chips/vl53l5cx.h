@@ -40,9 +40,9 @@ extern "C" {
 #define VL53L5CX_DEVICE_ID        0xF0u /**< boot-status low byte after fw load. */
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } vl53l5cx_t;
 
 /** @brief Bind context and probe. */

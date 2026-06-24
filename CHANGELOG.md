@@ -7,6 +7,283 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.8.0 candidate
 
+### Changed — clang-format pinned to v22 (was v14)
+
+- The C/C++ format gate now pins **clang-format-22** (was clang-format-14),
+  installed via the `clang-format==22.1.5` **pip wheel** in CI (apt does not
+  package v22; the wheel also ships `clang-format-diff.py`). `scripts/setup-clang-format.sh`
+  installs the same wheel locally so contributors match CI. The whole in-scope
+  tree (non-`zephyr/**`/`vendors/**`) was reformatted under v22 (66 files,
+  whitespace-only); `.clang-format` keeps `Cpp11BracedListStyle: false` so output
+  stays reproducible across versions, and `gen_soc_caps.py` now formats with v22.
+
+First full bench bring-up of the `E1M-AEN801` (Alif Ensemble E8, Cortex-M55-HE)
+on real silicon (alplab-gw).
+
+- **Flow D (J-Link direct MRAM flash) is the default burn path.**  J-Link's
+  built-in Alif MRAM loader activates with the **part-number device profile
+  `AE822FA0E5597LS0_M55_HE`** (not the generic Cortex-M55 profile), needs the
+  J-Link V9.46+ DLL (bench has V9.50) on a probe with matched V13 firmware, and
+  burns the signed ATOC over SWD in ~0.16 s, verifies, then re-runs the SE boot
+  ROM (`RSetType 2`, nRESET pin) so the app boots from MRAM.  Helper:
+  `bench-builds/flash-jlink.sh`.  SETOOLS over the SE-UART becomes the "Flow A"
+  fallback.  (The earlier blanket "J-Link cannot write MRAM on this part" was
+  true only for the *generic* profile; with the part profile J-Link **can** burn
+  Alif MRAM.  Probe gotcha: a version-mismatched probe forces a J-Link firmware
+  update on first connect that times out over a USB hub — use a direct root USB
+  port.)
+- **Ethernet works end-to-end (RESULT PASS).**  DHCP lease acquired
+  (e.g. `192.168.10.137`), confirmed server-side by the dnsmasq lease + ARP
+  REACHABLE.  Root cause of the long no-link: the GMAC DMA descriptor rings +
+  net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is not on
+  the GMAC DMA bus.  Fix: `zephyr,sram = &sram0` (global on-chip SRAM
+  @`0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n`.  The PHY power
+  (`E_PHY_PWRDWN` = P15_4 lpgpio), reset (`E_PHY_RESET` = P11_6 gpio11), and
+  `RCSR` bit7 `REF_CLK_SEL=1` were already correct; the earlier "PHY RX path /
+  ANLPAR=0 / scope the REF_CLK" diagnosis was a red herring (bad cable + DTCM
+  starvation).
+- **Generalizable lesson:** any DMA-master block on the E8 M55 (GMAC, Ethos-U
+  NPU, SDHC) needs its DMA-visible buffers in global SRAM0/SRAM1, never the
+  default DTCM.
+- **Peripheral matrix — 15/17 aen-\* apps PASS** (all flashed over Flow D and
+  booted on real E8): gpio (`gpio_dw`, full P8_0 pad path), uart3 (ns16550
+  loopback), pwm (UTIMER3 via pwm-leds), spi0 (DWC_ssi loopback), counter
+  (utimer0), i2c2+EEPROM (24C128 @`0x50`, 12 devices on the bus), wdt (CMSDK),
+  adc (`adc_alif` single-shot), dac (`dac_alif`, code holds), camera-stack
+  (cam/csi/dphy/arx3a0 nodes BIND + drivers v4.4-ported; cam instantiation
+  DT-blocked, live capture HW-blocked — no sensor), Ethos-U85 (ID `0x20007001`),
+  Ethos-U55-HE (ID `0x10104201`), NPU inference (TFLM + Ethos-U85, tiny fixture,
+  runs to completion), PDM mics (live varying PCM = real audio), and I2S TX
+  (i2s3 clocks the tone out with the 76.8 MHz audio clock).  **2 PARTIAL**, both
+  hardware-gated (not code/Flow-D bugs): qenc (driver reads clean but the count
+  is static until the encoder is physically spun) and sdcard (DWC SDHC inits but
+  the card is unreachable until the EVK SDIO 74LVC157 mux — EN=IO20/SEL=IO21,
+  both CC3501E-side — is routed with a card inserted).  Still-true caveats: an
+  audible I2S amp output pends the 74LVC157 mux (SEL=CC3501E GPIO13) + TAS2563
+  config; camera live capture pends a wired sensor; the i2s/pdm 76.8 MHz CGU
+  enable is still poked per-example (a Tier-1.5 clockctrl patch is the clean
+  follow-up).
+
+### Added — AEN801 (E8) bench STEP-2: real NPU model from MRAM, ADC/DAC analog, clockctrl Tier-1.5 patch, camera bind
+
+Builds on the bench bring-up above; all merged to `dev` (PRs #173–#181).
+
+- **Real NPU inference from MRAM (RESULT PASS).**  `examples/aen/aen-npu-inference-person-mram`
+  runs the real `person_detect` MobileNet (int8, ~263 KiB Vela'd for `ethos-u85-256`, 100 % NPU,
+  ~7.1 M MACs) on the Ethos-U85 with the model resident in **MRAM slot0** — it overflows the
+  256 KiB ITCM RAM-run, so it links into slot0 and boots via a new **MRAM-XIP two-blob Flow D**
+  helper (`scripts/bench/aen/flash-jlink-mramxip.sh`).  Two facts the bench pinned down:
+  `CONFIG_USE_DT_CODE_PARTITION=y` (slot0 link, reset vector `0x8001xxxx`) and the SETOOLS app
+  entry's `mramAddress` = the **full** address `0x80010000` (the offset gives `Invalid Global
+  Address`).  The matched-runtime fixture example `aen-npu-inference-alif` (the strong in-app
+  `ethosu_address_remap` + `ethosu_config_select` that fixed `ethosu_invoke=1`) landed alongside it.
+- **ADC/DAC analog — corrected VREF, bench-confirmed.**  The DAC `alif,reference-mv` was a *wrong*
+  placeholder (900 mV): the driver fixes the reference to **0.750 V** (`DAC12_VREF_CONT=0x4`) and
+  the ADC to **1.8 V** (`ADC_VREF_CONT=0x10`, RDIV=0), both grounded in hal_alif `analog_ctrl.h`
+  and confirmed on silicon (dac/adc regchecks PASS).  Repaired a latent build break — the four
+  `alif,adc` nodes lacked the `#io-channel-cells` that `adc-controller.yaml` requires, which broke
+  every app instantiating an ADC.  Added a DAC0→ADC loopback example (`aen-analog-validate`).
+- **Clockctrl Tier-1.5 west-patch.**  The per-example CGU-76.8 MHz / EXPMST0 audio-clock pokes are
+  folded into a `west patch` on the upstream `clock_control_alif.c` (`zephyr/patches.yml`), plus an
+  I2S `.set_rate` divider (BENCH-UNVERIFIED — exact field layout needs a scope).  pdm (live audio)
+  and i2s both still PASS on silicon with the example pokes removed.
+- **Camera CPI binds.**  The `cam` (`alif,cam`) node now instantiates + `device_is_ready` on E8: the
+  camera-regcheck overlay supplies the itcm/dtcm `global_base` and the cam↔csi↔arx3a0
+  media-controller endpoint graph.  Live capture stays HW-blocked (no sensor wired).
+- **Bench helpers checked in** at `scripts/bench/aen/` — sanitized build + Flow A/C/D (incl.
+  MRAM-XIP) flash + RAM-console-read helpers, host-specifics resolved via `bench-env.sh`.  SETOOLS
+  stays license-gated (not redistributed).
+
+### Changed — `dev` branch now CI-gated (twister + clang-format)
+
+`dev` now requires the two checks that run on every PR — `twister · native_sim/native/64` and
+`clang-format · diff-only` — matching `main`, now that the team has grown past a single maintainer.
+Gating it immediately surfaced two pre-existing native_sim failures (fixed below).
+
+### Fixed — pre-existing native_sim failures (DAC out-of-range, GPU2D test)
+
+- `alp_dac_open()` now rejects an out-of-range channel up front with `ALP_ERR_INVAL` — a portable
+  capability gate against `ALP_SOC_DAC_COUNT` (mirroring the ADC dispatch; a no-op under
+  `CONFIG_ALP_SOC_NONE`).  The DAC registry migration had dropped the wrapper's channel bound, so an
+  out-of-range channel surfaced `NOT_READY` instead.
+- The GPU2D "no vendor HAL → NOSUPPORT" test was stale since the priority-0 software fallback became
+  the *preferred* gpu2d backend; `alp_gpu2d_open()` now succeeds via the sw fallback (test updated).
+
+### Changed — eth_dwmac Alif glue promoted INTERIM → BENCH-VERIFIED + build-only regression
+
+- The Tier-1.5 Alif Ensemble GMAC glue (`eth_dwmac_alif_ensemble.c`, the
+  `alif,ethernet` binding, and `CONFIG_ETH_DWMAC_ALIF`) is promoted from
+  **INTERIM / BENCH-UNVERIFIED** to **BENCH-VERIFIED PASS on E8 (2026-06-17)** —
+  status-only, no behaviour change.  The driver/binding/Kconfig now state the
+  proven result (DHCP lease + server-side REACHABLE) and document the
+  **DMA-buffer placement requirement**: descriptor rings + net_buf pool live in
+  global SRAM0 (`chosen zephyr,sram = &sram0`, CPU addr == DMA addr) with
+  `CONFIG_DCACHE=n`, **never** the M55 DTCM.  A `BUILD_ASSERT` in the driver now
+  rejects the silent cache-incoherent combination (DCACHE on with no nocache
+  region).  The AUTO RMII ref-clock note is corrected: the verified bench path is
+  the **EXTERNAL** 50 MHz oscillator; the internal-PLL fallback branch stays
+  bench-unverified.
+- New **build-only** twister regression `examples/aen/aen-ethernet-link/testcase.yaml`
+  (scenario `alp_sdk.examples.aen.ethernet_link.aen`) compile-checks the
+  `alif,ethernet` node + the glue wire-up + the SRAM0 DMA-placement overlay on the
+  `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` board target.  Intentionally
+  filtered out of the native_sim PR gate (no Ethernet HW in CI; the M55 has no
+  native_sim host) — end-to-end remains a bench flash, not a CI run.
+
+### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
+
+The TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN family now has
+its bridge firmware **embedded in alp-sdk** at `firmware/cc3501e/` — modeled
+on `firmware/gd32-bridge/`, not a separate repo ([ADR
+0015](docs/adr/0015-cc3501e-firmware-embedded.md), which supersedes the
+earlier separate-`alplabai/cc3501e-firmware` plan).  The firmware `#include`s
+the canonical `include/alp/protocol/cc3501e.h` directly, so the host driver,
+the firmware parser, and the wire-vector tests move in one commit.
+
+- **v0.1 META group**: `PING` / `GET_VERSION` / `GET_MAC` / `RESET`, enough
+  to prove the link is alive and version-compatible.  All other opcodes
+  return `RESP_ERR_INVALID` (the header's v1 contract); Wi-Fi/BLE/GPIO-proxy
+  land in v0.2+.
+- **Selectable host-control transport**: SPI (default + always-available
+  fallback) and SDIO (optional, higher throughput).  Because the Alif has a
+  single SDIO controller shared with the micro-SD slot, SDIO is mutually
+  exclusive with an SD card; both transports feed one dispatcher
+  (`protocol_build_reply`).
+- Silicon-free core + `stub` HAL (host tests + CI compile smoke) + `ti` bench
+  backend skeleton (TI SimpleLink CC33xx SDK + ticlang).  Native transport
+  test at `tests/zephyr/cc3501e_bridge_transport/`; dedicated CI build at
+  `.github/workflows/pr-cc3501e-bridge-build.yml`; canonical wire vectors.
+- Production binary is built + signed on the bench (no SDK/silicon in CI);
+  the AEN `helper_firmware[].firmware_path` stays `TBD` until that lands.
+
+### Added — gd32-bridge: `SE_RESET` opcode to drive the secure-element reset (SE_RST = PC13)
+
+The GD32 bridge gains a `CMD_SE_RESET` wire opcode (`0x41`; bridge wire
+protocol → v0.8) and the `gd32g553_se_reset()` host helper to drive the
+on-module OPTIGA Trust M's reset line (`SE_RST` = GD32 `PC13`, per
+`metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`).  The pin was previously
+left floating at its GPIO power-on default with no host control path;
+the firmware now parks it released at boot and lets the host assert /
+release it.
+
+This gives the host a bus-independent way to reset the secure element:
+`PC13` and the SPI transport are independent of BRD_I2C, so the host can
+pulse `SE_RESET` (assert → wait → release) even when the I²C transport is
+down.  The active level (OPTIGA `RST` is active-low) is firmware-owned and
+flagged for schematic verification.  The stub HAL backend reports
+`STATUS_NOSUPPORT`.
+
+### Added — AEN inter-core mailbox: Alif Ensemble ARM MHUv2 Zephyr MBOX driver
+
+The AEN (Alif Ensemble) inter-core IPC mailbox is the **ARM MHUv2**, confirmed
+from the `alifsemi/zephyr_alif` fork DTS.  alp-sdk now ships its own MBOX-class
+driver (`zephyr/drivers/mbox/mbox_alif_mhuv2.c` + binding) under the **distinct
+compatible `alif,mhuv2-mbox`** (collision-free against the fork's `arm,mhuv2`), so
+AEN mailbox works on the default upstream-Zephyr + hal_alif base.  `E1M-AEN801`'s
+`mailbox.controller` is now `alif_mhuv2` (was `TBD`); `alp_rpc_open` is unblocked.
+**vendor-ext, BENCH-UNVERIFIED** (Cortex-M55 — can't build in native_sim).  AEN801
+only; the RTSS-HP MHU base + AEN301..701 rollout follow bench validation.  (#45, #50)
+
+### Added — GPU2D real backends: portable software 2D + Alif D/AVE 2D
+
+The GPU2D wildcard NOSUPPORT stub is replaced by two real backends: a pure-C
+**software fallback** (`src/backends/gpu2d/sw_fallback.c`) — real `fill_rect` /
+`blit` / `blend` across all 5 formats + 4 blend modes, **unit-tested with exact
+pixel asserts** on native_sim — and the **Alif D/AVE 2D** backend
+(`alif_dave2d.c`, behind `CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D`, bench-unverified).
+Doc corrections: the AEN 2D engine is **TES D/AVE 2D** (not Mali-D71), and i.MX 93
+has **no Vivante** (its 2D engine is PXP), so the NXP 2D backend is out of scope.  (#24)
+
+### Added — inference: real A55 NPU backends (DeepX dx_rt + Renesas DRP-AI)
+
+The Yocto/A55-side inference backends are now real: `src/yocto/inference_deepx.cpp`
+is rewritten to the real **`dxrt::InferenceEngine`** API (replacing a *fictional*
+`dxnn_*` API), and `src/yocto/inference_drpai.cpp` is a new backend against the real
+**`MeraDrpRuntimeWrapper`**.  Both gated (`ALP_SDK_USE_DEEPX_DXM1` /
+`ALP_SDK_USE_DRPAI_V2N`, default off).  The Stage-2 `scripts/alp_model/adapters/
+drpai.py` compiler adapter is implemented (`blob_format "drpai_dir"`, detect-and-skip)
+with mocked + hermetic tests.  **BENCH-UNVERIFIED** — the real link needs the RZ/V
+Yocto sysroot; on-silicon runs need the V2N board / DX-M1 card.  Proprietary SDKs are
+not vendored.  (#58, #59)
+
+### Added — Yocto RTC + Watchdog: real `/dev` ioctl backends on the registry
+
+RTC and Watchdog on the Yocto/Linux side migrate from NOSUPPORT stubs to the
+registry/dispatcher pattern with **real backends** — `/dev/rtcN` via
+`RTC_RD_TIME` / `RTC_SET_TIME` (`src/backends/rtc/yocto_drv.c`) and `/dev/watchdogN`
+via the `WDIOC_*` ioctls (`src/backends/wdt/yocto_drv.c`) — which also lands
+`alp_rtc_capabilities()` / `alp_wdt_capabilities()` on Yocto.  The other four Yocto
+classes (mqtt / audio / security / rpc) follow in a later slice.  **Yocto-link +
+on-target ioctl run UNVERIFIED** (no sysroot in CI).  (#33)
+
+### Added — Yocto PWM / ADC / CAN / I²S / Counter: real Linux backends on the registry
+
+Extends the Yocto registry migration to five more peripheral classes (the "planned"
+A-class rows), each a real Linux userspace backend: **CAN** SocketCAN
+(`src/backends/can/yocto_drv.c`), **PWM** `/sys/class/pwm` sysfs, **ADC** IIO sysfs,
+**I²S** ALSA (`snd_pcm_*`, CMake-gated on `libasound`), and **Counter/QEnc** the Linux
+Counter sysfs.  Wired via the dispatcher pattern (`ALP_VENDOR_OVERRIDES_*` so the
+dispatchers own the public symbols; nm-audited); deleted the orphaned
+`peripheral_can.c` / `peripheral_i2s.c`; fixed `pwm/sw_fallback.c` to drop a
+Zephyr-only `CONTAINER_OF` include so it builds on the Yocto host.  Non-standard ops
+(CAN out-of-band bitrate, PWM dead-time/one-shot/capture, Counter alarms) honestly
+return `ALP_ERR_NOSUPPORT`.  **BENCH-UNVERIFIED** — full Yocto link + on-target runs
+(real `/dev`/sysfs nodes, a CAN bus, an I²S codec) need the sysroot/board.  (#33)
+
+### Changed — Yocto audio + rpc migrated to the registry
+
+The Yocto **audio** (ALSA) and **rpc** (OpenAMP/RPMsg userland) classes — which already
+worked via the older direct-impl model — move onto the registry/dispatcher pattern, with
+the vendor-API bodies preserved verbatim: `audio_yocto.c` → `src/backends/audio/yocto_drv.c`,
+`rpc_yocto.c` → `src/backends/rpc/yocto_drv.c` (the direct-impl files are deleted).  Both
+keep their CMake gates (ALSA; `open-amp`/`libmetal` with a NOSUPPORT fallback); rpc needs no
+override macro (it was never a stub class, so `rpc_dispatch.c` is the sole symbol owner).
+nm-audited (one owner per public symbol; backends export only the registry struct).
+BENCH-UNVERIFIED.  The remaining `mqtt` / `security` classes stay on the direct-impl model
+until their vendor headers are available in CI to compile-test the migration.  (#33)
+
+### Changed — DAC migrated to the registry; `<alp/dac.h>` split out of `adc.h`
+
+DAC was the last peripheral class still on the legacy Zephyr-only direct-impl model
+(`src/zephyr/peripheral_dac.c`).  It now uses the registry/dispatcher pattern like every
+other class: new `src/dac_dispatch.c` (owns the public `alp_dac_*`) + `src/backends/dac/`
+with `zephyr_drv.c` (native Zephyr DAC), `gd32_bridge.c` (V2N GD32 bridge via the
+`v2n_supervisor`, registered for `renesas:rzv2n:n44`), and a `sw_fallback.c` — vendor bodies
+moved verbatim.  The public DAC surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`,
+**unchanged signatures**) splits out of `<alp/adc.h>` into its own **`<alp/dac.h>`** (the
+per-class-header convention); consumers now `#include <alp/dac.h>`.  This also unblocks a
+future cross-core DAC RPMsg proxy on V2N-M1.  The native + sw_fallback paths are
+native_sim-testable; the GD32 path stays bench-unverified.  (The ABI snapshot diff flags the
+`alp_dac_*` move adc.h→dac.h, but the symbols/signatures are unchanged — a source-include
+reorganization, not a binary break; the advisory pre-1.0 gate does not enforce it.)  (#33)
+
+### Fixed — orchestrator: resolve no command for the stock M-core shim
+
+`scripts/alp_orchestrate.py` no longer emits a broken `west build` for the
+placeholder `app: alp-stock-shim` (whose image body isn't in the tree).  The slice is
+carried as `command: null` / skipped with a `stock-shim-unimplemented` warning
+pointing at overriding `cores.<id>.app`.  (#49)
+
+### Fixed — library profiles: `cmsis_dsp` dir now matches its board token
+
+The CMSIS-DSP profile directory is renamed `cmsis-dsp/` → `cmsis_dsp/` to match the
+`board.yaml` token.  The loader's profile lookup (built from the raw token) was
+missing the hyphenated dir and **silently dropping the CMSIS-DSP HW-accelerator
+bindings** (NEON / TMU CORDIC / FFT).  `_LIBRARY_WEST_MODULES` keeps `cmsis_dsp →
+cmsis-dsp` (the upstream west *project* name).  (#47)
+
+### Fixed — CI + docs hygiene
+
+- `pr-twister` now runs the `tests/unit` suites (35 unit scenarios that previously
+  ran only in the local gate).  (#90)
+- `nightly-extras-tier1-pins`: fixed a west-topdir path mismatch that left the
+  library audit empty and produced an invalid `/*.txt` artifact path.
+- `zephyr/module.yml`: re-baselined the stale Zephyr-v3.7 `west-commands` note to v4.4.  (#51)
+- `<alp/display.h>`: corrected the `@brief` that described a non-existent v0.1 backend;
+  display remains a NOSUPPORT stub with the real backends tracked by #23.
+- bitbake CI moved to a private-runner dispatch bridge (no self-hosted runner on the
+  public repo).  (#127)
+
 ## [v0.7.0] - 2026-06-12
 
 ### Added — meta-alp-sdk: production image (`alp-image-prod`) + ALP distro identity + hardening

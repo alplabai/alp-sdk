@@ -45,18 +45,16 @@ extern "C" {
 #define TSL2591_ENABLE_AEN      0x02u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } tsl2591_t;
 
 /** @brief Bind context and verify chip ID. */
 alp_status_t tsl2591_init(tsl2591_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 
 /** @brief Read 16-bit visible+IR (CH0) and IR-only (CH1) counts. */
-alp_status_t tsl2591_read_channels(tsl2591_t *dev,
-                                   uint16_t  *ch0_full_out,
-                                   uint16_t  *ch1_ir_out);
+alp_status_t tsl2591_read_channels(tsl2591_t *dev, uint16_t *ch0_full_out, uint16_t *ch1_ir_out);
 
 /** @brief Release driver context. */
 void tsl2591_deinit(tsl2591_t *dev);

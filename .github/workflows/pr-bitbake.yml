@@ -1,49 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Bitbake gate for the v0.6 heterogeneous-OS design (per
-# docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
-# §7 Phase 5).  Builds the stock `alp-image-edge` reference rootfs
-# for every A-cluster MACHINE the SDK targets so the Yocto half of
-# the heterogeneous flow is verified at PR time, not surprise-broken
-# at release.
+# Bitbake CI — DISPATCH BRIDGE (GitHub-hosted).
 #
-# === Runner expectations ===
+# The actual Yocto build runs on a self-hosted runner in the PRIVATE
+# `alplabai/alp-sdk-internal` repo (which also hosts the license-gated
+# RZ BSP the build needs).  A self-hosted runner NEVER attaches to this
+# public repo — fork PRs would otherwise run untrusted code on it.  This
+# job is GitHub-hosted: it sets a `pending` commit status, then fires a
+# `repository_dispatch` to alp-sdk-internal with the target ref/sha.
+# alp-sdk-internal runs `bitbake alp-image-edge` for every A-cluster
+# MACHINE on its own runner and posts the per-MACHINE result back here as
+# a commit status (`bitbake · <MACHINE>`), so the red-X still lands on
+# the dev→main PR and can be a required check.
 #
-# This workflow REQUIRES a self-hosted runner labelled
-# `[self-hosted, linux, x64, alp-bitbake]`.  Provisioning checklist:
-#
-#   * Ubuntu 22.04 LTS host (Yocto kirkstone/scarthgap baseline).
-#   * Poky checked out at the path exposed by `${ALP_POKY_ROOT}` env
-#     var (typical: /opt/poky).  The runner provides this; the
-#     workflow does NOT fetch poky -- a cold-clone would blow past
-#     the 6h job ceiling.
-#   * Persistent sstate-cache mount at `${ALP_SSTATE_ROOT}` (typical
-#     /var/cache/alp-bitbake/sstate-cache).  Without warm sstate the
-#     first cold build is several hours; warm-cache steady-state is
-#     ~5 minutes per MACHINE.
-#   * Persistent downloads mirror at `${ALP_DL_ROOT}` (typical
-#     /var/cache/alp-bitbake/downloads).
-#   * Host packages from `meta-poky`'s build-essential list
-#     (gawk, wget, git-core, diffstat, unzip, texinfo, gcc-multilib,
-#     build-essential, chrpath, socat, cpio, python3, python3-pip,
-#     python3-pexpect, xz-utils, debianutils, iputils-ping,
-#     python3-git, python3-jinja2, libegl1-mesa, libsdl1.2-dev,
-#     pylint3, xterm, zstd, liblz4-tool).
-#
-# === Cache strategy ===
-#
-# Per-MACHINE sstate-cache is keyed on a hash of the `meta-alp-sdk/`
-# tree -- any recipe edit busts the cache for that MACHINE, but a
-# pure metadata-yaml or example-app edit (the common PR pattern)
-# reuses the existing sstate and steady-state stays at the
-# ~5min-per-MACHINE figure quoted in design §10 risks table.
-# Restore-keys fall back to any prior sstate for the same MACHINE
-# so a fresh sstate hash benefits from prior work.
-#
-# AEN MACHINEs are intentionally absent from the matrix below.
-# AEN's Yocto-on-A32 path is a v0.7 deliverable; once meta-alif-bsp
-# lands the canonical recipe set, add the matching MACHINEs here.
-#   TODO(v0.7): add e1m-aen{501,701,801}-a32 once AEN Yocto BSP lands.
+# Security model (see docs/ci/runner-architecture.md):
+#   * Fork PRs receive NO secrets, so the App credentials are absent and
+#     the guard below skips the dispatch entirely — a fork can never
+#     trigger the private build.
+#   * The dispatch token is minted at runtime from a GitHub App
+#     (actions/create-github-app-token), scoped to alp-sdk-internal with
+#     Contents:write ONLY and valid ~1h.  The only long-lived secret is
+#     the App's private key (org-owned + revocable); worst case if leaked,
+#     someone can kick off a build — no code execution, no host access.
 
 name: pr-bitbake
 
@@ -55,8 +33,8 @@ on:
       - 'scripts/**'
       - 'examples/**/board.yaml'
       - 'src/**'
-      - '.github/workflows/pr-bitbake.yml'
       - 'meta-alp-sdk/**'
+      - '.github/workflows/pr-bitbake.yml'
   push:
     branches: [main]
     paths:
@@ -72,115 +50,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  bitbake:
-    name: bitbake · ${{ matrix.MACHINE }}
-    # See top-of-file comment block for runner provisioning.  The
-    # `alp-bitbake` label scopes selection to runners that carry
-    # poky + persistent sstate + downloads mounts.
-    runs-on: [self-hosted, linux, x64, alp-bitbake]
-    timeout-minutes: 360
-
-    strategy:
-      fail-fast: false
-      matrix:
-        MACHINE:
-          - e1m-v2n101-a55
-          - e1m-v2n102-a55
-          - e1m-v2m101-a55
-          - e1m-v2m102-a55
-          - e1m-n93-a55
-
+  dispatch:
+    name: bitbake · dispatch to alp-sdk-internal
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write          # pending status on THIS repo (same-repo, no PAT)
     steps:
-      - name: Checkout alp-sdk
-        uses: actions/checkout@v4
-        with:
-          path: alp-sdk
-          fetch-depth: 1
-
-      # Per-MACHINE sstate-cache.  The hashFiles() input picks up
-      # every recipe/append under meta-alp-sdk; pure example or
-      # metadata-yaml edits keep the existing sstate hot.
-      - name: Restore sstate-cache for ${{ matrix.MACHINE }}
-        uses: actions/cache@v4
-        with:
-          path: |
-            tmp/sstate-cache
-          key: ${{ matrix.MACHINE }}-bitbake-sstate-${{ hashFiles('alp-sdk/meta-alp-sdk/**') }}
-          restore-keys: |
-            ${{ matrix.MACHINE }}-bitbake-sstate-
-
-      # The self-hosted runner supplies ${ALP_POKY_ROOT}; failing
-      # fast here makes runner mis-configuration obvious instead of
-      # cascading into a confusing bitbake "MACHINE not found".
-      - name: Verify runner exposes poky + sstate mounts
+      - name: Resolve target sha/ref
+        id: t
         run: |
-          set -euo pipefail
-          : "${ALP_POKY_ROOT:?ALP_POKY_ROOT env var not set on this runner -- see workflow header}"
-          test -d "${ALP_POKY_ROOT}" || {
-            echo "::error::ALP_POKY_ROOT=${ALP_POKY_ROOT} not a directory on this runner"
-            exit 1
-          }
-          test -f "${ALP_POKY_ROOT}/oe-init-build-env" || {
-            echo "::error::${ALP_POKY_ROOT}/oe-init-build-env missing -- poky checkout incomplete"
-            exit 1
-          }
-          echo "Poky root:  ${ALP_POKY_ROOT}"
-          echo "sstate:     ${ALP_SSTATE_ROOT:-<unset; per-job sstate-cache only>}"
-          echo "downloads:  ${ALP_DL_ROOT:-<unset; per-job DL_DIR only>}"
+          echo "sha=${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "ref=${{ github.event.pull_request.head.ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
 
-      - name: bitbake alp-image-edge for ${{ matrix.MACHINE }}
+      - name: Guard — internal events only (forks never dispatch)
+        id: guard
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && \
+             [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "Fork PR detected — skipping private dispatch (secrets do not reach forks anyway)."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set pending status on alp-sdk
+        if: steps.guard.outputs.go == 'true'
         env:
-          MACHINE: ${{ matrix.MACHINE }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          # `oe-init-build-env` sources poky + creates ./build with
-          # conf/{local,bblayers}.conf.  Source it inline; the
-          # subshell scope is fine because every subsequent step
-          # is fresh anyway.
-          # shellcheck disable=SC1091
-          . "${ALP_POKY_ROOT}/oe-init-build-env" build
-          # Wire meta-alp-sdk into bblayers.conf if not already
-          # present.  Idempotent -- bitbake-layers no-ops a duplicate.
-          bitbake-layers add-layer "${GITHUB_WORKSPACE}/alp-sdk/meta-alp-sdk" || true
-          # Point local.conf at the persistent sstate + downloads
-          # mounts when the runner provides them.  Falls back to
-          # per-job actions/cache + per-job DL_DIR otherwise.
-          if [ -n "${ALP_SSTATE_ROOT:-}" ]; then
-              echo "SSTATE_DIR ?= \"${ALP_SSTATE_ROOT}\"" >> conf/local.conf
-          fi
-          if [ -n "${ALP_DL_ROOT:-}" ]; then
-              echo "DL_DIR ?= \"${ALP_DL_ROOT}\"" >> conf/local.conf
-          fi
-          echo "MACHINE = \"${MACHINE}\"" >> conf/local.conf
-          bitbake alp-image-edge
+          gh api repos/${{ github.repository }}/statuses/${{ steps.t.outputs.sha }} \
+            -f state=pending \
+            -f context="bitbake (alp-sdk-internal)" \
+            -f description="Dispatched to the private Yocto runner…"
 
-      - name: Assert image artefact landed at expected path
-        env:
-          MACHINE: ${{ matrix.MACHINE }}
-        run: |
-          set -euo pipefail
-          deploy_dir="${GITHUB_WORKSPACE}/build/tmp/deploy/images/${MACHINE}"
-          # The image-name suffix carries the build timestamp +
-          # version; glob it.
-          shopt -s nullglob
-          matches=( "${deploy_dir}"/alp-image-edge-*.wic.gz )
-          if [ "${#matches[@]}" -eq 0 ]; then
-            echo "::error::No alp-image-edge-*.wic.gz under ${deploy_dir}"
-            ls -la "${deploy_dir}" 2>/dev/null || true
-            exit 1
-          fi
-          echo "Image artefact: ${matches[0]}"
-          # Resolve symlink path so the upload step picks the
-          # concrete file rather than a dangling alias.
-          readlink -f "${matches[0]}" > /tmp/alp-image-path.txt
-          cat /tmp/alp-image-path.txt
-
-      - name: Upload bitbake image artefact for pr-renode-dual-os
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Mint a short-lived App token (scoped to alp-sdk-internal)
+        if: steps.guard.outputs.go == 'true'
+        id: apptoken
+        uses: actions/create-github-app-token@v1
         with:
-          name: bitbake-${{ matrix.MACHINE }}-image
-          path: |
-            build/tmp/deploy/images/${{ matrix.MACHINE }}/alp-image-edge-*.wic.gz
-          retention-days: 14
-          if-no-files-found: warn
+          app-id: ${{ secrets.ALP_CI_APP_ID }}
+          private-key: ${{ secrets.ALP_CI_APP_PRIVATE_KEY }}
+          owner: alplabai
+          repositories: alp-sdk-internal
+
+      - name: Dispatch build to alp-sdk-internal
+        if: steps.guard.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        run: |
+          gh api repos/alplabai/alp-sdk-internal/dispatches \
+            -f event_type=bitbake \
+            -F "client_payload[sha]=${{ steps.t.outputs.sha }}" \
+            -F "client_payload[ref]=${{ steps.t.outputs.ref }}" \
+            -F "client_payload[pr]=${{ github.event.pull_request.number || 0 }}"

@@ -33,18 +33,18 @@ typedef struct alp_mproc_ops alp_mproc_ops_t;
 /* ------------------------------------------------------------------ */
 
 typedef struct alp_shmem_backend_state {
-    void                  *be_data;
-    const alp_mproc_ops_t *ops;
+	void                  *be_data;
+	const alp_mproc_ops_t *ops;
 } alp_shmem_backend_state_t;
 
 typedef struct alp_mbox_backend_state {
-    void                  *be_data;
-    const alp_mproc_ops_t *ops;
+	void                  *be_data;
+	const alp_mproc_ops_t *ops;
 } alp_mbox_backend_state_t;
 
 typedef struct alp_hwsem_backend_state {
-    void                  *be_data;
-    const alp_mproc_ops_t *ops;
+	void                  *be_data;
+	const alp_mproc_ops_t *ops;
 } alp_hwsem_backend_state_t;
 
 /* ------------------------------------------------------------------ */
@@ -52,34 +52,34 @@ typedef struct alp_hwsem_backend_state {
 /* ------------------------------------------------------------------ */
 
 struct alp_mproc_ops {
-    /* ---- Shared memory ---- */
-    alp_status_t (*shmem_open)(const alp_shmem_config_t *cfg,
-                               alp_shmem_backend_state_t *state,
-                               alp_capabilities_t *caps_out);
-    alp_status_t (*shmem_view)(alp_shmem_backend_state_t *state,
-                               void **base_out, size_t *size_out);
-    void         (*shmem_close)(alp_shmem_backend_state_t *state);
+	/* ---- Shared memory ---- */
+	alp_status_t (*shmem_open)(const alp_shmem_config_t  *cfg,
+	                           alp_shmem_backend_state_t *state,
+	                           alp_capabilities_t        *caps_out);
+	alp_status_t (*shmem_view)(alp_shmem_backend_state_t *state, void **base_out, size_t *size_out);
+	void (*shmem_close)(alp_shmem_backend_state_t *state);
 
-    /* ---- Mailbox ---- */
-    alp_status_t (*mbox_open)(const alp_mbox_config_t *cfg,
-                              alp_mbox_backend_state_t *state,
-                              alp_capabilities_t *caps_out);
-    alp_status_t (*mbox_send)(alp_mbox_backend_state_t *state,
-                              const void *data, size_t len,
-                              uint32_t timeout_ms);
-    alp_status_t (*mbox_set_callback)(alp_mbox_backend_state_t *state,
-                                      alp_mbox_msg_cb_t cb, void *user);
-    void         (*mbox_close)(alp_mbox_backend_state_t *state);
+	/* ---- Mailbox ---- */
+	alp_status_t (*mbox_open)(const alp_mbox_config_t  *cfg,
+	                          alp_mbox_backend_state_t *state,
+	                          alp_capabilities_t       *caps_out);
+	alp_status_t (*mbox_send)(alp_mbox_backend_state_t *state,
+	                          const void               *data,
+	                          size_t                    len,
+	                          uint32_t                  timeout_ms);
+	alp_status_t (*mbox_set_callback)(alp_mbox_backend_state_t *state,
+	                                  alp_mbox_msg_cb_t         cb,
+	                                  void                     *user);
+	void (*mbox_close)(alp_mbox_backend_state_t *state);
 
-    /* ---- Hardware semaphore ---- */
-    alp_status_t (*hwsem_open)(uint32_t hwsem_id,
-                               alp_hwsem_backend_state_t *state,
-                               alp_capabilities_t *caps_out);
-    alp_status_t (*hwsem_try_lock)(alp_hwsem_backend_state_t *state);
-    alp_status_t (*hwsem_lock)(alp_hwsem_backend_state_t *state,
-                               uint32_t timeout_ms);
-    alp_status_t (*hwsem_unlock)(alp_hwsem_backend_state_t *state);
-    void         (*hwsem_close)(alp_hwsem_backend_state_t *state);
+	/* ---- Hardware semaphore ---- */
+	alp_status_t (*hwsem_open)(uint32_t                   hwsem_id,
+	                           alp_hwsem_backend_state_t *state,
+	                           alp_capabilities_t        *caps_out);
+	alp_status_t (*hwsem_try_lock)(alp_hwsem_backend_state_t *state);
+	alp_status_t (*hwsem_lock)(alp_hwsem_backend_state_t *state, uint32_t timeout_ms);
+	alp_status_t (*hwsem_unlock)(alp_hwsem_backend_state_t *state);
+	void (*hwsem_close)(alp_hwsem_backend_state_t *state);
 };
 
 /* ------------------------------------------------------------------ */
@@ -87,24 +87,24 @@ struct alp_mproc_ops {
 /* ------------------------------------------------------------------ */
 
 struct alp_shmem {
-    alp_shmem_backend_state_t  state;
-    const alp_backend_t       *backend;
-    alp_capabilities_t         cached_caps;
-    bool                       in_use;
+	alp_shmem_backend_state_t state;
+	const alp_backend_t      *backend;
+	alp_capabilities_t        cached_caps;
+	bool                      in_use;
 };
 
 struct alp_mbox {
-    alp_mbox_backend_state_t   state;
-    const alp_backend_t       *backend;
-    alp_capabilities_t         cached_caps;
-    bool                       in_use;
+	alp_mbox_backend_state_t state;
+	const alp_backend_t     *backend;
+	alp_capabilities_t       cached_caps;
+	bool                     in_use;
 };
 
 struct alp_hwsem {
-    alp_hwsem_backend_state_t  state;
-    const alp_backend_t       *backend;
-    alp_capabilities_t         cached_caps;
-    bool                       in_use;
+	alp_hwsem_backend_state_t state;
+	const alp_backend_t      *backend;
+	alp_capabilities_t        cached_caps;
+	bool                      in_use;
 };
 
 #endif /* ALP_BACKENDS_MPROC_OPS_H */

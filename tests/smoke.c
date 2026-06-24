@@ -15,7 +15,8 @@
 #include "alp/gui.h"
 #include "alp/iot.h"
 
-int main(void) {
-    printf("Alp SDK smoke: headers compiled and linked.\n");
-    return 0;
+int main(void)
+{
+	printf("Alp SDK smoke: headers compiled and linked.\n");
+	return 0;
 }

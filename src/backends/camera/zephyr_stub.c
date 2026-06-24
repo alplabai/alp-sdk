@@ -15,8 +15,8 @@
  * with their own silicon-specific entries in
  * src/backends/camera/ at higher priority than this wildcard.
  * ISP-specific knobs (configure_isp) follow issue #21 separately
- * since the AEN Mali-C55 ISP fabric isn't wired by Zephyr's
- * portable video driver class yet.
+ * since the AEN VeriSilicon ISP Pico (vsi,isp-pico) fabric isn't
+ * wired by Zephyr's portable video driver class yet.
  *
  * @par Tracking: github.com/alplabai/alp-sdk/issues/20
  * @par Tracking: github.com/alplabai/alp-sdk/issues/21
@@ -31,69 +31,69 @@
 
 #include "camera_ops.h"
 
-static alp_status_t stub_open(const alp_camera_config_t *cfg,
+static alp_status_t stub_open(const alp_camera_config_t  *cfg,
                               alp_camera_backend_state_t *state,
-                              alp_capabilities_t *caps_out)
+                              alp_capabilities_t         *caps_out)
 {
-    (void)cfg;
-    (void)state;
-    (void)caps_out;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)cfg;
+	(void)state;
+	(void)caps_out;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static alp_status_t stub_start(alp_camera_backend_state_t *state)
 {
-    (void)state;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static alp_status_t stub_stop(alp_camera_backend_state_t *state)
 {
-    (void)state;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t stub_capture(alp_camera_backend_state_t *state,
-                                 alp_camera_frame_t *out,
-                                 uint32_t timeout_ms)
+static alp_status_t
+stub_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t timeout_ms)
 {
-    (void)state;
-    (void)out;
-    (void)timeout_ms;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	(void)out;
+	(void)timeout_ms;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t stub_release(alp_camera_backend_state_t *state,
-                                 alp_camera_frame_t *frame)
+static alp_status_t stub_release(alp_camera_backend_state_t *state, alp_camera_frame_t *frame)
 {
-    (void)state;
-    (void)frame;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	(void)frame;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t stub_configure_isp(alp_camera_backend_state_t *state,
+static alp_status_t stub_configure_isp(alp_camera_backend_state_t    *state,
                                        const alp_camera_isp_config_t *isp)
 {
-    (void)state;
-    (void)isp;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	(void)isp;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static const alp_camera_ops_t _ops = {
-    .open          = stub_open,
-    .start         = stub_start,
-    .stop          = stub_stop,
-    .capture       = stub_capture,
-    .release       = stub_release,
-    .configure_isp = stub_configure_isp,
-    .close         = NULL,
+	.open          = stub_open,
+	.start         = stub_start,
+	.stop          = stub_stop,
+	.capture       = stub_capture,
+	.release       = stub_release,
+	.configure_isp = stub_configure_isp,
+	.close         = NULL,
 };
 
-ALP_BACKEND_REGISTER(camera, zephyr_stub, {
-    .silicon_ref = "*",
-    .vendor      = "stub",
-    .base_caps   = 0u,
-    .priority    = 0,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(camera,
+                     zephyr_stub,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "stub",
+                         .base_caps   = 0u,
+                         .priority    = 0,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

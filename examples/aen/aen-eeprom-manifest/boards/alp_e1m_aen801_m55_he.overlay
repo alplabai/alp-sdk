@@ -1,0 +1,53 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Wire the on-module 24C128 EEPROM bus for the manifest read on the E1M-AEN801
+ * (M55-HE).  The EEPROM's interface is selected by bridge/DNP resistors onto SoC
+ * I2C2 (DesignWare master, upstream i2c_dw), pins P5_6 SCL_C / P5_7 SDA_C -- NOT
+ * the slave-only LPI2C0.  Map portable bus 0 (alp-i2c0) -> &i2c2.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+&pinctrl {
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			/* I2C pad config -- BENCH-VALIDATED on the E8 (2026-06-15) and
+			 * matching Alif's own reference i2c pinctrl (sdk-alif
+			 * common/ensemble-pinctrl.dtsi: read-enable=1 +
+			 * driver-state-control=2):
+			 *   input-enable    -> pad REN bit: the i2c_dw controller MUST be
+			 *                      able to SENSE SDA/SCL or it reads every
+			 *                      address as a NACK (no ACK detect). Without
+			 *                      this the EEPROM never responds.
+			 *   bias-pull-down  -> upstream pinctrl_soc.h encodes the pad
+			 *                      driver-state-control (DSC) field as DSC=2
+			 *                      from bias-pull-down -- which is exactly the
+			 *                      value Alif's reference uses for I2C. (DSC=1
+			 *                      via bias-pull-up does NOT work -> dead bus;
+			 *                      the upstream binding's pull naming is
+			 *                      effectively inverted vs the Alif pad HW.)
+			 * Do NOT "correct" bias-pull-down to bias-pull-up.
+			 */
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	/* 100 kHz: bench-validated; the on-module bus has no fast-mode margin
+	 * unless external pull-ups are stuffed. */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+/ {
+	aliases {
+		alp-i2c0 = &i2c2;
+	};
+};

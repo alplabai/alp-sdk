@@ -61,71 +61,73 @@
 #include "alp/inference.h"
 #include "alp/peripheral.h"
 
-#define M1_BOOT_US 5000u  /* DEEPX-recommended boot-wait (see DX-M1 datasheet) */
+#define M1_BOOT_US 5000u /* DEEPX-recommended boot-wait (see DX-M1 datasheet) */
 
 /* Placeholder model buffer -- on real hardware this is the
  * DXNN-compiled model byte stream.  Sized for the example only;
  * production code mmaps a model file or links it as a const
  * blob from a generator step. */
 static const uint8_t k_placeholder_model[8] = {
-    0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE,
+	0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE,
 };
 
 int main(void)
 {
-    printf("[deepx] v2n-m1-deepx-inference flagship\n");
-    printf("[deepx] stage 1: PCIe mux + power_mgmt bring-up (supervisor-side)\n");
-    /* On real V2N-M1 silicon the supervisor's v2n_power_mgmt.c
+	printf("[deepx] v2n-m1-deepx-inference flagship\n");
+	printf("[deepx] stage 1: PCIe mux + power_mgmt bring-up (supervisor-side)\n");
+	/* On real V2N-M1 silicon the supervisor's v2n_power_mgmt.c
      * (§C.28) brings up the 0.75 V DEEPX rail as soon as the
      * P65 IRQ fires; the PCIe mux + M1_RESET release ride the
      * deepx_dxm1_bring_up() helper below.  Under native_sim the
      * supervisor's NOSUPPORT path runs instead -- the example
      * still validates the framing all the way through. */
 
-    printf("[deepx] stage 2: opening DEEPX inference handle\n");
-    alp_inference_config_t cfg = {
-        .model_data  = k_placeholder_model,
-        .model_size  = sizeof k_placeholder_model,
-        .format      = ALP_INFERENCE_MODEL_DXNN,
-        .backend     = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
-        .arena_bytes = 0u, /* let the backend pick */
-        .arena       = NULL,
-    };
-    alp_inference_t *inf = alp_inference_open(&cfg);
-    if (inf == NULL) {
-        printf("[deepx]   open returned NULL: last_err=%d\n", (int)alp_last_error());
-        printf("[deepx]   (expected under native_sim and on builds without dx_rt)\n");
-        goto done;
-    }
+	printf("[deepx] stage 2: opening DEEPX inference handle\n");
+	alp_inference_config_t cfg = {
+		.model_data  = k_placeholder_model,
+		.model_size  = sizeof k_placeholder_model,
+		.format      = ALP_INFERENCE_MODEL_DXNN,
+		.backend     = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
+		.arena_bytes = 0u, /* let the backend pick */
+		.arena       = NULL,
+	};
+	alp_inference_t *inf = alp_inference_open(&cfg);
+	if (inf == NULL) {
+		printf("[deepx]   open returned NULL: last_err=%d\n", (int)alp_last_error());
+		printf("[deepx]   (expected under native_sim and on builds without dx_rt)\n");
+		goto done;
+	}
 
-    printf("[deepx] stage 3: model accepts %zu input + %zu output tensors\n",
-           alp_inference_num_inputs(inf), alp_inference_num_outputs(inf));
+	printf("[deepx] stage 3: model accepts %zu input + %zu output tensors\n",
+	       alp_inference_num_inputs(inf),
+	       alp_inference_num_outputs(inf));
 
-    alp_inference_tensor_t in = { 0 };
-    if (alp_inference_get_input(inf, 0u, &in) == ALP_OK) {
-        /* Fill the input buffer with the caller's domain payload
+	alp_inference_tensor_t in = { 0 };
+	if (alp_inference_get_input(inf, 0u, &in) == ALP_OK) {
+		/* Fill the input buffer with the caller's domain payload
          * (sensor sample, image pixels, audio frame, ...).  For
          * this example we just zero it. */
-        memset(in.data, 0, in.size_bytes);
-    }
+		memset(in.data, 0, in.size_bytes);
+	}
 
-    printf("[deepx] stage 4: running inference\n");
-    const alp_status_t rc = alp_inference_invoke(inf);
-    if (rc != ALP_OK) {
-        printf("[deepx]   invoke -> %d\n", (int)rc);
-        alp_inference_close(inf);
-        goto done;
-    }
+	printf("[deepx] stage 4: running inference\n");
+	const alp_status_t rc = alp_inference_invoke(inf);
+	if (rc != ALP_OK) {
+		printf("[deepx]   invoke -> %d\n", (int)rc);
+		alp_inference_close(inf);
+		goto done;
+	}
 
-    alp_inference_tensor_t out = { 0 };
-    if (alp_inference_get_output(inf, 0u, &out) == ALP_OK) {
-        printf("[deepx] stage 5: output tensor: %u bytes, dtype=%d\n",
-               (unsigned)out.size_bytes, (int)out.dtype);
-    }
+	alp_inference_tensor_t out = { 0 };
+	if (alp_inference_get_output(inf, 0u, &out) == ALP_OK) {
+		printf("[deepx] stage 5: output tensor: %u bytes, dtype=%d\n",
+		       (unsigned)out.size_bytes,
+		       (int)out.dtype);
+	}
 
-    alp_inference_close(inf);
+	alp_inference_close(inf);
 
 done:
-    printf("[deepx] done\n");
-    return 0;
+	printf("[deepx] done\n");
+	return 0;
 }

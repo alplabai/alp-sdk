@@ -277,9 +277,11 @@ The schema deliberately separates two concerns that get conflated:
 On E1M-AEN, the on-module parts are: Alif Ensemble silicon, TI
 CC3501E (Wi-Fi/BLE), Infineon OPTIGA Trust M, Micro Crystal
 RV-3028-C7 RTC, TI TMP112, Onsemi 24C128 EEPROM.  Everything else
-on the dev kit (LSM6DSO, BMI323, ICM-42670, BMP581, OLEDs, OV5640,
-TAS2563, INA236, ...) is on the **E1M-EVK board**, not on the
-module.
+on the dev kit (BMI323, ICM-42670, BMP581, TAS2563, INA236, the
+camera mux, ...) is on the **E1M-EVK board**, not on the module.
+LSM6DSO and an SSD1306 OLED are not soldered on the EVK -- apps that
+want them attach the part to the I2C/Qwiic header and declare it in
+their board.yaml `chips:` array.
 
 ### `som` block
 
@@ -377,9 +379,9 @@ with one `#define <MACRO> E1M_<…>` line per entry.
 
 #### Preset mode (SDK-internal shortcut)
 
-The 61 example projects under `examples/` all target the EVK or
-X-EVK, so they share a single board definition each via the
-`preset:` field:
+Most example projects under `examples/` target the EVK or X-EVK
+(66 do today — 46 on `e1m-evk`, 20 on `e1m-x-evk`), so they share a
+single board definition each via the `preset:` field:
 
 ```yaml
 preset: e1m-evk             # or e1m-x-evk

@@ -52,130 +52,137 @@
 
 static uint8_t sw_pcm_width_for(alp_audio_format_t f)
 {
-    switch (f) {
-    case ALP_AUDIO_FMT_S16_LE: return 16;
-    case ALP_AUDIO_FMT_S24_LE: return 24;
-    case ALP_AUDIO_FMT_S32_LE: return 32;
-    default:                   return 16;
-    }
+	switch (f) {
+	case ALP_AUDIO_FMT_S16_LE:
+		return 16;
+	case ALP_AUDIO_FMT_S24_LE:
+		return 24;
+	case ALP_AUDIO_FMT_S32_LE:
+		return 32;
+	default:
+		return 16;
+	}
 }
 
 static size_t sw_bytes_per_frame(const alp_audio_config_t *cfg)
 {
-    return (size_t)cfg->channels * (size_t)((sw_pcm_width_for(cfg->format) + 7u) / 8u);
+	return (size_t)cfg->channels * (size_t)((sw_pcm_width_for(cfg->format) + 7u) / 8u);
 }
 
 /* ---------- Input ---------- */
 
-static alp_status_t sw_in_open(const alp_audio_config_t *cfg,
+static alp_status_t sw_in_open(const alp_audio_config_t     *cfg,
                                alp_audio_in_backend_state_t *state,
-                               alp_capabilities_t *caps_out)
+                               alp_capabilities_t           *caps_out)
 {
-    (void)cfg;
-    state->be_data  = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	(void)cfg;
+	state->be_data  = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
 static alp_status_t sw_in_start(alp_audio_in_backend_state_t *state)
 {
-    (void)state;
-    return ALP_OK;
+	(void)state;
+	return ALP_OK;
 }
 
 static alp_status_t sw_in_stop(alp_audio_in_backend_state_t *state)
 {
-    (void)state;
-    return ALP_OK;
+	(void)state;
+	return ALP_OK;
 }
 
 static alp_status_t sw_in_read(alp_audio_in_backend_state_t *state,
-                               void *buf, size_t frames,
-                               size_t *out_frames,
-                               uint32_t timeout_ms)
+                               void                         *buf,
+                               size_t                        frames,
+                               size_t                       *out_frames,
+                               uint32_t                      timeout_ms)
 {
-    (void)timeout_ms;
-    /* Zero-fill -- silence source.  Tests that need byte-counts get
+	(void)timeout_ms;
+	/* Zero-fill -- silence source.  Tests that need byte-counts get
      * a predictable pattern; production builds that need real audio
      * MUST link the priority-100 zephyr_drv backend. */
-    size_t bytes = frames * sw_bytes_per_frame(&state->cfg);
-    memset(buf, 0, bytes);
-    if (out_frames != NULL) *out_frames = frames;
-    return ALP_OK;
+	size_t bytes = frames * sw_bytes_per_frame(&state->cfg);
+	memset(buf, 0, bytes);
+	if (out_frames != NULL) *out_frames = frames;
+	return ALP_OK;
 }
 
 static void sw_in_close(alp_audio_in_backend_state_t *state)
 {
-    (void)state;
+	(void)state;
 }
 
 /* ---------- Output ---------- */
 
-static alp_status_t sw_out_open(const alp_audio_config_t *cfg,
+static alp_status_t sw_out_open(const alp_audio_config_t      *cfg,
                                 alp_audio_out_backend_state_t *state,
-                                alp_capabilities_t *caps_out)
+                                alp_capabilities_t            *caps_out)
 {
-    (void)cfg;
-    state->be_data  = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	(void)cfg;
+	state->be_data  = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
 static alp_status_t sw_out_start(alp_audio_out_backend_state_t *state)
 {
-    (void)state;
-    return ALP_OK;
+	(void)state;
+	return ALP_OK;
 }
 
 static alp_status_t sw_out_stop(alp_audio_out_backend_state_t *state)
 {
-    (void)state;
-    return ALP_OK;
+	(void)state;
+	return ALP_OK;
 }
 
 static alp_status_t sw_out_write(alp_audio_out_backend_state_t *state,
-                                 const void *buf, size_t frames,
-                                 size_t *out_frames,
-                                 uint32_t timeout_ms)
+                                 const void                    *buf,
+                                 size_t                         frames,
+                                 size_t                        *out_frames,
+                                 uint32_t                       timeout_ms)
 {
-    (void)state;
-    (void)buf;
-    (void)timeout_ms;
-    /* Null sink -- caller-side accounting needs the frame count back
+	(void)state;
+	(void)buf;
+	(void)timeout_ms;
+	/* Null sink -- caller-side accounting needs the frame count back
      * so partial-write loops do not spin. */
-    if (out_frames != NULL) *out_frames = frames;
-    return ALP_OK;
+	if (out_frames != NULL) *out_frames = frames;
+	return ALP_OK;
 }
 
 static alp_status_t sw_out_set_volume(alp_audio_out_backend_state_t *state, uint8_t vol)
 {
-    (void)state;
-    (void)vol;
-    return ALP_OK;
+	(void)state;
+	(void)vol;
+	return ALP_OK;
 }
 
 static void sw_out_close(alp_audio_out_backend_state_t *state)
 {
-    (void)state;
+	(void)state;
 }
 
 /* ---------- Registration ---------- */
 
 static const alp_audio_ops_t _ops = {
-    .in_open        = sw_in_open,
-    .in_start       = sw_in_start,
-    .in_stop        = sw_in_stop,
-    .in_read        = sw_in_read,
-    .in_close       = sw_in_close,
-    .out_open       = sw_out_open,
-    .out_start      = sw_out_start,
-    .out_stop       = sw_out_stop,
-    .out_write      = sw_out_write,
-    .out_set_volume = sw_out_set_volume,
-    .out_close      = sw_out_close,
+	.in_open        = sw_in_open,
+	.in_start       = sw_in_start,
+	.in_stop        = sw_in_stop,
+	.in_read        = sw_in_read,
+	.in_close       = sw_in_close,
+	.out_open       = sw_out_open,
+	.out_start      = sw_out_start,
+	.out_stop       = sw_out_stop,
+	.out_write      = sw_out_write,
+	.out_set_volume = sw_out_set_volume,
+	.out_close      = sw_out_close,
 };
 
-ALP_BACKEND_REGISTER(audio, sw_fallback,
+ALP_BACKEND_REGISTER(audio,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

@@ -37,13 +37,13 @@ extern "C" {
 /** Per-channel L/R selection (set by the L/R pin, recorded here for
  *  the I²S controller's per-slot decode). */
 typedef enum {
-    ICS_43434_CH_LEFT  = 0,
-    ICS_43434_CH_RIGHT = 1,
+	ICS_43434_CH_LEFT  = 0,
+	ICS_43434_CH_RIGHT = 1,
 } ics_43434_channel_t;
 
 typedef struct {
-    ics_43434_channel_t channel;
-    bool                initialised;
+	ics_43434_channel_t channel;
+	bool                initialised;
 } ics_43434_t;
 
 /**

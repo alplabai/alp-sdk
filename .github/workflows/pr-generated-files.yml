@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # The ABI freeze gate below needs tags + the v0.1 commit
           # reachable so `git show v0.1:docs/abi/v0.1-snapshot.json`
@@ -51,9 +51,20 @@ jobs:
           fetch-tags: true
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+
+      # gen_soc_caps.py formats its output with clang-format-22 (the same version
+      # the diff-only style gate pins) so the generated headers match the repo
+      # .clang-format byte-for-byte.  Pinned via the pip wheel (not apt, which
+      # floats with the runner image).  Without it the regen below is unformatted
+      # and the in-sync diff fails.
+      - name: Install clang-format 22 (pinned)
+        run: |
+          python3 -m pip install --user 'clang-format==22.1.5'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/clang-format" --version
 
       - name: Regenerate soc_caps.h from metadata
         run: python3 scripts/gen_soc_caps.py
@@ -99,7 +110,7 @@ jobs:
       - name: ABI freeze gate vs tagged v0.1
         run: |
           # Need the full repo + tags for `git show v0.1:...` to work.
-          # actions/checkout@v4 already fetched tags so this is cheap.
+          # actions/checkout@v6 already fetched tags so this is cheap.
           if ! git rev-parse --verify --quiet refs/tags/v0.1 >/dev/null; then
             echo "::notice::No v0.1 tag yet -- ABI freeze gate is a no-op until v0.1 ships."
             exit 0

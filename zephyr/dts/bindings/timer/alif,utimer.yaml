@@ -1,0 +1,45 @@
+# Copyright (c) 2024 Alif Semiconductor
+#
+# SPDX-License-Identifier: Apache-2.0
+
+description: Alif Universal Timer
+
+compatible: "alif,utimer"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true
+
+  reg-names:
+    required: true
+
+  timer-id:
+    type: int
+    description: |
+      Channel number for each channel
+
+  counter-direction:
+    type: int
+    required: true
+    description: |
+      Sets timer counter direction.
+
+      Use constants defined in dt-bindings/timer/alif_utimer.h.
+
+      * ALIF_UTIMER_COUNTER_DIRECTION_UP           - used as up counter.
+      * ALIF_UTIMER_COUNTER_DIRECTION_DOWN         - used as down counter.
+      * ALIF_UTIMER_COUNTER_DIRECTION_TRIANGLE     - used as triangle counter.
+
+  clock-frequency:
+    type: int
+    description: |
+      UTIMER counter tick rate in Hz.  This is the source for the Zephyr
+      counter_config_info.freq field used by counter_us_to_ticks().
+
+      The fork's ALIF_UTIMER_CLK is a frequency-only dummy with no rate the
+      Zephyr clock controller can report, so the rate is carried here as a
+      board/overlay property.  The counter_alif_utimer driver defaults to
+      100000000 (100 MHz) when this is absent; confirm the real rate against
+      the Alif Ensemble TRM at bench bring-up.

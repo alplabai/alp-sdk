@@ -18,13 +18,14 @@
 # Option A: `workflow_run` chained to pr-bitbake.yml succeeding.
 # Option B: re-run bitbake-from-cache inline in this workflow.
 #
-# We pick (A) -- `workflow_run`.  Reasoning: bitbake's self-hosted
-# runner is expensive + serialised; re-running it from cache here
-# would either need the same self-hosted runner (defeats the
-# point of cheap ubuntu-latest for the Renode VM) or refetch the
-# image artefact via the bitbake job's `actions/upload-artifact`
-# (already happening).  Downloading the artefact is strictly
-# cheaper than re-running bitbake.
+# We pick (A) -- `workflow_run`.  Reasoning: bitbake runs on the
+# private alp-sdk-internal runner via the dispatch bridge in
+# pr-bitbake.yml (no self-hosted runner attaches to public
+# alp-sdk), so re-running it from cache on a cheap ubuntu-latest
+# VM here isn't possible.  The image artefact is produced on the
+# private runner, so this workflow must fetch it across the repo
+# boundary -- a cross-repo handshake that isn't wired yet (see
+# the advisory download step below).
 #
 # Caveat: `workflow_run` fires only for the *target branch* of
 # the PR -- it doesn't auto-run on the PR head ref.  That's fine
@@ -59,7 +60,7 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -83,7 +84,7 @@ jobs:
       # pr-bitbake.yml run (when triggered via workflow_run) or
       # the latest successful run on main (when manually dispatched).
       - name: Download V2N A55 bitbake image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bitbake-e1m-v2n101-a55-image
           path: ${{ github.workspace }}/artefacts/bitbake
@@ -92,13 +93,14 @@ jobs:
           # upstream run's artefacts.
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-        # Renode integration is a stretch goal -- the upstream
-        # bitbake artefact only lands when a self-hosted runner is
-        # available + pr-bitbake succeeded.  Keep advisory so the
-        # workflow stays useful via workflow_dispatch even when the
-        # cross-workflow artefact handshake isn't wired yet.
-        # Promotes to required when the self-hosted bitbake runner
-        # is provisioned and the artefact name stabilises.
+        # Renode integration is a stretch goal -- the bitbake image
+        # artefact is built on the private alp-sdk-internal runner
+        # (pr-bitbake.yml dispatches there), so it does NOT land in
+        # this public pr-bitbake run's artefacts.  Keep advisory so
+        # the workflow stays useful via workflow_dispatch even though
+        # the cross-repo artefact handshake isn't wired yet.  Promotes
+        # to required once the private runner publishes the image back
+        # under a stable artefact name reachable from the public repo.
         continue-on-error: true
 
       # Download the M33-SM Zephyr ELF from pr-alp-build.yml.  Same
@@ -107,7 +109,7 @@ jobs:
       # an explicit `actions/upload-artifact` for the per-slice ELF
       # in pr-alp-build.yml, update the name pattern below.
       - name: Download M33-SM Zephyr ELF
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: system-manifest-E1M-V2N101-heterogeneous-default
           path: ${{ github.workspace }}/artefacts/zephyr
@@ -163,7 +165,7 @@ jobs:
 
       - name: Upload Renode logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: renode-dual-os-logs
           path: /tmp/renode-logs/

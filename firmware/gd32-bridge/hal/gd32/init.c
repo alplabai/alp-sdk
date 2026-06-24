@@ -159,116 +159,123 @@
 void bridge_hw_init(void)
 {
 #if defined(BRIDGE_OTA_PARTITIONED) && defined(BRIDGE_APP_SLOT_BASE)
-    /* OTA Path-A: the app runs from a flash slot, not 0x08000000, so move
+	/* OTA Path-A: the app runs from a flash slot, not 0x08000000, so move
      * the vector table off the vendor SystemInit default before any NVIC
      * use.  Runs first (main calls bridge_hw_init before the transports
      * enable interrupts). */
-    SCB->VTOR = (uint32_t)(BRIDGE_APP_SLOT_BASE);
-    __DSB();
-    __ISB();
-    /* The Path-A bootloader hands off with PRIMASK SET (it runs
+	SCB->VTOR = (uint32_t)(BRIDGE_APP_SLOT_BASE);
+	__DSB();
+	__ISB();
+	/* The Path-A bootloader hands off with PRIMASK SET (it runs
      * __disable_irq() before swapping MSP/VTOR for the jump) -- without
      * clearing it here no interrupt ever fires in the slot app and the
      * transports go silent (silicon-caught 2026-06-04: CM33 retried init
      * 1600+ times against a slot app whose CS-EXTI could never run).
      * Re-enable now that OUR vector table is live; on a plain power-on
      * boot PRIMASK is already clear and this is a no-op. */
-    __enable_irq();
+	__enable_irq();
 #endif
 
-    /* Enable AHB2 clocks for every GPIO port the pad map references.
+	/* Enable AHB2 clocks for every GPIO port the pad map references.
      * The chip's RCU keeps unused GPIO ports clock-gated to save
      * power; we enable A..F unconditionally because the E1M IO map
      * spans those ports.  Port G isn't referenced by any pad. */
-    rcu_periph_clock_enable(RCU_GPIOA);
-    rcu_periph_clock_enable(RCU_GPIOB);
-    rcu_periph_clock_enable(RCU_GPIOC);
-    rcu_periph_clock_enable(RCU_GPIOD);
-    rcu_periph_clock_enable(RCU_GPIOE);
-    rcu_periph_clock_enable(RCU_GPIOF);
+	rcu_periph_clock_enable(RCU_GPIOA);
+	rcu_periph_clock_enable(RCU_GPIOB);
+	rcu_periph_clock_enable(RCU_GPIOC);
+	rcu_periph_clock_enable(RCU_GPIOD);
+	rcu_periph_clock_enable(RCU_GPIOE);
+	rcu_periph_clock_enable(RCU_GPIOF);
 
-    /* Configure every entry in `gpio_pad_map` as INPUT + PULL_UP.
+	/* Configure every entry in `gpio_pad_map` as INPUT + PULL_UP.
      * Safe default per the GPIO direction policy: no driven
      * contention with whatever the board might pull / drive on
      * those pads.  bridge_hw_gpio_write() promotes individual
      * pads to OUTPUT on demand. */
-    for (size_t i = 0; i < GPIO_PAD_MAP_COUNT; ++i) {
-        gpio_mode_set(gpio_pad_map[i].periph, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP,
-                      gpio_pad_map[i].pin);
-        gpio_is_output[i] = false;
-    }
+	for (size_t i = 0; i < GPIO_PAD_MAP_COUNT; ++i) {
+		gpio_mode_set(
+		    gpio_pad_map[i].periph, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, gpio_pad_map[i].pin);
+		gpio_is_output[i] = false;
+	}
 
-    /* TRNG bring-up: configure + enable only.  The NIST pipeline's
+	/* TRNG bring-up: configure + enable only.  The NIST pipeline's
      * first conditioned word can lag past any boot-time wait we are
      * willing to spin; readiness is promoted lazily by the first
      * TRNG_READ's short DRDY poll (by which point the host's boot
      * settle has given the analog source seconds, not milliseconds). */
-    trng_started = trng_start();
-    if (trng_started) {
-        /* Boot-time readiness grace: the transports aren't up yet, so
+	trng_started = trng_start();
+	if (trng_started) {
+		/* Boot-time readiness grace: the transports aren't up yet, so
          * spending a few milliseconds here is free and spares the
          * FIRST host TRNG_READ the one-time conditioning latency
          * (observed on the functional tier: the inaugural read paid
          * the promotion and answered STATUS_IO once).  Bounded; the
          * lazy per-read path remains the safety net. */
-        for (unsigned round = 0u; round < 8u && trng_started && !trng_ready; ++round) {
-            (void)trng_poll_ready();
-        }
-    }
+		for (unsigned round = 0u; round < 8u && trng_started && !trng_ready; ++round) {
+			(void)trng_poll_ready();
+		}
+	}
 
-    /* TMU clock enable.  Per-op configuration happens in
+	/* TMU clock enable.  Per-op configuration happens in
      * bridge_hw_tmu_compute because the mode + I/O width vary per
      * call. */
-    rcu_periph_clock_enable(RCU_TMU);
+	rcu_periph_clock_enable(RCU_TMU);
 
-    /* DAC bring-up.  Two channels per `dac_channels[]`:
+	/* DAC bring-up.  Two channels per `dac_channels[]`:
      *   ch0 -> DAC0_OUT0 -> PA4
      *   ch1 -> DAC1_OUT0 -> PA6
      * Configure both pads as analog (GPIOA clock was enabled
      * above for the IO pad map), enable each DAC peripheral in
      * NORMAL_PIN_BUFFON mode so the output drives the pad
      * through the chip's built-in buffer. */
-    gpio_mode_set(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO_PIN_4 | GPIO_PIN_6);
-    rcu_periph_clock_enable(RCU_DAC0);
-    rcu_periph_clock_enable(RCU_DAC1);
-    for (size_t i = 0; i < DAC_CHANNEL_COUNT; ++i) {
-        dac_deinit(dac_channels[i].periph);
-        dac_trigger_disable(dac_channels[i].periph, dac_channels[i].out);
-        dac_wave_mode_config(dac_channels[i].periph, dac_channels[i].out, DAC_WAVE_DISABLE);
-        dac_mode_config(dac_channels[i].periph, dac_channels[i].out, NORMAL_PIN_BUFFON);
-        dac_enable(dac_channels[i].periph, dac_channels[i].out);
-    }
+	gpio_mode_set(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO_PIN_4 | GPIO_PIN_6);
+	rcu_periph_clock_enable(RCU_DAC0);
+	rcu_periph_clock_enable(RCU_DAC1);
+	for (size_t i = 0; i < DAC_CHANNEL_COUNT; ++i) {
+		dac_deinit(dac_channels[i].periph);
+		dac_trigger_disable(dac_channels[i].periph, dac_channels[i].out);
+		dac_wave_mode_config(dac_channels[i].periph, dac_channels[i].out, DAC_WAVE_DISABLE);
+		dac_mode_config(dac_channels[i].periph, dac_channels[i].out, NORMAL_PIN_BUFFON);
+		dac_enable(dac_channels[i].periph, dac_channels[i].out);
+	}
 
-    /* Free-running counter: enable the Cortex-M33 DWT cycle counter.
+	/* Secure-element reset (SE_RST = PC13): park it DEASSERTED so the
+     * OPTIGA Trust M runs and the line stops floating at the GPIO POR
+     * default.  The host pulses it via CMD_SE_RESET to recover a
+     * BRD_I2C bus the SE has clock-stretched low.  (GPIOC clock was
+     * enabled above.) */
+	se_reset_init();
+
+	/* Free-running counter: enable the Cortex-M33 DWT cycle counter.
      * TRCENA in CoreDebug->DEMCR gates the entire DWT/ITM trace block;
      * setting CYCCNTENA in DWT->CTRL starts the 32-bit free-running
      * counter at the core clock rate (216 MHz on the GD32G553 in the
      * stock clock config -> ~19.9 s wrap, ~4.63 ns LSB).  The counter
      * is the source for bridge_hw_counter_read(). */
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    DWT->CYCCNT = 0u;
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+	DWT->CYCCNT = 0u;
+	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
-    /* PWM bring-up: configure the 8 PWM pads as alt-function outputs,
+	/* PWM bring-up: configure the 8 PWM pads as alt-function outputs,
      * enable TIMER0 + TIMER7 clocks, run the per-timer + per-channel
      * init.  After this the timers are running at 1 us tick with 0%
      * duty on every channel; bridge_hw_pwm_set programs both the
      * channel compare register and the timer ARR per call. */
-    for (size_t i = 0; i < PWM_CHANNEL_COUNT; ++i) {
-        const gd32_pwm_ch_t *ch = &pwm_channels[i];
-        gpio_mode_set(ch->gpio_port, GPIO_MODE_AF, GPIO_PUPD_NONE, ch->gpio_pin);
-        gpio_output_options_set(ch->gpio_port, GPIO_OTYPE_PP, GPIO_OSPEED_12MHZ, ch->gpio_pin);
-        gpio_af_set(ch->gpio_port, ch->gpio_af, ch->gpio_pin);
-    }
-    rcu_periph_clock_enable(RCU_TIMER0);
-    rcu_periph_clock_enable(RCU_TIMER7);
-    pwm_timer_init(TIMER0);
-    pwm_timer_init(TIMER7);
-    for (size_t i = 0; i < PWM_CHANNEL_COUNT; ++i) {
-        pwm_channel_init(&pwm_channels[i]);
-    }
+	for (size_t i = 0; i < PWM_CHANNEL_COUNT; ++i) {
+		const gd32_pwm_ch_t *ch = &pwm_channels[i];
+		gpio_mode_set(ch->gpio_port, GPIO_MODE_AF, GPIO_PUPD_NONE, ch->gpio_pin);
+		gpio_output_options_set(ch->gpio_port, GPIO_OTYPE_PP, GPIO_OSPEED_12MHZ, ch->gpio_pin);
+		gpio_af_set(ch->gpio_port, ch->gpio_af, ch->gpio_pin);
+	}
+	rcu_periph_clock_enable(RCU_TIMER0);
+	rcu_periph_clock_enable(RCU_TIMER7);
+	pwm_timer_init(TIMER0);
+	pwm_timer_init(TIMER7);
+	for (size_t i = 0; i < PWM_CHANNEL_COUNT; ++i) {
+		pwm_channel_init(&pwm_channels[i]);
+	}
 
-    /* Analog REFERENCE bring-up -- MUST precede any ADC/DAC use.
+	/* Analog REFERENCE bring-up -- MUST precede any ADC/DAC use.
      *
      * On this module revision the converters' reference node is served
      * by the GD32's ON-CHIP reference buffer -- there is no external
@@ -293,64 +300,66 @@ void bridge_hw_init(void)
      * VREFRDY wait is BOUNDED (boot-time, no SysTick yet): a spin
      * cap, not an unbounded poll -- a never-ready buffer must not hang
      * the bridge before the transports come online. */
-    rcu_periph_clock_enable(RCU_VREF);
-    vref_voltage_select(VREF_VOLTAGE_SEL_2_048V); /* lowest target = closest under VDDA */
-    /* CLEAR HIPM first.  VREF_CS resets to 0x02 (HIPM high-impedance),
+	rcu_periph_clock_enable(RCU_VREF);
+	vref_voltage_select(VREF_VOLTAGE_SEL_2_048V); /* lowest target = closest under VDDA */
+	/* CLEAR HIPM first.  VREF_CS resets to 0x02 (HIPM high-impedance),
      * and the SPL's vref_enable() is a read-modify-write that only
      * sets VREFEN -- it PRESERVES the reset HIPM bit, leaving the
      * buffer output high-Z so VREFRDY never sets and the reference
      * node stays dead (silicon-caught 2026-06-05: VREF_CS read 0x03 =
      * VREFEN|HIPM, ADC still zero).  HIPM must be cleared for the
      * buffer to drive the node. */
-    vref_high_impedance_mode_disable();
-    vref_enable();
-    for (uint32_t vr = 0u; vr < 100000u; ++vr) {
-        if (vref_status_get() == SET) break; /* VREFRDY -- buffer locked */
-    }
-    /* Latch the verdict.  A buffer that never locked leaves vref_ok
+	vref_high_impedance_mode_disable();
+	vref_enable();
+	for (uint32_t vr = 0u; vr < 100000u; ++vr) {
+		if (vref_status_get() == SET) break; /* VREFRDY -- buffer locked */
+	}
+	/* Latch the verdict.  A buffer that never locked leaves vref_ok
      * false and every ADC/DAC op answers IO instead of serving
      * garbage referenced to a dead node (the exact silent failure the
      * VREF bring-up exists to cure).  vref_ready_check() re-probes on
      * each analog op, so a late lock self-promotes. */
-    vref_ok = (vref_status_get() == SET);
+	vref_ok = (vref_status_get() == SET);
 
-    /* ADC bring-up: configure 8 pads as analog, enable all four ADC
+	/* ADC bring-up: configure 8 pads as analog, enable all four ADC
      * peripheral clocks, run the per-peripheral init.  Calibration
      * inside adc_periph_init now runs against a LIVE reference (it
      * previously self-calibrated against the undriven reference node,
      * baking in a bogus offset); the VREF bring-up above is the
      * prerequisite that makes that calibration meaningful. */
-    for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
-        gpio_mode_set(adc_channels_map[i].gpio_port, GPIO_MODE_ANALOG, GPIO_PUPD_NONE,
-                      adc_channels_map[i].gpio_pin);
-    }
-    rcu_periph_clock_enable(RCU_ADC0);
-    rcu_periph_clock_enable(RCU_ADC1);
-    rcu_periph_clock_enable(RCU_ADC2);
-    rcu_periph_clock_enable(RCU_ADC3);
-    /* Boot-time calibration result intentionally not latched: a
+	for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
+		gpio_mode_set(adc_channels_map[i].gpio_port,
+		              GPIO_MODE_ANALOG,
+		              GPIO_PUPD_NONE,
+		              adc_channels_map[i].gpio_pin);
+	}
+	rcu_periph_clock_enable(RCU_ADC0);
+	rcu_periph_clock_enable(RCU_ADC1);
+	rcu_periph_clock_enable(RCU_ADC2);
+	rcu_periph_clock_enable(RCU_ADC3);
+	/* Boot-time calibration result intentionally not latched: a
      * converter that fails here is also the converter every request-
      * path op re-times against (the read path's bounded EOC wait +
      * self-heal), so the failure surfaces loudly on first use instead
      * of wedging boot. */
-    (void)adc_periph_init(ADC0);
-    (void)adc_periph_init(ADC1);
-    (void)adc_periph_init(ADC2);
-    (void)adc_periph_init(ADC3);
-    for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
-        adc_sample_cycles_cache[i] = ADC_DEFAULT_SAMPLE_CYCLES;
-    }
+	(void)adc_periph_init(ADC0);
+	(void)adc_periph_init(ADC1);
+	(void)adc_periph_init(ADC2);
+	(void)adc_periph_init(ADC3);
+	for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
+		adc_sample_cycles_cache[i] = ADC_DEFAULT_SAMPLE_CYCLES;
+	}
 
-    /* Quadrature encoder bring-up: TIMER1..4 host the four E1M
+	/* Quadrature encoder bring-up: TIMER1..4 host the four E1M
      * encoder pairs.  Each timer uses its CH0 + CH1 input-capture
      * units as the X / Y quadrature inputs (decoder mode 2 -> X4). */
-    rcu_periph_clock_enable(RCU_TIMER1);
-    rcu_periph_clock_enable(RCU_TIMER2);
-    rcu_periph_clock_enable(RCU_TIMER3);
-    rcu_periph_clock_enable(RCU_TIMER4);
-    for (size_t i = 0; i < QENC_CHANNEL_COUNT; ++i) {
-        qenc_channel_init(&qenc_map[i]);
-    }
+	rcu_periph_clock_enable(RCU_TIMER1);
+	rcu_periph_clock_enable(RCU_TIMER2);
+	rcu_periph_clock_enable(RCU_TIMER3);
+	rcu_periph_clock_enable(RCU_TIMER4);
+	for (size_t i = 0; i < QENC_CHANNEL_COUNT; ++i) {
+		qenc_channel_init(&qenc_map[i]);
+	}
 }
 
 /* Called from the SysTick handler (or the main loop's idle path) on a
@@ -362,7 +371,7 @@ void bridge_hw_init(void)
  * bridge_hw_da9292_status_cached(). */
 void bridge_hw_tick(void)
 {
-    /* No-op on this HW rev (nothing to sample). */
+	/* No-op on this HW rev (nothing to sample). */
 }
 
 /* ----------------------------------------------------------------- */
@@ -372,7 +381,7 @@ void bridge_hw_tick(void)
 
 uint8_t bridge_hw_reset_reason(void)
 {
-    /* Read RCU_RSTSCK (reset/clock control status register, GD32G5xx
+	/* Read RCU_RSTSCK (reset/clock control status register, GD32G5xx
      * Reference Manual §6.6.13) and decode the sticky reset-cause
      * flags in the high byte: PORRSTF (bit 27), BORRSTF (25),
      * EPRSTF (26, NRST pin), SWRSTF (28), FWDGTRSTF (29),
@@ -393,30 +402,30 @@ uint8_t bridge_hw_reset_reason(void)
      * but we keep the access inline to avoid pulling rcu.c stages we
      * don't otherwise need.  After the write the next reader sees
      * UNKNOWN unless something resets the chip again. */
-    const uint32_t rstsck = RCU_RSTSCK;
-    uint8_t        cause  = 0u; /* UNKNOWN */
+	const uint32_t rstsck = RCU_RSTSCK;
+	uint8_t        cause  = 0u; /* UNKNOWN */
 
-    if (rstsck & RCU_RSTSCK_PORRSTF) {
-        cause = 1u; /* POWER_ON */
-    } else if (rstsck & RCU_RSTSCK_BORRSTF) {
-        cause = 5u; /* BROWNOUT */
-    } else if (rstsck & RCU_RSTSCK_EPRSTF) {
-        cause = 2u; /* NRST_PIN */
-    } else if (rstsck & RCU_RSTSCK_LPRSTF) {
-        cause = 6u; /* LOWPOWER */
-    } else if (rstsck & (RCU_RSTSCK_FWDGTRSTF | RCU_RSTSCK_WWDGTRSTF)) {
-        cause = 4u; /* WDT */
-    } else if (rstsck & RCU_RSTSCK_SWRSTF) {
-        cause = 3u; /* SOFT */
-    }
+	if (rstsck & RCU_RSTSCK_PORRSTF) {
+		cause = 1u; /* POWER_ON */
+	} else if (rstsck & RCU_RSTSCK_BORRSTF) {
+		cause = 5u; /* BROWNOUT */
+	} else if (rstsck & RCU_RSTSCK_EPRSTF) {
+		cause = 2u; /* NRST_PIN */
+	} else if (rstsck & RCU_RSTSCK_LPRSTF) {
+		cause = 6u; /* LOWPOWER */
+	} else if (rstsck & (RCU_RSTSCK_FWDGTRSTF | RCU_RSTSCK_WWDGTRSTF)) {
+		cause = 4u; /* WDT */
+	} else if (rstsck & RCU_RSTSCK_SWRSTF) {
+		cause = 3u; /* SOFT */
+	}
 
-    RCU_RSTSCK |= RCU_RSTSCK_RSTFC;
-    return cause;
+	RCU_RSTSCK |= RCU_RSTSCK_RSTFC;
+	return cause;
 }
 
 uint8_t bridge_hw_da9292_status_cached(void)
 {
-    /* 0xFF sentinel unconditionally: no DA9292 net reaches the GD32 on
+	/* 0xFF sentinel unconditionally: no DA9292 net reaches the GD32 on
      * this SoM rev (fault pins are Renesas P37/P36 inputs). */
-    return 0xFFu;
+	return 0xFFu;
 }

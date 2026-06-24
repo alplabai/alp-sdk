@@ -39,14 +39,14 @@
 extern "C" {
 #endif
 
-#define EEPROM_24C128_BYTES (16u * 1024u) /* 128 Kbit = 16 KB */
-#define EEPROM_24C128_PAGE_BYTES 64u      /* Datasheet page-write granularity */
-#define EEPROM_24C128_I2C_ADDR_LOW 0x50u  /* A2:A1:A0 = 000 */
+#define EEPROM_24C128_BYTES        (16u * 1024u) /* 128 Kbit = 16 KB */
+#define EEPROM_24C128_PAGE_BYTES   64u           /* Datasheet page-write granularity */
+#define EEPROM_24C128_I2C_ADDR_LOW 0x50u         /* A2:A1:A0 = 000 */
 
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
 } eeprom_24c128_t;
 
 /** @brief Probe the EEPROM (1-byte read at offset 0; ACK -> success). */
@@ -74,11 +74,11 @@ alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *
  * Caller is responsible for not exceeding the device's
  * write-endurance budget (10^6 writes per byte typical).
  */
-alp_status_t eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data,
-                                 size_t len);
+alp_status_t
+eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, size_t len);
 
 /** @brief Release the driver context.  Idempotent. */
-void         eeprom_24c128_deinit(eeprom_24c128_t *ctx);
+void eeprom_24c128_deinit(eeprom_24c128_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

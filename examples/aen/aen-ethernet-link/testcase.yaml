@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Tier-1.5 Alif Ensemble GMAC glue (eth_dwmac_alif,
+# BENCH-VERIFIED PASS on E8 2026-06-17: real DHCP lease, server-side REACHABLE).
+#
+# This scenario compile-checks the full Ethernet wire-up on the REAL E8 board
+# target (it cannot run in CI -- the M55 has no native_sim host and there is no
+# Ethernet HW in the PR gate):
+#   - the `alif,ethernet` DT node binds + enables CONFIG_ETH_DWMAC_ALIF (which in
+#     turn selects the upstream eth_dwmac core),
+#   - the glue's clock/pinctrl/IRQ wire-up and the descriptor-ring BUILD_ASSERT
+#     (cache-coherency guard) compile,
+#   - the board overlay's DMA-buffer placement (chosen zephyr,sram = &sram0,
+#     CONFIG_DCACHE=n) is consistent.
+# It is intentionally filtered OUT of the native_sim PR gate: the only platform
+# allowed is the AEN801 M55-HE board, which the native_sim twister run never
+# selects, so this adds a board-target build check without slowing the gate.
+#
+# NOTE: the platform id below MUST match the board .yaml `identifier` exactly
+# (zephyr/boards/alp/e1m_aen801_m55_he/..._rtss_he.yaml) or twister silently
+# skips the scenario.
+
+sample:
+  name: aen-ethernet-link
+  description: |
+    Bench RAM-run Ethernet (GMAC) link proof for the E1M-AEN801 (Alif Ensemble
+    E8, Cortex-M55-HE): brings up the upstream eth_dwmac core via the alp-sdk
+    Tier-1.5 alif,ethernet glue and pulls a DHCP lease off the bench switch.
+    DMA descriptor rings + net_buf pool placed in global SRAM0 (zephyr,sram =
+    &sram0) with CONFIG_DCACHE=n.  BENCH-VERIFIED PASS on E8 (2026-06-17).
+
+tests:
+  alp_sdk.examples.aen.ethernet_link.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - ethernet
+      - dwmac
+    build_only: true   # no Ethernet HW in CI; end-to-end is a bench flash, not a run.

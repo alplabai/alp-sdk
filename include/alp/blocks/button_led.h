@@ -41,18 +41,18 @@ typedef void (*alp_button_led_press_cb_t)(void *user);
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-    alp_gpio_t                *button;
-    alp_gpio_t                *led;
-    alp_button_led_press_cb_t  press_cb;
-    void                      *cb_user;
-    bool                       active_low_button;  /**< Most dev boards pull buttons up; press = 0. */
-    bool                       initialised;
+	alp_gpio_t               *button;
+	alp_gpio_t               *led;
+	alp_button_led_press_cb_t press_cb;
+	void                     *cb_user;
+	bool                      active_low_button; /**< Most dev boards pull buttons up; press = 0. */
+	bool                      initialised;
 } alp_button_led_t;
 
 typedef struct {
-    uint32_t button_pin_id;     /**< `pin_id` in alp,pin-array. */
-    uint32_t led_pin_id;
-    bool     active_low_button; /**< true if the button reads 0 when pressed. */
+	uint32_t button_pin_id; /**< `pin_id` in alp,pin-array. */
+	uint32_t led_pin_id;
+	bool     active_low_button; /**< true if the button reads 0 when pressed. */
 } alp_button_led_config_t;
 
 /**
@@ -62,8 +62,7 @@ typedef struct {
  * input (pull-up if `active_low_button`) and the LED as output
  * (initially off).
  */
-alp_status_t alp_button_led_init(alp_button_led_t *bl,
-                                 const alp_button_led_config_t *cfg);
+alp_status_t alp_button_led_init(alp_button_led_t *bl, const alp_button_led_config_t *cfg);
 
 /** True if the button is currently in the pressed state. */
 alp_status_t alp_button_led_is_pressed(alp_button_led_t *bl, bool *pressed);
@@ -80,15 +79,14 @@ alp_status_t alp_button_led_toggle(alp_button_led_t *bl);
  * Internally enables a GPIO interrupt with the appropriate edge for
  * the configured polarity.  Pass `cb = NULL` to clear.
  */
-alp_status_t alp_button_led_set_press_callback(alp_button_led_t *bl,
-                                               alp_button_led_press_cb_t cb,
-                                               void *user);
+alp_status_t
+alp_button_led_set_press_callback(alp_button_led_t *bl, alp_button_led_press_cb_t cb, void *user);
 
 /** Release the helper.  Closes the underlying GPIOs. */
-void         alp_button_led_deinit(alp_button_led_t *bl);
+void alp_button_led_deinit(alp_button_led_t *bl);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_BLOCKS_BUTTON_LED_H */
+#endif /* ALP_BLOCKS_BUTTON_LED_H */

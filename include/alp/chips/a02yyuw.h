@@ -38,8 +38,8 @@ extern "C" {
 #define A02YYUW_FRAME_LEN 4u
 
 typedef struct {
-    alp_uart_t *port;
-    bool        initialised;
+	alp_uart_t *port;
+	bool        initialised;
 } a02yyuw_t;
 
 /** @brief Bind context to an open UART port (caller configures 9600/8N1). */
@@ -54,9 +54,7 @@ alp_status_t a02yyuw_init(a02yyuw_t *dev, alp_uart_t *port);
  * @return `ALP_OK` on success, `ALP_ERR_IO` on checksum mismatch,
  *         `ALP_ERR_TIMEOUT` on UART timeout.
  */
-alp_status_t a02yyuw_read_distance(a02yyuw_t *dev,
-                                   uint16_t  *distance_mm,
-                                   uint32_t   timeout_ms);
+alp_status_t a02yyuw_read_distance(a02yyuw_t *dev, uint16_t *distance_mm, uint32_t timeout_ms);
 
 /** @brief Release driver context. */
 void a02yyuw_deinit(a02yyuw_t *dev);

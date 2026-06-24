@@ -1,0 +1,54 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Stage-B PM deep-sleep overlay for the E1M-AEN801 (Alif Ensemble E8, M55-HE),
+ * bench RAM-run via J-Link.
+ *
+ * Two jobs:
+ *
+ *  1. The Tier-1.5 PM devicetree the pinned Zephyr 4.4.0 Alif HE dtsi omits.
+ *     Pinned dts/arm/alif/ensemble/common/ensemble_rtss_he.dtsi has the cpu0
+ *     node but NO `power-states` table and NO `cpu-power-states` (only the
+ *     alifsemi/zephyr_alif fork's dtsi:153-197 has them).  We add the
+ *     `suspend_idle` zephyr,power-state (transcribed from the fork dtsi:154-162:
+ *     power-state-name "suspend-to-idle", min-residency-us 2500, exit-latency-us
+ *     500, substate-id 0) and point cpu0 cpu-power-states at it, so the PM
+ *     policy can select PM_STATE_SUSPEND_TO_IDLE and call the IWIC pm_state_set
+ *     hook (src/alif_pm_iwic.c).  Only suspend_idle is enabled -- the deeper
+ *     fork states (standby_s2ram / stop_s2ram / subsys_off) need the S2RAM
+ *     context-save + Secure-Enclave path that is the full-fork-port follow-up,
+ *     so they are deliberately not declared here.
+ *
+ *  2. The standard bench RAM-run retarget (run from ITCM, drop the MCUboot
+ *     code-partition fixup), matching the sibling aen-* apps -- the smoke uses
+ *     only architectural SysTick + a global-SRAM0 beacon (0x02000000), no
+ *     peripheral nodes.
+ */
+
+/ {
+	power-states {
+		suspend_idle: suspend_idle {
+			compatible = "zephyr,power-state";
+			power-state-name = "suspend-to-idle";
+			min-residency-us = <2500>;
+			exit-latency-us = <500>;
+			substate-id = <0>;
+			status = "okay";
+		};
+	};
+
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/* Wire the M55-HE core to the suspend-to-idle power-state (the pinned cpu0 node
+ * carries no cpu-power-states). */
+&cpu0 {
+	cpu-power-states = <&suspend_idle>;
+};

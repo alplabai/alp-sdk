@@ -79,49 +79,57 @@ static viewer_state_t g_state;
 K_THREAD_STACK_DEFINE(infer_stack, 8192);
 static struct k_thread infer_thread;
 
-static void            infer_entry(void *p1, void *p2, void *p3)
+static void infer_entry(void *p1, void *p2, void *p3)
 {
-    ARG_UNUSED(p1);
-    ARG_UNUSED(p2);
-    ARG_UNUSED(p3);
-    inference_loop_run(&g_state);
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+	inference_loop_run(&g_state);
 }
 
 int main(void)
 {
-    LOG_INF("ai-camera-viewer demo starting");
+	LOG_INF("ai-camera-viewer demo starting");
 
-    /* The camera SCCB + capture path are bring-up duties for the
+	/* The camera SCCB + capture path are bring-up duties for the
      * inference loop -- this thread owns the chip handle so it
      * can re-init on failure.  Pass our shared state pointer in
      * via the thread arg slot (NULL above; the loop fetches it
      * from main's stack via g_state directly). */
 
-    /* Display + LVGL bring-up. */
-    const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-    if (!device_is_ready(display)) {
-        LOG_ERR("display %s not ready", display->name);
-        return 1;
-    }
-    lv_init();
-    viewer_ui_build();
-    display_blanking_off(display);
+	/* Display + LVGL bring-up. */
+	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
+	if (!device_is_ready(display)) {
+		LOG_ERR("display %s not ready", display->name);
+		return 1;
+	}
+	lv_init();
+	viewer_ui_build();
+	display_blanking_off(display);
 
-    /* Spawn the inference thread.  Higher priority than main so
+	/* Spawn the inference thread.  Higher priority than main so
      * the model gets timely CPU even when LVGL is mid-blit. */
-    k_thread_create(&infer_thread, infer_stack, K_THREAD_STACK_SIZEOF(infer_stack), infer_entry,
-                    NULL, NULL, NULL, K_PRIO_PREEMPT(3), 0, K_NO_WAIT);
-    k_thread_name_set(&infer_thread, "infer_loop");
+	k_thread_create(&infer_thread,
+	                infer_stack,
+	                K_THREAD_STACK_SIZEOF(infer_stack),
+	                infer_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(3),
+	                0,
+	                K_NO_WAIT);
+	k_thread_name_set(&infer_thread, "infer_loop");
 
-    /* Render loop: 30 fps, sample the shared state once per
+	/* Render loop: 30 fps, sample the shared state once per
      * frame to avoid tearing the bounding-box overlay mid-update. */
-    while (1) {
-        viewer_state_t snap = g_state;
-        viewer_ui_apply(&snap);
+	while (1) {
+		viewer_state_t snap = g_state;
+		viewer_ui_apply(&snap);
 
-        const uint32_t sleep_ms = lv_task_handler();
-        k_msleep(MIN(sleep_ms, 10u));
-    }
+		const uint32_t sleep_ms = lv_task_handler();
+		k_msleep(MIN(sleep_ms, 10u));
+	}
 
-    return 0;
+	return 0;
 }

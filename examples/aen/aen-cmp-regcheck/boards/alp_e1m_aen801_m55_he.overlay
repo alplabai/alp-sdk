@@ -1,0 +1,49 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon HSCMP validation overlay for the E1M-AEN801 (Alif Ensemble E8,
+ * M55-HE), bench RAM-run via J-Link.
+ *
+ * Validates the alp-sdk Tier-2 comparator_alif driver on cmp0@49023000
+ * (compatible "alif,cmp").  The driver binds it as an upstream-Zephyr-v4.4
+ * comparator-class device: the SoC dtsi node already sets negative_input =
+ * "CMP_NEG_IN3" -> the on-chip DAC6 programmable reference (COMP_HS_IN_M_SEL =
+ * 0x3 = DAC6), so the minus terminal has a known INTERNAL reference and the
+ * smoke needs NO external wiring.
+ *
+ * Registers the human reads over J-Link to confirm the comparator is live
+ * (ground truth, independent of any printk).  Offsets from the driver register
+ * model (zephyr/drivers/comparator/comparator_alif.c), base 0x49023000 from the
+ * SoC dtsi node:
+ *     CMP_COMP_REG1 = base + 0x00 = 0x49023000  -- bit 28 (COMP_HS_EN) = 1 after init
+ *     CMP_STATUS    = base + 0x18 = 0x49023018  -- bit 0  (CMP_VALUE)  = live output
+ * mem32 0x49023000 / mem32 0x49023018.
+ *
+ * BENCH CONFIG (TBD): comparing against an EXTERNAL voltage instead of DAC6 needs
+ * the CMP0_IN0..IN3 input pad muxed (a &pinctrl_cmp0 group, not defined in this
+ * tree) AND the bench source/threshold wired -- both are bench unknowns on this
+ * batch.  Do NOT invent a pinctrl group or a pad mapping.  This overlay keeps the
+ * self-contained internal DAC6 reference.
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/* Enable cmp0 so the comparator_alif driver instantiates a device.  All config
+ * (DAC6 negative reference, IRQ 167, hysteresis, filter) is carried by the SoC
+ * dtsi node; this overlay only flips it okay. */
+&cmp0 {
+	status = "okay";
+};

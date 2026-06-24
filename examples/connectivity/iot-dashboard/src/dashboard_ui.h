@@ -14,11 +14,11 @@ extern "C" {
 #endif
 
 typedef struct {
-    float    temp_c;
-    float    humid_pct;
-    float    pressure_hpa;
-    bool     mqtt_connected;
-    uint32_t last_update_ms;
+	float    temp_c;
+	float    humid_pct;
+	float    pressure_hpa;
+	bool     mqtt_connected;
+	uint32_t last_update_ms;
 } dashboard_state_t;
 
 void dashboard_ui_build(void);

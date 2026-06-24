@@ -136,49 +136,49 @@ extern "C" {
 /** Channel identifier (the two dual-phase output channels in V2N's
  *  CONF configuration). */
 typedef enum {
-    DA9292_CH1 = 0, /**< Phases 1 + 2 -- 0.8 V Renesas rail on V2N. */
-    DA9292_CH2 = 1, /**< Phases 3 + 4 -- 0.75 V DEEPX rail on V2N-M1. */
+	DA9292_CH1 = 0, /**< Phases 1 + 2 -- 0.8 V Renesas rail on V2N. */
+	DA9292_CH2 = 1, /**< Phases 3 + 4 -- 0.75 V DEEPX rail on V2N-M1. */
 } da9292_channel_t;
 
 /** Decoded `PMC_STATUS_00` + `PMC_STATUS_01` snapshot. */
 typedef struct {
-    bool    ch1_pg;    /**< CH1 power-good (output in regulation). */
-    bool    ch2_pg;    /**< CH2 power-good. */
-    bool    ch1_uv;    /**< CH1 under-voltage (live). */
-    bool    ch2_uv;    /**< CH2 under-voltage. */
-    bool    ch1_ov;    /**< CH1 over-voltage. */
-    bool    ch2_ov;    /**< CH2 over-voltage. */
-    bool    ch1_oc;    /**< CH1 over-current (live). */
-    bool    ch2_oc;    /**< CH2 over-current. */
-    bool    temp_warn; /**< Thermal warning threshold crossed. */
-    bool    temp_crit; /**< Thermal critical threshold (shutdown imminent). */
-    bool    vin_uvlo;  /**< Input UVLO -- supply below operating range. */
-    uint8_t raw_00;    /**< Untouched PMC_STATUS_00 byte for diagnostics. */
-    uint8_t raw_01;    /**< Untouched PMC_STATUS_01 byte. */
+	bool    ch1_pg;    /**< CH1 power-good (output in regulation). */
+	bool    ch2_pg;    /**< CH2 power-good. */
+	bool    ch1_uv;    /**< CH1 under-voltage (live). */
+	bool    ch2_uv;    /**< CH2 under-voltage. */
+	bool    ch1_ov;    /**< CH1 over-voltage. */
+	bool    ch2_ov;    /**< CH2 over-voltage. */
+	bool    ch1_oc;    /**< CH1 over-current (live). */
+	bool    ch2_oc;    /**< CH2 over-current. */
+	bool    temp_warn; /**< Thermal warning threshold crossed. */
+	bool    temp_crit; /**< Thermal critical threshold (shutdown imminent). */
+	bool    vin_uvlo;  /**< Input UVLO -- supply below operating range. */
+	uint8_t raw_00;    /**< Untouched PMC_STATUS_00 byte for diagnostics. */
+	uint8_t raw_01;    /**< Untouched PMC_STATUS_01 byte. */
 } da9292_status_t;
 
 /** Latched-event snapshot (read-and-clear from `PMC_EVENT_00/01`). */
 typedef struct {
-    bool e_ch1_pg;
-    bool e_ch2_pg;
-    bool e_ch1_uv;
-    bool e_ch2_uv;
-    bool e_ch1_ov;
-    bool e_ch2_ov;
-    bool e_ch1_oc;
-    bool e_ch2_oc;
-    bool e_temp_warn;
-    bool e_temp_crit;
-    bool e_vin_uvlo;
+	bool e_ch1_pg;
+	bool e_ch2_pg;
+	bool e_ch1_uv;
+	bool e_ch2_uv;
+	bool e_ch1_ov;
+	bool e_ch2_ov;
+	bool e_ch1_oc;
+	bool e_ch2_oc;
+	bool e_temp_warn;
+	bool e_temp_crit;
+	bool e_vin_uvlo;
 } da9292_events_t;
 
 /** Driver context. */
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    uint8_t    dev_id; /**< Cached PMC_DEV_ID (read at init). */
-    uint8_t    rev_id; /**< Cached PMC_REV_ID. */
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	uint8_t    dev_id; /**< Cached PMC_DEV_ID (read at init). */
+	uint8_t    rev_id; /**< Cached PMC_REV_ID. */
 } da9292_t;
 
 /** @brief Probe + cache device + revision identifiers.

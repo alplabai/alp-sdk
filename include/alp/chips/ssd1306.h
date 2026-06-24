@@ -37,25 +37,25 @@ extern "C" {
 #endif
 
 /** Default 7-bit I2C addresses (D/C# pin selects). */
-#define SSD1306_I2C_ADDR_LOW   0x3C
-#define SSD1306_I2C_ADDR_HIGH  0x3D
+#define SSD1306_I2C_ADDR_LOW  0x3C
+#define SSD1306_I2C_ADDR_HIGH 0x3D
 
 /** Maximum supported geometry in v0.1.  128 × 64 is the dev-kit standard. */
-#define SSD1306_MAX_WIDTH   128
-#define SSD1306_MAX_HEIGHT  64
+#define SSD1306_MAX_WIDTH    128
+#define SSD1306_MAX_HEIGHT   64
 #define SSD1306_MAX_FB_BYTES (SSD1306_MAX_WIDTH * SSD1306_MAX_HEIGHT / 8)
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;       /**< 7-bit I2C address. */
-    uint16_t   width;
-    uint16_t   height;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr; /**< 7-bit I2C address. */
+	uint16_t   width;
+	uint16_t   height;
+	bool       initialised;
 
-    /** Vertical-byte framebuffer (one byte per 8 vertical pixels).
+	/** Vertical-byte framebuffer (one byte per 8 vertical pixels).
      *  Layout: page-major, column-minor, matching SSD1306 GDDRAM. */
-    uint8_t    fb[SSD1306_MAX_FB_BYTES];
+	uint8_t fb[SSD1306_MAX_FB_BYTES];
 } ssd1306_t;
 
 /**
@@ -70,11 +70,8 @@ typedef struct {
  * is left to the caller — call `ssd1306_display(dev)` after drawing
  * to flush.
  */
-alp_status_t ssd1306_init(ssd1306_t *dev,
-                          alp_i2c_t *bus,
-                          uint8_t i2c_addr,
-                          uint16_t width,
-                          uint16_t height);
+alp_status_t
+ssd1306_init(ssd1306_t *dev, alp_i2c_t *bus, uint8_t i2c_addr, uint16_t width, uint16_t height);
 
 /** Set the panel display ON or OFF (charge pump stays running). */
 alp_status_t ssd1306_set_display_on(ssd1306_t *dev, bool on);
@@ -86,7 +83,7 @@ alp_status_t ssd1306_set_contrast(ssd1306_t *dev, uint8_t contrast);
 alp_status_t ssd1306_set_inverted(ssd1306_t *dev, bool inverted);
 
 /** Wipe the in-memory framebuffer.  Does not push to the panel. */
-void         ssd1306_clear(ssd1306_t *dev);
+void ssd1306_clear(ssd1306_t *dev);
 
 /**
  * @brief Set a single pixel in the framebuffer.
@@ -95,18 +92,16 @@ void         ssd1306_clear(ssd1306_t *dev);
  * standard graphics-library contract and avoids forcing every
  * caller to clip.
  */
-void         ssd1306_draw_pixel(ssd1306_t *dev,
-                                uint16_t x, uint16_t y,
-                                bool on);
+void ssd1306_draw_pixel(ssd1306_t *dev, uint16_t x, uint16_t y, bool on);
 
 /** Push the entire in-memory framebuffer to the panel. */
 alp_status_t ssd1306_display(ssd1306_t *dev);
 
 /** Release the driver context.  Does not turn off the panel. */
-void         ssd1306_deinit(ssd1306_t *dev);
+void ssd1306_deinit(ssd1306_t *dev);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_CHIPS_SSD1306_H */
+#endif /* ALP_CHIPS_SSD1306_H */

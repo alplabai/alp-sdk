@@ -36,79 +36,83 @@
 
 #include "inference_ops.h"
 
-static alp_status_t drpai_open(const alp_inference_config_t *cfg,
+static alp_status_t drpai_open(const alp_inference_config_t  *cfg,
                                alp_inference_backend_state_t *state,
-                               alp_capabilities_t *caps_out)
+                               alp_capabilities_t            *caps_out)
 {
-    (void)cfg;
-    state->be_data  = NULL;
-    state->dev      = NULL;
-    caps_out->flags = 0u;
-    /* The real body validates the .dat blob magic + version,
+	(void)cfg;
+	state->be_data  = NULL;
+	state->dev      = NULL;
+	caps_out->flags = 0u;
+	/* The real body validates the .dat blob magic + version,
      * primes the DRP-AI command-stream decoder, and stores the
      * inbound tensor descriptors for get_input / get_output to
      * surface.  See issue #58 for the v0.x landing target. */
-    return ALP_ERR_NOT_IMPLEMENTED;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static size_t drpai_num_inputs(alp_inference_backend_state_t *state)
 {
-    (void)state;
-    return 0u;
+	(void)state;
+	return 0u;
 }
 
 static size_t drpai_num_outputs(alp_inference_backend_state_t *state)
 {
-    (void)state;
-    return 0u;
+	(void)state;
+	return 0u;
 }
 
-static alp_status_t drpai_get_input(alp_inference_backend_state_t *state,
-                                    size_t index,
-                                    alp_inference_tensor_t *out)
+static alp_status_t
+drpai_get_input(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
-    (void)state; (void)index; (void)out;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	(void)index;
+	(void)out;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t drpai_get_output(alp_inference_backend_state_t *state,
-                                     size_t index,
-                                     alp_inference_tensor_t *out)
+static alp_status_t
+drpai_get_output(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
-    (void)state; (void)index; (void)out;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	(void)index;
+	(void)out;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static alp_status_t drpai_invoke(alp_inference_backend_state_t *state)
 {
-    (void)state;
-    /* drpai_start + wait-for-completion lands with the vendor pack.
+	(void)state;
+	/* drpai_start + wait-for-completion lands with the vendor pack.
      * See issue #58. */
-    return ALP_ERR_NOT_IMPLEMENTED;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static void drpai_close(alp_inference_backend_state_t *state)
 {
-    if (state != NULL) {
-        state->be_data = NULL;
-    }
+	if (state != NULL) {
+		state->be_data = NULL;
+	}
 }
 
 static const alp_inference_ops_t _ops = {
-    .open        = drpai_open,
-    .num_inputs  = drpai_num_inputs,
-    .num_outputs = drpai_num_outputs,
-    .get_input   = drpai_get_input,
-    .get_output  = drpai_get_output,
-    .invoke      = drpai_invoke,
-    .close       = drpai_close,
+	.open        = drpai_open,
+	.num_inputs  = drpai_num_inputs,
+	.num_outputs = drpai_num_outputs,
+	.get_input   = drpai_get_input,
+	.get_output  = drpai_get_output,
+	.invoke      = drpai_invoke,
+	.close       = drpai_close,
 };
 
-ALP_BACKEND_REGISTER(inference, drpai_v2n, {
-    .silicon_ref = "renesas:rzv2n:n44",
-    .vendor      = "renesas",
-    .base_caps   = 0u,
-    .priority    = 100,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     drpai_v2n,
+                     {
+                         .silicon_ref = "renesas:rzv2n:n44",
+                         .vendor      = "renesas",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

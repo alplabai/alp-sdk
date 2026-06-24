@@ -40,9 +40,9 @@ extern "C" {
 #define VL53L1X_MODEL_ID                    0xEAu
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } vl53l1x_t;
 
 /** @brief Bind context and verify MODEL_ID. */

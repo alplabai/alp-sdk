@@ -49,19 +49,19 @@ extern "C" {
 #define TCAL9538_I2C_ADDR_BASE 0x70u /**< A1=0, A0=0. */
 
 typedef enum {
-    TCAL9538_DIR_OUTPUT = 0, /**< Configuration bit = 0. */
-    TCAL9538_DIR_INPUT  = 1, /**< Configuration bit = 1. */
+	TCAL9538_DIR_OUTPUT = 0, /**< Configuration bit = 0. */
+	TCAL9538_DIR_INPUT  = 1, /**< Configuration bit = 1. */
 } tcal9538_direction_t;
 
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    /* Cached register state -- keeps the driver from a
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	/* Cached register state -- keeps the driver from a
      * read-modify-write cycle on every set_pin / set_direction call.
      * Synced with the chip on init via a register read-back. */
-    uint8_t cfg_cache; /**< Configuration reg (0x03). */
-    uint8_t out_cache; /**< Output port reg (0x01). */
+	uint8_t cfg_cache; /**< Configuration reg (0x03). */
+	uint8_t out_cache; /**< Output port reg (0x01). */
 } tcal9538_t;
 
 /**
@@ -106,7 +106,7 @@ alp_status_t tcal9538_read_all(tcal9538_t *ctx, uint8_t *port_out);
 alp_status_t tcal9538_write_all(tcal9538_t *ctx, uint8_t port);
 
 /** @brief Release the driver context.  Idempotent. */
-void         tcal9538_deinit(tcal9538_t *ctx);
+void tcal9538_deinit(tcal9538_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

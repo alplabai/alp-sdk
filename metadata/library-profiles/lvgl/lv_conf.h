@@ -47,7 +47,7 @@
 /* Use LVGL's built-in TLSF allocator -- avoids heap fragmentation
  * on Cortex-M targets where the C library's allocator isn't ideal. */
 #define LV_MEM_CUSTOM 0
-#define LV_MEM_SIZE (48U * 1024U)
+#define LV_MEM_SIZE   (48U * 1024U)
 
 /* No automatic startup allocations -- the app's lv_init() controls
  * lifecycle. */
@@ -59,8 +59,8 @@
 
 /* Tick frequency the lv_tick_inc()-driving timer ticks at.  Apps
  * typically wire this to a 1 ms tick from Zephyr's k_timer / k_work. */
-#define LV_TICK_CUSTOM 1
-#define LV_TICK_CUSTOM_INCLUDE "zephyr/kernel.h"
+#define LV_TICK_CUSTOM               1
+#define LV_TICK_CUSTOM_INCLUDE       "zephyr/kernel.h"
 #define LV_TICK_CUSTOM_SYS_TIME_EXPR (k_uptime_get_32())
 
 /* Default DPI -- 130 covers the typical small/medium panels.
@@ -78,11 +78,11 @@
 #define LV_USE_LOG 0
 
 /* Drop the demos library; apps that want it pull it explicitly. */
-#define LV_USE_DEMO_WIDGETS 0
+#define LV_USE_DEMO_WIDGETS            0
 #define LV_USE_DEMO_KEYPAD_AND_ENCODER 0
-#define LV_USE_DEMO_BENCHMARK 0
-#define LV_USE_DEMO_STRESS 0
-#define LV_USE_DEMO_MUSIC 0
+#define LV_USE_DEMO_BENCHMARK          0
+#define LV_USE_DEMO_STRESS             0
+#define LV_USE_DEMO_MUSIC              0
 
 /* Filesystem integration off by default -- apps that need it wire
  * one of LV_USE_FS_STDIO / LV_USE_FS_POSIX / LV_USE_FS_FATFS
@@ -94,10 +94,10 @@
 
 /* PNG / BMP / JPG decoders off by default to save flash; apps
  * that want image loaders enable individually. */
-#define LV_USE_PNG 0
-#define LV_USE_BMP 0
-#define LV_USE_SJPG 0
-#define LV_USE_GIF 0
+#define LV_USE_PNG    0
+#define LV_USE_BMP    0
+#define LV_USE_SJPG   0
+#define LV_USE_GIF    0
 #define LV_USE_QRCODE 0
 
 #endif /* LV_CONF_H */

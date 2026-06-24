@@ -59,11 +59,11 @@ LOG_MODULE_REGISTER(audio_wake_word, LOG_LEVEL_INF);
  * (32 ms) for the inference cadence to align with a power-of-two
  * FFT length when the MFCC stage lands in v0.6.
  */
-#define SR_HZ          16000
-#define CHANNELS       1
-#define BLOCK_FRAMES   512
-#define MFCC_FRAMES    32
-#define MFCC_COEFFS    13
+#define SR_HZ        16000
+#define CHANNELS     1
+#define BLOCK_FRAMES 512
+#define MFCC_FRAMES  32
+#define MFCC_COEFFS  13
 
 /* ── Wake-word inference window ────────────────────────────────
  *
@@ -91,7 +91,7 @@ LOG_MODULE_REGISTER(audio_wake_word, LOG_LEVEL_INF);
  * backend returns NULL anyway; the surrounding code tolerates
  * that and prints "[wake] done" so twister can match).
  */
-static const uint8_t s_model[] = {0x00};
+static const uint8_t s_model[] = { 0x00 };
 
 /* Tensor arena -- 64 KiB matches board.yaml's default_arena_kib. */
 static uint8_t s_arena[64 * 1024] __aligned(16);
@@ -105,12 +105,12 @@ static int8_t s_mfcc[MFCC_FRAMES * MFCC_COEFFS];
 
 /* Shared state between the audio thread and main(). */
 static struct {
-    alp_audio_in_t  *mic;
-    alp_inference_t *inf;
-    bool             mic_ok;
-    bool             inf_ok;
-    uint32_t         windows_run;
-    uint32_t         detections;
+	alp_audio_in_t  *mic;
+	alp_inference_t *inf;
+	bool             mic_ok;
+	bool             inf_ok;
+	uint32_t         windows_run;
+	uint32_t         detections;
 } g_state;
 
 /* ── Inference thread stack ────────────────────────────────────
@@ -132,10 +132,10 @@ static struct k_thread infer_thread;
  */
 static void extract_mfcc(const int16_t *pcm, size_t frames, int8_t *out)
 {
-    /* Silence the unused-arg warning until v0.6 wires this up. */
-    (void)pcm;
-    (void)frames;
-    memset(out, 0, MFCC_FRAMES * MFCC_COEFFS);
+	/* Silence the unused-arg warning until v0.6 wires this up. */
+	(void)pcm;
+	(void)frames;
+	memset(out, 0, MFCC_FRAMES * MFCC_COEFFS);
 }
 
 /* ── Wake-word post-process stub ───────────────────────────────
@@ -147,10 +147,10 @@ static void extract_mfcc(const int16_t *pcm, size_t frames, int8_t *out)
  */
 static bool decode_wake(alp_inference_t *inf)
 {
-    /* TODO(v0.6): alp_inference_get_output() -> int8 logits ->
+	/* TODO(v0.6): alp_inference_get_output() -> int8 logits ->
      * dequantise via the tensor's scale/zero_point -> argmax. */
-    (void)inf;
-    return false;
+	(void)inf;
+	return false;
 }
 
 /* ── Inference loop ────────────────────────────────────────────
@@ -166,135 +166,144 @@ static bool decode_wake(alp_inference_t *inf)
  */
 static void infer_loop(void *p1, void *p2, void *p3)
 {
-    ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
 
-    for (uint32_t i = 0; i < WAKE_LOOP_ITERATIONS; ++i) {
-        /* 1. Read a PCM block.  On native_sim the mic is NULL and
+	for (uint32_t i = 0; i < WAKE_LOOP_ITERATIONS; ++i) {
+		/* 1. Read a PCM block.  On native_sim the mic is NULL and
          *    we just zero-fill the buffer so the rest of the
          *    pipeline still exercises. */
-        if (g_state.mic_ok) {
-            size_t got = 0;
-            (void)alp_audio_in_read(g_state.mic, s_pcm,
-                                    BLOCK_FRAMES, &got,
-                                    /*timeout_ms=*/100);
-        } else {
-            memset(s_pcm, 0, sizeof(s_pcm));
-        }
+		if (g_state.mic_ok) {
+			size_t got = 0;
+			(void)alp_audio_in_read(g_state.mic,
+			                        s_pcm,
+			                        BLOCK_FRAMES,
+			                        &got,
+			                        /*timeout_ms=*/100);
+		} else {
+			memset(s_pcm, 0, sizeof(s_pcm));
+		}
 
-        /* 2. MFCC features. */
-        extract_mfcc(s_pcm, BLOCK_FRAMES, s_mfcc);
+		/* 2. MFCC features. */
+		extract_mfcc(s_pcm, BLOCK_FRAMES, s_mfcc);
 
-        /* 3 + 4. Push features into the model + invoke. */
-        if (g_state.inf_ok) {
-            /* TODO(v0.6): copy s_mfcc into the model input tensor
+		/* 3 + 4. Push features into the model + invoke. */
+		if (g_state.inf_ok) {
+			/* TODO(v0.6): copy s_mfcc into the model input tensor
              * via alp_inference_get_input() before invoking. */
-            (void)alp_inference_invoke(g_state.inf);
-        }
+			(void)alp_inference_invoke(g_state.inf);
+		}
 
-        /* 5. Detect. */
-        if (decode_wake(g_state.inf)) {
-            g_state.detections++;
-            printf("[wake] hit! Hey Alp detected\n");
-            /* TODO(v0.6): assert WIC line to wake the M55 HP core
+		/* 5. Detect. */
+		if (decode_wake(g_state.inf)) {
+			g_state.detections++;
+			printf("[wake] hit! Hey Alp detected\n");
+			/* TODO(v0.6): assert WIC line to wake the M55 HP core
              * via the mproc-mailbox cross-core IRQ. */
-        }
-        g_state.windows_run++;
+		}
+		g_state.windows_run++;
 
-        /* 6. Park until the next window.  k_sleep yields to the
+		/* 6. Park until the next window.  k_sleep yields to the
          *    scheduler -- on a real AEN HE core the Zephyr idle
          *    thread drops to WFI which is what gets us the
          *    <1 mW average draw. */
-        k_msleep(WAKE_INFER_INTERVAL_MS);
-    }
+		k_msleep(WAKE_INFER_INTERVAL_MS);
+	}
 }
 
 int main(void)
 {
-    printf("[wake] audio-wake-word v0.5 -- always-on KWS on E1M-AEN\n");
+	printf("[wake] audio-wake-word v0.5 -- always-on KWS on E1M-AEN\n");
 
-    /* ── Open the PDM mic ──────────────────────────────────
+	/* ── Open the PDM mic ──────────────────────────────────
      *
      * 16 kHz mono S16 is the keyword-spotting standard.  On
      * native_sim this returns NULL with last_err = NOSUPPORT;
      * the loop tolerates that and runs the inference path
      * against zero-fill PCM. */
-    alp_audio_config_t mic_cfg = {
-        .peripheral_id    = E1M_PDM0,
-        .sample_rate_hz   = SR_HZ,
-        .channels         = CHANNELS,
-        .format           = ALP_AUDIO_FMT_S16_LE,
-        .frames_per_block = BLOCK_FRAMES,
-    };
-    g_state.mic = alp_audio_in_open(&mic_cfg);
-    g_state.mic_ok = (g_state.mic != NULL);
-    if (g_state.mic_ok) {
-        printf("[wake]   alp_audio_in_open(PDM0)       ok\n");
-        (void)alp_audio_in_start(g_state.mic);
-    } else {
-        printf("[wake]   alp_audio_in_open(PDM0)       skip (no DMIC, last_err=%d)\n",
-               (int)alp_last_error());
-    }
+	alp_audio_config_t mic_cfg = {
+		.peripheral_id    = E1M_PDM0,
+		.sample_rate_hz   = SR_HZ,
+		.channels         = CHANNELS,
+		.format           = ALP_AUDIO_FMT_S16_LE,
+		.frames_per_block = BLOCK_FRAMES,
+	};
+	g_state.mic    = alp_audio_in_open(&mic_cfg);
+	g_state.mic_ok = (g_state.mic != NULL);
+	if (g_state.mic_ok) {
+		printf("[wake]   alp_audio_in_open(PDM0)       ok\n");
+		(void)alp_audio_in_start(g_state.mic);
+	} else {
+		printf("[wake]   alp_audio_in_open(PDM0)       skip (no DMIC, last_err=%d)\n",
+		       (int)alp_last_error());
+	}
 
-    /* ── Open the inference backend ────────────────────────
+	/* ── Open the inference backend ────────────────────────
      *
      * ETHOS_U dispatches to the on-die Ethos-U55 NPU on the
      * AEN.  AUTO would do the same but spelling out the
      * backend makes the AEN-specific intent explicit. */
-    alp_inference_config_t inf_cfg = {
-        .backend     = ALP_INFERENCE_BACKEND_ETHOS_U,
-        .format      = ALP_INFERENCE_MODEL_VELA,
-        .model_data  = s_model,
-        .model_size  = sizeof(s_model),
-        .arena       = s_arena,
-        .arena_bytes = sizeof(s_arena),
-    };
-    g_state.inf = alp_inference_open(&inf_cfg);
-    g_state.inf_ok = (g_state.inf != NULL);
-    if (g_state.inf_ok) {
-        printf("[wake]   alp_inference_open(ETHOS_U)   ok\n");
-    } else {
-        printf("[wake]   alp_inference_open(ETHOS_U)   skip (last_err=%d)\n",
-               (int)alp_last_error());
-    }
+	alp_inference_config_t inf_cfg = {
+		.backend     = ALP_INFERENCE_BACKEND_ETHOS_U,
+		.format      = ALP_INFERENCE_MODEL_VELA,
+		.model_data  = s_model,
+		.model_size  = sizeof(s_model),
+		.arena       = s_arena,
+		.arena_bytes = sizeof(s_arena),
+	};
+	g_state.inf    = alp_inference_open(&inf_cfg);
+	g_state.inf_ok = (g_state.inf != NULL);
+	if (g_state.inf_ok) {
+		printf("[wake]   alp_inference_open(ETHOS_U)   ok\n");
+	} else {
+		printf("[wake]   alp_inference_open(ETHOS_U)   skip (last_err=%d)\n",
+		       (int)alp_last_error());
+	}
 
-    /* ── Spawn the inference loop at low priority ──────────
+	/* ── Spawn the inference loop at low priority ──────────
      *
      * K_PRIO_PREEMPT(10) is well below main() -- the scheduler
      * lets main() (and any future supervisory work) take the
      * core whenever they have something to do.  Between
      * inference windows the loop is k_sleep'd which drops the
      * idle thread to WFI on the M55 HE. */
-    k_thread_create(&infer_thread, infer_stack,
-                    K_THREAD_STACK_SIZEOF(infer_stack),
-                    infer_loop, NULL, NULL, NULL,
-                    K_PRIO_PREEMPT(10), 0, K_NO_WAIT);
-    k_thread_name_set(&infer_thread, "wake_infer");
+	k_thread_create(&infer_thread,
+	                infer_stack,
+	                K_THREAD_STACK_SIZEOF(infer_stack),
+	                infer_loop,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(10),
+	                0,
+	                K_NO_WAIT);
+	k_thread_name_set(&infer_thread, "wake_infer");
 
-    /* ── Wait for the loop to retire ───────────────────────
+	/* ── Wait for the loop to retire ───────────────────────
      *
      * On a real always-on deployment main() would either join
      * the worker forever or just return (Zephyr keeps the
      * worker alive).  For the twister build_only scenario we
      * block on the thread so the "[wake] done" sentinel only
      * fires after the loop has had a chance to exercise. */
-    k_thread_join(&infer_thread, K_FOREVER);
+	k_thread_join(&infer_thread, K_FOREVER);
 
-    /* ── Teardown ──────────────────────────────────────────
+	/* ── Teardown ──────────────────────────────────────────
      *
      * Real always-on apps skip this -- the worker never
      * exits.  We tear down here so the demo's resource
      * lifecycle is visible end-to-end for customers reading
      * the example. */
-    if (g_state.inf_ok) {
-        alp_inference_close(g_state.inf);
-    }
-    if (g_state.mic_ok) {
-        (void)alp_audio_in_stop(g_state.mic);
-        alp_audio_in_close(g_state.mic);
-    }
+	if (g_state.inf_ok) {
+		alp_inference_close(g_state.inf);
+	}
+	if (g_state.mic_ok) {
+		(void)alp_audio_in_stop(g_state.mic);
+		alp_audio_in_close(g_state.mic);
+	}
 
-    printf("[wake]   %u windows run, %u detections\n",
-           g_state.windows_run, g_state.detections);
-    printf("[wake] done\n");
-    return 0;
+	printf("[wake]   %u windows run, %u detections\n", g_state.windows_run, g_state.detections);
+	printf("[wake] done\n");
+	return 0;
 }

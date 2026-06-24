@@ -36,11 +36,11 @@ extern "C" {
 #endif
 
 /** Fixed panel geometry.  SSD1331 is exclusively 96 × 64. */
-#define SSD1331_WIDTH    96
-#define SSD1331_HEIGHT   64
+#define SSD1331_WIDTH  96
+#define SSD1331_HEIGHT 64
 
 /** Bytes per pixel in the framebuffer (RGB565 native). */
-#define SSD1331_BPP      2
+#define SSD1331_BPP 2
 
 /** Required framebuffer size in bytes. */
 #define SSD1331_FB_BYTES (SSD1331_WIDTH * SSD1331_HEIGHT * SSD1331_BPP)
@@ -51,17 +51,18 @@ extern "C" {
  * The SSD1331 expects MSB-first when streamed over SPI; the impl handles
  * the byte order before pushing to the bus.
  */
-static inline uint16_t ssd1331_rgb565(uint8_t r, uint8_t g, uint8_t b) {
-    return (uint16_t)(((r & 0xF8u) << 8) | ((g & 0xFCu) << 3) | (b >> 3));
+static inline uint16_t ssd1331_rgb565(uint8_t r, uint8_t g, uint8_t b)
+{
+	return (uint16_t)(((r & 0xF8u) << 8) | ((g & 0xFCu) << 3) | (b >> 3));
 }
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-    alp_spi_t  *bus;
-    alp_gpio_t *dc;             /**< D/C# command-vs-data line. */
-    uint8_t    *fb;             /**< Caller-supplied framebuffer of size @ref SSD1331_FB_BYTES. */
-    size_t      fb_len;
-    bool        initialised;
+	alp_spi_t  *bus;
+	alp_gpio_t *dc; /**< D/C# command-vs-data line. */
+	uint8_t    *fb; /**< Caller-supplied framebuffer of size @ref SSD1331_FB_BYTES. */
+	size_t      fb_len;
+	bool        initialised;
 } ssd1331_t;
 
 /**
@@ -80,11 +81,8 @@ typedef struct {
  * @param fb     Pointer to the caller's framebuffer storage.
  * @param fb_len Length of @p fb in bytes.  Must be ≥ @ref SSD1331_FB_BYTES.
  */
-alp_status_t ssd1331_init(ssd1331_t *dev,
-                          alp_spi_t *spi,
-                          alp_gpio_t *dc,
-                          uint8_t *fb,
-                          size_t fb_len);
+alp_status_t
+ssd1331_init(ssd1331_t *dev, alp_spi_t *spi, alp_gpio_t *dc, uint8_t *fb, size_t fb_len);
 
 /** Set the panel display ON or OFF. */
 alp_status_t ssd1331_set_display_on(ssd1331_t *dev, bool on);
@@ -97,7 +95,7 @@ alp_status_t ssd1331_set_display_on(ssd1331_t *dev, bool on);
 alp_status_t ssd1331_set_master_current(ssd1331_t *dev, uint8_t current);
 
 /** Wipe the in-memory framebuffer to black.  Does not push to the panel. */
-void         ssd1331_clear(ssd1331_t *dev);
+void ssd1331_clear(ssd1331_t *dev);
 
 /**
  * @brief Set a single pixel in the framebuffer.
@@ -110,18 +108,16 @@ void         ssd1331_clear(ssd1331_t *dev);
  * @param y      Row coordinate, 0..@ref SSD1331_HEIGHT - 1.
  * @param colour RGB565 pixel value.  See the ssd1331_rgb565 helper.
  */
-void         ssd1331_draw_pixel(ssd1331_t *dev,
-                                uint16_t x, uint16_t y,
-                                uint16_t colour);
+void ssd1331_draw_pixel(ssd1331_t *dev, uint16_t x, uint16_t y, uint16_t colour);
 
 /** Push the entire in-memory framebuffer to the panel. */
 alp_status_t ssd1331_display(ssd1331_t *dev);
 
 /** Release the driver context.  Does not turn off the panel. */
-void         ssd1331_deinit(ssd1331_t *dev);
+void ssd1331_deinit(ssd1331_t *dev);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_CHIPS_SSD1331_H */
+#endif /* ALP_CHIPS_SSD1331_H */

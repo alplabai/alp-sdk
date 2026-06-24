@@ -35,15 +35,15 @@
 
 uint32_t alp_hw_info_crc32(const uint8_t *buf, size_t len)
 {
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= (uint32_t)buf[i];
-        for (unsigned b = 0; b < 8; ++b) {
-            uint32_t mask = (uint32_t) - (int32_t)(crc & 1u);
-            crc           = (crc >> 1) ^ (0xEDB88320u & mask);
-        }
-    }
-    return ~crc;
+	uint32_t crc = 0xFFFFFFFFu;
+	for (size_t i = 0; i < len; ++i) {
+		crc ^= (uint32_t)buf[i];
+		for (unsigned b = 0; b < 8; ++b) {
+			uint32_t mask = (uint32_t)-(int32_t)(crc & 1u);
+			crc           = (crc >> 1) ^ (0xEDB88320u & mask);
+		}
+	}
+	return ~crc;
 }
 
 /* ---------------------------------------------------------------- */
@@ -53,15 +53,15 @@ uint32_t alp_hw_info_crc32(const uint8_t *buf, size_t len)
 /* ---------------------------------------------------------------- */
 static void copy_field(char *dst, size_t dst_len, const char *src, size_t src_len)
 {
-    size_t n = src_len;
-    if (n >= dst_len) n = dst_len - 1u;
-    memcpy(dst, src, n);
-    dst[n] = '\0';
-    /* If the source carried an embedded NUL, terminate there for
+	size_t n = src_len;
+	if (n >= dst_len) n = dst_len - 1u;
+	memcpy(dst, src, n);
+	dst[n] = '\0';
+	/* If the source carried an embedded NUL, terminate there for
      * tidiness even though memcpy above already covered the bytes. */
-    for (size_t i = 0; i < n; ++i) {
-        if (dst[i] == '\0') return;
-    }
+	for (size_t i = 0; i < n; ++i) {
+		if (dst[i] == '\0') return;
+	}
 }
 
 #if defined(CONFIG_ALP_SDK_HW_INFO) && defined(CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID) &&        \
@@ -79,26 +79,28 @@ static void copy_field(char *dst, size_t dst_len, const char *src, size_t src_le
  * caller. */
 static alp_status_t read_manifest(alp_hw_info_eeprom_t *manifest)
 {
-    alp_i2c_config_t cfg = {
-        .bus_id     = (uint32_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID,
-        .bitrate_hz = (uint32_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ,
-    };
-    alp_i2c_t *bus = alp_i2c_open(&cfg);
-    if (bus == NULL) return alp_last_error();
+	alp_i2c_config_t cfg = {
+		.bus_id     = (uint32_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID,
+		.bitrate_hz = (uint32_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ,
+	};
+	alp_i2c_t *bus = alp_i2c_open(&cfg);
+	if (bus == NULL) return alp_last_error();
 
-    eeprom_24c128_t ee;
-    alp_status_t s = eeprom_24c128_init(&ee, bus, (uint8_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT);
-    if (s != ALP_OK) {
-        alp_i2c_close(bus);
-        return s;
-    }
+	eeprom_24c128_t ee;
+	alp_status_t s = eeprom_24c128_init(&ee, bus, (uint8_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT);
+	if (s != ALP_OK) {
+		alp_i2c_close(bus);
+		return s;
+	}
 
-    s = eeprom_24c128_read(&ee, (uint16_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET, (uint8_t *)manifest,
-                           sizeof(*manifest));
+	s = eeprom_24c128_read(&ee,
+	                       (uint16_t)CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET,
+	                       (uint8_t *)manifest,
+	                       sizeof(*manifest));
 
-    eeprom_24c128_deinit(&ee);
-    alp_i2c_close(bus);
-    return s;
+	eeprom_24c128_deinit(&ee);
+	alp_i2c_close(bus);
+	return s;
 }
 
 #endif /* ALP_HW_INFO_EEPROM_ENABLED */
@@ -112,52 +114,52 @@ static alp_status_t read_manifest(alp_hw_info_eeprom_t *manifest)
  * ---------------------------------------------------------------- */
 alp_status_t alp_hw_info_classify_manifest(const alp_hw_info_eeprom_t *manifest, alp_hw_info_t *out)
 {
-    if (manifest == NULL || out == NULL) return ALP_ERR_INVAL;
+	if (manifest == NULL || out == NULL) return ALP_ERR_INVAL;
 
-    /* No valid header: a blank/erased EEPROM (0xFF or zeroed) carries
+	/* No valid header: a blank/erased EEPROM (0xFF or zeroed) carries
      * no ALPH magic.  This is the expected state of a module the
      * factory programmer has not run on yet -- distinct from a read
      * fault, so report NOT_PROVISIONED rather than IO. */
-    if (manifest->magic != ALP_HW_INFO_MAGIC) return ALP_ERR_NOT_PROVISIONED;
+	if (manifest->magic != ALP_HW_INFO_MAGIC) return ALP_ERR_NOT_PROVISIONED;
 
-    /* Header claims our format but the body disagrees: corruption. */
-    if (manifest->schema_version != ALP_HW_INFO_SCHEMA_VERSION) return ALP_ERR_IO;
+	/* Header claims our format but the body disagrees: corruption. */
+	if (manifest->schema_version != ALP_HW_INFO_SCHEMA_VERSION) return ALP_ERR_IO;
 
-    const size_t crc_covered_len = sizeof(*manifest) - sizeof(manifest->crc32);
-    uint32_t     calc_crc        = alp_hw_info_crc32((const uint8_t *)manifest, crc_covered_len);
-    if (calc_crc != manifest->crc32) return ALP_ERR_IO;
+	const size_t crc_covered_len = sizeof(*manifest) - sizeof(manifest->crc32);
+	uint32_t     calc_crc        = alp_hw_info_crc32((const uint8_t *)manifest, crc_covered_len);
+	if (calc_crc != manifest->crc32) return ALP_ERR_IO;
 
-    copy_field(out->som_family, sizeof(out->som_family), manifest->family,
-               sizeof(manifest->family));
-    copy_field(out->som_sku, sizeof(out->som_sku), manifest->sku, sizeof(manifest->sku));
-    copy_field(out->som_hw_rev, sizeof(out->som_hw_rev), manifest->hw_rev,
-               sizeof(manifest->hw_rev));
-    copy_field(out->som_serial, sizeof(out->som_serial), manifest->serial,
-               sizeof(manifest->serial));
-    out->som_mfg_year  = manifest->mfg_year;
-    out->som_mfg_month = manifest->mfg_month;
-    out->som_mfg_day   = manifest->mfg_day;
-    return ALP_OK;
+	copy_field(
+	    out->som_family, sizeof(out->som_family), manifest->family, sizeof(manifest->family));
+	copy_field(out->som_sku, sizeof(out->som_sku), manifest->sku, sizeof(manifest->sku));
+	copy_field(
+	    out->som_hw_rev, sizeof(out->som_hw_rev), manifest->hw_rev, sizeof(manifest->hw_rev));
+	copy_field(
+	    out->som_serial, sizeof(out->som_serial), manifest->serial, sizeof(manifest->serial));
+	out->som_mfg_year  = manifest->mfg_year;
+	out->som_mfg_month = manifest->mfg_month;
+	out->som_mfg_day   = manifest->mfg_day;
+	return ALP_OK;
 }
 
 alp_status_t alp_hw_info_read(alp_hw_info_t *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    memset(out, 0, sizeof(*out));
+	if (out == NULL) return ALP_ERR_INVAL;
+	memset(out, 0, sizeof(*out));
 
 #if !ALP_HW_INFO_EEPROM_ENABLED
-    /* No EEPROM bus configured -- return NOSUPPORT.  Callers wanting
+	/* No EEPROM bus configured -- return NOSUPPORT.  Callers wanting
      * to run on a board without the hw_info path enabled should
      * configure ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0 in their
      * prj.conf, or accept the NOSUPPORT return and continue. */
-    return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT;
 #else
-    alp_hw_info_eeprom_t manifest;
-    memset(&manifest, 0, sizeof(manifest));
+	alp_hw_info_eeprom_t manifest;
+	memset(&manifest, 0, sizeof(manifest));
 
-    alp_status_t s = read_manifest(&manifest);
-    if (s != ALP_OK) {
-        /* The I2C backend maps a transport -ENOSYS/-ENOTSUP to
+	alp_status_t s = read_manifest(&manifest);
+	if (s != ALP_OK) {
+		/* The I2C backend maps a transport -ENOSYS/-ENOTSUP to
          * ALP_ERR_NOSUPPORT, and eeprom_24c128_read() propagates it
          * raw.  In THIS (#else) branch the EEPROM bus IS configured, so
          * that means the device is unreachable, not "no hw_info path" --
@@ -165,37 +167,38 @@ alp_status_t alp_hw_info_read(alp_hw_info_t *out)
          * bus-not-configured case above.  Not dead code: the read step
          * can surface NOSUPPORT even though init() normalises to
          * NOT_READY. */
-        return s == ALP_ERR_NOSUPPORT ? ALP_ERR_NOT_READY : s;
-    }
+		return s == ALP_ERR_NOSUPPORT ? ALP_ERR_NOT_READY : s;
+	}
 
-    /* Validate + populate.  Board-side BOARD_ID decode is a future
+	/* Validate + populate.  Board-side BOARD_ID decode is a future
      * addition (board.yaml -> generated header). */
-    return alp_hw_info_classify_manifest(&manifest, out);
+	return alp_hw_info_classify_manifest(&manifest, out);
 #endif
 }
 
-alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info, const char *expected_sku,
-                                              const char *expected_hw_rev)
+alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info,
+                                              const char          *expected_sku,
+                                              const char          *expected_hw_rev)
 {
-    if (info == NULL) return ALP_ERR_INVAL;
+	if (info == NULL) return ALP_ERR_INVAL;
 
 #if !ALP_HW_INFO_EEPROM_ENABLED
-    (void)expected_sku;
-    (void)expected_hw_rev;
-    return ALP_ERR_NOSUPPORT;
+	(void)expected_sku;
+	(void)expected_hw_rev;
+	return ALP_ERR_NOSUPPORT;
 #else
-    /* NULL expected_* means "don't check this field".  Empty strings
+	/* NULL expected_* means "don't check this field".  Empty strings
      * in info-> imply alp_hw_info_read() wasn't called or returned
      * early; that's treated as a mismatch. */
-    if (expected_sku != NULL) {
-        if (info->som_sku[0] == '\0') return ALP_ERR_IO;
-        if (strncmp(info->som_sku, expected_sku, sizeof(info->som_sku)) != 0) return ALP_ERR_IO;
-    }
-    if (expected_hw_rev != NULL) {
-        if (info->som_hw_rev[0] == '\0') return ALP_ERR_IO;
-        if (strncmp(info->som_hw_rev, expected_hw_rev, sizeof(info->som_hw_rev)) != 0)
-            return ALP_ERR_IO;
-    }
-    return ALP_OK;
+	if (expected_sku != NULL) {
+		if (info->som_sku[0] == '\0') return ALP_ERR_IO;
+		if (strncmp(info->som_sku, expected_sku, sizeof(info->som_sku)) != 0) return ALP_ERR_IO;
+	}
+	if (expected_hw_rev != NULL) {
+		if (info->som_hw_rev[0] == '\0') return ALP_ERR_IO;
+		if (strncmp(info->som_hw_rev, expected_hw_rev, sizeof(info->som_hw_rev)) != 0)
+			return ALP_ERR_IO;
+	}
+	return ALP_OK;
 #endif
 }

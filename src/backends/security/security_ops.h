@@ -43,15 +43,15 @@ typedef struct alp_security_ops alp_security_ops_t;
 /* ------------------------------------------------------------------ */
 
 typedef struct alp_hash_backend_state {
-    alp_hash_alg_t            alg;
-    void                     *be_data;
-    const alp_security_ops_t *ops;
+	alp_hash_alg_t            alg;
+	void                     *be_data;
+	const alp_security_ops_t *ops;
 } alp_hash_backend_state_t;
 
 typedef struct alp_aead_backend_state {
-    alp_aead_alg_t            alg;
-    void                     *be_data;
-    const alp_security_ops_t *ops;
+	alp_aead_alg_t            alg;
+	void                     *be_data;
+	const alp_security_ops_t *ops;
 } alp_aead_backend_state_t;
 
 /* ------------------------------------------------------------------ */
@@ -59,38 +59,47 @@ typedef struct alp_aead_backend_state {
 /* ------------------------------------------------------------------ */
 
 struct alp_security_ops {
-    /* ---- Hash ---- */
-    alp_status_t (*hash_open)(alp_hash_alg_t alg,
-                              alp_hash_backend_state_t *state,
-                              alp_capabilities_t *caps_out);
-    alp_status_t (*hash_update)(alp_hash_backend_state_t *state,
-                                const uint8_t *data, size_t len);
-    alp_status_t (*hash_finish)(alp_hash_backend_state_t *state,
-                                uint8_t *digest_out, size_t digest_cap,
-                                size_t *digest_len);
-    void         (*hash_close)(alp_hash_backend_state_t *state);
+	/* ---- Hash ---- */
+	alp_status_t (*hash_open)(alp_hash_alg_t            alg,
+	                          alp_hash_backend_state_t *state,
+	                          alp_capabilities_t       *caps_out);
+	alp_status_t (*hash_update)(alp_hash_backend_state_t *state, const uint8_t *data, size_t len);
+	alp_status_t (*hash_finish)(alp_hash_backend_state_t *state,
+	                            uint8_t                  *digest_out,
+	                            size_t                    digest_cap,
+	                            size_t                   *digest_len);
+	void (*hash_close)(alp_hash_backend_state_t *state);
 
-    /* ---- AEAD ---- */
-    alp_status_t (*aead_open)(alp_aead_alg_t alg,
-                              const uint8_t *key, size_t key_len,
-                              alp_aead_backend_state_t *state,
-                              alp_capabilities_t *caps_out);
-    alp_status_t (*aead_encrypt)(alp_aead_backend_state_t *state,
-                                 const uint8_t *iv, size_t iv_len,
-                                 const uint8_t *aad, size_t aad_len,
-                                 const uint8_t *plain, size_t plain_len,
-                                 uint8_t *cipher_out,
-                                 uint8_t *tag_out, size_t tag_len);
-    alp_status_t (*aead_decrypt)(alp_aead_backend_state_t *state,
-                                 const uint8_t *iv, size_t iv_len,
-                                 const uint8_t *aad, size_t aad_len,
-                                 const uint8_t *cipher, size_t cipher_len,
-                                 const uint8_t *tag, size_t tag_len,
-                                 uint8_t *plain_out);
-    void         (*aead_close)(alp_aead_backend_state_t *state);
+	/* ---- AEAD ---- */
+	alp_status_t (*aead_open)(alp_aead_alg_t            alg,
+	                          const uint8_t            *key,
+	                          size_t                    key_len,
+	                          alp_aead_backend_state_t *state,
+	                          alp_capabilities_t       *caps_out);
+	alp_status_t (*aead_encrypt)(alp_aead_backend_state_t *state,
+	                             const uint8_t            *iv,
+	                             size_t                    iv_len,
+	                             const uint8_t            *aad,
+	                             size_t                    aad_len,
+	                             const uint8_t            *plain,
+	                             size_t                    plain_len,
+	                             uint8_t                  *cipher_out,
+	                             uint8_t                  *tag_out,
+	                             size_t                    tag_len);
+	alp_status_t (*aead_decrypt)(alp_aead_backend_state_t *state,
+	                             const uint8_t            *iv,
+	                             size_t                    iv_len,
+	                             const uint8_t            *aad,
+	                             size_t                    aad_len,
+	                             const uint8_t            *cipher,
+	                             size_t                    cipher_len,
+	                             const uint8_t            *tag,
+	                             size_t                    tag_len,
+	                             uint8_t                  *plain_out);
+	void (*aead_close)(alp_aead_backend_state_t *state);
 
-    /* ---- Random (stateless, no handle) ---- */
-    alp_status_t (*random_bytes)(uint8_t *out, size_t len);
+	/* ---- Random (stateless, no handle) ---- */
+	alp_status_t (*random_bytes)(uint8_t *out, size_t len);
 };
 
 /* ------------------------------------------------------------------ */
@@ -98,17 +107,17 @@ struct alp_security_ops {
 /* ------------------------------------------------------------------ */
 
 struct alp_hash {
-    alp_hash_backend_state_t   state;
-    const alp_backend_t       *backend;
-    alp_capabilities_t         cached_caps;
-    bool                       in_use;
+	alp_hash_backend_state_t state;
+	const alp_backend_t     *backend;
+	alp_capabilities_t       cached_caps;
+	bool                     in_use;
 };
 
 struct alp_aead {
-    alp_aead_backend_state_t   state;
-    const alp_backend_t       *backend;
-    alp_capabilities_t         cached_caps;
-    bool                       in_use;
+	alp_aead_backend_state_t state;
+	const alp_backend_t     *backend;
+	alp_capabilities_t       cached_caps;
+	bool                     in_use;
 };
 
 #endif /* ALP_BACKENDS_SECURITY_OPS_H */

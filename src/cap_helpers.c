@@ -11,8 +11,8 @@
 
 bool alp_capabilities_has(const alp_capabilities_t *c, alp_instance_cap_t f)
 {
-    if (c == NULL) {
-        return false;
-    }
-    return (c->flags & (uint32_t)f) != 0u;
+	if (c == NULL) {
+		return false;
+	}
+	return (c->flags & (uint32_t)f) != 0u;
 }

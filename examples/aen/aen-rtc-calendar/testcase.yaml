@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the E8 LPRTC counter->calendar shim
+# (src/backends/rtc/lprtc_calendar_shim.c): compile-checks the alp_rtc_*
+# calendar surface layered over the always-on snps,dw-apb-rtc COUNTER on the real
+# E8 board target.  Filtered OUT of the native_sim PR gate (platform_allow = the
+# AEN801 HE board only); the on-silicon advance proof is a bench flash, not a CI
+# run.  Pairs with aen-rtc-regcheck (the raw counter proof underneath).
+
+sample:
+  name: aen-rtc-calendar
+  description: |
+    Bench RAM-run LPRTC calendar-shim proof for the E1M-AEN801 (Alif Ensemble
+    E8, Cortex-M55-HE): exercises the portable alp_rtc_set_time()/get_time()
+    surface over the lprtc@42000000 free-running COUNTER via the alp-sdk
+    "lprtc_calendar_shim" rtc backend, and confirms the calendar advances with
+    the counter.
+
+tests:
+  alp_sdk.examples.aen.rtc_calendar.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - rtc
+      - counter
+    build_only: true   # the calendar advance check is a bench flash, not a CI run.

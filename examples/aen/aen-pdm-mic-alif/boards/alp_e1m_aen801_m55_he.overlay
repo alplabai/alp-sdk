@@ -1,0 +1,59 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * PDM mic-capture overlay for the E1M-AEN801 (E8, M55-HE).
+ *
+ * The EVK's MP34DT05 mics are wired to the HP PDM controller pdm@4902d000 (NOT the
+ * LPPDM lppdm@43002000) -- the AUTHORITATIVE SoM routing from
+ * metadata/e1m_modules/aen/from-alif.tsv:
+ *   PDM_C0 -> PDM_C0_C = P6_1 (clock 0)   PDM_D0 -> PDM_D0_C = P6_0 (data 0)
+ *   PDM_C1 -> PDM_C2_B = P11_4 (clock 2)  PDM_D1 -> PDM_D2_B = P5_4 (data 2)
+ * i.e. two stereo data lines: D0 carries channels 0/1, D2 carries channels 4/5
+ * (4 mics). pdm@4902d000 is in the main peripheral domain (CLKCTL_PER_SLV), driven
+ * here from the M55-HE; the alif,alif-pdm driver is the same one used for LPPDM.
+ *
+ * The DATA pads carry `input-enable` (the upstream pad REN bit) so the mic
+ * bitstream is sensed; the CLOCK pads are outputs (no input-enable).
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+	aliases {
+		alp-pdm0 = &pdm;
+	};
+};
+
+&pinctrl {
+	pinctrl_pdm0: pinctrl_pdm0 {
+		/* PDM clocks (outputs) -- no input-enable. C0=P6_1, C2=P11_4. */
+		group0 {
+			pinmux = <PIN_P6_1__PDM_C0_C>, <PIN_P11_4__PDM_C2_B>;
+		};
+		/* PDM data (inputs) -- input-enable sets the pad REN. D0=P6_0, D2=P5_4. */
+		group1 {
+			pinmux = <PIN_P6_0__PDM_D0_C>, <PIN_P5_4__PDM_D2_B>;
+			input-enable;
+		};
+	};
+};
+
+&{/soc} {
+	pdm: pdm@4902d000 {
+		compatible = "alif,alif-pdm";
+		reg = <0x4902d000 0x1000>;
+		interrupts = <145 3>, <146 3>, <147 3>;
+		interrupt-names = "warning_intr", "error_intr", "audio_det_intr";
+		pinctrl-0 = <&pinctrl_pdm0>;
+		pinctrl-names = "default";
+		clocks = <&clockctrl ALIF_PDM_76M8_CLK>;
+		fifo_watermark = <5>;
+		bypass_iir_filter = <1>;
+		status = "okay";
+	};
+};

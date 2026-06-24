@@ -43,10 +43,10 @@ extern "C" {
 #define SH1106_FB_BYTES (SH1106_WIDTH * SH1106_HEIGHT / 8)
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
-    uint8_t    fb[SH1106_FB_BYTES];
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
+	uint8_t    fb[SH1106_FB_BYTES];
 } sh1106_t;
 
 /** @brief Initialise an SH1106 over I²C. */

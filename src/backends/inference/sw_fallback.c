@@ -32,67 +32,71 @@
 
 #include "inference_ops.h"
 
-static alp_status_t sw_open(const alp_inference_config_t *cfg,
+static alp_status_t sw_open(const alp_inference_config_t  *cfg,
                             alp_inference_backend_state_t *state,
-                            alp_capabilities_t *caps_out)
+                            alp_capabilities_t            *caps_out)
 {
-    /* NOSUPPORT stub: no inference engine on native_sim.  The
+	/* NOSUPPORT stub: no inference engine on native_sim.  The
      * dispatcher relays this as a NULL handle + last_error = NOSUPPORT. */
-    (void)cfg;
-    (void)state;
-    (void)caps_out;
-    return ALP_ERR_NOSUPPORT;
+	(void)cfg;
+	(void)state;
+	(void)caps_out;
+	return ALP_ERR_NOSUPPORT;
 }
 
 static size_t sw_num_inputs(alp_inference_backend_state_t *state)
 {
-    (void)state;
-    return 0u;
+	(void)state;
+	return 0u;
 }
 
 static size_t sw_num_outputs(alp_inference_backend_state_t *state)
 {
-    (void)state;
-    return 0u;
+	(void)state;
+	return 0u;
 }
 
-static alp_status_t sw_get_input(alp_inference_backend_state_t *state,
-                                 size_t index,
-                                 alp_inference_tensor_t *out)
+static alp_status_t
+sw_get_input(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
-    (void)state; (void)index; (void)out;
-    return ALP_ERR_NOSUPPORT;
+	(void)state;
+	(void)index;
+	(void)out;
+	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_get_output(alp_inference_backend_state_t *state,
-                                  size_t index,
-                                  alp_inference_tensor_t *out)
+static alp_status_t
+sw_get_output(alp_inference_backend_state_t *state, size_t index, alp_inference_tensor_t *out)
 {
-    (void)state; (void)index; (void)out;
-    return ALP_ERR_NOSUPPORT;
+	(void)state;
+	(void)index;
+	(void)out;
+	return ALP_ERR_NOSUPPORT;
 }
 
 static alp_status_t sw_invoke(alp_inference_backend_state_t *state)
 {
-    (void)state;
-    return ALP_ERR_NOSUPPORT;
+	(void)state;
+	return ALP_ERR_NOSUPPORT;
 }
 
 static const alp_inference_ops_t _ops = {
-    .open        = sw_open,
-    .num_inputs  = sw_num_inputs,
-    .num_outputs = sw_num_outputs,
-    .get_input   = sw_get_input,
-    .get_output  = sw_get_output,
-    .invoke      = sw_invoke,
-    .close       = NULL,
+	.open        = sw_open,
+	.num_inputs  = sw_num_inputs,
+	.num_outputs = sw_num_outputs,
+	.get_input   = sw_get_input,
+	.get_output  = sw_get_output,
+	.invoke      = sw_invoke,
+	.close       = NULL,
 };
 
-ALP_BACKEND_REGISTER(inference, sw_fallback, {
-    .silicon_ref = "*",
-    .vendor      = "sw_fallback",
-    .base_caps   = 0u,
-    .priority    = 0,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(inference,
+                     sw_fallback,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "sw_fallback",
+                         .base_caps   = 0u,
+                         .priority    = 0,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

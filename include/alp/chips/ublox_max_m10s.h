@@ -34,16 +34,19 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    bool        initialised;
+	alp_uart_t *port;
+	bool        initialised;
 } ublox_max_m10s_t;
 
 /** @brief Bind context to caller-opened UART. */
 alp_status_t ublox_max_m10s_init(ublox_max_m10s_t *dev, alp_uart_t *port);
 
 /** @brief Read one NMEA line.  See `ublox_neo_m9n_read_nmea_line`. */
-alp_status_t ublox_max_m10s_read_nmea_line(ublox_max_m10s_t *dev, uint8_t *line_buf,
-                                           size_t line_max, size_t *len_out, uint32_t timeout_ms);
+alp_status_t ublox_max_m10s_read_nmea_line(ublox_max_m10s_t *dev,
+                                           uint8_t          *line_buf,
+                                           size_t            line_max,
+                                           size_t           *len_out,
+                                           uint32_t          timeout_ms);
 
 /** @brief Release driver context. */
 void ublox_max_m10s_deinit(ublox_max_m10s_t *dev);

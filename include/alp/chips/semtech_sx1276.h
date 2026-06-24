@@ -34,12 +34,12 @@ extern "C" {
 #endif
 
 #define SX1276_REG_VERSION 0x42u
-#define SX1276_VERSION 0x12u /**< Datasheet-reported silicon version. */
+#define SX1276_VERSION     0x12u /**< Datasheet-reported silicon version. */
 
 typedef struct {
-    alp_spi_t  *bus;
-    alp_gpio_t *nreset;
-    bool        initialised;
+	alp_spi_t  *bus;
+	alp_gpio_t *nreset;
+	bool        initialised;
 } semtech_sx1276_t;
 
 /** @brief Bind context to caller-opened SPI + reset GPIO. */

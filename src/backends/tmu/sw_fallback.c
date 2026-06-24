@@ -35,94 +35,95 @@
 
 static alp_status_t sw_sin(float in_a, float *out)
 {
-    *out = sinf(in_a);
-    return ALP_OK;
+	*out = sinf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_cos(float in_a, float *out)
 {
-    *out = cosf(in_a);
-    return ALP_OK;
+	*out = cosf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_tan(float in_a, float *out)
 {
-    *out = tanf(in_a);
-    return ALP_OK;
+	*out = tanf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_atan(float in_a, float *out)
 {
-    *out = atanf(in_a);
-    return ALP_OK;
+	*out = atanf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_atan2(float in_a, float in_b, float *out)
 {
-    *out = atan2f(in_a, in_b);
-    return ALP_OK;
+	*out = atan2f(in_a, in_b);
+	return ALP_OK;
 }
 
 static alp_status_t sw_sqrt(float in_a, float *out)
 {
-    *out = sqrtf(in_a);
-    return ALP_OK;
+	*out = sqrtf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_log(float in_a, float *out)
 {
-    *out = logf(in_a);
-    return ALP_OK;
+	*out = logf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_exp(float in_a, float *out)
 {
-    *out = expf(in_a);
-    return ALP_OK;
+	*out = expf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_sinh(float in_a, float *out)
 {
-    *out = sinhf(in_a);
-    return ALP_OK;
+	*out = sinhf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_cosh(float in_a, float *out)
 {
-    *out = coshf(in_a);
-    return ALP_OK;
+	*out = coshf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_tanh(float in_a, float *out)
 {
-    *out = tanhf(in_a);
-    return ALP_OK;
+	*out = tanhf(in_a);
+	return ALP_OK;
 }
 
 static alp_status_t sw_hypot(float in_a, float in_b, float *out)
 {
-    *out = hypotf(in_a, in_b);
-    return ALP_OK;
+	*out = hypotf(in_a, in_b);
+	return ALP_OK;
 }
 
 /* ---------- Registration ---------- */
 
 static const alp_tmu_ops_t _ops = {
-    .sin   = sw_sin,
-    .cos   = sw_cos,
-    .tan   = sw_tan,
-    .atan  = sw_atan,
-    .atan2 = sw_atan2,
-    .sqrt  = sw_sqrt,
-    .log   = sw_log,
-    .exp   = sw_exp,
-    .sinh  = sw_sinh,
-    .cosh  = sw_cosh,
-    .tanh  = sw_tanh,
-    .hypot = sw_hypot,
+	.sin   = sw_sin,
+	.cos   = sw_cos,
+	.tan   = sw_tan,
+	.atan  = sw_atan,
+	.atan2 = sw_atan2,
+	.sqrt  = sw_sqrt,
+	.log   = sw_log,
+	.exp   = sw_exp,
+	.sinh  = sw_sinh,
+	.cosh  = sw_cosh,
+	.tanh  = sw_tanh,
+	.hypot = sw_hypot,
 };
 
-ALP_BACKEND_REGISTER(tmu, sw_fallback,
+ALP_BACKEND_REGISTER(tmu,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

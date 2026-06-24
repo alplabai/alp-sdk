@@ -1,0 +1,71 @@
+diff --git a/se_services/zephyr/include/se_service.h b/se_services/zephyr/include/se_service.h
+--- a/se_services/zephyr/include/se_service.h
++++ b/se_services/zephyr/include/se_service.h
+@@ -294,6 +294,26 @@
+ int se_service_boot_cpu(uint32_t cpu_id, uint32_t address);
+ 
+ /**
++ * @brief Send a fully populated SE service request packet and block for
++ *        the response.
++ *
++ * Generic transport for callers that build their own SE service request
++ * packet (e.g. the CryptoCell AES / SHA / AEAD services in
++ * services_lib_protocol.h) rather than going through a per-service wrapper.
++ * The packet's header.hdr_service_id must be set and every send_*_addr
++ * already run through local_to_global(); on return the packet's resp_*
++ * fields carry the SE response.
++ *
++ * @param packet Pointer to the populated *_svc_t request packet.
++ * @param size   sizeof the concrete *_svc_t.
++ * @retval 0 Success (read the packet's resp_error_code for the SE verdict).
++ * @retval -EINVAL packet is NULL or size is 0.
++ * @retval -EAGAIN Operation timed out. Retry after a delay.
++ * @retval -EBUSY SE communication channel is busy.
++ */
++int se_service_send_request(uint32_t *packet, uint32_t size);
++
++/**
+  * @brief Update the ALIF STOC using the provided image.
+  *
+  * @param img_addr Pointer to the image data.
+diff --git a/se_services/zephyr/src/se_service.c b/se_services/zephyr/src/se_service.c
+--- a/se_services/zephyr/src/se_service.c
++++ b/se_services/zephyr/src/se_service.c
+@@ -1388,6 +1388,37 @@
+ 	return 0;
+ }
+ 
++int se_service_send_request(uint32_t *packet, uint32_t size)
++{
++	int err;
++
++	if (packet == NULL || size == 0u) {
++		return -EINVAL;
++	}
++
++	/* Ensure SE is ready to receive service calls */
++	err = se_service_ensure_ready();
++	if (err) {
++		return err;
++	}
++
++	err = k_mutex_lock(&svc_mutex, K_MSEC(MUTEX_TIMEOUT));
++	if (err) {
++		LOG_ERR("Unable to lock mutex (error = %d)\n", err);
++		return err;
++	}
++
++	/* The caller has fully populated the request packet (header service
++	 * id set + every send_*_addr already run through local_to_global()).
++	 * send_msg_to_se() flushes it to SE-visible memory, sends its global
++	 * address over the MHUv2 pair, blocks for the SE response, and
++	 * invalidates the cache so the packet's resp_* fields are visible.
++	 */
++	err = send_msg_to_se(packet, size, SERVICE_TIMEOUT);
++	k_mutex_unlock(&svc_mutex);
++	return err;
++}
++
+ int se_service_clock_set_divider(clock_divider_t divider, uint32_t value)
+ {
+ 	int err, i = 0, resp_err = -1;

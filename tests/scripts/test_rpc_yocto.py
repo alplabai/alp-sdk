@@ -1,14 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Unit tests for src/yocto/rpc_yocto.c (Wave 5A of the 2026-05-15
-heterogeneous-OS orchestration design).
+Unit tests for the Yocto/Linux RPC backend
+(``src/backends/rpc/yocto_drv.c``).
+
+History: before the registry migration (#33) the public
+``alp_rpc_*`` surface lived directly in ``src/yocto/rpc_yocto.c``.
+That file was split: the public class dispatcher now owns the
+``alp_rpc_open / close / subscribe / unsubscribe / send / call``
+surface in ``src/rpc_dispatch.c``, and the Linux RPMsg
+implementation was re-homed as a *backend* in
+``src/backends/rpc/yocto_drv.c`` that exposes only the static
+``y_*`` ops bound through an ``alp_rpc_ops_t`` vtable
+(``_ops``) and registered via ``ALP_BACKEND_REGISTER``.
 
 Two test classes:
 
 * ``TestRpcYoctoStructure`` -- source-level structural tests that
-  parse ``rpc_yocto.c`` and assert the function signatures, the
-  framing helpers + the synchronous-call call-slot fields are all
-  present.  Runs on every host (Linux, macOS, Windows).
+  parse the yocto backend and assert the ops vtable, the framing
+  helpers, the synchronous-call call-slot fields and the
+  concurrency primitives are all present, and that the active
+  (OpenAMP-userland) branch is a REAL implementation rather than
+  the NOSUPPORT fallback.  ``TestRpcPublicSurface`` separately
+  pins the moved-away public ``alp_rpc_*`` API to its new home in
+  the dispatcher.  Both run on every host (Linux, macOS, Windows).
 
 * ``TestRpcYoctoLive`` -- skipped on hosts without libmetal +
   librpmsg.  Documents how an end-to-end harness would invoke
@@ -36,7 +50,11 @@ import pytest
 
 
 REPO = Path(__file__).resolve().parents[2]
-RPC_SRC = REPO / "src" / "yocto" / "rpc_yocto.c"
+# Post-migration (#33) layout: the Linux RPMsg implementation is a
+# backend (static y_* ops behind a vtable); the public alp_rpc_*
+# surface lives in the shared class dispatcher.
+RPC_SRC = REPO / "src" / "backends" / "rpc" / "yocto_drv.c"
+RPC_DISPATCH = REPO / "src" / "rpc_dispatch.c"
 RPC_HDR = REPO / "include" / "alp" / "rpc.h"
 ZEPHYR_SRC = REPO / "src" / "backends" / "rpc" / "zephyr_drv.c"
 
@@ -53,6 +71,12 @@ def rpc_source() -> str:
 
 
 @pytest.fixture(scope="module")
+def dispatch_source() -> str:
+    assert RPC_DISPATCH.exists(), f"missing source: {RPC_DISPATCH}"
+    return RPC_DISPATCH.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
 def zephyr_source() -> str:
     assert ZEPHYR_SRC.exists(), f"missing source: {ZEPHYR_SRC}"
     return ZEPHYR_SRC.read_text(encoding="utf-8")
@@ -64,14 +88,11 @@ def header_source() -> str:
     return RPC_HDR.read_text(encoding="utf-8")
 
 
-class TestRpcYoctoStructure:
-    """Parse the rpc_yocto.c source and assert the synchronous-call
-    implementation has all the moving parts the design + the public
-    header contract require.  These tests run on every host so a CI
-    runner without libmetal still verifies the implementation didn't
-    silently regress to the NOSUPPORT stub."""
-
-    # ----- Public-API surface ---------------------------------------
+class TestRpcPublicSurface:
+    """The public ``alp_rpc_*`` API moved OUT of the yocto source
+    into the shared class dispatcher (``src/rpc_dispatch.c``) in the
+    registry migration (#33).  Pin each public entry point to its
+    new home so a future re-home or accidental deletion is caught."""
 
     @pytest.mark.parametrize(
         "fn",
@@ -84,40 +105,158 @@ class TestRpcYoctoStructure:
             "alp_rpc_call",
         ],
     )
-    def test_public_api_defined(self, rpc_source: str, fn: str) -> None:
-        # Look for the function definition (return type + name + opening paren).
+    def test_public_api_defined_in_dispatcher(
+        self, dispatch_source: str, fn: str
+    ) -> None:
+        # Look for the function definition (name + opening paren).
         pattern = rf"\b{re.escape(fn)}\s*\("
-        assert re.search(pattern, rpc_source) is not None, \
-            f"{fn} not found as a function definition in rpc_yocto.c"
+        assert re.search(pattern, dispatch_source) is not None, (
+            f"{fn} not found as a function definition in src/rpc_dispatch.c; "
+            "the public alp_rpc_* surface lives in the class dispatcher "
+            "post-#33, not in the yocto backend"
+        )
 
-    def test_alp_rpc_call_no_longer_nosupport(self, rpc_source: str) -> None:
-        """The pre-Wave-5A stub returned ALP_ERR_NOSUPPORT immediately.
-        The real implementation must not contain a top-level
-        `return ALP_ERR_NOSUPPORT;` inside the Linux branch.
+    @pytest.mark.parametrize(
+        "fn",
+        [
+            "alp_rpc_open",
+            "alp_rpc_close",
+            "alp_rpc_subscribe",
+            "alp_rpc_unsubscribe",
+            "alp_rpc_send",
+            "alp_rpc_call",
+        ],
+    )
+    def test_public_api_not_redefined_in_backend(
+        self, rpc_source: str, fn: str
+    ) -> None:
+        """The yocto backend must NOT re-define the public surface --
+        it only provides the static ``y_*`` ops.  A stray public
+        definition here would clash with the dispatcher at link time."""
+        pattern = rf"\b{re.escape(fn)}\s*\("
+        assert re.search(pattern, rpc_source) is None, (
+            f"{fn} unexpectedly (re)defined in the yocto backend; the "
+            "public surface belongs to src/rpc_dispatch.c after #33"
+        )
 
-        The fallback NOSUPPORT path at the bottom of the file (for
-        non-Linux hosts) is still allowed -- we slice the source at
-        the `#else` boundary before checking."""
-        # Find the #else that begins the NOSUPPORT fallback.
-        m = re.search(r"#else\s+/\*\s*!__linux__", rpc_source)
-        assert m is not None, "expected #else fallback block in rpc_yocto.c"
-        linux_branch = rpc_source[: m.start()]
+    def test_dispatcher_delegates_to_backend_ops(
+        self, dispatch_source: str
+    ) -> None:
+        """The dispatcher is a thin shim: every public call walks the
+        selected backend's ``ops`` vtable rather than implementing the
+        transport itself."""
+        assert "alp_backend_select" in dispatch_source, (
+            "dispatcher should select a backend via the registry"
+        )
+        for op in ["open", "subscribe", "unsubscribe", "send", "call", "close"]:
+            assert re.search(rf"ops->{op}\b", dispatch_source) is not None, (
+                f"dispatcher must delegate to ops->{op}"
+            )
 
-        # Locate alp_rpc_call's body inside the Linux branch.
-        call_match = re.search(
-            r"alp_status_t\s+alp_rpc_call\s*\(.*?\)\s*\{",
-            linux_branch,
+
+class TestRpcYoctoStructure:
+    """Parse ``src/backends/rpc/yocto_drv.c`` and assert the
+    synchronous-call backend has all the moving parts the design +
+    the public header contract require.  These tests run on every
+    host so a CI runner without libmetal still verifies the
+    implementation didn't silently regress to the NOSUPPORT stub."""
+
+    # ----- Backend ops surface --------------------------------------
+
+    @pytest.mark.parametrize(
+        "op",
+        [
+            "y_open",
+            "y_close",
+            "y_subscribe",
+            "y_unsubscribe",
+            "y_send",
+            "y_call",
+        ],
+    )
+    def test_backend_ops_defined(self, rpc_source: str, op: str) -> None:
+        """Every alp_rpc_ops_t slot is backed by a static y_* op."""
+        pattern = rf"\bstatic\s+(?:alp_status_t|void)\s+{re.escape(op)}\s*\("
+        assert re.search(pattern, rpc_source) is not None, (
+            f"{op} not found as a static op definition in yocto_drv.c"
+        )
+
+    @pytest.mark.parametrize(
+        ("slot", "op"),
+        [
+            (".open", "y_open"),
+            (".subscribe", "y_subscribe"),
+            (".unsubscribe", "y_unsubscribe"),
+            (".send", "y_send"),
+            (".call", "y_call"),
+            (".close", "y_close"),
+        ],
+    )
+    def test_ops_table_wires_every_slot(
+        self, rpc_source: str, slot: str, op: str
+    ) -> None:
+        """The static ``_ops`` table must bind every vtable slot to its
+        y_* op.  We match the ``.slot = y_op`` initialiser directly."""
+        pattern = rf"{re.escape(slot)}\s*=\s*{re.escape(op)}\b"
+        assert re.search(pattern, rpc_source) is not None, (
+            f"_ops table does not wire {slot} -> {op}"
+        )
+
+    def test_ops_table_present(self, rpc_source: str) -> None:
+        assert re.search(
+            r"static\s+const\s+alp_rpc_ops_t\s+_ops\s*=", rpc_source
+        ) is not None, "static const alp_rpc_ops_t _ops table missing"
+
+    def test_backend_registered(self, rpc_source: str) -> None:
+        """The backend self-registers into the rpc class registry with
+        the linux vendor + the _ops vtable."""
+        m = re.search(
+            r"ALP_BACKEND_REGISTER\s*\(\s*rpc\s*,\s*yocto_drv\s*,(.*?)\)\s*;",
+            rpc_source,
             flags=re.DOTALL,
         )
-        assert call_match is not None, \
-            "alp_rpc_call not found in Linux branch of rpc_yocto.c"
+        assert m is not None, "ALP_BACKEND_REGISTER(rpc, yocto_drv, ...) missing"
+        block = m.group(1)
+        assert re.search(r"\.vendor\s*=\s*\"linux\"", block), (
+            "yocto backend must register with vendor \"linux\""
+        )
+        assert re.search(r"\.ops\s*=\s*&_ops", block), (
+            "yocto backend registration must point .ops at &_ops"
+        )
+
+    def test_y_call_no_longer_nosupport(self, rpc_source: str) -> None:
+        """The active (OpenAMP-userland) build of y_call must be a real
+        implementation, NOT the NOSUPPORT fallback.
+
+        The fallback NOSUPPORT path lives under the
+        ``#else /* !ALP_SDK_HAVE_OPENAMP_USERLAND`` boundary; we slice
+        the source at that boundary before checking so only the real
+        branch is inspected."""
+        m = re.search(
+            r"#else\s+/\*\s*!ALP_SDK_HAVE_OPENAMP_USERLAND", rpc_source
+        )
+        assert m is not None, (
+            "expected #else !ALP_SDK_HAVE_OPENAMP_USERLAND fallback block "
+            "in yocto_drv.c"
+        )
+        real_branch = rpc_source[: m.start()]
+
+        # Locate y_call's body inside the real branch.
+        call_match = re.search(
+            r"static\s+alp_status_t\s+y_call\s*\(.*?\)\s*\{",
+            real_branch,
+            flags=re.DOTALL,
+        )
+        assert call_match is not None, (
+            "y_call not found in the OpenAMP-userland branch of yocto_drv.c"
+        )
 
         # Walk braces to find the matching close.
         depth = 0
         i = call_match.end() - 1  # the '{' we just matched
         body_end = None
-        while i < len(linux_branch):
-            c = linux_branch[i]
+        while i < len(real_branch):
+            c = real_branch[i]
             if c == "{":
                 depth += 1
             elif c == "}":
@@ -127,38 +266,51 @@ class TestRpcYoctoStructure:
                     break
             i += 1
         assert body_end is not None, "could not balance braces"
-        body = linux_branch[call_match.end():body_end]
+        body = real_branch[call_match.end():body_end]
 
-        # The real implementation must NOT have a NOSUPPORT short-circuit.
+        # The real implementation must NOT short-circuit to NOSUPPORT.
         bad = re.findall(r"return\s+ALP_ERR_NOSUPPORT", body)
         assert not bad, (
-            "alp_rpc_call's Linux branch still returns ALP_ERR_NOSUPPORT; "
-            "Wave 5A should have replaced the stub with a real implementation"
+            "y_call's OpenAMP-userland branch still returns "
+            "ALP_ERR_NOSUPPORT; the re-home should have preserved the real "
+            "implementation, not the stub"
         )
 
-    # ----- Header status string updated ----------------------------
+    def test_nosupport_fallback_present(self, rpc_source: str) -> None:
+        """The non-OpenAMP host build still compiles to a clean
+        NOSUPPORT op set so the TU links and the dispatcher falls
+        through to the SW fallback."""
+        m = re.search(
+            r"#else\s+/\*\s*!ALP_SDK_HAVE_OPENAMP_USERLAND", rpc_source
+        )
+        assert m is not None
+        fallback = rpc_source[m.start():]
+        assert "ALP_ERR_NOSUPPORT" in fallback, (
+            "the !ALP_SDK_HAVE_OPENAMP_USERLAND fallback must return "
+            "ALP_ERR_NOSUPPORT from its ops"
+        )
 
-    def test_header_no_longer_advertises_nosupport(
+    # ----- File-header documentation -------------------------------
+
+    def test_header_documents_correlation_strategy(
         self, rpc_source: str
     ) -> None:
-        """The file-header comment used to say
-        ``alp_rpc_call: NOSUPPORT (TODO Wave 5)``.  The post-Wave-5A
-        comment should describe the actual implementation strategy."""
-        # The top comment block spans up to roughly line 70 (past the
-        # `#include "alp/rpc.h"` line).  Slice on that boundary.
+        """The post-re-home file header should describe the actual
+        implementation strategy (the call/response correlation model +
+        the per-channel call-slot sync primitives) rather than a
+        TODO."""
         head_match = re.search(r'#include\s+"alp/rpc\.h"', rpc_source)
         assert head_match is not None
         header_block = rpc_source[: head_match.start()]
 
         assert "TODO Wave 5" not in header_block
-        # Positive assertions: the new comment must mention the
-        # correlation strategy + the call-slot mutex/cond names.
-        assert "correlation strategy" in header_block.lower(), \
+        assert "correlation strategy" in header_block.lower(), (
             "file header should explain the call/response correlation strategy"
-        assert "call_mutex" in header_block, \
-            "file header should mention the per-channel call_mutex"
-        assert "call_cond" in header_block, \
-            "file header should mention the per-channel call_cond"
+        )
+        # The correlation model is the method-name echo (no corr ID).
+        assert "method name" in header_block.lower(), (
+            "file header should describe the method-name-echo correlation model"
+        )
 
     # ----- Framing parity with Zephyr ------------------------------
 
@@ -171,8 +323,9 @@ class TestRpcYoctoStructure:
     ) -> None:
         """The Linux + Zephyr backends share an identical framing
         format.  Any divergence here breaks the wire protocol."""
-        assert re.search(rf"\b{helper}\s*\(", rpc_source) is not None, \
-            f"framing helper '{helper}' missing from rpc_yocto.c"
+        assert re.search(rf"\b{helper}\s*\(", rpc_source) is not None, (
+            f"framing helper '{helper}' missing from yocto_drv.c"
+        )
 
     def test_method_max_len_matches_header(
         self, rpc_source: str, header_source: str
@@ -203,7 +356,7 @@ class TestRpcYoctoStructure:
     )
     def test_call_slot_fields(self, rpc_source: str, field: str) -> None:
         """Every call-slot field documented in the file header must
-        exist in the channel struct."""
+        exist in the backend's per-channel struct."""
         assert re.search(
             rf"\b{field}\b", rpc_source
         ) is not None, f"call-slot field '{field}' missing"
@@ -231,8 +384,9 @@ class TestRpcYoctoStructure:
         """The synchronous-call wait uses pthread_cond_timedwait against
         an absolute CLOCK_REALTIME deadline; the close path broadcasts
         to wake pending callers."""
-        assert primitive in rpc_source, \
-            f"expected '{primitive}' in rpc_yocto.c"
+        assert primitive in rpc_source, (
+            f"expected '{primitive}' in yocto_drv.c"
+        )
 
     # ----- Error-code coverage --------------------------------------
 
@@ -249,72 +403,71 @@ class TestRpcYoctoStructure:
     )
     def test_status_codes(self, rpc_source: str, code: str) -> None:
         """Every status code documented for alp_rpc_call in rpc.h
-        must appear somewhere in rpc_yocto.c."""
+        must appear somewhere in yocto_drv.c."""
         assert code in rpc_source
 
     def test_call_serialises_via_tx_mutex(self, rpc_source: str) -> None:
         """The header docs (`@note Concurrent calls on the same
         channel from multiple threads are serialised by the SDK`)
-        require alp_rpc_call to take tx_mutex end-to-end."""
-        # Find alp_rpc_call's body & confirm tx_mutex is locked + unlocked.
-        m = re.search(
-            r"alp_status_t\s+alp_rpc_call\s*\(.*?\)\s*\{(.*?)\n\}\s*$",
-            rpc_source,
-            flags=re.DOTALL | re.MULTILINE,
-        )
-        # Pick the *first* match -- that's the Linux branch implementation,
-        # not the NOSUPPORT fallback at the bottom of the file.
+        require y_call to take tx_mutex end-to-end."""
+        # Slice the real (OpenAMP-userland) branch: from the first y_call
+        # definition to the #else fallback boundary.
         body_match = re.search(
-            r"alp_status_t\s+alp_rpc_call\s*\(",
+            r"static\s+alp_status_t\s+y_call\s*\(",
             rpc_source,
         )
         assert body_match is not None
-        # Slice from there to the end of file's Linux block (#else).
-        else_match = re.search(r"#else\s+/\*\s*!__linux__", rpc_source)
+        else_match = re.search(
+            r"#else\s+/\*\s*!ALP_SDK_HAVE_OPENAMP_USERLAND", rpc_source
+        )
         assert else_match is not None
         snippet = rpc_source[body_match.start(): else_match.start()]
-        assert "pthread_mutex_lock(&ch->tx_mutex)" in snippet, \
-            "alp_rpc_call must lock tx_mutex to serialise concurrent calls"
-        assert "pthread_mutex_unlock(&ch->tx_mutex)" in snippet, \
-            "alp_rpc_call must unlock tx_mutex on every return path"
+        assert "pthread_mutex_lock(&ch->tx_mutex)" in snippet, (
+            "y_call must lock tx_mutex to serialise concurrent calls"
+        )
+        assert "pthread_mutex_unlock(&ch->tx_mutex)" in snippet, (
+            "y_call must unlock tx_mutex on every return path"
+        )
 
     def test_close_wakes_pending_callers(self, rpc_source: str) -> None:
-        """alp_rpc_close must wake any pending alp_rpc_call with
-        ALP_ERR_NOT_READY so close-during-call doesn't leak the
-        caller until its timeout expires."""
+        """y_close must wake any pending y_call with ALP_ERR_NOT_READY
+        so close-during-call doesn't leak the caller until its timeout
+        expires."""
         m = re.search(
-            r"void\s+alp_rpc_close\s*\([^)]*\)\s*\{(.*?)\n\}\s*\n",
+            r"static\s+void\s+y_close\s*\([^)]*\)\s*\{(.*?)\n\}\s*\n",
             rpc_source,
             flags=re.DOTALL,
         )
-        assert m is not None, "alp_rpc_close body not found"
+        assert m is not None, "y_close body not found"
         body = m.group(1)
-        assert "call_pending" in body, \
-            "alp_rpc_close must inspect call_pending"
-        assert "ALP_ERR_NOT_READY" in body, \
-            "alp_rpc_close must set the pending caller's result to NOT_READY"
-        assert "pthread_cond_broadcast" in body or \
-               "pthread_cond_signal" in body, \
-            "alp_rpc_close must wake the pending caller's cond wait"
+        assert "call_pending" in body, (
+            "y_close must inspect call_pending"
+        )
+        assert "ALP_ERR_NOT_READY" in body, (
+            "y_close must set the pending caller's result to NOT_READY"
+        )
+        assert (
+            "pthread_cond_broadcast" in body or "pthread_cond_signal" in body
+        ), "y_close must wake the pending caller's cond wait"
 
     def test_buffer_too_small_returns_nomem(self, rpc_source: str) -> None:
         """When the peer's response exceeds the caller's resp buffer
-        capacity we must copy what fits AND return ALP_ERR_NOMEM
-        (matching the alp/rpc.h documentation)."""
-        # The RX worker is where the decision is made.
-        # Look for the routing block that fires when call_pending is true.
+        capacity we must copy what fits AND surface ALP_ERR_NOMEM
+        (matching the alp/rpc.h documentation).  The decision is made
+        in the RX worker's response-routing block."""
         m = re.search(
             r"if\s*\(\s*ch->call_pending.*?ch->call_pending\s*=\s*false",
             rpc_source,
             flags=re.DOTALL,
         )
-        assert m is not None, \
-            "RX worker's response-routing block not found"
+        assert m is not None, "RX worker's response-routing block not found"
         block = m.group(0)
-        assert "ALP_ERR_NOMEM" in block, \
+        assert "ALP_ERR_NOMEM" in block, (
             "RX worker must surface ALP_ERR_NOMEM when payload > resp_cap"
-        assert "memcpy" in block, \
+        )
+        assert "memcpy" in block, (
             "RX worker must memcpy the response into the caller's buffer"
+        )
 
     def test_correlation_strategy_matches_zephyr(
         self, rpc_source: str, zephyr_source: str
@@ -327,14 +480,14 @@ class TestRpcYoctoStructure:
         We check that neither backend prepends a 32-bit correlation
         ID to the frame.  Both rely on the method-name echo from the
         peer."""
-        # Neither side should emit a correlation-ID symbol.
         for src, name in [
-            (rpc_source, "rpc_yocto.c"),
+            (rpc_source, "src/backends/rpc/yocto_drv.c"),
             (zephyr_source, "src/backends/rpc/zephyr_drv.c"),
         ]:
-            assert "corr_id" not in src and "correlation_id" not in src, \
-                f"{name} appears to carry a correlation-ID field -- " \
-                "Wave 5A picked the serialised per-channel model"
+            assert "corr_id" not in src and "correlation_id" not in src, (
+                f"{name} appears to carry a correlation-ID field -- "
+                "both backends use the serialised per-channel model"
+            )
 
         # Both sides have a `call_pending` flag flipped from RX.
         assert "call_pending" in rpc_source
@@ -369,17 +522,18 @@ def _have_openamp_user() -> bool:
     ),
 )
 class TestRpcYoctoLive:
-    """End-to-end tests against the real rpc_yocto.c implementation.
+    """End-to-end tests against the real yocto_drv.c backend.
 
-    The harness builds librpc_yocto.so via CMake in ``setUp`` and
-    substitutes the chardev path with a UNIX socketpair so the test
-    process plays both sides of the RPMsg link.  Even on Linux the
-    kernel's rpmsg subsystem is unavailable without remoteproc-backed
-    hardware, so we mock the chardev at the file-descriptor level.
+    The harness builds the rpc backend into a .so via CMake in
+    ``setUp`` and substitutes the chardev path with a UNIX socketpair
+    so the test process plays both sides of the RPMsg link.  Even on
+    Linux the kernel's rpmsg subsystem is unavailable without
+    remoteproc-backed hardware, so we mock the chardev at the
+    file-descriptor level.
 
     These tests are intentionally light on assertions while the live
     harness matures.  They double as documentation of the contract
-    the C side of Wave 5A must honour.
+    the C side must honour.
     """
 
     @pytest.fixture

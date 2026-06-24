@@ -1343,7 +1343,7 @@ def resolve_carve_outs(
                 f"metadata.  Fill `mailbox.controller:` in "
                 f"metadata/e1m_modules/{project.sku}.yaml with the "
                 f"vendor mailbox node name (e.g. `renesas_mhu`, "
-                f"`nxp_mu`, `alif_evtrtr`) or remove the rpmsg "
+                f"`nxp_mu`, `alif_mhuv2`) or remove the rpmsg "
                 f"entries from board.yaml.")
         else:
             reserved_tags = {
@@ -1367,15 +1367,26 @@ def resolve_carve_outs(
         name = region["name"]
         if name in region_top:
             return region_top[name], None
-        base = region["base"]
+        # A region derived from the SoC variant JSON (no explicit
+        # `memory_map:` in the preset) carries name/size but NO `base`
+        # until the SoM is HW-mapped.  Treat a missing base the same as
+        # an explicit `TBD` so an un-mapped SoM (e.g. AEN801, whose E8
+        # SoC JSON has no per-region base yet) lands a clean *blocked*
+        # carve-out instead of crashing with KeyError: 'base'.
+        base = region.get("base")
         size_bytes = _region_size_bytes(region)
-        if isinstance(base, str) and base.strip().upper() == "TBD":
+        base_is_unmapped = (
+            base is None
+            or (isinstance(base, str) and base.strip().upper() == "TBD")
+        )
+        if base_is_unmapped:
             return None, (
-                f"memory_map.base is TBD for region '{name}' in SoM "
-                f"{project.sku}; this SoM hasn't been HW-mapped yet so "
-                f"IPC carve-outs cannot be allocated.  Fill the value "
-                f"in metadata/e1m_modules/{project.sku}.yaml or remove "
-                f"the matching ipc entry from board.yaml.")
+                f"memory_map.base is {'unset' if base is None else 'TBD'} "
+                f"for region '{name}' in SoM {project.sku}; this SoM "
+                f"hasn't been HW-mapped yet so IPC carve-outs cannot be "
+                f"allocated.  Add a `memory_map:` block to "
+                f"metadata/e1m_modules/{project.sku}.yaml (or per-region "
+                f"`base`) or remove the matching ipc entry from board.yaml.")
         if size_bytes is None:
             return None, (
                 f"memory_map.size is unresolvable for region '{name}' "
@@ -2200,13 +2211,25 @@ def emit_build_plan(
         cmd = _slice_command(
             project, replace(slice_, build_dir=build_dir))
         if cmd is None:
-            warnings.append({
-                "code":    "no-command",
-                "coreId":  slice_.core_id,
-                "message": (f"no build command for core "
-                            f"'{slice_.core_id}' (os: {slice_.os}) "
-                            f"-- missing app/board/image"),
-            })
+            if slice_.os == "zephyr" and slice_.app == STOCK_SHIM_APP:
+                warnings.append({
+                    "code":    "stock-shim-unimplemented",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}' uses the stock "
+                                f"M-core shim (app: {STOCK_SHIM_APP}); its "
+                                f"image body is not in the SDK tree yet "
+                                f"(issue #49). Override "
+                                f"cores.{slice_.core_id}.app with a real app "
+                                f"to build this core."),
+                })
+            else:
+                warnings.append({
+                    "code":    "no-command",
+                    "coreId":  slice_.core_id,
+                    "message": (f"no build command for core "
+                                f"'{slice_.core_id}' (os: {slice_.os}) "
+                                f"-- missing app/board/image"),
+                })
         config_artefacts: list[dict[str, str]] = []
         artefact = _slice_config_artefact(project, slice_)
         if artefact is not None:
@@ -2384,8 +2407,14 @@ class Orchestrator:
         cmd = _slice_command(self.project, slice_)
         if cmd is None:
             slice_.status = "skipped"
-            slice_.reason = ("no command resolver implemented yet for "
-                             f"os: {slice_.os} -- Phase 3 wires this up")
+            if slice_.os == "zephyr" and slice_.app == STOCK_SHIM_APP:
+                slice_.reason = (
+                    f"stock M-core shim (app: {STOCK_SHIM_APP}) -- image body "
+                    f"not in the SDK tree yet (issue #49); override "
+                    f"cores.{slice_.core_id}.app to build this core")
+            else:
+                slice_.reason = ("no command resolver implemented yet for "
+                                 f"os: {slice_.os} -- Phase 3 wires this up")
             return slice_
 
         # Slice subprocess: scoped env + dedicated log file.
@@ -2583,7 +2612,7 @@ _ON_MODULE_NON_CHIP_FIELDS: frozenset[str] = frozenset({
     "silicon",             # e.g. "renesas:rzv2n:n44" — SoC identifier, not a driver
     "ethernet_phy_count",  # integer count, not a chip slug
     "i2c_devices",         # sub-block: handled by extracting chip: entries below
-    "ospi_memories",       # sub-block: handled by extracting chip: entries below
+    "ospi_memories",       # sub-block: storage parts (flash/HyperRAM); MPNs have no chips/ driver -- excluded like nor_flash/emmc below
     # Storage-class fields encode the SoC controller / peripheral name
     # that reaches the on-module storage (e.g. `nor_flash: xspi` -> the
     # NOR flash is wired to the xSPI controller; `emmc: sd0` -> eMMC on
@@ -2600,10 +2629,13 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
     """Extract unique, non-TBD chip slugs from an ``on_module:`` block.
 
     Walks every scalar field that is NOT in ``_ON_MODULE_NON_CHIP_FIELDS``,
-    then recurses into the ``ospi_memories`` sub-block (extracting the
-    ``chip:`` field from each memory entry) and the ``i2c_devices``
-    sub-block (extracting the ``chip:`` field from each device entry).
-    Duplicate slugs and values of ``TBD`` / ``null`` are silently dropped.
+    then recurses into the ``i2c_devices`` sub-block (extracting the
+    ``chip:`` field from each device entry).  ``ospi_memories`` and the
+    ``hyperram`` block are storage parts (NOR flash / HyperRAM) with no
+    ``chips/<part>/`` driver, so their MPNs are NOT extracted as chip
+    slugs (emitting them as ``CONFIG_ALP_SDK_CHIP_<X>`` would trip
+    Zephyr's undefined-symbol guard).  Duplicate slugs and values of
+    ``TBD`` / ``null`` are silently dropped.
 
     Returns a sorted, deduplicated list of slug strings.
     """
@@ -2624,15 +2656,7 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
         if isinstance(val, str):
             _add(val)
 
-    # 2. ospi_memories sub-block — each value is a dict with a `chip:`
-    #    key.
-    ospi = on_module.get("ospi_memories")
-    if isinstance(ospi, dict):
-        for _slot, entry in ospi.items():
-            if isinstance(entry, dict):
-                _add(entry.get("chip"))
-
-    # 3. i2c_devices sub-block — each bus entry contains a `devices:`
+    # 2. i2c_devices sub-block — each bus entry contains a `devices:`
     #    list; extract the `chip:` field from each device.
     #    Devices marked `assembled: optional` are DNI (do-not-install)
     #    on some builds and must NOT be auto-enabled as chip drivers —
@@ -3544,15 +3568,29 @@ def _slice_flash_recipe(
     return (None, None)
 
 
+# Placeholder M-core "stock shim" app token (Zephyr side).  Accepted by the
+# SoM-preset schema and defaulted into M-core slots (AEN m55_hp/he, V2N
+# m33_sm, NX91 m33), but the shim image body is not yet in the SDK tree
+# (issue #49), so it resolves to no build command.
+STOCK_SHIM_APP = "alp-stock-shim"
+
+
 def _slice_command(
     project: BoardProject,
     slice_: Slice,
 ) -> Optional[list[str]]:
-    """Resolve the build command for a slice.  Returns None when
-    Phase 2 has no command for this os yet (caller marks the slice
-    `skipped`)."""
+    """Resolve the build command for a slice.  Returns None when there is no
+    buildable command yet -- the caller carries the slice as `skipped` /
+    `no-command`, never dropped.  This includes the stock M-core shim
+    (`app: alp-stock-shim`), whose image body isn't in the SDK tree yet
+    (issue #49)."""
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
+            return None
+        # The stock shim is a placeholder token, not a buildable app dir;
+        # resolve no command rather than west-building a path that doesn't
+        # exist.  Override cores.<id>.app with a real app to build the core.
+        if slice_.app == STOCK_SHIM_APP:
             return None
         return [
             "west", "build",

@@ -38,9 +38,9 @@ typedef struct alp_rpc_ops alp_rpc_ops_t;
 /* ------------------------------------------------------------------ */
 
 typedef struct alp_rpc_backend_state {
-    alp_rpc_config_t      cfg;     /* cached customer config */
-    void                 *be_data; /* backend-private per-channel block */
-    const alp_rpc_ops_t  *ops;
+	alp_rpc_config_t     cfg;     /* cached customer config */
+	void                *be_data; /* backend-private per-channel block */
+	const alp_rpc_ops_t *ops;
 } alp_rpc_backend_state_t;
 
 /* ------------------------------------------------------------------ */
@@ -48,23 +48,26 @@ typedef struct alp_rpc_backend_state {
 /* ------------------------------------------------------------------ */
 
 struct alp_rpc_ops {
-    alp_status_t (*open)(const alp_rpc_config_t *cfg,
-                         alp_rpc_backend_state_t *state,
-                         alp_capabilities_t *caps_out);
-    alp_status_t (*subscribe)(alp_rpc_backend_state_t *state,
-                              const char *method,
-                              alp_rpc_method_cb_t cb, void *user);
-    alp_status_t (*unsubscribe)(alp_rpc_backend_state_t *state,
-                                const char *method);
-    alp_status_t (*send)(alp_rpc_backend_state_t *state,
-                         const char *method,
-                         const void *payload, size_t len);
-    alp_status_t (*call)(alp_rpc_backend_state_t *state,
-                         const char *method,
-                         const void *req, size_t req_len,
-                         void *resp, size_t *resp_len,
-                         uint32_t timeout_ms);
-    void         (*close)(alp_rpc_backend_state_t *state);
+	alp_status_t (*open)(const alp_rpc_config_t  *cfg,
+	                     alp_rpc_backend_state_t *state,
+	                     alp_capabilities_t      *caps_out);
+	alp_status_t (*subscribe)(alp_rpc_backend_state_t *state,
+	                          const char              *method,
+	                          alp_rpc_method_cb_t      cb,
+	                          void                    *user);
+	alp_status_t (*unsubscribe)(alp_rpc_backend_state_t *state, const char *method);
+	alp_status_t (*send)(alp_rpc_backend_state_t *state,
+	                     const char              *method,
+	                     const void              *payload,
+	                     size_t                   len);
+	alp_status_t (*call)(alp_rpc_backend_state_t *state,
+	                     const char              *method,
+	                     const void              *req,
+	                     size_t                   req_len,
+	                     void                    *resp,
+	                     size_t                  *resp_len,
+	                     uint32_t                 timeout_ms);
+	void (*close)(alp_rpc_backend_state_t *state);
 };
 
 /* ------------------------------------------------------------------ */
@@ -72,10 +75,10 @@ struct alp_rpc_ops {
 /* ------------------------------------------------------------------ */
 
 struct alp_rpc_channel {
-    alp_rpc_backend_state_t  state;
-    const alp_backend_t     *backend;
-    alp_capabilities_t       cached_caps;
-    bool                     in_use;
+	alp_rpc_backend_state_t state;
+	const alp_backend_t    *backend;
+	alp_capabilities_t      cached_caps;
+	bool                    in_use;
 };
 
 #endif /* ALP_BACKENDS_RPC_OPS_H */

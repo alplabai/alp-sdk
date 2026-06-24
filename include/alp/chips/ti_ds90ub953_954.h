@@ -43,10 +43,10 @@ extern "C" {
 #define DS90UB954_REG_DEVICE_ID 0x00u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    ser_addr; /**< Serialiser (DS90UB953) addr. */
-    uint8_t    des_addr; /**< Deserialiser (DS90UB954) addr. */
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    ser_addr; /**< Serialiser (DS90UB953) addr. */
+	uint8_t    des_addr; /**< Deserialiser (DS90UB954) addr. */
+	bool       initialised;
 } ti_ds90ub_t;
 
 /**
@@ -55,10 +55,7 @@ typedef struct {
  * Reads the DEVICE_ID at each address.  Both must respond for the
  * link to be considered up.
  */
-alp_status_t ti_ds90ub_init(ti_ds90ub_t *dev,
-                            alp_i2c_t   *bus,
-                            uint8_t      ser_addr,
-                            uint8_t      des_addr);
+alp_status_t ti_ds90ub_init(ti_ds90ub_t *dev, alp_i2c_t *bus, uint8_t ser_addr, uint8_t des_addr);
 
 /** @brief Read DEVICE_ID from the deserialiser end. */
 alp_status_t ti_ds90ub_read_des_id(ti_ds90ub_t *dev, uint8_t *id_out);

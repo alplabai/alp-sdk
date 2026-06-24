@@ -20,15 +20,24 @@ on_module:
   eeprom:               eeprom_24c128
   ospi_memories:
     ospi0:
-      chip:           TBD            # part MPN pending HW design freeze
-      assembled:      optional       # BOM variant
-      capacity_mbit:  TBD            # density pending HW design freeze
+      chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
+      assembled:      optional            # BOM variant
+      capacity_mbit:  256                 # 256 Mbit (32 MiB)
+      chip_select:    0                   # OSPI0 CS0
       role:           app_storage
     ospi1:
-      chip:           TBD
-      assembled:      optional
+      chip:           TBD            # OSPI1 controller unused on this SoM: both OSPI devices
+      assembled:      optional       # share the OSPI0 octal bus (NOR = CS0, HyperRAM = CS1)
       capacity_mbit:  TBD
       role:           data_log
+  # External HyperRAM -- volatile XIP / scratch RAM, separate from the
+  # NOR flash above.  Shares the OSPI0 octal controller with the flash,
+  # separated only by chip-select (NOR flash = CS0, HyperRAM = CS1).
+  hyperram:
+    chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
+    capacity_mbit:  256             # 256 Mbit (32 MiB)
+    interface:      ospi0
+    chip_select:    1
 
 inference:
   preferred_backend:    ethos_u                # E8 ships Ethos-U85 alongside two U55s.
@@ -61,9 +70,25 @@ topology:
 # here ONLY for non-stock partitioning (none of the current 11 SKUs
 # need one).
 
-# Alif IPC controller name TBD pending the hand-written HW config.
+# Inter-core mailbox IP: ARM MHUv2.  Confirmed via the alifsemi/zephyr_alif
+# fork DTS (dts/arm/alif/ensemble/common/ensemble_rtss_he.dtsi), corroborated
+# by the Alif Linux BSP (meta-alif-ensemble + linux_alif: apss-mhu ->
+# mhuv2.cfg).  The earlier `alif_mhu` candidate / MHUv2-vs-mhuv3 uncertainty is
+# RESOLVED: it is MHUv2.  alp-sdk now ships a Zephyr MBOX-class driver for it
+# under the DISTINCT compatible `alif,mhuv2-mbox`
+# (zephyr/drivers/mbox/mbox_alif_mhuv2.c) -- distinct from `arm,mhuv2` to stay
+# collision-free against the opt-in zephyr_alif fork's binding.
+#
+# `controller: alif_mhuv2` is the node/driver-family token (matches the
+# `alif,mhuv2-mbox` compatible).  AEN801 is the lead part; rollout of this
+# wiring to AEN301..701 follows after AEN801 bench-passes.
+#
+# Still BENCH-UNVERIFIED on real silicon: the driver, the register map, and the
+# node addresses/IRQs come from the ARM MHUv2 spec + fork DTS and have not yet
+# been run on hardware.  See the bench step in docs/bring-up-aen.md
+# "§6 mailbox controller".
 mailbox:
-  controller: TBD
+  controller: alif_mhuv2                    # ARM MHUv2 (compatible alif,mhuv2-mbox); BENCH-UNVERIFIED on silicon
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }
     - { id: 1, reserved_for: app }

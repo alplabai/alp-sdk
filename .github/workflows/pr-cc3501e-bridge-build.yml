@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builds the cc3501e-bridge firmware tree's SILICON-FREE stub backend
+# and checks the canonical wire vectors.
+#
+#   * stub -- protocol layer + SPI/SDIO transports compile against the
+#             hardware-less HAL stub (hal/cc3501e_hw_stub.c).  Exercises
+#             the dispatcher/framing path end-to-end without the TI SDK.
+#
+# The PRODUCTION image (CC3501E_HAL_BACKEND=ti) is built on the bench
+# with TI's ticlang + the SimpleLink CC33xx SDK -- that toolchain + the
+# ~GB vendor SDK are not on the CI runner, so CI builds only the stub
+# (the silicon-free layer is toolchain-agnostic portable C; compiling it
+# for the Cortex-M33 target with the freely-available Arm GNU Toolchain
+# is a real "does it compile?" gate).  The transport's wire behaviour is
+# additionally covered by the native unit test
+# tests/zephyr/cc3501e_bridge_transport/ under the twister gate.
+
+name: pr-cc3501e-bridge-build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'firmware/cc3501e/**'
+      - '.github/workflows/pr-cc3501e-bridge-build.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/cc3501e/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stub:
+    name: cc3501e-bridge · CC3501E_HAL_BACKEND=stub
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install arm-none-eabi toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+              gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
+
+      - name: Configure (stub backend, default SPI transport)
+        run: |
+          cmake -B firmware/cc3501e/build/stub -S firmware/cc3501e \
+            -DCMAKE_TOOLCHAIN_FILE=$PWD/firmware/cc3501e/toolchain/arm-none-eabi.cmake \
+            -DCC3501E_HAL_BACKEND=stub
+
+      - name: Build (stub backend)
+        run: cmake --build firmware/cc3501e/build/stub --parallel
+
+      - name: Configure + build (stub backend, SDIO transport)
+        # The opt-in SDIO transport must also compile.
+        run: |
+          cmake -B firmware/cc3501e/build/stub-sdio -S firmware/cc3501e \
+            -DCMAKE_TOOLCHAIN_FILE=$PWD/firmware/cc3501e/toolchain/arm-none-eabi.cmake \
+            -DCC3501E_HAL_BACKEND=stub -DCC3501E_CONTROL_TRANSPORT=sdio
+          cmake --build firmware/cc3501e/build/stub-sdio --parallel
+
+      - name: Report binary size
+        run: arm-none-eabi-size firmware/cc3501e/build/stub/cc3501e-bridge
+
+  vectors:
+    name: cc3501e-bridge · wire vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check canonical wire vectors are regenerated
+        run: python3 firmware/cc3501e/tests/gen_protocol_vectors.py --check

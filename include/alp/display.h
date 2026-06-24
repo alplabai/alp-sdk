@@ -7,13 +7,15 @@
  * @file display.h
  * @brief Alp SDK display abstraction.
  *
- * v0.1: thin wrapper around the underlying OS display layer.  On
- * Zephyr this routes through Zephyr's `display_*` driver API so
- * generic SSD1306 / SSD1351 / similar parts work via devicetree.
- *
- * v0.2 will add:
+ * Portable surface only.  Every op is currently served by the
+ * priority-0 NOT_IMPLEMENTED stub (src/backends/display/zephyr_stub.c)
+ * -- no real backend exists yet.  The planned real backends are
+ * tracked by issue #23:
+ *   - a Zephyr `display_*` driver wrapper (so generic SSD1306 /
+ *     SSD1351 / similar parts resolve via devicetree),
+ *   - the V2N DSI / parallel-RGB framebuffer path,
+ *   - the Alif LCD-IF path,
  *   - alp_display_lvgl_attach() for LVGL flush integration.
- *   - DSI / parallel-RGB framebuffer paths for the V2N family.
  *
 
  * @par ABI status: [ABI-EXPERIMENTAL]
@@ -39,13 +41,13 @@ typedef struct alp_display alp_display_t;
  * shared with the camera surface without a forward dependency. */
 
 typedef struct {
-    uint32_t display_id;    /**< Studio-resolved display instance. */
+	uint32_t display_id; /**< Studio-resolved display instance. */
 } alp_display_config_t;
 
 typedef struct {
-    uint16_t width;
-    uint16_t height;
-    alp_pixfmt_t format;
+	uint16_t     width;
+	uint16_t     height;
+	alp_pixfmt_t format;
 } alp_display_caps_t;
 
 /**
@@ -84,10 +86,8 @@ alp_status_t alp_display_get_caps(alp_display_t *d, alp_display_caps_t *out);
  *         (rect outside display caps) / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_display_blit(alp_display_t *d,
-                              uint16_t x, uint16_t y,
-                              uint16_t w, uint16_t h,
-                              const void *pixels);
+alp_status_t alp_display_blit(
+    alp_display_t *d, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *pixels);
 
 /**
  * @brief Clear the framebuffer to the background colour.
@@ -118,4 +118,4 @@ const alp_capabilities_t *alp_display_capabilities(const alp_display_t *d);
 }
 #endif
 
-#endif  /* ALP_DISPLAY_H */
+#endif /* ALP_DISPLAY_H */

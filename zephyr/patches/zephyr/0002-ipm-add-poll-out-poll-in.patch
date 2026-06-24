@@ -1,0 +1,118 @@
+diff --git a/include/zephyr/drivers/ipm.h b/include/zephyr/drivers/ipm.h
+index 3aa366ba93a..6cce39519c6 100644
+--- a/include/zephyr/drivers/ipm.h
++++ b/include/zephyr/drivers/ipm.h
+@@ -91,6 +91,20 @@ typedef int (*ipm_set_enabled_t)(const struct device *ipmdev, int enable);
+  */
+ typedef void (*ipm_complete_t)(const struct device *ipmdev);
+ 
++/**
++ * @brief Callback API to send a message in polling mode.
++ * See @a ipm_poll_out() for argument definitions.
++ */
++typedef int (*ipm_poll_out_t)(const struct device *ipmdev, uint32_t id,
++			      const void *data, int size, k_timeout_t timeout);
++
++/**
++ * @brief Callback API to receive a message in polling mode.
++ * See @a ipm_poll_in() for argument definitions.
++ */
++typedef int (*ipm_poll_in_t)(const struct device *ipmdev, uint32_t id,
++			     const void *data, int size, k_timeout_t timeout);
++
+ /**
+  * @driver_ops{IPM}
+  */
+@@ -122,6 +136,14 @@ __subsystem struct ipm_driver_api {
+ 	 */
+ 	ipm_complete_t complete;
+ #endif
++	/**
++	 * @driver_ops_optional @copybrief ipm_poll_out
++	 */
++	ipm_poll_out_t poll_out;
++	/**
++	 * @driver_ops_optional @copybrief ipm_poll_in
++	 */
++	ipm_poll_in_t poll_in;
+ };
+ /**
+  * @}
+@@ -282,6 +304,77 @@ static inline void z_impl_ipm_complete(const struct device *ipmdev)
+ #endif
+ }
+ 
++/**
++ * @brief Try to send a message over the IPM device in polling mode.
++ *
++ * Polling counterpart of @ref ipm_send for drivers that expose a blocking,
++ * interrupt-free transmit path (e.g. before the scheduler is up).  Returns
++ * once the remote has consumed the message or @p timeout elapses.
++ *
++ * @param ipmdev  Driver instance pointer.
++ * @param id      Message identifier.
++ * @param data    Pointer to the data sent in the message.
++ * @param size    Size of the data.
++ * @param timeout Time to wait for the transfer to complete.
++ *
++ * @retval -EAGAIN    Timed out.
++ * @retval -ENOTSUP   Polling transmit is not supported by the driver.
++ * @retval -EINVAL    Invalid argument.
++ * @retval -EBUSY     Previous transfer is not complete.
++ * @retval 0          On success.
++ */
++__syscall int ipm_poll_out(const struct device *ipmdev, uint32_t id,
++			   const void *data, int size, k_timeout_t timeout);
++
++static inline int z_impl_ipm_poll_out(const struct device *ipmdev, uint32_t id,
++				      const void *data, int size,
++				      k_timeout_t timeout)
++{
++	const struct ipm_driver_api *api =
++		(const struct ipm_driver_api *)ipmdev->api;
++
++	if (api->poll_out == NULL) {
++		return -ENOSYS;
++	}
++
++	return api->poll_out(ipmdev, id, data, size, timeout);
++}
++
++/**
++ * @brief Try to receive a message over the IPM device in polling mode.
++ *
++ * Polling counterpart of the interrupt-driven receive callback for drivers
++ * that expose a blocking, interrupt-free receive path.  Returns once a message
++ * has arrived or @p timeout elapses.
++ *
++ * @param ipmdev  Driver instance pointer.
++ * @param id      Message identifier.
++ * @param data    Pointer to where the received data is written.
++ * @param size    Size of the data buffer.
++ * @param timeout Time to wait for a message to arrive.
++ *
++ * @retval -EAGAIN    Timed out.
++ * @retval -ENOTSUP   Polling receive is not supported by the driver.
++ * @retval -EINVAL    Invalid argument.
++ * @retval 0          On success.
++ */
++__syscall int ipm_poll_in(const struct device *ipmdev, uint32_t id,
++			  const void *data, int size, k_timeout_t timeout);
++
++static inline int z_impl_ipm_poll_in(const struct device *ipmdev, uint32_t id,
++				     const void *data, int size,
++				     k_timeout_t timeout)
++{
++	const struct ipm_driver_api *api =
++		(const struct ipm_driver_api *)ipmdev->api;
++
++	if (api->poll_in == NULL) {
++		return -ENOSYS;
++	}
++
++	return api->poll_in(ipmdev, id, data, size, timeout);
++}
++
+ #ifdef __cplusplus
+ }
+ #endif

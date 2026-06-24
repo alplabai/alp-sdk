@@ -28,9 +28,11 @@ hosts_som_families: [alif-ensemble, nxp-imx9]
 # individual entries to `false` in board.yaml's board.populated
 # block for DNI variants.
 populated:
-  # IMUs (the EVK mounts multiple for benchmark comparison; the
-  # app picks which one it uses at runtime).
-  lsm6dso:                  true
+  # IMUs -- two are soldered on the EVK (BMI323 + ICM-42670; the app
+  # picks which at runtime).  LSM6DSO is NOT on the EVK; an app that
+  # wants one attaches it to the I2C/Qwiic header and lists it in its
+  # own board.yaml `chips:` array, so it is intentionally absent from
+  # this (soldered-parts) block.
   bmi323:                   true
   icm42670:                 true
 
@@ -41,8 +43,11 @@ populated:
   # Accelerometer (additional, beyond the IMUs)
   lis2dw12:                 false               # not on the EVK by default
 
-  # Displays
-  ssd1306:                  true                # mono OLED (I2C)
+  # Displays -- none are soldered on the EVK.  The SSD1306 OLED attaches
+  # via the I2C/Qwiic header (the SSD1331 variant uses SPI); MIPI panels
+  # use the DSI/CSI FFC.  Apps that drive a panel declare it per-app in a
+  # board.yaml `chips:` array, so panels are intentionally absent here.
+  # SSD1331 below is a documented DNI footprint option.
   ssd1331:                  false               # colour OLED (SPI), not on the EVK
 
   # Camera + camera mux
@@ -185,6 +190,16 @@ e1m_routes:
         doc: "Arduino header CK_PWM3 = E1M_PWM5." }
     - { e1m: E1M_PWM6, macro: EVK_MB_PWM,
         doc: "mikroBUS PWM pin." }
+  # The adc: / dac: entries below also drive the portable analog DT
+  # aliases: scripts/alp_project.py emits one `alp-adc<N> = &adc<N>;` /
+  # `alp-dac<N> = &dac<N>;` per channel into the generated DTS overlay
+  # (the `alp-adcN` / `alp-dacN` aliases the <alp/adc.h> / <alp/dac.h>
+  # backends resolve their channels through).  The `&adc<N>` / `&dac<N>`
+  # phandle is the convention-default node-label; SoCs whose vendor DT
+  # node-labels diverge (the Alif Ensemble ADCs are `adc12_0..2`, DACs
+  # `dac0/dac1`) repoint the alias in the per-app board overlay
+  # (`aliases { alp-adc0 = &adc12_0; };`).  Regenerate after editing:
+  #   python3 scripts/alp_project.py --input <board.yaml> --emit dts-overlay
   adc:
     - { e1m: E1M_ADC0, macro: EVK_ADC_BOARD_ID,
         doc: "Carrier-side BOARD_ID resistor divider (see docs/board-id.md)." }
@@ -227,8 +242,9 @@ e1m_routes:
 # Inference + display defaults a stock EVK app would pick.  Apps
 # override in their board.yaml as needed.
 defaults:
-  display:                  ssd1306             # the always-populated OLED
-  primary_imu:              lsm6dso             # canonical (other IMUs are alternates)
+  display:                  ssd1306             # default panel for apps that attach an
+                                                # SSD1306 to the I2C header (none is soldered)
+  primary_imu:              bmi323              # canonical soldered IMU (ICM-42670 is the alternate)
 
 # Hardware revisions.  Same ADC + resistor-divider scheme as the
 # SoM modules (see metadata/e1m_modules/aen/hw-revisions.yaml for

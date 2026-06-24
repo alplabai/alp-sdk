@@ -1,0 +1,4 @@
+// @cliArgs --board /ti/boards/LP_EM_CC35X1 --rtos freertos
+var Mem = scripting.addModule("/ti/memoryconfig/MemoryConfigurator/Mem_cfg");
+Mem.flash_device_type = "PY25Q64LB";
+Mem.flash_device_size = 8;

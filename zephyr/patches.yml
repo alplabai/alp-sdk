@@ -1,0 +1,100 @@
+# West patch carry for the alp-sdk workspace (west patch apply).
+# alp-sdk does not own the mcuboot manifest pin (mcuboot is imported via Zephyr's
+# allowlist), so this Alif MRAM do_boot fix is carried as a re-appliable patch and
+# submitted upstream; drop it once the Zephyr mcuboot pin advances past it.
+patches:
+  - path: mcuboot/0001-flash_map_extended-alif-mram-base.patch
+    sha256sum: 9933c296212da9c205d2a25c26555c97867309c83cbee95b349d2a26a9beb5be
+    module: mcuboot
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-06-16
+    upstreamable: true
+    comments: |
+      do_boot() used CONFIG_FLASH_BASE_ADDRESS (MCUboot's ITCM exec base, 0x0)
+      for the slot vector address, but slot0 is in MRAM at 0x80000000 -> garbage
+      jump -> reboot loop. Derive the slot base from the alif,mram controller reg.
+      Bench-proven on E1M-AEN801 (E8): SES->MCUboot->slot0->app RESULT PASS.
+  - path: zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch
+    sha256sum: dd363a007acddc263e9168f4c75ac2b4bafd5a8ee438ce655b5f63a0398f2a76
+    module: zephyr
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-06-17
+    upstreamable: true
+    comments: |
+      The upstream Alif clockctrl (drivers/clock_control/clock_control_alif.c)
+      only flips per-peripheral GATE bits -- it never enables the audio MASTER
+      source, so audio bring-up had to poke raw CGU / EXPMST0 addresses from the
+      example code. Fold both into the driver, derived from the config bases (no
+      hardcoded absolute addresses):
+        (a) GROUNDED, bench-proven: the .on path now enables the CGU master
+            76.8 MHz / HFOSCx2 (cgu_base + ALIF_CLK_ENA_REG 0x14, bit 24) for I2S
+            and HP-PDM clocks, and the EXPMST0_CTRL IPCLK_FORCE|PCLK_FORCE
+            (clkctl_per_slv_base + 0x00, bits 31|30) for the HP PDM. Offsets/bits
+            carried from the zephyr_alif fork soc_common.c GEN2 path.
+        (b) BENCH-UNVERIFIED: adds .set_rate that programs the I2Sx_CTRL bit-clock
+            divider (76.8 MHz / sclk into the 10-bit CKDIV field) so i2s_dw.c stops
+            getting -ENOSYS. The CKDIV field layout is from the Alif i2s_sync
+            reference header but is NOT confirmed against the DFP/TRM for the
+            DesignWare i2s_dw path -- it is a separable hunk so the bench step can
+            land the (a) enable and hold (b) if the divider regresses.
+      Drop both once an Alif upstream clockctrl carries the master-source enable
+      and a real I2S .set_rate.
+  - path: zephyr/0002-ipm-add-poll-out-poll-in.patch
+    sha256sum: 2412e7f6bcdbed10433cb7421be4166d75adadc31315f1423dde543fa99ecf9c
+    module: zephyr
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-06-18
+    upstreamable: true
+    comments: |
+      hal_alif's SE client (se_services/zephyr/src/se_service.c) calls
+      ipm_poll_out()/ipm_poll_in() on its pre-scheduler path, and the Alif
+      arm,mhuv2 IPM driver assigns .poll_out/.poll_in. Both are a zephyr_alif
+      FORK extension to Zephyr's IPM API; upstream v4.4 ipm.h lacks the two
+      ipm_driver_api fields + the matching syscalls, so the SE transport will
+      not compile without them. Add ipm_poll_out/ipm_poll_in (struct fields +
+      __syscall wrappers, returning -ENOSYS when the op is NULL). Pure additive
+      API extension; drop once the Zephyr IPM pin gains a polling API.
+  - path: hal_alif/0001-se-service-add-boot-cpu.patch
+    sha256sum: cb456dbc41d51385539bd59cc221e7861547021a2abe882e2df9ac044dc8e86b
+    module: hal_alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-06-18
+    upstreamable: true
+    comments: |
+      hal_alif's SE client (se_services/zephyr/src/se_service.c) ships
+      se_service_boot_reset_cpu() but NOT se_service_boot_cpu() -- the SE service
+      that RELEASES a second M55 core at runtime (SERVICE_BOOT_CPU=501). The
+      marshalling struct (boot_cpu_svc_t {send_cpu_id, send_address}) is already
+      in services_lib_protocol.h. Add the thin Zephyr wrapper (a copy of
+      se_service_boot_reset_cpu's body with the boot_cpu_d union member + the
+      send_address field). Bench-proven on E1M-AEN801 (E8): the SES-booted HP
+      core calls se_service_boot_cpu(EXTSYS_1, 0x58000000) -> rc=0 -> the HE core
+      runs (both M55s live from one power-on). Pure additive; upstream to hal_alif
+      then drop. See [[project_aen_he_hp_mhu_doorbell_blocked]] / examples/aen/
+      aen-dualcore-master.
+  - path: hal_alif/0002-se-service-add-public-send-request.patch
+    sha256sum: af2d7f5eb065c4eb6dc6f2d1a12b01d7fcf43ed2e1c15bf8d7eb8ecf78dc63b6
+    module: hal_alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-06-19
+    upstreamable: true
+    comments: |
+      hal_alif's SE client (se_services/zephyr/src/se_service.c) drives the
+      RTSS-HE <-> SE MHUv2 transport through a static send_msg_to_se(), and
+      exposes only per-service public wrappers (se_service_get_rnd_num(),
+      se_service_boot_cpu(), ...). It exports NO generic entry to send an
+      arbitrary, caller-populated SE service packet -- so the SE-CryptoCell
+      AES/SHA/AEAD compute backend (src/backends/security/se_cryptocell.c, which
+      builds its own CryptoCell request packets from the public
+      services_lib_protocol.h structs) had no way to reach the SE. Add a thin
+      public se_service_send_request(packet, size) that mirrors the get_rnd_num
+      preamble (se_service_ensure_ready + svc_mutex) and hands the packet to the
+      existing static send_msg_to_se(). Pure additive; the SE still enforces its
+      own service policy. Unblocks ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
+      (default off; runtime SE round-trip bench-pending). Upstream to hal_alif
+      then drop. See #222.

@@ -32,22 +32,20 @@ typedef struct alp_power_ops alp_power_ops_t;
  *  configured wake_bitmap here so backends that don't keep their own
  *  copy can read it back at request_sleep() time. */
 typedef struct alp_power_backend_state {
-    uint32_t              wake_bitmap;
-    void                 *be_data;
-    const alp_power_ops_t *ops;
+	uint32_t               wake_bitmap;
+	void                  *be_data;
+	const alp_power_ops_t *ops;
 } alp_power_backend_state_t;
 
 /** Vtable each power backend implements. */
 struct alp_power_ops {
-    alp_status_t (*open)(alp_power_backend_state_t *state,
-                         alp_capabilities_t *caps_out);
-    alp_status_t (*configure_wake_source)(alp_power_backend_state_t *state,
-                                          uint32_t wake_bitmap);
-    alp_status_t (*request_sleep)(alp_power_backend_state_t *state,
-                                  alp_power_mode_t mode,
-                                  uint32_t wake_after_ms,
-                                  alp_power_wake_info_t *info);
-    void         (*close)(alp_power_backend_state_t *state);
+	alp_status_t (*open)(alp_power_backend_state_t *state, alp_capabilities_t *caps_out);
+	alp_status_t (*configure_wake_source)(alp_power_backend_state_t *state, uint32_t wake_bitmap);
+	alp_status_t (*request_sleep)(alp_power_backend_state_t *state,
+	                              alp_power_mode_t           mode,
+	                              uint32_t                   wake_after_ms,
+	                              alp_power_wake_info_t     *info);
+	void (*close)(alp_power_backend_state_t *state);
 };
 
 /**
@@ -58,10 +56,10 @@ struct alp_power_ops {
  * access the fields without duplicating the layout.
  */
 struct alp_power {
-    alp_power_backend_state_t  state;
-    const alp_backend_t       *backend;
-    alp_capabilities_t         cached_caps;
-    bool                       in_use;
+	alp_power_backend_state_t state;
+	const alp_backend_t      *backend;
+	alp_capabilities_t        cached_caps;
+	bool                      in_use;
 };
 
 #endif /* ALP_BACKENDS_POWER_OPS_H */

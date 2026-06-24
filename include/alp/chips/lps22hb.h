@@ -39,9 +39,9 @@ extern "C" {
 #define LPS22HB_WHO_AM_I     0xB1u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } lps22hb_t;
 
 /** @brief Bind context and verify WHO_AM_I = 0xB1. */

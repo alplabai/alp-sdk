@@ -28,19 +28,28 @@ on_module:
   wifi_ble:             cc3501e                # TI Wi-Fi 6 + BLE 5.4 coprocessor
   secure_element:       optiga_trust_m         # Infineon SLS32AIA010
   rtc_external:         rv3028c7               # Micro Crystal ultra-low-power RTC
-  temperature_sensor:   tmp112                 # TI TMP112 on Alif's LPI2C
+  temperature_sensor:   tmp112                 # TI TMP112 on the slave-only LPI2C0 (Tier-3 SE; ADR 0017)
   eeprom:               eeprom_24c128          # Onsemi N24S128C4DYT3G (128-Kbit I2C)
   ospi_memories:
     ospi0:
-      chip:           TBD            # part MPN pending HW design freeze
-      assembled:      optional       # BOM variant
-      capacity_mbit:  TBD            # density pending HW design freeze
+      chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
+      assembled:      optional            # BOM variant
+      capacity_mbit:  256                 # 256 Mbit (32 MiB)
+      chip_select:    0                   # OSPI0 CS0
       role:           app_storage
     ospi1:
-      chip:           TBD
-      assembled:      optional
+      chip:           TBD            # OSPI1 controller unused on this SoM: both OSPI devices
+      assembled:      optional       # share the OSPI0 octal bus (NOR = CS0, HyperRAM = CS1)
       capacity_mbit:  TBD
       role:           data_log
+  # External HyperRAM -- volatile XIP / scratch RAM, separate from the
+  # NOR flash above.  Shares the OSPI0 octal controller with the flash,
+  # separated only by chip-select (NOR flash = CS0, HyperRAM = CS1).
+  hyperram:
+    chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
+    capacity_mbit:  256             # 256 Mbit (32 MiB)
+    interface:      ospi0
+    chip_select:    1
 
 inference:
   preferred_backend:    ethos_u
@@ -118,9 +127,9 @@ pad_routes:
       doc: "CC3501E GPIO_30." }
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
-# on the AEN module; firmware comes from the separate
-# `alplabai/cc3501e-firmware` repo and stays TBD until a release
-# lands (matches the project's standing convention).
+# on the AEN module; firmware is embedded in alp-sdk at
+# `firmware/cc3501e/` (ADR 0015) and stays TBD until the first binary
+# is built + signed on the bench (the project's standing convention).
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e

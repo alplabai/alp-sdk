@@ -40,129 +40,127 @@
 
 /* ---------- Shared memory ---------- */
 
-static alp_status_t sw_shmem_open(const alp_shmem_config_t *cfg,
+static alp_status_t sw_shmem_open(const alp_shmem_config_t  *cfg,
                                   alp_shmem_backend_state_t *state,
-                                  alp_capabilities_t *caps_out)
+                                  alp_capabilities_t        *caps_out)
 {
-    /* NOSUPPORT stub: no shared-memory carve-out on native_sim. */
-    (void)cfg;
-    (void)state;
-    (void)caps_out;
-    return ALP_ERR_NOSUPPORT;
+	/* NOSUPPORT stub: no shared-memory carve-out on native_sim. */
+	(void)cfg;
+	(void)state;
+	(void)caps_out;
+	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_shmem_view(alp_shmem_backend_state_t *state,
-                                  void **base_out, size_t *size_out)
+static alp_status_t
+sw_shmem_view(alp_shmem_backend_state_t *state, void **base_out, size_t *size_out)
 {
-    (void)state;
-    if (base_out != NULL) *base_out = NULL;
-    if (size_out != NULL) *size_out = 0;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	if (base_out != NULL) *base_out = NULL;
+	if (size_out != NULL) *size_out = 0;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static void sw_shmem_close(alp_shmem_backend_state_t *state)
 {
-    (void)state;
+	(void)state;
 }
 
 /* ---------- Mailbox ---------- */
 
-static alp_status_t sw_mbox_open(const alp_mbox_config_t *cfg,
+static alp_status_t sw_mbox_open(const alp_mbox_config_t  *cfg,
                                  alp_mbox_backend_state_t *state,
-                                 alp_capabilities_t *caps_out)
+                                 alp_capabilities_t       *caps_out)
 {
-    /* NOSUPPORT stub: no MHU / mailbox device on native_sim. */
-    (void)cfg;
-    (void)state;
-    (void)caps_out;
-    return ALP_ERR_NOSUPPORT;
+	/* NOSUPPORT stub: no MHU / mailbox device on native_sim. */
+	(void)cfg;
+	(void)state;
+	(void)caps_out;
+	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_mbox_send(alp_mbox_backend_state_t *state,
-                                 const void *data, size_t len,
-                                 uint32_t timeout_ms)
+static alp_status_t
+sw_mbox_send(alp_mbox_backend_state_t *state, const void *data, size_t len, uint32_t timeout_ms)
 {
-    (void)state;
-    (void)data;
-    (void)len;
-    (void)timeout_ms;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	(void)data;
+	(void)len;
+	(void)timeout_ms;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_mbox_set_callback(alp_mbox_backend_state_t *state,
-                                         alp_mbox_msg_cb_t cb, void *user)
+static alp_status_t
+sw_mbox_set_callback(alp_mbox_backend_state_t *state, alp_mbox_msg_cb_t cb, void *user)
 {
-    (void)state;
-    (void)cb;
-    (void)user;
-    return ALP_ERR_NOT_IMPLEMENTED;
+	(void)state;
+	(void)cb;
+	(void)user;
+	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
 static void sw_mbox_close(alp_mbox_backend_state_t *state)
 {
-    (void)state;
+	(void)state;
 }
 
 /* ---------- Hardware semaphore ---------- */
 
-static alp_status_t sw_hwsem_open(uint32_t hwsem_id,
-                                  alp_hwsem_backend_state_t *state,
-                                  alp_capabilities_t *caps_out)
+static alp_status_t
+sw_hwsem_open(uint32_t hwsem_id, alp_hwsem_backend_state_t *state, alp_capabilities_t *caps_out)
 {
-    /* NOSUPPORT stub: no hardware semaphore block on native_sim. */
-    (void)hwsem_id;
-    (void)state;
-    (void)caps_out;
-    return ALP_ERR_NOSUPPORT;
+	/* NOSUPPORT stub: no hardware semaphore block on native_sim. */
+	(void)hwsem_id;
+	(void)state;
+	(void)caps_out;
+	return ALP_ERR_NOSUPPORT;
 }
 
 static alp_status_t sw_hwsem_try_lock(alp_hwsem_backend_state_t *state)
 {
-    (void)state;
-    /* No-op lock under native_sim -- the stub returns ALP_OK so
+	(void)state;
+	/* No-op lock under native_sim -- the stub returns ALP_OK so
      * tests that exercise the lock-protected code path can run
      * without a real cross-core sync primitive being available. */
-    return ALP_OK;
+	return ALP_OK;
 }
 
-static alp_status_t sw_hwsem_lock(alp_hwsem_backend_state_t *state,
-                                  uint32_t timeout_ms)
+static alp_status_t sw_hwsem_lock(alp_hwsem_backend_state_t *state, uint32_t timeout_ms)
 {
-    (void)state;
-    (void)timeout_ms;
-    /* Same no-op semantics as try_lock -- never blocks. */
-    return ALP_OK;
+	(void)state;
+	(void)timeout_ms;
+	/* Same no-op semantics as try_lock -- never blocks. */
+	return ALP_OK;
 }
 
 static alp_status_t sw_hwsem_unlock(alp_hwsem_backend_state_t *state)
 {
-    (void)state;
-    return ALP_OK;
+	(void)state;
+	return ALP_OK;
 }
 
 static void sw_hwsem_close(alp_hwsem_backend_state_t *state)
 {
-    (void)state;
+	(void)state;
 }
 
 /* ---------- Registration ---------- */
 
 static const alp_mproc_ops_t _ops = {
-    .shmem_open        = sw_shmem_open,
-    .shmem_view        = sw_shmem_view,
-    .shmem_close       = sw_shmem_close,
-    .mbox_open         = sw_mbox_open,
-    .mbox_send         = sw_mbox_send,
-    .mbox_set_callback = sw_mbox_set_callback,
-    .mbox_close        = sw_mbox_close,
-    .hwsem_open        = sw_hwsem_open,
-    .hwsem_try_lock    = sw_hwsem_try_lock,
-    .hwsem_lock        = sw_hwsem_lock,
-    .hwsem_unlock      = sw_hwsem_unlock,
-    .hwsem_close       = sw_hwsem_close,
+	.shmem_open        = sw_shmem_open,
+	.shmem_view        = sw_shmem_view,
+	.shmem_close       = sw_shmem_close,
+	.mbox_open         = sw_mbox_open,
+	.mbox_send         = sw_mbox_send,
+	.mbox_set_callback = sw_mbox_set_callback,
+	.mbox_close        = sw_mbox_close,
+	.hwsem_open        = sw_hwsem_open,
+	.hwsem_try_lock    = sw_hwsem_try_lock,
+	.hwsem_lock        = sw_hwsem_lock,
+	.hwsem_unlock      = sw_hwsem_unlock,
+	.hwsem_close       = sw_hwsem_close,
 };
 
-ALP_BACKEND_REGISTER(mproc, sw_fallback,
+ALP_BACKEND_REGISTER(mproc,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

@@ -76,11 +76,11 @@
  * etc.). */
 static const uint8_t TX_PATTERN[] = { 0xAA, 0x55, 0xDE, 0xAD };
 
-int                  main(void)
+int main(void)
 {
-    printf("[spi-master] open BOARD_SPI_ARDUINO @ 1 MHz mode 0\n");
+	printf("[spi-master] open BOARD_SPI_ARDUINO @ 1 MHz mode 0\n");
 
-    /* Open the SPI bus.  Configuration knobs in order:
+	/* Open the SPI bus.  Configuration knobs in order:
      *
      *   bus_id          -- portable instance, BOARD_SPI_ARDUINO here.
      *   freq_hz         -- 1 MHz is the conservative default.
@@ -94,47 +94,51 @@ int                  main(void)
      *   cs_pin_id       -- ALP_SPI_NO_CS = let the controller
      *                       manage it; otherwise the discrete
      *                       GPIO that drives /CS. */
-    alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-        .bus_id        = BOARD_SPI_ARDUINO,
-        .freq_hz       = 1000000,
-        .mode          = ALP_SPI_MODE_0,
-        .bits_per_word = 8,
-        .cs_pin_id     = ALP_SPI_NO_CS,
-    });
-    if (bus == NULL) {
-        /* Likely causes:
+	alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
+	    .bus_id        = BOARD_SPI_ARDUINO,
+	    .freq_hz       = 1000000,
+	    .mode          = ALP_SPI_MODE_0,
+	    .bits_per_word = 8,
+	    .cs_pin_id     = ALP_SPI_NO_CS,
+	});
+	if (bus == NULL) {
+		/* Likely causes:
          *   * No `alp-spi0` alias on this build (board overlay
          *     missing or wrong).
          *   * Requested freq_hz exceeds the controller's max
          *     (returns NOSUPPORT via alp_last_error).
          *   * On native_sim without the emul overlay we ship,
          *     the alias resolves to NULL. */
-        printf("[spi-master] open failed: alp_last_error=%d\n", (int)alp_last_error());
-        printf("[spi-master] done\n");
-        return 0;
-    }
+		printf("[spi-master] open failed: alp_last_error=%d\n", (int)alp_last_error());
+		printf("[spi-master] done\n");
+		return 0;
+	}
 
-    /* -------- 1.  Half-duplex write (TX only). --------
+	/* -------- 1.  Half-duplex write (TX only). --------
      *
      * Use this when you're sending a command + don't care what
      * the slave puts on MISO (it's usually high-Z or garbage
      * during the command phase). */
-    alp_status_t s = alp_spi_write(bus, TX_PATTERN, sizeof TX_PATTERN);
-    printf("[spi-master] write -> %d\n", (int)s);
+	alp_status_t s = alp_spi_write(bus, TX_PATTERN, sizeof TX_PATTERN);
+	printf("[spi-master] write -> %d\n", (int)s);
 
-    /* -------- 2.  Full-duplex transceive (TX + RX). --------
+	/* -------- 2.  Full-duplex transceive (TX + RX). --------
      *
      * Every byte we send out also clocks a byte in.  rx_buf
      * receives whatever the slave drives on MISO during each
      * clock cycle.  This is the canonical "read register N"
      * pattern when the slave responds in-band (no separate
      * command/response phase). */
-    uint8_t rx_buf[sizeof TX_PATTERN] = { 0 };
-    s = alp_spi_transceive(bus, TX_PATTERN, rx_buf, sizeof TX_PATTERN);
-    printf("[spi-master] transceive -> %d  rx={%02x %02x %02x %02x}\n", (int)s, rx_buf[0],
-           rx_buf[1], rx_buf[2], rx_buf[3]);
+	uint8_t rx_buf[sizeof TX_PATTERN] = { 0 };
+	s = alp_spi_transceive(bus, TX_PATTERN, rx_buf, sizeof TX_PATTERN);
+	printf("[spi-master] transceive -> %d  rx={%02x %02x %02x %02x}\n",
+	       (int)s,
+	       rx_buf[0],
+	       rx_buf[1],
+	       rx_buf[2],
+	       rx_buf[3]);
 
-    /* -------- 3.  Half-duplex read (RX only). --------
+	/* -------- 3.  Half-duplex read (RX only). --------
      *
      * The wrapper clocks the bus while sending 0xFF (the
      * convention for "I don't care what you see on MOSI") and
@@ -142,16 +146,20 @@ int                  main(void)
      * already streaming -- e.g. an ADC in continuous-conversion
      * mode, or a NAND-flash page read after the address has
      * already been clocked in. */
-    uint8_t in_buf[sizeof TX_PATTERN] = { 0 };
-    s                                 = alp_spi_read(bus, in_buf, sizeof in_buf);
-    printf("[spi-master] read -> %d  rx={%02x %02x %02x %02x}\n", (int)s, in_buf[0], in_buf[1],
-           in_buf[2], in_buf[3]);
+	uint8_t in_buf[sizeof TX_PATTERN] = { 0 };
+	s                                 = alp_spi_read(bus, in_buf, sizeof in_buf);
+	printf("[spi-master] read -> %d  rx={%02x %02x %02x %02x}\n",
+	       (int)s,
+	       in_buf[0],
+	       in_buf[1],
+	       in_buf[2],
+	       in_buf[3]);
 
-    /* Clean shutdown.  CS line returns to its idle state (high
+	/* Clean shutdown.  CS line returns to its idle state (high
      * for active-low CS); SCK + MOSI go to whatever the
      * controller's idle line state is.  The bus handle's slot
      * goes back to the SDK pool. */
-    alp_spi_close(bus);
-    printf("[spi-master] done\n");
-    return 0;
+	alp_spi_close(bus);
+	printf("[spi-master] done\n");
+	return 0;
 }

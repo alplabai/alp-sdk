@@ -31,17 +31,17 @@ extern "C" {
 typedef struct alp_camera alp_camera_t;
 
 typedef struct {
-    uint32_t camera_id;
-    uint16_t width;
-    uint16_t height;
-    uint8_t  fps;
-    alp_pixfmt_t format;
+	uint32_t     camera_id;
+	uint16_t     width;
+	uint16_t     height;
+	uint8_t      fps;
+	alp_pixfmt_t format;
 } alp_camera_config_t;
 
 typedef struct {
-    void    *data;
-    size_t   size;
-    uint64_t timestamp_us;
+	void    *data;
+	size_t   size;
+	uint64_t timestamp_us;
 } alp_camera_frame_t;
 
 /**
@@ -100,9 +100,7 @@ alp_status_t alp_camera_stop(alp_camera_t *c);
  *         ALP_ERR_NOT_READY (stream not started) / ALP_ERR_TIMEOUT /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
-alp_status_t alp_camera_capture(alp_camera_t *c,
-                                alp_camera_frame_t *out,
-                                uint32_t timeout_ms);
+alp_status_t alp_camera_capture(alp_camera_t *c, alp_camera_frame_t *out, uint32_t timeout_ms);
 
 /**
  * @brief Return the frame buffer to the backend after consumption.
@@ -142,7 +140,8 @@ const alp_capabilities_t *alp_camera_capabilities(const alp_camera_t *c);
 /*                                                                     */
 /* Wave-2 audit (internal AEN feature audit, §4.3) NEEDS-       */
 /* PORTABLE-SURFACE: AEN-family E4 / E6 / E8 ship a dedicated ISP     */
-/* (Alif's hardened Mali-C55 path) that Zephyr's portable             */
+/* (Alif's hardened VeriSilicon ISP Pico (vsi,isp-pico) path) that    */
+/* Zephyr's portable                                                  */
 /* drivers/video/ class doesn't expose at the on-chip-ISP level --     */
 /* the existing class covers sensor bridges + format negotiation but   */
 /* not in-line image processing.  Customers migrating from V2N to     */
@@ -169,22 +168,22 @@ const alp_capabilities_t *alp_camera_capabilities(const alp_camera_t *c);
  *     neighbour-averaged values.
  *   - noise_reduction: 2D / 3D temporal NR (backend-defined). */
 typedef struct {
-    bool auto_exposure;
-    bool auto_white_balance;
-    bool auto_focus;
-    bool lens_shading;
-    bool dead_pixel_correction;
-    bool noise_reduction;
-    /** Picture-tuning offsets, -128..+127.  Applied after the
+	bool auto_exposure;
+	bool auto_white_balance;
+	bool auto_focus;
+	bool lens_shading;
+	bool dead_pixel_correction;
+	bool noise_reduction;
+	/** Picture-tuning offsets, -128..+127.  Applied after the
      *  auto-* feedback loops resolve to their setpoints.
      *  Field-level meanings:
      *   - brightness: pre-gamma luma offset.
      *   - contrast: luma scale around mid-grey.
      *   - saturation: chroma scale around grey (0 = monochrome). */
-    int8_t  brightness;
-    int8_t  contrast;
-    int8_t  saturation;
-    uint8_t reserved;
+	int8_t  brightness;
+	int8_t  contrast;
+	int8_t  saturation;
+	uint8_t reserved;
 } alp_camera_isp_config_t;
 
 /**
@@ -208,4 +207,4 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *camera, const alp_camera_isp
 }
 #endif
 
-#endif  /* ALP_CAMERA_H */
+#endif /* ALP_CAMERA_H */

@@ -70,32 +70,32 @@ extern "C" {
  *  SoC-supported mode; the realised mode is reported back in
  *  @ref alp_power_wake_info_t::realised_mode. */
 typedef enum {
-    ALP_POWER_MODE_RUN        = 0, /**< Normal running mode (no sleep). */
-    ALP_POWER_MODE_SLEEP      = 1, /**< CPU clock-gated; peripherals + RAM live. */
-    ALP_POWER_MODE_DEEP_SLEEP = 2, /**< Clocks gated; RAM retained; vendor wake sources only. */
-    ALP_POWER_MODE_STANDBY    = 3, /**< Lowest power; RAM NOT retained; vendor wake only. */
+	ALP_POWER_MODE_RUN        = 0, /**< Normal running mode (no sleep). */
+	ALP_POWER_MODE_SLEEP      = 1, /**< CPU clock-gated; peripherals + RAM live. */
+	ALP_POWER_MODE_DEEP_SLEEP = 2, /**< Clocks gated; RAM retained; vendor wake sources only. */
+	ALP_POWER_MODE_STANDBY    = 3, /**< Lowest power; RAM NOT retained; vendor wake only. */
 } alp_power_mode_t;
 
 /** Wake-source bitmap.  OR together to enable multiple sources.
  *  Backends honour the subset their hardware supports; unsupported
  *  bits are silently ignored. */
-#define ALP_POWER_WAKE_NONE      0x00000000u
-#define ALP_POWER_WAKE_RTC       0x00000001u  /**< RTC alarm / periodic tick. */
-#define ALP_POWER_WAKE_GPIO      0x00000002u  /**< Configured GPIO IRQ line. */
-#define ALP_POWER_WAKE_UART_RX   0x00000004u  /**< UART RX activity. */
-#define ALP_POWER_WAKE_TIMER     0x00000008u  /**< Free-running timer match. */
-#define ALP_POWER_WAKE_USB       0x00000010u  /**< USB SOF / VBUS event. */
-#define ALP_POWER_WAKE_ETH_LINK  0x00000020u  /**< Ethernet link-up / WoL packet. */
+#define ALP_POWER_WAKE_NONE     0x00000000u
+#define ALP_POWER_WAKE_RTC      0x00000001u /**< RTC alarm / periodic tick. */
+#define ALP_POWER_WAKE_GPIO     0x00000002u /**< Configured GPIO IRQ line. */
+#define ALP_POWER_WAKE_UART_RX  0x00000004u /**< UART RX activity. */
+#define ALP_POWER_WAKE_TIMER    0x00000008u /**< Free-running timer match. */
+#define ALP_POWER_WAKE_USB      0x00000010u /**< USB SOF / VBUS event. */
+#define ALP_POWER_WAKE_ETH_LINK 0x00000020u /**< Ethernet link-up / WoL packet. */
 
 /** Information returned by @ref alp_power_request_sleep about how the
  *  sleep round-trip resolved. */
 typedef struct {
-    alp_power_mode_t realised_mode; /**< Mode the backend actually entered. */
-    uint32_t         wake_source;   /**< Wake-source bit that fired (one of
+	alp_power_mode_t realised_mode; /**< Mode the backend actually entered. */
+	uint32_t         wake_source;   /**< Wake-source bit that fired (one of
                                           the @c ALP_POWER_WAKE_* macros).  Zero
                                           if the call returned without sleeping
                                           (e.g. wake_after_ms == 0). */
-    uint32_t         slept_ms;      /**< Wall-clock duration of the sleep cycle
+	uint32_t         slept_ms;      /**< Wall-clock duration of the sleep cycle
                                           (best-effort; SoC-defined precision). */
 } alp_power_wake_info_t;
 
@@ -165,8 +165,10 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO (backend transport
  *         failure mid-cycle).
  */
-alp_status_t alp_power_request_sleep(alp_power_t *handle, alp_power_mode_t mode,
-                                     uint32_t wake_after_ms, alp_power_wake_info_t *info);
+alp_status_t alp_power_request_sleep(alp_power_t           *handle,
+                                     alp_power_mode_t       mode,
+                                     uint32_t               wake_after_ms,
+                                     alp_power_wake_info_t *info);
 
 /**
  * @brief Release the power-management handle.  NULL is a no-op.
@@ -184,7 +186,7 @@ void alp_power_close(alp_power_t *handle);
 const alp_capabilities_t *alp_power_capabilities(const alp_power_t *handle);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
 #endif /* ALP_POWER_H */

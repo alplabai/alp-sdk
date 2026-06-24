@@ -43,7 +43,7 @@ jobs:
     name: plain-cmake · baremetal stub backend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Configure
         run: cmake -B build/baremetal -S . -DALP_OS=baremetal
       - name: Build
@@ -60,7 +60,7 @@ jobs:
     name: plain-cmake · baremetal AEN (vendor scaffolding)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Configure
         run: cmake -B build/baremetal-aen -S . -DALP_OS=baremetal -DALP_SOM=aen
       - name: Build
@@ -76,7 +76,7 @@ jobs:
     name: plain-cmake · baremetal V2N (vendor scaffolding)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Configure
         run: cmake -B build/baremetal-v2n -S . -DALP_OS=baremetal -DALP_SOM=v2n
       - name: Build
@@ -86,7 +86,7 @@ jobs:
     name: plain-cmake · yocto backend + tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       # libmosquitto-dev unlocks the iot_yocto.c MQTT wrapper;
       # libasound2-dev unlocks the audio_yocto.c ALSA wrapper;
       # libssl-dev unlocks the security_yocto.c OpenSSL wrapper.

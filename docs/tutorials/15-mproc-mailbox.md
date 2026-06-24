@@ -58,12 +58,25 @@ of cache-coherent shared SRAM + a hardware semaphore.
 
 ### Mailbox (`alp_mbox_*`)
 
-A hardware FIFO that delivers a small fixed-size message from
-one core to another with a wake-up IRQ.  AEN E7 has two
-mailboxes (MHU0 + MHU1); the SDK opens MBOX channel 0 for the
-HP↔HE control channel.  Sends are explicit; **receives arrive
-via a registered callback** -- there is no blocking
-`*_recv` call.
+A hardware doorbell that signals one core from another with a
+wake-up IRQ.  On AEN the IP is the **ARM MHUv2**; alp-sdk drives
+it with an in-tree Zephyr MBOX-class driver under the compatible
+`alif,mhuv2-mbox`
+([`zephyr/drivers/mbox/mbox_alif_mhuv2.c`](../../zephyr/drivers/mbox/mbox_alif_mhuv2.c)).
+AEN exposes two MHU pairs (MHU0 + MHU1); each frame carries **32
+doorbell bits** (channel-window 0), and the SDK opens MBOX
+channel 0 (doorbell bit 0) for the HP↔HE control channel.
+
+The MHUv2 runs in **doorbell (signalling) mode** -- the MHU only
+rings a per-bit doorbell, it carries no payload; the actual bytes
+ride shared SRAM via the OpenAMP static-vrings (so `mbox_mtu_get`
+is 0 and `alp_mbox_send` passes the data through shmem, not the
+MHU).  Sends are explicit; **receives arrive via a registered
+callback** -- there is no blocking `*_recv` call.
+
+> The AEN MHUv2 driver is **vendor-ext, BENCH-UNVERIFIED**:
+> authored from the ARM MHUv2 spec + the zephyr_alif fork DTS,
+> not yet validated on real silicon.
 
 ```c
 alp_mbox_t *mbox = alp_mbox_open(&(alp_mbox_config_t){

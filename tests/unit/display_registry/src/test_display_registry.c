@@ -36,56 +36,54 @@ ZTEST_SUITE(alp_display_registry, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(alp_display_registry, test_stub_picked_for_alif_e7)
 {
-    /* The wildcard stub is the only display backend registered in
+	/* The wildcard stub is the only display backend registered in
      * Slice 8a; any silicon_ref resolves to it. */
-    const alp_backend_t *be =
-        alp_backend_select("display", "alif:ensemble:e7");
-    zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "stub"), 0);
-    zassert_equal(be->priority, 0);
+	const alp_backend_t *be = alp_backend_select("display", "alif:ensemble:e7");
+	zassert_not_null(be);
+	zassert_equal(strcmp(be->vendor, "stub"), 0);
+	zassert_equal(be->priority, 0);
 }
 
 ZTEST(alp_display_registry, test_stub_picked_for_unknown_silicon)
 {
-    const alp_backend_t *be =
-        alp_backend_select("display", "fictional:soc:zz");
-    zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "stub"), 0);
-    zassert_equal(be->priority, 0);
+	const alp_backend_t *be = alp_backend_select("display", "fictional:soc:zz");
+	zassert_not_null(be);
+	zassert_equal(strcmp(be->vendor, "stub"), 0);
+	zassert_equal(be->priority, 0);
 }
 
 ZTEST(alp_display_registry, test_select_returns_null_for_null_class)
 {
-    zassert_is_null(alp_backend_select(NULL, "alif:ensemble:e7"));
+	zassert_is_null(alp_backend_select(NULL, "alif:ensemble:e7"));
 }
 
 ZTEST(alp_display_registry, test_select_returns_null_for_null_silicon_ref)
 {
-    /* Regression for the NULL silicon_ref fix in src/backend.c.
+	/* Regression for the NULL silicon_ref fix in src/backend.c.
      * NULL must NOT silently match the "*" wildcard. */
-    zassert_is_null(alp_backend_select("display", NULL));
+	zassert_is_null(alp_backend_select("display", NULL));
 }
 
 /* ---------- Public-API behaviour tests ------------------------------ */
 
 ZTEST(alp_display_registry, test_display_open_returns_null_on_null_cfg)
 {
-    /* Dispatcher rejects NULL config at the front door before any
+	/* Dispatcher rejects NULL config at the front door before any
      * backend gets called. */
-    alp_display_t *h = alp_display_open(NULL);
-    zassert_is_null(h);
+	alp_display_t *h = alp_display_open(NULL);
+	zassert_is_null(h);
 }
 
 ZTEST(alp_display_registry, test_display_capabilities_returns_null_for_null_handle)
 {
-    zassert_is_null(alp_display_capabilities(NULL));
+	zassert_is_null(alp_display_capabilities(NULL));
 }
 
 /* ---------- Registry inventory test -------------------------------- */
 
 ZTEST(alp_display_registry, test_backend_count_for_display)
 {
-    /* Only zephyr_stub registered on this build -- no vendor-specific
+	/* Only zephyr_stub registered on this build -- no vendor-specific
      * display backends exist in Slice 8a. */
-    zassert_equal(alp_backend_count("display"), 1u);
+	zassert_equal(alp_backend_count("display"), 1u);
 }

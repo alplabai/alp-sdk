@@ -42,11 +42,11 @@
 /* Negative return values from any bridge_hw_* call.  Positive return
  * values are treated as "operation-specific success state" (currently
  * unused). */
-#define BRIDGE_HW_OK              0
-#define BRIDGE_HW_ERR_NOTIMPL    -1
-#define BRIDGE_HW_ERR_INVAL      -2
-#define BRIDGE_HW_ERR_RANGE      -3
-#define BRIDGE_HW_ERR_IO         -4
+#define BRIDGE_HW_OK          0
+#define BRIDGE_HW_ERR_NOTIMPL -1
+#define BRIDGE_HW_ERR_INVAL   -2
+#define BRIDGE_HW_ERR_RANGE   -3
+#define BRIDGE_HW_ERR_IO      -4
 /* Transient resource starvation: the request is valid and the unit
  * healthy, but servicing it NOW would overrun the handler's reply
  * window (e.g. a max-length TRNG pull while the conditioning round
@@ -94,8 +94,10 @@ int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns);
  *   dead-time register for complementary outputs (0 = no dead
  *   time).  break_cfg bit 0 enables the break input; remaining
  *   bits reserved. */
-int bridge_hw_pwm_configure(uint8_t channel, uint8_t align_mode,
-                            uint32_t dead_time_ns, uint8_t break_cfg);
+int bridge_hw_pwm_configure(uint8_t  channel,
+                            uint8_t  align_mode,
+                            uint32_t dead_time_ns,
+                            uint8_t  break_cfg);
 
 /* --------------------------------------------------------------- */
 /* ADC                                                              */
@@ -110,8 +112,10 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv);
  * firmware rounds down.  resolution is 6/8/10/12/14/16 bits (the
  * latter two require oversampling >= 4 / 16 respectively per the
  * datasheet's effective-resolution table). */
-int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio,
-                            uint16_t sample_cycles, uint8_t resolution_bits);
+int bridge_hw_adc_configure(uint8_t  channel,
+                            uint16_t oversample_ratio,
+                            uint16_t sample_cycles,
+                            uint8_t  resolution_bits);
 
 /* v0.3: DMA-backed continuous acquisition.  Two streams supported
  * concurrently (`stream_id` selects which one) -- the firmware
@@ -129,10 +133,11 @@ int bridge_hw_adc_configure(uint8_t channel, uint16_t oversample_ratio,
  * timer + DMA and restores the converter's single-shot state.
  * Buffer overruns are returned as STATUS_BUSY on subsequent
  * STREAM_READ. */
-int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel,
-                               uint32_t sample_rate_hz);
-int bridge_hw_adc_stream_read(uint8_t stream_id, uint8_t max_samples,
-                              uint8_t *got_samples, uint16_t *mv);
+int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t sample_rate_hz);
+int bridge_hw_adc_stream_read(uint8_t   stream_id,
+                              uint8_t   max_samples,
+                              uint8_t  *got_samples,
+                              uint16_t *mv);
 int bridge_hw_adc_stream_end(uint8_t stream_id);
 
 /* --------------------------------------------------------------- */
@@ -160,9 +165,8 @@ int bridge_hw_trng_read(uint8_t *dest, size_t len);
  * scale on the caller's behalf.  Returns BRIDGE_HW_ERR_RANGE for
  * inputs outside the function's domain (e.g. sqrt(negative) in Q31)
  * and BRIDGE_HW_ERR_IO if the TMU flags a hardware fault. */
-int bridge_hw_tmu_compute(uint8_t function, uint8_t format,
-                          uint32_t in_a, uint32_t in_b,
-                          uint32_t *result_out);
+int bridge_hw_tmu_compute(
+    uint8_t function, uint8_t format, uint32_t in_a, uint32_t in_b, uint32_t *result_out);
 
 /* --------------------------------------------------------------- */
 /* DAC                                                              */
@@ -214,6 +218,20 @@ int bridge_hw_counter_read(uint8_t counter, uint32_t *ticks);
  * same packing) and reads PMC_STATUS_00 etc. over BRD_I2C via
  * chips/da9292. */
 uint8_t bridge_hw_da9292_status_cached(void);
+
+/* --------------------------------------------------------------- */
+/* Secure-element reset (OPTIGA Trust M, SE_RST = GD32 PC13)          */
+/* --------------------------------------------------------------- */
+
+/* Drive the secure-element reset line.  @p assert == 1 holds the
+ * OPTIGA Trust M in reset; @p assert == 0 releases it.  The active
+ * GPIO level (the SE's RST is active-low) is owned by the GD32 backend
+ * (hal/gd32/se_reset.c), so the host expresses intent, not polarity.
+ * Returns BRIDGE_HW_ERR_INVAL for an out-of-range @p assert.  The
+ * recovery for a BRD_I2C bus the SE has clock-stretched low is a pulse
+ * -- assert, wait, release -- sequenced by the host (the OPTIGA needs
+ * ~15 ms after release before it answers I2C again). */
+int bridge_hw_se_reset(uint8_t assert);
 
 /* --------------------------------------------------------------- */
 /* v0.5 (§2B.2) -- advanced timer extras                             */
@@ -300,9 +318,13 @@ int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id);
  * is complete when the host has covered `[0, chunk_total_size)`.
  * The eventual per-kind layouts the firmware decodes are documented
  * in `docs/gd32-bridge-protocol.md` §3.x. */
-int bridge_hw_adc_dsp_stage_push(uint8_t chain_id, uint8_t stage_index, uint8_t kind,
-                                 uint16_t chunk_offset, uint16_t chunk_total_size,
-                                 const uint8_t *chunk_data, size_t chunk_data_len);
+int bridge_hw_adc_dsp_stage_push(uint8_t        chain_id,
+                                 uint8_t        stage_index,
+                                 uint8_t        kind,
+                                 uint16_t       chunk_offset,
+                                 uint16_t       chunk_total_size,
+                                 const uint8_t *chunk_data,
+                                 size_t         chunk_data_len);
 
 /* Attach a fully-populated chain to a streaming ADC source previously
  * opened with bridge_hw_adc_stream_begin.  After bind, the stream's

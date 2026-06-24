@@ -1,0 +1,62 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon LPRTC validation overlay for the E1M-AEN801 (Alif Ensemble E8,
+ * M55-HE), bench RAM-run via J-Link.
+ *
+ * Validates the alp-sdk Tier-2 counter_dw_rtc driver on the always-on
+ * lprtc@42000000 (compatible "snps,dw-apb-rtc").  The driver binds it as a
+ * Zephyr COUNTER device: a free-running 32-bit up-counter (CCVR) with one
+ * compare/alarm channel (CMR), clocked at 32768 Hz from the VBAT-domain LF
+ * source.
+ *
+ * NOT a calendar RTC: the DW-APB-RTC has no battery-backed date/time registers,
+ * so it does NOT back the alp_rtc_* calendar surface (the alp on-silicon RTC
+ * backend binds the Zephyr RTC *class* via the alp-rtc alias -- it will NOT bind
+ * this counter).  A counter->calendar shim backend is still TBD (see README).
+ * This overlay therefore exercises the COUNTER path only, via alp-counter.
+ *
+ * LPRTC register the human reads over J-Link to confirm the count advances
+ * (ground truth, independent of any printk).  Offsets from the vendored
+ * register header zephyr/drivers/counter/counter_dw_rtc.h:
+ *     CCVR (current counter value) = base + DW_RTC_REG_CCVR(0x00) = 0x42000000
+ * mem32 0x42000000 should advance ~32768 ticks/second.
+ *
+ * CLOCK-GATE NOTE (BENCH-UNVERIFIED): the LPRTC clock is gated from VBAT.  The
+ * fork SoC layer writes VBAT_LPRTC0_CLK_EN (0x1A609010) when rtc0 is okay;
+ * upstream Zephyr v4.4's ensemble soc.c (the alp-sdk build path) does NOT, and
+ * the driver does not write VBAT either.  If CCVR never advances on the bench,
+ * the gate is the cause -- enable it from the SoC bring-up (or confirm the
+ * always-on VBAT domain already runs it).  Do NOT add a VBAT write without the
+ * Alif TRM confirming the bit.  See the dtsi node + driver header.
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		/* The wildcard counter backend resolves alp-counter0; keep the
+		 * alias here so a portable alp_counter_open() path also works.
+		 * (The LPRTC is a counter, not a calendar RTC -- it is NOT wired to
+		 * an alp-rtc<N> alias.) */
+		alp-counter0 = &rtc0;
+	};
+};
+
+/* Enable the LPRTC node so the snps,dw-apb-rtc driver instantiates a device.
+ * Okay'ing rtc0 is ALSO what the fork SoC layer keys its VBAT clock-gate on
+ * (see the note above); on the alp-sdk upstream build that gate is bench-TBD. */
+&rtc0 {
+	status = "okay";
+};

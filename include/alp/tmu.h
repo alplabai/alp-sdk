@@ -210,7 +210,7 @@ alp_status_t alp_tmu_tanh(float in_a, float *out);
 alp_status_t alp_tmu_hypot(float in_a, float in_b, float *out);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_TMU_H */
+#endif /* ALP_TMU_H */

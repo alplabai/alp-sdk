@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: aen-cc3501e-bringup
+  description: |
+    Host (Alif M55-HE) side of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4
+    coprocessor bring-up: drive WIFI_EN + E_WIFI.NRST to power+reset the
+    CC3501E, then PING / GET_VERSION / GET_DIAG_INFO over the inter-chip
+    SPI1 link via the chips/cc3501e host driver. AEN analog of
+    v2n-gd32-bridge-ping.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_bringup.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - cc3501e
+      - wifi
+      - ble
+    build_only: true

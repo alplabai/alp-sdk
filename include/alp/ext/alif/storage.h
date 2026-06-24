@@ -45,11 +45,11 @@ extern "C" {
 
 /** OSPI SecAES engine runtime status flags. */
 typedef enum {
-    ALP_ALIF_STORAGE_SECAES_STATUS_IDLE     = 0u,
-    ALP_ALIF_STORAGE_SECAES_STATUS_ARMED    = 1u << 0,
-    ALP_ALIF_STORAGE_SECAES_STATUS_ENGAGED  = 1u << 1,
-    ALP_ALIF_STORAGE_SECAES_STATUS_KEY_LOAD_ERR = 1u << 2,
-    ALP_ALIF_STORAGE_SECAES_STATUS_BUS_ERR  = 1u << 3,
+	ALP_ALIF_STORAGE_SECAES_STATUS_IDLE         = 0u,
+	ALP_ALIF_STORAGE_SECAES_STATUS_ARMED        = 1u << 0,
+	ALP_ALIF_STORAGE_SECAES_STATUS_ENGAGED      = 1u << 1,
+	ALP_ALIF_STORAGE_SECAES_STATUS_KEY_LOAD_ERR = 1u << 2,
+	ALP_ALIF_STORAGE_SECAES_STATUS_BUS_ERR      = 1u << 3,
 } alp_alif_storage_secaes_status_t;
 
 /**
@@ -75,9 +75,8 @@ typedef enum {
  *          @ref ALP_ERR_NOSUPPORT until the vendor pack body lands.
  *          @ref ALP_ERR_IO on hardware bus / key-load fault.
  */
-alp_status_t alp_alif_storage_secaes_key_provision(alp_storage_t *s,
-                                                   const uint8_t *key,
-                                                   uint8_t        key_bytes);
+alp_status_t
+alp_alif_storage_secaes_key_provision(alp_storage_t *s, const uint8_t *key, uint8_t key_bytes);
 
 /**
  * @brief Read the SecAES engine status flags.
@@ -99,8 +98,7 @@ alp_status_t alp_alif_storage_secaes_key_provision(alp_storage_t *s,
  *          @ref ALP_ERR_INVAL (NULL status_out) /
  *          @ref ALP_ERR_NOSUPPORT until the vendor pack body lands.
  */
-alp_status_t alp_alif_storage_secaes_get_status(alp_storage_t *s,
-                                                uint32_t      *status_out);
+alp_status_t alp_alif_storage_secaes_get_status(alp_storage_t *s, uint32_t *status_out);
 
 #ifdef __cplusplus
 }

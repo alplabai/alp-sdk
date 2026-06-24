@@ -43,66 +43,64 @@ ZTEST_SUITE(alp_counter_registry, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(alp_counter_registry, test_zephyr_drv_picked_over_sw_on_alif_e7)
 {
-    const alp_backend_t *be =
-        alp_backend_select("counter", "alif:ensemble:e7");
-    zassert_not_null(be);
-    zassert_equal(strcmp(be->vendor, "zephyr"), 0);
-    zassert_equal(be->priority, 100);
+	const alp_backend_t *be = alp_backend_select("counter", "alif:ensemble:e7");
+	zassert_not_null(be);
+	zassert_equal(strcmp(be->vendor, "zephyr"), 0);
+	zassert_equal(be->priority, 100);
 }
 
 ZTEST(alp_counter_registry, test_sw_fallback_picked_for_unknown_silicon)
 {
-    /* Both registered backends are wildcards; the higher-priority
+	/* Both registered backends are wildcards; the higher-priority
      * zephyr_drv would normally win.  This case still exercises the
      * selector and asserts the sw_fallback is reachable on the test
      * build -- if the selector preference ever changes to "exact
      * match beats wildcard", this assertion documents the expected
      * behaviour. */
-    const alp_backend_t *be =
-        alp_backend_select("counter", "fictional:soc:zz");
-    zassert_not_null(be);
-    /* On the current selector (priority-only) zephyr_drv wins for
+	const alp_backend_t *be = alp_backend_select("counter", "fictional:soc:zz");
+	zassert_not_null(be);
+	/* On the current selector (priority-only) zephyr_drv wins for
      * fictional silicon too; we still assert reachability of the
      * sw_fallback via the registry's count below. */
-    (void)be;
-    zassert_true(alp_backend_count("counter") >= 2u);
+	(void)be;
+	zassert_true(alp_backend_count("counter") >= 2u);
 }
 
 ZTEST(alp_counter_registry, test_select_returns_null_for_null_class)
 {
-    zassert_is_null(alp_backend_select(NULL, "alif:ensemble:e7"));
+	zassert_is_null(alp_backend_select(NULL, "alif:ensemble:e7"));
 }
 
 ZTEST(alp_counter_registry, test_select_returns_null_for_null_silicon_ref)
 {
-    /* Regression for the NULL silicon_ref fix in src/backend.c.
+	/* Regression for the NULL silicon_ref fix in src/backend.c.
      * NULL must NOT silently match the "*" wildcard. */
-    zassert_is_null(alp_backend_select("counter", NULL));
+	zassert_is_null(alp_backend_select("counter", NULL));
 }
 
 /* ---------- Public-API behaviour tests ------------------------------ */
 
 ZTEST(alp_counter_registry, test_open_returns_null_on_null_config)
 {
-    /* The dispatcher rejects NULL cfg with ALP_ERR_INVAL before
+	/* The dispatcher rejects NULL cfg with ALP_ERR_INVAL before
      * consulting the registry; alp_counter_open returns NULL. */
-    alp_counter_t *h = alp_counter_open(NULL);
-    zassert_is_null(h);
+	alp_counter_t *h = alp_counter_open(NULL);
+	zassert_is_null(h);
 }
 
 ZTEST(alp_counter_registry, test_capabilities_returns_null_for_null_handle)
 {
-    zassert_is_null(alp_counter_capabilities(NULL));
+	zassert_is_null(alp_counter_capabilities(NULL));
 }
 
 /* ---------- Registry inventory test -------------------------------- */
 
 ZTEST(alp_counter_registry, test_backend_count_for_counter)
 {
-    /* zephyr_drv + sw_fallback registered on this build.
+	/* zephyr_drv + sw_fallback registered on this build.
      * gd32_bridge is gated behind CONFIG_ALP_SDK_V2N_SUPERVISOR=y
      * which this prj.conf deliberately omits. */
-    zassert_equal(alp_backend_count("counter"), 2u);
+	zassert_equal(alp_backend_count("counter"), 2u);
 }
 
 /* TODO(slice-4a-followup): bridge backend selection test.

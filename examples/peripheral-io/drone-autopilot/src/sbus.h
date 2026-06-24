@@ -22,9 +22,9 @@ extern "C" {
 #define SBUS_CHANNELS  16
 
 typedef struct {
-    uint16_t channel[SBUS_CHANNELS];  /**< 0..2047 raw counts. */
-    bool     frame_lost;
-    bool     failsafe;
+	uint16_t channel[SBUS_CHANNELS]; /**< 0..2047 raw counts. */
+	bool     frame_lost;
+	bool     failsafe;
 } sbus_frame_t;
 
 /** Decode one SBUS frame from a 25-byte buffer.

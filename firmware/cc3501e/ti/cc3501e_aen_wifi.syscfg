@@ -1,0 +1,127 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
+// @cliArgs --board /ti/boards/LP_EM_CC35X1 --rtos freertos
+
+/*
+ * cc3501e-bridge ti-build board file -- WI-FI HOST variant (-WifiHostDriver).
+ *
+ * DERIVED FROM cc3501e_aen.syscfg (the default/bench-validated board file).
+ * The SPI-peripheral (CONFIG_SPI_0) + kernel blocks below are a VERBATIM copy
+ * of that file -- cc3501e_aen.syscfg remains the source of truth for the
+ * inter-chip SPI pinout + the bench HW notes; keep this block in sync if it
+ * changes there.  The ONLY delta is the added UART2 instance (CONFIG_UART2_0),
+ * which the CC35xx Wi-Fi host integration's console/log glue requires:
+ * adaptation/uart_term.c opens UART2_open(CONFIG_UART2_0,...) and the wifi
+ * libs reference Report(); without a UART2 instance UART2_config[]/UART2_count
+ * are absent and the link fails.  A SEPARATE variant (not editing the default
+ * syscfg) keeps the silicon-validated default image's board file byte-identical.
+ *
+ * The bridge has NO physical console -- this UART2 exists so the SDK console
+ * glue LINKS; the bridge firmware never calls InitTerm()/Report().  The UART
+ * sits on free pins (GPIO5/GPIO6, the LaunchPad XDS110 default) that do NOT
+ * collide with the inter-chip SPI pads (GPIO16/27/28/29).
+ */
+
+/* ======== Kernel ======== */
+system.getScript("kernel_config_release.syscfg.js");
+
+/* ======== FreeRTOS heap (SHIP-CRITICAL for the Wi-Fi build) ========
+ * Bump the FreeRTOS heap to the network_terminal demo's 0x57000 (348 KB).  The
+ * Wi-Fi host driver's InitHostDriver (run inside Wlan_Start) creates the
+ * transport + FW-event THREADS and the RX/TX/control BUFFERS from the FreeRTOS
+ * heap.  The kernel default heap is only 0x8000 (32 KB): those allocations fail,
+ * so no event thread exists to signal init_device's fwEvent_Wait -> Wlan_Start
+ * HANGS forever (bench-proven: GET_MAC's Wlan_Start never returned, the bridge
+ * SPI stayed dead, ping_ok stuck 0 / reqhdr_rx=0x00000000).
+ *
+ * The demo uses 0x57000 (348 KB), but that is its NON-vendor example RAM map
+ * (~509 KB DRAM).  Our VENDOR image is capped at DRAM 0x30000 (193 KB,
+ * cc3501e_vendor.cmd, single region; heap_4 ucHeap is in .bss there -- no PSRAM
+ * [unpopulated], no heap_5, can't span regions).  After ~31 KB non-heap .bss the
+ * heap ceiling is ~154 KB, and the 8 KB bring-up/worker stack (src/main.c) takes
+ * its share, so the largest heap that links is 0x22000 (136 KB).
+ *
+ * That is AMPLE for the GET_MAC milestone: bare Wlan_Start->cme_init+
+ * InitHostDriver+fwEvent(RX_TX_BUFFER=13000) needs only ~40-60 KB of heap (no
+ * lwIP/sockets/TLS), and Wlan_Get(WLAN_GET_MACADDRESS) just queries the CME
+ * engine.  But the SDK's STA-WITH-SOCKETS floor is 0x42000 (264 KB) > the whole
+ * 193 KB region, so full connect-STA/sockets does NOT fit this vendor image --
+ * defer to a PSRAM HW rev or shrink the wifi-lib RX/TX/control buffers
+ * (conf_bin/Kconfig).  (Default/radio-free build keeps the 32 KB default.) */
+system.modules["/freertos/FreeRTOS"].$static.heapSize = 0x00042000; /* 264KB -- raised from 136KB (2026-06-23): full STA CONNECT (host WPA/WPA3-SAE supplicant +
+ * lwIP netif + PSA/TLS crypto) needs ~the SDK STA+sockets floor 0x42000, which 136KB STARVED (Wlan_Start + lwIP could not both allocate -> the worker HUNG: scan
+ * -4 / READY stuck low / no connect event).  The old "193KB DRAM cap / WiFi+BLE can't coexist / 136KB max" note below is STALE: build_ti.ps1 links the 512KB
+ * connectivity DRAM map (cc3501e_vendor.cmd DRAM_NON_SECURE = 0x7F24F ~520KB; the -Ble map showed ~152KB free at 136KB heap), so the heap was pinned low by THIS
+ * syscfg line, not the region.  264KB fits Wi-Fi-only with wide margin (~84KB) and -Ble with ~24KB.  HISTORICAL (pre-512KB-map) note follows:
+ * [stale] 136KB -- the VALIDATED WiFi GET_MAC/scan config (bench-proven cold: ping_ok climbs, mac_ok=1).
+ * Wlan_Start's heap floor was pinned on silicon 2026-06-18 across four points: STARVES at 88KB/0x16000,
+ * 106KB/0x1A000, 120KB/0x1E000 (all: ping_ok stuck at the gate, reqhdr_rx->0, mac timeout); WORKS at
+ * 136KB/0x22000. So Wlan_Start needs ~128-136KB heap -- it is the HIF bring-up both WiFi GET_MAC AND BLE
+ * (shared HIF) must run. Consequence (BLE feasibility, settled): heap ~130KB + ~48KB fixed WiFi/stack bss
+ * leaves only ~15KB of the 193KB vendor DRAM for NimBLE (host+controller HCI >> 15KB even trimmed), and the
+ * lwIP/hostap drop frees ~nothing (gc-sections already strips their pools to a few KB -- they are heap-not-bss).
+ * => WiFi+BLE CANNOT coexist on this no-PSRAM rev; BLE needs the PSRAM HW rev (or a conf_bin RX/TX-buffer
+ * shrink to lower this floor -- GUI INI-composer-gated). 136KB is the max heap that links in 0x30000 with the
+ * 8KB bring-up stack. Full STA+sockets (264KB SDK floor) also doesn't fit -> same PSRAM rev. */
+
+/* ======== Secure key store (HSM/PSA crypto) -> CryptoKeyKeyStore_PSA ========
+ * Wlan_Start + Wlan_RoleUp(STA) bring up the WPA/TLS supplicant, which uses
+ * the CC35xx HSM-backed PSA crypto + KeyStore.  That crypto stack's RAM
+ * objects are SysConfig-GENERATED, not in any .a -- the linker reports them
+ * as undefined when the archives alone are linked:
+ *   volatileAllocBuffer / volatileAllocBufferSizeBytes, gl_PSA_Key,
+ *   MBEDTLS_KEY_{VOLATILE,ASSET_STORE,PERSISTENT}_COUNT, FLASH_KEY_PERSISTENT_COUNT
+ *     <- CryptoKeyKeyStore_PSACC35XX.Board.c (this module's generated Board.c)
+ *   RNGXXF3HSM_returnBehavior
+ *     <- the RNG module's Board.c (auto-forced by this module via
+ *        Common.autoForceModules(["Board","Power","CryptoBoard","RNG"]))
+ * Defaults match the SDK network_terminal demo syscfg (the authoritative
+ * Wi-Fi+TLS recipe), which declares this exact module with no overrides. */
+var CryptoKeyKeyStore_PSA = scripting.addModule("/ti/drivers/CryptoKeyKeyStore_PSA");
+
+/* ======== SPI peripheral (slave) -> CONFIG_SPI_0 ========
+ * VERBATIM from cc3501e_aen.syscfg -- see that file for the full bench HW
+ * notes (crossed SoM data lines, CS->GPIO16 pull-low fix, 0x5A diag idle). */
+var SPI  = scripting.addModule("/ti/drivers/SPI");
+var spi0 = SPI.addInstance();
+spi0.$name                = "CONFIG_SPI_0";
+spi0.mode                 = "Four Pin CS Active Low";
+spi0.duplex               = "Full";       /* both data lines (RX requests + TX replies) */
+spi0.defaultTxBufferValue = "0xA5";       /* idle MISO = the 0xA5 SYNC marker (ALP_CC3501E_SYNC_IDLE):
+                                           * the slave drives 0xA5 even BETWEEN armed transfers (callback
+                                           * re-arm gap), so the host never catches a stray idle byte mid-
+                                           * frame on cold first-contact (was 0x5A -> reqhdr_rx=0x..005A
+                                           * leak -> cold byte-misalign). Ship value. */
+
+spi0.spi.sclkPin.$assign = "GPIO27";  /* <- Alif SCLK/P14_6 (correctly wired) */
+spi0.spi.picoPin.$assign = "GPIO29";  /* peripheral data IN  (needs Alif MOSI here -- HW cross) */
+spi0.spi.pociPin.$assign = "GPIO28";  /* peripheral data OUT (needs Alif MISO here -- HW cross) */
+spi0.spi.csnPin.$assign  = "GPIO16";  /* CS -> GPIO16 (only silicon-legal CS; pulled LOW to assert) */
+
+/* SHIP-CRITICAL (host-DMA on the FREE channels 12/13): the on-chip Wi-Fi/BLE
+ * radio is a SEPARATE subsystem (NWP) from the AP M33 the bridge runs on, so its
+ * DMA ops do not block the AP CPU -- the bridge SPI callback keeps re-arming the
+ * lockstep while the radio works.  The radio lower-MAC claims only host-DMA
+ * channels 0..11 (TRM swru626 §11: UART 0-3, SPI 4-5, TEMP 6-10, HIF hard-codes
+ * ch11 in hif.c).  The controller has 14 channels (0..13); 12 and 13 are FREE --
+ * the radio never remuxes them.  Pin the bridge SPI's RX DMA to ch12, TX DMA to
+ * ch13 so the bridge drains/fills its FIFO autonomously on channels Wlan_Start/
+ * scan/connect cannot steal.  (Earlier pins on radio-used channels -- auto
+ * ch11=HIF, then ch8/ch6=TEMP -- died the instant the radio re-pointed the shared
+ * mux; a non-DMA polling path died too, preempted by the worker's Wlan_Start.
+ * DMA on the FREE channels avoids both failure modes.)  NO minDmaTransferSize
+ * override -> the driver uses DMA (SPI_MODE_CALLBACK) as intended. */
+spi0.spi.dmaRxChannel.$assign = "DMA_CH12";
+spi0.spi.dmaTxChannel.$assign = "DMA_CH13";
+
+/* ======== UART2 (console glue) -> CONFIG_UART2_0 ========
+ * Required only by the Wi-Fi host integration's uart_term.c/syslog.c so the
+ * link resolves; unused at runtime on the headless bridge.  Pins GPIO5/GPIO6
+ * (XDS110 default) are clear of the SPI pads. */
+var UART2 = scripting.addModule("/ti/drivers/UART2");
+var uart0 = UART2.addInstance();
+uart0.$name = "CONFIG_UART2_0";
+uart0.uart.txPin.$assign = "GPIO5";
+uart0.uart.rxPin.$assign = "GPIO6";

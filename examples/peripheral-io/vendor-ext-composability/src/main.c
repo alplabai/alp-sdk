@@ -54,65 +54,65 @@
 
 int main(void)
 {
-    printf("[flex] vendor-ext composability: one pad (E1M_ADC1), three ways\n");
+	printf("[flex] vendor-ext composability: one pad (E1M_ADC1), three ways\n");
 
-    /* ── Way 1: the pad as a plain digital GPIO ──────────────────
+	/* ── Way 1: the pad as a plain digital GPIO ──────────────────
      * The analog peripheral is not "claimed" forever.  An app that
      * doesn't need ADC1's analog function drives its pad digitally
      * through the GPIO-secondary index E1M_GPIO_ADC1 (= 43 in the
      * positional e1m_pinout.h order).  We open, configure as a
      * push-pull output, drive it, then close -- releasing the pad. */
-    alp_gpio_t *as_gpio = alp_gpio_open(E1M_GPIO_ADC1);
-    if (as_gpio != NULL) {
-        alp_gpio_configure(as_gpio, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-        alp_gpio_write(as_gpio, true);
-        printf("[flex] way 1: E1M_GPIO_ADC1 driven as a digital GPIO output -- ok\n");
-        alp_gpio_close(as_gpio);
-    } else {
-        printf("[flex] way 1: GPIO open skipped (last_err=%d)\n", (int)alp_last_error());
-    }
+	alp_gpio_t *as_gpio = alp_gpio_open(E1M_GPIO_ADC1);
+	if (as_gpio != NULL) {
+		alp_gpio_configure(as_gpio, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+		alp_gpio_write(as_gpio, true);
+		printf("[flex] way 1: E1M_GPIO_ADC1 driven as a digital GPIO output -- ok\n");
+		alp_gpio_close(as_gpio);
+	} else {
+		printf("[flex] way 1: GPIO open skipped (last_err=%d)\n", (int)alp_last_error());
+	}
 
-    /* ── Way 2: the same pad as the portable E1M ADC ─────────────
+	/* ── Way 2: the same pad as the portable E1M ADC ─────────────
      * Way 1 closed the GPIO handle, so the pad is free again.  Open
      * it as a 12-bit analog input through the portable <alp/adc.h>
      * surface -- the call is byte-identical on AEN, V2N, and every
      * other E1M-conformant SoM. */
-    alp_adc_t *adc = alp_adc_open(&(alp_adc_config_t){
-        .channel_id      = EVK_ADC_ARDUINO_A1, /* = E1M_ADC1 */
-        .resolution_bits = 12,
-        .reference       = ALP_ADC_REF_INTERNAL,
-    });
-    if (adc == NULL) {
-        /* native_sim has no ADC controller, so the alp-adc1 alias
+	alp_adc_t *adc = alp_adc_open(&(alp_adc_config_t){
+	    .channel_id      = EVK_ADC_ARDUINO_A1, /* = E1M_ADC1 */
+	    .resolution_bits = 12,
+	    .reference       = ALP_ADC_REF_INTERNAL,
+	});
+	if (adc == NULL) {
+		/* native_sim has no ADC controller, so the alp-adc1 alias
          * resolves to a NULL spec -> NOT_READY.  Ways 2 + 3 are the
          * real-silicon path; the example still exits cleanly. */
-        printf("[flex] way 2: ADC open skipped (last_err=%d; native_sim has no ADC)\n",
-               (int)alp_last_error());
-        printf("[flex] done\n");
-        return 0;
-    }
+		printf("[flex] way 2: ADC open skipped (last_err=%d; native_sim has no ADC)\n",
+		       (int)alp_last_error());
+		printf("[flex] done\n");
+		return 0;
+	}
 
-    int32_t      uv = 0;
-    alp_status_t s  = alp_adc_read_uv(adc, &uv);
-    printf("[flex] way 2: E1M_ADC1 read as portable ADC -> status=%d uv=%d\n", (int)s, (int)uv);
+	int32_t      uv = 0;
+	alp_status_t s  = alp_adc_read_uv(adc, &uv);
+	printf("[flex] way 2: E1M_ADC1 read as portable ADC -> status=%d uv=%d\n", (int)s, (int)uv);
 
-    /* ── Way 3: an Alif vendor extension, layered ADDITIVELY ─────
+	/* ── Way 3: an Alif vendor extension, layered ADDITIVELY ─────
      * The extension takes the SAME handle from Way 2 and adds a
      * hardware-trigger-source knob that the portable surface does not
      * expose.  It augments the portable API; it never supplants it --
      * the Way-2 read above already succeeded and would keep working
      * even if this call is unavailable. */
 #ifdef ALP_EXT_ALIF_ADC_AVAILABLE
-    alp_status_t es = alp_alif_adc_set_trigger_source(adc, ALP_ALIF_ADC_TRIGGER_TIMER0);
-    printf("[flex] way 3: alif ext set_trigger_source -> %d "
-           "(additive on the Way-2 handle)\n",
-           (int)es);
+	alp_status_t es = alp_alif_adc_set_trigger_source(adc, ALP_ALIF_ADC_TRIGGER_TIMER0);
+	printf("[flex] way 3: alif ext set_trigger_source -> %d "
+	       "(additive on the Way-2 handle)\n",
+	       (int)es);
 #else
-    printf("[flex] way 3: <alp/ext/alif/adc.h> not compiled in (non-Alif build); "
-           "the portable Way-2 ADC is unaffected\n");
+	printf("[flex] way 3: <alp/ext/alif/adc.h> not compiled in (non-Alif build); "
+	       "the portable Way-2 ADC is unaffected\n");
 #endif
 
-    alp_adc_close(adc);
-    printf("[flex] done\n");
-    return 0;
+	alp_adc_close(adc);
+	printf("[flex] done\n");
+	return 0;
 }

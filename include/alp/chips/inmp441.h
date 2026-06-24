@@ -32,13 +32,13 @@ extern "C" {
 #endif
 
 typedef enum {
-    INMP441_CH_LEFT  = 0,
-    INMP441_CH_RIGHT = 1,
+	INMP441_CH_LEFT  = 0,
+	INMP441_CH_RIGHT = 1,
 } inmp441_channel_t;
 
 typedef struct {
-    inmp441_channel_t channel;
-    bool              initialised;
+	inmp441_channel_t channel;
+	bool              initialised;
 } inmp441_t;
 
 /** @brief Bind context with the (strapped) channel assignment. */

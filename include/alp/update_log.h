@@ -37,24 +37,24 @@ extern "C" {
 
 /** Outcome of an update, as recorded in an entry. */
 typedef enum {
-    ALP_UPDATE_STATUS_CONFIRMED       = 0, /**< New image booted + confirmed healthy. */
-    ALP_UPDATE_STATUS_VERIFY_FAILED   = 1, /**< Signature/hash verification failed. */
-    ALP_UPDATE_STATUS_ROLLED_BACK     = 2, /**< Reverted to the previous slot. */
-    ALP_UPDATE_STATUS_PENDING_CONFIRM = 3, /**< Booted, awaiting confirm window. */
+	ALP_UPDATE_STATUS_CONFIRMED       = 0, /**< New image booted + confirmed healthy. */
+	ALP_UPDATE_STATUS_VERIFY_FAILED   = 1, /**< Signature/hash verification failed. */
+	ALP_UPDATE_STATUS_ROLLED_BACK     = 2, /**< Reverted to the previous slot. */
+	ALP_UPDATE_STATUS_PENDING_CONFIRM = 3, /**< Booted, awaiting confirm window. */
 } alp_update_status_t;
 
 /** How strongly the log is protected on this SoM. */
 typedef enum {
-    ALP_UPDATE_LOG_SW_TAMPER_EVIDENT = 0, /**< Hash-chain + counter; app-cooperative. */
-    ALP_UPDATE_LOG_HW_ENFORCED       = 1, /**< TF-M-isolated store + HW monotonic counter. */
+	ALP_UPDATE_LOG_SW_TAMPER_EVIDENT = 0, /**< Hash-chain + counter; app-cooperative. */
+	ALP_UPDATE_LOG_HW_ENFORCED       = 1, /**< TF-M-isolated store + HW monotonic counter. */
 } alp_update_log_assurance_t;
 
 /** Result of walking the chain in @ref alp_update_log_verify. */
 typedef enum {
-    ALP_UPDATE_LOG_VERIFY_OK           = 0,
-    ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN = 1, /**< An entry was mutated or reordered. */
-    ALP_UPDATE_LOG_VERIFY_TRUNCATED    = 2, /**< Tail entries are missing. */
-    ALP_UPDATE_LOG_VERIFY_ROLLED_BACK  = 3, /**< Store regressed vs the monotonic anchor. */
+	ALP_UPDATE_LOG_VERIFY_OK           = 0,
+	ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN = 1, /**< An entry was mutated or reordered. */
+	ALP_UPDATE_LOG_VERIFY_TRUNCATED    = 2, /**< Tail entries are missing. */
+	ALP_UPDATE_LOG_VERIFY_ROLLED_BACK  = 3, /**< Store regressed vs the monotonic anchor. */
 } alp_update_log_verdict_t;
 
 /**
@@ -63,11 +63,11 @@ typedef enum {
  * counter). On @ref alp_update_log_get every field is populated.
  */
 typedef struct {
-    uint64_t            seq; /**< Authoritative order; engine-assigned. */
-    char                fw_version[ALP_UPDATE_LOG_FWVER_MAX + 1]; /**< NUL-terminated. */
-    uint8_t             image_hash[ALP_UPDATE_LOG_HASH_LEN];      /**< SHA-256 of the image. */
-    alp_update_status_t status;
-    uint64_t            timestamp; /**< Best-effort epoch; 0 = unset. */
+	uint64_t            seq; /**< Authoritative order; engine-assigned. */
+	char                fw_version[ALP_UPDATE_LOG_FWVER_MAX + 1]; /**< NUL-terminated. */
+	uint8_t             image_hash[ALP_UPDATE_LOG_HASH_LEN];      /**< SHA-256 of the image. */
+	alp_update_status_t status;
+	uint64_t            timestamp; /**< Best-effort epoch; 0 = unset. */
 } alp_update_log_entry_t;
 
 /** Opaque log handle. Acquire via @ref alp_update_log_open. */
@@ -93,15 +93,16 @@ alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_e
  * @return ALP_OK if the walk ran (inspect @p verdict_out for the result);
  *         ALP_ERR_IO if the store was unreadable.
  */
-alp_status_t alp_update_log_verify(alp_update_log_t *log, alp_update_log_verdict_t *verdict_out,
-                                   uint64_t *bad_seq_out);
+alp_status_t alp_update_log_verify(alp_update_log_t         *log,
+                                   alp_update_log_verdict_t *verdict_out,
+                                   uint64_t                 *bad_seq_out);
 
 /** @brief Number of entries. */
 alp_status_t alp_update_log_count(alp_update_log_t *log, uint64_t *count_out);
 
 /** @brief Fetch the entry at @p seq. ALP_ERR_NOT_FOUND if absent. */
-alp_status_t alp_update_log_get(alp_update_log_t *log, uint64_t seq,
-                                alp_update_log_entry_t *entry_out);
+alp_status_t
+alp_update_log_get(alp_update_log_t *log, uint64_t seq, alp_update_log_entry_t *entry_out);
 
 /** @brief Assurance level on this SoM. */
 alp_update_log_assurance_t alp_update_log_assurance(const alp_update_log_t *log);

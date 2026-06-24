@@ -33,16 +33,16 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    bool        initialised;
+	alp_uart_t *port;
+	bool        initialised;
 } atgm336h_t;
 
 /** @brief Bind context to caller-opened UART. */
 alp_status_t atgm336h_init(atgm336h_t *dev, alp_uart_t *port);
 
 /** @brief Read one NMEA line.  See `ublox_neo_m9n_read_nmea_line`. */
-alp_status_t atgm336h_read_nmea_line(atgm336h_t *dev, uint8_t *line_buf, size_t line_max,
-                                     size_t *len_out, uint32_t timeout_ms);
+alp_status_t atgm336h_read_nmea_line(
+    atgm336h_t *dev, uint8_t *line_buf, size_t line_max, size_t *len_out, uint32_t timeout_ms);
 
 /** @brief Release driver context. */
 void atgm336h_deinit(atgm336h_t *dev);

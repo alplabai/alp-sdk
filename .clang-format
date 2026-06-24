@@ -1,19 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
 # clang-format style for the Alp SDK.
-# Conservative LLVM/Zephyr-leaning baseline; refine in follow-ups.
+#
+# Alp SDK is its OWN code style -- a unification layer across hardware and
+# software platforms (Zephyr-on-M, Yocto/Linux-on-A, vendor SDKs), NOT a Zephyr
+# project -- so this is the house style, not a mirror of any one platform.
+# Indentation is TABS (each developer renders them at their preferred width;
+# TabWidth below only feeds clang-format's column math).  Alignment stays in
+# spaces ("smart tabs"), so columns line up regardless of tab width.  Vendored
+# upstream code (zephyr/**, vendors/**) keeps its own style and is excluded from
+# the format gate -- see .github/workflows/pr-static-analysis.yml.
 ---
 Language: Cpp
 BasedOnStyle: LLVM
 IndentWidth: 4
 TabWidth: 4
-UseTab: Never
+UseTab: ForIndentation
 ColumnLimit: 100
-AlignConsecutiveAssignments: AcrossEmptyLines
-AlignConsecutiveDeclarations: AcrossEmptyLines
+# Alignment: keep the polished column look for enums/structs/#define tables, but
+# use Consecutive (resets at blank lines) rather than AcrossEmptyLines so editing
+# one block never reflows its neighbours (avoids the "enum-alignment trap").
+# AlignConsecutiveMacros lines up #define value columns (register/capability blocks).
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: Consecutive
+AlignConsecutiveMacros: Consecutive
 AlignTrailingComments: true
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: WithoutElse
 BreakBeforeBraces: Linux
+# Wrapping: when a call/declaration is too long for the column limit, put each
+# argument/parameter on its own line (one-per-line) rather than bin-packing them,
+# so long public-API signatures + designated initialisers read clearly.
+BinPackParameters: false
+BinPackArguments: false
 KeepEmptyLinesAtTheStartOfBlocks: false
 PointerAlignment: Right
 SortIncludes: Never
@@ -23,10 +41,10 @@ SpacesInSquareBrackets: false
 IncludeBlocks: Preserve
 ReflowComments: false
 
-# Pin behaviour across clang-format versions.  The LLVM default for
-# Cpp11BracedListStyle flipped between clang-format 14 (Ubuntu apt
-# default on the CI runner) and clang-format 18+, which makes the
-# `(alp_i2c_config_t){ .foo = ... }` designated-initialiser idiom
-# format differently on developer machines vs CI.  Locking it
-# explicitly keeps the formatter idempotent across the version skew.
+# Pin behaviour across clang-format versions.  CI pins clang-format-22 (via the
+# pip wheel -- see .github/workflows/pr-static-analysis.yml + scripts/setup-clang-format.sh),
+# but the LLVM default for Cpp11BracedListStyle has flipped between major versions
+# (v14 vs v18+), which formats the `(alp_i2c_config_t){ .foo = ... }`
+# designated-initialiser idiom differently.  Locking it explicitly keeps the output
+# reproducible regardless of whichever clang-format a developer has on PATH.
 Cpp11BracedListStyle: false

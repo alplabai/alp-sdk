@@ -51,25 +51,26 @@
  * baremetal targets where there's no scheduler). */
 #define HELLO_TICK_PERIOD_MS 1000u
 
-int main(void) {
-    /* The first line a bring-up engineer wants to see -- it
+int main(void)
+{
+	/* The first line a bring-up engineer wants to see -- it
      * confirms the boot path made it to main() AND the printf
      * console is decoded correctly.  If THIS line is missing,
      * the toolchain / flash flow / console-cable is the suspect,
      * not the SDK. */
-    printf("[hello] Alp SDK hello-world starting\n");
+	printf("[hello] Alp SDK hello-world starting\n");
 
-    /* Periodic loop -- prints a monotonically-increasing tick every
+	/* Periodic loop -- prints a monotonically-increasing tick every
      * HELLO_TICK_PERIOD_MS so the customer can see the app is alive
      * (not just printed once + crashed).  Capped at HELLO_TICKS so
      * twister's console-harness one_line regex can latch the `done`
      * marker; real firmware would loop forever. */
-    for (uint32_t tick = 0; tick < HELLO_TICKS; tick++) {
-        printf("[hello] tick %u\n", tick);
-        k_msleep(HELLO_TICK_PERIOD_MS);
-    }
+	for (uint32_t tick = 0; tick < HELLO_TICKS; tick++) {
+		printf("[hello] tick %u\n", tick);
+		k_msleep(HELLO_TICK_PERIOD_MS);
+	}
 
-    /* TICKS_ON_REAL_SILICON: in production firmware you'd swap the
+	/* TICKS_ON_REAL_SILICON: in production firmware you'd swap the
      * bounded for-loop above for:
      *
      *     for (uint32_t tick = 0; ; tick++) {
@@ -80,28 +81,28 @@ int main(void) {
      * Returning from main() on Zephyr is technically legal but the
      * kernel idles afterwards -- nothing keeps the heartbeat going. */
 
-    /* Capability-API teaching block.
+	/* Capability-API teaching block.
      *
      * `ALP_HAS()` is a compile-time constant expression.  Use it for
      * #if / static_assert -- the unused branch disappears entirely
      * from the binary, so this is zero-cost on parts that lack the
      * feature. */
 #if ALP_HAS(HELIUM_MVE)
-    printf("[hello] this build targets a Helium-capable SoC\n");
+	printf("[hello] this build targets a Helium-capable SoC\n");
 #else
-    printf("[hello] no Helium MVE on this SoC -- scalar path\n");
+	printf("[hello] no Helium MVE on this SoC -- scalar path\n");
 #endif
 
-    /* `alp_has()` is the runtime equivalent.  Useful when the same
+	/* `alp_has()` is the runtime equivalent.  Useful when the same
      * binary may run on different SoCs (rare on Zephyr, common in
      * board-bringup tooling) or when the branch only matters for
      * logging rather than codegen. */
-    if (alp_has(ALP_CAP_ID_HW_I2C)) {
-        printf("[hello] HW I2C available (could probe sensors here)\n");
-    } else {
-        printf("[hello] no HW I2C on this SoC\n");
-    }
+	if (alp_has(ALP_CAP_ID_HW_I2C)) {
+		printf("[hello] HW I2C available (could probe sensors here)\n");
+	} else {
+		printf("[hello] no HW I2C on this SoC\n");
+	}
 
-    printf("[hello] done\n");
-    return 0;
+	printf("[hello] done\n");
+	return 0;
 }

@@ -37,8 +37,8 @@ extern "C" {
 typedef struct alp_wifi alp_wifi_t;
 
 typedef struct {
-    const char *ssid;
-    const char *psk;        /**< NULL for open networks. */
+	const char *ssid;
+	const char *psk; /**< NULL for open networks. */
 } alp_wifi_credentials_t;
 
 /**
@@ -48,7 +48,7 @@ typedef struct {
  *         to @ref ALP_ERR_NOSUPPORT (no Wi-Fi backend wired) or
  *         @ref ALP_ERR_NOT_READY (driver not yet probed).
  */
-alp_wifi_t   *alp_wifi_open(void);
+alp_wifi_t *alp_wifi_open(void);
 
 /**
  * @brief Associate + authenticate against the AP described by @p creds.
@@ -61,9 +61,8 @@ alp_wifi_t   *alp_wifi_open(void);
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO (auth failed) /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t  alp_wifi_connect(alp_wifi_t *w,
-                               const alp_wifi_credentials_t *creds,
-                               uint32_t timeout_ms);
+alp_status_t
+alp_wifi_connect(alp_wifi_t *w, const alp_wifi_credentials_t *creds, uint32_t timeout_ms);
 
 /**
  * @brief Drop the current association.  Safe to call when already disconnected.
@@ -72,14 +71,14 @@ alp_status_t  alp_wifi_connect(alp_wifi_t *w,
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
  */
-alp_status_t  alp_wifi_disconnect(alp_wifi_t *w);
+alp_status_t alp_wifi_disconnect(alp_wifi_t *w);
 
 /**
  * @brief Release the Wi-Fi handle.  Idempotent on NULL.
  *
  * @param[in] w  Handle from @ref alp_wifi_open, or NULL.
  */
-void          alp_wifi_close(alp_wifi_t *w);
+void alp_wifi_close(alp_wifi_t *w);
 
 /**
  * @brief Query the capabilities of an opened Wi-Fi handle.
@@ -106,36 +105,34 @@ typedef struct alp_mqtt alp_mqtt_t;
  * known-good CA bundle.
  */
 typedef struct {
-    const char *ca_file;        /**< PEM CA bundle path.  NULL = system store. */
-    const char *cert_file;      /**< Optional client certificate (PEM). */
-    const char *key_file;       /**< Optional client private key (PEM). */
-    bool        insecure;       /**< true skips peer cert verification (dev only). */
+	const char *ca_file;   /**< PEM CA bundle path.  NULL = system store. */
+	const char *cert_file; /**< Optional client certificate (PEM). */
+	const char *key_file;  /**< Optional client private key (PEM). */
+	bool        insecure;  /**< true skips peer cert verification (dev only). */
 } alp_mqtt_tls_config_t;
 
 typedef struct {
-    const char *broker_uri;     /**< e.g. `"mqtt://broker.local:1883"` or `"mqtts://broker.local:8883"` */
-    const char *client_id;
-    const char *username;       /**< NULL if unauth */
-    const char *password;
-    uint16_t    keepalive_s;
-    bool        clean_session;
-    /**
+	const char
+	    *broker_uri; /**< e.g. `"mqtt://broker.local:1883"` or `"mqtts://broker.local:8883"` */
+	const char *client_id;
+	const char *username; /**< NULL if unauth */
+	const char *password;
+	uint16_t    keepalive_s;
+	bool        clean_session;
+	/**
      * TLS parameters.  Required scheme is `mqtts://`; ignored for
      * `mqtt://`.  NULL is equivalent to a zero-initialised struct
      * (use OS default CA path, no client cert, verify peer).
      */
-    const alp_mqtt_tls_config_t *tls;
+	const alp_mqtt_tls_config_t *tls;
 } alp_mqtt_config_t;
 
-typedef enum {
-    ALP_MQTT_QOS_0 = 0,
-    ALP_MQTT_QOS_1 = 1,
-    ALP_MQTT_QOS_2 = 2
-} alp_mqtt_qos_t;
+typedef enum { ALP_MQTT_QOS_0 = 0, ALP_MQTT_QOS_1 = 1, ALP_MQTT_QOS_2 = 2 } alp_mqtt_qos_t;
 
-typedef void (*alp_mqtt_msg_cb_t)(const char *topic,
-                                  const uint8_t *payload, size_t len,
-                                  void *user);
+typedef void (*alp_mqtt_msg_cb_t)(const char    *topic,
+                                  const uint8_t *payload,
+                                  size_t         len,
+                                  void          *user);
 
 /**
  * @brief Allocate an MQTT client against the broker URI in @p cfg.
@@ -151,7 +148,7 @@ typedef void (*alp_mqtt_msg_cb_t)(const char *topic,
  *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOSUPPORT
  *         (no MQTT backend wired).
  */
-alp_mqtt_t   *alp_mqtt_open(const alp_mqtt_config_t *cfg);
+alp_mqtt_t *alp_mqtt_open(const alp_mqtt_config_t *cfg);
 
 /**
  * @brief Establish the TCP / TLS connection to the broker.
@@ -162,7 +159,7 @@ alp_mqtt_t   *alp_mqtt_open(const alp_mqtt_config_t *cfg);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
  *         ALP_ERR_IO (TLS or CONNECT error) / ALP_ERR_NOSUPPORT.
  */
-alp_status_t  alp_mqtt_connect(alp_mqtt_t *m, uint32_t timeout_ms);
+alp_status_t alp_mqtt_connect(alp_mqtt_t *m, uint32_t timeout_ms);
 
 /**
  * @brief Publish a single MQTT message.
@@ -177,9 +174,12 @@ alp_status_t  alp_mqtt_connect(alp_mqtt_t *m, uint32_t timeout_ms);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (not connected) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t  alp_mqtt_publish(alp_mqtt_t *m, const char *topic,
-                               const uint8_t *payload, size_t len,
-                               alp_mqtt_qos_t qos, bool retain);
+alp_status_t alp_mqtt_publish(alp_mqtt_t    *m,
+                              const char    *topic,
+                              const uint8_t *payload,
+                              size_t         len,
+                              alp_mqtt_qos_t qos,
+                              bool           retain);
 
 /**
  * @brief Subscribe to @p topic_filter and register a per-message callback.
@@ -195,9 +195,8 @@ alp_status_t  alp_mqtt_publish(alp_mqtt_t *m, const char *topic,
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t  alp_mqtt_subscribe(alp_mqtt_t *m, const char *topic_filter,
-                                 alp_mqtt_qos_t qos,
-                                 alp_mqtt_msg_cb_t cb, void *user);
+alp_status_t alp_mqtt_subscribe(
+    alp_mqtt_t *m, const char *topic_filter, alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user);
 
 /**
  * @brief Drive the MQTT state machine for up to @p timeout_ms.
@@ -212,14 +211,14 @@ alp_status_t  alp_mqtt_subscribe(alp_mqtt_t *m, const char *topic_filter,
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_TIMEOUT (no event in
  *         window) / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t  alp_mqtt_loop(alp_mqtt_t *m, uint32_t timeout_ms);
+alp_status_t alp_mqtt_loop(alp_mqtt_t *m, uint32_t timeout_ms);
 
 /**
  * @brief Disconnect + release the MQTT client.  Idempotent on NULL.
  *
  * @param[in] m  Handle from @ref alp_mqtt_open, or NULL.
  */
-void          alp_mqtt_close(alp_mqtt_t *m);
+void alp_mqtt_close(alp_mqtt_t *m);
 
 /**
  * @brief Query the capabilities of an opened MQTT handle.
@@ -233,4 +232,4 @@ const alp_capabilities_t *alp_mqtt_capabilities(const alp_mqtt_t *m);
 }
 #endif
 
-#endif  /* ALP_IOT_H */
+#endif /* ALP_IOT_H */

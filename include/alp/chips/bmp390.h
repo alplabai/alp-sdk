@@ -34,16 +34,16 @@
 extern "C" {
 #endif
 
-#define BMP390_I2C_ADDR_PRIMARY 0x77u /**< SDO = high (default). */
+#define BMP390_I2C_ADDR_PRIMARY   0x77u /**< SDO = high (default). */
 #define BMP390_I2C_ADDR_SECONDARY 0x76u /**< SDO = low. */
 
 #define BMP390_REG_CHIP_ID 0x00u
 #define BMP390_CHIP_ID     0x60u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } bmp390_t;
 
 /** @brief Bind context and verify CHIP_ID == 0x60. */

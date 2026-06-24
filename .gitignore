@@ -24,6 +24,12 @@ vendors/*/cube/
 !vendors/*/*.c
 !vendors/*/*.h
 
+# CC3501E SimpleLink CC33xx SDK -- license-gated, multi-GB, NOT redistributed
+# by alp-sdk.  Keep the committed wrapper (CMakeLists.txt + README.md); ignore
+# the extracted SDK if it is dropped in-tree under sdk/.  (The `vendors/`
+# plural rule above does not match this firmware-local singular `vendor/` path.)
+firmware/cc3501e/vendor/simplelink-cc33xx/sdk/
+
 # Zephyr / west workspace artefacts when this repo is the topdir.
 .west/
 twister-out/
@@ -59,13 +65,17 @@ CTestTestfile.cmake
 Makefile
 *.cmake
 !CMakeLists.txt
-# Toolchain files MUST stay tracked -- the gd32-bridge build invokes
+# Toolchain files MUST stay tracked -- the bridge builds invoke
 # them via -DCMAKE_TOOLCHAIN_FILE in CI + locally.
 !firmware/gd32-bridge/toolchain/*.cmake
+!firmware/cc3501e/toolchain/*.cmake
 # ... as is the build-id baker the gd32-bridge CMakeLists runs every build.
 !firmware/gd32-bridge/cmake/*.cmake
 !cmake/**/*.cmake
 !toolchain/**/*.cmake
+# Checked-in Zephyr board flash/debug runner files (board.cmake) -- these
+# are source, not generated, and `west flash` needs them tracked.
+!zephyr/boards/**/board.cmake
 
 # Test results
 Testing/
@@ -86,6 +96,11 @@ __pycache__/
 .Python
 env/
 venv/
+# any virtualenv flavour, incl. the NPU-branch scratch envs (.venv-vela/,
+# .venv/, etc.) -- keeps account-gated Vela/CMSIS/TVM wheels out of the
+# public repo (the ~/npu-sdks-outside-the-tree convention).
+.venv*/
+*venv/
 .claude/
 
 # MCUboot signing keys -- per-directory .gitignore at keys/.gitignore
@@ -107,3 +122,13 @@ dist/
 # It is Renesas-gen_tool-derived, SoM-hardware-specific config and MUST NOT be
 # committed to the public repo.
 meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpddr4-alp.c
+
+# Local ARM Vela / NPU toolchain virtualenv (not redistributed)
+.venv-vela/
+
+# Alif-proprietary Vela system-config -- the NPU examples inject it at build
+# time via -DAEN_NPU_VELA_CONFIG=<path>/ensemble_vela.ini (the .ini ships in
+# alp-sdk-internal, NOT here).  This guard keeps a stray copy that an operator
+# drops next to an example from ever being committed to the public repo.
+ensemble_vela.ini
+**/ensemble_vela.ini
