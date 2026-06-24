@@ -7,10 +7,11 @@
  * @file cc3501e.h
  * @brief Alif-side host driver for the on-module TI CC3501E
  *
- * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
- *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
- *   sequencing as paper-correct only until the v1.0 verification
- *   sweep lands.
+ * @par Verification status: [BENCH-VERIFIED] -- silicon-validated radio + GPIO
+ *   coprocessor on E1M-AEN801 (Alif Ensemble E8, M55) in v0.8.0.
+ *   Core SS0 link, Wi-Fi scan, Wi-Fi STA connect, BLE scan, and GPIO proxy
+ *   validated on real silicon (Wi-Fi + BLE not yet concurrent -- conf-gated,
+ *   not a code limit); warm-programmed and shipped on two boards (FIB v0.0.207).
  *        Wi-Fi 6 + BLE 5.4 coprocessor.
  *
  * Wraps the inter-chip SPI1 host-control protocol defined in

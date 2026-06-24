@@ -33,8 +33,8 @@ README = REPO / "README.md"
 # declared MAJOR.MINOR.  Keep these tightly anchored so historical refs
 # ("landed in v0.6") are never matched.
 _ANCHORS: list[tuple[str, re.Pattern[str]]] = [
-    ("intro badge — 'Mostly pre-silicon (`vX.Y`)'",
-     re.compile(r"Mostly pre-silicon \(`v(\d+\.\d+)`\)")),
+    ("intro badge — 'Partially silicon-verified (`vX.Y`)'",
+     re.compile(r"Partially silicon-verified \(`v(\d+\.\d+)`\)")),
     ("Status heading — '**vX.Y ramp — paper-correct'",
      re.compile(r"\*\*v(\d+\.\d+) ramp — paper-correct")),
 ]

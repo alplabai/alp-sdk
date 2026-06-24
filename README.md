@@ -8,11 +8,16 @@
 [![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.0-blue)](docs/zephyr-version-policy.md)
 
 > [!WARNING]
-> **Mostly pre-silicon (`v0.8`):** every chip driver, peripheral wrapper, and
-> example builds clean and passes its CI tests on `native_sim`, but **most of
-> the SDK has not yet been verified on real hardware**.  The first
+> **Partially silicon-verified (`v0.8`):** every chip driver, peripheral wrapper, and
+> example builds clean and passes its CI tests on `native_sim`. Two SoM
+> families now carry silicon evidence: the E1M-X V2N (GD32-bridge stack,
+> verified v0.6) and E1M-AEN801 (peripheral matrix, NPU inference, cc3501e
+> bridge, verified v0.8). Most remaining families (i.MX 93, V2M/DEEPX,
+> AEN30x/40x/50x/60x/70x) remain pre-silicon.  The first
 > silicon-verified slice landed in v0.6 — the V2N GD32-bridge campaign
-> (SPI/I²C link, HIL soak, A/B OTA, analog loopback).  Full caveats in the
+> (SPI/I²C link, HIL soak, A/B OTA, analog loopback). v0.8 adds two more:
+> E1M-AEN801 (Alif Ensemble E8, 15/17 peripheral apps verified on real
+> silicon) and CC3501E bridge (Wi-Fi/BLE/GPIO-proxy validated).  Full caveats in the
 > *Status* section below; per-feature state in
 > [`docs/test-plan.md`](docs/test-plan.md).
 
@@ -256,7 +261,7 @@ by upstream `bitbake` / OE-core constraint.  Codified in
 
 ## Status
 
-**v0.8 ramp — paper-correct, pre-HIL** — recorded in
+**v0.8 ramp — paper-correct, mostly pre-HIL; partial silicon-verified additions** — recorded in
 [`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
 landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in
@@ -266,9 +271,12 @@ until its gating rows flip to ✅.
 Treat register addresses, timing values, lifecycle sequencing, and
 per-SoM accelerator wiring as *paper-correct only* until their
 test-plan rows flip to ✅.  The first silicon-verified rows landed
-in v0.6 — the V2N GD32-bridge campaign (see the v0.6.0 section of
-[`docs/test-plan.md`](docs/test-plan.md)) — and the V2N Yocto image
-boots the bench board; everything else remains pre-HIL.  Per-driver
+in v0.6 — the V2N GD32-bridge campaign (SPI/I²C link, A/B OTA, Tier-B
+loopback, protocol negotiation, all validated end-to-end). v0.8
+expanded verified coverage to AEN801 (E1M-AEN-family Alif Ensemble E8:
+15/17 peripheral apps on real silicon) and CC3501E (Wi-Fi/BLE scan,
+GPIO proxy, warm-program flow); breadth beyond these families remains
+pre-HIL.  Per-driver
 verification status is recorded in `metadata/chips/<name>.yaml`'s
 `verification:` block and as `@par Verification status: [UNTESTED]`
 Doxygen tags on public headers.  Customers shipping production

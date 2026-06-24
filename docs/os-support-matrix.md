@@ -10,16 +10,14 @@ Status keys:
 - **planned** — declared roadmap, no code yet.
 - **n/a** — combination not targeted.
 
-> **Calibration note (2026-05-11; updated 2026-06-12).** Many rows tagged
-> **GA** below reference work the original v0.1 / v0.2 cycles completed
-> *to the code-merged bar*.  The first silicon-verified slice is the v0.6
-> E1M-X V2N GD32-bridge campaign (see the v0.6.0 "verified on the bench"
-> section of [`test-plan.md`](test-plan.md)); the **GA** rows in *this*
-> matrix — the AEN-class Zephyr columns — have **not** had their own
-> canonical HIL run yet (the `nightly-aen-hil.yml` skeleton needs a
-> self-hosted runner per [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md)).
-> Treat every **GA** entry as "code complete, awaiting HIL" until the
-> matching `test-plan.md` row flips to ✅.
+> **Calibration note (2026-06-24; updated 2026-06-24).** v0.8.0 ships
+> silicon-verified silicon: V2N GD32-bridge campaign (since v0.6),
+> AEN801 (E8) peripheral matrix (15/17 apps PASS on real silicon, 2
+> PARTIAL hardware-gated), and cc3501e bridge (hardware SS0, real
+> BLE/Wi-Fi scan, GPIO proxy, production warm-program flow) — all on
+> real silicon.  The **GA** rows marking code-complete AEN-Zephyr work
+> reference pre-v0.8 maturity; see the v0.8.0 CHANGELOG for what is now
+> silicon-verified.
 
 Each column targets a **`<SoM>: <core_id> <runtime>`** triple — the
 SDK now builds each on-die programmable core independently.  Within
@@ -201,7 +199,7 @@ hasn't been measured.
 | Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are now **real, bench-unverified** (link needs the Yocto sysroot; default-off Kconfig) — #58/#59; `tflm`/`ethos_u` paths still untested |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
-| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim; D/AVE 2D needs an AEN EVK + the Alif pack — #24.  (AEN 2D engine is **D/AVE 2D**, not Mali-D71; i.MX 93 = PXP, no Vivante) |
+| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim; D/AVE 2D bench-unverified.  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = PXP, no Vivante) |
 | Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
 | Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
 

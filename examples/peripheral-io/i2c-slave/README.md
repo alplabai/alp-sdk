@@ -5,10 +5,10 @@ Alp SDK.
 
 ## SDK gap notice
 
-**As of v0.6 the Alp SDK does NOT support I2C slave mode through
+**As of v0.8.0 the Alp SDK does NOT support I2C slave mode through
 `<alp/peripheral.h>`.**  The header exposes master-only calls
 (`alp_i2c_open`, `alp_i2c_write`, `alp_i2c_read`,
-`alp_i2c_write_read`).  Slave-mode support is planned for v0.7.
+`alp_i2c_write_read`).  Slave-mode support is tracked for future release.
 
 This example exists to:
 

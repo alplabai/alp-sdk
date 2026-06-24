@@ -5,10 +5,10 @@ Alp SDK.
 
 ## SDK gap notice
 
-**As of v0.6 the Alp SDK does NOT support SPI slave mode through
+**As of v0.8.0 the Alp SDK does NOT support SPI slave mode through
 `<alp/peripheral.h>`.**  The header exposes master-only calls
 (`alp_spi_open`, `alp_spi_write`, `alp_spi_read`,
-`alp_spi_transceive`).  Slave-mode support is planned for v0.7.
+`alp_spi_transceive`).  Slave-mode support is tracked for future release.
 
 Note: Zephyr's own SPI slave support is itself patchy -- many SoC
 drivers don't implement `spi_slave_register`.  When the Alp SDK
