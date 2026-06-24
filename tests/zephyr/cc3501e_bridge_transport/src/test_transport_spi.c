@@ -358,9 +358,8 @@ ZTEST(cc3501e_bridge_transport, test_wifi_connect_sta_parses_then_not_ready)
 	n = drain(reply, sizeof reply);
 	zassert_equal(n, 5u, "re-issued connect reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_CONNECT_STA, 1u);
-	zassert_equal(reply[4],
-	              ALP_CC3501E_RESP_ERR_NOT_READY,
-	              "re-issued CONNECT on stub -> NOT_READY");
+	zassert_equal(
+	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued CONNECT on stub -> NOT_READY");
 }
 
 ZTEST(cc3501e_bridge_transport, test_wifi_connect_bad_len_invalid)
