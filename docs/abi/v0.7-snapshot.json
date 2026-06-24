@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-14",
+  "generated": "2026-06-24",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -58,22 +58,6 @@
         "alp_adc_stream_read": {
           "hash": "87c7b34244772693",
           "signature": "alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got);"
-        },
-        "alp_dac_close": {
-          "hash": "36ff8acebd09531e",
-          "signature": "void alp_dac_close(alp_dac_t *dac);"
-        },
-        "alp_dac_open": {
-          "hash": "75d205275f109f14",
-          "signature": "alp_dac_t * alp_dac_open(const alp_dac_config_t *cfg);"
-        },
-        "alp_dac_read_mv": {
-          "hash": "05d55c9c26cb2b19",
-          "signature": "alp_status_t alp_dac_read_mv(alp_dac_t *dac, uint16_t *mv_out);"
-        },
-        "alp_dac_write_mv": {
-          "hash": "34624e3c2a105340",
-          "signature": "alp_status_t alp_dac_write_mv(alp_dac_t *dac, uint16_t mv);"
         }
       },
       "macros": {},
@@ -97,10 +81,6 @@
         "alp_adc_t": {
           "definition": "typedef struct alp_adc alp_adc_t;",
           "hash": "4f8bac696c999352"
-        },
-        "alp_dac_t": {
-          "definition": "typedef struct alp_dac alp_dac_t;",
-          "hash": "3ff97013ba7cfc44"
         },
         "channel_id": {
           "definition": "typedef struct { uint32_t channel_id;",
@@ -466,16 +446,16 @@
           "value": "EVK_PIN_CK_RST"
         },
         "EVK_I2C_ADDR_BMI323": {
-          "hash": "7905a85f0e62124c",
-          "value": "0x68u"
+          "hash": "b3ac50a48d2dabd8",
+          "value": ""
         },
         "EVK_I2C_ADDR_BMP581": {
           "hash": "e1b07d9176a943fb",
           "value": "0x47u"
         },
         "EVK_I2C_ADDR_ICM42670": {
-          "hash": "6b23f7f55f17ed2f",
-          "value": "0x69u"
+          "hash": "b13a0c0e775e3738",
+          "value": ""
         },
         "EVK_I2C_ADDR_INA236_1V8": {
           "hash": "e6b1e66392071f8a",
@@ -508,6 +488,10 @@
         "EVK_I2C_ADDR_TAS2563_LOW": {
           "hash": "30f8c138329a7e74",
           "value": "0x4Du"
+        },
+        "EVK_I2C_ADDR_TCA6408A_MAIN": {
+          "hash": "ff97f8a717d7b230",
+          "value": "0x20u"
         },
         "EVK_I2C_ADDR_TCAL9538": {
           "hash": "5c453e3611f54eb9",
@@ -935,6 +919,92 @@
         "EVK_UART_PORT_DEBUG": {
           "hash": "dcb7782f1fd4f742",
           "value": "E1M_UART0"
+        }
+      },
+      "typedefs": {}
+    },
+    "alp/boards/alp_e1m_x_evk.h": {
+      "functions": {},
+      "macros": {
+        "XEVK_I2C_ADDR_BMI323": {
+          "hash": "147256ab601db207",
+          "value": "0x68u"
+        },
+        "XEVK_I2C_ADDR_BMP581": {
+          "hash": "b976093422c5cdda",
+          "value": "0x47u"
+        },
+        "XEVK_I2C_ADDR_EEPROM": {
+          "hash": "76b65f6a82adb5b8",
+          "value": "0x50u"
+        },
+        "XEVK_I2C_ADDR_ICM42670": {
+          "hash": "6dec10e01fc58f24",
+          "value": "0x69u"
+        },
+        "XEVK_I2C_ADDR_INA236_1V8": {
+          "hash": "c2c588a9640f949e",
+          "value": "0x41u"
+        },
+        "XEVK_I2C_ADDR_INA236_3V3": {
+          "hash": "db2f615e7a9f47af",
+          "value": "0x40u"
+        },
+        "XEVK_I2C_ADDR_INA236_5V": {
+          "hash": "eca71276506e3164",
+          "value": "0x4Au"
+        },
+        "XEVK_I2C_ADDR_INA236_VCAM2": {
+          "hash": "b0c8b41cc03008ca",
+          "value": ""
+        },
+        "XEVK_I2C_ADDR_INA236_VCAM3": {
+          "hash": "502c24fa73d812fc",
+          "value": ""
+        },
+        "XEVK_I2C_ADDR_TCAL9538": {
+          "hash": "bd0e087dfca18e44",
+          "value": "0x72u"
+        },
+        "XEVK_INA236_MAX_1V8_A": {
+          "hash": "e731d428bed9c0fa",
+          "value": "4.0f"
+        },
+        "XEVK_INA236_MAX_3V3_A": {
+          "hash": "230bcba87b062cad",
+          "value": "4.0f"
+        },
+        "XEVK_INA236_MAX_5V_A": {
+          "hash": "4388c012e9236a27",
+          "value": "4.0f"
+        },
+        "XEVK_INA236_MAX_VCAM2_A": {
+          "hash": "c59a2d78669ccdab",
+          "value": "1.6f"
+        },
+        "XEVK_INA236_MAX_VCAM3_A": {
+          "hash": "e26ab29d67af4a26",
+          "value": "1.6f"
+        },
+        "XEVK_INA236_SHUNT_1V8_OHMS": {
+          "hash": "1f9891c6d2e87cdd",
+          "value": "0.020f"
+        },
+        "XEVK_INA236_SHUNT_3V3_OHMS": {
+          "hash": "88f3faeabe5c8b6e",
+          "value": "0.020f"
+        },
+        "XEVK_INA236_SHUNT_5V_OHMS": {
+          "hash": "1feb8cead916ad78",
+          "value": "0.020f"
+        },
+        "XEVK_INA236_SHUNT_VCAM2_OHMS": {
+          "hash": "b15eb3300a05111b",
+          "value": "0.050f"
+        },
+        "XEVK_INA236_SHUNT_VCAM3_OHMS": {
+          "hash": "9a8467d4d73bb732",
+          "value": "0.050f"
         }
       },
       "typedefs": {}
@@ -1945,6 +2015,22 @@
     },
     "alp/chips/cc3501e.h": {
       "functions": {
+        "alp_gpio_cc3501e_attach": {
+          "hash": "975f356be3f3038d",
+          "signature": "alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx);"
+        },
+        "cc3501e_ble_enable": {
+          "hash": "90164016198120b9",
+          "signature": "alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms);"
+        },
+        "cc3501e_ble_scan": {
+          "hash": "86e2819557a0c4b3",
+          "signature": "alp_status_t cc3501e_ble_scan(cc3501e_t *ctx, cc3501e_ble_scan_record_t *out_records, size_t cap, size_t *count, uint32_t timeout_ms);"
+        },
+        "cc3501e_cam_enable": {
+          "hash": "2d17bbe2c00c975e",
+          "signature": "alp_status_t cc3501e_cam_enable(cc3501e_t *ctx, uint8_t which, bool on, uint32_t timeout_ms);"
+        },
         "cc3501e_deinit": {
           "hash": "8fc892d1d03fcca7",
           "signature": "void cc3501e_deinit(cc3501e_t *ctx);"
@@ -1953,9 +2039,57 @@
           "hash": "c358ccfe7990379b",
           "signature": "alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);"
         },
+        "cc3501e_gpio_configure": {
+          "hash": "a4c64321c4e8ea5b",
+          "signature": "alp_status_t cc3501e_gpio_configure(cc3501e_t *ctx, uint8_t pad, alp_cc3501e_gpio_direction_t dir, alp_cc3501e_gpio_pull_t pull, uint32_t timeout_ms);"
+        },
+        "cc3501e_gpio_read": {
+          "hash": "614527667a36418e",
+          "signature": "alp_status_t cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uint32_t timeout_ms);"
+        },
+        "cc3501e_gpio_set_interrupt": {
+          "hash": "d7eeda9ef492012a",
+          "signature": "alp_status_t cc3501e_gpio_set_interrupt(cc3501e_t *ctx, uint8_t pad, alp_cc3501e_gpio_edge_t edge, bool enabled, uint32_t timeout_ms);"
+        },
+        "cc3501e_gpio_write": {
+          "hash": "1a0a0bce2339467c",
+          "signature": "alp_status_t cc3501e_gpio_write(cc3501e_t *ctx, uint8_t pad, bool level, uint32_t timeout_ms);"
+        },
+        "cc3501e_hard_reset": {
+          "hash": "28f1213b44a2144c",
+          "signature": "alp_status_t cc3501e_hard_reset(cc3501e_t *ctx);"
+        },
         "cc3501e_init": {
           "hash": "19d86d4f31421379",
           "signature": "alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus);"
+        },
+        "cc3501e_ota_abort": {
+          "hash": "95d86bdbc6c79eab",
+          "signature": "alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);"
+        },
+        "cc3501e_ota_begin": {
+          "hash": "b02201b3ad5aee3d",
+          "signature": "alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t timeout_ms);"
+        },
+        "cc3501e_ota_finish": {
+          "hash": "f54c3b104ab33dfe",
+          "signature": "alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms);"
+        },
+        "cc3501e_ota_status": {
+          "hash": "43a376a98bf1fd66",
+          "signature": "alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, uint32_t timeout_ms);"
+        },
+        "cc3501e_ota_update": {
+          "hash": "1df6029d27ff4e3f",
+          "signature": "alp_status_t cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t timeout_ms);"
+        },
+        "cc3501e_ota_write": {
+          "hash": "864d474aa2153b8c",
+          "signature": "alp_status_t cc3501e_ota_write(cc3501e_t *ctx, uint32_t offset, const uint8_t *data, size_t len, uint32_t timeout_ms);"
+        },
+        "cc3501e_power_policy": {
+          "hash": "5fed7bfe53c7205e",
+          "signature": "alp_status_t cc3501e_power_policy(cc3501e_t *ctx, const alp_cc3501e_power_policy_t *policy, uint32_t timeout_ms);"
         },
         "cc3501e_request": {
           "hash": "4394de213fad8378",
@@ -1968,10 +2102,59 @@
         "cc3501e_set_event_callback": {
           "hash": "518c5cd8722d69fc",
           "signature": "alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);"
+        },
+        "cc3501e_sync": {
+          "hash": "0a45ddf6957a686e",
+          "signature": "alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);"
+        },
+        "cc3501e_wifi_connect": {
+          "hash": "33db68006b4a08fe",
+          "signature": "alp_status_t cc3501e_wifi_connect(cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);"
+        },
+        "cc3501e_wifi_get_ip": {
+          "hash": "b463b4a2535b3d65",
+          "signature": "alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);"
+        },
+        "cc3501e_wifi_get_mac": {
+          "hash": "6e72c8ca6ed982bf",
+          "signature": "define CC3501E_MAC_LEN 6u alp_status_t cc3501e_wifi_get_mac(cc3501e_t *ctx, uint8_t mac[CC3501E_MAC_LEN], uint32_t timeout_ms);"
+        },
+        "cc3501e_wifi_rssi": {
+          "hash": "60c1d11b13c1025d",
+          "signature": "alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi);"
+        },
+        "cc3501e_wifi_scan": {
+          "hash": "624698bc2548730a",
+          "signature": "alp_status_t cc3501e_wifi_scan(cc3501e_t *ctx, cc3501e_scan_record_t *out_records, size_t cap, size_t *count, uint32_t timeout_ms);"
+        },
+        "cc3501e_wifi_sec_kind": {
+          "hash": "abe1748964ec79c8",
+          "signature": "cc3501e_wifi_sec_t cc3501e_wifi_sec_kind(uint16_t security_info);"
+        },
+        "cc3501e_wifi_sec_name": {
+          "hash": "dd5cbf349356b45d",
+          "signature": "const char * cc3501e_wifi_sec_name(uint16_t security_info);"
         }
       },
-      "macros": {},
+      "macros": {
+        "CC3501E_BLE_NAME_MAX": {
+          "hash": "d2312fbee8980e8a",
+          "value": "31u"
+        },
+        "CC3501E_MAC_LEN": {
+          "hash": "7d92f3b95b04a7e3",
+          "value": "6u"
+        },
+        "CC3501E_SSID_MAX": {
+          "hash": "7429591951fba979",
+          "value": "32u"
+        }
+      },
       "typedefs": {
+        "addr_type": {
+          "definition": "typedef struct { uint8_t addr[6]; uint8_t addr_type;",
+          "hash": "418c22f1491ef242"
+        },
         "cc3501e_event_cb_t": {
           "definition": "typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t len, void *user);",
           "hash": "b89208474f7bc2be"
@@ -1980,9 +2163,21 @@
           "definition": "typedef struct cc3501e cc3501e_t;",
           "hash": "7dec90f1a26a3e52"
         },
+        "cc3501e_wifi_sec_t": {
+          "definition": "typedef enum { CC3501E_WIFI_SEC_OPEN = 0, CC3501E_WIFI_SEC_WEP = 1, CC3501E_WIFI_SEC_WPA = 2, CC3501E_WIFI_SEC_WPA2 = 3, CC3501E_WIFI_SEC_WPA3 = 4, CC3501E_WIFI_SEC_UNKNOWN = 255, } cc3501e_wifi_sec_t;",
+          "hash": "4dd9b7539fedd924"
+        },
         "initialised": {
           "definition": "typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t len, void *user); struct cc3501e { bool initialised;",
           "hash": "1cb60073ac062bd6"
+        },
+        "pin_id": {
+          "definition": "typedef struct { uint32_t pin_id;",
+          "hash": "9f71d76559ad7ccc"
+        },
+        "rssi_dbm": {
+          "definition": "typedef struct { uint8_t bssid[6]; int8_t rssi_dbm;",
+          "hash": "f06a5cbf128d258c"
         }
       }
     },
@@ -5594,6 +5789,37 @@
         }
       }
     },
+    "alp/dac.h": {
+      "functions": {
+        "alp_dac_close": {
+          "hash": "36ff8acebd09531e",
+          "signature": "void alp_dac_close(alp_dac_t *dac);"
+        },
+        "alp_dac_open": {
+          "hash": "75d205275f109f14",
+          "signature": "alp_dac_t * alp_dac_open(const alp_dac_config_t *cfg);"
+        },
+        "alp_dac_read_mv": {
+          "hash": "05d55c9c26cb2b19",
+          "signature": "alp_status_t alp_dac_read_mv(alp_dac_t *dac, uint16_t *mv_out);"
+        },
+        "alp_dac_write_mv": {
+          "hash": "34624e3c2a105340",
+          "signature": "alp_status_t alp_dac_write_mv(alp_dac_t *dac, uint16_t mv);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_dac_t": {
+          "definition": "typedef struct alp_dac alp_dac_t;",
+          "hash": "3ff97013ba7cfc44"
+        },
+        "channel_id": {
+          "definition": "typedef struct { uint32_t channel_id;",
+          "hash": "b9a759f74c683398"
+        }
+      }
+    },
     "alp/display.h": {
       "functions": {
         "alp_display_blit": {
@@ -7929,9 +8155,17 @@
           "hash": "420aff122ca4629c",
           "value": "512"
         },
+        "ALP_CC3501E_OTA_MAX_CHUNK": {
+          "hash": "e3084f25bfd8ee65",
+          "value": "(ALP_CC3501E_MAX_PAYLOAD - 4u)"
+        },
         "ALP_CC3501E_PROTOCOL_VERSION": {
           "hash": "230499938620b789",
           "value": "1"
+        },
+        "ALP_CC3501E_SYNC_IDLE": {
+          "hash": "1b62c9b80bf39ade",
+          "value": "0xA5u"
         },
         "ALP_CC3501E_WAKE_BLE_ADV": {
           "hash": "ed93eeca458a2951",
@@ -7968,8 +8202,8 @@
           "hash": "4e46a21806d6caeb"
         },
         "alp_cc3501e_cmd_t": {
-          "definition": "typedef enum { ALP_CC3501E_CMD_PING = 0x00, ALP_CC3501E_CMD_GET_VERSION = 0x01, ALP_CC3501E_CMD_RESET = 0x02, ALP_CC3501E_CMD_GET_MAC = 0x03, ALP_CC3501E_CMD_GET_DIAG_INFO = 0x04, ALP_CC3501E_CMD_WIFI_SCAN_START = 0x10, ALP_CC3501E_CMD_WIFI_SCAN_STOP = 0x11, ALP_CC3501E_CMD_WIFI_CONNECT_STA = 0x12, ALP_CC3501E_CMD_WIFI_DISCONNECT = 0x13, ALP_CC3501E_CMD_WIFI_AP_START = 0x14, ALP_CC3501E_CMD_WIFI_AP_STOP = 0x15, ALP_CC3501E_CMD_WIFI_GET_RSSI = 0x16, ALP_CC3501E_CMD_WIFI_GET_IP = 0x17, ALP_CC3501E_EVT_WIFI_SCAN_RESULT = 0x18, ALP_CC3501E_EVT_WIFI_CONNECTED = 0x19, ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, ALP_CC3501E_CMD_SOCK_OPEN = 0x20, ALP_CC3501E_CMD_SOCK_CONNECT = 0x21, ALP_CC3501E_CMD_SOCK_SEND = 0x22, ALP_CC3501E_CMD_SOCK_RECV = 0x23, ALP_CC3501E_CMD_SOCK_CLOSE = 0x24, ALP_CC3501E_CMD_BLE_ENABLE = 0x30, ALP_CC3501E_CMD_BLE_DISABLE = 0x31, ALP_CC3501E_CMD_BLE_ADV_START = 0x32, ALP_CC3501E_CMD_BLE_ADV_STOP = 0x33, ALP_CC3501E_CMD_BLE_SCAN_START = 0x34, ALP_CC3501E_CMD_BLE_SCAN_STOP = 0x35, ALP_CC3501E_CMD_BLE_CONNECT = 0x36, ALP_CC3501E_CMD_BLE_DISCONNECT = 0x37, ALP_CC3501E_CMD_BLE_GATT_REGISTER = 0x38, ALP_CC3501E_CMD_BLE_GATT_NOTIFY = 0x39, ALP_CC3501E_CMD_BLE_GATT_READ = 0x3A, ALP_CC3501E_CMD_BLE_GATT_WRITE = 0x3B, ALP_CC3501E_EVT_BLE_ADV_REPORT = 0x3C, ALP_CC3501E_EVT_BLE_CONNECTED = 0x3D, ALP_CC3501E_EVT_BLE_DISCONNECTED = 0x3E, ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, ALP_CC3501E_CMD_GPIO_CONFIGURE = 0x50, ALP_CC3501E_CMD_GPIO_WRITE = 0x51, ALP_CC3501E_CMD_GPIO_READ = 0x52, ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53, ALP_CC3501E_EVT_GPIO_INTERRUPT = 0x54, ALP_CC3501E_CMD_CAM_ENABLE = 0x60, ALP_CC3501E_CMD_CAM_DISABLE = 0x61, ALP_CC3501E_CMD_POWER_POLICY = 0x62, ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70, ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71, } alp_cc3501e_cmd_t;",
-          "hash": "473e286ad1882e0f"
+          "definition": "typedef enum { ALP_CC3501E_CMD_PING = 0x00, ALP_CC3501E_CMD_GET_VERSION = 0x01, ALP_CC3501E_CMD_RESET = 0x02, ALP_CC3501E_CMD_GET_MAC = 0x03, ALP_CC3501E_CMD_GET_DIAG_INFO = 0x04, ALP_CC3501E_CMD_WIFI_SCAN_START = 0x10, ALP_CC3501E_CMD_WIFI_SCAN_STOP = 0x11, ALP_CC3501E_CMD_WIFI_CONNECT_STA = 0x12, ALP_CC3501E_CMD_WIFI_DISCONNECT = 0x13, ALP_CC3501E_CMD_WIFI_AP_START = 0x14, ALP_CC3501E_CMD_WIFI_AP_STOP = 0x15, ALP_CC3501E_CMD_WIFI_GET_RSSI = 0x16, ALP_CC3501E_CMD_WIFI_GET_IP = 0x17, ALP_CC3501E_EVT_WIFI_SCAN_RESULT = 0x18, ALP_CC3501E_EVT_WIFI_CONNECTED = 0x19, ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, ALP_CC3501E_CMD_WIFI_STATUS = 0x1B, ALP_CC3501E_CMD_SOCK_OPEN = 0x20, ALP_CC3501E_CMD_SOCK_CONNECT = 0x21, ALP_CC3501E_CMD_SOCK_SEND = 0x22, ALP_CC3501E_CMD_SOCK_RECV = 0x23, ALP_CC3501E_CMD_SOCK_CLOSE = 0x24, ALP_CC3501E_CMD_BLE_ENABLE = 0x30, ALP_CC3501E_CMD_BLE_DISABLE = 0x31, ALP_CC3501E_CMD_BLE_ADV_START = 0x32, ALP_CC3501E_CMD_BLE_ADV_STOP = 0x33, ALP_CC3501E_CMD_BLE_SCAN_START = 0x34, ALP_CC3501E_CMD_BLE_SCAN_STOP = 0x35, ALP_CC3501E_CMD_BLE_CONNECT = 0x36, ALP_CC3501E_CMD_BLE_DISCONNECT = 0x37, ALP_CC3501E_CMD_BLE_GATT_REGISTER = 0x38, ALP_CC3501E_CMD_BLE_GATT_NOTIFY = 0x39, ALP_CC3501E_CMD_BLE_GATT_READ = 0x3A, ALP_CC3501E_CMD_BLE_GATT_WRITE = 0x3B, ALP_CC3501E_EVT_BLE_ADV_REPORT = 0x3C, ALP_CC3501E_EVT_BLE_CONNECTED = 0x3D, ALP_CC3501E_EVT_BLE_DISCONNECTED = 0x3E, ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, ALP_CC3501E_CMD_OTA_BEGIN = 0x40, ALP_CC3501E_CMD_OTA_WRITE = 0x41, ALP_CC3501E_CMD_OTA_FINISH = 0x42, ALP_CC3501E_CMD_OTA_ABORT = 0x43, ALP_CC3501E_CMD_OTA_STATUS = 0x44, ALP_CC3501E_CMD_GPIO_CONFIGURE = 0x50, ALP_CC3501E_CMD_GPIO_WRITE = 0x51, ALP_CC3501E_CMD_GPIO_READ = 0x52, ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53, ALP_CC3501E_EVT_GPIO_INTERRUPT = 0x54, ALP_CC3501E_CMD_CAM_ENABLE = 0x60, ALP_CC3501E_CMD_CAM_DISABLE = 0x61, ALP_CC3501E_CMD_POWER_POLICY = 0x62, ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70, ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71, } alp_cc3501e_cmd_t;",
+          "hash": "a19fcbc801650d61"
         },
         "alp_cc3501e_gpio_direction_t": {
           "definition": "typedef enum { ALP_CC3501E_GPIO_DIR_INPUT = 0u, ALP_CC3501E_GPIO_DIR_OUTPUT = 1u, ALP_CC3501E_GPIO_DIR_OPEN_DRAIN = 2u, } alp_cc3501e_gpio_direction_t;",
@@ -7982,6 +8216,10 @@
         "alp_cc3501e_gpio_pull_t": {
           "definition": "typedef enum { ALP_CC3501E_GPIO_PULL_NONE = 0u, ALP_CC3501E_GPIO_PULL_UP = 1u, ALP_CC3501E_GPIO_PULL_DOWN = 2u, } alp_cc3501e_gpio_pull_t;",
           "hash": "43981a77665baaee"
+        },
+        "alp_cc3501e_ota_state_t": {
+          "definition": "typedef enum { ALP_CC3501E_OTA_STATE_IDLE = 0u, ALP_CC3501E_OTA_STATE_WRITING = 1u, ALP_CC3501E_OTA_STATE_STAGED = 2u, ALP_CC3501E_OTA_STATE_ERROR = 3u, } alp_cc3501e_ota_state_t;",
+          "hash": "5e6275e290ba2be3"
         },
         "alp_cc3501e_pp_preset_t": {
           "definition": "typedef enum { ALP_CC3501E_PP_PERFORMANCE = 0u, ALP_CC3501E_PP_BALANCED = 1u, ALP_CC3501E_PP_LOW_POWER = 2u, ALP_CC3501E_PP_DEEP_SLEEP = 3u, } alp_cc3501e_pp_preset_t;",
@@ -8007,6 +8245,14 @@
           "definition": "typedef enum { ALP_CC3501E_SOCK_TYPE_STREAM = 0u, ALP_CC3501E_SOCK_TYPE_DGRAM = 1u, } alp_cc3501e_sock_type_t;",
           "hash": "047a5c0b5ebddc53"
         },
+        "alp_cc3501e_wifi_conn_state_t": {
+          "definition": "typedef enum { ALP_CC3501E_WIFI_DISCONNECTED = 0u, ALP_CC3501E_WIFI_CONNECTING = 1u, ALP_CC3501E_WIFI_CONNECTED = 2u, ALP_CC3501E_WIFI_CONN_FAILED = 3u, } alp_cc3501e_wifi_conn_state_t;",
+          "hash": "e3d19151c1049c73"
+        },
+        "alp_cc3501e_wifi_fail_t": {
+          "definition": "typedef enum { ALP_CC3501E_WIFI_FAIL_NONE = 0u, ALP_CC3501E_WIFI_FAIL_TIMEOUT = 1u, ALP_CC3501E_WIFI_FAIL_REJECTED = 2u, ALP_CC3501E_WIFI_FAIL_KICK = 3u, } alp_cc3501e_wifi_fail_t;",
+          "hash": "1238a23f71ec45a4"
+        },
         "cc3501e_gpio": {
           "definition": "typedef struct { uint8_t cc3501e_gpio;",
           "hash": "18eeca2e86e7f75a"
@@ -8031,6 +8277,10 @@
           "definition": "typedef struct { uint16_t handle;",
           "hash": "ca2cf89fafae5013"
         },
+        "offset": {
+          "definition": "typedef struct { uint32_t offset;",
+          "hash": "f4ac1cc0cfc78c77"
+        },
         "policy": {
           "definition": "typedef struct { uint8_t policy;",
           "hash": "69643bd470723c49"
@@ -8042,6 +8292,14 @@
         "ssid_len": {
           "definition": "typedef struct { uint8_t ssid_len;",
           "hash": "cda49dbaf1de5864"
+        },
+        "state": {
+          "definition": "typedef struct { uint8_t state;",
+          "hash": "0fb8163287058f19"
+        },
+        "total_len": {
+          "definition": "typedef struct { uint32_t total_len;",
+          "hash": "0881e3b445e75df8"
         }
       }
     },

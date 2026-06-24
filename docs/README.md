@@ -87,6 +87,10 @@ into the topic-specific docs.
 - [cc3501e-integration-plan.md](cc3501e-integration-plan.md) —
   SWRU626 deep-dive informing the CC3501E host + firmware wire
   protocol (research-only).
+- [cc3501e-production.md](cc3501e-production.md) — building,
+  signing, and provisioning a shippable CC3501E coprocessor image.
+- [cc3501e-gpio-bench.md](cc3501e-gpio-bench.md) — warm-boot bench
+  validation of the CC3501E GPIO proxy (machine-checkable contract).
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
