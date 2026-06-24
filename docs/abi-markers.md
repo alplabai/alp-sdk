@@ -51,8 +51,8 @@ the PR for experimental symbols.
 |-----------------------|--------------------|-------------------------------------------------------------------|
 | `peripheral.h` (I²C/SPI/UART/GPIO) | `[ABI-STABLE]` | v0.1 surface; locked across every since-then release. |
 | `pwm.h`               | `[ABI-STABLE]`     | v0.2 surface; locked.                                             |
-| `adc.h`               | `[ABI-STABLE]`     | v0.2 + v0.5 additive (filter/spectrum handle types).  Base surface stable; new `alp_adc_filter_t` / `alp_adc_spectrum_t` may evolve `[ABI-EXPERIMENTAL]` at function granularity.  v0.8.0 (unreleased / current dev): the DAC half (`alp_dac_*`) split out to `dac.h` (same signatures; a source-include move, not a symbol change). |
-| `dac.h`               | `[ABI-STABLE]`     | v0.1 surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`); split out of `adc.h` into its own header in v0.8.0 (unreleased / current dev) when DAC moved to the registry/dispatcher pattern.  Signatures unchanged. |
+| `adc.h`               | `[ABI-STABLE]`     | v0.2 + v0.5 additive (filter/spectrum handle types).  Base surface stable; new `alp_adc_filter_t` / `alp_adc_spectrum_t` may evolve `[ABI-EXPERIMENTAL]` at function granularity.  v0.8.0: the DAC half (`alp_dac_*`) split out to `dac.h` (same signatures; a source-include move, not a symbol change). |
+| `dac.h`               | `[ABI-STABLE]`     | v0.1 surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`); split out of `adc.h` into its own header in v0.8.0 when DAC moved to the registry/dispatcher pattern.  Signatures unchanged. |
 | `counter.h`           | `[ABI-STABLE]`     | v0.2.                                                              |
 | `i2s.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
 | `can.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
