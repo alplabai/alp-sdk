@@ -134,11 +134,19 @@ static WlanNetworkEntry_t wifi_scan_cache[WIFI_SCAN_CACHE_MAX];
  * the worker).  Snapshots the result the issuing op is waiting on, then signals
  * the rendezvous.  GET_MAC takes no event (blocking get) so it is not handled
  * here.  osi_SyncObjSignal (not *FromISR): the cb is thread context. */
+/* DIAG: count EVERY Wi-Fi event the host-driver task delivers + record the last
+ * Id, so a scan that never returns SCAN_RESULT can be split: NWP fired NO event
+ * at all (RX/scan-engine stall -> antenna/HW) vs fired OTHER events (cb gap). */
+static volatile uint32_t wifi_cb_event_count;
+static volatile uint32_t wifi_cb_last_id;
+
 static void wifi_event_cb(WlanEvent_t *event)
 {
 	if (event == NULL) {
 		return;
 	}
+	wifi_cb_event_count++;
+	wifi_cb_last_id = (uint32_t)event->Id;
 	switch (event->Id) {
 	case WLAN_EVENT_SCAN_RESULT: {
 		uint32_t n = event->Data.ScanResult.NetworkListResultLen;
@@ -150,6 +158,34 @@ static void wifi_event_cb(WlanEvent_t *event)
 		}
 		wifi_scan_count  = n;
 		wifi_last_status = 0;
+		osi_SyncObjSignal(&wifi_event_sync);
+		break;
+	}
+	case WLAN_EVENT_EXTENDED_SCAN_RESULT: {
+		/* The NWP delivers scan results in the EXTENDED format -- a pointer to a
+		 * separate list -- not WLAN_EVENT_SCAN_RESULT.  Its entries share the
+		 * same leading fields as the normal WlanNetworkEntry_t, so copy those
+		 * into the same cache the wire-packer reads.  WITHOUT this case the cb
+		 * dropped the only event the scan fired and the host saw -4 (proven by
+		 * the event-count diag + the TI SDK two-event model). */
+		WlanEventExtendedScanResult_t *ext = event->Data.pExtendedScanResult;
+		const int ext_null = (ext == NULL || ext->NetworkListResult == NULL) ? 1 : 0;
+		uint32_t  n        = ext_null ? 0u : ext->NetworkListResultLen;
+		if (n > WIFI_SCAN_CACHE_MAX) {
+			n = WIFI_SCAN_CACHE_MAX;
+		}
+		for (uint32_t i = 0; i < n; i++) {
+			const WlanNetworkEntryExtended_t *e = &ext->NetworkListResult[i];
+			memcpy(wifi_scan_cache[i].Ssid, e->Ssid, WLAN_SSID_MAX_LENGTH);
+			memcpy(wifi_scan_cache[i].Bssid, e->Bssid, WLAN_BSSID_LENGTH);
+			wifi_scan_cache[i].SsidLen      = e->SsidLen;
+			wifi_scan_cache[i].Rssi         = e->Rssi;
+			wifi_scan_cache[i].SecurityInfo = e->SecurityInfo;
+			wifi_scan_cache[i].Channel      = e->Channel;
+		}
+		wifi_scan_count = n;
+		wifi_last_status =
+		    ext_null ? -77 : 0; /* DIAG: -77 = EXTENDED event had a NULL data pointer */
 		osi_SyncObjSignal(&wifi_event_sync);
 		break;
 	}
@@ -169,6 +205,17 @@ static void wifi_event_cb(WlanEvent_t *event)
 		break; /* CONNECTING / peer / P2P / etc. -- not awaited here */
 	}
 }
+
+/* DIAG: last Wi-Fi event Id the cb saw (any type) + the running count, surfaced
+ * via GET_DIAG_INFO so the host can identify which event the scan actually fires
+ * when neither SCAN_RESULT nor EXTENDED_SCAN_RESULT signals. */
+uint32_t cc3501e_hw_wifi_last_event_id(void)
+{
+	return wifi_cb_last_id;
+}
+
+/* Defined below; boot_start pre-caches the STA role through it. */
+static int cc3501e_hw_wifi_ensure_sta_role(void);
 
 /* Bring the CC35xx Wi-Fi host up to STA role once.  Returns CC3501E_HW_OK
  * when the stack is up (already-started is OK), CC3501E_HW_ERR_IO on a
@@ -218,12 +265,56 @@ static int cc3501e_hw_wifi_lazy_start(void)
  * link is re-armed at a clean header boundary before the first host command. */
 void cc3501e_hw_wifi_boot_start(void)
 {
+	cc3501e_bridge_busy(); /* configure GPIO17 + hold the host off through the boot radio init */
 	(void)cc3501e_hw_wifi_lazy_start();
+	/* Bring the STA role up ONCE here at boot, before the host polls.  RoleUp is a
+	 * HEAVY radio op that needs the bridge quiesced (suspend) to kick; doing it in
+	 * the scan hot path made the scan's bridge-down window ~30s and churned the
+	 * link (the suspend's SPI_close/open) past re-sync.  Pre-cached here, each later scan is just a LIGHT
+	 * Wlan_Scan (role already up) that kicks with NO suspend -- like GET_MAC's
+	 * Wlan_Get.  Suspend for the RoleUp, then reinit the bridge clean. */
+	bridge_transport_spi_hw_suspend();
+	(void)cc3501e_hw_wifi_ensure_sta_role();
+	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready(); /* boot radio init done, slave armed -> host may clock */
+}
+
+/* Bring up the lwIP TCP/IP core ONCE, EARLY -- called from bringup_task BEFORE
+ * transport_spi_init() spawns the busy-poll bridge slave task AND before the radio
+ * is lazy-started.  WHY this exact spot (root-caused on silicon 2026-06-23): tcpip_init
+ * spawns the lwIP tcpip thread then sys_sem_wait()s for it to start.  Run from the
+ * worker drain AFTER Wlan_Start, that wait HUNG the worker -- the bridge slave poll
+ * task busy-waits the RX FIFO at priority 8 (one below bringup), which starves the
+ * lwIP thread (TCPIP_THREAD_PRIO clamps to <=9) so it never signals, and the radio
+ * had already consumed the FreeRTOS heap the 16 KB tcpip stack needs.  Calling it
+ * here -- before that poll task exists and before any radio allocation -- lets the
+ * tcpip thread start cleanly.  Once the core mutex exists, the later
+ * network_stack_add_if_sta() (ensure_sta_role) is a synchronous LOCK_TCPIP_CORE +
+ * netif_add (no thread wait), so it is unaffected by the busy-poll thereafter. */
+void cc3501e_hw_net_init(void)
+{
+	network_stack_init();
+	/* Register the STA netif HERE at boot too -- before transport_spi_init() spawns
+	 * the busy-poll bridge task.  network_stack_add_if_sta() does LOCK_TCPIP_CORE +
+	 * netif_add; done LATER from the radio path (ensure_sta_role) it DEADLOCKED the
+	 * worker -- the busy-poll task (prio 8, one below bringup) starves the lwIP tcpip
+	 * thread, which holds/needs the core lock, so LOCK_TCPIP_CORE never returns
+	 * (silicon 2026-06-23: scan -4 / READY stuck low after adding the netif there).
+	 * At boot, before that poll task exists, the tcpip thread runs and netif_add
+	 * completes.  The registration is persistent (a static netif); the later
+	 * Wlan_RoleUp(STA) binds it.  The STA netif's linkoutput (the WLAN tx) is what the
+	 * connect EAPOL-4way / WPA3-SAE handshake flows over -- without it the NWP raises
+	 * no connect event (the no-connect-event root cause). */
+	network_stack_add_if_sta();
 }
 #else  /* !CC3501E_WIFI -- default v0.1 ti build brings up no radio */
 void cc3501e_hw_wifi_boot_start(void)
 {
 	/* No radio linked in this build -- nothing to bring up. */
+}
+void cc3501e_hw_net_init(void)
+{
+	/* No lwIP linked in this build -- nothing to bring up. */
 }
 #endif /* CC3501E_WIFI */
 
@@ -424,8 +515,9 @@ void cc3501e_hw_tick(void)
 	}
 
 	/* === Bridge SPI FIFO-flush recovery (cold-framing self-heal) ===
-	 * On the CS-less fixed-count link a 1-byte frame offset (RX FIFO residue from
-	 * the master over-clocking during a desync) cannot self-correct by more
+	 * The transport is hardware-SS0 framed (dwc-ssi drives SS0 per transfer), but a
+	 * cold first contact can still leave a 1-byte frame offset (RX FIFO residue from
+	 * the master over-clocking during a desync); it cannot self-correct by more
 	 * clocking -- it persists until the FIFO is flushed.  g_resync_count bursts
 	 * while the slave is stuck re-arming garbage (each misframed header reads the
 	 * 0xA5 idle, which is in the reserved cmd range -> re-arm++).  A burst within
@@ -559,8 +651,8 @@ static struct {
  * op_rc == OTA_OP_INFLIGHT.  The pump publishes the result + frees the slot
  * (auto-resets op to IDLE); the host observes completion through OTA_STATUS
  * (state / cursor), NOT by re-collecting -- so a WRITE poll never has to re-send
- * its 256 B payload while the device is mid-flash (which would desync the CS-less
- * lockstep).  Fast + ISR-safe (no flash here). */
+ * its 256 B payload while the device is mid-flash (which would desync the bridge
+ * lockstep during the flash blackout).  Fast + ISR-safe (no flash here). */
 static int ota_submit(uint8_t o)
 {
 	if (ota.op_rc == OTA_OP_INFLIGHT) return CC3501E_HW_BUSY; /* an op is running */
@@ -802,6 +894,11 @@ static bool gpio_pad_reserved(uint8_t pad)
 	case 27u:
 	case 28u:
 	case 29u:
+	/* GPIO17 (E1M IO16) = the bridge READY/host-IRQ line, firmware-owned (rev-1
+	 * host-IRQ wire: CC35 GPIO17 -> Alif P2_6; GPIO17 is not SPI0-CS-capable,
+	 * GPIO16 is the CS).  Reserve it so a host GPIO-proxy command can't clobber
+	 * the flow-control line. */
+	case 17u:
 	/* CONFIG_UART2_0 console glue: TX=5, RX=6. */
 	case 5u:
 	case 6u:
@@ -820,10 +917,11 @@ static bool gpio_pad_ok(uint8_t pad)
 	return (pad <= GPIO_pinUpperBound) && !gpio_pad_reserved(pad);
 }
 
-/* GPIO interrupt handler.  Async EVT_GPIO_INTERRUPT delivery to the host needs
- * the next-rev host-IRQ line (the CS-less 3-wire link has no slave->master
- * attention path), so this only clears the pending edge for now; the HW arming
- * (cc3501e_hw_gpio_set_interrupt) itself is real. */
+/* GPIO interrupt handler.  Async EVT_GPIO_INTERRUPT delivery to the host needs a
+ * slave->master attention path: the rev-1 host-IRQ wire (CC35 GPIO17 -> Alif P2_6)
+ * is currently dedicated to bridge READY/flow-control, not yet multiplexed for
+ * async GPIO-event delivery, so this only clears the pending edge for now; the HW
+ * arming (cc3501e_hw_gpio_set_interrupt) itself is real. */
 static void gpio_irq_cb(uint_least8_t index)
 {
 	GPIO_clearInt(index);
@@ -867,6 +965,40 @@ int cc3501e_hw_gpio_write(uint8_t pad, uint8_t level)
 	}
 	GPIO_write(pad, (level != 0u) ? 1u : 0u);
 	return CC3501E_HW_OK;
+}
+
+/* ---- Bridge READY/host-IRQ line: CC35 GPIO17 (E1M IO16) -> Alif P2_6 ------- *
+ * Strong overrides of the worker's weak cc3501e_bridge_busy/ready() hooks.  The
+ * line is flow-control to the host master: LOW = the bridge is BUSY (a radio op
+ * is running and the SPI-slave DMA is dead, do not clock), HIGH = the slave is
+ * armed and the host may clock a transaction.  Lazily configured push-pull,
+ * idling LOW (busy) until the first ready() so the host holds off through boot.
+ * GPIO17 = the silicon-legal sibling of the SPI0 CS pair (it is not CS-capable,
+ * GPIO16 is the CS); reserved from the host GPIO proxy in gpio_pad_reserved(). */
+#define CC3501E_READY_GPIO 17u
+
+static bool ready_inited;
+
+static void ready_ensure_init(void)
+{
+	if (!ready_inited) {
+		(void)GPIO_setConfig(CC3501E_READY_GPIO,
+		                     GPIO_CFG_OUTPUT_INTERNAL | GPIO_CFG_PULL_NONE_INTERNAL |
+		                         GPIO_CFG_OUT_LOW);
+		ready_inited = true;
+	}
+}
+
+void cc3501e_bridge_busy(void)
+{
+	ready_ensure_init();
+	GPIO_write(CC3501E_READY_GPIO, 0u); /* LOW = busy */
+}
+
+void cc3501e_bridge_ready(void)
+{
+	ready_ensure_init();
+	GPIO_write(CC3501E_READY_GPIO, 1u); /* HIGH = ready */
 }
 
 int cc3501e_hw_gpio_read(uint8_t pad, uint8_t *level_out)
@@ -944,6 +1076,40 @@ int cc3501e_hw_cam_enable(uint8_t which, uint8_t on)
 	return CC3501E_HW_OK;
 }
 
+/* ---- async-connect status latch (CMD_WIFI_STATUS) ------------------------- *
+ * The worker-routed connect body BLOCKS for seconds on the association event, so
+ * the host no longer polls it to completion (which clocked the bridge while the
+ * radio op held it down -- the -4/desync wall).  Instead the firmware mirrors the
+ * outcome into this latch, which the NON-blocking CMD_WIFI_STATUS reads off the
+ * SPI ISR (no radio op).  Defined unconditionally (no SDK needed) so it links in
+ * BOTH ti sub-builds; the connect body (CC3501E_WIFI) is the only terminal writer.
+ *
+ * Concurrency: written by mark_connecting() in the SPI-ISR/protocol context at
+ * SUBMIT, then by the connect body on the drain thread at completion -- never both
+ * at once (the worker is single-in-flight).  Read by handle_wifi_status (SPI ISR).
+ * volatile byte fields; state is published LAST so a reader seeing CONNECTED also
+ * sees the fresh rssi (release-style, mirrors the worker's publish discipline). */
+static volatile struct {
+	uint8_t state;       /* alp_cc3501e_wifi_conn_state_t */
+	uint8_t fail_reason; /* alp_cc3501e_wifi_fail_t        */
+	int8_t  rssi;        /* dBm, valid on CONNECTED        */
+} g_wifi_conn = { (uint8_t)ALP_CC3501E_WIFI_DISCONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE, 0 };
+
+void cc3501e_hw_wifi_mark_connecting(void)
+{
+	g_wifi_conn.fail_reason = (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE;
+	g_wifi_conn.rssi        = 0;
+	g_wifi_conn.state       = (uint8_t)ALP_CC3501E_WIFI_CONNECTING; /* publish state last */
+}
+
+int cc3501e_hw_wifi_conn_status(uint8_t *state, uint8_t *fail_reason, int8_t *rssi_dbm)
+{
+	if (state != 0) *state = g_wifi_conn.state;
+	if (fail_reason != 0) *fail_reason = g_wifi_conn.fail_reason;
+	if (rssi_dbm != 0) *rssi_dbm = g_wifi_conn.rssi;
+	return CC3501E_HW_OK;
+}
+
 /* --------------------------------------------------------------- */
 /* Wi-Fi (v0.2) -- real CC35xx SimpleLink host integration.          */
 /*                                                                   */
@@ -962,7 +1128,10 @@ static char cc3501e_wifi_sec(uint8_t security)
 	case 0u:
 		return (char)WLAN_SEC_TYPE_OPEN;
 	case 2u:
-		return (char)WLAN_SEC_TYPE_WPA3;
+		/* WPA2_WPA3(16) = transition mode (WPA2 / WPA2+PMF / WPA3), NOT WPA3-only(12).
+		 * Our scan labels both a pure-WPA3 and a WPA2/WPA3-transition AP as "wpa3", so
+		 * the transition type is the robust choice -- it associates to either. */
+		return (char)WLAN_SEC_TYPE_WPA2_WPA3;
 	case 1u:
 	default:
 		return (char)WLAN_SEC_TYPE_WPA_WPA2; /* WPA/WPA2-PSK */
@@ -981,6 +1150,20 @@ static int cc3501e_hw_wifi_ensure_sta_role(void)
 	if (wifi_rv != CC3501E_HW_OK) {
 		return wifi_rv;
 	}
+	/* Program the STA PHY band BEFORE RoleUp.  THE missing step (root cause of the
+	 * 0-AP scan): WLAN_SET_STA_WIFI_BAND is the ONLY call that runs
+	 * l2_StorePhyConfig() to set the band the radio RX uses + inits the scan-DB
+	 * wifi_band_cfg (static init leaves it 0 -> the survey captured 0 frames).
+	 * BOTH TI references do this on every STA role-up (network_terminal
+	 * wlan_cmd.c:676, at_commands atcmd_wlan.c:805); ours omitted it. */
+	uint8_t sta_wifi_band = (uint8_t)
+	    BAND_SEL_ONLY_2_4GHZ; /* our antenna/AP are 2.4 GHz; BOTH made the kick fail (5G) */
+	(void)Wlan_Set(WLAN_SET_STA_WIFI_BAND, &sta_wifi_band);
+	/* The STA netif is registered ONCE at boot (cc3501e_hw_net_init ->
+	 * network_stack_add_if_sta) -- it must NOT be done here: from this radio-path
+	 * context the busy-poll bridge task starves the lwIP tcpip thread and
+	 * LOCK_TCPIP_CORE deadlocks the worker.  Wlan_RoleUp(STA) binds the already-
+	 * registered netif, which is what the connect EAPOL/SAE handshake flows over. */
 	RoleUpStaCmd_t staParams = { 0 };
 	if (Wlan_RoleUp(WLAN_ROLE_STA, &staParams, 10000u) < 0) {
 		return CC3501E_HW_ERR_IO;
@@ -1003,14 +1186,46 @@ static int cc3501e_hw_wifi_scan_run(void)
 	if (wifi_rv != CC3501E_HW_OK) {
 		return wifi_rv;
 	}
+	/* The STA role is pre-cached at boot (cc3501e_hw_wifi_boot_start), so this
+	 * ensure_sta_role returns INSTANTLY with no RoleUp radio op.  The scan is then a
+	 * LIGHT Wlan_Scan -- like GET_MAC's Wlan_Get it kicks WITHOUT a bridge suspend.
+	 * No suspend == no SPI_close/open churn (the suspend's close/open is what wedged
+	 * the link past re-sync; GET_MAC, reinit-only, never churns).  reinit
+	 * AFTER recovers the slave's DMA that Wlan_Scan tore down. */
+	const int role_rv = cc3501e_hw_wifi_ensure_sta_role();
+
 	scanCommon_t sc = { 0 };
-	sc.Band         = BAND_SEL_BOTH;
+	sc.Band         = BAND_SEL_ONLY_2_4GHZ; /* 2.4 GHz antenna; matches the role-up band-set */
 	wifi_scan_count = 0u;
 	osi_SyncObjClear(&wifi_event_sync);
-	if (Wlan_Scan(WLAN_ROLE_STA, &sc, WLAN_MAX_SCAN_COUNT) != 0) {
-		return CC3501E_HW_ERR_IO;
+	const uint32_t cb_before = wifi_cb_event_count; /* DIAG: did ANY wifi event fire? */
+	int            scan_rv   = -1;
+	if (role_rv == CC3501E_HW_OK) {
+		scan_rv = Wlan_Scan(WLAN_ROLE_STA, &sc, (unsigned char)WLAN_MAX_SCAN_COUNT);
 	}
-	if (osi_SyncObjWait(&wifi_event_sync, OSI_WAIT_FOREVER) != OSI_OK) {
+	int wait_rv = OSI_OK;
+	if (scan_rv == 0) {
+		/* 6s (was 20s) so RoleUp(<=10s)+wait fits the host's 30s poll budget --
+		 * the host then reads the REAL final code instead of a -4 timeout mask. */
+		wait_rv = osi_SyncObjWait(&wifi_event_sync, 6u * OSI_WAIT_FOR_SECOND);
+	}
+	bridge_transport_spi_hw_reinit(); /* recover the bridge slave after the radio ops */
+
+	if (role_rv != CC3501E_HW_OK) {
+		return CC3501E_HW_ERR_INVAL; /* STA RoleUp failed -> host ALP_ERR_INVAL (-1) */
+	}
+	if (scan_rv != 0) {
+		return CC3501E_HW_ERR_INVAL; /* Wlan_Scan kick failed -> host ALP_ERR_INVAL (-1) */
+	}
+	if (wait_rv != OSI_OK) {
+		/* No WLAN_EVENT_SCAN_RESULT signalled.  DIAG split via the cb event count:
+		 *   NO event at all   -> NOTIMPL -> host ALP_ERR_NOT_READY (-2): the NWP/scan
+		 *                        engine produced nothing (scan stall / RF).
+		 *   other events only -> IO      -> host ALP_ERR_IO (-5): events fired but the
+		 *                        cb never saw SCAN_RESULT (a cb/event-routing gap). */
+		if (wifi_cb_event_count == cb_before) {
+			return CC3501E_HW_ERR_NOTIMPL;
+		}
 		return CC3501E_HW_ERR_IO;
 	}
 	return CC3501E_HW_OK;
@@ -1050,19 +1265,25 @@ int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len)
 		if (ssid_len > sizeof(e->Ssid)) {
 			ssid_len = (uint8_t)sizeof(e->Ssid);
 		}
-		const size_t rec = 10u + (size_t)ssid_len; /* CC3501E_SCAN_REC_HDR + SSID */
+		const size_t rec = 11u + (size_t)ssid_len; /* CC3501E_SCAN_REC_HDR + SSID */
 		if (off + rec > cap) {
 			break; /* stop before overflowing the wire buffer */
 		}
 		for (uint32_t b = 0u; b < 6u; b++) {
 			buf[off + b] = (uint8_t)e->Bssid[b];
 		}
-		buf[off + 6u] = (uint8_t)e->Rssi;         /* signed beacon RSSI, raw */
-		buf[off + 7u] = (uint8_t)e->Channel;      /* raw */
-		buf[off + 8u] = (uint8_t)e->SecurityInfo; /* raw */
-		buf[off + 9u] = ssid_len;
+		buf[off + 6u] = (uint8_t)e->Rssi;    /* signed beacon RSSI, raw */
+		buf[off + 7u] = (uint8_t)e->Channel; /* raw */
+		/* Raw 16-bit SecurityInfo, little-endian.  The host needs BOTH bytes:
+		 * the sec-type that distinguishes open / WPA2 / WPA3 lives in the HIGH
+		 * byte (WLAN_SCAN_RESULT_SEC_TYPE_BITMAP = (SecurityInfo >> 8) & 0x3f) --
+		 * the old 1-byte pack truncated to the low byte (group cipher) so the
+		 * host could only ever print "?". */
+		buf[off + 8u]  = (uint8_t)(e->SecurityInfo & 0xFFu);
+		buf[off + 9u]  = (uint8_t)((e->SecurityInfo >> 8) & 0xFFu);
+		buf[off + 10u] = ssid_len;
 		for (uint32_t s = 0u; s < ssid_len; s++) {
-			buf[off + 10u + s] = (uint8_t)e->Ssid[s];
+			buf[off + 11u + s] = (uint8_t)e->Ssid[s];
 		}
 		off += rec;
 	}
@@ -1078,15 +1299,31 @@ int cc3501e_hw_wifi_scan_stop(void)
 	return CC3501E_HW_OK;
 }
 
+/* Publish a terminal connect outcome to the status latch (rssi first, state last --
+ * a reader that observes the terminal state also observes the matching detail). */
+static void wifi_conn_set(uint8_t state, uint8_t fail_reason, int8_t rssi)
+{
+	g_wifi_conn.fail_reason = fail_reason;
+	g_wifi_conn.rssi        = rssi;
+	g_wifi_conn.state       = state;
+}
+
 int cc3501e_hw_wifi_connect_sta(
     const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
 {
 	if (ssid == 0 || ssid_len == 0u) {
+		/* The latch was armed CONNECTING at submit (mark_connecting); a bad arg must
+		 * still publish a TERMINAL outcome, else the latch stays stuck CONNECTING and
+		 * the host's status poll never resolves (spins to a misleading timeout). */
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
 		return CC3501E_HW_ERR_INVAL;
 	}
 	const int wifi_rv =
 	    cc3501e_hw_wifi_ensure_sta_role(); /* lazy-start + bounded STA role-up (shared) */
 	if (wifi_rv != CC3501E_HW_OK) {
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
 		return wifi_rv;
 	}
 	osi_SyncObjClear(&wifi_event_sync);
@@ -1100,17 +1337,44 @@ int cc3501e_hw_wifi_connect_sta(
 	                 (const char *)psk,
 	                 (char)psk_len,
 	                 0) != 0) {
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
 		return CC3501E_HW_ERR_IO;
 	}
-	if (osi_SyncObjWait(&wifi_event_sync, OSI_WAIT_FOREVER) != OSI_OK) {
+	/* BOUNDED wait for the connect event.  This op is WORKER-ROUTED (see protocol.c
+	 * wifi_join -> worker), so the wait pends off the SPI ISR; the READY/host-IRQ
+	 * line (CC35 GPIO17 -> Alif P2_6, a rev-1 wire) is held BUSY for the duration --
+	 * the SPI framing itself is hardware SS0 -- so the host never clocks into the
+	 * dead SPI-slave DMA.  The L2 association completes on
+	 * silicon (WLAN_EVENT_CONNECT fires ~15s in).  The OUTCOME is mirrored into the
+	 * status latch below; the host collects it NON-blocking via CMD_WIFI_STATUS (no
+	 * more poll-by-repeat on this opcode).  DHCP/IP still needs the lwIP stack brought
+	 * up (network_stack_init + add_if_sta) -- a v0.3 feature; this reports L2 only. */
+	if (osi_SyncObjWait(&wifi_event_sync, 15u * OSI_WAIT_FOR_SECOND) != OSI_OK) {
+		/* No connect event within the wait -- TERMINAL timeout (was masked as a
+		 * retryable IO that looped the host's poll-by-repeat -> -4). */
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_TIMEOUT, 0);
 		return CC3501E_HW_ERR_IO;
 	}
 	if (wifi_last_status < 0) {
-		return CC3501E_HW_ERR_IO; /* FW rejected the association/auth */
+		/* FW rejected the association/auth (WLAN_EVENT_CONNECT Status<0, or a
+		 * DISCONNECT/ASSOCIATION_REJECTED/AUTHENTICATION_REJECTED event) -- TERMINAL. */
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_REJECTED, 0);
+		return CC3501E_HW_ERR_IO;
 	}
-	/* Associated -> start DHCP on the STA interface (no IP-acquired event;
-	 * the host reads the lease later via WIFI_GET_IP). */
-	network_set_up(network_get_sta_if());
+	/* L2 ASSOCIATED.  Publish CONNECTED (rssi left 0) and return AT ONCE.  Do NOT read
+	 * the RSSI here: a Wlan_Get(WLAN_GET_RSSI) immediately after associate BLOCKS on
+	 * this NWP (the link is not yet settled for a beacon measurement) and hangs the
+	 * worker body -- it never returns, so worker_run_pending never re-arms the slave /
+	 * raises READY, and the bridge wedges with READY stuck LOW forever (root-caused on
+	 * silicon 2026-06-23: ver stays -3 / BUSY indefinitely after a successful connect).
+	 * The host fetches the RSSI separately, as a settled WIFI_GET_RSSI op, once it
+	 * observes CONNECTED.  Do NOT call network_set_up()/DHCP either: the lwIP stack is
+	 * not brought up here (network_stack_init broke the radio boot path), so it would
+	 * likewise hang the worker.  IP/DHCP is a v0.3 feature. */
+	wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE, 0);
 	return CC3501E_HW_OK;
 }
 
@@ -1294,6 +1558,19 @@ int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4])
  * the bridge SPI after each radio op, exactly as the Wi-Fi bodies do. */
 int cc3501e_hw_ble_enable(void)
 {
+	/* IDEMPOTENT first: if a prior pass already brought the NimBLE host up, do NOT
+	 * re-init it -- just re-sync the bridge for the reply and report OK.  The host
+	 * poll-by-repeat re-sends BLE_ENABLE on any transient IO, so without this a
+	 * second pass would double-init NimBLE (BleIf_EnableBLE + nimble_port_init
+	 * twice) and fail.  THIS is the wifi-scan -> ble-enable -4: the scan glitches
+	 * the bridge mid-enable so the (successful) first pass's OK never publishes,
+	 * the host retries, and the retry double-inits.  A clean boot never retries
+	 * (bridge stays synced), so it never hit this. */
+	if (cc3501e_nimble_host_is_enabled()) {
+		bridge_transport_spi_hw_reinit();
+		return CC3501E_HW_OK;
+	}
+
 	/* Wi-Fi must be up before BLE (shared HIF).  lazy_start re-opens the
 	 * bridge SPI after the Wlan_Start HIF disruption (its own bench-proven
 	 * fix); we re-open again after the NimBLE bring-up below. */
@@ -1302,16 +1579,33 @@ int cc3501e_hw_ble_enable(void)
 		return wifi_rv;
 	}
 
-	/* nimble_host_start = BleIf_EnableBLE + NimBLE host (blocks ~2s to sync).
-	 * BleIf_EnableBLE drives a control-cmd round-trip the NWP must command-complete
-	 * over the shared HIF.  Unlike Wlan_Start (which we recover from AFTER), the
-	 * bridge SPI slave's live DMA (ch12/13) CONTENDS with that HIF handshake DURING
-	 * the op -- and there is no host-driver mutex serialising them (ctrlCmdFw lock is
-	 * a no-op) -- so the NWP never command-completes and BleIf_EnableBLE blocks
-	 * (cmd_Send waits CMD_SEND_TIMEOUT_MS).  Stand the bridge DOWN for the duration so
-	 * the HIF is the sole DMA client, then re-open after (the host poll-retries on IO
-	 * across this window). */
-	bridge_transport_spi_hw_suspend();
+	/* Resync the bridge slave BEFORE the heavy BleIf_EnableBLE.  A prior radio op
+	 * (e.g. `wifi scan`) leaves the shared HIF / bridge DMA desynced, and the host
+	 * poll-by-repeat does NOT self-recover it -- so without this the enable starts
+	 * on a dead link and returns IO (the wifi-scan -> ble-enable -4).  On a clean
+	 * boot the bridge is already synced, so this reinit is a harmless no-op.  (When
+	 * Wi-Fi was just lazy-started above, lazy_start already reinit'd -- a second
+	 * reinit is still safe; the cost is one SPI re-open off the SPI ISR.) */
+	bridge_transport_spi_hw_reinit();
+
+	/* nimble_host_start = BleIf_OpenTransport + BleIf_EnableBLE + NimBLE host.
+	 * BleIf_EnableBLE sends the enable cmd then BLOCKS on an async 0x2A04
+	 * (BLE_INIT_DONE) event -- which the WLAN event thread delivers over the SAME
+	 * shared host<->NWP HIF.  So we must NOT suspend the bridge across the enable:
+	 * suspending the shared transport STARVES the 0x2A04 signal -> the 1s wait
+	 * times out every pass -> EnableBLE returns -1 -> the worker stalls (the -4
+	 * hang).  No TI BLE demo suspends across the enable -- this file's old "suspend
+	 * fixes BLE" note was WRONG (root-caused via the SDK 2026-06-22).  Two things
+	 * the TI ble_controller demo does that we were missing:
+	 *   (a) Always-Active power mode BEFORE the enable -- Wlan_Start leaves the NWP
+	 *       in ELP, in which it may never complete BLE-controller init / post 0x2A04
+	 *       (ble_controller_app.c:395 cmdSetPmModeCallback("-m 0")).
+	 *   (b) NO bridge suspend across the enable (above).
+	 * BleIf_EnableBLE/nimble still perturb the shared DMA like Wlan_Start, so we
+	 * recover the bridge slave with reinit AFTER (the host poll-retries on IO). */
+	WlanPowerManagement_e pm = POWER_MANAGEMENT_ALWAYS_ACTIVE_MODE; /* = 0 */
+	(void)Wlan_Set(WLAN_SET_POWER_MANAGEMENT, (void *)&pm);
+
 	const int rc = cc3501e_nimble_host_start();
 	bridge_transport_spi_hw_reinit();
 	if (rc != 0 || !cc3501e_nimble_host_is_enabled()) {
@@ -1353,6 +1647,56 @@ int cc3501e_hw_ble_adv_stop(void)
 	bridge_transport_spi_hw_reinit();
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
+
+/* BLE_SCAN (worker-routed, record-returning -- the BLE mirror of
+ * cc3501e_hw_wifi_scan).  Runs a NimBLE GAP discovery for CC3501E_BLE_SCAN_MS,
+ * then packs the discovered advertisers onto the reply: each record =
+ * addr[6] | addr_type(1) | rssi(int8) | name_len(1) | name[name_len].  The
+ * ble_gap_disc churns the shared HIF DMA like adv, so re-open the bridge SPI
+ * after (the host poll-retries on IO while the bridge re-syncs). */
+#define CC3501E_BLE_SCAN_MS 4000u
+int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len)
+{
+	if (buf == 0 || out_len == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	*out_len = 0u;
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL; /* BLE not enabled yet -> NOT_READY */
+	}
+
+	static cc3501e_nimble_scan_rec_t recs[24];
+	uint32_t                         n  = 0u;
+	const int                        rc = cc3501e_nimble_scan(
+	    recs, (uint32_t)(sizeof(recs) / sizeof(recs[0])), &n, CC3501E_BLE_SCAN_MS);
+	bridge_transport_spi_hw_reinit();
+	if (rc != 0) {
+		return CC3501E_HW_ERR_IO;
+	}
+
+	size_t off = 0u;
+	for (uint32_t i = 0u; i < n; i++) {
+		const cc3501e_nimble_scan_rec_t *r        = &recs[i];
+		uint8_t                          name_len = r->name_len;
+		if (name_len > 31u) {
+			name_len = 31u;
+		}
+		const size_t rec = 9u + (size_t)name_len; /* addr[6]+type+rssi+name_len + name */
+		if (off + rec > cap) {
+			break; /* stop before overflowing the wire buffer */
+		}
+		memcpy(&buf[off], r->addr, 6u);
+		buf[off + 6u] = r->addr_type;
+		buf[off + 7u] = (uint8_t)r->rssi;
+		buf[off + 8u] = name_len;
+		for (uint32_t s = 0u; s < name_len; s++) {
+			buf[off + 9u + s] = (uint8_t)r->name[s];
+		}
+		off += rec;
+	}
+	*out_len = off;
+	return CC3501E_HW_OK;
+}
 #else  /* !CC3501E_BLE -- stub / Wi-Fi-only / silicon-free build */
 int cc3501e_hw_ble_enable(void)
 {
@@ -1380,6 +1724,16 @@ int cc3501e_hw_ble_adv_start(uint8_t        connectable,
 
 int cc3501e_hw_ble_adv_stop(void)
 {
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len)
+{
+	(void)buf;
+	(void)cap;
+	if (out_len != 0) {
+		*out_len = 0u;
+	}
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 #endif /* CC3501E_BLE */

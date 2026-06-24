@@ -411,7 +411,7 @@ alp_status_t cc3501e_wifi_get_mac(cc3501e_t *ctx, uint8_t mac[CC3501E_MAC_LEN], 
 
 /* On-wire fixed header of a scan record (alp_cc3501e_scan_result_t without the
  * inline SSID): bssid[6] + rssi(1) + channel(1) + security(1) + ssid_len(1). */
-#define CC3501E_SCAN_REC_HDR 10u
+#define CC3501E_SCAN_REC_HDR 11u
 
 alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
                                cc3501e_scan_record_t *out_records,
@@ -443,7 +443,7 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 	size_t n   = 0;
 	while (off + CC3501E_SCAN_REC_HDR <= got && n < cap) {
 		const uint8_t *rec      = &scan_buf[off];
-		uint8_t        ssid_len = rec[9];
+		uint8_t        ssid_len = rec[10];
 		if (off + CC3501E_SCAN_REC_HDR + (size_t)ssid_len > got) {
 			break; /* truncated trailing record -- stop cleanly */
 		}
@@ -451,9 +451,11 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 		memcpy(out->bssid, &rec[0], 6);
 		out->rssi_dbm = (int8_t)rec[6];
 		out->channel  = rec[7];
-		out->security = rec[8];
-		out->ssid_len = ssid_len;
-		uint8_t copy  = (ssid_len > CC3501E_SSID_MAX) ? (uint8_t)CC3501E_SSID_MAX : ssid_len;
+		/* Raw 16-bit SecurityInfo, little-endian (firmware packs both bytes at
+		 * rec[8..9]; the sec-type lives in the high byte). */
+		out->security_info = (uint16_t)rec[8] | ((uint16_t)rec[9] << 8);
+		out->ssid_len      = ssid_len;
+		uint8_t copy       = (ssid_len > CC3501E_SSID_MAX) ? (uint8_t)CC3501E_SSID_MAX : ssid_len;
 		memcpy(out->ssid, &rec[CC3501E_SCAN_REC_HDR], copy);
 		out->ssid[copy] = '\0';
 		off += CC3501E_SCAN_REC_HDR + (size_t)ssid_len;

@@ -62,6 +62,15 @@ void bridge_transport_spi_hw_reinit(void);
  * stub backend (weak default below). */
 void bridge_transport_spi_hw_suspend(void);
 
+/* Bridge READY/host-IRQ flow-control (the READY GPIO noted below).  Weak no-ops
+ * in worker.c; the ti backend (cc3501e_hw_ti.c) drives a real GPIO -- CC35
+ * GPIO17 / E1M IO16 -> Alif P2_6.  busy() = LOW (a radio op is running, the
+ * SPI-slave DMA is dead, host must not clock); ready() = HIGH (slave re-armed).
+ * The worker drives busy() before every blocking radio op and ready() after the
+ * post-op re-arm, so the host master never clocks into a dead slave. */
+void cc3501e_bridge_busy(void);
+void cc3501e_bridge_ready(void);
+
 /* ---- SPI slave seams (defined in transport_spi.c) -------------- */
 /* The HW backend (or a host test) drives one request transaction as
  * cs_low -> rx_byte* -> cs_high, then clocks the staged reply back via

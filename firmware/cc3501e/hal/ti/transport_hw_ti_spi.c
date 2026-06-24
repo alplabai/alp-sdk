@@ -71,7 +71,8 @@
 #include "ti_drivers_config.h"
 
 #include <ti/drivers/SPI.h>
-#include <ti/drivers/dpl/ClockP.h> /* ClockP_usleep -- settle between SPI re-open retries */
+#include <ti/drivers/spi/SPIWFF3DMA.h> /* SPIWFF3DMA_CMD_RETURN_PARTIAL_ENABLE -- CS-framed re-sync */
+#include <ti/drivers/dpl/ClockP.h>     /* ClockP_usleep -- settle between SPI re-open retries */
 
 #include "../../src/protocol.h"
 #include "../../src/transport.h"
@@ -124,6 +125,11 @@ static void arm_transfer(void *rx, const void *tx, size_t count)
 	t.rxBuf = rx;
 	t.arg   = NULL;
 	(void)SPI_transfer(spi, &t);
+	/* Slave is now armed -> raise READY so the host may clock THIS transfer.  Paired
+	 * with the CSN-deassert re-arm + on_transfer's busy() drop, this gives the host an
+	 * exact "armed" edge to gate on, so it never asserts CSN + clocks into a not-yet-
+	 * re-armed slave (which loses the header's first bits -> misread -> 0x00 desync). */
+	cc3501e_bridge_ready();
 }
 
 /* Re-arm the request-header phase driving the 0xA5 marker on MISO.  Used both
@@ -156,7 +162,21 @@ static void dispatch_frame(size_t frame_len)
 static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 {
 	(void)h;
-	(void)t;
+	/* A phase's transfer just ended -> the slave is momentarily NOT armed for the host's
+	 * next clock.  Drop READY so the host holds off until arm_transfer() re-raises it. */
+	cc3501e_bridge_busy();
+
+	/* Per-transfer HARDWARE SS0: the Alif master asserts/deasserts SS0 around EACH
+	 * transceive, so every phase (req header / [req payload] / reply header / reply
+	 * payload) is its own CS-framed transfer.  ADVANCE on the transfer-COMPLETE callback
+	 * (the host clocked the full phase count): that is the event the driver delivers per
+	 * phase.  A redundant late SS0-deassert (SPI_TRANSFER_CSN_DEASSERT, if RETURN_PARTIAL
+	 * also delivers one for the already-completed transfer) is ignored to avoid
+	 * double-advancing.  Advancing here also re-raises READY (via arm_transfer), so the
+	 * host's per-request READY gate sees the slave armed for the next phase. */
+	if (t == NULL || t->status != SPI_TRANSFER_COMPLETED) {
+		return;
+	}
 
 	switch (phase) {
 	case PH_REQ_HEADER: {
@@ -182,6 +202,10 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 		cur_payload_len = plen;
 		if (plen == 0u) {
 			dispatch_frame(ALP_CC3501E_HEADER_BYTES);
+			/* Reply HEADER as its OWN SS0-framed transfer: under per-transfer hardware
+			 * CS the host reads the 4-byte reply header in one transceive, then sizes +
+			 * reads the payload in the NEXT.  (No single-transfer reply -- the SS0
+			 * deassert after the header would cut a single armed reply mid-frame.) */
 			phase = PH_REPLY_HEADER;
 			arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
 		} else {
@@ -194,13 +218,15 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 	}
 	case PH_REQ_PAYLOAD:
 		dispatch_frame((size_t)ALP_CC3501E_HEADER_BYTES + cur_payload_len);
+		/* Reply HEADER as its own SS0-framed transfer (see PH_REQ_HEADER). */
 		phase = PH_REPLY_HEADER;
 		arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
 		break;
 
 	case PH_REPLY_HEADER:
-		/* Reply header clocked out; now the reply payload (status + data
-		 * = reply_len - 4 bytes, always >= 1). */
+		/* Reply PAYLOAD (status + data = reply_len - 4, always >= 1) as its OWN
+		 * SS0-framed transfer, after the host clocked the reply header in the previous
+		 * transceive (so it knows the length to clock here). */
 		phase = PH_REPLY_PAYLOAD;
 		arm_transfer(
 		    NULL, &reply_buf[ALP_CC3501E_HEADER_BYTES], reply_len - ALP_CC3501E_HEADER_BYTES);
@@ -208,9 +234,9 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 
 	case PH_REPLY_PAYLOAD:
 	default:
-		/* Whole reply clocked -- clean frame boundary.  Re-arm the next request
-		 * header driving 0xA5.  (A pending CMD_RESET is actioned by
-		 * cc3501e_hw_tick() on the housekeeping task after this ack has gone out.) */
+		/* Whole reply clocked -- clean frame boundary.  Re-arm the next request header
+		 * driving 0xA5.  (A pending CMD_RESET is actioned by cc3501e_hw_tick() on the
+		 * housekeeping task after this ack has gone out.) */
 		arm_request_header();
 		break;
 	}
@@ -250,6 +276,13 @@ static void spi_open_and_arm(void)
 		 * and bring-up code reports the dead link. */
 		return;
 	}
+
+	/* RETURN_PARTIAL is intentionally NOT enabled.  With hardware SS0 (the Alif master
+	 * drives the per-transfer chip-select) each phase's transfer completes on its byte
+	 * count -- on_transfer advances on SPI_TRANSFER_COMPLETED before the SS0 deasserts.
+	 * Enabling RETURN_PARTIAL would ALSO deliver a trailing SPI_TRANSFER_CSN_DEASSERT per
+	 * phase, which (after on_transfer already re-armed + raised READY) would drop READY
+	 * again and stall the host's per-request READY gate (-3 BUSY).  Bench-proven. */
 
 	g_resync_count = 0u;
 	arm_request_header();

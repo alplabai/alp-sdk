@@ -52,9 +52,9 @@ void worker_init(void);
 
 /*
  * worker_submit -- queue a job for the drain.  @p cmd is the opcode the
- * job services (e.g. ALP_CC3501E_CMD_GET_MAC).  v0.2 jobs are argument-
- * free getters, so there are no args yet; future jobs (WIFI_CONNECT etc.)
- * will copy their args into a worker-owned buffer here.
+ * job services (e.g. ALP_CC3501E_CMD_GET_MAC).  For argument-free getters
+ * (GET_MAC / scan / ble); jobs that carry a request payload use
+ * worker_submit_payload() instead.
  *
  * Returns 1 if the job was accepted (state IDLE -> QUEUED), 0 if the
  * worker was busy (a different/earlier job is still in flight).
@@ -64,6 +64,17 @@ void worker_init(void);
  * poll -- this keeps native_sim ztests deterministic with no main loop.
  */
 int worker_submit(uint8_t cmd);
+
+/*
+ * worker_submit_payload -- like worker_submit, but for a job that carries a
+ * request payload (WIFI_CONNECT_STA / WIFI_AP_START: the
+ * alp_cc3501e_wifi_connect_t header + inline ssid + psk).  @p payload / @p len
+ * are copied into a worker-owned buffer so the drain can run the blocking
+ * association off the SPI ISR.  @p len must be <= ALP_CC3501E_MAX_PAYLOAD and
+ * is expected to be validated by the caller.  Same IDLE->QUEUED accept / busy
+ * semantics and synchronous-stub behaviour as worker_submit.
+ */
+int worker_submit_payload(uint8_t cmd, const uint8_t *payload, uint16_t len);
 
 /*
  * worker_poll -- read back a completed job's result WITHOUT blocking.

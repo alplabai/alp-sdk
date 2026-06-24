@@ -59,6 +59,9 @@ ISR-safe only: `osi_SyncObjSignalFromISR`, `osi_MsgQWrite(...,OSI_NO_WAIT)`. Cre
 - GET_MAC (blocking, no event): `WlanMacAddress_t p={.roleType=WLAN_ROLE_STA}; Wlan_Get(WLAN_GET_MACADDRESS,&p);` → `p.pMacAddress[6]`.
 - WIFI_SCAN: `scanCommon_t sc={.Band=BAND_SEL_BOTH}; Wlan_Scan(WLAN_ROLE_STA,&sc,N);` → wait `WLAN_EVENT_SCAN_RESULT` (ONE event, whole list in `Data.ScanResult.NetworkListResult[]`, `WlanNetworkEntry_t{Ssid[32],Bssid[6],SsidLen,Rssi,SecurityInfo,Channel}`). Pack compact (MAX_PAYLOAD=512 ⇒ ~17 entries/frame; page if needed).
 - WIFI_CONNECT (STA): `Wlan_Connect((signed char*)ssid,len,NULL,secType,pass,passlen,0);` wait `WLAN_EVENT_CONNECT` (`Data.Connect.Status<0`=fail). Sec enum: OPEN=0,WPA_WPA2=2,WPA2_PLUS=11,WPA3=12,WPA2_WPA3=16. IP via DHCP after — call `network_set_up()` then poll `network_stack_get_if_ip`.
+  - **MUST be worker-routed (P0-4), NOT run in the SPI ISR** — the association blocks ~15s on `WLAN_EVENT_CONNECT`; a blocking wait in `protocol_dispatch`'s ISR context either hung the bridge (`WAIT_FOREVER` → host -4) or could not pend (bounded → fast -2). Fixed 2026-06-23: `protocol.c wifi_join` routes via `worker_submit_payload` (the connect payload rides a worker-owned buffer); the drain runs the blocking `Wlan_Connect` off-ISR. The L2 association then completes on silicon.
+  - **Bench-validated 2026-06-24 (E1M-AEN801 EVK, fw v0.0.207.0): the bridge SURVIVES the ~15s association** — `ver`/GET_VERSION after a connect still returns, no desync, no power-cycle needed. The earlier "the ~15s association DESYNCS the CS-less r1 SPI bridge permanently (no recovery without power-cycle)" limitation is RESOLVED by running the bridge over the proper hardware peripheral-driven SS0 chip-select (P14_7 = SPI1_SS0_C; dwc-ssi drives SS0 per transfer) + per-phase READY gating. The bridge is NOT CS-less and NOT a GPIO bodge.
+  - **DHCP/IP needs the lwIP stack up** (`network_stack_init` once at boot, before any `Wlan_*`, + `network_stack_add_if_sta` before `Wlan_RoleUp(STA)`, per `network_terminal.c:1349` / `wlan_cmd.c:700`). NOT yet integrated — adding it naïvely at boot broke the tuned radio bring-up (scan died). A v0.3 task: bring lwIP up without disturbing the boot role pre-cache + bridge suspend/reinit window.
 - WIFI_SOFTAP: `network_stack_add_if_ap(); RoleUpApCmd_t ap={.ssid,.channel,.secParams{Type,Key,KeyLen}}; Wlan_RoleUp(WLAN_ROLE_AP,&ap,...);` then `network_set_up(ap_if)`. Peers: `WLAN_EVENT_ADD_PEER/REMOVE_PEER`.
 - WIFI_RSSI (blocking): `WlanBeaconRssi_t r={.role_id=0}; Wlan_Get(WLAN_GET_RSSI,&r);` → `r.rssi_beacon`.
 - WIFI_GET_IP: `network_stack_get_if_ip(WLAN_ROLE_STA,&ip,&mask,&gw,&dhcp);` (net-order u32; poll until ip!=0).
@@ -70,7 +73,21 @@ ISR-safe only: `osi_SyncObjSignalFromISR`, `osi_MsgQWrite(...,OSI_NO_WAIT)`. Cre
 - BLE_CONNECT: `ble_addr_t peer; BLE_COPY_BD_ADDRESS(peer.val,bd)` (**byte-reverses!**); `ble_gap_ext_connect(own_addr,&peer,0,PHY_1M|2M,...,gap_event_cb,NULL)`; result `BLE_GAP_EVENT_CONNECT{status,conn_handle}`. Disconnect `ble_gap_terminate`.
 - BLE_GATT server: static `ble_gatt_svc_def[]` + `ble_gatts_count_cfg`+`ble_gatts_add_svcs` (BEFORE host task); access cb read=`os_mbuf_append`, write=`ble_hs_mbuf_to_flat`; notify=`ble_gatts_notify_custom`. Client (no TI example): `ble_gattc_disc_all_svcs/chrs`, `ble_gattc_read`, `ble_gattc_write_flat`, subscribe by writing CCCD; add `BLE_GAP_EVENT_NOTIFY_RX` to `gap_event_cb`.
 
-## Coexistence: concurrent Wi-Fi+BLE supported; Wi-Fi first (shared HIF). `ble_wifi_provisioning` demo = STA+BLE-peripheral simultaneously.
+## Coexistence: Wi-Fi + BLE run CONCURRENTLY — bench-validated 2026-06-24.
+- Bench-validated 2026-06-24 (E1M-AEN801 EVK, fw v0.0.207.0): `wifi scan`, `ble enable`
+  (NimBLE host up), and `wifi connect` (WPA3, async — shell stays live) all succeed TOGETHER.
+  The bridge survives the ~15s association (`ver` after a connect still returns, no desync).
+  The earlier "Wi-Fi SCAN + BLE are NOT concurrent / one radio at a time / gated on the r2
+  CS + host-IRQ transport" framing is RESOLVED — the bridge now runs over the proper hardware
+  peripheral-driven SS0 chip-select (P14_7 = SPI1_SS0_C) + per-phase READY gating.
+- Validated on the AEN801 EVK bench (2 boards). Not a production-certification claim.
+- Background on the earlier SoftGemini investigation (FW 1.8.0.42, TI **OSPREY_MX-1518**
+  "degraded scan in coex", `CMD_STATUS_REJECT_MEAS_SG_ACTIVE = 11`): the 2026-06-22/23 scan
+  rejections under BLE were observed on the CS-less r1 transport; the hardware SS0 + per-phase
+  READY bridge no longer hits the wall on the bench. If a full-band survey is ever rejected while
+  BLE is active on a given FW build, that arbiter behaviour (not the transport) would be the
+  remaining lever; keep an eye on the TI NWP FW. See `docs/cc3501e-production.md`
+  "Wi-Fi + BLE concurrency".
 
 ## Build order (P0-4..P0-6 then pillars)
 P0-4 worker (offload from ISR) → P0-5 link the full set + compile osi_dpl.c/network_lwip.c/adaptation

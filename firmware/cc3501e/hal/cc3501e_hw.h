@@ -62,6 +62,15 @@ void cc3501e_hw_tick(void);
  * stub / silicon-free build (no radio -> nothing to start). */
 void cc3501e_hw_wifi_boot_start(void);
 
+/* Bring up the lwIP TCP/IP core (tcpip_init) ONCE at boot.  MUST be called EARLY --
+ * from main()'s bring-up task BEFORE transport_spi_init() spawns the busy-poll bridge
+ * slave task and before the radio is lazy-started -- because tcpip_init waits for the
+ * lwIP thread to start, which the busy-poll task would otherwise starve (and the radio
+ * would otherwise have eaten the heap the tcpip stack needs).  Prerequisite for the
+ * STA netif (network_stack_add_if_sta) the Wi-Fi connect path needs.  No-op on the
+ * stub / silicon-free build and on the ti build without CC3501E_WIFI (no lwIP). */
+void cc3501e_hw_net_init(void);
+
 /* --------------------------------------------------------------- */
 /* Meta operations                                                   */
 /* --------------------------------------------------------------- */
@@ -119,11 +128,12 @@ int cc3501e_hw_wifi_scan_start(void);
 int cc3501e_hw_wifi_scan_stop(void);
 
 /* Run a Wi-Fi scan and PACK the resulting AP list into @p buf in the host's
- * wire format -- per record: bssid[6] | rssi(1) | channel(1) | security(1) |
+ * wire format -- per record: bssid[6] | rssi(1) | channel(1) | security(LE16) |
  * ssid_len(1) then ssid_len SSID bytes (the cc3501e_wifi_scan parser's
- * CC3501E_SCAN_REC_HDR=10 layout).  Records are packed until @p cap would be
- * exceeded; *out_len receives the total bytes written.  Worker-routed (the
- * scan blocks for seconds), so this runs off the SPI ISR.  Returns
+ * CC3501E_SCAN_REC_HDR=11 layout; security is the raw 16-bit TI SecurityInfo so
+ * the host can decode open / WPA2 / WPA3).  Records are packed until @p cap
+ * would be exceeded; *out_len receives the total bytes written.  Worker-routed
+ * (the scan blocks for seconds), so this runs off the SPI ISR.  Returns
  * CC3501E_HW_OK on success; the stub / silicon-free build reports
  * CC3501E_HW_ERR_NOTIMPL with *out_len = 0. */
 int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len);
@@ -135,6 +145,23 @@ int cc3501e_hw_wifi_ap_start(
 int cc3501e_hw_wifi_ap_stop(void);
 int cc3501e_hw_wifi_get_rssi(int8_t *rssi_dbm_out);
 int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4]);
+
+/* ---- async-connect status latch (CMD_WIFI_STATUS) -------------------------- *
+ * The connect body (cc3501e_hw_wifi_connect_sta) BLOCKS for seconds on the
+ * association event, so it is worker-routed off the SPI ISR.  The host no longer
+ * blocks polling it; instead the firmware mirrors the outcome into a small latch
+ * that the NON-blocking CMD_WIFI_STATUS reads (no radio op, ISR-safe).
+ *
+ * mark_connecting() is called SYNCHRONOUSLY when a connect is submitted (from the
+ * protocol handler, before the drain runs the body) so the latch reads CONNECTING
+ * from submit onward -- a host status poll never sees a stale CONNECTED from a
+ * previous attempt during the brief queued window.  conn_status() copies the latch
+ * out: @p state = alp_cc3501e_wifi_conn_state_t, @p fail_reason =
+ * alp_cc3501e_wifi_fail_t (valid on FAILED), @p rssi_dbm = STA RSSI (valid on
+ * CONNECTED).  Any out pointer may be NULL.  The stub / silicon-free build keeps
+ * the latch DISCONNECTED. */
+void cc3501e_hw_wifi_mark_connecting(void);
+int  cc3501e_hw_wifi_conn_status(uint8_t *state, uint8_t *fail_reason, int8_t *rssi_dbm);
 
 /* --------------------------------------------------------------- */
 /* BLE 5.4 (v0.3)                                                    */
@@ -154,6 +181,11 @@ int cc3501e_hw_ble_adv_start(uint8_t        connectable,
 int cc3501e_hw_ble_adv_stop(void);
 int cc3501e_hw_ble_scan_start(void);
 int cc3501e_hw_ble_scan_stop(void);
+/* Worker-routed, record-returning BLE scan (the BLE mirror of
+ * cc3501e_hw_wifi_scan): PACK discovered advertisers into @p buf -- per record
+ * addr[6] | addr_type(1) | rssi(1) | name_len(1) then name_len name bytes.
+ * Requires the NimBLE host up (else NOTIMPL -> NOT_READY). */
+int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len);
 int cc3501e_hw_ble_connect(uint8_t addr_type, const uint8_t addr[6]);
 int cc3501e_hw_ble_disconnect(void);
 int cc3501e_hw_ble_gatt_register(const uint8_t *desc, uint16_t desc_len);

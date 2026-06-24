@@ -22,9 +22,12 @@ SPI bus (Alif **SPI1** master ↔ CC3501E **SPI0** slave).
 Per [`metadata/e1m_modules/aen/inter-chip.tsv`](../metadata/e1m_modules/aen/inter-chip.tsv):
 
 - **SPI** (Alif **SPI1** ↔ CC3501E **SPI0**): Alif `P14_4/5/6` ↔
-  CC3501E `GPIO_27/28/29`.  Alif is master, CC3501E is slave.  Carries
-  the host-control protocol.  (Note: the bus net is named `SPI1_*` after
-  the Alif master; the CC3501E endpoint is its own SPI0 peripheral.)
+  CC3501E `GPIO_27/28/29` (MISO/MOSI/SCLK), **plus a peripheral-driven
+  chip-select** Alif `P14_7` = `SPI1_SS0_C` ↔ the CC3501E SS pad.  Alif is
+  master, CC3501E is slave; the dwc-ssi master drives SS0 per transfer, so
+  every transaction is hardware-framed by a real CS edge.  Carries the
+  host-control protocol.  (Note: the bus net is named `SPI1_*` after the
+  Alif master; the CC3501E endpoint is its own SPI0 peripheral.)
 - **SDIO**: shared with the SD-card slot via board-level
   resistors.  Pick one or the other -- not both at the same time.
 - **WIFI_EN** (Alif `P15_5`): Alif drives the CC3501E
@@ -57,30 +60,61 @@ command dispatcher — see
 [`firmware/cc3501e/`](../firmware/cc3501e/) (`transport_spi.c` /
 `transport_sdio.c`).
 
-### Current rev: 3-wire SPI (no CS, no IRQ)
+### Current rev: hardware-CS SPI (SS0 + per-phase READY)
 
-The current E1M-AEN board rev wires the inter-chip SPI as **3 wires
-only — SCLK/MOSI/MISO**.  With no chip-select edge to frame
-transactions, the host↔firmware exchange runs as four deterministic
-fixed-count transfers in lockstep (request header → request payload →
-reply header → reply payload), each side taking the next length from a
-header it already exchanged; the host adds a short settle gap before
-reading the reply.  This requires the CC3501E SS pad to be tied asserted
-on the SoM and the SPI slave to complete on clock-count (SWRU626 §18).
+The current E1M-AEN board rev runs the inter-chip SPI as a **proper
+hardware-framed link**: SCLK/MOSI/MISO **plus a peripheral-driven
+chip-select** — Alif `P14_7` = `SPI1_SS0_C` ↔ the CC3501E SS pad.  The
+Alif dwc-ssi master asserts/deasserts **SS0 per transfer**, so every
+transaction is HW-framed by a real CS edge, and each of the four phases
+(request header → request payload → reply header → reply payload) is
+gated by a per-phase READY handshake.  This is **not** a CS-less /
+clock-count scheme and **not** a GPIO bodge — the CS is the SPI
+peripheral's own slave-select.  Validated on silicon 2026-06-24 (E1M-AEN801
+EVK bench, fw v0.0.207.0).
 
-The **coming board rev (AEN r2) adds two lines — CS + host-IRQ —
-without spending new CC3501E pins**, by reusing the SDIO pins: SPI and
-SDIO are mutually-exclusive control transports, so when SPI is active the
-CC3501E's `GPIO3/4/5/6/10/11` are free for SPI-mode extras.  The planned
-mapping is **`GPIO3` = HOST_IRQ → Alif `P7_0` (E1M `IO0`)** and a spare
-SDIO pin for CS (in SDIO mode those are the SDIO bus, so `IO0` is
-unaffected — it's a per-transport pinmux).  The IRQ line is the important
-one: the Alif is SPI master, so the CC3501E can never initiate, yet the
-protocol defines async events (`EVT_WIFI_*`, `EVT_BLE_*`,
-`EVT_GPIO_INTERRUPT`) with the 5–10 ms latency budgets above; a host-IRQ
-line is the standard SPI-coprocessor way to meet them without polling the
-bus, and it also removes the reply settle gap.  The current rev (r1) is
-unaffected.  See `firmware/cc3501e/DESIGN.md` "Next-rev hardening".
+The hardware CS edge re-frames every transaction, so the link cannot lose
+byte-alignment across a busy radio op — it survives long-running radio
+work (see "Bench-validated" below) with no settle-gap dependence.
+
+A host-IRQ line remains a useful future addition for async events
+(`EVT_WIFI_*`, `EVT_BLE_*`, `EVT_GPIO_INTERRUPT`) with the 5–10 ms latency
+budgets above: the Alif is SPI master, so the CC3501E cannot initiate, and
+a host-IRQ is the standard SPI-coprocessor way to deliver those events
+without polling the bus.  It is an optional optimization on top of the
+working HW-CS transport, not a prerequisite for it.  See
+`firmware/cc3501e/DESIGN.md` "Next-rev hardening".
+
+#### Bench-validated: HW-CS bridge survives radio ops + concurrent Wi-Fi/BLE (2026-06-24)
+
+With the hardware SS0 chip-select per transfer + per-phase READY gating,
+the link stays framed across every radio op — including the ~15 s STA
+association — and Wi-Fi and BLE run **concurrently**.  Measured on silicon
+(E1M-AEN801 EVK):
+
+| Operation | Radio-busy window | HW-CS bridge |
+|---|---|---|
+| `wifi scan` | ~3 s | survives |
+| `ble scan` / `ble enable` | scan/enable window | survives (NimBLE host up) |
+| `wifi connect` (STA associate) | **~15 s association** | **survives** — async connect, shell stays live; `ver` after the connect still returns (no desync, no power-cycle) |
+| Wi-Fi + BLE concurrent (`wifi scan` + `ble enable` + `wifi connect`) | continuous | survives — all succeed together, bridge does not desync |
+
+The earlier CS-less r1 limitation — a long radio op (the ~15 s
+association) losing lockstep with **no recovery without a power-cycle** —
+is **resolved** by the hardware SS0 CS edge re-framing every transaction.
+`wifi connect` is wired end-to-end (host → bridge → `Wlan_Connect`,
+worker-routed off the SPI ISR), runs **async** (the host shell stays
+responsive during association), and the L2 association completes with the
+link intact.
+
+The previously-documented "Wi-Fi + BLE not concurrent" limitation is
+likewise resolved on the bench: `wifi scan`, `ble enable`, and
+`wifi connect` (WPA3) all succeed together and the bridge survives the
+combined load.  See `docs/cc3501e-production.md` for the validated
+concurrency status.
+
+> These results are validated on the **E1M-AEN801 EVK bench**; they are
+> not a production-certification claim.
 
 ## Boot model
 
@@ -98,7 +132,8 @@ Alif side to wire beyond the two control lines we already have.
 |--------------|------------------|----------------|---------------------------------------|
 | `WIFI_EN`    | `P15_5`          | (power enable) | Gates the CC3501E supply.             |
 | `E_WIFI.NRST`| `P15_1_FLEX`     | pin 49 `nRESET`| The only host-driven reset/boot signal. |
-| `SPI1`       | `P14_4/5/6`      | `GPIO_27/28/29`| Host-control protocol post-boot.      |
+| `SPI1`       | `P14_4/5/6`      | `GPIO_27/28/29`| Host-control protocol post-boot (MISO/MOSI/SCLK). |
+| `SPI1_SS0`   | `P14_7`          | (SS pad)       | Peripheral-driven chip-select; dwc-ssi drives SS0 per transfer. |
 
 That is the full host-visible boot surface.  No SOP0/SOP1/SOP2
 straps (the CC3120/CC3220 generation had them; the CC3501E

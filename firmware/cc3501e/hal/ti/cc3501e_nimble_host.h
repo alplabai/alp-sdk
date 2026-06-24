@@ -59,6 +59,41 @@ int cc3501e_nimble_adv_config_and_start(uint8_t        connectable,
  */
 int cc3501e_nimble_adv_stop(void);
 
+/**
+ * @brief One discovered advertiser, filled by @ref cc3501e_nimble_scan.
+ *
+ * HAL-internal mirror of the on-wire BLE scan record; cc3501e_hw_ble_scan()
+ * packs an array of these onto the bridge reply.  @c name holds the parsed
+ * (complete or short) device name, NUL-terminated ("" if the advertiser sent
+ * none).
+ */
+typedef struct {
+	uint8_t addr[6];   /**< Advertiser address (NimBLE LE order). */
+	uint8_t addr_type; /**< NimBLE peer address type. */
+	int8_t  rssi;      /**< Latest advertising-report RSSI, dBm. */
+	uint8_t name_len;  /**< Bytes used in @c name (0..31). */
+	char    name[32];  /**< NUL-terminated device name (<= 31 chars). */
+} cc3501e_nimble_scan_rec_t;
+
+/**
+ * @brief Run a GAP discovery (BLE scan) and collect advertisers.
+ *
+ * Active scan for @p duration_ms, de-duplicated by advertiser address (latest
+ * RSSI + first non-empty name kept).  Blocks until the scan window completes
+ * (must be called from the worker drain, never the SPI ISR).  Requires the
+ * NimBLE host to be up (@ref cc3501e_nimble_host_start).
+ *
+ * @param out          Caller array of @p cap records.
+ * @param cap          Capacity of @p out.
+ * @param out_count    Receives the number of advertisers written (may be NULL).
+ * @param duration_ms  Scan window in milliseconds.
+ * @return 0 on success; negative on failure (host not enabled / disc error).
+ */
+int cc3501e_nimble_scan(cc3501e_nimble_scan_rec_t *out,
+                        uint32_t                   cap,
+                        uint32_t                  *out_count,
+                        uint32_t                   duration_ms);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

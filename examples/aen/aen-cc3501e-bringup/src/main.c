@@ -288,7 +288,7 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
 			       scan[i].ssid,
 			       scan[i].channel,
 			       (int)scan[i].rssi_dbm,
-			       scan[i].security);
+			       (unsigned)scan[i].security_info);
 		}
 	} else {
 		printf("[cc3501e-bringup] WIFI_SCAN -> %d\n", (int)ss);

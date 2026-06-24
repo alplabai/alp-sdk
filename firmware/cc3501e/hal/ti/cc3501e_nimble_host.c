@@ -48,7 +48,20 @@
 /* ------------------------------------------------------------------ */
 /* Tunables (mirror the demo's NimBLE thread + naming).                 */
 /* ------------------------------------------------------------------ */
-#define CC3501E_NIMBLE_THRD_PRIORITY   (3) /* CC33XX branch in the demo */
+/* OSI priority is INVERTED (0 = highest, 31 = lowest).  Use 8 -- this matches the
+ * reference vendor app's CC35XX branch (network_terminal/nimble_host.c is
+ * #ifdef CC33XX -> 3, #else -> 8; our build defines -DCC35XX, so 8 is the correct
+ * value for this part).  The old value 3 was the CC33XX-only branch: at 3 the
+ * NimBLE host task PREEMPTS the prio-7 HIF transport thread and the prio-8 shared
+ * WLAN/BLE event + CME threads, which is simply wrong for CC35XX -- the host must
+ * sit at or below the servicers it depends on, not above them.
+ *
+ * NOTE: this is a build-correctness fix, NOT a Wi-Fi+BLE concurrency fix.  Running
+ * a Wlan_Scan while BLE is up is still rejected by the closed NWP firmware
+ * (FW 1.8.0.42, SoftGemini coexistence arbiter -- TI OSPREY_MX-1518 "degraded scan
+ * in coex"); the priority value does not change that.  See docs/cc3501e-production.md
+ * "Wi-Fi + BLE concurrency".  Use the two radios one-at-a-time. */
+#define CC3501E_NIMBLE_THRD_PRIORITY   (8)
 #define CC3501E_NIMBLE_THRD_STACK_SIZE (4096)
 #define CC3501E_BLE_ADV_INSTANCE       (0) /* the single ext-adv set we drive */
 #define CC3501E_BLE_DEFAULT_NAME       "ALP-CC3501E"
@@ -189,10 +202,33 @@ int cc3501e_nimble_host_start(void)
 {
 	int rc;
 
+	/* Open the BLE HIF transport BEFORE enabling the controller.  THE missing
+	 * step (root cause of the BLE_ENABLE hang): the TI demo does
+	 * BleIf_OpenTransport() then nimble_host_start (network_terminal
+	 * ble_cmd.c:671 cmdBleStartCallback); without it the NWP has no open BLE
+	 * transport to command-complete on, so BleIf_EnableBLE() never returns ->
+	 * the worker stalls and the host times out (-4).  Mirrors the WiFi
+	 * WLAN_SET_STA_WIFI_BAND fix: a TI setup call we were skipping. */
+	BleIf_OpenTransport();
+
 	/* Enable the NWP BLE controller over the (already-up) shared HIF.  Gated
 	 * by the device conf_bin EnableBle -- times out if BLE is OFF in the conf
-	 * (see the conf_bin regen note in WIFI_BLE_INTEGRATION.md). */
-	rc = BleIf_EnableBLE();
+	 * (see the conf_bin regen note in WIFI_BLE_INTEGRATION.md).
+	 *
+	 * RETRY the enable: BleIf_EnableBLE blocks only 1 s (ble_if.c osi_SyncObjWait,
+	 * OSI_WAIT_FOR_SECOND) for the async 0x2A04 (BLE_INIT_DONE) event.  Right
+	 * after a Wi-Fi scan the NWP is busy and that first 1 s wait can expire even
+	 * though the controller comes up fine -- the wifi-scan -> ble-enable -4.  Each
+	 * call re-creates its own bleInitEventSyncObj + re-sends the enable cmd
+	 * (ble_if.c:194/211/230), so a retry is self-contained; loop until the
+	 * init-done lands.  This is BEFORE nimble_port_init so the one-time host init
+	 * below still runs exactly once. */
+	for (int attempt = 0; attempt < 8; attempt++) {
+		rc = BleIf_EnableBLE();
+		if (rc == OSI_OK) {
+			break;
+		}
+	}
 	if (rc != OSI_OK) {
 		return rc;
 	}
@@ -338,4 +374,130 @@ int cc3501e_nimble_adv_stop(void)
 		return -1;
 	}
 	return ble_gap_ext_adv_stop(CC3501E_BLE_ADV_INSTANCE);
+}
+
+/* ------------------------------------------------------------------ */
+/* GAP discovery (BLE scan) -- collect advertisers + their names.       */
+/*                                                                      */
+/* ble_gap_disc runs for a fixed window; each BLE_GAP_EVENT_DISC report  */
+/* is folded into a per-address cache (dedup, keep the latest RSSI +    */
+/* first non-empty name).  DISC_COMPLETE signals the waiter.  Headless: */
+/* the cache is drained by cc3501e_nimble_scan() into the caller's      */
+/* records, which cc3501e_hw_ble_scan() then packs onto the wire.       */
+/* ------------------------------------------------------------------ */
+#define CC3501E_BLE_SCAN_CACHE_MAX 24u
+
+static cc3501e_nimble_scan_rec_t s_scan_cache[CC3501E_BLE_SCAN_CACHE_MAX];
+static volatile uint32_t         s_scan_count;
+static OsiSyncObj_t              s_scan_done;
+
+/* Locate a cached advertiser by address (dedup); -1 if not yet seen. */
+static int cc3501e_scan_cache_find(const uint8_t addr[6])
+{
+	for (uint32_t i = 0u; i < s_scan_count; i++) {
+		if (memcmp(s_scan_cache[i].addr, addr, 6) == 0) {
+			return (int)i;
+		}
+	}
+	return -1;
+}
+
+static int cc3501e_scan_gap_event_cb(struct ble_gap_event *event, void *arg)
+{
+	(void)arg;
+	switch (event->type) {
+	case BLE_GAP_EVENT_DISC: {
+		int idx = cc3501e_scan_cache_find(event->disc.addr.val);
+		if (idx < 0) {
+			if (s_scan_count >= CC3501E_BLE_SCAN_CACHE_MAX) {
+				break; /* cache full -- ignore further new advertisers */
+			}
+			idx = (int)s_scan_count++;
+			memcpy(s_scan_cache[idx].addr, event->disc.addr.val, 6);
+			s_scan_cache[idx].addr_type = event->disc.addr.type;
+			s_scan_cache[idx].name_len  = 0u;
+			s_scan_cache[idx].name[0]   = '\0';
+		}
+		/* Latest RSSI wins (a scan-response often arrives stronger/closer). */
+		s_scan_cache[idx].rssi = event->disc.rssi;
+		/* Parse a device name out of the AD payload once -- the ADV_IND may
+		 * carry none and the scan-response (active scan) the complete name. */
+		if (s_scan_cache[idx].name_len == 0u) {
+			struct ble_hs_adv_fields fields;
+			if (ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) == 0 &&
+			    fields.name != NULL && fields.name_len > 0u) {
+				uint8_t n = fields.name_len;
+				if (n > sizeof(s_scan_cache[idx].name) - 1u) {
+					n = (uint8_t)(sizeof(s_scan_cache[idx].name) - 1u);
+				}
+				memcpy(s_scan_cache[idx].name, fields.name, n);
+				s_scan_cache[idx].name[n]  = '\0';
+				s_scan_cache[idx].name_len = n;
+			}
+		}
+		break;
+	}
+	case BLE_GAP_EVENT_DISC_COMPLETE:
+		osi_SyncObjSignal(&s_scan_done);
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+int cc3501e_nimble_scan(cc3501e_nimble_scan_rec_t *out,
+                        uint32_t                   cap,
+                        uint32_t                  *out_count,
+                        uint32_t                   duration_ms)
+{
+	if (out_count != NULL) {
+		*out_count = 0u;
+	}
+	if (!ble_hs_is_enabled()) {
+		return -1; /* controller/host not up -- caller maps to NOT_READY */
+	}
+
+	s_scan_count = 0u;
+	if (osi_SyncObjCreate(&s_scan_done) != OSI_OK) {
+		return -1;
+	}
+
+	struct ble_gap_disc_params dp;
+	memset(&dp, 0, sizeof(dp));
+	dp.passive           = 0u; /* active scan: request scan-response (names) */
+	dp.filter_duplicates = 0u; /* dedup host-side + refresh RSSI per report */
+	dp.itvl              = 0u; /* 0 -> controller default interval/window */
+	dp.window            = 0u;
+	dp.limited           = 0u;
+
+	int rc = ble_gap_disc(s_own_addr_type, duration_ms, &dp, cc3501e_scan_gap_event_cb, NULL);
+	if (rc != 0) {
+		(void)osi_SyncObjDelete(&s_scan_done);
+		return rc;
+	}
+
+	/* Wait for DISC_COMPLETE: the scan window plus a margin.  osi_SyncObjWait
+	 * blocks in 1-second ticks, so poll it (duration + 2) times and stop early
+	 * once the completion event signals. */
+	uint32_t wait_s = (duration_ms / 1000u) + 2u;
+	for (uint32_t i = 0u; i < wait_s; i++) {
+		if (osi_SyncObjWait(&s_scan_done, OSI_WAIT_FOR_SECOND) == OSI_OK) {
+			break;
+		}
+	}
+	(void)ble_gap_disc_cancel(); /* ensure the scan is stopped (idempotent) */
+	(void)osi_SyncObjDelete(&s_scan_done);
+
+	uint32_t n = s_scan_count;
+	if (n > cap) {
+		n = cap;
+	}
+	for (uint32_t i = 0u; i < n; i++) {
+		out[i] = s_scan_cache[i];
+	}
+	if (out_count != NULL) {
+		*out_count = n;
+	}
+	return 0;
 }
