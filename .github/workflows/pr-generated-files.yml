@@ -69,19 +69,19 @@ jobs:
       - name: Regenerate soc_caps.h from metadata
         run: python3 scripts/gen_soc_caps.py
 
-      - name: Regenerate ABI snapshot (current = v0.7)
-        # The committed v0.7 snapshot is the CURRENT working snapshot
-        # (v0.1 + v0.3 + v0.5 + v0.6 are FROZEN historical records --
+      - name: Regenerate ABI snapshot (current = v0.8)
+        # The committed v0.8 snapshot is the CURRENT working snapshot
+        # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 are FROZEN historical records --
         # the in-tree convention per docs/abi-markers.md).  Regenerate
-        # v0.7 from the current headers and compare.
+        # v0.8 from the current headers and compare.
         #
         # The snapshot's `generated` field is a date stamp; re-running
         # on the same headers always changes that one line, so the
         # diff below masks it with --ignore-matching-lines.
         run: |
           python3 scripts/abi_snapshot.py \
-              --version v0.7 \
-              --output docs/abi/v0.7-snapshot.json
+              --version v0.8 \
+              --output docs/abi/v0.8-snapshot.json
 
       - name: Fail if generated files differ from committed copies
         run: |
@@ -89,10 +89,10 @@ jobs:
           # else must match.
           if ! git diff --exit-code \
                   --ignore-matching-lines='"generated":' \
-                  -- include/alp/soc_caps.h docs/abi/v0.7-snapshot.json; then
+                  -- include/alp/soc_caps.h docs/abi/v0.8-snapshot.json; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
-            echo "::error::  python3 scripts/abi_snapshot.py --version v0.7 --output docs/abi/v0.7-snapshot.json"
+            echo "::error::  python3 scripts/abi_snapshot.py --version v0.8 --output docs/abi/v0.8-snapshot.json"
             echo "::error::and commit the result."
             exit 1
           fi

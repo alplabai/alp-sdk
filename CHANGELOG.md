@@ -5,7 +5,9 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.8.0 candidate
+## [Unreleased] - v0.9.0 candidate
+
+## [v0.8.0] - 2026-06-24
 
 ### Changed — clang-format pinned to v22 (was v14)
 
@@ -129,6 +131,48 @@ Gating it immediately surfaced two pre-existing native_sim failures (fixed below
   `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` board target.  Intentionally
   filtered out of the native_sim PR gate (no Ethernet HW in CI; the M55 has no
   native_sim host) — end-to-end remains a bench flash, not a CI run.
+
+### Added — cc3501e-bridge: hardware SS0 chip-select + per-phase READY, real Wi-Fi/BLE scan, GPIO proxy, production warm-program flow
+
+Matures the CC3501E bridge from the v0.1 link-alive state (below) to a
+silicon-validated radio + GPIO coprocessor on the E1M-AEN801 (Alif Ensemble
+E8, M55).  All validated warm-programmed on real silicon and shipped on two
+boards (FIB `v0.0.207`).
+
+- **Hardware SS0 chip-select + per-phase framing.**  The inter-chip SPI link
+  moves off the CS-less software-desync path onto the silicon's
+  `SPI1_SS0_C` (Alif `P14_7`): the host opens the link with `ALP_SPI_NO_CS`
+  so the `spi_dw` controller drives `SS0` itself, and the firmware advances
+  one protocol phase per `SPI_TRANSFER_COMPLETED` (per-phase SS0 framing,
+  `RETURN_PARTIAL` disabled — the trailing `CSN_DEASSERT` was dropping the
+  armed `READY`).  The host gates each phase on the slave-armed `READY=0x40`
+  (`cc3501e_wait_slave_armed`, 5 ms ceiling) instead of a fixed settle, which
+  removes the per-transfer re-arm race that pinned MISO to `0x00`.  This is
+  what makes `ver` / `scan` reliable instead of returning `-3` / `-5`.
+- **Real BLE scan.**  `cc3501e_nimble_scan` runs a NimBLE GAP discovery
+  (`ble_gap_disc`, active scan, per-address dedup, name parsed via
+  `ble_hs_adv_parse_fields`); `BLE_SCAN_START` is worker-routed off the SPI
+  ISR (mirroring `WIFI_SCAN`).  Validated on silicon (real advertisers with
+  address + RSSI + parsed name).
+- **Wi-Fi scan security decoded correctly.**  The scan record now carries the
+  **raw 16-bit TI `SecurityInfo`** (LE) instead of truncating to its low byte
+  — the open / WPA2 / WPA3 discriminator lives in the high byte
+  (`(SecurityInfo >> 8) & 0x3f`), which the old 1-byte field dropped (host
+  always read "?").  Scan-record header 10 → 11 bytes; the host parser
+  (`chips/cc3501e/cc3501e.c`) tracks the new layout.
+- **GPIO proxy** — `examples/aen/aen-cc3501e-gpio` + `docs/cc3501e-gpio-bench.md`:
+  a machine-checkable warm-boot contract for driving CC3501E-side GPIO through
+  the bridge (the EVK SDIO mux EN/SEL and I2S amp SEL live on CC35 pins).
+- **Production warm-program flow** documented in `docs/cc3501e-production.md`
+  (FIB → VALIDATION-key sign → XDS110 warm-program, monotonic anti-rollback
+  versions) + the on-air validation.
+- **Known limit (config, not code):** Wi-Fi and BLE are **not yet concurrent**
+  with the current `cc35xx-conf.bin` — coexistence is gated by
+  `CMN_KEY_BTH_WLAN_COEXIST_ENABLE` in the NWP conf init-table, a TI-toolbox
+  conf regen.  The host path is already hardened for it (idempotent
+  `cc3501e_hw_ble_enable`, bridge re-sync before enable, `BleIf_EnableBLE`
+  retry) and verified not to regress the clean-boot enable + scan.  Tracked in
+  `ti/WIFI_BLE_INTEGRATION.md`.  (#250, #233)
 
 ### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
 
