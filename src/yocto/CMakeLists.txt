@@ -121,6 +121,25 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_INFERENCE=1
 )
 
+# Mute the stub_backend.c definitions for every class whose dispatcher is
+# added UNCONDITIONALLY above (can/pwm/adc/i2s/counter/rtc/wdt).  These
+# must live in the same unconditional scope as their dispatcher
+# target_sources: on a non-Linux plain-CMake cross-build the dispatchers
+# still own alp_{can,pwm,adc,i2s,counter,rtc,wdt}_*, so leaving the mute
+# inside the Linux block would let stub_backend.c re-emit those symbols
+# and break the link with duplicate definitions.  (The I2C/SPI/UART/GPIO
+# overrides stay in the Linux block -- their symbol-providing wrappers
+# are Linux-only.)
+target_compile_definitions(alp_sdk PRIVATE
+    ALP_VENDOR_OVERRIDES_CAN=1
+    ALP_VENDOR_OVERRIDES_PWM=1
+    ALP_VENDOR_OVERRIDES_ADC=1
+    ALP_VENDOR_OVERRIDES_I2S=1
+    ALP_VENDOR_OVERRIDES_COUNTER=1
+    ALP_VENDOR_OVERRIDES_RTC=1
+    ALP_VENDOR_OVERRIDES_WDT=1
+)
+
 # v0.4: real Yocto peripheral wrappers binding against Linux
 # userspace ABIs.  Each class is independently gated via the
 # ALP_VENDOR_OVERRIDES_<CLASS> macros split out in
@@ -169,18 +188,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # exists, so no ALP_VENDOR_OVERRIDES_RPC mute is needed).
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_drv.c
     )
+    # Only the I2C/SPI/UART/GPIO wrappers are Linux-gated here; the
+    # can/pwm/adc/i2s/counter/rtc/wdt overrides moved to the unconditional
+    # block above (their dispatchers are added unconditionally).
     target_compile_definitions(alp_sdk PRIVATE
         ALP_VENDOR_OVERRIDES_I2C=1
         ALP_VENDOR_OVERRIDES_SPI=1
         ALP_VENDOR_OVERRIDES_UART=1
         ALP_VENDOR_OVERRIDES_GPIO=1
-        ALP_VENDOR_OVERRIDES_CAN=1
-        ALP_VENDOR_OVERRIDES_PWM=1
-        ALP_VENDOR_OVERRIDES_ADC=1
-        ALP_VENDOR_OVERRIDES_I2S=1
-        ALP_VENDOR_OVERRIDES_COUNTER=1
-        ALP_VENDOR_OVERRIDES_RTC=1
-        ALP_VENDOR_OVERRIDES_WDT=1
     )
     # The GPIO wrapper's IRQ dispatcher runs on a shared pthread; the
     # other wrappers don't touch pthread today but linking the whole
