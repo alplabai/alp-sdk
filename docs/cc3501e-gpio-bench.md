@@ -100,7 +100,7 @@ Example invocation (override every path — nothing is hardcoded to a user dir):
 ```
 firmware/cc3501e/ti/validate_gpio_bench.ps1 `
     -ToolboxExe     <simplelink-wifi-toolbox.exe> `
-    -PublicKey      <alp_validation_pub.pem> `
+    -PublicKey      <validation-pubkey.pem> `
     -SigningModule  <sign.py> `
     -ConfBin        <cc35xx-conf.bin> `
     -ToolSettings   <tool_settings.json> `
