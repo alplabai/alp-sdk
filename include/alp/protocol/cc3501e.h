@@ -129,6 +129,10 @@ typedef enum {
 	ALP_CC3501E_EVT_WIFI_SCAN_RESULT  = 0x18, /* async, slave -> master */
 	ALP_CC3501E_EVT_WIFI_CONNECTED    = 0x19, /* async */
 	ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, /* async */
+	/* Non-blocking connection-state poll.  The async connect model: the host
+	 * SUBMITS a CMD_WIFI_CONNECT_STA (one frame, returns at once) then polls this
+	 * to collect the outcome off a firmware latch -- reply alp_cc3501e_wifi_status_t. */
+	ALP_CC3501E_CMD_WIFI_STATUS = 0x1B,
 
 	/* TCP/UDP sockets (host-managed; offload to firmware). */
 	ALP_CC3501E_CMD_SOCK_OPEN    = 0x20,
@@ -349,6 +353,40 @@ typedef struct {
 	/* uint8_t ssid[ssid_len];   -- packed inline, no padding */
 	/* uint8_t psk[psk_len];     -- packed inline, no padding */
 } alp_cc3501e_wifi_connect_t;
+
+/** Connection state reported by CMD_WIFI_STATUS (opcode 0x1B).  The async connect
+ *  model: the host SUBMITS a CMD_WIFI_CONNECT_STA (one frame, returns at once) and
+ *  then polls this NON-BLOCKING status to learn the outcome -- CONNECTING while the
+ *  association runs (the bridge READY line is held BUSY then), CONNECTED or FAILED
+ *  once the firmware's WLAN connect event lands.  CONNECTED / FAILED are TERMINAL
+ *  (the host reads them once + stops); a fresh CMD_WIFI_CONNECT_STA starts a new
+ *  attempt (the firmware re-arms the latch to CONNECTING on submit). */
+typedef enum {
+	ALP_CC3501E_WIFI_DISCONNECTED = 0u, /**< no association + none in flight. */
+	ALP_CC3501E_WIFI_CONNECTING   = 1u, /**< association in progress (bridge BUSY). */
+	ALP_CC3501E_WIFI_CONNECTED    = 2u, /**< associated (rssi_dbm valid). */
+	ALP_CC3501E_WIFI_CONN_FAILED  = 3u, /**< attempt failed (fail_reason valid). */
+} alp_cc3501e_wifi_conn_state_t;
+
+/** Failure detail in @ref alp_cc3501e_wifi_status_t::fail_reason (meaningful only
+ *  when state == @ref ALP_CC3501E_WIFI_CONN_FAILED). */
+typedef enum {
+	ALP_CC3501E_WIFI_FAIL_NONE     = 0u, /**< not a failure state. */
+	ALP_CC3501E_WIFI_FAIL_TIMEOUT  = 1u, /**< no WLAN connect event within the wait. */
+	ALP_CC3501E_WIFI_FAIL_REJECTED = 2u, /**< association / authentication rejected. */
+	ALP_CC3501E_WIFI_FAIL_KICK     = 3u, /**< STA role-up / Wlan_Connect kick failed. */
+} alp_cc3501e_wifi_fail_t;
+
+/** Reply payload of CMD_WIFI_STATUS (opcode 0x1B): a NON-BLOCKING snapshot of the
+ *  STA connection state, read off a firmware latch (no radio op, ISR-safe) -- how
+ *  the host collects an async connect result without blocking.  Fixed 4-byte wire
+ *  layout (no padding): state | fail_reason | rssi_dbm | reserved. */
+typedef struct {
+	uint8_t state;       /**< @ref alp_cc3501e_wifi_conn_state_t. */
+	uint8_t fail_reason; /**< @ref alp_cc3501e_wifi_fail_t (when state == FAILED). */
+	int8_t  rssi_dbm;    /**< STA RSSI in dBm (when state == CONNECTED). */
+	uint8_t reserved;
+} alp_cc3501e_wifi_status_t;
 
 /** Async event for CMD_WIFI_SCAN_START and friends. */
 typedef struct {

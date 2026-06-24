@@ -39,14 +39,14 @@ prints the post-join RSSI and the DHCP IP.
 ```
 uart:~$ alp companion wifi scan
 5 AP(s):
-  Alp Electronix                   ch5    -43 dBm  wpa3
-  Skills Company 2,4GHz            ch3    -59 dBm  wpa2
-  Tapo_Cam_10BD                    ch6    -84 dBm  open
+  MyNetwork                        ch5    -43 dBm  wpa3
+  Guest-2.4GHz                     ch3    -59 dBm  wpa2
+  IoT-Hub                          ch6    -84 dBm  open
   ...
-uart:~$ alp companion wifi connect "Alp Electronix" hunter2 wpa3
-connecting to "Alp Electronix" (wpa3)...
+uart:~$ alp companion wifi connect "MyNetwork" hunter2 wpa3
+connecting to "MyNetwork" (wpa3)...
 connected  rssi=-44 dBm
-ip 192.168.1.74
+ip 192.0.2.74
 ```
 
 ### BLE

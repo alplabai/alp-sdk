@@ -27,7 +27,11 @@
 	/* SPI1 master (CC3501E bridge): SCK P14_6 / MOSI P14_5 / MISO P14_4 (alt-2, _C). */
 	pinctrl_spi1: pinctrl_spi1 {
 		group0 {
-			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>;
+			/* SS0 (P14_7) is now peripheral-driven -- the dwc-ssi hardware chip-select,
+			 * NOT the old GPIO bodge.  Push-pull output pad like SCLK/MOSI (no input-enable);
+			 * the master asserts/deasserts SS0 per transfer (write_ser). */
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
 		};
 		group1 {
 			pinmux = <PIN_P14_4__SPI1_MISO_C>;
@@ -60,14 +64,24 @@
 	};
 };
 
+/* P2_6 (READY) is on gpio2 (defined in the SoC dtsi) -- just enable it. */
+&gpio2 {
+	status = "okay";
+};
+
+/* P14_7 (CS) is now muxed as SPI1_SS0_C in pinctrl_spi1 -- the dwc-ssi peripheral drives
+ * it in hardware per transfer.  The old gpio14 GPIO-bodge controller node is removed: a
+ * GPIO claim of P14_7 would fight the SS0 pinctrl mux. */
+
 &clockctrl {
 	status = "okay";
 };
 
 &soc {
 	/* DWC_ssi SPI1 -- the on-SoM CC3501E inter-chip link (NOT the edge SPI0).
-	 * CS-less 3-wire; clock-frequency = SYST_HCLK (400 MHz) so spi_dw_alif
-	 * skips the failing clock-control path. Bench-proven by aen-cc3501e-gpio. */
+	 * 4-wire: SCLK/MOSI/MISO + the hardware SS0 chip-select (P14_7 = SPI1_SS0_C,
+	 * declared in pinctrl_spi1 above); clock-frequency = SYST_HCLK (400 MHz) so
+	 * spi_dw_alif skips the failing clock-control path. */
 	cc3501e_spi: spi@48104000 {
 		compatible = "alif,dwc-ssi-spi";
 		#address-cells = <1>;
@@ -78,6 +92,11 @@
 		clock-frequency = <400000000>;
 		dwc-ssi;
 		fifo-depth = <16>;
+		/* RX sample delay (DWC_ssi RX_SAMPLE_DLY reg 0xF0, ssi_clk cycles @ 400MHz =
+		 * 2.5ns/cycle) -- recenter the master's MISO capture at higher SCLK.  CLOCK-
+		 * DEPENDENT: keep 0 (absent) at 1 MHz; raise only when CC3501E_BRIDGE_SPI_FREQ_HZ
+		 * is bumped to 8 MHz (try 2) / 15 MHz (sweep 2->4).  A nonzero rx-delay at the
+		 * 1 MHz cold first-contact was bench-implicated in an early-boot desync. */
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";
 		status = "okay";
@@ -108,6 +127,7 @@
 		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
 			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
 	};
+
 
 	/* RGB "board alive" status LED.  Each pwm-leds child's `pwms` phandle is
 	 * what PWM_DT_SPEC_GET dereferences to reach the pwm10/pwm11 controller +

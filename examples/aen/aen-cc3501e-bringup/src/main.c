@@ -100,7 +100,9 @@
 /* Poll-by-repeat budgets for the Wi-Fi helpers (firmware kicks off a worker
  * and answers BUSY until it finishes; the host re-issues until OK/timeout). */
 #define CC3501E_MAC_TIMEOUT_MS  2000u
-#define CC3501E_SCAN_TIMEOUT_MS 8000u
+#define CC3501E_SCAN_TIMEOUT_MS 30000u /* a real both-band scan that FINDS APs (antenna
+                                        * attached) takes longer than the 8s that an
+                                        * empty no-antenna scan returned in; 30s covers it */
 #define CC3501E_CONN_TIMEOUT_MS 15000u
 
 /* Max scan records to collect into the witness-backed array. */

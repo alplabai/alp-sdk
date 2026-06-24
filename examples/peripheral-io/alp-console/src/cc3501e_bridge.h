@@ -33,11 +33,18 @@
 #define CC3501E_BRIDGE_SPI_BUS_ID 1u
 #endif
 #ifndef CC3501E_BRIDGE_SPI_FREQ_HZ
-/* 1 MHz: SILICON-VALIDATED cold-boot value (8 MHz mis-sampled MISO over the on-SoM
- * traces -> cold first-contact failed).  Raise only with the dwc-ssi rx-delay tuned.
+/* 8 MHz: first bench-sweep step up from the 1 MHz cold-boot floor toward the
+ * CC3501E's 15 MHz ceiling.  At >1 MHz the dwc-ssi master samples the incoming
+ * MISO bit too early over the on-SoM traces (the earlier bare 8 MHz attempt
+ * mis-sampled -> cold first-contact failed); this now pairs with the dwc-ssi
+ * RX sample delay set via `rx-delay` on the cc3501e_spi node in the board
+ * overlay (RX_SAMPLE_DLY reg 0xF0, in ssi_clk cycles).  GOAL: 15 MHz -- raise this
+ * to 15000000u ONLY after 8 MHz is bench-clean AND the overlay `rx-delay` is
+ * retuned for 15 MHz (see the overlay comment); MISO mis-sample shows up as a
+ * -5 desync / garbage reply headers on the link.
  * (Payload-request reliability is handled by the inter-phase settle in
  * cc3501e_request -- CC3501E_PHASE_SETTLE_US -- not the clock.) */
-#define CC3501E_BRIDGE_SPI_FREQ_HZ 1000000u
+#define CC3501E_BRIDGE_SPI_FREQ_HZ 1000000u /* 1 MHz: the bench-validated link rate; higher rates are a future throughput sweep */
 #endif
 
 /* CC3501E control pins on the Alif LP-GPIO island (NOT E1M edge pads):

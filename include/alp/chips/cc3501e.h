@@ -107,18 +107,19 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx);
 alp_status_t cc3501e_hard_reset(cc3501e_t *ctx);
 
 /**
- * @brief (Re)establish byte alignment on the CS-less 3-wire link.
+ * @brief (Re)establish byte alignment by walking the SPI byte phase.
  *
- * With no chip-select to delimit transactions, the master and slave keep
- * framing by fixed clock count alone; a missed/extra clock (or a slave
- * that booted mid-transaction) leaves them byte-misaligned with no edge to
- * recover on.  This walks the SPI byte phase until it observes the slave's
- * header-idle marker (@ref ALP_CC3501E_SYNC_IDLE, driven only when the
- * slave is parked at a clean request-header boundary), confirming with two
- * consecutive aligned reads to reject a stray marker byte inside reply
- * data.  Call it before the first request after reset, and on any
- * desync the request path detects (reply header that doesn't echo the
- * command).
+ * A best-effort cold first-contact probe: before the slave's SPI peripheral
+ * is armed its SS0 input is not yet framing transfers, so a missed/extra
+ * clock (or a slave that booted mid-transfer) can leave the two sides
+ * byte-misaligned within a transfer.  This walks the SPI byte phase until it
+ * observes the slave's header-idle marker (@ref ALP_CC3501E_SYNC_IDLE,
+ * driven only when the slave is parked at a clean request-header boundary),
+ * confirming with two consecutive aligned reads to reject a stray marker byte
+ * inside reply data.  Call it before the first request after reset.  (The
+ * steady-state request path does NOT byte-walk: each phase is its own
+ * hardware-SS0-framed transfer, so a per-transaction SS0 edge realigns the
+ * slave on the caller's next request after a desync.)
  *
  * @param ctx         Initialised driver context.
  * @param timeout_ms  Coarse upper bound on re-sync effort (each ~ms covers
@@ -270,6 +271,97 @@ alp_status_t cc3501e_wifi_connect(
     cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);
 
 /**
+ * @brief Submit a Wi-Fi association and RETURN IMMEDIATELY (async connect).
+ *
+ * Sends ONE CMD_WIFI_CONNECT_STA frame and returns as soon as the firmware has
+ * accepted the job into its worker (the submit ack) -- it does NOT block for the
+ * seconds-long association.  The firmware runs the association in the background
+ * (holding the bridge READY line BUSY while the radio op runs); collect the result
+ * later, non-blocking, via @ref cc3501e_wifi_status (poll it when @ref
+ * cc3501e_bus_ready is true again).  This is what keeps a host shell responsive
+ * during a connect.
+ *
+ * @param ctx       Initialised driver context.
+ * @param ssid      NUL-terminated SSID (<= 32 bytes; longer is rejected).
+ * @param sec_type  Security: 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE.
+ * @param pass      NUL-terminated passphrase (may be NULL/"" for open).
+ * @return ALP_OK once the connect is submitted; ALP_ERR_INVAL on an over-long
+ *         SSID/passphrase; ALP_ERR_IO if the bridge stayed down across the submit
+ *         retries; otherwise the mapped error.
+ */
+alp_status_t
+cc3501e_wifi_connect_async(cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass);
+
+/**
+ * @brief Read the non-blocking connection-status latch (WIFI_STATUS, opcode 0x1B).
+ *
+ * A SINGLE-frame, non-blocking snapshot of the STA connection state, the result
+ * channel for @ref cc3501e_wifi_connect_async: CONNECTING while the association
+ * runs, then CONNECTED (with @c rssi_dbm) or CONN_FAILED (with @c fail_reason).
+ * While the CC35 is mid-association the bridge is BUSY, so this returns
+ * @ref ALP_ERR_BUSY (the READY gate) rather than blocking -- the caller retries
+ * once @ref cc3501e_bus_ready reports the bridge is ready again.
+ *
+ * @param ctx  Initialised driver context.
+ * @param out  Receives the @ref alp_cc3501e_wifi_status_t snapshot on success.
+ * @return ALP_OK with @p out filled; ALP_ERR_BUSY if the bridge is mid-radio-op
+ *         (READY low); ALP_ERR_IO on a short reply; otherwise the mapped error.
+ */
+alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);
+
+/**
+ * @brief Bridge READY/host-IRQ flow-control hook -- is the CC3501E ready to clock?
+ *
+ * Weak default returns true (the portability fallback for a board with no READY
+ * line).  A board that wires the READY/host-IRQ line (CC35 GPIO17 -> an Alif input,
+ * a rev-1 wire) provides a
+ * strong override that reads it: true = the SPI slave is armed and the host may
+ * clock a transaction; false = the CC35 is mid-radio-op (its SPI-slave DMA is
+ * dead) and the host MUST NOT clock.  @ref cc3501e_request consults it and returns
+ * ALP_ERR_BUSY when it is false; a host background poller can read it directly to
+ * pace an async-connect result collection (poll @ref cc3501e_wifi_status only when
+ * this is true).
+ */
+bool cc3501e_bus_ready(void);
+
+/**
+ * @brief Set the request-HEADER -> request-PAYLOAD settle delay (µs).
+ *
+ * The LOAD-BEARING settle: the slave arms the request-PAYLOAD transfer in
+ * its ISR only AFTER the header transfer completes, so payload requests (CONNECT /
+ * AP / OTA_WRITE / GPIO_WRITE) DESYNC if this drops below ~200µs.  Default 200µs.
+ * Affects all subsequent requests on every context.
+ */
+void cc3501e_set_req_payload_settle_us(uint32_t us);
+
+/** @brief Get the request-HEADER -> request-PAYLOAD settle delay (µs). */
+uint32_t cc3501e_get_req_payload_settle_us(void);
+
+/**
+ * @brief Set the pre-reply-HEADER settle delay (µs).
+ *
+ * The throughput-sensitive settle: header-only commands (GET_VERSION / scan / ble /
+ * the worker-routed ops -- the common case) have no payload phase and are reliable
+ * here at near-zero, so a bench sweep can drive this toward 0 without affecting
+ * payload requests.  Default 50µs.  Affects all subsequent requests on every context.
+ */
+void cc3501e_set_reply_settle_us(uint32_t us);
+
+/** @brief Get the pre-reply-HEADER settle delay (µs). */
+uint32_t cc3501e_get_reply_settle_us(void);
+
+/**
+ * @brief Back-compat single-knob get/set over the two split settle levers.
+ *
+ * SET writes BOTH @ref cc3501e_set_req_payload_settle_us and @ref
+ * cc3501e_set_reply_settle_us (one knob for callers that don't care about the split);
+ * GET returns the throughput-sensitive reply settle (@ref cc3501e_get_reply_settle_us).
+ * Prefer the split setters when tuning the reply settle independently.
+ */
+void     cc3501e_set_phase_settle_us(uint32_t us);
+uint32_t cc3501e_get_phase_settle_us(void);
+
+/**
  * @brief Read the current STA RSSI in dBm (WIFI_GET_RSSI, opcode 0x16).
  *
  * @param ctx   Initialised driver context.
@@ -419,8 +511,8 @@ alp_status_t cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uin
  * @brief Arm/disable an edge interrupt on a proxied CC3501E GPIO
  *        (GPIO_SET_INTERRUPT, 0x53).
  *
- * The firmware arms the pad's HW edge interrupt; on this CS-less, no-host-IRQ
- * rev the async EVT_GPIO_INTERRUPT delivery has no slave->master attention
+ * The firmware arms the pad's HW edge interrupt; on this rev the async
+ * EVT_GPIO_INTERRUPT delivery has no slave->master attention
  * line, so the edge is latched on the CC3501E for a future poll/EVT path --
  * arming the controller is real, the host notification is deferred to the
  * next board rev.
