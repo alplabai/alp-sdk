@@ -154,7 +154,7 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
  *
  * GET_MAC is poll-by-repeat on the firmware side: the firmware may answer
  * RESP_ERR_BUSY while the radio identity is still being read out of the
- * device, so this loops @ref cc3501e_request(GET_MAC) on a bounded backoff
+ * device, so this loops the GET_MAC request on a bounded backoff
  * while it returns @ref ALP_ERR_BUSY, until RESP_OK fills the 6-byte MAC or
  * @p timeout_ms elapses.  Proving this round-trips exercises the firmware
  * worker seam from the host.
