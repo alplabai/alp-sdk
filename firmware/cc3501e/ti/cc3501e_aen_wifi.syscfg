@@ -50,7 +50,12 @@ system.getScript("kernel_config_release.syscfg.js");
  * 193 KB region, so full connect-STA/sockets does NOT fit this vendor image --
  * defer to a PSRAM HW rev or shrink the wifi-lib RX/TX/control buffers
  * (conf_bin/Kconfig).  (Default/radio-free build keeps the 32 KB default.) */
-system.modules["/freertos/FreeRTOS"].$static.heapSize = 0x00022000; /* 136KB -- the VALIDATED WiFi GET_MAC/scan config (bench-proven cold: ping_ok climbs, mac_ok=1).
+system.modules["/freertos/FreeRTOS"].$static.heapSize = 0x00042000; /* 264KB -- raised from 136KB (2026-06-23): full STA CONNECT (host WPA/WPA3-SAE supplicant +
+ * lwIP netif + PSA/TLS crypto) needs ~the SDK STA+sockets floor 0x42000, which 136KB STARVED (Wlan_Start + lwIP could not both allocate -> the worker HUNG: scan
+ * -4 / READY stuck low / no connect event).  The old "193KB DRAM cap / WiFi+BLE can't coexist / 136KB max" note below is STALE: build_ti.ps1 links the 512KB
+ * connectivity DRAM map (cc3501e_vendor.cmd DRAM_NON_SECURE = 0x7F24F ~520KB; the -Ble map showed ~152KB free at 136KB heap), so the heap was pinned low by THIS
+ * syscfg line, not the region.  264KB fits Wi-Fi-only with wide margin (~84KB) and -Ble with ~24KB.  HISTORICAL (pre-512KB-map) note follows:
+ * [stale] 136KB -- the VALIDATED WiFi GET_MAC/scan config (bench-proven cold: ping_ok climbs, mac_ok=1).
  * Wlan_Start's heap floor was pinned on silicon 2026-06-18 across four points: STARVES at 88KB/0x16000,
  * 106KB/0x1A000, 120KB/0x1E000 (all: ping_ok stuck at the gate, reqhdr_rx->0, mac timeout); WORKS at
  * 136KB/0x22000. So Wlan_Start needs ~128-136KB heap -- it is the HIF bring-up both WiFi GET_MAC AND BLE

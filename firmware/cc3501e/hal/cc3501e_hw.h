@@ -62,6 +62,15 @@ void cc3501e_hw_tick(void);
  * stub / silicon-free build (no radio -> nothing to start). */
 void cc3501e_hw_wifi_boot_start(void);
 
+/* Bring up the lwIP TCP/IP core (tcpip_init) ONCE at boot.  MUST be called EARLY --
+ * from main()'s bring-up task BEFORE transport_spi_init() spawns the busy-poll bridge
+ * slave task and before the radio is lazy-started -- because tcpip_init waits for the
+ * lwIP thread to start, which the busy-poll task would otherwise starve (and the radio
+ * would otherwise have eaten the heap the tcpip stack needs).  Prerequisite for the
+ * STA netif (network_stack_add_if_sta) the Wi-Fi connect path needs.  No-op on the
+ * stub / silicon-free build and on the ti build without CC3501E_WIFI (no lwIP). */
+void cc3501e_hw_net_init(void);
+
 /* --------------------------------------------------------------- */
 /* Meta operations                                                   */
 /* --------------------------------------------------------------- */
@@ -136,6 +145,23 @@ int cc3501e_hw_wifi_ap_start(
 int cc3501e_hw_wifi_ap_stop(void);
 int cc3501e_hw_wifi_get_rssi(int8_t *rssi_dbm_out);
 int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4]);
+
+/* ---- async-connect status latch (CMD_WIFI_STATUS) -------------------------- *
+ * The connect body (cc3501e_hw_wifi_connect_sta) BLOCKS for seconds on the
+ * association event, so it is worker-routed off the SPI ISR.  The host no longer
+ * blocks polling it; instead the firmware mirrors the outcome into a small latch
+ * that the NON-blocking CMD_WIFI_STATUS reads (no radio op, ISR-safe).
+ *
+ * mark_connecting() is called SYNCHRONOUSLY when a connect is submitted (from the
+ * protocol handler, before the drain runs the body) so the latch reads CONNECTING
+ * from submit onward -- a host status poll never sees a stale CONNECTED from a
+ * previous attempt during the brief queued window.  conn_status() copies the latch
+ * out: @p state = alp_cc3501e_wifi_conn_state_t, @p fail_reason =
+ * alp_cc3501e_wifi_fail_t (valid on FAILED), @p rssi_dbm = STA RSSI (valid on
+ * CONNECTED).  Any out pointer may be NULL.  The stub / silicon-free build keeps
+ * the latch DISCONNECTED. */
+void cc3501e_hw_wifi_mark_connecting(void);
+int  cc3501e_hw_wifi_conn_status(uint8_t *state, uint8_t *fail_reason, int8_t *rssi_dbm);
 
 /* --------------------------------------------------------------- */
 /* BLE 5.4 (v0.3)                                                    */

@@ -99,24 +99,24 @@ image (same FIB+sign recipe) whose version must exceed the running primary. The 
 cold **swap-boot** depends on the unit being cold-bootable (above), so it completes on
 correctly-activated production units; it does not on the mis-activated bench unit.
 
-## Status / open items (2026-06-22)
+## Status / open items (2026-06-24)
 
 - ✅ Full firmware (Wi-Fi+BLE+bridge+OTA) builds + links (`-Ble`, 0 errors).
 - ✅ **Wi-Fi SCAN ON-AIR validated** (2026-06-22, warm-programmed v0.0.161.0): `wifi scan`
   returns real APs with RSSI + decoded **open / WPA2 / WPA3** security (the scan packs
   the raw 16-bit TI `SecurityInfo`; the sec-type lives in its high byte).
-- ⚠️ **Wi-Fi CONNECT — wired + associates, but gated on the r2 bridge transport.**
-  `wifi connect` is plumbed end-to-end (host → bridge → `Wlan_Connect`) and the L2
-  association completes on silicon, but the ~15 s association **desyncs the CS-less r1
-  SPI bridge permanently** (`GET_VERSION` IO-errors for >24 s after, no recovery without
-  a power-cycle).  Two follow-ups gate a usable connect: (1) the **r2 CS + host-IRQ**
-  transport (or an SDIO framed transport) so a busy radio cannot desync the link
-  (`docs/cc3501e-bridge.md` "Bench-validated"); (2) the **lwIP network stack**
-  (`network_stack_init` + `network_stack_add_if_sta`) for DHCP/IP — not yet integrated
-  in the bridge firmware (naïvely adding it at boot breaks the tuned radio bring-up).
-  Connect was also found to have been dispatched **synchronously in the SPI ISR** (every
-  other blocking radio op is worker-routed); that is now fixed (worker-routed), which is
-  why the association reaches the radio at all.
+- ✅ **Wi-Fi CONNECT — async, validated on silicon (2026-06-24).**
+  `wifi connect` is plumbed end-to-end (host → bridge → `Wlan_Connect`), runs
+  **async** (worker-routed off the SPI ISR; the host shell stays live during the
+  ~15 s WPA3 association), and the L2 association completes with the bridge intact.
+  The earlier "the ~15 s association **desyncs the CS-less r1 SPI bridge permanently**"
+  limitation is **resolved**: the current rev runs a **hardware peripheral-driven SS0
+  chip-select** (Alif `P14_7` = `SPI1_SS0_C`; dwc-ssi drives SS0 per transfer) plus
+  per-phase READY gating, so a busy radio can no longer lose link framing — `ver`
+  after a connect still returns, no power-cycle needed (`docs/cc3501e-bridge.md`
+  "Bench-validated").  Connect was also found to have been dispatched **synchronously
+  in the SPI ISR** (every other blocking radio op is worker-routed); that is fixed
+  (worker-routed).
 - ✅ **BLE ON-AIR validated** (2026-06-22): `ble enable` brings the NimBLE host up;
   `ble scan` (`ble_gap_disc`) discovers real advertisers (address + RSSI + parsed name,
   e.g. an Epson "ET-2870 Series" printer). The enable hang was root-caused — the bridge
@@ -126,30 +126,16 @@ correctly-activated production units; it does not on the mis-activated bench uni
 - ⏳ **Production signing**: HSM step (key not on the bench).
 - ⏳ **OTA cold swap-boot**: requires a correctly-activated (`vendor_sbl_container_enable=0`)
   production unit; gated on the bench unit only.
-- ⚠️ **Wi-Fi scan and BLE are NOT concurrent — use one radio at a time.**  With BLE up,
-  a `Wlan_Scan` is **rejected by the NWP** (`wifi scan` returns a positive/non-zero
-  reject; `ble enable` after a `wifi scan` returns `-4`).  Each radio works perfectly
-  on its own from a clean boot — `wifi scan` lists every AP with the correct security,
-  `ble enable` + `ble scan` discovers ~14 advertisers.  **This is the shipping behavior:
-  drive the two radios one-at-a-time (power-cycle, or just don't run a scan while BLE is
-  enabled).**
+- ✅ **Wi-Fi + BLE CONCURRENT — validated on silicon (2026-06-24, E1M-AEN801 EVK).**
+  `wifi scan`, `ble enable` (NimBLE host up), and `wifi connect` (WPA3, async) all
+  **succeed together**, and the HW-CS bridge survives the combined radio load (a `ver`
+  after a connect still returns — no desync, no power-cycle).  The earlier "Wi-Fi scan
+  and BLE are NOT concurrent — use one radio at a time" limitation is **resolved**.
 
-  **ROOT CAUSE — exhausted to the closed NWP firmware, NOT a config we can change.**
-  The rejection lives in the closed NWP firmware (**FW 1.8.0.42**) SoftGemini (SG)
-  coexistence arbiter — TI known issue **OSPREY_MX-1518, "degraded scan performance in
-  coex"** (`CMD_STATUS_REJECT_MEAS_SG_ACTIVE = 11`).  All accessible host- and
-  config-side levers were tried on silicon (2026-06-22/23) and **none** lifted it:
-  - host firmware: re-sync the bridge before enable; idempotent enable; 8× `BleIf_EnableBLE`
-    retry; `WLAN_SET_SCAN_RESULTS_SIZE`; ELP vs Always-Active power mode (both placements);
-    no re-`RoleUp`; BLE-enable-at-boot; NimBLE thread prio 3→8.
-  - `cc35xx-conf.bin` regen (TI toolbox): raised the coex tie-breaker / group-scan
-    priorities; even `core.coex_configuration.Disable_coex = 1`.  No change — scan with
-    BLE up is still rejected, which confirms the gate is **below** the conf in the closed
-    NWP, not in it.
-
-  The combined demo therefore ships **one-at-a-time**; the NimBLE-prio-8 fix above is a
-  build-correctness fix, unrelated to this.  True coex needs a TI NWP firmware that
-  resolves OSPREY_MX-1518 (escalate to TI) — it is not reachable from alp-sdk code or the
-  device conf.  *(The `ble_wifi_provisioning` SDK demo runs STA-connected + BLE-peripheral
-  concurrently, but that is a connected STA holding a channel, not an active full-band
-  survey — the survey is what SG rejects.)*
+  Background: the prior block on a `Wlan_Scan` *while BLE is up* traced to the closed
+  NWP firmware (**FW 1.8.0.42**) SoftGemini coexistence arbiter — TI issue
+  **OSPREY_MX-1518** (`CMD_STATUS_REJECT_MEAS_SG_ACTIVE = 11`) — surfacing on the older
+  CS-less r1 transport.  On the current hardware-SS0 transport (Alif `P14_7` =
+  `SPI1_SS0_C`, dwc-ssi driving SS0 per transfer) with the worker-routed async path and
+  the NimBLE-prio fix, the concurrent flow runs on the bench.  (Validated on the
+  E1M-AEN801 EVK bench; not a production-certification claim.)

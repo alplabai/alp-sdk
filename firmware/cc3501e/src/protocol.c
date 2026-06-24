@@ -197,8 +197,16 @@ static alp_cc3501e_resp_t handle_worker_routed_payload(alp_cc3501e_cmd_t cmd,
 		if (err == CC3501E_HW_ERR_INVAL) return ALP_CC3501E_RESP_ERR_INVALID;
 		return ALP_CC3501E_RESP_ERR_RADIO;
 	case WORKER_IDLE:
-		/* No job in flight: queue THIS one (with its payload) and ask the host to
-		 * re-issue.  The host's connect poll-by-repeat absorbs the BUSY answers. */
+		/* No job in flight: queue THIS one (with its payload) + return BUSY (the
+		 * submit ack).  For a STA connect, latch the status to CONNECTING NOW --
+		 * synchronously, before the drain runs the seconds-long body -- so a host
+		 * CMD_WIFI_STATUS poll during the brief queued window never reads a stale
+		 * CONNECTED/FAILED from a previous attempt.  The body then publishes the
+		 * terminal CONNECTED/FAILED; the host collects it via CMD_WIFI_STATUS (no
+		 * poll-by-repeat on the connect opcode). */
+		if (cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA) {
+			cc3501e_hw_wifi_mark_connecting();
+		}
 		(void)worker_submit_payload((uint8_t)cmd, req, (uint16_t)req_len);
 		return ALP_CC3501E_RESP_ERR_BUSY;
 	default: /* QUEUED / RUNNING (incl. another cmd in flight) */
@@ -499,6 +507,32 @@ static alp_cc3501e_resp_t handle_wifi_get_ip(const uint8_t *req,
 		*reply_data_len = 4u;
 	}
 	return st;
+}
+
+/* WIFI_STATUS (0x1B): reply data = alp_cc3501e_wifi_status_t
+ * { state(1) | fail_reason(1) | rssi_dbm(int8) | reserved(1) }.  A NON-BLOCKING
+ * read of the firmware connection-status latch (no radio op -- safe in the SPI
+ * ISR), so the host can collect an async connect outcome without poll-by-repeat
+ * on WIFI_CONNECT_STA (which clocked the bridge while the radio op held it down). */
+static alp_cc3501e_resp_t handle_wifi_status(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply_data,
+                                             size_t         reply_cap,
+                                             size_t        *reply_data_len)
+{
+	(void)req;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	if (reply_cap < 4u) return ALP_CC3501E_RESP_ERR_NO_MEM;
+	uint8_t state = 0u, fail_reason = 0u;
+	int8_t  rssi = 0;
+	(void)cc3501e_hw_wifi_conn_status(&state, &fail_reason, &rssi);
+	reply_data[0]   = state;
+	reply_data[1]   = fail_reason;
+	reply_data[2]   = (uint8_t)rssi;
+	reply_data[3]   = 0u;
+	*reply_data_len = 4u;
+	return ALP_CC3501E_RESP_OK;
 }
 
 /* --------------------------------------------------------------- */
@@ -966,6 +1000,9 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
 		break;
 	case ALP_CC3501E_CMD_WIFI_GET_IP:
 		h = handle_wifi_get_ip;
+		break;
+	case ALP_CC3501E_CMD_WIFI_STATUS:
+		h = handle_wifi_status;
 		break;
 	/* BLE 5.4 (v0.3). */
 	case ALP_CC3501E_CMD_BLE_ENABLE:

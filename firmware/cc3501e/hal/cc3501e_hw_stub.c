@@ -32,6 +32,11 @@ void cc3501e_hw_wifi_boot_start(void)
 	/* No radio on the host stub -- nothing to bring up at boot. */
 }
 
+void cc3501e_hw_net_init(void)
+{
+	/* No lwIP on the host stub -- nothing to bring up. */
+}
+
 int cc3501e_hw_get_mac(uint8_t mac[6])
 {
 	/* No radio on the host stub -- zero the buffer and report NOTIMPL so
@@ -166,6 +171,19 @@ int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4])
 {
 	(void)ip_out;
 	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+void cc3501e_hw_wifi_mark_connecting(void)
+{
+	/* No radio on the host stub -- the connect-status latch stays DISCONNECTED. */
+}
+
+int cc3501e_hw_wifi_conn_status(uint8_t *state, uint8_t *fail_reason, int8_t *rssi_dbm)
+{
+	if (state != 0) *state = (uint8_t)ALP_CC3501E_WIFI_DISCONNECTED;
+	if (fail_reason != 0) *fail_reason = (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE;
+	if (rssi_dbm != 0) *rssi_dbm = 0;
+	return CC3501E_HW_OK;
 }
 
 /* --------------------------------------------------------------- */

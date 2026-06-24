@@ -50,6 +50,22 @@ __attribute__((weak)) void worker_critical_exit(unsigned long key)
 	(void)key;
 }
 
+/* ---- Bridge READY/host-IRQ line (weak; ti backend drives a real GPIO) ---- *
+ * The transport's flow-control to the host: a radio op kills the SPI-slave DMA
+ * (the bridge cannot be serviced while it runs), so the worker drives the line
+ * BUSY before every blocking radio op and READY again once the slave is
+ * re-armed (after the post-op bridge_transport_spi_hw_reinit).  The host gates
+ * its clocking on READY so it never drives a transaction into a dead slave.
+ * Default no-ops (host/native build has no host-IRQ line); the ti backend
+ * (hal/ti/cc3501e_hw_ti.c) overrides them to drive CC35 GPIO17 (E1M IO16). */
+__attribute__((weak)) void cc3501e_bridge_busy(void)
+{
+}
+
+__attribute__((weak)) void cc3501e_bridge_ready(void)
+{
+}
+
 /* The single in-flight job + its cached result.  `volatile`: written by
  * the drain (worker_run_pending / synchronous worker_submit), read by the
  * SPI ISR (worker_poll). */
@@ -279,7 +295,8 @@ void worker_run_pending(void)
 	worker_critical_exit(key);
 
 	if (go) {
-		worker_execute(cmd); /* may block for seconds (Wlan_* init + get) */
+		cc3501e_bridge_busy(); /* radio op about to kill the slave DMA -> hold host off */
+		worker_execute(cmd);   /* may block for seconds (Wlan_* init + get) */
 
 		/* Radio<->SPI coexistence fix: the worker body just ran a radio HAL op
 		 * (a Wlan_* call), during which the bridge SPI slave could not be
@@ -291,5 +308,25 @@ void worker_run_pending(void)
 		 * no SPI slave), the real FIFO-flush + poll-loop re-arm on the ti
 		 * backend (hal/ti/transport_hw_ti_spi.c). */
 		bridge_transport_spi_hw_reinit();
+
+		/* CONNECT / AP_START are FIRE-AND-FORGET at the worker level: their outcome
+		 * is mirrored into the HAL connection-status latch (read NON-blocking by
+		 * CMD_WIFI_STATUS), so the host never collects their DONE/ERR through this
+		 * single-job slot.  Free the slot to IDLE here so a SUBSEQUENT connect can
+		 * submit -- otherwise the slot would stay DONE/ERR and the next CONNECT would
+		 * re-collect the stale result instead of starting a fresh association.  This
+		 * MUST happen BEFORE cc3501e_bridge_ready() below: once READY is HIGH the host
+		 * may clock a transaction, and a second CONNECT landing while the slot still
+		 * held this attempt's DONE/ERR would be collected as the new submit (returning
+		 * RESP_OK off the stale result, skipping mark_connecting -> a stale latch and
+		 * NO fresh association).  Resetting first makes the slot IDLE the instant the
+		 * host is allowed to clock, so any next CONNECT hits the IDLE edge (fresh
+		 * submit + mark_connecting).  All the other worker-routed ops (GET_MAC / SCAN /
+		 * RSSI / BLE) stay poll-by-repeat: the host collects their DONE/ERR, which
+		 * resets the slot in protocol.c (handle_worker_routed). */
+		if (cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA || cmd == ALP_CC3501E_CMD_WIFI_AP_START) {
+			worker_reset();
+		}
+		cc3501e_bridge_ready(); /* slave re-armed -> host may clock again */
 	}
 }

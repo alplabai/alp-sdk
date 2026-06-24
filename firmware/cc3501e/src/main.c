@@ -58,11 +58,27 @@ static StaticTask_t bringup_tcb;
 static void bringup_task(void *arg)
 {
 	(void)arg;
+
+	/* Bring up the lwIP TCP/IP core FIRST -- before transport_spi_init() spawns the
+	 * busy-poll bridge slave task and before the radio is lazy-started.  tcpip_init
+	 * waits for the lwIP thread to start; doing it later (from the worker drain, after
+	 * the busy-poll task + Wlan_Start) HUNG the worker (the busy-poll starves the lwIP
+	 * thread + the radio ate the heap its 16 KB stack needs).  No-op on a build without
+	 * Wi-Fi/lwIP.  The Wi-Fi connect path's STA netif (network_stack_add_if_sta) needs
+	 * this core to exist. */
+	cc3501e_hw_net_init();
+
 #if defined(CC3501E_CONTROL_TRANSPORT_SDIO)
 	transport_sdio_init();
 #else
 	transport_spi_init();
 #endif
+
+	/* Bridge armed + idle -> drive the READY/host-IRQ line HIGH so the host may
+	 * clock.  The radio is brought up lazily (boot_start is NOT called), so without
+	 * this the line would idle LOW (busy) forever and gate every command.  The
+	 * worker then drops it LOW around each radio op (cc3501e_bridge_busy/ready). */
+	cc3501e_bridge_ready();
 
 	/* Confirm the MCUboot/PSA-FWU image FIRST (psa_fwu_accept, run by the first
 	 * cc3501e_hw_tick) -- BEFORE anything that might block.  SHIP-CRITICAL
