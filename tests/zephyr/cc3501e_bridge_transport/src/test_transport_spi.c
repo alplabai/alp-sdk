@@ -343,13 +343,24 @@ ZTEST(cc3501e_bridge_transport, test_wifi_connect_sta_parses_then_not_ready)
 		                    'o',
 		                    'r',
 		                    'd' };
+	/* WIFI_CONNECT_STA is WORKER-ROUTED (Wlan_Connect blocks for seconds, so it must run
+	 * off the SPI ISR): the first request submits the job and replies BUSY; the host
+	 * re-issues and collects the cached result, which on the radio-less stub is NOT_READY. */
 	transaction(req, sizeof req);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "connect reply = header + status");
+	zassert_equal(n, 5u, "first connect reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_CONNECT_STA, 1u);
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_BUSY,
+	              "first CONNECT submits the job -> BUSY (host retries)");
+
+	transaction(req, sizeof req);
+	n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "re-issued connect reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_CONNECT_STA, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_NOT_READY,
-	              "well-formed connect parses, then NOT_READY (no radio)");
+	              "re-issued CONNECT on stub -> NOT_READY");
 }
 
 ZTEST(cc3501e_bridge_transport, test_wifi_connect_bad_len_invalid)
