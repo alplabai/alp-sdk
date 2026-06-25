@@ -18,6 +18,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI:append = " \
     file://e1m-aen801-evk.dts \
+    file://e1m_dct_defines.h \
 "
 
 # linux-alif pins COMPATIBLE_MACHINE to "(devkit-e).*|(appkit-e).*"; extend it to
@@ -33,7 +34,7 @@ ALP_DTS_DST = "${S}/arch/arm/boot/dts/alif/ensemble/e1m"
 ALP_ENSEMBLE_MK = "${S}/arch/arm/boot/dts/alif/ensemble/Makefile"
 do_configure:prepend() {
     install -d "${ALP_DTS_DST}"
-    install -m 0644 "${WORKDIR}/e1m-aen801-evk.dts" "${ALP_DTS_DST}/"
+    install -m 0644 "${WORKDIR}/e1m-aen801-evk.dts" "${WORKDIR}/e1m_dct_defines.h" "${ALP_DTS_DST}/"
     # Register the carrier dtb: the Alif kernel uses subdir Makefiles
     # (ensemble/Makefile descends into devkit/ + appkit/ via subdir-y, each with
     # its own dtb-y list).  Drop an e1m/Makefile and make ensemble descend into
