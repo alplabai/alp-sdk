@@ -39,7 +39,9 @@ cores:
 
 chips:
   - tcal9538   # Main IO-expander @0x72 (LCD / camera / sensor INT fan-out).
-  - bmi323     # On-board IMU @0x68 (post-respin strap) / @0x69 (pre-respin).
+  - bmi323     # On-board IMU; post-respin boards strap @0x68. Pre-respin @0x69
+               # collides with U12 and falls to [FAIL] (the fallback probes
+               # icm42670 there, not bmi323).
   - icm42670   # Alternate IMU @0x69 (runtime fallback if bmi323 absent).
 
 diagnostics:

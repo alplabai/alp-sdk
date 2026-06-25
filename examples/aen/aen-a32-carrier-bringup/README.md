@@ -32,8 +32,12 @@ Fill these in on the bench from the live `/dev` enumeration, then rebuild:
 | Constant | How to resolve |
 |---|---|
 | `AEN_SENSOR_I2C_ADAPTER` | `i2cdetect -l` → the `/dev/i2c-N` for Alif I2C2 |
-| `AEN_PIN_LED_GREEN` | `gpioinfo` → `(gpiochip << 16) \| line` for the green LED pad |
+| `AEN_PIN_LED_GREEN` | `gpioinfo` → `(gpiochip << 16) \| line` for an output pad |
 | `AEN_PIN_BMI323_INT` | `gpioinfo` → packed pin_id for the BMI323 INT1 pad |
+
+> The EVK's RGB LED is PWM-driven (`EVK_PWM_LED_*`), so there may be no
+> GPIO-reachable "green LED" line. For the `alp_gpio_*` write exercise,
+> substitute any available SoC GPIO output the bench can observe.
 
 Until then the I2C steps run against the placeholder adapter and the GPIO
 steps report `[FAIL]` with the constant to set — by design, not a defect.
