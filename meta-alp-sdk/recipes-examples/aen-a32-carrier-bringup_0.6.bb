@@ -13,6 +13,12 @@ HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
+# The example sources currently live only on feat/aen-a32-yocto-bringup;
+# main has no examples/aen/aen-a32-carrier-bringup/ yet, so pointing at
+# branch=main would leave S empty and break the bake.  This pin is
+# temporary: once the feature branch merges, repoint to branch=main (matching
+# the alp-sdk recipe in recipes-core/alp-sdk/alp-sdk_0.6.bb) so the
+# ${AUTOREV} fetch keeps working after the feature branch is deleted.
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=feat/aen-a32-yocto-bringup"
 SRCREV  = "${AUTOREV}"
 PV      = "0.6.0"

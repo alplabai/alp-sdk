@@ -32,7 +32,6 @@
 #include "alp/chips/bmi323.h"
 #include "alp/chips/icm42670.h"
 #include "alp/boards/alp_e1m_evk.h"
-#include "alp/boards/alp_e1m_evk_routes.h"
 
 /*
  * Board-gated runtime mappings -- TODO(e1m-evk-hw).
