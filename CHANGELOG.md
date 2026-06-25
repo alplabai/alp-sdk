@@ -7,6 +7,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added
+
+- **E1M-AEN801 Cortex-A32 Linux (Yocto) carrier — baseline that builds.**  The
+  Alif Ensemble E8 A32 cluster now has a `meta-alp-sdk` carrier layer riding over
+  the Alif BSP (`meta-alif-ensemble` / `linux_alif` v6.12) per ADR 0017: a board
+  device tree (`e1m-aen801-evk.dts`) + `linux-alif` bbappend that registers the
+  dtb in the kernel's subdir Makefiles and extends `COMPATIBLE_MACHINE`, plus the
+  grounded `e1m-aen801-a32` machine-conf overrides (Macronix OctaFlash, OSPI-NOR
+  boot, `xipImage`).  `bitbake -c compile linux-alif` for `MACHINE=e1m-aen801-a32`
+  builds the carrier dtb end-to-end (no board needed).  The peripheral selection
+  is a devkit-e8 baseline pending the E1M-EVK HW mapping.  Design + build path:
+  `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
+
 ### Fixed
 
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The

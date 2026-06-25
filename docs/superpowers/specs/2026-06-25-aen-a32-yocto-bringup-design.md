@@ -364,6 +364,20 @@ e1m-aen801-evk.dts:
   `KERNEL_DEVICETREE` then points at `alif/ensemble/e1m/e1m-aen801-evk.dtb`.
   `MACHINE=devkit-e8` already builds end-to-end (env validated, kernel unpacked); the
   carrier introduces only the `e1m/` dir + the COMPATIBLE extension.
+
+**VALIDATED (2026-06-25):** `bitbake -c compile linux-alif` for
+`MACHINE=e1m-aen801-a32` BUILDS the carrier dtb
+(`arch/arm/boot/dts/alif/ensemble/e1m/e1m-aen801-evk.dtb`, 33 KB), 594/594 tasks,
+no board needed. Three integration fixes the bake surfaced (now in the bbappend +
+conf): (1) the kernel uses **subdir Makefiles** — `KERNEL_DEVICETREE` alone gives
+"no rule to make target", so the bbappend writes `e1m/Makefile` (`dtb-y`) + makes
+`ensemble/Makefile` descend into it; (2) `dct-kernel` **force-includes**
+`common/devkit_ex_dct_defines.h` via `DTS_MACRO_FILE`, so the carrier dts must
+include that same header (not a renamed-guard copy) to avoid `*_STATUS`
+redefinition; (3) a `require … # comment` in the machine conf — bitbake `.conf`
+splits the `require` line on whitespace, so the `#` parsed as a bogus file
+("not a BitBake file"). The baseline = the devkit-e8 peripheral selection; refine
+to the E1M-EVK mapping by overriding `*_STATUS` after the include.
 - **meta-alp-sdk integration:** its ROS recipes need `meta-ros` (absent from the Alif
   stack) — `BBMASK` `meta-alp-sdk/recipes-ros/` for the AEN build, and the AEN image
   drops ROS2 (the §8.2 footprint call) since ~42 MiB XIP RAM can't host it.
