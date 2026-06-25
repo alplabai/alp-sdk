@@ -11,7 +11,7 @@ DESCRIPTION = "User-space bring-up smoke test for the E1M-EVK carrier \
                and SoC GPIO."
 HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
+LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=feat/aen-a32-yocto-bringup"
 SRCREV  = "${AUTOREV}"
