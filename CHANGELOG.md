@@ -19,12 +19,25 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   builds the carrier dtb end-to-end, and `bitbake alif-tiny-image` produces the
   full bootable set (`bl32.bin` TF-A + `xipImage` kernel + `e1m-aen801-evk.dtb`
   + `cramfs-xip` rootfs) — all on real public Alif sources, no board needed.
-  The peripheral selection is a devkit-e8 baseline pending the E1M-EVK HW mapping;
-  the alp-sdk/ROS image content (alp-image-edge) is the full-integration follow-up.
+  The peripheral selection is a devkit-e8 baseline pending the E1M-EVK HW mapping.
   Design + build path: `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
+- **alp-sdk library runs on the AEN A32 Linux image.**  The full `meta-alp-sdk`
+  layer integrates onto the Alif scarthgap stack (BBMASK the V2N/ROS/DEEPX
+  recipes; dangling-bbappends warn-only), and `libalp_sdk.so` cross-builds +
+  packages for `cortexa32` musl.  ROS 2 is dropped on AEN (XIP footprint), so the
+  A32 image installs `alp-sdk` only — `bitbake alif-tiny-image` bakes a bootable
+  rootfs with the `<alp/*>` runtime on the E8 A32.
 
 ### Fixed
 
+- **Yocto: `alp_audio_*` no longer double-defines on an ALSA-less sysroot.**
+  `audio_dispatch.c` owns the public `alp_audio_in_*/out_*` symbols
+  unconditionally on Yocto, but its `stub_backend.c` mute lived inside the
+  `if(ALSA_FOUND)` gate — so an ALSA-less image (e.g. the Alif E8 A32) re-emitted
+  the symbols from the stub and failed to link.  Moved the
+  `ALP_VENDOR_OVERRIDES_AUDIO_IN/OUT` mutes to the unconditional override block
+  (the #240 fix that missed audio); the real ALSA backend stays gated, mirroring
+  i2s.
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
   SE-UART-only `alif_flash` runner burns only the signed ATOC (`app-write-mram
   -p`); a slot0-XIP app is *not* embedded in that ATOC, so the runner left the
