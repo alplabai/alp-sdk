@@ -107,8 +107,9 @@ class DrpaiAdapter(CompilerAdapter):
         opts = opts or {}
         # The TVM driver needs the model input geometry + a calibration image
         # set (post-training INT8 quantization); these come from board.yaml
-        # models[].compile.drpai. accel_config carries the DRP-AI product
-        # (V2N / V2H) so the toolchain selects the right backend.
+        # models[].compile.drpai.  (accel_config is "" for DRP-AI -- targets.py
+        # only populates it for Ethos-U; the DRP-AI product comes from the
+        # models[].compile.drpai config, not accel_config.)
         input_shape = opts.get("input_shape")
         input_name = opts.get("input_name")
         images = opts.get("images")
