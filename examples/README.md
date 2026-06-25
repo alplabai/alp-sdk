@@ -181,8 +181,9 @@ Ensemble) family on the E1M-EVK board (lead part: E8).
 
 | Directory                       | What it shows                                                            |
 |---------------------------------|--------------------------------------------------------------------------|
-| `aen/edgeai-vision-aen`         | Flagship EdgeAI vision pipeline -- CSI camera -> VeriSilicon ISP Pico (vsi,isp-pico) -> Ethos-U55 -> OLED. |
-| `aen/aen-secure-element-sign`   | OPTIGA Trust M init + product info + raw-APDU ECDSA-P256 sign over BRD_I2C (M55-HE). |
+| `aen/edgeai-vision-aen`              | Flagship EdgeAI vision pipeline -- CSI camera -> VeriSilicon ISP Pico (vsi,isp-pico) -> Ethos-U55 -> OLED. |
+| `aen/aen-secure-element-sign`        | OPTIGA Trust M init + product info + raw-APDU ECDSA-P256 sign over BRD_I2C (M55-HE). |
+| `aen/aen-a32-carrier-bringup`        | **A32 Linux** -- E1M-EVK carrier bring-up from Yocto userspace: i2c-dev scan + tcal9538 + bmi323/icm42670 + gpiochip. |
 
 ## Anatomy of a single-OS example
 

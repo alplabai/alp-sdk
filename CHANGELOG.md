@@ -26,6 +26,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   On-bus I2C device nodes are TODO (the bmi323/icm42670 0x68 strap is schematic-
   determined). Design + build path:
   `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
+- **`examples/aen/aen-a32-carrier-bringup` — A32-Linux carrier bring-up example
+  (SP2 Task 1).**  New Yocto userspace example that exercises the E1M-EVK carrier
+  peripherals from the Cortex-A32 Linux cluster: `alp_i2c_*` bus scan over
+  `/dev/i2c-N`, `tcal9538` IO-expander toggle/read, `bmi323`/`icm42670` IMU
+  chip-id (runtime-detected, post-respin strap), and `alp_gpio_*` LED + INT
+  line over the gpiochip v2 chardev ABI.  Builds with CMake inside a Yocto SDK
+  environment; board-gated `TODO(e1m-evk-hw)` constants isolate the three
+  `/dev`-enumeration values needed on the bench.  Host syntax-check gate passes
+  (`cc -std=c11 -Wall -Wextra -Iinclude -fsyntax-only`, exit 0).
 - **alp-sdk library runs on the AEN A32 Linux image.**  The full `meta-alp-sdk`
   layer integrates onto the Alif scarthgap stack (BBMASK the V2N/ROS/DEEPX
   recipes; dangling-bbappends warn-only), and `libalp_sdk.so` cross-builds +
