@@ -253,3 +253,43 @@ bring-up, peripheral probe (SP2), MHUv2/rpmsg handshake (SP3).
 - **SP3** — A32/M55 multicore: A32 releases M55 HP/HE (Zephyr); IPC over the
   MHUv2 mailbox (`E1M-AEN801.yaml mailbox`, ch0 `alp_default_rpmsg`) + shared-mem
   carveout; remoteproc/rpmsg. Parallels the V2N A55+M33 pattern.
+
+---
+
+## 12. Task 0 grounding (2026-06-25) — facts + plan revisions from the real BSP
+
+Grounded against a read-only reference clone of `meta-alif-ensemble@scarthgap`
+(`devkit-e8.conf` + `linux-alif_6.12.bb`/`linux-alif.inc` + `trusted-firmware-a.bb`).
+Raw numeric memory-map constants are referenced to the BSP / kept in
+alp-sdk-internal, not transcribed here (public/internal split, §5).
+
+**Base facts (inherit unchanged):** `cortexa32` tune; kernel `linux-alif` **6.12**,
+`KERNEL_IMAGETYPE = xipImage`; defconfig `devkit_e8_defconfig`;
+`TF-A_PLATFORM = "devkit_e7"` (shared e7/e8); console `ttyS0@115200` (UART2),
+`SMP=1`; SoC-level XIP memory map (`KERNEL_DTB_ADDR`, `XIP_KERNEL_LOAD_ADDR`,
+HyperRAM/SRAM/TRUSTED_SRAM bases — see `devkit-e8.conf`).
+
+**Carrier deltas (grounded, landed in `e1m-aen801-a32.conf`):** `MX_FLASH_EN=1` /
+`ISSI_FLASH_EN=0` (Macronix MX25UM25645 OctaFlash; triggers `linux-alif`
+`do_mx_rev16` xipImage byte-reverse); `ALP_BOOT_DEVICE=ospi-nor` (OSPI0 CS0);
+Winbond W958D8NBYA5I HyperRAM on OSPI0 CS1 (confirm `ISSI_HYPERRAM_EN`/
+`AP_HYPERRAM_EN` cover OctalRAM generically, else TBD); carrier dtb
+`alif/ensemble/e1m/e1m-aen801-evk.dtb`.
+
+**Plan revisions (these change Tasks 2–4 and the bbappend):**
+1. **`COMPATIBLE_MACHINE = "(devkit-e).*|(appkit-e).*"`** in `linux-alif` (and the
+   TF-A recipe) does NOT match `e1m-aen801-a32` → the `linux-alif`/TF-A bbappends
+   MUST extend `COMPATIBLE_MACHINE`. (Plan §4.2 must add this.)
+2. **`inherit dct-kernel` + DCT macro DTS** (`DTS_MACRO_FILE`, under `arch/arm`
+   aarch32) — the carrier DTS mirrors the Alif **devkit DCT** structure, NOT the
+   V2N `arch/arm64` dtsi composition. That structure + `devkit_e8_defconfig` live
+   in the **Alif kernel tree** (`ALIF_KERNEL_TREE`), not the meta layer, so
+   Tasks 2–4 need the kernel tree on hand to author without inventing.
+3. **Multi-layer BSP:** `meta-alif-ensemble` `require`s a base **MSD** layer
+   (`ALIF_MSD_BASE`) for `dct-kernel.bbclass`, `ALIF_KERNEL_TREE`/`TFA_TREE`,
+   `ospi-config.inc`. A full bitbake build needs poky(scarthgap)+MSD+ensemble+kernel.
+
+**Status:** Task 0 done; the `e1m-aen801-a32.conf` grounded overrides landed
+(`KERNEL_DEVICETREE` stays commented pending the DTS). Tasks 2–4 (DTS) + the
+bbappend are blocked on the Alif kernel tree; all `bitbake`/bake gates need the
+full stack.
