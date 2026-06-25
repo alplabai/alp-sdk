@@ -35,6 +35,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   environment; board-gated `TODO(e1m-evk-hw)` constants isolate the three
   `/dev`-enumeration values needed on the bench.  Host syntax-check gate passes
   (`cc -std=c11 -Wall -Wextra -Iinclude -fsyntax-only`, exit 0).
+- **`meta-alp-sdk/recipes-examples/aen-a32-carrier-bringup_0.6.bb` — Yocto recipe
+  that cross-builds and bakes the example into `alif-tiny-image` (SP2 Task 2).**
+  Inherits `cmake`; sources the branch `feat/aen-a32-yocto-bringup` via
+  `SRC_URI` + `SRCREV=${AUTOREV}`; `S` points directly at the example subdir
+  so only the example is compiled against the staged `alp-sdk` sysroot.
+  `DEPENDS = "alp-sdk alp-chips"`, `COMPATIBLE_MACHINE = "e1m-aen801-a32"`.
+  `IMAGE_INSTALL:append` in `e1m-aen801-a32.conf` extended to include
+  `aen-a32-carrier-bringup` alongside `alp-sdk`.
 - **alp-sdk library runs on the AEN A32 Linux image.**  The full `meta-alp-sdk`
   layer integrates onto the Alif scarthgap stack (BBMASK the V2N/ROS/DEEPX
   recipes; dangling-bbappends warn-only), and `libalp_sdk.so` cross-builds +
