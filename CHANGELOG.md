@@ -16,9 +16,12 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   dtb in the kernel's subdir Makefiles and extends `COMPATIBLE_MACHINE`, plus the
   grounded `e1m-aen801-a32` machine-conf overrides (Macronix OctaFlash, OSPI-NOR
   boot, `xipImage`).  `bitbake -c compile linux-alif` for `MACHINE=e1m-aen801-a32`
-  builds the carrier dtb end-to-end (no board needed).  The peripheral selection
-  is a devkit-e8 baseline pending the E1M-EVK HW mapping.  Design + build path:
-  `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
+  builds the carrier dtb end-to-end, and `bitbake alif-tiny-image` produces the
+  full bootable set (`bl32.bin` TF-A + `xipImage` kernel + `e1m-aen801-evk.dtb`
+  + `cramfs-xip` rootfs) — all on real public Alif sources, no board needed.
+  The peripheral selection is a devkit-e8 baseline pending the E1M-EVK HW mapping;
+  the alp-sdk/ROS image content (alp-image-edge) is the full-integration follow-up.
+  Design + build path: `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
 
 ### Fixed
 
