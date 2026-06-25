@@ -19,8 +19,13 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   builds the carrier dtb end-to-end, and `bitbake alif-tiny-image` produces the
   full bootable set (`bl32.bin` TF-A + `xipImage` kernel + `e1m-aen801-evk.dtb`
   + `cramfs-xip` rootfs) — all on real public Alif sources, no board needed.
-  The peripheral selection is a devkit-e8 baseline pending the E1M-EVK HW mapping.
-  Design + build path: `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
+  The carrier DTS carries the real E1M-EVK peripheral selection — console on
+  Alif UART5, sensors on I2C2, display/camera on I2C1 — transcribed from the
+  authoritative SoM/carrier routing (`from-alif.tsv` + `e1m-evk.yaml`), with the
+  pinmux groups; the decompiled dtb confirms `status="okay"` + `console=ttyS0`.
+  On-bus I2C device nodes are TODO (the bmi323/icm42670 0x68 strap is schematic-
+  determined). Design + build path:
+  `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
 - **alp-sdk library runs on the AEN A32 Linux image.**  The full `meta-alp-sdk`
   layer integrates onto the Alif scarthgap stack (BBMASK the V2N/ROS/DEEPX
   recipes; dangling-bbappends warn-only), and `libalp_sdk.so` cross-builds +
