@@ -118,11 +118,12 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         parser.add_argument(
             '--mram-xip', dest='mram_xip', default=False,
             action='store_true',
-            help='Provision a slot0-linked app in place (mramAddress '
-                 f'{_HE_SLOT0_MRAM_ADDRESS}, flags ["boot"]) instead of the '
-                 f'default ITCM-load ATOC (loadAddress {_HE_LOAD_ADDRESS}). '
-                 'Use for an app that overflows ITCM (e.g. an NPU model); '
-                 'the app must build with CONFIG_USE_DT_CODE_PARTITION=y.')
+            help='Reject the flash with a pointer to the two-blob bench Flow '
+                 'D helper. A slot0-linked app that overflows ITCM (mramAddress '
+                 f'{_HE_SLOT0_MRAM_ADDRESS}, flags ["boot"]) needs the raw app '
+                 'blob written to slot0 over the J-Link Alif MRAM loader, which '
+                 'this SE-UART-only runner does not drive; use '
+                 'scripts/bench/aen/flash-jlink-mramxip.sh instead.')
         parser.add_argument(
             '--app-gen-toc', dest='gen_toc', default='app-gen-toc',
             help='app-gen-toc executable name/path (default: app-gen-toc).')
@@ -150,6 +151,25 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         if command != 'flash':
             raise ValueError(f'{self.name()} only supports flash, not '
                              f'{command}')
+
+        # A slot0-XIP app is NOT embedded in the ATOC (flags ["boot"],
+        # mramAddress) -- the ATOC only tells the SE to boot whatever
+        # already sits at 0x80010000. Provisioning it therefore needs the
+        # standalone app blob written to slot0 *as well as* the ATOC. This
+        # SE-UART-only runner burns just the ATOC (app-write-mram -p), so a
+        # --mram-xip flash here would leave slot0 stale and the SE would
+        # boot a garbage image. Writing the raw app blob to an MRAM address
+        # needs the J-Link built-in Alif MRAM loader (bench Flow D), which
+        # this runner deliberately does not use (see capabilities()).
+        if self.mram_xip:
+            raise RuntimeError(
+                'slot0-XIP provisioning needs two blobs (the app at '
+                f'{_HE_SLOT0_MRAM_ADDRESS} AND the signed ATOC), and the raw '
+                'app blob must be written over the J-Link Alif MRAM loader '
+                'which this SE-UART-only runner does not drive. Use the '
+                'two-blob bench Flow D helper instead: '
+                'scripts/bench/aen/flash-jlink-mramxip.sh <build-dir> (see '
+                'docs/aen-bench-bringup.md, Flow D).')
 
         if not self.setools_dir:
             raise RuntimeError(
@@ -184,8 +204,7 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
 
         # 1. Stage the image + a per-app signed-ATOC config that keeps the
         #    factory DEVICE config and points the app entry at this build's
-        #    zephyr.bin. This mirrors flash-run.sh:41-48 (ITCM load) /
-        #    flash-jlink-mramxip.sh:62-69 (slot0 XIP) exactly.
+        #    zephyr.bin. This mirrors flash-run.sh:41-48 (ITCM load) exactly.
         name = Path(self.cfg.build_dir).name or 'alp-app'
         images_dir = setools / 'build' / 'images'
         config_dir = setools / 'build' / 'config'
@@ -194,7 +213,7 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         staged_bin = images_dir / f'{name}.bin'
         shutil.copyfile(bin_file, staged_bin)
 
-        cfg_name = f'{name}-slot0.json' if self.mram_xip else f'{name}.json'
+        cfg_name = f'{name}.json'
         cfg_path = config_dir / cfg_name
         cfg_path.write_text(self._atoc_config(name), encoding='utf-8')
 
@@ -214,32 +233,21 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
             [str(write_mram), '-c', self.se_uart, '-p'], cwd=str(setools))
 
         self.logger.info(
-            f"flashed '{name}' to MRAM via SETOOLS "
-            f'({"slot0-XIP" if self.mram_xip else "ITCM-load"} ATOC); '
+            f"flashed '{name}' to MRAM via SETOOLS (ITCM-load ATOC); "
             'the SES has booted the image.')
 
     def _atoc_config(self, name):
         '''Return the signed-ATOC JSON for this build.
 
         DEVICE keeps the factory device config (signed); the app entry is
-        signed + tagged for the M55-HE. The two shapes are transcribed
-        verbatim from the bench recipes:
-
-          ITCM-load  (default) -> loadAddress 0x58000000, flags load+boot
-                                  cite: scripts/bench/aen/flash-run.sh:42-48
-          slot0-XIP  (--mram-xip) -> mramAddress 0x80010000, flags boot
-                                  cite: scripts/bench/aen/flash-jlink-mramxip.sh:63-69
+        signed + tagged for the M55-HE and embedded ITCM-load (loadAddress
+        0x58000000, flags load+boot), transcribed verbatim from the bench
+        recipe. cite: scripts/bench/aen/flash-run.sh:42-48
         '''
-        if self.mram_xip:
-            app_entry = (
-                f'                 "cpu_id": "{_HE_CPU_ID}", '
-                f'"mramAddress": "{_HE_SLOT0_MRAM_ADDRESS}", '
-                '"flags": ["boot"] }')
-        else:
-            app_entry = (
-                f'                 "cpu_id": "{_HE_CPU_ID}", '
-                f'"loadAddress": "{_HE_LOAD_ADDRESS}", '
-                '"flags": ["load", "boot"] }')
+        app_entry = (
+            f'                 "cpu_id": "{_HE_CPU_ID}", '
+            f'"loadAddress": "{_HE_LOAD_ADDRESS}", '
+            '"flags": ["load", "boot"] }')
         return (
             '{\n'
             '    "DEVICE":  { "disabled": false, '

@@ -161,6 +161,7 @@ int main(void)
 		       "absent? err=%d) -- check the board overlay\n",
 		       CC3501E_BRIDGE_SPI_BUS_ID,
 		       (int)alp_last_error());
+		return 0;
 	}
 	printf("[cc3501e-gpio] cc3501e bridge bring-up -> %d%s\n",
 	       (int)s,
