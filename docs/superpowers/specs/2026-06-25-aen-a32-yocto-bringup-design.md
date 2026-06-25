@@ -329,6 +329,45 @@ the macro header live in the Alif **kernel tree**. So authoring the E1M-EVK carr
 config = producing the E1M DCT JSON + macro defines against the devkit reference —
 which requires the kernel tree. Without it, this is invention (forbidden).
 
+### 12b. DTS authoring recipe (grounded from the unpacked `linux_alif@v6.12-dev`)
+
+Confirmed against the real kernel DTS tree
+(`arch/arm/boot/dts/alif/ensemble/{common,devkit}`). The model is flatter than
+the V2N SoM/carrier/product split — it is a single product `.dts` per board:
+
+```
+e1m-aen801-evk.dts:
+  #include "../common/ensemble-ex.dtsi"        // E8 SoC base (Tier-1, consume)
+  #include "../e1m/e1m_dct_defines.h"           // OUR defines header (the *_STATUS macros)
+  / { model; compatible; aliases{serial0=&uartN};
+      reg_3v3/2v7/1v8/1v2 fixed regulators;
+      chosen { bootargs = "console=ttyS0,115200n8 root=mtd:physmap-flash.0 rootfstype=cramfs ro"; }; }
+  &uartN  { pinctrl; status = UARTn_STATUS; }   // console
+  &i2cN   { status = I2Cn_STATUS; <carrier devices from e1m-evk.yaml> }
+  &ospi…  / &mem_hyperam { status = MEM_HYPER_STATUS; }  // OSPI NOR + HyperRAM
+```
+
+- **Defines header** (`devkit_ex_dct_defines.h` is the reference): every peripheral
+  has a `<NAME>_STATUS` macro, default `"disabled"`. Our `e1m_dct_defines.h` sets
+  `"okay"` only for the E1M-EVK-populated peripherals (console UART, the carrier
+  I²C buses, OSPI/HyperRAM, MHU to the M55s for SP3). **No DCT JSON is needed** —
+  `dct-kernel`'s `do_dct_to_dts` only rewrites the header when a `DCT_JSON_FILE`
+  exists; absent one, the header defaults apply. (A JSON is the optional runtime
+  master-assignment override.)
+- **SoC base** `ensemble-ex.dtsi` (47 KB) carries the node labels (`&uartN`,
+  `&i2cN`, `&spiN`, `&mem_hyperam`, `&mem_stitch`, the MHU nodes, `&cpu1`) — consume,
+  never edit.
+- **Build wiring:** the `linux-alif` bbappend installs `e1m-aen801-evk.dts` +
+  `e1m_dct_defines.h` into `${S}/arch/arm/boot/dts/alif/ensemble/e1m/`, adds the dtb
+  to that dir's `Makefile` (`dtb-$(CONFIG_…) += e1m/e1m-aen801-evk.dtb`), and extends
+  `COMPATIBLE_MACHINE` to match `e1m-aen801-a32`. The machine conf's
+  `KERNEL_DEVICETREE` then points at `alif/ensemble/e1m/e1m-aen801-evk.dtb`.
+  `MACHINE=devkit-e8` already builds end-to-end (env validated, kernel unpacked); the
+  carrier introduces only the `e1m/` dir + the COMPATIBLE extension.
+- **meta-alp-sdk integration:** its ROS recipes need `meta-ros` (absent from the Alif
+  stack) — `BBMASK` `meta-alp-sdk/recipes-ros/` for the AEN build, and the AEN image
+  drops ROS2 (the §8.2 footprint call) since ~42 MiB XIP RAM can't host it.
+
 **Build path (now unblocked):** (1) `alif_linux-apss-build-setup` (branch
 `scarthgap_yocto_5.0`, `REL_TAG=APSS-v2.2.0`) → `scripts/fetch-layers.sh` clones the
 layer stack + bitbake; (2) `source scripts/setup.sh <build>` runs oe-init, adds the
