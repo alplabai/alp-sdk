@@ -293,3 +293,33 @@ Winbond W958D8NBYA5I HyperRAM on OSPI0 CS1 (confirm `ISSI_HYPERRAM_EN`/
 (`KERNEL_DEVICETREE` stays commented pending the DTS). Tasks 2–4 (DTS) + the
 bbappend are blocked on the Alif kernel tree; all `bitbake`/bake gates need the
 full stack.
+
+### 12a. The decisive gate — Alif kernel + TF-A source (not in the public layers)
+
+Full layer stack (all publicly cloneable): poky-scarthgap + `meta-openembedded`
+(oe/python/networking/filesystems) + `meta-poky` + **`meta-alif`** (base/MSD:
+`dct-kernel.bbclass`, `tune-cortexa32`, `apss-tiny` distro) + **`meta-alif-ensemble`**
+(machine confs, `linux-alif`/TF-A recipes) + `meta-alp-sdk`.
+
+**Blocker:** `linux-alif_6.12.bb` fetches `SRC_URI = "${ALIF_KERNEL_TREE};branch=${ALIF_KERNEL_BRANCH}"`
+and `trusted-firmware-a.bb` fetches `"${TFA_TREE};branch=${TFA_BRANCH}"`, but **none of
+these four vars are assigned anywhere in the public layers** (confirmed: not in
+`conf/`, `conf/distro/apss-tiny.conf`, or `local.conf.sample`). The integrator must
+supply the Alif **kernel** and **TF-A** git URLs/branches in `local.conf` — these
+point at Alif kernel/TF-A sources that are license-gated / customer-delivered, i.e.
+effectively the pending "new software" for the *build* (separate from the board).
+
+**DCT mechanism:** the carrier config is not a hand-authored dtsi. `dct-kernel`'s
+`do_dct_to_dts` reads a **DCT JSON** (`DCT_JSON_FILE`) describing each peripheral's
+A32-vs-M55 master assignment and rewrites `<PERIPH>_STATUS "okay"/"disabled"` macros
+in the `DTS_MACRO_FILE` header (e.g. `devkit_ex_dct_defines.h`). Both the JSON and
+the macro header live in the Alif **kernel tree**. So authoring the E1M-EVK carrier
+config = producing the E1M DCT JSON + macro defines against the devkit reference —
+which requires the kernel tree. Without it, this is invention (forbidden).
+
+**Resolution needed (human):** provide `ALIF_KERNEL_TREE` + `ALIF_KERNEL_BRANCH`
+and `TFA_TREE` + `TFA_BRANCH` (the Alif kernel/TF-A repo URLs + branches from the
+Alif account/delivery). With them: clone the OE+Alif layer stack, set the four vars
+in `local.conf`, `bitbake -c unpack linux-alif` to read the real DCT
+defines/devkit DTS, author the E1M DCT JSON + carrier DTS, then build. Without them:
+the build + DTS stay blocked; grounding + conf (PR #264) is the landed increment.
