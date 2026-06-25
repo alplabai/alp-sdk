@@ -33,8 +33,8 @@ All addresses transcribed from `metadata/boards/e1m-evk.yaml` +
 |---|---|---|---|
 | TCAL9538 IO-expander | `0x72` | `EVK_I2C_BUS_SENSORS` (E1M_I2C0) | e1m-evk.yaml `tcal9538: true` |
 | PCIe TCAL9538 #2 | `0x71` | same | alp_e1m_evk.h (not used by SP2) |
-| BMI323 IMU (primary) | `0x68` | same | e1m-evk.yaml `primary_imu: bmi323` |
-| ICM-42670 IMU (alt) | `0x68` | same | e1m-evk.yaml (strap-selected sibling) |
+| BMI323 IMU (primary) | `0x68` | same | `EVK_I2C_ADDR_BMI323` (U13) |
+| ICM-42670 IMU (alt) | `0x69` | same | `EVK_I2C_ADDR_ICM42670` (U12, AD0→VIO; pre-respin 0x69 collision noted in header) |
 | INA236 ×6 | `0x40..0x46` | same | e1m-evk.yaml `ina236: true` (not used by SP2) |
 
 Bus mapping (SP1 carrier DTS): `EVK_I2C_BUS_SENSORS = E1M_I2C0` → Alif **I2C2**.
@@ -77,9 +77,10 @@ Files:
 2. **Bus scan** — probe `0x08..0x77`, print the ACKing set.
 3. **TCAL9538 @0x72** via the `tcal9538` chip driver: configure one port pin as
    output, drive hi/lo, read the input port back.
-4. **BMI323 @0x68** via the `bmi323` chip driver: read the chip-id / WHO_AM_I
-   register, verify it matches BMI323; if it reads the ICM-42670 id instead, log
-   that the strap selected the alternate IMU (runtime disambiguation — no guess).
+4. **Primary IMU @0x68** via the `bmi323` driver (`EVK_I2C_ADDR_BMI323`): verify
+   CHIP_ID == `BMI323_CHIP_ID`. On failure fall back to the `icm42670` driver at
+   `EVK_I2C_ADDR_ICM42670` (0x69) and verify WHO_AM_I — reports which IMU is
+   populated at runtime (no guess; both addresses from the header).
 5. **SoC GPIO** via `alp_gpio_*`: drive `EVK_PIN_LED_GREEN`, read
    `EVK_PIN_BMI323_INT1`. The packed `pin_id` for each is a board-gated constant
    (see below); a `gpiodetect`-style scan helper lists `/dev/gpiochipN` so the
