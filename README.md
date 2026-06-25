@@ -518,7 +518,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: main        # pin to a release tag — v0.8.0 is the latest; `main` tracks the next candidate
+      revision: main        # pin to a release tag — v0.8.1 is the latest; `main` tracks the next candidate
       path: modules/lib/alp-sdk
 ```
 

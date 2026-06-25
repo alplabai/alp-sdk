@@ -17,6 +17,34 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   runner does not drive — `--mram-xip` now fails fast and points at the two-blob
   bench Flow D helper (`scripts/bench/aen/flash-jlink-mramxip.sh`).
 
+## [v0.8.1] - 2026-06-24
+
+### Fixed — documentation: current-state silicon-validation accuracy (post-v0.8.0)
+
+The v0.8.0 docs still framed the SDK as "mostly pre-silicon; the first
+silicon-verified slice landed in v0.6" — stale, since v0.8.0 is itself a
+silicon-validation release (the E1M-AEN801 E8 peripheral matrix + the cc3501e
+Wi-Fi/BLE bridge).  A whole-repo accuracy sweep corrects the current-state
+claims to the real hardware reality, scoped so nothing overclaims:
+
+- `README.md` intro badge + Status section: "Mostly pre-silicon" → "Partially
+  silicon-verified" — **two** SoM families now carry silicon evidence (E1M-X
+  V2N GD32-bridge, v0.6; E1M-AEN801 E8 peripheral matrix + cc3501e bridge,
+  v0.8); the remaining families (i.MX 93, V2M/DEEPX, AEN30x..70x) stay
+  honestly pre-silicon.
+- `include/alp/chips/cc3501e.h` + `gd32g553.h`: `@par Verification status`
+  `[UNTESTED]` → `[BENCH-VERIFIED]`, scoped to the validated operations
+  (cc3501e core SS0 link + Wi-Fi/BLE scan + STA connect + GPIO proxy; Wi-Fi +
+  BLE concurrency noted **conf-gated, not proven**).  `include/alp/ext/alif/adc.h`:
+  E8 silicon-verified note.
+- `docs/os-support-matrix.md`, `docs/bring-up-aen.md`,
+  `docs/recommended-libraries.md`, and the peripheral-io example READMEs:
+  current-state currency (incl. a `<alp/dac.h>` reference fix).
+- `firmware/cc3501e/README.md`: documents the **hardware SS0 chip-select**
+  link (was "3-wire CS-less"); no Wi-Fi/BLE concurrency overclaim.
+- `scripts/bump_version.py` + `scripts/check_version_doc_sync.py`: track the
+  reworded intro-badge label so future version bumps keep it in sync.  (#257)
+
 ## [v0.8.0] - 2026-06-24
 
 ### Changed — clang-format pinned to v22 (was v14)
