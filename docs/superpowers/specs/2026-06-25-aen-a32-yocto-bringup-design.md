@@ -301,13 +301,25 @@ Full layer stack (all publicly cloneable): poky-scarthgap + `meta-openembedded`
 `dct-kernel.bbclass`, `tune-cortexa32`, `apss-tiny` distro) + **`meta-alif-ensemble`**
 (machine confs, `linux-alif`/TF-A recipes) + `meta-alp-sdk`.
 
-**Blocker:** `linux-alif_6.12.bb` fetches `SRC_URI = "${ALIF_KERNEL_TREE};branch=${ALIF_KERNEL_BRANCH}"`
-and `trusted-firmware-a.bb` fetches `"${TFA_TREE};branch=${TFA_BRANCH}"`, but **none of
-these four vars are assigned anywhere in the public layers** (confirmed: not in
-`conf/`, `conf/distro/apss-tiny.conf`, or `local.conf.sample`). The integrator must
-supply the Alif **kernel** and **TF-A** git URLs/branches in `local.conf` — these
-point at Alif kernel/TF-A sources that are license-gated / customer-delivered, i.e.
-effectively the pending "new software" for the *build* (separate from the board).
+**Where the four vars come from (RESOLVED):** `linux-alif_6.12.bb` and
+`trusted-firmware-a.bb` reference `ALIF_KERNEL_TREE`/`TFA_TREE` but the meta layers
+never assign them — they are set in `conf/auto.conf` by the Alif **APSS build-setup**
+integrator repo (`github.com/alifsemi/alif_linux-apss-build-setup`, branch
+`scarthgap_yocto_5.0`). The kernel + TF-A are **public Alif github repos** (no auth
+needed; `protocol=https`, optional `HTTPS_USER/PASSWD`):
+
+| var | value (scarthgap) |
+|-----|-------------------|
+| `ALIF_KERNEL_TREE` | `git://github.com/alifsemi/linux_alif;protocol=https` |
+| `ALIF_KERNEL_BRANCH` | `v6.12-dev` |
+| `TFA_TREE` | `git://github.com/alifsemi/trusted-firmware-a_alif;protocol=https` |
+| `TFA_BRANCH` | `alif_lts-v2.10.8` |
+
+Full layer set (`scripts/fetch-layers.sh`): oe-core + `meta-alif` + `meta-alif-ensemble`
++ `meta-alif-iot` + `meta-yocto`(poky) + `meta-openembedded` + `meta-tensorflow` +
+bitbake 2.8, all `scarthgap`, pinned by `REL_TAG` (latest `APSS-v2.2.0`); the setup
+generates `auto.conf` with `MACHINE=devkit-e8`, `DISTRO=apss-tiny`. So the build is
+fully reproducible from public sources — the earlier "license-gated" read was wrong.
 
 **DCT mechanism:** the carrier config is not a hand-authored dtsi. `dct-kernel`'s
 `do_dct_to_dts` reads a **DCT JSON** (`DCT_JSON_FILE`) describing each peripheral's
@@ -317,9 +329,13 @@ the macro header live in the Alif **kernel tree**. So authoring the E1M-EVK carr
 config = producing the E1M DCT JSON + macro defines against the devkit reference —
 which requires the kernel tree. Without it, this is invention (forbidden).
 
-**Resolution needed (human):** provide `ALIF_KERNEL_TREE` + `ALIF_KERNEL_BRANCH`
-and `TFA_TREE` + `TFA_BRANCH` (the Alif kernel/TF-A repo URLs + branches from the
-Alif account/delivery). With them: clone the OE+Alif layer stack, set the four vars
-in `local.conf`, `bitbake -c unpack linux-alif` to read the real DCT
-defines/devkit DTS, author the E1M DCT JSON + carrier DTS, then build. Without them:
-the build + DTS stay blocked; grounding + conf (PR #264) is the landed increment.
+**Build path (now unblocked):** (1) `alif_linux-apss-build-setup` (branch
+`scarthgap_yocto_5.0`, `REL_TAG=APSS-v2.2.0`) → `scripts/fetch-layers.sh` clones the
+layer stack + bitbake; (2) `source scripts/setup.sh <build>` runs oe-init, adds the
+layers, writes `auto.conf` (kernel/TF-A trees + `MACHINE=devkit-e8`); (3) add our
+`meta-alp-sdk` layer + switch `MACHINE=e1m-aen801-a32`; (4) `bitbake -c unpack
+linux-alif` fetches `linux_alif@v6.12-dev` → read the real DCT defines + devkit DCT
+JSON / DTS; (5) author the E1M DCT JSON + carrier DTS + the `linux-alif`/TF-A
+bbappend (`COMPATIBLE_MACHINE` extension); (6) `bitbake alif-tiny-image` /
+`alp-image-edge`. Validate first against stock `MACHINE=devkit-e8` to confirm the
+stack bakes before introducing the carrier.
