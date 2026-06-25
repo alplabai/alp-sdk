@@ -48,21 +48,21 @@
  * live `gpiodetect` / `gpioinfo` enumeration on the booted board.
  */
 #define AEN_GPIO_PACK(chip, line) (((uint32_t)(chip) << 16) | (uint32_t)(line))
-#define AEN_PIN_LED_GREEN  AEN_GPIO_PACK(0, 0) /* TODO(e1m-evk-hw): EVK_PIN_LED_GREEN */
-#define AEN_PIN_BMI323_INT AEN_GPIO_PACK(0, 0) /* TODO(e1m-evk-hw): EVK_PIN_BMI323_INT1 */
+#define AEN_PIN_LED_GREEN         AEN_GPIO_PACK(0, 0) /* TODO(e1m-evk-hw): EVK_PIN_LED_GREEN */
+#define AEN_PIN_BMI323_INT        AEN_GPIO_PACK(0, 0) /* TODO(e1m-evk-hw): EVK_PIN_BMI323_INT1 */
 
 static int g_pass;
 static int g_fail;
 
 #define STEP_OK(msg)                                                                               \
-	do {                                                                                       \
-		printf("[ OK ] %s\n", (msg));                                                      \
-		g_pass++;                                                                          \
+	do {                                                                                           \
+		printf("[ OK ] %s\n", (msg));                                                              \
+		g_pass++;                                                                                  \
 	} while (0)
 #define STEP_FAIL(msg)                                                                             \
-	do {                                                                                       \
-		printf("[FAIL] %s\n", (msg));                                                      \
-		g_fail++;                                                                          \
+	do {                                                                                           \
+		printf("[FAIL] %s\n", (msg));                                                              \
+		g_fail++;                                                                                  \
 	} while (0)
 
 static void bus_scan(alp_i2c_t *bus)
@@ -70,8 +70,7 @@ static void bus_scan(alp_i2c_t *bus)
 	printf("-- i2c scan on adapter %u --\n", AEN_SENSOR_I2C_ADAPTER);
 	for (uint8_t a = 0x08u; a <= 0x77u; a++) {
 		uint8_t dummy = 0;
-		if (alp_i2c_read(bus, a, &dummy, 1) == ALP_OK)
-			printf("   device @ 0x%02x\n", a);
+		if (alp_i2c_read(bus, a, &dummy, 1) == ALP_OK) printf("   device @ 0x%02x\n", a);
 	}
 }
 
@@ -109,8 +108,7 @@ static void probe_imu(alp_i2c_t *bus)
 	if (icm42670_init(&icm, bus, EVK_I2C_ADDR_ICM42670) == ALP_OK) {
 		uint8_t id = 0;
 		icm42670_read_id(&icm, &id);
-		printf("   icm42670 who_am_i = 0x%02x (expect 0x%02x)\n", id,
-		       ICM42670_WHO_AM_I_VAL);
+		printf("   icm42670 who_am_i = 0x%02x (expect 0x%02x)\n", id, ICM42670_WHO_AM_I_VAL);
 		STEP_OK("alternate IMU = icm42670 @0x69");
 		icm42670_deinit(&icm);
 		return;
@@ -128,11 +126,10 @@ static void probe_gpio(void)
 	} else {
 		STEP_FAIL("SoC GPIO LED drive (set AEN_PIN_LED_GREEN)");
 	}
-	if (led != NULL)
-		alp_gpio_close(led);
+	if (led != NULL) alp_gpio_close(led);
 
 	alp_gpio_t *intp = alp_gpio_open(AEN_PIN_BMI323_INT);
-	bool lvl = false;
+	bool        lvl  = false;
 	if (intp != NULL && alp_gpio_configure(intp, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE) == ALP_OK &&
 	    alp_gpio_read(intp, &lvl) == ALP_OK) {
 		printf("   BMI323 INT1 line = %d\n", (int)lvl);
@@ -140,8 +137,7 @@ static void probe_gpio(void)
 	} else {
 		STEP_FAIL("SoC GPIO INT read (set AEN_PIN_BMI323_INT)");
 	}
-	if (intp != NULL)
-		alp_gpio_close(intp);
+	if (intp != NULL) alp_gpio_close(intp);
 }
 
 int main(void)
