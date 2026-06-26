@@ -7496,10 +7496,9 @@ Deferred from this batch:
     (CC3501E GPIO19).
   - **Six INA236 current shunt monitors** -- one per power rail
     on I2C0 (3V3, 1V8, VIO, +V_CAM0, +V_CAM1, 5V).  INA236A
-    occupies 0x40..0x43 and INA236B occupies 0x44..0x47, so all
-    six fit on one bus.  Macros key on rail name; the user's
-    notes had a ref-des typo (three "U30"s) -- cross-check
-    pending.
+    occupies 0x40-0x42, INA236B occupies 0x49-0x4B (split-bank;
+    VCAM0 post-respin A0=SCL gives 0x4B, pre-respin 0x48 collides
+    with TAS2563 broadcast).  Macros key on rail name.
   - **ENCODER_SW correction** -- moves from IO3 to IO4 per the
     schematic.  PEC12R-4222F-S0024 encoder + push switch.
   ABI: ADDED public header `alp/chips/tas2563.h` (snapshot now
