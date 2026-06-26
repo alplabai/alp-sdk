@@ -25,7 +25,9 @@ ZTEST(alp_xhci_core, test_ring_enqueue_cycle_and_link_wrap)
 	xhci_ring_enqueue(&ring, &in);
 	zassert_true((seg[0].control & XHCI_TRB_CYCLE) != 0, "TRB0 carries producer cycle=1");
 	xhci_ring_enqueue(&ring, &in);
+	zassert_true((seg[1].control & XHCI_TRB_CYCLE) != 0, "TRB1 carries producer cycle=1");
 	xhci_ring_enqueue(&ring, &in); /* this fills to the Link TRB -> wrap */
+	zassert_true((seg[2].control & XHCI_TRB_CYCLE) != 0, "TRB2 carries producer cycle=1");
 
 	zassert_equal(ring.enqueue, 0u, "wrapped back to index 0");
 	zassert_equal(ring.cycle, 0, "producer cycle toggled after the Link TRB");

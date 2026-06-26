@@ -5,15 +5,20 @@
 
 void xhci_ring_init(struct xhci_ring *ring, struct xhci_trb *seg, uint32_t size)
 {
+	/* A ring needs at least 1 usable TRB + 1 Link TRB. */
+	if (size < 2u) {
+		return;
+	}
 	memset(seg, 0, (size_t)size * sizeof(*seg));
 	ring->seg = seg;
 	ring->size = size;
 	ring->enqueue = 0u;
 	ring->cycle = 1;
 	/* Last TRB is a Link TRB pointing back to seg[0] (spec §4.11.5.1). Its
-	 * cycle bit is set to the producer cycle as the ring crosses it. */
+	 * cycle bit is set to the producer cycle as the ring crosses it.
+	 * Ring Segment Base is a 64-bit address (spec §6.4.4.1). */
 	seg[size - 1u].param_lo = (uint32_t)(uintptr_t)seg;
-	seg[size - 1u].param_hi = 0u;
+	seg[size - 1u].param_hi = (uint32_t)((uintptr_t)seg >> 32);
 	seg[size - 1u].control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_LINK) | XHCI_TRB_LINK_TC;
 }
 
