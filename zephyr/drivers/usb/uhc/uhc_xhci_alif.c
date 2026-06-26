@@ -132,6 +132,13 @@ struct uhc_xhci_alif_data {
 	 * 64-byte alignment required by spec §6.1.
 	 */
 	uint64_t dcbaa[9] __aligned(64);
+	/**
+	 * Operational-register image built by the host-validated xhci_core path.
+	 * TODO(aen401-bench): after HCRST completes + USBSTS.CNR clears, copy these
+	 * fields out to the real op-reg block at (cfg->base + CAPLENGTH) with volatile
+	 * writes (DCBAAP, CRCR), then set CONFIG.MaxSlotsEn and USBCMD.R/S at enable.
+	 */
+	struct xhci_op_regs op_image;
 };
 
 /* ---------------------------------------------------------------------------
@@ -181,26 +188,25 @@ static int uhc_xhci_alif_init(const struct device *dev)
 		       ARRAY_SIZE(data->cmd_ring_seg));
 
 	/*
-	 * TODO(aen401-bench): read cap->caplength from MMIO to locate the
-	 * operational register block.  0x20 is the typical xHCI CAPLENGTH
-	 * (spec §5.3.1) and is used here as a build-time placeholder only.
+	 * TODO(aen401-bench): full MMIO write-out sequence:
+	 *   1. Read cap->caplength from MMIO to locate the op-reg block
+	 *      (base + CAPLENGTH per xHCI spec §5.3.1).
+	 *   2. DWC3 soft-reset: assert DCTL.CoreSoftReset (0xC704 bit 30);
+	 *      poll until cleared; set GCTL.PrtCapDir=host (0xC110 bits 13:12).
+	 *   3. xHCI reset: assert USBCMD.HCRST; poll USBSTS.CNR and HCH to
+	 *      zero (spec §4.2) before writing any op registers.
+	 *   4. Copy op_image.dcbaap_{lo,hi} and crcr_{lo,hi} and config to
+	 *      the real op-reg block with volatile writes.
+	 *   5. Set USBCMD.R/S and unmask interrupts in uhc_xhci_alif_enable.
+	 *   6. Allocate event ring segment + ERST; write ERSTBA/ERSTSZ via
+	 *      the primary interrupter registers (§5.5).
 	 *
-	 * TODO(aen401-bench): assert USBCMD.HCRST; poll USBSTS.CNR and HCH
-	 * to zero before programming any operational registers (spec §4.2).
-	 *
-	 * TODO(aen401-bench): allocate event ring segment + ERST; write
-	 * ERSTBA and ERSTSZ via the primary interrupter registers (§5.5).
-	 */
-	struct xhci_op_regs *op =
-		(struct xhci_op_regs *)(cfg->base + 0x20u);
-
-	/*
 	 * DCBAA / CRCR take bus (physical) addresses (spec §6.1, §5.4.8).
 	 * On M55-HP there is no MMU, so VA == PA and the uintptr_t cast is
 	 * the bus address.  TODO(aen401-bench): if an MMU is ever enabled,
 	 * translate via the Zephyr phys-addr API before programming these.
 	 */
-	xhci_init_sequence(op,
+	xhci_init_sequence(&data->op_image,
 			   (uint64_t)(uintptr_t)data->dcbaa,
 			   (uint64_t)(uintptr_t)data->cmd_ring_seg,
 			   8u /* MaxSlots -- TODO(aen401-bench): read HCSPARAMS1[7:0] */);

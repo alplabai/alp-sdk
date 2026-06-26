@@ -18,7 +18,7 @@ void xhci_ring_init(struct xhci_ring *ring, struct xhci_trb *seg, uint32_t size)
 	 * cycle bit is set to the producer cycle as the ring crosses it.
 	 * Ring Segment Base is a 64-bit address (spec §6.4.4.1). */
 	seg[size - 1u].param_lo = (uint32_t)(uintptr_t)seg;
-	seg[size - 1u].param_hi = (uint32_t)((uintptr_t)seg >> 32);
+	seg[size - 1u].param_hi = (uint32_t)((uint64_t)(uintptr_t)seg >> 32);
 	seg[size - 1u].control  = XHCI_TRB_TYPE(XHCI_TRB_TYPE_LINK) | XHCI_TRB_LINK_TC;
 }
 
