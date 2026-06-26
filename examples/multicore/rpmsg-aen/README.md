@@ -1,16 +1,17 @@
 # rpmsg-aen
 
 > `[UNTESTED]` -- v0.6 structural draft.  Board.yaml + sources are
-> shape-correct, but the build will fail at carve-out resolution
-> until the user supplies authoritative AEN memory-map values in
-> `metadata/e1m_modules/E1M-AEN701.yaml`.
+> shape-correct.  AEN801 (the default) resolves its RPMsg carve-out
+> from sram0 (0x02000000); the full west build is pending silicon
+> bring-up of the MHUv2 mailbox driver.  AEN701 remains blocked on
+> its `mailbox.controller: TBD` in the SoM preset.
 
-Heterogeneous compute on **E1M-AEN701** (Alif Ensemble E7):
+Heterogeneous compute on **E1M-AEN801** (Alif Ensemble E8):
 
 - The 2-core **Cortex-A32 cluster** boots Yocto Linux from MRAM and
   runs the consumer under `linux/`.
 - The **Cortex-M55 HP** core boots from MRAM, reads the board's
-  on-board LSM6DSO IMU + BMP581 barometer, and publishes one
+  on-board BMI323 IMU + BMP581 barometer, and publishes one
   `imu_sample` event per second over `<alp/rpc.h>`.
 - The **Cortex-M55 HE** core stays at the SoM topology default
   (stock-shim Zephyr image) -- alive for future low-power offload,
@@ -18,7 +19,8 @@ Heterogeneous compute on **E1M-AEN701** (Alif Ensemble E7):
 
 ```
 examples/multicore/rpmsg-aen/
-├── board.yaml          (v2; declares a32_cluster + m55_hp + ipc)
+├── board.yaml          (AEN801 default; declares a32_cluster + m55_hp + ipc)
+├── board-aen701.yaml   (AEN701 alternate; blocked until mailbox lands)
 ├── README.md           (this file)
 ├── CMakeLists.txt      (multi-slice project marker)
 ├── linux/              (a32_cluster's Yocto slice)
@@ -30,30 +32,38 @@ examples/multicore/rpmsg-aen/
     └── src/main.c      (producer reading sensors + publishing)
 ```
 
+## Board SKUs
+
+| File                | SoM SKU      | Silicon | Status                              |
+|---------------------|--------------|---------|-------------------------------------|
+| `board.yaml`        | E1M-AEN801   | E8      | Default; carve-out resolves         |
+| `board-aen701.yaml` | E1M-AEN701   | E7      | Alternate; blocked (mailbox TBD)    |
+
+`linux/CMakeLists.txt` and `m55_hp/CMakeLists.txt` both hardcode `../board.yaml`,
+so the default build always targets AEN801.  To build for the AEN701 alternate
+(once its mailbox metadata is filled in), pass `--input board-aen701.yaml`
+explicitly to `west alp-build`.
+
+> **Known issue:** the M55-HP producer source comment references `LSM6DSO`, but
+> the `e1m-evk` preset populates `bmi323` instead.  This is a pre-existing draft
+> mismatch in the source comment -- the code is correct; only the comment is
+> stale.  Board-gated, out of SP3 scope; flagged for a follow-up cleanup.
+
 ## Memory map
 
-The AEN's memory_map currently carries `TBD` placeholders pending
-the authoritative HW-config writeup.  Once filled in, the
-`alp_default_rpmsg` carve-out lands in `mram_main` (cacheable,
-accessible from all three cores).  Spec §6.8 dictates AEN defaults
-to cacheable carve-outs because the M55 cores have caches enabled.
+The AEN801 resolves its `alp_default_rpmsg` carve-out from sram0
+(0x02000000, 4096 KiB, accessible from all three cores, cacheable).
+The 256 KiB carve-out is placed at 0x023c0000 by the top-down allocator.
 
-| Range                     | Owner                  | Notes                                                |
-|---------------------------|------------------------|------------------------------------------------------|
-| `mram_main` (TBD base)    | All cores              | On-die MRAM, cacheable.  Holds the RPMsg carve-out.  |
-| `sram_main` (TBD base)    | All cores              | On-die SRAM, non-cacheable scratch.                  |
+| Range                        | Owner      | Notes                                        |
+|------------------------------|------------|----------------------------------------------|
+| `sram0` (0x02000000, 4 MiB)  | All cores  | On-die SRAM, cacheable.  Holds RPMsg carve-out. |
+| `mram_main` (base TBD)       | All cores  | On-die MRAM; base not yet grounded in e8.json. |
 
-Until the SoM preset carries hard addresses, `west alp-build`
-exits with:
-
-```
-OrchestratorError: ipc 'alp_default_rpmsg': memory_map.base is TBD
-for region 'mram_main' (E1M-AEN701).  Update
-metadata/e1m_modules/E1M-AEN701.yaml with hard values.
-```
-
-The structural files (this directory) are correct -- only the
-metadata is TBD.
+For AEN701, the `alp_default_rpmsg` carve-out is blocked because
+`mailbox.controller` in `metadata/e1m_modules/E1M-AEN701.yaml` is still `TBD`.
+Once that field is filled with the authoritative Zephyr binding name (expected:
+`alif_mhuv2`), the carve-out will resolve on the next orchestrator run.
 
 ## Boot order
 
@@ -63,17 +73,16 @@ running on M55-HP.  RPMsg name-service handshake completes once
 the A32 has reached the Linux user-space stage and opened its
 side of `alp_default_rpmsg`.
 
-| Stage | Core         | Action                              |
+| Stage | Core         | Action                               |
 |-------|--------------|--------------------------------------|
 | 1     | m55_hp       | Reset, run Zephyr early-boot         |
 | 2     | m55_he       | Stock-shim Zephyr (idle wait)        |
 | 3     | a32_cluster  | M55-HP-driven A32 bootloader → Linux |
 | 4     | RPMsg        | Name-service handshake on both sides |
 
-(Recorded verbatim into `system-manifest.yaml` once the SoM preset
-ships the authoritative `boot_order:` block.)
-
 ## Build
+
+Default (AEN801):
 
 ```bash
 cd alp-workspace
@@ -82,13 +91,19 @@ west alp-build alp-sdk/examples/multicore/rpmsg-aen
 
 The orchestrator fans out:
 
-- `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen701-a32`).
-- `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen701_m55_hp`).
+- `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen801-a32`).
+- `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`).
 
 Iterate on the M-side only:
 
 ```bash
 west alp-build alp-sdk/examples/multicore/rpmsg-aen --core m55_hp
+```
+
+AEN701 alternate (blocked until mailbox metadata is filled in):
+
+```bash
+west alp-build alp-sdk/examples/multicore/rpmsg-aen --input board-aen701.yaml
 ```
 
 ## Reference
