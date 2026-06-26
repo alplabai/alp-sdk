@@ -478,6 +478,20 @@ def test_emit_dts_reservations_shape(tmp_path: Path) -> None:
     assert node_re.search(out), "missing alp_default_rpmsg node"
 
 
+def test_emit_dts_reservations_aarch32_cells(tmp_path: Path) -> None:
+    """E1M-AEN801 is AArch32 (linux_phys_addr_bits=32) so the
+    reserved-memory node must use single-cell addressing with a 2-word
+    reg, matching the base ensemble-ex.dtsi #address-cells = <1>."""
+    path = _write_board(tmp_path, AEN801_M55_IPC)
+    out = emit_dts_reservations(load_board_yaml(path))
+    assert "#address-cells = <1>;" in out
+    assert "#size-cells = <1>;" in out
+    # 1-cell reg: base + size as two 32-bit words (base 0x023f0000, 64 KiB).
+    assert "reg = <0x023f0000 0x00010000>;" in out
+    # The 2-cell 4-word form must NOT appear for this AArch32 target.
+    assert "#address-cells = <2>;" not in out
+
+
 # ---------------------------------------------------------------------
 # 9. emit_system_manifest
 # ---------------------------------------------------------------------

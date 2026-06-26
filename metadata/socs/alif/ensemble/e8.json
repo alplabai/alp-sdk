@@ -126,6 +126,7 @@
       "supports": ["RNN", "CNN"]
     }
   ],
+  "linux_phys_addr_bits": 32,
   "soc_ram_kb": 9984,
   "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,
