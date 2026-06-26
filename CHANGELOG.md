@@ -7,6 +7,34 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added — AEN401 (E4) USB host skeleton: board + driver + backend + example
+
+End-to-end USB host foundation for the E1M-AEN401 (Alif Ensemble E4, Cortex-M55).
+Compile-verified; live bring-up is bench-gated (`TODO(aen401-bench)` markers).
+
+- **`zephyr/boards/alp/e1m_aen401_m55_hp/`** — new Zephyr board for
+  `alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp`.  Mirrors the AEN801 M55-HP
+  structure (E1M-EVK console on UART5/P3_4-P3_5, MRAM flash controller,
+  MCUboot-compatible partition map).  Declares an `alif,dwc2-uhc` USB host
+  controller node (`zephyr_uhc0` label) with placeholder reg/IRQ pending E4 HWRM
+  confirmation.
+
+- **`zephyr/drivers/usb/uhc/uhc_dwc2_alif.c`** — Synopsys DWC2-host UHC driver
+  skeleton.  Full `struct uhc_api` op table (`lock` → `ep_dequeue`); every op that
+  requires hardware returns a defined status with a grounded DWC2 register comment
+  and a `TODO(aen401-bench)` marker.  `CONFIG_UHC_DWC2_ALIF` Kconfig; binding at
+  `zephyr/dts/bindings/usb/alif,dwc2-uhc.yaml`.
+
+- **`src/backends/usb/zephyr_drv.c`** — host-side ops (`z_host_open/enable/
+  disable/close`) wired to Zephyr's `usbh_init/enable/disable/shutdown` API
+  behind `CONFIG_USB_HOST_STACK && DT_HAS_COMPAT_STATUS_OKAY(alif_dwc2_uhc)`.
+  Builds without either guard fall through to the existing NOSUPPORT stubs.
+
+- **`examples/peripheral-io/usb-host-storage/`** — USB mass-storage host example
+  using `alp_usb_host_open/enable/disable/close` (`<alp/usb.h>`).  Build-verified
+  for `alp_e1m_aen401_m55_hp`; map confirms the DWC2 skeleton ops and the
+  `USBH_CONTROLLER_DEFINE` context are linked at the correct MRAM addresses.
+
 ### Fixed
 
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
