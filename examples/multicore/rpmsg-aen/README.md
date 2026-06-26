@@ -106,6 +106,26 @@ AEN701 alternate (blocked until mailbox metadata is filled in):
 west alp-build alp-sdk/examples/multicore/rpmsg-aen --input board-aen701.yaml
 ```
 
+### Manual M55-HP build (without the orchestrator)
+
+The M55-HP slice can be built standalone using `west` from a Zephyr 4.4+
+workspace with the Zephyr SDK (`arm-zephyr-eabi`) installed:
+
+```bash
+cd ~/zephyrproject          # west workspace containing zephyr 4.4+
+ZEPHYR_TOOLCHAIN_VARIANT=zephyr \
+EXTRA_ZEPHYR_MODULES=/path/to/alp-sdk \
+west build -b 'alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp' \
+  /path/to/alp-sdk/examples/multicore/rpmsg-aen/m55_hp -p always
+```
+
+The board qualifier uses Zephyr 4.x slash format (`board/soc/variant`).  The
+build emits orphan-section warnings for `alp_backends_*`; these are benign --
+GNU ld auto-emits `__start_`/`__stop_` bracket symbols for the C-identifier-
+named sections, so all backends register correctly.  See
+`meta-alp-sdk/recipes-firmware/aen-m55-hp-fw/aen-m55-hp-fw_0.6.bb` for the
+recipe that packages the resulting ELF for remoteproc.
+
 ## Reference
 
 - [`examples/multicore/rpmsg-v2n/`](../rpmsg-v2n/) -- V2N counterpart of this

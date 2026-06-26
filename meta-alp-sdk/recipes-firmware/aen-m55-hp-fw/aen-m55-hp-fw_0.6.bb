@@ -7,11 +7,20 @@
 # top-level `*.elf` rule keeps it out of public git; see the
 # classifying-public-vs-internal policy).  The ELF is built out-of-tree
 # from examples/multicore/rpmsg-aen/m55_hp via:
-#   west build -b alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp \
-#              examples/multicore/rpmsg-aen/m55_hp
-# Build it with the Zephyr SDK so the `alp_backends_*` iterable sections
-# land in their linker slots -- a gnuarmemb/system-script build emits
-# orphan-section warnings and the alp_* backends may not register.
+#
+#   cd ~/zephyrproject        # a west workspace with Zephyr 4.4+
+#   ZEPHYR_TOOLCHAIN_VARIANT=zephyr \
+#   EXTRA_ZEPHYR_MODULES=/path/to/alp-sdk \
+#   west build -b 'alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp' \
+#     alp-sdk/examples/multicore/rpmsg-aen/m55_hp
+#
+# Zephyr SDK (arm-zephyr-eabi) is the supported toolchain.  The build
+# emits orphan-section warnings for `alp_backends_*` (the Zephyr base
+# linker script does not declare these sections); the warnings are benign
+# -- GNU ld auto-emits __start_/__stop_ bracket symbols for C-identifier-
+# named sections even when orphaned, so all backends register correctly.
+# Verified: all 27 __start_alp_backends_* symbols present in FLASH with
+# correct __stop_ pairs (see docs/superpowers/notes/2026-06-25-aen-bsp-grounding.md).
 #
 # To bake: place the built ELF at this recipe's files/m55_hp.elf (it is
 # git-ignored by the top-level `*.elf` rule) -- or have alp-sdk-internal
