@@ -40,62 +40,65 @@ extern "C" {
 #endif
 
 /** Default 7-bit I²C addresses (CSB strap selects). */
-#define BMP581_I2C_ADDR_LOW  0x46
-#define BMP581_I2C_ADDR_HIGH 0x47
+#define BMP581_I2C_ADDR_LOW  0x46 /**< CSB strapped low. */
+#define BMP581_I2C_ADDR_HIGH 0x47 /**< CSB strapped high. */
 
 /** CHIP_ID (register 0x01) value the chip returns. */
 #define BMP581_CHIP_ID 0x50
 
-/** Oversampling rate (OSR_CONFIG bits[2:0] for T, bits[5:3] for P). */
+/** @brief Oversampling rate (OSR_CONFIG bits[2:0] for T, bits[5:3] for P). */
 typedef enum {
-	BMP581_OSR_X1   = 0x0,
-	BMP581_OSR_X2   = 0x1,
-	BMP581_OSR_X4   = 0x2,
-	BMP581_OSR_X8   = 0x3,
-	BMP581_OSR_X16  = 0x4,
-	BMP581_OSR_X32  = 0x5,
-	BMP581_OSR_X64  = 0x6,
-	BMP581_OSR_X128 = 0x7
+	BMP581_OSR_X1   = 0x0, /**< 1× oversampling. */
+	BMP581_OSR_X2   = 0x1, /**< 2× oversampling. */
+	BMP581_OSR_X4   = 0x2, /**< 4× oversampling. */
+	BMP581_OSR_X8   = 0x3, /**< 8× oversampling. */
+	BMP581_OSR_X16  = 0x4, /**< 16× oversampling. */
+	BMP581_OSR_X32  = 0x5, /**< 32× oversampling. */
+	BMP581_OSR_X64  = 0x6, /**< 64× oversampling. */
+	BMP581_OSR_X128 = 0x7  /**< 128× oversampling (lowest noise). */
 } bmp581_osr_t;
 
-/** Output data rate (ODR_CONFIG bits[6:2]). */
+/** @brief Output data rate (ODR_CONFIG bits[6:2]). */
 typedef enum {
-	BMP581_ODR_240_HZ = 0x00,
-	BMP581_ODR_120_HZ = 0x01,
-	BMP581_ODR_50_HZ  = 0x07,
-	BMP581_ODR_25_HZ  = 0x0E,
-	BMP581_ODR_10_HZ  = 0x14,
-	BMP581_ODR_5_HZ   = 0x17,
-	BMP581_ODR_1_HZ   = 0x1C
+	BMP581_ODR_240_HZ = 0x00, /**< 240 Hz. */
+	BMP581_ODR_120_HZ = 0x01, /**< 120 Hz. */
+	BMP581_ODR_50_HZ  = 0x07, /**< 50 Hz. */
+	BMP581_ODR_25_HZ  = 0x0E, /**< 25 Hz. */
+	BMP581_ODR_10_HZ  = 0x14, /**< 10 Hz. */
+	BMP581_ODR_5_HZ   = 0x17, /**< 5 Hz. */
+	BMP581_ODR_1_HZ   = 0x1C  /**< 1 Hz. */
 } bmp581_odr_t;
 
-/** Power mode (ODR_CONFIG bits[1:0]). */
+/** @brief Power mode (ODR_CONFIG bits[1:0]). */
 typedef enum {
-	BMP581_MODE_STANDBY    = 0x0,
-	BMP581_MODE_NORMAL     = 0x1,
-	BMP581_MODE_FORCED     = 0x2,
-	BMP581_MODE_CONTINUOUS = 0x3
+	BMP581_MODE_STANDBY    = 0x0, /**< Idle; no conversions. */
+	BMP581_MODE_NORMAL     = 0x1, /**< Periodic conversions at the configured ODR. */
+	BMP581_MODE_FORCED     = 0x2, /**< Single conversion, then back to standby. */
+	BMP581_MODE_CONTINUOUS = 0x3  /**< Free-running conversions (ignores ODR). */
 } bmp581_mode_t;
 
-/** Compensated-but-still-raw readings.
- *  Pressure: signed 24-bit, LSB = 1/64 Pa (so press_raw / 64.0 = Pa).
- *  Temperature: signed 24-bit, LSB = 1/65536 °C. */
+/**
+ * @brief Compensated-but-still-raw readings.
+ *
+ * Pressure: signed 24-bit, LSB = 1/64 Pa (so press_raw / 64.0 = Pa).
+ * Temperature: signed 24-bit, LSB = 1/65536 °C.
+ */
 typedef struct {
-	int32_t pressure_raw; /**< Sign-extended from 24 → 32 bits. */
-	int32_t temperature_raw;
+	int32_t pressure_raw;    /**< Sign-extended from 24 → 32 bits; LSB = 1/64 Pa. */
+	int32_t temperature_raw; /**< Sign-extended from 24 → 32 bits; LSB = 1/65536 °C. */
 } bmp581_raw_t;
 
-/** Compensated readings in convenient integer units. */
+/** @brief Compensated readings in convenient integer units. */
 typedef struct {
 	int32_t pressure_pa;       /**< Pascals. */
 	int32_t temperature_c1000; /**< Degrees C × 1000. */
 } bmp581_compensated_t;
 
-/** Driver context.  Treat as opaque. */
+/** @brief Driver context.  Treat as opaque; populated by @ref bmp581_init. */
 typedef struct {
-	alp_i2c_t *bus;
-	uint8_t    addr;
-	bool       initialised;
+	alp_i2c_t *bus;         /**< Caller-owned I²C bus the chip lives on. */
+	uint8_t    addr;        /**< 7-bit I²C address. */
+	bool       initialised; /**< True once @ref bmp581_init has verified CHIP_ID. */
 } bmp581_t;
 
 /**
@@ -103,30 +106,79 @@ typedef struct {
  *
  * Reads CHIP_ID and verifies it matches @ref BMP581_CHIP_ID.
  * Does not start sampling — caller selects ODR / OSR / mode via
- * @ref bmp581_set_sampling.
+ * @ref bmp581_set_sampling.  Ownership of @p bus stays with the caller.
+ *
+ * @param dev      Context to initialise.  Must be non-NULL.
+ * @param bus      Open I²C bus.  Must be non-NULL.
+ * @param i2c_addr 7-bit address (see BMP581_I2C_ADDR_*).
+ * @return ALP_OK on success; ALP_ERR_IO on a CHIP_ID mismatch (chip absent or
+ *         not a BMP581); otherwise an error/propagated I2C status.
  */
 alp_status_t bmp581_init(bmp581_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 
-/** Read CHIP_ID for liveness checks. */
+/**
+ * @brief Read CHIP_ID for liveness checks.
+ *
+ * @param dev    Initialised context.  Must be non-NULL.
+ * @param id_out Receives the CHIP_ID byte.  Must be non-NULL.
+ * @return ALP_OK on success; otherwise an error status.
+ */
 alp_status_t bmp581_read_id(bmp581_t *dev, uint8_t *id_out);
 
-/** Configure oversampling, ODR, and mode in one call. */
+/**
+ * @brief Configure oversampling, ODR, and mode in one call.
+ *
+ * @param dev       Initialised context.  Must be non-NULL.
+ * @param press_osr Pressure oversampling rate.
+ * @param temp_osr  Temperature oversampling rate.
+ * @param odr       Output data rate (used in periodic modes).
+ * @param mode      Power/sampling mode.
+ * @return ALP_OK on success; otherwise an error status.
+ */
 alp_status_t bmp581_set_sampling(bmp581_t     *dev,
                                  bmp581_osr_t  press_osr,
                                  bmp581_osr_t  temp_osr,
                                  bmp581_odr_t  odr,
                                  bmp581_mode_t mode);
 
-/** Read the raw 24-bit P + T pair in one burst. */
+/**
+ * @brief Read the raw 24-bit P + T pair in one burst.
+ *
+ * @param dev Initialised context.  Must be non-NULL.
+ * @param out Receives the sign-extended raw P/T sample.  Must be non-NULL.
+ * @return ALP_OK on success; otherwise an error status.
+ */
 alp_status_t bmp581_read_raw(bmp581_t *dev, bmp581_raw_t *out);
 
-/** Convert a raw reading into Pa + (°C × 1000). */
+/**
+ * @brief Convert a raw reading into Pa + (°C × 1000).
+ *
+ * Pure helper — no chip access and no @p dev needed (the BMP581 returns
+ * already-compensated values, so this only rescales the fixed-point LSBs).
+ *
+ * @param raw Raw sample to convert (e.g. from @ref bmp581_read_raw).  Non-NULL.
+ * @param out Receives the rescaled result.  Must be non-NULL.
+ * @return ALP_OK on success; ALP_ERR_INVAL on a NULL argument.
+ */
 alp_status_t bmp581_compensate(const bmp581_raw_t *raw, bmp581_compensated_t *out);
 
-/** Soft-reset the chip (writes 0xB6 to CMD register). */
+/**
+ * @brief Soft-reset the chip (writes 0xB6 to CMD register).
+ *
+ * Re-run @ref bmp581_init afterwards.
+ *
+ * @param dev Initialised context.  Must be non-NULL.
+ * @return ALP_OK on success; otherwise an error status.
+ */
 alp_status_t bmp581_soft_reset(bmp581_t *dev);
 
-/** Release the driver context. */
+/**
+ * @brief Release the driver context.
+ *
+ * Does not close the I²C bus or power down the chip.  NULL @p dev is a no-op.
+ *
+ * @param dev Context to release.  May be NULL.
+ */
 void bmp581_deinit(bmp581_t *dev);
 
 #ifdef __cplusplus

@@ -44,32 +44,62 @@
 extern "C" {
 #endif
 
+/** @brief Camera input routed to the mux output (datasheet SEL truth table). */
 typedef enum {
-	CAM_MUX_PI3WVR626_INPUT_A = 0,
-	CAM_MUX_PI3WVR626_INPUT_B = 1,
+	CAM_MUX_PI3WVR626_INPUT_A = 0, /**< SEL=0: route the A_MIPI_CSI_* inputs to the output. */
+	CAM_MUX_PI3WVR626_INPUT_B = 1, /**< SEL=1: route the B_MIPI_CSI_* inputs to the output. */
 } cam_mux_pi3wvr626_input_t;
 
+/**
+ * @brief Helper context for one PI3WVR626 mux instance.
+ *
+ * Caller-allocated and owned for the lifetime of the mux; the fields are
+ * driver-private (treat as opaque) and populated by @ref cam_mux_pi3wvr626_init.
+ */
 typedef struct {
-	bool        initialised;
-	alp_gpio_t *sel_pin;
+	bool        initialised; /**< True between a successful init and deinit. */
+	alp_gpio_t *sel_pin;     /**< Borrowed SEL GPIO handle; the caller retains ownership. */
 } cam_mux_pi3wvr626_t;
 
 /**
  * @brief Bind to the SEL GPIO and configure it as an output.
  *
- * @param[in] ctx      Helper context.
+ * @param[in] ctx      Helper context (output).
  * @param[in] sel_pin  Open GPIO handle for the SEL line (E1M IO2
  *                     on the EVK).  Caller owns the handle.
+ * @return ALP_OK on success; ALP_ERR_INVAL if @p ctx or @p sel_pin is NULL.
  */
 alp_status_t cam_mux_pi3wvr626_init(cam_mux_pi3wvr626_t *ctx, alp_gpio_t *sel_pin);
 
-/** @brief Switch the mux to input A (SEL=0) or input B (SEL=1). */
+/**
+ * @brief Switch the mux to input A (SEL=0) or input B (SEL=1).
+ *
+ * Drives SEL synchronously; the ~10 ns mux propagation delay means the host
+ * should stop any active downstream MIPI CSI capture before flipping inputs.
+ *
+ * @param[in] ctx    Initialised helper context.
+ * @param[in] input  Which camera input to route to the output.
+ * @return ALP_OK once SEL is driven; ALP_ERR_INVAL on a NULL @p ctx or an
+ *         out-of-range @p input; otherwise the underlying GPIO-write status.
+ */
 alp_status_t cam_mux_pi3wvr626_select(cam_mux_pi3wvr626_t *ctx, cam_mux_pi3wvr626_input_t input);
 
-/** @brief Read the currently-driven SEL state. */
+/**
+ * @brief Report which input the SEL line is currently driving.
+ *
+ * @param[in]  ctx        Initialised helper context.
+ * @param[out] input_out  Receives the currently-selected input.
+ * @return ALP_OK with @p input_out set; ALP_ERR_INVAL on a NULL argument.
+ */
 alp_status_t cam_mux_pi3wvr626_get(cam_mux_pi3wvr626_t *ctx, cam_mux_pi3wvr626_input_t *input_out);
 
-/** @brief Release the driver context.  Idempotent. */
+/**
+ * @brief Release the driver context.  Idempotent.
+ *
+ * Does not close the SEL GPIO handle -- the caller owns it.
+ *
+ * @param[in] ctx  Helper context (may already be deinitialised, or NULL).
+ */
 void cam_mux_pi3wvr626_deinit(cam_mux_pi3wvr626_t *ctx);
 
 #ifdef __cplusplus

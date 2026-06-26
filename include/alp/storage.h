@@ -50,10 +50,12 @@ typedef enum {
 	ALP_STORAGE_KIND_SD_MMC         = 3  /**< SD card or eMMC. */
 } alp_storage_kind_t;
 
+/** Opaque storage handle.  Allocate via @ref alp_storage_open. */
 typedef struct alp_storage alp_storage_t;
 
+/** Configuration passed to @ref alp_storage_open. */
 typedef struct {
-	alp_storage_kind_t kind;
+	alp_storage_kind_t kind;        /**< Storage class; selects the backend. */
 	uint32_t           instance_id; /**< 0 for the primary device. */
 	uint32_t           freq_hz;     /**< Bus clock; 0 = backend default. */
 	bool               read_only;   /**< Refuses writes / erases. */
@@ -61,9 +63,9 @@ typedef struct {
 
 /** Block geometry, populated by @ref alp_storage_get_info. */
 typedef struct {
-	uint64_t total_bytes;
-	uint32_t block_size; /**< Min unit for read/write. */
-	uint32_t erase_size; /**< Min unit for erase (often a multiple of block_size). */
+	uint64_t total_bytes; /**< Total device capacity in bytes. */
+	uint32_t block_size;  /**< Min unit for read/write. */
+	uint32_t erase_size;  /**< Min unit for erase (often a multiple of block_size). */
 } alp_storage_info_t;
 
 /**
@@ -199,9 +201,9 @@ const alp_capabilities_t *alp_storage_capabilities(const alp_storage_t *s);
  *   - XTS: AES-XTS (block-cipher mode; IV is the tweak.  Standard
  *     for storage encryption at flash-block granularity). */
 typedef enum {
-	ALP_STORAGE_AES_OFF = 0,
-	ALP_STORAGE_AES_CTR = 1,
-	ALP_STORAGE_AES_XTS = 2,
+	ALP_STORAGE_AES_OFF = 0, /**< Bypass; plaintext both ways. */
+	ALP_STORAGE_AES_CTR = 1, /**< AES-CTR; IV is the starting counter. */
+	ALP_STORAGE_AES_XTS = 2, /**< AES-XTS; IV is the tweak (flash-block granularity). */
 } alp_storage_aes_mode_t;
 
 /** Inline-AES configuration.  Caller-owned memory; backend reads
@@ -215,12 +217,12 @@ typedef enum {
  *     16 bytes for both CTR + XTS in the standard modes.
  *   - iv_bytes: typically 16. */
 typedef struct {
-	alp_storage_aes_mode_t mode;
-	const uint8_t         *key;
-	uint8_t                key_bytes;
-	const uint8_t         *iv;
-	uint8_t                iv_bytes;
-	uint16_t               reserved;
+	alp_storage_aes_mode_t mode;      /**< One of @ref alp_storage_aes_mode_t. */
+	const uint8_t         *key;       /**< Key bytes (length per @c key_bytes). */
+	uint8_t                key_bytes; /**< 16, 24, or 32 -- selects AES-128 / 192 / 256. */
+	const uint8_t         *iv;        /**< IV / tweak bytes (length per @c iv_bytes). */
+	uint8_t                iv_bytes;  /**< IV length; typically 16. */
+	uint16_t               reserved;  /**< Reserved for ABI growth; set to 0. */
 } alp_storage_aes_config_t;
 
 /**

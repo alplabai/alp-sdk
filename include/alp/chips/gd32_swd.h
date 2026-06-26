@@ -80,22 +80,23 @@ extern "C" {
 /** ACK response (3-bit field returned by the target after every
  *  request).  Values match the Arm ADIv5 specification. */
 typedef enum {
-	GD32_SWD_ACK_OK    = 0x1,
-	GD32_SWD_ACK_WAIT  = 0x2,
-	GD32_SWD_ACK_FAULT = 0x4,
-	GD32_SWD_ACK_PROTO = 0x7,
+	GD32_SWD_ACK_OK    = 0x1, /**< Transfer accepted. */
+	GD32_SWD_ACK_WAIT  = 0x2, /**< Target busy; retry (up to MAX_WAIT_RETRIES). */
+	GD32_SWD_ACK_FAULT = 0x4, /**< Sticky error flagged; transfer rejected. */
+	GD32_SWD_ACK_PROTO = 0x7, /**< Protocol/line error (no valid ACK decoded). */
 } gd32_swd_ack_t;
 
-/** Driver context. */
+/** Driver context.  Caller-allocated; populated by @ref gd32_swd_init and
+ *  treated as opaque thereafter (fields are internal bookkeeping). */
 typedef struct {
-	bool        initialised;
-	bool        connected;
-	alp_gpio_t *swdio;
-	alp_gpio_t *swclk;
-	alp_gpio_t *nrst;
-	uint32_t    clock_delay;
-	uint32_t    idcode;
-	bool        swdio_is_output;
+	bool        initialised;     /**< Set once @ref gd32_swd_init succeeds. */
+	bool        connected;       /**< Set once @ref gd32_swd_connect succeeds. */
+	alp_gpio_t *swdio;           /**< Borrowed SWDIO handle (caller owns). */
+	alp_gpio_t *swclk;           /**< Borrowed SWCLK handle (caller owns). */
+	alp_gpio_t *nrst;            /**< Borrowed NRST handle, or NULL if unwired. */
+	uint32_t    clock_delay;     /**< Per-half-bit busy-spin count (SWCLK rate). */
+	uint32_t    idcode;          /**< SW-DP IDCODE cached by @ref gd32_swd_connect. */
+	bool        swdio_is_output; /**< Tracks current SWDIO line direction. */
 } gd32_swd_t;
 
 /**
@@ -105,25 +106,48 @@ typedef struct {
  * state, and -- when `nrst` is non-NULL -- releases the reset line.
  * Ownership of the handles stays with the caller.
  *
+ * @param ctx    Caller-allocated context to populate.
+ * @param swdio  SWDIO line (bidirectional; required).
+ * @param swclk  SWCLK line (host-driven; required).
+ * @param nrst   NRST line (open-drain), or NULL to drive reset over
+ *               AIRCR.SYSRESETREQ only.
  * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on NULL ctx /
  *         swdio / swclk, or the @ref alp_gpio_write error from the
  *         idle-state configuration.
  */
 alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk, alp_gpio_t *nrst);
 
-/** Override the per-half-bit clock-delay loop count.  Clamped to
- *  [0, 2048]. */
+/**
+ * @brief Override the per-half-bit clock-delay loop count (SWCLK rate).
+ *
+ * Higher values clock SWCLK slower.  Defaults to
+ * @ref GD32_SWD_DEFAULT_CLOCK_DELAY.
+ *
+ * @param ctx          Initialised context.
+ * @param delay_spins  Busy-spin count per SWCLK half-bit; clamped to [0, 2048].
+ * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on NULL ctx.
+ */
 alp_status_t gd32_swd_set_clock_delay(gd32_swd_t *ctx, uint32_t delay_spins);
 
 /**
  * @brief Perform line-reset + JTAG-to-SWD switch + DPIDR read.
  *
- * On success the IDCODE is cached in @ref gd32_swd_t::idcode.
+ * On success the IDCODE is cached in @ref gd32_swd_t::idcode; compare
+ * against @ref GD32_SWD_EXPECTED_IDCODE to confirm the target part.
+ *
+ * @param ctx  Initialised context.
+ * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on NULL/uninitialised
+ *         ctx, or a transport/protocol error if the DPIDR read fails.
  */
 alp_status_t gd32_swd_connect(gd32_swd_t *ctx);
 
-/** Halt the Cortex-M33 cleanly via the Debug Halting Control and
- *  Status Register.  Must be called before any flash op. */
+/**
+ * @brief Halt the Cortex-M33 cleanly via the Debug Halting Control and
+ *        Status Register.  Must be called before any flash op.
+ *
+ * @param ctx  Connected context (see @ref gd32_swd_connect).
+ * @return @ref ALP_OK once the core reports halted, else an error.
+ */
 alp_status_t gd32_swd_halt(gd32_swd_t *ctx);
 
 /**
@@ -131,24 +155,56 @@ alp_status_t gd32_swd_halt(gd32_swd_t *ctx);
  *        covers @p addr .. @p addr + @p size - 1.
  *
  * Address + size are rounded out to sector boundaries
- * (@ref GD32_SWD_FMC_SECTOR_BYTES).
+ * (@ref GD32_SWD_FMC_SECTOR_BYTES).  Requires a halted core.
+ *
+ * @param ctx   Connected + halted context.
+ * @param addr  Start address (within flash, @ref GD32_SWD_FMC_FLASH_BASE).
+ * @param size  Byte span to cover; rounded up to whole sectors.
+ * @return @ref ALP_OK on success, else an error.
  */
 alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size);
 
-/** Program @p len bytes from @p data into flash starting at @p addr.
- *  Destination must be erased.  Doubleword-aligned. */
+/**
+ * @brief Program @p len bytes from @p data into flash starting at @p addr.
+ *
+ * Destination must already be erased; @p addr must be doubleword-aligned.
+ *
+ * @param ctx   Connected + halted context.
+ * @param addr  Doubleword-aligned destination address.
+ * @param data  Source bytes (must not be NULL when @p len > 0).
+ * @param len   Byte count to program.
+ * @return @ref ALP_OK on success, else an error.
+ */
 alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx, uint32_t addr, const uint8_t *data, size_t len);
 
-/** Read @p len bytes from flash starting at @p addr and compare
- *  against @p data.  Returns @ref ALP_OK on full match. */
+/**
+ * @brief Read @p len bytes from flash at @p addr and compare against @p data.
+ *
+ * @param ctx   Connected context.
+ * @param addr  Source address in flash.
+ * @param data  Expected bytes to compare against.
+ * @param len   Byte count to verify.
+ * @return @ref ALP_OK on a full match; @ref ALP_ERR_INVAL or a transport error
+ *         otherwise (a mismatch is reported as a verify failure).
+ */
 alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx, uint32_t addr, const uint8_t *data, size_t len);
 
-/** Release the core from debug halt + issue a system reset.  Uses
- *  the hardware @c NRST line when wired, otherwise the standard
- *  AIRCR.SYSRESETREQ + VECTKEY write. */
+/**
+ * @brief Release the core from debug halt + issue a system reset.
+ *
+ * Uses the hardware @c NRST line when wired, otherwise the standard
+ * AIRCR.SYSRESETREQ + VECTKEY write.
+ *
+ * @param ctx  Connected context.
+ * @return @ref ALP_OK on success, else an error.
+ */
 alp_status_t gd32_swd_reset_and_run(gd32_swd_t *ctx);
 
-/** Release the driver context.  Does NOT close the GPIO handles. */
+/**
+ * @brief Release the driver context.  Does NOT close the GPIO handles.
+ *
+ * @param ctx  Context to tear down (NULL is tolerated).
+ */
 void gd32_swd_deinit(gd32_swd_t *ctx);
 
 #ifdef __cplusplus

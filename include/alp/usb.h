@@ -54,16 +54,18 @@ typedef enum {
 	ALP_USB_DEVICE_HID     = 2  /**< HID (keyboard / mouse / generic). */
 } alp_usb_device_class_t;
 
+/** Opaque USB device-role handle. Acquire via @ref alp_usb_device_open. */
 typedef struct alp_usb_dev alp_usb_dev_t;
 
+/** Device-role descriptor presented to the host on enumerate. */
 typedef struct {
-	alp_usb_device_class_t device_class;
-	uint16_t               vendor_id;
-	uint16_t               product_id;
-	uint16_t               bcd_device;
-	const char            *manufacturer;
-	const char            *product;
-	const char            *serial;
+	alp_usb_device_class_t device_class; /**< Class to enumerate as. */
+	uint16_t               vendor_id;    /**< USB Vendor ID (idVendor). */
+	uint16_t               product_id;   /**< USB Product ID (idProduct). */
+	uint16_t               bcd_device;   /**< Device release number (bcdDevice), BCD-encoded. */
+	const char            *manufacturer; /**< iManufacturer string; NULL to omit. */
+	const char            *product;      /**< iProduct string; NULL to omit. */
+	const char            *serial;       /**< iSerialNumber string; NULL to omit. */
 } alp_usb_device_config_t;
 
 /**
@@ -138,6 +140,7 @@ void alp_usb_device_close(alp_usb_dev_t *dev);
 /* USB host                                                            */
 /* ------------------------------------------------------------------ */
 
+/** Opaque USB host-role handle (singleton). Acquire via @ref alp_usb_host_open. */
 typedef struct alp_usb_host alp_usb_host_t;
 
 /**

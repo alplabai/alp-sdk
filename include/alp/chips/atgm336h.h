@@ -32,19 +32,56 @@
 extern "C" {
 #endif
 
+/** @brief Driver context.  Treat as opaque; populated by @ref atgm336h_init. */
 typedef struct {
-	alp_uart_t *port;
-	bool        initialised;
+	alp_uart_t *port;        /**< Caller-owned UART carrying the module's NMEA stream. */
+	bool        initialised; /**< True once @ref atgm336h_init has bound @p port. */
 } atgm336h_t;
 
-/** @brief Bind context to caller-opened UART. */
+/**
+ * @brief Bind a driver context to a caller-opened UART.
+ *
+ * Does not configure the UART — the caller owns @p port and must open it at
+ * the module's line rate (9600 8N1 by default) before calling.  Ownership of
+ * @p port stays with the caller; @ref atgm336h_deinit does not close it.
+ *
+ * @param dev  Context to initialise.  Must be non-NULL.
+ * @param port Open UART carrying the module's NMEA output.  Must be non-NULL.
+ * @return ALP_OK on success; ALP_ERR_INVAL if @p dev or @p port is NULL.
+ */
 alp_status_t atgm336h_init(atgm336h_t *dev, alp_uart_t *port);
 
-/** @brief Read one NMEA line.  See `ublox_neo_m9n_read_nmea_line`. */
+/**
+ * @brief Read one NUL-terminated NMEA sentence from the module.
+ *
+ * Reads bytes until a '\n' is seen or @p line_buf is full, then NUL-terminates.
+ * Shares the contract of `ublox_neo_m9n_read_nmea_line`.  The per-byte UART
+ * read uses @p timeout_ms, so a stalled stream surfaces as the underlying
+ * UART status (e.g. ALP_ERR_TIMEOUT).
+ *
+ * @param dev        Initialised context.  Must be non-NULL.
+ * @param line_buf   Caller buffer to receive the sentence (NUL-terminated on
+ *                   success).  Must be non-NULL.
+ * @param line_max   Capacity of @p line_buf in bytes, including the NUL.  Must
+ *                   be >= 2.
+ * @param len_out    On success, receives the sentence length excluding the
+ *                   trailing NUL.  May be NULL if not needed.
+ * @param timeout_ms Per-byte UART read timeout, milliseconds.
+ * @return ALP_OK on a complete or buffer-bounded line; ALP_ERR_NOT_READY if
+ *         @p dev is uninitialised; ALP_ERR_INVAL if @p line_buf is NULL or
+ *         @p line_max < 2; otherwise the propagated UART read status.
+ */
 alp_status_t atgm336h_read_nmea_line(
     atgm336h_t *dev, uint8_t *line_buf, size_t line_max, size_t *len_out, uint32_t timeout_ms);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release the driver context.
+ *
+ * Clears @p dev's state; does not close the UART (the caller owns it) and does
+ * not power down the module.  NULL @p dev is a no-op.
+ *
+ * @param dev Context to release.  May be NULL.
+ */
 void atgm336h_deinit(atgm336h_t *dev);
 
 #ifdef __cplusplus

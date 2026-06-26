@@ -293,20 +293,21 @@ typedef enum {
 
 /** Reset-cause codes (per `gd32g553_reset_cause_t` on the firmware side). */
 typedef enum {
-	GD32G553_RESET_UNKNOWN  = 0,
-	GD32G553_RESET_POWER_ON = 1,
-	GD32G553_RESET_NRST_PIN = 2,
-	GD32G553_RESET_SOFT     = 3,
-	GD32G553_RESET_WDT      = 4,
-	GD32G553_RESET_BROWNOUT = 5,
-	GD32G553_RESET_LOWPOWER = 6,
+	GD32G553_RESET_UNKNOWN  = 0, /**< Cause not recorded / not classified. */
+	GD32G553_RESET_POWER_ON = 1, /**< Power-on / cold reset (POR). */
+	GD32G553_RESET_NRST_PIN = 2, /**< External NRST pin asserted. */
+	GD32G553_RESET_SOFT     = 3, /**< Software reset (SYSRESETREQ). */
+	GD32G553_RESET_WDT      = 4, /**< Watchdog timeout. */
+	GD32G553_RESET_BROWNOUT = 5, /**< Brown-out / supply-voltage reset. */
+	GD32G553_RESET_LOWPOWER = 6, /**< Exit from a low-power/standby reset. */
 } gd32g553_reset_cause_t;
 
 /** Firmware version triple returned by `GET_VERSION`. */
 typedef struct {
-	uint8_t major;
-	uint8_t minor;
-	uint8_t patch;
+	uint8_t major; /**< Major: bumped on a breaking wire change; host refuses
+	                    a mismatch vs @ref GD32G553_HOST_PROTOCOL_MAJOR. */
+	uint8_t minor; /**< Minor: additive opcode/payload additions. */
+	uint8_t patch; /**< Patch: bug-fix-only firmware build. */
 } gd32g553_version_t;
 
 /** Driver context.
@@ -521,10 +522,10 @@ alp_status_t gd32g553_counter_read(gd32g553_t *ctx, uint8_t counter, uint32_t *t
 /** PWM channel alignment mode -- passes through to the GD32 timer's
  *  CAM field (see GD32G553 reference manual §17). */
 typedef enum {
-	GD32G553_PWM_ALIGN_EDGE        = 0,
-	GD32G553_PWM_ALIGN_CENTER_UP   = 1,
-	GD32G553_PWM_ALIGN_CENTER_DOWN = 2,
-	GD32G553_PWM_ALIGN_CENTER_BOTH = 3,
+	GD32G553_PWM_ALIGN_EDGE        = 0, /**< Edge-aligned (counter counts up only). */
+	GD32G553_PWM_ALIGN_CENTER_UP   = 1, /**< Center-aligned, flags set on up-count. */
+	GD32G553_PWM_ALIGN_CENTER_DOWN = 2, /**< Center-aligned, flags set on down-count. */
+	GD32G553_PWM_ALIGN_CENTER_BOTH = 3, /**< Center-aligned, flags set on both. */
 } gd32g553_pwm_align_t;
 
 /** Sticky per-channel PWM tuning.  Subsequent @ref gd32g553_pwm_set

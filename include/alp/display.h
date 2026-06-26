@@ -17,7 +17,6 @@
  *   - the Alif LCD-IF path,
  *   - alp_display_lvgl_attach() for LVGL flush integration.
  *
-
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      v0.3 placeholder; no real backend impl yet.
  *      See docs/abi-markers.md for the convention.
@@ -35,19 +34,25 @@
 extern "C" {
 #endif
 
+/** Opaque display handle.  Acquire via @ref alp_display_open and
+ *  release via @ref alp_display_close. */
 typedef struct alp_display alp_display_t;
 
 /* alp_pixfmt_t is defined in <alp/peripheral.h> so it can be
  * shared with the camera surface without a forward dependency. */
 
+/** @brief Configuration passed to @ref alp_display_open. */
 typedef struct {
 	uint32_t display_id; /**< Studio-resolved display instance. */
 } alp_display_config_t;
 
+/** @brief Static display capabilities reported by @ref alp_display_get_caps. */
 typedef struct {
-	uint16_t     width;
-	uint16_t     height;
-	alp_pixfmt_t format;
+	uint16_t     width;  /**< Active panel width in pixels. */
+	uint16_t     height; /**< Active panel height in pixels. */
+	alp_pixfmt_t format; /**< Native framebuffer pixel format; the layout
+	                          @ref alp_display_blit expects (see
+	                          @ref alp_pixfmt_t). */
 } alp_display_caps_t;
 
 /**

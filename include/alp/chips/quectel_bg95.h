@@ -37,14 +37,23 @@
 extern "C" {
 #endif
 
+/** @brief Driver context for one BG95 module on a UART + control GPIOs. */
 typedef struct {
-	alp_uart_t *port;
-	alp_gpio_t *pwrkey; /**< Active-high PWRKEY pulse line. */
-	alp_gpio_t *reset;  /**< Optional hardware reset. */
-	bool        initialised;
+	alp_uart_t *port;        /**< Caller-opened AT-shell UART (borrowed, not owned). */
+	alp_gpio_t *pwrkey;      /**< Active-high PWRKEY pulse line (borrowed). */
+	alp_gpio_t *reset;       /**< Optional hardware reset; may be NULL. */
+	bool        initialised; /**< True once quectel_bg95_init() has succeeded. */
 } quectel_bg95_t;
 
-/** @brief Bind context to caller-opened UART + GPIOs. */
+/**
+ * @brief Bind context to caller-opened UART + GPIOs.
+ *
+ * @param dev    Caller-allocated context to populate.
+ * @param port   Open UART handle (borrowed; must outlive @p dev).
+ * @param pwrkey Open GPIO for PWRKEY (borrowed).
+ * @param reset  Open GPIO for hardware reset, or NULL if unused.
+ * @return ALP_OK on success; ALP_ERR_INVAL on a NULL required argument.
+ */
 alp_status_t
 quectel_bg95_init(quectel_bg95_t *dev, alp_uart_t *port, alp_gpio_t *pwrkey, alp_gpio_t *reset);
 
@@ -53,23 +62,43 @@ quectel_bg95_init(quectel_bg95_t *dev, alp_uart_t *port, alp_gpio_t *pwrkey, alp
  *
  * Caller is expected to wait at least 5 s after this returns
  * before sending the first AT command (Quectel boot time).
+ *
+ * @param dev Initialised driver context.
+ * @return ALP_OK on success; ALP_ERR_INVAL on NULL argument.
  */
 alp_status_t quectel_bg95_power_on(quectel_bg95_t *dev);
 
-/** @brief Send a single AT command (caller-supplied CR-terminator
- *         is OK; driver will append CRLF if missing). */
+/**
+ * @brief Send a single AT command.
+ *
+ * Caller-supplied CR terminator is OK; the driver appends CRLF if missing.
+ *
+ * @param dev    Initialised driver context.
+ * @param at_cmd NUL-terminated AT command string.
+ * @return ALP_OK on success; ALP_ERR_INVAL on NULL argument; a UART
+ *         error status on a failed write.
+ */
 alp_status_t quectel_bg95_send_cmd(quectel_bg95_t *dev, const char *at_cmd);
 
 /**
  * @brief Read up to @p max bytes of response (blocks up to @p timeout_ms).
  *
+ * @param dev          Initialised driver context.
+ * @param buf          Caller buffer to fill.
+ * @param max          Capacity of @p buf in bytes.
+ * @param received_out Out-param; receives the byte count read.
+ * @param timeout_ms   Maximum time to wait for data, in milliseconds.
  * @return `ALP_OK` on at least one byte received; `ALP_ERR_TIMEOUT`
- *         on no data within timeout.
+ *         on no data within timeout; ALP_ERR_INVAL on NULL argument.
  */
 alp_status_t quectel_bg95_read_response(
     quectel_bg95_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release driver context.
+ *
+ * @param dev Driver context; NULL is tolerated as a no-op.
+ */
 void quectel_bg95_deinit(quectel_bg95_t *dev);
 
 #ifdef __cplusplus

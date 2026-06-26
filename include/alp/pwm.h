@@ -79,7 +79,7 @@ typedef struct alp_pwm alp_pwm_t;
 typedef struct {
 	uint32_t           channel_id; /**< Studio-resolved PWM channel index (0..7). */
 	uint32_t           period_ns;  /**< PWM period in nanoseconds. 0 = use DT default. */
-	alp_pwm_polarity_t polarity;
+	alp_pwm_polarity_t polarity;   /**< Active-level mapping; see @ref alp_pwm_polarity_t. */
 } alp_pwm_config_t;
 
 /**

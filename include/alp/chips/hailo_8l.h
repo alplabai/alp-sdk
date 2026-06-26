@@ -68,13 +68,30 @@ typedef struct {
  */
 alp_status_t hailo_8l_init(hailo_8l_t *dev, alp_gpio_t *resetb, alp_gpio_t *pe_wake);
 
-/** @brief Assert RESETB then release.  100 ms low pulse. */
+/**
+ * @brief Assert RESETB then release.  100 ms low pulse.
+ *
+ * @param dev  Initialised context.
+ * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on NULL/uninitialised
+ *         dev, else the underlying GPIO error.
+ */
 alp_status_t hailo_8l_reset(hailo_8l_t *dev);
 
-/** @brief Sample the PCIe WAKE# line (true = active-low asserted). */
+/**
+ * @brief Sample the PCIe WAKE# line.
+ *
+ * @param dev            Initialised context.
+ * @param wake_asserted  Out: true when WAKE# is asserted (active-low low).
+ * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on NULL args, else
+ *         the underlying GPIO error.
+ */
 alp_status_t hailo_8l_read_wake(hailo_8l_t *dev, bool *wake_asserted);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release driver context.  Does NOT close the GPIO handles.
+ *
+ * @param dev  Context to tear down (NULL is tolerated).
+ */
 void hailo_8l_deinit(hailo_8l_t *dev);
 
 #ifdef __cplusplus

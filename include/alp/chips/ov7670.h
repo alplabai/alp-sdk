@@ -53,18 +53,18 @@ typedef enum {
 
 /** Pixel-format selection. */
 typedef enum {
-	OV7670_FMT_RGB565 = 0,
-	OV7670_FMT_YUV422 = 1,
-	OV7670_FMT_BAYER  = 2,
+	OV7670_FMT_RGB565 = 0, /**< 16-bit RGB565. */
+	OV7670_FMT_YUV422 = 1, /**< 16-bit YUV422 (YUYV order). */
+	OV7670_FMT_BAYER  = 2, /**< 8-bit raw Bayer (no ISP processing). */
 } ov7670_format_t;
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-	alp_i2c_t          *bus;
-	uint8_t             addr;
-	ov7670_resolution_t res;
-	ov7670_format_t     fmt;
-	bool                initialised;
+	alp_i2c_t          *bus;  /**< Borrowed SCCB/I²C bus; not owned, not closed by deinit. */
+	uint8_t             addr; /**< 7-bit SCCB address bound at init. */
+	ov7670_resolution_t res;  /**< Last requested resolution preset (stashed, may be unapplied). */
+	ov7670_format_t     fmt;  /**< Last requested pixel format (stashed, may be unapplied). */
+	bool                initialised; /**< True once init verified the chip ID. */
 } ov7670_t;
 
 /**

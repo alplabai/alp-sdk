@@ -13,6 +13,11 @@
  *   - Free-running tick reads as a high-precision timestamp source
  *   - A path that bypasses the kernel scheduler (interrupt context)
  *
+ * Where it runs: the portable <alp/counter.h> surface is identical on
+ * every E1M-conformant SoM (AEN, V2N, ...).  native_sim has no counter
+ * device by default, so alp_counter_open() returns NULL with
+ * ALP_ERR_NOT_READY there -- the example reports it and exits cleanly.
+ *
  * The alarm callback runs in interrupt context on M-class targets;
  * keep the body short and avoid blocking calls.
  */
@@ -52,6 +57,8 @@ int main(void)
 	    .counter_id = 0,
 	});
 	if (c == NULL) {
+		/* No alp-counter0 alias on this build, or no counter device
+	     * (the native_sim default) -- open returns NULL / NOT_READY. */
 		printf("[counter] open failed: alp_last_error=%d\n", (int)alp_last_error());
 		printf("[counter] done\n");
 		return 0;

@@ -59,8 +59,8 @@ typedef struct alp_wdt alp_wdt_t;
 
 /** Configuration passed to @ref alp_wdt_open. */
 typedef struct {
-	uint32_t         timeout_ms;
-	alp_wdt_action_t on_timeout;
+	uint32_t         timeout_ms; /**< Feed deadline in milliseconds; must be non-zero. */
+	alp_wdt_action_t on_timeout; /**< Action taken when a feed is missed. */
 } alp_wdt_config_t;
 
 /**

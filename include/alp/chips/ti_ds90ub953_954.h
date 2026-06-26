@@ -39,14 +39,17 @@ extern "C" {
 #define DS90UB953_I2C_ADDR_DEFAULT 0x18u
 #define DS90UB954_I2C_ADDR_DEFAULT 0x30u
 
+/** DEVICE_ID register offset on the serialiser (read to confirm presence). */
 #define DS90UB953_REG_DEVICE_ID 0x00u
+/** DEVICE_ID register offset on the deserialiser (read to confirm presence). */
 #define DS90UB954_REG_DEVICE_ID 0x00u
 
+/** @brief Driver context for one FPD-Link III SerDes pair. */
 typedef struct {
-	alp_i2c_t *bus;
-	uint8_t    ser_addr; /**< Serialiser (DS90UB953) addr. */
-	uint8_t    des_addr; /**< Deserialiser (DS90UB954) addr. */
-	bool       initialised;
+	alp_i2c_t *bus;         /**< Borrowed I²C bus the pair sits on; not owned. */
+	uint8_t    ser_addr;    /**< Serialiser (DS90UB953) 7-bit addr. */
+	uint8_t    des_addr;    /**< Deserialiser (DS90UB954) 7-bit addr. */
+	bool       initialised; /**< True once ti_ds90ub_init() probed both ends. */
 } ti_ds90ub_t;
 
 /**
@@ -54,19 +57,53 @@ typedef struct {
  *
  * Reads the DEVICE_ID at each address.  Both must respond for the
  * link to be considered up.
+ *
+ * @param dev       Caller-allocated context; populated on success.
+ * @param bus       Caller-opened I²C bus; borrowed, must outlive @p dev.
+ * @param ser_addr  7-bit serialiser address (must be non-zero).
+ * @param des_addr  7-bit deserialiser address (must be non-zero).
+ * @return ALP_OK; ALP_ERR_INVAL if @p dev / @p bus is NULL or an addr is 0;
+ *         ALP_ERR_IO if either end's DEVICE_ID reads back 0 / 0xFF (no link);
+ *         the underlying I²C error otherwise.
  */
 alp_status_t ti_ds90ub_init(ti_ds90ub_t *dev, alp_i2c_t *bus, uint8_t ser_addr, uint8_t des_addr);
 
-/** @brief Read DEVICE_ID from the deserialiser end. */
+/**
+ * @brief Read DEVICE_ID from the deserialiser (host-side) end.
+ *
+ * @param dev     Initialised context.
+ * @param id_out  Receives the DEVICE_ID byte.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_INVAL if
+ *         @p id_out is NULL; the underlying I²C error otherwise.
+ */
 alp_status_t ti_ds90ub_read_des_id(ti_ds90ub_t *dev, uint8_t *id_out);
 
-/** @brief Read DEVICE_ID from the serialiser end. */
+/**
+ * @brief Read DEVICE_ID from the serialiser (camera-side) end.
+ *
+ * @param dev     Initialised context.
+ * @param id_out  Receives the DEVICE_ID byte.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_INVAL if
+ *         @p id_out is NULL; the underlying I²C error otherwise.
+ */
 alp_status_t ti_ds90ub_read_ser_id(ti_ds90ub_t *dev, uint8_t *id_out);
 
-/** @brief Issue soft reset on both ends (RESET_CTL bit 0). */
+/**
+ * @brief Issue soft reset on both ends (RESET_CTL bit 0).
+ *
+ * @param dev  Initialised context.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; the underlying I²C
+ *         error otherwise.
+ */
 alp_status_t ti_ds90ub_soft_reset(ti_ds90ub_t *dev);
 
-/** @brief Release driver context.  NULL tolerated. */
+/**
+ * @brief Release the driver context (clears @c initialised).
+ *
+ * Does not touch the borrowed I²C bus.  NULL tolerated.
+ *
+ * @param dev  Context to release, or NULL.
+ */
 void ti_ds90ub_deinit(ti_ds90ub_t *dev);
 
 #ifdef __cplusplus

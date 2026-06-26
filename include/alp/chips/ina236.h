@@ -5,13 +5,13 @@
 
 /**
  * @file ina236.h
- * @brief TI INA236 16-bit, 0.1 % digital high-side current /
+ * @brief TI INA236 16-bit, 0.1 % digital high-side current / bus-voltage /
+ *        power monitor driver.
  *
  * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
  *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
- *        bus-voltage / power monitor driver.
  *
  * The INA236 measures current via a sense resistor in the high
  * side of the rail under test, plus the rail's bus voltage,
@@ -75,20 +75,18 @@ typedef enum {
 	    1, /**< Full-scale 20.48 mV, LSB = 625 nV.  Higher resolution at low currents. */
 } ina236_adcrange_t;
 
+/** @brief Driver context for one INA236 instance.  Treat as opaque. */
 typedef struct {
-	bool       initialised;
-	alp_i2c_t *bus;
-	uint8_t    addr;
-	/* Calibration parameters, retained for diagnostics. */
-	float shunt_ohms;
-	float max_current_a;
-	/* Computed at init: CURRENT_LSB in amps.  Multiply the raw
-     * CURRENT register by this to get amps; multiply by 1e6 first
-     * for microamps. */
-	float current_lsb_a;
-	/* Cached config register so toggles don't read-modify-write. */
-	uint16_t          cfg_cache;
-	ina236_adcrange_t adcrange;
+	bool       initialised;   /**< True once ina236_init() validated the IDs. */
+	alp_i2c_t *bus;           /**< I2C bus the chip sits on (borrowed; must outlive ctx). */
+	uint8_t    addr;          /**< 7-bit I2C address in use. */
+	float      shunt_ohms;    /**< Shunt resistance (Ohms), retained for diagnostics. */
+	float      max_current_a; /**< Max expected current (Amps), retained for diagnostics. */
+	/* Computed at init: CURRENT_LSB in amps.  Multiply the raw CURRENT
+	 * register by this to get amps; multiply by 1e6 first for microamps. */
+	float             current_lsb_a; /**< CURRENT_LSB in amps (max_current / 32768). */
+	uint16_t          cfg_cache;     /**< Cached config register; avoids read-modify-write. */
+	ina236_adcrange_t adcrange;      /**< ADC full-scale range in effect. */
 } ina236_t;
 
 /**
@@ -122,39 +120,86 @@ alp_status_t ina236_init(ina236_t         *ctx,
                          float             max_current_a,
                          ina236_adcrange_t adcrange);
 
-/** @brief Read the bus voltage in millivolts. */
+/**
+ * @brief Read the bus voltage in millivolts.
+ * @param[in]  ctx     Initialised context.
+ * @param[out] mv_out  Receives the bus voltage in mV.
+ * @return ALP_OK on success; ALP_ERR_NOT_READY if @p ctx is NULL/uninitialised
+ *         or @p mv_out is NULL; or the I2C error status on bus failure.
+ */
 alp_status_t ina236_read_bus_mv(ina236_t *ctx, int32_t *mv_out);
 
-/** @brief Read the shunt voltage in microvolts.  Signed (sign
- *  follows current direction through the shunt). */
+/**
+ * @brief Read the shunt voltage in microvolts.
+ *
+ * Signed; the sign follows current direction through the shunt.
+ *
+ * @param[in]  ctx     Initialised context.
+ * @param[out] uv_out  Receives the shunt voltage in uV.
+ * @return ALP_OK on success; ALP_ERR_NOT_READY if @p ctx is NULL/uninitialised
+ *         or @p uv_out is NULL; or the I2C error status on bus failure.
+ */
 alp_status_t ina236_read_shunt_uv(ina236_t *ctx, int32_t *uv_out);
 
-/** @brief Read current through the shunt in microamps.  Signed. */
+/**
+ * @brief Read current through the shunt in microamps (signed).
+ * @param[in]  ctx     Initialised context.
+ * @param[out] ua_out  Receives the current in uA.
+ * @return ALP_OK on success; ALP_ERR_NOT_READY if @p ctx is NULL/uninitialised
+ *         or @p ua_out is NULL; or the I2C error status on bus failure.
+ */
 alp_status_t ina236_read_current_ua(ina236_t *ctx, int32_t *ua_out);
 
-/** @brief Read instantaneous power in microwatts.  Unsigned. */
+/**
+ * @brief Read instantaneous power in microwatts (unsigned).
+ * @param[in]  ctx     Initialised context.
+ * @param[out] uw_out  Receives the power in uW.
+ * @return ALP_OK on success; ALP_ERR_NOT_READY if @p ctx is NULL/uninitialised
+ *         or @p uw_out is NULL; or the I2C error status on bus failure.
+ */
 alp_status_t ina236_read_power_uw(ina236_t *ctx, uint32_t *uw_out);
 
-/**
- * @brief Convenience: read all four (bus_mv, shunt_uv, current_ua,
- *        power_uw) in one I2C transaction sequence.  Cheaper than
- *        four separate calls when polling at high rate.
- */
+/** @brief One full reading: bus voltage, shunt voltage, current, power. */
 typedef struct {
-	int32_t  bus_mv;
-	int32_t  shunt_uv;
-	int32_t  current_ua;
-	uint32_t power_uw;
+	int32_t  bus_mv;     /**< Bus voltage in mV. */
+	int32_t  shunt_uv;   /**< Shunt voltage in uV (signed). */
+	int32_t  current_ua; /**< Current in uA (signed). */
+	uint32_t power_uw;   /**< Power in uW (unsigned). */
 } ina236_sample_t;
 
-/** @brief Read shunt voltage + bus voltage + current + power into one struct. */
+/**
+ * @brief Read bus voltage + shunt voltage + current + power into one struct.
+ *
+ * Convenience reader that gathers all four values in one I2C transaction
+ * sequence — cheaper than four separate calls when polling at a high rate.
+ *
+ * @param[in]  ctx         Initialised context.
+ * @param[out] sample_out  Receives the four readings.
+ * @return ALP_OK on success; ALP_ERR_INVAL if @p sample_out is NULL;
+ *         ALP_ERR_NOT_READY if @p ctx is NULL/uninitialised; or the I2C error
+ *         status on bus failure.
+ */
 alp_status_t ina236_read_all(ina236_t *ctx, ina236_sample_t *sample_out);
 
-/** @brief Soft-reset the chip and rerun the calibration step.
- *  Useful after a brown-out or detected bus-voltage glitch. */
+/**
+ * @brief Soft-reset the chip and rerun the calibration step.
+ *
+ * Useful after a brown-out or a detected bus-voltage glitch.  Reprograms the
+ * calibration from the shunt + max-current values captured at init.
+ *
+ * @param[in,out] ctx  Initialised context.
+ * @return ALP_OK on success; ALP_ERR_NOT_READY if @p ctx is NULL/uninitialised;
+ *         or the I2C error status on bus failure.
+ */
 alp_status_t ina236_reset(ina236_t *ctx);
 
-/** @brief Release the driver context.  Idempotent. */
+/**
+ * @brief Release the driver context.  Idempotent; NULL tolerated.
+ *
+ * Does not power down the chip and does not close the underlying I2C bus.
+ *
+ * @param[in,out] ctx  Context to release (may be NULL).
+ */
 void ina236_deinit(ina236_t *ctx);
 
 #ifdef __cplusplus

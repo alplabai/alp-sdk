@@ -148,6 +148,42 @@ CAP_ALIASES: list[tuple[str, str, str]] = [
     ("DMA2D", "DMA2D", "bool"),
 ]
 
+# Per-id Doxygen one-liners emitted as trailing /**< ... */ comments on each
+# alp_cap_id_t member.  Keyed by the cap_macro_name (2nd CAP_ALIASES field).
+CAP_ID_DOCS: dict[str, str] = {
+    "HW_I2C": "Hardware I2C controller(s).",
+    "HW_SPI": "Hardware SPI controller(s).",
+    "HW_UART": "Hardware UART(s).",
+    "HW_I2S": "Hardware I2S audio serial port(s).",
+    "HW_PDM": "Hardware PDM microphone interface(s).",
+    "HW_ADC": "Hardware analog-to-digital converter(s).",
+    "HW_DAC": "Hardware digital-to-analog converter(s).",
+    "HW_CAN": "Classic CAN 2.0 controller(s).",
+    "HW_CAN_FD": "At least one CAN controller supports CAN-FD.",
+    "HW_RTC": "Real-time clock.",
+    "HW_WDT": "Watchdog timer(s).",
+    "HW_QENC": "Quadrature encoder interface(s).",
+    "HW_TIMER": "General-purpose timer(s).",
+    "HW_PWM": "PWM generator(s).",
+    "HW_ETHERNET": "Ethernet MAC(s).",
+    "HW_USB": "USB controller(s).",
+    "HW_MIPI_CSI": "MIPI CSI-2 camera receiver(s).",
+    "HW_MIPI_DSI": "MIPI DSI display transmitter(s).",
+    "XSPI_DMA": "DMA-backed xSPI flash interface.",
+    "HEXSPI_DMA": "DMA-backed Hyper/Octal xSPI interface.",
+    "EMMC_DMA": "DMA-backed eMMC interface.",
+    "QUADSPI_DMA": "DMA-backed Quad-SPI interface.",
+    "NPU_DRPAI": "Renesas DRP-AI neural accelerator.",
+    "HELIUM_MVE": "Arm Helium (M-profile vector extension).",
+    "NEON": "Arm NEON SIMD (A-profile).",
+    "GPU2D": "2D graphics accelerator.",
+    "DAVE2D": "Renesas D/AVE 2D graphics engine.",
+    "CRYPTOCELL": "Arm CryptoCell security subsystem.",
+    "INLINE_AES": "Inline AES engine on a storage/transport path.",
+    "CAU": "Cryptographic acceleration unit.",
+    "DMA2D": "2D DMA / blitter engine.",
+}
+
 
 def _emit_cap_h() -> str:
     lines: list[str] = [
@@ -184,11 +220,24 @@ def _emit_cap_h() -> str:
         '#include "soc_caps.h"',
         '#include "cap_instance.h"',
         "",
+        "/**",
+        " * @brief SoC-level hardware capability identifiers.",
+        " *",
+        " * Pass one of these to @ref alp_has to test whether the active SoC",
+        " * implements the corresponding hardware block.  These are SoC-level",
+        ' * ("does this silicon have an NPU at all?") -- distinct from the',
+        " * per-instance flags in cap_instance.h.  @ref ALP_CAP_ID_COUNT is a",
+        " * sentinel element count, not a real capability.",
+        " */",
         "typedef enum {",
     ]
     for _soc, cap_name, _kind in CAP_ALIASES:
-        lines.append(f"    ALP_CAP_ID_{cap_name},")
-    lines.append("    ALP_CAP_ID_COUNT")
+        doc = CAP_ID_DOCS.get(cap_name)
+        if doc:
+            lines.append(f"    ALP_CAP_ID_{cap_name}, /**< {doc} */")
+        else:
+            lines.append(f"    ALP_CAP_ID_{cap_name},")
+    lines.append("    ALP_CAP_ID_COUNT /**< Sentinel: number of capability ids. */")
     lines.append("} alp_cap_id_t;")
     lines.append("")
     lines.append("/**")

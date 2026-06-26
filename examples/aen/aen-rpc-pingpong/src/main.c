@@ -28,10 +28,17 @@
 #include <zephyr/ipc/ipc_service.h>
 #include <se_service.h>
 
+/* HP boots HE through the Secure Enclave: EXTSYS_1_HE is the SE's CPU id for the
+ * HE external subsystem, and HE_LOAD_ADDR is where HE's image sits in MRAM (the
+ * ATOC load base). Once the endpoint binds, HP sends PINGPONG_ROUNDS pings. */
 #define EXTSYS_1_HE     3U
 #define HE_LOAD_ADDR    0x58000000U
 #define PINGPONG_ROUNDS 16U
 
+/* One source file, two roles: the board it is built for selects HP vs HE at
+ * compile time. Each role gets its own beacon addresses -- HP in the 0x0200_00xx
+ * SRAM0 window, HE in 0x0200_10xx -- so the host can watch both cores over SWD
+ * (HE has no USB console). IS_HOST gates the host-only boot + ping-drive code. */
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define ROLE        "HP"
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)

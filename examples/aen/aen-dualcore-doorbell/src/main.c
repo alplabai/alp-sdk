@@ -2,10 +2,11 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-dualcore-doorbell -- the HE->HP MHU-1 doorbell, now that BOTH M55 cores
- * boot (see aen-dualcore-master / the se_service_boot_cpu route). Earlier B1
- * attempts could not test this because only one core ran; here the HP master
- * releases HE, then HE rings HP.
+ * aen-dualcore-doorbell -- the HE->HP MHU-1 doorbell on the E1M-AEN801 (Alif
+ * Ensemble E8, dual Cortex-M55 HE+HP), now that BOTH M55 cores boot (see
+ * aen-dualcore-master / the se_service_boot_cpu route). Earlier B1 attempts
+ * could not test this because only one core ran; here the HP master releases
+ * HE, then HE rings HP.
  *
  * MHU-1 non-secure HE<->HP pair (Alif DFP + fork e1.dtsi):
  *   HE->HP sender   @0x400B0000 (IRQ44) -- HE writes CH0_SET to ring
@@ -36,8 +37,8 @@
 #define RCV_CH0_CLR  (MHU1_RECV + 0x08U)
 #define DOORBELL_BIT 0x1U
 
-#define EXTSYS_1_HE  3U
-#define HE_LOAD_ADDR 0x58000000U
+#define EXTSYS_1_HE  3U          /* se_service_boot_cpu cpu_id: EXTSYS_1 = M55-HE */
+#define HE_LOAD_ADDR 0x58000000U /* HE ITCM global alias = HE-APP loadAddress     */
 
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define ROLE        "HP"

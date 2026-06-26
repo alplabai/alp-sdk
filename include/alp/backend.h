@@ -37,11 +37,14 @@ extern "C" {
  *             exists.  Used by software fallback backends.
  */
 typedef struct alp_backend {
-	const char *silicon_ref;
-	const char *vendor;
-	uint32_t    base_caps;
-	uint8_t     priority;
-	const void *ops;
+	const char
+	    *silicon_ref;   /**< SoC this backend serves (e.g. "alif:ensemble:e7"); "*" = wildcard. */
+	const char *vendor; /**< Backend identity; lower strcmp wins the equal-priority tiebreak. */
+	uint32_t    base_caps; /**< Static capability bitmask, before @c probe refines it. */
+	uint8_t     priority;  /**< Selection priority; higher wins (see @ref alp_backend_select). */
+	const void *ops;       /**< Class-specific ops vtable; cast by the class dispatcher. */
+	/** Optional runtime probe: refines @c base_caps into @p refined_caps for @p instance_id.
+	 *  Returns 0 on success, non-zero to veto this backend. NULL = always usable. */
 	int (*probe)(uint32_t instance_id, uint32_t *refined_caps);
 } alp_backend_t;
 
@@ -53,9 +56,9 @@ typedef struct alp_backend {
  * range for the requested class_name.
  */
 typedef struct alp_backend_class_range {
-	const char          *class_name;
-	const alp_backend_t *start;
-	const alp_backend_t *stop;
+	const char *class_name;     /**< Class identifier (matches ALP_BACKEND_REGISTER's class). */
+	const alp_backend_t *start; /**< First entry in the class's linker section. */
+	const alp_backend_t *stop;  /**< One-past-the-last entry (exclusive end). */
 } alp_backend_class_range_t;
 
 /**

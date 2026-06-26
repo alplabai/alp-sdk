@@ -43,25 +43,49 @@ extern "C" {
 
 #define QMC5883L_CHIP_ID 0xFFu /**< QMC datasheet says 0xFF; clones may report 0xC4. */
 
+/** @brief One magnetometer sample, signed ADC counts (scale per configured range). */
 typedef struct {
-	int16_t x;
-	int16_t y;
-	int16_t z;
+	int16_t x; /**< X-axis field, signed counts. */
+	int16_t y; /**< Y-axis field, signed counts. */
+	int16_t z; /**< Z-axis field, signed counts. */
 } qmc5883l_axes_t;
 
+/** @brief Driver context for one QMC5883L on an I2C bus. */
 typedef struct {
-	alp_i2c_t *bus;
-	uint8_t    addr;
-	bool       initialised;
+	alp_i2c_t *bus;         /**< Caller-opened I2C bus handle (borrowed, not owned). */
+	uint8_t    addr;        /**< 7-bit I2C address (::QMC5883L_I2C_ADDR). */
+	bool       initialised; /**< True once qmc5883l_init() has succeeded. */
 } qmc5883l_t;
 
-/** @brief Bind context and apply continuous-mode CTRL defaults. */
+/**
+ * @brief Bind context and apply continuous-mode CTRL defaults.
+ *
+ * @param dev      Caller-allocated context to populate.
+ * @param bus      Open I2C bus handle (borrowed; must outlive @p dev).
+ * @param i2c_addr 7-bit device address (use ::QMC5883L_I2C_ADDR).
+ * @return ALP_OK on success; ALP_ERR_INVAL on NULL argument; an I2C
+ *         error status if the CTRL register writes fail.
+ */
 alp_status_t qmc5883l_init(qmc5883l_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 
-/** @brief Read 3-axis magnetic field as signed 16-bit counts. */
+/**
+ * @brief Read 3-axis magnetic field as signed 16-bit counts.
+ *
+ * Convert to micro-Tesla in the application using the configured
+ * full-scale range (default 2 G).
+ *
+ * @param dev      Initialised driver context.
+ * @param axes_out Out-param; receives the X/Y/Z sample.
+ * @return ALP_OK on success; ALP_ERR_INVAL on NULL argument; an I2C
+ *         error status on a failed read.
+ */
 alp_status_t qmc5883l_read_axes(qmc5883l_t *dev, qmc5883l_axes_t *axes_out);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release driver context.
+ *
+ * @param dev Driver context; NULL is tolerated as a no-op.
+ */
 void qmc5883l_deinit(qmc5883l_t *dev);
 
 #ifdef __cplusplus

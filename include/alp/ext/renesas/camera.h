@@ -64,10 +64,10 @@ typedef enum {
  *  callers wanting a single curve across all channels load the
  *  same table four times. */
 typedef enum {
-	ALP_RENESAS_CAMERA_CHANNEL_R  = 0,
-	ALP_RENESAS_CAMERA_CHANNEL_GR = 1,
-	ALP_RENESAS_CAMERA_CHANNEL_GB = 2,
-	ALP_RENESAS_CAMERA_CHANNEL_B  = 3,
+	ALP_RENESAS_CAMERA_CHANNEL_R  = 0, /**< Red channel. */
+	ALP_RENESAS_CAMERA_CHANNEL_GR = 1, /**< Green pixels on red-filtered rows. */
+	ALP_RENESAS_CAMERA_CHANNEL_GB = 2, /**< Green pixels on blue-filtered rows. */
+	ALP_RENESAS_CAMERA_CHANNEL_B  = 3, /**< Blue channel. */
 } alp_renesas_camera_channel_t;
 
 /** Pixel-coordinate rectangle.  All four fields measured from
@@ -75,10 +75,10 @@ typedef enum {
  *  configured sensor resolution and a value of zero rejects
  *  with @ref ALP_ERR_INVAL. */
 typedef struct {
-	uint16_t x;
-	uint16_t y;
-	uint16_t w;
-	uint16_t h;
+	uint16_t x; /**< Left edge in pixels from the active frame's top-left. */
+	uint16_t y; /**< Top edge in pixels from the active frame's top-left. */
+	uint16_t w; /**< Width in pixels; 0 rejects with @ref ALP_ERR_INVAL. */
+	uint16_t h; /**< Height in pixels; 0 rejects with @ref ALP_ERR_INVAL. */
 } alp_renesas_camera_rect_t;
 
 /**

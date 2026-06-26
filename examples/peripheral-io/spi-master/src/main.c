@@ -52,13 +52,12 @@
 #include "alp/peripheral.h"
 #include "alp/board.h"
 
-/* Sentinel meaning "the SPI controller manages CS internally" --
- * the SDK's controller-managed-CS path picks the right pin from
- * the devicetree chip-select array.  Many SoCs handle CS this way;
- * for multi-slave buses you'd assign a discrete GPIO here instead.
- *
- * Defined locally to keep the example self-contained; future
- * <alp/peripheral.h> revisions may export this as a named constant. */
+/* The cs_pin_id field below is set to ALP_SPI_NO_CS, the public sentinel
+ * from <alp/peripheral.h> meaning "the SPI controller manages CS
+ * internally" -- the SDK's controller-managed-CS path then picks the
+ * right pin from the devicetree chip-select array.  Many SoCs handle CS
+ * this way; for a multi-slave bus you instead pass the discrete GPIO
+ * that drives a given slave's /CS, so the SDK toggles it per transfer. */
 
 /* Test pattern.
  *

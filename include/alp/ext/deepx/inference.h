@@ -48,22 +48,22 @@ extern "C" {
 /** DX-M1 carries exactly four hardware slots.  Tile reservations
  *  are addressed by named-slot rather than bare 0..3 integers. */
 typedef enum {
-	ALP_DEEPX_INFERENCE_SLOT_0 = 0u,
-	ALP_DEEPX_INFERENCE_SLOT_1 = 1u,
-	ALP_DEEPX_INFERENCE_SLOT_2 = 2u,
-	ALP_DEEPX_INFERENCE_SLOT_3 = 3u,
+	ALP_DEEPX_INFERENCE_SLOT_0 = 0u, /**< Hardware inference slot 0. */
+	ALP_DEEPX_INFERENCE_SLOT_1 = 1u, /**< Hardware inference slot 1. */
+	ALP_DEEPX_INFERENCE_SLOT_2 = 2u, /**< Hardware inference slot 2. */
+	ALP_DEEPX_INFERENCE_SLOT_3 = 3u, /**< Hardware inference slot 3. */
 } alp_deepx_inference_slot_t;
 
 #define ALP_DEEPX_INFERENCE_SLOT_COUNT 4u
 
 /** DX-M1 runtime status flags. */
 typedef enum {
-	ALP_DEEPX_INFERENCE_STATUS_IDLE          = 0u,
-	ALP_DEEPX_INFERENCE_STATUS_ARMED         = 1u << 0,
-	ALP_DEEPX_INFERENCE_STATUS_RUNNING       = 1u << 1,
-	ALP_DEEPX_INFERENCE_STATUS_DONE          = 1u << 2,
-	ALP_DEEPX_INFERENCE_STATUS_TIMEOUT       = 1u << 3,
-	ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4,
+	ALP_DEEPX_INFERENCE_STATUS_IDLE          = 0u,      /**< No inference armed. */
+	ALP_DEEPX_INFERENCE_STATUS_ARMED         = 1u << 0, /**< Model loaded, awaiting invoke. */
+	ALP_DEEPX_INFERENCE_STATUS_RUNNING       = 1u << 1, /**< Invoke in progress on the NPU. */
+	ALP_DEEPX_INFERENCE_STATUS_DONE          = 1u << 2, /**< Last invoke completed. */
+	ALP_DEEPX_INFERENCE_STATUS_TIMEOUT       = 1u << 3, /**< Invoke exceeded its deadline. */
+	ALP_DEEPX_INFERENCE_STATUS_TRANSPORT_ERR = 1u << 4, /**< PCIe/transport fault to DX-M1. */
 } alp_deepx_inference_status_t;
 
 /**

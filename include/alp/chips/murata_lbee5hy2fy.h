@@ -132,27 +132,56 @@ alp_status_t murata_lbee5hy2fy_init(murata_lbee5hy2fy_t *ctx,
                                     alp_gpio_t          *wl_host_wake,
                                     alp_gpio_t          *bt_dev_wake);
 
-/** @brief Drive `BT_REG_ON` to the requested level. */
+/**
+ * @brief Drive `BT_REG_ON` to the requested level.
+ *
+ * @param ctx  Initialised driver context.
+ * @param on   true powers the BT subsystem on (REG_ON high); false powers it off.
+ * @return ALP_OK on success; an ALP_ERR_* status if the reg_set callback fails.
+ */
 alp_status_t murata_lbee5hy2fy_bt_power(murata_lbee5hy2fy_t *ctx, bool on);
 
-/** @brief Drive `WL_REG_ON` to the requested level. */
+/**
+ * @brief Drive `WL_REG_ON` to the requested level.
+ *
+ * @param ctx  Initialised driver context.
+ * @param on   true powers the Wi-Fi subsystem on (REG_ON high); false powers it off.
+ * @return ALP_OK on success; an ALP_ERR_* status if the reg_set callback fails.
+ */
 alp_status_t murata_lbee5hy2fy_wl_power(murata_lbee5hy2fy_t *ctx, bool on);
 
 /**
  * @brief Pulse `BT_DEV_WAKE` to wake the BT subsystem from sleep.
  *
+ * @param ctx  Initialised driver context.
  * @return ALP_OK on success.
  * @return ALP_ERR_NOSUPPORT if the line isn't wired on this board. */
 alp_status_t murata_lbee5hy2fy_bt_wake_device(murata_lbee5hy2fy_t *ctx);
 
-/** @brief Read the BT_HOST_WAKE pin level (true = module asserting wake). */
+/**
+ * @brief Read the BT_HOST_WAKE pin level (true = module asserting wake).
+ *
+ * @param ctx    Initialised driver context.
+ * @param level  Receives the pin level; reports false when the line isn't wired.
+ * @return ALP_OK on success; an ALP_ERR_* status on GPIO read failure.
+ */
 alp_status_t murata_lbee5hy2fy_bt_host_wake_level(murata_lbee5hy2fy_t *ctx, bool *level);
 
-/** @brief Read the WL_HOST_WAKE pin level. */
+/**
+ * @brief Read the WL_HOST_WAKE pin level (true = module asserting wake).
+ *
+ * @param ctx    Initialised driver context.
+ * @param level  Receives the pin level; reports false when the line isn't wired.
+ * @return ALP_OK on success; an ALP_ERR_* status on GPIO read failure.
+ */
 alp_status_t murata_lbee5hy2fy_wl_host_wake_level(murata_lbee5hy2fy_t *ctx, bool *level);
 
-/** @brief Release the context.  Idempotent.  Powers the module down
- *         by driving both REG_ON lines low before returning. */
+/**
+ * @brief Release the context.  Idempotent.  Powers the module down
+ *        by driving both REG_ON lines low before returning.
+ *
+ * @param ctx  Driver context, or NULL (tolerated; no-op).
+ */
 void murata_lbee5hy2fy_deinit(murata_lbee5hy2fy_t *ctx);
 
 #ifdef __cplusplus

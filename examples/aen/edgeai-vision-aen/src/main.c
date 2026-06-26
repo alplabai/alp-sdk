@@ -4,6 +4,10 @@
  *
  * EdgeAI vision-AEN reference application — v0.1 skeleton.
  *
+ * Target hardware: the E1M-AEN801 SoM (Alif Ensemble E8, M55 + Ethos-U NPU)
+ * on the E1M-EVK carrier.  The same source also builds and runs under
+ * native_sim, so CI exercises the v0.1 SDK surfaces with no board attached.
+ *
  * The full pipeline is the v0.2 deliverable.  This file ships the
  * shape of that pipeline so:
  *   1. Newcomers can read the intended data flow today.

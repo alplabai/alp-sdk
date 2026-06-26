@@ -16,6 +16,12 @@ tests:
       - security
     harness: console
     harness_config:
-      type: one_line
+      type: multi_line
+      ordered: true
       regex:
         - "verify: OK"
+        - "modify entry #1 .* CHAIN_BROKEN"
+        - "delete newest entry .* TRUNCATED"
+        - "roll store back .* ROLLED_BACK"
+        - "reorder entries #0/#1 .* CHAIN_BROKEN"
+        - "demo complete"

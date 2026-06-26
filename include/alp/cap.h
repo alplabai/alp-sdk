@@ -31,39 +31,48 @@ extern "C" {
 #include "soc_caps.h"
 #include "cap_instance.h"
 
+/**
+ * @brief SoC-level hardware capability identifiers.
+ *
+ * Pass one of these to @ref alp_has to test whether the active SoC
+ * implements the corresponding hardware block.  These are SoC-level
+ * ("does this silicon have an NPU at all?") -- distinct from the
+ * per-instance flags in cap_instance.h.  @ref ALP_CAP_ID_COUNT is a
+ * sentinel element count, not a real capability.
+ */
 typedef enum {
-	ALP_CAP_ID_HW_I2C,
-	ALP_CAP_ID_HW_SPI,
-	ALP_CAP_ID_HW_UART,
-	ALP_CAP_ID_HW_I2S,
-	ALP_CAP_ID_HW_PDM,
-	ALP_CAP_ID_HW_ADC,
-	ALP_CAP_ID_HW_DAC,
-	ALP_CAP_ID_HW_CAN,
-	ALP_CAP_ID_HW_CAN_FD,
-	ALP_CAP_ID_HW_RTC,
-	ALP_CAP_ID_HW_WDT,
-	ALP_CAP_ID_HW_QENC,
-	ALP_CAP_ID_HW_TIMER,
-	ALP_CAP_ID_HW_PWM,
-	ALP_CAP_ID_HW_ETHERNET,
-	ALP_CAP_ID_HW_USB,
-	ALP_CAP_ID_HW_MIPI_CSI,
-	ALP_CAP_ID_HW_MIPI_DSI,
-	ALP_CAP_ID_XSPI_DMA,
-	ALP_CAP_ID_HEXSPI_DMA,
-	ALP_CAP_ID_EMMC_DMA,
-	ALP_CAP_ID_QUADSPI_DMA,
-	ALP_CAP_ID_NPU_DRPAI,
-	ALP_CAP_ID_HELIUM_MVE,
-	ALP_CAP_ID_NEON,
-	ALP_CAP_ID_GPU2D,
-	ALP_CAP_ID_DAVE2D,
-	ALP_CAP_ID_CRYPTOCELL,
-	ALP_CAP_ID_INLINE_AES,
-	ALP_CAP_ID_CAU,
-	ALP_CAP_ID_DMA2D,
-	ALP_CAP_ID_COUNT
+	ALP_CAP_ID_HW_I2C,      /**< Hardware I2C controller(s). */
+	ALP_CAP_ID_HW_SPI,      /**< Hardware SPI controller(s). */
+	ALP_CAP_ID_HW_UART,     /**< Hardware UART(s). */
+	ALP_CAP_ID_HW_I2S,      /**< Hardware I2S audio serial port(s). */
+	ALP_CAP_ID_HW_PDM,      /**< Hardware PDM microphone interface(s). */
+	ALP_CAP_ID_HW_ADC,      /**< Hardware analog-to-digital converter(s). */
+	ALP_CAP_ID_HW_DAC,      /**< Hardware digital-to-analog converter(s). */
+	ALP_CAP_ID_HW_CAN,      /**< Classic CAN 2.0 controller(s). */
+	ALP_CAP_ID_HW_CAN_FD,   /**< At least one CAN controller supports CAN-FD. */
+	ALP_CAP_ID_HW_RTC,      /**< Real-time clock. */
+	ALP_CAP_ID_HW_WDT,      /**< Watchdog timer(s). */
+	ALP_CAP_ID_HW_QENC,     /**< Quadrature encoder interface(s). */
+	ALP_CAP_ID_HW_TIMER,    /**< General-purpose timer(s). */
+	ALP_CAP_ID_HW_PWM,      /**< PWM generator(s). */
+	ALP_CAP_ID_HW_ETHERNET, /**< Ethernet MAC(s). */
+	ALP_CAP_ID_HW_USB,      /**< USB controller(s). */
+	ALP_CAP_ID_HW_MIPI_CSI, /**< MIPI CSI-2 camera receiver(s). */
+	ALP_CAP_ID_HW_MIPI_DSI, /**< MIPI DSI display transmitter(s). */
+	ALP_CAP_ID_XSPI_DMA,    /**< DMA-backed xSPI flash interface. */
+	ALP_CAP_ID_HEXSPI_DMA,  /**< DMA-backed Hyper/Octal xSPI interface. */
+	ALP_CAP_ID_EMMC_DMA,    /**< DMA-backed eMMC interface. */
+	ALP_CAP_ID_QUADSPI_DMA, /**< DMA-backed Quad-SPI interface. */
+	ALP_CAP_ID_NPU_DRPAI,   /**< Renesas DRP-AI neural accelerator. */
+	ALP_CAP_ID_HELIUM_MVE,  /**< Arm Helium (M-profile vector extension). */
+	ALP_CAP_ID_NEON,        /**< Arm NEON SIMD (A-profile). */
+	ALP_CAP_ID_GPU2D,       /**< 2D graphics accelerator. */
+	ALP_CAP_ID_DAVE2D,      /**< Renesas D/AVE 2D graphics engine. */
+	ALP_CAP_ID_CRYPTOCELL,  /**< Arm CryptoCell security subsystem. */
+	ALP_CAP_ID_INLINE_AES,  /**< Inline AES engine on a storage/transport path. */
+	ALP_CAP_ID_CAU,         /**< Cryptographic acceleration unit. */
+	ALP_CAP_ID_DMA2D,       /**< 2D DMA / blitter engine. */
+	ALP_CAP_ID_COUNT        /**< Sentinel: number of capability ids. */
 } alp_cap_id_t;
 
 /**

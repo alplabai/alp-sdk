@@ -157,28 +157,31 @@ typedef struct {
 	uint8_t raw_01;    /**< Untouched PMC_STATUS_01 byte. */
 } da9292_status_t;
 
-/** Latched-event snapshot (read-and-clear from `PMC_EVENT_00/01`). */
+/** @brief Latched-event snapshot (read-and-clear from `PMC_EVENT_00/01`).
+ *
+ *  Each flag is true if that event latched since the last read; the read
+ *  clears it on the chip (write-1-to-clear). */
 typedef struct {
-	bool e_ch1_pg;
-	bool e_ch2_pg;
-	bool e_ch1_uv;
-	bool e_ch2_uv;
-	bool e_ch1_ov;
-	bool e_ch2_ov;
-	bool e_ch1_oc;
-	bool e_ch2_oc;
-	bool e_temp_warn;
-	bool e_temp_crit;
-	bool e_vin_uvlo;
+	bool e_ch1_pg;    /**< CH1 power-good transition latched. */
+	bool e_ch2_pg;    /**< CH2 power-good transition latched. */
+	bool e_ch1_uv;    /**< CH1 under-voltage event latched. */
+	bool e_ch2_uv;    /**< CH2 under-voltage event latched. */
+	bool e_ch1_ov;    /**< CH1 over-voltage event latched. */
+	bool e_ch2_ov;    /**< CH2 over-voltage event latched. */
+	bool e_ch1_oc;    /**< CH1 over-current event latched. */
+	bool e_ch2_oc;    /**< CH2 over-current event latched. */
+	bool e_temp_warn; /**< Thermal-warning event latched. */
+	bool e_temp_crit; /**< Thermal-critical event latched. */
+	bool e_vin_uvlo;  /**< Input UVLO event latched. */
 } da9292_events_t;
 
-/** Driver context. */
+/** @brief Driver context.  Caller-allocated; fields are driver-private. */
 typedef struct {
-	bool       initialised;
-	alp_i2c_t *bus;
-	uint8_t    addr;
-	uint8_t    dev_id; /**< Cached PMC_DEV_ID (read at init). */
-	uint8_t    rev_id; /**< Cached PMC_REV_ID. */
+	bool       initialised; /**< True between a successful init and deinit. */
+	alp_i2c_t *bus;         /**< Borrowed BRD_I2C handle; caller retains ownership. */
+	uint8_t    addr;        /**< 7-bit I2C slave address. */
+	uint8_t    dev_id;      /**< Cached PMC_DEV_ID (read at init). */
+	uint8_t    rev_id;      /**< Cached PMC_REV_ID. */
 } da9292_t;
 
 /** @brief Probe + cache device + revision identifiers.
@@ -187,13 +190,29 @@ typedef struct {
  *         OTP carries the V2N power-on defaults, and per V2N
  *         schematic the EN1 pin is strapped so CH1 enables itself
  *         at VSYS rise.  Touching CH1 from firmware would risk
- *         glitching the 0.8 V Renesas rail. */
+ *         glitching the 0.8 V Renesas rail.
+ *
+ *  @param ctx        Driver context (output).
+ *  @param bus        Opened BRD_I2C handle.
+ *  @param addr_7bit  7-bit slave address (0x1E on V2N -- @ref DA9292_I2C_ADDR_V2N).
+ *  @return ALP_OK with identifiers cached; ALP_ERR_INVAL on a NULL argument;
+ *          otherwise the underlying I2C status. */
 alp_status_t da9292_init(da9292_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
 
-/** @brief Read both status bytes and decode the bit fields. */
+/** @brief Read both status bytes and decode the bit fields.
+ *
+ *  @param ctx  Initialised driver context.
+ *  @param out  Receives the decoded live-status snapshot.
+ *  @return ALP_OK with @p out filled; ALP_ERR_INVAL on a NULL argument;
+ *          otherwise the underlying I2C status. */
 alp_status_t da9292_get_status(da9292_t *ctx, da9292_status_t *out);
 
-/** @brief Read + clear `PMC_EVENT_00/01` (write-1-to-clear semantics). */
+/** @brief Read + clear `PMC_EVENT_00/01` (write-1-to-clear semantics).
+ *
+ *  @param ctx  Initialised driver context.
+ *  @param out  Receives the latched-event snapshot taken before the clear.
+ *  @return ALP_OK with @p out filled and the events cleared on-chip;
+ *          ALP_ERR_INVAL on a NULL argument; otherwise the I2C status. */
 alp_status_t da9292_read_and_clear_events(da9292_t *ctx, da9292_events_t *out);
 
 /** @brief Sample the DA9292 fault pins and pack them into a flag byte.
@@ -229,7 +248,13 @@ alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n, uint8_t 
  *         to AVDD (always-on), only the register matters.  The V2N
  *         schematic ties EN1 always-on and routes EN2 to a host
  *         signal -- check the V2N peripheral map for the exact
- *         board wiring. */
+ *         board wiring.
+ *
+ *  @param ctx     Initialised driver context.
+ *  @param ch      Channel to enable/disable.
+ *  @param enable  true sets `CHx_EN`, false clears it.
+ *  @return ALP_OK on success; ALP_ERR_INVAL on a NULL/bad-channel argument;
+ *          otherwise the underlying I2C status. */
 alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable);
 
 /** @brief Set channel output voltage in millivolts (VSTEP = 0, 5 mV step).
@@ -241,10 +266,23 @@ alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable);
  *
  *  @warning  Don't ramp by big steps -- DA9292 detects instantaneous
  *            over/under-voltage if the target jumps by more than ~50 mV
- *            in one write.  Step in 50 mV increments for big swings. */
+ *            in one write.  Step in 50 mV increments for big swings.
+ *
+ *  @param ctx  Initialised driver context.
+ *  @param ch   Channel to program.
+ *  @param mv   Target output in mV; must be in [300, 1275] (rounded down to a
+ *              5 mV step).  Does NOT touch `CHx_VSTEP` (see @warning above).
+ *  @return ALP_OK on success; ALP_ERR_INVAL on a NULL/bad-channel argument or
+ *          an out-of-range @p mv; otherwise the underlying I2C status. */
 alp_status_t da9292_set_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t mv);
 
-/** @brief Read back the channel's `CHx_VOUT_VSEL_LO` setpoint in mV. */
+/** @brief Read back the channel's `CHx_VOUT_VSEL_LO` setpoint in mV.
+ *
+ *  @param ctx  Initialised driver context.
+ *  @param ch   Channel to query.
+ *  @param mv   Receives the decoded setpoint in mV (VSTEP=0 / 5 mV step).
+ *  @return ALP_OK with @p mv set; ALP_ERR_INVAL on a NULL/bad-channel
+ *          argument; otherwise the underlying I2C status. */
 alp_status_t da9292_get_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t *mv);
 
 /**
@@ -256,6 +294,10 @@ alp_status_t da9292_get_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t 
  *  Safe to call on V2N-M1 -- it leaves CH2 untouched if `ctx->dev_id`
  *  was probed successfully and CH2 was already enabled by the
  *  M1-specific init path.
+ *
+ *  @param ctx  Initialised driver context.
+ *  @return ALP_OK if CH2 is confirmed disabled; ALP_ERR_INVAL on a NULL
+ *          context; otherwise the underlying I2C status.
  */
 alp_status_t da9292_v2n_base_init(da9292_t *ctx);
 
@@ -286,18 +328,34 @@ alp_status_t da9292_v2n_base_init(da9292_t *ctx);
  *  before touching VSTEP so that callers who skipped base_init
  *  still get a safe ordering.
  *
+ *  @param ctx         Initialised driver context.
+ *  @param timeout_us  Upper bound (microseconds) on the CH2 power-good poll.
  *  @return ALP_OK if CH2 reaches PG within `timeout_us`,
  *          ALP_ERR_TIMEOUT otherwise.
  */
 alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us);
 
 /** Raw register R/W (for diagnostics / advanced use). */
-/** @brief Raw register read for diagnostics / advanced use. */
+/** @brief Raw register read for diagnostics / advanced use.
+ *  @param ctx  Initialised driver context.
+ *  @param reg  Register byte offset.
+ *  @param val  Receives the register contents.
+ *  @return ALP_OK with @p val set; ALP_ERR_INVAL on a NULL argument; otherwise
+ *          the underlying I2C status. */
 alp_status_t da9292_read_reg(da9292_t *ctx, uint8_t reg, uint8_t *val);
-/** @brief Raw register write for diagnostics / advanced use. */
+/** @brief Raw register write for diagnostics / advanced use.
+ *  @param ctx  Initialised driver context.
+ *  @param reg  Register byte offset.
+ *  @param val  Byte to write.
+ *  @return ALP_OK on success; ALP_ERR_INVAL on a NULL argument; otherwise the
+ *          underlying I2C status. */
 alp_status_t da9292_write_reg(da9292_t *ctx, uint8_t reg, uint8_t val);
 
-/** @brief Release resources.  Idempotent. */
+/** @brief Release resources.  Idempotent.
+ *
+ *  Does not close the I2C bus handle -- the caller owns it.
+ *
+ *  @param ctx  Driver context (may already be deinitialised, or NULL). */
 void da9292_deinit(da9292_t *ctx);
 
 #ifdef __cplusplus

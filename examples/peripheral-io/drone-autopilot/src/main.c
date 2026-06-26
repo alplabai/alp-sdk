@@ -4,6 +4,14 @@
  *
  * Drone autopilot main entry point.
  *
+ * Alp SDK example: a complete multi-rate flight-control stack built
+ * entirely on the portable <alp/*> peripheral API (I2C / UART / PWM)
+ * plus alp_chips/<part> sensor drivers, so the same source targets any
+ * E1M-family SoM (Alif Ensemble on the E1M EVK, RZ/V2N, ...) and also
+ * runs end-to-end on native_sim with synthesised RC input. The sibling
+ * files split the job: autopilot.c (sensors + control loops), mavlink.c
+ * (ground-station link), mixer.c (motor mixing), sbus.c (RC decode).
+ *
  * Spawns three deterministic control loops + the RC receiver
  * thread.  The PWM bank is owned by autopilot.c; this file just
  * orchestrates the threads.

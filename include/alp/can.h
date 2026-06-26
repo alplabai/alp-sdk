@@ -61,13 +61,13 @@ typedef enum {
 
 /** A single CAN frame (TX or RX). */
 typedef struct {
-	uint32_t id;     /**< 11-bit (standard) or 29-bit (extended). */
-	bool     ext_id; /**< true = 29-bit, false = 11-bit. */
-	bool     rtr;    /**< Remote-transmission request. */
-	bool     fd;     /**< CAN-FD frame. */
-	bool     brs;    /**< Bit-rate switch (FD only). */
-	uint8_t  dlc;    /**< Data length, 0..@ref ALP_CAN_MAX_DLC_FD. */
-	uint8_t  data[ALP_CAN_MAX_DLC_FD];
+	uint32_t id;                       /**< 11-bit (standard) or 29-bit (extended). */
+	bool     ext_id;                   /**< true = 29-bit, false = 11-bit. */
+	bool     rtr;                      /**< Remote-transmission request. */
+	bool     fd;                       /**< CAN-FD frame. */
+	bool     brs;                      /**< Bit-rate switch (FD only). */
+	uint8_t  dlc;                      /**< Data length, 0..@ref ALP_CAN_MAX_DLC_FD. */
+	uint8_t  data[ALP_CAN_MAX_DLC_FD]; /**< Payload; only the first @c dlc bytes are valid. */
 } alp_can_frame_t;
 
 /** Receive-side filter.  A frame matches when (frame.id & mask) == (id & mask). */
@@ -82,11 +82,11 @@ typedef struct alp_can alp_can_t;
 
 /** Configuration passed to @ref alp_can_open. */
 typedef struct {
-	uint32_t       bus_id;
+	uint32_t       bus_id; /**< Controller index (0-based); maps to a SoC CAN channel. */
 	uint32_t       bitrate_nominal_hz; /**< Arbitration-phase bit rate. */
 	uint32_t       bitrate_data_hz;    /**< Data-phase rate (FD); 0 if classic. */
-	alp_can_mode_t mode;
-	bool           loopback; /**< Local self-test mode. */
+	alp_can_mode_t mode;               /**< Classic vs CAN-FD; see @ref alp_can_mode_t. */
+	bool           loopback;           /**< Local self-test mode. */
 } alp_can_config_t;
 
 /**

@@ -34,11 +34,13 @@ extern "C" {
 /* Wi-Fi station                                                       */
 /* ------------------------------------------------------------------ */
 
+/** Opaque Wi-Fi station handle.  Acquire via @ref alp_wifi_open. */
 typedef struct alp_wifi alp_wifi_t;
 
+/** Credentials for @ref alp_wifi_connect. */
 typedef struct {
-	const char *ssid;
-	const char *psk; /**< NULL for open networks. */
+	const char *ssid; /**< Network SSID; must be non-NULL. */
+	const char *psk;  /**< Pre-shared key; NULL for open networks. */
 } alp_wifi_credentials_t;
 
 /**
@@ -92,6 +94,7 @@ const alp_capabilities_t *alp_wifi_capabilities(const alp_wifi_t *w);
 /* MQTT client                                                         */
 /* ------------------------------------------------------------------ */
 
+/** Opaque MQTT client handle.  Allocate via @ref alp_mqtt_open. */
 typedef struct alp_mqtt alp_mqtt_t;
 
 /**
@@ -111,14 +114,15 @@ typedef struct {
 	bool        insecure;  /**< true skips peer cert verification (dev only). */
 } alp_mqtt_tls_config_t;
 
+/** Configuration passed to @ref alp_mqtt_open. */
 typedef struct {
 	const char
 	    *broker_uri; /**< e.g. `"mqtt://broker.local:1883"` or `"mqtts://broker.local:8883"` */
-	const char *client_id;
-	const char *username; /**< NULL if unauth */
-	const char *password;
-	uint16_t    keepalive_s;
-	bool        clean_session;
+	const char *client_id;     /**< Client identifier presented at CONNECT. */
+	const char *username;      /**< NULL if unauth */
+	const char *password;      /**< NULL unless @c username is set. */
+	uint16_t    keepalive_s;   /**< Keepalive interval in seconds; 0 disables. */
+	bool        clean_session; /**< true starts a fresh broker session. */
 	/**
      * TLS parameters.  Required scheme is `mqtts://`; ignored for
      * `mqtt://`.  NULL is equivalent to a zero-initialised struct
@@ -127,8 +131,24 @@ typedef struct {
 	const alp_mqtt_tls_config_t *tls;
 } alp_mqtt_config_t;
 
-typedef enum { ALP_MQTT_QOS_0 = 0, ALP_MQTT_QOS_1 = 1, ALP_MQTT_QOS_2 = 2 } alp_mqtt_qos_t;
+/** MQTT delivery quality-of-service level. */
+typedef enum {
+	ALP_MQTT_QOS_0 = 0, /**< At most once (fire and forget). */
+	ALP_MQTT_QOS_1 = 1, /**< At least once (acknowledged delivery). */
+	ALP_MQTT_QOS_2 = 2  /**< Exactly once (assured delivery). */
+} alp_mqtt_qos_t;
 
+/**
+ * @brief Per-message subscription callback.
+ *
+ * Invoked from @ref alp_mqtt_loop context for each delivered message;
+ * keep the work minimal.  Buffers are only valid for the call duration.
+ *
+ * @param[in] topic    Topic the message arrived on (null-terminated).
+ * @param[in] payload  Message body; may be NULL when @p len == 0.
+ * @param[in] len      Payload length in bytes.
+ * @param[in] user     Opaque pointer registered via @ref alp_mqtt_subscribe.
+ */
 typedef void (*alp_mqtt_msg_cb_t)(const char    *topic,
                                   const uint8_t *payload,
                                   size_t         len,

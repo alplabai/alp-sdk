@@ -117,10 +117,10 @@ typedef enum {
 	CLK_5L35023B_STRAP_ADDR_0X6B = 3, /**< Bits[6:5] = 11. */
 } clk_5l35023b_strap_addr_t;
 
-/** Driver context. */
+/** @brief Driver context.  Caller-allocated; fields are driver-private. */
 typedef struct {
-	bool       initialised;
-	alp_i2c_t *bus;
+	bool       initialised;  /**< True between a successful init and deinit. */
+	alp_i2c_t *bus;          /**< Borrowed BRD_I2C handle; caller retains ownership. */
 	uint8_t    addr;         /**< 7-bit I2C slave address. */
 	uint8_t    dashcode_id;  /**< Cached Byte 0x01 read at init. */
 	uint8_t    general_ctrl; /**< Cached Byte 0x00 read at init. */
@@ -146,14 +146,31 @@ typedef struct {
  */
 alp_status_t clk_5l35023b_init(clk_5l35023b_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
 
-/** @brief Raw register read.  Operates on any documented register. */
+/**
+ * @brief Raw register read.  Operates on any register (documented or not).
+ *
+ * @param ctx  Initialised driver context.
+ * @param reg  Register byte offset (0x00..0x47).
+ * @param val  Receives the register contents.
+ * @return ALP_OK with @p val set; ALP_ERR_INVAL on a NULL argument or an
+ *         uninitialised context; otherwise the underlying I2C status.
+ */
 alp_status_t clk_5l35023b_read_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t *val);
 
-/** @brief Raw register write.  Writes to OTP-shadow registers take
- *         effect immediately; they revert to the OTP defaults on the
- *         next power-cycle unless the OTP itself is burned (out of
- *         scope for this driver -- requires the Renesas / IDT
- *         programming flow on `OE1` with `VDDDIFF1` raised to 6.5 V). */
+/**
+ * @brief Raw register write.
+ *
+ * Writes to OTP-shadow registers take effect immediately; they revert to the
+ * OTP defaults on the next power-cycle unless the OTP itself is burned (out of
+ * scope for this driver -- requires the Renesas / IDT programming flow on
+ * `OE1` with `VDDDIFF1` raised to 6.5 V).
+ *
+ * @param ctx  Initialised driver context.
+ * @param reg  Register byte offset (0x00..0x47).
+ * @param val  Byte to write.
+ * @return ALP_OK on success; ALP_ERR_INVAL on a NULL/uninitialised context;
+ *         otherwise the underlying I2C status.
+ */
 alp_status_t clk_5l35023b_write_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t val);
 
 /**
@@ -165,6 +182,13 @@ alp_status_t clk_5l35023b_write_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t va
  * sequential order from the lowest to the highest byte" so a single
  * write_read with one register-address byte returns N consecutive
  * registers.
+ *
+ * @param ctx        Initialised driver context.
+ * @param start_reg  First register byte offset to read.
+ * @param out        Caller buffer receiving @p count consecutive bytes.
+ * @param count      Number of registers to read into @p out.
+ * @return ALP_OK with @p out filled; ALP_ERR_INVAL on a NULL/uninitialised
+ *         context; otherwise the underlying I2C status.
  */
 alp_status_t
 clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out, size_t count);
@@ -180,6 +204,11 @@ clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out,
  *
  * The init helper caches the value into @ref clk_5l35023b_t::dashcode_id;
  * call this helper to re-read on demand.
+ *
+ * @param ctx       Initialised driver context.
+ * @param dashcode  Receives the freshly-read 8-bit Dash-Code-ID.
+ * @return ALP_OK with @p dashcode set; ALP_ERR_INVAL on a NULL/uninitialised
+ *         context; otherwise the underlying I2C status.
  */
 alp_status_t clk_5l35023b_read_dashcode_id(clk_5l35023b_t *ctx, uint8_t *dashcode);
 
@@ -187,6 +216,10 @@ alp_status_t clk_5l35023b_read_dashcode_id(clk_5l35023b_t *ctx, uint8_t *dashcod
  * @brief Decode the chip's strapped I2C address from the cached
  *        Byte 0x00 contents (bits[6:5]).
  *
+ * Uses the value cached at init -- does not re-read the chip.
+ *
+ * @param ctx    Initialised driver context.
+ * @param strap  Receives the decoded strap enum.
  * @return @ref ALP_OK / @ref ALP_ERR_NOT_READY (driver uninitialised).
  */
 alp_status_t clk_5l35023b_get_strap_addr(clk_5l35023b_t *ctx, clk_5l35023b_strap_addr_t *strap);
@@ -202,10 +235,22 @@ alp_status_t clk_5l35023b_get_strap_addr(clk_5l35023b_t *ctx, clk_5l35023b_strap
  * Read-modify-write internally so other bits in Byte 0x24
  * (`SE1_CLKSEL1`, `REF_EN`, `DIV4_CH3_EN`, `DIV4_CH2_EN`) are
  * preserved.
+ *
+ * @param ctx           Initialised driver context.
+ * @param powered_down  true clears `I2C_PDB` (power-down); false sets it
+ *                      (normal operation).
+ * @return ALP_OK on success; ALP_ERR_INVAL on a NULL/uninitialised context;
+ *         otherwise the underlying I2C status.
  */
 alp_status_t clk_5l35023b_set_power_down(clk_5l35023b_t *ctx, bool powered_down);
 
-/** @brief Release the context.  Idempotent. */
+/**
+ * @brief Release the context.  Idempotent.
+ *
+ * Does not close the I2C bus handle -- the caller owns it.
+ *
+ * @param ctx  Driver context (may already be deinitialised, or NULL).
+ */
 void clk_5l35023b_deinit(clk_5l35023b_t *ctx);
 
 #ifdef __cplusplus

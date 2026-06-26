@@ -115,12 +115,12 @@ extern "C" {
 #define RTL8211FDI_PAGE_PHYSR   0x0A43u /**< PHY-specific status reg 0x1A. */
 #define RTL8211FDI_PAGE_WOL     0x0D8Au /**< Wake-on-LAN config. */
 
-/** Negotiated speed enumeration (returned by @ref rtl8211fdi_get_link). */
+/** @brief Negotiated link speed reported by @ref rtl8211fdi_get_link. */
 typedef enum {
-	RTL8211FDI_SPEED_UNKNOWN = 0,
-	RTL8211FDI_SPEED_10M     = 10,
-	RTL8211FDI_SPEED_100M    = 100,
-	RTL8211FDI_SPEED_1000M   = 1000,
+	RTL8211FDI_SPEED_UNKNOWN = 0,    /**< Link down or speed not yet resolved. */
+	RTL8211FDI_SPEED_10M     = 10,   /**< 10BASE-T, 10 Mbit/s. */
+	RTL8211FDI_SPEED_100M    = 100,  /**< 100BASE-TX, 100 Mbit/s. */
+	RTL8211FDI_SPEED_1000M   = 1000, /**< 1000BASE-T, 1 Gbit/s. */
 } rtl8211fdi_speed_t;
 
 /* --------------------------------------------------------------- */
@@ -128,22 +128,34 @@ typedef enum {
 /* --------------------------------------------------------------- */
 
 /** @brief Read a 16-bit register at @p reg on @p phy_addr via MDIO.
+ *  @param phy_addr 5-bit MDIO slave address.
+ *  @param reg      Clause-22 register number.
+ *  @param val      [out] register value read.
+ *  @param user     Opaque cookie (the @c mdio_user passed to @ref rtl8211fdi_init).
  *  @return 0 on success, negative on bus error. */
 typedef int (*rtl8211fdi_mdio_read_t)(uint8_t phy_addr, uint8_t reg, uint16_t *val, void *user);
 
-/** @brief Write a 16-bit register at @p reg on @p phy_addr via MDIO. */
+/** @brief Write a 16-bit register at @p reg on @p phy_addr via MDIO.
+ *  @param phy_addr 5-bit MDIO slave address.
+ *  @param reg      Clause-22 register number.
+ *  @param val      Value to write.
+ *  @param user     Opaque cookie (the @c mdio_user passed to @ref rtl8211fdi_init).
+ *  @return 0 on success, negative on bus error. */
 typedef int (*rtl8211fdi_mdio_write_t)(uint8_t phy_addr, uint8_t reg, uint16_t val, void *user);
 
 /* --------------------------------------------------------------- */
 /* Driver context                                                    */
 /* --------------------------------------------------------------- */
 
+/** @brief Driver context for one RTL8211FDI PHY. Caller-allocated; populated by
+ *  @ref rtl8211fdi_init and passed to every subsequent call. Not thread-safe:
+ *  serialise access to a single instance (one instance per PHY). */
 typedef struct {
-	bool                    initialised;
-	uint8_t                 phy_addr; /**< 5-bit MDIO address (0..31). */
-	rtl8211fdi_mdio_read_t  mdio_read;
-	rtl8211fdi_mdio_write_t mdio_write;
-	void                   *mdio_user;
+	bool                    initialised;  /**< True once @ref rtl8211fdi_init succeeds. */
+	uint8_t                 phy_addr;     /**< 5-bit MDIO address (0..31). */
+	rtl8211fdi_mdio_read_t  mdio_read;    /**< Caller-supplied MDIO read callback. */
+	rtl8211fdi_mdio_write_t mdio_write;   /**< Caller-supplied MDIO write callback. */
+	void                   *mdio_user;    /**< Opaque cookie forwarded to both callbacks. */
 	uint16_t                phy_id1;      /**< Cached PHYID1 (Realtek OUI top). */
 	uint16_t                phy_id2;      /**< Cached PHYID2 (model + revision). */
 	uint16_t                current_page; /**< Last page written to reg 0x1F. */
@@ -176,7 +188,8 @@ alp_status_t rtl8211fdi_init(rtl8211fdi_t           *ctx,
                              rtl8211fdi_mdio_write_t write,
                              void                   *mdio_user);
 
-/** @brief Release the context.  Idempotent.  Does NOT touch the MDIO bus. */
+/** @brief Release the context.  Idempotent.  Does NOT touch the MDIO bus.
+ *  @param ctx Driver context (may be NULL, in which case the call is a no-op). */
 void rtl8211fdi_deinit(rtl8211fdi_t *ctx);
 
 /* --------------------------------------------------------------- */
@@ -194,7 +207,9 @@ void rtl8211fdi_deinit(rtl8211fdi_t *ctx);
 alp_status_t rtl8211fdi_soft_reset(rtl8211fdi_t *ctx, uint32_t timeout_us);
 
 /** @brief Restart auto-negotiation (BMCR bit 9).  Returns immediately;
- *         the host can poll @ref rtl8211fdi_get_link for completion. */
+ *         the host can poll @ref rtl8211fdi_get_link for completion.
+ *  @param ctx Initialised driver context.
+ *  @return ALP_OK on success, ALP_ERR_IO on MDIO error. */
 alp_status_t rtl8211fdi_restart_autoneg(rtl8211fdi_t *ctx);
 
 /** @brief Read current link state + speed + duplex.
@@ -215,32 +230,59 @@ rtl8211fdi_get_link(rtl8211fdi_t *ctx, bool *up, rtl8211fdi_speed_t *speed, bool
 /* Wake-on-LAN                                                        */
 /* --------------------------------------------------------------- */
 
-/** @brief Program the MAC address used for the WoL magic-packet match. */
+/** @brief Program the MAC address used for the WoL magic-packet match.
+ *  @param ctx Initialised driver context.
+ *  @param mac 6-byte MAC address, network byte order (mac[0] = OUI MSB).
+ *  @return ALP_OK on success, ALP_ERR_INVAL on NULL args, ALP_ERR_IO on MDIO error. */
 alp_status_t rtl8211fdi_wol_set_mac(rtl8211fdi_t *ctx, const uint8_t mac[6]);
 
-/** @brief Enable / disable the WoL magic-packet detector. */
+/** @brief Enable / disable the WoL magic-packet detector.
+ *  @param ctx    Initialised driver context.
+ *  @param enable true to arm the detector, false to disarm.
+ *  @return ALP_OK on success, ALP_ERR_IO on MDIO error. */
 alp_status_t rtl8211fdi_wol_enable(rtl8211fdi_t *ctx, bool enable);
 
 /** @brief Read-and-clear the WoL event flag (page 0xD8A, register 0x14
- *         bit 15 -- the "magic packet seen" latch). */
+ *         bit 15 -- the "magic packet seen" latch).
+ *  @param ctx     Initialised driver context.
+ *  @param was_set [out] true if a magic packet had been latched since the last clear.
+ *  @return ALP_OK on success, ALP_ERR_IO on MDIO error. */
 alp_status_t rtl8211fdi_wol_clear_event(rtl8211fdi_t *ctx, bool *was_set);
 
 /* --------------------------------------------------------------- */
 /* Raw register R/W (escape hatch)                                    */
 /* --------------------------------------------------------------- */
 
-/** @brief Read a clause-22 register on the default page. */
+/** @brief Read a clause-22 register on the default page.
+ *  @param ctx Initialised driver context.
+ *  @param reg Register address (0x00..0x1F).
+ *  @param val [out] register value read.
+ *  @return ALP_OK on success, ALP_ERR_IO on MDIO error. */
 alp_status_t rtl8211fdi_read_reg(rtl8211fdi_t *ctx, uint8_t reg, uint16_t *val);
 
-/** @brief Write a clause-22 register on the default page. */
+/** @brief Write a clause-22 register on the default page.
+ *  @param ctx Initialised driver context.
+ *  @param reg Register address (0x00..0x1F).
+ *  @param val Value to write.
+ *  @return ALP_OK on success, ALP_ERR_IO on MDIO error. */
 alp_status_t rtl8211fdi_write_reg(rtl8211fdi_t *ctx, uint8_t reg, uint16_t val);
 
 /** @brief Read a Realtek-extended page-N register.  Page-select +
  *         page-restore are handled internally; the call leaves the
- *         PHY's page register at @ref RTL8211FDI_PAGE_DEFAULT. */
+ *         PHY's page register at @ref RTL8211FDI_PAGE_DEFAULT.
+ *  @param ctx  Initialised driver context.
+ *  @param page Realtek extended page (e.g. @ref RTL8211FDI_PAGE_PHYSR).
+ *  @param reg  Register address within the page.
+ *  @param val  [out] register value read.
+ *  @return ALP_OK on success, ALP_ERR_IO on MDIO error. */
 alp_status_t rtl8211fdi_read_page_reg(rtl8211fdi_t *ctx, uint16_t page, uint8_t reg, uint16_t *val);
 
-/** @brief Write a Realtek-extended page-N register. */
+/** @brief Write a Realtek-extended page-N register.
+ *  @param ctx  Initialised driver context.
+ *  @param page Realtek extended page.
+ *  @param reg  Register address within the page.
+ *  @param val  Value to write.
+ *  @return ALP_OK on success, ALP_ERR_IO on MDIO error. */
 alp_status_t rtl8211fdi_write_page_reg(rtl8211fdi_t *ctx, uint16_t page, uint8_t reg, uint16_t val);
 
 #ifdef __cplusplus

@@ -2,7 +2,20 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Alp Lab AB
  *
- * E1M-AEN SoM CC3501E bridge bring-up helper -- see cc3501e_bridge.h.
+ * E1M-AEN SoM CC3501E bridge bring-up helper (host = Alif Ensemble E8, M55-HE).
+ *
+ * cc3501e_bridge_bringup() is the reusable, board-agnostic TEMPLATE every
+ * CC3501E example here calls to wake the on-module TI CC3501E Wi-Fi/BLE
+ * coprocessor in ONE step.  It does the three things any inter-chip bring-up
+ * needs, in order: (1) open + configure the WIFI_EN supply gate and nRESET
+ * control pins, (2) open the Alif-master inter-chip SPI link, and (3) bind
+ * them into the cc3501e driver, attach the optional GPIO proxy, and run the
+ * power/reset sequence.  An application copies this pattern; the examples wrap
+ * it with their own diagnostics (PING soak + SWD witness, or GPIO blink).
+ *
+ * The interface (handle type, pin/bus IDs) lives in cc3501e_bridge.h.  The one
+ * hardware quirk that can't live in a header -- the AEN LP-GPIO pads need a raw
+ * pad-mux poke before they drive -- is documented at that poke below.
  */
 
 #include "cc3501e_bridge.h"

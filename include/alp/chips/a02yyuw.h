@@ -34,15 +34,25 @@
 extern "C" {
 #endif
 
-#define A02YYUW_BAUD_RATE 9600u
-#define A02YYUW_FRAME_LEN 4u
+#define A02YYUW_BAUD_RATE 9600u /**< Fixed UART baud rate, bit/s (8N1). */
+#define A02YYUW_FRAME_LEN 4u    /**< Bytes per distance frame: [0xFF][HI][LO][CHK]. */
 
+/** @brief Driver context.  Zero-initialise, then pass to @ref a02yyuw_init. */
 typedef struct {
-	alp_uart_t *port;
-	bool        initialised;
+	alp_uart_t *port;        /**< Bound UART port (not owned; caller keeps it open). */
+	bool        initialised; /**< true once @ref a02yyuw_init has bound a port. */
 } a02yyuw_t;
 
-/** @brief Bind context to an open UART port (caller configures 9600/8N1). */
+/**
+ * @brief Bind context to an open UART port (caller configures 9600/8N1).
+ *
+ * Does not own @p port -- the caller opens it beforehand and closes it
+ * after @ref a02yyuw_deinit.
+ *
+ * @param dev   Caller-allocated context to initialise.  Must be non-NULL.
+ * @param port  Open UART configured for 9600/8N1.  Must be non-NULL.
+ * @return `ALP_OK` on success, `ALP_ERR_INVAL` if @p dev or @p port is NULL.
+ */
 alp_status_t a02yyuw_init(a02yyuw_t *dev, alp_uart_t *port);
 
 /**
@@ -56,7 +66,11 @@ alp_status_t a02yyuw_init(a02yyuw_t *dev, alp_uart_t *port);
  */
 alp_status_t a02yyuw_read_distance(a02yyuw_t *dev, uint16_t *distance_mm, uint32_t timeout_ms);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release driver context.  Does not close the bound UART port.
+ *
+ * @param dev  Context from @ref a02yyuw_init, or NULL (no-op).
+ */
 void a02yyuw_deinit(a02yyuw_t *dev);
 
 #ifdef __cplusplus

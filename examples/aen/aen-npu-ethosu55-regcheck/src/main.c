@@ -67,6 +67,13 @@
 #define CFG_MACS_SHIFT 0U
 #define CFG_MACS_MASK  0xFU
 
+/*
+ * Latched raw register words in a known file-scope symbol the human can read by
+ * name over J-Link, independent of the RAM-console decode -- so the evidence
+ * survives even if a later step faults before printing. The 0xDEADBEEF init is a
+ * sentinel meaning "main() never reached the read"; volatile keeps the stores
+ * from being optimised away.
+ */
 volatile uint32_t g_npu_base   = NPU_BASE;
 volatile uint32_t g_npu_id     = 0xDEADBEEFU;
 volatile uint32_t g_npu_status = 0xDEADBEEFU;

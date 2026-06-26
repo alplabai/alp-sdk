@@ -2,9 +2,23 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * MAVLink v2 implementation.  Packs the 7 outbound message types
- * the drone-autopilot needs to round-trip with QGroundControl /
- * Mission Planner; parses HEARTBEAT + COMMAND_LONG inbound.
+ * MAVLink v2 link for the drone-autopilot example. Packs the 7 outbound
+ * message types the drone-autopilot needs to round-trip with
+ * QGroundControl / Mission Planner; parses HEARTBEAT + COMMAND_LONG
+ * inbound.
+ *
+ * This is a deliberately MINIMAL, dialect-table-free stack -- just enough
+ * wire format to talk to a ground station over a serial SiK telemetry
+ * radio (typically 433/915 MHz), reached through the portable alp_uart
+ * API so it builds on any E1M-family SoM. A real product swaps this for
+ * the upstream c_library_v2 generator (type-safe accessors, full
+ * dialect); that trade-off is called out inline at the RX handler.
+ *
+ * What it teaches: the MAVLink v2 frame layout (send_frame), the
+ * CRC-16/X.25 + per-message "magic" byte scheme (crc_* / s_crc_extra),
+ * and a byte-at-a-time RX state machine (rx_feed_byte). Heads up: in v0.5
+ * the GCS link has no free UART and collides with the GNSS port -- see
+ * the loud warning in alp_mavlink_init().
  */
 
 #include <zephyr/kernel.h>

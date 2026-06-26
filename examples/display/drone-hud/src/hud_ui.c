@@ -82,7 +82,11 @@ void hud_ui_apply_telemetry(const drone_telemetry_t *t)
 {
 	char buf[64];
 
-	/* Attitude.  Tilt the horizon widget on roll; shift on pitch. */
+	/* Attitude.  Tilt the horizon widget on roll; shift it on pitch.
+	 * LVGL's transform_rotation is expressed in 1/10-degree units, so
+	 * roll degrees are scaled by 10 to feed the API.  Pitch maps to a
+	 * vertical pixel offset at ~0.5 px/deg -- enough to nudge the
+	 * sky/ground split without sliding the widget off the 240x120 box. */
 	lv_obj_set_style_transform_rotation(s_horizon, (int16_t)(t->roll_deg * 10), 0);
 	lv_obj_set_pos(s_horizon, 0, (int)(t->pitch_deg * 0.5f));
 

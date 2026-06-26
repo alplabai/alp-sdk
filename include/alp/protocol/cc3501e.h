@@ -346,12 +346,12 @@ typedef struct {
 /** Sent in the payload of CMD_WIFI_CONNECT_STA.  ssid_len + psk_len
  *  upper-bound on the cumulative frame length (still ≤ MAX_PAYLOAD). */
 typedef struct {
-	uint8_t ssid_len;
-	uint8_t psk_len;
+	uint8_t ssid_len; /**< Length of the inline SSID that follows the header. */
+	uint8_t psk_len;  /**< Length of the inline pre-shared key that follows. */
 	uint8_t security; /**< 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE */
-	uint8_t reserved;
-	/* uint8_t ssid[ssid_len];   -- packed inline, no padding */
-	/* uint8_t psk[psk_len];     -- packed inline, no padding */
+	uint8_t reserved; /**< Reserved; set to 0. */
+	                  /* uint8_t ssid[ssid_len];   -- packed inline, no padding */
+	                  /* uint8_t psk[psk_len];     -- packed inline, no padding */
 } alp_cc3501e_wifi_connect_t;
 
 /** Connection state reported by CMD_WIFI_STATUS (opcode 0x1B).  The async connect
@@ -388,14 +388,16 @@ typedef struct {
 	uint8_t reserved;
 } alp_cc3501e_wifi_status_t;
 
-/** Async event for CMD_WIFI_SCAN_START and friends. */
+/** Async event payload for EVT_WIFI_SCAN_RESULT (opcode 0x18): one
+ *  scanned access point, slave -> master per AP while a scan runs.  The
+ *  SSID bytes follow this header inline (no padding). */
 typedef struct {
-	uint8_t bssid[6];
-	int8_t  rssi_dbm;
-	uint8_t channel;
-	uint8_t security;
-	uint8_t ssid_len;
-	/* uint8_t ssid[ssid_len]; */
+	uint8_t bssid[6]; /**< AP BSSID (6-byte MAC, network order). */
+	int8_t  rssi_dbm; /**< Beacon RSSI in dBm (negative). */
+	uint8_t channel;  /**< Wi-Fi channel the AP was heard on. */
+	uint8_t security; /**< 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE. */
+	uint8_t ssid_len; /**< Length of the inline SSID that follows. */
+	                  /* uint8_t ssid[ssid_len]; */
 } alp_cc3501e_scan_result_t;
 
 /* ------------------------------------------------------------------ */
@@ -543,22 +545,27 @@ typedef struct {
 /* BLE advertising / scanning payload formats                          */
 /* ------------------------------------------------------------------ */
 
+/** Payload of CMD_BLE_ADV_START (opcode 0x32): start BLE advertising.
+ *  The advertising-data bytes follow this header inline (no padding). */
 typedef struct {
-	uint8_t  connectable;
-	uint8_t  reserved;
-	uint16_t interval_min_ms;
-	uint16_t interval_max_ms;
-	uint8_t  adv_data_len;
-	/* uint8_t adv_data[adv_data_len]; */
+	uint8_t  connectable;     /**< 0 = non-connectable beacon; 1 = connectable. */
+	uint8_t  reserved;        /**< Reserved; set to 0. */
+	uint16_t interval_min_ms; /**< Minimum advertising interval (ms). */
+	uint16_t interval_max_ms; /**< Maximum advertising interval (ms). */
+	uint8_t  adv_data_len;    /**< Inline advertising-data byte count. */
+	                          /* uint8_t adv_data[adv_data_len]; */
 } alp_cc3501e_ble_adv_start_t;
 
+/** Async event payload for EVT_BLE_ADV_REPORT (opcode 0x3C): one scanned
+ *  BLE advertisement, slave -> master while scanning is active.  The
+ *  advertising-data bytes follow this header inline (no padding). */
 typedef struct {
-	uint8_t addr_type;
-	uint8_t addr[6];
-	int8_t  rssi_dbm;
-	uint8_t adv_type;
-	uint8_t adv_data_len;
-	/* uint8_t adv_data[adv_data_len]; */
+	uint8_t addr_type;    /**< BLE address type (0 = public, 1 = random). */
+	uint8_t addr[6];      /**< 6-byte BLE device address. */
+	int8_t  rssi_dbm;     /**< Advertisement RSSI in dBm (negative). */
+	uint8_t adv_type;     /**< BLE PDU advertising type. */
+	uint8_t adv_data_len; /**< Inline advertising-data byte count. */
+	                      /* uint8_t adv_data[adv_data_len]; */
 } alp_cc3501e_ble_adv_report_t;
 
 /* ------------------------------------------------------------------ */

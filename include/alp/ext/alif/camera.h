@@ -71,10 +71,10 @@ typedef enum {
 
 /** Bayer / per-channel slot the gain-table loader addresses. */
 typedef enum {
-	ALP_ALIF_CAMERA_CHANNEL_R  = 0,
-	ALP_ALIF_CAMERA_CHANNEL_GR = 1,
-	ALP_ALIF_CAMERA_CHANNEL_GB = 2,
-	ALP_ALIF_CAMERA_CHANNEL_B  = 3,
+	ALP_ALIF_CAMERA_CHANNEL_R  = 0, /**< Red Bayer channel. */
+	ALP_ALIF_CAMERA_CHANNEL_GR = 1, /**< Green pixels on red rows. */
+	ALP_ALIF_CAMERA_CHANNEL_GB = 2, /**< Green pixels on blue rows. */
+	ALP_ALIF_CAMERA_CHANNEL_B  = 3, /**< Blue Bayer channel. */
 } alp_alif_camera_channel_t;
 
 /** Pixel-coordinate rectangle.  Layout intentionally mirrors
@@ -82,10 +82,10 @@ typedef enum {
  *  AEN silicon can share rectangle-computation code modulo the
  *  enum types. */
 typedef struct {
-	uint16_t x;
-	uint16_t y;
-	uint16_t w;
-	uint16_t h;
+	uint16_t x; /**< Left edge, pixels from the frame origin. */
+	uint16_t y; /**< Top edge, pixels from the frame origin. */
+	uint16_t w; /**< Width in pixels; must be > 0. */
+	uint16_t h; /**< Height in pixels; must be > 0. */
 } alp_alif_camera_rect_t;
 
 /**

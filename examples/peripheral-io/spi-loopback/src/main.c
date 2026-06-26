@@ -22,10 +22,11 @@
 #include "alp/peripheral.h"
 #include "alp/board.h"
 
-/* Sentinel meaning "no chip-select GPIO -- the controller manages
- * CS internally, or the device doesn't need one (e.g. shift
- * register chains).  Defined locally to keep the example
- * self-contained; real apps include this from <alp/peripheral.h>. */
+/* ALP_SPI_NO_CS (from <alp/peripheral.h>, included above) is the
+ * sentinel cs_pin_id meaning "no chip-select GPIO" -- the controller
+ * manages CS internally, or the device doesn't need one (e.g. shift
+ * register chains).  Pass a real studio-resolved pin_id instead when
+ * the slave needs a dedicated CS line. */
 
 int main(void)
 {

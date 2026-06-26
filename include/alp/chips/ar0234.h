@@ -32,28 +32,68 @@
 extern "C" {
 #endif
 
-#define AR0234_I2C_ADDR_LOW  0x10u
-#define AR0234_I2C_ADDR_HIGH 0x18u
+#define AR0234_I2C_ADDR_LOW  0x10u /**< 7-bit SCCB address with SADDR strapped low. */
+#define AR0234_I2C_ADDR_HIGH 0x18u /**< 7-bit SCCB address with SADDR strapped high. */
 
-#define AR0234_REG_CHIP_VERSION 0x3000u
-#define AR0234_CHIP_ID          0x0A56u
+#define AR0234_REG_CHIP_VERSION 0x3000u /**< 16-bit chip-version register address. */
+#define AR0234_CHIP_ID          0x0A56u /**< Expected value of CHIP_VERSION for the AR0234. */
 
+/**
+ * @brief AR0234 driver context (SCCB / I2C configuration side only).
+ *
+ * Covers the control channel; pixel data leaves over MIPI CSI-2 and is not
+ * touched here.  @p bus is borrowed, not owned -- it must outlive the context.
+ */
 typedef struct {
-	alp_i2c_t *bus;
-	uint8_t    addr;
-	bool       initialised;
+	alp_i2c_t *bus;         /**< Caller-opened I2C/SCCB bus handle (borrowed). */
+	uint8_t    addr;        /**< Active 7-bit slave address (AR0234_I2C_ADDR_*). */
+	bool       initialised; /**< True between a successful init and deinit. */
 } ar0234_t;
 
-/** @brief Bind context and verify chip ID. */
+/**
+ * @brief Bind the context to a bus and verify the chip ID.
+ *
+ * Reads AR0234_REG_CHIP_VERSION and checks it against AR0234_CHIP_ID; a mismatch
+ * fails init so a wrong/absent part is caught early.  The bus is borrowed and
+ * must stay valid until ar0234_deinit().
+ *
+ * @param dev       Context to initialise (output).
+ * @param bus       Caller-opened I2C/SCCB bus handle.
+ * @param i2c_addr  7-bit slave address (AR0234_I2C_ADDR_LOW or _HIGH).
+ * @return          ALP_OK on success, ALP_ERR_NOT_READY if the ID read fails or
+ *                  mismatches, ALP_ERR_INVAL on NULL args.
+ */
 alp_status_t ar0234_init(ar0234_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 
-/** @brief Read chip-version (combined 16-bit). */
+/**
+ * @brief Read the combined 16-bit chip-version register.
+ *
+ * @param dev     Initialised context.
+ * @param id_out  Output: CHIP_VERSION value (AR0234_CHIP_ID for a genuine part).
+ * @return        ALP_OK on success, ALP_ERR_NOT_READY if not initialised,
+ *                ALP_ERR_INVAL on NULL args.
+ */
 alp_status_t ar0234_read_id(ar0234_t *dev, uint16_t *id_out);
 
-/** @brief Issue a software reset (RESET_REGISTER bit 0). */
+/**
+ * @brief Issue a software reset (RESET_REGISTER bit 0).
+ *
+ * Returns the sensor to its register defaults; allow the datasheet's reset
+ * settling time before reconfiguring.
+ *
+ * @param dev  Initialised context.
+ * @return     ALP_OK on success, ALP_ERR_NOT_READY if not initialised,
+ *             ALP_ERR_INVAL on NULL @p dev.
+ */
 alp_status_t ar0234_soft_reset(ar0234_t *dev);
 
-/** @brief Release driver context.  Idempotent.  NULL tolerated. */
+/**
+ * @brief Release the driver context.  Idempotent; NULL tolerated.
+ *
+ * Does not close the borrowed bus handle -- the caller owns it.
+ *
+ * @param dev  Context to release (may be NULL).
+ */
 void ar0234_deinit(ar0234_t *dev);
 
 #ifdef __cplusplus

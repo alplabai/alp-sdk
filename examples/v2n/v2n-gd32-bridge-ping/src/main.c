@@ -2,8 +2,26 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * v2n-gd32-bridge-ping — open the on-module GD32G553 supervisor MCU
- * bridge, exchange PING + GET_VERSION over both transports.
+ * v2n-gd32-bridge-ping -- the SMALLEST end-to-end proof that the
+ * on-module GD32G553 supervisor MCU is alive and talking: open the
+ * bridge, then loop PING + GET_VERSION over the SPI fast path forever.
+ *
+ * Target: the E1M-X V2N module, where the Renesas RZ/V2N (its CM33
+ * realtime core runs this app) is the bridge HOST and the on-module
+ * GD32G553 is the supervisor SLAVE.  This is the "is the link even up?"
+ * tier: ping proves the TRANSPORT (two opcodes, forever), while the
+ * sibling hil-soak and functional examples build on the same link to
+ * prove the whole COMMAND SET.
+ *
+ * Like the other bridge demos this drives the gd32g553 chip driver
+ * directly -- the documented exception to the portable <alp/*> API
+ * rule for dedicated bridge/maintainer tooling.
+ *
+ * Only the SPI transport is wired here (i2c is passed NULL): on this
+ * SoM BRD_I2C is held low by the DX-M1 (see the bench handoff), so the
+ * second transport is deliberately left out rather than risk a wedged
+ * I2C transaction stalling the probe -- the SPI-only note in main()
+ * spells out the reasoning.
  *
  * This example is intentionally chatty: it walks through every step
  * of the V2N supervisor handshake so the file doubles as a tutorial
@@ -19,12 +37,13 @@
 #include "alp/chips/gd32g553.h"
 
 /*
- * Two parallel bus handles are wired into a single gd32g553 driver
- * context.  The driver picks the SPI fast path by default when both
- * are present; per-call `_via` helpers let the caller override.
+ * The gd32g553 driver can hold two parallel bus handles (SPI + I2C) in
+ * one context; it picks the SPI fast path by default when both are
+ * present, and per-call `_via` helpers let the caller override that.
  *
- * On boards that only wire one of the two transports, pass NULL for
- * the other -- gd32g553_init checks at least one is non-NULL.
+ * On boards that wire only one of the two transports -- like this
+ * example, which uses SPI alone -- pass NULL for the other; gd32g553_init
+ * only requires that at least one handle is non-NULL.
  */
 
 int main(void)

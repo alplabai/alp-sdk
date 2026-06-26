@@ -33,30 +33,55 @@
 extern "C" {
 #endif
 
-#define AS5048B_I2C_ADDR_BASE 0x40u /**< OR with 0..3 (A1:A2 strap). */
+#define AS5048B_I2C_ADDR_BASE 0x40u /**< Base 7-bit address; OR with 0..3 (A1:A2 strap). */
 
-#define AS5048B_REG_ANGLE_HI 0xFEu
-#define AS5048B_REG_ANGLE_LO 0xFFu
+#define AS5048B_REG_ANGLE_HI 0xFEu /**< Angle register, upper 8 bits (bits 13:6). */
+#define AS5048B_REG_ANGLE_LO 0xFFu /**< Angle register, lower 6 bits (bits 5:0). */
 
+/**
+ * @brief AS5048B driver context (I2C variant).
+ *
+ * @p bus is borrowed, not owned -- it must outlive the context.
+ */
 typedef struct {
-	alp_i2c_t *bus;
-	uint8_t    addr;
-	bool       initialised;
+	alp_i2c_t *bus;         /**< Caller-opened I2C bus handle (borrowed). */
+	uint8_t    addr;        /**< Active 7-bit slave address (0x40..0x43). */
+	bool       initialised; /**< True between a successful init and deinit. */
 } as5048b_t;
 
-/** @brief Bind context to caller-opened I²C bus. */
+/**
+ * @brief Bind the context to a caller-opened I2C bus.
+ *
+ * The bus is borrowed and must stay valid until as5048b_deinit().
+ *
+ * @param dev       Context to initialise (output).
+ * @param bus       Caller-opened I2C bus handle.
+ * @param i2c_addr  7-bit slave address (AS5048B_I2C_ADDR_BASE | strap, 0x40..0x43).
+ * @return          ALP_OK on success, ALP_ERR_INVAL on NULL args.
+ */
 alp_status_t as5048b_init(as5048b_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 
 /**
- * @brief Read 14-bit absolute angle in raw counts (0..16383).
+ * @brief Read the 14-bit absolute angle in raw counts.
  *
- * @param dev          Initialised context.
- * @param angle_out    Output: angle in counts.
- * @return `ALP_OK` on success.
+ * One full mechanical revolution spans the whole range, so degrees =
+ * counts * 360 / 16384.  The value is the raw angle; zero-position and rotation
+ * direction depend on magnet placement and any programmed offset.
+ *
+ * @param dev        Initialised context.
+ * @param angle_out  Output: angle in counts, 0..16383.
+ * @return           ALP_OK on success, ALP_ERR_NOT_READY if not initialised,
+ *                   ALP_ERR_INVAL on NULL args.
  */
 alp_status_t as5048b_read_angle(as5048b_t *dev, uint16_t *angle_out);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release the driver context.  Idempotent; NULL tolerated.
+ *
+ * Does not close the borrowed bus handle -- the caller owns it.
+ *
+ * @param dev  Context to release (may be NULL).
+ */
 void as5048b_deinit(as5048b_t *dev);
 
 #ifdef __cplusplus

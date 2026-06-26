@@ -68,50 +68,33 @@ extern "C" {
 #endif
 
 /** Pixel format for 2D surfaces.  Backends honour the subset their
- *  HW supports; unsupported formats return ALP_ERR_NOSUPPORT.
- *  Field-level meanings:
- *   - ARGB8888: 32-bit, A:R:G:B = 8:8:8:8 (default for DAVE2D).
- *   - RGB565: 16-bit, R:G:B = 5:6:5.
- *   - A8: 8-bit alpha only (useful for masks).
- *   - RGB888: 24-bit packed; backend-defined byte order.
- *   - RGBA8888: 32-bit, R:G:B:A = 8:8:8:8 (alternate ordering). */
+ *  HW supports; unsupported formats return ALP_ERR_NOSUPPORT. */
 typedef enum {
-	ALP_GPU2D_FMT_ARGB8888 = 0,
-	ALP_GPU2D_FMT_RGB565   = 1,
-	ALP_GPU2D_FMT_A8       = 2,
-	ALP_GPU2D_FMT_RGB888   = 3,
-	ALP_GPU2D_FMT_RGBA8888 = 4,
+	ALP_GPU2D_FMT_ARGB8888 = 0, /**< 32-bit, A:R:G:B = 8:8:8:8 (default for D/AVE 2D). */
+	ALP_GPU2D_FMT_RGB565   = 1, /**< 16-bit, R:G:B = 5:6:5. */
+	ALP_GPU2D_FMT_A8       = 2, /**< 8-bit alpha only (useful for masks). */
+	ALP_GPU2D_FMT_RGB888   = 3, /**< 24-bit packed; backend-defined byte order. */
+	ALP_GPU2D_FMT_RGBA8888 = 4, /**< 32-bit, R:G:B:A = 8:8:8:8 (alternate ordering). */
 } alp_gpu2d_format_t;
 
 /** Blend mode for @ref alp_gpu2d_blend.  Colours are straight
- *  (non-premultiplied) alpha.  Field-level meanings:
- *   - REPLACE: dst = src (no blend).
- *   - SRC_OVER: dst = src*src.a + dst*(1-src.a) (straight-alpha
- *     src-over: a transparent src leaves dst untouched, an opaque
- *     src replaces it).
- *   - ADDITIVE: dst = src + dst (clamped).
- *   - MULTIPLY: dst = src * dst. */
+ *  (non-premultiplied) alpha. */
 typedef enum {
-	ALP_GPU2D_BLEND_REPLACE  = 0,
-	ALP_GPU2D_BLEND_SRC_OVER = 1,
-	ALP_GPU2D_BLEND_ADDITIVE = 2,
-	ALP_GPU2D_BLEND_MULTIPLY = 3,
+	ALP_GPU2D_BLEND_REPLACE  = 0, /**< dst = src (no blend). */
+	ALP_GPU2D_BLEND_SRC_OVER = 1, /**< dst = src*a + dst*(1-a) (straight-alpha src-over). */
+	ALP_GPU2D_BLEND_ADDITIVE = 2, /**< dst = src + dst (clamped). */
+	ALP_GPU2D_BLEND_MULTIPLY = 3, /**< dst = src * dst. */
 } alp_gpu2d_blend_mode_t;
 
 /** Surface descriptor.  Lives in caller memory; copied internally
  *  per operation so the caller can reuse the struct or modify it
- *  between calls.  Field-level meanings:
- *   - base: pointer to the top-left pixel (no header byte).
- *   - width / height: dimensions in pixels.
- *   - stride_bytes: bytes from one row's start to the next
- *     (= width * bytes-per-pixel for tightly-packed surfaces).
- *   - format: one of @ref alp_gpu2d_format_t. */
+ *  between calls. */
 typedef struct {
-	void              *base;
-	uint32_t           width;
-	uint32_t           height;
-	uint32_t           stride_bytes;
-	alp_gpu2d_format_t format;
+	void              *base;         /**< Pointer to the top-left pixel (no header byte). */
+	uint32_t           width;        /**< Surface width in pixels. */
+	uint32_t           height;       /**< Surface height in pixels. */
+	uint32_t           stride_bytes; /**< Bytes per row, start to start (>= width*bpp). */
+	alp_gpu2d_format_t format;       /**< Pixel layout; one of @ref alp_gpu2d_format_t. */
 } alp_gpu2d_surface_t;
 
 /** Opaque GPU2D handle.  Allocate via @ref alp_gpu2d_open. */

@@ -72,17 +72,17 @@ extern "C" {
  *  @ref deepx_dxm1_set_reset_polarity() if the silicon polarity
  *  ever changes. */
 typedef enum {
-	DEEPX_DXM1_RESET_ACTIVE_LOW  = 0, /**< Default on V2N-M1. */
-	DEEPX_DXM1_RESET_ACTIVE_HIGH = 1,
+	DEEPX_DXM1_RESET_ACTIVE_LOW  = 0, /**< Default on V2N-M1: drive low to hold reset. */
+	DEEPX_DXM1_RESET_ACTIVE_HIGH = 1, /**< Drive high to hold reset (other DEEPX revs). */
 } deepx_dxm1_reset_polarity_t;
 
-/** Driver context. */
+/** @brief DEEPX DX-M1 bring-up sequencer context.  Caller-allocated; opaque to apps. */
 typedef struct {
-	bool                        initialised;
-	alp_gpio_t                 *m1_reset_pin; /**< Renesas PA6.        */
-	pi3dbs12212_t              *pcie_mux;     /**< owned + opened by caller. */
-	pi3dbs12212_state_t         deepx_path;   /**< Which mux state means "to DEEPX". */
-	deepx_dxm1_reset_polarity_t reset_polarity;
+	bool                        initialised;    /**< True between a successful init and deinit. */
+	alp_gpio_t                 *m1_reset_pin;   /**< Renesas PA6.        */
+	pi3dbs12212_t              *pcie_mux;       /**< owned + opened by caller. */
+	pi3dbs12212_state_t         deepx_path;     /**< Which mux state means "to DEEPX". */
+	deepx_dxm1_reset_polarity_t reset_polarity; /**< Active level of M1_RESET (default low). */
 } deepx_dxm1_t;
 
 /**
@@ -109,7 +109,17 @@ alp_status_t deepx_dxm1_init(deepx_dxm1_t       *ctx,
                              pi3dbs12212_t      *pcie_mux,
                              pi3dbs12212_state_t deepx_path);
 
-/** @brief Override the assumed reset-line polarity.  Default is active-high. */
+/**
+ * @brief Override the assumed reset-line polarity.
+ *
+ * The default after @ref deepx_dxm1_init is active-low (the confirmed V2N-M1
+ * polarity); call this only for a board whose DEEPX silicon flips it.  Takes
+ * effect on the next @ref deepx_dxm1_bring_up / @ref deepx_dxm1_shut_down.
+ *
+ * @param ctx  Initialised sequencer context.
+ * @param p    Reset-line polarity to assume from now on.
+ * @return ALP_OK on success; ALP_ERR_INVAL on a NULL @p ctx.
+ */
 alp_status_t deepx_dxm1_set_reset_polarity(deepx_dxm1_t *ctx, deepx_dxm1_reset_polarity_t p);
 
 /**
@@ -135,14 +145,28 @@ alp_status_t deepx_dxm1_set_reset_polarity(deepx_dxm1_t *ctx, deepx_dxm1_reset_p
  *                 the wait (the caller will poll PCIe link-up via
  *                 its own mechanism).  Default suggestion:
  *                 @ref DEEPX_DXM1_DEFAULT_BOOT_US.
+ * @return ALP_OK once M1_RESET is released; ALP_ERR_INVAL on a NULL @p ctx;
+ *         otherwise the first failing mux/GPIO status.
  */
 alp_status_t deepx_dxm1_bring_up(deepx_dxm1_t *ctx, uint32_t boot_us);
 
-/** @brief Power-down: re-assert M1_RESET, drop the PCIe muxes. */
+/**
+ * @brief Power-down: re-assert M1_RESET, drop the PCIe muxes.
+ *
+ * @param ctx  Initialised sequencer context.
+ * @return ALP_OK on success; ALP_ERR_INVAL on a NULL @p ctx; otherwise the
+ *         first failing GPIO/mux status.
+ */
 alp_status_t deepx_dxm1_shut_down(deepx_dxm1_t *ctx);
 
-/** @brief Release the context.  Does NOT close the underlying GPIO /
- *         mux handles -- caller retains ownership. */
+/**
+ * @brief Release the context.  Idempotent.
+ *
+ * Does NOT close the underlying GPIO / mux handles -- the caller retains
+ * ownership.
+ *
+ * @param ctx  Sequencer context (may already be deinitialised, or NULL).
+ */
 void deepx_dxm1_deinit(deepx_dxm1_t *ctx);
 
 #ifdef __cplusplus
