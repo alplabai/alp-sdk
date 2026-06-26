@@ -63,10 +63,10 @@ typedef enum {
 
 /** Configuration shared by both audio-in and audio-out streams. */
 typedef struct {
-	uint32_t           peripheral_id;  /**< Studio-resolved PDM/I²S instance. */
-	uint32_t           sample_rate_hz; /**< 8 k / 16 k / 44.1 k / 48 k typical. */
-	uint8_t            channels;       /**< 1 = mono, 2 = stereo. */
-	alp_audio_format_t format;
+	uint32_t           peripheral_id;    /**< Studio-resolved PDM/I²S instance. */
+	uint32_t           sample_rate_hz;   /**< 8 k / 16 k / 44.1 k / 48 k typical. */
+	uint8_t            channels;         /**< 1 = mono, 2 = stereo. */
+	alp_audio_format_t format;           /**< PCM sample format; see @ref alp_audio_format_t. */
 	uint16_t           frames_per_block; /**< Block size for DMA / ring queueing. */
 } alp_audio_config_t;
 

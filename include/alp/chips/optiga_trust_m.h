@@ -60,23 +60,34 @@ typedef struct {
 	uint8_t chip_type[6]; /**< Chip type number. */
 	uint8_t fw_id[2];     /**< Firmware identifier. */
 	uint8_t fw_build[2];  /**< Firmware build number. */
-	uint8_t reserved[10];
+	uint8_t reserved[10]; /**< Reserved bytes (padding to the 20-byte object). */
 } optiga_trust_m_product_info_t;
 
+/** @brief OPTIGA Trust M driver context. */
 typedef struct {
-	bool       initialised;
-	alp_i2c_t *bus;
-	uint8_t    addr;
+	bool       initialised; /**< True once optiga_trust_m_init() succeeded. */
+	alp_i2c_t *bus;         /**< Open I²C bus (not owned). */
+	uint8_t    addr;        /**< 7-bit device address. */
 } optiga_trust_m_t;
 
 /** @brief Probe the chip + open a host application context.
  *
  *  Sends the OPEN_APPLICATION APDU and waits for the success
  *  response.  Returns ALP_ERR_NOT_READY if the chip doesn't ACK
- *  on its I2C address (mis-strap / not populated). */
+ *  on its I2C address (mis-strap / not populated).
+ *
+ *  @param ctx        Driver context to populate (output).
+ *  @param bus        Open I²C bus (not owned; must outlive @p ctx).
+ *  @param addr_7bit  7-bit address (typically OPTIGA_TRUST_M_I2C_ADDR).
+ *  @return ALP_OK on success; ALP_ERR_NOT_READY if the chip doesn't ACK;
+ *          another ALP_ERR_* status on transport failure. */
 alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
 
-/** @brief Read the chip's product-info object (GET_DATA_OBJECT 0xE0C2). */
+/** @brief Read the chip's product-info object (GET_DATA_OBJECT 0xE0C2).
+ *
+ *  @param ctx  Initialised driver context.
+ *  @param out  Receives the parsed product info.
+ *  @return ALP_OK on success; an ALP_ERR_* status on transport failure. */
 alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx,
                                               optiga_trust_m_product_info_t *out);
 
@@ -105,7 +116,9 @@ alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
                                       size_t           *resp_len,
                                       uint32_t          timeout_ms);
 
-/** @brief Close the application context + release I2C resources. */
+/** @brief Close the application context + release I2C resources.
+ *
+ *  @param ctx  Driver context, or NULL (tolerated; no-op). */
 void optiga_trust_m_deinit(optiga_trust_m_t *ctx);
 
 #ifdef __cplusplus

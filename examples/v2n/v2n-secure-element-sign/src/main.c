@@ -20,11 +20,13 @@
  * prints the failure so the operator can see whether provisioning
  * has run.
  *
- * Hash input: the SHA-256 of the ASCII string "alp" is hard-coded
- * as the message digest so a reader can recompute it independently
- * (sha256("alp") = 11c95710cad928b86c5b16fa3957cda7c7ce7e ...).
- * Real apps pass a freshly-computed digest from
- * <alp/security.h>'s alp_hash_* surface.
+ * Hash input: a fixed 32-byte test vector is hard-coded as the
+ * message digest so the example output is reproducible run to run
+ * without pulling in a hashing step.  It is an arbitrary constant --
+ * NOT the SHA-256 of any particular string -- because the secure
+ * element signs whatever 32 bytes it is handed, so the exact value
+ * does not matter for the demo.  Real apps pass a freshly-computed
+ * digest from <alp/security.h>'s alp_hash_* surface.
  */
 
 #include <stdio.h>
@@ -35,11 +37,11 @@
 #include "alp/peripheral.h"
 #include "alp/chips/optiga_trust_m.h"
 
-/* Message digest the host wants the secure element to sign.  This is
- * SHA-256("alp") = 11c95710cad928b86c5b16fa3957cda7c7ce7eed1d3d3d59
- *                   59586a8e76b6e9c0  (32 bytes).
- * Hard-coded so the example output is reproducible without pulling
- * in the SHA-256 wrapper. */
+/* Message digest the host wants the secure element to sign: a fixed,
+ * arbitrary 32-byte test vector.  The SE signs any 32-byte digest the
+ * same way, so the exact bytes are not meaningful -- they are hard-coded
+ * only so the example output is reproducible without a hashing step.
+ * Production code signs a real digest computed at runtime. */
 static const uint8_t MESSAGE_DIGEST[32] = {
 	0x11, 0xc9, 0x57, 0x10, 0xca, 0xd9, 0x28, 0xb8, 0x6c, 0x5b, 0x16, 0xfa, 0x39, 0x57, 0xcd, 0xa7,
 	0xc7, 0xce, 0x7e, 0xed, 0x1d, 0x3d, 0x3d, 0x59, 0x59, 0x58, 0x6a, 0x8e, 0x76, 0xb6, 0xe9, 0xc0,

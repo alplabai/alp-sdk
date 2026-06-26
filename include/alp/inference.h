@@ -72,7 +72,7 @@ extern "C" {
  *  Vela picks at model-compile time and the runtime dispatches via
  *  the matching driver shim emitted by `scripts/alp_project.py`. */
 typedef enum {
-	ALP_INFERENCE_BACKEND_AUTO    = 0,
+	ALP_INFERENCE_BACKEND_AUTO    = 0, /**< Route to the best available backend on this SoM. */
 	ALP_INFERENCE_BACKEND_CPU     = 1, /**< TFLM reference kernels. */
 	ALP_INFERENCE_BACKEND_ETHOS_U = 2, /**< Arm Ethos-U via Vela (U55 / U65 / U85). */
 	ALP_INFERENCE_BACKEND_DRPAI   = 3, /**< Renesas DRP-AI3. */
@@ -93,33 +93,36 @@ typedef enum {
 
 /** Tensor element type. */
 typedef enum {
-	ALP_INFERENCE_DTYPE_F32   = 0,
-	ALP_INFERENCE_DTYPE_F16   = 1,
-	ALP_INFERENCE_DTYPE_INT8  = 2,
-	ALP_INFERENCE_DTYPE_UINT8 = 3,
-	ALP_INFERENCE_DTYPE_INT16 = 4,
-	ALP_INFERENCE_DTYPE_INT32 = 5
+	ALP_INFERENCE_DTYPE_F32   = 0, /**< 32-bit IEEE-754 float. */
+	ALP_INFERENCE_DTYPE_F16   = 1, /**< 16-bit IEEE-754 half float. */
+	ALP_INFERENCE_DTYPE_INT8  = 2, /**< Signed 8-bit; uses scale/zero_point. */
+	ALP_INFERENCE_DTYPE_UINT8 = 3, /**< Unsigned 8-bit; uses scale/zero_point. */
+	ALP_INFERENCE_DTYPE_INT16 = 4, /**< Signed 16-bit; uses scale/zero_point. */
+	ALP_INFERENCE_DTYPE_INT32 = 5  /**< Signed 32-bit (often bias/accumulator). */
 } alp_inference_dtype_t;
 
 /** Tensor descriptor — what `get_input` / `get_output` return. */
 typedef struct {
 	void                 *data;       /**< Backend-owned buffer. */
 	size_t                size_bytes; /**< Total buffer size. */
-	alp_inference_dtype_t dtype;
-	uint8_t               rank;     /**< 0..4 typical. */
-	uint16_t              shape[4]; /**< Most-significant first. */
+	alp_inference_dtype_t dtype;      /**< Element type; see @ref alp_inference_dtype_t. */
+	uint8_t               rank;       /**< 0..4 typical. */
+	uint16_t              shape[4];   /**< Most-significant first. */
 	/** Quantisation params (only meaningful when dtype is integer). */
 	float   scale;
 	int32_t zero_point;
 } alp_inference_tensor_t;
 
+/** Opaque inference handle.  Allocate via @ref alp_inference_open. */
 typedef struct alp_inference alp_inference_t;
 
+/** Configuration passed to @ref alp_inference_open. */
 typedef struct {
-	const void                  *model_data; /**< Pointer to model bytes. */
-	size_t                       model_size;
-	alp_inference_model_format_t format;
-	alp_inference_backend_t      backend;
+	const void *model_data; /**< Pointer to model bytes. */
+	size_t      model_size; /**< Length of @c model_data in bytes. */
+	alp_inference_model_format_t
+	                        format;  /**< Model format; see @ref alp_inference_model_format_t. */
+	alp_inference_backend_t backend; /**< Backend selector; AUTO picks the best fit. */
 	/** Bytes of scratch arena the backend may use.  TFLM-style
      *  backends size this from the compile-time tensor arena
      *  estimate; if 0, the backend uses a built-in default. */

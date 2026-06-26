@@ -4,6 +4,14 @@
  *
  * heterogeneous-offload -- Cortex-A55 / Yocto-Linux requester.
  *
+ * Target SoM: E1M-V2N101 -- a single die carrying a Cortex-A55 cluster
+ * (running Yocto Linux) and a Cortex-M33-SM peer (running Zephyr), the
+ * same module the rpmsg-v2n example uses.  This source is the A55/Linux
+ * half of the demo; its FFT-worker counterpart is ../../m33_sm/src/main.c.
+ * The two slices are built together from one board.yaml by the project
+ * orchestrator -- the A55 here is the RPMsg *requester*, the M33-SM is
+ * the *responder*.
+ *
  * Generates a 1024-sample sine wave (placeholder for libcamera /
  * ALSA capture in production), calls alp_rpc_call(..., "fft", ...)
  * on the M33-SM peer, and identifies the dominant frequency bin
@@ -86,6 +94,13 @@ int main(void)
 {
 	printf("[a55] heterogeneous-offload requester coming up\n");
 
+	/* RPMsg endpoint addresses are mirror-symmetric across the link: this
+	 * requester's local src endpoint is the channel's DST address and its
+	 * dst is the channel's SRC -- exactly the opposite assignment from the
+	 * m33_sm worker, which is what lets the two endpoints address each
+	 * other.  The ALP_IPC_* constants come from the generated
+	 * alp/system_ipc.h, so the carve-out (sized by the orchestrator for a
+	 * 1024-float payload) and the names stay in lockstep on both sides. */
 	const alp_rpc_config_t cfg = {
 		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
 		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,

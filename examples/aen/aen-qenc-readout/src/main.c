@@ -24,12 +24,17 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 
+/* The encoder is reached through the portable DT alias `alp_qenc0`, which the
+ * board overlay points at the concrete UTIMER qdec node -- so this app stays
+ * board-agnostic and never hard-codes a utimer instance.  SAMPLES * POLL_MS is
+ * the ~2 s window you have to spin the shaft in for a PASS. */
 #define QENC_NODE DT_ALIAS(alp_qenc0)
 #define SAMPLES   20
 #define POLL_MS   100
 
 int main(void)
 {
+	/* Resolve the qdec driver instance at build time from the alias above. */
 	const struct device *qenc = DEVICE_DT_GET(QENC_NODE);
 
 	printf("[qenc] open %s (UTIMER quadrature decoder)\n", qenc->name);
@@ -38,16 +43,26 @@ int main(void)
 		return 0;
 	}
 
+	/* `first` is the baseline reading; `moved` latches once any later reading
+	 * differs from it, which is the live-decode evidence that promotes the run
+	 * from PARTIAL to PASS (see the verdict below). */
 	int     ok_reads = 0;
 	bool    moved    = false;
 	int32_t first    = 0;
 	for (int i = 0; i < SAMPLES; i++) {
+		/* Standard Zephyr sensor two-step: sample_fetch latches one hardware
+		 * snapshot, then channel_get reads that cached value -- so the two
+		 * calls always describe the same instant.  A non-zero rc means the
+		 * driver path failed; skip this slot and keep polling. */
 		int rc = sensor_sample_fetch(qenc);
 		if (rc != 0) {
 			printf("[qenc] sample_fetch[%d] -> %d\n", i, rc);
 			k_msleep(POLL_MS);
 			continue;
 		}
+		/* Read the rotation channel: SENSOR_CHAN_ROTATION carries the raw
+		 * UTIMER count in val1 here (not degrees) -- this driver reports the
+		 * decoder counter verbatim. */
 		struct sensor_value v = { 0 };
 		rc                    = sensor_channel_get(qenc, SENSOR_CHAN_ROTATION, &v);
 		if (rc != 0) {

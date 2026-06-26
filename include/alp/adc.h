@@ -83,9 +83,9 @@ typedef struct {
 	uint32_t      channel_id;      /**< Studio-resolved ADC channel index (0..7). */
 	uint8_t       resolution_bits; /**< 8 / 10 / 12 / 14 / 16 typical. 0 = use DT default. */
 	uint16_t      acquisition_us;  /**< Sample-and-hold time, microseconds. */
-	alp_adc_ref_t reference;
-	uint8_t       gain_num; /**< Gain numerator (e.g. 1 for 1/1). */
-	uint8_t       gain_den; /**< Gain denominator (e.g. 6 for 1/6). */
+	alp_adc_ref_t reference;       /**< Reference voltage source; see @ref alp_adc_ref_t. */
+	uint8_t       gain_num;        /**< Gain numerator (e.g. 1 for 1/1). */
+	uint8_t       gain_den;        /**< Gain denominator (e.g. 6 for 1/6). */
 	/** Hardware oversampling ratio (1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256).
      *  Backend rounds down to the nearest power-of-two it supports.  0 means
      *  "backend default".  Backends without HW oversampling ignore this

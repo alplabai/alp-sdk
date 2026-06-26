@@ -2,7 +2,16 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Drone autopilot implementation.
+ * Drone autopilot implementation -- the control core of the
+ * drone-autopilot example.
+ *
+ * Owns sensor + actuator bring-up and the cascaded PID controller.
+ * Everything reaches hardware through the portable <alp/*> API
+ * (alp_i2c / alp_uart / alp_pwm) and alp_chips/<part> drivers, so the
+ * same loops run on any E1M-family SoM -- the per-axis math even maps
+ * onto each SoC's math accelerator where one exists (AEN FPU SIMD, V2N
+ * TMU CORDIC; see the PID note below) -- and on native_sim for desk
+ * testing. main.c spawns each loop below as its own thread.
  *
  * Three control loops + the navigator + the failsafe:
  *

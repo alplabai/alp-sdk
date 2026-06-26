@@ -50,11 +50,11 @@ typedef enum {
 
 /** Wire-format choice.  Most modern codecs accept @ref ALP_I2S_FMT_I2S. */
 typedef enum {
-	ALP_I2S_FMT_I2S             = 0, /**< Standard I²S (Phillips). */
-	ALP_I2S_FMT_LEFT_JUSTIFIED  = 1,
-	ALP_I2S_FMT_RIGHT_JUSTIFIED = 2,
+	ALP_I2S_FMT_I2S             = 0, /**< Standard I²S (Phillips): 1-bit clock delay, MSB first. */
+	ALP_I2S_FMT_LEFT_JUSTIFIED  = 1, /**< MSB aligned to the frame edge, no 1-bit delay. */
+	ALP_I2S_FMT_RIGHT_JUSTIFIED = 2, /**< LSB aligned to the trailing frame edge. */
 	ALP_I2S_FMT_PCM_SHORT       = 3, /**< PCM with short frame sync. */
-	ALP_I2S_FMT_PCM_LONG        = 4
+	ALP_I2S_FMT_PCM_LONG        = 4  /**< PCM with long (word-length) frame sync. */
 } alp_i2s_format_t;
 
 /** Opaque I²S handle.  Allocate via @ref alp_i2s_open. */
@@ -62,13 +62,13 @@ typedef struct alp_i2s alp_i2s_t;
 
 /** Configuration passed to @ref alp_i2s_open. */
 typedef struct {
-	uint32_t         bus_id;
-	uint32_t         sample_rate_hz;
-	uint8_t          word_bits; /**< 16 / 24 / 32. */
-	uint8_t          channels;  /**< 1 = mono, 2 = stereo. */
-	alp_i2s_format_t format;
-	alp_i2s_dir_t    direction;
-	uint16_t         block_frames; /**< Frames per DMA block. */
+	uint32_t         bus_id;         /**< SoC I²S/SAI peripheral instance index. */
+	uint32_t         sample_rate_hz; /**< Frame rate in Hz, e.g. 16000 or 48000. */
+	uint8_t          word_bits;      /**< 16 / 24 / 32. */
+	uint8_t          channels;       /**< 1 = mono, 2 = stereo. */
+	alp_i2s_format_t format;         /**< Wire format; see @ref alp_i2s_format_t. */
+	alp_i2s_dir_t    direction;      /**< Data-flow direction; see @ref alp_i2s_dir_t. */
+	uint16_t         block_frames;   /**< Frames per DMA block. */
 } alp_i2s_config_t;
 
 /**

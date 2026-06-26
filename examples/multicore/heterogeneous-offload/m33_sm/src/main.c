@@ -4,6 +4,12 @@
  *
  * heterogeneous-offload -- Cortex-M33-SM / Zephyr FFT worker.
  *
+ * Target SoM: E1M-V2N101 -- a single die carrying a Cortex-A55 cluster
+ * (Yocto Linux) and a Cortex-M33-SM peer (Zephyr).  This source is the
+ * M33-SM half and acts as the RPMsg *responder*; the A55/Linux
+ * *requester* that drives it lives in ../../linux/src/main.c.  Both
+ * slices build from one board.yaml via the project orchestrator.
+ *
  * Subscribes to the `fft` method.  Each inbound call carries 1024
  * float32 PCM samples; we run the CMSIS-DSP 1024-point real-FFT,
  * compute the magnitude spectrum (513 bins), and return it to the
@@ -94,6 +100,12 @@ int main(void)
 {
 	printf("[m33_sm] heterogeneous-offload worker coming up\n");
 
+	/* Worker side of the mirror-symmetric RPMsg endpoint pairing: src is
+	 * the channel's SRC address and dst is its DST -- the natural ordering,
+	 * and the exact opposite of the linux requester (which swaps them) so
+	 * the two endpoints name each other.  The ALP_IPC_* constants come from
+	 * the generated alp/system_ipc.h, keeping channel name + carve-out
+	 * identical on both cores. */
 	const alp_rpc_config_t cfg = {
 		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
 		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,

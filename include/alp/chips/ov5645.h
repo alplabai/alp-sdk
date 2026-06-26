@@ -57,26 +57,27 @@ typedef enum {
 
 /** MIPI CSI-2 lane count. */
 typedef enum {
-	OV5645_LANES_1 = 1,
-	OV5645_LANES_2 = 2,
+	OV5645_LANES_1 = 1, /**< Single MIPI CSI-2 data lane. */
+	OV5645_LANES_2 = 2, /**< Two MIPI CSI-2 data lanes (higher bandwidth). */
 } ov5645_lanes_t;
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-	alp_i2c_t          *bus;
-	uint8_t             addr;
-	ov5645_resolution_t res;
-	ov5645_lanes_t      lanes;
-	bool                initialised;
+	alp_i2c_t          *bus;   /**< Borrowed SCCB/I²C bus; not owned, not closed by deinit. */
+	uint8_t             addr;  /**< 7-bit SCCB address bound at init. */
+	ov5645_resolution_t res;   /**< Last requested resolution preset (stashed, may be unapplied). */
+	ov5645_lanes_t      lanes; /**< Last requested MIPI lane count (stashed, may be unapplied). */
+	bool                initialised; /**< True once init verified the chip ID. */
 } ov5645_t;
 
 /**
  * @brief Bind a driver context and verify the chip ID.
  *
  * @param dev       Output: caller-allocated driver context.
- * @param bus       I²C bus handle.
+ * @param bus       I²C bus handle (borrowed, must outlive @p dev).
  * @param i2c_addr  7-bit SCCB address (typically @ref OV5645_I2C_ADDR).
- * @return `ALP_OK` on success.
+ * @return `ALP_OK` on chip-ID match; `ALP_ERR_INVAL` on NULL args;
+ *         `ALP_ERR_IO` on chip-ID mismatch; propagated I²C error on bus failure.
  */
 alp_status_t ov5645_init(ov5645_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 
@@ -85,7 +86,8 @@ alp_status_t ov5645_init(ov5645_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
  *
  * @param dev     Initialised driver context.
  * @param id_out  Output: combined 16-bit chip ID.
- * @return `ALP_OK` on success.
+ * @return `ALP_OK` on success; `ALP_ERR_NOT_READY` if init did not succeed;
+ *         `ALP_ERR_IO` on SCCB failure.
  */
 alp_status_t ov5645_read_id(ov5645_t *dev, uint16_t *id_out);
 
@@ -93,7 +95,8 @@ alp_status_t ov5645_read_id(ov5645_t *dev, uint16_t *id_out);
  * @brief Issue a software reset.
  *
  * @param dev  Initialised driver context.
- * @return `ALP_OK` on success.
+ * @return `ALP_OK` on success; `ALP_ERR_NOT_READY` on uninitialised driver;
+ *         propagated I²C error.
  */
 alp_status_t ov5645_soft_reset(ov5645_t *dev);
 

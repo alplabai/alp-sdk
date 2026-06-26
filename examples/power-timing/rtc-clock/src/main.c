@@ -10,6 +10,11 @@
  * (NTP / GNSS / cellular) and read on demand thereafter.  The
  * battery-backed RTC keeps ticking across resets and (on most
  * SoCs) deep-sleep entries.
+ *
+ * Where it runs: the portable <alp/rtc.h> surface is identical across
+ * E1M SoMs.  native_sim has no RTC device, so alp_rtc_open() returns
+ * NOT_READY (-2) and the example exits early -- the working wall-clock
+ * path is the real-silicon one.
  */
 
 #include <stdio.h>

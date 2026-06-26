@@ -30,18 +30,25 @@ extern "C" {
 
 typedef struct alp_camera alp_camera_t;
 
+/** @brief Capture-stream request passed to @ref alp_camera_open. */
 typedef struct {
-	uint32_t     camera_id;
-	uint16_t     width;
-	uint16_t     height;
-	uint8_t      fps;
-	alp_pixfmt_t format;
+	uint32_t     camera_id; /**< Selects the camera device (0-based index). */
+	uint16_t     width;     /**< Requested frame width, pixels. */
+	uint16_t     height;    /**< Requested frame height, pixels. */
+	uint8_t      fps;       /**< Requested frame rate, frames per second. */
+	alp_pixfmt_t format;    /**< Requested pixel format. */
 } alp_camera_config_t;
 
+/**
+ * @brief One captured frame handed back by @ref alp_camera_capture.
+ *
+ * The buffer is owned by the backend, not the caller; return it with
+ * @ref alp_camera_release once consumed.
+ */
 typedef struct {
-	void    *data;
-	size_t   size;
-	uint64_t timestamp_us;
+	void    *data;         /**< Frame pixel data (backend-owned; do not free). */
+	size_t   size;         /**< Length of @c data, bytes. */
+	uint64_t timestamp_us; /**< Capture timestamp, microseconds. */
 } alp_camera_frame_t;
 
 /**
@@ -154,36 +161,25 @@ const alp_capabilities_t *alp_camera_capabilities(const alp_camera_t *c);
 /* customer demand surfaces.                                          */
 /* ================================================================== */
 
-/** Coarse ISP feature toggles.  All-zeros = bypass / passthrough --
- *  the sensor's raw frame reaches the application unchanged.  Each
- *  bit enables one major ISP pipeline stage.  Field-level meanings:
- *   - auto_exposure: AE convergence loop adjusts exposure +
- *     analog/digital gain.
- *   - auto_white_balance: AWB statistics drive the per-channel
- *     gain block.
- *   - auto_focus: drives the lens VCM (cameras with a focusable
- *     lens module).
- *   - lens_shading: applies the lens vignetting-correction LUT.
- *   - dead_pixel_correction: replaces flagged stuck pixels with
- *     neighbour-averaged values.
- *   - noise_reduction: 2D / 3D temporal NR (backend-defined). */
+/**
+ * @brief Coarse ISP (Image Signal Processor) feature toggles.
+ *
+ * All-zeros = bypass / passthrough -- the sensor's raw frame reaches the
+ * application unchanged.  Each bool enables one major ISP pipeline stage;
+ * the int8 picture-tuning offsets (-128..+127) are applied after the
+ * auto-* feedback loops resolve to their setpoints.
+ */
 typedef struct {
-	bool auto_exposure;
-	bool auto_white_balance;
-	bool auto_focus;
-	bool lens_shading;
-	bool dead_pixel_correction;
-	bool noise_reduction;
-	/** Picture-tuning offsets, -128..+127.  Applied after the
-     *  auto-* feedback loops resolve to their setpoints.
-     *  Field-level meanings:
-     *   - brightness: pre-gamma luma offset.
-     *   - contrast: luma scale around mid-grey.
-     *   - saturation: chroma scale around grey (0 = monochrome). */
-	int8_t  brightness;
-	int8_t  contrast;
-	int8_t  saturation;
-	uint8_t reserved;
+	bool    auto_exposure;         /**< AE loop drives exposure + analog/digital gain. */
+	bool    auto_white_balance;    /**< AWB statistics drive the per-channel gain block. */
+	bool    auto_focus;            /**< Drive the lens VCM (focusable-lens modules only). */
+	bool    lens_shading;          /**< Apply the lens vignetting-correction LUT. */
+	bool    dead_pixel_correction; /**< Replace flagged stuck pixels with neighbour averages. */
+	bool    noise_reduction;       /**< 2D / 3D temporal noise reduction (backend-defined). */
+	int8_t  brightness;            /**< Pre-gamma luma offset, -128..+127. */
+	int8_t  contrast;              /**< Luma scale around mid-grey, -128..+127. */
+	int8_t  saturation;            /**< Chroma scale around grey, -128..+127 (0 = monochrome). */
+	uint8_t reserved;              /**< Reserved for alignment; set to 0. */
 } alp_camera_isp_config_t;
 
 /**

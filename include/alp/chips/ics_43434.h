@@ -34,16 +34,22 @@
 extern "C" {
 #endif
 
-/** Per-channel L/R selection (set by the L/R pin, recorded here for
- *  the I²S controller's per-slot decode). */
+/**
+ * @brief Per-channel L/R selection.
+ *
+ * Set physically by the microphone's L/R-SEL strap and recorded here so the
+ * I²S controller decodes the correct slot.  The mic drives data on the WS
+ * half that matches this selection.
+ */
 typedef enum {
-	ICS_43434_CH_LEFT  = 0,
-	ICS_43434_CH_RIGHT = 1,
+	ICS_43434_CH_LEFT  = 0, /**< Mic strapped LEFT (data on WS low phase). */
+	ICS_43434_CH_RIGHT = 1, /**< Mic strapped RIGHT (data on WS high phase). */
 } ics_43434_channel_t;
 
+/** @brief Driver context.  Caller-allocated; treat fields as opaque. */
 typedef struct {
-	ics_43434_channel_t channel;
-	bool                initialised;
+	ics_43434_channel_t channel;     /**< Channel recorded at init (matches the L/R strap). */
+	bool                initialised; /**< True once ics_43434_init() has run. */
 } ics_43434_t;
 
 /**
@@ -55,10 +61,23 @@ typedef struct {
  */
 alp_status_t ics_43434_init(ics_43434_t *dev, ics_43434_channel_t channel);
 
-/** @brief Return the configured channel (introspection helper). */
+/**
+ * @brief Return the configured channel (introspection helper).
+ *
+ * @param dev          Initialised context.
+ * @param channel_out  Receives the channel recorded at init.
+ * @return `ALP_OK` on success; `ALP_ERR_INVAL` on a NULL argument.
+ */
 alp_status_t ics_43434_get_channel(ics_43434_t *dev, ics_43434_channel_t *channel_out);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release driver context.
+ *
+ * Clears the context's initialised flag.  The microphone has no registers to
+ * tear down; sample capture is owned by the I²S peripheral, not this driver.
+ *
+ * @param dev  Context to release (may be NULL).
+ */
 void ics_43434_deinit(ics_43434_t *dev);
 
 #ifdef __cplusplus

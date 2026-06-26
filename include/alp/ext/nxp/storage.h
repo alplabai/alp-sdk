@@ -51,10 +51,10 @@ extern "C" {
  *  semicolon-terminated statement between the macro above and the
  *  first function declaration below. */
 typedef enum {
-	ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0,
-	ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1,
-	ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2,
-	ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3,
+	ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0, /**< OTFAD address-window slot 0. */
+	ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1, /**< OTFAD address-window slot 1. */
+	ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2, /**< OTFAD address-window slot 2. */
+	ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3, /**< OTFAD address-window slot 3. */
 } alp_nxp_storage_otfad_slot_t;
 
 /**

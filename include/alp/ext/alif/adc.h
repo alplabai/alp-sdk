@@ -36,12 +36,12 @@ extern "C" {
 
 /** Trigger source for the Alif ADC hardware sequencer. */
 typedef enum {
-	ALP_ALIF_ADC_TRIGGER_SOFTWARE = 0,
-	ALP_ALIF_ADC_TRIGGER_TIMER0,
-	ALP_ALIF_ADC_TRIGGER_TIMER1,
-	ALP_ALIF_ADC_TRIGGER_TIMER2,
-	ALP_ALIF_ADC_TRIGGER_TIMER3,
-	ALP_ALIF_ADC_TRIGGER_EXT_PIN,
+	ALP_ALIF_ADC_TRIGGER_SOFTWARE = 0, /**< Convert on the software-trigger write (default). */
+	ALP_ALIF_ADC_TRIGGER_TIMER0,       /**< Convert on Alif timer-0 compare event. */
+	ALP_ALIF_ADC_TRIGGER_TIMER1,       /**< Convert on Alif timer-1 compare event. */
+	ALP_ALIF_ADC_TRIGGER_TIMER2,       /**< Convert on Alif timer-2 compare event. */
+	ALP_ALIF_ADC_TRIGGER_TIMER3,       /**< Convert on Alif timer-3 compare event. */
+	ALP_ALIF_ADC_TRIGGER_EXT_PIN,      /**< Convert on an external trigger-pin edge. */
 } alp_alif_adc_trigger_t;
 
 /* Note: HW oversampling is NOT a vendor extension -- it's reachable

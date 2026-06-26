@@ -37,17 +37,18 @@ extern "C" {
 #endif
 
 /** RA8875 SPI command bytes (data direction + register/data flag). */
-#define RA8875_CMD_WRITE  0x80u
-#define RA8875_CMD_READ   0xC0u
-#define RA8875_DATA_WRITE 0x00u
-#define RA8875_DATA_READ  0x40u
+#define RA8875_CMD_WRITE  0x80u /**< Register-address write prefix. */
+#define RA8875_CMD_READ   0xC0u /**< Register-address read prefix. */
+#define RA8875_DATA_WRITE 0x00u /**< Data write prefix. */
+#define RA8875_DATA_READ  0x40u /**< Data read prefix. */
 
 #define RA8875_REG_PWRR 0x01u /**< Power & Display Control Register. */
 
+/** @brief Driver context for one RA8875 on a SPI bus. */
 typedef struct {
-	alp_spi_t  *bus;
-	alp_gpio_t *reset;
-	bool        initialised;
+	alp_spi_t  *bus;         /**< Caller-opened SPI bus handle (borrowed, not owned). */
+	alp_gpio_t *reset;       /**< Optional hardware reset line; may be NULL. */
+	bool        initialised; /**< True once ra8875_init() has succeeded. */
 } ra8875_t;
 
 /**
@@ -57,19 +58,51 @@ typedef struct {
  * "display on".  Panel-specific PLL + LCD-clock + horizontal/
  * vertical-timing registers must be configured by a follow-up call
  * once the panel datasheet is mapped — left to `[stub-impl]` for now.
+ *
+ * @param dev   Caller-allocated context to populate.
+ * @param spi   Open SPI bus handle (borrowed; must outlive @p dev).
+ * @param reset Open GPIO for hardware reset, or NULL to skip the toggle.
+ * @return ALP_OK on success; ALP_ERR_INVAL on a NULL required argument;
+ *         a SPI error status on a failed transfer.
  */
 alp_status_t ra8875_init(ra8875_t *dev, alp_spi_t *spi, alp_gpio_t *reset);
 
-/** @brief Read register at @p reg over SPI. */
+/**
+ * @brief Read register at @p reg over SPI.
+ *
+ * @param dev Initialised driver context.
+ * @param reg Register address to read.
+ * @param val Out-param; receives the register value.
+ * @return ALP_OK on success; ALP_ERR_INVAL on NULL argument; a SPI
+ *         error status on a failed transfer.
+ */
 alp_status_t ra8875_read_reg(ra8875_t *dev, uint8_t reg, uint8_t *val);
 
-/** @brief Write @p val to register @p reg over SPI. */
+/**
+ * @brief Write @p val to register @p reg over SPI.
+ *
+ * @param dev Initialised driver context.
+ * @param reg Register address to write.
+ * @param val Value to write.
+ * @return ALP_OK on success; ALP_ERR_INVAL on NULL argument; a SPI
+ *         error status on a failed transfer.
+ */
 alp_status_t ra8875_write_reg(ra8875_t *dev, uint8_t reg, uint8_t val);
 
-/** @brief Issue software reset (PWRR bit 0). */
+/**
+ * @brief Issue software reset (PWRR bit 0).
+ *
+ * @param dev Initialised driver context.
+ * @return ALP_OK on success; ALP_ERR_INVAL on NULL argument; a SPI
+ *         error status on a failed transfer.
+ */
 alp_status_t ra8875_soft_reset(ra8875_t *dev);
 
-/** @brief Release the driver context.  NULL tolerated. */
+/**
+ * @brief Release the driver context.
+ *
+ * @param dev Driver context; NULL is tolerated as a no-op.
+ */
 void ra8875_deinit(ra8875_t *dev);
 
 #ifdef __cplusplus

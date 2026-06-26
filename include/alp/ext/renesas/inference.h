@@ -60,12 +60,12 @@ typedef enum {
 
 /** DRP-AI runtime status flags. */
 typedef enum {
-	ALP_RENESAS_INFERENCE_STATUS_IDLE    = 0u,
-	ALP_RENESAS_INFERENCE_STATUS_ARMED   = 1u << 0,
-	ALP_RENESAS_INFERENCE_STATUS_RUNNING = 1u << 1,
-	ALP_RENESAS_INFERENCE_STATUS_DONE    = 1u << 2,
-	ALP_RENESAS_INFERENCE_STATUS_TIMEOUT = 1u << 3,
-	ALP_RENESAS_INFERENCE_STATUS_BUS_ERR = 1u << 4,
+	ALP_RENESAS_INFERENCE_STATUS_IDLE    = 0u,      /**< No inference armed or running. */
+	ALP_RENESAS_INFERENCE_STATUS_ARMED   = 1u << 0, /**< Descriptors loaded, awaiting start. */
+	ALP_RENESAS_INFERENCE_STATUS_RUNNING = 1u << 1, /**< NPU actively executing the model. */
+	ALP_RENESAS_INFERENCE_STATUS_DONE    = 1u << 2, /**< Last invoke completed successfully. */
+	ALP_RENESAS_INFERENCE_STATUS_TIMEOUT = 1u << 3, /**< Hardware watchdog fired before done. */
+	ALP_RENESAS_INFERENCE_STATUS_BUS_ERR = 1u << 4, /**< Bus/transfer error during execution. */
 } alp_renesas_inference_status_t;
 
 /**

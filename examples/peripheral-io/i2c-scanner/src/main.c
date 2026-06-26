@@ -4,6 +4,13 @@
  *
  * i2c-scanner — open the EVK sensor bus and probe every 7-bit
  * address.  The canonical "any device on this bus?" pattern.
+ *
+ * Runs on both EVKs: BOARD_I2C_SENSORS (from <alp/board.h>) resolves
+ * to E1M_I2C0 on E1M EVK and E1M_X_I2C0 on E1M-X EVK, so the same
+ * source scans whichever sensor bus the SoM exposes.  If the bus is
+ * unavailable alp_i2c_open returns NULL; the example reports
+ * alp_last_error and exits cleanly so a console harness can assert
+ * it ran.
  */
 
 #include <stdio.h>

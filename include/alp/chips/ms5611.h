@@ -33,32 +33,52 @@ extern "C" {
 #endif
 
 #define MS5611_I2C_ADDR_PRIMARY   0x77u /**< CSB low / VDD high (default). */
-#define MS5611_I2C_ADDR_SECONDARY 0x76u
+#define MS5611_I2C_ADDR_SECONDARY 0x76u /**< CSB high. */
 
-#define MS5611_CMD_RESET     0x1Eu
+#define MS5611_CMD_RESET     0x1Eu /**< Soft-reset; reloads the calibration PROM. */
 #define MS5611_CMD_PROM_BASE 0xA0u /**< OR with 2*i for coefficient i in [0..7]. */
 
+/** @brief MS5611 barometer driver context. */
 typedef struct {
-	alp_i2c_t *bus;
-	uint8_t    addr;
-	uint16_t   prom[8]; /**< Factory calibration (read at init). */
-	bool       initialised;
+	alp_i2c_t *bus;         /**< Open I²C bus (not owned). */
+	uint8_t    addr;        /**< 7-bit device address. */
+	uint16_t   prom[8];     /**< Factory calibration (read at init). */
+	bool       initialised; /**< True once ms5611_init() succeeded. */
 } ms5611_t;
 
 /**
  * @brief Bind context, soft-reset, read PROM coefficients.
  *
- * @return `ALP_OK` on success.
+ * @param dev       Driver context to populate (output).
+ * @param bus       Open I²C bus (not owned; must outlive @p dev).
+ * @param i2c_addr  7-bit address (MS5611_I2C_ADDR_PRIMARY or _SECONDARY).
+ * @return `ALP_OK` on success; an ALP_ERR_* status on I²C failure.
  */
 alp_status_t ms5611_init(ms5611_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 
-/** @brief Reissue the CMD_RESET soft reset (~2.8 ms quiet time after). */
+/**
+ * @brief Reissue the CMD_RESET soft reset (~2.8 ms quiet time after).
+ *
+ * @param dev  Initialised driver context.
+ * @return ALP_OK on success; an ALP_ERR_* status on I²C failure.
+ */
 alp_status_t ms5611_soft_reset(ms5611_t *dev);
 
-/** @brief Return cached PROM coefficient `idx` in [0..7]. */
+/**
+ * @brief Return cached PROM coefficient `idx` in [0..7].
+ *
+ * @param dev       Initialised driver context.
+ * @param idx       Coefficient index in [0..7].
+ * @param coef_out  Receives the cached 16-bit coefficient.
+ * @return ALP_OK on success; an ALP_ERR_* status if @p idx is out of range.
+ */
 alp_status_t ms5611_get_coefficient(ms5611_t *dev, uint8_t idx, uint16_t *coef_out);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release driver context.
+ *
+ * @param dev  Driver context, or NULL (tolerated; no-op).
+ */
 void ms5611_deinit(ms5611_t *dev);
 
 #ifdef __cplusplus

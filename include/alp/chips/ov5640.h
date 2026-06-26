@@ -80,19 +80,19 @@ typedef enum {
 
 /** Pixel-format selection. */
 typedef enum {
-	OV5640_FMT_RGB565 = 0,
-	OV5640_FMT_YUV422 = 1,
-	OV5640_FMT_JPEG   = 2,
-	OV5640_FMT_RAW8   = 3
+	OV5640_FMT_RGB565 = 0, /**< 16-bit RGB565. */
+	OV5640_FMT_YUV422 = 1, /**< 16-bit YUV422 (YUYV order). */
+	OV5640_FMT_JPEG   = 2, /**< On-chip JPEG-compressed stream. */
+	OV5640_FMT_RAW8   = 3  /**< 8-bit raw Bayer (no ISP processing). */
 } ov5640_format_t;
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-	alp_i2c_t          *bus;
-	uint8_t             addr; /**< 7-bit SCCB address. */
-	ov5640_resolution_t res;
-	ov5640_format_t     fmt;
-	bool                initialised;
+	alp_i2c_t          *bus;  /**< Borrowed SCCB/I²C bus; not owned, not closed by deinit. */
+	uint8_t             addr; /**< 7-bit SCCB address bound at init. */
+	ov5640_resolution_t res;  /**< Last requested resolution (stashed; apply lands in v0.3). */
+	ov5640_format_t     fmt;  /**< Last requested pixel format (stashed; apply lands in v0.3). */
+	bool                initialised; /**< True once init verified the chip ID. */
 } ov5640_t;
 
 /**
@@ -102,14 +102,31 @@ typedef struct {
  * @ref OV5640_CHIP_ID.  Does not change resolution or format — call
  * @ref ov5640_set_resolution and @ref ov5640_set_format next.
  *
- * @return ALP_OK on success; ALP_ERR_IO on chip-ID mismatch.
+ * @param dev       Output: caller-allocated driver context.
+ * @param bus       I²C bus handle from `alp_i2c_open` (borrowed, must outlive @p dev).
+ * @param i2c_addr  7-bit SCCB address (typically @ref OV5640_I2C_ADDR).
+ * @return `ALP_OK` on success; `ALP_ERR_INVAL` on NULL args;
+ *         `ALP_ERR_IO` on chip-ID mismatch; propagated I²C error on bus failure.
  */
 alp_status_t ov5640_init(ov5640_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 
-/** Read CHIP_ID for liveness checks. */
+/**
+ * @brief Read the combined CHIP_ID word.  Useful as a liveness probe.
+ *
+ * @param dev     Initialised driver context.
+ * @param id_out  Output: combined 16-bit chip ID.
+ * @return `ALP_OK` on success; `ALP_ERR_NOT_READY` if init did not succeed;
+ *         `ALP_ERR_IO` on SCCB failure.
+ */
 alp_status_t ov5640_read_id(ov5640_t *dev, uint16_t *id_out);
 
-/** Issue a software reset (writes the system-reset bit at 0x3008). */
+/**
+ * @brief Issue a software reset (writes the system-reset bit at 0x3008).
+ *
+ * @param dev  Initialised driver context.
+ * @return `ALP_OK` on success; `ALP_ERR_NOT_READY` on uninitialised driver;
+ *         propagated I²C error.
+ */
 alp_status_t ov5640_soft_reset(ov5640_t *dev);
 
 /**
@@ -121,6 +138,11 @@ alp_status_t ov5640_soft_reset(ov5640_t *dev);
  * `ALP_ERR_NOSUPPORT` after stashing the request -- callers can
  * still discover their pinned preset via `dev->res`.  Out-of-range
  * enum values return `ALP_ERR_INVAL` without storing.
+ *
+ * @param dev  Initialised driver context.
+ * @param res  Resolution enum value.
+ * @return `ALP_ERR_INVAL` on out-of-range enum (nothing stored);
+ *         `ALP_ERR_NOSUPPORT` after stashing the request (apply path lands in v0.3).
  */
 alp_status_t ov5640_set_resolution(ov5640_t *dev, ov5640_resolution_t res);
 
@@ -131,13 +153,32 @@ alp_status_t ov5640_set_resolution(ov5640_t *dev, ov5640_resolution_t res);
  * remembered in `dev->fmt` but the driver returns
  * `ALP_ERR_NOSUPPORT` until v0.3's `FORMAT_CTRL` / `FORMAT_CTRL_MUX`
  * write table lands.
+ *
+ * @param dev  Initialised driver context.
+ * @param fmt  Pixel-format enum value.
+ * @return `ALP_ERR_INVAL` on out-of-range enum (nothing stored);
+ *         `ALP_ERR_NOSUPPORT` after stashing the request (apply path lands in v0.3).
  */
 alp_status_t ov5640_set_format(ov5640_t *dev, ov5640_format_t fmt);
 
-/** Enable / disable test-pattern output (colour-bar) for bring-up. */
+/**
+ * @brief Enable / disable the colour-bar test pattern for bring-up.
+ *
+ * @param dev      Initialised driver context.
+ * @param enabled  `true` to enable the static colour-bar pattern, `false` to disable.
+ * @return `ALP_OK` on success; `ALP_ERR_NOT_READY` on uninitialised driver;
+ *         propagated I²C error.
+ */
 alp_status_t ov5640_set_test_pattern(ov5640_t *dev, bool enabled);
 
-/** Release the driver context.  Does not power down the chip. */
+/**
+ * @brief Release the driver context.  Idempotent.
+ *
+ * Does NOT power down the chip — the host owns power-rail sequencing
+ * (PWDN / RESETB pads) and the borrowed I²C bus is not closed.
+ *
+ * @param dev  Driver context.  NULL is tolerated.
+ */
 void ov5640_deinit(ov5640_t *dev);
 
 #ifdef __cplusplus

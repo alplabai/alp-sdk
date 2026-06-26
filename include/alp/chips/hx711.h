@@ -44,27 +44,54 @@ typedef enum {
 	HX711_GAIN_64  = 27, /**< Channel A, gain 64  (27 pulses total) */
 } hx711_gain_t;
 
+/** Driver context.  Caller-allocated; GPIO handles are borrowed (the
+ *  caller owns and must keep them alive for the device's lifetime). */
 typedef struct {
-	alp_gpio_t  *sck;
-	alp_gpio_t  *dout;
-	hx711_gain_t gain;
-	bool         initialised;
+	alp_gpio_t  *sck;         /**< PD_SCK clock output (host-driven). */
+	alp_gpio_t  *dout;        /**< DOUT data input (also data-ready, active low). */
+	hx711_gain_t gain;        /**< Channel + gain selection (trailing-pulse count). */
+	bool         initialised; /**< Set once @ref hx711_init succeeds. */
 } hx711_t;
 
-/** @brief Bind context to caller-opened SCK + DOUT GPIOs. */
+/**
+ * @brief Bind context to caller-opened SCK + DOUT GPIOs.
+ *
+ * @param dev   Caller-allocated context to populate.
+ * @param sck   PD_SCK clock GPIO (borrowed).
+ * @param dout  DOUT data GPIO (borrowed).
+ * @param gain  Channel + gain (@ref hx711_gain_t).
+ * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on NULL args.
+ */
 alp_status_t hx711_init(hx711_t *dev, alp_gpio_t *sck, alp_gpio_t *dout, hx711_gain_t gain);
 
-/** @brief Block until DOUT goes low (chip ready) or timeout fires. */
+/**
+ * @brief Block until DOUT goes low (chip ready) or timeout fires.
+ *
+ * @param dev         Initialised context.
+ * @param timeout_ms  Maximum wait in milliseconds.
+ * @return @ref ALP_OK once DOUT is low, @ref ALP_ERR_TIMEOUT on expiry,
+ *         or @ref ALP_ERR_INVAL on NULL/uninitialised dev.
+ */
 alp_status_t hx711_wait_ready(hx711_t *dev, uint32_t timeout_ms);
 
 /**
  * @brief Read one signed 24-bit sample (sign-extended to int32).
  *
- * Caller is responsible for calling @ref hx711_wait_ready first.
+ * Caller is responsible for calling @ref hx711_wait_ready first.  The
+ * trailing clock pulses also latch the channel/gain for the NEXT
+ * conversion per @ref hx711_gain_t.
+ *
+ * @param dev        Initialised context.
+ * @param value_out  Out: signed 24-bit sample sign-extended to int32.
+ * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on NULL args.
  */
 alp_status_t hx711_read_raw(hx711_t *dev, int32_t *value_out);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release driver context.  Does NOT close the GPIO handles.
+ *
+ * @param dev  Context to tear down (NULL is tolerated).
+ */
 void hx711_deinit(hx711_t *dev);
 
 #ifdef __cplusplus

@@ -35,16 +35,16 @@
 extern "C" {
 #endif
 
-#define ST7789_MAX_WIDTH  240
-#define ST7789_MAX_HEIGHT 320
+#define ST7789_MAX_WIDTH  240 /**< Max addressable panel width in pixels. */
+#define ST7789_MAX_HEIGHT 320 /**< Max addressable panel height in pixels. */
 
 typedef struct {
-	alp_spi_t  *bus;
-	alp_gpio_t *dc;    /**< D/C# command-vs-data line. */
-	alp_gpio_t *reset; /**< Optional hardware reset; NULL = software-only. */
-	uint16_t    width;
-	uint16_t    height;
-	bool        initialised;
+	alp_spi_t  *bus;         /**< SPI bus the panel hangs off (borrowed, not owned). */
+	alp_gpio_t *dc;          /**< D/C# command-vs-data line. */
+	alp_gpio_t *reset;       /**< Optional hardware reset; NULL = software-only. */
+	uint16_t    width;       /**< Active panel width in pixels. */
+	uint16_t    height;      /**< Active panel height in pixels. */
+	bool        initialised; /**< True once st7789_init() has succeeded. */
 } st7789_t;
 
 /**
@@ -90,7 +90,10 @@ alp_status_t st7789_set_window(st7789_t *dev, uint16_t x0, uint16_t y0, uint16_t
  */
 alp_status_t st7789_write_pixels(st7789_t *dev, const uint8_t *pixels, size_t n_bytes);
 
-/** @brief Release the driver context.  Does not power down the panel. */
+/**
+ * @brief Release the driver context.  Does not power down the panel.
+ * @param dev Driver context to release.
+ */
 void st7789_deinit(st7789_t *dev);
 
 #ifdef __cplusplus

@@ -35,13 +35,20 @@
 extern "C" {
 #endif
 
+/**
+ * @brief DRV8833 driver context.
+ *
+ * Holds borrowed references to the caller-opened handles. The driver does not
+ * take ownership: the caller keeps each handle open for the context lifetime
+ * and closes them after drv8833_deinit().
+ */
 typedef struct {
-	alp_pwm_t  *in1;    /**< Channel-A input 1. */
-	alp_pwm_t  *in2;    /**< Channel-A input 2. */
-	alp_pwm_t  *in3;    /**< Channel-B input 1. */
-	alp_pwm_t  *in4;    /**< Channel-B input 2. */
-	alp_gpio_t *nsleep; /**< Active-low enable; may be NULL when tied high. */
-	bool        initialised;
+	alp_pwm_t  *in1;         /**< Channel-A input 1. */
+	alp_pwm_t  *in2;         /**< Channel-A input 2. */
+	alp_pwm_t  *in3;         /**< Channel-B input 1. */
+	alp_pwm_t  *in4;         /**< Channel-B input 2. */
+	alp_gpio_t *nsleep;      /**< Active-low enable; may be NULL when tied high. */
+	bool        initialised; /**< True once drv8833_init() has bound the handles. */
 } drv8833_t;
 
 /**
@@ -74,13 +81,34 @@ alp_status_t drv8833_init(drv8833_t  *dev,
  */
 alp_status_t drv8833_set_a(drv8833_t *dev, int32_t pulse_ns);
 
-/** @brief Set channel-B pulse-width.  See @ref drv8833_set_a. */
+/**
+ * @brief Set channel-B pulse-width. Sign and magnitude as in @ref drv8833_set_a.
+ *
+ * @param dev       Initialised context.
+ * @param pulse_ns  Signed active-level pulse width in ns; see @ref drv8833_set_a.
+ * @return `ALP_OK` on success.
+ */
 alp_status_t drv8833_set_b(drv8833_t *dev, int32_t pulse_ns);
 
-/** @brief Toggle the device sleep state (active-low). */
+/**
+ * @brief Enter or leave low-power sleep via the nSLEEP pin.
+ *
+ * @param dev       Initialised context.
+ * @param sleeping  true asserts sleep (drives nSLEEP low, outputs disabled);
+ *                  false wakes the device. Only meaningful if an nSLEEP GPIO
+ *                  was bound at init.
+ * @return `ALP_OK` on success.
+ */
 alp_status_t drv8833_set_sleep(drv8833_t *dev, bool sleeping);
 
-/** @brief Release driver context. */
+/**
+ * @brief Release the driver context.
+ *
+ * Clears the bound handles but does not close them — the caller owns the
+ * underlying PWM/GPIO handles.
+ *
+ * @param dev  Context to release.
+ */
 void drv8833_deinit(drv8833_t *dev);
 
 #ifdef __cplusplus

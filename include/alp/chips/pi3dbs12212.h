@@ -71,38 +71,64 @@
 extern "C" {
 #endif
 
+/** @brief Logical mux state the firmware can request via pi3dbs12212_set_state(). */
 typedef enum {
-	PI3DBS_STATE_OFF    = 0, /**< Mux disabled (PD = 0). */
-	PI3DBS_STATE_PATH_0 = 1, /**< Mux enabled, SEL = 0. */
-	PI3DBS_STATE_PATH_1 = 2, /**< Mux enabled, SEL = 1. */
+	PI3DBS_STATE_OFF    = 0, /**< Mux disabled (PD = 0); all outputs high-Z. Boot default. */
+	PI3DBS_STATE_PATH_0 = 1, /**< Mux enabled, SEL = 0; routes input pair 0 -> output. */
+	PI3DBS_STATE_PATH_1 = 2, /**< Mux enabled, SEL = 1; routes input pair 1 -> output. */
 } pi3dbs12212_state_t;
 
+/** @brief Driver context for one PI3DBS12212A (or a PD/SEL-ganged pair). */
 typedef struct {
-	bool                initialised;
-	alp_gpio_t         *pd;  /**< PD pin (high = mux enabled). */
-	alp_gpio_t         *sel; /**< SEL pin (path select). */
-	pi3dbs12212_state_t state;
+	bool                initialised; /**< True once pi3dbs12212_init() has bound the pins. */
+	alp_gpio_t         *pd;          /**< PD pin (high = mux enabled). Owned after init. */
+	alp_gpio_t         *sel;         /**< SEL pin (path select). Owned after init. */
+	pi3dbs12212_state_t state;       /**< Last state driven (chip has no readback). */
 } pi3dbs12212_t;
 
-/** @brief Initialise the driver and put the mux in OFF.
+/**
+ * @brief Initialise the driver and put the mux in OFF.
  *
- *  Takes ownership of the two pre-opened GPIO handles.  Both must
- *  already have been configured as outputs by the caller; the
- *  driver only drives them.
+ * Takes ownership of the two pre-opened GPIO handles.  Both must
+ * already have been configured as outputs by the caller; the
+ * driver only drives them.
  *
- *  @return ALP_OK / ALP_ERR_INVAL on NULL args. */
+ * @param ctx Caller-allocated context to populate.
+ * @param pd  Pre-opened output GPIO for the PD pin (high = enabled).
+ * @param sel Pre-opened output GPIO for the SEL pin (path select).
+ * @return ALP_OK on success; ALP_ERR_INVAL on any NULL argument.
+ */
 alp_status_t pi3dbs12212_init(pi3dbs12212_t *ctx, alp_gpio_t *pd, alp_gpio_t *sel);
 
-/** @brief Transition to a new logical state.  Drives PD + SEL in
- *         the correct order (off-then-on for path changes to avoid
- *         glitching the link). */
+/**
+ * @brief Transition to a new logical state.
+ *
+ * Drives PD + SEL in the correct order (off-then-on for path changes
+ * to avoid glitching the link).
+ *
+ * @param ctx   Initialised driver context.
+ * @param state Target state (see ::pi3dbs12212_state_t).
+ * @return ALP_OK on success; ALP_ERR_INVAL on NULL ctx or invalid state;
+ *         an error status from the underlying GPIO writes otherwise.
+ */
 alp_status_t pi3dbs12212_set_state(pi3dbs12212_t *ctx, pi3dbs12212_state_t state);
 
-/** @brief Read back the current state (driver-side -- the chip
- *         itself has no readback). */
+/**
+ * @brief Read back the current state (driver-side cache).
+ *
+ * The chip itself has no readback; this returns the last state driven.
+ *
+ * @param ctx   Initialised driver context.
+ * @param state Out-param; receives the cached state.
+ * @return ALP_OK on success; ALP_ERR_INVAL on NULL argument.
+ */
 alp_status_t pi3dbs12212_get_state(pi3dbs12212_t *ctx, pi3dbs12212_state_t *state);
 
-/** @brief Release the driver context.  Drives the mux to OFF first. */
+/**
+ * @brief Release the driver context.  Drives the mux to OFF first.
+ *
+ * @param ctx Driver context; NULL is tolerated as a no-op.
+ */
 void pi3dbs12212_deinit(pi3dbs12212_t *ctx);
 
 #ifdef __cplusplus

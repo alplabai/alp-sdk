@@ -70,11 +70,11 @@ typedef enum {
 } tas2563_mode_t;
 
 typedef struct {
-	bool        initialised;
-	alp_i2c_t  *bus;
-	uint8_t     addr;
-	alp_gpio_t *sd_n; /**< AMP.ENABLE pin (active-high; drive
-                               low to assert SD_N hardware shutdown). */
+	bool        initialised; /**< True once tas2563_init() has succeeded. */
+	alp_i2c_t  *bus;         /**< I2C control bus the amp sits on (borrowed, not owned). */
+	uint8_t     addr;        /**< 7-bit I2C address (one of TAS2563_I2C_ADDR_*). */
+	alp_gpio_t *sd_n;        /**< AMP.ENABLE pin (active-high; drive
+                              low to assert SD_N hardware shutdown).  NULL if unused. */
 } tas2563_t;
 
 /**
@@ -92,10 +92,20 @@ typedef struct {
  */
 alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n);
 
-/** @brief Read the chip's revision register (a no-op-ish sanity check). */
+/**
+ * @brief Read the chip's revision register (a no-op-ish sanity check).
+ * @param[in]  ctx     Initialised driver context.
+ * @param[out] rev_out Receives the REV_ID register value.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t tas2563_read_revision(tas2563_t *ctx, uint8_t *rev_out);
 
-/** @brief Switch operating mode via MODE_CTRL register write. */
+/**
+ * @brief Switch operating mode via MODE_CTRL register write.
+ * @param ctx  Initialised driver context.
+ * @param mode One of @ref tas2563_mode_t.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t tas2563_set_mode(tas2563_t *ctx, tas2563_mode_t mode);
 
 /**
@@ -104,10 +114,17 @@ alp_status_t tas2563_set_mode(tas2563_t *ctx, tas2563_mode_t mode);
  * Bypasses MODE_CTRL -- when SD_N is low, the chip is in HW
  * shutdown regardless of MODE_CTRL.  Useful for fast power-down
  * during a fault or for staging the boot sequence.
+ *
+ * @param ctx    Initialised driver context (must have been given a non-NULL sd_n).
+ * @param enable true drives SD_N high (resume), false drives it low (HW shutdown).
+ * @return `ALP_OK` on success, or an `alp_status_t` error (e.g. no SD_N GPIO bound).
  */
 alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
 
-/** @brief Release the driver context.  Drops SD_N before returning. */
+/**
+ * @brief Release the driver context.  Drops SD_N before returning.
+ * @param ctx Driver context to release.
+ */
 void tas2563_deinit(tas2563_t *ctx);
 
 #ifdef __cplusplus

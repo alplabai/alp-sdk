@@ -51,7 +51,7 @@ typedef enum {
 
 /** Result of walking the chain in @ref alp_update_log_verify. */
 typedef enum {
-	ALP_UPDATE_LOG_VERIFY_OK           = 0,
+	ALP_UPDATE_LOG_VERIFY_OK           = 0, /**< Chain intact; no tamper detected. */
 	ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN = 1, /**< An entry was mutated or reordered. */
 	ALP_UPDATE_LOG_VERIFY_TRUNCATED    = 2, /**< Tail entries are missing. */
 	ALP_UPDATE_LOG_VERIFY_ROLLED_BACK  = 3, /**< Store regressed vs the monotonic anchor. */
@@ -66,7 +66,7 @@ typedef struct {
 	uint64_t            seq; /**< Authoritative order; engine-assigned. */
 	char                fw_version[ALP_UPDATE_LOG_FWVER_MAX + 1]; /**< NUL-terminated. */
 	uint8_t             image_hash[ALP_UPDATE_LOG_HASH_LEN];      /**< SHA-256 of the image. */
-	alp_update_status_t status;
+	alp_update_status_t status;                                   /**< Recorded update outcome. */
 	uint64_t            timestamp; /**< Best-effort epoch; 0 = unset. */
 } alp_update_log_entry_t;
 
@@ -81,6 +81,8 @@ alp_update_log_t *alp_update_log_open(void);
 
 /**
  * @brief Append one entry. @c seq is assigned by the engine.
+ * @param log    Handle from @ref alp_update_log_open.
+ * @param entry  Entry to record; all fields except @c seq are caller-supplied.
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_entry_t *entry);
@@ -97,17 +99,35 @@ alp_status_t alp_update_log_verify(alp_update_log_t         *log,
                                    alp_update_log_verdict_t *verdict_out,
                                    uint64_t                 *bad_seq_out);
 
-/** @brief Number of entries. */
+/**
+ * @brief Number of entries currently in the log.
+ * @param      log        Handle from @ref alp_update_log_open.
+ * @param[out] count_out  Receives the entry count. Required.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO.
+ */
 alp_status_t alp_update_log_count(alp_update_log_t *log, uint64_t *count_out);
 
-/** @brief Fetch the entry at @p seq. ALP_ERR_NOT_FOUND if absent. */
+/**
+ * @brief Fetch the entry at @p seq.
+ * @param      log        Handle from @ref alp_update_log_open.
+ * @param[in]  seq        Engine-assigned sequence number to look up.
+ * @param[out] entry_out  Receives the populated entry. Required.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_FOUND (no such seq) / ALP_ERR_IO.
+ */
 alp_status_t
 alp_update_log_get(alp_update_log_t *log, uint64_t seq, alp_update_log_entry_t *entry_out);
 
-/** @brief Assurance level on this SoM. */
+/**
+ * @brief Assurance level (SW tamper-evident vs HW-enforced) on this SoM.
+ * @param log  Handle from @ref alp_update_log_open.
+ * @return The backend's @ref alp_update_log_assurance_t tier.
+ */
 alp_update_log_assurance_t alp_update_log_assurance(const alp_update_log_t *log);
 
-/** @brief Release the handle. */
+/**
+ * @brief Release the handle. NULL is a no-op.
+ * @param log  Handle from @ref alp_update_log_open, or NULL.
+ */
 void alp_update_log_close(alp_update_log_t *log);
 
 #ifdef __cplusplus

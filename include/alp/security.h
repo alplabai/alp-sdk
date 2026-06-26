@@ -119,9 +119,9 @@ const alp_capabilities_t *alp_hash_capabilities(const alp_hash_t *h);
 
 /** Supported authenticated-encryption algorithms. */
 typedef enum {
-	ALP_AEAD_AES_128_GCM       = 0,
-	ALP_AEAD_AES_256_GCM       = 1,
-	ALP_AEAD_CHACHA20_POLY1305 = 2
+	ALP_AEAD_AES_128_GCM       = 0, /**< AES-128-GCM; 16-byte key, 12-byte IV. */
+	ALP_AEAD_AES_256_GCM       = 1, /**< AES-256-GCM; 32-byte key, 12-byte IV. */
+	ALP_AEAD_CHACHA20_POLY1305 = 2  /**< ChaCha20-Poly1305; 32-byte key, 12-byte IV. */
 } alp_aead_alg_t;
 
 /** Opaque AEAD context.  Allocate via @ref alp_aead_open. */

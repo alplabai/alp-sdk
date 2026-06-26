@@ -58,11 +58,11 @@ static inline uint16_t ssd1331_rgb565(uint8_t r, uint8_t g, uint8_t b)
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-	alp_spi_t  *bus;
-	alp_gpio_t *dc; /**< D/C# command-vs-data line. */
-	uint8_t    *fb; /**< Caller-supplied framebuffer of size @ref SSD1331_FB_BYTES. */
-	size_t      fb_len;
-	bool        initialised;
+	alp_spi_t  *bus;         /**< SPI bus the panel hangs off (borrowed, not owned). */
+	alp_gpio_t *dc;          /**< D/C# command-vs-data line. */
+	uint8_t    *fb;          /**< Caller-supplied framebuffer of size @ref SSD1331_FB_BYTES. */
+	size_t      fb_len;      /**< Length of @ref fb in bytes (≥ @ref SSD1331_FB_BYTES). */
+	bool        initialised; /**< True once ssd1331_init() has succeeded. */
 } ssd1331_t;
 
 /**
@@ -84,17 +84,27 @@ typedef struct {
 alp_status_t
 ssd1331_init(ssd1331_t *dev, alp_spi_t *spi, alp_gpio_t *dc, uint8_t *fb, size_t fb_len);
 
-/** Set the panel display ON or OFF. */
+/**
+ * @brief Set the panel display ON or OFF.
+ * @param dev Initialised driver context.
+ * @param on  true = display on, false = display off.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t ssd1331_set_display_on(ssd1331_t *dev, bool on);
 
 /**
  * @brief Set master contrast attenuation.
  *
- * @p current is in the range 0..15 (datasheet command 0x87, 4-bit field).
+ * @param dev     Initialised driver context.
+ * @param current Attenuation level 0..15 (datasheet command 0x87, 4-bit field).
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
  */
 alp_status_t ssd1331_set_master_current(ssd1331_t *dev, uint8_t current);
 
-/** Wipe the in-memory framebuffer to black.  Does not push to the panel. */
+/**
+ * @brief Wipe the in-memory framebuffer to black.  Does not push to the panel.
+ * @param dev Initialised driver context.
+ */
 void ssd1331_clear(ssd1331_t *dev);
 
 /**
@@ -110,10 +120,17 @@ void ssd1331_clear(ssd1331_t *dev);
  */
 void ssd1331_draw_pixel(ssd1331_t *dev, uint16_t x, uint16_t y, uint16_t colour);
 
-/** Push the entire in-memory framebuffer to the panel. */
+/**
+ * @brief Push the entire in-memory framebuffer to the panel.
+ * @param dev Initialised driver context.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t ssd1331_display(ssd1331_t *dev);
 
-/** Release the driver context.  Does not turn off the panel. */
+/**
+ * @brief Release the driver context.  Does not turn off the panel.
+ * @param dev Driver context to release.
+ */
 void ssd1331_deinit(ssd1331_t *dev);
 
 #ifdef __cplusplus

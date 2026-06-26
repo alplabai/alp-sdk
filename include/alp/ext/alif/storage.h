@@ -45,11 +45,11 @@ extern "C" {
 
 /** OSPI SecAES engine runtime status flags. */
 typedef enum {
-	ALP_ALIF_STORAGE_SECAES_STATUS_IDLE         = 0u,
-	ALP_ALIF_STORAGE_SECAES_STATUS_ARMED        = 1u << 0,
-	ALP_ALIF_STORAGE_SECAES_STATUS_ENGAGED      = 1u << 1,
-	ALP_ALIF_STORAGE_SECAES_STATUS_KEY_LOAD_ERR = 1u << 2,
-	ALP_ALIF_STORAGE_SECAES_STATUS_BUS_ERR      = 1u << 3,
+	ALP_ALIF_STORAGE_SECAES_STATUS_IDLE         = 0u,      /**< Idle; no key armed. */
+	ALP_ALIF_STORAGE_SECAES_STATUS_ARMED        = 1u << 0, /**< Key armed, awaiting access. */
+	ALP_ALIF_STORAGE_SECAES_STATUS_ENGAGED      = 1u << 1, /**< Inline AES active on XIP. */
+	ALP_ALIF_STORAGE_SECAES_STATUS_KEY_LOAD_ERR = 1u << 2, /**< Last key-load failed. */
+	ALP_ALIF_STORAGE_SECAES_STATUS_BUS_ERR      = 1u << 3, /**< OSPI bus fault on access. */
 } alp_alif_storage_secaes_status_t;
 
 /**

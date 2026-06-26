@@ -54,9 +54,9 @@ typedef enum {
 } tcal9538_direction_t;
 
 typedef struct {
-	bool       initialised;
-	alp_i2c_t *bus;
-	uint8_t    addr;
+	bool       initialised; /**< True once tcal9538_init() has succeeded. */
+	alp_i2c_t *bus;         /**< I2C bus the expander sits on (borrowed, not owned). */
+	uint8_t    addr;        /**< 7-bit I2C address (0x70..0x73 by strap). */
 	/* Cached register state -- keeps the driver from a
      * read-modify-write cycle on every set_pin / set_direction call.
      * Synced with the chip on init via a register read-back. */
@@ -85,27 +85,56 @@ alp_status_t tcal9538_set_direction(tcal9538_t *ctx, uint8_t pin, tcal9538_direc
 
 /**
  * @brief Set directions of multiple pins via mask + value.
- * Bit N of @p mask = 1 means "apply"; bit N of @p value = 1 means
- * "input", 0 means "output".  This is the bulk variant of
- * `tcal9538_set_direction` and avoids 8 round-trips for typical
+ *
+ * Bulk variant of `tcal9538_set_direction` that avoids 8 round-trips for typical
  * "configure 4 outputs at once" calls.
+ *
+ * @param ctx   TCAL9538 driver context (must be initialised first).
+ * @param mask  Bit N = 1 selects pin N for update; bit N = 0 leaves it unchanged.
+ * @param value For selected pins, bit N = 1 means input, 0 means output.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
  */
 alp_status_t tcal9538_set_directions(tcal9538_t *ctx, uint8_t mask, uint8_t value);
 
-/** @brief Drive a single output pin to @p level. */
+/**
+ * @brief Drive a single output pin to @p level.
+ * @param ctx   Initialised driver context.
+ * @param pin   0..7.
+ * @param level true = high, false = low.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t tcal9538_set(tcal9538_t *ctx, uint8_t pin, bool level);
 
-/** @brief Read a single input pin's current level. */
+/**
+ * @brief Read a single input pin's current level.
+ * @param[in]  ctx       Initialised driver context.
+ * @param[in]  pin       0..7.
+ * @param[out] level_out Receives the pin level (true = high, false = low).
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t tcal9538_get(tcal9538_t *ctx, uint8_t pin, bool *level_out);
 
-/** @brief Read all 8 input pins as a bitmap. */
+/**
+ * @brief Read all 8 input pins as a bitmap.
+ * @param[in]  ctx      Initialised driver context.
+ * @param[out] port_out Receives the Input-port register (bit N = pin N level).
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t tcal9538_read_all(tcal9538_t *ctx, uint8_t *port_out);
 
-/** @brief Write all 8 output pins at once.  Bits with direction =
- *  input are ignored by the chip. */
+/**
+ * @brief Write all 8 output pins at once.  Bits with direction = input are
+ *        ignored by the chip.
+ * @param ctx  Initialised driver context.
+ * @param port Output-port bitmap (bit N drives pin N).
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t tcal9538_write_all(tcal9538_t *ctx, uint8_t port);
 
-/** @brief Release the driver context.  Idempotent. */
+/**
+ * @brief Release the driver context.  Idempotent.
+ * @param ctx Driver context to release.
+ */
 void tcal9538_deinit(tcal9538_t *ctx);
 
 #ifdef __cplusplus

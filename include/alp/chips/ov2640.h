@@ -77,18 +77,18 @@ typedef enum {
 
 /** Pixel-format selection. */
 typedef enum {
-	OV2640_FMT_RGB565 = 0,
-	OV2640_FMT_YUV422 = 1,
-	OV2640_FMT_JPEG   = 2,
+	OV2640_FMT_RGB565 = 0, /**< 16-bit RGB565, big-endian on the DVP bus. */
+	OV2640_FMT_YUV422 = 1, /**< 16-bit YUV422 (YUYV order). */
+	OV2640_FMT_JPEG   = 2, /**< On-chip JPEG-compressed stream. */
 } ov2640_format_t;
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-	alp_i2c_t          *bus;
-	uint8_t             addr;
-	ov2640_resolution_t res;
-	ov2640_format_t     fmt;
-	bool                initialised;
+	alp_i2c_t          *bus;  /**< Borrowed SCCB/I²C bus; not owned, not closed by deinit. */
+	uint8_t             addr; /**< 7-bit SCCB address bound at init (@ref OV2640_I2C_ADDR). */
+	ov2640_resolution_t res;  /**< Last requested resolution preset (stashed, may be unapplied). */
+	ov2640_format_t     fmt;  /**< Last requested pixel format (stashed, may be unapplied). */
+	bool                initialised; /**< True once init verified the chip ID. */
 } ov2640_t;
 
 /**

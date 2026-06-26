@@ -47,11 +47,11 @@ extern "C" {
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-	alp_i2c_t *bus;
-	uint8_t    addr; /**< 7-bit I2C address. */
-	uint16_t   width;
-	uint16_t   height;
-	bool       initialised;
+	alp_i2c_t *bus;         /**< I2C bus the panel hangs off (borrowed, not owned). */
+	uint8_t    addr;        /**< 7-bit I2C address. */
+	uint16_t   width;       /**< Active panel width in pixels. */
+	uint16_t   height;      /**< Active panel height in pixels. */
+	bool       initialised; /**< True once ssd1306_init() has succeeded. */
 
 	/** Vertical-byte framebuffer (one byte per 8 vertical pixels).
      *  Layout: page-major, column-minor, matching SSD1306 GDDRAM. */
@@ -69,20 +69,46 @@ typedef struct {
  * On success the framebuffer is cleared but the panel display state
  * is left to the caller — call `ssd1306_display(dev)` after drawing
  * to flush.
+ *
+ * @param dev      Output: caller-allocated driver context, populated on success.
+ * @param bus      Open I2C bus the panel is attached to (borrowed, not owned).
+ * @param i2c_addr 7-bit address; see @ref SSD1306_I2C_ADDR_LOW / @ref SSD1306_I2C_ADDR_HIGH.
+ * @param width    Panel width in pixels (≤ @ref SSD1306_MAX_WIDTH).
+ * @param height   Panel height in pixels (≤ @ref SSD1306_MAX_HEIGHT).
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure or
+ *         unsupported geometry.
  */
 alp_status_t
 ssd1306_init(ssd1306_t *dev, alp_i2c_t *bus, uint8_t i2c_addr, uint16_t width, uint16_t height);
 
-/** Set the panel display ON or OFF (charge pump stays running). */
+/**
+ * @brief Set the panel display ON or OFF (charge pump stays running).
+ * @param dev Initialised driver context.
+ * @param on  true = display on, false = display blanked.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t ssd1306_set_display_on(ssd1306_t *dev, bool on);
 
-/** 0 = darkest, 255 = brightest.  Datasheet reset value is 0x7F. */
+/**
+ * @brief Set panel contrast (segment-current scaling).
+ * @param dev      Initialised driver context.
+ * @param contrast 0 = darkest, 255 = brightest.  Datasheet reset value is 0x7F.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t ssd1306_set_contrast(ssd1306_t *dev, uint8_t contrast);
 
-/** Toggle inverted-display mode (every pixel value flipped). */
+/**
+ * @brief Toggle inverted-display mode (every pixel value flipped).
+ * @param dev      Initialised driver context.
+ * @param inverted true = inverted, false = normal.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t ssd1306_set_inverted(ssd1306_t *dev, bool inverted);
 
-/** Wipe the in-memory framebuffer.  Does not push to the panel. */
+/**
+ * @brief Wipe the in-memory framebuffer.  Does not push to the panel.
+ * @param dev Initialised driver context.
+ */
 void ssd1306_clear(ssd1306_t *dev);
 
 /**
@@ -91,13 +117,25 @@ void ssd1306_clear(ssd1306_t *dev);
  * Out-of-range coordinates are silently ignored — this is the
  * standard graphics-library contract and avoids forcing every
  * caller to clip.
+ *
+ * @param dev Initialised driver context.
+ * @param x   Column coordinate, 0..width - 1.
+ * @param y   Row coordinate, 0..height - 1.
+ * @param on  true lights the pixel, false clears it.
  */
 void ssd1306_draw_pixel(ssd1306_t *dev, uint16_t x, uint16_t y, bool on);
 
-/** Push the entire in-memory framebuffer to the panel. */
+/**
+ * @brief Push the entire in-memory framebuffer to the panel.
+ * @param dev Initialised driver context.
+ * @return `ALP_OK` on success, or an `alp_status_t` error on bus failure.
+ */
 alp_status_t ssd1306_display(ssd1306_t *dev);
 
-/** Release the driver context.  Does not turn off the panel. */
+/**
+ * @brief Release the driver context.  Does not turn off the panel.
+ * @param dev Driver context to release.
+ */
 void ssd1306_deinit(ssd1306_t *dev);
 
 #ifdef __cplusplus
