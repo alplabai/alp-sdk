@@ -23,8 +23,9 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   Alif UART5, sensors on I2C2, display/camera on I2C1 — transcribed from the
   authoritative SoM/carrier routing (`from-alif.tsv` + `e1m-evk.yaml`), with the
   pinmux groups; the decompiled dtb confirms `status="okay"` + `console=ttyS0`.
-  On-bus I2C device nodes are TODO (the bmi323/icm42670 0x68 strap is schematic-
-  determined). Design + build path:
+  On-bus I2C device nodes (bmi323@0x68, icm42670@0x69, bmp581@0x47,
+  ina236@0x40-0x45, tcal9538@0x72) grounded from the board header and
+  verified in the decompiled dtb.  Design + build path:
   `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
 - **`examples/aen/aen-a32-carrier-bringup` — A32-Linux carrier bring-up example
   (SP2 Task 1).**  New Yocto userspace example that exercises the E1M-EVK carrier
