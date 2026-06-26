@@ -1022,3 +1022,17 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SOC_RENESAS_RZV2N_N44
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/gd32_bridge.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_ADC_SW_FALLBACK
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/sw_fallback.c)
+
+# Alif Ensemble DWC2 USB host (UHC) driver skeleton -- BENCH-GATED.
+# All host bring-up paths are marked TODO(aen401-bench); the driver compiles
+# and links but does not drive hardware.  The uhc_api op table + register
+# comments are grounded from drivers/usb/common/usb_dwc2_hw.h (Zephyr 4.4).
+# uhc_common.h is a private Zephyr header; expose drivers/usb/uhc so the
+# driver can include it (the eth_dwmac_alif + i2s_dw precedents).
+# Binding: zephyr/dts/bindings/usb/alif,dwc2-uhc.yaml.
+# ADR 0017 Tier-1.5 (in-tree clean-room skeleton; no fork copy exists).
+zephyr_library_sources_ifdef(CONFIG_UHC_DWC2_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/usb/uhc/uhc_dwc2_alif.c)
+if(CONFIG_UHC_DWC2_ALIF)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
+endif()
