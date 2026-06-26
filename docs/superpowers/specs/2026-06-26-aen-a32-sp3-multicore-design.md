@@ -24,18 +24,20 @@ mailbox + remoteproc nodes and the M55-HP firmware that launcher needs.
 | Fact | Source |
 |---|---|
 | Mailbox = ARM **MHUv2**, controller token `alif_mhuv2`, compatible `alif,mhuv2-mbox`; ch0=`alp_default_rpmsg`, ch1/2=app, ch3=power_mgmt | `metadata/e1m_modules/E1M-AEN801.yaml` `mailbox:` (RESOLVED, not TBD) |
-| AEN801 memory: MRAM 5.5 MB, SRAM0/1 4 MB each, M55-HP ITCM 256 KB / DTCM 1024 KB | `metadata/socs/alif/ensemble/e8.json` variant `AE822FA0E5597LS0` (`alp_module_skus: [E1M-AEN801]`) |
-| Carveout sizes resolve; **absolute base stays unset** (silicon-default) | `scripts/alp_project.py::resolve_memory_map` (no `base` unless a SoM `memory_map:` override declares one; e8.json has no `memory_regions`/base) |
+| AEN801 memory **sizes**: MRAM 5.5 MB, SRAM0/1 4 MB each, M55-HP ITCM 256 KB / DTCM 1024 KB | `metadata/socs/alif/ensemble/e8.json` variant `AE822FA0E5597LS0` (`alp_module_skus: [E1M-AEN801]`) |
+| **Carveout is BLOCKED today**: e8.json has **no `memory_regions`** (bases), so `resolve_carve_outs` cannot place the region — verified `--emit dts-reservations` emits `/* BLOCKED: alp_default_rpmsg -- memory_map.base is unset for region 'sram0' … */` | `scripts/alp_orchestrate.py::resolve_carve_outs` / `alp_project.py::resolve_memory_map` |
+| The fix pattern: a SoC-JSON `memory_regions` block carrying authoritative bases (e.g. V2N `ddr_main` base `0x48000000`, `m33_tcm` `0x80000000`) makes `resolve_memory_map` return them verbatim → carveout resolves | `metadata/socs/renesas/rzv2n/n44.json` (the precedent) |
 | `alp-remoteproc` systemd unit (walks `/sys/class/remoteproc/`, starts ALP M-class fw, waits for `/dev/rpmsg_ctrl0`) already `COMPATIBLE_MACHINE = "…|e1m-aen.*|…"` | `meta-alp-sdk/recipes-core/alp-system/alp-remoteproc_0.6.bb` |
 | Firmware path convention `/lib/firmware/alp/<SKU>/<core>.elf` | `docs/heterogeneous-builds.md` |
 | EVK sensors (bmi323 @0x68, bmp581) are EVK-carrier-common across AEN701/801 | `metadata/boards/e1m-evk.yaml`; both SKUs use `preset: e1m-evk` |
 
 **The build-readiness asymmetry:** `E1M-AEN801` has a **resolved** mailbox
-(`alif_mhuv2`) and real memory sizes, so its carveout resolves — it is the
-build-ready multicore SKU. `E1M-AEN701` still carries `mailbox.controller: TBD`,
-so its carveout stays blocked (`docs/heterogeneous-builds.md` "Blocked
-carve-outs"). The existing `examples/multicore/rpmsg-aen/` targets 701 only and
-is `[UNTESTED]`.
+(`alif_mhuv2`) and real memory **sizes** — it is one authoritative-base block
+(SoC `memory_regions` in e8.json) away from a resolvable carveout. `E1M-AEN701`
+is blocked on **both** its `mailbox.controller: TBD` *and* the same missing
+bases. So SP3 unblocks 801 by grounding the E8 bases (Component 0); 701 stays
+blocked on its mailbox and is out of scope. The existing
+`examples/multicore/rpmsg-aen/` targets 701 only and is `[UNTESTED]`.
 
 ## Non-goals
 
@@ -45,6 +47,27 @@ is `[UNTESTED]`.
 - Changing the orchestrator (`alp_project.py` / `alp_orchestrate.py`) — SP3 consumes it as-is.
 
 ## Components
+
+### 0. Ground the Ensemble-E8 memory bases into `e8.json` (unblocks the carveout)
+
+`metadata/socs/alif/ensemble/e8.json` gains a top-level `memory_regions` block
+(the `n44.json` shape: `name`, `base`, `size_kib`/`size_mib`, `accessible_from`,
+`cacheable`) carrying the **authoritative Ensemble-E8 base addresses** for the
+regions an IPC carveout can land in (at minimum `mram_main` + the shared SRAM
+banks; M55-HP TCM optional). Bases are **transcribed from the Alif `linux_alif`
+devkit-e8 fork DTS `memory@`/`reserved-memory` nodes** (re-`bitbake -c unpack
+linux-alif`, the SP1 grounding method) — silicon facts, zero-invention. Any base
+genuinely absent from the fork stays `TBD` (and its region stays blocked).
+
+`resolve_memory_map` prefers `soc_memory_regions` verbatim when present, so this
+makes `--emit dts-reservations` for `board-aen801.yaml` produce a **real
+reserved-memory node** instead of the `/* BLOCKED … */` comment.
+
+**Blast radius:** e8.json is shared SoC metadata. Adding `memory_regions` flips
+`resolve_memory_map` from size-derived (sram_banks) to the verbatim region list
+for *every* E8 consumer — so the block must cover the regions existing E8
+board.yamls rely on. The task verifies no existing E8 projection regresses
+(re-run any E8 `--emit` + the metadata/schema gates).
 
 ### 1. Retarget `examples/multicore/rpmsg-aen/` to cover both SKUs
 
@@ -74,10 +97,12 @@ split.
 carrier DTS) gains, grounded from the Alif `linux_alif` devkit-e8 fork DTS
 (re-`bitbake -c unpack linux-alif`, the SP1 method) + the e8.json memory-map:
 
-- a `reserved-memory` carveout node for the rpmsg vrings + M55-HP firmware load
-  region — **size** from `carve_out_kb` (256 KB) consistent with the orchestrator
-  allocation; **base** = the silicon-default MRAM/SRAM base transcribed from the
-  fork DTS (or `TODO(aen-memory-map)` if the fork omits it).
+- the `reserved-memory` carveout for the rpmsg vrings + M55-HP firmware load
+  region. **Prefer the orchestrator-generated `dts-reservations.dtsi`** (`--emit
+  dts-reservations` → check the generated file into the bbappend's
+  `SRC_URI`/`files/` and `#include` it from the carrier DTS) so base+size stay the
+  single derived projection of Component 0 + `carve_out_kb` (256 KB) — no
+  hand-copied addresses. (Regenerate when board.yaml `ipc:` or e8.json changes.)
 - the MHUv2 mailbox node(s) enabled (`compatible = "alif,mhuv2-mbox"` /
   whatever the fork DTS uses), reg/IRQ from the fork DTS (else `TODO`).
 - a `remoteproc` node for M55-HP: `mboxes` = the MHUv2 channel(s) for ch0
@@ -88,8 +113,11 @@ If the devkit-e8 fork DTS already wires M55 remoteproc/mailbox/reserved-memory
 for Linux, mirror it verbatim (rename labels only). Override `*_STATUS`-style
 guards after the common include, as SP1 did.
 
-**Consistency constraint:** the DT carveout (size) and the orchestrator's
-`carve_out_kb` (256) must agree — both trace to e8.json + `board-aen801.yaml`.
+**Consistency constraint:** using the generated `dts-reservations.dtsi` makes the
+DT carveout base+size the single derived projection of Component 0 (e8.json bases)
++ `board-aen801.yaml` `carve_out_kb` — no hand-copied addresses to drift. The MHU
++ remoteproc nodes are the only hand-authored multicore DT (grounded from the
+fork DTS).
 
 ### 3. M55-HP firmware bake
 
@@ -111,21 +139,26 @@ in `e1m-aen801-a32.conf`, plus optionally the A32 `rpmsg_aen_consumer` binary
 1. **dtb compiles** + decompile shows the `reserved-memory`, MHUv2 mailbox, and
    `remoteproc` (M55-HP) nodes — SP1 method (`bitbake -c compile linux-alif` +
    `dtc` decompile), in the standing WSL build tree.
-2. **Orchestrator carveout resolve:** `scripts/alp_orchestrate.py --input
-   examples/multicore/rpmsg-aen/board-aen801.yaml --emit build-plan` succeeds with
-   no `memory_map.base is TBD` / blocked-carveout error — proving AEN801 unblocks
-   where 701 cannot (run with `py -3.14`).
+2. **Orchestrator carveout resolve:** after Component 0,
+   `py -3.14 scripts/alp_orchestrate.py --input
+   examples/multicore/rpmsg-aen/board-aen801.yaml --emit dts-reservations` emits a
+   **real `reserved-memory` node** (a `…@<base>` node with `compatible =
+   "shared-dma-pool"`, not the `/* BLOCKED … */` comment) — proving Component 0
+   unblocked the 801 carveout. (Baseline: the same command before Component 0, and
+   for 701, emits the BLOCKED comment.)
 3. **Image bake:** rebuild the image with the M55-HP firmware package +
    `alp-remoteproc`; assert `/lib/firmware/alp/E1M-AEN801/m55_hp.elf` and the
    firmware package appear in the rootfs manifest and the carveout/remoteproc
    nodes are in the deployed dtb (SP2 method).
 
-## Board-gated (deferred to bench, `TODO(aen-memory-map)` in DT where absent)
+## Board-gated (deferred to bench, `TODO(aen-memory-map)` where absent)
 
-- Absolute carveout base + MHU reg/IRQ if the devkit-e8 fork DTS omits them.
+- Any E8 base genuinely absent from the fork DTS (region stays blocked) + MHU
+  reg/IRQ if the fork omits them.
 - The live `remoteproc start` of M55-HP and the rpmsg channel handshake
   (`/dev/rpmsg_ctrl0` + the consumer receiving the producer's messages).
-- AEN701's `mailbox.controller` HW-config (separate follow-up).
+- AEN701's `mailbox.controller` HW-config (separate follow-up; SP3 leaves 701
+  blocked by design).
 
 ## Build / environment constraints
 
