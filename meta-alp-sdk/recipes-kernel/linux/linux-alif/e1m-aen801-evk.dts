@@ -130,3 +130,47 @@
 		>;
 	};
 };
+
+/* SP3 multicore: rpmsg over MHUv2 to M55-HP.
+ *
+ * Carveout -- generated from examples/multicore/rpmsg-aen/board.yaml
+ * (alp_default_rpmsg at sram0+0x1c0000, 256 KiB); do not hand-edit.
+ *
+ * MHU nodes -- transcribed verbatim from the Alif linux_alif fork
+ * (arch/arm/boot/dts/alif/ensemble/common/ensemble-ex.dtsi, 6.12+git,
+ * checked 2026-06-26):
+ *   mbox_m55_hp_mhu0_tx  reg=0x1b000000  IRQ SPI 11  (arm,mhuv2-tx)
+ *   mbox_m55_hp_mhu0_rx  reg=0x1b010000  IRQ SPI 12  (arm,mhuv2-rx)
+ * Both carry #mbox-cells = <2>; the consumer passes <channel ring_mode>.
+ *
+ * Remoteproc -- the alifsemi/linux_alif fork (6.12+git) carries NO
+ * Alif-specific remoteproc driver or DT binding; the compatible below is
+ * a PLACEHOLDER marked TODO(aen-memory-map).  Replace once Alif ships a
+ * Linux M55 remoteproc driver. */
+#include "aen801-dts-reservations.dtsi"	/* generated reserved-memory carveout */
+
+/* Enable HP-MHU0 TX + RX (grounded from ensemble-ex.dtsi; parent dtsi
+ * declares both with status = "disabled"). */
+&mbox_m55_hp_mhu0_tx {
+	status = "okay";
+};
+
+&mbox_m55_hp_mhu0_rx {
+	status = "okay";
+};
+
+/ {
+	remoteproc_m55_hp: remoteproc-m55-hp {
+		/* TODO(aen-memory-map): no Alif remoteproc driver/binding found in
+		 * alifsemi/linux_alif (6.12+git, grepped drivers/remoteproc + DT
+		 * bindings 2026-06-26); "alif,ensemble-m55-rproc" is a placeholder.
+		 * Validate and replace at bring-up once the driver lands upstream. */
+		compatible = "alif,ensemble-m55-rproc";
+		mboxes = <&mbox_m55_hp_mhu0_tx 0 0>,
+			 <&mbox_m55_hp_mhu0_rx 0 0>;
+		mbox-names = "tx", "rx";
+		memory-region = <&alp_default_rpmsg>;
+		firmware-name = "alp/E1M-AEN801/m55_hp.elf";
+		status = "okay";
+	};
+};
