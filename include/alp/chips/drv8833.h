@@ -36,12 +36,12 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_pwm_t  *in1; /**< Channel-A input 1. */
-    alp_pwm_t  *in2; /**< Channel-A input 2. */
-    alp_pwm_t  *in3; /**< Channel-B input 1. */
-    alp_pwm_t  *in4; /**< Channel-B input 2. */
-    alp_gpio_t *nsleep; /**< Active-low enable; may be NULL when tied high. */
-    bool        initialised;
+	alp_pwm_t  *in1;    /**< Channel-A input 1. */
+	alp_pwm_t  *in2;    /**< Channel-A input 2. */
+	alp_pwm_t  *in3;    /**< Channel-B input 1. */
+	alp_pwm_t  *in4;    /**< Channel-B input 2. */
+	alp_gpio_t *nsleep; /**< Active-low enable; may be NULL when tied high. */
+	bool        initialised;
 } drv8833_t;
 
 /**

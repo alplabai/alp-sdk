@@ -354,7 +354,7 @@ extern "C" {
 /* clang-format on */
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_E1M_X_PINOUT_H */
+#endif /* ALP_E1M_X_PINOUT_H */

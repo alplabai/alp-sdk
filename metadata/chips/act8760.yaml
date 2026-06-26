@@ -12,7 +12,11 @@
 #   complete  -- full register map exercised, all rails decoded.
 schema_version:   1
 chip_id:          act8760
-driver_status:    stub          # init+probe+raw R/W; VSET decode TODO
+driver_status:    partial       # probe + status + VSET0 accessors live
+                                # (register map verified vs the AA82BZ
+                                # workbook 2026-06-06); DVS slots VSET1-3,
+                                # per-tile fault regs + mV mapping still
+                                # raw-R/W-only
 display_name:     "Qorvo ACT88760-120.E1 primary PMIC"
 vendor:           qorvo         # formerly Active-Semi; brand-merged 2023
 mpn_population:
@@ -24,12 +28,13 @@ datasheet:
   cmi_profile:    "ACT88760_120.E1.26072083.iact"  # Alp CMI snapshot
   power_sequence: "ACT88760_CMI120 Power Sequence_250916.pdf"
   v2n_seq_diagram: "e1m-x_v2n-m1_power_sequence-power-on.pdf"
+  register_map:   "AA82BZ_RegisterMap_Users_Rev1P1 Customer Facing.xlsx"
 
 bus:              i2c
 i2c:
-  addresses:                    # both pages live on the same bus
-    - { page: 0, addr_7bit: 0x25, scope: "system + Buck1..Buck6 + GPIOs" }
-    - { page: 1, addr_7bit: 0x26, scope: "Buck7 + LDO1..LDO6" }
+  addresses:                    # two independent slaves on the same bus (not register pages)
+    - { slave: add1, addr_7bit: 0x25, scope: "MSTR + Buck1..Buck6 + GPIOs (ADD1)" }
+    - { slave: add2, addr_7bit: 0x26, scope: "Buck7 + LDO1..LDO6 (ADD2)" }
   max_clock_hz:   1000000       # datasheet: 1 MHz I2C
 
 # Per-rail manifest -- the rail names + intended target voltages live
@@ -38,19 +43,19 @@ i2c:
 # VSET-to-mV table for each Buck/LDO range setting.  Until then this
 # block lists the rails the V2N CMI populates with TBD voltages.
 rails:
-  - { id: buck1, page: 0, role: "TBD per CMI 120.E1 power-on diagram" }
-  - { id: buck2, page: 0, role: "TBD" }
-  - { id: buck3, page: 0, role: "TBD" }
-  - { id: buck4, page: 0, role: "TBD" }
-  - { id: buck5, page: 0, role: "TBD" }
-  - { id: buck6, page: 0, role: "TBD" }
-  - { id: buck7, page: 1, role: "TBD" }
-  - { id: ldo1,  page: 1, role: "TBD" }
-  - { id: ldo2,  page: 1, role: "TBD" }
-  - { id: ldo3,  page: 1, role: "TBD" }
-  - { id: ldo4,  page: 1, role: "TBD" }
-  - { id: ldo5,  page: 1, role: "TBD; may be configured as load switch" }
-  - { id: ldo6,  page: 1, role: "TBD; may be configured as load switch" }
+  - { id: buck1, slave: add1, role: "TBD per CMI 120.E1 power-on diagram" }
+  - { id: buck2, slave: add1, role: "TBD" }
+  - { id: buck3, slave: add1, role: "TBD" }
+  - { id: buck4, slave: add1, role: "TBD" }
+  - { id: buck5, slave: add1, role: "TBD" }
+  - { id: buck6, slave: add1, role: "TBD" }
+  - { id: buck7, slave: add2, role: "TBD" }
+  - { id: ldo1,  slave: add2, role: "TBD" }
+  - { id: ldo2,  slave: add2, role: "TBD" }
+  - { id: ldo3,  slave: add2, role: "TBD" }
+  - { id: ldo4,  slave: add2, role: "TBD" }
+  - { id: ldo5,  slave: add2, role: "TBD; may be configured as load switch" }
+  - { id: ldo6,  slave: add2, role: "TBD; may be configured as load switch" }
 
 # Pin-level signals the driver expects the board to route.  TWARN
 # is exposed inside the IC's status register (no dedicated pin); the
@@ -74,4 +79,5 @@ families:
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
-  smoke_tests:    null_arg_guard
+  smoke_tests:    null_arg_guard + probe_both_slaves + vset_offsets + status_decode
+  register_map:   verified_2026_06_06  # AA82BZ workbook + Datasheet Rev C, cell-by-cell

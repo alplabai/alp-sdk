@@ -39,9 +39,9 @@ extern "C" {
 #define AS5048B_REG_ANGLE_LO 0xFFu
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } as5048b_t;
 
 /** @brief Bind context to caller-opened I²C bus. */

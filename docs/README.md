@@ -40,13 +40,24 @@ into the topic-specific docs.
 - [e1m-pinout.md](e1m-pinout.md) — E1M form-factor pinout reference.
 - [board-id.md](board-id.md) — boot-time board identification:
   SoM EEPROM manifest + BOARD_ID ADC cross-check.
+- [aen-accelerator-backends-design.md](aen-accelerator-backends-design.md)
+  — integration design for the Alif Ensemble accelerator surfaces
+  (GPU2D / VeriSilicon ISP Pico (vsi,isp-pico) / SecAES / aiPM), each
+  silicon + HAL-pack gated.
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (12 ADRs as of 2026-05-18).
+  index (17 ADRs).
 
 ## Per-SoM bring-up
 
 - [bring-up-aen.md](bring-up-aen.md) — Alif Ensemble family.
+- [aen-bench-bringup.md](aen-bench-bringup.md) — E1M-AEN801 (E8)
+  on-silicon bench bring-up: Flow A/C/D flashing, the validated
+  peripheral matrix, and the NPU-from-MRAM path.
+- [aen-provisioning.md](aen-provisioning.md) — provisioning an
+  E1M-AEN SoM (SES → MCUboot → slot0 chain + the SoM-maker policy).
+- [aen-se-services.md](aen-se-services.md) — runtime `se_service_*`
+  API (device/LCS/power queries + the gated DVFS / STOC-update path).
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
 - [bring-up-imx93.md](bring-up-imx93.md) — NXP i.MX 93.
@@ -76,8 +87,14 @@ into the topic-specific docs.
 - [cc3501e-integration-plan.md](cc3501e-integration-plan.md) —
   SWRU626 deep-dive informing the CC3501E host + firmware wire
   protocol (research-only).
+- [cc3501e-production.md](cc3501e-production.md) — building,
+  signing, and provisioning a shippable CC3501E coprocessor image.
+- [cc3501e-gpio-bench.md](cc3501e-gpio-bench.md) — warm-boot bench
+  validation of the CC3501E GPIO proxy (machine-checkable contract).
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
+- [provisioning.md](provisioning.md) — provisioning a SoM from a
+  versioned release bundle (the `provision_som.py` orchestrator + runbook).
 - [os-support-matrix.md](os-support-matrix.md) — which OS runs
   on which core, per SoM.
 - [recommended-libraries.md](recommended-libraries.md) — curated
@@ -87,6 +104,8 @@ into the topic-specific docs.
 ## Security & release
 
 - [secure-boot.md](secure-boot.md) — MCUboot + OPTIGA flow.
+- [som-release-signing.md](som-release-signing.md) — verifying SoM-release
+  bundle provenance (ECDSA-P256; a separate concern from device secure-boot).
 - [threat-model.md](threat-model.md) — adversary classes, asset
   classes, per-header threat catalogue.
 - [security-advisories.md](security-advisories.md),

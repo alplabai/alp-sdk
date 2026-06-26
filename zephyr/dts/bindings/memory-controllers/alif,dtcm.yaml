@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Alif Ensemble RTSS-core DTCM (Data Tightly Coupled Memory).
+#
+# Re-authored in alp-sdk (config, not Alif driver code) to add the
+# `global_base` property that hal_alif's soc_memory_map.h local_to_global()
+# consumes -- DT_PROP(DT_NODELABEL(dtcm), global_base).  See the sibling
+# alif,itcm.yaml header for the full rationale.  DTCM global view =
+# 0x58800000 on the E8 RTSS-HE (from the fork ensemble_rtss_he.dtsi).
+#
+# ADR 0017 Tier-1.5 (in-tree thin glue over the upstream/hal base).
+
+description: Alif Ensemble RTSS-core DTCM (Data Tightly Coupled Memory)
+
+compatible: "alif,dtcm"
+
+include: [base.yaml, "zephyr,memory-region.yaml"]
+
+properties:
+  reg:
+    required: true
+  global_base:
+    required: true
+    type: int
+    description: |
+      Global (system-bus) base address of the DTCM as seen by other bus
+      masters (e.g. the Ethos-U NPU's AXI master), used by
+      soc_memory_map.h local_to_global() to translate a CPU-local DTCM
+      pointer into the address the NPU must be programmed with.

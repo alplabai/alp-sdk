@@ -44,26 +44,26 @@ extern "C" {
 
 /** Storage class.  Selects which backend the open routes to. */
 typedef enum {
-    ALP_STORAGE_KIND_INTERNAL_FLASH = 0,    /**< On-die flash / MRAM. */
-    ALP_STORAGE_KIND_QSPI_FLASH     = 1,    /**< External QSPI NOR. */
-    ALP_STORAGE_KIND_OSPI_FLASH     = 2,    /**< External OSPI NOR / HyperBus. */
-    ALP_STORAGE_KIND_SD_MMC         = 3     /**< SD card or eMMC. */
+	ALP_STORAGE_KIND_INTERNAL_FLASH = 0, /**< On-die flash / MRAM. */
+	ALP_STORAGE_KIND_QSPI_FLASH     = 1, /**< External QSPI NOR. */
+	ALP_STORAGE_KIND_OSPI_FLASH     = 2, /**< External OSPI NOR / HyperBus. */
+	ALP_STORAGE_KIND_SD_MMC         = 3  /**< SD card or eMMC. */
 } alp_storage_kind_t;
 
 typedef struct alp_storage alp_storage_t;
 
 typedef struct {
-    alp_storage_kind_t kind;
-    uint32_t           instance_id;     /**< 0 for the primary device. */
-    uint32_t           freq_hz;         /**< Bus clock; 0 = backend default. */
-    bool               read_only;       /**< Refuses writes / erases. */
+	alp_storage_kind_t kind;
+	uint32_t           instance_id; /**< 0 for the primary device. */
+	uint32_t           freq_hz;     /**< Bus clock; 0 = backend default. */
+	bool               read_only;   /**< Refuses writes / erases. */
 } alp_storage_config_t;
 
 /** Block geometry, populated by @ref alp_storage_get_info. */
 typedef struct {
-    uint64_t total_bytes;
-    uint32_t block_size;       /**< Min unit for read/write. */
-    uint32_t erase_size;       /**< Min unit for erase (often a multiple of block_size). */
+	uint64_t total_bytes;
+	uint32_t block_size; /**< Min unit for read/write. */
+	uint32_t erase_size; /**< Min unit for erase (often a multiple of block_size). */
 } alp_storage_info_t;
 
 /**
@@ -85,7 +85,7 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
-alp_status_t   alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);
+alp_status_t alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);
 
 /**
  * @brief Read @p len bytes starting at @p offset into @p data.
@@ -104,9 +104,7 @@ alp_status_t   alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);
  *         ALP_ERR_OUT_OF_RANGE (offset + len past device end) /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
-alp_status_t   alp_storage_read(alp_storage_t *s,
-                                uint64_t offset,
-                                void *data, size_t len);
+alp_status_t alp_storage_read(alp_storage_t *s, uint64_t offset, void *data, size_t len);
 
 /**
  * @brief Write @p len bytes from @p data starting at @p offset.
@@ -127,9 +125,7 @@ alp_status_t   alp_storage_read(alp_storage_t *s,
  *         (offset + len past device end) / ALP_ERR_NOSUPPORT /
  *         ALP_ERR_IO.
  */
-alp_status_t   alp_storage_write(alp_storage_t *s,
-                                 uint64_t offset,
-                                 const void *data, size_t len);
+alp_status_t alp_storage_write(alp_storage_t *s, uint64_t offset, const void *data, size_t len);
 
 /**
  * @brief Erase the region [@p offset, @p offset + @p len).
@@ -146,8 +142,7 @@ alp_status_t   alp_storage_write(alp_storage_t *s,
  *         ALP_ERR_NOT_READY / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
-alp_status_t   alp_storage_erase(alp_storage_t *s,
-                                 uint64_t offset, uint64_t len);
+alp_status_t alp_storage_erase(alp_storage_t *s, uint64_t offset, uint64_t len);
 
 /**
  * @brief Flush any backend-side write cache to media.
@@ -160,7 +155,7 @@ alp_status_t   alp_storage_erase(alp_storage_t *s,
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT /
  *         ALP_ERR_IO.
  */
-alp_status_t   alp_storage_sync(alp_storage_t *s);
+alp_status_t alp_storage_sync(alp_storage_t *s);
 
 /**
  * @brief Release the handle.  Implicitly syncs.
@@ -169,7 +164,7 @@ alp_status_t   alp_storage_sync(alp_storage_t *s);
  *
  * @param[in] s  Handle from @ref alp_storage_open, or NULL.
  */
-void           alp_storage_close(alp_storage_t *s);
+void alp_storage_close(alp_storage_t *s);
 
 /**
  * @brief Query the capabilities of an opened storage handle.
@@ -204,9 +199,9 @@ const alp_capabilities_t *alp_storage_capabilities(const alp_storage_t *s);
  *   - XTS: AES-XTS (block-cipher mode; IV is the tweak.  Standard
  *     for storage encryption at flash-block granularity). */
 typedef enum {
-    ALP_STORAGE_AES_OFF = 0,
-    ALP_STORAGE_AES_CTR = 1,
-    ALP_STORAGE_AES_XTS = 2,
+	ALP_STORAGE_AES_OFF = 0,
+	ALP_STORAGE_AES_CTR = 1,
+	ALP_STORAGE_AES_XTS = 2,
 } alp_storage_aes_mode_t;
 
 /** Inline-AES configuration.  Caller-owned memory; backend reads
@@ -220,12 +215,12 @@ typedef enum {
  *     16 bytes for both CTR + XTS in the standard modes.
  *   - iv_bytes: typically 16. */
 typedef struct {
-    alp_storage_aes_mode_t mode;
-    const uint8_t         *key;
-    uint8_t                key_bytes;
-    const uint8_t         *iv;
-    uint8_t                iv_bytes;
-    uint16_t               reserved;
+	alp_storage_aes_mode_t mode;
+	const uint8_t         *key;
+	uint8_t                key_bytes;
+	const uint8_t         *iv;
+	uint8_t                iv_bytes;
+	uint16_t               reserved;
 } alp_storage_aes_config_t;
 
 /**
@@ -259,7 +254,7 @@ alp_status_t alp_storage_configure_inline_aes(alp_storage_t                  *st
                                               const alp_storage_aes_config_t *cfg);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_STORAGE_H */
+#endif /* ALP_STORAGE_H */

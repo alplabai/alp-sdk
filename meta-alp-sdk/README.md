@@ -24,6 +24,7 @@ meta-alp-sdk/
 ├── conf/
 │   ├── layer.conf                       # Yocto layer metadata.
 │   ├── distro/
+│   │   ├── alp.conf                     # Alp distro identity (rebrands Renesas rz-vlp).
 │   │   └── include/
 │   │       └── mender.inc               # Opt-in Mender OTA distro config.
 │   └── machine/
@@ -34,14 +35,20 @@ meta-alp-sdk/
 │       └── e1m-nx9101-a55.conf          # NXP i.MX 93.
 ├── recipes-core/
 │   ├── alp-sdk/
-│   │   └── alp-sdk_0.5.bb               # libalp_sdk.so + headers.
+│   │   └── alp-sdk_0.6.bb               # libalp_sdk.so + headers.
 │   ├── alp-chips/
 │   │   └── alp-chips_0.6.bb             # libalp_chips.a + per-chip PACKAGECONFIG.
 │   └── alp-system/
 │       ├── alp-dts-reservations_0.6.bb  # Orchestrator-emitted DT reservations.
+│       ├── alp-network-defaults_0.7.bb  # Wired-DHCP networkd story pinned in the layer.
 │       ├── alp-remoteproc_0.6.bb        # systemd unit for the M-side firmware lifecycle.
 │       ├── alp-remoteproc.service
+│       ├── alp-ssh-hardening_0.7.bb     # Prod key-only SSH (sshd_config.d drop-in).
+│       ├── alp-watchdog-policy_0.7.bb   # CA55-cluster systemd HW-watchdog supervision.
 │       └── files/
+│           ├── 10-alp-ssh-hardening.conf
+│           ├── 10-alp-watchdog.conf
+│           ├── 80-alp-wired-dhcp.network
 │           └── alp-remoteproc-start.sh
 ├── recipes-examples/
 │   └── alp-edgeai/
@@ -50,10 +57,12 @@ meta-alp-sdk/
 │   └── dx-rt/
 │       └── dx-rt_2.4.bb                 # Pins the DEEPX runtime (vendor-licensed).
 ├── recipes-images/
-│   └── alp-image-edge.bb                # Reference image: ROS 2 + alp-sdk + DEEPX + Mender.
+│   ├── alp-image-common.inc            # Shared runtime for both images below.
+│   ├── alp-image-edge.bb                # Dev image: common + debug-tweaks + bench tooling.
+│   └── alp-image-prod.bb               # Production image: hardened, key-only SSH (DISTRO=alp).
 ├── recipes-ros/
 │   └── alp-perception/
-│       └── alp-perception_0.5.bb        # examples/v2n/v2n-m1-ros-perception node.
+│       └── alp-perception_0.6.bb        # examples/v2n/v2n-m1-ros-perception node.
 └── README.md                            # this file
 ```
 
@@ -71,7 +80,11 @@ This matches what `scripts/alp_orchestrate.py` writes into the
 emitted `system-manifest.yaml` per the heterogeneous-OS spec at
 `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`.
 
-AEN A32-class MACHINEs are deferred to v0.7 (Phase 5 CI gate).
+The AEN A32-class MACHINEs (`e1m-aen801-a32`, `e1m-aen701-a32`)
+ship the carrier scaffolding today -- they `require` the upstream
+Alif `devkit-e8` base and override the carrier specifics; the carrier
+DTB + TF-A memory map + full image-bake gate on the maintainer's AEN
+HW config (marked `# TBD(alif-hw-config)` in the machine confs).
 
 ## How customers consume it
 
@@ -165,12 +178,17 @@ MACHINE = "e1m-v2n101-a55"     # plain V2N
 # or
 MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 
-# 8. Build the reference image:
-bitbake alp-image-edge
+# 8. Build the image:
+bitbake alp-image-edge                 # dev image (passwordless root, bench tooling)
+# or the hardened production image, against the Alp distro identity:
+DISTRO=alp bitbake alp-image-prod      # key-only SSH, no debug tooling, "Alp SDK" branding
 ```
 
+See the edge-vs-prod posture table + `DISTRO=alp` notes in
+[`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md#edge-vs-production-image).
+
 The resulting `alp-image-edge-<machine>.wic[.gz]` is the kernel +
-rootfs (the bootloader is production-flashed by ALP).  See
+rootfs (the bootloader is production-flashed by Alp).  See
 [`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md) for the
 deploy + on-board verification steps.
 
@@ -189,20 +207,59 @@ MACHINE = "e1m-nx9101-a55"
 bitbake alp-image-edge
 ```
 
-## Per-machine inference runtime install
+### Alif Ensemble E8 — via meta-alif-ensemble
 
-The SDK's `<alp/inference.h>` compiles in every dispatcher the SoM
-preset's `capabilities:` block declares (silicon-determined), so
-each machine pulls the matching userspace runtime via the
-`alp-sdk` recipe's `DEPENDS:append:<machine>` lines.
+The AEN801 (E8) A32 path rides on Alif's
+[`meta-alif-ensemble`](https://github.com/alifsemi/meta-alif-ensemble)
+BSP, branch **scarthgap** (matching alp-sdk's Yocto series).  That
+layer ships the upstream-complete `devkit-e8` MACHINE (+ `appkit-e8`)
+— linux-alif, the TF-A platform, and `devkit-e8.dtb` — which the
+`e1m-aen801-a32.conf` carrier `require`s and then overrides.  On the
+M55 side the same E8 platform builds on upstream Zephyr's
+`ensemble_e8_dk` board, so the heterogeneous E8 stack is
+upstream-native top to bottom; alp-sdk only adds the thin carrier
+overlay (ADR-0017).  alp-sdk does **not** redistribute or fork the
+Alif BSP.
 
-| MACHINE              | Runtime installed                       | Source                                     |
-|----------------------|------------------------------------------|--------------------------------------------|
-| `e1m-v2n101-a55`     | `drpai-driver`                           | Renesas RZ/V2N on-chip DRP-AI3             |
-| `e1m-v2n102-a55`     | `drpai-driver`                           | Same as V2N101 (memory variant)            |
-| `e1m-v2m101-a55`     | `drpai-driver` + `dxm1-runtime`          | V2N silicon + DEEPX DX-M1 NPU on-module    |
-| `e1m-v2m102-a55`     | `drpai-driver` + `dxm1-runtime`          | Same as V2M101 (memory variant)            |
-| `e1m-nx9101-a55`     | `ethosu-driver-library`                  | NXP i.MX 93 on-die Ethos-U65               |
+```bash
+# 1. Clone the Alif Ensemble BSP (scarthgap) under your own licence:
+git clone -b scarthgap https://github.com/alifsemi/meta-alif-ensemble ../meta-alif-ensemble
+bitbake-layers add-layer ../meta-alif-ensemble
+
+# 2. Add meta-alp-sdk (if not already) and pick the MACHINE:
+MACHINE = "e1m-aen801-a32"
+bitbake alp-image-edge
+```
+
+The `e1m-aen801-a32.conf` MACHINE ships the carrier scaffolding today;
+the carrier DTB, TF-A memory map, and boot-media routing are
+maintainer-supplied AEN HW-config inputs and are marked
+`# TBD(alif-hw-config)` until that config lands (E8 silicon is also
+flagged `status.preliminary` in `metadata/e1m_modules/E1M-AEN801.yaml`).
+The `e1m-aen701-a32.conf` (E7) MACHINE follows the same pattern but is
+deprioritised both ways — Alp Lab leads with AEN801/E8, and upstream
+Alif demotes E7 on scarthgap (only `devkit-e7.conf.orig` remains).
+
+## Per-machine inference runtime
+
+The SDK's `<alp/inference.h>` compiles in the dispatcher for every
+backend the SoM preset's `capabilities:` block declares
+(silicon-determined), but the **vendor NPU runtimes are not build-time
+dependencies of the `alp-sdk` library** — the Yocto build links only
+the dispatcher + portable stubs.  Where a runtime userspace package
+exists, the **image** recipe installs it (e.g. `alp-image-edge`'s
+`IMAGE_INSTALL:append:e1m-v2m101 = "dx-rt"`); DRP-AI3 is driven through
+the in-kernel driver + UAPI headers from `meta-rz-drpai` (see below).
+
+| MACHINE              | NPU backend            | Runtime source                              |
+|----------------------|------------------------|---------------------------------------------|
+| `e1m-v2n101-a55`     | DRP-AI3                | in-kernel driver + `meta-rz-drpai` headers  |
+| `e1m-v2n102-a55`     | DRP-AI3                | Same as V2N101 (memory variant)             |
+| `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1  | DRP-AI3 as above; `dx-rt` via the image     |
+| `e1m-v2m102-a55`     | Same as V2M101         | Same as V2M101 (memory variant)             |
+| `e1m-nx9101-a55`     | Ethos-U65              | NXP i.MX 93 Ethos-U userspace via the image |
+| `e1m-aen801-a32`     | Ethos-U85 + 2x U55     | Ethos-U path inside the alp-sdk library     |
+| `e1m-aen701-a32`     | 2x Ethos-U55           | Ethos-U path inside the alp-sdk library     |
 
 Customer apps pick the active backend per-handle at runtime via
 `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
@@ -295,7 +352,10 @@ such in the matching recipes' `LICENSE` field.
   acknowledgement closes the legal review per
   [`docs/vendor-partnerships.md`](../docs/vendor-partnerships.md)
   §C.31.
-- AEN A32-class MACHINE (v0.7).
+- AEN A32-class MACHINE carrier scaffolding (`e1m-aen801-a32`,
+  `e1m-aen701-a32`) ships; the carrier DTB + TF-A memory map + full
+  image-bake await the maintainer's AEN HW config (the
+  `# TBD(alif-hw-config)` overrides in the machine confs).
 - `alp-image-edge.bb`'s minimal package set is documentary; the
   v1.0 sysbuild matrix in `docs/test-plan.md` adds the BLE
   provisioning layer + the certificate-pinning post-install hook.

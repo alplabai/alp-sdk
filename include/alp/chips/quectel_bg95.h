@@ -38,15 +38,15 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    alp_gpio_t *pwrkey; /**< Active-high PWRKEY pulse line. */
-    alp_gpio_t *reset;  /**< Optional hardware reset. */
-    bool        initialised;
+	alp_uart_t *port;
+	alp_gpio_t *pwrkey; /**< Active-high PWRKEY pulse line. */
+	alp_gpio_t *reset;  /**< Optional hardware reset. */
+	bool        initialised;
 } quectel_bg95_t;
 
 /** @brief Bind context to caller-opened UART + GPIOs. */
-alp_status_t quectel_bg95_init(quectel_bg95_t *dev, alp_uart_t *port, alp_gpio_t *pwrkey,
-                               alp_gpio_t *reset);
+alp_status_t
+quectel_bg95_init(quectel_bg95_t *dev, alp_uart_t *port, alp_gpio_t *pwrkey, alp_gpio_t *reset);
 
 /**
  * @brief Pulse PWRKEY for the documented duration (typ. 500 ms).
@@ -66,8 +66,8 @@ alp_status_t quectel_bg95_send_cmd(quectel_bg95_t *dev, const char *at_cmd);
  * @return `ALP_OK` on at least one byte received; `ALP_ERR_TIMEOUT`
  *         on no data within timeout.
  */
-alp_status_t quectel_bg95_read_response(quectel_bg95_t *dev, uint8_t *buf, size_t max,
-                                        size_t *received_out, uint32_t timeout_ms);
+alp_status_t quectel_bg95_read_response(
+    quectel_bg95_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms);
 
 /** @brief Release driver context. */
 void quectel_bg95_deinit(quectel_bg95_t *dev);

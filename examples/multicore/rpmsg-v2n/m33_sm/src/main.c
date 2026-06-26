@@ -35,44 +35,44 @@
 
 int main(void)
 {
-    printf("[m33] rpmsg-v2n producer coming up\n");
+	printf("[m33] rpmsg-v2n producer coming up\n");
 
-    /* Spec §6.6 canonical open.  Every value here comes from the
+	/* Spec §6.6 canonical open.  Every value here comes from the
      * generated header; the orchestrator computed them from the
      * project's `ipc:` block deterministically. */
-    const alp_rpc_config_t cfg = {
-        .name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
-        .src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
-        .dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
-        .mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
-    };
-    alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
-    if (ch == NULL) {
-        printf("[m33]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
-        goto done;
-    }
+	const alp_rpc_config_t cfg = {
+		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+		.dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+		.mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
+	};
+	alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
+	if (ch == NULL) {
+		printf("[m33]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
+		goto done;
+	}
 
-    /* Producer loop.  Synthetic counter on native_sim; on real
+	/* Producer loop.  Synthetic counter on native_sim; on real
      * V2N silicon this would read alp_adc_read() / alp_i2c_xfer()
      * / alp_sensor_read() against the board's on-board sensor. */
-    for (uint32_t i = 0; i < SAMPLE_BURST; ++i) {
-        const float        sample = 22.5f + (float)i * 0.1f;
-        const alp_status_t rv     = alp_rpc_send(ch, "temperature", &sample, sizeof(sample));
-        if (rv != ALP_OK) {
-            printf("[m33]   alp_rpc_send rv=%d at i=%u\n", (int)rv, (unsigned)i);
-            break;
-        }
-        printf("[m33] sent temperature[%u]=%.1f\n", (unsigned)i, (double)sample);
+	for (uint32_t i = 0; i < SAMPLE_BURST; ++i) {
+		const float        sample = 22.5f + (float)i * 0.1f;
+		const alp_status_t rv     = alp_rpc_send(ch, "temperature", &sample, sizeof(sample));
+		if (rv != ALP_OK) {
+			printf("[m33]   alp_rpc_send rv=%d at i=%u\n", (int)rv, (unsigned)i);
+			break;
+		}
+		printf("[m33] sent temperature[%u]=%.1f\n", (unsigned)i, (double)sample);
 
 #ifndef CONFIG_BOARD_NATIVE_SIM
-        /* 1 Hz cadence on real silicon. */
-        k_msleep(1000);
+		/* 1 Hz cadence on real silicon. */
+		k_msleep(1000);
 #endif
-    }
+	}
 
-    alp_rpc_close(ch);
+	alp_rpc_close(ch);
 
 done:
-    printf("[rpmsg-v2n] done\n");
-    return 0;
+	printf("[rpmsg-v2n] done\n");
+	return 0;
 }

@@ -39,9 +39,9 @@ extern "C" {
 #define ATECC608B_I2C_ADDR_DEFAULT 0x35u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } atecc608b_t;
 
 /** @brief Bind context to caller-opened I²C bus. */

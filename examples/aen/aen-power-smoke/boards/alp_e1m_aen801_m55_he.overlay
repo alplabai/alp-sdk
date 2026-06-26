@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Stage-A low-power smoke overlay for the E1M-AEN801 (Alif Ensemble E8,
+ * M55-HE), bench RAM-run via J-Link.  No peripheral nodes are needed -- the
+ * smoke uses only the architectural SysTick (system clock) as both timekeeper
+ * and WFI wake source, plus a global-SRAM0 beacon written by absolute address
+ * (0x02000000), so the only job of this overlay is the standard bench RAM-run
+ * retarget (run from ITCM, drop the MCUboot code-partition fixup), matching the
+ * sibling aen-*-regcheck apps.
+ */
+
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

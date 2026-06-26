@@ -1,0 +1,15 @@
+# Revisions to ignore in `git blame` — bulk, mechanical, whitespace-only
+# reformats that would otherwise bury authorship behind a single style commit.
+#
+# Enable locally:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub applies this file automatically in its blame view.)
+
+# style: reformat native C to tab indentation (alp-sdk house style)
+2fc8e0d3d717ade90a0ca9dd66296533593c8d82
+
+# style: reapply clang-format with the readability settings (Consecutive align, macros, BinPack off)
+afa7e7e273b2f799ef503b0a364f2ca088cf90fc
+
+# style(cc3501e): clang-format-14 the cc3501e sources to the house style
+45a3d4fd8f59757e1f02ed1e24b92258c83bb8ba

@@ -16,22 +16,22 @@
 
 void bench_audio_main(void)
 {
-    /* PDM input NULL-cfg rejection. */
-    BENCH_RUN("alp_audio_in_open(NULL)", 1000000, { (void)alp_audio_in_open(NULL); });
+	/* PDM input NULL-cfg rejection. */
+	BENCH_RUN("alp_audio_in_open(NULL)", 1000000, { (void)alp_audio_in_open(NULL); });
 
-    /* PDM input with an empty cfg -- exercises the struct-touch
+	/* PDM input with an empty cfg -- exercises the struct-touch
      * cost in the stub backend.  Real path will validate
      * peripheral_id + sample_rate against soc_caps. */
-    BENCH_RUN("alp_audio_in_open(empty cfg)", 1000000, {
-        alp_audio_config_t cfg = {0};
-        (void)alp_audio_in_open(&cfg);
-    });
+	BENCH_RUN("alp_audio_in_open(empty cfg)", 1000000, {
+		alp_audio_config_t cfg = { 0 };
+		(void)alp_audio_in_open(&cfg);
+	});
 
-    /* I2S output NULL-cfg rejection. */
-    BENCH_RUN("alp_audio_out_open(NULL)", 1000000, { (void)alp_audio_out_open(NULL); });
+	/* I2S output NULL-cfg rejection. */
+	BENCH_RUN("alp_audio_out_open(NULL)", 1000000, { (void)alp_audio_out_open(NULL); });
 
-    BENCH_RUN("alp_audio_out_open(empty cfg)", 1000000, {
-        alp_audio_config_t cfg = {0};
-        (void)alp_audio_out_open(&cfg);
-    });
+	BENCH_RUN("alp_audio_out_open(empty cfg)", 1000000, {
+		alp_audio_config_t cfg = { 0 };
+		(void)alp_audio_out_open(&cfg);
+	});
 }

@@ -11,9 +11,10 @@ display_name:     "GigaDevice GD32G553MEY7TR Cortex-M33 supervisor MCU"
 vendor:           gigadevice
 mpn_population:
   - "GD32G553MEY7TR"                    # 216 MHz Cortex-M33 core, 512 KB flash, 128 KB SRAM.
-                                        # NOTE: the advanced-timer clock domain
-                                        # (TIMER0/TIMER7) runs at 240 MHz, not the
-                                        # 216 MHz core -- see pwm_routing.counter_clock_hz.
+                                        # Timer clock domain (TIMER0/TIMER7) = CK_APB
+                                        # at DIV1 = the same 216 MHz as the core (no
+                                        # separate timer PLL exists on this part) --
+                                        # see pwm_routing.counter_clock_hz.
 datasheet:
   primary:        "GD32G553xx datasheet"
   user_manual:    "GD32G553 user manual"
@@ -73,13 +74,15 @@ signals:
 # --------------------------------------------------------------------
 # E1M PWM routing on the GD32 side.  All eight E1M PWM channels ride
 # the GD32's two 16-bit advanced timers (TIMER0 + TIMER7).  Counter
-# clock is the 240 MHz advanced-timer clock (distinct from the
-# 216 MHz Cortex-M33 core clock); effective LSB ~4.16 ns; maximum
-# period ~273 us at full 16-bit count.  Firmware translates caller
-# `period_ns` / `duty_ns` from CMD_PWM_SET into the timer's CAR /
-# CHnCV register pair and reports the rounded actual via CMD_PWM_GET.
+# clock is the 216 MHz CK_TIMER (= CK_APB at DIV1 = the Cortex-M33
+# core clock; this part has NO separate timer PLL -- a long-standing
+# "240 MHz timer clock" claim here was invented and is corrected as
+# of fw v0.2.4); effective LSB ~4.63 ns; maximum period ~303 us at
+# full 16-bit count.  Firmware translates caller `period_ns` /
+# `duty_ns` from CMD_PWM_SET into the timer's CAR / CHnCV register
+# pair and reports the register-derived actual via CMD_PWM_GET.
 pwm_routing:
-  counter_clock_hz: 240000000
+  counter_clock_hz: 216000000
   channels:
     - { e1m: PWM0, gd32_pad: PA11, timer: TIMER0, channel: MCH0 }
     - { e1m: PWM1, gd32_pad: PB1,  timer: TIMER0, channel: MCH2 }
@@ -92,9 +95,8 @@ pwm_routing:
   notes: |
     Both TIMER0 and TIMER7 are 16-bit advanced-control timers with
     dead-time generation, complementary output, and break-input
-    support.  The 16-bit counter at the 240 MHz core clock gives
-    ~4.16 ns LSB (the 240 MHz advanced-timer clock, not the 216 MHz
-    core clock); periods longer than ~273 us require the firmware's
+    support.  The 16-bit counter at the 216 MHz CK_TIMER gives
+    ~4.63 ns LSB; periods longer than ~303 us require the firmware's
     repetition-counter / prescaler logic (firmware-internal, not
     surfaced via CMD_PWM_SET).  Channel ordering matches the
     GD32G553 datasheet -- note that on TIMER0, MCH2 (not MCH1) maps

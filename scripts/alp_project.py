@@ -18,6 +18,9 @@ Usage:
     # Yocto local.conf snippet:
     python3 scripts/alp_project.py --emit yocto-conf
 
+    # Per-core natural-vs-effective OS facts (JSON; for IDEs / tooling):
+    python3 scripts/alp_project.py --emit os-topology
+
     # Write to a file (typical Zephyr usage: included by prj.conf):
     python3 scripts/alp_project.py --emit zephyr-conf \\
         --output build/generated/alp.conf
@@ -814,20 +817,33 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
 # guess vendor DT naming.
 
 # Match `#define <NAME> E1M_<CLASS><N>` (with optional trailing
-# token).  Class is one of the bus / pwm / gpio names we care about
-# at v0.3 scope.
+# token).  Class is one of the bus / pwm / gpio / analog-converter
+# names we care about.  ADC + DAC join the set so the portable
+# <alp/adc.h> / <alp/dac.h> backends -- which resolve their channels
+# via the `alp-adcN` / `alp-dacN` DT aliases -- get a generated alias
+# scaffold from the board's `e1m_routes.adc` / `.dac` entries.
 _DEFINE_E1M_RE = re.compile(
-    r"^\s*#\s*define\s+(\w+)\s+E1M_(I2C|SPI|UART|PWM|GPIO_IO)(\d+)\b",
+    r"^\s*#\s*define\s+(\w+)\s+E1M_(I2C|SPI|UART|PWM|ADC|DAC|GPIO_IO)(\d+)\b",
     re.MULTILINE,
 )
 
 # Bus-alias buckets the loader emits.  Each entry maps the e1m_pinout
 # class name -> (alias prefix, Zephyr DT phandle prefix).
+#
+# The phandle prefix is the convention-default node-label (&i2c0,
+# &adc0, ...); vendor DT may use a different label (e.g. the Alif
+# Ensemble ADCs are node-labelled `adc12_0` and the EEPROM bus is
+# `i2c2`), in which case the per-app board overlay repoints the alias
+# (`aliases { alp-adc0 = &adc12_0; };`) -- the loader's job is to
+# surface every alias the board wires, not to second-guess vendor DT
+# node-label naming.
 _BUS_BUCKETS: tuple[tuple[str, str, str], ...] = (
     ("I2C",  "alp-i2c",  "i2c"),
     ("SPI",  "alp-spi",  "spi"),
     ("UART", "alp-uart", "uart"),
     ("PWM",  "alp-pwm",  "pwm"),
+    ("ADC",  "alp-adc",  "adc"),
+    ("DAC",  "alp-dac",  "dac"),
 )
 
 
@@ -1497,6 +1513,7 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             OrchestratorError,
             emit_dts_reservations,
             emit_ipc_contract_h,
+            emit_os_topology,
             emit_system_manifest,
             load_board_yaml,
         )
@@ -1514,6 +1531,8 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             out = emit_ipc_contract_h(project)
         elif args.emit == "dts-reservations":
             out = emit_dts_reservations(project)
+        elif args.emit == "os-topology":
+            out = emit_os_topology(project)
         else:
             print(f"alp_project: unknown v2 emit '{args.emit}'",
                   file=sys.stderr)
@@ -1704,6 +1723,8 @@ def main() -> int:
                                  # v2 orchestration emits (Phase 2):
                                  "system-manifest", "dts-reservations",
                                  "ipc-contract-h",
+                                 # Per-core natural-vs-effective OS facts (issue #95).
+                                 "os-topology",
                                  # Demonstrator: JSON route-table dump.
                                  "composed-route-table"],
                         default="zephyr-conf",
@@ -1728,7 +1749,7 @@ def main() -> int:
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
     # ipc-contract-h) route through alp_orchestrate.py directly.
     if args.emit in ("system-manifest", "dts-reservations",
-                     "ipc-contract-h"):
+                     "ipc-contract-h", "os-topology"):
         return _run_v2_emit(args)
 
     project = _validate_and_load(args.input)

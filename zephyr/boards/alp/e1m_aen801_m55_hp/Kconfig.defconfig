@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_ALP_E1M_AEN801_M55_HP
+
+# The Ensemble E8 RTSS-HP has CONFIG_NUM_IRQS=480, so the ARMv8-M vector table is
+# (16 + 480) * 4 = 1984 bytes and the hardware VTOR must be 2 KiB (0x800) aligned.
+# For an MCUboot chain-loaded image the linker therefore places _vector_table at
+# slot_base + 0x800, but Zephyr hard-defaults the MCUboot header (ROM_START_OFFSET,
+# which is also imgtool --header-size) to 0x200 under BOOTLOADER_MCUBOOT and makes
+# it non-promptable. MCUboot then jumps to slot_base + 0x200 (header end) and reads
+# a garbage SP/PC from the 0x600 padding gap -> instant HardFault -> reset/reboot
+# loop, never reaching the app. Bump the header reservation to match the vector
+# alignment so the jump target == _vector_table. (Affects only chain-loaded images;
+# MCUboot itself builds with BOOTLOADER_MCUBOOT=n.)
+config ROM_START_OFFSET
+	default 0x800 if BOOTLOADER_MCUBOOT
+
+endif # BOARD_ALP_E1M_AEN801_M55_HP

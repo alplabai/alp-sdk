@@ -1,0 +1,91 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
+// @cliArgs --board /ti/boards/LP_EM_CC35X1 --rtos freertos
+
+/*
+ * cc3501e-bridge ti-build board file (SysConfig input).
+ *
+ * Generates CONFIG_SPI_0 -- the inter-chip SPI-peripheral (slave) the
+ * firmware opens in hal/ti/transport_hw_ti_spi.c (SPI_open(CONFIG_SPI_0,
+ * SPI_PERIPHERAL, SPI_MODE_CALLBACK)).  Based on the SDK's
+ * drivers/spiperipheral demo (examples/rtos/LP_EM_CC35X1/drivers/spiperipheral).
+ *
+ * AEN INTER-CHIP PINOUT (bench, 2026-06-16).  The on-module link wires the
+ * CC3501E (U4, BDE-BW35N) SPI0 to the Alif (U6) SPI1, traced from the SoM
+ * netlist (som_pinmap.csv) + metadata/e1m_modules/aen/inter-chip.tsv:
+ *
+ *   CC3501E pin   net               Alif pin (SPI1, master)
+ *   -----------   ---------------   -----------------------
+ *   GPIO_27       WIFI_SPI0.SCK     P14_6  SPI1_SCLK_C   -> SCLK
+ *   GPIO_28       WIFI_SPI0.MOSI    P14_5  SPI1_MOSI_C   -> CC3501E data IN  (PICO)
+ *   GPIO_29       WIFI_SPI0.MISO    P14_4  SPI1_MISO_C   -> CC3501E data OUT (POCI)
+ *
+ * ============================ HARDWARE NOTE ============================
+ * *** SoM rev BUG: the SPI0 data lines are CROSSED. ***  The CC35xx silicon
+ * FIXES the SPI0 pin roles (confirmed via SysConfig valid-pin sets):
+ *     PICO (peripheral data IN)  = GPIO29  (GPIO28 is NOT a valid PICO pin)
+ *     POCI (peripheral data OUT) = GPIO28
+ * but the SoM (som_pinmap.csv) wires, via straight series resistors:
+ *     Alif P14_5 SPI1_MOSI (master OUT) --R48-- CC3501E GPIO28 (= POCI, OUT)
+ *     Alif P14_4 SPI1_MISO (master IN)  --R62-- CC3501E GPIO29 (= PICO, IN)
+ * => MOSI lands on the CC3501E's OUTPUT (two drivers contend) and MISO lands
+ * on its INPUT (two receivers, no driver).  Both Alif pads (SPI1_MOSI_C /
+ * SPI1_MISO_C) and both CC35xx data roles are silicon-fixed, so NEITHER side
+ * can correct it in firmware.  The link needs a HARDWARE fix (cross the two
+ * data nets: route Alif MOSI/P14_5 -> GPIO29, Alif MISO/P14_4 -> GPIO28) or a
+ * next SoM rev.  See alp-sdk-internal HW tracker.
+ *
+ * This file uses the only SILICON-LEGAL mapping (PICO=GPIO29, POCI=GPIO28),
+ * which is ALSO the correct firmware pinout once the HW data lines are
+ * crossed.  (It happens to equal the LaunchPad LP_SPI0_BUS default.)
+ * ======================================================================
+ *
+ * CS-less 3-wire: this HW rev wires only SCLK/MOSI/MISO (no CS, no host IRQ),
+ * so "Three Pin" mode (no CSN pin) is used and the firmware's deterministic
+ * lockstep frames transactions without a CS edge.
+ */
+
+/* ======== Kernel ======== */
+system.getScript("kernel_config_release.syscfg.js");
+
+/* ======== SPI peripheral (slave) -> CONFIG_SPI_0 ======== */
+var SPI  = scripting.addModule("/ti/drivers/SPI");
+var spi0 = SPI.addInstance();
+spi0.$name                = "CONFIG_SPI_0";
+/*
+ * BENCH FIX 2026-06-17: the CC35 SPI *peripheral* needs its CS (ss_in_n)
+ * asserted to shift + drive POCI. In "Three Pin" mode the driver still left a
+ * default CS0 on GPIO26 configured as a floating input -> slave never selected
+ * -> POCI high-Z (scope: flat ~1V), ping_ok=0. GPIO26 is ALSO the SoM's
+ * SDIO_MUX_EN (74LVC157 /E) so it can't be tied. Fix: route the CS to GPIO16,
+ * which the SoM already pulls LOW -> CS permanently asserted -> slave
+ * continuously selected, no extra wire. (CS is never toggled by the Alif host;
+ * the 3-wire deterministic-count framing is unchanged.)
+ */
+spi0.mode                 = "Four Pin CS Active Low";
+spi0.duplex               = "Full";       /* both data lines (RX requests + TX replies) */
+spi0.defaultTxBufferValue = "0xA5";       /* idle MISO = the 0xA5 SYNC marker (ALP_CC3501E_SYNC_IDLE) so the
+                                           * slave drives 0xA5 even BETWEEN armed transfers (callback re-arm
+                                           * gap) -- the host's 0xA5 sync then never catches a stray idle byte
+                                           * mid-frame on cold first-contact. Ship value (was bench-diag 0x5A,
+                                           * which leaked into reqhdr_rx as 0x..005A and cold-byte-misaligned). */
+
+/* Silicon-legal pads (see HARDWARE NOTE).  The pin resources live under the
+ * instance's `spi` peripheral group; $assign uses the device pad names. */
+spi0.spi.sclkPin.$assign = "GPIO27";  /* <- Alif SCLK/P14_6 (correctly wired) */
+spi0.spi.picoPin.$assign = "GPIO29";  /* peripheral data IN  (needs Alif MOSI here -- HW cross) */
+spi0.spi.pociPin.$assign = "GPIO28";  /* peripheral data OUT (needs Alif MISO here -- HW cross) */
+spi0.spi.csnPin.$assign  = "GPIO16";  /* CS -> GPIO16 (only silicon-legal CS of the W_DISABLE pair; GPIO17 = resource conflict). Must be tied/pulled LOW to assert (see note above). */
+
+/* host-DMA on the FREE channels 12/13 (SHIP-CRITICAL -- keep in sync with
+ * cc3501e_aen_wifi.syscfg).  The transport opens the slave SPI_MODE_CALLBACK so
+ * the driver DMAs the FIFO; the on-chip radio (a separate NWP) claims only
+ * host-DMA channels 0..11 (TRM swru626 §11: UART 0-3, SPI 4-5, TEMP 6-10, HIF
+ * ch11) of the 14, so channels 12/13 are FREE and the radio never remuxes them.
+ * Pin RX DMA to ch12, TX DMA to ch13 so Wlan_Start/scan/connect cannot steal the
+ * bridge's channels.  The default/radio-free build matches the Wi-Fi build so
+ * both run the one CALLBACK/DMA transport. */
+spi0.spi.dmaRxChannel.$assign = "DMA_CH12";
+spi0.spi.dmaTxChannel.$assign = "DMA_CH13";

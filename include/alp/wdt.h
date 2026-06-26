@@ -49,9 +49,9 @@ extern "C" {
 
 /** What happens when the watchdog fires. */
 typedef enum {
-    ALP_WDT_RESET_SOC      = 0,   /**< Full SoC reset (default; safest). */
-    ALP_WDT_RESET_CPU      = 1,   /**< Core reset only — peripherals keep state. */
-    ALP_WDT_INTERRUPT_ONLY = 2    /**< Generate an IRQ; no reset. */
+	ALP_WDT_RESET_SOC      = 0, /**< Full SoC reset (default; safest). */
+	ALP_WDT_RESET_CPU      = 1, /**< Core reset only — peripherals keep state. */
+	ALP_WDT_INTERRUPT_ONLY = 2  /**< Generate an IRQ; no reset. */
 } alp_wdt_action_t;
 
 /** Opaque watchdog handle.  Allocate via @ref alp_wdt_open. */
@@ -59,8 +59,8 @@ typedef struct alp_wdt alp_wdt_t;
 
 /** Configuration passed to @ref alp_wdt_open. */
 typedef struct {
-    uint32_t          timeout_ms;
-    alp_wdt_action_t  on_timeout;
+	uint32_t         timeout_ms;
+	alp_wdt_action_t on_timeout;
 } alp_wdt_config_t;
 
 /**
@@ -78,7 +78,7 @@ typedef struct {
  *         underlying device isn't ready, or the SoC rejected the
  *         requested timeout (too long for the hardware).
  */
-alp_wdt_t   *alp_wdt_open(uint32_t wdt_id, const alp_wdt_config_t *cfg);
+alp_wdt_t *alp_wdt_open(uint32_t wdt_id, const alp_wdt_config_t *cfg);
 
 /**
  * @brief Reset the watchdog timer.
@@ -106,7 +106,7 @@ alp_status_t alp_wdt_feed(alp_wdt_t *wdt);
 alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
 
 /** @brief Best-effort disable, then release the handle.  NULL is a no-op. */
-void         alp_wdt_close(alp_wdt_t *wdt);
+void alp_wdt_close(alp_wdt_t *wdt);
 
 /**
  * @brief Query the capabilities of an opened watchdog handle.
@@ -117,7 +117,7 @@ void         alp_wdt_close(alp_wdt_t *wdt);
 const alp_capabilities_t *alp_wdt_capabilities(const alp_wdt_t *wdt);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_WDT_H */
+#endif /* ALP_WDT_H */

@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-gd32-bridge-functional
+  description: |
+    V2N-specific single-pass FUNCTIONAL validation of the GD32 bridge:
+    value-asserting tests (not just status checks) for the math (TMU),
+    TRNG, PWM-configure, ADC-configure and DSP-chain surfaces, then a
+    forever PWM7 duty staircase as a live oscilloscope observable
+    (PWM7 doubles as the EVK LED pad).  Exercises the gd32g553
+    chip-driver surface directly (intentional for this bridge demo
+    per spec §4.5).
+
+tests:
+  alp_sdk.examples.v2n.gd32_bridge_functional.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - supervisor-mcu
+      - gd32-bridge
+      - hil
+      - functional
+    build_only: true

@@ -72,60 +72,60 @@ extern "C" {
  *  Vela picks at model-compile time and the runtime dispatches via
  *  the matching driver shim emitted by `scripts/alp_project.py`. */
 typedef enum {
-    ALP_INFERENCE_BACKEND_AUTO    = 0,
-    ALP_INFERENCE_BACKEND_CPU     = 1, /**< TFLM reference kernels. */
-    ALP_INFERENCE_BACKEND_ETHOS_U = 2, /**< Arm Ethos-U via Vela (U55 / U65 / U85). */
-    ALP_INFERENCE_BACKEND_DRPAI   = 3, /**< Renesas DRP-AI3. */
-    ALP_INFERENCE_BACKEND_DEEPX_DXM1 =
-        4 /**< DEEPX DX-M1 (canonical id; matches the .alpmodel `deepx_dxm1` backend string). */
+	ALP_INFERENCE_BACKEND_AUTO    = 0,
+	ALP_INFERENCE_BACKEND_CPU     = 1, /**< TFLM reference kernels. */
+	ALP_INFERENCE_BACKEND_ETHOS_U = 2, /**< Arm Ethos-U via Vela (U55 / U65 / U85). */
+	ALP_INFERENCE_BACKEND_DRPAI   = 3, /**< Renesas DRP-AI3. */
+	ALP_INFERENCE_BACKEND_DEEPX_DXM1 =
+	    4 /**< DEEPX DX-M1 (canonical id; matches the .alpmodel `deepx_dxm1` backend string). */
 } alp_inference_backend_t;
 
 /** Model format.  Each backend supports a subset; AUTO picks based
  *  on whichever loader matches the magic bytes at the head of the
  *  model buffer. */
 typedef enum {
-    ALP_INFERENCE_MODEL_TFLITE     = 0,    /**< `.tflite` flatbuffer. */
-    ALP_INFERENCE_MODEL_VELA       = 1,    /**< Vela-compiled `.tflite`. */
-    ALP_INFERENCE_MODEL_DRPAI      = 2,    /**< Renesas DRP-AI binary. */
-    ALP_INFERENCE_MODEL_DXNN       = 3,    /**< DEEPX DXNN binary. */
-    ALP_INFERENCE_MODEL_EXECUTORCH = 4     /**< ExecuTorch program. */
+	ALP_INFERENCE_MODEL_TFLITE     = 0, /**< `.tflite` flatbuffer. */
+	ALP_INFERENCE_MODEL_VELA       = 1, /**< Vela-compiled `.tflite`. */
+	ALP_INFERENCE_MODEL_DRPAI      = 2, /**< Renesas DRP-AI binary. */
+	ALP_INFERENCE_MODEL_DXNN       = 3, /**< DEEPX DXNN binary. */
+	ALP_INFERENCE_MODEL_EXECUTORCH = 4  /**< ExecuTorch program. */
 } alp_inference_model_format_t;
 
 /** Tensor element type. */
 typedef enum {
-    ALP_INFERENCE_DTYPE_F32    = 0,
-    ALP_INFERENCE_DTYPE_F16    = 1,
-    ALP_INFERENCE_DTYPE_INT8   = 2,
-    ALP_INFERENCE_DTYPE_UINT8  = 3,
-    ALP_INFERENCE_DTYPE_INT16  = 4,
-    ALP_INFERENCE_DTYPE_INT32  = 5
+	ALP_INFERENCE_DTYPE_F32   = 0,
+	ALP_INFERENCE_DTYPE_F16   = 1,
+	ALP_INFERENCE_DTYPE_INT8  = 2,
+	ALP_INFERENCE_DTYPE_UINT8 = 3,
+	ALP_INFERENCE_DTYPE_INT16 = 4,
+	ALP_INFERENCE_DTYPE_INT32 = 5
 } alp_inference_dtype_t;
 
 /** Tensor descriptor — what `get_input` / `get_output` return. */
 typedef struct {
-    void                  *data;          /**< Backend-owned buffer. */
-    size_t                 size_bytes;    /**< Total buffer size. */
-    alp_inference_dtype_t  dtype;
-    uint8_t                rank;          /**< 0..4 typical. */
-    uint16_t               shape[4];      /**< Most-significant first. */
-    /** Quantisation params (only meaningful when dtype is integer). */
-    float                  scale;
-    int32_t                zero_point;
+	void                 *data;       /**< Backend-owned buffer. */
+	size_t                size_bytes; /**< Total buffer size. */
+	alp_inference_dtype_t dtype;
+	uint8_t               rank;     /**< 0..4 typical. */
+	uint16_t              shape[4]; /**< Most-significant first. */
+	/** Quantisation params (only meaningful when dtype is integer). */
+	float   scale;
+	int32_t zero_point;
 } alp_inference_tensor_t;
 
 typedef struct alp_inference alp_inference_t;
 
 typedef struct {
-    const void                  *model_data;   /**< Pointer to model bytes. */
-    size_t                       model_size;
-    alp_inference_model_format_t format;
-    alp_inference_backend_t      backend;
-    /** Bytes of scratch arena the backend may use.  TFLM-style
+	const void                  *model_data; /**< Pointer to model bytes. */
+	size_t                       model_size;
+	alp_inference_model_format_t format;
+	alp_inference_backend_t      backend;
+	/** Bytes of scratch arena the backend may use.  TFLM-style
      *  backends size this from the compile-time tensor arena
      *  estimate; if 0, the backend uses a built-in default. */
-    size_t                       arena_bytes;
-    /** Caller-allocated arena, or NULL to let the backend use heap. */
-    void                        *arena;
+	size_t arena_bytes;
+	/** Caller-allocated arena, or NULL to let the backend use heap. */
+	void *arena;
 } alp_inference_config_t;
 
 /**
@@ -150,12 +150,12 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
  *  or a storage @c path (Linux).  @c backend = AUTO lets the loader pick
  *  the best blob for the active SoM; pin a specific backend to force it. */
 typedef struct {
-    const void             *data;        /**< Package bytes, or NULL to use @c path. */
-    size_t                  size;        /**< Byte count when @c data is set. */
-    const char             *path;        /**< Storage path (Linux), or NULL. */
-    alp_inference_backend_t backend;     /**< AUTO, or a forced backend. */
-    size_t                  arena_bytes; /**< 0 = size from the manifest. */
-    void                   *arena;       /**< Caller arena, or NULL for backend default. */
+	const void             *data;        /**< Package bytes, or NULL to use @c path. */
+	size_t                  size;        /**< Byte count when @c data is set. */
+	const char             *path;        /**< Storage path (Linux), or NULL. */
+	alp_inference_backend_t backend;     /**< AUTO, or a forced backend. */
+	size_t                  arena_bytes; /**< 0 = size from the manifest. */
+	void                   *arena;       /**< Caller arena, or NULL for backend default. */
 } alp_model_open_opts_t;
 
 /**
@@ -169,7 +169,7 @@ typedef struct {
  * @c alp_inference_* accessors unchanged.
  *
  * @param[in] opts  Load options; @c data (with @c size) or @c path required.
- * @return Open handle, or NULL — read @ref alp_last_error:
+ * @return Open handle, or NULL — read @ref alp_last_error for the cause:
  *         ALP_ERR_INVAL (bad opts / bad magic / corrupt),
  *         ALP_ERR_VERSION (package newer than this loader),
  *         ALP_ERR_NO_BACKEND / ALP_ERR_NO_FIT / ALP_ERR_NOT_FOUND (selection),
@@ -183,7 +183,7 @@ alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts);
  * @param[in] inf  Handle from @ref alp_inference_open, or NULL.
  * @return Input tensor count, or 0 if @p inf is NULL or closed.
  */
-size_t           alp_inference_num_inputs(alp_inference_t *inf);
+size_t alp_inference_num_inputs(alp_inference_t *inf);
 
 /**
  * @brief Number of output tensors the model produces.
@@ -191,7 +191,7 @@ size_t           alp_inference_num_inputs(alp_inference_t *inf);
  * @param[in] inf  Handle from @ref alp_inference_open, or NULL.
  * @return Output tensor count, or 0 if @p inf is NULL or closed.
  */
-size_t           alp_inference_num_outputs(alp_inference_t *inf);
+size_t alp_inference_num_outputs(alp_inference_t *inf);
 
 /**
  * @brief Get a descriptor for input tensor @p index.
@@ -207,9 +207,8 @@ size_t           alp_inference_num_outputs(alp_inference_t *inf);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_NOT_READY.
  */
-alp_status_t     alp_inference_get_input(alp_inference_t *inf,
-                                         size_t index,
-                                         alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);
 
 /**
  * @brief Get a descriptor for output tensor @p index.
@@ -226,9 +225,8 @@ alp_status_t     alp_inference_get_input(alp_inference_t *inf,
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_NOT_READY.
  */
-alp_status_t     alp_inference_get_output(alp_inference_t *inf,
-                                          size_t index,
-                                          alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);
 
 /**
  * @brief Run one inference pass.
@@ -243,14 +241,14 @@ alp_status_t     alp_inference_get_output(alp_inference_t *inf,
  *         ALP_ERR_INVAL / ALP_ERR_TIMEOUT (NPU stuck) /
  *         ALP_ERR_IO (NPU error).
  */
-alp_status_t     alp_inference_invoke(alp_inference_t *inf);
+alp_status_t alp_inference_invoke(alp_inference_t *inf);
 
 /**
  * @brief Release the model + tensor buffers.  NULL-safe.
  *
  * @param[in] inf  Handle from @ref alp_inference_open, or NULL.
  */
-void             alp_inference_close(alp_inference_t *inf);
+void alp_inference_close(alp_inference_t *inf);
 
 /**
  * @brief Query the per-instance capabilities of an opened inference handle.
@@ -267,7 +265,7 @@ void             alp_inference_close(alp_inference_t *inf);
 const alp_capabilities_t *alp_inference_capabilities(const alp_inference_t *inf);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_INFERENCE_H */
+#endif /* ALP_INFERENCE_H */

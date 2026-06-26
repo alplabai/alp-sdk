@@ -62,9 +62,10 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `gpio-button-led`            | GPIO open + configure (input + output); the canonical first build.       |
 | `i2c-scanner`                | Walk an I2C bus + report every device that ACKs.                         |
 | `i2c-master`                 | Read a known I2C device (TMP112) at a known address.                     |
-| `i2c-slave`                  | Slave-mode shape + SDK gap notice (master-only today; v0.7 lands slave). |
+| `i2c-slave`                  | Slave-mode shape + SDK gap notice (master-only today; not yet implemented). |
+| `i2c-device-hub`             | Read every populated IC on the EVK sensor/power bus through its real chip driver -- one bus, many devices. |
 | `spi-master`                 | Discrete SPI master -- write / transceive / read patterns.                |
-| `spi-slave`                  | Slave-mode shape + SDK gap notice (master-only today; v0.7 lands slave). |
+| `spi-slave`                  | Slave-mode shape + SDK gap notice (master-only today; not yet implemented). |
 | `spi-loopback`               | SPI MOSI ↔ MISO loopback (jumper between the two pins).                  |
 | `uart-echo`                  | Open a UART; loop received bytes back to TX.                             |
 | `uart-hello-world`           | Canonical "printf via UART" walkthrough -- producer-only counterpart.     |
@@ -72,7 +73,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `pwm-led-fade`               | PWM channel open + sweep duty cycle.                                     |
 | `adc-voltmeter`              | Sample an ADC channel; convert raw → millivolts.                         |
 | `vendor-ext-composability`   | One ADC pad, three ways -- plain GPIO, portable ADC, then an *additive* Alif vendor extension. Proves `<alp/ext/...>` never locks a pad out of the portable surfaces. |
-| `dac-waveform`               | Generate a sine wave on `E1M_X_DAC0`. **(E1M-X; V2N today)**             |
+| `dac-waveform`               | Generate a sine wave on `BOARD_DAC0` -- native DAC on E1M (Alif), GD32-bridged on E1M-X (V2N). |
 | `can-loopback`               | CAN(-FD) frame TX + self-reception via loopback mode.                    |
 | `qenc-readout`               | Quadrature-encoder pulse counter.                                        |
 | `drone-autopilot`            | Real-time PID flight controller -- IMU → cascaded PID → PWM ESCs; deterministic multi-rate loops. **(AEN; advanced -- don't fly)** |
@@ -109,6 +110,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `iot-connected-camera`   | End-to-end IoT -- capture a frame, publish it to MQTT.                             |
 | `iot-dashboard`          | BME280 env samples → MQTT-over-TLS publish + a live LVGL dashboard. **(AEN)**      |
 | `iot-fleet-ota`          | Secure OTA firmware update with rollback; the v0.6 declarative `boot:` + `ota:` reference. |
+| `firmware-update-log`    | Portable tamper-evident update audit log -- one API, hardware-enforced on a secure backend, software tier on native_sim. |
 | `production-deployment`  | Field-product lifecycle flagship -- secure-boot + OTA + EEPROM provisioning + attestation in one `board.yaml`. |
 
 ### Display / GUI
@@ -171,6 +173,16 @@ SoM EEPROM manifest).
 | `v2n/v2n-xspi-flash-readwrite`  | Erase + write + read-back one page on the on-module xSPI NOR.            |
 | `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
+
+### AEN platform
+
+These live under `examples/aen/` and target the E1M-AEN (Alif
+Ensemble) family on the E1M-EVK board (lead part: E8).
+
+| Directory                       | What it shows                                                            |
+|---------------------------------|--------------------------------------------------------------------------|
+| `aen/edgeai-vision-aen`         | Flagship EdgeAI vision pipeline -- CSI camera -> VeriSilicon ISP Pico (vsi,isp-pico) -> Ethos-U55 -> OLED. |
+| `aen/aen-secure-element-sign`   | OPTIGA Trust M init + product info + raw-APDU ECDSA-P256 sign over BRD_I2C (M55-HE). |
 
 ## Anatomy of a single-OS example
 

@@ -26,63 +26,66 @@
 typedef struct alp_ble_ops alp_ble_ops_t;
 
 typedef struct alp_ble_radio_state {
-    void                *be_data;
-    const alp_ble_ops_t *ops;
+	void                *be_data;
+	const alp_ble_ops_t *ops;
 } alp_ble_radio_state_t;
 
 typedef struct alp_ble_conn_state {
-    struct alp_ble      *radio;   /* back-ref to owning radio handle */
-    void                *be_data;
-    const alp_ble_ops_t *ops;
+	struct alp_ble      *radio; /* back-ref to owning radio handle */
+	void                *be_data;
+	const alp_ble_ops_t *ops;
 } alp_ble_conn_state_t;
 
 struct alp_ble_ops {
-    /* Radio-side ops */
-    alp_status_t (*open)(alp_ble_radio_state_t *state,
-                         alp_capabilities_t *caps_out);
-    alp_status_t (*advertise_start)(alp_ble_radio_state_t *state,
-                                    const alp_ble_adv_config_t *cfg);
-    alp_status_t (*advertise_stop)(alp_ble_radio_state_t *state);
-    alp_status_t (*gatt_register_service)(alp_ble_radio_state_t *state,
-                                          const alp_ble_service_def_t *def,
-                                          alp_ble_attr_handle_t *handles_out);
-    alp_status_t (*gatt_notify)(alp_ble_radio_state_t *radio_state,
-                                alp_ble_conn_state_t *conn_state,
-                                alp_ble_attr_handle_t handle,
-                                const uint8_t *payload, size_t len);
-    alp_status_t (*scan_start)(alp_ble_radio_state_t *state,
-                               bool active,
-                               alp_ble_scan_cb_t cb, void *user);
-    alp_status_t (*scan_stop)(alp_ble_radio_state_t *state);
-    alp_status_t (*connect)(alp_ble_radio_state_t *state,
-                            const alp_ble_addr_t *peer,
-                            uint32_t timeout_ms,
-                            alp_ble_conn_state_t *conn_state_out);
-    void         (*close)(alp_ble_radio_state_t *state);
+	/* Radio-side ops */
+	alp_status_t (*open)(alp_ble_radio_state_t *state, alp_capabilities_t *caps_out);
+	alp_status_t (*advertise_start)(alp_ble_radio_state_t *state, const alp_ble_adv_config_t *cfg);
+	alp_status_t (*advertise_stop)(alp_ble_radio_state_t *state);
+	alp_status_t (*gatt_register_service)(alp_ble_radio_state_t       *state,
+	                                      const alp_ble_service_def_t *def,
+	                                      alp_ble_attr_handle_t       *handles_out);
+	alp_status_t (*gatt_notify)(alp_ble_radio_state_t *radio_state,
+	                            alp_ble_conn_state_t  *conn_state,
+	                            alp_ble_attr_handle_t  handle,
+	                            const uint8_t         *payload,
+	                            size_t                 len);
+	alp_status_t (*scan_start)(alp_ble_radio_state_t *state,
+	                           bool                   active,
+	                           alp_ble_scan_cb_t      cb,
+	                           void                  *user);
+	alp_status_t (*scan_stop)(alp_ble_radio_state_t *state);
+	alp_status_t (*connect)(alp_ble_radio_state_t *state,
+	                        const alp_ble_addr_t  *peer,
+	                        uint32_t               timeout_ms,
+	                        alp_ble_conn_state_t  *conn_state_out);
+	void (*close)(alp_ble_radio_state_t *state);
 
-    /* Conn-side ops */
-    alp_status_t (*disconnect)(alp_ble_conn_state_t *conn_state);
-    alp_status_t (*gatt_read)(alp_ble_conn_state_t *conn_state,
-                              alp_ble_attr_handle_t handle,
-                              uint8_t *out, size_t out_cap,
-                              size_t *out_len, uint32_t timeout_ms);
-    alp_status_t (*gatt_write)(alp_ble_conn_state_t *conn_state,
-                               alp_ble_attr_handle_t handle,
-                               const uint8_t *data, size_t len,
-                               uint32_t timeout_ms);
+	/* Conn-side ops */
+	alp_status_t (*disconnect)(alp_ble_conn_state_t *conn_state);
+	alp_status_t (*gatt_read)(alp_ble_conn_state_t *conn_state,
+	                          alp_ble_attr_handle_t handle,
+	                          uint8_t              *out,
+	                          size_t                out_cap,
+	                          size_t               *out_len,
+	                          uint32_t              timeout_ms);
+	alp_status_t (*gatt_write)(alp_ble_conn_state_t *conn_state,
+	                           alp_ble_attr_handle_t handle,
+	                           const uint8_t        *data,
+	                           size_t                len,
+	                           uint32_t              timeout_ms);
 };
 
 struct alp_ble {
-    alp_ble_radio_state_t  state;
-    const alp_backend_t   *backend;
-    alp_capabilities_t     cached_caps;
-    bool                   in_use;
+	alp_ble_radio_state_t state;
+	const alp_backend_t  *backend;
+	alp_capabilities_t    cached_caps;
+	bool                  in_use;
 };
 
 struct alp_ble_conn {
-    alp_ble_conn_state_t   state;
-    const alp_backend_t   *backend;
-    bool                   in_use;
+	alp_ble_conn_state_t state;
+	const alp_backend_t *backend;
+	bool                 in_use;
 };
 
 #endif /* ALP_BACKENDS_BLE_OPS_H */

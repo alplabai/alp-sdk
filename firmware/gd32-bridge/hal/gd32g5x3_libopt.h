@@ -8,15 +8,15 @@
  * Examples follow the same convention, each example carrying its own
  * libopt.h selector to keep the per-image flash footprint minimal.
  *
- * Pattern: each time `hal/bridge_hw_gd32.c` (or any peer that uses
+ * Pattern: each time a `hal/gd32/` TU (or any peer that uses
  * the standard-peripheral library) starts calling into a new
  * peripheral driver, add the matching `gd32g5x3_<periph>.h` include
  * here so the driver's prototype + register layouts are visible to
  * the translation unit.
  *
- * Today the file lists every header the eventual real-hook
- * implementations enumerated in `hal/bridge_hw_gd32.c`'s top comment
- * will need.  Including a header that isn't yet referenced is cheap
+ * Today the file lists every header the real-hook implementations
+ * enumerated in `hal/gd32/init.c`'s top comment
+ * need.  Including a header that isn't yet referenced is cheap
  * (header-only -- the driver's .c lives in
  * `vendors/gd32_firmware_library/upstream/Firmware/.../Source/`,
  * pulled into the static library by the vendor wrapper's CMake);

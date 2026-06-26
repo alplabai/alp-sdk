@@ -1,0 +1,30 @@
+# board.yaml -- per-app project configuration for v2n-gd32-bridge-loopback.
+#
+# This is the JUMPERED Tier-B loopback validation tier: it is V2N-only
+# and bench-only.  It will only produce meaningful results on an
+# E1M-X V2 carrier wired with the three loopback jumpers documented in
+# README.md (DAC0->CK_ANA, CK_PWM1->ENC1_X, CK_PWM2->CK_PWM3).  Do NOT
+# run it on an unwired board -- every test will simply fail its value
+# assertion.  Same SoM/board declarations as the sibling functional
+# example by design (one PCB, variant-populated V2N family).
+som:
+  sku: E1M-V2M101
+
+preset: e1m-x-evk
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    app: ./src
+    # SPI is the 25 MHz fast path under test; I2C is enabled so the
+    # driver's hybrid surface compiles (this suite passes i2c=NULL --
+    # only the SPI fast path carries the loopback transactions).
+    peripherals:
+      - spi
+      - i2c
+
+chips:
+  - gd32g553
+
+diagnostics:
+  log_level: info

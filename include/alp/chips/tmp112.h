@@ -42,24 +42,24 @@
 extern "C" {
 #endif
 
-#define TMP112_I2C_ADDR_GND 0x48u
+#define TMP112_I2C_ADDR_GND   0x48u
 #define TMP112_I2C_ADDR_VPLUS 0x49u
-#define TMP112_I2C_ADDR_SDA 0x4Au
-#define TMP112_I2C_ADDR_SCL 0x4Bu
+#define TMP112_I2C_ADDR_SDA   0x4Au
+#define TMP112_I2C_ADDR_SCL   0x4Bu
 
 /** Conversion-rate enum (CR1:CR0 in CONF). */
 typedef enum {
-    TMP112_RATE_0_25_HZ = 0,
-    TMP112_RATE_1_HZ    = 1,
-    TMP112_RATE_4_HZ    = 2, /**< Datasheet default. */
-    TMP112_RATE_8_HZ    = 3,
+	TMP112_RATE_0_25_HZ = 0,
+	TMP112_RATE_1_HZ    = 1,
+	TMP112_RATE_4_HZ    = 2, /**< Datasheet default. */
+	TMP112_RATE_8_HZ    = 3,
 } tmp112_rate_t;
 
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       extended_mode; /**< 13-bit if true (extended range up to +150 C). */
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       extended_mode; /**< 13-bit if true (extended range up to +150 C). */
 } tmp112_t;
 
 /** @brief Probe + configure for continuous-conversion mode. */

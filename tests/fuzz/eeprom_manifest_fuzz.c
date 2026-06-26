@@ -40,15 +40,15 @@
  * `zlib.crc32` use.  Inlined so the harness has no external dependency. */
 static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
 {
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= buf[i];
-        for (unsigned b = 0; b < 8; ++b) {
-            const uint32_t mask = -(int32_t)(crc & 1u);
-            crc = (crc >> 1) ^ (0xEDB88320u & mask);
-        }
-    }
-    return crc ^ 0xFFFFFFFFu;
+	uint32_t crc = 0xFFFFFFFFu;
+	for (size_t i = 0; i < len; ++i) {
+		crc ^= buf[i];
+		for (unsigned b = 0; b < 8; ++b) {
+			const uint32_t mask = -(int32_t)(crc & 1u);
+			crc                 = (crc >> 1) ^ (0xEDB88320u & mask);
+		}
+	}
+	return crc ^ 0xFFFFFFFFu;
 }
 
 /* Standalone decoder that mirrors what alp_hw_info_read would do
@@ -57,25 +57,25 @@ static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
  * to NOT trust strings, dates, or any field on a non-zero return. */
 static int decode_manifest(const uint8_t *buf, size_t len)
 {
-    if (len < sizeof(alp_hw_info_eeprom_t)) return -1;
-    const alp_hw_info_eeprom_t *m = (const alp_hw_info_eeprom_t *)buf;
-    if (m->magic != ALP_HW_INFO_MAGIC) return -2;
-    if (m->schema_version != ALP_HW_INFO_SCHEMA_VERSION) return -3;
-    /* CRC covers everything except the trailing crc32 field itself. */
-    const size_t crc_len = sizeof(*m) - sizeof(uint32_t);
-    if (crc32_iso3309(buf, crc_len) != m->crc32) return -4;
-    /* Date sanity: production-test fills these.  A bad manifest with
+	if (len < sizeof(alp_hw_info_eeprom_t)) return -1;
+	const alp_hw_info_eeprom_t *m = (const alp_hw_info_eeprom_t *)buf;
+	if (m->magic != ALP_HW_INFO_MAGIC) return -2;
+	if (m->schema_version != ALP_HW_INFO_SCHEMA_VERSION) return -3;
+	/* CRC covers everything except the trailing crc32 field itself. */
+	const size_t crc_len = sizeof(*m) - sizeof(uint32_t);
+	if (crc32_iso3309(buf, crc_len) != m->crc32) return -4;
+	/* Date sanity: production-test fills these.  A bad manifest with
      * a valid CRC32 (someone reflashed a malformed image) must still
      * be rejected. */
-    if (m->mfg_month < 1u || m->mfg_month > 12u) return -5;
-    if (m->mfg_day   < 1u || m->mfg_day   > 31u) return -6;
-    return 0;
+	if (m->mfg_month < 1u || m->mfg_month > 12u) return -5;
+	if (m->mfg_day < 1u || m->mfg_day > 31u) return -6;
+	return 0;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    /* Run the decoder; throw away the return value.  The fuzzer
+	/* Run the decoder; throw away the return value.  The fuzzer
      * watches for ASan / UBSan trips inside decode_manifest. */
-    (void)decode_manifest(data, size);
-    return 0;
+	(void)decode_manifest(data, size);
+	return 0;
 }

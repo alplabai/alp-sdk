@@ -9,11 +9,13 @@
 
 /* No ops -> demo_open() returns ALP_ERR_NOT_IMPLEMENTED for this silicon. */
 
-ALP_BACKEND_REGISTER(demo, stub_target, {
-    .silicon_ref = "fictional:stub:target",
-    .vendor      = "fictional",
-    .base_caps   = 0u,
-    .priority    = 50,
-    .ops         = NULL,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(demo,
+                     stub_target,
+                     {
+                         .silicon_ref = "fictional:stub:target",
+                         .vendor      = "fictional",
+                         .base_caps   = 0u,
+                         .priority    = 50,
+                         .ops         = NULL,
+                         .probe       = NULL,
+                     });

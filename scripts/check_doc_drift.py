@@ -71,6 +71,11 @@ _ALLOWLIST: set[str] = {
     # Real identifier; zephyr/drivers .c files are deliberately outside the
     # scanned API surfaces.
     "ALP_V2N_SCI7_DMAC",
+    # Kernel-dtb compile gate in meta-alp-sdk's e1m-v2n-som.dtsi that raises the
+    # CA55 cap from 1.7 GHz (default) to 1.8 GHz, documented in build-yocto-v2n.md.
+    # Real identifier; *.dtsi is deliberately outside the harvested surfaces
+    # (harvest scans meta-alp-sdk *.conf/*.bb/*.bbappend/*.inc only).
+    "ALP_CA55_1P8GHZ",
 }
 
 # Identifier shapes we treat as SDK symbols.
@@ -209,6 +214,11 @@ def find_index_gaps(root: pathlib.Path) -> list[str]:
     gaps: list[str] = []
     for md in sorted(docs.glob("*.md")):
         if md.name == "README.md":
+            continue
+        # Leading-underscore files are section fragments folded into another
+        # doc (e.g. _aen-runbook-section.md -> bring-up-aen.md), not standalone
+        # index entries.
+        if md.name.startswith("_"):
             continue
         if md.name not in linked:
             gaps.append(md.name)

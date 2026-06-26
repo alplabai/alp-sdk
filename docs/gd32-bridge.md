@@ -4,16 +4,16 @@ The **GD32 bridge** is the firmware that runs on the GigaDevice
 GD32G553MEY7TR companion MCU on every E1M-X V2N / V2N-M1 SoM.  It
 gives the Renesas RZ/V2N host a uniform on-module supervisor surface
 (GPIO fan-out, eight PWM channels, the ADC bank that doesn't fit on
-the Renesas pinmux, the DA9292 INT/TW fault-pin forward, …) over
-either of two parallel buses.
+the Renesas pinmux, the DA9292 INT/TW fault-pin forward, the
+secure-element reset, …) over either of two parallel buses.
 
 The **wire protocol** is specified in
 [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md); this doc
 covers the **firmware-tree** side -- where the source lives, how to
 build it, how to flash it, and what state the implementation is in.
 
-> **Pre-flashed by ALP; rebuild is optional and fully open.** The
-> GD32G553 ships flashed by ALP with the bridge firmware, so for normal
+> **Pre-flashed by Alp; rebuild is optional and fully open.** The
+> GD32G553 ships flashed by Alp with the bridge firmware, so for normal
 > use the customer does nothing — the Renesas host talks to a working
 > supervisor out of the box.  Like the CC3501E bridge, the GD32 firmware is
 > **open**: the source lives in this repo (`firmware/gd32-bridge/`) and
@@ -89,7 +89,12 @@ firmware/gd32-bridge/
 ├── hal/
 │   ├── bridge_hw.h                  (HAL surface consumed by protocol.c)
 │   ├── bridge_hw_stub.c             (host-test backend, ops return NOTIMPL)
-│   ├── bridge_hw_gd32.c             (real GigaDevice peripheral HAL)
+│   ├── gd32/                        (real GigaDevice peripheral HAL, one TU
+│   │                                 per peripheral: init.c gpio.c trng.c
+│   │                                 tmu.c vref.c adc.c adc_stream.c dac.c
+│   │                                 qenc.c pwm.c pwm_capture.c counter.c
+│   │                                 timer_sync.c power.c se_reset.c
+│   │                                 + gd32_common.h)
 │   ├── transport_hw_gd32.c          (SPI1 + I2C0 slave silicon bring-up, full-DMA SPI)
 │   └── fmc_ota.c                    (RAM-resident dual-bank FMC erase/program)
 ├── src/

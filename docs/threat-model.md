@@ -163,10 +163,11 @@ keys, or insert a backdoored vendor library.
 
 **Mitigations:**
 
-- Release tarballs SHA-256/512 + SHA-512 checksums per the
+- Release tarballs ship SHA-256 + SHA-512 checksums per the
   `release.yml` workflow.
-- v1.0+ adds SLSA L2 provenance attestations (planned per
-  Pillar 8 of `docs/v1.0-readiness.md`).
+- Release builds emit SLSA L3 provenance attestations per
+  Pillar 8 of `docs/v1.0-readiness.md` (L2 landed in Â§C.18, upgraded
+  to L3 in Â§C.27).
 - `keys/.gitignore` excludes every `*.pem` file; only the
   generator script + README live in the keys dir.
 - Production signing key never leaves the OPTIGA secure NVM;
@@ -194,6 +195,7 @@ defend (e.g. `<alp/e1m_pinout.h>` is just constants) marked n/a.
 | `<alp/storage.h>` (inline-AES) | Local physical | Key material via OPTIGA path only; SDK never sees the AES key in clear |
 | `<alp/camera.h>` | DMA-buffer overflow if frame_size mis-declared | Backend reconciles frame_size against silicon-reported width × height × bpp |
 | `<alp/audio.h>` | DMA-buffer overflow on misbehaving DMIC | Backend enforces `frames_per_block` × `channels` × `sizeof(int16_t)` against allocator |
+| `<alp/update_log.h>` | Tamper of historical update records | Hash-chain + monotonic-counter (SW tier, tamper-evident); TF-M Protected Storage + HW counter (HW_ENFORCED tier) |
 
 ## 5. Out-of-scope (explicit non-goals)
 

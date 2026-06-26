@@ -66,28 +66,28 @@
 /* ------------------------------------------------------------------ */
 
 struct alp_inference {
-    bool                    in_use;
-    alp_inference_backend_t backend;
-    void                   *be_state;
+	bool                    in_use;
+	alp_inference_backend_t backend;
+	void                   *be_state;
 };
 
-static struct alp_inference  g_inference_pool[ALP_SDK_MAX_INFERENCE_HANDLES];
+static struct alp_inference g_inference_pool[ALP_SDK_MAX_INFERENCE_HANDLES];
 
 static struct alp_inference *pool_acquire(void)
 {
-    for (size_t i = 0; i < ARRAY_SIZE(g_inference_pool); ++i) {
-        if (!g_inference_pool[i].in_use) {
-            memset(&g_inference_pool[i], 0, sizeof(g_inference_pool[i]));
-            g_inference_pool[i].in_use = true;
-            return &g_inference_pool[i];
-        }
-    }
-    return NULL;
+	for (size_t i = 0; i < ARRAY_SIZE(g_inference_pool); ++i) {
+		if (!g_inference_pool[i].in_use) {
+			memset(&g_inference_pool[i], 0, sizeof(g_inference_pool[i]));
+			g_inference_pool[i].in_use = true;
+			return &g_inference_pool[i];
+		}
+	}
+	return NULL;
 }
 
 static void pool_release(struct alp_inference *h)
 {
-    if (h != NULL) h->in_use = false;
+	if (h != NULL) h->in_use = false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -102,12 +102,24 @@ static void pool_release(struct alp_inference *h)
 alp_status_t alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg);
 size_t       alp_inference_deepx_num_inputs(struct alp_inference *h);
 size_t       alp_inference_deepx_num_outputs(struct alp_inference *h);
-alp_status_t alp_inference_deepx_get_input(struct alp_inference *h, size_t index,
-                                           alp_inference_tensor_t *out);
-alp_status_t alp_inference_deepx_get_output(struct alp_inference *h, size_t index,
-                                            alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_deepx_get_input(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_deepx_get_output(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
 alp_status_t alp_inference_deepx_invoke(struct alp_inference *h);
 void         alp_inference_deepx_close(struct alp_inference *h);
+#endif
+
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+alp_status_t alp_inference_drpai_open(struct alp_inference *h, const alp_inference_config_t *cfg);
+size_t       alp_inference_drpai_num_inputs(struct alp_inference *h);
+size_t       alp_inference_drpai_num_outputs(struct alp_inference *h);
+alp_status_t
+alp_inference_drpai_get_input(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
+alp_status_t
+alp_inference_drpai_get_output(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
+alp_status_t alp_inference_drpai_invoke(struct alp_inference *h);
+void         alp_inference_drpai_close(struct alp_inference *h);
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -121,9 +133,14 @@ void         alp_inference_deepx_close(struct alp_inference *h);
 static alp_inference_backend_t resolve_auto(void)
 {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    return ALP_INFERENCE_BACKEND_DEEPX_DXM1;
+	/* DEEPX DX-M1 wins first on V2N-M1: the companion NPU is the SoM's
+     * reason for shipping. */
+	return ALP_INFERENCE_BACKEND_DEEPX_DXM1;
+#elif defined(ALP_SDK_USE_DRPAI_V2N)
+	/* Plain V2N (no DX-M1): the on-SoC DRP-AI3 is the NPU. */
+	return ALP_INFERENCE_BACKEND_DRPAI;
 #else
-    return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
+	return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
 #endif
 }
 
@@ -144,132 +161,162 @@ static alp_inference_backend_t resolve_auto(void)
 
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 {
-    if (cfg == NULL || cfg->model_data == NULL || cfg->model_size == 0) {
-        alp_internal_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
+	if (cfg == NULL || cfg->model_data == NULL || cfg->model_size == 0) {
+		alp_internal_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
 
-    alp_inference_backend_t backend = cfg->backend;
-    if (backend == ALP_INFERENCE_BACKEND_AUTO) {
-        backend = resolve_auto();
-        if (backend == ALP_INFERENCE_BACKEND_AUTO) {
-            /* Nothing compiled in.  Honour the v0.1 contract: surface
+	alp_inference_backend_t backend = cfg->backend;
+	if (backend == ALP_INFERENCE_BACKEND_AUTO) {
+		backend = resolve_auto();
+		if (backend == ALP_INFERENCE_BACKEND_AUTO) {
+			/* Nothing compiled in.  Honour the v0.1 contract: surface
              * is shipped so apps link cleanly; the runtime answer is
              * NOSUPPORT until a backend lands. */
-            alp_internal_set_last_error(ALP_ERR_NOSUPPORT);
-            return NULL;
-        }
-    }
+			alp_internal_set_last_error(ALP_ERR_NOSUPPORT);
+			return NULL;
+		}
+	}
 
-    struct alp_inference *h = pool_acquire();
-    if (h == NULL) {
-        alp_internal_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-    h->backend      = backend;
+	struct alp_inference *h = pool_acquire();
+	if (h == NULL) {
+		alp_internal_set_last_error(ALP_ERR_NOMEM);
+		return NULL;
+	}
+	h->backend = backend;
 
-    alp_status_t rc = ALP_ERR_NOSUPPORT;
-    switch (backend) {
+	alp_status_t rc = ALP_ERR_NOSUPPORT;
+	switch (backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-        rc = alp_inference_deepx_open(h, cfg);
-        break;
+	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
+		rc = alp_inference_deepx_open(h, cfg);
+		break;
 #endif
-    default:
-        rc = ALP_ERR_NOSUPPORT;
-        break;
-    }
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_BACKEND_DRPAI:
+		rc = alp_inference_drpai_open(h, cfg);
+		break;
+#endif
+	default:
+		rc = ALP_ERR_NOSUPPORT;
+		break;
+	}
 
-    if (rc != ALP_OK) {
-        alp_internal_set_last_error(rc);
-        pool_release(h);
-        return NULL;
-    }
-    return h;
+	if (rc != ALP_OK) {
+		alp_internal_set_last_error(rc);
+		pool_release(h);
+		return NULL;
+	}
+	return h;
 }
 
 size_t alp_inference_num_inputs(alp_inference_t *inf)
 {
-    if (inf == NULL || !inf->in_use) return 0u;
-    switch (inf->backend) {
+	if (inf == NULL || !inf->in_use) return 0u;
+	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-        return alp_inference_deepx_num_inputs(inf);
+	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
+		return alp_inference_deepx_num_inputs(inf);
 #endif
-    default:
-        return 0u;
-    }
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_BACKEND_DRPAI:
+		return alp_inference_drpai_num_inputs(inf);
+#endif
+	default:
+		return 0u;
+	}
 }
 
 size_t alp_inference_num_outputs(alp_inference_t *inf)
 {
-    if (inf == NULL || !inf->in_use) return 0u;
-    switch (inf->backend) {
+	if (inf == NULL || !inf->in_use) return 0u;
+	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-        return alp_inference_deepx_num_outputs(inf);
+	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
+		return alp_inference_deepx_num_outputs(inf);
 #endif
-    default:
-        return 0u;
-    }
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_BACKEND_DRPAI:
+		return alp_inference_drpai_num_outputs(inf);
+#endif
+	default:
+		return 0u;
+	}
 }
 
-alp_status_t alp_inference_get_input(alp_inference_t *inf, size_t index,
-                                     alp_inference_tensor_t *out)
+alp_status_t
+alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out)
 {
-    if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
-    if (out == NULL) return ALP_ERR_INVAL;
-    *out = (alp_inference_tensor_t){0};
-    switch (inf->backend) {
+	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
+	if (out == NULL) return ALP_ERR_INVAL;
+	*out = (alp_inference_tensor_t){ 0 };
+	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-        return alp_inference_deepx_get_input(inf, index, out);
+	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
+		return alp_inference_deepx_get_input(inf, index, out);
 #endif
-    default:
-        return ALP_ERR_NOSUPPORT;
-    }
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_BACKEND_DRPAI:
+		return alp_inference_drpai_get_input(inf, index, out);
+#endif
+	default:
+		return ALP_ERR_NOSUPPORT;
+	}
 }
 
-alp_status_t alp_inference_get_output(alp_inference_t *inf, size_t index,
-                                      alp_inference_tensor_t *out)
+alp_status_t
+alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out)
 {
-    if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
-    if (out == NULL) return ALP_ERR_INVAL;
-    *out = (alp_inference_tensor_t){0};
-    switch (inf->backend) {
+	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
+	if (out == NULL) return ALP_ERR_INVAL;
+	*out = (alp_inference_tensor_t){ 0 };
+	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-        return alp_inference_deepx_get_output(inf, index, out);
+	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
+		return alp_inference_deepx_get_output(inf, index, out);
 #endif
-    default:
-        return ALP_ERR_NOSUPPORT;
-    }
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_BACKEND_DRPAI:
+		return alp_inference_drpai_get_output(inf, index, out);
+#endif
+	default:
+		return ALP_ERR_NOSUPPORT;
+	}
 }
 
 alp_status_t alp_inference_invoke(alp_inference_t *inf)
 {
-    if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
-    switch (inf->backend) {
+	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
+	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-        return alp_inference_deepx_invoke(inf);
+	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
+		return alp_inference_deepx_invoke(inf);
 #endif
-    default:
-        return ALP_ERR_NOSUPPORT;
-    }
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_BACKEND_DRPAI:
+		return alp_inference_drpai_invoke(inf);
+#endif
+	default:
+		return ALP_ERR_NOSUPPORT;
+	}
 }
 
 void alp_inference_close(alp_inference_t *inf)
 {
-    if (inf == NULL || !inf->in_use) return;
-    switch (inf->backend) {
+	if (inf == NULL || !inf->in_use) return;
+	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
-    case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-        alp_inference_deepx_close(inf);
-        break;
+	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
+		alp_inference_deepx_close(inf);
+		break;
 #endif
-    default:
-        break;
-    }
-    pool_release(inf);
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_BACKEND_DRPAI:
+		alp_inference_drpai_close(inf);
+		break;
+#endif
+	default:
+		break;
+	}
+	pool_release(inf);
 }

@@ -39,10 +39,10 @@ extern "C" {
 #define MS5611_CMD_PROM_BASE 0xA0u /**< OR with 2*i for coefficient i in [0..7]. */
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    uint16_t   prom[8]; /**< Factory calibration (read at init). */
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	uint16_t   prom[8]; /**< Factory calibration (read at init). */
+	bool       initialised;
 } ms5611_t;
 
 /**

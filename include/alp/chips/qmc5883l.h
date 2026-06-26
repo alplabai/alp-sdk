@@ -44,15 +44,15 @@ extern "C" {
 #define QMC5883L_CHIP_ID 0xFFu /**< QMC datasheet says 0xFF; clones may report 0xC4. */
 
 typedef struct {
-    int16_t x;
-    int16_t y;
-    int16_t z;
+	int16_t x;
+	int16_t y;
+	int16_t z;
 } qmc5883l_axes_t;
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } qmc5883l_t;
 
 /** @brief Bind context and apply continuous-mode CTRL defaults. */

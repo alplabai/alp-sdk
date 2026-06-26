@@ -5,7 +5,860 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] — v0.6.0 candidate
+## [Unreleased] - v0.9.0 candidate
+
+### Fixed
+
+- **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
+  SE-UART-only `alif_flash` runner burns only the signed ATOC (`app-write-mram
+  -p`); a slot0-XIP app is *not* embedded in that ATOC, so the runner left the
+  app blob at MRAM `0x80010000` blank/stale and the SE booted a garbage image.
+  Writing the raw slot0 app blob needs the J-Link Alif MRAM loader, which this
+  runner does not drive — `--mram-xip` now fails fast and points at the two-blob
+  bench Flow D helper (`scripts/bench/aen/flash-jlink-mramxip.sh`).
+
+## [v0.8.1] - 2026-06-24
+
+### Fixed — documentation: current-state silicon-validation accuracy (post-v0.8.0)
+
+The v0.8.0 docs still framed the SDK as "mostly pre-silicon; the first
+silicon-verified slice landed in v0.6" — stale, since v0.8.0 is itself a
+silicon-validation release (the E1M-AEN801 E8 peripheral matrix + the cc3501e
+Wi-Fi/BLE bridge).  A whole-repo accuracy sweep corrects the current-state
+claims to the real hardware reality, scoped so nothing overclaims:
+
+- `README.md` intro badge + Status section: "Mostly pre-silicon" → "Partially
+  silicon-verified" — **two** SoM families now carry silicon evidence (E1M-X
+  V2N GD32-bridge, v0.6; E1M-AEN801 E8 peripheral matrix + cc3501e bridge,
+  v0.8); the remaining families (i.MX 93, V2M/DEEPX, AEN30x..70x) stay
+  honestly pre-silicon.
+- `include/alp/chips/cc3501e.h` + `gd32g553.h`: `@par Verification status`
+  `[UNTESTED]` → `[BENCH-VERIFIED]`, scoped to the validated operations
+  (cc3501e core SS0 link + Wi-Fi/BLE scan + STA connect + GPIO proxy; Wi-Fi +
+  BLE concurrency noted **conf-gated, not proven**).  `include/alp/ext/alif/adc.h`:
+  E8 silicon-verified note.
+- `docs/os-support-matrix.md`, `docs/bring-up-aen.md`,
+  `docs/recommended-libraries.md`, and the peripheral-io example READMEs:
+  current-state currency (incl. a `<alp/dac.h>` reference fix).
+- `firmware/cc3501e/README.md`: documents the **hardware SS0 chip-select**
+  link (was "3-wire CS-less"); no Wi-Fi/BLE concurrency overclaim.
+- `scripts/bump_version.py` + `scripts/check_version_doc_sync.py`: track the
+  reworded intro-badge label so future version bumps keep it in sync.  (#257)
+
+## [v0.8.0] - 2026-06-24
+
+### Changed — clang-format pinned to v22 (was v14)
+
+- The C/C++ format gate now pins **clang-format-22** (was clang-format-14),
+  installed via the `clang-format==22.1.5` **pip wheel** in CI (apt does not
+  package v22; the wheel also ships `clang-format-diff.py`). `scripts/setup-clang-format.sh`
+  installs the same wheel locally so contributors match CI. The whole in-scope
+  tree (non-`zephyr/**`/`vendors/**`) was reformatted under v22 (66 files,
+  whitespace-only); `.clang-format` keeps `Cpp11BracedListStyle: false` so output
+  stays reproducible across versions, and `gen_soc_caps.py` now formats with v22.
+
+First full bench bring-up of the `E1M-AEN801` (Alif Ensemble E8, Cortex-M55-HE)
+on real silicon (alplab-gw).
+
+- **Flow D (J-Link direct MRAM flash) is the default burn path.**  J-Link's
+  built-in Alif MRAM loader activates with the **part-number device profile
+  `AE822FA0E5597LS0_M55_HE`** (not the generic Cortex-M55 profile), needs the
+  J-Link V9.46+ DLL (bench has V9.50) on a probe with matched V13 firmware, and
+  burns the signed ATOC over SWD in ~0.16 s, verifies, then re-runs the SE boot
+  ROM (`RSetType 2`, nRESET pin) so the app boots from MRAM.  Helper:
+  `bench-builds/flash-jlink.sh`.  SETOOLS over the SE-UART becomes the "Flow A"
+  fallback.  (The earlier blanket "J-Link cannot write MRAM on this part" was
+  true only for the *generic* profile; with the part profile J-Link **can** burn
+  Alif MRAM.  Probe gotcha: a version-mismatched probe forces a J-Link firmware
+  update on first connect that times out over a USB hub — use a direct root USB
+  port.)
+- **Ethernet works end-to-end (RESULT PASS).**  DHCP lease acquired
+  (e.g. `192.168.10.137`), confirmed server-side by the dnsmasq lease + ARP
+  REACHABLE.  Root cause of the long no-link: the GMAC DMA descriptor rings +
+  net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is not on
+  the GMAC DMA bus.  Fix: `zephyr,sram = &sram0` (global on-chip SRAM
+  @`0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n`.  The PHY power
+  (`E_PHY_PWRDWN` = P15_4 lpgpio), reset (`E_PHY_RESET` = P11_6 gpio11), and
+  `RCSR` bit7 `REF_CLK_SEL=1` were already correct; the earlier "PHY RX path /
+  ANLPAR=0 / scope the REF_CLK" diagnosis was a red herring (bad cable + DTCM
+  starvation).
+- **Generalizable lesson:** any DMA-master block on the E8 M55 (GMAC, Ethos-U
+  NPU, SDHC) needs its DMA-visible buffers in global SRAM0/SRAM1, never the
+  default DTCM.
+- **Peripheral matrix — 15/17 aen-\* apps PASS** (all flashed over Flow D and
+  booted on real E8): gpio (`gpio_dw`, full P8_0 pad path), uart3 (ns16550
+  loopback), pwm (UTIMER3 via pwm-leds), spi0 (DWC_ssi loopback), counter
+  (utimer0), i2c2+EEPROM (24C128 @`0x50`, 12 devices on the bus), wdt (CMSDK),
+  adc (`adc_alif` single-shot), dac (`dac_alif`, code holds), camera-stack
+  (cam/csi/dphy/arx3a0 nodes BIND + drivers v4.4-ported; cam instantiation
+  DT-blocked, live capture HW-blocked — no sensor), Ethos-U85 (ID `0x20007001`),
+  Ethos-U55-HE (ID `0x10104201`), NPU inference (TFLM + Ethos-U85, tiny fixture,
+  runs to completion), PDM mics (live varying PCM = real audio), and I2S TX
+  (i2s3 clocks the tone out with the 76.8 MHz audio clock).  **2 PARTIAL**, both
+  hardware-gated (not code/Flow-D bugs): qenc (driver reads clean but the count
+  is static until the encoder is physically spun) and sdcard (DWC SDHC inits but
+  the card is unreachable until the EVK SDIO 74LVC157 mux — EN=IO20/SEL=IO21,
+  both CC3501E-side — is routed with a card inserted).  Still-true caveats: an
+  audible I2S amp output pends the 74LVC157 mux (SEL=CC3501E GPIO13) + TAS2563
+  config; camera live capture pends a wired sensor; the i2s/pdm 76.8 MHz CGU
+  enable is still poked per-example (a Tier-1.5 clockctrl patch is the clean
+  follow-up).
+
+### Added — AEN801 (E8) bench STEP-2: real NPU model from MRAM, ADC/DAC analog, clockctrl Tier-1.5 patch, camera bind
+
+Builds on the bench bring-up above; all merged to `dev` (PRs #173–#181).
+
+- **Real NPU inference from MRAM (RESULT PASS).**  `examples/aen/aen-npu-inference-person-mram`
+  runs the real `person_detect` MobileNet (int8, ~263 KiB Vela'd for `ethos-u85-256`, 100 % NPU,
+  ~7.1 M MACs) on the Ethos-U85 with the model resident in **MRAM slot0** — it overflows the
+  256 KiB ITCM RAM-run, so it links into slot0 and boots via a new **MRAM-XIP two-blob Flow D**
+  helper (`scripts/bench/aen/flash-jlink-mramxip.sh`).  Two facts the bench pinned down:
+  `CONFIG_USE_DT_CODE_PARTITION=y` (slot0 link, reset vector `0x8001xxxx`) and the SETOOLS app
+  entry's `mramAddress` = the **full** address `0x80010000` (the offset gives `Invalid Global
+  Address`).  The matched-runtime fixture example `aen-npu-inference-alif` (the strong in-app
+  `ethosu_address_remap` + `ethosu_config_select` that fixed `ethosu_invoke=1`) landed alongside it.
+- **ADC/DAC analog — corrected VREF, bench-confirmed.**  The DAC `alif,reference-mv` was a *wrong*
+  placeholder (900 mV): the driver fixes the reference to **0.750 V** (`DAC12_VREF_CONT=0x4`) and
+  the ADC to **1.8 V** (`ADC_VREF_CONT=0x10`, RDIV=0), both grounded in hal_alif `analog_ctrl.h`
+  and confirmed on silicon (dac/adc regchecks PASS).  Repaired a latent build break — the four
+  `alif,adc` nodes lacked the `#io-channel-cells` that `adc-controller.yaml` requires, which broke
+  every app instantiating an ADC.  Added a DAC0→ADC loopback example (`aen-analog-validate`).
+- **Clockctrl Tier-1.5 west-patch.**  The per-example CGU-76.8 MHz / EXPMST0 audio-clock pokes are
+  folded into a `west patch` on the upstream `clock_control_alif.c` (`zephyr/patches.yml`), plus an
+  I2S `.set_rate` divider (BENCH-UNVERIFIED — exact field layout needs a scope).  pdm (live audio)
+  and i2s both still PASS on silicon with the example pokes removed.
+- **Camera CPI binds.**  The `cam` (`alif,cam`) node now instantiates + `device_is_ready` on E8: the
+  camera-regcheck overlay supplies the itcm/dtcm `global_base` and the cam↔csi↔arx3a0
+  media-controller endpoint graph.  Live capture stays HW-blocked (no sensor wired).
+- **Bench helpers checked in** at `scripts/bench/aen/` — sanitized build + Flow A/C/D (incl.
+  MRAM-XIP) flash + RAM-console-read helpers, host-specifics resolved via `bench-env.sh`.  SETOOLS
+  stays license-gated (not redistributed).
+
+### Changed — `dev` branch now CI-gated (twister + clang-format)
+
+`dev` now requires the two checks that run on every PR — `twister · native_sim/native/64` and
+`clang-format · diff-only` — matching `main`, now that the team has grown past a single maintainer.
+Gating it immediately surfaced two pre-existing native_sim failures (fixed below).
+
+### Fixed — pre-existing native_sim failures (DAC out-of-range, GPU2D test)
+
+- `alp_dac_open()` now rejects an out-of-range channel up front with `ALP_ERR_INVAL` — a portable
+  capability gate against `ALP_SOC_DAC_COUNT` (mirroring the ADC dispatch; a no-op under
+  `CONFIG_ALP_SOC_NONE`).  The DAC registry migration had dropped the wrapper's channel bound, so an
+  out-of-range channel surfaced `NOT_READY` instead.
+- The GPU2D "no vendor HAL → NOSUPPORT" test was stale since the priority-0 software fallback became
+  the *preferred* gpu2d backend; `alp_gpu2d_open()` now succeeds via the sw fallback (test updated).
+
+### Changed — eth_dwmac Alif glue promoted INTERIM → BENCH-VERIFIED + build-only regression
+
+- The Tier-1.5 Alif Ensemble GMAC glue (`eth_dwmac_alif_ensemble.c`, the
+  `alif,ethernet` binding, and `CONFIG_ETH_DWMAC_ALIF`) is promoted from
+  **INTERIM / BENCH-UNVERIFIED** to **BENCH-VERIFIED PASS on E8 (2026-06-17)** —
+  status-only, no behaviour change.  The driver/binding/Kconfig now state the
+  proven result (DHCP lease + server-side REACHABLE) and document the
+  **DMA-buffer placement requirement**: descriptor rings + net_buf pool live in
+  global SRAM0 (`chosen zephyr,sram = &sram0`, CPU addr == DMA addr) with
+  `CONFIG_DCACHE=n`, **never** the M55 DTCM.  A `BUILD_ASSERT` in the driver now
+  rejects the silent cache-incoherent combination (DCACHE on with no nocache
+  region).  The AUTO RMII ref-clock note is corrected: the verified bench path is
+  the **EXTERNAL** 50 MHz oscillator; the internal-PLL fallback branch stays
+  bench-unverified.
+- New **build-only** twister regression `examples/aen/aen-ethernet-link/testcase.yaml`
+  (scenario `alp_sdk.examples.aen.ethernet_link.aen`) compile-checks the
+  `alif,ethernet` node + the glue wire-up + the SRAM0 DMA-placement overlay on the
+  `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` board target.  Intentionally
+  filtered out of the native_sim PR gate (no Ethernet HW in CI; the M55 has no
+  native_sim host) — end-to-end remains a bench flash, not a CI run.
+
+### Added — cc3501e-bridge: hardware SS0 chip-select + per-phase READY, real Wi-Fi/BLE scan, GPIO proxy, production warm-program flow
+
+Matures the CC3501E bridge from the v0.1 link-alive state (below) to a
+silicon-validated radio + GPIO coprocessor on the E1M-AEN801 (Alif Ensemble
+E8, M55).  All validated warm-programmed on real silicon and shipped on two
+boards (FIB `v0.0.207`).
+
+- **Hardware SS0 chip-select + per-phase framing.**  The inter-chip SPI link
+  moves off the CS-less software-desync path onto the silicon's
+  `SPI1_SS0_C` (Alif `P14_7`): the host opens the link with `ALP_SPI_NO_CS`
+  so the `spi_dw` controller drives `SS0` itself, and the firmware advances
+  one protocol phase per `SPI_TRANSFER_COMPLETED` (per-phase SS0 framing,
+  `RETURN_PARTIAL` disabled — the trailing `CSN_DEASSERT` was dropping the
+  armed `READY`).  The host gates each phase on the slave-armed `READY=0x40`
+  (`cc3501e_wait_slave_armed`, 5 ms ceiling) instead of a fixed settle, which
+  removes the per-transfer re-arm race that pinned MISO to `0x00`.  This is
+  what makes `ver` / `scan` reliable instead of returning `-3` / `-5`.
+- **Real BLE scan.**  `cc3501e_nimble_scan` runs a NimBLE GAP discovery
+  (`ble_gap_disc`, active scan, per-address dedup, name parsed via
+  `ble_hs_adv_parse_fields`); `BLE_SCAN_START` is worker-routed off the SPI
+  ISR (mirroring `WIFI_SCAN`).  Validated on silicon (real advertisers with
+  address + RSSI + parsed name).
+- **Wi-Fi scan security decoded correctly.**  The scan record now carries the
+  **raw 16-bit TI `SecurityInfo`** (LE) instead of truncating to its low byte
+  — the open / WPA2 / WPA3 discriminator lives in the high byte
+  (`(SecurityInfo >> 8) & 0x3f`), which the old 1-byte field dropped (host
+  always read "?").  Scan-record header 10 → 11 bytes; the host parser
+  (`chips/cc3501e/cc3501e.c`) tracks the new layout.
+- **GPIO proxy** — `examples/aen/aen-cc3501e-gpio` + `docs/cc3501e-gpio-bench.md`:
+  a machine-checkable warm-boot contract for driving CC3501E-side GPIO through
+  the bridge (the EVK SDIO mux EN/SEL and I2S amp SEL live on CC35 pins).
+- **Production warm-program flow** documented in `docs/cc3501e-production.md`
+  (FIB → VALIDATION-key sign → XDS110 warm-program, monotonic anti-rollback
+  versions) + the on-air validation.
+- **Known limit (config, not code):** Wi-Fi and BLE are **not yet concurrent**
+  with the current `cc35xx-conf.bin` — coexistence is gated by
+  `CMN_KEY_BTH_WLAN_COEXIST_ENABLE` in the NWP conf init-table, a TI-toolbox
+  conf regen.  The host path is already hardened for it (idempotent
+  `cc3501e_hw_ble_enable`, bridge re-sync before enable, `BleIf_EnableBLE`
+  retry) and verified not to regress the clean-boot enable + scan.  Tracked in
+  `ti/WIFI_BLE_INTEGRATION.md`.  (#250, #233)
+
+### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
+
+The TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN family now has
+its bridge firmware **embedded in alp-sdk** at `firmware/cc3501e/` — modeled
+on `firmware/gd32-bridge/`, not a separate repo ([ADR
+0015](docs/adr/0015-cc3501e-firmware-embedded.md), which supersedes the
+earlier separate-`alplabai/cc3501e-firmware` plan).  The firmware `#include`s
+the canonical `include/alp/protocol/cc3501e.h` directly, so the host driver,
+the firmware parser, and the wire-vector tests move in one commit.
+
+- **v0.1 META group**: `PING` / `GET_VERSION` / `GET_MAC` / `RESET`, enough
+  to prove the link is alive and version-compatible.  All other opcodes
+  return `RESP_ERR_INVALID` (the header's v1 contract); Wi-Fi/BLE/GPIO-proxy
+  land in v0.2+.
+- **Selectable host-control transport**: SPI (default + always-available
+  fallback) and SDIO (optional, higher throughput).  Because the Alif has a
+  single SDIO controller shared with the micro-SD slot, SDIO is mutually
+  exclusive with an SD card; both transports feed one dispatcher
+  (`protocol_build_reply`).
+- Silicon-free core + `stub` HAL (host tests + CI compile smoke) + `ti` bench
+  backend skeleton (TI SimpleLink CC33xx SDK + ticlang).  Native transport
+  test at `tests/zephyr/cc3501e_bridge_transport/`; dedicated CI build at
+  `.github/workflows/pr-cc3501e-bridge-build.yml`; canonical wire vectors.
+- Production binary is built + signed on the bench (no SDK/silicon in CI);
+  the AEN `helper_firmware[].firmware_path` stays `TBD` until that lands.
+
+### Added — gd32-bridge: `SE_RESET` opcode to drive the secure-element reset (SE_RST = PC13)
+
+The GD32 bridge gains a `CMD_SE_RESET` wire opcode (`0x41`; bridge wire
+protocol → v0.8) and the `gd32g553_se_reset()` host helper to drive the
+on-module OPTIGA Trust M's reset line (`SE_RST` = GD32 `PC13`, per
+`metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`).  The pin was previously
+left floating at its GPIO power-on default with no host control path;
+the firmware now parks it released at boot and lets the host assert /
+release it.
+
+This gives the host a bus-independent way to reset the secure element:
+`PC13` and the SPI transport are independent of BRD_I2C, so the host can
+pulse `SE_RESET` (assert → wait → release) even when the I²C transport is
+down.  The active level (OPTIGA `RST` is active-low) is firmware-owned and
+flagged for schematic verification.  The stub HAL backend reports
+`STATUS_NOSUPPORT`.
+
+### Added — AEN inter-core mailbox: Alif Ensemble ARM MHUv2 Zephyr MBOX driver
+
+The AEN (Alif Ensemble) inter-core IPC mailbox is the **ARM MHUv2**, confirmed
+from the `alifsemi/zephyr_alif` fork DTS.  alp-sdk now ships its own MBOX-class
+driver (`zephyr/drivers/mbox/mbox_alif_mhuv2.c` + binding) under the **distinct
+compatible `alif,mhuv2-mbox`** (collision-free against the fork's `arm,mhuv2`), so
+AEN mailbox works on the default upstream-Zephyr + hal_alif base.  `E1M-AEN801`'s
+`mailbox.controller` is now `alif_mhuv2` (was `TBD`); `alp_rpc_open` is unblocked.
+**vendor-ext, BENCH-UNVERIFIED** (Cortex-M55 — can't build in native_sim).  AEN801
+only; the RTSS-HP MHU base + AEN301..701 rollout follow bench validation.  (#45, #50)
+
+### Added — GPU2D real backends: portable software 2D + Alif D/AVE 2D
+
+The GPU2D wildcard NOSUPPORT stub is replaced by two real backends: a pure-C
+**software fallback** (`src/backends/gpu2d/sw_fallback.c`) — real `fill_rect` /
+`blit` / `blend` across all 5 formats + 4 blend modes, **unit-tested with exact
+pixel asserts** on native_sim — and the **Alif D/AVE 2D** backend
+(`alif_dave2d.c`, behind `CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D`, bench-unverified).
+Doc corrections: the AEN 2D engine is **TES D/AVE 2D** (not Mali-D71), and i.MX 93
+has **no Vivante** (its 2D engine is PXP), so the NXP 2D backend is out of scope.  (#24)
+
+### Added — inference: real A55 NPU backends (DeepX dx_rt + Renesas DRP-AI)
+
+The Yocto/A55-side inference backends are now real: `src/yocto/inference_deepx.cpp`
+is rewritten to the real **`dxrt::InferenceEngine`** API (replacing a *fictional*
+`dxnn_*` API), and `src/yocto/inference_drpai.cpp` is a new backend against the real
+**`MeraDrpRuntimeWrapper`**.  Both gated (`ALP_SDK_USE_DEEPX_DXM1` /
+`ALP_SDK_USE_DRPAI_V2N`, default off).  The Stage-2 `scripts/alp_model/adapters/
+drpai.py` compiler adapter is implemented (`blob_format "drpai_dir"`, detect-and-skip)
+with mocked + hermetic tests.  **BENCH-UNVERIFIED** — the real link needs the RZ/V
+Yocto sysroot; on-silicon runs need the V2N board / DX-M1 card.  Proprietary SDKs are
+not vendored.  (#58, #59)
+
+### Added — Yocto RTC + Watchdog: real `/dev` ioctl backends on the registry
+
+RTC and Watchdog on the Yocto/Linux side migrate from NOSUPPORT stubs to the
+registry/dispatcher pattern with **real backends** — `/dev/rtcN` via
+`RTC_RD_TIME` / `RTC_SET_TIME` (`src/backends/rtc/yocto_drv.c`) and `/dev/watchdogN`
+via the `WDIOC_*` ioctls (`src/backends/wdt/yocto_drv.c`) — which also lands
+`alp_rtc_capabilities()` / `alp_wdt_capabilities()` on Yocto.  The other four Yocto
+classes (mqtt / audio / security / rpc) follow in a later slice.  **Yocto-link +
+on-target ioctl run UNVERIFIED** (no sysroot in CI).  (#33)
+
+### Added — Yocto PWM / ADC / CAN / I²S / Counter: real Linux backends on the registry
+
+Extends the Yocto registry migration to five more peripheral classes (the "planned"
+A-class rows), each a real Linux userspace backend: **CAN** SocketCAN
+(`src/backends/can/yocto_drv.c`), **PWM** `/sys/class/pwm` sysfs, **ADC** IIO sysfs,
+**I²S** ALSA (`snd_pcm_*`, CMake-gated on `libasound`), and **Counter/QEnc** the Linux
+Counter sysfs.  Wired via the dispatcher pattern (`ALP_VENDOR_OVERRIDES_*` so the
+dispatchers own the public symbols; nm-audited); deleted the orphaned
+`peripheral_can.c` / `peripheral_i2s.c`; fixed `pwm/sw_fallback.c` to drop a
+Zephyr-only `CONTAINER_OF` include so it builds on the Yocto host.  Non-standard ops
+(CAN out-of-band bitrate, PWM dead-time/one-shot/capture, Counter alarms) honestly
+return `ALP_ERR_NOSUPPORT`.  **BENCH-UNVERIFIED** — full Yocto link + on-target runs
+(real `/dev`/sysfs nodes, a CAN bus, an I²S codec) need the sysroot/board.  (#33)
+
+### Changed — Yocto audio + rpc migrated to the registry
+
+The Yocto **audio** (ALSA) and **rpc** (OpenAMP/RPMsg userland) classes — which already
+worked via the older direct-impl model — move onto the registry/dispatcher pattern, with
+the vendor-API bodies preserved verbatim: `audio_yocto.c` → `src/backends/audio/yocto_drv.c`,
+`rpc_yocto.c` → `src/backends/rpc/yocto_drv.c` (the direct-impl files are deleted).  Both
+keep their CMake gates (ALSA; `open-amp`/`libmetal` with a NOSUPPORT fallback); rpc needs no
+override macro (it was never a stub class, so `rpc_dispatch.c` is the sole symbol owner).
+nm-audited (one owner per public symbol; backends export only the registry struct).
+BENCH-UNVERIFIED.  The remaining `mqtt` / `security` classes stay on the direct-impl model
+until their vendor headers are available in CI to compile-test the migration.  (#33)
+
+### Changed — DAC migrated to the registry; `<alp/dac.h>` split out of `adc.h`
+
+DAC was the last peripheral class still on the legacy Zephyr-only direct-impl model
+(`src/zephyr/peripheral_dac.c`).  It now uses the registry/dispatcher pattern like every
+other class: new `src/dac_dispatch.c` (owns the public `alp_dac_*`) + `src/backends/dac/`
+with `zephyr_drv.c` (native Zephyr DAC), `gd32_bridge.c` (V2N GD32 bridge via the
+`v2n_supervisor`, registered for `renesas:rzv2n:n44`), and a `sw_fallback.c` — vendor bodies
+moved verbatim.  The public DAC surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`,
+**unchanged signatures**) splits out of `<alp/adc.h>` into its own **`<alp/dac.h>`** (the
+per-class-header convention); consumers now `#include <alp/dac.h>`.  This also unblocks a
+future cross-core DAC RPMsg proxy on V2N-M1.  The native + sw_fallback paths are
+native_sim-testable; the GD32 path stays bench-unverified.  (The ABI snapshot diff flags the
+`alp_dac_*` move adc.h→dac.h, but the symbols/signatures are unchanged — a source-include
+reorganization, not a binary break; the advisory pre-1.0 gate does not enforce it.)  (#33)
+
+### Fixed — orchestrator: resolve no command for the stock M-core shim
+
+`scripts/alp_orchestrate.py` no longer emits a broken `west build` for the
+placeholder `app: alp-stock-shim` (whose image body isn't in the tree).  The slice is
+carried as `command: null` / skipped with a `stock-shim-unimplemented` warning
+pointing at overriding `cores.<id>.app`.  (#49)
+
+### Fixed — library profiles: `cmsis_dsp` dir now matches its board token
+
+The CMSIS-DSP profile directory is renamed `cmsis-dsp/` → `cmsis_dsp/` to match the
+`board.yaml` token.  The loader's profile lookup (built from the raw token) was
+missing the hyphenated dir and **silently dropping the CMSIS-DSP HW-accelerator
+bindings** (NEON / TMU CORDIC / FFT).  `_LIBRARY_WEST_MODULES` keeps `cmsis_dsp →
+cmsis-dsp` (the upstream west *project* name).  (#47)
+
+### Fixed — CI + docs hygiene
+
+- `pr-twister` now runs the `tests/unit` suites (35 unit scenarios that previously
+  ran only in the local gate).  (#90)
+- `nightly-extras-tier1-pins`: fixed a west-topdir path mismatch that left the
+  library audit empty and produced an invalid `/*.txt` artifact path.
+- `zephyr/module.yml`: re-baselined the stale Zephyr-v3.7 `west-commands` note to v4.4.  (#51)
+- `<alp/display.h>`: corrected the `@brief` that described a non-existent v0.1 backend;
+  display remains a NOSUPPORT stub with the real backends tracked by #23.
+- bitbake CI moved to a private-runner dispatch bridge (no self-hosted runner on the
+  public repo).  (#127)
+
+## [v0.7.0] - 2026-06-12
+
+### Added — meta-alp-sdk: production image (`alp-image-prod`) + ALP distro identity + hardening
+
+A dedicated `alp-image-prod` image, with `alp-image-common.inc` factoring the
+shared content out of `alp-image-edge`, carrying the ALP distro identity and
+version banners.  Hardening recipes ship alongside: SSH hardening
+(`alp-ssh-hardening`), a watchdog policy (`alp-watchdog-policy`), and
+wired-DHCP network defaults (`alp-network-defaults`).
+
+### Added — meta-alp-sdk: U-Boot production boot + reproducible firmware banners
+
+A production-boot U-Boot config and `rzv2n-dev` production-boot patch, plus a
+`no-dirty-version` config, give clean reproducible/traceable firmware version
+banners across BL2 + U-Boot.
+
+### Added — meta-alp-sdk: CA55 1.8 GHz operating point (one-line opt-in)
+
+The Cortex-A55 1.8 GHz OPP is a one-line opt-in; 1.7 GHz stays the default.
+
+### Added — meta-alp-sdk: kernel FIT-signing build scaffolding (opt-in, default off)
+
+Opt-in scaffolding to build a signed kernel FIT image; default off.
+
+### Fixed — meta-alp-sdk: V2N reboot hang + Mali GPU clock double-management
+
+pm_runtime-guards the rzg2l MIPI-DSI host transfer so the DSI panel
+`.shutdown` path no longer takes an SError on reboot, and stops the Mali GPU
+driver double-managing the GPU clocks (the devicetree leaves GPU clocks to the
+PM domain) — killing the "Enabling unprepared gpu_0_clk" spam.
+
+### Changed — docs: post-productization documentation sweep + "Alp SDK" brand casing
+
+A documentation sweep across the productization surface plus a brand-casing
+fix to "Alp SDK".
+
+### Added — orchestrate: per-core OS topology + `system-manifest` pinned as the IDE/tool contract (issues #93, #95, #106)
+
+`metadata/schemas/system-manifest-v1.schema.json` formalizes
+`build/system-manifest.yaml` — the single derived projection of a
+`board.yaml` that `west alp-build` emits — as **the contract IDE/CLI
+tools read** instead of re-deriving folder layout and build wiring from
+`board.yaml` + the SoM presets.  The `scripts/alp_orchestrate.py`
+emitter and this schema move in lockstep, enforced by the new
+`scripts/check_system_manifest.py` gate.  Stability policy:
+`schema_version: 1` is **additive-only** (new optional fields only);
+breaking changes go to a `schema_version: 2` schema through a
+deprecation cycle.
+
+`scripts/alp_project.py --emit os-topology` reports, per resolved core,
+its `runtime_class`, class `default_os`, `effective_os`, and the legal
+`allowed_os` set — so a Board Configurator shows the SDK's selection and
+the valid overrides instead of guessing.  The OS is **class-derived and
+not user-selectable**: Cortex-A → Yocto/Linux, Cortex-M → Zephyr/RTOS;
+a `board.yaml` may only disable a core (`off`) or drop it to no-OS
+(`baremetal`), and selecting the other class's OS is rejected at load.
+The `os:` value-set is derived from `board.schema.json` (one source).
+`scripts/bootstrap.py` now installs west + Zephyr deps into a workspace
+`.venv` and respects `ZEPHYR_BASE`.
+
+### Added — meta-alp-sdk: `alp-image-edge` ROS 2 Humble image + `libalp_chips` shared library (V2N/V2M/NX)
+
+The `alp-image-edge` Yocto image builds for V2N/V2M/NX.  A new
+`libalp_chips` recipe builds the chip drivers as a shared library and
+links it into the `alp_perception` ROS 2 node, which builds against the
+current SDK API.  The SDK install no longer ships `alp/chips/*` headers
+— those are owned by the `alp-chips` package.
+
+### Added — metadata: signed SoM-release bundle manifest + provenance verification
+
+SoM-release bundles carry an ECDSA-P256 signature over a canonical-JSON
+manifest.  `scripts/check_som_bundle.py` verifies provenance
+(`--require-signature`) against the published signing public key
+(`keys/`, key_id `8be383f850354f40`), with a public v1 bundle schema
+and a CI gate on the example bundle.  Docs cover how to verify
+SoM-release provenance.
+
+### Added — provisioning: `scripts/provision_som.py` + `xspi_flashwriter` backend
+
+`provision_som.py` orchestrates per-SoM provisioning from a release
+bundle; the `xspi_flashwriter` flash backend drives the Renesas Flash
+Writer over SCIF (the real-write step is HW-gated).  Includes a
+provisioning runbook.
+
+### Added — bsp: public TF-A DDR-injection bbappend + u-boot `rzv2n-dev` config
+
+The TF-A DDR-parameter injection bbappend is now public; the overlaid
+private DDR param stays out of the public tree (gitignored).  The
+`rzv2n-dev` u-boot config (required for the DEEPX bring-up) builds.
+
+### Changed — docs: community-health files + landing-page polish
+
+Adds `SECURITY.md` and an issue-chooser with contact links; README
+badges + the verification callout corrected.
+
+### Fixed — release.yml: customer verification recipe points at the real proof
+
+The customer-facing verification recipe now uses `slsa-verifier` against
+the `.intoto.jsonl` asset (the SLSA generator's L3 proof), not
+`gh attestation verify` (which only serves the L2
+attest-build-provenance).  Proven on v0.6.0 (rekor 1740409638).
+
+### Removed — chips: fake-based register tests (driver validation moves to real silicon)
+
+The mocked-I2C ztests for the BRD_I2C ICs are removed per maintainer
+call — driver validation happens on real silicon via
+`v2n-brd-i2c-bringup` once the bus is patched.  The verified
+act8760/da9292 register maps, ABI snapshot, metadata, and the bring-up
+example stay; the chips suite is restored to its pre-slice state
+(151/151 green).
+
+### Added — examples/v2n: v2n-brd-i2c-bringup patch-day diagnostic (2026-06-07)
+
+`examples/v2n/v2n-brd-i2c-bringup` is a read-only bring-up diagnostic
+for the BRD_I2C management bus: a full 0x08..0x77 scan that
+distinguishes a bus-level electrical fault (line held low, missing
+pull-ups, wrong pinmux) from per-device failures, then per-IC probes —
+RV-3028-C7 time read, TMP112 temperature, CLK 5L35023B dash-code ID,
+ACT88760 dual-slave status, DA9292 ID + status, TPS628640 VOUT
+(assembly option, SKIP when absent), OPTIGA Trust M I2C_STATE, and a
+GD32 bridge PING + GET_VERSION over the I2C transport — ending in a
+PASS/FAIL/SKIP table.  The example surfaces the `tmp112`
+`0x40`-vs-`0x48` metadata discrepancy explicitly as a FAIL row instead
+of silently misreading the sensor.
+
+### Fixed — da9292: STATUS_00 layout verified vs Datasheet Rev 2.2 Table 14 (2026-06-07)
+
+An open TODO in `chips/da9292/da9292.c` queried whether the
+`PMC_STATUS_00` bit assignments matched the datasheet.  Verification
+against Renesas DA9292 Datasheet Rev 2.2 (R16DS0518EJ0220) Table 14
+(p.36-37) confirmed the existing decode was **correct** (the
+mirror-of-MASK assumption holds for every status bit).  The TODO is
+retired; `metadata/chips/da9292.yaml` `driver_status` moves
+`partial` → `complete`.  On-silicon validation follows on the
+patched BRD_I2C bus via `examples/v2n/v2n-brd-i2c-bringup`.
+
+### Fixed — act8760: register map replaced with the verified one (2026-06-07)
+
+The original `chips/act8760/act8760.c` register table was guessed;
+VSET accessors returned `ALP_ERR_NOSUPPORT`; the status decode was
+entirely wrong.  All three are corrected in this commit.
+
+**Register map** (source: `AA82BZ_RegisterMap_Users_Rev1P1` workbook +
+ACT88760 Datasheet Rev C, independently re-derived cell-by-cell
+2026-06-06):
+
+- Two-slave model now correctly documented: ADD1 (0x25 on CMI 120.E1)
+  = MSTR + GPIO + Buck1..6 tiles; ADD2 (0x26) = Buck7 tile + dual-LDO
+  tiles (LDO12 @ 0x20, LDO53 @ 0x40, LDO64 @ 0x60 on ADD2).
+- Verified VSET0 byte addresses: B1 0x42, B2 0x62, B3 0x82, B4 0xA2,
+  B5 0xC2, B6 0xE2 (ADD1); B7 0x02, LDO5 0x41, LDO1 0x21, LDO2 0x27,
+  LDO3 0x47, LDO4 0x67, LDO6 0x61 (ADD2).
+
+**VSET accessors** (`act8760_rail_get_vset` / `act8760_rail_set_vset`):
+no longer stubs.  `set_vset` does a read-modify-write preserving bits
+outside the VSET field (EN_OutPD / IPD_SET on bucks, RANGE on LDOs).
+
+**`act8760_status_t` — ABI BREAK** (field rename; no existing consumers
+outside this repo at time of writing):
+
+| Old field (wrong)  | New field (verified)   | Bit |
+|--------------------|-----------------------|-----|
+| `sys_data`         | `vsys_stat`           | bit4 |
+| `sys_warning`      | `vsys_warning`        | bit1 |
+| `ilim_warning`     | (deleted)             | — |
+| `fault_pending`    | (deleted)             | — |
+| (new)              | `rom_stat`            | bit7 |
+| (new)              | `wd_alert`            | bit6 |
+| (new)              | `vin_pok_ov`          | bit3 |
+| (new)              | `pb_assert`           | bit2 |
+| (new)              | `pb_deassert`         | bit0 |
+
+`thermal_warning` (bit5 TWARN) and `raw` are unchanged.
+
+**Removed defines** (unverified + unused): `ACT8760_REG_GPIO_STAT_LO`
+(0x03), `ACT8760_REG_OV_UV_CFG` (0x09).
+
+**Metadata** (`metadata/chips/act8760.yaml`): `driver_status` promoted
+from `stub` to `partial`; `register_map` source doc added; address
+entries renamed from `page:` to `slave: add1/add2` to match the
+two-slave model.
+
+### Added — update-log: experimental `<alp/update_log.h>` portable tamper-evident firmware-update audit log
+
+`<alp/update_log.h>` is a new **experimental** surface that records
+firmware-update outcomes in a tamper-evident, append-only log that
+is portable across all supported SoMs.  The software tier
+(`ALP_UPDATE_LOG_SW_TAMPER_EVIDENT`) — active on every target today
+— backs the log with a SHA-256 hash-chain and a monotonic counter,
+detecting mutation, truncation, rollback, and reorder of historical
+entries.  A hardware-enforced tier (`ALP_UPDATE_LOG_HW_ENFORCED`,
+backed by TF-M Protected Storage + a non-decrementable hardware
+monotonic counter) is a defined stub seam and is not yet
+implemented; the assurance level reported at runtime tells
+application code which tier is active.  ABI is marked
+`[ABI-EXPERIMENTAL]`; the surface may change before the hardware
+backend is silicon-proven.  Enable with `CONFIG_ALP_SDK_UPDATE_LOG=y`.
+
+## [v0.6.0] - 2026-06-06
+
+### Added — gd32-bridge v0.2.9 / protocol v0.7: the stale-reply kill + OTA version plumb (2026-06-06)
+
+Wire protocol 0.6.0 → **0.7.0** (MINOR; the un-negotiated wire is
+byte-identical to v0.6) and firmware 0.2.8 → **0.2.9**.
+
+* **`CMD_LINK_FEATURES` (0x81) + the negotiated `STATUS_SEQ` reply
+  stamp** — the architected kill for the transport's residual
+  stale-reply hazard, silicon-fingerprinted the day before
+  (byte-exact `COUNTER_READ` replays whose rate swung 0↔100 % on
+  host timing phase).  Once negotiated, every SPI reply carries a
+  4-bit slave-side sequence stamp in STATUS[7:4], advanced per
+  freshly-decoded request; the drain/rewind re-serves keep the same
+  stamp, so a CRC-valid reply whose stamp has not advanced tells the
+  host its request was never decoded — and since it was never
+  *executed*, the host driver's automatic single re-send is safe for
+  every opcode.  Host telemetry in `ctx->seq_stale_count`;
+  `gd32g553_init()` negotiates automatically and degrades to legacy
+  framing against older firmware.  I2C replies are never stamped
+  (`STATUS_NO_PENDING` owns bit 7 there).  Unit-pinned in
+  `tests/unit/gd32_bridge_transport` (stamp advance / rewind-keeps-
+  stamp / error-envelope stamping / mod-16 wrap / disable restores
+  byte-identical legacy framing) + new fuzz corpus seeds + §12
+  protocol vectors.
+* **`OTA_BEGIN` carries the incoming image's version** (additive
+  3-byte triple): recorded into the A/B metadata `fw_version[slot]`
+  at COMMIT — the record had reserved the field ("0 = unknown")
+  since its v2 layout.  Legacy 8-byte BEGIN still accepted;
+  pre-v0.7 firmware ignores the trailing bytes.
+  `gd32g553_ota_begin()` gains a nullable `fw_version` parameter
+  (no-legacy-compat: signature changed, callers updated, ABI
+  snapshot regenerated).
+* The HIL soak exports v0.7 link telemetry (`seq_forensics[]`:
+  negotiated flag + stale-catch count) next to the existing
+  counter-row discriminator, so the bench can WATCH the kill work.
+
+### Fixed — gd32-bridge v0.2.8: ISR-safety + error-masking fixes from the delta review (2026-06-05)
+
+Three behavior fixes found by an adversarial review of the
+v0.2.3→v0.2.7 delta (one critical, two major).  **Bench-validated:
+YES (2026-06-06)** — v0.2.8 + the hal/gd32 TU split + the real-SHA
+build-id smoked together on silicon: `GET_BUILD_ID` round-tripped
+`0.2.8+d038f981186a20` (exact HEAD match); the 20-row HIL soak ran
+253/253 clean on every row including the new `adc_stream_guard`
+converter-ownership probe; the Tier-B loopback repeated its 5/6
+(DAC raws {151,450,900,1350} mV vs commanded {150,450,900,1350};
+capture 5.000 ms / 2.500 ms exact; qenc still blocked by the known
+carrier-wiring item).  A counter-row anomaly during the first soak
+window was root-caused to the transport's documented stale-reply
+residual hazard (byte-exact reply replays, phase-dependent; raw
+back-to-back pairs read equal 0/277 once re-phased) — transport-level
+and pre-existing, not a v0.2.8 defect; the soak now carries a
+permanent discriminator row for it.
+
+* **CRITICAL — unbounded ADC-calibration spin reachable from the
+  CS-EXTI request handler** (`hal/bridge_hw_gd32.c`).  The vendor
+  SPL's `adc_calibration_enable()` spins on RSTCLB/CLB with no
+  timeout, and `adc_periph_init()` routed through it from two
+  in-handler sites: `STREAM_END`'s converter restore and `ADC_READ`'s
+  timeout self-heal.  A converter wedged hard enough to need the
+  self-heal is exactly the one that can hold those bits forever — the
+  recovery for the wedged-ADC case could itself wedge the whole SPI
+  link (the same failure class the bounded EOC waits were added to
+  stop).  Calibration is now a bounded reimplementation; `STREAM_END`
+  reports `STATUS_IO` if the restore calibration never completes (the
+  stream still tears down).
+* **MAJOR — single-shot `ADC_READ` could corrupt a live stream**: two
+  logical channels share each ADC converter, and a read on the sibling
+  of a streaming channel re-pointed routine rank 0 out from under the
+  stream's DMA, injected an unpaced software trigger, and consumed the
+  EOC the DDM path depends on.  Now refused (`STATUS_IO`) while the
+  stream owns the converter; retry after `STREAM_END`.
+* **MAJOR — a never-ready analog reference was silently swallowed**:
+  v0.2.6's bounded VREFRDY wait discarded its verdict, so a reference
+  buffer that never locks would let every ADC/DAC op answer
+  `STATUS_OK` with garbage millivolts — the exact masking class the
+  VREF fix targeted, and unobservable on the wire (no GET_FAULT
+  opcode).  The readiness verdict is now latched; `ADC_READ`,
+  `ADC_STREAM_BEGIN`, `DAC_SET` and `DAC_GET` answer `STATUS_IO`
+  while the reference is dead, re-probing on each attempt so a
+  late-locking buffer self-promotes.
+* Documentation from the same review: loopback verdict-slot legend
+  corrected to the real `{150, 450, 900, 1350}` setpoints; "firmware-
+  averaged" ADC wording removed (4 independent samples); host
+  `gd32g553_pwm_get` doc now states hardware-readback semantics
+  (shared-per-timer period, 65.536 ms / 0-duty boot default);
+  PWM-capture single-wrap validity bound documented (spans ≥ CAR+1
+  ticks alias undetected); TRNG fault-recover contract (one honest
+  `STATUS_IO`, next pull succeeds) added to the wire spec.
+* `firmware-version.txt` 0.2.7 → **0.2.8**.
+
+### Fixed — gd32-bridge v0.2.7: PWM-capture wrap-aware deltas (2026-06-05)
+
+* **PWM input-capture read a wrapped-garbage period and a zero pulse
+  width** (`hal/bridge_hw_gd32.c`).  `pwm_capture_drain` subtracted raw
+  capture counts (`now - last_tick`); on the capture timer's own
+  up-counter consecutive edges straddle the 0..CAR wrap, so the
+  subtraction underflowed.  All edge deltas are now taken modulo the
+  counter period (`CAR + 1`).  Most visible on the Tier-B PWM→PWM
+  loopback where stimulus and capture share TIMER0: the same-edge
+  "period" is now a clean ~0 (documented shared-timer degeneracy
+  instead of `0xFFFB6C20` garbage) and the adjacent-edge pulse width
+  is meaningful.  The loopback example's capture test moves to a
+  200 Hz / 50 % stimulus polled in a tight loop — 50 % removes the
+  arm-phase ambiguity (high = low = period/2) and the slow rate lets
+  the host catch three *consecutive* edges (the old 1 kHz + 5 ms retry
+  ladder sampled non-consecutive edges, which is why it read 0).
+  Silicon-validated end-to-end through the carrier jumper.
+* `firmware-version.txt` 0.2.6 → **0.2.7**.
+
+### Fixed — gd32-bridge v0.2.6: enable the internal VREF (the analog subsystem was dead) (2026-06-05)
+
+* **The GD32's entire ADC + DAC subsystem read garbage because the
+  analog reference was never driven** (`hal/bridge_hw_gd32.c`).  On
+  this module revision the converters' reference node depends on the
+  GD32's on-chip reference buffer (no external reference source); at
+  reset `VREF_CS = 0x02` (HIPM high-impedance) parks the buffer, so
+  every ADC channel + both DACs referenced an undriven node.  It went
+  unnoticed for the bridge's whole life because the ADC self-tests
+  were ceiling-only (`sample < 3400 mV` passes on a zero reading) and
+  `DAC_GET` echoes the digital hold register, not the pad — the
+  jumpered Tier-B loopback is what finally caught it (DAC→ADC read 0
+  with a known driven input).  `bridge_hw_init` now enables the
+  on-chip VREF buffer (`RCU_VREF` clock + `vref_enable()` at the
+  2.048 V target, bounded `VREFRDY` wait) before any ADC/DAC
+  bring-up, so the converters self-calibrate against a live
+  reference.  Bench-proven over SWD: with VREF up, a DAC→ADC copper
+  loopback tracks 1:1 (DAC 2730 → ADC 2730; DAC 600 → ADC 599).  The
+  buffer's three targets all exceed the 1.8 V VDDA so it regulates at
+  the rail (~VDDA); correctness in a loopback is ratiometric and
+  independent of the exact value, and the absolute mV scale tracks
+  VDDA (`ADC_VREF_MV = 1800`).
+* `firmware-version.txt` 0.2.5 → **0.2.6**.
+
+### Added — gd32-bridge Tier-B jumpered loopback example (2026-06-05)
+
+New `examples/v2n/v2n-gd32-bridge-loopback`: a maintainer bench tool
+that closes three GD32 bridge signal paths in copper on the X-EVK
+carrier and value-asserts them end-to-end — DAC0→ADC0 (direct 1:1
+after the VREF fix), PWM→PWM input-capture (pulse width), and
+PWM→quadrature-encoder stimulus.  Documents the exact jumper header
+pins (the buffered DAC output path is inoperable on this carrier rev —
+see the internal carrier errata; the loopback taps the raw DAC0 net
+instead), and reads its verdict block over SWD.  Also fixes the input-capture HAL to use the GD32G5 **MCH**
+capture units (the E1M PWM pads are MCH, not the classic CHx input
+the engine previously armed) and to restore the channel's output
+stage on `capture_end` (a capture session previously left the PWM
+channel output-dead until reboot).  `metadata/boards/e1m-x-evk.yaml`:
+`E1M_X_ADC0` corrected to the mikroBUS AN (`XEVK_ADC_MIKROBUS_AN`,
+net `CK_ANA`) — the netlist routes only that to ANA_S0, not "Arduino
+A0".
+
+### Fixed — gd32-bridge v0.2.4: ADC stream really streams (DDM + pacing timer) + the 216 MHz clock truth (2026-06-04)
+
+* **ADC streaming produced zero samples since it shipped**
+  (`hal/bridge_hw_gd32.c`).  Three stacked defects, root-caused by a
+  three-angle audit (firmware vs vendor SPL vs host) and the vendor's
+  own `ADC0_routine_channel_with_DMA` reference: (1) `CTL1.DDM`
+  (`adc_dma_request_after_last_enable`) was never set, so the ADC
+  stopped issuing DMA requests after one run — circular DMA without
+  DDM stalls by design; (2) continuous/DMA controls were programmed
+  onto an already-running converter — streaming now reconfigures with
+  ADCON clear in the vendor's order; (3) the stream path never enabled
+  the `RCU_DMAMUX` clock, working only because the SPI transport
+  happened to enable it first (an I2C-only build would stream
+  nothing).
+* **`sample_rate_hz` is now a real hardware contract.**  v0.2.3 and
+  earlier silently ignored it (free-run "aspirational hint").  Each
+  stream now owns a pacing timer (stream 0: TIMER5, stream 1: TIMER6)
+  whose update-event TRGO triggers exactly one conversion per period
+  via TRIGSEL: 1 Hz..100 kHz, tick-quantised, `STATUS_OUT_OF_RANGE`
+  above the cap.  One stream per ADC converter (second `BEGIN` on a
+  shared converter answers `STATUS_INVAL`); `STREAM_END` stops the
+  pacer and restores the converter's single-shot state.  The HiL soak
+  row now PROVES pacing with a two-read assertion (a free-running
+  stream answers the 32-cap twice; a paced one leaves ~18 samples).
+* **Every GD32 timer-clock constant was wrong: the part runs 216 MHz,
+  not 240 MHz.**  The SoM's SystemInit override is 216M-PLL-IRC8M with
+  APB at DIV1, and the GD32G5x3 has no separate timer PLL (GigaDevice's
+  own example states "TIMER0 frequency is fixed to 216MHz") — the
+  "240 MHz advanced-timer clock" in `metadata/chips/gd32g553.yaml` was
+  an invented value that propagated into the firmware.  Consequence:
+  **every PWM period ever generated was ~11 % long** (a commanded
+  1 kHz physically ran ~900 Hz).  Fixed: `PWM_TIMER_PRESCALER` 240→216
+  (true 1 µs tick), `pwm_routing.counter_clock_hz` 240 M→216 M, LSB
+  ~4.16→~4.63 ns and max single-counter period ~273→~303 µs corrected
+  across `metadata/`, `include/alp/chips/gd32g553.h`, `include/alp/pwm.h`,
+  `docs/gd32-bridge-protocol.md`, and firmware comments.
+* Doc drift: `STREAM_BEGIN` on an active slot answers `STATUS_INVAL`
+  (the doc claimed `STATUS_BUSY`); host header's "~1.5 Msps cap"
+  replaced with the real 100 kHz pacing contract.
+* `firmware-version.txt` 0.2.3 → **0.2.4**.
+
+### Added — `--emit build-plan`: machine-readable build plan for external front-ends (2026-06-04)
+
+* **`python3 scripts/alp_orchestrate.py --emit build-plan`** emits the
+  resolved build plan as deterministic, write-free JSON: one slice per
+  non-`off` core (build dir, exact tool command, env) plus every
+  generated artefact **with its contents** (`sharedArtefacts` +
+  per-slice `configArtefacts`), so a consumer materialises files and
+  runs commands with zero planner logic of its own.  This is the
+  agreed contract for the `alp` CLI / IDE extension (alp-sdk-vscode
+  "Wave C") — see [ADR 0014](docs/adr/0014-build-plan-emit-cli-contract.md)
+  for the settlement: camelCase keys, independent `schemaVersion`
+  (bumped + flagged here on breaking shape changes), no `inputHash` /
+  `sequential` (cache keys + parallelism belong to the consumer), and
+  command-less slices carried as `command: null` + a `no-command`
+  warning.  **Consumers: pin to release tags; the per-slice command
+  shape is not frozen** (it will grow `--sysbuild` flags when the
+  conf→build wiring lands).
+* The Orchestrator's materialise step and the plan emit now read the
+  same single sources (`_shared_artefacts` / `_slice_config_artefact`),
+  so the plan and the on-disk build cannot drift by construction.
+  This also fixes a latent gap: `emit_sysbuild_conf` was emit-only —
+  a `boot:` block now materialises `build/alp_sysbuild.conf` during
+  `west alp-build` too, matching its long-documented destination.
+
+### Fixed — gd32-bridge v0.2.3: honest PWM read-back + ISR-bounded ADC waits (2026-06-04)
+
+* **`PWM_GET` reads the silicon, not a cache** (`hal/bridge_hw_gd32.c`).
+  `bridge_hw_pwm_get` answered from a last-request software cache, so a
+  host could "verify" a PWM that never reached the pad — exactly what
+  happened on the bench: every PWM pass to date was the firmware echoing
+  the host's own request (maintainer's scope showed no signal ever).
+  The handler now reads the live `CAR`/`CHxCV` registers back and
+  converts ticks to ns, honouring the read-back contract
+  `docs/gd32-bridge-protocol.md` §3.8 always documented.  Consequences
+  now stated in the doc + `hal/bridge_hw.h`: per-timer shared period is
+  visible in the read-back, and a never-set channel reports the boot
+  default (65.536 ms / 0) instead of zeros.  The PWM **output stage
+  itself was proven good** by driving `TIMER7` `CAR`/`CH3CV` over SWD
+  and watching PD0 toggle — the "dead PWM" was the cache echo masking
+  the fact that nothing on the bench was driving the channel.
+* **Unbounded waits removed from the CS-EXTI handler path**
+  (`hal/bridge_hw_gd32.c`).  `bridge_hw_adc_read`'s EOC poll could spin
+  forever inside the CS interrupt handler; one wedged conversion froze
+  the handler, SPI RX DMA never re-armed, and the whole link rotted
+  (caught live on SWD: DMA0 CH3 `CHEN=0`, count frozen mid-frame).  The
+  poll is now bounded (timeout → ADC re-init + `BRIDGE_HW_ERR_IO`);
+  `adc_stream_begin` pre-clears stale EOC + re-inits the DMA param
+  struct, `adc_stream_end` adds a settle dwell + unconditional EOC
+  clear, and `adc_periph_init` gains a stabilization spin + explicit
+  calibration.  Soak-validated: 18/18 active rows clean for 410+
+  cycles with `adc_stream` active alongside (its own zero-sample
+  failure is still open, tracked separately).
+* HiL soak: every remaining quarantine row re-activated (`qenc` is
+  status-only — floating A/B inputs free-run; `trng` retries once per
+  the documented recovery cycle).
+* `firmware-version.txt` 0.2.1 → **0.2.3** (0.2.2 was consumed by the
+  OTA bench as the slot-B upgrade-test image version).
+
+### Added — full-bridge functional tier + math/TRNG silicon fixes (2026-06-04)
+
+New `examples/v2n/v2n-gd32-bridge-functional`: single-pass, VALUE-asserting
+validation of the bridge surfaces (the soak proves the link; this proves
+the functions) — 18 TMU math probes against known-exact results (incl.
+Q31), TRNG entropy/boundary pulls, PWM setpoint readback + configure
+contract, ADC configure error-path + all-channel sweep, DSP-chain pool
+lifecycle, identity — then a forever PWM7 duty staircase (the EVK LED
+pad) as a live oscilloscope observable.  **26/26 FUNCTIONAL-CLEAN on
+silicon**, after the suite itself caught and drove the fixes below:
+
+* **TMU (firmware)**: the vendor `tmu_two_*_write()` issues its two
+  IDATA stores back-to-back; with a warm i-cache the TMU swallows the
+  second word and ENDF never sets (computed exactly once per power-up —
+  the cache-cold first call).  Writes are now paced by a CS read-back.
+  Angle units fixed in BOTH directions: the CORDIC takes and returns
+  angles in units of pi, the wire contract is RADIANS (documented in
+  the host header) — sin/cos inputs are normalised, atan/atan2 outputs
+  scaled back.  sin(0)-only probes could never see either bug.
+* **TRNG (firmware)**: the unit takes intermittent SEED ERRORS and
+  parks with the LATCHED flags set (`TRNG_STAT = 0x48` = ERRSTA+SEIF
+  while current-status SECS reads clear) — the old CECS/SECS-only check
+  was blind to it and burned its whole DRDY budget on a dead unit.
+  Now: latched-fault detection first (vendor `trng_ready_check`
+  parity), incremental bring-up + lazy per-read rebuild (full re-seed),
+  and a whole-request DRDY budget that answers the new `STATUS_BUSY`
+  (`BRIDGE_HW_ERR_BUSY`) instead of overrunning the reply window; the
+  host driver retries BUSY.  Recovery silicon-validated.
+* **Host driver**: firmware ERROR replies carry no payload, so for any
+  payload-bearing opcode the fixed-width reply read CRC-failed on a
+  legitimate error and masked the real status as `ALP_ERR_IO` — an
+  entire class of "-5 from cycle 1" HiL rows (pwm_capture's documented
+  NOSUPPORT among them) was this.  The host now decodes the short
+  error envelope, and after any failed command sends one throwaway
+  PING so a stale staged reply can never be mis-attributed to the next
+  command; the firmware bounds drain rewinds (tar-pit breaker) on its
+  side.
+* **HiL soak**: pwm_capture / qenc / tmu / trng / ota_get_state
+  un-quarantined (their "-5 from cycle 1" was the transport bug + the
+  masked-status bug, not broken HAL bodies); qenc gets a floating-input
+  noise bound; trng one retry per the documented fault-recover cycle.
+  `adc_stream` stays quarantined (destructive failure mode — its own
+  supervised pass is next).
 
 ### Added — E1M-X Display 1 Linux bring-up (2026-06-04)
 
@@ -140,6 +993,30 @@ spec, tutorials, and the bridge-ping example.  The host observes the
 fault pins directly via the new `da9292_get_fault_pins()` (same bit
 packing) and reads register-level PMIC status over BRD_I2C via
 `da9292_get_status()` — both in the `chips/da9292` driver.
+
+### Changed — hw_info: the EEPROM manifest is the sole SoM-rev source (2026-05-31)
+
+The on-module EEPROM manifest (magic + schema_version + CRC32) is now
+the single authoritative source of the SoM hardware revision; the
+SoM-side BOARD_ID ADC cross-check path was removed outright
+(no-legacy-compat).  **Breaking (pre-1.0 minor):** the `[ABI-STABLE]`
+struct `alp_hw_info_t` drops the `som_board_id_mv` field; ABI snapshot
+regenerated.  `alp_hw_info_read()` return-code contract sharpened:
+blank manifest → `ALP_ERR_NOT_PROVISIONED`, corrupt manifest →
+`ALP_ERR_IO`, EEPROM unreachable → `ALP_ERR_NOT_READY`, no bus
+configured → `ALP_ERR_NOSUPPORT`.  Carrier-side `board_id_mv` /
+`board_hw_rev` stay (board-side BOARD_ID is a separate, carrier-owned
+path).
+
+### Added — `ALP_ERR_NOT_PROVISIONED` status code (2026-05-31)
+
+New `alp_status_t` enumerator `ALP_ERR_NOT_PROVISIONED` (= -15) in
+`<alp/peripheral.h>`.  Returned when the on-module EEPROM manifest is blank
+(all-0xFF or all-0x00) — i.e. the module has not yet been through the factory
+provisioning tool.  Distinct from `ALP_ERR_IO` (= -5), which covers a CRC
+mismatch or corrupted manifest on an otherwise-reachable EEPROM.  Callers that
+previously conflated the two conditions can now present a clearer diagnostic
+("unprogrammed" vs "corrupted").
 
 ### Added — doc-drift CI gate (2026-05-27)
 
@@ -4821,10 +5698,10 @@ Deferred from this batch:
     `ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT` (hex, range 0x50..0x57)
     `ALP_SDK_HW_INFO_EEPROM_OFFSET` (int, default 0)
     `ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ` (int, default 400000)
-  BOARD_ID ADC cross-check remains a no-op stub (`adc_cross_check`)
-  pending the per-family generated header that maps `hw_rev` strings
-  to expected mV bins (depends on `scripts/alp_project.py` emitting
-  a runtime-readable digest of `metadata/e1m_modules/<family>/hw-revisions.yaml`).
+  The EEPROM manifest is the single authoritative source of the SoM
+  hardware revision; there is no SoM-side ADC cross-check (the earlier
+  no-op `adc_cross_check` stub was removed). A blank manifest returns
+  `ALP_ERR_NOT_PROVISIONED`; a corrupt one returns `ALP_ERR_IO`.
 
 - **`chips/pi3dbs12212/` Diodes PI3DBS12212A PCIe mux driver (2026-05-12).**
   GPIO-only control surface for the two passive 12 Gbps

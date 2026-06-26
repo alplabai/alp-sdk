@@ -14,7 +14,7 @@ project (E1M-EVK, E1M-X-EVK, a SoM project, …). One run writes two CSVs:
 | File | Columns |
 |------|---------|
 | `<base>_pinmap.csv` | `Net, Designator, PinNumber, PinName` |
-| `<base>_components.csv` | `Designator, Comment, Parameters` |
+| `<base>_components.csv` | `Designator, Comment, DNP, Parameters` |
 
 The **pin map** is the key one: a normal netlist export gives
 `net ↔ pin number` but drops the **pin name**, and for an E1M / E1M-X
@@ -26,7 +26,10 @@ E1M-X pad  ↔  board net  ↔  on-board chip pin
 ```
 
 The **components** dump captures every component parameter, so MPN /
-Manufacturer values come straight from the schematic.
+Manufacturer values come straight from the schematic. The **`DNP`** column
+reflects the **assembly variant** you pick at run time: `1` = the component
+is *Not Fitted* (do-not-populate) in that variant, `0` = populated. Pick the
+base design (no variant) and every component reads `0`.
 
 ### Run it
 1. Open the board project in Altium so it's the **focused** project.
@@ -35,7 +38,10 @@ Manufacturer values come straight from the schematic.
 4. At the prompt, set the output base path — **rename per board**
    (e.g. `…\xevk`, `…\e1m_evk`, `…\v2n`). Default base:
    `%TEMP%\board`.
-5. Send both CSVs over.
+5. At the next prompt, pick the **assembly variant** to read for DNP
+   (the prompt lists the project's variants; default is the first, blank =
+   base design / all fitted).
+6. Send both CSVs over.
 
 Uses the Document-Manager API on the flattened document; builds output in
 memory and writes with `SaveToFile` (no lingering file handle — the cause
@@ -47,7 +53,8 @@ CSV is already on disk.
 - `E2` rows of `_pinmap.csv` → the E1M-X **pad → net** map → fills
   `metadata/boards/e1m-x-evk.yaml` `e1m_routes:` and validates
   `include/alp/e1m_x_pinout.h`.
-- `_components.csv` → the `populated:` chip list + MPNs.
+- `_components.csv` → the `populated:` chip list + MPNs; the `DNP` column
+  filters out per-variant unpopulated parts (e.g. an unpopulated DEEPX).
 - Run on the **E1M-EVK** and each **SoM** project the same way for their
   metadata / per-SoM `pad_routes:`.
 

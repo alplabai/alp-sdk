@@ -31,7 +31,7 @@ the old plan to this one:
 | v0.3.0  | **surface complete; impl in progress** | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro.  **Plus: `board.yaml` project config + loader (`scripts/alp_project.py`), DEEPX DX-M1 + Ethos-U65/i.MX 93 inference-backend dispatchers, bench + fuzz scaffolding, Coverity workflow stub, Renesas V2N AI SDK platform 7.1 / BSP v6.30 wire-up in meta-alp.** |
 | v0.4.0  | **in-progress (prep code merged, untested)** | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr.  **Prep merged on main:** Yocto core-4 peripheral wrappers (I²C / SPI / UART / GPIO + IRQ dispatcher), MQTT via libmosquitto, per-class override gates, `lwrb` + `nanopb` pinned behind `extras-v04` group.  Failure-path ctest green; **HW roundtrip still pending** — every row in [`docs/test-plan.md`](docs/test-plan.md)'s v0.4 section gates the tag. |
 | v0.5.0  | **wave-2 surface complete; HAL bodies pending** | Wave-2 GD32-bridge DSP + advanced-timer + power-saving + AEN-audit top-five gap surfaces.  **Shipped on main** (per `memory/project_v05_autonomous_burst_2026_05_12.md`): PROTOCOL_VERSION_MINOR 4 -> 5 + seven new reserved opcodes (`0x23..0x28` + `0x36`).  `<alp/dsp.h>` standalone DSP-chain API (FIR / IIR / WINDOW / FFT) with CMSIS-DSP + portable-C fallback.  `alp_adc_filter_t` + `alp_adc_spectrum_t` in `<alp/adc.h>` composing stream + chain.  Advanced timer extras in `<alp/pwm.h>` (`alp_pwm_capture_t` + `alp_pwm_single_pulse`).  `<alp/power.h>` system-power-mode surface.  `<alp/gpu2d.h>` 2D-accelerator surface (AEN audit headline gap).  `<alp/camera.h>::alp_camera_configure_isp` for Mali-C55 ISP toggles.  `<alp/storage.h>::alp_storage_configure_inline_aes` for AEN SecAES on OSPI / HexSPI.  `alp_delay_us` + `alp_delay_ms` portable primitives.  CC3501E §2A.2-plan items §5.1..§5.5 + §5.7 (protocol docs hygiene, named GPIO enums, IRQ event structs, diag info, reset-timing fix, power policy).  v2n_supervisor `alp_z_v2n_supervisor_invalidate()` post-wake re-init hook.  Six `gd32g553_*` host helpers mirroring the new opcodes.  Tests for every new surface.  **HAL bodies pending** in the GD32 firmware tree (`firmware/gd32-bridge/hal/`) -- every wave-2 reserved opcode returns STATUS_NOSUPPORT until the firmware ships them.  CAU (DES / TDES / AES) deferred to v0.6 with PSA driver registration. |
-| v0.6.0  | **shipped on main; pre-HiL** | Heterogeneous-OS orchestration.  `board.yaml` v2 introduces the per-core `cores:` block + cross-core `ipc:` carve-outs (v1 top-level `os:` / `peripherals:` / `libraries:` / `iot:` / `inference:` removed).  `scripts/alp_orchestrate.py` fans out one build slice per non-`off` core; `<alp/rpc.h>` + the generated `<alp/system_ipc.h>` give apps a framed RPC surface over OpenAMP RPMsg.  Reference: rpmsg-aen / rpmsg-v2n / rpmsg-imx93 / heterogeneous-offload examples.  Silicon-determined fields (`inference.backend`) removed from customer scope -- per-handle runtime selection via `alp_inference_open(.backend=...)`.  `alp_core_id_t` generalized to cover every SoM topology core_id.  HiL spec scaffolding for all 11 boards lands.  **2026-05-18 additions:** intra-family portability proven (matrix at [`docs/portability-matrix.md`](docs/portability-matrix.md), cookbook at [`docs/portability.md`](docs/portability.md), ADR 0011); 5 Phase B gap fixes landed (V2M102 namespace + V2M IO27..35 + per-variant Ethos-U U55/U65/U85 + per-CPU-class TFLM NEON/HELIUM/REF + cores key diagnostic); cross-platform Win/Mac/Linux developer host first-class (ADR 0012, [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md), `check_cross_platform.py` lint, CI matrix scaffolding); 8 vendor-SDK-style peripheral tutorial examples (hello-world, uart-hello-world, i2c-master, i2c-slave, spi-master, spi-slave, dac-waveform, timer-periodic-interrupt).  **Pre-HiL** -- still untested on real silicon. |
+| v0.6.0  | **released 2026-06-06; pre-HiL** | Heterogeneous-OS orchestration.  `board.yaml` v2 introduces the per-core `cores:` block + cross-core `ipc:` carve-outs (v1 top-level `os:` / `peripherals:` / `libraries:` / `iot:` / `inference:` removed).  `scripts/alp_orchestrate.py` fans out one build slice per non-`off` core; `<alp/rpc.h>` + the generated `<alp/system_ipc.h>` give apps a framed RPC surface over OpenAMP RPMsg.  Reference: rpmsg-aen / rpmsg-v2n / rpmsg-imx93 / heterogeneous-offload examples.  Silicon-determined fields (`inference.backend`) removed from customer scope -- per-handle runtime selection via `alp_inference_open(.backend=...)`.  `alp_core_id_t` generalized to cover every SoM topology core_id.  HiL spec scaffolding for all 11 boards lands.  **2026-05-18 additions:** intra-family portability proven (matrix at [`docs/portability-matrix.md`](docs/portability-matrix.md), cookbook at [`docs/portability.md`](docs/portability.md), ADR 0011); 5 Phase B gap fixes landed (V2M102 namespace + V2M IO27..35 + per-variant Ethos-U U55/U65/U85 + per-CPU-class TFLM NEON/HELIUM/REF + cores key diagnostic); cross-platform Win/Mac/Linux developer host first-class (ADR 0012, [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md), `check_cross_platform.py` lint, CI matrix scaffolding); 8 vendor-SDK-style peripheral tutorial examples (hello-world, uart-hello-world, i2c-master, i2c-slave, spi-master, spi-slave, dac-waveform, timer-periodic-interrupt).  **Late-v0.6 additions (see CHANGELOG [v0.6.0]):** the GD32 supervisor-bridge silicon campaign (firmware v0.2.3 → v0.2.9, wire protocol v0.7 with the negotiated STATUS_SEQ stale-reply kill, A/B OTA Path-A, the hal/gd32 per-peripheral TU split, real-SHA build ids), EEPROM-authoritative SoM hardware revision (`ALP_ERR_NOT_PROVISIONED`; SoM-side ADC cross-check retired), Linux rz-dmac evicted from the CM33-owned DMAC0, `.alpmodel` unified AI-model pipeline Stage-1 + real-dxcom Stage-2 compile.  **Validation status at tag time:** V2N silicon-validated end-to-end on the bench (GD32 link functional suite 26/26, 20-row HIL soak 253/253, Tier-B loopback 5/6, OTA A/B e2e, protocol v0.7 negotiation) -- see [`docs/verification-status.md`](docs/verification-status.md); AEN / i.MX 93 surfaces remain pre-HiL. |
 | **Backlog** | (cherry-pick into future tags) | See "Backlog -- cherry-pick into future tags" section below.  No per-version commitments for future items; releases tag whatever's ready at the time. |
 
 > **Note on v0.2 sequencing.**  The original v0.2 plan in this file
@@ -62,7 +62,7 @@ versions cleanly.
 | Display     | minimal   | `alp_display_init/clear/print` routes through Zephyr `display_*`         |
 | Math / DSP  | _(removed)_ | App code includes `arm_math.h` directly; ALP does not re-export CMSIS-DSP. SDK internals may use it via `ALP_HAS_CMSIS_DSP`. |
 | Camera      | header    | `<alp/camera.h>` API frozen; impl returns `ALP_ERR_NOSUPPORT`            |
-| GUI/LVGL    | header    | `<alp/gui.h>` includes upstream LVGL with ALP defaults; no widgets       |
+| GUI/LVGL    | header    | `<alp/gui.h>` includes upstream LVGL with Alp defaults; no widgets       |
 | IoT         | header    | `<alp/iot.h>` API frozen; impl stubbed                                   |
 | Audio       | —         | not in v0.1                                                              |
 | BLE         | —         | not in v0.1                                                              |
@@ -210,7 +210,7 @@ more sensors) and add a second SoM family.
   `pdm_mic` (PDM microphone) helper landed v0.1-tail.  Real impl
   for `ov5640` resolution presets + `pdm_mic` underlying I²S
   finishes in v0.2.  Plus `camera_parallel` (CPI fallback).
-- **Audio:** `alp_audio_*` PDM input + I²S output, ALP-default DSP chain.
+- **Audio:** `alp_audio_*` PDM input + I²S output, Alp-default DSP chain.
 - **Signal:** real FIR/IIR helpers using CMSIS-DSP, FFT wrappers.
 - **Math:** BLAS-style helpers for tensor pre/post processing.
 - **Camera:** real impl over Zephyr's `video_*` API (was stub in v0.1).
@@ -270,10 +270,10 @@ Example" deliverable for AEN, materialised as a shipped example.
   helpers, `alp_iot_http` (HTTP/HTTPS over MbedTLS), provisioning UI
   templates.
 - **Display:** e-paper drivers (`ssd1683`, `uc8175`), small TFTs
-  (`st7789`, `ili9341`), LVGL widget pack with ALP visual defaults.
+  (`st7789`, `ili9341`), LVGL widget pack with Alp visual defaults.
 - **Security:** `alp_security_*` re-export of MbedTLS + Alif/Renesas
   hardware crypto.
-- **GUI:** ALP widget set on top of LVGL (cards, status bars, tile
+- **GUI:** Alp widget set on top of LVGL (cards, status bars, tile
   layouts).
 
 ### Multi-Processor Support Completion (AEN)
@@ -428,9 +428,10 @@ target verification still parked behind the `hil-yocto` runner.
   decision; image-write hook onto MCUboot secondary slot.
 - **Device identity:** OPTIGA Trust M pre-provisioned ECC key pair
   surfaced via `<alp/security.h>` for TLS client certs.
-- **DEEPX DX-M1 real link:** `dxnn_*` link in
-  `src/yocto/inference_deepx.cpp` (pending DEEPX SDK provenance
-  decision).
+- **DEEPX DX-M1 on-silicon link:** the `src/yocto/inference_deepx.cpp`
+  body is now real (`dxrt::InferenceEngine`, replacing the earlier
+  `dxnn_*` plan); the remaining work is the cross-link against `dx_rt`
+  on the RZ/V Yocto sysroot + an on-silicon run on the DX-M1 PCIe card.
 - **Ethos-U65 real attach on i.MX 93:** Vela toolchain integration.
 
 See [`docs/secure-boot.md`](docs/secure-boot.md) and

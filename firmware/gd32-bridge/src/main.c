@@ -21,8 +21,8 @@
  * etc.) is read by the host over BRD_I2C via the chips/da9292 driver.
  *
  * Backends: BRIDGE_HAL_BACKEND=gd32 drives real silicon (peripheral
- * HAL in hal/bridge_hw_gd32.c, SPI1 + I2C0 slave transports in
- * hal/transport_hw_gd32.c).  BRIDGE_HAL_BACKEND=stub keeps everything
+ * HAL in the per-peripheral TUs under hal/gd32/, SPI1 + I2C0 slave
+ * transports in hal/transport_hw_gd32.c).  BRIDGE_HAL_BACKEND=stub keeps everything
  * hardware-free for host-side protocol tests: PING / GET_VERSION /
  * GET_BUILD_ID / RESET_REASON round-trip and HW-touching ops return
  * NOSUPPORT.
@@ -37,27 +37,33 @@
  * busy WFI loop -- behaviour-equivalent to a no-op for the
  * scaffold; the real HAL overrides these for peripheral bring-up
  * and periodic housekeeping. */
-__attribute__((weak)) void bridge_hw_init(void) { }
-__attribute__((weak)) void bridge_hw_tick(void) { }
+__attribute__((weak)) void bridge_hw_init(void)
+{
+}
+__attribute__((weak)) void bridge_hw_tick(void)
+{
+}
 
 /* The Cortex-M intrinsic; weakly defined here so the scaffold
  * compiles under hosted toolchains where __WFI() is missing. */
 #ifndef __WFI
-__attribute__((weak)) void __WFI(void) { }
+__attribute__((weak)) void __WFI(void)
+{
+}
 #endif
 
 int main(void)
 {
-    bridge_hw_init();
-    transport_spi_init();
-    transport_i2c_init();
+	bridge_hw_init();
+	transport_spi_init();
+	transport_i2c_init();
 
-    /* Periodic housekeeping lives inside bridge_hw_tick() (a no-op on
+	/* Periodic housekeeping lives inside bridge_hw_tick() (a no-op on
      * this SoM rev); the main loop just yields. */
-    for (;;) {
-        __WFI();
-        bridge_hw_tick();
-    }
-    /* unreachable */
-    return 0;
+	for (;;) {
+		__WFI();
+		bridge_hw_tick();
+	}
+	/* unreachable */
+	return 0;
 }

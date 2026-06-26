@@ -12,9 +12,9 @@ name: pr-twister
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 # Cancel in-flight runs on the same branch when a new commit lands.
@@ -42,13 +42,13 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -79,7 +79,7 @@ jobs:
           west zephyr-export
 
       - name: Cache Zephyr modules
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ github.workspace }}/zephyrproject/modules
@@ -136,19 +136,29 @@ jobs:
           # of the ${{ github.workspace }} expansion which the runner
           # may render as a host path on container jobs.
           python3 zephyr/scripts/twister \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/unit" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples" \
             -p native_sim/native/64 \
             --inline-logs \
             --no-detailed-test-id
 
-      # Persist the twister output regardless of pass/fail so the
-      # PR comment can link to per-test logs.
-      - name: Upload twister-out artefact
+      # Persist the twister REPORTS (json/xml/log) regardless of
+      # pass/fail.  Do NOT upload the whole twister-out/ tree: the
+      # per-test build directories grew past 2 GB with the v0.6
+      # example/test count and actions/upload-artifact@v7 dies with
+      # a Node "JavaScript heap out of memory" mid-upload (first hit
+      # on PR #88 -- the run was 721/721 green and the job still
+      # FAILED in this step).  Failing-test build logs are already
+      # in the job output via --inline-logs.
+      - name: Upload twister reports artefact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: twister-out
-          path: zephyrproject/twister-out/
+          path: |
+            zephyrproject/twister-out/*.json
+            zephyrproject/twister-out/*.xml
+            zephyrproject/twister-out/*.log
           retention-days: 14
           if-no-files-found: ignore

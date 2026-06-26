@@ -64,45 +64,45 @@ LOG_MODULE_REGISTER(lvgl_widgets_demo, LOG_LEVEL_INF);
 
 int main(void)
 {
-    LOG_INF("LVGL widgets demo starting");
+	LOG_INF("LVGL widgets demo starting");
 
-    /* Zephyr's display subsystem is the bedrock LVGL renders into.
+	/* Zephyr's display subsystem is the bedrock LVGL renders into.
      * The DEVICE_DT_GET path resolves whichever node devicetree
      * marks as the default display -- on the E1M-EVK that's the
      * ST7789 we declared in board.yaml's `chips:`. */
-    const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-    if (!device_is_ready(display)) {
-        LOG_ERR("display %s not ready", display->name);
-        return 1;
-    }
+	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
+	if (!device_is_ready(display)) {
+		LOG_ERR("display %s not ready", display->name);
+		return 1;
+	}
 
-    /* LVGL initialisation: allocate the framebuffer + draw context,
+	/* LVGL initialisation: allocate the framebuffer + draw context,
      * register the Zephyr display driver as LVGL's render target.
      * Zephyr's lvgl module ties these into lv_init() automatically
      * when CONFIG_LVGL=y; this call sets the global state. */
-    lv_init();
+	lv_init();
 
-    /* Render the upstream demo.  lv_demo_widgets() creates a tab
+	/* Render the upstream demo.  lv_demo_widgets() creates a tab
      * view with five tabs (Profile, Analytics, Shop, ...), each
      * exercising a different widget family.  Returns immediately;
      * subsequent UI updates are driven by lv_task_handler() below. */
-    lv_demo_widgets();
+	lv_demo_widgets();
 
-    /* Turn the backlight on (board-specific GPIO; the Zephyr
+	/* Turn the backlight on (board-specific GPIO; the Zephyr
      * display driver handles it via the `backlight-gpios` property
      * in the devicetree overlay if one is declared).  The display
      * starts off blank either way until LVGL renders the first
      * frame on the next handler tick. */
-    display_blanking_off(display);
+	display_blanking_off(display);
 
-    /* Main loop: tick LVGL at the configured refresh rate.  Zephyr
+	/* Main loop: tick LVGL at the configured refresh rate.  Zephyr
      * gives us a real RTOS so we can sleep precisely between ticks
      * instead of busy-waiting.  The 10 ms slice keeps animations
      * smooth at 30 fps with headroom for input handlers. */
-    while (1) {
-        const uint32_t sleep_ms = lv_task_handler();
-        k_msleep(MIN(sleep_ms, 10u));
-    }
+	while (1) {
+		const uint32_t sleep_ms = lv_task_handler();
+		k_msleep(MIN(sleep_ms, 10u));
+	}
 
-    return 0; /* unreachable. */
+	return 0; /* unreachable. */
 }

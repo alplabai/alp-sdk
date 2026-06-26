@@ -48,15 +48,15 @@ static const alp_tmu_ops_t *_cached_ops = NULL;
 
 static const alp_tmu_ops_t *_get_ops(void)
 {
-    if (_cached_ops != NULL) {
-        return _cached_ops;
-    }
-    const alp_backend_t *be = alp_backend_select("tmu", ALP_SOC_REF_STR);
-    if (be == NULL) {
-        return NULL;
-    }
-    _cached_ops = (const alp_tmu_ops_t *)be->ops;
-    return _cached_ops;
+	if (_cached_ops != NULL) {
+		return _cached_ops;
+	}
+	const alp_backend_t *be = alp_backend_select("tmu", ALP_SOC_REF_STR);
+	if (be == NULL) {
+		return NULL;
+	}
+	_cached_ops = (const alp_tmu_ops_t *)be->ops;
+	return _cached_ops;
 }
 
 /* ================================================================== */
@@ -65,96 +65,96 @@ static const alp_tmu_ops_t *_get_ops(void)
 
 alp_status_t alp_tmu_sin(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->sin == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->sin(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->sin == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->sin(in_a, out);
 }
 
 alp_status_t alp_tmu_cos(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->cos == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->cos(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->cos == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->cos(in_a, out);
 }
 
 alp_status_t alp_tmu_tan(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->tan == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->tan(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->tan == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->tan(in_a, out);
 }
 
 alp_status_t alp_tmu_atan(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->atan == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->atan(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->atan == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->atan(in_a, out);
 }
 
 alp_status_t alp_tmu_atan2(float in_a, float in_b, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->atan2 == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->atan2(in_a, in_b, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->atan2 == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->atan2(in_a, in_b, out);
 }
 
 alp_status_t alp_tmu_sqrt(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->sqrt == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->sqrt(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->sqrt == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->sqrt(in_a, out);
 }
 
 alp_status_t alp_tmu_log(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->log == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->log(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->log == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->log(in_a, out);
 }
 
 alp_status_t alp_tmu_exp(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->exp == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->exp(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->exp == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->exp(in_a, out);
 }
 
 alp_status_t alp_tmu_sinh(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->sinh == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->sinh(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->sinh == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->sinh(in_a, out);
 }
 
 alp_status_t alp_tmu_cosh(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->cosh == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->cosh(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->cosh == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->cosh(in_a, out);
 }
 
 alp_status_t alp_tmu_tanh(float in_a, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->tanh == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->tanh(in_a, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->tanh == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->tanh(in_a, out);
 }
 
 alp_status_t alp_tmu_hypot(float in_a, float in_b, float *out)
 {
-    if (out == NULL) return ALP_ERR_INVAL;
-    const alp_tmu_ops_t *ops = _get_ops();
-    if (ops == NULL || ops->hypot == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-    return ops->hypot(in_a, in_b, out);
+	if (out == NULL) return ALP_ERR_INVAL;
+	const alp_tmu_ops_t *ops = _get_ops();
+	if (ops == NULL || ops->hypot == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	return ops->hypot(in_a, in_b, out);
 }

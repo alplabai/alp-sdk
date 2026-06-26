@@ -49,101 +49,101 @@ static uint8_t s_arena[256 * 1024] __aligned(16);
  * the simplest customer-facing baseline. */
 static uint8_t s_frame[240 * 240 * 2] __aligned(16);
 
-void           inference_loop_run(viewer_state_t *state)
+void inference_loop_run(viewer_state_t *state)
 {
-    memset(state, 0, sizeof(*state));
+	memset(state, 0, sizeof(*state));
 
-    /* Camera setup.  Open <alp/camera.h>, ask for VGA-ish frames.
+	/* Camera setup.  Open <alp/camera.h>, ask for VGA-ish frames.
      * On native_sim the open returns NOSUPPORT; the loop carries
      * on with the placeholder frame data and the UI shows that
      * the camera is offline. */
-    alp_camera_t *cam = alp_camera_open(&(alp_camera_config_t){
-        .camera_id = 0,
-        .width     = 240,
-        .height    = 240,
-        .fps       = 30,
-        .format    = ALP_PIXFMT_RGB565,
-    });
-    state->camera_ok  = (cam != NULL);
-    if (!state->camera_ok) {
-        LOG_WRN("camera open failed; running with synthetic frame");
-    } else {
-        /* TODO(v0.6): inspect alp_camera_start() return -- v0.5
+	alp_camera_t *cam = alp_camera_open(&(alp_camera_config_t){
+	    .camera_id = 0,
+	    .width     = 240,
+	    .height    = 240,
+	    .fps       = 30,
+	    .format    = ALP_PIXFMT_RGB565,
+	});
+	state->camera_ok  = (cam != NULL);
+	if (!state->camera_ok) {
+		LOG_WRN("camera open failed; running with synthetic frame");
+	} else {
+		/* TODO(v0.6): inspect alp_camera_start() return -- v0.5
          * tolerates NOSUPPORT silently so native_sim still runs. */
-        (void)alp_camera_start(cam);
-    }
+		(void)alp_camera_start(cam);
+	}
 
-    /* Inference setup.  AUTO routes to the best available backend
+	/* Inference setup.  AUTO routes to the best available backend
      * for the active SoM (ETHOS_U55 on AEN701, ETHOS_U85 on
      * AEN401 / AEN601 / AEN801, U65 on NX9101, DRPAI on V2N,
      * CPU on native_sim). */
-    alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
-        .backend     = ALP_INFERENCE_BACKEND_AUTO,
-        .format      = ALP_INFERENCE_MODEL_VELA,
-        .model_data  = s_model,
-        .model_size  = sizeof(s_model),
-        .arena       = s_arena,
-        .arena_bytes = sizeof(s_arena),
-    });
-    state->inference_ok  = (inf != NULL);
-    if (!state->inference_ok) {
-        LOG_WRN("inference open failed; UI will render zero boxes");
-    }
+	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
+	    .backend     = ALP_INFERENCE_BACKEND_AUTO,
+	    .format      = ALP_INFERENCE_MODEL_VELA,
+	    .model_data  = s_model,
+	    .model_size  = sizeof(s_model),
+	    .arena       = s_arena,
+	    .arena_bytes = sizeof(s_arena),
+	});
+	state->inference_ok  = (inf != NULL);
+	if (!state->inference_ok) {
+		LOG_WRN("inference open failed; UI will render zero boxes");
+	}
 
-    uint32_t frames_in_window = 0;
-    uint32_t window_start_ms  = k_uptime_get_32();
+	uint32_t frames_in_window = 0;
+	uint32_t window_start_ms  = k_uptime_get_32();
 
-    while (1) {
-        /* Capture.  Backend owns the frame buffer; we copy out and
+	while (1) {
+		/* Capture.  Backend owns the frame buffer; we copy out and
          * release immediately so the next capture can reuse it. */
-        if (state->camera_ok) {
-            alp_camera_frame_t frame = { 0 };
-            if (alp_camera_capture(cam, &frame, /*timeout_ms=*/100) == ALP_OK) {
-                size_t n = frame.size < sizeof(s_frame) ? frame.size : sizeof(s_frame);
-                if (frame.data) {
-                    memcpy(s_frame, frame.data, n);
-                }
-                (void)alp_camera_release(cam, &frame);
-            }
-        }
+		if (state->camera_ok) {
+			alp_camera_frame_t frame = { 0 };
+			if (alp_camera_capture(cam, &frame, /*timeout_ms=*/100) == ALP_OK) {
+				size_t n = frame.size < sizeof(s_frame) ? frame.size : sizeof(s_frame);
+				if (frame.data) {
+					memcpy(s_frame, frame.data, n);
+				}
+				(void)alp_camera_release(cam, &frame);
+			}
+		}
 
-        /* Invoke. */
-        uint32_t t0_us = k_cycle_get_32();
-        if (state->inference_ok) {
-            /* TODO(v0.6): copy s_frame into the model's input tensor
+		/* Invoke. */
+		uint32_t t0_us = k_cycle_get_32();
+		if (state->inference_ok) {
+			/* TODO(v0.6): copy s_frame into the model's input tensor
              * via alp_inference_get_input(), then invoke.  v0.5 just
              * times the empty invoke so the UI shows the latency floor. */
-            (void)alp_inference_invoke(inf);
-        }
-        uint32_t t1_us        = k_cycle_get_32();
-        state->last_invoke_us = k_cyc_to_us_floor32(t1_us - t0_us);
+			(void)alp_inference_invoke(inf);
+		}
+		uint32_t t1_us        = k_cycle_get_32();
+		state->last_invoke_us = k_cyc_to_us_floor32(t1_us - t0_us);
 
-        /* Decode bounding boxes.  v0.5 emits a synthetic box so
+		/* Decode bounding boxes.  v0.5 emits a synthetic box so
          * the UI renders one rectangle; v0.6 wires the real
          * post-process. */
-        state->n_boxes  = 1;
-        state->boxes[0] = (viewer_box_t){
-            .x        = 60,
-            .y        = 60,
-            .w        = 120,
-            .h        = 120,
-            .class_id = 0,
-            .score    = 0.92f,
-        };
+		state->n_boxes  = 1;
+		state->boxes[0] = (viewer_box_t){
+			.x        = 60,
+			.y        = 60,
+			.w        = 120,
+			.h        = 120,
+			.class_id = 0,
+			.score    = 0.92f,
+		};
 
-        /* FPS estimate over a rolling 1 s window. */
-        frames_in_window++;
-        uint32_t now_ms = k_uptime_get_32();
-        if (now_ms - window_start_ms >= 1000) {
-            state->fps_x10   = (frames_in_window * 10);
-            frames_in_window = 0;
-            window_start_ms  = now_ms;
-        }
+		/* FPS estimate over a rolling 1 s window. */
+		frames_in_window++;
+		uint32_t now_ms = k_uptime_get_32();
+		if (now_ms - window_start_ms >= 1000) {
+			state->fps_x10   = (frames_in_window * 10);
+			frames_in_window = 0;
+			window_start_ms  = now_ms;
+		}
 
-        /* No explicit sleep -- the inference invoke + render loop
+		/* No explicit sleep -- the inference invoke + render loop
          * is the pacing.  If the model runs faster than the
          * display can render, LVGL's render thread naturally
          * limits the frame rate. */
-        k_yield();
-    }
+		k_yield();
+	}
 }

@@ -25,7 +25,7 @@ defaults / type-shim value.
 
 | Library      | Scope                                       | Status        | Why                                                                                |
 |--------------|---------------------------------------------|---------------|------------------------------------------------------------------------------------|
-| [CMSIS-DSP](https://github.com/ARM-software/CMSIS-DSP) | DSP, FFT, filters, matrix math (Cortex-M / Cortex-A) | recommended (build opt-in via `ALP_HAS_CMSIS_DSP`) | The reason `<alp/math.h>` was deleted.  App code includes `arm_math.h` directly.   |
+| [CMSIS-DSP](https://github.com/ARM-software/CMSIS-DSP) | DSP, FFT, filters, matrix math (Cortex-M / Cortex-A) | recommended (build opt-in via `ALP_HAS_CMSIS_DSP`) | Application code includes `arm_math.h` directly per the policy documented in `docs/architecture.md` (the SDK does not re-export CMSIS-DSP).   |
 | [ETLCPP / etl](https://github.com/ETLCPP/etl) | C++ STL alternative, no heap, fixed sizes | recommended | Best-in-class for C++ firmware on M-class targets.  Gives you `etl::vector`, `etl::map`, `etl::queue` with compile-time capacities. |
 | [fmt](https://github.com/fmtlib/fmt) / `std::format` | Modern C++ formatting | recommended | Type-safe replacement for printf.  Pairs naturally with logging in C++ user apps. |
 | [nlohmann/json](https://github.com/nlohmann/json) | JSON parsing/serialization (C++) | recommended | For `<alp/iot.h>` MQTT JSON payloads + studio codegen output.  Header-only.       |
@@ -259,7 +259,7 @@ it's parked.  v0.5 cycle revisits.
 | MCUboot     | Bootloader for Zephyr targets (AEN, N93-RTcore).  Locked in by [ADR 0006](adr/0006-secure-boot-secure-ota.md). |
 | MbedTLS     | PSA Crypto backend for `<alp/security.h>`.                                                  |
 | TinyUSB     | Reference for `<alp/usb.h>` Zephyr backend.                                                  |
-| LVGL        | `<alp/gui.h>` opt-in re-export with ALP defaults via `lv_conf.h`.                            |
+| LVGL        | `<alp/gui.h>` opt-in re-export with Alp defaults via `lv_conf.h`.                            |
 | lwIP / Mongoose | Zephyr's net stack + `<alp/iot.h>` MQTT path.  Mongoose available for users wanting an embedded HTTP server. |
 | u8g2        | Monochrome OLED graphics — pairs with the `chips/ssd1306` driver.                            |
 | SSD1306 / SSD1331 | Already in `chips/` library.                                                          |

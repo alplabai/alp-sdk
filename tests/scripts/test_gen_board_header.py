@@ -227,7 +227,9 @@ def test_real_xevk_header_uses_x_pinout_and_covers_macros(gen_module):
         "XEVK_PIN_LED_RED",       # GPIO (PWM pad as digital GPIO)
         "XEVK_PIN_BMI323_INT1",
         "XEVK_PWM_LED_RED",       # pwm
-        "XEVK_ADC_ARDUINO_A0",    # adc
+        "XEVK_ADC_MIKROBUS_AN",   # adc (renamed from ARDUINO_A0 2026-06-05:
+                                  # the V2 netlist routes only mikroBUS AN
+                                  # to ANA_S0)
         "XEVK_CAN_BUS0",          # can
         "XEVK_ENC_ROTARY",        # qenc
     ]

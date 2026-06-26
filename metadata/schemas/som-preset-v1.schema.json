@@ -115,7 +115,7 @@
     },
     "helper_firmware": {
       "type": "array",
-      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`); they're independently-flashed supervisor / coprocessor MCUs whose flash flow needs to be visible to `west alp-flash`.  Per the project's standing convention, AEN CC3501E entries stay TBD until the `alplabai/cc3501e-firmware` repo releases its first binary.",
+      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`); they're independently-flashed supervisor / coprocessor MCUs whose flash flow needs to be visible to `west alp-flash`.  Per the project's standing convention, AEN CC3501E entries stay TBD until the embedded `firmware/cc3501e/` tree (ADR 0015) cuts its first bench-built binary.",
       "items": { "$ref": "#/$defs/helper_firmware_entry" }
     },
     "default_hw_rev": {

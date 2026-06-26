@@ -74,139 +74,139 @@
 
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
 struct mqtt_be {
-    bool                    in_use;
-    alp_mqtt_msg_cb_t       msg_cb;
-    void                   *msg_user;
-    struct mqtt_client      client;
-    struct sockaddr_storage broker_addr;
-    uint8_t                 rx_buf[CONFIG_ALP_SDK_MQTT_BUF_SIZE];
-    uint8_t                 tx_buf[CONFIG_ALP_SDK_MQTT_BUF_SIZE];
-    uint8_t                 topic_buf[128]; /* scratch for incoming topic */
-    bool                    connected;
-    char                    client_id_buf[64];
-    char                    username_buf[64];
-    char                    password_buf[64];
-    struct mqtt_utf8        username_utf8;
-    struct mqtt_utf8        password_utf8;
-    uint16_t                next_msg_id; /* monotonic, wraps past 0xFFFF */
+	bool                    in_use;
+	alp_mqtt_msg_cb_t       msg_cb;
+	void                   *msg_user;
+	struct mqtt_client      client;
+	struct sockaddr_storage broker_addr;
+	uint8_t                 rx_buf[CONFIG_ALP_SDK_MQTT_BUF_SIZE];
+	uint8_t                 tx_buf[CONFIG_ALP_SDK_MQTT_BUF_SIZE];
+	uint8_t                 topic_buf[128]; /* scratch for incoming topic */
+	bool                    connected;
+	char                    client_id_buf[64];
+	char                    username_buf[64];
+	char                    password_buf[64];
+	struct mqtt_utf8        username_utf8;
+	struct mqtt_utf8        password_utf8;
+	uint16_t                next_msg_id; /* monotonic, wraps past 0xFFFF */
 };
 
 static struct mqtt_be g_mqtt_be_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
 
 static struct mqtt_be *mqtt_be_acquire(void)
 {
-    for (size_t i = 0; i < ARRAY_SIZE(g_mqtt_be_pool); ++i) {
-        if (!g_mqtt_be_pool[i].in_use) {
-            memset(&g_mqtt_be_pool[i], 0, sizeof(g_mqtt_be_pool[i]));
-            g_mqtt_be_pool[i].in_use = true;
-            return &g_mqtt_be_pool[i];
-        }
-    }
-    return NULL;
+	for (size_t i = 0; i < ARRAY_SIZE(g_mqtt_be_pool); ++i) {
+		if (!g_mqtt_be_pool[i].in_use) {
+			memset(&g_mqtt_be_pool[i], 0, sizeof(g_mqtt_be_pool[i]));
+			g_mqtt_be_pool[i].in_use = true;
+			return &g_mqtt_be_pool[i];
+		}
+	}
+	return NULL;
 }
 
 static void mqtt_be_release(struct mqtt_be *be)
 {
-    if (be != NULL) be->in_use = false;
+	if (be != NULL) be->in_use = false;
 }
 
 static alp_status_t errno_to_alp(int err)
 {
-    switch (err) {
-    case 0:
-        return ALP_OK;
-    case -EINVAL:
-        return ALP_ERR_INVAL;
-    case -EBUSY:
-        return ALP_ERR_BUSY;
-    case -EAGAIN:
-    case -ETIMEDOUT:
-        return ALP_ERR_TIMEOUT;
-    case -EIO:
-        return ALP_ERR_IO;
-    case -ENOTSUP:
-    case -ENOSYS:
-        return ALP_ERR_NOSUPPORT;
-    case -ENOMEM:
-        return ALP_ERR_NOMEM;
-    default:
-        return ALP_ERR_IO;
-    }
+	switch (err) {
+	case 0:
+		return ALP_OK;
+	case -EINVAL:
+		return ALP_ERR_INVAL;
+	case -EBUSY:
+		return ALP_ERR_BUSY;
+	case -EAGAIN:
+	case -ETIMEDOUT:
+		return ALP_ERR_TIMEOUT;
+	case -EIO:
+		return ALP_ERR_IO;
+	case -ENOTSUP:
+	case -ENOSYS:
+		return ALP_ERR_NOSUPPORT;
+	case -ENOMEM:
+		return ALP_ERR_NOMEM;
+	default:
+		return ALP_ERR_IO;
+	}
 }
 
 /* Parse "mqtt(s)?://host[:port]" into host/port/tls.  Returns 0 on
  * success.  No URI-encoding handling -- broker addresses in v0.2 are
  * expected to be plain hostnames or IPs. */
-static int parse_broker_uri(const char *uri, char *host_buf, size_t host_buf_len,
-                            uint16_t *port_out, bool *tls_out)
+static int parse_broker_uri(
+    const char *uri, char *host_buf, size_t host_buf_len, uint16_t *port_out, bool *tls_out)
 {
-    if (uri == NULL) return -EINVAL;
+	if (uri == NULL) return -EINVAL;
 
-    bool        tls    = false;
-    const char *cursor = uri;
-    if (strncmp(cursor, "mqtts://", 8) == 0) {
-        tls = true;
-        cursor += 8;
-    } else if (strncmp(cursor, "mqtt://", 7) == 0) {
-        tls = false;
-        cursor += 7;
-    } else {
-        return -EINVAL;
-    }
+	bool        tls    = false;
+	const char *cursor = uri;
+	if (strncmp(cursor, "mqtts://", 8) == 0) {
+		tls = true;
+		cursor += 8;
+	} else if (strncmp(cursor, "mqtt://", 7) == 0) {
+		tls = false;
+		cursor += 7;
+	} else {
+		return -EINVAL;
+	}
 
-    /* Default port: 1883 for plain, 8883 for TLS. */
-    uint16_t    port  = tls ? 8883 : 1883;
+	/* Default port: 1883 for plain, 8883 for TLS. */
+	uint16_t port = tls ? 8883 : 1883;
 
-    const char *colon = strrchr(cursor, ':');
-    const char *slash = strchr(cursor, '/');
-    size_t      host_len;
+	const char *colon = strrchr(cursor, ':');
+	const char *slash = strchr(cursor, '/');
+	size_t      host_len;
 
-    if (colon != NULL && (slash == NULL || colon < slash)) {
-        host_len    = (size_t)(colon - cursor);
-        long parsed = strtol(colon + 1, NULL, 10);
-        if (parsed <= 0 || parsed > 65535) return -EINVAL;
-        port = (uint16_t)parsed;
-    } else if (slash != NULL) {
-        host_len = (size_t)(slash - cursor);
-    } else {
-        host_len = strlen(cursor);
-    }
+	if (colon != NULL && (slash == NULL || colon < slash)) {
+		host_len    = (size_t)(colon - cursor);
+		long parsed = strtol(colon + 1, NULL, 10);
+		if (parsed <= 0 || parsed > 65535) return -EINVAL;
+		port = (uint16_t)parsed;
+	} else if (slash != NULL) {
+		host_len = (size_t)(slash - cursor);
+	} else {
+		host_len = strlen(cursor);
+	}
 
-    if (host_len == 0 || host_len >= host_buf_len) return -EINVAL;
-    memcpy(host_buf, cursor, host_len);
-    host_buf[host_len] = '\0';
+	if (host_len == 0 || host_len >= host_buf_len) return -EINVAL;
+	memcpy(host_buf, cursor, host_len);
+	host_buf[host_len] = '\0';
 
-    *port_out          = port;
-    *tls_out           = tls;
-    return 0;
+	*port_out = port;
+	*tls_out  = tls;
+	return 0;
 }
 
 static int resolve_broker_addr(const char *host, uint16_t port, struct sockaddr_storage *out)
 {
-    /* Prefer numeric IPv4 first -- keeps the wrapper resolver-free for
+	/* Prefer numeric IPv4 first -- keeps the wrapper resolver-free for
      * the common "broker is a static IP" case.  When CONFIG_DNS_RESOLVER
      * is enabled the caller can pre-resolve via getaddrinfo and pass the
      * numeric form. */
-    struct sockaddr_in *sin = (struct sockaddr_in *)out;
-    memset(out, 0, sizeof(*out));
-    sin->sin_family = AF_INET;
-    sin->sin_port   = htons(port);
-    if (zsock_inet_pton(AF_INET, host, &sin->sin_addr) == 1) return 0;
+	struct sockaddr_in *sin = (struct sockaddr_in *)out;
+	memset(out, 0, sizeof(*out));
+	sin->sin_family = AF_INET;
+	sin->sin_port   = htons(port);
+	if (zsock_inet_pton(AF_INET, host, &sin->sin_addr) == 1) return 0;
 
 #if defined(CONFIG_DNS_RESOLVER)
-    struct zsock_addrinfo  hints = {.ai_family = AF_INET, .ai_socktype = SOCK_STREAM};
-    struct zsock_addrinfo *res   = NULL;
-    int                    err   = zsock_getaddrinfo(host, NULL, &hints, &res);
-    if (err != 0 || res == NULL) {
-        if (res != NULL) zsock_freeaddrinfo(res);
-        return -EHOSTUNREACH;
-    }
-    *sin          = *(const struct sockaddr_in *)res->ai_addr;
-    sin->sin_port = htons(port);
-    zsock_freeaddrinfo(res);
-    return 0;
+	struct zsock_addrinfo  hints = { .ai_family = AF_INET, .ai_socktype = SOCK_STREAM };
+	struct zsock_addrinfo *res   = NULL;
+	int                    err   = zsock_getaddrinfo(host, NULL, &hints, &res);
+	if (err != 0 || res == NULL) {
+		if (res != NULL) zsock_freeaddrinfo(res);
+		return -EHOSTUNREACH;
+	}
+	*sin          = *(const struct sockaddr_in *)res->ai_addr;
+	sin->sin_port = htons(port);
+	zsock_freeaddrinfo(res);
+	return 0;
 #else
-    return -EHOSTUNREACH;
+	return -EHOSTUNREACH;
 #endif
 }
 
@@ -215,57 +215,57 @@ static int resolve_broker_addr(const char *host, uint16_t port, struct sockaddr_
  * sets connected=true; PUBLISH dispatches to the user callback). */
 static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *evt)
 {
-    struct mqtt_be *be = CONTAINER_OF(client, struct mqtt_be, client);
+	struct mqtt_be *be = CONTAINER_OF(client, struct mqtt_be, client);
 
-    switch (evt->type) {
-    case MQTT_EVT_CONNACK:
-        be->connected = (evt->result == 0);
-        break;
-    case MQTT_EVT_DISCONNECT:
-        be->connected = false;
-        break;
-    case MQTT_EVT_PUBLISH: {
-        const struct mqtt_publish_param *pub = &evt->param.publish;
-        if (be->msg_cb == NULL) {
-            /* Drop the payload off the wire so the broker doesn't
+	switch (evt->type) {
+	case MQTT_EVT_CONNACK:
+		be->connected = (evt->result == 0);
+		break;
+	case MQTT_EVT_DISCONNECT:
+		be->connected = false;
+		break;
+	case MQTT_EVT_PUBLISH: {
+		const struct mqtt_publish_param *pub = &evt->param.publish;
+		if (be->msg_cb == NULL) {
+			/* Drop the payload off the wire so the broker doesn't
              * stall on QoS-1+ acknowledgement -- but keep the
              * topic-string and length for callers that subscribed
              * without binding a callback. */
-            uint8_t scratch[64];
-            size_t  remaining = pub->message.payload.len;
-            while (remaining > 0) {
-                int n = mqtt_read_publish_payload(client, scratch, MIN(remaining, sizeof(scratch)));
-                if (n <= 0) break;
-                remaining -= (size_t)n;
-            }
-            break;
-        }
+			uint8_t scratch[64];
+			size_t  remaining = pub->message.payload.len;
+			while (remaining > 0) {
+				int n = mqtt_read_publish_payload(client, scratch, MIN(remaining, sizeof(scratch)));
+				if (n <= 0) break;
+				remaining -= (size_t)n;
+			}
+			break;
+		}
 
-        /* Copy the topic into our scratch buffer so we can NUL-terminate
+		/* Copy the topic into our scratch buffer so we can NUL-terminate
          * it for the public callback (the wire form is length-delimited). */
-        size_t topic_len = MIN(pub->message.topic.topic.size, sizeof(be->topic_buf) - 1);
-        memcpy(be->topic_buf, pub->message.topic.topic.utf8, topic_len);
-        be->topic_buf[topic_len] = '\0';
+		size_t topic_len = MIN(pub->message.topic.topic.size, sizeof(be->topic_buf) - 1);
+		memcpy(be->topic_buf, pub->message.topic.topic.utf8, topic_len);
+		be->topic_buf[topic_len] = '\0';
 
-        /* Read payload directly into rx_buf -- bounded by buffer size. */
-        size_t want = MIN(pub->message.payload.len, sizeof(be->rx_buf));
-        size_t got  = 0;
-        while (got < want) {
-            int n = mqtt_read_publish_payload(client, be->rx_buf + got, want - got);
-            if (n <= 0) break;
-            got += (size_t)n;
-        }
+		/* Read payload directly into rx_buf -- bounded by buffer size. */
+		size_t want = MIN(pub->message.payload.len, sizeof(be->rx_buf));
+		size_t got  = 0;
+		while (got < want) {
+			int n = mqtt_read_publish_payload(client, be->rx_buf + got, want - got);
+			if (n <= 0) break;
+			got += (size_t)n;
+		}
 
-        if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
-            const struct mqtt_puback_param ack = {.message_id = pub->message_id};
-            (void)mqtt_publish_qos1_ack(client, &ack);
-        }
-        be->msg_cb((const char *)be->topic_buf, be->rx_buf, got, be->msg_user);
-        break;
-    }
-    default:
-        break;
-    }
+		if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+			const struct mqtt_puback_param ack = { .message_id = pub->message_id };
+			(void)mqtt_publish_qos1_ack(client, &ack);
+		}
+		be->msg_cb((const char *)be->topic_buf, be->rx_buf, got, be->msg_user);
+		break;
+	}
+	default:
+		break;
+	}
 }
 
 /* Pull the active socket fd out of the mqtt client.  Path differs
@@ -275,11 +275,11 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 static int alp_mqtt_get_fd(struct mqtt_client *c)
 {
 #if defined(CONFIG_MQTT_LIB_TLS)
-    if (c->transport.type == MQTT_TRANSPORT_SECURE) {
-        return c->transport.tls.sock;
-    }
+	if (c->transport.type == MQTT_TRANSPORT_SECURE) {
+		return c->transport.tls.sock;
+	}
 #endif
-    return c->transport.tcp.sock;
+	return c->transport.tcp.sock;
 }
 #endif /* CONFIG_ALP_SDK_IOT_MQTT */
 
@@ -287,232 +287,237 @@ static int alp_mqtt_get_fd(struct mqtt_client *c)
 /* Ops                                                                 */
 /* ================================================================== */
 
-static alp_status_t z_open(const alp_mqtt_config_t *cfg,
-                           alp_mqtt_backend_state_t *st,
-                           alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
-    struct mqtt_be *be = mqtt_be_acquire();
-    if (be == NULL) {
-        caps_out->flags = 0u;
-        return ALP_ERR_NOMEM;
-    }
+	struct mqtt_be *be = mqtt_be_acquire();
+	if (be == NULL) {
+		caps_out->flags = 0u;
+		return ALP_ERR_NOMEM;
+	}
 
-    char     host[64];
-    uint16_t port;
-    bool     tls;
-    int      err = parse_broker_uri(cfg->broker_uri, host, sizeof(host), &port, &tls);
-    if (err != 0) {
-        mqtt_be_release(be);
-        caps_out->flags = 0u;
-        return ALP_ERR_INVAL;
-    }
+	char     host[64];
+	uint16_t port;
+	bool     tls;
+	int      err = parse_broker_uri(cfg->broker_uri, host, sizeof(host), &port, &tls);
+	if (err != 0) {
+		mqtt_be_release(be);
+		caps_out->flags = 0u;
+		return ALP_ERR_INVAL;
+	}
 
-    err = resolve_broker_addr(host, port, &be->broker_addr);
-    if (err != 0) {
-        mqtt_be_release(be);
-        caps_out->flags = 0u;
-        return errno_to_alp(err);
-    }
+	err = resolve_broker_addr(host, port, &be->broker_addr);
+	if (err != 0) {
+		mqtt_be_release(be);
+		caps_out->flags = 0u;
+		return errno_to_alp(err);
+	}
 
-    /* Stash the client id locally so we own its memory across
+	/* Stash the client id locally so we own its memory across
      * reconnects -- the caller's pointer can go out of scope. */
-    strncpy(be->client_id_buf, cfg->client_id, sizeof(be->client_id_buf) - 1);
+	strncpy(be->client_id_buf, cfg->client_id, sizeof(be->client_id_buf) - 1);
 
-    mqtt_client_init(&be->client);
-    be->client.broker         = &be->broker_addr;
-    be->client.evt_cb         = alp_mqtt_evt_cb;
-    be->client.client_id.utf8 = (uint8_t *)be->client_id_buf;
-    be->client.client_id.size = strlen(be->client_id_buf);
-    if (cfg->username != NULL) {
-        strncpy(be->username_buf, cfg->username, sizeof(be->username_buf) - 1);
-        be->username_utf8.utf8 = (uint8_t *)be->username_buf;
-        be->username_utf8.size = strlen(be->username_buf);
-        be->client.user_name   = &be->username_utf8;
-    } else {
-        be->client.user_name = NULL;
-    }
-    if (cfg->password != NULL) {
-        strncpy(be->password_buf, cfg->password, sizeof(be->password_buf) - 1);
-        be->password_utf8.utf8 = (uint8_t *)be->password_buf;
-        be->password_utf8.size = strlen(be->password_buf);
-        be->client.password    = &be->password_utf8;
-    } else {
-        be->client.password = NULL;
-    }
-    be->client.protocol_version = MQTT_VERSION_3_1_1;
+	mqtt_client_init(&be->client);
+	be->client.broker         = &be->broker_addr;
+	be->client.evt_cb         = alp_mqtt_evt_cb;
+	be->client.client_id.utf8 = (uint8_t *)be->client_id_buf;
+	be->client.client_id.size = strlen(be->client_id_buf);
+	if (cfg->username != NULL) {
+		strncpy(be->username_buf, cfg->username, sizeof(be->username_buf) - 1);
+		be->username_utf8.utf8 = (uint8_t *)be->username_buf;
+		be->username_utf8.size = strlen(be->username_buf);
+		be->client.user_name   = &be->username_utf8;
+	} else {
+		be->client.user_name = NULL;
+	}
+	if (cfg->password != NULL) {
+		strncpy(be->password_buf, cfg->password, sizeof(be->password_buf) - 1);
+		be->password_utf8.utf8 = (uint8_t *)be->password_buf;
+		be->password_utf8.size = strlen(be->password_buf);
+		be->client.password    = &be->password_utf8;
+	} else {
+		be->client.password = NULL;
+	}
+	be->client.protocol_version = MQTT_VERSION_3_1_1;
 #if defined(CONFIG_MQTT_LIB_TLS)
-    be->client.transport.type   = tls ? MQTT_TRANSPORT_SECURE : MQTT_TRANSPORT_NON_SECURE;
+	be->client.transport.type = tls ? MQTT_TRANSPORT_SECURE : MQTT_TRANSPORT_NON_SECURE;
 #else
-    /* TLS Kconfig disabled at build time -- silently downgrade. */
-    (void)tls;
-    be->client.transport.type   = MQTT_TRANSPORT_NON_SECURE;
+	/* TLS Kconfig disabled at build time -- silently downgrade. */
+	(void)tls;
+	be->client.transport.type = MQTT_TRANSPORT_NON_SECURE;
 #endif
-    be->client.rx_buf           = be->rx_buf;
-    be->client.rx_buf_size      = sizeof(be->rx_buf);
-    be->client.tx_buf           = be->tx_buf;
-    be->client.tx_buf_size      = sizeof(be->tx_buf);
-    be->client.keepalive        = cfg->keepalive_s;
-    be->client.clean_session    = cfg->clean_session ? 1U : 0U;
-    be->connected               = false;
-    be->next_msg_id             = 1;
+	be->client.rx_buf        = be->rx_buf;
+	be->client.rx_buf_size   = sizeof(be->rx_buf);
+	be->client.tx_buf        = be->tx_buf;
+	be->client.tx_buf_size   = sizeof(be->tx_buf);
+	be->client.keepalive     = cfg->keepalive_s;
+	be->client.clean_session = cfg->clean_session ? 1U : 0U;
+	be->connected            = false;
+	be->next_msg_id          = 1;
 
-    st->be_data     = be;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	st->be_data     = be;
+	caps_out->flags = 0u;
+	return ALP_OK;
 #else
-    (void)cfg;
-    (void)st;
-    caps_out->flags = 0u;
-    return ALP_ERR_NOSUPPORT;
+	(void)cfg;
+	(void)st;
+	caps_out->flags = 0u;
+	return ALP_ERR_NOSUPPORT;
 #endif
 }
 
 static alp_status_t z_connect(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 {
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
-    struct mqtt_be *be = (struct mqtt_be *)st->be_data;
-    if (be == NULL) return ALP_ERR_NOT_READY;
+	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
+	if (be == NULL) return ALP_ERR_NOT_READY;
 
-    int err = mqtt_connect(&be->client);
-    if (err != 0) {
-        return errno_to_alp(err);
-    }
+	int err = mqtt_connect(&be->client);
+	if (err != 0) {
+		return errno_to_alp(err);
+	}
 
-    /* Pump input until we get CONNACK (which the evt cb sets) or the
+	/* Pump input until we get CONNACK (which the evt cb sets) or the
      * timeout expires.  poll() with a short slice keeps the wait
      * responsive without busy-spinning. */
-    uint32_t deadline = k_uptime_get_32() + timeout_ms;
-    while ((int32_t)(deadline - k_uptime_get_32()) > 0) {
-        struct zsock_pollfd fds[1] = {0};
-        fds[0].fd                  = alp_mqtt_get_fd(&be->client);
-        fds[0].events              = ZSOCK_POLLIN;
-        int rc                     = zsock_poll(fds, 1, 200);
-        if (rc < 0) return errno_to_alp(-errno);
-        if (rc > 0) {
-            err = mqtt_input(&be->client);
-            if (err != 0) return errno_to_alp(err);
-        }
-        err = mqtt_live(&be->client);
-        if (err != 0 && err != -EAGAIN) return errno_to_alp(err);
+	uint32_t deadline = k_uptime_get_32() + timeout_ms;
+	while ((int32_t)(deadline - k_uptime_get_32()) > 0) {
+		struct zsock_pollfd fds[1] = { 0 };
+		fds[0].fd                  = alp_mqtt_get_fd(&be->client);
+		fds[0].events              = ZSOCK_POLLIN;
+		int rc                     = zsock_poll(fds, 1, 200);
+		if (rc < 0) return errno_to_alp(-errno);
+		if (rc > 0) {
+			err = mqtt_input(&be->client);
+			if (err != 0) return errno_to_alp(err);
+		}
+		err = mqtt_live(&be->client);
+		if (err != 0 && err != -EAGAIN) return errno_to_alp(err);
 
-        if (be->connected) return ALP_OK;
-    }
-    return ALP_ERR_TIMEOUT;
+		if (be->connected) return ALP_OK;
+	}
+	return ALP_ERR_TIMEOUT;
 #else
-    (void)st;
-    (void)timeout_ms;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)timeout_ms;
+	return ALP_ERR_NOSUPPORT;
 #endif
 }
 
-static alp_status_t z_publish(alp_mqtt_backend_state_t *st, const char *topic,
-                              const uint8_t *payload, size_t len,
-                              alp_mqtt_qos_t qos, bool retain)
+static alp_status_t z_publish(alp_mqtt_backend_state_t *st,
+                              const char               *topic,
+                              const uint8_t            *payload,
+                              size_t                    len,
+                              alp_mqtt_qos_t            qos,
+                              bool                      retain)
 {
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
-    struct mqtt_be *be = (struct mqtt_be *)st->be_data;
-    if (be == NULL) return ALP_ERR_NOT_READY;
+	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
+	if (be == NULL) return ALP_ERR_NOT_READY;
 
-    struct mqtt_publish_param p = {0};
-    p.message.topic.topic.utf8  = (const uint8_t *)topic;
-    p.message.topic.topic.size  = strlen(topic);
-    p.message.topic.qos         = (uint8_t)qos;
-    p.message.payload.data      = (uint8_t *)payload;
-    p.message.payload.len       = len;
-    p.dup_flag                  = 0;
-    p.retain_flag               = retain ? 1 : 0;
-    if (qos == ALP_MQTT_QOS_0) {
-        p.message_id = 0;
-    } else {
-        if (be->next_msg_id == 0) be->next_msg_id = 1; /* msg-id 0 is reserved */
-        p.message_id = be->next_msg_id++;
-    }
+	struct mqtt_publish_param p = { 0 };
+	p.message.topic.topic.utf8  = (const uint8_t *)topic;
+	p.message.topic.topic.size  = strlen(topic);
+	p.message.topic.qos         = (uint8_t)qos;
+	p.message.payload.data      = (uint8_t *)payload;
+	p.message.payload.len       = len;
+	p.dup_flag                  = 0;
+	p.retain_flag               = retain ? 1 : 0;
+	if (qos == ALP_MQTT_QOS_0) {
+		p.message_id = 0;
+	} else {
+		if (be->next_msg_id == 0) be->next_msg_id = 1; /* msg-id 0 is reserved */
+		p.message_id = be->next_msg_id++;
+	}
 
-    int err = mqtt_publish(&be->client, &p);
-    return errno_to_alp(err);
+	int err = mqtt_publish(&be->client, &p);
+	return errno_to_alp(err);
 #else
-    (void)st;
-    (void)topic;
-    (void)payload;
-    (void)len;
-    (void)qos;
-    (void)retain;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)topic;
+	(void)payload;
+	(void)len;
+	(void)qos;
+	(void)retain;
+	return ALP_ERR_NOSUPPORT;
 #endif
 }
 
-static alp_status_t z_subscribe(alp_mqtt_backend_state_t *st, const char *topic_filter,
-                                alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user)
+static alp_status_t z_subscribe(alp_mqtt_backend_state_t *st,
+                                const char               *topic_filter,
+                                alp_mqtt_qos_t            qos,
+                                alp_mqtt_msg_cb_t         cb,
+                                void                     *user)
 {
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
-    struct mqtt_be *be = (struct mqtt_be *)st->be_data;
-    if (be == NULL) return ALP_ERR_NOT_READY;
+	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
+	if (be == NULL) return ALP_ERR_NOT_READY;
 
-    be->msg_cb   = cb;
-    be->msg_user = user;
+	be->msg_cb   = cb;
+	be->msg_user = user;
 
-    struct mqtt_topic topic = {
-        .topic.utf8 = (const uint8_t *)topic_filter,
-        .topic.size = strlen(topic_filter),
-        .qos        = (uint8_t)qos,
-    };
-    if (be->next_msg_id == 0) be->next_msg_id = 1;
-    struct mqtt_subscription_list list = {
-        .list       = &topic,
-        .list_count = 1,
-        .message_id = be->next_msg_id++,
-    };
-    int err = mqtt_subscribe(&be->client, &list);
-    return errno_to_alp(err);
+	struct mqtt_topic topic = {
+		.topic.utf8 = (const uint8_t *)topic_filter,
+		.topic.size = strlen(topic_filter),
+		.qos        = (uint8_t)qos,
+	};
+	if (be->next_msg_id == 0) be->next_msg_id = 1;
+	struct mqtt_subscription_list list = {
+		.list       = &topic,
+		.list_count = 1,
+		.message_id = be->next_msg_id++,
+	};
+	int err = mqtt_subscribe(&be->client, &list);
+	return errno_to_alp(err);
 #else
-    (void)st;
-    (void)topic_filter;
-    (void)qos;
-    (void)cb;
-    (void)user;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)topic_filter;
+	(void)qos;
+	(void)cb;
+	(void)user;
+	return ALP_ERR_NOSUPPORT;
 #endif
 }
 
 static alp_status_t z_loop(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 {
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
-    struct mqtt_be *be = (struct mqtt_be *)st->be_data;
-    if (be == NULL) return ALP_ERR_NOT_READY;
+	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
+	if (be == NULL) return ALP_ERR_NOT_READY;
 
-    struct zsock_pollfd fds[1] = {0};
-    fds[0].fd                  = alp_mqtt_get_fd(&be->client);
-    fds[0].events              = ZSOCK_POLLIN;
-    int rc                     = zsock_poll(fds, 1, (int)timeout_ms);
-    if (rc < 0) return errno_to_alp(-errno);
-    if (rc > 0) {
-        int err = mqtt_input(&be->client);
-        if (err != 0) return errno_to_alp(err);
-    }
-    int err = mqtt_live(&be->client);
-    if (err != 0 && err != -EAGAIN) return errno_to_alp(err);
-    return ALP_OK;
+	struct zsock_pollfd fds[1] = { 0 };
+	fds[0].fd                  = alp_mqtt_get_fd(&be->client);
+	fds[0].events              = ZSOCK_POLLIN;
+	int rc                     = zsock_poll(fds, 1, (int)timeout_ms);
+	if (rc < 0) return errno_to_alp(-errno);
+	if (rc > 0) {
+		int err = mqtt_input(&be->client);
+		if (err != 0) return errno_to_alp(err);
+	}
+	int err = mqtt_live(&be->client);
+	if (err != 0 && err != -EAGAIN) return errno_to_alp(err);
+	return ALP_OK;
 #else
-    (void)st;
-    (void)timeout_ms;
-    return ALP_ERR_NOSUPPORT;
+	(void)st;
+	(void)timeout_ms;
+	return ALP_ERR_NOSUPPORT;
 #endif
 }
 
 static void z_close(alp_mqtt_backend_state_t *st)
 {
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
-    struct mqtt_be *be = (struct mqtt_be *)st->be_data;
-    if (be == NULL) return;
-    if (be->connected) {
-        (void)mqtt_disconnect(&be->client, NULL);
-        be->connected = false;
-    }
-    mqtt_be_release(be);
-    st->be_data = NULL;
+	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
+	if (be == NULL) return;
+	if (be->connected) {
+		(void)mqtt_disconnect(&be->client, NULL);
+		be->connected = false;
+	}
+	mqtt_be_release(be);
+	st->be_data = NULL;
 #else
-    (void)st;
+	(void)st;
 #endif
 }
 
@@ -521,19 +526,21 @@ static void z_close(alp_mqtt_backend_state_t *st)
 /* ------------------------------------------------------------------ */
 
 static const alp_mqtt_ops_t _ops = {
-    .open      = z_open,
-    .connect   = z_connect,
-    .publish   = z_publish,
-    .subscribe = z_subscribe,
-    .loop      = z_loop,
-    .close     = z_close,
+	.open      = z_open,
+	.connect   = z_connect,
+	.publish   = z_publish,
+	.subscribe = z_subscribe,
+	.loop      = z_loop,
+	.close     = z_close,
 };
 
-ALP_BACKEND_REGISTER(mqtt, zephyr_drv, {
-    .silicon_ref = "*",
-    .vendor      = "zephyr",
-    .base_caps   = 0u,
-    .priority    = 100,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(mqtt,
+                     zephyr_drv,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "zephyr",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

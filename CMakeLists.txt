@@ -64,6 +64,13 @@ option(ALP_BUILD_FUZZ     "Build Alp SDK libFuzzer harnesses (tests/fuzz/, clang
 option(ALP_HAS_LVGL       "Compile <alp/gui.h> against LVGL"  OFF)
 option(ALP_HAS_CMSIS_DSP  "Allow Alp SDK internals (audio etc.) to call CMSIS-DSP.  Application code uses CMSIS-DSP directly; ALP no longer re-exports it." OFF)
 
+# Build libalp_sdk as a shared library and install it + the <alp/*>
+# headers.  Linux/Yocto consumers (e.g. the meta-alp-sdk recipe, ROS 2
+# nodes that link libalp_sdk.so) set this ON; embedded users who
+# add_subdirectory() the SDK leave it OFF and get the static,
+# install-free build they expect.
+option(ALP_SDK_BUILD_SHARED "Build libalp_sdk.so + install lib/headers (Linux/Yocto)"  OFF)
+
 # ---------------------------------------------------------------------
 # Public header library
 # ---------------------------------------------------------------------
@@ -86,6 +93,49 @@ endif()
 add_library(alp::sdk_headers ALIAS alp_sdk_headers)
 
 # ---------------------------------------------------------------------
+# Chip-driver collection (libalp_chips)
+#
+# chips/<part>/<part>.c are OS-agnostic C drivers that call back into
+# <alp/peripheral.h> (alp_i2c_* / alp_spi_* / ...), resolved at final
+# link against libalp_sdk.  Each driver is opt-in via a per-chip
+# ALP_SDK_CHIP_<NAME> toggle (default OFF) so a consumer builds exactly
+# the drivers its board populates.  The Yocto `alp-chips` recipe drives
+# this with ALP_BUILD_CHIPS_ONLY=ON + the toggles, emitting a static
+# libalp_chips.a that apps (e.g. the alp_perception ROS node) link
+# alongside libalp_sdk.so.
+# ---------------------------------------------------------------------
+set(ALP_SDK_CHIP_LIST
+    tcal9538 ina236 tas2563 lsm6dso bmi323 bmp581 icm42670
+    ssd1306 ssd1331 tmp112 rv3028c7 optiga_trust_m eeprom_24c128
+    ov5640 cam_mux_pi3wvr626 ublox_neo_m9n
+    CACHE INTERNAL "Chip drivers selectable via ALP_SDK_CHIP_<NAME>")
+option(ALP_BUILD_CHIPS_ONLY
+    "Build the libalp_chips static archive from the enabled chip drivers (Yocto alp-chips recipe)." OFF)
+foreach(_chip IN LISTS ALP_SDK_CHIP_LIST)
+    string(TOUPPER "${_chip}" _chip_uc)
+    option(ALP_SDK_CHIP_${_chip_uc} "Build the ${_chip} driver into libalp_chips" OFF)
+endforeach()
+
+if(ALP_BUILD_CHIPS_ONLY)
+    add_library(alp_chips STATIC)
+    target_link_libraries(alp_chips PUBLIC alp_sdk_headers)
+    set(_alp_chips_enabled "")
+    foreach(_chip IN LISTS ALP_SDK_CHIP_LIST)
+        string(TOUPPER "${_chip}" _chip_uc)
+        if(ALP_SDK_CHIP_${_chip_uc})
+            target_sources(alp_chips PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/chips/${_chip}/${_chip}.c)
+            list(APPEND _alp_chips_enabled ${_chip})
+        endif()
+    endforeach()
+    message(STATUS "alp-sdk: libalp_chips drivers: ${_alp_chips_enabled}")
+    include(GNUInstallDirs)
+    install(TARGETS alp_chips ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/alp/chips
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/alp)
+endif()
+
+# ---------------------------------------------------------------------
 # Implementation library
 #
 # In Zephyr-module mode the per-backend CMakeLists uses zephyr_library_*
@@ -94,7 +144,14 @@ add_library(alp::sdk_headers ALIAS alp_sdk_headers)
 # ---------------------------------------------------------------------
 
 if(NOT DEFINED ZEPHYR_BASE)
-    add_library(alp_sdk STATIC)
+    if(ALP_SDK_BUILD_SHARED)
+        add_library(alp_sdk SHARED)
+        set_target_properties(alp_sdk PROPERTIES
+            VERSION   ${PROJECT_VERSION}
+            SOVERSION ${PROJECT_VERSION_MAJOR})
+    else()
+        add_library(alp_sdk STATIC)
+    endif()
     target_link_libraries(alp_sdk PUBLIC alp_sdk_headers)
     add_library(alp::sdk ALIAS alp_sdk)
 endif()
@@ -140,5 +197,22 @@ write_basic_package_version_file(
     COMPATIBILITY SameMajorVersion
 )
 
-# Install rules are intentionally minimal in v0.1.  Embedded consumers
-# typically use add_subdirectory() and don't need installed artifacts.
+# Install rules.  Only emitted for the shared/standalone build
+# (ALP_SDK_BUILD_SHARED) so the add_subdirectory() flow embedded
+# consumers use is unchanged -- they never invoke `install`.  This is
+# what lets the meta-alp-sdk Yocto recipe package libalp_sdk.so + the
+# <alp/*> headers into the target sysroot (so e.g. the alp_perception
+# ROS node's find_library(alp_sdk) / find_path(alp/peripheral.h)
+# resolve).
+if(ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE)
+    include(GNUInstallDirs)
+    install(TARGETS alp_sdk
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # alp/chips/ headers are owned by the alp-chips package; exclude them
+    # so a sysroot with both alp-sdk and alp-chips has no file collision.
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/alp
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        PATTERN "chips" EXCLUDE)
+endif()

@@ -42,82 +42,82 @@
 
 int main(void)
 {
-    printf("[m33] rpmsg-imx93 producer coming up\n");
+	printf("[m33] rpmsg-imx93 producer coming up\n");
 
-    /* ----- Channel setup ---------------------------------------- */
-    /* Spec §6.6 canonical open.  Every value here comes from the
+	/* ----- Channel setup ---------------------------------------- */
+	/* Spec §6.6 canonical open.  Every value here comes from the
      * generated header; if a customer renames the `alp_default`
      * channel in their board.yaml `ipc:` block, this struct picks
      * up the new identifiers automatically on the next build with
      * zero source edits on either side of the link. */
-    const alp_rpc_config_t cfg = {
-        .name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
-        .src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
-        .dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
-        .mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
-    };
+	const alp_rpc_config_t cfg = {
+		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+		.dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+		.mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
+	};
 
-    /* Acquire the RPC channel handle.  On i.MX93 silicon this binds
+	/* Acquire the RPC channel handle.  On i.MX93 silicon this binds
      * to the OpenAMP RPMsg device that the M33-side Zephyr driver
      * publishes; the underlying virtio rings live in the shared SRAM
      * carve-out the linker reserved.  On native_sim there is no such
      * device so we get NULL back -- treated as a clean early exit
      * rather than a hard failure so twister still passes the build. */
-    alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
-    if (ch == NULL) {
-        /* Common causes: orchestrator hasn't run yet (header out of
+	alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
+	if (ch == NULL) {
+		/* Common causes: orchestrator hasn't run yet (header out of
          * date), peer A55 firmware not loaded, or the host kernel
          * remoteproc node still in OFFLINE state. */
-        printf("[m33]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
-        goto done;
-    }
+		printf("[m33]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
+		goto done;
+	}
 
-    /* ----- Producer loop ---------------------------------------- */
-    /* Synthetic counter so the example is hardware-free; on real
+	/* ----- Producer loop ---------------------------------------- */
+	/* Synthetic counter so the example is hardware-free; on real
      * i.MX93 boards this would read alp_adc_read() / alp_i2c_xfer()
      * / alp_sensor_read() against whatever sensor the customer wired
      * onto the board.  The point of the demo is the link, not the
      * source of the bytes. */
-    for (uint32_t i = 0; i < SAMPLE_BURST; ++i) {
-        /* Fake a slowly-rising temperature in °C so the consumer
+	for (uint32_t i = 0; i < SAMPLE_BURST; ++i) {
+		/* Fake a slowly-rising temperature in °C so the consumer
          * side can prove it received different payloads frame by
          * frame and isn't just echoing a cached value. */
-        const float        sample = 23.0f + (float)i * 0.1f;
+		const float sample = 23.0f + (float)i * 0.1f;
 
-        /* Framed RPC send: header + payload pushed into the virtio
+		/* Framed RPC send: header + payload pushed into the virtio
          * TX ring, mailbox doorbell rung, A55 consumer is woken on
          * the matching dst_ept.  Returns ALP_OK on success or an
          * ALP_ERR_* code if the ring is full / peer disconnected. */
-        const alp_status_t rv     = alp_rpc_send(ch, "temperature", &sample, sizeof(sample));
-        if (rv != ALP_OK) {
-            /* Most common runtime failure: peer A55 hasn't claimed
+		const alp_status_t rv = alp_rpc_send(ch, "temperature", &sample, sizeof(sample));
+		if (rv != ALP_OK) {
+			/* Most common runtime failure: peer A55 hasn't claimed
              * its endpoint yet, so the ring drains slower than we
              * fill it.  Bail rather than spin -- the loop will be
              * retried on the next demo run. */
-            printf("[m33]   alp_rpc_send rv=%d at i=%u\n", (int)rv, (unsigned)i);
-            break;
-        }
-        printf("[m33] sent temperature[%u]=%.1f\n", (unsigned)i, (double)sample);
+			printf("[m33]   alp_rpc_send rv=%d at i=%u\n", (int)rv, (unsigned)i);
+			break;
+		}
+		printf("[m33] sent temperature[%u]=%.1f\n", (unsigned)i, (double)sample);
 
 #ifndef CONFIG_BOARD_NATIVE_SIM
-        /* 1 Hz cadence on real silicon -- under native_sim we skip
+		/* 1 Hz cadence on real silicon -- under native_sim we skip
          * the sleep so the twister harness completes in milliseconds
          * instead of seconds.  Production firmware would either keep
          * this 1-second tick or wire the cadence to a real sensor
          * data-ready GPIO. */
-        k_msleep(1000);
+		k_msleep(1000);
 #endif
-    }
+	}
 
-    /* ----- Teardown --------------------------------------------- */
-    /* Symmetric with alp_rpc_open(): releases the endpoint, tears
+	/* ----- Teardown --------------------------------------------- */
+	/* Symmetric with alp_rpc_open(): releases the endpoint, tears
      * down the virtio ring binding, and lets the peer's send() see
      * the channel as closed on its next attempt. */
-    alp_rpc_close(ch);
+	alp_rpc_close(ch);
 
 done:
-    /* Marker line consumed by the twister regex -- keep the literal
+	/* Marker line consumed by the twister regex -- keep the literal
      * `[rpmsg-imx93] done` string stable so test logic doesn't drift. */
-    printf("[rpmsg-imx93] done\n");
-    return 0;
+	printf("[rpmsg-imx93] done\n");
+	return 0;
 }

@@ -72,16 +72,16 @@ extern "C" {
 #endif
 
 typedef enum {
-    PI3DBS_STATE_OFF    = 0, /**< Mux disabled (PD = 0). */
-    PI3DBS_STATE_PATH_0 = 1, /**< Mux enabled, SEL = 0. */
-    PI3DBS_STATE_PATH_1 = 2, /**< Mux enabled, SEL = 1. */
+	PI3DBS_STATE_OFF    = 0, /**< Mux disabled (PD = 0). */
+	PI3DBS_STATE_PATH_0 = 1, /**< Mux enabled, SEL = 0. */
+	PI3DBS_STATE_PATH_1 = 2, /**< Mux enabled, SEL = 1. */
 } pi3dbs12212_state_t;
 
 typedef struct {
-    bool        initialised;
-    alp_gpio_t *pd;          /**< PD pin (high = mux enabled). */
-    alp_gpio_t *sel;         /**< SEL pin (path select). */
-    pi3dbs12212_state_t state;
+	bool                initialised;
+	alp_gpio_t         *pd;  /**< PD pin (high = mux enabled). */
+	alp_gpio_t         *sel; /**< SEL pin (path select). */
+	pi3dbs12212_state_t state;
 } pi3dbs12212_t;
 
 /** @brief Initialise the driver and put the mux in OFF.
@@ -103,7 +103,7 @@ alp_status_t pi3dbs12212_set_state(pi3dbs12212_t *ctx, pi3dbs12212_state_t state
 alp_status_t pi3dbs12212_get_state(pi3dbs12212_t *ctx, pi3dbs12212_state_t *state);
 
 /** @brief Release the driver context.  Drives the mux to OFF first. */
-void         pi3dbs12212_deinit(pi3dbs12212_t *ctx);
+void pi3dbs12212_deinit(pi3dbs12212_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

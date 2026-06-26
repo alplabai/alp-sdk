@@ -32,7 +32,7 @@ extern "C" {
 #ifdef ALP_HAS_LVGL
 /* The upstream LVGL umbrella header.  Configured via lv_conf.h
  * shipped under cmake/ — see docs/architecture.md. */
-#  include "lvgl.h"
+#include "lvgl.h"
 #endif
 
 /**
@@ -54,4 +54,4 @@ alp_status_t alp_gui_lvgl_attach(alp_display_t *display);
 }
 #endif
 
-#endif  /* ALP_GUI_H */
+#endif /* ALP_GUI_H */

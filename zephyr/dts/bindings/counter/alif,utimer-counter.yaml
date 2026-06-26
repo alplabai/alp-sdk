@@ -1,0 +1,22 @@
+# Copyright (c) 2025 Alif Semiconductor
+# Copyright (c) 2026 Alp Lab AB
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Alif UTIMER counter-mode child node.
+#
+# The fork's UTIMER DTS shape places a `counter { compatible =
+# "alif,utimer-counter"; }` child under the alif,utimer parent.  The alp-sdk
+# counter driver (zephyr/drivers/counter/counter_alif_utimer.c) binds the
+# PARENT alif,utimer compatible directly (it reads both reg windows + timer-id
+# from the parent), so this binding exists only so the disabled child node
+# validates against the devicetree schema.  No driver binds it.
+#
+# Transcribed from the Apache-2.0 alifsemi/zephyr_alif fork
+# (dts/bindings/counter/alif,utimer-counter.yaml).  vendor-ext, BENCH-UNVERIFIED.
+
+description: Alif UTIMER in counter mode
+
+compatible: "alif,utimer-counter"
+
+include: base.yaml

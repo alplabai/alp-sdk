@@ -20,45 +20,51 @@
 #include "rtc_ops.h"
 
 static alp_rtc_time_t _cursor = {
-    .year = 2026, .month = 1, .day = 1,
-    .weekday = 4,
-    .hour = 0, .minute = 0, .second = 0, .millisecond = 0,
+	.year        = 2026,
+	.month       = 1,
+	.day         = 1,
+	.weekday     = 4,
+	.hour        = 0,
+	.minute      = 0,
+	.second      = 0,
+	.millisecond = 0,
 };
 
-static alp_status_t sw_open(uint32_t rtc_id,
-                            alp_rtc_backend_state_t *st,
-                            alp_capabilities_t *caps_out) {
-    (void)rtc_id;
-    st->dev = NULL;
-    st->rtc_id = rtc_id;
-    st->be_data = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+static alp_status_t
+sw_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
+{
+	(void)rtc_id;
+	st->dev         = NULL;
+	st->rtc_id      = rtc_id;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
-static alp_status_t sw_set_time(alp_rtc_backend_state_t *st,
-                                const alp_rtc_time_t *t) {
-    (void)st;
-    _cursor = *t;
-    return ALP_OK;
+static alp_status_t sw_set_time(alp_rtc_backend_state_t *st, const alp_rtc_time_t *t)
+{
+	(void)st;
+	_cursor = *t;
+	return ALP_OK;
 }
 
-static alp_status_t sw_get_time(alp_rtc_backend_state_t *st,
-                                alp_rtc_time_t *t) {
-    (void)st;
-    *t = _cursor;
-    _cursor.second = (uint8_t)((_cursor.second + 1u) % 60u);
-    return ALP_OK;
+static alp_status_t sw_get_time(alp_rtc_backend_state_t *st, alp_rtc_time_t *t)
+{
+	(void)st;
+	*t             = _cursor;
+	_cursor.second = (uint8_t)((_cursor.second + 1u) % 60u);
+	return ALP_OK;
 }
 
 static const alp_rtc_ops_t _ops = {
-    .open     = sw_open,
-    .set_time = sw_set_time,
-    .get_time = sw_get_time,
-    .close    = NULL,
+	.open     = sw_open,
+	.set_time = sw_set_time,
+	.get_time = sw_get_time,
+	.close    = NULL,
 };
 
-ALP_BACKEND_REGISTER(rtc, sw_fallback,
+ALP_BACKEND_REGISTER(rtc,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

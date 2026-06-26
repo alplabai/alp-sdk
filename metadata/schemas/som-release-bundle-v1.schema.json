@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/som-release-bundle-v1.schema.json",
+  "title": "ALP SoM Release Bundle Manifest v1",
+  "description": "Public contract for a versioned per-SKU SoM-release bundle ({bl2, fip, system image}). The bundle (binaries + this manifest instance) is a private production artifact in alp-sdk-internal; this schema is public because it is the producer->consumer contract the provisioning tool (Piece 4) validates against. Every field is public-safe by construction.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sku", "family", "hw_rev", "release_version", "created", "status", "components", "provenance"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "sku": { "type": "string", "pattern": "^E1M-(AEN|V2N|V2M|NX9)\\d{3}$" },
+    "family": { "type": "string", "enum": ["aen", "v2n", "v2n-m1", "imx93"] },
+    "hw_rev": { "type": "string", "minLength": 1 },
+    "release_version": { "type": "string", "pattern": "^som-\\d+\\.\\d+\\.\\d+$" },
+    "created": { "type": "string", "format": "date" },
+    "status": { "type": "string", "enum": ["complete", "bootloader-only:image-pending-hw"] },
+    "components": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "file", "sha256", "size_bytes", "flash_target"],
+        "properties": {
+          "role": { "type": "string", "enum": ["bl2", "fip", "system_image"] },
+          "file": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "size_bytes": { "type": "integer", "minimum": 1 },
+          "flash_target": { "type": "string", "enum": ["xspi:mtd0", "xspi:mtd1", "emmc"] }
+        }
+      },
+      "allOf": [
+        { "contains": { "type": "object", "properties": { "role": { "const": "bl2" } }, "required": ["role"] } },
+        { "contains": { "type": "object", "properties": { "role": { "const": "fip" } }, "required": ["role"] } }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolchain", "u_boot_srcrev", "tf_a_srcrev", "uboot_defconfig", "patches", "equivalence"],
+      "properties": {
+        "toolchain": { "type": "string" },
+        "u_boot_srcrev": { "type": "string" },
+        "tf_a_srcrev": { "type": "string" },
+        "uboot_defconfig": { "type": "string" },
+        "patches": { "type": "array", "items": { "type": "string" } },
+        "equivalence": { "type": "string" },
+        "equivalence_ref": { "type": "string" }
+      }
+    },
+    "provenance_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "signature": {
+      "description": "ECDSA-P256 provenance signature (null until signed).",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format_version", "algorithm", "key_id", "signed_at", "value"],
+          "properties": {
+            "format_version": { "const": 1 },
+            "algorithm": { "const": "ecdsa-p256-sha256" },
+            "key_id": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+            "signed_at": { "type": "string", "format": "date" },
+            "value": { "type": "string", "pattern": "^[A-Za-z0-9+/]+={0,2}$" }
+          }
+        }
+      ]
+    }
+  },
+  "if": { "required": ["status"], "properties": { "status": { "const": "complete" } } },
+  "then": {
+    "properties": {
+      "components": {
+        "contains": { "type": "object", "properties": { "role": { "const": "system_image" } }, "required": ["role"] }
+      }
+    }
+  }
+}

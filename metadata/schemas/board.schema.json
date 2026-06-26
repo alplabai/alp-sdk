@@ -508,7 +508,7 @@
         "os": {
           "type": "string",
           "enum": ["zephyr", "yocto", "baremetal", "off"],
-          "description": "Override the natural runtime for this core.  Optional: the SoM topology already picks the right OS for each core's silicon class (Cortex-M -> Zephyr, Cortex-A -> Yocto Linux).  Write `os:` only to override -- `off` (skip the slice; no app required) or `baremetal` (rare hand-written firmware on a core that normally runs Zephyr)."
+          "description": "The OS runtime is DERIVED from the core's silicon class and is not selectable: Cortex-M -> Zephyr (RTOS), Cortex-A -> Yocto (Linux). Omit `os:` to take that runtime. The only values a board.yaml may set explicitly are `off` (skip the slice; no app required) or `baremetal` (rare hand-written firmware in place of the core's RTOS). Setting the OTHER class's OS (e.g. `zephyr` on a Cortex-A, `yocto` on a Cortex-M) is rejected by the loader -- the enum lists every resolved runtime, but the cross-file core-class check (board.yaml `os:` vs the SoC `cores[].type`) is enforced in scripts/alp_orchestrate.py, since JSON Schema cannot see the SoC spec."
         },
         "app": {
           "type": "string",

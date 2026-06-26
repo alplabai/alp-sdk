@@ -9,9 +9,8 @@
  *
  * Portable 2D blit / fill / blend operations against framebuffer
  * surfaces.  Maps to the Alif Ensemble's D/AVE 2D ("GPU2D") block on
- * AEN-family SoMs; planned implementations land for the NXP i.MX 93
- * Vivante GC328 (when the vendor HAL ships) and as a software
- * fallback for SoMs without a 2D accelerator.
+ * AEN-family SoMs; every other SoM is served by a portable software
+ * fallback that does the same fill / blit / blend on the CPU.
  *
  * Surface rationale: the Alif Ensemble audit
  * (internal AEN feature audit, top-five NEEDS-PORTABLE-
@@ -19,24 +18,23 @@
  * Zephyr driver class.  Customers migrating from V2N to AEN
  * silently lose the 2D acceleration if the SDK does not expose a
  * portable surface.  This header declares the API so customer code
- * compiles against every SoM; the actual GPU2D dispatch lands once
- * the AEN HAL pack stabilises (see roadmap in
- * the internal AEN feature audit §5.2).
+ * compiles against every SoM.
  *
  * Backends:
  *   - AEN-family : D/AVE 2D hardware block (SDK backend; no vendor
- *                  SDK dependency in app code).
- *   - i.MX 93    : Vivante 2D core (SDK backend, planned).
- *   - V2N        : NOSUPPORT (no on-die 2D block).
- *   - Yocto      : DRM / KMS planes where available; NOSUPPORT
- *                  otherwise.
- *   - Baremetal  : NOSUPPORT.
+ *                  SDK dependency in app code).  Bench-unverified
+ *                  today -- see src/backends/gpu2d/alif_dave2d.c.
+ *   - all others : portable software fallback (CPU fill/blit/blend;
+ *                  src/backends/gpu2d/sw_fallback.c).  This is what
+ *                  V2N, i.MX 93 (whose 2D engine is PXP, not a
+ *                  GPU2D peer -- see ADR 0008), Yocto, and
+ *                  bare-metal builds use.
  *
  * Concurrency: the singleton handle returned by @ref alp_gpu2d_open
  * is reentrant under a shared driver mutex.  Callers must serialise
  * @ref alp_gpu2d_fill_rect / @ref alp_gpu2d_blit / @ref alp_gpu2d_blend
- * issuance if the underlying HAL doesn't queue ops -- the v0.5 stub
- * doesn't perform any work so concurrency is not yet load-bearing.
+ * issuance -- the software fallback writes caller memory directly and
+ * the D/AVE 2D HAL's display-list builder is not itself thread-safe.
  *
  * Typical usage:
  * @code
@@ -78,23 +76,26 @@ extern "C" {
  *   - RGB888: 24-bit packed; backend-defined byte order.
  *   - RGBA8888: 32-bit, R:G:B:A = 8:8:8:8 (alternate ordering). */
 typedef enum {
-    ALP_GPU2D_FMT_ARGB8888 = 0,
-    ALP_GPU2D_FMT_RGB565   = 1,
-    ALP_GPU2D_FMT_A8       = 2,
-    ALP_GPU2D_FMT_RGB888   = 3,
-    ALP_GPU2D_FMT_RGBA8888 = 4,
+	ALP_GPU2D_FMT_ARGB8888 = 0,
+	ALP_GPU2D_FMT_RGB565   = 1,
+	ALP_GPU2D_FMT_A8       = 2,
+	ALP_GPU2D_FMT_RGB888   = 3,
+	ALP_GPU2D_FMT_RGBA8888 = 4,
 } alp_gpu2d_format_t;
 
-/** Blend mode for @ref alp_gpu2d_blend.  Field-level meanings:
+/** Blend mode for @ref alp_gpu2d_blend.  Colours are straight
+ *  (non-premultiplied) alpha.  Field-level meanings:
  *   - REPLACE: dst = src (no blend).
- *   - SRC_OVER: dst = src + dst*(1-src.a) (Porter-Duff).
+ *   - SRC_OVER: dst = src*src.a + dst*(1-src.a) (straight-alpha
+ *     src-over: a transparent src leaves dst untouched, an opaque
+ *     src replaces it).
  *   - ADDITIVE: dst = src + dst (clamped).
  *   - MULTIPLY: dst = src * dst. */
 typedef enum {
-    ALP_GPU2D_BLEND_REPLACE  = 0,
-    ALP_GPU2D_BLEND_SRC_OVER = 1,
-    ALP_GPU2D_BLEND_ADDITIVE = 2,
-    ALP_GPU2D_BLEND_MULTIPLY = 3,
+	ALP_GPU2D_BLEND_REPLACE  = 0,
+	ALP_GPU2D_BLEND_SRC_OVER = 1,
+	ALP_GPU2D_BLEND_ADDITIVE = 2,
+	ALP_GPU2D_BLEND_MULTIPLY = 3,
 } alp_gpu2d_blend_mode_t;
 
 /** Surface descriptor.  Lives in caller memory; copied internally
@@ -106,11 +107,11 @@ typedef enum {
  *     (= width * bytes-per-pixel for tightly-packed surfaces).
  *   - format: one of @ref alp_gpu2d_format_t. */
 typedef struct {
-    void              *base;
-    uint32_t           width;
-    uint32_t           height;
-    uint32_t           stride_bytes;
-    alp_gpu2d_format_t format;
+	void              *base;
+	uint32_t           width;
+	uint32_t           height;
+	uint32_t           stride_bytes;
+	alp_gpu2d_format_t format;
 } alp_gpu2d_surface_t;
 
 /** Opaque GPU2D handle.  Allocate via @ref alp_gpu2d_open. */
@@ -146,8 +147,13 @@ alp_gpu2d_t *alp_gpu2d_open(void);
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
  *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *dst, uint32_t x,
-                                 uint32_t y, uint32_t w, uint32_t h, uint32_t argb_color);
+alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *handle,
+                                 const alp_gpu2d_surface_t *dst,
+                                 uint32_t                   x,
+                                 uint32_t                   y,
+                                 uint32_t                   w,
+                                 uint32_t                   h,
+                                 uint32_t                   argb_color);
 
 /**
  * @brief Copy a sub-rect from @p src into @p dst (no blend).
@@ -168,9 +174,15 @@ alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *handle, const alp_gpu2d_surface_t 
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
  *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_gpu2d_blit(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src, uint32_t sx,
-                            uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
-                            uint32_t w, uint32_t h);
+alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *handle,
+                            const alp_gpu2d_surface_t *src,
+                            uint32_t                   sx,
+                            uint32_t                   sy,
+                            const alp_gpu2d_surface_t *dst,
+                            uint32_t                   dx,
+                            uint32_t                   dy,
+                            uint32_t                   w,
+                            uint32_t                   h);
 
 /**
  * @brief Alpha-blend @p src onto @p dst using the chosen mode.
@@ -189,9 +201,16 @@ alp_status_t alp_gpu2d_blit(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src,
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
  *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_gpu2d_blend(alp_gpu2d_t *handle, const alp_gpu2d_surface_t *src, uint32_t sx,
-                             uint32_t sy, const alp_gpu2d_surface_t *dst, uint32_t dx, uint32_t dy,
-                             uint32_t w, uint32_t h, alp_gpu2d_blend_mode_t mode);
+alp_status_t alp_gpu2d_blend(alp_gpu2d_t               *handle,
+                             const alp_gpu2d_surface_t *src,
+                             uint32_t                   sx,
+                             uint32_t                   sy,
+                             const alp_gpu2d_surface_t *dst,
+                             uint32_t                   dx,
+                             uint32_t                   dy,
+                             uint32_t                   w,
+                             uint32_t                   h,
+                             alp_gpu2d_blend_mode_t     mode);
 
 /**
  * @brief Release the GPU2D handle.  NULL is a no-op.

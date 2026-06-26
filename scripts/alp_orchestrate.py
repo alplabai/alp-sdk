@@ -15,6 +15,7 @@ Public API:
     emit_system_manifest(project, slices=...) -> str
     emit_dts_reservations(project) -> str
     emit_ipc_contract_h(project)   -> str
+    emit_build_plan(project, board_yaml=..., build_root=...) -> str
 
     BoardProject, Slice, ResolvedCarveOut, SystemManifest, Orchestrator,
     OrchestratorError
@@ -24,6 +25,7 @@ Reference: docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-desi
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -31,7 +33,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -77,6 +79,94 @@ def _default_os_from_core_type(core_type: str) -> str:
     if t.startswith("cortex-m"):
         return "zephyr"
     return "off"
+
+
+@functools.lru_cache(maxsize=None)
+def _core_os_choices() -> tuple[str, ...]:
+    """The runtimes a core's `os:` may resolve to, read from the board
+    schema's `$defs/core_entry/properties/os` enum.
+
+    Derived (not re-typed) so the value-set has exactly one source of truth
+    and cannot drift between the schema and the code.  `off` skips the core
+    (no slice is built).
+    """
+    schema = json.loads(BOARD_SCHEMA.read_text(encoding="utf-8"))
+    return tuple(schema["$defs"]["core_entry"]["properties"]["os"]["enum"])
+
+
+# The two class-determined OS runtimes (issue #95): Cortex-A -> Yocto (Linux),
+# Cortex-M -> Zephyr (RTOS).  These follow the core class and are NOT
+# user-selectable (see _default_os_from_core_type); `baremetal` (no-OS) and
+# `off` (disabled) are the only values a board.yaml may set explicitly.
+CLASS_RUNTIMES = ("yocto", "zephyr")
+
+
+def _runtime_class(core_type: str) -> str:
+    """`linux` for Cortex-A, `rtos` for Cortex-M, else `other`."""
+    t = (core_type or "").lower()
+    if t.startswith("cortex-a"):
+        return "linux"
+    if t.startswith("cortex-m"):
+        return "rtos"
+    return "other"
+
+
+def _cross_class_os(core_type: str) -> set[str]:
+    """The class runtime a core may NOT be set to -- the OS of the *other*
+    class.  A Cortex-A can't run Zephyr; a Cortex-M can't run Yocto."""
+    return set(CLASS_RUNTIMES) - {_default_os_from_core_type(core_type)}
+
+
+def _allowed_os_for_core(core_type: str) -> list[str]:
+    """The os: values valid for this core: every runtime minus the other
+    class's OS -- e.g. Cortex-A -> [yocto, baremetal, off], Cortex-M ->
+    [zephyr, baremetal, off]."""
+    cross = _cross_class_os(core_type)
+    return [o for o in _core_os_choices() if o not in cross]
+
+
+def core_os_topology(project: "BoardProject") -> dict[str, Any]:
+    """Per-core OS facts for an IDE / tool (issue #95).
+
+    The runtime is *determined by the core class* -- Cortex-A -> Yocto (Linux),
+    Cortex-M -> Zephyr (RTOS) -- and is not user-selectable.  For each resolved
+    core this reports its `runtime_class`, the class `default_os`, the
+    `effective_os` (after a `baremetal`/`off` override -- the only board.yaml
+    knobs), whether it is `enabled`, and the per-core `allowed_os` set (the
+    valid dropdown).  Lets the Board Configurator show the SDK's selection +
+    the legal overrides instead of guessing or offering a cross-class OS.
+    """
+    soc_types = {
+        c["id"]: c.get("type", "")
+        for c in (project.soc_spec.get("cores") or []) if "id" in c
+    }
+    rows: list[dict[str, Any]] = []
+    for core_id, sl in sorted(project.cores.items()):
+        core_type = soc_types.get(core_id, "")
+        default_os = _default_os_from_core_type(core_type)
+        rows.append({
+            "core_id":       core_id,
+            "core_type":     core_type,
+            "runtime_class": _runtime_class(core_type),
+            "default_os":    default_os,
+            "effective_os":  sl.os,
+            "enabled":       sl.os != "off",
+            "overridden":    sl.os != default_os,
+            "allowed_os":    _allowed_os_for_core(core_type),
+        })
+    return {
+        "schema_version": 1,
+        "sku":            project.sku,
+        "cores":          rows,
+    }
+
+
+def emit_os_topology(project: "BoardProject") -> str:
+    """JSON for `alp_project.py --emit os-topology` (see core_os_topology).
+
+    Sorted keys + a trailing newline so the output is byte-deterministic.
+    """
+    return json.dumps(core_os_topology(project), indent=2) + "\n"
 
 
 class OrchestratorError(RuntimeError):
@@ -740,6 +830,20 @@ def _validate_consistency(project: "BoardProject") -> None:
             )
 
 
+def _enforce_os_matches_core_class(slice_: Slice, core_type: str) -> None:
+    """The runtime follows the core class and is not user-selectable
+    (issue #95): a Cortex-A core runs Yocto/Linux, a Cortex-M core runs
+    Zephyr/RTOS.  A board.yaml may only disable a core (`off`) or drop it to
+    no-OS (`baremetal`); selecting the *other* class's OS is rejected.
+    """
+    if slice_.os in _cross_class_os(core_type):
+        raise OrchestratorError(
+            f"core '{slice_.core_id}' ({core_type or 'unclassified'}): its runtime "
+            f"is determined by the core class (Cortex-A -> Yocto/Linux, "
+            f"Cortex-M -> Zephyr/RTOS) and is not selectable. Set os: 'off' to "
+            f"disable it or 'baremetal' for no-OS firmware -- got os: '{slice_.os}'.")
+
+
 def _enforce_loader_rules(slice_: Slice) -> None:
     """Loader rules from spec §4.5: every non-off slice must declare
     enough to actually build."""
@@ -760,7 +864,7 @@ def _enforce_loader_rules(slice_: Slice) -> None:
             raise OrchestratorError(
                 f"core '{slice_.core_id}': os: yocto requires either "
                 f"`app:` (custom recipe) or `image:` (stock recipe)")
-    elif slice_.os not in ("zephyr", "yocto", "baremetal", "off"):
+    elif slice_.os not in _core_os_choices():
         raise OrchestratorError(
             f"core '{slice_.core_id}': unknown os '{slice_.os}'")
 
@@ -891,6 +995,8 @@ def load_board_yaml(path: Path, *,
             soc_core_type=soc_core_type_by_id.get(core_id, ""),
         )
         _enforce_loader_rules(slice_)
+        _enforce_os_matches_core_class(
+            slice_, soc_core_type_by_id.get(core_id, ""))
         cores[core_id] = slice_
 
     # 6. IPC entries.
@@ -1237,7 +1343,7 @@ def resolve_carve_outs(
                 f"metadata.  Fill `mailbox.controller:` in "
                 f"metadata/e1m_modules/{project.sku}.yaml with the "
                 f"vendor mailbox node name (e.g. `renesas_mhu`, "
-                f"`nxp_mu`, `alif_evtrtr`) or remove the rpmsg "
+                f"`nxp_mu`, `alif_mhuv2`) or remove the rpmsg "
                 f"entries from board.yaml.")
         else:
             reserved_tags = {
@@ -1261,15 +1367,26 @@ def resolve_carve_outs(
         name = region["name"]
         if name in region_top:
             return region_top[name], None
-        base = region["base"]
+        # A region derived from the SoC variant JSON (no explicit
+        # `memory_map:` in the preset) carries name/size but NO `base`
+        # until the SoM is HW-mapped.  Treat a missing base the same as
+        # an explicit `TBD` so an un-mapped SoM (e.g. AEN801, whose E8
+        # SoC JSON has no per-region base yet) lands a clean *blocked*
+        # carve-out instead of crashing with KeyError: 'base'.
+        base = region.get("base")
         size_bytes = _region_size_bytes(region)
-        if isinstance(base, str) and base.strip().upper() == "TBD":
+        base_is_unmapped = (
+            base is None
+            or (isinstance(base, str) and base.strip().upper() == "TBD")
+        )
+        if base_is_unmapped:
             return None, (
-                f"memory_map.base is TBD for region '{name}' in SoM "
-                f"{project.sku}; this SoM hasn't been HW-mapped yet so "
-                f"IPC carve-outs cannot be allocated.  Fill the value "
-                f"in metadata/e1m_modules/{project.sku}.yaml or remove "
-                f"the matching ipc entry from board.yaml.")
+                f"memory_map.base is {'unset' if base is None else 'TBD'} "
+                f"for region '{name}' in SoM {project.sku}; this SoM "
+                f"hasn't been HW-mapped yet so IPC carve-outs cannot be "
+                f"allocated.  Add a `memory_map:` block to "
+                f"metadata/e1m_modules/{project.sku}.yaml (or per-region "
+                f"`base`) or remove the matching ipc entry from board.yaml.")
         if size_bytes is None:
             return None, (
                 f"memory_map.size is unresolvable for region '{name}' "
@@ -1980,6 +2097,179 @@ def emit_system_manifest(
 
 
 # ---------------------------------------------------------------------
+# Build-plan emission (the Wave C consumer contract)
+# ---------------------------------------------------------------------
+
+
+def _slice_build_dir(build_root: Path, slice_: Slice) -> Path:
+    """Per-slice build directory: build/<core>-<os>/."""
+    return Path(build_root) / f"{slice_.core_id}-{slice_.os}"
+
+
+def _slice_config_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's config artefact, or None
+    when the os has none.
+
+    Single source for both the Orchestrator's materialise step and
+    `emit_build_plan` -- the two MUST agree byte-for-byte (the CLI
+    consumer byte-writes the plan's contents and trusts them to match
+    what we'd write ourselves).
+    """
+    if slice_.os == "zephyr":
+        return ("alp.conf", _slice_alp_conf(project, slice_))
+    if slice_.os == "yocto":
+        return ("local.conf", _slice_local_conf(project, slice_))
+    if slice_.os == "baremetal":
+        return ("cmake-args.txt", _slice_cmake_args(project, slice_))
+    return None
+
+
+def _shared_artefacts(
+    project: BoardProject,
+    build_root: Path,
+) -> list[tuple[Path, str]]:
+    """(path, contents) of every shared generated artefact.
+
+    Single source for `_materialise_shared` and `emit_build_plan`
+    (same byte-parity contract as `_slice_config_artefact`).
+    Conditional artefacts (sysbuild / TF-M) follow absence-emits-
+    nothing: they only appear when their emit is non-empty.
+    """
+    build_root = Path(build_root)
+    gen = build_root / "generated"
+    out: list[tuple[Path, str]] = [
+        # `<alp/system_ipc.h>` is the canonical include path consumers
+        # use (see include/alp/rpc.h §usage and the per-slice main.c
+        # references) -- the header sits in an `alp/` subdir so slice
+        # CMakeLists add `generated/` straight to the include path.
+        (gen / "alp" / "system_ipc.h", emit_ipc_contract_h(project)),
+        (gen / "dts-reservations.dtsi", emit_dts_reservations(project)),
+        # Apps that don't declare storage[] still get a stub file with
+        # a "nothing to emit" comment so downstream #include resolves.
+        (gen / "dts-partitions.dtsi", emit_dts_partitions(project)),
+    ]
+    sysbuild_conf = emit_sysbuild_conf(project)
+    if sysbuild_conf:
+        out.append((build_root / "alp_sysbuild.conf", sysbuild_conf))
+    tfm_conf = emit_tfm_sysbuild_conf(project)
+    if tfm_conf:
+        out.append((build_root / "sysbuild" / "tfm" / "tfm.conf",
+                    tfm_conf))
+    return out
+
+
+def emit_build_plan(
+    project: BoardProject,
+    *,
+    board_yaml: Path,
+    build_root: Path,
+) -> str:
+    """Emit the machine-readable build plan as JSON (Wave C contract).
+
+    Consumed by the `alp` CLI (alp-sdk-vscode), which materialises the
+    plan's files, runs each slice's command, and owns scheduling /
+    caching / progress UX on top -- instead of re-implementing this
+    planner.  Agreed 2026-06-04 with the alp-sdk-vscode team; their
+    docs/PROPOSAL-alp-build-core.md records the settlement.
+
+    Contract notes (locked with the consumer -- bump `schemaVersion`
+    and flag in the CHANGELOG before changing the shape):
+
+      * camelCase keys; `schemaVersion` is independent of board.yaml's
+        schema version.
+      * Every artefact carries its `contents` so the consumer's
+        materialise step stays pure IO.  `_shared_artefacts` /
+        `_slice_config_artefact` are the single sources both this emit
+        and the Orchestrator's own materialise step read, so the two
+        cannot drift.
+      * No `inputHash` (the consumer computes its own cache key over
+        the plan) and no `sequential` (parallelism policy belongs to
+        the consumer's scheduler).
+      * One slice per non-`off` core, sorted by coreId.  A slice this
+        script cannot build yet (e.g. no `app:`) is carried with
+        `command: null` plus a `no-command` warning -- never dropped,
+        so the consumer can still report the core.
+      * Write-free: nothing is created on disk.  (Command resolution
+        stats the app dir to pick the CMakeLists.txt convention --
+        read-only, same as the build itself.)
+    """
+    build_root = Path(build_root)
+    slices_out: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+
+    for slice_ in sorted(project.cores.values(),
+                         key=lambda s: s.core_id):
+        if slice_.os == "off":
+            continue
+        build_dir = _slice_build_dir(build_root, slice_)
+        # `replace` keeps this emit side-effect free: _slice_command
+        # reads `build_dir` off the slice (baremetal -B), and the
+        # project's own Slice objects must stay untouched.
+        cmd = _slice_command(
+            project, replace(slice_, build_dir=build_dir))
+        if cmd is None:
+            if slice_.os == "zephyr" and slice_.app == STOCK_SHIM_APP:
+                warnings.append({
+                    "code":    "stock-shim-unimplemented",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}' uses the stock "
+                                f"M-core shim (app: {STOCK_SHIM_APP}); its "
+                                f"image body is not in the SDK tree yet "
+                                f"(issue #49). Override "
+                                f"cores.{slice_.core_id}.app with a real app "
+                                f"to build this core."),
+                })
+            else:
+                warnings.append({
+                    "code":    "no-command",
+                    "coreId":  slice_.core_id,
+                    "message": (f"no build command for core "
+                                f"'{slice_.core_id}' (os: {slice_.os}) "
+                                f"-- missing app/board/image"),
+                })
+        config_artefacts: list[dict[str, str]] = []
+        artefact = _slice_config_artefact(project, slice_)
+        if artefact is not None:
+            name, contents = artefact
+            config_artefacts.append({
+                "path":     (build_dir / name).as_posix(),
+                "contents": contents,
+            })
+        slices_out.append({
+            "coreId":          slice_.core_id,
+            "backend":         slice_.os,
+            "buildDir":        build_dir.as_posix(),
+            "configArtefacts": config_artefacts,
+            "command": None if cmd is None else {
+                "tool": cmd[0],
+                "args": cmd[1:],
+                "cwd":  build_dir.as_posix(),
+            },
+            # Native host-path form: the value is handed to the slice
+            # subprocess environment verbatim.
+            "env": {"ALP_SDK_ROOT": str(REPO)},
+        })
+
+    plan: dict[str, Any] = {
+        "schemaVersion":   1,
+        "generatedBy":     "scripts/alp_orchestrate.py",
+        "boardYaml":       Path(board_yaml).as_posix(),
+        "sku":             project.sku,
+        "buildRoot":       build_root.as_posix(),
+        "slices":          slices_out,
+        "sharedArtefacts": [
+            {"path": p.as_posix(), "contents": c}
+            for p, c in _shared_artefacts(project, build_root)
+        ],
+        "warnings":        warnings,
+    }
+    return json.dumps(plan, indent=2) + "\n"
+
+
+# ---------------------------------------------------------------------
 # Orchestrator (fan-out)
 # ---------------------------------------------------------------------
 
@@ -2060,49 +2350,36 @@ class Orchestrator:
 
     def _materialise_slice_config(self, slice_: Slice) -> Path:
         """Write per-core config artefacts under
-        build/<core>-<os>/."""
-        slice_dir = self.build_root / f"{slice_.core_id}-{slice_.os}"
+        build/<core>-<os>/.
+
+        The artefact itself comes from `_slice_config_artefact` -- the
+        same source `emit_build_plan` reads -- so what we write and
+        what the plan promises cannot drift.
+        """
+        slice_dir = _slice_build_dir(self.build_root, slice_)
         slice_dir.mkdir(parents=True, exist_ok=True)
         slice_.build_dir = slice_dir
         slice_.log_path = slice_dir / "build.log"
-        if slice_.os == "zephyr":
-            (slice_dir / "alp.conf").write_text(
-                _slice_alp_conf(self.project, slice_), encoding="utf-8")
-        elif slice_.os == "yocto":
-            (slice_dir / "local.conf").write_text(
-                _slice_local_conf(self.project, slice_), encoding="utf-8")
-        elif slice_.os == "baremetal":
-            (slice_dir / "cmake-args.txt").write_text(
-                _slice_cmake_args(self.project, slice_), encoding="utf-8")
+        artefact = _slice_config_artefact(self.project, slice_)
+        if artefact is not None:
+            name, contents = artefact
+            (slice_dir / name).write_text(contents, encoding="utf-8")
         return slice_dir
 
     def _materialise_shared(self) -> Path:
+        """Write the shared generated artefacts.
+
+        The (path, contents) set comes from `_shared_artefacts` -- the
+        same source `emit_build_plan` reads -- so what we write and
+        what the plan promises cannot drift.  Conditional artefacts
+        (sysbuild / TF-M) are absent from the list when empty, so
+        their directories are never created spuriously.
+        """
         gen = self.build_root / "generated"
-        gen.mkdir(parents=True, exist_ok=True)
-        # `<alp/system_ipc.h>` is the canonical include path consumers
-        # use (see include/alp/rpc.h §usage and the per-slice main.c
-        # references) — write the generated header at the matching
-        # `alp/` subdir so slice CMakeLists can add this directory
-        # straight to the include path.
-        alp_subdir = gen / "alp"
-        alp_subdir.mkdir(parents=True, exist_ok=True)
-        (alp_subdir / "system_ipc.h").write_text(
-            emit_ipc_contract_h(self.project), encoding="utf-8")
-        (gen / "dts-reservations.dtsi").write_text(
-            emit_dts_reservations(self.project), encoding="utf-8")
-        # Storage partitions land alongside the IPC reservations DTS;
-        # apps that don't declare storage[] still get a stub file with
-        # a "nothing to emit" comment so downstream `#include` resolves.
-        (gen / "dts-partitions.dtsi").write_text(
-            emit_dts_partitions(self.project), encoding="utf-8")
-        # TF-M sysbuild child-image overlay -- only when the project
-        # opts in to `security.psa.tfm: true`.  Absence-emits-nothing:
-        # we don't create the directory when the file would be empty.
-        tfm_conf = emit_tfm_sysbuild_conf(self.project)
-        if tfm_conf:
-            tfm_dir = self.build_root / "sysbuild" / "tfm"
-            tfm_dir.mkdir(parents=True, exist_ok=True)
-            (tfm_dir / "tfm.conf").write_text(tfm_conf, encoding="utf-8")
+        for path, contents in _shared_artefacts(self.project,
+                                                self.build_root):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents, encoding="utf-8")
         return gen
 
     # ---- dispatch ----
@@ -2130,8 +2407,14 @@ class Orchestrator:
         cmd = _slice_command(self.project, slice_)
         if cmd is None:
             slice_.status = "skipped"
-            slice_.reason = ("no command resolver implemented yet for "
-                             f"os: {slice_.os} -- Phase 3 wires this up")
+            if slice_.os == "zephyr" and slice_.app == STOCK_SHIM_APP:
+                slice_.reason = (
+                    f"stock M-core shim (app: {STOCK_SHIM_APP}) -- image body "
+                    f"not in the SDK tree yet (issue #49); override "
+                    f"cores.{slice_.core_id}.app to build this core")
+            else:
+                slice_.reason = ("no command resolver implemented yet for "
+                                 f"os: {slice_.os} -- Phase 3 wires this up")
             return slice_
 
         # Slice subprocess: scoped env + dedicated log file.
@@ -2329,7 +2612,7 @@ _ON_MODULE_NON_CHIP_FIELDS: frozenset[str] = frozenset({
     "silicon",             # e.g. "renesas:rzv2n:n44" — SoC identifier, not a driver
     "ethernet_phy_count",  # integer count, not a chip slug
     "i2c_devices",         # sub-block: handled by extracting chip: entries below
-    "ospi_memories",       # sub-block: handled by extracting chip: entries below
+    "ospi_memories",       # sub-block: storage parts (flash/HyperRAM); MPNs have no chips/ driver -- excluded like nor_flash/emmc below
     # Storage-class fields encode the SoC controller / peripheral name
     # that reaches the on-module storage (e.g. `nor_flash: xspi` -> the
     # NOR flash is wired to the xSPI controller; `emmc: sd0` -> eMMC on
@@ -2346,10 +2629,13 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
     """Extract unique, non-TBD chip slugs from an ``on_module:`` block.
 
     Walks every scalar field that is NOT in ``_ON_MODULE_NON_CHIP_FIELDS``,
-    then recurses into the ``ospi_memories`` sub-block (extracting the
-    ``chip:`` field from each memory entry) and the ``i2c_devices``
-    sub-block (extracting the ``chip:`` field from each device entry).
-    Duplicate slugs and values of ``TBD`` / ``null`` are silently dropped.
+    then recurses into the ``i2c_devices`` sub-block (extracting the
+    ``chip:`` field from each device entry).  ``ospi_memories`` and the
+    ``hyperram`` block are storage parts (NOR flash / HyperRAM) with no
+    ``chips/<part>/`` driver, so their MPNs are NOT extracted as chip
+    slugs (emitting them as ``CONFIG_ALP_SDK_CHIP_<X>`` would trip
+    Zephyr's undefined-symbol guard).  Duplicate slugs and values of
+    ``TBD`` / ``null`` are silently dropped.
 
     Returns a sorted, deduplicated list of slug strings.
     """
@@ -2370,15 +2656,7 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
         if isinstance(val, str):
             _add(val)
 
-    # 2. ospi_memories sub-block — each value is a dict with a `chip:`
-    #    key.
-    ospi = on_module.get("ospi_memories")
-    if isinstance(ospi, dict):
-        for _slot, entry in ospi.items():
-            if isinstance(entry, dict):
-                _add(entry.get("chip"))
-
-    # 3. i2c_devices sub-block — each bus entry contains a `devices:`
+    # 2. i2c_devices sub-block — each bus entry contains a `devices:`
     #    list; extract the `chip:` field from each device.
     #    Devices marked `assembled: optional` are DNI (do-not-install)
     #    on some builds and must NOT be auto-enabled as chip drivers —
@@ -3290,15 +3568,29 @@ def _slice_flash_recipe(
     return (None, None)
 
 
+# Placeholder M-core "stock shim" app token (Zephyr side).  Accepted by the
+# SoM-preset schema and defaulted into M-core slots (AEN m55_hp/he, V2N
+# m33_sm, NX91 m33), but the shim image body is not yet in the SDK tree
+# (issue #49), so it resolves to no build command.
+STOCK_SHIM_APP = "alp-stock-shim"
+
+
 def _slice_command(
     project: BoardProject,
     slice_: Slice,
 ) -> Optional[list[str]]:
-    """Resolve the build command for a slice.  Returns None when
-    Phase 2 has no command for this os yet (caller marks the slice
-    `skipped`)."""
+    """Resolve the build command for a slice.  Returns None when there is no
+    buildable command yet -- the caller carries the slice as `skipped` /
+    `no-command`, never dropped.  This includes the stock M-core shim
+    (`app: alp-stock-shim`), whose image body isn't in the SDK tree yet
+    (issue #49)."""
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
+            return None
+        # The stock shim is a placeholder token, not a buildable app dir;
+        # resolve no command rather than west-building a path that doesn't
+        # exist.  Override cores.<id>.app with a real app to build the core.
+        if slice_.app == STOCK_SHIM_APP:
             return None
         return [
             "west", "build",
@@ -3371,7 +3663,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         choices=["system-manifest", "ipc-contract-h",
                                  "dts-reservations", "dts-partitions",
                                  "storage-mounts-c",
-                                 "tfm-sysbuild-conf"],
+                                 "tfm-sysbuild-conf", "build-plan"],
                         help="Skip the build; just emit one of the "
                              "generated artefacts to stdout.")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -3396,6 +3688,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 sys.stdout.write(emit_storage_mounts_c(project))
             elif args.emit == "tfm-sysbuild-conf":
                 sys.stdout.write(emit_tfm_sysbuild_conf(project))
+            elif args.emit == "build-plan":
+                sys.stdout.write(emit_build_plan(
+                    project, board_yaml=args.input,
+                    build_root=args.build_root))
         except OrchestratorError as e:
             print(f"alp-orchestrate: {e}", file=sys.stderr)
             return 1

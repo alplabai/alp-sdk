@@ -56,6 +56,7 @@ byte; their numeric encoding is:
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
 | `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
+| `0x41` | `SE_RESET` (v0.8)       | `assert:u8` (`0` = release, `1` = hold in reset) | _empty_ (see §3.15) |
 | `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
 | `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
@@ -75,8 +76,9 @@ byte; their numeric encoding is:
 | `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _(empty; returns STATUS_NOSUPPORT today)_         |
 | `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _(empty; returns STATUS_NOSUPPORT today)_         |
 | `0x28` | `POWER_MODE_SET`      | `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32` | _(empty; returns STATUS_NOSUPPORT today)_       |
+| `0x81` | `LINK_FEATURES` (v0.7) | `features:u8` (wanted; bit0 = `STATUS_SEQ`)          | `features:u8` (granted + armed; see §3.14 / §4.1.1) |
 
-Opcodes `0x81..0xEF` are **reserved** for future ALP-defined
+Opcodes `0x82..0xEF` are **reserved** for future Alp-defined
 extensions (next slot: hardware AES via the CAU engine).  Boards
 SHOULD NOT define their own opcodes in this range -- the firmware
 replies with **`ALP_ERR_NOSUPPORT`** (see §6) for any opcode it
@@ -279,6 +281,16 @@ drives none.  See `pwm_routing` in
 for the per-channel `e1m` → GD32 timer + pad map (the single source
 of truth).
 
+> **The PERIOD is shared per underlying timer** (one 16-bit ARR per
+> timer; duty is per-channel).  PWM0–3 ride TIMER0 and PWM4–7 ride
+> TIMER7, so a `PWM_SET` on any channel of a bank silently re-tunes
+> the period of **every** channel in that bank — last write wins
+> (1 kHz on PWM0 followed by 25 kHz on PWM2 leaves PWM0 at 25 kHz
+> with its programmed duty *ticks* rescaled to the new period).
+> `PWM_GET` reads live registers, so it always reports the
+> bank-shared truth.  Keep co-resident consumers of one bank on a
+> common period, or split them across the two banks.
+
 ### 3.3 ADC samples
 
 `samples = 0` is invalid (reply: `ALP_ERR_INVAL`).  `samples >
@@ -291,6 +303,21 @@ should issue multiple `ADC_READ` opcodes and accumulate on the
 host side.  Each `mv[i]` carries the firmware's internal-reference-
 corrected reading; the host treats the values as **ground truth**
 for telemetry purposes.
+
+Two converter-level guards (fw `v0.2.8+`) make `ADC_READ` answer
+`STATUS_IO` instead of serving unreliable data:
+
+- **converter owned by a stream** -- two logical channels ride each
+  ADC converter, and a running `ADC_STREAM_*` session owns its
+  converter outright.  A single-shot read on either channel of a
+  streaming converter is refused (it would corrupt the live stream's
+  ring AND return wrong data); retry after `STREAM_END`.
+- **analog reference not ready** -- if the on-chip reference buffer
+  never reported ready at boot, every conversion would be garbage
+  referenced to a dead node.  The firmware fails the read loudly
+  rather than answering `STATUS_OK` with bogus millivolts, and
+  re-probes the reference on each attempt so a late-locking buffer
+  self-heals.
 
 ### 3.4 DA9292 status forward
 
@@ -327,15 +354,18 @@ does not mirror its bit layout.  For register-level PMIC status
 The V2N module routes both E1M DAC channels (`DAC0` → GD32 `PA4`,
 `DAC1` → GD32 `PA6`) through the bridge.  `DAC_SET` programs the
 output in millivolts; the firmware rounds to the GD32's 12-bit DAC
-resolution (~0.8 mV/LSB on a 3.3 V reference) and saturates above
-the reference rail.  `DAC_GET` reads back what was actually
-programmed — useful for verification + closed-loop telemetry.
+resolution (~0.44 mV/LSB on the module's 1.8 V analog rail) and
+saturates above the rail.  `DAC_GET` reads back the DAC's live hold
+register (the code actually driving the pad) — useful for
+verification + closed-loop telemetry.
 
-Until `hal/bridge_hw_gd32.c` wires the DAC channels (HAL stubs
-return `BRIDGE_HW_ERR_NOTIMPL` today), both opcodes return
-`STATUS_NOSUPPORT` and the SDK surfaces `ALP_ERR_NOSUPPORT` to the
-caller.  The wire framing is locked from `v0.2` so the firmware
-bodies are an independent landing.
+Both opcodes are live on silicon from fw `v0.2.6` (which also
+brings up the on-chip analog reference buffer the converters
+depend on; DAC→ADC copper loopback validated 1:1 on the bench
+2026-06-05).  From fw `v0.2.8`, a reference buffer that never
+reports ready makes both opcodes answer `STATUS_IO` — a loud
+failure instead of silently driving/reading garbage against a dead
+reference node.
 
 ### 3.6 Quadrature encoders (`v0.2+`)
 
@@ -360,12 +390,18 @@ is empty.
 
 On V2N every E1M PWM channel maps to a TIMER0 / TIMER7 channel
 (see `metadata/chips/gd32g553.yaml` `pwm_routing:` for the table).
-Both timers are 16-bit advanced timers running at the 240 MHz core
-clock, so the achievable resolution is ~4.16 ns LSB and the longest
-single-counter period is ~273 us.  `CMD_PWM_GET` always reports
-what the firmware actually programmed after rounding -- callers
-that need exact frequency confirmation should read back rather than
-recompute.
+Both timers are 16-bit advanced timers running at the 216 MHz
+CK_TIMER (= CK_APB at DIV1 = the core clock; this part has no
+separate timer PLL), so the achievable resolution is ~4.63 ns LSB
+and the longest single-counter period is ~303 us.  `CMD_PWM_GET` reads the live
+timer registers (auto-reload + compare) and converts ticks back to
+nanoseconds -- it reports what the pad is actually generating, never
+an echo of the request.  Two consequences of the hardware truth:
+the period is shared per timer (a `PWM_SET` on a sibling channel of
+the same timer moves this channel's reported period too), and before
+the first `PWM_SET` a channel reports the boot default (65.536 ms
+period, 0 duty).  Callers that need exact frequency confirmation
+should read back rather than recompute.
 
 ### 3.9 ADC configure (`v0.3+`)
 
@@ -399,10 +435,35 @@ a firmware-side ring buffer at the requested `sample_rate_hz`.
 Two streams supported concurrently -- stream 0 binds to GD32 DMA0,
 stream 1 binds to DMA1, so they can run truly in parallel against
 different channels at different rates.  Calling `STREAM_BEGIN` on a
-stream slot that's already active replies with `STATUS_BUSY`.
+stream slot that's already active replies with `STATUS_INVAL` (the
+slot must be `STREAM_END`ed first).
 Request payload is 7 bytes:
 `stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32`;
 reply empty.
+
+The sample rate is a real hardware contract (fw `v0.2.4+`): a
+dedicated pacing timer per stream (update-event TRGO routed to the
+converter's routine trigger) starts exactly one conversion per
+period.  Accepted range is 1 Hz..100 kHz -- 0 answers
+`STATUS_INVAL`, above the cap answers `STATUS_OUT_OF_RANGE`.  The
+rate quantises to the pacer tick (1 us at 16 Hz and above, 100 us
+below 16 Hz), truncating: e.g. 300 Hz runs at 1 MHz/3333 ticks =
+300.03 Hz.  A rate whose period is shorter than the channel's
+configured sample-and-hold time degrades gracefully -- the silicon
+ignores trigger edges that land mid-conversion, so the stream runs
+at the channel's achievable rate instead of corrupting data.  Two
+constraints fall out of the silicon's converter-level trigger
+routing: only one stream may run per ADC converter at a time (a
+second `BEGIN` whose channel shares the first stream's converter
+answers `STATUS_INVAL`), and `STREAM_END` restores the converter's
+single-shot state for subsequent `ADC_READ` calls.  While a stream
+runs, a single-shot `ADC_READ` on **either** channel of its
+converter answers `STATUS_IO` (fw `v0.2.8+`) -- retry after
+`STREAM_END`.  `STREAM_END` itself answers `STATUS_IO` in the rare
+case the converter's restore re-calibration never completes (the
+stream still tears down; the converter is back but in an unproven
+state -- the next `ADC_READ`'s own timeout/self-heal path arbitrates
+from there).
 
 `ADC_STREAM_READ` drains up to `max_samples` samples from the
 named stream's ring.  The wire envelope is fixed-length (host
@@ -432,6 +493,15 @@ path) until `len` is satisfied; latency at typical TRNG_CLK is
 ~40 cycles per pull (sub-microsecond).  Self-check failures
 (documented in the GD32 user manual TRNG_STAT register) cause
 the firmware to reply with `STATUS_IO`.
+
+**Fault-recover contract** (fw `v0.2.4+`, silicon-validated
+2026-06-04): a tripped self-check parks the unit with latched fault
+flags and answers exactly **one** honest `STATUS_IO` while the
+firmware demotes and lazily rebuilds the TRNG (full re-seed); the
+**next** `TRNG_READ` succeeds.  Callers should therefore retry once
+on `STATUS_IO` before treating the unit as down.  A reply of
+`STATUS_BUSY` is different: the unit is healthy but mid-conditioning
+(a max-length pull can drain the FIFO) -- poll again.
 
 ### 3.12 TMU compute (`v0.4+`)
 
@@ -513,6 +583,65 @@ in bounded time.  Apps that need alarms must either use a host-
 local timer or poll `COUNTER_READ` and synthesise the callback
 client-side.
 
+### 3.14 Link-feature negotiation (`v0.7+`)
+
+`LINK_FEATURES` (0x81) negotiates opt-in framing upgrades.  The host
+sends the feature set it wants (`features:u8`); the firmware grants
+the intersection with what it implements, **arms it immediately**,
+and echoes the granted set.  A request of `0` disables everything
+(idempotent both ways).  Pre-v0.7 firmware answers
+`STATUS_NOSUPPORT` through the dispatch default, so a new host
+degrades to the legacy framing automatically — and an un-negotiated
+v0.7 link is byte-identical to the old wire.
+
+Defined feature bits:
+
+| Bit | Name | Effect when granted |
+|-----|------|---------------------|
+| 0 | `STATUS_SEQ` | Every **SPI** reply STATUS byte carries a 4-bit slave-side sequence stamp in bits `[7:4]` (§4.1.1).  The reply to the negotiation itself is already stamped — the host takes that stamp as its baseline.  I2C replies are never stamped. |
+
+After a firmware reboot the feature resets to off (replies revert to
+unstamped); the host's normal link-recovery path (re-init →
+`GET_VERSION`) re-negotiates.
+
+### 3.15 Secure-element reset (`v0.8+`)
+
+`SE_RESET` (`0x41`) drives the on-module secure element's reset line,
+`SE_RST` = GD32 **`PC13`** (per
+`metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`).  The SE is an **OPTIGA
+Trust M** slave on the shared **BRD_I2C** management bus.  Request
+payload is one byte:
+
+| `assert` | Effect |
+|----------|--------|
+| `0`      | Release reset — the SE runs. |
+| `1`      | Hold the SE in reset. |
+
+The reply is empty.  The firmware owns the **active level** (OPTIGA
+Trust M `RST` is **active-low**, so `assert=1` drives `PC13` low); the
+host expresses intent, not polarity.  At boot the firmware parks the
+line **released** so the SE runs and `PC13` no longer floats at its
+GPIO power-on default.
+
+**Bus-recovery use.**  The OPTIGA speaks I²C with clock-stretching; an
+aborted APDU (e.g. the host warm-resets mid-transaction while the SE
+keeps power) can leave it holding **SCL low**, wedging BRD_I2C for every
+other master/slave (the 5L35023B PCIe-refclk generator, the PMICs, …).
+The recovery is a **reset pulse**, sequenced by the host:
+
+1. `SE_RESET assert=1` (hold in reset),
+2. wait ≥ a few hundred µs,
+3. `SE_RESET assert=0` (release),
+4. wait ~15 ms for the OPTIGA to warm-boot before re-probing BRD_I2C.
+
+Crucially this works **even when BRD_I2C is dead**: `PC13` is an
+independent GPIO and the **SPI transport** reaches the GD32 while the
+I²C bus is held low, so the host can always command the reset.
+
+Returns `STATUS_INVAL` for an `assert` byte outside `{0, 1}` and
+`STATUS_NOSUPPORT` on firmware whose GD32 HAL body is not built (the
+stub backend).
+
 ## 4. SPI framing
 
 Each command on SPI is a **request frame** sent by the host while CS
@@ -535,7 +664,7 @@ clocks back out on the *next* CS transaction within
 |---------|-------|------------------------------------------------------------------------------------------------|
 | SOF     | 1     | `0xA5`. Anything else → host or firmware abandons the frame and resyncs on the next CS edge.   |
 | CMD     | 1     | Opcode from §3.                                                                                |
-| STATUS  | 1     | Reply only.  `0x00` = OK.  See §6 for non-zero values.                                         |
+| STATUS  | 1     | Reply only.  Bits `[3:0]` = status code (`0x0` = OK, §6).  Bits `[7:4]` = the v0.7 **sequence stamp** — zero until `LINK_FEATURES` negotiates `STATUS_SEQ` (§4.3), so the legacy wire is unchanged. |
 | PAYLOAD | N / M | Length is **opcode-derived** — both ends know the byte count from the opcode + status pair.   |
 | CRC     | 2     | CRC-16/CCITT-FALSE (poly `0x1021`, init `0xFFFF`, xor-out 0x0000, **non-reflected**), MSB first |
 
@@ -589,6 +718,34 @@ retry the whole command safely because the request side has already
 executed (commands are idempotent except for `GPIO_WRITE` /
 `PWM_SET`, where the host knows the desired final state and writing
 the same value twice is benign).
+
+### 4.1.1 The residual stale-reply hazard and its v0.7 kill
+
+The two-transaction pattern has one residual hazard (documented in
+`transport_spi.c` since v0.2.1): if a REQUEST is ever lost whole —
+every byte landing inside the slave's SPI-reset window while the
+previous handler still runs — the re-armed PREVIOUS reply is
+CRC-valid stale data, and for a **same-opcode re-read** it is
+indistinguishable from a fresh success.  This is not theoretical: it
+was fingerprinted on silicon 2026-06-06 as byte-exact value replays
+on back-to-back identical `COUNTER_READ` frames, with a fail rate
+that swung 0 % ↔ 100 % purely on host-side timing phase.
+
+Protocol v0.7 kills it with the **`STATUS_SEQ` sequence stamp**
+(negotiated via `LINK_FEATURES`, §3.14): the slave keeps a 4-bit
+counter that advances once per freshly decoded request and stamps it
+into bits `[7:4]` of every SPI reply STATUS byte.  The drain/rewind
+re-serves of the *same* staged reply keep the *same* stamp — so a
+host that reads a CRC-valid reply whose stamp has **not advanced**
+past its previously accepted reply knows its request was never
+decoded, and re-sends it (the `gd32g553` driver does this once
+automatically, counting occurrences in `ctx->seq_stale_count`).
+Because a stale verdict proves the request was never executed, the
+re-send is safe even for non-idempotent opcodes.  The stamp wraps
+mod 16; replies re-served across the wrap remain detectable because
+detection compares against the last accepted stamp, not zero.
+I2C replies are **never** stamped (`STATUS_NO_PENDING` owns bit 7
+on that transport, and the hazard is SPI-specific).
 
 ### 4.2 CRC validation
 
@@ -690,6 +847,13 @@ byte is naturally unsigned and human-readable on a logic analyser:
 Hosts MUST translate the wire byte back to a negative `alp_status_t`
 via the table above before returning it from a public API call.
 
+**v0.7 SPI note:** once `STATUS_SEQ` is negotiated (§3.14), the SPI
+status byte carries the sequence stamp in bits `[7:4]` — hosts mask
+with `0x0F` before the table lookup (every SPI-visible code fits the
+low nibble; `0x80 NO_PENDING` is I2C-only, where stamping never
+applies).  Masking is safe unconditionally on SPI: legacy firmware
+never sets the high nibble there.
+
 ## 7. Liveness handshake
 
 `gd32g553_init()` issues:
@@ -728,6 +892,13 @@ including `minor`**: a pre-production minor may revise a
 pre-production opcode's payload (v0.6 did this to `OTA_WRITE_CHUNK`),
 and the major-only handshake cannot detect that — do not mix a v0.5
 host with v0.6 firmware or vice versa.
+
+Version history (pre-1.0): **v0.7** adds `LINK_FEATURES` (0x81) +
+the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
+additive `OTA_BEGIN` version triple (§10) — both backward-compatible
+by construction (un-negotiated framing and the 8-byte BEGIN are
+byte-identical to v0.6).  **v0.8** adds `SE_RESET` (0x41, §3.15) — a
+new opcode; older hosts simply never send it.
 
 ## 9. Reference vectors
 
@@ -773,7 +944,7 @@ firmware in `firmware/gd32-bridge/src/ota.c`):
 
 | Op | Name | Request payload | Reply payload |
 |------|------|----------------|---------------|
-| `0xF0` | `OTA_BEGIN` | `size:u32 expected_crc32:u32` | `chunk_max:u16 target_slot:u8` |
+| `0xF0` | `OTA_BEGIN` | `size:u32 expected_crc32:u32` `[fw_major:u8 fw_minor:u8 fw_patch:u8]` (v0.7 additive: the incoming image's version, recorded into the A/B metadata `fw_version[slot]` at COMMIT; legacy 8-byte form ⇒ 0 = unknown, and pre-v0.7 firmware ignores the trailing triple) | `chunk_max:u16 target_slot:u8` |
 | `0xF1` | `OTA_WRITE_CHUNK` | `offset:u32 len:u8 data[len]` | `received_bytes:u32` (high-water) |
 | `0xF2` | `OTA_VERIFY` | _empty_ | `computed_crc32:u32 verified:u8` |
 | `0xF3` | `OTA_COMMIT` | _empty_ | _empty_ (resets on success) |

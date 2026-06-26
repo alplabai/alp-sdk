@@ -37,8 +37,8 @@ extern "C" {
 #define MAX31855_FAULT_MASK 0x00010007u
 
 typedef struct {
-    alp_spi_t *bus;
-    bool       initialised;
+	alp_spi_t *bus;
+	bool       initialised;
 } max31855_t;
 
 /** @brief Bind context to caller-opened SPI bus. */

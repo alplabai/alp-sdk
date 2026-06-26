@@ -35,21 +35,21 @@
 extern "C" {
 #endif
 
-#define MAX31865_REG_CONFIG      0x00u /* RW (write 0x80 | reg). */
-#define MAX31865_REG_RTD_MSB     0x01u
-#define MAX31865_REG_RTD_LSB     0x02u
-#define MAX31865_REG_FAULT_STAT  0x07u
+#define MAX31865_REG_CONFIG     0x00u /* RW (write 0x80 | reg). */
+#define MAX31865_REG_RTD_MSB    0x01u
+#define MAX31865_REG_RTD_LSB    0x02u
+#define MAX31865_REG_FAULT_STAT 0x07u
 
-#define MAX31865_CONFIG_VBIAS    0x80u
-#define MAX31865_CONFIG_MODE_AUTO 0x40u
-#define MAX31865_CONFIG_3WIRE    0x10u
-#define MAX31865_CONFIG_FAULT_AUTO 0x04u
+#define MAX31865_CONFIG_VBIAS        0x80u
+#define MAX31865_CONFIG_MODE_AUTO    0x40u
+#define MAX31865_CONFIG_3WIRE        0x10u
+#define MAX31865_CONFIG_FAULT_AUTO   0x04u
 #define MAX31865_CONFIG_CLEAR_FAULTS 0x02u
-#define MAX31865_CONFIG_FILTER_50HZ 0x01u
+#define MAX31865_CONFIG_FILTER_50HZ  0x01u
 
 typedef struct {
-    alp_spi_t *bus;
-    bool       initialised;
+	alp_spi_t *bus;
+	bool       initialised;
 } max31865_t;
 
 /** @brief Bind context to caller-opened SPI bus. */
@@ -64,9 +64,7 @@ alp_status_t max31865_set_config(max31865_t *dev, uint8_t config);
  * Note: fault flag is in bit 0 of RTD_LSB; cleared from returned
  * value but reflected in *fault_set if non-NULL.
  */
-alp_status_t max31865_read_rtd(max31865_t *dev,
-                               uint16_t   *rtd_out,
-                               bool       *fault_set);
+alp_status_t max31865_read_rtd(max31865_t *dev, uint16_t *rtd_out, bool *fault_set);
 
 /** @brief Release driver context. */
 void max31865_deinit(max31865_t *dev);

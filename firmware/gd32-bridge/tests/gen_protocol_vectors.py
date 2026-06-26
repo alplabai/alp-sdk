@@ -97,6 +97,8 @@ CMD_DAC_GET                  = 0x51
 CMD_QENC_READ                = 0x60
 CMD_QENC_RESET               = 0x61
 CMD_COUNTER_READ             = 0x70
+CMD_SE_RESET                 = 0x41
+CMD_LINK_FEATURES            = 0x81
 CMD_OTA_BEGIN                = 0xF0
 CMD_OTA_WRITE_CHUNK          = 0xF1
 CMD_OTA_VERIFY               = 0xF2
@@ -110,7 +112,7 @@ STATUS_NOSUPPORT             = 0x06
 
 # Firmware-declared version triple; bump when protocol.h's
 # PROTOCOL_VERSION_{MAJOR,MINOR,PATCH} change.
-FW_VERSION = (0, 6, 0)
+FW_VERSION = (0, 8, 0)
 
 
 HEADER = """\
@@ -190,10 +192,10 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
 
     # ----- §4. v0.2 additions: DAC / QENC / COUNTER ------------------
     # Request envelopes (host -> firmware).  Stub firmware replies
-    # NOSUPPORT (0x06) for every body until bridge_hw_*_set / *_read /
-    # *_reset are wired in hal/bridge_hw_gd32.c; the vectors below let
-    # both sides assert that the framing layer is byte-for-byte locked
-    # before the HAL bodies land.
+    # NOSUPPORT (0x06) for every body; the gd32 backend's real
+    # bridge_hw_*_set / *_read / *_reset live under hal/gd32/.  The
+    # vectors let both sides assert that the framing layer is
+    # byte-for-byte locked independently of the HAL bodies.
     out.append((
         "spi_dac_set_ch0_1650mv_request",
         spi_frame(SOF, CMD_DAC_SET,
@@ -219,6 +221,16 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         "spi_counter_read_ch0_request",
         spi_frame(SOF, CMD_COUNTER_READ, bytes([0x00])).hex().upper(),
         "SOF | CMD=0x70 | counter=0 | CRC",
+    ))
+    out.append((
+        "spi_se_reset_assert_request",
+        spi_frame(SOF, CMD_SE_RESET, bytes([0x01])).hex().upper(),
+        "SOF | CMD=0x41 | assert=1 (hold OPTIGA Trust M in reset) | CRC",
+    ))
+    out.append((
+        "spi_se_reset_release_request",
+        spi_frame(SOF, CMD_SE_RESET, bytes([0x00])).hex().upper(),
+        "SOF | CMD=0x41 | assert=0 (release the SE) | CRC",
     ))
     out.append((
         "spi_reply_nosupport",
@@ -289,8 +301,8 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
     # Single representative vector: alp_tmu_sqrt(4.0f) -> 2.0f as
     # encoded on the wire.  Function = SQRT (5); format = IEEE-754
     # single (1); in_a = 0x40800000 (float bits for 4.0f); in_b = 0.
-    # Firmware stub replies STATUS_NOSUPPORT until bridge_hw_gd32.c
-    # wires the TMU, mirroring the existing v0.3 pattern.
+    # Firmware stub replies STATUS_NOSUPPORT; the gd32 backend's TMU
+    # body lives in hal/gd32/tmu.c, mirroring the existing v0.3 pattern.
     out.append((
         "spi_tmu_compute_sqrt_f32_4p0_request",
         spi_frame(SOF, CMD_TMU_COMPUTE,
@@ -440,6 +452,19 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         " expected_crc32=0xDEADBEEF (LE) | CRC",
     ))
     out.append((
+        "spi_ota_begin_request_v0_7",
+        spi_frame(SOF, CMD_OTA_BEGIN,
+                  bytes([0xF8, 0xA3, 0x00, 0x00,          # size = 41976 (LE)
+                         0xEF, 0xBE, 0xAD, 0xDE,          # expected_crc32 (LE)
+                         0x00, 0x02, 0x09,                # fw_version 0.2.9
+                  ])).hex().upper(),
+        "SOF | CMD=0xF0 | size=41976 (LE) | expected_crc32=0xDEADBEEF (LE)"
+        " | fw_major=0 | fw_minor=2 | fw_patch=9 | CRC -- the v0.7"
+        " ADDITIVE form: the triple lands in the A/B metadata at COMMIT"
+        " (fw_version[slot], 0 = unknown); pre-v0.7 firmware ignores the"
+        " 3 trailing bytes, and the 8-byte legacy form stays valid",
+    ))
+    out.append((
         "spi_ota_begin_reply_slot_b",
         spi_frame(SOF, STATUS_OK,
                   bytes([0x3C, 0x00,                      # chunk_max = 60 (LE)
@@ -518,6 +543,32 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         spi_frame(SOF, STATUS_NOT_READY).hex().upper(),
         "SOF | STATUS=0x02 (NOT_READY) | CRC -- WRITE_CHUNK / VERIFY"
         " without a BEGIN-opened session, or COMMIT before VERIFY",
+    ))
+
+    # ----- §12. v0.7 additions: link-feature negotiation -------------
+    # CMD_LINK_FEATURES (0x81) + the STATUS_SEQ stamped-reply framing.
+    # The stamp value is per-session state, so the canonical vectors fix
+    # an EXAMPLE stamp; the unstamped reply is simultaneously the exact
+    # I2C wire shape (I2C never stamps -- STATUS_NO_PENDING owns bit 7).
+    out.append((
+        "spi_link_features_request",
+        spi_frame(SOF, CMD_LINK_FEATURES, bytes([0x01])).hex().upper(),
+        "SOF | CMD=0x81 (LINK_FEATURES) | features=0x01 (STATUS_SEQ"
+        " wanted) | CRC -- pre-v0.7 firmware answers STATUS_NOSUPPORT",
+    ))
+    out.append((
+        "spi_link_features_reply_granted_seq1",
+        spi_frame(SOF, 0x10 | STATUS_OK, bytes([0x01])).hex().upper(),
+        "SOF | STATUS=0x10 (code OK, stamp=1 -- the firmware arms the"
+        " feature BEFORE staging, so the negotiation reply itself is"
+        " stamped and the host baselines from it) | granted=0x01 | CRC",
+    ))
+    out.append((
+        "spi_ping_reply_ok_seq5",
+        spi_frame(SOF, 0x50 | STATUS_OK).hex().upper(),
+        "SOF | STATUS=0x50 (code OK, stamp=5) | CRC -- example stamped"
+        " reply: code = STATUS & 0x0F, stamp = STATUS >> 4; a reply whose"
+        " stamp equals the previously accepted one is a STALE re-serve",
     ))
 
     return out
@@ -625,7 +676,17 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
     chunks.append("#       bridge (docs/gd32-bridge-protocol.md §10 Path A).  Unarmed")
     chunks.append("#       firmware replies STATUS_NOSUPPORT to every OTA opcode.")
     chunks.append("# ---------------------------------------------------------------------")
-    for name, value, comment in vectors[29:]:
+    for name, value, comment in vectors[29:42]:
+        if comment:
+            chunks.append(f"# {comment}")
+        chunks.append(f"{name:<30} = {value}")
+
+    # ----- §12 block -------------------------------------------------
+    chunks.append("\n# ---------------------------------------------------------------------")
+    chunks.append("# §12. v0.7 additions -- link-feature negotiation (CMD_LINK_FEATURES)")
+    chunks.append("#       + the STATUS_SEQ stamped-reply framing (SPI only)")
+    chunks.append("# ---------------------------------------------------------------------")
+    for name, value, comment in vectors[42:]:
         if comment:
             chunks.append(f"# {comment}")
         chunks.append(f"{name:<30} = {value}")

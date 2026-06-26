@@ -32,13 +32,13 @@
 extern "C" {
 #endif
 
-#define ES8388_I2C_ADDR_LOW 0x10u
+#define ES8388_I2C_ADDR_LOW  0x10u
 #define ES8388_I2C_ADDR_HIGH 0x11u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	bool       initialised;
 } es8388_t;
 
 /** @brief Bind context to caller-opened I²C bus. */

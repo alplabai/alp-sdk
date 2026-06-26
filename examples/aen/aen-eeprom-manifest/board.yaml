@@ -1,0 +1,27 @@
+# board.yaml -- per-app project configuration for aen-eeprom-manifest.
+#
+# Read + decode the on-module 24C128 Alp manifest on the E1M-AEN (Alif Ensemble)
+# SoM, over the SoM-portable <alp/*> API. AEN sibling of
+# examples/v2n/v2n-eeprom-manifest-dump (same src flow). The EEPROM is on SoC
+# I2C2 (DesignWare master, upstream i2c_dw) -- the per-example board overlay
+# (boards/alp_e1m_aen801_m55_he.overlay) enables i2c2 + pinctrl + the alp-i2c0
+# alias.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+    peripherals:
+      - i2c
+
+chips:
+  - eeprom_24c128         # on-module Alp manifest EEPROM @ 0x50.
+
+diagnostics:
+  log_level: info

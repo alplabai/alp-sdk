@@ -99,9 +99,10 @@ bring-up.  Two flavours: E1M-EVK (35 × 35) and E1M-X-EVK (45 × 65).
 N93 modules carry Ethos-U65.
 
 **GPU2D** -- 2D compositing accelerator (alpha blending, rotation,
-scaling) for OLED/TFT pipelines.  AEN populates a Mali-D71;
-other E1M families currently don't.  Exposed via
-`<alp/gpu2d.h>` for portability.  See
+scaling) for OLED/TFT pipelines.  AEN's "GPU2D" is the TES **D/AVE
+2D** engine (`dave2d: true` in the AEN SoC JSON); other E1M families
+have no peer hardware and run a portable software fallback.  Exposed
+via `<alp/gpu2d.h>` for portability.  See
 [ADR 0008](adr/0008-gpu2d-portable-shim.md).
 
 **`<family>/hw-revisions.yaml`** -- Per-rev SDK-version compatibility
@@ -233,7 +234,7 @@ on released presets; customers don't write it.  `TBD` is honoured
 per the no-inventing-values rule (e.g. the current `E1M-NX9101`
 preset).
 
-**SKU** -- Stock-Keeping Unit.  In ALP terminology: an MPN that
+**SKU** -- Stock-Keeping Unit.  In Alp terminology: an MPN that
 identifies a specific SoM configuration (e.g. `E1M-V2N101`).
 
 **Slice** -- One per-core build invocation produced by the
@@ -243,7 +244,7 @@ scoped subprocess.
 
 **SoC** -- System-on-Chip.  The main silicon under a SoM's lid.
 
-**SoM** -- System-on-Module.  ALP's per-SoC PCB module that plugs
+**SoM** -- System-on-Module.  Alp's per-SoC PCB module that plugs
 into a board (e.g. E1M-V2N101, E1M-AEN701).
 
 **SoM preset** (`E1M-<MPN>.yaml`) -- Per-SKU manifest declaring
@@ -272,7 +273,7 @@ authoritative value is pending (e.g. a board-rev divider voltage).
 app for each on-die core.  Customers inherit + override these
 defaults in their project's `board.yaml cores:` block.
 
-**V2N** -- ALP module family based on Renesas RZ/V2N silicon.
+**V2N** -- Alp module family based on Renesas RZ/V2N silicon.
 E1M-X form factor.  See [`docs/soms/v2n.md`](soms/v2n.md).
 
 **V2N-M1** -- V2N variant with the DEEPX DX-M1 NPU on-module.

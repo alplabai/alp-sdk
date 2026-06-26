@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Stage-A low-power smoke (periodic k_timer wake +
+# k_cpu_idle / WFI with a SysTick wake) on the E1M-AEN801 (Alif Ensemble E8,
+# M55-HE).  BENCH-PENDING: the WFI-enter/SysTick-wake proof is a bench flash +
+# SWD read, not a CI run.
+#
+# This scenario compile-checks the Stage-A app on the REAL E8 board target (it
+# cannot run in CI -- the M55 has no native_sim host):
+#   - k_timer/k_sem/k_cpu_idle()/k_uptime_get() link against the arch idle path;
+#   - the RAM-console retarget + ITCM RAM-run overlay link with NO PM subsystem
+#     (Stage-A is intentionally CONFIG_PM-free; HAS_PM is unselected upstream).
+# It is intentionally filtered to the AEN801 M55-HE board only, which the
+# native_sim PR gate never selects, so it adds a board-target build check
+# without slowing the gate.
+#
+# NOTE: the platform id below MUST match the board .yaml `identifier` exactly
+# (zephyr/boards/alp/e1m_aen801_m55_he/..._rtss_he.yaml) or twister silently
+# skips the scenario.
+
+sample:
+  name: aen-power-smoke
+  description: |
+    Stage-A low-power smoke for the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE):
+    enters the architectural WFI sleep via a periodic k_timer wake + k_cpu_idle()
+    repeatedly and proves the SysTick system clock wakes the core each time (a
+    beacon/heartbeat in global SRAM0 at 0x02000000 and k_uptime_get advance
+    across each sleep).  WFI-equivalent baseline for the Stage-B board
+    pm_state_set IWIC hook.  CONFIG_PM-free: pinned upstream Zephyr's Alif E8 SoC
+    does not select HAS_PM (only the zephyr_alif fork does).  BENCH-PENDING.
+
+tests:
+  alp_sdk.examples.aen.power_smoke.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+      - pm
+    build_only: true   # WFI enter + SysTick wake is a bench flash, not a CI run.

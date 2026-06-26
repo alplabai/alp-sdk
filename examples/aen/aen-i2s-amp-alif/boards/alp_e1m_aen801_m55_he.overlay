@@ -1,0 +1,49 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Audio-I2S out overlay for the E1M-AEN801 (E8, M55-HE).
+ *
+ * The EVK audio I2S is the SoC's **i2s3** (i2s3@49017000) -- per the AUTHORITATIVE
+ * SoM pinout metadata/e1m_modules/aen/from-alif.tsv, the board's "I2S0_*" audio
+ * signals are wired to I2S3_*_A on P9_2..P9_5:
+ *   I2S0_SDI -> I2S3_SDI_A = P9_2 | I2S0_SDO -> I2S3_SDO_A = P9_3
+ *   I2S0_SCLK -> I2S3_SCLK_A = P9_4 | I2S0_WS -> I2S3_WS_A = P9_5
+ * (NOT i2s0@49014000 -- that was the first cut's wrong instance.) The
+ * snps,designware-i2s node + driver (drivers/i2s/i2s_dw.c, CONFIG_I2S_DW) are
+ * transcribed from the fork; alias alp-i2s0 -> &i2s3 keeps the portable bus id.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+	aliases {
+		alp-i2s0 = &i2s3;
+	};
+};
+
+&pinctrl {
+	pinctrl_i2s3: pinctrl_i2s3 {
+		/* TX path: SDO (data out) + SCLK + WS, the I2S3_*_A route (P9_3/4/5). */
+		group0 {
+			pinmux = <PIN_P9_3__I2S3_SDO_A>, <PIN_P9_4__I2S3_SCLK_A>,
+				 <PIN_P9_5__I2S3_WS_A>;
+		};
+	};
+};
+
+&{/soc} {
+	i2s3: i2s3@49017000 {
+		compatible = "snps,designware-i2s";
+		reg = <0x49017000 0x1000>;
+		interrupts = <144 3>;
+		pinctrl-0 = <&pinctrl_i2s3>;
+		pinctrl-names = "default";
+		clocks = <&clockctrl ALIF_I2S3_76M8_CLK>;
+		status = "okay";
+	};
+};

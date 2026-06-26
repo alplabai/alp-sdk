@@ -96,19 +96,19 @@ extern "C" {
 
 /** Maximum stages per chain.  v0.5 wire format documents the same
  *  bound for the upcoming bridge-side `CMD_ADC_STREAM_CONFIGURE_DSP`. */
-#define ALP_DSP_MAX_STAGES        4u
+#define ALP_DSP_MAX_STAGES 4u
 
 /** Maximum FIR taps per FIR stage.  Q31 storage = 256 bytes max. */
-#define ALP_DSP_MAX_FIR_TAPS      64u
+#define ALP_DSP_MAX_FIR_TAPS 64u
 
 /** Maximum biquad sections per IIR stage (cascaded direct-form-1). */
-#define ALP_DSP_MAX_IIR_SECTIONS  8u
+#define ALP_DSP_MAX_IIR_SECTIONS 8u
 
 /** Minimum FFT size in points (power-of-two). */
-#define ALP_DSP_MIN_FFT_POINTS    32u
+#define ALP_DSP_MIN_FFT_POINTS 32u
 
 /** Maximum FFT size in points (power-of-two). */
-#define ALP_DSP_MAX_FFT_POINTS    1024u
+#define ALP_DSP_MAX_FFT_POINTS 1024u
 
 /* ================================================================== */
 /* Enums                                                               */
@@ -116,37 +116,37 @@ extern "C" {
 
 /** DSP stage kinds. */
 typedef enum {
-    ALP_DSP_STAGE_FIR    = 0, /**< Finite impulse response filter.   */
-    ALP_DSP_STAGE_IIR    = 1, /**< Cascaded biquad IIR filter.        */
-    ALP_DSP_STAGE_WINDOW = 2, /**< Window function (must precede FFT). */
-    ALP_DSP_STAGE_FFT    = 3, /**< Forward FFT (terminal stage only). */
+	ALP_DSP_STAGE_FIR    = 0, /**< Finite impulse response filter.   */
+	ALP_DSP_STAGE_IIR    = 1, /**< Cascaded biquad IIR filter.        */
+	ALP_DSP_STAGE_WINDOW = 2, /**< Window function (must precede FFT). */
+	ALP_DSP_STAGE_FFT    = 3, /**< Forward FFT (terminal stage only). */
 } alp_dsp_stage_kind_t;
 
 /** Window shape for @ref ALP_DSP_STAGE_WINDOW. */
 typedef enum {
-    ALP_DSP_WINDOW_RECTANGULAR = 0, /**< No window (unity gain).      */
-    ALP_DSP_WINDOW_HANN        = 1, /**< Hann window.                  */
-    ALP_DSP_WINDOW_HAMMING     = 2, /**< Hamming window.               */
-    ALP_DSP_WINDOW_BLACKMAN    = 3, /**< Blackman window.              */
+	ALP_DSP_WINDOW_RECTANGULAR = 0, /**< No window (unity gain).      */
+	ALP_DSP_WINDOW_HANN        = 1, /**< Hann window.                  */
+	ALP_DSP_WINDOW_HAMMING     = 2, /**< Hamming window.               */
+	ALP_DSP_WINDOW_BLACKMAN    = 3, /**< Blackman window.              */
 } alp_dsp_window_kind_t;
 
 /** Output format for @ref ALP_DSP_STAGE_FFT. */
 typedef enum {
-    /** Interleaved (re, im) f32 pairs.  Output element count =
+	/** Interleaved (re, im) f32 pairs.  Output element count =
      *  2 * @c n_points.  Bins are not normalised. */
-    ALP_DSP_FFT_OUTPUT_COMPLEX   = 0,
-    /** Magnitude `sqrt(re*re + im*im)` per bin.  Output element count
+	ALP_DSP_FFT_OUTPUT_COMPLEX = 0,
+	/** Magnitude `sqrt(re*re + im*im)` per bin.  Output element count
      *  = @c n_points.  Wire-friendly: half the bandwidth of COMPLEX. */
-    ALP_DSP_FFT_OUTPUT_MAGNITUDE = 1,
+	ALP_DSP_FFT_OUTPUT_MAGNITUDE = 1,
 } alp_dsp_fft_output_t;
 
 /** Coefficient format for FIR/IIR stages. */
 typedef enum {
-    /** IEEE-754 single-precision.  Caller pointer is `const float *`. */
-    ALP_DSP_COEFF_FORMAT_F32 = 0,
-    /** Q31 fixed-point (signed 32-bit, full-scale = +/-1.0).  Caller
+	/** IEEE-754 single-precision.  Caller pointer is `const float *`. */
+	ALP_DSP_COEFF_FORMAT_F32 = 0,
+	/** Q31 fixed-point (signed 32-bit, full-scale = +/-1.0).  Caller
      *  pointer is `const int32_t *`. */
-    ALP_DSP_COEFF_FORMAT_Q31 = 1,
+	ALP_DSP_COEFF_FORMAT_Q31 = 1,
 } alp_dsp_coeff_format_t;
 
 /* ================================================================== */
@@ -155,9 +155,9 @@ typedef enum {
 
 /** FIR filter parameters (one per @ref ALP_DSP_STAGE_FIR). */
 typedef struct {
-    alp_dsp_coeff_format_t coeff_format; /**< F32 or Q31.            */
-    uint16_t               n_taps;       /**< 1..@ref ALP_DSP_MAX_FIR_TAPS. */
-    const void            *taps;         /**< Pointer to coefficient
+	alp_dsp_coeff_format_t coeff_format; /**< F32 or Q31.            */
+	uint16_t               n_taps;       /**< 1..@ref ALP_DSP_MAX_FIR_TAPS. */
+	const void            *taps;         /**< Pointer to coefficient
                                               array; @c n_taps entries in
                                               the chosen format.  Copied
                                               into the chain on open --
@@ -170,9 +170,9 @@ typedef struct {
  *  @c y[n]=b0*x[n]+b1*x[n-1]+b2*x[n-2]-a1*y[n-1]-a2*y[n-2].  Coefficient
  *  order on the wire and in memory: @c b0,b1,b2,a1,a2 per section. */
 typedef struct {
-    alp_dsp_coeff_format_t coeff_format; /**< F32 or Q31.            */
-    uint16_t               n_sections;   /**< 1..@ref ALP_DSP_MAX_IIR_SECTIONS. */
-    const void            *coeffs;       /**< 5 * @c n_sections entries
+	alp_dsp_coeff_format_t coeff_format; /**< F32 or Q31.            */
+	uint16_t               n_sections;   /**< 1..@ref ALP_DSP_MAX_IIR_SECTIONS. */
+	const void            *coeffs;       /**< 5 * @c n_sections entries
                                               in the chosen format.  Copied
                                               into the chain on open. */
 } alp_dsp_iir_params_t;
@@ -181,26 +181,26 @@ typedef struct {
  *  The window length is bound to the following FFT stage's @c n_points;
  *  the window coefficients are computed inside the chain at open time. */
 typedef struct {
-    alp_dsp_window_kind_t shape; /**< One of @ref alp_dsp_window_kind_t. */
+	alp_dsp_window_kind_t shape; /**< One of @ref alp_dsp_window_kind_t. */
 } alp_dsp_window_params_t;
 
 /** FFT parameters (one per @ref ALP_DSP_STAGE_FFT). */
 typedef struct {
-    uint16_t              n_points;      /**< Power-of-two in
+	uint16_t             n_points;      /**< Power-of-two in
                                               [@ref ALP_DSP_MIN_FFT_POINTS,
                                                @ref ALP_DSP_MAX_FFT_POINTS]. */
-    alp_dsp_fft_output_t  output_format; /**< COMPLEX or MAGNITUDE. */
+	alp_dsp_fft_output_t output_format; /**< COMPLEX or MAGNITUDE. */
 } alp_dsp_fft_params_t;
 
 /** One stage description.  Union member selected by @c kind. */
 typedef struct {
-    alp_dsp_stage_kind_t kind;
-    union {
-        alp_dsp_fir_params_t    fir;
-        alp_dsp_iir_params_t    iir;
-        alp_dsp_window_params_t window;
-        alp_dsp_fft_params_t    fft;
-    } u;
+	alp_dsp_stage_kind_t kind;
+	union {
+		alp_dsp_fir_params_t    fir;
+		alp_dsp_iir_params_t    iir;
+		alp_dsp_window_params_t window;
+		alp_dsp_fft_params_t    fft;
+	} u;
 } alp_dsp_stage_t;
 
 /* ================================================================== */
@@ -234,8 +234,7 @@ typedef struct alp_dsp_chain alp_dsp_chain_t;
  *         - @ref ALP_ERR_NOMEM when the static chain pool is
  *           exhausted (compile-time pool size).
  */
-alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages,
-                                    size_t n_stages);
+alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stages);
 
 /**
  * @brief Apply a filter-terminated chain to an in-RAM sample buffer.
@@ -257,11 +256,11 @@ alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages,
  *         FFT -- use @ref alp_dsp_chain_apply_bins instead).
  */
 alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
-                                         const int16_t *in_mv,
-                                         size_t in_n,
-                                         int16_t *out_mv,
-                                         size_t out_cap,
-                                         size_t *got);
+                                         const int16_t   *in_mv,
+                                         size_t           in_n,
+                                         int16_t         *out_mv,
+                                         size_t           out_cap,
+                                         size_t          *got);
 
 /**
  * @brief Apply an FFT-terminated chain to an in-RAM sample buffer.
@@ -294,11 +293,11 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
  *         out_cap < required).
  */
 alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
-                                      const int16_t *in_mv,
-                                      size_t in_n,
-                                      float *out_bins,
-                                      size_t out_cap,
-                                      size_t *got);
+                                      const int16_t   *in_mv,
+                                      size_t           in_n,
+                                      float           *out_bins,
+                                      size_t           out_cap,
+                                      size_t          *got);
 
 /**
  * @brief Release a DSP chain back to the pool.
@@ -327,7 +326,7 @@ void alp_dsp_chain_close(alp_dsp_chain_t *chain);
 const alp_capabilities_t *alp_dsp_chain_capabilities(const alp_dsp_chain_t *chain);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
 #endif /* ALP_DSP_H */

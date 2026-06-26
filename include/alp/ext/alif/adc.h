@@ -9,7 +9,7 @@
  * @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC.
  *
  * @par Supported silicon: alif:ensemble:e7
- *      (e3 / e5 / e8 land in a v0.7.x follow-up.)
+ *      (e3 / e5 land in a follow-up.  e8 silicon-verified in v0.8.0: 15/17 aen-* apps PASS on real E8.)
  *
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
@@ -36,12 +36,12 @@ extern "C" {
 
 /** Trigger source for the Alif ADC hardware sequencer. */
 typedef enum {
-    ALP_ALIF_ADC_TRIGGER_SOFTWARE = 0,
-    ALP_ALIF_ADC_TRIGGER_TIMER0,
-    ALP_ALIF_ADC_TRIGGER_TIMER1,
-    ALP_ALIF_ADC_TRIGGER_TIMER2,
-    ALP_ALIF_ADC_TRIGGER_TIMER3,
-    ALP_ALIF_ADC_TRIGGER_EXT_PIN,
+	ALP_ALIF_ADC_TRIGGER_SOFTWARE = 0,
+	ALP_ALIF_ADC_TRIGGER_TIMER0,
+	ALP_ALIF_ADC_TRIGGER_TIMER1,
+	ALP_ALIF_ADC_TRIGGER_TIMER2,
+	ALP_ALIF_ADC_TRIGGER_TIMER3,
+	ALP_ALIF_ADC_TRIGGER_EXT_PIN,
 } alp_alif_adc_trigger_t;
 
 /* Note: HW oversampling is NOT a vendor extension -- it's reachable
@@ -62,8 +62,7 @@ typedef enum {
  * @return  @ref ALP_OK / @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC /
  *          @ref ALP_ERR_INVAL.
  */
-alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h,
-                                             alp_alif_adc_trigger_t src);
+alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_t src);
 
 #ifdef __cplusplus
 }

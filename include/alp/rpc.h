@@ -116,33 +116,33 @@ typedef struct alp_rpc_channel alp_rpc_channel_t;
  * initialiser literal directly to @ref alp_rpc_open for terse use.
  */
 typedef struct {
-    /** RPMsg endpoint name (matches @c ALP_IPC_<NAME>_NAME from the
+	/** RPMsg endpoint name (matches @c ALP_IPC_<NAME>_NAME from the
      *  generated `<alp/system_ipc.h>`).  Must be non-NULL + non-empty
      *  and ≤ 32 bytes including the NUL terminator. */
-    const char *name;
+	const char *name;
 
-    /** This side's endpoint ID (@c ALP_IPC_<NAME>_SRC_EPT).  When 0
+	/** This side's endpoint ID (@c ALP_IPC_<NAME>_SRC_EPT).  When 0
      *  the backend assigns a deterministic value from the channel
      *  name via FNV-1a hash; matching `<alp/system_ipc.h>` saves a
      *  hop. */
-    uint32_t src_ept;
+	uint32_t src_ept;
 
-    /** Peer side's endpoint ID (@c ALP_IPC_<NAME>_DST_EPT).  Must
+	/** Peer side's endpoint ID (@c ALP_IPC_<NAME>_DST_EPT).  Must
      *  agree with the value seen by the peer's @ref alp_rpc_open
      *  call -- the generated header on both sides is the contract.
      *  When 0 the backend uses `src_ept + 1` (same convention as
      *  the orchestrator). */
-    uint32_t dst_ept;
+	uint32_t dst_ept;
 
-    /** Mailbox channel index (@c ALP_IPC_<NAME>_MBOX_CH).  Defaults
+	/** Mailbox channel index (@c ALP_IPC_<NAME>_MBOX_CH).  Defaults
      *  to @ref ALP_RPC_DEFAULT_MBOX_CH when 0. */
-    uint32_t mbox_ch;
+	uint32_t mbox_ch;
 
-    /** Memory-caching policy for the carve-out.  @c false picks the
+	/** Memory-caching policy for the carve-out.  @c false picks the
      *  non-cacheable region (the v0.6 default).  Set to @c true on
      *  AEN where M55 caches are enabled and the carve-out is in
      *  cacheable MRAM. */
-    bool cacheable;
+	bool cacheable;
 } alp_rpc_config_t;
 
 /**
@@ -253,8 +253,8 @@ const alp_capabilities_t *alp_rpc_capabilities(const alp_rpc_channel_t *ch);
  *          - @ref ALP_ERR_NOMEM   per-channel subscribe table full
  *                                  (v0.6 cap: 8 entries)
  */
-alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb,
-                               void *user);
+alp_status_t
+alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb, void *user);
 
 /**
  * @brief Remove a prior @ref alp_rpc_subscribe registration.
@@ -294,8 +294,8 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method);
  *          - @ref ALP_ERR_NOSUPPORT backend doesn't implement send
  *                                    on this OS yet
  */
-alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload,
-                          size_t len);
+alp_status_t
+alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len);
 
 /**
  * @brief Synchronous request/response.
@@ -339,8 +339,13 @@ alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void 
  *       are serialised by the SDK; the second caller blocks until
  *       the first call returns or times out.
  */
-alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method, const void *req,
-                          size_t req_len, void *resp, size_t *resp_len, uint32_t timeout_ms);
+alp_status_t alp_rpc_call(alp_rpc_channel_t *ch,
+                          const char        *method,
+                          const void        *req,
+                          size_t             req_len,
+                          void              *resp,
+                          size_t            *resp_len,
+                          uint32_t           timeout_ms);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -40,7 +40,10 @@
 #include <stdint.h>
 
 /* Pull a single bit out of `byte`. */
-static int bit(uint8_t byte, unsigned i) { return (byte >> i) & 1u; }
+static int bit(uint8_t byte, unsigned i)
+{
+	return (byte >> i) & 1u;
+}
 
 /* Header layout, Arm DDI 0316C §5.3:
  *   bit 0   start (must be 1)
@@ -54,38 +57,36 @@ static int bit(uint8_t byte, unsigned i) { return (byte >> i) & 1u; }
  */
 static int validate_header(uint8_t hdr)
 {
-    if (bit(hdr, 0) != 1) return -1; /* start */
-    if (bit(hdr, 6) != 0) return -2; /* stop */
-    if (bit(hdr, 7) != 1) return -3; /* park */
-    const int parity = bit(hdr, 1) ^ bit(hdr, 2) ^ bit(hdr, 3) ^ bit(hdr, 4);
-    if (bit(hdr, 5) != parity) return -4;
-    return 0;
+	if (bit(hdr, 0) != 1) return -1; /* start */
+	if (bit(hdr, 6) != 0) return -2; /* stop */
+	if (bit(hdr, 7) != 1) return -3; /* park */
+	const int parity = bit(hdr, 1) ^ bit(hdr, 2) ^ bit(hdr, 3) ^ bit(hdr, 4);
+	if (bit(hdr, 5) != parity) return -4;
+	return 0;
 }
 
 static int validate_data_parity(uint32_t data, uint8_t parity)
 {
-    uint32_t v = data;
-    v ^= v >> 16;
-    v ^= v >> 8;
-    v ^= v >> 4;
-    v ^= v >> 2;
-    v ^= v >> 1;
-    const int computed = (int)(v & 1u);
-    if ((parity & 1u) != computed) return -1;
-    return 0;
+	uint32_t v = data;
+	v ^= v >> 16;
+	v ^= v >> 8;
+	v ^= v >> 4;
+	v ^= v >> 2;
+	v ^= v >> 1;
+	const int computed = (int)(v & 1u);
+	if ((parity & 1u) != computed) return -1;
+	return 0;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    if (size < 6u) return 0;
-    const uint8_t  hdr = data[0];
-    const uint32_t d   = (uint32_t)data[1]
-                       | ((uint32_t)data[2] << 8)
-                       | ((uint32_t)data[3] << 16)
-                       | ((uint32_t)data[4] << 24);
-    const uint8_t parity = data[5];
+	if (size < 6u) return 0;
+	const uint8_t  hdr = data[0];
+	const uint32_t d   = (uint32_t)data[1] | ((uint32_t)data[2] << 8) | ((uint32_t)data[3] << 16) |
+	                     ((uint32_t)data[4] << 24);
+	const uint8_t  parity = data[5];
 
-    (void)validate_header(hdr);
-    (void)validate_data_parity(d, parity);
-    return 0;
+	(void)validate_header(hdr);
+	(void)validate_data_parity(d, parity);
+	return 0;
 }

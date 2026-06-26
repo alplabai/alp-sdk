@@ -90,7 +90,7 @@ deltas (verify when the HW config writeup lands):
 | Panel power | LCD1_PWR_EN = E1M IO15 — **unrouted on V2N-family SoMs** but pulled high on the carrier, so the panel powers by default without explicit firmware action. |
 | Touch controller | Goodix GT911 on DSI1_CSI_I2C = E1M I2C3 → GD32 PC8/PC9 (the bridge's secondary I2C transport). **Linux has no I2C master to this bus today** — GT911 INT also lands on the GD32. Touch support is deferred to a GD32 I2C-proxy follow-up; a goodix polled-mode patch ships dormant on the branch in the meantime. |
 | Silicon note | Datasheet R01DS0466 rev 1.20 section #AC0/#BC0 states those part suffixes do not support MIPI-DSI Display Command Set (DCS) control — HX8394 init (which uses DCS commands) is impossible on `#AC0` parts. The SoM is moving to a later-suffix DCS-capable part; older `#AC0` boards will fail at panel init by design. |
-| Bring-up status | Code complete on `feat/v2n-lcd-display1` (kernel patches 0002–0004, DT nodes, weston image, LVGL example); **HIL on silicon pending** (bench ladder G0–G8). |
+| Bring-up status | Code complete on `feat/v2n-lcd-display1` (kernel patches 0004–0006, DT nodes, weston image, LVGL example); **HIL on silicon pending** (bench ladder G0–G8). |
 
 ### Display 2 (J28) — carrier-ready, unavailable on V2N/V2M
 

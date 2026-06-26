@@ -195,7 +195,7 @@ the SoM preset's `topology.<id>` when omitted):
 |----------------|----------------------------------------------------------------------------------------|
 | `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.                          |
 | `image`        | Yocto image recipe name (e.g. `alp-image-edge`).                                       |
-| `os`           | Override the natural runtime only — `off` (skip slice) or `baremetal` (rare).          |
+| `os`           | NOT an OS picker — the runtime is class-derived (M→Zephyr, A→Yocto). Only `off` (skip slice) or `baremetal` (rare) are settable; a cross-class OS is rejected. |
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
 | `libraries`    | Library opt-in list for this slice.                                                    |
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
@@ -214,12 +214,33 @@ in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
 `_default_os_from_core_type()` in
 [`scripts/alp_orchestrate.py`](../scripts/alp_orchestrate.py).
 
-Customer override behaviour is unchanged: `cores.<id>.os:` in
-`board.yaml` wins when set, the inference applies when omitted.
-Custom SoMs ported via
-[`docs/porting-new-som.md`](porting-new-som.md) get this OS
-inference for free as long as their SoC JSON declares core types
-correctly.
+The OS is **not** user-selectable: the runtime follows the core
+class, full stop.  A `board.yaml` may only **disable** a core
+(`os: off`) or drop it to **no-OS** (`os: baremetal`); selecting the
+*other* class's OS — `zephyr` on a Cortex-A, `yocto` on a Cortex-M —
+is **rejected by the loader** (`OrchestratorError`).  We support
+exactly two OSes — Yocto for Linux, Zephyr for the RTOS — mapped to
+the silicon class, not chosen.  (The check lives in the loader, not
+the schema, because it's cross-file: board.yaml `os:` vs the SoC
+`cores[].type`.)  Custom SoMs ported via
+[`docs/porting-new-som.md`](porting-new-som.md) get this for free as
+long as their SoC JSON declares core types correctly.
+
+**Querying it (for IDEs / tooling).**  Rather than re-deriving the
+M/A → OS mapping, tools read the resolved facts directly:
+
+```bash
+python3 scripts/alp_project.py --emit os-topology   # JSON to stdout
+```
+
+emits, per resolved core, the `core_type`, the `runtime_class`
+(`linux` | `rtos`), the class `default_os`, the `effective_os`,
+whether the core is `enabled`, and the per-core `allowed_os` — the
+valid dropdown, which *excludes the other class's OS* (so a Cortex-A
+shows `[yocto, baremetal, off]`, a Cortex-M `[zephyr, baremetal,
+off]`).  That's what an editor's board configurator uses to present
+the SDK's selection + the legal overrides, instead of guessing or
+offering a cross-class OS.
 
 **Silicon-determined fields never appear in `board.yaml`.**  Inference
 backend selection, NPU presence, on-module component populations,
@@ -256,9 +277,11 @@ The schema deliberately separates two concerns that get conflated:
 On E1M-AEN, the on-module parts are: Alif Ensemble silicon, TI
 CC3501E (Wi-Fi/BLE), Infineon OPTIGA Trust M, Micro Crystal
 RV-3028-C7 RTC, TI TMP112, Onsemi 24C128 EEPROM.  Everything else
-on the dev kit (LSM6DSO, BMI323, ICM-42670, BMP581, OLEDs, OV5640,
-TAS2563, INA236, ...) is on the **E1M-EVK board**, not on the
-module.
+on the dev kit (BMI323, ICM-42670, BMP581, TAS2563, INA236, the
+camera mux, ...) is on the **E1M-EVK board**, not on the module.
+LSM6DSO and an SSD1306 OLED are not soldered on the EVK -- apps that
+want them attach the part to the I2C/Qwiic header and declare it in
+their board.yaml `chips:` array.
 
 ### `som` block
 
@@ -356,9 +379,9 @@ with one `#define <MACRO> E1M_<…>` line per entry.
 
 #### Preset mode (SDK-internal shortcut)
 
-The 41 example projects under `examples/` all target the EVK or
-X-EVK, so they share a single board definition each via the
-`preset:` field:
+Most example projects under `examples/` target the EVK or X-EVK
+(66 do today — 46 on `e1m-evk`, 20 on `e1m-x-evk`), so they share a
+single board definition each via the `preset:` field:
 
 ```yaml
 preset: e1m-evk             # or e1m-x-evk
@@ -826,7 +849,7 @@ the canonical math lives at
 
 ```
 metadata/
-├── sdk_version.yaml                            # single-line "version: 0.3.0"
+├── sdk_version.yaml                            # SDK release version (currently "version: 0.6.0")
 ├── e1m_modules/
 │   ├── aen/hw-revisions.yaml                   # family-level revs (AEN family
 │   │                                            #  shares one PCB; SKUs differ
@@ -837,11 +860,11 @@ metadata/
 │   └── E1M-AEN701.yaml                     # MPN preset; `default_hw_rev: r1`
 │                                                #  points into the family table.
 └── boards/
-    ├── E1M-EVK/board.yaml                      # board preset; carries its own
+    ├── e1m-evk.yaml                            # board preset; carries its own
     │                                            #  hw_revisions + default_hw_rev.
-    ├── E1M-X-EVK/board.yaml                    # V2N / V2N-M1 board
+    ├── e1m-x-evk.yaml                          # V2N / V2N-M1 board
     │                                            #  (board_id.adc_channel TBD).
-    └── custom-example/board.yaml               # copy-friendly template
+    └── custom-example.yaml                     # copy-friendly template
 ```
 
 `board.yaml` overrides go in the `som.hw_rev` / `board.hw_rev`

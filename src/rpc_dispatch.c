@@ -45,17 +45,20 @@ static struct alp_rpc_channel _rpc_pool[CONFIG_ALP_SDK_MAX_RPC_HANDLES];
 
 static struct alp_rpc_channel *_alloc_rpc(void)
 {
-    for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_RPC_HANDLES; ++i) {
-        if (!_rpc_pool[i].in_use) {
-            memset(&_rpc_pool[i], 0, sizeof(_rpc_pool[i]));
-            _rpc_pool[i].in_use = true;
-            return &_rpc_pool[i];
-        }
-    }
-    return NULL;
+	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_RPC_HANDLES; ++i) {
+		if (!_rpc_pool[i].in_use) {
+			memset(&_rpc_pool[i], 0, sizeof(_rpc_pool[i]));
+			_rpc_pool[i].in_use = true;
+			return &_rpc_pool[i];
+		}
+	}
+	return NULL;
 }
 
-static void _free_rpc(struct alp_rpc_channel *h) { h->in_use = false; }
+static void _free_rpc(struct alp_rpc_channel *h)
+{
+	h->in_use = false;
+}
 
 /* ================================================================== */
 /* Lifecycle                                                           */
@@ -63,103 +66,105 @@ static void _free_rpc(struct alp_rpc_channel *h) { h->in_use = false; }
 
 alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
 {
-    alp_z_clear_last_error();
-    if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
-        alp_z_set_last_error(ALP_ERR_INVAL);
-        return NULL;
-    }
-    const alp_backend_t *be = alp_backend_select("rpc", ALP_SOC_REF_STR);
-    if (be == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-        return NULL;
-    }
-    const alp_rpc_ops_t *ops = (const alp_rpc_ops_t *)be->ops;
-    if (ops == NULL || ops->open == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
-        return NULL;
-    }
-    struct alp_rpc_channel *h = _alloc_rpc();
-    if (h == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-    h->backend   = be;
-    h->state.ops = ops;
-    h->state.cfg = *cfg;
-    alp_capabilities_t caps = { .flags = be->base_caps };
-    alp_status_t rc = ops->open(cfg, &h->state, &caps);
-    if (rc != ALP_OK) {
-        _free_rpc(h);
-        alp_z_set_last_error(rc);
-        return NULL;
-    }
-    h->cached_caps = caps;
-    return h;
+	alp_z_clear_last_error();
+	if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
+		alp_z_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
+	const alp_backend_t *be = alp_backend_select("rpc", ALP_SOC_REF_STR);
+	if (be == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
+		return NULL;
+	}
+	const alp_rpc_ops_t *ops = (const alp_rpc_ops_t *)be->ops;
+	if (ops == NULL || ops->open == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
+		return NULL;
+	}
+	struct alp_rpc_channel *h = _alloc_rpc();
+	if (h == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOMEM);
+		return NULL;
+	}
+	h->backend              = be;
+	h->state.ops            = ops;
+	h->state.cfg            = *cfg;
+	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_status_t       rc   = ops->open(cfg, &h->state, &caps);
+	if (rc != ALP_OK) {
+		_free_rpc(h);
+		alp_z_set_last_error(rc);
+		return NULL;
+	}
+	h->cached_caps = caps;
+	return h;
 }
 
 void alp_rpc_close(alp_rpc_channel_t *ch)
 {
-    if (ch == NULL || !ch->in_use) return;
-    if (ch->state.ops != NULL && ch->state.ops->close != NULL) {
-        ch->state.ops->close(&ch->state);
-    }
-    _free_rpc(ch);
+	if (ch == NULL || !ch->in_use) return;
+	if (ch->state.ops != NULL && ch->state.ops->close != NULL) {
+		ch->state.ops->close(&ch->state);
+	}
+	_free_rpc(ch);
 }
 
 /* ================================================================== */
 /* Subscriptions                                                       */
 /* ================================================================== */
 
-alp_status_t alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method,
-                               alp_rpc_method_cb_t cb, void *user)
+alp_status_t
+alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
-    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-    if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
-    if (ch->state.ops == NULL || ch->state.ops->subscribe == NULL) {
-        return ALP_ERR_NOT_IMPLEMENTED;
-    }
-    return ch->state.ops->subscribe(&ch->state, method, cb, user);
+	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
+	if (ch->state.ops == NULL || ch->state.ops->subscribe == NULL) {
+		return ALP_ERR_NOT_IMPLEMENTED;
+	}
+	return ch->state.ops->subscribe(&ch->state, method, cb, user);
 }
 
 alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
 {
-    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-    if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
-    if (ch->state.ops == NULL || ch->state.ops->unsubscribe == NULL) {
-        return ALP_ERR_NOT_IMPLEMENTED;
-    }
-    return ch->state.ops->unsubscribe(&ch->state, method);
+	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
+	if (ch->state.ops == NULL || ch->state.ops->unsubscribe == NULL) {
+		return ALP_ERR_NOT_IMPLEMENTED;
+	}
+	return ch->state.ops->unsubscribe(&ch->state, method);
 }
 
 /* ================================================================== */
 /* Send + call                                                         */
 /* ================================================================== */
 
-alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method,
-                          const void *payload, size_t len)
+alp_status_t
+alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len)
 {
-    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-    if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
-    if (payload == NULL && len > 0) return ALP_ERR_INVAL;
-    if (ch->state.ops == NULL || ch->state.ops->send == NULL) {
-        return ALP_ERR_NOT_IMPLEMENTED;
-    }
-    return ch->state.ops->send(&ch->state, method, payload, len);
+	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
+	if (payload == NULL && len > 0) return ALP_ERR_INVAL;
+	if (ch->state.ops == NULL || ch->state.ops->send == NULL) {
+		return ALP_ERR_NOT_IMPLEMENTED;
+	}
+	return ch->state.ops->send(&ch->state, method, payload, len);
 }
 
-alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method,
-                          const void *req, size_t req_len,
-                          void *resp, size_t *resp_len,
-                          uint32_t timeout_ms)
+alp_status_t alp_rpc_call(alp_rpc_channel_t *ch,
+                          const char        *method,
+                          const void        *req,
+                          size_t             req_len,
+                          void              *resp,
+                          size_t            *resp_len,
+                          uint32_t           timeout_ms)
 {
-    if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-    if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
-    if (resp != NULL && resp_len == NULL) return ALP_ERR_INVAL;
-    if (ch->state.ops == NULL || ch->state.ops->call == NULL) {
-        return ALP_ERR_NOT_IMPLEMENTED;
-    }
-    return ch->state.ops->call(&ch->state, method, req, req_len,
-                               resp, resp_len, timeout_ms);
+	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
+	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
+	if (resp != NULL && resp_len == NULL) return ALP_ERR_INVAL;
+	if (ch->state.ops == NULL || ch->state.ops->call == NULL) {
+		return ALP_ERR_NOT_IMPLEMENTED;
+	}
+	return ch->state.ops->call(&ch->state, method, req, req_len, resp, resp_len, timeout_ms);
 }
 
 /* ================================================================== */
@@ -168,5 +173,5 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch, const char *method,
 
 const alp_capabilities_t *alp_rpc_capabilities(const alp_rpc_channel_t *ch)
 {
-    return (ch != NULL) ? &ch->cached_caps : NULL;
+	return (ch != NULL) ? &ch->cached_caps : NULL;
 }

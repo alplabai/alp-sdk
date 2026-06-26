@@ -2,21 +2,24 @@
 
 > Write once, run on any E1M module.
 
-> ⚠️ **[UNTESTED] — `v0.6` status: paper-correct, no real-silicon verification yet.**
->
-> Every chip driver, library binding, peripheral wrapper, and
-> example app in this repo builds clean on `native_sim/native/64`
-> and passes its NULL-arg-guard ZTEST.  **Nothing has been brought
-> up on real silicon yet.**  Treat register addresses, timing
-> values, lifecycle sequencing, and per-SoM accelerator wiring as
-> *paper-correct only* until the v1.0 HiL verification sweep
-> lands.  Per-driver verification status is recorded in
-> `metadata/chips/<name>.yaml`'s `verification:` block and as
-> `@par Verification status: [UNTESTED]` Doxygen tags on every
-> public header.  Customers shipping production firmware should
-> assume nothing in here has been silicon-validated and budget
-> their own bring-up time accordingly.  Verification rolls out
-> per-SKU + per-chip from v0.6 onward.
+[![CI](https://github.com/alplabai/alp-sdk/actions/workflows/pr-twister.yml/badge.svg?branch=main)](https://github.com/alplabai/alp-sdk/actions/workflows/pr-twister.yml)
+[![Release](https://img.shields.io/github/v/release/alplabai/alp-sdk)](https://github.com/alplabai/alp-sdk/releases)
+[![License](https://img.shields.io/github/license/alplabai/alp-sdk)](LICENSE)
+[![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.0-blue)](docs/zephyr-version-policy.md)
+
+> [!WARNING]
+> **Partially silicon-verified (`v0.8`):** every chip driver, peripheral wrapper, and
+> example builds clean and passes its CI tests on `native_sim`. Two SoM
+> families now carry silicon evidence: the E1M-X V2N (GD32-bridge stack,
+> verified v0.6) and E1M-AEN801 (peripheral matrix, NPU inference, cc3501e
+> bridge, verified v0.8). Most remaining families (i.MX 93, V2M/DEEPX,
+> AEN30x/40x/50x/60x/70x) remain pre-silicon.  The first
+> silicon-verified slice landed in v0.6 — the V2N GD32-bridge campaign
+> (SPI/I²C link, HIL soak, A/B OTA, analog loopback). v0.8 adds two more:
+> E1M-AEN801 (Alif Ensemble E8, 15/17 peripheral apps verified on real
+> silicon) and CC3501E bridge (Wi-Fi/BLE/GPIO-proxy validated).  Full caveats in the
+> *Status* section below; per-feature state in
+> [`docs/test-plan.md`](docs/test-plan.md).
 
 The **Alp SDK** is the unification software layer for Alp Lab edge AI
 modules built on the **E1M open-standard form factor**.  It provides
@@ -128,7 +131,7 @@ indexes the common ones with fixes.
 
 ## 30-second quick start
 
-A v0.6 project is **one declarative file** plus per-core app
+A v0.8 project is **one declarative file** plus per-core app
 directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
@@ -258,12 +261,28 @@ by upstream `bitbake` / OE-core constraint.  Codified in
 
 ## Status
 
-**v0.6 ramp — paper-correct, pre-HIL** — recorded in
+**v0.8 ramp — paper-correct, mostly pre-HIL; partial silicon-verified additions** — recorded in
 [`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
 landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in
 [`docs/test-plan.md`](docs/test-plan.md), and a release does not tag
 until its gating rows flip to ✅.
+
+Treat register addresses, timing values, lifecycle sequencing, and
+per-SoM accelerator wiring as *paper-correct only* until their
+test-plan rows flip to ✅.  The first silicon-verified rows landed
+in v0.6 — the V2N GD32-bridge campaign (SPI/I²C link, A/B OTA, Tier-B
+loopback, protocol negotiation, all validated end-to-end). v0.8
+expanded verified coverage to AEN801 (E1M-AEN-family Alif Ensemble E8:
+15/17 peripheral apps on real silicon) and CC3501E (Wi-Fi/BLE scan,
+GPIO proxy, warm-program flow); breadth beyond these families remains
+pre-HIL.  Per-driver
+verification status is recorded in `metadata/chips/<name>.yaml`'s
+`verification:` block and as `@par Verification status: [UNTESTED]`
+Doxygen tags on public headers.  Customers shipping production
+firmware should check the matching test-plan row and budget their
+own bring-up time for any surface not yet marked ✅.  Verification
+rolls out per-SKU + per-chip from v0.6 onward.
 
 v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md).
 
@@ -284,8 +303,8 @@ v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneou
 - Roadmap: [`VERSIONS.md`](VERSIONS.md).
 - What changed when: `CHANGELOG.md` (in the repo root).
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md).
-- Architecture decisions: [`docs/adr/`](docs/adr/) (12 ADRs, latest:
-  0011 intra-family portability + 0012 cross-platform host).
+- Architecture decisions: [`docs/adr/`](docs/adr/) (17 ADRs, latest:
+  0017 alp-sdk-over-the-vendor-sdk).
 
 ## Test it from scratch
 
@@ -327,7 +346,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 
 | Group | Headers + chip drivers |
 |---|---|
-| Peripherals | `peripheral.h` (GPIO/I²C/SPI/UART), `pwm.h`, `adc.h`, `counter.h`, `i2s.h`, `can.h`, `rtc.h`, `wdt.h`, `usb.h` |
+| Peripherals | `peripheral.h` (GPIO/I²C/SPI/UART), `pwm.h`, `adc.h`, `dac.h`, `counter.h`, `i2s.h`, `can.h`, `rtc.h`, `wdt.h`, `usb.h` |
 | Audio / camera / display | `audio.h` (PDM in + I²S out), `camera.h`, `gui.h` (LVGL), `display.h` (panels) — chip drivers: SSD1306, SSD1331, ST7789, OV5640, CAM_MUX, TAS2563, PDM mic |
 | Connectivity & security | `iot.h` (Wi-Fi/MQTT), `ble.h` (BLE 5.4), `security.h` (MbedTLS PSA Crypto), `storage.h` (LittleFS), OPTIGA Trust M chip driver |
 | DSP / graphics / power | `dsp.h` (FFT / FAC / IIR chain), `tmu.h` (trig-/math-unit offload), `gpu2d.h` (2D blit/fill), `power.h` (sleep + wake sources) — HW-accelerated where the SoC provides it, SW fallback (CMSIS-DSP / libm / Zephyr PM) otherwise |
@@ -369,7 +388,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate.py      │
-  │ (v0.6)        │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
+  │ (v0.8)        │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
   │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
@@ -435,7 +454,7 @@ All consumer-facing headers live under `include/alp/`:
 | Header               | Library                                    |
 |----------------------|--------------------------------------------|
 | `alp/peripheral.h`   | I²C, SPI, GPIO, UART                       |
-| `alp/pwm.h` / `adc.h` / `counter.h` / `i2s.h` / `can.h` / `rtc.h` / `wdt.h` / `usb.h` | one peripheral class per header |
+| `alp/pwm.h` / `adc.h` / `dac.h` / `counter.h` / `i2s.h` / `can.h` / `rtc.h` / `wdt.h` / `usb.h` | one peripheral class per header |
 | `alp/camera.h` / `gui.h` / `display.h` | camera · LVGL re-export · display-panel driver |
 | `alp/audio.h`        | PDM in / I²S out (+ smart-amp codecs, e.g. TAS2563) |
 | `alp/iot.h` / `ble.h` | Wi-Fi station + MQTT · BLE 5.4 peripheral + central |
@@ -499,7 +518,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: main        # pin to a tag (v0.6.0, etc.) once released; v0.6 is pre-release
+      revision: main        # pin to a release tag — v0.8.1 is the latest; `main` tracks the next candidate
       path: modules/lib/alp-sdk
 ```
 
@@ -530,7 +549,7 @@ cmake -B build -DALP_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-# Zephyr (heterogeneous slice, v0.6 pre-release flow)
+# Zephyr (heterogeneous slice, v0.8 flow)
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
 west alp-build examples/multicore/rpmsg-v2n

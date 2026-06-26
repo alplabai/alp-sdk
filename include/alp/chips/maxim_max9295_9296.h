@@ -44,10 +44,10 @@ extern "C" {
 #define MAX9296_DEV_ID 0x94u
 
 typedef struct {
-    alp_i2c_t *bus;
-    uint8_t    ser_addr;
-    uint8_t    des_addr;
-    bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    ser_addr;
+	uint8_t    des_addr;
+	bool       initialised;
 } maxim_gmsl2_t;
 
 /**
@@ -56,10 +56,8 @@ typedef struct {
  * Verifies MAX9295A serialiser DEV_ID == 0x91 and MAX9296A
  * deserialiser DEV_ID == 0x94.
  */
-alp_status_t maxim_gmsl2_init(maxim_gmsl2_t *dev,
-                              alp_i2c_t     *bus,
-                              uint8_t        ser_addr,
-                              uint8_t        des_addr);
+alp_status_t
+maxim_gmsl2_init(maxim_gmsl2_t *dev, alp_i2c_t *bus, uint8_t ser_addr, uint8_t des_addr);
 
 /** @brief Read DEV_ID from the deserialiser. */
 alp_status_t maxim_gmsl2_read_des_id(maxim_gmsl2_t *dev, uint8_t *id_out);

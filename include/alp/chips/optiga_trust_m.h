@@ -57,16 +57,16 @@ extern "C" {
  *  Fields are little-endian on the wire; the parsed shape lives
  *  in this struct.  See SRM table 38. */
 typedef struct {
-    uint8_t chip_type[6]; /**< Chip type number. */
-    uint8_t fw_id[2];     /**< Firmware identifier. */
-    uint8_t fw_build[2];  /**< Firmware build number. */
-    uint8_t reserved[10];
+	uint8_t chip_type[6]; /**< Chip type number. */
+	uint8_t fw_id[2];     /**< Firmware identifier. */
+	uint8_t fw_build[2];  /**< Firmware build number. */
+	uint8_t reserved[10];
 } optiga_trust_m_product_info_t;
 
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
 } optiga_trust_m_t;
 
 /** @brief Probe the chip + open a host application context.
@@ -97,9 +97,13 @@ alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx
  * @param[out] resp_len    Receives bytes copied into @p resp.
  * @param[in]  timeout_ms  Max wait for the chip to clock out the response.
  */
-alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx, const uint8_t *apdu, size_t apdu_len,
-                                      uint8_t *resp, size_t resp_cap, size_t *resp_len,
-                                      uint32_t timeout_ms);
+alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
+                                      const uint8_t    *apdu,
+                                      size_t            apdu_len,
+                                      uint8_t          *resp,
+                                      size_t            resp_cap,
+                                      size_t           *resp_len,
+                                      uint32_t          timeout_ms);
 
 /** @brief Close the application context + release I2C resources. */
 void optiga_trust_m_deinit(optiga_trust_m_t *ctx);

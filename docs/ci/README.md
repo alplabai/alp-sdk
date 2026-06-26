@@ -60,11 +60,16 @@ reference.
 
 - **GitHub-hosted**: PR-time workflows (`pr-twister`,
   `pr-metadata-validate`, `pr-doxygen`).  Run on
-  `ubuntu-latest`; PR-twister uses the
+  `ubuntu-latest`; PR-twister deliberately uses the runner's
+  stock gcc (`ZEPHYR_TOOLCHAIN_VARIANT=host`), not the
   `ghcr.io/zephyrproject-rtos/ci` Docker image.
-- **Self-hosted (HIL)**: nightly workflows.  See
-  [`HW-IN-LOOP.md`](HW-IN-LOOP.md) for runner setup contracts and
-  helper-script expectations.
+- **Self-hosted (heavy builds + HIL)**: bitbake (Yocto) and HIL jobs
+  never attach a runner to this **public** repo.  They run on
+  self-hosted runners registered to the **private** `alp-sdk-internal`
+  repo, triggered by a dispatch bridge (`pr-bitbake.yml`); results post
+  back as commit statuses on the PR.  See
+  [`runner-architecture.md`](runner-architecture.md) for the full model
+  and [`HW-IN-LOOP.md`](HW-IN-LOOP.md) for HIL runner contracts.
 
 ## When to add a new workflow
 

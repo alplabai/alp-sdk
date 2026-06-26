@@ -39,65 +39,67 @@
 #define SW_BUF_LEN 64u
 
 static uint8_t _buf[SW_BUF_LEN];
-static size_t  _head = 0u;   /* read index */
-static size_t  _tail = 0u;   /* write index */
-static size_t  _count = 0u;  /* bytes currently buffered */
+static size_t  _head  = 0u; /* read index */
+static size_t  _tail  = 0u; /* write index */
+static size_t  _count = 0u; /* bytes currently buffered */
 
-static alp_status_t sw_open(const alp_uart_config_t *cfg,
-                            alp_uart_backend_state_t *st,
-                            alp_capabilities_t *caps_out) {
-    (void)cfg;
-    st->dev     = NULL;
-    st->port_id = 0u;
-    st->be_data = NULL;
-    caps_out->flags = 0u;
-    /* Reset the circular buffer state on each open */
-    _head  = 0u;
-    _tail  = 0u;
-    _count = 0u;
-    return ALP_OK;
+static alp_status_t
+sw_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilities_t *caps_out)
+{
+	(void)cfg;
+	st->dev         = NULL;
+	st->port_id     = 0u;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	/* Reset the circular buffer state on each open */
+	_head  = 0u;
+	_tail  = 0u;
+	_count = 0u;
+	return ALP_OK;
 }
 
-static alp_status_t sw_write(alp_uart_backend_state_t *st,
-                             const uint8_t *data, size_t len) {
-    (void)st;
-    for (size_t i = 0; i < len; i++) {
-        if (_count < SW_BUF_LEN) {
-            _buf[_tail] = data[i];
-            _tail = (_tail + 1u) % SW_BUF_LEN;
-            _count++;
-        }
-        /* overflow: byte silently dropped */
-    }
-    return ALP_OK;
+static alp_status_t sw_write(alp_uart_backend_state_t *st, const uint8_t *data, size_t len)
+{
+	(void)st;
+	for (size_t i = 0; i < len; i++) {
+		if (_count < SW_BUF_LEN) {
+			_buf[_tail] = data[i];
+			_tail       = (_tail + 1u) % SW_BUF_LEN;
+			_count++;
+		}
+		/* overflow: byte silently dropped */
+	}
+	return ALP_OK;
 }
 
-static alp_status_t sw_read(alp_uart_backend_state_t *st,
-                            uint8_t *data, size_t len,
-                            uint32_t timeout_ms) {
-    (void)st;
-    (void)timeout_ms;
-    size_t n = (_count < len) ? _count : len;
-    for (size_t i = 0; i < n; i++) {
-        data[i] = _buf[_head];
-        _head = (_head + 1u) % SW_BUF_LEN;
-        _count--;
-    }
-    return ALP_OK;
+static alp_status_t
+sw_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout_ms)
+{
+	(void)st;
+	(void)timeout_ms;
+	size_t n = (_count < len) ? _count : len;
+	for (size_t i = 0; i < n; i++) {
+		data[i] = _buf[_head];
+		_head   = (_head + 1u) % SW_BUF_LEN;
+		_count--;
+	}
+	return ALP_OK;
 }
 
 static const alp_uart_ops_t _ops = {
-    .open  = sw_open,
-    .write = sw_write,
-    .read  = sw_read,
-    .close = NULL,
+	.open  = sw_open,
+	.write = sw_write,
+	.read  = sw_read,
+	.close = NULL,
 };
 
-ALP_BACKEND_REGISTER(uart, sw_fallback, {
-    .silicon_ref = "*",
-    .vendor      = "sw_fallback",
-    .base_caps   = 0u,
-    .priority    = 0,
-    .ops         = &_ops,
-    .probe       = NULL,
-});
+ALP_BACKEND_REGISTER(uart,
+                     sw_fallback,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "sw_fallback",
+                         .base_caps   = 0u,
+                         .priority    = 0,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });

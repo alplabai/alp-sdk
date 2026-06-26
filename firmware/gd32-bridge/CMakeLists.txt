@@ -58,13 +58,30 @@ option(BRIDGE_OTA_PARTITIONED "Arm the OTA Path-A flash path (HIL-gated)" OFF)
 if(BRIDGE_HAL_BACKEND STREQUAL "stub")
     list(APPEND GD32_BRIDGE_SOURCES hal/bridge_hw_stub.c)
 elseif(BRIDGE_HAL_BACKEND STREQUAL "gd32")
-    # bridge_hw_gd32.c: the real (currently stubbed) peripheral hooks.
+    # hal/gd32/: the real peripheral hooks, split move-only into per-
+    # peripheral translation units (fw v0.2.8 refactor).  init.c owns boot
+    # bring-up + board-level reads; the rest are one TU per peripheral and
+    # share tables/helpers via hal/gd32/gd32_common.h.
     # gd32_libc_stubs.c: weak `_init` / `_fini` newlib stubs needed
     # because `-nostartfiles` drops crti.o.  Only relevant to this
     # backend; the stub HAL backend never links the vendor Reset_Handler
     # that pulls in `__libc_init_array`.
     list(APPEND GD32_BRIDGE_SOURCES
-        hal/bridge_hw_gd32.c
+        hal/gd32/init.c
+        hal/gd32/adc.c
+        hal/gd32/adc_stream.c
+        hal/gd32/counter.c
+        hal/gd32/dac.c
+        hal/gd32/gpio.c
+        hal/gd32/power.c
+        hal/gd32/pwm.c
+        hal/gd32/pwm_capture.c
+        hal/gd32/qenc.c
+        hal/gd32/se_reset.c
+        hal/gd32/timer_sync.c
+        hal/gd32/tmu.c
+        hal/gd32/trng.c
+        hal/gd32/vref.c
         hal/transport_hw_gd32.c
         hal/fmc_ota.c
         hal/gd32_libc_stubs.c
@@ -100,38 +117,40 @@ endif()
 # Firmware *release* version (own semver; source of truth firmware-version.txt).
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/firmware-version.txt GD32_BRIDGE_FW_VERSION LIMIT_COUNT 1)
 message(STATUS "gd32-bridge firmware version: ${GD32_BRIDGE_FW_VERSION}")
-# Re-run the configure step whenever the version file changes -- without
-# this, an incremental `cmake --build` after a version bump keeps baking
-# the STALE build-id (bench-caught 2026-06-04: an OTA bench upgrade check
-# failed because the freshly built slot image still reported the old
-# version).
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-             ${CMAKE_CURRENT_SOURCE_DIR}/firmware-version.txt)
 
-# GET_BUILD_ID payload: "<fw-version>+<sha>" padded to exactly 20 chars
-# (protocol.c _Static_asserts the literal length).  The post-link SHA hook
-# is still TODO, so the sha portion is a zero placeholder sized to fill the
-# frame -- but the version half is REAL, which is what lets an OTA bench
-# flow prove a slot swap took effect over the wire.
-string(LENGTH "${GD32_BRIDGE_FW_VERSION}" _fw_ver_len)
-math(EXPR _sha_pad_len "19 - ${_fw_ver_len}")
-if(_sha_pad_len LESS 1)
-    message(FATAL_ERROR "firmware-version.txt too long for the 20-char build-id frame")
-endif()
-string(REPEAT "0" ${_sha_pad_len} _sha_placeholder)
-set(GD32_BRIDGE_BUILD_ID "${GD32_BRIDGE_FW_VERSION}+${_sha_placeholder}")
-message(STATUS "gd32-bridge build-id: ${GD32_BRIDGE_BUILD_ID}")
+# GET_BUILD_ID payload: "<fw-version>+<git-sha-prefix>", exactly 20 chars
+# (protocol.c _Static_asserts the length).  Baked at BUILD time by
+# cmake/gen_build_id.cmake into a generated header, regenerated on every
+# build and copied only-if-different -- so a HEAD move OR a version bump
+# re-bakes the id on the next incremental build with NO reconfigure.
+# (The old configure-time placeholder went stale on exactly those two
+# axes; an OTA bench upgrade check failed on it 2026-06-04.)
+set(GD32_BRIDGE_BUILD_ID_HEADER_DIR ${CMAKE_BINARY_DIR}/generated)
+add_custom_target(gd32-build-id
+    COMMAND ${CMAKE_COMMAND}
+        -DVERSION_FILE=${CMAKE_CURRENT_SOURCE_DIR}/firmware-version.txt
+        -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+        -DOUT_HEADER=${GD32_BRIDGE_BUILD_ID_HEADER_DIR}/gd32_bridge_build_id.h
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_build_id.cmake
+    BYPRODUCTS ${GD32_BRIDGE_BUILD_ID_HEADER_DIR}/gd32_bridge_build_id.h
+    COMMENT "Baking gd32-bridge build-id (version + git sha)")
 
-# Common per-target config: Cortex-M33 + thumb + soft-float, the version
-# define, includes, the vendor lib + .hex/.bin emission (gd32 backend only;
+# Common per-target config: Cortex-M33 + thumb + soft-float, the build-id
+# header, includes, the vendor lib + .hex/.bin emission (gd32 backend only;
 # the stub backend has no Reset_Handler so objcopy of a sectionless ELF
 # fails).  Literal output paths sidestep a $<TARGET_FILE:> GENERATE-step
 # failure on Generic-system toolchains.
 function(gd32_firmware_target tgt linker_script)
-    target_include_directories(${tgt} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/hal)
-    target_compile_definitions(${tgt} PRIVATE
-        GD32_BRIDGE_FW_VERSION="${GD32_BRIDGE_FW_VERSION}"
-        GD32_BRIDGE_BUILD_ID="${GD32_BRIDGE_BUILD_ID}")
+    target_include_directories(${tgt} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/hal
+                               ${GD32_BRIDGE_BUILD_ID_HEADER_DIR})
+    # The generated gd32_bridge_build_id.h carries GD32_BRIDGE_BUILD_ID;
+    # protocol.c includes it when this flag is set (and keeps its
+    # hermetic placeholder fallback for non-CMake consumers like the
+    # SDK-side transport unit tests).  The old per-target
+    # GD32_BRIDGE_FW_VERSION define was consumed by no source file --
+    # deleted; the version rides inside the build-id.
+    target_compile_definitions(${tgt} PRIVATE GD32_BRIDGE_HAVE_BUILD_ID_HEADER)
+    add_dependencies(${tgt} gd32-build-id)
     target_compile_options(${tgt} PRIVATE
         -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
         -ffunction-sections -fdata-sections

@@ -53,3 +53,5 @@ requires a major-version bump.  `ADDED` entries always pass.
 |--------------------------------------------------|-------|------------|
 | [`v0.1-snapshot.json`](v0.1-snapshot.json)       | v0.1  | 2026-05-10 |
 | [`v0.3-snapshot.json`](v0.3-snapshot.json)       | v0.3  | 2026-05-13 |
+| [`v0.5-snapshot.json`](v0.5-snapshot.json)       | v0.5  | 2026-06-06 |
+| [`v0.6-snapshot.json`](v0.6-snapshot.json)       | v0.6  | 2026-06-11 |

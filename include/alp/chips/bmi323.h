@@ -43,61 +43,61 @@ extern "C" {
 #endif
 
 /** Default 7-bit I2C addresses (SDO strap selects). */
-#define BMI323_I2C_ADDR_LOW    0x68
-#define BMI323_I2C_ADDR_HIGH   0x69
+#define BMI323_I2C_ADDR_LOW  0x68
+#define BMI323_I2C_ADDR_HIGH 0x69
 
 /** CHIP_ID (register 0x00) value. */
-#define BMI323_CHIP_ID         0x43
+#define BMI323_CHIP_ID 0x43
 
 /** Output data rate (ACC_CONF / GYR_CONF bits[3:0]). */
 typedef enum {
-    BMI323_ODR_0_78125_HZ = 0x1,
-    BMI323_ODR_1_5625_HZ  = 0x2,
-    BMI323_ODR_3_125_HZ   = 0x3,
-    BMI323_ODR_6_25_HZ    = 0x4,
-    BMI323_ODR_12_5_HZ    = 0x5,
-    BMI323_ODR_25_HZ      = 0x6,
-    BMI323_ODR_50_HZ      = 0x7,
-    BMI323_ODR_100_HZ     = 0x8,
-    BMI323_ODR_200_HZ     = 0x9,
-    BMI323_ODR_400_HZ     = 0xA,
-    BMI323_ODR_800_HZ     = 0xB,
-    BMI323_ODR_1600_HZ    = 0xC,
-    BMI323_ODR_3200_HZ    = 0xD,
-    BMI323_ODR_6400_HZ    = 0xE
+	BMI323_ODR_0_78125_HZ = 0x1,
+	BMI323_ODR_1_5625_HZ  = 0x2,
+	BMI323_ODR_3_125_HZ   = 0x3,
+	BMI323_ODR_6_25_HZ    = 0x4,
+	BMI323_ODR_12_5_HZ    = 0x5,
+	BMI323_ODR_25_HZ      = 0x6,
+	BMI323_ODR_50_HZ      = 0x7,
+	BMI323_ODR_100_HZ     = 0x8,
+	BMI323_ODR_200_HZ     = 0x9,
+	BMI323_ODR_400_HZ     = 0xA,
+	BMI323_ODR_800_HZ     = 0xB,
+	BMI323_ODR_1600_HZ    = 0xC,
+	BMI323_ODR_3200_HZ    = 0xD,
+	BMI323_ODR_6400_HZ    = 0xE
 } bmi323_odr_t;
 
 /** Accelerometer full-scale range (ACC_CONF bits[6:4]). */
 typedef enum {
-    BMI323_ACCEL_FS_2G  = 0x0,
-    BMI323_ACCEL_FS_4G  = 0x1,
-    BMI323_ACCEL_FS_8G  = 0x2,
-    BMI323_ACCEL_FS_16G = 0x3
+	BMI323_ACCEL_FS_2G  = 0x0,
+	BMI323_ACCEL_FS_4G  = 0x1,
+	BMI323_ACCEL_FS_8G  = 0x2,
+	BMI323_ACCEL_FS_16G = 0x3
 } bmi323_accel_fs_t;
 
 /** Gyroscope full-scale range (GYR_CONF bits[6:4]). */
 typedef enum {
-    BMI323_GYRO_FS_125_DPS  = 0x0,
-    BMI323_GYRO_FS_250_DPS  = 0x1,
-    BMI323_GYRO_FS_500_DPS  = 0x2,
-    BMI323_GYRO_FS_1000_DPS = 0x3,
-    BMI323_GYRO_FS_2000_DPS = 0x4
+	BMI323_GYRO_FS_125_DPS  = 0x0,
+	BMI323_GYRO_FS_250_DPS  = 0x1,
+	BMI323_GYRO_FS_500_DPS  = 0x2,
+	BMI323_GYRO_FS_1000_DPS = 0x3,
+	BMI323_GYRO_FS_2000_DPS = 0x4
 } bmi323_gyro_fs_t;
 
 /** Three-axis sample, raw 16-bit signed counts. */
 typedef struct {
-    int16_t x;
-    int16_t y;
-    int16_t z;
+	int16_t x;
+	int16_t y;
+	int16_t z;
 } bmi323_axes_t;
 
 /** Driver context.  Treat as opaque. */
 typedef struct {
-    alp_i2c_t          *bus;
-    uint8_t             addr;
-    bmi323_accel_fs_t   accel_fs;
-    bmi323_gyro_fs_t    gyro_fs;
-    bool                initialised;
+	alp_i2c_t        *bus;
+	uint8_t           addr;
+	bmi323_accel_fs_t accel_fs;
+	bmi323_gyro_fs_t  gyro_fs;
+	bool              initialised;
 } bmi323_t;
 
 /**
@@ -115,14 +115,10 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 alp_status_t bmi323_read_id(bmi323_t *dev, uint8_t *id_out);
 
 /** Configure accelerometer ODR + full-scale range. */
-alp_status_t bmi323_set_accel(bmi323_t *dev,
-                              bmi323_odr_t odr,
-                              bmi323_accel_fs_t fs);
+alp_status_t bmi323_set_accel(bmi323_t *dev, bmi323_odr_t odr, bmi323_accel_fs_t fs);
 
 /** Configure gyroscope ODR + full-scale range. */
-alp_status_t bmi323_set_gyro(bmi323_t *dev,
-                             bmi323_odr_t odr,
-                             bmi323_gyro_fs_t fs);
+alp_status_t bmi323_set_gyro(bmi323_t *dev, bmi323_odr_t odr, bmi323_gyro_fs_t fs);
 
 /** Read the current accelerometer sample (raw int16 counts). */
 alp_status_t bmi323_read_accel(bmi323_t *dev, bmi323_axes_t *out);
@@ -134,10 +130,10 @@ alp_status_t bmi323_read_gyro(bmi323_t *dev, bmi323_axes_t *out);
 alp_status_t bmi323_read_temp(bmi323_t *dev, int16_t *temp_raw);
 
 /** Release the driver context. */
-void          bmi323_deinit(bmi323_t *dev);
+void bmi323_deinit(bmi323_t *dev);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_CHIPS_BMI323_H */
+#endif /* ALP_CHIPS_BMI323_H */

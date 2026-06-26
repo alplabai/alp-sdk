@@ -94,7 +94,7 @@ branch-protection settings are in
 | `release/v1.1`, ...     | Next minors after they ship; same LTS rules if promoted. | PR only; signed commits required. |
 | Feature branches        | `feat/<topic>` / `fix/<topic>` / `docs/<topic>`; branch off `dev`, merged back into `dev` via PR (`--no-ff`). | OK on contributor forks/branches. |
 
-Tags on `main` are `v0.5.0`, `v1.0.0`, ... — cut on `main` once
+Tags on `main` are `v0.5.0`, `v0.6.0`, `v1.0.0`, ... — cut on `main` once
 `dev` has been promoted through the release gate.  Tags on
 `release/v1.0` are `v1.0.0`, `v1.0.1`, ... — incremented on each
 LTS-branch release.

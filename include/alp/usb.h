@@ -49,21 +49,21 @@ extern "C" {
 
 /** Standard device classes supported by the v0.3 wrapper. */
 typedef enum {
-    ALP_USB_DEVICE_CDC_ACM = 0,    /**< Virtual COM port. */
-    ALP_USB_DEVICE_MSC     = 1,    /**< Mass-storage.  Backed by `<alp/storage.h>`. */
-    ALP_USB_DEVICE_HID     = 2     /**< HID (keyboard / mouse / generic). */
+	ALP_USB_DEVICE_CDC_ACM = 0, /**< Virtual COM port. */
+	ALP_USB_DEVICE_MSC     = 1, /**< Mass-storage.  Backed by `<alp/storage.h>`. */
+	ALP_USB_DEVICE_HID     = 2  /**< HID (keyboard / mouse / generic). */
 } alp_usb_device_class_t;
 
 typedef struct alp_usb_dev alp_usb_dev_t;
 
 typedef struct {
-    alp_usb_device_class_t  device_class;
-    uint16_t                vendor_id;
-    uint16_t                product_id;
-    uint16_t                bcd_device;
-    const char             *manufacturer;
-    const char             *product;
-    const char             *serial;
+	alp_usb_device_class_t device_class;
+	uint16_t               vendor_id;
+	uint16_t               product_id;
+	uint16_t               bcd_device;
+	const char            *manufacturer;
+	const char            *product;
+	const char            *serial;
 } alp_usb_device_config_t;
 
 /**
@@ -85,7 +85,7 @@ alp_usb_dev_t *alp_usb_device_open(const alp_usb_device_config_t *cfg);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t   alp_usb_device_enable(alp_usb_dev_t *dev);
+alp_status_t alp_usb_device_enable(alp_usb_dev_t *dev);
 
 /**
  * @brief Detach the USB device from the bus.  Pair with @ref alp_usb_device_enable.
@@ -94,7 +94,7 @@ alp_status_t   alp_usb_device_enable(alp_usb_dev_t *dev);
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
  */
-alp_status_t   alp_usb_device_disable(alp_usb_dev_t *dev);
+alp_status_t alp_usb_device_disable(alp_usb_dev_t *dev);
 
 /**
  * @brief Send @p len bytes through the device's primary endpoint
@@ -108,9 +108,8 @@ alp_status_t   alp_usb_device_disable(alp_usb_dev_t *dev);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (not enumerated) /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t   alp_usb_device_write(alp_usb_dev_t *dev,
-                                    const uint8_t *data, size_t len,
-                                    uint32_t timeout_ms);
+alp_status_t
+alp_usb_device_write(alp_usb_dev_t *dev, const uint8_t *data, size_t len, uint32_t timeout_ms);
 
 /**
  * @brief Receive up to @p len bytes from the device's primary endpoint
@@ -125,17 +124,15 @@ alp_status_t   alp_usb_device_write(alp_usb_dev_t *dev,
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t   alp_usb_device_read(alp_usb_dev_t *dev,
-                                   uint8_t *data, size_t len,
-                                   size_t *out_len,
-                                   uint32_t timeout_ms);
+alp_status_t alp_usb_device_read(
+    alp_usb_dev_t *dev, uint8_t *data, size_t len, size_t *out_len, uint32_t timeout_ms);
 
 /**
  * @brief Release the USB device handle.  Idempotent on NULL.
  *
  * @param[in] dev  Handle from @ref alp_usb_device_open, or NULL.
  */
-void           alp_usb_device_close(alp_usb_dev_t *dev);
+void alp_usb_device_close(alp_usb_dev_t *dev);
 
 /* ------------------------------------------------------------------ */
 /* USB host                                                            */
@@ -159,7 +156,7 @@ alp_usb_host_t *alp_usb_host_open(void);
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
-alp_status_t    alp_usb_host_enable(alp_usb_host_t *host);
+alp_status_t alp_usb_host_enable(alp_usb_host_t *host);
 
 /**
  * @brief Stop the host-role controller.  Pair with @ref alp_usb_host_enable.
@@ -168,14 +165,14 @@ alp_status_t    alp_usb_host_enable(alp_usb_host_t *host);
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
  */
-alp_status_t    alp_usb_host_disable(alp_usb_host_t *host);
+alp_status_t alp_usb_host_disable(alp_usb_host_t *host);
 
 /**
  * @brief Release the USB host handle.  Idempotent on NULL.
  *
  * @param[in] host  Handle from @ref alp_usb_host_open, or NULL.
  */
-void            alp_usb_host_close(alp_usb_host_t *host);
+void alp_usb_host_close(alp_usb_host_t *host);
 
 /**
  * @brief Query the capabilities of an opened USB device handle.
@@ -186,7 +183,7 @@ void            alp_usb_host_close(alp_usb_host_t *host);
 const alp_capabilities_t *alp_usb_capabilities(const alp_usb_dev_t *dev);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_USB_H */
+#endif /* ALP_USB_H */

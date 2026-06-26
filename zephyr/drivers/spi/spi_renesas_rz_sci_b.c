@@ -3,6 +3,12 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
+ * ====== ADR 0017 Tier-1.5 (thin Zephyr glue over the vendored Renesas FSP r_sci_b_spi) ======
+ * The FSP r_sci_b_spi module is vendored from RA (zephyr/drivers/spi/r_sci_b_spi/,
+ * BSD-3, shared RA<->RZ); this is thin glue over it, not a fork-driver copy.
+ * BENCH-UNVERIFIED. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * ==================================================================
+ *
  * Renesas RZ SCI-B Simple-SPI controller driver.
  *
  * The on-module GD32G553 supervisor's SPI fast path is wired to RZ/V2N pads
@@ -251,8 +257,25 @@ extern void sci_b_spi_tx_dmac_callback(sci_b_spi_instance_ctrl_t const * const p
 #define ALP_V2N_SCI7_DMAC_UNIT  0 /* DMAC0 = MCPU (CM33) DMAC            */
 #define ALP_V2N_SCI7_DMAC_RX_CH 0 /* DMAINT0 -> NVIC 89                   */
 #define ALP_V2N_SCI7_DMAC_TX_CH 1 /* DMAINT1 -> NVIC 90                   */
-#define ALP_V2N_DMAC_TRIGGER_SCI7_RXI DMAC_TRIGGER_EVENT_SCI7_RXI
-#define ALP_V2N_DMAC_TRIGGER_SCI7_TXI DMAC_TRIGGER_EVENT_SCI7_TXI
+
+/* RZ-port deviation (silicon 2026-06-06): the rzv2n BSP trigger table marks
+ * the RSCI7 RXI/TXI requests DETECTION_RISING_EDGE, but the RSCI sc_rxi/
+ * sc_txi DMA requests are LEVEL semantics -- the SAME table's SCIF rows use
+ * DETECTION_HIGH_LEVEL with the identical MASK_DACK ack mode, and the
+ * activation-source ENABLE macro re-imposes the enum's detection bits on
+ * EVERY per-transfer arm (it overwrites CHCFG.HIEN/LVL from the enum, so
+ * the e2-studio ext-cfg internal_detection setting is dead code).  An
+ * edge-armed channel whose request line is ALREADY ASSERTED at arm time
+ * (TDRE = 1 on an idle transmitter) never sees a fresh edge and never
+ * moves a beat: with the A55 rz-dmac eliminated via DT (exclusive CM33
+ * ownership) every armed transfer timed out beat-less with CHSTAT clean.
+ * Override only the detection field; id + ack mode stay per HWM Table
+ * 4.7-22. */
+#define ALP_V2N_DMAC_DETECTION_FIELD_Msk (7 << 24)
+#define ALP_V2N_DMAC_TRIGGER_SCI7_RXI                                                              \
+    ((DMAC_TRIGGER_EVENT_SCI7_RXI & ~ALP_V2N_DMAC_DETECTION_FIELD_Msk) | DETECTION_HIGH_LEVEL)
+#define ALP_V2N_DMAC_TRIGGER_SCI7_TXI                                                              \
+    ((DMAC_TRIGGER_EVENT_SCI7_TXI & ~ALP_V2N_DMAC_DETECTION_FIELD_Msk) | DETECTION_HIGH_LEVEL)
 #endif /* ALP_V2N_SCI7_DMAC */
 
 struct rz_sci_b_spi_config {

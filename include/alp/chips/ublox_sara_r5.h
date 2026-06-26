@@ -33,15 +33,15 @@ extern "C" {
 #endif
 
 typedef struct {
-    alp_uart_t *port;
-    alp_gpio_t *pwr_on;
-    alp_gpio_t *reset;
-    bool        initialised;
+	alp_uart_t *port;
+	alp_gpio_t *pwr_on;
+	alp_gpio_t *reset;
+	bool        initialised;
 } ublox_sara_r5_t;
 
 /** @brief Bind context to caller-opened UART + GPIOs. */
-alp_status_t ublox_sara_r5_init(ublox_sara_r5_t *dev, alp_uart_t *port, alp_gpio_t *pwr_on,
-                                alp_gpio_t *reset);
+alp_status_t
+ublox_sara_r5_init(ublox_sara_r5_t *dev, alp_uart_t *port, alp_gpio_t *pwr_on, alp_gpio_t *reset);
 
 /** @brief Pulse PWR_ON for 1500 ms per u-blox HW integration guide. */
 alp_status_t ublox_sara_r5_power_on(ublox_sara_r5_t *dev);
@@ -50,8 +50,8 @@ alp_status_t ublox_sara_r5_power_on(ublox_sara_r5_t *dev);
 alp_status_t ublox_sara_r5_send_cmd(ublox_sara_r5_t *dev, const char *at_cmd);
 
 /** @brief Read up to @p max bytes of UART response. */
-alp_status_t ublox_sara_r5_read_response(ublox_sara_r5_t *dev, uint8_t *buf, size_t max,
-                                         size_t *received_out, uint32_t timeout_ms);
+alp_status_t ublox_sara_r5_read_response(
+    ublox_sara_r5_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms);
 
 /** @brief Release driver context. */
 void ublox_sara_r5_deinit(ublox_sara_r5_t *dev);

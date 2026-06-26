@@ -66,10 +66,10 @@ typedef struct alp_spi_slave_shim alp_spi_slave_t;
 
 /** Proposed: slave configuration. */
 typedef struct {
-    uint32_t       bus_id;        /**< BOARD_SPI_ARDUINO (or any SPI bus id) to claim. */
-    alp_spi_mode_t mode;          /**< CPOL/CPHA -- must match master. */
-    uint8_t        bits_per_word; /**< Usually 8 -- must match master. */
-    uint32_t       cs_pin_id;     /**< /CS pin the master will assert. */
+	uint32_t       bus_id;        /**< BOARD_SPI_ARDUINO (or any SPI bus id) to claim. */
+	alp_spi_mode_t mode;          /**< CPOL/CPHA -- must match master. */
+	uint8_t        bits_per_word; /**< Usually 8 -- must match master. */
+	uint32_t       cs_pin_id;     /**< /CS pin the master will assert. */
 } alp_spi_slave_config_t;
 
 /** Proposed: callback fired on each MOSI byte clocked in.  Return the
@@ -84,28 +84,29 @@ typedef void (*alp_spi_slave_eot_cb_t)(void *user);
  * slave-mode support. */
 static alp_spi_slave_t *alp_spi_slave_open(const alp_spi_slave_config_t *cfg)
 {
-    (void)cfg;
-    /* Real impl will Zephyr-dispatch to the controller's slave
+	(void)cfg;
+	/* Real impl will Zephyr-dispatch to the controller's slave
      * registration call (Zephyr's spi_slave_register, where
      * available).  Note: Zephyr's SPI slave support is itself
      * patchy -- many Zephyr SoC drivers don't implement it. */
-    return NULL;
+	return NULL;
 }
 
 static alp_status_t alp_spi_slave_set_callbacks(alp_spi_slave_t        *slave,
                                                 alp_spi_slave_byte_cb_t on_byte,
-                                                alp_spi_slave_eot_cb_t on_eot, void *user)
+                                                alp_spi_slave_eot_cb_t  on_eot,
+                                                void                   *user)
 {
-    (void)slave;
-    (void)on_byte;
-    (void)on_eot;
-    (void)user;
-    return ALP_ERR_NOSUPPORT;
+	(void)slave;
+	(void)on_byte;
+	(void)on_eot;
+	(void)user;
+	return ALP_ERR_NOSUPPORT;
 }
 
 static void alp_spi_slave_close(alp_spi_slave_t *slave)
 {
-    (void)slave;
+	(void)slave;
 }
 
 /* ------------------------------------------------------------------
@@ -124,7 +125,7 @@ static void alp_spi_slave_close(alp_spi_slave_t *slave)
  * because it didn't know the command was coming until MOSI clocked in.
  * ------------------------------------------------------------------ */
 
-#define CMD_PING 0x01u        /* echo payload back */
+#define CMD_PING        0x01u /* echo payload back */
 #define CMD_GET_VERSION 0x02u /* reply with 4-byte version string */
 
 static volatile uint8_t  g_cmd        = 0u;
@@ -136,100 +137,103 @@ static volatile uint32_t g_transfers  = 0u;
  * thread / workqueue via a flag. */
 static uint8_t on_mosi_byte(uint8_t mosi, void *user)
 {
-    (void)user;
-    g_bytes_seen++;
+	(void)user;
+	g_bytes_seen++;
 
-    /* First byte of a transfer is always the command. */
-    if (g_bytes_seen == 1u) {
-        g_cmd = mosi;
-        return 0x00u; /* status placeholder -- master discards */
-    }
+	/* First byte of a transfer is always the command. */
+	if (g_bytes_seen == 1u) {
+		g_cmd = mosi;
+		return 0x00u; /* status placeholder -- master discards */
+	}
 
-    /* Subsequent bytes: protocol-specific response. */
-    switch (g_cmd) {
-    case CMD_PING:
-        /* Echo whatever MOSI sent back on MISO -- the simplest
+	/* Subsequent bytes: protocol-specific response. */
+	switch (g_cmd) {
+	case CMD_PING:
+		/* Echo whatever MOSI sent back on MISO -- the simplest
          * possible protocol; useful for connectivity probes. */
-        return mosi;
-    case CMD_GET_VERSION:
-        /* Drive a fixed version byte sequence. */
-        switch (g_bytes_seen - 1u) { /* index after the command byte */
-        case 1u:
-            return 0x00u; /* major */
-        case 2u:
-            return 0x06u; /* minor (v0.6 today) */
-        case 3u:
-            return 0x00u; /* patch */
-        case 4u:
-            return 'A'; /* tag char */
-        default:
-            return 0x00u; /* extra clocks beyond the
+		return mosi;
+	case CMD_GET_VERSION:
+		/* Drive a fixed version byte sequence. */
+		switch (g_bytes_seen - 1u) { /* index after the command byte */
+		case 1u:
+			return 0x00u; /* major */
+		case 2u:
+			return 0x06u; /* minor (v0.6 today) */
+		case 3u:
+			return 0x00u; /* patch */
+		case 4u:
+			return 'A'; /* tag char */
+		default:
+			return 0x00u; /* extra clocks beyond the
                                        * fixed-length reply: pad */
-        }
-    default:
-        /* Unknown command -- reply with 0xEE so the master can
+		}
+	default:
+		/* Unknown command -- reply with 0xEE so the master can
          * distinguish "bad command" from a 0x00 padding byte. */
-        return 0xEEu;
-    }
+		return 0xEEu;
+	}
 }
 
 /* End-of-transfer callback fires when the master deasserts /CS.
  * Reset the state machine so the next transfer starts cleanly. */
 static void on_eot(void *user)
 {
-    (void)user;
-    g_transfers++;
-    g_bytes_seen = 0u;
-    g_cmd        = 0u;
+	(void)user;
+	g_transfers++;
+	g_bytes_seen = 0u;
+	g_cmd        = 0u;
 }
 
 int main(void)
 {
-    printf("[spi-slave] open as slave on BOARD_SPI_ARDUINO (mode 0, 8 bits)\n");
+	printf("[spi-slave] open as slave on BOARD_SPI_ARDUINO (mode 0, 8 bits)\n");
 
-    alp_spi_slave_t *s = alp_spi_slave_open(&(alp_spi_slave_config_t){
-        .bus_id        = BOARD_SPI_ARDUINO,
-        .mode          = ALP_SPI_MODE_0,
-        .bits_per_word = 8,
-        .cs_pin_id     = 0u, /* BOARD_SPI_ARDUINO carries its own
+	alp_spi_slave_t *s = alp_spi_slave_open(&(alp_spi_slave_config_t){
+	    .bus_id        = BOARD_SPI_ARDUINO,
+	    .mode          = ALP_SPI_MODE_0,
+	    .bits_per_word = 8,
+	    .cs_pin_id     = 0u, /* BOARD_SPI_ARDUINO carries its own
                                         * board-routed /CS line; a
                                         * discrete CS GPIO is only
                                         * needed when chaining extra
                                         * slaves. */
-    });
-    if (s == NULL) {
-        /* Today this branch ALWAYS fires because the shim returns
+	});
+	if (s == NULL) {
+		/* Today this branch ALWAYS fires because the shim returns
          * NULL.  Customers reading the console see why their build
          * succeeds but the slave doesn't respond. */
-        printf("[spi-slave] Alp SDK v0.6 does NOT support SPI slave mode\n");
-        printf("[spi-slave]   <alp/peripheral.h> is master-only today\n");
-        printf("[spi-slave]   Note: Zephyr's own SPI slave support is patchy too;\n");
-        printf("[spi-slave]         some SoC drivers don't implement spi_slave_register.\n");
-        printf("[spi-slave]   tracking: v0.7 API surface addition\n");
-        printf("[spi-slave] done\n");
-        return 0;
-    }
+		printf("[spi-slave] Alp SDK v0.6 does NOT support SPI slave mode\n");
+		printf("[spi-slave]   <alp/peripheral.h> is master-only today\n");
+		printf("[spi-slave]   Note: Zephyr's own SPI slave support is patchy too;\n");
+		printf("[spi-slave]         some SoC drivers don't implement spi_slave_register.\n");
+		printf("[spi-slave]   tracking: v0.7 API surface addition\n");
+		printf("[spi-slave] done\n");
+		return 0;
+	}
 
-    /* Unreachable today; kept so the type-checker exercises the
+	/* Unreachable today; kept so the type-checker exercises the
      * proposed API shape. */
-    alp_status_t st = alp_spi_slave_set_callbacks(s, on_mosi_byte, on_eot, NULL);
-    if (st != ALP_OK) {
-        printf("[spi-slave] set_callbacks -> %d (expected -6 NOSUPPORT today)\n", (int)st);
-        alp_spi_slave_close(s);
-        printf("[spi-slave] done\n");
-        return 0;
-    }
+	alp_status_t st = alp_spi_slave_set_callbacks(s, on_mosi_byte, on_eot, NULL);
+	if (st != ALP_OK) {
+		printf("[spi-slave] set_callbacks -> %d (expected -6 NOSUPPORT today)\n", (int)st);
+		alp_spi_slave_close(s);
+		printf("[spi-slave] done\n");
+		return 0;
+	}
 
-    /* Idle loop -- the callbacks do all the work in ISR context.
+	/* Idle loop -- the callbacks do all the work in ISR context.
      * Print transfer counts once a second so an operator running
      * the example can SEE incoming traffic. */
-    for (int i = 0; i < 5; i++) {
-        printf("[spi-slave] tick %d transfers=%u bytes=%u last_cmd=0x%02x\n", i,
-               (unsigned)g_transfers, (unsigned)g_bytes_seen, (unsigned)g_cmd);
-        k_msleep(1000);
-    }
+	for (int i = 0; i < 5; i++) {
+		printf("[spi-slave] tick %d transfers=%u bytes=%u last_cmd=0x%02x\n",
+		       i,
+		       (unsigned)g_transfers,
+		       (unsigned)g_bytes_seen,
+		       (unsigned)g_cmd);
+		k_msleep(1000);
+	}
 
-    alp_spi_slave_close(s);
-    printf("[spi-slave] done\n");
-    return 0;
+	alp_spi_slave_close(s);
+	printf("[spi-slave] done\n");
+	return 0;
 }

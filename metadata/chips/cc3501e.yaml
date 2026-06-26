@@ -18,9 +18,16 @@ mpn_population:
 datasheet:
   primary:        "TI SWRU626"     # CC3501E technical reference manual
 
-bus:              spi              # inter-chip SPI1 host-control protocol
+bus:              spi              # DEFAULT host-control link (inter-chip SPI1).
+                                   # SDIO is an OPTIONAL alternative selected per
+                                   # board (firmware CC3501E_CONTROL_TRANSPORT);
+                                   # available only when the Alif SDIO is routed to
+                                   # the CC3501E instead of an SD card.  See
+                                   # docs/cc3501e-bridge.md "Selectable host-control
+                                   # transport".
 spi:
-  interface:      SPI1             # E1M_SPI1 inter-chip bus
+  interface:      SPI1             # E1M_SPI1 bus (Alif SPI1 master); the
+                                   # CC3501E endpoint is its own SPI0 peripheral
   mode:           [0]
   word_bits:      8
   max_clock_hz:   8000000          # current default per the header lifecycle
@@ -37,6 +44,7 @@ signals:
 protocol:
   header:         "include/alp/protocol/cc3501e.h"
   doc:            "docs/cc3501e-bridge.md"
+  major_version:  1                # ALP_CC3501E_PROTOCOL_VERSION; host insists on a match
 
 kconfig:
   zephyr:         ALP_SDK_CHIP_CC3501E

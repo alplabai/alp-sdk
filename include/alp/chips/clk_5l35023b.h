@@ -102,28 +102,28 @@ extern "C" {
 
 /** Documented register offsets the typed helpers operate on.
  *  Customers can reach any other register via the raw R/W helpers. */
-#define CLK_5L35023B_REG_GENERAL_CTRL     0x00u  /**< Byte 0 */
-#define CLK_5L35023B_REG_DASHCODE_ID      0x01u  /**< Byte 1 */
-#define CLK_5L35023B_REG_OUTPUT_CTRL      0x1Du  /**< Byte 29: DIFF1/2 enable */
-#define CLK_5L35023B_REG_OE_DFC_CTRL      0x1Eu  /**< Byte 30: SE1/3 enable */
-#define CLK_5L35023B_REG_DIFF1_CTRL       0x22u  /**< Byte 34: DIFF1 mode + slew */
-#define CLK_5L35023B_REG_SE1_DIV4_CTRL    0x24u  /**< Byte 36: I2C_PDB (bit 7) */
+#define CLK_5L35023B_REG_GENERAL_CTRL  0x00u /**< Byte 0 */
+#define CLK_5L35023B_REG_DASHCODE_ID   0x01u /**< Byte 1 */
+#define CLK_5L35023B_REG_OUTPUT_CTRL   0x1Du /**< Byte 29: DIFF1/2 enable */
+#define CLK_5L35023B_REG_OE_DFC_CTRL   0x1Eu /**< Byte 30: SE1/3 enable */
+#define CLK_5L35023B_REG_DIFF1_CTRL    0x22u /**< Byte 34: DIFF1 mode + slew */
+#define CLK_5L35023B_REG_SE1_DIV4_CTRL 0x24u /**< Byte 36: I2C_PDB (bit 7) */
 
 /** Decoded `I2C_addr[1:0]` strap from Byte 0x00 bits[6:5]. */
 typedef enum {
-    CLK_5L35023B_STRAP_ADDR_0X68 = 0, /**< Bits[6:5] = 00. */
-    CLK_5L35023B_STRAP_ADDR_0X69 = 1, /**< Bits[6:5] = 01. */
-    CLK_5L35023B_STRAP_ADDR_0X6A = 2, /**< Bits[6:5] = 10. */
-    CLK_5L35023B_STRAP_ADDR_0X6B = 3, /**< Bits[6:5] = 11. */
+	CLK_5L35023B_STRAP_ADDR_0X68 = 0, /**< Bits[6:5] = 00. */
+	CLK_5L35023B_STRAP_ADDR_0X69 = 1, /**< Bits[6:5] = 01. */
+	CLK_5L35023B_STRAP_ADDR_0X6A = 2, /**< Bits[6:5] = 10. */
+	CLK_5L35023B_STRAP_ADDR_0X6B = 3, /**< Bits[6:5] = 11. */
 } clk_5l35023b_strap_addr_t;
 
 /** Driver context. */
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;            /**< 7-bit I2C slave address. */
-    uint8_t    dashcode_id;     /**< Cached Byte 0x01 read at init. */
-    uint8_t    general_ctrl;    /**< Cached Byte 0x00 read at init. */
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;         /**< 7-bit I2C slave address. */
+	uint8_t    dashcode_id;  /**< Cached Byte 0x01 read at init. */
+	uint8_t    general_ctrl; /**< Cached Byte 0x00 read at init. */
 } clk_5l35023b_t;
 
 /**
@@ -144,8 +144,7 @@ typedef struct {
  *
  * @return @ref ALP_OK / @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY.
  */
-alp_status_t clk_5l35023b_init(clk_5l35023b_t *ctx, alp_i2c_t *bus,
-                               uint8_t addr_7bit);
+alp_status_t clk_5l35023b_init(clk_5l35023b_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
 
 /** @brief Raw register read.  Operates on any documented register. */
 alp_status_t clk_5l35023b_read_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t *val);
@@ -167,8 +166,8 @@ alp_status_t clk_5l35023b_write_reg(clk_5l35023b_t *ctx, uint8_t reg, uint8_t va
  * write_read with one register-address byte returns N consecutive
  * registers.
  */
-alp_status_t clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg,
-                                        uint8_t *out, size_t count);
+alp_status_t
+clk_5l35023b_register_dump(clk_5l35023b_t *ctx, uint8_t start_reg, uint8_t *out, size_t count);
 
 /**
  * @brief Read the factory Dash-Code-ID (Byte 0x01).
@@ -190,8 +189,7 @@ alp_status_t clk_5l35023b_read_dashcode_id(clk_5l35023b_t *ctx, uint8_t *dashcod
  *
  * @return @ref ALP_OK / @ref ALP_ERR_NOT_READY (driver uninitialised).
  */
-alp_status_t clk_5l35023b_get_strap_addr(clk_5l35023b_t *ctx,
-                                         clk_5l35023b_strap_addr_t *strap);
+alp_status_t clk_5l35023b_get_strap_addr(clk_5l35023b_t *ctx, clk_5l35023b_strap_addr_t *strap);
 
 /**
  * @brief Toggle the chip's soft power-down state (`I2C_PDB` -- Byte
@@ -208,7 +206,7 @@ alp_status_t clk_5l35023b_get_strap_addr(clk_5l35023b_t *ctx,
 alp_status_t clk_5l35023b_set_power_down(clk_5l35023b_t *ctx, bool powered_down);
 
 /** @brief Release the context.  Idempotent. */
-void         clk_5l35023b_deinit(clk_5l35023b_t *ctx);
+void clk_5l35023b_deinit(clk_5l35023b_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */

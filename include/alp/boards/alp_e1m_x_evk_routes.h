@@ -88,13 +88,13 @@ extern "C" {
 /* ADC channels (E1M_ADC<N> -> board-side signal) */
 /* ------------------------------------------------------------------ */
 
-#define XEVK_ADC_ARDUINO_A0 E1M_X_ADC0  /**< Arduino UNO header A0 analog input (ANA_S0). */
+#define XEVK_ADC_MIKROBUS_AN E1M_X_ADC0  /**< mikroBUS Click socket AN analog input (net CK_ANA, also on breakout header P7.1; raw passthrough, no divider).  The V2 carrier netlist routes ONLY the mikroBUS AN to ANA_S0; the earlier 'Arduino A0' doc here did not match the netlist. */
 
 /* ------------------------------------------------------------------ */
 /* DAC channels (E1M_DAC<N> -> board-side signal) */
 /* ------------------------------------------------------------------ */
 
-#define XEVK_DAC0 E1M_X_DAC0  /**< DAC0 analog output. */
+#define XEVK_DAC0 E1M_X_DAC0  /**< DAC0 analog output.  Header J15.2 (DAC0_OUT) is the x2-buffered copy, but the buffered path is INOPERABLE on this carrier revision (carrier erratum, fixed next rev; rework details in the internal carrier errata).  Bench use taps the raw 1.8 V-full-scale DAC0 net instead. */
 #define XEVK_DAC1 E1M_X_DAC1  /**< DAC1 analog output. */
 
 /* ------------------------------------------------------------------ */

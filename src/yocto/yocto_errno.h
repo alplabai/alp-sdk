@@ -33,28 +33,28 @@ extern "C" {
 
 static inline alp_status_t alp_yocto_errno_to_alp(int err)
 {
-    switch (err) {
-    case 0:
-        return ALP_OK;
-    case EINVAL:
-        return ALP_ERR_INVAL;
-    case EBUSY:
-    case EAGAIN:
-        return ALP_ERR_BUSY;
-    case ETIMEDOUT:
-        return ALP_ERR_TIMEOUT;
-    case ENOMEM:
-        return ALP_ERR_NOMEM;
-    case ENOTSUP:
-    case ENOSYS:
-        return ALP_ERR_NOSUPPORT;
-    case ENOENT:
-    case ENODEV:
-    case ENXIO:
-        return ALP_ERR_NOT_READY;
-    default:
-        return ALP_ERR_IO;
-    }
+	switch (err) {
+	case 0:
+		return ALP_OK;
+	case EINVAL:
+		return ALP_ERR_INVAL;
+	case EBUSY:
+	case EAGAIN:
+		return ALP_ERR_BUSY;
+	case ETIMEDOUT:
+		return ALP_ERR_TIMEOUT;
+	case ENOMEM:
+		return ALP_ERR_NOMEM;
+	case ENOTSUP:
+	case ENOSYS:
+		return ALP_ERR_NOSUPPORT;
+	case ENOENT:
+	case ENODEV:
+	case ENXIO:
+		return ALP_ERR_NOT_READY;
+	default:
+		return ALP_ERR_IO;
+	}
 }
 
 #ifdef __cplusplus

@@ -71,7 +71,7 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -80,7 +80,7 @@ jobs:
       # toolchain version pin keeps the orchestrator behaviour
       # consistent across the metadata gate + this gate.
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -242,7 +242,7 @@ jobs:
 
       - name: Upload system-manifest artefact
         if: always() && steps.gate.outputs.present == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: system-manifest-${{ matrix.som }}-${{ matrix.scenario }}
           path: ${{ github.workspace }}/alp-sdk/${{ steps.pick.outputs.example_path }}/build/system-manifest.yaml

@@ -10,13 +10,14 @@ Status keys:
 - **planned** — declared roadmap, no code yet.
 - **n/a** — combination not targeted.
 
-> **Calibration note (2026-05-11).** Many rows tagged **GA** below
-> reference work the original v0.1 / v0.2 cycles completed *to the
-> code-merged bar*, but the SDK's first canonical HIL run is still
-> pending (the `nightly-aen-hil.yml` skeleton needs a self-hosted
-> runner per [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md)).  Treat
-> every **GA** entry as "code complete, awaiting HIL" until the
-> matching `test-plan.md` row flips to ✅.
+> **Calibration note (2026-06-24; updated 2026-06-24).** v0.8.0 ships
+> silicon-verified silicon: V2N GD32-bridge campaign (since v0.6),
+> AEN801 (E8) peripheral matrix (15/17 apps PASS on real silicon, 2
+> PARTIAL hardware-gated), and cc3501e bridge (hardware SS0, real
+> BLE/Wi-Fi scan, GPIO proxy, production warm-program flow) — all on
+> real silicon.  The **GA** rows marking code-complete AEN-Zephyr work
+> reference pre-v0.8 maturity; see the v0.8.0 CHANGELOG for what is now
+> silicon-verified.
 
 Each column targets a **`<SoM>: <core_id> <runtime>`** triple — the
 SDK now builds each on-die programmable core independently.  Within
@@ -52,7 +53,7 @@ full per-(library × core × runtime) picture.
 | IoT         | stub                          | stub                   | stub                      | planned |
 
 [^disp1]: Display 1 (RK055HDMIPI4MA0, HX8394-F, 2-lane MIPI-DSI) bring-up code-complete on
-    `feat/v2n-lcd-display1` (kernel patches 0002–0004, weston image, LVGL example); row flips
+    `feat/v2n-lcd-display1` (kernel patches 0004–0006, weston image, LVGL example); row flips
     on HIL pass.  Display 2 (J28, DSI1 lane set) is permanently unavailable on V2N/V2M SoMs.
 
 ### Cortex-M (Zephyr)
@@ -79,14 +80,14 @@ plan in `VERSIONS.md`.
 
 | Library                   | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto | iMX93: a55_cluster Yocto |
 |---------------------------|-------------------------------|------------------------|---------------------------|--------------------------|
-| **PWM** (`<alp/pwm.h>`)   | planned                       | planned                | planned                   | planned |
-| **ADC** (`<alp/adc.h>`)   | planned                       | planned                | planned                   | planned |
-| **Counter / QEnc** (`<alp/counter.h>`) | planned          | planned                | planned                   | planned |
-| **I²S / SAI** (`<alp/i2s.h>`) | planned                   | planned                | planned                   | planned |
-| **CAN / CAN-FD** (`<alp/can.h>`) | planned                | planned                | planned                   | planned |
-| **RTC** (`<alp/rtc.h>`)   | planned                       | planned                | planned                   | planned |
-| **Watchdog** (`<alp/wdt.h>`) | planned                    | planned                | planned                   | planned |
-| **Audio** (`<alp/audio.h>`) | planned                     | planned                | planned                   | planned |
+| **PWM** (`<alp/pwm.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
+| **ADC** (`<alp/adc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
+| **Counter / QEnc** (`<alp/counter.h>`) | code complete¹  | code complete¹         | code complete¹            | code complete¹            |
+| **I²S / SAI** (`<alp/i2s.h>`) | code complete¹ (ALSA)     | code complete¹ (ALSA)  | code complete¹ (ALSA)     | code complete¹ (ALSA)     |
+| **CAN / CAN-FD** (`<alp/can.h>`) | code complete¹         | code complete¹         | code complete¹            | code complete¹            |
+| **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
+| **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
+| **Audio** (`<alp/audio.h>`) | code complete¹              | code complete¹         | code complete¹            | code complete¹            |
 | **Camera** (`<alp/camera.h>`) | planned                   | **GA** (MIPI CSI-2)    | **GA**                    | planned |
 | **IoT** (`<alp/iot.h>`)   | **GA**                        | **GA**                 | **GA**                    | planned |
 
@@ -99,11 +100,24 @@ plan in `VERSIONS.md`.
 | **Counter / QEnc** (`<alp/counter.h>`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | stub | stub | stub |
 | **I²S / SAI** (`<alp/i2s.h>`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`)   | **GA** (Zephyr `i2s_*`)   | stub               | stub                 | stub               |
 | **CAN / CAN-FD** (`<alp/can.h>`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | stub               | stub                 | stub               |
-| **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | stub               | stub                 | stub               |
-| **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | stub               | stub                 | stub               |
+| **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | code complete¹     | code complete¹       | code complete¹     |
+| **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | code complete¹     | code complete¹       | code complete¹     |
 | **Audio** (`<alp/audio.h>`) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub | stub |
 | **Camera** (`<alp/camera.h>`) | planned              | planned                  | planned                   | planned                   | stub               | stub                 | stub               |
 | **IoT** (`<alp/iot.h>`)   | **GA** (Wi-Fi+MQTT)      | **GA** (Wi-Fi+MQTT)      | **GA** (Wi-Fi+MQTT)       | **GA** (Wi-Fi+MQTT)       | stub               | stub                 | stub               |
+
+¹ **code complete** — migrated to the registry/dispatcher pattern with real Linux
+backends in the v0.8 cycle (issue #33), which also lands the per-class
+`alp_<class>_capabilities()` getter on Yocto:
+RTC (`/dev/rtcN`), Watchdog (`/dev/watchdogN`), CAN (SocketCAN), PWM (`/sys/class/pwm`),
+ADC (IIO sysfs), Counter (Linux Counter sysfs), I²S + Audio (ALSA `snd_pcm_*` — gated on
+`libasound`, fall back to the stub when absent), and RPC (OpenAMP/RPMsg userland — gated
+on `open-amp`/`libmetal`, with a NOSUPPORT fallback).  Each compiles + passes an nm
+symbol-ownership audit, but the **full Yocto link + on-target run are HIL-gated** (no
+sysroot / real device nodes in CI).  The remaining two classes (mqtt / security — already
+real via the direct-impl model; their migration is deferred because the vendor headers
+`libmosquitto` / OpenSSL aren't installable in CI to compile-test it) and the cross-core
+RPMsg proxy are separate slices.
 
 ### Cross-cutting v0.2 capability infrastructure
 
@@ -121,7 +135,7 @@ plan in `VERSIONS.md`.
 |----------------------|---------|----------------|
 | BLE (`<alp/ble.h>`)  | declared| Zephyr `bt` host stack |
 | Security (`<alp/security.h>`) | declared | MbedTLS PSA + per-SoC HW accelerator routing |
-| MProc (`<alp/mproc.h>`) | declared | Zephyr `mbox_*` (MHU on Alif) + `hwsem_*` + shared-memory regions |
+| MProc (`<alp/mproc.h>`) | declared | Zephyr `mbox_*` — the AEN MHU is now backed by alp-sdk's `alif,mhuv2-mbox` driver (AEN801, bench-unverified, #45/#50) — + `hwsem_*` + shared-memory regions |
 
 ## v0.4.0 prep — landed on `main` (2026-05-11)
 
@@ -186,17 +200,17 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
-| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx_dxm1` | surface + backend registry present; per-NPU dispatch **untested** |
+| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are now **real, bench-unverified** (link needs the Yocto sysroot; default-off Kconfig) — #58/#59; `tflm`/`ethos_u` paths still untested |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
-| 2D graphics | `gpu2d.h` | M (Alif Dave2D / GPU2D) + SW fallback | surface present; **untested** |
+| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim; D/AVE 2D bench-unverified.  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = PXP, no Vivante) |
 | Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
 | Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
 
 ## CMSIS-DSP per-SoM validation
 
 Alp SDK does not re-export CMSIS-DSP -- application code includes
-`arm_math.h` directly when DSP/math primitives are needed.  ALP's
+`arm_math.h` directly when DSP/math primitives are needed.  Alp's
 own internals (e.g. filtering inside `<alp/audio.h>` ) optionally
 pull in CMSIS-DSP when the build sets `ALP_HAS_CMSIS_DSP`.  Either
 way the validated **feature groups** depend on each SoC's

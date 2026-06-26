@@ -27,10 +27,6 @@
 #include "alp/rtc.h"
 #include "alp/wdt.h"
 
-#if defined(CONFIG_ALP_SDK_V2N_SUPERVISOR)
-#include <zephyr/drivers/dac.h>
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,43 +36,43 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 
 #ifndef CONFIG_ALP_SDK_MAX_I2C_HANDLES
-#define CONFIG_ALP_SDK_MAX_I2C_HANDLES   4
+#define CONFIG_ALP_SDK_MAX_I2C_HANDLES 4
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_SPI_HANDLES
-#define CONFIG_ALP_SDK_MAX_SPI_HANDLES   4
+#define CONFIG_ALP_SDK_MAX_SPI_HANDLES 4
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_UART_HANDLES
-#define CONFIG_ALP_SDK_MAX_UART_HANDLES  4
+#define CONFIG_ALP_SDK_MAX_UART_HANDLES 4
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_GPIO_HANDLES
-#define CONFIG_ALP_SDK_MAX_GPIO_HANDLES  16
+#define CONFIG_ALP_SDK_MAX_GPIO_HANDLES 16
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_PWM_HANDLES
-#define CONFIG_ALP_SDK_MAX_PWM_HANDLES   8
+#define CONFIG_ALP_SDK_MAX_PWM_HANDLES 8
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_ADC_HANDLES
-#define CONFIG_ALP_SDK_MAX_ADC_HANDLES   8
+#define CONFIG_ALP_SDK_MAX_ADC_HANDLES 8
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_COUNTER_HANDLES
 #define CONFIG_ALP_SDK_MAX_COUNTER_HANDLES 4
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_QENC_HANDLES
-#define CONFIG_ALP_SDK_MAX_QENC_HANDLES  4
+#define CONFIG_ALP_SDK_MAX_QENC_HANDLES 4
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_I2S_HANDLES
-#define CONFIG_ALP_SDK_MAX_I2S_HANDLES   2
+#define CONFIG_ALP_SDK_MAX_I2S_HANDLES 2
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_CAN_HANDLES
-#define CONFIG_ALP_SDK_MAX_CAN_HANDLES   4
+#define CONFIG_ALP_SDK_MAX_CAN_HANDLES 4
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_RTC_HANDLES
-#define CONFIG_ALP_SDK_MAX_RTC_HANDLES   2
+#define CONFIG_ALP_SDK_MAX_RTC_HANDLES 2
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_WDT_HANDLES
-#define CONFIG_ALP_SDK_MAX_WDT_HANDLES   2
+#define CONFIG_ALP_SDK_MAX_WDT_HANDLES 2
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_DAC_HANDLES
-#define CONFIG_ALP_SDK_MAX_DAC_HANDLES   2
+#define CONFIG_ALP_SDK_MAX_DAC_HANDLES 2
 #endif
 #ifndef CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES
 #define CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES 2
@@ -93,10 +89,10 @@ extern "C" {
 #include <lwrb/lwrb.h>
 
 struct alp_uart_rx_ringbuf {
-    bool                 in_use;
-    const struct device *dev;     /* mirror of port->state.dev for ISR use */
-    struct alp_uart     *port;    /* back-ref for detach */
-    lwrb_t               rb;
+	bool                 in_use;
+	const struct device *dev;  /* mirror of port->state.dev for ISR use */
+	struct alp_uart     *port; /* back-ref for detach */
+	lwrb_t               rb;
 };
 #endif
 
@@ -138,21 +134,7 @@ struct alp_uart_rx_ringbuf {
 
 /* struct alp_wdt is defined in src/backends/wdt/wdt_ops.h.             */
 
-/* ------------------------------------------------------------------ */
-/* DAC                                                                 */
-/*                                                                     */
-/* `dev == NULL` -> dispatch through the V2N supervisor singleton      */
-/* (CONFIG_ALP_SDK_V2N_SUPERVISOR).  Non-NULL `dev` -> resolve via the */
-/* alp-dacN DT alias path on the local SoC's Zephyr dac_* driver.      */
-/* ------------------------------------------------------------------ */
-
-struct alp_dac {
-    bool                  in_use;
-    uint32_t              channel_id;
-    const struct device  *dev;            /* NULL -> via_bridge */
-    uint8_t               channel;        /* hardware channel id when dev != NULL */
-    uint16_t              last_mv;        /* most recently programmed setpoint   */
-};
+/* struct alp_dac is defined in src/backends/dac/dac_ops.h.            */
 
 /* ------------------------------------------------------------------ */
 /* Streaming ADC                                                       */
@@ -165,12 +147,12 @@ struct alp_dac {
 /* ------------------------------------------------------------------ */
 
 struct alp_adc_stream {
-    bool     in_use;
-    bool     via_bridge;
-    uint8_t  stream_id; /* backend slot index (0..1 on the V2N family) */
-    uint8_t  channel;   /* hardware channel id */
-    uint32_t channel_id;
-    uint32_t sample_rate_hz;
+	bool     in_use;
+	bool     via_bridge;
+	uint8_t  stream_id; /* backend slot index (0..1 on the V2N family) */
+	uint8_t  channel;   /* hardware channel id */
+	uint32_t channel_id;
+	uint32_t sample_rate_hz;
 };
 
 /* ------------------------------------------------------------------ */
@@ -190,9 +172,6 @@ struct alp_uart_rx_ringbuf *alp_z_uart_rx_ringbuf_pool_acquire(void);
 void                        alp_z_uart_rx_ringbuf_pool_release(struct alp_uart_rx_ringbuf *h);
 #endif
 
-struct alp_dac     *alp_z_dac_pool_acquire(void);
-void                alp_z_dac_pool_release(struct alp_dac *h);
-
 struct alp_adc_stream *alp_z_adc_stream_pool_acquire(void);
 void                   alp_z_adc_stream_pool_release(struct alp_adc_stream *h);
 
@@ -200,4 +179,4 @@ void                   alp_z_adc_stream_pool_release(struct alp_adc_stream *h);
 }
 #endif
 
-#endif  /* ALP_INTERNAL_ZEPHYR_HANDLES_H_ */
+#endif /* ALP_INTERNAL_ZEPHYR_HANDLES_H_ */

@@ -66,7 +66,7 @@ alp-sdk/
 │   ├── peripheral.h                 # alp_i2c_t, alp_spi_t, alp_gpio_t, alp_uart_t
 │   ├── display.h
 │   ├── camera.h
-│   ├── gui.h                        # LVGL re-export with ALP defaults
+│   ├── gui.h                        # LVGL re-export with Alp defaults
 │   ├── dsp.h                        # composable DSP pipeline (FFT / FAC / filters)
 │   ├── rpc.h                        # framed RPMsg surface; opens with <alp/system_ipc.h>
 │   ├── inference.h                  # TFLM / Ethos-U / DRP-AI / DEEPX dispatcher
@@ -269,7 +269,7 @@ The active generators are:
 
 | Script                                  | Reads                                                | Writes                                                                         |
 |-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
-| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, per-slice `alp.conf` / `local.conf` / `cmake-args.txt` |
+| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON external build front-ends consume (ADR 0014) |
 | `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
 | `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
@@ -279,7 +279,7 @@ The active generators are:
 All generated artefacts are byte-stable across rebuilds (deterministic
 key ordering, no timestamps, no run IDs) so CI can diff them against
 the checked-in copies under `include/alp/` and reject any drift.
-Zephyr board files for ALP modules are slated to be generated from
+Zephyr board files for Alp modules are slated to be generated from
 the SoM preset YAMLs by a future `--emit zephyr-board` mode (memory
 note `[[zephyr-board-from-yaml]]`); for now they are tracked as a
 roadmap item in [`docs/porting-new-som.md`](porting-new-som.md).
@@ -300,6 +300,7 @@ in [`docs/test-plan.md`](test-plan.md), not duplicated here.
 | UART             | `alp/peripheral.h`  | `uart_*`                                      |
 | PWM              | `alp/pwm.h`         | `pwm_*`                                       |
 | ADC              | `alp/adc.h`         | `adc_*` + `adc_dt_spec`                       |
+| DAC              | `alp/dac.h`         | `dac_*` (GD32 IO-MCU bridge on V2N)           |
 | Counter / Timer  | `alp/counter.h`     | `counter_*`                                   |
 | Quadrature decoder | `alp/counter.h`   | `sensor_*` (SENSOR_CHAN_ROTATION)             |
 | I2S / SAI        | `alp/i2s.h`         | `i2s_*` + memory slab                         |
@@ -317,8 +318,8 @@ not others.
 | Library          | Header(s)            | Backed by                                                      | Status |
 |------------------|----------------------|----------------------------------------------------------------|--------|
 | Display          | `alp/display.h`      | Zephyr `display_*` (SSD1306 first).                            | v0.1 surface; full impl v0.3 |
-| Camera           | `alp/camera.h`       | Zephyr `video_*` API.  V2N MIPI CSI-2 wrapper in v0.2.          | v0.1 stub (NOSUPPORT) |
-| GUI/LVGL         | `alp/gui.h`          | Upstream LVGL with an ALP `lv_conf.h`.                         | Header re-export only — no custom widgets |
+| Camera           | `alp/camera.h`       | Zephyr `video_*` API.  V2N MIPI CSI-2 wrapper in v0.2.          | v0.2 video stack (CPI / CSI-2 / D-PHY / ARX3A0) ported to Zephyr v4.4 + binds on E8; live capture bench-pending (sensor wiring); ISP-Pico ext + portable ISP config vendor-gated |
+| GUI/LVGL         | `alp/gui.h`          | Upstream LVGL with an Alp `lv_conf.h`.                         | Header re-export only — no custom widgets |
 | DSP              | `alp/dsp.h`          | Composable chain primitives — FIR/IIR/FFT/WINDOW via `alp_dsp_chain_t`; CMSIS-DSP SW fallback when `ALP_HAS_CMSIS_DSP` is set; GD32 FAC/CORDIC HW path on V2N via the bridge.  CMSIS-DSP low-level math (`arm_math.h`) consumed directly from app code — the SDK does not re-export it. | v0.5 surface (Wave-2 DSP); see ADR 0007. |
 | IoT              | `alp/iot.h`          | Zephyr `net_*` + MQTT client (AEN); Linux net + libmosquitto (Yocto). | v0.1 surface; Yocto MQTT cleartext + TLS (`mqtts://` via `mosquitto_tls_set`) code complete via libmosquitto (v0.4 prep, `pkg_check_modules`-gated), **broker roundtrip untested** -- see [test-plan.md](test-plan.md); Zephyr Wi-Fi+MQTT v0.4 |
 | Audio            | `alp/audio.h`        | Zephyr `audio_dmic` + `i2s_*` chains; ALSA `snd_pcm_*` on Yocto.| v0.1 surface; Zephyr backend v0.2; Yocto ALSA backend code complete v0.4-prep (`pkg_check_modules(alsa)`-gated), real capture/playback gates on `hil-yocto` |
@@ -413,7 +414,7 @@ fronts that Zephyr does *not* cover:
    justification for the wrapper.
 2. **Studio codegen target.**  alp-studio's pin allocator emits C
    that calls a fixed API regardless of which OS the SoM uses.
-   Without the ALP wrapper, studio codegen would fork per-OS.
+   Without the Alp wrapper, studio codegen would fork per-OS.
 3. **Opaque studio-resolved IDs.**  Zephyr's API takes a
    `const struct device *` (a DT label literal).  The studio
    resolves `bus_id` / `pin_id` / `channel_id` from the e1m-spec
@@ -432,7 +433,7 @@ fronts that Zephyr does *not* cover:
 **Design constraint that follows.**  The wrapper *should stay thin*
 over Zephyr's API.  Reimplementing what Zephyr already does (DMA
 schedulers, custom driver classes) adds bug surface without
-portability gain.  The ALP value is *studio-friendly + OS-portable +
+portability gain.  The Alp value is *studio-friendly + OS-portable +
 ABI-stable*, not *vendor-diversity over Zephyr*.
 
 ## E1M as the portability bound
@@ -584,7 +585,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: main           # pin to a release tag once v0.6.0 ships
+      revision: main           # pin to a release tag — v0.8.1 is the latest
       path: modules/alp-sdk
 ```
 
@@ -658,7 +659,7 @@ for the full rationale and edge-case guidance.
   repo.  alp-studio's pin allocator now reads these YAMLs directly.
 - AI accelerator runtimes (Ethos-U `vela`, Renesas DRP-AI translator) —
   separate vendor repos.
-- Zephyr board files for ALP modules — `alplabai/alp-zephyr-modules`
+- Zephyr board files for Alp modules — `alplabai/alp-zephyr-modules`
   (TBD).
 
 ## Non-goals

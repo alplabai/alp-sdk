@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the in-tree alif,hwsem HWSEM driver
+# (zephyr/drivers/misc/alif_hwsem/hwsem_alif.c), vendor-ext, BENCH-UNVERIFIED:
+# the take/give API acquires HWSEM instance 0 and the REL count tracks
+# take(->nonzero)/give(->0).  Single-core acquire/release smoke; dual-core
+# arbitration is the fuller test (see README).
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only -- the
+# M55-only HWSEM block has no native_sim model).
+
+sample:
+  name: aen-hwsem-regcheck
+  description: |
+    Bench RAM-run HWSEM (alif,hwsem) take/give proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): binds hwsem@4902e000 via the alp-sdk in-tree
+    alif,hwsem driver and confirms the AMP request/release latch acquires and
+    releases through the take/give API.  vendor-ext, BENCH-UNVERIFIED.
+
+tests:
+  alp_sdk.examples.aen.hwsem_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - hwsem
+      - mproc
+    build_only: true   # the HWSEM take/give check is a bench flash, not a CI run.

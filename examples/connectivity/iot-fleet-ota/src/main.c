@@ -111,32 +111,32 @@
  */
 static bool fleet_wifi_up(void)
 {
-    printf("[ota] stage 1: bringing Wi-Fi station up\n");
-    alp_wifi_t *w = alp_wifi_open();
-    if (w == NULL) {
-        printf("[ota]   alp_wifi_open -> NULL (native_sim: NOSUPPORT;"
-               " HiL pre-DT: NOT_READY)\n");
-        return false;
-    }
-    /* On real silicon the credentials come from the EEPROM
+	printf("[ota] stage 1: bringing Wi-Fi station up\n");
+	alp_wifi_t *w = alp_wifi_open();
+	if (w == NULL) {
+		printf("[ota]   alp_wifi_open -> NULL (native_sim: NOSUPPORT;"
+		       " HiL pre-DT: NOT_READY)\n");
+		return false;
+	}
+	/* On real silicon the credentials come from the EEPROM
      * factory manifest (alp_hw_info_t.wifi_*) so the same
      * binary works across fleet units.  Hardcoded for the
      * framing demo. */
-    const alp_wifi_credentials_t creds = {
-        .ssid = "fleet-ssid",
-        .psk  = "fleet-psk",
-    };
-    const alp_status_t rc = alp_wifi_connect(w, &creds, 10000u);
-    if (rc != ALP_OK) {
-        printf("[ota]   alp_wifi_connect -> %d\n", (int)rc);
-        alp_wifi_close(w);
-        return false;
-    }
-    printf("[ota]   Wi-Fi associated -- ready for HTTPS poll\n");
-    alp_wifi_close(w);  /* HTTPS client re-uses the station;
+	const alp_wifi_credentials_t creds = {
+		.ssid = "fleet-ssid",
+		.psk  = "fleet-psk",
+	};
+	const alp_status_t rc = alp_wifi_connect(w, &creds, 10000u);
+	if (rc != ALP_OK) {
+		printf("[ota]   alp_wifi_connect -> %d\n", (int)rc);
+		alp_wifi_close(w);
+		return false;
+	}
+	printf("[ota]   Wi-Fi associated -- ready for HTTPS poll\n");
+	alp_wifi_close(w); /* HTTPS client re-uses the station;
                          * keep the handle short-lived for the
                          * framing test. */
-    return true;
+	return true;
 }
 
 /* ----------------------------------------------------------------- */
@@ -157,22 +157,20 @@ static bool fleet_wifi_up(void)
  *
  * @return true if a deployment is pending, false if not.
  */
-static bool fleet_poll_for_update(uint8_t *manifest_out,
-                                  size_t   manifest_cap,
-                                  size_t  *manifest_len)
+static bool fleet_poll_for_update(uint8_t *manifest_out, size_t manifest_cap, size_t *manifest_len)
 {
-    (void)manifest_out;
-    (void)manifest_cap;
-    if (manifest_len != NULL) {
-        *manifest_len = 0u;
-    }
-    printf("[ota] stage 2: polling %s for deployment\n", MENDER_SERVER_URL);
-    printf("[ota]   GET /api/devices/v1/deployments/.../next"
-           " (stubbed on native_sim)\n");
-    /* On native_sim no manifest comes back -- the framing demo
+	(void)manifest_out;
+	(void)manifest_cap;
+	if (manifest_len != NULL) {
+		*manifest_len = 0u;
+	}
+	printf("[ota] stage 2: polling %s for deployment\n", MENDER_SERVER_URL);
+	printf("[ota]   GET /api/devices/v1/deployments/.../next"
+	       " (stubbed on native_sim)\n");
+	/* On native_sim no manifest comes back -- the framing demo
      * exits the poll loop here.  On HiL the mender-mcu-client
      * fills the buffer with the deployment JSON. */
-    return false;
+	return false;
 }
 
 /* ----------------------------------------------------------------- */
@@ -200,19 +198,19 @@ static bool fleet_poll_for_update(uint8_t *manifest_out,
  *
  * @return true on signature pass, false otherwise.
  */
-static bool fleet_verify_signature(const uint8_t *image, size_t image_len,
-                                   const uint8_t *sig,   size_t sig_len)
+static bool
+fleet_verify_signature(const uint8_t *image, size_t image_len, const uint8_t *sig, size_t sig_len)
 {
-    (void)image;
-    (void)image_len;
-    (void)sig;
-    (void)sig_len;
-    printf("[ota] stage 3: verifying ECDSA-P256 signature\n");
-    printf("[ota]   public key = OPTIGA Trust M slot 0xE0F0"
-           " (compiled into MCUboot)\n");
-    printf("[ota]   alp_hash + ECDSA-P256 verify"
-           " (stubbed on native_sim)\n");
-    return true;
+	(void)image;
+	(void)image_len;
+	(void)sig;
+	(void)sig_len;
+	printf("[ota] stage 3: verifying ECDSA-P256 signature\n");
+	printf("[ota]   public key = OPTIGA Trust M slot 0xE0F0"
+	       " (compiled into MCUboot)\n");
+	printf("[ota]   alp_hash + ECDSA-P256 verify"
+	       " (stubbed on native_sim)\n");
+	return true;
 }
 
 /* ----------------------------------------------------------------- */
@@ -231,34 +229,35 @@ static bool fleet_verify_signature(const uint8_t *image, size_t image_len,
  */
 static bool fleet_write_inactive_slot(const uint8_t *image, size_t image_len)
 {
-    (void)image;
-    (void)image_len;
-    printf("[ota] stage 4: writing artefact to inactive MCUboot slot\n");
-    alp_storage_t *s = alp_storage_open(&(alp_storage_config_t){
-        .kind        = ALP_STORAGE_KIND_INTERNAL_FLASH,
-        .instance_id = 0u,
-    });
-    if (s == NULL) {
-        printf("[ota]   alp_storage_open(INTERNAL_FLASH) -> NULL"
-               " (last_err=%d)\n", (int)alp_last_error());
-        return false;
-    }
-    alp_storage_info_t info = { 0 };
-    const alp_status_t rc = alp_storage_get_info(s, &info);
-    if (rc == ALP_OK) {
-        printf("[ota]   flash geometry: %llu bytes total,"
-               " erase=%u write=%u\n",
-               (unsigned long long)info.total_bytes,
-               (unsigned)info.erase_size,
-               (unsigned)info.block_size);
-    }
-    /* On HiL: loop over MENDER_CHUNK_SIZE windows, erase the
+	(void)image;
+	(void)image_len;
+	printf("[ota] stage 4: writing artefact to inactive MCUboot slot\n");
+	alp_storage_t *s = alp_storage_open(&(alp_storage_config_t){
+	    .kind        = ALP_STORAGE_KIND_INTERNAL_FLASH,
+	    .instance_id = 0u,
+	});
+	if (s == NULL) {
+		printf("[ota]   alp_storage_open(INTERNAL_FLASH) -> NULL"
+		       " (last_err=%d)\n",
+		       (int)alp_last_error());
+		return false;
+	}
+	alp_storage_info_t info = { 0 };
+	const alp_status_t rc   = alp_storage_get_info(s, &info);
+	if (rc == ALP_OK) {
+		printf("[ota]   flash geometry: %llu bytes total,"
+		       " erase=%u write=%u\n",
+		       (unsigned long long)info.total_bytes,
+		       (unsigned)info.erase_size,
+		       (unsigned)info.block_size);
+	}
+	/* On HiL: loop over MENDER_CHUNK_SIZE windows, erase the
      * destination sector, write the chunk, feed the watchdog,
      * repeat.  The framing demo stops at the open()+info read
      * to keep the native_sim run bounded. */
-    printf("[ota]   (chunked erase + write happens here on HiL)\n");
-    alp_storage_close(s);
-    return true;
+	printf("[ota]   (chunked erase + write happens here on HiL)\n");
+	alp_storage_close(s);
+	return true;
 }
 
 /* ----------------------------------------------------------------- */
@@ -278,12 +277,12 @@ static bool fleet_write_inactive_slot(const uint8_t *image, size_t image_len)
  */
 static void fleet_arm_swap_and_reboot(void)
 {
-    printf("[ota] stage 5: arming swap-with-rollback + rebooting\n");
-    printf("[ota]   boot_request_upgrade(BOOT_UPGRADE_TEST)"
-           " (stubbed on native_sim)\n");
-    printf("[ota]   k_reboot() (stubbed on native_sim)\n");
+	printf("[ota] stage 5: arming swap-with-rollback + rebooting\n");
+	printf("[ota]   boot_request_upgrade(BOOT_UPGRADE_TEST)"
+	       " (stubbed on native_sim)\n");
+	printf("[ota]   k_reboot() (stubbed on native_sim)\n");
 #ifndef CONFIG_BOARD_NATIVE_SIM
-    /* sys_reboot() / k_reboot() -- the real implementation lands
+	/* sys_reboot() / k_reboot() -- the real implementation lands
      * alongside the mender-mcu-client integration in v0.4.  Kept
      * out of the native_sim build to avoid pulling Zephyr's
      * reboot subsys into the framing test. */
@@ -306,59 +305,57 @@ static void fleet_arm_swap_and_reboot(void)
  */
 static bool fleet_ota_tick(void)
 {
-    if (!fleet_wifi_up()) {
-        return true;  /* try again next tick */
-    }
+	if (!fleet_wifi_up()) {
+		return true; /* try again next tick */
+	}
 
-    uint8_t manifest[MANIFEST_MAX_BYTES];
-    size_t  manifest_len = 0u;
-    if (!fleet_poll_for_update(manifest, sizeof manifest, &manifest_len)) {
-        printf("[ota]   no deployment pending -- sleeping %us\n",
-               (unsigned)OTA_POLL_INTERVAL_S);
-        return true;
-    }
+	uint8_t manifest[MANIFEST_MAX_BYTES];
+	size_t  manifest_len = 0u;
+	if (!fleet_poll_for_update(manifest, sizeof manifest, &manifest_len)) {
+		printf("[ota]   no deployment pending -- sleeping %us\n", (unsigned)OTA_POLL_INTERVAL_S);
+		return true;
+	}
 
-    /* On HiL the manifest carries the artefact URL + signature.
+	/* On HiL the manifest carries the artefact URL + signature.
      * The download happens chunked through the mender-mcu-client
      * (which calls back into this app's "verify-and-write" path
      * once the bytes are buffered).  The flow below is the
      * happy-path skeleton. */
-    const uint8_t *image    = manifest;          /* placeholder */
-    const size_t   img_len  = manifest_len;
-    const uint8_t *sig      = manifest;          /* placeholder */
-    const size_t   sig_len  = SIG_ECDSA_P256_BYTES;
+	const uint8_t *image   = manifest; /* placeholder */
+	const size_t   img_len = manifest_len;
+	const uint8_t *sig     = manifest; /* placeholder */
+	const size_t   sig_len = SIG_ECDSA_P256_BYTES;
 
-    if (!fleet_verify_signature(image, img_len, sig, sig_len)) {
-        printf("[ota]   signature verification FAILED -- discarding\n");
-        return true;
-    }
-    if (!fleet_write_inactive_slot(image, img_len)) {
-        printf("[ota]   slot write failed -- aborting deployment\n");
-        return true;
-    }
-    fleet_arm_swap_and_reboot();
-    return false;  /* k_reboot() would have happened on HiL */
+	if (!fleet_verify_signature(image, img_len, sig, sig_len)) {
+		printf("[ota]   signature verification FAILED -- discarding\n");
+		return true;
+	}
+	if (!fleet_write_inactive_slot(image, img_len)) {
+		printf("[ota]   slot write failed -- aborting deployment\n");
+		return true;
+	}
+	fleet_arm_swap_and_reboot();
+	return false; /* k_reboot() would have happened on HiL */
 }
 
 int main(void)
 {
-    printf("[ota] alp-sdk iot-fleet-ota demo\n");
-    printf("[ota]   trust: OPTIGA Trust M (slot 0xE0F0) +"
-           " ECDSA-P256 + MCUboot swap-using-scratch\n");
-    printf("[ota]   transport: HTTPS poll to %s (Mender protocol)\n",
-           MENDER_SERVER_URL);
+	printf("[ota] alp-sdk iot-fleet-ota demo\n");
+	printf("[ota]   trust: OPTIGA Trust M (slot 0xE0F0) +"
+	       " ECDSA-P256 + MCUboot swap-using-scratch\n");
+	printf("[ota]   transport: HTTPS poll to %s (Mender protocol)\n", MENDER_SERVER_URL);
 
-    for (;;) {
-        if (!fleet_ota_tick()) {
-            break;
-        }
+	for (;;) {
+		if (!fleet_ota_tick()) {
+			break;
+		}
 #ifdef CONFIG_BOARD_NATIVE_SIM
-        break; /* one iteration is enough for the framing test */
+		break; /* one iteration is enough for the framing test */
 #else
-        k_sleep(K_SECONDS(OTA_POLL_INTERVAL_S));
+		k_sleep(K_SECONDS(OTA_POLL_INTERVAL_S));
 #endif
-    }
+	}
 
-    printf("[ota] done\n");
-    return 0;
+	printf("[ota] done\n");
+	return 0;
 }

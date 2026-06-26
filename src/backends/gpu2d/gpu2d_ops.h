@@ -5,15 +5,16 @@
  * implementations.  NOT a public header -- customer code never
  * sees this struct.  Layout may change between SDK versions.
  *
- * Slice 8b ships only the zephyr_stub backend; every op returns
- * ALP_ERR_NOT_IMPLEMENTED except open(), which succeeds so the
- * dispatcher's surface-validation pre-checks (NULL pointer, zero
- * dimensions, format range) stay reachable and match the legacy
- * src/zephyr/gpu2d_zephyr.c contract.  Real backends (Alif D/AVE 2D
- * on AEN, Vivante GC328 on i.MX 93) land per the tracking issue on
- * the stub source file.  No vendor extensions exist for GPU2D in
- * this slice, so the first-member-aliasing pattern the ADC vtable
- * uses is not required here.
+ * Backends:
+ *   - sw_fallback.c : portable pure-C CPU fill/blit/blend, wildcard
+ *                     "*" at priority 0.  open() returns ALP_OK and
+ *                     the ops do real pixel work; this is the
+ *                     backend native_sim runs and tests.
+ *   - alif_dave2d.c : the AEN D/AVE 2D real backend (priority 100,
+ *                     per-SKU silicon_refs), gated on the Dave2D
+ *                     pack + bench-unverified.
+ * No vendor extensions exist for GPU2D, so the first-member-aliasing
+ * pattern the ADC vtable uses is not required here.
  */
 
 #ifndef ALP_BACKENDS_GPU2D_OPS_H
@@ -33,8 +34,8 @@ typedef struct alp_gpu2d_ops alp_gpu2d_ops_t;
  *  config so the dispatcher mirrors nothing here today; be_data lets
  *  vendor backends hang on whatever HAL state they need. */
 typedef struct alp_gpu2d_backend_state {
-    void                   *be_data;
-    const alp_gpu2d_ops_t  *ops;
+	void                  *be_data;
+	const alp_gpu2d_ops_t *ops;
 } alp_gpu2d_backend_state_t;
 
 /** Vtable each GPU2D backend implements.  Op signatures mirror the
@@ -42,26 +43,34 @@ typedef struct alp_gpu2d_backend_state {
  *  exactly so the dispatcher can forward args 1:1 after its surface
  *  validation pre-checks pass. */
 struct alp_gpu2d_ops {
-    alp_status_t (*open)(alp_gpu2d_backend_state_t *state,
-                         alp_capabilities_t *caps_out);
-    alp_status_t (*fill_rect)(alp_gpu2d_backend_state_t *state,
-                              const alp_gpu2d_surface_t *dst,
-                              uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                              uint32_t argb_color);
-    alp_status_t (*blit)(alp_gpu2d_backend_state_t *state,
-                         const alp_gpu2d_surface_t *src,
-                         uint32_t sx, uint32_t sy,
-                         const alp_gpu2d_surface_t *dst,
-                         uint32_t dx, uint32_t dy,
-                         uint32_t w, uint32_t h);
-    alp_status_t (*blend)(alp_gpu2d_backend_state_t *state,
-                          const alp_gpu2d_surface_t *src,
-                          uint32_t sx, uint32_t sy,
-                          const alp_gpu2d_surface_t *dst,
-                          uint32_t dx, uint32_t dy,
-                          uint32_t w, uint32_t h,
-                          alp_gpu2d_blend_mode_t mode);
-    void         (*close)(alp_gpu2d_backend_state_t *state);
+	alp_status_t (*open)(alp_gpu2d_backend_state_t *state, alp_capabilities_t *caps_out);
+	alp_status_t (*fill_rect)(alp_gpu2d_backend_state_t *state,
+	                          const alp_gpu2d_surface_t *dst,
+	                          uint32_t                   x,
+	                          uint32_t                   y,
+	                          uint32_t                   w,
+	                          uint32_t                   h,
+	                          uint32_t                   argb_color);
+	alp_status_t (*blit)(alp_gpu2d_backend_state_t *state,
+	                     const alp_gpu2d_surface_t *src,
+	                     uint32_t                   sx,
+	                     uint32_t                   sy,
+	                     const alp_gpu2d_surface_t *dst,
+	                     uint32_t                   dx,
+	                     uint32_t                   dy,
+	                     uint32_t                   w,
+	                     uint32_t                   h);
+	alp_status_t (*blend)(alp_gpu2d_backend_state_t *state,
+	                      const alp_gpu2d_surface_t *src,
+	                      uint32_t                   sx,
+	                      uint32_t                   sy,
+	                      const alp_gpu2d_surface_t *dst,
+	                      uint32_t                   dx,
+	                      uint32_t                   dy,
+	                      uint32_t                   w,
+	                      uint32_t                   h,
+	                      alp_gpu2d_blend_mode_t     mode);
+	void (*close)(alp_gpu2d_backend_state_t *state);
 };
 
 /**
@@ -72,10 +81,10 @@ struct alp_gpu2d_ops {
  * access the fields without duplicating the layout.
  */
 struct alp_gpu2d {
-    alp_gpu2d_backend_state_t  state;
-    const alp_backend_t       *backend;
-    alp_capabilities_t         cached_caps;
-    bool                       in_use;
+	alp_gpu2d_backend_state_t state;
+	const alp_backend_t      *backend;
+	alp_capabilities_t        cached_caps;
+	bool                      in_use;
 };
 
 #endif /* ALP_BACKENDS_GPU2D_OPS_H */

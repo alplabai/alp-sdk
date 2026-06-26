@@ -13,7 +13,11 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 | Directory                                              | What it shows                                                                |
 |--------------------------------------------------------|------------------------------------------------------------------------------|
 | [`v2n-gd32-bridge-ping`](v2n-gd32-bridge-ping/)        | PING + GET_VERSION handshake against the GD32 supervisor over both SPI (fast path) and I²C (management path). The canonical first build on V2N. |
+| [`v2n-gd32-bridge-functional`](v2n-gd32-bridge-functional/) | Single-pass FUNCTIONAL validation -- drive each bridge surface with a known stimulus and assert the value back (sqrt/sin/TRNG/ADC-reject/PWM readback), then a live PWM7 staircase for the scope. |
+| [`v2n-gd32-bridge-loopback`](v2n-gd32-bridge-loopback/) | Jumpered Tier-B LOOPBACK -- three copper jumpers route a bridge OUTPUT back into a bridge INPUT to prove the analog + timer signal paths end to end. |
+| [`v2n-gd32-bridge-hil-soak`](v2n-gd32-bridge-hil-soak/) | Pass/fail soak of the WHOLE GD32 bridge command set over the 25 MHz SPI fast path -- every opcode round-trips each cycle with a self-contained verification. |
 | [`v2n-board-id-readout`](v2n-board-id-readout/)        | Read the 128-byte SoM EEPROM manifest + assert the runtime SKU matches the firmware build's expected SKU.                                       |
+| [`v2n-brd-i2c-bringup`](v2n-brd-i2c-bringup/)          | Patch-day diagnostic for the SoM's BRD_I2C management bus (Renesas RIIC8) -- scan, separate bus-level faults from per-device failures, then read-only probe every populated IC. |
 | [`v2n-eeprom-manifest-dump`](v2n-eeprom-manifest-dump/)| Hexdump + structured decode of the EEPROM manifest at offset 0x0000 (magic, schema_v1, family, sku, hw_rev, serial, mfg_date, CRC32).            |
 | [`v2n-ethernet-dual`](v2n-ethernet-dual/)              | Bring up both RTL8211FDI PHYs (ET0 + ET1) -- probe, reset, autoneg, link, Wake-on-LAN config.                                                    |
 | [`v2n-rtc-multi-alarm`](v2n-rtc-multi-alarm/)          | Register per-source callbacks on the rv3028c7 multi-source alarm dispatcher (timer + periodic + clock-out + manual).                             |

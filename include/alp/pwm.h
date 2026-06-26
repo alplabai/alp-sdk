@@ -47,8 +47,8 @@ extern "C" {
 
 /** Output polarity (which level represents the "on" portion of the cycle). */
 typedef enum {
-    ALP_PWM_POLARITY_NORMAL   = 0,    /**< High during the active portion. */
-    ALP_PWM_POLARITY_INVERTED = 1     /**< Low during the active portion. */
+	ALP_PWM_POLARITY_NORMAL   = 0, /**< High during the active portion. */
+	ALP_PWM_POLARITY_INVERTED = 1  /**< Low during the active portion. */
 } alp_pwm_polarity_t;
 
 /** Per-channel alignment mode for @ref alp_pwm_configure.  Edge-aligned
@@ -58,10 +58,10 @@ typedef enum {
  *  both phases, which reduces high-frequency harmonic content in motor-
  *  drive applications. */
 typedef enum {
-    ALP_PWM_ALIGN_EDGE        = 0, /**< Sawtooth counter (default). */
-    ALP_PWM_ALIGN_CENTER_UP   = 1, /**< Triangle, edges in count-up. */
-    ALP_PWM_ALIGN_CENTER_DOWN = 2, /**< Triangle, edges in count-down. */
-    ALP_PWM_ALIGN_CENTER_BOTH = 3, /**< Triangle, edges in both phases. */
+	ALP_PWM_ALIGN_EDGE        = 0, /**< Sawtooth counter (default). */
+	ALP_PWM_ALIGN_CENTER_UP   = 1, /**< Triangle, edges in count-up. */
+	ALP_PWM_ALIGN_CENTER_DOWN = 2, /**< Triangle, edges in count-down. */
+	ALP_PWM_ALIGN_CENTER_BOTH = 3, /**< Triangle, edges in both phases. */
 } alp_pwm_align_t;
 
 /** Bitmap of break-input / fault sources for @ref alp_pwm_configure.
@@ -69,7 +69,7 @@ typedef enum {
  *  output when asserted; remaining bits are reserved for future fault
  *  sources (e.g. on-die comparator trip).  Backends that don't support
  *  a particular bit silently ignore it. */
-#define ALP_PWM_BREAK_NONE 0x00u
+#define ALP_PWM_BREAK_NONE     0x00u
 #define ALP_PWM_BREAK_EXTERNAL 0x01u
 
 /** Opaque PWM channel handle.  Allocate via @ref alp_pwm_open. */
@@ -77,9 +77,9 @@ typedef struct alp_pwm alp_pwm_t;
 
 /** Configuration passed to @ref alp_pwm_open. */
 typedef struct {
-    uint32_t            channel_id;   /**< Studio-resolved PWM channel index (0..7). */
-    uint32_t            period_ns;    /**< PWM period in nanoseconds. 0 = use DT default. */
-    alp_pwm_polarity_t  polarity;
+	uint32_t           channel_id; /**< Studio-resolved PWM channel index (0..7). */
+	uint32_t           period_ns;  /**< PWM period in nanoseconds. 0 = use DT default. */
+	alp_pwm_polarity_t polarity;
 } alp_pwm_config_t;
 
 /**
@@ -99,7 +99,7 @@ typedef struct {
  *         - handle pool exhausted
  *         - hardware rejected the period
  */
-alp_pwm_t   *alp_pwm_open(const alp_pwm_config_t *cfg);
+alp_pwm_t *alp_pwm_open(const alp_pwm_config_t *cfg);
 
 /**
  * @brief Set the active-level pulse width.
@@ -143,7 +143,7 @@ alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns);
  *
  * Backends round @p dead_time_ns down to the nearest tick they can
  * honour at the configured period; on the GD32 family that's
- * ~4.16 ns at the 240 MHz core clock.  @p break_cfg is treated as an
+ * ~4.63 ns at the 216 MHz timer clock.  @p break_cfg is treated as an
  * opaque bitmap of @ref ALP_PWM_BREAK_NONE / @ref ALP_PWM_BREAK_EXTERNAL
  * flags.
  *
@@ -161,8 +161,10 @@ alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns);
  *         ALP_ERR_OUT_OF_RANGE (dead_time_ns exceeds the timer's
  *         maximum at the configured period) / ALP_ERR_IO.
  */
-alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint32_t dead_time_ns,
-                               uint8_t break_cfg);
+alp_status_t alp_pwm_configure(alp_pwm_t      *pwm,
+                               alp_pwm_align_t align_mode,
+                               uint32_t        dead_time_ns,
+                               uint8_t         break_cfg);
 
 /**
  * @brief Drive the output low and release the handle back to the pool.
@@ -171,7 +173,7 @@ alp_status_t alp_pwm_configure(alp_pwm_t *pwm, alp_pwm_align_t align_mode, uint3
  *
  * @param[in] pwm  Handle from @ref alp_pwm_open, or NULL.
  */
-void         alp_pwm_close(alp_pwm_t *pwm);
+void alp_pwm_close(alp_pwm_t *pwm);
 
 /**
  * @brief Query the capabilities of an opened PWM channel handle.
@@ -216,9 +218,9 @@ alp_status_t alp_pwm_single_pulse(alp_pwm_t *pwm, uint32_t pulse_ns);
 
 /** Edge polarity selector for @ref alp_pwm_capture_open. */
 typedef enum {
-    ALP_PWM_CAPTURE_EDGE_RISING  = 0, /**< Capture on rising edges only. */
-    ALP_PWM_CAPTURE_EDGE_FALLING = 1, /**< Capture on falling edges only. */
-    ALP_PWM_CAPTURE_EDGE_BOTH    = 2, /**< Capture on both edges (pulse-width measurement). */
+	ALP_PWM_CAPTURE_EDGE_RISING  = 0, /**< Capture on rising edges only. */
+	ALP_PWM_CAPTURE_EDGE_FALLING = 1, /**< Capture on falling edges only. */
+	ALP_PWM_CAPTURE_EDGE_BOTH    = 2, /**< Capture on both edges (pulse-width measurement). */
 } alp_pwm_capture_edge_t;
 
 /** Opaque input-capture handle.  Allocate via @ref alp_pwm_capture_open. */
@@ -226,8 +228,8 @@ typedef struct alp_pwm_capture alp_pwm_capture_t;
 
 /** Configuration passed to @ref alp_pwm_capture_open. */
 typedef struct {
-    uint32_t               channel_id; /**< PWM channel index (0..7) used as input. */
-    alp_pwm_capture_edge_t edge;       /**< Edge polarity selector. */
+	uint32_t               channel_id; /**< PWM channel index (0..7) used as input. */
+	alp_pwm_capture_edge_t edge;       /**< Edge polarity selector. */
 } alp_pwm_capture_config_t;
 
 /**
@@ -282,8 +284,8 @@ alp_pwm_capture_t *alp_pwm_capture_open(const alp_pwm_capture_config_t *cfg);
  *         signal too slow for the timer's tick rate) / ALP_ERR_IO /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out,
-                                  uint32_t *pulse_ns_out);
+alp_status_t
+alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out, uint32_t *pulse_ns_out);
 
 /**
  * @brief Close a capture handle and release the channel.
@@ -297,7 +299,7 @@ alp_status_t alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_ou
 void alp_pwm_capture_close(alp_pwm_capture_t *cap);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* ALP_PWM_H */
+#endif /* ALP_PWM_H */

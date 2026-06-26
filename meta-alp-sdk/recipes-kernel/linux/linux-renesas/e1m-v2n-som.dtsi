@@ -157,6 +157,44 @@
 };
 
 /*
+ * CA55 cluster maximum operating point: 1.7 GHz (default) or 1.8 GHz (opt-in).
+ *
+ * The SoC dtsi (r9a09g056.dtsi) ships a cluster0_opp table that tops out at
+ * 1.7 GHz -- the conservative Renesas default -- with an in-tree note that the
+ * PLLCA55 "can be clocked to 1.8GHz as well" and that "the table below should
+ * be overridden in the board DTS". The RZ/V2N datasheet (r01ds0466) rates the
+ * CA55 at 1.8 GHz @ 0.9 V (1.1 GHz @ 0.8 V).
+ *
+ * 1.7 GHz and 1.8 GHz sit on the SAME 0.9 V rail (the voltage step is lower in
+ * the table, at <= 0.85 GHz / 0.8 V), so raising the cap is a ~6 % clock bump
+ * at unchanged voltage -- not a higher-voltage corner. The CPG clk driver
+ * reprograms PLLCA55 dynamically (the boot-strapped BOOTPLLCA frequency is the
+ * initial value, not a ceiling). 1.8 GHz IS the datasheet ceiling, though, so
+ * per-unit Fmax margin is thinner there; we ship 1.7 GHz by default and leave
+ * 1.8 GHz as a one-line opt-in.
+ *
+ * TO RAISE THE CAP TO 1.8 GHz: flip ALP_CA55_1P8GHZ to 1 below (or build the
+ * kernel dtb with -DALP_CA55_1P8GHZ=1 -- no DT edit needed). Bench-validated
+ * on E1M-V2M101 silicon (2026-06-12): a 5 min 4-core soak held 1.8 GHz on all
+ * cores with zero sha256 miscompute, no thermal throttle (56 C peak vs the
+ * 95 C passive trip), and a clean boot. Validate your own silicon + thermals
+ * before enabling 1.8 GHz fleet-wide.
+ */
+#ifndef ALP_CA55_1P8GHZ
+#define ALP_CA55_1P8GHZ 0	/* 0 = 1.7 GHz (default), 1 = 1.8 GHz */
+#endif
+
+#if ALP_CA55_1P8GHZ
+&cluster0_opp {
+	opp-1800000000 {
+		opp-hz = /bits/ 64 <1800000000>;
+		opp-microvolt = <900000>;
+		clock-latency-ns = <300000>;
+	};
+};
+#endif
+
+/*
  * Dual on-module GbE PHYs. Each PHY is addressed at MDIO address 2 on its
  * bus (the on-module wiring makes address 2 the reliable address; address
  * 0 does not respond to phy_poll_reset). The compatible string carries the
@@ -224,6 +262,15 @@
 		spi-tx-bus-width = <4>;
 		spi-rx-bus-width = <4>;
 
+		/* Layout for the populated 32 MiB MX25U25635F: bl2 (mtd0) +
+		 * fip (mtd1, spans the remainder; also carries the CM33
+		 * image).  The EVK reference layout this was ported from
+		 * assumed a 64 MiB part and declared a third "user"
+		 * partition at 0x2000000 -- past the end of this flash, so
+		 * the kernel disabled it on every boot ("partition is out
+		 * of reach").  Re-cutting fip to free real user space is a
+		 * deliberate layout decision (it moves mtd1's bounds for
+		 * provisioning and CM33 flashing) -- not done casually here. */
 		partitions {
 			compatible = "fixed-partitions";
 			#address-cells = <1>;
@@ -238,16 +285,67 @@
 				label = "fip";
 				reg = <0x00060000 0x1fa0000>;
 			};
-
-			partition@2000000 {
-				label = "user";
-				reg = <0x2000000 0x2000000>;
-			};
 		};
 	};
 };
 
+/* CA55-cluster watchdog (wdt1 -- wdt0 belongs to the CM33, wdt2/3 to
+ * the CR8s).  SoC-internal, so enabled at SoM level rather than per
+ * carrier.  systemd arms and pets it from early userspace
+ * (RuntimeWatchdogSec -- see the alp-watchdog-policy recipe);
+ * timeout-sec pins the policy explicitly instead of inheriting the
+ * driver default (the HW period itself is fixed ~175 ms; longer
+ * timeouts are kernel-emulated).
+ * NOTE: the WDT1-underflow -> reset routing (CPG_ERRORRST_SEL2) is
+ * programmed by TF-A BL2 on r9a09g056 (this kernel's DT has no
+ * renesas,syscon-cpg-error-rst) -- supervision only resets the board
+ * when running the ALP/BSP FIP.
+ * VALIDATION: pending bench hang-injection on a built image + the
+ * deployed FIP. */
+&wdt1 {
+	timeout-sec = <60>;
+	status = "okay";
+};
+
+/* MCPU DMAC (DMAC0 @ 0x11400000) is OWNED BY THE CM33 firmware (the
+ * GD32 supervisor link's SCI7 DMA path drives it through the rzv FSP
+ * r_dmac_b).  The upstream SoC dtsi enables it for Linux, whose
+ * rz-dmac driver then binds the unit, claims all 8 channel interrupts
+ * and resets/owns the channels under the CM33's feet -- the same AMP
+ * double-ownership class as the port-9 SD1_CD lesson.  Silicon
+ * 2026-06-06: rz-dmac bound + 8 GIC IRQs claimed on the live system
+ * while the CM33 FSP was arming the same channels.  The A55 has four
+ * other DMAC units; this one is off-limits.
+ * (dmac0_aclk is NOT gated by this: bench-verified on the pristine
+ * BSP kernel with the node disabled, the cpg driver keeps the clock
+ * held -- enable_cnt=1, deviceless -- so the CM33's engine keeps its
+ * clock.) */
+&dmac0 {
+	status = "disabled";
+};
+
 &pinctrl {
+	/* eMMC/SD0 IO rail select (PA0, eMMC_V_SEL): the rail is
+	 * GPIO-selected between 3.3 V (on-module pull-down default) and
+	 * 1.8 V, switching the SoC's VDD1833_SD0 pad rail AND the eMMC
+	 * VccQ + bus pull-ups together.  Park it HIGH (1.8 V) before the
+	 * card is ever initialised: eMMC has no live VccQ-switch
+	 * handshake (unlike SD CMD11), so modelling this as a switchable
+	 * vqmmc regulator costs a guaranteed mmc_select_hs200 -110 +
+	 * retry on every boot (silicon-verified) -- whereas a hog at
+	 * pinctrl probe (~1.9 s) has the rail stable at 1.8 V long
+	 * before sdhi probes (~3.0 s), the fixed reg_1p8v vqmmc claim is
+	 * then TRUE, and HS200 trains first try.  Without this hog the
+	 * rail sat at its 3.3 V default while the driver claimed 1.8 V:
+	 * 'mmc_select_hs200 failed, error -74' + silent HS-52 fallback
+	 * on every cold boot. */
+	emmc-v-sel-hog {
+		gpio-hog;
+		gpios = <RZV2N_GPIO(A, 0) GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "emmc_v_sel_1v8";
+	};
+
 	sdhi0_emmc_pins: emmc-pins {
 		sd0-clk {
 			pins = "SD0CLK";

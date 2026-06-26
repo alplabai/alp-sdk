@@ -21,6 +21,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -257,6 +260,22 @@ def _emit_cap_c() -> str:
     return "\n".join(lines) + "\n"
 
 
+def _emit_aligned_defines(out: list[str], defs: list[tuple[str, str]]) -> None:
+    """Emit ``#define NAME VALUE`` with the value column aligned.
+
+    Pads each macro name to the widest in the (consecutive, blank-line-bounded)
+    block so the value column matches what clang-format's
+    ``AlignConsecutiveMacros: Consecutive`` produces.  This keeps the generated
+    header clang-clean without requiring a clang-format pass at generation time
+    (same pre-alignment approach already used for the capability table below).
+    """
+    if not defs:
+        return
+    width = max(len(name) for name, _ in defs)
+    for name, value in defs:
+        out.append(f"#define {name:<{width}} {value}")
+
+
 def _emit_cap_layer(out: list[str]) -> None:
     out.append("")
     out.append("/* ---------------------------------------------------------------")
@@ -266,11 +285,13 @@ def _emit_cap_layer(out: list[str]) -> None:
     out.append(" * Counts collapse to 0/1 via `> 0`, so ALP_HAS() is always a")
     out.append(" * constant expression and safe inside #if and static_assert.")
     out.append(" * --------------------------------------------------------------- */")
+    cap_defs: list[tuple[str, str]] = []
     for soc_name, cap_name, kind in CAP_ALIASES:
         if kind == "count":
-            out.append(f"#define ALP_CAP_{cap_name} (ALP_SOC_{soc_name} > 0)")
+            cap_defs.append((f"ALP_CAP_{cap_name}", f"(ALP_SOC_{soc_name} > 0)"))
         else:
-            out.append(f"#define ALP_CAP_{cap_name} (ALP_SOC_{soc_name})")
+            cap_defs.append((f"ALP_CAP_{cap_name}", f"(ALP_SOC_{soc_name})"))
+    _emit_aligned_defines(out, cap_defs)
     out.append("")
     out.append("#define ALP_HAS(cap) (ALP_CAP_##cap)")
 
@@ -342,21 +363,19 @@ def emit() -> str:
         keyword = "if" if i == 0 else "elif"
         lines.append(f"#{keyword} defined(CONFIG_ALP_SOC_{kc})")
         lines.append(f"/* {ref} */")
-        lines.append(f"#define ALP_SOC_REF_STR \"{ref}\"")
-        for cap, _ in CAPS:
-            lines.append(f"#define ALP_SOC_{cap} {caps[cap]}")
-        for key in BOOL_CAPS:
-            lines.append(f"#define ALP_SOC_{key.upper()} {bool_caps[key.upper()]}")
-        lines.append(f"#define ALP_SOC_NPU_ARENA_SRAM_KIB {arena_kib}")
+        soc_defs: list[tuple[str, str]] = [("ALP_SOC_REF_STR", f"\"{ref}\"")]
+        soc_defs += [(f"ALP_SOC_{cap}", str(caps[cap])) for cap, _ in CAPS]
+        soc_defs += [(f"ALP_SOC_{key.upper()}", str(bool_caps[key.upper()])) for key in BOOL_CAPS]
+        soc_defs.append(("ALP_SOC_NPU_ARENA_SRAM_KIB", str(arena_kib)))
+        _emit_aligned_defines(lines, soc_defs)
         lines.append("")
 
     lines.append("#else /* No SoC selected — accept any config. */")
-    lines.append("#define ALP_SOC_REF_STR \"unknown\"")
-    for cap, _ in CAPS:
-        lines.append(f"#define ALP_SOC_{cap} UINT16_MAX")
-    for key in BOOL_CAPS:
-        lines.append(f"#define ALP_SOC_{key.upper()} UINT16_MAX")
-    lines.append("#define ALP_SOC_NPU_ARENA_SRAM_KIB UINT16_MAX")
+    else_defs: list[tuple[str, str]] = [("ALP_SOC_REF_STR", "\"unknown\"")]
+    else_defs += [(f"ALP_SOC_{cap}", "UINT16_MAX") for cap, _ in CAPS]
+    else_defs += [(f"ALP_SOC_{key.upper()}", "UINT16_MAX") for key in BOOL_CAPS]
+    else_defs.append(("ALP_SOC_NPU_ARENA_SRAM_KIB", "UINT16_MAX"))
+    _emit_aligned_defines(lines, else_defs)
     lines.append("")
     lines.append("#endif")
 
@@ -369,20 +388,44 @@ def emit() -> str:
     return "\n".join(lines)
 
 
+def _clang_format(path: Path) -> None:
+    """Format a generated file in place to match the repo .clang-format.
+
+    The emitters above produce best-effort, pre-aligned output, but the canonical
+    formatting (tab indentation, AlignConsecutive* columns) is owned by
+    /.clang-format -- so run clang-format here to guarantee the generated file is
+    byte-identical to what the CI diff-only gate expects, regardless of how this
+    script lays out whitespace.  No-op (with a warning) if clang-format is absent;
+    the CI gate then catches any drift.
+    """
+    # Pinned to clang-format-22 (the CI version; installed via the pip wheel
+    # `clang-format==22.*`, which provides the unsuffixed `clang-format`).
+    # Prefer a v22-named binary if present, else the pinned `clang-format`.
+    exe = shutil.which("clang-format-22") or shutil.which("clang-format")
+    if exe is None:
+        print(f"  warning: clang-format not found; {path.name} left unformatted "
+              "(CI will flag any drift)", file=sys.stderr)
+        return
+    subprocess.run([exe, "-i", "--style=file", str(path)], check=True)
+
+
 def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     out_text = emit()
     OUT.write_text(out_text, encoding="utf-8")
-    print(f"wrote {OUT.relative_to(REPO)} ({len(out_text.splitlines())} lines)")
+    _clang_format(OUT)
+    print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text().splitlines())} lines)")
 
     cap_h_text = _emit_cap_h()
     CAP_H_OUT.write_text(cap_h_text, encoding="utf-8")
-    print(f"wrote {CAP_H_OUT.relative_to(REPO)} ({len(cap_h_text.splitlines())} lines)")
+    _clang_format(CAP_H_OUT)
+    print(f"wrote {CAP_H_OUT.relative_to(REPO)} ({len(CAP_H_OUT.read_text().splitlines())} lines)")
 
     CAP_C_OUT.parent.mkdir(parents=True, exist_ok=True)
     cap_c_text = _emit_cap_c()
     CAP_C_OUT.write_text(cap_c_text, encoding="utf-8")
-    print(f"wrote {CAP_C_OUT.relative_to(REPO)} ({len(cap_c_text.splitlines())} lines)")
+    _clang_format(CAP_C_OUT)
+    print(f"wrote {CAP_C_OUT.relative_to(REPO)} ({len(CAP_C_OUT.read_text().splitlines())} lines)")
 
     return 0
 

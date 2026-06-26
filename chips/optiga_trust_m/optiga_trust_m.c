@@ -15,8 +15,8 @@
  * acceleration transparently.  That work tracks as v0.3.x.
  *
  * For v0.3 we ship:
- *   - I2C address probe via a 1-byte read at 0x80 (the chip's
- *     status register; reads 0x00 when idle).
+ *   - I2C address probe via a 4-byte read of the I2C_STATE register
+ *     at 0x82.
  *   - Send-APDU + receive-response thin wrapper that lets apps
  *     hand-roll commands against Infineon's SRM until the host
  *     library lands.
@@ -34,60 +34,64 @@
 
 #include "alp/chips/optiga_trust_m.h"
 
-#define OPTIGA_REG_DATA 0x80u /* Data register (where APDUs flow) */
+#define OPTIGA_REG_DATA         0x80u /* Data register (where APDUs flow) */
 #define OPTIGA_REG_DATA_REG_LEN 0x81u
-#define OPTIGA_REG_I2C_STATE 0x82u
+#define OPTIGA_REG_I2C_STATE    0x82u
 
 alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 {
-    if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
-    memset(ctx, 0, sizeof(*ctx));
-    ctx->bus  = bus;
-    ctx->addr = (addr_7bit != 0) ? addr_7bit : OPTIGA_TRUST_M_I2C_ADDR;
+	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->bus  = bus;
+	ctx->addr = (addr_7bit != 0) ? addr_7bit : OPTIGA_TRUST_M_I2C_ADDR;
 
-    /* Probe by reading the I2C state register.  Trust M ACKs at
+	/* Probe by reading the I2C state register.  Trust M ACKs at
      * its address even before OPEN_APPLICATION; if no ACK,
      * NOT_READY tells the caller the chip isn't populated /
      * mis-strapped. */
-    uint8_t      reg      = OPTIGA_REG_I2C_STATE;
-    uint8_t      state[4] = {0};
-    alp_status_t s        = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, state, sizeof(state));
-    if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	uint8_t      reg      = OPTIGA_REG_I2C_STATE;
+	uint8_t      state[4] = { 0 };
+	alp_status_t s        = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, state, sizeof(state));
+	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 
-    ctx->initialised = true;
-    return ALP_OK;
+	ctx->initialised = true;
+	return ALP_OK;
 }
 
-alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx, const uint8_t *apdu, size_t apdu_len,
-                                      uint8_t *resp, size_t resp_cap, size_t *resp_len,
-                                      uint32_t timeout_ms)
+alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
+                                      const uint8_t    *apdu,
+                                      size_t            apdu_len,
+                                      uint8_t          *resp,
+                                      size_t            resp_cap,
+                                      size_t           *resp_len,
+                                      uint32_t          timeout_ms)
 {
-    (void)apdu;
-    (void)apdu_len;
-    (void)resp;
-    (void)resp_cap;
-    (void)timeout_ms;
-    if (resp_len != NULL) *resp_len = 0;
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    /* Full transport (info-pack sequence + CRC16) lands in v0.3.x
+	(void)apdu;
+	(void)apdu_len;
+	(void)resp;
+	(void)resp_cap;
+	(void)timeout_ms;
+	if (resp_len != NULL) *resp_len = 0;
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	/* Full transport (info-pack sequence + CRC16) lands in v0.3.x
      * via Infineon's host library.  Returning NOSUPPORT here is
      * faithful to that contract without surfacing fake success. */
-    return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT;
 }
 
 alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx,
                                               optiga_trust_m_product_info_t *out)
 {
-    if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-    if (out == NULL) return ALP_ERR_INVAL;
-    /* GET_DATA_OBJECT(0xE0C2) needs the full APDU stack; defer to
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (out == NULL) return ALP_ERR_INVAL;
+	/* GET_DATA_OBJECT(0xE0C2) needs the full APDU stack; defer to
      * v0.3.x for the same reason as send_apdu. */
-    return ALP_ERR_NOSUPPORT;
+	return ALP_ERR_NOSUPPORT;
 }
 
 void optiga_trust_m_deinit(optiga_trust_m_t *ctx)
 {
-    if (ctx == NULL) return;
-    ctx->initialised = false;
-    ctx->bus         = NULL;
+	if (ctx == NULL) return;
+	ctx->initialised = false;
+	ctx->bus         = NULL;
 }

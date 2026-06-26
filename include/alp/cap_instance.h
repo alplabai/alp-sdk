@@ -30,18 +30,18 @@ extern "C" {
 
 /** Bitwise-OR'd flags describing what a single opened handle can do. */
 typedef enum {
-    ALP_INSTANCE_CAP_DMA            = 1u << 0,
-    ALP_INSTANCE_CAP_HW_OVERSAMPLE  = 1u << 1,
-    ALP_INSTANCE_CAP_HW_TRIGGER     = 1u << 2,
-    ALP_INSTANCE_CAP_DIFFERENTIAL   = 1u << 3,
+	ALP_INSTANCE_CAP_DMA           = 1u << 0,
+	ALP_INSTANCE_CAP_HW_OVERSAMPLE = 1u << 1,
+	ALP_INSTANCE_CAP_HW_TRIGGER    = 1u << 2,
+	ALP_INSTANCE_CAP_DIFFERENTIAL  = 1u << 3,
 } alp_instance_cap_t;
 
 /** Per-instance capability descriptor populated by ops->probe. */
 typedef struct alp_capabilities {
-    uint32_t flags;
-    uint32_t max_sample_rate;   /* 0 = not applicable */
-    uint16_t max_resolution_bits;
-    uint16_t channel_count;
+	uint32_t flags;
+	uint32_t max_sample_rate; /* 0 = not applicable */
+	uint16_t max_resolution_bits;
+	uint16_t channel_count;
 } alp_capabilities_t;
 
 /**

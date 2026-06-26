@@ -37,12 +37,12 @@
 #define HAS_CMSIS_DSP 0
 #endif
 
-#define FFT_LEN 1024u
+#define FFT_LEN  1024u
 #define MAGS_LEN (FFT_LEN / 2u + 1u)
 
-static float              g_samples[FFT_LEN];
-static float              g_complex[FFT_LEN * 2u]; /* CMSIS interleaved scratch */
-static float              g_mags[MAGS_LEN];
+static float g_samples[FFT_LEN];
+static float g_complex[FFT_LEN * 2u]; /* CMSIS interleaved scratch */
+static float g_mags[MAGS_LEN];
 
 static alp_rpc_channel_t *g_ch;
 
@@ -50,82 +50,82 @@ static alp_rpc_channel_t *g_ch;
 static void run_fft(void)
 {
 #if HAS_CMSIS_DSP
-    arm_rfft_fast_instance_f32 fft;
-    arm_rfft_fast_init_f32(&fft, FFT_LEN);
-    arm_rfft_fast_f32(&fft, g_samples, g_complex, /*ifft=*/0);
+	arm_rfft_fast_instance_f32 fft;
+	arm_rfft_fast_init_f32(&fft, FFT_LEN);
+	arm_rfft_fast_f32(&fft, g_samples, g_complex, /*ifft=*/0);
 
-    /* CMSIS packs DC + Nyquist into bin 0 (DC.real, Nyquist.real).
+	/* CMSIS packs DC + Nyquist into bin 0 (DC.real, Nyquist.real).
      * We split them into separate bins for the response. */
-    g_mags[0]            = fabsf(g_complex[0]);
-    g_mags[FFT_LEN / 2u] = fabsf(g_complex[1]);
-    for (uint32_t i = 1; i < FFT_LEN / 2u; ++i) {
-        const float r  = g_complex[2u * i];
-        const float im = g_complex[2u * i + 1u];
-        g_mags[i]      = sqrtf(r * r + im * im);
-    }
+	g_mags[0]            = fabsf(g_complex[0]);
+	g_mags[FFT_LEN / 2u] = fabsf(g_complex[1]);
+	for (uint32_t i = 1; i < FFT_LEN / 2u; ++i) {
+		const float r  = g_complex[2u * i];
+		const float im = g_complex[2u * i + 1u];
+		g_mags[i]      = sqrtf(r * r + im * im);
+	}
 #else
-    /* Fallback: zero-fill so the wire shape stays correct under
+	/* Fallback: zero-fill so the wire shape stays correct under
      * native_sim without CMSIS-DSP. */
-    for (uint32_t i = 0; i < MAGS_LEN; ++i) {
-        g_mags[i] = 0.0f;
-    }
+	for (uint32_t i = 0; i < MAGS_LEN; ++i) {
+		g_mags[i] = 0.0f;
+	}
 #endif
 }
 
 static void on_fft(const void *payload, size_t len, void *user)
 {
-    (void)user;
+	(void)user;
 
-    if (len != sizeof g_samples) {
-        printf("[m33_sm]   bad payload len=%zu (expected %zu)\n", len, sizeof g_samples);
-        return;
-    }
-    memcpy(g_samples, payload, sizeof g_samples);
+	if (len != sizeof g_samples) {
+		printf("[m33_sm]   bad payload len=%zu (expected %zu)\n", len, sizeof g_samples);
+		return;
+	}
+	memcpy(g_samples, payload, sizeof g_samples);
 
-    printf("[m33_sm] processing 1024-sample frame\n");
-    run_fft();
+	printf("[m33_sm] processing 1024-sample frame\n");
+	run_fft();
 
-    if (alp_rpc_send(g_ch, "fft", g_mags, sizeof g_mags) != ALP_OK) {
-        printf("[m33_sm]   alp_rpc_send rv=%d\n", (int)alp_last_error());
-    }
+	if (alp_rpc_send(g_ch, "fft", g_mags, sizeof g_mags) != ALP_OK) {
+		printf("[m33_sm]   alp_rpc_send rv=%d\n", (int)alp_last_error());
+	}
 }
 
 int main(void)
 {
-    printf("[m33_sm] heterogeneous-offload worker coming up\n");
+	printf("[m33_sm] heterogeneous-offload worker coming up\n");
 
-    const alp_rpc_config_t cfg = {
-        .name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
-        .src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
-        .dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
-        .mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
-    };
-    g_ch = alp_rpc_open(&cfg);
-    if (g_ch == NULL) {
-        printf("[m33_sm]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
-        goto done;
-    }
+	const alp_rpc_config_t cfg = {
+		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+		.dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+		.mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
+	};
+	g_ch = alp_rpc_open(&cfg);
+	if (g_ch == NULL) {
+		printf("[m33_sm]   alp_rpc_open failed: last_err=%d\n", (int)alp_last_error());
+		goto done;
+	}
 
-    if (alp_rpc_subscribe(g_ch, "fft", on_fft, NULL) != ALP_OK) {
-        printf("[m33_sm]   alp_rpc_subscribe failed\n");
-        alp_rpc_close(g_ch);
-        goto done;
-    }
+	if (alp_rpc_subscribe(g_ch, "fft", on_fft, NULL) != ALP_OK) {
+		printf("[m33_sm]   alp_rpc_subscribe failed\n");
+		alp_rpc_close(g_ch);
+		goto done;
+	}
 
-    printf("[m33_sm] FFT worker ready; waiting for 'fft' calls\n");
+	printf("[m33_sm] FFT worker ready; waiting for 'fft' calls\n");
 
-    /* Idle main thread; on_fft runs on the SDK's RX worker.  In
+	/* Idle main thread; on_fft runs on the SDK's RX worker.  In
      * native_sim there are no inbound calls, so this loop is purely
      * to keep the producer alive until twister latches. */
-    for (int i = 0; i < 8; ++i) {
+	for (int i = 0; i < 8; ++i) {
 #ifndef CONFIG_BOARD_NATIVE_SIM
-        k_msleep(1000);
+		k_msleep(1000);
 #endif
-    }
+	}
 
-    alp_rpc_close(g_ch);
+	alp_rpc_close(g_ch);
 
 done:
-    printf("[heterogeneous-offload] done\n");
-    return 0;
+	printf("[heterogeneous-offload] done\n");
+	return 0;
 }

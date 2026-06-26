@@ -1,0 +1,38 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon CRC-engine validation overlay for the E1M-AEN801 (Alif Ensemble
+ * E8, M55-HE), bench RAM-run via J-Link.
+ *
+ * Validates the alp-sdk clean-room crc_alif driver on the hardware CRC engine
+ * crc0@48107000 (compatible "alif,crc").  The driver binds it as a Zephyr CRC
+ * class device (crc_begin / crc_update / crc_finish over struct crc_ctx): a
+ * polled, memory-mapped accelerator with no interrupt.
+ *
+ * CRC engine register the human reads over J-Link to confirm the result (ground
+ * truth, independent of any printk).  Offset from the clean-room driver
+ * zephyr/drivers/crc/crc_alif.c (transcribed value-only from the Alif DFP):
+ *     CRC_OUT (accumulated CRC) = base + 0x18 = 0x48107018
+ * After the app finishes, mem32 0x48107018 holds the last computed CRC.
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/* Enable the first CRC engine so the alif,crc driver instantiates a device.
+ * (crc1@48108000 is left disabled; this regcheck exercises crc0 only.) */
+&crc0 {
+	status = "okay";
+};

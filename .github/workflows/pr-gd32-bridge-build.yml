@@ -7,8 +7,9 @@
 #              hardware-less HAL stubs in `hal/bridge_hw_stub.c`.
 #              Exercises the dispatcher path end-to-end without
 #              needing the vendor library on the workspace.
-#   * gd32  -- bridge_hw_gd32.c + the GigaDevice standard-peripheral
-#              library link successfully.  Catches missing peripheral
+#   * gd32  -- the hal/gd32/ per-peripheral TUs + the GigaDevice
+#              standard-peripheral library link successfully.
+#              Catches missing peripheral
 #              header includes, mismatched function signatures
 #              against the vendor library, and linker errors before
 #              they reach the maintainer's HIL bench.
@@ -49,7 +50,7 @@ jobs:
       # No submodule init -- the stub backend doesn't link the vendor
       # tree, so cloning the ~hundred-MB upstream archive is wasted
       # work in this job.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install arm-none-eabi toolchain
         # Pull libnewlib-arm-none-eabi explicitly -- it carries
@@ -79,7 +80,7 @@ jobs:
     name: gd32-bridge · BRIDGE_HAL_BACKEND=gd32
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # Init only the gd32_firmware_library submodule; other
           # submodules (if any are added later) stay un-initialised
@@ -117,7 +118,7 @@ jobs:
 
       - name: Upload firmware artefacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gd32-bridge-gd32-backend
           path: |

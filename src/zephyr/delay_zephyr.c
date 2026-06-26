@@ -19,12 +19,12 @@
 
 void alp_delay_us(uint32_t us)
 {
-    if (us == 0u) return;
-    k_busy_wait(us);
+	if (us == 0u) return;
+	k_busy_wait(us);
 }
 
 void alp_delay_ms(uint32_t ms)
 {
-    if (ms == 0u) return;
-    k_msleep((int32_t)ms);
+	if (ms == 0u) return;
+	k_msleep((int32_t)ms);
 }

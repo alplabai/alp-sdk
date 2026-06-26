@@ -80,12 +80,12 @@ static drone_telemetry_t g_telem;
 K_THREAD_STACK_DEFINE(imu_stack, 4096);
 static struct k_thread imu_thread;
 
-static void            imu_entry(void *p1, void *p2, void *p3)
+static void imu_entry(void *p1, void *p2, void *p3)
 {
-    ARG_UNUSED(p1);
-    ARG_UNUSED(p2);
-    ARG_UNUSED(p3);
-    drone_sensors_run_imu_loop(&g_telem);
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+	drone_sensors_run_imu_loop(&g_telem);
 }
 
 /* Slow-telemetry thread: 5 Hz GPS NMEA + INA236 read.  Lower
@@ -94,63 +94,75 @@ static void            imu_entry(void *p1, void *p2, void *p3)
 K_THREAD_STACK_DEFINE(telem_stack, 4096);
 static struct k_thread telem_thread;
 
-static void            telem_entry(void *p1, void *p2, void *p3)
+static void telem_entry(void *p1, void *p2, void *p3)
 {
-    ARG_UNUSED(p1);
-    ARG_UNUSED(p2);
-    ARG_UNUSED(p3);
-    drone_sensors_run_slow_loop(&g_telem);
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+	drone_sensors_run_slow_loop(&g_telem);
 }
 
 int main(void)
 {
-    LOG_INF("drone-hud demo starting");
+	LOG_INF("drone-hud demo starting");
 
-    /* Sensor bring-up.  Returns immediately if a chip is absent so
+	/* Sensor bring-up.  Returns immediately if a chip is absent so
      * the demo still runs on a partial board (e.g. no GPS lock
      * indoors -- the IMU + battery + UI still work). */
-    if (drone_sensors_init(&g_telem) != 0) {
-        LOG_WRN("drone_sensors_init returned non-zero; degraded mode");
-    }
+	if (drone_sensors_init(&g_telem) != 0) {
+		LOG_WRN("drone_sensors_init returned non-zero; degraded mode");
+	}
 
-    /* Display + LVGL bring-up. */
-    const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-    if (!device_is_ready(display)) {
-        LOG_ERR("display %s not ready", display->name);
-        return 1;
-    }
-    lv_init();
-    hud_ui_build(); /* Construct the HUD layout once. */
-    display_blanking_off(display);
+	/* Display + LVGL bring-up. */
+	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
+	if (!device_is_ready(display)) {
+		LOG_ERR("display %s not ready", display->name);
+		return 1;
+	}
+	lv_init();
+	hud_ui_build(); /* Construct the HUD layout once. */
+	display_blanking_off(display);
 
-    /* Spawn the sensor threads after the UI is built so the first
+	/* Spawn the sensor threads after the UI is built so the first
      * frame doesn't show garbage values. */
-    k_thread_create(&imu_thread, imu_stack, K_THREAD_STACK_SIZEOF(imu_stack), imu_entry, NULL, NULL,
-                    NULL,
-                    /* priority */ K_PRIO_PREEMPT(2),
-                    /* options  */ 0, K_NO_WAIT);
-    k_thread_name_set(&imu_thread, "imu_loop");
+	k_thread_create(&imu_thread,
+	                imu_stack,
+	                K_THREAD_STACK_SIZEOF(imu_stack),
+	                imu_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                /* priority */ K_PRIO_PREEMPT(2),
+	                /* options  */ 0,
+	                K_NO_WAIT);
+	k_thread_name_set(&imu_thread, "imu_loop");
 
-    k_thread_create(&telem_thread, telem_stack, K_THREAD_STACK_SIZEOF(telem_stack), telem_entry,
-                    NULL, NULL, NULL,
-                    /* priority */ K_PRIO_PREEMPT(6),
-                    /* options  */ 0, K_NO_WAIT);
-    k_thread_name_set(&telem_thread, "slow_telem");
+	k_thread_create(&telem_thread,
+	                telem_stack,
+	                K_THREAD_STACK_SIZEOF(telem_stack),
+	                telem_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                /* priority */ K_PRIO_PREEMPT(6),
+	                /* options  */ 0,
+	                K_NO_WAIT);
+	k_thread_name_set(&telem_thread, "slow_telem");
 
-    /* Main loop: drain the LVGL task queue + refresh the on-screen
+	/* Main loop: drain the LVGL task queue + refresh the on-screen
      * widgets from the shared telemetry snapshot.  We copy the
      * struct once per frame and render from the copy so a field
      * can't change underneath a single hud_ui_apply_telemetry()
      * pass.  The copy itself is a plain (non-atomic) struct
      * assignment, so it can still straddle a concurrent writer --
      * acceptable for a display-only HUD (see the file header). */
-    while (1) {
-        drone_telemetry_t snapshot = g_telem;
-        hud_ui_apply_telemetry(&snapshot);
+	while (1) {
+		drone_telemetry_t snapshot = g_telem;
+		hud_ui_apply_telemetry(&snapshot);
 
-        const uint32_t sleep_ms = lv_task_handler();
-        k_msleep(MIN(sleep_ms, 10u));
-    }
+		const uint32_t sleep_ms = lv_task_handler();
+		k_msleep(MIN(sleep_ms, 10u));
+	}
 
-    return 0; /* unreachable. */
+	return 0; /* unreachable. */
 }

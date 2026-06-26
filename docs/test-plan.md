@@ -90,7 +90,8 @@ A release does **not** tag until every row gating it is `verified`.
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
 | `<alp/inference.h>` Ethos-U on AEN | `src/backends/inference/tflm.cpp` | ⏳ untested | Vela-compiled MobileNetV2 outputs logits matching CPU reference within tolerance | HIL | v0.3 |
-| `<alp/inference.h>` DEEPX dispatcher routing | `src/yocto/inference_yocto.c` + `inference_deepx.cpp` | 🟡 partial | Dispatcher selects DEEPX backend when configured; real `dxnn_*` link still pending | Yocto plain-CMake build green; `tests/yocto/inference_dispatcher.c` covers NULL/INVAL paths; **real link gates v0.4** | v0.3 |
+| `<alp/inference.h>` DEEPX DX-M1 (A55) | `src/yocto/inference_yocto.c` + `inference_deepx.cpp` | 🟡 code-complete, bench-unverified | Real `dxrt::InferenceEngine` body loads a `.dxnn` model + runs inference; outputs match a host-CPU reference | Body header-compiles against the **real** `dx_rt` headers (`dxrt::InferenceEngine`, replacing a fictional `dxnn_*` API); `tests/yocto/inference_dispatcher.c` covers NULL/INVAL; **real link needs the RZ/V Yocto sysroot, on-silicon run needs the DX-M1 PCIe card** | v0.8 |
+| `<alp/inference.h>` DRP-AI (A55) | `src/yocto/inference_drpai.cpp` | 🟡 code-complete, bench-unverified | Real `MeraDrpRuntimeWrapper` body loads a `drpai_dir` model (tar staged to a tempdir) + runs inference | Body header-compiles against the **real** `MeraDrpRuntimeWrapper.h`; **cross-link needs the RZ/V Yocto SDK sysroot + EdgeCortix MERA libs, on-silicon run needs the V2N board** | v0.8 |
 | `<alp/audio.h>` real impl | `src/backends/audio/zephyr_drv.c` | ⏳ untested | PDM mic captures audio playable through I²S DAC, no buffer underruns | HIL | v0.3 |
 | `<alp/ble.h>` real impl | `src/backends/ble/zephyr_drv.c` | ⏳ untested | Advertise + connect + GATT read from a second BLE device | HIL | v0.3 |
 | `<alp/security.h>` real impl | `src/backends/security/zephyr_drv.c` | ⏳ untested | SHA-256 + AES-128-GCM round-trip against MbedTLS reference vectors | unit test or HIL | v0.3 |
@@ -126,16 +127,18 @@ A release does **not** tag until every row gating it is `verified`.
 | Yocto MQTT TLS (`mqtts://`) | `src/yocto/iot_yocto.c` (`apply_tls`) | 🟡 partial | Connect + handshake against a TLS broker with a pinned CA bundle; reject on bad cert | `tests/yocto/iot_mqtt.c` (default-TLS open / pinned-CA open / missing-CA refusal / insecure-flag accepted / default-8883 port); **broker handshake via `hil-yocto`** | v0.4 |
 | Yocto audio backend (ALSA) | `src/yocto/audio_yocto.c` | 🟡 partial | 1 kHz tone captured + played back via ALSA on a real Yocto target; FFT peak within ±5 Hz; volume scale audibly correct | `tests/yocto/audio_alsa.c` (NULL/INVAL + unreachable device failure paths); **real capture/playback via `hil-yocto`** | v0.4 |
 | Yocto `<alp/security.h>` (OpenSSL) | `src/yocto/security_yocto.c` | 🟡 partial | KATs + AEAD round-trip on a representative Yocto image; same wins on a developer-bench Linux host (the ALP_OS=yocto build IS the runtime target -- crypto correctness is host-portable) | `tests/yocto/security_openssl.c` (16 tests: SHA-256 NIST `"abc"` KAT, SHA-384/512 length checks, AES-128-GCM + ChaCha20-Poly1305 roundtrips, tag-mismatch path, key-length / NULL-key / unsupported-alg refusals, TRNG fill + null-arg).  Flips to ✅ once `meta-alp-sdk` builds a real Yocto image carrying this code on a SoM. | v0.4 |
-| `meta-alp-sdk` BSP for V2N / V2N-M1 / i.MX 93 | `meta-alp-sdk/` | ⏳ untested | `bitbake alp-image-edge` succeeds for each `e1m-<sku>-a55` MACHINE; produced image boots on the matching SoM | HIL | v0.6 |
+| Yocto `<alp/rtc.h>` (`/dev/rtcN`) | `src/backends/rtc/yocto_drv.c` | 🟡 code-complete, link-unverified | Wall-clock read/set via `RTC_RD_TIME`/`RTC_SET_TIME` against a real `/dev/rtc0`; `alp_rtc_capabilities()` resolves (registry/dispatcher migration, issue #33) | Backend + dispatcher compile clean (`gcc -std=gnu11`); nm-audited single-symbol ownership; **full Yocto link + on-target ioctl run need the sysroot (`hil-yocto`)** | v0.8 |
+| Yocto `<alp/wdt.h>` (`/dev/watchdogN`) | `src/backends/wdt/yocto_drv.c` | 🟡 code-complete, link-unverified | Timeout set + keepalive + magic-close via `WDIOC_*` against `/dev/watchdog0` (issue #33) | same compile + nm verification as the RTC row; **on-target run gates `hil-yocto`** | v0.8 |
+| `meta-alp-sdk` BSP for V2N / V2N-M1 / i.MX 93 | `meta-alp-sdk/` | 🟡 partial | `bitbake alp-image-edge` succeeds for each `e1m-<sku>-a55` MACHINE; produced image boots on the matching SoM | V2N leg: full `core-image-minimal` bake clean on BSP v6.30 (8313 tasks, 2026-05-26, kernel 6.1.141-cip43 + carrier dtb + FIP) and the produced kernel/dtb run the live V2N bench board from eMMC.  `alp-image-edge` (dev) + `alp-image-prod` (hardened) now share `alp-image-common.inc` and bake under the `alp` distro; the V2N image boots the bench board.  V2N-M1 + i.MX 93 machines still pending | v0.7 |
 | Authoritative Zephyr board files | external (`alplabai/alp-zephyr-modules`) | ⏳ untested | `alp_e1m_evk_aen` board boots and binds the same DT aliases the SDK overlays expect | HIL | v0.4 |
 | MCUboot secure-boot on AEN-Zephyr | `zephyr/sysbuild/aen/sysbuild.conf` + `keys/generate_dev_key.sh` + `docs/secure-boot.md` | ⏳ untested | Signed image boots; tampered image triggers rollback to previous slot; mid-swap power loss recovers atomically | HIL + tamper test (gates on `alp_e1m_evk_aen` board file in `alplabai/alp-zephyr-modules`) | v0.4 |
 | Secure OTA on AEN-Zephyr (MCUboot + Mender) | `docs/ota.md` (Zephyr-client decision pending) | ⏳ untested | Signed update delivered, swap-using-scratch completes, next boot validates | HIL + OTA bench (gates on Zephyr-side Mender client choice: `mender-mcu-client` vs Hawkbit, plus `alp_e1m_evk_aen` board file) | v0.4 |
-| Secure OTA on V2N-Yocto (`meta-mender`) | `meta-alp-sdk/conf/distro/include/mender.inc` + machine .conf opt-in lines + `docs/ota.md` | ⏳ untested | A/B partition swap survives an interrupted-update simulation; rollback on failed commit health-check | HIL via `hil-yocto` | v0.6 |
+| Secure OTA on V2N-Yocto (`meta-mender`) | `meta-alp-sdk/conf/distro/include/mender.inc` + machine .conf opt-in lines + `docs/ota.md` | ⏳ untested | A/B partition swap survives an interrupted-update simulation; rollback on failed commit health-check | HIL via `hil-yocto` (the A55/Mender path; distinct from the GD32 supervisor A/B OTA verified in the v0.6 section below) | v0.7 |
 | Secure OTA on i.MX 93-Yocto (`meta-mender`) | same scaffolding as V2N row above | ⏳ untested | A/B partition swap survives an interrupted-update simulation | HIL via `hil-yocto` | v0.4 |
 | OPTIGA Trust M-rooted device identity | TBD | ⏳ untested | TLS handshake succeeds using OPTIGA-stored ECC key; tampered key rejects | HIL | v0.4 |
-| DEEPX DX-M1 real `dxnn_*` link | `src/yocto/inference_deepx.cpp` | ⏳ untested | DX-M1 SDK on sysroot; sample model run completes; outputs match host-CPU reference | HIL | v0.4 |
+| DEEPX DX-M1 on-silicon link + run | `src/yocto/inference_deepx.cpp` | ⏳ untested | The now-real `dxrt::InferenceEngine` body links against `dx_rt` on the Yocto sysroot; a sample `.dxnn` model run completes; outputs match host-CPU reference | HIL (DX-M1 PCIe card) | v0.8 |
 | Ethos-U65 real attach on i.MX 93 | `src/backends/inference/ethos_u_n93.cpp` | ⏳ untested | Vela-compiled model run on i.MX 93 NPU; outputs match Ethos-U55 reference | HIL | v0.4 |
-| DRP-AI3 real attach on V2N | TBD | ⏳ untested | DRP-AI-translator output runs on V2N silicon | HIL | v0.4 |
+| DRP-AI3 real attach on V2N | `src/yocto/inference_drpai.cpp` | ⏳ untested | The now-real `MeraDrpRuntimeWrapper` body cross-links against the RZ/V Yocto SDK + EdgeCortix MERA libs; DRP-AI-translator output runs on V2N silicon | HIL | v0.8 |
 
 ## v0.4 prep — landed on `main` (2026-05-11)
 
@@ -151,6 +154,41 @@ right now" status is one scroll away from the v0.4 gate list:
 | `west.yml` `extras-v04` group with lwrb + nanopb pins | 🟡 partial — pins resolve via `west update --group-filter +extras-v04` on a fresh workspace; first LwRB consumer (UART RX ringbuf) landed against the in-tree stub impl; first nanopb consumer landed against a placeholder framing impl (not the generator-emitted codec yet) | (Stub-side coverage in `alp_sdk.peripheral.uart_rx_ringbuf` + `alp_sdk.mproc.nanopb_framing` twister scenarios; upstream-on-workspace builds untested) |
 | AEN-Zephyr UART RX ring buffer (LwRB) | 🟡 partial — failure-path ZTESTs green in `pr-twister` (both the default and `prj_uart_ringbuf.conf` scenarios); real-IRQ attach untested | `pr-twister.yml` `alp_sdk.peripheral.uart_rx_ringbuf` scenario |
 | AEN-Zephyr mproc envelope framing (placeholder) | 🟡 partial — 9 framing helper ZTESTs + the `alp_sdk.mproc.nanopb_framing` scenario compile the framing branches in `alp_mbox_send` / `mbox_rx_cb`; peer-firmware roundtrip untested | `pr-twister.yml` `alp_sdk.mproc.nanopb_framing` scenario |
+
+## v0.5.0 — AEN accelerator surfaces (vendor-HAL-gated)
+
+The 2026-05-12 AEN feature audit surfaced three on-die AEN-family
+accelerator blocks with no portable / vendor-ext surface.  Each
+header + stub landed in v0.5 ahead of the Alif HAL pack: every
+function returns `ALP_ERR_NOSUPPORT` until the matching vendor pack
+ships, so these rows are **gated on the vendor HAL pack and stay
+`⏳ untested` until first silicon** (no SoM in scope ships the HAL
+pack today).  Design captured in
+[`docs/aen-accelerator-backends-design.md`](aen-accelerator-backends-design.md).
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| GPU2D (D/AVE 2D) portable surface | `src/backends/gpu2d/sw_fallback.c` (real CPU path) + `src/backends/gpu2d/alif_dave2d.c` (D/AVE 2D real backend, bench-unverified, issue #24) | ✅ sw_fallback unit-tested / ⏳ D/AVE 2D untested | sw_fallback `fill_rect` / `blit` / `blend` produce exact pixels asserted in `tests/unit/gpu2d_registry` on native_sim; the D/AVE 2D backend produces the same pixels on a real E1M-AEN EVK | `tests/unit/gpu2d_registry` pixel ZTESTs green in `pr-twister`; **HAL-backed pixel assertion via `nightly-aen-hil`** — gated on the Alif D/AVE 2D vendor pack | sw_fallback v0.x (tested), D/AVE 2D bench-gated |
+| ISP (VeriSilicon ISP Pico (vsi,isp-pico)) vendor-ext surface | `src/backends/ext/alif/camera.c` + `<alp/ext/alif/camera.h>` (ISP Pico backend, priority 100 on E4/E6/E8) | ⏳ untested | 3A window / per-channel gain LUT / LSC MESH LUT take effect on real ISP Pico silicon (E4/E6/E8 — **not E7**); non-Alif handle returns `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister`; **HAL-backed ISP statistics readback** on ISP Pico silicon — gated on the Alif ISP Pico HAL pack | v0.5 (header+stub), real bodies gate v0.x |
+| Inline-AES (OSPI SecAES) vendor-ext surface | `src/backends/ext/alif/storage.c` + `<alp/ext/alif/storage.h>` | ⏳ untested | SecAES key-provision binds a slot and encrypted XIP executes from OctalSPI on real ISP-Pico-tier silicon (E4/E6/E8); status read-back reports `ENGAGED` before XIP is trusted | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister`; **encrypted-XIP boot + status readback** on silicon — gated on the Alif SecAES HAL pack | v0.5 (header+stub), real bodies gate v0.x |
+
+## v0.6.0 — V2N GD32-bridge silicon campaign (verified on the bench)
+
+The first rows in this ledger verified against real silicon: the
+E1M-X V2N bench board (RZ/V2N CM33 host ↔ GD32G553 supervisor,
+firmware v0.2.9, wire protocol v0.7).  Evidence pointers are the
+merge commits on `main` (each names its bench results) + the
+matching CHANGELOG `[v0.6.0]` entries.
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| GD32 bridge link (SPI 25 MHz + I2C), full command set | `firmware/gd32-bridge/` + `chips/gd32g553/` | ✅ verified | Functional suite asserts real values (ADC/DAC/PWM/math/TRNG fault-recover contract) on silicon | 26/26 on fw v0.2.4 (merge `ed1daf2`); re-smoked through v0.2.9 | v0.6 |
+| Bridge HIL soak (20 rows, link-stability) | `examples/v2n/v2n-gd32-bridge-hil-soak/` | ✅ verified | Every row passes a sustained soak with zero IO errors; counter-row stale-reply discriminator clean | 253/253 × 20 rows on v0.2.8 + v0.2.9 (2026-06-06) | v0.6 |
+| Protocol v0.7 STATUS_SEQ stale-reply kill | `firmware/gd32-bridge/src/transport_spi.c` + host driver | ✅ verified | Negotiated stamp advances per fresh decode; stale replies detected + safely re-sent on silicon | CHANGELOG v0.2.9 entry; `seq_forensics` telemetry in the soak | v0.6 |
+| GD32 supervisor A/B OTA (Path A, opcodes 0xF0..) | `firmware/gd32-bridge/src/ota.c` + bootloader | ✅ verified | Full image stream → CRC verify → slot swap → boot-back, e2e on silicon | OTA bench e2e (7 silicon bugs found + fixed; memory ledger `project-gd32-ota-path-a-validated`) | v0.6 |
+| Tier-B analog loopback (DAC→ADC, PWM-capture) | `examples/v2n/v2n-gd32-bridge-loopback/` | ✅ verified | DAC raws within 1 LSB of commanded through the carrier jumper; capture period/pulse exact | 5/6 rows (qenc blocked by carrier ENC1_Y float — issue #85) on v0.2.7+ | v0.6 |
+| CM33↔GD32 SCI7 SPI bidirectional link | `zephyr/drivers/spi/` RSCI path | ✅ verified | Sustained request/reply traffic, both transports, zero CRC errors in soak | merges `9f3e600`, `7845ad7`, `b5c941c` | v0.6 |
+| SCI7 DMA fast path | `zephyr/drivers/spi/spi_renesas_rz_sci_b.c` DMAC-B path | ❌ failing | DMA-driven transactions sustain the soak | Survives full init incl. v0.7 negotiation, then TX requests stop post-settle (issue #84; vendor ticket drafted); gate stays default-off | v0.7 |
 
 ## CI-only / tooling rows (no HIL gate)
 

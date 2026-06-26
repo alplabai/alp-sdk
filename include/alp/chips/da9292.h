@@ -12,21 +12,15 @@
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
  *
- * @par Verification status: [PAPER-CORRECT-STUB]
- *   `PMC_STATUS_00` per-bit assignment is provisional.  The chip
- *   ACK + ID probe (`da9292_init`), voltage encoding, `CHx_EN`
- *   control, and event read-and-clear paths are coded against the
- *   datasheet's documented register layout; however the
- *   `PMC_STATUS_00` bit order is assumed to mirror `PMC_MASK_00`
- *   (whose layout IS documented in Table 19) and that assumption
- *   needs cross-check against datasheet Table 14 before the
- *   decoded `ch1_*` / `ch2_*` boolean fields in `da9292_status_t`
- *   are trusted in production.  No surface returns
- *   `ALP_ERR_NOSUPPORT` -- if the bit order turns out to be
- *   different, `da9292_get_status` will succeed but report
- *   under/over-voltage flags swapped with over-current flags.
- *   See the comment block above `DA9292_STATUS00_*` in da9292.c
- *   for the exact unverified bit positions.
+ * @par Verification status: [REGISTER-MAP VERIFIED]
+ *   `PMC_STATUS_00` bit layout verified 2026-06-06 against DA9292
+ *   Datasheet Rev 2.2 (R16DS0518EJ0220), Table 14 (p.36-37):
+ *   bits[7:0] = S_CH2_OC, S_CH1_OC, S_CH2_OV, S_CH1_OV,
+ *               S_CH2_UV, S_CH1_UV, S_CH2_PG, S_CH1_PG.
+ *   The assumption that STATUS_00 mirrors MASK_00 (Table 18) was
+ *   correct.  The [UNTESTED] on-silicon caveat below remains -- no
+ *   HiL bring-up yet; validation happens on the patched BRD_I2C bus
+ *   via `examples/v2n/v2n-brd-i2c-bringup`.
  *
  * The DA9292 is a multi-phase DC-DC buck PMIC that can be configured
  * (via the silicon's `CONF` strap pin) as either:
@@ -142,49 +136,49 @@ extern "C" {
 /** Channel identifier (the two dual-phase output channels in V2N's
  *  CONF configuration). */
 typedef enum {
-    DA9292_CH1 = 0, /**< Phases 1 + 2 -- 0.8 V Renesas rail on V2N. */
-    DA9292_CH2 = 1, /**< Phases 3 + 4 -- 0.75 V DEEPX rail on V2N-M1. */
+	DA9292_CH1 = 0, /**< Phases 1 + 2 -- 0.8 V Renesas rail on V2N. */
+	DA9292_CH2 = 1, /**< Phases 3 + 4 -- 0.75 V DEEPX rail on V2N-M1. */
 } da9292_channel_t;
 
 /** Decoded `PMC_STATUS_00` + `PMC_STATUS_01` snapshot. */
 typedef struct {
-    bool    ch1_pg;    /**< CH1 power-good (output in regulation). */
-    bool    ch2_pg;    /**< CH2 power-good. */
-    bool    ch1_uv;    /**< CH1 under-voltage (live). */
-    bool    ch2_uv;    /**< CH2 under-voltage. */
-    bool    ch1_ov;    /**< CH1 over-voltage. */
-    bool    ch2_ov;    /**< CH2 over-voltage. */
-    bool    ch1_oc;    /**< CH1 over-current (live). */
-    bool    ch2_oc;    /**< CH2 over-current. */
-    bool    temp_warn; /**< Thermal warning threshold crossed. */
-    bool    temp_crit; /**< Thermal critical threshold (shutdown imminent). */
-    bool    vin_uvlo;  /**< Input UVLO -- supply below operating range. */
-    uint8_t raw_00;    /**< Untouched PMC_STATUS_00 byte for diagnostics. */
-    uint8_t raw_01;    /**< Untouched PMC_STATUS_01 byte. */
+	bool    ch1_pg;    /**< CH1 power-good (output in regulation). */
+	bool    ch2_pg;    /**< CH2 power-good. */
+	bool    ch1_uv;    /**< CH1 under-voltage (live). */
+	bool    ch2_uv;    /**< CH2 under-voltage. */
+	bool    ch1_ov;    /**< CH1 over-voltage. */
+	bool    ch2_ov;    /**< CH2 over-voltage. */
+	bool    ch1_oc;    /**< CH1 over-current (live). */
+	bool    ch2_oc;    /**< CH2 over-current. */
+	bool    temp_warn; /**< Thermal warning threshold crossed. */
+	bool    temp_crit; /**< Thermal critical threshold (shutdown imminent). */
+	bool    vin_uvlo;  /**< Input UVLO -- supply below operating range. */
+	uint8_t raw_00;    /**< Untouched PMC_STATUS_00 byte for diagnostics. */
+	uint8_t raw_01;    /**< Untouched PMC_STATUS_01 byte. */
 } da9292_status_t;
 
 /** Latched-event snapshot (read-and-clear from `PMC_EVENT_00/01`). */
 typedef struct {
-    bool e_ch1_pg;
-    bool e_ch2_pg;
-    bool e_ch1_uv;
-    bool e_ch2_uv;
-    bool e_ch1_ov;
-    bool e_ch2_ov;
-    bool e_ch1_oc;
-    bool e_ch2_oc;
-    bool e_temp_warn;
-    bool e_temp_crit;
-    bool e_vin_uvlo;
+	bool e_ch1_pg;
+	bool e_ch2_pg;
+	bool e_ch1_uv;
+	bool e_ch2_uv;
+	bool e_ch1_ov;
+	bool e_ch2_ov;
+	bool e_ch1_oc;
+	bool e_ch2_oc;
+	bool e_temp_warn;
+	bool e_temp_crit;
+	bool e_vin_uvlo;
 } da9292_events_t;
 
 /** Driver context. */
 typedef struct {
-    bool       initialised;
-    alp_i2c_t *bus;
-    uint8_t    addr;
-    uint8_t    dev_id; /**< Cached PMC_DEV_ID (read at init). */
-    uint8_t    rev_id; /**< Cached PMC_REV_ID. */
+	bool       initialised;
+	alp_i2c_t *bus;
+	uint8_t    addr;
+	uint8_t    dev_id; /**< Cached PMC_DEV_ID (read at init). */
+	uint8_t    rev_id; /**< Cached PMC_REV_ID. */
 } da9292_t;
 
 /** @brief Probe + cache device + revision identifiers.

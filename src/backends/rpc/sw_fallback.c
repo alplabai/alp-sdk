@@ -40,83 +40,87 @@
 
 #include "rpc_ops.h"
 
-static alp_status_t sw_open(const alp_rpc_config_t *cfg,
-                            alp_rpc_backend_state_t *st,
-                            alp_capabilities_t *caps_out)
+static alp_status_t
+sw_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-    (void)cfg;
-    st->be_data     = NULL;
-    caps_out->flags = 0u;
-    return ALP_OK;
+	(void)cfg;
+	st->be_data     = NULL;
+	caps_out->flags = 0u;
+	return ALP_OK;
 }
 
-static alp_status_t sw_subscribe(alp_rpc_backend_state_t *st, const char *method,
-                                 alp_rpc_method_cb_t cb, void *user)
+static alp_status_t
+sw_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
-    (void)st;
-    (void)method;
-    (void)cb;
-    (void)user;
-    /* The stub accepts the registration silently -- no inbound frames
+	(void)st;
+	(void)method;
+	(void)cb;
+	(void)user;
+	/* The stub accepts the registration silently -- no inbound frames
      * will ever be delivered under native_sim, so the test surface is
      * "the dispatcher routed the call into the backend at all". */
-    return ALP_OK;
+	return ALP_OK;
 }
 
 static alp_status_t sw_unsubscribe(alp_rpc_backend_state_t *st, const char *method)
 {
-    (void)st;
-    (void)method;
-    return ALP_OK;
+	(void)st;
+	(void)method;
+	return ALP_OK;
 }
 
-static alp_status_t sw_send(alp_rpc_backend_state_t *st, const char *method,
-                            const void *payload, size_t len)
+static alp_status_t
+sw_send(alp_rpc_backend_state_t *st, const char *method, const void *payload, size_t len)
 {
-    (void)st;
-    (void)method;
-    (void)payload;
-    (void)len;
-    /* Frame silently dropped -- no peer exists under native_sim. */
-    return ALP_OK;
+	(void)st;
+	(void)method;
+	(void)payload;
+	(void)len;
+	/* Frame silently dropped -- no peer exists under native_sim. */
+	return ALP_OK;
 }
 
-static alp_status_t sw_call(alp_rpc_backend_state_t *st, const char *method,
-                            const void *req, size_t req_len,
-                            void *resp, size_t *resp_len, uint32_t timeout_ms)
+static alp_status_t sw_call(alp_rpc_backend_state_t *st,
+                            const char              *method,
+                            const void              *req,
+                            size_t                   req_len,
+                            void                    *resp,
+                            size_t                  *resp_len,
+                            uint32_t                 timeout_ms)
 {
-    (void)st;
-    (void)method;
-    (void)req;
-    (void)req_len;
-    (void)resp;
-    (void)timeout_ms;
-    if (resp_len != NULL) {
-        *resp_len = 0;
-    }
-    /* No reply ever comes -- mirrors the documented header contract
+	(void)st;
+	(void)method;
+	(void)req;
+	(void)req_len;
+	(void)resp;
+	(void)timeout_ms;
+	if (resp_len != NULL) {
+		*resp_len = 0;
+	}
+	/* No reply ever comes -- mirrors the documented header contract
      * for a peer that fails to respond.  Returns immediately
      * regardless of timeout_ms; the stub does NOT block. */
-    return ALP_ERR_TIMEOUT;
+	return ALP_ERR_TIMEOUT;
 }
 
 static void sw_close(alp_rpc_backend_state_t *st)
 {
-    (void)st;
+	(void)st;
 }
 
 /* ---------- Registration ---------- */
 
 static const alp_rpc_ops_t _ops = {
-    .open        = sw_open,
-    .subscribe   = sw_subscribe,
-    .unsubscribe = sw_unsubscribe,
-    .send        = sw_send,
-    .call        = sw_call,
-    .close       = sw_close,
+	.open        = sw_open,
+	.subscribe   = sw_subscribe,
+	.unsubscribe = sw_unsubscribe,
+	.send        = sw_send,
+	.call        = sw_call,
+	.close       = sw_close,
 };
 
-ALP_BACKEND_REGISTER(rpc, sw_fallback,
+ALP_BACKEND_REGISTER(rpc,
+                     sw_fallback,
                      {
                          .silicon_ref = "*",
                          .vendor      = "sw_fallback",

@@ -50,133 +50,148 @@ static struct alp_gpu2d _pool[CONFIG_ALP_SDK_MAX_GPU2D_HANDLES];
 
 static struct alp_gpu2d *_alloc(void)
 {
-    for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_GPU2D_HANDLES; ++i) {
-        if (!_pool[i].in_use) {
-            memset(&_pool[i], 0, sizeof(_pool[i]));
-            _pool[i].in_use = true;
-            return &_pool[i];
-        }
-    }
-    return NULL;
+	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_GPU2D_HANDLES; ++i) {
+		if (!_pool[i].in_use) {
+			memset(&_pool[i], 0, sizeof(_pool[i]));
+			_pool[i].in_use = true;
+			return &_pool[i];
+		}
+	}
+	return NULL;
 }
 
 static void _free(struct alp_gpu2d *h)
 {
-    h->in_use = false;
+	h->in_use = false;
 }
 
 static alp_status_t _validate_surface(const alp_gpu2d_surface_t *s)
 {
-    if (s == NULL) {
-        return ALP_ERR_INVAL;
-    }
-    if (s->base == NULL || s->width == 0u || s->height == 0u ||
-        s->stride_bytes == 0u) {
-        return ALP_ERR_INVAL;
-    }
-    if ((unsigned)s->format > (unsigned)ALP_GPU2D_FMT_RGBA8888) {
-        return ALP_ERR_INVAL;
-    }
-    return ALP_OK;
+	if (s == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (s->base == NULL || s->width == 0u || s->height == 0u || s->stride_bytes == 0u) {
+		return ALP_ERR_INVAL;
+	}
+	if ((unsigned)s->format > (unsigned)ALP_GPU2D_FMT_RGBA8888) {
+		return ALP_ERR_INVAL;
+	}
+	return ALP_OK;
 }
 
 alp_gpu2d_t *alp_gpu2d_open(void)
 {
-    alp_z_clear_last_error();
-    const alp_backend_t *be = alp_backend_select("gpu2d", ALP_SOC_REF_STR);
-    if (be == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-        return NULL;
-    }
-    const alp_gpu2d_ops_t *ops = (const alp_gpu2d_ops_t *)be->ops;
-    if (ops == NULL || ops->open == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
-        return NULL;
-    }
-    struct alp_gpu2d *h = _alloc();
-    if (h == NULL) {
-        alp_z_set_last_error(ALP_ERR_NOMEM);
-        return NULL;
-    }
-    h->backend = be;
-    h->state.ops = ops;
-    alp_capabilities_t caps = { .flags = be->base_caps };
-    alp_status_t rc = ops->open(&h->state, &caps);
-    if (rc != ALP_OK) {
-        _free(h);
-        alp_z_set_last_error(rc);
-        return NULL;
-    }
-    h->cached_caps = caps;
-    return h;
+	alp_z_clear_last_error();
+	const alp_backend_t *be = alp_backend_select("gpu2d", ALP_SOC_REF_STR);
+	if (be == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
+		return NULL;
+	}
+	const alp_gpu2d_ops_t *ops = (const alp_gpu2d_ops_t *)be->ops;
+	if (ops == NULL || ops->open == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
+		return NULL;
+	}
+	struct alp_gpu2d *h = _alloc();
+	if (h == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOMEM);
+		return NULL;
+	}
+	h->backend              = be;
+	h->state.ops            = ops;
+	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_status_t       rc   = ops->open(&h->state, &caps);
+	if (rc != ALP_OK) {
+		_free(h);
+		alp_z_set_last_error(rc);
+		return NULL;
+	}
+	h->cached_caps = caps;
+	return h;
 }
 
-alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t *h, const alp_gpu2d_surface_t *dst,
-                                 uint32_t x, uint32_t y, uint32_t w, uint32_t height,
-                                 uint32_t argb_color)
+alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *h,
+                                 const alp_gpu2d_surface_t *dst,
+                                 uint32_t                   x,
+                                 uint32_t                   y,
+                                 uint32_t                   w,
+                                 uint32_t                   height,
+                                 uint32_t                   argb_color)
 {
-    if (h == NULL || !h->in_use) {
-        return ALP_ERR_NOT_READY;
-    }
-    alp_status_t s = _validate_surface(dst);
-    if (s != ALP_OK) {
-        return s;
-    }
-    return h->state.ops->fill_rect(&h->state, dst, x, y, w, height, argb_color);
+	if (h == NULL || !h->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t s = _validate_surface(dst);
+	if (s != ALP_OK) {
+		return s;
+	}
+	return h->state.ops->fill_rect(&h->state, dst, x, y, w, height, argb_color);
 }
 
-alp_status_t alp_gpu2d_blit(alp_gpu2d_t *h, const alp_gpu2d_surface_t *src,
-                            uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst,
-                            uint32_t dx, uint32_t dy, uint32_t w, uint32_t height)
+alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *h,
+                            const alp_gpu2d_surface_t *src,
+                            uint32_t                   sx,
+                            uint32_t                   sy,
+                            const alp_gpu2d_surface_t *dst,
+                            uint32_t                   dx,
+                            uint32_t                   dy,
+                            uint32_t                   w,
+                            uint32_t                   height)
 {
-    if (h == NULL || !h->in_use) {
-        return ALP_ERR_NOT_READY;
-    }
-    alp_status_t s = _validate_surface(src);
-    if (s != ALP_OK) {
-        return s;
-    }
-    s = _validate_surface(dst);
-    if (s != ALP_OK) {
-        return s;
-    }
-    return h->state.ops->blit(&h->state, src, sx, sy, dst, dx, dy, w, height);
+	if (h == NULL || !h->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t s = _validate_surface(src);
+	if (s != ALP_OK) {
+		return s;
+	}
+	s = _validate_surface(dst);
+	if (s != ALP_OK) {
+		return s;
+	}
+	return h->state.ops->blit(&h->state, src, sx, sy, dst, dx, dy, w, height);
 }
 
-alp_status_t alp_gpu2d_blend(alp_gpu2d_t *h, const alp_gpu2d_surface_t *src,
-                             uint32_t sx, uint32_t sy, const alp_gpu2d_surface_t *dst,
-                             uint32_t dx, uint32_t dy, uint32_t w, uint32_t height,
-                             alp_gpu2d_blend_mode_t mode)
+alp_status_t alp_gpu2d_blend(alp_gpu2d_t               *h,
+                             const alp_gpu2d_surface_t *src,
+                             uint32_t                   sx,
+                             uint32_t                   sy,
+                             const alp_gpu2d_surface_t *dst,
+                             uint32_t                   dx,
+                             uint32_t                   dy,
+                             uint32_t                   w,
+                             uint32_t                   height,
+                             alp_gpu2d_blend_mode_t     mode)
 {
-    if (h == NULL || !h->in_use) {
-        return ALP_ERR_NOT_READY;
-    }
-    if ((unsigned)mode > (unsigned)ALP_GPU2D_BLEND_MULTIPLY) {
-        return ALP_ERR_INVAL;
-    }
-    alp_status_t s = _validate_surface(src);
-    if (s != ALP_OK) {
-        return s;
-    }
-    s = _validate_surface(dst);
-    if (s != ALP_OK) {
-        return s;
-    }
-    return h->state.ops->blend(&h->state, src, sx, sy, dst, dx, dy, w, height, mode);
+	if (h == NULL || !h->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if ((unsigned)mode > (unsigned)ALP_GPU2D_BLEND_MULTIPLY) {
+		return ALP_ERR_INVAL;
+	}
+	alp_status_t s = _validate_surface(src);
+	if (s != ALP_OK) {
+		return s;
+	}
+	s = _validate_surface(dst);
+	if (s != ALP_OK) {
+		return s;
+	}
+	return h->state.ops->blend(&h->state, src, sx, sy, dst, dx, dy, w, height, mode);
 }
 
 void alp_gpu2d_close(alp_gpu2d_t *h)
 {
-    if (h == NULL || !h->in_use) {
-        return;
-    }
-    if (h->state.ops != NULL && h->state.ops->close != NULL) {
-        h->state.ops->close(&h->state);
-    }
-    _free(h);
+	if (h == NULL || !h->in_use) {
+		return;
+	}
+	if (h->state.ops != NULL && h->state.ops->close != NULL) {
+		h->state.ops->close(&h->state);
+	}
+	_free(h);
 }
 
 const alp_capabilities_t *alp_gpu2d_capabilities(const alp_gpu2d_t *h)
 {
-    return (h != NULL) ? &h->cached_caps : NULL;
+	return (h != NULL) ? &h->cached_caps : NULL;
 }

@@ -16,18 +16,18 @@ extern "C" {
 #define VIEWER_MAX_BOXES 8
 
 typedef struct {
-    int16_t x, y, w, h;
-    uint8_t class_id;
-    float   score;
+	int16_t x, y, w, h;
+	uint8_t class_id;
+	float   score;
 } viewer_box_t;
 
 typedef struct {
-    viewer_box_t boxes[VIEWER_MAX_BOXES];
-    uint8_t      n_boxes;
-    uint32_t     last_invoke_us;
-    uint32_t     fps_x10;          /**< Frames-per-second × 10 (one decimal). */
-    bool         camera_ok;
-    bool         inference_ok;
+	viewer_box_t boxes[VIEWER_MAX_BOXES];
+	uint8_t      n_boxes;
+	uint32_t     last_invoke_us;
+	uint32_t     fps_x10; /**< Frames-per-second × 10 (one decimal). */
+	bool         camera_ok;
+	bool         inference_ok;
 } viewer_state_t;
 
 void viewer_ui_build(void);

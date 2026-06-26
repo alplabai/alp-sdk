@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # The ABI freeze gate below needs tags + the v0.1 commit
           # reachable so `git show v0.1:docs/abi/v0.1-snapshot.json`
@@ -51,26 +51,37 @@ jobs:
           fetch-tags: true
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+
+      # gen_soc_caps.py formats its output with clang-format-22 (the same version
+      # the diff-only style gate pins) so the generated headers match the repo
+      # .clang-format byte-for-byte.  Pinned via the pip wheel (not apt, which
+      # floats with the runner image).  Without it the regen below is unformatted
+      # and the in-sync diff fails.
+      - name: Install clang-format 22 (pinned)
+        run: |
+          python3 -m pip install --user 'clang-format==22.1.5'
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/clang-format" --version
 
       - name: Regenerate soc_caps.h from metadata
         run: python3 scripts/gen_soc_caps.py
 
-      - name: Regenerate ABI snapshot (current = v0.5)
-        # The committed v0.5 snapshot is the CURRENT working snapshot
-        # (v0.1 + v0.3 are FROZEN historical records -- the in-tree
-        # convention per docs/abi-markers.md).  Regenerate v0.5 from
-        # the current headers and compare.
+      - name: Regenerate ABI snapshot (current = v0.8)
+        # The committed v0.8 snapshot is the CURRENT working snapshot
+        # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 are FROZEN historical records --
+        # the in-tree convention per docs/abi-markers.md).  Regenerate
+        # v0.8 from the current headers and compare.
         #
         # The snapshot's `generated` field is a date stamp; re-running
         # on the same headers always changes that one line, so the
         # diff below masks it with --ignore-matching-lines.
         run: |
           python3 scripts/abi_snapshot.py \
-              --version v0.5 \
-              --output docs/abi/v0.5-snapshot.json
+              --version v0.8 \
+              --output docs/abi/v0.8-snapshot.json
 
       - name: Fail if generated files differ from committed copies
         run: |
@@ -78,10 +89,10 @@ jobs:
           # else must match.
           if ! git diff --exit-code \
                   --ignore-matching-lines='"generated":' \
-                  -- include/alp/soc_caps.h docs/abi/v0.5-snapshot.json; then
+                  -- include/alp/soc_caps.h docs/abi/v0.8-snapshot.json; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
-            echo "::error::  python3 scripts/abi_snapshot.py --version v0.5 --output docs/abi/v0.5-snapshot.json"
+            echo "::error::  python3 scripts/abi_snapshot.py --version v0.8 --output docs/abi/v0.8-snapshot.json"
             echo "::error::and commit the result."
             exit 1
           fi
@@ -99,7 +110,7 @@ jobs:
       - name: ABI freeze gate vs tagged v0.1
         run: |
           # Need the full repo + tags for `git show v0.1:...` to work.
-          # actions/checkout@v4 already fetched tags so this is cheap.
+          # actions/checkout@v6 already fetched tags so this is cheap.
           if ! git rev-parse --verify --quiet refs/tags/v0.1 >/dev/null; then
             echo "::notice::No v0.1 tag yet -- ABI freeze gate is a no-op until v0.1 ships."
             exit 0

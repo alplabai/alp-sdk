@@ -1,0 +1,115 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Synopsys DesignWare MIPI-DSI host controller -- the DSI-TX bridge between the
+# CDC200 DPI source and the shared DesignWare MIPI D-PHY (TX role) on the Alif
+# Ensemble E8.  re-authored, NOT vendored: the host property set is grounded in
+# the Alif CMSIS DFP register map (drivers/include/dsi.h: DSI_PWR_UP shutdownz,
+# DSI_DPI_COLOR_CODING, DSI_DPI_CFG_POL shutd/colorm active-low bits,
+# DSI_VID_PKT_SIZE, DSI_PCKHDL_CFG EOTP/BTA/ECC_RX/CRC_RX, the PHY_IF_CFG lane
+# count) and matches the property names the zephyr_alif fork node carries so the
+# same node text binds.  Builds on the upstream Zephyr mipi-dsi-host.yaml base
+# (the mipi-dsi bus is upstream-native; only the host driver is missing).  No
+# upstream Zephyr nor hal_alif ships a snps,designware-dsi host driver -- ADR
+# 0017 Tier-2 when a driver is authored.  The D-PHY TX role is already covered by
+# the in-tree zephyr/drivers/mipi_dphy/dphy_dw.c (dphy_dw_master_setup).
+# BENCH-UNVERIFIED.
+
+description: Synopsys DesignWare MIPI-DSI host controller
+
+compatible: "snps,designware-dsi"
+
+include: mipi-dsi-host.yaml
+
+properties:
+  reg:
+    required: true
+
+  interrupts:
+    required: true
+
+  cdc-if:
+    type: phandle
+    required: true
+    description: Phandle to the CDC200 (tes,cdc-2.1) DPI source instance.
+
+  phy-if:
+    type: phandle-array
+    required: true
+    specifier-space: dphy
+    description:
+      Phandle (+ D-PHY id cell) to the shared DesignWare MIPI D-PHY, driven in
+      the TX role by dphy_dw_master_setup().
+
+  cam-disp-mux-gpios:
+    type: phandle-array
+    description: |
+      Drive high to route the shared D-PHY lanes + clock to the MIPI-DSI TX
+      (vs the CSI-2 RX).  Bench-unknown on the AEN801 SoM -- omit unless wired.
+
+  eotp-lp-tx-en:
+    type: boolean
+    description:
+      Insert an EoTp short packet at the end of LP transmission
+      (DSI_PCKHDL_CFG.EOTP_TX_EN).
+
+  eotp-rx-en:
+    type: boolean
+    description: Enable reception of an EoTp short packet at end of LPDT reception.
+
+  ecc-recv-en:
+    type: boolean
+    description:
+      Enable ECC reception, correction and reporting (DSI_PCKHDL_CFG.ECC_RX_EN).
+
+  crc-recv-en:
+    type: boolean
+    description:
+      Enable CRC reception and error reporting (DSI_PCKHDL_CFG.CRC_RX_EN).
+
+  frame-ack-en:
+    type: boolean
+    description: Request peripheral ACK at the end of frames (DSI_PCKHDL_CFG.BTA_EN).
+
+  dpi-colorm-active:
+    type: int
+    required: true
+    description:
+      Color-Mode command pulse polarity (DSI_DPI_CFG_POL.COLORM_ACTIVE_LOW).
+      If dpicolorm is active low, use 0, otherwise use 1.
+    enum:
+      - 0
+      - 1
+
+  dpi-shutdn-active:
+    type: int
+    required: true
+    description:
+      Shutdown command pulse polarity (DSI_DPI_CFG_POL.SHUTD_ACTIVE_LOW).
+      If dpishutdn is active low, use 0, otherwise use 1.
+    enum:
+      - 0
+      - 1
+
+  vid-pkt-size:
+    type: int
+    default: 0
+    description:
+      Video packet size in pixels (DSI_VID_PKT_SIZE, bits[13:0]).  The product of
+      number of chunks and video packet size should be the active line width.
+
+  dpi-video-pattern-gen:
+    type: string
+    required: false
+    enum:
+      - "vertical-color-bar"
+      - "horizontal-color-bar"
+      - "vertical-bit-error-rate"
+    description: Built-in video pattern generator for testing DSI without DPI input.
+
+  panel-max-lane-bandwidth:
+    type: int
+    default: 500000000
+    description:
+      The lane bandwidth a panel supports (bps).  D-PHY PLL calculations are
+      limited to half of this value.

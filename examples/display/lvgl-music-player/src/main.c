@@ -35,30 +35,30 @@ LOG_MODULE_REGISTER(lvgl_music_player, LOG_LEVEL_INF);
 
 int main(void)
 {
-    LOG_INF("LVGL music-player demo starting");
+	LOG_INF("LVGL music-player demo starting");
 
-    const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-    if (!device_is_ready(display)) {
-        LOG_ERR("display %s not ready", display->name);
-        return 1;
-    }
+	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
+	if (!device_is_ready(display)) {
+		LOG_ERR("display %s not ready", display->name);
+		return 1;
+	}
 
-    lv_init();
+	lv_init();
 
-    /* Kick off the demo UI.  lv_demo_music() builds the full music-
+	/* Kick off the demo UI.  lv_demo_music() builds the full music-
      * player scene + spawns the periodic animation timer that
      * advances the progress bar + equaliser bands. */
-    lv_demo_music();
+	lv_demo_music();
 
-    display_blanking_off(display);
+	display_blanking_off(display);
 
-    /* lv_demo_music() owns its own animation timer; from here on
+	/* lv_demo_music() owns its own animation timer; from here on
      * main just pumps the LVGL task handler.  No audio path -- this
      * is a UI-only demo (see the file header). */
-    while (1) {
-        const uint32_t sleep_ms = lv_task_handler();
-        k_msleep(MIN(sleep_ms, 10u));
-    }
+	while (1) {
+		const uint32_t sleep_ms = lv_task_handler();
+		k_msleep(MIN(sleep_ms, 10u));
+	}
 
-    return 0;
+	return 0;
 }

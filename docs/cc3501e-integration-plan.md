@@ -2,11 +2,21 @@
 
 **Date:** 2026-05-12
 **Owner:** alpCaner
-**Status:** Research-only. Informs the first production firmware drop in
-`alplabai/cc3501e-firmware` and the v0.x follow-ups on the alp-sdk host side.
+**Status:** Research-only. Informs the first production firmware drop (now the
+embedded `firmware/cc3501e/` tree) and the v0.x follow-ups on the alp-sdk host side.
 **Trigger:** Maintainer asked for a deep SWRU626 read before host + firmware
 are wired the first time, so the wire protocol does not need a v1→v2 break
 the moment real packets start flowing.
+
+> **UPDATE (ADR 0015, 2026-06-13):** this plan predates the decision to
+> **embed** the CC3501E firmware in alp-sdk at
+> [`firmware/cc3501e/`](../firmware/cc3501e/) (like the gd32-bridge), rather
+> than create a separate `alplabai/cc3501e-firmware` repo.  References below to
+> that repo — including the acid-test ground rule and the §4.4 handoff
+> checklist — now mean the in-tree `firmware/cc3501e/` tree; the firmware
+> `#include`s the wire-protocol header directly (no mirror).  The
+> alp-sdk-vs-TI-SDK split still holds: TI SimpleLink code rides as an optional
+> submodule under `firmware/cc3501e/vendor/`, kept out of the default clone.
 **Sources read:**
 
 - TI SWRU626 Technical Reference Manual, December 2025 (~500 pages),
@@ -36,7 +46,7 @@ The CC3501E is the wireless brain on every E1M-AEN module. The Alif Ensemble
 application SoC has no integrated Wi-Fi/BLE radios for the AEN family, so
 the CC3501E is treated as an on-module coprocessor with its own Cortex-M33,
 its own external xSPI flash (4 MB on the E1M-AEN; the SKU table in SWRS343
-also lists 8 MB and PSRAM-augmented variants), and its own ALP-authored
+also lists 8 MB and PSRAM-augmented variants), and its own Alp-authored
 firmware.
 
 The CC3501E also doubles as a GPIO + camera-LDO expander: per
@@ -174,7 +184,7 @@ a proxied surface:
 > intentionally do **not** read that spec here — per ADR 0005 the alp-sdk
 > host side does NOT speak that protocol. The CC3501E firmware does:
 > the firmware runs TI's `sl_*` driver internally, and exposes a small
-> ALP-authored protocol (the `<alp/protocol/cc3501e.h>` opcodes) to the
+> Alp-authored protocol (the `<alp/protocol/cc3501e.h>` opcodes) to the
 > Alif side.
 >
 > §3.10 below documents the implications.

@@ -101,8 +101,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                  COMMAND alp_test_iot_mqtt)
     endif()
     if(ALSA_TEST_FOUND)
+        # The audio backends carry their ALP_BACKEND_REGISTER entries in
+        # internal-linkage objects (src/backends/audio/*.c) that the linker
+        # would NOT pull from the static libalp_sdk.a -- nothing the test
+        # references defines an external symbol there -- leaving the
+        # alp_backends_audio section empty and __start/__stop_alp_backends_audio
+        # undefined when audio_dispatch.c.o gets pulled in.  Compile the audio
+        # backends straight into the test so the section is always populated
+        # and the ALSA backend (priority 100) wins selection, matching the
+        # library build under ALSA.  (static registration vars => no ODR clash
+        # with the never-extracted archive copies.)
         add_executable(alp_test_audio_alsa
             ${CMAKE_CURRENT_SOURCE_DIR}/audio_alsa.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/audio/sw_fallback.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/audio/yocto_drv.c
         )
         target_link_libraries(alp_test_audio_alsa PRIVATE alp::sdk)
         target_include_directories(alp_test_audio_alsa PRIVATE

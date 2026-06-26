@@ -39,12 +39,12 @@ extern "C" {
 #define ST7789_MAX_HEIGHT 320
 
 typedef struct {
-    alp_spi_t  *bus;
-    alp_gpio_t *dc;          /**< D/C# command-vs-data line. */
-    alp_gpio_t *reset;       /**< Optional hardware reset; NULL = software-only. */
-    uint16_t    width;
-    uint16_t    height;
-    bool        initialised;
+	alp_spi_t  *bus;
+	alp_gpio_t *dc;    /**< D/C# command-vs-data line. */
+	alp_gpio_t *reset; /**< Optional hardware reset; NULL = software-only. */
+	uint16_t    width;
+	uint16_t    height;
+	bool        initialised;
 } st7789_t;
 
 /**
@@ -78,11 +78,7 @@ alp_status_t st7789_init(st7789_t   *dev,
  * @param y1   Inclusive bottom edge (must be > y0).
  * @return `ALP_OK` on success.
  */
-alp_status_t st7789_set_window(st7789_t *dev,
-                               uint16_t  x0,
-                               uint16_t  y0,
-                               uint16_t  x1,
-                               uint16_t  y1);
+alp_status_t st7789_set_window(st7789_t *dev, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 
 /**
  * @brief Push a buffer of native-format RGB565 pixels.
@@ -92,9 +88,7 @@ alp_status_t st7789_set_window(st7789_t *dev,
  * @param n_bytes  Length in bytes (must be even).
  * @return `ALP_OK` on success.
  */
-alp_status_t st7789_write_pixels(st7789_t      *dev,
-                                 const uint8_t *pixels,
-                                 size_t         n_bytes);
+alp_status_t st7789_write_pixels(st7789_t *dev, const uint8_t *pixels, size_t n_bytes);
 
 /** @brief Release the driver context.  Does not power down the panel. */
 void st7789_deinit(st7789_t *dev);

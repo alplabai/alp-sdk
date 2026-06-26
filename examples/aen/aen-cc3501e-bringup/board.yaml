@@ -1,0 +1,34 @@
+# board.yaml -- per-app project configuration for aen-cc3501e-bringup.
+#
+# Host (Alif) side of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4
+# coprocessor bring-up on the E1M-AEN801 (Alif Ensemble E8) SoM.  Drives
+# WIFI_EN + E_WIFI.NRST to power+reset the CC3501E and PINGs it over the
+# inter-chip SPI1 link via the chips/cc3501e host driver.  AEN analog of
+# examples/v2n/v2n-gd32-bridge-ping (the GD32 supervisor bring-up).
+#
+# The actual inter-chip wiring (SPI1 on P14_6/5/4, WIFI_EN P15_5,
+# E_WIFI.NRST P15_1_FLEX -- metadata/e1m_modules/aen/inter-chip.tsv) lives
+# in the per-board overlay under boards/, since these are SoM-internal
+# control nets rather than E1M edge pads.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+    # Portable peripheral subsystems this app opens.  The loader
+    # translates these to CONFIG_SPI=y / CONFIG_GPIO=y in alp.conf.
+    peripherals:
+      - spi
+      - gpio
+
+chips:
+  - cc3501e               # on-module Wi-Fi 6 + BLE 5.4 coprocessor (host driver).
+
+diagnostics:
+  log_level: info

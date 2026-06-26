@@ -111,16 +111,16 @@ extern "C" {
 #define RTL8211FDI_BMSR_LINK_STATUS      (1u << 2)
 
 /** Realtek extended pages relevant to this driver. */
-#define RTL8211FDI_PAGE_DEFAULT          0x0000u  /**< Standard IEEE registers. */
-#define RTL8211FDI_PAGE_PHYSR            0x0A43u  /**< PHY-specific status reg 0x1A. */
-#define RTL8211FDI_PAGE_WOL              0x0D8Au  /**< Wake-on-LAN config. */
+#define RTL8211FDI_PAGE_DEFAULT 0x0000u /**< Standard IEEE registers. */
+#define RTL8211FDI_PAGE_PHYSR   0x0A43u /**< PHY-specific status reg 0x1A. */
+#define RTL8211FDI_PAGE_WOL     0x0D8Au /**< Wake-on-LAN config. */
 
 /** Negotiated speed enumeration (returned by @ref rtl8211fdi_get_link). */
 typedef enum {
-    RTL8211FDI_SPEED_UNKNOWN = 0,
-    RTL8211FDI_SPEED_10M     = 10,
-    RTL8211FDI_SPEED_100M    = 100,
-    RTL8211FDI_SPEED_1000M   = 1000,
+	RTL8211FDI_SPEED_UNKNOWN = 0,
+	RTL8211FDI_SPEED_10M     = 10,
+	RTL8211FDI_SPEED_100M    = 100,
+	RTL8211FDI_SPEED_1000M   = 1000,
 } rtl8211fdi_speed_t;
 
 /* --------------------------------------------------------------- */
@@ -129,26 +129,24 @@ typedef enum {
 
 /** @brief Read a 16-bit register at @p reg on @p phy_addr via MDIO.
  *  @return 0 on success, negative on bus error. */
-typedef int (*rtl8211fdi_mdio_read_t)(uint8_t phy_addr, uint8_t reg,
-                                      uint16_t *val, void *user);
+typedef int (*rtl8211fdi_mdio_read_t)(uint8_t phy_addr, uint8_t reg, uint16_t *val, void *user);
 
 /** @brief Write a 16-bit register at @p reg on @p phy_addr via MDIO. */
-typedef int (*rtl8211fdi_mdio_write_t)(uint8_t phy_addr, uint8_t reg,
-                                       uint16_t val, void *user);
+typedef int (*rtl8211fdi_mdio_write_t)(uint8_t phy_addr, uint8_t reg, uint16_t val, void *user);
 
 /* --------------------------------------------------------------- */
 /* Driver context                                                    */
 /* --------------------------------------------------------------- */
 
 typedef struct {
-    bool                       initialised;
-    uint8_t                    phy_addr;        /**< 5-bit MDIO address (0..31). */
-    rtl8211fdi_mdio_read_t     mdio_read;
-    rtl8211fdi_mdio_write_t    mdio_write;
-    void                      *mdio_user;
-    uint16_t                   phy_id1;         /**< Cached PHYID1 (Realtek OUI top). */
-    uint16_t                   phy_id2;         /**< Cached PHYID2 (model + revision). */
-    uint16_t                   current_page;    /**< Last page written to reg 0x1F. */
+	bool                    initialised;
+	uint8_t                 phy_addr; /**< 5-bit MDIO address (0..31). */
+	rtl8211fdi_mdio_read_t  mdio_read;
+	rtl8211fdi_mdio_write_t mdio_write;
+	void                   *mdio_user;
+	uint16_t                phy_id1;      /**< Cached PHYID1 (Realtek OUI top). */
+	uint16_t                phy_id2;      /**< Cached PHYID2 (model + revision). */
+	uint16_t                current_page; /**< Last page written to reg 0x1F. */
 } rtl8211fdi_t;
 
 /* --------------------------------------------------------------- */
@@ -172,10 +170,11 @@ typedef struct {
  * @return ALP_ERR_IO    on MDIO bus error.
  * @return ALP_ERR_NOT_READY if PHYID1 OUI does not match Realtek.
  */
-alp_status_t rtl8211fdi_init(rtl8211fdi_t *ctx, uint8_t phy_addr,
-                             rtl8211fdi_mdio_read_t read,
+alp_status_t rtl8211fdi_init(rtl8211fdi_t           *ctx,
+                             uint8_t                 phy_addr,
+                             rtl8211fdi_mdio_read_t  read,
                              rtl8211fdi_mdio_write_t write,
-                             void *mdio_user);
+                             void                   *mdio_user);
 
 /** @brief Release the context.  Idempotent.  Does NOT touch the MDIO bus. */
 void rtl8211fdi_deinit(rtl8211fdi_t *ctx);
@@ -209,9 +208,8 @@ alp_status_t rtl8211fdi_restart_autoneg(rtl8211fdi_t *ctx);
  *  @param speed        [out] negotiated speed.
  *  @param full_duplex  [out] true if full-duplex.
  */
-alp_status_t rtl8211fdi_get_link(rtl8211fdi_t *ctx, bool *up,
-                                 rtl8211fdi_speed_t *speed,
-                                 bool *full_duplex);
+alp_status_t
+rtl8211fdi_get_link(rtl8211fdi_t *ctx, bool *up, rtl8211fdi_speed_t *speed, bool *full_duplex);
 
 /* --------------------------------------------------------------- */
 /* Wake-on-LAN                                                        */
@@ -240,12 +238,10 @@ alp_status_t rtl8211fdi_write_reg(rtl8211fdi_t *ctx, uint8_t reg, uint16_t val);
 /** @brief Read a Realtek-extended page-N register.  Page-select +
  *         page-restore are handled internally; the call leaves the
  *         PHY's page register at @ref RTL8211FDI_PAGE_DEFAULT. */
-alp_status_t rtl8211fdi_read_page_reg(rtl8211fdi_t *ctx, uint16_t page,
-                                      uint8_t reg, uint16_t *val);
+alp_status_t rtl8211fdi_read_page_reg(rtl8211fdi_t *ctx, uint16_t page, uint8_t reg, uint16_t *val);
 
 /** @brief Write a Realtek-extended page-N register. */
-alp_status_t rtl8211fdi_write_page_reg(rtl8211fdi_t *ctx, uint16_t page,
-                                       uint8_t reg, uint16_t val);
+alp_status_t rtl8211fdi_write_page_reg(rtl8211fdi_t *ctx, uint16_t page, uint8_t reg, uint16_t val);
 
 #ifdef __cplusplus
 } /* extern "C" */
