@@ -74,9 +74,63 @@ The following paths are guarded as skeletons and require live AEN401 silicon:
 6. **Event ISR + completion**:
    - Process Transfer Event TRBs from the event ring; call `uhc_xfer_buf_free`.
 
+## xhci_core host-logic validation (Task 4 — 2026-06-27)
+
+`xhci_core.{c,h}` implements the arch-neutral, no-MMIO ring / context / init
+sequence logic (pure C, no Zephyr deps).  The three verified invariants:
+
+| Test | Invariant |
+|------|-----------|
+| `test_ring_enqueue_cycle_and_link_wrap` | Producer cycle toggles on Link-TRB wrap; enqueue pointer resets to 0; Link TRB carries TC bit and pre-toggle cycle. |
+| `test_dcbaa_and_context_build` | DCBAA slot write; slot context dword0 route/speed/entries packing; EP context dword1 ep_type/max_packet + dword2/3 TR dequeue ptr \| DCS. |
+| `test_init_sequence_writes_expected_regs` | `xhci_init_sequence` writes `CONFIG.MaxSlotsEn`, `DCBAAP_LO/HI`, `CRCR_LO` (ring ptr \| RCS=1), and sets `USBCMD.R/S`. |
+
+### native_sim / twister gate result
+
+```
+platform: native_sim/native/64
+suite:    alp.xhci_core.unit
+
+3 of 3 executed test cases passed (100.00%)
+1 of 1 test configurations passed (100.00%)
+Twister exit code: 0
+```
+
+### Driver wiring (Task 4)
+
+`uhc_xhci_alif.c` now:
+- `#include "xhci_core.h"`
+- Data struct holds `struct xhci_ring cmd_ring` + `struct xhci_trb cmd_ring_seg[32]` + `uint64_t dcbaa[9]` (both 64-byte aligned).
+- `uhc_xhci_alif_init` calls `xhci_ring_init` (command ring) then `xhci_init_sequence` (op-reg programming) after the DWC3 G\*-register TODO block.
+- CAPLENGTH MMIO read and USBSTS.CNR/HCH waits remain `TODO(aen401-bench)`.
+
+`xhci_core.c` added to the module CMakeLists (`zephyr/CMakeLists.txt`) via
+`zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF …/xhci_core.c)`.
+
+### AEN401 build gate (Task 4)
+
+```
+Board:   alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp
+Example: examples/peripheral-io/usb-host-storage
+Build:   PASS (west --pristine, Zephyr 4.4.0, arm-zephyr-eabi 14.3.0)
+
+FLASH: 58 968 B / 5 632 KB (1.02%)
+RAM:   19 812 B / 1 MB (1.89%)
+
+ELF: 32-bit LSB executable, ARM, EABI5 version 1 (SYSV),
+     statically linked, with debug_info, not stripped
+```
+
+`xhci_ring_init` / `xhci_init_sequence` symbols resolved at link time
+(no "undefined reference" errors); dead-stripped by `--gc-sections` in the
+final ELF (expected: init reachable only via function pointer through the
+`uhc_api` table at runtime).
+
 ## Artifacts
 
 - Driver: `zephyr/drivers/usb/uhc/uhc_xhci_alif.c`
+- xHCI core: `zephyr/drivers/usb/uhc/xhci_core.{c,h}`
+- Unit test: `tests/unit/xhci_core/`
 - Binding: `zephyr/dts/bindings/usb/alif,xhci-uhc.yaml`
 - Kconfig: `zephyr/drivers/usb/uhc/Kconfig.xhci_alif`
 - Board DTS: `zephyr/boards/alp/e1m_aen401_m55_hp/alp_e1m_aen401_m55_hp_ae402fa0e5597le0_rtss_hp.dts`

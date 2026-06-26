@@ -1033,7 +1033,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_ADC_SW_FALLBACK
 # Binding: zephyr/dts/bindings/usb/alif,xhci-uhc.yaml.
 # ADR 0017 Tier-1.5 (in-tree clean-room skeleton; no fork copy exists).
 zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF
-    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/usb/uhc/uhc_xhci_alif.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/usb/uhc/uhc_xhci_alif.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/usb/uhc/xhci_core.c)
 if(CONFIG_UHC_XHCI_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
 endif()

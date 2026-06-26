@@ -41,6 +41,7 @@
 #include <zephyr/drivers/usb/uhc.h>
 #include <zephyr/logging/log.h>
 #include "uhc_common.h"
+#include "xhci_core.h"
 
 LOG_MODULE_REGISTER(uhc_xhci_alif, CONFIG_UHC_DRIVER_LOG_LEVEL);
 
@@ -117,6 +118,20 @@ struct uhc_xhci_alif_data {
 	struct uhc_data common;
 	/** Mapped capability register block (used only after bench init). */
 	volatile struct xhci_cap_regs *cap;
+	/** xhci_core command ring bookkeeping (initialised in *_init). */
+	struct xhci_ring cmd_ring;
+	/**
+	 * Command ring TRB storage: 31 usable TRBs + 1 Link TRB.
+	 * 64-byte alignment satisfies the xHCI base-address alignment
+	 * requirement (spec §4.9.1 / §6.4.4.1).
+	 */
+	struct xhci_trb cmd_ring_seg[32] __aligned(64);
+	/**
+	 * Device Context Base Address Array: slot 0 reserved (spec §6.1) +
+	 * 8 device slots.  TODO(aen401-bench): size from HCSPARAMS1[7:0].
+	 * 64-byte alignment required by spec §6.1.
+	 */
+	uint64_t dcbaa[9] __aligned(64);
 };
 
 /* ---------------------------------------------------------------------------
@@ -154,19 +169,36 @@ static int uhc_xhci_alif_init(const struct device *dev)
 	 * TODO(aen401-bench): DWC3 G*-register host-mode init sequence:
 	 *   1. Assert DCTL.CoreSoftReset (0xC704 bit 30); poll until cleared.
 	 *   2. Set GCTL.PrtCapDir (bits 13:12) = 0b01 (host mode).
-	 *      DWC3_GCTL (0xC110): write ((read & ~DWC3_GCTL_PRTCAPDIR_MASK) | DWC3_GCTL_PRTCAPDIR_HOST).
+	 *      DWC3_GCTL (0xC110): write ((read & ~DWC3_GCTL_PRTCAPDIR_MASK) |
+	 *      DWC3_GCTL_PRTCAPDIR_HOST).
 	 *   3. Program GUSB2PHYCFG0 (0xC200) -- PHY type, turnaround, suspend.
 	 *   4. Size TX/RX FIFOs: GTXFIFOSIZ0 (0xC300), GRXFIFOSIZ0 (0xC380).
 	 *   5. Set GCTL.U2RSTECN (bit 16).
-	 * Then xHCI init:
-	 *   6. Read cap->caplength to find operational register offset.
-	 *   7. Assert USBCMD.HCRST, poll until cleared.
-	 *   8. Read HCSPARAMS1 for MaxSlots, MaxPorts; HCCPARAMS1 for AC64.
-	 *   9. Allocate DCBAA (aligned 64-byte) + write DCBAAP.
-	 *  10. Allocate command ring (TRBs) + write CRCR (with RCS=1).
-	 *  11. Allocate event ring segment + ERST; write ERSTBA + ERSTSZ.
-	 *  12. Set CONFIG.MaxSlotsEn.
 	 */
+
+	/* Initialise the xhci_core command ring (31 usable TRBs + 1 Link TRB). */
+	xhci_ring_init(&data->cmd_ring, data->cmd_ring_seg,
+		       ARRAY_SIZE(data->cmd_ring_seg));
+
+	/*
+	 * TODO(aen401-bench): read cap->caplength from MMIO to locate the
+	 * operational register block.  0x20 is the typical xHCI CAPLENGTH
+	 * (spec §5.3.1) and is used here as a build-time placeholder only.
+	 *
+	 * TODO(aen401-bench): assert USBCMD.HCRST; poll USBSTS.CNR and HCH
+	 * to zero before programming any operational registers (spec §4.2).
+	 *
+	 * TODO(aen401-bench): allocate event ring segment + ERST; write
+	 * ERSTBA and ERSTSZ via the primary interrupter registers (§5.5).
+	 */
+	struct xhci_op_regs *op =
+		(struct xhci_op_regs *)(cfg->base + 0x20u);
+
+	xhci_init_sequence(op,
+			   (uint64_t)(uintptr_t)data->dcbaa,
+			   (uint64_t)(uintptr_t)data->cmd_ring_seg,
+			   8u /* MaxSlots -- TODO(aen401-bench): read HCSPARAMS1[7:0] */);
+
 	return 0;
 }
 

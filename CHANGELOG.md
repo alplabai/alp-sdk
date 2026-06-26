@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added — xhci_core: arch-neutral host logic validated + driver wired
+
+`xhci_core.{c,h}` — pure-C, no-MMIO xHCI ring/context/init-sequence logic
+(spec §4/5/6) verified by a native_sim ztest suite (`tests/unit/xhci_core`,
+`alp.xhci_core.unit`, 3/3 PASS).  `uhc_xhci_alif.c` now calls
+`xhci_ring_init` (command ring) and `xhci_init_sequence` (op-reg programming)
+from its `_init` handler; the AEN401 `usb-host-storage` build still links
+clean (FLASH 58 968 B, arm-zephyr-eabi 14.3.0).  MMIO-dependent paths (DWC3
+G\*-register soft-reset, CAPLENGTH read, USBSTS.CNR/HCH poll, event ISR,
+transfer scheduling, enumeration) remain `TODO(aen401-bench)`.
+
 ### Added — AEN401 (E4) USB host skeleton: board + driver + backend + example
 
 End-to-end USB host foundation for the E1M-AEN401 (Alif Ensemble E4, Cortex-M55).
