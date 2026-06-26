@@ -398,7 +398,8 @@ uint32_t cc3501e_get_reply_settle_us(void);
  * @param us  New settle delay (microseconds) applied to BOTH levers.
  * @return (getter) the current reply settle in microseconds.
  */
-void     cc3501e_set_phase_settle_us(uint32_t us);
+void cc3501e_set_phase_settle_us(uint32_t us);
+/** @brief Get the back-compat single-knob settle delay (the reply settle, in µs). */
 uint32_t cc3501e_get_phase_settle_us(void);
 
 /**
