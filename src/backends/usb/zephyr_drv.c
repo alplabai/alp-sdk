@@ -12,10 +12,10 @@
  * wired.
  *
  * Host side: wired to Zephyr's usbh_* host stack behind
- * CONFIG_USB_HOST_STACK + an alif,dwc2-uhc node (label zephyr_uhc0).
+ * CONFIG_USB_HOST_STACK + an alif,xhci-uhc node (label zephyr_uhc0).
  * When either is absent the ops return NOSUPPORT so device-only
  * and native_sim builds are unaffected.  Live bring-up paths inside
- * the uhc_dwc2_alif driver are bench-gated (TODO(aen401-bench)).
+ * the uhc_xhci_alif driver are bench-gated (TODO(aen401-bench)).
  *
  * Gated on CONFIG_ALP_SDK_USB -- when OFF the I/O ops return
  * NOSUPPORT but the registry entry still links so the dispatcher
@@ -216,17 +216,17 @@ static void z_dev_close(alp_usb_dev_state_t *st)
 
 /*
  * Wire the alp_usb_host_* surface to Zephyr's usbh_* host stack when
- * CONFIG_USB_HOST_STACK is set and the board carries an alif,dwc2-uhc
+ * CONFIG_USB_HOST_STACK is set and the board carries an alif,xhci-uhc
  * node (label zephyr_uhc0 by Zephyr convention, established in the
  * board DTS or overlay).  The USBH_CONTROLLER_DEFINE macro places a
  * struct usbh_context in the usbh_context iterable section so the host
  * core can discover it.
  *
  * When either guard is absent (device-only board, native_sim, boards
- * without the Alif DWC2 controller) the ops fall through to the
+ * without the Alif xHCI controller) the ops fall through to the
  * NOSUPPORT stubs below, preserving backwards compatibility.
  */
-#if defined(CONFIG_USB_HOST_STACK) && DT_HAS_COMPAT_STATUS_OKAY(alif_dwc2_uhc)
+#if defined(CONFIG_USB_HOST_STACK) && DT_HAS_COMPAT_STATUS_OKAY(alif_xhci_uhc)
 #include <zephyr/usb/usbh.h>
 
 USBH_CONTROLLER_DEFINE(alp_usbh, DEVICE_DT_GET(DT_NODELABEL(zephyr_uhc0)));
@@ -265,13 +265,13 @@ static void z_host_close(alp_usb_host_state_t *st)
 	}
 }
 
-#else /* !(CONFIG_USB_HOST_STACK && DT_HAS_COMPAT_STATUS_OKAY(alif_dwc2_uhc)) */
+#else /* !(CONFIG_USB_HOST_STACK && DT_HAS_COMPAT_STATUS_OKAY(alif_xhci_uhc)) */
 
 static alp_status_t z_host_open(alp_usb_host_state_t *st, alp_capabilities_t *caps_out)
 {
 	(void)st;
 	caps_out->flags = 0u;
-	/* USB host ops require CONFIG_USB_HOST_STACK and an alif,dwc2-uhc
+	/* USB host ops require CONFIG_USB_HOST_STACK and an alif,xhci-uhc
 	 * node (label zephyr_uhc0) in the board DTS.  See the AEN401
 	 * bring-up plan for the bench-gated activation path. */
 	return ALP_ERR_NOSUPPORT;
@@ -294,7 +294,7 @@ static void z_host_close(alp_usb_host_state_t *st)
 	(void)st;
 }
 
-#endif /* CONFIG_USB_HOST_STACK && DT_HAS_COMPAT_STATUS_OKAY(alif_dwc2_uhc) */
+#endif /* CONFIG_USB_HOST_STACK && DT_HAS_COMPAT_STATUS_OKAY(alif_xhci_uhc) */
 
 /* ------------------------------------------------------------------ */
 /* Registration                                                        */
