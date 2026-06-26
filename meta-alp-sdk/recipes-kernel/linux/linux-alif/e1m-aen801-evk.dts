@@ -15,7 +15,7 @@
  * Builds via the Alif dct-kernel flow (DTS_MACRO_FILE); validated by bake (dtb
  * compiles for MACHINE=e1m-aen801-a32, no board).  On-bus I2C device nodes are
  * grounded from board header (bmi323@0x68, icm42670@0x69, bmp581@0x47,
- * ina236@0x40-0x45, tcal9538@0x72).
+ * ina236@0x40-0x42 + 0x49-0x4B, tcal9538@0x72).
  */
 /dts-v1/;
 
@@ -78,7 +78,7 @@
 };
 
 /* Sensors bus -- E1M_I2C0 = Alif I2C2 (P5_6 SCL / P5_7 SDA).
- * EVK_I2C_BUS_SENSORS: bmi323, icm42670, bmp581, ina236 x6, tcal9538. */
+ * EVK_I2C_BUS_SENSORS: bmi323, icm42670, bmp581, ina236 x6 (0x40-0x42 + 0x49-0x4B), tcal9538. */
 &i2c2 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -116,21 +116,22 @@
 		compatible = "ti,ina236";
 		reg = <0x41>;
 	};
-	pmon_vddio: power-monitor@42 {
+	pmon_vio: power-monitor@42 {
 		compatible = "ti,ina236";
 		reg = <0x42>;
 	};
-	pmon_vbat: power-monitor@43 {
+	pmon_vcam1: power-monitor@49 {
 		compatible = "ti,ina236";
-		reg = <0x43>;
+		reg = <0x49>;
 	};
-	pmon_vcc: power-monitor@44 {
+	pmon_5v: power-monitor@4a {
 		compatible = "ti,ina236";
-		reg = <0x44>;
+		reg = <0x4a>;
 	};
-	pmon_vsys: power-monitor@45 {
+	/* VCAM0: 0x4B post-respin (A0=SCL); pre-respin 0x48 collides with the TAS2563 broadcast. */
+	pmon_vcam0: power-monitor@4b {
 		compatible = "ti,ina236";
-		reg = <0x45>;
+		reg = <0x4b>;
 	};
 
 	ioexp_tcal9538: gpio@72 {

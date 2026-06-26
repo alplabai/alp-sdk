@@ -24,7 +24,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   authoritative SoM/carrier routing (`from-alif.tsv` + `e1m-evk.yaml`), with the
   pinmux groups; the decompiled dtb confirms `status="okay"` + `console=ttyS0`.
   On-bus I2C device nodes (bmi323@0x68, icm42670@0x69, bmp581@0x47,
-  ina236@0x40-0x45, tcal9538@0x72) grounded from the board header and
+  ina236 @0x40-0x42 / 0x49-0x4B, tcal9538@0x72) grounded from the board header and
   verified in the decompiled dtb.  Design + build path:
   `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
 - **`examples/aen/aen-a32-carrier-bringup` — A32-Linux carrier bring-up example
