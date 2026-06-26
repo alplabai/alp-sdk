@@ -51,6 +51,7 @@ LOG_MODULE_REGISTER(uhc_xhci_alif, CONFIG_UHC_DRIVER_LOG_LEVEL);
  */
 #define DWC3_GCTL               0xC110u   /* Global Core Control Register */
 #define DWC3_GCTL_PRTCAPDIR_SHIFT   12u
+#define DWC3_GCTL_PRTCAPDIR_MASK    (3u << DWC3_GCTL_PRTCAPDIR_SHIFT)
 #define DWC3_GCTL_PRTCAPDIR_HOST    (1u << DWC3_GCTL_PRTCAPDIR_SHIFT)
 
 /* TODO(aen401-bench): add GUSB2PHYCFG0 (0xC200), DCTL (0xC704),
@@ -153,7 +154,7 @@ static int uhc_xhci_alif_init(const struct device *dev)
 	 * TODO(aen401-bench): DWC3 G*-register host-mode init sequence:
 	 *   1. Assert DCTL.CoreSoftReset (0xC704 bit 30); poll until cleared.
 	 *   2. Set GCTL.PrtCapDir (bits 13:12) = 0b01 (host mode).
-	 *      DWC3_GCTL (0xC110): write (read | DWC3_GCTL_PRTCAPDIR_HOST).
+	 *      DWC3_GCTL (0xC110): write ((read & ~DWC3_GCTL_PRTCAPDIR_MASK) | DWC3_GCTL_PRTCAPDIR_HOST).
 	 *   3. Program GUSB2PHYCFG0 (0xC200) -- PHY type, turnaround, suspend.
 	 *   4. Size TX/RX FIFOs: GTXFIFOSIZ0 (0xC300), GRXFIFOSIZ0 (0xC380).
 	 *   5. Set GCTL.U2RSTECN (bit 16).
@@ -184,7 +185,7 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 
 static int uhc_xhci_alif_disable(const struct device *dev)
 {
-	/* TODO(aen401-bench): clear USBCMD.R/S; mask IMAN.IE; disble IRQ. */
+	/* TODO(aen401-bench): clear USBCMD.R/S; mask IMAN.IE; disable IRQ. */
 	return 0;
 }
 
