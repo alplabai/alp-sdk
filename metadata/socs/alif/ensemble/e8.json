@@ -236,6 +236,22 @@
       "alp_module_skus": ["E1M-AEN801"]
     }
   ],
+  "memory_regions": [
+    {
+      "name":            "sram0",
+      "base":            33554432,
+      "size_kib":        4096,
+      "accessible_from": ["a32_cluster", "m55_hp", "m55_he"],
+      "cacheable":       true
+    },
+    {
+      "name":            "sram1",
+      "base":            37748736,
+      "size_kib":        4096,
+      "accessible_from": ["a32_cluster", "m55_hp", "m55_he"],
+      "cacheable":       true
+    }
+  ],
   "notes": [
     "Datasheet v1.0 released (Alif_E8_Datasheet_v1.0.pdf, ADTS0013, 2026-05-11) -- supersedes the prior v0.51 pre-release reference.  Peripheral counts above were ingested against v0.51 and remain provisional; reconcile against v1.0 in the next dedicated re-ingest pass.",
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",
@@ -244,6 +260,7 @@
     "E8 swaps OctalSPI for HexSPI (16-bit, 400 MB/s SDR / 800 MB/s DDR) -- a different external-memory protocol than E3/E7.",
     "E8 ships an ISP and JPEG encoder (E3/E7 do not).",
     "WLCSP216 package exposes 136× 1.8-V GPIOs; FBGA194 exposes 120 (note: 'GPIO[0-14]' subset on FBGA per datasheet table 7-1).",
-    "AE822FA0E5597LS0 is the variant Alp Lab uses on the E1M-AEN801 module SKU."
+    "AE822FA0E5597LS0 is the variant Alp Lab uses on the E1M-AEN801 module SKU.",
+    "memory_regions sram0/sram1 bases grounded from Alif linux-alif kernel fork DTS (SP3 Task 1, 2026-06-26): ensemble-ex.dtsi mem_stitch node (memory1@2000000, reg = <0x02000000 0x7DD000>) establishes SRAM base at 0x02000000; sram1 follows contiguously at 0x02400000 = sram0.base + sram0.size_kib*1024.  MRAM and TCM bank bases are not present in the fork DTS and are omitted (pending TODO(aen-memory-map))."
   ]
 }

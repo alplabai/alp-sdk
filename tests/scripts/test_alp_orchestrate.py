@@ -147,11 +147,11 @@ ipc:
 
 
 # AEN801 (the lead E8 part) RESOLVES its mailbox controller
-# (alif_mhuv2), so it sails past the controller-TBD guard -- but its
-# memory map is DERIVED from the E8 SoC variant JSON, which carries no
-# per-region `base` yet.  Before the region.get("base") fix this
-# crashed resolve_carve_outs with `KeyError: 'base'`; it MUST instead
-# land a clean blocked carve-out.  Regression guard for that crash.
+# (alif_mhuv2), so it sails past the controller-TBD guard.  The E8
+# SoC JSON now carries per-region `base` addresses (grounded from the
+# Alif kernel fork DTS in SP3 Task 1), so the carve-out RESOLVES
+# rather than blocking.  This fixture verifies the happy path for an
+# M55-HP↔M55-HE rpmsg channel on the E8 (both cores can access sram0).
 AEN801_UNMAPPED = """
 som:
   sku: E1M-AEN801
@@ -391,22 +391,27 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     assert "E1M-AEN701" in entry.reason
 
 
-def test_resolve_carve_outs_blocks_on_unmapped_base(tmp_path: Path) -> None:
-    """AEN801 has a RESOLVED mailbox controller (alif_mhuv2), so it
-    proceeds past the controller-TBD guard into the region allocator --
-    but its memory map is derived from the E8 SoC variant JSON, which
-    has no per-region `base` yet.  resolve_carve_outs MUST emit a
-    blocked carve-out (base unmapped) rather than crash with
-    `KeyError: 'base'`."""
+def test_resolve_carve_outs_aen801_m55_ipc_resolves(tmp_path: Path) -> None:
+    """AEN801 E8 SoC JSON now carries per-region SRAM base addresses
+    (grounded from the Alif kernel fork DTS in SP3 Task 1).  The
+    M55-HP↔M55-HE rpmsg channel must RESOLVE (status='ok', base
+    allocated from sram0) rather than crash or block.
+
+    Renamed from test_resolve_carve_outs_blocks_on_unmapped_base when
+    the E8 memory map was grounded; the no-crash guarantee is still
+    provided by the `resolved = resolve_carve_outs(project)` call."""
     path = _write_board(tmp_path, AEN801_UNMAPPED)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)        # must not raise
     assert len(resolved) == 1
     entry = resolved[0]
-    assert entry.status == "blocked"
-    assert entry.reason is not None
-    assert "E1M-AEN801" in entry.reason
-    assert "HW-mapped" in entry.reason
+    assert entry.status == "ok", (
+        f"AEN801 M55-HP↔M55-HE carveout should resolve after SP3 Task 1 "
+        f"grounded the E8 memory bases; got status={entry.status!r}, "
+        f"reason={entry.reason!r}"
+    )
+    assert entry.base is not None
+    assert entry.size == 64 * 1024
 
 
 # ---------------------------------------------------------------------
