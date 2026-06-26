@@ -153,7 +153,7 @@
     }
   ],
   "notes": [
-    "Datasheet v1.0 released (Alif_E4_Datasheet_v1.0.pdf, 2026-05-11).  Peripheral counts (`peripherals: {}`) intentionally still empty -- the v1.0 datasheet ships but the SDK's per-peripheral count ingest hasn't run against it yet; do NOT fall back to E8's counts blindly because E8 ships HexSPI while E4 ships OctalSPI per the ALP module table, so the IO mix differs.  Re-ingest tracked separately.",
+    "Datasheet v1.0 released (Alif_E4_Datasheet_v1.0.pdf, 2026-05-11).  Peripheral counts are minimally populated (`usb_2` only, sibling-grounded -- see the usb_2 note) -- the v1.0 datasheet ships but the SDK's full per-peripheral count ingest hasn't run against it yet; do NOT fall back to E8's counts blindly because E8 ships HexSPI while E4 ships OctalSPI per the ALP module table, so the IO mix differs.  Re-ingest tracked separately.",
     "Topology: 2× M55 (no A32), 2× U55 + 1× U85, ISP/JPEG, 5.5 MB MRAM, up to 9.75 MB SRAM, 2× OSPI.  Confirmed by the v1.0 datasheet.",
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git (the `confidential: true` flag on the hwrm block makes that explicit).",
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
