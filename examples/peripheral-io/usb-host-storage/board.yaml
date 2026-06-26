@@ -6,8 +6,8 @@
 # and `west build -b alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp`.
 #
 # USB host bring-up is bench-gated:
-#   - CONFIG_USB_HOST_STACK=y + CONFIG_UHC_DWC2_ALIF=y (in prj.conf)
-#   - DWC2 register bring-up is TODO(aen401-bench) inside uhc_dwc2_alif.c
+#   - CONFIG_USB_HOST_STACK=y + CONFIG_UHC_XHCI_ALIF=y (in prj.conf)
+#   - xHCI register bring-up is TODO(aen401-bench) inside uhc_xhci_alif.c
 #   - The zephyr_uhc0 node in the board DTS carries placeholder reg/IRQ values
 som:
   sku: E1M-AEN401
