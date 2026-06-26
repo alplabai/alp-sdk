@@ -54,7 +54,8 @@ ZTEST(alp_xhci_core, test_dcbaa_and_context_build)
 	/* EP context (spec §6.2.3): dword1 ep_type(5:3) | max_packet(31:16);
 	 * dword2/3 = TR dequeue ptr | DCS(bit0). */
 	uint32_t ep[8] = { 0 };
-	xhci_build_ep_context(ep, 4u /*Control? use Bulk-IN=6*/, 64u, 0xCAFE0000ull, 1);
+	xhci_build_ep_context(
+	    ep, 4u /* Control Bidirectional (xHCI spec §6.2.3) */, 64u, 0xCAFE0000ull, 1);
 	zassert_equal((ep[1] >> 3) & 0x7u, 4u, "ep type");
 	zassert_equal((ep[1] >> 16) & 0xFFFFu, 64u, "max packet size");
 	zassert_equal(ep[2] & 0x1u, 1u, "dequeue cycle state (DCS)");
