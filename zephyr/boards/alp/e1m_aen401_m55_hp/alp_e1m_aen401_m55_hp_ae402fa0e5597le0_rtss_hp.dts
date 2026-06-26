@@ -9,17 +9,15 @@
  * carrier) but targets the E4 SoC variant:
  *   - 2x Cortex-M55 + 2x Ethos-U55 + 1x Ethos-U85 (no A32 / Linux core)
  *   - 5632 KiB MRAM + up to 9984 KiB SRAM
- *   - Same Ensemble DWC2 USB2 IP as E8 (grounded against E3/E8 sibling)
+ *   - xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints
  *
  * Console is retargeted to the E1M carrier UART0 (Alif UART5, P3_4/P3_5),
  * matching the AEN801 pin assignment for the E1M-EVK console.
  *
- * USB host: a Synopsys DWC2 OTG controller node (`alif,dwc2-uhc`) is
- * declared here so CONFIG_UHC_DWC2_ALIF and the usbh stack can be
- * activated at build time.  The reg base address and interrupt number are
- * placeholder values from the Ensemble E8 address map; they MUST be
- * confirmed against the E4 HWRM before any hardware bring-up attempt.
- * See TODO(aen401-bench) comments.
+ * USB host: xHCI USB-2.0 dual-role controller node (`alif,xhci-uhc`) at
+ * 0x48200000 (IRQ 101), 16 endpoints.  Address and IRQ are grounded from the
+ * Alif DFP soc.h/soc_features.h (AE402FA0E5597).  The `alif,xhci-uhc`
+ * binding is created in Task 2; this DTS references it ahead of that.
  *
  * MRAM partition map (5632 KiB, same layout as AEN801):
  *   mcuboot  0x000000  64 KiB
@@ -61,13 +59,13 @@
 
 &itcm {
 	compatible = "alif,itcm";
-	/* RTSS-HP global TCM alias (same as AEN801 / E8). TODO(aen401-bench): confirm vs E4 TRM. */
+	/* RTSS-HP global TCM alias -- HP-ITCM base; grounded from Alif DFP (AE402FA0E5597). */
 	global_base = <0x50000000>;
 };
 
 &dtcm {
 	compatible = "alif,dtcm";
-	/* RTSS-HP global TCM alias. TODO(aen401-bench): confirm vs E4 TRM. */
+	/* RTSS-HP global TCM alias -- HP-DTCM base; grounded from Alif DFP (AE402FA0E5597). */
 	global_base = <0x50800000>;
 };
 
@@ -133,23 +131,15 @@
 };
 
 /* ------------------------------------------------------------------ */
-/* USB host: Synopsys DWC2 OTG in host (UHC) mode                     */
+/* USB host: xHCI USB-2.0 dual-role in host (UHC) mode                */
 /* ------------------------------------------------------------------ */
 
-/*
- * TODO(aen401-bench): the reg base 0x4014C000 and IRQ 164 are heuristic
- * placeholders derived from the Alif Ensemble address map family pattern.
- * Confirm both from the E4 HWRM (Confidential-Alif_E4_HWRM_v0.3.pdf)
- * before any hardware bring-up attempt.  The `alif,dwc2-uhc` compatible
- * binds the uhc_dwc2_alif skeleton driver (bench-gated, not yet functional).
- */
 / {
 	soc {
-		zephyr_uhc0: usb_host0: usb@4014c000 {
-			compatible = "alif,dwc2-uhc";
-			reg = <0x4014c000 0x10000>;
-			interrupts = <164 0>;
-			interrupt-parent = <&nvic>;
+		zephyr_uhc0: usb@48200000 {
+			compatible = "alif,xhci-uhc";
+			reg = <0x48200000 0x10000>;
+			interrupts = <101 0>;
 			maximum-speed = "high-speed";
 			status = "okay";
 		};
