@@ -3,16 +3,20 @@
  * Regenerate after changes to board.yaml `ipc:` or the SoM's
  * memory_map block.  #include this file from your kernel /
  * Zephyr DT.
+ *
+ * Note: no #address-cells / #size-cells override here.  The Ensemble
+ * E8 A32 cluster is AArch32 (32-bit physical addresses); the base DTS
+ * (ensemble-ex.dtsi) already declares reserved-memory with
+ * #address-cells = <1> #size-cells = <1>.  The reg here is 32-bit
+ * format to match.
  */
 
 / {
     reserved-memory {
-        #address-cells = <2>;
-        #size-cells = <2>;
 
         alp_default_rpmsg: alp_default_rpmsg@23c0000 {
             compatible = "shared-dma-pool";
-            reg = <0x0 0x023c0000 0x0 0x00040000>;
+            reg = <0x023c0000 0x00040000>;
             no-map;
             label = "alp_default_rpmsg";
         };

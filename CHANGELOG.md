@@ -66,6 +66,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   the top-level `*.elf` rule; supplied by alp-sdk-internal / the integrator).  The
   recipe is `SKIP_RECIPE`-gated by default — clear the skip and place the ELF at
   `files/m55_hp.elf` to bake.  `COMPATIBLE_MACHINE = "e1m-aen801-a32"`.
+- **AEN801 multicore image baked end-to-end (SP3 Task 5).**  `alif-tiny-image` for
+  `MACHINE=e1m-aen801-a32` now bakes with `alp-remoteproc` (committed to
+  `IMAGE_INSTALL:append`) and — with a local `SKIP_RECIPE` clear + the untracked ELF —
+  `aen-m55-hp-fw` in the rootfs manifest (`cortexa32hf-neon 0.6-r0`).  The deployed
+  `e1m-aen801-evk.dtb` carries the `alp_default_rpmsg` 256 KiB carveout at
+  `0x023c0000`, the MHUv2 TX/RX nodes (`arm,mhuv2-tx`/`arm,mhuv2-rx` for `m55_hp`
+  enabled), and the `remoteproc-m55-hp` node with `firmware-name =
+  "alp/E1M-AEN801/m55_hp.elf"`.  The `aen801-dts-reservations.dtsi` `#address-cells`
+  mismatch (64-bit for a 32-bit SoC) was caught and fixed in the same PR.
 
 ### Fixed
 
