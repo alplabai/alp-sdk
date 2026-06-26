@@ -12,11 +12,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 `xhci_core.{c,h}` — pure-C, no-MMIO xHCI ring/context/init-sequence logic
 (spec §4/5/6) verified by a native_sim ztest suite (`tests/unit/xhci_core`,
 `alp.xhci_core.unit`, 3/3 PASS).  `uhc_xhci_alif.c` now calls
-`xhci_ring_init` (command ring) and `xhci_init_sequence` (op-reg programming)
-from its `_init` handler; the AEN401 `usb-host-storage` build still links
-clean (FLASH 58 968 B, arm-zephyr-eabi 14.3.0).  MMIO-dependent paths (DWC3
-G\*-register soft-reset, CAPLENGTH read, USBSTS.CNR/HCH poll, event ISR,
-transfer scheduling, enumeration) remain `TODO(aen401-bench)`.
+`xhci_ring_init` (command ring) and `xhci_init_sequence` to build an
+op-reg image in RAM (`data->op_image`) via the host-validated path; the
+MMIO write-out (DCBAAP/CRCR/CONFIG copy from the image with volatile writes,
+then USBCMD.R/S at enable) is `TODO(aen401-bench)`.  The AEN401
+`usb-host-storage` build still links clean (FLASH 58 968 B,
+arm-zephyr-eabi 14.3.0).  All MMIO-dependent paths (DWC3 G\*-register
+soft-reset, CAPLENGTH read, HCRST/CNR poll, event ISR, transfer scheduling,
+enumeration) remain `TODO(aen401-bench)`.
 
 ### Added — AEN401 (E4) USB host skeleton: board + driver + backend + example
 

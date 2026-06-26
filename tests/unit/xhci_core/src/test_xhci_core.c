@@ -67,12 +67,18 @@ ZTEST(alp_xhci_core, test_init_sequence_writes_expected_regs)
 	struct xhci_op_regs op;
 	memset(&op, 0, sizeof(op));
 
-	xhci_init_sequence(&op, 0x20000000ull /*dcbaa*/, 0x20001000ull /*cmd ring*/, 8u);
+	/* Use non-trivial addresses to pin both the 64-byte alignment masks
+	 * and the high-word split.  Both values are already 64-byte aligned
+	 * (low 6 bits zero) so the masks do not alter them -- confirming the
+	 * function passes them through unchanged rather than masking them away. */
+	xhci_init_sequence(
+	    &op, 0x1234567800002040ull /*dcbaa*/, 0x00000000DEAD2080ull /*cmd ring*/, 8u);
 
 	zassert_equal(op.config & 0xFFu, 8u, "CONFIG.MaxSlotsEn = 8");
-	zassert_equal(op.dcbaap_lo, 0x20000000u, "DCBAAP low");
-	zassert_equal(op.dcbaap_hi, 0u, "DCBAAP high");
+	zassert_equal(op.dcbaap_lo, 0x00002040u, "DCBAAP low");
+	zassert_equal(op.dcbaap_hi, 0x12345678u, "DCBAAP high");
 	/* CRCR low = cmd_ring_phys (64-byte aligned) | RCS(bit0)=1. */
-	zassert_equal(op.crcr_lo, 0x20001000u | 1u, "CRCR low with RCS=1");
+	zassert_equal(op.crcr_lo, 0xDEAD2080u | 1u, "CRCR low with RCS=1");
+	zassert_equal(op.crcr_hi, 0u, "CRCR high");
 	zassert_true((op.usbcmd & 1u) != 0, "USBCMD.R/S set");
 }

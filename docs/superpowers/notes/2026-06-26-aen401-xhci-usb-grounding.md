@@ -101,8 +101,11 @@ Twister exit code: 0
 `uhc_xhci_alif.c` now:
 - `#include "xhci_core.h"`
 - Data struct holds `struct xhci_ring cmd_ring` + `struct xhci_trb cmd_ring_seg[32]` + `uint64_t dcbaa[9]` (both 64-byte aligned).
-- `uhc_xhci_alif_init` calls `xhci_ring_init` (command ring) then `xhci_init_sequence` (op-reg programming) after the DWC3 G\*-register TODO block.
-- CAPLENGTH MMIO read and USBSTS.CNR/HCH waits remain `TODO(aen401-bench)`.
+- `uhc_xhci_alif_init` calls `xhci_ring_init` (command ring) then
+  `xhci_init_sequence(&data->op_image, …)` to build an op-reg image in RAM
+  via the host-validated path; the MMIO write-out (DCBAAP/CRCR/CONFIG with
+  volatile writes, then USBCMD.R/S at enable) is `TODO(aen401-bench)`.
+- CAPLENGTH MMIO read, DWC3 soft-reset, and USBSTS.CNR/HCH waits remain `TODO(aen401-bench)`.
 
 `xhci_core.c` added to the module CMakeLists (`zephyr/CMakeLists.txt`) via
 `zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF …/xhci_core.c)`.
