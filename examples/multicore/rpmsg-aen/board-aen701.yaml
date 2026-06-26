@@ -1,4 +1,4 @@
-# board.yaml -- rpmsg-aen
+# board-aen701.yaml -- rpmsg-aen (AEN701 alternate; blocked on mailbox.controller TBD)
 #
 # Heterogeneous compute demo for E1M-AEN701 (Alif Ensemble E7).  The
 # E7 die carries a 2-core Cortex-A32 cluster plus 2 Cortex-M55 cores
