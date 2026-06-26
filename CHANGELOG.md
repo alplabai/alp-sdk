@@ -49,6 +49,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   packages for `cortexa32` musl.  ROS 2 is dropped on AEN (XIP footprint), so the
   A32 image installs `alp-sdk` only — `bitbake alif-tiny-image` bakes a bootable
   rootfs with the `<alp/*>` runtime on the E8 A32.
+- **`examples/multicore/rpmsg-aen/` retargeted to E1M-AEN801 (SP3 Task 2).**  The
+  example's default `board.yaml` now declares `som.sku: E1M-AEN801`; the
+  orchestrator resolves the 256 KiB `alp_default_rpmsg` carve-out from E8's sram0
+  (0x023c0000) using the grounded base added in SP3 Task 1.  The former AEN701
+  config is preserved as `board-aen701.yaml` (still blocked on its
+  `mailbox.controller: TBD`) and documented as the explicit alternate
+  (`west alp-build ... --input board-aen701.yaml`).  Dual-SKU build flow and a
+  known-issue note (LSM6DSO comment vs. bmi323 preset) added to the README.
 
 ### Fixed
 
