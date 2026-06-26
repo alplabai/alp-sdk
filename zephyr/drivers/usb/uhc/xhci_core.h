@@ -35,4 +35,15 @@ struct xhci_ring {
 void xhci_ring_init(struct xhci_ring *ring, struct xhci_trb *seg, uint32_t size);
 void xhci_ring_enqueue(struct xhci_ring *ring, const struct xhci_trb *in);
 
+/* DCBAA helpers (spec §6.1). */
+void xhci_dcbaa_set(uint64_t *dcbaa, uint32_t slot, uint64_t ctx_phys);
+
+/* Context builders (spec §6.2.2 slot, §6.2.3 endpoint). */
+void xhci_build_slot_context(uint32_t *ctx,
+                             uint32_t  route_string,
+                             uint32_t  speed,
+                             uint32_t  ctx_entries);
+void xhci_build_ep_context(
+    uint32_t *ctx, uint32_t ep_type, uint32_t max_packet, uint64_t tr_dequeue_phys, int dcs);
+
 #endif /* ALP_XHCI_CORE_H */
