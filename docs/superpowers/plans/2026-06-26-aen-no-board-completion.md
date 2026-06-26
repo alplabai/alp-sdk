@@ -19,7 +19,7 @@
 
 ---
 
-### Task A: Arch-aware DT reserved-memory cells
+### Task 1: Arch-aware DT reserved-memory cells (item A)
 
 **Files:**
 - Modify: `metadata/schemas/soc-spec-v1.schema.json` (add `linux_phys_addr_bits` property)
@@ -167,7 +167,7 @@ git commit -m "feat(orchestrate): arch-aware DT reserved-memory cells (linux_phy
 
 ---
 
-### Task B: Carrier DTS on-bus i2c sensor nodes
+### Task 2: Carrier DTS on-bus i2c sensor nodes (item B)
 
 **Files:**
 - Modify: `meta-alp-sdk/recipes-kernel/linux/linux-alif/e1m-aen801-evk.dts` (the `&i2c2` block)
@@ -253,7 +253,7 @@ git commit -m "dts(aen): add the EVK carrier on-bus i2c sensor nodes (bmi323/icm
 
 ---
 
-### Task C: M55-HP firmware Zephyr-SDK rebuild + iterable-section verify
+### Task 3: M55-HP firmware Zephyr-SDK rebuild + iterable-section verify (item C)
 
 **Files:**
 - Modify: `meta-alp-sdk/recipes-firmware/aen-m55-hp-fw/aen-m55-hp-fw_0.6.bb` (comment: confirmed Zephyr-SDK build)
