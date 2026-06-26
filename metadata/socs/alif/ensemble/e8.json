@@ -126,6 +126,7 @@
       "supports": ["RNN", "CNN"]
     }
   ],
+  "linux_phys_addr_bits": 32,
   "soc_ram_kb": 9984,
   "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,
@@ -236,6 +237,15 @@
       "alp_module_skus": ["E1M-AEN801"]
     }
   ],
+  "memory_regions": [
+    {
+      "name":            "sram0",
+      "base":            33554432,
+      "size_kib":        4096,
+      "accessible_from": ["a32_cluster", "m55_hp", "m55_he"],
+      "cacheable":       true
+    }
+  ],
   "notes": [
     "Datasheet v1.0 released (Alif_E8_Datasheet_v1.0.pdf, ADTS0013, 2026-05-11) -- supersedes the prior v0.51 pre-release reference.  Peripheral counts above were ingested against v0.51 and remain provisional; reconcile against v1.0 in the next dedicated re-ingest pass.",
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",
@@ -244,6 +254,7 @@
     "E8 swaps OctalSPI for HexSPI (16-bit, 400 MB/s SDR / 800 MB/s DDR) -- a different external-memory protocol than E3/E7.",
     "E8 ships an ISP and JPEG encoder (E3/E7 do not).",
     "WLCSP216 package exposes 136× 1.8-V GPIOs; FBGA194 exposes 120 (note: 'GPIO[0-14]' subset on FBGA per datasheet table 7-1).",
-    "AE822FA0E5597LS0 is the variant Alp Lab uses on the E1M-AEN801 module SKU."
+    "AE822FA0E5597LS0 is the variant Alp Lab uses on the E1M-AEN801 module SKU.",
+    "memory_regions is INTENTIONALLY PARTIAL (TODO(aen-memory-map)): only sram0's base (0x02000000) is grounded from the Alif linux-alif kernel fork DTS (ensemble-ex.dtsi memory1@2000000, SP3 Task 1, 2026-06-26).  sram1, mram_main, and M55 TCM bases are absent from the fork DTS and stay unlisted.  resolve_memory_map returns only grounded region(s); any IPC carveout requesting an unlisted region remains blocked until those bases are HW-mapped."
   ]
 }

@@ -1,7 +1,7 @@
-# board.yaml -- rpmsg-aen  (AEN801 default)
+# board-aen701.yaml -- rpmsg-aen (AEN701 alternate; blocked on mailbox.controller TBD)
 #
-# Heterogeneous compute demo for E1M-AEN801 (Alif Ensemble E8).  The
-# E8 die carries a 2-core Cortex-A32 cluster plus 2 Cortex-M55 cores
+# Heterogeneous compute demo for E1M-AEN701 (Alif Ensemble E7).  The
+# E7 die carries a 2-core Cortex-A32 cluster plus 2 Cortex-M55 cores
 # (HP + HE).  This example wires:
 #
 #   * `a32_cluster` -- Yocto Linux consumer under `linux/`.
@@ -18,17 +18,17 @@
 # `examples/multicore/rpmsg-v2n/` example is the canonical V2N counterpart of
 # this AEN setup.
 #
-# AEN801 uses the E8 silicon variant (AE822FA0E5597LS0) whose sram0
-# base is grounded (0x02000000); the `alp_default_rpmsg` carve-out
-# resolves from that region.  The mailbox controller is `alif_mhuv2`
-# (ARM MHUv2, bench-unverified on silicon but not TBD).
-#
-# For the AEN701 (E7) alternate -- still blocked on its
-# `mailbox.controller: TBD` -- pass `--input board-aen701.yaml`
-# explicitly.
+# AEN memory_map values are still TBD in the SoM preset (per the
+# project memory note -- the user supplies authoritative values
+# later).  Schema validation is fine, but `west alp-build` will
+# refuse to allocate a carve-out until those numbers land.  This
+# example's structural files (board.yaml, READMEs, sources) are
+# correct in shape; the build is expected to fail with
+# `OrchestratorError: memory_map.base is TBD` until E1M-AEN701.yaml
+# carries hard addresses.
 
 som:
-  sku: E1M-AEN801
+  sku: E1M-AEN701
   hw_rev: r1
 
 preset: e1m-evk             # BMP581 + BMI323 (on-board IMU) are
@@ -48,9 +48,10 @@ cores:
     libraries: [cmsis_dsp]
 
 # Cross-core RPMsg carve-out.  The orchestrator allocates from
-# E1M-AEN801's sram0 region (0x02000000, 4096 KiB, accessible from
-# all three cores; cacheable: true on AEN by default because the M55
-# cache is on).
+# E1M-AEN701's `memory_map:` -- once the user supplies authoritative
+# AEN memory-map addresses, the carve-out lands in mram_main (the
+# only region accessible from all three cores; spec §6.8 flips to
+# cacheable: true on AEN by default because the M55 cache is on).
 ipc:
   - kind: rpmsg
     endpoints: [a32_cluster, m55_hp]

@@ -7,8 +7,86 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added
+
+- **E1M-AEN801 Cortex-A32 Linux (Yocto) carrier — baseline that builds.**  The
+  Alif Ensemble E8 A32 cluster now has a `meta-alp-sdk` carrier layer riding over
+  the Alif BSP (`meta-alif-ensemble` / `linux_alif` v6.12) per ADR 0017: a board
+  device tree (`e1m-aen801-evk.dts`) + `linux-alif` bbappend that registers the
+  dtb in the kernel's subdir Makefiles and extends `COMPATIBLE_MACHINE`, plus the
+  grounded `e1m-aen801-a32` machine-conf overrides (Macronix OctaFlash, OSPI-NOR
+  boot, `xipImage`).  `bitbake -c compile linux-alif` for `MACHINE=e1m-aen801-a32`
+  builds the carrier dtb end-to-end, and `bitbake alif-tiny-image` produces the
+  full bootable set (`bl32.bin` TF-A + `xipImage` kernel + `e1m-aen801-evk.dtb`
+  + `cramfs-xip` rootfs) — all on real public Alif sources, no board needed.
+  The carrier DTS carries the real E1M-EVK peripheral selection — console on
+  Alif UART5, sensors on I2C2, display/camera on I2C1 — transcribed from the
+  authoritative SoM/carrier routing (`from-alif.tsv` + `e1m-evk.yaml`), with the
+  pinmux groups; the decompiled dtb confirms `status="okay"` + `console=ttyS0`.
+  On-bus I2C device nodes (bmi323@0x68, icm42670@0x69, bmp581@0x47,
+  ina236 @0x40-0x42 / 0x49-0x4B, tcal9538@0x72) grounded from the board header and
+  verified in the decompiled dtb.  Design + build path:
+  `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
+- **`examples/aen/aen-a32-carrier-bringup` — A32-Linux carrier bring-up example
+  (SP2 Task 1).**  New Yocto userspace example that exercises the E1M-EVK carrier
+  peripherals from the Cortex-A32 Linux cluster: `alp_i2c_*` bus scan over
+  `/dev/i2c-N`, `tcal9538` IO-expander toggle/read, `bmi323`/`icm42670` IMU
+  chip-id (runtime-detected, post-respin strap), and `alp_gpio_*` LED + INT
+  line over the gpiochip v2 chardev ABI.  Builds with CMake inside a Yocto SDK
+  environment; board-gated `TODO(e1m-evk-hw)` constants isolate the three
+  `/dev`-enumeration values needed on the bench.  Host syntax-check gate passes
+  (`cc -std=c11 -Wall -Wextra -Iinclude -fsyntax-only`, exit 0).
+- **`meta-alp-sdk/recipes-examples/aen-a32-carrier-bringup_0.6.bb` — Yocto recipe
+  that cross-builds and bakes the example into `alif-tiny-image` (SP2 Task 2).**
+  Inherits `cmake`; sources the branch `feat/aen-a32-yocto-bringup` via
+  `SRC_URI` + `SRCREV=${AUTOREV}`; `S` points directly at the example subdir
+  so only the example is compiled against the staged `alp-sdk` sysroot.
+  `DEPENDS = "alp-sdk alp-chips"`, `COMPATIBLE_MACHINE = "e1m-aen801-a32"`.
+  `IMAGE_INSTALL:append` in `e1m-aen801-a32.conf` extended to include
+  `aen-a32-carrier-bringup` alongside `alp-sdk`.
+- **alp-sdk library runs on the AEN A32 Linux image.**  The full `meta-alp-sdk`
+  layer integrates onto the Alif scarthgap stack (BBMASK the V2N/ROS/DEEPX
+  recipes; dangling-bbappends warn-only), and `libalp_sdk.so` cross-builds +
+  packages for `cortexa32` musl.  ROS 2 is dropped on AEN (XIP footprint), so the
+  A32 image installs `alp-sdk` only — `bitbake alif-tiny-image` bakes a bootable
+  rootfs with the `<alp/*>` runtime on the E8 A32.
+- **`examples/multicore/rpmsg-aen/` retargeted to E1M-AEN801 (SP3 Task 2).**  The
+  example's default `board.yaml` now declares `som.sku: E1M-AEN801`; the
+  orchestrator resolves the 256 KiB `alp_default_rpmsg` carve-out from E8's sram0
+  (0x023c0000) using the grounded base added in SP3 Task 1.  The former AEN701
+  config is preserved as `board-aen701.yaml` (still blocked on its
+  `mailbox.controller: TBD`) and documented as the explicit alternate
+  (`west alp-build ... --input board-aen701.yaml`).  Dual-SKU build flow and a
+  known-issue note (LSM6DSO comment vs. bmi323 preset) added to the README.
+- **`meta-alp-sdk/recipes-firmware/aen-m55-hp-fw_0.6.bb` — M55-HP rpmsg firmware
+  install shell (SP3 Task 4).**  A Yocto recipe that installs the Cortex-M55-HP
+  Zephyr ELF to `/lib/firmware/alp/E1M-AEN801/m55_hp.elf` — the path the carrier
+  DTS `firmware-name` property and `alp-remoteproc-start.sh` expect.  The ELF is a
+  prebuilt binary built out-of-tree from `examples/multicore/rpmsg-aen/m55_hp` via
+  `west build` and is **not redistributed in the public layer** (kept out of git by
+  the top-level `*.elf` rule; supplied by alp-sdk-internal / the integrator).  The
+  recipe is `SKIP_RECIPE`-gated by default — clear the skip and place the ELF at
+  `files/m55_hp.elf` to bake.  `COMPATIBLE_MACHINE = "e1m-aen801-a32"`.
+- **AEN801 multicore image baked end-to-end (SP3 Task 5).**  `alif-tiny-image` for
+  `MACHINE=e1m-aen801-a32` now bakes with `alp-remoteproc` (committed to
+  `IMAGE_INSTALL:append`) and — with a local `SKIP_RECIPE` clear + the untracked ELF —
+  `aen-m55-hp-fw` in the rootfs manifest (`cortexa32hf-neon 0.6-r0`).  The deployed
+  `e1m-aen801-evk.dtb` carries the `alp_default_rpmsg` 256 KiB carveout at
+  `0x023c0000`, the MHUv2 TX/RX nodes (`arm,mhuv2-tx`/`arm,mhuv2-rx` for `m55_hp`
+  enabled), and the `remoteproc-m55-hp` node with `firmware-name =
+  "alp/E1M-AEN801/m55_hp.elf"`.  The `aen801-dts-reservations.dtsi` `#address-cells`
+  mismatch (64-bit for a 32-bit SoC) was caught and fixed in the same PR.
+
 ### Fixed
 
+- **Yocto: `alp_audio_*` no longer double-defines on an ALSA-less sysroot.**
+  `audio_dispatch.c` owns the public `alp_audio_in_*/out_*` symbols
+  unconditionally on Yocto, but its `stub_backend.c` mute lived inside the
+  `if(ALSA_FOUND)` gate — so an ALSA-less image (e.g. the Alif E8 A32) re-emitted
+  the symbols from the stub and failed to link.  Moved the
+  `ALP_VENDOR_OVERRIDES_AUDIO_IN/OUT` mutes to the unconditional override block
+  (the #240 fix that missed audio); the real ALSA backend stays gated, mirroring
+  i2s.
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
   SE-UART-only `alif_flash` runner burns only the signed ATOC (`app-write-mram
   -p`); a slot0-XIP app is *not* embedded in that ATOC, so the runner left the
@@ -7418,10 +7496,9 @@ Deferred from this batch:
     (CC3501E GPIO19).
   - **Six INA236 current shunt monitors** -- one per power rail
     on I2C0 (3V3, 1V8, VIO, +V_CAM0, +V_CAM1, 5V).  INA236A
-    occupies 0x40..0x43 and INA236B occupies 0x44..0x47, so all
-    six fit on one bus.  Macros key on rail name; the user's
-    notes had a ref-des typo (three "U30"s) -- cross-check
-    pending.
+    occupies 0x40-0x42, INA236B occupies 0x49-0x4B (split-bank;
+    VCAM0 post-respin A0=SCL gives 0x4B, pre-respin 0x48 collides
+    with TAS2563 broadcast).  Macros key on rail name.
   - **ENCODER_SW correction** -- moves from IO3 to IO4 per the
     schematic.  PEC12R-4222F-S0024 encoder + push switch.
   ABI: ADDED public header `alp/chips/tas2563.h` (snapshot now

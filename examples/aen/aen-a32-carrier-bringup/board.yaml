@@ -1,0 +1,48 @@
+# board.yaml -- per-app project configuration for the
+# aen-a32-carrier-bringup example.
+#
+# Linux/Yocto user-space bring-up smoke test for the E1M-EVK carrier
+# peripherals on the E1M-AEN801 Cortex-A32.  Exercises the portable
+# alp_* surface over Linux userspace ABIs:
+#   - alp_i2c_* over /dev/i2c-N (i2c-dev)
+#   - tcal9538 IO-expander @0x72 toggle/read
+#   - bmi323 (0x68) / icm42670 (0x69) IMU chip-id, runtime-detected
+#   - alp_gpio_* over the gpiochip v2 chardev ABI
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+
+# E1M pads this app uses (subset of the EVK preset's e1m_routes:).
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS,
+      doc: "Sensor + IO-expander bus (tcal9538 @0x72, bmi323/icm42670 @0x68/0x69)" }
+  - { e1m: E1M_GPIO_IO15, macro: EVK_PIN_BMI323_INT1,
+      doc: "BMI323 INT1 (CC3501E-proxied on AEN; TODO(e1m-evk-hw))" }
+
+cores:
+  # The A32 cluster runs the Linux/Yocto userspace app.
+  a32_cluster:
+    app: ./src
+    # Linux userspace app; links libalp_chips.a (tcal9538 / bmi323 /
+    # icm42670 drivers) ahead of libalp_sdk.so (alp_i2c / alp_gpio backends).
+    peripherals:
+      - i2c
+      - gpio
+  # The M55-HE runs the companion Zephyr real-time firmware on the
+  # LP island; this bring-up example exercises only the A32 Linux side.
+  m55_he:
+    os: "off"
+
+chips:
+  - tcal9538   # Main IO-expander @0x72 (LCD / camera / sensor INT fan-out).
+  - bmi323     # On-board IMU; post-respin boards strap @0x68. Pre-respin @0x69
+               # collides with U12 and falls to [FAIL] (the fallback probes
+               # icm42670 there, not bmi323).
+  - icm42670   # Alternate IMU @0x69 (runtime fallback if bmi323 absent).
+
+diagnostics:
+  log_level: info

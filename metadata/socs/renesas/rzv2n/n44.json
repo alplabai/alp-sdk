@@ -46,6 +46,7 @@
       "supports": ["CNN", "RNN", "Transformer"]
     }
   ],
+  "linux_phys_addr_bits": 64,
   "soc_ram_kb": 1536,
   "inference_arena_sram_kib": 0,
   "always_on_sram_kb": 0,
