@@ -1856,6 +1856,13 @@ def emit_dts_reservations(project: BoardProject) -> str:
         "",
         "/ {",
         "    reserved-memory {",
+        # TODO(arch-aware-cells): always emits 64-bit cells. AArch32
+        # targets (e.g. the Ensemble E8 A32 cluster, whose base DTS
+        # declares reserved-memory with #address-cells/#size-cells = <1>)
+        # need the cells + reg hand-adjusted to 32-bit after regen -- see
+        # the note in the generated aen801-dts-reservations.dtsi. Proper
+        # fix: pick the cell width from the target address width (no arch
+        # signal in the SoC JSON cores[] today).
         "        #address-cells = <2>;",
         "        #size-cells = <2>;",
         "",
