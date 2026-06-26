@@ -124,53 +124,53 @@
  */
 static void make_dashboard(void)
 {
-    /* lv_screen_active() returns the default screen; it is created
+	/* lv_screen_active() returns the default screen; it is created
 	 * automatically by lv_init() and bound to the first registered
 	 * lv_display_t.  Widgets parented to it appear on the panel. */
-    lv_obj_t *scr = lv_screen_active();
+	lv_obj_t *scr = lv_screen_active();
 
-    /* ── Title ── */
-    lv_obj_t *title = lv_label_create(scr);
-    lv_label_set_text(title, "ALP SDK -- E1M-X V2N");
-    /* LV_ALIGN_TOP_MID centres the label horizontally, 24 px from the
+	/* ── Title ── */
+	lv_obj_t *title = lv_label_create(scr);
+	lv_label_set_text(title, "ALP SDK -- E1M-X V2N");
+	/* LV_ALIGN_TOP_MID centres the label horizontally, 24 px from the
 	 * top edge; keeps it visible on both portrait and landscape panels. */
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
+	lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
 
-    /* ── Arc gauge ── */
-    lv_obj_t *arc = lv_arc_create(scr);
-    /* 360 x 360 pixels -- comfortable on a 720 x 1280 panel and large
+	/* ── Arc gauge ── */
+	lv_obj_t *arc = lv_arc_create(scr);
+	/* 360 x 360 pixels -- comfortable on a 720 x 1280 panel and large
 	 * enough to read at arm's length.  The arc draws a 270-degree sweep
 	 * by default; lv_arc_set_value maps [0..100] onto that sweep. */
-    lv_obj_set_size(arc, 360, 360);
-    lv_arc_set_value(arc, 62); /* 62% -- placeholder for live telemetry */
-    lv_obj_center(arc);        /* centred in the screen object */
+	lv_obj_set_size(arc, 360, 360);
+	lv_arc_set_value(arc, 62); /* 62% -- placeholder for live telemetry */
+	lv_obj_center(arc);        /* centred in the screen object */
 
-    /* ── Touch-me button ── */
-    lv_obj_t *btn = lv_button_create(scr);
-    /* 48 px above the bottom edge so it clears any system navbar overlay. */
-    lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -48);
-    lv_obj_t *lbl = lv_label_create(btn);
-    lv_label_set_text(lbl, "Touch me");
-    /* No explicit size on btn -- LVGL wraps it around the label. */
+	/* ── Touch-me button ── */
+	lv_obj_t *btn = lv_button_create(scr);
+	/* 48 px above the bottom edge so it clears any system navbar overlay. */
+	lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -48);
+	lv_obj_t *lbl = lv_label_create(btn);
+	lv_label_set_text(lbl, "Touch me");
+	/* No explicit size on btn -- LVGL wraps it around the label. */
 }
 
 /* ── Entry point ─────────────────────────────────────────────────────── */
 
 int main(void)
 {
-    /* lv_init() allocates LVGL's global state (draw buffers, timer queue,
+	/* lv_init() allocates LVGL's global state (draw buffers, timer queue,
 	 * indev list).  Must be called before any other LVGL function. */
-    lv_init();
+	lv_init();
 
-    /* ── Display backend ── */
+	/* ── Display backend ── */
 
-    /* lv_linux_drm_create() registers a new lv_display_t backed by the
+	/* lv_linux_drm_create() registers a new lv_display_t backed by the
 	 * Linux DRM subsystem.  It does NOT open the card yet -- that happens
 	 * inside lv_linux_drm_set_file() so the caller can set the path and
 	 * connector selector first. */
-    lv_display_t *disp = lv_linux_drm_create();
+	lv_display_t *disp = lv_linux_drm_create();
 
-    /* Open card0 and pick the first connected connector.  Passing -1 as
+	/* Open card0 and pick the first connected connector.  Passing -1 as
 	 * connector_id is the "wildcard / first found" sentinel defined in
 	 * lv_linux_drm.h.  The function queries the KMS modesetting API,
 	 * picks the preferred mode of that connector (720x1280@60 on the
@@ -179,33 +179,33 @@ int main(void)
 	 *
 	 * connector_id is int64_t in the LVGL 9.1 API (verified against
 	 * src/drivers/display/drm/lv_linux_drm.h at tag v9.1.0). */
-    lv_linux_drm_set_file(disp, DRM_CARD, -1);
+	lv_linux_drm_set_file(disp, DRM_CARD, -1);
 
-    /* ── Touch input (optional) ── */
+	/* ── Touch input (optional) ── */
 
-    /* access(R_OK) probes the node without opening it -- avoids a hard
+	/* access(R_OK) probes the node without opening it -- avoids a hard
 	 * error on units where the GD32 I2C-proxy hasn't landed yet.  The
 	 * demo is fully usable display-only; touch is additive. */
-    if (access(TOUCH_EVDEV, R_OK) == 0) {
-        /* lv_evdev_create() opens the evdev node, spawns an internal
+	if (access(TOUCH_EVDEV, R_OK) == 0) {
+		/* lv_evdev_create() opens the evdev node, spawns an internal
 		 * reader, and returns an lv_indev_t the LVGL input machinery
 		 * polls on each lv_timer_handler() tick.  LV_INDEV_TYPE_POINTER
 		 * maps ABS_X / ABS_Y / BTN_TOUCH to LVGL's pointer model. */
-        lv_indev_t *touch = lv_evdev_create(LV_INDEV_TYPE_POINTER, TOUCH_EVDEV);
-        /* Bind the input device to our display so LVGL translates
+		lv_indev_t *touch = lv_evdev_create(LV_INDEV_TYPE_POINTER, TOUCH_EVDEV);
+		/* Bind the input device to our display so LVGL translates
 		 * raw touch coordinates into the display's logical space. */
-        lv_indev_set_display(touch, disp);
-    }
+		lv_indev_set_display(touch, disp);
+	}
 
-    /* ── Build the UI ── */
+	/* ── Build the UI ── */
 
-    /* Widgets created here appear on lv_screen_active(), which LVGL
+	/* Widgets created here appear on lv_screen_active(), which LVGL
 	 * already bound to `disp` when the DRM backend registered itself. */
-    make_dashboard();
+	make_dashboard();
 
-    /* ── Main loop ── */
+	/* ── Main loop ── */
 
-    /* lv_timer_handler() drives LVGL's internal timers (animations,
+	/* lv_timer_handler() drives LVGL's internal timers (animations,
 	 * input polling, display flush).  It returns the number of
 	 * milliseconds until the next timer fires -- sleeping that long
 	 * prevents busy-waiting without missing deadlines.
@@ -213,18 +213,18 @@ int main(void)
 	 * Return type is uint32_t in LVGL 9.1 (verified against
 	 * src/misc/lv_timer.h at tag v9.1.0).  usleep takes microseconds,
 	 * hence the *1000 conversion. */
-    while (1) {
-        uint32_t idle_ms = lv_timer_handler();
+	while (1) {
+		uint32_t idle_ms = lv_timer_handler();
 
-        /* lv_timer_handler() returns the time until its next timer is
+		/* lv_timer_handler() returns the time until its next timer is
 		 * due -- or LV_NO_TIMER_READY (UINT32_MAX) when none is pending.
 		 * Clamp before sleeping: POSIX usleep() requires an argument
 		 * below 1e6, and the naive `idle_ms * 1000` multiply would wrap
 		 * for the sentinel. 100 ms keeps the loop responsive either way.
 		 */
-        if (idle_ms > 100) idle_ms = 100;
-        usleep(idle_ms * 1000u);
-    }
+		if (idle_ms > 100) idle_ms = 100;
+		usleep(idle_ms * 1000u);
+	}
 
-    return 0; /* unreachable */
+	return 0; /* unreachable */
 }
