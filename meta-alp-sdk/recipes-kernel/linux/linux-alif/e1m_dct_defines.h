@@ -22,20 +22,20 @@
  */
 
 /* A32 cluster is dual-core; cpu1 online for SMP Linux. */
-#define CPU1_STATUS		"okay"
+#define CPU1_STATUS "okay"
 
 /* Memory stitching / HyperRAM: disabled pending full memory-map audit.
  * TODO(aen-memory-map): re-evaluate once the E1M-EVK memory map is confirmed. */
-#define MEM_STITCH_STATUS	"disabled"
-#define MEM_HYPER_STATUS	"disabled"
-#define MEM_HYP_STITCH_STATUS	"disabled"
+#define MEM_STITCH_STATUS     "disabled"
+#define MEM_HYPER_STATUS      "disabled"
+#define MEM_HYP_STITCH_STATUS "disabled"
 
 /* Console: E1M_UART0 -> Alif UART5 (devkit default UART2 not routed). */
-#define UART2_STATUS		"disabled"
-#define UART5_STATUS		"okay"
+#define UART2_STATUS "disabled"
+#define UART5_STATUS "okay"
 
 /* I2C: E1M_I2C0 -> I2C2 (sensors bus), E1M_I2C1 -> I2C1 (disp/cam bus).
  * Alif I2C0 is not an E1M connector bus -> remains disabled (no #define needed;
  * ensemble-ex.dtsi default is disabled). */
-#define I2C1_STATUS		"okay"
-#define I2C2_STATUS		"okay"
+#define I2C1_STATUS "okay"
+#define I2C2_STATUS "okay"
