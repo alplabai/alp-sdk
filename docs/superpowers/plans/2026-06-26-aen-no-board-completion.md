@@ -178,7 +178,7 @@ git commit -m "feat(orchestrate): arch-aware DT reserved-memory cells (linux_phy
 
 - [ ] **Step 1: Replace the `&i2c2` TODO with the device nodes**
 
-In `e1m-aen801-evk.dts`, the `&i2c2` node has a `TODO(e1m-evk-hw)` comment block listing the on-bus devices. Replace that comment (keep the controller properties — `#address-cells`, `#size-cells`, `pinctrl-*`, `status`) with these child nodes (addresses transcribed from `include/alp/boards/alp_e1m_evk.h`: `EVK_I2C_ADDR_BMI323`=0x68, `EVK_I2C_ADDR_ICM42670`=0x69, `EVK_I2C_ADDR_BMP581`=0x47, `EVK_I2C_ADDR_INA236` 0x40..0x45, `EVK_I2C_ADDR_TCAL9538`=0x72):
+In `e1m-aen801-evk.dts`, the `&i2c2` node has a `TODO(e1m-evk-hw)` comment block listing the on-bus devices. Replace that comment (keep the controller properties — `#address-cells`, `#size-cells`, `pinctrl-*`, `status`) with these child nodes (addresses transcribed from `include/alp/boards/alp_e1m_evk.h`: `EVK_I2C_ADDR_BMI323`=0x68, `EVK_I2C_ADDR_ICM42670`=0x69, `EVK_I2C_ADDR_BMP581`=0x47, `EVK_I2C_ADDR_INA236` 0x40-0x42 / 0x49-0x4B, `EVK_I2C_ADDR_TCAL9538`=0x72):
 ```dts
 	/*
 	 * On-bus EVK-carrier devices (addresses from
@@ -240,9 +240,9 @@ Match the file's existing tab indentation. (The INA236 rail labels are descripti
 
 Write `scratchpad/build_b_dtb.sh` (source the env, `bitbake -c cleansstate linux-alif`, `bitbake -c compile linux-alif`, then `dtc -I dtb -O dts` the produced `e1m-aen801-evk.dtb`) and run it via `MSYS_NO_PATHCONV=1 wsl bash /mnt/c/.../scratchpad/build_b_dtb.sh`. Grep the decompile:
 ```
-... | grep -iE "bosch,bmi323|invensense,icm42670|bosch,bmp581|ti,ina236|ti,tca9538|@6[89]|@4[0-7]|@72"
+... | grep -iE "bosch,bmi323|invensense,icm42670|bosch,bmp581|ti,ina236|ti,tca9538|@6[89]|@4[0-9a-b]|@72"
 ```
-Expected: the six device nodes appear under the i2c2 controller at 0x68/0x69/0x47/0x40-0x45/0x72. This is a LONG kernel rebuild — let it finish. If the dtc decompile errors on a node, fix the DTS and rebuild.
+Expected: the six device nodes appear under the i2c2 controller at 0x68/0x69/0x47/0x40-0x42+0x49-0x4B/0x72. This is a LONG kernel rebuild — let it finish. If the dtc decompile errors on a node, fix the DTS and rebuild.
 
 - [ ] **Step 3: Commit**
 

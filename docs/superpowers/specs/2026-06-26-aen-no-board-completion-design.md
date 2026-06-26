@@ -63,7 +63,7 @@ nodes, addresses transcribed from the board header (nothing invented):
 | `bmi323@68` | `0x68` (`EVK_I2C_ADDR_BMI323`, U13) | `bosch,bmi323` |
 | `icm42670@69` | `0x69` (`EVK_I2C_ADDR_ICM42670`, U12) | `invensense,icm42670p` |
 | `bmp581@47` | `0x47` (`EVK_I2C_ADDR_BMP581`, U14) | `bosch,bmp581` |
-| `ina236@40`..`@45` | `0x40..0x45` (6×) | `ti,ina236` |
+| `ina236@40..42` + `@49..4B` | `0x40,0x41,0x42,0x49,0x4A,0x4B` (6×, split-bank A/B) | `ti,ina236` |
 | `tcal9538@72` | `0x72` (`EVK_I2C_ADDR_TCAL9538`, U35) | `ti,tca9538` |
 
 Each node gets `reg = <0xADDR>;` and its `compatible`. The bus already declares
