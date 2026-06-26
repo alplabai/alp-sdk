@@ -480,8 +480,8 @@ def test_emit_dts_reservations_shape(tmp_path: Path) -> None:
 
 def test_emit_dts_reservations_aarch32_cells(tmp_path: Path) -> None:
     """E1M-AEN801 is AArch32 (linux_phys_addr_bits=32) so the
-    reserved-memory node must use single-cell addressing with a 2-word
-    reg, matching the base ensemble-ex.dtsi #address-cells = <1>."""
+    reserved-memory node must use single-cell addressing (a two-cell base+size
+    reg), matching the base ensemble-ex.dtsi #address-cells = <1>."""
     path = _write_board(tmp_path, AEN801_M55_IPC)
     out = emit_dts_reservations(load_board_yaml(path))
     assert "#address-cells = <1>;" in out
