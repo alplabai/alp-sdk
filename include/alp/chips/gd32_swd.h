@@ -184,7 +184,7 @@ alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx, uint32_t addr, const uint8_t 
  * @param addr  Source address in flash.
  * @param data  Expected bytes to compare against.
  * @param len   Byte count to verify.
- * @return @ref ALP_OK on a full match, @ref ALP_ERR_INVAL/transport error
+ * @return @ref ALP_OK on a full match; @ref ALP_ERR_INVAL or a transport error
  *         otherwise (a mismatch is reported as a verify failure).
  */
 alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx, uint32_t addr, const uint8_t *data, size_t len);

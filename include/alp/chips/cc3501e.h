@@ -183,7 +183,7 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
  *
  * GET_MAC is poll-by-repeat on the firmware side: the firmware may answer
  * RESP_ERR_BUSY while the radio identity is still being read out of the
- * device, so this loops @ref cc3501e_request(GET_MAC) on a bounded backoff
+ * device, so this loops @ref cc3501e_request with GET_MAC on a bounded backoff
  * while it returns @ref ALP_ERR_BUSY, until RESP_OK fills the 6-byte MAC or
  * @p timeout_ms elapses.  Proving this round-trips exercises the firmware
  * worker seam from the host.
@@ -324,7 +324,7 @@ cc3501e_wifi_connect_async(cc3501e_t *ctx, const char *ssid, uint8_t sec_type, c
  * @brief Read the non-blocking connection-status latch (WIFI_STATUS, opcode 0x1B).
  *
  * A SINGLE-frame, non-blocking snapshot of the STA connection state, the result
- * channel for @ref cc3501e_wifi_connect_async: CONNECTING while the association
+ * channel for @ref cc3501e_wifi_connect_async -- CONNECTING while the association
  * runs, then CONNECTED (with @c rssi_dbm) or CONN_FAILED (with @c fail_reason).
  * While the CC35 is mid-association the bridge is BUSY, so this returns
  * @ref ALP_ERR_BUSY (the READY gate) rather than blocking -- the caller retries
@@ -396,7 +396,8 @@ uint32_t cc3501e_get_reply_settle_us(void);
  * Prefer the split setters when tuning the reply settle independently.
  *
  * @param us  New settle delay (microseconds) applied to BOTH levers.
- * @return (getter) the current reply settle in microseconds.
+ *
+ * The matching getter returns the current reply settle (see below).
  */
 void cc3501e_set_phase_settle_us(uint32_t us);
 /** @brief Get the back-compat single-knob settle delay (the reply settle, in µs). */
