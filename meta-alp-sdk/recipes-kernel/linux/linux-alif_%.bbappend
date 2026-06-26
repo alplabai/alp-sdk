@@ -16,6 +16,9 @@
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
+# aen801-dts-reservations.dtsi (and the .dts + defines) live at the linux-alif/
+# top level in FILESEXTRAPATHS, not under a files/ subdir, because FILESEXTRAPATHS
+# only prepends ${THISDIR}/${PN}/ (= linux-alif/) -- there is no separate files/ dir.
 SRC_URI:append = " \
     file://e1m-aen801-evk.dts \
     file://e1m_dct_defines.h \
