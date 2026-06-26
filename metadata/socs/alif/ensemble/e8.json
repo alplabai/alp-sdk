@@ -243,13 +243,6 @@
       "size_kib":        4096,
       "accessible_from": ["a32_cluster", "m55_hp", "m55_he"],
       "cacheable":       true
-    },
-    {
-      "name":            "sram1",
-      "base":            37748736,
-      "size_kib":        4096,
-      "accessible_from": ["a32_cluster", "m55_hp", "m55_he"],
-      "cacheable":       true
     }
   ],
   "notes": [
@@ -261,6 +254,6 @@
     "E8 ships an ISP and JPEG encoder (E3/E7 do not).",
     "WLCSP216 package exposes 136× 1.8-V GPIOs; FBGA194 exposes 120 (note: 'GPIO[0-14]' subset on FBGA per datasheet table 7-1).",
     "AE822FA0E5597LS0 is the variant Alp Lab uses on the E1M-AEN801 module SKU.",
-    "memory_regions sram0/sram1 bases grounded from Alif linux-alif kernel fork DTS (SP3 Task 1, 2026-06-26): ensemble-ex.dtsi mem_stitch node (memory1@2000000, reg = <0x02000000 0x7DD000>) establishes SRAM base at 0x02000000; sram1 follows contiguously at 0x02400000 = sram0.base + sram0.size_kib*1024.  MRAM and TCM bank bases are not present in the fork DTS and are omitted (pending TODO(aen-memory-map))."
+    "memory_regions is INTENTIONALLY PARTIAL (TODO(aen-memory-map)): only sram0's base (0x02000000) is grounded from the Alif linux-alif kernel fork DTS (ensemble-ex.dtsi memory1@2000000, SP3 Task 1, 2026-06-26).  sram1, mram_main, and M55 TCM bases are absent from the fork DTS and stay unlisted.  resolve_memory_map returns only grounded region(s); any IPC carveout requesting an unlisted region remains blocked until those bases are HW-mapped."
   ]
 }

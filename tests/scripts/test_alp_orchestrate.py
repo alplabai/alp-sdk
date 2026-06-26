@@ -152,7 +152,7 @@ ipc:
 # Alif kernel fork DTS in SP3 Task 1), so the carve-out RESOLVES
 # rather than blocking.  This fixture verifies the happy path for an
 # M55-HP↔M55-HE rpmsg channel on the E8 (both cores can access sram0).
-AEN801_UNMAPPED = """
+AEN801_M55_IPC = """
 som:
   sku: E1M-AEN801
 
@@ -400,7 +400,7 @@ def test_resolve_carve_outs_aen801_m55_ipc_resolves(tmp_path: Path) -> None:
     Renamed from test_resolve_carve_outs_blocks_on_unmapped_base when
     the E8 memory map was grounded; the no-crash guarantee is still
     provided by the `resolved = resolve_carve_outs(project)` call."""
-    path = _write_board(tmp_path, AEN801_UNMAPPED)
+    path = _write_board(tmp_path, AEN801_M55_IPC)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)        # must not raise
     assert len(resolved) == 1
@@ -411,6 +411,11 @@ def test_resolve_carve_outs_aen801_m55_ipc_resolves(tmp_path: Path) -> None:
         f"reason={entry.reason!r}"
     )
     assert entry.base is not None
+    # Exact base: sram0 top (0x02400000) minus 64 KiB (0x10000),
+    # verified against resolve_carve_outs output for this fixture.
+    assert entry.base == 0x023F0000, (
+        f"expected sram0 top-down base 0x023F0000 (37683200); got {entry.base:#010x}"
+    )
     assert entry.size == 64 * 1024
 
 

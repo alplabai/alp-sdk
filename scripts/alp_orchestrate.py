@@ -1370,9 +1370,10 @@ def resolve_carve_outs(
         # A region derived from the SoC variant JSON (no explicit
         # `memory_map:` in the preset) carries name/size but NO `base`
         # until the SoM is HW-mapped.  Treat a missing base the same as
-        # an explicit `TBD` so an un-mapped SoM (e.g. AEN801, whose E8
-        # SoC JSON has no per-region base yet) lands a clean *blocked*
-        # carve-out instead of crashing with KeyError: 'base'.
+        # an explicit `TBD` so an un-mapped SoM (e.g. a future SoM
+        # whose SoC JSON has no per-region base grounded yet) lands a
+        # clean *blocked* carve-out instead of crashing with
+        # KeyError: 'base'.
         base = region.get("base")
         size_bytes = _region_size_bytes(region)
         base_is_unmapped = (
