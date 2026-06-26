@@ -57,6 +57,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `mailbox.controller: TBD`) and documented as the explicit alternate
   (`west alp-build ... --input board-aen701.yaml`).  Dual-SKU build flow and a
   known-issue note (LSM6DSO comment vs. bmi323 preset) added to the README.
+- **`meta-alp-sdk/recipes-firmware/aen-m55-hp-fw_0.6.bb` — M55-HP rpmsg firmware
+  install shell (SP3 Task 4).**  A Yocto recipe that installs the Cortex-M55-HP
+  Zephyr ELF to `/lib/firmware/alp/E1M-AEN801/m55_hp.elf` — the path the carrier
+  DTS `firmware-name` property and `alp-remoteproc-start.sh` expect.  The ELF is a
+  prebuilt binary built out-of-tree from `examples/multicore/rpmsg-aen/m55_hp` via
+  `west build` and is **not redistributed in the public layer** (kept out of git by
+  the top-level `*.elf` rule; supplied by alp-sdk-internal / the integrator).  The
+  recipe is `SKIP_RECIPE`-gated by default — clear the skip and place the ELF at
+  `files/m55_hp.elf` to bake.  `COMPATIBLE_MACHINE = "e1m-aen801-a32"`.
 
 ### Fixed
 
