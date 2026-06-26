@@ -194,6 +194,12 @@ static int uhc_xhci_alif_init(const struct device *dev)
 	struct xhci_op_regs *op =
 		(struct xhci_op_regs *)(cfg->base + 0x20u);
 
+	/*
+	 * DCBAA / CRCR take bus (physical) addresses (spec §6.1, §5.4.8).
+	 * On M55-HP there is no MMU, so VA == PA and the uintptr_t cast is
+	 * the bus address.  TODO(aen401-bench): if an MMU is ever enabled,
+	 * translate via the Zephyr phys-addr API before programming these.
+	 */
 	xhci_init_sequence(op,
 			   (uint64_t)(uintptr_t)data->dcbaa,
 			   (uint64_t)(uintptr_t)data->cmd_ring_seg,
