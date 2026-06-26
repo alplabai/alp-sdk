@@ -34,7 +34,6 @@ SKIP_RECIPE[aen-m55-hp-fw] ?= "M55-HP firmware is a prebuilt binary not redistri
 EXCLUDE_FROM_WORLD = "1"
 
 SRC_URI = "file://m55_hp.elf"
-S = "${WORKDIR}"
 
 do_install() {
     install -d ${D}/lib/firmware/alp/E1M-AEN801
@@ -44,3 +43,11 @@ do_install() {
 
 FILES:${PN} = "/lib/firmware/alp/E1M-AEN801/m55_hp.elf"
 COMPATIBLE_MACHINE = "e1m-aen801-a32"
+
+# Prebuilt Cortex-M55 firmware: keep OE's host strip + sysroot strip off
+# it (they would corrupt the cross-arch ELF -- including the
+# alp_backends_* iterable sections), and tell the QA insane checker the
+# arch mismatch (M55 ELF on an AArch64 sysroot) is expected.
+INHIBIT_PACKAGE_STRIP = "1"
+INHIBIT_SYSROOT_STRIP = "1"
+INSANE_SKIP:${PN} = "arch"
