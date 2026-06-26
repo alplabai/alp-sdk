@@ -46,4 +46,27 @@ void xhci_build_slot_context(uint32_t *ctx,
 void xhci_build_ep_context(
     uint32_t *ctx, uint32_t ep_type, uint32_t max_packet, uint64_t tr_dequeue_phys, int dcs);
 
+/* xHCI operational registers (spec §5.4), offsets from the op base
+ * (= CAP base + CAPLENGTH).  Split 64-bit regs into lo/hi for portability. */
+struct xhci_op_regs {
+	uint32_t usbcmd;   /* 0x00 */
+	uint32_t usbsts;   /* 0x04 */
+	uint32_t pagesize; /* 0x08 */
+	uint32_t rsvd0[2];
+	uint32_t dnctrl;  /* 0x14 */
+	uint32_t crcr_lo; /* 0x18 */
+	uint32_t crcr_hi; /* 0x1C */
+	uint32_t rsvd1[4];
+	uint32_t dcbaap_lo; /* 0x30 */
+	uint32_t dcbaap_hi; /* 0x34 */
+	uint32_t config;    /* 0x38 */
+};
+#define XHCI_USBCMD_RS (1u << 0)
+#define XHCI_CRCR_RCS  (1u << 0)
+
+void xhci_init_sequence(struct xhci_op_regs *op,
+                        uint64_t             dcbaa_phys,
+                        uint64_t             cmd_ring_phys,
+                        uint32_t             max_slots);
+
 #endif /* ALP_XHCI_CORE_H */

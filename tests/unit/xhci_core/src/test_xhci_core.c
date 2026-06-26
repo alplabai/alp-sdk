@@ -61,3 +61,18 @@ ZTEST(alp_xhci_core, test_dcbaa_and_context_build)
 	zassert_equal(ep[2] & 0x1u, 1u, "dequeue cycle state (DCS)");
 	zassert_equal(ep[2] & ~0xFu, (uint32_t)(0xCAFE0000ull & ~0xFull), "TR dequeue ptr lo");
 }
+
+ZTEST(alp_xhci_core, test_init_sequence_writes_expected_regs)
+{
+	struct xhci_op_regs op;
+	memset(&op, 0, sizeof(op));
+
+	xhci_init_sequence(&op, 0x20000000ull /*dcbaa*/, 0x20001000ull /*cmd ring*/, 8u);
+
+	zassert_equal(op.config & 0xFFu, 8u, "CONFIG.MaxSlotsEn = 8");
+	zassert_equal(op.dcbaap_lo, 0x20000000u, "DCBAAP low");
+	zassert_equal(op.dcbaap_hi, 0u, "DCBAAP high");
+	/* CRCR low = cmd_ring_phys (64-byte aligned) | RCS(bit0)=1. */
+	zassert_equal(op.crcr_lo, 0x20001000u | 1u, "CRCR low with RCS=1");
+	zassert_true((op.usbcmd & 1u) != 0, "USBCMD.R/S set");
+}

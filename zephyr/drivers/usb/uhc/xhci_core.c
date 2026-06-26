@@ -67,3 +67,17 @@ void xhci_build_ep_context(
 	ctx[2] = ((uint32_t)(tr_dequeue_phys & 0xFFFFFFF0u)) | (dcs ? 1u : 0u);
 	ctx[3] = (uint32_t)(tr_dequeue_phys >> 32);
 }
+
+void xhci_init_sequence(struct xhci_op_regs *op,
+                        uint64_t             dcbaa_phys,
+                        uint64_t             cmd_ring_phys,
+                        uint32_t             max_slots)
+{
+	/* spec §4.2 init: program MaxSlotsEn, DCBAAP, CRCR (RCS=1), then run. */
+	op->config    = (op->config & ~0xFFu) | (max_slots & 0xFFu);
+	op->dcbaap_lo = (uint32_t)(dcbaa_phys & 0xFFFFFFC0u); /* 64-byte aligned */
+	op->dcbaap_hi = (uint32_t)(dcbaa_phys >> 32);
+	op->crcr_lo   = (uint32_t)(cmd_ring_phys & 0xFFFFFFC0u) | XHCI_CRCR_RCS;
+	op->crcr_hi   = (uint32_t)(cmd_ring_phys >> 32);
+	op->usbcmd |= XHCI_USBCMD_RS;
+}
