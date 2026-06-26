@@ -114,7 +114,9 @@
   "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,
   "always_on_sram_kb": 4,
-  "peripherals": {},
+  "peripherals": {
+    "usb_2": 1
+  },
   "capabilities": {
     "ethos_u55_count": 2,
     "ethos_u85_count": 1,
@@ -155,6 +157,7 @@
     "Topology: 2× M55 (no A32), 2× U55 + 1× U85, ISP/JPEG, 5.5 MB MRAM, up to 9.75 MB SRAM, 2× OSPI.  Confirmed by the v1.0 datasheet.",
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git (the `confidential: true` flag on the hwrm block makes that explicit).",
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
-    "Order code AE402FA0E5597LE0 backs the E1M-AEN401 module SKU."
+    "Order code AE402FA0E5597LE0 backs the E1M-AEN401 module SKU.",
+    "peripherals.usb_2 grounded against the E3 sibling (shared Ensemble DWC2 USB2 IP); full per-peripheral ingest against the E4 datasheet is tracked separately."
   ]
 }
