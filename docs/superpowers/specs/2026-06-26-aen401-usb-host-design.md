@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-06-26)** by `2026-06-26-aen401-xhci-usb-host-design.md` — the IP is xHCI (DWC3-family), not DWC2. The DWC2 host-channel approach here is wrong; see the xHCI spec.
+
 # E1M-AEN401 M55/Zephyr USB host (on-SoC DWC2)
 
 **Date:** 2026-06-26
