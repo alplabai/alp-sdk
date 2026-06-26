@@ -15,24 +15,26 @@ Compile-verified; live bring-up is bench-gated (`TODO(aen401-bench)` markers).
 - **`zephyr/boards/alp/e1m_aen401_m55_hp/`** — new Zephyr board for
   `alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp`.  Mirrors the AEN801 M55-HP
   structure (E1M-EVK console on UART5/P3_4-P3_5, MRAM flash controller,
-  MCUboot-compatible partition map).  Declares an `alif,dwc2-uhc` USB host
-  controller node (`zephyr_uhc0` label) with placeholder reg/IRQ pending E4 HWRM
-  confirmation.
+  MCUboot-compatible partition map).  Declares an `alif,xhci-uhc` USB host
+  controller node (`zephyr_uhc0` label) at `0x48200000` / IRQ 101 (grounded from
+  the Alif DFP `soc.h` for AE402FA0E5597).
 
-- **`zephyr/drivers/usb/uhc/uhc_dwc2_alif.c`** — Synopsys DWC2-host UHC driver
-  skeleton.  Full `struct uhc_api` op table (`lock` → `ep_dequeue`); every op that
-  requires hardware returns a defined status with a grounded DWC2 register comment
-  and a `TODO(aen401-bench)` marker.  `CONFIG_UHC_DWC2_ALIF` Kconfig; binding at
-  `zephyr/dts/bindings/usb/alif,dwc2-uhc.yaml`.
+- **`zephyr/drivers/usb/uhc/uhc_xhci_alif.c`** — xHCI USB-2.0 host UHC driver
+  skeleton for the Alif Ensemble USB (DWC3-family).  Full `struct uhc_api` op table
+  (`lock` → `ep_dequeue`); xHCI capability register map from the xHCI spec §5.3;
+  DWC3 G\*-register host-mode init (GCTL @ 0xC110, PrtCapDir=host) + xHCI
+  command/event/transfer ring sequencing documented as `TODO(aen401-bench)` code
+  comments.  `CONFIG_UHC_XHCI_ALIF` Kconfig; binding at
+  `zephyr/dts/bindings/usb/alif,xhci-uhc.yaml`.
 
 - **`src/backends/usb/zephyr_drv.c`** — host-side ops (`z_host_open/enable/
   disable/close`) wired to Zephyr's `usbh_init/enable/disable/shutdown` API
-  behind `CONFIG_USB_HOST_STACK && DT_HAS_COMPAT_STATUS_OKAY(alif_dwc2_uhc)`.
+  behind `CONFIG_USB_HOST_STACK && DT_HAS_COMPAT_STATUS_OKAY(alif_xhci_uhc)`.
   Builds without either guard fall through to the existing NOSUPPORT stubs.
 
 - **`examples/peripheral-io/usb-host-storage/`** — USB mass-storage host example
   using `alp_usb_host_open/enable/disable/close` (`<alp/usb.h>`).  Build-verified
-  for `alp_e1m_aen401_m55_hp`; map confirms the DWC2 skeleton ops and the
+  for `alp_e1m_aen401_m55_hp`; map confirms the xHCI skeleton ops and the
   `USBH_CONTROLLER_DEFINE` context are linked at the correct MRAM addresses.
 
 ### Fixed
