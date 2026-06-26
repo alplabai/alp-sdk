@@ -50,7 +50,7 @@ ring/transfer/enumeration bring-up is bench-validated.
 | `alp_usb_host_*` API + backend host ops + the `z_host_*`→`usbh` wiring | `include/alp/usb.h`; `src/backends/usb/zephyr_drv.c` (PR #268) |
 | Zephyr `uhc` has NO xHCI driver (max3421e/mcux-{ehci,ohci,khci,ip3516hs}/virtual only) | `~/zephyrproject/zephyr/drivers/usb/uhc/` |
 
-**Confidential-source rule:** the E4 HWRM is `Confidential-` (OneDrive). Extract only the
+**Confidential-source rule:** the E4 HWRM is `Confidential-`. Extract only the
 register *facts* (offsets, init steps) into our code/metadata — never commit the doc,
 its OneDrive path, or verbatim HWRM prose. The xHCI register semantics themselves are
 the public xHCI spec.

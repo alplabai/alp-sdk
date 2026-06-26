@@ -11,7 +11,7 @@
  *       examples/peripheral-io/usb-host-storage -d /tmp/usb_host
  *
  * Bring-up status:
- *   The DWC2-host uhc driver (uhc_dwc2_alif) is a SKELETON: the usbh
+ *   The xHCI uhc driver (uhc_xhci_alif) is a SKELETON: the usbh
  *   stack registers the controller and calls the op table, but the actual
  *   bus-reset / channel-programming / transfer-completion sequences are
  *   bench-gated (TODO(aen401-bench) markers inside the driver).  This
@@ -31,7 +31,7 @@ int main(void)
 	alp_usb_host_t *host = alp_usb_host_open();
 	if (host == NULL) {
 		printf("alp_usb_host_open: no host backend available "
-		       "(check CONFIG_USB_HOST_STACK + alif,dwc2-uhc DT node)\n");
+		       "(check CONFIG_USB_HOST_STACK + alif,xhci-uhc DT node)\n");
 		return 1;
 	}
 
@@ -42,7 +42,7 @@ int main(void)
 	}
 
 	printf("USB host enabled -- attach a mass-storage device\n");
-	printf("(enumeration is bench-gated; DWC2 bring-up required)\n");
+	printf("(enumeration is bench-gated; xHCI bring-up required)\n");
 
 	/*
 	 * TODO(aen401-bench): on real silicon, wait here for a connect event
