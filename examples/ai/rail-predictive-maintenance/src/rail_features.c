@@ -9,6 +9,10 @@
 #include <math.h>
 #include <string.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 void rail_feat_state_reset(struct rail_feat_state *st)
 {
 	st->count = 0;
