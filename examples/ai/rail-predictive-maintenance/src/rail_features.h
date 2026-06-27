@@ -70,6 +70,31 @@ void rail_feat_extract(const struct rail_feat_state *st,
  */
 size_t rail_feat_pack(const struct rail_features *f, float *vec, size_t cap);
 
+/** Rail-defect taxonomy (reference-grade; customers retrain/retune). */
+typedef enum {
+	RAIL_HEALTHY     = 0,
+	RAIL_CORRUGATION = 1,
+	RAIL_JOINT_WELD  = 2,
+	RAIL_ROUGH_RCF   = 3,
+	RAIL_CLASS_COUNT
+} rail_class_t;
+
+/** Classifier output: class + 0..1 severity (1 - P(healthy)). */
+struct rail_verdict {
+	rail_class_t cls;
+	float        severity;
+};
+
+/**
+ * Deterministic rule-of-thumb classifier over the feature vector.  Used
+ * when no AI model is loaded (e.g. native_sim) so the demo still produces
+ * sensible geotagged output; the AI path overrides it when present.
+ */
+struct rail_verdict rail_classify_fallback(const struct rail_features *f);
+
+/** Stable upper-case name for a class (for the CSV record). */
+const char *rail_class_name(rail_class_t c);
+
 #ifdef __cplusplus
 }
 #endif

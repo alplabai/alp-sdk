@@ -169,3 +169,47 @@ size_t rail_feat_pack(const struct rail_features *f, float *vec, size_t cap)
 	vec[i++] = f->rail_wavelength_m;
 	return i; /* == RAIL_FEATURE_DIM */
 }
+
+struct rail_verdict rail_classify_fallback(const struct rail_features *f)
+{
+	struct rail_verdict v = { RAIL_HEALTHY, 0.0f };
+
+	/* Narrowband ratio: fraction of spectral energy in the strongest band. */
+	float band_max = 0.0f;
+	for (int b = 0; b < RAIL_N_BANDS; b++) {
+		if (f->band_energy[b] > band_max) {
+			band_max = f->band_energy[b];
+		}
+	}
+
+	if (f->crest_factor > 6.0f && f->kurtosis > 5.0f) {
+		v.cls      = RAIL_JOINT_WELD;
+		v.severity = fminf(1.0f, (f->crest_factor - 6.0f) / 6.0f);
+	} else if (band_max > 0.5f) {
+		v.cls      = RAIL_CORRUGATION;
+		v.severity = fminf(1.0f, band_max);
+	} else if (f->rms > 0.30f) {
+		v.cls      = RAIL_ROUGH_RCF;
+		v.severity = fminf(1.0f, (f->rms - 0.30f) / 0.30f);
+	} else {
+		v.cls      = RAIL_HEALTHY;
+		v.severity = 0.0f;
+	}
+	return v;
+}
+
+const char *rail_class_name(rail_class_t c)
+{
+	switch (c) {
+	case RAIL_HEALTHY:
+		return "HEALTHY";
+	case RAIL_CORRUGATION:
+		return "CORRUGATION";
+	case RAIL_JOINT_WELD:
+		return "JOINT_WELD";
+	case RAIL_ROUGH_RCF:
+		return "ROUGH_RCF";
+	default:
+		return "UNKNOWN";
+	}
+}
