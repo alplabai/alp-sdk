@@ -10,12 +10,12 @@ sample:
 common:
   tags: ai inference industrial predictive-maintenance gnss marketing showcase
 tests:
+  # native_sim runs the full canned pipeline to completion (console-matched).
   alp_sdk.example.rail_predictive_maintenance.e1m_evk:
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
       - native_sim/native/64
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
     integration_platforms:
       - native_sim/native/64
     tags:
@@ -48,3 +48,17 @@ tests:
       type: one_line
       regex:
         - "\\[rail\\] done"
+
+  # AEN silicon cross-build is build-only (no host runner; CI is the AEN gate).
+  alp_sdk.example.rail_predictive_maintenance.aen_build:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    platform_allow:
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    build_only: true
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - industrial
+      - aen

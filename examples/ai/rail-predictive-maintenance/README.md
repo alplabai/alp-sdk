@@ -63,6 +63,12 @@ Place a Vela-compiled (AEN / Ethos-U) or DX-M1 (V2N) `.tflite` and point
 `RAIL_FEATURE_DIM`-float feature vector at the same 256-sample @ 800 Hz
 window the app uses. With no model the deterministic fallback runs.
 
+A real model needs a tensor arena: either pass a static `arena`/`arena_bytes`
+in the `alp_inference_config_t` (see the sibling `ai-anomaly-detection-vibration`,
+which uses a 128 KiB static arena) or set `CONFIG_HEAP_MEM_POOL_SIZE` so the
+backend can heap-allocate; with the stub model the deterministic fallback runs
+and no arena is needed.
+
 ## Tests
 
 ```sh

@@ -57,7 +57,8 @@ LOG_MODULE_REGISTER(rail_pdm, LOG_LEVEL_INF);
  * pipeline end-to-end without a trained model. */
 static const uint8_t s_model[] = { 0x00 };
 
-/* A tiny canned NMEA track for native_sim (moving north at ~12 kn). */
+/* Canned native_sim track. Checksums are placeholders (*00) -- rail_pos_parse_rmc
+ * is checksum-agnostic by design; real NMEA from the GNSS carries valid checksums. */
 static const char *const s_canned_track[] = {
 	"$GNRMC,083559.00,A,5919.99990,N,01803.74400,E,12.0,0.0,250626,,,A*00",
 	"$GNRMC,083600.00,A,5920.01000,N,01803.74400,E,12.0,0.0,250626,,,A*00",
@@ -143,6 +144,9 @@ static struct rail_verdict classify(struct rail_ctx *c, const struct rail_featur
 					struct rail_verdict v = { (rail_class_t)best, 1.0f - scores[RAIL_HEALTHY] };
 					if (v.severity < 0.0f) {
 						v.severity = 0.0f;
+					}
+					if (v.severity > 1.0f) {
+						v.severity = 1.0f;
 					}
 					return v;
 				}

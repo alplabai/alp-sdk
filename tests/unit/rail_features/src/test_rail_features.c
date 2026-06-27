@@ -89,7 +89,7 @@ static float gen_impulse_train(int i)
 }
 
 /* Broadband: a cheap deterministic pseudo-noise (no Math.random). */
-static float __attribute__((unused)) gen_broadband(int i)
+static float gen_broadband(int i)
 {
 	float s = sinf((float)i * 1.7f) + sinf((float)i * 0.37f) + sinf((float)i * 3.91f);
 	return s * 0.5f;
@@ -131,4 +131,16 @@ ZTEST(rail_features, test_class_name_round_trip)
 {
 	zassert_true(strcmp(rail_class_name(RAIL_HEALTHY), "HEALTHY") == 0, "name");
 	zassert_true(strcmp(rail_class_name(RAIL_JOINT_WELD), "JOINT_WELD") == 0, "name");
+}
+
+ZTEST(rail_features, test_classify_broadband_is_rough_rcf)
+{
+	struct rail_feat_state st;
+	struct rail_features   f;
+	fill(&st, gen_broadband);
+	rail_feat_extract(&st, RAIL_ODR_HZ, 20.0f, &f);
+	/* Broadband energy: elevated RMS, no single dominant band. */
+	zassert_true(f.rms > 0.30f, "broadband signal has elevated RMS");
+	struct rail_verdict v = rail_classify_fallback(&f);
+	zassert_equal(v.cls, RAIL_ROUGH_RCF, "broadband -> ROUGH_RCF");
 }
