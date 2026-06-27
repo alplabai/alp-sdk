@@ -28,10 +28,10 @@ ZTEST(rail_position, test_chainage_accumulates_and_bins)
 	zassert_false(adv, "first fix does not advance a segment");
 	zassert_equal(st.segment_index, 0, "start in segment 0");
 
-	/* Step ~100 m north (0.0008993 deg lat ~= 100 m). */
-	adv = rail_pos_update(&st, 0.0008993, 0.0, true);
-	zassert_within(st.chainage_m, 100.0, 2.0, "chainage ~100 m");
-	zassert_equal(st.segment_index, 4, "100 m / 25 m = segment 4");
+	/* Step ~115 m north (0.0010342 deg lat ~= 115 m at R=6371000, mid-segment-4). */
+	adv = rail_pos_update(&st, 0.0010342, 0.0, true); /* ~115 m, seg 4 centre */
+	zassert_within(st.chainage_m, 115.0, 2.0, "chainage ~115 m");
+	zassert_equal(st.segment_index, 4, "115 m / 25 m = segment 4");
 	zassert_true(adv, "crossed into a new segment");
 }
 
@@ -40,7 +40,7 @@ ZTEST(rail_position, test_no_fix_holds_chainage)
 	struct rail_pos_state st;
 	rail_pos_init(&st, 25.0f);
 	rail_pos_update(&st, 0.0, 0.0, true);
-	rail_pos_update(&st, 0.0008993, 0.0, true);
+	rail_pos_update(&st, 0.0010342, 0.0, true);
 	double held = st.chainage_m;
 
 	bool adv = rail_pos_update(&st, 5.0, 5.0, false); /* no fix: ignored */

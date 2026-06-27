@@ -14,7 +14,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-#define RAIL_EARTH_R_M 6378137.0 /* WGS84 equatorial radius, matches GNSS datum */
+#define RAIL_EARTH_R_M 6371000.0 /* mean Earth radius (haversine standard) */
 #define RAIL_DEG2RAD   (M_PI / 180.0)
 #define RAIL_KNOT_MPS  0.514444f
 
@@ -52,7 +52,7 @@ bool rail_pos_update(struct rail_pos_state *st, double lat, double lon, bool has
 }
 
 /* Convert ddmm.mmmm + hemisphere to signed decimal degrees. */
-static double nmea_to_deg(const char *field, char hemi, int deg_digits)
+static double nmea_to_deg(const char *field, char hemi)
 {
 	if (field == NULL || field[0] == '\0') {
 		return 0.0;
@@ -61,7 +61,6 @@ static double nmea_to_deg(const char *field, char hemi, int deg_digits)
 	double degrees = floor(v / 100.0);
 	double minutes = v - degrees * 100.0;
 	double dec     = degrees + minutes / 60.0;
-	(void)deg_digits;
 	if (hemi == 'S' || hemi == 'W') {
 		dec = -dec;
 	}
@@ -101,10 +100,10 @@ bool rail_pos_parse_rmc(const char *nmea, double *lat, double *lon, float *speed
 	}
 	if (fix && nf > 7) {
 		if (lat) {
-			*lat = nmea_to_deg(fields[3], fields[4][0], 2);
+			*lat = nmea_to_deg(fields[3], fields[4][0]);
 		}
 		if (lon) {
-			*lon = nmea_to_deg(fields[5], fields[6][0], 3);
+			*lon = nmea_to_deg(fields[5], fields[6][0]);
 		}
 		if (speed_mps) {
 			*speed_mps = (float)atof(fields[7]) * RAIL_KNOT_MPS;
