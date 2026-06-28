@@ -65,6 +65,9 @@ float rotor_tacholess_rpm(const float *env, size_t n, float frame_rate_hz, uint8
 		for (size_t i = 0; i + lag < n; i++) {
 			s += ((double)env[i] - mean) * ((double)env[i + lag] - mean);
 		}
+		/* Unbiased estimate: divide by the term count so the (n-lag) envelope
+		 * does not bias the argmax toward small lags. */
+		s /= (double)(n - lag);
 		if (s > best) {
 			best     = s;
 			best_lag = lag;

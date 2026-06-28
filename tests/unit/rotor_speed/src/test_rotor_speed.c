@@ -21,6 +21,9 @@ ZTEST(rotor_speed, test_rpm_valid_gate)
 	zassert_true(rotor_rpm_valid(15.0f), "15 rpm is valid");
 	zassert_false(rotor_rpm_valid(0.0f), "0 rpm invalid");
 	zassert_false(rotor_rpm_valid(100.0f), "100 rpm invalid");
+	zassert_true(rotor_rpm_valid(3.0f), "3 rpm valid (lower boundary)");
+	zassert_true(rotor_rpm_valid(30.0f), "30 rpm valid (upper boundary)");
+	zassert_false(rotor_rpm_valid(2.99f), "below lower bound invalid");
 }
 
 ZTEST(rotor_speed, test_tacho_rpm)
