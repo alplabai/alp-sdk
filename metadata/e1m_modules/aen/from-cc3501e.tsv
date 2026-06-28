@@ -1,6 +1,21 @@
+# E1M pads that terminate on the on-module TI CC3501E Wi-Fi 6 + BLE 5.4
+# combo MCU rather than on the Alif Ensemble SoC.  Apps reach these pads
+# through the CC3501E host-control surface (Alif drives SPI1 to the WiFi
+# MCU; see inter-chip.tsv), not through Alif GPIO peripherals.  Tracks
+# board rev R2 (2626-R2).
 e1m_pad	e1m_function	cc3501e_function	cc3501e_pad
+A18	IO11	GPIO2
 AG8	SPI1_MISO	SPI1.MISO	GPIO_34
 AG9	SPI1_MOSI	SPI1.MOSI	GPIO_33
 AG10	SPI1_SCLK	SPI1.SCK	GPIO_32
+AG33	IO8	GPIO30
 AH8	SPI1_CS1	SPI1.CS1	GPIO_15
 AH9	SPI1_CS0	SPI1.CS0	GPIO_31
+AH33	IO10	GPIO35
+E3	IO13	GPIO13
+F3	IO15	GPIO14
+G3	IO16	GPIO17
+H3	IO17	GPIO16
+I3	IO18	GPIO18
+J3	IO19	GPIO19
+K3	IO20	GPIO26

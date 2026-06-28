@@ -123,6 +123,10 @@ pad_routes:
       doc: "Inter-chip SPI1 fast path; CC3501E acts as SPI peripheral." }
 
   # GPIO pads that physically terminate on CC3501E (not on Alif silicon).
+  - { e1m: E1M_GPIO_IO8,  dispatch: cc3501e, dispatch_pin: 30,
+      doc: "CC3501E GPIO_30 (board 2626-R2; GPIO30 moved here from IO21)." }
+  - { e1m: E1M_GPIO_IO10, dispatch: cc3501e, dispatch_pin: 35,
+      doc: "CC3501E GPIO_35 (board 2626-R2)." }
   - { e1m: E1M_GPIO_IO11, dispatch: cc3501e, dispatch_pin: 2,
       doc: "CC3501E GPIO_2." }
   - { e1m: E1M_GPIO_IO13, dispatch: cc3501e, dispatch_pin: 13,
@@ -139,8 +143,6 @@ pad_routes:
       doc: "CC3501E GPIO_19." }
   - { e1m: E1M_GPIO_IO20, dispatch: cc3501e, dispatch_pin: 26,
       doc: "CC3501E GPIO_26." }
-  - { e1m: E1M_GPIO_IO21, dispatch: cc3501e, dispatch_pin: 30,
-      doc: "CC3501E GPIO_30." }
 
 # On-module helper MCUs.  CC3501E is the TI Wi-Fi 6 + BLE 5.4
 # coprocessor wired to the Alif over SPI1.  Firmware is embedded in
