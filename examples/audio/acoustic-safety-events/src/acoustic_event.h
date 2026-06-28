@@ -53,7 +53,7 @@ extern "C" {
  *                 ase_feat_extract() so unit tests can use any rate.
  *
  * ASE_N_BANDS     Number of log-spaced energy bands.  8 bands spans roughly
- *                 one octave per band from ~60 Hz to 8 kHz (Nyquist at 16 kHz).
+ *                 one octave per band from ~30 Hz to 8 kHz (Nyquist at 16 kHz).
  *
  * ASE_FEATURE_DIM Total floats in the packed feature vector:
  *                   8 band energies + centroid + flatness + rolloff +

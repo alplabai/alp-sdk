@@ -35,8 +35,10 @@ PDM mic (<alp/audio.h>, 16 kHz) --frame--> acoustic_event (bands/centroid/
 
 ```
 # ASE,t_s,event,confidence,centroid_hz,rms
-ASE,0.06,GLASS_BREAK,0.85,5400.0,0.16
-ASE,0.10,ALARM,0.90,3000.0,0.21
+ASE,0.00,AMBIENT,0.80,1111.0,0.00
+ASE,0.03,GLASS_BREAK,0.85,5762.0,0.16
+ASE,0.06,ALARM,0.90,3000.0,0.21
+ASE,0.10,SCREAM,0.75,1684.0,0.22
 ```
 
 ## Build

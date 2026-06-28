@@ -77,7 +77,7 @@ LOG_MODULE_REGISTER(ase, LOG_LEVEL_INF);
  *
  * alp_inference_open() requires model_data to be non-NULL, so a 1-byte array
  * satisfies that contract.  The byte 0x00 is NOT the TFLite flatbuffer magic
- * (which starts with the offset 0x18 0x00 0x00 0x00 + "TFLITE3"), so the
+ * (which starts with the offset 0x18 0x00 0x00 0x00 + "TFL3"), so the
  * backend's parser rejects it immediately and open() returns NULL.
  *
  * classify() below tests `inf != NULL` before entering the AI path; when
@@ -271,7 +271,7 @@ int main(void)
 	 * Open the inference backend via <alp/inference.h>.
 	 *
 	 *   .backend    = ALP_INFERENCE_BACKEND_AUTO
-	 *       Let the SDK pick the best NPU: Ethos-U85 on AEN E8, DX-M1 on V2N-M1,
+	 *       Let the SDK pick the best NPU: the AEN preset's Ethos-U NPU, DX-M1 on V2N-M1,
 	 *       or CPU TFLM when no NPU is available.  Using AUTO keeps the source
 	 *       portable -- flipping board.yaml's som.sku retargets the backend.
 	 *

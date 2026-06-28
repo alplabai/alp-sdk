@@ -309,10 +309,13 @@ void ase_feat_extract(const struct ase_frame_state *st, float sr_hz, struct ase_
 	 * logarithmic scale (the mel / bark / ERB scales all share this property).
 	 * Equal-width linear bands would give most bins — and most resolution — to
 	 * the high-frequency region, where there is often little perceptually useful
-	 * content.  Log spacing gives each octave roughly equal representation:
-	 *   band 0: sub-200 Hz (room modes, HVAC hum)
-	 *   band 3: ~1–2 kHz   (speech body, alarm harmonics)
-	 *   band 7: ~4–8 kHz   (sibilance, HF transients, glass break signature)
+	 * content.  Log spacing gives each octave roughly equal representation.
+	 *
+	 * Band boundaries follow k = 2^b for band b (b = floor(log(k)/log(256)*8)),
+	 * where bin→Hz = k * 31.25 (= 16000/512).  Approximate band centres:
+	 *   band 0: ~31–62 Hz   (sub-bass, room modes, HVAC hum)
+	 *   band 3: ~250–500 Hz (upper bass, low-speech fundamentals)
+	 *   band 7: ~4–8 kHz    (sibilance, HF transients, glass break signature)
 	 *
 	 * Normalisation: each band energy is divided by total2 (total spectral
 	 * power) so the 8-element vector sums to 1.  This makes the features
