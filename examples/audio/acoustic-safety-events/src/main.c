@@ -246,7 +246,8 @@ int main(void)
 	 *   .frames_per_block = ASE_FRAME_N (512)
 	 *       DMA block = one analysis frame, so each alp_audio_in_read() call
 	 *       delivers exactly the samples needed for one ase_feat_extract() pass.
-	 *       512 frames at 16 kHz = 32 ms latency per classification.
+	 *       512 samples at 16 kHz = 32 ms latency per classification (mono,
+	 *       so 1 audio frame == 1 sample).
 	 *
 	 * On native_sim (no DMIC device in the DT) the backend returns NULL.
 	 * The loop detects mic == NULL and switches to synth_sample() automatically.
