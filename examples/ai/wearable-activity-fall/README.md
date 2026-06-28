@@ -1,6 +1,6 @@
 # wearable-activity-fall
 
-> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The two cores
+> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The two cores
 > (`motion_features`, `fall_detect`) are host-unit-tested on
 > `native_sim/native/64`; the full app runs end-to-end on native_sim with
 > synthetic motion (incl. an injected fall). HiL on a real wearable + a trained
