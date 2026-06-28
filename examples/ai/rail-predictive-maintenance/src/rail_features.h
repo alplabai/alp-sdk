@@ -23,16 +23,37 @@
 extern "C" {
 #endif
 
+/*
+ * Tuning constants for the feature extraction pipeline.
+ *
+ * RAIL_WINDOW_N  Sliding window length in samples.
+ *   256 samples at 800 Hz = 320 ms of data.  Must be a power of 2
+ *   (radix-2 FFT requirement); 256 gives 3.125 Hz per bin at 800 Hz ODR.
+ *
+ * RAIL_N_BANDS  Number of log-spaced spectral energy bands.
+ *   8 bands span bins 1..127 on a log scale -- roughly one octave per
+ *   band across the 3.125-400 Hz analysis range.
+ *
+ * RAIL_ODR_HZ  Default accelerometer output data rate in Hz.
+ *   800 Hz gives a Nyquist of 400 Hz, covering the short-pitch
+ *   corrugation range (100-400 Hz at typical survey speeds).
+ */
 #define RAIL_WINDOW_N 256
 #define RAIL_N_BANDS  8
 #define RAIL_ODR_HZ   800.0f
 /** 3 scalars (rms, crest, kurtosis) + 8 bands + dom_freq + wavelength. */
 #define RAIL_FEATURE_DIM (3 + RAIL_N_BANDS + 2)
 
-/** Accumulating sample window. */
+/**
+ * Accumulating sample window.
+ *
+ * count grows from 0 to RAIL_WINDOW_N as samples are pushed.  The
+ * feature extractor reads exactly count entries (or RAIL_WINDOW_N when
+ * full); the trailing portion of samples[] is not accessed.
+ */
 struct rail_feat_state {
-	float    samples[RAIL_WINDOW_N];
-	uint16_t count;
+	float    samples[RAIL_WINDOW_N]; /**< Raw vibration-magnitude samples (m/s^2). */
+	uint16_t count;                  /**< Number of valid samples currently held. */
 };
 
 /** Extracted per-window features. */
@@ -51,7 +72,11 @@ void rail_feat_state_reset(struct rail_feat_state *st);
 /** Append one vibration-magnitude sample; ignored once the window is full. */
 void rail_feat_window_push(struct rail_feat_state *st, float sample);
 
-/** True once RAIL_WINDOW_N samples have been pushed. */
+/**
+ * True once RAIL_WINDOW_N samples have been pushed into the window.
+ * Poll after each rail_feat_window_push to decide when to call
+ * rail_feat_extract and rail_feat_state_reset.
+ */
 bool rail_feat_window_full(const struct rail_feat_state *st);
 
 /**
@@ -72,17 +97,23 @@ size_t rail_feat_pack(const struct rail_features *f, float *vec, size_t cap);
 
 /** Rail-defect taxonomy (reference-grade; customers retrain/retune). */
 typedef enum {
-	RAIL_HEALTHY     = 0,
-	RAIL_CORRUGATION = 1,
-	RAIL_JOINT_WELD  = 2,
-	RAIL_ROUGH_RCF   = 3,
+	RAIL_HEALTHY     = 0, /**< No anomaly: all features below thresholds. */
+	RAIL_CORRUGATION = 1, /**< Quasi-periodic corrugation (narrowband spectral peak). */
+	RAIL_JOINT_WELD  = 2, /**< Discrete transient at a rail joint or weld. */
+	RAIL_ROUGH_RCF   = 3, /**< Elevated broadband energy from RCF surface damage. */
 	RAIL_CLASS_COUNT
 } rail_class_t;
 
-/** Classifier output: class + 0..1 severity (1 - P(healthy)). */
+/**
+ * Classifier output: class + 0..1 severity.
+ *
+ * severity = 0.0 means no detected defect contribution; 1.0 means the
+ * feature magnitude is at or above the upper saturation point.  For
+ * RAIL_HEALTHY the severity is always 0.0.
+ */
 struct rail_verdict {
-	rail_class_t cls;
-	float        severity;
+	rail_class_t cls;      /**< Predicted defect class. */
+	float        severity; /**< Severity in [0, 1]; 0 = healthy, 1 = max defect. */
 };
 
 /**

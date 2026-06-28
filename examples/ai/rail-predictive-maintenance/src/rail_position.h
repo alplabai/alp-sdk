@@ -17,20 +17,36 @@
 extern "C" {
 #endif
 
-/** Running geotag state. */
+/**
+ * Running geotag state.
+ *
+ * Holds the previous GNSS fix for incremental haversine distance steps,
+ * the accumulated along-track distance (chainage), and the derived
+ * segment index for per-segment feature aggregation.
+ */
 struct rail_pos_state {
-	double  last_lat;
-	double  last_lon;
-	bool    have_last;
+	double  last_lat;      /**< Latitude of the previous valid fix (decimal degrees). */
+	double  last_lon;      /**< Longitude of the previous valid fix (decimal degrees). */
+	bool    have_last;     /**< False until the first valid fix has been received. */
 	double  chainage_m;    /**< accumulated along-track distance. */
 	int32_t segment_index; /**< floor(chainage / segment_len_m). */
 	float   segment_len_m; /**< segment size (default 25 m). */
 };
 
-/** Initialise; @p segment_len_m <= 0 falls back to 25 m. */
+/**
+ * Initialise position-tracking state.
+ *
+ * Zeroes all fields; @p segment_len_m <= 0 falls back to the default
+ * 25 m segment length.
+ */
 void rail_pos_init(struct rail_pos_state *st, float segment_len_m);
 
-/** Great-circle distance between two WGS84 points, metres. */
+/**
+ * Great-circle distance between two WGS84 points in metres.
+ *
+ * Uses the haversine formula with mean Earth radius 6 371 000 m;
+ * all four coordinates must be in decimal degrees (not NMEA ddmm.mmmm).
+ */
 double rail_pos_haversine_m(double lat1, double lon1, double lat2, double lon2);
 
 /**
