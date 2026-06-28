@@ -444,7 +444,7 @@ git commit -m "feat(ase): acoustic_event per-frame DSP (bands/centroid/flatness/
 - Consumes: `struct ase_features` (Task 1).
 - Produces (Task 3): `typedef enum { ASE_AMBIENT=0, ASE_GLASS_BREAK=1, ASE_ALARM=2, ASE_SCREAM=3, ASE_EVENT_COUNT } ase_event_t;` `struct ase_verdict { ase_event_t ev; float confidence; };` `struct ase_verdict ase_classify_fallback(const struct ase_features *f);` `const char *ase_event_name(ase_event_t e);`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/unit/acoustic_event/src/test_acoustic_event.c`:
 
@@ -523,11 +523,11 @@ ZTEST(acoustic_event, test_event_name)
 
 Add `#include <string.h>` at the top of the test if not already present.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run twister (testsuite-root `tests/unit`). Expected: build failure — `ase_classify_fallback`/`ase_verdict`/`ase_event_t`/`ase_event_name` undeclared.
 
-- [ ] **Step 3: Add the API to the header**
+- [x] **Step 3: Add the API to the header**
 
 Insert into `acoustic_event.h` before the closing `#ifdef __cplusplus }`:
 
@@ -556,7 +556,7 @@ struct ase_verdict ase_classify_fallback(const struct ase_features *f);
 const char *ase_event_name(ase_event_t e);
 ```
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 Append to `acoustic_event.c`:
 
@@ -604,11 +604,11 @@ const char *ase_event_name(ase_event_t e)
 }
 ```
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 Run twister (testsuite-root `tests/unit`). Expected: `alp.unit.acoustic_event` PASS, 8/8. If a classify case misses, inspect the offending feature against the branch thresholds (glass: crest>4 & centroid>4000 & zcr>0.4; alarm: flatness<0.2 & centroid 2500–4000; scream: rms>0.1 & centroid 800–2500) — debug the synthetic generator or the feature, do NOT loosen a threshold without re-checking all four classes still separate.
 
-- [ ] **Step 6: Format + commit**
+- [x] **Step 6: Format + commit**
 
 ```bash
 git add examples/audio/acoustic-safety-events/src/acoustic_event.h \
