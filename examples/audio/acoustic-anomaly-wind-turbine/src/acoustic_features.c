@@ -171,3 +171,21 @@ size_t aco_feat_pack(const struct aco_features *f, float *vec, size_t cap)
 	vec[i++] = f->total_rms;
 	return i; /* == ACO_FEATURE_DIM */
 }
+
+float aco_anomaly_fallback(const float *vec, size_t n, const struct aco_baseline *base)
+{
+	float d2 = 0.0f;
+	for (size_t i = 0; i < n; i++) {
+		float dx = vec[i] - base->mean[i];
+		d2 += dx * dx * base->inv_var[i];
+	}
+	/* Squash to [0,1): grows with normalised distance, saturates smoothly. */
+	float score = 1.0f - expf(-d2 / (float)ACO_FEATURE_DIM);
+	if (score < 0.0f) {
+		score = 0.0f;
+	}
+	if (score > 1.0f) {
+		score = 1.0f;
+	}
+	return score;
+}

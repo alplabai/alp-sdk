@@ -77,3 +77,26 @@ ZTEST(acoustic_features, test_impulse_has_high_kurtosis)
 	aco_feat_extract(&st, ACO_SR_HZ, &f);
 	zassert_true(f.kurtosis > 5.0f, "impulse train has high kurtosis");
 }
+
+ZTEST(acoustic_features, test_anomaly_zero_on_baseline_high_off_baseline)
+{
+	struct aco_baseline base;
+	for (int i = 0; i < ACO_FEATURE_DIM; i++) {
+		base.mean[i]    = 1.0f;
+		base.inv_var[i] = 1.0f;
+	}
+
+	float on[ACO_FEATURE_DIM];
+	float off[ACO_FEATURE_DIM];
+	for (int i = 0; i < ACO_FEATURE_DIM; i++) {
+		on[i]  = 1.0f;        /* exactly the baseline mean */
+		off[i] = 1.0f + 3.0f; /* 3 sigma off on every feature */
+	}
+
+	float s_on  = aco_anomaly_fallback(on, ACO_FEATURE_DIM, &base);
+	float s_off = aco_anomaly_fallback(off, ACO_FEATURE_DIM, &base);
+
+	zassert_within((double)s_on, 0.0, 1e-4, "score ~0 at the baseline mean");
+	zassert_true(s_off > 0.9f, "score saturates high far off baseline");
+	zassert_true(s_off <= 1.0f, "score is clamped to <= 1");
+}

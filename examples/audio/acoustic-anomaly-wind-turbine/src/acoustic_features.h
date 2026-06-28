@@ -42,6 +42,19 @@ bool   aco_frame_full(const struct aco_frame_state *st);
 void   aco_feat_extract(const struct aco_frame_state *st, float sr_hz, struct aco_features *out);
 size_t aco_feat_pack(const struct aco_features *f, float *vec, size_t cap);
 
+/** Healthy-baseline template: per-feature mean + inverse variance. */
+struct aco_baseline {
+	float mean[ACO_FEATURE_DIM];
+	float inv_var[ACO_FEATURE_DIM];
+};
+
+/**
+ * Deterministic anomaly score in [0,1]: Mahalanobis-style deviation of @p vec
+ * from the healthy @p base, squashed by `1 - exp(-d/ACO_FEATURE_DIM)`.  Runs when
+ * no AI model is loaded so the demo still produces a real score.
+ */
+float aco_anomaly_fallback(const float *vec, size_t n, const struct aco_baseline *base);
+
 #ifdef __cplusplus
 }
 #endif
