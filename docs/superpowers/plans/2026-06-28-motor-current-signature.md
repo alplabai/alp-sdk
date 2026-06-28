@@ -53,7 +53,7 @@
 **Interfaces:**
 - Produces (Tasks 2/3): `CURR_WINDOW_N 256`, `CURR_SR_HZ 200.0f`, `CURR_FEATURE_DIM 7`; `struct curr_sample`; `struct curr_window_state`; `struct curr_features`; `curr_window_reset/push/full`; `curr_feat_extract`; `curr_feat_pack`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/current_features/src/test_current_features.c`:
 
@@ -133,7 +133,7 @@ ZTEST(current_features, test_inrush_slope_is_negative)
 }
 ```
 
-- [ ] **Step 2: Write the test scaffolding**
+- [x] **Step 2: Write the test scaffolding**
 
 Create `tests/unit/current_features/CMakeLists.txt`:
 
@@ -177,11 +177,11 @@ tests:
       - unit
 ```
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 Run twister (testsuite-root `tests/unit`). Expected: `alp.unit.current_features` build failure (`current_features.h`/`.c` missing).
 
-- [ ] **Step 4: Write the header**
+- [x] **Step 4: Write the header**
 
 Create `examples/ai/motor-current-signature/src/current_features.h`:
 
@@ -246,7 +246,7 @@ size_t curr_feat_pack(const struct curr_features *f, float *vec, size_t cap);
 #endif /* CURRENT_FEATURES_H */
 ```
 
-- [ ] **Step 5: Write the implementation**
+- [x] **Step 5: Write the implementation**
 
 Create `examples/ai/motor-current-signature/src/current_features.c`:
 
@@ -400,11 +400,11 @@ size_t curr_feat_pack(const struct curr_features *f, float *vec, size_t cap)
 }
 ```
 
-- [ ] **Step 6: Run GREEN**
+- [x] **Step 6: Run GREEN**
 
 Run twister (testsuite-root `tests/unit`). Expected: `alp.unit.current_features` PASS, 3/3. (40 Hz at 200/256 → bin 51 → 39.8 Hz, within 3.)
 
-- [ ] **Step 7: Format + commit**
+- [x] **Step 7: Format + commit**
 
 Format with clang-format-22, then:
 ```bash
@@ -426,7 +426,7 @@ git commit -m "feat(curr): current_features windowed INA236 DSP (mean/ripple/cre
 - Consumes: `struct curr_features` (Task 1).
 - Produces (Task 3): `typedef enum { CURR_OFF=0, CURR_NORMAL=1, CURR_INRUSH=2, CURR_OVERLOAD=3, CURR_STALL=4, CURR_STATE_COUNT } curr_state_t;` `struct curr_config { float off_a; float overload_a; float ripple_min_a; float inrush_slope_a; };` `curr_state_t current_classify(const struct curr_features *f, const struct curr_config *cfg);` `const char *curr_state_name(curr_state_t s);` `float curr_anomaly_fallback(const struct curr_features *f, const struct curr_config *cfg);`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/unit/current_features/src/test_current_features.c`:
 
@@ -491,11 +491,11 @@ ZTEST(current_features, test_anomaly_and_names)
 
 Add `#include <string.h>` at the top of the test if not already present.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run twister (testsuite-root `tests/unit`). Expected: build failure — `current_classify`/`curr_config`/`curr_state_t`/`curr_state_name`/`curr_anomaly_fallback` undeclared.
 
-- [ ] **Step 3: Add the API to the header**
+- [x] **Step 3: Add the API to the header**
 
 Insert into `current_features.h` before the closing `#ifdef __cplusplus }`:
 
@@ -531,7 +531,7 @@ const char *curr_state_name(curr_state_t s);
 float curr_anomaly_fallback(const struct curr_features *f, const struct curr_config *cfg);
 ```
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 Append to `current_features.c`:
 
@@ -590,11 +590,11 @@ float curr_anomaly_fallback(const struct curr_features *f, const struct curr_con
 
 `fmaxf` needs `<math.h>` (already included in Task 1).
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 Run twister (testsuite-root `tests/unit`). Expected: `alp.unit.current_features` PASS, 7/7. If `test_classify_inrush` mis-labels (the inrush window's mean ≈ 3 A also exceeds overload), confirm the INRUSH slope check runs BEFORE the overload check (it does in the order above) — do not reorder.
 
-- [ ] **Step 6: Format + commit**
+- [x] **Step 6: Format + commit**
 
 ```bash
 git add examples/ai/motor-current-signature/src/current_features.h \
