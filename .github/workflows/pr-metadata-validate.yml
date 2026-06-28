@@ -196,6 +196,12 @@ jobs:
               python3 scripts/validate_board_yaml.py --input "$f"
           done < <(find examples tests -name board.yaml 2>/dev/null)
 
+      # End-to-end: every E1M board route resolves to a function the SoM
+      # capability table actually backs (or is a documented open pad).
+      # Catches a carrier wiring a pad the module doesn't expose.
+      - name: Check E1M board routes against the SoM capability table
+        run: python3 scripts/check_e1m_route_capability.py
+
       # Cross-validate: every `id:` in every metadata/socs/.../*.json
       # cores[] block must have a matching key in every consuming
       # SoM preset's `topology:` block.  Catches the case where a
