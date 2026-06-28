@@ -5,6 +5,7 @@
  * Host unit tests for acoustic_event (per-frame DSP) -- native_sim.
  */
 #include <math.h>
+#include <string.h>
 #include <zephyr/ztest.h>
 #include "acoustic_event.h"
 
@@ -59,4 +60,75 @@ ZTEST(acoustic_event, test_zcr_rises_with_frequency)
 	ase_feat_extract(&st, ASE_SR_HZ, &hi);
 	zassert_true(hi.zcr > lo.zcr, "ZCR increases with tone frequency");
 	zassert_within((double)hi.zcr, 0.75, 0.1, "6 kHz / 16 kHz -> ZCR ~0.75");
+}
+
+/* A decaying 6 kHz tone -> impulsive HF (high crest + centroid + ZCR). */
+static void fill_glass(struct ase_frame_state *st)
+{
+	ase_frame_reset(st);
+	for (int i = 0; i < ASE_FRAME_N; i++) {
+		float env = expf(-(float)i * 0.02f);
+		ase_frame_push(st, env * sinf(2.0f * (float)M_PI * 6000.0f * (float)i / ASE_SR_HZ));
+	}
+}
+
+/* Harmonic voiced: 800 Hz fundamental + 3 harmonics, high energy (scream). */
+static void fill_scream(struct ase_frame_state *st)
+{
+	ase_frame_reset(st);
+	for (int i = 0; i < ASE_FRAME_N; i++) {
+		float t = (float)i / ASE_SR_HZ;
+		float s = 1.0f * sinf(2.0f * (float)M_PI * 800.0f * t) +
+		          0.6f * sinf(2.0f * (float)M_PI * 1600.0f * t) +
+		          0.4f * sinf(2.0f * (float)M_PI * 2400.0f * t) +
+		          0.3f * sinf(2.0f * (float)M_PI * 3200.0f * t);
+		ase_frame_push(st, 0.25f * s);
+	}
+}
+
+ZTEST(acoustic_event, test_classify_ambient)
+{
+	struct ase_frame_state st;
+	struct ase_features    f;
+	ase_frame_reset(&st);
+	for (int i = 0; i < ASE_FRAME_N; i++) {
+		ase_frame_push(&st, 0.002f * sinf((float)i * 0.3f));
+	}
+	ase_feat_extract(&st, ASE_SR_HZ, &f);
+	zassert_equal(ase_classify_fallback(&f).ev, ASE_AMBIENT, "quiet -> AMBIENT");
+}
+
+ZTEST(acoustic_event, test_classify_glass_break)
+{
+	struct ase_frame_state st;
+	struct ase_features    f;
+	fill_glass(&st);
+	ase_feat_extract(&st, ASE_SR_HZ, &f);
+	zassert_true(f.crest > 4.0f, "glass burst is impulsive");
+	zassert_equal(ase_classify_fallback(&f).ev, ASE_GLASS_BREAK, "HF impulsive -> GLASS_BREAK");
+}
+
+ZTEST(acoustic_event, test_classify_alarm)
+{
+	struct ase_frame_state st;
+	struct ase_features    f;
+	fill_tone(&st, 3000.0f, 0.3f); /* steady 3 kHz beep */
+	ase_feat_extract(&st, ASE_SR_HZ, &f);
+	zassert_equal(ase_classify_fallback(&f).ev, ASE_ALARM, "3 kHz tonal -> ALARM");
+}
+
+ZTEST(acoustic_event, test_classify_scream)
+{
+	struct ase_frame_state st;
+	struct ase_features    f;
+	fill_scream(&st);
+	ase_feat_extract(&st, ASE_SR_HZ, &f);
+	zassert_equal(ase_classify_fallback(&f).ev, ASE_SCREAM, "harmonic voiced -> SCREAM");
+}
+
+ZTEST(acoustic_event, test_event_name)
+{
+	zassert_true(strcmp(ase_event_name(ASE_AMBIENT), "AMBIENT") == 0, "name");
+	zassert_true(strcmp(ase_event_name(ASE_GLASS_BREAK), "GLASS_BREAK") == 0, "name");
+	zassert_true(strcmp(ase_event_name(ASE_SCREAM), "SCREAM") == 0, "name");
 }

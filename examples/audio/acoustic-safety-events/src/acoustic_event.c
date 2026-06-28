@@ -186,3 +186,45 @@ size_t ase_feat_pack(const struct ase_features *f, float *vec, size_t cap)
 	vec[i++] = f->rms;
 	return i; /* == ASE_FEATURE_DIM */
 }
+
+struct ase_verdict ase_classify_fallback(const struct ase_features *f)
+{
+	struct ase_verdict v = { ASE_AMBIENT, 0.6f };
+
+	if (f->rms < 0.02f) {
+		v.ev         = ASE_AMBIENT;
+		v.confidence = 0.8f;
+	} else if (f->crest > 4.0f && f->centroid_hz > 4000.0f && f->zcr > 0.4f) {
+		/* Broadband impulsive high-frequency burst. */
+		v.ev         = ASE_GLASS_BREAK;
+		v.confidence = 0.85f;
+	} else if (f->flatness < 0.2f && f->centroid_hz >= 2500.0f && f->centroid_hz <= 4000.0f) {
+		/* Narrowband tonal beep in the alarm band. */
+		v.ev         = ASE_ALARM;
+		v.confidence = 0.9f;
+	} else if (f->rms > 0.1f && f->centroid_hz >= 800.0f && f->centroid_hz < 2500.0f) {
+		/* High-energy harmonic voice band. */
+		v.ev         = ASE_SCREAM;
+		v.confidence = 0.75f;
+	} else {
+		v.ev         = ASE_AMBIENT;
+		v.confidence = 0.5f;
+	}
+	return v;
+}
+
+const char *ase_event_name(ase_event_t e)
+{
+	switch (e) {
+	case ASE_AMBIENT:
+		return "AMBIENT";
+	case ASE_GLASS_BREAK:
+		return "GLASS_BREAK";
+	case ASE_ALARM:
+		return "ALARM";
+	case ASE_SCREAM:
+		return "SCREAM";
+	default:
+		return "UNKNOWN";
+	}
+}

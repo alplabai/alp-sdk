@@ -44,6 +44,29 @@ bool   ase_frame_full(const struct ase_frame_state *st);
 void   ase_feat_extract(const struct ase_frame_state *st, float sr_hz, struct ase_features *out);
 size_t ase_feat_pack(const struct ase_features *f, float *vec, size_t cap);
 
+/** Safety/security sound-event taxonomy (reference-grade). */
+typedef enum {
+	ASE_AMBIENT     = 0,
+	ASE_GLASS_BREAK = 1,
+	ASE_ALARM       = 2,
+	ASE_SCREAM      = 3,
+	ASE_EVENT_COUNT
+} ase_event_t;
+
+struct ase_verdict {
+	ase_event_t ev;
+	float       confidence; /**< 0..1 */
+};
+
+/**
+ * Deterministic event classifier over the feature vector.  Runs when no AI
+ * model is loaded.  Reference-grade threshold rules; customers retrain/retune.
+ */
+struct ase_verdict ase_classify_fallback(const struct ase_features *f);
+
+/** Stable upper-case event name for the record. */
+const char *ase_event_name(ase_event_t e);
+
 #ifdef __cplusplus
 }
 #endif
