@@ -91,8 +91,18 @@ pads:
   - { e1m_pad: "Y1", e1m_function: "JTAG_TMS/SWDIO", owner: "alif", silicon_peripheral: "JTAG_TMS/SWDIO", silicon_pad: "P4_5/JTAG0_TMS" }
   - { e1m_pad: "Y2", e1m_function: "JTAG_TDO", owner: "alif", silicon_peripheral: "JTAG_TDO", silicon_pad: "P4_7/JTAG0_TDO" }
   - { e1m_pad: "Z2", e1m_function: "AUDIO_CLK", owner: "alif", silicon_peripheral: "AUDIO_CLK_B", silicon_pad: "P9_6" }
+  - { e1m_pad: "A18", e1m_function: "IO11", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO2" }
   - { e1m_pad: "AG8", e1m_function: "SPI1_MISO", owner: "cc3501e", silicon_peripheral: "SPI1.MISO", silicon_pad: "GPIO_34" }
   - { e1m_pad: "AG9", e1m_function: "SPI1_MOSI", owner: "cc3501e", silicon_peripheral: "SPI1.MOSI", silicon_pad: "GPIO_33" }
   - { e1m_pad: "AG10", e1m_function: "SPI1_SCLK", owner: "cc3501e", silicon_peripheral: "SPI1.SCK", silicon_pad: "GPIO_32" }
+  - { e1m_pad: "AG33", e1m_function: "IO8", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO30" }
   - { e1m_pad: "AH8", e1m_function: "SPI1_CS1", owner: "cc3501e", silicon_peripheral: "SPI1.CS1", silicon_pad: "GPIO_15" }
   - { e1m_pad: "AH9", e1m_function: "SPI1_CS0", owner: "cc3501e", silicon_peripheral: "SPI1.CS0", silicon_pad: "GPIO_31" }
+  - { e1m_pad: "AH33", e1m_function: "IO10", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO35" }
+  - { e1m_pad: "E3", e1m_function: "IO13", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO13" }
+  - { e1m_pad: "F3", e1m_function: "IO15", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO14" }
+  - { e1m_pad: "G3", e1m_function: "IO16", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO17" }
+  - { e1m_pad: "H3", e1m_function: "IO17", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO16" }
+  - { e1m_pad: "I3", e1m_function: "IO18", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO18" }
+  - { e1m_pad: "J3", e1m_function: "IO19", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO19" }
+  - { e1m_pad: "K3", e1m_function: "IO20", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO26" }

@@ -74,21 +74,34 @@ def _read_tsv_rows(path: Path) -> list[list[str]]:
 
 
 def _pads_for_family(spec: dict) -> list[dict[str, str]]:
-    """Project a family's pad-claim TSVs into ordered pad entries."""
+    """Project a family's pad-claim TSVs into ordered pad entries.
+
+    Pad-claim rows carry (e1m_pad, e1m_function, peripheral, pad).  The
+    CC3501E map has a second, 3-column shape for raw GPIO pads
+    (e1m_pad, e1m_function, gpio) where the on-module pin IS the function
+    and there is no distinct peripheral -- those land as an empty
+    peripheral with the GPIO as the silicon pad.
+    """
     pads: list[dict[str, str]] = []
     for src in spec["sources"]:
         path = MODULES / src["file"]
         for row in _read_tsv_rows(path):
-            if len(row) < 4:
+            cells = [c.strip() for c in row]
+            if len(cells) == 3:
+                e1m_pad, e1m_function, peripheral, pad = (
+                    cells[0], cells[1], "", cells[2])
+            elif len(cells) >= 4:
+                e1m_pad, e1m_function, peripheral, pad = cells[:4]
+            else:
                 raise SystemExit(
                     f"gen_pinmux_capability: malformed row in {src['file']!r}: "
-                    f"{row!r} (expected 4 tab-separated columns)")
+                    f"{row!r} (expected 3 or 4 tab-separated columns)")
             pads.append({
-                "e1m_pad": row[0].strip(),
-                "e1m_function": row[1].strip(),
+                "e1m_pad": e1m_pad,
+                "e1m_function": e1m_function,
                 "owner": src["owner"],
-                "silicon_peripheral": row[2].strip(),
-                "silicon_pad": row[3].strip(),
+                "silicon_peripheral": peripheral,
+                "silicon_pad": pad,
             })
     return pads
 
