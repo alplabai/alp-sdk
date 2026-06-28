@@ -52,7 +52,11 @@ except ImportError:
 # resolve_capabilities merges SoC-JSON defaults with SoM-level overrides so
 # that silicon-determined caps removed from SoM YAMLs (slice 3b) still resolve.
 # Imported here so the orchestrator never duplicates that logic.
-from alp_project import resolve_memory_map, resolve_capabilities  # noqa: E402
+from alp_project import (  # noqa: E402
+    resolve_memory_map,
+    resolve_capabilities,
+    silicon_to_kconfig,
+)
 
 
 REPO = Path(__file__).resolve().parent.parent
@@ -432,21 +436,6 @@ class SystemManifest:
 # ---------------------------------------------------------------------
 # Silicon ref -> SoC JSON path
 # ---------------------------------------------------------------------
-
-# Mirrors scripts/alp_project.py:_SILICON_TO_KCONFIG so the orchestrator
-# can resolve any silicon ref it sees -- used to check the loader's
-# Kconfig coverage matches the SoC spec coverage.
-_SILICON_TO_KCONFIG: dict[str, str] = {
-    "alif:ensemble:e3": "ALP_SOC_ALIF_ENSEMBLE_E3",
-    "alif:ensemble:e4": "ALP_SOC_ALIF_ENSEMBLE_E4",
-    "alif:ensemble:e5": "ALP_SOC_ALIF_ENSEMBLE_E5",
-    "alif:ensemble:e6": "ALP_SOC_ALIF_ENSEMBLE_E6",
-    "alif:ensemble:e7": "ALP_SOC_ALIF_ENSEMBLE_E7",
-    "alif:ensemble:e8": "ALP_SOC_ALIF_ENSEMBLE_E8",
-    "renesas:rzv2n:n44": "ALP_SOC_RENESAS_RZV2N_N44",
-    "nxp:imx9:imx93":   "ALP_SOC_NXP_IMX9_IMX93",
-}
-
 
 def _silicon_to_soc_path(silicon: str, metadata_root: Path) -> Path:
     """`alif:ensemble:e7` -> metadata/socs/alif/ensemble/e7.json."""
@@ -2809,7 +2798,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     intrinsic chip set with no other board.yaml edits required.
     """
     silicon = project.som_preset.get("silicon")
-    kconfig = _SILICON_TO_KCONFIG.get(silicon)
+    kconfig = silicon_to_kconfig(silicon)
     diagnostics = project.diagnostics
 
     # Lazy-import alp_project tables — alp_project imports us, so a
