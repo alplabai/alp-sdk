@@ -42,8 +42,15 @@ tacho GPIO / tacholess --> rotor_speed --> rpm, BPF
 
 ```
 # WTAC,t_s,rpm,bpf_hz,anomaly_score,dominant_subsystem,top_band_hz,flags,rpm_src
-WTAC,12.0,17.4,0.87,0.62,BLADE_BPF,5333.3,IMBALANCE,ESTIMATED
+WTAC,12.0,17.4,0.87,0.62,BLADE_BPF,3333.3,IMBALANCE,ESTIMATED
 ```
+
+`top_band_hz` = `GEARMESH_BAND * (ACO_SR_HZ/2) / ACO_N_BANDS` = `5 * 8000 / 12` ≈ `3333.3` Hz.
+
+`rpm_src` ∈ `{TACHO, ESTIMATED, CANNED}`: `TACHO` = live GPIO pulse counting,
+`ESTIMATED` = tacholess envelope-based estimate (demo default when the estimate
+converges), `CANNED` = fixed look-up table fallback used in the demo when the
+tacholess estimate has not converged.
 
 ## Build
 

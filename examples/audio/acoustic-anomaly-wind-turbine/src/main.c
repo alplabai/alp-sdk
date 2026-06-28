@@ -228,7 +228,7 @@ int main(void)
 		const char *rpm_src = "ESTIMATED";
 		if (!rotor_rpm_valid(rpm)) {
 			rpm     = s_canned_rpm[r]; /* fall back to the canned track */
-			rpm_src = "TACHO";
+			rpm_src = "CANNED";
 		}
 		float bpf = rotor_bpf_hz(rpm, N_BLADES);
 
@@ -315,6 +315,9 @@ int main(void)
 	if (c.mic != NULL) {
 		alp_audio_in_stop(c.mic);
 		alp_audio_in_close(c.mic);
+	}
+	if (c.tacho != NULL) {
+		alp_gpio_close(c.tacho);
 	}
 	printk("[wtac] done\n");
 	return 0;
