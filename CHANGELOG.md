@@ -7,6 +7,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added
+
+- **`examples/ai/wearable-activity-fall`** — new wearable activity + fall
+  detection example (four-task series).  Task 1: `motion_features` pure-C DSP
+  core — 256-sample windowed accel+gyro features (per-axis + magnitude AC RMS,
+  SMA, dominant cadence via 256-pt radix-2 FFT, jerk RMS, tilt angle); host
+  unit-tested on `native_sim/native/64` via `tests/unit/motion_features`
+  (`alp.unit.motion_features`, 3 test cases).
+
 ### Fixed
 
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
