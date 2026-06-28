@@ -51,6 +51,28 @@ bool   mot_window_full(const struct mot_window_state *st);
 void   mot_feat_extract(const struct mot_window_state *st, float sr_hz, struct mot_features *out);
 size_t mot_feat_pack(const struct mot_features *f, float *vec, size_t cap);
 
+/** Coarse activity classes.  STAIRS is an AI-only class -- the deterministic
+ *  fallback cannot separate it from WALK without a barometer. */
+typedef enum {
+	ACT_IDLE   = 0,
+	ACT_WALK   = 1,
+	ACT_RUN    = 2,
+	ACT_STAIRS = 3,
+	ACT_CLASS_COUNT
+} mot_activity_t;
+
+struct mot_verdict {
+	mot_activity_t cls;
+	float          confidence; /**< 0..1 */
+};
+
+/** Deterministic idle/walk/run classifier over the feature vector.  Runs when no
+ *  AI model is loaded.  Never emits STAIRS (maps that case to WALK). */
+struct mot_verdict mot_activity_fallback(const struct mot_features *f);
+
+/** Stable upper-case class name for the record. */
+const char *mot_activity_name(mot_activity_t c);
+
 #ifdef __cplusplus
 }
 #endif

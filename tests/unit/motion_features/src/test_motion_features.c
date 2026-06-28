@@ -5,6 +5,7 @@
  * Host unit tests for motion_features (windowed IMU DSP) -- native_sim.
  */
 #include <math.h>
+#include <string.h>
 #include <zephyr/ztest.h>
 #include "motion_features.h"
 
@@ -72,4 +73,38 @@ ZTEST(motion_features, test_idle_is_low_energy)
 	mot_feat_extract(&st, MOT_SR_HZ, &f);
 	zassert_true(f.amag_rms < 0.02f, "idle window has near-zero AC magnitude");
 	zassert_within((double)f.tilt_deg, 0.0, 5.0, "Z-up gravity -> ~0 deg tilt");
+}
+
+ZTEST(motion_features, test_classify_idle)
+{
+	struct mot_window_state st;
+	struct mot_features     f;
+	mot_window_reset(&st);
+	for (int i = 0; i < MOT_WINDOW_N; i++) {
+		struct mot_sample s = { .ax = 0.0f, .ay = 0.0f, .az = 1.0f };
+		mot_window_push(&st, s);
+	}
+	mot_feat_extract(&st, MOT_SR_HZ, &f);
+	zassert_equal(mot_activity_fallback(&f).cls, ACT_IDLE, "still -> IDLE");
+}
+
+ZTEST(motion_features, test_classify_walk_vs_run)
+{
+	struct mot_window_state st;
+	struct mot_features     f;
+
+	fill_gait(&st, 2.0f, 0.3f); /* 2 Hz, modest amplitude -> WALK */
+	mot_feat_extract(&st, MOT_SR_HZ, &f);
+	zassert_equal(mot_activity_fallback(&f).cls, ACT_WALK, "2 Hz modest -> WALK");
+
+	fill_gait(&st, 3.0f, 1.2f); /* 3 Hz, large amplitude -> RUN */
+	mot_feat_extract(&st, MOT_SR_HZ, &f);
+	zassert_equal(mot_activity_fallback(&f).cls, ACT_RUN, "3 Hz strong -> RUN");
+}
+
+ZTEST(motion_features, test_activity_name)
+{
+	zassert_true(strcmp(mot_activity_name(ACT_IDLE), "IDLE") == 0, "name");
+	zassert_true(strcmp(mot_activity_name(ACT_RUN), "RUN") == 0, "name");
+	zassert_true(strcmp(mot_activity_name(ACT_STAIRS), "STAIRS") == 0, "name");
 }

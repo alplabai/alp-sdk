@@ -184,3 +184,37 @@ size_t mot_feat_pack(const struct mot_features *f, float *vec, size_t cap)
 	vec[i++] = f->tilt_deg;
 	return i; /* == MOT_FEATURE_DIM */
 }
+
+struct mot_verdict mot_activity_fallback(const struct mot_features *f)
+{
+	struct mot_verdict v = { ACT_IDLE, 0.0f };
+
+	if (f->amag_rms < 0.05f) {
+		v.cls        = ACT_IDLE;
+		v.confidence = 0.8f;
+	} else if (f->dom_freq_hz > 2.5f && f->amag_rms > 0.6f) {
+		v.cls        = ACT_RUN;
+		v.confidence = fminf(1.0f, f->amag_rms);
+	} else {
+		/* Moving but not running -> WALK (covers stairs too; the model splits). */
+		v.cls        = ACT_WALK;
+		v.confidence = 0.7f;
+	}
+	return v;
+}
+
+const char *mot_activity_name(mot_activity_t c)
+{
+	switch (c) {
+	case ACT_IDLE:
+		return "IDLE";
+	case ACT_WALK:
+		return "WALK";
+	case ACT_RUN:
+		return "RUN";
+	case ACT_STAIRS:
+		return "STAIRS";
+	default:
+		return "UNKNOWN";
+	}
+}
