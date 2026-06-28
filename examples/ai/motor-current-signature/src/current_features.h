@@ -50,6 +50,36 @@ bool curr_window_full(const struct curr_window_state *st);
 void curr_feat_extract(const struct curr_window_state *st, float sr_hz, struct curr_features *out);
 size_t curr_feat_pack(const struct curr_features *f, float *vec, size_t cap);
 
+/** Operating-state taxonomy (reference-grade; customers retune the config). */
+typedef enum {
+	CURR_OFF      = 0,
+	CURR_NORMAL   = 1,
+	CURR_INRUSH   = 2,
+	CURR_OVERLOAD = 3,
+	CURR_STALL    = 4,
+	CURR_STATE_COUNT
+} curr_state_t;
+
+/** Motor-specific thresholds (Amps). */
+struct curr_config {
+	float off_a;          /**< below this mean current = OFF. */
+	float overload_a;     /**< above this mean current = OVERLOAD/STALL. */
+	float ripple_min_a;   /**< AC ripple below this at high current = STALL. */
+	float inrush_slope_a; /**< slope below -this = decaying inrush. */
+};
+
+/** Classify the operating state from the features + config. */
+curr_state_t current_classify(const struct curr_features *f, const struct curr_config *cfg);
+
+/** Stable upper-case state name for the record. */
+const char *curr_state_name(curr_state_t s);
+
+/**
+ * Deterministic 0..1 anomaly score (overcurrent severity, saturating high on a
+ * stall).  Used when no AI model is loaded.
+ */
+float curr_anomaly_fallback(const struct curr_features *f, const struct curr_config *cfg);
+
 #ifdef __cplusplus
 }
 #endif

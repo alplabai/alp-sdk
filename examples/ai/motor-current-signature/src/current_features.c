@@ -149,3 +149,54 @@ size_t curr_feat_pack(const struct curr_features *f, float *vec, size_t cap)
 	vec[i++] = f->ripple_freq_hz;
 	return i; /* == CURR_FEATURE_DIM */
 }
+
+curr_state_t current_classify(const struct curr_features *f, const struct curr_config *cfg)
+{
+	if (f->mean_current_a < cfg->off_a) {
+		return CURR_OFF;
+	}
+	if (f->slope_a < -cfg->inrush_slope_a) {
+		return CURR_INRUSH; /* current decaying from a startup spike */
+	}
+	if (f->mean_current_a > cfg->overload_a) {
+		return (f->rms_ac_a < cfg->ripple_min_a) ? CURR_STALL : CURR_OVERLOAD;
+	}
+	return CURR_NORMAL;
+}
+
+const char *curr_state_name(curr_state_t s)
+{
+	switch (s) {
+	case CURR_OFF:
+		return "OFF";
+	case CURR_NORMAL:
+		return "NORMAL";
+	case CURR_INRUSH:
+		return "INRUSH";
+	case CURR_OVERLOAD:
+		return "OVERLOAD";
+	case CURR_STALL:
+		return "STALL";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+float curr_anomaly_fallback(const struct curr_features *f, const struct curr_config *cfg)
+{
+	float score = 0.0f;
+	if (f->mean_current_a > cfg->overload_a && cfg->overload_a > 1e-6f) {
+		score = (f->mean_current_a - cfg->overload_a) / cfg->overload_a;
+	}
+	/* High current with no ripple = stalled rotor: a strong anomaly. */
+	if (f->mean_current_a > cfg->overload_a && f->rms_ac_a < cfg->ripple_min_a) {
+		score = fmaxf(score, 0.9f);
+	}
+	if (score < 0.0f) {
+		score = 0.0f;
+	}
+	if (score > 1.0f) {
+		score = 1.0f;
+	}
+	return score;
+}
