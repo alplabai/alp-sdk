@@ -29,6 +29,8 @@ tests:
         - "\\[wact\\] done"
 
   alp_sdk.example.wearable_activity_fall.aen_build:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
       - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
     build_only: true
