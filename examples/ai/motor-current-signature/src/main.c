@@ -163,7 +163,8 @@ int main(void)
 		alp_inference_close(inf);
 	}
 	if (mon_ok) {
-		ina236_reset(&mon);
+		(void)ina236_reset(&mon);
+		ina236_deinit(&mon);
 	}
 	if (bus != NULL) {
 		alp_i2c_close(bus);
