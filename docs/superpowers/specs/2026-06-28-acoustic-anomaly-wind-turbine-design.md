@@ -122,7 +122,7 @@ small autoencoder → Vela for Ethos-U / DX-M1 for V2N).
 WTAC,12.0,17.4,0.87,0.62,BLADE_BPF,180.0,IMBALANCE,TACHO
 ```
 `dominant_subsystem` ∈ {`BLADE_BPF`, `DRIVETRAIN_TONAL`, `BROADBAND`}; `rpm_src` ∈
-{`TACHO`, `ESTIMATED`, `INVALID`}; worst-scoring window in the interval wins. The fallback
+{`TACHO`, `ESTIMATED`, `CANNED`}; worst-scoring window in the interval wins. The fallback
 sets advisory flags (the AI gives the score):
 
 | Flag | Cue |

@@ -82,7 +82,9 @@ void bpf_modulation_extract(const struct bpf_env_state *st,
 	for (int i = 0; i < n; i++) {
 		total += buf[i] * buf[i];
 	}
-	float norm = (total > 1e-12f) ? (1.0f / total) : 0.0f;
+	/* |X(k)|^2 sums to n*Sigma|x|^2 (Parseval); divide by (n*total) so each
+	 * blade-order energy is a bounded fraction of the envelope AC energy. */
+	float norm = (total > 1e-12f) ? (1.0f / ((float)n * total)) : 0.0f;
 
 	for (int k = 1; k <= BPF_N_HARMONICS; k++) {
 		float p                        = goertzel_power(buf, n, (float)k * bpf_hz, frame_rate_hz);

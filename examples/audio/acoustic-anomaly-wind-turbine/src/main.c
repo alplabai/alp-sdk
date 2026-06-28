@@ -274,7 +274,9 @@ int main(void)
 			score = aco_anomaly_fallback(acc, ACO_FEATURE_DIM, &s_baseline);
 		}
 
-		float blade = mod.blade_order_energy[0];
+		/* Blade-pass AM strength (already 0..1) raises the score; do NOT use the
+		 * raw blade_order_energy, which is not a probability. */
+		float blade = mod.modulation_depth;
 		if (blade > score) {
 			score = blade;
 		}
@@ -286,7 +288,7 @@ int main(void)
 		int   subsystem = 2; /* BROADBAND */
 		char  flags[32] = "NONE";
 		float gearmesh  = acc[GEARMESH_BAND];
-		if (blade > 0.4f && mod.modulation_depth > 0.3f) {
+		if (mod.modulation_depth > 0.3f && mod.blade_order_energy[0] > 0.2f) {
 			subsystem = 0; /* BLADE_BPF */
 			strcpy(flags, "IMBALANCE");
 		} else if (gearmesh > 0.3f) {

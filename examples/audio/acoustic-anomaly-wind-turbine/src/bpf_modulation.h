@@ -29,7 +29,7 @@ struct bpf_env_state {
 };
 
 struct bpf_modulation {
-	float blade_order_energy[BPF_N_HARMONICS]; /**< normalised energy at k*BPF. */
+	float blade_order_energy[BPF_N_HARMONICS]; /**< fraction of envelope AC energy at k*BPF (0..~1). */
 	float modulation_depth;                    /**< (max-min)/(max+min) of the envelope. */
 };
 
