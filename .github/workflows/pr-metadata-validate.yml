@@ -77,6 +77,12 @@ jobs:
       - name: Check pin conflicts in every SoM peripheral map
         run: python3 scripts/check_pin_conflicts.py
 
+      # Catches inference-backend / model-format naming drift: every
+      # backend a preset selects must be a canonical string the device
+      # dispatcher decodes (else it silently falls back to AUTO/TFLITE).
+      - name: Check inference backend <-> dispatcher canonicalisation
+        run: python3 scripts/check_inference_backend_parity.py
+
       # Smoke-test the board.yaml loader on the canonical example so
       # any schema / loader regression is caught at PR time rather
       # than v0.4-load-test time.  Exercises every emit format.
