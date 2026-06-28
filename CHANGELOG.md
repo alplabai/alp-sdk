@@ -7,6 +7,18 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added
+
+- **Wind-turbine acoustic anomaly example** (`examples/audio/acoustic-anomaly-wind-turbine/`):
+  nacelle acoustic condition monitor — PDM mic → DSP features (`acoustic_features`:
+  FFT band energies / spectral flatness / centroid / kurtosis + healthy-baseline
+  anomaly fallback) → rotor-order normalisation (`rotor_speed` tacho + tacholess RPM
+  → BPF; `bpf_modulation` Goertzel at blade-pass harmonics) → per-interval anomaly
+  score for drivetrain tonals + gross blade aero-anomalies. Three pure-C DSP cores
+  host-unit-tested on `native_sim` (`tests/unit/acoustic_features`,
+  `tests/unit/rotor_speed`, `tests/unit/bpf_modulation`); model is a stub with a
+  training recipe in `models/README.md`; HiL bench-gated.
+
 ### Fixed
 
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
