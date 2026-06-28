@@ -2678,6 +2678,36 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
         encoding="utf-8") == shared[sysbuild_path]
 
 
+def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
+    """ADR 0014 Phase-3: a `boot:` block (-> build/alp_sysbuild.conf) makes
+    the Zephyr slice command pass `--sysbuild --sysbuild-config
+    ../alp_sysbuild.conf` (the overlay sits one dir up from the slice's
+    cwd=build/<core>-<os>); a project without one adds no flag and keeps
+    the bare `west build -b <board> <app>` shape."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    # With boot: -> sysbuild overlay emitted -> command carries the flags.
+    path = _write_board(tmp_path, V2N_BOOT_MCUBOOT)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+    z = next(s for s in plan["slices"]
+             if s["backend"] == "zephyr" and s["command"])
+    args = z["command"]["args"]
+    assert args[:2] == ["build", "-b"]
+    assert "--sysbuild" in args
+    assert args[args.index("--sysbuild-config") + 1] == "../alp_sysbuild.conf"
+
+    # Without boot: -> no sysbuild overlay -> no flag, bare command.
+    path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
+    plan2 = _json.loads(emit_build_plan(
+        load_board_yaml(path2), board_yaml=path2, build_root=Path("build")))
+    z2 = next(s for s in plan2["slices"]
+              if s["backend"] == "zephyr" and s["command"])
+    assert "--sysbuild" not in z2["command"]["args"]
+    assert "--sysbuild-config" not in z2["command"]["args"]
+
+
 def test_cli_emit_build_plan(tmp_path: Path, capsys, monkeypatch) -> None:
     """`--emit build-plan` prints the JSON to stdout, rc 0, writes
     nothing to disk."""

@@ -3581,11 +3581,27 @@ def _slice_command(
         # exist.  Override cores.<id>.app with a real app to build the core.
         if slice_.app == STOCK_SHIM_APP:
             return None
-        return [
+        cmd = [
             "west", "build",
             "-b", slice_.board,
             str(_zephyr_app_dir(slice_.app)),
         ]
+        # ADR 0014 Phase-3 conf->build: wire the generated sysbuild
+        # overlays into the build command itself.  `_shared_artefacts`
+        # emits the top-level overlay at build_root/alp_sysbuild.conf and
+        # the TF-M child overlay at build_root/sysbuild/tfm/tfm.conf; the
+        # command runs with cwd=build_dir (build/<core>-<os>), so the
+        # top-level overlay is one directory up.  Pass --sysbuild whenever
+        # a sysbuild child image is configured (a `boot:` or `security.psa:`
+        # block), and --sysbuild-config only when the top-level overlay is
+        # non-empty (the TF-M overlay is picked up by sysbuild convention
+        # from its sysbuild/tfm/ path).  Absent both, the stock per-family
+        # sysbuild defaults apply and no flag is added.
+        if emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project):
+            cmd.append("--sysbuild")
+            if emit_sysbuild_conf(project):
+                cmd += ["--sysbuild-config", "../alp_sysbuild.conf"]
+        return cmd
     if slice_.os == "yocto":
         target = slice_.image or slice_.app
         if not target:
