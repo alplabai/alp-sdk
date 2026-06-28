@@ -9,12 +9,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
-- **`examples/ai/wearable-activity-fall`** — new wearable activity + fall
-  detection example (four-task series).  Task 1: `motion_features` pure-C DSP
-  core — 256-sample windowed accel+gyro features (per-axis + magnitude AC RMS,
-  SMA, dominant cadence via 256-pt radix-2 FFT, jerk RMS, tilt angle); host
-  unit-tested on `native_sim/native/64` via `tests/unit/motion_features`
-  (`alp.unit.motion_features`, 3 test cases).
+- **Wearable activity + fall example** (`examples/ai/wearable-activity-fall/`):
+  body-worn IMU edge node — ICM-42670 accel+gyro → windowed motion features
+  (`motion_features`: per-axis/magnitude RMS, SMA, step cadence via FFT, jerk,
+  tilt + a deterministic idle/walk/run fallback) → activity classifier via
+  `<alp/inference.h>`, plus a rule-based 3-phase fall detector (`fall_detect`:
+  free-fall → impact → post-impact stillness). Two pure-C cores host-unit-tested
+  on `native_sim` (`tests/unit/motion_features`, `tests/unit/fall_detect`); model
+  is a stub with a training recipe in `models/README.md`; HiL bench-gated.
 
 ### Fixed
 
