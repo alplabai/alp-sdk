@@ -4,21 +4,37 @@ family: aen
 display_name: "E1M-AEN (Alif Ensemble)"
 
 hw_revisions:
+  # SDK rev key tracks the Altium board rev (rN == board 2626-RN) so there
+  # is no label offset.  Per the family invariant, all AEN SKUs (E3..E8)
+  # share the same module PCB; SoC-tier differences live in the per-SKU
+  # `som.yaml`, not as hw-revisions of the module.
   r1:
     min_sdk_version: "0.3.0"
     max_sdk_version: ~
     status: production
+    board_rev: "R1"
     summary: |
-      First production AEN revision.  Per the family invariant,
-      all AEN SKUs (E3..E8) share the same module PCB; SoC-tier
-      differences are captured in the per-SKU `som.yaml`, not as
-      hw-revisions of the module.
+      Initial AEN board -- Altium board rev `R1`.  The pinout predates the
+      r2 CC3501E re-route: E1M IO8/IO10 are Alif GPIOs and IO21 reaches the
+      CC3501E.  This is the board the early bench bring-up ran on.
     changes:
-      - "Initial release."
+      - "Initial AEN bring-up board (rev R1)."
   r2:
     min_sdk_version: ~
     max_sdk_version: ~
-    status: reserved
+    status: production
+    board_rev: "R2"
+    released: "2026-06-23"
+    summary: |
+      Production AEN board -- Altium board rev `R2`, the default build
+      going forward (on-module Alif<->CC3501E link defaults to SPI, not
+      SDIO).  The schematic netlist of record (export `2626-R2`, where
+      `2626` is the YYWW date code = 2026 week 26) is held privately under
+      `metadata/e1m_modules/aen/netlists/E1M-AEN-2626-R2_*.csv`; the public
+      curated pinout TSVs track this revision.
+    changes:
+      - "CC3501E GPIO re-route vs r1: IO8 -> WIFI_GPIO30 and IO10 -> WIFI_GPIO35 (both now CC3501E); IO21 unrouted (was CC3501E GPIO30)."
+      - "On-module Alif<->CC3501E link defaults to SPI (not SDIO)."
   r3:
     min_sdk_version: ~
     max_sdk_version: ~
