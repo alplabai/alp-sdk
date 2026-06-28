@@ -20,13 +20,35 @@ extern "C" {
 /** Per-frame rate of the acoustic front end (ACO_SR_HZ / ACO_FRAME_N). */
 #define ACO_FRAME_RATE_HZ 62.5f
 
-/** Blade-pass frequency: BPF = n_blades * rpm / 60. */
+/**
+ * @brief Compute the blade-pass frequency from shaft speed.
+ *
+ * BPF = n_blades * rpm / 60.  This is the rotor-order fundamental that
+ * indexes all blade-pass harmonic analysis (see bpf_modulation.h).
+ *
+ * @param rpm      Shaft speed in revolutions per minute.
+ * @param n_blades Number of rotor blades (typically 3 for utility-scale turbines).
+ * @return Blade-pass frequency in Hz.
+ */
 float rotor_bpf_hz(float rpm, uint8_t n_blades);
 
-/** Plausibility gate for a wind-turbine rotor (3..30 rpm). */
+/**
+ * @brief Plausibility gate for a wind-turbine rotor (3..30 rpm).
+ * @param rpm RPM estimate to validate.
+ * @return true if rpm is within the operational range; false otherwise.
+ */
 bool rotor_rpm_valid(float rpm);
 
-/** RPM from a tacho pulse interval (us) and pulses-per-revolution. */
+/**
+ * @brief RPM from a tacho pulse interval (us) and pulses-per-revolution.
+ *
+ * rev_period_us = pulse_interval_us * pulses_per_rev;
+ * rpm = 60e6 / rev_period_us.
+ *
+ * @param pulse_interval_us Time between consecutive tachometer pulses in microseconds.
+ * @param pulses_per_rev    Number of pulses the tachometer emits per shaft revolution.
+ * @return Shaft speed in RPM, or 0.0f if either argument is zero.
+ */
 float rotor_tacho_rpm(uint32_t pulse_interval_us, uint16_t pulses_per_rev);
 
 /**
