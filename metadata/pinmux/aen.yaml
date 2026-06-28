@@ -52,7 +52,6 @@ pads:
   - { e1m_pad: "AG16", e1m_function: "IO4", owner: "alif", silicon_peripheral: "GPIO", silicon_pad: "P4.3" }
   - { e1m_pad: "AG17", e1m_function: "I2C1_SCL", owner: "alif", silicon_peripheral: "I2C1_SCL_B", silicon_pad: "P3_7/JTAG0_TRACECLK" }
   - { e1m_pad: "AG18", e1m_function: "IO6", owner: "alif", silicon_peripheral: "", silicon_pad: "P9.7" }
-  - { e1m_pad: "AG33", e1m_function: "IO8", owner: "alif", silicon_peripheral: "", silicon_pad: "P7.1" }
   - { e1m_pad: "AG34", e1m_function: "IO7", owner: "alif", silicon_peripheral: "", silicon_pad: "P4.0" }
   - { e1m_pad: "AH4", e1m_function: "UART1_RX", owner: "alif", silicon_peripheral: "UART3_RX_A", silicon_pad: "P1_2" }
   - { e1m_pad: "AH5", e1m_function: "I3C_SDA", owner: "alif", silicon_peripheral: "I3C_SDA_D", silicon_pad: "P7_6_FLEX/SCP2_C" }
@@ -64,7 +63,6 @@ pads:
   - { e1m_pad: "AH14", e1m_function: "SD_D3", owner: "alif", silicon_peripheral: "SD_D3", silicon_pad: "P13_3" }
   - { e1m_pad: "AH17", e1m_function: "I2C1_SDA", owner: "alif", silicon_peripheral: "I2C1_SDA_C", silicon_pad: "P7_2/SCP2_A" }
   - { e1m_pad: "AH18", e1m_function: "IO5", owner: "alif", silicon_peripheral: "", silicon_pad: "P14.7" }
-  - { e1m_pad: "AH33", e1m_function: "IO10", owner: "alif", silicon_peripheral: "", silicon_pad: "P9.1" }
   - { e1m_pad: "B3", e1m_function: "PWM7", owner: "alif", silicon_peripheral: "UT3_T0_C", silicon_pad: "P10_6" }
   - { e1m_pad: "B4", e1m_function: "PWM5", owner: "alif", silicon_peripheral: "UT6_T0_A", silicon_pad: "P1_4" }
   - { e1m_pad: "B5", e1m_function: "PWM3", owner: "alif", silicon_peripheral: "UT10_T0_A", silicon_pad: "P2_4" }
