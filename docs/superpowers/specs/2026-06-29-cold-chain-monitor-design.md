@@ -91,7 +91,7 @@ absent on native_sim → synthetic environment generator. Per report → `cc_fea
 
 ```
 # CC,t_s,state,temp_c,rh_pct,dewpoint_c,mkt_c,excursion_min
-CC,256.0,OK,5.0,50.0,-4.4,5.0,0.0
+CC,256.0,OK,5.0,50.0,-4.6,5.0,0.0
 CC,512.0,TEMP_EXCURSION,12.0,55.0,3.3,8.7,40.0
 ```
 `state` ∈ {`OK`,`TEMP_EXCURSION`,`MKT_EXCEEDED`,`CONDENSATION_RISK`}.

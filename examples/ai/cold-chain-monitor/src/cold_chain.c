@@ -74,13 +74,13 @@ static float mkt_celsius(const struct cc_window_state *st, int n)
 	/* Each Boltzmann factor is proportional to the Arrhenius reaction rate at
 	 * its temperature.  The ratio between any two factors is
 	 * exp(ΔH/R × (1/T_cold − 1/T_hot)); for T_cold=277 K (4 C) versus
-	 * T_hot=313 K (40 C) that ratio is about 70.  A single hour at 40 C
-	 * therefore delivers the same cumulative chemical damage as ~70 hours at
-	 * 4 C -- which is exactly the asymmetry MKT is designed to capture. */
+	 * T_hot=313 K (40 C) that ratio is exp(10000·(1/277.15 − 1/313.15)) ≈ 63.
+	 * A single hour at 40 C therefore delivers the same cumulative chemical
+	 * damage as ~63 hours at 4 C -- exactly the asymmetry MKT captures. */
 	/* Divide by n to get the mean of the Boltzmann-weighted exponentials. */
 	double mean_exp = sum_exp / (double)n;
-	/* Guard the log: mean_exp is strictly positive for any real temperature. */
-	/* Invert the logarithm: MKT_K = (ΔH/R) / (-ln(mean_exp)). */
+	/* mean_exp is in (0,1) for any real temperature, so -ln(mean_exp) > 0 and
+	 * no runtime guard is needed; invert to MKT_K = (ΔH/R) / (-ln(mean_exp)). */
 	double mkt_kelvin = (double)CC_DH_OVER_R / (-log(mean_exp));
 	/* Convert back to Celsius for the application layer. */
 	return (float)(mkt_kelvin - 273.15);
@@ -105,10 +105,11 @@ static float dewpoint_celsius(float temp_c, float rh_pct)
 	 * for a 20 C ambient -- far below any real cold-chain scenario.  This
 	 * guard only fires on corrupt or uninitialised sensor readings. */
 	float rh = (rh_pct < 1.0f) ? 1.0f : ((rh_pct > 100.0f) ? 100.0f : rh_pct);
-	/* γ combines the saturation vapour-pressure (log term) and the Clausius-
-	 * Clapeyron temperature term.  For valid inputs γ is always negative:
-	 * log(RH/100) <= 0 and the temperature term is positive but smaller in
-	 * magnitude, giving a dewpoint below the ambient as physically expected. */
+	/* γ combines the saturation vapour-pressure (log term, <= 0 for RH <= 100%)
+	 * and the temperature term (positive).  γ may be negative (cold/dry air) or
+	 * positive (warm/humid, e.g. +0.65 at 20 C / 50% RH); either way γ < a, so
+	 * the denominator (a - γ) stays positive and Td <= T for RH <= 100% -- the
+	 * dewpoint never exceeds the ambient, as physically expected. */
 	float gamma = logf(rh / 100.0f) + (a * temp_c) / (b + temp_c);
 	/* Solve for the temperature at which RH would equal 100%. */
 	return (b * gamma) / (a - gamma);
