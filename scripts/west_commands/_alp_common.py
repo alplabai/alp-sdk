@@ -27,26 +27,26 @@ def find_sdk_root() -> Optional[Path]:
       ALP_SDK_ROOT env -> this file's grandparent ->
       EXTRA_ZEPHYR_MODULES / ZEPHYR_EXTRA_MODULES entries.
 
-    Returns the first path that contains scripts/alp_orchestrate.py;
+    Returns the first path that contains scripts/alp_orchestrate/;
     None when no candidate works.
     """
     env_root = os.environ.get("ALP_SDK_ROOT", "").strip()
     if env_root:
         p = Path(env_root)
-        if (p / "scripts" / "alp_orchestrate.py").is_file():
+        if (p / "scripts" / "alp_orchestrate" / "__init__.py").is_file():
             return p
 
     # scripts/west_commands/_alp_common.py -> the sdk root is two
     # parents up.
     candidate = Path(__file__).resolve().parents[2]
-    if (candidate / "scripts" / "alp_orchestrate.py").is_file():
+    if (candidate / "scripts" / "alp_orchestrate" / "__init__.py").is_file():
         return candidate
 
     for var in ("EXTRA_ZEPHYR_MODULES", "ZEPHYR_EXTRA_MODULES"):
         for entry in os.environ.get(var, "").split(os.pathsep):
             entry = entry.strip()
             if entry and (Path(entry) / "scripts" /
-                          "alp_orchestrate.py").is_file():
+                          "alp_orchestrate" / "__init__.py").is_file():
                 return Path(entry)
     return None
 
@@ -76,8 +76,8 @@ def env_with_sdk(sdk_root: Path) -> dict[str, str]:
         env["EXTRA_ZEPHYR_MODULES"] = (existing + sep + str(sdk_root)
                                         if existing else str(sdk_root))
     env["ALP_SDK_ROOT"] = str(sdk_root)
-    # Make sure scripts/alp_orchestrate.py is importable when a wrapper
-    # invokes the python module form.
+    # Make sure the alp_orchestrate package is importable when a wrapper
+    # invokes the python module form (`python -m alp_orchestrate`).
     pp = env.get("PYTHONPATH", "")
     sdk_scripts = str(sdk_root / "scripts")
     if sdk_scripts not in pp.split(sep):
