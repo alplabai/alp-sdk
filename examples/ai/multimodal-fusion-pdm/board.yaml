@@ -2,8 +2,8 @@
 #
 # An M55 node reads three on-board sensors -- ICM-42670 (vibration), INA236
 # (current), BME280 (temperature) -- and fuses them into one motor-health
-# verdict via cross-modal corroboration.  Same source targets the V2N DEEPX
-# path when som.sku is flipped.
+# verdict via cross-modal corroboration.  Same source targets the V2N
+# accelerator path when som.sku is flipped.
 
 som:
   sku: E1M-AEN701

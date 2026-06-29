@@ -138,7 +138,8 @@ static uint8_t s_arena[64 * 1024] __aligned(16);
  *
  * Perturbation magnitude is 3x tolerance so sub-scores are clearly above
  * the anomaly threshold (>1) and the corroboration logic fires decisively.
- * On HiL with real sensors, synth_input() is never called.
+ * synth_input() runs only when NO real sensor is present (native_sim); on a
+ * board with at least one sensor the live read path is used instead.
  */
 static struct fusion_input synth_input(int report)
 {
@@ -363,15 +364,19 @@ int main(void)
 
 	for (int r = 0; r < N_REPORTS; r++) {
 		/*
-		 * Build the per-modality summary.  On HiL (all sensors OK) read the
-		 * real chips; on native_sim fall back to the deterministic synthetic
-		 * scenario that drives the specific hypothesis for this report index.
+		 * Build the per-modality summary.  If ANY real sensor came up, read the
+		 * chips: read_sensors() leaves every absent sensor's fields at the
+		 * baseline nominal, so a partially-populated board degrades gracefully
+		 * (the missing modality reads non-anomalous and just lowers
+		 * corroboration) rather than being faked.  Only when NO sensor is
+		 * present -- native_sim with no emulated chips -- do we fall back to the
+		 * deterministic synthetic scenario that drives this report's hypothesis.
 		 */
 		struct fusion_input in;
-		if (imu_ok && mon_ok && bme_ok) {
+		if (imu_ok || mon_ok || bme_ok) {
 			read_sensors(&imu, imu_ok, &mon, mon_ok, &bme, bme_ok, &in);
 		} else {
-			in = synth_input(r); /* native_sim path */
+			in = synth_input(r); /* no sensors (native_sim) -> synthetic path */
 		}
 
 		/*
