@@ -19,6 +19,13 @@ hw_revisions:
       CC3501E.  This is the board the early bench bring-up ran on.
     changes:
       - "Initial AEN bring-up board (rev R1)."
+    # Per-rev routing delta vs the base (r2/production) pad_routes.  Restores
+    # the pre-2626-R2 routing: IO8/IO10 were Alif GPIOs (r2 moved them to the
+    # CC3501E) and IO21 reached the CC3501E (r2 left it open).
+    pad_route_overrides:
+      - { e1m: E1M_GPIO_IO8,  dispatch: direct, doc: "r1: Alif GPIO (r2 -> CC3501E GPIO_30)." }
+      - { e1m: E1M_GPIO_IO10, dispatch: direct, doc: "r1: Alif GPIO (r2 -> CC3501E GPIO_35)." }
+      - { e1m: E1M_GPIO_IO21, dispatch: cc3501e, dispatch_pin: 30, doc: "r1: CC3501E GPIO_30 (r2 unrouted)." }
   r2:
     min_sdk_version: ~
     max_sdk_version: ~

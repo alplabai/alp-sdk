@@ -60,6 +60,21 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Bullet list of changes from the previous rev (pin moves, chip swaps, RC bumps).  Customer-visible summary; deeper internal detail is held outside this tree."
+        },
+        "pad_route_overrides": {
+          "type": "array",
+          "description": "Machine-readable per-rev routing deltas.  The base SoM `pad_routes:` tracks the production rev; a rev whose routing differs lists the deviating pads here, and `--emit composed-route-table` applies them for that rev.  Each entry replaces the base `pad_routes:` entry for its `e1m` pad.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["e1m"],
+            "properties": {
+              "e1m": { "type": "string", "pattern": "^E1M_[A-Z0-9_]+$" },
+              "dispatch": { "type": "string" },
+              "dispatch_pin": { "type": ["integer", "string"] },
+              "doc": { "type": "string" }
+            }
+          }
         }
       }
     }

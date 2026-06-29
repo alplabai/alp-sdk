@@ -319,6 +319,38 @@ def _resolve_pad_routes(
     return indexed
 
 
+def _hwrev_pad_route_overrides(
+    sku: str,
+    hw_rev: str | None,
+    metadata_root: Path,
+) -> list[dict[str, Any]]:
+    """Per-rev pad-route overrides for the selected ``hw_rev``.
+
+    The base SoM ``pad_routes:`` tracks the *production* revision.  A board
+    revision whose routing differs declares the deviating pads as data in
+    the family ``hw-revisions.yaml`` ``pad_route_overrides:`` block; this
+    returns that rev's list (empty when it declares none, so the base
+    ``pad_routes:`` then applies verbatim).  Applying these is what makes
+    ``--emit composed-route-table`` differ between revisions of one SKU --
+    e.g. AEN ``r1`` restores IO8/IO10 to Alif GPIOs and IO21 to the CC3501E,
+    the pre-2626-R2 routing.
+    """
+    if not hw_rev:
+        return []
+    try:
+        family = _sku_family(sku)
+    except ValueError:
+        return []
+    path = metadata_root / "e1m_modules" / family / "hw-revisions.yaml"
+    if not path.is_file():
+        return []
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    rev = (data.get("hw_revisions") or {}).get(hw_rev) or {}
+    overrides = rev.get("pad_route_overrides") or []
+    return [e for e in overrides
+            if isinstance(e, dict) and isinstance(e.get("e1m"), str)]
+
+
 def _compose_route(
     e1m_pad: str,
     board_route: dict[str, Any] | None,
@@ -1422,6 +1454,16 @@ def _emit_composed_route_table(
     """
     pad_routes = _resolve_pad_routes(sku_preset)
 
+    # Apply the selected board revision's pad-route overrides on top of the
+    # base (production-rev) pad_routes, so the composed table -- and thus
+    # `--emit composed-route-table` -- differs by hw_rev.  The rev comes from
+    # the board's `som.hw_rev`, falling back to the SoM's `default_hw_rev`.
+    hw_rev = ((project.get("som") or {}).get("hw_rev")
+              or sku_preset.get("default_hw_rev"))
+    for ov in _hwrev_pad_route_overrides(project["som"]["sku"], hw_rev,
+                                         metadata_root):
+        pad_routes[ov["e1m"]] = ov
+
     # Resolve silicon variant order_code for the top-level summary field.
     variant = _resolve_silicon_variant(sku_preset, metadata_root)
     silicon_variant_str = variant["order_code"] if variant else None
@@ -1494,6 +1536,7 @@ def _emit_composed_route_table(
     result: dict[str, Any] = {
         "board": board_name,
         "som": project["som"]["sku"],
+        "hw_rev": hw_rev,
         "silicon_variant": silicon_variant_str,
         "routes": routes,
     }
