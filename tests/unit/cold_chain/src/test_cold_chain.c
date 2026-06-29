@@ -5,6 +5,7 @@
  * Host unit tests for cold_chain (BME280 time-series metrics) -- native_sim.
  */
 #include <math.h>
+#include <string.h>
 #include <zephyr/ztest.h>
 #include "cold_chain.h"
 
@@ -100,4 +101,65 @@ ZTEST(cold_chain, test_excursion_minutes)
 	               (double)CC_WINDOW_N * (double)CC_SAMPLE_MIN,
 	               0.5,
 	               "every sample out of band -> full window of excursion minutes");
+}
+
+ZTEST(cold_chain, test_classify_ok_and_excursion)
+{
+	struct cc_window_state st;
+	struct cc_features     f;
+
+	fill_const(&st, 5.0f, 50.0f); /* stable in-band cold */
+	cc_feat_extract(&st, &CFG, &f);
+	zassert_equal(cc_classify(&f, &CFG), CC_OK, "stable 5 C -> OK");
+
+	fill_const(&st, 12.0f, 55.0f); /* mean out of band */
+	cc_feat_extract(&st, &CFG, &f);
+	zassert_equal(cc_classify(&f, &CFG), CC_TEMP_EXCURSION, "12 C -> TEMP_EXCURSION");
+}
+
+ZTEST(cold_chain, test_classify_mkt_exceeded)
+{
+	struct cc_window_state st;
+	struct cc_features     f;
+
+	/* Mean stays in-band but a brief 40 C spike pushes MKT over the limit. */
+	cc_window_reset(&st);
+	for (int i = 0; i < 250; i++) {
+		struct cc_sample s = { .temp_c = 4.0f, .rh_pct = 50.0f, .pressure_pa = 101325.0f };
+		cc_window_push(&st, s);
+	}
+	for (int i = 0; i < 6; i++) {
+		struct cc_sample s = { .temp_c = 40.0f, .rh_pct = 50.0f, .pressure_pa = 101325.0f };
+		cc_window_push(&st, s);
+	}
+	cc_feat_extract(&st, &CFG, &f);
+	zassert_equal(
+	    cc_classify(&f, &CFG), CC_MKT_EXCEEDED, "in-band mean + hot spike -> MKT_EXCEEDED");
+}
+
+ZTEST(cold_chain, test_classify_condensation)
+{
+	struct cc_window_state st;
+	struct cc_features     f;
+
+	fill_const(&st, 5.0f, 95.0f); /* in-band but very humid -> near dewpoint */
+	cc_feat_extract(&st, &CFG, &f);
+	zassert_equal(cc_classify(&f, &CFG), CC_CONDENSATION_RISK, "5 C / 95% RH -> CONDENSATION_RISK");
+}
+
+ZTEST(cold_chain, test_anomaly_and_names)
+{
+	struct cc_window_state st;
+	struct cc_features     f;
+
+	fill_const(&st, 5.0f, 50.0f);
+	cc_feat_extract(&st, &CFG, &f);
+	zassert_true(cc_anomaly_fallback(&f, &CFG) < 0.2f, "stable cold -> low anomaly");
+
+	fill_const(&st, 20.0f, 50.0f); /* deep excursion */
+	cc_feat_extract(&st, &CFG, &f);
+	zassert_true(cc_anomaly_fallback(&f, &CFG) > 0.8f, "deep excursion -> high anomaly");
+
+	zassert_true(strcmp(cc_state_name(CC_OK), "OK") == 0, "name");
+	zassert_true(strcmp(cc_state_name(CC_MKT_EXCEEDED), "MKT_EXCEEDED") == 0, "name");
 }

@@ -221,3 +221,102 @@ size_t cc_feat_pack(const struct cc_features *f, float *vec, size_t cap)
 	vec[i++] = f->excursion_min;
 	return i; /* == CC_FEATURE_DIM */
 }
+
+/* -------------------------------------------------------------------------
+ * 4-state integrity classifier.
+ *
+ * The three checks are ordered by severity: ACUTE (product currently outside
+ * its temperature band, or it has already spent too many minutes out of band)
+ * takes priority over CUMULATIVE MKT damage, which takes priority over
+ * HUMIDITY risk.  This ordering means the most urgent condition is always
+ * surfaced first and the operator sees one unambiguous action.
+ * ------------------------------------------------------------------------- */
+
+cc_state_t cc_classify(const struct cc_features *f, const struct cc_config *cfg)
+{
+	/* ACUTE first: the product is currently too warm/cold, or it has spent more
+	 * than the allowed minutes out of band. */
+	if (f->mean_temp_c < cfg->t_lo || f->mean_temp_c > cfg->t_hi ||
+	    f->excursion_min > cfg->excursion_min_limit) {
+		return CC_TEMP_EXCURSION;
+	}
+	/* CUMULATIVE: even after recovering to the band, a hot spike may have done
+	 * enough Arrhenius damage to push MKT past the limit. */
+	if (f->mkt_c > cfg->mkt_limit_c) {
+		return CC_MKT_EXCEEDED;
+	}
+	/* HUMIDITY: ambient near the dewpoint (or saturated air) risks condensation
+	 * on the goods/packaging. */
+	if ((f->mean_temp_c - f->dewpoint_c) < cfg->dewpoint_margin_c || f->mean_rh_pct > 90.0f) {
+		return CC_CONDENSATION_RISK;
+	}
+	return CC_OK;
+}
+
+const char *cc_state_name(cc_state_t s)
+{
+	/* Map each state to a stable, upper-case string (the enum member name
+	 * without the CC_ prefix).  Returns "UNKNOWN" for any out-of-range
+	 * value — safe to log even if the caller passes a corrupt byte. */
+	switch (s) {
+	case CC_OK:
+		return "OK";
+	case CC_TEMP_EXCURSION:
+		return "TEMP_EXCURSION";
+	case CC_MKT_EXCEEDED:
+		return "MKT_EXCEEDED";
+	case CC_CONDENSATION_RISK:
+		return "CONDENSATION_RISK";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+/* -------------------------------------------------------------------------
+ * Deterministic anomaly score.
+ *
+ * Combines two contributions into a single 0..1 float so that the main
+ * application loop can log an anomaly severity even when no AI model is
+ * loaded (e.g., first boot, model download in progress, OTA mid-flight).
+ *
+ * Score is the MAX of:
+ *   (a) excursion depth: how far the mean T is outside the band, normalised
+ *       by the band width so that 2x the band edge = score 1.0;
+ *   (b) MKT overshoot: how much MKT exceeds the limit, normalised by the
+ *       limit itself so that 2x the MKT limit = score 1.0.
+ *
+ * Taking the max (not the sum) keeps the score interpretable: 0.9 always
+ * means "very close to or past a hard limit", regardless of which limit.
+ * The score is clamped to [0, 1] and saturates at 1.0.
+ * ------------------------------------------------------------------------- */
+
+float cc_anomaly_fallback(const struct cc_features *f, const struct cc_config *cfg)
+{
+	float score = 0.0f;
+
+	/* How far the mean temperature is outside the band, scaled by the band width. */
+	float band = cfg->t_hi - cfg->t_lo;
+	if (band > 1e-6f) {
+		float over = 0.0f;
+		if (f->mean_temp_c > cfg->t_hi) {
+			over = f->mean_temp_c - cfg->t_hi;
+		} else if (f->mean_temp_c < cfg->t_lo) {
+			over = cfg->t_lo - f->mean_temp_c;
+		}
+		score = over / band;
+	}
+	/* MKT overshoot contributes too (cumulative damage). */
+	if (f->mkt_c > cfg->mkt_limit_c && cfg->mkt_limit_c > 1e-6f) {
+		float mkt_term = (f->mkt_c - cfg->mkt_limit_c) / cfg->mkt_limit_c;
+		if (mkt_term > score) {
+			score = mkt_term;
+		}
+	}
+	if (score < 0.0f) {
+		score = 0.0f;
+	}
+	if (score > 1.0f) {
+		score = 1.0f;
+	}
+	return score;
+}

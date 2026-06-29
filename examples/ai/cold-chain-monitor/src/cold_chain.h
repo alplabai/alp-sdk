@@ -135,6 +135,42 @@ void cc_feat_extract(const struct cc_window_state *st,
  *  Field order matches the training pipeline; do NOT reorder. */
 size_t cc_feat_pack(const struct cc_features *f, float *vec, size_t cap);
 
+/* -------------------------------------------------------------------------
+ * 4-state integrity classifier.
+ *
+ * The classifier reduces the rich feature vector to a single actionable state
+ * using deterministic thresholds from @p cfg.  Severity levels are ordered:
+ * an acute excursion (product currently out of band) is flagged before the
+ * cumulative MKT breach, which is flagged before the humidity-driven
+ * condensation risk.  This ordering ensures the most urgent condition is
+ * always visible to the operator.
+ * ------------------------------------------------------------------------- */
+
+/** Integrity state (reference-grade; customers retune the config per product). */
+typedef enum {
+	CC_OK                = 0, /**< inside band, MKT under limit, no condensation. */
+	CC_TEMP_EXCURSION    = 1, /**< acute: mean out of band, or excursion-time over limit. */
+	CC_MKT_EXCEEDED      = 2, /**< cumulative thermal damage (MKT over limit). */
+	CC_CONDENSATION_RISK = 3, /**< T near dewpoint or very high humidity. */
+	CC_STATE_COUNT
+} cc_state_t;
+
+/**
+ * Classify the integrity state.  Order matters: an ACUTE excursion (currently
+ * out of band) is reported before the CUMULATIVE MKT breach, which is reported
+ * before the humidity-driven condensation risk.
+ */
+cc_state_t cc_classify(const struct cc_features *f, const struct cc_config *cfg);
+
+/** Stable upper-case state name for the record. */
+const char *cc_state_name(cc_state_t s);
+
+/**
+ * Deterministic 0..1 anomaly score (excursion depth + MKT overshoot), saturating.
+ * Used when no AI model is loaded.
+ */
+float cc_anomaly_fallback(const struct cc_features *f, const struct cc_config *cfg);
+
 #ifdef __cplusplus
 }
 #endif
