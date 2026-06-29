@@ -7,6 +7,18 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added
+
+- **Multimodal fusion PdM example** (`examples/ai/multimodal-fusion-pdm/`):
+  fuses vibration (ICM-42670) + current (INA236) + temperature (BME280) into one
+  motor-health verdict — `fusion_health` scores each modality vs a healthy
+  baseline, counts cross-modal corroboration, and maps the pattern to a fault
+  hypothesis (HEALTHY / BEARING_WEAR / ELECTRICAL_FAULT / MECHANICAL_OVERLOAD /
+  UNCORROBORATED) with a confidence-weighted health score — plus an
+  `<alp/inference.h>` fused model with the deterministic rule as fallback. Core
+  host-unit-tested on `native_sim` (`tests/unit/fusion_health`); model is a stub
+  with a recipe in `models/README.md`; HiL bench-gated.
+
 ### Fixed
 
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
