@@ -35,7 +35,7 @@ import sys
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 try:
     import yaml  # type: ignore[import-untyped]
@@ -59,7 +59,9 @@ from alp_project import (  # noqa: E402
 )
 
 
-REPO = Path(__file__).resolve().parent.parent
+# __init__ now sits one level deeper (scripts/alp_orchestrate/), so the repo
+# root is three parents up, not two.
+REPO = Path(__file__).resolve().parent.parent.parent
 METADATA_ROOT = REPO / "metadata"
 BOARD_SCHEMA = METADATA_ROOT / "schemas" / "board.schema.json"
 BOARD_PRESET_SCHEMA = METADATA_ROOT / "schemas" / "board-preset.schema.json"
@@ -176,7 +178,7 @@ def emit_os_topology(project: "BoardProject") -> str:
 # The orchestrator data model now lives in alp_orchestrate_models (the first
 # #285 modularization seam); re-exported here so `from alp_orchestrate import
 # Slice` (and friends) keeps working unchanged for callers + tests.
-from alp_orchestrate_models import (  # noqa: E402
+from .models import (  # noqa: E402
     BoardProject,
     IpcEntry,
     OrchestratorError,
@@ -2561,7 +2563,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # fragments.
     import sys as _sys
     from pathlib import Path as _Path
-    _scripts = _Path(__file__).resolve().parent
+    _scripts = _Path(__file__).resolve().parent.parent  # the scripts/ dir
     if str(_scripts) not in _sys.path:
         _sys.path.insert(0, str(_scripts))
     from alp_project import (  # type: ignore
@@ -3406,82 +3408,8 @@ def _zephyr_app_dir(app: str) -> Path:
 # ---------------------------------------------------------------------
 
 
-def main(argv: Optional[Iterable[str]] = None) -> int:
-    import argparse
-    parser = argparse.ArgumentParser(
-        description="Fan-out orchestrator for board.yaml.")
-    parser.add_argument("--input", type=Path, default=Path("board.yaml"),
-                        help="Path to the project's board.yaml.")
-    parser.add_argument("--build-root", type=Path,
-                        default=Path("build"),
-                        help="Build root directory.")
-    parser.add_argument("--core", default=None,
-                        help="Limit fan-out to a single core ID.")
-    parser.add_argument("--no-parallel", action="store_true",
-                        help="Force sequential dispatch.")
-    parser.add_argument("--emit", default=None,
-                        choices=["system-manifest", "ipc-contract-h",
-                                 "dts-reservations", "dts-partitions",
-                                 "storage-mounts-c",
-                                 "tfm-sysbuild-conf", "build-plan"],
-                        help="Skip the build; just emit one of the "
-                             "generated artefacts to stdout.")
-    args = parser.parse_args(list(argv) if argv is not None else None)
-
-    try:
-        project = load_board_yaml(args.input)
-    except OrchestratorError as e:
-        print(f"alp-orchestrate: {e}", file=sys.stderr)
-        return 1
-
-    if args.emit:
-        try:
-            if args.emit == "system-manifest":
-                sys.stdout.write(emit_system_manifest(project))
-            elif args.emit == "ipc-contract-h":
-                sys.stdout.write(emit_ipc_contract_h(project))
-            elif args.emit == "dts-reservations":
-                sys.stdout.write(emit_dts_reservations(project))
-            elif args.emit == "dts-partitions":
-                sys.stdout.write(emit_dts_partitions(project))
-            elif args.emit == "storage-mounts-c":
-                sys.stdout.write(emit_storage_mounts_c(project))
-            elif args.emit == "tfm-sysbuild-conf":
-                sys.stdout.write(emit_tfm_sysbuild_conf(project))
-            elif args.emit == "build-plan":
-                sys.stdout.write(emit_build_plan(
-                    project, board_yaml=args.input,
-                    build_root=args.build_root))
-        except OrchestratorError as e:
-            print(f"alp-orchestrate: {e}", file=sys.stderr)
-            return 1
-        return 0
-
-    orchestrator = Orchestrator(project, args.build_root)
-    try:
-        manifest = orchestrator.fan_out(
-            only_core=args.core, parallel=not args.no_parallel)
-    except OrchestratorError as e:
-        print(f"alp-orchestrate: {e}", file=sys.stderr)
-        return 1
-
-    # Surface per-slice status to the console.
-    failed = 0
-    for s in manifest.slices:
-        marker = {
-            "ok":      "[OK ]",
-            "failed":  "[FAIL]",
-            "skipped": "[SKIP]",
-            "pending": "[??? ]",
-        }.get(s.status, "[??? ]")
-        extra = f" -- {s.reason}" if s.reason else ""
-        print(f"{marker} {s.core_id}/{s.os}{extra}")
-        if s.status == "failed":
-            failed += 1
-    print(f"alp-orchestrate: manifest at "
-          f"{(args.build_root / 'system-manifest.yaml')}")
-    return 1 if failed > 0 else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+# Re-export the CLI entry: main() lives in __main__ (so `python -m
+# alp_orchestrate` is the invocation), but `from alp_orchestrate import main`
+# stays valid for callers + the test-suite.  Placed at module end so __main__'s
+# `from alp_orchestrate import ...` sees a fully-populated package.
+from .cli import main  # noqa: F401,E402  (intentional re-export)

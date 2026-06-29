@@ -125,7 +125,7 @@ class AlpBuild(WestCommand):
         # Step 2 -- fan out via the orchestrator.
         cmd = [
             python,
-            str(sdk_root / "scripts" / "alp_orchestrate.py"),
+            "-m", "alp_orchestrate",  # env_with_sdk() puts scripts/ on PYTHONPATH
             "--input", str(board_yaml),
             "--build-root", str(build_root),
         ]
