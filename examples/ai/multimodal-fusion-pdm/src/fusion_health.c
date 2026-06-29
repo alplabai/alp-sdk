@@ -84,7 +84,11 @@ void fusion_assess(const struct fusion_input    *in,
 	 *    1    1    1   | MECHANICAL_OVERLOAD (all channels stressed)
 	 *    1    0    1   | BEARING_WEAR        (friction: heat + vibration)
 	 *    0    1    *   | ELECTRICAL_FAULT    (winding/supply, no vibration)
-	 *    1    0    0   | UNCORROBORATED      (single channel, likely noise)
+	 *    1    0    0   | UNCORROBORATED      (no known pattern, likely noise)
+	 *
+	 * UNCORROBORATED is the catch-all: the row above is one example, but ANY
+	 * pattern outside the named shapes lands here -- including 2-channel ones
+	 * like 1 1 0 (vibration+current, no heat) that match no recognised fault.
 	 */
 	if (out->corroboration == 0) {
 		/* No modality anomalous: the motor is running within spec. */
@@ -105,9 +109,12 @@ void fusion_assess(const struct fusion_input    *in,
 		 * subsystem (imbalance, winding fault, supply droop). */
 		out->hypothesis = FUSION_ELECTRICAL_FAULT;
 	} else {
-		/* A lone or odd modality (e.g. vibration only) -- nothing corroborates,
-		 * so this is more likely noise / a sensor knock than a real fault.
-		 * Flagging it UNCORROBORATED keeps it visible without raising an alarm. */
+		/* Catch-all: any anomaly pattern that does not match a known fault
+		 * signature -- a lone modality (e.g. vibration only), OR an odd pair
+		 * like vibration+current with no heat (corroboration==2 but not the
+		 * bearing/electrical/overload shapes).  Without a recognised pattern
+		 * it is more likely noise / a sensor knock than a real fault, so we
+		 * flag it UNCORROBORATED: visible, but not an alarm. */
 		out->hypothesis = FUSION_UNCORROBORATED;
 	}
 

@@ -56,7 +56,7 @@ typedef enum {
 	FUSION_BEARING_WEAR        = 1, /**< vibration + temperature (friction heat). */
 	FUSION_ELECTRICAL_FAULT    = 2, /**< current anomalous, vibration normal. */
 	FUSION_MECHANICAL_OVERLOAD = 3, /**< all three modalities anomalous. */
-	FUSION_UNCORROBORATED      = 4, /**< a single odd modality -> low confidence. */
+	FUSION_UNCORROBORATED      = 4, /**< anomaly with no known fault pattern -> low confidence. */
 	FUSION_FAULT_COUNT_ENUM         /* not used; FUSION_FAULT_COUNT is the macro. */
 } fusion_fault_t;
 

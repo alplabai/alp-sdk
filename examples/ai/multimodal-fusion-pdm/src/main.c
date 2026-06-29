@@ -343,8 +343,8 @@ int main(void)
 	}
 
 	/*
-	 * Inference handle: ALP_INFERENCE_BACKEND_AUTO routes to the on-die NPU
-	 * (Ethos-U on AEN, DEEPX DX-M1 on V2N) or to TFLM CPU on native_sim.
+	 * Inference handle: ALP_INFERENCE_BACKEND_AUTO routes to the SoM's on-die
+	 * NPU on real silicon (AEN / V2N) or to the TFLM CPU path on native_sim.
 	 * s_arena is passed so the backend avoids heap allocation.
 	 * With the 1-byte stub model the backend returns a rank-0 output tensor,
 	 * and the app keeps the deterministic fusion_assess verdict unchanged.
