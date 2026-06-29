@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added
+
+- **Cold-chain integrity example** (`examples/ai/cold-chain-monitor/`):
+  environmental edge AI — BME280 T/RH/P → sliding-window `cold_chain` metrics
+  (mean/min/max, temperature slope, **Mean Kinetic Temperature** per ICH/USP,
+  Magnus dewpoint, excursion minutes) → a deterministic 4-state classifier
+  (OK / TEMP_EXCURSION / MKT_EXCEEDED / CONDENSATION_RISK) + an
+  `<alp/inference.h>` anomaly score with a deterministic fallback. The core is
+  host-unit-tested on `native_sim` (`tests/unit/cold_chain`); model is a stub
+  with a training recipe in `models/README.md`; HiL bench-gated.
+
 ### Fixed
 
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
