@@ -29,7 +29,7 @@
  *
  * Platform targets:
  *   - native_sim/native/64: synthetic frames, CPU inference fallback.
- *   - ensemble_e8_dk/.../rtss_hp: OV5640 CSI camera, Ethos-U NPU.
+ *   - ensemble_e8_dk/.../rtss_hp: OV5640 CSI camera, on-die NPU.
  *   Flip som.sku in board.yaml to E1M-V2M101 for the V2N accelerator path.
  *
  * ALP_BOARD_E1M_EVK must be defined (testcase.yaml CONFIG_COMPILER_OPT)
@@ -87,13 +87,13 @@ static const struct defect_baseline BASE = {
 
 /* ── 1-byte model stub ───────────────────────────────────────────────────────
  * Satisfies alp_inference_open's non-NULL model_data contract while forcing the
- * deterministic statistical fallback (the stub yields no usable tensor tensors).
- * Replace with a Vela-compiled autoencoder; see models/README.md.
+ * deterministic statistical fallback (the stub yields no usable tensors).
+ * Replace with a compiled autoencoder; see models/README.md.
  * The inspect() guard checks in.size_bytes before trusting the tensor pointer. */
 static const uint8_t s_model[] = { 0x00 };
 
 /* ── Inference arena ─────────────────────────────────────────────────────────
- * Kept off the heap and aligned for TFLM / Ethos-U DMA.  Sized to match
+ * Kept off the heap and aligned for the NPU/accelerator DMA.  Sized to match
  * default_arena_kib: 256 in board.yaml's inference: block.
  * Must outlive the inference handle (closed in teardown at the end of main). */
 static uint8_t s_arena[256 * 1024] __aligned(16);
@@ -233,7 +233,7 @@ int main(void)
 
 	/* ── Inference open ─────────────────────────────────────────────────────
 	 * ALP_INFERENCE_BACKEND_AUTO routes to the SoM's on-die NPU on real
-	 * silicon (Ethos-U on AEN, DRP-AI3 / DEEPX on V2N families), or falls
+	 * silicon (AEN / V2N families), or falls
 	 * back to TFLM CPU reference kernels on native_sim.  The 1-byte stub
 	 * makes this an empty autoencoder -- the statistical path runs instead. */
 	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){

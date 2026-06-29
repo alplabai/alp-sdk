@@ -30,7 +30,7 @@ CSI camera --RGB565--> 64x64 luma grid --> autoencoder (reconstruction)
 ```
 # DEFECT,frame,verdict,severity,coverage_pct,worst_tx,worst_ty,worst_score
 DEFECT,1,PASS,0.00,0.0,0,0,0.33
-DEFECT,2,FAIL,0.83,1.6,5,3,1.91
+DEFECT,2,FAIL,0.98,1.6,5,3,1.98
 ```
 
 `worst_tx/worst_ty` are in [0,7] and locate the worst tile in the 8x8 grid;
