@@ -118,10 +118,14 @@ void fusion_assess(const struct fusion_input    *in,
 	 *   sub=3.0  -> severity=1   (saturated: 3× tolerance = critical)
 	 *   sub between -> linear interpolation
 	 *
-	 * Confidence reflects how much cross-modal evidence we have:
-	 *   0.0  = healthy (no score at all)
-	 *   0.5  = uncorroborated single modality (discount for possible noise)
-	 *   1.0  = corroborated by ≥2 modalities (high confidence real fault)
+	 * Confidence reflects how much we trust the hypothesis:
+	 *   0.0  = HEALTHY (no fault -> no score at all)
+	 *   0.5  = UNCORROBORATED single odd modality (discount for possible noise)
+	 *   1.0  = any NAMED fault (BEARING_WEAR / ELECTRICAL_FAULT /
+	 *          MECHANICAL_OVERLOAD) -- a recognised signature, full weight.
+	 *          Note ELECTRICAL_FAULT is named on current alone (corroboration=1):
+	 *          a winding/supply fault need not show up mechanically, so the
+	 *          named pattern -- not the modality count -- is what earns trust.
 	 *
 	 * Final: health_score = severity × confidence, range [0, 1]. */
 	float max_sub  = fmaxf(out->vib_score, fmaxf(out->current_score, out->temp_score));
