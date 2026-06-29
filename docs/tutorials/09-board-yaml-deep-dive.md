@@ -23,7 +23,7 @@ the loader translates each block into backend config.
 firmware project targets.  Every backend's config -- Zephyr's
 `alp.conf`, plain-CMake `-D` flags, Yocto's `local.conf` -- is
 **derived** from it by `scripts/alp_project.py` +
-`scripts/alp_orchestrate.py`.  The schema lives at
+`scripts/alp_orchestrate/`.  The schema lives at
 [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json);
 this tutorial walks every top-level block.
 

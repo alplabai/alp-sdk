@@ -20,7 +20,6 @@ on:
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
-      - 'scripts/alp_orchestrate.py'
       - 'scripts/alp_orchestrate/**'
       - 'scripts/check_emit_snapshots.py'
       - 'scripts/lint_doc_yaml_fragments.py'

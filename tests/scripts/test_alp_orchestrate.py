@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Unit tests for scripts/alp_orchestrate.py (Phase 2 of the
+Unit tests for scripts/alp_orchestrate/ (Phase 2 of the
 2026-05-15 heterogeneous-OS orchestration design).
 
 Run locally:
