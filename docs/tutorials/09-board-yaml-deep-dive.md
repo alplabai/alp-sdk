@@ -464,9 +464,9 @@ The build absorbs three outputs per project:
 Inspect the resolved layout:
 
 ```bash
-python3 scripts/alp_orchestrate.py --input board.yaml --emit system-manifest \
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit system-manifest \
     | yq '.storage[]'
-python3 scripts/alp_orchestrate.py --input board.yaml --emit dts-partitions
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit dts-partitions
 ```
 
 The loader rejects typoed `flash_device:` references at parse time
