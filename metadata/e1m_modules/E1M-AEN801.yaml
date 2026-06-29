@@ -138,7 +138,7 @@ helper_firmware:
     flash_method:  TBD
     flash_args:    TBD
 
-default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
+default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
 default_board:        E1M-EVK
 
