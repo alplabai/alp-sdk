@@ -26,13 +26,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SNAP_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
-ORCH = REPO / "scripts" / "alp_orchestrate.py"
+# The orchestrator is now a package; invoke it as a module.  scripts/ goes on
+# PYTHONPATH so the package + its `alp_project` sibling import both resolve
+# (replaces the old file-path call to scripts/alp_orchestrate.py).
+ORCH = [sys.executable, "-m", "alp_orchestrate"]
 PROJ = REPO / "scripts" / "alp_project.py"
 
 # (snapshot id, tool, board.yaml, emit mode).  Deterministic, write-free
@@ -52,9 +56,15 @@ CASES = [
 
 def _emit(tool: Path, board: str, mode: str) -> str:
     """Run the emitter from the repo root; normalise the SDK-root path."""
+    env = {**os.environ}
+    scripts_dir = str(REPO / "scripts")
+    env["PYTHONPATH"] = (
+        scripts_dir + os.pathsep + env["PYTHONPATH"]
+        if env.get("PYTHONPATH") else scripts_dir
+    )
     rv = subprocess.run(
-        [sys.executable, str(tool), "--input", board, "--emit", mode],
-        capture_output=True, text=True, cwd=REPO, check=False)
+        [*tool, "--input", board, "--emit", mode],
+        capture_output=True, text=True, cwd=REPO, check=False, env=env)
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
                          f"--emit {mode} (rc={rv.returncode}):\n{rv.stderr}")
