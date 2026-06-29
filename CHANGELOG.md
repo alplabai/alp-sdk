@@ -7,6 +7,18 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added
+
+- **Visual-defect detection example** (`examples/ai/visual-defect-detection/`):
+  camera-fed surface-anomaly inspection — an autoencoder reconstructs the
+  "normal" surface and high reconstruction error flags a defect (unsupervised, no
+  defect labels). `defect_map` downsamples the RGB565 frame to a 64x64 luma grid,
+  scores each of 64 tiles (reconstruction error, or a statistical mean/variance/
+  gradient fallback), and classifies into a worst-tile location, coverage %,
+  severity, and PASS/FAIL. Core host-unit-tested on `native_sim`
+  (`tests/unit/defect_map`); model is a stub with a recipe in `models/README.md`;
+  HiL bench-gated.
+
 ### Fixed
 
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The

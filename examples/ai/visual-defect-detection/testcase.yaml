@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: visual-defect-detection
+  description: |
+    Camera-fed surface-anomaly inspection: an autoencoder reconstructs the
+    "normal" surface and high reconstruction error flags a defect.  The frame is
+    tiled, the worst region localized, and a PASS/FAIL verdict reported with a
+    severity score and defect-coverage %.  native_sim runs synthetic clean +
+    defect frames; the deterministic statistical fallback runs without a model.
+common:
+  tags: ai inference vision industrial defect-detection marketing showcase
+tests:
+  alp_sdk.example.visual_defect_detection.e1m_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - vision
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[defect\\] done"
+
+  alp_sdk.example.visual_defect_detection.aen_build:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    platform_allow:
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    build_only: true
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - vision
