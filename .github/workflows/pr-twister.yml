@@ -113,7 +113,7 @@ jobs:
       # docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
       # §5.6 + §7 Phase 5):
       #
-      # In v0.6 the orchestrator (`scripts/alp_orchestrate.py`) fans
+      # In v0.6 the orchestrator (`scripts/alp_orchestrate/`) fans
       # board.yaml out into per-core slices.  For Zephyr-only slices
       # the orchestrator routes through twister via the new emit
       # mode `alp_project.py --emit zephyr-conf --core <id>`.  Twister

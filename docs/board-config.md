@@ -212,7 +212,7 @@ loader picks the natural runtime from each core's `cores[].type`
 in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
 -> `yocto`, anything else -> `off`.  Helper:
 `_default_os_from_core_type()` in
-[`scripts/alp_orchestrate.py`](../scripts/alp_orchestrate.py).
+[`scripts/alp_orchestrate/`](../scripts/alp_orchestrate/).
 
 The OS is **not** user-selectable: the runtime follows the core
 class, full stop.  A `board.yaml` may only **disable** a core
@@ -618,7 +618,7 @@ The `profile:` file follows the same shape as
 for a worked example.
 
 Loader rules (enforced by `_validate_consistency()` in
-`scripts/alp_orchestrate.py`):
+`scripts/alp_orchestrate/`):
 
 - Each entry MUST declare exactly one of `kconfig:` / `profile:`.
 - `name:` is globally unique across every core's
@@ -1171,7 +1171,7 @@ not a separate M55-HE core).  See `docs/adr/0013-tfm-boundary-m55-hp-trustzone.m
 
 JSON Schema validates one field at a time; many real-world
 mistakes only become apparent when two fields disagree.
-`scripts/alp_orchestrate.py:_validate_consistency()` runs after
+`scripts/alp_orchestrate/` runs after
 the schema pass and enforces a small set of cross-field rules.
 A violation raises `OrchestratorError`; warnings print to
 `stderr` and let the load continue.

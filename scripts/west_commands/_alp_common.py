@@ -5,7 +5,7 @@ Shared helpers for the alp-sdk west extension commands.
 The five wrappers (alp_build / alp_image / alp_flash / alp_clean /
 alp_renode) all need to:
 
-  1. Locate the SDK root so they can call scripts/alp_orchestrate.py.
+  1. Locate the SDK root so they can call scripts/alp_orchestrate/.
   2. Resolve the board.yaml the customer points at.
   3. Bootstrap ALP_SDK_ROOT + EXTRA_ZEPHYR_MODULES in the sub-process
      env without spamming the system PATH.

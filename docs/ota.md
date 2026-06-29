@@ -32,7 +32,7 @@ fewer keys, fewer surfaces, fewer mistakes.
 ### Declarative wiring (`ota:` block in `board.yaml`)
 
 The recommended path is the top-level `ota:` block in your
-project's `board.yaml` -- the loader (`scripts/alp_orchestrate.py`)
+project's `board.yaml` -- the loader (`scripts/alp_orchestrate/`)
 emits the matching `MENDER_*` weak-assignments + `INHERIT +=
 "mender-full"` into the slice's generated `local.conf`.  No
 hand-edited Mender variables.

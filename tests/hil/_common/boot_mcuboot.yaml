@@ -2,7 +2,7 @@
 #
 # Portable HiL smoke for the board.yaml `boot:` block (PR #3).
 #
-# The orchestrator's emit_sysbuild_conf() in scripts/alp_orchestrate.py
+# The orchestrator's emit_sysbuild_conf() in scripts/alp_orchestrate/
 # turns `boot: { method: mcuboot, signing: { algorithm: ecdsa_p256, ... }, ... }`
 # into a sysbuild.conf overlay carrying:
 #

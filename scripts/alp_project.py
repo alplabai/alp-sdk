@@ -98,7 +98,7 @@ def _sku_family(sku: str) -> str:
 # This is NOT a hand-maintained table: the symbol is computed from the
 # ref, and the single source of the allowlist is the versioned registry
 # at metadata/registries/silicon-kconfig.json.  Both this emitter and
-# scripts/alp_orchestrate.py consume `silicon_to_kconfig()` so the
+# scripts/alp_orchestrate/ consume `silicon_to_kconfig()` so the
 # mapping has exactly one definition (the prior _SILICON_TO_KCONFIG dict
 # was duplicated across both files -- "duplicated truth is a bug").
 SILICON_KCONFIG_REGISTRY = METADATA_ROOT / "registries" / "silicon-kconfig.json"
@@ -1547,7 +1547,7 @@ def _emit_composed_route_table(
 # v2 emit shims
 # ---------------------------------------------------------------------
 #
-# The orchestrator (scripts/alp_orchestrate.py) owns the v2 board.yaml
+# The orchestrator (scripts/alp_orchestrate/) owns the v2 board.yaml
 # loader + carve-out resolver + system-manifest emitter.  These shims
 # route the v2-only `--emit` modes (and the per-core
 # `--emit zephyr-conf --core <id>`) through the orchestrator.
@@ -1814,7 +1814,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
-    # ipc-contract-h) route through alp_orchestrate.py directly.
+    # ipc-contract-h) route through alp_orchestrate/ directly.
     if args.emit in ("system-manifest", "dts-reservations",
                      "ipc-contract-h", "os-topology"):
         return _run_v2_emit(args)
