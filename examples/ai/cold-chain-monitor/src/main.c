@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -260,13 +260,13 @@ int main(void)
 		 * return a fresh reading without needing to poll the status register.
 		 * For a cold-chain logger the 1 s cadence is already faster than the
 		 * CC_SAMPLE_MIN (1 min) window rate, so X1/1 s is well matched. */
-		bme280_set_sampling(&dev,
-		                    BME280_OVERSAMPLING_X1, /* temperature channel */
-		                    BME280_OVERSAMPLING_X1, /* pressure channel */
-		                    BME280_OVERSAMPLING_X1, /* humidity channel */
-		                    BME280_MODE_NORMAL,     /* continuous conversion */
-		                    BME280_STANDBY_1000_MS, /* 1 s between measurements */
-		                    BME280_FILTER_OFF);     /* no IIR smoothing */
+		(void)bme280_set_sampling(&dev,
+		                          BME280_OVERSAMPLING_X1, /* temperature channel */
+		                          BME280_OVERSAMPLING_X1, /* pressure channel */
+		                          BME280_OVERSAMPLING_X1, /* humidity channel */
+		                          BME280_MODE_NORMAL,     /* continuous conversion */
+		                          BME280_STANDBY_1000_MS, /* 1 s between measurements */
+		                          BME280_FILTER_OFF);     /* no IIR smoothing */
 		sensor_ok = true;
 	} else {
 		LOG_WRN("BME280 unavailable; using synthetic environment data");
@@ -362,6 +362,7 @@ int main(void)
 		/* Soft-reset the chip before releasing the bus so it stops
 		 * converting and returns to sleep (lowest power state). */
 		bme280_soft_reset(&dev);
+		bme280_deinit(&dev); /* Release the driver context (no chip power-down). */
 	}
 	if (bus != NULL) {
 		alp_i2c_close(bus);
