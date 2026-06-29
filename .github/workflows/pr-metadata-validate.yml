@@ -20,10 +20,14 @@ on:
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
+      - 'scripts/alp_orchestrate.py'
+      - 'scripts/alp_orchestrate/**'
+      - 'scripts/check_emit_snapshots.py'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
+      - 'tests/fixtures/emit-snapshots/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
@@ -207,6 +211,13 @@ jobs:
       # Catches a carrier wiring a pad the module doesn't expose.
       - name: Check E1M board routes against the SoM capability table
         run: python3 scripts/check_e1m_route_capability.py
+
+      # Behaviour-pin for the #285 orchestrator modularization: the
+      # `--emit` contract surfaces (system-manifest / build-plan) stay
+      # byte-identical across the three vendor families.  A refactor that
+      # moves code but alters a byte fails here.
+      - name: Check --emit snapshots are byte-identical
+        run: python3 scripts/check_emit_snapshots.py
 
       # Cross-validate: every `id:` in every metadata/socs/.../*.json
       # cores[] block must have a matching key in every consuming
