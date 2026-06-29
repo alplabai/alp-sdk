@@ -58,8 +58,9 @@ bool cc_window_full(const struct cc_window_state *st)
  * ------------------------------------------------------------------------- */
 static float mkt_celsius(const struct cc_window_state *st, int n)
 {
-	/* Accumulate Σ exp(-ΔH/R / T_i) in double to avoid catastrophic
-	 * cancellation; individual terms can be as small as ~3e-14 at 4 °C. */
+	/* Accumulate Σ exp(-ΔH/R / T_i) in double to preserve relative precision
+	 * in the sum; individual terms are tiny -- ~2e-16 at 4 °C, ~1.4e-14 at
+	 * 40 °C -- so a hot spike's term dwarfs the cold-baseline terms. */
 	double sum_exp = 0.0;
 	for (int i = 0; i < n; i++) {
 		/* Convert each Celsius reading to Kelvin before taking the exponential.

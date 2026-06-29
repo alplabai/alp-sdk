@@ -65,7 +65,8 @@ struct cc_sample {
  *  @p count saturates at CC_WINDOW_N; the window is "full" once that count is
  *  reached and no further samples are accepted. */
 struct cc_window_state {
-	/* Ring of up to CC_WINDOW_N raw BME280 readings. */
+	/* Plain fill-once array of up to CC_WINDOW_N readings (NOT a ring buffer:
+	 * samples are written once per report window and not overwritten). */
 	struct cc_sample s[CC_WINDOW_N];
 	/* How many samples have been pushed so far; capped at CC_WINDOW_N. */
 	uint16_t count;
