@@ -166,8 +166,8 @@ cc_state_t cc_classify(const struct cc_features *f, const struct cc_config *cfg)
 const char *cc_state_name(cc_state_t s);
 
 /**
- * Deterministic 0..1 anomaly score (excursion depth + MKT overshoot), saturating.
- * Used when no AI model is loaded.
+ * Deterministic 0..1 anomaly score = max(excursion depth, MKT overshoot),
+ * saturating.  Used when no AI model is loaded.
  */
 float cc_anomaly_fallback(const struct cc_features *f, const struct cc_config *cfg);
 

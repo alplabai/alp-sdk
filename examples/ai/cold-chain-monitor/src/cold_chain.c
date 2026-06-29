@@ -281,7 +281,8 @@ const char *cc_state_name(cc_state_t s)
  *
  * Score is the MAX of:
  *   (a) excursion depth: how far the mean T is outside the band, normalised
- *       by the band width so that 2x the band edge = score 1.0;
+ *       by the band width -- score reaches 1.0 when the mean is one full band
+ *       width past an edge (e.g. for a 2..8 C band, mean = 14 C);
  *   (b) MKT overshoot: how much MKT exceeds the limit, normalised by the
  *       limit itself so that 2x the MKT limit = score 1.0.
  *
