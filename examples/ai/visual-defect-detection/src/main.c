@@ -121,8 +121,9 @@ static void put_gray(uint8_t *p, uint8_t v)
  *
  * frame 0: flat mid-grey (128) -- represents a clean surface.
  *          Expected result: all tile scores below threshold -> PASS.
- *          The gradient statistic gives ~0.33 for a uniform field, which is
- *          below DEFECT_THRESHOLD = 1.0.
+ *          For a uniform field the gradient statistic is 0; its normalized
+ *          deviation |0-8|/24 = ~0.33 is the largest of the three terms and so
+ *          becomes the tile's worst score -- still below DEFECT_THRESHOLD = 1.0.
  *
  * frame 1: mid-grey everywhere EXCEPT a 16x16 source patch at columns
  *          80..95, rows 48..63, which is solid bright white (255).
