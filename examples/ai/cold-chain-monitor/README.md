@@ -37,7 +37,7 @@ BME280 (I2C) --window--> cold_chain (mean/min/max, MKT, dewpoint, excursion)
 
 ```
 # CC,t_s,state,temp_c,rh_pct,dewpoint_c,mkt_c,excursion_min
-CC,256.0,OK,5.0,50.0,-4.4,5.0,0.0
+CC,256.0,OK,5.0,50.0,-4.6,5.0,0.0
 CC,768.0,CONDENSATION_RISK,5.0,95.0,4.3,5.0,0.0
 ```
 

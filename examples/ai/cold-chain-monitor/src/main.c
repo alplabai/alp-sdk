@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *

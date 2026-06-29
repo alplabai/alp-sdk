@@ -30,7 +30,10 @@ void cc_window_reset(struct cc_window_state *st)
 void cc_window_push(struct cc_window_state *st, struct cc_sample s)
 {
 	/* Silently ignore pushes after the window is full.  The caller is
-	 * expected to call cc_window_reset() to begin a new epoch. */
+	 * expected to call cc_window_reset() to begin a new epoch.  Dropping
+	 * excess samples (rather than wrapping around a ring buffer) keeps all
+	 * n samples in chronological order at s[0..n-1], which the slope
+	 * computation relies on for its mirror-index approach. */
 	if (st->count < CC_WINDOW_N) {
 		st->s[st->count++] = s;
 	}
@@ -68,6 +71,12 @@ static float mkt_celsius(const struct cc_window_state *st, int n)
 		double t_kelvin = (double)st->s[i].temp_c + 273.15;
 		sum_exp += exp(-(double)CC_DH_OVER_R / t_kelvin);
 	}
+	/* Each Boltzmann factor is proportional to the Arrhenius reaction rate at
+	 * its temperature.  The ratio between any two factors is
+	 * exp(ΔH/R × (1/T_cold − 1/T_hot)); for T_cold=277 K (4 C) versus
+	 * T_hot=313 K (40 C) that ratio is about 70.  A single hour at 40 C
+	 * therefore delivers the same cumulative chemical damage as ~70 hours at
+	 * 4 C -- which is exactly the asymmetry MKT is designed to capture. */
 	/* Divide by n to get the mean of the Boltzmann-weighted exponentials. */
 	double mean_exp = sum_exp / (double)n;
 	/* Guard the log: mean_exp is strictly positive for any real temperature. */
@@ -91,9 +100,15 @@ static float dewpoint_celsius(float temp_c, float rh_pct)
 {
 	/* Magnus coefficients (Alduchov & Eskridge 1996 optimisation). */
 	const float a = 17.62f, b = 243.12f;
-	/* Clamp RH to a safe range: log(0) = -∞, log(>100%) is physically wrong. */
+	/* Clamp RH to a safe range: log(0) = -∞, log(>100%) is physically wrong.
+	 * The 1% floor is conservative: at RH=1% the dewpoint is roughly -50 C
+	 * for a 20 C ambient -- far below any real cold-chain scenario.  This
+	 * guard only fires on corrupt or uninitialised sensor readings. */
 	float rh = (rh_pct < 1.0f) ? 1.0f : ((rh_pct > 100.0f) ? 100.0f : rh_pct);
-	/* γ combines the vapour-pressure and temperature terms. */
+	/* γ combines the saturation vapour-pressure (log term) and the Clausius-
+	 * Clapeyron temperature term.  For valid inputs γ is always negative:
+	 * log(RH/100) <= 0 and the temperature term is positive but smaller in
+	 * magnitude, giving a dewpoint below the ambient as physically expected. */
 	float gamma = logf(rh / 100.0f) + (a * temp_c) / (b + temp_c);
 	/* Solve for the temperature at which RH would equal 100%. */
 	return (b * gamma) / (a - gamma);
@@ -174,7 +189,11 @@ void cc_feat_extract(const struct cc_window_state *st,
 		/* Mirror-index from the end to get the last quarter. */
 		last += st->s[n - 1 - i].temp_c;
 	}
-	/* Slope = ΔT / Δt in °C/min; normalise both differences by the same q. */
+	/* Slope = ΔT / Δt in °C/min; normalise both differences by the same q.
+	 * Expanding: slope = (mean_last_q - mean_first_q) / (n * CC_SAMPLE_MIN),
+	 * where n * CC_SAMPLE_MIN is the full window duration in minutes.  Using
+	 * the full-window span (not just the quarter) gives a globally consistent
+	 * rate: a positive value means the window is warming, negative is cooling. */
 	out->temp_slope_c_per_min = ((last - first) / (float)q) / ((float)n * CC_SAMPLE_MIN);
 
 	/* Dewpoint uses the window-mean T/RH so it lines up with the classifier's
@@ -208,13 +227,19 @@ size_t cc_feat_pack(const struct cc_features *f, float *vec, size_t cap)
 	/* Pack in the same order the training pipeline used to build the model.
 	 * Any reordering here must be mirrored in the Python feature_extractor. */
 	size_t i = 0;
-	/* Temperature statistics (3 floats). */
+	/* Temperature statistics (3 floats): mean captures the typical exposure
+	 * level; min and max bound the extremes.  Together they let the autoencoder
+	 * distinguish a fluctuating-but-safe profile from one that is narrowly
+	 * within band but trending toward the edge of the safe region. */
 	vec[i++] = f->mean_temp_c;
 	vec[i++] = f->min_temp_c;
 	vec[i++] = f->max_temp_c;
 	/* Humidity mean (1 float). */
 	vec[i++] = f->mean_rh_pct;
-	/* Trend and derived metrics (4 floats). */
+	/* Trend and derived physics metrics (4 floats): temp_slope gives the
+	 * direction of change; dewpoint and mkt carry the condensation-risk and
+	 * cumulative-damage signals respectively; excursion_min directly encodes
+	 * the regulatory breach duration independent of the current temperature. */
 	vec[i++] = f->temp_slope_c_per_min;
 	vec[i++] = f->dewpoint_c;
 	vec[i++] = f->mkt_c;
@@ -235,18 +260,31 @@ size_t cc_feat_pack(const struct cc_features *f, float *vec, size_t cap)
 cc_state_t cc_classify(const struct cc_features *f, const struct cc_config *cfg)
 {
 	/* ACUTE first: the product is currently too warm/cold, or it has spent more
-	 * than the allowed minutes out of band. */
+	 * than the allowed minutes out of band.  We compare the window mean (not a
+	 * single instantaneous reading) against t_lo/t_hi so that a lone noisy
+	 * sample does not trigger a false alert; the excursion_min counter catches
+	 * that same spike as a cumulative time-in-breach penalty.  Acute alerts
+	 * demand immediate operator action: move product, repair the cold store. */
 	if (f->mean_temp_c < cfg->t_lo || f->mean_temp_c > cfg->t_hi ||
 	    f->excursion_min > cfg->excursion_min_limit) {
 		return CC_TEMP_EXCURSION;
 	}
-	/* CUMULATIVE: even after recovering to the band, a hot spike may have done
-	 * enough Arrhenius damage to push MKT past the limit. */
+	/* CUMULATIVE: even after the temperature has recovered to the safe band, a
+	 * brief hot excursion may have delivered enough Arrhenius-weighted thermal
+	 * energy to push MKT past the regulatory limit.  Because the Boltzmann
+	 * exponential grows steeply with temperature, a spike to 20 C for 1 hour
+	 * raises MKT far more than 1 hour at 9 C.  ICH Q1A / USP <1079> reference
+	 * limit for most vaccines: MKT <= 8 C (same as the storage ceiling). */
 	if (f->mkt_c > cfg->mkt_limit_c) {
 		return CC_MKT_EXCEEDED;
 	}
-	/* HUMIDITY: ambient near the dewpoint (or saturated air) risks condensation
-	 * on the goods/packaging. */
+	/* HUMIDITY: condensation risk arises from two independent conditions --
+	 *   (a) The gap between ambient temperature and the dewpoint is smaller than
+	 *       dewpoint_margin_c: the air is close to saturation and a small drop
+	 *       (draught, cold surface) will start condensing water on the goods.
+	 *   (b) RH > 90% regardless of the gap: so-saturated air condenses on any
+	 *       surface even 1-2 C cooler than ambient.
+	 * Both conditions risk label detachment, mould growth, and corrosion. */
 	if ((f->mean_temp_c - f->dewpoint_c) < cfg->dewpoint_margin_c || f->mean_rh_pct > 90.0f) {
 		return CC_CONDENSATION_RISK;
 	}
@@ -295,7 +333,11 @@ float cc_anomaly_fallback(const struct cc_features *f, const struct cc_config *c
 {
 	float score = 0.0f;
 
-	/* How far the mean temperature is outside the band, scaled by the band width. */
+	/* Excursion depth: how far the mean T is past the band edge, normalised by
+	 * the band width.  Score = 0 when in-band; score = 1 when the mean is one
+	 * full band width outside the edge.  For a 2..8 C fridge (band = 6 C),
+	 * mean_temp_c = 14 C gives score = 6/6 = 1.0.  Using the mean (not an
+	 * instantaneous reading) keeps the score robust against sensor glitches. */
 	float band = cfg->t_hi - cfg->t_lo;
 	if (band > 1e-6f) {
 		float over = 0.0f;
@@ -306,7 +348,11 @@ float cc_anomaly_fallback(const struct cc_features *f, const struct cc_config *c
 		}
 		score = over / band;
 	}
-	/* MKT overshoot contributes too (cumulative damage). */
+	/* MKT overshoot: how far MKT exceeds the cumulative-damage limit, normalised
+	 * by the limit so 2× the MKT limit saturates at score = 1.0.  For a
+	 * vaccine fridge with mkt_limit_c = 8 C, MKT = 12 C → mkt_term = 4/8 =
+	 * 0.5.  Taking max() (not sum) keeps the score interpretable: 0.9 always
+	 * means "very close to or past a hard limit", regardless of which one. */
 	if (f->mkt_c > cfg->mkt_limit_c && cfg->mkt_limit_c > 1e-6f) {
 		float mkt_term = (f->mkt_c - cfg->mkt_limit_c) / cfg->mkt_limit_c;
 		if (mkt_term > score) {
