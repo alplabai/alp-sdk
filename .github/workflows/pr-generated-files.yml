@@ -21,9 +21,11 @@ on:
     paths:
       - 'metadata/**'
       - 'include/alp/**'
+      - 'docs/diagnostics/**'
       - 'scripts/gen_soc_caps.py'
       - 'scripts/gen_pinmux_capability.py'
       - 'scripts/gen_support_matrix.py'
+      - 'scripts/gen_error_catalog.py'
       - 'scripts/abi_snapshot.py'
       - '.github/workflows/pr-generated-files.yml'
   push:
@@ -31,6 +33,7 @@ on:
     paths:
       - 'metadata/**'
       - 'include/alp/**'
+      - 'docs/diagnostics/**'
   workflow_dispatch:
 
 concurrency:
@@ -81,6 +84,13 @@ jobs:
       - name: Regenerate peripheral-support matrix from metadata
         run: python3 scripts/gen_support_matrix.py
 
+      # Single-source error catalog: projected from the ALP_ERR_* enum in
+      # include/alp/peripheral.h + the docs/diagnostics/ALP-B*.md landing
+      # pages by scripts/gen_error_catalog.py (what `alp explain` reads).
+      # Regenerate and let the diff gate below flag any drift.
+      - name: Regenerate error catalog from headers + diagnostic docs
+        run: python3 scripts/gen_error_catalog.py
+
       - name: Regenerate ABI snapshot (current = v0.8)
         # The committed v0.8 snapshot is the CURRENT working snapshot
         # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 are FROZEN historical records --
@@ -103,11 +113,13 @@ jobs:
                   --ignore-matching-lines='"generated":' \
                   -- include/alp/soc_caps.h docs/abi/v0.8-snapshot.json \
                      metadata/pinmux/ \
+                     metadata/error-catalog.json \
                      docs/peripheral-support-matrix.md; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
             echo "::error::  python3 scripts/gen_support_matrix.py"
+            echo "::error::  python3 scripts/gen_error_catalog.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version v0.8 --output docs/abi/v0.8-snapshot.json"
             echo "::error::and commit the result."
             exit 1
