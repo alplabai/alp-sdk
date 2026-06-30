@@ -19,7 +19,7 @@ confirm:
      CONFIG_FOO=y for `boot:`, the HiL spec must assert something
      observable downstream of CONFIG_FOO=y.
   3. Wakeup-source names referenced in the power spec match the
-     supported subsystem set in scripts/alp_orchestrate.py
+     supported subsystem set in scripts/alp_orchestrate/
      (`_slice_alp_conf` translates them into CONFIG_PM_DEVICE_WAKE_*).
   4. Module names in the diagnostics spec match the alp.conf
      emit format (`CONFIG_<MODULE>_LOG_LEVEL=<n>`).

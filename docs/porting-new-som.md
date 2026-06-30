@@ -542,20 +542,22 @@ CONFIG_ALP_PERIPHERAL_I2C=y
 
 The `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E9=y` line is the headline
 result — the loader successfully resolved the new SoM through the
-new SoC JSON.  Once `scripts/alp_project.py` is wired to mint
-`CONFIG_ALP_SOC_<NEW_REF>` for the new ref (one row in the
-`_SILICON_TO_KCONFIG` table at the top of that file) the swap-test
-is green.  (The existing Alif rows run `ALP_SOC_ALIF_ENSEMBLE_E3`
-through `E8`; a brand-new SoC adds its own `ALP_SOC_*` token.)
+new SoC JSON.  The Kconfig symbol is **computed** from the ref
+(`ALP_SOC_ + <REF>.upper().replace(':','_')`), so the swap-test
+goes green once the new ref is added to the allowlist in
+`metadata/registries/silicon-kconfig.json`.  (The existing Alif
+rows run `ALP_SOC_ALIF_ENSEMBLE_E3` through `E8`; a brand-new SoC
+adds its own ref to that list.)
 
-> **Caveat (current state, 2026-05-18).**  The
-> `_SILICON_TO_KCONFIG` dictionary in `scripts/alp_project.py` is
-> baked inline; adding a new SoC ref means adding one line there
-> AND a matching `config ALP_SOC_<NEW_REF>` stanza in
-> `zephyr/Kconfig`.  Until those two rows land, the loader will
-> emit a blank Kconfig fragment for the new SoC; this is
-> expected, and is the only code-touching step in the otherwise
-> metadata-only port.
+> **Caveat (current state).**  Adding a new SoC ref means one row in
+> `metadata/registries/silicon-kconfig.json` (the versioned allowlist
+> consumed by `silicon_to_kconfig()` in `scripts/alp_project.py`) AND
+> a matching `config ALP_SOC_<NEW_REF>` stanza in `zephyr/Kconfig`.
+> `scripts/validate_metadata.py` gates that every allowlisted ref
+> resolves to an existing `metadata/socs/` spec.  Until the registry
+> row + the Kconfig stanza land, the loader emits a blank Kconfig
+> fragment for the new SoC; this is expected, and is the only
+> data-touching step in the otherwise metadata-only port.
 
 ### 4. Confirm capabilities resolve
 

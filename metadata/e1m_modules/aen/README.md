@@ -26,3 +26,19 @@ CC3501E owns (notably SPI1 + IO11 / IO13 / IO15..IO21).
 Apps targeting CC3501E-owned pads dispatch through the
 [`<alp/chips/cc3501e.h>`](../../../include/alp/chips/cc3501e.h)
 host-control surface.
+
+## Structured capability table (generated)
+
+The two pad-claim TSVs (`from-alif.tsv` + `from-cc3501e.tsv`) are
+projected into a single schema'd, queryable table at
+[`metadata/pinmux/aen.yaml`](../../pinmux/aen.yaml) (schema:
+`pinmux-capability-v1`) by `scripts/gen_pinmux_capability.py`.  Each
+E1M edge pad becomes one entry — `{ e1m_pad, e1m_function, owner,
+silicon_peripheral, silicon_pad }` — so a CLI/IDE queries one
+structured file instead of parsing the raw TSVs.
+
+The **TSVs remain the single source**; the table is generated and a CI
+regen-diff gate keeps it byte-in-sync (edit a TSV, run the generator,
+commit the result — never hand-edit `aen.yaml`).  Pad exclusivity (no
+silicon pad backing two E1M functions) is gated separately by
+`scripts/check_pin_conflicts.py`.

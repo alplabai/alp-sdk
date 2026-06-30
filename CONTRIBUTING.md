@@ -66,6 +66,12 @@ signatures), if you have one in mind.
    ```
    See [`docs/testing.md`](docs/testing.md) for the per-stage
    breakdown + how to run individual layers.
+
+   Don't want to set up west + Zephyr by hand?
+   [`tools/native-sim-container/`](tools/native-sim-container/README.md)
+   freezes the `native_sim` PR gate in a container --
+   `make -C tools/native-sim-container test` reproduces
+   `pr-twister.yml` locally with no hardware.
 6. Open a PR; CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
    matrices.  CI green is necessary but not sufficient for tagging
    a release -- the test-plan row also has to flip to `✅`.
