@@ -20,10 +20,9 @@ from typing import Any, Optional
 from alp_project import resolve_memory_map
 
 from .models import BoardProject, IpcEntry, ResolvedCarveOut
+from .memregion import _PAGE, _region_size_bytes
 from .paths import METADATA_ROOT
 
-
-_PAGE = 4096
 
 
 def _fnv1a_32(data: bytes) -> int:
@@ -34,23 +33,6 @@ def _fnv1a_32(data: bytes) -> int:
         h = (h * 0x01000193) & 0xFFFFFFFF
     return h
 
-
-def _region_size_bytes(region: dict[str, Any]) -> Optional[int]:
-    """Convert a memory_map entry's size_mib / size_kib to bytes.
-
-    Returns None if the size field is unset OR is the literal 'TBD'.
-    """
-    if "size_mib" in region:
-        v = region["size_mib"]
-        if isinstance(v, int):
-            return v * 1024 * 1024
-        return None
-    if "size_kib" in region:
-        v = region["size_kib"]
-        if isinstance(v, int):
-            return v * 1024
-        return None
-    return None
 
 
 def _align_down(value: int, alignment: int) -> int:

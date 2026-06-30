@@ -873,15 +873,11 @@ def load_board_yaml(path: Path, *,
 # ---------------------------------------------------------------------
 # Carve-out resolver
 # ---------------------------------------------------------------------
-# The carve-out resolver now lives in carveout.py (the #285 carve-out seam).
-# Re-export resolve_carve_outs (orchestrator + emitters + tests) plus the page
-# primitives _PAGE / _region_size_bytes that the storage-partition resolver
-# below still shares.
-from .carveout import (  # noqa: E402
-    _PAGE,
-    _region_size_bytes,
-    resolve_carve_outs,
-)
+# resolve_carve_outs lives in carveout.py; the shared page primitives _PAGE /
+# _region_size_bytes now live in the memregion.py leaf (the storage-partition
+# resolver below uses them too). Re-exported so the public surface is unchanged.
+from .carveout import resolve_carve_outs  # noqa: E402
+from .memregion import _PAGE, _region_size_bytes  # noqa: E402
 
 
 # ---------------------------------------------------------------------
