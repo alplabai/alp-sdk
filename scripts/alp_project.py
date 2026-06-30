@@ -48,6 +48,7 @@ pip packages):
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import re
 import sys
@@ -72,13 +73,14 @@ SDK_VERSION_FILE = METADATA_ROOT / "sdk_version.yaml"
 
 
 # ---------------------------------------------------------------------
-# SKU + silicon → Kconfig mapping
+# SKU-family mapping
 # ---------------------------------------------------------------------
 #
-# The mapping is small (5 families × a handful of SKUs each) so we
-# bake it inline rather than reading another metadata file.  When a
-# new SoM family lands, add the entry here + update the schema's
-# `som.sku` pattern.
+# The SKU-prefix -> family-dir map is a small, pure derivation with no
+# second on-disk source, so we keep it inline.  When a new SoM family
+# lands, add the entry here + update the schema's `som.sku` pattern.
+# (The silicon -> Kconfig mapping, by contrast, now lives in the
+# versioned registry below -- see silicon_to_kconfig().)
 
 _SKU_FAMILY = re.compile(r"^E1M-(AEN|V2N|V2M|NX9)")
 
@@ -91,17 +93,39 @@ def _sku_family(sku: str) -> str:
     return {"AEN": "aen", "V2N": "v2n", "V2M": "v2n-m1", "NX9": "imx93"}[m.group(1)]
 
 
-# Map silicon refs to the Zephyr Kconfig that selects them.
-_SILICON_TO_KCONFIG: dict[str, str] = {
-    "alif:ensemble:e3": "ALP_SOC_ALIF_ENSEMBLE_E3",
-    "alif:ensemble:e4": "ALP_SOC_ALIF_ENSEMBLE_E4",
-    "alif:ensemble:e5": "ALP_SOC_ALIF_ENSEMBLE_E5",
-    "alif:ensemble:e6": "ALP_SOC_ALIF_ENSEMBLE_E6",
-    "alif:ensemble:e7": "ALP_SOC_ALIF_ENSEMBLE_E7",
-    "alif:ensemble:e8": "ALP_SOC_ALIF_ENSEMBLE_E8",
-    "renesas:rzv2n:n44": "ALP_SOC_RENESAS_RZV2N_N44",
-    "nxp:imx9:imx93": "ALP_SOC_NXP_IMX9_IMX93",
-}
+# Silicon ref -> Zephyr SoC-select Kconfig symbol.
+#
+# This is NOT a hand-maintained table: the symbol is computed from the
+# ref, and the single source of the allowlist is the versioned registry
+# at metadata/registries/silicon-kconfig.json.  Both this emitter and
+# scripts/alp_orchestrate/ consume `silicon_to_kconfig()` so the
+# mapping has exactly one definition (the prior _SILICON_TO_KCONFIG dict
+# was duplicated across both files -- "duplicated truth is a bug").
+SILICON_KCONFIG_REGISTRY = METADATA_ROOT / "registries" / "silicon-kconfig.json"
+
+
+@functools.lru_cache(maxsize=1)
+def _load_silicon_kconfig() -> tuple[str, frozenset[str]]:
+    """Load (socSymbolPrefix, knownSilicon) from the versioned registry."""
+    data = json.loads(SILICON_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
+    return data["socSymbolPrefix"], frozenset(data["knownSilicon"])
+
+
+def silicon_to_kconfig(silicon: str | None) -> str | None:
+    """Return the Zephyr Kconfig symbol that selects *silicon*, or ``None``.
+
+    The symbol is computed as ``socSymbolPrefix + ref.upper().replace(':','_')``;
+    e.g. ``alif:ensemble:e7`` -> ``ALP_SOC_ALIF_ENSEMBLE_E7``.  ``None`` is
+    returned for any ref not in the registry allowlist (so an accelerator
+    such as ``deepx:dx:m1`` -- or an unknown ref -- emits no CONFIG line,
+    matching the prior dict's ``.get()`` behaviour).
+    """
+    if silicon is None:
+        return None
+    prefix, known = _load_silicon_kconfig()
+    if silicon not in known:
+        return None
+    return prefix + silicon.upper().replace(":", "_")
 
 
 # ---------------------------------------------------------------------
@@ -293,6 +317,38 @@ def _resolve_pad_routes(
         # duplicates, surface the later entry (most-recent author wins).
         indexed[e1m] = entry
     return indexed
+
+
+def _hwrev_pad_route_overrides(
+    sku: str,
+    hw_rev: str | None,
+    metadata_root: Path,
+) -> list[dict[str, Any]]:
+    """Per-rev pad-route overrides for the selected ``hw_rev``.
+
+    The base SoM ``pad_routes:`` tracks the *production* revision.  A board
+    revision whose routing differs declares the deviating pads as data in
+    the family ``hw-revisions.yaml`` ``pad_route_overrides:`` block; this
+    returns that rev's list (empty when it declares none, so the base
+    ``pad_routes:`` then applies verbatim).  Applying these is what makes
+    ``--emit composed-route-table`` differ between revisions of one SKU --
+    e.g. AEN ``r1`` restores IO8/IO10 to Alif GPIOs and IO21 to the CC3501E,
+    the pre-2626-R2 routing.
+    """
+    if not hw_rev:
+        return []
+    try:
+        family = _sku_family(sku)
+    except ValueError:
+        return []
+    path = metadata_root / "e1m_modules" / family / "hw-revisions.yaml"
+    if not path.is_file():
+        return []
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    rev = (data.get("hw_revisions") or {}).get(hw_rev) or {}
+    overrides = rev.get("pad_route_overrides") or []
+    return [e for e in overrides
+            if isinstance(e, dict) and isinstance(e.get("e1m"), str)]
 
 
 def _compose_route(
@@ -1398,6 +1454,16 @@ def _emit_composed_route_table(
     """
     pad_routes = _resolve_pad_routes(sku_preset)
 
+    # Apply the selected board revision's pad-route overrides on top of the
+    # base (production-rev) pad_routes, so the composed table -- and thus
+    # `--emit composed-route-table` -- differs by hw_rev.  The rev comes from
+    # the board's `som.hw_rev`, falling back to the SoM's `default_hw_rev`.
+    hw_rev = ((project.get("som") or {}).get("hw_rev")
+              or sku_preset.get("default_hw_rev"))
+    for ov in _hwrev_pad_route_overrides(project["som"]["sku"], hw_rev,
+                                         metadata_root):
+        pad_routes[ov["e1m"]] = ov
+
     # Resolve silicon variant order_code for the top-level summary field.
     variant = _resolve_silicon_variant(sku_preset, metadata_root)
     silicon_variant_str = variant["order_code"] if variant else None
@@ -1470,6 +1536,7 @@ def _emit_composed_route_table(
     result: dict[str, Any] = {
         "board": board_name,
         "som": project["som"]["sku"],
+        "hw_rev": hw_rev,
         "silicon_variant": silicon_variant_str,
         "routes": routes,
     }
@@ -1480,7 +1547,7 @@ def _emit_composed_route_table(
 # v2 emit shims
 # ---------------------------------------------------------------------
 #
-# The orchestrator (scripts/alp_orchestrate.py) owns the v2 board.yaml
+# The orchestrator (scripts/alp_orchestrate/) owns the v2 board.yaml
 # loader + carve-out resolver + system-manifest emitter.  These shims
 # route the v2-only `--emit` modes (and the per-core
 # `--emit zephyr-conf --core <id>`) through the orchestrator.
@@ -1747,7 +1814,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
-    # ipc-contract-h) route through alp_orchestrate.py directly.
+    # ipc-contract-h) route through alp_orchestrate/ directly.
     if args.emit in ("system-manifest", "dts-reservations",
                      "ipc-contract-h", "os-topology"):
         return _run_v2_emit(args)

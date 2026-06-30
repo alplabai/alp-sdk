@@ -45,7 +45,7 @@ and Alif provides their signing keys.
 ## Declarative wiring (`boot:` block in `board.yaml`)
 
 The recommended path is the top-level `boot:` block in your
-project's `board.yaml` -- the loader (`scripts/alp_orchestrate.py`)
+project's `board.yaml` -- the loader (`scripts/alp_orchestrate/`)
 emits the matching `SB_CONFIG_*` overlay (sysbuild Kconfig) into
 `build/alp_sysbuild.conf` and passes it via
 `--sysbuild-config`.  No hand-edited sysbuild.conf.
