@@ -335,9 +335,9 @@ static alp_status_t z_in_read(alp_audio_in_backend_state_t *state,
 	struct hw_in_be *be = (struct hw_in_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
 
-	void    *block = NULL;
-	uint32_t got   = 0;
-	int      err   = dmic_read(be->dev, 0, &block, &got, (int32_t)timeout_ms);
+	void  *block = NULL;
+	size_t got   = 0;
+	int    err   = dmic_read(be->dev, 0, &block, &got, (int32_t)timeout_ms);
 	if (err != 0) return errno_to_alp(err);
 
 	size_t bf       = bytes_per_frame(&state->cfg);

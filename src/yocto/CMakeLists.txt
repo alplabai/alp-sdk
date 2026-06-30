@@ -122,14 +122,18 @@ target_compile_definitions(alp_sdk PRIVATE
 )
 
 # Mute the stub_backend.c definitions for every class whose dispatcher is
-# added UNCONDITIONALLY above (can/pwm/adc/i2s/counter/rtc/wdt).  These
-# must live in the same unconditional scope as their dispatcher
+# added UNCONDITIONALLY above (can/pwm/adc/i2s/counter/rtc/wdt + audio in/out).
+# These must live in the same unconditional scope as their dispatcher
 # target_sources: on a non-Linux plain-CMake cross-build the dispatchers
-# still own alp_{can,pwm,adc,i2s,counter,rtc,wdt}_*, so leaving the mute
-# inside the Linux block would let stub_backend.c re-emit those symbols
+# still own alp_{can,pwm,adc,i2s,counter,rtc,wdt}_* / alp_audio_*, so leaving
+# the mute inside a gated block would let stub_backend.c re-emit those symbols
 # and break the link with duplicate definitions.  (The I2C/SPI/UART/GPIO
 # overrides stay in the Linux block -- their symbol-providing wrappers
-# are Linux-only.)
+# are Linux-only.)  Audio's mute is unconditional here because audio_dispatch.c
+# owns alp_audio_* regardless of ALSA; the real ALSA backend
+# (backends/audio/yocto_drv.c) is still added only when libasound is found --
+# mirroring i2s.  (Without this, an ALSA-less sysroot -- e.g. the Alif Ensemble
+# A32 image -- double-defines alp_audio_* and fails to link.)
 target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_CAN=1
     ALP_VENDOR_OVERRIDES_PWM=1
@@ -138,6 +142,8 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_COUNTER=1
     ALP_VENDOR_OVERRIDES_RTC=1
     ALP_VENDOR_OVERRIDES_WDT=1
+    ALP_VENDOR_OVERRIDES_AUDIO_IN=1
+    ALP_VENDOR_OVERRIDES_AUDIO_OUT=1
 )
 
 # v0.4: real Yocto peripheral wrappers binding against Linux
@@ -298,10 +304,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 # to link against libasound.
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i2s/yocto_drv.c
             )
-            target_compile_definitions(alp_sdk PRIVATE
-                ALP_VENDOR_OVERRIDES_AUDIO_IN=1
-                ALP_VENDOR_OVERRIDES_AUDIO_OUT=1
-            )
+            # (ALP_VENDOR_OVERRIDES_AUDIO_IN/OUT are defined unconditionally
+            # above -- audio_dispatch.c owns alp_audio_* whether or not ALSA is
+            # present; this block only adds the real ALSA backend + link.)
             target_link_libraries(alp_sdk PUBLIC PkgConfig::ALSA)
         else()
             message(STATUS
