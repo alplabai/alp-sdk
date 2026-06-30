@@ -181,7 +181,7 @@ For AEN801 (which carries the U85 too) the loader would also
 emit `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`; for N93 it
 emits `_U65=y` plus `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y`
 (the i.MX 93 PHY shim).  Advanced readers: the emit logic
-lives in `scripts/alp_orchestrate.py` § *Per-variant Ethos-U
+lives in `scripts/alp_orchestrate/` § *Per-variant Ethos-U
 selector* (G-1) and § *CPU-class TFLM kernel selector* (G-2).
 
 The app picks Ethos-U vs CPU per-handle at runtime via
@@ -386,7 +386,7 @@ provisioned.
   -- end-to-end demo: camera → ISP → inference → OLED overlay.
 - [Vela docs](https://github.com/ARM-software/ethos-u-vela) --
   the Ethos-U pre-compiler.
-- [`scripts/alp_orchestrate.py`](../../scripts/alp_orchestrate.py)
+- [`scripts/alp_orchestrate/`](../../scripts/alp_orchestrate/)
   § *Per-variant Ethos-U selector* + § *CPU-class TFLM kernel
   selector* -- the G-1 / G-2 emit logic for advanced readers.
 - [`docs/test-plan.md`](../test-plan.md) -- the verification

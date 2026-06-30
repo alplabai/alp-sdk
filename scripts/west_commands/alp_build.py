@@ -6,7 +6,7 @@ build slice per non-`off` core.
 Replaces the v1 single-OS `west alp-build` (which only ever
 invoked Zephyr's `west build`) with a heterogeneous-aware driver
 that dispatches Yocto + Zephyr + baremetal slices in parallel via
-scripts/alp_orchestrate.py.
+scripts/alp_orchestrate/.
 
 Customer flow (per spec §5.4):
 
@@ -125,7 +125,7 @@ class AlpBuild(WestCommand):
         # Step 2 -- fan out via the orchestrator.
         cmd = [
             python,
-            str(sdk_root / "scripts" / "alp_orchestrate.py"),
+            "-m", "alp_orchestrate",  # env_with_sdk() puts scripts/ on PYTHONPATH
             "--input", str(board_yaml),
             "--build-root", str(build_root),
         ]

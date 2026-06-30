@@ -78,7 +78,7 @@ boot:
 # ----------------------------------------------------------------
 # `provider: mender` triggers two emitters:
 #
-#   - Yocto slices (`os: yocto`): scripts/alp_orchestrate.py's
+#   - Yocto slices (`os: yocto`): scripts/alp_orchestrate/'s
 #     _slice_local_conf() emits `INHERIT += "mender-full"` and
 #     `MENDER_*` weak-assignments into local.conf.  Customers
 #     forking this skeleton for V2N101 (Linux + M33) inherit the
