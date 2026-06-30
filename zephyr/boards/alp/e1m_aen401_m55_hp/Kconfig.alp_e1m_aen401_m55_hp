@@ -1,0 +1,5 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_ALP_E1M_AEN401_M55_HP
+	select SOC_AE402FA0E5597LE0_RTSS_HP

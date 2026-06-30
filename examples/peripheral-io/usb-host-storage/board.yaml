@@ -1,0 +1,24 @@
+# board.yaml -- per-app project configuration for the usb-host-storage example.
+#
+# Target: E1M-AEN401 (Alif Ensemble E4) M55-HP core.
+#
+# Customer workflow: copy this directory, change `som.sku` to your MPN,
+# and `west build -b alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp`.
+#
+# USB host bring-up is bench-gated:
+#   - CONFIG_USB_HOST_STACK=y + CONFIG_UHC_XHCI_ALIF=y (in prj.conf)
+#   - xHCI register bring-up is TODO(aen401-bench) inside uhc_xhci_alif.c
+#   - The zephyr_uhc0 node in the board DTS carries the DFP-grounded 0x48200000 / IRQ 101
+som:
+  sku: E1M-AEN401
+
+preset: e1m-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    peripherals:
+      - usb
+
+diagnostics:
+  log_level: info

@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+CONFIG_ARM_MPU=y
+CONFIG_HW_STACK_PROTECTION=y
+
+# Console: Alif UART5 (E1M edge "UART0", P3_4/P3_5) -- NS16550-class UART.
+# Same physical pin as AEN801; Ensemble family shares the UART5 base address.
+CONFIG_SERIAL=y
+CONFIG_CONSOLE=y
+CONFIG_UART_CONSOLE=y
+CONFIG_UART_INTERRUPT_DRIVEN=y
+CONFIG_UART_NS16550=y

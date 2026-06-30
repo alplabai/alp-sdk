@@ -3188,6 +3188,14 @@ endmenu # "Alp SDK chip drivers"
 # metadata/library-profiles/<name>/hw-backends.yaml.
 rsource "Kconfig.alp-libraries"
 
+# ---------------------------------------------------------------------------
+# Alif Ensemble xHCI USB host (UHC) driver skeleton -- ADR 0017 Tier-1.5.
+# Sourced inside if ALP_SDK because it is an alp-sdk module driver (wired
+# from zephyr/CMakeLists.txt) and depends on UHC_DRIVER being enabled by
+# the application.
+# ---------------------------------------------------------------------------
+rsource "drivers/usb/uhc/Kconfig"
+
 endif # ALP_SDK
 
 # ---------------------------------------------------------------------------

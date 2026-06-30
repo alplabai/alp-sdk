@@ -7,6 +7,50 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added — xhci_core: arch-neutral host logic validated + driver wired
+
+`xhci_core.{c,h}` — pure-C, no-MMIO xHCI ring/context/init-sequence logic
+(spec §4/5/6) verified by a native_sim ztest suite (`tests/unit/xhci_core`,
+`alp.xhci_core.unit`, 3/3 PASS).  `uhc_xhci_alif.c` now calls
+`xhci_ring_init` (command ring) and `xhci_init_sequence` to build an
+op-reg image in RAM (`data->op_image`) via the host-validated path; the
+MMIO write-out (DCBAAP/CRCR/CONFIG copy from the image with volatile writes,
+then USBCMD.R/S at enable) is `TODO(aen401-bench)`.  The AEN401
+`usb-host-storage` build still links clean (FLASH 58 968 B,
+arm-zephyr-eabi 14.3.0).  All MMIO-dependent paths (DWC3 G\*-register
+soft-reset, CAPLENGTH read, HCRST/CNR poll, event ISR, transfer scheduling,
+enumeration) remain `TODO(aen401-bench)`.
+
+### Added — AEN401 (E4) USB host skeleton: board + driver + backend + example
+
+End-to-end USB host foundation for the E1M-AEN401 (Alif Ensemble E4, Cortex-M55).
+Compile-verified; live bring-up is bench-gated (`TODO(aen401-bench)` markers).
+
+- **`zephyr/boards/alp/e1m_aen401_m55_hp/`** — new Zephyr board for
+  `alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp`.  Mirrors the AEN801 M55-HP
+  structure (E1M-EVK console on UART5/P3_4-P3_5, MRAM flash controller,
+  MCUboot-compatible partition map).  Declares an `alif,xhci-uhc` USB host
+  controller node (`zephyr_uhc0` label) at `0x48200000` / IRQ 101 (grounded from
+  the Alif DFP `soc.h` for AE402FA0E5597).
+
+- **`zephyr/drivers/usb/uhc/uhc_xhci_alif.c`** — xHCI USB-2.0 host UHC driver
+  skeleton for the Alif Ensemble USB (DWC3-family).  Full `struct uhc_api` op table
+  (`lock` → `ep_dequeue`); xHCI capability register map from the xHCI spec §5.3;
+  DWC3 G\*-register host-mode init (GCTL @ 0xC110, PrtCapDir=host) + xHCI
+  command/event/transfer ring sequencing documented as `TODO(aen401-bench)` code
+  comments.  `CONFIG_UHC_XHCI_ALIF` Kconfig; binding at
+  `zephyr/dts/bindings/usb/alif,xhci-uhc.yaml`.
+
+- **`src/backends/usb/zephyr_drv.c`** — host-side ops (`z_host_open/enable/
+  disable/close`) wired to Zephyr's `usbh_init/enable/disable/shutdown` API
+  behind `CONFIG_USB_HOST_STACK && DT_HAS_COMPAT_STATUS_OKAY(alif_xhci_uhc)`.
+  Builds without either guard fall through to the existing NOSUPPORT stubs.
+
+- **`examples/peripheral-io/usb-host-storage/`** — USB mass-storage host example
+  using `alp_usb_host_open/enable/disable/close` (`<alp/usb.h>`).  Build-verified
+  for `alp_e1m_aen401_m55_hp`; map confirms the xHCI skeleton ops and the
+  `USBH_CONTROLLER_DEFINE` context are linked at the correct MRAM addresses.
+
 ### Fixed
 
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
