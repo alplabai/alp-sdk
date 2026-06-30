@@ -18,6 +18,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `<alp/inference.h>` fused model with the deterministic rule as fallback. Core
   host-unit-tested on `native_sim` (`tests/unit/fusion_health`); model is a stub
   with a recipe in `models/README.md`; HiL bench-gated.
+- **DC motor current-signature example** (`examples/ai/motor-current-signature/`):
+  electrical-modality PdM — INA236 current/voltage/power → windowed
+  `current_features` (mean/ripple-RMS/crest/slope/power + dominant ripple
+  frequency) → a deterministic 5-state classifier (OFF/NORMAL/INRUSH/OVERLOAD/
+  STALL; the ripple magnitude separates a stalled rotor from a turning overload)
+  + an `<alp/inference.h>` anomaly score with a deterministic fallback. The core
+  is host-unit-tested on `native_sim` (`tests/unit/current_features`); model is a
+  stub with a training recipe in `models/README.md`; HiL bench-gated.
+- **Wearable activity + fall example** (`examples/ai/wearable-activity-fall/`):
+  body-worn IMU edge node — ICM-42670 accel+gyro → windowed motion features
+  (`motion_features`: per-axis/magnitude RMS, SMA, step cadence via FFT, jerk,
+  tilt + a deterministic idle/walk/run fallback) → activity classifier via
+  `<alp/inference.h>`, plus a rule-based 3-phase fall detector (`fall_detect`:
+  free-fall → impact → post-impact stillness). Two pure-C cores host-unit-tested
+  on `native_sim` (`tests/unit/motion_features`, `tests/unit/fall_detect`); model
+  is a stub with a training recipe in `models/README.md`; HiL bench-gated.
 - **Rail predictive-maintenance example** (`examples/ai/rail-predictive-maintenance/`):
   train-mounted rail-condition survey — ICM-42670 vibration → DSP feature
   extraction (`rail_features`: RMS/crest/kurtosis/FFT band energies/dominant
