@@ -9,6 +9,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **Acoustic safety-event example** (`examples/audio/acoustic-safety-events/`):
+  always-listening security/safety node — PDM mic → per-frame `acoustic_event`
+  DSP (8 FFT band energies, spectral centroid/flatness/rolloff, crest factor,
+  zero-crossing rate, RMS) → a deterministic 4-class event classifier
+  (AMBIENT/GLASS_BREAK/ALARM/SCREAM) + an `<alp/inference.h>` classifier with a
+  deterministic fallback. The core is host-unit-tested on `native_sim`
+  (`tests/unit/acoustic_event`); model is a stub with a training recipe in
+  `models/README.md`; HiL bench-gated.
 - **Wind-turbine acoustic anomaly example** (`examples/audio/acoustic-anomaly-wind-turbine/`):
   nacelle acoustic condition monitor — PDM mic → DSP features (`acoustic_features`:
   FFT band energies / spectral flatness / centroid / kurtosis + healthy-baseline
