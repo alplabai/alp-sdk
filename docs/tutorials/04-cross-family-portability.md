@@ -51,7 +51,7 @@ som:
   sku: E1M-AEN801    # was E1M-AEN701
 ```
 
-The orchestrator (`scripts/alp_orchestrate.py`) resolves the
+The orchestrator (`scripts/alp_orchestrate/`) resolves the
 new preset under `metadata/e1m_modules/E1M-AEN801.yaml`,
 regenerates `alp.conf` with the AEN801-specific Kconfig flags,
 and `west build` does the rest.

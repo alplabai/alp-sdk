@@ -36,7 +36,7 @@ Both blocks are project-wide (one bootloader, one OTA fabric per
 device). The orchestrator translates each into native build-system
 config:
 
-- `boot:` -> sysbuild MCUboot child image. `scripts/alp_orchestrate.py`
+- `boot:` -> sysbuild MCUboot child image. `scripts/alp_orchestrate/`
   emits `SB_CONFIG_BOOTLOADER_MCUBOOT=y`,
   `SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256=y`,
   `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="keys/prod_ecdsa_p256.pub.pem"`,
