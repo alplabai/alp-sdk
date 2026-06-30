@@ -25,6 +25,10 @@ into the topic-specific docs.
 - [portability-matrix.md](portability-matrix.md) — the empirical
   guarantee: 21/21 E1M + 12/12 E1M-X cells green, all Phase B
   gaps resolved.
+- [peripheral-support-matrix.md](peripheral-support-matrix.md) —
+  auto-generated SoM × peripheral-class presence matrix, projected
+  from the single-source SoC metadata (presence only; driver
+  maturity lives in the OS support matrix).
 - [ADR 0011 — intra-family portability](adr/0011-intra-family-portability.md)
   — architectural decision: portability is INTRA-family;
   cross-form-factor is intentionally a separate product-line choice.
