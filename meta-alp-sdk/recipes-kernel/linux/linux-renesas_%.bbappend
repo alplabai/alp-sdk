@@ -64,6 +64,9 @@ SRC_URI:append = " \
     file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch \
     file://0002-drm-renesas-rzg2l-mipi-dsi-pm_runtime-guard-host-tra.patch \
     file://0003-usb-ohci-platform-add-spurious-oc-DT-property.patch \
+    file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
+    file://0005-gpio-add-gd32-bridge-expander-driver.patch \
+    file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
 "
 
 # AMP clock ownership: RSCI7 + RIIC8 belong to the Cortex-M33 system
@@ -124,3 +127,8 @@ SRC_URI:append = " \
 # (no DT consumer) until the ti,tas2563 nodes land in the carrier dtsi.
 SRC_URI:append:e1m-v2m101 = " file://tas2563-audio.cfg"
 SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg"
+
+# Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
+# + GD32-bridge GPIO for panel reset).
+SRC_URI:append:e1m-v2n101 = " file://display.cfg"
+SRC_URI:append:e1m-v2m101 = " file://display.cfg"

@@ -36,12 +36,10 @@ sheets — each is a discoverable feature block on the board:
 | `Mikro BUS.SchDoc`             | mikroBUS click-board expansion header(s).                     |
 | `Current Measurement.SchDoc`   | Per-rail INA236 monitors.                                     |
 
-The interface-mux ICs found in the schematic so far:
-
-| Part                    | Datasheet on file                                          | Likely role                                 |
-|-------------------------|------------------------------------------------------------|---------------------------------------------|
-| **ITE `IT6162`**        | `IT6162_Datasheet_V0.9.0_Alp Lab AB.pdf`, `IT6162_V0.91_20241202.pdf` | DSI-to-anything bridge / display redriver — confirm with the user. |
-| **Diodes `PI3WVR648`**  | `PI3WVR648.pdf`                                            | High-bandwidth video / USB / PCIe lane mux. |
+Both display FFCs are wired point-to-point (ESD clamps + LSF0102 level
+shifters only).  Datasheets for the ITE IT6162 and Diodes PI3WVR648 exist
+in the vendor datasheet folder but **neither part is populated** on the
+E1M-X EVK.
 
 ## Compared to the E1M EVK (35 × 35)
 
@@ -78,6 +76,31 @@ deltas (verify when the HW config writeup lands):
 - The Zephyr board file for `alp_e1m_evk_v2n` lives in
   `alplabai/alp-zephyr-modules` (TBD), same split as the AEN EVK.
 
+## Display
+
+### Display 1 (J6) — V2N primary display path
+
+| Item | Detail |
+|------|--------|
+| Connector | J6 — DSI0 lane set (4 data pairs wired to the E1M-X SoM) |
+| Panel | Rocktech RK055HDMIPI4MA0 — 5.5″ 720×1280, Himax HX8394-F controller |
+| Link config | 2-lane MIPI-DSI, RGB565 (per the NXP / Rocktech reference configuration) |
+| Backlight | SoM-side boost converter driven by Renesas PA5 (GPT1 ch2 B-output); `pwm-backlight` device tree node; 5 kHz PWM. |
+| Panel reset | LCD1_RST = E1M IO13 → GD32 PF1; Linux drives it via the `gpio-gd32-bridge` GPIO expander at BRD_I2C 0x70. |
+| Panel power | LCD1_PWR_EN = E1M IO15 — **unrouted on V2N-family SoMs** but pulled high on the carrier, so the panel powers by default without explicit firmware action. |
+| Touch controller | Goodix GT911 on DSI1_CSI_I2C = E1M I2C3 → GD32 PC8/PC9 (the bridge's secondary I2C transport). **Linux has no I2C master to this bus today** — GT911 INT also lands on the GD32. Touch support is deferred to a GD32 I2C-proxy follow-up; a goodix polled-mode patch ships dormant on the branch in the meantime. |
+| Silicon note | Datasheet R01DS0466 rev 1.20 section #AC0/#BC0 states those part suffixes do not support MIPI-DSI Display Command Set (DCS) control — HX8394 init (which uses DCS commands) is impossible on `#AC0` parts. The SoM is moving to a later-suffix DCS-capable part; older `#AC0` boards will fail at panel init by design. |
+| Bring-up status | Code complete on `feat/v2n-lcd-display1` (kernel patches 0004–0006, DT nodes, weston image, LVGL example); **HIL on silicon pending** (bench ladder G0–G8). |
+
+### Display 2 (J28) — carrier-ready, unavailable on V2N/V2M
+
+The carrier fully wires the DSI1 lane set to J28 for future dual-DSI
+SoMs.  V2N-family SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) have only
+one MIPI-DSI output — the DSI1 pads are unpopulated on the SoM.
+Display 2, its LCD2_RST (IO21), LCD2_PWR_EN (IO22), and CTP2 sideband
+(IO17/IO19) are therefore **permanently unavailable on V2N/V2M** at this
+hardware revision.
+
 ## Pending from the user
 
 - Authoritative pad-by-pad routing (which E1M-X pad maps to which
@@ -85,8 +108,6 @@ deltas (verify when the HW config writeup lands):
 - I²C addresses for any on-board sensors / IO expanders / current
   monitors.
 - Boot-strap dipswitch positions for V2N vs V2N-M1.
-- The IT6162 + PI3WVR648 functional roles (display bridge, lane
-  mux, etc. — schematic sheets imply but don't fully describe).
 
 When that lands, this doc becomes the SDK-side cheat sheet for
 the E1M-X EVK matching what

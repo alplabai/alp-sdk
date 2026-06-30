@@ -97,6 +97,12 @@ e1m_routes:
     - { e1m: E1M_X_GPIO_IO6,  macro: XEVK_PIN_M2E_UART_WAKE, active_low: true,
         doc: "M.2 E-key UART-path wake (active-low)." }
     # --- Capacitive touch panels (on the two DSI displays) ---
+    # CTP1 INT/RST (IO9/IO11): GT911 touch controller for Display 1. On V2N-family
+    # SoMs the GT911 I2C bus (DSI1_CSI_I2C = E1M I2C3) terminates at GD32 PC8/PC9
+    # (the bridge's secondary I2C transport) -- Linux has no direct I2C master here.
+    # Touch is deferred until the GD32 I2C-proxy follow-up; see XEVK_I2C_BUS_DSI_CSI1.
+    # CTP2 INT/RST (IO17/IO19): Display 2 sideband -- unreachable on V2N/V2M SoMs
+    # (DSI1 lane set unpopulated). Wired on the carrier for future dual-DSI SoMs.
     - { e1m: E1M_X_GPIO_IO9,  macro: XEVK_PIN_CTP1_INT,
         doc: "Capacitive touch panel 1 interrupt (display 1)." }
     - { e1m: E1M_X_GPIO_IO11, macro: XEVK_PIN_CTP1_RST, active_low: true,
@@ -106,6 +112,14 @@ e1m_routes:
     - { e1m: E1M_X_GPIO_IO19, macro: XEVK_PIN_CTP2_RST, active_low: true,
         doc: "Capacitive touch panel 2 reset (active-low)." }
     # --- MIPI-DSI display panels ---
+    # Display 1 (J6, DSI0): LCD1_RST (IO13) is routed via the GD32 bridge GPIO
+    # expander on V2N-family SoMs (GD32 PF1, gpio-gd32-bridge @0x70 on BRD_I2C).
+    # LCD1_PWR_EN (IO15) is unrouted on V2N SoMs but pulled high on the carrier --
+    # panel powers by default; no explicit firmware action needed.
+    # Display 2 (J28, DSI1): V2N/V2M SoMs have only one MIPI-DSI output; DSI1
+    # lane set is unpopulated on the SoM -- LCD2_RST (IO21), LCD2_PWR_EN (IO22),
+    # and the CTP2 sideband (IO17/IO19) are permanently unreachable on V2N/V2M.
+    # The carrier fully wires them for future dual-DSI SoMs.
     - { e1m: E1M_X_GPIO_IO13, macro: XEVK_PIN_LCD1_RST,    active_low: true,
         doc: "DSI display panel 1 reset (active-low)." }
     - { e1m: E1M_X_GPIO_IO15, macro: XEVK_PIN_LCD1_PWR_EN,
@@ -155,6 +169,9 @@ e1m_routes:
         doc: "On-board sensor + IO-expander + INA236 bus (ICM-42670, BMI323, BMP581, TCAL9538, INA236)." }
     - { e1m: E1M_X_I2C2,  macro: XEVK_I2C_BUS_DSI_CSI0,
         doc: "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config)." }
+    # On V2N-family SoMs, E1M I2C3 (DSI1_CSI_I2C) terminates at GD32 PC8/PC9 --
+    # there is no Linux I2C master to this bus today; the GT911 touch controller
+    # is accessed only after the GD32 I2C-proxy follow-up is implemented.
     - { e1m: E1M_X_I2C3,  macro: XEVK_I2C_BUS_DSI_CSI1,
         doc: "Display/camera control I2C bank 1." }
     - { e1m: E1M_X_SPI1,  macro: XEVK_SPI_BUS_ARDUINO,

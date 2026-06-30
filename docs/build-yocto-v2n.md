@@ -89,6 +89,19 @@ not the distro.
 > integrator because the perception example documents a multi-host robot
 > graph, so a forced loopback default would silently break it.
 
+> **Kernel version pin:** the VLP-v5 `local.conf` template defaults to
+> `PREFERRED_VERSION_linux-renesas = "6.12%"` — you **must** override this
+> to `"6.1%"` (linux-renesas 6.1.141-cip43) for BSP v6.30.  Leaving it at
+> the template default causes a recipe mismatch and build failure.
+
+> **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
+> fragments from `meta-alp-sdk/recipes-kernel/linux/`.  For V2N with the
+> display and audio features enabled, the active fragment list includes
+> `display.cfg` + `tas2563-audio.cfg`.  To build a minimal image without
+> Weston/display, remove the `alp-lvgl-dashboard`, `weston`, and
+> `weston-init` packages from `IMAGE_INSTALL` in your `local.conf` and
+> drop the `display.cfg` fragment from the `SRC_URI` override.
+
 ## 4. Deploy the rootfs
 
 The bootloader's `bootcmd` (rzv2n-dev config + the Alp 0002 patch)
