@@ -22,7 +22,7 @@ extern "C" {
 /** Number of logarithmically-spaced spectral bands in the feature vector. */
 #define ACO_N_BANDS 12
 /** Default codec sample rate; determines the Hz-per-bin mapping in aco_feat_extract(). */
-#define ACO_SR_HZ   16000.0f
+#define ACO_SR_HZ 16000.0f
 /** 12 band energies + flatness + centroid + kurtosis + total_rms. */
 #define ACO_FEATURE_DIM (ACO_N_BANDS + 4)
 

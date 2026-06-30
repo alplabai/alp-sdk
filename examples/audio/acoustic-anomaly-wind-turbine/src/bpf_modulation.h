@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 /** Ring-buffer depth: ~4 s of per-frame energy at 62.5 fps. */
-#define BPF_ENV_N       256
+#define BPF_ENV_N 256
 /** Number of BPF harmonics evaluated by the Goertzel filter (1x..4x BPF). */
 #define BPF_N_HARMONICS 4
 /** Feature vector length: BPF_N_HARMONICS blade-order energies + modulation_depth. */
@@ -36,8 +36,9 @@ struct bpf_env_state {
 };
 
 struct bpf_modulation {
-	float blade_order_energy[BPF_N_HARMONICS]; /**< fraction of envelope AC energy at k*BPF (0..~1). */
-	float modulation_depth;                    /**< (max-min)/(max+min) of the envelope. */
+	float blade_order_energy
+	    [BPF_N_HARMONICS];  /**< fraction of envelope AC energy at k*BPF (0..~1). */
+	float modulation_depth; /**< (max-min)/(max+min) of the envelope. */
 };
 
 /**

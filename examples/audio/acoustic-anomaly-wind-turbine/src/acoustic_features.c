@@ -105,14 +105,14 @@ static void fft_radix2(float *re, float *im, int n)
 			/* Running twiddle W^k, initialised to W^0 = 1 + j*0. */
 			float wr = 1.0f, wi = 0.0f;
 			for (int k = 0; k < len / 2; k++) {
-				int   a  = i + k;
-				int   b  = i + k + len / 2;
+				int a = i + k;
+				int b = i + k + len / 2;
 				/* T = W^k * X[b]  (complex multiply). */
 				float tr = wr * re[b] - wi * im[b];
 				float ti = wr * im[b] + wi * re[b];
 				/* Radix-2 butterfly: X[a] += T, X[b] = X[a] - T. */
-				re[b]    = re[a] - tr;
-				im[b]    = im[a] - ti;
+				re[b] = re[a] - tr;
+				im[b] = im[a] - ti;
 				re[a] += tr;
 				im[a] += ti;
 				/* Twiddle recurrence: W^(k+1) = W^k * W_step. */
