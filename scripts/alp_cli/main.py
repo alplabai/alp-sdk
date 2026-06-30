@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from alp_cli import __version__
+from alp_cli.doctor import doctor_cmd
 from alp_cli.init import init_cmd
 from alp_cli.model import model_group
 from alp_cli.run import run_cmd
@@ -17,6 +18,7 @@ def cli() -> None:
     """Alp SDK command-line interface."""
 
 
+cli.add_command(doctor_cmd)
 cli.add_command(init_cmd)
 cli.add_command(model_group)
 cli.add_command(run_cmd)

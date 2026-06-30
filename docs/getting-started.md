@@ -81,6 +81,21 @@ pip install west
 wsl --install -d Ubuntu
 ```
 
+**Verify your setup first.**  Before building anything, run the
+read-only preflight -- it checks every tool above (plus the Zephyr
+pin, the `.west` workspace and the workspace venv) and prints a
+`[PASS]`/`[WARN]`/`[FAIL]` line with a fix hint for each:
+
+```bash
+alp doctor              # human-readable report; exit 1 on any FAIL
+alp doctor --strict     # also fail on WARN (handy in CI)
+alp doctor --json       # machine-readable (used by the VS Code extension)
+```
+
+It is HW-free (no build, no board, no flash), so it is safe to run
+anytime.  Resolve every `[FAIL]` before continuing; `[WARN]` lines
+are for optional / real-silicon-only tooling (Zephyr SDK, hal_alif).
+
 For real-silicon builds you'll also need the Zephyr SDK
 (`zephyr-sdk-1.0.1` matches the v0.6 Zephyr v4.4 pin — see
 `docs/zephyr-version-policy.md`) and a JTAG / SWD probe matching
