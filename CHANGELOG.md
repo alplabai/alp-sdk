@@ -18,6 +18,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   severity, and PASS/FAIL. Core host-unit-tested on `native_sim`
   (`tests/unit/defect_map`); model is a stub with a recipe in `models/README.md`;
   HiL bench-gated.
+- **Rail predictive-maintenance example** (`examples/ai/rail-predictive-maintenance/`):
+  train-mounted rail-condition survey — ICM-42670 vibration → DSP feature
+  extraction (`rail_features`: RMS/crest/kurtosis/FFT band energies/dominant
+  frequency/rail wavelength) → AI classifier via `<alp/inference.h>` with a
+  deterministic fallback → geotagged to GNSS lat/lon + haversine chainage
+  (`rail_position`) → one CSV record per 25 m segment. The two pure-C DSP cores
+  are host-unit-tested on `native_sim` (`tests/unit/rail_features`,
+  `tests/unit/rail_position`); HiL bench-gated.
 
 ### Fixed
 
