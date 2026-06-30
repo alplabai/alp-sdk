@@ -13,7 +13,7 @@ Yocto layer that packages the **Alp SDK** runtime, on-board chip
 drivers, edge-AI examples, and reference ROS 2 nodes for the
 V2N / V2N-M1 / i.MX 93 Linux side of every supported E1M SoM.
 
-The orchestrator (`scripts/alp_orchestrate.py`) emits per-MACHINE
+The orchestrator (`scripts/alp_orchestrate/`) emits per-MACHINE
 build invocations against this layer; customers who hand-write
 firmware skip the orchestrator and consume the layer directly.
 
@@ -76,7 +76,7 @@ MACHINE names follow the per-cluster pattern `e1m-<sku>-<cluster>`:
   the Linux cluster on V2N / iMX93; the M33 system core builds via
   Zephyr, not Yocto).
 
-This matches what `scripts/alp_orchestrate.py` writes into the
+This matches what `scripts/alp_orchestrate/` writes into the
 emitted `system-manifest.yaml` per the heterogeneous-OS spec at
 `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`.
 

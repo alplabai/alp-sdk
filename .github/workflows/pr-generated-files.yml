@@ -22,6 +22,8 @@ on:
       - 'metadata/**'
       - 'include/alp/**'
       - 'scripts/gen_soc_caps.py'
+      - 'scripts/gen_pinmux_capability.py'
+      - 'scripts/gen_support_matrix.py'
       - 'scripts/abi_snapshot.py'
       - '.github/workflows/pr-generated-files.yml'
   push:
@@ -69,6 +71,16 @@ jobs:
       - name: Regenerate soc_caps.h from metadata
         run: python3 scripts/gen_soc_caps.py
 
+      - name: Regenerate pin-mux capability tables from the pinout TSVs
+        run: python3 scripts/gen_pinmux_capability.py
+
+      # Same single-source contract as soc_caps.h: the peripheral-support
+      # matrix is projected from metadata/e1m_modules/*.yaml + metadata/socs/
+      # by scripts/gen_support_matrix.py.  Regenerate and let the diff gate
+      # below flag any drift.
+      - name: Regenerate peripheral-support matrix from metadata
+        run: python3 scripts/gen_support_matrix.py
+
       - name: Regenerate ABI snapshot (current = v0.8)
         # The committed v0.8 snapshot is the CURRENT working snapshot
         # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 are FROZEN historical records --
@@ -89,9 +101,13 @@ jobs:
           # else must match.
           if ! git diff --exit-code \
                   --ignore-matching-lines='"generated":' \
-                  -- include/alp/soc_caps.h docs/abi/v0.8-snapshot.json; then
+                  -- include/alp/soc_caps.h docs/abi/v0.8-snapshot.json \
+                     metadata/pinmux/ \
+                     docs/peripheral-support-matrix.md; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
+            echo "::error::  python3 scripts/gen_pinmux_capability.py"
+            echo "::error::  python3 scripts/gen_support_matrix.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version v0.8 --output docs/abi/v0.8-snapshot.json"
             echo "::error::and commit the result."
             exit 1

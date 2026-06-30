@@ -114,8 +114,10 @@ west flash                                        # -> alif_flash -> SETOOLS
 ```
 
 The runner reads `SETOOLS_DIR` / `SE_UART` (the same env vars these helpers
-use), or takes `--setools-dir` / `--se-uart`; pass `--mram-xip` for a
-slot0-linked app that overflows ITCM (mramAddress `0x80010000`).
+use), or takes `--setools-dir` / `--se-uart`. A slot0-linked app that overflows
+ITCM (mramAddress `0x80010000`) is NOT provisionable through this SE-UART-only
+runner (it would leave slot0 stale); `--mram-xip` fails fast and points you at
+the two-blob `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D) helper.
 
 **One-off setup.** `alif_flash` is **not** in upstream Zephyr's `runners`
 package — alp-sdk ships it and surfaces it through `zephyr/module.yml`'s

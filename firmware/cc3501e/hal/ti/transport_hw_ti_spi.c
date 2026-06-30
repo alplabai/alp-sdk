@@ -77,6 +77,8 @@
 #include "../../src/protocol.h"
 #include "../../src/transport.h"
 
+#include "../cc3501e_hw.h" /* cc3501e_hw_notify_reply_sent -- arm the deferred reset/OTA-swap reboot */
+
 /* Deterministic lockstep phases (see file header). */
 enum spi_phase {
 	PH_REQ_HEADER = 0, /* clocking the 4-byte request header   */
@@ -234,9 +236,12 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 
 	case PH_REPLY_PAYLOAD:
 	default:
-		/* Whole reply clocked -- clean frame boundary.  Re-arm the next request header
-		 * driving 0xA5.  (A pending CMD_RESET is actioned by cc3501e_hw_tick() on the
-		 * housekeeping task after this ack has gone out.) */
+		/* Whole reply clocked -- clean frame boundary.  Tell the HAL the in-flight
+		 * reply has fully drained so the deferred CMD_RESET and OTA swap-reboot
+		 * (both gated on reply_drained) can fire on the next cc3501e_hw_tick() --
+		 * without this the host's ack never marks the link quiescent and neither
+		 * deferred reboot ever runs.  Then re-arm the next request header (0xA5). */
+		cc3501e_hw_notify_reply_sent();
 		arm_request_header();
 		break;
 	}
