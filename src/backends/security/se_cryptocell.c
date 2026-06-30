@@ -67,9 +67,12 @@
  * bench-validated on real E8 silicon (aen-se-crypto, Flow C RAM-run): the SE
  * backend binds at priority 110 and the SE CryptoCell computed SHA-256("abc")
  * to the NIST known-answer and the AES-128-GCM round-trip, both MATCH.  With
- * it OFF (or for an alg the SE declines -- SHA-384/512, an over-ceiling
- * single-shot input) the op returns ALP_ERR_NOSUPPORT and the dispatcher
- * falls through to the PSA backend.
+ * it OFF (or for an alg the SE declines at open -- SHA-384/512) the op returns
+ * ALP_ERR_NOSUPPORT at hash_open and the dispatcher falls through to the PSA
+ * backend.  An over-ceiling SHA-256 input cannot fall through that way because
+ * the dispatcher binds one backend at hash_open and never re-selects; instead
+ * the SE hash handle migrates itself to the PSA backend in place once the
+ * buffered byte count exceeds the single-shot ceiling (see se_hash_update).
  *
  * @par Address translation: every send_*_addr the SE dereferences is a
  *      GLOBAL address (the SE's view of M55-local memory), produced by
@@ -174,9 +177,22 @@ static alp_status_t se_rc_to_alp(int rc)
 #endif
 
 struct se_hash_be {
-	bool    in_use;
-	size_t  used;
-	uint8_t buf[CONFIG_ALP_SDK_SECURITY_SE_HASH_BUF];
+	bool in_use;
+	/*
+	 * Once the buffered byte count would exceed the single-shot SE SHA
+	 * ceiling, this handle transparently switches to the portable PSA
+	 * (zephyr_drv) backend in place: the already-buffered bytes are
+	 * replayed into a PSA hash and every subsequent update/finish/close
+	 * routes through `psa_ops` instead of the SE single-shot service.
+	 * The dispatcher binds one backend at hash_open and cannot re-select
+	 * mid-stream, so the SE backend owns the fall-through itself rather
+	 * than returning NOSUPPORT after data has already been consumed.
+	 */
+	bool                      delegated;
+	const alp_security_ops_t *psa_ops;
+	alp_hash_backend_state_t  psa_state;
+	size_t                    used;
+	uint8_t                   buf[CONFIG_ALP_SDK_SECURITY_SE_HASH_BUF];
 };
 
 struct se_aead_be {
@@ -227,6 +243,72 @@ static size_t alp_hash_digest_len(alp_hash_alg_t a)
 	default:
 		return 0u;
 	}
+}
+
+/*
+ * Highest-priority security backend that is NOT this SE one -- i.e. the
+ * portable PSA (zephyr_drv, "*"/100) path the SE hash falls through to for
+ * inputs over the single-shot ceiling.  Walks the same per-class section the
+ * dispatcher selects from; the section bounds are emitted by the security
+ * dispatcher's ALP_BACKEND_DEFINE_CLASS(security).
+ */
+extern const alp_backend_t __start_alp_backends_security[];
+extern const alp_backend_t __stop_alp_backends_security[];
+
+static const alp_security_ops_t _ops; /* this backend's vtable, defined below */
+
+static const alp_security_ops_t *se_hash_fallback_ops(void)
+{
+	const alp_backend_t *best = NULL;
+	for (const alp_backend_t *be = __start_alp_backends_security; be < __stop_alp_backends_security;
+	     ++be) {
+		if (be->ops == &_ops) {
+			continue; /* skip ourselves -- we only want the next path */
+		}
+		if (best == NULL || be->priority > best->priority) {
+			best = be;
+		}
+	}
+	return (best != NULL) ? (const alp_security_ops_t *)best->ops : NULL;
+}
+
+/*
+ * Promote a buffering SE hash handle to the PSA backend: open a PSA hash for
+ * the same alg and replay every byte buffered so far.  After this returns
+ * ALP_OK the handle is `delegated` and all further update/finish/close route
+ * through `psa_ops`.  Any failure leaves the handle untouched so the caller
+ * sees a single hard error rather than a half-migrated stream.
+ */
+static alp_status_t se_hash_delegate(alp_hash_backend_state_t *state, struct se_hash_be *be)
+{
+	const alp_security_ops_t *psa = se_hash_fallback_ops();
+	if (psa == NULL || psa->hash_open == NULL || psa->hash_update == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	alp_hash_backend_state_t ps   = { 0 };
+	alp_capabilities_t       caps = { 0 };
+	alp_status_t             s    = psa->hash_open(state->alg, &ps, &caps);
+	if (s != ALP_OK) {
+		return s;
+	}
+	if (be->used != 0u) {
+		s = psa->hash_update(&ps, be->buf, be->used);
+		if (s != ALP_OK) {
+			if (psa->hash_close != NULL) {
+				psa->hash_close(&ps);
+			}
+			return s;
+		}
+	}
+
+	/* Buffered plaintext is now mirrored into the PSA context; wipe it. */
+	memset(be->buf, 0, sizeof(be->buf));
+	be->used      = 0u;
+	be->psa_ops   = psa;
+	be->psa_state = ps;
+	be->delegated = true;
+	return ALP_OK;
 }
 
 /* ================================================================== */
@@ -307,11 +389,20 @@ static alp_status_t se_hash_update(alp_hash_backend_state_t *state, const uint8_
 	if (data == NULL && len != 0u) {
 		return ALP_ERR_INVAL;
 	}
+	if (be->delegated) {
+		return be->psa_ops->hash_update(&be->psa_state, data, len);
+	}
 	if (be->used + len > sizeof(be->buf)) {
-		/* Single-shot buffer overflow.  The SE streaming SHA
-		 * (starts/update/finish) removes this ceiling once the send
-		 * seam is live; for now decline so the caller can pick PSA. */
-		return ALP_ERR_NOSUPPORT;
+		/* Input exceeds the single-shot SE SHA buffer.  The SE public
+		 * client exposes no streaming starts/update/finish service, and
+		 * the dispatcher already bound this backend at hash_open, so
+		 * migrate the handle to the portable PSA backend in place (it
+		 * replays the buffered bytes) and feed this chunk through it. */
+		alp_status_t s = se_hash_delegate(state, be);
+		if (s != ALP_OK) {
+			return s;
+		}
+		return be->psa_ops->hash_update(&be->psa_state, data, len);
 	}
 	if (len != 0u) {
 		memcpy(be->buf + be->used, data, len);
@@ -333,6 +424,16 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 	const size_t dlen = alp_hash_digest_len(state->alg); /* 32 for SHA-256 */
 	if (digest_out == NULL || digest_cap < dlen) {
 		return ALP_ERR_INVAL;
+	}
+
+	if (be->delegated) {
+		/* Over-ceiling input was migrated to PSA; let it finish. */
+		alp_status_t s =
+		    be->psa_ops->hash_finish(&be->psa_state, digest_out, digest_cap, digest_len);
+		be->delegated  = false;
+		be->in_use     = false;
+		state->be_data = NULL;
+		return s;
 	}
 
 #if defined(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM)
@@ -378,6 +479,10 @@ static void se_hash_close(alp_hash_backend_state_t *state)
 	struct se_hash_be *be = (struct se_hash_be *)state->be_data;
 	if (be == NULL || !be->in_use) {
 		return;
+	}
+	/* Tear down the delegated PSA context before wiping our slot. */
+	if (be->delegated && be->psa_ops != NULL && be->psa_ops->hash_close != NULL) {
+		be->psa_ops->hash_close(&be->psa_state);
 	}
 	/* Wipe buffered plaintext before releasing the slot. */
 	memset(be, 0, sizeof(*be));

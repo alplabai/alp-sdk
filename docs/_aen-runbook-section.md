@@ -110,8 +110,10 @@ Two host prerequisites:
   alp-sdk) and point the runner at it with `--setools-dir` or `$SETOOLS_DIR`,
   and at the SE-UART with `--se-uart` or `$SE_UART` (the same env vars
   `scripts/bench/aen/flash-run.sh` uses, so a host already set up for the bench
-  helper needs no extra flags). Pass `--mram-xip` for a slot0-linked app that
-  overflows ITCM (e.g. an NPU model; `mramAddress 0x80010000`, flags `["boot"]`).
+  helper needs no extra flags). A slot0-linked app that overflows ITCM (e.g. an
+  NPU model; `mramAddress 0x80010000`, flags `["boot"]`) is NOT provisionable
+  through this SE-UART-only runner — `--mram-xip` fails fast and routes you to
+  the two-blob `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D) helper.
 
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
 > self-test in slot0 (LCS=DM), so the core is already released and `west flash`

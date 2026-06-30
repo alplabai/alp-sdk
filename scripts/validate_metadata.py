@@ -30,6 +30,8 @@ REPO = Path(__file__).resolve().parent.parent
 SCHEMA = REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json"
 SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
 HWREV_SCHEMA = REPO / "metadata" / "schemas" / "hw-revisions-v1.schema.json"
+SILICON_KCONFIG_SCHEMA = REPO / "metadata" / "schemas" / "silicon-kconfig-v1.schema.json"
+SILICON_KCONFIG_REGISTRY = REPO / "metadata" / "registries" / "silicon-kconfig.json"
 SOCS = REPO / "metadata" / "socs"
 SOM_PRESETS = REPO / "metadata" / "e1m_modules"
 
@@ -79,6 +81,53 @@ def _check_files(label, files, validator, loader, key_for_summary):
     return failures
 
 
+def _check_silicon_kconfig() -> list:
+    """Validate the silicon->Kconfig registry and its socs/ correspondence.
+
+    Schema-checks metadata/registries/silicon-kconfig.json, then asserts
+    every `knownSilicon` ref resolves to an existing metadata/socs/ spec
+    (the registry is the Kconfig allowlist; the SoC tree is the fact).
+    Returns a failure list shaped like _check_files().
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    if not SILICON_KCONFIG_REGISTRY.is_file():
+        return failures  # optional gate; skip when absent
+    rel = SILICON_KCONFIG_REGISTRY.relative_to(REPO)
+    try:
+        data = json.loads(SILICON_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"FAIL {rel}: parse error ({e})")
+        return [(rel, [f"invalid JSON parse: {e}"])]
+
+    msgs: list[str] = []
+    if SILICON_KCONFIG_SCHEMA.is_file():
+        schema = json.loads(SILICON_KCONFIG_SCHEMA.read_text(encoding="utf-8"))
+        validator = jsonschema.Draft202012Validator(schema)
+        for err in sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path)):
+            loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
+            msgs.append(f"{loc}: {err.message}")
+
+    for ref in data.get("knownSilicon", []):
+        parts = ref.split(":")
+        if len(parts) != 3:
+            msgs.append(f"knownSilicon[{ref}]: not a <vendor>:<family>:<part> ref")
+            continue
+        soc_path = SOCS / parts[0] / parts[1] / f"{parts[2]}.json"
+        if not soc_path.is_file():
+            msgs.append(f"knownSilicon[{ref}]: no SoC spec at "
+                        f"{soc_path.relative_to(REPO)}")
+
+    if msgs:
+        print(f"FAIL {rel}")
+        for m in msgs:
+            print(f"  · {m}")
+        failures.append((rel, msgs))
+    else:
+        n = len(data.get("knownSilicon", []))
+        print(f"OK   {rel}  (knownSilicon={n}, all resolve to socs/)")
+    return failures
+
+
 def main() -> int:
     # SoC files (JSON) against soc-spec v1.
     soc_schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
@@ -124,12 +173,16 @@ def main() -> int:
                 "family",
             )
 
+    # Silicon -> Kconfig registry + socs/ correspondence.
     print()
-    total_files = len(soc_files) + len(som_files) + len(hwrev_files)
-    total_failures = len(soc_failures) + len(som_failures) + len(hwrev_failures)
+    silicon_kconfig_failures = _check_silicon_kconfig()
+
+    print()
+    total_failures = (len(soc_failures) + len(som_failures)
+                      + len(hwrev_failures) + len(silicon_kconfig_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
-          f"{len(hwrev_files)} hw-revisions file(s) checked, "
-          f"{total_failures} failure(s)")
+          f"{len(hwrev_files)} hw-revisions file(s) + silicon-kconfig registry "
+          f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 
 

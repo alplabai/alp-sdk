@@ -54,7 +54,7 @@ you install them.
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v4.4.0 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
-| Python      | 3.10+            | For `west`, the v0.6 orchestrator (`alp_project.py` + `alp_orchestrate.py`), validators. |
+| Python      | 3.10+            | For `west`, the v0.6 orchestrator (`alp_project.py` + `alp_orchestrate/`), validators. |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |

@@ -75,8 +75,12 @@ The `cores.<id>.app:` path is the binding; `m33_sm/` matches its core
 ID (canonical), while `linux/` is an explicit alias set by
 `app: ./linux`.  Omitting `app:` entirely is also valid — the core
 then builds the SoM's stock default app (`alp-image-edge` on a Linux
-core, `alp-stock-shim` on a Zephyr core), so a bare board.yaml still
-produces working firmware.
+core, `alp-stock-shim` on a Zephyr core).  The Linux default produces
+working firmware; the Zephyr `alp-stock-shim` is currently a
+placeholder whose image body is not yet in the SDK tree, so the
+orchestrator resolves it to no build command and flags the slice
+`stock-shim-unimplemented` (issue #49) — override `cores.<id>.app`
+with a real app to build that peer core.
 
 Single-OS examples don't change shape: they keep their flat `src/`
 layout and declare a single core in `board.yaml`.  The sub-directory
@@ -323,7 +327,7 @@ build itself — the `alp` CLI / IDE extension does — consumes the plan
 instead of re-deriving it:
 
 ```bash
-python3 scripts/alp_orchestrate.py --input board.yaml --emit build-plan
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit build-plan
 ```
 
 The JSON carries one entry per non-`off` core (build dir, the exact

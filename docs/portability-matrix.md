@@ -141,7 +141,7 @@ IO27..IO35 entries, 0 namespace leaks.
 
 ### G-1 — Ethos-U variant (U55 / U65 / U85) is invisible to the build  *(RESOLVED 2026-05-18)*
 
-Originally: `scripts/alp_orchestrate.py:1551-1567` emitted a single
+Originally: `scripts/alp_orchestrate/` emitted a single
 `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y` regardless of whether the SoM
 carried U55, U65, or U85.  The only variant-specific line was
 `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y` (hard-coded for i.MX 93).
@@ -189,7 +189,7 @@ from E1M-AEN701 to E1M-NX9101 also requires renaming `cores.m55_hp:`
 to `cores.m33:` because `m55_hp` is not a key in NX9101's `topology:`.
 The orchestrator silently dropped the unmatched key.
 
-**Fix landed:** `load_board_yaml` in `scripts/alp_orchestrate.py` now
+**Fix landed:** `load_board_yaml` in `scripts/alp_orchestrate/` now
 hard-fails with `OrchestratorError` carrying a "did you mean one of:
 ['a55_cluster', 'm33']?" hint when NO `cores:` key intersects the
 preset's `topology:` keys.  Soft-warns on stderr (per dropped key)

@@ -114,7 +114,7 @@ alp-sdk/
 ├── cmake/                           # find_package + Zephyr module helpers
 │   └── AlpSdkConfig.cmake.in
 ├── scripts/                         # CODEGEN + ORCHESTRATION
-│   ├── alp_orchestrate.py           # board.yaml → per-core slice fan-out + manifest
+│   ├── alp_orchestrate/             # board.yaml → per-core slice fan-out + manifest
 │   ├── alp_project.py               # per-slice Kconfig / cmake-args / DTS overlay emit
 │   ├── gen_soc_caps.py              # SoC JSONs → include/alp/soc_caps.h
 │   ├── gen_board_header.py        # board YAML → include/alp/boards/<board>_routes.h
@@ -190,7 +190,7 @@ canonical core IDs of the active SoM's SoC (`a55_cluster`,
 `m33_sm`, `m55_hp`, `m55_he`, …).  Each entry declares the runtime,
 app source, peripherals, libraries, inference, iot, plus the new
 `memory:` and `power:` sub-blocks for stack/heap sizing and
-sleep-mode wake sources.  `scripts/alp_orchestrate.py` loads the file, resolves
+sleep-mode wake sources.  `scripts/alp_orchestrate/` loads the file, resolves
 each entry against the SoM preset's `topology:` defaults, and emits
 one **slice** per non-`off` core:
 
@@ -215,7 +215,7 @@ default to Zephyr, Cortex-A cores default to Yocto Linux.  The
 customer writes an explicit `os:` only when overriding the default
 (`os: off` to skip a peer core, `os: baremetal` on a Cortex-M that
 normally takes Zephyr).  Yocto-on-A55 + Zephyr-on-M33 on a single
-V2N SoM is one `alp_orchestrate.py` invocation, not two.  Full
+V2N SoM is one `alp_orchestrate/` invocation, not two.  Full
 walkthrough: [`docs/heterogeneous-builds.md`](heterogeneous-builds.md).
 
 ### Sparse capabilities flow
@@ -246,7 +246,7 @@ Wi-Fi/BLE radio, supervisor MCU, Ethernet PHY, …).  The customer's
 `E1M-V2N101` to `E1M-AEN701` automatically swaps the on-module chip
 set with zero edits.
 
-`scripts/alp_orchestrate.py` `_slugs_from_on_module` walks the
+`scripts/alp_orchestrate/` `_slugs_from_on_module` walks the
 `on_module:` block (scalar fields, plus the `i2c_devices:` and
 `ospi_memories:` sub-blocks) and the `helper_firmware:` list, then
 emits `CONFIG_ALP_SDK_CHIP_<NAME>=y` per chip slug (or
@@ -269,7 +269,7 @@ The active generators are:
 
 | Script                                  | Reads                                                | Writes                                                                         |
 |-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
-| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON external build front-ends consume (ADR 0014) |
+| `scripts/alp_orchestrate/`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON external build front-ends consume (ADR 0014) |
 | `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
 | `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
