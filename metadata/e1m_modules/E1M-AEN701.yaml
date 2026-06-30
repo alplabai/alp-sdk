@@ -156,7 +156,7 @@ helper_firmware:
     flash_method:  TBD                       # cc3501e_usb_bootloader or alif_spi_relay; see firmware/cc3501e/flash.py
     flash_args:    TBD
 
-default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
+default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
 default_board:        E1M-EVK
 

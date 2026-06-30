@@ -28,7 +28,7 @@ Prior to v0.6 the dual-OS framing lived in two places that had to
 stay in sync by hand: this directory's `board.yaml` covered the
 Zephyr/M33 half, and the Yocto/A55 half hid behind a separate
 bitbake recipe that didn't consume the same config.  v0.6's
-orchestrator (`scripts/alp_orchestrate.py`) reads **one**
+orchestrator (`scripts/alp_orchestrate/`) reads **one**
 `board.yaml`, fans out per-core slices, and emits a system manifest
 that the image-bundle + flash + OTA tooling consume.
 

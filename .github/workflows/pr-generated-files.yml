@@ -21,8 +21,13 @@ on:
     paths:
       - 'metadata/**'
       - 'include/alp/**'
+      - 'examples/**'
       - 'scripts/gen_soc_caps.py'
       - 'scripts/gen_pinmux_capability.py'
+      - 'scripts/gen_support_matrix.py'
+      - 'scripts/gen_catalog.py'
+      - 'scripts/alp_orchestrate/cli.py'
+      - 'scripts/check_*.py'
       - 'scripts/abi_snapshot.py'
       - '.github/workflows/pr-generated-files.yml'
   push:
@@ -30,6 +35,7 @@ on:
     paths:
       - 'metadata/**'
       - 'include/alp/**'
+      - 'examples/**'
   workflow_dispatch:
 
 concurrency:
@@ -73,6 +79,20 @@ jobs:
       - name: Regenerate pin-mux capability tables from the pinout TSVs
         run: python3 scripts/gen_pinmux_capability.py
 
+      # Same single-source contract as soc_caps.h: the peripheral-support
+      # matrix is projected from metadata/e1m_modules/*.yaml + metadata/socs/
+      # by scripts/gen_support_matrix.py.  Regenerate and let the diff gate
+      # below flag any drift.
+      - name: Regenerate peripheral-support matrix from metadata
+        run: python3 scripts/gen_support_matrix.py
+
+      # Same single-source contract again: metadata/catalog.json is the
+      # machine-readable SDK map an agent / MCP server reads.  It is projected
+      # from metadata/, examples/, include/alp/, and scripts/ by
+      # scripts/gen_catalog.py; regenerate and let the diff gate flag drift.
+      - name: Regenerate machine-readable SDK catalog
+        run: python3 scripts/gen_catalog.py
+
       - name: Regenerate ABI snapshot (current = v0.8)
         # The committed v0.8 snapshot is the CURRENT working snapshot
         # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 are FROZEN historical records --
@@ -94,10 +114,14 @@ jobs:
           if ! git diff --exit-code \
                   --ignore-matching-lines='"generated":' \
                   -- include/alp/soc_caps.h docs/abi/v0.8-snapshot.json \
-                     metadata/pinmux/; then
+                     metadata/pinmux/ \
+                     metadata/catalog.json \
+                     docs/peripheral-support-matrix.md; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
+            echo "::error::  python3 scripts/gen_support_matrix.py"
+            echo "::error::  python3 scripts/gen_catalog.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version v0.8 --output docs/abi/v0.8-snapshot.json"
             echo "::error::and commit the result."
             exit 1
