@@ -394,7 +394,10 @@ def _check_long_paths() -> CheckResult | None:
         winreg.CloseKey(key)
         if int(value) == 1:
             return CheckResult("long-paths", PASS, "Windows long-path support enabled")
-    except OSError:  # pragma: no cover - Windows-only
+    except (OSError, ValueError, TypeError):  # pragma: no cover - Windows-only
+        # OSError: key/value absent. ValueError/TypeError: registry value is
+        # not a clean integer -- a preflight check must degrade to WARN, never
+        # crash the whole `alp doctor` run.
         pass
     return CheckResult(  # pragma: no cover - Windows-only
         "long-paths", WARN, "Windows long-path support not confirmed enabled",
