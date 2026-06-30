@@ -254,6 +254,21 @@ def test_validate_board_yaml_writes_inline_content_to_tempfile(monkeypatch):
     res = server.validate_board_yaml("som: E1M-AEN801\nname: demo\n")
     assert res["ok"] is False
     assert res["returncode"] == 1
+
+
+def test_run_surfaces_timeout_as_clean_nonzero(monkeypatch):
+    # A hung SDK subprocess must NOT hang the MCP client or raise: _run caps it
+    # and returns a synthetic nonzero result so the live tool degrades to ok=False.
+    import subprocess as _sp
+
+    def _raise_timeout(*a, **k):
+        assert k.get("timeout") == server._SUBPROCESS_TIMEOUT_S
+        raise _sp.TimeoutExpired(cmd=a[0] if a else k.get("args"), timeout=k["timeout"])
+
+    monkeypatch.setattr(server.subprocess, "run", _raise_timeout)
+    proc = server._run(["sleep", "999"])
+    assert proc.returncode == 124
+    assert "timed out" in proc.stderr
     assert "E1M-AEN801" in captured["content"]
 
 

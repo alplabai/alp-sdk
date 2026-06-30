@@ -415,20 +415,41 @@ def emit(board_yaml_path: str, mode: str) -> dict[str, Any]:
     }
 
 
+# A wall-clock cap on the SDK subprocesses the live tools shell out to. Without
+# it a hung validator/orchestrator would block the MCP stdio client forever.
+_SUBPROCESS_TIMEOUT_S = 120
+
+
 def _run(
     cmd: list[str],
     cwd: Optional[Path] = None,
     env: Optional[dict[str, str]] = None,
+    timeout: int = _SUBPROCESS_TIMEOUT_S,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess capturing text stdout/stderr (no exception on nonzero)."""
-    return subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """Run a subprocess capturing text stdout/stderr (no exception on nonzero).
+
+    Bounded by ``timeout`` seconds; a timeout is surfaced as a synthetic
+    nonzero result (returncode 124, the conventional timeout code) carrying a
+    clear stderr message, so callers degrade to ``{"ok": false, ...}`` rather
+    than the MCP client hanging or seeing an uncaught ``TimeoutExpired``.
+    """
+    try:
+        return subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            cmd,
+            124,
+            stdout=exc.stdout or "",
+            stderr=f"timed out after {timeout}s: {' '.join(cmd)}",
+        )
 
 
 # ===========================================================================
