@@ -2,7 +2,7 @@
 #
 # Portable HiL smoke for the board.yaml `cores.<id>.memory:` block (PR #3).
 #
-# scripts/alp_orchestrate.py:_slice_alp_conf() turns
+# scripts/alp_orchestrate/ turns
 #
 #   cores:
 #     m55_hp:

@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Renode platform descriptor: Alif Ensemble E8 (E1M-AEN801), the
+// Cortex-M55 "RTSS-HP" (high-performance) real-time subsystem only.
+//
+// This is the minimal slice needed to boot a single-core Zephyr app
+// (examples/peripheral-io/hello-world) headless, with no hardware:
+// the M55-HP CPU, its TCMs, on-die MRAM, and the UART5 console.  It
+// is NOT a full E8 model -- the A32 cluster, the second M55-HE core,
+// the Ethos-U NPUs, and the rest of the peripheral set are
+// deliberately absent.
+//
+// !! VALIDATION STATUS: UNVERIFIED on a real Renode at authoring time.
+//    Every address below is sourced from alp-sdk metadata / the
+//    upstream Zephyr Alif devicetree (cited inline), but this .repl
+//    has NOT been booted in Renode yet -- the authoring environment
+//    has no `renode` binary.  The advisory CI workflow
+//    (.github/workflows/pr-renode-aen-smoke.yml) is what proves it.
+//
+// Address provenance:
+//   - TCM / MRAM bases + sizes: metadata/socs/alif/ensemble/e8.json
+//     (sram_banks_kb) cross-checked with the per-core board devicetree
+//     zephyr/boards/alp/e1m_aen801_m55_hp/*.dts (itcm/dtcm global_base,
+//     mram_storage reg).
+//   - UART5 MMIO base + IRQ: the upstream Zephyr Alif Ensemble SoC
+//     devicetree (dts/arm/alif/ensemble/common/ensemble_common.dtsi),
+//     node `uart5: uart@4901d000` -- compatible "ns16550",
+//     reg = <0x4901d000 0x1000>, interrupts = <129 0>, reg-shift = <2>.
+
+// --- Cortex-M55 high-performance core ---------------------------------
+//
+// e8.json cores[id=m55_hp].type = "cortex-m55".
+//
+// NOTE: "cortex-m55" CPU support depends on the Renode build.  If the
+// pinned Renode (v1.15.3) does not recognise "cortex-m55", fall back to
+// "cortex-m33" (same Armv8-M baseline; Helium/MVE is not exercised by
+// hello-world) -- documented as a TODO in the PR, to be confirmed on the
+// CI runner.
+cpu: CPU.CortexM @ sysbus
+    cpuType: "cortex-m55"
+    nvic: nvic
+
+// Nested Vectored Interrupt Controller.  Standard Armv8-M PPB address
+// 0xE000E000; wired to the CPU's IRQ input (cpu@0).
+nvic: IRQControllers.NVIC @ sysbus 0xE000E000
+    -> cpu@0
+
+// --- Tightly-coupled memories (RTSS-HP global aliases) ----------------
+//
+// The Zephyr app links + runs from DTCM (board .dts:
+// `zephyr,sram = &dtcm`).  Bases are the RTSS-HP *global* TCM windows
+// (the CPU-global addresses every bus master sees), transcribed in the
+// board .dts as itcm/dtcm global_base.
+//
+// ITCM @ 0x50000000, 256 KiB  (e8.json SRAM2_M55_HP_ITCM = 256;
+//                              board .dts itcm global_base = 0x50000000)
+itcm: Memory.MappedMemory @ sysbus 0x50000000
+    size: 0x40000
+
+// DTCM @ 0x50800000, 1024 KiB (e8.json SRAM3_M55_HP_DTCM = 1024;
+//                              board .dts dtcm global_base = 0x50800000)
+dtcm: Memory.MappedMemory @ sysbus 0x50800000
+    size: 0x100000
+
+// --- On-die MRAM (non-volatile "flash") -------------------------------
+//
+// MRAM @ 0x80000000, 5632 KiB (e8.json soc_flash_mb = 5.5 -> 5632 KiB;
+// board .dts mram_storage reg = <0x80000000 DT_SIZE_K(5632)>).  Modelled
+// as plain RAM here: a RAM-run hello-world executes from DTCM and only
+// reads MRAM (rodata / vector table copy).  Erase/program semantics of
+// the real MRAM flash controller are out of scope for this smoke.
+mram: Memory.MappedMemory @ sysbus 0x80000000
+    size: 0x580000
+
+// --- UART5 console ----------------------------------------------------
+//
+// The E1M carrier console (board .dts: `zephyr,console = &uart5`).
+// Alif's UART is NS16550-compatible (devicetree compatible "ns16550").
+// reg-shift = <2> in the devicetree means the 8 NS16550 registers are
+// spaced 4 bytes apart (32-bit stride) -> Renode's `wideRegisters: true`.
+// IRQ 129 (devicetree `interrupts = <129 0>`) routed to the NVIC.
+uart5: UART.NS16550 @ sysbus 0x4901d000
+    wideRegisters: true
+    -> nvic@129

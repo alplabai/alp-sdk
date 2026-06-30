@@ -2,7 +2,7 @@
 #
 # Portable HiL smoke for the board.yaml `diagnostics.modules:` block (PR #3).
 #
-# scripts/alp_orchestrate.py:_slice_alp_conf() turns
+# scripts/alp_orchestrate/ turns
 #
 #   diagnostics:
 #     log_level: info

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "silicon-kconfig-v1",
+  "_comment": "Single source for the silicon-ref -> Zephyr SoC-select Kconfig symbol. The symbol is COMPUTED as socSymbolPrefix + ref.upper().replace(':','_'); knownSilicon is the allowlist of host SoCs that get a symbol (accelerators such as deepx:dx:m1 do not). Consumed by scripts/alp_project.py:silicon_to_kconfig(); coverage gated by scripts/validate_metadata.py.",
+  "socSymbolPrefix": "ALP_SOC_",
+  "knownSilicon": [
+    "alif:ensemble:e3",
+    "alif:ensemble:e4",
+    "alif:ensemble:e5",
+    "alif:ensemble:e6",
+    "alif:ensemble:e7",
+    "alif:ensemble:e8",
+    "renesas:rzv2n:n44",
+    "nxp:imx9:imx93"
+  ]
+}

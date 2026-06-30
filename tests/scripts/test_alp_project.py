@@ -305,7 +305,7 @@ class TestHwInfoHEmit(unittest.TestCase):
         self.assertIn("#define ALP_HW_INFO_BUILD_H", out)
         self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN701"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_FAMILY      "aen"', out)
-        self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r1"', out)
+        self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r2"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_NAME      "E1M-EVK"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_HW_REV    "r1"', out)
         self.assertIn('#define ALP_HW_BUILD_OS              "zephyr"', out)
