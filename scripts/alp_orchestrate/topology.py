@@ -17,6 +17,8 @@ import functools
 import json
 from typing import TYPE_CHECKING, Any
 
+from .paths import BOARD_SCHEMA
+
 if TYPE_CHECKING:
     from .models import BoardProject
 
@@ -50,10 +52,6 @@ def _core_os_choices() -> tuple[str, ...]:
     and cannot drift between the schema and the code.  `off` skips the core
     (no slice is built).
     """
-    # Lazy import: BOARD_SCHEMA is a shared schema-path root defined in the
-    # package __init__; importing it at call time (not module load) keeps
-    # topology.py free of an import cycle back into the package.
-    from . import BOARD_SCHEMA
     schema = json.loads(BOARD_SCHEMA.read_text(encoding="utf-8"))
     return tuple(schema["$defs"]["core_entry"]["properties"]["os"]["enum"])
 

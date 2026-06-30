@@ -58,12 +58,16 @@ from alp_project import (  # noqa: E402
 )
 
 
-# __init__ now sits one level deeper (scripts/alp_orchestrate/), so the repo
-# root is three parents up, not two.
-REPO = Path(__file__).resolve().parent.parent.parent
-METADATA_ROOT = REPO / "metadata"
-BOARD_SCHEMA = METADATA_ROOT / "schemas" / "board.schema.json"
-BOARD_PRESET_SCHEMA = METADATA_ROOT / "schemas" / "board-preset.schema.json"
+# The filesystem roots now live in paths.py (the #285 paths seam) -- a leaf both
+# __init__ and topology.py import, so topology no longer lazy-imports BOARD_SCHEMA
+# back through the package. Re-exported here so `from alp_orchestrate import REPO`
+# (and friends) keeps working unchanged.
+from .paths import (  # noqa: E402
+    BOARD_PRESET_SCHEMA,  # noqa: F401  (re-export for the public surface)
+    BOARD_SCHEMA,
+    METADATA_ROOT,
+    REPO,
+)
 
 
 # The per-core OS-class taxonomy + topology view now live in topology.py (the
