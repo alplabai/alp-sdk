@@ -9,6 +9,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **Multimodal fusion PdM example** (`examples/ai/multimodal-fusion-pdm/`):
+  fuses vibration (ICM-42670) + current (INA236) + temperature (BME280) into one
+  motor-health verdict — `fusion_health` scores each modality vs a healthy
+  baseline, counts cross-modal corroboration, and maps the pattern to a fault
+  hypothesis (HEALTHY / BEARING_WEAR / ELECTRICAL_FAULT / MECHANICAL_OVERLOAD /
+  UNCORROBORATED) with a confidence-weighted health score — plus an
+  `<alp/inference.h>` fused model with the deterministic rule as fallback. Core
+  host-unit-tested on `native_sim` (`tests/unit/fusion_health`); model is a stub
+  with a recipe in `models/README.md`; HiL bench-gated.
 - **DC motor current-signature example** (`examples/ai/motor-current-signature/`):
   electrical-modality PdM — INA236 current/voltage/power → windowed
   `current_features` (mean/ripple-RMS/crest/slope/power + dominant ripple
