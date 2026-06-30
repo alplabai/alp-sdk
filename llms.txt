@@ -18,7 +18,7 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 - [metadata/templates/board.yaml](metadata/templates/board.yaml): copy-friendly commented `board.yaml` template.
 - [docs/adr/0014-build-plan-emit-cli-contract.md](docs/adr/0014-build-plan-emit-cli-contract.md): ADR 0014 — the `--emit` CLI as the tool-facing build-plan contract.
 - [scripts/alp_project.py](scripts/alp_project.py): per-core loader (`--emit zephyr-conf | cmake-args | yocto-conf | hw-info-h | dts-overlay | west-libraries | os-topology`).
-- [scripts/alp_orchestrate.py](scripts/alp_orchestrate.py): system orchestrator (`--emit system-manifest | build-plan | ipc-contract-h | dts-reservations | dts-partitions | storage-mounts-c | tfm-sysbuild-conf`).
+- [scripts/alp_orchestrate/](scripts/alp_orchestrate/): system orchestrator package, invoked `python -m alp_orchestrate` (`--emit system-manifest | build-plan | ipc-contract-h | dts-reservations | dts-partitions | storage-mounts-c | tfm-sysbuild-conf`).
 
 ## Hardware
 

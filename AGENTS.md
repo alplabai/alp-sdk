@@ -50,7 +50,7 @@ Two loaders fan `board.yaml` into per-core slices:
 
 - `scripts/alp_project.py --emit {zephyr-conf,cmake-args,yocto-conf,hw-info-h,dts-overlay,west-libraries,os-topology}`
   — the per-slice build config.
-- `scripts/alp_orchestrate.py --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf}`
+- `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf}`
   — the cross-core / system artefacts.
 
 `west alp-build -b <board> <app-dir>` is the convenience wrapper: it validates
