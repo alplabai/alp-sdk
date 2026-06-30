@@ -9,6 +9,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **Cold-chain integrity example** (`examples/ai/cold-chain-monitor/`):
+  environmental edge AI — BME280 T/RH/P → sliding-window `cold_chain` metrics
+  (mean/min/max, temperature slope, **Mean Kinetic Temperature** per ICH/USP,
+  Magnus dewpoint, excursion minutes) → a deterministic 4-state classifier
+  (OK / TEMP_EXCURSION / MKT_EXCEEDED / CONDENSATION_RISK) + an
+  `<alp/inference.h>` anomaly score with a deterministic fallback. The core is
+  host-unit-tested on `native_sim` (`tests/unit/cold_chain`); model is a stub
+  with a training recipe in `models/README.md`; HiL bench-gated.
 - **Visual-defect detection example** (`examples/ai/visual-defect-detection/`):
   camera-fed surface-anomaly inspection — an autoencoder reconstructs the
   "normal" surface and high reconstruction error flags a defect (unsupervised, no
