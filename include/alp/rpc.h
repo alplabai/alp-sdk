@@ -13,7 +13,7 @@
  * `<alp/mproc.h>` (mailbox + shared memory + hardware semaphore) and
  * the build-time-generated carve-out + endpoint-id macros in
  * `<alp/system_ipc.h>` (auto-emitted by
- * `scripts/alp_orchestrate.py`).
+ * `scripts/alp_orchestrate/`).
  *
  * The canonical usage example (matching spec §6.6 of
  * `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`):
