@@ -86,9 +86,89 @@
           "e1m-evk",
           "e1m-x-evk"
         ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "cold-chain-monitor",
+        "path": "examples/ai/cold-chain-monitor",
+        "som": "E1M-AEN701",
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `cold_chain` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic environment data covering the states. HiL with a > real BME280 + a trained model is bench-gated.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "motor-current-signature",
+        "path": "examples/ai/motor-current-signature",
+        "som": "E1M-AEN701",
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `current_features` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic current covering all five states. HiL > on a real motor + a trained model is bench-gated.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "multimodal-fusion-pdm",
+        "path": "examples/ai/multimodal-fusion-pdm",
+        "som": "E1M-AEN701",
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `fusion_health` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic per-modality data covering every > scenario. HiL with the three real sensors + a trained model is bench-gated.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "rail-predictive-maintenance",
+        "path": "examples/ai/rail-predictive-maintenance",
+        "som": "E1M-AEN701",
+        "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The DSP cores > (`rail_features`, `rail_position`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > a canned NMEA track + synthetic vibration. HiL on a real bogie with a > customer-trained model is bench-gated.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "visual-defect-detection",
+        "path": "examples/ai/visual-defect-detection",
+        "som": "E1M-AEN701",
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `defect_map` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic clean + defect frames. HiL with a real CSI camera + > a trained autoencoder is bench-gated.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "wearable-activity-fall",
+        "path": "examples/ai/wearable-activity-fall",
+        "som": "E1M-AEN701",
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The two cores > (`motion_features`, `fall_detect`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic motion (incl. an injected fall). HiL on a real wearable + a trained > model is bench-gated.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
       }
     ],
     "audio": [
+      {
+        "board": "e1m-evk",
+        "name": "acoustic-anomaly-wind-turbine",
+        "path": "examples/audio/acoustic-anomaly-wind-turbine",
+        "som": "E1M-AEN701",
+        "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The three DSP cores > (`acoustic_features`, `rotor_speed`, `bpf_modulation`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic acoustics + a canned RPM track. HiL on a real nacelle with a > customer-trained model is bench-gated."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "acoustic-safety-events",
+        "path": "examples/audio/acoustic-safety-events",
+        "som": "E1M-AEN701",
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `acoustic_event` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic audio cycling the four event types. > HiL with a real mic + a trained model is bench-gated."
+      },
       {
         "board": "e1m-evk",
         "name": "audio-loopback",
