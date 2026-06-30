@@ -1,0 +1,44 @@
+schema_version: 1
+generated_by: scripts/alp_orchestrate.py
+hw_info:
+  sku: E1M-NX9101
+  som_hw_rev: r1
+  board_name: E1M-EVK
+  board_hw_rev: r1
+  silicon: nxp:imx9:imx93
+slices:
+- core_id: a55_cluster
+  os: yocto
+  app: ./linux
+  image: alp-image-edge
+  machine: e1m-nx9101-a55
+  toolchain: poky-glibc
+  status: pending
+  flash_method: yocto_wic_to_sd_or_emmc
+  flash_args:
+    target: e1m-nx9101-a55
+- core_id: m33
+  os: zephyr
+  app: ./m33
+  board: alp_e1m_nx9101_m33
+  toolchain: arm-zephyr-eabi
+  status: pending
+  flash_method: zephyr_west_flash
+  flash_args:
+    runner: openocd
+ipc:
+- name: alp_default_rpmsg
+  kind: rpmsg
+  endpoints:
+  - a55_cluster
+  - m33
+  status: blocked
+  reason: SoM E1M-NX9101 mailbox controller is TBD; carve-out resolution requires
+    authoritative mailbox metadata.  Fill `mailbox.controller:` in metadata/e1m_modules/E1M-NX9101.yaml
+    with the vendor mailbox node name (e.g. `renesas_mhu`, `nxp_mu`, `alif_mhuv2`)
+    or remove the rpmsg entries from board.yaml.
+helper_mcus: []
+boot_order: []
+
+# boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-NX9101.yaml when the
+# bring-up order is finalised.

@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Reproducible container for the hardware-free native_sim build.
+#
+# This FREEZES the recipe that .github/workflows/pr-twister.yml runs on
+# every PR: an ubuntu-latest runner that builds the ztest + example
+# suite under native_sim/native/64 with the HOST gcc
+# (ZEPHYR_TOOLCHAIN_VARIANT=host), not the Zephyr SDK cross-toolchains.
+#
+# The pins below track pr-twister.yml + west.yml in lockstep:
+#   - Zephyr            v4.4.0   (west.yml `zephyr` revision; pr-twister --mr)
+#   - Ubuntu base       24.04    (pr-twister runs on ubuntu-latest == 24.04)
+#   - Python            3.12     (pr-twister `setup-python` pin)
+#
+# Why no Zephyr SDK?  native_sim/native/64 compiles with the host's own
+# gcc (ENV ZEPHYR_TOOLCHAIN_VARIANT=host below), so the ~17 GB Zephyr
+# SDK cross-toolchain bundle is not needed -- exactly the reasoning
+# pr-twister.yml documents for skipping the zephyrprojectrtos/ci image.
+# (The issue #269 note about "Zephyr SDK 1.0.1" applies to the
+# consumer-side devbox, which builds Zephyr-SDK targets; the PR gate and
+# this container do host-only and never call find_package(Zephyr-sdk).)
+#
+# Usage (see README.md):
+#   podman build -t alp-native-sim tools/native-sim-container
+#   podman run --rm -v "$PWD":/work/alp-sdk:z alp-native-sim
+#
+# A clean ubuntu:24.04 (unlike the GH runner image) ships WITHOUT cmake,
+# so we add it explicitly below.
+
+FROM ubuntu:24.04
+
+# Pin knobs -- override at build time with --build-arg if a workspace
+# bumps the Zephyr revision (keep in lockstep with west.yml + the
+# pr-twister.yml `--mr` flag).
+ARG ZEPHYR_REV=v4.4.0
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ZEPHYR_TOOLCHAIN_VARIANT=host \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:/usr/lib/ccache:$PATH
+
+# ---------------------------------------------------------------------
+# Host build tools.  This is the EXACT apt set pr-twister.yml installs
+# (ninja, gperf, ccache, dfu-util, dtc, python dev, libffi, libssl, xz,
+# file, make, gcc + multilib, libsdl2, libmagic1) PLUS three packages a
+# clean ubuntu:24.04 needs that the GH runner image already provides:
+#   - cmake          (NOT on a bare ubuntu:24.04 -- see issue #269)
+#   - git            (west clones Zephyr + modules over it)
+#   - ca-certificates / python3-venv (clean-base hygiene)
+# ---------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ninja-build gperf ccache dfu-util device-tree-compiler \
+        python3-dev python3-pip python3-setuptools python3-wheel \
+        python3-venv \
+        libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
+        g++-multilib libsdl2-dev libmagic1 \
+        cmake git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# west + the Zephyr/Alp Python deps go in an isolated venv so we don't
+# fight ubuntu 24.04's PEP-668 externally-managed-environment guard.
+RUN python3 -m venv "$VIRTUAL_ENV" \
+    && pip install --no-cache-dir --upgrade pip west
+
+# ---------------------------------------------------------------------
+# Bake the pinned Zephyr workspace INTO the image so `podman run` is a
+# pure compile -- no per-run network clone, fully reproducible.  This
+# mirrors pr-twister.yml's "west init zephyr workspace" step verbatim:
+# Zephyr-led init (zephyr is the manifest repo), narrow + depth-1 to
+# stay small, then export the CMake package so the SDK checkout is
+# discoverable.
+# ---------------------------------------------------------------------
+WORKDIR /work/zephyrproject
+RUN west init -m https://github.com/zephyrproject-rtos/zephyr --mr "${ZEPHYR_REV}" . \
+    && west update --narrow -o=--depth=1 \
+    && west zephyr-export \
+    && pip install --no-cache-dir -r zephyr/scripts/requirements.txt \
+    && pip install --no-cache-dir jsonschema \
+    && rm -rf /root/.cache
+
+# ZEPHYR_BASE is fixed by the baked workspace; EXTRA_ZEPHYR_MODULES
+# points at the alp-sdk checkout that gets bind-mounted at run time.
+ENV ZEPHYR_BASE=/work/zephyrproject/zephyr \
+    EXTRA_ZEPHYR_MODULES=/work/alp-sdk
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Default run = the pr-twister.yml twister invocation over the
+# bind-mounted alp-sdk.  Override by passing your own argv to
+# `podman run ... alp-native-sim <cmd>` (see entrypoint.sh).
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

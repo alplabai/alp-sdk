@@ -327,7 +327,7 @@ build itself — the `alp` CLI / IDE extension does — consumes the plan
 instead of re-deriving it:
 
 ```bash
-python3 scripts/alp_orchestrate.py --input board.yaml --emit build-plan
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit build-plan
 ```
 
 The JSON carries one entry per non-`off` core (build dir, the exact

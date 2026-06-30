@@ -1,0 +1,55 @@
+schema_version: 1
+generated_by: scripts/alp_orchestrate.py
+hw_info:
+  sku: E1M-V2N101
+  som_hw_rev: r1
+  board_name: E1M-X-EVK
+  board_hw_rev: r1
+  silicon: renesas:rzv2n:n44
+slices:
+- core_id: a55_cluster
+  os: yocto
+  app: ./linux
+  image: alp-image-edge
+  machine: e1m-v2n101-a55
+  toolchain: poky-glibc
+  status: pending
+  flash_method: yocto_wic_to_sd_or_emmc
+  flash_args:
+    target: e1m-v2n101-a55
+- core_id: m33_sm
+  os: zephyr
+  app: ./m33_sm
+  board: alp_e1m_v2n101_m33_sm
+  toolchain: arm-zephyr-eabi
+  status: pending
+  flash_method: zephyr_west_flash
+  flash_args:
+    runner: openocd
+ipc:
+- name: alp_default_rpmsg
+  kind: rpmsg
+  endpoints:
+  - a55_cluster
+  - m33_sm
+  carve_out_base: '0x00010000'
+  carve_out_size: '0x00080000'
+  carve_out_region: ocram_low
+  cacheable: false
+  rpmsg_endpoint_ids:
+    src: '0x000004e6'
+    dst: '0x000004e7'
+  mailbox_channel: 0
+helper_mcus:
+- name: gd32_bridge
+  chip: gd32g553
+  firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
+  flash_method: swd_probe
+  flash_args:
+    interface: cmsis-dap
+    target: gd32g553
+    base: '0x08000000'
+boot_order: []
+
+# boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-V2N101.yaml when the
+# bring-up order is finalised.
