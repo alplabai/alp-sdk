@@ -1,0 +1,33 @@
+# board.yaml -- visual-defect detection (surface-anomaly inspection).
+#
+# An M55 node captures a surface image from the CSI camera, reduces it to a
+# luma inspection grid, and scores it for anomalies with an autoencoder (high
+# reconstruction error = defect).  Same source targets the V2N accelerator path
+# when som.sku is flipped.
+
+som:
+  sku: E1M-AEN701
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    app: ./src
+    inference:
+      default_arena_kib: 256
+    libraries:
+      - tflite_micro
+    peripherals:
+      - i2c                  # Camera SCCB (OV5640 control bus).
+      - gpio                 # Camera ancillaries (reset, power-down).
+
+chips:
+  - ov5640                   # 5 MP CSI camera sensor.
+
+diagnostics:
+  log_level: info
