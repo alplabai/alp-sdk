@@ -66,6 +66,10 @@ rather than guessing.
 An agent's loop here is: generate, then run the validators, then fix what they
 report.
 
+- `alp doctor` — HW-free environment preflight: checks the host toolchain,
+  `west`, the pinned Zephyr version, Python deps, etc., and prints a remediation
+  hint per failing check (`--json` for machine consumption). Run it first on a
+  fresh checkout to find why a build won't work before you build.
 - `alp validate board.yaml` — the diagnostic-rich `board.yaml` validator
   (CLI entry `alp`; equivalently `python3 scripts/validate_board_yaml.py`).
   Try it against a fixture under `tests/fixtures/board_yaml_bad/` to learn the
@@ -103,7 +107,9 @@ report.
 - `examples/` — minimal per-peripheral apps + end-to-end reference apps, each
   driven by a `board.yaml`.
 - `docs/` — guides: `getting-started.md`, `board-config.md`, `architecture.md`,
-  `e1m-pinout.md`, `portability-matrix.md`, the ADRs in `docs/adr/`.
+  `e1m-pinout.md`, `portability-matrix.md`, the generated
+  `peripheral-support-matrix.md` (SoM × peripheral presence), the ADRs in
+  `docs/adr/`.
 - `scripts/` — the loaders, validators, and `check_*.py` CI gates.
 
 ## A note for Claude Code users

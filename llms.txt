@@ -31,6 +31,7 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 - [docs/e1m-pinout.md](docs/e1m-pinout.md): the canonical 52-pad E1M pinout and instance-ID order.
 - [docs/portability-matrix.md](docs/portability-matrix.md): empirical intra-family `som.sku:`-swap portability proof.
 - [docs/os-support-matrix.md](docs/os-support-matrix.md): OS / core-class support per SoM.
+- [docs/peripheral-support-matrix.md](docs/peripheral-support-matrix.md): generated SoM × peripheral-class presence matrix (single-source from metadata).
 - [metadata/e1m_modules](metadata/e1m_modules): per-MPN SoM presets (the silicon source of truth).
 - [metadata/socs](metadata/socs): per-SoC capability JSON the loader validates against.
 
@@ -55,6 +56,7 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 
 ## Validation
 
+- [scripts/alp_cli/doctor.py](scripts/alp_cli/doctor.py): `alp doctor` — HW-free environment preflight (toolchain / west / Zephyr-pin / deps), with `--json`.
 - [scripts/validate_board_yaml.py](scripts/validate_board_yaml.py): the `board.yaml` validator (also exposed as the `alp validate` CLI command).
 - [scripts/check_example_portability.py](scripts/check_example_portability.py): gate enforcing the portable-API rule for examples.
 - [scripts/check_doc_drift.py](scripts/check_doc_drift.py): gate catching docs that drifted from code/metadata.
