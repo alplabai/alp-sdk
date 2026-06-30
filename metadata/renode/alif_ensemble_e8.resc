@@ -1,0 +1,31 @@
+:name: E1M-AEN801 (Alif Ensemble E8) M55-HP smoke
+:description: Boot a single Cortex-M55-HP Zephyr slice headless, no hardware.
+
+# ---------------------------------------------------------------------
+# Variables filled in by the `west alp-renode` wrapper
+# (scripts/west_commands/alp_renode.py -> build_renode_argv).  The
+# wrapper injects `$elf` (the resolved <build_dir>/zephyr/zephyr.elf)
+# and `$repl` (the platform descriptor) via `renode -e "$elf=@..."`
+# BEFORE this script runs.  The `?=` defaults below only apply when the
+# variable is still unset, so the wrapper's values win -- and the script
+# stays runnable by hand from an alp-build'd hello-world tree:
+#
+#     renode metadata/renode/alif_ensemble_e8.resc
+# ---------------------------------------------------------------------
+$repl ?= @metadata/renode/alif_ensemble_e8.repl
+$elf  ?= @examples/peripheral-io/hello-world/build/m55_hp-zephyr/zephyr/zephyr.elf
+
+mach create "aen801"
+machine LoadPlatformDescription $repl
+
+# Surface the UART5 console.  Run headless (the wrapper passes
+# `--console --disable-xwt`), so Renode routes the analyzer to stdout
+# instead of a GUI window; the wrapper tees that stdout to --log, which
+# is where the CI smoke greps for the app's "[hello] done" marker.
+showAnalyzer uart5
+
+# Load the Zephyr ELF and set the CPU PC/SP from its entry point +
+# vector table.  hello-world is a RAM-run image (links/runs from DTCM).
+sysbus LoadELF $elf
+
+start

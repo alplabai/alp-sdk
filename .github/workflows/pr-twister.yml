@@ -3,10 +3,13 @@
 # Pull-request twister gate for the Alp SDK.
 #
 # Runs the full ztest + example suite under native_sim/native/64
-# on every PR.  The Zephyr workspace is set up via the
-# zephyrprojectrtos/ci Docker image, which ships Zephyr + west +
-# toolchains pre-installed — saves ~5 minutes per run vs a clean
-# `west init`.
+# on every PR.  The work is split into N parallel shards via
+# twister's `--subset i/N` (deterministic partition of the same
+# suite list -- the shards' union is identical to a single run, so
+# coverage is unchanged).  A tiny aggregator job named exactly
+# `twister · native_sim/native/64` gates on all shards, so that name
+# stays the single required branch-protection context (no protection
+# change needed when the shard count changes).
 
 name: pr-twister
 
@@ -23,9 +26,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  twister:
-    name: twister · native_sim/native/64
+  twister-shard:
+    # NB: this job's checks (`twister-shard 1/4` ...) are NOT the
+    # required context -- the aggregator `twister` job below is.  The
+    # shard count can change here without touching branch protection.
+    name: twister-shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
+
+    strategy:
+      # Run every shard even if one fails, so a single failing suite
+      # doesn't mask failures in the other shards.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     # We deliberately do NOT use the zephyrprojectrtos/ci docker
     # image here.  The image bundles Zephyr SDK 1.0.1 (~17 GB on disk
@@ -33,12 +46,17 @@ jobs:
     # ubuntu-latest runner's ~14 GB free space at docker-pull time
     # with "no space left on device".  Since native_sim builds use
     # the host's gcc directly (ZEPHYR_TOOLCHAIN_VARIANT=host), the
-    # SDK isn't needed — we just need Python, west, dtc, ninja, and
+    # SDK isn't needed -- we just need Python, west, dtc, ninja, and
     # the Zephyr Python deps.  Installing those is ~2 minutes vs a
     # 5+ minute image pull, and stays well within disk budget.
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: host
+      # ccache is content-addressed; persisting it across runs turns
+      # the per-shard cold builds warm.  Each shard caches its own
+      # objects (the `--subset i/4` partition is deterministic, so a
+      # shard rebuilds the same suites run-to-run -> high hit rate).
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
       - name: Checkout alp-sdk
@@ -86,6 +104,17 @@ jobs:
             ${{ github.workspace }}/zephyrproject/zephyr
           key: zephyr-v4.4.0-host-${{ runner.os }}
 
+      # Persist ccache objects across runs, per shard.  The save key is
+      # per-SHA so each run writes a fresh entry; restore-keys falls
+      # back to the latest cache for this shard so warm builds reuse it.
+      - name: Cache ccache objects
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-twister-shard${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-twister-shard${{ matrix.shard }}-
+
       - name: pip install Zephyr requirements
         working-directory: ${{ github.workspace }}/zephyrproject
         run: |
@@ -99,34 +128,7 @@ jobs:
         run: |
           pip3 install jsonschema
 
-      - name: debug · verify checkout paths are reachable inside container
-        run: |
-          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
-          echo "PWD=$(pwd)"
-          ls "$GITHUB_WORKSPACE/alp-sdk" | head -20 || true
-          echo "--- testcase.yaml files ---"
-          find "$GITHUB_WORKSPACE/alp-sdk/tests" "$GITHUB_WORKSPACE/alp-sdk/examples" \
-              -name "testcase.yaml" -o -name "sample.yaml" || true
-
-      # ---------------------------------------------------------------
-      # v0.6 heterogeneous-orchestrator note (per
-      # docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
-      # §5.6 + §7 Phase 5):
-      #
-      # In v0.6 the orchestrator (`scripts/alp_orchestrate.py`) fans
-      # board.yaml out into per-core slices.  For Zephyr-only slices
-      # the orchestrator routes through twister via the new emit
-      # mode `alp_project.py --emit zephyr-conf --core <id>`.  Twister
-      # itself stays the fast lane for pure-Zephyr coverage (no
-      # bitbake spin-up, no Renode boot) and remains the
-      # native_sim/native/64 gate for every PR.
-      #
-      # The orchestrator-side integration (calling twister with a
-      # per-core conf fragment) lands in Phase 2 -- this workflow's
-      # invocation below is intentionally unchanged for v0.6 so
-      # twister coverage stays stable while Phase 2 is in flight.
-      # ---------------------------------------------------------------
-      - name: twister · run tests + examples on native_sim/native/64
+      - name: twister · run shard ${{ matrix.shard }}/4 on native_sim/native/64
         working-directory: ${{ github.workspace }}/zephyrproject
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
@@ -135,11 +137,16 @@ jobs:
           # Use $GITHUB_WORKSPACE (container-mapped at run time) instead
           # of the ${{ github.workspace }} expansion which the runner
           # may render as a host path on container jobs.
+          #
+          # --subset i/4 deterministically partitions the SAME suite
+          # list across the 4 shards; their union == a single full run,
+          # so no test is dropped (coverage unchanged, ~4x faster wall).
           python3 zephyr/scripts/twister \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/unit" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples" \
             -p native_sim/native/64 \
+            --subset ${{ matrix.shard }}/4 \
             --inline-logs \
             --no-detailed-test-id
 
@@ -151,14 +158,37 @@ jobs:
       # on PR #88 -- the run was 721/721 green and the job still
       # FAILED in this step).  Failing-test build logs are already
       # in the job output via --inline-logs.
+      #
+      # Per-shard artefact name so the 4 parallel uploads don't clash.
       - name: Upload twister reports artefact
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: twister-out
+          name: twister-out-${{ matrix.shard }}
           path: |
             zephyrproject/twister-out/*.json
             zephyrproject/twister-out/*.xml
             zephyrproject/twister-out/*.log
           retention-days: 14
           if-no-files-found: ignore
+
+  # Aggregator: the single required branch-protection context.  Its
+  # name MUST stay `twister · native_sim/native/64` (the repointed
+  # required check) regardless of how many shards run.  It fails iff
+  # any shard failed -- `if: always()` so it reports even when a shard
+  # is red (a plain `needs` without it would be skipped, not failed).
+  twister:
+    name: twister · native_sim/native/64
+    needs: twister-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on all twister shards
+        run: |
+          result='${{ needs.twister-shard.result }}'
+          echo "twister-shard aggregate result: $result"
+          if [ "$result" != "success" ]; then
+            echo "::error::one or more twister shards did not pass ($result)"
+            exit 1
+          fi
+          echo "all twister shards passed"

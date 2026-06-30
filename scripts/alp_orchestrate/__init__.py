@@ -25,7 +25,6 @@ Reference: docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-desi
 
 from __future__ import annotations
 
-import functools
 import json
 import os
 import re
@@ -33,9 +32,9 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 try:
     import yaml  # type: ignore[import-untyped]
@@ -52,401 +51,58 @@ except ImportError:
 # resolve_capabilities merges SoC-JSON defaults with SoM-level overrides so
 # that silicon-determined caps removed from SoM YAMLs (slice 3b) still resolve.
 # Imported here so the orchestrator never duplicates that logic.
-from alp_project import resolve_memory_map, resolve_capabilities  # noqa: E402
+from alp_project import (  # noqa: E402
+    resolve_memory_map,
+    resolve_capabilities,
+    silicon_to_kconfig,
+)
 
 
-REPO = Path(__file__).resolve().parent.parent
-METADATA_ROOT = REPO / "metadata"
-BOARD_SCHEMA = METADATA_ROOT / "schemas" / "board.schema.json"
-BOARD_PRESET_SCHEMA = METADATA_ROOT / "schemas" / "board-preset.schema.json"
+# The filesystem roots now live in paths.py (the #285 paths seam) -- a leaf both
+# __init__ and topology.py import, so topology no longer lazy-imports BOARD_SCHEMA
+# back through the package. Re-exported here so `from alp_orchestrate import REPO`
+# (and friends) keeps working unchanged.
+from .paths import (  # noqa: E402
+    BOARD_PRESET_SCHEMA,  # noqa: F401  (re-export for the public surface)
+    BOARD_SCHEMA,
+    METADATA_ROOT,
+    REPO,
+)
 
 
-def _default_os_from_core_type(core_type: str) -> str:
-    """Infer default OS from a SoC's `cores[].type`.
+# The per-core OS-class taxonomy + topology view now live in topology.py (the
+# #285 topology seam). Re-export the names referenced outside the module:
+# `_default_os_from_core_type` (loader), `_cross_class_os` + `_core_os_choices`
+# (the OS-class validator below), and the public emit surface `core_os_topology`
+# / `emit_os_topology` (alp_project.py + the test_emit_os_topology tests). The
+# remaining helpers (CLASS_RUNTIMES, _allowed_os_for_core, _runtime_class) stay
+# topology-private -- nothing outside topology.py references them.
+from .topology import (  # noqa: E402
+    _core_os_choices,
+    _cross_class_os,
+    _default_os_from_core_type,
+    core_os_topology,  # noqa: F401  (re-export: test_emit_os_topology)
+    emit_os_topology,  # noqa: F401  (re-export: alp_project.py + tests)
+)
 
-    Convention (codified across the SoM presets pre-2026-05-18):
-        cortex-a*  ->  yocto
-        cortex-m*  ->  zephyr
-        anything else ->  off
-
-    Used as the fallback when a SoM preset's `topology.<core>.os` is
-    omitted (the field is now optional in som-preset-v1.schema.json --
-    M-class cores default to Zephyr, A-class to Yocto).
-    """
-    t = (core_type or "").lower()
-    if t.startswith("cortex-a"):
-        return "yocto"
-    if t.startswith("cortex-m"):
-        return "zephyr"
-    return "off"
-
-
-@functools.lru_cache(maxsize=None)
-def _core_os_choices() -> tuple[str, ...]:
-    """The runtimes a core's `os:` may resolve to, read from the board
-    schema's `$defs/core_entry/properties/os` enum.
-
-    Derived (not re-typed) so the value-set has exactly one source of truth
-    and cannot drift between the schema and the code.  `off` skips the core
-    (no slice is built).
-    """
-    schema = json.loads(BOARD_SCHEMA.read_text(encoding="utf-8"))
-    return tuple(schema["$defs"]["core_entry"]["properties"]["os"]["enum"])
-
-
-# The two class-determined OS runtimes (issue #95): Cortex-A -> Yocto (Linux),
-# Cortex-M -> Zephyr (RTOS).  These follow the core class and are NOT
-# user-selectable (see _default_os_from_core_type); `baremetal` (no-OS) and
-# `off` (disabled) are the only values a board.yaml may set explicitly.
-CLASS_RUNTIMES = ("yocto", "zephyr")
-
-
-def _runtime_class(core_type: str) -> str:
-    """`linux` for Cortex-A, `rtos` for Cortex-M, else `other`."""
-    t = (core_type or "").lower()
-    if t.startswith("cortex-a"):
-        return "linux"
-    if t.startswith("cortex-m"):
-        return "rtos"
-    return "other"
-
-
-def _cross_class_os(core_type: str) -> set[str]:
-    """The class runtime a core may NOT be set to -- the OS of the *other*
-    class.  A Cortex-A can't run Zephyr; a Cortex-M can't run Yocto."""
-    return set(CLASS_RUNTIMES) - {_default_os_from_core_type(core_type)}
-
-
-def _allowed_os_for_core(core_type: str) -> list[str]:
-    """The os: values valid for this core: every runtime minus the other
-    class's OS -- e.g. Cortex-A -> [yocto, baremetal, off], Cortex-M ->
-    [zephyr, baremetal, off]."""
-    cross = _cross_class_os(core_type)
-    return [o for o in _core_os_choices() if o not in cross]
-
-
-def core_os_topology(project: "BoardProject") -> dict[str, Any]:
-    """Per-core OS facts for an IDE / tool (issue #95).
-
-    The runtime is *determined by the core class* -- Cortex-A -> Yocto (Linux),
-    Cortex-M -> Zephyr (RTOS) -- and is not user-selectable.  For each resolved
-    core this reports its `runtime_class`, the class `default_os`, the
-    `effective_os` (after a `baremetal`/`off` override -- the only board.yaml
-    knobs), whether it is `enabled`, and the per-core `allowed_os` set (the
-    valid dropdown).  Lets the Board Configurator show the SDK's selection +
-    the legal overrides instead of guessing or offering a cross-class OS.
-    """
-    soc_types = {
-        c["id"]: c.get("type", "")
-        for c in (project.soc_spec.get("cores") or []) if "id" in c
-    }
-    rows: list[dict[str, Any]] = []
-    for core_id, sl in sorted(project.cores.items()):
-        core_type = soc_types.get(core_id, "")
-        default_os = _default_os_from_core_type(core_type)
-        rows.append({
-            "core_id":       core_id,
-            "core_type":     core_type,
-            "runtime_class": _runtime_class(core_type),
-            "default_os":    default_os,
-            "effective_os":  sl.os,
-            "enabled":       sl.os != "off",
-            "overridden":    sl.os != default_os,
-            "allowed_os":    _allowed_os_for_core(core_type),
-        })
-    return {
-        "schema_version": 1,
-        "sku":            project.sku,
-        "cores":          rows,
-    }
-
-
-def emit_os_topology(project: "BoardProject") -> str:
-    """JSON for `alp_project.py --emit os-topology` (see core_os_topology).
-
-    Sorted keys + a trailing newline so the output is byte-deterministic.
-    """
-    return json.dumps(core_os_topology(project), indent=2) + "\n"
-
-
-class OrchestratorError(RuntimeError):
-    """Raised when the orchestrator can't resolve / build a project.
-
-    Carries a human-readable message; the caller (west wrapper / CI)
-    prints it and exits non-zero.
-    """
-
-
-# ---------------------------------------------------------------------
-# Dataclasses
-# ---------------------------------------------------------------------
-
-
-@dataclass
-class Slice:
-    """One per-core build slice."""
-
-    core_id: str
-    os: str                              # zephyr | yocto | baremetal | off
-    app: Optional[str] = None
-    image: Optional[str] = None          # Yocto image recipe name
-    machine: Optional[str] = None        # Yocto MACHINE
-    board: Optional[str] = None          # Zephyr board target
-    toolchain: Optional[str] = None
-    peripherals: list[str] = field(default_factory=list)
-    libraries: list[str] = field(default_factory=list)
-    # Open-set escape hatch for libraries the SDK doesn't curate.  Each
-    # entry is a dict with `name:` + (exclusively) `kconfig:` OR
-    # `profile:`; loader's _validate_consistency() enforces the
-    # exactly-one and uniqueness rules.  See docs/board-config.md
-    # `extra_libraries:`.
-    extra_libraries: list[dict[str, Any]] = field(default_factory=list)
-    inference: dict[str, Any] = field(default_factory=dict)
-    iot: dict[str, Any] = field(default_factory=dict)
-    memory: dict[str, Any] = field(default_factory=dict)   # stack_kib, heap_kib, isr_stack_kib
-    power: dict[str, Any] = field(default_factory=dict)    # sleep_mode, wakeup_sources
-
-    # Populated by Orchestrator.fan_out:
-    build_dir: Optional[Path] = None
-    output_artefact: Optional[str] = None
-    status: str = "pending"              # pending | ok | failed | skipped
-    reason: Optional[str] = None         # populated for skipped / failed
-    log_path: Optional[Path] = None
-    duration_s: float = 0.0
-
-    def to_manifest_entry(self) -> dict[str, Any]:
-        """Project this slice as a dict for system-manifest.yaml.
-
-        Includes the per-os `flash_method:` + `flash_args:` so
-        `west alp-flash` can dispatch each slice without re-deriving
-        the backend.  The actual backend implementations (driver
-        invocations) are the subject of Phase 5 follow-ups; this
-        Phase 3 wiring is just the data plumbing.
-
-        Spec §6.1 byte-stability: the manifest MUST be deterministic
-        across rebuilds.  `duration_s` is a wall-clock runtime metric
-        that varies run-to-run, so it stays on the Slice dataclass
-        but never lands in the manifest.  Same goes for anything else
-        timer / PID-style — keep the manifest content-addressable.
-        """
-        flash_method, flash_args = _slice_flash_recipe(self)
-        entry: dict[str, Any] = {
-            "core_id":          self.core_id,
-            "os":               self.os,
-            "app":              self.app,
-            "image":            self.image,
-            "machine":          self.machine,
-            "board":            self.board,
-            "toolchain":        self.toolchain,
-            "build_dir":        str(self.build_dir) if self.build_dir else None,
-            "output_artefact":  self.output_artefact,
-            "status":           self.status,
-            "log_path":         str(self.log_path) if self.log_path else None,
-            "flash_method":     flash_method,
-            "flash_args":       flash_args,
-        }
-        if self.reason:
-            entry["reason"] = self.reason
-        # Drop keys with None values to keep the manifest tidy.
-        return {k: v for k, v in entry.items() if v is not None}
-
-
-@dataclass
-class IpcEntry:
-    """Raw IPC declaration straight from board.yaml."""
-
-    name: str
-    kind: str
-    endpoints: list[str]
-    carve_out_kb: int
-    cacheable: Optional[bool] = None
-    address: Optional[int] = None    # explicit base-address override
-
-
-@dataclass
-class ResolvedCarveOut:
-    """An IpcEntry after allocation from the SoM memory_map.
-
-    `status` is "ok" for a fully resolved carve-out; "blocked" when
-    the SoM metadata has TBDs (mailbox controller, memory_map base /
-    size, etc.) or the board.yaml entry can't be satisfied.  Blocked
-    entries land in `system-manifest.yaml` with `status: blocked` +
-    `reason: ...` so reviewers see the gap; the actual slice-build
-    step (which CI doesn't run) is what fails on a blocked carve-out.
-    """
-
-    name: str
-    kind: str
-    endpoints: list[str]
-    base: int                # 0 when blocked
-    size: int                # in bytes; 0 when blocked
-    region: str              # source memory-region name; "" when blocked
-    cacheable: bool
-    src_ept: int             # 0 when blocked
-    dst_ept: int             # 0 when blocked
-    mailbox_channel: int     # 0 when blocked
-    status: str = "ok"       # "ok" | "blocked"
-    reason: Optional[str] = None     # populated when blocked
-
-    def to_manifest_entry(self) -> dict[str, Any]:
-        if self.status == "blocked":
-            return {
-                "name":      self.name,
-                "kind":      self.kind,
-                "endpoints": list(self.endpoints),
-                "status":    "blocked",
-                "reason":    self.reason or "",
-            }
-        return {
-            "name":            self.name,
-            "kind":            self.kind,
-            "endpoints":       list(self.endpoints),
-            "carve_out_base":  f"0x{self.base:08x}",
-            "carve_out_size":  f"0x{self.size:08x}",
-            "carve_out_region": self.region,
-            "cacheable":       self.cacheable,
-            "rpmsg_endpoint_ids": {
-                "src": f"0x{self.src_ept:08x}",
-                "dst": f"0x{self.dst_ept:08x}",
-            },
-            "mailbox_channel": self.mailbox_channel,
-        }
-
-
-@dataclass
-class StorageEntry:
-    """Raw storage-partition declaration straight from board.yaml.
-
-    Mirrors the shape under `storage:` in board.schema.json; the
-    orchestrator turns these into ResolvedPartitions in
-    `resolve_storage_partitions()`.
-    """
-
-    name: str
-    size_kib: int
-    fs: str                  # littlefs | fat | ext4 | raw
-    mount: Optional[str] = None
-    flash_device: Optional[str] = None
-    offset_kib: Optional[int] = None     # explicit offset override
-
-
-@dataclass
-class ResolvedPartition:
-    """A StorageEntry after allocation against the SoM flash devices.
-
-    `status` follows the IPC carve-out convention: "ok" for a fully
-    resolved partition; "blocked" when the SoM metadata has TBDs
-    (flash device base/size unset) or the entry can't be satisfied
-    (unknown flash_device, page-misaligned offset, overlap with a
-    sibling partition).  Blocked entries land in `system-manifest.yaml`
-    with `reason: ...` so reviewers see the gap.
-    """
-
-    name: str
-    fs: str
-    flash_device: str        # original SDK name from board.yaml
-    dt_label: str            # Zephyr DT label resolved by the loader
-    base_kib: int            # offset within the flash device, in KiB; 0 when blocked
-    size_kib: int
-    mount: Optional[str] = None
-    status: str = "ok"       # "ok" | "blocked"
-    reason: Optional[str] = None
-
-    def to_manifest_entry(self) -> dict[str, Any]:
-        if self.status == "blocked":
-            return {
-                "name":         self.name,
-                "fs":           self.fs,
-                "flash_device": self.flash_device,
-                "status":       "blocked",
-                "reason":       self.reason or "",
-            }
-        entry: dict[str, Any] = {
-            "name":          self.name,
-            "fs":            self.fs,
-            "flash_device":  self.flash_device,
-            "dt_label":      self.dt_label,
-            "offset_kib":    self.base_kib,
-            "size_kib":      self.size_kib,
-        }
-        if self.mount:
-            entry["mount"] = self.mount
-        return entry
-
-
-@dataclass
-class BoardProject:
-    """Resolved board.yaml project ready for fan-out."""
-
-    sku: str
-    hw_rev: Optional[str]
-    board_name: Optional[str]
-    board_hw_rev: Optional[str]
-    cores: dict[str, Slice]                       # effective per-core slices
-    ipc: list[IpcEntry]
-    soc_spec: dict[str, Any]
-    som_preset: dict[str, Any]
-    board_preset: Optional[dict[str, Any]]
-    diagnostics: dict[str, Any] = field(default_factory=dict)
-    chips: list[str] = field(default_factory=list)
-    features: dict[str, Any] = field(default_factory=dict)
-    boot: dict[str, Any] = field(default_factory=dict)
-    ota: dict[str, Any] = field(default_factory=dict)
-    storage: list[StorageEntry] = field(default_factory=list)
-    security: dict[str, Any] = field(default_factory=dict)
-    raw: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class SystemManifest:
-    """The artefact written to build/system-manifest.yaml."""
-
-    project: BoardProject
-    slices: list[Slice]
-    carve_outs: list[ResolvedCarveOut]
-    partitions: list[ResolvedPartition] = field(default_factory=list)
-    boot_order: list[dict[str, Any]] = field(default_factory=list)
-    helper_mcus: list[dict[str, Any]] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        out: dict[str, Any] = {
-            "schema_version": 1,
-            "generated_by":   "scripts/alp_orchestrate.py",
-            "hw_info": {
-                "sku":             self.project.sku,
-                "som_hw_rev":      self.project.hw_rev,
-                "board_name":    self.project.board_name,
-                "board_hw_rev":  self.project.board_hw_rev,
-                "silicon":         self.project.som_preset.get("silicon"),
-            },
-            "slices":      [s.to_manifest_entry() for s in self.slices],
-            "ipc":         [c.to_manifest_entry() for c in self.carve_outs],
-            "helper_mcus": list(self.helper_mcus),
-            "boot_order":  list(self.boot_order),
-        }
-        if self.partitions:
-            out["storage"] = [p.to_manifest_entry() for p in self.partitions]
-        return out
+# The orchestrator data model now lives in alp_orchestrate_models (the first
+# #285 modularization seam); re-exported here so `from alp_orchestrate import
+# Slice` (and friends) keeps working unchanged for callers + tests.
+from .models import (  # noqa: E402
+    BoardProject,
+    IpcEntry,
+    OrchestratorError,
+    ResolvedCarveOut,  # noqa: F401  (re-export; consumed by carveout.py now, not __init__)
+    ResolvedPartition,
+    Slice,
+    StorageEntry,
+    SystemManifest,
+)
 
 
 # ---------------------------------------------------------------------
 # Silicon ref -> SoC JSON path
 # ---------------------------------------------------------------------
-
-# Mirrors scripts/alp_project.py:_SILICON_TO_KCONFIG so the orchestrator
-# can resolve any silicon ref it sees -- used to check the loader's
-# Kconfig coverage matches the SoC spec coverage.
-_SILICON_TO_KCONFIG: dict[str, str] = {
-    "alif:ensemble:e3": "ALP_SOC_ALIF_ENSEMBLE_E3",
-    "alif:ensemble:e4": "ALP_SOC_ALIF_ENSEMBLE_E4",
-    "alif:ensemble:e5": "ALP_SOC_ALIF_ENSEMBLE_E5",
-    "alif:ensemble:e6": "ALP_SOC_ALIF_ENSEMBLE_E6",
-    "alif:ensemble:e7": "ALP_SOC_ALIF_ENSEMBLE_E7",
-    "alif:ensemble:e8": "ALP_SOC_ALIF_ENSEMBLE_E8",
-    "renesas:rzv2n:n44": "ALP_SOC_RENESAS_RZV2N_N44",
-    "nxp:imx9:imx93":   "ALP_SOC_NXP_IMX9_IMX93",
-}
-
 
 def _silicon_to_soc_path(silicon: str, metadata_root: Path) -> Path:
     """`alif:ensemble:e7` -> metadata/socs/alif/ensemble/e7.json."""
@@ -1217,289 +873,15 @@ def load_board_yaml(path: Path, *,
 # ---------------------------------------------------------------------
 # Carve-out resolver
 # ---------------------------------------------------------------------
-
-
-_PAGE = 4096
-
-
-def _fnv1a_32(data: bytes) -> int:
-    """FNV-1a 32-bit hash.  10 lines, no deps."""
-    h = 0x811c9dc5
-    for b in data:
-        h ^= b
-        h = (h * 0x01000193) & 0xFFFFFFFF
-    return h
-
-
-def _region_size_bytes(region: dict[str, Any]) -> Optional[int]:
-    """Convert a memory_map entry's size_mib / size_kib to bytes.
-
-    Returns None if the size field is unset OR is the literal 'TBD'.
-    """
-    if "size_mib" in region:
-        v = region["size_mib"]
-        if isinstance(v, int):
-            return v * 1024 * 1024
-        return None
-    if "size_kib" in region:
-        v = region["size_kib"]
-        if isinstance(v, int):
-            return v * 1024
-        return None
-    return None
-
-
-def _align_down(value: int, alignment: int) -> int:
-    return value - (value % alignment)
-
-
-def _resolve_default_mailbox_channel(
-    mailbox: dict[str, Any],
-    entry_name: str,
-) -> int:
-    """Pick the mailbox channel reserved for a given IPC name.
-
-    Returns the channel `id` from mailbox.channels[] whose
-    `reserved_for:` matches the entry name; falls back to channel 0
-    when nothing matches (loader-rule check happens at emit time)."""
-    for ch in mailbox.get("channels") or []:
-        if ch.get("reserved_for") == entry_name:
-            return int(ch["id"])
-    return 0
-
-
-def _blocked_carve_out(entry: IpcEntry, reason: str) -> ResolvedCarveOut:
-    """Project an IpcEntry into a blocked ResolvedCarveOut.
-
-    Used when SoM metadata isn't ready yet (TBD addresses, missing
-    mailbox controller) or the board.yaml entry can't be satisfied
-    (no region, collision, etc.).  The manifest records the entry as
-    `status: blocked` + `reason: ...` so reviewers see the gap; the
-    actual slice-build step is what trips on it.
-    """
-    return ResolvedCarveOut(
-        name=entry.name,
-        kind=entry.kind,
-        endpoints=list(entry.endpoints),
-        base=0, size=0, region="",
-        cacheable=bool(entry.cacheable) if entry.cacheable is not None else False,
-        src_ept=0, dst_ept=0, mailbox_channel=0,
-        status="blocked", reason=reason,
-    )
-
-
-def resolve_carve_outs(
-    project: BoardProject,
-) -> list[ResolvedCarveOut]:
-    """Spec §6.1 algorithm.
-
-    1. Sort ipc entries alphabetically by name.
-    2. For each entry, pick the first memory region whose
-       accessible_from: covers every endpoint and whose `cacheable:`
-       attribute matches the entry's preference (non-cacheable by
-       default; explicit `cacheable: true` flips the preference).
-    3. Emit a `status: blocked` entry when the matching region has a
-       TBD base / size (the SoM isn't HW-mapped yet); the manifest
-       records the block reason and the actual slice-build step is
-       what fails.
-    4. Allocate top-down within the region, page-aligned (4 KiB).
-    5. Endpoint IDs: FNV-1a of the entry name, low byte ORed with
-       0x400 for src, +1 for dst.  Collision check at emit time.
-
-    Phase 3 strict-channel-reservation enforcement (spec §6.4):
-       - If the SoM preset's `mailbox.controller` is `TBD`, every
-         rpmsg entry lands blocked with a hint pointing at the preset
-         that owes the value.
-       - If the controller is set but no channel is `reserved_for:
-         alp_default_rpmsg` (and any `ipc[].kind == rpmsg` entry is
-         present), the rpmsg entries land blocked so the customer
-         adds an explicit reservation rather than silently dropping
-         the channel to 0.
-    """
-    if not project.ipc:
-        return []
-
-    # Derive the effective memory-region table.  An explicit `memory_map:`
-    # block in the SoM preset wins verbatim (non-stock partitioning); when
-    # absent the helper derives the table from the SoC variant JSON so the
-    # orchestrator doesn't need to duplicate that logic.
-    memory_map = resolve_memory_map(project.som_preset, METADATA_ROOT)
-    mailbox = dict(project.som_preset.get("mailbox") or {})
-
-    # Phase 3 strict mailbox checks (spec §6.4).  Surfaces preset
-    # bugs before the user spends time on a build that would silently
-    # collide on mailbox channel 0.  When metadata is incomplete, the
-    # rpmsg entries land blocked rather than aborting resolution
-    # (Phase 4 acceptance §6.1: emit a manifest, fail the build).
-    has_rpmsg_entry = any(e.kind == "rpmsg" for e in project.ipc)
-    rpmsg_block_reason: Optional[str] = None
-    if has_rpmsg_entry:
-        controller = mailbox.get("controller")
-        if controller is None or controller == "TBD":
-            rpmsg_block_reason = (
-                f"SoM {project.sku} mailbox controller is "
-                f"{'unset' if controller is None else 'TBD'}; "
-                f"carve-out resolution requires authoritative mailbox "
-                f"metadata.  Fill `mailbox.controller:` in "
-                f"metadata/e1m_modules/{project.sku}.yaml with the "
-                f"vendor mailbox node name (e.g. `renesas_mhu`, "
-                f"`nxp_mu`, `alif_mhuv2`) or remove the rpmsg "
-                f"entries from board.yaml.")
-        else:
-            reserved_tags = {
-                ch.get("reserved_for")
-                for ch in (mailbox.get("channels") or [])
-            }
-            if "alp_default_rpmsg" not in reserved_tags:
-                rpmsg_block_reason = (
-                    f"no mailbox channel reserved for alp_default_rpmsg "
-                    f"in {project.sku}; add one with `reserved_for: "
-                    f"alp_default_rpmsg` to metadata/e1m_modules/"
-                    f"{project.sku}.yaml mailbox.channels (e.g. "
-                    f"`- {{ id: 0, reserved_for: alp_default_rpmsg }}`).")
-
-    # Per-region high-water-mark allocator state.  Initialised lazily
-    # the first time we touch a region; returns None when the region
-    # carries a TBD base or unresolvable size.
-    region_top: dict[str, int] = {}
-
-    def _region_top_init(region: dict[str, Any]) -> tuple[Optional[int], Optional[str]]:
-        name = region["name"]
-        if name in region_top:
-            return region_top[name], None
-        # A region derived from the SoC variant JSON (no explicit
-        # `memory_map:` in the preset) carries name/size but NO `base`
-        # until the SoM is HW-mapped.  Treat a missing base the same as
-        # an explicit `TBD` so an un-mapped SoM (e.g. AEN801, whose E8
-        # SoC JSON has no per-region base yet) lands a clean *blocked*
-        # carve-out instead of crashing with KeyError: 'base'.
-        base = region.get("base")
-        size_bytes = _region_size_bytes(region)
-        base_is_unmapped = (
-            base is None
-            or (isinstance(base, str) and base.strip().upper() == "TBD")
-        )
-        if base_is_unmapped:
-            return None, (
-                f"memory_map.base is {'unset' if base is None else 'TBD'} "
-                f"for region '{name}' in SoM {project.sku}; this SoM "
-                f"hasn't been HW-mapped yet so IPC carve-outs cannot be "
-                f"allocated.  Add a `memory_map:` block to "
-                f"metadata/e1m_modules/{project.sku}.yaml (or per-region "
-                f"`base`) or remove the matching ipc entry from board.yaml.")
-        if size_bytes is None:
-            return None, (
-                f"memory_map.size is unresolvable for region '{name}' "
-                f"in SoM {project.sku} (size_mib / size_kib unset or "
-                f"TBD).  Cannot allocate carve-outs.")
-        # Top-down allocator: top = base + size, page-aligned.
-        top = base + size_bytes
-        top = _align_down(top, _PAGE)
-        region_top[name] = top
-        return top, None
-
-    # Sort entries alphabetically by name for determinism.
-    sorted_entries = sorted(project.ipc, key=lambda e: e.name)
-
-    resolved: list[ResolvedCarveOut] = []
-    seen_low_bytes: dict[int, str] = {}
-
-    for entry in sorted_entries:
-        # Mailbox metadata blocked? rpmsg entries can't proceed.
-        if entry.kind == "rpmsg" and rpmsg_block_reason is not None:
-            resolved.append(_blocked_carve_out(entry, rpmsg_block_reason))
-            continue
-
-        prefers_cacheable = bool(entry.cacheable) if entry.cacheable is not None else False
-        endpoint_set = set(entry.endpoints)
-
-        # Filter candidates: accessibility covers every endpoint.
-        candidates: list[dict[str, Any]] = []
-        for region in memory_map:
-            af = set(region.get("accessible_from") or [])
-            if not endpoint_set.issubset(af):
-                continue
-            candidates.append(region)
-        if not candidates:
-            resolved.append(_blocked_carve_out(entry, (
-                f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
-                f"have no matching memory_map region in SoM "
-                f"{project.sku}")))
-            continue
-
-        # Prefer the region whose `cacheable:` flag matches the entry's
-        # preference.  Default carve-out is non-cacheable.
-        def _rank(r: dict[str, Any]) -> tuple[int, int]:
-            cacheable_match = (bool(r.get("cacheable")) == prefers_cacheable)
-            # Smaller region size first (avoid eating the giant DDR
-            # region with tiny carve-outs when ocram fits).
-            size_b = _region_size_bytes(r) or 1 << 62
-            return (0 if cacheable_match else 1, size_b)
-
-        candidates.sort(key=_rank)
-        chosen = candidates[0]
-        region_name = chosen["name"]
-
-        # Initialise the region (and surface any TBD field).  Blocked
-        # regions emit a blocked entry rather than aborting.
-        _top, region_block_reason = _region_top_init(chosen)
-        if region_block_reason is not None:
-            resolved.append(_blocked_carve_out(entry, region_block_reason))
-            continue
-        carve_size = entry.carve_out_kb * 1024
-        carve_size_aligned = ((carve_size + _PAGE - 1) // _PAGE) * _PAGE
-
-        # Honour an explicit address override per ipc_entry.
-        if entry.address is not None:
-            base = entry.address
-            if base % _PAGE != 0:
-                resolved.append(_blocked_carve_out(entry, (
-                    f"ipc entry '{entry.name}' explicit address "
-                    f"0x{base:x} is not page-aligned (4 KiB)")))
-                continue
-        else:
-            new_top = region_top[region_name] - carve_size_aligned
-            region_lo = int(chosen["base"])
-            if new_top < region_lo:
-                resolved.append(_blocked_carve_out(entry, (
-                    f"ipc entry '{entry.name}' ({entry.carve_out_kb} "
-                    f"KiB) doesn't fit in region '{region_name}' "
-                    f"after prior allocations")))
-                continue
-            region_top[region_name] = new_top
-            base = new_top
-
-        # Endpoint ID derivation.
-        h = _fnv1a_32(entry.name.encode("utf-8"))
-        low = h & 0x0FF
-        if low in seen_low_bytes:
-            resolved.append(_blocked_carve_out(entry, (
-                f"ipc entry '{entry.name}' endpoint-id low byte "
-                f"0x{low:02x} collides with prior entry "
-                f"'{seen_low_bytes[low]}'.  Rename one of the channels.")))
-            continue
-        seen_low_bytes[low] = entry.name
-        src_ept = 0x400 | low
-        dst_ept = src_ept + 1
-
-        mbox = _resolve_default_mailbox_channel(mailbox, entry.name)
-
-        resolved.append(ResolvedCarveOut(
-            name=entry.name,
-            kind=entry.kind,
-            endpoints=list(entry.endpoints),
-            base=base,
-            size=carve_size_aligned,
-            region=region_name,
-            cacheable=bool(chosen.get("cacheable", False))
-                       if entry.cacheable is None
-                       else bool(entry.cacheable),
-            src_ept=src_ept,
-            dst_ept=dst_ept,
-            mailbox_channel=mbox,
-        ))
-
-    return resolved
+# The carve-out resolver now lives in carveout.py (the #285 carve-out seam).
+# Re-export resolve_carve_outs (orchestrator + emitters + tests) plus the page
+# primitives _PAGE / _region_size_bytes that the storage-partition resolver
+# below still shares.
+from .carveout import (  # noqa: E402
+    _PAGE,
+    _region_size_bytes,
+    resolve_carve_outs,
+)
 
 
 # ---------------------------------------------------------------------
@@ -2809,7 +2191,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     intrinsic chip set with no other board.yaml edits required.
     """
     silicon = project.som_preset.get("silicon")
-    kconfig = _SILICON_TO_KCONFIG.get(silicon)
+    kconfig = silicon_to_kconfig(silicon)
     diagnostics = project.diagnostics
 
     # Lazy-import alp_project tables — alp_project imports us, so a
@@ -2817,7 +2199,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # fragments.
     import sys as _sys
     from pathlib import Path as _Path
-    _scripts = _Path(__file__).resolve().parent
+    _scripts = _Path(__file__).resolve().parent.parent  # the scripts/ dir
     if str(_scripts) not in _sys.path:
         _sys.path.insert(0, str(_scripts))
     from alp_project import (  # type: ignore
@@ -3592,11 +2974,27 @@ def _slice_command(
         # exist.  Override cores.<id>.app with a real app to build the core.
         if slice_.app == STOCK_SHIM_APP:
             return None
-        return [
+        cmd = [
             "west", "build",
             "-b", slice_.board,
             str(_zephyr_app_dir(slice_.app)),
         ]
+        # ADR 0014 Phase-3 conf->build: wire the generated sysbuild
+        # overlays into the build command itself.  `_shared_artefacts`
+        # emits the top-level overlay at build_root/alp_sysbuild.conf and
+        # the TF-M child overlay at build_root/sysbuild/tfm/tfm.conf; the
+        # command runs with cwd=build_dir (build/<core>-<os>), so the
+        # top-level overlay is one directory up.  Pass --sysbuild whenever
+        # a sysbuild child image is configured (a `boot:` or `security.psa:`
+        # block), and --sysbuild-config only when the top-level overlay is
+        # non-empty (the TF-M overlay is picked up by sysbuild convention
+        # from its sysbuild/tfm/ path).  Absent both, the stock per-family
+        # sysbuild defaults apply and no flag is added.
+        if emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project):
+            cmd.append("--sysbuild")
+            if emit_sysbuild_conf(project):
+                cmd += ["--sysbuild-config", "../alp_sysbuild.conf"]
+        return cmd
     if slice_.os == "yocto":
         target = slice_.image or slice_.app
         if not target:
@@ -3646,82 +3044,8 @@ def _zephyr_app_dir(app: str) -> Path:
 # ---------------------------------------------------------------------
 
 
-def main(argv: Optional[Iterable[str]] = None) -> int:
-    import argparse
-    parser = argparse.ArgumentParser(
-        description="Fan-out orchestrator for board.yaml.")
-    parser.add_argument("--input", type=Path, default=Path("board.yaml"),
-                        help="Path to the project's board.yaml.")
-    parser.add_argument("--build-root", type=Path,
-                        default=Path("build"),
-                        help="Build root directory.")
-    parser.add_argument("--core", default=None,
-                        help="Limit fan-out to a single core ID.")
-    parser.add_argument("--no-parallel", action="store_true",
-                        help="Force sequential dispatch.")
-    parser.add_argument("--emit", default=None,
-                        choices=["system-manifest", "ipc-contract-h",
-                                 "dts-reservations", "dts-partitions",
-                                 "storage-mounts-c",
-                                 "tfm-sysbuild-conf", "build-plan"],
-                        help="Skip the build; just emit one of the "
-                             "generated artefacts to stdout.")
-    args = parser.parse_args(list(argv) if argv is not None else None)
-
-    try:
-        project = load_board_yaml(args.input)
-    except OrchestratorError as e:
-        print(f"alp-orchestrate: {e}", file=sys.stderr)
-        return 1
-
-    if args.emit:
-        try:
-            if args.emit == "system-manifest":
-                sys.stdout.write(emit_system_manifest(project))
-            elif args.emit == "ipc-contract-h":
-                sys.stdout.write(emit_ipc_contract_h(project))
-            elif args.emit == "dts-reservations":
-                sys.stdout.write(emit_dts_reservations(project))
-            elif args.emit == "dts-partitions":
-                sys.stdout.write(emit_dts_partitions(project))
-            elif args.emit == "storage-mounts-c":
-                sys.stdout.write(emit_storage_mounts_c(project))
-            elif args.emit == "tfm-sysbuild-conf":
-                sys.stdout.write(emit_tfm_sysbuild_conf(project))
-            elif args.emit == "build-plan":
-                sys.stdout.write(emit_build_plan(
-                    project, board_yaml=args.input,
-                    build_root=args.build_root))
-        except OrchestratorError as e:
-            print(f"alp-orchestrate: {e}", file=sys.stderr)
-            return 1
-        return 0
-
-    orchestrator = Orchestrator(project, args.build_root)
-    try:
-        manifest = orchestrator.fan_out(
-            only_core=args.core, parallel=not args.no_parallel)
-    except OrchestratorError as e:
-        print(f"alp-orchestrate: {e}", file=sys.stderr)
-        return 1
-
-    # Surface per-slice status to the console.
-    failed = 0
-    for s in manifest.slices:
-        marker = {
-            "ok":      "[OK ]",
-            "failed":  "[FAIL]",
-            "skipped": "[SKIP]",
-            "pending": "[??? ]",
-        }.get(s.status, "[??? ]")
-        extra = f" -- {s.reason}" if s.reason else ""
-        print(f"{marker} {s.core_id}/{s.os}{extra}")
-        if s.status == "failed":
-            failed += 1
-    print(f"alp-orchestrate: manifest at "
-          f"{(args.build_root / 'system-manifest.yaml')}")
-    return 1 if failed > 0 else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+# Re-export the CLI entry: main() lives in __main__ (so `python -m
+# alp_orchestrate` is the invocation), but `from alp_orchestrate import main`
+# stays valid for callers + the test-suite.  Placed at module end so __main__'s
+# `from alp_orchestrate import ...` sees a fully-populated package.
+from .cli import main  # noqa: F401,E402  (intentional re-export)

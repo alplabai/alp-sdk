@@ -12,7 +12,7 @@ from board.yaml + the SoM presets.
 
 With no --manifest, this regenerates a manifest from a representative set of
 example projects via the orchestrator and validates each -- a conformance
-gate that keeps scripts/alp_orchestrate.py's emitter and this contract in
+gate that keeps scripts/alp_orchestrate/'s emitter and this contract in
 lockstep. With --manifest PATH it validates an existing manifest (e.g. a real
 build/system-manifest.yaml an IDE consumes).
 

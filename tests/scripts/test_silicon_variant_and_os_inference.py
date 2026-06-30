@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the two 2026-05-18 loader changes:
 
-1. `scripts/alp_orchestrate.py::_default_os_from_core_type()` --
+1. `scripts/alp_orchestrate/::_default_os_from_core_type()` --
    infers the per-core OS default from the SoC's `cores[].type`
    when the SoM preset omits `topology.<core>.os` (Finding A).
 
@@ -22,7 +22,7 @@ Run locally:
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -36,21 +36,21 @@ METADATA_ROOT = REPO / "metadata"
 
 
 # ---------------------------------------------------------------------
-# Module-load fixtures (importlib.util pattern, matches
-# tests/scripts/test_gen_board_header.py)
+# Module-load fixtures
 # ---------------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
 def orchestrate_module():
-    spec = importlib.util.spec_from_file_location(
-        "alp_orchestrate", REPO / "scripts" / "alp_orchestrate.py"
-    )
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["alp_orchestrate"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    # alp_orchestrate is a package now (scripts/alp_orchestrate/, post-#285);
+    # import it by name with scripts/ on the path rather than loading a flat
+    # file -- a package __init__ can't be spec-loaded by raw path without its
+    # submodule search locations, and the by-name import is what the rest of
+    # the suite + the west wrappers already use.
+    scripts_dir = str(REPO / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    return importlib.import_module("alp_orchestrate")
 
 
 @pytest.fixture(scope="module")

@@ -1,0 +1,59 @@
+schema_version: 1
+generated_by: scripts/alp_orchestrate.py
+hw_info:
+  sku: E1M-AEN701
+  som_hw_rev: r1
+  board_name: E1M-EVK
+  board_hw_rev: r1
+  silicon: alif:ensemble:e7
+slices:
+- core_id: a32_cluster
+  os: yocto
+  app: ./linux
+  image: alp-image-edge
+  machine: e1m-aen701-a32
+  toolchain: poky-glibc
+  status: pending
+  flash_method: yocto_wic_to_sd_or_emmc
+  flash_args:
+    target: e1m-aen701-a32
+- core_id: m55_hp
+  os: zephyr
+  app: ./m55_hp
+  board: alp_e1m_aen701_m55_hp
+  toolchain: arm-zephyr-eabi
+  status: pending
+  flash_method: zephyr_west_flash
+  flash_args:
+    runner: openocd
+- core_id: m55_he
+  os: zephyr
+  app: alp-stock-shim
+  board: alp_e1m_aen701_m55_he
+  toolchain: arm-zephyr-eabi
+  status: pending
+  flash_method: zephyr_west_flash
+  flash_args:
+    runner: openocd
+ipc:
+- name: alp_default_rpmsg
+  kind: rpmsg
+  endpoints:
+  - a32_cluster
+  - m55_hp
+  status: blocked
+  reason: SoM E1M-AEN701 mailbox controller is TBD; carve-out resolution requires
+    authoritative mailbox metadata.  Fill `mailbox.controller:` in metadata/e1m_modules/E1M-AEN701.yaml
+    with the vendor mailbox node name (e.g. `renesas_mhu`, `nxp_mu`, `alif_mhuv2`)
+    or remove the rpmsg entries from board.yaml.
+helper_mcus:
+- name: cc3501e_otp
+  chip: cc3501e
+  firmware_path: TBD
+  flash_method: TBD
+  flash_args: TBD
+  note: firmware_path TBD; populated when the upstream firmware release lands
+boot_order: []
+
+# boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-AEN701.yaml when the
+# bring-up order is finalised.
