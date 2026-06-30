@@ -254,6 +254,7 @@ def test_validate_board_yaml_writes_inline_content_to_tempfile(monkeypatch):
     res = server.validate_board_yaml("som: E1M-AEN801\nname: demo\n")
     assert res["ok"] is False
     assert res["returncode"] == 1
+    assert "E1M-AEN801" in captured["content"]
 
 
 def test_run_surfaces_timeout_as_clean_nonzero(monkeypatch):
@@ -269,7 +270,6 @@ def test_run_surfaces_timeout_as_clean_nonzero(monkeypatch):
     proc = server._run(["sleep", "999"])
     assert proc.returncode == 124
     assert "timed out" in proc.stderr
-    assert "E1M-AEN801" in captured["content"]
 
 
 def test_emit_rejects_unknown_mode():
