@@ -9,6 +9,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **Wearable activity + fall example** (`examples/ai/wearable-activity-fall/`):
+  body-worn IMU edge node — ICM-42670 accel+gyro → windowed motion features
+  (`motion_features`: per-axis/magnitude RMS, SMA, step cadence via FFT, jerk,
+  tilt + a deterministic idle/walk/run fallback) → activity classifier via
+  `<alp/inference.h>`, plus a rule-based 3-phase fall detector (`fall_detect`:
+  free-fall → impact → post-impact stillness). Two pure-C cores host-unit-tested
+  on `native_sim` (`tests/unit/motion_features`, `tests/unit/fall_detect`); model
+  is a stub with a training recipe in `models/README.md`; HiL bench-gated.
 - **Rail predictive-maintenance example** (`examples/ai/rail-predictive-maintenance/`):
   train-mounted rail-condition survey — ICM-42670 vibration → DSP feature
   extraction (`rail_features`: RMS/crest/kurtosis/FFT band energies/dominant
