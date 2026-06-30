@@ -6,6 +6,7 @@ import click
 
 from alp_cli import __version__
 from alp_cli.doctor import doctor_cmd
+from alp_cli.explain import explain_cmd
 from alp_cli.faultdecode import faultdecode_cmd
 from alp_cli.init import init_cmd
 from alp_cli.model import model_group
@@ -20,6 +21,7 @@ def cli() -> None:
 
 
 cli.add_command(doctor_cmd)
+cli.add_command(explain_cmd)
 cli.add_command(faultdecode_cmd)
 cli.add_command(init_cmd)
 cli.add_command(model_group)

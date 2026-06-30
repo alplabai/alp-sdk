@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: cold-chain-monitor
+  description: |
+    Cold-chain integrity monitor: BME280 T/RH/P -> sliding-window metrics
+    (MKT / dewpoint / excursion time) -> 4-state classifier (OK / TEMP_EXCURSION
+    / MKT_EXCEEDED / CONDENSATION_RISK) + AI anomaly score (deterministic
+    fallback).  native_sim runs synthetic environment data covering the states.
+common:
+  tags: ai inference industrial environmental cold-chain marketing showcase
+tests:
+  alp_sdk.example.cold_chain_monitor.e1m_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - environmental
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[cc\\] done"
+
+  alp_sdk.example.cold_chain_monitor.aen_build:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    platform_allow:
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    build_only: true
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - environmental

@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: acoustic-anomaly-wind-turbine
+  description: |
+    Nacelle acoustic condition monitor: PDM mic -> DSP features ->
+    rotor-order (BPF) normalisation -> anomaly score (deterministic
+    fallback) for drivetrain tonals + gross blade aero-anomalies.
+    native_sim runs synthetic acoustics + a canned RPM track.
+common:
+  tags: audio ai inference industrial predictive-maintenance marketing showcase
+tests:
+  alp_sdk.example.acoustic_anomaly_wind_turbine.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args: CONFIG_AUDIO_DMIC=y
+    tags:
+      - alp-sdk
+      - example
+      - audio
+      - ai
+      - industrial
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[wtac\\] done"
+
+  alp_sdk.example.acoustic_anomaly_wind_turbine.aen_build:
+    platform_allow:
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    build_only: true
+    tags:
+      - alp-sdk
+      - example
+      - audio
+      - ai
+      - industrial

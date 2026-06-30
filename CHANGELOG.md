@@ -7,6 +7,68 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added
+
+- **Wind-turbine acoustic anomaly example** (`examples/audio/acoustic-anomaly-wind-turbine/`):
+  nacelle acoustic condition monitor — PDM mic → DSP features (`acoustic_features`:
+  FFT band energies / spectral flatness / centroid / kurtosis + healthy-baseline
+  anomaly fallback) → rotor-order normalisation (`rotor_speed` tacho + tacholess RPM
+  → BPF; `bpf_modulation` Goertzel at blade-pass harmonics) → per-interval anomaly
+  score for drivetrain tonals + gross blade aero-anomalies. Three pure-C DSP cores
+  host-unit-tested on `native_sim` (`tests/unit/acoustic_features`,
+  `tests/unit/rotor_speed`, `tests/unit/bpf_modulation`); model is a stub with a
+  training recipe in `models/README.md`; HiL bench-gated.
+- **Cold-chain integrity example** (`examples/ai/cold-chain-monitor/`):
+  environmental edge AI — BME280 T/RH/P → sliding-window `cold_chain` metrics
+  (mean/min/max, temperature slope, **Mean Kinetic Temperature** per ICH/USP,
+  Magnus dewpoint, excursion minutes) → a deterministic 4-state classifier
+  (OK / TEMP_EXCURSION / MKT_EXCEEDED / CONDENSATION_RISK) + an
+  `<alp/inference.h>` anomaly score with a deterministic fallback. The core is
+  host-unit-tested on `native_sim` (`tests/unit/cold_chain`); model is a stub
+  with a training recipe in `models/README.md`; HiL bench-gated.
+- **Visual-defect detection example** (`examples/ai/visual-defect-detection/`):
+  camera-fed surface-anomaly inspection — an autoencoder reconstructs the
+  "normal" surface and high reconstruction error flags a defect (unsupervised, no
+  defect labels). `defect_map` downsamples the RGB565 frame to a 64x64 luma grid,
+  scores each of 64 tiles (reconstruction error, or a statistical mean/variance/
+  gradient fallback), and classifies into a worst-tile location, coverage %,
+  severity, and PASS/FAIL. Core host-unit-tested on `native_sim`
+  (`tests/unit/defect_map`); model is a stub with a recipe in `models/README.md`;
+  HiL bench-gated.
+- **Multimodal fusion PdM example** (`examples/ai/multimodal-fusion-pdm/`):
+  fuses vibration (ICM-42670) + current (INA236) + temperature (BME280) into one
+  motor-health verdict — `fusion_health` scores each modality vs a healthy
+  baseline, counts cross-modal corroboration, and maps the pattern to a fault
+  hypothesis (HEALTHY / BEARING_WEAR / ELECTRICAL_FAULT / MECHANICAL_OVERLOAD /
+  UNCORROBORATED) with a confidence-weighted health score — plus an
+  `<alp/inference.h>` fused model with the deterministic rule as fallback. Core
+  host-unit-tested on `native_sim` (`tests/unit/fusion_health`); model is a stub
+  with a recipe in `models/README.md`; HiL bench-gated.
+- **DC motor current-signature example** (`examples/ai/motor-current-signature/`):
+  electrical-modality PdM — INA236 current/voltage/power → windowed
+  `current_features` (mean/ripple-RMS/crest/slope/power + dominant ripple
+  frequency) → a deterministic 5-state classifier (OFF/NORMAL/INRUSH/OVERLOAD/
+  STALL; the ripple magnitude separates a stalled rotor from a turning overload)
+  + an `<alp/inference.h>` anomaly score with a deterministic fallback. The core
+  is host-unit-tested on `native_sim` (`tests/unit/current_features`); model is a
+  stub with a training recipe in `models/README.md`; HiL bench-gated.
+- **Wearable activity + fall example** (`examples/ai/wearable-activity-fall/`):
+  body-worn IMU edge node — ICM-42670 accel+gyro → windowed motion features
+  (`motion_features`: per-axis/magnitude RMS, SMA, step cadence via FFT, jerk,
+  tilt + a deterministic idle/walk/run fallback) → activity classifier via
+  `<alp/inference.h>`, plus a rule-based 3-phase fall detector (`fall_detect`:
+  free-fall → impact → post-impact stillness). Two pure-C cores host-unit-tested
+  on `native_sim` (`tests/unit/motion_features`, `tests/unit/fall_detect`); model
+  is a stub with a training recipe in `models/README.md`; HiL bench-gated.
+- **Rail predictive-maintenance example** (`examples/ai/rail-predictive-maintenance/`):
+  train-mounted rail-condition survey — ICM-42670 vibration → DSP feature
+  extraction (`rail_features`: RMS/crest/kurtosis/FFT band energies/dominant
+  frequency/rail wavelength) → AI classifier via `<alp/inference.h>` with a
+  deterministic fallback → geotagged to GNSS lat/lon + haversine chainage
+  (`rail_position`) → one CSV record per 25 m segment. The two pure-C DSP cores
+  are host-unit-tested on `native_sim` (`tests/unit/rail_features`,
+  `tests/unit/rail_position`); HiL bench-gated.
+
 ### Fixed
 
 - **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
