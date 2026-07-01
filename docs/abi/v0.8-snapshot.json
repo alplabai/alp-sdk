@@ -2116,8 +2116,8 @@
           "signature": "alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);"
         },
         "cc3501e_wifi_get_mac": {
-          "hash": "6e72c8ca6ed982bf",
-          "signature": "define CC3501E_MAC_LEN 6u alp_status_t cc3501e_wifi_get_mac(cc3501e_t *ctx, uint8_t mac[CC3501E_MAC_LEN], uint32_t timeout_ms);"
+          "hash": "1ef1861f63ff8c55",
+          "signature": "alp_status_t cc3501e_wifi_get_mac(cc3501e_t *ctx, uint8_t mac[CC3501E_MAC_LEN], uint32_t timeout_ms);"
         },
         "cc3501e_wifi_rssi": {
           "hash": "60c1d11b13c1025d",
@@ -7469,8 +7469,8 @@
     "alp/gui.h": {
       "functions": {
         "alp_gui_lvgl_attach": {
-          "hash": "c74b7b39031c8879",
-          "signature": "endif alp_status_t alp_gui_lvgl_attach(alp_display_t *display);"
+          "hash": "d550030e741987b6",
+          "signature": "alp_status_t alp_gui_lvgl_attach(alp_display_t *display);"
         }
       },
       "macros": {},
@@ -8917,8 +8917,8 @@
           "signature": "alp_status_t alp_tmu_log(float in_a, float *out);"
         },
         "alp_tmu_sin": {
-          "hash": "eb8b6685938a8637",
-          "signature": "endif alp_status_t alp_tmu_sin(float in_a, float *out);"
+          "hash": "713f675c729f0e1f",
+          "signature": "alp_status_t alp_tmu_sin(float in_a, float *out);"
         },
         "alp_tmu_sinh": {
           "hash": "b2c0c1b70bff23c9",
@@ -9074,8 +9074,8 @@
     "alp/version.h": {
       "functions": {
         "alp_version_string": {
-          "hash": "30fc4298ae535813",
-          "signature": "define ALP_ABI_STATUS_CAP ALP_ABI_EXPERIMENTAL const char * alp_version_string(void);"
+          "hash": "05f69162bd2356a8",
+          "signature": "const char * alp_version_string(void);"
         }
       },
       "macros": {
