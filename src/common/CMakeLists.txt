@@ -4,6 +4,7 @@
 if(NOT DEFINED ZEPHYR_BASE)
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/proto/alp_mproc_frame.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/version.c
     )
     target_include_directories(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
