@@ -77,15 +77,17 @@ line per device with live values, ending in:
 [devhub] done
 ```
 
-native_sim (emul I2C, nothing registered on the bus) -- this is a
-silicon example, so the native_sim value is just "the plumbing
+native_sim (emul I2C, nothing registered on the bus -- the
+[`boards/`](boards/) overlay + conf route `alp-i2c0` to a
+`zephyr,i2c-emul-controller` with no emul targets attached) -- this
+is a silicon example, so the native_sim value is just "the plumbing
 compiles, links and exits cleanly":
 
 ```
 [devhub] open BOARD_I2C_SENSORS @ 100 kHz
 [devhub] ICM42670 @0x69 init fail (rc=-5; pre-respin collides w/ BMI323 @0x69)
 [devhub] BMI323   @0x68 init fail (rc=-5; pre-respin it's at 0x69)
-[devhub] BMP581   @0x47 absent (err=-5)
+[devhub] BMP581   @0x47 absent (err=0)
 ...            # each remaining device likewise reports absent
 [devhub] RESULT PARTIAL: 0/13 devices answered
 [devhub] done
@@ -100,8 +102,11 @@ compiles, links and exits cleanly":
   usual suspects.
 * **`bus open failed`.**  The `alp-i2c` DT alias for
   `BOARD_I2C_SENSORS` isn't routed on your board target; for
-  native_sim check that `CONFIG_EMUL=y CONFIG_I2C_EMUL=y` are in
-  effect.
+  native_sim check that the shipped
+  [`boards/native_sim_native_64.overlay`](boards/native_sim_native_64.overlay)
+  (the `alp-i2c0` alias) and `CONFIG_EMUL=y CONFIG_I2C_EMUL=y` (from
+  [`boards/native_sim_native_64.conf`](boards/native_sim_native_64.conf))
+  are in effect.
 
 ## Reference
 
