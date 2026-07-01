@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-05-18 against slice-3b state. -->
+<!-- Last verified: 2026-07-02 (board repo still unpublished; native_sim path only). -->
 
 # 01 -- First build: GPIO + LED
 
