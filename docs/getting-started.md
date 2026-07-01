@@ -11,6 +11,25 @@ hand-written firmware as a first-class consumer.
 > it with cross-version navigation + search.  Stuck on something?
 > Ask on [**community.alplab.ai**](https://community.alplab.ai/).
 
+> **Two front ends: `alp` CLI vs `west`.**  The SDK ships two
+> equivalent entry points, and both consume the same `board.yaml`:
+>
+> - **`alp` CLI** — the single-image quick path.  `pip install -e .`
+>   once per clone, then `alp init` scaffolds a project and `alp run`
+>   builds it for `native_sim` and prints its stdout straight
+>   through.  This is the headline
+>   [README Quickstart](../README.md#quickstart) — if you just want
+>   a hello-world running in two minutes, start there.
+> - **`west alp-build`** — the multi-core / heterogeneous path this
+>   walkthrough uses.  It fans a `board.yaml` out into per-core
+>   build slices, runs the full pre-flight (schema validation, SoC
+>   caps, hw_info header) and delegates to `west build`.
+>
+> Nothing is lost switching between them: `alp run` uses the same
+> loader and validator under the hood.  Pick `alp` for a first
+> taste, `west alp-build` once your project spans more than one
+> core or OS.
+
 If you'd rather skim, the fastest path is:
 
 ```bash
@@ -43,6 +62,29 @@ real-hardware HIL), see [`docs/testing.md`](testing.md):
 ```bash
 bash scripts/test-all.sh
 ```
+
+## Linux / Yocto path — start here
+
+Everything below targets the **Zephyr / MCU side**: M-class cores
+plus `native_sim` on your host.  If you came here for the **Linux
+side** of a V2N / V2N-M1 SoM — a kernel + root filesystem for the
+Cortex-A55 cluster — that is a separate flow with different
+constraints, worth knowing before you allocate an afternoon:
+
+- **The Renesas BSP is license-gated.**  The build consumes the
+  RZ/V2N AI SDK BSP Source Code package (`RTK0EF0189F06300SJ`),
+  fetched from your own Renesas account.  alp-sdk does not (and
+  cannot) redistribute it.
+- **Disk + host:** budget **~60 GB free** and a **Linux host or
+  WSL2 Ubuntu** — Yocto does not build on native Windows or macOS.
+- The bootloader is production-flashed by Alp Lab; you build only
+  kernel + rootfs.
+
+Start at [`docs/build-yocto-v2n.md`](build-yocto-v2n.md) for the
+V2N-specific BSP / deploy / verification detail, and
+[`meta-alp-sdk/README.md`](../meta-alp-sdk/README.md) for the layer
+assembly.  The Zephyr sections below still apply to the same SoM's
+M33 core — the two paths coexist on one module.
 
 ## 1. Prerequisites
 
@@ -154,9 +196,12 @@ After this:
 `west update --narrow -o=--depth=1` keeps the clone shallow —
 saves ~30 GB of unrelated git history.
 
-Importing alp-sdk via `west init -m` also surfaces the
-`west alp-build` extension command (see `scripts/west_commands/alp.py`)
-that the rest of this walkthrough uses.
+Importing alp-sdk via `west init -m` also surfaces the SDK's
+west-extension commands — `west alp-build`
+(`scripts/west_commands/alp_build.py`) plus its siblings
+`alp-image` / `alp-flash` / `alp-clean` / `alp-emit` / `alp-size` /
+`alp-renode`, all registered via `scripts/west-commands.yml` — that
+the rest of this walkthrough uses.
 
 ## 4. First build: the GPIO example
 
