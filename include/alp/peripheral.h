@@ -166,7 +166,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id);
  * @brief Configure a pin's direction + pull-up / pull-down resistors.
  *
  * @param[in] pin   Handle from @ref alp_gpio_open.
- * @param[in] dir   Direction (INPUT / OUTPUT / OUTPUT_OPEN_DRAIN / DISCONNECTED).
+ * @param[in] dir   Direction (@ref ALP_GPIO_INPUT / @ref ALP_GPIO_OUTPUT).
  * @param[in] pull  Pull-up / pull-down resistor selection.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
