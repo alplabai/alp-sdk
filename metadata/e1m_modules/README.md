@@ -21,7 +21,14 @@ device addresses, memory specs).
 TBD pending the hand-written HW config (see the header of
 `E1M-NX9101.yaml`).  The `som.sku` regex accepts `E1M-NX9xxx` for any
 4-digit tail, so the real SKU drops in as a sibling preset; do not treat
-`E1M-NX9101` as the canonical, released MPN.
+`E1M-NX9101` as the canonical, released MPN and **never hardcode the
+string `E1M-NX9101`** in tooling, docs, or examples as if it were a
+shipping part.  The machine-visible marker is the preset's
+`status.preliminary: true` (paired with `status.partial_hw_config:
+true`) — tools that filter for released SoMs must key off that flag,
+not off the SKU string.  When the real SKU lands, its preset flips
+`preliminary` to `false` and this placeholder is deleted (no
+legacy-compat alias).
 
 ## Schema + validation
 
