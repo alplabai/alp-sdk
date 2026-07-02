@@ -576,8 +576,9 @@ const alp_capabilities_t *alp_spi_capabilities(const alp_spi_t *bus);
 /* absence fails open() with ALP_ERR_NOSUPPORT / ALP_ERR_NOT_READY;   */
 /* driver-level absence surfaces on the FIRST transceive as           */
 /* ALP_ERR_NOSUPPORT (the Zephyr backend cannot probe it at open).    */
-/* native_sim has no target-mode emulation -- applications must       */
-/* degrade cleanly either way.                                         */
+/* native_sim: the emulated controller accepts a slave-mode open, but */
+/* nothing external ever clocks a transfer -- degrade cleanly (and    */
+/* bound your waits) either way.                                      */
 /*                                                                     */
 /* ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.                         */
 /* ------------------------------------------------------------------ */
@@ -609,9 +610,9 @@ typedef struct {
  *         this silicon) / @ref ALP_ERR_OUT_OF_RANGE (bus_id beyond
  *         this SoC's documented SPI count) / @ref ALP_ERR_NOT_READY /
  *         @ref ALP_ERR_NOSUPPORT (backend has no slave mode -- e.g.
- *         every native_sim build today; a controller DRIVER without
- *         slave support surfaces NOSUPPORT on the first transceive
- *         instead) / @ref ALP_ERR_NOMEM.
+ *         the SW-fallback loopback and the yocto/baremetal stubs; a
+ *         controller DRIVER without slave support surfaces NOSUPPORT
+ *         on the first transceive instead) / @ref ALP_ERR_NOMEM.
  */
 alp_spi_target_t *alp_spi_target_open(const alp_spi_target_config_t *cfg);
 

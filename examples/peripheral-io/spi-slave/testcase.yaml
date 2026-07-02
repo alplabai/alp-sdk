@@ -5,11 +5,12 @@ sample:
   description: |
     Per-peripheral example for SPI target (slave) mode via
     alp_spi_target_open: transfer-based request/response protocol
-    (preload reply, block on the controller's clock).  On
-    native_sim there is no slave-mode emulation, so the open
-    degrades cleanly with the diagnostic.  Builds on both EVKs:
-    BOARD_SPI_ARDUINO resolves to E1M_SPI1 on E1M EVK and E1M_X_SPI1
-    on E1M-X EVK.
+    (preload reply, bounded wait on the controller's clock).  On
+    native_sim BOARD_SPI_ARDUINO is not wired (only the alp-spi0
+    loader alias exists), so the open degrades cleanly with the
+    NOT_READY diagnostic.  Builds on both EVKs: BOARD_SPI_ARDUINO
+    resolves to ALP_E1M_SPI1 on E1M EVK and ALP_E1M_X_SPI1 on
+    E1M-X EVK.
 
 tests:
   alp_sdk.example.spi_slave.e1m_x_evk:

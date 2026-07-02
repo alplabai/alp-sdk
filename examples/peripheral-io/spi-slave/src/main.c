@@ -32,10 +32,10 @@
  *   ...
  *   [spi-slave] done
  *
- * On native_sim (CI lane) there is no SPI slave emulation, so
- * open() fails with ALP_ERR_NOSUPPORT / ALP_ERR_NOT_READY; the
- * example prints the diagnostic and exits.  Either way the
- * [spi-slave] done marker latches the harness.
+ * On native_sim (CI lane) BOARD_SPI_ARDUINO (alp-spi1) is not
+ * wired, so open() fails with ALP_ERR_NOT_READY; the example
+ * prints the diagnostic and exits.  Either way the [spi-slave]
+ * done marker latches the harness.
  *
  * Availability note: Zephyr's SPI slave support is itself patchy --
  * some SoC controller drivers reject SPI_OP_MODE_SLAVE.  See
@@ -134,14 +134,15 @@ int main(void)
 	});
 	if (tgt == NULL) {
 		/* Common causes:
-		 *   * ALP_ERR_NOSUPPORT -- no slave mode in this backend or
-		 *     controller driver.  Every native_sim build lands here
-		 *     today: there is no SPI slave emulation.
-		 *   * ALP_ERR_NOT_READY -- alp-spi1 alias unset / device
-		 *     not ready on this board. */
+		 *   * ALP_ERR_NOT_READY -- alp-spi1 alias unset / device not
+		 *     ready.  native_sim lands here: it wires only alp-spi0,
+		 *     so BOARD_SPI_ARDUINO does not resolve.
+		 *   * ALP_ERR_NOSUPPORT -- no slave mode in this backend (a
+		 *     DRIVER-level gap surfaces on the first transceive
+		 *     instead -- see <alp/peripheral.h>). */
 		printf("[spi-slave] target open failed: alp_last_error=%d\n", (int)alp_last_error());
-		printf("[spi-slave]   SPI target (slave) mode is unavailable on this build\n");
-		printf("[spi-slave]   (native_sim has no slave-mode emulation; on real\n");
+		printf("[spi-slave]   SPI target (slave) mode is unavailable here\n");
+		printf("[spi-slave]   (native_sim does not wire BOARD_SPI_ARDUINO; on real\n");
 		printf("[spi-slave]   hardware check the SoC driver supports slave mode)\n");
 		printf("[spi-slave] done\n");
 		return 0;

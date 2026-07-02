@@ -42,12 +42,13 @@ drivers reject `SPI_OP_MODE_SLAVE`.  Backends or drivers without
 slave mode fail with `ALP_ERR_NOSUPPORT` (or `ALP_ERR_NOT_READY`
 when the bus alias is unset), which the example handles by
 printing the diagnostic and exiting -- that is the expected
-outcome on **native_sim**, which has no slave-mode emulation:
+outcome on **native_sim**, which does not wire `BOARD_SPI_ARDUINO`
+(only the `alp-spi0` loader alias exists there):
 
 ```
 [spi-slave] listening on BOARD_SPI_ARDUINO (mode 0, 8 bits)
 [spi-slave] target open failed: alp_last_error=-2
-[spi-slave]   SPI target (slave) mode is unavailable on this build
+[spi-slave]   SPI target (slave) mode is unavailable here
 [spi-slave] done
 ```
 
