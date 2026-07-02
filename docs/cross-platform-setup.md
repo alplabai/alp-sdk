@@ -257,6 +257,13 @@ The examples in this section use **PowerShell 7+** syntax.  Open
 PowerShell as Administrator for the first-time install steps; the
 day-to-day workflow runs as a normal user.
 
+> **Shortcut:** `pwsh scripts\bootstrap.ps1` automates §4.2 + §4.5
+> (venv + Python deps + west workspace + the editable `alp` CLI install) once the
+> §4.1 base toolchain is present — it prints the matching `winget`
+> one-liner for anything missing and is idempotent.  The Arm GNU
+> Toolchain (§4.3) and Zephyr SDK stay manual (GUI installers).  The
+> sections below remain the manual walkthrough the script automates.
+
 ### 4.1 Base toolchain via winget
 
 ```powershell
@@ -613,7 +620,8 @@ explicitly — Windows does not honour Unix shebangs.
 The following scripts under `scripts/` are intentionally Bash:
 
 - `scripts/bootstrap.sh` — fresh-clone setup.  Works on
-  Linux / macOS / WSL.  Windows-native users follow §4 manually.
+  Linux / macOS / WSL.  Windows-native users run the PowerShell
+  twin `scripts/bootstrap.ps1` (see §4), or follow §4 manually.
 - `scripts/test-all.sh` — local CI driver.  Works on
   Linux / macOS / WSL.  Windows-native users invoke the
   individual Python tests directly (see §6.4).
