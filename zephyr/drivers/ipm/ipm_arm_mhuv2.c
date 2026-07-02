@@ -303,15 +303,15 @@ static void mhuv2_recv_isr(const struct device *dev)
 			recv_ch_status_reg = RECV->CH_INT_ST0;
 		} else if (ch_id >= CHCOMB_INT_ST1_BEGIN &&
 			ch_id <= CHCOMB_INT_ST1_END) {
-			offset = CHCOMB_INT_ST0_END;
+			offset = CHCOMB_INT_ST1_BEGIN;
 			recv_ch_status_reg = RECV->CH_INT_ST1;
 		} else if (ch_id >= CHCOMB_INT_ST2_BEGIN &&
 			ch_id <= CHCOMB_INT_ST2_END) {
-			offset = CHCOMB_INT_ST1_END;
+			offset = CHCOMB_INT_ST2_BEGIN;
 			recv_ch_status_reg = RECV->CH_INT_ST2;
 		} else if (ch_id >= CHCOMB_INT_ST3_BEGIN &&
 			ch_id <= CHCOMB_INT_ST3_END) {
-			offset = CHCOMB_INT_ST2_END;
+			offset = CHCOMB_INT_ST3_BEGIN;
 			recv_ch_status_reg = RECV->CH_INT_ST3;
 		}
 		if ((recv_ch_status_reg) & (0x1 << (ch_id - offset))) {
