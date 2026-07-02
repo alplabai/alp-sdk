@@ -10,6 +10,12 @@
 
 ## 1. Introduction
 
+> **Scaffold first:** `alp new-som` generates both metadata skeletons
+> this guide walks through (the SoM YAML + the SoC JSON) with
+> schema-legal `TBD` placeholders, and prints the porting checklist --
+> run it, then use the sections below to fill in the facts.  See the
+> verb reference in [cli.md](cli.md).
+
 "Porting a new SoM" in the Alp SDK means *adding one row of
 machine-readable metadata*.  It is **not**:
 
