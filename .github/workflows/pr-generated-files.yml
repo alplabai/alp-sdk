@@ -69,10 +69,10 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version-file: .python-version
 
       # gen_soc_caps.py formats its output with clang-format-22 (the same version
       # the diff-only style gate pins) so the generated headers match the repo

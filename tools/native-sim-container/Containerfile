@@ -10,7 +10,9 @@
 # The pins below track pr-twister.yml + west.yml in lockstep:
 #   - Zephyr            v4.4.0   (west.yml `zephyr` revision; pr-twister --mr)
 #   - Ubuntu base       24.04    (pr-twister runs on ubuntu-latest == 24.04)
-#   - Python            3.12     (pr-twister `setup-python` pin)
+#   - Python            3.12     (.python-version, via pr-twister `setup-python`;
+#                                 the image itself uses ubuntu:24.04 system python,
+#                                 so bumping .python-version past 24.04 also needs a base bump)
 #
 # Why no Zephyr SDK?  native_sim/native/64 compiles with the host's own
 # gcc (ENV ZEPHYR_TOOLCHAIN_VARIANT=host below), so the ~17 GB Zephyr

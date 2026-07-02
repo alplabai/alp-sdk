@@ -72,5 +72,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
       - name: Check canonical wire vectors are regenerated
         run: python3 firmware/cc3501e/tests/gen_protocol_vectors.py --check

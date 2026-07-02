@@ -17,7 +17,7 @@ Everything tracks the PR gate (`.github/workflows/pr-twister.yml`) and the SDK's
 | --- | --- | --- |
 | Zephyr | `v4.4.0` | `west.yml` `zephyr` revision / `pr-twister.yml --mr` |
 | Ubuntu base | `24.04` | `pr-twister.yml` runs on `ubuntu-latest` |
-| Python | `3.12` | `pr-twister.yml` `setup-python` |
+| Python | `3.12` | `.python-version` (via `pr-twister.yml` `setup-python`); image itself uses `ubuntu:24.04` system python |
 | Toolchain | host `gcc` (`ZEPHYR_TOOLCHAIN_VARIANT=host`) | `pr-twister.yml` `env:` |
 
 There is **no Zephyr SDK** in the image: `native_sim/native/64` compiles with the

@@ -65,10 +65,12 @@ jobs:
           path: alp-sdk
           fetch-depth: 1
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          # Repo is checked out under alp-sdk/ (path:), but setup-python (a
+          # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
+          python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools (dtc, ninja, ccache, gperf, libffi)
         run: |
