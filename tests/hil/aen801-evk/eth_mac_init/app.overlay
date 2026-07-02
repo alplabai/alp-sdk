@@ -62,9 +62,12 @@
 	pinctrl-0 = <&pinctrl_eth>;
 	pinctrl-names = "default";
 
-	/* Locally-administered unicast MAC (matches the dtsi default; restated
-	 * here so the readback math is self-contained):
-	 *   02:01:56:78:43:21
-	 * The glue copies it straight into MAC_ADDRESS_HIGH/LOW (no fuse). */
+	/* Locally-administered unicast MAC, PINNED for this test: the register
+	 * readback asserts exact MAC_ADDRESS_HIGH/LOW words, so the SoC dtsi's
+	 * random-MAC default must be overridden.  This is the documented
+	 * per-unit provisioning pattern: delete the random flag, then the glue
+	 * honours local-mac-address verbatim (no fuse).
+	 *   02:01:56:78:43:21 */
+	/delete-property/ zephyr,random-mac-address;
 	local-mac-address = [02 01 56 78 43 21];
 };

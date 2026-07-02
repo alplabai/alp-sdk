@@ -94,6 +94,12 @@
 &ethernet {
 	pinctrl-0 = <&pinctrl_eth>;
 	pinctrl-names = "default";
-	local-mac-address = [02 01 56 78 43 21];
+	/* Station MAC: inherits zephyr,random-mac-address from the SoC dtsi
+	 * (per-boot random locally-administered 02:01:56:xx:xx:xx) -- DHCP
+	 * doesn't care which MAC asks, and a random one means two boards on
+	 * the same bench switch never collide.  To pin a fixed per-unit MAC
+	 * instead:
+	 *   /delete-property/ zephyr,random-mac-address;
+	 *   local-mac-address = [ .. ]; */
 	status = "okay";
 };

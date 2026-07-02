@@ -31,8 +31,17 @@
 #                <zephyr/dt-bindings/clock/alif_ensemble_clocks.h>, e.g.
 #                clocks = <&clockctrl ALIF_ETHERNET_CLK>.)
 #   - pinctrl-0 / pinctrl-names  (the RMII pad routing)
-#   - local-mac-address          (required: the glue reads it directly; there
-#                                 is no fuse/OUI fallback in this glue)
+#
+# Station MAC (standard ethernet-controller.yaml semantics):
+#   - `zephyr,random-mac-address` (the SoC-dtsi default): the glue generates a
+#     per-boot random locally-administered address (prefix 02:01:56, this
+#     repo's LAA convention) via the upstream gen_random_mac() helper, so no
+#     two units ship the same MAC. Any local-mac-address is ignored while the
+#     flag is set (upstream binding rule).
+#   - `local-mac-address`: fixed per-unit address; a provisioning overlay
+#     deletes the random flag (/delete-property/ zephyr,random-mac-address;)
+#     and supplies the real address. There is no fuse/OUI fallback in this
+#     glue; a node carrying NEITHER property fails the glue's BUILD_ASSERT.
 #
 # PHY: the controller node may carry a child `mdio` bus with a managed PHY
 # (e.g. ti,dp83825 at addr 0), OR -- for first bring-up -- a `fixed-link` child
@@ -78,10 +87,14 @@ properties:
     required: true
 
   local-mac-address:
-    required: true
     description: |
-      The 6-byte station MAC address. Required: the Alif glue copies it
-      straight into the MAC with no fuse/derived-OUI fallback.
+      The 6-byte station MAC address for per-unit provisioning. Only honoured
+      when `zephyr,random-mac-address` is NOT set on the node (standard
+      ethernet-controller semantics); the SoC dtsi sets the random flag by
+      default, so an overlay pinning a real address must also
+      /delete-property/ zephyr,random-mac-address. The glue enforces at build
+      time that at least one of the two properties is present (no fuse/OUI
+      fallback).
 
   # phy-handle is inherited from ethernet-controller.yaml (type: phandle). The
   # node points it at either a managed PHY on a child `mdio` bus or a fixed-link
