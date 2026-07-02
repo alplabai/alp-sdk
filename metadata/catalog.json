@@ -757,7 +757,7 @@
       "script": "scripts/check_vendor_ext_tags.py"
     },
     {
-      "purpose": "Fail if the README's *current-state* version label drifts from the declared SDK version.",
+      "purpose": "Fail if any version copy drifts from the declared SDK version.",
       "script": "scripts/check_version_doc_sync.py"
     }
   ],
@@ -1180,6 +1180,12 @@
         "alp_usb_host_open"
       ],
       "header": "include/alp/usb.h"
+    },
+    {
+      "functions": [
+        "alp_version_string"
+      ],
+      "header": "include/alp/version.h"
     },
     {
       "functions": [

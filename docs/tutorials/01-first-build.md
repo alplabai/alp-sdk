@@ -1,6 +1,16 @@
-<!-- Last verified: 2026-05-18 against slice-3b state. -->
+<!-- Last verified: 2026-07-02 (board repo still unpublished; native_sim path only). -->
 
 # 01 -- First build: GPIO + LED
+
+> **Status:** the `alp_e1m_evk_aen` board definition this tutorial
+> builds against ships via the
+> [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
+> repo, which is **not yet published**.  Until it lands, the
+> real-hardware steps below (Step 3's `-b alp_e1m_evk_aen`, Step 4's
+> flash) cannot be reproduced -- follow along on
+> `native_sim/native/64` instead, and watch
+> [`docs/getting-started.md` §7](../getting-started.md#7-targeting-real-silicon),
+> which tracks the board-file publication.
 
 The canonical "your first Alp SDK build."  This tutorial walks
 through compiling `examples/peripheral-io/gpio-button-led/` against the
