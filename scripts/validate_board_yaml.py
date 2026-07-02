@@ -79,9 +79,7 @@ def _load_yaml(path: Path) -> dict[str, Any] | None:
 
 
 def _check_schema(project: dict[str, Any], path: Path) -> bool:
-    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
-    validator = jsonschema.Draft202012Validator(schema)
-    errors = sorted(validator.iter_errors(project), key=lambda e: list(e.absolute_path))
+    errors = iter_schema_errors(project)
     if not errors:
         print(f"OK   schema: {path}")
         return True

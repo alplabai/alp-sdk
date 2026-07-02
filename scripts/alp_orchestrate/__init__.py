@@ -42,9 +42,16 @@ except ImportError:
     sys.exit("alp_orchestrate: PyYAML is required.  Install via `pip install pyyaml`.")
 
 try:
-    import jsonschema  # type: ignore[import-untyped]
+    import jsonschema  # type: ignore[import-untyped]  # noqa: F401  (dep gate)
 except ImportError:
     sys.exit("alp_orchestrate: jsonschema is required.  Install via `pip install jsonschema`.")
+
+# The JSON-Schema pass routes through the ONE shared board.schema.json
+# implementation in alp_cli.validator (same schema resolution, draft
+# dialect, and error ordering as `alp validate` + validate_board_yaml.py).
+# alp_cli sits next to this package under scripts/, so the import resolves
+# in every supported invocation (west wrappers put scripts/ on PYTHONPATH).
+from alp_cli.validator import iter_schema_errors  # noqa: E402
 
 # resolve_memory_map derives the effective region table from the SoC variant
 # when the SoM preset does not declare an explicit `memory_map:` block.
@@ -146,10 +153,7 @@ def _validate_board(project: dict[str, Any],
         # Fall back to the global schema when the metadata_root doesn't
         # carry its own copy (e.g. synthetic test roots without schemas/).
         schema_path = BOARD_SCHEMA
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    validator = jsonschema.Draft202012Validator(schema)
-    errors = sorted(validator.iter_errors(project),
-                    key=lambda e: list(e.path))
+    errors = iter_schema_errors(project, schema_path)
     if errors:
         messages = []
         for e in errors:
