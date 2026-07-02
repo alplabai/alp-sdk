@@ -2,18 +2,32 @@
 # Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 """
-Generate the per-family pin-mux capability table from the SoM pinout TSVs.
+Generate the per-family pin-mux capability tables from the SoM pinout TSVs.
 
-The E1M-AEN family ships its pinout as two pad-claim TSVs:
+Each family ships its pinout as TSVs under metadata/e1m_modules/<family>/,
+in one of two shapes:
+
+* E1M-pad claims (AEN): 4 columns
+  (e1m_pad, e1m_function, silicon_peripheral, silicon_pad) -- plus a
+  3-column raw-GPIO variant on the CC3501E map.
 
     metadata/e1m_modules/aen/from-alif.tsv      (Alif-Ensemble-owned pads)
     metadata/e1m_modules/aen/from-cc3501e.tsv   (TI CC3501E-owned pads)
 
-These are the single source.  Tools (the `alp` CLI / the IDE) want one
-structured, schema'd table rather than five heterogeneous TSVs, so this
-generator projects the two pad-claim TSVs into:
+* Pad-first peripheral maps (V2N): 2 columns (peripheral, silicon_pad).
+  These don't carry the E1M edge ball, so `e1m_pad` is emitted as the
+  literal "TBD" (per the no-inventing-values rule); `e1m_function` is
+  taken from rows whose peripheral cell literally names an E1M net
+  ("E1M PWM0" -> "PWM0") and is "TBD" for on-module / inter-chip nets.
 
-    metadata/pinmux/aen.yaml   (schema: pinmux-capability-v1)
+    metadata/e1m_modules/v2n/renesas-peripheral-map.tsv  (RZ/V2N-owned pads)
+    metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv         (GD32 IO-MCU pads)
+
+The TSVs are the single source.  Tools (the `alp` CLI / the IDE) want one
+structured, schema'd table per family rather than heterogeneous TSVs, so
+this generator projects them into:
+
+    metadata/pinmux/<family>.yaml   (schema: pinmux-capability-v1)
 
 Each row becomes one pad entry: { e1m_pad, e1m_function, owner,
 silicon_peripheral, silicon_pad }.  The emitted file is validated against
@@ -47,15 +61,31 @@ MODULES = REPO / "metadata" / "e1m_modules"
 PINMUX_DIR = REPO / "metadata" / "pinmux"
 SCHEMA = REPO / "metadata" / "schemas" / "pinmux-capability-v1.schema.json"
 
-# Per-family generation spec: which pad-claim TSVs feed the table and how
-# each maps onto the common pad entry.  `owner` is the on-module silicon
-# that drives the pad; columns are (e1m_pad, e1m_function, peripheral, pad).
+# Per-family generation spec: which TSVs feed the table and how each maps
+# onto the common pad entry.  `owner` is the on-module silicon that drives
+# the pad.  `shape` selects the source column layout:
+#   "e1m_claim" (default) -- (e1m_pad, e1m_function, peripheral, pad)
+#   "pad_first"           -- (peripheral, pad); e1m_pad is unmappable -> "TBD"
+#
+# imx93 deliberately has no entry: the family ships no pinout TSV yet
+# (metadata/e1m_modules/imx93/ holds only hw-revisions.yaml pending the
+# IMX93RM ingestion / HW-config writeup), so there is nothing to project.
+# Add it here when the TSV lands.
 FAMILIES: dict[str, dict] = {
     "aen": {
         "display_name": "E1M-AEN (Alif Ensemble)",
         "sources": [
             {"file": "aen/from-alif.tsv", "owner": "alif"},
             {"file": "aen/from-cc3501e.tsv", "owner": "cc3501e"},
+        ],
+    },
+    "v2n": {
+        "display_name": "E1M-V2N (Renesas RZ/V2N + GD32 IO MCU)",
+        "sources": [
+            {"file": "v2n/renesas-peripheral-map.tsv", "owner": "renesas",
+             "shape": "pad_first"},
+            {"file": "v2n/gd32-io-mcu-map.tsv", "owner": "gd32",
+             "shape": "pad_first"},
         ],
     },
 }
@@ -67,27 +97,46 @@ def _read_tsv_rows(path: Path) -> list[list[str]]:
     with path.open(encoding="utf-8") as fi:
         for line in fi:
             s = line.rstrip("\n")
-            if not s or s.startswith("#") or s.startswith("e1m_pad\t"):
+            if (not s or s.startswith("#")
+                    or s.startswith("e1m_pad\t") or s.startswith("peripheral\t")):
                 continue
             rows.append(s.split("\t"))
     return rows
 
 
 def _pads_for_family(spec: dict) -> list[dict[str, str]]:
-    """Project a family's pad-claim TSVs into ordered pad entries.
+    """Project a family's TSVs into ordered pad entries.
 
-    Pad-claim rows carry (e1m_pad, e1m_function, peripheral, pad).  The
-    CC3501E map has a second, 3-column shape for raw GPIO pads
-    (e1m_pad, e1m_function, gpio) where the on-module pin IS the function
-    and there is no distinct peripheral -- those land as an empty
-    peripheral with the GPIO as the silicon pad.
+    E1M-claim rows (shape "e1m_claim", the default) carry
+    (e1m_pad, e1m_function, peripheral, pad).  The CC3501E map has a
+    second, 3-column shape for raw GPIO pads (e1m_pad, e1m_function, gpio)
+    where the on-module pin IS the function and there is no distinct
+    peripheral -- those land as an empty peripheral with the GPIO as the
+    silicon pad.
+
+    Pad-first rows (shape "pad_first") carry (peripheral, pad).  The E1M
+    edge ball is not in the source, so `e1m_pad` is the literal "TBD";
+    `e1m_function` is projected mechanically from peripheral cells that
+    literally name an E1M net ("E1M PWM0" -> "PWM0") and is "TBD" for
+    on-module / inter-chip nets -- nothing is invented.
     """
     pads: list[dict[str, str]] = []
     for src in spec["sources"]:
         path = MODULES / src["file"]
+        shape = src.get("shape", "e1m_claim")
         for row in _read_tsv_rows(path):
             cells = [c.strip() for c in row]
-            if len(cells) == 3:
+            if shape == "pad_first":
+                if len(cells) < 2:
+                    raise SystemExit(
+                        f"gen_pinmux_capability: malformed row in "
+                        f"{src['file']!r}: {row!r} (expected 2 tab-separated "
+                        f"columns: peripheral, pad)")
+                peripheral, pad = cells[0], cells[1]
+                e1m_pad = "TBD"
+                e1m_function = (peripheral[len("E1M "):]
+                                if peripheral.startswith("E1M ") else "TBD")
+            elif len(cells) == 3:
                 e1m_pad, e1m_function, peripheral, pad = (
                     cells[0], cells[1], "", cells[2])
             elif len(cells) >= 4:

@@ -19,7 +19,7 @@ display_name: "E1M-NX9101 (NXP i.MX 93 -- exact SKU TBD)"
 on_module:
   silicon:              nxp:imx9:imx93         # 2x Cortex-A55 + Cortex-M33 + Ethos-U65
   wifi_ble:             TBD                    # one of Murata Type 2DL/2EL/2KL/2LL per BOM
-  pmic:                 pca9451a               # NXP PCA9451A
+  pmic_main:            pca9451a               # NXP PCA9451A (canonical key -- matches V2N's pmic_main)
   ethernet_phy:         TBD                    # variant of RTL or NXP PHY per BOM
 
 memory:
@@ -29,6 +29,12 @@ memory:
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u65                    # i.MX 93 ships Ethos-U65
+  npu_population:
+    # Single Ethos-U65 instance -- the count is authoritative from
+    # metadata/socs/nxp/imx9/imx93.json (`capabilities.ethos_u65_count: 1`).
+    # NXP's role label + host-core pairing are not yet in-repo-authoritative
+    # (pending the IMX93RM ingestion / HW-config writeup) -> TBD, never invented.
+    - { variant: u65, role: TBD, paired_with: TBD }
 
 capabilities:
   optiga_trust_m:       true       # Populated on the E1M-NX9101 module.

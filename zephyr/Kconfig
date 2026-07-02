@@ -2730,7 +2730,7 @@ config ALP_SDK_CHIP_PCA9451A
 	  driver_status: stub) -- the chip-driver source + headers land
 	  alongside the NX9101 bring-up.  Declaring the Kconfig now so
 	  scripts/alp_orchestrate.py's `CONFIG_ALP_SDK_CHIP_PCA9451A=y`
-	  emit (from on_module.pmic: pca9451a) resolves cleanly under
+	  emit (from on_module.pmic_main: pca9451a) resolves cleanly under
 	  Zephyr Kconfig even while no `.c` body exists.
 
 config ALP_SDK_CHIP_DA9292

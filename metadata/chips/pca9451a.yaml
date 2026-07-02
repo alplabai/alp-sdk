@@ -20,7 +20,7 @@ i2c:
 # Per [[pending-hw-configs]]: rail voltages, enable straps, and signal
 # routing are TBD until the maintainer hand-writes the NX9101 HW config.
 # The block exists so cross-reference validators (validate_metadata.py,
-# alp_project.py loader) can resolve E1M-NX9101.yaml's `pmic: pca9451a`
+# alp_project.py loader) can resolve E1M-NX9101.yaml's `pmic_main: pca9451a`
 # reference without flagging a missing-chip error.
 
 signals: []                        # populate when datasheet + V0 schematic land

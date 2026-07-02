@@ -42,6 +42,11 @@ What this touches:
     README.md                       -- the current-state version labels (e.g.
                                        "Partially silicon-verified (`vX.Y`)", "vX.Y ramp");
                                        enforced by scripts/check_version_doc_sync.py.
+    include/alp/version.h           -- ALP_VERSION_MAJOR/MINOR/PATCH +
+                                       ALP_VERSION_STRING macros;
+                                       enforced by scripts/check_version_doc_sync.py.
+    pyproject.toml                  -- the alp-sdk-cli [project] version;
+                                       enforced by scripts/check_version_doc_sync.py.
 
 What it does NOT touch:
 
@@ -65,6 +70,8 @@ REPO = Path(__file__).resolve().parent.parent
 SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
 CHANGELOG = REPO / "CHANGELOG.md"
 README = REPO / "README.md"
+VERSION_H = REPO / "include" / "alp" / "version.h"
+PYPROJECT = REPO / "pyproject.toml"
 ABI_DIR = REPO / "docs" / "abi"
 ABI_SNAPSHOT_TOOL = REPO / "scripts" / "abi_snapshot.py"
 
@@ -154,6 +161,51 @@ def update_readme_version_labels(current: str, new_version: str, dry_run: bool) 
           f"v{old_mm} -> v{new_mm}")
 
 
+def update_version_h(new_version: str, dry_run: bool) -> None:
+    """Rewrite the ALP_VERSION_* macros in include/alp/version.h.
+
+    Preserves the surrounding whitespace/alignment (the repo
+    clang-format aligns consecutive macro values), substituting only
+    the numeric / string values.  Keep in lockstep with
+    scripts/check_version_doc_sync.py's version.h parsers.
+    """
+    major, minor, patch, _pre = parse_version(new_version)
+    text = version_h_text = VERSION_H.read_text(encoding="utf-8")
+    subs = [
+        (r"(#define\s+ALP_VERSION_MAJOR\s+)\d+", rf"\g<1>{major}"),
+        (r"(#define\s+ALP_VERSION_MINOR\s+)\d+", rf"\g<1>{minor}"),
+        (r"(#define\s+ALP_VERSION_PATCH\s+)\d+", rf"\g<1>{patch}"),
+        (r'(#define\s+ALP_VERSION_STRING\s+)"[^"]*"', rf'\g<1>"{new_version}"'),
+    ]
+    for pat, repl in subs:
+        text, n = re.subn(pat, repl, text, count=1)
+        if n != 1:
+            raise SystemExit(f"bump_version: pattern '{pat}' not found in "
+                             f"{VERSION_H.relative_to(REPO)}")
+    if text == version_h_text:
+        print(f"  unchanged {VERSION_H.relative_to(REPO)} (already at {new_version})")
+        return
+    if not dry_run:
+        VERSION_H.write_text(text, encoding="utf-8")
+    print(f"  updated {VERSION_H.relative_to(REPO)}: ALP_VERSION_* -> {new_version}")
+
+
+def update_pyproject(new_version: str, dry_run: bool) -> None:
+    """Rewrite the [project] version in pyproject.toml (alp-sdk-cli)."""
+    text = PYPROJECT.read_text(encoding="utf-8")
+    new_text, n = re.subn(r'^version\s*=\s*"[^"]*"', f'version = "{new_version}"',
+                          text, count=1, flags=re.MULTILINE)
+    if n != 1:
+        raise SystemExit(f"bump_version: no 'version = \"...\"' line in "
+                         f"{PYPROJECT.relative_to(REPO)}")
+    if new_text == text:
+        print(f"  unchanged {PYPROJECT.relative_to(REPO)} (already at {new_version})")
+        return
+    if not dry_run:
+        PYPROJECT.write_text(new_text, encoding="utf-8")
+    print(f"  updated {PYPROJECT.relative_to(REPO)}: -> version = \"{new_version}\"")
+
+
 def regenerate_abi_snapshot(new_version: str, dry_run: bool) -> None:
     major, minor, _patch, _pre = parse_version(new_version)
     snapshot_path = ABI_DIR / f"v{major}.{minor}-snapshot.json"
@@ -186,6 +238,8 @@ def main() -> int:
     update_sdk_version_yaml(args.to, args.dry_run)
     slice_changelog(args.to, args.dry_run)
     update_readme_version_labels(current, args.to, args.dry_run)
+    update_version_h(args.to, args.dry_run)
+    update_pyproject(args.to, args.dry_run)
     regenerate_abi_snapshot(args.to, args.dry_run)
     print()
     print("Next steps:")
