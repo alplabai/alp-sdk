@@ -74,7 +74,7 @@ def _pinout_include(routes: dict[str, Any]) -> str:
     E1M (35x35) and E1M-X (45x65) are deliberately separate pinout
     namespaces (`<alp/e1m_pinout.h>` vs `<alp/e1m_x_pinout.h>`); a
     board's routes live entirely in one.  Detect E1M-X by the
-    `E1M_X_` macro prefix so the generated header includes the
+    `E1M_X_` pad-name prefix so the generated header includes the
     matching pad definitions.
     """
     for entries in routes.values():
