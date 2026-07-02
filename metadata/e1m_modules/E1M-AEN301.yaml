@@ -147,9 +147,9 @@ pad_routes:
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: TBD
-    flash_method:  TBD
-    flash_args:    TBD
+    firmware_path: TBD                       # populated when firmware/cc3501e/ cuts its first bench binary
+    flash_method:  TBD                       # cc3501e_usb_bootloader or alif_spi_relay; see firmware/cc3501e/flash.py
+    flash_args:    TBD                       # follows flash_method once that lands
 
 default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
