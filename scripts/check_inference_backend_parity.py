@@ -21,6 +21,12 @@ vs canonical `deepx_dxm1` / `dxnn`).  A non-canonical backend string decodes
 silently to the AUTO/TFLITE sentinel on-device (NOT an error), so the
 mis-selection would never surface at runtime; here it fails CI immediately.
 
+One sanctioned exception: the `tbd` backend placeholder emitted by
+`alp new-som` is accepted, but ONLY while the preset declares
+`status.preliminary: true` (the scaffold-first porting flow -- see
+docs/porting-new-som.md).  Clearing the preliminary flag without
+replacing `tbd` with the real silicon backend fails here.
+
 Run locally:
 
     python3 scripts/check_inference_backend_parity.py
@@ -59,9 +65,15 @@ def _enum_literals(source: str, func: str) -> set[str]:
     return set(re.findall(r'strcmp\(s,\s*"([^"]+)"\)', m.group(1)))
 
 
-def _collect_preset_names(path: Path) -> list[tuple[str, str, str]]:
-    """Return (field, backend_or_fmt_kind, value) tuples from a preset."""
+def _collect_preset_names(path: Path) -> tuple[bool, list[tuple[str, str, str]]]:
+    """Return (preliminary, [(field, backend_or_fmt_kind, value), ...]).
+
+    `preliminary` is the preset's `status.preliminary` flag -- the marker
+    that legalises the `tbd` backend placeholder (scaffold-first flow).
+    """
     doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    status = doc.get("status")
+    preliminary = isinstance(status, dict) and status.get("preliminary") is True
     inf = doc.get("inference") or {}
     out: list[tuple[str, str, str]] = []
     pb = inf.get("preferred_backend")
@@ -73,7 +85,7 @@ def _collect_preset_names(path: Path) -> list[tuple[str, str, str]]:
                 out.append((f"inference.targets[{i}].backend", "backend", t["backend"]))
             if isinstance(t.get("blob_format"), str):
                 out.append((f"inference.targets[{i}].blob_format", "format", t["blob_format"]))
-    return out
+    return preliminary, out
 
 
 def main() -> int:
@@ -98,8 +110,24 @@ def main() -> int:
     checked = 0
     for path in sorted(PRESETS.glob("E1M-*.yaml")):
         rel = path.relative_to(REPO)
-        for field, kind, value in _collect_preset_names(path):
+        preliminary, names = _collect_preset_names(path)
+        for field, kind, value in names:
             checked += 1
+            if kind == "backend" and value == "tbd":
+                # `alp new-som` scaffold placeholder: legal ONLY while the
+                # preset itself is flagged status.preliminary: true, so a
+                # scaffold commits green but cannot graduate with `tbd`.
+                if preliminary:
+                    print(f"OK   {rel}  ({field}=tbd -- scaffold placeholder, "
+                          f"status.preliminary: true)")
+                    continue
+                errors.append(
+                    f"{rel}: {field} = 'tbd' is the `alp new-som` scaffold "
+                    f"placeholder, legal only while the preset declares "
+                    f"status.preliminary: true; replace it with the real "
+                    f"silicon backend (one of {sorted(canonical[kind])}) "
+                    f"before clearing the preliminary flag")
+                continue
             if value not in canonical[kind]:
                 errors.append(
                     f"{rel}: {field} = {value!r} is not a canonical {kind} the "
