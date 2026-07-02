@@ -123,11 +123,14 @@ int main(void)
 	}
 
 	uint8_t tx[FRAME_LEN] = { 0 }; /* idle reply until the first command lands */
-	uint8_t rx[FRAME_LEN];
+	uint8_t rx[FRAME_LEN] = { 0 };
 
 	for (uint32_t i = 0; i < TRANSFER_COUNT; i++) {
 		/* Stage the transfer and block until the external controller
-		 * clocks it (no timeout -- the controller decides when). */
+		 * clocks it (no timeout -- the controller decides when).
+		 * Zero rx first so a short transfer can't leave stale bytes
+		 * from the previous frame in the un-clocked tail. */
+		memset(rx, 0, sizeof(rx));
 		size_t       got = 0;
 		alp_status_t s   = alp_spi_target_transceive(tgt, tx, rx, FRAME_LEN, &got);
 		if (s != ALP_OK) {
