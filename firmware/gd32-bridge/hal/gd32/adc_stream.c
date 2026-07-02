@@ -19,6 +19,38 @@
 /* Stream slots; layout + sizing doc in gd32_common.h. */
 adc_stream_state_t adc_streams[BRIDGE_ADC_STREAM_COUNT];
 
+/* NVIC priority for the per-stream DMA "lap" ISR (full-transfer-
+ * finish).  Below every transport ISR (SPI/CS = 1, I2C = 2 -- see
+ * bridge_board_config.h): a lap tick fires once per ring period
+ * (>= ~10 ms at the 100 kHz rate cap) and is pure bookkeeping, so it
+ * must never delay the latency-sensitive link ISRs. */
+#define ADC_STREAM_LAP_IRQ_PRIO    3u
+#define ADC_STREAM_LAP_IRQ_SUBPRIO 0u
+
+/* DMA full-transfer-finish "lap" ISRs -- one per stream (stream 0 ->
+ * DMA0 CH0, stream 1 -> DMA1 CH0, fixed in stream_begin below).  The
+ * circular channel raises FTF exactly once per ring reload, so
+ * lap_count * RING_SAMPLES + the live write index is the TOTAL sample
+ * count the DMA has ever deposited -- the writer half of the overrun
+ * accounting in bridge_hw_adc_stream_read.  Strong definitions
+ * override the vendor startup's weak Default_Handler aliases
+ * (CMSIS/GD/GD32G5x3/Source/GCC/startup_gd32g5x3.S). */
+void DMA0_Channel0_IRQHandler(void)
+{
+	if (dma_interrupt_flag_get(DMA0, DMA_CH0, DMA_INT_FLAG_FTF) != RESET) {
+		dma_interrupt_flag_clear(DMA0, DMA_CH0, DMA_INT_FLAG_FTF);
+		adc_streams[0].lap_count++;
+	}
+}
+
+void DMA1_Channel0_IRQHandler(void)
+{
+	if (dma_interrupt_flag_get(DMA1, DMA_CH0, DMA_INT_FLAG_FTF) != RESET) {
+		dma_interrupt_flag_clear(DMA1, DMA_CH0, DMA_INT_FLAG_FTF);
+		adc_streams[1].lap_count++;
+	}
+}
+
 /* TRIGSEL route target for an ADC peripheral's routine-group trigger. */
 static trigsel_periph_enum adc_stream_routrg(uint32_t adc_periph)
 {
@@ -143,6 +175,18 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
 		/* tSTAB dwell after ADCON, same bound adc_periph_init uses */
 	}
 
+	/* Arm the lap counter BEFORE the channel starts: clear any stale
+	 * full-transfer flag from a prior session on this controller, then
+	 * enable the FTF interrupt + its NVIC line so EVERY ring reload is
+	 * counted -- the overrun detection in stream_read is exact
+	 * total-written-vs-read accounting, not a heuristic. */
+	s->lap_count = 0u;
+	dma_flag_clear(s->dma_periph, (dma_channel_enum)s->dma_channel, DMA_FLAG_FTF);
+	dma_interrupt_enable(s->dma_periph, (dma_channel_enum)s->dma_channel, DMA_INT_FTF);
+	nvic_irq_enable((s->dma_periph == DMA0) ? DMA0_Channel0_IRQn : DMA1_Channel0_IRQn,
+	                ADC_STREAM_LAP_IRQ_PRIO,
+	                ADC_STREAM_LAP_IRQ_SUBPRIO);
+
 	dma_channel_enable(s->dma_periph, (dma_channel_enum)s->dma_channel);
 
 	/* Route the pacing timer's update-event TRGO0 to this converter's
@@ -176,6 +220,7 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
 	s->in_use       = true;
 	s->channel      = channel;
 	s->read_idx     = 0u;
+	s->total_read   = 0u; /* lap_count zeroed above, pre-arm */
 	s->dsp_chain_id = 0u;
 	s->dsp_bound    = false;
 	return BRIDGE_HW_OK;
@@ -195,18 +240,42 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
 	if (!s->in_use) return BRIDGE_HW_ERR_INVAL;
 
 	/* Drain as many fresh samples as the host asked for, capped by
-     * what the DMA has actually deposited since the last read.  The
-     * DMA cursor walks forward through the ring; producer/consumer
-     * indices wrap independently, and a write cursor that has lapped
-     * the reader is detected via the unsigned-arithmetic delta. */
-	const uint16_t w = adc_stream_write_index(s);
-	uint16_t       avail;
-	if (w >= s->read_idx) {
-		avail = (uint16_t)(w - s->read_idx);
-	} else {
-		avail = (uint16_t)((BRIDGE_ADC_STREAM_RING_SAMPLES - s->read_idx) + w);
+     * what the DMA has actually deposited since the last read.
+     * Overrun accounting is EXACT total-written-vs-read: the writer's
+     * lifetime deposit count is lap_count full rings (the FTF lap ISR
+     * above) plus the live write index; the reader's is total_read.
+     * A backlog beyond one ring means the writer lapped the reader
+     * and overwrote samples the host never saw -- mixed-lap data that
+     * must not be delivered as a contiguous stream.
+     *
+     * Snapshot lap_count BEFORE the write index: this read runs in
+     * the CS-EXTI handler (prio 1), which outprioritises the lap ISR
+     * (prio 3), so a reload landing mid-read leaves lap_count
+     * momentarily one short while w has already wrapped small.  That
+     * ordering only ever UNDERcounts the backlog (a transient
+     * empty-looking poll that self-corrects once the pended lap ISR
+     * runs) -- never a false overrun.  Unsigned uint32 wrap of the
+     * lifetime totals is harmless: the difference below stays small
+     * and modular arithmetic keeps it exact. */
+	const uint32_t laps          = s->lap_count;
+	const uint16_t w             = adc_stream_write_index(s);
+	const uint32_t total_written = laps * BRIDGE_ADC_STREAM_RING_SAMPLES + (uint32_t)w;
+	const int32_t  backlog       = (int32_t)(total_written - s->total_read);
+	if (backlog <= 0) return BRIDGE_HW_OK; /* empty ring (or transient undercount) */
+
+	if ((uint32_t)backlog >= BRIDGE_ADC_STREAM_RING_SAMPLES) {
+		/* Lapped (or exactly full, where the oldest unread slot is the
+	     * DMA's next landing zone -- reading it races the in-flight
+	     * beat).  Drop the corrupt backlog and resynchronise the
+	     * cursor to the live write position so the NEXT read returns
+	     * fresh, gap-free samples; answer BUSY so the host learns
+	     * samples were lost (docs/gd32-bridge-protocol.md §3.10: ring
+	     * overrun -> STATUS_BUSY, "poll faster"). */
+		s->read_idx   = w;
+		s->total_read = total_written;
+		return BRIDGE_HW_ERR_BUSY;
 	}
-	if (avail == 0u) return BRIDGE_HW_OK; /* empty ring; host should poll later */
+	const uint16_t avail = (uint16_t)backlog;
 
 	uint16_t to_emit = (avail < max_samples) ? avail : max_samples;
 	for (uint16_t i = 0u; i < to_emit; ++i) {
@@ -215,6 +284,7 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
 		mv[i]       = (uint16_t)((code * ADC_VREF_MV) / ADC_FULL_SCALE);
 		s->read_idx = (uint16_t)((s->read_idx + 1u) % BRIDGE_ADC_STREAM_RING_SAMPLES);
 	}
+	s->total_read += to_emit;
 	*got_samples = (uint8_t)to_emit;
 	return BRIDGE_HW_OK;
 }
@@ -235,6 +305,14 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
 	adc_dma_request_after_last_disable(ch->periph);
 	adc_dma_mode_disable(ch->periph);
 	dma_channel_disable(s->dma_periph, (dma_channel_enum)s->dma_channel);
+
+	/* Stand the lap counter down with the channel: mask the FTF
+     * interrupt + NVIC line and clear a possibly-pending flag so a
+     * later single-shot user of this DMA controller can't inherit a
+     * stale lap tick. */
+	dma_interrupt_disable(s->dma_periph, (dma_channel_enum)s->dma_channel, DMA_INT_FTF);
+	nvic_irq_disable((s->dma_periph == DMA0) ? DMA0_Channel0_IRQn : DMA1_Channel0_IRQn);
+	dma_flag_clear(s->dma_periph, (dma_channel_enum)s->dma_channel, DMA_FLAG_FTF);
 
 	/* A trigger edge may have started a conversion just before the
      * timer stopped.  Dwell past one conversion time (~6.3 us healthy;
