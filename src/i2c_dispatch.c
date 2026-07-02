@@ -15,6 +15,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/i2c/i2c_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(i2c);
@@ -31,9 +32,11 @@ static struct alp_i2c _pool[CONFIG_ALP_SDK_MAX_I2C_HANDLES];
 static struct alp_i2c *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_I2C_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch
+		 * the slot's other fields (in_use is the struct's last
+		 * member, so zero everything before it). */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_i2c, in_use));
 			return &_pool[i];
 		}
 	}
@@ -42,7 +45,7 @@ static struct alp_i2c *_alloc(void)
 
 static void _free(struct alp_i2c *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
@@ -131,9 +134,11 @@ static struct alp_i2c_target _tpool[CONFIG_ALP_SDK_MAX_I2C_TARGET_HANDLES];
 static struct alp_i2c_target *_talloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_I2C_TARGET_HANDLES; ++i) {
-		if (!_tpool[i].in_use) {
-			memset(&_tpool[i], 0, sizeof(_tpool[i]));
-			_tpool[i].in_use = true;
+		if (alp_slot_try_claim(&_tpool[i].in_use)) {
+			/* Zeroing everything before in_use also parks the
+			 * lifecycle byte at LC_UNOPENED, so a stale handle
+			 * pointer is treated as closed until open completes. */
+			memset(&_tpool[i], 0, offsetof(struct alp_i2c_target, in_use));
 			return &_tpool[i];
 		}
 	}
@@ -143,8 +148,11 @@ static struct alp_i2c_target *_talloc(void)
 alp_i2c_target_t *alp_i2c_target_open(const alp_i2c_target_config_t *cfg)
 {
 	alp_z_clear_last_error();
+	/* 7-bit address space: 0x00-0x07 and 0x78-0x7F are reserved by
+	 * the I2C spec (general call, CBUS, 10-bit prefixes, ...) -- a
+	 * target must answer on 0x08..0x77 only. */
 	if (cfg == NULL || cfg->on_write == NULL || cfg->on_read == NULL ||
-	    cfg->own_addr_7bit > 0x7Fu) {
+	    cfg->own_addr_7bit < 0x08u || cfg->own_addr_7bit > 0x77u) {
 		alp_z_set_last_error(ALP_ERR_INVAL);
 		return NULL;
 	}
@@ -169,20 +177,29 @@ alp_i2c_target_t *alp_i2c_target_open(const alp_i2c_target_config_t *cfg)
 	h->state.ops    = ops;
 	alp_status_t rc = ops->target_open(cfg, &h->state);
 	if (rc != ALP_OK) {
-		h->in_use = false;
+		alp_slot_release(&h->in_use);
 		alp_z_set_last_error(rc);
 		return NULL;
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_I2C_TARGET_LC_IDLE);
 	return h;
 }
 
 void alp_i2c_target_close(alp_i2c_target_t *tgt)
 {
-	if (tgt == NULL || !tgt->in_use) return;
+	if (tgt == NULL) return;
+	/* Exactly one caller wins the IDLE -> CLOSING step; a concurrent
+	 * double-close (or a stale handle) loses the CAS and returns
+	 * without touching the slot -- close stays idempotent without
+	 * two threads unregistering the same registration. */
+	if (!alp_lifecycle_cas(&tgt->lifecycle, ALP_I2C_TARGET_LC_IDLE, ALP_I2C_TARGET_LC_CLOSING)) {
+		return;
+	}
 	if (tgt->state.ops != NULL && tgt->state.ops->target_close != NULL) {
 		tgt->state.ops->target_close(&tgt->state);
 	}
-	tgt->in_use = false;
+	alp_lifecycle_set(&tgt->lifecycle, ALP_I2C_TARGET_LC_UNOPENED);
+	alp_slot_release(&tgt->in_use);
 }
 
 const alp_capabilities_t *alp_i2c_capabilities(const alp_i2c_t *bus)

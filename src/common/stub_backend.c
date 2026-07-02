@@ -225,19 +225,21 @@ alp_spi_target_t *alp_spi_target_open(const alp_spi_target_config_t *cfg)
 	z_last_error = ALP_ERR_NOSUPPORT;
 	return NULL;
 }
-alp_status_t
-alp_spi_target_transceive(alp_spi_target_t *b, const uint8_t *t, uint8_t *r, size_t l, size_t *rl)
+alp_status_t alp_spi_target_transceive(
+    alp_spi_target_t *b, const uint8_t *t, uint8_t *r, size_t l, size_t *rl, uint32_t to_ms)
 {
 	(void)b;
 	(void)t;
 	(void)r;
 	(void)l;
+	(void)to_ms;
 	if (rl != NULL) *rl = 0;
 	return ALP_ERR_NOSUPPORT;
 }
-void alp_spi_target_close(alp_spi_target_t *t)
+alp_status_t alp_spi_target_close(alp_spi_target_t *t)
 {
 	(void)t;
+	return ALP_OK; /* nothing was ever opened -- close is a no-op */
 }
 #endif /* !ALP_VENDOR_OVERRIDES_SPI_TARGET */
 

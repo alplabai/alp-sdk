@@ -58,9 +58,19 @@ struct alp_i2c {
 	bool                    in_use;
 };
 
+/* Lifecycle states for struct alp_i2c_target.  Driven atomically by
+ * src/i2c_dispatch.c (see src/common/alp_slot_claim.h) so concurrent
+ * closes race cleanly: exactly one caller unregisters the target and
+ * returns the slot, instead of two closes tearing down (and a
+ * concurrent open re-initialising) the same slot at once. */
+#define ALP_I2C_TARGET_LC_UNOPENED 0u /* slot claimed but open unfinished / closed */
+#define ALP_I2C_TARGET_LC_IDLE     1u
+#define ALP_I2C_TARGET_LC_CLOSING  2u
+
 struct alp_i2c_target {
 	alp_i2c_backend_state_t state;
 	const alp_backend_t    *backend;
+	uint8_t                 lifecycle; /* ALP_I2C_TARGET_LC_*; atomic access only */
 	bool                    in_use;
 };
 

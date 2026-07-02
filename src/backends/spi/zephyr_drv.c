@@ -15,10 +15,13 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
@@ -26,6 +29,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "spi_ops.h"
 
 #define ALP_SPI_DEV_OR_NULL(idx)                                                                   \
@@ -72,9 +76,10 @@ static alp_z_spi_side_t _sides[CONFIG_ALP_SDK_MAX_SPI_HANDLES];
 static alp_z_spi_side_t *_alloc_side(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_sides); ++i) {
-		if (!_sides[i].in_use) {
-			_sides[i]        = (alp_z_spi_side_t){ 0 };
-			_sides[i].in_use = true;
+		/* Atomic claim (see alp_slot_claim.h): in_use is the last
+		 * member, so the winner zeroes everything before it. */
+		if (alp_slot_try_claim(&_sides[i].in_use)) {
+			memset(&_sides[i], 0, offsetof(alp_z_spi_side_t, in_use));
 			return &_sides[i];
 		}
 	}
@@ -83,7 +88,7 @@ static alp_z_spi_side_t *_alloc_side(void)
 
 static void _free_side(alp_z_spi_side_t *s)
 {
-	if (s != NULL) s->in_use = false;
+	if (s != NULL) alp_slot_release(&s->in_use);
 }
 
 static uint16_t _to_spi_op(const alp_spi_config_t *cfg)
@@ -189,9 +194,42 @@ static void z_close(alp_spi_backend_state_t *st)
 /* Target (slave) mode -- Zephyr models SPI slave as the same           */
 /* spi_transceive call with SPI_OP_MODE_SLAVE in the operation word:   */
 /* the call blocks until the external controller clocks a transfer     */
-/* and returns the number of frames received.  The per-handle sidecar  */
-/* pool is shared with the controller-mode path above.                 */
+/* and returns the number of FRAMES received (converted to bytes       */
+/* below).  Target handles get their OWN sidecar pool, sized by        */
+/* CONFIG_ALP_SDK_MAX_SPI_TARGET_HANDLES, so target opens can never    */
+/* starve controller-mode opens of sidecars (and vice versa).          */
+/*                                                                     */
+/* Bounded waits ride Zephyr's async API (spi_transceive_signal +      */
+/* k_poll) and therefore need CONFIG_SPI_ASYNC; on a sync-only build   */
+/* a finite timeout fails with ALP_ERR_NOSUPPORT.  Zephyr has no       */
+/* cancel: a timed-out transfer stays armed in the driver, so the      */
+/* sidecar tracks it as "orphaned" and refuses reuse/teardown with     */
+/* ALP_ERR_BUSY until the driver signals completion.                   */
 /* ------------------------------------------------------------------ */
+
+/* Per-target-handle Zephyr sidecar. */
+typedef struct {
+	struct spi_config zspi_cfg;
+	uint8_t           bytes_per_frame; /* buffer bytes per SPI frame (dfs) */
+#ifdef CONFIG_SPI_ASYNC
+	struct k_poll_signal sig;      /* completion signal for bounded waits */
+	bool                 orphaned; /* timed-out transfer still armed in the driver */
+#endif
+	bool in_use;
+} alp_z_spi_target_side_t;
+
+static alp_z_spi_target_side_t _tsides[CONFIG_ALP_SDK_MAX_SPI_TARGET_HANDLES];
+
+static alp_z_spi_target_side_t *_alloc_target_side(void)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(_tsides); ++i) {
+		if (alp_slot_try_claim(&_tsides[i].in_use)) {
+			memset(&_tsides[i], 0, offsetof(alp_z_spi_target_side_t, in_use));
+			return &_tsides[i];
+		}
+	}
+	return NULL;
+}
 
 static uint16_t _to_spi_target_op(const alp_spi_target_config_t *cfg)
 {
@@ -203,6 +241,26 @@ static uint16_t _to_spi_target_op(const alp_spi_target_config_t *cfg)
 	return op;
 }
 
+/* If a previous bounded wait timed out, its transfer is still armed
+ * in the controller driver.  Returns ALP_ERR_BUSY while it is pending;
+ * clears the orphan marker once the driver has signalled completion. */
+static alp_status_t _target_orphan_check(alp_z_spi_target_side_t *s)
+{
+#ifdef CONFIG_SPI_ASYNC
+	if (s->orphaned) {
+		int signaled = 0;
+		int result   = 0;
+		k_poll_signal_check(&s->sig, &signaled, &result);
+		if (!signaled) return ALP_ERR_BUSY;
+		k_poll_signal_reset(&s->sig);
+		s->orphaned = false;
+	}
+#else
+	(void)s;
+#endif
+	return ALP_OK;
+}
+
 static alp_status_t z_target_open(const alp_spi_target_config_t *cfg, alp_spi_backend_state_t *st)
 {
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
@@ -210,7 +268,7 @@ static alp_status_t z_target_open(const alp_spi_target_config_t *cfg, alp_spi_ba
 	const struct device *dev = _devs[cfg->bus_id];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
 
-	alp_z_spi_side_t *s = _alloc_side();
+	alp_z_spi_target_side_t *s = _alloc_target_side();
 	if (s == NULL) return ALP_ERR_NOMEM;
 
 	s->zspi_cfg.frequency = 0u; /* clock is owned by the external controller */
@@ -218,38 +276,100 @@ static alp_status_t z_target_open(const alp_spi_target_config_t *cfg, alp_spi_ba
 	s->zspi_cfg.slave     = 0;
 	/* No CS resolution: the external controller drives /CS. */
 
+	/* Frame -> byte conversion factor.  Zephyr drivers pack one
+	 * frame into 1, 2, or 4 buffer bytes depending on the word size
+	 * (the drivers' "dfs" convention); the portable rx_len contract
+	 * is BYTES, so the transceive path multiplies by this. */
+	uint8_t bits       = (cfg->bits_per_word != 0u) ? cfg->bits_per_word : 8u;
+	s->bytes_per_frame = (bits <= 8u) ? 1u : (bits <= 16u) ? 2u : 4u;
+
+#ifdef CONFIG_SPI_ASYNC
+	k_poll_signal_init(&s->sig);
+#endif
+
 	st->dev     = (void *)dev;
 	st->bus_id  = cfg->bus_id;
 	st->be_data = s;
 	return ALP_OK;
 }
 
-static alp_status_t z_target_transceive(
-    alp_spi_backend_state_t *st, const uint8_t *tx, uint8_t *rx, size_t len, size_t *rx_len)
+static alp_status_t z_target_transceive(alp_spi_backend_state_t *st,
+                                        const uint8_t           *tx,
+                                        uint8_t                 *rx,
+                                        size_t                   len,
+                                        size_t                  *rx_len,
+                                        uint32_t                 timeout_ms)
 {
-	const struct device *dev = (const struct device *)st->dev;
-	alp_z_spi_side_t    *s   = (alp_z_spi_side_t *)st->be_data;
+	const struct device     *dev = (const struct device *)st->dev;
+	alp_z_spi_target_side_t *s   = (alp_z_spi_target_side_t *)st->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;
+
+	alp_status_t rc = _target_orphan_check(s);
+	if (rc != ALP_OK) return rc;
 
 	struct spi_buf     tx_buf = { .buf = (void *)tx, .len = (tx != NULL) ? len : 0 };
 	struct spi_buf     rx_buf = { .buf = rx, .len = (rx != NULL) ? len : 0 };
 	struct spi_buf_set tx_set = { .buffers = &tx_buf, .count = 1 };
 	struct spi_buf_set rx_set = { .buffers = &rx_buf, .count = 1 };
 
-	/* In slave mode a non-negative return is the number of frames
-	 * the external controller actually clocked (drivers without
-	 * slave support fail with -ENOTSUP -> ALP_ERR_NOSUPPORT). */
-	int ret = spi_transceive(
-	    dev, &s->zspi_cfg, (tx != NULL) ? &tx_set : NULL, (rx != NULL) ? &rx_set : NULL);
-	if (ret < 0) return _errno_to_alp(ret);
-	if (rx_len != NULL) *rx_len = (size_t)ret;
-	return ALP_OK;
+	if (timeout_ms == UINT32_MAX) {
+		/* Unbounded wait: the plain sync call blocks until the
+		 * external controller clocks the transfer.  A non-negative
+		 * return is the number of frames actually clocked (drivers
+		 * without slave support fail with -ENOTSUP ->
+		 * ALP_ERR_NOSUPPORT). */
+		int ret = spi_transceive(
+		    dev, &s->zspi_cfg, (tx != NULL) ? &tx_set : NULL, (rx != NULL) ? &rx_set : NULL);
+		if (ret < 0) return _errno_to_alp(ret);
+		if (rx_len != NULL) *rx_len = (size_t)ret * s->bytes_per_frame;
+		return ALP_OK;
+	}
+
+#ifdef CONFIG_SPI_ASYNC
+	/* Bounded wait: start the transfer asynchronously and poll the
+	 * completion signal with a deadline. */
+	k_poll_signal_reset(&s->sig);
+	int err = spi_transceive_signal(
+	    dev, &s->zspi_cfg, (tx != NULL) ? &tx_set : NULL, (rx != NULL) ? &rx_set : NULL, &s->sig);
+	if (err != 0) return _errno_to_alp(err);
+
+	struct k_poll_event ev =
+	    K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_SIGNAL, K_POLL_MODE_NOTIFY_ONLY, &s->sig);
+	if (k_poll(&ev, 1, K_MSEC(timeout_ms)) == 0) {
+		int signaled = 0;
+		int result   = 0;
+		k_poll_signal_check(&s->sig, &signaled, &result);
+		k_poll_signal_reset(&s->sig);
+		if (result < 0) return _errno_to_alp(result);
+		if (rx_len != NULL) *rx_len = (size_t)result * s->bytes_per_frame;
+		return ALP_OK;
+	}
+	/* Deadline passed.  Zephyr cannot cancel an armed slave transfer,
+	 * so mark it orphaned: this handle answers ALP_ERR_BUSY (and close
+	 * refuses teardown) until the driver signals completion.  The
+	 * caller's tx/rx buffers stay registered with the driver -- the
+	 * public contract requires them valid until the BUSY state clears. */
+	s->orphaned = true;
+	return ALP_ERR_TIMEOUT;
+#else
+	/* No async support compiled in -- a bounded wait cannot be
+	 * honoured (and silently blocking forever would be worse). */
+	return ALP_ERR_NOSUPPORT;
+#endif
 }
 
-static void z_target_close(alp_spi_backend_state_t *st)
+static alp_status_t z_target_close(alp_spi_backend_state_t *st)
 {
-	_free_side((alp_z_spi_side_t *)st->be_data);
+	alp_z_spi_target_side_t *s = (alp_z_spi_target_side_t *)st->be_data;
+	if (s == NULL) return ALP_OK;
+	/* Never free the sidecar while a timed-out transfer may still
+	 * complete into it -- the dispatcher surfaces this as
+	 * ALP_ERR_BUSY and keeps the handle alive. */
+	alp_status_t rc = _target_orphan_check(s);
+	if (rc != ALP_OK) return rc;
+	alp_slot_release(&s->in_use);
 	st->be_data = NULL;
+	return ALP_OK;
 }
 
 static const alp_spi_ops_t _ops = {
