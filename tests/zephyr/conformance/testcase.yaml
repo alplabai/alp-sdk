@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  # Portable-API conformance gate: one data-driven suite every
+  # backend must pass.  See src/main.c for the class x case matrix
+  # and docs/porting-new-som.md ("Conformance gate") for how a new
+  # SoM port consumes it.
+  alp_sdk.conformance.portable_api:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - conformance
+      - peripheral
