@@ -101,6 +101,24 @@ static d2_s32 _pitch_px(const alp_gpu2d_surface_t *s)
 	return bpp != 0 ? (d2_s32)(s->stride_bytes / (d2_u32)bpp) : 0;
 }
 
+/*
+ * Coordinate guards for the fixed-point submit path.  The ops below
+ * shift pixel coordinates <<4 into the engine's n.4 fixed-point
+ * d2_point / d2_width and pass blit origins as d2_blitpos; an
+ * unguarded uint32_t would silently truncate/wrap in those casts and
+ * the engine would render at a garbage offset.  Both limits are
+ * derived from the pack's own typedef width (sizeof), so a pack
+ * revision that widens the types widens the guard with it -- no
+ * hardware range value is invented here.
+ *
+ * D2_FIXED4_MAX: largest pixel value whose <<4 still fits the SIGNED
+ * positive range of the type.  D2_POS_MAX: largest unshifted pixel
+ * value for the type (signed positive range assumed -- conservative
+ * by half if a pack revision makes it unsigned).
+ */
+#define D2_FIXED4_MAX(type) ((uint32_t)(((UINT64_C(1) << (sizeof(type) * 8u - 1u)) - 1u) >> 4))
+#define D2_POS_MAX(type)    ((uint32_t)((UINT64_C(1) << (sizeof(type) * 8u - 1u)) - 1u))
+
 static alp_status_t _fmt_to_d2(alp_gpu2d_format_t fmt, d2_u32 *out)
 {
 	switch (fmt) {
@@ -211,6 +229,19 @@ static alp_status_t dave2d_fill_rect(alp_gpu2d_backend_state_t *state,
 	if (rc != ALP_OK) {
 		return rc;
 	}
+	/* Clip to the dst surface exactly like the sw_fallback does (shared
+	 * helper in gpu2d_ops.h): an unclipped rect handed to the engine is
+	 * an out-of-bounds DMA write into whatever follows the framebuffer. */
+	if (!alp_gpu2d_clip_rect(dst, x, y, &w, &h)) {
+		return ALP_OK; /* fully clipped: nothing to do, not an error */
+	}
+	/* Reject coordinates whose 16.4 fixed-point encoding (<<4 below)
+	 * would overflow d2_point / d2_width -- the casts are otherwise
+	 * silent.  x + w never wraps: both are clipped <= dst->width. */
+	if ((uint64_t)x + w > D2_FIXED4_MAX(d2_point) || (uint64_t)y + h > D2_FIXED4_MAX(d2_point) ||
+	    w > D2_FIXED4_MAX(d2_width) || h > D2_FIXED4_MAX(d2_width)) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 	/* BENCH-UNVERIFIED: clean the dst range from cache after the
      * engine writes it (docs/aen-accelerator-backends-design.md §1). */
 	d2_startframe(dev);
@@ -244,6 +275,22 @@ static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state,
 	rc = _bind_dst(dev, dst);
 	if (rc != ALP_OK) {
 		return rc;
+	}
+	/* Clip against BOTH surfaces (same order/shape as sw_fallback):
+	 * the engine reads sx..sx+w from src and writes dx..dx+w into
+	 * dst, and neither walk may leave its surface. */
+	if (!alp_gpu2d_clip_rect(src, sx, sy, &w, &h)) {
+		return ALP_OK; /* fully clipped: nothing to do, not an error */
+	}
+	if (!alp_gpu2d_clip_rect(dst, dx, dy, &w, &h)) {
+		return ALP_OK;
+	}
+	/* Fixed-point overflow guard: dx/dy/w/h are shifted <<4 into
+	 * d2_point / d2_width; sx/sy pass unshifted as d2_blitpos. */
+	if ((uint64_t)sx + w > D2_POS_MAX(d2_blitpos) || (uint64_t)sy + h > D2_POS_MAX(d2_blitpos) ||
+	    (uint64_t)dx + w > D2_FIXED4_MAX(d2_point) || (uint64_t)dy + h > D2_FIXED4_MAX(d2_point) ||
+	    w > D2_FIXED4_MAX(d2_width) || h > D2_FIXED4_MAX(d2_width)) {
+		return ALP_ERR_OUT_OF_RANGE;
 	}
 	d2_startframe(dev);
 	d2_setblitsrc(
@@ -287,6 +334,19 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 	rc = _bind_dst(dev, dst);
 	if (rc != ALP_OK) {
 		return rc;
+	}
+	/* Same clip + fixed-point guard as dave2d_blit -- the blend path
+	 * feeds the identical d2_blitcopy coordinate set. */
+	if (!alp_gpu2d_clip_rect(src, sx, sy, &w, &h)) {
+		return ALP_OK; /* fully clipped: nothing to do, not an error */
+	}
+	if (!alp_gpu2d_clip_rect(dst, dx, dy, &w, &h)) {
+		return ALP_OK;
+	}
+	if ((uint64_t)sx + w > D2_POS_MAX(d2_blitpos) || (uint64_t)sy + h > D2_POS_MAX(d2_blitpos) ||
+	    (uint64_t)dx + w > D2_FIXED4_MAX(d2_point) || (uint64_t)dy + h > D2_FIXED4_MAX(d2_point) ||
+	    w > D2_FIXED4_MAX(d2_width) || h > D2_FIXED4_MAX(d2_width)) {
+		return ALP_ERR_OUT_OF_RANGE;
 	}
 	d2_startframe(dev);
 	d2_setblendmode(dev, src_bf, dst_bf);
