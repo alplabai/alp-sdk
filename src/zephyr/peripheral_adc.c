@@ -330,7 +330,8 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
 	return f;
 }
 
-alp_status_t alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
+alp_status_t
+alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
 {
 	if (got == NULL) return ALP_ERR_INVAL;
 	*got = 0u;
@@ -388,7 +389,8 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
 	return NULL;
 }
 
-alp_status_t alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
+alp_status_t
+alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
 {
 	/* Mirror the bridge-path contract's pre-checks even when the
      * backend isn't wired -- callers passing a NULL got / NULL

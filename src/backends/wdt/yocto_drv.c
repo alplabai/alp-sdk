@@ -76,9 +76,8 @@ static alp_status_t _errno_to_alp(int err)
  * tells us whether magic-close is available for the close()-disarm
  * path.
  */
-static alp_status_t y_open(const alp_wdt_config_t  *cfg,
-                           alp_wdt_backend_state_t *st,
-                           alp_capabilities_t      *caps_out)
+static alp_status_t
+y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	char path[32];
 	int  n = snprintf(path, sizeof(path), "/dev/watchdog%u", (unsigned)cfg->wdt_id);

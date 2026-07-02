@@ -47,9 +47,8 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(const alp_wdt_config_t  *cfg,
-                           alp_wdt_backend_state_t *st,
-                           alp_capabilities_t      *caps_out)
+static alp_status_t
+z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	const uint32_t wdt_id = cfg->wdt_id;
 	if (wdt_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;

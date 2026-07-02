@@ -75,6 +75,7 @@
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.2 + v0.5 additive (filter/spectrum types).  Base surface stable; new alp_adc_filter_t / alp_adc_spectrum_t may evolve [ABI-EXPERIMENTAL] at function granularity.
+ *      v0.9.0: alp_adc_stream_read / alp_adc_filter_read renamed to alp_adc_stream_read_mv / alp_adc_filter_read_mv so every read entry point carries its unit suffix (pre-1.0 rename; parameter lists unchanged).
  *      See docs/abi-markers.md for the convention.
  */
 

@@ -31,7 +31,7 @@
  * @endcode
  *
  * @par ABI status: [ABI-STABLE]
- *      v0.2.
+ *      v0.2.  v0.9.0: wdt_id moved into alp_wdt_config_t so alp_wdt_open(const alp_wdt_config_t *) matches every other config-taking open (pre-1.0 signature change).
  *      See docs/abi-markers.md for the convention.
  */
 

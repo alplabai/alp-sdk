@@ -19,9 +19,8 @@
 
 #include "wdt_ops.h"
 
-static alp_status_t sw_open(const alp_wdt_config_t  *cfg,
-                            alp_wdt_backend_state_t *st,
-                            alp_capabilities_t      *caps_out)
+static alp_status_t
+sw_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	st->dev         = NULL;
 	st->wdt_id      = cfg->wdt_id;

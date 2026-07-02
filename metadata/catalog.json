@@ -768,7 +768,7 @@
         "alp_adc_close",
         "alp_adc_filter_close",
         "alp_adc_filter_open",
-        "alp_adc_filter_read",
+        "alp_adc_filter_read_mv",
         "alp_adc_open",
         "alp_adc_read_raw",
         "alp_adc_read_uv",
@@ -777,7 +777,7 @@
         "alp_adc_spectrum_read_bins",
         "alp_adc_stream_close",
         "alp_adc_stream_open",
-        "alp_adc_stream_read"
+        "alp_adc_stream_read_mv"
       ],
       "header": "include/alp/adc.h"
     },
@@ -888,6 +888,7 @@
     },
     {
       "functions": [
+        "alp_dac_capabilities",
         "alp_dac_close",
         "alp_dac_open",
         "alp_dac_read_mv",
