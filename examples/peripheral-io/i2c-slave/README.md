@@ -2,7 +2,7 @@
 
 Make this MCU answer on the bus as a register-mapped I2C target
 (slave) using the portable `alp_i2c_target_*` surface from
-`<alp/peripheral.h>` (v0.8, `[ABI-EXPERIMENTAL]`).
+`<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`).
 
 ## What it shows
 

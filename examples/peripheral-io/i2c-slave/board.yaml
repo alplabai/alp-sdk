@@ -2,7 +2,7 @@
 # i2c-slave example.
 #
 # Register-mapped I2C target (slave) via the portable
-# alp_i2c_target_* surface in <alp/peripheral.h> (v0.8).
+# alp_i2c_target_* surface in <alp/peripheral.h> (v0.9).
 # Needs controller-driver target support (CONFIG_I2C_TARGET) at
 # runtime; the example degrades cleanly (NOSUPPORT diagnostic)
 # where none exists.

@@ -1,7 +1,7 @@
 # spi-slave
 
 Claim the bus in target (slave) mode using the portable
-`alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.8,
+`alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.9,
 `[ABI-EXPERIMENTAL]`) and answer an external SPI controller.
 
 ## What it shows
