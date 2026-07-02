@@ -48,6 +48,19 @@ struct alp_power_ops {
 	void (*close)(alp_power_backend_state_t *state);
 };
 
+/** Vtable for the handle-less operating-point-profile surface
+ *  (alp_power_profile_get / alp_power_profile_set).
+ *
+ *  Deliberately a SEPARATE registry class ("power_profile") from the
+ *  sleep-mode class above: a silicon-specific profile backend must
+ *  not displace the portable request_sleep winner (the registry picks
+ *  one backend per class), and the profile surface needs no handle.
+ *  The dispatcher validates `which` before dispatching. */
+typedef struct alp_power_profile_ops {
+	alp_status_t (*get)(alp_power_profile_id_t which, alp_power_profile_t *out);
+	alp_status_t (*set)(alp_power_profile_id_t which, const alp_power_profile_t *profile);
+} alp_power_profile_ops_t;
+
 /**
  * Handle struct layout.  Opaque to customers via the public
  * `typedef struct alp_power alp_power_t;` forward declaration in

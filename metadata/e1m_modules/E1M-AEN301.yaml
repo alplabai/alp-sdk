@@ -51,6 +51,18 @@ on_module:
     interface:      ospi0
     chip_select:    1
 
+# Off-SoC module memory in the canonical cross-family shape (see
+# som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
+# on_module facts above, never invented:
+#   dram_mbit  <- on_module.hyperram.capacity_mbit (populated on every
+#                 AEN BOM variant).
+#   flash_mbit <- TBD: the OSPI0 NOR (256 Mbit) is `assembled: optional`
+#                 (per-BOM variant), so a single number would be wrong
+#                 for the DNI variant.
+memory:
+  dram_mbit:            256
+  flash_mbit:           TBD
+
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u55

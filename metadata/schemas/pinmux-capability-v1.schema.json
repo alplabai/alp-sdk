@@ -18,9 +18,20 @@
         "additionalProperties": false,
         "required": ["e1m_pad", "e1m_function", "owner", "silicon_peripheral", "silicon_pad"],
         "properties": {
-          "e1m_pad": { "type": "string", "minLength": 1 },
-          "e1m_function": { "type": "string", "minLength": 1 },
-          "owner": { "enum": ["alif", "cc3501e"] },
+          "e1m_pad": {
+            "type": "string",
+            "minLength": 1,
+            "description": "E1M edge-connector ball name.  The literal \"TBD\" when the family's source TSVs are pad-first peripheral maps that don't carry the edge ball (V2N) -- never invented."
+          },
+          "e1m_function": {
+            "type": "string",
+            "minLength": 1,
+            "description": "E1M-standard function name.  The literal \"TBD\" when the source row is an on-module / inter-chip net that doesn't surface at the E1M connector, or when the source TSV doesn't state the E1M function."
+          },
+          "owner": {
+            "enum": ["alif", "cc3501e", "renesas", "gd32"],
+            "description": "On-module silicon that drives the pad.  Per-family legal values: aen -> alif | cc3501e; v2n -> renesas | gd32."
+          },
           "silicon_peripheral": {
             "type": "string",
             "description": "Silicon peripheral/function backing the pad.  Empty when the pad is plain GPIO (no dedicated peripheral mux) -- faithful to the source TSV's empty cell."

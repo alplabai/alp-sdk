@@ -12,8 +12,10 @@
  * SRAM0 vring carve-out wired in the board overlays.
  *
  * Topology (identical to pingpong):
- *   - HP is the host: it releases HE (se_service_boot_cpu), opens the channel,
- *     subscribes to "pong", then sends 16 "ping" frames and counts the pongs.
+ *   - HP is the host: it releases HE via the portable alp_mproc_boot_core()
+ *     (<alp/mproc.h>; the registry routes it to the SoM's boot authority --
+ *     the SE boot service on AEN), opens the channel, subscribes to "pong",
+ *     then sends 16 "ping" frames and counts the pongs.
  *   - HE is the remote: it opens the same channel, subscribes to "ping", and
  *     echoes every ping straight back as a "pong".
  *
@@ -31,8 +33,8 @@
  *   HP: self 0x02000010 (magic+hb) | opened 0x02000048 | pongs 0x0200004C
  *   HE: self 0x02001010 (magic+hb) | opened 0x02001048 | pings 0x0200104C
  *
- * vendor-ext, BENCH-UNVERIFIED for this example's app code; the transport
- * (MHU + vrings + ipc_service handshake) is the bench-proven pingpong config.
+ * BENCH-UNVERIFIED for this example's app code; the transport (MHU + vrings +
+ * ipc_service handshake) is the bench-proven pingpong config.
  */
 
 #include <stdint.h>
@@ -41,13 +43,11 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
-#include <se_service.h>
-
+#include <alp/mproc.h>
 #include <alp/rpc.h>
 
-/* SE-service handle to release the HE core (same constants pingpong uses). */
-#define EXTSYS_1_HE     3U
-#define HE_LOAD_ADDR    0x58000000U
+/* Peer-core release (portable <alp/mproc.h>; same address pingpong uses). */
+#define HE_LOAD_ADDR    0x58000000U /* HE ITCM global alias = HE-APP loadAddress */
 #define PINGPONG_ROUNDS 16U
 
 /*
@@ -132,9 +132,9 @@ int main(void)
 #if IS_HOST
 	/* HP releases the HE core before opening the channel, so HE is alive to
 	 * bind its end of the endpoint (same as pingpong). */
-	int brc = se_service_boot_cpu(EXTSYS_1_HE, HE_LOAD_ADDR);
+	alp_status_t brc = alp_mproc_boot_core(ALP_CORE_M55_HE, HE_LOAD_ADDR);
 
-	printk("[HP] boot_cpu rc=%d\n", brc);
+	printk("[HP] boot_core rc=%d\n", (int)brc);
 #endif
 
 	/*

@@ -12,6 +12,9 @@ into the topic-specific docs.
 - [cross-platform-setup.md](cross-platform-setup.md) — per-OS
   quickstart (Linux + macOS + Windows native + WSL2).  *NEW —
   Codified in [ADR 0012](adr/0012-cross-platform-developer-host.md).*
+- [cli.md](cli.md) — the `alp` CLI verb reference
+  (init / build / run / flash / emit / validate / model / doctor /
+  monitor) + when to use `alp` vs `west alp-*`.
 - [firmware-quickstart.md](firmware-quickstart.md) — minimal "what
   does a board.yaml + main.c look like" walkthrough.
 - [troubleshooting.md](troubleshooting.md) — common failure modes

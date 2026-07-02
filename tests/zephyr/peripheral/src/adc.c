@@ -53,7 +53,7 @@ ZTEST(alp_peripheral, test_adc_stream_read_null_handle_yields_not_ready)
 {
 	uint16_t     buf[4];
 	size_t       got = 99u;
-	alp_status_t s   = alp_adc_stream_read(NULL, buf, ARRAY_SIZE(buf), &got);
+	alp_status_t s   = alp_adc_stream_read_mv(NULL, buf, ARRAY_SIZE(buf), &got);
 	zassert_equal(s, ALP_ERR_NOT_READY, "got %d", (int)s);
 	zassert_equal(got, 0u, "got must be zeroed on failure");
 }
@@ -61,7 +61,7 @@ ZTEST(alp_peripheral, test_adc_stream_read_null_handle_yields_not_ready)
 ZTEST(alp_peripheral, test_adc_stream_read_null_got_is_inval)
 {
 	uint16_t     buf[4];
-	alp_status_t s = alp_adc_stream_read(NULL, buf, ARRAY_SIZE(buf), NULL);
+	alp_status_t s = alp_adc_stream_read_mv(NULL, buf, ARRAY_SIZE(buf), NULL);
 	zassert_equal(s, ALP_ERR_INVAL, "NULL got pointer must be INVAL, got %d", (int)s);
 }
 

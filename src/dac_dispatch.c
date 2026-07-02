@@ -124,3 +124,8 @@ void alp_dac_close(alp_dac_t *h)
 	}
 	_free(h);
 }
+
+const alp_capabilities_t *alp_dac_capabilities(const alp_dac_t *h)
+{
+	return (h != NULL) ? &h->cached_caps : NULL;
+}

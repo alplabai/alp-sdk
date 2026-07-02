@@ -46,7 +46,7 @@ static void _free(struct alp_wdt *h)
 	h->in_use = false;
 }
 
-alp_wdt_t *alp_wdt_open(uint32_t wdt_id, const alp_wdt_config_t *cfg)
+alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg)
 {
 	alp_z_clear_last_error();
 	if (cfg == NULL || cfg->timeout_ms == 0u) {
@@ -73,10 +73,10 @@ alp_wdt_t *alp_wdt_open(uint32_t wdt_id, const alp_wdt_config_t *cfg)
 	alp_capabilities_t caps = { .flags = be->base_caps };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
-		(void)be->probe(wdt_id, &refined);
+		(void)be->probe(cfg->wdt_id, &refined);
 		caps.flags = refined;
 	}
-	alp_status_t rc = ops->open(wdt_id, cfg, &h->state, &caps);
+	alp_status_t rc = ops->open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free(h);
 		alp_z_set_last_error(rc);
