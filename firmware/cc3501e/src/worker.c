@@ -153,6 +153,17 @@ static void worker_execute(uint8_t cmd)
 		break;
 	}
 
+	/* Defensive clamp before the publish memcpy: every HAL body above is
+	 * CONTRACTED to report len <= ALP_CC3501E_MAX_PAYLOAD (it fills buf,
+	 * which is exactly that size), but a misbehaving backend that reports
+	 * a larger len must corrupt at most its own answer -- never overrun
+	 * job.result[] and smash the worker state the SPI ISR reads.
+	 * Truncation is safe to publish: the poller copies min(out_cap,
+	 * result_len) and the protocol layer length-checks every reply. */
+	if (len > sizeof(job.result)) {
+		len = sizeof(job.result);
+	}
+
 	/* Publish the result atomically wrt the SPI ISR: fill result[] first,
 	 * then flip state LAST so a poller never sees DONE with stale bytes. */
 	const unsigned long key = worker_critical_enter();
