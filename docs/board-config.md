@@ -370,12 +370,12 @@ The `e1m_routes:` block is the single editable source of truth
 for the board-side C macros hand-written firmware uses
 (`PIN_BMI323_INT1`, `I2C_BUS_SENSORS`, `PWM_LED_RED`, …).  Each
 entry binds an E1M-standard pad or peripheral instance
-(`ALP_E1M_GPIO_IO<N>`, `ALP_E1M_PWM<N>`, `ALP_E1M_I2C<N>` / `ALP_E1M_SPI<N>` /
-`ALP_E1M_UART<N>` / `ALP_E1M_I3C<N>`) to a board-side macro plus optional
+(`ALP_E1M_GPIO_IO<N>`, `ALP_E1M_PWM<N>`, `ALP_E1M_I2C0/1` / `ALP_E1M_SPI0/1` /
+`ALP_E1M_UART0/1` / `ALP_E1M_I3C0`) to a board-side macro plus optional
 `doc:` / `active_low:` / `routes_via:` flags.
 [`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
 reads the block and emits `include/alp/boards/alp_<name>_routes.h`
-with one `#define <MACRO> E1M_<…>` line per entry.
+with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 
 #### Preset mode (SDK-internal shortcut)
 
