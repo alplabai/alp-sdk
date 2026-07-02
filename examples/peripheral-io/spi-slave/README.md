@@ -1,7 +1,7 @@
 # spi-slave
 
 Claim the bus in target (slave) mode using the portable
-`alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.8,
+`alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.9,
 `[ABI-EXPERIMENTAL]`) and answer an external SPI controller.
 
 ## What it shows
@@ -16,10 +16,17 @@ Claim the bus in target (slave) mode using the portable
   SAME transfer -- replies always lag one frame.
 * A tiny request/response protocol over 5-byte fixed frames:
   PING (`0x01`) echoes the payload, GET_VERSION (`0x02`) returns
-  4 version bytes, unknown commands fill with `0xEE`.
+  the SDK version bytes (`ALP_VERSION_MAJOR/MINOR/PATCH` from
+  `<alp/version.h>`) plus a tag char, unknown commands fill with
+  `0xEE`.
 * `alp_spi_target_close()` -- release the bus.
 
 ## Availability
+
+This example's `prj.conf` sets `CONFIG_SPI_SLAVE=y` -- an
+app-level upstream-Zephyr toggle the `board.yaml` derivation does
+not cover; every in-tree SPI driver compiles its slave/target
+path only when it is set.
 
 Zephyr's SPI slave support is patchy -- some SoC controller
 drivers reject `SPI_OP_MODE_SLAVE`.  Backends or drivers without
@@ -42,7 +49,8 @@ outcome on **native_sim**, which has no slave-mode emulation:
    * `[0x01, 0xDE, 0xAD, 0xBE, 0xEF]` for PING (expect
      `[0x00, 0xDE, 0xAD, 0xBE, 0xEF]` back on the NEXT frame).
    * `[0x02, 0xFF, 0xFF, 0xFF, 0xFF]` for GET_VERSION (expect
-     `[0x00, 0x00, 0x08, 0x00, 'A']` on the NEXT frame).
+     `[0x00, <major>, <minor>, <patch>, 'A']` on the NEXT frame --
+     the SDK version bytes from `<alp/version.h>`).
 3. Wire SCK-SCK, MOSI-MOSI, MISO-MISO, /CS-/CS, GND-GND between
    the two boards.  The master drives SCK + MOSI + /CS; the slave
    drives MISO.

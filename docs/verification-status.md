@@ -34,6 +34,8 @@ verified in the Alp SDK as of today".  It complements:
 | Per-SoM `capabilities:` blocks | `[PARTIAL]` | Populated from datasheet readings; some fields marked `# TBD` for items pending datasheet verification |
 | Per-NPU TFLM driver gates (`CONFIG_ALP_TFLM_ETHOS_U85/U65/U55`) | `[UNTESTED]` | Kconfig-reachable; no Vela-compiled model has actually been dispatched yet |
 | Examples + reference apps | `[UNTESTED]` | Build clean on native_sim; HiL flash-and-run still TBD |
+| Portable-API conformance suite (`tests/zephyr/conformance/`) | ✅ green on native_sim | 13 classes × 8 cases, data-driven ztest (`alp_sdk.conformance.portable_api`); the porting gate for new-SoM backends — see [`docs/porting-new-som.md`](porting-new-som.md) "Conformance gate" |
+| SE-backed portable surfaces (SoC identity / power profiles / peer-core boot, v0.9) | `[UNTESTED]` | Alif SE backends registered for `alif:ensemble:e8`; native_sim proves only the NOSUPPORT degrade paths — SE round-trips are bench-gated (see the v0.9 rows in [`docs/test-plan.md`](test-plan.md)) |
 | CI: pr-twister + pr-static-analysis + pr-doxygen | ✅ green on `main` | Build correctness, style, doc completeness |
 | CI: pr-twister with `--platform alif_*` | ✅ build-only | Cross-compiles to AEN target; doesn't flash silicon |
 | HiL runners | ❌ not online | `nightly-aen-hil.yml` is a skeleton waiting for a self-hosted runner |

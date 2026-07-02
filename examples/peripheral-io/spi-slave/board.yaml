@@ -2,7 +2,7 @@
 # spi-slave example.
 #
 # SPI target (slave) mode via the portable alp_spi_target_*
-# surface in <alp/peripheral.h> (v0.8): transfer-based
+# surface in <alp/peripheral.h> (v0.9): transfer-based
 # request/response protocol clocked by an external controller.
 # Needs controller-driver slave support at runtime; the example
 # degrades cleanly (diagnostic + exit) where none exists -- e.g.

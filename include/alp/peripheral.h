@@ -114,7 +114,7 @@ alp_status_t alp_last_error(void);
  *         @ref ALP_ERR_NOT_READY / @ref ALP_ERR_IO when their
  *         bring-up work fails.
  *
- * @par ABI status: [ABI-EXPERIMENTAL] -- v0.8 new.
+ * @par ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.
  */
 alp_status_t alp_init(void);
 
@@ -129,7 +129,7 @@ alp_status_t alp_init(void);
  * @return @ref ALP_OK on success (the only result the current
  *         implementation produces).
  *
- * @par ABI status: [ABI-EXPERIMENTAL] -- v0.8 new.
+ * @par ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.
  */
 alp_status_t alp_deinit(void);
 
@@ -377,7 +377,7 @@ const alp_capabilities_t *alp_i2c_capabilities(const alp_i2c_t *bus);
 /* the registration but no external controller ever drives it, so     */
 /* callbacks never fire there.                                         */
 /*                                                                     */
-/* ABI status: [ABI-EXPERIMENTAL] -- v0.8 new.                         */
+/* ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.                         */
 /* ------------------------------------------------------------------ */
 
 typedef struct alp_i2c_target alp_i2c_target_t;
@@ -564,7 +564,7 @@ const alp_capabilities_t *alp_spi_capabilities(const alp_spi_t *bus);
 /* native_sim has no target-mode emulation -- applications must       */
 /* degrade cleanly either way.                                         */
 /*                                                                     */
-/* ABI status: [ABI-EXPERIMENTAL] -- v0.8 new.                         */
+/* ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.                         */
 /* ------------------------------------------------------------------ */
 
 typedef struct alp_spi_target alp_spi_target_t;

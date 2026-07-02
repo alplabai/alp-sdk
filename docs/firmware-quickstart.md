@@ -281,11 +281,20 @@ upstream Zephyr board file or the `alplabai/alp-zephyr-modules`
 overlay.  See [`docs/architecture.md`](architecture.md) for the
 split.
 
+The `alp` CLI covers the same flow in fewer keystrokes:
+`alp build && alp flash` programs every slice + helper MCU in
+`boot_order:`, and `alp monitor --port <port>` opens the board's
+serial console afterwards (portless it lists the host's serial
+ports).  If a build machine misbehaves, `alp doctor` is the
+hardware-free environment triage.  Verb reference:
+[`docs/cli.md`](cli.md).
+
 ## 8. Where to look next
 
 | Topic                                            | Document                                          |
 |--------------------------------------------------|---------------------------------------------------|
 | Workspace + tooling deep-dive                    | [`docs/getting-started.md`](getting-started.md)   |
+| `alp` CLI verb reference                         | [`docs/cli.md`](cli.md)                           |
 | `board.yaml` schema reference                    | [`docs/board-config.md`](board-config.md)         |
 | Architecture (modules, wrappers, codegen split)  | [`docs/architecture.md`](architecture.md)         |
 | SoM bring-up procedures                          | [`docs/bring-up-v2n.md`](bring-up-v2n.md), [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) |

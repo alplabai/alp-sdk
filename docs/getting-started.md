@@ -19,7 +19,9 @@ hand-written firmware as a first-class consumer.
 >   builds it for `native_sim` and prints its stdout straight
 >   through.  This is the headline
 >   [README Quickstart](../README.md#quickstart) — if you just want
->   a hello-world running in two minutes, start there.
+>   a hello-world running in two minutes, start there.  The full
+>   verb reference (`build` / `flash` / `emit` / `doctor` /
+>   `monitor` / `new-som` / …) lives in [`docs/cli.md`](cli.md).
 > - **`west alp-build`** — the multi-core / heterogeneous path this
 >   walkthrough uses.  It fans a `board.yaml` out into per-core
 >   build slices, runs the full pre-flight (schema validation, SoC
@@ -49,7 +51,9 @@ creates the Zephyr workspace one level up from `alp-sdk/`, runs
 `west update --narrow`, installs the Zephyr Python deps + the
 SDK's extras (`jsonschema`, `imgtool`), and prints OS-specific
 `apt` / `brew` commands for the optional native libraries the
-Yocto-side backends need.
+Yocto-side backends need.  Windows-native users run the PowerShell
+twin, `scripts/bootstrap.ps1`, instead (see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §4).
 
 `west alp-build` validates the example's `board.yaml`, generates
 the build-time config from it, and delegates to `west build`.
@@ -317,6 +321,12 @@ for V2N), build with that as the `-b` target:
 west build -b alp_e1m_evk_aen alp-sdk/examples/peripheral-io/gpio-button-led
 west flash
 ```
+
+The `alp` CLI equivalents are `alp build --board <name>` and
+`alp flash`; once the board is running, `alp monitor --port <port>`
+opens its serial console (run it portless to list the host's serial
+ports; `--baud` overrides the 115200 default).  See
+[`docs/cli.md`](cli.md).
 
 Each example's `boards/` directory has an overlay that maps
 the example's `alp,pin-array` slots to specific EVK pins.  The

@@ -23,6 +23,27 @@ TBD pending the hand-written HW config (see the header of
 4-digit tail, so the real SKU drops in as a sibling preset; do not treat
 `E1M-NX9101` as the canonical, released MPN.
 
+## Schema + validation
+
+Every `E1M-<SKU>.yaml` preset validates against
+`metadata/schemas/som-preset-v1.schema.json`.  Since the 2026-07
+tightening the schema sets `additionalProperties: false` and pins
+**one canonical shape** per fact family — `memory:` (module DRAM /
+flash capacities), `on_module:` (incl. `pmic_main` and the
+`i2c_devices` address map), and `inference:` (`preferred_backend`
+always; `ethos_u_variant` / `npu_population` where applicable) — so
+a preset can no longer carry a misspelled or family-idiosyncratic
+key silently.  Unknown hardware facts stay explicit `TBD`s (values
+are never invented); `alp new-som` scaffolds a schema-valid preset
+with exactly this shape.
+
+Per-family pinmux capability tables live beside the presets at
+`metadata/pinmux/<family>.yaml` (`aen.yaml`, `v2n.yaml`), generated
+by `scripts/gen_pinmux_capability.py` and drift-gated by
+`pr-generated-files.yml`.  `scripts/validate_metadata.py` sweeps the
+SoM presets and `metadata/boards/` in one gate (CI:
+`pr-metadata-validate.yml`).
+
 ## Consumed by
 
 * `scripts/alp_project.py` -- reads `<SKU>.yaml` and

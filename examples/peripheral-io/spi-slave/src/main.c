@@ -50,6 +50,7 @@
 
 #include "alp/peripheral.h"
 #include "alp/board.h"
+#include "alp/version.h"
 
 /* Frame layout shared with the controller side: 1 command byte +
  * 4 payload bytes.  Fixed-length frames keep the slave's preload
@@ -80,10 +81,13 @@ static void build_reply(const uint8_t *rx_frame, size_t rx_len, uint8_t *tx)
 		memcpy(&tx[1], &rx_frame[1], FRAME_LEN - 1u);
 		break;
 	case CMD_GET_VERSION:
-		tx[1] = 0x00u; /* major */
-		tx[2] = 0x08u; /* minor (v0.8 today) */
-		tx[3] = 0x00u; /* patch */
-		tx[4] = 'A';   /* tag char */
+		/* Report the SDK version -- <alp/version.h> gives every
+		 * firmware image its version bytes for free, so a wire
+		 * protocol never hardcodes them. */
+		tx[1] = (uint8_t)ALP_VERSION_MAJOR;
+		tx[2] = (uint8_t)ALP_VERSION_MINOR;
+		tx[3] = (uint8_t)ALP_VERSION_PATCH;
+		tx[4] = 'A'; /* app-defined tag char */
 		break;
 	default:
 		/* Unknown command -- fill with 0xEE so the controller can

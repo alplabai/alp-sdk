@@ -49,6 +49,14 @@ the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
 **Board** -- A board that an E1M SoM plugs into.  The SDK ships
 presets for the E1M-EVK + E1M-X-EVK reference boards.
 
+**Capability layer** -- The generated `<alp/cap.h>` /
+`<alp/cap_instance.h>` surface (`alp_has()` / `ALP_HAS()` +
+per-instance queries) that lets portable code gate on what the
+active silicon offers (`ALP_CAP_ID_HW_CAN`, `HW_I2S`, …) instead of
+`#if`-ing on board or SoM names.  Generated from the SoC/SoM
+metadata; the "gate on capabilities, not board names" pattern is
+documented in [`docs/portability.md`](portability.md) §5.2.
+
 **Carve-out** -- A physical memory region reserved for cross-core
 IPC, declared in `board.yaml ipc[]` and resolved against the
 auto-derived region table (from `metadata/socs/.../<part>.json
@@ -65,6 +73,14 @@ Symbols use the chip's natural name (e.g. `lsm6dso_init`); the
 
 **CMI** -- Code Matrix Index, Qorvo's term for the ACT88760 PMIC's
 configuration profile.  V2N populates the **CMI 120.E1** variant.
+
+**Conformance suite** -- The data-driven ztest suite at
+`tests/zephyr/conformance/` (13 peripheral classes × 8 contract
+cases) that every backend must pass; runs on `native_sim` as the
+`alp_sdk.conformance.portable_api` Twister scenario and is the
+proof gate for a new SoM port's backends (see
+[`docs/porting-new-som.md`](porting-new-som.md) "Conformance
+gate").
 
 **Core id** -- A normalized identifier (e.g. `a55_cluster`,
 `m33_sm`, `m55_hp`) assigned to each on-die programmable core in
@@ -264,6 +280,14 @@ output binary, every IPC carve-out's resolved address, the boot
 order, and pointers to helper-MCU firmware.  The single source of
 truth consumed by `west alp-image`, `west alp-flash`, the OTA
 bundler, and (eventually) alp-studio.
+
+**Target mode** -- Operating an I²C or SPI controller as the bus
+*target* (slave): an external controller owns the clock and our
+firmware answers.  Portable surface `alp_i2c_target_*` (byte-granular
+ISR callbacks) / `alp_spi_target_*` (transfer-based, preloaded TX)
+in `<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`); drivers
+without target support degrade with `ALP_ERR_NOSUPPORT`.  Reference
+examples: `examples/peripheral-io/i2c-slave` + `spi-slave`.
 
 **TBD** -- "To be determined".  Used in metadata where the
 authoritative value is pending (e.g. a board-rev divider voltage).

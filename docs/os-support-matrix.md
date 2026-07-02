@@ -188,7 +188,8 @@ across backends -- the currently-defined gates are `I2C`, `SPI`,
 
 These `<alp/*>` surfaces landed (public header + a backend or SW
 fallback) after the v0.4-prep cut.  They are listed here so the matrix
-is complete; **none has per-SoM HIL verification yet** — treat every row
+is complete; **almost none has per-SoM HIL verification yet** (the DAC
+row's E8 bench pass is the exception) — treat every row
 as surface-only / untested until the matching [`test-plan.md`](test-plan.md)
 row flips.  They are deliberately **not** broken out per-core × per-SoM:
 asserting a status in each of the 11 cells would overclaim coverage that
@@ -202,6 +203,13 @@ hasn't been measured.
 | 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim; D/AVE 2D bench-unverified.  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = PXP, no Vivante) |
 | Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
 | Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
+| DAC | `dac.h` (split out of `adc.h` in v0.8) | M (Zephyr `dac_*`) + A (Yocto registry backend, issue #33) | Zephyr backend real — **E8 bench PASS** (`dac_alif`, v0.8.0 campaign); Yocto code-complete, HIL-gated; `alp_dac_capabilities()` additive in v0.9 (conformance-suite covered on native_sim) |
+| I²C/SPI target (slave) mode | `peripheral.h` (`alp_i2c_target_*` / `alp_spi_target_*`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Zephyr `i2c_target_register` / `SPI_OP_MODE_SLAVE`); Yocto + baremetal: NOSUPPORT stubs (no Linux slave-mode uAPI) | Zephyr backend real; drivers without target support degrade with `ALP_ERR_NOSUPPORT`; native_sim proves the degrade path only — **two-board HIL pending** |
+| SDK lifecycle | `peripheral.h` (`alp_init` / `alp_deinit`, v0.9) | all OSes (thin, idempotent) | present; every `peripheral-io` example calls it first |
+| SoC identity | `hw_info.h` (`alp_soc_info_read` / `alp_soc_secure_fw_ping`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service backend on AEN); elsewhere the SW fallback answers `soc_ref` only + NOSUPPORT | surface + AEN SE backend; **bench-gated** |
+| Power profiles (operating points) | `power.h` (`alp_power_profile_get/_set`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service backend on AEN); NOSUPPORT elsewhere | surface + AEN SE backend; **bench-gated** (set() is brown-out-capable — treat like a firmware update) |
+| Peer-core boot | `mproc.h` (`alp_mproc_boot_core`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service boot authority on AEN); NOSUPPORT where the platform boots peers by other means | surface + AEN SE backend; **bench-gated** |
+| SDK version / ABI feature-test | `version.h` (v0.9, `[ABI-STABLE]`) | all OSes (compile-time macros + `alp_version_string()`) | present; value-sync CI-gated (`check_version_doc_sync.py`) |
 
 ## CMSIS-DSP per-SoM validation
 
