@@ -134,15 +134,20 @@ def silicon_to_kconfig(silicon: str | None) -> str | None:
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        sys.exit(f"alp_project: file not found: {path}")
+    """Delegate to the orchestrator loader's `_load_yaml` (one parse, one home).
+
+    Same checks, same message texts -- the loader raises OrchestratorError with
+    exactly the text this used to print after its "alp_project: " prefix, so the
+    CLI-facing behaviour is byte-identical (sys.exit, code 1). Lazy import:
+    alp_orchestrate imports this module at load time (the resolve_memory_map
+    edge), so the reverse import must happen at call time.
+    """
+    from alp_orchestrate.loader import OrchestratorError
+    from alp_orchestrate.loader import _load_yaml as _loader_load_yaml
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as e:
-        sys.exit(f"alp_project: failed to parse {path}: {e}")
-    if not isinstance(data, dict):
-        sys.exit(f"alp_project: {path} did not parse to a top-level mapping")
-    return data
+        return _loader_load_yaml(path)
+    except OrchestratorError as e:
+        sys.exit(f"alp_project: {e}")
 
 
 def _validate_and_load(path: Path) -> dict[str, Any]:
