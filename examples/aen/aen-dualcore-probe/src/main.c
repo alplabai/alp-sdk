@@ -21,6 +21,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
+/* Core-role selection (HP vs HE build of this app), not a peripheral-presence gate. */
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define BEACON_BASE 0x02000010U
 #define ROLE        "HP"
