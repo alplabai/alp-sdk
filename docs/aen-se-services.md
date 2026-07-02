@@ -15,6 +15,18 @@ profile, and (gated) changing DVFS or the secure-boot table. This is the
 > `aen-se-service-info` (#192), `aen-se-service-query` (#197) examples and
 > [`bring-up-aen.md`](bring-up-aen.md).
 
+> **Portable-first.** Application code does **not** call `se_service_*`
+> directly — the SDK wraps the read-only + boot services behind portable
+> surfaces backed by registry backends (`silicon_ref="alif:ensemble:e8"`):
+> SoC identity via `alp_soc_info_read` / `alp_soc_secure_fw_ping`
+> (`<alp/hw_info.h>`), RUN/STANDBY operating-point profiles via
+> `alp_power_profile_get`/`_set` (`<alp/power.h>`), peer-core release via
+> `alp_mproc_boot_core` (`<alp/mproc.h>`), and TRNG/crypto via
+> `<alp/security.h>` (SE CryptoCell).  This doc remains the TRANSPORT +
+> bring-up reference (what the backends and the vendor-scoped
+> `aen-se-service-info` regcheck ride); `aen-se-service-query` shows the
+> portable consumer path.
+
 ## 0. The model
 
 The SES is always running on the SE core. The M55 reaches it over **two Arm
@@ -151,5 +163,6 @@ state; none are needed for the read-only characterisation.
 | §2.1 `set_run_cfg` (real change) | No — needs power-cycle recovery on hand; idempotent re-assert is a cache no-op |
 | §2.2 `update_stoc` | No — sacrificial board + proven SETOOLS recovery required first |
 
-See `examples/aen/aen-se-service-info` (transport + LCS) and
-`aen-se-service-query` (full read-only surface) for the runnable parts.
+See `examples/aen/aen-se-service-info` (vendor-scoped transport + LCS regcheck)
+and `aen-se-service-query` (the read-only surface via the portable `alp_*`
+wrappers) for the runnable parts.

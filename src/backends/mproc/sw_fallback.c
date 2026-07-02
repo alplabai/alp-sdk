@@ -169,3 +169,35 @@ ALP_BACKEND_REGISTER(mproc,
                          .ops         = &_ops,
                          .probe       = NULL,
                      });
+
+/* ------------------------------------------------------------------ */
+/* Peer-core boot fallback (class "mproc_boot")                        */
+/*                                                                     */
+/* Wildcard priority-0 registration so alp_mproc_boot_core links +     */
+/* returns gracefully on every build.  A single-core / simulated build */
+/* has no boot authority for a peer, so the op reports                 */
+/* ALP_ERR_NOSUPPORT; real boot-authority backends (the Alif SE body)  */
+/* register per silicon_ref at higher priority.                        */
+/* ------------------------------------------------------------------ */
+
+static alp_status_t sw_boot_core(alp_core_id_t core, uintptr_t entry_addr)
+{
+	(void)core;
+	(void)entry_addr;
+	return ALP_ERR_NOSUPPORT;
+}
+
+static const alp_mproc_boot_ops_t _boot_ops = {
+	.boot_core = sw_boot_core,
+};
+
+ALP_BACKEND_REGISTER(mproc_boot,
+                     sw_fallback,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "sw_fallback",
+                         .base_caps   = 0u,
+                         .priority    = 0,
+                         .ops         = &_boot_ops,
+                         .probe       = NULL,
+                     });

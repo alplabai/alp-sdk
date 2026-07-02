@@ -427,6 +427,13 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/zephyr_drv.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/sw_fallback.c)
+# mproc_boot class (alp_mproc_boot_core -- portable peer-core release).
+# The dispatcher body + the wildcard NOSUPPORT fallback ride in
+# mproc_dispatch.c / mproc/sw_fallback.c above (unconditional, keeps
+# the class section populated on every build).  The Alif SE-service
+# boot authority gates on its Kconfig (HAS_ALIF_SE_SERVICES).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/mproc/alif_se_boot.c)
 # Security registry sources.  The dispatcher owns two handle pools
 # (hash + AEAD) plus a cached ops pointer for the stateless
 # alp_random_bytes fast path; the portable Zephyr backend uses
@@ -641,6 +648,13 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_PM_POLICY
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/zephyr_pm_policy.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_EXT_RENESAS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/power.c)
+# Operating-point-profile class ("power_profile", handle-less).  The
+# dispatcher body + the wildcard NOSUPPORT stub ride in
+# power_dispatch.c / power/zephyr_stub.c above (same ALP_SDK_POWER
+# gate, so the class section is populated whenever the dispatcher is).
+# The Alif SE aiPM backend gates on its Kconfig (HAS_ALIF_SE_SERVICES).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_PROFILE_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/alif_se_profile.c)
 
 # Display class dispatcher + stub backend.  Real backends (Zephyr
 # display_* driver-class wrapper for SSD1306 / ILI9341 / ST7789 on
@@ -669,6 +683,18 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/hw_info_zephyr.c)
+
+# SoC-identity class ("soc_info" -- the alp_soc_info_read /
+# alp_soc_secure_fw_ping half of <alp/hw_info.h>).  Dispatcher +
+# wildcard sw_fallback ship unconditionally: the dispatcher stamps the
+# build-time soc_ref on every build (native_sim included) and the
+# fallback keeps the class section populated.  The Alif SE-service
+# identity backend gates on its Kconfig (HAS_ALIF_SE_SERVICES).
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/soc_info_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/soc_info/sw_fallback.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SOC_INFO_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/soc_info/alif_se.c)
 
 # Chip drivers — gated on per-chip Kconfig so blocks that don't use a
 # given chip don't pay its code size.
