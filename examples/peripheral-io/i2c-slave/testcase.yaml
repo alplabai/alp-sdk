@@ -3,12 +3,14 @@
 sample:
   name: i2c-slave
   description: |
-    Per-peripheral example for I2C slave mode.  As of v0.6 the
-    Alp SDK <alp/peripheral.h> surface is master-only; this
-    example documents the API gap, stakes out the proposed
-    slave-mode shape, and exits with the NOSUPPORT diagnostic.
-    Builds on both EVKs: E1M EVK uses E1M_I2C0 via BOARD_I2C_SENSORS;
-    E1M-X EVK uses E1M_X_I2C0.
+    Per-peripheral example for I2C target (slave) mode via
+    alp_i2c_target_open: register-file pattern over byte-granular
+    write/read/stop callbacks.  On native_sim the emulated
+    controller accepts the registration but nothing drives the
+    bus, so ticks show writes_seen=0; drivers without target
+    support degrade cleanly with the NOSUPPORT diagnostic.
+    Builds on both EVKs: E1M EVK uses E1M_I2C0 via
+    BOARD_I2C_SENSORS; E1M-X EVK uses E1M_X_I2C0.
 
 tests:
   alp_sdk.example.i2c_slave.e1m_x_evk:
@@ -23,7 +25,6 @@ tests:
       - alp-sdk
       - example
       - i2c
-      - api-gap
       - v2n
     harness: console
     harness_config:
@@ -42,7 +43,6 @@ tests:
       - alp-sdk
       - example
       - i2c
-      - api-gap
       - aen
     harness: console
     harness_config:

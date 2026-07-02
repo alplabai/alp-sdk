@@ -21,7 +21,7 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
+#include <alp/peripheral.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/watchdog.h>
 
@@ -63,7 +63,7 @@ int main(void)
 
 	int fed = 0;
 	for (int i = 0; i < FEEDS; i++) {
-		k_msleep(FEED_PERIOD_MS);
+		alp_delay_ms(FEED_PERIOD_MS);
 		rc = wdt_feed(wdt, ch);
 		if (rc != 0) {
 			printf("[wdt] wdt_feed[%d] -> %d\n", i, rc);

@@ -12,8 +12,6 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
-
 #include "alp/peripheral.h"
 #include "alp/chips/tmp112.h"
 
@@ -59,7 +57,7 @@ int main(void)
 		} else {
 			printf("[temp] sample %d: read failed (status=%d)\n", i, (int)s);
 		}
-		k_msleep(1000);
+		alp_delay_ms(1000);
 	}
 
 	tmp112_deinit(&sensor);

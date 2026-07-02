@@ -20,7 +20,6 @@
  * Sensor bring-up + the PWM bank live in autopilot_init().
  */
 
-#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
 #include <string.h>
@@ -203,7 +202,7 @@ void autopilot_rate_loop(autopilot_state_t *s)
 		mixer_x_quad(thr, tau_p, tau_q, tau_r, s->motor_cmd);
 		autopilot_emit_motors(s);
 
-		k_msleep(1);
+		alp_delay_ms(1);
 	}
 }
 
@@ -240,7 +239,7 @@ void autopilot_attitude_loop(autopilot_state_t *s)
 			s->setp_pitch = pid_step(&s_atti_pitch, pitch_sp, s->pitch, dt_s);
 		}
 
-		k_msleep(4);
+		alp_delay_ms(4);
 	}
 }
 
@@ -292,7 +291,7 @@ void autopilot_nav_loop(autopilot_state_t *s)
 			s->stick_throttle          = 0.55f + alt_correction * 0.10f;
 		}
 
-		k_msleep(40);
+		alp_delay_ms(40);
 	}
 }
 

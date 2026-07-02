@@ -34,6 +34,7 @@
 /* BOARD_CAN0 is the portable alias from <alp/board.h>
  * (E1M_CAN0 on E1M EVK; E1M_X_CAN0 on E1M-X EVK). */
 #include "alp/board.h"
+#include "alp/peripheral.h"
 
 /* Volatile because the rx callback runs from the CAN driver's RX
  * thread (Zephyr's `can_rx` worker) and the main loop polls. */
@@ -58,6 +59,10 @@ static void on_rx(const alp_can_frame_t *f, void *user)
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	/* Capability gate: skip cleanly on CAN-less silicon.  On a SoC
 	 * with no CAN controller (e.g. an NPU-only part) this prints a
 	 * diagnostic instead of a confusing open() failure.  Under

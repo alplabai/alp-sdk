@@ -56,6 +56,10 @@ static const struct {
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	int attempted = 0;
 	int answered  = 0;
 

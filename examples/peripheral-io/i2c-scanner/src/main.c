@@ -18,6 +18,10 @@
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[i2c] open BOARD_I2C_SENSORS @ 100 kHz\n");
 
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){

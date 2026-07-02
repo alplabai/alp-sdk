@@ -9,6 +9,25 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **I2C/SPI target (slave) mode** in `<alp/peripheral.h>` (`[ABI-EXPERIMENTAL]`):
+  `alp_i2c_target_open`/`alp_i2c_target_close` (byte-granular write/read/stop
+  ISR callbacks, dispatched to Zephyr's `i2c_target_register`) and
+  `alp_spi_target_open`/`alp_spi_target_transceive`/`alp_spi_target_close`
+  (transfer-based slave over `SPI_OP_MODE_SLAVE`).  Wired through the backend
+  registry with graceful `ALP_ERR_NOSUPPORT` degradation where the controller
+  driver (or native_sim emulation) lacks target support.  The
+  `examples/peripheral-io/{i2c,spi}-slave` examples now run against the real
+  API — their local `TODO(api-gap)` shims are gone.
+- **`alp_init()` / `alp_deinit()`** SDK-lifecycle entry points in
+  `<alp/peripheral.h>`: idempotent and currently thin, but applications SHOULD
+  call `alp_init()` before the first `alp_*_open` so future backends (bridge
+  links, vendor HAL bring-up) can rely on it.  Every
+  `examples/peripheral-io/*` example now calls it first.
+- **`k_msleep`/`k_sleep` scrub across `examples/**`**: every example source
+  whose only `<zephyr/kernel.h>` use was sleeping now calls the portable
+  `alp_delay_ms` and drops the Zephyr include; files using kernel APIs beyond
+  sleeping are untouched.
+
 - **Acoustic safety-event example** (`examples/audio/acoustic-safety-events/`):
   always-listening security/safety node — PDM mic → per-frame `acoustic_event`
   DSP (8 FFT band energies, spectral centroid/flatness/rolloff, crest factor,

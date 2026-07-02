@@ -164,6 +164,22 @@ void alp_i2c_close(alp_i2c_t *b)
 }
 #endif /* !ALP_VENDOR_OVERRIDES_I2C */
 
+/* I2C target (slave) mode -- Zephyr-only today.  Gated independently
+ * of ALP_VENDOR_OVERRIDES_I2C so a vendor wrapper can adopt target
+ * mode later without re-implementing the controller-mode surface. */
+#if !defined(ALP_VENDOR_OVERRIDES_I2C_TARGET)
+alp_i2c_target_t *alp_i2c_target_open(const alp_i2c_target_config_t *cfg)
+{
+	(void)cfg;
+	z_last_error = ALP_ERR_NOSUPPORT;
+	return NULL;
+}
+void alp_i2c_target_close(alp_i2c_target_t *t)
+{
+	(void)t;
+}
+#endif /* !ALP_VENDOR_OVERRIDES_I2C_TARGET */
+
 #if !defined(ALP_VENDOR_OVERRIDES_SPI)
 alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 {
@@ -198,6 +214,32 @@ void alp_spi_close(alp_spi_t *b)
 	(void)b;
 }
 #endif /* !ALP_VENDOR_OVERRIDES_SPI */
+
+/* SPI target (slave) mode -- Zephyr-only today.  Gated independently
+ * of ALP_VENDOR_OVERRIDES_SPI so a vendor wrapper can adopt target
+ * mode later without re-implementing the controller-mode surface. */
+#if !defined(ALP_VENDOR_OVERRIDES_SPI_TARGET)
+alp_spi_target_t *alp_spi_target_open(const alp_spi_target_config_t *cfg)
+{
+	(void)cfg;
+	z_last_error = ALP_ERR_NOSUPPORT;
+	return NULL;
+}
+alp_status_t
+alp_spi_target_transceive(alp_spi_target_t *b, const uint8_t *t, uint8_t *r, size_t l, size_t *rl)
+{
+	(void)b;
+	(void)t;
+	(void)r;
+	(void)l;
+	if (rl != NULL) *rl = 0;
+	return ALP_ERR_NOSUPPORT;
+}
+void alp_spi_target_close(alp_spi_target_t *t)
+{
+	(void)t;
+}
+#endif /* !ALP_VENDOR_OVERRIDES_SPI_TARGET */
 
 #if !defined(ALP_VENDOR_OVERRIDES_GPIO)
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)

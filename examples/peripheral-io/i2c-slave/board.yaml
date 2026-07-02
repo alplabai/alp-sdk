@@ -1,11 +1,11 @@
 # board.yaml -- per-app project configuration for the
 # i2c-slave example.
 #
-# Demonstrates the *shape* of I2C slave-mode application code.
-# As of v0.6 the Alp SDK does NOT expose I2C slave mode through
-# <alp/peripheral.h>; this example documents the gap and shows
-# what the slave-side main.c would look like when the API lands.
-# See the prominent TODO block in src/main.c.
+# Register-mapped I2C target (slave) via the portable
+# alp_i2c_target_* surface in <alp/peripheral.h> (v0.8).
+# Needs controller-driver target support (CONFIG_I2C_TARGET) at
+# runtime; the example degrades cleanly (NOSUPPORT diagnostic)
+# where none exists.
 #
 # Customer workflow: copy this directory, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,

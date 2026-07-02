@@ -19,7 +19,7 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
+#include "alp/peripheral.h"
 
 #include "alp/pwm.h"
 
@@ -33,6 +33,10 @@
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[pwm] open BOARD_PWM_LED_GREEN (period=%u ns)\n", PERIOD_NS);
 
 	alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
@@ -58,7 +62,7 @@ int main(void)
 				printf("[pwm] set_duty(%u) -> %d\n", pulse, (int)s);
 				goto out;
 			}
-			k_msleep(STEP_DELAY_MS);
+			alp_delay_ms(STEP_DELAY_MS);
 		}
 	}
 

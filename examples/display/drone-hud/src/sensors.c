@@ -16,7 +16,6 @@
  * peripheral surfaces only in app + library code".
  */
 
-#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
 #include <math.h>
@@ -140,7 +139,7 @@ void drone_sensors_run_imu_loop(drone_telemetry_t *telem)
 			(void)a;
 			update_attitude(telem, gx, gy, gz, 0.01f);
 		}
-		k_msleep(10);
+		alp_delay_ms(10);
 	}
 }
 
@@ -191,6 +190,6 @@ void drone_sensors_run_slow_loop(drone_telemetry_t *telem)
 			}
 		}
 
-		k_msleep(200); /* 5 Hz cadence. */
+		alp_delay_ms(200); /* 5 Hz cadence. */
 	}
 }

@@ -1,83 +1,74 @@
 # i2c-slave
 
-Demonstrate the *shape* of I2C slave-mode application code on the
-Alp SDK.
+Make this MCU answer on the bus as a register-mapped I2C target
+(slave) using the portable `alp_i2c_target_*` surface from
+`<alp/peripheral.h>` (v0.8, `[ABI-EXPERIMENTAL]`).
 
-## SDK gap notice
+## What it shows
 
-**As of v0.8.0 the Alp SDK does NOT support I2C slave mode through
-`<alp/peripheral.h>`.**  The header exposes master-only calls
-(`alp_i2c_open`, `alp_i2c_write`, `alp_i2c_read`,
-`alp_i2c_write_read`).  Slave-mode support is tracked for future release.
+* `alp_init()` -- SDK runtime bring-up before the first open.
+* `alp_i2c_target_open()` -- claim a bus as a target at a known
+  7-bit address (`0x42`), with byte-granular ISR callbacks passed
+  in the config:
+  * `on_write` -- byte received from the external controller,
+  * `on_read` -- byte requested by the external controller,
+  * `on_stop` -- STOP condition (transaction boundary).
+* The register-file pattern -- the idiom every embedded engineer
+  expects for "make this MCU look like a sensor / EEPROM /
+  register-mapped peripheral": first written byte latches the
+  register pointer, subsequent bytes store with auto-increment,
+  reads serve from the pointer with auto-increment, STOP re-arms
+  the pointer latch.
+* `alp_i2c_target_close()` -- unregister and release the bus.
 
-This example exists to:
+## Availability
 
-1. **Document the gap** so customers don't waste time hunting for
-   a non-existent header.
-2. **Stake out the proposed API shape** so when the slave-mode
-   surface lands, this example is the migration template.
-3. **Show the recommended register-file pattern** -- the idiom
-   every embedded engineer expects for "make this MCU look like
-   a sensor / EEPROM / register-mapped peripheral".
+Target mode needs controller-driver support: on Zephyr that is
+`CONFIG_I2C_TARGET` (set in this example's `prj.conf`) plus a
+driver implementing `target_register`.  Backends or drivers
+without it fail the open with `ALP_ERR_NOSUPPORT`, which the
+example handles by printing the diagnostic and exiting.
 
-The code in `src/main.c` defines a local `alp_i2c_slave_*` shim
-that returns `ALP_ERR_NOSUPPORT` from every call.  When the real
-surface lands, delete the shim block and the downstream
-application code keeps compiling against the upstream names.
-
-## What this WILL show (once the API lands)
-
-* `alp_i2c_slave_open()` -- claim a bus as slave at a known
-  7-bit address.
-* `alp_i2c_slave_set_callbacks()` -- register write-from-master
-  and read-from-master ISR callbacks.
-* The fake-register-file pattern: an array of bytes that the
-  callbacks read/write to make the MCU behave like a sensor.
-* `alp_i2c_slave_close()` -- release the bus.
-
-## What this DOES show today
+On **native_sim** (the CI lane) the emulated controller accepts
+the registration, but no external controller ever drives the
+emulated bus -- the ticks simply show `writes_seen=0`:
 
 ```
-[i2c-slave] open as slave @ 0x42 on E1M_I2C0
-[i2c-slave] Alp SDK v0.6 does NOT support I2C slave mode
-[i2c-slave]   <alp/peripheral.h> is master-only today
-[i2c-slave]   tracking: v0.7 API surface addition
+[i2c-slave] listening @ 0x42 on BOARD_I2C_SENSORS
+[i2c-slave] tick 0 writes_seen=0 regs={0xa0,0xa1,0xa2,0xa3,...}
+...
 [i2c-slave] done
 ```
 
-So far so good: the example *compiles* against the proposed names
-(via the shim), exits cleanly with a diagnostic, and gives
-customers a copy-paste starting point for when the API lands.
-
-## Test setup (once the API lands)
-
-To exercise I2C slave mode end-to-end on real hardware:
+## Test setup (real hardware)
 
 1. Flash this example onto board A.
-2. Flash a master example (modify `examples/peripheral-io/i2c-master` to point
-   at address `0x42` and use a simple register read/write loop)
-   onto board B.
+2. Flash a master example (modify `examples/peripheral-io/i2c-master`
+   to point at address `0x42` and use a simple register read/write
+   loop) onto board B -- or probe from a USB-I2C adapter:
+   `i2ctransfer -y 0 w1@0x42 0x00 r4` should return
+   `0xa0 0xa1 0xa2 0xa3`.
 3. Wire SDA-SDA, SCL-SCL, GND-GND between the two boards.  Use
    external 4.7 kΩ pull-ups on SDA + SCL if neither board
    provides them.
-4. Power both boards.  Board A's console should show
-   `writes_seen` incrementing as board B sends register writes;
-   board B should see register read values matching what board A
-   primed into `g_regs[]`.
+4. Power both boards.  Board A's console shows `writes_seen`
+   incrementing as board B sends register writes; board B reads
+   back the values board A primed into `g_regs[]`.
 
 ## Other useful tools
 
 * **Logic analyser.**  Saleae Logic 2 (free decoder for I2C) +
   any cheap clone shows the bus traffic.  Essential when debugging
   bus contention or NACKs.
-* **`i2c-scanner`** running on board B with no slave attached gives
+* **`i2c-scanner`** running on board B with no target attached gives
   a baseline "what's on the bus" reading -- run it before flipping
-  on the slave to confirm address 0x42 isn't already taken.
+  on the target to confirm address 0x42 isn't already taken.
 
 ## Reference
 
-- [`<alp/peripheral.h>`](../../../include/alp/peripheral.h) I2C surface (master-only today).
+- [`<alp/peripheral.h>`](../../../include/alp/peripheral.h) -- the
+  "I2C -- target (slave) mode" section documents the full contract.
 - [`examples/peripheral-io/i2c-scanner/`](../i2c-scanner/) -- master-side discovery.
 - [`examples/peripheral-io/i2c-master/`](../i2c-master/) -- master-side known-address read.
-- Zephyr `i2c_slave_register` -- the upstream API the future
-  `alp_i2c_slave_*` will dispatch through on the Zephyr backend.
+- Zephyr `i2c_target_register` -- the upstream API the Zephyr
+  backend dispatches through.

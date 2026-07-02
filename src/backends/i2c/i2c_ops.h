@@ -44,12 +44,23 @@ struct alp_i2c_ops {
 	                           uint8_t                 *rdata,
 	                           size_t                   rlen);
 	void (*close)(alp_i2c_backend_state_t *state);
+	/* Target (slave) mode -- optional.  Backends without target
+	 * support leave both NULL; the dispatcher then fails
+	 * alp_i2c_target_open with ALP_ERR_NOSUPPORT. */
+	alp_status_t (*target_open)(const alp_i2c_target_config_t *cfg, alp_i2c_backend_state_t *state);
+	void (*target_close)(alp_i2c_backend_state_t *state);
 };
 
 struct alp_i2c {
 	alp_i2c_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
+	bool                    in_use;
+};
+
+struct alp_i2c_target {
+	alp_i2c_backend_state_t state;
+	const alp_backend_t    *backend;
 	bool                    in_use;
 };
 

@@ -23,7 +23,7 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
+#include "alp/peripheral.h"
 
 #include "alp/e1m_pinout.h"
 #include "alp/wdt.h"
@@ -72,7 +72,7 @@ int main(void)
 	for (int i = 0; i < 3; i++) {
 		alp_status_t s = alp_wdt_feed(wdt);
 		printf("[wdt] feed %d -> %d\n", i, (int)s);
-		k_msleep(FEED_PERIOD_MS);
+		alp_delay_ms(FEED_PERIOD_MS);
 	}
 
 	/* Best-effort disable.  Many M-class watchdogs are

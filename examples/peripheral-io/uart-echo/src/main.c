@@ -25,6 +25,10 @@
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[uart] open BOARD_UART_DEBUG @ 115200 8N1\n");
 
 	/* The 8-N-1 framing is the lowest common denominator for serial

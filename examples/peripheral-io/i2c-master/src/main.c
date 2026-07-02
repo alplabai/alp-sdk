@@ -34,8 +34,6 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
-
 #include "alp/peripheral.h"
 #include "alp/chips/tmp112.h"
 
@@ -65,6 +63,10 @@
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[i2c-master] open BOARD_I2C_SENSORS @ 400 kHz\n");
 
 	/* Open the bus at 400 kHz (I2C Fast-mode).  TMP112 supports up
@@ -153,7 +155,7 @@ int main(void)
              * will likely succeed. */
 			printf("[i2c-master] sample %u: read -> %d\n", i, (int)s);
 		}
-		k_msleep(SAMPLE_PERIOD_MS);
+		alp_delay_ms(SAMPLE_PERIOD_MS);
 	}
 
 	/* Clean shutdown -- deinit the chip driver (which leaves the

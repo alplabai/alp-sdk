@@ -13,6 +13,7 @@
 
 #include "alp/adc.h"
 #include "alp/cap.h" /* alp_has() / ALP_HAS(); also pulls in cap_instance.h */
+#include "alp/peripheral.h"
 #include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Defensive include: the Alif vendor-extension header only exists when
@@ -26,6 +27,10 @@
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	/* 0. Capability gate -- ask the silicon, not the board name.
 	 *    alp_has() reads the generated capability table for the active
 	 *    CONFIG_ALP_SOC_<...>, so the same source runs on every SoM with

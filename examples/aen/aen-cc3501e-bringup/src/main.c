@@ -44,7 +44,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <zephyr/kernel.h>
 #include <zephyr/fatal.h>
 
 #include "alp/peripheral.h"
@@ -374,7 +373,7 @@ int main(void)
 		       attempt,
 		       (int)s,
 		       CC3501E_PING_GAP_MS);
-		k_msleep(CC3501E_PING_GAP_MS);
+		alp_delay_ms(CC3501E_PING_GAP_MS);
 	}
 	if (!up) {
 		printf("[cc3501e-bringup] coprocessor never answered PING -- check power "
@@ -508,7 +507,7 @@ int main(void)
 			g_cc3501e_witness.version = (uint32_t)v | ((uint32_t)(uint8_t)vs << 16);
 			printf("[cc3501e-bringup] soak GET_VERSION #%u -> %d (v%u)\n", i, (int)vs, v);
 		}
-		k_msleep(500);
+		alp_delay_ms(500);
 	}
 
 	/* not reached -- the soak loops forever.  The bridge SPI + control pins are
