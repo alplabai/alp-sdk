@@ -9,6 +9,37 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Changed
 
+- **I2C/SPI target (slave) mode hardening** (`[ABI-EXPERIMENTAL]` surface, so
+  no compat shims):
+  - `alp_spi_target_transceive` now takes a trailing `timeout_ms`
+    (`UINT32_MAX` = wait forever, matching the SDK's other blocking calls).
+    Finite timeouts ride Zephyr's async SPI API and need `CONFIG_SPI_ASYNC`;
+    sync-only builds answer `ALP_ERR_NOSUPPORT` instead of silently blocking.
+    A timed-out transfer stays armed in the driver (no portable SPI-slave
+    cancel): the handle answers `ALP_ERR_BUSY` until it completes, and the
+    caller's buffers must stay valid until then.
+  - `alp_spi_target_close` now returns `alp_status_t` and refuses with
+    `ALP_ERR_BUSY` while a transceive is blocked in another thread (or a
+    timed-out transfer is still armed) — previously this was a use-after-free
+    window where close freed the backend sidecar under a live
+    `spi_transceive`.
+  - `rx_len` now reports **bytes** (per the documented contract) instead of
+    Zephyr frames when `bits_per_word` > 8.
+  - `alp_i2c_target_open` rejects the reserved 7-bit address ranges
+    0x00-0x07 / 0x78-0x7F with `ALP_ERR_INVAL` (contract was already
+    0x08..0x77); `alp_spi_target_open` validates `mode` (0..3) and
+    `bits_per_word` (<= 32) the same way.
+  - The SPI target Zephyr backend gets its **own sidecar pool** sized by
+    `CONFIG_ALP_SDK_MAX_SPI_TARGET_HANDLES` (it used to share — and could
+    starve — the controller-mode pool sized by
+    `CONFIG_ALP_SDK_MAX_SPI_HANDLES`).
+  - All I2C/SPI handle + sidecar pools claim slots with an atomic
+    compare-exchange (`src/common/alp_slot_claim.h`) instead of an unlocked
+    check-then-set, and `alp_init` uses the same builtin-atomic once-guard;
+    concurrent opens/closes can no longer double-claim a slot or double-free
+    a registration.  New ztests in `tests/zephyr/peripheral/src/{i2c,spi}_target.c`
+    pin the validation + degrade paths on native_sim.
+
 - **BREAKING: pin/instance macros renamed `E1M_*` -> `ALP_E1M_*` and
   `E1M_X_*` -> `ALP_E1M_X_*`** (`<alp/e1m_pinout.h>`, `<alp/e1m_x_pinout.h>`).
   The pinout id macros were the SDK's last unprefixed public symbols and could
