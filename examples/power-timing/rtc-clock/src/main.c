@@ -14,7 +14,7 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
+#include "alp/peripheral.h"
 
 #include "alp/rtc.h"
 
@@ -55,7 +55,7 @@ int main(void)
 	/* Sleep for 250 ms so a real RTC has time to tick at least once
      * before we read back.  On native_sim the readback returns 0s
      * regardless because the host RTC isn't running. */
-	k_msleep(250);
+	alp_delay_ms(250);
 
 	/* Read the current wall-clock.  The got struct is populated only
      * when status == ALP_OK; treat fields as unspecified otherwise. */

@@ -28,13 +28,17 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
+#include "alp/peripheral.h"
 
 #include "alp/blocks/button_led.h"
 #include "alp/board.h"
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED\n");
 
 	alp_button_led_t bl;
@@ -56,7 +60,7 @@ int main(void)
 		bool on = (i & 1);
 		s       = alp_button_led_set(&bl, on);
 		printf("[gpio] led=%d status=%d\n", (int)on, (int)s);
-		k_msleep(50);
+		alp_delay_ms(50);
 	}
 
 	bool pressed = false;

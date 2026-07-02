@@ -30,6 +30,7 @@
 /* BOARD_CAN0 is the portable alias from <alp/board.h>
  * (E1M_CAN0 on E1M EVK; E1M_X_CAN0 on E1M-X EVK). */
 #include "alp/board.h"
+#include "alp/peripheral.h"
 
 /* Volatile because the rx callback runs from the CAN driver's RX
  * thread (Zephyr's `can_rx` worker) and the main loop polls. */
@@ -54,6 +55,10 @@ static void on_rx(const alp_can_frame_t *f, void *user)
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[can] open BOARD_CAN0 @ 500 kbps loopback\n");
 
 	alp_can_t *bus = alp_can_open(&(alp_can_config_t){

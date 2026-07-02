@@ -45,8 +45,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <zephyr/kernel.h>
-
 #include "alp/peripheral.h"
 #include "alp/e1m_pinout.h"
 
@@ -54,8 +52,8 @@
  * timeout.  Real on-silicon firmware would loop forever instead. */
 #define HELLO_TICKS 5u
 
-/* The wait between ticks.  k_msleep yields the CPU; alp_delay_ms
- * also yields on Zephyr (busy-loops on baremetal). */
+/* The wait between ticks.  alp_delay_ms yields the CPU on
+ * scheduler-backed targets (busy-loops on baremetal). */
 #define HELLO_TICK_PERIOD_MS 1000u
 
 /* The greeting we ship out the UART.  Stored as a `static const`
@@ -67,6 +65,10 @@ static const uint8_t HELLO_GREETING[] = "Alp SDK uart-hello-world\r\n";
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[uart-hello] open E1M_UART0 @ 115200 8N1\n");
 
 	/* Open UART0 at the lowest-common-denominator serial framing.
@@ -143,7 +145,7 @@ int main(void)
 			break;
 		}
 		printf("[uart-hello] tick %u written\n", tick);
-		k_msleep(HELLO_TICK_PERIOD_MS);
+		alp_delay_ms(HELLO_TICK_PERIOD_MS);
 	}
 
 	/* Close releases the SDK handle but does NOT power down the

@@ -78,6 +78,10 @@ static const uint8_t TX_PATTERN[] = { 0xAA, 0x55, 0xDE, 0xAD };
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[spi-master] open BOARD_SPI_ARDUINO @ 1 MHz mode 0\n");
 
 	/* Open the SPI bus.  Configuration knobs in order:

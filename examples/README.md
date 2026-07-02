@@ -62,10 +62,10 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `gpio-button-led`            | GPIO open + configure (input + output); the canonical first build.       |
 | `i2c-scanner`                | Walk an I2C bus + report every device that ACKs.                         |
 | `i2c-master`                 | Read a known I2C device (TMP112) at a known address.                     |
-| `i2c-slave`                  | Slave-mode shape + SDK gap notice (master-only today; not yet implemented). |
+| `i2c-slave`                  | I2C target (slave) mode -- register-file pattern over `alp_i2c_target_open` callbacks. |
 | `i2c-device-hub`             | Read every populated IC on the EVK sensor/power bus through its real chip driver -- one bus, many devices. |
 | `spi-master`                 | Discrete SPI master -- write / transceive / read patterns.                |
-| `spi-slave`                  | Slave-mode shape + SDK gap notice (master-only today; not yet implemented). |
+| `spi-slave`                  | SPI target (slave) mode -- transfer-based request/response via `alp_spi_target_transceive`. |
 | `spi-loopback`               | SPI MOSI ↔ MISO loopback (jumper between the two pins).                  |
 | `uart-echo`                  | Open a UART; loop received bytes back to TX.                             |
 | `uart-hello-world`           | Canonical "printf via UART" walkthrough -- producer-only counterpart.     |

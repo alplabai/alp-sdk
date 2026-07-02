@@ -40,8 +40,6 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
-
 #include "alp/peripheral.h"
 
 /* BOARD_UART_DEBUG is a portable cross-EVK alias from <alp/board.h>:
@@ -58,6 +56,10 @@ static uint8_t rx_backing[64];
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[ringbuf] open BOARD_UART_DEBUG @ 115200 8N1\n");
 
 	/* The classic open() — no different from the uart-echo example.
@@ -102,10 +104,10 @@ int main(void)
      * silently drains the controller FIFO into the ring. */
 	printf("[ringbuf] attached; backing=%zu bytes\n", sizeof(rx_backing));
 
-	/* k_msleep emulates "doing real work for a while".  On native_sim
+	/* alp_delay_ms emulates "doing real work for a while".  On native_sim
      * we won't actually receive any bytes during this nap, but the
      * code path is identical to a production loop. */
-	k_msleep(50);
+	alp_delay_ms(50);
 
 	/* Drain whatever the IRQ has staged.  Non-blocking: if the ring
      * is empty, got=0 and we move on.  This is the pattern apps

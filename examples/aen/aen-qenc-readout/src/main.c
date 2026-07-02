@@ -20,7 +20,7 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
+#include <alp/peripheral.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 
@@ -45,14 +45,14 @@ int main(void)
 		int rc = sensor_sample_fetch(qenc);
 		if (rc != 0) {
 			printf("[qenc] sample_fetch[%d] -> %d\n", i, rc);
-			k_msleep(POLL_MS);
+			alp_delay_ms(POLL_MS);
 			continue;
 		}
 		struct sensor_value v = { 0 };
 		rc                    = sensor_channel_get(qenc, SENSOR_CHAN_ROTATION, &v);
 		if (rc != 0) {
 			printf("[qenc] channel_get[%d] -> %d\n", i, rc);
-			k_msleep(POLL_MS);
+			alp_delay_ms(POLL_MS);
 			continue;
 		}
 		ok_reads++;
@@ -62,7 +62,7 @@ int main(void)
 			moved = true;
 		}
 		printf("[qenc] count[%d] = %d\n", i, v.val1);
-		k_msleep(POLL_MS);
+		alp_delay_ms(POLL_MS);
 	}
 
 	printf("[qenc] RESULT %s: %s (%d/%d clean reads)\n",

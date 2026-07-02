@@ -13,6 +13,7 @@
 
 #include "alp/adc.h"
 #include "alp/cap_instance.h"
+#include "alp/peripheral.h"
 #include "alp/boards/alp_e1m_evk_routes.h"
 
 /* Defensive include: the Alif vendor-extension header only exists when
@@ -26,6 +27,10 @@
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	/* 1. Capability rejection: ask for an absurd resolution.
      *    With any concrete CONFIG_ALP_SOC_<...>=y this returns NULL
      *    with last_error = ALP_ERR_OUT_OF_RANGE.  With ALP_SOC_NONE

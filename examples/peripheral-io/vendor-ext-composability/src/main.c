@@ -54,6 +54,10 @@
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[flex] vendor-ext composability: one pad (E1M_ADC1), three ways\n");
 
 	/* ── Way 1: the pad as a plain digital GPIO ──────────────────
