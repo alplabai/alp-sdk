@@ -13,6 +13,9 @@ fails at `alp_adc_open` with `ALP_ERR_OUT_OF_RANGE`.
 - One-shot conversion through `alp_adc_read_uv`.
 - The capability-validation contract: a deliberately
   unreasonable resolution (`100` bits) is rejected before any I/O.
+- Gating on capabilities, not board names: `alp_has(ALP_CAP_ID_HW_ADC)`
+  (runtime) / `ALP_HAS(HW_ADC)` (compile-time) from `<alp/cap.h>` replace
+  `#ifdef CONFIG_BOARD_*` forks, so the same source runs on every SoM.
 
 ## Build (standalone, native_sim)
 

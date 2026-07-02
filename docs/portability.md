@@ -612,6 +612,44 @@ The pattern is "lean on runtime detection by default; reach for
 silently degrading at runtime would be a worse customer experience
 than a build error."
 
+**Gate on capabilities, not board names.**  The umbrella header
+[`include/alp/cap.h`](../include/alp/cap.h) wraps the raw counts in
+`ALP_HAS(<CAP>)` (a compile-time constant expression, safe in `#if`
+and `static_assert`) and `alp_has(ALP_CAP_ID_<CAP>)` (the runtime
+twin).  Reaching for `#ifdef CONFIG_BOARD_<NAME>` to skip a
+peripheral is the anti-pattern — it forks the source per board and
+silently breaks when the next SoM arrives.  Ask the silicon instead:
+
+```c
+#include "alp/cap.h"
+
+int main(void)
+{
+    /* Runtime gate: skip cleanly on ADC-less silicon.  Same source
+     * runs on every SoM -- no #ifdef CONFIG_BOARD_* forks. */
+    if (!alp_has(ALP_CAP_ID_HW_ADC)) {
+        printf("no ADC on this SoC (%s) -- skipping\n", ALP_SOC_REF_STR);
+        return 0;
+    }
+
+    /* Compile-time gate: the unused branch disappears from the
+     * binary entirely on parts that lack the feature. */
+#if ALP_HAS(HW_CAN_FD)
+    /* ... configure ALP_CAN_MODE_FD + bitrate_data_hz ... */
+#endif
+    /* ... */
+}
+```
+
+See
+[`examples/peripheral-io/adc-voltmeter`](../examples/peripheral-io/adc-voltmeter/src/main.c)
+for the pattern in a full example (capability gate → open →
+instance-level `alp_adc_capabilities()`), and
+[`examples/peripheral-io/hello-world`](../examples/peripheral-io/hello-world/src/main.c)
+for the minimal teaching block.  Note that when no SoC is selected
+(`native_sim`) the capability layer is permissive — gates pass and
+the `alp_*_open()` contract from §5.1 provides the graceful failure.
+
 ### 5.3  Runtime detection — the fallback ladder pattern
 
 For inference dispatch in particular, the dispatcher's `AUTO`

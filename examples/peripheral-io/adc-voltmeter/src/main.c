@@ -12,7 +12,7 @@
 #include <zephyr/kernel.h>
 
 #include "alp/adc.h"
-#include "alp/cap_instance.h"
+#include "alp/cap.h" /* alp_has() / ALP_HAS(); also pulls in cap_instance.h */
 #include "alp/peripheral.h"
 #include "alp/boards/alp_e1m_evk_routes.h"
 
@@ -30,6 +30,20 @@ int main(void)
 	/* Bring up the SDK runtime before anything else -- thin today,
 	 * but future backends rely on it (see <alp/peripheral.h>). */
 	(void)alp_init();
+
+	/* 0. Capability gate -- ask the silicon, not the board name.
+	 *    alp_has() reads the generated capability table for the active
+	 *    CONFIG_ALP_SOC_<...>, so the same source runs on every SoM with
+	 *    no #ifdef CONFIG_BOARD_* forks.  With no SoC selected
+	 *    (native_sim) the capability layer is permissive and the demo
+	 *    proceeds, relying on open() failing gracefully instead.
+	 *    ALP_HAS(HW_ADC) is the compile-time twin when the unused branch
+	 *    should be dropped from the binary entirely. */
+	if (!alp_has(ALP_CAP_ID_HW_ADC)) {
+		printf("[adc] no ADC on this SoC (%s) -- skipping\n", ALP_SOC_REF_STR);
+		printf("[adc] done\n");
+		return 0;
+	}
 
 	/* 1. Capability rejection: ask for an absurd resolution.
      *    With any concrete CONFIG_ALP_SOC_<...>=y this returns NULL
@@ -68,8 +82,8 @@ int main(void)
 	/* 3. Capability-gated teaching block.
      *
      * `alp_adc_capabilities` asks the backend what THIS opened handle
-     * can do (runtime gate -- pairs with ALP_HAS() from <alp/cap.h>
-     * for the compile-time SoC-level gate).
+     * can do (instance-level runtime gate -- pairs with the SoC-level
+     * alp_has() / ALP_HAS() gate demonstrated at step 0).
      *
      * For HW oversampling: this is reachable through the portable
      * config field cfg->oversampling_ratio at open time -- no vendor
