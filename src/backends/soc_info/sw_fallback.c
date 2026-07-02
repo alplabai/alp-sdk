@@ -12,6 +12,11 @@
  * runtime fields (secure-firmware version, part number, die revision,
  * lifecycle, serial) have no software source, so both entry points
  * report ALP_ERR_NOSUPPORT -- graceful, never a link error.
+ *
+ * @par Cost: negligible ROM (two stub entry points that return
+ *      ALP_ERR_NOSUPPORT), RAM 0 bytes (no per-handle state).
+ * @par Performance: O(1) per call; both entry points return
+ *      immediately, deterministic for test assertions.
  */
 
 #include <alp/backend.h>
