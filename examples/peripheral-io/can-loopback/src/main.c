@@ -27,6 +27,10 @@
 
 #include "alp/can.h"
 
+/* alp_has() / ALP_HAS() -- gate on what the silicon offers, never on
+ * a board name (#ifdef CONFIG_BOARD_* forks don't port to new SoMs). */
+#include "alp/cap.h"
+
 /* BOARD_CAN0 is the portable alias from <alp/board.h>
  * (E1M_CAN0 on E1M EVK; E1M_X_CAN0 on E1M-X EVK). */
 #include "alp/board.h"
@@ -54,6 +58,17 @@ static void on_rx(const alp_can_frame_t *f, void *user)
 
 int main(void)
 {
+	/* Capability gate: skip cleanly on CAN-less silicon.  On a SoC
+	 * with no CAN controller (e.g. an NPU-only part) this prints a
+	 * diagnostic instead of a confusing open() failure.  Under
+	 * native_sim no SoC is selected, the capability layer is
+	 * permissive, and the demo proceeds to the loopback path. */
+	if (!alp_has(ALP_CAP_ID_HW_CAN)) {
+		printf("[can] no CAN controller on this SoC (%s) -- skipping\n", ALP_SOC_REF_STR);
+		printf("[can] done\n");
+		return 0;
+	}
+
 	printf("[can] open BOARD_CAN0 @ 500 kbps loopback\n");
 
 	alp_can_t *bus = alp_can_open(&(alp_can_config_t){
@@ -64,7 +79,8 @@ int main(void)
 	    .bitrate_nominal_hz = 500000,
 	    /* CLASSIC mode = ISO 11898-1, ≤ 8 byte payload.  Switch to
          * ALP_CAN_MODE_FD for ≤ 64 byte payload + bit-rate switch
-         * (and set bitrate_data_hz appropriately). */
+         * (and set bitrate_data_hz appropriately).  ALP_HAS(HW_CAN_FD)
+         * answers "does this SoC's controller do FD?" at compile time. */
 	    .mode = ALP_CAN_MODE_CLASSIC,
 	    /* Loopback off the wire -- self-test only.  Set to false
          * once you're driving real CAN_H/CAN_L. */
