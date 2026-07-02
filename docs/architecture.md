@@ -237,6 +237,17 @@ default).  No SoM YAML repeats facts already in the SoC JSON — per
 the memory note `[[silicon-determined-fields-not-customer-facing]]`,
 every silicon-fixed value has exactly one home.
 
+The reverse direction — a SKU that populates **less** than its
+silicon offers — is a *restriction*, declared as
+`silicon_capabilities.unpopulated: [...]` in the SoM preset.  A SKU
+can only remove capabilities its SoC JSON declares truthy (enforced
+by `scripts/validate_metadata.py`), never add through this field;
+`resolve_capabilities()` forces each listed key to `false`/`0` after
+the merge, and `scripts/gen_soc_caps.py` drops the matching
+`ALP_CAP_*` flags in `<alp/soc_caps.h>` behind an `ALP_SOM_<SKU>`
+gate.  SKUs without the field (all current SKUs) inherit the full
+silicon capability set, so family-level behaviour is unchanged.
+
 ### on_module: auto-enable
 
 A SoM's preset YAML carries an `on_module:` block that names the

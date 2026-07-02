@@ -51,6 +51,40 @@ by `scripts/gen_pinmux_capability.py` and drift-gated by
 SoM presets and `metadata/boards/` in one gate (CI:
 `pr-metadata-validate.yml`).
 
+### Per-SKU capability restriction (`silicon_capabilities:`)
+
+Capability flags default to the **silicon's** set: the SoC JSON's
+`capabilities:` block is the base layer and the preset's `capabilities:`
+block only **adds** SoM-side features (on-module chips, bridge
+accelerators).  When two SKUs of one family differ in silicon
+*population* — an accelerator fused off / not bonded out on one order
+code — the narrower SKU declares the delta as a **restriction**:
+
+```yaml
+# HYPOTHETICAL example only — no released SKU restricts its silicon
+# capability set today.  Do not copy population facts from here.
+silicon_capabilities:
+  unpopulated: [gpu2d, dave2d]     # silicon offers these; this SKU does not populate them
+```
+
+Rules (enforced by `scripts/validate_metadata.py`):
+
+* every listed name must resolve to a **truthy** entry in the referenced
+  SoC JSON's `capabilities:` block — a SKU can only remove what its
+  silicon offers, never add;
+* a name must not also appear in the preset's additive `capabilities:`
+  block (a capability is either SoM-added or silicon-unpopulated, never
+  both);
+* omitting the field means the SKU inherits the full silicon capability
+  set — the default for every current SKU.
+
+Downstream, `resolve_capabilities()` (scripts/alp_project.py) forces each
+listed capability to `false`/`0` for that SKU, and
+`scripts/gen_soc_caps.py` appends an `ALP_SOM_<SKU>`-gated override block
+to `include/alp/soc_caps.h` so `ALP_HAS(...)` drops the matching
+`ALP_CAP_*` flags; the build emitters pass `-DALP_SOM_<SKU>` only for
+restricted SKUs.
+
 ## Known cross-SKU TBDs
 
 **AEN `helper_firmware` / `cc3501e_otp`** — all six AEN presets

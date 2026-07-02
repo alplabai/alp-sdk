@@ -22,6 +22,17 @@ def _board_define_slug(name: str) -> str:
     return name.lower().replace("-", "_").upper()
 
 
+def _som_define_slug(sku: str) -> str:
+    """'E1M-AEN801' -> 'E1M_AEN801': the ALP_SOM_* compile-define suffix.
+
+    Same transform as _board_define_slug; kept as its own name so the
+    SoM-selection define (per-SKU capability restrictions in
+    <alp/soc_caps.h>, gen_soc_caps.som_token) reads distinctly from the
+    board facade define at call sites.
+    """
+    return _board_define_slug(sku)
+
+
 # on_module fields that carry non-chip-slug values — skip them when
 # walking the block for chip-driver enables.  Numeric fields, silicon
 # identifiers, and structured sub-blocks are excluded by name rather
