@@ -618,7 +618,48 @@ or under `native_sim` for portable CI today.
 
 ---
 
-## 11. Common pitfalls
+## 11. Conformance gate — prove the portable contract
+
+Metadata validation (Step 5) proves the *description* of the new
+SoM; the conformance suite proves its *backends*.
+`tests/zephyr/conformance/` is one data-driven ztest suite that
+every backend must pass — it mechanically exercises the uniform
+lifecycle contract of every portable peripheral class (GPIO / I²C /
+SPI / UART / ADC / DAC / PWM / CAN / RTC / WDT / counter / qenc /
+I²S):
+
+- `alp_<class>_open(NULL cfg)` → NULL + `alp_last_error()` ==
+  `ALP_ERR_INVAL`
+- `alp_<class>_open(<bad instance>)` → NULL + a documented
+  `alp_status_t` code (never a raw negative errno)
+- `alp_<class>_close(NULL)` and double-close are safe no-ops
+- `alp_<class>_capabilities(NULL)` → NULL; non-NULL for an open
+  handle
+- NULL-handle data-path calls refuse with an in-enum status
+
+Run it (the same invocation CI uses, minus the module paths):
+
+```bash
+twister --testsuite-root tests/zephyr/conformance \
+    -p native_sim/native/64 -O twister-out-conformance
+```
+
+A new SoM port satisfies the gate when the
+`alp_sdk.conformance.portable_api` scenario passes with the new
+backend selected.  Classes whose instance 0 is backed on the build
+platform run the positive path (open + capabilities + double-close);
+classes without an instance must still fail the documented way —
+the suite asserts the failure contract and logs the degrade path
+(`conformance[<class>]: degrade path -- ...` in the handler log), so
+nothing skips silently.  A new portable class is enrolled by adding
+**one row** to the `conf_classes[]` table in
+`tests/zephyr/conformance/src/main.c` — the generic runners pick it
+up automatically; see the test-matrix comment at the top of that
+file.
+
+---
+
+## 12. Common pitfalls
 
 - **Inventing pin values.**  Per [[pending-hw-configs]], unknown
   routes / addresses / bases must be `"TBD"`, never plausible
@@ -657,7 +698,7 @@ or under `native_sim` for portable CI today.
 
 ---
 
-## 12. Where to next
+## 13. Where to next
 
 - **Customer cookbook** — [`docs/portability.md`](portability.md)
   walks through the intra-family swap from the customer's side
