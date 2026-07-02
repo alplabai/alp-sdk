@@ -39,6 +39,61 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   whose only `<zephyr/kernel.h>` use was sleeping now calls the portable
   `alp_delay_ms` and drops the Zephyr include; files using kernel APIs beyond
   sleeping are untouched.
+- **`<alp/version.h>`** (`[ABI-STABLE]`): compile-time SDK version macros
+  (`ALP_VERSION_MAJOR/MINOR/PATCH`, `ALP_VERSION`, `ALP_VERSION_STRING`,
+  `ALP_VERSION_AT_LEAST(maj,min,pat)`), per-class `ALP_ABI_STATUS_*` tier
+  macros mirroring `docs/abi-markers.md`, and the runtime
+  `alp_version_string()` getter.  `scripts/bump_version.py` /
+  `scripts/check_version_doc_sync.py` keep the header, `pyproject.toml`, and
+  `metadata/sdk_version.yaml` in lockstep.
+- **SE-backed portable surfaces** (`[ABI-EXPERIMENTAL]` at function
+  granularity; Alif SE-service backends registered per silicon ref,
+  vendor `<se_service.h>` confined to `src/backends/**`):
+  `alp_soc_info_read()` + `alp_soc_secure_fw_ping()` in `<alp/hw_info.h>`
+  (SoC identity: secure-fw version, part number, die rev, lifecycle, unique
+  serial — `soc_ref` stamped from the build even where no runtime source
+  exists), `alp_power_profile_get()`/`alp_power_profile_set()` in
+  `<alp/power.h>` (RUN/STANDBY operating points; exact-match values, RMW
+  set), and `alp_mproc_boot_core()` in `<alp/mproc.h>` (portable peer-core
+  release).  Seven AEN examples converted off the vendor SE API;
+  `examples/aen/aen-se-service-info` stays as the sanctioned vendor
+  bring-up reference.
+- **`alp` CLI as the single front door**: new `alp build` / `alp run` /
+  `alp flash` / `alp emit` / `alp doctor` (host-environment preflight) /
+  `alp monitor` (serial console) verbs beside `init`/`validate`/`model`,
+  a Windows-native `scripts/bootstrap.ps1` companion to `bootstrap.sh`,
+  and the validator collapse onto one diagnostic-rich implementation.
+  Verb reference: [`docs/cli.md`](docs/cli.md).
+- **`alp new-som` scaffold verb** — the vendor-N+1 porting kit: generates
+  a schema-valid SoM preset (`metadata/e1m_modules/<SKU>.yaml`) and, when
+  the SoC has no spec yet, the `metadata/socs/<vendor>/<family>/<part>.json`
+  skeleton — every hardware-fact field an explicit `TBD`, values never
+  invented — then prints the numbered porting checklist.
+  [`docs/porting-new-som.md`](docs/porting-new-som.md) now opens
+  scaffold-first.
+- **Portable-API conformance suite** (`tests/zephyr/conformance/`): one
+  data-driven ztest suite (13 peripheral classes × 8 contract cases —
+  NULL/INVAL, close-NULL, double-close, capability shape, degrade paths)
+  every backend must pass; runs on `native_sim` in `pr-twister` as
+  `alp_sdk.conformance.portable_api` and gates new SoM ports (see the
+  "Conformance gate" section of `docs/porting-new-som.md`).
+- **Capability-layer adoption in examples**: `adc-voltmeter`,
+  `can-loopback` (`HW_CAN`), and `i2s-tone` (`HW_I2S`) now gate on
+  `alp_has()`/`ALP_HAS` instead of board-name `#if`s;
+  `docs/portability.md` §5.2 documents the "gate on capabilities, not
+  board names" pattern.
+- **SoM-preset schema tightened + multi-family pinmux**
+  (`metadata/schemas/som-preset-v1.schema.json`): `additionalProperties:
+  false` with one canonical shape for `memory` / `on_module` (incl.
+  `pmic_main`, `i2c_devices`) / `inference`; every preset normalised;
+  pinmux-capability generation goes multi-family with the new
+  `metadata/pinmux/v2n.yaml` beside `aen.yaml`, swept by
+  `scripts/validate_metadata.py` (which now also validates
+  `metadata/boards/`).
+- **CI drift gates for generated files**: `include/alp/cap.h` /
+  `src/cap.c` and the per-board routes headers are regenerated in CI and
+  diffed against the tree, so a metadata edit can no longer land without
+  its generated C.
 
 - **Acoustic safety-event example** (`examples/audio/acoustic-safety-events/`):
   always-listening security/safety node — PDM mic → per-frame `acoustic_event`
