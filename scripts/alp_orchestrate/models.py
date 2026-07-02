@@ -79,7 +79,7 @@ class Slice:
         # Local import: the flash-recipe deriver lives in alp_orchestrate; a
         # module-level import here would create a models<->orchestrate cycle.
         # By call time both modules are loaded, so this resolves cleanly.
-        from alp_orchestrate import _slice_flash_recipe
+        from alp_orchestrate.orchestrator import _slice_flash_recipe
 
         flash_method, flash_args = _slice_flash_recipe(self)
         entry: dict[str, Any] = {
