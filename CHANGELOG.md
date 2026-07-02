@@ -391,6 +391,67 @@ boards (FIB `v0.0.207`).
   retry) and verified not to regress the clean-boot enable + scan.  Tracked in
   `ti/WIFI_BLE_INTEGRATION.md`.  (#250, #233)
 
+### Added — cc3501e-bridge: OTA-over-bridge, Wi-Fi/BLE protocol layers, POWER_POLICY (retroactive correction)
+
+> **Correction (2026-07-02):** the entries below shipped in the v0.8.0
+> cycle (PRs #232, #234 and the v0.2/v0.3 protocol-layer commits, all
+> merged before the 2026-06-24 tag) but were missing when v0.8.0 was
+> tagged — the notes then still framed the firmware as the v0.1
+> META-only bring-up.  Recorded retroactively; nothing below is new in
+> a later release.  (#247)
+
+- **OTA over the bridge (PR #232).**  The host streams a signed GPE-format
+  vendor image into the CC3501E's non-primary vendor slot via PSA-FWU:
+  new wire opcodes `ALP_CC3501E_CMD_OTA_BEGIN..OTA_STATUS` (`0x40..0x44`)
+  with sequential-cursor `WRITE` chunks (`1..ALP_CC3501E_OTA_MAX_CHUNK`),
+  host helpers `cc3501e_ota_update()` + granular
+  `cc3501e_ota_begin/_write/_finish/_abort/_status()`, a RAM-stage +
+  flash-window recovery fix for reliable streaming, and the reproducible
+  production packaging recipe (HSM-signed full image,
+  `docs/cc3501e-production.md`).  Silicon-validated through
+  install/STAGED; the final cold swap-boot needs a correctly-activated
+  (cold-bootable) unit.
+- **Wi-Fi v0.2 protocol layer** — `WIFI_SCAN` / `CONNECT_STA` / `AP` /
+  `GET_RSSI` / `GET_IP` opcode handlers in the firmware parser, with
+  `SCAN` + `RSSI` worker-routed off the SPI ISR on the `ti` backend
+  (scan and async STA connect are the silicon-validated subset — see
+  the section above).
+- **BLE v0.3 protocol layer** — GAP advertise / scan / connect + GATT
+  register/notify/read/write opcode handlers, and the NimBLE
+  enable + advertise path linked into (and fitting) the vendor image
+  (NimBLE enable + scan are the silicon-validated subset).
+- **POWER_POLICY applied for real (PR #234).**  `ALP_CC3501E_CMD_POWER_POLICY`
+  is now applied through the CC35xx power driver on the firmware side,
+  with the `cc3501e_power_policy()` host helper — alongside the
+  `aen-cc3501e-gpio` GPIO-proxy + camera-enable example and the
+  warm-boot bench-validation harness recorded above.
+
+### Added — security: SE-CryptoCell hardware-crypto backend, default ON on E8 (retroactive correction)
+
+> **Correction (2026-07-02):** shipped in the v0.8.0 cycle (PRs #208 /
+> #229 / #230, merged 2026-06-18/19, before the tag) but missing from
+> these notes — and a **default-on crypto rerouting** belongs in the
+> release notes.  Recorded retroactively.  (#247)
+
+- The `<alp/security.h>` hash / AEAD / random surface on the Alif
+  Ensemble E8 now routes **by default** into the Secure Enclave's
+  CryptoCell (`src/backends/security/se_cryptocell.c`) instead of
+  MbedTLS-PSA on the M55: the backend registers at
+  `silicon_ref="alif:ensemble:e8"` priority 110, one step ahead of the
+  `"*"` priority-100 PSA backend.  Compute travels over the existing
+  RTSS-HE ↔ SE MHUv2 mailbox via a thin public
+  `se_service_send_request()` added to hal_alif as west-patch
+  `zephyr/patches/hal_alif/0002-…` (the SE-CryptoCell host library is
+  proprietary and is NOT vendored; only wire facts from the Apache-2.0
+  hal_alif headers are used).  (#208, #229)
+- `CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM` flipped default
+  n → **y** after bench validation on real E8 silicon (`aen-se-crypto`:
+  SHA-256 NIST FIPS 180-4 known-answer MATCH, AES-128-GCM round-trip
+  MATCH, TRNG OK).  Algorithms the SE declines (SHA-384/512, an
+  over-ceiling single-shot input) still return `ALP_ERR_NOSUPPORT`
+  and fall through to the MbedTLS-PSA backend, so nothing loses
+  coverage.  (#230)
+
 ### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
 
 The TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN family now has
