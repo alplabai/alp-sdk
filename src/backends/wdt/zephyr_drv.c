@@ -47,11 +47,11 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
-static alp_status_t z_open(uint32_t                 wdt_id,
-                           const alp_wdt_config_t  *cfg,
+static alp_status_t z_open(const alp_wdt_config_t  *cfg,
                            alp_wdt_backend_state_t *st,
                            alp_capabilities_t      *caps_out)
 {
+	const uint32_t wdt_id = cfg->wdt_id;
 	if (wdt_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (wdt_id >= ALP_SOC_WDT_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	const struct device *dev = _devs[wdt_id];

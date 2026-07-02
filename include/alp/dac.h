@@ -111,6 +111,20 @@ alp_status_t alp_dac_read_mv(alp_dac_t *dac, uint16_t *mv_out);
  */
 void alp_dac_close(alp_dac_t *dac);
 
+/**
+ * @brief Query the capabilities of an opened DAC channel handle.
+ *
+ * Returns a pointer to the @ref alp_capabilities_t descriptor the
+ * backend populated at open time. Useful for runtime gating
+ * (e.g. only enabling DMA-driven waveform code paths when the
+ * backend advertises @ref ALP_INSTANCE_CAP_DMA).
+ *
+ * @param dac  Handle from @ref alp_dac_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p dac
+ *         is NULL.
+ */
+const alp_capabilities_t *alp_dac_capabilities(const alp_dac_t *dac);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

@@ -27,7 +27,7 @@
  * Typical usage (one-shot):
  * @code
  *     alp_adc_t *th = alp_adc_open(&(alp_adc_config_t){
- *         .channel_id = 0,
+ *         .channel_id = E1M_ADC0,
  *         .resolution_bits = 12,
  *         .reference  = ALP_ADC_REF_INTERNAL,
  *     });
@@ -38,15 +38,40 @@
  * Typical usage (streaming, V2N family only today):
  * @code
  *     alp_adc_stream_t *s = alp_adc_stream_open(&(alp_adc_stream_config_t){
- *         .channel_id     = 0,
+ *         .channel_id     = E1M_ADC0,
  *         .sample_rate_hz = 100000,
  *     });
  *     uint16_t buf[32];
  *     size_t got = 0;
- *     alp_adc_stream_read(s, buf, ARRAY_SIZE(buf), &got);  // drain ring
+ *     alp_adc_stream_read_mv(s, buf, ARRAY_SIZE(buf), &got);  // drain ring
  *     ...
  *     alp_adc_stream_close(s);
  * @endcode
+ *
+ * ## Units
+ *
+ * The one-shot and streaming surfaces intentionally use different
+ * units and sample widths.  The one-shot path favours precision
+ * (32-bit microvolts resolve a 24-bit code against a 3.3 V
+ * reference without rounding); the streaming path favours wire and
+ * ring-buffer density (16-bit millivolts halve the DMA/bridge
+ * bandwidth per sample, and mV granularity is what the 12-bit
+ * hardware actually delivers at streaming rates).  The sample
+ * widths are wire formats and will not change; every function name
+ * carries its unit as a suffix so the split is visible at the call
+ * site:
+ *
+ *   - @ref alp_adc_read_raw          — @c int32_t, native ADC code (no unit).
+ *   - @ref alp_adc_read_uv           — @c int32_t, signed microvolts (µV).
+ *   - @ref alp_adc_stream_read_mv    — @c uint16_t samples, unsigned millivolts (mV).
+ *   - @ref alp_adc_filter_read_mv    — @c int16_t samples, signed millivolts (mV)
+ *                                      (DSP chains need signed headroom).
+ *   - @ref alp_adc_spectrum_read_bins — @c float FFT bins (input scale mV,
+ *                                      so bin magnitudes are in mV·sample).
+ *
+ * Conversion: 1 mV = 1000 µV — a stream sample @c s sits at
+ * @c s*1000 on the @ref alp_adc_read_uv scale (modulo the
+ * quantisation the 16-bit mV format implies).
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.2 + v0.5 additive (filter/spectrum types).  Base surface stable; new alp_adc_filter_t / alp_adc_spectrum_t may evolve [ABI-EXPERIMENTAL] at function granularity.
@@ -80,7 +105,7 @@ typedef struct alp_adc alp_adc_t;
 
 /** Configuration passed to @ref alp_adc_open. */
 typedef struct {
-	uint32_t      channel_id;      /**< Studio-resolved ADC channel index (0..7). */
+	uint32_t      channel_id;      /**< Studio-resolved ADC channel index (E1M_ADC0..ADC7). */
 	uint8_t       resolution_bits; /**< 8 / 10 / 12 / 14 / 16 typical. 0 = use DT default. */
 	uint16_t      acquisition_us;  /**< Sample-and-hold time, microseconds. */
 	alp_adc_ref_t reference;
@@ -111,7 +136,8 @@ typedef struct {
  * them to the channel before returning the handle.  For DMA-backed
  * continuous acquisition use @ref alp_adc_stream_open.
  *
- * @param[in] cfg  Configuration.  Must be non-NULL; @c channel_id < 8.
+ * @param[in] cfg  Configuration.  Must be non-NULL; @c channel_id must
+ *                 be < @ref E1M_ADC_COUNT (E1M_ADC0..ADC7).
  * @return Open handle on success, or NULL if the channel can't be
  *         resolved, configured, or the pool is exhausted.
  */
@@ -132,14 +158,18 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg);
 alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out);
 
 /**
- * @brief One-shot read converted to microvolts.
+ * @brief One-shot read converted to microvolts (int32, µV).
  *
  * Applies the configured reference voltage and gain to the raw code.
  * Convertible to engineering units by the caller via the sensor's
- * transfer function.
+ * transfer function.  Note the unit split against the streaming
+ * surface: one-shot reads are signed 32-bit MICROvolts; stream
+ * samples are 16-bit MILLIvolts (see the "Units" section in the
+ * file header).
  *
  * @param[in]  adc     Handle from @ref alp_adc_open.
- * @param[out] uv_out  Receives the signed microvolt reading.
+ * @param[out] uv_out  Receives the signed microvolt (µV) reading as
+ *                     @c int32_t.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
  */
 alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out);
@@ -178,7 +208,7 @@ typedef struct alp_adc_stream alp_adc_stream_t;
 
 /** Configuration passed to @ref alp_adc_stream_open. */
 typedef struct {
-	uint32_t channel_id;     /**< Studio-resolved ADC channel index (0..7). */
+	uint32_t channel_id;     /**< Studio-resolved ADC channel index (E1M_ADC0..ADC7). */
 	uint32_t sample_rate_hz; /**< Target sample rate (Hz).  Backend rounds
                                     *  down to its nearest achievable value and
                                     *  caps at the active SoM's hardware ceiling
@@ -199,7 +229,7 @@ typedef struct {
  * @return Open handle on success, or NULL with @ref alp_last_error set to
  *         one of:
  *         - @ref ALP_ERR_INVAL on NULL cfg or zero sample-rate,
- *         - @ref ALP_ERR_OUT_OF_RANGE on channel_id >= 8,
+ *         - @ref ALP_ERR_OUT_OF_RANGE on channel_id >= @ref E1M_ADC_COUNT,
  *         - @ref ALP_ERR_NOSUPPORT on SoMs without a streaming backend,
  *         - @ref ALP_ERR_NOT_READY when the backend transport is not
  *           configured (e.g. V2N supervisor with no bus ids set),
@@ -209,17 +239,20 @@ typedef struct {
 alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg);
 
 /**
- * @brief Drain pending samples from the stream's backend ring.
+ * @brief Drain pending samples from the stream's backend ring
+ *        (uint16, mV).
  *
- * The backend's per-call sample ceiling is hardware-defined (32 on
- * the V2N family's GD32 IO MCU); callers wanting more than that per
- * logical batch must loop.  A return value of @ref ALP_OK with
- * @p *got == 0 means the backend ring was empty since the last read
- * -- not an error.
+ * Samples are UNSIGNED 16-bit MILLIvolts -- the stream wire format
+ * (see the "Units" section in the file header; multiply by 1000 for
+ * the @ref alp_adc_read_uv microvolt scale).  The backend's per-call
+ * sample ceiling is hardware-defined (32 on the V2N family's GD32 IO
+ * MCU); callers wanting more than that per logical batch must loop.
+ * A return value of @ref ALP_OK with @p *got == 0 means the backend
+ * ring was empty since the last read -- not an error.
  *
  * @param[in]  stream  Handle from @ref alp_adc_stream_open.
- * @param[out] mv      Caller buffer for the sample values (mV, u16).
- *                     Length >= @p cap.
+ * @param[out] mv      Caller buffer for the sample values
+ *                     (millivolts, @c uint16_t).  Length >= @p cap.
  * @param[in]  cap     Capacity of @p mv (samples, not bytes).
  * @param[out] got     Number of samples actually copied; may be 0.
  *
@@ -228,7 +261,8 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg);
  *         ALP_ERR_BUSY (backend ring overran -- poll faster) /
  *         ALP_ERR_IO.
  */
-alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got);
+alp_status_t
+alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got);
 
 /**
  * @brief Close the stream, releasing its backend slot + handle.
@@ -264,7 +298,7 @@ typedef struct alp_adc_filter alp_adc_filter_t;
 
 /** Configuration passed to @ref alp_adc_filter_open. */
 typedef struct {
-	uint32_t channel_id;     /**< ADC channel index (0..7). */
+	uint32_t channel_id;     /**< ADC channel index (E1M_ADC0..ADC7). */
 	uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
 	/** DSP stages, filter-terminated (no FFT).  Copied into the
      *  internal chain at open time; caller may free immediately. */
@@ -285,8 +319,8 @@ typedef struct {
  * @return Handle on success; NULL with @ref alp_last_error set to:
  *         - @ref ALP_ERR_INVAL on NULL cfg, NULL stages, n_stages == 0,
  *           or an FFT-terminated chain.
- *         - @ref ALP_ERR_OUT_OF_RANGE on channel_id >= 8 or any
- *           per-stage bound violation.
+ *         - @ref ALP_ERR_OUT_OF_RANGE on channel_id >=
+ *           @ref E1M_ADC_COUNT or any per-stage bound violation.
  *         - @ref ALP_ERR_NOSUPPORT on SoMs without a streaming ADC.
  *         - @ref ALP_ERR_NOT_READY when the backend transport is not
  *           configured.
@@ -297,16 +331,18 @@ typedef struct {
 alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg);
 
 /**
- * @brief Drain filtered samples from the stream.
+ * @brief Drain filtered samples from the stream (int16, mV).
  *
  * Polls the underlying @ref alp_adc_stream_t, converts the raw
- * uint16 mV samples to int16, runs them through the DSP chain, and
- * writes the result into the caller's buffer.  The per-batch sample
- * ceiling is backend-defined; callers wanting more samples per call
- * must loop.
+ * unsigned uint16 mV samples to SIGNED int16 mV (DSP stages need
+ * signed headroom -- see the "Units" section in the file header),
+ * runs them through the DSP chain, and writes the result into the
+ * caller's buffer.  The per-batch sample ceiling is backend-defined;
+ * callers wanting more samples per call must loop.
  *
  * @param[in]  filter  Handle from @ref alp_adc_filter_open.
- * @param[out] out_mv  Caller buffer for filtered samples (int16 mV).
+ * @param[out] out_mv  Caller buffer for filtered samples
+ *                     (millivolts, @c int16_t).
  * @param[in]  cap     Capacity of @p out_mv (samples).
  * @param[out] got     Number of samples actually written; may be 0.
  *
@@ -314,7 +350,7 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg);
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t
-alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got);
+alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got);
 
 /**
  * @brief Close a filter handle.  NULL is a no-op.
@@ -329,7 +365,7 @@ typedef struct alp_adc_spectrum alp_adc_spectrum_t;
 
 /** Configuration passed to @ref alp_adc_spectrum_open. */
 typedef struct {
-	uint32_t channel_id;     /**< ADC channel index (0..7). */
+	uint32_t channel_id;     /**< ADC channel index (E1M_ADC0..ADC7). */
 	uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
 	/** DSP stages, FFT-terminated (optional WINDOW immediately
      *  before FFT).  Copied at open time. */
