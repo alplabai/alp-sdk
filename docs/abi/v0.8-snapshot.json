@@ -8870,40 +8870,40 @@
     "alp/storage.h": {
       "functions": {
         "alp_storage_capabilities": {
-          "hash": "f625ea74c58af8da",
-          "signature": "const alp_capabilities_t * alp_storage_capabilities(const alp_storage_t *s);"
+          "hash": "4a8d1920a7a19bcf",
+          "signature": "const alp_capabilities_t * alp_storage_capabilities(const alp_storage_t *storage);"
         },
         "alp_storage_close": {
-          "hash": "5d5e8e7dbc5bedfd",
-          "signature": "void alp_storage_close(alp_storage_t *s);"
+          "hash": "fb89cedb9acdf047",
+          "signature": "void alp_storage_close(alp_storage_t *storage);"
         },
         "alp_storage_configure_inline_aes": {
           "hash": "9879e5e8057f3350",
           "signature": "alp_status_t alp_storage_configure_inline_aes(alp_storage_t *storage, const alp_storage_aes_config_t *cfg);"
         },
         "alp_storage_erase": {
-          "hash": "857f95912d78027f",
-          "signature": "alp_status_t alp_storage_erase(alp_storage_t *s, uint64_t offset, uint64_t len);"
+          "hash": "7e0d758ca7aecff6",
+          "signature": "alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t offset, uint64_t len);"
         },
         "alp_storage_get_info": {
-          "hash": "79f4f2bdc334cf92",
-          "signature": "alp_status_t alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);"
+          "hash": "543bf847f4cbd47b",
+          "signature": "alp_status_t alp_storage_get_info(alp_storage_t *storage, alp_storage_info_t *info);"
         },
         "alp_storage_open": {
           "hash": "d4d135f67ba2336d",
           "signature": "alp_storage_t * alp_storage_open(const alp_storage_config_t *cfg);"
         },
         "alp_storage_read": {
-          "hash": "34b9475c84273d35",
-          "signature": "alp_status_t alp_storage_read(alp_storage_t *s, uint64_t offset, void *data, size_t len);"
+          "hash": "abfa35caae6ab24a",
+          "signature": "alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t offset, void *data, size_t len);"
         },
         "alp_storage_sync": {
-          "hash": "6a368d559d6ce424",
-          "signature": "alp_status_t alp_storage_sync(alp_storage_t *s);"
+          "hash": "251265e98923f3f9",
+          "signature": "alp_status_t alp_storage_sync(alp_storage_t *storage);"
         },
         "alp_storage_write": {
-          "hash": "ec81e8d2ad921e19",
-          "signature": "alp_status_t alp_storage_write(alp_storage_t *s, uint64_t offset, const void *data, size_t len);"
+          "hash": "a1bb2fff4a0175d9",
+          "signature": "alp_status_t alp_storage_write(alp_storage_t *storage, uint64_t offset, const void *data, size_t len);"
         }
       },
       "macros": {},

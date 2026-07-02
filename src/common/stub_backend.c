@@ -1100,43 +1100,43 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 	(void)cfg;
 	return NULL;
 }
-alp_status_t alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info)
+alp_status_t alp_storage_get_info(alp_storage_t *storage, alp_storage_info_t *info)
 {
-	(void)s;
+	(void)storage;
 	if (info) *info = (alp_storage_info_t){ 0 };
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_storage_read(alp_storage_t *s, uint64_t o, void *d, size_t l)
+alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t o, void *d, size_t l)
 {
-	(void)s;
+	(void)storage;
 	(void)o;
 	(void)d;
 	(void)l;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_storage_write(alp_storage_t *s, uint64_t o, const void *d, size_t l)
+alp_status_t alp_storage_write(alp_storage_t *storage, uint64_t o, const void *d, size_t l)
 {
-	(void)s;
+	(void)storage;
 	(void)o;
 	(void)d;
 	(void)l;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_storage_erase(alp_storage_t *s, uint64_t o, uint64_t l)
+alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t o, uint64_t l)
 {
-	(void)s;
+	(void)storage;
 	(void)o;
 	(void)l;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_storage_sync(alp_storage_t *s)
+alp_status_t alp_storage_sync(alp_storage_t *storage)
 {
-	(void)s;
+	(void)storage;
 	return ALP_ERR_NOSUPPORT;
 }
-void alp_storage_close(alp_storage_t *s)
+void alp_storage_close(alp_storage_t *storage)
 {
-	(void)s;
+	(void)storage;
 }
 
 alp_usb_dev_t *alp_usb_device_open(const alp_usb_device_config_t *cfg)
@@ -1315,9 +1315,10 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *c, const alp_camera_isp_conf
 /* Storage inline-AES (alp/storage.h v0.5 extension)                   */
 /* ------------------------------------------------------------------ */
 
-alp_status_t alp_storage_configure_inline_aes(alp_storage_t *s, const alp_storage_aes_config_t *cfg)
+alp_status_t alp_storage_configure_inline_aes(alp_storage_t                  *storage,
+                                              const alp_storage_aes_config_t *cfg)
 {
 	if (cfg == NULL) return ALP_ERR_INVAL;
-	(void)s;
+	(void)storage;
 	return ALP_ERR_NOSUPPORT;
 }
