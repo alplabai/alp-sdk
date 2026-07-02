@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-24",
+  "generated": "2026-07-02",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -7485,6 +7485,14 @@
         "alp_hw_info_read": {
           "hash": "d02a9525f7e742f6",
           "signature": "alp_status_t alp_hw_info_read(alp_hw_info_t *out);"
+        },
+        "alp_soc_info_read": {
+          "hash": "f803d1d960a8ef81",
+          "signature": "alp_status_t alp_soc_info_read(alp_soc_info_t *out);"
+        },
+        "alp_soc_secure_fw_ping": {
+          "hash": "c5d7664cb112d5c7",
+          "signature": "alp_status_t alp_soc_secure_fw_ping(void);"
         }
       },
       "macros": {
@@ -7511,12 +7519,28 @@
         "ALP_HW_INFO_SKU_LEN": {
           "hash": "560d8201b0ff6dc7",
           "value": "24u"
+        },
+        "ALP_SOC_INFO_FW_VERSION_LEN": {
+          "hash": "61be5a310f28a190",
+          "value": "80u"
+        },
+        "ALP_SOC_INFO_REF_LEN": {
+          "hash": "bcb00ac37b9fbc21",
+          "value": "32u"
+        },
+        "ALP_SOC_INFO_SERIAL_MAX_LEN": {
+          "hash": "dbca2b3cca56049b",
+          "value": "16u"
         }
       },
       "typedefs": {
         "magic": {
           "definition": "typedef struct alp_hw_info_eeprom_t { uint32_t magic;",
           "hash": "eec13f781c17ea74"
+        },
+        "part_number": {
+          "definition": "typedef struct alp_soc_info_t { char soc_ref[ALP_SOC_INFO_REF_LEN]; char secure_fw_version[ALP_SOC_INFO_FW_VERSION_LEN]; uint32_t part_number;",
+          "hash": "a3d22ca36522808e"
         },
         "som_mfg_year": {
           "definition": "typedef struct alp_hw_info_t { char som_family[ALP_HW_INFO_FAMILY_LEN]; char som_sku[ALP_HW_INFO_SKU_LEN]; char som_hw_rev[ALP_HW_INFO_HW_REV_LEN]; char som_serial[ALP_HW_INFO_SERIAL_LEN]; uint16_t som_mfg_year;",
@@ -7811,6 +7835,10 @@
           "hash": "47b4010791d6990b",
           "signature": "alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *user);"
         },
+        "alp_mproc_boot_core": {
+          "hash": "77db97067d702e93",
+          "signature": "alp_status_t alp_mproc_boot_core(alp_core_id_t core, uintptr_t entry_addr);"
+        },
         "alp_shmem_capabilities": {
           "hash": "4dd2cd77b19f9c51",
           "signature": "const alp_capabilities_t * alp_shmem_capabilities(const alp_shmem_t *s);"
@@ -8078,6 +8106,14 @@
           "hash": "884b334187b41b49",
           "signature": "alp_power_t * alp_power_open(void);"
         },
+        "alp_power_profile_get": {
+          "hash": "12ab63260b0b0af7",
+          "signature": "alp_status_t alp_power_profile_get(alp_power_profile_id_t which, alp_power_profile_t *out);"
+        },
+        "alp_power_profile_set": {
+          "hash": "4df5a586680913a2",
+          "signature": "alp_status_t alp_power_profile_set(alp_power_profile_id_t which, const alp_power_profile_t *profile);"
+        },
         "alp_power_request_sleep": {
           "hash": "6df7bca8e77d8254",
           "signature": "alp_status_t alp_power_request_sleep(alp_power_t *handle, alp_power_mode_t mode, uint32_t wake_after_ms, alp_power_wake_info_t *info);"
@@ -8118,9 +8154,17 @@
           "definition": "typedef enum { ALP_POWER_MODE_RUN = 0, ALP_POWER_MODE_SLEEP = 1, ALP_POWER_MODE_DEEP_SLEEP = 2, ALP_POWER_MODE_STANDBY = 3, } alp_power_mode_t;",
           "hash": "b043f8579fd9fb3b"
         },
+        "alp_power_profile_id_t": {
+          "definition": "typedef enum { ALP_POWER_PROFILE_RUN = 0, ALP_POWER_PROFILE_STANDBY = 1, } alp_power_profile_id_t;",
+          "hash": "7e56e24fae8a6b2f"
+        },
         "alp_power_t": {
           "definition": "typedef struct alp_power alp_power_t;",
           "hash": "e1b187648292f85a"
+        },
+        "cpu_clk_hz": {
+          "definition": "typedef struct alp_power_profile_t { uint32_t cpu_clk_hz;",
+          "hash": "c6987ebeec2b2371"
         },
         "realised_mode": {
           "definition": "typedef struct { alp_power_mode_t realised_mode;",
