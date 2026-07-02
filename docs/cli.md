@@ -46,8 +46,12 @@ Rules of thumb:
   `build/system-manifest.yaml` and hand every slice + helper MCU to
   its registered backend in `scripts/flash_backends/`, honouring the
   manifest's `boot_order:`.
-* `alp emit` == `west alp-emit`: read-only print of one generated
-  artefact.
+* `alp emit` and `west alp-emit` overlap but expose DIFFERENT mode
+  sets: `alp emit` wraps `alp_project.py --emit` (zephyr-conf,
+  cmake-args, yocto-conf, dts-overlay, hw-info-h, ...); `west
+  alp-emit` wraps the orchestrator's artefacts (dts-partitions,
+  storage-mounts-c, tfm-sysbuild-conf, build-plan).  Pick by the
+  artefact you need.
 * `west alp-image`, `west alp-clean`, `west alp-size`,
   `west alp-renode` have no `alp` alias yet -- use the west form.
 
@@ -208,13 +212,13 @@ misbehaves.
 ```bash
 alp monitor --port COM7                # Windows
 alp monitor --port /dev/ttyUSB0       # Linux
-alp monitor                            # port from the project's console: block
+alp monitor                            # lists available ports if none given
 ```
 
-Opens pyserial's miniterm (Ctrl+] to quit).  Baud defaults to the
-project's `console:` declaration, else 115200.  When no port is given
-or the requested one doesn't exist, it lists every serial port on the
-host and exits non-zero instead of hanging on a wrong device.
+Opens pyserial's miniterm (Ctrl+] to quit).  Baud defaults to 115200
+(`--baud` to override).  When no port is given or the requested one
+doesn't exist, it lists every serial port on the host and exits
+non-zero instead of hanging on a wrong device.
 
 ### `alp explain` -- decode a diagnostic code
 

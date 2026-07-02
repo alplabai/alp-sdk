@@ -61,6 +61,9 @@ def test_emit_requires_board_yaml_or_input(tmp_path, monkeypatch):
 def test_emit_delegates_to_alp_project(tmp_path, monkeypatch, mocker):
     proj = _project(tmp_path)
     monkeypatch.chdir(proj)
+    # A stray ALP_SDK_ROOT pointing at another checkout would redirect
+    # sdk_root() and fail the REPO-path assert spuriously.
+    monkeypatch.delenv("ALP_SDK_ROOT", raising=False)
     run = mocker.patch(
         "alp_cli.emit.subprocess.run",
         return_value=SimpleNamespace(returncode=0),

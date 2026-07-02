@@ -100,6 +100,11 @@ if ($Missing.Count -gt 0) {
 
 # Python >= 3.10 (dataclass slots, `X | None` unions in the tooling).
 $PyVer = & python -c "import sys; print('%d.%d' % sys.version_info[:2])"
+if (-not $PyVer) {
+    # The Microsoft Store `python.exe` alias exists on PATH but prints
+    # nothing (it opens the Store instead of running).
+    Fail "python did not run (Windows Store alias?).  Install real Python: winget install -e --id Python.Python.3.12, reopen PowerShell, re-run."
+}
 if ([version]$PyVer -lt [version]"3.10") {
     Fail "Python $PyVer found; the SDK tooling needs >= 3.10 (winget install -e --id Python.Python.3.12)."
 }

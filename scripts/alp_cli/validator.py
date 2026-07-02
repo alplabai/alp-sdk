@@ -54,8 +54,10 @@ def iter_schema_errors(
     ordering -- so every consumer reports identical violations.
     """
     validator = jsonschema.Draft202012Validator(load_board_schema(schema_path))
+    # Stringify path parts: absolute_path mixes ints (array indices) and
+    # strs (keys); a raw list comparison would TypeError across siblings.
     return sorted(validator.iter_errors(data),
-                  key=lambda e: list(e.absolute_path))
+                  key=lambda e: [str(p) for p in e.absolute_path])
 
 
 def validate_board_yaml(path: Path) -> DiagnosticCollector:
