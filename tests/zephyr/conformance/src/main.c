@@ -36,7 +36,7 @@
  *   spi      | x  | x | x | x  | must-open| x  | x | x
  *   uart     | x  | x | x | x  | must-open| x  | x | x
  *   adc      | x  | x | x | x  | degrade  | x  | x | x
- *   dac      | x  | x | x | ** | degrade  | ** | x | x    (** capabilities lands in PR #329 -- see below)
+ *   dac      | x  | x | x | x  | degrade  | x  | x | x
  *   pwm      | x  | x | x | x  | degrade  | x  | x | x
  *   can      | x  | x | x | x  | degrade  | x  | x | x
  *   rtc      | -- | x | x | x  | degrade  | x  | x | x    (open takes an rtc id, not a cfg pointer)
@@ -65,11 +65,6 @@
  * call.  The generic runners pick the row up automatically; no new
  * ZTEST bodies are needed.
  *
- * DAC NOTE: <alp/dac.h> has no alp_dac_capabilities() yet; PR #329
- * adds it.  The DAC row keeps .capabilities = NULL ("skip-marked")
- * so this suite builds both before and after that merge.  Once
- * PR #329 lands, flip the field to a dac_caps_ adapter and delete
- * this note -- cases D and F then run for the DAC too.
  */
 
 #include <zephyr/ztest.h>
@@ -123,8 +118,8 @@ typedef struct {
 	conf_open_fn_t open_valid;
 	/** alp_<class>_close wrapper. */
 	conf_close_fn_t close;
-	/** alp_<class>_capabilities wrapper; NULL when the class has no
-	 *  capabilities query yet (DAC until PR #329 -- skip-marked). */
+	/** alp_<class>_capabilities wrapper; NULL ("skip-marked") when
+	 *  the class has no capabilities query yet. */
 	conf_caps_fn_t capabilities;
 	/** Representative data-path call on a NULL handle; must refuse
 	 *  with an in-enum, non-OK status. */
@@ -295,7 +290,7 @@ static alp_status_t adc_null_call_(void)
 	return alp_adc_read_raw(NULL, &raw);
 }
 
-/* DAC -- .capabilities skip-marked until PR #329 lands (see header). */
+/* DAC */
 static void *dac_open_null_(void)
 {
 	return alp_dac_open(NULL);
@@ -315,6 +310,10 @@ static void dac_close_(void *h)
 static alp_status_t dac_null_call_(void)
 {
 	return alp_dac_write_mv(NULL, 0);
+}
+static const alp_capabilities_t *dac_caps_(const void *h)
+{
+	return alp_dac_capabilities(h);
 }
 
 /* PWM */
@@ -406,26 +405,26 @@ static alp_status_t rtc_null_call_(void)
 	return alp_rtc_get_time(NULL, &t);
 }
 
-/* WDT -- open takes (id, cfg); NULL-cfg case still applies. */
+/* WDT */
 static void *wdt_open_null_(void)
 {
-	return alp_wdt_open(0, NULL);
+	return alp_wdt_open(NULL);
 }
 static void *wdt_open_invalid_(void)
 {
-	return alp_wdt_open(CONF_BAD_INSTANCE,
-	                    &(alp_wdt_config_t){
-	                        .timeout_ms = 1000,
-	                        .on_timeout = ALP_WDT_RESET_SOC,
-	                    });
+	return alp_wdt_open(&(alp_wdt_config_t){
+	    .wdt_id     = CONF_BAD_INSTANCE,
+	    .timeout_ms = 1000,
+	    .on_timeout = ALP_WDT_RESET_SOC,
+	});
 }
 static void *wdt_open_valid_(void)
 {
-	return alp_wdt_open(0,
-	                    &(alp_wdt_config_t){
-	                        .timeout_ms = 1000,
-	                        .on_timeout = ALP_WDT_RESET_SOC,
-	                    });
+	return alp_wdt_open(&(alp_wdt_config_t){
+	    .wdt_id     = 0,
+	    .timeout_ms = 1000,
+	    .on_timeout = ALP_WDT_RESET_SOC,
+	});
 }
 static void wdt_close_(void *h)
 {
@@ -596,7 +595,7 @@ static const conf_class_t conf_classes[] = {
 	    .open_invalid     = dac_open_invalid_,
 	    .open_valid       = dac_open_valid_,
 	    .close            = dac_close_,
-	    .capabilities     = NULL, /* skip-marked: alp_dac_capabilities lands in PR #329 */
+	    .capabilities     = dac_caps_,
 	    .null_handle_call = dac_null_call_,
 	    .must_open        = false, /* no DAC controller on native_sim */
 	},
