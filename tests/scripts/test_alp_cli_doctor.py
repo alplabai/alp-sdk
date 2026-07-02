@@ -174,6 +174,48 @@ def test_workspace_venv_present_not_active_is_warn(monkeypatch, tmp_path):
     assert doctor._check_workspace_venv().status == doctor.WARN
 
 
+def test_ninja_missing_is_fail(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    assert doctor._check_ninja().status == doctor.FAIL
+
+
+def test_dtc_and_gperf_missing_are_warn_only(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    assert doctor._check_dtc().status == doctor.WARN
+    assert doctor._check_gperf().status == doctor.WARN
+
+
+def test_jlink_missing_is_warn_only(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    assert doctor._check_jlink().status == doctor.WARN
+
+
+def test_jlink_present_is_pass(monkeypatch):
+    monkeypatch.setattr(
+        doctor.shutil, "which",
+        lambda name: "/usr/bin/JLinkExe" if name == "JLinkExe" else None,
+    )
+    assert doctor._check_jlink().status == doctor.PASS
+
+
+def test_zephyr_pin_read_live_from_west_yml(monkeypatch, tmp_path):
+    (tmp_path / "west.yml").write_text(
+        "manifest:\n"
+        "  projects:\n"
+        "    - name: zephyr\n"
+        "      revision: v9.9.9\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
+    assert doctor._zephyr_pin() == "v9.9.9"
+    assert doctor._pin_mm() == (9, 9)
+
+
+def test_zephyr_pin_falls_back_without_west_yml(monkeypatch, tmp_path):
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)  # no west.yml
+    assert doctor._zephyr_pin() == doctor.ZEPHYR_PIN
+
+
 # -------- end-to-end command behaviour ---------------------------------------
 
 

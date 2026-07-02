@@ -5,11 +5,10 @@
 #
 # Cross-platform scope: this script targets Linux + macOS (POSIX
 # shells).  Windows users should invoke it via WSL2 (Ubuntu-22.04
-# is the tested distro) or run the equivalent commands by hand --
-# see docs/cross-platform-setup.md section 4 for the native
-# PowerShell equivalents (winget + scoop install of west, the
-# Zephyr SDK, the Python bits) that get you the same workspace
-# without bash.
+# is the tested distro) or run scripts/bootstrap.ps1 in native
+# PowerShell (same flow: venv + west init/update + pip install -e .)
+# -- see docs/cross-platform-setup.md section 4 for the manual
+# equivalents and what the PS1 script cannot auto-install.
 #
 # Fresh-clone bootstrap for the Alp SDK.  Sets up a Zephyr workspace
 # beside the alp-sdk checkout, installs Python deps, and prints the
@@ -222,6 +221,12 @@ if [ "${DO_PIP}" -eq 1 ]; then
     info "Installing alp-sdk Python extras into the venv (jsonschema, imgtool)"
     "${VPY}" -m pip install -q jsonschema imgtool \
         || warn "alp-sdk extras install reported a problem -- check manually"
+    # The `alp` CLI front door (alp init / build / run / flash / emit /
+    # validate / model / doctor / monitor) -- editable install, so a
+    # `git pull` in the checkout updates the CLI in place.
+    info "Installing the alp CLI into the venv (pip install -e ${REPO_ROOT})"
+    "${VPY}" -m pip install -q -e "${REPO_ROOT}" \
+        || warn "alp CLI editable install reported a problem -- check manually"
 else
     info "Skipping pip installs (--no-pip)"
 fi
@@ -276,6 +281,9 @@ Next steps:
   # Make Zephyr reachable for builds:
   export ZEPHYR_BASE="${WORKSPACE_DIR}/zephyr"
   export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
+
+  # Sanity-check the host environment with the alp CLI:
+  alp doctor
 
   # Run the local test suite:
   bash scripts/test-all.sh

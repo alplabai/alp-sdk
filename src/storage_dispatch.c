@@ -100,62 +100,62 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 	return h;
 }
 
-alp_status_t alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info)
+alp_status_t alp_storage_get_info(alp_storage_t *storage, alp_storage_info_t *info)
 {
 	if (info == NULL) return ALP_ERR_INVAL;
 	*info = (alp_storage_info_t){ 0 };
-	if (s == NULL || !s->in_use) return ALP_ERR_NOT_READY;
-	if (s->state.ops->get_info == NULL) return ALP_ERR_NOSUPPORT;
-	return s->state.ops->get_info(&s->state, info);
+	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
+	if (storage->state.ops->get_info == NULL) return ALP_ERR_NOSUPPORT;
+	return storage->state.ops->get_info(&storage->state, info);
 }
 
-alp_status_t alp_storage_read(alp_storage_t *s, uint64_t off, void *data, size_t len)
+alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t off, void *data, size_t len)
 {
-	if (s == NULL || !s->in_use) return ALP_ERR_NOT_READY;
+	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
 	if (len == 0u) return ALP_OK;
 	if (data == NULL) return ALP_ERR_INVAL;
-	if (s->state.ops->read == NULL) return ALP_ERR_NOSUPPORT;
-	return s->state.ops->read(&s->state, off, data, len);
+	if (storage->state.ops->read == NULL) return ALP_ERR_NOSUPPORT;
+	return storage->state.ops->read(&storage->state, off, data, len);
 }
 
-alp_status_t alp_storage_write(alp_storage_t *s, uint64_t off, const void *data, size_t len)
+alp_status_t alp_storage_write(alp_storage_t *storage, uint64_t off, const void *data, size_t len)
 {
-	if (s == NULL || !s->in_use) return ALP_ERR_NOT_READY;
-	if (s->state.read_only) return ALP_ERR_NOT_READY;
+	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
+	if (storage->state.read_only) return ALP_ERR_NOT_READY;
 	if (len == 0u) return ALP_OK;
 	if (data == NULL) return ALP_ERR_INVAL;
-	if (s->state.ops->write == NULL) return ALP_ERR_NOSUPPORT;
-	return s->state.ops->write(&s->state, off, data, len);
+	if (storage->state.ops->write == NULL) return ALP_ERR_NOSUPPORT;
+	return storage->state.ops->write(&storage->state, off, data, len);
 }
 
-alp_status_t alp_storage_erase(alp_storage_t *s, uint64_t off, uint64_t len)
+alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t off, uint64_t len)
 {
-	if (s == NULL || !s->in_use) return ALP_ERR_NOT_READY;
-	if (s->state.read_only) return ALP_ERR_INVAL;
+	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
+	if (storage->state.read_only) return ALP_ERR_INVAL;
 	if (len == 0u) return ALP_OK;
-	if (s->state.ops->erase == NULL) return ALP_ERR_NOSUPPORT;
-	return s->state.ops->erase(&s->state, off, len);
+	if (storage->state.ops->erase == NULL) return ALP_ERR_NOSUPPORT;
+	return storage->state.ops->erase(&storage->state, off, len);
 }
 
-alp_status_t alp_storage_sync(alp_storage_t *s)
+alp_status_t alp_storage_sync(alp_storage_t *storage)
 {
-	if (s == NULL || !s->in_use) return ALP_ERR_NOT_READY;
-	if (s->state.ops->sync == NULL) return ALP_OK; /* nothing to flush */
-	return s->state.ops->sync(&s->state);
+	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
+	if (storage->state.ops->sync == NULL) return ALP_OK; /* nothing to flush */
+	return storage->state.ops->sync(&storage->state);
 }
 
-void alp_storage_close(alp_storage_t *s)
+void alp_storage_close(alp_storage_t *storage)
 {
-	if (s == NULL || !s->in_use) return;
-	if (s->state.ops != NULL && s->state.ops->close != NULL) {
-		s->state.ops->close(&s->state);
+	if (storage == NULL || !storage->in_use) return;
+	if (storage->state.ops != NULL && storage->state.ops->close != NULL) {
+		storage->state.ops->close(&storage->state);
 	}
-	_free(s);
+	_free(storage);
 }
 
-const alp_capabilities_t *alp_storage_capabilities(const alp_storage_t *s)
+const alp_capabilities_t *alp_storage_capabilities(const alp_storage_t *storage)
 {
-	return (s != NULL) ? &s->cached_caps : NULL;
+	return (storage != NULL) ? &storage->cached_caps : NULL;
 }
 
 alp_status_t alp_storage_configure_inline_aes(alp_storage_t                  *storage,

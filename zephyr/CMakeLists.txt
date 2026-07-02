@@ -41,6 +41,8 @@ zephyr_library_named(alp_sdk)
 zephyr_library_sources(
     # Runtime capability table -- always compiled; pure .rodata, no Kconfig guard.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/cap.c
+    # Runtime SDK-version accessor -- always compiled; pure .rodata.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/version.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/delay_zephyr.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/handles.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/last_error.c

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alp-sdk-cli"
-version = "0.6.0"
+version = "0.8.1"
 description = "Command-line front-end for the Alp SDK"
 requires-python = ">=3.10"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "cbor2>=5.0",
     "questionary>=2.0",
     "colorama>=0.4.6",
+    "pyserial>=3.5",
 ]
 
 [project.optional-dependencies]

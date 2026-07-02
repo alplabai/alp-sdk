@@ -3,7 +3,8 @@
 Runs a battery of host / filesystem / `--version` checks and prints one
 `[PASS]`/`[WARN]`/`[FAIL]` line each with a remediation hint, mirroring the
 truth encoded in `scripts/bootstrap.sh` (workspace venv at
-`../zephyrproject/.venv`, the `v4.4.0` Zephyr pin, `.west`/`VERSION` probing).
+`../zephyrproject/.venv`, the Zephyr pin read live from west.yml,
+`.west`/`VERSION` probing).
 
 It is strictly HW-free: no build, no board, no flash -- pure environment,
 filesystem and `--version` inspection -- so it is safe to run anywhere,
@@ -50,9 +51,9 @@ PASS = "PASS"
 WARN = "WARN"
 FAIL = "FAIL"
 
-# Keep in sync with the Zephyr `revision:` pin in west.yml / bootstrap.sh.
+# Fallback when the SDK's west.yml can't be read; the live pin comes from
+# _zephyr_pin() so a west.yml bump never leaves doctor checking a stale pin.
 ZEPHYR_PIN = "v4.4.0"
-_PIN_MM = (4, 4)
 ZEPHYR_SDK_VERSION = "zephyr-sdk-1.0.1"
 
 _REQUIRED_DEPS = ("yaml", "jsonschema", "click", "cbor2", "questionary", "colorama")
@@ -98,6 +99,25 @@ def _repo_root() -> Path:
 def _workspace_dir() -> Path:
     """The Zephyr workspace bootstrap.sh creates beside the alp-sdk checkout."""
     return _repo_root().parent / "zephyrproject"
+
+
+def _zephyr_pin() -> str:
+    """The Zephyr `revision:` pin, read live from the SDK's west.yml.
+
+    Falls back to ZEPHYR_PIN when west.yml is missing/unparseable (e.g. a
+    packaged install without the repo checkout).
+    """
+    try:
+        text = (_repo_root() / "west.yml").read_text(encoding="utf-8")
+    except OSError:
+        return ZEPHYR_PIN
+    m = re.search(r"-\s+name:\s+zephyr\s*\n\s+revision:\s+(\S+)", text)
+    return m.group(1) if m else ZEPHYR_PIN
+
+
+def _pin_mm() -> tuple[int, int]:
+    """(MAJOR, MINOR) of the pinned Zephyr version."""
+    return _parse_two(_zephyr_pin()) or (4, 4)
 
 
 # -------- individual checks ---------------------------------------------------
@@ -162,6 +182,74 @@ def _check_cmake() -> CheckResult:
     return CheckResult(
         "cmake", FAIL, f"cmake {ver[0]}.{ver[1]} is below the required 3.20",
         "Upgrade CMake to 3.20+ (find_package(Zephyr) minimum).",
+    )
+
+
+def _check_ninja() -> CheckResult:
+    # Zephyr's default CMake generator; every west build needs it.
+    if shutil.which("ninja") is None:
+        return CheckResult(
+            "ninja", FAIL, "ninja not found on PATH",
+            "Install it: apt install ninja-build / brew install ninja / "
+            "winget install Ninja-build.Ninja.",
+        )
+    ver = _tool_version(["ninja", "--version"])
+    label = f"ninja {ver[0]}.{ver[1]}" if ver else "ninja present"
+    return CheckResult("ninja", PASS, label)
+
+
+def _check_dtc() -> CheckResult:
+    # The devicetree compiler.  Zephyr's build runs it for extra dts
+    # validation when present; WARN-only because edtlib does the
+    # load-bearing parse in pure Python.
+    if shutil.which("dtc") is None:
+        return CheckResult(
+            "dtc", WARN, "devicetree compiler (dtc) not found on PATH",
+            "Install it: apt install device-tree-compiler / brew install dtc "
+            "(bundled with the Zephyr SDK on Windows).",
+        )
+    ver = _tool_version(["dtc", "--version"])
+    label = f"dtc {ver[0]}.{ver[1]}" if ver else "dtc present"
+    return CheckResult("dtc", PASS, label)
+
+
+def _check_gperf() -> CheckResult:
+    # Needed by Zephyr's kobject/userspace generation; WARN-only because
+    # plain kernel-mode apps build without it.
+    if shutil.which("gperf") is None:
+        return CheckResult(
+            "gperf", WARN, "gperf not found on PATH",
+            "Install it: apt install gperf / brew install gperf "
+            "(bundled with the Zephyr SDK on Windows).",
+        )
+    ver = _tool_version(["gperf", "--version"])
+    label = f"gperf {ver[0]}.{ver[1]}" if ver else "gperf present"
+    return CheckResult("gperf", PASS, label)
+
+
+def _check_imgtool() -> CheckResult:
+    # MCUboot image signing (secure-boot flows).  WARN-only: unsigned
+    # bring-up builds don't need it.
+    if importlib.util.find_spec("imgtool") is not None or \
+            shutil.which("imgtool") is not None:
+        return CheckResult("imgtool", PASS, "imgtool available")
+    return CheckResult(
+        "imgtool", WARN, "imgtool not importable / not on PATH",
+        "pip install imgtool (needed to sign MCUboot images; "
+        "not needed for unsigned bring-up builds).",
+    )
+
+
+def _check_jlink() -> CheckResult:
+    # Optional probe tooling: only SWD flash/debug flows need it.
+    for exe in ("JLinkExe", "JLink"):
+        found = shutil.which(exe)
+        if found:
+            return CheckResult("jlink", PASS, f"SEGGER J-Link tools ({found})")
+    return CheckResult(
+        "jlink", WARN, "SEGGER J-Link tools not on PATH (optional)",
+        "Install J-Link Software & Documentation Pack if you flash/debug "
+        "over SWD; not needed for native_sim or bootloader-based flashing.",
     )
 
 
@@ -238,24 +326,26 @@ def _read_zephyr_mm(base: Path) -> tuple[int, int] | None:
 
 
 def _check_zephyr_version() -> CheckResult:
+    pin = _zephyr_pin()
+    pin_mm = _pin_mm()
     base = _zephyr_base()
     if base is None or not (base / "VERSION").is_file():
         return CheckResult(
             "zephyr-version", WARN, "cannot verify Zephyr version (no ZEPHYR_BASE tree)",
-            f"Set ZEPHYR_BASE to a Zephyr {ZEPHYR_PIN} tree.",
+            f"Set ZEPHYR_BASE to a Zephyr {pin} tree.",
         )
     mm = _read_zephyr_mm(base)
     if mm is None:
         return CheckResult(
             "zephyr-version", WARN, "could not parse $ZEPHYR_BASE/VERSION",
-            f"Expected MAJOR.MINOR == {_PIN_MM[0]}.{_PIN_MM[1]} ({ZEPHYR_PIN}).",
+            f"Expected MAJOR.MINOR == {pin_mm[0]}.{pin_mm[1]} ({pin}).",
         )
-    if mm == _PIN_MM:
-        return CheckResult("zephyr-version", PASS, f"Zephyr {mm[0]}.{mm[1]}.x (pin {ZEPHYR_PIN})")
+    if mm == pin_mm:
+        return CheckResult("zephyr-version", PASS, f"Zephyr {mm[0]}.{mm[1]}.x (pin {pin})")
     return CheckResult(
         "zephyr-version", FAIL,
-        f"Zephyr {mm[0]}.{mm[1]}.x != pinned {_PIN_MM[0]}.{_PIN_MM[1]}.x",
-        f"Stale Zephyr tree vs the pinned {ZEPHYR_PIN}: run `west update`.",
+        f"Zephyr {mm[0]}.{mm[1]}.x != pinned {pin_mm[0]}.{pin_mm[1]}.x",
+        f"Stale Zephyr tree vs the pinned {pin} (west.yml): run `west update`.",
     )
 
 
@@ -411,7 +501,11 @@ def _all_checks() -> list[CheckResult]:
         _check_python(),
         _check_west(),
         _check_python_deps(),
+        _check_imgtool(),
         _check_cmake(),
+        _check_ninja(),
+        _check_dtc(),
+        _check_gperf(),
         _check_host_compiler(),
         _check_zephyr_base(),
         _check_zephyr_version(),
@@ -419,6 +513,7 @@ def _all_checks() -> list[CheckResult]:
         _check_workspace_venv(),
         _check_hal_alif(),
         _check_zephyr_sdk(),
+        _check_jlink(),
     ]
     for maybe in (_check_git_autocrlf(), _check_long_paths()):
         if maybe is not None:

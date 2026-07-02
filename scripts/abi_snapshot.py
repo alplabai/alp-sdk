@@ -137,6 +137,28 @@ _SKIP_LINE_RE = re.compile(
 )
 
 
+def _strip_preprocessor(src: str) -> str:
+    """
+    Drop preprocessor lines (and their backslash continuations).
+
+    A `#define` line does not end in `;`, so without this pass
+    `_flatten` glues it onto the next function declaration and the
+    extracted signature (and its hash) gets polluted with macro text
+    whenever a macro block immediately precedes a declaration.
+    """
+    out_lines: list[str] = []
+    in_continuation = False
+    for line in src.splitlines():
+        if in_continuation:
+            in_continuation = line.rstrip().endswith("\\")
+            continue
+        if line.lstrip().startswith("#"):
+            in_continuation = line.rstrip().endswith("\\")
+            continue
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
 def _flatten(src: str) -> str:
     """
     Join logical declarations onto single lines.
@@ -177,7 +199,7 @@ def extract(header_path: Path) -> dict[str, dict[str, Any]]:
             continue  # include guard sentinel
         macros[name] = {"value": value, "hash": fingerprint(name + " " + value)}
 
-    decls = _flatten(strip_comments(text))
+    decls = _flatten(_strip_preprocessor(strip_comments(text)))
 
     typedefs: dict[str, dict[str, str]] = {}
     for m in _TYPEDEF_FNPTR_RE.finditer(decls):
