@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-24",
+  "generated": "2026-07-02",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -7862,6 +7862,10 @@
     },
     "alp/peripheral.h": {
       "functions": {
+        "alp_deinit": {
+          "hash": "c374b43394f7a422",
+          "signature": "alp_status_t alp_deinit(void);"
+        },
         "alp_delay_ms": {
           "hash": "21c34368c9608371",
           "signature": "void alp_delay_ms(uint32_t ms);"
@@ -7918,6 +7922,14 @@
           "hash": "936f06f7f4414abc",
           "signature": "alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t len);"
         },
+        "alp_i2c_target_close": {
+          "hash": "9ced1b45e3bcac20",
+          "signature": "void alp_i2c_target_close(alp_i2c_target_t *tgt);"
+        },
+        "alp_i2c_target_open": {
+          "hash": "efa4b112f8f01b92",
+          "signature": "alp_i2c_target_t * alp_i2c_target_open(const alp_i2c_target_config_t *cfg);"
+        },
         "alp_i2c_write": {
           "hash": "b98371be78869b4c",
           "signature": "alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, size_t len);"
@@ -7925,6 +7937,10 @@
         "alp_i2c_write_read": {
           "hash": "0b7fa85a2c3849aa",
           "signature": "alp_status_t alp_i2c_write_read(alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen);"
+        },
+        "alp_init": {
+          "hash": "1b097309da7a714a",
+          "signature": "alp_status_t alp_init(void);"
         },
         "alp_last_error": {
           "hash": "a15ddf9d11450877",
@@ -7945,6 +7961,18 @@
         "alp_spi_read": {
           "hash": "71e5873d83ffd4ff",
           "signature": "alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len);"
+        },
+        "alp_spi_target_close": {
+          "hash": "a417248d16ebbea7",
+          "signature": "void alp_spi_target_close(alp_spi_target_t *tgt);"
+        },
+        "alp_spi_target_open": {
+          "hash": "3069c8626b43f4a9",
+          "signature": "alp_spi_target_t * alp_spi_target_open(const alp_spi_target_config_t *cfg);"
+        },
+        "alp_spi_target_transceive": {
+          "hash": "b4aa694e4cb14157",
+          "signature": "alp_status_t alp_spi_target_transceive(alp_spi_target_t *bus, const uint8_t *tx, uint8_t *rx, size_t len, size_t *rx_len);"
         },
         "alp_spi_transceive": {
           "hash": "2491d90648c989f6",
@@ -8022,6 +8050,22 @@
           "definition": "typedef struct alp_i2c alp_i2c_t;",
           "hash": "db2417083edaab94"
         },
+        "alp_i2c_target_read_cb_t": {
+          "definition": "typedef alp_status_t (*alp_i2c_target_read_cb_t)(uint8_t *byte, void *user);",
+          "hash": "41d0178d74c10760"
+        },
+        "alp_i2c_target_stop_cb_t": {
+          "definition": "typedef void (*alp_i2c_target_stop_cb_t)(void *user);",
+          "hash": "10e3fe59802dc708"
+        },
+        "alp_i2c_target_t": {
+          "definition": "typedef struct alp_i2c_target alp_i2c_target_t;",
+          "hash": "126417068c6810f0"
+        },
+        "alp_i2c_target_write_cb_t": {
+          "definition": "typedef void (*alp_i2c_target_write_cb_t)(uint8_t byte, void *user);",
+          "hash": "a10e2d0c6600201b"
+        },
         "alp_pixfmt_t": {
           "definition": "typedef enum { ALP_PIXFMT_MONO_VLSB = 0, ALP_PIXFMT_RGB565 = 1, ALP_PIXFMT_RGB888 = 2, ALP_PIXFMT_ARGB8888 = 3 } alp_pixfmt_t;",
           "hash": "b7b2fa99edecde8b"
@@ -8033,6 +8077,10 @@
         "alp_spi_t": {
           "definition": "typedef struct alp_spi alp_spi_t;",
           "hash": "3d4c6b8b6611f2e7"
+        },
+        "alp_spi_target_t": {
+          "definition": "typedef struct alp_spi_target alp_spi_target_t;",
+          "hash": "7791d07ddc74db4b"
         },
         "alp_status_t": {
           "definition": "typedef enum { ALP_OK = 0, ALP_ERR_INVAL = -1, ALP_ERR_NOT_READY = -2, ALP_ERR_BUSY = -3, ALP_ERR_TIMEOUT = -4, ALP_ERR_IO = -5, ALP_ERR_NOSUPPORT = -6, ALP_ERR_NOMEM = -7, ALP_ERR_OUT_OF_RANGE = -8, ALP_ERR_NOT_PRESENT_ON_THIS_SOC = -9, ALP_ERR_NOT_IMPLEMENTED = -10, ALP_ERR_VERSION = -11, ALP_ERR_NO_BACKEND = -12, ALP_ERR_NO_FIT = -13, ALP_ERR_NOT_FOUND = -14, ALP_ERR_NOT_PROVISIONED = -15 } alp_status_t;",
