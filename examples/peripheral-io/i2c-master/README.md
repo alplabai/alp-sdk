@@ -26,16 +26,18 @@ V2N-M1 families per
 
 7-bit address depends on the ADD0 strap:
 
-| ADD0 strap | Address | SoM defaults                    |
-|------------|---------|---------------------------------|
-| GND        | 0x48    | E1M-AEN (this example's default) |
-| V+         | 0x49    | (none today)                    |
-| SDA        | 0x40    | E1M-V2N, E1M-V2M (V2N-M1)       |
-| SCL        | 0x4B    | (none today)                    |
+| ADD0 strap | Address | SoM defaults                              |
+|------------|---------|-------------------------------------------|
+| GND        | 0x48    | E1M-AEN + E1M-V2N families (this default) |
+| V+         | 0x49    | (none today)                              |
+| SDA        | 0x4A    | (none today)                              |
+| SCL        | 0x4B    | (none today)                              |
 
-If you copy this example to a V2N project, change `TMP112_ADDR_7BIT`
-to `0x40` -- the V2N straps ADD0 to SDA (see TMP112 datasheet SBOS473K
-table 2 or [`include/alp/chips/tmp112.h`](../../../include/alp/chips/tmp112.h)).
+All current SoM families strap ADD0 to GND, so `TMP112_ADDR_7BIT`
+works unchanged across them (see the `scope:` note in
+[`metadata/chips/tmp112.yaml`](../../../metadata/chips/tmp112.yaml),
+TMP112 datasheet SBOS473K table 2, or
+[`include/alp/chips/tmp112.h`](../../../include/alp/chips/tmp112.h)).
 
 ## Build
 

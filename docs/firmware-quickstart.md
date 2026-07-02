@@ -134,7 +134,7 @@ if (bus == NULL) {
 }
 
 tmp112_t temp;
-if (tmp112_init(&temp, bus, 0x40) != ALP_OK) {
+if (tmp112_init(&temp, bus, TMP112_I2C_ADDR_GND) != ALP_OK) {
     printf("[tmp112] init failed\n");
 }
 ```
