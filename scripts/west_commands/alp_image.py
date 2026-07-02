@@ -24,6 +24,9 @@ The bundle layout:
     └── helper-mcus/
         ├── gd32_bridge.bin    (when registered)
         └── cc3501e_otp.blob
+
+Also runnable standalone (`python alp_image.py <app>`) -- the path the
+`alp image` CLI verb delegates to, mirroring alp_flash.py.
 """
 
 from __future__ import annotations
@@ -35,13 +38,154 @@ import shutil
 import sys
 import tarfile
 from pathlib import Path
+from typing import Optional
 
 import yaml                                       # type: ignore[import-untyped]
-from west import log                              # type: ignore[import-not-found]
-from west.commands import WestCommand             # type: ignore[import-not-found]
+
+try:
+    from west import log                     # type: ignore[import-not-found]
+    from west.commands import WestCommand    # type: ignore[import-not-found]
+    _HAS_WEST = True
+except ImportError:                          # pragma: no cover
+    # Allow `python alp_image.py ...` outside a west workspace (the
+    # `alp image` delegation path + unit tests).
+    _HAS_WEST = False
+
+    class _StubLog:
+        @staticmethod
+        def inf(msg: str) -> None: print(msg)
+        @staticmethod
+        def wrn(msg: str) -> None: print(f"WARN: {msg}", file=sys.stderr)
+        @staticmethod
+        def err(msg: str) -> None: print(f"ERROR: {msg}", file=sys.stderr)
+        @staticmethod
+        def die(msg: str) -> None:
+            print(f"FATAL: {msg}", file=sys.stderr)
+            sys.exit(1)
+
+    log = _StubLog()                         # type: ignore[assignment]
+
+    class WestCommand:                       # type: ignore[no-redef]
+        """Stand-in so the module imports cleanly without west."""
+
+        def __init__(self, *a, **kw) -> None: pass
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _alp_common import find_sdk_root             # noqa: E402
+
+
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Shared argparse wiring; used by both WestCommand and the
+    ``python alp_image.py ...`` standalone path."""
+    parser.add_argument(
+        "app_path",
+        help="Path to the application source directory.")
+    parser.add_argument(
+        "--build-root", default=None,
+        help="Override the build root (default: <app_path>/build).")
+
+
+def _tar_directory(src: Path, dst: Path) -> None:
+    """Tar+gzip `src` into `dst` (overwriting)."""
+    if dst.exists():
+        dst.unlink()
+    with tarfile.open(dst, "w:gz") as tf:
+        tf.add(src, arcname=src.name)
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def run(args: argparse.Namespace) -> int:
+    """Walk system-manifest.yaml and assemble build/image-bundle/."""
+    sdk_root = find_sdk_root()
+    if sdk_root is None:
+        log.die("Cannot locate alp-sdk root.")
+        return 1
+
+    app_path = Path(args.app_path).resolve()
+    build_root = (Path(args.build_root).resolve()
+                  if args.build_root
+                  else app_path / "build")
+    manifest_path = build_root / "system-manifest.yaml"
+    if not manifest_path.is_file():
+        log.die(f"system-manifest.yaml not found at {manifest_path}; "
+                f"run `alp build` / `west alp-build {args.app_path}` first.")
+        return 1
+
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        log.die(f"system-manifest.yaml at {manifest_path} did not "
+                f"parse to a mapping.")
+        return 1
+
+    bundle_dir = build_root / "image-bundle"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    slices_dir = bundle_dir / "slices"
+    slices_dir.mkdir(exist_ok=True)
+    helpers_dir = bundle_dir / "helper-mcus"
+    helpers_dir.mkdir(exist_ok=True)
+
+    bundle_entries: list[dict[str, object]] = []
+
+    for slice_ in manifest.get("slices", []) or []:
+        if slice_.get("status") != "ok":
+            log.inf(f"alp-image: skipping {slice_.get('core_id')} "
+                    f"(status: {slice_.get('status')})")
+            continue
+        core_id = slice_.get("core_id", "unknown")
+        os_kind = slice_.get("os", "unknown")
+        build_dir = slice_.get("build_dir")
+        if not build_dir or not Path(build_dir).is_dir():
+            log.inf(f"alp-image: skipping {core_id} (build_dir missing)")
+            continue
+        archive = slices_dir / f"{core_id}-{os_kind}.tar.gz"
+        _tar_directory(Path(build_dir), archive)
+        bundle_entries.append({
+            "core_id":  core_id,
+            "os":       os_kind,
+            "artefact": str(archive.relative_to(bundle_dir)),
+            "sha256":   _sha256(archive),
+            "size":     archive.stat().st_size,
+        })
+
+    helper_entries: list[dict[str, object]] = []
+    for hm in manifest.get("helper_mcus", []) or []:
+        fw = hm.get("firmware_path")
+        if not fw:
+            continue
+        fw_path = Path(fw)
+        if not fw_path.is_file():
+            log.inf(f"alp-image: helper-mcu firmware not found at "
+                    f"{fw_path}; skipping")
+            continue
+        dst = helpers_dir / fw_path.name
+        shutil.copy2(fw_path, dst)
+        helper_entries.append({
+            "name":     hm.get("name"),
+            "role":     hm.get("role"),
+            "artefact": str(dst.relative_to(bundle_dir)),
+            "sha256":   _sha256(dst),
+            "size":     dst.stat().st_size,
+        })
+
+    bundle_manifest = {
+        "schema_version": 1,
+        "generated_by":   "west alp-image",
+        "hw_info":        manifest.get("hw_info", {}),
+        "slices":         bundle_entries,
+        "helper_mcus":    helper_entries,
+        "boot_order":     manifest.get("boot_order", []),
+    }
+    (bundle_dir / "bundle-manifest.json").write_text(
+        json.dumps(bundle_manifest, indent=2), encoding="utf-8")
+    log.inf(f"alp-image: bundle ready at {bundle_dir}")
+    return 0
 
 
 class AlpImage(WestCommand):
@@ -60,111 +204,31 @@ class AlpImage(WestCommand):
             description=self.description,
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
-        parser.add_argument(
-            "app_path",
-            help="Path to the application source directory.")
-        parser.add_argument(
-            "--build-root", default=None,
-            help="Override the build root (default: <app_path>/build).")
+        _add_arguments(parser)
         return parser
 
     def do_run(self, args, _unknown):        # type: ignore[no-untyped-def]
-        sdk_root = find_sdk_root()
-        if sdk_root is None:
-            log.die("Cannot locate alp-sdk root.")
-            return 1
+        return run(args)
 
-        app_path = Path(args.app_path).resolve()
-        build_root = (Path(args.build_root).resolve()
-                      if args.build_root
-                      else app_path / "build")
-        manifest_path = build_root / "system-manifest.yaml"
-        if not manifest_path.is_file():
-            log.die(f"system-manifest.yaml not found at {manifest_path}; "
-                    f"run `west alp-build {args.app_path}` first.")
-            return 1
 
-        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-        if not isinstance(manifest, dict):
-            log.die(f"system-manifest.yaml at {manifest_path} did not "
-                    f"parse to a mapping.")
-            return 1
+# ---------------------------------------------------------------------
+# Standalone CLI entry (`python alp_image.py <app>`)
+# ---------------------------------------------------------------------
 
-        bundle_dir = build_root / "image-bundle"
-        bundle_dir.mkdir(parents=True, exist_ok=True)
-        slices_dir = bundle_dir / "slices"
-        slices_dir.mkdir(exist_ok=True)
-        helpers_dir = bundle_dir / "helper-mcus"
-        helpers_dir.mkdir(exist_ok=True)
 
-        bundle_entries: list[dict[str, object]] = []
+def main(argv: Optional[list[str]] = None) -> int:
+    """Standalone entry -- the `alp image` delegation path.  When
+    invoked under west, the AlpImage.do_run path is used instead."""
+    parser = argparse.ArgumentParser(
+        prog="alp-image",
+        description=("Assemble a single flashable bundle from "
+                     "system-manifest.yaml."),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_arguments(parser)
+    args = parser.parse_args(argv)
+    return run(args)
 
-        for slice_ in manifest.get("slices", []) or []:
-            if slice_.get("status") != "ok":
-                log.inf(f"alp-image: skipping {slice_.get('core_id')} "
-                        f"(status: {slice_.get('status')})")
-                continue
-            core_id = slice_.get("core_id", "unknown")
-            os_kind = slice_.get("os", "unknown")
-            build_dir = slice_.get("build_dir")
-            if not build_dir or not Path(build_dir).is_dir():
-                log.inf(f"alp-image: skipping {core_id} (build_dir missing)")
-                continue
-            archive = slices_dir / f"{core_id}-{os_kind}.tar.gz"
-            self._tar_directory(Path(build_dir), archive)
-            bundle_entries.append({
-                "core_id":  core_id,
-                "os":       os_kind,
-                "artefact": str(archive.relative_to(bundle_dir)),
-                "sha256":   self._sha256(archive),
-                "size":     archive.stat().st_size,
-            })
 
-        helper_entries: list[dict[str, object]] = []
-        for hm in manifest.get("helper_mcus", []) or []:
-            fw = hm.get("firmware_path")
-            if not fw:
-                continue
-            fw_path = Path(fw)
-            if not fw_path.is_file():
-                log.inf(f"alp-image: helper-mcu firmware not found at "
-                        f"{fw_path}; skipping")
-                continue
-            dst = helpers_dir / fw_path.name
-            shutil.copy2(fw_path, dst)
-            helper_entries.append({
-                "name":     hm.get("name"),
-                "role":     hm.get("role"),
-                "artefact": str(dst.relative_to(bundle_dir)),
-                "sha256":   self._sha256(dst),
-                "size":     dst.stat().st_size,
-            })
-
-        bundle_manifest = {
-            "schema_version": 1,
-            "generated_by":   "west alp-image",
-            "hw_info":        manifest.get("hw_info", {}),
-            "slices":         bundle_entries,
-            "helper_mcus":    helper_entries,
-            "boot_order":     manifest.get("boot_order", []),
-        }
-        (bundle_dir / "bundle-manifest.json").write_text(
-            json.dumps(bundle_manifest, indent=2), encoding="utf-8")
-        log.inf(f"alp-image: bundle ready at {bundle_dir}")
-        return 0
-
-    @staticmethod
-    def _tar_directory(src: Path, dst: Path) -> None:
-        """Tar+gzip `src` into `dst` (overwriting)."""
-        if dst.exists():
-            dst.unlink()
-        with tarfile.open(dst, "w:gz") as tf:
-            tf.add(src, arcname=src.name)
-
-    @staticmethod
-    def _sha256(path: Path) -> str:
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-        return h.hexdigest()
+if __name__ == "__main__":                    # pragma: no cover
+    raise SystemExit(main())

@@ -19,8 +19,32 @@ import subprocess
 import sys
 from pathlib import Path
 
-from west import log                              # type: ignore[import-not-found]
-from west.commands import WestCommand             # type: ignore[import-not-found]
+try:
+    from west import log                          # type: ignore[import-not-found]
+    from west.commands import WestCommand         # type: ignore[import-not-found]
+    _HAVE_WEST = True
+except ImportError:  # pragma: no cover - unit tests run without west installed
+    # Import-safe without west so `_EMIT_MODES` stays importable by the
+    # alp/west emit-parity test (tests/scripts/test_alp_cli_emit.py).
+    _HAVE_WEST = False
+
+    class WestCommand:  # type: ignore[no-redef]
+        """Minimal shim so this module imports without west (unit tests)."""
+
+        def __init__(self, *args, **kwargs):  # noqa: D401,ANN002,ANN003
+            pass
+
+    class _StubLog:
+        """west.log stand-in; only die() is reachable outside west."""
+
+        @staticmethod
+        def inf(msg: str) -> None: print(msg)
+        @staticmethod
+        def die(msg: str) -> None:
+            print(f"FATAL: {msg}", file=sys.stderr)
+            sys.exit(1)
+
+    log = _StubLog()  # type: ignore[assignment]
 
 # Allow `from _alp_common import ...` regardless of how west loads the wrapper.
 sys.path.insert(0, str(Path(__file__).resolve().parent))

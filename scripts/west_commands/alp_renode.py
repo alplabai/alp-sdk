@@ -57,7 +57,21 @@ except ImportError:  # pragma: no cover - unit tests run without west installed
         def __init__(self, *args, **kwargs):  # noqa: D401,ANN002,ANN003
             pass
 
-    log = None  # type: ignore[assignment]
+    class _StubLog:
+        """west.log stand-in for the standalone (`alp renode`) path."""
+
+        @staticmethod
+        def inf(msg: str) -> None: print(msg)
+        @staticmethod
+        def wrn(msg: str) -> None: print(f"WARN: {msg}", file=sys.stderr)
+        @staticmethod
+        def err(msg: str) -> None: print(f"ERROR: {msg}", file=sys.stderr)
+        @staticmethod
+        def die(msg: str) -> None:
+            print(f"FATAL: {msg}", file=sys.stderr)
+            sys.exit(1)
+
+    log = _StubLog()  # type: ignore[assignment]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _alp_common import find_sdk_root            # noqa: E402
@@ -150,7 +164,7 @@ def load_manifest(build_root: Path) -> dict:
     if not mpath.is_file():
         raise AlpRenodeError(
             f"no system-manifest.yaml at {mpath}; run "
-            f"`west alp-build <app>` first.")
+            f"`alp build` / `west alp-build <app>` first.")
     data = yaml.safe_load(mpath.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise AlpRenodeError(
@@ -302,6 +316,92 @@ def _run_renode(
 # ---------------------------------------------------------------------
 
 
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Shared argparse wiring; used by both WestCommand and the
+    ``python alp_renode.py ...`` standalone path."""
+    parser.add_argument(
+        "app_path", nargs="?", default=".",
+        help="Path to the application source directory.")
+    parser.add_argument(
+        "--build-root", default=None,
+        help="Override the build root (default: <app_path>/build).")
+    parser.add_argument(
+        "--board", default=None,
+        help="Override the SoM SKU used to pick the Renode platform "
+             "descriptor (default: hw_info.sku from the manifest).")
+    parser.add_argument(
+        "--image-bundle", default=None,
+        help="Directory of pre-built per-slice artefacts (dual-OS "
+             "boot).  Accepted for parity with the dual-OS flow; "
+             "unused by the single-Zephyr-slice smoke.")
+    parser.add_argument(
+        "--log", default=None,
+        help="Tee the Renode UART/console output to this file "
+             "(default: <build_root>/renode.log).")
+    parser.add_argument(
+        "--timeout", type=int, default=_DEFAULT_TIMEOUT_S,
+        help=f"Wall-clock cap for the Renode run, seconds "
+             f"(default: {_DEFAULT_TIMEOUT_S}).")
+    parser.add_argument(
+        "--expect", default=None,
+        help="If set, stop early (exit 0) when this substring "
+             "appears in the console; exit 1 if the run ends "
+             "without it.")
+
+
+def run(args) -> int:                        # type: ignore[no-untyped-def]
+    """Pre-flight + boot the manifest in Renode (shared west/standalone
+    body)."""
+    sdk_root = find_sdk_root()
+    if sdk_root is None:
+        log.die("Cannot locate alp-sdk root.")
+        return 1
+
+    app_path = Path(args.app_path).resolve()
+    build_root = (Path(args.build_root).resolve()
+                  if args.build_root
+                  else app_path / "build")
+    log_path = (Path(args.log).resolve()
+                if args.log
+                else build_root / "renode.log")
+
+    try:
+        manifest = load_manifest(build_root)
+        sku = args.board or (manifest.get("hw_info") or {}).get("sku")
+        if not sku:
+            raise AlpRenodeError(
+                "could not determine SoM SKU: manifest has no "
+                "hw_info.sku and --board was not given.")
+        elf = zephyr_elf_from_manifest(manifest, build_root)
+        if not elf.is_file():
+            raise AlpRenodeError(
+                f"Zephyr ELF not found at {elf}; run "
+                f"`west alp-build {app_path}` first.")
+        repl, resc = platform_files_for_sku(sku, sdk_root)
+        for descriptor in (repl, resc):
+            if not descriptor.is_file():
+                raise AlpRenodeError(
+                    f"missing Renode descriptor {descriptor}.")
+        renode_bin = resolve_renode_binary()
+    except AlpRenodeError as e:
+        log.die(str(e))
+        return 1
+
+    if args.image_bundle:
+        log.inf(f"alp-renode: --image-bundle {args.image_bundle} "
+                f"accepted but unused by the single-slice smoke.")
+
+    log.inf(f"alp-renode: booting {elf} on {repl.name} "
+            f"(log -> {log_path})")
+    argv = build_renode_argv(renode_bin, repl, resc, elf)
+    rc = _run_renode(argv, log_path, args.timeout, expect=args.expect)
+    if rc != 0:
+        log.die(f"alp-renode: console did not contain "
+                f"{args.expect!r} within {args.timeout}s "
+                f"(see {log_path}).")
+    return rc
+
+
 class AlpRenode(WestCommand):
 
     def __init__(self) -> None:
@@ -318,82 +418,31 @@ class AlpRenode(WestCommand):
             description=self.description,
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
-        parser.add_argument(
-            "app_path", nargs="?", default=".",
-            help="Path to the application source directory.")
-        parser.add_argument(
-            "--build-root", default=None,
-            help="Override the build root (default: <app_path>/build).")
-        parser.add_argument(
-            "--board", default=None,
-            help="Override the SoM SKU used to pick the Renode platform "
-                 "descriptor (default: hw_info.sku from the manifest).")
-        parser.add_argument(
-            "--image-bundle", default=None,
-            help="Directory of pre-built per-slice artefacts (dual-OS "
-                 "boot).  Accepted for parity with the dual-OS flow; "
-                 "unused by the single-Zephyr-slice smoke.")
-        parser.add_argument(
-            "--log", default=None,
-            help="Tee the Renode UART/console output to this file "
-                 "(default: <build_root>/renode.log).")
-        parser.add_argument(
-            "--timeout", type=int, default=_DEFAULT_TIMEOUT_S,
-            help=f"Wall-clock cap for the Renode run, seconds "
-                 f"(default: {_DEFAULT_TIMEOUT_S}).")
-        parser.add_argument(
-            "--expect", default=None,
-            help="If set, stop early (exit 0) when this substring "
-                 "appears in the console; exit 1 if the run ends "
-                 "without it.")
+        _add_arguments(parser)
         return parser
 
     def do_run(self, args, _unknown):        # type: ignore[no-untyped-def]
-        sdk_root = find_sdk_root()
-        if sdk_root is None:
-            log.die("Cannot locate alp-sdk root.")
-            return 1
+        return run(args)
 
-        app_path = Path(args.app_path).resolve()
-        build_root = (Path(args.build_root).resolve()
-                      if args.build_root
-                      else app_path / "build")
-        log_path = (Path(args.log).resolve()
-                    if args.log
-                    else build_root / "renode.log")
 
-        try:
-            manifest = load_manifest(build_root)
-            sku = args.board or (manifest.get("hw_info") or {}).get("sku")
-            if not sku:
-                raise AlpRenodeError(
-                    "could not determine SoM SKU: manifest has no "
-                    "hw_info.sku and --board was not given.")
-            elf = zephyr_elf_from_manifest(manifest, build_root)
-            if not elf.is_file():
-                raise AlpRenodeError(
-                    f"Zephyr ELF not found at {elf}; run "
-                    f"`west alp-build {app_path}` first.")
-            repl, resc = platform_files_for_sku(sku, sdk_root)
-            for descriptor in (repl, resc):
-                if not descriptor.is_file():
-                    raise AlpRenodeError(
-                        f"missing Renode descriptor {descriptor}.")
-            renode_bin = resolve_renode_binary()
-        except AlpRenodeError as e:
-            log.die(str(e))
-            return 1
+# ---------------------------------------------------------------------
+# Standalone CLI entry (`python alp_renode.py <app>`)
+# ---------------------------------------------------------------------
 
-        if args.image_bundle:
-            log.inf(f"alp-renode: --image-bundle {args.image_bundle} "
-                    f"accepted but unused by the single-slice smoke.")
 
-        log.inf(f"alp-renode: booting {elf} on {repl.name} "
-                f"(log -> {log_path})")
-        argv = build_renode_argv(renode_bin, repl, resc, elf)
-        rc = _run_renode(argv, log_path, args.timeout, expect=args.expect)
-        if rc != 0:
-            log.die(f"alp-renode: console did not contain "
-                    f"{args.expect!r} within {args.timeout}s "
-                    f"(see {log_path}).")
-        return rc
+def main(argv: Optional[list[str]] = None) -> int:
+    """Standalone entry -- the `alp renode` delegation path.  When
+    invoked under west, the AlpRenode.do_run path is used instead."""
+    parser = argparse.ArgumentParser(
+        prog="alp-renode",
+        description=("Boot the built system manifest in Renode "
+                     "(headless smoke)."),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_arguments(parser)
+    args = parser.parse_args(argv)
+    return run(args)
+
+
+if __name__ == "__main__":                    # pragma: no cover
+    raise SystemExit(main())
