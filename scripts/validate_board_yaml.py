@@ -47,14 +47,20 @@ except ImportError:
     sys.exit("validate_board_yaml: PyYAML is required.  Install via `pip install pyyaml`.")
 
 try:
-    import jsonschema  # type: ignore[import-untyped]
+    import jsonschema  # type: ignore[import-untyped]  # noqa: F401  (dep gate)
 except ImportError:
     sys.exit("validate_board_yaml: jsonschema is required.  Install via `pip install jsonschema`.")
+
+# The ONE shared board.schema.json implementation (schema file resolution,
+# draft dialect, error ordering) lives in alp_cli.validator; this script is
+# a thin caller.  scripts/ is sys.path[0] when this file runs as a script,
+# and the west wrappers put scripts/ on PYTHONPATH, so the import resolves
+# in every supported invocation.
+from alp_cli.validator import iter_schema_errors  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT_DEFAULT = REPO / "metadata"
-SCHEMA = METADATA_ROOT_DEFAULT / "schemas" / "board.schema.json"
 
 
 def _load_yaml(path: Path) -> dict[str, Any] | None:
