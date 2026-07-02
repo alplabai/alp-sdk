@@ -632,7 +632,9 @@ SoM; the conformance suite proves its *backends*.
 every backend must pass — it mechanically exercises the uniform
 lifecycle contract of every portable peripheral class (GPIO / I²C /
 SPI / UART / ADC / DAC / PWM / CAN / RTC / WDT / counter / qenc /
-I²S):
+I²S, plus the I²C/SPI target modes) and the non-class v0.9
+surfaces (`alp_init`/`alp_deinit` idempotency, the
+`alp_uart_rx_ringbuf_*` contract, I²C-target config validation):
 
 - `alp_<class>_open(NULL cfg)` → NULL + `alp_last_error()` ==
   `ALP_ERR_INVAL`
@@ -643,25 +645,62 @@ I²S):
   handle
 - NULL-handle data-path calls refuse with an in-enum status
 
-Run it (the same invocation CI uses, minus the module paths):
+**Expectations come from the capability layer.**  On a real-SoM
+build (any `CONFIG_ALP_SOC_<X>`), whether `open(instance 0)` must
+succeed is derived from `alp_has()` (`<alp/cap.h>`), so the gate
+doubles as a caps↔backend parity check: cap **true** but open
+failed = the port is broken (FAIL); cap **false** but open handed
+out a handle = the capability table is broken (FAIL); cap false and
+open refused the documented way = asserted degrade path, logged as
+`silicon lacks it`.  On `native_sim` (`CONFIG_ALP_SOC_NONE`, the
+permissive profile) the suite falls back to what the test overlay
+wires: gpio / i2c / spi / uart / adc / counter run the positive
+path against emulated controllers; the rest assert the failure
+contract.  The target-mode rows never promote to must-open —
+their headers document `ALP_ERR_NOSUPPORT` as a legitimate
+per-driver refusal.
+
+Run it on `native_sim` (the same invocation CI uses, minus the
+module paths):
 
 ```bash
 twister --testsuite-root tests/zephyr/conformance \
     -p native_sim/native/64 -O twister-out-conformance
 ```
 
+The qualified in-repo boards (`zephyr/boards/alp/`) are in the
+scenario's `platform_allow` too, so the same gate builds — and, on
+the bench or the nightly HIL, runs — with the real backend
+selected.  Per-board `boards/<board>.conf` fragments pin the
+matching `CONFIG_ALP_SOC_*` capability profile.  E.g. a build-only
+smoke for the AEN801 HE core:
+
+```bash
+twister --testsuite-root tests/zephyr/conformance \
+    -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+    --build-only -O twister-out-conformance-arm
+```
+
+**Watchdog safety.**  The WDT row's positive open arms a real
+`RESET_SOC` watchdog, and many M-class watchdogs are
+write-once-armed (`<alp/wdt.h>`) — close() cannot stop them.  The
+arming path therefore runs only under
+`CONFIG_TEST_ALP_CONFORMANCE_WDT_ARM` (default **y** on
+`native_sim` where no watchdog device is wired, default **n** on
+hardware).  A bench operator opting in should run the suite
+dead-last and expect a possible end-of-run reset.
+
 A new SoM port satisfies the gate when the
 `alp_sdk.conformance.portable_api` scenario passes with the new
-backend selected.  Classes whose instance 0 is backed on the build
-platform run the positive path (open + capabilities + double-close);
-classes without an instance must still fail the documented way —
-the suite asserts the failure contract and logs the degrade path
-(`conformance[<class>]: degrade path -- ...` in the handler log), so
-nothing skips silently.  A new portable class is enrolled by adding
-**one row** to the `conf_classes[]` table in
-`tests/zephyr/conformance/src/main.c` — the generic runners pick it
-up automatically; see the test-matrix comment at the top of that
-file.
+backend selected — add a `boards/<board>.conf` in the suite pinning
+the new `CONFIG_ALP_SOC_<X>` and the board name to
+`platform_allow` in `testcase.yaml`.  Nothing skips silently: the
+suite asserts the failure contract and logs every degrade path
+(`conformance[<class>]: degrade path -- ...` in the handler log).
+A new portable class is enrolled by adding **one row** to the
+`conf_classes[]` table in `tests/zephyr/conformance/src/main.c` —
+the generic runners pick it up automatically; see the test-matrix
+comment at the top of that file.
 
 ---
 
