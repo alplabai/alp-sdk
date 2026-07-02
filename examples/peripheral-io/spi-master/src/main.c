@@ -41,7 +41,7 @@
  * transceive / close path runs and the harness latches `done`.
  *
  * Runs on both EVKs: BOARD_SPI_ARDUINO (from <alp/board.h>) resolves
- * to E1M_SPI1 on E1M EVK and E1M_X_SPI1 on E1M-X EVK.
+ * to ALP_E1M_SPI1 on E1M EVK and ALP_E1M_X_SPI1 on E1M-X EVK.
  */
 
 #include <stdio.h>

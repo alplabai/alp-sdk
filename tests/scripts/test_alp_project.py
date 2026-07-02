@@ -276,18 +276,18 @@ class TestDtsOverlayEmit(unittest.TestCase):
         """The alp,pin-array is the full 52-entry positional map in
         e1m_pinout.h canonical order, so alp_z_gpio_resolve(pin_id) is a
         direct index -- including the secondary-function pads opened as
-        GPIO (PWM/ENC/ADC/DAC).  Without this, alp_gpio_open(E1M_GPIO_PWM3)
+        GPIO (PWM/ENC/ADC/DAC).  Without this, alp_gpio_open(ALP_E1M_GPIO_PWM3)
         et al. can't resolve."""
         rv = _run_loader(input_path=TEMPLATE, emit="dts-overlay")
         out = rv.stdout
         # Exactly 52 positional slots.
         self.assertEqual(out.count("<&gpio0 0 GPIO_ACTIVE_HIGH>"), 52)
         # Canonical slots present + correctly indexed in the comments.
-        self.assertIn("[ 0] E1M_GPIO_IO0", out)
-        self.assertIn("[ 4] E1M_GPIO_IO4", out)
-        self.assertIn("[29] E1M_GPIO_PWM3", out)   # RGB-red pad as GPIO
-        self.assertIn("[42] E1M_GPIO_ADC0", out)
-        self.assertIn("[51] E1M_GPIO_DAC1", out)
+        self.assertIn("[ 0] ALP_E1M_GPIO_IO0", out)
+        self.assertIn("[ 4] ALP_E1M_GPIO_IO4", out)
+        self.assertIn("[29] ALP_E1M_GPIO_PWM3", out)   # RGB-red pad as GPIO
+        self.assertIn("[42] ALP_E1M_GPIO_ADC0", out)
+        self.assertIn("[51] ALP_E1M_GPIO_DAC1", out)
 
 
 class TestHwInfoHEmit(unittest.TestCase):

@@ -42,7 +42,7 @@
 /*
  * Portable ALP SDK headers (no vendor names visible to application code):
  *   alp/audio.h      -- alp_audio_in_open / _start / _read / _stop / _close
- *   alp/e1m_pinout.h -- E1M_PDM0 (= 0), the first PDM microphone instance
+ *   alp/e1m_pinout.h -- ALP_E1M_PDM0 (= 0), the first PDM microphone instance
  *   alp/inference.h  -- alp_inference_open / get_input / get_output / _invoke / _close
  * Local header:
  *   acoustic_event.h -- ase_frame_state, ase_features, all ase_* functions
@@ -222,8 +222,8 @@ int main(void)
 	 *
 	 * Field-by-field explanation:
 	 *
-	 *   .peripheral_id    = E1M_PDM0 (= 0u)
-	 *       The first PDM microphone instance on the E1M connector.  E1M_PDM0
+	 *   .peripheral_id    = ALP_E1M_PDM0 (= 0u)
+	 *       The first PDM microphone instance on the E1M connector.  ALP_E1M_PDM0
 	 *       is defined in <alp/e1m_pinout.h> as 0u; it maps to the PDM_MIC0
 	 *       devicetree alias on every E1M-conformant board.
 	 *
@@ -253,7 +253,7 @@ int main(void)
 	 * The loop detects mic == NULL and switches to synth_sample() automatically.
 	 */
 	alp_audio_in_t *mic = alp_audio_in_open(&(alp_audio_config_t){
-	    .peripheral_id    = E1M_PDM0,
+	    .peripheral_id    = ALP_E1M_PDM0,
 	    .sample_rate_hz   = 16000,
 	    .channels         = 1,
 	    .format           = ALP_AUDIO_FMT_S16_LE,

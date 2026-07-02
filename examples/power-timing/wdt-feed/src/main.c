@@ -49,9 +49,9 @@ int main(void)
      * peripherals retain state -- useful for soft-fault recovery)
      * and INTERRUPT_ONLY (fires an IRQ; you'd capture state in the
      * handler before manually triggering a reset).  wdt_id selects
-     * the watchdog instance (E1M_WDT0 = 0 on every E1M SoM). */
+     * the watchdog instance (ALP_E1M_WDT0 = 0 on every E1M SoM). */
 	alp_wdt_t *wdt = alp_wdt_open(&(alp_wdt_config_t){
-	    .wdt_id     = E1M_WDT0,
+	    .wdt_id     = ALP_E1M_WDT0,
 	    .timeout_ms = WDT_TIMEOUT_MS,
 	    .on_timeout = ALP_WDT_RESET_SOC,
 	});

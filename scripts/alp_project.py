@@ -859,7 +859,7 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
 # invent gpio bank numbers or per-pad GPIO_ACTIVE_* flags.  The
 # emitted .overlay declares the board's bus aliases and a stub
 # alp,pin-array with one entry per EVK_PIN_* macro, each annotated
-# with a comment naming the macro and the E1M_GPIO_IO<N> it
+# with a comment naming the macro and the ALP_E1M_GPIO_IO<N> it
 # resolves to.  Customers fill the gpio bank / index columns with
 # their SoM's actual DT controller phandles once the upstream board
 # files land in alplabai/alp-zephyr-modules.
@@ -872,14 +872,14 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
 # job is to surface every alias the board wants, not to second-
 # guess vendor DT naming.
 
-# Match `#define <NAME> E1M_<CLASS><N>` (with optional trailing
+# Match `#define <NAME> ALP_E1M_<CLASS><N>` (with optional trailing
 # token).  Class is one of the bus / pwm / gpio / analog-converter
 # names we care about.  ADC + DAC join the set so the portable
 # <alp/adc.h> / <alp/dac.h> backends -- which resolve their channels
 # via the `alp-adcN` / `alp-dacN` DT aliases -- get a generated alias
 # scaffold from the board's `e1m_routes.adc` / `.dac` entries.
 _DEFINE_E1M_RE = re.compile(
-    r"^\s*#\s*define\s+(\w+)\s+E1M_(I2C|SPI|UART|PWM|ADC|DAC|GPIO_IO)(\d+)\b",
+    r"^\s*#\s*define\s+(\w+)\s+ALP_E1M_(I2C|SPI|UART|PWM|ADC|DAC|GPIO_IO)(\d+)\b",
     re.MULTILINE,
 )
 
@@ -907,10 +907,10 @@ _BUS_BUCKETS: tuple[tuple[str, str, str], ...] = (
 # invariant".  The alp,pin-array `gpios` property MUST list these 52
 # entries in this exact order so the GPIO backend's positional resolve
 # (alp_z_gpio_resolve -> alp_pins[pin_id]) lands on the right pad,
-# including secondary-function pads opened as GPIO via E1M_GPIO_<class><N>
+# including secondary-function pads opened as GPIO via ALP_E1M_GPIO_<class><N>
 # (PWM -> 26..33, ENC -> 34..41, ADC -> 42..49, DAC -> 50..51).
 def _e1m_gpio_canonical() -> list[str]:
-    """Return the 52 E1M_GPIO_<suffix> names in canonical index order."""
+    """Return the 52 ALP_E1M_GPIO_<suffix> names in canonical index order."""
     names: list[str] = [f"IO{n}" for n in range(26)]      # 0..25
     names += [f"PWM{n}" for n in range(8)]                 # 26..33
     for e in range(4):                                     # 34..41
@@ -951,7 +951,7 @@ def _read_board_header_with_includes(header_path: Path) -> str:
     """Read `header_path` and inline any `#include "alp/boards/<file>.h"`
     that exists under include/.  Used so the loader picks up the
     generated routes header (alp_e1m_evk_routes.h) which holds the
-    EVK_* -> E1M_* macro bindings since slice 1c.
+    EVK_* -> ALP_E1M_* macro bindings since slice 1c.
 
     Single-level inlining is sufficient -- the generated routes header
     only `#include`s `alp/e1m_pinout.h`, which carries no EVK_* macros.
@@ -971,7 +971,7 @@ def _parse_board_macros(
     header_path: Path,
 ) -> dict[str, list[tuple[str, int]]]:
     """Return {class_name: [(macro_name, channel_index), ...]} for
-    each E1M_<CLASS><N> reference in the board header."""
+    each ALP_E1M_<CLASS><N> reference in the board header."""
     raw = _read_board_header_with_includes(header_path)
     text = _strip_c_comments(_collapse_line_continuations(raw))
     out: dict[str, list[tuple[str, int]]] = {
@@ -1087,7 +1087,7 @@ def _emit_dts_overlay(
     # by e1m_pinout.h's "Devicetree / overlay invariant" so the GPIO
     # backend's positional resolve (alp_pins[pin_id]) lands on the right
     # pad, including secondary-function pads opened as GPIO via
-    # E1M_GPIO_<class><N>.  Every slot is present even when the board
+    # ALP_E1M_GPIO_<class><N>.  Every slot is present even when the board
     # doesn't route it; <&gpioX Y FLAGS> triplets are TBD pending the
     # upstream SoM board file.
     io_by_idx = {idx: m for (m, idx) in macros.get("GPIO_IO", [])}
@@ -1106,7 +1106,7 @@ def _emit_dts_overlay(
         terminator = ";" if i == len(canonical) - 1 else ","
         # Annotate IO / PWM slots with the board macro routed to that pad
         # (parsed from the board header); other classes carry the bare
-        # E1M_GPIO_<suffix> so the customer knows which pad the slot is.
+        # ALP_E1M_GPIO_<suffix> so the customer knows which pad the slot is.
         routed = ""
         if suffix.startswith("IO"):
             n = int(suffix[2:])
@@ -1118,7 +1118,7 @@ def _emit_dts_overlay(
                 routed = f"  default fn: {pwm_by_idx[n]}"
         lines.append(
             f"            <&gpio0 0 GPIO_ACTIVE_HIGH>{terminator}"
-            f"  /* [{i:2d}] E1M_GPIO_{suffix}{routed} */"
+            f"  /* [{i:2d}] ALP_E1M_GPIO_{suffix}{routed} */"
         )
     lines.append("    };")
     lines.append("")

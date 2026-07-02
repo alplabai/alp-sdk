@@ -12,8 +12,8 @@
  * harness can assert it ran.
  *
  * Runs on both EVKs: BOARD_PWM_LED_GREEN (from <alp/board.h>)
- * resolves to E1M_PWM0 on E1M EVK (RGB LED green via PWM0) and
- * E1M_X_PWM7 on E1M-X EVK (RGB LED green via PWM7).  On real
+ * resolves to ALP_E1M_PWM0 on E1M EVK (RGB LED green via PWM0) and
+ * ALP_E1M_X_PWM7 on E1M-X EVK (RGB LED green via PWM7).  On real
  * silicon the LED breathes at 1 kHz across a linear duty sweep.
  */
 
@@ -24,7 +24,7 @@
 #include "alp/pwm.h"
 
 /* BOARD_PWM_LED_GREEN is the portable alias from <alp/board.h>
- * (E1M_PWM0 on E1M EVK; E1M_X_PWM7 on E1M-X EVK). */
+ * (ALP_E1M_PWM0 on E1M EVK; ALP_E1M_X_PWM7 on E1M-X EVK). */
 #include "alp/board.h"
 
 #define PERIOD_NS     1000000u /* 1 kHz */
@@ -40,9 +40,10 @@ int main(void)
 	printf("[pwm] open BOARD_PWM_LED_GREEN (period=%u ns)\n", PERIOD_NS);
 
 	alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
-	    .channel_id = BOARD_PWM_LED_GREEN, /* E1M_PWM0 on E1M EVK; E1M_X_PWM7 on E1M-X EVK */
-	    .period_ns  = PERIOD_NS,
-	    .polarity   = ALP_PWM_POLARITY_NORMAL,
+	    .channel_id =
+	        BOARD_PWM_LED_GREEN, /* ALP_E1M_PWM0 on E1M EVK; ALP_E1M_X_PWM7 on E1M-X EVK */
+	    .period_ns = PERIOD_NS,
+	    .polarity  = ALP_PWM_POLARITY_NORMAL,
 	});
 	if (led == NULL) {
 		printf("[pwm] open failed: alp_last_error=%d "

@@ -34,7 +34,7 @@ that's off by one bit.
 
 ## Wiring
 
-The E1M-EVK routes `E1M_SPI1` to the Arduino UNO header SPI; the
+The E1M-EVK routes `ALP_E1M_SPI1` to the Arduino UNO header SPI; the
 SoM bridges the bus internally, so app code just opens the E1M
 instance and never sees the physical termination.
 For this example:
@@ -66,7 +66,7 @@ west flash
 native_sim (no slave registered):
 
 ```
-[spi-master] open E1M_SPI1 @ 1 MHz mode 0
+[spi-master] open ALP_E1M_SPI1 @ 1 MHz mode 0
 [spi-master] write -> 0
 [spi-master] transceive -> 0  rx={00 00 00 00}
 [spi-master] read -> 0  rx={00 00 00 00}
@@ -76,7 +76,7 @@ native_sim (no slave registered):
 Real hardware with MOSI -> MISO loopback jumper:
 
 ```
-[spi-master] open E1M_SPI1 @ 1 MHz mode 0
+[spi-master] open ALP_E1M_SPI1 @ 1 MHz mode 0
 [spi-master] write -> 0
 [spi-master] transceive -> 0  rx={aa 55 de ad}
 [spi-master] read -> 0  rx={ff ff ff ff}
@@ -86,7 +86,7 @@ Real hardware with MOSI -> MISO loopback jumper:
 Real hardware with a register-mapped slave at 0x10:
 
 ```
-[spi-master] open E1M_SPI1 @ 1 MHz mode 0
+[spi-master] open ALP_E1M_SPI1 @ 1 MHz mode 0
 [spi-master] write -> 0
 [spi-master] transceive -> 0  rx={00 7a 5c 12}   <- slave's register echo
 [spi-master] read -> 0  rx={5c 12 ab cd}         <- streaming data

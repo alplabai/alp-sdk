@@ -25,7 +25,7 @@
  *
  * @code
  *   alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
- *       .bus_id = E1M_SPI1,   // inter-chip SPI bus
+ *       .bus_id = ALP_E1M_SPI1,   // inter-chip SPI bus
  *       .freq_hz = 8000000,
  *       .mode = ALP_SPI_MODE_0,
  *       .bits_per_word = 8,

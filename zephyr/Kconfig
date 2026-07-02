@@ -2708,7 +2708,7 @@ config ALP_SDK_CHIP_TCAL9538
 	depends on I2C
 	help
 	  Compile chips/tcal9538/tcal9538.c.  On the E1M EVK the
-	  TCAL9538 sits on E1M_I2C0 at 0x72 (A1=1, A0=0); its eight
+	  TCAL9538 sits on ALP_E1M_I2C0 at 0x72 (A1=1, A0=0); its eight
 	  GPIOs fan out LCD / camera / capacitive-touch control
 	  lines plus four sensor interrupt inputs (see
 	  evk_ioexp_pin_t in <alp/boards/alp_e1m_evk.h>).

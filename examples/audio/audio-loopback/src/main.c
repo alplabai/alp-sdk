@@ -8,8 +8,8 @@
  * i2s-tone, etc.
  *
  * What it does
- *   1. open  a PDM mic on E1M_PDM0 (16 kHz mono, S16)
- *   2. open  an I2S DAC on E1M_I2S0 (same rate / channels)
+ *   1. open  a PDM mic on ALP_E1M_PDM0 (16 kHz mono, S16)
+ *   2. open  an I2S DAC on ALP_E1M_I2S0 (same rate / channels)
  *   3. start both, then in a tight loop: read a block from the
  *      mic, write it to the DAC.  The wrapper runs the ALP
  *      DSP chain (DC-block in v0.2) inside alp_audio_in_read,
@@ -38,11 +38,11 @@
 
 /* BOARD_I2S_AUDIO is a portable alias that resolves to the on-board
  * audio I2S bus on whichever EVK is targeted:
- *   E1M EVK  (AEN)  → E1M_I2S0  (TAS2563 amps via the 74LVC157 mux)
- *   E1M-X EVK (V2N) → E1M_X_I2S0
+ *   E1M EVK  (AEN)  → ALP_E1M_I2S0  (TAS2563 amps via the 74LVC157 mux)
+ *   E1M-X EVK (V2N) → ALP_E1M_X_I2S0
  * Include via <alp/board.h>; ALP_BOARD_* is emitted by the build
  * system from the board.yaml preset.  The PDM mic stays on the raw
- * E1M_PDM0 instance (no portable route maps it). */
+ * ALP_E1M_PDM0 instance (no portable route maps it). */
 #include "alp/board.h"
 
 /* Loop budget -- 50 blocks of 256 frames @ 16 kHz = ~0.8 s.
@@ -62,7 +62,7 @@ int main(void)
 	printf("[audio] audio-loopback v0.2 reference -- mic -> DSP -> DAC\n");
 
 	alp_audio_config_t cfg = {
-		.peripheral_id    = E1M_PDM0,
+		.peripheral_id    = ALP_E1M_PDM0,
 		.sample_rate_hz   = SR_HZ,
 		.channels         = CHANS,
 		.format           = ALP_AUDIO_FMT_S16_LE,
@@ -77,7 +77,7 @@ int main(void)
 	}
 	printf("[audio]   alp_audio_in_open(PDM0)         ok\n");
 
-	cfg.peripheral_id    = BOARD_I2S_AUDIO; /* E1M EVK: E1M_I2S0; E1M-X EVK: E1M_X_I2S0 */
+	cfg.peripheral_id    = BOARD_I2S_AUDIO; /* E1M EVK: ALP_E1M_I2S0; E1M-X EVK: ALP_E1M_X_I2S0 */
 	alp_audio_out_t *spk = alp_audio_out_open(&cfg);
 	if (spk == NULL) {
 		printf("[audio]   alp_audio_out_open              skip (no I2S, last_err=%d)\n",

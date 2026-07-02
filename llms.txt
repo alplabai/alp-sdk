@@ -38,8 +38,8 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 ## Portable API (include/alp/)
 
 - [include/alp/peripheral.h](include/alp/peripheral.h): GPIO + core peripheral primitives (`alp_gpio_open`, `alp_last_error`, `ALP_OK`).
-- [include/alp/e1m_pinout.h](include/alp/e1m_pinout.h): portable `E1M_*` instance IDs for E1M parts.
-- [include/alp/e1m_x_pinout.h](include/alp/e1m_x_pinout.h): portable `E1M_X_*` instance IDs for E1M-X parts.
+- [include/alp/e1m_pinout.h](include/alp/e1m_pinout.h): portable `ALP_E1M_*` instance IDs for E1M parts.
+- [include/alp/e1m_x_pinout.h](include/alp/e1m_x_pinout.h): portable `ALP_E1M_X_*` instance IDs for E1M-X parts.
 - [include/alp/adc.h](include/alp/adc.h): ADC wrapper API.
 - [include/alp/pwm.h](include/alp/pwm.h): PWM wrapper API.
 - [include/alp/inference.h](include/alp/inference.h): portable NPU / model-inference API.

@@ -10,7 +10,7 @@ what's behind them; this example *reads* a known sensor.
 
 ## What this shows
 
-* `alp_i2c_open()` -- open `E1M_I2C0` at 400 kHz Fast-mode.
+* `alp_i2c_open()` -- open `ALP_E1M_I2C0` at 400 kHz Fast-mode.
 * `tmp112_init()` -- chip-driver probe + configure.
 * `tmp112_set_rate()` -- tune the conversion cadence.
 * `tmp112_read_temp_milli_c()` -- one register read per second.
@@ -56,7 +56,7 @@ west flash
 Real hardware (TMP112 populated, room temperature):
 
 ```
-[i2c-master] open E1M_I2C0 @ 400 kHz
+[i2c-master] open ALP_E1M_I2C0 @ 400 kHz
 [i2c-master] tmp112_init @ 0x48 -> 0 (OK)
 [i2c-master] sample 0: 23.625 degC
 [i2c-master] sample 1: 23.687 degC
@@ -69,7 +69,7 @@ Real hardware (TMP112 populated, room temperature):
 native_sim (emul I2C, no TMP112 registered):
 
 ```
-[i2c-master] open E1M_I2C0 @ 400 kHz
+[i2c-master] open ALP_E1M_I2C0 @ 400 kHz
 [i2c-master] tmp112_init @ 0x48 -> -5 (populated? right address?)
 [i2c-master] done
 ```

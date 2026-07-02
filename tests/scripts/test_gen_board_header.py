@@ -64,7 +64,7 @@ def test_emit_board_produces_header_for_well_formed_yaml(gen_module):
     assert out is not None
     assert "ALP_BOARDS_TEST_CARRIER_ROUTES_H" in out
     assert "#define TST_PIN_BUTTON" in out
-    assert "E1M_GPIO_IO0" in out
+    assert "ALP_E1M_GPIO_IO0" in out
     assert "#define TST_I2C_BUS_MAIN" in out
     assert "#define TST_PWM_LED" in out
     assert "DO NOT EDIT BY HAND" in out
@@ -235,5 +235,5 @@ def test_real_xevk_header_uses_x_pinout_and_covers_macros(gen_module):
     ]
     for macro in must_define:
         assert f"#define {macro}" in out, f"{macro} missing from X-EVK header"
-    # Routes must resolve to the E1M_X_* namespace.
-    assert "E1M_X_I2C0" in out and "E1M_X_GPIO_PWM5" in out
+    # Routes must resolve to the ALP_E1M_X_* namespace.
+    assert "ALP_E1M_X_I2C0" in out and "ALP_E1M_X_GPIO_PWM5" in out

@@ -13,12 +13,12 @@
  *
  * The E1M spec reserves four encoders (ENC0..ENC3), each routed
  * as a complementary pad pair (ENCn_X / ENCn_Y).  Apps that only
- * use E1M_ENCn for n < E1M_ENC_COUNT (= 4) stay portable
+ * use ALP_E1M_ENCn for n < ALP_E1M_ENC_COUNT (= 4) stay portable
  * across every E1M-conformant SoM.
  *
  * Runs on both EVKs: BOARD_ENC_ROTARY (from <alp/board.h>) resolves
- * to E1M_ENC0 on E1M EVK (PEC12R-4222F-S0024, 24 PPR) and
- * E1M_X_ENC0 on E1M-X EVK (PEC12R-4222F, same form factor).
+ * to ALP_E1M_ENC0 on E1M EVK (PEC12R-4222F-S0024, 24 PPR) and
+ * ALP_E1M_X_ENC0 on E1M-X EVK (PEC12R-4222F, same form factor).
  */
 
 #include <stdio.h>
@@ -28,7 +28,7 @@
 #include "alp/counter.h"
 
 /* BOARD_ENC_ROTARY is the portable alias from <alp/board.h>
- * (E1M_ENC0 on E1M EVK; E1M_X_ENC0 on E1M-X EVK). */
+ * (ALP_E1M_ENC0 on E1M EVK; ALP_E1M_X_ENC0 on E1M-X EVK). */
 #include "alp/board.h"
 #include "alp/peripheral.h"
 
@@ -41,8 +41,8 @@ int main(void)
 	printf("[qenc] open BOARD_ENC_ROTARY\n");
 
 	alp_qenc_t *enc = alp_qenc_open(&(alp_qenc_config_t){
-	    /* BOARD_ENC_ROTARY resolves to E1M_ENC0 on E1M EVK and
-         * E1M_X_ENC0 on E1M-X EVK -- an index into the alp-qenc<N>
+	    /* BOARD_ENC_ROTARY resolves to ALP_E1M_ENC0 on E1M EVK and
+         * ALP_E1M_X_ENC0 on E1M-X EVK -- an index into the alp-qenc<N>
          * DT alias table; the SoC binds it to a specific QDEC peripheral. */
 	    .encoder_id = BOARD_ENC_ROTARY,
 	    /* Mechanical resolution -- informational only at the

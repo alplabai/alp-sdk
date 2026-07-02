@@ -73,7 +73,7 @@
 #include <zephyr/logging/log.h>
 
 /* BOARD_I2C_SENSORS resolves to the shared sensor bus on the active EVK
- * (E1M_I2C0 on E1M EVK / E1M_X_I2C0 on E1M-X EVK) via the build-emitted
+ * (ALP_E1M_I2C0 on E1M EVK / ALP_E1M_X_I2C0 on E1M-X EVK) via the build-emitted
  * -DALP_BOARD_E1M_EVK / -DALP_BOARD_E1M_X_EVK define; see testcase.yaml.
  * On native_sim the overlay aliases alp-i2c0 to the emulated controller. */
 #include "alp/board.h"

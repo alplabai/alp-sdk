@@ -8,8 +8,8 @@ lifecycle.
 
 ## What this shows
 
-- Opening a PDM input (`E1M_PDM0`) and an I²S output
-  (`E1M_I2S0`) by portable bus ID -- no SoM-specific
+- Opening a PDM input (`ALP_E1M_PDM0`) and an I²S output
+  (`ALP_E1M_I2S0`) by portable bus ID -- no SoM-specific
   device-tree node references in the application code.
 - The `alp_audio_in_read` / `alp_audio_out_write` mirrored
   block-API.  Reading blocks of `FRAMES` samples at a time

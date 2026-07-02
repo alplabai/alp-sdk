@@ -13,8 +13,8 @@
  * etc.
  *
  * Runs on both EVKs: BOARD_SPI_ARDUINO (from <alp/board.h>) resolves
- * to E1M_SPI1 on E1M EVK (through the on-module CC3501E) and
- * E1M_X_SPI1 on E1M-X EVK (level-shifted Arduino header SPI).
+ * to ALP_E1M_SPI1 on E1M EVK (through the on-module CC3501E) and
+ * ALP_E1M_X_SPI1 on E1M-X EVK (level-shifted Arduino header SPI).
  */
 
 #include <stdio.h>

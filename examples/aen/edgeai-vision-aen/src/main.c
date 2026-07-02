@@ -32,7 +32,7 @@
 /* Pins/buses are opened by their BOARD-MACRO names (EVK_I2C_BUS_SENSORS,
  * EVK_PIN_ENCODER_SW, EVK_PIN_LED_RED) rather than raw E1M instance IDs.
  * The macros come from the board's generated routes header (one
- * `#define EVK_<NAME> E1M_<...>` per `e1m_routes:` entry in
+ * `#define EVK_<NAME> ALP_E1M_<...>` per `e1m_routes:` entry in
  * metadata/boards/e1m-evk.yaml); they are the customer's readable,
  * rebindable pin names.  Port this app to your own board by editing
  * that board's `pins:` block -- the code below stays unchanged. */
@@ -52,7 +52,7 @@ static int stage_peripherals_init(void)
 	printf("[edgeai] stage 1: peripherals\n");
 
 	g_sensor_bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = EVK_I2C_BUS_SENSORS, /* = E1M_I2C0: shared sensor + IO-expander bus */
+	    .bus_id     = EVK_I2C_BUS_SENSORS, /* = ALP_E1M_I2C0: shared sensor + IO-expander bus */
 	    .bitrate_hz = 400000,
 	});
 	if (g_sensor_bus == NULL) {
@@ -75,8 +75,8 @@ static int stage_peripherals_init(void)
 	/* User trigger + status LED via the button_led block, both opened
      * by board-macro name.  The EVK has no plain GPIO LED, so
      * EVK_PIN_LED_RED resolves to the RGB-red pad driven as a digital
-     * GPIO (E1M_GPIO_PWM3, the e1m-spec "GPIO secondary"); the trigger
-     * is the encoder push switch, EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
+     * GPIO (ALP_E1M_GPIO_PWM3, the e1m-spec "GPIO secondary"); the trigger
+     * is the encoder push switch, EVK_PIN_ENCODER_SW (ALP_E1M_GPIO_IO4). */
 	s = alp_button_led_init(&g_trigger,
 	                        &(alp_button_led_config_t){
 	                            .button_pin_id     = EVK_PIN_ENCODER_SW,

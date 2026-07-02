@@ -128,7 +128,7 @@ structurally identical to V2M101 after A2-2 also landed.
 Originally: V2N101 and V2N102 each declared 18 GPIO routes (10 base
 IO8..IO16 + IO24..IO25 + 8 extension IO27..IO35; IO33 absent on V2N).
 V2M101 declared only the 10 base; V2M102 declared only 10 base (also
-with wrong namespace per A2-1).  Apps using `E1M_X_GPIO_IO27..IO35`
+with wrong namespace per A2-1).  Apps using `ALP_E1M_X_GPIO_IO27..IO35`
 resolved on V2N variants but missed on V2M variants.
 
 **Fix landed:** maintainer confirmed the GD32 routing is identical on

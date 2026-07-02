@@ -26,9 +26,9 @@
  *
  * API reconciliation notes (checked against real alp API headers):
  *   - No BOARD_GPIO_TACHO alias exists in <alp/board.h> routes headers.
- *     Using E1M_GPIO_IO0 (IO0, E1M pad L2) as the tacho input pin.
+ *     Using ALP_E1M_GPIO_IO0 (IO0, E1M pad L2) as the tacho input pin.
  *     A customer wiring a tacho pulse to a different IO should change
- *     this to the matching E1M_GPIO_IO<N> constant from <alp/e1m_pinout.h>.
+ *     this to the matching ALP_E1M_GPIO_IO<N> constant from <alp/e1m_pinout.h>.
  *   - alp_gpio_open() takes a uint32_t pin_id; signature confirmed.
  *   - alp_gpio_configure() signature: (pin, alp_gpio_dir_t, alp_gpio_pull_t).
  *     ALP_GPIO_PULL_NONE confirmed in peripheral.h.
@@ -70,9 +70,9 @@ LOG_MODULE_REGISTER(wtac, LOG_LEVEL_INF);
 /*
  * E1M GPIO IO0 (pad L2) used as tacho input.  No BOARD_GPIO_TACHO alias
  * exists in the E1M-EVK routes header; IO0 is a representative choice.
- * Rewire to the E1M_GPIO_IO<N> that matches your carrier's tacho wire.
+ * Rewire to the ALP_E1M_GPIO_IO<N> that matches your carrier's tacho wire.
  */
-#define WTAC_TACHO_GPIO E1M_GPIO_IO0
+#define WTAC_TACHO_GPIO ALP_E1M_GPIO_IO0
 
 /* 1-byte stub so alp_inference_open's non-NULL model_data contract is met;
  * bad magic bytes cause the backend to return NULL, which forces the
@@ -154,7 +154,7 @@ int main(void)
 
 	/* PDM mic -- tolerate absence on native_sim (-> synthetic audio). */
 	c.mic = alp_audio_in_open(&(alp_audio_config_t){
-	    .peripheral_id    = E1M_PDM0,
+	    .peripheral_id    = ALP_E1M_PDM0,
 	    .sample_rate_hz   = 16000,
 	    .channels         = 1,
 	    .format           = ALP_AUDIO_FMT_S16_LE,

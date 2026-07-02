@@ -186,7 +186,7 @@ int main(void)
 
 	/* --- GNSS UART (tolerate absence on native_sim -> canned track). --- */
 	c.gps_uart = alp_uart_open(&(alp_uart_config_t){
-	    .port_id  = E1M_UART1,
+	    .port_id  = ALP_E1M_UART1,
 	    .baudrate = 9600,
 	});
 	if (c.gps_uart != NULL) {

@@ -23,7 +23,7 @@ example.
 * `alp_gpio_open()` + `alp_gpio_configure()` + `alp_gpio_write()`
   -- LED toggle from the main thread.  The EVK has no plain GPIO
   LED, so the indicator is the RGB-red pad (default function PWM3)
-  claimed as a digital GPIO via `E1M_GPIO_PWM3` -- the e1m-spec
+  claimed as a digital GPIO via `ALP_E1M_GPIO_PWM3` -- the e1m-spec
   "GPIO secondary" capability.
 * The "flag + main-thread drain" coordination pattern.
 * Clean shutdown via `alp_counter_cancel_alarm()` +
@@ -79,7 +79,7 @@ Real hardware (AEN, EVK with the RGB-red LED on the PWM3 pad as GPIO):
 [timer] open counter=0
 [timer] start -> 0
 [timer] 100000 us = 1600 ticks (status=0)
-[timer] open LED on E1M_GPIO_PWM3
+[timer] open LED on ALP_E1M_GPIO_PWM3
 [timer] arming first alarm
 [timer] tick 0 fired @ 1600 ticks, LED -> 1
 [timer] tick 1 fired @ 3200 ticks, LED -> 0
@@ -111,8 +111,8 @@ example on AEN for the working ISR path.)
 * **Different period.**  Drop `ALARM_PERIOD_US` to 10000 for
   100 Hz toggle (visible LED breathe); raise to 1000000 for
   1 Hz (a slow blink for "is it alive?" checks).
-* **Different LED pin.**  Change `E1M_GPIO_PWM3` to whatever pad
-  your board wires to an LED (a plain `E1M_GPIO_IO<N>` on a board
+* **Different LED pin.**  Change `ALP_E1M_GPIO_PWM3` to whatever pad
+  your board wires to an LED (a plain `ALP_E1M_GPIO_IO<N>` on a board
   with a dedicated GPIO LED, or any free GPIO to scope-probe).
 * **No LED at all.**  Drop the GPIO block; the printf trace alone
   proves the alarm is firing.
@@ -122,7 +122,7 @@ example on AEN for the working ISR path.)
 - [`<alp/counter.h>`](../../../include/alp/counter.h) -- counter + qenc API.
 - [`<alp/peripheral.h>`](../../../include/alp/peripheral.h) -- GPIO API.
 - [`<alp/e1m_pinout.h>`](../../../include/alp/e1m_pinout.h) -- the
-  `E1M_GPIO_<class><N>` pin-as-GPIO indices.
+  `ALP_E1M_GPIO_<class><N>` pin-as-GPIO indices.
 - [`examples/power-timing/counter-alarm/`](../counter-alarm/)
   -- single-shot alarm sibling.
 - [`examples/peripheral-io/gpio-button-led/`](../gpio-button-led/)

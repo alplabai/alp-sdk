@@ -90,7 +90,7 @@ boards (CRC mismatch on read-back) are quarantined for rework.
                                                     │ I2C read
                                                     ▼
 alp_hw_info_read(out)
-   ├── eeprom_24c128_init(...) on E1M_I2C0 (V2N) / Alif LPI2C (AEN)
+   ├── eeprom_24c128_init(...) on ALP_E1M_I2C0 (V2N) / Alif LPI2C (AEN)
    ├── eeprom_24c128_read(0, &manifest, 128)
    ├── verify manifest.magic == "ALPH"
    ├── verify manifest.schema_version == 1
@@ -118,12 +118,12 @@ can log and continue, or halt boot, depending on safety requirements.
 
 ## V2N-specific specifics
 
-* **EEPROM**: Onsemi `N24S128C4DYT3G` on `E1M_I2C0` (Renesas RIIC0,
+* **EEPROM**: Onsemi `N24S128C4DYT3G` on `ALP_E1M_I2C0` (Renesas RIIC0,
   `P31`/`P30`).  Alternate footprint `M24128-BFMH6TG` (STMicro) is
   pin-compatible; not assembled by default.
 * **Kconfig**: enable `CONFIG_ALP_SDK_HW_INFO=y`, set
   `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` to the bus id matching
-  E1M_I2C0 in the studio-generated DT alias.
+  ALP_E1M_I2C0 in the studio-generated DT alias.
 
 ## V2N-M1 specifics
 

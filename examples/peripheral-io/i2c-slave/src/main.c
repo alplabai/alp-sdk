@@ -46,8 +46,8 @@
 #include "alp/peripheral.h"
 
 /* BOARD_I2C_SENSORS is a portable cross-EVK alias from <alp/board.h>:
- *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> E1M_I2C0
- *   E1M-X EVK -> XEVK_I2C_BUS_SENSORS -> E1M_X_I2C0
+ *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> ALP_E1M_I2C0
+ *   E1M-X EVK -> XEVK_I2C_BUS_SENSORS -> ALP_E1M_X_I2C0
  * Rebind it in board.yaml `pins:` to port to another board. */
 #include "alp/board.h"
 
@@ -126,7 +126,7 @@ int main(void)
 	}
 
 	alp_i2c_target_t *tgt = alp_i2c_target_open(&(alp_i2c_target_config_t){
-	    .bus_id        = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
+	    .bus_id        = BOARD_I2C_SENSORS, /* E1M EVK: ALP_E1M_I2C0; E1M-X EVK: ALP_E1M_X_I2C0 */
 	    .own_addr_7bit = SLAVE_OWN_ADDR_7BIT,
 	    .on_write      = on_write,
 	    .on_read       = on_read,
