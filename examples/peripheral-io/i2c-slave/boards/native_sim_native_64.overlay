@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * One emulated I2C bus exposed via the alp-i2c0 alias.  The
- * example's slave-mode open returns NULL (API gap), so the bus
- * never gets a real transaction -- but the alias must exist for
- * the loader's DT-resolution pass to succeed.
+ * emulated controller has no target-mode emulation, so the
+ * example's alp_i2c_target_open degrades cleanly (NOSUPPORT
+ * diagnostic) -- but the alias must exist for the loader's
+ * DT-resolution pass to succeed.
  */
 
 #include <zephyr/dt-bindings/i2c/i2c.h>
