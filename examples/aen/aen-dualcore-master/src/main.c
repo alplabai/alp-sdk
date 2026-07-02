@@ -20,6 +20,7 @@
 #include <zephyr/sys/printk.h>
 #include <se_service.h>
 
+/* Core-role selection (HP vs HE build of this app), not a peripheral-presence gate. */
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define ROLE        "HP"
 #define TARGET_CPU  3U          /* EXTSYS_1 = M55-HE */

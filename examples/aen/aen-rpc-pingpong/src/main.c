@@ -32,6 +32,7 @@
 #define HE_LOAD_ADDR    0x58000000U
 #define PINGPONG_ROUNDS 16U
 
+/* Core-role selection (HP vs HE build of this app), not a peripheral-presence gate. */
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define ROLE        "HP"
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)

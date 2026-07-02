@@ -60,6 +60,7 @@
 #define METHOD_PING "ping"
 #define METHOD_PONG "pong"
 
+/* Core-role selection (HP vs HE build of this app), not a peripheral-presence gate. */
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define ROLE        "HP"
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)

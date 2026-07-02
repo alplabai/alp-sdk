@@ -94,7 +94,8 @@ struct ipc_msg {
 #define RT_BAD    ((volatile uint32_t *)0x02002084U)       /* HE reply mismatches  */
 #define HP_SERVED ((volatile uint32_t *)0x02002088U)       /* HP requests serviced */
 
-/* Per-core liveness beacon (same scheme as master/doorbell). */
+/* Per-core liveness beacon (same scheme as master/doorbell).  The board #if
+ * is core-role selection (HP vs HE build), not a peripheral-presence gate. */
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define ROLE        "HP"
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)
