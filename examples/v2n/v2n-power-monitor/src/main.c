@@ -27,7 +27,7 @@
  * shunt values come from <alp/boards/alp_e1m_x_evk.h>.
  *
  * The monitors sit on the on-board sensor I2C bus
- * (XEVK_I2C_BUS_SENSORS = E1M_X_I2C0, i.e. Linux /dev/i2c-0).
+ * (XEVK_I2C_BUS_SENSORS = ALP_E1M_X_I2C0, i.e. Linux /dev/i2c-0).
  *
  * Build (Yocto SDK):  see this example's README.md.
  * Run on target:      ./v2n-power-monitor   (Ctrl-C to stop)

@@ -42,7 +42,7 @@
  * <alp/peripheral.h> "SPI -- target (slave) mode" for the contract.
  *
  * Runs on both EVKs: BOARD_SPI_ARDUINO (from <alp/board.h>) resolves
- * to E1M_SPI1 on E1M EVK and E1M_X_SPI1 on E1M-X EVK.
+ * to ALP_E1M_SPI1 on E1M EVK and ALP_E1M_X_SPI1 on E1M-X EVK.
  */
 
 #include <stdio.h>

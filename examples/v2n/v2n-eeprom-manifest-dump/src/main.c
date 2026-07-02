@@ -69,7 +69,7 @@ int main(void)
 {
 	printf("[manifest] v2n-eeprom-manifest-dump\n");
 
-	/* On V2N the on-module 24C128 EEPROM lives on E1M_I2C0 at
+	/* On V2N the on-module 24C128 EEPROM lives on ALP_E1M_I2C0 at
      * 7-bit address 0x50.  Customise the bus_id below for your
      * board overlay. */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){

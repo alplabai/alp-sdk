@@ -43,8 +43,8 @@
 #include "alp/peripheral.h"
 
 /* BOARD_UART_DEBUG is a portable cross-EVK alias from <alp/board.h>:
- *   E1M EVK  -> EVK_UART_PORT_DEBUG  -> E1M_UART0
- *   E1M-X EVK -> XEVK_UART_PORT_DEBUG -> E1M_X_UART0
+ *   E1M EVK  -> EVK_UART_PORT_DEBUG  -> ALP_E1M_UART0
+ *   E1M-X EVK -> XEVK_UART_PORT_DEBUG -> ALP_E1M_X_UART0
  * Rebind it in board.yaml `pins:` to port this app to another board
  * without touching the code below. */
 #include "alp/board.h"
@@ -67,7 +67,7 @@ int main(void)
      * mix polled reads with ringbuf reads on the same handle work,
      * though the typical pattern is one or the other. */
 	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-	    .port_id   = BOARD_UART_DEBUG, /* E1M EVK: E1M_UART0; E1M-X EVK: E1M_X_UART0 */
+	    .port_id   = BOARD_UART_DEBUG, /* E1M EVK: ALP_E1M_UART0; E1M-X EVK: ALP_E1M_X_UART0 */
 	    .baudrate  = 115200,
 	    .data_bits = 8,
 	    .stop_bits = 1,

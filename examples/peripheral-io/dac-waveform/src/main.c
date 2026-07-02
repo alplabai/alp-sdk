@@ -129,7 +129,7 @@ int main(void)
      * the converter's hardware-achievable resolution.
      *
      * channel_id = BOARD_DAC0 -> the selected board's DAC0 pad
-     * (E1M_DAC0 on E1M / Alif; E1M_X_DAC0 -> GD32 PA4 on E1M-X / V2N). */
+     * (ALP_E1M_DAC0 on E1M / Alif; ALP_E1M_X_DAC0 -> GD32 PA4 on E1M-X / V2N). */
 	alp_dac_t *dac = alp_dac_open(&(alp_dac_config_t){
 	    .channel_id = BOARD_DAC0,
 	    .initial_mv = SINE_DC_OFFSET_MV,

@@ -13,13 +13,13 @@
  *
  * Per-board resolution:
  *   E1M EVK:
- *     BOARD_PIN_ENCODER_SW = EVK_PIN_ENCODER_SW  = E1M_GPIO_IO4
- *     BOARD_PIN_LED_RED    = EVK_PIN_LED_RED      = E1M_GPIO_PWM3
+ *     BOARD_PIN_ENCODER_SW = EVK_PIN_ENCODER_SW  = ALP_E1M_GPIO_IO4
+ *     BOARD_PIN_LED_RED    = EVK_PIN_LED_RED      = ALP_E1M_GPIO_PWM3
  *       (the RGB-red PWM pad claimed as a digital GPIO; the E1M EVK
  *       has no plain GPIO LED, so the LED rides a PWM pad as GPIO)
  *   E1M-X EVK:
- *     BOARD_PIN_ENCODER_SW = XEVK_PIN_ENCODER_SW = E1M_X_GPIO_IO28
- *     BOARD_PIN_LED_RED    = XEVK_PIN_LED_RED     = E1M_X_GPIO_PWM5
+ *     BOARD_PIN_ENCODER_SW = XEVK_PIN_ENCODER_SW = ALP_E1M_X_GPIO_IO28
+ *     BOARD_PIN_LED_RED    = XEVK_PIN_LED_RED     = ALP_E1M_X_GPIO_PWM5
  *       (similarly the X EVK's RGB-red PWM pad driven as GPIO)
  *
  * native_sim wires a GPIO-emul controller in boards/, so the open /

@@ -26,7 +26,7 @@ int main(void)
      * manufacturing date from the EEPROM manifest.  The Kconfig
      * symbols CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID +
      * CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT must be set to the
-     * board's wiring (E1M_I2C0 on V2N; 0x50 strap default). */
+     * board's wiring (ALP_E1M_I2C0 on V2N; 0x50 strap default). */
 	alp_hw_info_t info;
 	alp_status_t  s = alp_hw_info_read(&info);
 
@@ -45,7 +45,7 @@ int main(void)
 		printf("[board-id] EEPROM bus not configured\n");
 		printf("[board-id]   set CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID\n");
 		printf("[board-id]   in prj.conf to the bus id matching\n");
-		printf("[board-id]   the SoM's E1M_I2C0 alias.\n");
+		printf("[board-id]   the SoM's ALP_E1M_I2C0 alias.\n");
 		break;
 	case ALP_ERR_NOT_PROVISIONED:
 		printf("[board-id] EEPROM is blank -- module not yet provisioned\n");
