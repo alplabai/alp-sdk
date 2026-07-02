@@ -123,7 +123,7 @@ def emit_build_plan(
     """
     # Orchestrator-side (stay inline until orchestrator.py); lazy to avoid
     # a buildplan<->package import cycle.
-    from . import STOCK_SHIM_APP, _slice_command
+    from .orchestrator import STOCK_SHIM_APP, _slice_command
     build_root = Path(build_root)
     slices_out: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []

@@ -521,7 +521,7 @@ def test_orchestrator_fan_out_skips_when_tools_absent(
     be well-formed."""
     # Stub `shutil.which` to claim neither tool is on PATH.
     import alp_orchestrate
-    monkeypatch.setattr(alp_orchestrate.shutil, "which",
+    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
                         lambda name: None)
 
     path = _write_board(tmp_path, V2N_HAPPY)
@@ -2604,7 +2604,7 @@ def test_emit_build_plan_matches_materialiser(
         load_board_yaml(path), board_yaml=path, build_root=build_root))
 
     # Materialise via the real fan_out (dispatch skipped: no tools).
-    monkeypatch.setattr(alp_orchestrate.shutil, "which",
+    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
                         lambda name: None)
     orch = Orchestrator(load_board_yaml(path), build_root)
     orch.fan_out(parallel=False)
@@ -2670,7 +2670,7 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
     assert sysbuild_path in shared
     assert "SB_CONFIG_BOOTLOADER_MCUBOOT=y" in shared[sysbuild_path]
 
-    monkeypatch.setattr(alp_orchestrate.shutil, "which",
+    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
                         lambda name: None)
     orch = Orchestrator(load_board_yaml(path), build_root)
     orch.fan_out(parallel=False)
