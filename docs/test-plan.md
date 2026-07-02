@@ -190,6 +190,27 @@ matching CHANGELOG `[v0.6.0]` entries.
 | CM33↔GD32 SCI7 SPI bidirectional link | `zephyr/drivers/spi/` RSCI path | ✅ verified | Sustained request/reply traffic, both transports, zero CRC errors in soak | merges `9f3e600`, `7845ad7`, `b5c941c` | v0.6 |
 | SCI7 DMA fast path | `zephyr/drivers/spi/spi_renesas_rz_sci_b.c` DMAC-B path | ❌ failing | DMA-driven transactions sustain the soak | Survives full init incl. v0.7 negotiation, then TX requests stop post-settle (issue #84; vendor ticket drafted); gate stays default-off | v0.7 |
 
+## v0.9.0 candidate — portable-surface consistency batch (2026-07)
+
+The 2026-07 CX batch (PRs #319..#335): `<alp/version.h>`, the SE-backed
+SoC-identity / power-profile / core-boot surfaces, I²C/SPI target
+(slave) mode + `alp_init`/`alp_deinit`, DAC capabilities + the analog/WDT
+API-consistency renames, the `alp` CLI front door, and the portable-API
+conformance suite.  native_sim coverage lands with the code; every
+silicon-facing row is bench-gated as usual.
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| `<alp/version.h>` macros + `alp_version_string()` | `include/alp/version.h` + `src/common/version.c` | 🟡 partial | Compile-time macros and the runtime string agree with `metadata/sdk_version.yaml` on every build | `scripts/check_version_doc_sync.py` (CI) + `tests/smoke.c`; nothing silicon-facing — flips ✅ with two consecutive green gate runs | v0.9 |
+| I²C target (slave) mode (`alp_i2c_target_*`) | `src/backends/i2c/zephyr_drv.c` (target section) + `src/i2c_dispatch.c` | 🟡 partial | An external I²C controller reads/writes the register file `examples/peripheral-io/i2c-slave` exposes at 0x42 on real silicon | Conformance suite + example degrade-path on native_sim (registration accepted, callbacks external-controller-gated); **two-board exercise via HIL** | v0.9 |
+| SPI target (slave) mode (`alp_spi_target_*`) | `src/backends/spi/zephyr_drv.c` (`SPI_OP_MODE_SLAVE`) + `src/spi_dispatch.c` | 🟡 partial | `examples/peripheral-io/spi-slave`'s PING/GET_VERSION protocol answers a real external master frame-for-frame | NOSUPPORT degrade path proven on native_sim (no slave-mode emulation); **two-board exercise via HIL** | v0.9 |
+| `alp_init` / `alp_deinit` lifecycle | `src/common/` init path | 🟡 partial | Idempotency contract holds (double-init OK, deinit-then-reopen OK) on native_sim + real target | Every `examples/peripheral-io/*` example calls it first; conformance suite runs on native_sim | v0.9 |
+| SoC identity over SE (`alp_soc_info_read` / `alp_soc_secure_fw_ping`) | `src/backends/soc_info/alif_se.c` (+ `sw_fallback.c`) | ⏳ untested | Part number / die rev / lifecycle / serial read back on a real E8 match SETOOLS' view; ping bounded round-trip | sw_fallback NOSUPPORT-with-soc_ref path covered on native_sim; **SE round-trip via `nightly-aen-hil`** | v0.9 |
+| Power profiles over SE (`alp_power_profile_get/_set`) | `src/backends/power/` profile backend (`power_profile` class) | ⏳ untested | RUN/STANDBY profile read matches the SE's view; a set() round-trips exactly (no rounding) without brown-out on a real E8 | NULL/INVAL paths on native_sim; **SE exercise via `nightly-aen-hil`** — treat set() like a firmware update on the bench | v0.9 |
+| Peer-core boot (`alp_mproc_boot_core`) | `src/backends/mproc/` boot backend (`mproc_boot` class) | ⏳ untested | M55-HE released at a valid entry and its firmware handshakes back (the AEN dual-core examples) | `ALP_CORE_SELF` rejection on native_sim; **dual-core release via `nightly-aen-hil`** | v0.9 |
+| `alp_dac_capabilities()` | `src/dac_dispatch.c` + backends | 🟡 partial | Caps reported on an opened handle match the silicon (resolution, channel count) on a real target | Live capabilities row in the conformance suite on native_sim | v0.9 |
+| `alp_wdt_open(const alp_wdt_config_t *)` single-arg + ADC `_mv` read renames | `include/alp/wdt.h` / `include/alp/adc.h` + all in-tree callers | 🟡 partial | Pre-1.0 signature migration: no stale two-arg / unsuffixed callers anywhere in tree; behaviour unchanged | Conformance suite adopted the new signatures (`eec8868d`); grep-clean tree; ABI snapshot regenerated | v0.9 |
+
 ## CI-only / tooling rows (no HIL gate)
 
 These never need HIL.  They tag `✅` once the matching workflow has
@@ -205,6 +226,8 @@ been green on `main` for at least two consecutive PRs.
 | `pr-doxygen.yml` zero-warnings | `pr-doxygen.yml` | ✅ verified |
 | VS Code extension build (split repo) | [`alplabai/alp-sdk-vscode` &mdash; ci workflow](https://github.com/alplabai/alp-sdk-vscode/actions/workflows/ci.yml) | ✅ verified |
 | `coverity.yml` weekly scan | `coverity.yml` | ✅ verified |
+| Portable-API conformance suite (13 classes × 8 cases, `alp_sdk.conformance.portable_api`) | `pr-twister.yml` (`tests/zephyr/conformance/`) | ✅ verified |
+| `alp` CLI verbs (`init` / `new-som` / `build` / `run` / `flash` / `emit` / `validate` / `doctor` / `monitor`) | click-runner pytest (`tests/scripts/test_alp_cli*.py`) via `pr-metadata-validate.yml` + `cross-platform-zephyr.yml` | ✅ verified |
 
 ---
 
