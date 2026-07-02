@@ -52,8 +52,9 @@
  *
  * The one-shot and streaming surfaces intentionally use different
  * units and sample widths.  The one-shot path favours precision
- * (32-bit microvolts resolve a 24-bit code against a 3.3 V
- * reference without rounding); the streaming path favours wire and
+ * (32-bit microvolts resolve any supported 8-16 bit code against a
+ * 3.3 V reference without rounding, ~50 uV/LSB at 16 bits); the
+ * streaming path favours wire and
  * ring-buffer density (16-bit millivolts halve the DMA/bridge
  * bandwidth per sample, and mV granularity is what the 12-bit
  * hardware actually delivers at streaming rates).  The sample
