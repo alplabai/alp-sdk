@@ -96,6 +96,20 @@ pattern for a brand-new family, register the silicon ref, validate,
 regenerate, run the conformance suite).  The full walkthrough lives in
 [porting-new-som.md](porting-new-som.md).
 
+The scaffold is committable as-is: every input is validated *before*
+anything is written (a rejected invocation never leaves half-written
+files), `--default-board` must name a carrier from `metadata/boards/`,
+and `--default-hw-rev` must resolve in the family's
+`hw-revisions.yaml` whenever that file already exists (a brand-new
+family defers this to the checklist).  The generated
+`preferred_backend: tbd` placeholder passes
+`scripts/check_inference_backend_parity.py` only while the preset
+declares `status.preliminary: true` -- replace `tbd` with the real
+silicon backend before clearing the flag.  Use `--dry-run` to see the
+planned files (and run the full validation) without writing anything.
+When stdin is not a terminal (CI), missing required flags fail fast
+with an explicit list instead of dropping into the prompts.
+
 | Option | Meaning |
 |---|---|
 | `--sku` | New SoM SKU, e.g. `E1M-NX9555` |
@@ -109,9 +123,12 @@ regenerate, run the conformance suite).  The full walkthrough lives in
 | `--default-board` | Stock carrier board (default `E1M-EVK`) |
 | `--default-hw-rev` | Default hardware revision (default `r1`) |
 | `--output-root` | Root to generate `metadata/` under (default: the SDK checkout) |
+| `--dry-run` | Validate and print the planned files; write nothing |
 | `--force` | Overwrite an existing preset for this SKU |
 
-Omit `--sku` / `--soc-ref` / `--family` to be prompted interactively.
+Omit `--sku` / `--soc-ref` / `--family` to be prompted interactively
+(requires a terminal; in a pipe or CI the command fails fast naming
+the missing flags).
 
 ### `alp build` -- build the project (multi-core aware)
 
