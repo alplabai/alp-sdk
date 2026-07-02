@@ -3,8 +3,9 @@
 `alp` is the Alp SDK's single command-line front door: scaffold a
 project, build it (multi-core aware), run it on the simulator, flash
 it, inspect the generated configuration, validate `board.yaml`,
-compile AI models, sanity-check the host environment, and open a
-serial console -- all from one verb set.
+compile AI models, sanity-check the host environment, open a
+serial console, and scaffold the metadata for porting a new SoM --
+all from one verb set.
 
 It is installed automatically by the bootstrap scripts
 (`scripts/bootstrap.sh` on Linux/macOS/WSL2, `scripts/bootstrap.ps1`
@@ -74,6 +75,43 @@ list.  Omit any flag to be prompted interactively.
 | `--som` | SoM SKU, e.g. `E1M-AEN701` |
 | `--preset` | Board preset from `metadata/boards/`, e.g. `e1m-evk` |
 | `--peripherals` | Comma-separated starter peripherals (`uart,gpio,i2c,spi,pwm`) |
+
+### `alp new-som` -- scaffold metadata for a new SoM port
+
+```bash
+alp new-som --sku E1M-NX9555 --soc-ref nxp:imx9:imx95 --family nxp-imx9
+alp new-som               # interactive: prompts for every field
+```
+
+The vendor-N+1 porting kit.  Generates the two metadata skeletons a
+new SoM port needs -- `metadata/e1m_modules/<SKU>.yaml` (the SoM
+preset, canonical cross-family shape) and, when the target SoC has no
+spec yet, `metadata/socs/<vendor>/<family>/<part>.json` -- with every
+schema-required hardware-fact field present as an explicit `TBD`
+placeholder (values are never invented; the JSON carries its TODOs in
+the schema-sanctioned `_pending_reason` + `notes` fields).  Both
+skeletons are schema-valid on arrival, and the command finishes with
+the numbered porting checklist (fill TBDs, extend the schema `sku`
+pattern for a brand-new family, register the silicon ref, validate,
+regenerate, run the conformance suite).  The full walkthrough lives in
+[porting-new-som.md](porting-new-som.md).
+
+| Option | Meaning |
+|---|---|
+| `--sku` | New SoM SKU, e.g. `E1M-NX9555` |
+| `--soc-ref` | Silicon triple-colon ref, e.g. `nxp:imx9:imx95` |
+| `--family` | Human-readable family slug, e.g. `nxp-imx9` |
+| `--vendor` | Vendor display name for the SoC JSON (default: soc-ref vendor segment) |
+| `--display-name` | Preset display name (default derived from the SKU) |
+| `--inference-backend` | `ethos_u` / `drpai` / `deepx_dxm1` / `tbd` (default `tbd`) |
+| `--ethos-u-variant` | `u55` / `u65` / `u85`; required with `--inference-backend ethos_u` |
+| `--cores` | Comma-separated canonical core ids (default: a `tbd_core0` placeholder) |
+| `--default-board` | Stock carrier board (default `E1M-EVK`) |
+| `--default-hw-rev` | Default hardware revision (default `r1`) |
+| `--output-root` | Root to generate `metadata/` under (default: the SDK checkout) |
+| `--force` | Overwrite an existing preset for this SKU |
+
+Omit `--sku` / `--soc-ref` / `--family` to be prompted interactively.
 
 ### `alp build` -- build the project (multi-core aware)
 
