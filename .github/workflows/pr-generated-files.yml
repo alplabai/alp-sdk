@@ -4,9 +4,15 @@
 #
 #   - Metadata edits that didn't trigger a soc_caps.h regeneration.
 #     scripts/gen_soc_caps.py reads metadata/socs/**.json and emits
-#     include/alp/soc_caps.h; if the committed header doesn't match
+#     include/alp/soc_caps.h plus the capability dispatch pair
+#     include/alp/cap.h + src/cap.c; if a committed copy doesn't match
 #     what the script would produce, the PR is asking reviewers to
 #     accept stale capability tables.
+#
+#   - Board YAML edits that didn't trigger a routes-header regeneration.
+#     scripts/gen_board_header.py reads metadata/boards/*.yaml
+#     `e1m_routes:` blocks and emits
+#     include/alp/boards/alp_<board>_routes.h.
 #
 #   - Public-header additions/removals that didn't bump the ABI
 #     snapshot at docs/abi/v<N>-snapshot.json.  The snapshot's
@@ -23,7 +29,9 @@ on:
       - 'include/alp/**'
       - 'docs/diagnostics/**'
       - 'examples/**'
+      - 'src/cap.c'
       - 'scripts/gen_soc_caps.py'
+      - 'scripts/gen_board_header.py'
       - 'scripts/gen_pinmux_capability.py'
       - 'scripts/gen_support_matrix.py'
       - 'scripts/gen_catalog.py'
@@ -37,6 +45,7 @@ on:
     paths:
       - 'metadata/**'
       - 'include/alp/**'
+      - 'src/cap.c'
       - 'docs/diagnostics/**'
       - 'examples/**'
   workflow_dispatch:
@@ -76,8 +85,25 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/clang-format" --version
 
-      - name: Regenerate soc_caps.h from metadata
+      # gen_board_header.py + gen_pinmux_capability.py (and the matrix /
+      # catalog generators below) read YAML metadata; the pinmux generator
+      # also schema-validates its output.  setup-python's interpreter ships
+      # neither package, so install them explicitly.
+      - name: Install generator dependencies
+        run: python3 -m pip install --user pyyaml jsonschema
+
+      # gen_soc_caps.py emits include/alp/soc_caps.h AND the capability
+      # dispatch pair include/alp/cap.h + src/cap.c (CAP_H_OUT / CAP_C_OUT);
+      # all three are diff-gated below.
+      - name: Regenerate soc_caps.h + cap.h/cap.c from metadata
         run: python3 scripts/gen_soc_caps.py
+
+      # Board-macro routes headers: include/alp/boards/alp_<board>_routes.h
+      # is projected from each metadata/boards/<name>.yaml `e1m_routes:`
+      # block by scripts/gen_board_header.py.  Regenerate and let the diff
+      # gate below flag any drift.
+      - name: Regenerate board routes headers from board YAMLs
+        run: python3 scripts/gen_board_header.py
 
       - name: Regenerate pin-mux capability tables from the pinout TSVs
         run: python3 scripts/gen_pinmux_capability.py
@@ -124,12 +150,16 @@ jobs:
           if ! git diff --exit-code \
                   --ignore-matching-lines='"generated":' \
                   -- include/alp/soc_caps.h docs/abi/v0.8-snapshot.json \
+                     include/alp/cap.h \
+                     src/cap.c \
+                     include/alp/boards/ \
                      metadata/pinmux/ \
                      metadata/catalog.json \
                      metadata/error-catalog.json \
                      docs/peripheral-support-matrix.md; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
+            echo "::error::  python3 scripts/gen_board_header.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
             echo "::error::  python3 scripts/gen_support_matrix.py"
             echo "::error::  python3 scripts/gen_catalog.py"
