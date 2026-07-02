@@ -79,10 +79,12 @@ jobs:
       # Mirror pr-metadata-validate.yml's Python setup -- same
       # toolchain version pin keeps the orchestrator behaviour
       # consistent across the metadata gate + this gate.
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          # Repo is checked out under alp-sdk/ (path:), but setup-python (a
+          # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
+          python-version-file: alp-sdk/.python-version
 
       - name: Install Python deps
         run: pip install jsonschema pyyaml
