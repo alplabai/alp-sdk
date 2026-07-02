@@ -111,6 +111,82 @@ void alp_spi_close(alp_spi_t *bus)
 	_free(bus);
 }
 
+/* ------------------------------------------------------------------ */
+/* Target (slave) mode                                                 */
+/* ------------------------------------------------------------------ */
+
+#ifndef CONFIG_ALP_SDK_MAX_SPI_TARGET_HANDLES
+#define CONFIG_ALP_SDK_MAX_SPI_TARGET_HANDLES 2
+#endif
+
+static struct alp_spi_target _tpool[CONFIG_ALP_SDK_MAX_SPI_TARGET_HANDLES];
+
+static struct alp_spi_target *_talloc(void)
+{
+	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_SPI_TARGET_HANDLES; ++i) {
+		if (!_tpool[i].in_use) {
+			memset(&_tpool[i], 0, sizeof(_tpool[i]));
+			_tpool[i].in_use = true;
+			return &_tpool[i];
+		}
+	}
+	return NULL;
+}
+
+alp_spi_target_t *alp_spi_target_open(const alp_spi_target_config_t *cfg)
+{
+	alp_z_clear_last_error();
+	if (cfg == NULL) {
+		alp_z_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
+	const alp_backend_t *be = alp_backend_select("spi", ALP_SOC_REF_STR);
+	if (be == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
+		return NULL;
+	}
+	const alp_spi_ops_t *ops = (const alp_spi_ops_t *)be->ops;
+	if (ops == NULL || ops->target_open == NULL || ops->target_transceive == NULL ||
+	    ops->target_close == NULL) {
+		/* Backend has no slave mode (e.g. the native_sim
+		 * sw_fallback) -- degrade gracefully. */
+		alp_z_set_last_error(ALP_ERR_NOSUPPORT);
+		return NULL;
+	}
+	struct alp_spi_target *h = _talloc();
+	if (h == NULL) {
+		alp_z_set_last_error(ALP_ERR_NOMEM);
+		return NULL;
+	}
+	h->backend      = be;
+	h->state.ops    = ops;
+	alp_status_t rc = ops->target_open(cfg, &h->state);
+	if (rc != ALP_OK) {
+		h->in_use = false;
+		alp_z_set_last_error(rc);
+		return NULL;
+	}
+	return h;
+}
+
+alp_status_t alp_spi_target_transceive(
+    alp_spi_target_t *bus, const uint8_t *tx, uint8_t *rx, size_t len, size_t *rx_len)
+{
+	if (rx_len != NULL) *rx_len = 0;
+	if (bus == NULL || !bus->in_use) return ALP_ERR_NOT_READY;
+	if (len == 0 || (tx == NULL && rx == NULL)) return ALP_ERR_INVAL;
+	return bus->state.ops->target_transceive(&bus->state, tx, rx, len, rx_len);
+}
+
+void alp_spi_target_close(alp_spi_target_t *tgt)
+{
+	if (tgt == NULL || !tgt->in_use) return;
+	if (tgt->state.ops != NULL && tgt->state.ops->target_close != NULL) {
+		tgt->state.ops->target_close(&tgt->state);
+	}
+	tgt->in_use = false;
+}
+
 const alp_capabilities_t *alp_spi_capabilities(const alp_spi_t *bus)
 {
 	return (bus != NULL) ? &bus->cached_caps : NULL;

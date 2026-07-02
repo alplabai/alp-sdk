@@ -23,6 +23,8 @@ endif()
 
 target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub_backend.c
+    # SDK lifecycle (alp_init / alp_deinit) -- OS-agnostic.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../init.c
 )
 
 if(ALP_SOM STREQUAL "aen")

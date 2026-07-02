@@ -61,6 +61,14 @@ config ALP_SDK_MAX_I2C_HANDLES
 	int "Maximum concurrent alp_i2c_t handles"
 	default 4
 
+config ALP_SDK_MAX_I2C_TARGET_HANDLES
+	int "Maximum concurrent alp_i2c_target_t handles"
+	default 2
+	help
+	  Pool size for I2C target (slave) mode registrations opened via
+	  alp_i2c_target_open.  Each slot also reserves a driver-side
+	  registration sidecar in the Zephyr backend.
+
 config ALP_SDK_I2C_SW_FALLBACK
 	bool "Software I2C fallback (in-memory loopback)"
 	depends on ALP_SDK
@@ -76,6 +84,15 @@ config ALP_SDK_I2C_SW_FALLBACK
 config ALP_SDK_MAX_SPI_HANDLES
 	int "Maximum concurrent alp_spi_t handles"
 	default 4
+
+config ALP_SDK_MAX_SPI_TARGET_HANDLES
+	int "Maximum concurrent alp_spi_target_t handles"
+	default 2
+	help
+	  Pool size for SPI target (slave) mode handles opened via
+	  alp_spi_target_open.  The Zephyr backend's per-handle sidecar
+	  pool (sized by ALP_SDK_MAX_SPI_HANDLES) is shared between
+	  controller-mode and target-mode handles.
 
 config ALP_SDK_SPI_SW_FALLBACK
 	bool "Software SPI fallback (in-memory loopback)"

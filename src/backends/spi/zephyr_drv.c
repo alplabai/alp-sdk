@@ -185,10 +185,80 @@ static void z_close(alp_spi_backend_state_t *st)
 	st->be_data = NULL;
 }
 
+/* ------------------------------------------------------------------ */
+/* Target (slave) mode -- Zephyr models SPI slave as the same           */
+/* spi_transceive call with SPI_OP_MODE_SLAVE in the operation word:   */
+/* the call blocks until the external controller clocks a transfer     */
+/* and returns the number of frames received.  The per-handle sidecar  */
+/* pool is shared with the controller-mode path above.                 */
+/* ------------------------------------------------------------------ */
+
+static uint16_t _to_spi_target_op(const alp_spi_target_config_t *cfg)
+{
+	uint16_t op = SPI_WORD_SET(cfg->bits_per_word ? cfg->bits_per_word : 8);
+	op |= SPI_OP_MODE_SLAVE;
+	op |= SPI_TRANSFER_MSB;
+	if (cfg->mode & 0x2u) op |= SPI_MODE_CPOL;
+	if (cfg->mode & 0x1u) op |= SPI_MODE_CPHA;
+	return op;
+}
+
+static alp_status_t z_target_open(const alp_spi_target_config_t *cfg, alp_spi_backend_state_t *st)
+{
+	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
+	if (cfg->bus_id >= ALP_SOC_SPI_COUNT) return ALP_ERR_OUT_OF_RANGE;
+	const struct device *dev = _devs[cfg->bus_id];
+	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
+
+	alp_z_spi_side_t *s = _alloc_side();
+	if (s == NULL) return ALP_ERR_NOMEM;
+
+	s->zspi_cfg.frequency = 0u; /* clock is owned by the external controller */
+	s->zspi_cfg.operation = _to_spi_target_op(cfg);
+	s->zspi_cfg.slave     = 0;
+	/* No CS resolution: the external controller drives /CS. */
+
+	st->dev     = (void *)dev;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = s;
+	return ALP_OK;
+}
+
+static alp_status_t z_target_transceive(
+    alp_spi_backend_state_t *st, const uint8_t *tx, uint8_t *rx, size_t len, size_t *rx_len)
+{
+	const struct device *dev = (const struct device *)st->dev;
+	alp_z_spi_side_t    *s   = (alp_z_spi_side_t *)st->be_data;
+	if (s == NULL) return ALP_ERR_NOT_READY;
+
+	struct spi_buf     tx_buf = { .buf = (void *)tx, .len = (tx != NULL) ? len : 0 };
+	struct spi_buf     rx_buf = { .buf = rx, .len = (rx != NULL) ? len : 0 };
+	struct spi_buf_set tx_set = { .buffers = &tx_buf, .count = 1 };
+	struct spi_buf_set rx_set = { .buffers = &rx_buf, .count = 1 };
+
+	/* In slave mode a non-negative return is the number of frames
+	 * the external controller actually clocked (drivers without
+	 * slave support fail with -ENOTSUP -> ALP_ERR_NOSUPPORT). */
+	int ret = spi_transceive(
+	    dev, &s->zspi_cfg, (tx != NULL) ? &tx_set : NULL, (rx != NULL) ? &rx_set : NULL);
+	if (ret < 0) return _errno_to_alp(ret);
+	if (rx_len != NULL) *rx_len = (size_t)ret;
+	return ALP_OK;
+}
+
+static void z_target_close(alp_spi_backend_state_t *st)
+{
+	_free_side((alp_z_spi_side_t *)st->be_data);
+	st->be_data = NULL;
+}
+
 static const alp_spi_ops_t _ops = {
-	.open       = z_open,
-	.transceive = z_transceive,
-	.close      = z_close,
+	.open              = z_open,
+	.transceive        = z_transceive,
+	.close             = z_close,
+	.target_open       = z_target_open,
+	.target_transceive = z_target_transceive,
+	.target_close      = z_target_close,
 };
 
 ALP_BACKEND_REGISTER(spi,

@@ -47,12 +47,25 @@ struct alp_spi_ops {
 	                           uint8_t                 *rx,
 	                           size_t                   len);
 	void (*close)(alp_spi_backend_state_t *state);
+	/* Target (slave) mode -- optional.  Backends without slave
+	 * support leave all three NULL; the dispatcher then fails
+	 * alp_spi_target_open with ALP_ERR_NOSUPPORT. */
+	alp_status_t (*target_open)(const alp_spi_target_config_t *cfg, alp_spi_backend_state_t *state);
+	alp_status_t (*target_transceive)(
+	    alp_spi_backend_state_t *state, const uint8_t *tx, uint8_t *rx, size_t len, size_t *rx_len);
+	void (*target_close)(alp_spi_backend_state_t *state);
 };
 
 struct alp_spi {
 	alp_spi_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
+	bool                    in_use;
+};
+
+struct alp_spi_target {
+	alp_spi_backend_state_t state;
+	const alp_backend_t    *backend;
 	bool                    in_use;
 };
 
