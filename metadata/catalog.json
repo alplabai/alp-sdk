@@ -383,7 +383,7 @@
         "name": "i2c-device-hub",
         "path": "examples/peripheral-io/i2c-device-hub",
         "som": "E1M-AEN801",
-        "summary": "i2c-device-hub -- functional read-out of every populated device on the EVK sensor/power I2C bus, each through its real chip driver (not a raw register poke). This is the \"prove the whole board is usable\" demo: one bus, many ICs, each brought up + read for a real value."
+        "summary": "Functional read-out of **every populated device on the EVK sensor/power I2C bus**, each through its real chip driver -- not a raw register poke. This is the \"prove the whole board is usable\" demo: one bus, many ICs, each brought up and read for a real value."
       },
       {
         "board": "e1m-evk",
@@ -412,7 +412,7 @@
         "name": "i2c-slave",
         "path": "examples/peripheral-io/i2c-slave",
         "som": "E1M-AEN701",
-        "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the portable `alp_i2c_target_*` surface from `<alp/peripheral.h>` (v0.8, `[ABI-EXPERIMENTAL]`).",
+        "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the portable `alp_i2c_target_*` surface from `<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`).",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -467,7 +467,7 @@
         "name": "spi-slave",
         "path": "examples/peripheral-io/spi-slave",
         "som": "E1M-AEN701",
-        "summary": "Claim the bus in target (slave) mode using the portable `alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.8, `[ABI-EXPERIMENTAL]`) and answer an external SPI controller.",
+        "summary": "Claim the bus in target (slave) mode using the portable `alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`) and answer an external SPI controller.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -604,7 +604,7 @@
         "name": "v2n-gd32-bridge-functional",
         "path": "examples/v2n/v2n-gd32-bridge-functional",
         "som": "E1M-V2M101",
-        "summary": "v2n-gd32-bridge-functional -- single-pass FUNCTIONAL validation of the GD32 supervisor bridge, then a live oscilloscope observable."
+        "summary": "Single-pass **functional** validation of the V2N module's GD32G553 supervisor-MCU bridge, followed by a forever PWM7 duty staircase as a live oscilloscope observable."
       },
       {
         "board": "e1m-x-evk",
@@ -945,7 +945,9 @@
     {
       "functions": [
         "alp_hw_info_assert_matches_build",
-        "alp_hw_info_read"
+        "alp_hw_info_read",
+        "alp_soc_info_read",
+        "alp_soc_secure_fw_ping"
       ],
       "header": "include/alp/hw_info.h"
     },
@@ -1011,6 +1013,7 @@
         "alp_mbox_open",
         "alp_mbox_send",
         "alp_mbox_set_callback",
+        "alp_mproc_boot_core",
         "alp_shmem_capabilities",
         "alp_shmem_close",
         "alp_shmem_open",
@@ -1068,6 +1071,8 @@
         "alp_power_close",
         "alp_power_configure_wake_source",
         "alp_power_open",
+        "alp_power_profile_get",
+        "alp_power_profile_set",
         "alp_power_request_sleep"
       ],
       "header": "include/alp/power.h"
