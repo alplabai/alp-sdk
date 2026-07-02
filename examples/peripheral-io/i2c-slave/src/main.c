@@ -28,9 +28,11 @@
  *   ...
  *   [i2c-slave] done
  *
- * On native_sim (CI lane) the emulated controller has no
- * target-mode support, so open() fails with ALP_ERR_NOSUPPORT /
- * ALP_ERR_NOT_READY; the example prints the diagnostic and exits.
+ * On native_sim (CI lane) the emulated controller ACCEPTS the
+ * target registration (CONFIG_I2C_TARGET), but no external
+ * controller ever drives the emulated bus, so the ticks show
+ * writes_seen=0.  On drivers WITHOUT target support open() fails
+ * with ALP_ERR_NOSUPPORT and the diagnostic prints instead.
  * Either way the [i2c-slave] done marker latches the harness.
  *
  * Availability note: target mode needs controller-driver support
@@ -134,14 +136,13 @@ int main(void)
 	if (tgt == NULL) {
 		/* Common causes:
 		 *   * ALP_ERR_NOSUPPORT -- controller driver has no target
-		 *     mode.  Every native_sim build lands here today: the
-		 *     emulated I2C controller cannot emulate target mode.
+		 *     mode (CONFIG_I2C_TARGET off, or the driver never
+		 *     implemented target_register).
 		 *   * ALP_ERR_NOT_READY -- alp-i2c0 alias unset / device
 		 *     not ready on this board. */
 		printf("[i2c-slave] target open failed: alp_last_error=%d\n", (int)alp_last_error());
 		printf("[i2c-slave]   I2C target mode is unavailable on this build\n");
-		printf("[i2c-slave]   (native_sim has no target-mode emulation; on real\n");
-		printf("[i2c-slave]   hardware check CONFIG_I2C_TARGET + driver support)\n");
+		printf("[i2c-slave]   (check CONFIG_I2C_TARGET + controller-driver support)\n");
 		printf("[i2c-slave] done\n");
 		return 0;
 	}

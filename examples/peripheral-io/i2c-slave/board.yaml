@@ -3,9 +3,9 @@
 #
 # Register-mapped I2C target (slave) via the portable
 # alp_i2c_target_* surface in <alp/peripheral.h> (v0.8).
-# Needs controller-driver target support at runtime; the example
-# degrades cleanly (NOSUPPORT diagnostic) where none exists --
-# e.g. every native_sim build.
+# Needs controller-driver target support (CONFIG_I2C_TARGET) at
+# runtime; the example degrades cleanly (NOSUPPORT diagnostic)
+# where none exists.
 #
 # Customer workflow: copy this directory, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,

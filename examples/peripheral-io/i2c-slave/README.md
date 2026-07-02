@@ -27,14 +27,16 @@ Target mode needs controller-driver support: on Zephyr that is
 `CONFIG_I2C_TARGET` (set in this example's `prj.conf`) plus a
 driver implementing `target_register`.  Backends or drivers
 without it fail the open with `ALP_ERR_NOSUPPORT`, which the
-example handles by printing the diagnostic and exiting -- that is
-the expected outcome on **native_sim**, which has no target-mode
-emulation:
+example handles by printing the diagnostic and exiting.
+
+On **native_sim** (the CI lane) the emulated controller accepts
+the registration, but no external controller ever drives the
+emulated bus -- the ticks simply show `writes_seen=0`:
 
 ```
 [i2c-slave] listening @ 0x42 on BOARD_I2C_SENSORS
-[i2c-slave] target open failed: alp_last_error=-6
-[i2c-slave]   I2C target mode is unavailable on this build
+[i2c-slave] tick 0 writes_seen=0 regs={0xa0,0xa1,0xa2,0xa3,...}
+...
 [i2c-slave] done
 ```
 

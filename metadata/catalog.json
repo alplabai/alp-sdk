@@ -412,7 +412,7 @@
         "name": "i2c-slave",
         "path": "examples/peripheral-io/i2c-slave",
         "som": "E1M-AEN701",
-        "summary": "Demonstrate the *shape* of I2C slave-mode application code on the Alp SDK.",
+        "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the portable `alp_i2c_target_*` surface from `<alp/peripheral.h>` (v0.8, `[ABI-EXPERIMENTAL]`).",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -467,7 +467,7 @@
         "name": "spi-slave",
         "path": "examples/peripheral-io/spi-slave",
         "som": "E1M-AEN701",
-        "summary": "Demonstrate the *shape* of SPI slave-mode application code on the Alp SDK.",
+        "summary": "Claim the bus in target (slave) mode using the portable `alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.8, `[ABI-EXPERIMENTAL]`) and answer an external SPI controller.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -1019,6 +1019,7 @@
     },
     {
       "functions": [
+        "alp_deinit",
         "alp_delay_ms",
         "alp_delay_us",
         "alp_gpio_capabilities",
@@ -1033,13 +1034,19 @@
         "alp_i2c_close",
         "alp_i2c_open",
         "alp_i2c_read",
+        "alp_i2c_target_close",
+        "alp_i2c_target_open",
         "alp_i2c_write",
         "alp_i2c_write_read",
+        "alp_init",
         "alp_last_error",
         "alp_spi_capabilities",
         "alp_spi_close",
         "alp_spi_open",
         "alp_spi_read",
+        "alp_spi_target_close",
+        "alp_spi_target_open",
+        "alp_spi_target_transceive",
         "alp_spi_transceive",
         "alp_spi_write",
         "alp_uart_capabilities",

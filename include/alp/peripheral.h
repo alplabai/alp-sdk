@@ -371,9 +371,11 @@ const alp_capabilities_t *alp_i2c_capabilities(const alp_i2c_t *bus);
 /*                                                                     */
 /* Availability: requires controller-driver target support (Zephyr:   */
 /* CONFIG_I2C_TARGET + a driver that implements target_register).     */
-/* native_sim has no target-mode emulation -- open() fails with        */
-/* ALP_ERR_NOSUPPORT / ALP_ERR_NOT_READY and applications must        */
-/* degrade cleanly.                                                    */
+/* Drivers without it fail open() with ALP_ERR_NOSUPPORT (or          */
+/* ALP_ERR_NOT_READY when the bus alias is unset) -- applications     */
+/* must degrade cleanly.  native_sim's emulated controller accepts    */
+/* the registration but no external controller ever drives it, so     */
+/* callbacks never fire there.                                         */
 /*                                                                     */
 /* ABI status: [ABI-EXPERIMENTAL] -- v0.8 new.                         */
 /* ------------------------------------------------------------------ */
@@ -439,8 +441,7 @@ typedef struct {
  * @return Open handle on success; NULL with @ref alp_last_error set to
  *         @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /
  *         @ref ALP_ERR_NOSUPPORT (backend or controller driver has no
- *         target mode -- e.g. every native_sim build today) /
- *         @ref ALP_ERR_NOMEM.
+ *         target mode) / @ref ALP_ERR_NOMEM.
  */
 alp_i2c_target_t *alp_i2c_target_open(const alp_i2c_target_config_t *cfg);
 

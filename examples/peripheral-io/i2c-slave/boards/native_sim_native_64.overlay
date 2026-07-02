@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * One emulated I2C bus exposed via the alp-i2c0 alias.  The
- * emulated controller has no target-mode emulation, so the
- * example's alp_i2c_target_open degrades cleanly (NOSUPPORT
- * diagnostic) -- but the alias must exist for the loader's
+ * emulated controller accepts the example's target registration
+ * (CONFIG_I2C_TARGET) but nothing ever drives the bus, so the
+ * callbacks never fire.  The alias must exist for the loader's
  * DT-resolution pass to succeed.
  */
 

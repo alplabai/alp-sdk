@@ -6,10 +6,11 @@ sample:
     Per-peripheral example for I2C target (slave) mode via
     alp_i2c_target_open: register-file pattern over byte-granular
     write/read/stop callbacks.  On native_sim the emulated
-    controller has no target-mode support, so the open degrades
-    cleanly with the NOSUPPORT diagnostic.  Builds on both EVKs:
-    E1M EVK uses E1M_I2C0 via BOARD_I2C_SENSORS; E1M-X EVK uses
-    E1M_X_I2C0.
+    controller accepts the registration but nothing drives the
+    bus, so ticks show writes_seen=0; drivers without target
+    support degrade cleanly with the NOSUPPORT diagnostic.
+    Builds on both EVKs: E1M EVK uses E1M_I2C0 via
+    BOARD_I2C_SENSORS; E1M-X EVK uses E1M_X_I2C0.
 
 tests:
   alp_sdk.example.i2c_slave.e1m_x_evk:
