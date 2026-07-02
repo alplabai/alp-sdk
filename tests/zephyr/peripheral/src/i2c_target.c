@@ -54,8 +54,8 @@ ZTEST(alp_peripheral, test_i2c_target_missing_callbacks_inval)
 	zassert_is_null(alp_i2c_target_open(&cfg), "on_write is required");
 	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 
-	cfg          = _valid_cfg();
-	cfg.on_read  = NULL;
+	cfg         = _valid_cfg();
+	cfg.on_read = NULL;
 	zassert_is_null(alp_i2c_target_open(&cfg), "on_read is required");
 	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
@@ -82,8 +82,8 @@ ZTEST(alp_peripheral, test_i2c_target_open_close_roundtrip)
 	 * no external controller drives the bus. */
 	alp_i2c_target_config_t cfg = _valid_cfg();
 	alp_i2c_target_t       *tgt = alp_i2c_target_open(&cfg);
-	zassert_not_null(tgt, "emul controller should accept registration (last_error=%d)",
-	                 (int)alp_last_error());
+	zassert_not_null(
+	    tgt, "emul controller should accept registration (last_error=%d)", (int)alp_last_error());
 	alp_i2c_target_close(tgt);
 	/* Double-close must be a harmless no-op (idempotence contract). */
 	alp_i2c_target_close(tgt);
@@ -103,5 +103,6 @@ ZTEST(alp_peripheral, test_i2c_target_invalid_bus_returns_null)
 	 * the SoC's documented I2C count (OUT_OF_RANGE) -- either precise
 	 * refusal is acceptable; what matters is NO handle. */
 	zassert_true(alp_last_error() == ALP_ERR_INVAL || alp_last_error() == ALP_ERR_OUT_OF_RANGE,
-	             "got %d", (int)alp_last_error());
+	             "got %d",
+	             (int)alp_last_error());
 }

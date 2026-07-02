@@ -70,8 +70,7 @@ static inline void alp_slot_release(bool *in_use)
  */
 static inline bool alp_lifecycle_cas(uint8_t *state, uint8_t from, uint8_t to)
 {
-	return __atomic_compare_exchange_n(
-	    state, &from, to, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+	return __atomic_compare_exchange_n(state, &from, to, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
 }
 
 /**

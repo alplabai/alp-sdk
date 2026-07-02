@@ -59,14 +59,16 @@ ZTEST(alp_peripheral, test_spi_target_invalid_bus_returns_null)
 	 * the SoC's documented SPI count (OUT_OF_RANGE) -- either precise
 	 * refusal is acceptable; what matters is NO handle. */
 	zassert_true(alp_last_error() == ALP_ERR_INVAL || alp_last_error() == ALP_ERR_OUT_OF_RANGE,
-	             "got %d", (int)alp_last_error());
+	             "got %d",
+	             (int)alp_last_error());
 }
 
 ZTEST(alp_peripheral, test_spi_target_transceive_null_handle_not_ready)
 {
 	uint8_t buf[4] = { 0 };
 	size_t  got    = 99;
-	zassert_equal(alp_spi_target_transceive(NULL, buf, buf, sizeof buf, &got, 100), ALP_ERR_NOT_READY);
+	zassert_equal(alp_spi_target_transceive(NULL, buf, buf, sizeof buf, &got, 100),
+	              ALP_ERR_NOT_READY);
 	zassert_equal(got, 0, "rx_len must be zeroed on every failure path");
 }
 
@@ -74,8 +76,8 @@ ZTEST(alp_peripheral, test_spi_target_transceive_arg_validation)
 {
 	alp_spi_target_config_t cfg = _valid_cfg();
 	alp_spi_target_t       *tgt = alp_spi_target_open(&cfg);
-	zassert_not_null(tgt, "emulated alp-spi0 should open in slave mode (last_error=%d)",
-	                 (int)alp_last_error());
+	zassert_not_null(
+	    tgt, "emulated alp-spi0 should open in slave mode (last_error=%d)", (int)alp_last_error());
 
 	uint8_t buf[4] = { 0 };
 	size_t  got    = 99;
@@ -87,8 +89,7 @@ ZTEST(alp_peripheral, test_spi_target_transceive_arg_validation)
 	zassert_equal(got, 0);
 
 	/* Both directions NULL: nothing to transfer either way. */
-	zassert_equal(alp_spi_target_transceive(tgt, NULL, NULL, sizeof buf, &got, 100),
-	              ALP_ERR_INVAL);
+	zassert_equal(alp_spi_target_transceive(tgt, NULL, NULL, sizeof buf, &got, 100), ALP_ERR_INVAL);
 
 	zassert_equal(alp_spi_target_close(tgt), ALP_OK);
 }
@@ -102,8 +103,8 @@ ZTEST(alp_peripheral, test_spi_target_bounded_wait_nosupport_without_async)
 	 * path apps must handle. */
 	alp_spi_target_config_t cfg = _valid_cfg();
 	alp_spi_target_t       *tgt = alp_spi_target_open(&cfg);
-	zassert_not_null(tgt, "emulated alp-spi0 should open in slave mode (last_error=%d)",
-	                 (int)alp_last_error());
+	zassert_not_null(
+	    tgt, "emulated alp-spi0 should open in slave mode (last_error=%d)", (int)alp_last_error());
 
 	uint8_t      buf[4] = { 0 };
 	size_t       got    = 99;
