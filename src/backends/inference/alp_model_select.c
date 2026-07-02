@@ -69,7 +69,7 @@ alp_status_t alp_model_select(const alp_model_t            *m,
 	}
 
 	int  best = -1, cpu = -1;
-	bool any_backend = false;
+	bool any_backend = false, cpu_no_fit = false;
 
 	for (uint32_t i = 0; i < m->n_targets; ++i) {
 		const alp_model_target_t *t  = &m->targets[i];
@@ -83,7 +83,17 @@ alp_status_t alp_model_select(const alp_model_t            *m,
 		}
 
 		if (be == ALP_INFERENCE_BACKEND_CPU) {
-			cpu = (int)i;
+			/* The CPU candidate must pass the same arena gate every NPU
+			 * target passes: an oversized CPU blob selected here would
+			 * return ALP_OK and only fail far downstream at arena
+			 * allocation (issue #245).  Remember that a CPU target
+			 * existed but did not fit so the caller gets NO_FIT, not
+			 * NO_BACKEND. */
+			if (_fits(t, env)) {
+				cpu = (int)i;
+			} else {
+				cpu_no_fit = true;
+			}
 			continue;
 		}
 
@@ -136,7 +146,9 @@ alp_status_t alp_model_select(const alp_model_t            *m,
 		best = cpu;
 	}
 	if (best < 0) {
-		return any_backend ? ALP_ERR_NO_FIT : ALP_ERR_NO_BACKEND;
+		/* NO_FIT when at least one target was available but oversized
+		 * (NPU or CPU); NO_BACKEND when nothing was available at all. */
+		return (any_backend || cpu_no_fit) ? ALP_ERR_NO_FIT : ALP_ERR_NO_BACKEND;
 	}
 
 	const alp_model_target_t *t = &m->targets[best];
