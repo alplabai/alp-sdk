@@ -1044,6 +1044,15 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_ADC
 # ADC backends.  Each registers itself into .alp_backends_adc via
 # ALP_BACKEND_REGISTER.  SoC-gated so unused vendor code is
 # tree-shaken from the build.
+#
+# zephyr_drv is the portable wildcard backend (alp-adcN alias ->
+# "alp,adc-input" consumer -> adc_channel_setup_dt / adc_read).  A
+# vendor exact-match at the same priority still wins the registry
+# tiebreak (see alp_backend_select), so compiling it wherever the
+# Zephyr ADC subsystem is on is safe -- it only answers when no
+# vendor backend matches the active SoC.
+zephyr_library_sources_ifdef(CONFIG_ADC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/zephyr_drv.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/alif_e7.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8
