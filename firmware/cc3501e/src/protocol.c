@@ -536,7 +536,7 @@ static alp_cc3501e_resp_t handle_wifi_status(const uint8_t *req,
 }
 
 /* --------------------------------------------------------------- */
-/* BLE 5.4 (0x30..0x4F)                                              */
+/* BLE 5.4 (0x30..0x3F)                                              */
 /*                                                                   */
 /* BLE payloads with multi-byte fields are parsed field-by-field from */
 /* the PACKED wire (LE), not by casting to the doc structs in         */
