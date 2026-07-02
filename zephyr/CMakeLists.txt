@@ -956,6 +956,15 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MODEL_READER
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backend.c
 )
+# Declare the custom alp_backends_* / alp_backend_classes sections in
+# the rodata region.  Required on real boards: Zephyr's ld-script
+# targets link with --orphan-handling=warn + --fatal-warnings, so the
+# registry sections MUST be placed explicitly (native_sim's host
+# linker script auto-places them as orphans, which is why this never
+# surfaced in CI).  See the maintenance note in the snippet: one line
+# per backend class.
+zephyr_linker_sources(ROM_SECTIONS
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/linker/alp-backend-sections.ld)
 
 # I2C class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
