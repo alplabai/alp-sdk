@@ -6,6 +6,16 @@
  * Enclave (SE) SERVICE transport on the E1M-AEN801 (Ensemble E8, M55-HE), via
  * the bench RAM-run + RAM-console flow.  Mirrors aen-camera-regcheck.
  *
+ * DELIBERATELY VENDOR-SPECIFIC (the sanctioned bring-up escape hatch, per the
+ * vendor-extension doctrine -- see examples/peripheral-io/vendor-ext-
+ * composability).  This app exists to poke Alif silicon: it asserts the DT
+ * nodes bind at the FORK's reg/IRQ facts and drives the hal_alif client
+ * directly, which no portable surface can (or should) express.  Customer code
+ * never writes this -- it calls the portable wrappers these mailboxes back:
+ * alp_soc_info_read / alp_soc_secure_fw_ping (<alp/hw_info.h>),
+ * alp_power_profile_get (<alp/power.h>), alp_mproc_boot_core (<alp/mproc.h>);
+ * see aen-se-service-query for the portable consumer of this transport.
+ *
  * WHAT THIS APP VALIDATES (and what it deliberately does NOT):
  *
  *   The SE service client is the Apache-2.0 hal_alif library

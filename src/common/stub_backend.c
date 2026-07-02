@@ -587,9 +587,8 @@ void alp_rtc_close(alp_rtc_t *r)
 #endif /* !ALP_VENDOR_OVERRIDES_RTC */
 
 #if !defined(ALP_VENDOR_OVERRIDES_WDT)
-alp_wdt_t *alp_wdt_open(uint32_t id, const alp_wdt_config_t *cfg)
+alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg)
 {
-	(void)id;
 	(void)cfg;
 	z_last_error = ALP_ERR_NOSUPPORT;
 	return NULL;

@@ -457,7 +457,7 @@ ZTEST(alp_adc_filter, test_read_null_handle_returns_not_ready)
 {
 	int16_t      out[8] = { 0 };
 	size_t       got    = 0u;
-	alp_status_t s      = alp_adc_filter_read(NULL, out, 8u, &got);
+	alp_status_t s      = alp_adc_filter_read_mv(NULL, out, 8u, &got);
 	zassert_equal(s, ALP_ERR_NOT_READY, NULL);
 	zassert_equal(got, 0u, NULL);
 }
@@ -471,7 +471,7 @@ ZTEST(alp_adc_filter, test_read_null_got_returns_inval)
      * first check is `got == NULL`, which is independent of handle
      * validity. */
 	int          dummy = 0;
-	alp_status_t s     = alp_adc_filter_read((alp_adc_filter_t *)&dummy, out, 8u, NULL);
+	alp_status_t s     = alp_adc_filter_read_mv((alp_adc_filter_t *)&dummy, out, 8u, NULL);
 	zassert_equal(s, ALP_ERR_INVAL, NULL);
 }
 

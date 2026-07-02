@@ -2134,6 +2134,65 @@ config ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
 	  returns ALP_ERR_NOSUPPORT and the dispatcher falls through to the PSA
 	  backend.  Turn OFF to force all crypto onto the M55 via PSA.  See #222.
 
+config ALP_SDK_MPROC_BOOT_ALIF_SE
+	bool "Route alp_mproc_boot_core() to the Alif SE-service boot authority"
+	depends on ALP_SDK && HAS_ALIF_SE_SERVICES
+	default y
+	help
+	  Compiles the Alif SE-service peer-core boot backend
+	  (src/backends/mproc/alif_se_boot.c).  It registers at
+	  silicon_ref="alif:ensemble:e8" priority 100 in the "mproc_boot"
+	  class -- ahead of the silicon_ref="*" priority-0 NOSUPPORT
+	  fallback -- so on the E8 the portable alp_mproc_boot_core()
+	  (<alp/mproc.h>) releases the other M55 through
+	  se_service_boot_cpu() over the SE MHUv2 mailbox: the bench-proven
+	  "B1 Option B" dual-core route (a dual ATOC loads the peer image
+	  ["load"]-only; the master core starts it at runtime).
+
+	  se_service_boot_cpu() itself is added to hal_alif by
+	  zephyr/patches/hal_alif/0001-se-service-add-boot-cpu.patch.
+	  Needs the SE mailboxes (ARM_MHUV2 + the se_service DT node).
+	  With this OFF, alp_mproc_boot_core() returns ALP_ERR_NOSUPPORT
+	  on AEN builds.
+
+config ALP_SDK_SOC_INFO_ALIF_SE
+	bool "Route the <alp/hw_info.h> SoC identity to the Alif SE service"
+	depends on ALP_SDK && HAS_ALIF_SE_SERVICES
+	default y
+	help
+	  Compiles the Alif SE-service SoC-identity backend
+	  (src/backends/soc_info/alif_se.c).  It registers at
+	  silicon_ref="alif:ensemble:e8" priority 100 in the "soc_info"
+	  class, so alp_soc_info_read() / alp_soc_secure_fw_ping() ride
+	  the SE mailbox: heartbeat, the SE firmware revision string, the
+	  device part number, and the device-revision data (die revision +
+	  lifecycle state + factory-fused serial).  Read-only -- no
+	  mutating SE service is ever issued by this backend.
+
+	  With this OFF (or on non-AEN builds) the wildcard sw_fallback
+	  answers: soc_ref still reports the build-time silicon reference
+	  and the runtime fields return ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_POWER_PROFILE_ALIF_SE
+	bool "Route alp_power_profile_* to the Alif SE aiPM service"
+	depends on ALP_SDK_POWER && HAS_ALIF_SE_SERVICES
+	default y
+	help
+	  Compiles the Alif SE aiPM operating-point-profile backend
+	  (src/backends/power/alif_se_profile.c).  It registers at
+	  silicon_ref="alif:ensemble:e8" priority 100 in the
+	  "power_profile" class (separate from the "power" sleep-mode
+	  class, so the pm_policy request_sleep winner is untouched) and
+	  maps the SE's RUN/OFF profiles (run_profile_t / off_profile_t)
+	  onto the portable alp_power_profile_t: Hz + millivolts +
+	  implementation-defined domain/memory/wake masks.
+
+	  GET rides the two read-only aiPM getters (se_service_get_run_cfg
+	  / se_service_get_off_cfg).  SET is a read-modify-write over
+	  se_service_set_run_cfg / se_service_set_off_cfg -- it CHANGES
+	  the live operating point; see the <alp/power.h> warning.  With
+	  this OFF, both calls return ALP_ERR_NOSUPPORT on AEN builds.
+
 config ALP_SDK_MPROC
 	bool "Real multi-processor IPC for <alp/mproc.h>"
 	default y if MBOX

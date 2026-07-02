@@ -25,6 +25,7 @@
 
 #include "alp/peripheral.h"
 
+#include "alp/e1m_pinout.h"
 #include "alp/wdt.h"
 
 /* WDT_TIMEOUT_MS sets the max interval between two feed() calls.
@@ -47,12 +48,13 @@ int main(void)
      * miss-feed.  Alternatives are RESET_CPU (core reset only,
      * peripherals retain state -- useful for soft-fault recovery)
      * and INTERRUPT_ONLY (fires an IRQ; you'd capture state in the
-     * handler before manually triggering a reset). */
-	alp_wdt_t *wdt = alp_wdt_open(0,
-	                              &(alp_wdt_config_t){
-	                                  .timeout_ms = WDT_TIMEOUT_MS,
-	                                  .on_timeout = ALP_WDT_RESET_SOC,
-	                              });
+     * handler before manually triggering a reset).  wdt_id selects
+     * the watchdog instance (E1M_WDT0 = 0 on every E1M SoM). */
+	alp_wdt_t *wdt = alp_wdt_open(&(alp_wdt_config_t){
+	    .wdt_id     = E1M_WDT0,
+	    .timeout_ms = WDT_TIMEOUT_MS,
+	    .on_timeout = ALP_WDT_RESET_SOC,
+	});
 	if (wdt == NULL) {
 		printf("[wdt] open failed: alp_last_error=%d "
 		       "(expected NOT_READY = -2 on native_sim)\n",

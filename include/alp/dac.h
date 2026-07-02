@@ -32,7 +32,7 @@
  * @endcode
  *
  * @par ABI status: [ABI-STABLE]
- *      v0.2.  Base surface stable.
+ *      v0.2.  Base surface stable.  v0.9.0: additive alp_dac_capabilities, aligning DAC with every other opened-handle class.
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -76,26 +76,27 @@ typedef struct {
 alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg);
 
 /**
- * @brief Set the DAC output in millivolts.
+ * @brief Set the DAC output in millivolts (uint16, mV).
  *
  * The backend saturates at the DAC's reference rail (3.3 V typical
  * on the GD32 / V2N route) and rounds to the converter's hardware-
  * achievable resolution (12-bit on the GD32 DAC).
  *
  * @param[in] dac  Handle from @ref alp_dac_open.
- * @param[in] mv   Requested output in millivolts.
+ * @param[in] mv   Requested output in millivolts (@c uint16_t, mV).
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO.
  */
 alp_status_t alp_dac_write_mv(alp_dac_t *dac, uint16_t mv);
 
 /**
- * @brief Read back the currently-programmed DAC output in millivolts.
+ * @brief Read back the currently-programmed DAC output in millivolts
+ *        (uint16, mV).
  *
  * Useful for verification + closed-loop monitors where the rounded
  * hardware setpoint may differ from the requested value.
  *
  * @param[in]  dac     Handle from @ref alp_dac_open.
- * @param[out] mv_out  Receives the programmed output (mV).
+ * @param[out] mv_out  Receives the programmed output (@c uint16_t, mV).
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
  */
 alp_status_t alp_dac_read_mv(alp_dac_t *dac, uint16_t *mv_out);
@@ -110,6 +111,20 @@ alp_status_t alp_dac_read_mv(alp_dac_t *dac, uint16_t *mv_out);
  * @param[in] dac  Handle from @ref alp_dac_open, or NULL.
  */
 void alp_dac_close(alp_dac_t *dac);
+
+/**
+ * @brief Query the capabilities of an opened DAC channel handle.
+ *
+ * Returns a pointer to the @ref alp_capabilities_t descriptor the
+ * backend populated at open time. Useful for runtime gating
+ * (e.g. only enabling DMA-driven waveform code paths when the
+ * backend advertises @ref ALP_INSTANCE_CAP_DMA).
+ *
+ * @param dac  Handle from @ref alp_dac_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p dac
+ *         is NULL.
+ */
+const alp_capabilities_t *alp_dac_capabilities(const alp_dac_t *dac);
 
 #ifdef __cplusplus
 } /* extern "C" */

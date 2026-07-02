@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * aen-dualcore-doorbell -- the HE->HP MHU-1 doorbell, now that BOTH M55 cores
- * boot (see aen-dualcore-master / the se_service_boot_cpu route). Earlier B1
- * attempts could not test this because only one core ran; here the HP master
- * releases HE, then HE rings HP.
+ * boot (see aen-dualcore-master / the portable alp_mproc_boot_core route, which
+ * the backend registry resolves to the SoM's boot authority -- the SE boot
+ * service on AEN). Earlier B1 attempts could not test this because only one
+ * core ran; here the HP master releases HE, then HE rings HP.
  *
  * MHU-1 non-secure HE<->HP pair (Alif DFP + fork e1.dtsi):
  *   HE->HP sender   @0x400B0000 (IRQ44) -- HE writes CH0_SET to ring
@@ -25,7 +26,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
-#include <se_service.h>
+
+#include <alp/mproc.h>
 
 #define MHU1_SEND    0x400B0000U /* HE->HP sender   */
 #define MHU1_RECV    0x400A0000U /* HE->HP receiver */
@@ -36,8 +38,7 @@
 #define RCV_CH0_CLR  (MHU1_RECV + 0x08U)
 #define DOORBELL_BIT 0x1U
 
-#define EXTSYS_1_HE  3U
-#define HE_LOAD_ADDR 0x58000000U
+#define HE_LOAD_ADDR 0x58000000U /* HE ITCM global alias = HE-APP loadAddress */
 
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define ROLE        "HP"
@@ -67,11 +68,11 @@ int main(void)
 
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 	/* HP master: release HE, then receive HE's doorbells on MHU-1. */
-	int rc = se_service_boot_cpu(EXTSYS_1_HE, HE_LOAD_ADDR);
+	alp_status_t rc = alp_mproc_boot_core(ALP_CORE_M55_HE, HE_LOAD_ADDR);
 
-	printk("se_service_boot_cpu(HE, 0x%08x) rc=%d -- now receiving on MHU-1 @0x400A0000\n",
+	printk("alp_mproc_boot_core(M55-HE, 0x%08x) rc=%d -- now receiving on MHU-1 @0x400A0000\n",
 	       HE_LOAD_ADDR,
-	       rc);
+	       (int)rc);
 
 	uint32_t received = 0U;
 
