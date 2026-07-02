@@ -51,13 +51,13 @@ the PR for experimental symbols.
 |-----------------------|--------------------|-------------------------------------------------------------------|
 | `peripheral.h` (I²C/SPI/UART/GPIO) | `[ABI-STABLE]` | v0.1 surface; locked across every since-then release. |
 | `pwm.h`               | `[ABI-STABLE]`     | v0.2 surface; locked.                                             |
-| `adc.h`               | `[ABI-STABLE]`     | v0.2 + v0.5 additive (filter/spectrum handle types).  Base surface stable; new `alp_adc_filter_t` / `alp_adc_spectrum_t` may evolve `[ABI-EXPERIMENTAL]` at function granularity.  v0.8.0: the DAC half (`alp_dac_*`) split out to `dac.h` (same signatures; a source-include move, not a symbol change). |
-| `dac.h`               | `[ABI-STABLE]`     | v0.1 surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`); split out of `adc.h` into its own header in v0.8.0 when DAC moved to the registry/dispatcher pattern.  Signatures unchanged. |
+| `adc.h`               | `[ABI-STABLE]`     | v0.2 + v0.5 additive (filter/spectrum handle types).  Base surface stable; new `alp_adc_filter_t` / `alp_adc_spectrum_t` may evolve `[ABI-EXPERIMENTAL]` at function granularity.  v0.8.0: the DAC half (`alp_dac_*`) split out to `dac.h` (same signatures; a source-include move, not a symbol change).  v0.9.0: `alp_adc_stream_read` / `alp_adc_filter_read` renamed to `alp_adc_stream_read_mv` / `alp_adc_filter_read_mv` so every read entry point carries its unit suffix (pre-1.0 rename; parameter lists unchanged). |
+| `dac.h`               | `[ABI-STABLE]`     | v0.1 surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`); split out of `adc.h` into its own header in v0.8.0 when DAC moved to the registry/dispatcher pattern.  Signatures unchanged.  v0.9.0: additive `alp_dac_capabilities`, aligning DAC with every other opened-handle class. |
 | `counter.h`           | `[ABI-STABLE]`     | v0.2.                                                              |
 | `i2s.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
 | `can.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
 | `rtc.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
-| `wdt.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
+| `wdt.h`               | `[ABI-STABLE]`     | v0.2.  v0.9.0: `wdt_id` moved into `alp_wdt_config_t` so `alp_wdt_open(const alp_wdt_config_t *)` matches every other config-taking open (pre-1.0 signature change). |
 | `audio.h`             | `[ABI-STABLE]`     | v0.2 decl + v0.3 impl; PDM-in / I²S-out shape stable.             |
 | `iot.h`               | `[ABI-STABLE]`     | v0.2-v0.4; Wi-Fi station + MQTT (TLS) signatures stable.          |
 | `security.h`          | `[ABI-STABLE]`     | v0.3 MbedTLS PSA Crypto wrapper.                                  |

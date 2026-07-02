@@ -20,7 +20,7 @@
  * Typical usage:
  * @code
  *     alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
- *         .channel_id = 0,                     // PWM0
+ *         .channel_id = E1M_PWM0,
  *         .period_ns  = 1000000,               // 1 kHz
  *         .polarity   = ALP_PWM_POLARITY_NORMAL,
  *     });
@@ -77,7 +77,7 @@ typedef struct alp_pwm alp_pwm_t;
 
 /** Configuration passed to @ref alp_pwm_open. */
 typedef struct {
-	uint32_t           channel_id; /**< Studio-resolved PWM channel index (0..7). */
+	uint32_t           channel_id; /**< Studio-resolved PWM channel index (E1M_PWM0..PWM7). */
 	uint32_t           period_ns;  /**< PWM period in nanoseconds. 0 = use DT default. */
 	alp_pwm_polarity_t polarity;
 } alp_pwm_config_t;
@@ -91,7 +91,8 @@ typedef struct {
  * the caller sets a non-zero duty via @ref alp_pwm_set_duty.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL; @c channel_id must
- *                 be < 8 and resolvable to a ready Zephyr pwm device.
+ *                 be < @ref E1M_PWM_COUNT (E1M_PWM0..PWM7) and
+ *                 resolvable to a ready Zephyr pwm device.
  * @return Open handle on success, or NULL on any of:
  *         - @p cfg is NULL
  *         - @c channel_id out of range or alias unset
@@ -228,7 +229,7 @@ typedef struct alp_pwm_capture alp_pwm_capture_t;
 
 /** Configuration passed to @ref alp_pwm_capture_open. */
 typedef struct {
-	uint32_t               channel_id; /**< PWM channel index (0..7) used as input. */
+	uint32_t               channel_id; /**< PWM channel index (E1M_PWM0..PWM7) used as input. */
 	alp_pwm_capture_edge_t edge;       /**< Edge polarity selector. */
 } alp_pwm_capture_config_t;
 

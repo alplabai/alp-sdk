@@ -19,14 +19,11 @@
 
 #include "wdt_ops.h"
 
-static alp_status_t sw_open(uint32_t                 wdt_id,
-                            const alp_wdt_config_t  *cfg,
-                            alp_wdt_backend_state_t *st,
-                            alp_capabilities_t      *caps_out)
+static alp_status_t
+sw_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	(void)cfg;
 	st->dev         = NULL;
-	st->wdt_id      = wdt_id;
+	st->wdt_id      = cfg->wdt_id;
 	st->channel_id  = 0;
 	st->be_data     = NULL;
 	caps_out->flags = 0u;

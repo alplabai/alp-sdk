@@ -19,9 +19,9 @@
           "hash": "10146d31d595620d",
           "signature": "alp_adc_filter_t * alp_adc_filter_open(const alp_adc_filter_config_t *cfg);"
         },
-        "alp_adc_filter_read": {
-          "hash": "6274d4a82cac55b3",
-          "signature": "alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got);"
+        "alp_adc_filter_read_mv": {
+          "hash": "398fd1a314320cb1",
+          "signature": "alp_status_t alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got);"
         },
         "alp_adc_open": {
           "hash": "d92fbf03c9a5f30c",
@@ -55,9 +55,9 @@
           "hash": "e44faa9127a200bd",
           "signature": "alp_adc_stream_t * alp_adc_stream_open(const alp_adc_stream_config_t *cfg);"
         },
-        "alp_adc_stream_read": {
-          "hash": "87c7b34244772693",
-          "signature": "alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got);"
+        "alp_adc_stream_read_mv": {
+          "hash": "5a7dd0bf03ed1db7",
+          "signature": "alp_status_t alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got);"
         }
       },
       "macros": {},
@@ -5791,6 +5791,10 @@
     },
     "alp/dac.h": {
       "functions": {
+        "alp_dac_capabilities": {
+          "hash": "7862c03075b7bb5f",
+          "signature": "const alp_capabilities_t * alp_dac_capabilities(const alp_dac_t *dac);"
+        },
         "alp_dac_close": {
           "hash": "36ff8acebd09531e",
           "signature": "void alp_dac_close(alp_dac_t *dac);"
@@ -9269,8 +9273,8 @@
           "signature": "alp_status_t alp_wdt_feed(alp_wdt_t *wdt);"
         },
         "alp_wdt_open": {
-          "hash": "646cfd5cbef425f9",
-          "signature": "alp_wdt_t * alp_wdt_open(uint32_t wdt_id, const alp_wdt_config_t *cfg);"
+          "hash": "57b68a11388c41f6",
+          "signature": "alp_wdt_t * alp_wdt_open(const alp_wdt_config_t *cfg);"
         }
       },
       "macros": {},
@@ -9283,9 +9287,9 @@
           "definition": "typedef struct alp_wdt alp_wdt_t;",
           "hash": "e6254d4093592cd4"
         },
-        "timeout_ms": {
-          "definition": "typedef struct { uint32_t timeout_ms;",
-          "hash": "e1b36fb474845888"
+        "wdt_id": {
+          "definition": "typedef struct { uint32_t wdt_id;",
+          "hash": "ef92cfadf6797b08"
         }
       }
     }

@@ -76,6 +76,29 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   (`rail_position`) → one CSV record per 25 m segment. The two pure-C DSP cores
   are host-unit-tested on `native_sim` (`tests/unit/rail_features`,
   `tests/unit/rail_position`); HiL bench-gated.
+- **`alp_dac_capabilities()`** (`<alp/dac.h>`): additive capabilities getter for
+  opened DAC handles — DAC was the only opened-handle class without one.  Same
+  signature/doc/lifetime contract as `alp_adc_capabilities()`; the dispatcher
+  returns the caps the backend populated at open time.
+
+### Changed — analog + WDT API consistency (pre-1.0 breaking)
+
+- **`alp_wdt_open(const alp_wdt_config_t *)`**: the watchdog instance id moved
+  into the config struct as `wdt_id` (matching the `bus_id` / `channel_id` /
+  `counter_id` convention of every other config-taking open).  All in-tree
+  callers (examples, tests, stub backend, HiL specs) migrated; there is no
+  two-argument compatibility shim.
+- **`alp_adc_stream_read` → `alp_adc_stream_read_mv`** and
+  **`alp_adc_filter_read` → `alp_adc_filter_read_mv`**: every ADC read entry
+  point now carries its unit suffix (`_raw` / `_uv` / `_mv` / `_bins`).
+  Parameter lists and wire formats are unchanged — the one-shot path stays
+  `int32_t` µV, the stream path stays `uint16_t` mV, the DSP filter path stays
+  `int16_t` mV.  A new "Units" block in `<alp/adc.h>` documents the µV/mV split
+  and the conversion between the scales.
+- **Channel-id docs unified on E1M symbols**: `<alp/adc.h>` and `<alp/pwm.h>`
+  now document `channel_id` as `E1M_ADC0..ADC7` / `E1M_PWM0..PWM7` (bounds
+  `E1M_ADC_COUNT` / `E1M_PWM_COUNT` from `<alp/e1m_pinout.h>`), matching the
+  `E1M_DAC0` / `E1M_DAC_COUNT` convention `<alp/dac.h>` already used.
 
 ### Fixed
 

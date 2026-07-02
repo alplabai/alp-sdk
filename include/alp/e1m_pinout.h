@@ -160,7 +160,8 @@ extern "C" {
 #define E1M_COUNTER2 2u
 #define E1M_COUNTER3 3u
 
-/* Watchdog instance IDs — passed as `wdt_id` to alp_wdt_open(). */
+/* Watchdog instance IDs — carried as `wdt_id` in the alp_wdt_config_t
+ * passed to alp_wdt_open(). */
 #define E1M_WDT0 0u
 #define E1M_WDT1 1u
 

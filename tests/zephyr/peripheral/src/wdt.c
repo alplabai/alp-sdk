@@ -15,14 +15,14 @@
 
 ZTEST(alp_peripheral, test_wdt_null_cfg)
 {
-	zassert_is_null(alp_wdt_open(0, NULL));
+	zassert_is_null(alp_wdt_open(NULL));
 	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_peripheral, test_wdt_zero_timeout_rejected)
 {
-	alp_wdt_t *w =
-	    alp_wdt_open(0, &(alp_wdt_config_t){ .timeout_ms = 0, .on_timeout = ALP_WDT_RESET_SOC });
+	alp_wdt_t *w = alp_wdt_open(
+	    &(alp_wdt_config_t){ .wdt_id = 0, .timeout_ms = 0, .on_timeout = ALP_WDT_RESET_SOC });
 	zassert_is_null(w);
 	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }
@@ -31,7 +31,7 @@ ZTEST(alp_peripheral, test_wdt_out_of_range_id_rejected)
 {
 	/* §C.22: wdt_id beyond the wrapper's pool size rejects. */
 	alp_wdt_t *w = alp_wdt_open(
-	    99, &(alp_wdt_config_t){ .timeout_ms = 1000u, .on_timeout = ALP_WDT_RESET_SOC });
+	    &(alp_wdt_config_t){ .wdt_id = 99, .timeout_ms = 1000u, .on_timeout = ALP_WDT_RESET_SOC });
 	zassert_is_null(w);
 	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
 }

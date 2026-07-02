@@ -31,8 +31,11 @@ typedef struct alp_wdt_backend_state {
 } alp_wdt_backend_state_t;
 
 struct alp_wdt_ops {
-	alp_status_t (*open)(uint32_t                 wdt_id,
-	                     const alp_wdt_config_t  *cfg,
+	/* Open the watchdog.  cfg is the customer's config (carries the
+	 * instance id in cfg->wdt_id); state is preallocated by the
+	 * dispatcher; caps_out is filled with the (possibly probe-refined)
+	 * instance capabilities. */
+	alp_status_t (*open)(const alp_wdt_config_t  *cfg,
 	                     alp_wdt_backend_state_t *state,
 	                     alp_capabilities_t      *caps_out);
 	alp_status_t (*feed)(alp_wdt_backend_state_t *state);
