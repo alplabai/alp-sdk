@@ -128,6 +128,29 @@ typedef struct alp_backend_class_range {
 const alp_backend_t *alp_backend_select(const char *class_name, const char *silicon_ref);
 
 /**
+ * @brief Find the next-best backend AFTER a previously selected one.
+ *
+ * Walks the same per-class section as alp_backend_select() with the
+ * same silicon_ref filter and tiebreaker, but only considers entries
+ * that rank strictly below @p prev in the selection order.  Lets a
+ * dispatcher fall through to the next candidate when the currently
+ * selected backend declines an open() with ALP_ERR_NOSUPPORT (e.g.
+ * an algorithm the hardware path does not implement) instead of
+ * surfacing the decline as a hard application error (issue #239).
+ *
+ * @param class_name   The class identifier passed to ALP_BACKEND_REGISTER.
+ * @param silicon_ref  Active SoC reference (e.g. "alif:ensemble:e7").
+ *                     Pass ALP_SOC_REF_STR from <alp/soc_caps.h>.
+ * @param prev         Backend returned by a previous alp_backend_select()
+ *                     or alp_backend_select_next() call for this class.
+ *                     NULL behaves exactly like alp_backend_select().
+ * @return  The best-ranked matching backend below @p prev, or NULL when
+ *          no lower-ranked candidate remains.
+ */
+const alp_backend_t *
+alp_backend_select_next(const char *class_name, const char *silicon_ref, const alp_backend_t *prev);
+
+/**
  * @brief Count backends registered for a class (any silicon).
  *
  * @param class_name   The class identifier passed to ALP_BACKEND_REGISTER.

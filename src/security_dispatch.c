@@ -143,31 +143,49 @@ alp_hash_t *alp_hash_open(alp_hash_alg_t alg)
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 		return NULL;
 	}
-	const alp_security_ops_t *ops = (const alp_security_ops_t *)be->ops;
-	if (ops == NULL || ops->hash_open == NULL) {
-		alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
-		return NULL;
+	/* Populate the random-fast-path cache opportunistically from the
+     * top-ranked backend -- the same backend wires up all three
+     * primitives, and its random path stays live even when it later
+     * declines this particular hash alg. */
+	if (_cached_ops == NULL && be->ops != NULL) {
+		_cached_ops = (const alp_security_ops_t *)be->ops;
 	}
-	/* Populate the random-fast-path cache opportunistically -- the
-     * same backend wires up all three primitives. */
-	if (_cached_ops == NULL) _cached_ops = ops;
 
 	struct alp_hash *h = _alloc_hash();
 	if (h == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOMEM);
 		return NULL;
 	}
-	h->backend              = be;
-	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
-	alp_status_t       rc   = ops->hash_open(alg, &h->state, &caps);
-	if (rc != ALP_OK) {
-		_free_hash(h);
-		alp_z_set_last_error(rc);
-		return NULL;
+
+	/* Fall-through selection (issue #239): a backend may decline an alg
+     * it does not implement (e.g. the SE CryptoCell declines SHA-384/512)
+     * by returning ALP_ERR_NOSUPPORT from hash_open.  Open time is the
+     * only safe point to re-select -- no data has been consumed yet -- so
+     * walk down the ranked candidates until one accepts.  Any error other
+     * than NOSUPPORT is a real failure and is surfaced, not masked by a
+     * lower-ranked backend. */
+	alp_status_t rc = ALP_ERR_NOT_IMPLEMENTED;
+	while (be != NULL) {
+		const alp_security_ops_t *ops = (const alp_security_ops_t *)be->ops;
+		if (ops != NULL && ops->hash_open != NULL) {
+			memset(&h->state, 0, sizeof(h->state));
+			h->backend              = be;
+			h->state.ops            = ops;
+			alp_capabilities_t caps = { .flags = be->base_caps };
+			rc                      = ops->hash_open(alg, &h->state, &caps);
+			if (rc == ALP_OK) {
+				h->cached_caps = caps;
+				return h;
+			}
+			if (rc != ALP_ERR_NOSUPPORT) {
+				break;
+			}
+		}
+		be = alp_backend_select_next("security", ALP_SOC_REF_STR, be);
 	}
-	h->cached_caps = caps;
-	return h;
+	_free_hash(h);
+	alp_z_set_last_error(rc);
+	return NULL;
 }
 
 alp_status_t alp_hash_update(alp_hash_t *h, const uint8_t *data, size_t len)
@@ -220,29 +238,40 @@ alp_aead_t *alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 		return NULL;
 	}
-	const alp_security_ops_t *ops = (const alp_security_ops_t *)be->ops;
-	if (ops == NULL || ops->aead_open == NULL) {
-		alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
-		return NULL;
+	if (_cached_ops == NULL && be->ops != NULL) {
+		_cached_ops = (const alp_security_ops_t *)be->ops;
 	}
-	if (_cached_ops == NULL) _cached_ops = ops;
 
 	struct alp_aead *a = _alloc_aead();
 	if (a == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOMEM);
 		return NULL;
 	}
-	a->backend              = be;
-	a->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
-	alp_status_t       rc   = ops->aead_open(alg, key, key_len, &a->state, &caps);
-	if (rc != ALP_OK) {
-		_free_aead(a);
-		alp_z_set_last_error(rc);
-		return NULL;
+
+	/* Fall-through selection on NOSUPPORT at open -- same shape as
+     * alp_hash_open above (issue #239). */
+	alp_status_t rc = ALP_ERR_NOT_IMPLEMENTED;
+	while (be != NULL) {
+		const alp_security_ops_t *ops = (const alp_security_ops_t *)be->ops;
+		if (ops != NULL && ops->aead_open != NULL) {
+			memset(&a->state, 0, sizeof(a->state));
+			a->backend              = be;
+			a->state.ops            = ops;
+			alp_capabilities_t caps = { .flags = be->base_caps };
+			rc                      = ops->aead_open(alg, key, key_len, &a->state, &caps);
+			if (rc == ALP_OK) {
+				a->cached_caps = caps;
+				return a;
+			}
+			if (rc != ALP_ERR_NOSUPPORT) {
+				break;
+			}
+		}
+		be = alp_backend_select_next("security", ALP_SOC_REF_STR, be);
 	}
-	a->cached_caps = caps;
-	return a;
+	_free_aead(a);
+	alp_z_set_last_error(rc);
+	return NULL;
 }
 
 alp_status_t alp_aead_encrypt(alp_aead_t    *a,
@@ -258,6 +287,11 @@ alp_status_t alp_aead_encrypt(alp_aead_t    *a,
 {
 	if (a == NULL || !a->in_use) return ALP_ERR_NOT_READY;
 	if (iv == NULL || cipher_out == NULL || tag_out == NULL) return ALP_ERR_INVAL;
+	/* aad == NULL is legitimate only for the no-AAD case (aad_len == 0,
+     * see <alp/security.h>); reject the contradictory combination here
+     * so no backend ever dereferences or translates a NULL aad
+     * (issue #245). */
+	if (aad == NULL && aad_len > 0) return ALP_ERR_INVAL;
 	if (a->state.ops == NULL || a->state.ops->aead_encrypt == NULL) {
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
@@ -280,6 +314,8 @@ alp_status_t alp_aead_decrypt(alp_aead_t    *a,
 	if (iv == NULL || cipher == NULL || tag == NULL || plain_out == NULL) {
 		return ALP_ERR_INVAL;
 	}
+	/* Same no-AAD contract as alp_aead_encrypt (issue #245). */
+	if (aad == NULL && aad_len > 0) return ALP_ERR_INVAL;
 	if (a->state.ops == NULL || a->state.ops->aead_decrypt == NULL) {
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
