@@ -127,6 +127,54 @@ typedef enum {
 } alp_core_id_t;
 
 /* ------------------------------------------------------------------ */
+/* Peer-core lifecycle                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Release (boot) a peer core at a given entry address.
+ *
+ * On heterogeneous SoMs the firmware for a secondary core is often
+ * LOADED at boot (by the boot ROM / secure firmware, from the boot
+ * package) but not RELEASED -- the master core decides at runtime
+ * when the peer starts.  This call asks the platform's boot authority
+ * (typically the SoC's secure / system-controller firmware) to start
+ * @p core executing at @p entry_addr.
+ *
+ * @p entry_addr is the peer's entry point in the GLOBAL address map
+ * -- the same load address the boot package declares for that core's
+ * image (e.g. the ITCM global alias the image was packaged for).  It
+ * comes from the application's boot-package layout; this API performs
+ * no address validation beyond what the boot authority enforces.
+ *
+ * Bounded: backends riding a controller mailbox time-limit the
+ * round-trip, so the call returns rather than hangs when the
+ * controller is unreachable.  A successful return means the boot
+ * authority ACCEPTED the request -- confirming the peer actually runs
+ * is the application's business (heartbeat/beacon, or open an IPC
+ * channel via `<alp/rpc.h>`).
+ *
+ * @param[in] core        Peer to start.  @ref ALP_CORE_SELF is
+ *                        invalid.
+ * @param[in] entry_addr  Entry point in the global address map.
+ *
+ * @return  @ref ALP_OK when the boot authority accepted the request.
+ *          @ref ALP_ERR_INVAL for @ref ALP_CORE_SELF.
+ *          @ref ALP_ERR_NOSUPPORT when this build has no boot
+ *                                 authority for @p core (wrong SoM,
+ *                                 native_sim, or a core the platform
+ *                                 boots by other means).
+ *          @ref ALP_ERR_NOT_READY when the boot authority is
+ *                                 asleep/unreachable (retryable).
+ *          @ref ALP_ERR_IO on a transport fault or a rejected
+ *                          request.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.9 -- portable peer-core release (first consumers:
+ *      the AEN dual-core examples).
+ */
+alp_status_t alp_mproc_boot_core(alp_core_id_t core, uintptr_t entry_addr);
+
+/* ------------------------------------------------------------------ */
 /* Shared memory                                                       */
 /* ------------------------------------------------------------------ */
 
