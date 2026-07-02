@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Validate every metadata/socs/**/*.json against the soc-spec v1
-schema AND every metadata/e1m_modules/<SKU>.yaml against the
-som-preset v1 schema.
+schema, every metadata/e1m_modules/<SKU>.yaml against the
+som-preset v1 schema, and every metadata/boards/<name>.yaml
+against the shared board-preset schema.
 
 Run locally before pushing:
 
@@ -32,8 +33,10 @@ SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
 HWREV_SCHEMA = REPO / "metadata" / "schemas" / "hw-revisions-v1.schema.json"
 SILICON_KCONFIG_SCHEMA = REPO / "metadata" / "schemas" / "silicon-kconfig-v1.schema.json"
 SILICON_KCONFIG_REGISTRY = REPO / "metadata" / "registries" / "silicon-kconfig.json"
+BOARD_PRESET_SCHEMA = REPO / "metadata" / "schemas" / "board-preset.schema.json"
 SOCS = REPO / "metadata" / "socs"
 SOM_PRESETS = REPO / "metadata" / "e1m_modules"
+BOARD_PRESETS = REPO / "metadata" / "boards"
 
 
 def _emit_pending_warnings(rel: Path, doc) -> None:
@@ -173,15 +176,35 @@ def main() -> int:
                 "family",
             )
 
+    # Shared board presets (YAML) against the board-preset schema.
+    # Distinct from project board.yaml files (board.schema.json /
+    # scripts/validate_board_yaml.py): these are the SDK-internal
+    # shared board definitions referenced via `preset:`.
+    board_failures: list = []
+    board_files: list = []
+    if BOARD_PRESET_SCHEMA.is_file():
+        board_schema = json.loads(BOARD_PRESET_SCHEMA.read_text(encoding="utf-8"))
+        board_validator = jsonschema.Draft202012Validator(board_schema)
+        board_files = sorted(BOARD_PRESETS.glob("*.yaml"))
+        if board_files:
+            print()
+            board_failures = _check_files(
+                "YAML", board_files, board_validator,
+                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                "name",
+            )
+
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
 
     print()
     total_failures = (len(soc_failures) + len(som_failures)
-                      + len(hwrev_failures) + len(silicon_kconfig_failures))
+                      + len(hwrev_failures) + len(board_failures)
+                      + len(silicon_kconfig_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
-          f"{len(hwrev_files)} hw-revisions file(s) + silicon-kconfig registry "
+          f"{len(hwrev_files)} hw-revisions file(s) + "
+          f"{len(board_files)} board preset(s) + silicon-kconfig registry "
           f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 
