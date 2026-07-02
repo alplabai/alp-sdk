@@ -32,11 +32,11 @@ exits cleanly.
 The `<alp/audio.h>` surface mirrors input and output through
 two distinct handle types: `alp_audio_in_t` and
 `alp_audio_out_t`.  Both take a config struct with the same
-shape -- the peripheral_id differs (`E1M_PDM0` vs `E1M_I2S0`).
+shape -- the peripheral_id differs (`ALP_E1M_PDM0` vs `ALP_E1M_I2S0`).
 
 ```c
 alp_audio_config_t cfg = {
-    .peripheral_id    = E1M_PDM0,
+    .peripheral_id    = ALP_E1M_PDM0,
     .sample_rate_hz   = 16000,
     .channels         = 1,
     .format           = ALP_AUDIO_FMT_S16_LE,
@@ -44,7 +44,7 @@ alp_audio_config_t cfg = {
 };
 alp_audio_in_t *mic = alp_audio_in_open(&cfg);
 
-cfg.peripheral_id    = E1M_I2S0;
+cfg.peripheral_id    = ALP_E1M_I2S0;
 alp_audio_out_t *spk = alp_audio_out_open(&cfg);
 ```
 

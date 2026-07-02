@@ -370,8 +370,8 @@ The `e1m_routes:` block is the single editable source of truth
 for the board-side C macros hand-written firmware uses
 (`PIN_BMI323_INT1`, `I2C_BUS_SENSORS`, `PWM_LED_RED`, …).  Each
 entry binds an E1M-standard pad or peripheral instance
-(`E1M_GPIO_IO<N>`, `E1M_PWM<N>`, `E1M_I2C<N>` / `E1M_SPI<N>` /
-`E1M_UART<N>` / `E1M_I3C<N>`) to a board-side macro plus optional
+(`ALP_E1M_GPIO_IO<N>`, `ALP_E1M_PWM<N>`, `ALP_E1M_I2C<N>` / `ALP_E1M_SPI<N>` /
+`ALP_E1M_UART<N>` / `ALP_E1M_I3C<N>`) to a board-side macro plus optional
 `doc:` / `active_low:` / `routes_via:` flags.
 [`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
 reads the block and emits `include/alp/boards/alp_<name>_routes.h`
@@ -445,7 +445,7 @@ automatically; the app doesn't say "TX is output" by hand.
 
 The reason direction stays in the firmware: the same physical
 pad can have multiple legitimate directions in different apps.
-The drone-autopilot uses `E1M_PWM3` as a PWM output driving an
+The drone-autopilot uses `ALP_E1M_PWM3` as a PWM output driving an
 ESC channel; gpio-button-led uses the same pad as a GPIO output
 driving the red status LED.  `board.yaml` describes the
 **wiring** (pad ↔ feature), which is universal; direction is a
@@ -783,7 +783,7 @@ UART, PWM, GPIO_IO), and emits a Zephyr `.overlay` declaring:
   channel.
 - An `alp_pins` node with `compatible = "alp,pin-array"` and one
   `gpios` entry per `EVK_PIN_*` macro that resolves to an
-  `E1M_GPIO_IO<N>`.  Each entry's `<&gpioX Y FLAGS>` triplet
+  `ALP_E1M_GPIO_IO<N>`.  Each entry's `<&gpioX Y FLAGS>` triplet
   is a TBD placeholder; the trailing comment carries the macro
   name and the E1M IO index so the customer can fill the columns
   in place without renumbering.

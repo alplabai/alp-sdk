@@ -25,7 +25,7 @@ ONLY**:
   `alp_<class>_open()` / `alp_gpio_open()` / `alp_last_error()` (returns
   `ALP_OK` on success).
 - Name instances with the portable IDs from `<alp/e1m_pinout.h>`
-  (`E1M_I2C0`, `E1M_PWM3`, `E1M_GPIO_IO15`, …) or, for E1M-X, the `E1M_X_*`
+  (`ALP_E1M_I2C0`, `ALP_E1M_PWM3`, `ALP_E1M_GPIO_IO15`, …) or, for E1M-X, the `ALP_E1M_X_*`
   IDs from `<alp/e1m_x_pinout.h>`. (There is no `ALP_E1M_*` prefix.)
 - **Never include a chip driver in app/example code** — symbols like
   `gd32g553_*`, `alif_*`, `lsm6dso_*` are **SDK backends and bridge demos**,

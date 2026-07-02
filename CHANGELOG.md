@@ -7,6 +7,18 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Changed
+
+- **BREAKING: pin/instance macros renamed `E1M_*` -> `ALP_E1M_*` and
+  `E1M_X_*` -> `ALP_E1M_X_*`** (`<alp/e1m_pinout.h>`, `<alp/e1m_x_pinout.h>`).
+  The pinout id macros were the SDK's last unprefixed public symbols and could
+  collide with vendor BSP defines; they now carry the uniform `ALP_` namespace
+  (e.g. `ALP_E1M_I2C0`, `ALP_E1M_X_PWM0`, `ALP_E1M_ADC_COUNT`).  No compat
+  aliases are kept -- update callers by prefixing `ALP_`.  Board YAML
+  `e1m:`/`e1m_routes:`/`pad_routes:` metadata keeps the connector-namespace
+  `E1M_*`/`E1M_X_*` pad names; `scripts/gen_board_header.py` now prefixes
+  `ALP_` when emitting the C tokens.
+
 ### Added
 
 - **I2C/SPI target (slave) mode** in `<alp/peripheral.h>` (`[ABI-EXPERIMENTAL]`):

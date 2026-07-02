@@ -166,7 +166,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   720p panel (NXP-supplied reference panel; drivers are available
   from NXP's MIPI-DSI panel collection).  Backlight rails + the
   capacitive-touch controller sit on `EVK_I2C_BUS_DSI_CSI`
-  (`E1M_I2C1`).
+  (`ALP_E1M_I2C1`).
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
   the PEC12R-4222F-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.

@@ -199,7 +199,7 @@
         "name": "i2s-tone",
         "path": "examples/audio/i2s-tone",
         "som": "E1M-AEN701",
-        "summary": "Per-peripheral example for `<alp/i2s.h>`. Generates a 1 kHz sine wave and writes it as 16-bit stereo PCM to E1M_I2S0.",
+        "summary": "Per-peripheral example for `<alp/i2s.h>`. Generates a 1 kHz sine wave and writes it as 16-bit stereo PCM to ALP_E1M_I2S0.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -325,7 +325,7 @@
         "name": "adc-voltmeter",
         "path": "examples/peripheral-io/adc-voltmeter",
         "som": "E1M-AEN801",
-        "summary": "Per-peripheral example for `<alp/adc.h>`. Reads ADC channel `E1M_ADC1` once and prints the converted microvolt value. Demonstrates capability validation: requesting a resolution higher than the active SoC's `ALP_SOC_ADC_MAX_RESOLUTION_BITS` fails at `alp_adc_open` with `ALP_ERR_OUT_OF_RANGE`."
+        "summary": "Per-peripheral example for `<alp/adc.h>`. Reads ADC channel `ALP_E1M_ADC1` once and prints the converted microvolt value. Demonstrates capability validation: requesting a resolution higher than the active SoC's `ALP_SOC_ADC_MAX_RESOLUTION_BITS` fails at `alp_adc_open` with `ALP_ERR_OUT_OF_RANGE`."
       },
       {
         "board": "e1m-evk",
@@ -401,7 +401,7 @@
         "name": "i2c-scanner",
         "path": "examples/peripheral-io/i2c-scanner",
         "som": "E1M-AEN701",
-        "summary": "Per-peripheral example for `<alp/peripheral.h>` I²C. Walks every 7-bit address on `E1M_I2C0` and reports which respond.",
+        "summary": "Per-peripheral example for `<alp/peripheral.h>` I²C. Walks every 7-bit address on `ALP_E1M_I2C0` and reports which respond.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -423,7 +423,7 @@
         "name": "pwm-led-fade",
         "path": "examples/peripheral-io/pwm-led-fade",
         "som": "E1M-AEN701",
-        "summary": "Per-peripheral example for `<alp/pwm.h>`. Fades an LED on PWM channel `E1M_PWM0` from 0 % to 100 % and back, demonstrating the canonical open / set-duty / close pattern.",
+        "summary": "Per-peripheral example for `<alp/pwm.h>`. Fades an LED on PWM channel `ALP_E1M_PWM0` from 0 % to 100 % and back, demonstrating the canonical open / set-duty / close pattern.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -434,7 +434,7 @@
         "name": "qenc-readout",
         "path": "examples/peripheral-io/qenc-readout",
         "som": "E1M-AEN701",
-        "summary": "Per-peripheral example for the quadrature-decoder side of `<alp/counter.h>`. Reads `E1M_ENC0`'s position once per 100 ms for ~1 second.",
+        "summary": "Per-peripheral example for the quadrature-decoder side of `<alp/counter.h>`. Reads `ALP_E1M_ENC0`'s position once per 100 ms for ~1 second.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -663,7 +663,7 @@
         "name": "v2n-pwm-fan-control",
         "path": "examples/v2n/v2n-pwm-fan-control",
         "som": "E1M-V2N101",
-        "summary": "Drive a fan from `E1M_PWM0` on V2N. Walks duty cycle through a five-stop curve at a fixed 25 kHz board (above audible) using the portable `<alp/pwm.h>` surface, so the wave shape is observable on a scope."
+        "summary": "Drive a fan from `ALP_E1M_PWM0` on V2N. Walks duty cycle through a five-stop curve at a fixed 25 kHz board (above audible) using the portable `<alp/pwm.h>` surface, so the wave shape is observable on a scope."
       },
       {
         "board": "e1m-x-evk",

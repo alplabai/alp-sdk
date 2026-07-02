@@ -7,11 +7,11 @@ Claiming a vendor-specific feature on a pad does *not* lock that pad
 out of the portable surfaces. The same physical pad stays usable as a
 plain digital GPIO and as its portable E1M peripheral. This example
 exercises all three surfaces on the Arduino A1 analog input
-(`EVK_ADC_ARDUINO_A1` = `E1M_ADC1`):
+(`EVK_ADC_ARDUINO_A1` = `ALP_E1M_ADC1`):
 
 | Way | Surface | Call |
 |-----|---------|------|
-| 1 | plain GPIO | `alp_gpio_open(E1M_GPIO_ADC1)` -- the pad's universal GPIO secondary (index 43 in the positional `e1m_pinout.h` order) |
+| 1 | plain GPIO | `alp_gpio_open(ALP_E1M_GPIO_ADC1)` -- the pad's universal GPIO secondary (index 43 in the positional `e1m_pinout.h` order) |
 | 2 | portable ADC | `alp_adc_open(EVK_ADC_ARDUINO_A1)` -- the cross-vendor `<alp/adc.h>` surface, identical on every E1M SoM |
 | 3 | vendor extension | `alp_alif_adc_set_trigger_source(handle)` -- an Alif-only knob from `<alp/ext/alif/adc.h>`, layered **on the Way-2 handle** |
 
@@ -43,7 +43,7 @@ graceful `skip` path** (`alp_adc_open` returns `NULL` with
 `ALP_ERR_NOT_READY`) -- the same NULL-tolerant contract every SDK
 `open()` honours. On a real Alif EVK all three ways run for real.
 
-Reaching `E1M_GPIO_ADC1` (index 43) needs two GPIO-emul controllers,
+Reaching `ALP_E1M_GPIO_ADC1` (index 43) needs two GPIO-emul controllers,
 since a single emul controller caps at 32 pins; the overlay shows the
 canonical two-controller split a full 52-slot board file uses.
 

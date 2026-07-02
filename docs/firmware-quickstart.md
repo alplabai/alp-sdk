@@ -125,7 +125,7 @@ west flash                     # real silicon
 
 ```c
 alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-    .bus_id     = 0u,           // E1M_I2C0 from <alp/e1m_pinout.h>
+    .bus_id     = 0u,           // ALP_E1M_I2C0 from <alp/e1m_pinout.h>
     .bitrate_hz = 400000u,
 });
 if (bus == NULL) {

@@ -190,7 +190,7 @@ automatically; the app doesn't say "TX is output" by hand.
 
 The reason direction stays in the firmware: the same pad can
 have multiple legitimate directions in different apps.  The
-drone-autopilot uses `E1M_PWM3` as a PWM output driving an ESC
+drone-autopilot uses `ALP_E1M_PWM3` as a PWM output driving an ESC
 channel; gpio-button-led uses the same pad as a GPIO output
 driving the red status LED.
 

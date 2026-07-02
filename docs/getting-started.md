@@ -161,7 +161,7 @@ rationale.
 
 You write Zephyr / Yocto / bare-metal app code directly against
 `<alp/...>` headers.  Pick instance IDs by hand from
-`<alp/e1m_pinout.h>` (`E1M_I2C0`, `E1M_PWM3`, …).  Your
+`<alp/e1m_pinout.h>` (`ALP_E1M_I2C0`, `ALP_E1M_PWM3`, …).  Your
 app stays portable across every E1M-conformant SoM.  The rest
 of this document covers this path.
 
