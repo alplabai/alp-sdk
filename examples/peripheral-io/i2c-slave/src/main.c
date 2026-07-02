@@ -113,8 +113,16 @@ static void on_stop(void *user)
 int main(void)
 {
 	/* Bring up the SDK runtime before the first open() -- thin today,
-	 * but future backends rely on it (see <alp/peripheral.h>). */
-	(void)alp_init();
+	 * but future backends (bridge links, vendor HAL bring-up) rely on
+	 * it, and THEY can fail.  Check the return like any other call --
+	 * an app that ignores it would run against a half-initialised
+	 * SDK. */
+	alp_status_t init_rc = alp_init();
+	if (init_rc != ALP_OK) {
+		printf("[i2c-slave] alp_init failed: %d\n", (int)init_rc);
+		printf("[i2c-slave] done\n");
+		return 1;
+	}
 
 	printf("[i2c-slave] listening @ 0x%02x on BOARD_I2C_SENSORS\n", SLAVE_OWN_ADDR_7BIT);
 
