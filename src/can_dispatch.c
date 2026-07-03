@@ -18,6 +18,8 @@
 #include "backends/can/can_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(can);
+/* Pull the can registry section into a static-archive link (#368). */
+ALP_BACKEND_ANCHOR(can);
 
 extern void alp_z_set_last_error(alp_status_t s);
 extern void alp_z_clear_last_error(void);

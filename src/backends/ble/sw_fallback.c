@@ -172,6 +172,9 @@ static const alp_ble_ops_t _ops = {
 	.gatt_write            = sw_gatt_write,
 };
 
+/* Export the ble static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(ble);
+
 ALP_BACKEND_REGISTER(ble,
                      sw_fallback,
                      {

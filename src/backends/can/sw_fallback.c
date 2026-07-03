@@ -111,6 +111,9 @@ static const alp_can_ops_t _ops = {
 	.close         = sw_close,
 };
 
+/* Export the can static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(can);
+
 ALP_BACKEND_REGISTER(can,
                      sw_fallback,
                      {

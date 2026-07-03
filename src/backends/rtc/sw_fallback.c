@@ -63,6 +63,9 @@ static const alp_rtc_ops_t _ops = {
 	.close    = NULL,
 };
 
+/* Export the rtc static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(rtc);
+
 ALP_BACKEND_REGISTER(rtc,
                      sw_fallback,
                      {

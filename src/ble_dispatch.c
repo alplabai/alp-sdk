@@ -31,6 +31,8 @@
 #include "backends/ble/ble_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(ble);
+/* Pull the ble registry section into a static-archive link (#368). */
+ALP_BACKEND_ANCHOR(ble);
 
 extern void alp_z_set_last_error(alp_status_t s);
 extern void alp_z_clear_last_error(void);

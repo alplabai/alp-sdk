@@ -49,6 +49,29 @@
 extern const alp_backend_class_range_t __start_alp_backend_classes[];
 extern const alp_backend_class_range_t __stop_alp_backend_classes[];
 
+#ifdef ALP_BACKEND_STATIC_ANCHORS
+/* Static-archive self-anchor for the class-range section (#368).  The
+ * per-class dispatchers drop their alp_backend_classes entries, but a
+ * consumer that only ever calls alp_backend_count / ALP_BACKEND_AVAILABLE
+ * (e.g. a diagnostic tool) pulls THIS file without pulling any
+ * dispatcher, so on a plain-CMake static link the section has zero
+ * contributions and the __start_/__stop_ bounds above go undefined.
+ * This retained empty sentinel keeps the section present so those
+ * bounds always resolve.  class_name "" never matches a real class
+ * (strcmp), and start == stop == NULL means the range walkers below
+ * skip it -- so it is inert at runtime.  Inert on Zephyr (whole-archive
+ * links always carry a dispatcher; the macro is undefined there). */
+static const alp_backend_class_range_t _alp_backend_classes_anchor
+    __attribute__((used,
+                   retain,
+                   aligned(__alignof__(alp_backend_class_range_t)),
+                   section("alp_backend_classes"))) = {
+	    .class_name = "",
+	    .start      = NULL,
+	    .stop       = NULL,
+    };
+#endif
+
 static bool is_wildcard(const alp_backend_t *be)
 {
 	return (be->silicon_ref != NULL && be->silicon_ref[0] == '*' && be->silicon_ref[1] == '\0');

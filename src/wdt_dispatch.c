@@ -19,6 +19,8 @@
 #include "backends/wdt/wdt_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(wdt);
+/* Pull the wdt registry section into a static-archive link (#368). */
+ALP_BACKEND_ANCHOR(wdt);
 
 extern void alp_z_set_last_error(alp_status_t s);
 extern void alp_z_clear_last_error(void);

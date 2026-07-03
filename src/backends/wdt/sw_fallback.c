@@ -48,6 +48,9 @@ static const alp_wdt_ops_t _ops = {
 	.close   = NULL,
 };
 
+/* Export the wdt static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(wdt);
+
 ALP_BACKEND_REGISTER(wdt,
                      sw_fallback,
                      {
