@@ -179,6 +179,14 @@
         }
       },
       "macros": {
+        "ALP_BACKEND_ANCHOR": {
+          "hash": "29e2b8847a7d2406",
+          "value": "(class)        extern const int _alp_backend_anchor_decl_##class"
+        },
+        "ALP_BACKEND_ANCHOR_DEFINE": {
+          "hash": "981b3d9da3dfa2d5",
+          "value": "(class) extern const int _alp_backend_anchor_decl_##class"
+        },
         "ALP_BACKEND_AVAILABLE": {
           "hash": "18b781a0e45bc46e",
           "value": "(class) (alp_backend_count(#class) > 0u)"
