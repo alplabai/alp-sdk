@@ -300,6 +300,102 @@ ZTEST(alp_update_log, test_count_and_get)
 	zassert_equal(ulog_engine_get(&s, 9, &e), ALP_ERR_NOT_FOUND);
 }
 
+/* --- Tier selection + degrade (issues #111, #239) ---------------------
+ *
+ * The real HW_ENFORCED TF-M tier only registers under BUILD_WITH_TFM, which
+ * native_sim cannot build, so we exercise the dispatcher's ranked-walk +
+ * open-time fall-through with a stand-in HW_ENFORCED backend registered
+ * straight into the update_log class section. Its ready() verdict is driven
+ * by g_fake_hw_ready so a single backend covers all three dispatcher
+ * branches: bind (ALP_OK), degrade to the next tier (ALP_ERR_NOSUPPORT),
+ * and surface a hard error (anything else). It is priority 20 (> the SW
+ * tier's 10) so alp_update_log_open() always offers it first; its default
+ * verdict is ALP_ERR_NOSUPPORT so every OTHER test in this suite still
+ * degrades cleanly to the SW tier, exactly as on a real board whose HW tier
+ * is not yet provisioned. */
+
+static alp_status_t g_fake_hw_ready = ALP_ERR_NOSUPPORT;
+
+static alp_status_t fake_hw_ready(void)
+{
+	return g_fake_hw_ready;
+}
+static alp_status_t fake_hw_append(const alp_update_log_entry_t *e)
+{
+	(void)e;
+	return ALP_OK;
+}
+static alp_status_t fake_hw_verify(alp_update_log_verdict_t *v, uint64_t *bad)
+{
+	(void)bad;
+	if (v) *v = ALP_UPDATE_LOG_VERIFY_OK;
+	return ALP_OK;
+}
+static alp_status_t fake_hw_count(uint64_t *out)
+{
+	if (out) *out = 0;
+	return ALP_OK;
+}
+static alp_status_t fake_hw_get(uint64_t seq, alp_update_log_entry_t *out)
+{
+	(void)seq;
+	(void)out;
+	return ALP_ERR_NOT_FOUND;
+}
+static const alp_update_log_ops_t _fake_hw_ops = {
+	.assurance = ALP_UPDATE_LOG_HW_ENFORCED,
+	.ready     = fake_hw_ready,
+	.append    = fake_hw_append,
+	.verify    = fake_hw_verify,
+	.count     = fake_hw_count,
+	.get       = fake_hw_get,
+};
+ALP_BACKEND_REGISTER(update_log,
+                     fake_hw,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "fake_hw",
+                         .base_caps   = 0u,
+                         .priority    = 20,
+                         .ops         = &_fake_hw_ops,
+                         .probe       = NULL,
+                     });
+
+/* HW tier ready -> the dispatcher binds it and reports HW_ENFORCED. */
+ZTEST(alp_update_log, test_selection_prefers_hw_when_ready)
+{
+	g_fake_hw_ready       = ALP_OK;
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_assurance(log), ALP_UPDATE_LOG_HW_ENFORCED);
+	alp_update_log_close(log);
+	g_fake_hw_ready = ALP_ERR_NOSUPPORT; /* restore for the rest of the suite */
+}
+
+/* HW tier declines with NOSUPPORT -> the dispatcher falls through to the SW
+ * tamper-evident tier, which serves a fully working log. */
+ZTEST(alp_update_log, test_selection_degrades_to_sw_when_hw_not_ready)
+{
+	g_fake_hw_ready       = ALP_ERR_NOSUPPORT;
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_assurance(log), ALP_UPDATE_LOG_SW_TAMPER_EVIDENT);
+	alp_update_log_entry_t e = mk_entry(1, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(alp_update_log_append(log, &e), ALP_OK);
+	alp_update_log_close(log);
+}
+
+/* A non-NOSUPPORT ready() verdict is a hard error: it is surfaced, NOT
+ * masked by silently dropping to a lower tier. */
+ZTEST(alp_update_log, test_selection_hard_error_surfaces)
+{
+	g_fake_hw_ready       = ALP_ERR_IO;
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_is_null(log);
+	zassert_equal(alp_last_error(), ALP_ERR_IO);
+	g_fake_hw_ready = ALP_ERR_NOSUPPORT; /* restore for the rest of the suite */
+}
+
 /* --- Task 5: public-surface smoke (dispatch + sw_tier backend). Keep LAST. --- */
 
 ZTEST(alp_update_log, test_public_surface_sw_tier)
