@@ -80,7 +80,16 @@ static bool test_sha256_abc(void)
 	alp_status_t s          = alp_hash_update(h, (const uint8_t *)"abc", 3u);
 	if (s == ALP_OK) {
 		s = alp_hash_finish(h, digest, sizeof(digest), &dlen);
+		/* Contract nuance (<alp/security.h>): finish implicitly closes
+		 * the context ON SUCCESS ONLY.  A failed finish leaves the
+		 * handle open, so it must be closed explicitly or the backend
+		 * slot leaks and later opens start failing. */
+		if (s != ALP_OK) {
+			alp_hash_close(h);
+		}
 	} else {
+		/* Update failed before finish ever ran: release the handle
+		 * (close is the "abandon without finalising" path). */
 		alp_hash_close(h);
 	}
 

@@ -38,20 +38,24 @@
 #include "alp/chips/tcal9538.h"
 #include "alp/chips/eeprom_24c128.h"
 
-/* The six INA236 rail monitors, with the shunt + full-scale current each
- * rail is wired for (from the EVK schematic, mirrored in alp_e1m_evk.h). */
+/* The six INA236 rail monitors.  Address AND per-rail shunt / full-scale
+ * current all come from <alp/boards/alp_e1m_evk.h> -- the board header is
+ * the single source of these hardware facts (it mirrors the EVK
+ * schematic), so a board respin that changes a shunt updates every app
+ * through the EVK_INA236_SHUNT_* / EVK_INA236_MAX_* macros; hardcoded
+ * copies here would silently drift (#246). */
 static const struct {
 	const char *name;
 	uint8_t     addr;
 	float       shunt_ohms;
 	float       max_a;
 } INA_RAILS[] = {
-	{ "+3V3", EVK_I2C_ADDR_INA236_3V3, 0.020f, 4.0f },
-	{ "+1V8", EVK_I2C_ADDR_INA236_1V8, 0.020f, 4.0f },
-	{ "+VIO", EVK_I2C_ADDR_INA236_VIO, 0.050f, 1.6f },
-	{ "+VCAM0", EVK_I2C_ADDR_INA236_VCAM0, 0.050f, 1.6f },
-	{ "+VCAM1", EVK_I2C_ADDR_INA236_VCAM1, 0.050f, 1.6f },
-	{ "+5V", EVK_I2C_ADDR_INA236_5V, 0.020f, 4.0f },
+	{ "+3V3", EVK_I2C_ADDR_INA236_3V3, EVK_INA236_SHUNT_3V3_OHMS, EVK_INA236_MAX_3V3_A },
+	{ "+1V8", EVK_I2C_ADDR_INA236_1V8, EVK_INA236_SHUNT_1V8_OHMS, EVK_INA236_MAX_1V8_A },
+	{ "+VIO", EVK_I2C_ADDR_INA236_VIO, EVK_INA236_SHUNT_VIO_OHMS, EVK_INA236_MAX_VIO_A },
+	{ "+VCAM0", EVK_I2C_ADDR_INA236_VCAM0, EVK_INA236_SHUNT_VCAM0_OHMS, EVK_INA236_MAX_VCAM0_A },
+	{ "+VCAM1", EVK_I2C_ADDR_INA236_VCAM1, EVK_INA236_SHUNT_VCAM1_OHMS, EVK_INA236_MAX_VCAM1_A },
+	{ "+5V", EVK_I2C_ADDR_INA236_5V, EVK_INA236_SHUNT_5V_OHMS, EVK_INA236_MAX_5V_A },
 };
 
 int main(void)

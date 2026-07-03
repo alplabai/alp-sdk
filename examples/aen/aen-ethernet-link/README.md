@@ -46,6 +46,13 @@ Confirmed on the **server** too: `dnsmasq` handed `192.168.10.137` to the SOM MA
 `02:01:56:78:43:21`, the SOM shows `REACHABLE` in the switch-port host's ARP table,
 and the server NIC RX counter moved off 0 — the SOM is discoverable on the wire.
 
+> Note: that bench run used the then-fixed DT `local-mac-address`. The SoC dtsi
+> now defaults to `zephyr,random-mac-address` (per-boot random
+> locally-administered `02:01:56:xx:xx:xx`, so two boards never collide), and
+> this example inherits it — expect a different MAC in the dnsmasq lease each
+> boot. Per-unit provisioning pins a fixed MAC by deleting the random flag in
+> the overlay (see `boards/alp_e1m_aen801_m55_he.overlay`).
+
 ### Three independent things had to be right
 
 1. **PHY power + clock — `E_PHY_PWRDWN` = P15_4 (lpgpio), `E_PHY_RESET` = P11_6

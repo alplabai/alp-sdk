@@ -30,6 +30,32 @@
 
 typedef struct alp_gpu2d_ops alp_gpu2d_ops_t;
 
+/** Clip a @p w x @p h rect at (@p x, @p y) to the surface bounds;
+ *  returns false (skip the op -- fully clipped, not an error) if the
+ *  origin is already past the edge or nothing remains after the clamp.
+ *
+ *  Shared by every backend so the hardware paths reject/clamp the same
+ *  rects the software fallback does: an unclipped rect handed to an
+ *  engine is an out-of-bounds DMA write.  The clamp deliberately avoids
+ *  computing `x + *w` (which overflows for a caller passing a huge
+ *  "fill everything" width, wrapping below s->width and skipping the
+ *  clamp); `s->width - x` is safe because `x < s->width` already holds.
+ *  Same for h. */
+static inline bool
+alp_gpu2d_clip_rect(const alp_gpu2d_surface_t *s, uint32_t x, uint32_t y, uint32_t *w, uint32_t *h)
+{
+	if (x >= s->width || y >= s->height) {
+		return false;
+	}
+	if (*w > s->width - x) {
+		*w = s->width - x;
+	}
+	if (*h > s->height - y) {
+		*h = s->height - y;
+	}
+	return (*w != 0u && *h != 0u);
+}
+
 /** Backend-owned per-handle state.  GPU2D's public open() takes no
  *  config so the dispatcher mirrors nothing here today; be_data lets
  *  vendor backends hang on whatever HAL state they need. */
