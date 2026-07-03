@@ -153,10 +153,35 @@ Distinguishes board respins of the same SKU.
 EEPROM manifest + BOARD_ID ADC.  See
 [`<alp/hw_info.h>`](../include/alp/hw_info.h).
 
+**Inline AES** -- On-the-fly encryption of external flash traffic by
+an inline-AES-capable controller (Alif SecAES on OSPI / HexSPI;
+`inline_aes: true` in the AEN SoC JSONs).  Configured through
+`alp_storage_configure_inline_aes()` in
+[`<alp/storage.h>`](../include/alp/storage.h); backends without an
+inline-AES path return `ALP_ERR_NOSUPPORT`.  Key material travels the
+OPTIGA path only -- the SDK never sees the AES key in clear (see
+[`docs/threat-model.md`](threat-model.md)).
+
+**ISP** -- Image Signal Processor.  On AEN silicon this is the
+VeriSilicon **ISP Pico** (`vsi,isp-pico`), populated on the E4 / E6 /
+E8 variants (never E7).  Coarse controls ride the portable
+`alp_camera_configure_isp()`; the finer ISP-Pico-only knobs live in
+the vendor-ext `<alp/ext/alif/camera.h>`.  See
+[`docs/aen-accelerator-backends-design.md`](aen-accelerator-backends-design.md).
+
 **Kconfig** -- Linux kernel's configuration language.  Zephyr +
 the SDK use it for per-feature opt-in.
 
 ## L-P
+
+**LCS** -- Lifecycle State of the Alif Secure Enclave: `0x0` CM (chip
+manufacturer), `0x1` **DM** (device manufacturer -- debug open, fully
+re-provisionable; the state Alp ships modules in), onward to secure /
+RMA states.  Read via `se_service_system_get_device_data()`; see
+[`docs/aen-se-services.md`](aen-se-services.md) +
+[`docs/aen-provisioning.md`](aen-provisioning.md).  The OPTIGA Trust M
+secure element has its own, separate lifecycle bits surfaced by
+[`<alp/chips/optiga_trust_m.h>`](../include/alp/chips/optiga_trust_m.h).
 
 **Loader** -- `scripts/alp_project.py` -- reads `board.yaml`,
 resolves SoM SKU preset + board preset, emits the per-backend
@@ -225,6 +250,16 @@ Quad Cortex-A55 + Cortex-M33 + DRP-AI3.
 **Sample.yaml** -- Zephyr Twister test scenario metadata next to
 an application's source.  Optional; required to run as a Twister
 target.
+
+**SE-CryptoCell** -- The hardware-crypto backend for
+[`<alp/security.h>`](../include/alp/security.h) on the Alif Ensemble
+E8: hash / AEAD / random compute is pushed into the Secure Enclave's
+CryptoCell over the RTSS-HE ↔ SE MHUv2 mailbox
+(`src/backends/security/se_cryptocell.c`), registered one priority
+step ahead of the portable MbedTLS-PSA backend -- so E8 apps get SE
+key-isolated crypto by default (v0.8.0), and algorithms the SE
+declines fall through to PSA on the M55.  Nothing in
+`<alp/security.h>` names the SE.
 
 **sysbuild** -- Zephyr's umbrella build system for multi-image
 projects (application + MCUboot + ...).  AEN's secure-boot
