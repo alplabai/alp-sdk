@@ -29,6 +29,10 @@ manifest-driven **top-level** `libraries:` selection.
 | `zcbor`     | A    | 0.9.1      | Apache-2.0 | zephyr    | — |
 | `micro-ros` | B    | humble     | Apache-2.0 | zephyr    | Cortex-M; west pin ‡ |
 | `ros2`      | B    | humble     | Apache-2.0 | yocto     | Cortex-A; meta-ros2-humble layer ‡ |
+| `lwm2m`     | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
+| `coap`      | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
+| `aws-iot`   | B    | main       | Apache-2.0 | zephyr    | Zephyr; module pin § |
+| `azure-iot` | B    | main       | MIT        | zephyr    | Zephyr; module pin § |
 
 `alp doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
@@ -53,6 +57,39 @@ headers rather than papered over:
 - The **cross-core RMW bridge** (micro-ROS↔ROS 2 over UDP-on-virtio or a custom
   RMW over the existing RPMsg transport, ADR 0016) is **bench-gated** and out of
   scope here — likely its own ADR.
+
+**The ADR 0018 cloud / connectivity Tier-B group.** Four manifests deliver the
+device-to-cloud story; all Tier B (recipe-only), split by grounding:
+
+- `lwm2m` / `coap` are **upstream Zephyr in-tree subsystems** — real enable
+  symbols transcribed from the pinned v4.4.0 tree (`CONFIG_LWM2M`,
+  `subsys/net/lib/lwm2m/Kconfig`; `CONFIG_COAP`, `subsys/net/lib/coap/Kconfig`),
+  version `4.4.0` (the Zephyr release the subsystem ships with),
+  `integration.zephyr.module: null` (no separate west module — the `zephyr`
+  project carries them). LwM2M `select COAP`, so `libraries: [lwm2m]` pulls its
+  transport in. LwM2M could merit Tier A on strength, but the ADR groups
+  connectivity/cloud as B and there is no CI build lane + example yet
+  (promotion is a named follow-up).
+- **§ `aws-iot` / `azure-iot` are prerequisite manifests** — verified **not
+  pinned** (`west list` has no aws/azure/iot entry). Unlike the micro-ROS
+  flagship, neither generic CMake C SDK has an official upstream **Zephyr west
+  module**, so the prerequisite is larger: package the real upstream
+  (`aws-iot-device-sdk-embedded-C`, Apache-2.0; `azure-sdk-for-c`, MIT — both
+  licences cited from upstream, **not** in-tree-verified) as a Zephyr module (or
+  a meta-alp-sdk recipe) *and* add the pin. Each declares an **enable-by-presence**
+  Zephyr section (`module:` naming the real upstream repo, **no** `kconfig:`) —
+  no enable symbol is invented; emit renders the selection tag with no
+  `CONFIG_` line until the module lands (named follow-up).
+
+**Memfault — deliberately NOT shipped.** Memfault's `memfault-firmware-sdk` is
+not pinned in `west.yml`, and its licence is the proprietary **Memfault SDK
+License** (source-available, use-with-Memfault-services), which is **not** in the
+permissive allowlist below (Apache-2.0/MIT/BSD-2/BSD-3/Zlib/MIT-0). Per the
+ADR 0018 non-goal, a copyleft/proprietary licence must not ride in through a
+`libraries:` selection, and forcing a wrong SPDX id to pass validation is
+forbidden. It can only be added if a human legal review extends the allowlist
+(schema `license.enum` + this list, same change) with the Memfault licence — a
+deliberate decision, not a metadata edit.
 
 ## Manifest shape
 
