@@ -23,11 +23,14 @@ license: MIT
 requires:
   # LVGL is display-agnostic: it renders into a draw buffer and hands pixels
   # to a flush callback, so it drives an SPI SSD1306 or a MIPI-DSI panel alike.
-  # There is no single "display" capability in the alp-sdk capability layer to
-  # gate on, so the only honest hard requirement is a RAM floor.  The SDK's own
-  # lv_conf.h pins LV_MEM_SIZE = 48 KiB (metadata/library-profiles/lvgl/
-  # lv_conf.h:50 `#define LV_MEM_SIZE (48U * 1024U)`); a 64 KiB floor covers
-  # that heap plus a modest draw buffer and app overhead.
+  # The capability layer's nearest display fact is HW_MIPI_DSI (derived from
+  # each SoC's mipi_dsi peripheral count) -- but that is too NARROW to gate
+  # LVGL: it would wrongly exclude the many targets that drive a plain SPI/I2C
+  # OLED with no MIPI-DSI controller at all.  So the only honest hard
+  # requirement is a RAM floor.  The SDK's own lv_conf.h pins
+  # LV_MEM_SIZE = 48 KiB (metadata/library-profiles/lvgl/lv_conf.h:50
+  # `#define LV_MEM_SIZE (48U * 1024U)`); a 64 KiB floor covers that heap plus
+  # a modest draw buffer and app overhead.
   min_ram_kib: 64
 
 integration:
