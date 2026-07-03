@@ -388,6 +388,14 @@ static const alp_gpu2d_ops_t _ops = {
 	.close     = NULL,
 };
 
+const alp_gpu2d_ops_t *alp_gpu2d_sw_ops(void)
+{
+	/* Cross-backend delegation hook -- see the declaration in
+	 * gpu2d_ops.h.  The ops are stateless (no be_data), so callers
+	 * may pass any backend state through. */
+	return &_ops;
+}
+
 ALP_BACKEND_REGISTER(gpu2d,
                      sw_fallback,
                      {
