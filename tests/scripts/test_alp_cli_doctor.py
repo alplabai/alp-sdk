@@ -87,6 +87,60 @@ def test_python_ok(monkeypatch):
     assert doctor._check_python().status == doctor.PASS
 
 
+def test_python_pin_mismatch_is_warn(monkeypatch, tmp_path):
+    (tmp_path / ".python-version").write_text("3.12\n", encoding="utf-8")
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(doctor.sys, "version_info", _VInfo(3, 11, 4, "final", 0))
+    res = doctor._check_python_pin()
+    assert res is not None
+    assert res.status == doctor.WARN
+    assert "3.11.4" in res.message and "3.12" in res.message
+    # The floor/pin distinction must be spelled out in the hint.
+    assert "3.10" in (res.hint or "")
+
+
+def test_python_pin_match_is_pass(monkeypatch, tmp_path):
+    (tmp_path / ".python-version").write_text("3.12\n", encoding="utf-8")
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(doctor.sys, "version_info", _VInfo(3, 12, 3, "final", 0))
+    res = doctor._check_python_pin()
+    assert res is not None
+    assert res.status == doctor.PASS
+
+
+def test_python_pin_absent_skips_check(monkeypatch, tmp_path):
+    # Packaged install without the repo checkout: no .python-version -> the
+    # check is skipped entirely rather than guessing a pin.
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
+    assert doctor._check_python_pin() is None
+
+
+def test_python_pin_unparseable_is_warn(monkeypatch, tmp_path):
+    (tmp_path / ".python-version").write_text("bogus\n", encoding="utf-8")
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
+    res = doctor._check_python_pin()
+    assert res is not None
+    assert res.status == doctor.WARN
+
+
+def test_python_pin_in_all_checks_when_pinned(monkeypatch, tmp_path):
+    _force_all_pass(monkeypatch, tmp_path)
+    # _force_all_pass points _repo_root at tmp_path; add a matching pin so
+    # the check appears (and PASSes) in the aggregate --json report.
+    v = doctor.sys.version_info
+    (tmp_path / ".python-version").write_text(
+        f"{v.major}.{v.minor}\n", encoding="utf-8"
+    )
+    result = _run(["--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    by_name = {c["name"]: c for c in payload["checks"]}
+    assert by_name["python-pin"]["status"] == "PASS"
+    # Ordering contract: the pin line reads right after the floor line.
+    names = [c["name"] for c in payload["checks"]]
+    assert names.index("python-pin") == names.index("python") + 1
+
+
 def test_west_missing_is_fail(monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
     assert doctor._check_west().status == doctor.FAIL
