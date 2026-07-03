@@ -72,6 +72,10 @@ struct cc3501e {
 	alp_spi_t         *bus;        /**< SPI1 to the CC3501E (Alif master). */
 	alp_gpio_t        *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t        *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
+	alp_gpio_t        *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17 -> Alif P2_6):
+	                                *   HIGH when the SPI slave is armed+idle.  When populated,
+	                                *   cc3501e_request() waits on it before each reply phase
+	                                *   instead of a fixed settle gap.  NULL = legacy fixed gap. */
 	cc3501e_event_cb_t event_cb;
 	void              *event_user;
 	uint8_t            rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];

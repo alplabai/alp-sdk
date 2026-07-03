@@ -48,6 +48,12 @@
 #ifndef CC3501E_BRIDGE_PIN_NRST
 #define CC3501E_BRIDGE_PIN_NRST 1u
 #endif
+/* OPTIONAL host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).  When
+ * the board wires it, cc3501e_request() gates reply phases on it (HIGH = slave
+ * armed) instead of a fixed delay.  Absent -> ready_pin NULL -> legacy gap. */
+#ifndef CC3501E_BRIDGE_PIN_READY
+#define CC3501E_BRIDGE_PIN_READY 2u
+#endif
 
 /**
  * @brief Bring up the SoM's CC3501E coprocessor over the inter-chip bridge.

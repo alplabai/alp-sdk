@@ -207,6 +207,32 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * vs the per-request budget.  The r2 bridge (CS + host-IRQ) removes the need. */
 #define CC3501E_PHASE_SETTLE_US 200u
 
+/* READY gate for the r2 SS0 + host-IRQ bridge.  When ctx->ready_pin is
+ * populated (the CC35 GPIO17 -> Alif P2_6 line is wired + opened as an input),
+ * wait for it HIGH -- the slave drives it HIGH when its SPI slave is armed+idle
+ * -- before clocking a reply phase, instead of a fixed settle gap.  This tracks
+ * the slave's actual re-arm rather than guessing, so slow (Wi-Fi/BLE) replies
+ * no longer need a conservative fixed delay.  Opt-in + degrades safely: a NULL
+ * ready_pin (CS-less r1 boards) or a line that never asserts falls back to the
+ * fixed gap.  See project_cc3501e_link_topology. */
+static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
+{
+	if (ctx->ready_pin != NULL) {
+		/* Opportunistic: a bounded burst of cheap polls catches an already-armed
+		 * slave (fast READY assert) and short-cuts the wait.  If the line isn't
+		 * asserted -- a slow op, or an IRQ bodge not yet HW-validated (P2_6 reads
+		 * 0 on the current bench) -- fall through to the proven fixed gap.  So the
+		 * gate never stalls and never costs more than a short burst + the gap. */
+		bool level = false;
+		for (uint32_t i = 0; i < 64u; ++i) {
+			if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
+				return;
+			}
+		}
+	}
+	alp_delay_us(fallback_us);
+}
+
 alp_status_t cc3501e_request(cc3501e_t        *ctx,
                              alp_cc3501e_cmd_t cmd,
                              const uint8_t    *tx_payload,
@@ -249,10 +275,9 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 		if (s != ALP_OK) return s;
 	}
 
-	/* Settle gap: let the slave dispatch + arm its reply before we read.
-     * v0.1 META dispatch is instant; slow (Wi-Fi/BLE) replies + async
-     * events need the next-rev host IRQ line, not a fixed gap. */
-	alp_delay_us(200u);
+	/* Wait for the slave to dispatch + arm its reply before we read: the
+	 * READY gate tracks it via the host-IRQ line when wired, else a fixed gap. */
+	cc3501e_reply_gate(ctx, 200u);
 
 	/* Dummies for the read transactions (MOSI is don't-care on a read). */
 	memset(ctx->tx_scratch, 0xFF, sizeof(ctx->tx_scratch));
@@ -277,9 +302,9 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 		return ALP_ERR_IO;
 	}
 
-	/* Same inter-phase settle before the reply PAYLOAD: the slave arms that
-	 * transfer in its ISR only after the reply-header transfer completes. */
-	alp_delay_us(CC3501E_PHASE_SETTLE_US);
+	/* Same READY gate before the reply PAYLOAD phase (the slave re-arms it in
+	 * its ISR only after the reply-header transfer completes). */
+	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 	/* 4. Reply payload: status byte followed by the response data. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
 	if (s != ALP_OK) return s;

@@ -109,6 +109,16 @@
 	status = "okay";
 };
 
+/*
+ * gpio2 for the host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).
+ * P2_6's reset-default mux is function 0 = GPIO (PIN_P2_6__GPIO), so no pinctrl
+ * group is needed; gpio_dw defaults the pin to input, which the app confirms via
+ * alp_gpio_configure(INPUT).  The READY line lets the host gate reply phases on
+ * the slave's actual re-arm instead of a fixed settle gap. */
+&gpio2 {
+	status = "okay";
+};
+
 / {
 	aliases {
 		/* bus_id 1 in alp_spi_open() -> this controller. */
@@ -125,6 +135,7 @@
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
 		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
-			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] host-IRQ/READY (P2_6 <- CC35 GPIO17) */
 	};
 };
