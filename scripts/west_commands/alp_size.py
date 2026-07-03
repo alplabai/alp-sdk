@@ -73,7 +73,21 @@ except ImportError:  # pragma: no cover - unit tests run without west installed
         def __init__(self, *args, **kwargs):  # noqa: D401,ANN002,ANN003
             pass
 
-    log = None  # type: ignore[assignment]
+    class _StubLog:
+        """west.log stand-in for the standalone (`alp size`) path."""
+
+        @staticmethod
+        def inf(msg: str) -> None: print(msg)
+        @staticmethod
+        def wrn(msg: str) -> None: print(f"WARN: {msg}", file=sys.stderr)
+        @staticmethod
+        def err(msg: str) -> None: print(f"ERROR: {msg}", file=sys.stderr)
+        @staticmethod
+        def die(msg: str) -> None:
+            print(f"FATAL: {msg}", file=sys.stderr)
+            sys.exit(1)
+
+    log = _StubLog()  # type: ignore[assignment]
 
 # Reuse the validator's colour discipline (NO_COLOR / isatty aware).  The
 # import is guarded so the module still loads where colorama is absent.
@@ -130,7 +144,7 @@ def load_manifest(build_root: Path) -> dict:
     if not mpath.is_file():
         raise AlpSizeError(
             f"no system-manifest.yaml at {mpath}; run "
-            f"`west alp-build <app>` first.")
+            f"`alp build` / `west alp-build <app>` first.")
     data = yaml.safe_load(mpath.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise AlpSizeError(
@@ -623,6 +637,75 @@ def unknown_budget_rows(rows: list[SliceSize]) -> list[SliceSize]:
 # ---------------------------------------------------------------------
 
 
+def _add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Shared argparse wiring; used by both WestCommand and the
+    ``python alp_size.py ...`` standalone path."""
+    parser.add_argument(
+        "app_path", nargs="?", default=".",
+        help="Path to the application source directory.")
+    parser.add_argument(
+        "--build-root", default=None,
+        help="Override the build root (default: <app_path>/build).")
+    parser.add_argument(
+        "--board", default=None,
+        help="Override the SoM SKU used to resolve the memory budget "
+             "(default: hw_info.sku from the manifest).")
+    parser.add_argument(
+        "--json", action="store_true",
+        help="Emit the machine-readable report (for the VS Code "
+             "extension), instead of the human table.")
+    parser.add_argument(
+        "--fail-over-budget", action="store_true",
+        help="Exit non-zero if any slice exceeds its resolved budget "
+             "(slices with an unknown budget are skipped + reported).")
+
+
+def run(args) -> int:                        # type: ignore[no-untyped-def]
+    """Measure + report every manifest slice (shared west/standalone body)."""
+    sdk_root = find_sdk_root()
+    if sdk_root is None:
+        log.die("Cannot locate alp-sdk root.")
+        return 1
+
+    app_path = Path(args.app_path).resolve()
+    build_root = (Path(args.build_root).resolve()
+                  if args.build_root
+                  else app_path / "build")
+
+    try:
+        manifest = load_manifest(build_root)
+    except AlpSizeError as e:
+        log.die(str(e))
+        return 1
+
+    sku = args.board or (manifest.get("hw_info") or {}).get("sku")
+    size_bin = find_size_tool()
+    rows = build_report(manifest, build_root, sdk_root,
+                        sku=sku, size_bin=size_bin)
+
+    if args.json:
+        print(render_json(rows))
+    else:
+        print(render_table(rows))
+        if size_bin is None:
+            log.inf("alp-size: no size tool on PATH "
+                    "(arm-zephyr-eabi-size / llvm-size / size); "
+                    "fell back to pyelftools / rom.json+ram.json.")
+
+    if args.fail_over_budget:
+        over = over_budget_rows(rows)
+        unknown = unknown_budget_rows(rows)
+        if unknown and not args.json:
+            names = ", ".join(r.core_id for r in unknown)
+            log.inf(f"alp-size: budget unknown for [{names}] -- "
+                    f"skipped by --fail-over-budget (no guess).")
+        if over:
+            names = ", ".join(r.core_id for r in over)
+            log.die(f"alp-size: over budget: [{names}].")
+            return 1
+    return 0
+
+
 class AlpSize(WestCommand):
 
     def __init__(self) -> None:
@@ -639,66 +722,31 @@ class AlpSize(WestCommand):
             description=self.description,
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
-        parser.add_argument(
-            "app_path", nargs="?", default=".",
-            help="Path to the application source directory.")
-        parser.add_argument(
-            "--build-root", default=None,
-            help="Override the build root (default: <app_path>/build).")
-        parser.add_argument(
-            "--board", default=None,
-            help="Override the SoM SKU used to resolve the memory budget "
-                 "(default: hw_info.sku from the manifest).")
-        parser.add_argument(
-            "--json", action="store_true",
-            help="Emit the machine-readable report (for the VS Code "
-                 "extension), instead of the human table.")
-        parser.add_argument(
-            "--fail-over-budget", action="store_true",
-            help="Exit non-zero if any slice exceeds its resolved budget "
-                 "(slices with an unknown budget are skipped + reported).")
+        _add_arguments(parser)
         return parser
 
     def do_run(self, args, _unknown):        # type: ignore[no-untyped-def]
-        sdk_root = find_sdk_root()
-        if sdk_root is None:
-            log.die("Cannot locate alp-sdk root.")
-            return 1
+        return run(args)
 
-        app_path = Path(args.app_path).resolve()
-        build_root = (Path(args.build_root).resolve()
-                      if args.build_root
-                      else app_path / "build")
 
-        try:
-            manifest = load_manifest(build_root)
-        except AlpSizeError as e:
-            log.die(str(e))
-            return 1
+# ---------------------------------------------------------------------
+# Standalone CLI entry (`python alp_size.py <app>`)
+# ---------------------------------------------------------------------
 
-        sku = args.board or (manifest.get("hw_info") or {}).get("sku")
-        size_bin = find_size_tool()
-        rows = build_report(manifest, build_root, sdk_root,
-                            sku=sku, size_bin=size_bin)
 
-        if args.json:
-            print(render_json(rows))
-        else:
-            print(render_table(rows))
-            if size_bin is None:
-                log.inf("alp-size: no size tool on PATH "
-                        "(arm-zephyr-eabi-size / llvm-size / size); "
-                        "fell back to pyelftools / rom.json+ram.json.")
+def main(argv: Optional[list[str]] = None) -> int:
+    """Standalone entry -- the `alp size` delegation path.  When
+    invoked under west, the AlpSize.do_run path is used instead."""
+    parser = argparse.ArgumentParser(
+        prog="alp-size",
+        description=("Report per-slice flash/RAM footprint against the "
+                     "SoM memory budget."),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    _add_arguments(parser)
+    args = parser.parse_args(argv)
+    return run(args)
 
-        if args.fail_over_budget:
-            over = over_budget_rows(rows)
-            unknown = unknown_budget_rows(rows)
-            if unknown and not args.json:
-                names = ", ".join(r.core_id for r in unknown)
-                log.inf(f"alp-size: budget unknown for [{names}] -- "
-                        f"skipped by --fail-over-budget (no guess).")
-            if over:
-                names = ", ".join(r.core_id for r in over)
-                log.die(f"alp-size: over budget: [{names}].")
-                return 1
-        return 0
+
+if __name__ == "__main__":                    # pragma: no cover
+    raise SystemExit(main())

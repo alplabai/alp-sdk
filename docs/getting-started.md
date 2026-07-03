@@ -205,7 +205,10 @@ west-extension commands — `west alp-build`
 (`scripts/west_commands/alp_build.py`) plus its siblings
 `alp-image` / `alp-flash` / `alp-clean` / `alp-emit` / `alp-size` /
 `alp-renode`, all registered via `scripts/west-commands.yml` — that
-the rest of this walkthrough uses.
+the rest of this walkthrough uses.  Every one of them is equally
+reachable through the `alp` CLI (`alp build`, `alp flash`, `alp size`,
+…) documented in [`docs/cli.md`](cli.md); the two front doors drive
+the same pipeline.
 
 ## 4. First build: the GPIO example
 

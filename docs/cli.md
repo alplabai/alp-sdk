@@ -1,11 +1,12 @@
 # The `alp` CLI
 
 `alp` is the Alp SDK's single command-line front door: scaffold a
-project, build it (multi-core aware), run it on the simulator, flash
-it, inspect the generated configuration, validate `board.yaml`,
-compile AI models, sanity-check the host environment, open a
-serial console, and scaffold the metadata for porting a new SoM --
-all from one verb set.
+project, build it (multi-core aware), run it on the simulator or in
+Renode, check its footprint against the SoM memory budget, flash it,
+bundle it for OTA, clean it, inspect the generated configuration,
+validate `board.yaml`, compile AI models, sanity-check the host
+environment, open a serial console, and scaffold the metadata for
+porting a new SoM -- all from one verb set.
 
 It is installed automatically by the bootstrap scripts
 (`scripts/bootstrap.sh` on Linux/macOS/WSL2, `scripts/bootstrap.ps1`
@@ -47,14 +48,18 @@ Rules of thumb:
   `build/system-manifest.yaml` and hand every slice + helper MCU to
   its registered backend in `scripts/flash_backends/`, honouring the
   manifest's `boot_order:`.
-* `alp emit` and `west alp-emit` overlap but expose DIFFERENT mode
-  sets: `alp emit` wraps `alp_project.py --emit` (zephyr-conf,
-  cmake-args, yocto-conf, dts-overlay, hw-info-h, ...); `west
-  alp-emit` wraps the orchestrator's artefacts (dts-partitions,
-  storage-mounts-c, tfm-sysbuild-conf, build-plan).  Pick by the
-  artefact you need.
-* `west alp-image`, `west alp-clean`, `west alp-size`,
-  `west alp-renode` have no `alp` alias yet -- use the west form.
+* `alp emit` is a SUPERSET of `west alp-emit`: every artefact either
+  front door can generate is reachable from `alp emit` (one catalog,
+  listed in the `alp emit` verb reference below).  `west alp-emit`
+  remains for west-centric scripting and
+  exposes the orchestrator's ADR-0014 subset.  Same emitters
+  underneath either way -- the two can never produce different output
+  for the same mode.
+* `alp size` / `alp clean` / `alp image` / `alp renode` ==
+  `west alp-size` / `west alp-clean` / `west alp-image` /
+  `west alp-renode`: same implementation, same flags; the `alp` form
+  finds the app by walking up from the cwd, the west form takes the
+  app path explicitly.
 
 ## Verb reference
 
@@ -201,6 +206,89 @@ west alp-build examples/multicore/rpmsg-v2n && west alp-flash examples/multicore
 | `--build-root` | Override the build root |
 | `--skip-missing-tools` | Warn + skip slices whose flash tool is missing |
 
+### `alp size` -- footprint vs the SoM memory budget
+
+```bash
+alp build && alp size            # does each image fit the silicon?
+alp size --fail-over-budget      # CI gate: non-zero exit when over
+alp size --json                  # machine-readable (VS Code extension)
+```
+
+Walks `build/system-manifest.yaml` (produced by `alp build` /
+`west alp-build`), measures every Zephyr slice's `zephyr.elf`, and
+compares FLASH and RAM usage against the budget resolved from the
+SoM's SoC metadata -- BEFORE you flash.  Identical to `west alp-size`.
+Slices that aren't built are reported as `not built`, Yocto/baremetal
+slices as `n/a`, and an unresolvable budget shows `unknown` (never a
+guessed number; `--fail-over-budget` skips such slices and says so).
+
+| Option | Meaning |
+|---|---|
+| `APP_PATH` (argument, optional) | App directory (default: walk up from cwd) |
+| `--build-root` | Override the build root (default: `<app>/build`) |
+| `--board` | Override the SoM SKU used to resolve the budget |
+| `--json` | Machine-readable report instead of the human table |
+| `--fail-over-budget` | Exit non-zero if any slice exceeds its budget |
+
+### `alp image` -- assemble a flashable bundle
+
+```bash
+alp build && alp image           # produces build/image-bundle/
+```
+
+Reads `build/system-manifest.yaml` and assembles a single flashable
+bundle under `build/image-bundle/`: per-slice `tar.gz` archives,
+helper-MCU firmware, and a `bundle-manifest.json` with per-artefact
+SHA-256s.  Identical to `west alp-image`.
+
+| Option | Meaning |
+|---|---|
+| `APP_PATH` (argument, optional) | App directory (default: walk up from cwd) |
+| `--build-root` | Override the build root (default: `<app>/build`) |
+
+### `alp clean` -- remove build outputs
+
+```bash
+alp clean                        # rm -rf <app>/build + orchestrator cache
+alp clean --dry-run              # list what would go, delete nothing
+```
+
+Removes the per-project build directory and the orchestrator's
+`.alp-build-state.json`.  The per-slice build dirs are self-contained,
+so no Zephyr/Yocto-specific cleaners are needed.  Identical to
+`west alp-clean`.
+
+| Option | Meaning |
+|---|---|
+| `APP_PATH` (argument, optional) | App directory (default: walk up from cwd) |
+| `--build-root` | Override the build root (default: `<app>/build`) |
+| `--dry-run` | List paths that would be removed, don't delete |
+
+### `alp renode` -- boot the build in Renode (no hardware)
+
+```bash
+alp build && alp renode                      # headless smoke boot
+alp renode --expect "[hello] done"           # exit 0 when seen, 1 if not
+alp renode --log out.log --timeout 60
+```
+
+Boots the built system manifest's Zephyr slice in the
+[Renode](https://renode.io) emulator, headless, with a wall-clock
+timeout -- a no-hardware smoke test.  The SoM family maps to a
+platform descriptor under `metadata/renode/`; the console output tees
+to `--log` (default `build/renode.log`).  Requires the `renode` binary
+on PATH -- exits non-zero with install guidance when absent, never a
+silent pass.  Identical to `west alp-renode`.
+
+| Option | Meaning |
+|---|---|
+| `APP_PATH` (argument, optional) | App directory (default: walk up from cwd) |
+| `--build-root` | Override the build root (default: `<app>/build`) |
+| `--board` | Override the SoM SKU used to pick the platform descriptor |
+| `--log` | Tee the console output to this file |
+| `--timeout` | Wall-clock cap in seconds (default 120) |
+| `--expect` | Stop early (exit 0) when this substring appears; exit 1 if it never does |
+
 ### `alp emit` -- print one generated artefact (no build)
 
 ```bash
@@ -208,13 +296,44 @@ alp emit zephyr-conf                   # the per-core Zephyr fragment
 alp emit system-manifest               # the full-system manifest
 alp emit hw-info-h --output hw_info.h  # write instead of stdout
 alp emit zephyr-conf --core m55_he     # scope per-core modes to one core
+alp emit build-plan                    # the orchestrator's build plan (JSON)
 ```
 
-Read-only wrapper over `scripts/alp_project.py --emit <mode>`: shows
-exactly what a consuming tool (CMake, Yocto, the IDE) would see.
-Modes: `zephyr-conf`, `cmake-args`, `yocto-conf`, `dts-overlay`,
-`hw-info-h`, `west-libraries`, `system-manifest`, `dts-reservations`,
-`ipc-contract-h`, `os-topology`, `composed-route-table`.
+Read-only: shows exactly what a consuming tool (CMake, Yocto, the
+IDE) would see.  This is the ONE catalog of every generated artefact
+-- `alp emit` reaches everything `scripts/alp_project.py --emit` and
+`west alp-emit` can produce, delegating each mode to the single
+implementation that owns it (never a fork):
+
+| Mode | Artefact | Emitted by |
+|---|---|---|
+| `zephyr-conf` | Per-core Zephyr `alp.conf` Kconfig fragment | `alp_project.py` |
+| `cmake-args` | Per-core `-D` CMake argument list | `alp_project.py` |
+| `yocto-conf` | Per-core `local.conf` fragment | `alp_project.py` |
+| `dts-overlay` | Board DTS overlay (bus aliases + pin array) | `alp_project.py` |
+| `hw-info-h` | Build-time `hw_info.h` macro header | `alp_project.py` |
+| `west-libraries` | `west.yml` fragment for `libraries:` deps | `alp_project.py` |
+| `system-manifest` | Full-system manifest (slices, boot order) | orchestrator |
+| `dts-reservations` | DTS reserved-memory overlay (cross-core carve-outs) | orchestrator |
+| `ipc-contract-h` | Cross-core IPC contract header | orchestrator |
+| `os-topology` | Per-core natural-vs-effective OS facts | orchestrator |
+| `composed-route-table` | JSON route-table dump (demonstrator) | `alp_project.py` |
+| `dts-partitions` | DTS fixed-partitions overlay (`storage:` entries) | orchestrator |
+| `storage-mounts-c` | Static C storage mount table | orchestrator |
+| `tfm-sysbuild-conf` | TF-M sysbuild child-image overlay (`security.psa:`) | orchestrator |
+| `build-plan` | Per-slice build plan, JSON (IDE / CI consumers) | orchestrator |
+
+| Option | Meaning |
+|---|---|
+| `--input` | Path to `board.yaml` (default: nearest one upward) |
+| `--output` | Write to this path instead of stdout |
+| `--core` | Scope per-core modes to one core ID |
+| `--build-root` | Build root used for `build-plan` slice paths |
+
+`west alp-emit` exposes the orchestrator subset of the same catalog
+(`system-manifest`, `ipc-contract-h`, `dts-reservations`,
+`dts-partitions`, `storage-mounts-c`, `tfm-sysbuild-conf`,
+`build-plan`) for west-centric scripting.
 
 ### `alp validate` -- check a board.yaml
 
@@ -317,10 +436,11 @@ west alp-flash examples/multicore/rpmsg-v2n --core m33_sm
 | `ALP_SDK_ROOT` | Explicit path to the alp-sdk checkout; otherwise the CLI locates the repo it was installed (editable) from |
 | `ZEPHYR_BASE` | The Zephyr tree used by single-image builds + checked by `alp doctor` |
 
-The build/flash/emit verbs export `ALP_SDK_ROOT`, append the SDK to
-`EXTRA_ZEPHYR_MODULES`, and put `<sdk>/scripts` on `PYTHONPATH` for
-their sub-processes -- the same wiring the `west alp-*` wrappers use,
-so a CLI-invoked orchestrator run behaves identically to a west one.
+The delegating verbs (build, flash, emit, size, image, clean, renode)
+export `ALP_SDK_ROOT`, append the SDK to `EXTRA_ZEPHYR_MODULES`, and
+put `<sdk>/scripts` on `PYTHONPATH` for their sub-processes -- the
+same wiring the `west alp-*` wrappers use, so a CLI-invoked
+orchestrator run behaves identically to a west one.
 
 ## See also
 
