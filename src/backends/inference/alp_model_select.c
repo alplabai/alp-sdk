@@ -33,8 +33,10 @@ static alp_inference_model_format_t _fmt_enum(const char *s)
 	return ALP_INFERENCE_MODEL_TFLITE; /* "tflite" + default */
 }
 
-/* A target is available if its silicon_ref is the cpu wildcard, the host
- * SoC, or any compiled-in discrete accelerator ref. */
+/* A target is available if its silicon_ref is the cpu wildcard or one of
+ * the env's ENGINE-backed refs (soc_ref when the on-SoC NPU engine is
+ * compiled in, plus every avail_silicon entry).  The env owner encodes
+ * the core-class truth -- see alp_model_select_env_t in the header. */
 static bool _silicon_available(const char *ref, const alp_model_select_env_t *e)
 {
 	if (strcmp(ref, "*") == 0) {
