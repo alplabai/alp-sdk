@@ -65,7 +65,9 @@ typedef enum {
 	    -13, /**< A backend matched but no blob fits the device NPU envelope (e.g. arena SRAM too small), and no CPU fallback. */
 	ALP_ERR_NOT_FOUND = -14, /**< An explicitly-requested backend is absent from the package. */
 	ALP_ERR_NOT_PROVISIONED =
-	    -15 /**< Hardware identity store (e.g. the on-module EEPROM manifest) is blank / unprogrammed -- the module has not been provisioned by the factory tool yet. */
+	    -15, /**< Hardware identity store (e.g. the on-module EEPROM manifest) is blank / unprogrammed -- the module has not been provisioned by the factory tool yet. */
+	ALP_STATUS_ENUM_FLOOR =
+	    -15 /**< End-of-enum sentinel: equal to the most negative status code.  NOT a status -- never returned by any API.  Use it for membership checks (`s <= ALP_OK && s >= ALP_STATUS_ENUM_FLOOR`); keep it equal to the last real member when adding codes. */
 } alp_status_t;
 
 /**

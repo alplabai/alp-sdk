@@ -953,6 +953,15 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MODEL_READER
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backend.c
 )
+# Declare the custom alp_backends_* / alp_backend_classes sections in
+# the rodata region.  Required on real boards: Zephyr's ld-script
+# targets link with --orphan-handling=warn + --fatal-warnings, so the
+# registry sections MUST be placed explicitly (native_sim's host
+# linker script auto-places them as orphans, which is why this never
+# surfaced in CI).  See the maintenance note in the snippet: one line
+# per backend class.
+zephyr_linker_sources(ROM_SECTIONS
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/linker/alp-backend-sections.ld)
 
 # I2C class dispatcher + backends.
 # The dispatcher and zephyr_drv backend compile unconditionally;
@@ -1041,6 +1050,15 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PERIPH_ADC
 # ADC backends.  Each registers itself into .alp_backends_adc via
 # ALP_BACKEND_REGISTER.  SoC-gated so unused vendor code is
 # tree-shaken from the build.
+#
+# zephyr_drv is the portable wildcard backend (alp-adcN alias ->
+# "alp,adc-input" consumer -> adc_channel_setup_dt / adc_read).  A
+# vendor exact-match at the same priority still wins the registry
+# tiebreak (see alp_backend_select), so compiling it wherever the
+# Zephyr ADC subsystem is on is safe -- it only answers when no
+# vendor backend matches the active SoC.
+zephyr_library_sources_ifdef(CONFIG_ADC
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/zephyr_drv.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/alif_e7.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8

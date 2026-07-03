@@ -36,6 +36,15 @@ silicon family without editing existing files.
 That's it. The registry walker at `alp_backend_select()` picks up the
 new entry automatically.
 
+Adding a **new class** additionally needs one
+`ALP_BACKEND_SECTION_ROM(<class>)` line in
+`zephyr/linker/alp-backend-sections.ld`. Zephyr's ld-script boards
+link with `--orphan-handling=warn` plus `--fatal-warnings`, so an
+undeclared `alp_backends_<class>` section is a hard link error on
+real hardware — and the omission never shows up in native CI, because
+the host linker script used by `native_sim` auto-places orphan
+sections.
+
 ## Selection tiebreaker
 
 When multiple backends match the active silicon, `alp_backend_select()`
