@@ -333,6 +333,13 @@ void cc3501e_hw_net_init(void)
 {
 	/* No lwIP linked in this build -- nothing to bring up. */
 }
+uint32_t cc3501e_hw_wifi_last_event_id(void)
+{
+	/* No radio linked in this build -- no Wi-Fi events to report.  protocol.c's
+	 * GET_DIAG_INFO reads this unconditionally, so the non-Wi-Fi ti build must
+	 * define it too (matches cc3501e_hw_stub.c). */
+	return 0u;
+}
 #endif /* CC3501E_WIFI */
 
 /* Deferred-reset latch: CMD_RESET sets this; cc3501e_hw_tick() performs
