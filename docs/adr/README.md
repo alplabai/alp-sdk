@@ -54,6 +54,7 @@ Bad / costs: ...
 | [0015](0015-cc3501e-firmware-embedded.md) | CC3501E bridge firmware is embedded in alp-sdk (like gd32-bridge), not a separate repo | Accepted |
 | [0016](0016-cross-core-peripheral-proxy-wire-schema.md) | Cross-core peripheral proxy wire schema: the GD32 bridge command frame carried over RPMsg (A55→M33→GD32) | Proposed |
 | [0017](0017-alp-sdk-over-the-vendor-sdk.md) | alp-sdk rides over the vendor SDK — no rewritten vendor drivers; Tier-1 upstream-native / Tier-1.5 in-tree-thin (Apache HAL / upstream core) / Tier-2 vendor-SDK-consumed / Tier-3 SE-mediated | Accepted (amended 2026-06-15) |
+| [0018](0018-curated-third-party-libraries.md) | Curated third-party libraries: one `libraries:` flag in the project YAML, capability-gated manifests under `metadata/libraries/`, Tier A curated / Tier B recipe-only, never forked | Proposed |
 
 ## When to write an ADR
 
