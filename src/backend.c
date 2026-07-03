@@ -80,8 +80,15 @@ static bool candidate_beats_best(const alp_backend_t *cand, const alp_backend_t 
 	return strcmp(cand->vendor, best->vendor) < 0;
 }
 
-static const alp_backend_t *
-select_in_range(const alp_backend_t *start, const alp_backend_t *stop, const char *silicon_ref)
+/* Best match in [start, stop) that ranks strictly BELOW `prev` in the
+ * tiebreaker order (prev == NULL means unconstrained -- plain best).
+ * Candidates tied with `prev` on every tier are skipped too: the docs
+ * forbid registering duplicate {class, priority, match-type, vendor}
+ * rows, so a full tie can only be prev itself or a mis-registration. */
+static const alp_backend_t *select_in_range(const alp_backend_t *start,
+                                            const alp_backend_t *stop,
+                                            const char          *silicon_ref,
+                                            const alp_backend_t *prev)
 {
 	const alp_backend_t *best = NULL;
 	for (const alp_backend_t *be = start; be < stop; ++be) {
@@ -91,6 +98,9 @@ select_in_range(const alp_backend_t *start, const alp_backend_t *stop, const cha
 		if (!wild && !exact) {
 			continue;
 		}
+		if (prev != NULL && (be == prev || !candidate_beats_best(prev, be))) {
+			continue; /* at or above prev's rank -- already tried */
+		}
 		if (best == NULL || candidate_beats_best(be, best)) {
 			best = be;
 		}
@@ -98,7 +108,8 @@ select_in_range(const alp_backend_t *start, const alp_backend_t *stop, const cha
 	return best;
 }
 
-const alp_backend_t *alp_backend_select(const char *class_name, const char *silicon_ref)
+const alp_backend_t *
+alp_backend_select_next(const char *class_name, const char *silicon_ref, const alp_backend_t *prev)
 {
 	if (class_name == NULL) {
 		return NULL;
@@ -110,10 +121,15 @@ const alp_backend_t *alp_backend_select(const char *class_name, const char *sili
 	     c < __stop_alp_backend_classes;
 	     ++c) {
 		if (strcmp(c->class_name, class_name) == 0) {
-			return select_in_range(c->start, c->stop, silicon_ref);
+			return select_in_range(c->start, c->stop, silicon_ref, prev);
 		}
 	}
 	return NULL;
+}
+
+const alp_backend_t *alp_backend_select(const char *class_name, const char *silicon_ref)
+{
+	return alp_backend_select_next(class_name, silicon_ref, NULL);
 }
 
 size_t alp_backend_count(const char *class_name)
