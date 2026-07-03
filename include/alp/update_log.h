@@ -27,6 +27,17 @@
  *      @ref ALP_UPDATE_LOG_HW_ENFORCED tier's job (TF-M isolation + a
  *      hardware counter; issue #111).
  *
+ * @par Hardware-enforced tier status (@ref ALP_UPDATE_LOG_HW_ENFORCED)
+ *      Not yet built. The tier is registered on TF-M-capable builds
+ *      (@c CONFIG_ALP_SDK_UPDATE_LOG_TFM) but declines at open() until its
+ *      secure store (PSA Protected Storage in the SPE) and a hardware
+ *      monotonic counter are wired on silicon, so @ref alp_update_log_open
+ *      transparently falls through to the software tamper-evident tier and
+ *      @ref alp_update_log_assurance reports @ref
+ *      ALP_UPDATE_LOG_SW_TAMPER_EVIDENT today (issue #111). Query it rather
+ *      than assume the tier -- it is the only portable signal of which
+ *      assurance actually backs the log on a given SoM.
+ *
  * @par Full log (software tier)
  *      The log is append-only and never wraps -- wrapping would erase
  *      audit history. When the backing partition is full,

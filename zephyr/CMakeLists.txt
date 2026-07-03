@@ -458,11 +458,13 @@ zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/securit
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/se_cryptocell.c)
 # Update-log surface (<alp/update_log.h>) -- experimental, opt-in.
-# Pure engine + software tamper-evident tier + (compiled, unregistered)
-# Alif TF-M stub seam. Gated on CONFIG_ALP_SDK_UPDATE_LOG.  The dispatch
+# Pure engine + software tamper-evident tier + the Alif TF-M
+# (HW_ENFORCED) tier. Gated on CONFIG_ALP_SDK_UPDATE_LOG.  The dispatch
 # owns the public surface + the singleton handle; sw_tier registers the
-# universal silicon_ref="*" backend; alif_tfm_stub is compiled (so it
-# can't bitrot) but deliberately NOT registered until its silicon lands.
+# universal silicon_ref="*" backend; alif_tfm_stub's seams compile
+# unconditionally (so they can't bitrot) but its backend registration is
+# gated behind CONFIG_ALP_SDK_UPDATE_LOG_TFM (=> BUILD_WITH_TFM), so it
+# only enters the registry where the platform advertises TF-M isolation.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/engine.c

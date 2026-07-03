@@ -1694,6 +1694,37 @@ config ALP_SDK_UPDATE_LOG_PERSIST
 	  partition can rebuild store + counter consistently. The
 	  HW_ENFORCED tier (issue #111) is the app-immutable answer.
 
+config ALP_SDK_UPDATE_LOG_TFM
+	bool "Register the hardware-enforced (TF-M) update-log tier"
+	default n
+	depends on ALP_SDK_UPDATE_LOG && BUILD_WITH_TFM
+	help
+	  Register the HW_ENFORCED update-log tier
+	  (src/backends/update_log/alif_tfm_stub.c) into the update_log
+	  backend section at a higher priority than the software tier, so
+	  the dispatcher prefers it wherever TF-M isolation is advertised.
+	  This is the app-IMMUTABLE tier the software tamper-evident tier
+	  cannot provide: the log store and its monotonic anchor live in
+	  the Secure Processing Environment, unreachable by the non-secure
+	  application.
+
+	  This depends on BUILD_WITH_TFM because the assurance is only real
+	  under TF-M: the store binds to PSA Protected Storage (psa_ps_set /
+	  psa_ps_get, psa/protected_storage.h) in the SPE, and the monotonic
+	  anchor to the TF-M platform NV-counter service. Without TF-M the
+	  same PSA API is served from the non-secure image (Zephyr's
+	  secure_storage subsystem) -- that is the software tier's boundary,
+	  not this one.
+
+	  STATUS: stub. The tier registers but its ready() probe returns
+	  ALP_ERR_NOSUPPORT until the secure store + hardware monotonic
+	  counter are wired and provisioned on silicon, so the dispatcher
+	  transparently falls through to the SW tamper-evident tier
+	  (issues #111, #239). Enabling this today changes nothing at
+	  runtime; it exists so a TF-M-capable board can opt the tier into
+	  the registry once the on-silicon slice lands. It cannot build on
+	  native_sim (no TF-M there); leave it off.
+
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
 # wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
 # contract so apps can link cleanly against <alp/iot.h>.
