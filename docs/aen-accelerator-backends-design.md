@@ -89,14 +89,19 @@ HAL on the AEN family, registering a silicon-specific entry per
 
 ### Dispatch + registration
 
-The stub registers at priority 0 against `"*"` so every build links
-`<alp/gpu2d.h>` cleanly and the dispatcher's surface-validation
-pre-checks (NULL handle, zero dimensions, format range) stay
-reachable on every SoC.  The real D/AVE 2D backend registers against
-the concrete AEN silicon_refs at priority 100; the registry then
-prefers it over the wildcard stub on those parts and leaves every
-other SoM (V2N — no on-die 2D block — and bare-metal) on the stub's
-clean `ALP_ERR_NOSUPPORT`.
+The software fallback registers at priority 0 against `"*"` so every
+build links `<alp/gpu2d.h>` cleanly and the dispatcher's
+surface-validation pre-checks (NULL handle, zero dimensions, format
+range, row-fits-stride) stay reachable on every SoC.  The real
+D/AVE 2D backend registers against the concrete AEN silicon_refs at
+priority 100; the registry then prefers it over the wildcard
+fallback on those parts and leaves every other SoM (V2N — no on-die
+2D block — i.MX 93, and bare-metal) on the fallback's REAL CPU
+fill/blit/blend.  Selection is per-SoC-exclusive — there is no
+per-op fallback in the dispatcher — so ops the engine cannot express
+single-pass (the ADDITIVE / MULTIPLY blend modes) are delegated to
+the software path by the D/AVE 2D backend itself, through the
+internal `alp_gpu2d_sw_ops()` hook.
 
 ### DMA-queue semantics
 
