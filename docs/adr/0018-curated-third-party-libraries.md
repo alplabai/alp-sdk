@@ -1,6 +1,6 @@
 # 0018. Curated third-party libraries: one `libraries:` flag, capability-gated, never forked
 
-Status: Proposed
+Status: Accepted
 Date: 2026-07-03
 
 alp-sdk's next developer-experience step after backend completeness is
