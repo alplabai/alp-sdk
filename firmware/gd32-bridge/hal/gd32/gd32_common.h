@@ -102,8 +102,18 @@ typedef struct {
 	uint32_t pace_timer;  /* TIMER5 (stream 0) or TIMER6 (stream 1) */
 	uint16_t ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
 	uint16_t read_idx; /* host's consumer cursor                */
-	uint8_t  dsp_chain_id;
-	bool     dsp_bound;
+	/* Overrun accounting (adc_stream.c).  lap_count is bumped by the
+	 * stream's DMA full-transfer-finish ISR on every circular-mode
+	 * reload (one full "lap" of the ring); total_read accumulates the
+	 * samples the host has drained.  lap_count * RING_SAMPLES + the
+	 * live write index is the TOTAL the DMA ever deposited, so a
+	 * backlog beyond one ring means the writer lapped the reader.
+	 * volatile: written in ISR context, read from the CS-EXTI-driven
+	 * stream_read path. */
+	volatile uint32_t lap_count;
+	uint32_t          total_read;
+	uint8_t           dsp_chain_id;
+	bool              dsp_bound;
 } adc_stream_state_t;
 
 /* ----------------------------------------------------------------- */

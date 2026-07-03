@@ -434,6 +434,12 @@ static gd32_bridge_status_t handle_adc_stream_read(
 	uint8_t   got = 0u;
 	const int rv  = bridge_hw_adc_stream_read(stream_id, max_samples, &got, mv);
 	if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
+	/* Ring overrun (the DMA writer lapped the host's read cursor):
+     * the documented wire answer is STATUS_BUSY -- "host should poll
+     * faster" (docs/gd32-bridge-protocol.md §3.10).  The HAL has
+     * already dropped the corrupt backlog and resynced its cursor,
+     * so the next READ returns fresh samples. */
+	if (rv == BRIDGE_HW_ERR_BUSY) return STATUS_BUSY;
 	if (rv < 0) return STATUS_IO;
 	if (got > max_samples) return STATUS_IO; /* HAL contract violation */
 

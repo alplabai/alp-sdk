@@ -481,7 +481,12 @@ is 1 byte: `stream_id:u8`; reply empty.
 
 Ring overrun on the firmware side returns `STATUS_BUSY` on the next
 `STREAM_READ`, signalling "host should poll faster" -- the
-firmware does NOT silently drop samples.
+firmware does NOT silently drop samples.  The firmware detects the
+overrun exactly (a per-reload DMA lap counter tracks total samples
+written vs total drained); the `STATUS_BUSY` answer also discards
+the lapped (corrupt) backlog and resynchronises the read cursor to
+the live write position, so the following `STREAM_READ` returns
+fresh, gap-free samples.
 
 ### 3.11 TRNG read (`v0.3+`)
 
