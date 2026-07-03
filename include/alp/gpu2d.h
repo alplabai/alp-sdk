@@ -27,8 +27,10 @@
  *   - all others : portable software fallback (CPU fill/blit/blend;
  *                  src/backends/gpu2d/sw_fallback.c).  This is what
  *                  V2N, i.MX 93 (whose 2D engine is PXP, not a
- *                  GPU2D peer -- see ADR 0008), Yocto, and
- *                  bare-metal builds use.
+ *                  GPU2D peer -- see ADR 0008), and ALP_OS=yocto
+ *                  Linux builds use.  Plain-CMake bare-metal builds
+ *                  still link the NOSUPPORT stub (no backend
+ *                  registry there yet).
  *
  * Concurrency: the singleton handle returned by @ref alp_gpu2d_open
  * is reentrant under a shared driver mutex.  Callers must serialise

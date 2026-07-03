@@ -1234,6 +1234,12 @@ void alp_power_close(alp_power_t *p)
 /* GPU2D (alp/gpu2d.h)                                                 */
 /* ------------------------------------------------------------------ */
 
+/* Muted when the OS backend compiles the real class dispatcher
+ * (src/gpu2d_dispatch.c + the portable sw_fallback) -- the Yocto
+ * build does, so Linux apps get the REAL CPU fill/blit/blend
+ * instead of NOSUPPORT (same #33 migration pattern as rtc/wdt/
+ * can/pwm/adc/i2s/counter above). */
+#if !defined(ALP_VENDOR_OVERRIDES_GPU2D)
 alp_gpu2d_t *alp_gpu2d_open(void)
 {
 	z_last_error = ALP_ERR_NOSUPPORT;
@@ -1304,6 +1310,12 @@ void alp_gpu2d_close(alp_gpu2d_t *g)
 {
 	(void)g;
 }
+const alp_capabilities_t *alp_gpu2d_capabilities(const alp_gpu2d_t *g)
+{
+	(void)g;
+	return NULL;
+}
+#endif /* !ALP_VENDOR_OVERRIDES_GPU2D */
 
 /* ------------------------------------------------------------------ */
 /* Camera ISP (alp/camera.h v0.5 extension)                            */

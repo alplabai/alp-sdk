@@ -99,7 +99,6 @@ struct alp_gpu2d_ops {
 	void (*close)(alp_gpu2d_backend_state_t *state);
 };
 
-#if defined(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK)
 /**
  * @brief Ops table of the portable software fallback backend.
  * @return The sw_fallback vtable (never NULL).
@@ -110,11 +109,13 @@ struct alp_gpu2d_ops {
  * instead of returning ALP_ERR_NOSUPPORT, keeping the ADR 0008
  * "write once" contract (the op works, just slower).  The sw ops
  * never touch state->be_data, so a delegating backend may pass its
- * own state through unchanged.  Only compiled when
- * CONFIG_ALP_SDK_GPU2D_SW_FALLBACK selects sw_fallback.c.
+ * own state through unchanged.  Declared unconditionally (plain-
+ * CMake builds have no Kconfig macros); DEFINED only when
+ * sw_fallback.c is in the build -- Zephyr-side that is
+ * CONFIG_ALP_SDK_GPU2D_SW_FALLBACK, so a caller must guard on it
+ * there (as alif_dave2d.c does) or the link breaks.
  */
 const alp_gpu2d_ops_t *alp_gpu2d_sw_ops(void);
-#endif /* CONFIG_ALP_SDK_GPU2D_SW_FALLBACK */
 
 /**
  * Handle struct layout.  Opaque to customers via the public
