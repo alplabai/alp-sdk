@@ -337,6 +337,13 @@
       "description": "Chip drivers the application links directly via <alp/chips/<name>.h>.  Each entry enables the matching CONFIG_ALP_SDK_CHIP_<NAME>=y.  Shared across cores (project-wide chip population)."
     },
 
+    "libraries": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "description": "Curated third-party libraries to pull into the project (ADR 0018).  Each entry names a manifest under metadata/libraries/<name>.yaml; the orchestrator emits its per-OS wiring (Zephyr Kconfig / Yocto IMAGE_INSTALL / baremetal CMake) through the --emit contract and rejects a selection incompatible with the target SoM/core.  Project-wide: applied to every core whose OS the manifest supports.  Distinct from the per-core `cores.<id>.libraries:` curated-token list."
+    },
+
     "features": {
       "type": "object",
       "additionalProperties": true,

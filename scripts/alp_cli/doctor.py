@@ -540,6 +540,72 @@ def _check_long_paths() -> CheckResult | None:
     )
 
 
+def _check_libraries() -> CheckResult | None:
+    """Curated third-party libraries selected by the current project (ADR 0018).
+
+    Returns None (skipped) when no project (board.yaml) is in scope or the
+    project selects no `libraries:` -- there is nothing to report.  Otherwise
+    reports each selected library's tier + licence and whether it is compatible
+    with the project's SoM/core.  WARN-only: an incompatible or unknown
+    selection is a WARN (build-time emit is the hard gate), never a doctor FAIL.
+    """
+    try:
+        from alp_cli._workspace import find_project
+    except Exception:  # pragma: no cover - packaging edge
+        return None
+    project_dir = find_project(Path.cwd())
+    if project_dir is None:
+        return None
+
+    # Peek at the raw `libraries:` list without a full load first, so a project
+    # that selects nothing costs nothing and stays silent.
+    board_yaml = project_dir / "board.yaml"
+    try:
+        import yaml  # local import: doctor is otherwise yaml-free
+        raw = yaml.safe_load(board_yaml.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        return CheckResult("libraries", WARN,
+                           f"could not read {board_yaml}: {e}")
+    selected = list(raw.get("libraries") or [])
+    if not selected:
+        return None
+
+    # Resolve + compatibility-check via the same manifests the emitter and
+    # alp-studio read, so the CLI and the emit error can never disagree.
+    metadata_root = _repo_root() / "metadata"
+    try:
+        sys.path.insert(0, str(_repo_root() / "scripts"))
+        from alp_orchestrate import load_board_yaml
+        from alp_orchestrate.libraries import load_manifest, resolve_selection
+        project = load_board_yaml(board_yaml, metadata_root=metadata_root)
+        resolve_selection(project, metadata_root)
+    except Exception as e:
+        # An unknown name or a failed `requires:` constraint -- surface the
+        # emitter's own message, but only at WARN.
+        labels = []
+        for name in selected:
+            try:
+                man = load_manifest(name, metadata_root)
+                labels.append(f"{name} (tier {man.get('tier', '?')}, "
+                              f"{man.get('license', '?')})")
+            except Exception:
+                labels.append(f"{name} (unknown)")
+        return CheckResult(
+            "libraries", WARN,
+            f"{len(selected)} selected: {', '.join(labels)} -- INCOMPATIBLE: {e}",
+            hint="fix or remove the offending `libraries:` entry; emit will "
+                 "reject it as a hard error")
+
+    labels = []
+    for name in selected:
+        man = load_manifest(name, metadata_root)
+        labels.append(f"{name} (tier {man.get('tier', '?')}, "
+                      f"{man.get('license', '?')})")
+    return CheckResult(
+        "libraries", PASS,
+        f"{len(selected)} selected, all compatible: {', '.join(labels)}")
+
+
 def _all_checks() -> list[CheckResult]:
     checks = [
         _check_python(),
@@ -565,7 +631,7 @@ def _all_checks() -> list[CheckResult]:
     pin = _check_python_pin()
     if pin is not None:
         checks.insert(1, pin)
-    for maybe in (_check_git_autocrlf(), _check_long_paths()):
+    for maybe in (_check_git_autocrlf(), _check_long_paths(), _check_libraries()):
         if maybe is not None:
             checks.append(maybe)
     return checks

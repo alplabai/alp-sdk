@@ -1770,6 +1770,17 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
     else:
         core_ids = sorted(project.cores.keys())
 
+    # Resolve + compatibility-validate any top-level `libraries:` once, up
+    # front, so an unknown name or a failed `requires:` constraint surfaces
+    # as a clean one-line error (ADR 0018) rather than a traceback mid-emit.
+    if project.libraries:
+        try:
+            from alp_orchestrate.libraries import resolve_selection
+            resolve_selection(project, args.metadata_root)
+        except OrchestratorError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+
     parts: list[str] = []
     for cid in core_ids:
         slice_ = project.cores[cid]

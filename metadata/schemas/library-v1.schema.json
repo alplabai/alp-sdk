@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/library-v1.schema.json",
+  "title": "alp-sdk curated third-party library manifest (v1)",
+  "description": "Per-library manifest for the ADR 0018 third-party library layer.  One file per library under metadata/libraries/<name>.yaml -- the single source of truth for how a curated library is wired per OS, what it needs from the target, its curation tier, its pinned upstream version and its SPDX licence.  The orchestrator emits the `integration:` wiring through the ADR 0014 --emit contract when a project declares `libraries: [<name>, ...]`; `scripts/validate_metadata.py` schema-validates every manifest, cross-checks each `requires.capabilities` key against the SoC capability vocabulary, and rejects any licence outside the allowlist.  ADR 0017 applies verbatim: alp-sdk pins and integrates upstream releases -- it does not fork or vendor library sources.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "tier", "version", "license", "integration"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version this manifest is written against.  Currently 1."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Library token used in a project's `libraries:` array.  Lower-case, ASCII, hyphen-separated (e.g. `lvgl`, `cmsis-dsp`).  Must match the manifest filename (`<name>.yaml`) exactly."
+    },
+    "description": {
+      "type": "string",
+      "description": "Short customer-facing one-liner; surfaced in `alp doctor` and the portability matrix."
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["A", "B"],
+      "description": "Curation tier (ADR 0018).  A = curated: version-pinned, built in alp-sdk CI for at least one board per supported family, ships a teaching example, breakage blocks release.  B = recipe-only: wiring + compatibility metadata are maintained and emitted but the library is NOT built in alp-sdk CI (`alp doctor` labels it)."
+    },
+    "version": {
+      "type": "string",
+      "description": "The pinned upstream version.  A human upstream release string (e.g. `9.5.0`) when the pinned tree exposes one, else the exact upstream revision the Zephyr west manifest / OE recipe pins.  Never a range -- the point is a single reproducible pin (ADR 0017)."
+    },
+    "license": {
+      "type": "string",
+      "enum": ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "Zlib", "MIT-0"],
+      "description": "SPDX licence identifier of the upstream library.  Validated against this permissive allowlist; a GPL-family or proprietary licence is rejected so a copyleft surprise cannot ride in through a `libraries:` selection (ADR 0018 non-goal).  Extending this allowlist is a deliberate human decision (legal review), not a metadata edit -- add the id here AND in metadata/libraries/README.md's allowlist rationale in the same change."
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Compatibility constraints resolved at emit time against the target SoM/core (ADR 0018).  Every constraint is optional; an omitted constraint means `no requirement`.  An unsatisfied constraint fails emit with the constraint named, exactly like schema validation.",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          },
+          "description": "SoC/SoM capability keys the library needs (e.g. `gpu2d`, `cryptocell`).  Each key MUST name a real capability in the alp-sdk capability vocabulary -- `scripts/validate_metadata.py` cross-checks every key against metadata/schemas/soc-spec-v1.schema.json's `capabilities` properties and rejects an unknown key.  Resolved at emit time against the merged SoC+SoM `capabilities:`."
+        },
+        "min_flash_kib": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum on-die/attached program store the target must have, in KiB.  Checked against the SoC spec's `soc_flash_mb` (x1024)."
+        },
+        "min_ram_kib": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum RAM the target must have, in KiB.  Checked against the SoC spec's `soc_ram_kb`.  For a GUI/heap library, derive this from the library's own configured heap floor and cite the source in the manifest."
+        },
+        "core_class": {
+          "type": "string",
+          "enum": ["m", "a"],
+          "description": "Required application-core class: `m` (Cortex-M / Zephyr) or `a` (Cortex-A / Yocto).  Satisfied when the target SoC has at least one core of that class.  Only set this when upstream genuinely constrains it (e.g. a Zephyr Kconfig `depends on CPU_CORTEX_M`)."
+        },
+        "os": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["zephyr", "yocto", "baremetal"]
+          },
+          "description": "Operating systems the library can run under.  Satisfied when at least one of the project's cores runs one of these.  Usually left unset -- the presence/absence of an `integration.<os>` section already encodes per-OS support; use this only to reject a selection early with a clearer message."
+        }
+      }
+    },
+    "integration": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Per-OS build wiring the orchestrator emits.  Each OS section is optional; a library selected for a core whose OS has no section here fails emit (you asked for a library that cannot be wired on that OS).  At least one section is required.",
+      "properties": {
+        "zephyr": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kconfig"],
+          "description": "Zephyr wiring.  The library is pinned as a west module upstream (ADR 0017); this section only records the module name and the Kconfig symbols that enable it.  Emitted into the slice's alp.conf fragment alongside the board/SoM-driven CONFIG lines.",
+          "properties": {
+            "kconfig": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^CONFIG_[A-Z0-9_]+=[A-Za-z0-9_\"-]+$"
+              },
+              "description": "Upstream Zephyr Kconfig assignments that enable the library and the components consumers reach (e.g. `CONFIG_LVGL=y`).  Transcribed from the pinned Zephyr module's Kconfig -- never invented."
+            },
+            "module": {
+              "type": ["string", "null"],
+              "description": "West module name (as it appears in the Zephyr west manifest, e.g. `lvgl`), or null for a header-only/in-tree library with no separate module.  Documentation only -- west owns the actual pin."
+            }
+          }
+        },
+        "yocto": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Yocto wiring.  Emitted into the slice's local.conf fragment.  Only present when a real OE/meta-alp-sdk recipe exists -- never invented.",
+          "properties": {
+            "image_install": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              },
+              "description": "Recipe/package names appended to `IMAGE_INSTALL` (e.g. `lvgl` from the openembedded-layer)."
+            },
+            "recipe_include": {
+              "type": "string",
+              "description": "Optional `.inc`/`require` line a consumer recipe must include to pull in the library's build glue."
+            }
+          }
+        },
+        "baremetal": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Baremetal / plain-CMake wiring.  Emitted into the slice's cmake args.  Only present when a real CMake package/FetchContent pin exists -- never invented.",
+          "properties": {
+            "cmake": {
+              "type": "string",
+              "description": "CMake integration hint (a `find_package`/`FetchContent` pin the emitted args reference)."
+            }
+          }
+        }
+      }
+    }
+  }
+}

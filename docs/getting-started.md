@@ -314,6 +314,36 @@ unwrapped peripherals exit after printing the
 `alp_last_error()` diagnostic — that's expected and proves the
 wrapper plumbing compiles + links cleanly.
 
+## 6.5. Pull in a curated third-party library
+
+Need a GUI, DSP, or serialization library?  Add one line to your
+project's `board.yaml` — the top-level `libraries:` key (ADR 0018):
+
+```yaml
+som:
+  sku: E1M-AEN701
+libraries: [lvgl, cmsis-dsp]   # curated third-party libraries
+cores:
+  m55_hp:
+    app: ./src
+```
+
+Each name resolves to a manifest under
+[`metadata/libraries/`](../metadata/libraries/); the loader emits the
+right wiring per OS (Zephyr `CONFIG_LVGL=y` in `alp.conf`, Yocto
+`IMAGE_INSTALL` for the A-cores, …) and refuses a library the target
+can't run, naming the failing constraint.  Check what's selected and
+whether it's compatible:
+
+```bash
+alp doctor            # a "libraries" line reports tier + licence + fit
+```
+
+The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,
+`zcbor` (all Tier A).  See
+[`metadata/libraries/README.md`](../metadata/libraries/README.md) for
+the full list and how to add one.
+
 ## 7. Targeting real silicon
 
 When `alplabai/alp-zephyr-modules` publishes the EVK board
