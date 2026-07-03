@@ -970,6 +970,11 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2c_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_I2C
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/zephyr_drv.c)
+# Register-file I2C target helper (<alp/i2c_regfile.h>).  Pure layer
+# over alp_i2c_target_open; OS-agnostic, so compiled unconditionally
+# like cap_helpers.c.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i2c_regfile.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/sw_fallback.c)
 # SPI class dispatcher + backends.

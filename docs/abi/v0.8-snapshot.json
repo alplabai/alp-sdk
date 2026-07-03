@@ -7556,6 +7556,37 @@
         }
       }
     },
+    "alp/i2c_regfile.h": {
+      "functions": {
+        "alp_i2c_regfile_close": {
+          "hash": "a57e99729ed12e77",
+          "signature": "void alp_i2c_regfile_close(alp_i2c_regfile_t *rf);"
+        },
+        "alp_i2c_regfile_open": {
+          "hash": "e22f6d0dcc3ee6cc",
+          "signature": "alp_status_t alp_i2c_regfile_open(uint32_t bus_id, uint8_t own_addr_7bit, volatile uint8_t *regs, size_t len, alp_i2c_regfile_t **out);"
+        },
+        "alp_i2c_regfile_set_write_window": {
+          "hash": "9bf582a6270b3665",
+          "signature": "alp_status_t alp_i2c_regfile_set_write_window(alp_i2c_regfile_t *rf, size_t first, size_t count);"
+        },
+        "alp_i2c_regfile_stats": {
+          "hash": "5fdb110f35103951",
+          "signature": "alp_status_t alp_i2c_regfile_stats(const alp_i2c_regfile_t *rf, alp_i2c_regfile_stats_t *out);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_i2c_regfile_t": {
+          "definition": "typedef struct alp_i2c_regfile alp_i2c_regfile_t;",
+          "hash": "6c62607fe9b90285"
+        },
+        "writes_seen": {
+          "definition": "typedef struct { uint32_t writes_seen;",
+          "hash": "b9b57e8c3321e77e"
+        }
+      }
+    },
     "alp/i2s.h": {
       "functions": {
         "alp_i2s_capabilities": {

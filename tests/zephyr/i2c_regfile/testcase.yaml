@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  # Default scenario: CONFIG_I2C_TARGET=y.  native_sim's emulated
+  # controller forwards same-bus transfers addressed to the registered
+  # target, so the loopback tests exercise the helper's register-file
+  # state machine (pointer latch / auto-increment / wraparound / STOP
+  # re-arm / write window / stats) for real, plus the param-validation
+  # surface.
+  alp_sdk.i2c_regfile.default:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - i2c
+      - regfile
+
+  # Degrade-path scenario: CONFIG_I2C_TARGET=n makes the controller
+  # driver's target_register NULL (-ENOSYS), so alp_i2c_target_open
+  # fails with ALP_ERR_NOSUPPORT -- the helper must propagate exactly
+  # that.  The loopback tests compile out; the param-validation tests
+  # run in both builds.
+  alp_sdk.i2c_regfile.notarget:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_notarget.conf"
+    tags:
+      - alp-sdk
+      - i2c
+      - regfile
