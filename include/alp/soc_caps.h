@@ -312,7 +312,7 @@
 #define ALP_SOC_ETHERNET_COUNT          0
 #define ALP_SOC_USB_COUNT               0
 #define ALP_SOC_MIPI_CSI_COUNT          0
-#define ALP_SOC_MIPI_DSI_COUNT          0
+#define ALP_SOC_MIPI_DSI_COUNT          1
 #define ALP_SOC_XSPI_DMA                0
 #define ALP_SOC_HEXSPI_DMA              0
 #define ALP_SOC_EMMC_DMA                1

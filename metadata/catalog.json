@@ -1582,7 +1582,7 @@
         "i2s": false,
         "i3c": false,
         "mipi_csi": false,
-        "mipi_dsi": false,
+        "mipi_dsi": true,
         "npu": true,
         "pcie": false,
         "pdm": false,
