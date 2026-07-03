@@ -802,7 +802,8 @@
     {
       "functions": [
         "alp_backend_count",
-        "alp_backend_select"
+        "alp_backend_select",
+        "alp_backend_select_next"
       ],
       "header": "include/alp/backend.h"
     },
