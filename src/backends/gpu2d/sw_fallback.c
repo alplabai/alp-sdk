@@ -397,6 +397,9 @@ const alp_gpu2d_ops_t *alp_gpu2d_sw_ops(void)
 	return &_ops;
 }
 
+/* Export the gpu2d static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(gpu2d);
+
 ALP_BACKEND_REGISTER(gpu2d,
                      sw_fallback,
                      {

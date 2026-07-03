@@ -108,6 +108,54 @@ typedef struct alp_backend_class_range {
 	}
 
 /**
+ * @brief Static-archive link anchor for a per-class registry section.
+ *
+ * On a plain-CMake STATIC libalp_sdk.a the archive member that carries
+ * a class's ALP_BACKEND_REGISTER entry (typically its sw_fallback TU)
+ * is nothing but data in the alp_backends_<class> linker section -- no
+ * code references it.  A static-library link only pulls a member when
+ * an already-included object needs one of its symbols, so that member
+ * never joins the link; the section is then absent and the
+ * __start_/__stop_alp_backends_<class> bounds ALP_BACKEND_DEFINE_CLASS
+ * reads from the (always-linked) dispatcher go undefined -- the link
+ * fails with `undefined reference to __start_alp_backends_<class>`
+ * (issue #368).
+ *
+ * The anchor closes that gap.  The section-carrying backend TU exports
+ * one global symbol via ALP_BACKEND_ANCHOR_DEFINE(class); the
+ * dispatcher TU takes its address via ALP_BACKEND_ANCHOR(class).  The
+ * dispatcher is always pulled (it owns alp_<class>_open), so the
+ * address-of forces the backend member -- and with it the section and
+ * its bound symbols -- into the link.
+ *
+ * Only plain-CMake static links need this, so the two macros are inert
+ * unless the top-level CMake defines ALP_BACKEND_STATIC_ANCHORS (the
+ * non-Zephyr build).  Zephyr links whole objects (zephyr_library), so
+ * the member is always present and the anchors compile to nothing.
+ *
+ * Adding a NEW registry class that ships a portable catch-all backend
+ * reachable from the plain-CMake path: call ALP_BACKEND_ANCHOR_DEFINE
+ * once in that backend's TU and ALP_BACKEND_ANCHOR once in the
+ * dispatcher.  Both are no-ops on Zephyr, so they can sit
+ * unconditionally next to the ALP_BACKEND_REGISTER / DEFINE_CLASS they
+ * pair with.
+ */
+#ifdef ALP_BACKEND_STATIC_ANCHORS
+#define ALP_BACKEND_ANCHOR_DEFINE(class)                                                           \
+	const int _alp_backend_anchor_##class __attribute__((used, retain)) = 0
+#define ALP_BACKEND_ANCHOR(class)                                                                  \
+	extern const int         _alp_backend_anchor_##class;                                          \
+	static const void *const _alp_backend_anchor_ref_##class __attribute__((used)) =               \
+	    (const void *)&_alp_backend_anchor_##class
+#else
+/* Whole-archive (Zephyr) links never need the anchor: expand to a bare
+ * declaration so the call sites still take a trailing semicolon while
+ * emitting no code or symbols. */
+#define ALP_BACKEND_ANCHOR_DEFINE(class) extern const int _alp_backend_anchor_decl_##class
+#define ALP_BACKEND_ANCHOR(class)        extern const int _alp_backend_anchor_decl_##class
+#endif
+
+/**
  * @brief Find the best backend registered for a class on the active SoC.
  *
  * Walks the per-class section, filters by silicon_ref exact match or

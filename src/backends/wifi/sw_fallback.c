@@ -70,6 +70,9 @@ static const alp_wifi_ops_t _ops = {
 	.close      = sw_close,
 };
 
+/* Export the wifi static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(wifi);
+
 ALP_BACKEND_REGISTER(wifi,
                      sw_fallback,
                      {

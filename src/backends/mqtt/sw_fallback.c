@@ -104,6 +104,9 @@ static const alp_mqtt_ops_t _ops = {
 	.close     = sw_close,
 };
 
+/* Export the mqtt static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(mqtt);
+
 ALP_BACKEND_REGISTER(mqtt,
                      sw_fallback,
                      {
