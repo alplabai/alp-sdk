@@ -241,6 +241,10 @@ class BoardProject:
     board_preset: Optional[dict[str, Any]]
     diagnostics: dict[str, Any] = field(default_factory=dict)
     chips: list[str] = field(default_factory=list)
+    # Project-wide curated third-party libraries (ADR 0018).  Each name
+    # resolves to metadata/libraries/<name>.yaml; the emitters wire its
+    # per-OS integration into every slice whose OS the manifest supports.
+    libraries: list[str] = field(default_factory=list)
     features: dict[str, Any] = field(default_factory=dict)
     boot: dict[str, Any] = field(default_factory=dict)
     ota: dict[str, Any] = field(default_factory=dict)

@@ -23,6 +23,7 @@ from alp_project import (
     som_unpopulated_capabilities,
 )
 
+from . import libraries as _library_layer
 from .models import BoardProject, Slice
 from .paths import METADATA_ROOT, REPO
 from .partition import resolve_storage_partitions
@@ -346,6 +347,17 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             else:
                 lines.append(
                     f"# TODO: wire library '{lib}' once its v0.4 enable lands")
+        lines.append("")
+
+    # Project-wide curated third-party libraries (top-level `libraries:`,
+    # ADR 0018).  Emitted from the metadata/libraries/<name>.yaml manifests;
+    # resolve_selection() has already rejected any incompatible selection.
+    # Guard keeps a project with no `libraries:` byte-identical.
+    library_lines = _library_layer.zephyr_kconfig_lines(project, slice_)
+    if library_lines:
+        lines.append("# Curated third-party libraries "
+                     "(project `libraries:`, ADR 0018)")
+        lines.extend(library_lines)
         lines.append("")
 
     # ----------------------------------------------------------------
@@ -682,6 +694,13 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         imageinstall = " ".join(
             f"lib-{lib.replace('_', '-')}" for lib in slice_.libraries)
         lines.append(f'IMAGE_INSTALL:append = " {imageinstall}"')
+    # Project-wide curated third-party libraries (top-level `libraries:`,
+    # ADR 0018) with a Yocto integration section.  Guard keeps a project
+    # with no such libraries byte-identical.
+    library_pkgs = _library_layer.yocto_image_install(project, slice_)
+    if library_pkgs:
+        joined = " ".join(library_pkgs)
+        lines.append(f'IMAGE_INSTALL:append = " {joined}"')
     if slice_.image:
         lines.append(f"# bitbake target: {slice_.image}")
 
@@ -752,4 +771,9 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
         lines.append("-DALP_SDK_USE_DRPAI_V2N=ON")
     if capabilities.get("deepx_dxm1"):
         lines.append("-DALP_SDK_USE_DEEPX_DXM1=ON")
+    # Project-wide curated third-party libraries (top-level `libraries:`,
+    # ADR 0018) with a baremetal integration section.  Guard keeps a project
+    # with no such libraries byte-identical.
+    for arg in _library_layer.baremetal_cmake_args(project, slice_):
+        lines.append(arg)
     return "\n".join(lines) + "\n"
