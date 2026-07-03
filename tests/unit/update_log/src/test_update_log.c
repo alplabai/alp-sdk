@@ -5,6 +5,7 @@
 #include <alp/peripheral.h>
 #include <alp/update_log.h>
 
+#include "../../../../src/backends/update_log/update_log_ops.h"
 #include "../../../../src/update_log/engine.h"
 #include "../../../../src/update_log/store.h"
 #include "../../../../src/update_log/sha256.h"
@@ -318,3 +319,132 @@ ZTEST(alp_update_log, test_public_surface_sw_tier)
 	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
 	alp_update_log_close(log);
 }
+
+/* --- Persistence (#262): sw-tier store modes ------------------------
+ *
+ * alp_ulog_sw_tier_test_reset(false) emulates a reboot: it drops every
+ * piece of RAM state the backend holds (RAM store, RAM counter, cached
+ * NVS mount), so anything still readable afterwards came from the NVS
+ * partition.  wipe=true additionally clears the partition (pristine
+ * store) -- each test starts and ends with a wipe so the suite is
+ * order-independent.
+ */
+
+#ifdef CONFIG_ALP_SDK_UPDATE_LOG_PERSIST
+
+ZTEST(alp_update_log, test_persist_entries_survive_reinit)
+{
+	alp_ulog_sw_tier_test_reset(true); /* pristine store */
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	const char *vers[3] = { "1.0.0", "1.1.0", "2.0.0" };
+	for (int i = 0; i < 3; i++) {
+		alp_update_log_entry_t e =
+		    mk_entry((uint64_t)(i + 1) * 100, vers[i], ALP_UPDATE_STATUS_CONFIRMED);
+		zassert_equal(alp_update_log_append(log, &e), ALP_OK);
+	}
+	alp_update_log_close(log);
+
+	alp_ulog_sw_tier_test_reset(false); /* "reboot": keep flash only */
+
+	log = alp_update_log_open();
+	zassert_not_null(log);
+	uint64_t n = 0;
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, 3, "entries lost across re-init (got %llu)", (unsigned long long)n);
+
+	alp_update_log_verdict_t v;
+	zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+
+	for (int i = 0; i < 3; i++) {
+		alp_update_log_entry_t got;
+		zassert_equal(alp_update_log_get(log, (uint64_t)i, &got), ALP_OK);
+		zassert_equal(got.seq, (uint64_t)i);
+		zassert_equal(got.timestamp, (uint64_t)(i + 1) * 100);
+		zassert_equal(got.status, ALP_UPDATE_STATUS_CONFIRMED);
+		zassert_equal(strcmp(got.fw_version, vers[i]), 0);
+		uint8_t want[32];
+		memset(want, (int)((uint64_t)(i + 1) * 100), 32);
+		zassert_mem_equal(got.image_hash, want, 32);
+	}
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true); /* leave a clean store behind */
+}
+
+ZTEST(alp_update_log, test_persist_full_log_nomem_no_wrap)
+{
+	alp_ulog_sw_tier_test_reset(true);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+
+	/* Fill the 16 KiB partition. Each append persists entry + meta +
+	 * counter; the store must eventually report NOMEM -- never wrap. */
+	uint64_t     appended = 0;
+	alp_status_t rc       = ALP_OK;
+	for (int i = 0; i < 2000; i++) {
+		alp_update_log_entry_t e = mk_entry((uint64_t)i + 1, "9.9.9", ALP_UPDATE_STATUS_CONFIRMED);
+		rc                       = alp_update_log_append(log, &e);
+		if (rc != ALP_OK) {
+			break;
+		}
+		appended++;
+	}
+	zassert_equal(rc, ALP_ERR_NOMEM, "full log must report NOMEM (got %d)", (int)rc);
+	zassert_true(appended > 0);
+
+	/* The failed append must not have damaged the chain. */
+	uint64_t n = 0;
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, appended);
+	alp_update_log_verdict_t v;
+	zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+
+	/* Still full (and still verifiable) after a "reboot". */
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(false);
+	log = alp_update_log_open();
+	zassert_not_null(log);
+	alp_update_log_entry_t e = mk_entry(7, "9.9.9", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(alp_update_log_append(log, &e), ALP_ERR_NOMEM);
+	zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
+}
+
+#else /* !CONFIG_ALP_SDK_UPDATE_LOG_PERSIST */
+
+ZTEST(alp_update_log, test_ram_fallback_entries_do_not_survive_reinit)
+{
+	alp_ulog_sw_tier_test_reset(true);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_assurance(log), ALP_UPDATE_LOG_SW_TAMPER_EVIDENT);
+	alp_update_log_entry_t e = mk_entry(1, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(alp_update_log_append(log, &e), ALP_OK);
+	uint64_t n = 0;
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, 1);
+	alp_update_log_close(log);
+
+	/* RAM store: a re-init (reboot) loses everything -- the documented
+	 * fallback behaviour when no alp_ulog_partition exists. */
+	alp_ulog_sw_tier_test_reset(false);
+	log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, 0, "RAM fallback must not persist (got %llu)", (unsigned long long)n);
+	alp_update_log_verdict_t v;
+	zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK); /* empty log verifies clean */
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
+}
+
+#endif /* CONFIG_ALP_SDK_UPDATE_LOG_PERSIST */

@@ -210,6 +210,7 @@ hasn't been measured.
 | Power profiles (operating points) | `power.h` (`alp_power_profile_get/_set`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service backend on AEN); NOSUPPORT elsewhere | surface + AEN SE backend; **bench-gated** (set() is brown-out-capable — treat like a firmware update) |
 | Peer-core boot | `mproc.h` (`alp_mproc_boot_core`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service boot authority on AEN); NOSUPPORT where the platform boots peers by other means | surface + AEN SE backend; **bench-gated** |
 | SDK version / ABI feature-test | `version.h` (v0.9, `[ABI-STABLE]`) | all OSes (compile-time macros + `alp_version_string()`) | present; value-sync CI-gated (`check_version_doc_sync.py`) |
+| Update audit log | `update_log.h` (v0.7, `[ABI-EXPERIMENTAL]`) | M (Zephyr only today): hash-chain engine + SW tier — **NVS-persistent** when the board carves an `alp_ulog_partition` (`CONFIG_ALP_SDK_UPDATE_LOG_PERSIST`), RAM fallback otherwise; tamper-EVIDENT, not tamper-proof (HW_ENFORCED TF-M tier is #111); Yocto/baremetal: not built | code complete (native_sim unit-tested: chain verdicts, persist-across-reinit, full-log NOMEM-no-wrap, RAM fallback); **no on-silicon persistence proof yet** — #262 |
 
 ## CMSIS-DSP per-SoM validation
 
