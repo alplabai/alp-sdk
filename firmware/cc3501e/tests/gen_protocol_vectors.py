@@ -47,7 +47,7 @@ RESP_ERR_NOT_READY = 0x05
 RESP_ERR_PROTOCOL = 0x07
 
 # Wire-protocol version GET_VERSION reports (ALP_CC3501E_PROTOCOL_VERSION).
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 
 def frame(cmd: int, flags: int, payload: bytes = b"") -> bytes:

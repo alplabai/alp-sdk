@@ -137,6 +137,23 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);
  *  `ALP_CC3501E_PROTOCOL_VERSION` to confirm wire compatibility). */
 alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
 
+/**
+ * @brief Send one FRAMED bulk-data frame to the CC3501E stream sink (proto v2).
+ *
+ * Wraps @ref ALP_CC3501E_CMD_STREAM_WRITE: the request payload (@p len bytes)
+ * is clocked in a single SPI transfer, so it rides the host peripheral-DMA path
+ * when @p len reaches the SPI DMA threshold (@c CONFIG_SPI_DW_ALIF_DMA_MIN_LEN).
+ * The firmware sinks + acks the frame, so unlike raw throwaway clocking the link
+ * stays framed and never desyncs.  Send frames back-to-back for a bulk stream.
+ *
+ * @param ctx   Initialised, reset driver context.
+ * @param data  Bulk bytes to send (may be NULL only if @p len is 0).
+ * @param len   Byte count, at most @c ALP_CC3501E_MAX_PAYLOAD minus the header.
+ * @return ALP_OK on ack; ALP_ERR_INVAL on a bad arg / oversized frame; the
+ *         mapped firmware status otherwise.
+ */
+alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t len);
+
 /* ------------------------------------------------------------------ */
 /* Wi-Fi host helpers                                                  */
 /*                                                                     */

@@ -332,6 +332,19 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out)
 	return ALP_OK;
 }
 
+alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t len)
+{
+	if (ctx == NULL || (data == NULL && len > 0u)) return ALP_ERR_INVAL;
+	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)) {
+		return ALP_ERR_INVAL;
+	}
+	/* One framed bulk frame: the request PAYLOAD phase clocks @len bytes in a
+	 * single transfer, which takes the host DMA path when @len >= the SPI DMA
+	 * threshold (CONFIG_SPI_DW_ALIF_DMA_MIN_LEN).  The firmware sinks + acks it,
+	 * so the link stays framed -- send these back-to-back for a bulk stream. */
+	return cc3501e_request(ctx, ALP_CC3501E_CMD_STREAM_WRITE, data, len, NULL, 0u, NULL, 200u);
+}
+
 /* ------------------------------------------------------------------ */
 /* Wi-Fi host helpers                                                  */
 /*                                                                     */

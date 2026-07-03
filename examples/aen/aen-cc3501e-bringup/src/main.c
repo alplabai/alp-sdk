@@ -437,38 +437,32 @@ int main(void)
 #endif
 	for (uint32_t i = 0u;; ++i) {
 		/*
-		 * Run-once host-DMA continuous-stream throughput benchmark.  Once the
-		 * link is up, clock a large TX buffer over SPI1 back-to-back; each
-		 * transfer is well over CONFIG_SPI_DW_ALIF_DMA_MIN_LEN so it takes the
-		 * peripheral-DMA path (evtrtr0 -> DMA0, no CPU FIFO shuffling).  Records
-		 * the aggregate KB/s in the witness -- this is the "continuous stream at
-		 * full speed" proof (the CC35 just discards the bytes; we measure the
-		 * host TX-DMA + 14.8 MHz SCLK throughput).
+		 * Run-once FRAMED bulk-stream throughput benchmark.  Once the link is up,
+		 * send MAX-payload frames via CMD_STREAM_WRITE back-to-back: each frame's
+		 * payload phase (508 B, well over CONFIG_SPI_DW_ALIF_DMA_MIN_LEN) rides the
+		 * host peripheral-DMA path (evtrtr0 -> DMA0, no CPU FIFO shuffling), and
+		 * the firmware sinks + ACKs every frame so the link stays framed -- real
+		 * bulk data over the bridge, not throwaway clocking.  Records KB/s.
 		 */
 #ifdef CC3501E_DMA_STREAM_BENCH
-		/* Opt-in host-DMA throughput benchmark (build with
-		 * -DEXTRA_CFLAGS=-DCC3501E_DMA_STREAM_BENCH).  OFF by default: it clocks
-		 * throwaway bytes the CC35 discards, which desyncs the bridge framing (the
-		 * soak PINGs fail afterwards).  Proves the host TX-DMA saturates the SPI;
-		 * for real bulk data over the bridge use the framed CMD_STREAM path. */
+		/* Opt-in bulk-stream throughput benchmark (build with
+		 * -DEXTRA_CFLAGS=-DCC3501E_DMA_STREAM_BENCH).  Framed + ACKed, so it does
+		 * NOT desync the bridge -- the soak PINGs keep working afterwards. */
 		if (!stream_done && g_cc3501e_witness.ping_ok >= 20u) {
-			/* Stream buffer in SRAM0 (0x02000000, 4 MB) -- native global memory the
-			 * PL330 reaches over AXI directly.  A DTCM buffer is only reachable via
-			 * the slow global-alias path (0x58800000), whose refill latency starves
-			 * the TX FIFO and throttles SCLK.  SRAM0 keeps the FIFO fed. */
-			enum { STREAM_LEN = 131072u };
-			uint8_t *stream_tx = (uint8_t *)0x02000000u;
-			stream_done        = true;
-			for (uint32_t k = 0u; k < STREAM_LEN; ++k) {
-				stream_tx[k] = (uint8_t)k;
+			/* One frame = the largest payload a request carries (MAX_PAYLOAD minus
+			 * the 4-byte header).  The frame buffer may live in DTCM: the PL330
+			 * driver remaps it via local_to_global() so the AXI master reaches it. */
+			enum { FRAME_LEN = ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES };
+			static uint8_t frame[FRAME_LEN];
+			stream_done = true;
+			for (uint32_t k = 0u; k < FRAME_LEN; ++k) {
+				frame[k] = (uint8_t)k;
 			}
-			/* TX-only (rx=NULL) -- a real one-directional stream: no RX FIFO drain
-			 * to backpressure SCLK. */
-			const uint32_t iters = 4u;
-			uint32_t       ok    = 0u;
-			uint32_t       t0    = k_cycle_get_32();
-			for (uint32_t k = 0u; k < iters; ++k) {
-				if (alp_spi_transceive(fw.bus, stream_tx, NULL, STREAM_LEN) == ALP_OK) {
+			const uint32_t frames = 512u;
+			uint32_t       ok     = 0u;
+			uint32_t       t0     = k_cycle_get_32();
+			for (uint32_t k = 0u; k < frames; ++k) {
+				if (cc3501e_stream_write(&fw, frame, (size_t)FRAME_LEN) == ALP_OK) {
 					ok++;
 				}
 			}
@@ -476,10 +470,10 @@ int main(void)
 			g_cc3501e_witness.dma_stream_iters = ok;
 			g_cc3501e_witness.dma_stream_us    = us;
 			g_cc3501e_witness.dma_stream_kbps =
-			    (us > 0u) ? (uint32_t)(((uint64_t)ok * STREAM_LEN * 1000u) / us) : 0u;
+			    (us > 0u) ? (uint32_t)(((uint64_t)ok * FRAME_LEN * 1000u) / us) : 0u;
 			printf("[cc3501e-bringup] DMA stream: %u x %u B in %u us -> %u KB/s\n",
 			       ok,
-			       (unsigned)STREAM_LEN,
+			       (unsigned)FRAME_LEN,
 			       us,
 			       g_cc3501e_witness.dma_stream_kbps);
 		}
