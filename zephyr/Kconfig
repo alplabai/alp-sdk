@@ -1830,10 +1830,10 @@ config ALP_SDK_INFERENCE_BACKEND_TFLM
 	  tflite::MicroInterpreter + tflite::MicroMutableOpResolver
 	  onto the inference ops vtable.  Registers at priority 50
 	  against silicon_ref="*" so it wins on any silicon unless a
-	  vendor-specific NPU backend (ETHOS_U_AEN / ETHOS_U_N93 /
-	  DRPAI_V2N / DEEPX_DXM1) registers at priority 100 on the
-	  matching silicon_ref.  Pulls in TFLM via the upstream
-	  tflite-micro Zephyr module (see west.yml's name-allowlist).
+	  vendor-specific NPU backend (ETHOS_U_AEN / ETHOS_U_N93)
+	  registers at priority 100 on the matching silicon_ref.
+	  Pulls in TFLM via the upstream tflite-micro Zephyr module
+	  (see west.yml's name-allowlist).
 	  Native_sim builds skip this (no TFLM module); the dispatcher
 	  falls back to sw_fallback.
 
@@ -1859,28 +1859,15 @@ config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
 	  at priority 100 so it wins over the portable tflm backend on
 	  i.MX 93.
 
-config ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N
-	bool "Renesas DRP-AI3 backend (NOT_IMPLEMENTED stub, priority 100 on V2N)"
-	default n
-	help
-	  Compile src/backends/inference/drpai_v2n_stub.c.  Registers
-	  against silicon_ref="renesas:rzv2n:n44" at priority 100; every
-	  op returns ALP_ERR_NOT_IMPLEMENTED until the Renesas DRP-AI
-	  vendor pack lands.  Pinning the stub at higher priority than
-	  the portable tflm means V2N AUTO builds get a clear NOT_IMPLEMENTED
-	  signal rather than silently falling through to TFLM on the
-	  M-class core.  See github issue #58 for the v0.x landing.
-
-config ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1
-	bool "DEEPX DX-M1 backend (NOT_IMPLEMENTED stub, priority 100 on deepx:dx:m1)"
-	default n
-	help
-	  Compile src/backends/inference/deepx_dxm1_stub.c.  Registers
-	  against silicon_ref="deepx:dx:m1" at priority 100; every op
-	  returns ALP_ERR_NOT_IMPLEMENTED until the DEEPX SDK adapter
-	  lands.  See github issue #59 for the v0.x landing.  The
-	  Yocto-side DEEPX body lives at src/yocto/inference_deepx.cpp
-	  and is owned by the Yocto-registry-migration slice.
+# There is deliberately NO Zephyr-side DRP-AI or DEEPX DX-M1 backend
+# Kconfig.  Both engines are A55/Linux-side only: DRP-AI3 is driven by
+# the MERA/DRP-AI TVM userspace runtime and the DX-M1 hangs off the
+# A55's PCIe (libdxrt).  An M-class Zephyr build cannot reach either,
+# so the former NOT_IMPLEMENTED stubs (issues #58/#59) were removed --
+# on V2N M-class builds the portable tflm backend is the correct and
+# only engine.  The real bodies live in
+# src/yocto/inference_{drpai,deepx}.cpp (ALP_SDK_USE_DRPAI_V2N /
+# ALP_SDK_USE_DEEPX_DXM1 CMake options).
 
 config ALP_SDK_INFERENCE_SW_FALLBACK
 	bool "Software fallback (stateless NOSUPPORT stub, priority 0)"
