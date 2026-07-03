@@ -395,7 +395,7 @@ static alp_status_t spi_target_null_call_(void)
 {
 	uint8_t rx     = 0;
 	size_t  rx_len = 0;
-	return alp_spi_target_transceive(NULL, NULL, &rx, 1, &rx_len);
+	return alp_spi_target_transceive(NULL, NULL, &rx, 1, &rx_len, 100);
 }
 
 /* UART */
