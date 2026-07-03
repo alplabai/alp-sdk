@@ -22,14 +22,22 @@
 # The routing is exercised today; the real run requires the deepx-dxm1
 # dx-rt Yocto recipe on the V2N-M1 sysroot (BENCH-UNVERIFIED until HIL).
 #
-# RTC + WDT carve-out (#33): these two classes have migrated off the
-# stub_backend.c direct-impl model onto the backend registry /
-# dispatcher pattern already used Zephyr-side.  The public alp_rtc_* /
-# alp_wdt_* symbols are now owned by src/rtc_dispatch.c +
-# src/wdt_dispatch.c, which route through src/backend.c to the real
-# Linux backends src/backends/{rtc,wdt}/yocto_drv.c (/dev/rtcN +
-# /dev/watchdogN ioctls).  The ioctl backends are compile-verified on
-# a Linux host; the full Yocto cross-link is BENCH-UNVERIFIED.
+# Registry migration (#33) -- COMPLETE: every class this file compiles
+# has migrated off the stub_backend.c / direct-impl model onto the
+# backend registry + dispatcher pattern already used Zephyr-side.  The
+# public alp_<class>_* symbols are owned by src/<class>_dispatch.c,
+# which routes through src/backend.c to the real Linux backends in
+# src/backends/<class>/yocto_drv.c:
+#   - rtc/wdt      /dev/rtcN + /dev/watchdogN ioctls
+#   - can/pwm/adc/counter  SocketCAN / sysfs-pwm / IIO / Counter sysfs
+#   - i2s/audio    ALSA snd_pcm_* (gated on libasound)
+#   - rpc          OpenAMP userland RPMsg (gated on open-amp/libmetal)
+#   - mqtt         libmosquitto (gated on libmosquitto)
+#   - security     OpenSSL EVP (gated on libssl/libcrypto)
+# Wi-Fi + BLE carry dispatchers + sw_fallback only (system-config
+# concern on Linux -- see the note at their target_sources block).
+# All backends are compile-verified on a Linux host where the gating
+# lib exists; the full Yocto cross-link is BENCH-UNVERIFIED.
 #
 # This file only fires on plain-CMake builds (ZEPHYR_BASE unset);
 # Yocto recipes ultimately invoke this same plain-CMake path.
@@ -108,6 +116,29 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../rpc_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/audio/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/sw_fallback.c
+    # MQTT + Security + Wi-Fi + BLE complete the Yocto registry
+    # migration (#33 remainder).  The dispatchers own the public
+    # alp_mqtt_* / alp_hash_*+alp_aead_*+alp_random_bytes / alp_wifi_* /
+    # alp_ble_* symbols; stub_backend.c is muted for all four classes
+    # below via ALP_VENDOR_OVERRIDES_{MQTT,SECURITY,WIFI,BLE}.  The
+    # sw_fallback backends are the portable priority-0 catch-alls; the
+    # real Linux backends (libmosquitto for mqtt, OpenSSL EVP for
+    # security) live in backends/<class>/yocto_drv.c and are added in
+    # their pkg-config-gated blocks below.  Wi-Fi and BLE deliberately
+    # ship NO real Linux backend: radio bring-up on a Yocto image is a
+    # system-config concern (wpa_supplicant / NetworkManager / BlueZ),
+    # not an SDK-side one -- apps consume the resulting network through
+    # plain sockets, and the sw_fallback keeps the class link-complete
+    # with working capability getters (alp_wifi_capabilities was
+    # previously declared in <alp/iot.h> but undefined on Yocto).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../mqtt_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../security_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../wifi_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ble_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/mqtt/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/security/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wifi/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/ble/sw_fallback.c
     # The shared dispatchers call alp_z_set_last_error/clear (defined
     # Zephyr-side in src/zephyr/last_error.c, which the Yocto build does
     # not compile).  This shim forwards them onto the common last-error
@@ -146,6 +177,18 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_WDT=1
     ALP_VENDOR_OVERRIDES_AUDIO_IN=1
     ALP_VENDOR_OVERRIDES_AUDIO_OUT=1
+    # MQTT / Security / Wi-Fi / BLE dispatchers are added
+    # unconditionally above, so their mutes live in the SAME
+    # unconditional scope (the #240 lesson: symbol source + mute macro
+    # must never drift apart).  The formerly gated per-lib mutes
+    # (mosquitto / OpenSSL blocks below) are gone -- the dispatcher owns
+    # the symbols whether or not the real backend compiles in; a
+    # lib-less sysroot degrades to the sw_fallback instead of the
+    # stub_backend.c NOSUPPORT stubs.
+    ALP_VENDOR_OVERRIDES_MQTT=1
+    ALP_VENDOR_OVERRIDES_SECURITY=1
+    ALP_VENDOR_OVERRIDES_WIFI=1
+    ALP_VENDOR_OVERRIDES_BLE=1
 )
 
 # v0.4: real Yocto peripheral wrappers binding against Linux
@@ -244,17 +287,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         pkg_check_modules(MOSQUITTO IMPORTED_TARGET libmosquitto)
         if(MOSQUITTO_FOUND)
             target_sources(alp_sdk PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/iot_yocto.c
-            )
-            target_compile_definitions(alp_sdk PRIVATE
-                ALP_VENDOR_OVERRIDES_MQTT=1
+                # MQTT is now a REAL registry backend (#33), not the old
+                # iot_yocto.c direct-impl: backends/mqtt/yocto_drv.c is
+                # the libmosquitto backend, registered at priority 100
+                # (vendor "linux").  The mqtt_dispatch + sw_fallback +
+                # backend.c are pulled in unconditionally above;
+                # mqtt_dispatch.c owns the public alp_mqtt_* symbols
+                # (stub_backend.c is muted via ALP_VENDOR_OVERRIDES_MQTT
+                # in the unconditional block).  When libmosquitto isn't
+                # on the sysroot the dispatcher degrades to the
+                # sw_fallback rather than failing to link.
+                ${CMAKE_CURRENT_SOURCE_DIR}/../backends/mqtt/yocto_drv.c
             )
             target_link_libraries(alp_sdk PUBLIC PkgConfig::MOSQUITTO)
         else()
             message(STATUS
                 "alp-sdk yocto: libmosquitto not found via pkg-config; "
-                "alp_mqtt_* stays NOSUPPORT.  Install libmosquitto-dev "
-                "(Debian/Ubuntu) or the matching Yocto recipe to enable.")
+                "alp_mqtt_* degrades to the sw_fallback backend.  Install "
+                "libmosquitto-dev (Debian/Ubuntu) or the matching Yocto "
+                "recipe to enable.")
         endif()
 
         # OpenSSL backs the Yocto-side <alp/security.h> impl.
@@ -266,17 +317,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         pkg_check_modules(OPENSSL IMPORTED_TARGET libssl libcrypto)
         if(OPENSSL_FOUND)
             target_sources(alp_sdk PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/security_yocto.c
-            )
-            target_compile_definitions(alp_sdk PRIVATE
-                ALP_VENDOR_OVERRIDES_SECURITY=1
+                # Security is now a REAL registry backend (#33), not the
+                # old security_yocto.c direct-impl:
+                # backends/security/yocto_drv.c is the OpenSSL EVP
+                # backend (hash + AEAD + random_bytes behind one ops
+                # vtable), registered at priority 100 (vendor "linux").
+                # The security_dispatch + sw_fallback + backend.c are
+                # pulled in unconditionally above; security_dispatch.c
+                # owns the public symbols (stub_backend.c muted via
+                # ALP_VENDOR_OVERRIDES_SECURITY in the unconditional
+                # block).  Without OpenSSL the class degrades to the
+                # sw_fallback rather than failing to link.
+                ${CMAKE_CURRENT_SOURCE_DIR}/../backends/security/yocto_drv.c
             )
             target_link_libraries(alp_sdk PUBLIC PkgConfig::OPENSSL)
         else()
             message(STATUS
                 "alp-sdk yocto: OpenSSL (libssl + libcrypto) not found via pkg-config; "
-                "alp_hash_* / alp_aead_* / alp_random_bytes stay NOSUPPORT.  Install "
-                "libssl-dev (Debian/Ubuntu) or the matching Yocto recipe to enable.")
+                "alp_hash_* / alp_aead_* / alp_random_bytes degrade to the sw_fallback "
+                "backend.  Install libssl-dev (Debian/Ubuntu) or the matching Yocto "
+                "recipe to enable.")
         endif()
 
         # Audio via ALSA libasound -- same opt-in pattern as MQTT.  The
