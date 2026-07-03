@@ -36,7 +36,13 @@ on:
       - 'scripts/gen_support_matrix.py'
       - 'scripts/gen_catalog.py'
       - 'scripts/gen_error_catalog.py'
-      - 'scripts/alp_orchestrate/cli.py'
+      # The portability matrix re-runs the som.sku swap-test through
+      # scripts/alp_project.py + the alp_orchestrate/ package, so any
+      # emit-pipeline change can move its generated block.
+      - 'scripts/gen_portability_matrix.py'
+      - 'scripts/alp_project.py'
+      - 'scripts/alp_orchestrate/**'
+      - 'docs/portability-matrix.md'
       - 'scripts/check_*.py'
       - 'scripts/abi_snapshot.py'
       - '.github/workflows/pr-generated-files.yml'
@@ -115,6 +121,16 @@ jobs:
       - name: Regenerate peripheral-support matrix from metadata
         run: python3 scripts/gen_support_matrix.py
 
+      # Same single-source contract: the intra-family portability matrix
+      # (docs/portability-matrix.md, generated block only) is produced by
+      # scripts/gen_portability_matrix.py re-running the som.sku swap-test
+      # (metadata/e1m_modules/E1M-*.yaml x the pinned portable examples)
+      # through scripts/alp_project.py.  Regenerate and let the diff gate
+      # below flag any drift.  Hand-written prose outside the BEGIN/END
+      # markers is preserved by the generator.
+      - name: Regenerate intra-family portability matrix from metadata
+        run: python3 scripts/gen_portability_matrix.py
+
       # Same single-source contract again: metadata/catalog.json is the
       # machine-readable SDK map an agent / MCP server reads.  It is projected
       # from metadata/, examples/, include/alp/, and scripts/ by
@@ -156,12 +172,14 @@ jobs:
                      metadata/pinmux/ \
                      metadata/catalog.json \
                      metadata/error-catalog.json \
-                     docs/peripheral-support-matrix.md; then
+                     docs/peripheral-support-matrix.md \
+                     docs/portability-matrix.md; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_board_header.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
             echo "::error::  python3 scripts/gen_support_matrix.py"
+            echo "::error::  python3 scripts/gen_portability_matrix.py"
             echo "::error::  python3 scripts/gen_catalog.py"
             echo "::error::  python3 scripts/gen_error_catalog.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version v0.8 --output docs/abi/v0.8-snapshot.json"
