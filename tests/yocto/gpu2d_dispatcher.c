@@ -123,17 +123,16 @@ static void test_blend_src_over_opaque_and_transparent(void)
 	alp_gpu2d_surface_t dst = argb_surface();
 
 	ALP_ASSERT_TRUE(g != NULL);
-	src              = argb_surface();
-	src.base         = src_buf;
+	src      = argb_surface();
+	src.base = src_buf;
 
 	/* Opaque src wins fully. */
 	for (int i = 0; i < W * H; ++i) {
 		src_buf[i] = 0xFF112233u;
 	}
 	fb_clear(0xFF445566u);
-	ALP_ASSERT_EQ_INT(alp_gpu2d_blend(g, &src, 0u, 0u, &dst, 0u, 0u, 1u, 1u,
-	                                  ALP_GPU2D_BLEND_SRC_OVER),
-	                  ALP_OK);
+	ALP_ASSERT_EQ_INT(
+	    alp_gpu2d_blend(g, &src, 0u, 0u, &dst, 0u, 0u, 1u, 1u, ALP_GPU2D_BLEND_SRC_OVER), ALP_OK);
 	ALP_ASSERT_EQ_INT(fb[0], 0xFF112233u);
 
 	/* Fully transparent src leaves dst untouched. */
@@ -141,9 +140,8 @@ static void test_blend_src_over_opaque_and_transparent(void)
 		src_buf[i] = 0x00112233u;
 	}
 	fb_clear(0xFF445566u);
-	ALP_ASSERT_EQ_INT(alp_gpu2d_blend(g, &src, 0u, 0u, &dst, 0u, 0u, 1u, 1u,
-	                                  ALP_GPU2D_BLEND_SRC_OVER),
-	                  ALP_OK);
+	ALP_ASSERT_EQ_INT(
+	    alp_gpu2d_blend(g, &src, 0u, 0u, &dst, 0u, 0u, 1u, 1u, ALP_GPU2D_BLEND_SRC_OVER), ALP_OK);
 	ALP_ASSERT_EQ_INT(fb[0], 0xFF445566u);
 	alp_gpu2d_close(g);
 }
