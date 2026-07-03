@@ -100,6 +100,24 @@ struct alp_gpu2d_ops {
 };
 
 /**
+ * @brief Ops table of the portable software fallback backend.
+ * @return The sw_fallback vtable (never NULL).
+ *
+ * Internal cross-backend hook: a silicon backend whose engine cannot
+ * express an op (e.g. D/AVE 2D has no documented single-pass
+ * ADDITIVE / MULTIPLY blend) delegates that op to the CPU path
+ * instead of returning ALP_ERR_NOSUPPORT, keeping the ADR 0008
+ * "write once" contract (the op works, just slower).  The sw ops
+ * never touch state->be_data, so a delegating backend may pass its
+ * own state through unchanged.  Declared unconditionally (plain-
+ * CMake builds have no Kconfig macros); DEFINED only when
+ * sw_fallback.c is in the build -- Zephyr-side that is
+ * CONFIG_ALP_SDK_GPU2D_SW_FALLBACK, so a caller must guard on it
+ * there (as alif_dave2d.c does) or the link breaks.
+ */
+const alp_gpu2d_ops_t *alp_gpu2d_sw_ops(void);
+
+/**
  * Handle struct layout.  Opaque to customers via the public
  * `typedef struct alp_gpu2d alp_gpu2d_t;` forward declaration in
  * <alp/gpu2d.h>.  Defined here so the dispatcher

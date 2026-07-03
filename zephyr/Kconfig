@@ -1615,9 +1615,10 @@ config ALP_SDK_GPU2D_ALIF_DAVE2D
 	help
 	  Compile src/backends/gpu2d/alif_dave2d.c, the AEN-family
 	  D/AVE 2D backend.  Registers one entry per
-	  alif:ensemble:e1..e8 at priority 100, driving the engine
-	  through the documented d2_* API of the proprietary Alif
-	  D/AVE 2D driver pack (AlifSemiconductor::Dave2DDriver).
+	  alif:ensemble:e6 / e7 / e8 (the SKUs whose SoC JSON sets
+	  dave2d: true) at priority 100, driving the engine through the
+	  documented d2_* API of the proprietary Alif D/AVE 2D driver
+	  pack (AlifSemiconductor::Dave2DDriver).
 
 	  Off by default: it can only build when the Dave2D pack is on
 	  the include path (the SDK never vendors the pack), and it is
@@ -1626,9 +1627,10 @@ config ALP_SDK_GPU2D_ALIF_DAVE2D
 	  and await AEN bench bring-up (issue #24).  It cannot build on
 	  native_sim; leave it off there and let the software fallback
 	  serve the surface.  ADDITIVE / MULTIPLY blends have no
-	  documented single-pass D/AVE 2D mapping and return NOSUPPORT
-	  from this backend, so portable code that needs them falls
-	  back to the software path.
+	  documented single-pass D/AVE 2D mapping; this backend
+	  delegates those two modes to the software fallback's CPU path
+	  when ALP_SDK_GPU2D_SW_FALLBACK is also enabled (the default),
+	  and returns NOSUPPORT for them otherwise.
 
 config ALP_SDK_UPDATE_LOG
 	bool "Enable <alp/update_log.h> firmware-update audit-log surface (experimental)"

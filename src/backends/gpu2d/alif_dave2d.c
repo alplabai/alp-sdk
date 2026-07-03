@@ -152,8 +152,9 @@ static alp_status_t _fmt_to_d2(alp_gpu2d_format_t fmt, d2_u32 *out)
  * d2_setblendmode factor pairs.  ADDITIVE and MULTIPLY do NOT have a
  * documented single-pass d2_setblendmode equivalent (the driver's
  * fixed blend stage is a Porter-Duff factor multiply-add, not a
- * channel product or a saturating add of dst), so they return
- * NOSUPPORT here; the software fallback serves them losslessly.
+ * channel product or a saturating add of dst), so dave2d_blend never
+ * routes them here -- it delegates them to the software fallback's
+ * CPU path (or returns NOSUPPORT when sw_fallback is compiled out).
  * Revisit if a bench check shows the engine's extended-blend path
  * covers them.  BENCH-UNVERIFIED.
  */
@@ -170,8 +171,9 @@ static alp_status_t _blend_to_d2(alp_gpu2d_blend_mode_t mode, d2_u32 *src_bf, d2
 		return ALP_OK;
 	case ALP_GPU2D_BLEND_ADDITIVE:
 	case ALP_GPU2D_BLEND_MULTIPLY:
-		/* No documented single-pass d2 factor pair; sw_fallback owns
-         * these.  BENCH-UNVERIFIED -- see header. */
+		/* No documented single-pass d2 factor pair; dave2d_blend
+         * delegates these to the sw path before reaching here.
+         * BENCH-UNVERIFIED -- see header. */
 		return ALP_ERR_NOSUPPORT;
 	default:
 		return ALP_ERR_NOSUPPORT;
@@ -323,9 +325,26 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 {
 	d2_device   *dev = (d2_device *)state->be_data;
 	d2_u32       src_bf, dst_bf, src_mode;
+
+	if (mode == ALP_GPU2D_BLEND_ADDITIVE || mode == ALP_GPU2D_BLEND_MULTIPLY) {
+#if defined(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK)
+		/* The engine has no documented single-pass mapping for these
+	     * two modes (see _blend_to_d2); serve them from the portable
+	     * CPU path so the ADR 0008 "write once" contract holds on AEN
+	     * too.  The sw ops ignore be_data, so our state passes through
+	     * unchanged.  BENCH-UNVERIFIED coherency caveat: the CPU
+	     * composite reads/writes caller memory directly -- the same
+	     * cache-maintenance follow-up flagged in the file header
+	     * applies where it mixes with prior engine writes. */
+		return alp_gpu2d_sw_ops()->blend(state, src, sx, sy, dst, dx, dy, w, h, mode);
+#else
+		return ALP_ERR_NOSUPPORT; /* sw_fallback compiled out */
+#endif
+	}
+
 	alp_status_t rc = _blend_to_d2(mode, &src_bf, &dst_bf);
 	if (rc != ALP_OK) {
-		return rc; /* ADDITIVE / MULTIPLY -> NOSUPPORT; sw_fallback owns them */
+		return rc;
 	}
 	rc = _fmt_to_d2(src->format, &src_mode);
 	if (rc != ALP_OK) {

@@ -82,6 +82,11 @@ target_sources(alp_sdk PRIVATE
     # harmless too, but the Linux block keeps the device-node backends
     # grouped with the other Linux userspace wrappers).
     ${CMAKE_CURRENT_SOURCE_DIR}/../backend.c
+    # Public <alp/cap_instance.h> helper (alp_capabilities_has) --
+    # portable pure C, previously compiled Zephyr-side only, leaving
+    # the symbol undefined for plain-CMake consumers that query the
+    # caps a dispatcher hands back (e.g. alp_gpu2d_capabilities).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cap_helpers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../rtc_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../wdt_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/sw_fallback.c
@@ -143,6 +148,18 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/security/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wifi/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/ble/sw_fallback.c
+    # GPU2D on the same registry / dispatcher pattern (#24).  The
+    # dispatcher owns the public alp_gpu2d_* symbols (stub_backend.c
+    # is muted below via ALP_VENDOR_OVERRIDES_GPU2D); the portable
+    # sw_fallback is a REAL pure-C fill/blit/blend (the same backend
+    # native_sim unit-tests + the E8 bench ran), so Linux apps --
+    # including the i.MX 93 A55 cluster, whose PXP/libg2d silicon
+    # backend is future work (see ADR 0008) -- get working 2D ops
+    # rather than NOSUPPORT.  A future Linux 2D-engine backend
+    # registers at priority 100 above it, exactly like the
+    # yocto_drv.c backends of the classes above.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../gpu2d_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/gpu2d/sw_fallback.c
     # The shared dispatchers call alp_z_set_last_error/clear (defined
     # Zephyr-side in src/zephyr/last_error.c, which the Yocto build does
     # not compile).  This shim forwards them onto the common last-error
@@ -193,6 +210,7 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_SECURITY=1
     ALP_VENDOR_OVERRIDES_WIFI=1
     ALP_VENDOR_OVERRIDES_BLE=1
+    ALP_VENDOR_OVERRIDES_GPU2D=1
 )
 
 # v0.4: real Yocto peripheral wrappers binding against Linux

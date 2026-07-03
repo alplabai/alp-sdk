@@ -22,6 +22,21 @@ target_compile_features(alp_test_inference_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
 
+# GPU2D dispatcher + portable sw_fallback on the plain-CMake Yocto
+# build (#24): proves Linux apps get the REAL CPU fill/blit/blend,
+# not the old NOSUPPORT stub.  Portable pure C -- no Linux gate.
+add_executable(alp_test_gpu2d_dispatcher
+    ${CMAKE_CURRENT_SOURCE_DIR}/gpu2d_dispatcher.c
+)
+target_link_libraries(alp_test_gpu2d_dispatcher PRIVATE alp::sdk)
+target_include_directories(alp_test_gpu2d_dispatcher PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_features(alp_test_gpu2d_dispatcher PRIVATE c_std_99)
+
+add_test(NAME alp_test_gpu2d_dispatcher
+         COMMAND alp_test_gpu2d_dispatcher)
+
 # v0.4: Yocto I2C wrapper failure-path coverage.  Real-adapter HIL
 # coverage is parked under docs/ci/HW-IN-LOOP.md until the self-hosted
 # `hil-yocto` runner lands.  Linux-only -- the underlying source

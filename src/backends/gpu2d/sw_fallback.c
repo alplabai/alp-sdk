@@ -286,11 +286,12 @@ static alp_status_t sw_fill_rect(alp_gpu2d_backend_state_t *state,
  * @return ALP_OK, or ALP_ERR_NOSUPPORT for an unknown format.
  *
  * The rect is clipped against the source first, then the destination,
- * so neither surface is read or written out of bounds.  Rows are
- * copied top-to-bottom; overlapping same-buffer upward copies are
- * safe, a downward overlapping copy on one buffer can alias (the
- * portable fallback does not reverse-iterate -- callers needing
- * overlap-safe moves should use distinct buffers).
+ * so neither surface is read or written out of bounds.  Pixels are
+ * copied top-to-bottom, left-to-right; an overlapping same-buffer
+ * copy toward earlier memory (dy < sy, or dy == sy with dx <= sx)
+ * is safe, a copy toward later memory can alias (the portable
+ * fallback does not reverse-iterate -- callers needing overlap-safe
+ * moves in both directions should use distinct buffers).
  */
 static alp_status_t sw_blit(alp_gpu2d_backend_state_t *state,
                             const alp_gpu2d_surface_t *src,
@@ -387,6 +388,14 @@ static const alp_gpu2d_ops_t _ops = {
 	.blend     = sw_blend,
 	.close     = NULL,
 };
+
+const alp_gpu2d_ops_t *alp_gpu2d_sw_ops(void)
+{
+	/* Cross-backend delegation hook -- see the declaration in
+	 * gpu2d_ops.h.  The ops are stateless (no be_data), so callers
+	 * may pass any backend state through. */
+	return &_ops;
+}
 
 ALP_BACKEND_REGISTER(gpu2d,
                      sw_fallback,
