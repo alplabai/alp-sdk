@@ -15,6 +15,16 @@
 > schema-legal `TBD` placeholders, and prints the porting checklist --
 > run it, then use the sections below to fill in the facts.  See the
 > verb reference in [cli.md](cli.md).
+>
+> The scaffold is **mergeable as-is**: it passes the full
+> `pr-metadata-validate` command set (`validate_metadata.py` and
+> `check_inference_backend_parity.py`) the moment it is committed.
+> The `inference.preferred_backend: tbd` placeholder rides on the
+> preset's `status.preliminary: true` marker -- the parity gate
+> accepts `tbd` *only* on preliminary presets, so the port cannot
+> graduate (clear `status.preliminary`) until the real silicon
+> backend replaces the placeholder.  Preview a scaffold without
+> writing anything via `alp new-som ... --dry-run`.
 
 "Porting a new SoM" in the Alp SDK means *adding one row of
 machine-readable metadata*.  It is **not**:
