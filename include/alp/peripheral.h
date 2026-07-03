@@ -109,6 +109,12 @@ alp_status_t alp_last_error(void);
  * Idempotent: calling it again after a successful return is a no-op
  * that returns @ref ALP_OK.
  *
+ * Thread-safety: safe to call concurrently -- an atomic once-guard
+ * ensures exactly one caller performs the bring-up work; the others
+ * return @ref ALP_OK immediately.  Do NOT race @ref alp_deinit
+ * against alp_init or against in-flight peripheral calls: the
+ * deinit/re-init sequence is single-threaded by contract.
+ *
  * @return @ref ALP_OK on success (the only result the current
  *         implementation produces).  Future backends may surface
  *         @ref ALP_ERR_NOT_READY / @ref ALP_ERR_IO when their
@@ -380,6 +386,7 @@ const alp_capabilities_t *alp_i2c_capabilities(const alp_i2c_t *bus);
 /* ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.                         */
 /* ------------------------------------------------------------------ */
 
+/** @brief Opaque handle for an I2C target (slave) registration. */
 typedef struct alp_i2c_target alp_i2c_target_t;
 
 /**
@@ -420,6 +427,7 @@ typedef alp_status_t (*alp_i2c_target_read_cb_t)(uint8_t *byte, void *user);
  */
 typedef void (*alp_i2c_target_stop_cb_t)(void *user);
 
+/** @brief I2C target (slave) registration config: own address + ISR callbacks. */
 typedef struct {
 	uint32_t                  bus_id;        /**< Studio-resolved bus instance id. */
 	uint8_t                   own_addr_7bit; /**< Address this target answers on (0x08..0x77). */
@@ -436,12 +444,19 @@ typedef struct {
  * they read (register files, counters) BEFORE calling.
  *
  * @param[in] cfg  Target configuration.  Must be non-NULL with
- *                 non-NULL @c on_write / @c on_read.
+ *                 non-NULL @c on_write / @c on_read and
+ *                 @c own_addr_7bit inside 0x08..0x77 (the reserved
+ *                 7-bit ranges 0x00-0x07 / 0x78-0x7F are rejected).
  *
  * @return Open handle on success; NULL with @ref alp_last_error set to
- *         @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /
+ *         @ref ALP_ERR_INVAL (NULL cfg/callbacks, reserved address) /
+ *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no I2C backend for
+ *         this silicon) / @ref ALP_ERR_OUT_OF_RANGE (bus_id beyond
+ *         this SoC's documented I2C count) / @ref ALP_ERR_NOT_READY /
  *         @ref ALP_ERR_NOSUPPORT (backend or controller driver has no
- *         target mode) / @ref ALP_ERR_NOMEM.
+ *         target mode) / @ref ALP_ERR_BUSY (driver refused the
+ *         registration, e.g. the address slot is already taken) /
+ *         @ref ALP_ERR_NOMEM.
  */
 alp_i2c_target_t *alp_i2c_target_open(const alp_i2c_target_config_t *cfg);
 
@@ -561,18 +576,22 @@ const alp_capabilities_t *alp_spi_capabilities(const alp_spi_t *bus);
 /* absence fails open() with ALP_ERR_NOSUPPORT / ALP_ERR_NOT_READY;   */
 /* driver-level absence surfaces on the FIRST transceive as           */
 /* ALP_ERR_NOSUPPORT (the Zephyr backend cannot probe it at open).    */
-/* native_sim has no target-mode emulation -- applications must       */
-/* degrade cleanly either way.                                         */
+/* native_sim: the emulated controller accepts a slave-mode open, but */
+/* nothing external ever clocks a transfer -- degrade cleanly (and    */
+/* bound your waits) either way.                                      */
 /*                                                                     */
 /* ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.                         */
 /* ------------------------------------------------------------------ */
 
+/** @brief Opaque handle for an SPI bus claimed in target (slave) mode. */
 typedef struct alp_spi_target alp_spi_target_t;
 
+/** @brief SPI target (slave) config: bus + clocking must match the controller. */
 typedef struct {
 	uint32_t       bus_id;        /**< Studio-resolved bus instance id. */
 	alp_spi_mode_t mode;          /**< CPOL/CPHA -- must match the external controller. */
-	uint8_t        bits_per_word; /**< Usually 8 -- must match the external controller. */
+	uint8_t        bits_per_word; /**< Usually 8 (0 defaults to 8; max 32) -- must
+	                               *   match the external controller. */
 } alp_spi_target_config_t;
 
 /**
@@ -581,48 +600,89 @@ typedef struct {
  * The bus's /CS line is driven by the external controller; no
  * @c cs_pin_id is configured on the target side.
  *
- * @param[in] cfg  Target configuration.  Must be non-NULL.
+ * @param[in] cfg  Target configuration.  Must be non-NULL with
+ *                 @c mode in 0..3 and @c bits_per_word 0 (default 8)
+ *                 or 1..32.
  *
  * @return Open handle on success; NULL with @ref alp_last_error set to
- *         @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /
+ *         @ref ALP_ERR_INVAL (NULL cfg, mode > 3, bits_per_word > 32)
+ *         / @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no SPI backend for
+ *         this silicon) / @ref ALP_ERR_OUT_OF_RANGE (bus_id beyond
+ *         this SoC's documented SPI count) / @ref ALP_ERR_NOT_READY /
  *         @ref ALP_ERR_NOSUPPORT (backend has no slave mode -- e.g.
- *         every native_sim build today; a controller DRIVER without
- *         slave support surfaces NOSUPPORT on the first transceive
- *         instead) / @ref ALP_ERR_NOMEM.
+ *         the SW-fallback loopback and the yocto/baremetal stubs; a
+ *         controller DRIVER without slave support surfaces NOSUPPORT
+ *         on the first transceive instead) / @ref ALP_ERR_NOMEM.
  */
 alp_spi_target_t *alp_spi_target_open(const alp_spi_target_config_t *cfg);
 
 /**
- * @brief Stage one target-side transfer and block until the external
- *        controller clocks it.
+ * @brief Stage one target-side transfer and wait (bounded by
+ *        @p timeout_ms) for the external controller to clock it.
  *
  * @p tx is driven onto the data-out line while the controller clocks;
  * whatever the controller drives lands in @p rx.  The controller may
  * clock FEWER bytes than @p len -- @p rx_len reports how many actually
- * moved.  Blocks until the controller completes the transfer (i.e.
- * deasserts /CS); there is no timeout, so call from a thread that may
- * wait indefinitely.
+ * moved (in bytes, regardless of @c bits_per_word).
  *
- * @param[in]  bus     Handle from @ref alp_spi_target_open.
- * @param[in]  tx      Bytes to present on data-out.  May be NULL to
- *                     drive the idle pattern.
- * @param[out] rx      Receive buffer.  May be NULL to discard input.
- * @param[in]  len     Buffer length in bytes (both directions).
- * @param[out] rx_len  Bytes actually clocked by the controller.  May
- *                     be NULL when the caller doesn't care.
+ * Timeouts: @c UINT32_MAX blocks until the controller completes the
+ * transfer (deasserts /CS) -- call from a thread that may wait
+ * indefinitely.  A finite @p timeout_ms bounds the wait; on the
+ * Zephyr backend this needs @c CONFIG_SPI_ASYNC (a finite timeout on
+ * a sync-only build fails with @ref ALP_ERR_NOSUPPORT rather than
+ * silently blocking forever).
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
- *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ * After @ref ALP_ERR_TIMEOUT the transfer is STILL armed in the
+ * controller driver (SPI slave hardware has no portable cancel): the
+ * handle answers @ref ALP_ERR_BUSY -- and @ref alp_spi_target_close
+ * refuses teardown -- until the external controller clocks the
+ * pending transfer.  Keep @p tx / @p rx valid until a subsequent call
+ * on this handle stops returning @ref ALP_ERR_BUSY.
+ *
+ * One transfer at a time: a second thread calling while a transceive
+ * is in flight gets @ref ALP_ERR_BUSY.
+ *
+ * @param[in]  bus         Handle from @ref alp_spi_target_open.
+ * @param[in]  tx          Bytes to present on data-out.  May be NULL
+ *                         to drive the idle pattern.
+ * @param[out] rx          Receive buffer.  May be NULL to discard
+ *                         input.
+ * @param[in]  len         Buffer length in bytes (both directions).
+ *                         Must be > 0: unlike controller-mode
+ *                         @ref alp_spi_transceive (where len == 0 is a
+ *                         no-op @ref ALP_OK), a target cannot stage a
+ *                         zero-length transfer -- @ref ALP_ERR_INVAL.
+ * @param[out] rx_len      Bytes actually clocked by the controller.
+ *                         May be NULL when the caller doesn't care.
+ * @param[in]  timeout_ms  Max wait for the controller to clock the
+ *                         transfer; @c UINT32_MAX to wait forever.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_BUSY /
+ *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_spi_target_transceive(
-    alp_spi_target_t *bus, const uint8_t *tx, uint8_t *rx, size_t len, size_t *rx_len);
+alp_status_t alp_spi_target_transceive(alp_spi_target_t *bus,
+                                       const uint8_t    *tx,
+                                       uint8_t          *rx,
+                                       size_t            len,
+                                       size_t           *rx_len,
+                                       uint32_t          timeout_ms);
 
 /**
- * @brief Release the target handle.  Idempotent on NULL.
+ * @brief Release the target handle.  Idempotent on NULL and on an
+ *        already-closed handle.
+ *
+ * Refuses with @ref ALP_ERR_BUSY -- and frees NOTHING -- while another
+ * thread is blocked in @ref alp_spi_target_transceive on this handle,
+ * or while a timed-out transfer is still armed in the controller
+ * driver.  Retry after the in-flight transfer completes (or use a
+ * finite transceive timeout so the blocked thread returns first).
  *
  * @param[in] tgt  Handle from @ref alp_spi_target_open, or NULL.
+ *
+ * @return @ref ALP_OK on release (or NULL/already-closed no-op);
+ *         @ref ALP_ERR_BUSY when a transfer is in flight.
  */
-void alp_spi_target_close(alp_spi_target_t *tgt);
+alp_status_t alp_spi_target_close(alp_spi_target_t *tgt);
 
 /* ------------------------------------------------------------------ */
 /* UART                                                                */

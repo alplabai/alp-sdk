@@ -90,9 +90,10 @@ config ALP_SDK_MAX_SPI_TARGET_HANDLES
 	default 2
 	help
 	  Pool size for SPI target (slave) mode handles opened via
-	  alp_spi_target_open.  The Zephyr backend's per-handle sidecar
-	  pool (sized by ALP_SDK_MAX_SPI_HANDLES) is shared between
-	  controller-mode and target-mode handles.
+	  alp_spi_target_open.  Sizes both the dispatcher handle pool
+	  and the Zephyr backend's dedicated target sidecar pool, so
+	  target opens never compete with controller-mode opens (whose
+	  sidecars are sized by ALP_SDK_MAX_SPI_HANDLES).
 
 config ALP_SDK_SPI_SW_FALLBACK
 	bool "Software SPI fallback (in-memory loopback)"

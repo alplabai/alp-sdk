@@ -49,11 +49,24 @@ struct alp_spi_ops {
 	void (*close)(alp_spi_backend_state_t *state);
 	/* Target (slave) mode -- optional.  Backends without slave
 	 * support leave all three NULL; the dispatcher then fails
-	 * alp_spi_target_open with ALP_ERR_NOSUPPORT. */
+	 * alp_spi_target_open with ALP_ERR_NOSUPPORT.
+	 *
+	 * target_transceive: rx_len is BYTES (the backend converts from
+	 * whatever frame unit its driver reports); timeout_ms bounds the
+	 * wait, UINT32_MAX means block until the controller clocks the
+	 * transfer.
+	 *
+	 * target_close returns ALP_ERR_BUSY when a timed-out transfer is
+	 * still armed in the controller driver (the dispatcher then keeps
+	 * the handle alive instead of freeing state under the driver). */
 	alp_status_t (*target_open)(const alp_spi_target_config_t *cfg, alp_spi_backend_state_t *state);
-	alp_status_t (*target_transceive)(
-	    alp_spi_backend_state_t *state, const uint8_t *tx, uint8_t *rx, size_t len, size_t *rx_len);
-	void (*target_close)(alp_spi_backend_state_t *state);
+	alp_status_t (*target_transceive)(alp_spi_backend_state_t *state,
+	                                  const uint8_t           *tx,
+	                                  uint8_t                 *rx,
+	                                  size_t                   len,
+	                                  size_t                  *rx_len,
+	                                  uint32_t                 timeout_ms);
+	alp_status_t (*target_close)(alp_spi_backend_state_t *state);
 };
 
 struct alp_spi {
@@ -63,9 +76,20 @@ struct alp_spi {
 	bool                    in_use;
 };
 
+/* Lifecycle states for struct alp_spi_target.  Driven atomically by
+ * src/spi_dispatch.c (see src/common/alp_slot_claim.h): a transceive
+ * may only start from IDLE, and close may only proceed from IDLE, so
+ * "close while another thread is blocked in transceive" is refused
+ * with ALP_ERR_BUSY instead of freeing state under the driver. */
+#define ALP_SPI_TARGET_LC_UNOPENED 0u /* slot claimed but open unfinished / closed */
+#define ALP_SPI_TARGET_LC_IDLE     1u
+#define ALP_SPI_TARGET_LC_XFER     2u /* a transceive is blocked in the backend */
+#define ALP_SPI_TARGET_LC_CLOSING  3u
+
 struct alp_spi_target {
 	alp_spi_backend_state_t state;
 	const alp_backend_t    *backend;
+	uint8_t                 lifecycle; /* ALP_SPI_TARGET_LC_*; atomic access only */
 	bool                    in_use;
 };
 

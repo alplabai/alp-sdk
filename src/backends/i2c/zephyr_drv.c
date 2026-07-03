@@ -8,6 +8,8 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
@@ -18,6 +20,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "i2c_ops.h"
 
 #define ALP_I2C_DEV_OR_NULL(idx)                                                                   \
@@ -124,9 +127,10 @@ static alp_z_i2c_target_side_t _tsides[CONFIG_ALP_SDK_MAX_I2C_TARGET_HANDLES];
 static alp_z_i2c_target_side_t *_talloc_side(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_tsides); ++i) {
-		if (!_tsides[i].in_use) {
-			_tsides[i]        = (alp_z_i2c_target_side_t){ 0 };
-			_tsides[i].in_use = true;
+		/* Atomic claim (see alp_slot_claim.h): in_use is the last
+		 * member, so the winner zeroes everything before it. */
+		if (alp_slot_try_claim(&_tsides[i].in_use)) {
+			memset(&_tsides[i], 0, offsetof(alp_z_i2c_target_side_t, in_use));
 			return &_tsides[i];
 		}
 	}
@@ -194,7 +198,7 @@ static alp_status_t z_target_open(const alp_i2c_target_config_t *cfg, alp_i2c_ba
 	 * ALP_ERR_NOSUPPORT) -- the native_sim emul controller path. */
 	int err = i2c_target_register(dev, &s->zcfg);
 	if (err != 0) {
-		s->in_use = false;
+		alp_slot_release(&s->in_use);
 		return _errno_to_alp(err);
 	}
 	st->dev     = (void *)dev;
@@ -209,7 +213,7 @@ static void z_target_close(alp_i2c_backend_state_t *st)
 	const struct device     *dev = (const struct device *)st->dev;
 	if (s == NULL) return;
 	(void)i2c_target_unregister(dev, &s->zcfg);
-	s->in_use   = false;
+	alp_slot_release(&s->in_use);
 	st->be_data = NULL;
 }
 

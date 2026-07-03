@@ -9,8 +9,8 @@ sample:
     controller accepts the registration but nothing drives the
     bus, so ticks show writes_seen=0; drivers without target
     support degrade cleanly with the NOSUPPORT diagnostic.
-    Builds on both EVKs: E1M EVK uses E1M_I2C0 via
-    BOARD_I2C_SENSORS; E1M-X EVK uses E1M_X_I2C0.
+    Builds on both EVKs: E1M EVK uses ALP_E1M_I2C0 via
+    BOARD_I2C_SENSORS; E1M-X EVK uses ALP_E1M_X_I2C0.
 
 tests:
   alp_sdk.example.i2c_slave.e1m_x_evk:

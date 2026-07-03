@@ -6,14 +6,23 @@ Claim the bus in target (slave) mode using the portable
 
 ## What it shows
 
-* `alp_init()` -- SDK runtime bring-up before the first open.
+* `alp_init()` -- SDK runtime bring-up before the first open,
+  with its return CHECKED (future backends can fail bring-up).
 * `alp_spi_target_open()` -- claim a bus in slave mode (the
   external controller owns SCK + /CS; no `cs_pin_id` on our side).
 * `alp_spi_target_transceive()` -- the transfer-based slave idiom:
-  preload a TX reply, block until the controller clocks a
-  transfer, decode what arrived, preload the next reply.  SPI is
-  full-duplex, so a slave can never answer a command within the
-  SAME transfer -- replies always lag one frame.
+  preload a TX reply, wait (bounded by `timeout_ms`) for the
+  controller to clock a transfer, decode what arrived, preload
+  the next reply.  SPI is full-duplex, so a slave can never
+  answer a command within the SAME transfer -- replies always
+  lag one frame.
+* The **bounded-wait pattern**: a finite `timeout_ms` keeps the
+  thread responsive when the controller goes quiet (and is what
+  makes a clean `close` possible -- close refuses with
+  `ALP_ERR_BUSY` while a transceive is blocked).  Drivers without
+  an async path report `ALP_ERR_NOSUPPORT` for finite timeouts
+  (Zephyr: needs `CONFIG_SPI_ASYNC`); the example degrades to the
+  unbounded `UINT32_MAX` wait and says so.
 * A tiny request/response protocol over 5-byte fixed frames:
   PING (`0x01`) echoes the payload, GET_VERSION (`0x02`) returns
   the SDK version bytes (`ALP_VERSION_MAJOR/MINOR/PATCH` from
@@ -33,12 +42,13 @@ drivers reject `SPI_OP_MODE_SLAVE`.  Backends or drivers without
 slave mode fail with `ALP_ERR_NOSUPPORT` (or `ALP_ERR_NOT_READY`
 when the bus alias is unset), which the example handles by
 printing the diagnostic and exiting -- that is the expected
-outcome on **native_sim**, which has no slave-mode emulation:
+outcome on **native_sim**, which does not wire `BOARD_SPI_ARDUINO`
+(only the `alp-spi0` loader alias exists there):
 
 ```
 [spi-slave] listening on BOARD_SPI_ARDUINO (mode 0, 8 bits)
 [spi-slave] target open failed: alp_last_error=-2
-[spi-slave]   SPI target (slave) mode is unavailable on this build
+[spi-slave]   SPI target (slave) mode is unavailable here
 [spi-slave] done
 ```
 
