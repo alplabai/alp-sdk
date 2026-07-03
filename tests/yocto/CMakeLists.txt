@@ -88,8 +88,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         pkg_check_modules(ALSA_TEST QUIET alsa)
     endif()
     if(MOSQUITTO_TEST_FOUND)
+        # MQTT is a registry backend since #33; compile the mqtt backend
+        # TUs straight into the test so the alp_backends_mqtt linker
+        # section is populated and the libmosquitto backend (priority
+        # 100) wins selection -- same archive-extraction rationale as
+        # alp_test_audio_alsa below.
         add_executable(alp_test_iot_mqtt
             ${CMAKE_CURRENT_SOURCE_DIR}/iot_mqtt.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/sw_fallback.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/yocto_drv.c
         )
         target_link_libraries(alp_test_iot_mqtt PRIVATE alp::sdk)
         target_include_directories(alp_test_iot_mqtt PRIVATE
@@ -133,8 +140,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         pkg_check_modules(OPENSSL_TEST QUIET libssl libcrypto)
     endif()
     if(OPENSSL_TEST_FOUND)
+        # Security is a registry backend since #33; compile the backend
+        # TUs into the test so the alp_backends_security section is
+        # populated and the OpenSSL backend (priority 100) wins
+        # selection -- same rationale as alp_test_audio_alsa.
         add_executable(alp_test_security_openssl
             ${CMAKE_CURRENT_SOURCE_DIR}/security_openssl.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/sw_fallback.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/yocto_drv.c
         )
         target_link_libraries(alp_test_security_openssl PRIVATE alp::sdk)
         target_include_directories(alp_test_security_openssl PRIVATE
@@ -145,4 +158,27 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME alp_test_security_openssl
                  COMMAND alp_test_security_openssl)
     endif()
+
+    # Registry sw_fallback wiring for the #33-remainder classes (mqtt /
+    # security / wifi / ble).  Deliberately compiles ONLY the priority-0
+    # sw_fallback backends into the executable -- never the yocto_drv
+    # vendor backends -- so the dispatcher deterministically selects
+    # sw_fallback regardless of which optional host libs (libmosquitto /
+    # OpenSSL) are installed.  Runnable on every Linux CI host; no
+    # pkg-config gate.
+    add_executable(alp_test_registry_sw_fallback
+        ${CMAKE_CURRENT_SOURCE_DIR}/registry_sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/wifi/sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/ble/sw_fallback.c
+    )
+    target_link_libraries(alp_test_registry_sw_fallback PRIVATE alp::sdk)
+    target_include_directories(alp_test_registry_sw_fallback PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_registry_sw_fallback PRIVATE c_std_99)
+
+    add_test(NAME alp_test_registry_sw_fallback
+             COMMAND alp_test_registry_sw_fallback)
 endif()

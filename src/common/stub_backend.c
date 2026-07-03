@@ -669,6 +669,7 @@ void alp_camera_close(alp_camera_t *c)
 	(void)c;
 }
 
+#if !defined(ALP_VENDOR_OVERRIDES_WIFI)
 alp_wifi_t *alp_wifi_open(void)
 {
 	return NULL;
@@ -689,6 +690,7 @@ void alp_wifi_close(alp_wifi_t *w)
 {
 	(void)w;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_WIFI */
 
 #if !defined(ALP_VENDOR_OVERRIDES_MQTT)
 alp_mqtt_t *alp_mqtt_open(const alp_mqtt_config_t *cfg)
@@ -806,6 +808,7 @@ void alp_audio_out_close(alp_audio_out_t *o)
 }
 #endif /* !ALP_VENDOR_OVERRIDES_AUDIO_OUT */
 
+#if !defined(ALP_VENDOR_OVERRIDES_BLE)
 alp_ble_t *alp_ble_open(void)
 {
 	return NULL;
@@ -892,6 +895,7 @@ alp_status_t alp_ble_gatt_write(
 	(void)t;
 	return ALP_ERR_NOSUPPORT;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_BLE */
 
 #if !defined(ALP_VENDOR_OVERRIDES_SECURITY)
 alp_hash_t *alp_hash_open(alp_hash_alg_t a)

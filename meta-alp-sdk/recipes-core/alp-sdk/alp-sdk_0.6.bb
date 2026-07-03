@@ -31,6 +31,26 @@ EXTRA_OECMAKE = "-DALP_SDK_BUILD_SHARED=ON      \
                  -DALP_SDK_BUILD_EXAMPLES=OFF   \
                  -DALP_OS=yocto"
 
+# Optional Linux-userspace backends (#33 registry migration).  The SDK's
+# CMake auto-detects each library via pkg_check_modules and silently
+# degrades the class to its priority-0 sw_fallback backend when the
+# library is missing from the sysroot -- so WITHOUT these build deps the
+# produced libalp_sdk.so would quietly ship without the real MQTT /
+# security / audio+I2S / RPC backends.  PACKAGECONFIG makes the choice
+# explicit and default-on; images that must shrink can strip entries.
+# No cmake -D flags are needed (detection is pkg-config-side), hence the
+# empty enable/disable slots.
+#   mqtt     -> mosquitto  (meta-openembedded/meta-networking)
+#   security -> openssl    (oe-core)
+#   audio    -> alsa-lib   (oe-core; also enables the I2S backend)
+#   rpc      -> open-amp + libmetal (meta-openamp; default OFF because
+#               the layer is not in the standard alp bblayers set yet)
+PACKAGECONFIG ??= "mqtt security audio"
+PACKAGECONFIG[mqtt]     = ",,mosquitto"
+PACKAGECONFIG[security] = ",,openssl"
+PACKAGECONFIG[audio]    = ",,alsa-lib"
+PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
+
 # Inference backends are NOT build-time dependencies of the SDK
 # library.  The Yocto build (src/yocto/) links only the
 # <alp/inference.h> dispatcher + the portable stubs; the vendor NPU

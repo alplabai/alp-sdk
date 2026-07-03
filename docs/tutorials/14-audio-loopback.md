@@ -181,7 +181,7 @@ why the DSP surface is shaped this way.
 ## 6. Yocto-side variant
 
 On Yocto the same `<alp/audio.h>` API maps to ALSA's
-`snd_pcm_*` via `src/yocto/audio_yocto.c`.  Differences:
+`snd_pcm_*` via `src/backends/audio/yocto_drv.c`.  Differences:
 
 - `peripheral_id == 0` → ALSA `"default"` device.
 - `peripheral_id == N` (N > 0) → ALSA `"hw:N-1,0"` device.

@@ -107,13 +107,20 @@ backends in the v0.8 cycle (issue #33), which also lands the per-class
 `alp_<class>_capabilities()` getter on Yocto:
 RTC (`/dev/rtcN`), Watchdog (`/dev/watchdogN`), CAN (SocketCAN), PWM (`/sys/class/pwm`),
 ADC (IIO sysfs), Counter (Linux Counter sysfs), I²S + Audio (ALSA `snd_pcm_*` — gated on
-`libasound`, fall back to the stub when absent), and RPC (OpenAMP/RPMsg userland — gated
-on `open-amp`/`libmetal`, with a NOSUPPORT fallback).  Each compiles + passes an nm
-symbol-ownership audit, but the **full Yocto link + on-target run are HIL-gated** (no
-sysroot / real device nodes in CI).  The remaining two classes (mqtt / security — already
-real via the direct-impl model; their migration is deferred because the vendor headers
-`libmosquitto` / OpenSSL aren't installable in CI to compile-test it) and the cross-core
-RPMsg proxy are separate slices.
+`libasound`, fall back to the stub when absent), RPC (OpenAMP/RPMsg userland — gated
+on `open-amp`/`libmetal`, with a NOSUPPORT fallback), MQTT (libmosquitto — gated on
+`libmosquitto`), and Security (OpenSSL `EVP_*` — gated on `libssl`/`libcrypto`); classes
+whose gating lib is absent degrade to the priority-0 `sw_fallback` backend.  Wi-Fi + BLE
+also gained dispatchers + `sw_fallback` on Yocto (closing the
+declared-but-undefined `alp_wifi_capabilities` link gap) but deliberately ship **no**
+real Linux backend — radio bring-up is a system-config concern (wpa_supplicant /
+NetworkManager / BlueZ) and apps consume the resulting network through plain sockets.
+Each backend compiles + passes an nm symbol-ownership audit where its gating lib exists
+on the build host, but the **full Yocto link + on-target run are HIL-gated** (no
+sysroot / real device nodes in CI; the mqtt/security backends additionally lack
+`libmosquitto`/OpenSSL dev headers on the CI host, so their real paths are
+compile-verified only where those are installed).  The cross-core
+RPMsg proxy is a separate slice.
 
 ### Cross-cutting v0.2 capability infrastructure
 
@@ -151,7 +158,7 @@ need v0.4 fall back cleanly to the v0.3 state above.
 | **Peripherals (UART RX ringbuf)** (`<alp/peripheral.h>`) | n/a (Linux kernel already buffers) | n/a (Linux kernel already buffers) | n/a | n/a |
 | **IoT — MQTT cleartext** (`<alp/iot.h>`) | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto | planned |
 | **IoT — MQTT TLS** (`mqtts://`)      | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) | planned |
-| **IoT — Wi-Fi station** (`<alp/iot.h>`) | stub (system-config via wpa_supplicant/NM) | stub (system-config via wpa_supplicant/NM) | stub | planned |
+| **IoT — Wi-Fi station** (`<alp/iot.h>`) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design | planned |
 | **Audio** (`<alp/audio.h>`)          | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) | planned |
 | **Security** (`<alp/security.h>`)    | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green) | planned |
 | **Mender OTA (meta-alp-sdk opt-in)**     | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) | planned |
@@ -176,13 +183,16 @@ need v0.4 fall back cleanly to the v0.3 state above.
 
 The Yocto MQTT / audio / security backends are each conditional on
 their own `pkg_check_modules` check (`libmosquitto`, `alsa`,
-`libssl libcrypto`); workspaces without the matching `-dev` package
-on the sysroot keep the NOSUPPORT stubs.  Per-class
+`libssl libcrypto`); since the #33 registry migration, workspaces
+without the matching `-dev` package on the sysroot degrade to the
+priority-0 `sw_fallback` backend of the class (not the old
+stub_backend.c NOSUPPORT stubs).  Per-class
 `ALP_VENDOR_OVERRIDES_<CLASS>` macros in
 `src/common/stub_backend.c` let each surface roll out independently
-across backends -- the currently-defined gates are `I2C`, `SPI`,
-`UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`, and
-`UART_RX_RINGBUF`.
+across backends -- the currently-defined class gates include `I2C`,
+`SPI`, `UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`,
+`WIFI`, `BLE`, `CAN`, `PWM`, `ADC`, `I2S`, `COUNTER`, `RTC`, `WDT`,
+and `UART_RX_RINGBUF`.
 
 ## v0.5+ surfaces (listed for completeness — surface-only / untested)
 
