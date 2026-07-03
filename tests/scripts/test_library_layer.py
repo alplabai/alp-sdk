@@ -441,3 +441,120 @@ def test_ros2_on_non_yocto_target_errors(tmp_path: Path) -> None:
         liblayer.resolve_selection(project)
     msg = str(exc.value)
     assert "ros2" in msg and "yocto" in msg
+
+
+# ---------------------------------------------------------------------
+# ADR 0018 cloud / connectivity Tier-B group
+#
+# Two upstream Zephyr subsystems (lwm2m, coap -- real CONFIG symbols grounded
+# in the pinned v4.4.0 tree) and two prerequisite manifests (aws-iot, azure-iot
+# -- NOT pinned, enable-by-presence module named, no fabricated Kconfig).
+# Grounding (2026-07-03):
+#   * CONFIG_LWM2M  $ZEPHYR_BASE/subsys/net/lib/lwm2m/Kconfig `menuconfig LWM2M`
+#   * CONFIG_COAP   $ZEPHYR_BASE/subsys/net/lib/coap/Kconfig  `config COAP`
+#   * aws-iot / azure-iot: no upstream Zephyr west module in `west list`, so a
+#     module-only prerequisite section names the real upstream, no CONFIG.
+# ---------------------------------------------------------------------
+
+CLOUD_LIBS = {"lwm2m", "coap", "aws-iot", "azure-iot"}
+
+
+def test_cloud_manifests_present() -> None:
+    on_disk = {p.stem for p in LIBRARIES_DIR.glob("*.yaml")}
+    assert CLOUD_LIBS <= on_disk, f"missing cloud manifests: {CLOUD_LIBS - on_disk}"
+
+
+def test_lwm2m_coap_are_upstream_apache() -> None:
+    for lib in ("lwm2m", "coap"):
+        doc = yaml.safe_load((LIBRARIES_DIR / f"{lib}.yaml").read_text(encoding="utf-8"))
+        assert doc["tier"] == "B"
+        assert doc["license"] == "Apache-2.0"
+
+
+def test_aws_azure_are_module_only_prerequisites() -> None:
+    """The cloud prerequisite manifests name a real upstream module with NO
+    fabricated Kconfig (unpinned generic C SDKs, enable-by-presence)."""
+    aws = yaml.safe_load((LIBRARIES_DIR / "aws-iot.yaml").read_text(encoding="utf-8"))
+    assert aws["license"] == "Apache-2.0"
+    zephyr = aws["integration"]["zephyr"]
+    assert zephyr.get("module") == "aws-iot-device-sdk-embedded-C"
+    assert "kconfig" not in zephyr, "no Kconfig may be invented while the SDK is unpinned"
+
+    azure = yaml.safe_load((LIBRARIES_DIR / "azure-iot.yaml").read_text(encoding="utf-8"))
+    assert azure["license"] == "MIT"
+    zephyr = azure["integration"]["zephyr"]
+    assert zephyr.get("module") == "azure-sdk-for-c"
+    assert "kconfig" not in zephyr
+
+
+# --- emit: an upstream cloud lib lands its real CONFIG on a Zephyr M core ---
+
+_V2N_LWM2M = """
+som:
+  sku: E1M-V2N101
+libraries: [lwm2m, coap]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
+
+def test_emit_lwm2m_coap_zephyr_kconfig(tmp_path: Path) -> None:
+    """lwm2m + coap on the M33 emit their grounded upstream enable symbols."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_LWM2M))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "CONFIG_LWM2M=y" in out
+    assert "CONFIG_COAP=y" in out
+    assert "ADR 0018" in out
+    assert "lwm2m v4.4.0" in out  # version transcribed from the manifest
+
+
+# --- emit: a prerequisite cloud lib emits the tag with NO fabricated CONFIG ---
+
+_V2N_AWS = """
+som:
+  sku: E1M-V2N101
+libraries: [aws-iot]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
+
+def test_emit_aws_iot_module_only_no_kconfig(tmp_path: Path) -> None:
+    """aws-iot on the M33 emits the ADR 0018 selection tag naming the upstream
+    module and -- because the SDK is unpinned with no enable symbol -- NO
+    fabricated CONFIG line."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_AWS))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "ADR 0018" in out
+    assert "aws-iot-device-sdk-embedded-C" in out   # module named in the tag
+    assert "aws-iot vmain" in out                    # version transcribed
+    assert "CONFIG_AWS" not in out                   # nothing invented
+
+
+# --- os constraint on an upstream cloud lib names the failing constraint ---
+
+def test_lwm2m_on_non_zephyr_target_errors(tmp_path: Path) -> None:
+    """lwm2m requires os: [zephyr]; a project whose only live core is the A55
+    running Yocto fails naming the os constraint (upstream-lib variant of the
+    incompatibility path)."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries: [lwm2m]
+    cores:
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+      m33_sm:
+        os: "off"
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    with pytest.raises(OrchestratorError) as exc:
+        liblayer.resolve_selection(project)
+    msg = str(exc.value)
+    assert "lwm2m" in msg and "zephyr" in msg

@@ -1,0 +1,53 @@
+# LwM2M -- OMA Lightweight M2M (ADR 0018 library manifest).
+#
+# The device-management half of the ADR 0018 cloud / connectivity Tier-B group:
+# OMA LwM2M is the standard register / observe / firmware-update protocol an
+# LwM2M server (Leshan, Coiote, ...) speaks to a constrained device.  It rides
+# on CoAP (metadata/libraries/coap.yaml) -- the LwM2M Kconfig `select COAP`.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * IN-TREE Zephyr subsystem -- NOT a separate west module.  It lives in the
+#     zephyr repo itself at subsys/net/lib/lwm2m/ (west module `zephyr`,
+#     west.yml revision v4.4.0), so `integration.zephyr.module` is null.
+#   * enable symbol CONFIG_LWM2M
+#     ($ZEPHYR_BASE/subsys/net/lib/lwm2m/Kconfig:4 `menuconfig LWM2M` /
+#     "OMA LwM2M protocol stack").  It `select COAP` + `select HTTP_PARSER_URL`
+#     + `select NET_SOCKETS`, so enabling CONFIG_LWM2M pulls its transport in --
+#     no extra Kconfig transcription is needed here.
+#   * upstream version 4.4.0 -- the pinned Zephyr release the subsystem ships
+#     with ($ZEPHYR_BASE/VERSION: VERSION_MAJOR/MINOR = 4/4, PATCHLEVEL 0).
+#   * licence Apache-2.0
+#     ($ZEPHYR_BASE/subsys/net/lib/lwm2m/Kconfig:2 "SPDX-License-Identifier:
+#     Apache-2.0"; the whole zephyr repo is Apache-2.0, $ZEPHYR_BASE/LICENSE).
+#
+# Tier B, though it could merit A: LwM2M is upstream, stable, and a strong
+# differentiator (standards-based device management), so it is the most
+# promotable of this cloud group.  It ships B here because the ADR 0018 initial
+# curation deliberately groups connectivity/cloud as Tier B ("promote per
+# demand"), and it does not yet meet the Tier-A bar in
+# metadata/libraries/README.md (no alp-sdk CI build lane + shipped teaching
+# example yet).  Promotion to A is a named follow-up once a build lane + an
+# LwM2M client example land.
+schema_version: 1
+name: lwm2m
+description: "OMA LwM2M -- standards-based device management over CoAP."
+tier: B
+version: "4.4.0"
+license: Apache-2.0
+
+requires:
+  # LwM2M is a Zephyr networking subsystem: it exists only under Zephyr, so
+  # `os: [zephyr]` rejects a selection whose live cores run no Zephyr with the
+  # constraint named.  No capability/RAM floor is cited -- the subsystem is
+  # arch-neutral (no `depends on CPU_CORTEX_M`) and its footprint scales with
+  # the object set + transport config, so inventing a RAM number would be
+  # dishonest.
+  os: [zephyr]
+
+integration:
+  zephyr:
+    # In-tree Zephyr subsystem: no separate west module to pin (the `zephyr`
+    # project itself carries it).  null per the schema's header-only/in-tree case.
+    module: null
+    kconfig:
+      - CONFIG_LWM2M=y
