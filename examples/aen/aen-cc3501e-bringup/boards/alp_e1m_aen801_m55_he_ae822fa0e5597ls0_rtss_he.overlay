@@ -41,7 +41,10 @@
 	 */
 	pinctrl_spi1: pinctrl_spi1 {
 		group0 {
-			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>;
+			/* Hardware SS0 chip-select (P14_7 = SPI1_SS0_C) -- dwc-ssi master
+			 * drives SS0 per transfer to frame the CC3501E slave. */
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
 		};
 		group1 {
 			pinmux = <PIN_P14_4__SPI1_MISO_C>;
