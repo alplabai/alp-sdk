@@ -30,25 +30,45 @@
 /* Only build the latch when the peripheral-flow PL330 is actually in the DT. */
 #if DT_HAS_COMPAT_STATUS_OKAY(alif_dma_pl330)
 
+/* DMA0 (SYSTOP, main-domain -- the controller behind evtrtr0 that main-domain
+ * peripherals like SPI1 use).  Boot-control regs live in CLKCTRL_PER_MST. */
+#define CLKCTRL_PER_MST_PERIPH_CLK_EN 0x4903F00Cu
+#define PER_MST_CLK_EN_DMA0           BIT(4) /* ALIF_DMA0_CLK: PERIPH_CLK_EN[4] */
+#define CLKCTRL_PER_MST_DMA_CTRL   0x4903F070u
+#define CLKCTRL_PER_MST_DMA_IRQ    0x4903F074u
+#define CLKCTRL_PER_MST_DMA_PERIPH 0x4903F078u
+/* DMA2 (M55-HE-local -- for LP peripherals) boot-control in M55HE_CFG. */
 #define M55HE_CFG_HE_DMA_CTRL   0x43007000u
 #define M55HE_CFG_HE_DMA_IRQ    0x43007004u
 #define M55HE_CFG_HE_DMA_PERIPH 0x43007008u
 #define M55HE_CFG_HE_CLK_ENA    0x43007010u
 #define HE_CLK_ENA_DMA2_CKEN    BIT(4) /* ALIF_DMA2_CLK: HE_CLK_ENA[4] (DFP sys_ctrl_dma.h) */
 
-static int alp_alif_dma2_boot_latch(void)
+static int alp_alif_dma_boot_latch(void)
 {
-	/* Ungate the DMA2 peripheral clock FIRST -- the PL330 registers bus-fault
-	 * while gated at reset (bench skill), so the security latch below must run
-	 * with the clock on. */
+	/* DMA0 (SYSTOP): ungate its peripheral clock FIRST (PERIPH_CLK_EN[4]) -- the
+	 * PL330 registers read garbage / drop writes while gated, so the driver init +
+	 * evtrtr config below need it on. */
+	sys_set_bits(CLKCTRL_PER_MST_PERIPH_CLK_EN, PER_MST_CLK_EN_DMA0);
+	/* DMA0 security latch -- clear the secure-domain bit, zero the NS IRQ/PERIPH
+	 * selects, pulse SW_RST to re-boot the PL330 boot-manager into the secure
+	 * domain (else a DMAGO is silently DMANOP'd).  SYSTOP power is already on for
+	 * this app (it drives SPI1/GPIO in the same region). */
+	sys_clear_bits(CLKCTRL_PER_MST_DMA_CTRL, BIT(0));
+	sys_write32(0u, CLKCTRL_PER_MST_DMA_IRQ);
+	sys_write32(0u, CLKCTRL_PER_MST_DMA_PERIPH);
+	sys_set_bits(CLKCTRL_PER_MST_DMA_CTRL, BIT(16));
+
+	/* DMA2 (M55-HE-local): ungate its clock (HE_CLK_ENA[4]) + same latch, for
+	 * completeness if an LP-peripheral DMA is wired to it. */
 	sys_set_bits(M55HE_CFG_HE_CLK_ENA, HE_CLK_ENA_DMA2_CKEN);
-	sys_clear_bits(M55HE_CFG_HE_DMA_CTRL, BIT(0)); /* secure domain */
-	sys_write32(0u, M55HE_CFG_HE_DMA_IRQ);         /* NS IRQ select   -> none */
-	sys_write32(0u, M55HE_CFG_HE_DMA_PERIPH);      /* NS periph select -> none */
-	sys_set_bits(M55HE_CFG_HE_DMA_CTRL, BIT(16));  /* SW_RST: re-boot the manager */
+	sys_clear_bits(M55HE_CFG_HE_DMA_CTRL, BIT(0));
+	sys_write32(0u, M55HE_CFG_HE_DMA_IRQ);
+	sys_write32(0u, M55HE_CFG_HE_DMA_PERIPH);
+	sys_set_bits(M55HE_CFG_HE_DMA_CTRL, BIT(16));
 	return 0;
 }
 
-SYS_INIT(alp_alif_dma2_boot_latch, PRE_KERNEL_1, 0);
+SYS_INIT(alp_alif_dma_boot_latch, PRE_KERNEL_1, 0);
 
 #endif /* DT_HAS_COMPAT_STATUS_OKAY(alif_dma_pl330) */

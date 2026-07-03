@@ -122,54 +122,52 @@
 
 /*
  * Host-side peripheral DMA for continuous SPI streams over the CC3501E bridge.
- * Repoint the (upstream-memcpy) dma2 node onto the vendored peripheral-flow
- * PL330 (compatible alif,dma-pl330, #dma-cells=2) + add its event-router mux
- * (evtrtr2), then route SPI1 TX/RX through it.  DMA2 = the M55-HE-local PL330;
- * its clock + boot-manager security latch are handled by dma_alif_boot_latch.c.
- *
- *   microcode: 8*0x400 B channel ucode in AXI-visible SRAM0 (0x02000000) -- the
- *   PL330 fetches ucode over AXI; the M55 TCM (where .bss lands) is NOT reachable.
- *   IRQs 0..7 = the 8 DMA2 channel-done lines, 32 = abort (AE822 DFP rtss_he).
+ * SPI1 is a MAIN-domain peripheral, so per the AE822 DFP soc_dma_map (SPI1_DMA=0,
+ * group 2, TX req 21 / RX req 17) it routes through the SYSTOP DMA0 via its event
+ * router evtrtr0 (4 groups -> group 2 valid) -- NOT the M55-HE-local DMA2/evtrtr2
+ * (1 group, for LP peripherals; wiring SPI1 there leaves the channel Waiting-For-
+ * Peripheral forever -- SPI1's request line isn't on the HE router).  DMA0's clock
+ * is SYSTOP (already on -- the app drives SPI1/GPIO in the same region); its
+ * PL330 boot-manager security latch (CLKCTRL_PER_MST) is in dma_alif_boot_latch.c.
+ * The fork PL330 driver statically allocates the per-channel ucode + remaps it via
+ * local_to_global(), so no external `microcode` prop is needed.  IRQs 299..306 =
+ * the 8 DMA0 channel-done lines, 331 = abort (AE822 DFP rtss_he).
  */
-&dma2 {
-	/delete-property/ microcode; /* base node set microcode=<0x0>; fork driver uses
-	                              * a remapped static buffer instead (no ext ucode). */
-	compatible = "alif,dma-pl330";
-	#dma-cells = <2>;
-	interrupt-parent = <&nvic>;
-	interrupts = <0 3>, <1 3>, <2 3>, <3 3>, <4 3>, <5 3>,
-		     <6 3>, <7 3>, <32 3>;
-	interrupt-names = "channel0", "channel1", "channel2", "channel3",
-			  "channel4", "channel5", "channel6", "channel7", "abort";
-	/* No `microcode` prop: the fork driver statically allocates the per-channel
-	 * ucode buffer and remaps it through local_to_global() (soc_memory_map.h) so a
-	 * TCM-resident buffer is reachable by the PL330 AXI master -- matches the
-	 * sdk-alif ensemble_rtss_he.dtsi dma2 node. */
-	status = "okay";
-};
-
 &soc {
-	evtrtr2: event-router@400e2000 {
+	dma0: dma@49080000 {
+		compatible = "alif,dma-pl330";
+		reg = <0x49080000 0x1000>;
+		#dma-cells = <2>;
+		dma-channels = <8>;
+		interrupt-parent = <&nvic>;
+		interrupts = <299 3>, <300 3>, <301 3>, <302 3>, <303 3>,
+			     <304 3>, <305 3>, <306 3>, <331 3>;
+		interrupt-names = "channel0", "channel1", "channel2", "channel3",
+				  "channel4", "channel5", "channel6", "channel7", "abort";
+		status = "okay";
+	};
+
+	evtrtr0: event-router@49035000 {
 		compatible = "alif,dma-event-router";
-		reg = <0x400e2000 0x100>;
-		dma-controller = <&dma2>;
+		reg = <0x49035000 0x100>;
+		dma-controller = <&dma0>;
 		channels = <32>;
-		dma-groups = <1>;
+		dma-groups = <4>;  /* SYSTOP router: 4 ACK_TYPE groups (0-3); SPI1 uses group 2 */
 		#dma-cells = <2>;
 		status = "okay";
 	};
 };
 
 /*
- * Route the bridge SPI1 through the event-router to DMA2.  Cell encoding
+ * Route the bridge SPI1 through evtrtr0 to DMA0.  Cell encoding
  * (ALIF_DMA_ENCODE(channel, dma_group, handshake), periph_req):
  *   TX = PL330 ch2, evtrtr group 2, handshake on, SPI1 TX periph req 21
  *   RX = PL330 ch3, evtrtr group 2, handshake on, SPI1 RX periph req 17
  * (AE822 DFP soc_dma_map.h: SPI1 group 2, TX 21 / RX 17.)
  */
 &cc3501e_spi {
-	dmas = <&evtrtr2 ALIF_DMA_ENCODE(2, 2, 1) 21>,
-	       <&evtrtr2 ALIF_DMA_ENCODE(3, 2, 1) 17>;
+	dmas = <&evtrtr0 ALIF_DMA_ENCODE(2, 2, 1) 21>,
+	       <&evtrtr0 ALIF_DMA_ENCODE(3, 2, 1) 17>;
 	dma-names = "txdma", "rxdma";
 };
 

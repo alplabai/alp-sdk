@@ -45,6 +45,7 @@
 #include <string.h>
 
 #include <zephyr/fatal.h>
+#include <zephyr/kernel.h> /* k_cycle_get_32 / k_cyc_to_us_floor32 for the DMA stream benchmark */
 
 #include "alp/peripheral.h"
 #include "alp/chips/cc3501e.h"
@@ -161,6 +162,10 @@ typedef struct {
 	/* --- BLE bring-up results (cc3501e_ble_* helpers) --- */
 	uint32_t ble_status;  /* +0x38  (uint32_t)alp_status_t from cc3501e_ble_enable        */
 	uint32_t ble_enabled; /* +0x3C  1 once the BLE controller + NimBLE host came up        */
+	/* --- host peripheral-DMA continuous-stream throughput benchmark --- */
+	uint32_t dma_stream_iters; /* +0x40  large TX-DMA transfers completed in the burst     */
+	uint32_t dma_stream_us;    /* +0x44  elapsed microseconds for the burst                */
+	uint32_t dma_stream_kbps;  /* +0x48  measured throughput, KB/s (bytes*1000/us)         */
 } cc3501e_witness_t;
 
 /* Progress checkpoints written to g_cc3501e_witness.phase so a J-Link can
@@ -427,7 +432,48 @@ int main(void)
 	 */
 	printf("[cc3501e-bringup] entering liveness soak (PING every 500 ms)\n");
 	g_cc3501e_witness.phase = CC3501E_PHASE_SOAK;
+	bool stream_done = false;
 	for (uint32_t i = 0u;; ++i) {
+		/*
+		 * Run-once host-DMA continuous-stream throughput benchmark.  Once the
+		 * link is up, clock a large TX buffer over SPI1 back-to-back; each
+		 * transfer is well over CONFIG_SPI_DW_ALIF_DMA_MIN_LEN so it takes the
+		 * peripheral-DMA path (evtrtr0 -> DMA0, no CPU FIFO shuffling).  Records
+		 * the aggregate KB/s in the witness -- this is the "continuous stream at
+		 * full speed" proof (the CC35 just discards the bytes; we measure the
+		 * host TX-DMA + 14.8 MHz SCLK throughput).
+		 */
+		if (!stream_done && g_cc3501e_witness.ping_ok >= 20u) {
+			/* Stream buffer in SRAM0 (0x02000000, 4 MB) -- native global memory the
+			 * PL330 reaches over AXI directly.  A DTCM buffer is only reachable via
+			 * the slow global-alias path (0x58800000), whose refill latency starves
+			 * the TX FIFO and throttles SCLK.  SRAM0 keeps the FIFO fed. */
+			enum { STREAM_LEN = 131072u };
+			uint8_t *stream_tx = (uint8_t *)0x02000000u;
+			stream_done        = true;
+			for (uint32_t k = 0u; k < STREAM_LEN; ++k) {
+				stream_tx[k] = (uint8_t)k;
+			}
+			/* TX-only (rx=NULL) -- a real one-directional stream: no RX FIFO drain
+			 * to backpressure SCLK. */
+			const uint32_t iters = 4u;
+			uint32_t       ok    = 0u;
+			uint32_t       t0    = k_cycle_get_32();
+			for (uint32_t k = 0u; k < iters; ++k) {
+				if (alp_spi_transceive(fw.bus, stream_tx, NULL, STREAM_LEN) == ALP_OK) {
+					ok++;
+				}
+			}
+			uint32_t us = k_cyc_to_us_floor32(k_cycle_get_32() - t0);
+			g_cc3501e_witness.dma_stream_iters = ok;
+			g_cc3501e_witness.dma_stream_us    = us;
+			g_cc3501e_witness.dma_stream_kbps =
+				(us > 0u) ? (uint32_t)(((uint64_t)ok * STREAM_LEN * 1000u) / us)
+					  : 0u;
+			printf("[cc3501e-bringup] DMA stream: %u x %u B in %u us -> %u KB/s\n",
+			       ok, (unsigned)STREAM_LEN, us, g_cc3501e_witness.dma_stream_kbps);
+		}
+
 		s                             = cc3501e_ping(&fw);
 		g_cc3501e_witness.last_status = (uint32_t)s;
 		if (s == ALP_OK) {
