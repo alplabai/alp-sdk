@@ -64,6 +64,13 @@ full per-(library × core × runtime) picture.
 
 > **Note:** CMSIS-DSP is consumed directly via `arm_math.h` from app code; the SDK does not re-export it.
 
+> **Note on the Display "GA (SSD1306)" cells:** that GA claim covers
+> the **SSD1306 chip driver** (`chips/ssd1306/`, `ssd1306_*`) and
+> the LVGL re-export (`<alp/gui.h>`) riding Zephyr's own display
+> binding — **not** the portable `<alp/display.h>` class, whose
+> backend was the NOT_IMPLEMENTED stub until issue #23 landed the
+> Zephyr driver-class wrapper (see the v0.5+ surfaces table).
+
 ## v0.2.0 — landed (peripheral expansion + capability validation)
 
 The v0.2 SDK doubles peripheral coverage from 4 to 12 wrapped
@@ -207,6 +214,7 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
+| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; no panel has been driven on real hardware through this class yet.  (The v0.1 Display "GA (SSD1306)" rows are the **chip-driver + LVGL re-export path**, not this class.)  V2N DSI / parallel-RGB + Alif LCD-IF vendor backends still pending |
 | Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `tflm` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are **real, bench-unverified** (link needs the Yocto sysroot; default-off CMake options); the former M-class DRP-AI/DEEPX stubs are removed — both engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |

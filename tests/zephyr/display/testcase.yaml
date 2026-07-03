@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  # Real-backend scenario: the upstream dummy display controller
+  # (CONFIG_DUMMY_DISPLAY, zephyr,dummy-dc) backs the alp-display0
+  # alias, so open / get_caps / blit / clear / close plus the param-
+  # validation edges run against the real zephyr_drv backend.
+  alp_sdk.display.zephyr_drv:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "DTC_OVERLAY_FILE=overlays/dummy_display.overlay"
+    tags:
+      - alp-sdk
+      - display
+      - backend
+
+  # No-device scenario: CONFIG_DISPLAY=y so zephyr_drv is compiled
+  # and selected, but no alp-displayN alias exists in DT.  Proves
+  # the clean degrade on boards without a display node: open returns
+  # NULL with ALP_ERR_NOT_READY, nothing crashes at boot.
+  alp_sdk.display.no_device:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - display
+      - backend
+
+  # Stub-fallback scenario: CONFIG_DISPLAY=n removes the zephyr_drv
+  # backend entirely; the wildcard priority-0 stub is selected and
+  # open degrades with ALP_ERR_NOT_IMPLEMENTED.
+  alp_sdk.display.stub_fallback:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_stub.conf"
+    tags:
+      - alp-sdk
+      - display
+      - backend

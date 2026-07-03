@@ -66,6 +66,23 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   (app-cooperative); the app-immutable `HW_ENFORCED` TF-M tier remains #111.
   native_sim coverage: persist-across-reinit, full-log NOMEM-no-wrap, and
   RAM-fallback scenarios (`alp.unit.update_log{,.persist}`).
+- **Real Zephyr display backend** for `<alp/display.h>` (issue #23):
+  `src/backends/display/zephyr_drv.c` wraps the upstream Zephyr
+  `display_*` driver class (`display_write`/`display_clear`/
+  `display_blanking_on`/`_off`/`display_get_capabilities`/
+  `display_set_pixel_format`; ADR-0017 Tier 1) so any panel with an
+  upstream display driver resolves via the new `alp-display0..3` DT
+  aliases.  Registered `silicon_ref="*"` priority 50 behind
+  `CONFIG_ALP_SDK_DISPLAY_ZEPHYR_DRV` (default y with
+  `CONFIG_DISPLAY`); the priority-0 stub remains and boards without a
+  display node degrade cleanly (`ALP_ERR_NOT_READY` /
+  `ALP_ERR_NOT_IMPLEMENTED`).  Drivers without a clear op get a
+  chunked zero-fill software fallback; blit rects are bounds-checked
+  against the panel (`ALP_ERR_OUT_OF_RANGE`).  Covered by
+  `tests/zephyr/display/` on native_sim against the upstream dummy
+  display controller — code complete, **no silicon run yet**.  The
+  LVGL re-export path keeps owning the `zephyr,display` chosen node;
+  see the zephyr_drv.c header for the hand-off rules.
 - **I2C/SPI target (slave) mode** in `<alp/peripheral.h>` (`[ABI-EXPERIMENTAL]`):
   `alp_i2c_target_open`/`alp_i2c_target_close` (byte-granular write/read/stop
   ISR callbacks, dispatched to Zephyr's `i2c_target_register`) and
