@@ -121,10 +121,12 @@ a build.
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `ros2` | B | `humble` | Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**35 / 35 (library × SKU) cells compatible.**
+**47 / 49 (library × SKU) cells compatible (2 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -133,10 +135,12 @@ a build.
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ |
+| `ros2` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 
-**20 / 20 (library × SKU) cells compatible.**
+**28 / 28 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->
