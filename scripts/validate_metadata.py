@@ -34,9 +34,29 @@ HWREV_SCHEMA = REPO / "metadata" / "schemas" / "hw-revisions-v1.schema.json"
 SILICON_KCONFIG_SCHEMA = REPO / "metadata" / "schemas" / "silicon-kconfig-v1.schema.json"
 SILICON_KCONFIG_REGISTRY = REPO / "metadata" / "registries" / "silicon-kconfig.json"
 BOARD_PRESET_SCHEMA = REPO / "metadata" / "schemas" / "board-preset.schema.json"
+LIBRARY_SCHEMA = REPO / "metadata" / "schemas" / "library-v1.schema.json"
+SOC_SPEC_SCHEMA = REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json"
 SOCS = REPO / "metadata" / "socs"
 SOM_PRESETS = REPO / "metadata" / "e1m_modules"
 BOARD_PRESETS = REPO / "metadata" / "boards"
+LIBRARIES = REPO / "metadata" / "libraries"
+
+
+def _capability_vocabulary() -> set[str]:
+    """The authoritative SoC capability key set (ADR 0018 `requires.capabilities`).
+
+    Sourced the same way gen_soc_caps.py grounds its cap layer: the fixed
+    `capabilities` property names in soc-spec-v1.schema.json (that object is
+    `additionalProperties: false`, so its keys ARE the vocabulary).  A library
+    manifest may only require a capability the SoC layer can actually resolve.
+    """
+    if not SOC_SPEC_SCHEMA.is_file():
+        return set()
+    schema = json.loads(SOC_SPEC_SCHEMA.read_text(encoding="utf-8"))
+    caps = (schema.get("properties", {})
+            .get("capabilities", {})
+            .get("properties", {}))
+    return set(caps.keys())
 
 
 def _emit_pending_warnings(rel: Path, doc) -> None:
@@ -198,6 +218,65 @@ def _check_silicon_kconfig() -> list:
     return failures
 
 
+def _check_library_semantics(library_files) -> list:
+    """Cross-checks on library manifests beyond pure schema validation (ADR 0018).
+
+    Schema already enforces the licence allowlist and the tier/os enums; this
+    pass adds the two facts the schema cannot express:
+
+      * every `requires.capabilities` key names a real SoC capability
+        (validated against `_capability_vocabulary()`), so an incompatible
+        selection is rejected early and clearly rather than emitting a dead
+        Kconfig line; and
+      * `name:` matches the manifest filename (`<name>.yaml`), so the
+        `libraries: [<name>]` token a project writes always resolves.
+
+    Returns a failure list shaped like _check_files().
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    vocab = _capability_vocabulary()
+    for path in library_files:
+        try:
+            rel = path.relative_to(REPO)
+        except ValueError:
+            rel = path  # out-of-tree (e.g. a test fixture); report as-is
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # parse / schema errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+
+        name = doc.get("name")
+        if isinstance(name, str) and name != path.stem:
+            msgs.append(
+                f"name: `{name}` must match the manifest filename `{path.stem}` "
+                f"-- the `libraries: [{path.stem}]` token resolves by filename")
+
+        requires = doc.get("requires") or {}
+        if isinstance(requires, dict):
+            for cap in requires.get("capabilities") or []:
+                if cap not in vocab:
+                    offered = ", ".join(sorted(vocab)) or "<none>"
+                    msgs.append(
+                        f"requires/capabilities[{cap}]: not a known SoC capability "
+                        f"-- must be one the capability layer resolves "
+                        f"(known: {offered})")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            tier = doc.get("tier", "?")
+            lic = doc.get("license", "?")
+            print(f"OK   {rel}  (library: tier {tier}, {lic})")
+    return failures
+
+
 def main() -> int:
     # SoC files (JSON) against soc-spec v1.
     soc_schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
@@ -261,6 +340,23 @@ def main() -> int:
                 "name",
             )
 
+    # Library manifests (YAML) against library v1 (ADR 0018).
+    library_failures: list = []
+    library_semantic_failures: list = []
+    library_files: list = []
+    if LIBRARY_SCHEMA.is_file():
+        library_schema = json.loads(LIBRARY_SCHEMA.read_text(encoding="utf-8"))
+        library_validator = jsonschema.Draft202012Validator(library_schema)
+        library_files = sorted(LIBRARIES.glob("*.yaml"))
+        if library_files:
+            print()
+            library_failures = _check_files(
+                "YAML", library_files, library_validator,
+                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                "name",
+            )
+            library_semantic_failures = _check_library_semantics(library_files)
+
     # SoM `silicon_capabilities.unpopulated` <-> SoC capability cross-check.
     restriction_failures: list = []
     if som_files:
@@ -274,11 +370,13 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures)
+                      + len(library_failures) + len(library_semantic_failures)
                       + len(restriction_failures)
                       + len(silicon_kconfig_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
-          f"{len(board_files)} board preset(s) + silicon-kconfig registry "
+          f"{len(board_files)} board preset(s) + {len(library_files)} "
+          f"library manifest(s) + silicon-kconfig registry "
           f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 

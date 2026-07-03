@@ -1,0 +1,42 @@
+# LVGL -- Light and Versatile Graphics Library (ADR 0018 library manifest).
+#
+# Formalises the re-export the SDK already ships (metadata/library-profiles/
+# lvgl/ carries the SDK-tuned lv_conf.h + the HW-accelerator bindings).  This
+# manifest is the single source of truth for the `libraries: [lvgl]` selection.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * west module `lvgl`, path modules/lib/gui/lvgl,
+#     west.yml revision 85aa60d18b3d5e5588d7b247abf90198f07c8a63
+#   * enable symbol CONFIG_LVGL  ($ZEPHYR_BASE/modules/lvgl/Kconfig: `config LVGL`)
+#   * upstream version 9.5.0  (modules/lib/gui/lvgl/lv_version.h:
+#     LVGL_VERSION_MAJOR/MINOR/PATCH = 9/5/0)
+#   * licence MIT  (modules/lib/gui/lvgl/LICENCE.txt: "MIT licence")
+#   * Yocto: recipe `lvgl` from the openembedded-layer
+#     (meta-alp-sdk/conf/layer.conf: LAYERDEPENDS_alp-sdk = "core openembedded-layer")
+schema_version: 1
+name: lvgl
+description: "Light and Versatile Graphics Library -- embedded GUI/widgets."
+tier: A
+version: "9.5.0"
+license: MIT
+
+requires:
+  # LVGL is display-agnostic: it renders into a draw buffer and hands pixels
+  # to a flush callback, so it drives an SPI SSD1306 or a MIPI-DSI panel alike.
+  # There is no single "display" capability in the alp-sdk capability layer to
+  # gate on, so the only honest hard requirement is a RAM floor.  The SDK's own
+  # lv_conf.h pins LV_MEM_SIZE = 48 KiB (metadata/library-profiles/lvgl/
+  # lv_conf.h:50 `#define LV_MEM_SIZE (48U * 1024U)`); a 64 KiB floor covers
+  # that heap plus a modest draw buffer and app overhead.
+  min_ram_kib: 64
+
+integration:
+  zephyr:
+    module: lvgl
+    kconfig:
+      - CONFIG_LVGL=y
+  yocto:
+    # Standard OpenEmbedded recipe, reachable via meta-alp-sdk's
+    # openembedded-layer dependency.
+    image_install:
+      - lvgl
