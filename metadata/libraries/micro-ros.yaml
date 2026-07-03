@@ -1,0 +1,74 @@
+# micro-ROS -- ROS 2 client for microcontrollers (ADR 0018 library manifest).
+#
+# The Cortex-M / Zephyr half of the ADR 0018 flagship: a micro-ROS node runs
+# on the M-class Zephyr peer and talks to a ROS 2 agent on the Cortex-A / Yocto
+# peer (see metadata/libraries/ros2.yaml).  Together they are the heterogeneous
+# Zephyr+Yocto robotics proof ADR 0010 exists to enable.
+#
+# PREREQUISITE -- NOT YET PINNED IN west.yml (grounded 2026-07-03):
+#   micro-ROS is NOT in the pinned Zephyr v4.4.0 workspace.  `west list` from
+#   alp-sdk/west.yml shows only cmsis / cmsis-dsp / cmsis_6 / lvgl / open-amp /
+#   zcbor / nanopb / tflite-micro; `ls $ZEPHYR_BASE/../modules/lib` has no
+#   ros/micro entry.  Wiring micro-ROS therefore requires FIRST adding the
+#   upstream micro-ROS Zephyr module to alp-sdk/west.yml:
+#     name  micro_ros_zephyr_module   (github.com/micro-ROS/micro_ros_zephyr_module)
+#     branch  humble                  (pairs with the ros2.yaml Humble A-side)
+#   No revision is invented here -- pinning an exact `revision:` is the human
+#   step that lands the module (its own follow-up issue).  This manifest is
+#   valid, honest metadata in the meantime: it names the module and its role.
+#
+# Enablement is BY MODULE PRESENCE, not a Kconfig gate.  The micro-ROS Zephyr
+# module builds `libmicroros` and its app glue whenever the module is in the
+# workspace; there is no single upstream `CONFIG_MICRO_ROS=y` enable symbol to
+# transcribe (transport/RMW/executor knobs are set in app code + the module's
+# colcon meta, not one master switch).  So `integration.zephyr` here carries
+# `module:` and NO `kconfig:` -- inventing a symbol is forbidden (ADR 0018).
+# Once the module is pinned and a symbol is confirmed in its Kconfig, transcribe
+# it here; until then the emitter renders the selection tag with no CONFIG line.
+#
+# Cross-core transport (BENCH-GATED, its own follow-up):
+#   A micro-ROS node on M reaches the ROS 2 agent on A either over UDP on a
+#   virtual net or a custom RMW over RPMsg.  alp-sdk already has the RPMsg
+#   substrate the latter would ride: open-amp is pinned (west module
+#   `open-amp`), the A55/Linux side has a framed RPMsg transport
+#   (src/backends/rpc/yocto_drv.c binding <alp/rpc.h> onto /dev/rpmsg_ctrl0,
+#   ADR 0016), and examples/multicore/rpmsg-v2n proves the A55<->M33 channel.
+#   But NOTHING wires a micro-ROS RMW onto it today, and there is no ROS 2
+#   agent packaged on the A side yet.  The RMW bridge is a separate design
+#   (likely its own ADR) and must be proven on the bench -- it is NOT built here.
+#
+# Version:  `humble` -- the micro-ROS Humble release line, chosen to pair with
+#   the meta-ros2-humble A-side that meta-alp-sdk already grounds (ros2.yaml).
+#   Not an invented git revision; the exact west `revision:` lands with the pin.
+# License:  Apache-2.0 -- cited from the upstream micro-ROS project (the whole
+#   micro-ROS stack and micro_ros_zephyr_module are Apache-2.0).  NOT verified
+#   from an in-tree LICENSE file, because the module is not in this checkout.
+schema_version: 1
+name: micro-ros
+description: "micro-ROS -- ROS 2 client for microcontrollers (Cortex-M / Zephyr node)."
+# Tier B for now: the metadata/libraries/README.md promotion bar for Tier A is
+# CI-built + a shipped teaching example + breakage-blocks-release.  micro-ROS
+# meets NONE of these yet -- it is not even pinned in west.yml (see the
+# prerequisite note above).  It promotes to Tier A once the west pin, the CI
+# build lane, and the microros<->ros2 example land (its named follow-ups).
+tier: B
+version: "humble"
+license: Apache-2.0
+
+requires:
+  # micro-ROS is the Zephyr / M-class client in the alp-sdk heterogeneous
+  # topology (ADR 0010): it runs on the Cortex-M peer while ROS 2 owns the
+  # Cortex-A / Yocto side (ros2.yaml).  `os: [zephyr]` rejects a selection on a
+  # core that does not run Zephyr with a clear message; `core_class: m` pins the
+  # deployment role.  (Unlike cmsis-nn there is no CPU_CORTEX_M `depends on` to
+  # cite -- the module is not pinned -- so this constraint encodes the alp-sdk
+  # deployment model, not an upstream Kconfig dependency.)
+  os: [zephyr]
+  core_class: m
+
+integration:
+  zephyr:
+    # Enable-by-presence + prerequisite pin (see header): module named, no
+    # invented Kconfig.  Emit renders `# library: micro-ros vhumble (west module
+    # `micro_ros_zephyr_module`)` with no CONFIG line until the module lands.
+    module: micro_ros_zephyr_module

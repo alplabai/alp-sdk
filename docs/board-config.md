@@ -678,6 +678,53 @@ that ship a `metadata/libraries/<name>.yaml` manifest.
 See [`metadata/libraries/README.md`](../metadata/libraries/README.md)
 for the manifest shape, the full library list, and how to add one.
 
+#### Flagship: micro-ROS + ROS 2 across one heterogeneous project
+
+The `libraries:` mechanism spans both OSes of a heterogeneous SoM in a
+single project — the proof ADR 0018 exists for and the peer model
+[ADR 0010](adr/0010-heterogeneous-os-orchestration.md) defines. A
+robotics project runs a **micro-ROS** node on the Cortex-M / Zephyr
+peer and **ROS 2** on the Cortex-A / Yocto peer, both selected from the
+same top-level `libraries:` key:
+
+```yaml
+som:
+  sku: E1M-V2N101
+libraries: [micro-ros, ros2]   # M-side client + A-side agent, one file
+cores:
+  a55_cluster:                 # Cortex-A55 -> Yocto runs ROS 2
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+  m33_sm:                      # Cortex-M33 -> Zephyr runs the micro-ROS node
+    os: zephyr
+    app: ./m33
+```
+
+Each library resolves to the peer it belongs on: `micro-ros`
+(`requires: {os: [zephyr], core_class: m}`) wires only into the Zephyr
+slice's `alp.conf`; `ros2` (`requires: {os: [yocto], core_class: a}`)
+appends `rclcpp` to the Yocto slice's `IMAGE_INSTALL`. Select either on
+the wrong peer and emit fails naming the `os` / `core_class` constraint.
+
+Two honest limits are recorded in the manifest headers rather than
+hidden:
+
+- **micro-ROS is not yet pinned** in the Zephyr v4.4.0 `west.yml`. Its
+  manifest names the upstream `micro_ros_zephyr_module` (branch
+  `humble`) as a west prerequisite and enables **by module presence**
+  (no invented Kconfig); emit renders the selection tag with no
+  `CONFIG_` line until the module is added to `west.yml`.
+- **ROS 2 is Tier B (recipe-only)**: its wiring is grounded in
+  `meta-alp-sdk` (`rclcpp`; `meta-ros2-humble` as a `LAYERRECOMMENDS`),
+  but alp-sdk CI does not build it, and a build must add
+  `meta-ros2-humble` to `bblayers.conf`.
+- The **cross-core RMW bridge** that carries ROS topics between the two
+  peers (UDP-on-virtio, or a custom RMW over the RPMsg transport of
+  [ADR 0016](adr/0016-cross-core-peripheral-proxy-wire-schema.md)) is
+  bench-gated and out of scope for the manifests — it is its own
+  design.
+
 ## How the loader compiles the file
 
 `scripts/alp_project.py` reads `board.yaml`, validates against the

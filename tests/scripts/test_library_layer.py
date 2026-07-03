@@ -298,3 +298,146 @@ def test_doctor_libraries_none_when_empty(monkeypatch, tmp_path: Path) -> None:
     _write_board(tmp_path, _V2N_NOLIB)
     monkeypatch.chdir(tmp_path)
     assert doctor._check_libraries() is None
+
+
+# ---------------------------------------------------------------------
+# ADR 0018 flagship: micro-ROS (M / Zephyr) + ROS 2 (A55 / Yocto)
+#
+# The heterogeneous-core proof (ADR 0010): one project, a micro-ROS node on
+# the Cortex-M Zephyr peer and ROS 2 on the Cortex-A Yocto peer.  Grounding
+# (2026-07-03): micro-ROS is NOT pinned in the Zephyr v4.4.0 west.yml, so its
+# manifest documents the west prerequisite and declares an enable-by-presence
+# module with NO fabricated Kconfig; ROS 2 IS grounded via meta-alp-sdk
+# (rclcpp in alp-image-common.inc, meta-ros2-humble LAYERRECOMMENDS).
+# ---------------------------------------------------------------------
+
+FLAGSHIP_LIBS = {"micro-ros", "ros2"}
+
+
+def test_flagship_manifests_present() -> None:
+    on_disk = {p.stem for p in LIBRARIES_DIR.glob("*.yaml")}
+    assert FLAGSHIP_LIBS <= on_disk, f"missing flagship manifests: {FLAGSHIP_LIBS - on_disk}"
+
+
+def test_ros2_is_tier_b() -> None:
+    """ROS 2 is a heavy Yocto layer, not an alp-sdk-CI-built library -> Tier B."""
+    doc = yaml.safe_load((LIBRARIES_DIR / "ros2.yaml").read_text(encoding="utf-8"))
+    assert doc["tier"] == "B"
+    assert doc["license"] == "Apache-2.0"
+
+
+def test_microros_is_apache() -> None:
+    doc = yaml.safe_load((LIBRARIES_DIR / "micro-ros.yaml").read_text(encoding="utf-8"))
+    assert doc["license"] == "Apache-2.0"
+    # module-absent: an enable-by-presence Zephyr section (module, no kconfig).
+    zephyr = doc["integration"]["zephyr"]
+    assert zephyr.get("module") == "micro_ros_zephyr_module"
+    assert "kconfig" not in zephyr, "no Kconfig may be invented while the module is unpinned"
+
+
+# --- schema: the module-only Zephyr section the flagship needs -------
+
+def test_schema_accepts_zephyr_module_only() -> None:
+    """A Zephyr integration may name its west module without a Kconfig -- the
+    honest shape for an enable-by-presence / not-yet-pinned module (micro-ROS).
+    """
+    doc = _valid_manifest()
+    doc["integration"] = {"zephyr": {"module": "micro_ros_zephyr_module"}}
+    assert not list(_validator().iter_errors(doc)), "module-only zephyr must validate"
+
+
+def test_schema_rejects_empty_zephyr_section() -> None:
+    """Relaxing `kconfig` must not let an empty zephyr section through: it still
+    has to carry at least a module (minProperties: 1)."""
+    doc = _valid_manifest()
+    doc["integration"] = {"zephyr": {}}
+    assert list(_validator().iter_errors(doc)), "empty zephyr section must be rejected"
+
+
+# --- emit: micro-ROS on an M-core -----------------------------------
+
+_V2N_MICROROS = """
+som:
+  sku: E1M-V2N101
+libraries: [micro-ros]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
+
+def test_emit_microros_module_only_no_kconfig(tmp_path: Path) -> None:
+    """micro-ROS on the M33 emits the ADR 0018 selection tag naming the west
+    module, and -- because the module is not pinned and has no enable symbol --
+    NO fabricated CONFIG line (the documented module-absent behaviour)."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_MICROROS))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "ADR 0018" in out
+    assert "micro_ros_zephyr_module" in out           # module named in the tag
+    assert "micro-ros vhumble" in out                 # version transcribed
+    assert "CONFIG_MICRO" not in out                  # nothing invented
+
+
+def test_microros_requires_zephyr_core(tmp_path: Path) -> None:
+    """micro-ROS is the M/Zephyr client; selecting it on a project whose live
+    cores run no Zephyr fails naming the os constraint."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries: [micro-ros]
+    cores:
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+      m33_sm:
+        os: "off"
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    with pytest.raises(OrchestratorError) as exc:
+        liblayer.resolve_selection(project)
+    assert "zephyr" in str(exc.value)
+
+
+# --- emit: ROS 2 on an A55 Yocto core -------------------------------
+
+_V2N_ROS2_YOCTO = """
+som:
+  sku: E1M-V2N101
+libraries: [ros2]
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+"""
+
+
+def test_emit_ros2_yocto_image_install(tmp_path: Path) -> None:
+    """ROS 2 on the A55 Yocto slice appends the grounded rclcpp package
+    (transcribed from meta-alp-sdk alp-image-common.inc)."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_ROS2_YOCTO))
+    out = _slice_local_conf(project, project.cores["a55_cluster"])
+    assert 'IMAGE_INSTALL:append = " rclcpp"' in out
+
+
+def test_ros2_on_non_yocto_target_errors(tmp_path: Path) -> None:
+    """ROS 2 requires os: [yocto] + core_class a; a project whose only live
+    core is the M33 running Zephyr fails naming the os constraint."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries: [ros2]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: "off"
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    with pytest.raises(OrchestratorError) as exc:
+        liblayer.resolve_selection(project)
+    msg = str(exc.value)
+    assert "ros2" in msg and "yocto" in msg
