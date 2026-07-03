@@ -13,18 +13,30 @@ counter the same API is hardware-enforced — no application change required.
 
 | Level | Value | What you get |
 |---|---|---|
-| `SW_TAMPER_EVIDENT` | `0` | SHA-256 hash-chain + RAM monotonic counter. Detects mutation, truncation, rollback, and reorder of historical entries. App-cooperative: a process with write access to the store can forge entries. Use for audit trails where cooperative tamper-evidence is sufficient. |
+| `SW_TAMPER_EVIDENT` | `0` | SHA-256 hash-chain + monotonic counter (NVS-persisted where the board provides an `alp_ulog_partition`; RAM otherwise). Detects mutation, truncation, rollback, and reorder of historical entries. App-cooperative: a process with write access to the store can forge entries. Use for audit trails where cooperative tamper-evidence is sufficient. |
 | `HW_ENFORCED` | `1` | TF-M Protected Storage (Secure Processing Environment, unreachable from NS) + a hardware non-decrementable monotonic counter (PSA NV or OPTIGA). An attacker with full OS access cannot forge or roll back entries without breaking TF-M isolation. Present where the secure backend is registered. |
 
 Call `alp_update_log_assurance()` to query which level is active at runtime.
 
-## Slice-1 scope
+## Persistence
 
-The software store in this slice is **in-RAM**: the log does not survive a
-reboot. Durable persistence via Zephyr Settings/NVS (so the chain survives
-power-cycles) is the named follow-up before the software tier is production.
-The engine contract and assurance level are unchanged by that swap — only the
-`alp_secure_store_if` implementation gains persistence; the API is identical.
+With `CONFIG_ALP_SDK_UPDATE_LOG_PERSIST` (default y when `CONFIG_NVS` is on)
+and a fixed partition labelled `alp_ulog_partition` in the devicetree, the
+software store lives in Zephyr NVS: the log and its monotonic counter survive
+reboot and firmware update. Boards opt in by carving that partition out of a
+writable flash device (offsets are board-specific — see the Kconfig help).
+Without the partition the tier falls back to the pre-persistence **in-RAM**
+store and the log does not survive a reboot.
+
+Persistence does **not** change the assurance level: the software tier stays
+tamper-*evident* — `verify()` catches out-of-band mutation, truncation,
+rollback, and reorder, but code that can write the partition can rebuild the
+store and counter consistently. App-immutability requires the `HW_ENFORCED`
+tier (TF-M isolation + hardware counter, issue #111).
+
+The log is append-only and never wraps: when the partition is full,
+`alp_update_log_append()` returns `ALP_ERR_NOMEM` and the existing chain
+stays intact and verifiable.
 
 ## Running the example
 

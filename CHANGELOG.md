@@ -21,6 +21,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added
 
+- **Persistent backing store for the software `<alp/update_log.h>` tier**
+  (#262).  With `CONFIG_ALP_SDK_UPDATE_LOG_PERSIST` (default y when
+  `CONFIG_NVS` is enabled) and a board-provided `alp_ulog_partition` fixed
+  partition, the sw tier's keyed store **and** its monotonic counter live in
+  Zephyr NVS, so the tamper-evident audit chain survives reboot and firmware
+  update.  Boards without the partition (or with NVS off) keep the previous
+  RAM-store behaviour.  The log is append-only and never wraps: a full
+  partition makes `alp_update_log_append()` return `ALP_ERR_NOMEM` with the
+  existing chain intact (appends are free-space-gated up front so a
+  mid-transaction flash-full cannot leave an honest log looking rolled
+  back).  Assurance is unchanged — still `SW_TAMPER_EVIDENT`
+  (app-cooperative); the app-immutable `HW_ENFORCED` TF-M tier remains #111.
+  native_sim coverage: persist-across-reinit, full-log NOMEM-no-wrap, and
+  RAM-fallback scenarios (`alp.unit.update_log{,.persist}`).
 - **I2C/SPI target (slave) mode** in `<alp/peripheral.h>` (`[ABI-EXPERIMENTAL]`):
   `alp_i2c_target_open`/`alp_i2c_target_close` (byte-granular write/read/stop
   ISR callbacks, dispatched to Zephyr's `i2c_target_register`) and

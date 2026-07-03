@@ -1642,6 +1642,27 @@ config ALP_SDK_UPDATE_LOG
 	  Storage + monotonic counter) is a later slice; until it lands the
 	  surface stays experimental. See docs/abi-markers.md.
 
+config ALP_SDK_UPDATE_LOG_PERSIST
+	bool "Persist the software update-log tier in NVS"
+	default y
+	depends on ALP_SDK_UPDATE_LOG && NVS
+	help
+	  Back the software update-log tier's store and monotonic counter
+	  with Zephyr NVS on the fixed partition labelled
+	  `alp_ulog_partition`, so the audit log survives reboot and
+	  firmware update. Board porting requirement: the board (or app
+	  overlay) must carve that partition out of a flash device the
+	  running image can write -- there is no portable default offset,
+	  so alp-sdk does not invent one per board. Without the partition
+	  (or if the NVS mount fails) the tier silently falls back to the
+	  pre-persistence RAM store: entries then vanish on reboot.
+
+	  TRUST BOUNDARY: persistence does not raise the assurance level.
+	  The tier stays SW_TAMPER_EVIDENT (app-cooperative tamper
+	  EVIDENCE, not tamper PROOFNESS): code that can write the
+	  partition can rebuild store + counter consistently. The
+	  HW_ENFORCED tier (issue #111) is the app-immutable answer.
+
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
 # wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
 # contract so apps can link cleanly against <alp/iot.h>.

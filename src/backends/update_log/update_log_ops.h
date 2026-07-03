@@ -21,4 +21,11 @@ struct alp_update_log {
 	bool                        in_use;
 };
 
+#ifdef CONFIG_ZTEST
+/* Test-only reboot emulation for the sw tier: drops all of the backend's
+ * RAM state (RAM store, RAM counter, cached NVS mount). wipe=true also
+ * clears the NVS partition. Compiled only under ZTEST. */
+void alp_ulog_sw_tier_test_reset(bool wipe);
+#endif
+
 #endif
