@@ -17,7 +17,11 @@ from typing import Any, Optional
 
 import yaml
 
-from alp_project import resolve_capabilities, silicon_to_kconfig
+from alp_project import (
+    resolve_capabilities,
+    silicon_to_kconfig,
+    som_unpopulated_capabilities,
+)
 
 from .models import BoardProject, Slice
 from .paths import METADATA_ROOT, REPO
@@ -27,6 +31,7 @@ from .slugs import (
     _board_define_slug,
     _slugs_from_helper_firmware,
     _slugs_from_on_module,
+    _som_define_slug,
 )
 
 
@@ -196,6 +201,15 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # correct EVK-specific BOARD_* aliases without per-app prj.conf
     # entries or extra_args.  Inline boards (no preset/name) skip this;
     # native_sim testcases that do need the define set it via extra_args.
+    # Per-SKU capability-restriction gate for <alp/soc_caps.h>: emitted
+    # ONLY when the SoM preset declares `silicon_capabilities.unpopulated`
+    # (no SKU in the current catalogue does), so unrestricted SKUs keep a
+    # byte-identical fragment.  Folded into the same CONFIG_COMPILER_OPT
+    # string as the board facade define because that Kconfig is
+    # single-value (last write wins, not additive).
+    som_def = ""
+    if som_unpopulated_capabilities(project.som_preset):
+        som_def = f"-DALP_SOM_{_som_define_slug(project.sku)}"
     if project.board_name:
         # Cross-EVK board facade selector for <alp/board.h>.  NOTE:
         # CONFIG_COMPILER_OPT is a single-value Kconfig string (last write
@@ -203,9 +217,19 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         # this -D is silently dropped; pass extra defines another way.
         lines.append("# Cross-EVK board facade selector (<alp/board.h>);"
                      " CONFIG_COMPILER_OPT is single-value (do not also set in prj.conf).")
-        lines.append(
-            f'CONFIG_COMPILER_OPT="-DALP_BOARD_{_board_define_slug(project.board_name)}"'
-        )
+        if som_def:
+            lines.append("# + ALP_SOM_* capability-restriction gate: this SKU "
+                         "leaves silicon capabilities unpopulated "
+                         "(SoM preset silicon_capabilities.unpopulated).")
+        opt = f"-DALP_BOARD_{_board_define_slug(project.board_name)}"
+        if som_def:
+            opt = f"{opt} {som_def}"
+        lines.append(f'CONFIG_COMPILER_OPT="{opt}"')
+        lines.append("")
+    elif som_def:
+        lines.append("# ALP_SOM_* capability-restriction gate (<alp/soc_caps.h>);"
+                     " CONFIG_COMPILER_OPT is single-value (do not also set in prj.conf).")
+        lines.append(f'CONFIG_COMPILER_OPT="{som_def}"')
         lines.append("")
 
     # ----------------------------------------------------------------
@@ -706,6 +730,11 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
                  "-- pass to cmake.")
     lines.append(f"-DALP_SOM_SKU={project.sku}")
     lines.append(f"-DALP_SOM_FAMILY={family}")
+    # Per-SKU capability-restriction gate for <alp/soc_caps.h>: emitted
+    # ONLY when the SoM preset declares `silicon_capabilities.unpopulated`,
+    # so every unrestricted SKU's cmake-args output stays byte-identical.
+    if som_unpopulated_capabilities(project.som_preset):
+        lines.append(f"-DALP_SOM_{_som_define_slug(project.sku)}")
     lines.append(f"-DALP_CORE_ID={slice_.core_id}")
     # Cross-EVK board facade selector (<alp/board.h>).
     # Emitted only when the project resolves to a named board preset
