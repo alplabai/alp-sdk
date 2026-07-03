@@ -27,10 +27,32 @@ manifest-driven **top-level** `libraries:` selection.
 | `cmsis-nn`  | A    | (west pin) | Apache-2.0 | zephyr    | Cortex-M |
 | `nanopb`    | A    | 0.4.9.1    | Zlib       | zephyr    | — |
 | `zcbor`     | A    | 0.9.1      | Apache-2.0 | zephyr    | — |
+| `micro-ros` | B    | humble     | Apache-2.0 | zephyr    | Cortex-M; west pin ‡ |
+| `ros2`      | B    | humble     | Apache-2.0 | yocto     | Cortex-A; meta-ros2-humble layer ‡ |
 
 `alp doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
 library picker can never disagree.
+
+**‡ The ADR 0018 flagship — micro-ROS + ROS 2 (ADR 0010 heterogeneous proof).**
+One project runs a micro-ROS node on the Cortex-M / Zephyr peer and ROS 2 on
+the Cortex-A / Yocto peer. Two honest caveats are recorded in the manifest
+headers rather than papered over:
+
+- `micro-ros` is **not yet pinned** in the Zephyr v4.4.0 `west.yml` (verified:
+  `west list` has no ros/micro module). Its manifest is valid metadata that
+  names the upstream `micro_ros_zephyr_module` (branch `humble`) as a west
+  prerequisite and declares an **enable-by-presence** Zephyr section (`module:`,
+  no `kconfig:`) — no enable symbol is invented. Emit renders the selection tag
+  with no `CONFIG_` line until the module lands. (Adding the west pin is a
+  named follow-up.)
+- `ros2` is **Tier B (recipe-only)**: its wiring is grounded in-tree
+  (`rclcpp` in `meta-alp-sdk/recipes-images/alp-image-common.inc`,
+  `meta-ros2-humble` as a `LAYERRECOMMENDS`), but alp-sdk CI does not build it.
+  A build must add `meta-ros2-humble` to `bblayers.conf` (named follow-up).
+- The **cross-core RMW bridge** (micro-ROS↔ROS 2 over UDP-on-virtio or a custom
+  RMW over the existing RPMsg transport, ADR 0016) is **bench-gated** and out of
+  scope here — likely its own ADR.
 
 ## Manifest shape
 
@@ -78,6 +100,15 @@ comment. Notes from the initial set:
   transcribed from the pinned Zephyr v4.4.0 workspace / OE recipe (record the
   file and `west.yml` revision in a manifest comment), or omitted. Never
   invent one.
+- A Zephyr integration section may name its west `module:` **without** a
+  `kconfig:` list (`integration.zephyr` requires only that one of the two is
+  present). This is the honest shape for an *enable-by-presence* module — one
+  that builds when it is in the workspace with no master `CONFIG_*=y` switch —
+  or a curated module whose west pin is a documented prerequisite not yet in
+  this checkout's `west.yml` (the micro-ROS flagship). Fabricating a Kconfig to
+  fill the slot is exactly what this relaxation exists to prevent: name the
+  module, document the prerequisite in the header, and transcribe the symbol
+  only once it is real.
 
 ## Licence allowlist
 

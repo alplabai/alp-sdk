@@ -83,8 +83,8 @@
         "zephyr": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kconfig"],
-          "description": "Zephyr wiring.  The library is pinned as a west module upstream (ADR 0017); this section only records the module name and the Kconfig symbols that enable it.  Emitted into the slice's alp.conf fragment alongside the board/SoM-driven CONFIG lines.",
+          "minProperties": 1,
+          "description": "Zephyr wiring.  The library is pinned as a west module upstream (ADR 0017); this section records the module name and, when it exists, the Kconfig symbols that enable it.  Emitted into the slice's alp.conf fragment alongside the board/SoM-driven CONFIG lines.  At least one of `module`/`kconfig` must be present.  `kconfig` is NOT required, for two honest cases the schema must be able to express without inviting invention: (1) an enable-by-presence module -- it builds its objects (e.g. micro-ROS's `libmicroros`) whenever the west module is in the workspace, with no single `CONFIG_*=y` gate to transcribe; and (2) an ADR-curated module (e.g. the micro-ROS flagship) whose west pin is a documented prerequisite not yet in this checkout's west.yml, where transcribing a Kconfig would be an invention.  In both cases the section carries `module:` and the manifest header documents the prerequisite; the emitter renders the selection tag with no fabricated CONFIG line.  Never invent a Kconfig symbol to satisfy this section -- omit it and document why.",
           "properties": {
             "kconfig": {
               "type": "array",
@@ -94,7 +94,7 @@
                 "type": "string",
                 "pattern": "^CONFIG_[A-Z0-9_]+=[A-Za-z0-9_\"-]+$"
               },
-              "description": "Upstream Zephyr Kconfig assignments that enable the library and the components consumers reach (e.g. `CONFIG_LVGL=y`).  Transcribed from the pinned Zephyr module's Kconfig -- never invented."
+              "description": "Upstream Zephyr Kconfig assignments that enable the library and the components consumers reach (e.g. `CONFIG_LVGL=y`).  Transcribed from the pinned Zephyr module's Kconfig -- never invented.  Omitted for an enable-by-presence module or one whose west pin is still a prerequisite (see the section description)."
             },
             "module": {
               "type": ["string", "null"],

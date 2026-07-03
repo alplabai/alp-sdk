@@ -1,0 +1,58 @@
+# ROS 2 -- Robot Operating System 2 (ADR 0018 library manifest).
+#
+# The Cortex-A / Yocto half of the ADR 0018 flagship: the ROS 2 stack runs on
+# the A-cluster under Linux and peers with a micro-ROS node on the M-class
+# Zephyr side (metadata/libraries/micro-ros.yaml).  This is the heterogeneous
+# Zephyr+Yocto robotics proof ADR 0010 enables.
+#
+# Tier B (recipe-only), grounded (2026-07-03):
+#   ROS 2 is a heavy Yocto-layer concern, not an alp-sdk-CI-built library, so it
+#   ships Tier B per the ADR's cloud/heavy-layer tier: the wiring + compatibility
+#   metadata are maintained and emitted, but alp-sdk CI does not build it.
+#   The wiring IS real and in-tree:
+#     * meta-alp-sdk/recipes-images/alp-image-common.inc IMAGE_INSTALL lists
+#       `rclcpp` (+ sensor-msgs / vision-msgs / image-transport / cv-bridge) --
+#       the ROS 2 client library the Alp edge images already ship.
+#     * meta-alp-sdk/conf/layer.conf: `meta-ros2-humble provides rclcpp + the
+#       ROS message packages pulled into alp-image-edge`, declared as a
+#       LAYERRECOMMENDS (soft dep) so non-ROS images build without it.
+#     * meta-alp-sdk/conf/distro/include/ros2-humble-build.inc pins the Humble
+#       subset (Fast-DDS RMW; Connext + Qt5 GUI recipes masked).
+#     * There is even a real ROS 2 node example:
+#       meta-alp-sdk/recipes-ros/alp-perception/ (inherit ros_distro_humble,
+#       ament_cmake) building examples/v2n/v2n-m1-ros-perception/.
+#
+# PREREQUISITE for a build: the meta-ros2-humble layer must be in bblayers.conf.
+#   It is a LAYERRECOMMENDS (soft) dependency of meta-alp-sdk, not a hard one --
+#   a build that selects `ros2` must add meta-ros2-humble (and un-mask the ROS
+#   recipes) itself.  That layer add is the named follow-up; this manifest emits
+#   the grounded IMAGE_INSTALL entry, no more.
+#
+# Version:  `humble` -- the ROS 2 Humble distro meta-alp-sdk targets
+#   (conf/distro/include/ros2-humble-build.inc; recipes-ros inherit
+#   ros_distro_humble).  Pairs with the micro-ros.yaml Humble M-side.
+# License:  Apache-2.0 -- the ROS 2 core (rclcpp, rcl, the message packages) is
+#   Apache-2.0.
+schema_version: 1
+name: ros2
+description: "ROS 2 (Humble) -- robotics middleware on the Cortex-A / Yocto peer."
+tier: B
+version: "humble"
+license: Apache-2.0
+
+requires:
+  # ROS 2 is the Linux / A-class peer (ADR 0010): it runs under Yocto on the
+  # Cortex-A cluster.  `os: [yocto]` rejects a selection whose live cores run
+  # no Yocto with the constraint named; `core_class: a` pins the deployment
+  # role.  (micro-ros.yaml is the mirror-image M/Zephyr client.)
+  os: [yocto]
+  core_class: a
+
+integration:
+  yocto:
+    # rclcpp is the ROS 2 C++ client library; naming it in IMAGE_INSTALL pulls
+    # ROS 2 into the image (provided by meta-ros2-humble -- see header).
+    # Transcribed from meta-alp-sdk/recipes-images/alp-image-common.inc, never
+    # invented.
+    image_install:
+      - rclcpp
