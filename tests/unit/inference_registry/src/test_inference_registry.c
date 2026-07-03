@@ -5,10 +5,11 @@
  * Backends visible on this test build:
  *   sw_fallback     (priority 0,   "*" wildcard, vendor "sw_fallback")
  *
- * Real bodies (tflm, ethos_u_aen, ethos_u_n93, drpai_v2n stub,
- * deepx_dxm1 stub) do NOT link into this native_sim test build --
- * they all depend on either TFLM (not on native_sim) or vendor
- * silicon-specific Kconfigs.  The dispatcher, vendor-ext gating
+ * Real bodies (tflm, ethos_u_aen, ethos_u_n93) do NOT link into
+ * this native_sim test build -- they all depend on either TFLM
+ * (not on native_sim) or vendor silicon-specific Kconfigs.  The
+ * A55/Linux-only DRP-AI / DEEPX DX-M1 engines never register on
+ * Zephyr at all (#58/#59).  The dispatcher, vendor-ext gating
  * (renesas / deepx surfaces), and selector code paths are
  * exercised against the SW fallback + fabricated handles pinned
  * to specific vendor strings.

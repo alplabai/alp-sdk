@@ -7,9 +7,9 @@
  * Every op besides open / close returns ALP_ERR_NOSUPPORT.  Apps
  * that link this backend should never reach get_input / invoke
  * on a real silicon build -- tflm (priority 50) wins on any
- * silicon_ref, and the vendor backends (ethos_u_aen at 100 on
- * AEN, ethos_u_n93 at 100 on N93, drpai_v2n at 100 on V2N,
- * deepx_dxm1 at 100 on DX-M1) win on theirs.
+ * silicon_ref, and the Ethos-U backends (ethos_u_aen at 100 on
+ * AEN, ethos_u_n93 at 100 on N93) win on theirs.  DRP-AI / DX-M1
+ * are A55/Linux-side engines outside this registry (#58/#59).
  *
  * Priority 0, silicon_ref=\"*\": picked only when no real backend
  * compiled in -- typically native_sim with CONFIG_TENSORFLOW_LITE_MICRO

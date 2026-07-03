@@ -205,6 +205,73 @@ ZTEST(alp_model_select, test_null_env_and_out_return_inval)
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, NULL), ALP_ERR_INVAL);
 }
 
+ZTEST(alp_model_select, test_m_class_env_does_not_offer_drpai_falls_to_cpu)
+{
+	/* V2N M33 (Zephyr) env: the DRP-AI3 engine is A55/Linux-side only
+     * (issue #58), so the loader passes soc_ref=NULL and an empty
+     * avail_silicon.  The drpai target must NOT be offered even though
+     * its silicon_ref names the very SoC the M33 sits on; AUTO falls
+     * back to the CPU blob (TFLM runs fine on the M33). */
+	static const uint8_t b0[4] = { 1 }, b1[4] = { 2 };
+	alp_model_t          m     = { 0 };
+	m.n_targets                = 2;
+	m.targets[0]               = T("drpai", "renesas:rzv2n:n44", "drpai_dir", 0, 0, b0, 4);
+	m.targets[1]               = T("cpu", "*", "tflite", 0, 0, b1, 4);
+	alp_model_select_env_t env = {
+		.soc_ref         = NULL, /* no on-SoC NPU engine driveable from this core */
+		.avail_silicon   = NULL,
+		.n_avail_silicon = 0,
+	};
+	alp_model_select_result_t r = { 0 };
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
+	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_CPU);
+	zassert_equal(r.target_index, 1u);
+}
+
+ZTEST(alp_model_select, test_m_class_env_drpai_only_returns_no_backend)
+{
+	/* Same M33 env, but the package carries ONLY the drpai blob: nothing
+     * is runnable on this core-class -> NO_BACKEND (both for AUTO and for
+     * an explicit DRPAI request -- the engine exists in the package but
+     * is not available on this build, which is 'nothing available', not
+     * NOT_FOUND / NO_FIT). */
+	static const uint8_t b0[4] = { 1 };
+	alp_model_t          m     = { 0 };
+	m.n_targets                = 1;
+	m.targets[0]               = T("drpai", "renesas:rzv2n:n44", "drpai_dir", 0, 0, b0, 4);
+	alp_model_select_env_t env = {
+		.soc_ref         = NULL,
+		.avail_silicon   = NULL,
+		.n_avail_silicon = 0,
+	};
+	alp_model_select_result_t r = { 0 };
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_NO_BACKEND);
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_DRPAI, &r), ALP_ERR_NO_BACKEND);
+}
+
+ZTEST(alp_model_select, test_a55_env_offers_drpai_via_avail_silicon)
+{
+	/* A55/Yocto env with the MERA engine compiled in
+     * (ALP_SDK_USE_DRPAI_V2N): the loader lists renesas:rzv2n:n44 in
+     * avail_silicon -- soc_ref stays NULL, proving availability flows
+     * from the engine list alone. */
+	static const uint8_t b0[4] = { 1 }, b1[4] = { 2 };
+	alp_model_t          m         = { 0 };
+	m.n_targets                    = 2;
+	m.targets[0]                   = T("drpai", "renesas:rzv2n:n44", "drpai_dir", 0, 0, b0, 4);
+	m.targets[1]                   = T("cpu", "*", "tflite", 0, 0, b1, 4);
+	const char            *avail[] = { "renesas:rzv2n:n44" };
+	alp_model_select_env_t env     = {
+		.soc_ref         = NULL,
+		.avail_silicon   = avail,
+		.n_avail_silicon = 1,
+	};
+	alp_model_select_result_t r = { 0 };
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
+	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_DRPAI);
+	zassert_equal(r.format, ALP_INFERENCE_MODEL_DRPAI);
+}
+
 ZTEST(alp_model_select, test_explicit_cpu_request)
 {
 	/* Explicit CPU: picks the cpu blob directly; with no cpu blob the

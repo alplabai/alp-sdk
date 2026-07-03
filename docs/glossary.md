@@ -91,9 +91,11 @@ rather than by `cores[]` array index.
 **DEEPX DX-M1** -- An on-module AI accelerator populated on V2N-M1
 SKUs only.  See [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
-**DRP-AI3** -- Renesas's on-die NPU on the RZ/V2N silicon, exposed
-through the SDK's `<alp/inference.h>` dispatcher when
-`ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y`.
+**DRP-AI3** -- Renesas's on-die NPU on the RZ/V2N silicon, driven
+from the A55/Linux side only (the MERA / DRP-AI TVM runtime) and
+exposed through the SDK's `<alp/inference.h>` dispatcher when the
+Yocto build enables `ALP_SDK_USE_DRPAI_V2N`.  The V2N M33 (Zephyr)
+core cannot reach the engine and runs TFLM instead.
 
 **DSP chain** -- A composable pipeline of filter / window / FFT
 stages under `<alp/dsp.h>` (standalone) and

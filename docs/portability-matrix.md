@@ -97,9 +97,9 @@ level and intentionally does NOT leak into application-facing CONFIG.
 | ------------------------------------------------- | --------------------------------------------------- |
 | `CONFIG_ALP_SOC_RENESAS_RZV2N_N44=y`              | identical on all four (same silicon)                |
 | `CONFIG_ALP_SDK_CHIP_GD32G553=y`                  | identical on all four (every E1M-X has the GD32 bridge) |
-| `CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y`                | identical on all four (silicon-determined)          |
 | `CONFIG_ALP_SDK_CHIP_DEEPX_DXM1=y`                | V2M only                                            |
 | `CONFIG_ALP_SDK_CHIP_PI3DBS12212=y`               | V2M only                                            |
+| `-DALP_SDK_USE_DRPAI_V2N=ON` (`--emit cmake-args`)  | identical on all four (silicon-determined) — DRP-AI3 lives on the Linux/A55 path, not Zephyr |
 | `-DALP_SDK_USE_DEEPX_DXM1=ON` (`--emit cmake-args`) | V2M only — DEEPX lives on the Linux PCIe path, not Zephyr |
 
 ## Gaps surfaced by Phase A (tracked in Phase B)

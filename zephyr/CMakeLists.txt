@@ -518,15 +518,12 @@ if(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/ethos_u_n93.cpp)
 endif()
 
-if(CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/drpai_v2n_stub.c)
-endif()
-
-if(CONFIG_ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/deepx_dxm1_stub.c)
-endif()
+# No Zephyr-side DRP-AI / DEEPX DX-M1 backends -- deliberately.  Both
+# engines are driven from the A55/Linux side only (DRP-AI3 via the
+# MERA/TVM runtime, DX-M1 via libdxrt over the A55's PCIe); an M-class
+# core cannot reach either, so the former NOT_IMPLEMENTED stubs were
+# removed instead of blocking TFLM at priority 100 (issues #58/#59).
+# The real bodies live in src/yocto/inference_{drpai,deepx}.cpp.
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/sw_fallback.c)
 # Camera real backends.  Gate each on its own Kconfig

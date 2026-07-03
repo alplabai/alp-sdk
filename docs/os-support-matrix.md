@@ -197,7 +197,7 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
-| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are now **real, bench-unverified** (link needs the Yocto sysroot; default-off Kconfig) — #58/#59; `tflm`/`ethos_u` paths still untested |
+| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `tflm` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are **real, bench-unverified** (link needs the Yocto sysroot; default-off CMake options); the former M-class DRP-AI/DEEPX stubs are removed — both engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
 | 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim; D/AVE 2D bench-unverified.  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = PXP, no Vivante) |

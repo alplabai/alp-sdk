@@ -250,9 +250,11 @@ And, on the Linux/CMake side
 
 (DEEPX lives on the Linux PCIe path, not Zephyr.)
 
-The DRP-AI3 driver enable (`CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y`) is
-unchanged — both SKUs carry the same RZ/V2N silicon, so DRP-AI3 is
-present on both.  V2M101 lights up DEEPX *in addition*.
+The DRP-AI3 engine enable (`-DALP_SDK_USE_DRPAI_V2N=ON`, also on the
+Linux/CMake side — the engine is A55-driven via the MERA runtime, so
+there is no Zephyr Kconfig for it) is unchanged — both SKUs carry the
+same RZ/V2N silicon, so DRP-AI3 is present on both.  V2M101 lights up
+DEEPX *in addition*.
 
 **The application code does not change.**  An app written like
 this, on V2N101, picks DRP-AI3.  The same app, on V2M101, can

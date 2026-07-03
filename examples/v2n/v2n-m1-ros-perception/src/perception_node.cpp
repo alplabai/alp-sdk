@@ -49,15 +49,15 @@
 //       alp_inference_open(backend=AUTO) -> ALP_INFERENCE_BACKEND_DEEPX_DXM1
 //
 // The SoM preset's `capabilities:` block drives which backends the
-// build compiles into the inference registry: V2M101 ships both
-// `drp_ai: true` and `deepx_dx: true`, so
-// CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y and
-// CONFIG_ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1=y both fire.  On V2N101
-// (no DEEPX silicon, `deepx_dx: false`), the DEEPX backend isn't
-// compiled in; the registry selector falls through to DRP-AI on V2N
-// silicon (priority 100) or the sw_fallback floor (priority 0)
-// otherwise.  Customer board.yaml does NOT pin a backend -- silicon
-// is the source of truth.
+// A55/Yocto build compiles in -- both engines are Linux-side only
+// (DRP-AI3 via the MERA runtime, DX-M1 via libdxrt over PCIe): the
+// orchestrator emits -DALP_SDK_USE_DRPAI_V2N=ON on every V2N-family
+// SKU and additionally -DALP_SDK_USE_DEEPX_DXM1=ON on V2M101/V2M102
+// (`deepx_dxm1: true`).  On V2N101 (no DEEPX silicon) the DEEPX
+// body isn't compiled in and dispatch resolves to DRP-AI.  The
+// M33/Zephyr slice carries neither engine -- see issues #58/#59.
+// Customer board.yaml does NOT pin a backend -- silicon is the
+// source of truth.
 
 #include <chrono>
 #include <memory>

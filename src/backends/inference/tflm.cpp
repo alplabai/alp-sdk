@@ -43,6 +43,13 @@ extern "C" {
 }
 
 #include "inference_ops.h"
+/* tflm_shared.h carries the extern "C" declarations of
+ * alp_inference_tflm_ops + the variant helpers.  Including it here is
+ * load-bearing: without the prior extern "C" declaration the `const`
+ * vtable definition below gets C++ INTERNAL linkage and every
+ * ethos_u_aen / ethos_u_n93 build fails to link with undefined
+ * references to alp_inference_tflm_ops. */
+#include "tflm_shared.h"
 
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
@@ -182,6 +189,27 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
                               alp_inference_backend_state_t *state,
                               alp_capabilities_t            *caps_out)
 {
+	/* Pinned-backend gate (the dispatcher contract in
+	 * src/inference_dispatch.c: a pinned open the serving backend
+	 * cannot honour returns NOSUPPORT).  This vtable serves the CPU
+	 * TFLM executor and -- when the Ethos-U op-resolver entry is
+	 * compiled in -- the ethos_u_aen / ethos_u_n93 registrations.
+	 * DRP-AI3 and DEEPX DX-M1 are A55/Linux-side engines (issues
+	 * #58/#59): no Zephyr registry backend can ever serve those
+	 * pins, so reject them here instead of failing deep inside the
+	 * flatbuffer parse with a misleading INVAL. */
+	switch (cfg->backend) {
+	case ALP_INFERENCE_BACKEND_AUTO:
+	case ALP_INFERENCE_BACKEND_CPU:
+		break;
+#if defined(ALP_INFERENCE_TFLM_HAS_ETHOS_U)
+	case ALP_INFERENCE_BACKEND_ETHOS_U:
+		break;
+#endif
+	default:
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	/* One-shot variant log so HIL operators can confirm which
      * kernel set the build actually linked against.  Drops to
      * LOG_DBG after the first call to keep per-model open() noise
