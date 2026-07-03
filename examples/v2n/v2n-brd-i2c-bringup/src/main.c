@@ -13,7 +13,7 @@
  *   0x25  act8760 ADD1    primary PMIC: system + Buck1..6 + GPIOs
  *   0x26  act8760 ADD2    primary PMIC: Buck7 + LDO1..6
  *   0x30  optiga_trust_m  secure element
- *   0x40  tmp112          temp sensor  (metadata addr -- but see below!)
+ *   0x48  tmp112          temp sensor  (see address note below)
  *   0x4D  tps628640       LPDDR4X 0.6 V buck (assembly OPTION)
  *   0x52  rv3028c7        RTC
  *   0x68  clk_5l35023b    clock generator
@@ -31,10 +31,12 @@
  *              power-on flag and select 24 h mode -- that is the
  *              documented, side-effect-free bring-up handshake.)
  *
- * TMP112 address note: the SoM metadata says 0x40, but TI's TMP112
- * only decodes 0x48..0x4B (ADD0 strap).  Until silicon settles the
- * question this example probes BOTH and reports which one ACKs --
- * whichever way it lands, fix metadata or BOM, not this file first.
+ * TMP112 address note: the SoM metadata used to say 0x40, which TI's
+ * TMP112 cannot decode (only 0x48..0x4B via the ADD0 strap); it now
+ * says 0x48 (ADD0 = GND, per metadata/chips/tmp112.yaml), but that
+ * fix is still bench-unverified.  Until silicon confirms, this
+ * example probes BOTH and reports which one ACKs -- whichever way it
+ * lands, fix metadata or BOM, not this file first.
  */
 
 #include <stdarg.h>
@@ -156,8 +158,9 @@ static void probe_rtc(alp_i2c_t *bus)
 
 static void probe_tmp112(alp_i2c_t *bus)
 {
-	/* Address discrepancy under test: metadata says 0x40, the TMP112
-	 * datasheet says 0x48..0x4B.  Find where (and whether) it ACKs. */
+	/* Address discrepancy under test: metadata said 0x40 before the
+	 * issue-#41 fix to 0x48 (bench-unverified); the TMP112 datasheet
+	 * decodes only 0x48..0x4B.  Find where (and whether) it ACKs. */
 	const uint8_t candidates[] = { 0x40, TMP112_I2C_ADDR_GND, 0x49, 0x4A, 0x4B };
 	uint8_t       found        = 0;
 
@@ -172,9 +175,9 @@ static void probe_tmp112(alp_i2c_t *bus)
 		return;
 	}
 	if (found == 0x40) {
-		/* ACKs at the metadata address -- but the driver (faithfully
-		 * to the datasheet) refuses 0x40.  Surface the conflict; do
-		 * NOT quietly loosen the driver. */
+		/* ACKs at the old (pre-#41) metadata address -- the driver
+		 * (faithfully to the datasheet) refuses 0x40.  Surface the
+		 * conflict; do NOT quietly loosen the driver. */
 		report("tmp112 temp",
 		       0x40,
 		       R_FAIL,

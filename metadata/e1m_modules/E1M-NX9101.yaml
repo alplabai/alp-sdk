@@ -80,6 +80,12 @@ default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/
 
 default_board:        E1M-EVK                # 35x35 board same as AEN family
 
+# Machine-visible placeholder marker (issue #43): `preliminary: true`
+# is the som-preset-v1 schema's canonical flag for "do not treat this
+# preset as a released, canonical MPN" -- here it covers BOTH the
+# preliminary BOM AND the fact that the E1M-NX9101 SKU string itself
+# is a placeholder (see the file header).  Tooling that needs "is this
+# a shipping SoM?" must key off this flag, never off the SKU string.
 status:
-  preliminary:          true                   # production SKU + BOM choices TBD
+  preliminary:          true                   # placeholder MPN + production BOM choices TBD
   partial_hw_config:    true

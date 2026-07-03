@@ -126,12 +126,19 @@ pad_routes:
   - { e1m: E1M_GPIO_IO20, dispatch: cc3501e, dispatch_pin: 26,
       doc: "CC3501E GPIO_26." }
 
+# On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
+# on the AEN module; firmware is embedded in alp-sdk at
+# `firmware/cc3501e/` (ADR 0015) and stays TBD until the first binary
+# is built + signed on the bench (the project's standing convention).
+# What unblocks the TBDs: the first bench-built, signed cc3501e image
+# landing in firmware/cc3501e/prebuilt/ -- see docs/v0.6-tbd-and-
+# assumptions.md and metadata/e1m_modules/README.md (issue #44).
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: TBD
-    flash_method:  TBD
-    flash_args:    TBD
+    firmware_path: TBD                       # populated when firmware/cc3501e/ cuts its first bench binary
+    flash_method:  TBD                       # cc3501e_usb_bootloader or alif_spi_relay; see firmware/cc3501e/flash.py
+    flash_args:    TBD                       # follows flash_method once that lands
 
 default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 

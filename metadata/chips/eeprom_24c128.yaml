@@ -36,6 +36,7 @@ families:
   - aen                            # on SoC I2C2 (bridge/DNP-selected; upstream i2c_dw)
   - v2n                            # on E1M_I2C0 (Renesas RIIC0)
   - v2n-m1                         # inherited from V2N base
+  - imx93                          # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

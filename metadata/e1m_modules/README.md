@@ -21,7 +21,14 @@ device addresses, memory specs).
 TBD pending the hand-written HW config (see the header of
 `E1M-NX9101.yaml`).  The `som.sku` regex accepts `E1M-NX9xxx` for any
 4-digit tail, so the real SKU drops in as a sibling preset; do not treat
-`E1M-NX9101` as the canonical, released MPN.
+`E1M-NX9101` as the canonical, released MPN and **never hardcode the
+string `E1M-NX9101`** in tooling, docs, or examples as if it were a
+shipping part.  The machine-visible marker is the preset's
+`status.preliminary: true` (paired with `status.partial_hw_config:
+true`) — tools that filter for released SoMs must key off that flag,
+not off the SKU string.  When the real SKU lands, its preset flips
+`preliminary` to `false` and this placeholder is deleted (no
+legacy-compat alias).
 
 ## Schema + validation
 
@@ -43,6 +50,20 @@ by `scripts/gen_pinmux_capability.py` and drift-gated by
 `pr-generated-files.yml`.  `scripts/validate_metadata.py` sweeps the
 SoM presets and `metadata/boards/` in one gate (CI:
 `pr-metadata-validate.yml`).
+
+## Known cross-SKU TBDs
+
+**AEN `helper_firmware` / `cc3501e_otp`** — all six AEN presets
+(`E1M-AEN301..801`) deliberately carry `TBD` for the CC3501E helper
+firmware's `firmware_path` / `flash_method` / `flash_args`.  That is
+correct per the project's never-invent policy, and the six SKUs must
+stay in lockstep (same TBD set, same annotations).  What unblocks
+them: the first bench-built, **signed** binary from the embedded
+`firmware/cc3501e/` tree (ADR 0015) landing in
+`firmware/cc3501e/prebuilt/` — at that point `firmware_path` points at
+the prebuilt, `flash_method` resolves to `cc3501e_usb_bootloader` or
+`alif_spi_relay` (see `firmware/cc3501e/flash.py`), and `flash_args`
+follows.  See also `docs/v0.6-tbd-and-assumptions.md`.  (Issue #44.)
 
 ## Consumed by
 

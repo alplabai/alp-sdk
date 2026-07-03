@@ -58,7 +58,7 @@ Same code, swap `som.sku` to `E1M-V2N101`, rebuild.  Expected:
 0x25 ACK   -- ACT88760 page 0
 0x26 ACK   -- ACT88760 page 1
 0x30 ACK   -- OPTIGA Trust M
-0x40 ACK   -- TMP112
+0x48 ACK   -- TMP112
 0x4D ACK   -- TPS628640 (optional)
 0x52 ACK   -- RV-3028-C7
 0x68 ACK   -- 5L35023B
