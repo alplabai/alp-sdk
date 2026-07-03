@@ -442,10 +442,12 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y")
         for v in sorted(ethos_variants):
             inference_lines.append(f"CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{v.upper()}=y")
-    if capabilities.get("drp_ai"):
-        inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y")
-    # DEEPX DX-M1 dispatches via Linux PCIe driver -- no Zephyr Kconfig.
-    # Its build wiring lives on the cmake-args / Yocto emit paths.
+    # DRP-AI3 and DEEPX DX-M1 have NO Zephyr Kconfig -- deliberately.
+    # Both engines are A55/Linux-side only (DRP-AI3 via the MERA/TVM
+    # userspace runtime, DX-M1 via libdxrt over the A55's PCIe); an
+    # M-class Zephyr slice cannot drive either (issues #58/#59), so it
+    # gets TFLM only.  Their build wiring lives on the cmake-args /
+    # Yocto emit paths (_slice_cmake_args below).
     lines.append("# Inference dispatchers (from SoM capabilities -- "
                  "customer does not pick)")
     lines.extend(inference_lines)
@@ -716,7 +718,9 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     if slice_.toolchain:
         lines.append(f"-DALP_TOOLCHAIN={slice_.toolchain}")
     if capabilities.get("drp_ai"):
-        lines.append("-DALP_SDK_USE_DRPAI=ON")
+        # Must match the option name in src/yocto/CMakeLists.txt
+        # (ALP_SDK_USE_DRPAI_V2N -- compiles inference_drpai.cpp).
+        lines.append("-DALP_SDK_USE_DRPAI_V2N=ON")
     if capabilities.get("deepx_dxm1"):
         lines.append("-DALP_SDK_USE_DEEPX_DXM1=ON")
     return "\n".join(lines) + "\n"
