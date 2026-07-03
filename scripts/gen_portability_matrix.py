@@ -56,15 +56,42 @@ except ImportError:
              "Install via `pip install pyyaml`.")
 
 REPO = Path(__file__).resolve().parent.parent
-MODULES = REPO / "metadata" / "e1m_modules"
+sys.path.insert(0, str(REPO / "scripts"))
+
+METADATA = REPO / "metadata"
+MODULES = METADATA / "e1m_modules"
 ALP_PROJECT = REPO / "scripts" / "alp_project.py"
 DOC = REPO / "docs" / "portability-matrix.md"
 
+# The ADR 0018 library-compatibility table reuses the orchestrator's own
+# emit-side resolution as its single source of truth: a (library x SKU)
+# cell is COMPATIBLE iff the very `requires:` check the emitter runs
+# (`alp_orchestrate.libraries._check_requires`) accepts the SoM, and the
+# manifest has an `integration:` section for an OS the SoM runs.  We never
+# re-derive the compat rules here -- a library the emitter would reject
+# renders incompatible by construction.
+from alp_orchestrate.libraries import (  # noqa: E402
+    _check_requires,
+    available_libraries,
+    load_manifest,
+)
+from alp_orchestrate.loader import _load_json, _silicon_to_soc_path  # noqa: E402
+from alp_orchestrate.models import (  # noqa: E402
+    BoardProject,
+    OrchestratorError,
+    Slice,
+)
+from alp_orchestrate.topology import _default_os_from_core_type  # noqa: E402
+
 PASS = "✅"   # white heavy check mark
 FAIL = "❌"   # cross mark
+NA = "—"     # em dash: library not wireable on any OS this SoM runs
 
 BEGIN_MARK = "<!-- BEGIN GENERATED: gen_portability_matrix -->"
 END_MARK = "<!-- END GENERATED: gen_portability_matrix -->"
+
+LIB_BEGIN_MARK = "<!-- BEGIN GENERATED: gen_portability_matrix_libraries -->"
+LIB_END_MARK = "<!-- END GENERATED: gen_portability_matrix_libraries -->"
 
 # The two SoM families, each with its pinned set of portable examples.
 #
@@ -323,28 +350,222 @@ def render_block(results: list[tuple[str, list[str], dict]],
     return "\n".join(lines)
 
 
-def replace_block(doc_text: str, block: str) -> str:
-    """Splice `block` between the doc's markers, preserving all prose."""
-    begin = doc_text.find(BEGIN_MARK)
-    end = doc_text.find(END_MARK)
+def replace_block(doc_text: str, block: str,
+                  begin_mark: str = BEGIN_MARK,
+                  end_mark: str = END_MARK) -> str:
+    """Splice `block` between the given markers, preserving all prose."""
+    begin = doc_text.find(begin_mark)
+    end = doc_text.find(end_mark)
     if begin < 0 or end < 0:
         raise SystemExit(
             f"gen_portability_matrix: {DOC.relative_to(REPO)} is missing the "
-            f"generated-block markers ({BEGIN_MARK!r} / {END_MARK!r})")
+            f"generated-block markers ({begin_mark!r} / {end_mark!r})")
     if end < begin:
         raise SystemExit(
             f"gen_portability_matrix: markers out of order in "
             f"{DOC.relative_to(REPO)}")
-    return doc_text[:begin] + block + doc_text[end + len(END_MARK):]
+    return doc_text[:begin] + block + doc_text[end + len(end_mark):]
+
+
+# ---------------------------------------------------------------------
+# Library x SKU compatibility (ADR 0018)
+# ---------------------------------------------------------------------
+
+
+def _project_for_sku(sku: str, preset: dict) -> BoardProject:
+    """Build the minimal BoardProject the library resolver needs for a SKU.
+
+    Only the fields `_check_requires` reads are populated: `soc_spec`
+    (RAM/flash/core-class facts), `som_preset` (capabilities), and one
+    `Slice` per SoM `topology:` core carrying that core's effective OS
+    (explicit `topology.<core>.os`, else the loader's core-type default).
+    This is the SoM at full topology -- its maximum capability -- which is
+    exactly the axis the SKU-row matrix already represents.
+    """
+    silicon = preset.get("silicon") or ""
+    soc_spec: dict = {}
+    if silicon:
+        soc_path = _silicon_to_soc_path(silicon, METADATA)
+        if soc_path.is_file():
+            soc_spec = _load_json(soc_path)
+
+    core_type_by_id = {
+        str(c.get("id")): str(c.get("type") or "")
+        for c in (soc_spec.get("cores") or []) if c.get("id")
+    }
+    cores: dict[str, Slice] = {}
+    for core_id, entry in (preset.get("topology") or {}).items():
+        entry = entry if isinstance(entry, dict) else {}
+        os_ = entry.get("os") or _default_os_from_core_type(
+            core_type_by_id.get(core_id, ""))
+        cores[core_id] = Slice(core_id=core_id, os=os_)
+
+    return BoardProject(
+        sku=sku, hw_rev=None, board_name=None, board_hw_rev=None,
+        cores=cores, ipc=[], soc_spec=soc_spec, som_preset=preset,
+        board_preset=None,
+    )
+
+
+def _requirement_reason(message: str) -> str:
+    """Compress a `_check_requires` error into a short, path-free cell reason.
+
+    The authoritative messages all read
+    ``library `x` requires <REQ>, but <target> ...`` /
+    ``... requires <REQ>, which <target> ...``; the cell keeps only <REQ>
+    (e.g. ``core_class `m```, ``min_ram_kib 64``) -- the SoM name is
+    already the column header, so it is dropped to stay compact and
+    deterministic.  This is a pure reformat of the resolver's own message,
+    not a re-derivation of the decision.
+    """
+    marker = " requires "
+    idx = message.find(marker)
+    if idx < 0:
+        return message.strip()
+    rest = message[idx + len(marker):]
+    for sep in (", but ", ", which "):
+        cut = rest.find(sep)
+        if cut >= 0:
+            rest = rest[:cut]
+            break
+    return rest.strip()
+
+
+def library_cell(name: str, manifest: dict, project: BoardProject) -> str:
+    """Classify one (library x SKU) cell, reusing the emitter's resolution.
+
+    Returns the rendered cell:
+      * PASS               -- `requires:` satisfied AND wireable on this SoM
+      * ``FAIL <reason>``  -- the emitter's `_check_requires` rejects the SoM
+      * NA                 -- `requires:` OK but the manifest has no
+                              `integration:` section for any OS this SoM runs
+    """
+    try:
+        _check_requires(name, manifest, project, METADATA)
+    except OrchestratorError as err:
+        return f"{FAIL} {_requirement_reason(str(err))}"
+
+    integration = manifest.get("integration") or {}
+    oses = {s.os for s in project.cores.values() if s.os and s.os != "off"}
+    if oses and not (set(integration) & oses):
+        return NA
+    return PASS
+
+
+def library_sweep(
+    presets: dict[str, dict],
+) -> tuple[list[tuple[str, dict]], list[tuple[str, list[str], dict[tuple[str, str], str]]]]:
+    """Resolve every (library x SKU) cell for every family.
+
+    Returns ``(libraries, per_family)`` where ``libraries`` is
+    ``[(name, manifest), ...]`` (sorted, auto-discovered) and
+    ``per_family`` is ``[(title, skus, {(library, sku): rendered_cell})]``
+    in FAMILIES order.
+    """
+    libraries = [(name, load_manifest(name, METADATA))
+                 for name in available_libraries(METADATA)]
+
+    projects = {sku: _project_for_sku(sku, preset)
+                for sku, preset in presets.items()}
+
+    per_family = []
+    for fam in FAMILIES:
+        skus = family_skus(presets, fam["sku_prefixes"])
+        cells: dict[tuple[str, str], str] = {}
+        for name, manifest in libraries:
+            for sku in skus:
+                cells[(name, sku)] = library_cell(name, manifest, projects[sku])
+        per_family.append((fam["title"], skus, cells))
+    return libraries, per_family
+
+
+def render_library_block(
+    libraries: list[tuple[str, dict]],
+    per_family: list[tuple[str, list[str], dict[tuple[str, str], str]]],
+) -> str:
+    """Render the ADR 0018 library-compatibility block (markers included)."""
+    lines: list[str] = [
+        LIB_BEGIN_MARK,
+        "<!-- AUTO-GENERATED by scripts/gen_portability_matrix.py "
+        "— DO NOT EDIT between the markers. -->",
+        "<!--",
+        "     Rows are the ADR 0018 library manifests auto-discovered from",
+        "     metadata/libraries/*.yaml; columns are each family's SoM SKUs.",
+        "     Every cell reuses the orchestrator's own emit-side resolution",
+        "     (alp_orchestrate/libraries.py) -- a library the emitter would",
+        "     reject renders incompatible here.  Regenerate after editing a",
+        "     manifest, a SoM preset, or the resolver:",
+        "         python3 scripts/gen_portability_matrix.py",
+        "-->",
+    ]
+
+    if not libraries:
+        lines.append("")
+        lines.append("_No library manifests under metadata/libraries/._")
+        lines.append(LIB_END_MARK)
+        return "\n".join(lines)
+
+    for title, skus, cells in per_family:
+        lines.append("")
+        lines.append(f"### {title}")
+        lines.append("")
+
+        header = ["Library", "Tier", "Version", "License", *skus]
+        sep = ["---", ":---:", "---", "---", *([":---:"] * len(skus))]
+        lines.append("| " + " | ".join(header) + " |")
+        lines.append("| " + " | ".join(sep) + " |")
+
+        compat = incompat = na = 0
+        for name, manifest in libraries:
+            row = [
+                f"`{name}`",
+                str(manifest.get("tier", "?")),
+                f"`{manifest.get('version', '?')}`",
+                str(manifest.get("license", "?")),
+            ]
+            for sku in skus:
+                cell = cells[(name, sku)]
+                row.append(cell)
+                if cell == PASS:
+                    compat += 1
+                elif cell == NA:
+                    na += 1
+                else:
+                    incompat += 1
+            lines.append("| " + " | ".join(row) + " |")
+
+        total = len(libraries) * len(skus)
+        lines.append("")
+        if incompat == 0 and na == 0:
+            lines.append(f"**{compat} / {total} (library × SKU) cells compatible.**")
+        else:
+            lines.append(
+                f"**{compat} / {total} (library × SKU) cells compatible "
+                f"({incompat} incompatible, {na} n/a).**")
+
+    lines.append("")
+    lines.append(
+        f"Legend: {PASS} `requires:` satisfied and wireable on the SoM · "
+        f"{FAIL} incompatible (the named `requires:` constraint fails) · "
+        f"{NA} not applicable (no `integration:` for any OS this SoM runs).")
+    lines.append(LIB_END_MARK)
+    return "\n".join(lines)
 
 
 def generate() -> str:
-    """Produce the full regenerated doc text."""
+    """Produce the full regenerated doc text (both generated blocks)."""
     presets = load_presets()
     with tempfile.TemporaryDirectory(prefix="alp-portability-") as tmp:
         results = sweep(presets, Path(tmp))
     block = render_block(results, presets)
-    return replace_block(DOC.read_text(encoding="utf-8"), block)
+
+    libraries, per_family = library_sweep(presets)
+    lib_block = render_library_block(libraries, per_family)
+
+    text = DOC.read_text(encoding="utf-8")
+    text = replace_block(text, block, BEGIN_MARK, END_MARK)
+    text = replace_block(text, lib_block, LIB_BEGIN_MARK, LIB_END_MARK)
+    return text
 
 
 def main() -> int:

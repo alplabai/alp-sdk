@@ -122,12 +122,18 @@ jobs:
         run: python3 scripts/gen_support_matrix.py
 
       # Same single-source contract: the intra-family portability matrix
-      # (docs/portability-matrix.md, generated block only) is produced by
-      # scripts/gen_portability_matrix.py re-running the som.sku swap-test
-      # (metadata/e1m_modules/E1M-*.yaml x the pinned portable examples)
-      # through scripts/alp_project.py.  Regenerate and let the diff gate
-      # below flag any drift.  Hand-written prose outside the BEGIN/END
-      # markers is preserved by the generator.
+      # (docs/portability-matrix.md, generated blocks only) is produced by
+      # scripts/gen_portability_matrix.py.  It regenerates TWO blocks:
+      #   1. the som.sku swap-test matrix (metadata/e1m_modules/E1M-*.yaml x
+      #      the pinned portable examples) through scripts/alp_project.py;
+      #   2. the ADR 0018 library-compatibility table -- rows are the
+      #      manifests auto-discovered from metadata/libraries/*.yaml, each
+      #      (library x SKU) cell reusing alp_orchestrate/libraries.py's own
+      #      emit-side `requires:` resolution.
+      # So a change to a manifest under metadata/libraries/ (covered by the
+      # metadata/** path filter) or to the resolver (scripts/alp_orchestrate/**)
+      # can move this doc.  Regenerate and let the diff gate below flag any
+      # drift.  Hand-written prose outside the BEGIN/END markers is preserved.
       - name: Regenerate intra-family portability matrix from metadata
         run: python3 scripts/gen_portability_matrix.py
 
