@@ -499,9 +499,13 @@ def resolve_capabilities(
       2. Read ``soc["capabilities"]`` (defaults to ``{}`` when absent --
          older SoC JSONs that pre-date this field continue to work).
       3. Read ``sku_preset.get("capabilities", {})``.
-      4. Return a merged dict; SoM-side wins on key collision so that
-         SoM add-on chips / GD32 bridge capabilities can override the
-         host silicon's defaults.
+      4. Merge; SoM-side wins on key collision so that SoM add-on chips /
+         GD32 bridge capabilities can override the host silicon's defaults.
+      5. Apply the SKU's ``silicon_capabilities.unpopulated`` RESTRICTION
+         list: each listed silicon capability is forced to 0 (count) /
+         ``False`` (flag).  A SKU can only remove what the silicon offers
+         (enforced by scripts/validate_metadata.py); presets without the
+         field keep the full silicon capability set.
     """
     silicon = sku_preset.get("silicon", "")
     parts = silicon.split(":")
@@ -515,7 +519,36 @@ def resolve_capabilities(
     som_caps: dict[str, Any] = sku_preset.get("capabilities") or {}
 
     # SoM side wins on collision (bridge / add-on overrides silicon default).
-    return {**soc_caps, **som_caps}
+    merged: dict[str, Any] = {**soc_caps, **som_caps}
+
+    # SKU-level restriction: capabilities the silicon offers but this SKU
+    # leaves unpopulated (per-SKU granularity -- one family, many SKUs).
+    # Preserve the value class so count-style caps (ethos_u55_count, ...)
+    # restrict to 0 and flag-style caps restrict to False.
+    for name in som_unpopulated_capabilities(sku_preset):
+        base = soc_caps.get(name)
+        if isinstance(base, int) and not isinstance(base, bool):
+            merged[name] = 0
+        else:
+            merged[name] = False
+    return merged
+
+
+def som_unpopulated_capabilities(sku_preset: dict[str, Any]) -> list[str]:
+    """Return the SKU's `silicon_capabilities.unpopulated` list (or []).
+
+    Single accessor for the per-SKU capability RESTRICTION block so the
+    loader (`resolve_capabilities`), the emitters (`alp_orchestrate/kconfig.py`,
+    which passes `-DALP_SOM_<TOKEN>` only for restricted SKUs) and the header
+    generator (`gen_soc_caps.py`) agree on where the field lives.
+    """
+    block = sku_preset.get("silicon_capabilities") or {}
+    if not isinstance(block, dict):
+        return []
+    names = block.get("unpopulated") or []
+    if not isinstance(names, list):
+        return []
+    return [str(n) for n in names]
 
 
 # ---------------------------------------------------------------------

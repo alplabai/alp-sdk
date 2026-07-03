@@ -164,7 +164,25 @@
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
       "additionalProperties": { "type": "boolean" },
-      "description": "Per-SoM hardware-accelerator / feature capability flags.  DELIBERATELY OPEN keys (values pinned to booleans): the key set is matched against each library's metadata/library-profiles/<name>/hw-backends.yaml, which grows with the library catalogue -- enumerating it here would couple the preset schema to every library release."
+      "description": "Per-SoM hardware-accelerator / feature capability flags.  DELIBERATELY OPEN keys (values pinned to booleans): the key set is matched against each library's metadata/library-profiles/<name>/hw-backends.yaml, which grows with the library catalogue -- enumerating it here would couple the preset schema to every library release.  ADDITIVE direction only: declare capabilities the SoM ADDS on top of the silicon (on-module chips, bridge features).  Removing a silicon capability the SKU leaves unpopulated goes in `silicon_capabilities.unpopulated` instead, never as a `false` here."
+    },
+    "silicon_capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unpopulated"],
+      "description": "SKU-level RESTRICTION of the referenced silicon's capability set.  A SKU can only remove (mark unpopulated / not-bonded-out) what its SoC JSON `capabilities:` block offers -- never add; additions belong in `capabilities:`.  Optional; when absent the SKU inherits the SoC's full capability set (the default for every current SKU).  Semantic cross-check (scripts/validate_metadata.py): every listed name must resolve to a truthy entry in the referenced SoC JSON's `capabilities:` block and must not also appear in this preset's `capabilities:` block.",
+      "properties": {
+        "unpopulated": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": "Capability keys from the SoC JSON `capabilities:` block that this SKU does NOT populate (e.g. an accelerator fused off / not bonded out on this order code).  The loader's resolve_capabilities() forces each listed key to false/0 and scripts/gen_soc_caps.py drops the matching ALP_CAP_* flag for ALP_SOM_<SKU>-gated builds."
+        }
+      }
     },
     "topology": {
       "type": "object",

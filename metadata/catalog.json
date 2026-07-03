@@ -412,7 +412,7 @@
         "name": "i2c-slave",
         "path": "examples/peripheral-io/i2c-slave",
         "som": "E1M-AEN701",
-        "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the portable `alp_i2c_target_*` surface from `<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`).",
+        "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the register-file helper from `<alp/i2c_regfile.h>` (v0.9, `[ABI-EXPERIMENTAL]`), a pure layer over the portable `alp_i2c_target_*` surface in `<alp/peripheral.h>`.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -951,6 +951,15 @@
         "alp_soc_secure_fw_ping"
       ],
       "header": "include/alp/hw_info.h"
+    },
+    {
+      "functions": [
+        "alp_i2c_regfile_close",
+        "alp_i2c_regfile_open",
+        "alp_i2c_regfile_set_write_window",
+        "alp_i2c_regfile_stats"
+      ],
+      "header": "include/alp/i2c_regfile.h"
     },
     {
       "functions": [

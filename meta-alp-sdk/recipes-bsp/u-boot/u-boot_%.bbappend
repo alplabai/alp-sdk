@@ -86,16 +86,23 @@ SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean
 # is deliberately deferred -- see the alp-sdk-internal som-productization docs.
 UBOOT_CONFIG[rzv2n-evk] = "rzv2n-dev_defconfig"
 
-# Demote patch-fuzz from fatal-error to warning for THIS recipe only.
-# u-boot here is renesas-u-boot-cip pinned via +git (a moving base), and the
-# vendor feature-layer patches (meta-rz-drpai add-ether, meta-rz-opencva
-# OpenCVA+Codec) apply on top of it. Those vendor hunks land with a small
-# context offset -- they apply correctly ("Hunk succeeded"), but Yocto's fatal
-# patch-fuzz QA fails do_patch. The offset is structural, not a defect in our
-# patches: the OpenCVA hunk in include/configs/rzv2n-evk.h fuzzes by the same
-# 5 lines even though NO ALP patch touches evk.h -- that is pure +git base
-# drift. (The ALP 0002 patch additionally shifts rzv2n-dev.h, compounding it.)
-# Refreshing vendor patches each BSP bump is a treadmill and we do not own
-# them, so demote the gate here rather than mask fuzz globally.
-WARN_QA:append = " patch-fuzz"
-ERROR_QA:remove = "patch-fuzz"
+# Demote patch-fuzz from fatal-error to warning -- ONLY for the
+# rzv2n-family u-boot build. A u-boot_%.bbappend fires for EVERY machine's
+# u-boot recipe, so the demotion must carry the same :rzv2n-family
+# machine override the SRC_URI additions above use; unscoped it would
+# relax the fatal patch-fuzz QA gate for every other machine in the
+# distro too (issue #245).
+# WHY the demotion at all: u-boot here is renesas-u-boot-cip pinned via
+# +git (a moving base), and the vendor feature-layer patches
+# (meta-rz-drpai add-ether, meta-rz-opencva OpenCVA+Codec) apply on top
+# of it. Those vendor hunks land with a small context offset -- they
+# apply correctly ("Hunk succeeded"), but Yocto's fatal patch-fuzz QA
+# fails do_patch. The offset is structural, not a defect in our patches:
+# the OpenCVA hunk in include/configs/rzv2n-evk.h fuzzes by the same
+# 5 lines even though NO ALP patch touches evk.h -- that is pure +git
+# base drift. (The ALP 0002 patch additionally shifts rzv2n-dev.h,
+# compounding it.) Refreshing vendor patches each BSP bump is a
+# treadmill and we do not own them, so demote the gate here rather than
+# mask fuzz globally.
+WARN_QA:append:rzv2n-family = " patch-fuzz"
+ERROR_QA:remove:rzv2n-family = "patch-fuzz"

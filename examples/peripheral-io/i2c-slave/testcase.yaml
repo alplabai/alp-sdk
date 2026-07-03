@@ -3,9 +3,10 @@
 sample:
   name: i2c-slave
   description: |
-    Per-peripheral example for I2C target (slave) mode via
-    alp_i2c_target_open: register-file pattern over byte-granular
-    write/read/stop callbacks.  On native_sim the emulated
+    Per-peripheral example for I2C target (slave) mode via the
+    <alp/i2c_regfile.h> helper: the register-file pattern shipped
+    as one open() call over the byte-granular target callbacks,
+    plus write-window + stats niceties.  On native_sim the emulated
     controller accepts the registration but nothing drives the
     bus, so ticks show writes_seen=0; drivers without target
     support degrade cleanly with the NOSUPPORT diagnostic.

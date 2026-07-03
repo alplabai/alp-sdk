@@ -31,6 +31,7 @@
 #if defined(__linux__)
 
 #include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -61,6 +62,18 @@ typedef struct {
 	size_t     frame_bytes; /* channels * (word_bits / 8) */
 	bool       capture;     /* true: RX stream; false: TX stream */
 } y_i2s_data_t;
+
+/** @brief Clamp a uint32_t millisecond timeout to ALSA's int-typed wait.
+ *
+ * snd_pcm_wait() takes an int; a timeout_ms above INT_MAX would wrap
+ * negative through a plain cast, and ALSA treats a negative timeout as
+ * "wait forever" -- turning a finite timeout into an infinite block.
+ * INT_MAX milliseconds is ~24.8 days, so the clamp is semantically a
+ * no-op for any realistic timeout. */
+static int _clamp_wait_ms(uint32_t timeout_ms)
+{
+	return (timeout_ms > (uint32_t)INT_MAX) ? INT_MAX : (int)timeout_ms;
+}
 
 /** @brief Map a snd_pcm_* return code (negative errno) to alp_status_t. */
 static alp_status_t _alsa_to_alp(int rc)
@@ -289,10 +302,15 @@ static alp_status_t y_stop(alp_i2s_backend_state_t *st)
  * @brief Push a PCM block to the TX path via snd_pcm_writei().
  *
  * ALSA is frame-oriented; the dispatcher hands a byte count, so divide
- * by frame_bytes to get the interleaved frame count.  An xrun
+ * by frame_bytes to get the interleaved frame count.  snd_pcm_writei()
+ * may legally queue FEWER frames than requested (a signal, or partial
+ * buffer room), so the write loops until every frame is queued or an
+ * unrecoverable error surfaces -- the dispatcher contract is
+ * all-or-nothing, never a silent partial write (issue #245).  An xrun
  * (-EPIPE) is recovered transparently via snd_pcm_recover() so the
- * next write succeeds on a healthy DAI.  timeout_ms gates the wait for
- * buffer room via snd_pcm_wait(); 0 means "don't block".
+ * next write succeeds on a healthy DAI.  timeout_ms gates each wait
+ * for buffer room via snd_pcm_wait() (clamped to INT_MAX -- see
+ * _clamp_wait_ms); 0 means "don't block".
  */
 static alp_status_t
 y_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t timeout_ms)
@@ -304,18 +322,27 @@ y_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
 	if (d->frame_bytes == 0u) return ALP_ERR_NOT_READY;
 	if (bytes == 0u) return ALP_OK;
 
-	snd_pcm_uframes_t frames = (snd_pcm_uframes_t)(bytes / d->frame_bytes);
-	if (frames == 0u) return ALP_ERR_INVAL; /* fewer than one frame */
+	snd_pcm_uframes_t remaining = (snd_pcm_uframes_t)(bytes / d->frame_bytes);
+	if (remaining == 0u) return ALP_ERR_INVAL; /* fewer than one frame */
 
-	int rc = snd_pcm_wait(d->pcm, (int)timeout_ms);
-	if (rc == 0) return ALP_ERR_TIMEOUT;
-	if (rc < 0) return _alsa_to_alp(rc);
+	const uint8_t *pos     = (const uint8_t *)block;
+	int            wait_ms = _clamp_wait_ms(timeout_ms);
 
-	snd_pcm_sframes_t wrote = snd_pcm_writei(d->pcm, block, frames);
-	if (wrote < 0) {
-		int rec = snd_pcm_recover(d->pcm, (int)wrote, 1 /* silent */);
-		if (rec < 0) return _alsa_to_alp(rec);
-		return ALP_ERR_IO;
+	while (remaining > 0u) {
+		int rc = snd_pcm_wait(d->pcm, wait_ms);
+		if (rc == 0) return ALP_ERR_TIMEOUT;
+		if (rc < 0) return _alsa_to_alp(rc);
+
+		snd_pcm_sframes_t wrote = snd_pcm_writei(d->pcm, pos, remaining);
+		if (wrote < 0) {
+			int rec = snd_pcm_recover(d->pcm, (int)wrote, 1 /* silent */);
+			if (rec < 0) return _alsa_to_alp(rec);
+			return ALP_ERR_IO;
+		}
+		/* Partial write: advance past the queued frames and loop for
+		 * the rest.  wrote is bounded by remaining, so no overshoot. */
+		pos += (size_t)wrote * d->frame_bytes;
+		remaining -= (snd_pcm_uframes_t)wrote;
 	}
 	return ALP_OK;
 }
@@ -326,7 +353,8 @@ y_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
  * Reports the byte count actually copied via @p bytes_out (frames read
  * × frame_bytes), never more than @p bytes.  Xruns (-EPIPE /
  * -ESTRPIPE) are recovered via snd_pcm_recover().  timeout_ms gates the
- * wait for available frames via snd_pcm_wait(); 0 means "don't block".
+ * wait for available frames via snd_pcm_wait() (clamped to INT_MAX --
+ * see _clamp_wait_ms); 0 means "don't block".
  */
 static alp_status_t y_read(
     alp_i2s_backend_state_t *st, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
@@ -343,7 +371,7 @@ static alp_status_t y_read(
 	snd_pcm_uframes_t frames = (snd_pcm_uframes_t)(bytes / d->frame_bytes);
 	if (frames == 0u) return ALP_ERR_INVAL; /* dest < one frame */
 
-	int rc = snd_pcm_wait(d->pcm, (int)timeout_ms);
+	int rc = snd_pcm_wait(d->pcm, _clamp_wait_ms(timeout_ms));
 	if (rc == 0) return ALP_ERR_TIMEOUT;
 	if (rc < 0) return _alsa_to_alp(rc);
 

@@ -297,9 +297,20 @@ inference:
 # SoM-side extensions to silicon capabilities.  The loader merges
 # this on top of soc_spec.capabilities at codegen time (see
 # resolve_capabilities() in scripts/alp_project.py).  Only declare
-# capabilities the SoM ADDS to or COUNTERMANDS the silicon.
+# capabilities the SoM ADDS on top of the silicon; a capability the
+# silicon offers but this SKU does NOT populate goes in
+# `silicon_capabilities.unpopulated` below, never as `false` here.
 capabilities:
   optiga_trust_m:       true               # on-module SE; not in silicon caps.
+
+# OPTIONAL -- per-SKU RESTRICTION of the silicon capability set.  Only
+# declare when this SKU leaves a silicon capability unpopulated (e.g.
+# an accelerator fused off / not bonded out on this order code); every
+# listed name must be truthy in the SoC JSON's `capabilities:` block
+# (validate_metadata.py cross-check).  Omit entirely when the SKU
+# carries the silicon's full set -- true for every current SKU.
+# silicon_capabilities:
+#   unpopulated: [gpu2d, dave2d]           # HYPOTHETICAL -- transcribe from the datasheet.
 
 topology:
   a32_cluster:
@@ -365,6 +376,7 @@ status:
 | `on_module:*`          | No — SoM extension                | Yes per field             | The set of keys is open; chip names match `chips/<part>/` driver dirs (driver-naming convention applies).               |
 | `inference`            | Mixed                             | Yes (omit when unsure)    | `preferred_backend` is silicon-determined; the customer cannot override it from `board.yaml` (per the v0.6 cleanup).    |
 | `capabilities`         | SoM extension only                | Yes                       | Only list keys the SoM **adds** to silicon caps (e.g., on-module CAU on V2N, `optiga_trust_m` on AEN/V2N).               |
+| `silicon_capabilities` | Silicon-determined (restriction)  | Omit when unrestricted    | Optional `unpopulated:` list of SoC `capabilities:` keys this SKU does **not** populate; can only remove what the silicon offers (`validate_metadata.py` cross-check). |
 | `topology`             | Silicon-determined (core ids)     | No                        | Keys must match `soc.cores[].id`; `app:` / `board:` / `machine:` / `toolchain:` are SoM-extension.                       |
 | `memory_map`           | Silicon-determined (derived)      | Omit entirely              | Only declare for non-stock partitioning; otherwise the loader derives from SoC `sram_banks_kb`.                          |
 | `mailbox.controller`   | Mixed                             | Yes (`"TBD"`)             | Required when any topology entry runs Zephyr or baremetal; controller name comes from the hand-written HW config.        |
@@ -591,7 +603,10 @@ The merge happens in `resolve_capabilities()`:
 1. SoC JSON `capabilities:` provides the silicon defaults.
 2. SoM YAML `capabilities:` overlays SoM additions
    (`optiga_trust_m: true` on AEN901).
-3. Customer's `board.yaml` capabilities (rare) wins last.
+3. SoM YAML `silicon_capabilities.unpopulated` (when present) forces
+   the listed silicon capabilities to `false`/`0` — the per-SKU
+   restriction layer.
+4. Customer's `board.yaml` capabilities (rare) wins last.
 
 ---
 

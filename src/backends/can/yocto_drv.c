@@ -33,6 +33,13 @@
  *   - Asynchronous RX dispatch uses a per-handle reader thread (pthread)
  *     that read()s frames and invokes the matching alp_can_rx_cb_t.
  *     Kernel-side filtering uses setsockopt(CAN_RAW_FILTER).
+ *   - cfg->loopback ("local self-test mode") maps to the per-socket
+ *     CAN_RAW_LOOPBACK + CAN_RAW_RECV_OWN_MSGS options: frames this
+ *     handle sends are looped back to its own RX path so installed
+ *     filters see them.  NOTE: unlike a controller loopback mode
+ *     (Zephyr CAN_MODE_LOOPBACK), the frames still go out on the wire;
+ *     bus-off isolation would need the netlink "ip link ... loopback on"
+ *     controller mode, which a CAN_RAW socket cannot set (issue #246).
  */
 
 #if defined(__linux__)
@@ -209,9 +216,13 @@ static void *_rx_loop(void *arg)
  * binds an AF_CAN raw socket to it.  For ALP_CAN_MODE_FD the socket is
  * switched to CAN_RAW_FD_FRAMES so it can carry 64-byte canfd_frames;
  * if the kernel/interface lacks FD support the setsockopt fails and we
- * surface it as ALP_ERR_NOSUPPORT.  Bitrate is configured out-of-band
- * (see file header) and is recorded by the dispatcher snapshot, not
- * applied here.  caps stay 0 (SocketCAN exposes no queryable cap bits).
+ * surface it as ALP_ERR_NOSUPPORT.  For cfg->loopback the socket opts
+ * CAN_RAW_LOOPBACK + CAN_RAW_RECV_OWN_MSGS are BOTH enabled so this
+ * handle's own TX frames come back through its RX filters (local
+ * self-test; see the file-header scope note on wire semantics).
+ * Bitrate is configured out-of-band (see file header) and is recorded
+ * by the dispatcher snapshot, not applied here.  caps stay 0
+ * (SocketCAN exposes no queryable cap bits).
  */
 static alp_status_t
 y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilities_t *caps_out)
@@ -244,6 +255,23 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 			/* Interface / kernel without CAN-FD -> NOSUPPORT, honouring
              * the alp_can_open contract for "CAN-FD requested but
              * unsupported". */
+			return _errno_to_alp(e);
+		}
+	}
+
+	/* Local self-test mode: loop our own TX frames back into this
+	 * socket's RX queue.  CAN_RAW_LOOPBACK (default on) makes sent
+	 * frames visible to local sockets at all; CAN_RAW_RECV_OWN_MSGS
+	 * (default off) additionally delivers them to the SENDING socket,
+	 * which is what "the handle receives what it sends" needs.  Both
+	 * are set explicitly so the mode does not depend on kernel
+	 * defaults.  Silently ignoring cfg->loopback was issue #246. */
+	if (cfg->loopback) {
+		int on = 1;
+		if (setsockopt(fd, SOL_CAN_RAW, CAN_RAW_LOOPBACK, &on, sizeof(on)) < 0 ||
+		    setsockopt(fd, SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS, &on, sizeof(on)) < 0) {
+			int e = errno;
+			close(fd);
 			return _errno_to_alp(e);
 		}
 	}

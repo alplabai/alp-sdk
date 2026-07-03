@@ -272,6 +272,48 @@ ZTEST(alp_model_select, test_a55_env_offers_drpai_via_avail_silicon)
 	zassert_equal(r.format, ALP_INFERENCE_MODEL_DRPAI);
 }
 
+ZTEST(alp_model_select, test_oversized_cpu_target_rejected)
+{
+	/* The CPU catch-all passes the same arena gate as every NPU target:
+     * a CPU blob whose req_sram_kib exceeds the device budget must NOT be
+     * selected (it would return ALP_OK and only fail far downstream at
+     * arena allocation).  With nothing else in the package the verdict
+     * is NO_FIT -- a target existed but was oversized. */
+	static const uint8_t b0[4]     = { 1 };
+	alp_model_t          m         = { 0 };
+	m.n_targets                    = 1;
+	m.targets[0]                   = T("cpu", "*", "tflite", 0, 512, b0, 4);
+	const char            *avail[] = { "alif:ensemble:e7" };
+	alp_model_select_env_t env     = {
+		.soc_ref         = "alif:ensemble:e7",
+		.avail_silicon   = avail,
+		.n_avail_silicon = 1,
+		.arena_sram_kib  = 256,
+	};
+	alp_model_select_result_t r = { 0 };
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_NO_FIT);
+	/* An explicit CPU request for the same oversized blob is NO_FIT too. */
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_CPU, &r), ALP_ERR_NO_FIT);
+}
+
+ZTEST(alp_model_select, test_cpu_fallback_skipped_when_cpu_oversized)
+{
+	/* AUTO with an oversized NPU target AND an oversized CPU target:
+     * the CPU fallback must not fire either -- NO_FIT overall. */
+	static const uint8_t b0[4] = { 1 }, b1[4] = { 2 };
+	alp_model_t          m = { 0 };
+	m.n_targets            = 2;
+	m.targets[0]           = T("ethos_u", "alif:ensemble:e7", "vela_tflite", 0, 512, b0, 4);
+	m.targets[1]           = T("cpu", "*", "tflite", 0, 400, b1, 4);
+	const char               *avail[] = { "alif:ensemble:e7" };
+	alp_model_select_env_t    env     = { .soc_ref         = "alif:ensemble:e7",
+		                                  .avail_silicon   = avail,
+		                                  .n_avail_silicon = 1,
+		                                  .arena_sram_kib  = 256 };
+	alp_model_select_result_t r       = { 0 };
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_NO_FIT);
+}
+
 ZTEST(alp_model_select, test_explicit_cpu_request)
 {
 	/* Explicit CPU: picks the cpu blob directly; with no cpu blob the

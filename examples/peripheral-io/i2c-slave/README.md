@@ -1,33 +1,42 @@
 # i2c-slave
 
 Make this MCU answer on the bus as a register-mapped I2C target
-(slave) using the portable `alp_i2c_target_*` surface from
-`<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`).
+(slave) using the register-file helper from `<alp/i2c_regfile.h>`
+(v0.9, `[ABI-EXPERIMENTAL]`), a pure layer over the portable
+`alp_i2c_target_*` surface in `<alp/peripheral.h>`.
 
 ## What it shows
 
-* `alp_init()` -- SDK runtime bring-up before the first open.
-* `alp_i2c_target_open()` -- claim a bus as a target at a known
-  7-bit address (`0x42`), with byte-granular ISR callbacks passed
-  in the config:
-  * `on_write` -- byte received from the external controller,
-  * `on_read` -- byte requested by the external controller,
-  * `on_stop` -- STOP condition (transaction boundary).
-* The register-file pattern -- the idiom every embedded engineer
-  expects for "make this MCU look like a sensor / EEPROM /
-  register-mapped peripheral": first written byte latches the
-  register pointer, subsequent bytes store with auto-increment,
-  reads serve from the pointer with auto-increment, STOP re-arms
-  the pointer latch.
-* `alp_i2c_target_close()` -- unregister and release the bus.
+* `alp_init()` -- SDK runtime bring-up before the first open
+  (checked; the example bails out on failure).
+* `alp_i2c_regfile_open()` -- claim a bus as a target at a known
+  7-bit address (`0x42`) and expose a caller-owned buffer as the
+  classic register file.  The helper ships the state machine every
+  target application used to hand-roll: first written byte latches
+  the register pointer, subsequent bytes store with wraparound
+  auto-increment, reads serve from the pointer, STOP re-arms the
+  pointer latch.
+* `alp_i2c_regfile_set_write_window()` -- carve out read-only
+  registers (device-ID style) by shrinking the controller-writable
+  window.
+* `alp_i2c_regfile_stats()` -- traffic counters for bench
+  observability (`writes_seen` / `reads_seen`).
+* `alp_i2c_regfile_close()` -- unregister and release the bus.
+
+Need a shape the register-file idiom doesn't fit (command/response
+protocols, FIFOs)?  Drop down to the raw byte-granular callbacks:
+`alp_i2c_target_open()` with `on_write` / `on_read` / `on_stop` in
+`<alp/peripheral.h>`.  This example's git history shows the same
+register file hand-rolled on those callbacks.
 
 ## Availability
 
 Target mode needs controller-driver support: on Zephyr that is
 `CONFIG_I2C_TARGET` (set in this example's `prj.conf`) plus a
-driver implementing `target_register`.  Backends or drivers
-without it fail the open with `ALP_ERR_NOSUPPORT`, which the
-example handles by printing the diagnostic and exiting.
+driver implementing `target_register`.  The helper degrades exactly
+as `alp_i2c_target_open` does -- backends or drivers without target
+mode fail the open with `ALP_ERR_NOSUPPORT`, which the example
+handles by printing the diagnostic and exiting.
 
 On **native_sim** (the CI lane) the emulated controller accepts
 the registration, but no external controller ever drives the
@@ -53,7 +62,9 @@ emulated bus -- the ticks simply show `writes_seen=0`:
    provides them.
 4. Power both boards.  Board A's console shows `writes_seen`
    incrementing as board B sends register writes; board B reads
-   back the values board A primed into `g_regs[]`.
+   back the values board A primed into `g_regs[]`.  Note that
+   registers 0..1 are read-only in this example (write window
+   starts at register 2), so writes to them are dropped.
 
 ## Other useful tools
 
@@ -66,8 +77,11 @@ emulated bus -- the ticks simply show `writes_seen=0`:
 
 ## Reference
 
+- [`<alp/i2c_regfile.h>`](../../../include/alp/i2c_regfile.h) -- the
+  register-file helper contract this example teaches.
 - [`<alp/peripheral.h>`](../../../include/alp/peripheral.h) -- the
-  "I2C -- target (slave) mode" section documents the full contract.
+  "I2C -- target (slave) mode" section documents the raw callback
+  contract underneath.
 - [`examples/peripheral-io/i2c-scanner/`](../i2c-scanner/) -- master-side discovery.
 - [`examples/peripheral-io/i2c-master/`](../i2c-master/) -- master-side known-address read.
 - Zephyr `i2c_target_register` -- the upstream API the Zephyr

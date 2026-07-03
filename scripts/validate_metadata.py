@@ -84,6 +84,73 @@ def _check_files(label, files, validator, loader, key_for_summary):
     return failures
 
 
+def _check_silicon_capability_restrictions(som_files) -> list:
+    """Cross-check SoM `silicon_capabilities.unpopulated` against the SoC JSON.
+
+    The field is a RESTRICTION: a SKU may only mark unpopulated what the
+    referenced silicon's `capabilities:` block actually offers (truthy value),
+    and a name must not simultaneously appear in the preset's additive
+    `capabilities:` block (that would make the merged value ambiguous).
+    Returns a failure list shaped like _check_files().  Presets without the
+    field are skipped -- absence means "full silicon capability set".
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO)
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        block = doc.get("silicon_capabilities")
+        if not isinstance(block, dict):
+            continue
+        unpopulated = block.get("unpopulated") or []
+        if not isinstance(unpopulated, list):
+            continue  # wrong shape -- already failed the schema pass above
+
+        msgs: list[str] = []
+        soc_caps: dict = {}
+        silicon = str(doc.get("silicon", ""))
+        parts = silicon.split(":")
+        soc_path = None
+        if len(parts) == 3:
+            soc_path = SOCS / parts[0] / parts[1] / f"{parts[2]}.json"
+        if soc_path is None or not soc_path.is_file():
+            msgs.append(f"silicon_capabilities: silicon ref `{silicon}` does not "
+                        f"resolve to a metadata/socs/ spec, cannot validate "
+                        f"`unpopulated:` against the silicon capability set")
+        else:
+            soc_doc = json.loads(soc_path.read_text(encoding="utf-8"))
+            soc_caps = soc_doc.get("capabilities") or {}
+
+        som_caps = doc.get("capabilities") or {}
+        for name in unpopulated:
+            if soc_path is not None and soc_path.is_file() and not soc_caps.get(name):
+                offered = ", ".join(sorted(k for k, v in soc_caps.items() if v)) or "<none>"
+                msgs.append(
+                    f"silicon_capabilities/unpopulated[{name}]: not a capability the "
+                    f"referenced silicon `{silicon}` offers -- a SKU can only remove "
+                    f"what the SoC JSON `capabilities:` block declares truthy "
+                    f"(offered: {offered})")
+            if name in som_caps:
+                msgs.append(
+                    f"silicon_capabilities/unpopulated[{name}]: also declared in this "
+                    f"preset's `capabilities:` block -- a capability is either "
+                    f"SoM-added or silicon-unpopulated, never both")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (silicon_capabilities: {len(unpopulated)} "
+                  f"unpopulated cap(s) resolve against {silicon})")
+    return failures
+
+
 def _check_silicon_kconfig() -> list:
     """Validate the silicon->Kconfig registry and its socs/ correspondence.
 
@@ -194,6 +261,12 @@ def main() -> int:
                 "name",
             )
 
+    # SoM `silicon_capabilities.unpopulated` <-> SoC capability cross-check.
+    restriction_failures: list = []
+    if som_files:
+        print()
+        restriction_failures = _check_silicon_capability_restrictions(som_files)
+
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
@@ -201,6 +274,7 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures)
+                      + len(restriction_failures)
                       + len(silicon_kconfig_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "

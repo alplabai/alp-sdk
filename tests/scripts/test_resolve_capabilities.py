@@ -155,6 +155,73 @@ def test_unknown_silicon_ref_returns_only_som_caps(alp_project, tmp_path):
     assert result == {"custom_key": True}
 
 
+def test_unpopulated_restriction_forces_flag_false(alp_project, tmp_path):
+    """`silicon_capabilities.unpopulated` forces a truthy silicon flag to False."""
+    soc_caps = {"gpu2d": True, "dave2d": True, "neon": True}
+    meta = _make_soc_json(tmp_path, "testvendor", "testfam", "testpart", soc_caps)
+
+    preset = {
+        "sku": "E1M-TEST",
+        "silicon": "testvendor:testfam:testpart",
+        "silicon_capabilities": {"unpopulated": ["gpu2d", "dave2d"]},
+    }
+    result = alp_project.resolve_capabilities(preset, meta)
+
+    assert result["gpu2d"] is False
+    assert result["dave2d"] is False
+    # Unlisted silicon caps keep the full silicon value.
+    assert result["neon"] is True
+
+
+def test_unpopulated_restriction_forces_count_to_zero(alp_project, tmp_path):
+    """Count-style silicon caps (e.g. ethos_u55_count) restrict to 0, not False,
+    so `> 0` presence checks downstream keep their integer semantics."""
+    soc_caps = {"ethos_u55_count": 2, "ethos_u85_count": 1, "helium_mve": True}
+    meta = _make_soc_json(tmp_path, "testvendor", "testfam", "testpart", soc_caps)
+
+    preset = {
+        "sku": "E1M-TEST",
+        "silicon": "testvendor:testfam:testpart",
+        "silicon_capabilities": {"unpopulated": ["ethos_u85_count"]},
+    }
+    result = alp_project.resolve_capabilities(preset, meta)
+
+    assert result["ethos_u85_count"] == 0
+    assert isinstance(result["ethos_u85_count"], int)
+    assert result["ethos_u55_count"] == 2
+    assert result["helium_mve"] is True
+
+
+def test_no_restriction_field_keeps_full_silicon_set(alp_project, tmp_path):
+    """Absence of `silicon_capabilities:` = full silicon capability set
+    (the zero-behaviour-change default for every existing SKU)."""
+    soc_caps = {"gpu2d": True, "neon": True}
+    meta = _make_soc_json(tmp_path, "testvendor", "testfam", "testpart", soc_caps)
+
+    preset = {"sku": "E1M-TEST", "silicon": "testvendor:testfam:testpart"}
+    restricted = dict(preset, silicon_capabilities={"unpopulated": ["gpu2d"]})
+
+    assert alp_project.resolve_capabilities(preset, meta) == {
+        "gpu2d": True, "neon": True}
+    assert alp_project.resolve_capabilities(restricted, meta) == {
+        "gpu2d": False, "neon": True}
+
+
+def test_som_unpopulated_capabilities_accessor(alp_project):
+    """The shared accessor returns [] for absent/malformed blocks and the
+    transcribed list otherwise."""
+    assert alp_project.som_unpopulated_capabilities({}) == []
+    assert alp_project.som_unpopulated_capabilities(
+        {"silicon_capabilities": None}) == []
+    assert alp_project.som_unpopulated_capabilities(
+        {"silicon_capabilities": "gpu2d"}) == []
+    assert alp_project.som_unpopulated_capabilities(
+        {"silicon_capabilities": {"unpopulated": None}}) == []
+    assert alp_project.som_unpopulated_capabilities(
+        {"silicon_capabilities": {"unpopulated": ["gpu2d", "dave2d"]}}
+    ) == ["gpu2d", "dave2d"]
+
+
 def test_v2n101_real_soc_drp_ai_true_and_cau_override(alp_project):
     """Integration test against the real RZ/V2N n44.json:
       - SoC-side drp_ai should be True.
