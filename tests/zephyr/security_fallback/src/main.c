@@ -328,17 +328,10 @@ ZTEST(alp_security_fallback, test_aead_open_falls_through_nosupport)
 	                  a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain), cipher, tag, sizeof(tag)),
 	              ALP_OK,
 	              "NULL aad with aad_len 0 is legitimate");
-	zassert_equal(alp_aead_decrypt(a,
-	                               iv,
-	                               sizeof(iv),
-	                               NULL,
-	                               0,
-	                               cipher,
-	                               sizeof(cipher),
-	                               tag,
-	                               sizeof(tag),
-	                               decoded),
-	              ALP_OK);
+	zassert_equal(
+	    alp_aead_decrypt(
+	        a, iv, sizeof(iv), NULL, 0, cipher, sizeof(cipher), tag, sizeof(tag), decoded),
+	    ALP_OK);
 	zassert_mem_equal(decoded, plain, sizeof(plain), "round-trip through fake_sw");
 	alp_aead_close(a);
 }
