@@ -182,6 +182,7 @@ Top-level fields:
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
 | `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
+| `libraries`      | no       | Project-wide curated third-party libraries (ADR 0018), e.g. `[lvgl, cmsis-dsp]`.  Each names a manifest under `metadata/libraries/<name>.yaml`; the orchestrator emits its per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (project-wide, ADR 0018)](#libraries-project-wide-adr-0018) below.  Distinct from the per-core `cores.<id>.libraries:` token list. |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
 *Either `preset:` (preset mode) or inline `name:` + `populated:` +
@@ -626,6 +627,56 @@ Loader rules (enforced by `_validate_consistency()` in
 - `name:` must NOT collide with the curated `libraries:` enum --
   use the curated path for curated entries.
 - `profile:` must resolve to a file (repo-relative).
+
+### `libraries` (project-wide, ADR 0018)
+
+The **top-level** `libraries:` key (a sibling of `som:` / `cores:`,
+not nested under a core) selects *curated third-party libraries* the
+SDK integrates across the whole project — GUI, DSP/NN, serialization,
+and so on:
+
+```yaml
+som:
+  sku: E1M-AEN701
+libraries: [lvgl, cmsis-dsp, nanopb]   # <-- project-wide
+cores:
+  m55_hp:
+    app: ./src
+```
+
+Each name resolves to a manifest at
+[`metadata/libraries/<name>.yaml`](../metadata/libraries/) — the single
+source of truth for that library's per-OS wiring, pinned upstream
+version, SPDX licence, curation tier, and compatibility constraints.
+The orchestrator emits the wiring through the ordinary `--emit`
+contract (ADR 0014): the library's Kconfig symbols land in each Zephyr
+slice's `alp.conf`, its `IMAGE_INSTALL` entries in each Yocto slice's
+`local.conf`, its CMake pin in each baremetal slice's args. Selecting a
+library the target cannot satisfy fails emit with the failing
+constraint named — the same clear-error contract as schema validation.
+
+Two curation tiers bound CI cost (ADR 0018):
+
+- **Tier A — curated**: version-pinned, built in alp-sdk CI for at
+  least one board per family, ships a teaching example. Breakage blocks
+  release.
+- **Tier B — recipe-only**: wiring + compatibility metadata are
+  maintained and emitted, but the library is not built in alp-sdk CI.
+  `alp doctor` labels it.
+
+`alp doctor` reports the selected libraries for the project in scope
+(tier + licence + compatibility), reading the same manifests, so the
+CLI and alp-studio's library picker never disagree.
+
+**This is a different mechanism from the per-core `cores.<id>.libraries:`
+token list above.** The per-core list is a closed enum wired through
+`metadata/library-profiles/` (compile-time config headers + HW-backend
+bindings); the top-level `libraries:` is the manifest-driven ADR 0018
+selection. Use the top-level key for the curated third-party libraries
+that ship a `metadata/libraries/<name>.yaml` manifest.
+
+See [`metadata/libraries/README.md`](../metadata/libraries/README.md)
+for the manifest shape, the full library list, and how to add one.
 
 ## How the loader compiles the file
 

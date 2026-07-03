@@ -183,6 +183,16 @@ RMA states.  Read via `se_service_system_get_device_data()`; see
 secure element has its own, separate lifecycle bits surfaced by
 [`<alp/chips/optiga_trust_m.h>`](../include/alp/chips/optiga_trust_m.h).
 
+**Library manifest** -- A `metadata/libraries/<name>.yaml` file: the
+single source of truth for one curated third-party library (ADR 0018).
+Declares its per-OS `integration:` wiring (Zephyr Kconfig / Yocto
+`IMAGE_INSTALL` / baremetal CMake), `requires:` compatibility
+constraints, curation `tier:`, pinned `version:`, and SPDX `license:`.
+Selected project-wide via the top-level `libraries: [<name>, ...]` key
+in `board.yaml`; the orchestrator emits the wiring and rejects an
+incompatible selection at emit time.  See
+[`metadata/libraries/README.md`](../metadata/libraries/README.md).
+
 **Loader** -- `scripts/alp_project.py` -- reads `board.yaml`,
 resolves SoM SKU preset + board preset, emits the per-backend
 config (Zephyr `alp.conf` / CMake `-D` flags / Yocto `local.conf`).
@@ -328,6 +338,18 @@ examples: `examples/peripheral-io/i2c-slave` + `spi-slave`.
 
 **TBD** -- "To be determined".  Used in metadata where the
 authoritative value is pending (e.g. a board-rev divider voltage).
+
+**Tier A / Tier B (libraries)** -- The two curation tiers for
+curated third-party libraries (ADR 0018), recorded in each
+[library manifest](#library-manifest) `tier:` field.  **Tier A (curated):**
+version-pinned, built in alp-sdk CI for at least one board per
+supported family, ships a teaching example -- breakage blocks
+release.  **Tier B (recipe-only):** wiring + compatibility metadata
+are maintained and emitted, but the library is not built in alp-sdk
+CI; `alp doctor` labels it.  Promotion B → A requires a dedicated
+owner and a CI build lane.  (Distinct from the driver/library
+integration ladder in
+[ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md).)
 
 **Topology block** -- The `topology:` block in
 `metadata/e1m_modules/<SKU>.yaml` that declares the default OS +
