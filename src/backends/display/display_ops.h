@@ -5,12 +5,13 @@
  * implementations.  NOT a public header -- customer code never
  * sees this struct.  Layout may change between SDK versions.
  *
- * Slice 8a ships only the zephyr_stub backend (every op returns
- * ALP_ERR_NOT_IMPLEMENTED); real Zephyr-display-driver and V2N
- * DSI / parallel-RGB backends land per the tracking issue on the
- * stub source file.  No vendor extensions exist for display, so
- * the first-member-aliasing pattern the ADC vtable uses is not
- * required here.
+ * Backends in this directory: zephyr_stub.c (wildcard priority-0
+ * NOT_IMPLEMENTED fallback) and zephyr_drv.c (wildcard priority-50
+ * wrapper over Zephyr's drivers/display.h class, issue #23).
+ * Vendor-specific V2N DSI / parallel-RGB and Alif LCD-IF backends
+ * land per the tracking issue on the stub source file.  No vendor
+ * extensions exist for display, so the first-member-aliasing
+ * pattern the ADC vtable uses is not required here.
  */
 
 #ifndef ALP_BACKENDS_DISPLAY_OPS_H

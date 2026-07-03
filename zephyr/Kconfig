@@ -1538,6 +1538,34 @@ config ALP_SDK_CAMERA_ALIF_ISP
 	  so the ISP driver compiles but does NOT link against the local
 	  wrapper.  Bump the hal_alif wrapper before enabling.  Task #21.
 
+config ALP_SDK_DISPLAY_ZEPHYR_DRV
+	bool "Compile the real Zephyr display driver-class backend"
+	depends on DISPLAY
+	default y
+	help
+	  Compile src/backends/display/zephyr_drv.c, the portable
+	  display backend that wraps Zephyr's drivers/display.h class
+	  (display_write + display_clear + display_blanking_on /
+	  _off + display_get_capabilities + display_set_pixel_format)
+	  into the alp_display_* vtable.  Any panel with an upstream
+	  Zephyr display driver (SSD1306, SSD1331, ILI9341, ST7789V,
+	  dummy-dc, ...) resolves via the alp-display0..3 devicetree
+	  aliases.  Registered at silicon_ref="*" priority 50 so it
+	  always wins over the zephyr_stub fallback (priority 0) on
+	  builds that link Zephyr's display subsystem; loses to future
+	  vendor-specific real backends (V2N DSI / parallel-RGB, Alif
+	  LCD-IF) at priority 100 on their silicon.
+
+	  Boards without an alp-displayN alias degrade cleanly:
+	  alp_display_open returns NULL with ALP_ERR_NOT_READY.
+
+	  Do not point an alp-displayN alias at the panel LVGL owns
+	  (the zephyr,display chosen node) when CONFIG_LVGL=y -- two
+	  writers on one panel conflict.  See the zephyr_drv.c header.
+
+	  Depends on CONFIG_DISPLAY so the display_* symbols are
+	  visible at link time.
+
 config ALP_SDK_POWER_PM_POLICY
 	bool "Compile the real Zephyr pm_policy_* power backend"
 	depends on ALP_SDK_POWER

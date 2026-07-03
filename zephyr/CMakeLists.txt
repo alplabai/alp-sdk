@@ -655,12 +655,18 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_EXT_RENESAS
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_PROFILE_ALIF_SE
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/alif_se_profile.c)
 
-# Display class dispatcher + stub backend.  Real backends (Zephyr
-# display_* driver-class wrapper for SSD1306 / ILI9341 / ST7789 on
-# AEN, V2N DSI / parallel-RGB framebuffer paths) land per issue #23.
+# Display class dispatcher + stub backend.  The dispatcher and the
+# wildcard stub ship unconditionally so alp_display_open keeps
+# linking (and degrading cleanly) on every supported SoC; the real
+# Zephyr display driver-class wrapper is gated on its Kconfig
+# (default y when CONFIG_DISPLAY provides the display_* symbols).
+# Vendor-specific paths (V2N DSI / parallel-RGB, Alif LCD-IF) still
+# land per issue #23.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/display_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_stub.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DISPLAY_ZEPHYR_DRV
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_drv.c)
 
 # 2D graphics accelerator surface (<alp/gpu2d.h>).  The class
 # dispatcher ships whenever the surface is enabled; the portable
