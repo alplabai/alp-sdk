@@ -34,9 +34,9 @@
  * peripherals like SPI1 use).  Boot-control regs live in CLKCTRL_PER_MST. */
 #define CLKCTRL_PER_MST_PERIPH_CLK_EN 0x4903F00Cu
 #define PER_MST_CLK_EN_DMA0           BIT(4) /* ALIF_DMA0_CLK: PERIPH_CLK_EN[4] */
-#define CLKCTRL_PER_MST_DMA_CTRL   0x4903F070u
-#define CLKCTRL_PER_MST_DMA_IRQ    0x4903F074u
-#define CLKCTRL_PER_MST_DMA_PERIPH 0x4903F078u
+#define CLKCTRL_PER_MST_DMA_CTRL      0x4903F070u
+#define CLKCTRL_PER_MST_DMA_IRQ       0x4903F074u
+#define CLKCTRL_PER_MST_DMA_PERIPH    0x4903F078u
 /* DMA2 (M55-HE-local -- for LP peripherals) boot-control in M55HE_CFG. */
 #define M55HE_CFG_HE_DMA_CTRL   0x43007000u
 #define M55HE_CFG_HE_DMA_IRQ    0x43007004u

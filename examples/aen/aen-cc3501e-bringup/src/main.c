@@ -432,7 +432,9 @@ int main(void)
 	 */
 	printf("[cc3501e-bringup] entering liveness soak (PING every 500 ms)\n");
 	g_cc3501e_witness.phase = CC3501E_PHASE_SOAK;
+#ifdef CC3501E_DMA_STREAM_BENCH
 	bool stream_done = false;
+#endif
 	for (uint32_t i = 0u;; ++i) {
 		/*
 		 * Run-once host-DMA continuous-stream throughput benchmark.  Once the
@@ -443,6 +445,12 @@ int main(void)
 		 * full speed" proof (the CC35 just discards the bytes; we measure the
 		 * host TX-DMA + 14.8 MHz SCLK throughput).
 		 */
+#ifdef CC3501E_DMA_STREAM_BENCH
+		/* Opt-in host-DMA throughput benchmark (build with
+		 * -DEXTRA_CFLAGS=-DCC3501E_DMA_STREAM_BENCH).  OFF by default: it clocks
+		 * throwaway bytes the CC35 discards, which desyncs the bridge framing (the
+		 * soak PINGs fail afterwards).  Proves the host TX-DMA saturates the SPI;
+		 * for real bulk data over the bridge use the framed CMD_STREAM path. */
 		if (!stream_done && g_cc3501e_witness.ping_ok >= 20u) {
 			/* Stream buffer in SRAM0 (0x02000000, 4 MB) -- native global memory the
 			 * PL330 reaches over AXI directly.  A DTCM buffer is only reachable via
@@ -464,15 +472,18 @@ int main(void)
 					ok++;
 				}
 			}
-			uint32_t us = k_cyc_to_us_floor32(k_cycle_get_32() - t0);
+			uint32_t us                        = k_cyc_to_us_floor32(k_cycle_get_32() - t0);
 			g_cc3501e_witness.dma_stream_iters = ok;
 			g_cc3501e_witness.dma_stream_us    = us;
 			g_cc3501e_witness.dma_stream_kbps =
-				(us > 0u) ? (uint32_t)(((uint64_t)ok * STREAM_LEN * 1000u) / us)
-					  : 0u;
+			    (us > 0u) ? (uint32_t)(((uint64_t)ok * STREAM_LEN * 1000u) / us) : 0u;
 			printf("[cc3501e-bringup] DMA stream: %u x %u B in %u us -> %u KB/s\n",
-			       ok, (unsigned)STREAM_LEN, us, g_cc3501e_witness.dma_stream_kbps);
+			       ok,
+			       (unsigned)STREAM_LEN,
+			       us,
+			       g_cc3501e_witness.dma_stream_kbps);
 		}
+#endif /* CC3501E_DMA_STREAM_BENCH */
 
 		s                             = cc3501e_ping(&fw);
 		g_cc3501e_witness.last_status = (uint32_t)s;

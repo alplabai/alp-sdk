@@ -79,12 +79,13 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 * (SSIENR=0); persists across the driver's per-transfer configure.  Value is
 	 * silicon-tuned -- sweep CC3501E_BRIDGE_RX_SAMPLE_DLY at the target SCLK. */
 	{
-		volatile uint32_t *ssienr = (volatile uint32_t *)(uintptr_t)(CC3501E_BRIDGE_SPI1_BASE + 0x08u);
-		volatile uint32_t *rsd    = (volatile uint32_t *)(uintptr_t)(CC3501E_BRIDGE_SPI1_BASE + 0xf0u);
-		uint32_t en = *ssienr;
-		*ssienr = 0u;
-		*rsd    = (uint32_t)CC3501E_BRIDGE_RX_SAMPLE_DLY;
-		*ssienr = en;
+		volatile uint32_t *ssienr =
+		    (volatile uint32_t *)(uintptr_t)(CC3501E_BRIDGE_SPI1_BASE + 0x08u);
+		volatile uint32_t *rsd = (volatile uint32_t *)(uintptr_t)(CC3501E_BRIDGE_SPI1_BASE + 0xf0u);
+		uint32_t           en  = *ssienr;
+		*ssienr                = 0u;
+		*rsd                   = (uint32_t)CC3501E_BRIDGE_RX_SAMPLE_DLY;
+		*ssienr                = en;
 	}
 #endif
 
