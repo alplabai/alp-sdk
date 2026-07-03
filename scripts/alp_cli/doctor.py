@@ -120,6 +120,24 @@ def _pin_mm() -> tuple[int, int]:
     return _parse_two(_zephyr_pin()) or (4, 4)
 
 
+def _python_pin() -> str | None:
+    """The dev/CI interpreter pin, read live from the repo's .python-version.
+
+    Returns ``None`` when the file is absent or empty (e.g. a packaged
+    install without the repo checkout) so the check can skip instead of
+    guessing.
+    """
+    try:
+        text = (_repo_root() / ".python-version").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+
 # -------- individual checks ---------------------------------------------------
 
 
@@ -131,6 +149,32 @@ def _check_python() -> CheckResult:
     return CheckResult(
         "python", FAIL, f"Python {cur} is below the required 3.10",
         "Install Python 3.10+ (pyproject requires-python = \">=3.10\").",
+    )
+
+
+def _check_python_pin() -> CheckResult | None:
+    # Dev/CI standardise on the interpreter pinned in .python-version (the
+    # single source every actions/setup-python reads).  requires-python in
+    # pyproject.toml stays the SUPPORT floor (>= 3.10); this check only
+    # nudges towards the pinned version, so a mismatch is WARN, never FAIL.
+    pin = _python_pin()
+    if pin is None:
+        return None  # packaged install without the repo checkout -- skip
+    v = sys.version_info
+    cur = f"{v.major}.{v.minor}.{v.micro}"
+    pin_mm = _parse_two(pin)
+    if pin_mm is None:
+        return CheckResult(
+            "python-pin", WARN, f".python-version pin {pin!r} is unparseable",
+            "Fix .python-version to a MAJOR.MINOR like 3.12.",
+        )
+    if (v.major, v.minor) == pin_mm:
+        return CheckResult("python-pin", PASS, f"Python {cur} matches the {pin} pin")
+    return CheckResult(
+        "python-pin", WARN,
+        f"Python {cur} != pinned {pin} (.python-version)",
+        f"Dev/CI standardise on Python {pin}; >= 3.10 still works "
+        "(pyproject support floor) but CI runs the pinned version.",
     )
 
 
@@ -515,6 +559,12 @@ def _all_checks() -> list[CheckResult]:
         _check_zephyr_sdk(),
         _check_jlink(),
     ]
+    # The pin check reads the repo's .python-version; skipped (None) on a
+    # packaged install without the checkout.  Slot it beside the interpreter
+    # floor check so the two Python lines read together.
+    pin = _check_python_pin()
+    if pin is not None:
+        checks.insert(1, pin)
     for maybe in (_check_git_autocrlf(), _check_long_paths()):
         if maybe is not None:
             checks.append(maybe)

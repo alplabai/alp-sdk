@@ -58,6 +58,24 @@ load-bearing decision behind this matrix.  ADR
 [0010](adr/0010-heterogeneous-os-orchestration.md) is why
 heterogeneous orchestration is its own row.
 
+### 1.1 Python version: floor vs pin
+
+Every host workflow needs Python.  Two numbers matter, and they
+are deliberately different:
+
+- **Support floor: 3.10.**  `pyproject.toml` declares
+  `requires-python = ">=3.10"` — the SDK's Python tooling
+  (validators, `alp` CLI, orchestrator) runs on any 3.10+.
+- **Dev/CI pin: 3.12.**  The repo-root `.python-version` file is
+  the single source; every CI workflow's `actions/setup-python`
+  reads it via `python-version-file`, so CI always runs exactly
+  the pinned version.
+
+To reproduce CI byte-for-byte, match the pin locally — `pyenv`
+and `uv` pick `.python-version` up automatically.  `alp doctor`
+WARNs (never FAILs) when the running interpreter differs from
+the pin; anything >= 3.10 remains supported.
+
 ---
 
 ## 2. Linux setup (Debian / Ubuntu / Fedora)
