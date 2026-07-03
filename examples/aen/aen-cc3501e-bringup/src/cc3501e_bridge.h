@@ -40,7 +40,7 @@
  * clean cold + warm = ~15x the old throughput.  Cold-boot + concurrent Wi-Fi/BLE
  * validated on e1m-aen-evk-01.  Payload reliability is also covered by the
  * inter-phase settle in cc3501e_request (CC3501E_PHASE_SETTLE_US). */
-#define CC3501E_BRIDGE_SPI_FREQ_HZ 14800000u
+#define CC3501E_BRIDGE_SPI_FREQ_HZ 14000000u
 #endif
 
 /* CC3501E control pins on the Alif LP-GPIO island (NOT E1M edge pads):
