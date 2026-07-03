@@ -340,8 +340,21 @@ config SPI_DW_ALIF_USE_DMA
 	depends on SPI_DW_ALIF
 	help
 	  Compile the DMA transfer path of the Alif DWC_ssi SPI driver.  DMA is
-	  only actually engaged when the node wires `dmas`/`dma-names`; left off
-	  by default (the DMAC channel/handshake encoding is a bench unknown).
+	  only actually engaged when the node wires `dmas`/`dma-names` AND the
+	  transfer is at least SPI_DW_ALIF_DMA_MIN_LEN bytes; smaller transfers
+	  stay on the PIO/interrupt path.  Drives the vendored peripheral-flow
+	  PL330 (alif,dma-pl330) + event-router (alif,dma-event-router).
+
+config SPI_DW_ALIF_DMA_MIN_LEN
+	int "Minimum transfer length (bytes) to use the SPI DMA path"
+	default 64
+	depends on SPI_DW_ALIF_USE_DMA
+	help
+	  Transfers shorter than this stay on the PIO/interrupt path -- DMA channel
+	  setup + the FIFO-watermark handshake dominate (and a sub-FIFO-depth
+	  transfer never reaches the burst watermark, so it would stall).  Tiny
+	  control frames (e.g. the CC3501E bridge's 4-8 byte lockstep transfers)
+	  thus keep working on PIO while large continuous streams use DMA.
 
 # ----------------------------------------------------------------------------
 # Secure-Enclave (SE) SERVICE transport -- Arm MHUv2 IPM driver + hal_alif client
@@ -3374,3 +3387,12 @@ config MRAM_FLASH_ALIF
 	  MRAM flash driver): INTERIM.  Retires onto the opt-in sdk-alif fork once
 	  the MRAM flash node is repointed to the fork compatible AND bench-verified
 	  (task #21).  Driver: zephyr/drivers/flash/flash_mram_alif.c.
+
+# Alif peripheral-flow PL330 DMA + its Event-Router multiplexer, vendored from the
+# Apache-2.0 sdk-alif fork with DISTINCT compatibles (alif,dma-pl330 /
+# alif,dma-event-router) + config (DMA_PL330_ALIF) so they coexist with upstream
+# Zephyr's MEMORY_TO_MEMORY-only arm,dma-pl330.  Provides host-side peripheral DMA
+# for continuous SPI streams (the CC3501E bridge).  ADR 0017 Tier-2 (INTERIM;
+# upstream ships no peripheral-flow PL330).  Drivers under zephyr/drivers/dma/.
+rsource "drivers/dma/Kconfig.dma_pl330_alif"
+rsource "drivers/dma/Kconfig.dma_alif_event_router"
