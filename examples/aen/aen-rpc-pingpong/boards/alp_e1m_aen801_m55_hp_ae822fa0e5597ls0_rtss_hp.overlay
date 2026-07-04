@@ -16,11 +16,12 @@
  *
  *   2. The two MHUv2 frames this core drives, via the alif,mhuv2-mbox MBOX
  *      driver (zephyr/drivers/mbox/mbox_alif_mhuv2.c).  HP is the host, so:
- *        - tx (HP -> HE) : MHU0 HP-TX window @0x40090000, HP IRQ 42
- *        - rx (HE -> HP) : MHU1 HP-RX window @0x400A0000, HP IRQ 43
+ *        - tx (HP -> HE) : NS MHU1 TX window @0x400B0000 (TX doorbell, no IRQ)
+ *        - rx (HE -> HP) : NS MHU1 RX window @0x400A0000, HP IRQ 43
  *      Addresses + IRQs are clean-room-transcribed from the Alif DFP E8 part
  *      (AE822FA0E5597, rtss_hp/soc.h):
- *        MHU_M55HP_M55HE_0_TX_BASE = 0x40090000, MHU_M55HP_M55HE_0_TX_IRQn = 42
+ *        MHU_M55HP_M55HE_1_TX_BASE = 0x400B0000 (MHU_M55HP_M55HE_1_TX_IRQn = 44,
+ *        unused -- TX is a fire-and-forget doorbell)
  *        MHU_M55HE_M55HP_1_RX_BASE = 0x400A0000, MHU_M55HE_M55HP_1_RX_IRQn = 43
  *      The HE -> HP direction (HE writes 0x400B0000 -> this 0x400A0000 RX) is
  *      bench-proven by aen-dualcore-doorbell (commit b81a3738: HP received-count
