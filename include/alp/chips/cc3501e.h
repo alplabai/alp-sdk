@@ -72,6 +72,10 @@ struct cc3501e {
 	alp_spi_t         *bus;        /**< SPI1 to the CC3501E (Alif master). */
 	alp_gpio_t        *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t        *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
+	alp_gpio_t        *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17 -> Alif P2_6):
+	                                *   HIGH when the SPI slave is armed+idle.  When populated,
+	                                *   cc3501e_request() waits on it before each reply phase
+	                                *   instead of a fixed settle gap.  NULL = legacy fixed gap. */
 	cc3501e_event_cb_t event_cb;
 	void              *event_user;
 	uint8_t            rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
@@ -132,6 +136,23 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);
 /** Retrieve the firmware's protocol version (compare against
  *  `ALP_CC3501E_PROTOCOL_VERSION` to confirm wire compatibility). */
 alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
+
+/**
+ * @brief Send one FRAMED bulk-data frame to the CC3501E stream sink (proto v2).
+ *
+ * Wraps @ref ALP_CC3501E_CMD_STREAM_WRITE: the request payload (@p len bytes)
+ * is clocked in a single SPI transfer, so it rides the host peripheral-DMA path
+ * when @p len reaches the SPI DMA threshold (@c CONFIG_SPI_DW_ALIF_DMA_MIN_LEN).
+ * The firmware sinks + acks the frame, so unlike raw throwaway clocking the link
+ * stays framed and never desyncs.  Send frames back-to-back for a bulk stream.
+ *
+ * @param ctx   Initialised, reset driver context.
+ * @param data  Bulk bytes to send (may be NULL only if @p len is 0).
+ * @param len   Byte count, at most @c ALP_CC3501E_MAX_PAYLOAD minus the header.
+ * @return ALP_OK on ack; ALP_ERR_INVAL on a bad arg / oversized frame; the
+ *         mapped firmware status otherwise.
+ */
+alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t len);
 
 /* ------------------------------------------------------------------ */
 /* Wi-Fi host helpers                                                  */

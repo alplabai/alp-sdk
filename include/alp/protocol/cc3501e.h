@@ -53,7 +53,7 @@
 extern "C" {
 #endif
 
-#define ALP_CC3501E_PROTOCOL_VERSION 1
+#define ALP_CC3501E_PROTOCOL_VERSION 2
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -172,6 +172,15 @@ typedef enum {
 	ALP_CC3501E_CMD_OTA_FINISH = 0x42, /* no payload; install + deferred reboot */
 	ALP_CC3501E_CMD_OTA_ABORT  = 0x43, /* no payload; cancel the session      */
 	ALP_CC3501E_CMD_OTA_STATUS = 0x44, /* reply alp_cc3501e_ota_status_t      */
+
+	/* Bulk-data stream sink (proto v2).  The host sends up to
+	 * ALP_CC3501E_MAX_PAYLOAD-header bytes per frame; the firmware receives +
+	 * discards them (counting the total, reported via GET_DIAG_INFO) and acks.
+	 * A back-to-back sequence of these is a FRAMED bulk stream: each frame's
+	 * payload phase rides the host's DMA path (>= the SPI DMA threshold), and
+	 * every frame is acked so the link never desyncs -- unlike clocking raw
+	 * throwaway bytes.  Empty reply data. */
+	ALP_CC3501E_CMD_STREAM_WRITE = 0x45, /* req: opaque bulk bytes; reply: none */
 
 	/* GPIO proxy.  IO11 / IO13 / IO15..IO21 hang off CC3501E
      * GPIOs; these commands let the Alif read/write them via the

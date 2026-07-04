@@ -1,0 +1,19 @@
+# Copyright 2020 Broadcom
+# SPDX-License-Identifier: Apache-2.0
+
+config DMA_PL330_ALIF
+	bool
+	prompt "PL330 DMA driver (Alif peripheral-flow)"
+	default y
+	depends on DT_HAS_ALIF_DMA_PL330_ENABLED
+	help
+	  This option enables support of pl330 DMA Controller.
+
+config DMA_PL330_ALIF_MAX_BLOCK_COUNT
+	int "Maximum scatter-gather block count per channel"
+	depends on DMA_PL330_ALIF
+	default 2
+	help
+	  Number of dma_block_config entries pre-allocated per channel.
+	  This is the maximum scatter-gather chain length accepted by
+	  dma_config(). Increase if your application needs longer blocks.

@@ -32,6 +32,29 @@ endif()
 zephyr_sources_ifdef(CONFIG_MRAM_FLASH_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_mram_alif.c)
 
+# Alif peripheral-flow PL330 DMA + its Event-Router mux.  Upstream Zephyr's
+# dma_pl330 is MEMORY_TO_MEMORY only; this is the sdk-alif fork's peripheral-flow
+# PL330 (MEMORY_TO/FROM_PERIPHERAL) + the evtrtr multiplexer, vendored with a
+# DISTINCT compatible (alif,dma-pl330 / alif,dma-event-router) + config
+# (DMA_PL330_ALIF) so it coexists with upstream's arm,dma-pl330 without symbol
+# or devicetree collision.  Enables host-side DMA for continuous SPI streams
+# (the CC3501E bridge).  Headers live under zephyr/include/ so the <zephyr/...>
+# includes resolve.  ADR 0017 Tier-2 (fork-driver copy; upstream ships no
+# peripheral-flow PL330) -- INTERIM, retires onto the opt-in sdk-alif fork.
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma)
+if(DEFINED ZEPHYR_ALIF_MODULE_DIR)
+  zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+endif()
+zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_pl330_alif.c)
+zephyr_sources_ifdef(CONFIG_DMA_ALIF_EVENT_ROUTER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_event_router.c)
+# Tier-1.5 glue: the M55-HE PL330 DMA2 boot-manager security latch the fork does
+# in its soc_init (self-gates on the alif,dma-pl330 node being present).
+zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_boot_latch.c)
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
@@ -291,6 +314,10 @@ zephyr_library_sources_ifdef(CONFIG_ALIF_PDM
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/audio/alif_pdm.c)
 if(CONFIG_ALIF_PDM)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma)
+if(DEFINED ZEPHYR_ALIF_MODULE_DIR)
+  zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+endif()
 endif()
 
 # Alif Ensemble DesignWare I2S controller (compatible "snps,designware-i2s"),
@@ -350,6 +377,10 @@ endif()
 # it is Tier-2 opt-in (CONFIG_ALP_SDK_CAMERA_ALIF_ISP, default n).
 if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW OR CONFIG_VIDEO_ISP_VSI)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma)
+if(DEFINED ZEPHYR_ALIF_MODULE_DIR)
+  zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+endif()
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/video)
     # video_alif.c / isp_pico.c use hal_alif's <soc_memory_map.h> (local_to_global
     # for the CPI/ISP AXI buffer addresses).  hal_alif only puts its common/include
@@ -918,6 +949,10 @@ zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include)
 # timer/alif_utimer.h) live under zephyr/include and are #included by C drivers
 # (the utimer PWM/counter drivers), not just by DTS -- put the dir on the C path.
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma)
+if(DEFINED ZEPHYR_ALIF_MODULE_DIR)
+  zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+endif()
 # src/common holds the internal mproc framing helper that tests
 # include directly to cover encode/decode without a real mbox peer.
 # Header path is `proto/alp_mproc_frame.h` so apps that don't opt in

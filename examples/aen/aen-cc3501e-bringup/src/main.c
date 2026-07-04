@@ -45,6 +45,7 @@
 #include <string.h>
 
 #include <zephyr/fatal.h>
+#include <zephyr/kernel.h> /* k_cycle_get_32 / k_cyc_to_us_floor32 for the DMA stream benchmark */
 
 #include "alp/peripheral.h"
 #include "alp/chips/cc3501e.h"
@@ -161,6 +162,10 @@ typedef struct {
 	/* --- BLE bring-up results (cc3501e_ble_* helpers) --- */
 	uint32_t ble_status;  /* +0x38  (uint32_t)alp_status_t from cc3501e_ble_enable        */
 	uint32_t ble_enabled; /* +0x3C  1 once the BLE controller + NimBLE host came up        */
+	/* --- host peripheral-DMA continuous-stream throughput benchmark --- */
+	uint32_t dma_stream_iters; /* +0x40  large TX-DMA transfers completed in the burst     */
+	uint32_t dma_stream_us;    /* +0x44  elapsed microseconds for the burst                */
+	uint32_t dma_stream_kbps;  /* +0x48  measured throughput, KB/s (bytes*1000/us)         */
 } cc3501e_witness_t;
 
 /* Progress checkpoints written to g_cc3501e_witness.phase so a J-Link can
@@ -427,7 +432,53 @@ int main(void)
 	 */
 	printf("[cc3501e-bringup] entering liveness soak (PING every 500 ms)\n");
 	g_cc3501e_witness.phase = CC3501E_PHASE_SOAK;
+#ifdef CC3501E_DMA_STREAM_BENCH
+	bool stream_done = false;
+#endif
 	for (uint32_t i = 0u;; ++i) {
+		/*
+		 * Run-once FRAMED bulk-stream throughput benchmark.  Once the link is up,
+		 * send MAX-payload frames via CMD_STREAM_WRITE back-to-back: each frame's
+		 * payload phase (508 B, well over CONFIG_SPI_DW_ALIF_DMA_MIN_LEN) rides the
+		 * host peripheral-DMA path (evtrtr0 -> DMA0, no CPU FIFO shuffling), and
+		 * the firmware sinks + ACKs every frame so the link stays framed -- real
+		 * bulk data over the bridge, not throwaway clocking.  Records KB/s.
+		 */
+#ifdef CC3501E_DMA_STREAM_BENCH
+		/* Opt-in bulk-stream throughput benchmark (build with
+		 * -DEXTRA_CFLAGS=-DCC3501E_DMA_STREAM_BENCH).  Framed + ACKed, so it does
+		 * NOT desync the bridge -- the soak PINGs keep working afterwards. */
+		if (!stream_done && g_cc3501e_witness.ping_ok >= 20u) {
+			/* One frame = the largest payload a request carries (MAX_PAYLOAD minus
+			 * the 4-byte header).  The frame buffer may live in DTCM: the PL330
+			 * driver remaps it via local_to_global() so the AXI master reaches it. */
+			enum { FRAME_LEN = ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES };
+			static uint8_t frame[FRAME_LEN];
+			stream_done = true;
+			for (uint32_t k = 0u; k < FRAME_LEN; ++k) {
+				frame[k] = (uint8_t)k;
+			}
+			const uint32_t frames = 512u;
+			uint32_t       ok     = 0u;
+			uint32_t       t0     = k_cycle_get_32();
+			for (uint32_t k = 0u; k < frames; ++k) {
+				if (cc3501e_stream_write(&fw, frame, (size_t)FRAME_LEN) == ALP_OK) {
+					ok++;
+				}
+			}
+			uint32_t us                        = k_cyc_to_us_floor32(k_cycle_get_32() - t0);
+			g_cc3501e_witness.dma_stream_iters = ok;
+			g_cc3501e_witness.dma_stream_us    = us;
+			g_cc3501e_witness.dma_stream_kbps =
+			    (us > 0u) ? (uint32_t)(((uint64_t)ok * FRAME_LEN * 1000u) / us) : 0u;
+			printf("[cc3501e-bringup] DMA stream: %u x %u B in %u us -> %u KB/s\n",
+			       ok,
+			       (unsigned)FRAME_LEN,
+			       us,
+			       g_cc3501e_witness.dma_stream_kbps);
+		}
+#endif /* CC3501E_DMA_STREAM_BENCH */
+
 		s                             = cc3501e_ping(&fw);
 		g_cc3501e_witness.last_status = (uint32_t)s;
 		if (s == ALP_OK) {
