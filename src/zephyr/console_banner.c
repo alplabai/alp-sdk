@@ -105,6 +105,10 @@ static void print_manifest_line(void)
 		}
 	} else if (s == ALP_ERR_NOSUPPORT) {
 		printk("  manifest: unavailable (no EEPROM bus configured)\n");
+	} else if (s == ALP_ERR_NOT_PROVISIONED) {
+		printk("  manifest: unprovisioned (EEPROM blank -- run program_eeprom.py)\n");
+	} else if (s == ALP_ERR_NOT_READY) {
+		printk("  manifest: unavailable (EEPROM not ready / bus not wired)\n");
 	} else {
 		printk("  manifest: unavailable (read failed: %d)\n", (int)s);
 	}

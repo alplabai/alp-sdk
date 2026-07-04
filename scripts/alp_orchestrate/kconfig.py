@@ -284,6 +284,18 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     if console_lines:
         lines.extend(console_lines)
 
+    # On-module HW manifest EEPROM: when the SoM preset carries one
+    # (`on_module.eeprom`), point the hw_info reader -- and the improved
+    # console banner's boot-time manifest read -- at portable bus 0, the
+    # `alp-i2c0` alias every SoM routes its manifest EEPROM to (e.g. AEN's
+    # 24C128 @0x50 on SoC I2C2).  Harmless on examples without that bus
+    # wired: the read just returns NOT_READY and the banner says so.
+    if (project.som_preset.get("on_module") or {}).get("eeprom"):
+        lines.append("# On-module HW manifest EEPROM -> portable bus 0 (alp-i2c0);")
+        lines.append("# enables alp_hw_info_read() + the console banner manifest line.")
+        lines.append("CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0")
+        lines.append("")
+
     if kconfig:
         lines.append(f"# SoM silicon ({silicon} via {project.sku})")
         lines.append(f"CONFIG_{kconfig}=y")
