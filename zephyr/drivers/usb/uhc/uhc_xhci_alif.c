@@ -66,6 +66,23 @@ LOG_MODULE_REGISTER(uhc_xhci_alif, CONFIG_UHC_DRIVER_LOG_LEVEL);
 #define DWC3_GUSB2PHYCFG_PHYSOFTRST (1u << 31)
 #define DWC3_GUSB2PHYCFG_SUSPHY     (1u << 6)
 #define DWC3_GUSB2PHYCFG_ULPI_UTMI  (1u << 4)
+#define DWC3_GUSB2PHYCFG_ULPIAUTORES (1u << 15)
+#define DWC3_GUSB2PHYCFG_PHYIF_MASK  (1u << 3)          /* PHYIF pos 3 */
+#define DWC3_GUSB2PHYCFG_USBTRDTIM_MASK (0xFu << 10)    /* USBTRDTIM pos 10 */
+#define DWC3_GUSB2PHYCFG_USBTRDTIM_8BIT (9u << 10)      /* USBTRDTIM_UTMI_8_BIT */
+/* PHYIF 8-bit UTMI = 0, so only USBTRDTIM is set for the E8 8-bit HS PHY. */
+
+/* Global SoC bus config (0xC100), user control (0xC12C), frame-length adjust
+ * (0xC630) -- DFP soc.h USB_Type offsets; bits from usbd.h. */
+#define DWC3_GSBUSCFG0          0xC100u
+#define DWC3_GSBUSCFG0_INCRBRSTENA   (1u << 0)
+#define DWC3_GSBUSCFG0_INCR16BRSTENA (1u << 3)
+#define DWC3_GUCTL              0xC12Cu
+#define DWC3_GUCTL_HSTINAUTORETRY    (1u << 14)
+#define DWC3_GFLADJ             0xC630u
+#define DWC3_GFLADJ_30MHZ_MASK       0x3Fu
+#define DWC3_GFLADJ_30MHZ_SDBND_SEL  (1u << 7)
+#define DWC3_GFLADJ_30MHZ_DEFAULT    0x20u
 
 /* USB clock + PHY power-on-reset live in CLKCTL_PER_MST (0x4903F000), NOT the
  * controller window -- DFP drivers/include/sys_ctrl_usb.h.  Transcribed here
@@ -244,6 +261,16 @@ static int uhc_xhci_alif_first_light(const struct device *dev)
 	sys_clear_bits(CLKCTL_USB_CTRL2, CLKCTL_USB_CTRL2_PHY_POR);
 	k_busy_wait(5000);
 
+	/* 2b. Select HOST port capability BEFORE the core comes out of soft-reset, so
+	 *     the DWC3 core initialises the host (xHCI) block on reset-release.  DWC3
+	 *     databook: GCTL.PrtCapDir must be set going INTO the core reset -- setting
+	 *     it after (as usbd, which is device-mode, does) leaves the host block
+	 *     unconnected and USBCMD.HCRST never completes. */
+	reg = sys_read32(base + DWC3_GCTL);
+	reg &= ~DWC3_GCTL_PRTCAPDIR_MASK;
+	reg |= DWC3_GCTL_PRTCAPDIR_HOST;
+	sys_write32(reg, base + DWC3_GCTL);
+
 	/* 3. DWC3 core + PHY soft-reset, matching the DFP usbd_phy_reset() timing
 	 *    EXACTLY: assert core+PHY reset together, hold 50 ms, release the PHY,
 	 *    wait another 50 ms for the PHYs to stabilise, THEN release the core.
@@ -265,20 +292,44 @@ static int uhc_xhci_alif_first_light(const struct device *dev)
 	reg &= ~DWC3_GCTL_CORESOFTRESET;
 	sys_write32(reg, base + DWC3_GCTL);
 
-	/* 4. GCTL: select HOST port capability + disable clock gating. */
+	/* 4. PHY setup (DFP usbd_phy_setup): select 8-bit UTMI -- clear ULPIAutoRes,
+	 *    ULPI_UTMI, PHYIF + USBTRDTIM, then set USBTRDTIM=8-bit (PHYIF 8-bit = 0);
+	 *    keep the PHY active (SUSPHY clear). */
+	reg = sys_read32(base + DWC3_GUSB2PHYCFG0);
+	reg &= ~(DWC3_GUSB2PHYCFG_ULPIAUTORES | DWC3_GUSB2PHYCFG_ULPI_UTMI |
+		 DWC3_GUSB2PHYCFG_PHYIF_MASK | DWC3_GUSB2PHYCFG_USBTRDTIM_MASK |
+		 DWC3_GUSB2PHYCFG_SUSPHY);
+	reg |= DWC3_GUSB2PHYCFG_USBTRDTIM_8BIT;
+	sys_write32(reg, base + DWC3_GUSB2PHYCFG0);
+
+	/* 5. Global control (usbd_setup_global_control): disable clock gating; in HOST
+	 *    mode set GUCTL.HSTINAUTORETRY. */
+	reg = sys_read32(base + DWC3_GCTL);
+	reg |= DWC3_GCTL_DSBLCLKGTNG;
+	sys_write32(reg, base + DWC3_GCTL);
+	reg = sys_read32(base + DWC3_GUCTL);
+	reg |= DWC3_GUCTL_HSTINAUTORETRY;
+	sys_write32(reg, base + DWC3_GUCTL);
+
+	/* 6. Frame-length adjustment (usbd_frame_length_adjustment): 30 MHz GFLADJ to
+	 *    the default 0x20 with SDBND select, so SOF/ITP timing tracks the ref
+	 *    clock -- part of what the host block needs before HCRST can complete. */
+	reg = sys_read32(base + DWC3_GFLADJ);
+	reg &= ~DWC3_GFLADJ_30MHZ_MASK;
+	reg |= DWC3_GFLADJ_30MHZ_SDBND_SEL | DWC3_GFLADJ_30MHZ_DEFAULT;
+	sys_write32(reg, base + DWC3_GFLADJ);
+
+	/* 7. AXI burst config (usbd_set_incr_burst_type): undefined-length + INCR16. */
+	reg = sys_read32(base + DWC3_GSBUSCFG0);
+	reg |= DWC3_GSBUSCFG0_INCRBRSTENA | DWC3_GSBUSCFG0_INCR16BRSTENA;
+	sys_write32(reg, base + DWC3_GSBUSCFG0);
+
+	/* 8. Select HOST port capability (usbd_set_mode -> PrtCapDir=host). */
 	reg = sys_read32(base + DWC3_GCTL);
 	reg &= ~DWC3_GCTL_PRTCAPDIR_MASK;
-	reg |= DWC3_GCTL_PRTCAPDIR_HOST | DWC3_GCTL_DSBLCLKGTNG;
+	reg |= DWC3_GCTL_PRTCAPDIR_HOST;
 	sys_write32(reg, base + DWC3_GCTL);
-
-	/* 4b. Keep the HS PHY ACTIVE (clear SUSPHY) and select UTMI (clear
-	 * ULPI_UTMI) before the host reset.  Bench (E8, 2026-07-04): with SUSPHY
-	 * left set the host block has no PHY clock, so USBCMD.HCRST never
-	 * self-clears (stuck at 0x02, USBSTS.CNR already 0) and the poll times out. */
-	reg = sys_read32(base + DWC3_GUSB2PHYCFG0);
-	reg &= ~(DWC3_GUSB2PHYCFG_SUSPHY | DWC3_GUSB2PHYCFG_ULPI_UTMI);
-	sys_write32(reg, base + DWC3_GUSB2PHYCFG0);
-	k_busy_wait(100);
+	k_busy_wait(1000);
 
 	/* 5. xHCI host-block reset: USBCMD.HCRST at (base + CAPLENGTH), then poll
 	 *    HCRST self-clear + USBSTS.CNR clear (xHCI spec §4.2). */
