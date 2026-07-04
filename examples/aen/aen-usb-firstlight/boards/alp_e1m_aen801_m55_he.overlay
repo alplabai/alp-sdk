@@ -3,6 +3,17 @@
  * in the SYSTOP main domain, reachable from HE (like the 0x49xx peripherals);
  * first light is pure MMIO (clock/PHY/reset/cap-read), no IRQ. */
 / {
+	/* Put SYSTEM RAM in the global on-chip SRAM0 (@0x02000000), NOT the M55-HE
+	 * DTCM (@0x20000000).  The xHCI controller is a DMA bus master: it fetches the
+	 * DCBAA / command+event rings / ERST / scratchpad and reads/writes them over
+	 * AXI.  DTCM is tightly-coupled and NOT on the controller's DMA path, so those
+	 * structures left in DTCM are invisible to it (the No-Op never completes, the
+	 * controller re-halts).  SRAM0 is globally addressed (CPU addr == DMA addr, no
+	 * local_to_global) and with CONFIG_DCACHE=n the CPU + controller share a
+	 * coherent view -- the same fix eth_dwmac and the NPU use. */
+	chosen {
+		zephyr,sram = &sram0;
+	};
 	soc {
 		zephyr_uhc0: usb@48200000 {
 			compatible = "alif,xhci-uhc";
