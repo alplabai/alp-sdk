@@ -37,12 +37,23 @@ int main(void)
 
 	int rc = uhc_init(dev, fl_cb, NULL);
 
-	if (rc == 0) {
-		printk("RESULT PASS: xHCI first-light OK -- DWC3 host init + HCRST "
-		       "settled, capability registers read (see the LOG line above)\n");
-	} else {
+	if (rc != 0) {
 		printk("RESULT FAIL: uhc_init/first-light rc=%d "
 		       "(controller not reachable / not clocked / reset stuck)\n", rc);
+		return 0;
+	}
+	printk("first-light OK; starting controller + No-Op command round-trip...\n");
+
+	/* Enable = run the controller + drive a No-Op command through the command
+	 * ring -> doorbell -> event ring (see the driver's g_..._data_0.fl.noop_cc). */
+	int en = uhc_enable(dev);
+
+	if (en == 0) {
+		printk("RESULT PASS: xHCI running + No-Op command completed (ring/event "
+		       "machinery works end-to-end, no device needed)\n");
+	} else {
+		printk("RESULT PARTIAL: first-light OK but run/No-Op rc=%d "
+		       "(controller ready; ring round-trip incomplete -- read fl.noop_cc)\n", en);
 	}
 	return 0;
 }

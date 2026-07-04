@@ -22,7 +22,12 @@ struct xhci_trb {
 #define XHCI_TRB_LINK_TC     (1u << 1) /* Link TRB Toggle Cycle */
 #define XHCI_TRB_TYPE(t)     ((uint32_t)(t) << 10)
 #define XHCI_TRB_GET_TYPE(c) (((c) >> 10) & 0x3Fu)
-#define XHCI_TRB_TYPE_LINK   6u /* spec Table 6-91 */
+#define XHCI_TRB_TYPE_LINK   6u  /* spec Table 6-91 */
+#define XHCI_TRB_TYPE_NOOP_CMD 23u /* No Op Command (§6.4.3.10) */
+#define XHCI_TRB_TYPE_CMD_COMPLETION 33u /* Command Completion Event (§6.4.2.2) */
+/* Event/completion helpers: completion code is status[31:24]; SUCCESS = 1. */
+#define XHCI_TRB_GET_CC(status) (((status) >> 24) & 0xFFu)
+#define XHCI_CC_SUCCESS      1u
 
 /* A producer ring: `size` TRBs, the last reserved as a Link TRB. */
 struct xhci_ring {

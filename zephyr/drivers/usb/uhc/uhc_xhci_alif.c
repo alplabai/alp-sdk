@@ -42,10 +42,31 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/sys_io.h>
 #include <errno.h>
+#include <string.h>
 #include "uhc_common.h"
 #include "xhci_core.h"
 
 LOG_MODULE_REGISTER(uhc_xhci_alif, CONFIG_UHC_DRIVER_LOG_LEVEL);
+
+/* The xHCI DMA master is a SYSTOP system-bus master: it CANNOT reach the M55's
+ * local TCM aliases (DTCM @ 0x20000000, ITCM @ 0x0).  Every DMA structure the CPU
+ * allocates in TCM (DCBAA, command/event rings, ERST, scratchpad) must be handed
+ * to the controller -- and referenced from INSIDE the structures (Link TRB,
+ * DCBAA[0], ERST base, scratchpad-array entry) -- by its GLOBAL alias.  Same
+ * remap as hal_alif local_to_global() (soc_memory_map.h): DTCM 0x20000000 ->
+ * 0x58800000, ITCM 0x0 -> 0x58000000.  Addresses already global pass through. */
+static uint64_t xhci_l2g(const void *p)
+{
+	uintptr_t a = (uintptr_t)p;
+
+	if (a >= 0x20000000u && a < 0x20100000u) {
+		return (uint64_t)(a - 0x20000000u + 0x58800000u);
+	}
+	if (a < 0x00100000u) {
+		return (uint64_t)(a + 0x58000000u);
+	}
+	return (uint64_t)a;
+}
 
 /* ---------------------------------------------------------------------------
  * DWC3 global registers (offsets from the USB controller base).
@@ -186,6 +207,23 @@ struct uhc_xhci_alif_data {
 	 * writes (DCBAAP, CRCR), then set CONFIG.MaxSlotsEn and USBCMD.R/S at enable.
 	 */
 	struct xhci_op_regs op_image;
+	/** Register block bases resolved in *_init (base + CAPLENGTH/RTSOFF/DBOFF). */
+	uintptr_t op_base;
+	uintptr_t rt_base;
+	uintptr_t db_base;
+	/** Event ring: 16 TRBs (no Link -- a single ERST segment, spec §4.9.4). */
+	struct xhci_trb event_ring_seg[16] __aligned(64);
+	/** Event Ring Segment Table: one entry (base + size), 64-byte aligned (§6.5). */
+	struct {
+		uint32_t base_lo;
+		uint32_t base_hi;
+		uint32_t size; /* segment size in TRBs (low 16 bits) */
+		uint32_t rsvd;
+	} erst[1] __aligned(64);
+	/** Scratchpad (HCSPARAMS2 says MaxScratchpadBufs=1): a 1-entry pointer array
+	 *  (DCBAA[0], §6.6) + one page the xHC owns for internal state. */
+	uint64_t scratchpad_array[1] __aligned(64);
+	uint8_t  scratchpad_buf[4096] __aligned(4096);
 	/**
 	 * First-light snapshot: the xHCI capability registers read after the DWC3
 	 * host-mode init + xHCI HCRST.  Populated by uhc_xhci_alif_first_light() so a
@@ -204,6 +242,14 @@ struct uhc_xhci_alif_data {
 		uint32_t dboff;
 		uint32_t rtsoff;
 		uint32_t usbsts;     /* post-reset status snapshot */
+		/* Run + No-Op milestone (set in *_enable): run_hch=0 means the
+		 * controller started (USBSTS.HCH cleared after USBCMD.R/S); noop_cc is
+		 * the completion code of a No-Op command driven round-trip through the
+		 * command ring -> doorbell -> event ring (1 = SUCCESS = the ring/event
+		 * machinery works end-to-end without any device attached). */
+		uint32_t run_hch;
+		uint32_t noop_cc;
+		uint32_t run_usbsts;
 	} fl;
 };
 
@@ -418,48 +464,128 @@ static int uhc_xhci_alif_init(const struct device *dev)
 		return fl;
 	}
 
-	/* Initialise the xhci_core command ring (31 usable TRBs + 1 Link TRB). */
-	xhci_ring_init(&data->cmd_ring, data->cmd_ring_seg,
-		       ARRAY_SIZE(data->cmd_ring_seg));
+	/* Resolve the register-block bases now that CAPLENGTH/DBOFF/RTSOFF are known
+	 * (op = base + CAPLENGTH §5.4; runtime = base + RTSOFF §5.5; doorbell = base +
+	 * DBOFF §5.6).  No MMU on the M55, so VA == PA == bus address for the DMA
+	 * structures below (DCBAA/rings/ERST take bus addresses, §6.1/§5.4.8). */
+	data->op_base = cfg->base + data->fl.caplength;
+	data->rt_base = cfg->base + (data->fl.rtsoff & ~0x1Fu);
+	data->db_base = cfg->base + (data->fl.dboff & ~0x3u);
 
-	/*
-	 * TODO(aen401-bench): full MMIO write-out sequence:
-	 *   1. Read cap->caplength from MMIO to locate the op-reg block
-	 *      (base + CAPLENGTH per xHCI spec §5.3.1).
-	 *   2. DWC3 soft-reset: assert DCTL.CoreSoftReset (0xC704 bit 30);
-	 *      poll until cleared; set GCTL.PrtCapDir=host (0xC110 bits 13:12).
-	 *   3. xHCI reset: assert USBCMD.HCRST; poll USBSTS.CNR and HCH to
-	 *      zero (spec §4.2) before writing any op registers.
-	 *   4. Copy op_image.dcbaap_{lo,hi} and crcr_{lo,hi} and config to
-	 *      the real op-reg block with volatile writes.
-	 *   5. Set USBCMD.R/S and unmask interrupts in uhc_xhci_alif_enable.
-	 *   6. Allocate event ring segment + ERST; write ERSTBA/ERSTSZ via
-	 *      the primary interrupter registers (§5.5).
-	 *
-	 * DCBAA / CRCR take bus (physical) addresses (spec §6.1, §5.4.8).
-	 * On M55-HP there is no MMU, so VA == PA and the uintptr_t cast is
-	 * the bus address.  TODO(aen401-bench): if an MMU is ever enabled,
-	 * translate via the Zephyr phys-addr API before programming these.
-	 */
-	xhci_init_sequence(&data->op_image,
-			   (uint64_t)(uintptr_t)data->dcbaa,
-			   (uint64_t)(uintptr_t)data->cmd_ring_seg,
-			   8u /* MaxSlots -- TODO(aen401-bench): read HCSPARAMS1[7:0] */);
+	/* Command ring (31 usable TRBs + 1 Link TRB).  xhci_ring_init sets the Link
+	 * TRB to the ring's CPU (local) address -- the xHC follows it via DMA, so
+	 * rewrite it to the ring's GLOBAL alias. */
+	xhci_ring_init(&data->cmd_ring, data->cmd_ring_seg, ARRAY_SIZE(data->cmd_ring_seg));
+	{
+		uint64_t g = xhci_l2g(data->cmd_ring_seg);
+		struct xhci_trb *link = &data->cmd_ring_seg[ARRAY_SIZE(data->cmd_ring_seg) - 1u];
+
+		link->param_lo = (uint32_t)g;
+		link->param_hi = (uint32_t)(g >> 32);
+	}
+	xhci_init_sequence(&data->op_image, 0u, 0u,
+			   data->fl.hcsparams1 & 0xFFu /* real MaxSlots (DCBAAP/CRCR
+			   * are written with global addresses in *_enable) */);
+
+	/* Scratchpad (§6.6): HCSPARAMS2 says the xHC needs scratchpad pages before it
+	 * can run.  DCBAA[0] -> the scratchpad-pointer array (global); array[0] -> one
+	 * page (global) the xHC owns. */
+	data->scratchpad_array[0] = xhci_l2g(data->scratchpad_buf);
+	data->dcbaa[0] = xhci_l2g(data->scratchpad_array);
 
 	return 0;
 }
 
+/* Primary interrupter (interrupter 0) register offsets from the runtime base
+ * (xHCI spec §5.5.2): the interrupter array starts at RT + 0x20. */
+#define XHCI_IR0             0x20u
+#define XHCI_IR_ERSTSZ       0x08u
+#define XHCI_IR_ERSTBA_LO    0x10u
+#define XHCI_IR_ERSTBA_HI    0x14u
+#define XHCI_IR_ERDP_LO      0x18u
+#define XHCI_IR_ERDP_HI      0x1Cu
+
+/* Operational register offsets used at enable (spec §5.4). */
+#define XHCI_OP_CRCR_LO      0x18u
+#define XHCI_OP_CRCR_HI      0x1Cu
+#define XHCI_OP_DCBAAP_LO    0x30u
+#define XHCI_OP_DCBAAP_HI    0x34u
+#define XHCI_OP_CONFIG       0x38u
+
 static int uhc_xhci_alif_enable(const struct device *dev)
 {
-	/*
-	 * TODO(aen401-bench): start the controller and unmask interrupts:
-	 *   1. Set USBCMD.R/S (bit 0) to start the schedule.
-	 *   2. Set primary interrupter IMAN.IE (bit 1) + IMAN.IP clear.
-	 *   3. Set USBCMD.INTE (bit 2) to unmask the global interrupt.
-	 *   4. Set PORTSC.PP (bit 9) on each root-hub port to apply power.
-	 *   5. Enable the SoC IRQ via cfg->irq_config().
-	 */
-	return 0;
+	struct uhc_xhci_alif_data *data = dev->data;
+	const uintptr_t op = data->op_base;
+	const uintptr_t rt = data->rt_base;
+	const uintptr_t ir = rt + XHCI_IR0;
+	int timeout;
+
+	/* 1. Program the operational registers (spec §4.2): DCBAAP, CRCR (RCS=1),
+	 *    CONFIG.MaxSlotsEn -- all with GLOBAL (DMA-reachable) addresses. */
+	uint64_t dcbaa_g = xhci_l2g(data->dcbaa);
+	uint64_t cmdr_g = xhci_l2g(data->cmd_ring_seg);
+
+	sys_write32((uint32_t)(dcbaa_g & 0xFFFFFFC0u), op + XHCI_OP_DCBAAP_LO);
+	sys_write32((uint32_t)(dcbaa_g >> 32), op + XHCI_OP_DCBAAP_HI);
+	sys_write32((uint32_t)(cmdr_g & 0xFFFFFFC0u) | XHCI_CRCR_RCS, op + XHCI_OP_CRCR_LO);
+	sys_write32((uint32_t)(cmdr_g >> 32), op + XHCI_OP_CRCR_HI);
+	sys_write32(data->op_image.config, op + XHCI_OP_CONFIG);
+
+	/* 2. Event ring: one ERST segment -> event_ring_seg (global); program the
+	 *    primary interrupter's ERSTSZ / ERSTBA / ERDP (spec §4.9.4, §5.5.2). */
+	uint64_t evtr_g = xhci_l2g(data->event_ring_seg);
+	uint64_t erst_g = xhci_l2g(data->erst);
+
+	memset(data->event_ring_seg, 0, sizeof(data->event_ring_seg));
+	data->erst[0].base_lo = (uint32_t)evtr_g;
+	data->erst[0].base_hi = (uint32_t)(evtr_g >> 32);
+	data->erst[0].size = ARRAY_SIZE(data->event_ring_seg);
+	data->erst[0].rsvd = 0u;
+	sys_write32(1u, ir + XHCI_IR_ERSTSZ); /* 1 segment */
+	sys_write32((uint32_t)evtr_g, ir + XHCI_IR_ERDP_LO);
+	sys_write32((uint32_t)(evtr_g >> 32), ir + XHCI_IR_ERDP_HI);
+	sys_write32((uint32_t)erst_g, ir + XHCI_IR_ERSTBA_LO);
+	sys_write32((uint32_t)(erst_g >> 32), ir + XHCI_IR_ERSTBA_HI);
+
+	/* 3. Run: set USBCMD.R/S, wait for USBSTS.HCH to clear (controller running). */
+	sys_write32(sys_read32(op + XHCI_OP_USBCMD) | XHCI_USBCMD_RS, op + XHCI_OP_USBCMD);
+	for (timeout = 100000; timeout > 0; timeout--) {
+		if ((sys_read32(op + XHCI_OP_USBSTS) & XHCI_USBSTS_HCH) == 0u) {
+			break;
+		}
+		k_busy_wait(1);
+	}
+	data->fl.run_hch = sys_read32(op + XHCI_OP_USBSTS) & XHCI_USBSTS_HCH;
+
+	/* 4. No-Op command round-trip: enqueue a No-Op Command TRB, ring the command
+	 *    doorbell (DB[0]=0), and poll the event ring for its Command Completion
+	 *    Event.  This exercises command ring -> doorbell -> event ring end to end
+	 *    with no device attached.  The controller writes the first event with
+	 *    cycle=1 (our initial consumer cycle). */
+	struct xhci_trb noop = {0};
+
+	noop.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_NOOP_CMD);
+	xhci_ring_enqueue(&data->cmd_ring, &noop);
+	sys_write32(0u, data->db_base); /* DB[0] = host controller command doorbell */
+
+	data->fl.noop_cc = 0u;
+	for (timeout = 200000; timeout > 0; timeout--) {
+		volatile struct xhci_trb *evt = &data->event_ring_seg[0];
+
+		if ((evt->control & XHCI_TRB_CYCLE) &&
+		    XHCI_TRB_GET_TYPE(evt->control) == XHCI_TRB_TYPE_CMD_COMPLETION) {
+			data->fl.noop_cc = XHCI_TRB_GET_CC(evt->status);
+			break;
+		}
+		k_busy_wait(1);
+	}
+	data->fl.run_usbsts = sys_read32(op + XHCI_OP_USBSTS);
+
+	LOG_INF("xhci run: HCH=%u  No-Op completion code=%u (%s)", data->fl.run_hch,
+		data->fl.noop_cc,
+		data->fl.noop_cc == XHCI_CC_SUCCESS ? "SUCCESS" : "not-success");
+
+	return (data->fl.run_hch == 0u && data->fl.noop_cc == XHCI_CC_SUCCESS) ? 0 : -EIO;
 }
 
 static int uhc_xhci_alif_disable(const struct device *dev)
