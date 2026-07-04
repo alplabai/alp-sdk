@@ -354,9 +354,13 @@ static int uhc_xhci_alif_first_light(const struct device *dev)
 	const uintptr_t op = base + caplength;
 
 	sys_write32(XHCI_USBCMD_HCRST, op + XHCI_OP_USBCMD);
+	/* Ready condition = USBSTS.CNR clear (xHCI spec §4.2: software must wait on CNR
+	 * before touching op registers).  The HCRST *self-clear* bit is best-effort on
+	 * this DWC3 -- bench: it can stay asserted (0x02) while the controller is
+	 * nonetheless ready (CNR=0) and the root port runs (PORTSC PLS=RxDetect,PP=1).
+	 * Gate readiness on CNR; record HCRST-clear separately for diagnostics. */
 	for (timeout = 100000; timeout > 0; timeout--) {
-		if ((sys_read32(op + XHCI_OP_USBCMD) & XHCI_USBCMD_HCRST) == 0u &&
-		    (sys_read32(op + XHCI_OP_USBSTS) & XHCI_USBSTS_CNR) == 0u) {
+		if ((sys_read32(op + XHCI_OP_USBSTS) & XHCI_USBSTS_CNR) == 0u) {
 			break;
 		}
 		k_busy_wait(1);
