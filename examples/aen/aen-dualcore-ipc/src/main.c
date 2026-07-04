@@ -219,6 +219,7 @@ int main(void)
 			REQ_MBOX->payload[i] = (seq << 8) + i;
 		}
 		REQ_MBOX->len = IPC_PAYLOAD_WORDS;
+		barrier_dmem_fence_full();
 		REQ_MBOX->seq = seq; /* seq LAST: HP keys off it via the doorbell */
 
 		mhu_ring(); /* hint HP that a request is ready */

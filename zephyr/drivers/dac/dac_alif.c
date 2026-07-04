@@ -306,9 +306,15 @@ static int dac_init(const struct device *dev)
 
 	regs = DEVICE_MMIO_NAMED_GET(dev, dac_reg);
 
-	err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
-	if (err != 0) {
-		return err;
+	/* pinctrl is optional: the enabled dac node carries no pinctrl-0 (the DAC
+	 * output pad is fixed-function), so config->pcfg is NULL -- applying it
+	 * unconditionally NULL-derefs in pinctrl_lookup_state and fails init, leaving
+	 * the device not-ready.  Guard on the property being present. */
+	if (config->pcfg != NULL) {
+		err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
+		if (err != 0) {
+			return err;
+		}
 	}
 
 	unsigned int key = irq_lock();
