@@ -1,0 +1,15 @@
+/* Enable the main-domain USB controller (DWC3/xHCI @ 0x48200000, IRQ 101 --
+ * DFP AE822 soc.h) for a first-light bring-up on the M55-HE core.  The USB IP is
+ * in the SYSTOP main domain, reachable from HE (like the 0x49xx peripherals);
+ * first light is pure MMIO (clock/PHY/reset/cap-read), no IRQ. */
+/ {
+	soc {
+		zephyr_uhc0: usb@48200000 {
+			compatible = "alif,xhci-uhc";
+			reg = <0x48200000 0x10000>;
+			interrupts = <101 0>;
+			maximum-speed = "high-speed";
+			status = "okay";
+		};
+	};
+};

@@ -236,35 +236,49 @@ static int uhc_xhci_alif_first_light(const struct device *dev)
 	 *    Without this every controller-window read bus-faults (the PL330 lesson). */
 	sys_set_bits(CLKCTL_PERIPH_CLK_ENA, CLKCTL_PERIPH_CLK_ENA_USB);
 
-	/* 2. Power-on-reset the embedded HS PHY: pulse USB_CTRL2.PHY_POR.  Polarity
-	 *    per sys_ctrl_usb.h (por_set asserts, por_clear releases); the >=10us hold
-	 *    and post-release settle are bench-tunable. */
-	sys_set_bits(CLKCTL_USB_CTRL2, CLKCTL_USB_CTRL2_PHY_POR);
-	k_busy_wait(20);
+	/* 2. Release the HS PHY from power-on-reset.  The DFP usbd_initialize() just
+	 *    CLEARS USB_CTRL2.PHY_POR (the cold boot leaves it asserted) -- do NOT
+	 *    re-assert it: a fresh POR pulse needs a long PLL-relock settle, and the
+	 *    earlier set-then-clear left the PHY without a stable clock so the xHCI
+	 *    HCRST hung.  Follow with the 5 ms pre-reset settle usbd_initialize uses. */
 	sys_clear_bits(CLKCTL_USB_CTRL2, CLKCTL_USB_CTRL2_PHY_POR);
-	k_busy_wait(100);
+	k_busy_wait(5000);
 
-	/* 3. DWC3 core + PHY soft-reset (assert both, hold, release). */
+	/* 3. DWC3 core + PHY soft-reset, matching the DFP usbd_phy_reset() timing
+	 *    EXACTLY: assert core+PHY reset together, hold 50 ms, release the PHY,
+	 *    wait another 50 ms for the PHYs to stabilise, THEN release the core.
+	 *    Bench (E8, 2026-07-04): the earlier 100 us holds were ~500x too short --
+	 *    the core never finished resetting so the xHCI HCRST hung (USBCMD stuck at
+	 *    0x02 with USBSTS.CNR already clear). */
 	reg = sys_read32(base + DWC3_GCTL);
 	reg |= DWC3_GCTL_CORESOFTRESET;
 	sys_write32(reg, base + DWC3_GCTL);
 	reg = sys_read32(base + DWC3_GUSB2PHYCFG0);
 	reg |= DWC3_GUSB2PHYCFG_PHYSOFTRST;
 	sys_write32(reg, base + DWC3_GUSB2PHYCFG0);
-	k_busy_wait(100);
+	k_busy_wait(50000);
 	reg = sys_read32(base + DWC3_GUSB2PHYCFG0);
 	reg &= ~DWC3_GUSB2PHYCFG_PHYSOFTRST;
 	sys_write32(reg, base + DWC3_GUSB2PHYCFG0);
+	k_busy_wait(50000);
 	reg = sys_read32(base + DWC3_GCTL);
 	reg &= ~DWC3_GCTL_CORESOFTRESET;
 	sys_write32(reg, base + DWC3_GCTL);
-	k_busy_wait(100);
 
 	/* 4. GCTL: select HOST port capability + disable clock gating. */
 	reg = sys_read32(base + DWC3_GCTL);
 	reg &= ~DWC3_GCTL_PRTCAPDIR_MASK;
 	reg |= DWC3_GCTL_PRTCAPDIR_HOST | DWC3_GCTL_DSBLCLKGTNG;
 	sys_write32(reg, base + DWC3_GCTL);
+
+	/* 4b. Keep the HS PHY ACTIVE (clear SUSPHY) and select UTMI (clear
+	 * ULPI_UTMI) before the host reset.  Bench (E8, 2026-07-04): with SUSPHY
+	 * left set the host block has no PHY clock, so USBCMD.HCRST never
+	 * self-clears (stuck at 0x02, USBSTS.CNR already 0) and the poll times out. */
+	reg = sys_read32(base + DWC3_GUSB2PHYCFG0);
+	reg &= ~(DWC3_GUSB2PHYCFG_SUSPHY | DWC3_GUSB2PHYCFG_ULPI_UTMI);
+	sys_write32(reg, base + DWC3_GUSB2PHYCFG0);
+	k_busy_wait(100);
 
 	/* 5. xHCI host-block reset: USBCMD.HCRST at (base + CAPLENGTH), then poll
 	 *    HCRST self-clear + USBSTS.CNR clear (xHCI spec §4.2). */
