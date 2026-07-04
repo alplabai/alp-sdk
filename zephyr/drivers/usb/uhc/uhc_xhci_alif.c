@@ -40,6 +40,8 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/usb/uhc.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/sys_io.h>
+#include <errno.h>
 #include "uhc_common.h"
 #include "xhci_core.h"
 
@@ -54,10 +56,32 @@ LOG_MODULE_REGISTER(uhc_xhci_alif, CONFIG_UHC_DRIVER_LOG_LEVEL);
 #define DWC3_GCTL_PRTCAPDIR_SHIFT   12u
 #define DWC3_GCTL_PRTCAPDIR_MASK    (3u << DWC3_GCTL_PRTCAPDIR_SHIFT)
 #define DWC3_GCTL_PRTCAPDIR_HOST    (1u << DWC3_GCTL_PRTCAPDIR_SHIFT)
+/* DFP drivers/include/usbd.h: GCTL.DisableClockGating bit0, CoreSoftReset bit11,
+ * PrtCapDir host = 1<<12 (matches PRTCAPDIR_HOST above). */
+#define DWC3_GCTL_DSBLCLKGTNG   (1u << 0)
+#define DWC3_GCTL_CORESOFTRESET (1u << 11)
 
-/* TODO(aen401-bench): add GUSB2PHYCFG0 (0xC200), DCTL (0xC704),
- * GTXFIFOSIZ0 (0xC300), GRXFIFOSIZ0 (0xC380) with exact field masks
- * from HWRM §14.10.5.3 Table 14-168 once bench values are confirmed. */
+/* Global USB2 PHY config (DFP soc.h USB_Type @ 0xC200; bits from usbd.h). */
+#define DWC3_GUSB2PHYCFG0       0xC200u
+#define DWC3_GUSB2PHYCFG_PHYSOFTRST (1u << 31)
+#define DWC3_GUSB2PHYCFG_SUSPHY     (1u << 6)
+#define DWC3_GUSB2PHYCFG_ULPI_UTMI  (1u << 4)
+
+/* USB clock + PHY power-on-reset live in CLKCTL_PER_MST (0x4903F000), NOT the
+ * controller window -- DFP drivers/include/sys_ctrl_usb.h.  Transcribed here
+ * so the driver is self-contained (no hal_alif USB module exists). */
+#define CLKCTL_PER_MST_BASE          0x4903F000u
+#define CLKCTL_PERIPH_CLK_ENA        (CLKCTL_PER_MST_BASE + 0x0Cu)
+#define CLKCTL_PERIPH_CLK_ENA_USB    (1u << 20)   /* PERIPH_CLK_ENA_USB_CKEN */
+#define CLKCTL_USB_CTRL2             (CLKCTL_PER_MST_BASE + 0xACu)
+#define CLKCTL_USB_CTRL2_PHY_POR     (1u << 8)    /* USB_CTRL2_PHY_POR */
+
+/* xHCI operational registers (xHCI spec §5.4, at controller base + CAPLENGTH). */
+#define XHCI_OP_USBCMD          0x00u
+#define XHCI_OP_USBSTS          0x04u
+#define XHCI_USBCMD_HCRST       (1u << 1)   /* Host Controller Reset (§5.4.1) */
+#define XHCI_USBSTS_CNR         (1u << 11)  /* Controller Not Ready (§5.4.2)  */
+#define XHCI_USBSTS_HCH         (1u << 0)   /* HCHalted (§5.4.2)              */
 
 /* ---------------------------------------------------------------------------
  * xHCI capability registers (at controller base; xHCI spec §5.3).
@@ -139,6 +163,25 @@ struct uhc_xhci_alif_data {
 	 * writes (DCBAAP, CRCR), then set CONFIG.MaxSlotsEn and USBCMD.R/S at enable.
 	 */
 	struct xhci_op_regs op_image;
+	/**
+	 * First-light snapshot: the xHCI capability registers read after the DWC3
+	 * host-mode init + xHCI HCRST.  Populated by uhc_xhci_alif_first_light() so a
+	 * bench read (SWD or LOG) confirms the controller is alive and reports the
+	 * real HCSPARAMS the ring/slot TODOs must be sized from.  fl_ok = the reset
+	 * settled (USBSTS.CNR cleared) and HCIVERSION looks sane (>= 0x0100).
+	 */
+	struct {
+		uint32_t magic;      /* 0x58484349 ("XHCI") once populated */
+		int32_t  fl_status;  /* 0 = ok, negative = reset/probe failure */
+		uint8_t  caplength;
+		uint16_t hciversion;
+		uint32_t hcsparams1; /* [7:0]=MaxSlots [18:8]=MaxIntrs [31:24]=MaxPorts */
+		uint32_t hcsparams2;
+		uint32_t hccparams1;
+		uint32_t dboff;
+		uint32_t rtsoff;
+		uint32_t usbsts;     /* post-reset status snapshot */
+	} fl;
 };
 
 /* ---------------------------------------------------------------------------
@@ -165,6 +208,111 @@ static int uhc_xhci_alif_unlock(const struct device *dev)
  * ---------------------------------------------------------------------------
  */
 
+/* ---------------------------------------------------------------------------
+ * First light: clock + PHY + DWC3 host-mode core init + xHCI reset, then read
+ * the capability registers.  Transcribed from the Alif DFP USB device driver
+ * (drivers/source/usb/usbd_initialize.c + drivers/include/{usbd.h,sys_ctrl_usb.h})
+ * -- the clock/PHY/core-reset/GCTL path is shared device<->host; only
+ * GCTL.PrtCapDir differs (host=1).  Per usbd_core_soft_reset(), host mode must
+ * NOT assert the DCTL device soft-reset (bit30) -- the xHCI USBCMD.HCRST resets
+ * the host block instead.  The exact PHY-POR polarity/settle and FIFO sizing are
+ * the fields the TODOs mean by "bench provides values"; the reset+cap-read below
+ * is the milestone that proves the controller is reachable and reports the real
+ * HCSPARAMS the ring/slot code must size from.
+ * ---------------------------------------------------------------------------
+ */
+static int uhc_xhci_alif_first_light(const struct device *dev)
+{
+	const struct uhc_xhci_alif_config *cfg = dev->config;
+	struct uhc_xhci_alif_data *data = dev->data;
+	const uintptr_t base = cfg->base;
+	uint32_t reg;
+	int timeout;
+
+	data->fl.magic = 0u;
+	data->fl.fl_status = -EIO;
+
+	/* 1. Ungate the USB peripheral clock (CLKCTL_PER_MST.PERIPH_CLK_ENA bit20).
+	 *    Without this every controller-window read bus-faults (the PL330 lesson). */
+	sys_set_bits(CLKCTL_PERIPH_CLK_ENA, CLKCTL_PERIPH_CLK_ENA_USB);
+
+	/* 2. Power-on-reset the embedded HS PHY: pulse USB_CTRL2.PHY_POR.  Polarity
+	 *    per sys_ctrl_usb.h (por_set asserts, por_clear releases); the >=10us hold
+	 *    and post-release settle are bench-tunable. */
+	sys_set_bits(CLKCTL_USB_CTRL2, CLKCTL_USB_CTRL2_PHY_POR);
+	k_busy_wait(20);
+	sys_clear_bits(CLKCTL_USB_CTRL2, CLKCTL_USB_CTRL2_PHY_POR);
+	k_busy_wait(100);
+
+	/* 3. DWC3 core + PHY soft-reset (assert both, hold, release). */
+	reg = sys_read32(base + DWC3_GCTL);
+	reg |= DWC3_GCTL_CORESOFTRESET;
+	sys_write32(reg, base + DWC3_GCTL);
+	reg = sys_read32(base + DWC3_GUSB2PHYCFG0);
+	reg |= DWC3_GUSB2PHYCFG_PHYSOFTRST;
+	sys_write32(reg, base + DWC3_GUSB2PHYCFG0);
+	k_busy_wait(100);
+	reg = sys_read32(base + DWC3_GUSB2PHYCFG0);
+	reg &= ~DWC3_GUSB2PHYCFG_PHYSOFTRST;
+	sys_write32(reg, base + DWC3_GUSB2PHYCFG0);
+	reg = sys_read32(base + DWC3_GCTL);
+	reg &= ~DWC3_GCTL_CORESOFTRESET;
+	sys_write32(reg, base + DWC3_GCTL);
+	k_busy_wait(100);
+
+	/* 4. GCTL: select HOST port capability + disable clock gating. */
+	reg = sys_read32(base + DWC3_GCTL);
+	reg &= ~DWC3_GCTL_PRTCAPDIR_MASK;
+	reg |= DWC3_GCTL_PRTCAPDIR_HOST | DWC3_GCTL_DSBLCLKGTNG;
+	sys_write32(reg, base + DWC3_GCTL);
+
+	/* 5. xHCI host-block reset: USBCMD.HCRST at (base + CAPLENGTH), then poll
+	 *    HCRST self-clear + USBSTS.CNR clear (xHCI spec §4.2). */
+	uint8_t caplength = sys_read8(base);            /* §5.3.1 */
+	uint16_t hciversion = sys_read16(base + 2u);    /* §5.3.2 */
+	const uintptr_t op = base + caplength;
+
+	sys_write32(XHCI_USBCMD_HCRST, op + XHCI_OP_USBCMD);
+	for (timeout = 100000; timeout > 0; timeout--) {
+		if ((sys_read32(op + XHCI_OP_USBCMD) & XHCI_USBCMD_HCRST) == 0u &&
+		    (sys_read32(op + XHCI_OP_USBSTS) & XHCI_USBSTS_CNR) == 0u) {
+			break;
+		}
+		k_busy_wait(1);
+	}
+
+	/* 6. Snapshot the capability registers (the first-light observable). */
+	data->fl.caplength   = caplength;
+	data->fl.hciversion  = hciversion;
+	data->fl.hcsparams1  = sys_read32(base + 0x04u);
+	data->fl.hcsparams2  = sys_read32(base + 0x08u);
+	data->fl.hccparams1  = sys_read32(base + 0x10u);
+	data->fl.dboff       = sys_read32(base + 0x14u);
+	data->fl.rtsoff      = sys_read32(base + 0x18u);
+	data->fl.usbsts      = sys_read32(op + XHCI_OP_USBSTS);
+	data->fl.magic       = 0x58484349u; /* "XHCI" */
+
+	if (timeout == 0) {
+		LOG_ERR("xhci: HCRST/CNR did not settle (USBSTS=0x%08x)", data->fl.usbsts);
+		data->fl.fl_status = -ETIMEDOUT;
+		return -ETIMEDOUT;
+	}
+	/* Sanity: a live xHCI reports HCIVERSION >= 0x0100 and a nonzero CAPLENGTH. */
+	if (caplength == 0u || caplength == 0xFFu || hciversion < 0x0100u) {
+		LOG_ERR("xhci: implausible caps (CAPLENGTH=0x%02x HCIVERSION=0x%04x)",
+			caplength, hciversion);
+		data->fl.fl_status = -ENODEV;
+		return -ENODEV;
+	}
+	data->fl.fl_status = 0;
+	LOG_INF("xhci first light: CAPLENGTH=0x%02x HCIVERSION=0x%04x "
+		"HCSPARAMS1=0x%08x (MaxSlots=%u MaxPorts=%u) DBOFF=0x%x RTSOFF=0x%x",
+		caplength, hciversion, data->fl.hcsparams1,
+		data->fl.hcsparams1 & 0xFFu, (data->fl.hcsparams1 >> 24) & 0xFFu,
+		data->fl.dboff, data->fl.rtsoff);
+	return 0;
+}
+
 static int uhc_xhci_alif_init(const struct device *dev)
 {
 	const struct uhc_xhci_alif_config *cfg = dev->config;
@@ -172,16 +320,15 @@ static int uhc_xhci_alif_init(const struct device *dev)
 
 	data->cap = (volatile struct xhci_cap_regs *)cfg->base;
 
-	/*
-	 * TODO(aen401-bench): DWC3 G*-register host-mode init sequence:
-	 *   1. Assert DCTL.CoreSoftReset (0xC704 bit 30); poll until cleared.
-	 *   2. Set GCTL.PrtCapDir (bits 13:12) = 0b01 (host mode).
-	 *      DWC3_GCTL (0xC110): write ((read & ~DWC3_GCTL_PRTCAPDIR_MASK) |
-	 *      DWC3_GCTL_PRTCAPDIR_HOST).
-	 *   3. Program GUSB2PHYCFG0 (0xC200) -- PHY type, turnaround, suspend.
-	 *   4. Size TX/RX FIFOs: GTXFIFOSIZ0 (0xC300), GRXFIFOSIZ0 (0xC380).
-	 *   5. Set GCTL.U2RSTECN (bit 16).
-	 */
+	/* First light: bring the DWC3 core to host mode, reset the xHCI block, and
+	 * read the capability registers.  A failure here means the controller is not
+	 * reachable/clocked -- report it rather than proceeding into the (still
+	 * TODO(aen401-bench)) ring/slot/enumeration path on a dead controller. */
+	int fl = uhc_xhci_alif_first_light(dev);
+
+	if (fl != 0) {
+		return fl;
+	}
 
 	/* Initialise the xhci_core command ring (31 usable TRBs + 1 Link TRB). */
 	xhci_ring_init(&data->cmd_ring, data->cmd_ring_seg,
