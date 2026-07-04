@@ -258,6 +258,16 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
      *   1. send request header (4)        3. read reply header (4)
      *   2. send request payload (tx_len)  4. read reply payload (status+data)
      */
+	/* Gate READY before the REQUEST header too.  After the slave sends a reply it
+	 * re-arms its header phase in its ISR; a spaced request (soak loop, bring-up)
+	 * has ample idle time so the header always landed on an armed slave.  But a
+	 * TIGHT back-to-back loop -- streaming via cc3501e_stream_write -- clocks the
+	 * next header the instant the prior reply is read, racing that re-arm: the
+	 * first frame acks, then every following frame desyncs (bench 2026-07-04:
+	 * dma_stream_iters stuck at 1).  READY tracks the actual header-arm; on a
+	 * CS-less r1 board with no ready_pin the fallback is the same short settle the
+	 * other phases use. */
+	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
 	alp_status_t s =
 	    alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
