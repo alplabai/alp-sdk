@@ -3396,3 +3396,27 @@ config MRAM_FLASH_ALIF
 # upstream ships no peripheral-flow PL330).  Drivers under zephyr/drivers/dma/.
 rsource "drivers/dma/Kconfig.dma_pl330_alif"
 rsource "drivers/dma/Kconfig.dma_alif_event_router"
+
+# -------------------------------------------------------------------
+# Improved console boot banner (<alp/console>) -- replaces Zephyr's
+# basic one-line boot banner with a Linux-style header (SDK version,
+# board/SoC/core, SoM MPN, memory map, console) and reads the HW
+# manifest from EEPROM at boot.  src/zephyr/console_banner.c.
+# -------------------------------------------------------------------
+config ALP_SDK_CONSOLE_BANNER
+	bool "Alp SDK improved console boot banner"
+	depends on ALP_SDK
+	default y
+	select PRINTK
+	help
+	  Print an informative Linux-console-style boot header on the app
+	  console (SDK version, board target, SoC + core, on-module memory
+	  map, and the console itself) and read the HW manifest (SoM MPN /
+	  hw-rev / serial) from the module EEPROM at boot, instead of
+	  Zephyr's basic "*** Booting Zephyr OS ***" banner.
+
+# Turn OFF Zephyr's basic boot banner when ours is on, so there is one
+# canonical boot header everywhere.  Apps can still force it back with an
+# explicit CONFIG_BOOT_BANNER=y in prj.conf.
+config BOOT_BANNER
+	default n if ALP_SDK_CONSOLE_BANNER

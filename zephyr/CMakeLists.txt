@@ -85,6 +85,10 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
 )
 
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_BANNER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console_banner.c)
+
+
 # Storage class dispatcher + backends.
 # The dispatcher compiles unconditionally so apps that depend on the
 # <alp/storage.h> ABI always link cleanly; each backend gates on its
