@@ -140,6 +140,91 @@ def _emit_extra_library_profile(
     return out
 
 
+# --------------------------------------------------------------------
+# Console backend auto-selection (issue: generic console).
+#
+# The Alp SDK is a generic, multi-OS SoM layer: the same example can be
+# built for a Zephyr core (Cortex-M) or a Linux core (Cortex-A / Yocto),
+# and the console backend that "printf lands on" differs per OS.  Rather
+# than force every app author to hand-pick console Kconfig (the old AEN
+# bench examples hard-coded a RAM console, which then fought the board's
+# real UART console), the generator selects it automatically from the
+# slice's `os:` and lets the SoM manufacturer / customer override via a
+# single `diagnostics.console:` knob in board.yaml.
+#
+#   auto  (default) -> os: zephyr        => alp  (UART console)
+#                      os: yocto/ubuntu  => linux (stdio/tty console)
+#                      other             => none
+#   alp | uart      -> Zephyr UART console (the module's console UART,
+#                       e.g. E1M edge UART0; the board layer owns the
+#                       `zephyr,console` DT chosen + pinmux).
+#   ram             -> Zephyr RAM console (bench flow: read the buffer
+#                       over SWD when no serial line is available).
+#   linux           -> Linux console (nothing to emit on the Zephyr side;
+#                       meaningful only on a yocto slice).
+#   none | off      -> emit nothing; inherit whatever the board provides.
+# --------------------------------------------------------------------
+_CONSOLE_ALIASES = {
+    "alp": "uart",
+    "uart": "uart",
+    "serial": "uart",
+    "ram": "ram",
+    "swd": "ram",
+    "linux": "linux",
+    "stdio": "linux",
+    "none": "none",
+    "off": "none",
+}
+
+
+def _resolve_console(value: Optional[str], os_: str) -> str:
+    """Resolve the effective console backend for a slice.
+
+    ``value`` is the raw ``diagnostics.console:`` knob (or ``None`` /
+    ``"auto"`` for the OS-derived default); ``os_`` is the slice OS.
+    Returns one of ``"uart"``, ``"ram"``, ``"linux"``, ``"none"``.
+    """
+    v = (value or "auto").strip().lower()
+    if v == "auto":
+        if os_ == "zephyr":
+            return "uart"
+        if os_ in ("yocto", "ubuntu"):
+            return "linux"
+        return "none"
+    return _CONSOLE_ALIASES.get(v, "none")
+
+
+def _emit_zephyr_console(console: str) -> list[str]:
+    """Kconfig lines for a Zephyr slice's resolved console backend."""
+    if console == "uart":
+        return [
+            "# Console: Alp UART console (auto-selected for os: zephyr).",
+            "# printf/LOG land on the module's console UART (the board layer",
+            "# owns the `zephyr,console` DT chosen + pinmux -- e.g. E1M edge",
+            "# UART0).  Override in board.yaml with `diagnostics.console: ram`",
+            "# (SWD bench flow) or `none` (inherit the board default).",
+            "CONFIG_SERIAL=y",
+            "CONFIG_CONSOLE=y",
+            "CONFIG_UART_CONSOLE=y",
+            "CONFIG_UART_INTERRUPT_DRIVEN=y",
+            "",
+        ]
+    if console == "ram":
+        return [
+            "# Console: RAM console (board.yaml `diagnostics.console: ram`).",
+            "# No serial line on this bench -- read `ram_console_buf` over SWD.",
+            "# LOG is routed to printk so the RAM backend still captures it.",
+            "CONFIG_CONSOLE=y",
+            "CONFIG_RAM_CONSOLE=y",
+            "CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048",
+            "CONFIG_UART_CONSOLE=n",
+            "",
+        ]
+    # "linux" on a Zephyr slice is meaningless, and "none" means inherit
+    # the board default -- emit nothing in both cases.
+    return []
+
+
 def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     """Per-core Kconfig fragment for a Zephyr slice.
 
@@ -189,6 +274,16 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         if log_level in log_level_kc:
             lines.append(f"CONFIG_LOG_DEFAULT_LEVEL={log_level_kc[log_level]}")
     lines.append("")
+
+    # Console backend, auto-selected from the slice OS (overridable via
+    # board.yaml `diagnostics.console:`).  A Zephyr slice defaults to the
+    # Alp UART console so `west build && attach a terminal` just works;
+    # a customer on a serial-less bench flips to `ram`.
+    console = _resolve_console(diagnostics.get("console"), slice_.os)
+    console_lines = _emit_zephyr_console(console)
+    if console_lines:
+        lines.extend(console_lines)
+
     if kconfig:
         lines.append(f"# SoM silicon ({silicon} via {project.sku})")
         lines.append(f"CONFIG_{kconfig}=y")
@@ -689,6 +784,17 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
                  "-- append to local.conf.")
     lines.append(f"# Per-core slice `{slice_.core_id}` "
                  f"(image: {slice_.image or 'custom'})")
+    # Console: a Yocto slice uses the Linux console (kernel console = the
+    # SoM's debug UART via the `console=` kernel cmdline; userspace printf
+    # goes to stdout/the controlling tty).  This is the Linux half of the
+    # generic console auto-selection -- nothing to set in local.conf; the
+    # BSP owns the `console=ttySC*` cmdline.  (Zephyr slices get the Alp
+    # UART console instead; see _emit_zephyr_console.)
+    console = _resolve_console((project.diagnostics or {}).get("console"),
+                               slice_.os)
+    if console == "linux":
+        lines.append("# Console: Linux console (kernel `console=` cmdline "
+                     "-> SoM debug UART; userspace -> stdout/tty).")
     lines.append(f'MACHINE = "{machine}"')
     if slice_.libraries:
         imageinstall = " ".join(
