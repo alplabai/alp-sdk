@@ -224,6 +224,15 @@ struct uhc_xhci_alif_data {
 	 *  (DCBAA[0], §6.6) + one page the xHC owns for internal state. */
 	uint64_t scratchpad_array[1] __aligned(64);
 	uint8_t  scratchpad_buf[4096] __aligned(4096);
+	/* Enumeration (device slot 1): 64-byte contexts (HCCPARAMS1.CSZ=1).  Input
+	 * context = input-control + slot + EP0 (3 x 64B); device context = slot + EP0
+	 * (2 x 64B, pointed at by DCBAA[slot]).  EP0 control transfer ring + a buffer
+	 * for GET_DESCRIPTOR data.  All in SRAM0 (DMA-reachable). */
+	uint32_t input_ctx[3 * 16] __aligned(64);
+	uint32_t device_ctx[2 * 16] __aligned(64);
+	struct xhci_trb ep0_ring[16] __aligned(64);
+	struct xhci_ring ep0;
+	uint8_t  descriptor_buf[64] __aligned(64);
 	/**
 	 * First-light snapshot: the xHCI capability registers read after the DWC3
 	 * host-mode init + xHCI HCRST.  Populated by uhc_xhci_alif_first_light() so a
@@ -257,6 +266,16 @@ struct uhc_xhci_alif_data {
 		uint32_t slot_cc;
 		uint32_t slot_id;
 		uint32_t portsc;
+		/* Enumeration results.  enum_stage: 0=no device on port, 1=port reset +
+		 * enabled, 2=Address Device SUCCESS, 3=device descriptor read.  desc0/desc1
+		 * = the first 8 device-descriptor bytes (bLength, bDescriptorType, bcdUSB,
+		 * bDeviceClass/SubClass/Proto, bMaxPacketSize0); idVendor follows at [8]. */
+		uint32_t enum_stage;
+		uint32_t port_speed;
+		uint32_t addr_cc;
+		uint32_t xfer_cc;
+		uint32_t desc0;
+		uint32_t desc1;
 	} fl;
 	/* Event-ring consumer state (dequeue index + cycle, spec §4.9.4). */
 	uint32_t event_deq;
@@ -523,48 +542,164 @@ static int uhc_xhci_alif_init(const struct device *dev)
 #define XHCI_OP_PORTSC(p)    (0x400u + (p) * 0x10u) /* port 0 PORTSC (§5.4.8) */
 #define XHCI_ERDP_EHB        (1u << 3)              /* Event Handler Busy (write-1-clear) */
 
-/* Submit one command TRB on the command ring, ring the command doorbell, and
- * consume the resulting Command Completion Event from the event ring (advancing
- * the dequeue pointer + ERDP, spec §4.9.4).  Returns the completion code (0 on
- * timeout) and, via *slot_id, the event's Slot ID.  Polled (no ISR) -- enough to
- * drive the bring-up command sequence without a device attached. */
-static uint8_t uhc_xhci_alif_submit_cmd(struct uhc_xhci_alif_data *data,
-					const struct xhci_trb *cmd, uint8_t *slot_id)
+/* Consume the next event of `want` type from the event ring, advancing the
+ * dequeue pointer + ERDP (spec §4.9.4).  Any other event types seen first are
+ * consumed and skipped (e.g. a Port Status Change before a Transfer Event).
+ * Returns the completion code (0 on timeout); *slot_id gets the event's Slot ID. */
+static uint8_t uhc_xhci_alif_wait_event(struct uhc_xhci_alif_data *data,
+					uint8_t want, uint8_t *slot_id)
 {
 	const uintptr_t ir = data->rt_base + XHCI_IR0;
-	uint8_t cc = 0u;
-	int timeout;
+	int timeout = 500000;
 
 	if (slot_id != NULL) {
 		*slot_id = 0u;
 	}
-	xhci_ring_enqueue(&data->cmd_ring, cmd);
-	sys_write32(0u, data->db_base); /* DB[0] = command doorbell */
-
-	for (timeout = 200000; timeout > 0; timeout--) {
+	while (timeout-- > 0) {
 		volatile struct xhci_trb *evt = &data->event_ring_seg[data->event_deq];
 
-		if ((evt->control & XHCI_TRB_CYCLE) == (uint32_t)data->event_cycle &&
-		    XHCI_TRB_GET_TYPE(evt->control) == XHCI_TRB_TYPE_CMD_COMPLETION) {
-			cc = XHCI_TRB_GET_CC(evt->status);
-			if (slot_id != NULL) {
-				*slot_id = XHCI_TRB_GET_SLOT(evt->control);
-			}
-			/* Advance the event-ring dequeue (wrap toggles the cycle) + ERDP. */
-			data->event_deq++;
-			if (data->event_deq >= ARRAY_SIZE(data->event_ring_seg)) {
-				data->event_deq = 0u;
-				data->event_cycle ^= 1u;
-			}
-			uint64_t erdp = xhci_l2g(&data->event_ring_seg[data->event_deq]);
+		if ((evt->control & XHCI_TRB_CYCLE) != (uint32_t)data->event_cycle) {
+			k_busy_wait(1);
+			continue;
+		}
+		uint8_t etype = XHCI_TRB_GET_TYPE(evt->control);
+		uint8_t cc = XHCI_TRB_GET_CC(evt->status);
+		uint8_t slot = XHCI_TRB_GET_SLOT(evt->control);
 
-			sys_write32((uint32_t)erdp | XHCI_ERDP_EHB, ir + XHCI_IR_ERDP_LO);
-			sys_write32((uint32_t)(erdp >> 32), ir + XHCI_IR_ERDP_HI);
+		data->event_deq++;
+		if (data->event_deq >= ARRAY_SIZE(data->event_ring_seg)) {
+			data->event_deq = 0u;
+			data->event_cycle ^= 1u;
+		}
+		uint64_t erdp = xhci_l2g(&data->event_ring_seg[data->event_deq]);
+
+		sys_write32((uint32_t)erdp | XHCI_ERDP_EHB, ir + XHCI_IR_ERDP_LO);
+		sys_write32((uint32_t)(erdp >> 32), ir + XHCI_IR_ERDP_HI);
+		if (etype == want) {
+			if (slot_id != NULL) {
+				*slot_id = slot;
+			}
+			return cc;
+		}
+	}
+	return 0u;
+}
+
+/* Enqueue a command TRB, ring DB[0], wait for its Command Completion Event. */
+static uint8_t uhc_xhci_alif_submit_cmd(struct uhc_xhci_alif_data *data,
+					const struct xhci_trb *cmd, uint8_t *slot_id)
+{
+	xhci_ring_enqueue(&data->cmd_ring, cmd);
+	sys_write32(0u, data->db_base); /* DB[0] = command doorbell */
+	return uhc_xhci_alif_wait_event(data, XHCI_TRB_TYPE_CMD_COMPLETION, slot_id);
+}
+
+/* Enumerate the device on root-hub port 0 (spec §4.3): reset the port, Address
+ * Device (build the input slot+EP0 contexts, slot already Enabled), then a
+ * control GET_DESCRIPTOR(device, 8) over EP0 -- the core of USB enumeration.
+ * Records how far it got + the first descriptor bytes in fl.  No-op if no device
+ * is attached (PORTSC.CCS=0). */
+static void uhc_xhci_alif_enumerate(struct uhc_xhci_alif_data *data, uintptr_t op)
+{
+	uint32_t portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+	const uint8_t slot = (uint8_t)data->fl.slot_id;
+	int t;
+
+	if ((portsc & 1u) == 0u || slot == 0u) { /* CCS=0: nothing attached */
+		data->fl.enum_stage = 0u;
+		return;
+	}
+
+	/* 1. Reset the port (PORTSC.PR).  Preserve PP, do NOT write-1-clear the change
+	 *    bits [23:17] or PED [1].  Wait for PRC (reset complete), read the speed. */
+	sys_write32((portsc & ~((0x7Fu << 17) | (1u << 1))) | (1u << 4) | (1u << 9),
+		    op + XHCI_OP_PORTSC(0));
+	for (t = 500000; t > 0; t--) {
+		portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+		if (portsc & (1u << 21)) { /* PRC: Port Reset Change */
 			break;
 		}
 		k_busy_wait(1);
 	}
-	return cc;
+	data->fl.port_speed = (portsc >> 10) & 0xFu;
+	data->fl.enum_stage = 1u;
+
+	uint32_t speed = data->fl.port_speed;
+	uint32_t mps = (speed == 2u) ? 8u : 64u; /* speed 2 = Low Speed -> MPS 8 */
+
+	/* 2. EP0 control transfer ring (fix its Link TRB to the global alias). */
+	xhci_ring_init(&data->ep0, data->ep0_ring, ARRAY_SIZE(data->ep0_ring));
+	{
+		uint64_t g = xhci_l2g(data->ep0_ring);
+		struct xhci_trb *link = &data->ep0_ring[ARRAY_SIZE(data->ep0_ring) - 1u];
+
+		link->param_lo = (uint32_t)g;
+		link->param_hi = (uint32_t)(g >> 32);
+	}
+
+	/* 3. Input context (64-byte contexts): input-control [0..15], slot [16..31],
+	 *    EP0 [32..47].  Add-flags A0(slot)|A1(EP0); slot dword0 speed+1-entry,
+	 *    dword1 root-hub port=1; EP0 dword1 type=Control CErr=3 MPS, dword2/3 TR
+	 *    dequeue = EP0 ring | DCS. */
+	memset(data->input_ctx, 0, sizeof(data->input_ctx));
+	memset(data->device_ctx, 0, sizeof(data->device_ctx));
+	data->input_ctx[1] = 0x3u;
+	data->input_ctx[16] = (speed << 20) | (1u << 27);
+	data->input_ctx[17] = (1u << 16);
+	data->input_ctx[33] = (4u << 3) | (3u << 1) | (mps << 16);
+	uint64_t ep0g = xhci_l2g(data->ep0_ring);
+
+	data->input_ctx[34] = (uint32_t)(ep0g & ~0xFu) | 1u; /* DCS=1 */
+	data->input_ctx[35] = (uint32_t)(ep0g >> 32);
+	data->dcbaa[slot] = xhci_l2g(data->device_ctx);
+
+	/* 4. Address Device command. */
+	struct xhci_trb addr = {0};
+	uint64_t ing = xhci_l2g(data->input_ctx);
+
+	addr.param_lo = (uint32_t)ing;
+	addr.param_hi = (uint32_t)(ing >> 32);
+	addr.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_ADDRESS_DEVICE) | XHCI_SLOT_ID(slot);
+	data->fl.addr_cc = uhc_xhci_alif_submit_cmd(data, &addr, NULL);
+	if (data->fl.addr_cc != XHCI_CC_SUCCESS) {
+		return;
+	}
+	data->fl.enum_stage = 2u;
+
+	/* 5. GET_DESCRIPTOR(device, 8) over EP0: Setup (immediate data) + Data-IN +
+	 *    Status-OUT stage TRBs, ring DB[slot] target EP0 (DCI 1), wait for the
+	 *    Transfer Event.  Setup packet 80 06 00 01 00 00 08 00. */
+	memset(data->descriptor_buf, 0, sizeof(data->descriptor_buf));
+	struct xhci_trb setup = {0};
+
+	setup.param_lo = 0x01000680u; /* bmReqType=80 bReq=06 wValue=0100 */
+	setup.param_hi = 0x00080000u; /* wIndex=0000 wLength=0008 */
+	setup.status = 8u;
+	setup.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_SETUP) | XHCI_TRB_IDT | XHCI_TRB_TRT_IN;
+	xhci_ring_enqueue(&data->ep0, &setup);
+
+	struct xhci_trb dstage = {0};
+	uint64_t bufg = xhci_l2g(data->descriptor_buf);
+
+	dstage.param_lo = (uint32_t)bufg;
+	dstage.param_hi = (uint32_t)(bufg >> 32);
+	dstage.status = 8u;
+	dstage.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_DATA) | XHCI_TRB_DIR_IN;
+	xhci_ring_enqueue(&data->ep0, &dstage);
+
+	struct xhci_trb sstage = {0};
+
+	sstage.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_STATUS) | XHCI_TRB_IOC;
+	xhci_ring_enqueue(&data->ep0, &sstage);
+
+	sys_write32(1u, data->db_base + (uint32_t)slot * 4u); /* DB[slot] EP0 = DCI 1 */
+	data->fl.xfer_cc = uhc_xhci_alif_wait_event(data, XHCI_TRB_TYPE_TRANSFER_EVENT, NULL);
+
+	data->fl.desc0 = sys_read32((uintptr_t)&data->descriptor_buf[0]);
+	data->fl.desc1 = sys_read32((uintptr_t)&data->descriptor_buf[4]);
+	if (data->fl.xfer_cc == XHCI_CC_SUCCESS) {
+		data->fl.enum_stage = 3u;
+	}
 }
 
 static int uhc_xhci_alif_enable(const struct device *dev)
@@ -639,15 +774,24 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 	uint32_t portsc = sys_read32(op + XHCI_OP_PORTSC(0));
 
 	sys_write32(portsc | (1u << 9), op + XHCI_OP_PORTSC(0));
-	k_busy_wait(20000); /* let PP settle + any connect debounce */
+	k_busy_wait(100000); /* let PP settle + connect debounce */
 	data->fl.portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+
+	/* 7. If a device is attached (PORTSC.CCS), enumerate it: port reset ->
+	 *    Address Device -> control GET_DESCRIPTOR over EP0. */
+	uhc_xhci_alif_enumerate(data, op);
 
 	data->fl.run_usbsts = sys_read32(op + XHCI_OP_USBSTS);
 
-	LOG_INF("xhci: HCH=%u No-Op=%u EnableSlot cc=%u slot=%u PORTSC=0x%08x",
-		data->fl.run_hch, data->fl.noop_cc, data->fl.slot_cc, data->fl.slot_id,
-		data->fl.portsc);
+	LOG_INF("xhci: run HCH=%u No-Op=%u Slot cc=%u id=%u PORTSC=0x%08x", data->fl.run_hch,
+		data->fl.noop_cc, data->fl.slot_cc, data->fl.slot_id, data->fl.portsc);
+	LOG_INF("xhci enum: stage=%u speed=%u Addr cc=%u Xfer cc=%u desc=%08x %08x",
+		data->fl.enum_stage, data->fl.port_speed, data->fl.addr_cc,
+		data->fl.xfer_cc, data->fl.desc0, data->fl.desc1);
 
+	/* Controller-level bring-up PASS = running + command/event ring proven (No-Op
+	 * + Enable Slot).  Enumeration (enum_stage 3) only completes with a device on
+	 * the port; report it separately in fl. */
 	return (data->fl.run_hch == 0u && data->fl.noop_cc == XHCI_CC_SUCCESS &&
 		data->fl.slot_cc == XHCI_CC_SUCCESS && data->fl.slot_id != 0u) ? 0 : -EIO;
 }

@@ -23,10 +23,23 @@ struct xhci_trb {
 #define XHCI_TRB_TYPE(t)     ((uint32_t)(t) << 10)
 #define XHCI_TRB_GET_TYPE(c) (((c) >> 10) & 0x3Fu)
 #define XHCI_TRB_TYPE_LINK   6u  /* spec Table 6-91 */
+#define XHCI_TRB_TYPE_NORMAL   1u  /* Normal (bulk/int data, §6.4.1.1) */
+#define XHCI_TRB_TYPE_SETUP    2u  /* Setup Stage (§6.4.1.2.1) */
+#define XHCI_TRB_TYPE_DATA     3u  /* Data Stage (§6.4.1.2.2) */
+#define XHCI_TRB_TYPE_STATUS   4u  /* Status Stage (§6.4.1.2.3) */
+#define XHCI_TRB_TYPE_ENABLE_SLOT 9u  /* Enable Slot Command (§6.4.3.2) */
+#define XHCI_TRB_TYPE_ADDRESS_DEVICE 11u /* Address Device Command (§6.4.3.4) */
 #define XHCI_TRB_TYPE_NOOP_CMD 23u /* No Op Command (§6.4.3.10) */
-#define XHCI_TRB_TYPE_ENABLE_SLOT 9u /* Enable Slot Command (§6.4.3.2) */
+#define XHCI_TRB_TYPE_TRANSFER_EVENT 32u /* Transfer Event (§6.4.2.1) */
 #define XHCI_TRB_TYPE_CMD_COMPLETION 33u /* Command Completion Event (§6.4.2.2) */
 #define XHCI_TRB_TYPE_PORT_STATUS 34u /* Port Status Change Event (§6.4.2.3) */
+
+/* Control-transfer TRB control-word bits (§6.4.1.2). */
+#define XHCI_TRB_IDT          (1u << 6)  /* Immediate Data (Setup) */
+#define XHCI_TRB_IOC          (1u << 5)  /* Interrupt On Completion */
+#define XHCI_TRB_DIR_IN       (1u << 16) /* Data/Status stage direction = IN */
+#define XHCI_TRB_TRT_IN       (3u << 16) /* Setup TRT = IN data stage */
+#define XHCI_SLOT_ID(c)       ((uint32_t)(c) << 24) /* command TRB Slot ID field */
 /* Event/completion helpers: completion code is status[31:24]; SUCCESS = 1.
  * A Command Completion Event carries the Slot ID in control[31:24]. */
 #define XHCI_TRB_GET_CC(status)   (((status) >> 24) & 0xFFu)
