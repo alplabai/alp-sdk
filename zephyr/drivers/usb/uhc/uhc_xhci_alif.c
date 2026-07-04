@@ -115,6 +115,8 @@ static uint64_t xhci_l2g(const void *p)
 #define CLKCTL_PER_MST_BASE          0x4903F000u
 #define CLKCTL_PERIPH_CLK_ENA        (CLKCTL_PER_MST_BASE + 0x0Cu)
 #define CLKCTL_PERIPH_CLK_ENA_USB    (1u << 20)   /* PERIPH_CLK_ENA_USB_CKEN */
+#define CLKCTL_USB_CTRL1             (CLKCTL_PER_MST_BASE + 0xA8u)
+#define CLKCTL_USB_CTRL1_PERM_ATTACH (1u << 1)   /* HUB_PORT_PERM_ATTACH (SVD) */
 #define CLKCTL_USB_CTRL2             (CLKCTL_PER_MST_BASE + 0xACu)
 #define CLKCTL_USB_CTRL2_PHY_POR     (1u << 8)    /* USB_CTRL2 bit8 = POR_RST_MASK (SVD) */
 #define CLKCTL_USB_CTRL2_FLADJ_MASK  (0x3Fu << 0) /* USB_CTRL2 FLADJ_30MHZ_REG [5:0] */
@@ -333,6 +335,14 @@ static int uhc_xhci_alif_first_light(const struct device *dev)
 	/* 1. Ungate the USB peripheral clock (CLKCTL_PER_MST.PERIPH_CLK_ENA bit20).
 	 *    Without this every controller-window read bus-faults (the PL330 lesson). */
 	sys_set_bits(CLKCTL_PERIPH_CLK_ENA, CLKCTL_PERIPH_CLK_ENA_USB);
+
+	/* Treat the USB2 root port as PERMANENTLY ATTACHED (USB_CTRL1 bit1).  On this
+	 * EVK the DWC3 VBUS-valid sense is not wired to the connector, so the port
+	 * never reports a connect even with VBUS + a device present.  Perm-attach
+	 * bypasses that so the host can reset + address the physically-connected
+	 * device.  A carrier that wires USB2_VBUS to the PHY sense can drop this and
+	 * use real connect detection. */
+	sys_set_bits(CLKCTL_USB_CTRL1, CLKCTL_USB_CTRL1_PERM_ATTACH);
 
 	/* 2. Release the HS PHY from power-on-reset.  The DFP usbd_initialize() just
 	 *    CLEARS USB_CTRL2.PHY_POR (the cold boot leaves it asserted) -- do NOT
@@ -601,11 +611,24 @@ static uint8_t uhc_xhci_alif_submit_cmd(struct uhc_xhci_alif_data *data,
  * is attached (PORTSC.CCS=0). */
 static void uhc_xhci_alif_enumerate(struct uhc_xhci_alif_data *data, uintptr_t op)
 {
-	uint32_t portsc = sys_read32(op + XHCI_OP_PORTSC(0));
 	const uint8_t slot = (uint8_t)data->fl.slot_id;
+	uint32_t portsc;
 	int t;
 
-	if ((portsc & 1u) == 0u || slot == 0u) { /* CCS=0: nothing attached */
+	/* Wait briefly for a connect (PORTSC.CCS).  On this EVK VBUS-valid is not
+	 * sensed by the PHY, so CCS may never set even with a device present -- we run
+	 * with PERM_ATTACH (USB_CTRL1) and proceed with the port reset + Address
+	 * Device regardless; the physically-connected device responds. */
+	for (t = 2000; t > 0; t--) {
+		portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+		if (portsc & 1u) { /* CCS */
+			break;
+		}
+		k_busy_wait(1000);
+	}
+	portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+	data->fl.portsc = portsc;
+	if (slot == 0u) {
 		data->fl.enum_stage = 0u;
 		return;
 	}
@@ -625,7 +648,17 @@ static void uhc_xhci_alif_enumerate(struct uhc_xhci_alif_data *data, uintptr_t o
 	data->fl.enum_stage = 1u;
 
 	uint32_t speed = data->fl.port_speed;
-	uint32_t mps = (speed == 2u) ? 8u : 64u; /* speed 2 = Low Speed -> MPS 8 */
+
+	if (speed == 0u) {
+		speed = 1u; /* PERM_ATTACH: port trained no speed -> assume Full Speed (the
+			     * FTDI is FS) so the slot context is valid + Address Device
+			     * passes; the EP0 transfer then proves the D+/D- path. */
+	}
+	/* Initial EP0 max-packet-size (xHCI port-speed IDs: 1=FS 2=LS 3=HS 4=SS).
+	 * HS EP0 is always 64; FS/LS use 8 for the first 8-byte GET_DESCRIPTOR (the
+	 * real bMaxPacketSize0 is byte 7 of that descriptor, applied on a later
+	 * Evaluate Context).  SS would be 512, but this port is USB2 (FS device). */
+	uint32_t mps = (speed == 3u) ? 64u : (speed == 4u) ? 512u : 8u;
 
 	/* 2. EP0 control transfer ring (fix its Link TRB to the global alias). */
 	xhci_ring_init(&data->ep0, data->ep0_ring, ARRAY_SIZE(data->ep0_ring));
