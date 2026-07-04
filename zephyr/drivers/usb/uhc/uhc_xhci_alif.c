@@ -69,8 +69,12 @@ LOG_MODULE_REGISTER(uhc_xhci_alif, CONFIG_UHC_DRIVER_LOG_LEVEL);
 #define DWC3_GUSB2PHYCFG_ULPIAUTORES (1u << 15)
 #define DWC3_GUSB2PHYCFG_PHYIF_MASK  (1u << 3)          /* PHYIF pos 3 */
 #define DWC3_GUSB2PHYCFG_USBTRDTIM_MASK (0xFu << 10)    /* USBTRDTIM pos 10 */
-#define DWC3_GUSB2PHYCFG_USBTRDTIM_8BIT (9u << 10)      /* USBTRDTIM_UTMI_8_BIT */
-/* PHYIF 8-bit UTMI = 0, so only USBTRDTIM is set for the E8 8-bit HS PHY. */
+/* The E8 HS PHY is 16-bit UTMI+ (UTMIW) -- the DFP hard-defaults hsphy_mode to
+ * UTMIW (usbd_initialize.c:276): PHYIF=1 (16-bit), USBTRDTIM=5, SUSPHY set.
+ * An 8-bit config (PHYIF=0, USBTRDTIM=9) mismatches the PHY data width so the
+ * UTMI clock is wrong and the xHCI core stays frozen (HCRST never completes). */
+#define DWC3_GUSB2PHYCFG_PHYIF_16BIT     (1u << 3)      /* UTMI_PHYIF_16_BIT */
+#define DWC3_GUSB2PHYCFG_USBTRDTIM_16BIT (5u << 10)     /* USBTRDTIM_UTMI_16_BIT */
 
 /* Global SoC bus config (0xC100), user control (0xC12C), frame-length adjust
  * (0xC630) -- DFP soc.h USB_Type offsets; bits from usbd.h. */
@@ -91,7 +95,9 @@ LOG_MODULE_REGISTER(uhc_xhci_alif, CONFIG_UHC_DRIVER_LOG_LEVEL);
 #define CLKCTL_PERIPH_CLK_ENA        (CLKCTL_PER_MST_BASE + 0x0Cu)
 #define CLKCTL_PERIPH_CLK_ENA_USB    (1u << 20)   /* PERIPH_CLK_ENA_USB_CKEN */
 #define CLKCTL_USB_CTRL2             (CLKCTL_PER_MST_BASE + 0xACu)
-#define CLKCTL_USB_CTRL2_PHY_POR     (1u << 8)    /* USB_CTRL2_PHY_POR */
+#define CLKCTL_USB_CTRL2_PHY_POR     (1u << 8)    /* USB_CTRL2 bit8 = POR_RST_MASK (SVD) */
+#define CLKCTL_USB_CTRL2_FLADJ_MASK  (0x3Fu << 0) /* USB_CTRL2 FLADJ_30MHZ_REG [5:0] */
+#define CLKCTL_USB_CTRL2_FLADJ_30MHZ (0x20u << 0) /* SoC-wrapper 30MHz frame-len adjust */
 
 /* xHCI operational registers (xHCI spec §5.4, at controller base + CAPLENGTH). */
 #define XHCI_OP_USBCMD          0x00u
@@ -258,7 +264,12 @@ static int uhc_xhci_alif_first_light(const struct device *dev)
 	 *    re-assert it: a fresh POR pulse needs a long PLL-relock settle, and the
 	 *    earlier set-then-clear left the PHY without a stable clock so the xHCI
 	 *    HCRST hung.  Follow with the 5 ms pre-reset settle usbd_initialize uses. */
-	sys_clear_bits(CLKCTL_USB_CTRL2, CLKCTL_USB_CTRL2_PHY_POR);
+	reg = sys_read32(CLKCTL_USB_CTRL2);
+	reg &= ~(CLKCTL_USB_CTRL2_PHY_POR | CLKCTL_USB_CTRL2_FLADJ_MASK);
+	reg |= CLKCTL_USB_CTRL2_FLADJ_30MHZ; /* SoC-wrapper 30MHz adjust (was 0 -- the
+	                                      * suspend/power-down clock timing needs it;
+	                                      * DWC3 GFLADJ alone is not enough) */
+	sys_write32(reg, CLKCTL_USB_CTRL2);
 	k_busy_wait(5000);
 
 	/* 2b. Select HOST port capability BEFORE the core comes out of soft-reset, so
@@ -292,15 +303,20 @@ static int uhc_xhci_alif_first_light(const struct device *dev)
 	reg &= ~DWC3_GCTL_CORESOFTRESET;
 	sys_write32(reg, base + DWC3_GCTL);
 
-	/* 4. PHY setup (DFP usbd_phy_setup): select 8-bit UTMI -- clear ULPIAutoRes,
-	 *    ULPI_UTMI, PHYIF + USBTRDTIM, then set USBTRDTIM=8-bit (PHYIF 8-bit = 0);
-	 *    keep the PHY active (SUSPHY clear). */
+	/* 4. PHY setup (DFP usbd_phy_setup, UTMIW/16-bit path): clear ULPIAutoRes,
+	 *    ULPI_UTMI, PHYIF + USBTRDTIM, then set PHYIF=16-bit + USBTRDTIM=16-bit +
+	 *    SUSPHY -- matching the E8's 16-bit UTMI+ PHY.  (An 8-bit config froze the
+	 *    xHCI core: caps read on APB but HCRST never completed -- bench 2026-07-04.) */
 	reg = sys_read32(base + DWC3_GUSB2PHYCFG0);
 	reg &= ~(DWC3_GUSB2PHYCFG_ULPIAUTORES | DWC3_GUSB2PHYCFG_ULPI_UTMI |
 		 DWC3_GUSB2PHYCFG_PHYIF_MASK | DWC3_GUSB2PHYCFG_USBTRDTIM_MASK |
 		 DWC3_GUSB2PHYCFG_SUSPHY);
-	reg |= DWC3_GUSB2PHYCFG_USBTRDTIM_8BIT;
+	reg |= DWC3_GUSB2PHYCFG_PHYIF_16BIT | DWC3_GUSB2PHYCFG_USBTRDTIM_16BIT;
 	sys_write32(reg, base + DWC3_GUSB2PHYCFG0);
+	/* SUSPHY left CLEARED: during the xHCI HCRST the controller is HALTED, and a
+	 * set SUSPHY would let the PHY suspend (stop its clock) so HCRST -- a
+	 * core-clock operation -- never completes.  (The DFP sets SUSPHY, but that is
+	 * the device path where the controller is running; host reset needs it off.) */
 
 	/* 5. Global control (usbd_setup_global_control): disable clock gating; in HOST
 	 *    mode set GUCTL.HSTINAUTORETRY. */
