@@ -250,7 +250,17 @@ struct uhc_xhci_alif_data {
 		uint32_t run_hch;
 		uint32_t noop_cc;
 		uint32_t run_usbsts;
+		/* Enable Slot command result + the root-hub port status.  slot_cc=1 +
+		 * slot_id>0 means the xHC allocated a device slot (a real command, not a
+		 * No-Op, round-tripped).  portsc: CCS(bit0)=a device is attached,
+		 * PP(bit9)=port powered, PLS(bits8:5), speed(bits13:10). */
+		uint32_t slot_cc;
+		uint32_t slot_id;
+		uint32_t portsc;
 	} fl;
+	/* Event-ring consumer state (dequeue index + cycle, spec §4.9.4). */
+	uint32_t event_deq;
+	uint8_t  event_cycle;
 };
 
 /* ---------------------------------------------------------------------------
@@ -510,6 +520,52 @@ static int uhc_xhci_alif_init(const struct device *dev)
 #define XHCI_OP_DCBAAP_LO    0x30u
 #define XHCI_OP_DCBAAP_HI    0x34u
 #define XHCI_OP_CONFIG       0x38u
+#define XHCI_OP_PORTSC(p)    (0x400u + (p) * 0x10u) /* port 0 PORTSC (§5.4.8) */
+#define XHCI_ERDP_EHB        (1u << 3)              /* Event Handler Busy (write-1-clear) */
+
+/* Submit one command TRB on the command ring, ring the command doorbell, and
+ * consume the resulting Command Completion Event from the event ring (advancing
+ * the dequeue pointer + ERDP, spec §4.9.4).  Returns the completion code (0 on
+ * timeout) and, via *slot_id, the event's Slot ID.  Polled (no ISR) -- enough to
+ * drive the bring-up command sequence without a device attached. */
+static uint8_t uhc_xhci_alif_submit_cmd(struct uhc_xhci_alif_data *data,
+					const struct xhci_trb *cmd, uint8_t *slot_id)
+{
+	const uintptr_t ir = data->rt_base + XHCI_IR0;
+	uint8_t cc = 0u;
+	int timeout;
+
+	if (slot_id != NULL) {
+		*slot_id = 0u;
+	}
+	xhci_ring_enqueue(&data->cmd_ring, cmd);
+	sys_write32(0u, data->db_base); /* DB[0] = command doorbell */
+
+	for (timeout = 200000; timeout > 0; timeout--) {
+		volatile struct xhci_trb *evt = &data->event_ring_seg[data->event_deq];
+
+		if ((evt->control & XHCI_TRB_CYCLE) == (uint32_t)data->event_cycle &&
+		    XHCI_TRB_GET_TYPE(evt->control) == XHCI_TRB_TYPE_CMD_COMPLETION) {
+			cc = XHCI_TRB_GET_CC(evt->status);
+			if (slot_id != NULL) {
+				*slot_id = XHCI_TRB_GET_SLOT(evt->control);
+			}
+			/* Advance the event-ring dequeue (wrap toggles the cycle) + ERDP. */
+			data->event_deq++;
+			if (data->event_deq >= ARRAY_SIZE(data->event_ring_seg)) {
+				data->event_deq = 0u;
+				data->event_cycle ^= 1u;
+			}
+			uint64_t erdp = xhci_l2g(&data->event_ring_seg[data->event_deq]);
+
+			sys_write32((uint32_t)erdp | XHCI_ERDP_EHB, ir + XHCI_IR_ERDP_LO);
+			sys_write32((uint32_t)(erdp >> 32), ir + XHCI_IR_ERDP_HI);
+			break;
+		}
+		k_busy_wait(1);
+	}
+	return cc;
+}
 
 static int uhc_xhci_alif_enable(const struct device *dev)
 {
@@ -556,35 +612,44 @@ static int uhc_xhci_alif_enable(const struct device *dev)
 	}
 	data->fl.run_hch = sys_read32(op + XHCI_OP_USBSTS) & XHCI_USBSTS_HCH;
 
-	/* 4. No-Op command round-trip: enqueue a No-Op Command TRB, ring the command
-	 *    doorbell (DB[0]=0), and poll the event ring for its Command Completion
-	 *    Event.  This exercises command ring -> doorbell -> event ring end to end
-	 *    with no device attached.  The controller writes the first event with
-	 *    cycle=1 (our initial consumer cycle). */
+	/* Event-ring consumer starts at index 0, cycle 1 (the xHC writes the first
+	 * event with cycle=1). */
+	data->event_deq = 0u;
+	data->event_cycle = 1u;
+
+	/* 4. No-Op command: command ring -> doorbell -> event ring round-trip (no
+	 *    device needed). */
 	struct xhci_trb noop = {0};
 
 	noop.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_NOOP_CMD);
-	xhci_ring_enqueue(&data->cmd_ring, &noop);
-	sys_write32(0u, data->db_base); /* DB[0] = host controller command doorbell */
+	data->fl.noop_cc = uhc_xhci_alif_submit_cmd(data, &noop, NULL);
 
-	data->fl.noop_cc = 0u;
-	for (timeout = 200000; timeout > 0; timeout--) {
-		volatile struct xhci_trb *evt = &data->event_ring_seg[0];
+	/* 5. Enable Slot command: a REAL command -- the xHC allocates a device slot
+	 *    and returns its Slot ID in the completion event (still no device needed;
+	 *    the slot is provisioned for the device we would then Address). */
+	struct xhci_trb en_slot = {0};
+	uint8_t slot_id = 0u;
 
-		if ((evt->control & XHCI_TRB_CYCLE) &&
-		    XHCI_TRB_GET_TYPE(evt->control) == XHCI_TRB_TYPE_CMD_COMPLETION) {
-			data->fl.noop_cc = XHCI_TRB_GET_CC(evt->status);
-			break;
-		}
-		k_busy_wait(1);
-	}
+	en_slot.control = XHCI_TRB_TYPE(XHCI_TRB_TYPE_ENABLE_SLOT);
+	data->fl.slot_cc = uhc_xhci_alif_submit_cmd(data, &en_slot, &slot_id);
+	data->fl.slot_id = slot_id;
+
+	/* 6. Root-hub port: apply power (PORTSC.PP, bit 9) and snapshot the status
+	 *    (CCS bit0 = a device is attached; PLS bits8:5; speed bits13:10). */
+	uint32_t portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+
+	sys_write32(portsc | (1u << 9), op + XHCI_OP_PORTSC(0));
+	k_busy_wait(20000); /* let PP settle + any connect debounce */
+	data->fl.portsc = sys_read32(op + XHCI_OP_PORTSC(0));
+
 	data->fl.run_usbsts = sys_read32(op + XHCI_OP_USBSTS);
 
-	LOG_INF("xhci run: HCH=%u  No-Op completion code=%u (%s)", data->fl.run_hch,
-		data->fl.noop_cc,
-		data->fl.noop_cc == XHCI_CC_SUCCESS ? "SUCCESS" : "not-success");
+	LOG_INF("xhci: HCH=%u No-Op=%u EnableSlot cc=%u slot=%u PORTSC=0x%08x",
+		data->fl.run_hch, data->fl.noop_cc, data->fl.slot_cc, data->fl.slot_id,
+		data->fl.portsc);
 
-	return (data->fl.run_hch == 0u && data->fl.noop_cc == XHCI_CC_SUCCESS) ? 0 : -EIO;
+	return (data->fl.run_hch == 0u && data->fl.noop_cc == XHCI_CC_SUCCESS &&
+		data->fl.slot_cc == XHCI_CC_SUCCESS && data->fl.slot_id != 0u) ? 0 : -EIO;
 }
 
 static int uhc_xhci_alif_disable(const struct device *dev)
