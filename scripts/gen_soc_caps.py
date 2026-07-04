@@ -9,6 +9,14 @@ or similar); the SDK's `alp_*_open` functions consult the matching
 `ALP_SOC_*` macros to reject configurations that exceed the SoC's
 documented hardware caps.
 
+Per-SKU granularity: a SoM preset (metadata/e1m_modules/<SKU>.yaml) may
+declare `silicon_capabilities.unpopulated` -- silicon capabilities the SKU
+leaves unpopulated.  For each such SKU this generator appends an
+`ALP_SOM_<SKU>`-gated override block that forces the matching `ALP_SOC_*`
+boolean macros to 0, so `ALP_HAS(...)` reflects the SKU, not just the
+SoC family.  SKUs without the field emit nothing (full SoC capability
+set -- the output is byte-identical to the pre-restriction generator).
+
 Run:
 
     python3 scripts/gen_soc_caps.py
@@ -27,8 +35,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 REPO = Path(__file__).resolve().parent.parent
 META_DIR = REPO / "metadata" / "socs"
+SOM_DIR = REPO / "metadata" / "e1m_modules"
 OUT = REPO / "include" / "alp" / "soc_caps.h"
 CAP_H_OUT = REPO / "include" / "alp" / "cap.h"
 CAP_C_OUT = REPO / "src" / "cap.c"
@@ -301,6 +312,78 @@ def kconfig_token(ref: str) -> str:
     return ref.upper().replace(":", "_").replace("-", "_")
 
 
+def som_token(sku: str) -> str:
+    """`E1M-AEN801` → `E1M_AEN801` (the ALP_SOM_* macro suffix).
+
+    Mirrors alp_orchestrate.slugs._board_define_slug's transform so the
+    `-DALP_SOM_<TOKEN>` define the emitters pass matches this header's gate.
+    """
+    return sku.upper().replace("-", "_")
+
+
+def load_som_restrictions(som_dir: Path) -> list[tuple[str, list[str]]]:
+    """Collect per-SKU `silicon_capabilities.unpopulated` lists.
+
+    Returns [(sku, [cap_name, ...]), ...] sorted by SKU, containing ONLY
+    SKUs that declare a non-empty restriction list.  Today no SKU does,
+    so the returned list is empty and emit() output is unchanged.
+    Validation of the names (must exist truthy in the referenced SoC's
+    `capabilities:` block) is scripts/validate_metadata.py's job; this
+    loader just transcribes.
+    """
+    restrictions: list[tuple[str, list[str]]] = []
+    if not som_dir.is_dir():
+        return restrictions
+    for path in sorted(som_dir.glob("E1M-*.yaml")):
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict):
+            continue
+        block = doc.get("silicon_capabilities") or {}
+        names = block.get("unpopulated") or [] if isinstance(block, dict) else []
+        if names:
+            restrictions.append((str(doc.get("sku", path.stem)),
+                                 [str(n) for n in names]))
+    return restrictions
+
+
+def _emit_som_restrictions(out: list[str], restrictions: list[tuple[str, list[str]]]) -> None:
+    """Emit ALP_SOM_<SKU>-gated ALP_SOC_* overrides for restricted SKUs.
+
+    Only capability names that materialise as ALP_SOC_* boolean macros
+    (BOOL_CAPS) get an override here; count-style silicon capabilities
+    (e.g. `ethos_u55_count`) have no ALP_SOC_* macro and act through the
+    loader layer only (resolve_capabilities() in scripts/alp_project.py) --
+    they are surfaced as a comment so the header stays self-explaining.
+    Emits nothing when no SKU is restricted, keeping the header
+    byte-identical for the no-restriction (= current) catalogue.
+    """
+    if not restrictions:
+        return
+    out.append("")
+    out.append("/* ---------------------------------------------------------------")
+    out.append(" * Per-SKU capability restrictions -- from the SoM preset's")
+    out.append(" * `silicon_capabilities.unpopulated` (metadata/e1m_modules/<SKU>.yaml).")
+    out.append(" * A SKU can only NARROW its SoC's capability set, never extend it.")
+    out.append(" * The build system defines ALP_SOM_<SKU> for restricted SKUs")
+    out.append(" * (scripts/alp_orchestrate/kconfig.py); builds without the define")
+    out.append(" * keep the full SoC capability set.")
+    out.append(" * --------------------------------------------------------------- */")
+    for sku, names in restrictions:
+        out.append(f"#if defined(ALP_SOM_{som_token(sku)})")
+        out.append(f"/* {sku}: unpopulated on this SKU. */")
+        loader_only: list[str] = []
+        for name in names:
+            if name in BOOL_CAPS:
+                out.append(f"#undef ALP_SOC_{name.upper()}")
+                out.append(f"#define ALP_SOC_{name.upper()} 0")
+            else:
+                loader_only.append(name)
+        if loader_only:
+            out.append(f"/* Loader-layer only (no ALP_SOC_* macro): "
+                       f"{', '.join(loader_only)}. */")
+        out.append("#endif")
+
+
 def extract_caps(soc: dict[str, Any]) -> dict[str, int]:
     p = soc.get("peripherals", {}) or {}
     return {name: int(fn(p)) for name, fn in CAPS}
@@ -316,9 +399,9 @@ def extract_bool_caps(soc: dict[str, Any]) -> dict[str, int]:
     return {key.upper(): (1 if caps.get(key) else 0) for key in BOOL_CAPS}
 
 
-def emit() -> str:
+def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
     socs: list[tuple[str, str, dict[str, int], dict[str, int], int]] = []
-    for path in sorted(META_DIR.rglob("*.json")):
+    for path in sorted(meta_dir.rglob("*.json")):
         soc = json.loads(path.read_text(encoding="utf-8"))
         ref = soc["ref"]
         arena_kib = int(soc.get("inference_arena_sram_kib", 0))
@@ -378,6 +461,11 @@ def emit() -> str:
     _emit_aligned_defines(lines, else_defs)
     lines.append("")
     lines.append("#endif")
+
+    # Per-SKU restriction overrides sit between the per-SoC blocks and the
+    # ALP_CAP_* layer so a restricted SKU's build resolves ALP_HAS() against
+    # the narrowed set.  No restricted SKU (the current catalogue) = no output.
+    _emit_som_restrictions(lines, load_som_restrictions(som_dir))
 
     _emit_cap_layer(lines)
 

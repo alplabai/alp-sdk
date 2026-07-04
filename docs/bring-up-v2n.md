@@ -128,7 +128,7 @@ exercising the I2C bus):
 
 If the production-test programmer (`scripts/program_eeprom.py`) has
 been run against this module, the on-module 24C128 EEPROM at
-`E1M_I2C0` carries a 128-byte manifest with the SKU + hw_rev +
+`ALP_E1M_I2C0` carries a 128-byte manifest with the SKU + hw_rev +
 serial number.  Confirm:
 
 ```c
@@ -206,7 +206,7 @@ Expected: PHYID1 reads `0x001C` (Realtek OUI).  After ~3-5 s with a
 
 * **`alp_hw_info_read` returns `ALP_ERR_NOSUPPORT`.**
   Kconfig `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` is set to its
-  default `-1`.  Wire the right bus id (E1M_I2C0 on V2N) and the
+  default `-1`.  Wire the right bus id (ALP_E1M_I2C0 on V2N) and the
   EEPROM address (`0x50` strap default) in `prj.conf`.
 
 ## 8. Next steps

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Unit tests for scripts/alp_orchestrate.py (Phase 2 of the
+Unit tests for scripts/alp_orchestrate/ (Phase 2 of the
 2026-05-15 heterogeneous-OS orchestration design).
 
 Run locally:
@@ -521,7 +521,7 @@ def test_orchestrator_fan_out_skips_when_tools_absent(
     be well-formed."""
     # Stub `shutil.which` to claim neither tool is on PATH.
     import alp_orchestrate
-    monkeypatch.setattr(alp_orchestrate.shutil, "which",
+    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
                         lambda name: None)
 
     path = _write_board(tmp_path, V2N_HAPPY)
@@ -2604,7 +2604,7 @@ def test_emit_build_plan_matches_materialiser(
         load_board_yaml(path), board_yaml=path, build_root=build_root))
 
     # Materialise via the real fan_out (dispatch skipped: no tools).
-    monkeypatch.setattr(alp_orchestrate.shutil, "which",
+    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
                         lambda name: None)
     orch = Orchestrator(load_board_yaml(path), build_root)
     orch.fan_out(parallel=False)
@@ -2670,12 +2670,42 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
     assert sysbuild_path in shared
     assert "SB_CONFIG_BOOTLOADER_MCUBOOT=y" in shared[sysbuild_path]
 
-    monkeypatch.setattr(alp_orchestrate.shutil, "which",
+    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
                         lambda name: None)
     orch = Orchestrator(load_board_yaml(path), build_root)
     orch.fan_out(parallel=False)
     assert (build_root / "alp_sysbuild.conf").read_text(
         encoding="utf-8") == shared[sysbuild_path]
+
+
+def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
+    """ADR 0014 Phase-3: a `boot:` block (-> build/alp_sysbuild.conf) makes
+    the Zephyr slice command pass `--sysbuild --sysbuild-config
+    ../alp_sysbuild.conf` (the overlay sits one dir up from the slice's
+    cwd=build/<core>-<os>); a project without one adds no flag and keeps
+    the bare `west build -b <board> <app>` shape."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    # With boot: -> sysbuild overlay emitted -> command carries the flags.
+    path = _write_board(tmp_path, V2N_BOOT_MCUBOOT)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+    z = next(s for s in plan["slices"]
+             if s["backend"] == "zephyr" and s["command"])
+    args = z["command"]["args"]
+    assert args[:2] == ["build", "-b"]
+    assert "--sysbuild" in args
+    assert args[args.index("--sysbuild-config") + 1] == "../alp_sysbuild.conf"
+
+    # Without boot: -> no sysbuild overlay -> no flag, bare command.
+    path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
+    plan2 = _json.loads(emit_build_plan(
+        load_board_yaml(path2), board_yaml=path2, build_root=Path("build")))
+    z2 = next(s for s in plan2["slices"]
+              if s["backend"] == "zephyr" and s["command"])
+    assert "--sysbuild" not in z2["command"]["args"]
+    assert "--sysbuild-config" not in z2["command"]["args"]
 
 
 def test_cli_emit_build_plan(tmp_path: Path, capsys, monkeypatch) -> None:

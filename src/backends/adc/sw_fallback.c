@@ -52,6 +52,9 @@ static const alp_adc_ops_t sw_ops = {
 	.close    = NULL,
 };
 
+/* Export the adc static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(adc);
+
 ALP_BACKEND_REGISTER(adc,
                      sw_fallback,
                      {

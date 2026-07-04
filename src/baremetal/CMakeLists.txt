@@ -23,6 +23,16 @@ endif()
 
 target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub_backend.c
+    # SDK lifecycle (alp_init / alp_deinit) -- OS-agnostic.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../init.c
+    # Register-file I2C target helper (<alp/i2c_regfile.h>) -- pure
+    # layer over alp_i2c_target_open, so it degrades to the stub's
+    # ALP_ERR_NOSUPPORT here without any backend of its own.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../i2c_regfile.c
+    # Public <alp/cap_instance.h> helper (alp_capabilities_has) --
+    # portable pure C; without it the public caps-query surface is
+    # link-broken on plain-CMake builds.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cap_helpers.c
 )
 
 if(ALP_SOM STREQUAL "aen")

@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Plain-CMake tests for the Yocto/libmosquitto MQTT backend
- * (src/yocto/iot_yocto.c).
+ * (src/backends/mqtt/yocto_drv.c, dispatched through
+ * src/mqtt_dispatch.c since the #33 registry migration).
  *
  * Failure-path coverage only -- broker-roundtrip happy paths need
  * a Mosquitto broker on the runner, which is parked behind
@@ -203,24 +204,26 @@ static void test_valid_uri_opens_successfully(void)
 	}
 }
 
-static void test_publish_on_null_returns_invalid(void)
+static void test_publish_on_null_returns_not_ready(void)
 {
+	/* Dispatcher contract (matches the Zephyr side since #33): a NULL
+	 * handle is NOT_READY; INVAL is for bad args on a live handle. */
 	const uint8_t payload[] = "hello";
 	alp_status_t  rc = alp_mqtt_publish(NULL, "t", payload, sizeof(payload), ALP_MQTT_QOS_0, false);
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
-static void test_subscribe_on_null_returns_invalid(void)
+static void test_subscribe_on_null_returns_not_ready(void)
 {
 	alp_status_t rc =
 	    alp_mqtt_subscribe(NULL, "t", ALP_MQTT_QOS_0, (alp_mqtt_msg_cb_t)0, (void *)0);
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
-static void test_loop_on_null_returns_invalid(void)
+static void test_loop_on_null_returns_not_ready(void)
 {
 	alp_status_t rc = alp_mqtt_loop(NULL, 100);
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
 static void test_close_null_is_safe(void)
@@ -242,9 +245,9 @@ int main(void)
 	test_empty_host_returns_invalid();
 	test_bad_port_returns_invalid();
 	test_valid_uri_opens_successfully();
-	test_publish_on_null_returns_invalid();
-	test_subscribe_on_null_returns_invalid();
-	test_loop_on_null_returns_invalid();
+	test_publish_on_null_returns_not_ready();
+	test_subscribe_on_null_returns_not_ready();
+	test_loop_on_null_returns_not_ready();
 	test_close_null_is_safe();
 
 	ALP_TEST_SUMMARY();

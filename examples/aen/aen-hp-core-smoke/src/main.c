@@ -25,7 +25,10 @@
  *
  *   SRAM0[0] = 0xA11FE000  magic  ("ALIVE")
  *   SRAM0[1] = SCB.CPUID          (0x411FD220 = Cortex-M55)
- *   SRAM0[2] = SCB.VTOR           (vector base; 0x50000000 confirms the SES HP load)
+ *   SRAM0[2] = SCB.VTOR           (vector base; expect 0x00000000 -- the HP core
+ *                                  runs from its local ITCM at 0x0, so VTOR reads 0.
+ *                                  The SES HP load is confirmed by CPUID + an
+ *                                  advancing heartbeat, not by VTOR.)
  *   SRAM0[3] = heartbeat          (incremented every ~100 ms -> ADVANCING means
  *                                  the HP core is actively executing, not a stale
  *                                  value left by a prior image)

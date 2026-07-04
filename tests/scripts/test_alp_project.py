@@ -276,18 +276,18 @@ class TestDtsOverlayEmit(unittest.TestCase):
         """The alp,pin-array is the full 52-entry positional map in
         e1m_pinout.h canonical order, so alp_z_gpio_resolve(pin_id) is a
         direct index -- including the secondary-function pads opened as
-        GPIO (PWM/ENC/ADC/DAC).  Without this, alp_gpio_open(E1M_GPIO_PWM3)
+        GPIO (PWM/ENC/ADC/DAC).  Without this, alp_gpio_open(ALP_E1M_GPIO_PWM3)
         et al. can't resolve."""
         rv = _run_loader(input_path=TEMPLATE, emit="dts-overlay")
         out = rv.stdout
         # Exactly 52 positional slots.
         self.assertEqual(out.count("<&gpio0 0 GPIO_ACTIVE_HIGH>"), 52)
         # Canonical slots present + correctly indexed in the comments.
-        self.assertIn("[ 0] E1M_GPIO_IO0", out)
-        self.assertIn("[ 4] E1M_GPIO_IO4", out)
-        self.assertIn("[29] E1M_GPIO_PWM3", out)   # RGB-red pad as GPIO
-        self.assertIn("[42] E1M_GPIO_ADC0", out)
-        self.assertIn("[51] E1M_GPIO_DAC1", out)
+        self.assertIn("[ 0] ALP_E1M_GPIO_IO0", out)
+        self.assertIn("[ 4] ALP_E1M_GPIO_IO4", out)
+        self.assertIn("[29] ALP_E1M_GPIO_PWM3", out)   # RGB-red pad as GPIO
+        self.assertIn("[42] ALP_E1M_GPIO_ADC0", out)
+        self.assertIn("[51] ALP_E1M_GPIO_DAC1", out)
 
 
 class TestHwInfoHEmit(unittest.TestCase):
@@ -305,7 +305,7 @@ class TestHwInfoHEmit(unittest.TestCase):
         self.assertIn("#define ALP_HW_INFO_BUILD_H", out)
         self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN701"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_FAMILY      "aen"', out)
-        self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r1"', out)
+        self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r2"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_NAME      "E1M-EVK"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_HW_REV    "r1"', out)
         self.assertIn('#define ALP_HW_BUILD_OS              "zephyr"', out)
@@ -651,24 +651,30 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", out)
         self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y", out)
+        self.assertNotIn("DRPAI", out)
 
-    def test_v2n101_zephyr_emits_tflm_plus_drpai(self) -> None:
-        """E1M-V2N101 has DRP-AI3 on V2N silicon, no Ethos, no DEEPX."""
+    def test_v2n101_zephyr_emits_tflm_only(self) -> None:
+        """E1M-V2N101 M33 slice gets TFLM only: the DRP-AI3 engine is
+        A55/Linux-side (MERA runtime), so no Zephyr inference backend
+        Kconfig exists for it (issues #58/#59)."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2N101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", out)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y", out)
+        self.assertNotIn("DRPAI", out)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y", out)
 
-    def test_v2m101_zephyr_emits_tflm_plus_drpai(self) -> None:
-        """E1M-V2M101 = V2N + DEEPX.  On Zephyr only DRPAI is wired
-        (DEEPX is host-Linux-only via the PCIe driver); the Yocto
-        emit path carries the concurrent-NPU plumbing."""
+    def test_v2m101_zephyr_emits_tflm_only(self) -> None:
+        """E1M-V2M101 = V2N + DEEPX.  Neither engine is Zephyr-side
+        (DRP-AI3 = A55 MERA runtime, DX-M1 = A55 PCIe libdxrt); the
+        Yocto emit path carries the concurrent-NPU plumbing."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2M101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", out)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y", out)
+        self.assertNotIn("DRPAI", out)
+        # The DX-M1 *chip driver* (CONFIG_ALP_SDK_CHIP_DEEPX_DXM1 --
+        # M33-side management, not inference) legitimately stays; only
+        # the inference-backend namespace must be DEEPX-free.
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DEEPX", out)
 
     # --- G-1 + G-2 -- per-variant Ethos-U + per-CPU-class TFLM ------------
     #
@@ -717,7 +723,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
 
     def test_v2n101_emits_no_ethos_variants(self) -> None:
         """V2N has no Ethos-U at all; none of the per-variant switches
-        fire even though _DRPAI does."""
+        fire (and no DRP-AI Kconfig exists -- A55-side engine)."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2N101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
@@ -761,7 +767,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         rc, out, err = self._v2_cmake_slice(
             "E1M-V2M101", "a55_cluster", "baremetal")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn("ALP_SDK_USE_DRPAI=ON", out)
+        self.assertIn("ALP_SDK_USE_DRPAI_V2N=ON", out)
         self.assertIn("ALP_SDK_USE_DEEPX_DXM1=ON", out)
 
     def test_v2n101_baremetal_cmake_args_drpai_only(self) -> None:
@@ -771,7 +777,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         rc, out, err = self._v2_cmake_slice(
             "E1M-V2N101", "a55_cluster", "baremetal")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn("ALP_SDK_USE_DRPAI=ON", out)
+        self.assertIn("ALP_SDK_USE_DRPAI_V2N=ON", out)
         self.assertNotIn("ALP_SDK_USE_DEEPX_DXM1=ON", out)
 
     # --- Schema-level rejection of inference.backend ------------------

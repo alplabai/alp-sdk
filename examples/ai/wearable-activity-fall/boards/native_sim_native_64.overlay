@@ -1,0 +1,27 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Host-build overlay -- exposes one emulated I2C controller via the alp-i2c0
+ * alias so alp_i2c_open(BOARD_I2C_SENSORS) resolves and the ICM-42670 bring-up
+ * runs.  No emul target is attached, so the WHO_AM_I read fails and main.c
+ * falls back to synthetic motion.  On real silicon this file is NOT applied.
+ */
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+    aliases {
+        alp-i2c0 = &i2c0_emul;
+    };
+
+    soc {
+        i2c0_emul: i2c@100 {
+            compatible = "zephyr,i2c-emul-controller";
+            status = "okay";
+            reg = <0 0x100 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            clock-frequency = <I2C_BITRATE_FAST>;
+        };
+    };
+};

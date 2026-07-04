@@ -25,7 +25,7 @@
  *
  * @code
  *   alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
- *       .bus_id = E1M_SPI1,   // inter-chip SPI bus
+ *       .bus_id = ALP_E1M_SPI1,   // inter-chip SPI bus
  *       .freq_hz = 8000000,
  *       .mode = ALP_SPI_MODE_0,
  *       .bits_per_word = 8,
@@ -72,6 +72,10 @@ struct cc3501e {
 	alp_spi_t         *bus;        /**< SPI1 to the CC3501E (Alif master). */
 	alp_gpio_t        *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t        *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
+	alp_gpio_t        *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17 -> Alif P2_6):
+	                                *   HIGH when the SPI slave is armed+idle.  When populated,
+	                                *   cc3501e_request() waits on it before each reply phase
+	                                *   instead of a fixed settle gap.  NULL = legacy fixed gap. */
 	cc3501e_event_cb_t event_cb;
 	void              *event_user;
 	uint8_t            rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
@@ -132,6 +136,23 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);
 /** Retrieve the firmware's protocol version (compare against
  *  `ALP_CC3501E_PROTOCOL_VERSION` to confirm wire compatibility). */
 alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
+
+/**
+ * @brief Send one FRAMED bulk-data frame to the CC3501E stream sink (proto v2).
+ *
+ * Wraps @ref ALP_CC3501E_CMD_STREAM_WRITE: the request payload (@p len bytes)
+ * is clocked in a single SPI transfer, so it rides the host peripheral-DMA path
+ * when @p len reaches the SPI DMA threshold (@c CONFIG_SPI_DW_ALIF_DMA_MIN_LEN).
+ * The firmware sinks + acks the frame, so unlike raw throwaway clocking the link
+ * stays framed and never desyncs.  Send frames back-to-back for a bulk stream.
+ *
+ * @param ctx   Initialised, reset driver context.
+ * @param data  Bulk bytes to send (may be NULL only if @p len is 0).
+ * @param len   Byte count, at most @c ALP_CC3501E_MAX_PAYLOAD minus the header.
+ * @return ALP_OK on ack; ALP_ERR_INVAL on a bad arg / oversized frame; the
+ *         mapped firmware status otherwise.
+ */
+alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t len);
 
 /* ------------------------------------------------------------------ */
 /* Wi-Fi host helpers                                                  */
@@ -510,22 +531,83 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 
 /* Granular OTA controls (cc3501e_ota_update wraps these for the common path). */
 
-/** Open an OTA session: declare @p total_len; the device picks its non-primary
- *  vendor slot and brings it READY. */
+/**
+ * @brief Open an OTA session (OTA_BEGIN, opcode 0x40).
+ *
+ * Declares the full image size up front; the device picks its NON-primary
+ * vendor slot and brings it to READY (PSA-FWU), arming the session's write
+ * cursor at offset 0.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param total_len   Full signed GPE vendor-image size in bytes (manifest +
+ *                    body) that the session will stream.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK once the session is open; otherwise the mapped error (e.g.
+ *         ALP_ERR_BUSY if a session is already in flight).
+ */
 alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t timeout_ms);
 
-/** Stream one sequential image chunk at absolute @p offset.  @p len must be
- *  1..ALP_CC3501E_OTA_MAX_CHUNK and @p offset must equal the device cursor. */
+/**
+ * @brief Stream one SEQUENTIAL image chunk (OTA_WRITE, opcode 0x41).
+ *
+ * Preconditions (both enforced): @p offset MUST equal the device's running
+ * write cursor -- out-of-order writes are rejected by the firmware -- and
+ * @p len MUST be 1..ALP_CC3501E_OTA_MAX_CHUNK bytes (the wire frame is a
+ * 4-byte LE offset + the raw bytes, bounded by ALP_CC3501E_MAX_PAYLOAD).
+ * After a missed reply, re-sync to the device's actual cursor with
+ * @ref cc3501e_ota_status instead of blindly re-sending.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param offset      Absolute byte offset into the image; must equal the
+ *                    device's write cursor (bytes_written so far).
+ * @param data        Chunk bytes to append (must be non-NULL).
+ * @param len         Chunk length: 1..ALP_CC3501E_OTA_MAX_CHUNK.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK once the chunk is accepted; ALP_ERR_INVAL on a NULL @p data
+ *         or an out-of-range @p len; otherwise the mapped error (a
+ *         cursor-mismatched offset surfaces as the firmware's INVALID).
+ */
 alp_status_t cc3501e_ota_write(
     cc3501e_t *ctx, uint32_t offset, const uint8_t *data, size_t len, uint32_t timeout_ms);
 
-/** Finalize: the device installs the staged image + arms the swap reboot. */
+/**
+ * @brief Finalize the session (OTA_FINISH, opcode 0x42).
+ *
+ * The device installs the fully-streamed image into its non-primary vendor
+ * slot and arms the deferred swap reboot (the bridge link drops while the
+ * device reboots and BL2/MCUboot swaps the slot to primary).
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK once FINISH is acked (reboot follows); otherwise the mapped
+ *         error (e.g. an incomplete stream is rejected).
+ */
 alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms);
 
-/** Cancel an in-flight session on the device. */
+/**
+ * @brief Cancel an in-flight OTA session (OTA_ABORT, opcode 0x43).
+ *
+ * Resets the device-side session back to IDLE, discarding streamed bytes.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK once the session is cancelled; otherwise the mapped error.
+ */
 alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);
 
-/** Query device session state into @p out (state / bytes_written / total_len). */
+/**
+ * @brief Query the device-side OTA session state (OTA_STATUS, opcode 0x44).
+ *
+ * Fills @p out with the session state, the bytes accepted so far (the write
+ * cursor a resuming host must continue from), and the total declared at
+ * BEGIN.  Read-only: safe to call at any point in the session.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param out         Receives the @ref alp_cc3501e_ota_status_t snapshot.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK with @p out filled; ALP_ERR_INVAL on a NULL @p out;
+ *         ALP_ERR_IO on a short reply; otherwise the mapped error.
+ */
 alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, uint32_t timeout_ms);
 
 /* ------------------------------------------------------------------ */

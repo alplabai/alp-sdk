@@ -8,6 +8,17 @@
 
 typedef struct alp_update_log_ops {
 	alp_update_log_assurance_t assurance;
+	/* Open-time readiness probe (optional; NULL == always ready). The
+	 * dispatcher calls this once per alp_update_log_open() and, on
+	 * ALP_ERR_NOSUPPORT, falls through to the next-ranked backend
+	 * (issue #239 pattern). It lets a higher-priority tier that cannot
+	 * serve on this boot -- e.g. the HW_ENFORCED TF-M tier before its
+	 * secure store + monotonic counter are provisioned (issue #111) --
+	 * decline cleanly so the SW tamper-evident tier serves instead,
+	 * rather than binding a backend whose append() would just fail. Any
+	 * status other than ALP_OK / ALP_ERR_NOSUPPORT is a hard error and
+	 * is surfaced, not masked by a lower tier. */
+	alp_status_t (*ready)(void);
 	alp_status_t (*append)(const alp_update_log_entry_t *e);
 	alp_status_t (*verify)(alp_update_log_verdict_t *v, uint64_t *bad);
 	alp_status_t (*count)(uint64_t *out);
@@ -20,5 +31,12 @@ struct alp_update_log {
 	alp_update_log_assurance_t  assurance;
 	bool                        in_use;
 };
+
+#ifdef CONFIG_ZTEST
+/* Test-only reboot emulation for the sw tier: drops all of the backend's
+ * RAM state (RAM store, RAM counter, cached NVS mount). wipe=true also
+ * clears the NVS partition. Compiled only under ZTEST. */
+void alp_ulog_sw_tier_test_reset(bool wipe);
+#endif
 
 #endif

@@ -26,6 +26,8 @@
 #include "backends/adc/adc_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(adc);
+/* Pull the adc registry section into a static-archive link (#368). */
+ALP_BACKEND_ANCHOR(adc);
 
 /* Reuse the existing TLS-backed last-error mechanism from
  * src/zephyr/last_error.c.  Declared in src/zephyr/handles.h but

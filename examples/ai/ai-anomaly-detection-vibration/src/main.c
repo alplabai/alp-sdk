@@ -101,8 +101,8 @@
 
 /* BOARD_I2C_SENSORS is a portable alias that resolves to the shared
  * sensor I2C bus on whichever EVK is being targeted:
- *   E1M EVK  (AEN)  → E1M_I2C0
- *   E1M-X EVK (V2N) → E1M_X_I2C0
+ *   E1M EVK  (AEN)  → ALP_E1M_I2C0
+ *   E1M-X EVK (V2N) → ALP_E1M_X_I2C0
  * Include via <alp/board.h>; ALP_BOARD_* is emitted by the build
  * system from the board.yaml preset. */
 #include "alp/board.h"
@@ -323,7 +323,7 @@ int main(void)
      * for the ICM-42670's 1 MHz max.  Failure tolerated -- the loop
      * falls back to a zero-fill window so native_sim still runs. */
 	alp_i2c_t *i2c = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
+	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: ALP_E1M_I2C0; E1M-X EVK: ALP_E1M_X_I2C0 */
 	    .bitrate_hz = 400000,
 	});
 	if (i2c == NULL) {

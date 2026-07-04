@@ -136,6 +136,31 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
 	}
 }
 
+/* Release every video_buffer this handle acquired, getting the driver's
+ * queue out of the way first.  video_stream_stop() implies a CANCEL flush
+ * (video.h: `video_flush(dev, true)` moves everything the driver holds
+ * from its incoming queue to the outgoing one as VIDEO_BUF_ABORTED), so a
+ * stop + drain-dequeue detaches the buffers from the device before
+ * video_buffer_release() returns them to the shared pool.  Releasing a
+ * buffer the driver still queues would recycle a pool slot the device can
+ * later hand back -- a stale pointer on the next open (#246). */
+static void _release_vbufs(alp_alif_isp_pico_state_t *st)
+{
+	struct video_buffer *vb = NULL;
+
+	(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
+	while (video_dequeue(st->dev, &vb, K_NO_WAIT) == 0 && vb != NULL) {
+		vb = NULL;
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(st->vbufs); ++i) {
+		if (st->vbufs[i] != NULL) {
+			(void)video_buffer_release(st->vbufs[i]);
+			st->vbufs[i] = NULL;
+		}
+	}
+	st->vbuf_count = 0;
+}
+
 /* ============================================================== */
 /* Sensor / capture path -- delegates to Zephyr drivers/video/    */
 /* through the portable v4.4 video API.                           */
@@ -210,25 +235,44 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 
-	uint32_t bytes_per_buf = (st->fmt.pitch != 0u)
-	                             ? (st->fmt.pitch * st->fmt.height)
-	                             : ((uint32_t)st->fmt.width * st->fmt.height * 2u);
+	/* Per-buffer size: prefer the driver-negotiated pitch; when the driver
+	 * reports none, derive bytes-per-pixel from the negotiated fourcc via
+	 * Zephyr's own format table (video_bits_per_pixel: RGB565 = 16 bpp,
+	 * RGB24 = 24 bpp, XRGB32 = 32 bpp).  The previous flat 2 B/px guess
+	 * under-allocated RGB888 (3 B/px) and ARGB8888 (4 B/px) frames (#245). */
+	uint32_t bytes_per_buf = (st->fmt.pitch != 0u) ? (st->fmt.pitch * st->fmt.height)
+	                                               : (((uint32_t)st->fmt.width * st->fmt.height *
+	                                                   video_bits_per_pixel(st->fmt.pixelformat)) /
+	                                                  BITS_PER_BYTE);
 	if (bytes_per_buf == 0u) {
+		if (st->fmt.width != 0u && st->fmt.height != 0u) {
+			/* Real dimensions but a fourcc Zephyr's table can't size:
+			 * refuse rather than under-allocate and let the ISP DMA
+			 * past the end of the pool block. */
+			_free_state(st);
+			return ALP_ERR_NOSUPPORT;
+		}
+		/* No format negotiated at all (driver without get_format):
+		 * keep open() alive with a minimal dummy allocation. */
 		bytes_per_buf = 64u;
 	}
 
 	for (uint8_t i = 0; i < want; ++i) {
 		st->vbufs[i] = video_buffer_alloc(bytes_per_buf, K_NO_WAIT);
 		if (st->vbufs[i] == NULL) {
-			for (uint8_t j = 0; j < i; ++j) {
-				st->vbufs[j] = NULL;
-			}
+			/* Pool exhausted: give back vbufs[0..i-1] (already
+			 * enqueued) before failing (#246). */
+			_release_vbufs(st);
 			_free_state(st);
 			return ALP_ERR_NOMEM;
 		}
 		st->vbufs[i]->type = VIDEO_BUF_TYPE_OUTPUT;
 		err                = video_enqueue(dev, st->vbufs[i]);
 		if (err != 0) {
+			/* Mid-loop enqueue failure: vbufs[0..i-1] sit in the
+			 * driver's queue and vbufs[i] is loose -- release them
+			 * all instead of leaking the pool (#246). */
+			_release_vbufs(st);
 			_free_state(st);
 			return _errno_to_alp(err);
 		}
@@ -354,14 +398,11 @@ static void isp_close(alp_camera_backend_state_t *state)
 	if (st == NULL) {
 		return;
 	}
-	if (st->streaming) {
-		(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
-		st->streaming = false;
-	}
-	for (uint8_t i = 0; i < st->vbuf_count; ++i) {
-		st->vbufs[i] = NULL;
-	}
-	st->vbuf_count = 0;
+	st->streaming = false;
+	/* Stop + drain + release every buffer this handle allocated --
+	 * _release_vbufs stops the stream itself (harmless when already
+	 * stopped), so the pool is whole again for the next open (#246). */
+	_release_vbufs(st);
 	_free_state(st);
 	state->be_data = NULL;
 }

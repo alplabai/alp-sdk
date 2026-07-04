@@ -39,6 +39,18 @@ on_module:
     interface:      ospi0
     chip_select:    1
 
+# Off-SoC module memory in the canonical cross-family shape (see
+# som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
+# on_module facts above, never invented:
+#   dram_mbit  <- on_module.hyperram.capacity_mbit (populated on every
+#                 AEN BOM variant).
+#   flash_mbit <- TBD: the OSPI0 NOR (256 Mbit) is `assembled: optional`
+#                 (per-BOM variant), so a single number would be wrong
+#                 for the DNI variant.
+memory:
+  dram_mbit:            256
+  flash_mbit:           TBD
+
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u85               # primary -- E4 ships one U85 alongside two U55s.
@@ -94,6 +106,10 @@ pad_routes:
       doc: "Inter-chip SPI1 fast path; CC3501E acts as SPI peripheral." }
 
   # GPIO pads that physically terminate on CC3501E (not on Alif silicon).
+  - { e1m: E1M_GPIO_IO8,  dispatch: cc3501e, dispatch_pin: 30,
+      doc: "CC3501E GPIO_30 (board 2626-R2; GPIO30 moved here from IO21)." }
+  - { e1m: E1M_GPIO_IO10, dispatch: cc3501e, dispatch_pin: 35,
+      doc: "CC3501E GPIO_35 (board 2626-R2)." }
   - { e1m: E1M_GPIO_IO11, dispatch: cc3501e, dispatch_pin: 2,
       doc: "CC3501E GPIO_2." }
   - { e1m: E1M_GPIO_IO13, dispatch: cc3501e, dispatch_pin: 13,
@@ -110,17 +126,22 @@ pad_routes:
       doc: "CC3501E GPIO_19." }
   - { e1m: E1M_GPIO_IO20, dispatch: cc3501e, dispatch_pin: 26,
       doc: "CC3501E GPIO_26." }
-  - { e1m: E1M_GPIO_IO21, dispatch: cc3501e, dispatch_pin: 30,
-      doc: "CC3501E GPIO_30." }
 
+# On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
+# on the AEN module; firmware is embedded in alp-sdk at
+# `firmware/cc3501e/` (ADR 0015) and stays TBD until the first binary
+# is built + signed on the bench (the project's standing convention).
+# What unblocks the TBDs: the first bench-built, signed cc3501e image
+# landing in firmware/cc3501e/prebuilt/ -- see docs/v0.6-tbd-and-
+# assumptions.md and metadata/e1m_modules/README.md (issue #44).
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: TBD
-    flash_method:  TBD
-    flash_args:    TBD
+    firmware_path: TBD                       # populated when firmware/cc3501e/ cuts its first bench binary
+    flash_method:  TBD                       # cc3501e_usb_bootloader or alif_spi_relay; see firmware/cc3501e/flash.py
+    flash_args:    TBD                       # follows flash_method once that lands
 
-default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
+default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 
 default_board:        E1M-EVK
 

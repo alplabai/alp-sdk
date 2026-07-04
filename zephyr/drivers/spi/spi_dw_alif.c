@@ -781,6 +781,39 @@ static void spi_dw_update_txftlr(const struct device *dev,
 	write_txftlr(dev, reg_data);
 }
 
+#ifdef CONFIG_SPI_DW_ALIF_USE_DMA
+/* Total byte length of a buffer set (0 for a NULL/empty set). */
+static size_t spi_dw_bufset_len(const struct spi_buf_set *bufs)
+{
+	size_t total = 0;
+
+	if (bufs != NULL) {
+		for (size_t i = 0; i < bufs->count; i++) {
+			total += bufs->buffers[i].len;
+		}
+	}
+	return total;
+}
+
+/* Route a transfer through DMA only when it is large enough to be worth the
+ * channel setup + FIFO-watermark handshake.  Tiny control frames -- e.g. the
+ * CC3501E bridge's 4-8 byte fixed-count lockstep transfers -- stay on the PIO/
+ * interrupt path: a sub-threshold transfer never reaches the DMA burst watermark
+ * and would stall.  Large streams take the DMA path (the point of this driver). */
+static bool spi_dw_should_dma(const struct spi_dw_config *info,
+			      const struct spi_buf_set *tx_bufs,
+			      const struct spi_buf_set *rx_bufs)
+{
+	size_t len;
+
+	if (!info->dma_tx.enabled && !info->dma_rx.enabled) {
+		return false;
+	}
+	len = MAX(spi_dw_bufset_len(tx_bufs), spi_dw_bufset_len(rx_bufs));
+	return len >= (size_t)CONFIG_SPI_DW_ALIF_DMA_MIN_LEN;
+}
+#endif /* CONFIG_SPI_DW_ALIF_USE_DMA */
+
 static int transceive(const struct device *dev,
 		      const struct spi_config *config,
 		      const struct spi_buf_set *tx_bufs,
@@ -791,6 +824,11 @@ static int transceive(const struct device *dev,
 {
 	const struct spi_dw_config *info = dev->config;
 	struct spi_dw_data *spi = dev->data;
+#ifdef CONFIG_SPI_DW_ALIF_USE_DMA
+	const bool use_dma = spi_dw_should_dma(info, tx_bufs, rx_bufs);
+#else
+	const bool use_dma = false;
+#endif
 	uint32_t tmod = DW_SPI_CTRLR0_TMOD_TX_RX;
 	uint32_t dw_spi_rxftlr_dflt = (info->fifo_depth * 1) / 2;
 	uint32_t reg_data;
@@ -902,10 +940,10 @@ static int transceive(const struct device *dev,
 	}
 
 #ifdef CONFIG_SPI_DW_ALIF_USE_DMA
-	if (info->dma_tx.enabled && tx_bufs && tx_bufs->buffers) {
+	if (use_dma && info->dma_tx.enabled && tx_bufs && tx_bufs->buffers) {
 		reg_data &= ~(DW_SPI_IMR_TXEIM);
 	}
-	if (info->dma_rx.enabled && rx_bufs && rx_bufs->buffers) {
+	if (use_dma && info->dma_rx.enabled && rx_bufs && rx_bufs->buffers) {
 		reg_data &= ~(DW_SPI_IMR_RXFIM);
 	}
 #endif
@@ -930,7 +968,7 @@ static int transceive(const struct device *dev,
 	}
 
 #ifdef CONFIG_SPI_DW_ALIF_USE_DMA
-	if (info->dma_tx.enabled || info->dma_rx.enabled) {
+	if (use_dma) {
 		ret = spi_dw_dma_transceive(dev, tx_bufs, rx_bufs);
 	}
 #endif

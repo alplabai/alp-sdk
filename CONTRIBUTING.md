@@ -66,6 +66,19 @@ signatures), if you have one in mind.
    ```
    See [`docs/testing.md`](docs/testing.md) for the per-stage
    breakdown + how to run individual layers.
+
+   Don't want to set up west + Zephyr by hand?
+   [`tools/native-sim-container/`](tools/native-sim-container/README.md)
+   freezes the `native_sim` PR gate in a container --
+   `make -C tools/native-sim-container test` reproduces
+   `pr-twister.yml` locally with no hardware.
+
+   **Python version:** the support *floor* is 3.10
+   (`pyproject.toml` `requires-python`), but dev/CI standardise on
+   the *pin* in the repo-root `.python-version` (currently 3.12) --
+   every CI workflow's `actions/setup-python` reads that one file.
+   Run the pinned version locally to match CI exactly (`pyenv`/`uv`
+   pick it up automatically); `alp doctor` warns on a mismatch.
 6. Open a PR; CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
    matrices.  CI green is necessary but not sufficient for tagging
    a release -- the test-plan row also has to flip to `✅`.

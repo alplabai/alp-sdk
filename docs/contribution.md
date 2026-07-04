@@ -51,6 +51,21 @@ signatures), if you have one.
    `⏳ untested`; CI green is necessary but not sufficient to flip
    the row to `✅` -- real-hardware HIL evidence does.
 
+### Python version
+
+The repo pins one canonical interpreter in **`.python-version`** (currently
+`3.12`).  Tools that read this file resolve to it automatically: `pyenv` /
+`pyenv-win`, `uv`, and the CI `actions/setup-python` steps (via
+`python-version-file`) — so those paths need no hand-synced version literal.  The
+bundled Windows `py` launcher does **not** read `.python-version`; on Windows use
+`pyenv-win` / `uv`, or select the interpreter explicitly (`py -3.12`).  A plain
+`python3 -m venv` (including `scripts/bootstrap.sh`) uses whatever `python3` is
+active, so activate the pinned version first (e.g. via `pyenv`) if your system
+default differs.  The `requires-python = ">=3.10"` floor in `pyproject.toml` is
+the *published support range* — the wider set of interpreters the package must
+run on — not the dev/CI pin; leave it as-is.  To bump the pinned version, edit
+`.python-version` only.
+
 ## Code style
 
 ### Public surface (`include/alp/`)

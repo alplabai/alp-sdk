@@ -64,6 +64,13 @@ full per-(library × core × runtime) picture.
 
 > **Note:** CMSIS-DSP is consumed directly via `arm_math.h` from app code; the SDK does not re-export it.
 
+> **Note on the Display "GA (SSD1306)" cells:** that GA claim covers
+> the **SSD1306 chip driver** (`chips/ssd1306/`, `ssd1306_*`) and
+> the LVGL re-export (`<alp/gui.h>`) riding Zephyr's own display
+> binding — **not** the portable `<alp/display.h>` class, whose
+> backend was the NOT_IMPLEMENTED stub until issue #23 landed the
+> Zephyr driver-class wrapper (see the v0.5+ surfaces table).
+
 ## v0.2.0 — landed (peripheral expansion + capability validation)
 
 The v0.2 SDK doubles peripheral coverage from 4 to 12 wrapped
@@ -107,13 +114,20 @@ backends in the v0.8 cycle (issue #33), which also lands the per-class
 `alp_<class>_capabilities()` getter on Yocto:
 RTC (`/dev/rtcN`), Watchdog (`/dev/watchdogN`), CAN (SocketCAN), PWM (`/sys/class/pwm`),
 ADC (IIO sysfs), Counter (Linux Counter sysfs), I²S + Audio (ALSA `snd_pcm_*` — gated on
-`libasound`, fall back to the stub when absent), and RPC (OpenAMP/RPMsg userland — gated
-on `open-amp`/`libmetal`, with a NOSUPPORT fallback).  Each compiles + passes an nm
-symbol-ownership audit, but the **full Yocto link + on-target run are HIL-gated** (no
-sysroot / real device nodes in CI).  The remaining two classes (mqtt / security — already
-real via the direct-impl model; their migration is deferred because the vendor headers
-`libmosquitto` / OpenSSL aren't installable in CI to compile-test it) and the cross-core
-RPMsg proxy are separate slices.
+`libasound`, fall back to the stub when absent), RPC (OpenAMP/RPMsg userland — gated
+on `open-amp`/`libmetal`, with a NOSUPPORT fallback), MQTT (libmosquitto — gated on
+`libmosquitto`), and Security (OpenSSL `EVP_*` — gated on `libssl`/`libcrypto`); classes
+whose gating lib is absent degrade to the priority-0 `sw_fallback` backend.  Wi-Fi + BLE
+also gained dispatchers + `sw_fallback` on Yocto (closing the
+declared-but-undefined `alp_wifi_capabilities` link gap) but deliberately ship **no**
+real Linux backend — radio bring-up is a system-config concern (wpa_supplicant /
+NetworkManager / BlueZ) and apps consume the resulting network through plain sockets.
+Each backend compiles + passes an nm symbol-ownership audit where its gating lib exists
+on the build host, but the **full Yocto link + on-target run are HIL-gated** (no
+sysroot / real device nodes in CI; the mqtt/security backends additionally lack
+`libmosquitto`/OpenSSL dev headers on the CI host, so their real paths are
+compile-verified only where those are installed).  The cross-core
+RPMsg proxy is a separate slice.
 
 ### Cross-cutting v0.2 capability infrastructure
 
@@ -151,7 +165,7 @@ need v0.4 fall back cleanly to the v0.3 state above.
 | **Peripherals (UART RX ringbuf)** (`<alp/peripheral.h>`) | n/a (Linux kernel already buffers) | n/a (Linux kernel already buffers) | n/a | n/a |
 | **IoT — MQTT cleartext** (`<alp/iot.h>`) | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto | planned |
 | **IoT — MQTT TLS** (`mqtts://`)      | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) | planned |
-| **IoT — Wi-Fi station** (`<alp/iot.h>`) | stub (system-config via wpa_supplicant/NM) | stub (system-config via wpa_supplicant/NM) | stub | planned |
+| **IoT — Wi-Fi station** (`<alp/iot.h>`) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design | planned |
 | **Audio** (`<alp/audio.h>`)          | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) | planned |
 | **Security** (`<alp/security.h>`)    | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green) | planned |
 | **Mender OTA (meta-alp-sdk opt-in)**     | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) | planned |
@@ -176,19 +190,23 @@ need v0.4 fall back cleanly to the v0.3 state above.
 
 The Yocto MQTT / audio / security backends are each conditional on
 their own `pkg_check_modules` check (`libmosquitto`, `alsa`,
-`libssl libcrypto`); workspaces without the matching `-dev` package
-on the sysroot keep the NOSUPPORT stubs.  Per-class
+`libssl libcrypto`); since the #33 registry migration, workspaces
+without the matching `-dev` package on the sysroot degrade to the
+priority-0 `sw_fallback` backend of the class (not the old
+stub_backend.c NOSUPPORT stubs).  Per-class
 `ALP_VENDOR_OVERRIDES_<CLASS>` macros in
 `src/common/stub_backend.c` let each surface roll out independently
-across backends -- the currently-defined gates are `I2C`, `SPI`,
-`UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`, and
-`UART_RX_RINGBUF`.
+across backends -- the currently-defined class gates include `I2C`,
+`SPI`, `UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`,
+`WIFI`, `BLE`, `CAN`, `PWM`, `ADC`, `I2S`, `COUNTER`, `RTC`, `WDT`,
+and `UART_RX_RINGBUF`.
 
 ## v0.5+ surfaces (listed for completeness — surface-only / untested)
 
 These `<alp/*>` surfaces landed (public header + a backend or SW
 fallback) after the v0.4-prep cut.  They are listed here so the matrix
-is complete; **none has per-SoM HIL verification yet** — treat every row
+is complete; **almost none has per-SoM HIL verification yet** (the DAC
+row's E8 bench pass is the exception) — treat every row
 as surface-only / untested until the matching [`test-plan.md`](test-plan.md)
 row flips.  They are deliberately **not** broken out per-core × per-SoM:
 asserting a status in each of the 11 cells would overclaim coverage that
@@ -196,12 +214,22 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
-| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr) + A (Yocto); registry over `tflm` / `ethos_u` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are now **real, bench-unverified** (link needs the Yocto sysroot; default-off Kconfig) — #58/#59; `tflm`/`ethos_u` paths still untested |
+| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; no panel has been driven on real hardware through this class yet.  (The v0.1 Display "GA (SSD1306)" rows are the **chip-driver + LVGL re-export path**, not this class.)  V2N DSI / parallel-RGB + Alif LCD-IF vendor backends still pending |
+| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `tflm` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are **real, bench-unverified** (link needs the Yocto sysroot; default-off CMake options); the former M-class DRP-AI/DEEPX stubs are removed — both engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
-| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim; D/AVE 2D bench-unverified.  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = PXP, no Vivante) |
+| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim + **E8 bench PASS** (RAM-run, 2026-06-17); D/AVE 2D code-complete, bench-unverified (ADDITIVE/MULTIPLY blends delegate to the sw path).  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = **PXP**, no Vivante — N93 is served by the sw fallback today, now wired on `ALP_OS=yocto` plain-CMake builds too (dispatcher + sw_fallback replace the NOSUPPORT stub, ctest-covered); a Linux-side PXP/`libg2d` backend is future work gated on the `meta-imx` machine wiring + an in-repo API source, see #24) |
 | Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
 | Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
+| DAC | `dac.h` (split out of `adc.h` in v0.8) | M (Zephyr `dac_*`) + A (Yocto registry backend, issue #33) | Zephyr backend real — **E8 bench PASS** (`dac_alif`, v0.8.0 campaign); Yocto code-complete, HIL-gated; `alp_dac_capabilities()` additive in v0.9 (conformance-suite covered on native_sim) |
+| I²C/SPI target (slave) mode | `peripheral.h` (`alp_i2c_target_*` / `alp_spi_target_*`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Zephyr `i2c_target_register` / `SPI_OP_MODE_SLAVE`); Yocto + baremetal: NOSUPPORT stubs (no Linux slave-mode uAPI) | Zephyr backend real; `alp_spi_target_transceive` takes a `timeout_ms` bound (finite timeouts need `CONFIG_SPI_ASYNC` — sync-only builds answer `ALP_ERR_NOSUPPORT`) and `alp_spi_target_close` refuses `ALP_ERR_BUSY` while a transfer is in flight; drivers without target support degrade with `ALP_ERR_NOSUPPORT`; native_sim covers param-validation + degrade paths — **two-board HIL pending** |
+| SDK lifecycle | `peripheral.h` (`alp_init` / `alp_deinit`, v0.9) | all OSes (thin, idempotent) | present; every `peripheral-io` example calls it first |
+| SoC identity | `hw_info.h` (`alp_soc_info_read` / `alp_soc_secure_fw_ping`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service backend on AEN); elsewhere the SW fallback answers `soc_ref` only + NOSUPPORT | surface + AEN SE backend; **bench-gated** |
+| Power profiles (operating points) | `power.h` (`alp_power_profile_get/_set`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service backend on AEN); NOSUPPORT elsewhere | surface + AEN SE backend; **bench-gated** (set() is brown-out-capable — treat like a firmware update) |
+| Peer-core boot | `mproc.h` (`alp_mproc_boot_core`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service boot authority on AEN); NOSUPPORT where the platform boots peers by other means | surface + AEN SE backend; **bench-gated** |
+| SDK version / ABI feature-test | `version.h` (v0.9, `[ABI-STABLE]`) | all OSes (compile-time macros + `alp_version_string()`) | present; value-sync CI-gated (`check_version_doc_sync.py`) |
+| Update audit log | `update_log.h` (v0.7, `[ABI-EXPERIMENTAL]`) | M (Zephyr only today): hash-chain engine + SW tier — **NVS-persistent** when the board carves an `alp_ulog_partition` (`CONFIG_ALP_SDK_UPDATE_LOG_PERSIST`), RAM fallback otherwise; tamper-EVIDENT, not tamper-proof; Yocto/baremetal: not built | code complete (native_sim unit-tested: chain verdicts, persist-across-reinit, full-log NOMEM-no-wrap, RAM fallback, tier selection + degrade); **no on-silicon persistence proof yet** — #262 |
+| Update audit log — HW_ENFORCED tier | `update_log.h` `ALP_UPDATE_LOG_HW_ENFORCED` (`CONFIG_ALP_SDK_UPDATE_LOG_TFM`) | M (TF-M builds only): app-immutable tier — store → PSA Protected Storage in the SPE, anchor → HW monotonic counter | **stub** — dispatcher-side plumbing + capability-gated registration + degrade landed; `ready()` returns NOSUPPORT so `alp_update_log_open()` falls through to the SW tier (native_sim-tested). Prerequisites for GA: `psa_ps_set`/`psa_ps_get` under `BUILD_WITH_TFM` + a HW monotonic-counter service (neither the pinned Zephyr nor hal_alif v2.2.0 SE — OTP-only — exposes a non-secure NV counter) — #111 |
 
 ## CMSIS-DSP per-SoM validation
 

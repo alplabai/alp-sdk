@@ -15,8 +15,12 @@ Locks in the post-cleanup schema behaviour:
      `not: { required: [os] }` clause).  Per-core runtime lives
      under `cores.<id>.os:` now.
 
-  3. v1's top-level `peripherals:` / `libraries:` / `iot:` /
-     `inference:` blocks are REJECTED.  All moved per-core in v2.
+  3. v1's top-level `peripherals:` / `iot:` / `inference:` blocks
+     are REJECTED.  All moved per-core in v2.  (Top-level `libraries:`
+     was ALSO rejected in v2 -- until ADR 0018 re-introduced it with a
+     new meaning: the project-wide curated third-party library
+     selection, distinct from the per-core `cores.<id>.libraries:`
+     token list.  Its acceptance is asserted below.)
 
   4. POSITIVE CONTROL: `cores.<id>.inference: { default_arena_kib: N }`
      is ACCEPTED -- arena tuning is an app-level concern, not a
@@ -199,21 +203,25 @@ def test_top_level_peripherals_rejected(tmp_path: Path) -> None:
     _expect_schema_reject(tmp_path, body, marker="peripherals")
 
 
-def test_top_level_libraries_rejected(tmp_path: Path) -> None:
-    """And top-level `libraries:`."""
+def test_top_level_libraries_accepted(tmp_path: Path) -> None:
+    """Top-level `libraries:` is now VALID -- the ADR 0018 project-wide
+    curated third-party library selection (distinct from the per-core
+    `cores.<id>.libraries:` list).  It loads and is captured on the model."""
     body = """
         som:
           sku: E1M-AEN701
 
         libraries:
           - lvgl
-          - mbedtls
+          - cmsis-dsp
 
         cores:
           m55_hp:
             app: ./src
     """
-    _expect_schema_reject(tmp_path, body, marker="libraries")
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert project.libraries == ["lvgl", "cmsis-dsp"]
 
 
 def test_top_level_iot_rejected(tmp_path: Path) -> None:

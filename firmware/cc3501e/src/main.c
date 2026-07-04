@@ -30,14 +30,16 @@
 
 #if defined(CC3501E_RTOS_FREERTOS)
 /* ----------------------------------------------------------------- *
- * ti bench build (FreeRTOS).  The bridge SPI slave runs WITHOUT host- *
- * DMA (the on-chip radio claims all 12 host-DMA channels): it opens   *
- * BLOCKING and is serviced by a dedicated blocking-poll TASK that     *
- * transport_spi_init() spawns (hal/ti/transport_hw_ti_spi.c).  That   *
- * poll task busy-waits the RX FIFO, so it is created ONE PRIORITY      *
- * BELOW this bring-up task -- which therefore must stay higher so it   *
- * can preempt the spinning poll task to drain the async worker (the   *
- * seconds-long Wlan_* lazy-start) and run the housekeeping tick.      *
+ * ti bench build (FreeRTOS).  The bridge SPI slave is fully event-    *
+ * driven -- there is NO poll task: transport_spi_init() opens the SPI *
+ * peripheral in SPI_MODE_CALLBACK with DMA on the free host-DMA       *
+ * channels 12 (RX) / 13 (TX), and the driver's transfer-complete      *
+ * callback (on_transfer, hal/ti/transport_hw_ti_spi.c) advances the   *
+ * request-header -> request-payload -> reply-header -> reply-payload  *
+ * lockstep, dispatching each complete frame from callback context.    *
+ * This bring-up task only DRAINS the async worker (the seconds-long   *
+ * Wlan_* radio ops run here, off the SPI callback) and runs the       *
+ * housekeeping tick every 10 ms.                                      *
  * (The native/stub build keeps the bare WFI loop below.)              *
  * ----------------------------------------------------------------- */
 #include <FreeRTOS.h>
@@ -59,11 +61,11 @@ static void bringup_task(void *arg)
 {
 	(void)arg;
 
-	/* Bring up the lwIP TCP/IP core FIRST -- before transport_spi_init() spawns the
-	 * busy-poll bridge slave task and before the radio is lazy-started.  tcpip_init
+	/* Bring up the lwIP TCP/IP core FIRST -- before transport_spi_init() arms the
+	 * callback-driven bridge slave and before the radio is lazy-started.  tcpip_init
 	 * waits for the lwIP thread to start; doing it later (from the worker drain, after
-	 * the busy-poll task + Wlan_Start) HUNG the worker (the busy-poll starves the lwIP
-	 * thread + the radio ate the heap its 16 KB stack needs).  No-op on a build without
+	 * the transport + Wlan_Start) HUNG the worker on the bench (the lwIP thread never
+	 * came up + the radio ate the heap its 16 KB stack needs).  No-op on a build without
 	 * Wi-Fi/lwIP.  The Wi-Fi connect path's STA netif (network_stack_add_if_sta) needs
 	 * this core to exist. */
 	cc3501e_hw_net_init();

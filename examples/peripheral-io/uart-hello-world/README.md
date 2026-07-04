@@ -21,13 +21,13 @@ Kconfig-pinned device.  Many real apps need to drive a
 * Debug pin on a custom board that isn't the console.
 
 `alp_uart_*()` lets you open ANY UART by portable instance ID
-(`E1M_UART0`, `E1M_UART1`) without touching `CONFIG_CONSOLE_*`
+(`ALP_E1M_UART0`, `ALP_E1M_UART1`) without touching `CONFIG_CONSOLE_*`
 knobs.  It also takes a byte buffer + length, which is what you
 want when shipping binary protocols (`printf` is text-only).
 
 ## What this shows
 
-* `alp_uart_open()` -- opens `E1M_UART0` at 115200 8N1.
+* `alp_uart_open()` -- opens `ALP_E1M_UART0` at 115200 8N1.
 * `alp_uart_write()` -- blocking byte-buffer write.
 * Error handling via `alp_last_error()` when the port can't open.
 * `alp_uart_close()` -- clean shutdown.
@@ -48,7 +48,7 @@ west flash
 
 ## Attaching a terminal
 
-The output appears on whatever the board wires `E1M_UART0` to.
+The output appears on whatever the board wires `ALP_E1M_UART0` to.
 On the E1M-EVK and E1M-X-EVK that's the on-board FTDI USB-UART
 (115200 8N1, 8 data bits, no parity, 1 stop bit).
 
@@ -84,7 +84,7 @@ device path):
 On the SDK log console (e.g. RTT or another UART):
 
 ```
-[uart-hello] open E1M_UART0 @ 115200 8N1
+[uart-hello] open ALP_E1M_UART0 @ 115200 8N1
 [uart-hello] greeting written
 [uart-hello] tick 0 written
 [uart-hello] tick 1 written
@@ -92,7 +92,7 @@ On the SDK log console (e.g. RTT or another UART):
 [uart-hello] done
 ```
 
-On the terminal attached to E1M_UART0 itself:
+On the terminal attached to ALP_E1M_UART0 itself:
 
 ```
 Alp SDK uart-hello-world
@@ -111,8 +111,8 @@ tick 4
   rate and returns NOSUPPORT if the request is unreachable.
 * **Different framing.**  Override `.data_bits`, `.parity`,
   `.stop_bits` for industrial 7-E-1 / RS-485 9-bit / ...
-* **Different port.**  `E1M_UART0` is the conventional console;
-  swap for `E1M_UART1` for a secondary serial route.
+* **Different port.**  `ALP_E1M_UART0` is the conventional console;
+  swap for `ALP_E1M_UART1` for a secondary serial route.
 
 ## Reference
 

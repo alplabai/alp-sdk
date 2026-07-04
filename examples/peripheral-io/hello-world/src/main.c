@@ -34,9 +34,8 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
-
 #include <alp/cap.h>
+#include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
 /* Capped tick count keeps the native_sim run inside twister's
@@ -45,14 +44,18 @@
  * so customers see exactly what to change. */
 #define HELLO_TICKS 5u
 
-/* The wait between ticks.  k_msleep yields the CPU to other
- * threads + the Zephyr power-management subsystem during the wait
- * (unlike alp_delay_ms which falls through to a busy-loop on
- * baremetal targets where there's no scheduler). */
+/* The wait between ticks.  alp_delay_ms yields the CPU to other
+ * threads + the power-management subsystem during the wait on
+ * scheduler-backed targets; on baremetal it falls through to a
+ * calibrated busy-loop (there's no scheduler to yield to). */
 #define HELLO_TICK_PERIOD_MS 1000u
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	/* The first line a bring-up engineer wants to see -- it
      * confirms the boot path made it to main() AND the printf
      * console is decoded correctly.  If THIS line is missing,
@@ -67,7 +70,7 @@ int main(void)
      * marker; real firmware would loop forever. */
 	for (uint32_t tick = 0; tick < HELLO_TICKS; tick++) {
 		printf("[hello] tick %u\n", tick);
-		k_msleep(HELLO_TICK_PERIOD_MS);
+		alp_delay_ms(HELLO_TICK_PERIOD_MS);
 	}
 
 	/* TICKS_ON_REAL_SILICON: in production firmware you'd swap the
@@ -75,7 +78,7 @@ int main(void)
      *
      *     for (uint32_t tick = 0; ; tick++) {
      *         printf("[hello] tick %u\n", tick);
-     *         k_msleep(HELLO_TICK_PERIOD_MS);
+     *         alp_delay_ms(HELLO_TICK_PERIOD_MS);
      *     }
      *
      * Returning from main() on Zephyr is technically legal but the

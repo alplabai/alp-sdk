@@ -207,6 +207,32 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * vs the per-request budget.  The r2 bridge (CS + host-IRQ) removes the need. */
 #define CC3501E_PHASE_SETTLE_US 200u
 
+/* READY gate for the r2 SS0 + host-IRQ bridge.  When ctx->ready_pin is
+ * populated (the CC35 GPIO17 -> Alif P2_6 line is wired + opened as an input),
+ * wait for it HIGH -- the slave drives it HIGH when its SPI slave is armed+idle
+ * -- before clocking a reply phase, instead of a fixed settle gap.  This tracks
+ * the slave's actual re-arm rather than guessing, so slow (Wi-Fi/BLE) replies
+ * no longer need a conservative fixed delay.  Opt-in + degrades safely: a NULL
+ * ready_pin (CS-less r1 boards) or a line that never asserts falls back to the
+ * fixed gap.  See project_cc3501e_link_topology. */
+static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
+{
+	if (ctx->ready_pin != NULL) {
+		/* Opportunistic: a bounded burst of cheap polls catches an already-armed
+		 * slave (fast READY assert) and short-cuts the wait.  If the line isn't
+		 * asserted -- a slow op, or an IRQ bodge not yet HW-validated (P2_6 reads
+		 * 0 on the current bench) -- fall through to the proven fixed gap.  So the
+		 * gate never stalls and never costs more than a short burst + the gap. */
+		bool level = false;
+		for (uint32_t i = 0; i < 64u; ++i) {
+			if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
+				return;
+			}
+		}
+	}
+	alp_delay_us(fallback_us);
+}
+
 alp_status_t cc3501e_request(cc3501e_t        *ctx,
                              alp_cc3501e_cmd_t cmd,
                              const uint8_t    *tx_payload,
@@ -232,6 +258,16 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
      *   1. send request header (4)        3. read reply header (4)
      *   2. send request payload (tx_len)  4. read reply payload (status+data)
      */
+	/* Gate READY before the REQUEST header too.  After the slave sends a reply it
+	 * re-arms its header phase in its ISR; a spaced request (soak loop, bring-up)
+	 * has ample idle time so the header always landed on an armed slave.  But a
+	 * TIGHT back-to-back loop -- streaming via cc3501e_stream_write -- clocks the
+	 * next header the instant the prior reply is read, racing that re-arm: the
+	 * first frame acks, then every following frame desyncs (bench 2026-07-04:
+	 * dma_stream_iters stuck at 1).  READY tracks the actual header-arm; on a
+	 * CS-less r1 board with no ready_pin the fallback is the same short settle the
+	 * other phases use. */
+	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
 	alp_status_t s =
 	    alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
@@ -249,10 +285,9 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 		if (s != ALP_OK) return s;
 	}
 
-	/* Settle gap: let the slave dispatch + arm its reply before we read.
-     * v0.1 META dispatch is instant; slow (Wi-Fi/BLE) replies + async
-     * events need the next-rev host IRQ line, not a fixed gap. */
-	alp_delay_us(200u);
+	/* Wait for the slave to dispatch + arm its reply before we read: the
+	 * READY gate tracks it via the host-IRQ line when wired, else a fixed gap. */
+	cc3501e_reply_gate(ctx, 200u);
 
 	/* Dummies for the read transactions (MOSI is don't-care on a read). */
 	memset(ctx->tx_scratch, 0xFF, sizeof(ctx->tx_scratch));
@@ -277,9 +312,9 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 		return ALP_ERR_IO;
 	}
 
-	/* Same inter-phase settle before the reply PAYLOAD: the slave arms that
-	 * transfer in its ISR only after the reply-header transfer completes. */
-	alp_delay_us(CC3501E_PHASE_SETTLE_US);
+	/* Same READY gate before the reply PAYLOAD phase (the slave re-arms it in
+	 * its ISR only after the reply-header transfer completes). */
+	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 	/* 4. Reply payload: status byte followed by the response data. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
 	if (s != ALP_OK) return s;
@@ -305,6 +340,19 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out)
 	if (got < sizeof(reply)) return ALP_ERR_IO;
 	*version_out = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
 	return ALP_OK;
+}
+
+alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t len)
+{
+	if (ctx == NULL || (data == NULL && len > 0u)) return ALP_ERR_INVAL;
+	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)) {
+		return ALP_ERR_INVAL;
+	}
+	/* One framed bulk frame: the request PAYLOAD phase clocks @len bytes in a
+	 * single transfer, which takes the host DMA path when @len >= the SPI DMA
+	 * threshold (CONFIG_SPI_DW_ALIF_DMA_MIN_LEN).  The firmware sinks + acks it,
+	 * so the link stays framed -- send these back-to-back for a bulk stream. */
+	return cc3501e_request(ctx, ALP_CC3501E_CMD_STREAM_WRITE, data, len, NULL, 0u, NULL, 200u);
 }
 
 /* ------------------------------------------------------------------ */

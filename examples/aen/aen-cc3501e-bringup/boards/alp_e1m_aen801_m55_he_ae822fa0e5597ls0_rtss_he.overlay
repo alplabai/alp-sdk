@@ -28,6 +28,7 @@
 
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/dma/alif_dma_event_router.h>
 
 &pinctrl {
 	/*
@@ -41,7 +42,10 @@
 	 */
 	pinctrl_spi1: pinctrl_spi1 {
 		group0 {
-			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>;
+			/* Hardware SS0 chip-select (P14_7 = SPI1_SS0_C) -- dwc-ssi master
+			 * drives SS0 per transfer to frame the CC3501E slave. */
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
 		};
 		group1 {
 			pinmux = <PIN_P14_4__SPI1_MISO_C>;
@@ -86,7 +90,7 @@
 		 * use it directly and skip the failing clock-control path. SYST_HCLK =
 		 * AHB = 400 MHz (E8 HWRM); BAUDR = 400M/freq_hz (=50 for an 8 MHz SCLK).
 		 */
-		clock-frequency = <400000000>;
+		clock-frequency = <200000000>; /* real SSI functional clock (was mis-set 400M; proven via BAUDR scaling) */
 		dwc-ssi;
 		fifo-depth = <16>;
 		pinctrl-0 = <&pinctrl_spi1>;
@@ -106,6 +110,67 @@
 	status = "okay";
 };
 
+/*
+ * gpio2 for the host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).
+ * P2_6's reset-default mux is function 0 = GPIO (PIN_P2_6__GPIO), so no pinctrl
+ * group is needed; gpio_dw defaults the pin to input, which the app confirms via
+ * alp_gpio_configure(INPUT).  The READY line lets the host gate reply phases on
+ * the slave's actual re-arm instead of a fixed settle gap. */
+&gpio2 {
+	status = "okay";
+};
+
+/*
+ * Host-side peripheral DMA for continuous SPI streams over the CC3501E bridge.
+ * SPI1 is a MAIN-domain peripheral, so per the AE822 DFP soc_dma_map (SPI1_DMA=0,
+ * group 2, TX req 21 / RX req 17) it routes through the SYSTOP DMA0 via its event
+ * router evtrtr0 (4 groups -> group 2 valid) -- NOT the M55-HE-local DMA2/evtrtr2
+ * (1 group, for LP peripherals; wiring SPI1 there leaves the channel Waiting-For-
+ * Peripheral forever -- SPI1's request line isn't on the HE router).  DMA0's clock
+ * is SYSTOP (already on -- the app drives SPI1/GPIO in the same region); its
+ * PL330 boot-manager security latch (CLKCTRL_PER_MST) is in dma_alif_boot_latch.c.
+ * The fork PL330 driver statically allocates the per-channel ucode + remaps it via
+ * local_to_global(), so no external `microcode` prop is needed.  IRQs 299..306 =
+ * the 8 DMA0 channel-done lines, 331 = abort (AE822 DFP rtss_he).
+ */
+&soc {
+	dma0: dma@49080000 {
+		compatible = "alif,dma-pl330";
+		reg = <0x49080000 0x1000>;
+		#dma-cells = <2>;
+		dma-channels = <8>;
+		interrupt-parent = <&nvic>;
+		interrupts = <299 3>, <300 3>, <301 3>, <302 3>, <303 3>,
+			     <304 3>, <305 3>, <306 3>, <331 3>;
+		interrupt-names = "channel0", "channel1", "channel2", "channel3",
+				  "channel4", "channel5", "channel6", "channel7", "abort";
+		status = "okay";
+	};
+
+	evtrtr0: event-router@49035000 {
+		compatible = "alif,dma-event-router";
+		reg = <0x49035000 0x100>;
+		dma-controller = <&dma0>;
+		channels = <32>;
+		dma-groups = <4>;  /* SYSTOP router: 4 ACK_TYPE groups (0-3); SPI1 uses group 2 */
+		#dma-cells = <2>;
+		status = "okay";
+	};
+};
+
+/*
+ * Route the bridge SPI1 through evtrtr0 to DMA0.  Cell encoding
+ * (ALIF_DMA_ENCODE(channel, dma_group, handshake), periph_req):
+ *   TX = PL330 ch2, evtrtr group 2, handshake on, SPI1 TX periph req 21
+ *   RX = PL330 ch3, evtrtr group 2, handshake on, SPI1 RX periph req 17
+ * (AE822 DFP soc_dma_map.h: SPI1 group 2, TX 21 / RX 17.)
+ */
+&cc3501e_spi {
+	dmas = <&evtrtr0 ALIF_DMA_ENCODE(2, 2, 1) 21>,
+	       <&evtrtr0 ALIF_DMA_ENCODE(3, 2, 1) 17>;
+	dma-names = "txdma", "rxdma";
+};
+
 / {
 	aliases {
 		/* bus_id 1 in alp_spi_open() -> this controller. */
@@ -122,6 +187,22 @@
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
 		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
-			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] host-IRQ/READY (P2_6 <- CC35 GPIO17) */
 	};
+};
+
+/*
+ * Global-bus aliases of the M55-HE TCMs, needed by hal_alif soc_memory_map.h
+ * local_to_global() -- the PL330 (AXI master) reaches TCM-resident buffers only
+ * via these global windows.  Values from the AE822 M55-HE map (sdk-alif fork
+ * ensemble_rtss_he.dtsi): ITCM 0x0->0x58000000, DTCM 0x20000000->0x58800000.
+ * (DMA stream buffers still belong in SRAM0 0x02000000, which is already global
+ * -> local_to_global() returns it unchanged.)
+ */
+&itcm {
+	global_base = <0x58000000>;
+};
+&dtcm {
+	global_base = <0x58800000>;
 };

@@ -9,13 +9,14 @@
  *   - NULL handle -> ALP_ERR_INVAL.
  *   - non-Renesas backend -> ALP_ERR_NOT_PRESENT_ON_THIS_SOC.
  *
- * After the gate the calls return NOSUPPORT today; the drpai_v2n
- * backend itself is a NOT_IMPLEMENTED stub (see issue #58) so
- * there is no per-handle state to reach into yet.  When the real
- * DRP-AI body lands, the bodies below grow into pokes against the
- * NPU register surface (Renesas RZ/V2N Hardware User's Manual,
- * DRP-AI3 chapter -- TBD register addresses and bit layouts
- * documented in the vendor pack).
+ * After the gate the calls return NOSUPPORT today.  On Zephyr the
+ * vendor gate is always the terminal answer: the registry ships NO
+ * renesas-vendor inference backend because the DRP-AI3 engine is
+ * A55/Linux-side only (MERA/DRP-AI TVM runtime,
+ * src/yocto/inference_drpai.cpp; issue #58) -- an M-class handle can
+ * never be DRP-AI-backed.  Wiring these knobs through to the Yocto
+ * handle (which uses the Yocto dispatcher's layout, not this
+ * registry's) is follow-up work gated on the vendor pack.
  */
 
 #include <stdbool.h>
@@ -53,10 +54,10 @@ alp_status_t alp_renesas_inference_pipeline_stage_pin(alp_inference_t           
 		return ALP_ERR_INVAL;
 	}
 	(void)layer_index;
-	/* Per-layer pin lands when the drpai_v2n backend grows past
-     * its NOT_IMPLEMENTED stub (issue #58).  The layer-count
-     * range check requires translator metadata which only the
-     * real body has access to. */
+	/* Per-layer pin lands when these knobs are wired to the
+     * A55-side DRP-AI body (issue #58).  The layer-count range
+     * check requires translator metadata which only the real
+     * body has access to. */
 	return ALP_ERR_NOSUPPORT;
 }
 
@@ -68,8 +69,8 @@ alp_status_t alp_renesas_inference_ai_sram_reserve(alp_inference_t *inf, uint32_
 	if (reserve_bytes > ALP_RENESAS_INFERENCE_AI_SRAM_BYTES) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
-	/* AI-SRAM reservation pokes happen when the drpai_v2n backend
-     * grows past its NOT_IMPLEMENTED stub. */
+	/* AI-SRAM reservation pokes happen when these knobs are wired
+     * to the A55-side DRP-AI body (issue #58). */
 	return ALP_ERR_NOSUPPORT;
 }
 

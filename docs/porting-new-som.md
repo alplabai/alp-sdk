@@ -10,6 +10,22 @@
 
 ## 1. Introduction
 
+> **Scaffold first:** `alp new-som` generates both metadata skeletons
+> this guide walks through (the SoM YAML + the SoC JSON) with
+> schema-legal `TBD` placeholders, and prints the porting checklist --
+> run it, then use the sections below to fill in the facts.  See the
+> verb reference in [cli.md](cli.md).
+>
+> The scaffold is **mergeable as-is**: it passes the full
+> `pr-metadata-validate` command set (`validate_metadata.py` and
+> `check_inference_backend_parity.py`) the moment it is committed.
+> The `inference.preferred_backend: tbd` placeholder rides on the
+> preset's `status.preliminary: true` marker -- the parity gate
+> accepts `tbd` *only* on preliminary presets, so the port cannot
+> graduate (clear `status.preliminary`) until the real silicon
+> backend replaces the placeholder.  Preview a scaffold without
+> writing anything via `alp new-som ... --dry-run`.
+
 "Porting a new SoM" in the Alp SDK means *adding one row of
 machine-readable metadata*.  It is **not**:
 
@@ -281,9 +297,20 @@ inference:
 # SoM-side extensions to silicon capabilities.  The loader merges
 # this on top of soc_spec.capabilities at codegen time (see
 # resolve_capabilities() in scripts/alp_project.py).  Only declare
-# capabilities the SoM ADDS to or COUNTERMANDS the silicon.
+# capabilities the SoM ADDS on top of the silicon; a capability the
+# silicon offers but this SKU does NOT populate goes in
+# `silicon_capabilities.unpopulated` below, never as `false` here.
 capabilities:
   optiga_trust_m:       true               # on-module SE; not in silicon caps.
+
+# OPTIONAL -- per-SKU RESTRICTION of the silicon capability set.  Only
+# declare when this SKU leaves a silicon capability unpopulated (e.g.
+# an accelerator fused off / not bonded out on this order code); every
+# listed name must be truthy in the SoC JSON's `capabilities:` block
+# (validate_metadata.py cross-check).  Omit entirely when the SKU
+# carries the silicon's full set -- true for every current SKU.
+# silicon_capabilities:
+#   unpopulated: [gpu2d, dave2d]           # HYPOTHETICAL -- transcribe from the datasheet.
 
 topology:
   a32_cluster:
@@ -349,6 +376,7 @@ status:
 | `on_module:*`          | No — SoM extension                | Yes per field             | The set of keys is open; chip names match `chips/<part>/` driver dirs (driver-naming convention applies).               |
 | `inference`            | Mixed                             | Yes (omit when unsure)    | `preferred_backend` is silicon-determined; the customer cannot override it from `board.yaml` (per the v0.6 cleanup).    |
 | `capabilities`         | SoM extension only                | Yes                       | Only list keys the SoM **adds** to silicon caps (e.g., on-module CAU on V2N, `optiga_trust_m` on AEN/V2N).               |
+| `silicon_capabilities` | Silicon-determined (restriction)  | Omit when unrestricted    | Optional `unpopulated:` list of SoC `capabilities:` keys this SKU does **not** populate; can only remove what the silicon offers (`validate_metadata.py` cross-check). |
 | `topology`             | Silicon-determined (core ids)     | No                        | Keys must match `soc.cores[].id`; `app:` / `board:` / `machine:` / `toolchain:` are SoM-extension.                       |
 | `memory_map`           | Silicon-determined (derived)      | Omit entirely              | Only declare for non-stock partitioning; otherwise the loader derives from SoC `sram_banks_kb`.                          |
 | `mailbox.controller`   | Mixed                             | Yes (`"TBD"`)             | Required when any topology entry runs Zephyr or baremetal; controller name comes from the hand-written HW config.        |
@@ -542,20 +570,22 @@ CONFIG_ALP_PERIPHERAL_I2C=y
 
 The `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E9=y` line is the headline
 result — the loader successfully resolved the new SoM through the
-new SoC JSON.  Once `scripts/alp_project.py` is wired to mint
-`CONFIG_ALP_SOC_<NEW_REF>` for the new ref (one row in the
-`_SILICON_TO_KCONFIG` table at the top of that file) the swap-test
-is green.  (The existing Alif rows run `ALP_SOC_ALIF_ENSEMBLE_E3`
-through `E8`; a brand-new SoC adds its own `ALP_SOC_*` token.)
+new SoC JSON.  The Kconfig symbol is **computed** from the ref
+(`ALP_SOC_ + <REF>.upper().replace(':','_')`), so the swap-test
+goes green once the new ref is added to the allowlist in
+`metadata/registries/silicon-kconfig.json`.  (The existing Alif
+rows run `ALP_SOC_ALIF_ENSEMBLE_E3` through `E8`; a brand-new SoC
+adds its own ref to that list.)
 
-> **Caveat (current state, 2026-05-18).**  The
-> `_SILICON_TO_KCONFIG` dictionary in `scripts/alp_project.py` is
-> baked inline; adding a new SoC ref means adding one line there
-> AND a matching `config ALP_SOC_<NEW_REF>` stanza in
-> `zephyr/Kconfig`.  Until those two rows land, the loader will
-> emit a blank Kconfig fragment for the new SoC; this is
-> expected, and is the only code-touching step in the otherwise
-> metadata-only port.
+> **Caveat (current state).**  Adding a new SoC ref means one row in
+> `metadata/registries/silicon-kconfig.json` (the versioned allowlist
+> consumed by `silicon_to_kconfig()` in `scripts/alp_project.py`) AND
+> a matching `config ALP_SOC_<NEW_REF>` stanza in `zephyr/Kconfig`.
+> `scripts/validate_metadata.py` gates that every allowlisted ref
+> resolves to an existing `metadata/socs/` spec.  Until the registry
+> row + the Kconfig stanza land, the loader emits a blank Kconfig
+> fragment for the new SoC; this is expected, and is the only
+> data-touching step in the otherwise metadata-only port.
 
 ### 4. Confirm capabilities resolve
 
@@ -573,7 +603,10 @@ The merge happens in `resolve_capabilities()`:
 1. SoC JSON `capabilities:` provides the silicon defaults.
 2. SoM YAML `capabilities:` overlays SoM additions
    (`optiga_trust_m: true` on AEN901).
-3. Customer's `board.yaml` capabilities (rare) wins last.
+3. SoM YAML `silicon_capabilities.unpopulated` (when present) forces
+   the listed silicon capabilities to `false`/`0` — the per-SKU
+   restriction layer.
+4. Customer's `board.yaml` capabilities (rare) wins last.
 
 ---
 
@@ -616,7 +649,87 @@ or under `native_sim` for portable CI today.
 
 ---
 
-## 11. Common pitfalls
+## 11. Conformance gate — prove the portable contract
+
+Metadata validation (Step 5) proves the *description* of the new
+SoM; the conformance suite proves its *backends*.
+`tests/zephyr/conformance/` is one data-driven ztest suite that
+every backend must pass — it mechanically exercises the uniform
+lifecycle contract of every portable peripheral class (GPIO / I²C /
+SPI / UART / ADC / DAC / PWM / CAN / RTC / WDT / counter / qenc /
+I²S, plus the I²C/SPI target modes) and the non-class v0.9
+surfaces (`alp_init`/`alp_deinit` idempotency, the
+`alp_uart_rx_ringbuf_*` contract, I²C-target config validation):
+
+- `alp_<class>_open(NULL cfg)` → NULL + `alp_last_error()` ==
+  `ALP_ERR_INVAL`
+- `alp_<class>_open(<bad instance>)` → NULL + a documented
+  `alp_status_t` code (never a raw negative errno)
+- `alp_<class>_close(NULL)` and double-close are safe no-ops
+- `alp_<class>_capabilities(NULL)` → NULL; non-NULL for an open
+  handle
+- NULL-handle data-path calls refuse with an in-enum status
+
+**Expectations come from the capability layer.**  On a real-SoM
+build (any `CONFIG_ALP_SOC_<X>`), whether `open(instance 0)` must
+succeed is derived from `alp_has()` (`<alp/cap.h>`), so the gate
+doubles as a caps↔backend parity check: cap **true** but open
+failed = the port is broken (FAIL); cap **false** but open handed
+out a handle = the capability table is broken (FAIL); cap false and
+open refused the documented way = asserted degrade path, logged as
+`silicon lacks it`.  On `native_sim` (`CONFIG_ALP_SOC_NONE`, the
+permissive profile) the suite falls back to what the test overlay
+wires: gpio / i2c / spi / uart / adc / counter run the positive
+path against emulated controllers; the rest assert the failure
+contract.  The target-mode rows never promote to must-open —
+their headers document `ALP_ERR_NOSUPPORT` as a legitimate
+per-driver refusal.
+
+Run it on `native_sim` (the same invocation CI uses, minus the
+module paths):
+
+```bash
+twister --testsuite-root tests/zephyr/conformance \
+    -p native_sim/native/64 -O twister-out-conformance
+```
+
+The qualified in-repo boards (`zephyr/boards/alp/`) are in the
+scenario's `platform_allow` too, so the same gate builds — and, on
+the bench or the nightly HIL, runs — with the real backend
+selected.  Per-board `boards/<board>.conf` fragments pin the
+matching `CONFIG_ALP_SOC_*` capability profile.  E.g. a build-only
+smoke for the AEN801 HE core:
+
+```bash
+twister --testsuite-root tests/zephyr/conformance \
+    -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+    --build-only -O twister-out-conformance-arm
+```
+
+**Watchdog safety.**  The WDT row's positive open arms a real
+`RESET_SOC` watchdog, and many M-class watchdogs are
+write-once-armed (`<alp/wdt.h>`) — close() cannot stop them.  The
+arming path therefore runs only under
+`CONFIG_TEST_ALP_CONFORMANCE_WDT_ARM` (default **y** on
+`native_sim` where no watchdog device is wired, default **n** on
+hardware).  A bench operator opting in should run the suite
+dead-last and expect a possible end-of-run reset.
+
+A new SoM port satisfies the gate when the
+`alp_sdk.conformance.portable_api` scenario passes with the new
+backend selected — add a `boards/<board>.conf` in the suite pinning
+the new `CONFIG_ALP_SOC_<X>` and the board name to
+`platform_allow` in `testcase.yaml`.  Nothing skips silently: the
+suite asserts the failure contract and logs every degrade path
+(`conformance[<class>]: degrade path -- ...` in the handler log).
+A new portable class is enrolled by adding **one row** to the
+`conf_classes[]` table in `tests/zephyr/conformance/src/main.c` —
+the generic runners pick it up automatically; see the test-matrix
+comment at the top of that file.
+
+---
+
+## 12. Common pitfalls
 
 - **Inventing pin values.**  Per [[pending-hw-configs]], unknown
   routes / addresses / bases must be `"TBD"`, never plausible
@@ -655,7 +768,7 @@ or under `native_sim` for portable CI today.
 
 ---
 
-## 12. Where to next
+## 13. Where to next
 
 - **Customer cookbook** — [`docs/portability.md`](portability.md)
   walks through the intra-family swap from the customer's side

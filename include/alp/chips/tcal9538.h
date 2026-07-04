@@ -19,7 +19,7 @@
  * address strap A1A0 selects 0x70..0x73 (TCA9538) or
  * 0x70..0x73 (TCAL9538 same range).
  *
- * On the E1M EVK the chip sits on E1M_I2C0 at 0x72 (A1=1, A0=0)
+ * On the E1M EVK the chip sits on ALP_E1M_I2C0 at 0x72 (A1=1, A0=0)
  * and fans out LCD / camera / capacitive-touch control lines plus
  * four sensor interrupt inputs.  See
  * `<alp/boards/alp_e1m_evk.h>`'s `evk_ioexp_pin_t` enum

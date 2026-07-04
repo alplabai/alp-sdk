@@ -125,7 +125,7 @@ west flash                     # real silicon
 
 ```c
 alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-    .bus_id     = 0u,           // E1M_I2C0 from <alp/e1m_pinout.h>
+    .bus_id     = 0u,           // ALP_E1M_I2C0 from <alp/e1m_pinout.h>
     .bitrate_hz = 400000u,
 });
 if (bus == NULL) {
@@ -134,7 +134,7 @@ if (bus == NULL) {
 }
 
 tmp112_t temp;
-if (tmp112_init(&temp, bus, 0x40) != ALP_OK) {
+if (tmp112_init(&temp, bus, TMP112_I2C_ADDR_GND) != ALP_OK) {
     printf("[tmp112] init failed\n");
 }
 ```
@@ -281,11 +281,20 @@ upstream Zephyr board file or the `alplabai/alp-zephyr-modules`
 overlay.  See [`docs/architecture.md`](architecture.md) for the
 split.
 
+The `alp` CLI covers the same flow in fewer keystrokes:
+`alp build && alp flash` programs every slice + helper MCU in
+`boot_order:`, and `alp monitor --port <port>` opens the board's
+serial console afterwards (portless it lists the host's serial
+ports).  If a build machine misbehaves, `alp doctor` is the
+hardware-free environment triage.  Verb reference:
+[`docs/cli.md`](cli.md).
+
 ## 8. Where to look next
 
 | Topic                                            | Document                                          |
 |--------------------------------------------------|---------------------------------------------------|
 | Workspace + tooling deep-dive                    | [`docs/getting-started.md`](getting-started.md)   |
+| `alp` CLI verb reference                         | [`docs/cli.md`](cli.md)                           |
 | `board.yaml` schema reference                    | [`docs/board-config.md`](board-config.md)         |
 | Architecture (modules, wrappers, codegen split)  | [`docs/architecture.md`](architecture.md)         |
 | SoM bring-up procedures                          | [`docs/bring-up-v2n.md`](bring-up-v2n.md), [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) |

@@ -119,6 +119,9 @@ static const alp_rpc_ops_t _ops = {
 	.close       = sw_close,
 };
 
+/* Export the rpc static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(rpc);
+
 ALP_BACKEND_REGISTER(rpc,
                      sw_fallback,
                      {

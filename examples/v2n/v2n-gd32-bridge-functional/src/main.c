@@ -34,7 +34,6 @@
  */
 
 #include <string.h>
-#include <zephyr/kernel.h>
 
 #include "alp/chips/gd32g553.h"
 #include "alp/peripheral.h"
@@ -368,7 +367,7 @@ static void pwm7_staircase_forever(void)
 		func_results[40] = pm;
 		func_results[41] = (uint32_t)step;
 		step++;
-		k_msleep(2000);
+		alp_delay_ms(2000);
 	}
 }
 
@@ -395,12 +394,12 @@ int main(void)
 	alp_status_t s;
 	do {
 		s = gd32g553_init(&ctx, spi, NULL, GD32G553_BRIDGE_DEFAULT_I2C_ADDR);
-		if (s != ALP_OK) k_msleep(200);
+		if (s != ALP_OK) alp_delay_ms(200);
 	} while (s != ALP_OK);
 
 	/* Settle past the host's boot window (same rationale as the soak:
      * A55 storage/pinmux bring-up can glitch shared board state). */
-	k_msleep(20000);
+	alp_delay_ms(20000);
 
 	func_results[1] = 1u;
 	run_suite();

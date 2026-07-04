@@ -16,7 +16,6 @@
  * peripheral surfaces only in app + library code".
  */
 
-#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
 #include <math.h>
@@ -47,7 +46,7 @@ int drone_sensors_init(drone_telemetry_t *telem)
 	/* I²C bus shared by IMU + battery monitor.  400 kHz fast-mode
      * is comfortable for both chips. */
 	s_i2c = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	if (s_i2c == NULL) {
@@ -57,7 +56,7 @@ int drone_sensors_init(drone_telemetry_t *telem)
 
 	/* GPS UART -- 9600/8N1 is the NEO-M9N factory default. */
 	s_gps_uart = alp_uart_open(&(alp_uart_config_t){
-	    .port_id  = E1M_UART0,
+	    .port_id  = ALP_E1M_UART0,
 	    .baudrate = 9600,
 	});
 	if (s_gps_uart == NULL) {
@@ -140,7 +139,7 @@ void drone_sensors_run_imu_loop(drone_telemetry_t *telem)
 			(void)a;
 			update_attitude(telem, gx, gy, gz, 0.01f);
 		}
-		k_msleep(10);
+		alp_delay_ms(10);
 	}
 }
 
@@ -191,6 +190,6 @@ void drone_sensors_run_slow_loop(drone_telemetry_t *telem)
 			}
 		}
 
-		k_msleep(200); /* 5 Hz cadence. */
+		alp_delay_ms(200); /* 5 Hz cadence. */
 	}
 }

@@ -27,11 +27,11 @@
  * Two ways to use it:
  *
  *   1. PORTABLE (what an application normally writes):
- *        alp_gpio_t *io = alp_gpio_open(E1M_GPIO_IO13);
+ *        alp_gpio_t *io = alp_gpio_open(ALP_E1M_GPIO_IO13);
  *        alp_gpio_configure(io, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
  *        alp_gpio_write(io, true);
  *      With CONFIG_ALP_SDK_GPIO_CC3501E_PROXY=y and the route table in
- *      src/cc3501e_gpio_routes.c, the SDK silently routes E1M_GPIO_IO13
+ *      src/cc3501e_gpio_routes.c, the SDK silently routes ALP_E1M_GPIO_IO13
  *      over the bridge to raw CC3501E GPIO_13 -- the app never names the
  *      coprocessor.  (This build enables that backend so the bring-up
  *      helper's alp_gpio_cc3501e_attach() runs, exactly as a portable app
@@ -44,9 +44,9 @@
  *      directly so each bridge transaction is explicit in the teaching
  *      log -- it is the same wire op the portable path emits underneath.
  *
- * The route table (src/cc3501e_gpio_routes.c) ties E1M_GPIO_IO13 -> raw
+ * The route table (src/cc3501e_gpio_routes.c) ties ALP_E1M_GPIO_IO13 -> raw
  * CC3501E GPIO 13, so "pad 13" below is the same pad a portable
- * alp_gpio_open(E1M_GPIO_IO13) would reach.
+ * alp_gpio_open(ALP_E1M_GPIO_IO13) would reach.
  *
  *
  * ==== THE r2 HOST-IRQ CAVEAT (READ BEFORE USING INTERRUPTS) ========
@@ -101,7 +101,7 @@
 /*
  * The proxied pad this demo drives.  RAW CC3501E GPIO index 13, which the
  * route table (src/cc3501e_gpio_routes.c) maps to the portable E1M IO
- * E1M_GPIO_IO13 (= I2S_SELECT on the E1M-AEN netlist).  Driving it has no
+ * ALP_E1M_GPIO_IO13 (= I2S_SELECT on the E1M-AEN netlist).  Driving it has no
  * destructive side-effect on the bench, which is why it is the demo pad.
  */
 #define DEMO_PAD 13u
@@ -147,7 +147,7 @@ int main(void)
 	 * Bring up the SoM's CC3501E coprocessor in ONE call -- exactly like
 	 * aen-cc3501e-bringup.  cc3501e_bridge_bringup() opens the inter-chip
 	 * SPI bridge + the WIFI_EN/nRESET control pins, binds them, attaches
-	 * the GPIO proxy backend (so a portable alp_gpio_open(E1M_GPIO_IO13)
+	 * the GPIO proxy backend (so a portable alp_gpio_open(ALP_E1M_GPIO_IO13)
 	 * would route over the bridge), and runs the power + reset sequence
 	 * (TI SWRU626 + the Puya cold-boot hard-reset).  Leaves WIFI_EN HIGH.
 	 */

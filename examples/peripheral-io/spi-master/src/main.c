@@ -41,7 +41,7 @@
  * transceive / close path runs and the harness latches `done`.
  *
  * Runs on both EVKs: BOARD_SPI_ARDUINO (from <alp/board.h>) resolves
- * to E1M_SPI1 on E1M EVK and E1M_X_SPI1 on E1M-X EVK.
+ * to ALP_E1M_SPI1 on E1M EVK and ALP_E1M_X_SPI1 on E1M-X EVK.
  */
 
 #include <stdio.h>
@@ -78,6 +78,10 @@ static const uint8_t TX_PATTERN[] = { 0xAA, 0x55, 0xDE, 0xAD };
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[spi-master] open BOARD_SPI_ARDUINO @ 1 MHz mode 0\n");
 
 	/* Open the SPI bus.  Configuration knobs in order:

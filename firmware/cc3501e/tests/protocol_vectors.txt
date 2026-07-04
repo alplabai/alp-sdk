@@ -16,8 +16,8 @@ ping_request                       = 00000000
 ping_reply_ok                      = 0000010000
 # cmd=GET_VERSION | flags=0 | len=0
 get_version_request                = 01000000
-# cmd=GET_VERSION | len=3 | status=OK | version=1 (LE16)
-get_version_reply_proto1           = 01000300000100
+# cmd=GET_VERSION | len=3 | status=OK | version=2 (LE16)
+get_version_reply_proto2           = 01000300000200
 # cmd=GET_MAC | flags=0 | len=0
 get_mac_request                    = 03000000
 # cmd=GET_MAC | len=1 | status=BUSY -- job submitted, host re-issues

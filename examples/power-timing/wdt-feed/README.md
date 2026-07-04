@@ -5,7 +5,8 @@ watchdog timeout and feeds it from a background loop.
 
 ## What this shows
 
-- Installing a WDT timeout via `alp_wdt_open` with the
+- Installing a WDT timeout via `alp_wdt_open` (the watchdog instance
+  is selected by `wdt_id` inside `alp_wdt_config_t`) with the
   `ALP_WDT_RESET_SOC` action.
 - The "feed before timeout or the chip resets" contract.
 - Graceful close (where the SoC supports it).

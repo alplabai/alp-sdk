@@ -1,0 +1,93 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the alp-sdk conformance ztest under
+ * native_sim.  Wires three emulated GPIOs, one emulated I2C bus,
+ * one emulated SPI bus, the existing native_sim UART (uart0), the
+ * board's zephyr,adc-emul controller (adc0) and native-sim counter
+ * (counter0) to the alias names alp_sdk's Zephyr backends look up --
+ * so gpio / i2c / spi / uart / adc / counter all run the REAL
+ * positive lifecycle path on native_sim.
+ */
+
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+    aliases {
+        alp-i2c0     = &i2c0_emul;
+        alp-spi0     = &spi0_emul;
+        alp-uart0    = &uart0;
+        alp-adc0     = &alp_adc_in0;
+        alp-counter0 = &counter0;
+    };
+
+    /* io-channels consumer the alp-adc0 alias resolves to.  The
+     * "alp,adc-input" compatible is REQUIRED (not cosmetic): only a
+     * bound node gets its io-channels phandle-array macros generated,
+     * so ADC_DT_SPEC_GET on the alias compiles.  See the binding at
+     * zephyr/dts/bindings/adc/alp,adc-input.yaml. */
+    alp_adc_in0: alp-adc-in0 {
+        compatible = "alp,adc-input";
+        io-channels = <&adc0 0>;
+    };
+
+    /* native_sim's /soc has #address-cells=2, #size-cells=1, so
+     * `reg` needs three cells: <addr_hi addr_lo size>. */
+    soc {
+        i2c0_emul: i2c@100 {
+            compatible = "zephyr,i2c-emul-controller";
+            status = "okay";
+            reg = <0 0x100 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            clock-frequency = <I2C_BITRATE_STANDARD>;
+        };
+
+        spi0_emul: spi@200 {
+            compatible = "zephyr,spi-emul-controller";
+            status = "okay";
+            reg = <0 0x200 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+        };
+    };
+
+    gpio_emul0: gpio_emul0 {
+        compatible = "zephyr,gpio-emul";
+        status = "okay";
+        gpio-controller;
+        rising-edge;
+        falling-edge;
+        #gpio-cells = <2>;
+        ngpios = <8>;
+    };
+
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio_emul0 0 GPIO_ACTIVE_HIGH>,
+                <&gpio_emul0 1 GPIO_ACTIVE_HIGH>,
+                <&gpio_emul0 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+    };
+};
+
+/* native_sim ships adc0 (zephyr,adc-emul, status "okay") but no
+ * channel config; add the channel@0 node adc_channel_setup_dt reads
+ * plus the internal reference the emulator scales against.  Values
+ * transcribed from Zephyr's own adc-emul exercise at
+ * $ZEPHYR_BASE/tests/drivers/adc/adc_api/boards/native_sim.overlay. */
+&adc0 {
+    ref-internal-mv = <3300>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    channel@0 {
+        reg = <0>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,resolution = <12>;
+    };
+};

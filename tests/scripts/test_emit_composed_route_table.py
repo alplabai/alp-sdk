@@ -224,3 +224,36 @@ class TestV2n101XEvk:
         assert len(gd32) == 40
         assert len(direct) == 25
         assert len(routes) == 65
+
+
+class TestPerRevPadRouteOverride:
+    """The composed route table differs by hw_rev: the base pad_routes track
+    the production rev (r2); r1's pad_route_overrides restore the pre-2626-R2
+    routing.  This is what makes `--emit composed-route-table` rev-differentiated
+    (the byte-for-byte two-rev seam)."""
+
+    @staticmethod
+    def _dispatch(alp_project, hw_rev):
+        sku_preset = alp_project._resolve_sku("E1M-AEN801", METADATA)
+        project = {"name": "t", "som": {"sku": "E1M-AEN801", "hw_rev": hw_rev}}
+        out = json.loads(alp_project._emit_composed_route_table(
+            project, sku_preset, None, METADATA))
+        assert out["hw_rev"] == hw_rev
+        return {r["e1m"]: (r["dispatch"], r.get("dispatch_pin"))
+                for r in out["routes"]
+                if r["e1m"] in ("E1M_GPIO_IO8", "E1M_GPIO_IO10", "E1M_GPIO_IO21")}
+
+    def test_r2_is_the_production_base(self, alp_project):
+        d = self._dispatch(alp_project, "r2")
+        assert d["E1M_GPIO_IO8"] == ("cc3501e", 30)
+        assert d["E1M_GPIO_IO10"] == ("cc3501e", 35)
+        assert "E1M_GPIO_IO21" not in d          # unrouted in r2
+
+    def test_r1_override_restores_pre_r2_routing(self, alp_project):
+        d = self._dispatch(alp_project, "r1")
+        assert d["E1M_GPIO_IO8"] == ("direct", None)     # Alif GPIO
+        assert d["E1M_GPIO_IO10"] == ("direct", None)    # Alif GPIO
+        assert d["E1M_GPIO_IO21"] == ("cc3501e", 30)     # CC3501E GPIO_30
+
+    def test_r1_and_r2_emit_differ(self, alp_project):
+        assert self._dispatch(alp_project, "r1") != self._dispatch(alp_project, "r2")

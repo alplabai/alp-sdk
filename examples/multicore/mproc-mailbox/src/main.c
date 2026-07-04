@@ -49,8 +49,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <zephyr/kernel.h>
-
 #include "alp/mproc.h"
 #include "alp/peripheral.h"
 
@@ -162,7 +160,7 @@ int main(void)
      * callback flips g_state.got_reply within ~1 ms of the
      * peer's send. */
 	for (int i = 0; i < 100 && !g_state.got_reply; ++i) {
-		k_msleep(10);
+		alp_delay_ms(10);
 	}
 	if (!g_state.got_reply) {
 		printf("[mproc]   reply timeout (peer not running?)\n");

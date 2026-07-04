@@ -1,0 +1,41 @@
+# board.yaml -- rail predictive-maintenance survey demo.
+#
+# A train-mounted node reads axlebox/carbody vibration from the on-board
+# ICM-42670 accelerometer, extracts DSP features, classifies the rail
+# defect (DSP -> small AI model, with a deterministic fallback), and
+# geotags each verdict to a track position from the NEO-M9N GNSS
+# (lat/lon + along-track chainage).  One CSV record per 25 m segment.
+#
+# Same source targets the V2N DEEPX path when som.sku is flipped.
+
+som:
+  sku: E1M-AEN701
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "ICM-42670 accelerometer bus" }
+  - { e1m: E1M_UART1, macro: EVK_UART_PORT_ARDUINO, doc: "NEO-M9N GNSS NMEA (Arduino-header UART)" }
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    app: ./src
+    inference:
+      default_arena_kib: 64
+    libraries:
+      - tflite_micro
+    peripherals:
+      - i2c                   # ICM-42670 link.
+      - uart                  # NEO-M9N GNSS NMEA link.
+
+chips:
+  - icm42670                  # 6-axis IMU; accel only.
+  - ublox_neo_m9n             # Multi-constellation GNSS.
+
+diagnostics:
+  log_level: info

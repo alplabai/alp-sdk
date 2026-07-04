@@ -181,7 +181,7 @@ For AEN801 (which carries the U85 too) the loader would also
 emit `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`; for N93 it
 emits `_U65=y` plus `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y`
 (the i.MX 93 PHY shim).  Advanced readers: the emit logic
-lives in `scripts/alp_orchestrate.py` § *Per-variant Ethos-U
+lives in `scripts/alp_orchestrate/` § *Per-variant Ethos-U
 selector* (G-1) and § *CPU-class TFLM kernel selector* (G-2).
 
 The app picks Ethos-U vs CPU per-handle at runtime via
@@ -232,13 +232,17 @@ cores:
     app: ./src
 ```
 
-No backend pick needed in `board.yaml` — V2N101's SoM preset
-declares `capabilities.drp_ai: true`, so the loader emits
-`CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y` automatically, alongside the
-TFLM CPU fallback.  The app calls `alp_inference_open` with the
-same `.backend = ALP_INFERENCE_BACKEND_AUTO`, and the dispatcher
-routes to DRP-AI on V2N silicon, Ethos-U on AEN silicon, CPU
-under native_sim — same source, three SoMs.
+No backend pick needed in `board.yaml`.  Note the core-class
+split on V2N: the DRP-AI3 engine is driven from the **A55/Linux
+side only** (the MERA runtime — `capabilities.drp_ai: true` makes
+the loader emit `-DALP_SDK_USE_DRPAI_V2N=ON` on the A55/Yocto
+slice), so the `m33_sm` Zephyr slice above runs the model on the
+**TFLM CPU backend** — there is deliberately no M-class DRP-AI
+backend (issue #58).  The app still calls `alp_inference_open`
+with the same `.backend = ALP_INFERENCE_BACKEND_AUTO`, and the
+dispatcher routes to Ethos-U on AEN silicon (the M55 drives that
+NPU directly), TFLM on the V2N M33, CPU under native_sim — same
+source, three SoMs.
 
 > **The one thing the SDK cannot abstract: the model
 > artefact.**  Each NPU vendor ships its own offline compiler
@@ -297,11 +301,14 @@ DX-M1 (on-module via PCIe).  The SoM preset declares both:
 ```yaml
 # metadata/e1m_modules/E1M-V2M101.yaml
 capabilities:
-  drp_ai:    true
-  deepx_dx:  true
+  drp_ai:      true
+  deepx_dxm1:  true
 ```
 
-The loader compiles both dispatchers into the build.  Apps can
+Both engines live on the **A55/Linux side** (DRP-AI3 via the MERA
+runtime, DX-M1 via `libdxrt` over the A55's PCIe): the loader
+emits `-DALP_SDK_USE_DRPAI_V2N=ON` and `-DALP_SDK_USE_DEEPX_DXM1=ON`
+for the A55/Yocto slice and compiles both dispatchers in.  Apps can
 open **multiple handles** in parallel, each bound to a different
 NPU, to run independent models concurrently:
 
@@ -386,7 +393,7 @@ provisioned.
   -- end-to-end demo: camera → ISP → inference → OLED overlay.
 - [Vela docs](https://github.com/ARM-software/ethos-u-vela) --
   the Ethos-U pre-compiler.
-- [`scripts/alp_orchestrate.py`](../../scripts/alp_orchestrate.py)
+- [`scripts/alp_orchestrate/`](../../scripts/alp_orchestrate/)
   § *Per-variant Ethos-U selector* + § *CPU-class TFLM kernel
   selector* -- the G-1 / G-2 emit logic for advanced readers.
 - [`docs/test-plan.md`](../test-plan.md) -- the verification

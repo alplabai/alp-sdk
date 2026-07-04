@@ -182,6 +182,7 @@ Top-level fields:
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
 | `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
+| `libraries`      | no       | Project-wide curated third-party libraries (ADR 0018), e.g. `[lvgl, cmsis-dsp]`.  Each names a manifest under `metadata/libraries/<name>.yaml`; the orchestrator emits its per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (project-wide, ADR 0018)](#libraries-project-wide-adr-0018) below.  Distinct from the per-core `cores.<id>.libraries:` token list. |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
 *Either `preset:` (preset mode) or inline `name:` + `populated:` +
@@ -212,7 +213,7 @@ loader picks the natural runtime from each core's `cores[].type`
 in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
 -> `yocto`, anything else -> `off`.  Helper:
 `_default_os_from_core_type()` in
-[`scripts/alp_orchestrate.py`](../scripts/alp_orchestrate.py).
+[`scripts/alp_orchestrate/`](../scripts/alp_orchestrate/).
 
 The OS is **not** user-selectable: the runtime follows the core
 class, full stop.  A `board.yaml` may only **disable** a core
@@ -370,12 +371,12 @@ The `e1m_routes:` block is the single editable source of truth
 for the board-side C macros hand-written firmware uses
 (`PIN_BMI323_INT1`, `I2C_BUS_SENSORS`, `PWM_LED_RED`, …).  Each
 entry binds an E1M-standard pad or peripheral instance
-(`E1M_GPIO_IO<N>`, `E1M_PWM<N>`, `E1M_I2C<N>` / `E1M_SPI<N>` /
-`E1M_UART<N>` / `E1M_I3C<N>`) to a board-side macro plus optional
+(`ALP_E1M_GPIO_IO<N>`, `ALP_E1M_PWM<N>`, `ALP_E1M_I2C0/1` / `ALP_E1M_SPI0/1` /
+`ALP_E1M_UART0/1` / `ALP_E1M_I3C0`) to a board-side macro plus optional
 `doc:` / `active_low:` / `routes_via:` flags.
 [`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
 reads the block and emits `include/alp/boards/alp_<name>_routes.h`
-with one `#define <MACRO> E1M_<…>` line per entry.
+with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 
 #### Preset mode (SDK-internal shortcut)
 
@@ -445,7 +446,7 @@ automatically; the app doesn't say "TX is output" by hand.
 
 The reason direction stays in the firmware: the same physical
 pad can have multiple legitimate directions in different apps.
-The drone-autopilot uses `E1M_PWM3` as a PWM output driving an
+The drone-autopilot uses `ALP_E1M_PWM3` as a PWM output driving an
 ESC channel; gpio-button-led uses the same pad as a GPIO output
 driving the red status LED.  `board.yaml` describes the
 **wiring** (pad ↔ feature), which is universal; direction is a
@@ -618,7 +619,7 @@ The `profile:` file follows the same shape as
 for a worked example.
 
 Loader rules (enforced by `_validate_consistency()` in
-`scripts/alp_orchestrate.py`):
+`scripts/alp_orchestrate/`):
 
 - Each entry MUST declare exactly one of `kconfig:` / `profile:`.
 - `name:` is globally unique across every core's
@@ -626,6 +627,103 @@ Loader rules (enforced by `_validate_consistency()` in
 - `name:` must NOT collide with the curated `libraries:` enum --
   use the curated path for curated entries.
 - `profile:` must resolve to a file (repo-relative).
+
+### `libraries` (project-wide, ADR 0018)
+
+The **top-level** `libraries:` key (a sibling of `som:` / `cores:`,
+not nested under a core) selects *curated third-party libraries* the
+SDK integrates across the whole project — GUI, DSP/NN, serialization,
+and so on:
+
+```yaml
+som:
+  sku: E1M-AEN701
+libraries: [lvgl, cmsis-dsp, nanopb]   # <-- project-wide
+cores:
+  m55_hp:
+    app: ./src
+```
+
+Each name resolves to a manifest at
+[`metadata/libraries/<name>.yaml`](../metadata/libraries/) — the single
+source of truth for that library's per-OS wiring, pinned upstream
+version, SPDX licence, curation tier, and compatibility constraints.
+The orchestrator emits the wiring through the ordinary `--emit`
+contract (ADR 0014): the library's Kconfig symbols land in each Zephyr
+slice's `alp.conf`, its `IMAGE_INSTALL` entries in each Yocto slice's
+`local.conf`, its CMake pin in each baremetal slice's args. Selecting a
+library the target cannot satisfy fails emit with the failing
+constraint named — the same clear-error contract as schema validation.
+
+Two curation tiers bound CI cost (ADR 0018):
+
+- **Tier A — curated**: version-pinned, built in alp-sdk CI for at
+  least one board per family, ships a teaching example. Breakage blocks
+  release.
+- **Tier B — recipe-only**: wiring + compatibility metadata are
+  maintained and emitted, but the library is not built in alp-sdk CI.
+  `alp doctor` labels it.
+
+`alp doctor` reports the selected libraries for the project in scope
+(tier + licence + compatibility), reading the same manifests, so the
+CLI and alp-studio's library picker never disagree.
+
+**This is a different mechanism from the per-core `cores.<id>.libraries:`
+token list above.** The per-core list is a closed enum wired through
+`metadata/library-profiles/` (compile-time config headers + HW-backend
+bindings); the top-level `libraries:` is the manifest-driven ADR 0018
+selection. Use the top-level key for the curated third-party libraries
+that ship a `metadata/libraries/<name>.yaml` manifest.
+
+See [`metadata/libraries/README.md`](../metadata/libraries/README.md)
+for the manifest shape, the full library list, and how to add one.
+
+#### Flagship: micro-ROS + ROS 2 across one heterogeneous project
+
+The `libraries:` mechanism spans both OSes of a heterogeneous SoM in a
+single project — the proof ADR 0018 exists for and the peer model
+[ADR 0010](adr/0010-heterogeneous-os-orchestration.md) defines. A
+robotics project runs a **micro-ROS** node on the Cortex-M / Zephyr
+peer and **ROS 2** on the Cortex-A / Yocto peer, both selected from the
+same top-level `libraries:` key:
+
+```yaml
+som:
+  sku: E1M-V2N101
+libraries: [micro-ros, ros2]   # M-side client + A-side agent, one file
+cores:
+  a55_cluster:                 # Cortex-A55 -> Yocto runs ROS 2
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+  m33_sm:                      # Cortex-M33 -> Zephyr runs the micro-ROS node
+    os: zephyr
+    app: ./m33
+```
+
+Each library resolves to the peer it belongs on: `micro-ros`
+(`requires: {os: [zephyr], core_class: m}`) wires only into the Zephyr
+slice's `alp.conf`; `ros2` (`requires: {os: [yocto], core_class: a}`)
+appends `rclcpp` to the Yocto slice's `IMAGE_INSTALL`. Select either on
+the wrong peer and emit fails naming the `os` / `core_class` constraint.
+
+Two honest limits are recorded in the manifest headers rather than
+hidden:
+
+- **micro-ROS is not yet pinned** in the Zephyr v4.4.0 `west.yml`. Its
+  manifest names the upstream `micro_ros_zephyr_module` (branch
+  `humble`) as a west prerequisite and enables **by module presence**
+  (no invented Kconfig); emit renders the selection tag with no
+  `CONFIG_` line until the module is added to `west.yml`.
+- **ROS 2 is Tier B (recipe-only)**: its wiring is grounded in
+  `meta-alp-sdk` (`rclcpp`; `meta-ros2-humble` as a `LAYERRECOMMENDS`),
+  but alp-sdk CI does not build it, and a build must add
+  `meta-ros2-humble` to `bblayers.conf`.
+- The **cross-core RMW bridge** that carries ROS topics between the two
+  peers (UDP-on-virtio, or a custom RMW over the RPMsg transport of
+  [ADR 0016](adr/0016-cross-core-peripheral-proxy-wire-schema.md)) is
+  bench-gated and out of scope for the manifests — it is its own
+  design.
 
 ## How the loader compiles the file
 
@@ -783,7 +881,7 @@ UART, PWM, GPIO_IO), and emits a Zephyr `.overlay` declaring:
   channel.
 - An `alp_pins` node with `compatible = "alp,pin-array"` and one
   `gpios` entry per `EVK_PIN_*` macro that resolves to an
-  `E1M_GPIO_IO<N>`.  Each entry's `<&gpioX Y FLAGS>` triplet
+  `ALP_E1M_GPIO_IO<N>`.  Each entry's `<&gpioX Y FLAGS>` triplet
   is a TBD placeholder; the trailing comment carries the macro
   name and the E1M IO index so the customer can fill the columns
   in place without renumbering.
@@ -1125,8 +1223,8 @@ aggregate `alp_storage_mounts[]` array for boot-time iteration.
 Inspect the resolved layout with:
 
 ```bash
-python3 scripts/alp_orchestrate.py --input board.yaml --emit dts-partitions
-python3 scripts/alp_orchestrate.py --input board.yaml --emit system-manifest \
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit dts-partitions
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit system-manifest \
     | yq '.storage[]'
 ```
 
@@ -1171,7 +1269,7 @@ not a separate M55-HE core).  See `docs/adr/0013-tfm-boundary-m55-hp-trustzone.m
 
 JSON Schema validates one field at a time; many real-world
 mistakes only become apparent when two fields disagree.
-`scripts/alp_orchestrate.py:_validate_consistency()` runs after
+`scripts/alp_orchestrate/` runs after
 the schema pass and enforces a small set of cross-field rules.
 A violation raises `OrchestratorError`; warnings print to
 `stderr` and let the load continue.

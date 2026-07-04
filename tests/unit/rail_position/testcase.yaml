@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+tests:
+  alp.unit.rail_position:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp
+      - ai
+      - gnss
+      - predictive-maintenance
+      - unit

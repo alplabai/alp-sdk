@@ -172,6 +172,9 @@ static const alp_security_ops_t _ops = {
 	.random_bytes = sw_random_bytes,
 };
 
+/* Export the security static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(security);
+
 ALP_BACKEND_REGISTER(security,
                      sw_fallback,
                      {

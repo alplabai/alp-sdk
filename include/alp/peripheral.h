@@ -65,7 +65,9 @@ typedef enum {
 	    -13, /**< A backend matched but no blob fits the device NPU envelope (e.g. arena SRAM too small), and no CPU fallback. */
 	ALP_ERR_NOT_FOUND = -14, /**< An explicitly-requested backend is absent from the package. */
 	ALP_ERR_NOT_PROVISIONED =
-	    -15 /**< Hardware identity store (e.g. the on-module EEPROM manifest) is blank / unprogrammed -- the module has not been provisioned by the factory tool yet. */
+	    -15, /**< Hardware identity store (e.g. the on-module EEPROM manifest) is blank / unprogrammed -- the module has not been provisioned by the factory tool yet. */
+	ALP_STATUS_ENUM_FLOOR =
+	    -15 /**< End-of-enum sentinel: equal to the most negative status code.  NOT a status -- never returned by any API.  Use it for membership checks (`s <= ALP_OK && s >= ALP_STATUS_ENUM_FLOOR`); keep it equal to the last real member when adding codes. */
 } alp_status_t;
 
 /**
@@ -91,6 +93,53 @@ typedef enum {
  *         has been recorded since the last successful open().
  */
 alp_status_t alp_last_error(void);
+
+/* ------------------------------------------------------------------ */
+/* SDK lifecycle                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Initialise the Alp SDK runtime.
+ *
+ * Applications SHOULD call this once at startup, before the first
+ * `alp_*_open` call.  Today the call is thin -- the backend registry
+ * is linker-section based and needs no runtime setup, so every
+ * current backend works even when the call is skipped -- but future
+ * backends (bridge links, clock bring-up, vendor HAL init) are
+ * allowed to rely on it, so portable application code must not.
+ *
+ * Idempotent: calling it again after a successful return is a no-op
+ * that returns @ref ALP_OK.
+ *
+ * Thread-safety: safe to call concurrently -- an atomic once-guard
+ * ensures exactly one caller performs the bring-up work; the others
+ * return @ref ALP_OK immediately.  Do NOT race @ref alp_deinit
+ * against alp_init or against in-flight peripheral calls: the
+ * deinit/re-init sequence is single-threaded by contract.
+ *
+ * @return @ref ALP_OK on success (the only result the current
+ *         implementation produces).  Future backends may surface
+ *         @ref ALP_ERR_NOT_READY / @ref ALP_ERR_IO when their
+ *         bring-up work fails.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.
+ */
+alp_status_t alp_init(void);
+
+/**
+ * @brief Release SDK-global runtime state acquired by @ref alp_init.
+ *
+ * Peripheral handles are NOT closed for the caller -- close every
+ * open handle first.  Idempotent; safe to call without a prior
+ * @ref alp_init.  After it returns, @ref alp_init may be called
+ * again to re-initialise.
+ *
+ * @return @ref ALP_OK on success (the only result the current
+ *         implementation produces).
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.
+ */
+alp_status_t alp_deinit(void);
 
 /* ------------------------------------------------------------------ */
 /* Delay primitives                                                    */
@@ -166,7 +215,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id);
  * @brief Configure a pin's direction + pull-up / pull-down resistors.
  *
  * @param[in] pin   Handle from @ref alp_gpio_open.
- * @param[in] dir   Direction (INPUT / OUTPUT / OUTPUT_OPEN_DRAIN / DISCONNECTED).
+ * @param[in] dir   Direction (@ref ALP_GPIO_INPUT / @ref ALP_GPIO_OUTPUT).
  * @param[in] pull  Pull-up / pull-down resistor selection.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
@@ -321,6 +370,107 @@ void alp_i2c_close(alp_i2c_t *bus);
 const alp_capabilities_t *alp_i2c_capabilities(const alp_i2c_t *bus);
 
 /* ------------------------------------------------------------------ */
+/* I2C -- target (slave) mode                                          */
+/*                                                                     */
+/* Makes this MCU answer on the bus as an addressable device (a       */
+/* "register-mapped peripheral" from the external controller's point   */
+/* of view).  Byte-granular callbacks mirror the wire protocol, so a  */
+/* register-file slave is a ~20-line state machine on top of them.    */
+/*                                                                     */
+/* Availability: requires controller-driver target support (Zephyr:   */
+/* CONFIG_I2C_TARGET + a driver that implements target_register).     */
+/* Drivers without it fail open() with ALP_ERR_NOSUPPORT (or          */
+/* ALP_ERR_NOT_READY when the bus alias is unset) -- applications     */
+/* must degrade cleanly.  native_sim's emulated controller accepts    */
+/* the registration but no external controller ever drives it, so     */
+/* callbacks never fire there.                                         */
+/*                                                                     */
+/* ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.                         */
+/* ------------------------------------------------------------------ */
+
+/** @brief Opaque handle for an I2C target (slave) registration. */
+typedef struct alp_i2c_target alp_i2c_target_t;
+
+/**
+ * @brief Per-byte write callback: the external controller clocked one
+ *        byte to us.
+ *
+ * Runs in ISR context -- keep the work minimal (update a state
+ * machine, stash into a `volatile` register file) and defer anything
+ * substantive to a thread / workqueue.
+ *
+ * @param[in] byte  The byte received from the controller.
+ * @param[in] user  Opaque pointer from @ref alp_i2c_target_config_t.
+ */
+typedef void (*alp_i2c_target_write_cb_t)(uint8_t byte, void *user);
+
+/**
+ * @brief Per-byte read callback: the external controller is clocking a
+ *        byte out of us -- supply it.
+ *
+ * Runs in ISR context.  Called once for the first byte after the
+ * address phase and again for every additional byte the controller
+ * ACKs.
+ *
+ * @param[out] byte  Store the byte to drive onto the bus here.
+ * @param[in]  user  Opaque pointer from @ref alp_i2c_target_config_t.
+ *
+ * @return ALP_OK to continue the transfer; any error NAKs / ends it.
+ */
+typedef alp_status_t (*alp_i2c_target_read_cb_t)(uint8_t *byte, void *user);
+
+/**
+ * @brief STOP-condition callback: the controller ended the transaction.
+ *
+ * Runs in ISR context.  The canonical use is resetting a register-file
+ * pointer state machine so the next transaction starts clean.
+ *
+ * @param[in] user  Opaque pointer from @ref alp_i2c_target_config_t.
+ */
+typedef void (*alp_i2c_target_stop_cb_t)(void *user);
+
+/** @brief I2C target (slave) registration config: own address + ISR callbacks. */
+typedef struct {
+	uint32_t                  bus_id;        /**< Studio-resolved bus instance id. */
+	uint8_t                   own_addr_7bit; /**< Address this target answers on (0x08..0x77). */
+	alp_i2c_target_write_cb_t on_write;      /**< Byte received from the controller.  Required. */
+	alp_i2c_target_read_cb_t  on_read;       /**< Byte requested by the controller.  Required. */
+	alp_i2c_target_stop_cb_t  on_stop;       /**< STOP condition.  Optional; may be NULL. */
+	void                     *user;          /**< Forwarded to every callback. */
+} alp_i2c_target_config_t;
+
+/**
+ * @brief Register this MCU as an I2C target (slave) on @p cfg->bus_id.
+ *
+ * The callbacks start firing as soon as this returns; prime any state
+ * they read (register files, counters) BEFORE calling.
+ *
+ * @param[in] cfg  Target configuration.  Must be non-NULL with
+ *                 non-NULL @c on_write / @c on_read and
+ *                 @c own_addr_7bit inside 0x08..0x77 (the reserved
+ *                 7-bit ranges 0x00-0x07 / 0x78-0x7F are rejected).
+ *
+ * @return Open handle on success; NULL with @ref alp_last_error set to
+ *         @ref ALP_ERR_INVAL (NULL cfg/callbacks, reserved address) /
+ *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no I2C backend for
+ *         this silicon) / @ref ALP_ERR_OUT_OF_RANGE (bus_id beyond
+ *         this SoC's documented I2C count) / @ref ALP_ERR_NOT_READY /
+ *         @ref ALP_ERR_NOSUPPORT (backend or controller driver has no
+ *         target mode) / @ref ALP_ERR_BUSY (driver refused the
+ *         registration, e.g. the address slot is already taken) /
+ *         @ref ALP_ERR_NOMEM.
+ */
+alp_i2c_target_t *alp_i2c_target_open(const alp_i2c_target_config_t *cfg);
+
+/**
+ * @brief Unregister the target and release the handle.  Idempotent on
+ *        NULL.  No callback fires after this returns.
+ *
+ * @param[in] tgt  Handle from @ref alp_i2c_target_open, or NULL.
+ */
+void alp_i2c_target_close(alp_i2c_target_t *tgt);
+
+/* ------------------------------------------------------------------ */
 /* SPI                                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -412,6 +562,129 @@ void alp_spi_close(alp_spi_t *bus);
  * @return Pointer valid for the handle's lifetime; NULL if @p bus is NULL.
  */
 const alp_capabilities_t *alp_spi_capabilities(const alp_spi_t *bus);
+
+/* ------------------------------------------------------------------ */
+/* SPI -- target (slave) mode                                          */
+/*                                                                     */
+/* Makes this MCU the clocked side of the bus: the external           */
+/* controller owns SCK + /CS and decides when (and how many) bytes    */
+/* move.  Because SPI is full-duplex and the target cannot see a      */
+/* command before responding within the SAME transfer, the surface is  */
+/* transfer-based: preload a TX response, block until the controller  */
+/* clocks a transfer, inspect what arrived, preload the next reply.   */
+/*                                                                     */
+/* Availability: requires controller-driver slave support (patchy     */
+/* across Zephyr SoC drivers; needs CONFIG_SPI_SLAVE).  Backend-level */
+/* absence fails open() with ALP_ERR_NOSUPPORT / ALP_ERR_NOT_READY;   */
+/* driver-level absence surfaces on the FIRST transceive as           */
+/* ALP_ERR_NOSUPPORT (the Zephyr backend cannot probe it at open).    */
+/* native_sim: the emulated controller accepts a slave-mode open, but */
+/* nothing external ever clocks a transfer -- degrade cleanly (and    */
+/* bound your waits) either way.                                      */
+/*                                                                     */
+/* ABI status: [ABI-EXPERIMENTAL] -- v0.9 new.                         */
+/* ------------------------------------------------------------------ */
+
+/** @brief Opaque handle for an SPI bus claimed in target (slave) mode. */
+typedef struct alp_spi_target alp_spi_target_t;
+
+/** @brief SPI target (slave) config: bus + clocking must match the controller. */
+typedef struct {
+	uint32_t       bus_id;        /**< Studio-resolved bus instance id. */
+	alp_spi_mode_t mode;          /**< CPOL/CPHA -- must match the external controller. */
+	uint8_t        bits_per_word; /**< Usually 8 (0 defaults to 8; max 32) -- must
+	                               *   match the external controller. */
+} alp_spi_target_config_t;
+
+/**
+ * @brief Claim @p cfg->bus_id in target (slave) mode.
+ *
+ * The bus's /CS line is driven by the external controller; no
+ * @c cs_pin_id is configured on the target side.
+ *
+ * @param[in] cfg  Target configuration.  Must be non-NULL with
+ *                 @c mode in 0..3 and @c bits_per_word 0 (default 8)
+ *                 or 1..32.
+ *
+ * @return Open handle on success; NULL with @ref alp_last_error set to
+ *         @ref ALP_ERR_INVAL (NULL cfg, mode > 3, bits_per_word > 32)
+ *         / @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no SPI backend for
+ *         this silicon) / @ref ALP_ERR_OUT_OF_RANGE (bus_id beyond
+ *         this SoC's documented SPI count) / @ref ALP_ERR_NOT_READY /
+ *         @ref ALP_ERR_NOSUPPORT (backend has no slave mode -- e.g.
+ *         the SW-fallback loopback and the yocto/baremetal stubs; a
+ *         controller DRIVER without slave support surfaces NOSUPPORT
+ *         on the first transceive instead) / @ref ALP_ERR_NOMEM.
+ */
+alp_spi_target_t *alp_spi_target_open(const alp_spi_target_config_t *cfg);
+
+/**
+ * @brief Stage one target-side transfer and wait (bounded by
+ *        @p timeout_ms) for the external controller to clock it.
+ *
+ * @p tx is driven onto the data-out line while the controller clocks;
+ * whatever the controller drives lands in @p rx.  The controller may
+ * clock FEWER bytes than @p len -- @p rx_len reports how many actually
+ * moved (in bytes, regardless of @c bits_per_word).
+ *
+ * Timeouts: @c UINT32_MAX blocks until the controller completes the
+ * transfer (deasserts /CS) -- call from a thread that may wait
+ * indefinitely.  A finite @p timeout_ms bounds the wait; on the
+ * Zephyr backend this needs @c CONFIG_SPI_ASYNC (a finite timeout on
+ * a sync-only build fails with @ref ALP_ERR_NOSUPPORT rather than
+ * silently blocking forever).
+ *
+ * After @ref ALP_ERR_TIMEOUT the transfer is STILL armed in the
+ * controller driver (SPI slave hardware has no portable cancel): the
+ * handle answers @ref ALP_ERR_BUSY -- and @ref alp_spi_target_close
+ * refuses teardown -- until the external controller clocks the
+ * pending transfer.  Keep @p tx / @p rx valid until a subsequent call
+ * on this handle stops returning @ref ALP_ERR_BUSY.
+ *
+ * One transfer at a time: a second thread calling while a transceive
+ * is in flight gets @ref ALP_ERR_BUSY.
+ *
+ * @param[in]  bus         Handle from @ref alp_spi_target_open.
+ * @param[in]  tx          Bytes to present on data-out.  May be NULL
+ *                         to drive the idle pattern.
+ * @param[out] rx          Receive buffer.  May be NULL to discard
+ *                         input.
+ * @param[in]  len         Buffer length in bytes (both directions).
+ *                         Must be > 0: unlike controller-mode
+ *                         @ref alp_spi_transceive (where len == 0 is a
+ *                         no-op @ref ALP_OK), a target cannot stage a
+ *                         zero-length transfer -- @ref ALP_ERR_INVAL.
+ * @param[out] rx_len      Bytes actually clocked by the controller.
+ *                         May be NULL when the caller doesn't care.
+ * @param[in]  timeout_ms  Max wait for the controller to clock the
+ *                         transfer; @c UINT32_MAX to wait forever.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_BUSY /
+ *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
+alp_status_t alp_spi_target_transceive(alp_spi_target_t *bus,
+                                       const uint8_t    *tx,
+                                       uint8_t          *rx,
+                                       size_t            len,
+                                       size_t           *rx_len,
+                                       uint32_t          timeout_ms);
+
+/**
+ * @brief Release the target handle.  Idempotent on NULL and on an
+ *        already-closed handle.
+ *
+ * Refuses with @ref ALP_ERR_BUSY -- and frees NOTHING -- while another
+ * thread is blocked in @ref alp_spi_target_transceive on this handle,
+ * or while a timed-out transfer is still armed in the controller
+ * driver.  Retry after the in-flight transfer completes (or use a
+ * finite transceive timeout so the blocked thread returns first).
+ *
+ * @param[in] tgt  Handle from @ref alp_spi_target_open, or NULL.
+ *
+ * @return @ref ALP_OK on release (or NULL/already-closed no-op);
+ *         @ref ALP_ERR_BUSY when a transfer is in flight.
+ */
+alp_status_t alp_spi_target_close(alp_spi_target_t *tgt);
 
 /* ------------------------------------------------------------------ */
 /* UART                                                                */

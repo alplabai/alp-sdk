@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  # Portable-API conformance gate: one data-driven suite every
+  # backend must pass.  See src/main.c for the class x case matrix
+  # and docs/porting-new-som.md ("Conformance gate") for how a new
+  # SoM port consumes it.
+  #
+  # CI runs it on native_sim (integration_platforms).  The qualified
+  # in-repo real boards are allowed too so `twister -p <board>` can
+  # build (and, on the bench / nightly HIL, run) the same gate with
+  # the real backend selected -- their boards/<board>.conf pins the
+  # CONFIG_ALP_SOC_* capability profile, which switches the suite's
+  # per-class expectations from the permissive native_sim fallback to
+  # strict alp_has() caps<->backend parity.
+  alp_sdk.conformance.portable_api:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - conformance
+      - peripheral

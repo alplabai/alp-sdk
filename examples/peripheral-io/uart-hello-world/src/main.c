@@ -8,7 +8,7 @@
  * monotonically-increasing counter every second.  Distinct from
  * examples/peripheral-io/uart-echo (which is a bidirectional ping-pong) -- this
  * example is the producer-only variant most vendor SDKs ship as
- * their first tutorial.  It deliberately keeps the raw E1M_UART0
+ * their first tutorial.  It deliberately keeps the raw ALP_E1M_UART0
  * instance ID in view; examples/peripheral-io/uart-echo opens the same port by its
  * board-macro name (EVK_UART_PORT_DEBUG, from alp_e1m_evk_routes.h).
  * Both styles are first-class -- the macro is just a board-named
@@ -30,7 +30,7 @@
  *
  * What success looks like:
  *
- *   [uart-hello] open E1M_UART0 @ 115200 8N1
+ *   [uart-hello] open ALP_E1M_UART0 @ 115200 8N1
  *   [uart-hello] greeting written
  *   [uart-hello] tick 0 written
  *   [uart-hello] tick 1 written
@@ -38,14 +38,12 @@
  *   [uart-hello] done
  *
  * On real silicon you'd also see the greeting + ticks on whatever
- * terminal is wired to E1M_UART0 (the FTDI USB-UART on the EVK,
+ * terminal is wired to ALP_E1M_UART0 (the FTDI USB-UART on the EVK,
  * the board's modem header on a custom board, ...).
  */
 
 #include <stdio.h>
 #include <string.h>
-
-#include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
 #include "alp/e1m_pinout.h"
@@ -54,8 +52,8 @@
  * timeout.  Real on-silicon firmware would loop forever instead. */
 #define HELLO_TICKS 5u
 
-/* The wait between ticks.  k_msleep yields the CPU; alp_delay_ms
- * also yields on Zephyr (busy-loops on baremetal). */
+/* The wait between ticks.  alp_delay_ms yields the CPU on
+ * scheduler-backed targets (busy-loops on baremetal). */
 #define HELLO_TICK_PERIOD_MS 1000u
 
 /* The greeting we ship out the UART.  Stored as a `static const`
@@ -67,7 +65,11 @@ static const uint8_t HELLO_GREETING[] = "Alp SDK uart-hello-world\r\n";
 
 int main(void)
 {
-	printf("[uart-hello] open E1M_UART0 @ 115200 8N1\n");
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
+	printf("[uart-hello] open ALP_E1M_UART0 @ 115200 8N1\n");
 
 	/* Open UART0 at the lowest-common-denominator serial framing.
      *
@@ -77,12 +79,12 @@ int main(void)
      * industrial PLCs use 7-E-1, RS-485 multidrop uses 9-bit
      * frames, some legacy GPS modules want 9600 baud.
      *
-     * The E1M_UART0 instance ID is portable across every
+     * The ALP_E1M_UART0 instance ID is portable across every
      * E1M-conformant SoM (E1M-AEN, E1M-V2N, ...): the SDK's
      * loader resolves it to the right SoC USART node at build
      * time via the devicetree `alp-uart0` alias. */
 	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-	    .port_id   = E1M_UART0,
+	    .port_id   = ALP_E1M_UART0,
 	    .baudrate  = 115200,
 	    .data_bits = 8,
 	    .stop_bits = 1,
@@ -143,7 +145,7 @@ int main(void)
 			break;
 		}
 		printf("[uart-hello] tick %u written\n", tick);
-		k_msleep(HELLO_TICK_PERIOD_MS);
+		alp_delay_ms(HELLO_TICK_PERIOD_MS);
 	}
 
 	/* Close releases the SDK handle but does NOT power down the

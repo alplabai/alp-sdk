@@ -223,7 +223,7 @@ int main(void)
      * the loop tolerates that and runs the inference path
      * against zero-fill PCM. */
 	alp_audio_config_t mic_cfg = {
-		.peripheral_id    = E1M_PDM0,
+		.peripheral_id    = ALP_E1M_PDM0,
 		.sample_rate_hz   = SR_HZ,
 		.channels         = CHANNELS,
 		.format           = ALP_AUDIO_FMT_S16_LE,

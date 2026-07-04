@@ -1,14 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
+common:
+  platform_allow:
+    - native_sim
+    - native_sim/native/64
+  integration_platforms:
+    - native_sim
+    - native_sim/native/64
+  tags:
+    - alp
+    - update_log
+    - security
+    - unit
 tests:
-  alp.unit.update_log:
-    platform_allow:
-      - native_sim
-      - native_sim/native/64
-    integration_platforms:
-      - native_sim
-      - native_sim/native/64
-    tags:
-      - alp
-      - update_log
-      - security
-      - unit
+  # RAM-fallback mode: NVS off, so ALP_SDK_UPDATE_LOG_PERSIST resolves n
+  # and the sw tier keeps the pre-persistence RAM store (entries do NOT
+  # survive re-init).  Also carries all the engine-level chain tests.
+  alp.unit.update_log: {}
+  # NVS-persistent mode: the boards/*.overlay carves alp_ulog_partition
+  # and these configs mount NVS on it -- entries survive a full backend
+  # re-init and a full log reports NOMEM without wrapping.
+  alp.unit.update_log.persist:
+    extra_configs:
+      - CONFIG_FLASH=y
+      - CONFIG_FLASH_MAP=y
+      - CONFIG_NVS=y

@@ -224,7 +224,7 @@ Re-run `scripts/program_eeprom.py` against the module.
 
 The EEPROM-side hw_info reader isn't configured.  Set
 `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` in `prj.conf` to the
-bus id matching `E1M_I2C0` on your board.
+bus id matching `ALP_E1M_I2C0` on your board.
 
 ## CI / tooling issues
 

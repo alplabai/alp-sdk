@@ -23,7 +23,7 @@ the loader translates each block into backend config.
 firmware project targets.  Every backend's config -- Zephyr's
 `alp.conf`, plain-CMake `-D` flags, Yocto's `local.conf` -- is
 **derived** from it by `scripts/alp_project.py` +
-`scripts/alp_orchestrate.py`.  The schema lives at
+`scripts/alp_orchestrate/`.  The schema lives at
 [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json);
 this tutorial walks every top-level block.
 
@@ -190,7 +190,7 @@ automatically; the app doesn't say "TX is output" by hand.
 
 The reason direction stays in the firmware: the same pad can
 have multiple legitimate directions in different apps.  The
-drone-autopilot uses `E1M_PWM3` as a PWM output driving an ESC
+drone-autopilot uses `ALP_E1M_PWM3` as a PWM output driving an ESC
 channel; gpio-button-led uses the same pad as a GPIO output
 driving the red status LED.
 
@@ -464,9 +464,9 @@ The build absorbs three outputs per project:
 Inspect the resolved layout:
 
 ```bash
-python3 scripts/alp_orchestrate.py --input board.yaml --emit system-manifest \
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit system-manifest \
     | yq '.storage[]'
-python3 scripts/alp_orchestrate.py --input board.yaml --emit dts-partitions
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit dts-partitions
 ```
 
 The loader rejects typoed `flash_device:` references at parse time

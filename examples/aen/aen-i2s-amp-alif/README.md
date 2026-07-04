@@ -32,10 +32,15 @@ clocks the tone out (`i2s3`, P9_3/4/5).
 
 The load-bearing fix (shared with the now-working PDM mics): the **76.8 MHz audio
 source (HFOSCx2)** must be enabled at the CGU — the upstream Alif clockctrl only
-sets per-peripheral gates and never enables this master source. The example pokes
-`CGU_CLK_ENA` (`0x1A602014`) **bit 24** (`CLK76P8M`) directly (reg + bit from the
-fork clock driver, GEN2 path). Two `clock_control` calls in `i2s_dw.c` also tolerate
-`-ENOSYS` (the upstream clockctrl has only `.on`/`.off`/`.get_rate`).
+sets per-peripheral gates and never enables this master source. The CGU 76.8 MHz
+enable **and** the `I2Sx_CTRL` bit-clock divider are now handled entirely by the
+Tier-1.5 clockctrl west-patch
+(`zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch`):
+`i2s_configure()` → the `i2s_dw` driver calls `clock_control_on()` /
+`clock_control_set_rate()`, and the patched clockctrl enables the master source and
+divides it down to SCLK — **this example does no raw register poke**. The driver's
+`clock_control` calls still tolerate `-ENOSYS`/`-ENOTSUP` so the same source builds
+on SoCs whose clockctrl lacks `.set_rate` (e.g. `native_sim`).
 
 > **For AUDIBLE amplifier output (bench-pending — not driver bugs):**
 > 1. **74LVC157 mux → TAS2563:** the I2S3 signal reaches the two TAS2563 amps
@@ -46,8 +51,9 @@ fork clock driver, GEN2 path). Two `clock_control` calls in `i2s_dw.c` also tole
 > 2. **TAS2563 config:** the amps need their I2C ACTIVE-mode config (done by
 >    `examples/peripheral-io/i2c-device-hub`) + a speaker on the output.
 > 3. **Exact sample rate:** the bit-clock divider (`CLKCTL_PER_SLV` `I2S3_CTRL`) is
->    not programmed (upstream clockctrl has no `.set_rate`); the TX clocks, but the
->    achieved SCLK rate is unverified until a Tier-1.5 clockctrl `.set_rate` lands.
+>    now programmed by the Tier-1.5 clockctrl `.set_rate` patch, but the *achieved*
+>    SCLK rate has not yet been measured on the bench — verify it against
+>    `SAMPLE_RATE_HZ` with a scope before trusting the audio pitch.
 
 See [[project_pending_hw_configs]]. Folding the CGU 76.8 MHz enable + the divider
 `.set_rate` into a Tier-1.5 clockctrl patch is the clean follow-up; Tier-2 retires

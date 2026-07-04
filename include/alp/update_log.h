@@ -13,6 +13,37 @@
  * same API is hardware-enforced (TF-M Protected Storage + a non-decrementable
  * monotonic counter). Query @ref alp_update_log_assurance to learn which.
  *
+ * @par Persistence vs. trust boundary (software tier)
+ *      With @c CONFIG_ALP_SDK_UPDATE_LOG_PERSIST and an
+ *      @c alp_ulog_partition fixed partition in the devicetree, the
+ *      software tier stores the log and its monotonic counter in Zephyr
+ *      NVS, so entries survive reboot and firmware update. Without the
+ *      partition it falls back to RAM (entries vanish on reboot).
+ *      Persistence does NOT change the assurance level: the software tier
+ *      is tamper-EVIDENT, not tamper-proof -- @ref alp_update_log_verify
+ *      detects out-of-band mutation, truncation, rollback, and reorder,
+ *      but code that can write the backing partition can rebuild the store
+ *      and counter consistently and forge history. App-immutability is the
+ *      @ref ALP_UPDATE_LOG_HW_ENFORCED tier's job (TF-M isolation + a
+ *      hardware counter; issue #111).
+ *
+ * @par Hardware-enforced tier status (@ref ALP_UPDATE_LOG_HW_ENFORCED)
+ *      Not yet built. The tier is registered on TF-M-capable builds
+ *      (@c CONFIG_ALP_SDK_UPDATE_LOG_TFM) but declines at open() until its
+ *      secure store (PSA Protected Storage in the SPE) and a hardware
+ *      monotonic counter are wired on silicon, so @ref alp_update_log_open
+ *      transparently falls through to the software tamper-evident tier and
+ *      @ref alp_update_log_assurance reports @ref
+ *      ALP_UPDATE_LOG_SW_TAMPER_EVIDENT today (issue #111). Query it rather
+ *      than assume the tier -- it is the only portable signal of which
+ *      assurance actually backs the log on a given SoM.
+ *
+ * @par Full log (software tier)
+ *      The log is append-only and never wraps -- wrapping would erase
+ *      audit history. When the backing partition is full,
+ *      @ref alp_update_log_append fails cleanly and the existing chain
+ *      stays intact and verifiable.
+ *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      v0.7 new. Surface may change until the hardware backend is
  *      silicon-proven. See docs/abi-markers.md.
@@ -81,7 +112,11 @@ alp_update_log_t *alp_update_log_open(void);
 
 /**
  * @brief Append one entry. @c seq is assigned by the engine.
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ * @param log   The update log handle (from @ref alp_update_log_open).
+ * @param entry Entry to append; every field except @c seq is caller-filled.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT;
+ *         ALP_ERR_NOMEM when the store is full (the log never wraps --
+ *         existing entries stay intact and verifiable).
  */
 alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_entry_t *entry);
 

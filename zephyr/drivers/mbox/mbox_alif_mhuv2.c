@@ -116,6 +116,13 @@ struct mhuv2_data {
      * poll timer started in set_enabled(), independent of the (dead) IRQ.
      */
     struct k_timer poll_timer;
+    /**
+     * Bitmask of currently-enabled doorbell bits. The poll timer is shared by
+     * the whole frame, so it may only be stopped once the LAST enabled channel
+     * is disabled -- otherwise disabling one channel would silently kill
+     * dispatch for every other still-enabled channel.
+     */
+    uint32_t enabled_mask;
 };
 
 /* Dispatch the registered callbacks for every asserted (and unmasked) doorbell
@@ -283,17 +290,24 @@ static int mhuv2_set_enabled(const struct device *dev, mbox_channel_id_t channel
     if (enable) {
         struct mhuv2_data *data = dev->data;
 
+        data->enabled_mask |= BIT(channel_id);
         sys_write32(BIT(channel_id), cfg->base + MHUV2_RX_CH0_MASK_CLEAR);
         /* Also enable the COMBINED receive interrupt (Alif DFP mhu_receiver.c).
          * NOTE: on the E8 non-secure HE<->HP pair this still does not raise an
-         * NVIC IRQ, so we ALSO start the poll timer below as the real driver. */
+         * NVIC IRQ, so we ALSO start the poll timer below as the real driver.
+         * (Re)starting an already-running k_timer is a harmless restart. */
         sys_write32(sys_read32(cfg->base + MHUV2_RX_INT_EN) | MHUV2_RX_INT_CHCOMB,
                     cfg->base + MHUV2_RX_INT_EN);
         k_timer_start(&data->poll_timer, K_MSEC(1), K_MSEC(1));
     } else {
         struct mhuv2_data *data = dev->data;
 
-        k_timer_stop(&data->poll_timer);
+        data->enabled_mask &= ~BIT(channel_id);
+        /* The poll timer serves EVERY enabled doorbell bit on this frame:
+         * only stop it once the last enabled channel goes away. */
+        if (data->enabled_mask == 0U) {
+            k_timer_stop(&data->poll_timer);
+        }
         sys_write32(BIT(channel_id), cfg->base + MHUV2_RX_CH0_MASK_SET);
     }
 

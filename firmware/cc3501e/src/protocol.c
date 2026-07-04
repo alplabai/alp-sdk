@@ -66,6 +66,8 @@ static uint32_t get_le32(const uint8_t *p)
 static uint8_t  g_last_error = ALP_CC3501E_RESP_OK;
 static uint32_t g_frames_ok;
 static uint32_t g_frames_err;
+/* Running total of bytes sunk by CMD_STREAM_WRITE (proto v2 bulk stream). */
+static uint32_t g_stream_bytes;
 
 /* --------------------------------------------------------------- */
 /* META handlers (opcodes 0x00..0x0F)                                */
@@ -110,6 +112,27 @@ static alp_cc3501e_resp_t handle_get_version(const uint8_t *req,
 	if (reply_cap < 2u) return ALP_CC3501E_RESP_ERR_NO_MEM;
 	put_le16(reply_data, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION);
 	*reply_data_len = 2u;
+	return ALP_CC3501E_RESP_OK;
+}
+
+/* STREAM_WRITE (0x45, proto v2): bulk-data stream sink.  Accepts an opaque
+ * payload (up to ALP_CC3501E_MAX_PAYLOAD-header bytes), counts + discards it,
+ * and acks with empty reply data.  A back-to-back sequence is a FRAMED bulk
+ * stream whose per-frame payload phase rides the host DMA path; because every
+ * frame is acked the link never desyncs (unlike raw throwaway clocking).  The
+ * running total is reported via GET_DIAG_INFO for throughput accounting.
+ * Synchronous (no worker): a memory sink can't block. */
+static alp_cc3501e_resp_t handle_stream_write(const uint8_t *req,
+                                              size_t         req_len,
+                                              uint8_t       *reply_data,
+                                              size_t         reply_cap,
+                                              size_t        *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	g_stream_bytes += (uint32_t)req_len;
+	*reply_data_len = 0u;
 	return ALP_CC3501E_RESP_OK;
 }
 
@@ -536,7 +559,7 @@ static alp_cc3501e_resp_t handle_wifi_status(const uint8_t *req,
 }
 
 /* --------------------------------------------------------------- */
-/* BLE 5.4 (0x30..0x4F)                                              */
+/* BLE 5.4 (0x30..0x3F)                                              */
 /*                                                                   */
 /* BLE payloads with multi-byte fields are parsed field-by-field from */
 /* the PACKED wire (LE), not by casting to the doc structs in         */
@@ -958,6 +981,9 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
 		break;
 	case ALP_CC3501E_CMD_OTA_STATUS:
 		h = handle_ota_status;
+		break;
+	case ALP_CC3501E_CMD_STREAM_WRITE:
+		h = handle_stream_write;
 		break;
 	/* GPIO proxy + camera enables (v0.4). */
 	case ALP_CC3501E_CMD_GPIO_CONFIGURE:
