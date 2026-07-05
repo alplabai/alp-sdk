@@ -139,6 +139,12 @@
           "default": "info",
           "description": "Default log level for every Alp SDK module that does not appear in `modules:` below."
         },
+        "console": {
+          "type": "string",
+          "enum": ["auto", "alp", "uart", "ram", "linux", "none"],
+          "default": "auto",
+          "description": "Console backend the loader wires per slice.  `auto` (default) selects by the slice OS: a Zephyr slice gets the Alp UART console (`alp`/`uart` -- printf lands on the module console UART, e.g. E1M edge UART0), a Yocto slice gets the Linux console.  `ram` forces the Zephyr RAM console for serial-less bench boards (read `ram_console_buf` over SWD).  `none` emits no console Kconfig and inherits the board default.  The board layer owns the physical console UART (`zephyr,console` DT chosen); this knob only picks the backend."
+        },
         "modules": {
           "type": "object",
           "additionalProperties": {
