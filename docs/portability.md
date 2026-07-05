@@ -166,8 +166,8 @@ the U55 line:
 (`CONFIG_I2C=y` is the Zephyr-subsystem class symbol the loader
 emits per `peripherals: [i2c]`; the Alp wrapper Kconfigs
 `ALP_SDK_PERIPH_*` flip `default y` once the underlying class is
-on.  See the `_PERIPHERAL_KCONFIG` table in
-[`scripts/alp_project.py`](../scripts/alp_project.py).)
+on.  See the shared registry at
+[`metadata/registries/peripheral-kconfig.json`](../metadata/registries/peripheral-kconfig.json).)
 
 The `_U85=y` line is the visible footprint of fix G-1 (resolved
 2026-05-18 — see the matrix doc).  Before that fix, AEN801 and
