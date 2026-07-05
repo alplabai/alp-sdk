@@ -329,10 +329,9 @@ def test_ros2_is_tier_b() -> None:
 def test_microros_is_apache() -> None:
     doc = yaml.safe_load((LIBRARIES_DIR / "micro-ros.yaml").read_text(encoding="utf-8"))
     assert doc["license"] == "Apache-2.0"
-    # module-absent: an enable-by-presence Zephyr section (module, no kconfig).
     zephyr = doc["integration"]["zephyr"]
     assert zephyr.get("module") == "micro_ros_zephyr_module"
-    assert "kconfig" not in zephyr, "no Kconfig may be invented while the module is unpinned"
+    assert zephyr.get("kconfig") == ["CONFIG_MICROROS=y"]
 
 
 # --- schema: the module-only Zephyr section the flagship needs -------
@@ -367,16 +366,15 @@ cores:
 """
 
 
-def test_emit_microros_module_only_no_kconfig(tmp_path: Path) -> None:
+def test_emit_microros_module_and_kconfig(tmp_path: Path) -> None:
     """micro-ROS on the M33 emits the ADR 0018 selection tag naming the west
-    module, and -- because the module is not pinned and has no enable symbol --
-    NO fabricated CONFIG line (the documented module-absent behaviour)."""
+    module plus the real upstream master enable symbol."""
     project = load_board_yaml(_write_board(tmp_path, _V2N_MICROROS))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "ADR 0018" in out
     assert "micro_ros_zephyr_module" in out           # module named in the tag
     assert "micro-ros vhumble" in out                 # version transcribed
-    assert "CONFIG_MICRO" not in out                  # nothing invented
+    assert "CONFIG_MICROROS=y" in out                 # real module Kconfig
 
 
 def test_microros_requires_zephyr_core(tmp_path: Path) -> None:

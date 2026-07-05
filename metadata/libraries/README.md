@@ -27,7 +27,7 @@ manifest-driven **top-level** `libraries:` selection.
 | `cmsis-nn`  | A    | (west pin) | Apache-2.0 | zephyr    | Cortex-M |
 | `nanopb`    | A    | 0.4.9.1    | Zlib       | zephyr    | — |
 | `zcbor`     | A    | 0.9.1      | Apache-2.0 | zephyr    | — |
-| `micro-ros` | B    | humble     | Apache-2.0 | zephyr    | Cortex-M; west pin ‡ |
+| `micro-ros` | B    | humble     | Apache-2.0 | zephyr    | Cortex-M; west pin + CONFIG_MICROROS ‡ |
 | `ros2`      | B    | humble     | Apache-2.0 | yocto     | Cortex-A; meta-ros2-humble layer ‡ |
 | `lwm2m`     | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
 | `coap`      | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
@@ -43,13 +43,11 @@ One project runs a micro-ROS node on the Cortex-M / Zephyr peer and ROS 2 on
 the Cortex-A / Yocto peer. Two honest caveats are recorded in the manifest
 headers rather than papered over:
 
-- `micro-ros` is **not yet pinned** in the Zephyr v4.4.0 `west.yml` (verified:
-  `west list` has no ros/micro module). Its manifest is valid metadata that
-  names the upstream `micro_ros_zephyr_module` (branch `humble`) as a west
-  prerequisite and declares an **enable-by-presence** Zephyr section (`module:`,
-  no `kconfig:`) — no enable symbol is invented. Emit renders the selection tag
-  with no `CONFIG_` line until the module lands. (Adding the west pin is a
-  named follow-up.)
+- `micro-ros` is pinned in `west.yml` from the upstream
+  `micro_ros_zephyr_module` Humble branch at
+  `cfbddc5e4334317a1036e883ce8f6af12b1da66a`. Its Zephyr integration names the
+  west module and transcribes the real master symbol from
+  `modules/libmicroros/Kconfig`: `CONFIG_MICROROS=y`.
 - `ros2` is **Tier B (recipe-only)**: its wiring is grounded in-tree
   (`rclcpp` in `meta-alp-sdk/recipes-images/alp-image-common.inc`,
   `meta-ros2-humble` as a `LAYERRECOMMENDS`), but alp-sdk CI does not build it.
@@ -142,7 +140,8 @@ comment. Notes from the initial set:
   present). This is the honest shape for an *enable-by-presence* module — one
   that builds when it is in the workspace with no master `CONFIG_*=y` switch —
   or a curated module whose west pin is a documented prerequisite not yet in
-  this checkout's `west.yml` (the micro-ROS flagship). Fabricating a Kconfig to
+  this checkout's `west.yml` (for example, AWS/Azure SDK packaging follow-ups).
+  Fabricating a Kconfig to
   fill the slot is exactly what this relaxation exists to prevent: name the
   module, document the prerequisite in the header, and transcribe the symbol
   only once it is real.
