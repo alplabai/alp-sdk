@@ -36,7 +36,12 @@ CMD_PING = 0x00
 CMD_GET_VERSION = 0x01
 CMD_RESET = 0x02
 CMD_GET_MAC = 0x03
+CMD_GET_PENDING_EVENTS = 0x05  # async-event queue drain (host-polled)
 CMD_WIFI_SCAN_START = 0x10  # representative not-yet-implemented v1 opcode
+
+# Async event opcodes carried inside a GET_PENDING_EVENTS reply.
+EVT_WIFI_CONNECTED = 0x19
+EVT_WIFI_DISCONNECTED = 0x1A
 CMD_SOCK_OPEN = 0x20
 CMD_SOCK_CLOSE = 0x24
 
@@ -49,7 +54,7 @@ RESP_ERR_NOT_READY = 0x05
 RESP_ERR_PROTOCOL = 0x07
 
 # Wire-protocol version GET_VERSION reports (ALP_CC3501E_PROTOCOL_VERSION).
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 
 
 def frame(cmd: int, flags: int, payload: bytes = b"") -> bytes:
@@ -134,6 +139,23 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
     out.append(("sock_open_bad_len_reply_invalid",
                 reply(CMD_SOCK_OPEN, RESP_ERR_INVALID).hex().upper(),
                 "cmd=SOCK_OPEN | len=1 | status=INVALID -- payload length != sizeof(sock_open_t)"))
+
+    # Async-event queue drain (0x05, proto v3): the reply DATA is a packed list
+    # of { evt_opcode(1) | len(1) | payload[len] } entries.
+    out.append(("get_pending_events_request", frame(CMD_GET_PENDING_EVENTS, 0).hex().upper(),
+                "cmd=GET_PENDING_EVENTS | flags=0 | len=0"))
+    # Empty ring: status OK with zero data bytes.
+    out.append(("get_pending_events_reply_empty",
+                reply(CMD_GET_PENDING_EVENTS, RESP_OK).hex().upper(),
+                "cmd=GET_PENDING_EVENTS | len=1 | status=OK | no events queued"))
+    # Two payloadless events queued: EVT_WIFI_CONNECTED then EVT_WIFI_DISCONNECTED,
+    # each { evt_opcode | len=0 } back to back in the reply DATA.
+    out.append((
+        "get_pending_events_reply_wifi_conn_disc",
+        reply(CMD_GET_PENDING_EVENTS, RESP_OK,
+              bytes([EVT_WIFI_CONNECTED, 0x00, EVT_WIFI_DISCONNECTED, 0x00])).hex().upper(),
+        "cmd=GET_PENDING_EVENTS | status=OK | [WIFI_CONNECTED len0][WIFI_DISCONNECTED len0]",
+    ))
 
     # Framing error: declared payload_len doesn't match the captured bytes.
     out.append((

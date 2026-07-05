@@ -16,8 +16,8 @@ ping_request                       = 00000000
 ping_reply_ok                      = 0000010000
 # cmd=GET_VERSION | flags=0 | len=0
 get_version_request                = 01000000
-# cmd=GET_VERSION | len=3 | status=OK | version=2 (LE16)
-get_version_reply_proto2           = 01000300000200
+# cmd=GET_VERSION | len=3 | status=OK | version=3 (LE16)
+get_version_reply_proto3           = 01000300000300
 # cmd=GET_MAC | flags=0 | len=0
 get_mac_request                    = 03000000
 # cmd=GET_MAC | len=1 | status=BUSY -- job submitted, host re-issues
@@ -40,5 +40,11 @@ sock_open_reply_not_ready_stub     = 2000010005
 sock_close_request                 = 2400040001000000
 # cmd=SOCK_OPEN | len=1 | status=INVALID -- payload length != sizeof(sock_open_t)
 sock_open_bad_len_reply_invalid    = 2000010001
+# cmd=GET_PENDING_EVENTS | flags=0 | len=0
+get_pending_events_request         = 05000000
+# cmd=GET_PENDING_EVENTS | len=1 | status=OK | no events queued
+get_pending_events_reply_empty     = 0500010000
+# cmd=GET_PENDING_EVENTS | status=OK | [WIFI_CONNECTED len0][WIFI_DISCONNECTED len0]
+get_pending_events_reply_wifi_conn_disc = 050005000019001A00
 # reply to a frame whose payload_len mismatches the byte count -> PROTOCOL error
 ping_bad_len_reply_protocol        = 0000010007

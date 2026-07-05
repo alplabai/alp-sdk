@@ -28,6 +28,11 @@
 #include <stdint.h>
 #include <string.h> /* memcpy (OTA manifest buffering) */
 
+/* Async-event ring (src/event_ring.h, on the firmware CMake include path): the
+ * Wi-Fi connect/disconnect path pushes EVT_WIFI_* here for the host to drain via
+ * CMD_GET_PENDING_EVENTS.  Silicon-free; always linked. */
+#include "event_ring.h"
+
 /* CMSIS core for NVIC_SystemReset (the CC35xx M33 core).  Pulled in via the
  * device's CMSIS header -- ti_drivers_config.h does NOT bring the core in
  * transitively on this SDK (SDK 10.10). */
@@ -1324,12 +1329,27 @@ int cc3501e_hw_wifi_scan_stop(void)
 }
 
 /* Publish a terminal connect outcome to the status latch (rssi first, state last --
- * a reader that observes the terminal state also observes the matching detail). */
+ * a reader that observes the terminal state also observes the matching detail).
+ *
+ * ALSO enqueue the matching async EVT_* so a host that registered an event
+ * callback (via CMD_GET_PENDING_EVENTS polling) is notified: CONNECTED ->
+ * EVT_WIFI_CONNECTED, a terminal FAILED/DISCONNECTED -> EVT_WIFI_DISCONNECTED.
+ * Both carry no payload -- the host reads the detail (rssi / fail_reason) via
+ * CMD_WIFI_STATUS.  wifi_conn_set is the single terminal-transition chokepoint
+ * (mark_connecting writes the CONNECTING latch directly and is NOT terminal), so
+ * exactly one event is queued per terminal outcome. */
 static void wifi_conn_set(uint8_t state, uint8_t fail_reason, int8_t rssi)
 {
 	g_wifi_conn.fail_reason = fail_reason;
 	g_wifi_conn.rssi        = rssi;
 	g_wifi_conn.state       = state;
+
+	if (state == (uint8_t)ALP_CC3501E_WIFI_CONNECTED) {
+		(void)event_ring_push((uint8_t)ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+	} else if (state == (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED ||
+	           state == (uint8_t)ALP_CC3501E_WIFI_DISCONNECTED) {
+		(void)event_ring_push((uint8_t)ALP_CC3501E_EVT_WIFI_DISCONNECTED, NULL, 0u);
+	}
 }
 
 /* STA L3 bring-up: bounded DHCP-lease poll after the L2 connect event.
@@ -1443,6 +1463,9 @@ int cc3501e_hw_wifi_disconnect(void)
 	if (Wlan_Disconnect(WLAN_ROLE_STA, NULL) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
+	/* Host-requested teardown succeeded: mirror the state into the latch and
+	 * queue an async EVT_WIFI_DISCONNECTED (wifi_conn_set does both). */
+	wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_DISCONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE, 0);
 	return CC3501E_HW_OK;
 }
 
