@@ -251,6 +251,57 @@ static int cmd_companion_wifi_disconnect(const struct shell *sh, size_t argc, ch
 	return 0;
 }
 
+static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **argv)
+{
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	const char *ssid = argv[1];
+	const char *pass = (argc >= 3) ? argv[2] : "";
+	/* Same security rule as `wifi connect`: no passphrase -> open, a
+	 * passphrase -> WPA2-PSK, a trailing "wpa3" token -> WPA3-SAE. */
+	uint8_t sec = (pass[0] == '\0') ? 0u : 1u;
+	if (argc >= 4 && strcmp(argv[3], "wpa3") == 0) {
+		sec = 2u;
+	}
+
+	/* AP bring-up blocks for seconds in the firmware; run it under the bus
+	 * lock so a concurrent BLE/GPIO op can't interleave on the bridge. */
+	k_mutex_lock(&companion_bus_lock, K_FOREVER);
+	alp_status_t s =
+	    cc3501e_wifi_ap_start(companion_cc3501e, ssid, sec, pass, ALP_COMPANION_WIFI_CONN_MS);
+	k_mutex_unlock(&companion_bus_lock);
+
+	if (s != ALP_OK) {
+		shell_error(sh, "ap start \"%s\" failed (%d)", ssid, (int)s);
+		return -EIO;
+	}
+	shell_print(
+	    sh, "ap \"%s\" up (%s)", ssid, (sec == 0u) ? "open" : (sec == 2u ? "wpa3" : "wpa2"));
+	return 0;
+}
+
+static int cmd_companion_wifi_ap_stop(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	k_mutex_lock(&companion_bus_lock, K_FOREVER);
+	alp_status_t s = cc3501e_wifi_ap_stop(companion_cc3501e);
+	k_mutex_unlock(&companion_bus_lock);
+
+	if (s != ALP_OK) {
+		shell_error(sh, "ap stop failed (%d)", (int)s);
+		return -EIO;
+	}
+	shell_print(sh, "ap stopped");
+	return 0;
+}
+
 /* Map the connection-state latch to a short label for `wifi status`. */
 static const char *companion_wifi_state_name(uint8_t state)
 {
@@ -422,6 +473,16 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
                   2),
     SHELL_CMD_ARG(
         disconnect, NULL, "tear down the STA association", cmd_companion_wifi_disconnect, 1, 0),
+    SHELL_CMD_ARG(ap,
+                  NULL,
+                  "ap <ssid> [pass] [wpa3]  -- start a soft-AP (no pass = open)",
+                  cmd_companion_wifi_ap,
+                  2,
+                  2),
+    /* "ap-stop" is a shell command name, not a subtraction expression. */
+    /* clang-format off */
+    SHELL_CMD_ARG(ap-stop, NULL, "stop the soft-AP", cmd_companion_wifi_ap_stop, 1, 0),
+    /* clang-format on */
     SHELL_CMD_ARG(
         status, NULL, "show connection state + rssi + ip", cmd_companion_wifi_status, 1, 0),
     SHELL_SUBCMD_SET_END);
@@ -529,7 +590,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 #else
     SHELL_CMD(wifi,
               &alp_companion_wifi_subcmds,
-              "CC3501E Wi-Fi (scan / connect / disconnect / status)",
+              "CC3501E Wi-Fi (scan / connect / disconnect / ap / ap-stop / status)",
               NULL),
     SHELL_CMD(ble, &alp_companion_ble_subcmds, "CC3501E BLE (enable / scan)", NULL),
     SHELL_CMD_ARG(

@@ -599,6 +599,51 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx)
 	    ctx, ALP_CC3501E_CMD_WIFI_DISCONNECT, NULL, 0, NULL, 0, NULL, CC3501E_WIFI_DOWN_WINDOW_MS);
 }
 
+alp_status_t cc3501e_wifi_ap_start(
+    cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms)
+{
+	if (ssid == NULL) return ALP_ERR_INVAL;
+	size_t ssid_len = strlen(ssid);
+	size_t psk_len  = (pass != NULL) ? strlen(pass) : 0u;
+	if (ssid_len > 32u || psk_len > 64u) return ALP_ERR_INVAL;
+
+	/* WIFI_AP_START reuses the STA connect wire format: an
+	 * alp_cc3501e_wifi_connect_t header (4 B) + inline SSID + inline
+	 * passphrase, all packed with no padding (firmware wifi_join validates
+	 * both paths against the same struct). */
+	uint8_t                    payload[sizeof(alp_cc3501e_wifi_connect_t) + 32u + 64u];
+	alp_cc3501e_wifi_connect_t hdr = {
+		.ssid_len = (uint8_t)ssid_len,
+		.psk_len  = (uint8_t)psk_len,
+		.security = sec_type,
+		.reserved = 0u,
+	};
+	size_t off = 0;
+	memcpy(&payload[off], &hdr, sizeof(hdr));
+	off += sizeof(hdr);
+	memcpy(&payload[off], ssid, ssid_len);
+	off += ssid_len;
+	if (psk_len > 0u) {
+		memcpy(&payload[off], pass, psk_len);
+		off += psk_len;
+	}
+	/* AP bring-up is worker-routed in the firmware, so the bridge is briefly
+	 * down (BUSY/IO) while the radio comes up; poll_by_repeat re-issues until
+	 * OK (AP up) or a hard error, exactly like cc3501e_wifi_connect. */
+	return poll_by_repeat(
+	    ctx, ALP_CC3501E_CMD_WIFI_AP_START, payload, off, NULL, 0, NULL, timeout_ms);
+}
+
+alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx)
+{
+	/* Tear down the soft-AP (WIFI_AP_STOP, 0x15).  No payload, no reply data --
+	 * success is the OK status.  Like cc3501e_wifi_disconnect this is a radio
+	 * op, so the bridge can be briefly down (IO/BUSY) while it runs; floor the
+	 * budget to the radio down-window and let poll_by_repeat retry. */
+	return poll_by_repeat(
+	    ctx, ALP_CC3501E_CMD_WIFI_AP_STOP, NULL, 0, NULL, 0, NULL, CC3501E_WIFI_DOWN_WINDOW_MS);
+}
+
 alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi)
 {
 	if (rssi == NULL) return ALP_ERR_INVAL;

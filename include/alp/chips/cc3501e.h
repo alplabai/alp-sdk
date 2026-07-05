@@ -320,6 +320,45 @@ alp_status_t cc3501e_wifi_connect(
 alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
 
 /**
+ * @brief Start a Wi-Fi soft-AP (WIFI_AP_START, opcode 0x14).
+ *
+ * Brings the CC3501E up as an access point advertising @p ssid.  The on-wire
+ * payload is identical to @ref cc3501e_wifi_connect: an
+ * @ref alp_cc3501e_wifi_connect_t header (ssid_len / psk_len / security)
+ * followed by the inline SSID then the inline passphrase, packed with no
+ * padding.  AP bring-up is a radio op (the firmware worker-routes it and the
+ * bridge is briefly down), so while the firmware reports RESP_ERR_BUSY the
+ * request is re-issued on a bounded backoff until RESP_OK or the deadline.
+ *
+ * @param ctx         Initialised driver context.
+ * @param ssid        NUL-terminated AP SSID (<= 32 bytes; longer is rejected).
+ * @param sec_type    Security: 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE
+ *                    (matches @ref alp_cc3501e_wifi_connect_t::security).
+ * @param pass        NUL-terminated passphrase (may be NULL/"" for an open AP).
+ * @param timeout_ms  Upper bound on the AP-start poll budget (floored to the
+ *                    radio down-window).
+ * @return ALP_OK once the AP is up; ALP_ERR_TIMEOUT if still starting at the
+ *         deadline; ALP_ERR_INVAL on an over-long SSID/passphrase; mapped
+ *         error otherwise.
+ */
+alp_status_t cc3501e_wifi_ap_start(
+    cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);
+
+/**
+ * @brief Stop the Wi-Fi soft-AP (WIFI_AP_STOP, opcode 0x15).
+ *
+ * No payload, no reply data -- success is the OK status.  Tearing the AP down
+ * is a radio op, so the bridge can be briefly down while it runs; the budget is
+ * floored internally to the radio down-window and the request is re-issued on a
+ * bounded backoff until it lands, like @ref cc3501e_wifi_disconnect.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK once the firmware acknowledged the AP stop; ALP_ERR_TIMEOUT
+ *         if it stayed busy for the whole down-window; mapped error otherwise.
+ */
+alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx);
+
+/**
  * @brief Read the current STA RSSI in dBm (WIFI_GET_RSSI, opcode 0x16).
  *
  * @param ctx   Initialised driver context.
