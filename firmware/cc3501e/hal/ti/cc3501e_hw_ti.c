@@ -70,6 +70,13 @@ appControlBlock app_CB;
  * prebuilt lwip.a carries sockets.c.  lwip_socket / lwip_connect / lwip_send /
  * lwip_recvfrom / lwip_close + struct sockaddr_in / SO_RCVTIMEO live here. */
 #include <lwip/sockets.h>
+/* Wi-Fi console UART logger (network_terminal demo adaptation/uart_term.c, linked
+ * in the --wifi build): Report() surfaces the real reason a socket op failed on the
+ * bench console -- the only diagnostic channel this headless bridge has. */
+#include <uart_term.h>
+/* FreeRTOS heap accounting (resolves at link time; declared here so the socket
+ * failure path can report free heap without pulling the kernel headers). */
+extern size_t xPortGetFreeHeapSize(void);
 #endif
 
 #ifdef CC3501E_BLE
@@ -1325,6 +1332,12 @@ static void wifi_conn_set(uint8_t state, uint8_t fail_reason, int8_t rssi)
 	g_wifi_conn.state       = state;
 }
 
+/* STA L3 bring-up: bounded DHCP-lease poll after the L2 connect event.
+ * CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US = 50 * 200 ms = 10 s budget
+ * (the worker drain sleeps between tries so the tcpip thread runs DHCP). */
+#define CC3501E_STA_DHCP_TRIES   50u
+#define CC3501E_STA_DHCP_POLL_US 200000u
+
 int cc3501e_hw_wifi_connect_sta(
     const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
 {
@@ -1381,16 +1394,43 @@ int cc3501e_hw_wifi_connect_sta(
 		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_REJECTED, 0);
 		return CC3501E_HW_ERR_IO;
 	}
-	/* L2 ASSOCIATED.  Publish CONNECTED (rssi left 0) and return AT ONCE.  Do NOT read
-	 * the RSSI here: a Wlan_Get(WLAN_GET_RSSI) immediately after associate BLOCKS on
-	 * this NWP (the link is not yet settled for a beacon measurement) and hangs the
-	 * worker body -- it never returns, so worker_run_pending never re-arms the slave /
-	 * raises READY, and the bridge wedges with READY stuck LOW forever (root-caused on
-	 * silicon 2026-06-23: ver stays -3 / BUSY indefinitely after a successful connect).
-	 * The host fetches the RSSI separately, as a settled WIFI_GET_RSSI op, once it
-	 * observes CONNECTED.  Do NOT call network_set_up()/DHCP either: the lwIP stack is
-	 * not brought up here (network_stack_init broke the radio boot path), so it would
-	 * likewise hang the worker.  IP/DHCP is a v0.3 feature. */
+	/* L2 ASSOCIATED.  Bring the STA netif UP at L3 + start DHCP, MIRRORING the AP path
+	 * (cc3501e_hw_wifi_ap_start -> network_set_up(network_get_ap_if())).  Without this
+	 * the netif stays link-down, lwIP has no route, and lwip_socket/connect fail -- the
+	 * L3 gap the bench hit.  network_set_up() does netif_set_up + netif_set_link_up under
+	 * LOCK_TCPIP_CORE; the STA netif's link_callback (registered at boot by
+	 * network_stack_add_if_sta -> _role_sta_up) then runs dhcp_start FROM THE TCPIP
+	 * CONTEXT (sta_ip_mode defaults to IP_DHCP, STATIC_IP undefined).  The old
+	 * "network_set_up()/DHCP would hang the worker" caveat here PREDATED the busy-poll
+	 * transport that starved the tcpip thread; the slave is now DMA-callback driven, so
+	 * LOCK_TCPIP_CORE no longer deadlocks the drain (confirmed 2026-07-05).
+	 *
+	 * Do NOT read the RSSI here: a Wlan_Get(WLAN_GET_RSSI) immediately after associate
+	 * BLOCKS on this NWP (the link is not yet settled for a beacon measurement) and hangs
+	 * the worker body -- the host fetches it separately via WIFI_GET_RSSI once settled. */
+	network_set_up(network_get_sta_if());
+
+	/* GATE "CONNECTED" ON L3-UP: bounded, NON-blocking poll of the netif IP (a light read,
+	 * no radio op) with a short task-sleep between tries so DHCP proceeds on the tcpip
+	 * thread -- NOT a blocking semaphore wait in the drain.  Publishing CONNECTED only
+	 * once a nonzero IP is leased means a host that observes CONNECTED can open sockets
+	 * immediately (the netif has a route). */
+	uint32_t ip = 0u, mask = 0u, gw = 0u, dhcp = 0u;
+	for (unsigned i = 0u; i < CC3501E_STA_DHCP_TRIES; ++i) {
+		if (network_stack_get_if_ip(WLAN_ROLE_STA, &ip, &mask, &gw, &dhcp) == 0 && ip != 0u) {
+			break;
+		}
+		ip = 0u;
+		ClockP_usleep(CC3501E_STA_DHCP_POLL_US);
+	}
+	if (ip == 0u) {
+		/* Associated at L2 but no DHCP lease within the budget -- TERMINAL (there is no
+		 * usable IP, so a "connected" report would mislead the host into failing socket
+		 * ops).  The host reads this as CONN_FAILED/TIMEOUT via CMD_WIFI_STATUS. */
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_TIMEOUT, 0);
+		return CC3501E_HW_ERR_IO;
+	}
 	wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE, 0);
 	return CC3501E_HW_OK;
 }
@@ -1584,7 +1624,17 @@ int cc3501e_hw_sock_open(uint8_t family, uint8_t type, uint8_t protocol, uint16_
 	const int st = (type == (uint8_t)ALP_CC3501E_SOCK_TYPE_DGRAM) ? SOCK_DGRAM : SOCK_STREAM;
 	const int fd = lwip_socket(AF_INET, st, (int)protocol);
 	if (fd < 0) {
-		return CC3501E_HW_ERR_IO;
+		/* netconn allocation failed -- typically FreeRTOS-heap exhaustion for the
+		 * recvmbox/sem, or MEMP_NUM_NETCONN starvation.  UNMASK the real reason on the
+		 * bench console (errno + free heap), then FAIL FAST: return NOTIMPL, which the
+		 * protocol layer maps to RESP_ERR_NOT_READY -- a NON-retryable host error.  (IO
+		 * would map to RESP_ERR_RADIO -> host ALP_ERR_IO, which poll_by_repeat retries
+		 * for the whole budget and masks as a -4 timeout.)  NOT_READY == "the IP stack
+		 * cannot serve a socket right now", which is exactly this condition. */
+		Report("\n\rcc3501e sock_open: lwip_socket failed errno=%d freeHeap=%u\n\r",
+		       errno,
+		       (unsigned)xPortGetFreeHeapSize());
+		return CC3501E_HW_ERR_NOTIMPL;
 	}
 	/* lwIP fds are small non-negative ints; +1 keeps host handle 0 = invalid.  A
 	 * full u16 table is unnecessary -- lwIP validates the fd (EBADF) on each op. */
