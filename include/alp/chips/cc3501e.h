@@ -270,6 +270,20 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
                                uint32_t               timeout_ms);
 
 /**
+ * @brief Abort an in-progress Wi-Fi scan (WIFI_SCAN_STOP, opcode 0x11).
+ *
+ * No payload, no reply data -- success is the OK status.  The firmware tears
+ * the scan down as a radio op, so the bridge can be briefly down; the budget is
+ * floored internally to the radio down-window and the request is re-issued on a
+ * bounded backoff until it lands, like @ref cc3501e_wifi_get_mac.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK once the firmware acknowledged the stop; ALP_ERR_TIMEOUT if it
+ *         stayed busy for the whole down-window; mapped error otherwise.
+ */
+alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);
+
+/**
  * @brief Associate with a Wi-Fi AP (WIFI_CONNECT_STA, opcode 0x12).
  *
  * Submits the SSID / security / passphrase as the on-wire
@@ -290,6 +304,20 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
  */
 alp_status_t cc3501e_wifi_connect(
     cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);
+
+/**
+ * @brief Tear down the STA association (WIFI_DISCONNECT, opcode 0x13).
+ *
+ * No payload, no reply data -- success is the OK status.  Disconnect is a radio
+ * op (Wlan_Disconnect), so the bridge can be briefly down while it runs; the
+ * budget is floored internally to the radio down-window and the request is
+ * re-issued on a bounded backoff until it lands, like @ref cc3501e_wifi_get_mac.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK once the firmware acknowledged the disconnect; ALP_ERR_TIMEOUT
+ *         if it stayed busy for the whole down-window; mapped error otherwise.
+ */
+alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
 
 /**
  * @brief Read the current STA RSSI in dBm (WIFI_GET_RSSI, opcode 0x16).
@@ -320,6 +348,26 @@ alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi);
  *       bytes after the status byte.  See cc3501e.c gap note.
  */
 alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);
+
+/**
+ * @brief Poll the non-blocking STA connection state (WIFI_STATUS, opcode 0x1B).
+ *
+ * Reads the firmware's connection-state latch without a radio op (ISR-safe on
+ * the firmware side): how the host collects the outcome of an async
+ * @ref cc3501e_wifi_connect submit -- CONNECTING while the association runs,
+ * then CONNECTED or FAILED once the WLAN connect event lands.  The reply is the
+ * fixed 4-byte @ref alp_cc3501e_wifi_status_t wire layout (state | fail_reason |
+ * rssi_dbm | reserved), decoded into @p out.
+ *
+ * @param ctx  Initialised driver context.
+ * @param out  Receives the decoded status snapshot: @c state is a
+ *             @ref alp_cc3501e_wifi_conn_state_t, @c fail_reason a
+ *             @ref alp_cc3501e_wifi_fail_t (valid when state == CONN_FAILED) and
+ *             @c rssi_dbm the STA RSSI (valid when state == CONNECTED).
+ * @return ALP_OK with @p out filled; ALP_ERR_INVAL if @p out is NULL;
+ *         ALP_ERR_IO on a short reply; otherwise the mapped error.
+ */
+alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);
 
 /**
  * @brief Enable the CC3501E BLE controller + NimBLE host (BLE_ENABLE, 0x30).
