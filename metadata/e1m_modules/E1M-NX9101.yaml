@@ -18,7 +18,12 @@ display_name: "E1M-NX9101 (NXP i.MX 93 -- exact SKU TBD)"
 
 on_module:
   silicon:              nxp:imx9:imx93         # 2x Cortex-A55 + Cortex-M33 + Ethos-U65
-  wifi_ble:             TBD                    # one of Murata Type 2DL/2EL/2KL/2LL per BOM
+  # One of the catalogued Murata NXP-paired modules per final BOM:
+  # murata_lbee5pl2dl (Type 2DL / IW611),
+  # murata_lbes5pl2el (Type 2EL / IW612),
+  # murata_lbee0zz2kl (Type 2KL / IW610F), or
+  # murata_lbes0zz2ll (Type 2LL / IW610G).
+  wifi_ble:             TBD
   pmic_main:            pca9451a               # NXP PCA9451A (canonical key -- matches V2N's pmic_main)
   ethernet_phy:         TBD                    # variant of RTL or NXP PHY per BOM
 
