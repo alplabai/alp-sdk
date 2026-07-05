@@ -35,6 +35,8 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
 
+#include <alp/version.h> /* ALP_VERSION_STRING -- the single SDK-version source */
+
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 #include <alp/hw_info.h> /* alp_hw_info_read(), alp_hw_info_t, ALP_OK */
 #endif
@@ -103,7 +105,7 @@ static int alp_sdk_banner(void)
 	 */
 	if (alp_hw_info_read(&info) == ALP_OK && info.som_sku[0] != '\0') {
 		printk("Alp SDK %s  |  %s %s",
-		       CONFIG_ALP_SDK_VERSION, info.som_sku, info.som_hw_rev);
+		       ALP_VERSION_STRING, info.som_sku, info.som_hw_rev);
 		alp_print_soc_and_eol();
 		alp_print_sysinfo();
 		return 0;
@@ -117,7 +119,7 @@ static int alp_sdk_banner(void)
 		board_name = CONFIG_ALP_SDK_SOM_SKU;
 	}
 #endif
-	printk("Alp SDK %s  |  %s", CONFIG_ALP_SDK_VERSION, board_name);
+	printk("Alp SDK %s  |  %s", ALP_VERSION_STRING, board_name);
 	alp_print_soc_and_eol();
 	alp_print_sysinfo();
 	return 0;

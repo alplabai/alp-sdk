@@ -21,15 +21,6 @@ config ALP_SDK_BANNER
 	  hardware revision from the EEPROM manifest; otherwise it falls
 	  back to the build-time board name (CONFIG_BOARD).
 
-config ALP_SDK_VERSION
-	string "Alp SDK version string (boot banner / runtime)"
-	default "0.6.0"
-	help
-	  Human-readable Alp SDK release shown in the boot banner and
-	  available to apps.  Tracks VERSIONS.md.  (The repo-root
-	  CMakeLists project() VERSION is build metadata and may lag
-	  this string.)
-
 config ALP_SDK_SOM_SKU
 	string "SoM SKU identity string (boot-banner fallback)"
 	default ""

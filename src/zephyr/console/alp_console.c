@@ -17,6 +17,7 @@
 
 #include <alp/peripheral.h>
 #include <alp/console.h>
+#include <alp/version.h> /* ALP_VERSION_STRING -- the single SDK-version source */
 
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 #include <alp/hw_info.h>
@@ -50,7 +51,7 @@ static int cmd_board(const struct shell *sh, size_t argc, char **argv)
 	if (alp_hw_info_read(&info) == ALP_OK && info.som_sku[0] != '\0') {
 		shell_print(sh,
 		            "Alp SDK %s  |  %s %s  |  (c) Alp Lab AB",
-		            CONFIG_ALP_SDK_VERSION,
+		            ALP_VERSION_STRING,
 		            info.som_sku,
 		            info.som_hw_rev);
 		shell_print(sh, "  family : %s", info.som_family);
@@ -64,7 +65,7 @@ static int cmd_board(const struct shell *sh, size_t argc, char **argv)
 #endif
 	{
 		shell_print(
-		    sh, "Alp SDK %s  |  %s  |  (c) Alp Lab AB", CONFIG_ALP_SDK_VERSION, CONFIG_BOARD);
+		    sh, "Alp SDK %s  |  %s  |  (c) Alp Lab AB", ALP_VERSION_STRING, CONFIG_BOARD);
 	}
 
 	shell_print(sh, "  uptime : %llu ms", (unsigned long long)k_uptime_get());
