@@ -51,6 +51,18 @@ alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus)
 	return ALP_OK;
 }
 
+/* Cold-boot self-recovery soak (the CUSTOMER cold-boot solution): the CC3501E's
+ * first boot after a cold power-on can mis-read its Puya flash (reqhdr_rx=
+ * 0xFFFFFFFF, vendor image never launches, SPI slave never arms). The fix is a
+ * WARM re-boot (nRESET pulse, rails held) that reads the now-settled flash -- but
+ * ONE re-boot is not always enough, so cc3501e_reset RETRIES the warm re-boot,
+ * probing cc3501e_sync between each, until the slave arms. This runs unattended
+ * inside cc3501e_reset/init, so a plain application self-recovers on cold
+ * power-on WITHOUT any external warm reset (which a fielded product cannot rely
+ * on). Bounded so a genuinely dead module still returns an error. */
+#define CC3501E_COLD_BOOT_MAX_REBOOTS 8u    /* warm re-boots after the first before giving up */
+#define CC3501E_COLD_BOOT_SYNC_MS     1500u /* per-probe sync budget (slave-arm window) */
+
 alp_status_t cc3501e_reset(cc3501e_t *ctx)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
@@ -111,9 +123,22 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	 * Re-boot once with the rails kept up; the second boot reads the now-settled
 	 * flash and launches normally.  Validated on silicon (cold reqhdr_rx
 	 * 0xFFFFFFFF -> 0x5A5A5A5A, ping_ok climbing, after one hard reset).  The
-	 * bringup soak calls cc3501e_hard_reset() again if a single re-boot is not
-	 * enough.  Remove once TI ships the Puya flash fix. */
-	return cc3501e_hard_reset(ctx);
+	 * enough, so the SELF-RECOVERY SOAK below re-boots (warm) + re-probes until
+	 * the slave arms -- unattended, so a cold-booting app recovers on its own.
+	 * Remove the soak once TI ships the Puya flash fix. */
+	(void)cc3501e_hard_reset(ctx); /* first warm re-boot (reads settled flash) */
+	for (unsigned int i = 0u; i < CC3501E_COLD_BOOT_MAX_REBOOTS; i++) {
+		/* cc3501e_sync clocks a non-destructive 0xFF probe looking for the
+		 * slave's parked 0xA5 armed-marker; ALP_OK => the vendor image launched
+		 * and the SPI slave is framing => the Puya flash settled. */
+		if (cc3501e_sync(ctx, CC3501E_COLD_BOOT_SYNC_MS) == ALP_OK) {
+			return ALP_OK;
+		}
+		(void)cc3501e_hard_reset(ctx); /* still 0xFFFFFFFF -- warm re-boot, rails held */
+	}
+	/* Final probe: OK if it armed on the last re-boot, else surface the failure
+	 * (a genuinely dead / unpowered / unbodged module). */
+	return cc3501e_sync(ctx, CC3501E_COLD_BOOT_SYNC_MS);
 }
 
 alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
