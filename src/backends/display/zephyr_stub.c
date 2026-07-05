@@ -79,6 +79,7 @@ static const alp_display_ops_t _ops = {
 	.close    = NULL,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(display);
 ALP_BACKEND_REGISTER(display,
                      zephyr_stub,
                      {

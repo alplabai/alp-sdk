@@ -36,6 +36,7 @@
 #include "backends/power/power_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(power);
+ALP_BACKEND_ANCHOR(power);
 
 /* Reuse the existing TLS-backed last-error mechanism from
  * src/zephyr/last_error.c.  Forward-declared here to avoid pulling
@@ -159,6 +160,7 @@ const alp_capabilities_t *alp_power_capabilities(const alp_power_t *h)
 /* ================================================================== */
 
 ALP_BACKEND_DEFINE_CLASS(power_profile);
+ALP_BACKEND_ANCHOR(power_profile);
 
 static const alp_power_profile_ops_t *_cached_profile_ops = NULL;
 

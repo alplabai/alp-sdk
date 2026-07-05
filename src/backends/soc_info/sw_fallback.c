@@ -41,6 +41,7 @@ static const alp_soc_info_ops_t _ops = {
 	.ping = sw_ping,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(soc_info);
 ALP_BACKEND_REGISTER(soc_info,
                      sw_fallback,
                      {

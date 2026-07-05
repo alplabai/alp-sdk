@@ -643,6 +643,7 @@ static const alp_dsp_ops_t _ops = {
 	.close         = sw_close,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(dsp);
 ALP_BACKEND_REGISTER(dsp,
                      sw_fallback,
                      {

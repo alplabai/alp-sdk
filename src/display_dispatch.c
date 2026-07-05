@@ -23,6 +23,7 @@
 #include "backends/display/display_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(display);
+ALP_BACKEND_ANCHOR(display);
 
 /* Reuse the existing TLS-backed last-error mechanism from
  * src/zephyr/last_error.c.  Forward-declared here to avoid pulling

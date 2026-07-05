@@ -30,6 +30,7 @@
 #include "backends/soc_info/soc_info_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(soc_info);
+ALP_BACKEND_ANCHOR(soc_info);
 
 static const alp_soc_info_ops_t *_cached_ops = NULL;
 
