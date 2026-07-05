@@ -467,6 +467,189 @@ alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
                               uint32_t                   timeout_ms);
 
 /* ------------------------------------------------------------------ */
+/* BLE control (disable / advertise / connect / GATT, 0x31..0x3B).    */
+/*                                                                    */
+/* Thin wrappers over the firmware BLE handlers.  WIRE GAP: the        */
+/* protocol header carries the BLE opcodes + alp_cc3501e_ble_adv_      */
+/* start_t, but has NO payload struct for CONNECT (0x36) or the four   */
+/* GATT ops (0x38..0x3B); those wire layouts are defined only by the   */
+/* firmware handlers (firmware/cc3501e/src/protocol.c handle_ble_*)    */
+/* and are documented per-function + in cc3501e.c.  GATT async         */
+/* notifications (EVT_BLE_GATT_WRITE_REQ, 0x3F) need the async-event   */
+/* path (not wired on this HW rev); these wrappers issue the outbound  */
+/* commands only.                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Disable the CC3501E BLE controller + NimBLE host (BLE_DISABLE, 0x31).
+ *
+ * Undoes @ref cc3501e_ble_enable.  No payload; success is the OK status.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget (per-request retry on transient IO).
+ * @return ALP_OK once BLE is torn down; ALP_ERR_NOT_READY if BLE was not
+ *         enabled / not built into the firmware; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_disable(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Start BLE advertising (BLE_ADV_START, 0x32).
+ *
+ * Packs the 7-byte wire header the firmware @c handle_ble_adv_start parses
+ * (connectable | reserved | interval_min_ms(LE16) | interval_max_ms(LE16) |
+ * adv_data_len) followed by the inline advertising-data bytes.  NOTE: the doc
+ * struct @ref alp_cc3501e_ble_adv_start_t is 8 bytes with an alignment pad the
+ * wire omits, so the header is hand-packed to 7 bytes (see cc3501e.c).
+ *
+ * @param ctx              Initialised bridge handle (BLE must be enabled).
+ * @param connectable      true = connectable advertising, false = non-connectable.
+ * @param interval_min_ms  Minimum advertising interval, milliseconds.
+ * @param interval_max_ms  Maximum advertising interval, milliseconds.
+ * @param adv_data         Advertising-data bytes (may be NULL only if
+ *                         @p adv_data_len is 0).
+ * @param adv_data_len     Advertising-data length (0..255).
+ * @param timeout_ms       Caller budget.
+ * @return ALP_OK once advertising is up; ALP_ERR_INVAL on a NULL @p adv_data
+ *         with a non-zero length; ALP_ERR_NOT_READY if BLE is not enabled;
+ *         otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_adv_start(cc3501e_t     *ctx,
+                                   bool           connectable,
+                                   uint16_t       interval_min_ms,
+                                   uint16_t       interval_max_ms,
+                                   const uint8_t *adv_data,
+                                   uint8_t        adv_data_len,
+                                   uint32_t       timeout_ms);
+
+/**
+ * @brief Stop BLE advertising (BLE_ADV_STOP, 0x33).
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once advertising is stopped; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_adv_stop(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Stop an in-progress BLE scan (BLE_SCAN_STOP, 0x35).
+ *
+ * Cancels the NimBLE GAP discovery started by @ref cc3501e_ble_scan before its
+ * window elapses.  No payload; success is the OK status.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once the scan is stopped; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_scan_stop(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Initiate a BLE central connection to a peer (BLE_CONNECT, 0x36).
+ *
+ * The wire payload the firmware @c handle_ble_connect parses is
+ * addr_type(1) | addr[6] (7 bytes; addr_type FIRST).  No header struct exists
+ * for this opcode -- the layout is defined only by the firmware handler.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled).
+ * @param addr        6-byte peer address (little-endian, as carried on the wire
+ *                    and reported by @ref cc3501e_ble_scan_record_t::addr).
+ * @param addr_type   Peer address type (0 = public, 1 = random, per NimBLE).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once the connection is established; ALP_ERR_INVAL on a NULL
+ *         @p addr; ALP_ERR_NOT_READY if BLE is not enabled; otherwise mapped.
+ */
+alp_status_t
+cc3501e_ble_connect(cc3501e_t *ctx, const uint8_t addr[6], uint8_t addr_type, uint32_t timeout_ms);
+
+/**
+ * @brief Disconnect the active BLE connection (BLE_DISCONNECT, 0x37).
+ *
+ * No payload -- the firmware tracks the single active connection itself.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once disconnected; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_disconnect(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Register a GATT attribute table with the firmware (BLE_GATT_REGISTER, 0x38).
+ *
+ * The firmware @c handle_ble_gatt_register takes the payload as an OPAQUE
+ * attribute-table descriptor (>= 1 byte): there is no host-side header struct
+ * and no fixed UUID/handle layout on the wire, so the host ships the descriptor
+ * bytes verbatim and the firmware parses them.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled).
+ * @param descriptor  Opaque attribute-table descriptor bytes (non-NULL).
+ * @param len         Descriptor length (1..@ref ALP_CC3501E_MAX_PAYLOAD).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once registered; ALP_ERR_INVAL on a NULL/empty/oversized
+ *         descriptor; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
+                                       const uint8_t *descriptor,
+                                       size_t         len,
+                                       uint32_t       timeout_ms);
+
+/**
+ * @brief Send a GATT notification on a characteristic (BLE_GATT_NOTIFY, 0x39).
+ *
+ * Wire (firmware @c handle_ble_gatt_notify): handle(LE16) | value bytes.  No
+ * header struct -- the layout is defined only by the firmware handler.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled + connected).
+ * @param handle      Characteristic-value attribute handle to notify on.
+ * @param data        Value bytes to notify (may be NULL only if @p len is 0).
+ * @param len         Value length (0..@ref ALP_CC3501E_MAX_PAYLOAD minus 2).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once the notification is queued; ALP_ERR_INVAL on a bad arg /
+ *         oversized value; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_gatt_notify(
+    cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);
+
+/**
+ * @brief Read a GATT attribute value (BLE_GATT_READ, 0x3A).
+ *
+ * Wire request (firmware @c handle_ble_gatt_read): handle(LE16); the reply DATA
+ * (after the status byte) is the attribute value bytes.  No header struct --
+ * the layout is defined only by the firmware handler.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled + connected).
+ * @param handle      Attribute handle to read.
+ * @param out         Receives the value bytes (may be NULL only if @p cap is 0);
+ *                    truncated to @p cap.
+ * @param cap         Capacity of @p out in bytes.
+ * @param out_len     Receives the number of value bytes copied (may be NULL).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK with @p out / @p out_len filled; ALP_ERR_INVAL on a NULL
+ *         @p out with non-zero @p cap; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx,
+                                   uint16_t   handle,
+                                   uint8_t   *out,
+                                   size_t     cap,
+                                   size_t    *out_len,
+                                   uint32_t   timeout_ms);
+
+/**
+ * @brief Write a GATT attribute value (BLE_GATT_WRITE, 0x3B).
+ *
+ * Wire (firmware @c handle_ble_gatt_write): handle(LE16) | value bytes --
+ * identical framing to @ref cc3501e_ble_gatt_notify.  No header struct.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled + connected).
+ * @param handle      Attribute handle to write.
+ * @param data        Value bytes to write (may be NULL only if @p len is 0).
+ * @param len         Value length (0..@ref ALP_CC3501E_MAX_PAYLOAD minus 2).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once the write is accepted; ALP_ERR_INVAL on a bad arg /
+ *         oversized value; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_gatt_write(
+    cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);
+
+/* ------------------------------------------------------------------ */
 /* GPIO proxy (0x50..0x53) + camera enables (0x60/0x61).              */
 /*                                                                    */
 /* The CC3501E fronts a set of E1M pads (IO11/IO13/IO15..IO21) and    */
