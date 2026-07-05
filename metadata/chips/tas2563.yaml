@@ -40,6 +40,71 @@ kconfig:
   zephyr:         ALP_SDK_CHIP_TAS2563
   baremetal:      ALP_SDK_CHIP_TAS2563
 
+signals:
+  - { name: SCL,          type: input,  scope: "I2C mode: I2C clock (SCL_SELZ, pull up to IOVDD); SPI mode: active-low chip select" }
+  - { name: SDA,          type: bidir,  scope: "I2C mode: I2C data (SDA_MOSI, pull up to IOVDD); SPI mode: serial data input" }
+  - { name: ADDR,         type: input,  scope: "I2C mode: address-select strap (ADDR_SPICLK); SPI mode: SPI clock" }
+  - { name: SPII2CZ_MISO, type: input,  scope: "control-bus mode-select strap: short to GND for I2C mode; SPI serial-data-out otherwise" }
+  - { name: SBCLK,        type: input,  scope: "ASI1 I2S/TDM serial bit clock" }
+  - { name: FSYNC,        type: input,  scope: "I2S word clock / TDM frame sync, ASI1 + ASI2" }
+  - { name: SDIN,         type: input,  scope: "ASI1 I2S/TDM serial data input (audio data)" }
+  - { name: IRQ_N,        type: open_drain, scope: "active-low interrupt; pull up to IOVDD if internal pull-up unused" }
+  - { name: SD_N,         type: input,  scope: "active-low hardware shutdown" }
+  - { name: VSNS_P,       type: analog, scope: "I/V-sense: voltage-sense positive; connect to OUT_P via ferrite bead" }
+  - { name: VSNS_N,       type: analog, scope: "I/V-sense: voltage-sense negative; connect to OUT_N via ferrite bead" }
+  - { name: OUT_P,        type: output, scope: "Class-D speaker output, positive" }
+  - { name: OUT_N,        type: output, scope: "Class-D speaker output, negative" }
+  - { name: VBAT,         type: power,  scope: "battery supply, 2.5V-5.5V" }
+  - { name: VDD,          type: power,  scope: "analog/digital/IO core supply, 1.62V-1.95V" }
+  - { name: IOVDD,        type: power,  scope: "digital IO supply, 1.62V-3.6V" }
+  - { name: PVDD,         type: power,  scope: "Class-D power-stage / boost supply" }
+  - { name: GND,          type: ground }
+
+physical:
+  # pins per TI TAS2563 datasheet SLASET3D (Apr 2019, rev. Jan 2024; the manifest's
+  # SLASEU1 predates a TI literature renumbering of the same device), Section 4
+  # "Pin Configuration and Functions", Table 4-1 "Pin Functions", RPP (32-pin QFN)
+  # column -- matches mpn_population TAS2563RPP.
+  # GNDB/GNDD/GNDP (boost/digital/power-stage grounds) all tie to the PCB GND
+  # plane per the datasheet and are collapsed onto one GND net here.
+  # Internal regulator/boost nodes (DREG, GREG, VBST, SW, GPIO) and ASI2
+  # (not brought out on the QFN package) omitted: not board-signal-bearing
+  # for the base I2C+ASI1 use case. NC pins (1, 8, 17) omitted.
+  refdes_prefix: U
+  package:       VQFN-32
+  footprint:     vqfn_32_4p5x4p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "3",  signal: "SDA" }
+    - { pad: "4",  signal: "SCL" }
+    - { pad: "5",  signal: "FSYNC" }
+    - { pad: "6",  signal: "SBCLK" }
+    - { pad: "7",  signal: "SD_N" }
+    - { pad: "11", signal: "SDIN" }
+    - { pad: "12", signal: "SPII2CZ_MISO" }
+    - { pad: "14", signal: "GND" }
+    - { pad: "18", signal: "IRQ_N" }
+    - { pad: "19", signal: "ADDR" }
+    - { pad: "20", signal: "VSNS_P" }
+    - { pad: "21", signal: "OUT_P" }
+    - { pad: "25", signal: "PVDD" }
+    - { pad: "26", signal: "OUT_N" }
+    - { pad: "27", signal: "GND" }
+    - { pad: "28", signal: "GND" }
+    - { pad: "29", signal: "VSNS_N" }
+    - { pad: "30", signal: "VBAT" }
+    - { pad: "31", signal: "VDD" }
+    - { pad: "32", signal: "IOVDD" }
+  passives:
+    - { role: decouple, value: 100nF, net: VBAT,  refdes_prefix: C }
+    - { role: decouple, value: 1uF,   net: VDD,   refdes_prefix: C }
+    - { role: decouple, value: 100nF, net: IOVDD, refdes_prefix: C }
+    - { role: decouple, value: 10uF,  net: PVDD,  refdes_prefix: C }
+    - { role: pullup,   value: 10k,   net: SCL,   refdes_prefix: R }
+    - { role: pullup,   value: 10k,   net: SDA,   refdes_prefix: R }
+    - { role: pullup,   value: 10k,   net: IRQ_N, refdes_prefix: R }
+
 families:
   - aen
   - v2n

@@ -90,3 +90,11 @@ def test_reference_blocks_present_and_valid():
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "metadata/blocks/button_led.yaml" in r.stdout
+
+def test_reference_chips_have_physical():
+    import yaml
+    for name in ("icm42670", "tas2563", "ina236"):
+        d = yaml.safe_load((REPO / f"metadata/chips/{name}.yaml").read_text())
+        assert d.get("signals"), f"{name} needs signals[]"
+        assert d.get("physical"), f"{name} needs physical:"
+        assert d["physical"]["visibility"] in ("public", "internal")
