@@ -321,6 +321,83 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
 	}
 }
 
+/*
+ * Step 7.5 (opt-in) -- OTA firmware update to the CC3501E.
+ *
+ * Demonstrates the host-side OTA contract from <alp/chips/cc3501e.h>:
+ *
+ *   cc3501e_ota_update(fw, image, len, timeout)
+ *       = cc3501e_ota_begin(len)            open a session on the CC35's
+ *                                           NON-primary vendor slot
+ *       + cc3501e_ota_write(off, chunk, n)  stream the image in page-aligned
+ *                                           (256 B) chunks; the firmware RAM-
+ *                                           stages each chunk (no flash yet)
+ *       + cc3501e_ota_finish()              ONE flash burst: psa_fwu_start +
+ *                                           write + install -> STAGED, then a
+ *                                           deferred swap-reboot
+ *
+ * `cc3501e_ota_status()` can be polled at any point for the session state
+ * (idle / writing / staged) and the running byte cursor.
+ *
+ * WHAT A REAL DEPLOYMENT PASSES: `image` must be a genuine SIGNED GPE vendor
+ * image (manifest + body) built for the CC3501E -- the same artefact
+ * firmware/cc3501e/ produces.  The blob below is a small INERT pattern: it
+ * exercises the host encode/stream/framing path end-to-end but is NOT a
+ * valid image, so on real silicon the firmware's psa_fwu_start rejects it at
+ * FINISH (an expected, safe failure -- nothing gets staged).  Swap in a real
+ * signed image on the bench to stage a genuine update.
+ *
+ * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md): the receive ->
+ * RAM-stage -> psa_fwu install-to-STAGED pipeline is silicon-validated, but
+ * the final COLD swap-boot is gated by the vendor-SBL cold-boot issue on the
+ * current mis-activated bench units.  So this demo proves the streaming +
+ * framing + state machine; it does not (yet) prove a live A/B swap on those
+ * units.  Opt in with -DEXTRA_CFLAGS=-DCC3501E_OTA_DEMO; left OFF by default
+ * so a normal bring-up run never kicks a (disruptive) flash cycle.
+ */
+#ifdef CC3501E_OTA_DEMO
+#define CC3501E_OTA_DEMO_TIMEOUT_MS 20000u
+static void cc3501e_demo_ota(cc3501e_t *fw)
+{
+	/* Illustrative inert blob (NOT a signed image -- see the note above). */
+	static uint8_t image[1024];
+	for (size_t i = 0; i < sizeof(image); ++i) {
+		image[i] = (uint8_t)(i * 31u + 7u);
+	}
+
+	printf("[cc3501e-bringup] OTA: streaming a %u B demo blob via cc3501e_ota_update...\n",
+	       (unsigned)sizeof(image));
+
+	alp_status_t s = cc3501e_ota_update(fw, image, sizeof(image), CC3501E_OTA_DEMO_TIMEOUT_MS);
+
+	/* Read back the session state regardless of the update result -- this is
+	 * the field-diagnostic call (`alp companion ota status` uses the same). */
+	alp_cc3501e_ota_status_t st = { 0 };
+	if (cc3501e_ota_status(fw, &st, CC3501E_OTA_DEMO_TIMEOUT_MS) == ALP_OK) {
+		printf("[cc3501e-bringup] OTA status: state=%u written=%u/%u B\n",
+		       (unsigned)st.state,
+		       (unsigned)st.bytes_written,
+		       (unsigned)st.total_len);
+	}
+
+	if (s == ALP_OK) {
+		printf("[cc3501e-bringup] OTA -> STAGED; the CC35 will swap+boot the new "
+		       "slot on its next reboot (production path)\n");
+	} else if (s == ALP_ERR_NOT_READY) {
+		printf("[cc3501e-bringup] OTA -> NOT_READY (no PSA-FWU in this CC3501E image) "
+		       "-- expected on a non-OTA firmware build\n");
+	} else {
+		/* An inert blob fails at FINISH (image validation) -- the host stream +
+		 * framing still round-tripped, which is what this demo proves.  Reset the
+		 * half-open session so the slot is clean for a real image. */
+		printf("[cc3501e-bringup] OTA -> %d (inert blob rejected at FINISH as expected); "
+		       "aborting the session\n",
+		       (int)s);
+		(void)cc3501e_ota_abort(fw, CC3501E_OTA_DEMO_TIMEOUT_MS);
+	}
+}
+#endif /* CC3501E_OTA_DEMO */
+
 int main(void)
 {
 	printf("\n[cc3501e-bringup] E1M-AEN CC3501E Wi-Fi/BLE coprocessor bring-up\n");
@@ -431,6 +508,9 @@ int main(void)
 #ifdef CC3501E_DMA_STREAM_BENCH
 	bool stream_done = false;
 #endif
+#ifdef CC3501E_OTA_DEMO
+	bool ota_done = false;
+#endif
 	for (uint32_t i = 0u;; ++i) {
 		/*
 		 * Run-once FRAMED bulk-stream throughput benchmark.  Once the link is up,
@@ -474,6 +554,16 @@ int main(void)
 			       g_cc3501e_witness.dma_stream_kbps);
 		}
 #endif /* CC3501E_DMA_STREAM_BENCH */
+
+#ifdef CC3501E_OTA_DEMO
+		/* One-shot OTA demo, run only once the link is solidly up (same
+		 * ping_ok discipline as the DMA bench): OTA's FINISH does a flash burst
+		 * that disrupts the CS-less link, so gate it behind a stable link. */
+		if (!ota_done && g_cc3501e_witness.ping_ok >= 20u) {
+			ota_done = true;
+			cc3501e_demo_ota(&fw);
+		}
+#endif /* CC3501E_OTA_DEMO */
 
 		s                             = cc3501e_ping(&fw);
 		g_cc3501e_witness.last_status = (uint32_t)s;

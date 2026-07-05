@@ -24,7 +24,7 @@ design recipe in `firmware/cc3501e/ti/WIFI_BLE_INTEGRATION.md`.
 | **CAM enables** | ✅ fixed mapping (netlist) | `which` 0→GPIO_1 (LDO0), 1→GPIO_0 (LDO1) — firmware was reversed; corrected from U4 pins 54/55 |
 | **GPIO proxy** + camera enables | 🚧 **in progress** | firmware HAL + host API done; portable backend / tests / example pending; pad map parked |
 | **Cold-boot** | ✅ host-workable | Puya 64 Mbit flash bug; host hard-reset after each power-cycle |
-| **OTA over SPI** | designed, parked (secondary) | opcodes 0x40–0x4F; PSA-FWU cycle built |
+| **OTA over SPI** | 🚧 **receive→stage validated; cold swap-boot HW-gated** | opcodes 0x40–0x44; over-bridge PSA-FWU cycle built. BEGIN→WRITE(RAM-stage)→FINISH(one flash burst→`psa_fwu_install`→STAGED) is silicon-validated; the final **cold swap-boot is gated by the vendor-SBL cold-boot issue** on the mis-activated bench units. Host wrappers + hermetic host OTA test green; `--ota-selftest` build fixed (`CC3501E_OTA_WRITE_CHUNK`) |
 
 ---
 
