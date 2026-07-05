@@ -31,11 +31,18 @@ XDS_SERIAL="${XDS_SERIAL:-L50015YR}"     # CC3501E XDS110 on this bench
 # app SemVer (that lives in firmware-version.txt and is reported via
 # GET_DIAG_INFO.fw_version) and NOT the wire ALP_CC3501E_PROTOCOL_VERSION.
 #
-# Scheme = date-derived + major>=1 so it is always monotonic and beats whatever
-# is on the unit: major.<yy>.<mmdd>.<hhmm>  e.g. 1.26.0705.1432.  The bench unit
-# was poisoned to 0.9.0.7 by ad-hoc bumps, so major MUST stay >= 1 going forward
-# (1.x > 0.9).  Override with VERSION=... only to force a specific higher value.
-VERSION="${VERSION:-1.$(date +%y).$(date +%m%d).$(date +%H%M)}"
+# The four fields a.b.c.d are BYTE-SIZED (each 0..255) and compared field-by-field.
+# So a human date like 1.<yy>.<mmdd>.<hhmm> is INVALID -- mmdd=0705 and hhmm=1531
+# overflow a byte and corrupt the programmed version (this bricked a bench unit).
+#
+# Correct scheme: the big-endian 4 bytes of the Unix epoch seconds. Each field is
+# a byte (<=255) by construction, and because it is the big-endian split of a
+# monotonically-increasing 32-bit counter, the field-by-field version compare IS
+# the epoch compare -> strictly monotonic every second, no state file needed. The
+# high byte is ~0x68 today, so this also cleanly beats any poisoned low value.
+# Override with VERSION=a.b.c.d (all <=255, higher than the unit) to force one.
+_e=$(date +%s)
+VERSION="${VERSION:-$(( (_e >> 24) & 255 )).$(( (_e >> 16) & 255 )).$(( (_e >> 8) & 255 )).$(( _e & 255 ))}"
 
 OUT=/home/caner/alp-sdk/firmware/cc3501e/build/ti
 VOUT="$OUT/cc3501e-bridge.out"
