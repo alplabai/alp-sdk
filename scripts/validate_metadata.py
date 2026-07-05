@@ -297,12 +297,13 @@ def _check_chip_semantics(chip_files) -> list:
 
 
 def _check_chip_physical(chip_files) -> list:
-    """Semantic cross-checks for chip `physical:` block (pin→signal resolution + pad uniqueness).
+    """Semantic cross-checks for chip `physical:` block (pin/passive→signal resolution + pad uniqueness).
 
     Every `pins[].signal` must resolve to a declared `signals[]` name or a
-    power/ground net, and a footprint pad must appear at most once.  Mirrors
-    `_check_library_semantics()`: schema validates shape; this pass validates
-    meaning.  Returns a failure list shaped like `_check_files()`.
+    power/ground net, every `passives[].net` must resolve the same way, and a
+    footprint pad must appear at most once.  Mirrors `_check_library_semantics()`:
+    schema validates shape; this pass validates meaning.  Returns a failure
+    list shaped like `_check_files()`.
     """
     failures: list = []
     for path in chip_files:
@@ -329,6 +330,10 @@ def _check_chip_physical(chip_files) -> list:
             if pad in seen_pads:
                 msgs.append(f"physical.pins: pad '{pad}' used more than once")
             seen_pads[pad] = True
+        for passive in phys.get("passives", []):
+            net = passive.get("net")
+            if net not in sig_names and net not in _POWER_NETS:
+                msgs.append(f"physical.passives: net '{net}' not in signals[] or power nets")
         if msgs:
             failures.append((rel, msgs))
             print(f"FAIL {rel}")
@@ -338,40 +343,46 @@ def _check_chip_physical(chip_files) -> list:
 
 
 def _check_block_realizations(block_files, chip_files) -> list:
-	"""Semantic cross-checks for block `realizations[].parts[].chip` and `maps` targets.
+    """Semantic cross-checks for block `realizations[].parts[].chip`, `maps`, and `passives[].net`.
 
-	Every `realizations[].parts[].chip` must resolve to a chip manifest filename,
-	and every `maps` value must name a signal declared in the block's `interface`.
-	Returns a failure list shaped like `_check_files()`.
-	"""
-	failures: list = []
-	chip_ids = {p.stem for p in chip_files}
-	for path in block_files:
-		try:
-			rel = path.relative_to(REPO)
-		except ValueError:
-			rel = path  # out-of-tree (e.g. a test fixture); report as-is
-		try:
-			doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-		except Exception:
-			continue  # parse errors already reported by the schema pass
-		if not isinstance(doc, dict):
-			continue
-		iface = {e["signal"] for e in doc.get("interface", []) if isinstance(e, dict) and "signal" in e}
-		msgs: list = []
-		for r in doc.get("realizations", []):
-			for part in r.get("parts", []):
-				if part.get("chip") not in chip_ids:
-					msgs.append(f"realization '{r.get('id')}': part chip '{part.get('chip')}' has no metadata/chips manifest")
-				for _pin, sig in (part.get("maps") or {}).items():
-					if sig not in iface:
-						msgs.append(f"realization '{r.get('id')}': maps target '{sig}' not in interface[]")
-		if msgs:
-			failures.append((rel, msgs))
-			print(f"FAIL {rel}")
-			for m in msgs:
-				print(f"  · {m}")
-	return failures
+    Every `realizations[].parts[].chip` must resolve to a chip manifest filename,
+    every `maps` value must name a signal declared in the block's `interface`,
+    and every `realizations[].passives[].net` must resolve to an `interface`
+    signal or a power/ground net.  Returns a failure list shaped like
+    `_check_files()`.
+    """
+    failures: list = []
+    chip_ids = {p.stem for p in chip_files}
+    for path in block_files:
+        try:
+            rel = path.relative_to(REPO)
+        except ValueError:
+            rel = path  # out-of-tree (e.g. a test fixture); report as-is
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        iface = {e["signal"] for e in doc.get("interface", []) if isinstance(e, dict) and "signal" in e}
+        msgs: list = []
+        for r in doc.get("realizations", []):
+            for part in r.get("parts", []):
+                if part.get("chip") not in chip_ids:
+                    msgs.append(f"realization '{r.get('id')}': part chip '{part.get('chip')}' has no metadata/chips manifest")
+                for _pin, sig in (part.get("maps") or {}).items():
+                    if sig not in iface:
+                        msgs.append(f"realization '{r.get('id')}': maps target '{sig}' not in interface[]")
+            for passive in r.get("passives", []):
+                net = passive.get("net")
+                if net not in iface and net not in _POWER_NETS:
+                    msgs.append(f"realization '{r.get('id')}': passives net '{net}' not in interface[] or power nets")
+        if msgs:
+            failures.append((rel, msgs))
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+    return failures
 
 
 def _check_library_semantics(library_files) -> list:
@@ -630,8 +641,7 @@ def main() -> int:
                 "chip_id",
             )
             chip_failures += _check_chip_semantics(chip_files)
-            if chip_files:
-                chip_failures += _check_chip_physical(chip_files)
+            chip_failures += _check_chip_physical(chip_files)
 
     # Block manifests (YAML) against block-v1 schema.
     block_failures: list = []
@@ -647,8 +657,7 @@ def main() -> int:
                 lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
                 "block_id",
             )
-            if block_files:
-                block_failures += _check_block_realizations(block_files, chip_files)
+            block_failures += _check_block_realizations(block_files, chip_files)
 
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []

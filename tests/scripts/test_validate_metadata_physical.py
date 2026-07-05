@@ -41,6 +41,24 @@ def test_duplicate_pad_rejected(tmp_path):
     failures = vm._check_chip_physical([p])
     assert failures and any("pad" in m.lower() for _, msgs in failures for m in msgs)
 
+def test_passive_net_must_resolve(tmp_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm5", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "z.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "z", "display_name": "Z", "vendor": "v",
+        "mpn_population": ["Z"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": "SCL", "type": "bidir"}],
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public", "provenance": "web_provisional",
+                     "pins": [{"pad": "1", "signal": "SCL"}],
+                     "passives": [{"role": "pullup", "value": "4k7", "net": "SCLL",
+                                   "refdes_prefix": "R"}]},  # SCLL not in signals
+    }))
+    failures = vm._check_chip_physical([p])
+    assert failures and any("SCLL" in m for _, msgs in failures for m in msgs)
+
 def test_block_schema_exists():
     schema = json.loads((REPO / "metadata/schemas/block-v1.schema.json").read_text())
     assert schema["properties"]["block_id"]["pattern"] == "^[a-z][a-z0-9_]*$"

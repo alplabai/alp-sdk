@@ -85,7 +85,7 @@
     },
     "physical": {
       "type": "object", "additionalProperties": false,
-      "required": ["refdes_prefix", "package", "footprint", "pins", "visibility"],
+      "required": ["refdes_prefix", "package", "footprint", "pins", "visibility", "provenance"],
       "properties": {
         "refdes_prefix": { "type": "string", "pattern": "^[A-Z]+$" },
         "package": { "type": "string" },
