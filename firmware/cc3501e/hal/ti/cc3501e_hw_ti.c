@@ -1991,6 +1991,106 @@ int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len)
 	*out_len = off;
 	return CC3501E_HW_OK;
 }
+
+/* BLE_SCAN_STOP: cancel any in-flight GAP discovery (issues HCI over the shared
+ * HIF, so re-sync the bridge after).  Worker-routed off the SPI ISR. */
+int cc3501e_hw_ble_scan_stop(void)
+{
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL; /* BLE not enabled yet -> NOT_READY */
+	}
+	const int rc = cc3501e_nimble_scan_stop();
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_CONNECT: central-connect to addr_type|addr.  Blocks on the connection-
+ * complete HCI event over the shared HIF (worker-routed off the SPI ISR -- see
+ * worker.c ALP_CC3501E_CMD_BLE_CONNECT), then re-syncs the bridge SPI. */
+int cc3501e_hw_ble_connect(uint8_t addr_type, const uint8_t addr[6])
+{
+	if (addr == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL; /* BLE not enabled yet -> NOT_READY */
+	}
+	const int rc = cc3501e_nimble_connect(addr_type, addr);
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_DISCONNECT: terminate the active connection; blocks on the disconnect HCI
+ * event over the shared HIF, then re-syncs the bridge.  Idempotent (OK when no
+ * link is up). */
+int cc3501e_hw_ble_disconnect(void)
+{
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_disconnect();
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_GATT_REGISTER: confirm the fixed demo GATT service is live (the opaque
+ * descriptor is not parsed this rev -- see cc3501e_nimble_gatt_register).  Pure
+ * host-side attribute-table check: no HCI, so no bridge re-sync needed. */
+int cc3501e_hw_ble_gatt_register(const uint8_t *desc, uint16_t desc_len)
+{
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_gatt_register(desc, desc_len);
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_GATT_NOTIFY: push a notification to the connected peer.  Blocks on HCI
+ * over the shared HIF, so re-sync the bridge after (worker-routed). */
+int cc3501e_hw_ble_gatt_notify(uint16_t handle, const uint8_t *data, uint16_t data_len)
+{
+	if (data == 0 && data_len != 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_gatt_notify(handle, data, data_len);
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_GATT_READ: GATT-client read of a peer attribute; blocks on the read-
+ * response HCI over the shared HIF, packs the value into out, re-syncs the
+ * bridge (worker-routed -- the payload+reply path copies out back to the host). */
+int cc3501e_hw_ble_gatt_read(uint16_t handle, uint8_t *out, uint16_t cap, uint16_t *out_len)
+{
+	if (out == 0 || out_len == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	*out_len = 0u;
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_gatt_read(handle, out, cap, out_len);
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_GATT_WRITE: GATT-client acknowledged write to a peer attribute; blocks on
+ * the write-response HCI over the shared HIF, then re-syncs the bridge. */
+int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t data_len)
+{
+	if (data == 0 && data_len != 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_gatt_write(handle, data, data_len);
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
 #else  /* !CC3501E_BLE -- stub / Wi-Fi-only / silicon-free build */
 int cc3501e_hw_ble_enable(void)
 {
@@ -2028,12 +2128,6 @@ int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len)
 	if (out_len != 0) {
 		*out_len = 0u;
 	}
-	return CC3501E_HW_ERR_NOTIMPL;
-}
-#endif /* CC3501E_BLE */
-
-int cc3501e_hw_ble_scan_start(void)
-{
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
@@ -2083,6 +2177,15 @@ int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t dat
 	(void)handle;
 	(void)data;
 	(void)data_len;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+#endif /* CC3501E_BLE */
+
+/* BLE_SCAN_START: streaming-scan kickoff has no NimBLE mapping this rev (the
+ * record-returning cc3501e_hw_ble_scan is the supported scan path) -- NOTIMPL on
+ * every build. */
+int cc3501e_hw_ble_scan_start(void)
+{
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
