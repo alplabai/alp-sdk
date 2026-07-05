@@ -28,6 +28,7 @@
 
 #include "protocol.h"
 #include "worker.h"
+#include "event_ring.h"
 #include "../hal/cc3501e_hw.h"
 
 /* --------------------------------------------------------------- */
@@ -998,6 +999,26 @@ static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 	return ALP_CC3501E_RESP_OK;
 }
 
+/* GET_PENDING_EVENTS (0x05): drain the async-event ring into the reply.  Reply
+ * data is a packed list of { evt_opcode(1) | len(1) | payload[len] } entries
+ * (alp_cc3501e_event_entry_t); an empty ring yields zero data bytes (status
+ * OK).  Fast + non-blocking -- just an IRQ-safe memcpy out of the ring -- so it
+ * runs INLINE in the SPI-ISR dispatch (unlike the seconds-long radio getters,
+ * which the worker routes off-ISR).  The producers (the Wi-Fi connect/disconnect
+ * path, etc.) push into the ring from thread context. */
+static alp_cc3501e_resp_t handle_get_pending_events(const uint8_t *req,
+                                                    size_t         req_len,
+                                                    uint8_t       *reply_data,
+                                                    size_t         reply_cap,
+                                                    size_t        *reply_data_len)
+{
+	(void)req;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	*reply_data_len = event_ring_drain(reply_data, reply_cap);
+	return ALP_CC3501E_RESP_OK;
+}
+
 /* --------------------------------------------------------------- */
 /* OTA firmware update (over-the-bridge PSA-FWU streaming) -- v0.2    */
 /* --------------------------------------------------------------- */
@@ -1128,6 +1149,9 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
 		break;
 	case ALP_CC3501E_CMD_GET_DIAG_INFO:
 		h = handle_get_diag_info;
+		break;
+	case ALP_CC3501E_CMD_GET_PENDING_EVENTS:
+		h = handle_get_pending_events;
 		break;
 	/* OTA firmware update (v0.2). */
 	case ALP_CC3501E_CMD_OTA_BEGIN:

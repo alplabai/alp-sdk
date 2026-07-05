@@ -183,6 +183,134 @@ static void companion_conn_thread(void *a, void *b, void *c)
  * conn_pending == false, so it costs nothing until a connect submits. */
 K_THREAD_DEFINE(companion_conn_tid, 1024, companion_conn_thread, NULL, NULL, NULL, 7, 0, 0);
 
+/* ---- async EVT_* delivery (task #17): host-polled event queue ------------ *
+ * The CC3501E firmware queues async events (Wi-Fi connect/disconnect, ...) that
+ * it CANNOT push -- the CC35 GPIO17 -> Alif P2_6 attention line is a bodge not
+ * routed on the stock EVK.  So the PRIMARY, benchable mechanism is this low-rate
+ * poll: a background thread calls cc3501e_poll_events() every ~500 ms, which
+ * drains the firmware ring (CMD_GET_PENDING_EVENTS) and invokes the callback
+ * below once per queued event -- printing it so the bench can SEE an async event
+ * (connect / disconnect the Wi-Fi and watch "[event] wifi ..." appear).  The
+ * opt-in interrupt path (CONFIG_ALP_SDK_CC3501E_EVENT_IRQ, below) drives the
+ * SAME drain from a P2_6 edge instead, for a bodged unit. */
+#define ALP_COMPANION_EVENT_POLL_MS 500
+
+/* Runs on the driver's RX/poll context (here: the event-poll thread or the IRQ
+ * workqueue) while the bridge bus lock is held.  Print-only -- printk goes to
+ * the active console backend, so it is safe off the shell thread. */
+static void companion_event_cb(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
+{
+	ARG_UNUSED(payload);
+	ARG_UNUSED(user);
+	switch (opcode) {
+	case ALP_CC3501E_EVT_WIFI_CONNECTED:
+		printk("[event] wifi connected\n");
+		break;
+	case ALP_CC3501E_EVT_WIFI_DISCONNECTED:
+		printk("[event] wifi disconnected\n");
+		break;
+	case ALP_CC3501E_EVT_BLE_CONNECTED:
+		printk("[event] ble connected\n");
+		break;
+	case ALP_CC3501E_EVT_BLE_DISCONNECTED:
+		printk("[event] ble disconnected\n");
+		break;
+	case ALP_CC3501E_EVT_GPIO_INTERRUPT:
+		printk("[event] gpio interrupt\n");
+		break;
+	default:
+		printk("[event] opcode 0x%02x (len %u)\n", opcode, (unsigned int)len);
+		break;
+	}
+}
+
+/* Drain + dispatch pending events under the bridge bus lock.  Shared by the
+ * timer-poll thread and the opt-in IRQ workqueue.  No-op until a companion is
+ * registered (the cb is attached lazily on first poll). */
+static bool companion_event_cb_set;
+
+static void companion_drain_events(void)
+{
+	if (companion_cc3501e == NULL) {
+		return;
+	}
+	k_mutex_lock(&companion_bus_lock, K_FOREVER);
+	if (!companion_event_cb_set) {
+		(void)cc3501e_set_event_callback(companion_cc3501e, companion_event_cb, NULL);
+		companion_event_cb_set = true;
+	}
+	(void)cc3501e_poll_events(companion_cc3501e);
+	k_mutex_unlock(&companion_bus_lock);
+}
+
+static void companion_event_thread(void *a, void *b, void *c)
+{
+	ARG_UNUSED(a);
+	ARG_UNUSED(b);
+	ARG_UNUSED(c);
+	for (;;) {
+		k_msleep(ALP_COMPANION_EVENT_POLL_MS);
+		companion_drain_events();
+	}
+}
+
+/* Low priority (7), like the connect worker: the shell stays above it.  Costs a
+ * light GET_PENDING_EVENTS round-trip every 500 ms once a companion is
+ * registered, and nothing (a sleep) before that. */
+K_THREAD_DEFINE(companion_event_tid, 1024, companion_event_thread, NULL, NULL, NULL, 7, 0, 0);
+
+#if IS_ENABLED(CONFIG_ALP_SDK_CC3501E_EVENT_IRQ)
+/* ---- opt-in interrupt path (bodged unit only) --------------------------- *
+ * HW-GATED + default-off.  Needs the CC35 GPIO17 -> Alif P2_6 attention wire
+ * (a bodge, absent on the stock EVK) AND CC35 firmware driving GPIO17 when an
+ * event is pending; a board with the bodge provides a `cc3501e-attn` DT alias
+ * pointing at P2_6 (gpio2 pin 6).  On each edge the ISR schedules a workqueue
+ * item (NOT the drain itself -- cc3501e_poll_events does SPI I/O and takes a
+ * mutex, neither ISR-safe) that runs the same companion_drain_events() as the
+ * timer poll.  This coexists with the timer poll (which stays the default,
+ * benchable path); the edge just makes delivery immediate on a bodged unit. */
+#include <zephyr/drivers/gpio.h>
+
+static const struct gpio_dt_spec companion_attn = GPIO_DT_SPEC_GET(DT_ALIAS(cc3501e_attn), gpios);
+static struct gpio_callback      companion_attn_cb_data;
+
+static void companion_event_work_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	companion_drain_events();
+}
+static K_WORK_DEFINE(companion_event_work, companion_event_work_fn);
+
+static void companion_attn_isr(const struct device *port, struct gpio_callback *cb, uint32_t pins)
+{
+	ARG_UNUSED(port);
+	ARG_UNUSED(cb);
+	ARG_UNUSED(pins);
+	/* Defer the SPI drain to a workqueue -- never do bridge I/O in the ISR. */
+	k_work_submit(&companion_event_work);
+}
+
+static int companion_event_irq_init(void)
+{
+	if (!gpio_is_ready_dt(&companion_attn)) {
+		return -ENODEV;
+	}
+	int rc = gpio_pin_configure_dt(&companion_attn, GPIO_INPUT);
+	if (rc != 0) {
+		return rc;
+	}
+	/* Edge-triggered: the CC35 pulses GPIO17 when an event is pending.  ACTIVE
+	 * covers whichever polarity the bodge/overlay declares in the DT flags. */
+	rc = gpio_pin_interrupt_configure_dt(&companion_attn, GPIO_INT_EDGE_TO_ACTIVE);
+	if (rc != 0) {
+		return rc;
+	}
+	gpio_init_callback(&companion_attn_cb_data, companion_attn_isr, BIT(companion_attn.pin));
+	return gpio_add_callback(companion_attn.port, &companion_attn_cb_data);
+}
+SYS_INIT(companion_event_irq_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+#endif /* CONFIG_ALP_SDK_CC3501E_EVENT_IRQ */
+
 static int cmd_companion_wifi_scan(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);

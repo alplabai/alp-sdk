@@ -167,6 +167,24 @@ config ALP_SDK_CONSOLE_CMD_COMPANION
 	  GD32 supervisor singleton automatically; on Alif the application
 	  registers its CC3501E handle via alp_console_companion_set().
 
+config ALP_SDK_CC3501E_EVENT_IRQ
+	bool "CC3501E async events via a P2_6 attention interrupt (bodge only)"
+	depends on ALP_SDK_CONSOLE_CMD_COMPANION && !ALP_SDK_V2N_SUPERVISOR && GPIO
+	default n
+	help
+	  Opt-in INTERRUPT delivery for the CC3501E async event queue.  When
+	  set, the companion console configures the Alif P2_6 pin (gpio2 pin 6
+	  -- the CC35 GPIO17 attention line) as an EDGE interrupt whose ISR
+	  schedules a workqueue drain of the event ring (cc3501e_poll_events),
+	  in addition to the default ~500 ms timer poll.
+
+	  HW-GATED: the GPIO17 -> P2_6 line is a BODGE that is NOT routed on the
+	  stock E1M-AEN EVK (the carrier repurposes those pads), and it needs
+	  CC35 firmware that drives GPIO17 when an event is pending.  A board
+	  with the bodge must provide a `cc3501e-attn` devicetree alias pointing
+	  at P2_6.  Leave OFF (the default) on stock hardware -- the host-polled
+	  path needs no attention pin and is the benchable mechanism.
+
 # Active SoC selection — drives <alp/soc_caps.h> capability checks.
 # When no choice is selected the SDK's runtime validation is permissive
 # (default macros = UINT16_MAX); selecting a SoC enables strict
