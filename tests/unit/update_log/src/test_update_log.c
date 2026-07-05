@@ -427,11 +427,12 @@ ZTEST(alp_update_log, test_public_surface_sw_tier)
  */
 
 #ifdef CONFIG_ALP_SDK_UPDATE_LOG_PERSIST
+alp_status_t
+alp_ulog_sw_tier_test_corrupt_persisted_entry(uint64_t seq, size_t offset, uint8_t xor_mask);
+alp_status_t alp_ulog_sw_tier_test_delete_persisted_entry(uint64_t seq);
 
-ZTEST(alp_update_log, test_persist_entries_survive_reinit)
+static void append_three_persisted_entries(void)
 {
-	alp_ulog_sw_tier_test_reset(true); /* pristine store */
-
 	alp_update_log_t *log = alp_update_log_open();
 	zassert_not_null(log);
 	const char *vers[3] = { "1.0.0", "1.1.0", "2.0.0" };
@@ -441,12 +442,20 @@ ZTEST(alp_update_log, test_persist_entries_survive_reinit)
 		zassert_equal(alp_update_log_append(log, &e), ALP_OK);
 	}
 	alp_update_log_close(log);
+}
+
+ZTEST(alp_update_log, test_persist_entries_survive_reinit)
+{
+	alp_ulog_sw_tier_test_reset(true); /* pristine store */
+
+	append_three_persisted_entries();
 
 	alp_ulog_sw_tier_test_reset(false); /* "reboot": keep flash only */
 
-	log = alp_update_log_open();
+	alp_update_log_t *log = alp_update_log_open();
 	zassert_not_null(log);
-	uint64_t n = 0;
+	const char *vers[3] = { "1.0.0", "1.1.0", "2.0.0" };
+	uint64_t    n       = 0;
 	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
 	zassert_equal(n, 3, "entries lost across re-init (got %llu)", (unsigned long long)n);
 
@@ -467,6 +476,45 @@ ZTEST(alp_update_log, test_persist_entries_survive_reinit)
 	}
 	alp_update_log_close(log);
 	alp_ulog_sw_tier_test_reset(true); /* leave a clean store behind */
+}
+
+ZTEST(alp_update_log, test_persist_verify_detects_mutated_entry)
+{
+	alp_ulog_sw_tier_test_reset(true);
+	append_three_persisted_entries();
+
+	alp_ulog_sw_tier_test_reset(false); /* "reboot": keep flash only */
+	zassert_equal(alp_ulog_sw_tier_test_corrupt_persisted_entry(1, 12, 0xFF), ALP_OK);
+	alp_ulog_sw_tier_test_reset(false);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 0;
+	zassert_equal(alp_update_log_verify(log, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN);
+	zassert_equal(bad, 2);
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
+}
+
+ZTEST(alp_update_log, test_persist_verify_detects_deleted_entry)
+{
+	alp_ulog_sw_tier_test_reset(true);
+	append_three_persisted_entries();
+
+	alp_ulog_sw_tier_test_reset(false); /* "reboot": keep flash only */
+	zassert_equal(alp_ulog_sw_tier_test_delete_persisted_entry(2), ALP_OK);
+	alp_ulog_sw_tier_test_reset(false);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 0;
+	zassert_equal(alp_update_log_verify(log, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_TRUNCATED);
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
 }
 
 ZTEST(alp_update_log, test_persist_full_log_nomem_no_wrap)
