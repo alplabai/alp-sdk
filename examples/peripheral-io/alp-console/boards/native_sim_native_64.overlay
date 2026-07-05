@@ -1,0 +1,33 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim stand-ins for alp-console: the shell UART alias and a
+ * minimal GPIO emulator so the `alp gpio` command enumerates something.
+ * No CC3501E (companion guard in main.c compiles out CONFIG_ALP_SDK_CHIP_CC3501E).
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		/* Shell UART: maps to the native_sim UART emulator. */
+		alp-uart0 = &uart0;
+	};
+
+	gpio_emul0: gpio_emul0 {
+		compatible = "zephyr,gpio-emul";
+		status = "okay";
+		gpio-controller;
+		rising-edge;
+		falling-edge;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+	};
+
+	/* Minimal alp,pin-array so the GPIO back-end initialises (no real pins). */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&gpio_emul0 0 GPIO_ACTIVE_HIGH>;   /* [0] stub pin */
+	};
+};

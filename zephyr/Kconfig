@@ -10,6 +10,178 @@ config ALP_SDK
 
 if ALP_SDK
 
+config ALP_SDK_BANNER
+	bool "Print an Alp SDK identity banner at boot"
+	default y
+	help
+	  Print a one-line "Alp SDK <version> | <board> | (c) Alp Lab AB"
+	  banner to the console during APPLICATION-level init.  When
+	  CONFIG_ALP_SDK_HW_INFO is also enabled and the SoM identity
+	  EEPROM is readable, the board field shows the live SoM SKU +
+	  hardware revision from the EEPROM manifest; otherwise it falls
+	  back to the build-time board name (CONFIG_BOARD).
+
+config ALP_SDK_VERSION
+	string "Alp SDK version string (boot banner / runtime)"
+	default "0.6.0"
+	help
+	  Human-readable Alp SDK release shown in the boot banner and
+	  available to apps.  Tracks VERSIONS.md.  (The repo-root
+	  CMakeLists project() VERSION is build metadata and may lag
+	  this string.)
+
+config ALP_SDK_SOM_SKU
+	string "SoM SKU identity string (boot-banner fallback)"
+	default ""
+	help
+	  The SoM part number (board.yaml `som.sku`), emitted into the
+	  generated alp.conf by scripts/alp_orchestrate.py.  The boot banner
+	  shows this as the SoM identity when the on-module identity EEPROM is
+	  absent, unprovisioned, or unreadable (before falling back to the raw
+	  CONFIG_BOARD target).  Empty when built without alp_orchestrate.py.
+
+config ALP_SDK_SOC_NAME
+	string "SoC display name (boot banner)"
+	default ""
+	help
+	  Vendor + family + part (e.g. "Alif Ensemble E8"), emitted from the SoC
+	  spec JSON by scripts/alp_orchestrate.py.  Shown in the boot banner.
+
+config ALP_SDK_SOC_CPUS
+	string "SoC CPU complement description (boot banner)"
+	default ""
+	help
+	  Pre-formatted core list -- the active core marked and listed first --
+	  e.g. "M55-HE @160MHz (active) + M55-HP @400MHz + 2x Cortex-A32 @800MHz".
+	  Emitted from the SoC spec JSON cores[] by scripts/alp_orchestrate.py.
+
+config ALP_SDK_SOC_NPUS
+	string "SoC NPU complement description (boot banner)"
+	default ""
+	help
+	  Pre-formatted NPU list, e.g. "Ethos-U85 + 2x Ethos-U55".  Emitted from
+	  the SoC spec JSON npus[] by scripts/alp_orchestrate.py.
+
+config ALP_SDK_SOC_SRAM_KB
+	int "SoC total on-chip SRAM in KB (boot banner; 0 = unknown)"
+	default 0
+	help
+	  Total on-chip SRAM of the SoC (soc_ram_kb from the SoC spec JSON).  The
+	  boot banner prefers this over the build's chosen sram region size.
+
+config ALP_SDK_SOC_MRAM_KB
+	int "SoC on-chip MRAM/flash in KB (boot banner; 0 = unknown)"
+	default 0
+	help
+	  On-chip MRAM/flash of the SoC (soc_flash_mb from the SoC spec JSON,
+	  in KB).  The boot banner prefers this over the chosen flash region.
+
+config ALP_SDK_CONSOLE
+	bool "Alp SoM interactive console (Zephyr shell + `alp` commands)"
+	depends on ALP_SDK
+	default y
+	select SHELL
+	help
+	  Register the `alp` command tree on the Zephyr shell: board
+	  identity, gpio / i2c / adc / pwm pokes via the portable <alp/*>
+	  API, a memory peek, a clock dump, and a companion-chip bridge.
+	  Read-only verbs only unless ALP_SDK_CONSOLE_UNSAFE is also set.
+
+config ALP_SDK_CONSOLE_UNSAFE
+	bool "Allow write / destructive `alp` console commands"
+	depends on ALP_SDK_CONSOLE
+	default n
+	help
+	  Compile the write / destructive verbs into the console:
+	  `mem wr`, `gpio write`, `i2c write`, `pwm set`,
+	  companion writes, and `reboot`.  Leave OFF for field / production
+	  builds so a mis-typed poke cannot brick a live unit; the verbs are
+	  then physically absent from the binary and from `help`.
+
+config ALP_SDK_CONSOLE_CMD_BOARD
+	bool "alp board command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp board` sub-command (SoM identity, SDK version,
+	  uptime).  Disable to shave the identity strings from tight builds.
+
+config ALP_SDK_CONSOLE_CMD_MEM
+	bool "alp mem command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp mem` sub-command (rd always; wr under UNSAFE).
+
+config ALP_SDK_CONSOLE_CMD_GPIO
+	bool "alp gpio command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp gpio` sub-command (read always; write under UNSAFE).
+
+config ALP_SDK_CONSOLE_CMD_I2C
+	bool "alp i2c command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp i2c` sub-command (scan/read always; write under UNSAFE).
+
+config ALP_SDK_CONSOLE_CMD_ADC
+	bool "alp adc command"
+	depends on ALP_SDK_CONSOLE && ALP_SDK_PERIPH_ADC
+	default y
+	help
+	  Compile the `alp adc` sub-command (one-shot raw read).  Requires
+	  ALP_SDK_PERIPH_ADC; automatically absent when ADC is disabled.
+
+config ALP_SDK_CONSOLE_CMD_PWM
+	bool "alp pwm command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp pwm` sub-command (set period/duty, UNSAFE only).
+
+config ALP_SDK_CONSOLE_CMD_CLK
+	bool "alp clk command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp clk` sub-command (system clock and tick rate).
+
+config ALP_SDK_CONSOLE_CMD_RES
+	bool "alp res command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp res` sub-command -- a live resource view: the active
+	  CPU core + the SoC core complement, the SoC SRAM/MRAM totals + this
+	  build's RAM region, and a per-thread stack used/free table (needs
+	  CONFIG_THREAD_MONITOR + CONFIG_THREAD_STACK_INFO for the table).
+
+config ALP_SDK_CONSOLE_CMD_REBOOT
+	bool "alp reboot command"
+	depends on ALP_SDK_CONSOLE
+	default y
+	help
+	  Compile the `alp reboot` sub-command (warm reset, UNSAFE only).
+
+config ALP_SDK_CONSOLE_CMD_COMPANION
+	bool "alp companion command (GD32 on V2N / CC3501E on Alif)"
+	depends on ALP_SDK_CONSOLE
+	default y if ALP_SDK_V2N_SUPERVISOR || ALP_SDK_CHIP_CC3501E
+	default n
+	help
+	  Compile the `alp companion` command group.  On V2N it binds the
+	  GD32 supervisor singleton automatically; on Alif the application
+	  registers its CC3501E handle via alp_console_companion_set().
+
+# Active SoC selection — drives <alp/soc_caps.h> capability checks.
+# When no choice is selected the SDK's runtime validation is permissive
+# (default macros = UINT16_MAX); selecting a SoC enables strict
+# rejection of configs that exceed its documented hardware caps.
+# See docs/adr/0002-error-mechanism.md.
+
 # Active SoC selection — drives <alp/soc_caps.h> capability checks.
 # When no choice is selected the SDK's runtime validation is permissive
 # (default macros = UINT16_MAX); selecting a SoC enables strict
@@ -3396,27 +3568,3 @@ config MRAM_FLASH_ALIF
 # upstream ships no peripheral-flow PL330).  Drivers under zephyr/drivers/dma/.
 rsource "drivers/dma/Kconfig.dma_pl330_alif"
 rsource "drivers/dma/Kconfig.dma_alif_event_router"
-
-# -------------------------------------------------------------------
-# Improved console boot banner (<alp/console>) -- replaces Zephyr's
-# basic one-line boot banner with a Linux-style header (SDK version,
-# board/SoC/core, SoM MPN, memory map, console) and reads the HW
-# manifest from EEPROM at boot.  src/zephyr/console_banner.c.
-# -------------------------------------------------------------------
-config ALP_SDK_CONSOLE_BANNER
-	bool "Alp SDK improved console boot banner"
-	depends on ALP_SDK
-	default y
-	select PRINTK
-	help
-	  Print an informative Linux-console-style boot header on the app
-	  console (SDK version, board target, SoC + core, on-module memory
-	  map, and the console itself) and read the HW manifest (SoM MPN /
-	  hw-rev / serial) from the module EEPROM at boot, instead of
-	  Zephyr's basic "*** Booting Zephyr OS ***" banner.
-
-# Turn OFF Zephyr's basic boot banner when ours is on, so there is one
-# canonical boot header everywhere.  Apps can still force it back with an
-# explicit CONFIG_BOOT_BANNER=y in prj.conf.
-config BOOT_BANNER
-	default n if ALP_SDK_CONSOLE_BANNER

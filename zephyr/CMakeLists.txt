@@ -85,8 +85,26 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
 )
 
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_BANNER
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console_banner.c)
+# Boot-identity banner (CONFIG_ALP_SDK_BANNER, default y) -- one line at
+# APPLICATION init naming the SDK + SoM + manufacturer.  Data-driven from the
+# SoM identity EEPROM when CONFIG_ALP_SDK_HW_INFO is on (src/zephyr/alp_banner.c).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BANNER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/alp_banner.c)
+
+# Alp SoM console (CONFIG_ALP_SDK_CONSOLE) -- the `alp` Zephyr-shell command
+# tree.  Each group is its own TU attaching to the `alp` root via the
+# decentralized SHELL_SUBCMD_ADD section mechanism, so they list here flat.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_mem.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_gpio.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_i2c.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_periph.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_sys.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion.c)
+
+
 
 
 # Storage class dispatcher + backends.
