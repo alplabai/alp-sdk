@@ -163,14 +163,8 @@ class Orchestrator:
         cmd = _slice_command(self.project, slice_)
         if cmd is None:
             slice_.status = "skipped"
-            if slice_.os == "zephyr" and slice_.app == STOCK_SHIM_APP:
-                slice_.reason = (
-                    f"stock M-core shim (app: {STOCK_SHIM_APP}) -- image body "
-                    f"not in the SDK tree yet (issue #49); override "
-                    f"cores.{slice_.core_id}.app to build this core")
-            else:
-                slice_.reason = ("no command resolver implemented yet for "
-                                 f"os: {slice_.os} -- Phase 3 wires this up")
+            slice_.reason = ("no command resolver implemented yet for "
+                             f"os: {slice_.os} -- Phase 3 wires this up")
             return slice_
 
         # Slice subprocess: scoped env + dedicated log file.
@@ -328,11 +322,12 @@ def _slice_flash_recipe(
     return (None, None)
 
 
-# Placeholder M-core "stock shim" app token (Zephyr side).  Accepted by the
-# SoM-preset schema and defaulted into M-core slots (AEN m55_hp/he, V2N
-# m33_sm, NX91 m33), but the shim image body is not yet in the SDK tree
-# (issue #49), so it resolves to no build command.
+# M-core "stock shim" app token (Zephyr side).  Accepted by the SoM-preset
+# schema and defaulted into M-core slots (AEN m55_hp/he, V2N m33_sm,
+# NX91 m33).  The token resolves to the SDK-owned app below rather than a
+# project-local path.
 STOCK_SHIM_APP = "alp-stock-shim"
+STOCK_SHIM_DIR = REPO / "firmware" / "alp-stock-shim"
 
 
 def _slice_command(
@@ -341,16 +336,9 @@ def _slice_command(
 ) -> Optional[list[str]]:
     """Resolve the build command for a slice.  Returns None when there is no
     buildable command yet -- the caller carries the slice as `skipped` /
-    `no-command`, never dropped.  This includes the stock M-core shim
-    (`app: alp-stock-shim`), whose image body isn't in the SDK tree yet
-    (issue #49)."""
+    `no-command`, never dropped."""
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
-            return None
-        # The stock shim is a placeholder token, not a buildable app dir;
-        # resolve no command rather than west-building a path that doesn't
-        # exist.  Override cores.<id>.app with a real app to build the core.
-        if slice_.app == STOCK_SHIM_APP:
             return None
         cmd = [
             "west", "build",
@@ -388,6 +376,8 @@ def _slice_command(
 
 def _resolve_app_path(app: str) -> Path:
     """Resolve `./linux` or absolute paths from a slice.app."""
+    if app == STOCK_SHIM_APP:
+        return STOCK_SHIM_DIR
     p = Path(app)
     if p.is_absolute():
         return p
