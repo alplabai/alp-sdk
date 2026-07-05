@@ -418,6 +418,15 @@ void cc3501e_hw_init(void)
 extern const unsigned char cc3501e_ota_candidate[];
 extern const unsigned int  cc3501e_ota_candidate_len;
 
+/* psa_fwu_write granularity for the SELFTEST installer: 256 B = the CC35 flash
+ * page (a 4-byte-aligned flash write block).  This is the validated selftest
+ * chunk (host cc3501e_ota_update mirrors it: chips/cc3501e/cc3501e.c documents
+ * "the validated SELFTEST installer used CC3501E_OTA_WRITE_CHUNK 256").  Its
+ * original definition here was dropped when the OTA-over-bridge FINISH burst
+ * (CC3501E_OTA_FINISH_FLASH_BLOCK, below) was added, which broke --ota-selftest
+ * builds -- restored so the selftest installer's use (below) resolves. */
+#define CC3501E_OTA_WRITE_CHUNK 256u
+
 /* Install a GPE-format signed vendor image into the alternate (non-primary)
  * vendor slot and request the reboot that performs the swap.  Returns 0 on
  * "install staged + reboot requested" (does not return if reboot is immediate),
@@ -627,8 +636,11 @@ void cc3501e_hw_notify_reply_sent(void)
  * the bring-up task with a single bridge re-arm after.  (r2 adds CS + a host-IRQ;
  * then per-chunk flash + a smaller buffer become viable.) */
 #define CC3501E_OTA_IMAGE_MAX (64u * 1024u) /* max staged image; begin rejects larger */
-#define CC3501E_OTA_WRITE_CHUNK                                                                    \
-	4096u /* finish flash block: big => few psa_fwu_write calls (each tears the bridge DMA), short burst */
+/* FINISH flash block for the OTA-over-bridge path (distinct from the SELFTEST
+ * installer's CC3501E_OTA_WRITE_CHUNK; a --ota-selftest build compiles both, so
+ * they must not collide): big => few psa_fwu_write calls (each tears the bridge
+ * DMA), short burst.  4096 is a multiple of the 256 B flash page. */
+#define CC3501E_OTA_FINISH_FLASH_BLOCK 4096u
 
 #define OTA_OP_IDLE     0u
 #define OTA_OP_BEGIN    1u
@@ -697,7 +709,7 @@ static int ota_do_begin(void)
 
 /* FINISH: commit the whole RAM-staged image to the target slot in ONE flash burst
  * (manifest = first TI_FWU_MANIFEST_SIZE bytes -> psa_fwu_start; the remainder in
- * CC3501E_OTA_WRITE_CHUNK pages -> psa_fwu_write), finalize + install, then arm
+ * CC3501E_OTA_FINISH_FLASH_BLOCK pages -> psa_fwu_write), finalize + install, then arm
  * the swap-reboot.  All the OTA flash (hence all bridge-DMA disruption) is here. */
 static int ota_do_finish(void)
 {
@@ -725,8 +737,8 @@ static int ota_do_finish(void)
 	uint32_t since_rearm = 0u;
 	for (uint32_t off = (uint32_t)TI_FWU_MANIFEST_SIZE; off < ota.total_len;) {
 		uint32_t n = ota.total_len - off;
-		if (n > CC3501E_OTA_WRITE_CHUNK) {
-			n = CC3501E_OTA_WRITE_CHUNK;
+		if (n > CC3501E_OTA_FINISH_FLASH_BLOCK) {
+			n = CC3501E_OTA_FINISH_FLASH_BLOCK;
 		}
 		if (psa_fwu_write(ota.target, off, &ota.image_buf[off], n) != PSA_SUCCESS) {
 			return CC3501E_HW_ERR_IO;
