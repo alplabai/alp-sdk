@@ -1,0 +1,46 @@
+# Alp SDK chip manifest: Murata LBEE0ZZ2KL (Type 2KL) Wi-Fi 6 + Bluetooth LE.
+schema_version:   1
+chip_id:          murata_lbee0zz2kl
+driver_status:    planned          # Linux/Android/freeRTOS host stack;
+                                   # no Alp SDK chip-driver body yet.
+display_name:     "Murata LBEE0ZZ2KL Type 2KL Wi-Fi 6 + Bluetooth 5.4 LE (NXP IW610F)"
+vendor:           murata
+mpn_population:
+  - "LBEE0ZZ2KL"
+silicon_under_lid:
+  - "NXP IW610F"
+
+datasheet:
+  primary:        "https://www.murata.com/en-us/products/connectivitymodule/wi-fi-bluetooth/overview/lineup/type2kl"
+
+notes: |
+  Candidate N93 on-module Wi-Fi/Bluetooth combo. Murata lists Type 2KL
+  as an NXP IW610F-based 2.4/5 GHz Wi-Fi 6 HE20 + Bluetooth 5.4 Low
+  Energy module with SDIO or USB for Wi-Fi and UART or USB for
+  Bluetooth.
+
+bus:              sdio              # Wi-Fi data path; Bluetooth uses UART.
+
+host_interfaces:
+  wifi:           SDIO/USB
+  bluetooth:      UART/USB
+
+radio:
+  wifi:           "802.11a/b/g/n/ac/ax HE20 1x1, 2.4GHz + 5GHz, up to 114.7Mbps PHY"
+  bluetooth:      "Bluetooth 5.4 Low Energy, up to 2Mbps PHY"
+  ieee802154:     false
+
+physical:
+  dimension_mm:   "7.7 x 8.8 x 1.3"
+  antenna:        external
+  operating_temp_deg_c: "-40..85"
+
+kconfig:
+  yocto:          n/a
+
+families:
+  - nxp-imx9
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard

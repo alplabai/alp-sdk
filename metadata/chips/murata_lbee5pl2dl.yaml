@@ -1,0 +1,47 @@
+# Alp SDK chip manifest: Murata LBEE5PL2DL (Type 2DL) Wi-Fi 6 + Bluetooth 5.3.
+schema_version:   1
+chip_id:          murata_lbee5pl2dl
+driver_status:    planned          # Linux/Android host stack; no Alp SDK
+                                   # chip-driver body yet.
+display_name:     "Murata LBEE5PL2DL Type 2DL Wi-Fi 6 + Bluetooth 5.3 (NXP IW611)"
+vendor:           murata
+mpn_population:
+  - "LBEE5PL2DL"
+  - "LBEE5PL2DL-921"
+silicon_under_lid:
+  - "NXP IW611"
+
+datasheet:
+  primary:        "https://www.murata.com/en-us/products/connectivitymodule/wi-fi-bluetooth/overview/lineup/type2dl"
+
+notes: |
+  Candidate N93 on-module Wi-Fi/Bluetooth combo. Murata lists Type 2DL
+  as an NXP IW611-based 2.4/5 GHz Wi-Fi 6 + Bluetooth 5.3 BR/EDR/LE
+  module with SDIO for Wi-Fi, UART for Bluetooth, and PCM/I2S audio.
+
+bus:              sdio              # Wi-Fi data path; Bluetooth uses UART.
+
+host_interfaces:
+  wifi:           SDIO
+  bluetooth:      UART
+  audio:          PCM/I2S
+
+radio:
+  wifi:           "802.11a/b/g/n/ac/ax 1x1, 2.4GHz + 5GHz, up to 601Mbps PHY"
+  bluetooth:      "Bluetooth 5.3 BR/EDR/LE, up to 2Mbps PHY"
+  ieee802154:     false
+
+physical:
+  dimension_mm:   "7.7 x 8.8 x 1.3"
+  antenna:        external
+  operating_temp_deg_c: "-40..85"
+
+kconfig:
+  yocto:          n/a
+
+families:
+  - nxp-imx9
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard
