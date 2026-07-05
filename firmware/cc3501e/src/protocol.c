@@ -58,7 +58,7 @@ static uint32_t get_le32(const uint8_t *p)
 /* Firmware *release* version reported by GET_DIAG_INFO.fw_version (u16) --
  * distinct from ALP_CC3501E_PROTOCOL_VERSION (GET_VERSION).  Encodes
  * firmware-version.txt 0.1.0 as 0x0001 (the first release). */
-#define CC3501E_BRIDGE_FW_VERSION_U16 0x0001u
+#define CC3501E_BRIDGE_FW_VERSION_U16 0x0002u
 
 /* Diagnostics state (firmware-side): last_error = the most recent non-OK
  * response emitted; the frame counters feed DIAG_GET_STATS.  All are
@@ -583,6 +583,10 @@ static alp_cc3501e_resp_t handle_ble_enable(const uint8_t *req,
 	    ALP_CC3501E_CMD_BLE_ENABLE, 0u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
+/* BLE_DISABLE (0x31): tear down advertising + scanning.  Worker-routed
+ * (argless), identical to BLE_ENABLE/SCAN: the real body issues HCI over the
+ * shared HIF and re-syncs the bridge SPI, both of which block and so MUST NOT
+ * run in the SPI ISR that dispatches this handler (see handle_worker_routed). */
 static alp_cc3501e_resp_t handle_ble_disable(const uint8_t *req,
                                              size_t         req_len,
                                              uint8_t       *reply_data,
@@ -590,16 +594,20 @@ static alp_cc3501e_resp_t handle_ble_disable(const uint8_t *req,
                                              size_t        *reply_data_len)
 {
 	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_disable());
+	return handle_worker_routed(
+	    ALP_CC3501E_CMD_BLE_DISABLE, 0u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
 /* BLE_ADV_START (0x32): packed wire = connectable(1) | reserved(1) |
  * interval_min_ms(LE16) | interval_max_ms(LE16) | adv_data_len(1) |
- * adv_data[adv_data_len].  (7-byte header; the doc struct is 8 with pad.) */
+ * adv_data[adv_data_len].  (7-byte header; the doc struct is 8 with pad.)
+ *
+ * Length-validated HERE, then WORKER-ROUTED with its payload (like
+ * WIFI_CONNECT_STA): the real cc3501e_hw_ble_adv_start issues ext-adv HCI and
+ * blocks on the shared-HIF ack, which MUST NOT run in the SPI ISR that
+ * dispatches this handler (that is the -4/adv-wedge root cause).  The raw req
+ * bytes are stashed via worker_submit_payload; worker_execute re-derives the
+ * 7-byte header + adv_data in the drain (see worker.c). */
 #define BLE_ADV_START_HDR 7u
 static alp_cc3501e_resp_t handle_ble_adv_start(const uint8_t *req,
                                                size_t         req_len,
@@ -611,15 +619,15 @@ static alp_cc3501e_resp_t handle_ble_adv_start(const uint8_t *req,
 	(void)reply_cap;
 	*reply_data_len = 0u;
 	if (req_len < BLE_ADV_START_HDR) return ALP_CC3501E_RESP_ERR_INVALID;
-	const uint8_t  connectable  = req[0];
-	const uint16_t interval_min = (uint16_t)req[2] | ((uint16_t)req[3] << 8);
-	const uint16_t interval_max = (uint16_t)req[4] | ((uint16_t)req[5] << 8);
-	const uint8_t  adv_data_len = req[6];
+	const uint8_t adv_data_len = req[6];
 	if (req_len != (size_t)BLE_ADV_START_HDR + adv_data_len) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_adv_start(
-	    connectable, interval_min, interval_max, &req[BLE_ADV_START_HDR], adv_data_len));
+	return handle_worker_routed_payload(
+	    ALP_CC3501E_CMD_BLE_ADV_START, req, req_len, reply_data_len);
 }
 
+/* BLE_ADV_STOP (0x33): stop the adv set.  Worker-routed (argless): the real
+ * cc3501e_hw_ble_adv_stop issues HCI over the shared HIF + re-syncs the bridge
+ * SPI, which block and so MUST NOT run in the SPI ISR (see handle_worker_routed). */
 static alp_cc3501e_resp_t handle_ble_adv_stop(const uint8_t *req,
                                               size_t         req_len,
                                               uint8_t       *reply_data,
@@ -627,11 +635,8 @@ static alp_cc3501e_resp_t handle_ble_adv_stop(const uint8_t *req,
                                               size_t        *reply_data_len)
 {
 	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_adv_stop());
+	return handle_worker_routed(
+	    ALP_CC3501E_CMD_BLE_ADV_STOP, 0u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
 /* BLE_SCAN_START (0x34): reply data = the packed advertiser list (each record

@@ -130,6 +130,31 @@ static void worker_execute(uint8_t cmd)
 		 * worker-routed off the SPI ISR exactly like WIFI_SCAN_START. */
 		rv = cc3501e_hw_ble_scan(buf, ALP_CC3501E_MAX_PAYLOAD, &len);
 		break;
+	case ALP_CC3501E_CMD_BLE_ADV_START: {
+		/* Ext-adv config+start BLOCKS on the shared-HIF HCI ack (2 s), so -- like
+		 * the connect ops -- it MUST run here in the drain, not the SPI ISR (that
+		 * was the adv-wedge -4).  The 7-byte header (connectable | reserved |
+		 * itvl_min LE16 | itvl_max LE16 | adv_data_len) + inline adv_data were
+		 * stashed in job.req by worker_submit_payload; the protocol handler already
+		 * length-validated them.  Argless reply (OK carries no payload). */
+		const uint8_t  connectable  = (uint8_t)job.req[0];
+		const uint16_t itvl_min     = (uint16_t)job.req[2] | ((uint16_t)job.req[3] << 8);
+		const uint16_t itvl_max     = (uint16_t)job.req[4] | ((uint16_t)job.req[5] << 8);
+		const uint8_t  adv_data_len = (uint8_t)job.req[6];
+		rv                          = cc3501e_hw_ble_adv_start(
+		    connectable, itvl_min, itvl_max, (const uint8_t *)job.req + 7, adv_data_len);
+		break;
+	}
+	case ALP_CC3501E_CMD_BLE_ADV_STOP:
+		/* Stops the adv set; issues HCI over the shared HIF + re-syncs the bridge
+		 * SPI (blocks), so it is worker-routed off the SPI ISR.  Argless. */
+		rv = cc3501e_hw_ble_adv_stop();
+		break;
+	case ALP_CC3501E_CMD_BLE_DISABLE:
+		/* Tears down adv+scan via NimBLE; issues HCI over the shared HIF + re-syncs
+		 * the bridge SPI (blocks), so it is worker-routed off the SPI ISR.  Argless. */
+		rv = cc3501e_hw_ble_disable();
+		break;
 	case ALP_CC3501E_CMD_WIFI_CONNECT_STA:
 	case ALP_CC3501E_CMD_WIFI_AP_START: {
 		/* Association BLOCKS until the connect/IP event (seconds), so -- unlike the
