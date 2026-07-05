@@ -1396,11 +1396,14 @@ int cc3501e_hw_wifi_connect_sta(
 	 * line (CC35 GPIO17 -> Alif P2_6, a rev-1 wire) is held BUSY for the duration --
 	 * the SPI framing itself is hardware SS0 -- so the host never clocks into the
 	 * dead SPI-slave DMA.  The L2 association completes on
-	 * silicon (WLAN_EVENT_CONNECT fires ~15s in).  The OUTCOME is mirrored into the
-	 * status latch below; the host collects it NON-blocking via CMD_WIFI_STATUS (no
-	 * more poll-by-repeat on this opcode).  DHCP/IP still needs the lwIP stack brought
-	 * up (network_stack_init + add_if_sta) -- a v0.3 feature; this reports L2 only. */
-	if (osi_SyncObjWait(&wifi_event_sync, 15u * OSI_WAIT_FOR_SECOND) != OSI_OK) {
+	 * silicon.  WPA2 associates ~15s in, but WPA3-SAE is SLOWER (the extra SAE
+	 * commit/confirm exchange + PMF), so a 15s wait raced the WLAN_EVENT_CONNECT and
+	 * timed out on a WPA3 AP even though the association was in progress -- bench-seen
+	 * on "Alp Electronix" (wpa3), 2026-07-05.  30s covers WPA2 and WPA3-SAE with margin
+	 * (the bridge is BUSY for the wait, but a connect is a deliberate, infrequent op).
+	 * The OUTCOME is mirrored into the status latch below; the host collects it
+	 * NON-blocking via CMD_WIFI_STATUS.  DHCP/IP is brought up right after (L3). */
+	if (osi_SyncObjWait(&wifi_event_sync, 30u * OSI_WAIT_FOR_SECOND) != OSI_OK) {
 		/* No connect event within the wait -- TERMINAL timeout (was masked as a
 		 * retryable IO that looped the host's poll-by-repeat -> -4). */
 		wifi_conn_set(

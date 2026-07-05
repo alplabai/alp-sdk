@@ -120,7 +120,9 @@ static int cmd_companion_ping(const struct shell *sh, size_t argc, char **argv)
 /* ---- CC3501E Wi-Fi / BLE (Alif companion) ------------------------------- */
 #define ALP_COMPANION_WIFI_SCAN_MAX 16u
 #define ALP_COMPANION_WIFI_SCAN_MS  30000u
-#define ALP_COMPANION_WIFI_CONN_MS  35000u
+/* Cover the CC3501E connect budget: L2 assoc up to 30s (WPA3-SAE is slower than
+ * WPA2 -- see cc3501e_hw_ti.c) + the STA DHCP poll (~10s) = ~40s, plus margin. */
+#define ALP_COMPANION_WIFI_CONN_MS  50000u
 #define ALP_COMPANION_BLE_MS        30000u
 #define ALP_COMPANION_BLE_SCAN_MAX  16u
 /* Socket data-path budgets: each socket op is worker-routed on the firmware and
