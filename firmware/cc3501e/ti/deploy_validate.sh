@@ -26,23 +26,28 @@ CONF_BIN="${CONF_BIN:?stage + set: cc35xx-conf.bin}"
 TOOL_SETTINGS="${TOOL_SETTINGS:?stage + set: tool_settings.json}"
 XDS_SERIAL="${XDS_SERIAL:-L50015YR}"     # CC3501E XDS110 on this bench
 
-# GPE image/flash version = the CC35 vendor-RoT ANTI-ROLLBACK gate: the unit
-# rejects a flash whose version <= what is already programmed.  It is NOT the
-# app SemVer (that lives in firmware-version.txt and is reported via
-# GET_DIAG_INFO.fw_version) and NOT the wire ALP_CC3501E_PROTOCOL_VERSION.
+# GPE image/flash version = the CC35 vendor-RoT gate.  It is NOT the app SemVer
+# (that lives in firmware-version.txt and is reported via GET_DIAG_INFO.fw_version)
+# and NOT the wire ALP_CC3501E_PROTOCOL_VERSION.
 #
-# The four fields a.b.c.d are BYTE-SIZED (each 0..255) and compared field-by-field.
-# So a human date like 1.<yy>.<mmdd>.<hhmm> is INVALID -- mmdd=0705 and hhmm=1531
-# overflow a byte and corrupt the programmed version (this bricked a bench unit).
+# The four fields a.b.c.d are BYTE-SIZED (each 0..255).  TWO hard constraints,
+# both bench-proven on the E1M-AEN801 (2026-07-05):
+#   1. Each field must be <=255.  A human date like 1.<yy>.<mmdd>.<hhmm> is INVALID
+#      (mmdd=0705/hhmm=1531 overflow a byte and corrupt the version).
+#   2. The MAJOR field (a) MUST be 0.  A vendor image whose major >= 1 FAILS the
+#      SES/BL2 secure-boot AUTHENTICATION (boot report @0x28000104 sets AUTH_ERROR
+#      0x80) and the app core never launches -- host reads get_version=-5, the CC35
+#      never services the bridge.  Proven: byte-identical firmware authenticated at
+#      0.0.1.0 but AUTH_ERROR'd at 1.0.0.0 and at 104.x.y.z.  (The OLD scheme here --
+#      the big-endian 4 bytes of `date +%s`, high byte ~0x68=104 in the major slot --
+#      is exactly this failure and silently bricked EVERY V3 image this session.)
 #
-# Correct scheme: the big-endian 4 bytes of the Unix epoch seconds. Each field is
-# a byte (<=255) by construction, and because it is the big-endian split of a
-# monotonically-increasing 32-bit counter, the field-by-field version compare IS
-# the epoch compare -> strictly monotonic every second, no state file needed. The
-# high byte is ~0x68 today, so this also cleanly beats any poisoned low value.
-# Override with VERSION=a.b.c.d (all <=255, higher than the unit) to force one.
+# Correct scheme: MAJOR=0, then the low 3 bytes of the Unix epoch in b.c.d.  Each
+# field is a byte by construction; monotonic per-second (the 24-bit window wraps
+# only every ~194 days -- fine within a release cycle).  Override with VERSION=a.b.c.d
+# (all <=255, a=0, higher than the unit) to force one.
 _e=$(date +%s)
-VERSION="${VERSION:-$(( (_e >> 24) & 255 )).$(( (_e >> 16) & 255 )).$(( (_e >> 8) & 255 )).$(( _e & 255 ))}"
+VERSION="${VERSION:-0.$(( (_e >> 16) & 255 )).$(( (_e >> 8) & 255 )).$(( _e & 255 ))}"
 
 OUT=/home/caner/alp-sdk/firmware/cc3501e/build/ti
 VOUT="$OUT/cc3501e-bridge.out"
