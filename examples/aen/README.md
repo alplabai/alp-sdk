@@ -70,6 +70,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-ethernet-link`](aen-ethernet-link/)          | Bring up the E8 GMAC (`eth_dwmac` + the `alif,ethernet` glue) and report net-if state (Zephyr net-if API). |
 | [`aen-cc3501e-bringup`](aen-cc3501e-bringup/)      | Host (Alif M55-HE) side of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor bring-up (power-gate, reset, control link). |
+| [`aen-cc3501e-companion-tour`](aen-cc3501e-companion-tour/) | **capstone** -- full-surface tour of the CC3501E companion API: init -> ping -> diag -> Wi-Fi scan/connect/IP -> TCP socket -> BLE enable/scan -> proxied-GPIO read. |
 | [`aen-can-regcheck`](aen-can-regcheck/)            | **staging** -- Alif CAN-FD controller bind-only staging check (bus wiring HW-blocked). |
 | [`aen-sdcard-readout`](aen-sdcard-readout/)        | Probe a microSD over the E8 SD Host Controller (`snps,dwc-sdhc` + SDMMC disk) via the disk-access API. |
 | [`aen-spi-regcheck`](aen-spi-regcheck/)            | **bench** -- Alif DWC_ssi SPI driver (`alif,dwc-ssi-spi`, spi0 @ 0x48103000) register validation. |

@@ -1,0 +1,35 @@
+# board.yaml -- per-app project configuration for aen-cc3501e-companion-tour.
+#
+# The CAPSTONE full-surface example for the on-module TI CC3501E Wi-Fi 6 +
+# BLE 5.4 coprocessor on the E1M-AEN801 (Alif Ensemble E8) SoM.  Where
+# aen-cc3501e-bringup is the minimal power+PING soak, this one walks the
+# WHOLE companion API in sequence -- init, ping, diag, Wi-Fi scan/connect/IP,
+# a TCP socket round-trip, Wi-Fi teardown, BLE enable/scan/disable, and a
+# proxied-GPIO read -- as documentation of the hand-written-firmware path.
+#
+# The inter-chip wiring (SPI1 on P14_6/5/4, WIFI_EN P15_5, E_WIFI.NRST
+# P15_1_FLEX -- metadata/e1m_modules/aen/inter-chip.tsv) lives in the
+# per-board overlay under boards/, since these are SoM-internal control
+# nets rather than E1M edge pads.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+    # Portable peripheral subsystems this app opens.  The loader
+    # translates these to CONFIG_SPI=y / CONFIG_GPIO=y in alp.conf.
+    peripherals:
+      - spi
+      - gpio
+
+chips:
+  - cc3501e               # on-module Wi-Fi 6 + BLE 5.4 coprocessor (host driver).
+
+diagnostics:
+  log_level: info

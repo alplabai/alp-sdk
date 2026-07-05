@@ -98,6 +98,11 @@ into the topic-specific docs.
   signing, and provisioning a shippable CC3501E coprocessor image.
 - [cc3501e-gpio-bench.md](cc3501e-gpio-bench.md) — warm-boot bench
   validation of the CC3501E GPIO proxy (machine-checkable contract).
+- [cc3501e-companion-commands.md](cc3501e-companion-commands.md) —
+  reference for the `alp companion` console command surface
+  (wifi / ble / sock / diag) + the host-driver OTA + GPIO-proxy APIs.
+- [console.md](console.md) — the interactive `alp` command tree on the
+  Zephyr shell (safety tiers, command list, companion binding, banner).
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
