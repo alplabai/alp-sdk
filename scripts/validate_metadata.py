@@ -44,6 +44,8 @@ SOCS = REPO / "metadata" / "socs"
 SOM_PRESETS = REPO / "metadata" / "e1m_modules"
 BOARD_PRESETS = REPO / "metadata" / "boards"
 LIBRARIES = REPO / "metadata" / "libraries"
+CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
+CHIPS = REPO / "metadata" / "chips"
 
 
 def _capability_vocabulary() -> set[str]:
@@ -494,6 +496,21 @@ def main() -> int:
                 "name",
             )
 
+    # Chip manifests (YAML) against chip-v1 schema.
+    chip_failures: list = []
+    chip_files: list = []
+    if CHIP_SCHEMA.is_file():
+        chip_schema = json.loads(CHIP_SCHEMA.read_text(encoding="utf-8"))
+        chip_validator = jsonschema.Draft202012Validator(chip_schema)
+        chip_files = sorted(CHIPS.glob("*.yaml"))
+        if chip_files:
+            print()
+            chip_failures = _check_files(
+                "YAML", chip_files, chip_validator,
+                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                "chip_id",
+            )
+
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
     library_semantic_failures: list = []
@@ -528,7 +545,7 @@ def main() -> int:
 
     print()
     total_failures = (len(soc_failures) + len(som_failures)
-                      + len(hwrev_failures) + len(board_failures)
+                      + len(hwrev_failures) + len(board_failures) + len(chip_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(restriction_failures)
                       + len(silicon_kconfig_failures)
@@ -536,8 +553,8 @@ def main() -> int:
                       + len(tier_a_library_ci_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
-          f"{len(board_files)} board preset(s) + {len(library_files)} "
-          f"library manifest(s) + Kconfig registries + "
+          f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
+          f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry "
           f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1

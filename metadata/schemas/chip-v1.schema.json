@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/chip-v1.schema.json",
+  "title": "alp-sdk chip manifest (v1)",
+  "description": "Per-chip manifest under metadata/chips/<part>.yaml. Physical block optional; when present it feeds the carrier netlist + BOM (alp-studio#65).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "chip_id", "display_name", "vendor", "mpn_population", "datasheet", "bus"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "chip_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "display_name": { "type": "string" },
+    "driver_status": { "type": "string" },
+    "vendor": { "type": "string" },
+    "mpn_population": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "datasheet": { "type": "object" },
+    "bus": { "type": "string" },
+    "i2c": { "type": "object" },
+    "spi": { "type": "object" },
+    "uart": { "type": "object" },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": true,
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["input", "output", "bidir", "power", "ground", "analog", "open_drain", "open_drain_output"] },
+          "scope": { "type": "string" }
+        }
+      }
+    },
+    "physical": {
+      "type": "object", "additionalProperties": false,
+      "required": ["refdes_prefix", "package", "footprint", "pins", "visibility"],
+      "properties": {
+        "refdes_prefix": { "type": "string", "pattern": "^[A-Z]+$" },
+        "package": { "type": "string" },
+        "footprint": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "visibility": { "type": "string", "enum": ["public", "internal"] },
+        "pins": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["pad", "signal"],
+            "properties": { "pad": { "type": "string" }, "signal": { "type": "string" } }
+          }
+        },
+        "passives": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["role", "value", "net", "refdes_prefix"],
+            "properties": {
+              "role": { "type": "string", "enum": ["decouple", "pullup", "pulldown", "series", "bulk", "level_shift"] },
+              "value": { "type": "string" }, "net": { "type": "string" },
+              "refdes_prefix": { "type": "string", "pattern": "^[A-Z]+$" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
