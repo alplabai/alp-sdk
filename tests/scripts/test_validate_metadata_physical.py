@@ -41,6 +41,11 @@ def test_duplicate_pad_rejected(tmp_path):
     failures = vm._check_chip_physical([p])
     assert failures and any("pad" in m.lower() for _, msgs in failures for m in msgs)
 
+def test_block_schema_exists():
+    schema = json.loads((REPO / "metadata/schemas/block-v1.schema.json").read_text())
+    assert schema["properties"]["block_id"]["pattern"] == "^[a-z][a-z0-9_]*$"
+    assert schema["additionalProperties"] is False
+
 def test_validate_metadata_passes_on_real_tree():
     # The full validator must stay green with the new chip pass wired in.
     r = subprocess.run([sys.executable, "scripts/validate_metadata.py"],

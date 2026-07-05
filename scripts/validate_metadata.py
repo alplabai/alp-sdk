@@ -50,6 +50,8 @@ BOARD_PRESETS = REPO / "metadata" / "boards"
 LIBRARIES = REPO / "metadata" / "libraries"
 CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
+BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
+BLOCKS = REPO / "metadata" / "blocks"
 
 
 def _capability_vocabulary() -> set[str]:
@@ -594,6 +596,21 @@ def main() -> int:
             if chip_files:
                 chip_failures += _check_chip_physical(chip_files)
 
+    # Block manifests (YAML) against block-v1 schema.
+    block_failures: list = []
+    block_files: list = []
+    if BLOCK_SCHEMA.is_file():
+        block_schema = json.loads(BLOCK_SCHEMA.read_text(encoding="utf-8"))
+        block_validator = jsonschema.Draft202012Validator(block_schema)
+        block_files = sorted(BLOCKS.glob("*.yaml"))
+        if block_files:
+            print()
+            block_failures = _check_files(
+                "YAML", block_files, block_validator,
+                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                "block_id",
+            )
+
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
     library_semantic_failures: list = []
@@ -629,6 +646,7 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
+                      + len(block_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(restriction_failures)
                       + len(silicon_kconfig_failures)
@@ -637,6 +655,7 @@ def main() -> int:
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
+          f"{len(block_files)} block file(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry "
           f"checked, {total_failures} failure(s)")

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/block-v1.schema.json",
+  "title": "alp-sdk block manifest (v1)",
+  "description": "Per-block manifest under metadata/blocks/<name>.yaml. Declares the block's abstract interface and one or more physical realizations (discrete chips or a pre-routed module) for the carrier netlist (alp-studio#65).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "block_id", "display_name", "kconfig", "interface", "realizations"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "block_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "display_name": { "type": "string" },
+    "kconfig": { "type": "string", "pattern": "^ALP_SDK_BLOCK_[A-Z0-9_]+$" },
+    "interface": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["signal", "dir"],
+        "properties": {
+          "signal": { "type": "string" },
+          "dir": { "type": "string", "enum": ["input", "output", "bidir"] },
+          "pull": { "type": "string", "enum": ["up", "down", "none"] },
+          "rail": { "type": "string" },
+          "max_ma": { "type": "number" }
+        }
+      }
+    },
+    "realizations": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "physical_form", "visibility"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "physical_form": { "type": "string", "enum": ["discrete", "module"] },
+          "visibility": { "type": "string", "enum": ["public", "internal"] },
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["chip", "maps"],
+              "properties": { "chip": { "type": "string" }, "maps": { "type": "object" } }
+            }
+          },
+          "passives": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["role", "value", "net", "refdes_prefix"],
+              "properties": {
+                "role": { "type": "string" }, "value": { "type": "string" },
+                "net": { "type": "string" }, "refdes_prefix": { "type": "string", "pattern": "^[A-Z]+$" }
+              }
+            }
+          },
+          "connector": {
+            "type": "object", "additionalProperties": false,
+            "required": ["footprint", "pins"],
+            "properties": {
+              "footprint": { "type": "string" },
+              "pins": {
+                "type": "array",
+                "items": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["pin", "signal"],
+                  "properties": { "pin": { "type": "string" }, "signal": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
