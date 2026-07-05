@@ -35,6 +35,8 @@ SILICON_KCONFIG_SCHEMA = REPO / "metadata" / "schemas" / "silicon-kconfig-v1.sch
 SILICON_KCONFIG_REGISTRY = REPO / "metadata" / "registries" / "silicon-kconfig.json"
 PERIPHERAL_KCONFIG_SCHEMA = REPO / "metadata" / "schemas" / "peripheral-kconfig-v1.schema.json"
 PERIPHERAL_KCONFIG_REGISTRY = REPO / "metadata" / "registries" / "peripheral-kconfig.json"
+TIER_A_LIBRARY_CI_SCHEMA = REPO / "metadata" / "schemas" / "tier-a-library-ci-v1.schema.json"
+TIER_A_LIBRARY_CI_REGISTRY = REPO / "metadata" / "registries" / "tier-a-library-ci.json"
 BOARD_PRESET_SCHEMA = REPO / "metadata" / "schemas" / "board-preset.schema.json"
 LIBRARY_SCHEMA = REPO / "metadata" / "schemas" / "library-v1.schema.json"
 SOC_SPEC_SCHEMA = REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json"
@@ -310,6 +312,125 @@ def _check_library_semantics(library_files) -> list:
     return failures
 
 
+def _check_tier_a_library_ci(library_files, som_files) -> list:
+    """Validate the Tier-A library CI registry against live metadata.
+
+    The registry is the machine-readable contract the build workflow consumes
+    and the portability matrix can cross-check later: every Tier-A library must
+    either be in the host-build lane or carry an explicit exclusion reason, and
+    every representative `(family, SoM, core)` cell must resolve against the SoM
+    preset topology.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    if not TIER_A_LIBRARY_CI_REGISTRY.is_file():
+        return failures
+    rel = TIER_A_LIBRARY_CI_REGISTRY.relative_to(REPO)
+    try:
+        data = json.loads(TIER_A_LIBRARY_CI_REGISTRY.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"FAIL {rel}: parse error ({e})")
+        return [(rel, [f"invalid JSON parse: {e}"])]
+
+    msgs: list[str] = []
+    if TIER_A_LIBRARY_CI_SCHEMA.is_file():
+        schema = json.loads(TIER_A_LIBRARY_CI_SCHEMA.read_text(encoding="utf-8"))
+        validator = jsonschema.Draft202012Validator(schema)
+        for err in sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path)):
+            loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
+            msgs.append(f"{loc}: {err.message}")
+
+    library_docs: dict[str, dict] = {}
+    for path in library_files:
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("name"), str):
+            library_docs[doc["name"]] = doc
+
+    tier_a = {name for name, doc in library_docs.items() if doc.get("tier") == "A"}
+    host = data.get("hostBuild", {}) if isinstance(data.get("hostBuild"), dict) else {}
+    host_libraries = set(host.get("libraries") or [])
+    excluded = set((host.get("excludedLibraries") or {}).keys())
+    known = set(library_docs)
+
+    for name in sorted(host_libraries | excluded):
+        if name not in known:
+            msgs.append(f"hostBuild/{name}: no library manifest at metadata/libraries/{name}.yaml")
+    for name in sorted(host_libraries):
+        if library_docs.get(name, {}).get("tier") != "A":
+            msgs.append(f"hostBuild/libraries[{name}]: library is not Tier A")
+    for name in sorted(excluded):
+        if library_docs.get(name, {}).get("tier") != "A":
+            msgs.append(f"hostBuild/excludedLibraries[{name}]: library is not Tier A")
+
+    accounted = host_libraries | excluded
+    missing = tier_a - accounted
+    extra = accounted - tier_a
+    if missing:
+        msgs.append("hostBuild: Tier-A libraries missing from build/exclusion set: "
+                    + ", ".join(sorted(missing)))
+    if extra:
+        msgs.append("hostBuild: non-Tier-A libraries listed in build/exclusion set: "
+                    + ", ".join(sorted(extra)))
+
+    som_docs: dict[str, dict] = {}
+    for path in som_files:
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("sku"), str):
+            som_docs[doc["sku"]] = doc
+
+    families_seen: set[str] = set()
+    for idx, cell in enumerate(data.get("familyMatrix") or []):
+        if not isinstance(cell, dict):
+            continue
+        family = cell.get("family")
+        som = cell.get("som")
+        core = cell.get("core")
+        if isinstance(family, str):
+            families_seen.add(family)
+        doc = som_docs.get(som)
+        if doc is None:
+            msgs.append(f"familyMatrix[{idx}]/som: `{som}` has no SoM preset")
+            continue
+        if doc.get("family") != family:
+            msgs.append(f"familyMatrix[{idx}]: family `{family}` does not match "
+                        f"{som}'s preset family `{doc.get('family')}`")
+        topology = doc.get("topology") or {}
+        if core not in topology:
+            available = ", ".join(sorted(topology)) or "<none>"
+            msgs.append(f"familyMatrix[{idx}]/core: `{core}` is not a topology core "
+                        f"on {som} (available: {available})")
+        elif not isinstance(topology.get(core), dict) or "board" not in topology[core]:
+            msgs.append(f"familyMatrix[{idx}]/core: `{core}` on {som} is not a Zephyr slice")
+
+    metadata_families = {
+        doc.get("family")
+        for doc in som_docs.values()
+        if isinstance(doc.get("family"), str)
+    }
+    missing_families = metadata_families - families_seen
+    if missing_families:
+        msgs.append("familyMatrix: missing supported SoM families: "
+                    + ", ".join(sorted(missing_families)))
+
+    if msgs:
+        print(f"FAIL {rel}")
+        for m in msgs:
+            print(f"  · {m}")
+        failures.append((rel, msgs))
+    else:
+        n_libs = len(host_libraries)
+        n_excluded = len(excluded)
+        n_cells = len(data.get("familyMatrix") or [])
+        print(f"OK   {rel}  (hostBuild={n_libs}, excluded={n_excluded}, "
+              f"familyMatrix={n_cells})")
+    return failures
+
+
 def main() -> int:
     # SoC files (JSON) against soc-spec v1.
     soc_schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
@@ -401,17 +522,23 @@ def main() -> int:
     silicon_kconfig_failures = _check_silicon_kconfig()
     peripheral_kconfig_failures = _check_peripheral_kconfig()
 
+    # ADR 0018 Tier-A library CI registry + metadata correspondence.
+    print()
+    tier_a_library_ci_failures = _check_tier_a_library_ci(library_files, som_files)
+
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(restriction_failures)
                       + len(silicon_kconfig_failures)
-                      + len(peripheral_kconfig_failures))
+                      + len(peripheral_kconfig_failures)
+                      + len(tier_a_library_ci_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(library_files)} "
-          f"library manifest(s) + Kconfig registries "
+          f"library manifest(s) + Kconfig registries + "
+          f"tier-a-library-ci registry "
           f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 
