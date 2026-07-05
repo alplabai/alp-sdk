@@ -353,6 +353,23 @@ def test_schema_rejects_empty_zephyr_section() -> None:
     assert list(_validator().iter_errors(doc)), "empty zephyr section must be rejected"
 
 
+def test_schema_rejects_floating_west_revision() -> None:
+    """A manifest-provided west project pin must be reproducible."""
+    doc = _valid_manifest()
+    doc["integration"] = {
+        "zephyr": {
+            "module": "widget",
+            "west": {
+                "name": "widget",
+                "url": "https://github.com/example/widget.git",
+                "revision": "main",
+                "path": "modules/lib/widget",
+            },
+        }
+    }
+    assert list(_validator().iter_errors(doc)), "floating west revision must fail"
+
+
 # --- emit: micro-ROS on an M-core -----------------------------------
 
 _V2N_MICROROS = """
@@ -445,13 +462,13 @@ def test_ros2_on_non_yocto_target_errors(tmp_path: Path) -> None:
 # ADR 0018 cloud / connectivity Tier-B group
 #
 # Two upstream Zephyr subsystems (lwm2m, coap -- real CONFIG symbols grounded
-# in the pinned v4.4.0 tree) and two prerequisite manifests (aws-iot, azure-iot
-# -- NOT pinned, enable-by-presence module named, no fabricated Kconfig).
-# Grounding (2026-07-03):
+# in the pinned v4.4.0 tree) and two pinned generic C SDKs (aws-iot, azure-iot
+# -- west project pins, enable-by-presence module named, no fabricated Kconfig).
+# Grounding (2026-07-05):
 #   * CONFIG_LWM2M  $ZEPHYR_BASE/subsys/net/lib/lwm2m/Kconfig `menuconfig LWM2M`
 #   * CONFIG_COAP   $ZEPHYR_BASE/subsys/net/lib/coap/Kconfig  `config COAP`
-#   * aws-iot / azure-iot: no upstream Zephyr west module in `west list`, so a
-#     module-only prerequisite section names the real upstream, no CONFIG.
+#   * aws-iot / azure-iot: no upstream Zephyr west module in `west list`; exact
+#     release pins live in integration.zephyr.west, no CONFIG is invented.
 # ---------------------------------------------------------------------
 
 CLOUD_LIBS = {"lwm2m", "coap", "aws-iot", "azure-iot"}
@@ -470,18 +487,24 @@ def test_lwm2m_coap_are_upstream_apache() -> None:
 
 
 def test_aws_azure_are_module_only_prerequisites() -> None:
-    """The cloud prerequisite manifests name a real upstream module with NO
-    fabricated Kconfig (unpinned generic C SDKs, enable-by-presence)."""
+    """The cloud manifests name real upstream repos with exact west pins and NO
+    fabricated Kconfig (generic C SDKs, enable-by-presence)."""
     aws = yaml.safe_load((LIBRARIES_DIR / "aws-iot.yaml").read_text(encoding="utf-8"))
     assert aws["license"] == "Apache-2.0"
+    assert aws["version"] == "v3.1.5"
     zephyr = aws["integration"]["zephyr"]
     assert zephyr.get("module") == "aws-iot-device-sdk-embedded-C"
-    assert "kconfig" not in zephyr, "no Kconfig may be invented while the SDK is unpinned"
+    assert zephyr["west"]["revision"] == "v3.1.5"
+    assert zephyr["west"]["path"] == "modules/lib/aws-iot-device-sdk-embedded-C"
+    assert "kconfig" not in zephyr, "no Kconfig may be invented without a real symbol"
 
     azure = yaml.safe_load((LIBRARIES_DIR / "azure-iot.yaml").read_text(encoding="utf-8"))
     assert azure["license"] == "MIT"
+    assert azure["version"] == "1.5.0"
     zephyr = azure["integration"]["zephyr"]
     assert zephyr.get("module") == "azure-sdk-for-c"
+    assert zephyr["west"]["revision"] == "1.5.0"
+    assert zephyr["west"]["path"] == "modules/lib/azure-sdk-for-c"
     assert "kconfig" not in zephyr
 
 
@@ -523,13 +546,13 @@ cores:
 
 def test_emit_aws_iot_module_only_no_kconfig(tmp_path: Path) -> None:
     """aws-iot on the M33 emits the ADR 0018 selection tag naming the upstream
-    module and -- because the SDK is unpinned with no enable symbol -- NO
+    module and -- because the SDK has no confirmed enable symbol -- NO
     fabricated CONFIG line."""
     project = load_board_yaml(_write_board(tmp_path, _V2N_AWS))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "ADR 0018" in out
     assert "aws-iot-device-sdk-embedded-C" in out   # module named in the tag
-    assert "aws-iot vmain" in out                    # version transcribed
+    assert "aws-iot v3.1.5" in out                   # version transcribed
     assert "CONFIG_AWS" not in out                   # nothing invented
 
 

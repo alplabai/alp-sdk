@@ -213,7 +213,9 @@ def zephyr_kconfig_lines(
             continue
         _check_core_class(name, manifest, project, slice_)
         module = zephyr.get("module")
-        tag = f"{name} v{manifest.get('version', '?')}"
+        version = str(manifest.get("version", "?"))
+        display_version = version if version.startswith("v") else f"v{version}"
+        tag = f"{name} {display_version}"
         if module:
             tag += f" (west module `{module}`)"
         lines.append(f"# library: {tag}")
