@@ -40,7 +40,7 @@ block).  See
 multi-core (`a55_cluster` + `m33_sm`, `a32_cluster` + `m55_hp` +
 `m55_he`) shape and the cross-core `ipc:` block.
 
-Released MPNs the SDK ships SoM presets for (look under
+SDK-shipped SoM presets (look under
 `metadata/e1m_modules/<MPN>.yaml`):
 
 | Family            | MPNs (paste any into `som.sku`)                                              |
@@ -48,7 +48,7 @@ Released MPNs the SDK ships SoM presets for (look under
 | Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`               |
 | Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                                       |
 | RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                       |
-| NXP i.MX 93       | `E1M-NX9101` (production MPN TBD pending HW config)                          |
+| NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 Stock board presets (paste into `preset:`):
 
@@ -308,7 +308,7 @@ som:
 
 #### `silicon_variant:` (forward MPN reference, set by Alp)
 
-Each released SoM preset declares a top-level `silicon_variant:`
+Each production SoM preset declares a top-level `silicon_variant:`
 field naming the exact vendor order code the module is built
 around -- `AE302F80F55D5LE` for `E1M-AEN301`, `R9A09G056N44GBG`
 for `E1M-V2N101`, etc.  The loader uses it to forward-resolve the
@@ -319,7 +319,7 @@ which carries the per-variant MRAM / SRAM / package /
 
 The reverse path (`alp_module_skus` arrays inside each SoC JSON
 variant) stays in place as a fallback for legacy presets that
-omit the field, AND for the released `E1M-NX9101` preset which
+omit the field, AND for the placeholder `E1M-NX9101` preset which
 carries `silicon_variant: TBD` per the no-inventing-values rule.
 Resolver: `_resolve_silicon_variant()` in
 [`scripts/alp_project.py`](../scripts/alp_project.py).
@@ -502,23 +502,23 @@ metadata/
 │   ├── E1M-V2N102.yaml      # partial_hw_config: true
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
-│   └── E1M-NX9101.yaml      # i.MX 93 (production MPN TBD pending HW config)
+│   └── E1M-NX9101.yaml      # i.MX 93 placeholder MPN (production E1M-NX9xxx TBD)
 └── boards/
     ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)
     ├── e1m-x-evk.yaml          # 45x65 EVK (V2N / V2N-M1)
     └── custom-example.yaml     # template downstream consumers copy + edit
 ```
 
-v0.3 ships the schema + every released MPN's preset (11 SoM SKUs
-across 4 families) + the two stock boards + a copy-friendly
-custom-example template.  Two SKUs (`E1M-AEN701`, `E1M-V2N101`)
-have their hardware configuration fully populated; the others
-carry `partial_hw_config: true` so the loader knows to expect
-SKU-specific overrides from the consumer's `board.yaml`.  Per
-the project memory note, values not in the silicon datasheet
-stay `TBD` (e.g. `board_id.adc_channel` in family-level
-`hw-revisions.yaml`) until the user supplies them
-authoritatively.
+v0.3 ships the schema + ten production SoM presets, the
+placeholder N93 bring-up preset (`E1M-NX9101`), the two stock
+boards, and a copy-friendly custom-example template.  Two SKUs
+(`E1M-AEN701`, `E1M-V2N101`) have their hardware configuration
+fully populated; the others carry `partial_hw_config: true` so
+the loader knows to expect SKU-specific overrides from the
+consumer's `board.yaml`.  Per the project memory note, values
+not in the silicon datasheet stay `TBD` (e.g.
+`board_id.adc_channel` in family-level `hw-revisions.yaml`)
+until the user supplies them authoritatively.
 
 ### `libraries` block (user-facing, no wrapper)
 

@@ -78,9 +78,10 @@ should be able to write by hand.
 ## Portability promise — swap-and-run within a family
 
 Change `som.sku:` in `board.yaml`, rebuild, ship — **within a SoM
-family**.  Empirically proven across all 7 E1M SKUs (AEN301..801 +
-NX9101) and all 4 E1M-X SKUs (V2N101, V2N102, V2M101, V2M102) for
-the canonical portable examples; matrix at
+family**.  Empirically proven across the 6 released E1M AEN SKUs,
+the placeholder N93 bring-up preset (`E1M-NX9101`), and all 4
+E1M-X SKUs (V2N101, V2N102, V2M101, V2M102) for the canonical
+portable examples; matrix at
 [`docs/portability-matrix.md`](docs/portability-matrix.md).
 
 Cross-form-factor portability between E1M and E1M-X is intentionally
@@ -136,7 +137,7 @@ directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
 som:
-  sku: E1M-V2N101      # your MPN -- the SDK ships a preset for every released MPN
+  sku: E1M-V2N101      # your MPN -- the SDK ships presets for supported SoMs
   hw_rev: r1
 
 preset: e1m-x-evk      # or write your board out inline -- see docs/board-config.md
@@ -230,9 +231,9 @@ the SoM preset's `topology:` block.  Customers override on a
 per-core basis via the project's `cores:` block.
 
 Want a GUI?  Install the [VS Code extension](https://github.com/alplabai/alp-sdk-vscode) — schema-aware
-editing, a configurator panel with dropdowns for every released MPN
-and board, one-keypress "Generate all" for the four emit modes,
-inline validator diagnostics in the Problems panel, west wrappers.
+editing, a configurator panel with dropdowns for supported SoM
+presets and boards, one-keypress "Generate all" for the four emit
+modes, inline validator diagnostics in the Problems panel, west wrappers.
 
 ## Development hosts
 

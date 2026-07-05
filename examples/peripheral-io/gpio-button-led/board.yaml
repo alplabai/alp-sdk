@@ -7,7 +7,7 @@
 #      to your own app directory.
 #   2. Change `som.sku` to your MPN.  Stock SoM presets live at
 #      metadata/e1m_modules/<MPN>.yaml; the SDK ships one
-#      for every released MPN.
+#      for every supported SoM preset.
 #   3. If your board is not the EVK, swap `preset: e1m-evk` for
 #      an inline board definition: top-level `name:` + `populated:`
 #      + `e1m_routes:` blocks.  See docs/board-config.md for the

@@ -488,7 +488,7 @@ development.  See the "Using with VS Code" section in
 adds schema-aware `board.yaml` editing (autocomplete on SKUs,
 boards, libraries; inline diagnostics from `validate_board_yaml.py`
 in the Problems panel), a GUI configurator panel with dropdowns
-for every released MPN + board, west wrappers (build / flash /
+for supported SoM presets + boards, west wrappers (build / flash /
 run native_sim), per-OS dependency bootstrap, and a one-keypress
 *Alp: Generate all* command for the six loader emit modes.  Build
 + install locally:
