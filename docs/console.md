@@ -40,9 +40,9 @@ production firmware — there is no authentication on the serial port.
 
 ## Boot banner
 
-When `CONFIG_ALP_SDK_CONSOLE=y` is set, `alp_banner.c` (linked
-automatically) prints the SoM + SoC identity and a system summary before
-the shell prompt appears:
+When `CONFIG_ALP_SDK_CONSOLE=y` is set, the boot-banner module
+(`src/zephyr/`, linked automatically) prints the SoM + SoC identity and a
+system summary before the shell prompt appears:
 
 ```
 Alp SDK 0.7.0  |  E1M-AEN801  |  Alif Ensemble E8  |  (c) Alp Lab AB
