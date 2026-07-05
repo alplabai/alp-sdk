@@ -808,12 +808,16 @@ echo 'require alp-generated.conf' >> build/conf/local.conf
 ### west.yml libraries auto-pin (`--emit west-libraries`)
 
 `--emit west-libraries` produces a `west.yml` fragment listing the
-Zephyr modules the board.yaml's `libraries:` array requires
-(`lvgl`, `mbedtls`, `cmsis-dsp`, `fs/littlefs`).  Header-only C++
-libraries (`etl`, `fmt`, `nlohmann_json`, `doctest`) aren't Zephyr
-modules -- they ride the loader's compile-time profile hook
-instead -- so the emitter lists them in a trailing comment rather
-than the allowlist.
+Zephyr modules and exact west project pins the board.yaml's library
+declarations require.  Zephyr-owned modules (`lvgl`, `mbedtls`,
+`cmsis-dsp`, `fs/littlefs`) land in the `zephyr` import
+`name-allowlist:`.  ADR 0018 libraries whose manifests carry an
+`integration.zephyr.west` pin, such as `aws-iot` and `azure-iot`,
+land as concrete `projects:` entries with exact upstream release
+tags.  Header-only C++ libraries (`etl`, `fmt`, `nlohmann_json`,
+`doctest`) aren't Zephyr modules -- they ride the loader's
+compile-time profile hook instead -- so the emitter lists them in a
+trailing comment rather than the allowlist.
 
 ```bash
 python3 $ALP_SDK/scripts/alp_project.py \

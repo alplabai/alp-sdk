@@ -118,8 +118,8 @@ a build.
 
 | Library | Tier | Version | License | E1M-AEN301 | E1M-AEN401 | E1M-AEN501 | E1M-AEN601 | E1M-AEN701 | E1M-AEN801 | E1M-NX9101 |
 | --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `aws-iot` | B | `main` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `azure-iot` | B | `main` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -136,8 +136,8 @@ a build.
 
 | Library | Tier | Version | License | E1M-V2M101 | E1M-V2M102 | E1M-V2N101 | E1M-V2N102 |
 | --- | :---: | --- | --- | :---: | :---: | :---: | :---: |
-| `aws-iot` | B | `main` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `azure-iot` | B | `main` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |

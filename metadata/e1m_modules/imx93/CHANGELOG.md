@@ -13,6 +13,9 @@ Detailed internal rev notes are held outside this tree.
   writeup lands.  `E1M-NX9101` is a placeholder MPN for this
   first bring-up preset; replace it with the production `E1M-NX9xxx`
   SKU when the orderable module name is assigned.
+* Candidate Wi-Fi/Bluetooth module manifests are catalogued for the
+  Murata Type 2DL / 2EL / 2KL / 2LL BOM options; leave
+  `on_module.wifi_ble: TBD` until the final module is selected.
 
 ## r2..r8 -- reserved
 

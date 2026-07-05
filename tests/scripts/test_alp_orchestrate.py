@@ -2522,12 +2522,9 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
         assert contents.strip()
 
 
-def test_emit_build_plan_stock_shim_skipped(tmp_path: Path) -> None:
-    """A core left on the stock M-core shim (app: alp-stock-shim) carries
-    command: null + a `stock-shim-unimplemented` warning (issue #49): the
-    shim image body is not in the SDK tree, so we must NOT emit a west
-    command pointing at a non-existent app dir.  The slice is still carried
-    (never dropped) with its config artefact."""
+def test_emit_build_plan_stock_shim_resolves_to_sdk_app(tmp_path: Path) -> None:
+    """A core left on the stock M-core shim (app: alp-stock-shim) gets a
+    normal west command pointed at the SDK-owned shim app."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 
@@ -2548,14 +2545,19 @@ cores:
     plan = _json.loads(out)
 
     m33 = next(s for s in plan["slices"] if s["coreId"] == "m33_sm")
-    assert m33["command"] is None
+    assert m33["command"]["tool"] == "west"
+    assert m33["command"]["args"][:3] == [
+        "build",
+        "-b",
+        "alp_e1m_v2n101_m33_sm",
+    ]
+    assert m33["command"]["args"][3] == str(
+        REPO / "firmware" / "alp-stock-shim")
+    assert m33["command"]["cwd"] == "build/m33_sm-zephyr"
 
     stock_warns = [w for w in plan["warnings"]
                    if w["code"] == "stock-shim-unimplemented"]
-    assert len(stock_warns) == 1
-    assert stock_warns[0]["coreId"] == "m33_sm"
-    assert "alp-stock-shim" in stock_warns[0]["message"]
-    assert "m33_sm" in stock_warns[0]["message"]
+    assert stock_warns == []
 
     # Carried, not dropped: the slice still ships its alp.conf artefact.
     assert any(a["path"].endswith("alp.conf")

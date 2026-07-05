@@ -416,6 +416,31 @@ class TestWestLibrariesEmit(unittest.TestCase):
             self.assertIn("name-allowlist:", rv.stdout)
             self.assertIn("[]", rv.stdout)
 
+    def test_top_level_cloud_libraries_emit_exact_west_projects(self) -> None:
+        """ADR 0018 top-level libraries can carry their own west project pins
+        when Zephyr's own west.yml does not import the upstream repo."""
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                som:
+                  sku: E1M-V2N101
+                libraries: [aws-iot, azure-iot]
+                cores:
+                  m33_sm:
+                    os: zephyr
+                    app: ./src
+            """)
+            rv = _run_loader(input_path=path, emit="west-libraries")
+            self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+            out = rv.stdout
+            self.assertIn("name: aws-iot-device-sdk-embedded-C", out)
+            self.assertIn("url: https://github.com/aws/aws-iot-device-sdk-embedded-C.git", out)
+            self.assertIn("revision: v3.1.5", out)
+            self.assertIn("path: modules/lib/aws-iot-device-sdk-embedded-C", out)
+            self.assertIn("name: azure-sdk-for-c", out)
+            self.assertIn("url: https://github.com/Azure/azure-sdk-for-c.git", out)
+            self.assertIn("revision: 1.5.0", out)
+            self.assertIn("path: modules/lib/azure-sdk-for-c", out)
+
 
 class TestValidatorPeripheralCheck(unittest.TestCase):
     """validate_board_yaml.py end-to-end smoke test on a shipped v2

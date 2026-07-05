@@ -31,8 +31,8 @@ manifest-driven **top-level** `libraries:` selection.
 | `ros2`      | B    | humble     | Apache-2.0 | yocto     | Cortex-A; meta-ros2-humble layer ‡ |
 | `lwm2m`     | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
 | `coap`      | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
-| `aws-iot`   | B    | main       | Apache-2.0 | zephyr    | Zephyr; module pin § |
-| `azure-iot` | B    | main       | MIT        | zephyr    | Zephyr; module pin § |
+| `aws-iot`   | B    | v3.1.5     | Apache-2.0 | zephyr    | Zephyr; west project pin § |
+| `azure-iot` | B    | 1.5.0      | MIT        | zephyr    | Zephyr; west project pin § |
 
 `alp doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
@@ -68,16 +68,18 @@ device-to-cloud story; all Tier B (recipe-only), split by grounding:
   transport in. LwM2M could merit Tier A on strength, but the ADR groups
   connectivity/cloud as B and there is no CI build lane + example yet
   (promotion is a named follow-up).
-- **§ `aws-iot` / `azure-iot` are prerequisite manifests** — verified **not
-  pinned** (`west list` has no aws/azure/iot entry). Unlike the micro-ROS
-  flagship, neither generic CMake C SDK has an official upstream **Zephyr west
-  module**, so the prerequisite is larger: package the real upstream
-  (`aws-iot-device-sdk-embedded-C`, Apache-2.0; `azure-sdk-for-c`, MIT — both
-  licences cited from upstream, **not** in-tree-verified) as a Zephyr module (or
-  a meta-alp-sdk recipe) *and* add the pin. Each declares an **enable-by-presence**
-  Zephyr section (`module:` naming the real upstream repo, **no** `kconfig:`) —
-  no enable symbol is invented; emit renders the selection tag with no
-  `CONFIG_` line until the module lands (named follow-up).
+- **§ `aws-iot` / `azure-iot` are pinned source manifests** — verified **not
+  imported by Zephyr's own west manifest** (`west list` has no aws/azure/iot
+  entry). Unlike the micro-ROS flagship, neither generic CMake C SDK has an
+  official upstream **Zephyr module.yml** or master Kconfig symbol, so
+  Zephyr-side packaging/build glue remains a follow-up. The source pins are now
+  exact and reproducible: AWS `aws-iot-device-sdk-embedded-C` at `v3.1.5`
+  (Apache-2.0) and Azure `azure-sdk-for-c` at `1.5.0` (MIT). Each declares an
+  **enable-by-presence** Zephyr section (`module:` naming the real upstream repo,
+  `west:` carrying the exact project pin, **no** `kconfig:`) — no enable symbol
+  is invented; emit renders the selection tag and `--emit west-libraries` emits
+  concrete west project entries, with no `CONFIG_` line until packaging confirms
+  a real symbol.
 
 **Memfault — deliberately NOT shipped.** Memfault's `memfault-firmware-sdk` is
 not pinned in `west.yml`, and its licence is the proprietary **Memfault SDK
@@ -113,6 +115,11 @@ integration:                   # at least one OS section required
   zephyr:                      # emitted into the slice's alp.conf
     module: lvgl               # west module name (documentation; west owns the pin)
     kconfig: [CONFIG_LVGL=y]   # upstream Kconfig symbols -- transcribed, never invented
+    west:                      # optional exact west project pin when Zephyr does not import it
+      name: aws-iot-device-sdk-embedded-C
+      url: https://github.com/aws/aws-iot-device-sdk-embedded-C.git
+      revision: v3.1.5         # exact tag/SHA, never main/master
+      path: modules/lib/aws-iot-device-sdk-embedded-C
   yocto:                       # emitted into the slice's local.conf
     image_install: [lvgl]      # appended to IMAGE_INSTALL
   baremetal:                   # emitted into the slice's cmake args
@@ -131,9 +138,10 @@ comment. Notes from the initial set:
 - `requires.capabilities` keys are cross-checked by
   `scripts/validate_metadata.py` against the SoC capability vocabulary
   (`soc-spec-v1.schema.json` → `capabilities`). An unknown key is rejected.
-- Grounding matters: every Kconfig symbol, module name, and version must be
+- Grounding matters: every Kconfig symbol, module name, west project pin, and version must be
   transcribed from the pinned Zephyr v4.4.0 workspace / OE recipe (record the
-  file and `west.yml` revision in a manifest comment), or omitted. Never
+  file and `west.yml` revision in a manifest comment), or an exact upstream
+  release tag/SHA for repos Zephyr does not import. Never
   invent one.
 - A Zephyr integration section may name its west `module:` **without** a
   `kconfig:` list (`integration.zephyr` requires only that one of the two is

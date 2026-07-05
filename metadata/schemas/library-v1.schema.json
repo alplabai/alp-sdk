@@ -99,6 +99,34 @@
             "module": {
               "type": ["string", "null"],
               "description": "West module name (as it appears in the Zephyr west manifest, e.g. `lvgl`), or null for a header-only/in-tree library with no separate module.  Documentation only -- west owns the actual pin."
+            },
+            "west": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "url", "revision", "path"],
+              "description": "Optional west project pin for a curated library whose upstream is not imported by Zephyr's own west manifest.  This is emitted by `alp_project.py --emit west-libraries` as a concrete project entry.  Use exact release tags or commit SHAs only; never a floating branch.",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.+-]+$",
+                  "description": "West project name to emit."
+                },
+                "url": {
+                  "type": "string",
+                  "pattern": "^https://github.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\\.git)?$",
+                  "description": "Canonical upstream GitHub repository URL."
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^(?!main$|master$).+",
+                  "description": "Exact upstream release tag or commit SHA.  Floating branches such as `main` and `master` are rejected."
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^modules/lib/[A-Za-z0-9_./+-]+$",
+                  "description": "Workspace path where west should place the project."
+                }
+              }
             }
           }
         },

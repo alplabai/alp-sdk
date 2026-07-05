@@ -5,25 +5,28 @@
 # (github.com/Azure/azure-sdk-for-c), whose az_iot layer provides the Azure IoT
 # Hub / Device Provisioning Service (DPS) protocol clients.
 #
-# PREREQUISITE -- NOT PINNED IN this checkout (grounded 2026-07-03):
+# West pin + Kconfig grounding (verified 2026-07-05):
 #   Azure IoT embedded-C is NOT in the pinned Zephyr v4.4.0 workspace.  Verified:
 #   `west list` has no azure entry and `ls $ZEPHYR_BASE/../modules/lib` has none.
+#   The manifest therefore carries its own west project pin:
+#     https://github.com/Azure/azure-sdk-for-c.git @ 1.5.0
+#     (tag commit 6d6e634a3bb7f4d6bb5666ec8e1005ecd248e635).
 #   As with aws-iot.yaml, the Azure SDK for Embedded C is a generic CMake C SDK
-#   with NO official upstream Zephyr west module, so the prerequisite is to
-#   package the upstream as a Zephyr module (or a meta-alp-sdk Yocto recipe) AND
-#   add the pin before it can be wired.  That packaging + pin is the named human
-#   follow-up; no revision or Zephyr module name is invented here.
+#   with NO official upstream Zephyr module.yml or master Kconfig symbol, so
+#   packaging/build glue remains a follow-up.  The source revision is now
+#   reproducible and `--emit west-libraries` can produce a concrete west
+#   project entry.
 #
 # Enablement is BY MODULE PRESENCE, not a Kconfig gate.  There is no single
-# upstream `CONFIG_AZURE_IOT=y` enable symbol in the pinned tree to transcribe
-# (the SDK is a set of protocol-serialization helpers configured in app code,
-# not one Zephyr master switch).  `integration.zephyr` therefore carries
-# `module:` -- naming the REAL upstream repo as the prerequisite -- and NO
-# `kconfig:`; inventing a symbol is forbidden (ADR 0018).  The emitter renders
-# the selection tag with no CONFIG line until the module is packaged and pinned.
+# upstream `CONFIG_AZURE_IOT=y` enable symbol to transcribe (the SDK is a set
+# of protocol-serialization helpers configured in app code, not one Zephyr
+# master switch).  `integration.zephyr` therefore carries `module:` + a `west:`
+# pin and NO `kconfig:`; inventing a symbol is forbidden (ADR 0018).  The
+# emitter renders the selection tag with no CONFIG line until packaging
+# confirms a real enable symbol, if one exists.
 #
-# Version:  `main` -- the upstream default branch; NOT an invented point release.
-#   The exact release tag is pinned when the module lands (human follow-up).
+# Version:  `1.5.0` -- exact upstream release tag from
+#   github.com/Azure/azure-sdk-for-c.
 # License:  MIT -- cited from the upstream Azure SDK for C project (MIT, per its
 #   LICENSE.txt at github.com/Azure/azure-sdk-for-c).  NOT verified from an
 #   in-tree LICENSE file, because the SDK is not in this checkout
@@ -37,7 +40,7 @@ schema_version: 1
 name: azure-iot
 description: "Azure SDK for Embedded C -- Azure IoT Hub / DPS client for constrained devices."
 tier: B
-version: "main"
+version: "1.5.0"
 license: MIT
 
 requires:
@@ -49,8 +52,12 @@ requires:
 
 integration:
   zephyr:
-    # Enable-by-presence + prerequisite pin (see header): the REAL upstream repo
-    # is named as the module prerequisite, with NO invented Kconfig.  Emit
-    # renders `# library: azure-iot vmain (west module ...)` with no CONFIG line
-    # until the SDK is packaged as a Zephyr module and pinned.
+    # Enable-by-presence source pin (see header): the REAL upstream repo is
+    # named, with NO invented Kconfig.  Emit renders a library tag plus a west
+    # project entry, but no CONFIG line until Zephyr packaging confirms one.
     module: azure-sdk-for-c
+    west:
+      name: azure-sdk-for-c
+      url: https://github.com/Azure/azure-sdk-for-c.git
+      revision: 1.5.0
+      path: modules/lib/azure-sdk-for-c

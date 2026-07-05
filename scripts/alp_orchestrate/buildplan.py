@@ -123,7 +123,7 @@ def emit_build_plan(
     """
     # Orchestrator-side (stay inline until orchestrator.py); lazy to avoid
     # a buildplan<->package import cycle.
-    from .orchestrator import STOCK_SHIM_APP, _slice_command
+    from .orchestrator import _slice_command
     build_root = Path(build_root)
     slices_out: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -139,25 +139,13 @@ def emit_build_plan(
         cmd = _slice_command(
             project, replace(slice_, build_dir=build_dir))
         if cmd is None:
-            if slice_.os == "zephyr" and slice_.app == STOCK_SHIM_APP:
-                warnings.append({
-                    "code":    "stock-shim-unimplemented",
-                    "coreId":  slice_.core_id,
-                    "message": (f"core '{slice_.core_id}' uses the stock "
-                                f"M-core shim (app: {STOCK_SHIM_APP}); its "
-                                f"image body is not in the SDK tree yet "
-                                f"(issue #49). Override "
-                                f"cores.{slice_.core_id}.app with a real app "
-                                f"to build this core."),
-                })
-            else:
-                warnings.append({
-                    "code":    "no-command",
-                    "coreId":  slice_.core_id,
-                    "message": (f"no build command for core "
-                                f"'{slice_.core_id}' (os: {slice_.os}) "
-                                f"-- missing app/board/image"),
-                })
+            warnings.append({
+                "code":    "no-command",
+                "coreId":  slice_.core_id,
+                "message": (f"no build command for core "
+                            f"'{slice_.core_id}' (os: {slice_.os}) "
+                            f"-- missing app/board/image"),
+            })
         config_artefacts: list[dict[str, str]] = []
         artefact = _slice_config_artefact(project, slice_)
         if artefact is not None:

@@ -1190,12 +1190,22 @@ _OTA_PROVIDER_WEST_MODULES: dict[str, str] = {
 }
 
 
+def _load_curated_library_manifest(lib: str) -> dict[str, Any] | None:
+    """Load a top-level ADR 0018 library manifest if one exists."""
+    path = METADATA_ROOT / "libraries" / f"{lib}.yaml"
+    if not path.is_file():
+        return None
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return doc if isinstance(doc, dict) else None
+
+
 def _emit_west_libraries(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
     board_preset: dict[str, Any] | None,
     *,
     v2_libraries: list[str] | None = None,
+    v2_project_libraries: list[str] | None = None,
 ) -> str:
     """Emit a west.yml fragment that the customer's manifest can
     import to pin the Zephyr modules board.yaml's `libraries:` array
@@ -1205,21 +1215,57 @@ def _emit_west_libraries(
     v1 path (`v2_libraries is None`): reads project-level `libraries:`.
     v2 path: callers compute the union across the Zephyr-runtime cores
     (or pick one when `--core <id>` is supplied) and pass it in via
-    `v2_libraries`.
+    `v2_libraries`.  `v2_project_libraries` carries the top-level ADR 0018
+    curated library manifests; these may either import a Zephyr-owned module
+    by name or emit a standalone west project pin from the manifest's
+    `integration.zephyr.west` block.
     """
     del sku_preset, board_preset  # unused -- libraries are SoM-agnostic
     if v2_libraries is not None:
         libs = list(v2_libraries)
     else:
         libs = project.get("libraries") or []
-    modules: list[tuple[str, str]] = []   # (library, west-module)
+    project_libs = list(v2_project_libraries
+                        if v2_project_libraries is not None
+                        else [])
+    modules: list[tuple[str, str]] = []   # (library, Zephyr-owned west module)
+    west_projects: list[tuple[str, dict[str, Any]]] = []
     unsupported: list[str] = []
+    seen_modules: set[str] = set()
+    seen_projects: set[str] = set()
+
+    def add_module(lib: str, mod: str) -> None:
+        if mod not in seen_modules:
+            modules.append((lib, mod))
+            seen_modules.add(mod)
+
+    def add_west_project(lib: str, west: dict[str, Any]) -> None:
+        name = str(west.get("name") or "")
+        if name and name not in seen_projects:
+            west_projects.append((lib, west))
+            seen_projects.add(name)
+
     for lib in libs:
         mod = _LIBRARY_WEST_MODULES.get(lib)
         if mod is None:
             unsupported.append(lib)
         else:
-            modules.append((lib, mod))
+            add_module(lib, mod)
+
+    for lib in project_libs:
+        manifest = _load_curated_library_manifest(lib)
+        zephyr = ((manifest or {}).get("integration") or {}).get("zephyr") or {}
+        if not zephyr:
+            continue
+        west = zephyr.get("west")
+        if isinstance(west, dict):
+            add_west_project(lib, west)
+            continue
+        mod = zephyr.get("module")
+        if isinstance(mod, str) and mod:
+            add_module(lib, mod)
+        else:
+            unsupported.append(lib)
 
     # OTA provider-driven dispatch (ADR 0009 follow-up): out-of-tree
     # Zephyr OTA clients need their own west.yml entry.  Mender-MCU-client
@@ -1252,15 +1298,23 @@ def _emit_west_libraries(
         for lib, mod in modules:
             lines.append(f"          - {mod}        # board.yaml libraries: '{lib}'")
     else:
-        lines.append("          # board.yaml `libraries:` is empty -- nothing to pin.")
+        lines.append("          # no selected Zephyr-owned modules -- nothing to allowlist.")
         lines.append("          []")
+
+    if west_projects:
+        lines.append("")
+        lines.append("    # ADR 0018 libraries not imported by Zephyr's own west.yml.")
+        for lib, west in west_projects:
+            lines.append(f"    - name: {west['name']}")
+            lines.append(f"      url: {west['url']}")
+            lines.append(f"      revision: {west['revision']}")
+            lines.append(f"      path: {west['path']}        # board.yaml libraries: '{lib}'")
 
     if unsupported:
         lines.append("")
-        lines.append("# The following libraries are not Zephyr modules today")
-        lines.append("# and don't need a west.yml entry (the loader wires their")
-        lines.append("# include path + compile-time profile via metadata/library-")
-        lines.append("# profiles/<lib>/ at CMake-configure time):")
+        lines.append("# The following libraries have no Zephyr west project entry today")
+        lines.append("# (header-only/profile libraries ride the loader's include path;")
+        lines.append("# Yocto-only or in-tree Zephyr subsystems do not need a project pin):")
         for lib in unsupported:
             lines.append(f"#   - {lib}")
     return "\n".join(lines) + "\n"
@@ -1743,6 +1797,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             project_v1_shaped, project.som_preset,
             project.board_preset,
             v2_libraries=v2_libraries,
+            v2_project_libraries=sorted(project.libraries),
         )
         return _write_or_print(out, args.output)
 
