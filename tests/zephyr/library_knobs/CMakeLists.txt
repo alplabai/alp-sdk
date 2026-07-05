@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Twister smoke test for the §D.lib library-knob path.  Exercises
-# the alp.conf -> Kconfig -> Zephyr build chain end-to-end for the
-# libraries that live in Zephyr's own modules tree (lvgl / mbedtls /
-# cmsis-dsp / tflite-micro).  Catches:
+# the alp.conf -> Kconfig -> Zephyr build chain end-to-end for
+# libraries that live in Zephyr's own modules tree.  Catches:
 #   - Loader regressions that drop a CONFIG_*=y line.
 #   - Zephyr-module include-path breakage.
 #   - Cross-config issues (e.g. mbedtls + tflite-micro both pulled
