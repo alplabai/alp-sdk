@@ -47,6 +47,7 @@
 #define ALP_SOC_USB_COUNT               1
 #define ALP_SOC_MIPI_CSI_COUNT          1
 #define ALP_SOC_MIPI_DSI_COUNT          1
+#define ALP_SOC_LCDIF_COUNT             0
 #define ALP_SOC_XSPI_DMA                1
 #define ALP_SOC_HEXSPI_DMA              0
 #define ALP_SOC_EMMC_DMA                0
@@ -85,6 +86,7 @@
 #define ALP_SOC_USB_COUNT               0
 #define ALP_SOC_MIPI_CSI_COUNT          0
 #define ALP_SOC_MIPI_DSI_COUNT          0
+#define ALP_SOC_LCDIF_COUNT             0
 #define ALP_SOC_XSPI_DMA                1
 #define ALP_SOC_HEXSPI_DMA              0
 #define ALP_SOC_EMMC_DMA                0
@@ -123,6 +125,7 @@
 #define ALP_SOC_USB_COUNT               0
 #define ALP_SOC_MIPI_CSI_COUNT          0
 #define ALP_SOC_MIPI_DSI_COUNT          0
+#define ALP_SOC_LCDIF_COUNT             0
 #define ALP_SOC_XSPI_DMA                1
 #define ALP_SOC_HEXSPI_DMA              0
 #define ALP_SOC_EMMC_DMA                0
@@ -161,6 +164,7 @@
 #define ALP_SOC_USB_COUNT               0
 #define ALP_SOC_MIPI_CSI_COUNT          0
 #define ALP_SOC_MIPI_DSI_COUNT          0
+#define ALP_SOC_LCDIF_COUNT             0
 #define ALP_SOC_XSPI_DMA                1
 #define ALP_SOC_HEXSPI_DMA              0
 #define ALP_SOC_EMMC_DMA                0
@@ -199,6 +203,7 @@
 #define ALP_SOC_USB_COUNT               1
 #define ALP_SOC_MIPI_CSI_COUNT          1
 #define ALP_SOC_MIPI_DSI_COUNT          1
+#define ALP_SOC_LCDIF_COUNT             0
 #define ALP_SOC_XSPI_DMA                1
 #define ALP_SOC_HEXSPI_DMA              0
 #define ALP_SOC_EMMC_DMA                0
@@ -237,6 +242,7 @@
 #define ALP_SOC_USB_COUNT               1
 #define ALP_SOC_MIPI_CSI_COUNT          1
 #define ALP_SOC_MIPI_DSI_COUNT          1
+#define ALP_SOC_LCDIF_COUNT             0
 #define ALP_SOC_XSPI_DMA                0
 #define ALP_SOC_HEXSPI_DMA              1
 #define ALP_SOC_EMMC_DMA                0
@@ -275,6 +281,7 @@
 #define ALP_SOC_USB_COUNT               0
 #define ALP_SOC_MIPI_CSI_COUNT          0
 #define ALP_SOC_MIPI_DSI_COUNT          0
+#define ALP_SOC_LCDIF_COUNT             0
 #define ALP_SOC_XSPI_DMA                0
 #define ALP_SOC_HEXSPI_DMA              0
 #define ALP_SOC_EMMC_DMA                0
@@ -313,6 +320,7 @@
 #define ALP_SOC_USB_COUNT               0
 #define ALP_SOC_MIPI_CSI_COUNT          0
 #define ALP_SOC_MIPI_DSI_COUNT          1
+#define ALP_SOC_LCDIF_COUNT             1
 #define ALP_SOC_XSPI_DMA                0
 #define ALP_SOC_HEXSPI_DMA              0
 #define ALP_SOC_EMMC_DMA                1
@@ -351,6 +359,7 @@
 #define ALP_SOC_USB_COUNT               1
 #define ALP_SOC_MIPI_CSI_COUNT          2
 #define ALP_SOC_MIPI_DSI_COUNT          1
+#define ALP_SOC_LCDIF_COUNT             0
 #define ALP_SOC_XSPI_DMA                0
 #define ALP_SOC_HEXSPI_DMA              0
 #define ALP_SOC_EMMC_DMA                1
@@ -388,6 +397,7 @@
 #define ALP_SOC_USB_COUNT               UINT16_MAX
 #define ALP_SOC_MIPI_CSI_COUNT          UINT16_MAX
 #define ALP_SOC_MIPI_DSI_COUNT          UINT16_MAX
+#define ALP_SOC_LCDIF_COUNT             UINT16_MAX
 #define ALP_SOC_XSPI_DMA                UINT16_MAX
 #define ALP_SOC_HEXSPI_DMA              UINT16_MAX
 #define ALP_SOC_EMMC_DMA                UINT16_MAX
@@ -430,6 +440,7 @@
 #define ALP_CAP_HW_USB      (ALP_SOC_USB_COUNT > 0)
 #define ALP_CAP_HW_MIPI_CSI (ALP_SOC_MIPI_CSI_COUNT > 0)
 #define ALP_CAP_HW_MIPI_DSI (ALP_SOC_MIPI_DSI_COUNT > 0)
+#define ALP_CAP_HW_LCDIF    (ALP_SOC_LCDIF_COUNT > 0)
 #define ALP_CAP_XSPI_DMA    (ALP_SOC_XSPI_DMA)
 #define ALP_CAP_HEXSPI_DMA  (ALP_SOC_HEXSPI_DMA)
 #define ALP_CAP_EMMC_DMA    (ALP_SOC_EMMC_DMA)

@@ -49,7 +49,8 @@
   "inference_arena_sram_kib": 0,
   "always_on_sram_kb": 0,
   "peripherals": {
-    "mipi_dsi": 1
+    "mipi_dsi": 1,
+    "lcdif": 1
   },
   "pending_reference_manual_ingestion": true,
   "_pending_reason": "IMX93RM.pdf ingestion against peripherals: pending; the full per-peripheral count table still defaults to zero -- ALP_SOC_*_COUNT ceilings on NX9101 under-report until it is populated. Exception: peripherals.mipi_dsi is grounded ahead of the RM pass from the pinned Zephyr v4.4.0 dtsi (see notes), so the flag stays true while a single display-path count is populated.",
@@ -91,7 +92,7 @@
   "notes": [
     "Orderable variant resolved to **i.MX 9352** (2026-05-11) per the design-doc inventory; the full order-code suffix (package code + temperature grade + qualification) is still pending the HW-config writeup.  i.MX 9352 is the top-of-line i.MX 93 SKU: dual A55 @ 1.7 GHz + M33 @ 250 MHz + Ethos-U65, no GPU.",
     "Per-peripheral counts are still almost entirely pending -- ingestion against IMX93RM.pdf (5593 pages) is a separate dedicated pass and has not yet run.  The sole populated entry is `mipi_dsi: 1`, transcribed ahead of that pass from the pinned Zephyr v4.4.0 device tree (`dts/arm64/nxp/nxp_mimx93_a55.dtsi`, single `mipi_dsi: dsi@4ae10000` node, compatible `nxp,mipi-dsi-dwc`), so HW_MIPI_DSI reports truthfully for the display path; every other count still defaults to zero and must not be inferred from its absence.",
-    "i.MX 93 has *no GPU* -- that's a deliberate split with i.MX 95.  Display path is LCDIF (1x `nxp,imx-lcdifv3` display-controller@4ae30000 in the same pinned Zephyr dtsi) driving MIPI-DSI (no 2D GPU acceleration).  Only the MIPI-DSI instance is structured as a `peripherals` count today: the soc-spec-v1 schema + gen_soc_caps.py have no key or capability for an LCDIF / parallel-RGB display controller distinct from mipi_dsi (E8 models a parallel display path as `dpi_parallel`, an unrelated interface), so the LCDIF count is documented in prose here rather than invented into an orphan, un-consumed peripherals key -- see the schema-gap follow-up.",
+    "i.MX 93 has *no GPU* -- that's a deliberate split with i.MX 95.  Display path is LCDIF (1x `nxp,imx-lcdifv3` display-controller@4ae30000 in the same pinned Zephyr dtsi) driving MIPI-DSI (no 2D GPU acceleration).  Both the MIPI-DSI and LCDIF instances are structured as `peripherals` counts (`mipi_dsi: 1`, `lcdif: 1`): gen_soc_caps.py consumes `lcdif` into ALP_SOC_LCDIF_COUNT / ALP_CAP_HW_LCDIF (issue #379), distinct from mipi_dsi. E8 models its parallel display path as `dpi_parallel`, an unrelated interface, so the LCDIF key stays imx-lcdifv3-specific.",
     "Companion silicon on the Alp Lab E1M-i.MX93 SoM (per the vendor datasheet): NXP PCA9451A PMIC; Murata Type 2DL / 2EL / 2KL / 2LL Wi-Fi 6 + BLE 5.x combo (variant TBD); IW610 Wi-Fi 6 module -- confirm which combo ships on which SKU when the user writes the exact HW config.",
     "Reference docs available locally: IMX93HDG.pdf (Hardware Design Guide, 42 p), IMX93RM.pdf (Reference Manual Rev. 6, 5593 p), AN14413.pdf (PCA9451A PMIC application note).  All cross-referenced in the `datasheet.source` field above."
   ]
