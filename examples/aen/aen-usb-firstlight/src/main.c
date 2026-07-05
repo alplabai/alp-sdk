@@ -34,7 +34,7 @@ volatile struct {
 	int32_t  gpio_cfg;
 	int32_t  gpio_wr;
 	int32_t  level;
-} g_usbmux __attribute__((used)) = {.magic = 0x55534d58u, .level = USB2_SEL_LVL};
+} g_usbmux __attribute__((used)) = { .magic = 0x55534d58u, .level = USB2_SEL_LVL };
 
 static int fl_cb(const struct device *dev, const struct uhc_event *const event)
 {
@@ -54,13 +54,17 @@ int main(void)
 
 	g_usbmux.bringup = (int32_t)bs;
 	if (bs == ALP_OK) {
-		g_usbmux.gpio_cfg = (int32_t)cc3501e_gpio_configure(&fw, CC3501E_USB2_SELECT_PAD,
-								    ALP_CC3501E_GPIO_DIR_OUTPUT,
-								    ALP_CC3501E_GPIO_PULL_NONE, 200u);
-		g_usbmux.gpio_wr = (int32_t)cc3501e_gpio_write(&fw, CC3501E_USB2_SELECT_PAD,
-							       (USB2_SEL_LVL != 0), 200u);
+		g_usbmux.gpio_cfg = (int32_t)cc3501e_gpio_configure(&fw,
+		                                                    CC3501E_USB2_SELECT_PAD,
+		                                                    ALP_CC3501E_GPIO_DIR_OUTPUT,
+		                                                    ALP_CC3501E_GPIO_PULL_NONE,
+		                                                    200u);
+		g_usbmux.gpio_wr =
+		    (int32_t)cc3501e_gpio_write(&fw, CC3501E_USB2_SELECT_PAD, (USB2_SEL_LVL != 0), 200u);
 		printk("USB2_SELECT (CC35 GPIO2) cfg=%d wr=%d level=%d\n",
-		       g_usbmux.gpio_cfg, g_usbmux.gpio_wr, USB2_SEL_LVL);
+		       g_usbmux.gpio_cfg,
+		       g_usbmux.gpio_wr,
+		       USB2_SEL_LVL);
 		k_busy_wait(200000); /* mux + connect debounce */
 	} else {
 		printk("WARN: CC3501E link down (%d) -> mux not set\n", (int)bs);
