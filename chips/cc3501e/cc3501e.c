@@ -672,7 +672,17 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4])
 	    ctx, ALP_CC3501E_CMD_WIFI_GET_IP, NULL, 0, reply, sizeof(reply), &got, CC3501E_REQ_TMO_MS);
 	if (s != ALP_OK) return s;
 	if (got < 4u) return ALP_ERR_IO;
-	memcpy(ip, reply, 4);
+	/* Byte-order normalise (host-only): the firmware derives these 4 bytes from the
+	 * lwIP netif address -- a NETWORK-order u32 (netif_ip4_addr()->addr) -- but extracts
+	 * it MSB-first, so on the wire the octets arrive REVERSED (192.168.1.14 -> the wire
+	 * bytes [14,1,168,192]).  Reverse them here to canonical dotted-quad order
+	 * (ip[0]=192 ... ip[3]=14), which is directly printable AND matches the ip[]
+	 * convention cc3501e_sock_connect expects (network order, ip[0] = most-significant
+	 * octet) -- so a get_ip result can feed straight back into a connect. */
+	ip[0] = reply[3];
+	ip[1] = reply[2];
+	ip[2] = reply[1];
+	ip[3] = reply[0];
 	return ALP_OK;
 }
 

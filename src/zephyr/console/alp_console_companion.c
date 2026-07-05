@@ -1129,7 +1129,8 @@ static int cmd_companion_sock_tcp_get(const struct shell *sh, size_t argc, char 
 	 *    close; stop after a few consecutive empty reads (or the round cap). */
 	shell_print(sh, "---- response ----");
 	static uint8_t rx[ALP_COMPANION_SOCK_RECV_BUF];
-	unsigned       empty = 0;
+	unsigned       empty    = 0;
+	bool           got_data = false;
 	for (unsigned round = 0; round < ALP_COMPANION_SOCK_RECV_ROUNDS; round++) {
 		size_t n = 0;
 		k_mutex_lock(&companion_bus_lock, K_FOREVER);
@@ -1137,7 +1138,16 @@ static int cmd_companion_sock_tcp_get(const struct shell *sh, size_t argc, char 
 		    companion_cc3501e, handle, rx, sizeof(rx), &n, ALP_COMPANION_SOCK_RECV_MS);
 		k_mutex_unlock(&companion_bus_lock);
 		if (s != ALP_OK) {
-			shell_error(sh, "recv failed (%d)", (int)s);
+			/* A recv error AFTER the body already arrived is the peer-close tail: the
+			 * server sent its response then closed, so the firmware's post-close recv
+			 * surfaces as TIMEOUT/NOT_READY/IO.  Treat it as a CLEAN end-of-response --
+			 * stop quietly (clear s so the command still succeeds).  Only surface an
+			 * error when the FIRST recv fails, before any data (a real fetch failure). */
+			if (got_data) {
+				s = ALP_OK;
+			} else {
+				shell_error(sh, "recv failed (%d)", (int)s);
+			}
 			break;
 		}
 		if (n == 0u) {
@@ -1146,7 +1156,8 @@ static int cmd_companion_sock_tcp_get(const struct shell *sh, size_t argc, char 
 			}
 			continue;
 		}
-		empty = 0;
+		got_data = true;
+		empty    = 0;
 		shell_fprintf(sh, SHELL_NORMAL, "%.*s", (int)n, (const char *)rx);
 	}
 	shell_print(sh, "\n---- end ----");
