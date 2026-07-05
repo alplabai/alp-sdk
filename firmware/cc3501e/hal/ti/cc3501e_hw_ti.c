@@ -28,6 +28,11 @@
 #include <stdint.h>
 #include <string.h> /* memcpy (OTA manifest buffering) */
 
+/* Async-event ring (src/event_ring.h, on the firmware CMake include path): the
+ * Wi-Fi connect/disconnect path pushes EVT_WIFI_* here for the host to drain via
+ * CMD_GET_PENDING_EVENTS.  Silicon-free; always linked. */
+#include "event_ring.h"
+
 /* CMSIS core for NVIC_SystemReset (the CC35xx M33 core).  Pulled in via the
  * device's CMSIS header -- ti_drivers_config.h does NOT bring the core in
  * transitively on this SDK (SDK 10.10). */
@@ -65,6 +70,18 @@
  * optional signals are simply skipped on this headless bridge). */
 #include <network_terminal.h>
 appControlBlock app_CB;
+/* lwIP BSD socket API for the TCP/UDP data path (CMD_SOCK_* 0x20..0x24): the
+ * osi lwipopts enable LWIP_SOCKET + LWIP_COMPAT_SOCKETS + LWIP_TCP/UDP and the
+ * prebuilt lwip.a carries sockets.c.  lwip_socket / lwip_connect / lwip_send /
+ * lwip_recvfrom / lwip_close + struct sockaddr_in / SO_RCVTIMEO live here. */
+#include <lwip/sockets.h>
+/* Wi-Fi console UART logger (network_terminal demo adaptation/uart_term.c, linked
+ * in the --wifi build): Report() surfaces the real reason a socket op failed on the
+ * bench console -- the only diagnostic channel this headless bridge has. */
+#include <uart_term.h>
+/* FreeRTOS heap accounting (resolves at link time; declared here so the socket
+ * failure path can report free heap without pulling the kernel headers). */
+extern size_t xPortGetFreeHeapSize(void);
 #endif
 
 #ifdef CC3501E_BLE
@@ -418,6 +435,15 @@ void cc3501e_hw_init(void)
 extern const unsigned char cc3501e_ota_candidate[];
 extern const unsigned int  cc3501e_ota_candidate_len;
 
+/* psa_fwu_write granularity for the SELFTEST installer: 256 B = the CC35 flash
+ * page (a 4-byte-aligned flash write block).  This is the validated selftest
+ * chunk (host cc3501e_ota_update mirrors it: chips/cc3501e/cc3501e.c documents
+ * "the validated SELFTEST installer used CC3501E_OTA_WRITE_CHUNK 256").  Its
+ * original definition here was dropped when the OTA-over-bridge FINISH burst
+ * (CC3501E_OTA_FINISH_FLASH_BLOCK, below) was added, which broke --ota-selftest
+ * builds -- restored so the selftest installer's use (below) resolves. */
+#define CC3501E_OTA_WRITE_CHUNK 256u
+
 /* Install a GPE-format signed vendor image into the alternate (non-primary)
  * vendor slot and request the reboot that performs the swap.  Returns 0 on
  * "install staged + reboot requested" (does not return if reboot is immediate),
@@ -627,8 +653,11 @@ void cc3501e_hw_notify_reply_sent(void)
  * the bring-up task with a single bridge re-arm after.  (r2 adds CS + a host-IRQ;
  * then per-chunk flash + a smaller buffer become viable.) */
 #define CC3501E_OTA_IMAGE_MAX (64u * 1024u) /* max staged image; begin rejects larger */
-#define CC3501E_OTA_WRITE_CHUNK                                                                    \
-	4096u /* finish flash block: big => few psa_fwu_write calls (each tears the bridge DMA), short burst */
+/* FINISH flash block for the OTA-over-bridge path (distinct from the SELFTEST
+ * installer's CC3501E_OTA_WRITE_CHUNK; a --ota-selftest build compiles both, so
+ * they must not collide): big => few psa_fwu_write calls (each tears the bridge
+ * DMA), short burst.  4096 is a multiple of the 256 B flash page. */
+#define CC3501E_OTA_FINISH_FLASH_BLOCK 4096u
 
 #define OTA_OP_IDLE     0u
 #define OTA_OP_BEGIN    1u
@@ -697,7 +726,7 @@ static int ota_do_begin(void)
 
 /* FINISH: commit the whole RAM-staged image to the target slot in ONE flash burst
  * (manifest = first TI_FWU_MANIFEST_SIZE bytes -> psa_fwu_start; the remainder in
- * CC3501E_OTA_WRITE_CHUNK pages -> psa_fwu_write), finalize + install, then arm
+ * CC3501E_OTA_FINISH_FLASH_BLOCK pages -> psa_fwu_write), finalize + install, then arm
  * the swap-reboot.  All the OTA flash (hence all bridge-DMA disruption) is here. */
 static int ota_do_finish(void)
 {
@@ -725,8 +754,8 @@ static int ota_do_finish(void)
 	uint32_t since_rearm = 0u;
 	for (uint32_t off = (uint32_t)TI_FWU_MANIFEST_SIZE; off < ota.total_len;) {
 		uint32_t n = ota.total_len - off;
-		if (n > CC3501E_OTA_WRITE_CHUNK) {
-			n = CC3501E_OTA_WRITE_CHUNK;
+		if (n > CC3501E_OTA_FINISH_FLASH_BLOCK) {
+			n = CC3501E_OTA_FINISH_FLASH_BLOCK;
 		}
 		if (psa_fwu_write(ota.target, off, &ota.image_buf[off], n) != PSA_SUCCESS) {
 			return CC3501E_HW_ERR_IO;
@@ -1300,13 +1329,34 @@ int cc3501e_hw_wifi_scan_stop(void)
 }
 
 /* Publish a terminal connect outcome to the status latch (rssi first, state last --
- * a reader that observes the terminal state also observes the matching detail). */
+ * a reader that observes the terminal state also observes the matching detail).
+ *
+ * ALSO enqueue the matching async EVT_* so a host that registered an event
+ * callback (via CMD_GET_PENDING_EVENTS polling) is notified: CONNECTED ->
+ * EVT_WIFI_CONNECTED, a terminal FAILED/DISCONNECTED -> EVT_WIFI_DISCONNECTED.
+ * Both carry no payload -- the host reads the detail (rssi / fail_reason) via
+ * CMD_WIFI_STATUS.  wifi_conn_set is the single terminal-transition chokepoint
+ * (mark_connecting writes the CONNECTING latch directly and is NOT terminal), so
+ * exactly one event is queued per terminal outcome. */
 static void wifi_conn_set(uint8_t state, uint8_t fail_reason, int8_t rssi)
 {
 	g_wifi_conn.fail_reason = fail_reason;
 	g_wifi_conn.rssi        = rssi;
 	g_wifi_conn.state       = state;
+
+	if (state == (uint8_t)ALP_CC3501E_WIFI_CONNECTED) {
+		(void)event_ring_push((uint8_t)ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+	} else if (state == (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED ||
+	           state == (uint8_t)ALP_CC3501E_WIFI_DISCONNECTED) {
+		(void)event_ring_push((uint8_t)ALP_CC3501E_EVT_WIFI_DISCONNECTED, NULL, 0u);
+	}
 }
+
+/* STA L3 bring-up: bounded DHCP-lease poll after the L2 connect event.
+ * CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US = 50 * 200 ms = 10 s budget
+ * (the worker drain sleeps between tries so the tcpip thread runs DHCP). */
+#define CC3501E_STA_DHCP_TRIES   50u
+#define CC3501E_STA_DHCP_POLL_US 200000u
 
 int cc3501e_hw_wifi_connect_sta(
     const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
@@ -1364,16 +1414,43 @@ int cc3501e_hw_wifi_connect_sta(
 		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_REJECTED, 0);
 		return CC3501E_HW_ERR_IO;
 	}
-	/* L2 ASSOCIATED.  Publish CONNECTED (rssi left 0) and return AT ONCE.  Do NOT read
-	 * the RSSI here: a Wlan_Get(WLAN_GET_RSSI) immediately after associate BLOCKS on
-	 * this NWP (the link is not yet settled for a beacon measurement) and hangs the
-	 * worker body -- it never returns, so worker_run_pending never re-arms the slave /
-	 * raises READY, and the bridge wedges with READY stuck LOW forever (root-caused on
-	 * silicon 2026-06-23: ver stays -3 / BUSY indefinitely after a successful connect).
-	 * The host fetches the RSSI separately, as a settled WIFI_GET_RSSI op, once it
-	 * observes CONNECTED.  Do NOT call network_set_up()/DHCP either: the lwIP stack is
-	 * not brought up here (network_stack_init broke the radio boot path), so it would
-	 * likewise hang the worker.  IP/DHCP is a v0.3 feature. */
+	/* L2 ASSOCIATED.  Bring the STA netif UP at L3 + start DHCP, MIRRORING the AP path
+	 * (cc3501e_hw_wifi_ap_start -> network_set_up(network_get_ap_if())).  Without this
+	 * the netif stays link-down, lwIP has no route, and lwip_socket/connect fail -- the
+	 * L3 gap the bench hit.  network_set_up() does netif_set_up + netif_set_link_up under
+	 * LOCK_TCPIP_CORE; the STA netif's link_callback (registered at boot by
+	 * network_stack_add_if_sta -> _role_sta_up) then runs dhcp_start FROM THE TCPIP
+	 * CONTEXT (sta_ip_mode defaults to IP_DHCP, STATIC_IP undefined).  The old
+	 * "network_set_up()/DHCP would hang the worker" caveat here PREDATED the busy-poll
+	 * transport that starved the tcpip thread; the slave is now DMA-callback driven, so
+	 * LOCK_TCPIP_CORE no longer deadlocks the drain (confirmed 2026-07-05).
+	 *
+	 * Do NOT read the RSSI here: a Wlan_Get(WLAN_GET_RSSI) immediately after associate
+	 * BLOCKS on this NWP (the link is not yet settled for a beacon measurement) and hangs
+	 * the worker body -- the host fetches it separately via WIFI_GET_RSSI once settled. */
+	network_set_up(network_get_sta_if());
+
+	/* GATE "CONNECTED" ON L3-UP: bounded, NON-blocking poll of the netif IP (a light read,
+	 * no radio op) with a short task-sleep between tries so DHCP proceeds on the tcpip
+	 * thread -- NOT a blocking semaphore wait in the drain.  Publishing CONNECTED only
+	 * once a nonzero IP is leased means a host that observes CONNECTED can open sockets
+	 * immediately (the netif has a route). */
+	uint32_t ip = 0u, mask = 0u, gw = 0u, dhcp = 0u;
+	for (unsigned i = 0u; i < CC3501E_STA_DHCP_TRIES; ++i) {
+		if (network_stack_get_if_ip(WLAN_ROLE_STA, &ip, &mask, &gw, &dhcp) == 0 && ip != 0u) {
+			break;
+		}
+		ip = 0u;
+		ClockP_usleep(CC3501E_STA_DHCP_POLL_US);
+	}
+	if (ip == 0u) {
+		/* Associated at L2 but no DHCP lease within the budget -- TERMINAL (there is no
+		 * usable IP, so a "connected" report would mislead the host into failing socket
+		 * ops).  The host reads this as CONN_FAILED/TIMEOUT via CMD_WIFI_STATUS. */
+		wifi_conn_set(
+		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_TIMEOUT, 0);
+		return CC3501E_HW_ERR_IO;
+	}
 	wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE, 0);
 	return CC3501E_HW_OK;
 }
@@ -1386,6 +1463,9 @@ int cc3501e_hw_wifi_disconnect(void)
 	if (Wlan_Disconnect(WLAN_ROLE_STA, NULL) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
+	/* Host-requested teardown succeeded: mirror the state into the latch and
+	 * queue an async EVT_WIFI_DISCONNECTED (wifi_conn_set does both). */
+	wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_DISCONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE, 0);
 	return CC3501E_HW_OK;
 }
 
@@ -1537,6 +1617,213 @@ int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4])
 #endif /* CC3501E_WIFI */
 
 /* --------------------------------------------------------------- */
+/* TCP/UDP sockets (v0.5) -- lwIP BSD socket path.                   */
+/*                                                                   */
+/* CMD_SOCK_* (0x20..0x24) route here through the async worker: every */
+/* lwip_* body below BLOCKS (a tcpip_apimsg round-trip to the lwIP   */
+/* core thread; connect/recv also wait on the network), so -- like   */
+/* the Wlan_* ops -- they MUST run in worker_run_pending, never the  */
+/* SPI ISR.  The handle handed to the host is the lwIP fd + 1 so the */
+/* protocol's "0 = invalid handle" contract holds (lwIP fds start at */
+/* 0).  IPv4 only this rev (the osi lwipopts bring up an IPv4 stack). */
+/* Under !CC3501E_WIFI (no lwIP) every body is NOTIMPL -> NOT_READY.  */
+/* --------------------------------------------------------------- */
+#ifdef CC3501E_WIFI
+/* Bounded receive timeout so a worker RECV job can never wedge the drain on a
+ * silent/half-open peer: after this window lwip_recv returns EWOULDBLOCK, which
+ * the recv body maps to "0 bytes available" (OK) per the non-blocking wire
+ * contract.  The host re-issues CMD_SOCK_RECV to poll for more. */
+#define CC3501E_SOCK_RCVTIMEO_MS 4000
+
+int cc3501e_hw_sock_open(uint8_t family, uint8_t type, uint8_t protocol, uint16_t *handle_out)
+{
+	if (handle_out == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	*handle_out = 0u;
+	if (family != (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4) {
+		return CC3501E_HW_ERR_INVAL; /* v1 IP stack is IPv4-only */
+	}
+	const int st = (type == (uint8_t)ALP_CC3501E_SOCK_TYPE_DGRAM) ? SOCK_DGRAM : SOCK_STREAM;
+	const int fd = lwip_socket(AF_INET, st, (int)protocol);
+	if (fd < 0) {
+		/* netconn allocation failed -- typically FreeRTOS-heap exhaustion for the
+		 * recvmbox/sem, or MEMP_NUM_NETCONN starvation.  UNMASK the real reason on the
+		 * bench console (errno + free heap), then FAIL FAST: return NOTIMPL, which the
+		 * protocol layer maps to RESP_ERR_NOT_READY -- a NON-retryable host error.  (IO
+		 * would map to RESP_ERR_RADIO -> host ALP_ERR_IO, which poll_by_repeat retries
+		 * for the whole budget and masks as a -4 timeout.)  NOT_READY == "the IP stack
+		 * cannot serve a socket right now", which is exactly this condition. */
+		Report("\n\rcc3501e sock_open: lwip_socket failed errno=%d freeHeap=%u\n\r",
+		       errno,
+		       (unsigned)xPortGetFreeHeapSize());
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	/* lwIP fds are small non-negative ints; +1 keeps host handle 0 = invalid.  A
+	 * full u16 table is unnecessary -- lwIP validates the fd (EBADF) on each op. */
+	if (fd >= 0xFFFF) {
+		(void)lwip_close(fd);
+		return CC3501E_HW_ERR_IO;
+	}
+	struct timeval tv = { .tv_sec  = CC3501E_SOCK_RCVTIMEO_MS / 1000,
+		                  .tv_usec = (CC3501E_SOCK_RCVTIMEO_MS % 1000) * 1000 };
+	(void)lwip_setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	*handle_out = (uint16_t)(fd + 1);
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, const uint8_t addr[4])
+{
+	if (handle == 0u || addr == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (family != (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	const int          fd = (int)handle - 1;
+	struct sockaddr_in sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sin_family = AF_INET;
+	sa.sin_port   = lwip_htons(port); /* host-order port -> network order */
+	/* addr[0..3] are already big-endian (network order); s_addr is a network-order
+	 * u32, so a straight copy lands the octets in the right byte positions. */
+	memcpy(&sa.sin_addr.s_addr, addr, 4);
+	if (lwip_connect(fd, (struct sockaddr *)&sa, sizeof(sa)) != 0) {
+		return CC3501E_HW_ERR_IO;
+	}
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_sock_send(
+    uint16_t handle, uint8_t flags, const uint8_t *data, uint16_t data_len, uint16_t *sent_out)
+{
+	(void)flags; /* MORE hint is advisory; lwip_send has no matching flag here */
+	if (sent_out != 0) *sent_out = 0u;
+	if (handle == 0u || (data == 0 && data_len > 0u)) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	const int     fd = (int)handle - 1;
+	const ssize_t n  = lwip_send(fd, data, data_len, 0);
+	if (n < 0) {
+		return CC3501E_HW_ERR_IO;
+	}
+	if (sent_out != 0) *sent_out = (uint16_t)n;
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_sock_recv(uint16_t  handle,
+                         uint16_t  max_len,
+                         uint8_t  *buf,
+                         uint16_t  cap,
+                         uint16_t *recv_len_out,
+                         uint8_t   from_addr[4],
+                         uint16_t *from_port_out)
+{
+	if (recv_len_out != 0) *recv_len_out = 0u;
+	if (from_addr != 0) {
+		memset(from_addr, 0, 4);
+	}
+	if (from_port_out != 0) *from_port_out = 0u;
+	if (handle == 0u || buf == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	const int fd   = (int)handle - 1;
+	uint16_t  want = (max_len < cap) ? max_len : cap;
+
+	struct sockaddr_in from;
+	socklen_t          fromlen = sizeof(from);
+	memset(&from, 0, sizeof(from));
+	const ssize_t n = lwip_recvfrom(fd, buf, want, 0, (struct sockaddr *)&from, &fromlen);
+	if (n < 0) {
+		/* SO_RCVTIMEO expiry (EAGAIN / EWOULDBLOCK) is NOT an error at the wire: it
+		 * means "no data yet" -- report OK with 0 bytes so the host re-polls.  Any
+		 * other errno is a real socket failure (bad fd / reset) -> IO.  The ticlang
+		 * C <errno.h> defines EAGAIN but not always EWOULDBLOCK, so guard the latter
+		 * (lwIP treats the two as equal on this platform). */
+		if (errno == EAGAIN
+#ifdef EWOULDBLOCK
+		    || errno == EWOULDBLOCK
+#endif
+		) {
+			return CC3501E_HW_OK;
+		}
+		return CC3501E_HW_ERR_IO;
+	}
+	/* n == 0 on a STREAM socket means the peer closed -- still OK, 0 bytes. */
+	if (recv_len_out != 0) *recv_len_out = (uint16_t)n;
+	if (from.sin_family == AF_INET) {
+		if (from_addr != 0) memcpy(from_addr, &from.sin_addr.s_addr, 4);
+		if (from_port_out != 0) *from_port_out = lwip_ntohs(from.sin_port);
+	}
+	return CC3501E_HW_OK;
+}
+
+int cc3501e_hw_sock_close(uint16_t handle)
+{
+	if (handle == 0u) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (lwip_close((int)handle - 1) != 0) {
+		return CC3501E_HW_ERR_IO;
+	}
+	return CC3501E_HW_OK;
+}
+#else  /* !CC3501E_WIFI -- no lwIP: report NOTIMPL (-> RESP_ERR_NOT_READY) */
+int cc3501e_hw_sock_open(uint8_t family, uint8_t type, uint8_t protocol, uint16_t *handle_out)
+{
+	(void)family;
+	(void)type;
+	(void)protocol;
+	if (handle_out != 0) *handle_out = 0u;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, const uint8_t addr[4])
+{
+	(void)handle;
+	(void)family;
+	(void)port;
+	(void)addr;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_sock_send(
+    uint16_t handle, uint8_t flags, const uint8_t *data, uint16_t data_len, uint16_t *sent_out)
+{
+	(void)handle;
+	(void)flags;
+	(void)data;
+	(void)data_len;
+	if (sent_out != 0) *sent_out = 0u;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_sock_recv(uint16_t  handle,
+                         uint16_t  max_len,
+                         uint8_t  *buf,
+                         uint16_t  cap,
+                         uint16_t *recv_len_out,
+                         uint8_t   from_addr[4],
+                         uint16_t *from_port_out)
+{
+	(void)handle;
+	(void)max_len;
+	(void)buf;
+	(void)cap;
+	if (recv_len_out != 0) *recv_len_out = 0u;
+	if (from_addr != 0) memset(from_addr, 0, 4);
+	if (from_port_out != 0) *from_port_out = 0u;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_sock_close(uint16_t handle)
+{
+	(void)handle;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+#endif /* CC3501E_WIFI */
+
+/* --------------------------------------------------------------- */
 /* BLE 5.4 (v0.3) -- real TI BLE host integration (Apache NimBLE).   */
 /*                                                                   */
 /* Under CC3501E_BLE the enable + advertise bodies route to the      */
@@ -1614,9 +1901,16 @@ int cc3501e_hw_ble_enable(void)
 	return CC3501E_HW_OK;
 }
 
+/* BLE_DISABLE: tear down advertising + discovery via the NimBLE glue, then
+ * re-open the bridge SPI (the teardown issues HCI over the shared HIF, exactly
+ * like adv_stop).  Reached ONLY from the async worker's drain (never the SPI
+ * ISR).  Best-effort: the NimBLE host stays up so a later BLE_ENABLE is a cheap
+ * no-op (see cc3501e_hw_ble_enable's idempotency). */
 int cc3501e_hw_ble_disable(void)
 {
-	return CC3501E_HW_ERR_NOTIMPL;
+	const int rc = cc3501e_nimble_host_disable();
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
 /* BLE_ADVERTISE (ext-adv): configure + start the single adv set via the NimBLE
@@ -1697,6 +1991,106 @@ int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len)
 	*out_len = off;
 	return CC3501E_HW_OK;
 }
+
+/* BLE_SCAN_STOP: cancel any in-flight GAP discovery (issues HCI over the shared
+ * HIF, so re-sync the bridge after).  Worker-routed off the SPI ISR. */
+int cc3501e_hw_ble_scan_stop(void)
+{
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL; /* BLE not enabled yet -> NOT_READY */
+	}
+	const int rc = cc3501e_nimble_scan_stop();
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_CONNECT: central-connect to addr_type|addr.  Blocks on the connection-
+ * complete HCI event over the shared HIF (worker-routed off the SPI ISR -- see
+ * worker.c ALP_CC3501E_CMD_BLE_CONNECT), then re-syncs the bridge SPI. */
+int cc3501e_hw_ble_connect(uint8_t addr_type, const uint8_t addr[6])
+{
+	if (addr == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL; /* BLE not enabled yet -> NOT_READY */
+	}
+	const int rc = cc3501e_nimble_connect(addr_type, addr);
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_DISCONNECT: terminate the active connection; blocks on the disconnect HCI
+ * event over the shared HIF, then re-syncs the bridge.  Idempotent (OK when no
+ * link is up). */
+int cc3501e_hw_ble_disconnect(void)
+{
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_disconnect();
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_GATT_REGISTER: confirm the fixed demo GATT service is live (the opaque
+ * descriptor is not parsed this rev -- see cc3501e_nimble_gatt_register).  Pure
+ * host-side attribute-table check: no HCI, so no bridge re-sync needed. */
+int cc3501e_hw_ble_gatt_register(const uint8_t *desc, uint16_t desc_len)
+{
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_gatt_register(desc, desc_len);
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_GATT_NOTIFY: push a notification to the connected peer.  Blocks on HCI
+ * over the shared HIF, so re-sync the bridge after (worker-routed). */
+int cc3501e_hw_ble_gatt_notify(uint16_t handle, const uint8_t *data, uint16_t data_len)
+{
+	if (data == 0 && data_len != 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_gatt_notify(handle, data, data_len);
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_GATT_READ: GATT-client read of a peer attribute; blocks on the read-
+ * response HCI over the shared HIF, packs the value into out, re-syncs the
+ * bridge (worker-routed -- the payload+reply path copies out back to the host). */
+int cc3501e_hw_ble_gatt_read(uint16_t handle, uint8_t *out, uint16_t cap, uint16_t *out_len)
+{
+	if (out == 0 || out_len == 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	*out_len = 0u;
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_gatt_read(handle, out, cap, out_len);
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
+
+/* BLE_GATT_WRITE: GATT-client acknowledged write to a peer attribute; blocks on
+ * the write-response HCI over the shared HIF, then re-syncs the bridge. */
+int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t data_len)
+{
+	if (data == 0 && data_len != 0) {
+		return CC3501E_HW_ERR_INVAL;
+	}
+	if (!cc3501e_nimble_host_is_enabled()) {
+		return CC3501E_HW_ERR_NOTIMPL;
+	}
+	const int rc = cc3501e_nimble_gatt_write(handle, data, data_len);
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+}
 #else  /* !CC3501E_BLE -- stub / Wi-Fi-only / silicon-free build */
 int cc3501e_hw_ble_enable(void)
 {
@@ -1734,12 +2128,6 @@ int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len)
 	if (out_len != 0) {
 		*out_len = 0u;
 	}
-	return CC3501E_HW_ERR_NOTIMPL;
-}
-#endif /* CC3501E_BLE */
-
-int cc3501e_hw_ble_scan_start(void)
-{
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
@@ -1789,6 +2177,15 @@ int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t dat
 	(void)handle;
 	(void)data;
 	(void)data_len;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+#endif /* CC3501E_BLE */
+
+/* BLE_SCAN_START: streaming-scan kickoff has no NimBLE mapping this rev (the
+ * record-returning cc3501e_hw_ble_scan is the supported scan path) -- NOTIMPL on
+ * every build. */
+int cc3501e_hw_ble_scan_start(void)
+{
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 

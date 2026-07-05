@@ -36,7 +36,14 @@ CMD_PING = 0x00
 CMD_GET_VERSION = 0x01
 CMD_RESET = 0x02
 CMD_GET_MAC = 0x03
+CMD_GET_PENDING_EVENTS = 0x05  # async-event queue drain (host-polled)
 CMD_WIFI_SCAN_START = 0x10  # representative not-yet-implemented v1 opcode
+
+# Async event opcodes carried inside a GET_PENDING_EVENTS reply.
+EVT_WIFI_CONNECTED = 0x19
+EVT_WIFI_DISCONNECTED = 0x1A
+CMD_SOCK_OPEN = 0x20
+CMD_SOCK_CLOSE = 0x24
 
 FLAG_SOLICITED = 0x00
 
@@ -47,7 +54,7 @@ RESP_ERR_NOT_READY = 0x05
 RESP_ERR_PROTOCOL = 0x07
 
 # Wire-protocol version GET_VERSION reports (ALP_CC3501E_PROTOCOL_VERSION).
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 
 
 def frame(cmd: int, flags: int, payload: bytes = b"") -> bytes:
@@ -110,6 +117,44 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
         "wifi_scan_start_reply_invalid",
         reply(CMD_WIFI_SCAN_START, RESP_ERR_INVALID).hex().upper(),
         "cmd=WIFI_SCAN_START | len=1 | status=INVALID -- v1 opcode not implemented in v0.1",
+    ))
+
+    # TCP/UDP sockets (0x20..0x24): worker-routed, poll-by-repeat like GET_MAC.
+    # SOCK_OPEN req = sock_open_t { family=IPV4(0) | type=STREAM(0) | proto=0 | rsvd }.
+    out.append(("sock_open_tcp_request",
+                frame(CMD_SOCK_OPEN, 0, bytes([0x00, 0x00, 0x00, 0x00])).hex().upper(),
+                "cmd=SOCK_OPEN | len=4 | family=IPV4 type=STREAM proto=0"))
+    # First request submits the worker job and replies BUSY; host re-issues.
+    out.append(("sock_open_reply_busy_submitted", reply(CMD_SOCK_OPEN, RESP_ERR_BUSY).hex().upper(),
+                "cmd=SOCK_OPEN | len=1 | status=BUSY -- job submitted, host re-issues"))
+    # Re-issued on the stub (no IP stack) -> NOT_READY.
+    out.append(("sock_open_reply_not_ready_stub",
+                reply(CMD_SOCK_OPEN, RESP_ERR_NOT_READY).hex().upper(),
+                "cmd=SOCK_OPEN | len=1 | status=NOT_READY -- re-issued; stub has no IP stack"))
+    # SOCK_CLOSE req = sock_close_t { handle(LE16)=1 | reserved(LE16) } = 4 B.
+    out.append(("sock_close_request",
+                frame(CMD_SOCK_CLOSE, 0, bytes([0x01, 0x00, 0x00, 0x00])).hex().upper(),
+                "cmd=SOCK_CLOSE | len=4 | handle=1"))
+    # Bad length: a 3-byte SOCK_OPEN payload is rejected up front (not worker-routed).
+    out.append(("sock_open_bad_len_reply_invalid",
+                reply(CMD_SOCK_OPEN, RESP_ERR_INVALID).hex().upper(),
+                "cmd=SOCK_OPEN | len=1 | status=INVALID -- payload length != sizeof(sock_open_t)"))
+
+    # Async-event queue drain (0x05, proto v3): the reply DATA is a packed list
+    # of { evt_opcode(1) | len(1) | payload[len] } entries.
+    out.append(("get_pending_events_request", frame(CMD_GET_PENDING_EVENTS, 0).hex().upper(),
+                "cmd=GET_PENDING_EVENTS | flags=0 | len=0"))
+    # Empty ring: status OK with zero data bytes.
+    out.append(("get_pending_events_reply_empty",
+                reply(CMD_GET_PENDING_EVENTS, RESP_OK).hex().upper(),
+                "cmd=GET_PENDING_EVENTS | len=1 | status=OK | no events queued"))
+    # Two payloadless events queued: EVT_WIFI_CONNECTED then EVT_WIFI_DISCONNECTED,
+    # each { evt_opcode | len=0 } back to back in the reply DATA.
+    out.append((
+        "get_pending_events_reply_wifi_conn_disc",
+        reply(CMD_GET_PENDING_EVENTS, RESP_OK,
+              bytes([EVT_WIFI_CONNECTED, 0x00, EVT_WIFI_DISCONNECTED, 0x00])).hex().upper(),
+        "cmd=GET_PENDING_EVENTS | status=OK | [WIFI_CONNECTED len0][WIFI_DISCONNECTED len0]",
     ))
 
     # Framing error: declared payload_len doesn't match the captured bytes.

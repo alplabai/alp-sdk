@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# tests/baremetal/ -- plain-CMake static archive regressions for the
+# baremetal SDK backend.  Activated from tests/CMakeLists.txt when
+# ALP_OS=baremetal; silent otherwise.
+
+add_executable(alp_test_baremetal_registry_static_link
+    ${CMAKE_CURRENT_SOURCE_DIR}/registry_static_link.c
+)
+target_link_libraries(alp_test_baremetal_registry_static_link PRIVATE alp::sdk)
+target_include_directories(alp_test_baremetal_registry_static_link PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../yocto
+)
+target_compile_features(alp_test_baremetal_registry_static_link PRIVATE c_std_99)
+
+add_test(NAME alp_test_baremetal_registry_static_link
+         COMMAND alp_test_baremetal_registry_static_link)

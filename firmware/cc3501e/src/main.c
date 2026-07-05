@@ -26,6 +26,7 @@
 
 #include "transport.h"
 #include "worker.h"
+#include "event_ring.h"
 #include "../hal/cc3501e_hw.h"
 
 #if defined(CC3501E_RTOS_FREERTOS)
@@ -119,6 +120,7 @@ int main(void)
 {
 	cc3501e_hw_init();
 	worker_init();
+	event_ring_init();
 	(void)xTaskCreateStatic(bringup_task,
 	                        "cc3501e_bringup",
 	                        CC3501E_BRINGUP_STACK_WORDS,
@@ -146,6 +148,7 @@ int main(void)
 {
 	cc3501e_hw_init();
 	worker_init();
+	event_ring_init();
 
 #if defined(CC3501E_CONTROL_TRANSPORT_SDIO)
 	/* Opt-in: the board routes the Alif SDIO controller to the CC3501E

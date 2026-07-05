@@ -1,0 +1,123 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include <zephyr/ztest.h>
+#include <zephyr/shell/shell.h>
+#include <zephyr/shell/shell_dummy.h>
+#include <string.h>
+
+#include <alp/version.h> /* ALP_VERSION_STRING -- the single SDK-version source */
+
+/* Run a shell line on the dummy backend and return its captured output. */
+static const char *run(const char *line)
+{
+	const struct shell *sh = shell_backend_dummy_get_ptr();
+
+	shell_backend_dummy_clear_output(sh);
+	(void)shell_execute_cmd(sh, line);
+
+	size_t      len;
+	const char *out = shell_backend_dummy_get_output(sh, &len);
+	return out;
+}
+
+static void *suite_setup(void)
+{
+	const struct shell *sh = shell_backend_dummy_get_ptr();
+
+	WAIT_FOR(shell_ready(sh), 20000, k_msleep(1));
+	zassert_true(shell_ready(sh), "timed out waiting for dummy shell backend");
+	return NULL;
+}
+
+ZTEST(alp_console, test_board_reports_version)
+{
+	const char *out = run("alp board");
+
+	zassert_not_null(strstr(out, "Alp SDK"), "banner line missing: %s", out);
+	zassert_not_null(strstr(out, ALP_VERSION_STRING), "version missing");
+}
+
+ZTEST(alp_console, test_mem_rd_reads_known_word)
+{
+	static volatile uint32_t probe = 0xCAFEF00Du;
+	char                     line[48];
+
+	snprintk(line, sizeof(line), "alp mem rd 0x%lx", (unsigned long)(uintptr_t)&probe);
+	const char *out = run(line);
+
+	zassert_not_null(strstr(out, "cafef00d"), "expected value in: %s", out);
+}
+
+ZTEST(alp_console, test_mem_wr_then_rd_roundtrips)
+{
+	static volatile uint32_t probe = 0;
+	char                     line[64];
+
+	snprintk(line, sizeof(line), "alp mem wr 0x%lx 0x12345678", (unsigned long)(uintptr_t)&probe);
+	(void)run(line);
+	zassert_equal(probe, 0x12345678u, "write did not land");
+}
+
+ZTEST(alp_console, test_gpio_read_runs)
+{
+	const char *out = run("alp gpio read 0");
+
+	/* On native_sim pin 0 of the emulated gpio_emul0 reads back a
+	 * defined level (the gpio-emul reset default is low = 0).
+	 * Assert the command resolved and printed a level, not an error. */
+	zassert_true(strstr(out, "= 0") || strstr(out, "= 1"), "got: %s", out);
+}
+
+ZTEST(alp_console, test_i2c_scan_runs)
+{
+	const char *out = run("alp i2c scan 0");
+
+	zassert_not_null(strstr(out, "responder"), "scan summary missing: %s", out);
+}
+
+ZTEST(alp_console, test_i2c_read_2byte_reg)
+{
+	/* The sw_fallback echoes the written register-address bytes back on the
+	 * read phase.  With regbytes=2 and reg=0x1234 the 2-byte BIG-ENDIAN
+	 * address 0x12 0x34 must lead the readback -- proving the command issued
+	 * a 2-byte register address (needed for 16-bit-addressed parts like the
+	 * 24C128 EEPROM). */
+	const char *out = run("alp i2c read 0 0x50 0x1234 4 2");
+
+	zassert_not_null(strstr(out, "12 34"), "2-byte reg addr not issued: %s", out);
+}
+
+ZTEST(alp_console, test_i2c_read_1byte_default)
+{
+	/* No regbytes arg = 1-byte register (backward compatible); the single
+	 * address byte 0xab echoes back. */
+	const char *out = run("alp i2c read 0 0x50 0xab 2");
+
+	zassert_not_null(strstr(out, "ab"), "1-byte reg addr not issued: %s", out);
+}
+
+ZTEST(alp_console, test_adc_read_registers)
+{
+	const char *out = run("alp adc read 0");
+
+	/* Command must be registered AND its handler must run: on native_sim the
+	 * sw-fallback adc open fails, so the handler prints "open ch ...". A raw
+	 * value ("raw") is the success token on real hardware. "Unknown command"
+	 * means the subcmd is absent. */
+	zassert_is_null(strstr(out, "Unknown command"), "adc cmd not registered: %s", out);
+	zassert_true(strstr(out, "open ch") != NULL || strstr(out, "raw") != NULL,
+	             "adc handler did not run: %s",
+	             out);
+}
+
+ZTEST(alp_console, test_clk_dump_runs)
+{
+	const char *out = run("alp clk");
+
+	zassert_not_null(strstr(out, "Hz"), "clk dump missing: %s", out);
+	zassert_is_null(strstr(out, "Unknown command"), "clk cmd not registered: %s", out);
+}
+
+ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);

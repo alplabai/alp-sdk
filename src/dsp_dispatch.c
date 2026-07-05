@@ -45,6 +45,7 @@
 #include "backends/dsp/dsp_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(dsp);
+ALP_BACKEND_ANCHOR(dsp);
 
 extern void alp_z_set_last_error(alp_status_t s);
 extern void alp_z_clear_last_error(void);

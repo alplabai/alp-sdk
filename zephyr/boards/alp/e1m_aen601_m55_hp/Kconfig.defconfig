@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_ALP_E1M_AEN601_M55_HP
+
+# The Ensemble E6 RTSS-HP has CONFIG_NUM_IRQS=480, so the ARMv8-M vector table
+# is (16 + 480) * 4 = 1984 bytes and VTOR must be 2 KiB (0x800) aligned.
+# Bump the MCUboot header reservation to match so the chain-loaded jump
+# target == _vector_table.  (Mirrors the AEN401/AEN801 M55-HP setting.)
+config ROM_START_OFFSET
+	default 0x800 if BOOTLOADER_MCUBOOT
+
+endif # BOARD_ALP_E1M_AEN601_M55_HP

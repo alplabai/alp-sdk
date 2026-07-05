@@ -50,6 +50,22 @@ Compile-verified; live bring-up is bench-gated (`TODO(aen401-bench)` markers).
   using `alp_usb_host_open/enable/disable/close` (`<alp/usb.h>`).  Build-verified
   for `alp_e1m_aen401_m55_hp`; map confirms the xHCI skeleton ops and the
   `USBH_CONTROLLER_DEFINE` context are linked at the correct MRAM addresses.
+
+### Added — AEN601 (E6) board wrapper: real firmware unlock
+
+SDK Zephyr board for the E1M-AEN601 (Alif Ensemble E6, `AE612FA0E5597LS0`),
+mirroring the AEN401/AEN801 M55-HP baseline.  E6 silicon is already supported
+upstream (`soc/alif/ensemble/e6`, Zephyr v4.4.0), so this wrapper is the only
+missing piece; with it the module produces a real `zephyr.bin` (no upstream
+dependency).  Compile-verified (`samples/hello_world` links, 18 KB in MRAM);
+live bring-up is bench-gated (`TODO(aen601-bench)` in `board.cmake`).
+
+- **`zephyr/boards/alp/e1m_aen601_m55_hp/`** — new board
+  `alp_e1m_aen601_m55_hp/ae612fa0e5597ls0/rtss_hp`.  E1M-EVK console on
+  UART5 (P3_4/P3_5), on-die MRAM flash controller, MCUboot-compatible
+  5632 KiB partition map (identical layout to AEN401/AEN801).  Boot + console
+  only; on-module buses and USB are added once grounded + benched on E6.
+
 ### Changed
 
 - **I2C/SPI target (slave) mode hardening** (`[ABI-EXPERIMENTAL]` surface, so

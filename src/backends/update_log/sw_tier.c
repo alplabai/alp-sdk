@@ -416,6 +416,7 @@ static const alp_update_log_ops_t _sw_ops = {
 	.get       = sw_get_e,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(update_log);
 ALP_BACKEND_REGISTER(update_log,
                      sw_tier,
                      {

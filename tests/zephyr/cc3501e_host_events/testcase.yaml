@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Native-sim unit tests for the CC3501E async-event host wrapper
+# (chips/cc3501e/cc3501e.c: cc3501e_poll_events), driven against a software
+# model of the firmware event-ring slave.  Lives under tests/zephyr/ (not
+# tests/unit/) so the pr-twister gate actually runs it.
+
+tests:
+  alp_sdk.cc3501e.host_events:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - cc3501e
+      - events

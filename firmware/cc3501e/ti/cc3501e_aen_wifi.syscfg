@@ -50,7 +50,13 @@ system.getScript("kernel_config_release.syscfg.js");
  * 193 KB region, so full connect-STA/sockets does NOT fit this vendor image --
  * defer to a PSRAM HW rev or shrink the wifi-lib RX/TX/control buffers
  * (conf_bin/Kconfig).  (Default/radio-free build keeps the 32 KB default.) */
-system.modules["/freertos/FreeRTOS"].$static.heapSize = 0x00042000; /* 264KB -- raised from 136KB (2026-06-23): full STA CONNECT (host WPA/WPA3-SAE supplicant +
+system.modules["/freertos/FreeRTOS"].$static.heapSize = 0x00046000; /* 280KB -- raised again (2026-07-05) from 264KB to unblock lwip_socket: at 264KB the
+ * netconn recvmbox/sem alloc for lwip_socket() FAILED on the bench (sock_open -1), because after Wlan_Start (~136KB) + lwIP tcpip stack + wifi/hostap threads +
+ * PSA/TLS the runtime free heap was below the netconn allocation size.  0x46000 is the DRAM CEILING for the -Ble build: the connectivity vendor map
+ * DRAM_NON_SECURE = 0x7F24F (~520KB) and the -Ble .bss+heap footprint at 264KB used 0x79EFC (~487KB, only ~21KB free -- see the -Ble .map), so the non-heap
+ * footprint is ~0x37EFC and the max heap that links is ~0x47353; 0x46000 keeps a ~5KB DRAM margin.  NOTE (DRAM-bound, flagged for the bench): with BLE in, the
+ * heap can only grow ~16KB, which may be marginal for many concurrent sockets -- a WIFI-ONLY socket build frees NimBLE's .bss and allows a much larger heap
+ * (~0x57000 per the wifi-only margin below), and the socket data path does not need BLE.  HISTORICAL (2026-06-23, 264KB): full STA CONNECT (host WPA/WPA3-SAE supplicant +
  * lwIP netif + PSA/TLS crypto) needs ~the SDK STA+sockets floor 0x42000, which 136KB STARVED (Wlan_Start + lwIP could not both allocate -> the worker HUNG: scan
  * -4 / READY stuck low / no connect event).  The old "193KB DRAM cap / WiFi+BLE can't coexist / 136KB max" note below is STALE: build_ti.ps1 links the 512KB
  * connectivity DRAM map (cc3501e_vendor.cmd DRAM_NON_SECURE = 0x7F24F ~520KB; the -Ble map showed ~152KB free at 136KB heap), so the heap was pinned low by THIS

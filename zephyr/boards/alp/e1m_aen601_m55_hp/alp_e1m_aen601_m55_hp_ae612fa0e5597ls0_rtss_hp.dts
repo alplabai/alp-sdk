@@ -1,0 +1,127 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN601 (Alif Ensemble E6, AE612FA0E5597LS0) Cortex-M55-HP carrier,
+ * for the Alp E1M-EVK.
+ *
+ * Mirrors the AEN801 M55-HP board structure (same E1M connector, same E1M-EVK
+ * carrier) but targets the E6 SoC variant:
+ *   - 1x Cortex-A32 + 2x Cortex-M55 + 2x Ethos-U55 + 1x Ethos-U85
+ *   - 5632 KiB MRAM + up to 9984 KiB SRAM
+ * This board is the M55-HP subsystem only; the A32 (Linux) core is out of
+ * scope for the Zephyr real-firmware baseline.
+ *
+ * Console is retargeted to the E1M carrier UART0 (Alif UART5, P3_4/P3_5),
+ * matching the AEN401/AEN801 pin assignment for the E1M-EVK console.
+ *
+ * Boot + storage run from on-die MRAM only.  The SoM's OSPI0 NOR + HyperRAM
+ * are BOM-optional and not assumed populated, so there is no external XIP
+ * device on the baseline.  Inter-core IPC and the on-module peripheral buses
+ * (GPIO / I2C / SPI / Ethernet / USB) are added alongside their drivers once
+ * grounded + benched on E6; this base wires boot + console only.
+ *
+ * MRAM partition map (5632 KiB, same layout as AEN401/AEN801):
+ *   mcuboot  0x000000  64 KiB
+ *   image-0  0x010000  2688 KiB   (primary slot, code-partition)
+ *   image-1  0x2b0000  2688 KiB   (secondary OTA slot)
+ *   scratch  0x550000  64 KiB
+ *   storage  0x560000  128 KiB
+ */
+
+/dts-v1/;
+
+#include <alif/ensemble/ae612fa0e5597ls0.dtsi>
+#include <alif/ensemble/common/ensemble_rtss_hp.dtsi>
+#include "alp_e1m_aen601_m55_hp-pinctrl.dtsi"
+
+/ {
+	model = "Alp E1M-AEN601 Cortex-M55 HP carrier";
+	compatible = "alp,e1m-aen601-m55-hp";
+
+	chosen {
+		zephyr,flash = &mram_storage;
+		zephyr,flash-controller = &mram;
+		zephyr,sram = &dtcm;
+		zephyr,console = &uart5;
+		zephyr,shell-uart = &uart5;
+		zephyr,code-partition = &slot0_partition;
+	};
+};
+
+/* ------------------------------------------------------------------ */
+/* TCM global_base -- CPU-local -> system-bus address translation     */
+/* ------------------------------------------------------------------ */
+
+&itcm {
+	compatible = "alif,itcm";
+	/* RTSS-HP global TCM alias -- HP-ITCM base (shared Ensemble RTSS-HP window). */
+	global_base = <0x50000000>;
+};
+
+&dtcm {
+	compatible = "alif,dtcm";
+	/* RTSS-HP global TCM alias -- HP-DTCM base (shared Ensemble RTSS-HP window). */
+	global_base = <0x50800000>;
+};
+
+/* ------------------------------------------------------------------ */
+/* On-die MRAM as alif,mram-flash-controller (mirrors AEN401/AEN801)  */
+/* ------------------------------------------------------------------ */
+
+&mram {
+	compatible = "alif,mram-flash-controller";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	/delete-property/ zephyr,memory-region;
+	/delete-property/ ranges;
+
+	mram_storage: mram_storage@80000000 {
+		compatible = "soc-nv-flash";
+		reg = <0x80000000 DT_SIZE_K(5632)>;
+		erase-block-size = <1024>;
+		write-block-size = <16>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			boot_partition: partition@0 {
+				label = "mcuboot";
+				reg = <0x0 DT_SIZE_K(64)>;
+			};
+
+			slot0_partition: partition@10000 {
+				label = "image-0";
+				reg = <0x10000 DT_SIZE_K(2688)>;
+			};
+
+			slot1_partition: partition@2b0000 {
+				label = "image-1";
+				reg = <0x2b0000 DT_SIZE_K(2688)>;
+			};
+
+			scratch_partition: partition@550000 {
+				label = "image-scratch";
+				reg = <0x550000 DT_SIZE_K(64)>;
+			};
+
+			storage_partition: partition@560000 {
+				label = "storage";
+				reg = <0x560000 DT_SIZE_K(128)>;
+			};
+		};
+	};
+};
+
+/* ------------------------------------------------------------------ */
+/* Console: E1M carrier UART0 = Alif UART5 (P3_4 RX / P3_5 TX)       */
+/* ------------------------------------------------------------------ */
+
+&uart5 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_uart5>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+};

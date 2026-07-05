@@ -1,0 +1,8 @@
+tests:
+  alp_sdk.console:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp_sdk
+      - console

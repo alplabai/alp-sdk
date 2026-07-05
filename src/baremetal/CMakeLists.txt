@@ -23,6 +23,10 @@ endif()
 
 target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub_backend.c
+    # Backend registry core plus portable fallback classes used by
+    # plain-CMake baremetal builds.  Keeping these classes on the same
+    # dispatcher path as Zephyr/Yocto prevents static-archive drift.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backend.c
     # SDK lifecycle (alp_init / alp_deinit) -- OS-agnostic.
     ${CMAKE_CURRENT_SOURCE_DIR}/../init.c
     # Register-file I2C target helper (<alp/i2c_regfile.h>) -- pure
@@ -33,6 +37,35 @@ target_sources(alp_sdk PRIVATE
     # portable pure C; without it the public caps-query surface is
     # link-broken on plain-CMake builds.
     ${CMAKE_CURRENT_SOURCE_DIR}/../cap_helpers.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../baremetal/dispatch_last_error_shim.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../dac_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dac/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dsp/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../soc_info_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/soc_info/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tmu_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/tmu/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../camera_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/camera/zephyr_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../display_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/display/zephyr_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../power_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/power/zephyr_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../update_log_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/update_log/sw_tier.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../update_log/engine.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../update_log/sha256.c
+)
+
+target_compile_definitions(alp_sdk PRIVATE
+    ALP_VENDOR_OVERRIDES_CAMERA=1
+    ALP_VENDOR_OVERRIDES_DISPLAY=1
+    ALP_VENDOR_OVERRIDES_POWER=1
+)
+
+target_include_directories(alp_sdk PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
 )
 
 if(ALP_SOM STREQUAL "aen")

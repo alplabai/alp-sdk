@@ -1,0 +1,170 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN801 EVK overlay for alp-console.  Two jobs:
+ *
+ * 1. CC3501E inter-chip bridge wiring (so `alp companion ver/ping` reaches the
+ *    on-module CC3501E) -- the SoM-internal Alif<->CC3501E SPI1 link + the two
+ *    host-driven control nets, from metadata/e1m_modules/aen/inter-chip.tsv.
+ *    This is the SAME proven wiring as examples/aen/aen-cc3501e-bringup; the
+ *    console copies cc3501e_bridge.{c,h} from there, so it needs the matching
+ *    overlay too (cc3501e_bridge_bringup opens bus_id 1 = &cc3501e_spi):
+ *      SPI1.SCK P14_6  MOSI P14_5  MISO P14_4   WIFI_EN P15_5  NRST P15_1_FLEX
+ *
+ * 2. Master I2C bus (so `alp i2c scan 0` has a live bus): portable bus 0 ->
+ *    SoC I2C2 (i2c_dw master, P5_6 SCL_C / P5_7 SDA_C), the on-module 24C128
+ *    EEPROM (0x50) + EVK sensor bank.  Pad config bench-validated in
+ *    aen-eeprom-manifest (input-enable for ACK-detect; bias-pull-down = the
+ *    pad DSC value Alif's reference uses -- do NOT "correct" to pull-up).
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+
+&pinctrl {
+	/* SPI1 master (CC3501E bridge): SCK P14_6 / MOSI P14_5 / MISO P14_4 (alt-2, _C). */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			/* SS0 (P14_7) is now peripheral-driven -- the dwc-ssi hardware chip-select,
+			 * NOT the old GPIO bodge.  Push-pull output pad like SCLK/MOSI (no input-enable);
+			 * the master asserts/deasserts SS0 per transfer (write_ser). */
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+	};
+
+	/* I2C2 master: SCL P5_6 / SDA P5_7 (_C). */
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	/* RGB-LED PWM outputs (from aen-rgb-led-fade): RED P2_4 = UT10_T0_A;
+	 * GREEN P12_7 = UT11_T1_C; BLUE P12_6 = UT11_T0_C.  Output pads -- no
+	 * input-enable/bias.  Distinct from the SPI1/I2C2 pads above (no conflict). */
+	pinctrl_pwm10: pinctrl_pwm10 {
+		group0 {
+			pinmux = <PIN_P2_4__UT10_T0_A>; /* RED  */
+		};
+	};
+	pinctrl_pwm11: pinctrl_pwm11 {
+		group0 {
+			pinmux = <PIN_P12_7__UT11_T1_C>, /* GREEN */
+				 <PIN_P12_6__UT11_T0_C>; /* BLUE  */
+		};
+	};
+};
+
+/* P2_6 (READY) is on gpio2 (defined in the SoC dtsi) -- just enable it. */
+&gpio2 {
+	status = "okay";
+};
+
+/* P14_7 (CS) is now muxed as SPI1_SS0_C in pinctrl_spi1 -- the dwc-ssi peripheral drives
+ * it in hardware per transfer.  The old gpio14 GPIO-bodge controller node is removed: a
+ * GPIO claim of P14_7 would fight the SS0 pinctrl mux. */
+
+&clockctrl {
+	status = "okay";
+};
+
+&soc {
+	/* DWC_ssi SPI1 -- the on-SoM CC3501E inter-chip link (NOT the edge SPI0).
+	 * 4-wire: SCLK/MOSI/MISO + the hardware SS0 chip-select (P14_7 = SPI1_SS0_C,
+	 * declared in pinctrl_spi1 above); clock-frequency = SYST_HCLK (400 MHz) so
+	 * spi_dw_alif skips the failing clock-control path. */
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>;          /* BENCH-TBD: SPI1 IRQ */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		clock-frequency = <400000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		/* RX sample delay (DWC_ssi RX_SAMPLE_DLY reg 0xF0, ssi_clk cycles @ 400MHz =
+		 * 2.5ns/cycle) -- recenter the master's MISO capture at higher SCLK.  CLOCK-
+		 * DEPENDENT: keep 0 (absent) at 1 MHz; raise only when CC3501E_BRIDGE_SPI_FREQ_HZ
+		 * is bumped to 8 MHz (try 2) / 15 MHz (sweep 2->4).  A nonzero rx-delay at the
+		 * 1 MHz cold first-contact was bench-implicated in an early-boot desync. */
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/* LP GPIO island: WIFI_EN (P15_5) + E_WIFI.NRST (P15_1_FLEX) as outputs. */
+&lpgpio {
+	status = "okay";
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;   /* 100 kHz */
+};
+
+/ {
+	aliases {
+		alp-spi1 = &cc3501e_spi;   /* bus_id 1 in cc3501e_bridge_bringup() */
+		alp-i2c0 = &i2c2;          /* bus 0 for `alp i2c scan 0` */
+	};
+
+	/* SoM-internal CC3501E control nets, in CC3501E_PIN_* index order. */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+	};
+
+
+	/* RGB "board alive" status LED.  Each pwm-leds child's `pwms` phandle is
+	 * what PWM_DT_SPEC_GET dereferences to reach the pwm10/pwm11 controller +
+	 * channel (never DEVICE_DT_GET on the controller node -- avoids the
+	 * "alif,pwm" #pwm-cells codegen phantom; see aen-rgb-led-fade). */
+	rgb_leds: pwm-leds {
+		compatible = "pwm-leds";
+
+		led_red: led_r {
+			label = "rgb-red";
+			pwms  = <&pwm10 0 PWM_USEC(100) PWM_POLARITY_NORMAL>;
+		};
+		led_green: led_g {
+			label = "rgb-green";
+			pwms  = <&pwm11 1 PWM_USEC(100) PWM_POLARITY_NORMAL>;
+		};
+		led_blue: led_b {
+			label = "rgb-blue";
+			pwms  = <&pwm11 0 PWM_USEC(100) PWM_POLARITY_NORMAL>;
+		};
+	};
+};
+
+&utimer10 {
+	status = "okay";
+	pwm10 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm10>;
+		pinctrl-names = "default";
+	};
+};
+
+&utimer11 {
+	status = "okay";
+	pwm11 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm11>;
+		pinctrl-names = "default";
+	};
+};
