@@ -107,3 +107,23 @@ def test_reconciled_chips_exist_with_physical():
         d = yaml.safe_load(p.read_text())
         assert d["chip_id"] == name
         assert d.get("physical")
+
+def test_aen801_reference_set_is_bom_complete():
+    import yaml
+    evk = yaml.safe_load((REPO / "metadata/boards/e1m-evk.yaml").read_text())
+    populated = [k for k, v in evk["populated"].items() if v is True]
+    unresolved = []
+    for slug in populated:
+        chip = REPO / f"metadata/chips/{slug}.yaml"
+        block = REPO / f"metadata/blocks/{slug}.yaml"
+        if chip.is_file():
+            d = yaml.safe_load(chip.read_text())
+            if not d.get("physical"):
+                unresolved.append(f"{slug}: chip has no physical:")
+        elif block.is_file():
+            d = yaml.safe_load(block.read_text())
+            if not d.get("realizations"):
+                unresolved.append(f"{slug}: block has no realizations")
+        else:
+            unresolved.append(f"{slug}: no chip or block manifest")
+    assert not unresolved, "\n".join(unresolved)
