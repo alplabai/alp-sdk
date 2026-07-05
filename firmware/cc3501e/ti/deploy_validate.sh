@@ -25,7 +25,17 @@ SIGNING_MODULE="${SIGNING_MODULE:?stage + set: sign.py shim (keys wired to the v
 CONF_BIN="${CONF_BIN:?stage + set: cc35xx-conf.bin}"
 TOOL_SETTINGS="${TOOL_SETTINGS:?stage + set: tool_settings.json}"
 XDS_SERIAL="${XDS_SERIAL:-L50015YR}"     # CC3501E XDS110 on this bench
-VERSION="${VERSION:-0.1.0.1}"            # GPE image version; MUST be monotonic (>= version on the unit)
+
+# GPE image/flash version = the CC35 vendor-RoT ANTI-ROLLBACK gate: the unit
+# rejects a flash whose version <= what is already programmed.  It is NOT the
+# app SemVer (that lives in firmware-version.txt and is reported via
+# GET_DIAG_INFO.fw_version) and NOT the wire ALP_CC3501E_PROTOCOL_VERSION.
+#
+# Scheme = date-derived + major>=1 so it is always monotonic and beats whatever
+# is on the unit: major.<yy>.<mmdd>.<hhmm>  e.g. 1.26.0705.1432.  The bench unit
+# was poisoned to 0.9.0.7 by ad-hoc bumps, so major MUST stay >= 1 going forward
+# (1.x > 0.9).  Override with VERSION=... only to force a specific higher value.
+VERSION="${VERSION:-1.$(date +%y).$(date +%m%d).$(date +%H%M)}"
 
 OUT=/home/caner/alp-sdk/firmware/cc3501e/build/ti
 VOUT="$OUT/cc3501e-bridge.out"

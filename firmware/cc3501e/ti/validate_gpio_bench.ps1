@@ -60,7 +60,11 @@ param(
     [Parameter(Mandatory = $true)][string]$SigningModule,  # validation signing module (sign.py shim)
     [Parameter(Mandatory = $true)][string]$ConfBin,        # cc35xx-conf.bin (memory/flash config)
     [Parameter(Mandatory = $true)][string]$ToolSettings,   # tool_settings.json (references primary_vendor_image.sign.bin)
-    [string]$Version       = "0.1.0.1", # GPE image version; MUST be monotonic (>= the version on the unit)
+    # GPE image version = vendor-RoT ANTI-ROLLBACK gate (monotonic, >= the unit's),
+    # DISTINCT from the app SemVer (firmware-version.txt / GET_DIAG_INFO.fw_version).
+    # The bench unit is at 0.9.0.7 -> major MUST be >= 1 now. See deploy_validate.sh
+    # for the date-derived scheme (major.yy.mmdd.hhmm); pass a >=1.x value here.
+    [string]$Version       = "1.0.0.1", # GPE image version; MUST be monotonic (major>=1)
     [string]$CcXdsSerial   = "",         # XDS110 serial on the CC3501E (toolbox -param1); blank = single-probe auto
 
     # --- Alif host example build + flash ---
