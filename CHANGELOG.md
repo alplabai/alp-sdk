@@ -123,8 +123,9 @@ live bring-up is bench-gated (`TODO(aen601-bench)` in `board.cmake`).
   mid-transaction flash-full cannot leave an honest log looking rolled
   back).  Assurance is unchanged — still `SW_TAMPER_EVIDENT`
   (app-cooperative); the app-immutable `HW_ENFORCED` TF-M tier remains #111.
-  native_sim coverage: persist-across-reinit, full-log NOMEM-no-wrap, and
-  RAM-fallback scenarios (`alp.unit.update_log{,.persist}`).
+  native_sim coverage: persist-across-reinit, persisted mutation/delete tamper
+  verdicts, full-log NOMEM-no-wrap, and RAM-fallback scenarios
+  (`alp.unit.update_log{,.persist}`).
 - **Real Zephyr display backend** for `<alp/display.h>` (issue #23):
   `src/backends/display/zephyr_drv.c` wraps the upstream Zephyr
   `display_*` driver class (`display_write`/`display_clear`/

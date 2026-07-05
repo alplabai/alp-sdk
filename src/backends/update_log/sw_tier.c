@@ -386,6 +386,50 @@ void alp_ulog_sw_tier_test_reset(bool wipe)
 	(void)wipe;
 #endif
 }
+
+#ifdef SW_TIER_NVS
+alp_status_t
+alp_ulog_sw_tier_test_corrupt_persisted_entry(uint64_t seq, size_t offset, uint8_t xor_mask)
+{
+	if (!sw_nvs_ready()) {
+		return ALP_ERR_IO;
+	}
+	if (seq > SW_NVS_ENTRY_MAX || offset >= ULOG_ENTRY_WIRE_LEN) {
+		return ALP_ERR_INVAL;
+	}
+
+	uint16_t id = (uint16_t)(SW_NVS_ID_ENTRY_BASE + seq);
+	uint8_t  buf[ULOG_ENTRY_WIRE_LEN];
+	ssize_t  len = nvs_read(&g_nvs, id, buf, sizeof(buf));
+	if (len == -ENOENT) {
+		return ALP_ERR_NOT_FOUND;
+	}
+	if (len < 0 || (size_t)len != sizeof(buf)) {
+		return ALP_ERR_IO;
+	}
+
+	buf[offset] ^= xor_mask;
+	ssize_t written = nvs_write(&g_nvs, id, buf, sizeof(buf));
+	return (written < 0) ? ALP_ERR_IO : ALP_OK;
+}
+
+alp_status_t alp_ulog_sw_tier_test_delete_persisted_entry(uint64_t seq)
+{
+	if (!sw_nvs_ready()) {
+		return ALP_ERR_IO;
+	}
+	if (seq > SW_NVS_ENTRY_MAX) {
+		return ALP_ERR_INVAL;
+	}
+
+	uint16_t id  = (uint16_t)(SW_NVS_ID_ENTRY_BASE + seq);
+	int      err = nvs_delete(&g_nvs, id);
+	if (err == -ENOENT) {
+		return ALP_ERR_NOT_FOUND;
+	}
+	return (err == 0) ? ALP_OK : ALP_ERR_IO;
+}
+#endif /* SW_TIER_NVS */
 #endif /* CONFIG_ZTEST */
 
 static alp_status_t sw_append(const alp_update_log_entry_t *e)
