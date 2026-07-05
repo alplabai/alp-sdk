@@ -231,6 +231,80 @@ static int cmd_companion_wifi_connect(const struct shell *sh, size_t argc, char 
 	return 0;
 }
 
+static int cmd_companion_wifi_disconnect(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	k_mutex_lock(&companion_bus_lock, K_FOREVER);
+	alp_status_t s = cc3501e_wifi_disconnect(companion_cc3501e);
+	k_mutex_unlock(&companion_bus_lock);
+
+	if (s != ALP_OK) {
+		shell_error(sh, "disconnect failed (%d)", (int)s);
+		return -EIO;
+	}
+	shell_print(sh, "wifi disconnected");
+	return 0;
+}
+
+/* Map the connection-state latch to a short label for `wifi status`. */
+static const char *companion_wifi_state_name(uint8_t state)
+{
+	switch (state) {
+	case ALP_CC3501E_WIFI_DISCONNECTED:
+		return "disconnected";
+	case ALP_CC3501E_WIFI_CONNECTING:
+		return "connecting";
+	case ALP_CC3501E_WIFI_CONNECTED:
+		return "connected";
+	case ALP_CC3501E_WIFI_CONN_FAILED:
+		return "failed";
+	default:
+		return "unknown";
+	}
+}
+
+static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+
+	alp_cc3501e_wifi_status_t st = { 0 };
+	k_mutex_lock(&companion_bus_lock, K_FOREVER);
+	alp_status_t s = cc3501e_wifi_status(companion_cc3501e, &st);
+	k_mutex_unlock(&companion_bus_lock);
+
+	if (s != ALP_OK) {
+		shell_error(sh, "status failed (%d)", (int)s);
+		return -EIO;
+	}
+
+	shell_print(sh, "state: %s", companion_wifi_state_name(st.state));
+	if (st.state == ALP_CC3501E_WIFI_CONNECTED) {
+		/* rssi_dbm is valid only when associated; the IP is a separate lease
+		 * query (WIFI_GET_IP) -- print it only if the firmware has a lease. */
+		shell_print(sh, "rssi:  %d dBm", (int)st.rssi_dbm);
+		uint8_t ip[4] = { 0 };
+		k_mutex_lock(&companion_bus_lock, K_FOREVER);
+		alp_status_t ips = cc3501e_wifi_get_ip(companion_cc3501e, ip);
+		k_mutex_unlock(&companion_bus_lock);
+		if (ips == ALP_OK) {
+			shell_print(sh, "ip:    %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+		}
+	} else if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
+		shell_print(sh, "fail:  %u", (unsigned int)st.fail_reason);
+	}
+	return 0;
+}
+
 static int cmd_companion_ble_enable(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -346,6 +420,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
                   cmd_companion_wifi_connect,
                   2,
                   2),
+    SHELL_CMD_ARG(
+        disconnect, NULL, "tear down the STA association", cmd_companion_wifi_disconnect, 1, 0),
+    SHELL_CMD_ARG(
+        status, NULL, "show connection state + rssi + ip", cmd_companion_wifi_status, 1, 0),
     SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(alp_companion_ble_subcmds,
@@ -449,7 +527,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 #if IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR)
     SHELL_CMD(gpio, &alp_companion_gpio_subcmds, "companion GPIO (V2N only)", NULL),
 #else
-    SHELL_CMD(wifi, &alp_companion_wifi_subcmds, "CC3501E Wi-Fi (scan / connect)", NULL),
+    SHELL_CMD(wifi,
+              &alp_companion_wifi_subcmds,
+              "CC3501E Wi-Fi (scan / connect / disconnect / status)",
+              NULL),
     SHELL_CMD(ble, &alp_companion_ble_subcmds, "CC3501E BLE (enable / scan)", NULL),
     SHELL_CMD_ARG(
         bench, NULL, "bench [n] -- time n GET_VERSION round-trips", cmd_companion_bench, 1, 1),

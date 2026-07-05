@@ -545,6 +545,17 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 	return ALP_OK;
 }
 
+alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx)
+{
+	/* Abort an in-progress scan (WIFI_SCAN_STOP, 0x11).  No payload, no reply
+	 * data -- success is the OK status.  The firmware tears the scan down as a
+	 * radio op, so the bridge can be briefly down (IO/BUSY) mid-abort; floor the
+	 * budget to the radio down-window and let poll_by_repeat retry, exactly like
+	 * cc3501e_wifi_get_mac. */
+	return poll_by_repeat(
+	    ctx, ALP_CC3501E_CMD_WIFI_SCAN_STOP, NULL, 0, NULL, 0, NULL, CC3501E_WIFI_DOWN_WINDOW_MS);
+}
+
 alp_status_t cc3501e_wifi_connect(
     cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms)
 {
@@ -577,6 +588,17 @@ alp_status_t cc3501e_wifi_connect(
 	    ctx, ALP_CC3501E_CMD_WIFI_CONNECT_STA, payload, off, NULL, 0, NULL, timeout_ms);
 }
 
+alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx)
+{
+	/* Tear down the STA association (WIFI_DISCONNECT, 0x13).  No payload, no
+	 * reply data -- success is the OK status.  Disconnect is a radio op
+	 * (Wlan_Disconnect), so the bridge can be briefly down (IO/BUSY) while it
+	 * runs; floor the budget to the radio down-window and let poll_by_repeat
+	 * retry, exactly like cc3501e_wifi_get_mac. */
+	return poll_by_repeat(
+	    ctx, ALP_CC3501E_CMD_WIFI_DISCONNECT, NULL, 0, NULL, 0, NULL, CC3501E_WIFI_DOWN_WINDOW_MS);
+}
+
 alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi)
 {
 	if (rssi == NULL) return ALP_ERR_INVAL;
@@ -606,6 +628,31 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4])
 	if (s != ALP_OK) return s;
 	if (got < 4u) return ALP_ERR_IO;
 	memcpy(ip, reply, 4);
+	return ALP_OK;
+}
+
+alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
+{
+	if (out == NULL) return ALP_ERR_INVAL;
+
+	/* Reply is the fixed 4-byte alp_cc3501e_wifi_status_t wire layout (no
+	 * padding): state | fail_reason | rssi_dbm | reserved.  The status is a
+	 * NON-BLOCKING latch read (no radio op), so -- like cc3501e_wifi_rssi /
+	 * cc3501e_wifi_get_ip -- a single request with the short timeout suffices;
+	 * no poll-by-repeat down-window handling is needed. */
+	uint8_t      reply[4] = { 0 };
+	size_t       got      = 0;
+	alp_status_t s        = cc3501e_request(
+	    ctx, ALP_CC3501E_CMD_WIFI_STATUS, NULL, 0, reply, sizeof(reply), &got, CC3501E_REQ_TMO_MS);
+	if (s != ALP_OK) return s;
+	if (got < sizeof(reply)) return ALP_ERR_IO; /* short reply -- firmware/wire gap */
+
+	/* Decode wire -> struct field by field (matches the packed layout in
+	 * alp/protocol/cc3501e.h), mirroring how cc3501e_wifi_scan walks records. */
+	out->state       = reply[0];
+	out->fail_reason = reply[1];
+	out->rssi_dbm    = (int8_t)reply[2];
+	out->reserved    = reply[3];
 	return ALP_OK;
 }
 
