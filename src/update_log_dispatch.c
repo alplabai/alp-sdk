@@ -27,6 +27,7 @@
 #include "alp/soc_caps.h"
 #include "alp/update_log.h"
 #include "backends/update_log/update_log_ops.h"
+#include "update_log/boot_metadata.h"
 
 ALP_BACKEND_DEFINE_CLASS(update_log);
 ALP_BACKEND_ANCHOR(update_log);
@@ -71,6 +72,33 @@ alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_e
 	if (log == NULL || !log->in_use || entry == NULL) return ALP_ERR_INVAL;
 	if (log->ops->append == NULL) return ALP_ERR_NOT_IMPLEMENTED;
 	return log->ops->append(entry);
+}
+
+alp_status_t alp_update_log_entry_from_boot_metadata(alp_update_log_entry_t *entry_out,
+                                                     uint64_t                timestamp)
+{
+	if (entry_out == NULL) return ALP_ERR_INVAL;
+
+	alp_update_log_entry_t entry = { 0 };
+	alp_status_t           rc    = alp_update_log_boot_metadata_read(&entry);
+	if (rc != ALP_OK) return rc;
+
+	entry.seq       = 0;
+	entry.timestamp = timestamp;
+	*entry_out      = entry;
+	return ALP_OK;
+}
+
+alp_status_t alp_update_log_append_boot(alp_update_log_t *log, uint64_t timestamp)
+{
+	if (log == NULL || !log->in_use) return ALP_ERR_INVAL;
+	if (log->ops->append == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+
+	alp_update_log_entry_t entry = { 0 };
+	alp_status_t           rc    = alp_update_log_entry_from_boot_metadata(&entry, timestamp);
+	if (rc != ALP_OK) return rc;
+
+	return log->ops->append(&entry);
 }
 
 alp_status_t alp_update_log_verify(alp_update_log_t         *log,

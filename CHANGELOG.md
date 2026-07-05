@@ -126,6 +126,15 @@ live bring-up is bench-gated (`TODO(aen601-bench)` in `board.cmake`).
   native_sim coverage: persist-across-reinit, persisted mutation/delete tamper
   verdicts, full-log NOMEM-no-wrap, and RAM-fallback scenarios
   (`alp.unit.update_log{,.persist}`).
+- **Trusted boot-metadata append contract for `<alp/update_log.h>`** (#263).
+  `alp_update_log_entry_from_boot_metadata()` and
+  `alp_update_log_append_boot()` add the app-facing path for entries whose
+  firmware version, image hash, and verification status come from an
+  authenticated boot-metadata provider rather than app-filled fields.  The
+  default provider returns `ALP_ERR_NOSUPPORT`; board integrations can override
+  the internal provider with MCUboot shared-data / Alif SE verification facts.
+  native_sim coverage proves app-supplied identity fields cannot override the
+  trusted provider on this path.
 - **Real Zephyr display backend** for `<alp/display.h>` (issue #23):
   `src/backends/display/zephyr_drv.c` wraps the upstream Zephyr
   `display_*` driver class (`display_write`/`display_clear`/

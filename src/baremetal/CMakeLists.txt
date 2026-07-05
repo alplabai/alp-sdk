@@ -53,6 +53,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../power_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/power/zephyr_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../update_log_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../update_log_boot_metadata.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/update_log/sw_tier.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../update_log/engine.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../update_log/sha256.c

@@ -44,6 +44,15 @@
  *      @ref alp_update_log_append fails cleanly and the existing chain
  *      stays intact and verifiable.
  *
+ * @par Authenticated boot metadata
+ *      Prefer @ref alp_update_log_append_boot for update-result entries
+ *      when the platform provides authenticated boot metadata. That path
+ *      asks the SDK's boot-metadata provider for the booted image version,
+ *      image SHA-256, and verification status, then appends the entry
+ *      without accepting app-supplied identity fields. Platforms without
+ *      a provider return @c ALP_ERR_NOSUPPORT so callers can avoid writing
+ *      forged-but-well-formed audit entries by accident.
+ *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      v0.7 new. Surface may change until the hardware backend is
  *      silicon-proven. See docs/abi-markers.md.
@@ -119,6 +128,37 @@ alp_update_log_t *alp_update_log_open(void);
  *         existing entries stay intact and verifiable).
  */
 alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_entry_t *entry);
+
+/**
+ * @brief Build an entry from authenticated boot metadata. [ABI-EXPERIMENTAL]
+ * @param[out] entry_out Entry populated from the trusted boot-metadata provider.
+ *                       @c seq is zeroed; the append engine assigns it later.
+ * @param timestamp      Best-effort epoch to store in the entry; 0 = unset.
+ * @return ALP_OK when authenticated metadata is available;
+ *         ALP_ERR_NOSUPPORT when this platform has no provider yet;
+ *         ALP_ERR_INVAL for NULL output.
+ *
+ * The provider, not app code, supplies @c fw_version, @c image_hash, and
+ * @c status. This helper is the testable contract for MCUboot shared-data /
+ * Alif SE verification integrations: app-supplied identity fields cannot
+ * override authenticated values on the trusted path.
+ */
+alp_status_t alp_update_log_entry_from_boot_metadata(alp_update_log_entry_t *entry_out,
+                                                     uint64_t                timestamp);
+
+/**
+ * @brief Append one entry sourced from authenticated boot metadata. [ABI-EXPERIMENTAL]
+ * @param log       The update log handle (from @ref alp_update_log_open).
+ * @param timestamp Best-effort epoch to store in the entry; 0 = unset.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT;
+ *         ALP_ERR_NOMEM when the store is full.
+ *
+ * This is the preferred update-audit path once a board wires a real
+ * boot-metadata provider. It intentionally does not accept an
+ * @ref alp_update_log_entry_t from the caller, so firmware cannot forge the
+ * logged booted-image version, image hash, or verification status.
+ */
+alp_status_t alp_update_log_append_boot(alp_update_log_t *log, uint64_t timestamp);
 
 /**
  * @brief Walk the chain and report integrity.

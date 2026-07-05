@@ -154,6 +154,34 @@ static alp_update_log_entry_t mk_entry(uint64_t ts, const char *ver, alp_update_
 	return e;
 }
 
+void alp_ulog_sw_tier_test_reset(bool wipe);
+
+static bool                   g_boot_meta_ready;
+static alp_update_log_entry_t g_boot_meta;
+
+alp_status_t alp_update_log_boot_metadata_read(alp_update_log_entry_t *entry_out)
+{
+	if (entry_out == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (!g_boot_meta_ready) {
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	*entry_out = g_boot_meta;
+	return ALP_OK;
+}
+
+static void set_boot_meta(const char *version, uint8_t hash_byte, alp_update_status_t status)
+{
+	memset(&g_boot_meta, 0, sizeof(g_boot_meta));
+	strncpy(g_boot_meta.fw_version, version, ALP_UPDATE_LOG_FWVER_MAX);
+	memset(g_boot_meta.image_hash, hash_byte, sizeof(g_boot_meta.image_hash));
+	g_boot_meta.status = status;
+	g_boot_meta.seq    = 99; /* provider value must not leak through */
+	g_boot_meta_ready  = true;
+}
+
 ZTEST(alp_update_log, test_append_assigns_seq_and_chains)
 {
 	struct td_store          t;
@@ -414,6 +442,65 @@ ZTEST(alp_update_log, test_public_surface_sw_tier)
 	zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
 	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
 	alp_update_log_close(log);
+}
+
+/* --- Trusted boot metadata path (#263) -------------------------------
+ *
+ * The production provider is weak/default-NOSUPPORT until a board wires
+ * MCUboot shared data or Alif SE verification.  This test's strong provider
+ * proves the public helper and append path copy identity/status from that
+ * provider only; app-filled entries cannot override it.
+ */
+
+ZTEST(alp_update_log, test_boot_metadata_helper_reports_nosupport_without_provider)
+{
+	g_boot_meta_ready        = false;
+	alp_update_log_entry_t e = mk_entry(11, "forged", ALP_UPDATE_STATUS_ROLLED_BACK);
+	zassert_equal(alp_update_log_entry_from_boot_metadata(&e, 1234), ALP_ERR_NOSUPPORT);
+}
+
+ZTEST(alp_update_log, test_boot_metadata_helper_overwrites_app_fields)
+{
+	set_boot_meta("3.2.1", 0xA5, ALP_UPDATE_STATUS_CONFIRMED);
+
+	alp_update_log_entry_t e = mk_entry(11, "forged", ALP_UPDATE_STATUS_ROLLED_BACK);
+	e.seq                    = 7;
+	zassert_equal(alp_update_log_entry_from_boot_metadata(&e, 1234), ALP_OK);
+	zassert_equal(e.seq, 0);
+	zassert_equal(e.timestamp, 1234);
+	zassert_equal(e.status, ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(strcmp(e.fw_version, "3.2.1"), 0);
+	for (size_t i = 0; i < sizeof(e.image_hash); i++) {
+		zassert_equal(e.image_hash[i], 0xA5);
+	}
+}
+
+ZTEST(alp_update_log, test_append_boot_stores_trusted_metadata)
+{
+	alp_ulog_sw_tier_test_reset(true);
+	g_fake_hw_ready = ALP_ERR_NOSUPPORT;
+	set_boot_meta("4.5.6", 0x5A, ALP_UPDATE_STATUS_PENDING_CONFIRM);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_append_boot(log, 5678), ALP_OK);
+
+	uint64_t n = 0;
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, 1);
+
+	alp_update_log_entry_t got;
+	zassert_equal(alp_update_log_get(log, 0, &got), ALP_OK);
+	zassert_equal(got.seq, 0);
+	zassert_equal(got.timestamp, 5678);
+	zassert_equal(got.status, ALP_UPDATE_STATUS_PENDING_CONFIRM);
+	zassert_equal(strcmp(got.fw_version, "4.5.6"), 0);
+	for (size_t i = 0; i < sizeof(got.image_hash); i++) {
+		zassert_equal(got.image_hash[i], 0x5A);
+	}
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
+	g_boot_meta_ready = false;
 }
 
 /* --- Persistence (#262): sw-tier store modes ------------------------
