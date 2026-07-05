@@ -86,6 +86,7 @@ static const alp_power_ops_t _ops = {
 	.close                 = NULL,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(power);
 ALP_BACKEND_REGISTER(power,
                      zephyr_stub,
                      {
@@ -127,6 +128,7 @@ static const alp_power_profile_ops_t _profile_ops = {
 	.set = stub_profile_set,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(power_profile);
 ALP_BACKEND_REGISTER(power_profile,
                      zephyr_stub,
                      {

@@ -615,6 +615,7 @@ void alp_wdt_close(alp_wdt_t *w)
 /* Higher libraries (camera, iot, audio, ble, security, mproc, display) */
 /* ------------------------------------------------------------------ */
 
+#if !defined(ALP_VENDOR_OVERRIDES_DISPLAY)
 alp_display_t *alp_display_open(const alp_display_config_t *cfg)
 {
 	(void)cfg;
@@ -635,7 +636,9 @@ void alp_display_close(alp_display_t *d)
 {
 	(void)d;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_DISPLAY */
 
+#if !defined(ALP_VENDOR_OVERRIDES_CAMERA)
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg)
 {
 	(void)cfg;
@@ -668,6 +671,7 @@ void alp_camera_close(alp_camera_t *c)
 {
 	(void)c;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_CAMERA */
 
 #if !defined(ALP_VENDOR_OVERRIDES_WIFI)
 alp_wifi_t *alp_wifi_open(void)
@@ -1203,6 +1207,7 @@ void alp_usb_host_close(alp_usb_host_t *h)
 /* power (alp/power.h)                                                 */
 /* ------------------------------------------------------------------ */
 
+#if !defined(ALP_VENDOR_OVERRIDES_POWER)
 alp_power_t *alp_power_open(void)
 {
 	z_last_error = ALP_ERR_NOSUPPORT;
@@ -1229,6 +1234,7 @@ void alp_power_close(alp_power_t *p)
 {
 	(void)p;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_POWER */
 
 /* ------------------------------------------------------------------ */
 /* GPU2D (alp/gpu2d.h)                                                 */
@@ -1321,12 +1327,14 @@ const alp_capabilities_t *alp_gpu2d_capabilities(const alp_gpu2d_t *g)
 /* Camera ISP (alp/camera.h v0.5 extension)                            */
 /* ------------------------------------------------------------------ */
 
+#if !defined(ALP_VENDOR_OVERRIDES_CAMERA)
 alp_status_t alp_camera_configure_isp(alp_camera_t *c, const alp_camera_isp_config_t *isp)
 {
 	if (isp == NULL) return ALP_ERR_INVAL;
 	(void)c;
 	return ALP_ERR_NOSUPPORT;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_CAMERA */
 
 /* ------------------------------------------------------------------ */
 /* Storage inline-AES (alp/storage.h v0.5 extension)                   */

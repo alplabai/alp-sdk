@@ -55,6 +55,7 @@ static const alp_dac_ops_t sw_ops = {
 	.close    = NULL,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(dac);
 ALP_BACKEND_REGISTER(dac,
                      sw_fallback,
                      {
