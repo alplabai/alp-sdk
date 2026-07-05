@@ -9,10 +9,12 @@
  * registers the whole `alp` command tree on the Zephyr shell at link time,
  * so an app gets board / gpio / i2c / adc / pwm / mem / clk / reboot
  * diagnostics for free -- main() does NOT register any commands.  On the
- * AEN801 that tree includes `alp companion wifi scan|connect` and
- * `alp companion ble enable|scan`, which reach the on-module CC3501E over the
- * inter-chip bridge bound below.  A background thread breathes the on-board RGB
- * LED so the board is visibly alive while the shell stays fully responsive.
+ * AEN801 that tree includes `alp companion wifi scan|connect`,
+ * `alp companion ble enable|scan`, and `alp companion sock tcp-get <ip> <port>
+ * <path>` (a full TCP client -- open/connect/send/recv/close over the CC3501E IP
+ * stack), which reach the on-module CC3501E over the inter-chip bridge bound
+ * below.  A background thread breathes the on-board RGB LED so the board is
+ * visibly alive while the shell stays fully responsive.
  *
  * Boot sequence:
  *   1. Zephyr shell starts (via CONFIG_SHELL=y in prj.conf).

@@ -83,6 +83,23 @@ static struct {
 	volatile uint16_t req_len;
 } job;
 
+/* Little-endian store helper for the socket reply wire (parallels protocol.c). */
+static void wk_put_le16(uint8_t *p, uint16_t v)
+{
+	p[0] = (uint8_t)(v & 0xFFu);
+	p[1] = (uint8_t)((v >> 8) & 0xFFu);
+}
+
+/* Read a 16-bit LE field out of the (volatile) request buffer byte-by-byte. */
+static uint16_t wk_get_le16(const volatile uint8_t *p, size_t off)
+{
+	return (uint16_t)p[off] | ((uint16_t)p[off + 1u] << 8);
+}
+
+/* recv reply header = alp_cc3501e_sock_recv_resp_t: from(sock_addr 20) |
+ * data_len(LE16) | reserved(LE16).  The received bytes follow inline. */
+#define WK_SOCK_RECV_HDR 24u
+
 /* Run the blocking HAL body for @p cmd and publish DONE/ERR.  Called from
  * the drain (RUNNING) and from the synchronous stub path in worker_submit.
  * NOT ISR context -- may block.  v0.2 services only GET_MAC; future
@@ -212,6 +229,81 @@ static void worker_execute(uint8_t cmd)
 		rv = (cmd == ALP_CC3501E_CMD_WIFI_AP_START)
 		         ? cc3501e_hw_wifi_ap_start(ssid, c->ssid_len, psk, c->psk_len, c->security)
 		         : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
+		break;
+	}
+	case ALP_CC3501E_CMD_SOCK_OPEN: {
+		/* job.req = alp_cc3501e_sock_open_t: family(0) | type(1) | protocol(2) |
+		 * reserved(3).  Reply DATA = alp_cc3501e_sock_handle_t: handle(LE16) |
+		 * reserved(2). */
+		uint16_t handle = 0u;
+		rv              = cc3501e_hw_sock_open(job.req[0], job.req[1], job.req[2], &handle);
+		if (rv == CC3501E_HW_OK) {
+			wk_put_le16(buf, handle);
+			buf[2] = 0u;
+			buf[3] = 0u;
+			len    = 4u;
+		}
+		break;
+	}
+	case ALP_CC3501E_CMD_SOCK_CONNECT: {
+		/* job.req = alp_cc3501e_sock_connect_t: handle(LE16 @0) | reserved(@2) |
+		 * peer sock_addr @4 { family(@4) | reserved(@5) | port(LE16 @6) |
+		 * addr[16] @8 }.  v1 IPv4: only addr[8..11] are meaningful. */
+		const uint16_t handle = wk_get_le16(job.req, 0u);
+		const uint8_t  family = job.req[4];
+		const uint16_t port   = wk_get_le16(job.req, 6u);
+		uint8_t        addr[4];
+		for (unsigned i = 0u; i < 4u; ++i)
+			addr[i] = job.req[8u + i];
+		rv = cc3501e_hw_sock_connect(handle, family, port, addr);
+		break;
+	}
+	case ALP_CC3501E_CMD_SOCK_SEND: {
+		/* job.req = alp_cc3501e_sock_send_t: handle(LE16 @0) | flags(@2) |
+		 * reserved(@3) | data_len(LE16 @4) | reserved2(@6) | data @8.  Reply
+		 * DATA = uint16_t LE byte count actually queued. */
+		const uint16_t handle   = wk_get_le16(job.req, 0u);
+		const uint8_t  flags    = job.req[2];
+		const uint16_t data_len = wk_get_le16(job.req, 4u);
+		uint16_t       sent     = 0u;
+		/* The data rides inline in job.req at offset 8 (the handler validated
+		 * req_len == 8 + data_len <= MAX_PAYLOAD); pass it in place, mirroring how
+		 * the WIFI_CONNECT case reads ssid/psk straight out of job.req. */
+		rv = cc3501e_hw_sock_send(handle, flags, (const uint8_t *)&job.req[8], data_len, &sent);
+		if (rv == CC3501E_HW_OK) {
+			wk_put_le16(buf, sent);
+			len = 2u;
+		}
+		break;
+	}
+	case ALP_CC3501E_CMD_SOCK_RECV: {
+		/* job.req = alp_cc3501e_sock_recv_t: handle(LE16 @0) | max_len(LE16 @2).
+		 * Reply = recv_resp header (WK_SOCK_RECV_HDR) + up to max_len bytes.  Cap
+		 * the data so header + data + the status byte fit one frame. */
+		const uint16_t handle       = wk_get_le16(job.req, 0u);
+		const uint16_t max_len      = wk_get_le16(job.req, 2u);
+		const uint16_t data_cap     = (uint16_t)(ALP_CC3501E_MAX_PAYLOAD - WK_SOCK_RECV_HDR - 1u);
+		uint8_t        from_addr[4] = { 0 };
+		uint16_t       from_port    = 0u;
+		uint16_t       recv_len     = 0u;
+		rv                          = cc3501e_hw_sock_recv(
+		    handle, max_len, &buf[WK_SOCK_RECV_HDR], data_cap, &recv_len, from_addr, &from_port);
+		if (rv == CC3501E_HW_OK) {
+			/* Build the from sock_addr (family | reserved | port(LE16) | addr[16]);
+			 * STREAM leaves it zeroed (recv fills only for DGRAM). */
+			memset(buf, 0, WK_SOCK_RECV_HDR);
+			buf[0] = (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4;
+			wk_put_le16(&buf[2], from_port);
+			for (unsigned i = 0u; i < 4u; ++i)
+				buf[4u + i] = from_addr[i];
+			wk_put_le16(&buf[20], recv_len); /* data_len */
+			len = (size_t)WK_SOCK_RECV_HDR + (size_t)recv_len;
+		}
+		break;
+	}
+	case ALP_CC3501E_CMD_SOCK_CLOSE: {
+		/* job.req = alp_cc3501e_sock_close_t: handle(LE16 @0) | reserved(@2). */
+		rv = cc3501e_hw_sock_close(wk_get_le16(job.req, 0u));
 		break;
 	}
 	default:
