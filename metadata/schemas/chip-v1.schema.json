@@ -65,6 +65,8 @@
     "instances": { "type": "array" },
     "power": { "type": "object" },
     "slave_address_range": { "type": "string" },
+    "radio": { "type": "object" },
+    "host_interfaces": { "type": "object" },
     "signals": {
       "type": "array",
       "items": {
@@ -85,13 +87,17 @@
     },
     "physical": {
       "type": "object", "additionalProperties": false,
-      "required": ["refdes_prefix", "package", "footprint", "pins", "visibility", "provenance"],
+      "if": { "required": ["pins"] },
+      "then": { "required": ["refdes_prefix", "package", "footprint", "pins", "visibility", "provenance"] },
       "properties": {
         "refdes_prefix": { "type": "string", "pattern": "^[A-Z]+$" },
         "package": { "type": "string" },
         "footprint": { "type": "string", "pattern": "^[a-z0-9_]+$" },
         "visibility": { "type": "string", "enum": ["public", "internal"] },
         "provenance": { "type": "string", "enum": ["datasheet_confirmed", "web_provisional", "internal_netlist"], "description": "Trust level of the pad/footprint data. web_provisional = transcribed from a public datasheet found online, pending maintainer confirmation." },
+        "dimension_mm": { "type": "string" },
+        "antenna": { "type": "string" },
+        "operating_temp_deg_c": { "type": "string" },
         "pins": {
           "type": "array", "minItems": 1,
           "items": {
