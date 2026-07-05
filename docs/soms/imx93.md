@@ -6,10 +6,17 @@
 
 | SKU            | Silicon                                | Status      |
 |----------------|----------------------------------------|-------------|
-| `E1M-NX9101`   | NXP i.MX 9352                          | preliminary |
+| `E1M-NX9101`   | NXP i.MX 9352                          | placeholder MPN |
 
 i.MX 9352 = the top-of-line i.MX 93 SKU: dual Cortex-A55 @ 1.7 GHz
 + Cortex-M33 @ 250 MHz + Ethos-U65, no GPU.
+
+`E1M-NX9101` is the SDK's provisional preset name for the first N93
+bring-up target, not a production MPN to bake into customer tooling.
+The preset carries `status.preliminary: true` until the final hardware
+configuration names the orderable module SKU.  When that SKU lands, it
+will get its own `metadata/e1m_modules/E1M-NX9xxx.yaml` preset and
+examples/docs that currently point at `E1M-NX9101` will be updated.
 
 ## What's on the module
 
@@ -20,7 +27,8 @@ i.MX 9352 = the top-of-line i.MX 93 SKU: dual Cortex-A55 @ 1.7 GHz
 | Wi-Fi 6 + BLE           | Murata Type 2DL/2EL/2KL/2LL (variant TBD) | (vendor HAL)             |
 | Wi-Fi 6 (alt)           | NXP IW610                  | (vendor HAL)                            |
 
-Exact populated variant: pending.  See [`metadata/e1m_modules/E1M-NX9101.yaml`](../../metadata/e1m_modules/E1M-NX9101.yaml).
+Exact populated variant and production MPN: pending.  See
+[`metadata/e1m_modules/E1M-NX9101.yaml`](../../metadata/e1m_modules/E1M-NX9101.yaml).
 
 ## Boot + identification
 

@@ -56,14 +56,14 @@ som:
 
 `sku` resolves to a preset at
 `metadata/e1m_modules/E1M-<MPN>.yaml`.  The SDK ships presets
-for every released MPN:
+for production SoMs plus placeholder presets for active bring-up:
 
-| Family            | MPNs (paste any into `som.sku`)                            |
-|-------------------|------------------------------------------------------------|
-| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801` |
-| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                     |
-| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                     |
-| NXP i.MX 93       | `E1M-NX9101`                                               |
+| Family            | MPNs (paste any into `som.sku`)                                               |
+|-------------------|-------------------------------------------------------------------------------|
+| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`                 |
+| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                                        |
+| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                        |
+| NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 `hw_rev` cross-checks against the family's `hw-revisions.yaml`.
 If the customer's SDK version is older than the rev's
