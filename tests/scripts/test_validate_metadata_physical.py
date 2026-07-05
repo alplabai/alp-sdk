@@ -82,3 +82,11 @@ def test_validate_metadata_passes_on_real_tree():
                        cwd=REPO, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "metadata/chips/" in r.stdout  # chips are now being checked
+
+def test_reference_blocks_present_and_valid():
+    for name in ("button_led", "pdm_mic"):
+        assert (REPO / f"metadata/blocks/{name}.yaml").is_file()
+    r = subprocess.run([sys.executable, "scripts/validate_metadata.py"], cwd=REPO,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "metadata/blocks/button_led.yaml" in r.stdout
