@@ -1137,3 +1137,19 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SOC_RENESAS_RZV2N_N44
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/gd32_bridge.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_ADC_SW_FALLBACK
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/sw_fallback.c)
+
+# Alif Ensemble xHCI USB host (UHC) driver skeleton -- BENCH-GATED.
+# All host bring-up paths are marked TODO(aen401-bench); the driver compiles
+# and links but does not drive hardware.  The xHCI register map (§5.3 cap
+# regs) and DWC3 G*-register init are grounded from the Alif DFP soc.h
+# (USB_BASE 0x48200000 / USB_IRQ_IRQn 101 / GCTL 0xC110) and the xHCI spec.
+# uhc_common.h is a private Zephyr header; expose drivers/usb/uhc so the
+# driver can include it (the eth_dwmac_alif + i2s_dw precedents).
+# Binding: zephyr/dts/bindings/usb/alif,xhci-uhc.yaml.
+# ADR 0017 Tier-1.5 (in-tree clean-room skeleton; no fork copy exists).
+zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/usb/uhc/uhc_xhci_alif.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/usb/uhc/xhci_core.c)
+if(CONFIG_UHC_XHCI_ALIF)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
+endif()
