@@ -47,7 +47,7 @@ static void aen_lp_pads_enable_output(void)
  * GPIO driver does not apply Alif pinctrl, so do it directly via pinctrl_configure_pins. */
 #define ALIF_PAD_REN (1u << 16)
 static const pinctrl_soc_pin_t bodge_pins[] = {
-    (pinctrl_soc_pin_t)(PIN_P2_6__GPIO | ALIF_PAD_REN) /* READY in, read-enable */
+	(pinctrl_soc_pin_t)(PIN_P2_6__GPIO | ALIF_PAD_REN) /* READY in, read-enable */
 };
 
 static void aen_bodge_init(void)
@@ -59,9 +59,9 @@ static void aen_bodge_init(void)
 	 * above, so the input register reflects the pad. */
 }
 
-#define ALIF_GPIO2_BASE      0x49002000u
-#define DW_GPIO_EXT_PORTA    0x50u
-#define CC3501E_READY_PIN    6u
+#define ALIF_GPIO2_BASE   0x49002000u
+#define DW_GPIO_EXT_PORTA 0x50u
+#define CC3501E_READY_PIN 6u
 
 static int bodge_ready_raw(void)
 {

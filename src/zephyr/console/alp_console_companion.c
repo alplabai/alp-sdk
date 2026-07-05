@@ -121,7 +121,7 @@ static int cmd_companion_ping(const struct shell *sh, size_t argc, char **argv)
  * association blocks THIS thread, not the shell -- and prints the result. */
 #define ALP_COMPANION_CONN_POLL_MS 200
 
-static volatile bool       conn_pending; /* an async connect is awaiting its run */
+static volatile bool       conn_pending;  /* an async connect is awaiting its run */
 static const struct shell *conn_sh;       /* shell to print the async result on   */
 static char                conn_ssid[33]; /* SSID to connect to                   */
 static char                conn_pass[64]; /* passphrase ("" = open)               */
@@ -142,9 +142,8 @@ static void companion_conn_thread(void *a, void *b, void *c)
 		 * blocks until the firmware reports the association result); the shell
 		 * thread runs above this one, so the prompt stays responsive throughout. */
 		k_mutex_lock(&companion_bus_lock, K_FOREVER);
-		alp_status_t s = cc3501e_wifi_connect(companion_cc3501e, conn_ssid,
-		                                      conn_sec, conn_pass,
-		                                      ALP_COMPANION_WIFI_CONN_MS);
+		alp_status_t s = cc3501e_wifi_connect(
+		    companion_cc3501e, conn_ssid, conn_sec, conn_pass, ALP_COMPANION_WIFI_CONN_MS);
 		k_mutex_unlock(&companion_bus_lock);
 
 		if (s == ALP_OK) {
@@ -152,13 +151,11 @@ static void companion_conn_thread(void *a, void *b, void *c)
 			k_mutex_lock(&companion_bus_lock, K_FOREVER);
 			(void)cc3501e_wifi_rssi(companion_cc3501e, &rssi);
 			k_mutex_unlock(&companion_bus_lock);
-			shell_print(conn_sh, "wifi connected \"%s\"  rssi=%d dBm",
-			            conn_ssid, (int)rssi);
+			shell_print(conn_sh, "wifi connected \"%s\"  rssi=%d dBm", conn_ssid, (int)rssi);
 		} else if (s == ALP_ERR_TIMEOUT) {
 			shell_warn(conn_sh, "wifi connect to \"%s\": timed out", conn_ssid);
 		} else {
-			shell_error(conn_sh, "wifi connect to \"%s\" failed (%d)",
-			            conn_ssid, (int)s);
+			shell_error(conn_sh, "wifi connect to \"%s\" failed (%d)", conn_ssid, (int)s);
 		}
 		conn_pending = false;
 	}
@@ -220,13 +217,13 @@ static int cmd_companion_wifi_connect(const struct shell *sh, size_t argc, char 
 		sec = 2u;
 	}
 
-		strncpy(conn_ssid, ssid, sizeof(conn_ssid) - 1u);
+	strncpy(conn_ssid, ssid, sizeof(conn_ssid) - 1u);
 	conn_ssid[sizeof(conn_ssid) - 1u] = '\0';
 	strncpy(conn_pass, pass, sizeof(conn_pass) - 1u);
 	conn_pass[sizeof(conn_pass) - 1u] = '\0';
-	conn_sec = sec;
-	conn_sh  = sh;
-	conn_pending = true;
+	conn_sec                          = sec;
+	conn_sh                           = sh;
+	conn_pending                      = true;
 	shell_print(sh,
 	            "connecting to \"%s\" (%s) in background -- result prints here; shell stays live",
 	            ssid,
@@ -351,13 +348,20 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
                   2),
     SHELL_SUBCMD_SET_END);
 
-SHELL_STATIC_SUBCMD_SET_CREATE(
-    alp_companion_ble_subcmds,
-    SHELL_CMD_ARG(
-        enable, NULL, "enable the BLE controller + NimBLE host", cmd_companion_ble_enable, 1, 0),
-    SHELL_CMD_ARG(scan, NULL, "scan for BLE advertisers (needs `ble enable` first)",
-                  cmd_companion_ble_scan, 1, 0),
-    SHELL_SUBCMD_SET_END);
+SHELL_STATIC_SUBCMD_SET_CREATE(alp_companion_ble_subcmds,
+                               SHELL_CMD_ARG(enable,
+                                             NULL,
+                                             "enable the BLE controller + NimBLE host",
+                                             cmd_companion_ble_enable,
+                                             1,
+                                             0),
+                               SHELL_CMD_ARG(scan,
+                                             NULL,
+                                             "scan for BLE advertisers (needs `ble enable` first)",
+                                             cmd_companion_ble_scan,
+                                             1,
+                                             0),
+                               SHELL_SUBCMD_SET_END);
 #endif /* !CONFIG_ALP_SDK_V2N_SUPERVISOR */
 
 #if IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR)
@@ -447,7 +451,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 #else
     SHELL_CMD(wifi, &alp_companion_wifi_subcmds, "CC3501E Wi-Fi (scan / connect)", NULL),
     SHELL_CMD(ble, &alp_companion_ble_subcmds, "CC3501E BLE (enable / scan)", NULL),
-    SHELL_CMD_ARG(bench, NULL, "bench [n] -- time n GET_VERSION round-trips", cmd_companion_bench, 1, 1),
+    SHELL_CMD_ARG(
+        bench, NULL, "bench [n] -- time n GET_VERSION round-trips", cmd_companion_bench, 1, 1),
 #endif
     SHELL_SUBCMD_SET_END);
 

@@ -29,7 +29,7 @@ int alp_console_parse_ulong(const char *s, unsigned long *out)
 		return -EINVAL;
 	}
 
-	char	     *end = NULL;
+	char         *end = NULL;
 	unsigned long v   = strtoul(s, &end, 0); /* base 0: 0x.. hex, else dec */
 
 	if (end == s || *end != '\0') {
@@ -64,8 +64,7 @@ static int cmd_board(const struct shell *sh, size_t argc, char **argv)
 	} else
 #endif
 	{
-		shell_print(
-		    sh, "Alp SDK %s  |  %s  |  (c) Alp Lab AB", ALP_VERSION_STRING, CONFIG_BOARD);
+		shell_print(sh, "Alp SDK %s  |  %s  |  (c) Alp Lab AB", ALP_VERSION_STRING, CONFIG_BOARD);
 	}
 
 	shell_print(sh, "  uptime : %llu ms", (unsigned long long)k_uptime_get());

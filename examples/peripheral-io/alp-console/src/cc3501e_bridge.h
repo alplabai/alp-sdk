@@ -44,7 +44,8 @@
  * -5 desync / garbage reply headers on the link.
  * (Payload-request reliability is handled by the inter-phase settle in
  * cc3501e_request -- CC3501E_PHASE_SETTLE_US -- not the clock.) */
-#define CC3501E_BRIDGE_SPI_FREQ_HZ 1000000u /* 1 MHz: the bench-validated link rate; higher rates are a future throughput sweep */
+#define CC3501E_BRIDGE_SPI_FREQ_HZ                                                                 \
+	1000000u /* 1 MHz: the bench-validated link rate; higher rates are a future throughput sweep */
 #endif
 
 /* CC3501E control pins on the Alif LP-GPIO island (NOT E1M edge pads):

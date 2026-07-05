@@ -478,12 +478,18 @@ cc3501e_wifi_sec_t cc3501e_wifi_sec_kind(uint16_t security_info)
 const char *cc3501e_wifi_sec_name(uint16_t security_info)
 {
 	switch (cc3501e_wifi_sec_kind(security_info)) {
-	case CC3501E_WIFI_SEC_OPEN: return "open";
-	case CC3501E_WIFI_SEC_WEP:  return "wep";
-	case CC3501E_WIFI_SEC_WPA:  return "wpa";
-	case CC3501E_WIFI_SEC_WPA2: return "wpa2";
-	case CC3501E_WIFI_SEC_WPA3: return "wpa3";
-	default:                    return "sec?";
+	case CC3501E_WIFI_SEC_OPEN:
+		return "open";
+	case CC3501E_WIFI_SEC_WEP:
+		return "wep";
+	case CC3501E_WIFI_SEC_WPA:
+		return "wpa";
+	case CC3501E_WIFI_SEC_WPA2:
+		return "wpa2";
+	case CC3501E_WIFI_SEC_WPA3:
+		return "wpa3";
+	default:
+		return "sec?";
 	}
 }
 
@@ -633,14 +639,8 @@ alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
 	 * reports it collected as the BLE_SCAN_START reply payload. */
 	static uint8_t scan_buf[ALP_CC3501E_MAX_PAYLOAD];
 	size_t         got = 0;
-	alp_status_t   s   = poll_by_repeat(ctx,
-	                                    ALP_CC3501E_CMD_BLE_SCAN_START,
-	                                    NULL,
-	                                    0,
-	                                    scan_buf,
-	                                    sizeof(scan_buf),
-	                                    &got,
-	                                    timeout_ms);
+	alp_status_t   s   = poll_by_repeat(
+	    ctx, ALP_CC3501E_CMD_BLE_SCAN_START, NULL, 0, scan_buf, sizeof(scan_buf), &got, timeout_ms);
 	if (s != ALP_OK) return s;
 
 	size_t off = 0;
@@ -656,7 +656,7 @@ alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
 		out->addr_type = rec[6];
 		out->rssi_dbm  = (int8_t)rec[7];
 		out->name_len  = name_len;
-		uint8_t copy   = (name_len > CC3501E_BLE_NAME_MAX) ? (uint8_t)CC3501E_BLE_NAME_MAX : name_len;
+		uint8_t copy = (name_len > CC3501E_BLE_NAME_MAX) ? (uint8_t)CC3501E_BLE_NAME_MAX : name_len;
 		memcpy(out->name, &rec[CC3501E_BLE_REC_HDR], copy);
 		out->name[copy] = '\0';
 		off += CC3501E_BLE_REC_HDR + (size_t)name_len;

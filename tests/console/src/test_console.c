@@ -7,6 +7,8 @@
 #include <zephyr/shell/shell_dummy.h>
 #include <string.h>
 
+#include <alp/version.h> /* ALP_VERSION_STRING -- the single SDK-version source */
+
 /* Run a shell line on the dummy backend and return its captured output. */
 static const char *run(const char *line)
 {
@@ -34,7 +36,7 @@ ZTEST(alp_console, test_board_reports_version)
 	const char *out = run("alp board");
 
 	zassert_not_null(strstr(out, "Alp SDK"), "banner line missing: %s", out);
-	zassert_not_null(strstr(out, CONFIG_ALP_SDK_VERSION), "version missing");
+	zassert_not_null(strstr(out, ALP_VERSION_STRING), "version missing");
 }
 
 ZTEST(alp_console, test_mem_rd_reads_known_word)

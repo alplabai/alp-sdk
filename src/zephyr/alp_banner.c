@@ -76,19 +76,17 @@ static void alp_print_sysinfo(void)
 
 	unsigned int cpu_mhz =
 #if DT_NODE_HAS_PROP(DT_PATH(cpus, cpu_0), clock_frequency)
-		(unsigned int)(DT_PROP(DT_PATH(cpus, cpu_0), clock_frequency) / 1000000U);
+	    (unsigned int)(DT_PROP(DT_PATH(cpus, cpu_0), clock_frequency) / 1000000U);
 #else
-		(unsigned int)(sys_clock_hw_cycles_per_sec() / 1000000U);
+	    (unsigned int)(sys_clock_hw_cycles_per_sec() / 1000000U);
 #endif
 
 	printk("  CPU %u MHz", cpu_mhz);
 #if DT_HAS_CHOSEN(zephyr_sram)
-	printk("  |  RAM %u KB",
-	       (unsigned int)(DT_REG_SIZE(DT_CHOSEN(zephyr_sram)) / 1024U));
+	printk("  |  RAM %u KB", (unsigned int)(DT_REG_SIZE(DT_CHOSEN(zephyr_sram)) / 1024U));
 #endif
 #if DT_HAS_CHOSEN(zephyr_flash)
-	printk("  |  ROM %u KB",
-	       (unsigned int)(DT_REG_SIZE(DT_CHOSEN(zephyr_flash)) / 1024U));
+	printk("  |  ROM %u KB", (unsigned int)(DT_REG_SIZE(DT_CHOSEN(zephyr_flash)) / 1024U));
 #endif
 	printk("\n");
 }
@@ -104,8 +102,7 @@ static int alp_sdk_banner(void)
 	 * a boot.
 	 */
 	if (alp_hw_info_read(&info) == ALP_OK && info.som_sku[0] != '\0') {
-		printk("Alp SDK %s  |  %s %s",
-		       ALP_VERSION_STRING, info.som_sku, info.som_hw_rev);
+		printk("Alp SDK %s  |  %s %s", ALP_VERSION_STRING, info.som_sku, info.som_hw_rev);
 		alp_print_soc_and_eol();
 		alp_print_sysinfo();
 		return 0;

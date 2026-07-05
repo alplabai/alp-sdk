@@ -161,8 +161,8 @@ static void rgb_status_thread(void *a, void *b, void *c)
 
 	for (;;) {
 		rgb_set(&red, rgb_breathe(phase));         /*   0 deg */
-		rgb_set(&green, rgb_breathe(phase + 85u));  /* +120 deg around the wheel */
-		rgb_set(&blue, rgb_breathe(phase + 170u));  /* +240 deg */
+		rgb_set(&green, rgb_breathe(phase + 85u)); /* +120 deg around the wheel */
+		rgb_set(&blue, rgb_breathe(phase + 170u)); /* +240 deg */
 		phase = (phase + 1u) & 0xFFu;
 		k_msleep(15);
 	}
