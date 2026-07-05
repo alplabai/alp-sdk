@@ -98,3 +98,12 @@ def test_reference_chips_have_physical():
         assert d.get("signals"), f"{name} needs signals[]"
         assert d.get("physical"), f"{name} needs physical:"
         assert d["physical"]["visibility"] in ("public", "internal")
+
+def test_reconciled_chips_exist_with_physical():
+    import yaml
+    for name in ("bmi323", "bmp581", "cam_mux_pi3wvr626", "tcal9538"):
+        p = REPO / f"metadata/chips/{name}.yaml"
+        assert p.is_file(), f"{name} manifest missing"
+        d = yaml.safe_load(p.read_text())
+        assert d["chip_id"] == name
+        assert d.get("physical")
