@@ -1614,9 +1614,16 @@ int cc3501e_hw_ble_enable(void)
 	return CC3501E_HW_OK;
 }
 
+/* BLE_DISABLE: tear down advertising + discovery via the NimBLE glue, then
+ * re-open the bridge SPI (the teardown issues HCI over the shared HIF, exactly
+ * like adv_stop).  Reached ONLY from the async worker's drain (never the SPI
+ * ISR).  Best-effort: the NimBLE host stays up so a later BLE_ENABLE is a cheap
+ * no-op (see cc3501e_hw_ble_enable's idempotency). */
 int cc3501e_hw_ble_disable(void)
 {
-	return CC3501E_HW_ERR_NOTIMPL;
+	const int rc = cc3501e_nimble_host_disable();
+	bridge_transport_spi_hw_reinit();
+	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
 /* BLE_ADVERTISE (ext-adv): configure + start the single adv set via the NimBLE

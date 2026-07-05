@@ -376,6 +376,21 @@ int cc3501e_nimble_adv_stop(void)
 	return ble_gap_ext_adv_stop(CC3501E_BLE_ADV_INSTANCE);
 }
 
+int cc3501e_nimble_host_disable(void)
+{
+	/* Nothing to tear down if the host never came up -- report success so a
+	 * BLE_DISABLE on an already-off stack is idempotent. */
+	if (!ble_hs_is_enabled()) {
+		return 0;
+	}
+	/* Stop the two GAP roles that hold the shared HIF: the ext-adv set and any
+	 * in-flight discovery.  Both are idempotent (EALREADY when not active), so
+	 * their return codes are swallowed -- disable is best-effort teardown. */
+	(void)ble_gap_ext_adv_stop(CC3501E_BLE_ADV_INSTANCE);
+	(void)ble_gap_disc_cancel();
+	return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* GAP discovery (BLE scan) -- collect advertisers + their names.       */
 /*                                                                      */

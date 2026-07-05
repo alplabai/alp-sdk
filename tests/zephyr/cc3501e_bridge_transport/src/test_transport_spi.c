@@ -423,11 +423,21 @@ ZTEST(cc3501e_bridge_transport, test_ble_adv_start_parses_then_not_ready)
 		                    0x02u,
 		                    0x01u,
 		                    0x06u };
+	/* BLE_ADV_START is now worker-routed (its NimBLE HCI commands block on the
+	 * host task and must not run in the SPI ISR): the first request submits the
+	 * job and replies BUSY; the host re-issues, and on the silicon-free stub the
+	 * worker ran synchronously at submit -> NOT_READY (stub HAL has no radio). */
 	transaction(req, sizeof req);
 	size_t n = drain(reply, sizeof reply);
 	zassert_equal(n, 5u, "adv reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_BLE_ADV_START, 1u);
-	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "well-formed adv parses -> NOT_READY");
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_BUSY, "well-formed adv submits the job -> BUSY");
+
+	transaction(req, sizeof req);
+	n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "re-issued adv reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_BLE_ADV_START, 1u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued adv on stub -> NOT_READY");
 }
 
 ZTEST(cc3501e_bridge_transport, test_ble_adv_start_bad_len_invalid)
@@ -468,7 +478,7 @@ ZTEST(cc3501e_bridge_transport, test_get_diag_info)
 	assert_reply_header(reply, ALP_CC3501E_CMD_GET_DIAG_INFO, 17u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GET_DIAG_INFO -> OK");
 	const uint16_t fw = (uint16_t)reply[5] | ((uint16_t)reply[6] << 8);
-	zassert_equal(fw, 0x0001u, "fw_version = 0x0001 (v0.1.0)");
+	zassert_equal(fw, 0x0002u, "fw_version = 0x0002 (reflash-verification marker bump)");
 	zassert_equal(reply[7], (uint8_t)ALP_CC3501E_RESET_POWER_ON, "stub reset cause = POWER_ON");
 	zassert_equal(reply[8], (uint8_t)ALP_CC3501E_ROLE_OFF, "role = OFF in v0.1 (no radio)");
 }

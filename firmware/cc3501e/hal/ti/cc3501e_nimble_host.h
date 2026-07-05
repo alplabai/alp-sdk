@@ -60,6 +60,17 @@ int cc3501e_nimble_adv_config_and_start(uint8_t        connectable,
 int cc3501e_nimble_adv_stop(void);
 
 /**
+ * @brief Tear down BLE activity (advertising + discovery).
+ *
+ * Best-effort: if the host is enabled, stops the ext-adv set and cancels any
+ * in-flight GAP discovery (both idempotent).  A no-op if the host never came
+ * up.  The NimBLE host itself stays initialised (a re-enable is a no-op).
+ *
+ * @return 0 always (teardown is best-effort).
+ */
+int cc3501e_nimble_host_disable(void);
+
+/**
  * @brief One discovered advertiser, filled by @ref cc3501e_nimble_scan.
  *
  * HAL-internal mirror of the on-wire BLE scan record; cc3501e_hw_ble_scan()
