@@ -188,14 +188,10 @@ volatile cc3501e_witness_t g_cc3501e_witness __attribute__((used));
 /* The CC3501E SoM bring-up (control pins + inter-chip SPI + reset, incl. the AEN
  * LP-pad mux) lives in cc3501e_bridge_bringup() (cc3501e_bridge.{c,h}). */
 
-/* Send a bare PING (META opcode 0x00).  The reply payload is just the
- * status byte -- no data -- so we pass a NULL/0 receive buffer.  Returns
- * the driver status: ALP_OK means the coprocessor parsed the frame and
- * answered in lockstep. */
-static alp_status_t cc3501e_ping(cc3501e_t *fw)
-{
-	return cc3501e_request(fw, ALP_CC3501E_CMD_PING, NULL, 0, NULL, 0, NULL, 100u);
-}
+/* PING (META opcode 0x00) uses the public cc3501e_ping() from <alp/chips/cc3501e.h>
+ * -- a bare liveness probe: ALP_OK means the coprocessor parsed the frame and
+ * answered in lockstep. (This example previously carried a local copy; it now
+ * uses the SDK's.) */
 
 /* Pretty-print the extended diagnostics block (META opcode 0x04).
  *
