@@ -337,6 +337,43 @@ def _check_chip_physical(chip_files) -> list:
     return failures
 
 
+def _check_block_realizations(block_files, chip_files) -> list:
+	"""Semantic cross-checks for block `realizations[].parts[].chip` and `maps` targets.
+
+	Every `realizations[].parts[].chip` must resolve to a chip manifest filename,
+	and every `maps` value must name a signal declared in the block's `interface`.
+	Returns a failure list shaped like `_check_files()`.
+	"""
+	failures: list = []
+	chip_ids = {p.stem for p in chip_files}
+	for path in block_files:
+		try:
+			rel = path.relative_to(REPO)
+		except ValueError:
+			rel = path  # out-of-tree (e.g. a test fixture); report as-is
+		try:
+			doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+		except Exception:
+			continue  # parse errors already reported by the schema pass
+		if not isinstance(doc, dict):
+			continue
+		iface = {e["signal"] for e in doc.get("interface", []) if isinstance(e, dict) and "signal" in e}
+		msgs: list = []
+		for r in doc.get("realizations", []):
+			for part in r.get("parts", []):
+				if part.get("chip") not in chip_ids:
+					msgs.append(f"realization '{r.get('id')}': part chip '{part.get('chip')}' has no metadata/chips manifest")
+				for _pin, sig in (part.get("maps") or {}).items():
+					if sig not in iface:
+						msgs.append(f"realization '{r.get('id')}': maps target '{sig}' not in interface[]")
+		if msgs:
+			failures.append((rel, msgs))
+			print(f"FAIL {rel}")
+			for m in msgs:
+				print(f"  · {m}")
+	return failures
+
+
 def _check_library_semantics(library_files) -> list:
     """Cross-checks on library manifests beyond pure schema validation (ADR 0018).
 
@@ -610,6 +647,8 @@ def main() -> int:
                 lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
                 "block_id",
             )
+            if block_files:
+                block_failures += _check_block_realizations(block_files, chip_files)
 
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []

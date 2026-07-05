@@ -46,6 +46,36 @@ def test_block_schema_exists():
     assert schema["properties"]["block_id"]["pattern"] == "^[a-z][a-z0-9_]*$"
     assert schema["additionalProperties"] is False
 
+def test_realization_chip_must_exist(tmp_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm3", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "b.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "b", "display_name": "B",
+        "kconfig": "ALP_SDK_BLOCK_B",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": [{"chip": "does_not_exist", "maps": {"A": "LED"}}]}],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])
+    assert failures and any("does_not_exist" in m for _, msgs in failures for m in msgs)
+
+def test_realization_maps_must_be_in_interface(tmp_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm4", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "c.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "c", "display_name": "C",
+        "kconfig": "ALP_SDK_BLOCK_C",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": [{"chip": "x", "maps": {"A": "NOT_IN_INTERFACE"}}]}],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])
+    assert failures and any("NOT_IN_INTERFACE" in m for _, msgs in failures for m in msgs)
+
 def test_validate_metadata_passes_on_real_tree():
     # The full validator must stay green with the new chip pass wired in.
     r = subprocess.run([sys.executable, "scripts/validate_metadata.py"],
