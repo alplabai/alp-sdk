@@ -153,11 +153,13 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
 	(void)alp_gpio_cc3501e_attach(fw);
 #endif
-	/* Power + reset sequence (cold-cycle + Puya hard-reset workaround). */
-	alp_status_t rst = cc3501e_reset(fw);
-	if (rst != ALP_OK) {
-		return rst;
-	}
+	/* Power + reset sequence (cold-cycle + Puya hard-reset workaround).  A non-OK
+	 * cc3501e_reset here is NOT fatal: a cold CC35 commonly mis-reads on first
+	 * contact and only aligns after the hard-reset soak below, so fall through
+	 * rather than abort -- otherwise the caller never registers the companion on a
+	 * cold boot (bench-confirmed on the E1M-AEN801: the early return left the shell
+	 * reporting "companion not registered" until the soak ran). */
+	(void)cc3501e_reset(fw);
 	/* COLD-BOOT SOAK (the cold-boot workaround is a MUST): the Puya double-boot can need
 	 * SEVERAL hard resets before the cold-booted image services the bridge.  Retry
 	 * cc3501e_hard_reset until a GET_VERSION probe succeeds (cold first-contact aligns via
