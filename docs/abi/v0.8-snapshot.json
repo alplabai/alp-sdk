@@ -9085,6 +9085,10 @@
           "hash": "a0385cf92a0e599b",
           "signature": "alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_entry_t *entry);"
         },
+        "alp_update_log_append_boot": {
+          "hash": "65fb4db8032e3cd5",
+          "signature": "alp_status_t alp_update_log_append_boot(alp_update_log_t *log, uint64_t timestamp);"
+        },
         "alp_update_log_assurance": {
           "hash": "d5cf59e88cb7ad92",
           "signature": "alp_update_log_assurance_t alp_update_log_assurance(const alp_update_log_t *log);"
@@ -9096,6 +9100,10 @@
         "alp_update_log_count": {
           "hash": "5b6f22e22177a783",
           "signature": "alp_status_t alp_update_log_count(alp_update_log_t *log, uint64_t *count_out);"
+        },
+        "alp_update_log_entry_from_boot_metadata": {
+          "hash": "53a96c85b8e2835a",
+          "signature": "alp_status_t alp_update_log_entry_from_boot_metadata(alp_update_log_entry_t *entry_out, uint64_t timestamp);"
         },
         "alp_update_log_get": {
           "hash": "65a91dec2240a93d",
