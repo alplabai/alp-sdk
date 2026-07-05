@@ -255,6 +255,41 @@ def _check_peripheral_kconfig() -> list:
     return failures
 
 
+def _check_chip_semantics(chip_files) -> list:
+    """Cross-check beyond pure schema validation: `chip_id:` matches filename.
+
+    Mirrors `_check_library_semantics()`'s `name == path.stem` check: the
+    `chip_id` a board/SoM manifest references must resolve by filename, so a
+    mismatch (copy-paste drift between `metadata/chips/<part>.yaml` and its
+    `chip_id:` field) would silently break that lookup.  Returns a failure
+    list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in chip_files:
+        rel = path.relative_to(REPO)
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+
+        chip_id = doc.get("chip_id")
+        if isinstance(chip_id, str) and chip_id != path.stem:
+            msgs.append(
+                f"chip_id: `{chip_id}` must match the manifest filename `{path.stem}` "
+                f"-- chip_id lookups resolve by filename")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_library_semantics(library_files) -> list:
     """Cross-checks on library manifests beyond pure schema validation (ADR 0018).
 
@@ -510,6 +545,7 @@ def main() -> int:
                 lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
                 "chip_id",
             )
+            chip_failures += _check_chip_semantics(chip_files)
 
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []

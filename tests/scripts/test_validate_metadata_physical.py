@@ -6,7 +6,7 @@ REPO = Path(__file__).resolve().parents[2]
 def test_chip_schema_exists_and_is_draft2020():
     schema = json.loads((REPO / "metadata/schemas/chip-v1.schema.json").read_text())
     assert schema["$schema"].endswith("2020-12/schema")
-    assert schema["additionalProperties"] is True
+    assert schema["additionalProperties"] is False
     assert schema["properties"]["schema_version"]["const"] == 1
 
 def test_validate_metadata_passes_on_real_tree():
