@@ -33,6 +33,8 @@ SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
 HWREV_SCHEMA = REPO / "metadata" / "schemas" / "hw-revisions-v1.schema.json"
 SILICON_KCONFIG_SCHEMA = REPO / "metadata" / "schemas" / "silicon-kconfig-v1.schema.json"
 SILICON_KCONFIG_REGISTRY = REPO / "metadata" / "registries" / "silicon-kconfig.json"
+PERIPHERAL_KCONFIG_SCHEMA = REPO / "metadata" / "schemas" / "peripheral-kconfig-v1.schema.json"
+PERIPHERAL_KCONFIG_REGISTRY = REPO / "metadata" / "registries" / "peripheral-kconfig.json"
 BOARD_PRESET_SCHEMA = REPO / "metadata" / "schemas" / "board-preset.schema.json"
 LIBRARY_SCHEMA = REPO / "metadata" / "schemas" / "library-v1.schema.json"
 SOC_SPEC_SCHEMA = REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json"
@@ -218,6 +220,37 @@ def _check_silicon_kconfig() -> list:
     return failures
 
 
+def _check_peripheral_kconfig() -> list:
+    """Validate the peripheral-token -> Zephyr Kconfig registry."""
+    failures: list[tuple[Path, list[str]]] = []
+    if not PERIPHERAL_KCONFIG_REGISTRY.is_file():
+        return failures
+    rel = PERIPHERAL_KCONFIG_REGISTRY.relative_to(REPO)
+    try:
+        data = json.loads(PERIPHERAL_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"FAIL {rel}: parse error ({e})")
+        return [(rel, [f"invalid JSON parse: {e}"])]
+
+    msgs: list[str] = []
+    if PERIPHERAL_KCONFIG_SCHEMA.is_file():
+        schema = json.loads(PERIPHERAL_KCONFIG_SCHEMA.read_text(encoding="utf-8"))
+        validator = jsonschema.Draft202012Validator(schema)
+        for err in sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path)):
+            loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
+            msgs.append(f"{loc}: {err.message}")
+
+    if msgs:
+        print(f"FAIL {rel}")
+        for m in msgs:
+            print(f"  · {m}")
+        failures.append((rel, msgs))
+    else:
+        n = len(data.get("peripherals", {}))
+        print(f"OK   {rel}  (peripherals={n})")
+    return failures
+
+
 def _check_library_semantics(library_files) -> list:
     """Cross-checks on library manifests beyond pure schema validation (ADR 0018).
 
@@ -366,17 +399,19 @@ def main() -> int:
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
+    peripheral_kconfig_failures = _check_peripheral_kconfig()
 
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(restriction_failures)
-                      + len(silicon_kconfig_failures))
+                      + len(silicon_kconfig_failures)
+                      + len(peripheral_kconfig_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(library_files)} "
-          f"library manifest(s) + silicon-kconfig registry "
+          f"library manifest(s) + Kconfig registries "
           f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 

@@ -12,6 +12,8 @@ memregion.py move) ahead of the kconfig emitter.
 
 from __future__ import annotations
 
+from alp_registries import peripheral_kconfig
+
 
 def _board_define_slug(name: str) -> str:
     """'E1M-X-EVK' -> 'E1M_X_EVK': the ALP_BOARD_* compile-define suffix.
@@ -120,17 +122,4 @@ def _slugs_from_helper_firmware(helper_firmware: list) -> list[str]:
     return sorted(seen)
 
 
-_PERIPHERAL_KCONFIG: dict[str, str] = {
-    "adc":      "ADC",
-    "can":      "CAN",
-    "counter":  "COUNTER",
-    "gpio":     "GPIO",
-    "i2c":      "I2C",
-    "i2s":      "I2S",
-    "pwm":      "PWM",
-    "rtc":      "RTC",
-    "sensor":   "SENSOR",
-    "spi":      "SPI",
-    "uart":     "SERIAL",
-    "watchdog": "WATCHDOG",
-}
+_PERIPHERAL_KCONFIG: dict[str, str] = peripheral_kconfig()

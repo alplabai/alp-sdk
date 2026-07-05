@@ -65,6 +65,8 @@ try:
 except ImportError:
     sys.exit("alp_project: jsonschema is required.  Install via `pip install jsonschema`.")
 
+from alp_registries import peripheral_kconfig
+
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
@@ -776,25 +778,10 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
 }
 
 
-# Peripheral name (from board.yaml's `peripherals:` array) ->
-# Zephyr Kconfig symbol the loader sets.  Mirrors the per-class
-# wrapper enables in zephyr/Kconfig (ALP_SDK_PERIPH_*) which all
-# `default y if <SUBSYS>` -- so enabling the Zephyr subsystem
-# here lights up both the subsystem driver AND the alp wrapper.
-_PERIPHERAL_KCONFIG: dict[str, str] = {
-    "adc":      "ADC",
-    "can":      "CAN",
-    "counter":  "COUNTER",
-    "gpio":     "GPIO",
-    "i2c":      "I2C",
-    "i2s":      "I2S",
-    "pwm":      "PWM",
-    "rtc":      "RTC",
-    "sensor":   "SENSOR",    # underlying class for the qenc helper
-    "spi":      "SPI",
-    "uart":     "SERIAL",    # Zephyr's UART class symbol is SERIAL
-    "watchdog": "WATCHDOG",
-}
+# Peripheral name (from board.yaml's `peripherals:` array) -> Zephyr Kconfig
+# symbol.  Single-sourced in metadata/registries/peripheral-kconfig.json and
+# shared with alp_orchestrate/slugs.py.
+_PERIPHERAL_KCONFIG: dict[str, str] = peripheral_kconfig()
 
 
 # Library-name -> Kconfig flag(s) to set when the library appears

@@ -16,10 +16,13 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "scripts"))
+
 LOADER = REPO / "scripts" / "alp_project.py"
 TEMPLATE = REPO / "metadata" / "templates" / "board.yaml.example"
 
@@ -48,6 +51,38 @@ def _write_board(tmp: Path, body: str) -> Path:
 
 class TestLoaderContract(unittest.TestCase):
     """Schema + preset resolution behaviour."""
+
+    def test_peripheral_kconfig_registry_is_shared(self) -> None:
+        """alp_project and alp_orchestrate consume one metadata registry."""
+        import alp_project
+        import alp_registries
+        from alp_orchestrate.slugs import _PERIPHERAL_KCONFIG as orchestrate_map
+
+        registry_map = alp_registries.peripheral_kconfig()
+        self.assertEqual(alp_project._PERIPHERAL_KCONFIG, registry_map)
+        self.assertEqual(orchestrate_map, registry_map)
+        self.assertEqual(registry_map["uart"], "SERIAL")
+
+    def test_peripheral_kconfig_registry_schema_is_gated(self) -> None:
+        """validate_metadata rejects malformed peripheral registry data."""
+        import validate_metadata
+
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "peripheral-kconfig.json"
+            bad.write_text("""
+                {
+                  "schemaVersion": "peripheral-kconfig-v1",
+                  "peripherals": {
+                    "uart": "SERIAL",
+                    "bad-token": "not_upper"
+                  }
+                }
+            """, encoding="utf-8")
+            with mock.patch.object(validate_metadata, "REPO", Path(td)), \
+                 mock.patch.object(validate_metadata, "PERIPHERAL_KCONFIG_REGISTRY", bad):
+                failures = validate_metadata._check_peripheral_kconfig()
+        self.assertTrue(failures)
+        self.assertIn("peripherals", failures[0][1][0])
 
     def test_canonical_template_passes(self) -> None:
         """The shipped board.yaml.example must compile cleanly in
