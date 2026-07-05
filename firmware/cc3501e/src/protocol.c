@@ -237,6 +237,47 @@ static alp_cc3501e_resp_t handle_worker_routed_payload(alp_cc3501e_cmd_t cmd,
 	}
 }
 
+/* As handle_worker_routed_payload, but for a payload-carrying job that ALSO
+ * returns reply DATA (BLE_GATT_READ: the attribute handle goes up in the
+ * payload, the attribute value comes back).  The worker copies its DONE bytes
+ * straight into @p reply_data -- the SAME reply path handle_worker_routed uses
+ * for the record-returning scans -- so a single job round-trips a value off the
+ * SPI ISR.  Poll-by-repeat, @min_cap is the reply-data floor.  The caller must
+ * have validated @p req / @p req_len already. */
+static alp_cc3501e_resp_t handle_worker_routed_payload_reply(alp_cc3501e_cmd_t cmd,
+                                                             const uint8_t    *req,
+                                                             size_t            req_len,
+                                                             size_t            min_cap,
+                                                             uint8_t          *reply_data,
+                                                             size_t            reply_cap,
+                                                             size_t           *reply_data_len)
+{
+	*reply_data_len = 0u;
+	if (reply_cap < min_cap) return ALP_CC3501E_RESP_ERR_NO_MEM;
+
+	size_t                  n   = 0u;
+	int8_t                  err = 0;
+	const enum worker_state st  = worker_poll((uint8_t)cmd, reply_data, reply_cap, &n, &err);
+
+	switch (st) {
+	case WORKER_DONE:
+		worker_reset();
+		*reply_data_len = n; /* the worker copied the attribute value into reply_data */
+		return ALP_CC3501E_RESP_OK;
+	case WORKER_ERR:
+		worker_reset();
+		if (err == CC3501E_HW_ERR_NOTIMPL) return ALP_CC3501E_RESP_ERR_NOT_READY;
+		if (err == CC3501E_HW_ERR_INVAL) return ALP_CC3501E_RESP_ERR_INVALID;
+		return ALP_CC3501E_RESP_ERR_RADIO;
+	case WORKER_IDLE:
+		/* No job in flight: queue THIS one (with its payload) + return BUSY. */
+		(void)worker_submit_payload((uint8_t)cmd, req, (uint16_t)req_len);
+		return ALP_CC3501E_RESP_ERR_BUSY;
+	default: /* QUEUED / RUNNING (incl. another cmd in flight) */
+		return ALP_CC3501E_RESP_ERR_BUSY;
+	}
+}
+
 /* GET_MAC (0x03): the CC3501E's factory MAC (6 bytes, big-endian wire
  * order as TI stores it).  Read from the radio subsystem via the HAL.
  *
@@ -669,7 +710,11 @@ static alp_cc3501e_resp_t handle_ble_scan_stop(const uint8_t *req,
 	return hw_to_resp(cc3501e_hw_ble_scan_stop());
 }
 
-/* BLE_CONNECT (0x36): packed wire = addr_type(1) | addr[6]. */
+/* BLE_CONNECT (0x36): packed wire = addr_type(1) | addr[6].  Length-validated
+ * HERE, then WORKER-ROUTED with its payload (like WIFI_CONNECT_STA): the real
+ * body issues a GAP connect that blocks on the connection-complete HCI event
+ * over the shared HIF and so MUST NOT run in the SPI ISR that dispatches this
+ * handler.  worker_execute re-derives addr_type/addr from job.req. */
 static alp_cc3501e_resp_t handle_ble_connect(const uint8_t *req,
                                              size_t         req_len,
                                              uint8_t       *reply_data,
@@ -680,7 +725,7 @@ static alp_cc3501e_resp_t handle_ble_connect(const uint8_t *req,
 	(void)reply_cap;
 	*reply_data_len = 0u;
 	if (req_len != 7u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_connect(req[0], &req[1]));
+	return handle_worker_routed_payload(ALP_CC3501E_CMD_BLE_CONNECT, req, req_len, reply_data_len);
 }
 
 static alp_cc3501e_resp_t handle_ble_disconnect(const uint8_t *req,
@@ -697,7 +742,10 @@ static alp_cc3501e_resp_t handle_ble_disconnect(const uint8_t *req,
 	return hw_to_resp(cc3501e_hw_ble_disconnect());
 }
 
-/* BLE_GATT_REGISTER (0x38): opaque attribute-table descriptor (>= 1 byte). */
+/* BLE_GATT_REGISTER (0x38): opaque attribute-table descriptor (>= 1 byte).
+ * Length-validated HERE, then WORKER-ROUTED with its payload: the real body
+ * registers services + issues HCI over the shared HIF (blocks), so it MUST NOT
+ * run in the SPI ISR.  worker_execute forwards the whole payload as the desc. */
 static alp_cc3501e_resp_t handle_ble_gatt_register(const uint8_t *req,
                                                    size_t         req_len,
                                                    uint8_t       *reply_data,
@@ -708,10 +756,15 @@ static alp_cc3501e_resp_t handle_ble_gatt_register(const uint8_t *req,
 	(void)reply_cap;
 	*reply_data_len = 0u;
 	if (req_len < 1u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_gatt_register(req, (uint16_t)req_len));
+	return handle_worker_routed_payload(
+	    ALP_CC3501E_CMD_BLE_GATT_REGISTER, req, req_len, reply_data_len);
 }
 
-/* BLE_GATT_NOTIFY (0x39) / WRITE (0x3B): packed wire = handle(LE16) | data. */
+/* BLE_GATT_NOTIFY (0x39) / WRITE (0x3B): packed wire = handle(LE16) | data.
+ * Length-validated HERE, then WORKER-ROUTED with the payload (handle + data):
+ * the real bodies push a notification / GATT write that blocks on HCI over the
+ * shared HIF, so they MUST NOT run in the SPI ISR.  worker_execute re-derives
+ * the handle + data span from job.req. */
 static alp_cc3501e_resp_t handle_ble_gatt_notify(const uint8_t *req,
                                                  size_t         req_len,
                                                  uint8_t       *reply_data,
@@ -722,8 +775,8 @@ static alp_cc3501e_resp_t handle_ble_gatt_notify(const uint8_t *req,
 	(void)reply_cap;
 	*reply_data_len = 0u;
 	if (req_len < 2u) return ALP_CC3501E_RESP_ERR_INVALID;
-	const uint16_t handle = (uint16_t)req[0] | ((uint16_t)req[1] << 8);
-	return hw_to_resp(cc3501e_hw_ble_gatt_notify(handle, &req[2], (uint16_t)(req_len - 2u)));
+	return handle_worker_routed_payload(
+	    ALP_CC3501E_CMD_BLE_GATT_NOTIFY, req, req_len, reply_data_len);
 }
 
 static alp_cc3501e_resp_t handle_ble_gatt_write(const uint8_t *req,
@@ -736,11 +789,17 @@ static alp_cc3501e_resp_t handle_ble_gatt_write(const uint8_t *req,
 	(void)reply_cap;
 	*reply_data_len = 0u;
 	if (req_len < 2u) return ALP_CC3501E_RESP_ERR_INVALID;
-	const uint16_t handle = (uint16_t)req[0] | ((uint16_t)req[1] << 8);
-	return hw_to_resp(cc3501e_hw_ble_gatt_write(handle, &req[2], (uint16_t)(req_len - 2u)));
+	return handle_worker_routed_payload(
+	    ALP_CC3501E_CMD_BLE_GATT_WRITE, req, req_len, reply_data_len);
 }
 
-/* BLE_GATT_READ (0x3A): packed wire = handle(LE16); reply data = attr value. */
+/* BLE_GATT_READ (0x3A): packed wire = handle(LE16); reply data = attr value.
+ * Length-validated HERE, then WORKER-ROUTED with payload AND reply: the real
+ * body issues a GATT read that blocks on the read-response HCI over the shared
+ * HIF, so it MUST NOT run in the SPI ISR.  Unlike the other GATT ops this one
+ * returns data, so it uses the payload+reply worker path -- the worker copies
+ * the attribute value into reply_data (see handle_worker_routed_payload_reply);
+ * worker_execute re-derives the handle from job.req. */
 static alp_cc3501e_resp_t handle_ble_gatt_read(const uint8_t *req,
                                                size_t         req_len,
                                                uint8_t       *reply_data,
@@ -749,12 +808,8 @@ static alp_cc3501e_resp_t handle_ble_gatt_read(const uint8_t *req,
 {
 	*reply_data_len = 0u;
 	if (req_len != 2u) return ALP_CC3501E_RESP_ERR_INVALID;
-	const uint16_t     handle  = (uint16_t)req[0] | ((uint16_t)req[1] << 8);
-	uint16_t           out_len = 0u;
-	alp_cc3501e_resp_t st =
-	    hw_to_resp(cc3501e_hw_ble_gatt_read(handle, reply_data, (uint16_t)reply_cap, &out_len));
-	if (st == ALP_CC3501E_RESP_OK) *reply_data_len = out_len;
-	return st;
+	return handle_worker_routed_payload_reply(
+	    ALP_CC3501E_CMD_BLE_GATT_READ, req, req_len, 0u, reply_data, reply_cap, reply_data_len);
 }
 
 /* --------------------------------------------------------------- */

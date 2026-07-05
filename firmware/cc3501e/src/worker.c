@@ -155,6 +155,47 @@ static void worker_execute(uint8_t cmd)
 		 * the bridge SPI (blocks), so it is worker-routed off the SPI ISR.  Argless. */
 		rv = cc3501e_hw_ble_disable();
 		break;
+	case ALP_CC3501E_CMD_BLE_CONNECT:
+		/* GAP connect blocks on the connection-complete HCI event over the shared
+		 * HIF, so it is worker-routed off the SPI ISR.  Payload = addr_type(1) |
+		 * addr[6], stashed in job.req by worker_submit_payload (validated by the
+		 * protocol handler).  Argless reply. */
+		rv = cc3501e_hw_ble_connect((uint8_t)job.req[0], (const uint8_t *)job.req + 1);
+		break;
+	case ALP_CC3501E_CMD_BLE_GATT_REGISTER:
+		/* Registers the attribute table + issues HCI (blocks), so it is worker-routed
+		 * off the SPI ISR.  Payload = the whole opaque descriptor (job.req_len bytes). */
+		rv = cc3501e_hw_ble_gatt_register((const uint8_t *)job.req, job.req_len);
+		break;
+	case ALP_CC3501E_CMD_BLE_GATT_NOTIFY: {
+		/* Pushes a notification (blocks on HCI over the shared HIF), so it is
+		 * worker-routed off the SPI ISR.  Payload = handle(LE16) | data[job.req_len-2]. */
+		const uint16_t handle = (uint16_t)job.req[0] | ((uint16_t)job.req[1] << 8);
+		rv                    = cc3501e_hw_ble_gatt_notify(
+		    handle, (const uint8_t *)job.req + 2, (uint16_t)(job.req_len - 2u));
+		break;
+	}
+	case ALP_CC3501E_CMD_BLE_GATT_WRITE: {
+		/* GATT write (blocks on HCI over the shared HIF), so it is worker-routed off
+		 * the SPI ISR.  Payload = handle(LE16) | data[job.req_len-2]. */
+		const uint16_t handle = (uint16_t)job.req[0] | ((uint16_t)job.req[1] << 8);
+		rv                    = cc3501e_hw_ble_gatt_write(
+		    handle, (const uint8_t *)job.req + 2, (uint16_t)(job.req_len - 2u));
+		break;
+	}
+	case ALP_CC3501E_CMD_BLE_GATT_READ: {
+		/* GATT read (blocks on the read-response HCI over the shared HIF), so it is
+		 * worker-routed off the SPI ISR.  Payload = handle(LE16); the attribute value
+		 * is packed into buf and published so the payload+reply worker path copies it
+		 * back to the host (see handle_worker_routed_payload_reply). */
+		const uint16_t handle  = (uint16_t)job.req[0] | ((uint16_t)job.req[1] << 8);
+		uint16_t       out_len = 0u;
+		rv = cc3501e_hw_ble_gatt_read(handle, buf, (uint16_t)ALP_CC3501E_MAX_PAYLOAD, &out_len);
+		if (rv == CC3501E_HW_OK) {
+			len = out_len;
+		}
+		break;
+	}
 	case ALP_CC3501E_CMD_WIFI_CONNECT_STA:
 	case ALP_CC3501E_CMD_WIFI_AP_START: {
 		/* Association BLOCKS until the connect/IP event (seconds), so -- unlike the
