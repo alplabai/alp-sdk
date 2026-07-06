@@ -1,4 +1,14 @@
 // @cliArgs --board /ti/boards/LP_EM_CC35X1 --rtos freertos
+//
+// PACKAGING NOTE (bench-proven 2026-07-05): the MemoryConfigurator emits
+// `activation_type=sdk_example_key` into action_request_extra.txt by DEFAULT.
+// Our E1M-AEN801 units are activated to the Alp VALIDATION (vendor) key as their
+// root-of-trust, so a vendor image built/signed for sdk_example_key FAILS SES/BL2
+// secure-boot authentication (AUTH_ERROR -> app core never launches). ALWAYS
+// package with `activation_type=vendor_key` -- deploy_validate.sh passes it
+// explicitly; a raw `make ... all` must add `activation_type=vendor_key` on the
+// command line (or use a SYSCONFIG_ARTIFACT whose action_request_extra.txt says
+// vendor_key). See firmware/cc3501e/ti/deploy_validate.sh.
 var Mem = scripting.addModule("/ti/memoryconfig/MemoryConfigurator/Mem_cfg");
 Mem.flash_device_type = "PY25Q64LB";
 Mem.flash_device_size = 8;

@@ -478,7 +478,13 @@ ZTEST(cc3501e_bridge_transport, test_get_diag_info)
 	assert_reply_header(reply, ALP_CC3501E_CMD_GET_DIAG_INFO, 17u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GET_DIAG_INFO -> OK");
 	const uint16_t fw = (uint16_t)reply[5] | ((uint16_t)reply[6] << 8);
-	zassert_equal(fw, 0x0002u, "fw_version = 0x0002 (reflash-verification marker bump)");
+	/* Marker is DERIVED from firmware-version.txt (packed (MINOR<<8)|PATCH) and
+	 * fed in via -DCC3501E_BRIDGE_FW_VERSION_U16 by this test's CMakeLists, so
+	 * this asserts against the single-sourced constant, never a drifting
+	 * literal.  0.2.0 -> 0x0200. */
+	zassert_equal(fw,
+	              CC3501E_BRIDGE_FW_VERSION_U16,
+	              "fw_version = derived marker (firmware-version.txt 0.2.0 -> 0x0200)");
 	zassert_equal(reply[7], (uint8_t)ALP_CC3501E_RESET_POWER_ON, "stub reset cause = POWER_ON");
 	zassert_equal(reply[8], (uint8_t)ALP_CC3501E_ROLE_OFF, "role = OFF in v0.1 (no radio)");
 }
