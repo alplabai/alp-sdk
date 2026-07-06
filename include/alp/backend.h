@@ -4,7 +4,7 @@
  *
  * Each peripheral subsystem (ADC, SPI, ...) carries a class name.
  * Backends register themselves into a per-class linker section via
- * the ALP_BACKEND_REGISTER macro.  alp_<class>_open() walks the
+ * the ALP_BACKEND_REGISTER macro.  alp_&lt;class&gt;_open() walks the
  * section once, picks a backend by silicon_ref + priority, caches
  * the choice, and dispatches through ops thereafter.
  *
@@ -61,7 +61,7 @@ typedef struct alp_backend_class_range {
 /**
  * @brief Register a backend into the per-class section.
  *
- * Expands to a static const struct in section ".alp_backends_<class>".
+ * Expands to a static const struct in section ".alp_backends_&lt;class&gt;".
  * The linker collects every such entry into a contiguous array.
  *
  * @param class  Class name (e.g. adc, spi, inference).  Becomes part of
@@ -75,7 +75,7 @@ typedef struct alp_backend_class_range {
  * native_sim builds enable --gc-sections aggressively and drop the
  * registration without `retain`. */
 /* Section name MUST be a valid C identifier (no leading dot) so GNU
- * ld auto-emits __start_alp_backends_<class> and __stop_<class>
+ * ld auto-emits __start_alp_backends_&lt;class&gt; and __stop_&lt;class&gt;
  * bound symbols.  `retain` keeps the entry through --gc-sections. */
 #define ALP_BACKEND_REGISTER(class, name, ...)                                                     \
 	static const alp_backend_t _alp_be_##class##_##name __attribute__((                            \
@@ -86,7 +86,7 @@ typedef struct alp_backend_class_range {
  * @brief Define the class-range table entry for a per-class section.
  *
  * Each class dispatcher (typically the file that implements
- * alp_<class>_open) instantiates this once.  Tells the selector how
+ * alp_&lt;class&gt;_open) instantiates this once.  Tells the selector how
  * to find the section for a class name.
  */
 #define ALP_BACKEND_DEFINE_CLASS(class)                                                            \
@@ -116,15 +116,15 @@ typedef struct alp_backend_class_range {
  * code references it.  A static-library link only pulls a member when
  * an already-included object needs one of its symbols, so that member
  * never joins the link; the section is then absent and the
- * __start_/__stop_alp_backends_<class> bounds ALP_BACKEND_DEFINE_CLASS
+ * __start_/__stop_alp_backends_&lt;class&gt; bounds ALP_BACKEND_DEFINE_CLASS
  * reads from the (always-linked) dispatcher go undefined -- the link
- * fails with `undefined reference to __start_alp_backends_<class>`
+ * fails with `undefined reference to __start_alp_backends_&lt;class&gt;`
  * (issue #368).
  *
  * The anchor closes that gap.  The section-carrying backend TU exports
  * one global symbol via ALP_BACKEND_ANCHOR_DEFINE(class); the
  * dispatcher TU takes its address via ALP_BACKEND_ANCHOR(class).  The
- * dispatcher is always pulled (it owns alp_<class>_open), so the
+ * dispatcher is always pulled (it owns alp_&lt;class&gt;_open), so the
  * address-of forces the backend member -- and with it the section and
  * its bound symbols -- into the link.
  *
@@ -202,7 +202,7 @@ alp_backend_select_next(const char *class_name, const char *silicon_ref, const a
  * @brief Count backends registered for a class (any silicon).
  *
  * @param class_name   The class identifier passed to ALP_BACKEND_REGISTER.
- * @return  Number of entries in the .alp_backends_<class> section.
+ * @return  Number of entries in the .alp_backends_&lt;class&gt; section.
  */
 size_t alp_backend_count(const char *class_name);
 
