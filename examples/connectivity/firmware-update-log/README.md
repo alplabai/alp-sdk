@@ -105,9 +105,15 @@ HP owner, HP releases HE, and the HE client runs `open`/`append`/`verify`/`count
 entirely over the MHU mailbox — HP served all five requests (`ALP_OK`) and wrote the
 entry to the MRAM NVS store (confirmed by the SE `getmramdata` read), while HE never
 touches the partition directly. So HE reports `HW_ENFORCED`, the log is written only by
-the trusted owner, and HE's own direct write bus-faults. The remaining gaps are E4
-parity (E8 = E4 + A32; expected but not yet E4-bench-proven) and the anti-rollback NV
-counter — both tracked under #111.
+the trusted owner, and HE's own direct write bus-faults.
+
+**E4 parity is established by silicon identity, not pending a separate bench run.** E4
+is E8 with the A32 application cluster removed; the SE, both M55 cores, MRAM, the
+firewall (FC8) and the M55 TrustZone (SAU/TGU) are the *same IP*, and the A32 cluster
+takes no part in the log-enforcement path. The E8 results here — the FC8 master-side
+block, the dual-M55 owner/client flow, and the single-core SAU block — therefore apply
+to E4 unchanged. The one genuinely open item is the anti-rollback NV counter (tracked
+under #111).
 
 A **single-core** variant of the same guarantee is proven separately in
 `examples/aen/aen-tz-secure-log-probe`: on one M55, TrustZone-M (the SAU) marks the
