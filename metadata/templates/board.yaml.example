@@ -4,12 +4,13 @@
 # valid document the loader can exercise end-to-end.
 
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 
-# Per-core runtime mapping.  The E7 silicon carries no Cortex-A
-# class core, so the only programmable peer-pair is M55-HP + M55-HE.
+# Per-core runtime mapping.  The E8 silicon exposes the A32 cluster
+# plus the M55-HP + M55-HE pair; this minimal Zephyr example runs
+# only M55-HP and leaves the other topology defaults alone.
 # This example runs Zephyr on M55-HP only; M55-HE inherits the SoM
 # topology's default Zephyr shim (so the build covers both halves
 # by default).

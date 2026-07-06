@@ -9,7 +9,7 @@
 # Same source targets the V2N DEEPX path when som.sku is flipped.
 
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 supported_boards:

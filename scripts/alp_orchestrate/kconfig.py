@@ -344,7 +344,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # SoM-intrinsic chip drivers — derived from on_module: + helper_firmware:
     # in the SoM preset.  These are NOT declared by the customer; they
     # are determined by which SoM SKU the project targets.  Swapping
-    # `som.sku:` from E1M-V2N101 to E1M-AEN701 automatically swaps
+    # `som.sku:` from E1M-V2N101 to E1M-AEN801 automatically swaps
     # the on-module chip set without any board.yaml changes.
     # ----------------------------------------------------------------
     som_chips: set[str] = set()
@@ -558,7 +558,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # also names the role + paired-core); fall back to the capability
     # counts (ethos_u{55,65,85}_count) for SoMs that haven't yet
     # declared the per-instance block.  Both AEN401 / AEN601 / AEN801
-    # populate npu_population[]; AEN701 declares U55s there too; the
+    # populate npu_population[]; AEN801 declares U55s there too; the
     # i.MX 93 SoM relies on the capability-count fallback today.
     ethos_variants: set[str] = set()
     npu_pop = (project.som_preset.get("inference") or {}).get("npu_population") or []

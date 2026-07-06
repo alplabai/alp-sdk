@@ -8,7 +8,7 @@ The load-bearing customer promise of the Alp SDK:
 > SoM family**.
 
 This tutorial walks the promise (with a worked retarget from
-`E1M-AEN701` to `E1M-AEN801`), explains the deliberate boundary
+`E1M-AEN601` to `E1M-AEN801`), explains the deliberate boundary
 between the E1M and E1M-X form factors, and points at the
 empirical proof + the cookbook + the architectural ADR for
 deeper reading.
@@ -48,7 +48,7 @@ Swap one line:
 ```yaml
 # board.yaml -- swap the SKU, keep the source.
 som:
-  sku: E1M-AEN801    # was E1M-AEN701
+  sku: E1M-AEN801    # was E1M-AEN601
 ```
 
 The orchestrator (`scripts/alp_orchestrate/`) resolves the

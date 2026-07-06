@@ -7,7 +7,7 @@
 # layers the generated alp.conf over prj.conf via OVERLAY_CONFIG.
 
 som:
-  sku: E1M-AEN701          # Alif Ensemble E7 -- ships the <alp/ext/alif/adc.h>
+  sku: E1M-AEN801          # Alif Ensemble E8 -- ships the <alp/ext/alif/adc.h>
                             # vendor extension this demo layers in Way 3.
 
 preset: e1m-evk

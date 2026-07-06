@@ -93,7 +93,7 @@ storage:
 The MCUboot slots are explicit (matching `boot.slots:` sizes);
 Zephyr's settings subsystem gets its own littlefs partition;
 app-managed runtime data gets its own. Adds to ~2.4 MiB of the
-AEN E7's 5.5 MiB MRAM -- the rest stays free for code + MCUboot
+AEN E8's 5.5 MiB MRAM -- the rest stays free for code + MCUboot
 itself + TF-M's secure partition. The orchestrator emits a
 partial DTS overlay (`partitions { ... }` node) + matching
 Kconfig (`CONFIG_FILE_SYSTEM_LITTLEFS=y`) per entry.

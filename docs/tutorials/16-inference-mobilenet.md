@@ -152,7 +152,7 @@ int main(void) {
 
 ```yaml
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 cores:
@@ -165,9 +165,9 @@ cores:
 ```
 
 There is no `inference.backend:` field — the dispatcher set is
-silicon-determined.  AEN701's SoM preset declares the U55
-silicon via `inference.npu_population[]` (and a fallback
-`capabilities.ethos_u55_count: 2`), so the loader emits:
+silicon-determined. AEN801's SoM preset declares the U85 primary plus
+the U55 pair via `inference.npu_population[]` (with fallback
+capability counters), so the loader emits:
 
 ```
 CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y
@@ -362,7 +362,7 @@ Per-backend latency baselines (native_sim CPU + AEN Ethos-U55):
 | MobileNet v2 96x96 quant | ~120 ms | ~1 ms |
 
 Real numbers per silicon land in
-`tests/bench/baselines/E1M-AEN701-zephyr.yaml` once HiL is
+`tests/bench/baselines/E1M-AEN801-zephyr.yaml` once HiL is
 provisioned.
 
 ## 8. Troubleshooting

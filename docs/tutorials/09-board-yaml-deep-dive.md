@@ -50,8 +50,8 @@ the SoM preset's `topology:` block.
 
 ```yaml
 som:
-  sku: E1M-AEN701          # required
-  hw_rev: r1               # optional; defaults to default_hw_rev in the family
+  sku: E1M-AEN801          # required
+  hw_rev: r2               # optional; defaults to default_hw_rev in the family
 ```
 
 `sku` resolves to a preset at
@@ -393,7 +393,7 @@ The orchestrator merges `metadata/socs/<silicon>.json`'s
 `capabilities:` with the SoM preset's overrides at config time.
 Examples:
 
-- `ethos_u55_count: 2` is a silicon-determined fact on AEN701;
+- `ethos_u55_count: 2` plus `ethos_u85_count: 1` are silicon-determined facts on AEN801;
   the SoM preset doesn't have to repeat it.
 - `drp_ai: true` is silicon-determined on every V2N; not in the
   SoM YAML.
@@ -485,8 +485,8 @@ BLE + MQTT-TLS + LVGL display:
 name: my-iot-board       # inline board: required when no `preset:`
 
 som:
-  sku:    E1M-AEN701
-  hw_rev: r1
+  sku:    E1M-AEN801
+  hw_rev: r2
 
 populated:
   bme280:     true

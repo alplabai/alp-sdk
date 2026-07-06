@@ -256,7 +256,7 @@ def load_board_yaml(path: Path, *,
     # Phase B gap fix G-4: catch the cross-class `som.sku:` swap where
     # `cores.<key>` doesn't match this SoM preset's `topology:`.
     # Example: customer has `cores.m55_hp:` and swaps som.sku from
-    # E1M-AEN701 (topology: m55_hp + m55_he + a32_cluster) to
+    # E1M-AEN801 (topology: m55_hp + m55_he + a32_cluster) to
     # E1M-NX9101 (topology: m33 + a55_cluster).  Pre-fix the slice-
     # build loop iterated topology keys, NOT project_cores keys, so
     # `cores.m55_hp:` was silently dropped and the customer got an

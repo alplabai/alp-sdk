@@ -149,7 +149,7 @@ its `cores:` keys.
 | Directory                | What it shows                                                                                |
 |--------------------------|----------------------------------------------------------------------------------------------|
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
-| `rpmsg-aen`              | AEN E7 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
+| `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
 | `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; build pending iMX93 HW map). **(iMX93)** |
 | `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |

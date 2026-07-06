@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * EdgeAI vision-AEN -- overlay for the E1M EVK populated with an
- * E1M-AEN701 SoM.  Re-aliases what the board file exposes:
+ * E1M-AEN801 SoM.  Re-aliases what the board file exposes:
  *
  *   alp_i2c0  -> on-EVK shared sensor bus (LSM6DSO / SSD1306 via the
  *               level shifter on the display side).

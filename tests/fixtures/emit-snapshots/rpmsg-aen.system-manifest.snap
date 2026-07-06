@@ -1,26 +1,26 @@
 schema_version: 1
 generated_by: scripts/alp_orchestrate.py
 hw_info:
-  sku: E1M-AEN701
-  som_hw_rev: r1
+  sku: E1M-AEN801
+  som_hw_rev: r2
   board_name: E1M-EVK
   board_hw_rev: r1
-  silicon: alif:ensemble:e7
+  silicon: alif:ensemble:e8
 slices:
 - core_id: a32_cluster
   os: yocto
   app: ./linux
   image: alp-image-edge
-  machine: e1m-aen701-a32
+  machine: e1m-aen801-a32
   toolchain: poky-glibc
   status: pending
   flash_method: yocto_wic_to_sd_or_emmc
   flash_args:
-    target: e1m-aen701-a32
+    target: e1m-aen801-a32
 - core_id: m55_hp
   os: zephyr
   app: ./m55_hp
-  board: alp_e1m_aen701_m55_hp
+  board: alp_e1m_aen801_m55_hp
   toolchain: arm-zephyr-eabi
   status: pending
   flash_method: zephyr_west_flash
@@ -29,7 +29,7 @@ slices:
 - core_id: m55_he
   os: zephyr
   app: alp-stock-shim
-  board: alp_e1m_aen701_m55_he
+  board: alp_e1m_aen801_m55_he
   toolchain: arm-zephyr-eabi
   status: pending
   flash_method: zephyr_west_flash
@@ -42,10 +42,10 @@ ipc:
   - a32_cluster
   - m55_hp
   status: blocked
-  reason: SoM E1M-AEN701 mailbox controller is TBD; carve-out resolution requires
-    authoritative mailbox metadata.  Fill `mailbox.controller:` in metadata/e1m_modules/E1M-AEN701.yaml
-    with the vendor mailbox node name (e.g. `renesas_mhu`, `nxp_mu`, `alif_mhuv2`)
-    or remove the rpmsg entries from board.yaml.
+  reason: memory_map.base is unset for region 'sram0' in SoM E1M-AEN801; this SoM
+    hasn't been HW-mapped yet so IPC carve-outs cannot be allocated.  Add a `memory_map:`
+    block to metadata/e1m_modules/E1M-AEN801.yaml (or per-region `base`) or remove
+    the matching ipc entry from board.yaml.
 helper_mcus:
 - name: cc3501e_otp
   chip: cc3501e
@@ -55,5 +55,5 @@ helper_mcus:
   note: firmware_path TBD; populated when the upstream firmware release lands
 boot_order: []
 
-# boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-AEN701.yaml when the
+# boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-AEN801.yaml when the
 # bring-up order is finalised.

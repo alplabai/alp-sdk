@@ -24,13 +24,13 @@ Three customer questions get one answer:
   leaves the device, so the customer's plant network never sees
   raw vibration.
 - **"Cheap enough to deploy on every machine?"** -- yes, the
-  AEN701's Ethos-U55 + clock-gated M55 path runs months on a
+  AEN801's Ethos-U + clock-gated M55 path runs months on a
   single battery charge; the V2N path drops into a higher-rate
   AI-PLC node when speed matters more than power.
 
 ## Hardware
 
-- E1M-AEN701 SoM (or any E1M-AEN variant; SKU lives in
+- E1M-AEN801 SoM (or any E1M-AEN variant; SKU lives in
   `board.yaml`).  Flip to E1M-V2M101 for the DEEPX path.
 - E1M-EVK board.  ICM-42670 is already populated at I2C0 0x69.
 - (Production) attach the accelerometer module to the monitored
