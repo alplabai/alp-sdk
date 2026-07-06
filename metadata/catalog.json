@@ -48,6 +48,13 @@
       },
       {
         "board": "e1m-evk",
+        "name": "aen-cc3501e-companion-tour",
+        "path": "examples/aen/aen-cc3501e-companion-tour",
+        "som": "E1M-AEN801",
+        "summary": "The **capstone** full-surface example for the on-module **TI CC3501E** Wi-Fi 6 + BLE 5.4 coprocessor, driven from the Alif **M55-HE** core on the **E1M-AEN801** (Alif Ensemble E8) SoM."
+      },
+      {
+        "board": "e1m-evk",
         "name": "aen-cc3501e-gpio",
         "path": "examples/aen/aen-cc3501e-gpio",
         "som": "E1M-AEN801",
@@ -329,6 +336,13 @@
       },
       {
         "board": "e1m-evk",
+        "name": "alp-console",
+        "path": "examples/peripheral-io/alp-console",
+        "som": "E1M-AEN801",
+        "summary": "<!-- SPDX-License-Identifier: Apache-2.0 -->"
+      },
+      {
+        "board": "e1m-evk",
         "name": "can-loopback",
         "path": "examples/peripheral-io/can-loopback",
         "som": "E1M-AEN701",
@@ -501,6 +515,13 @@
           "e1m-evk",
           "e1m-x-evk"
         ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "usb-host-storage",
+        "path": "examples/peripheral-io/usb-host-storage",
+        "som": "E1M-AEN401",
+        "summary": "Opens the USB host role via `<alp/usb.h>` and enumerates an attached USB mass-storage device on the E1M-AEN401 Cortex-M55-HP."
       },
       {
         "board": "e1m-evk",
@@ -870,6 +891,12 @@
     },
     {
       "functions": [
+        "alp_console_companion_set"
+      ],
+      "header": "include/alp/console.h"
+    },
+    {
+      "functions": [
         "alp_counter_cancel_alarm",
         "alp_counter_capabilities",
         "alp_counter_close",
@@ -1178,9 +1205,11 @@
     {
       "functions": [
         "alp_update_log_append",
+        "alp_update_log_append_boot",
         "alp_update_log_assurance",
         "alp_update_log_close",
         "alp_update_log_count",
+        "alp_update_log_entry_from_boot_metadata",
         "alp_update_log_get",
         "alp_update_log_open",
         "alp_update_log_verify"
@@ -1304,7 +1333,7 @@
         "spi": false,
         "timer": false,
         "uart": false,
-        "usb": false,
+        "usb": true,
         "watchdog": false
       },
       "silicon": "alif:ensemble:e4",
