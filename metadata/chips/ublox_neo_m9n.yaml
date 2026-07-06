@@ -18,6 +18,24 @@ uart:
 gnss:
   constellations: [gps, glonass, galileo, beidou]
 
+physical:
+  # Pre-routed GNSS module (not a bare die/package) -- lighter module
+  # form, no pins/footprint. Per u-blox NEO-M9N-00B datasheet
+  # UBX-19014285 R08, section 6 "Mechanical specifications" (Table 20:
+  # typical 16.0 x 12.2 x 2.4mm, "NEO form factor" 16-pad LCC) and
+  # section 4.2 "Operating conditions" (Topr -40 to +85 degC). Module
+  # has no on-board antenna: RF_IN (pin 11) is the GNSS RF input and
+  # VCC_RF (pin 9) + LNA_EN (pin 14) drive an external active antenna;
+  # both active and passive external antennas are supported. Module
+  # also breaks out a 16-pad UART/I2C/SPI/USB interface not modeled
+  # here since this form omits pins per the module template.
+  package:              "16-pad LCC (leadless chip carrier)"
+  dimension_mm:         "16.0 x 12.2 x 2.4"
+  antenna:              external
+  operating_temp_deg_c: "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_UBLOX_NEO_M9N
   baremetal:      ALP_SDK_CHIP_UBLOX_NEO_M9N

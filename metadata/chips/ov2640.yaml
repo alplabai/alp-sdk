@@ -21,11 +21,31 @@ signals:
   - { name: SDA,    type: bidir, scope: "SCCB data"  }
   - { name: PWDN,   type: input, scope: "host-driven power-down (active high)" }
   - { name: RESETB, type: input, scope: "host-driven hardware reset (active low)" }
-  - { name: D0..D7, type: output, scope: "DVP 8-bit parallel pixel data; host receiver" }
+  # Replaces the previous "D0..D7" shorthand: the real OV2640 pixel bus
+  # is a 10-bit port named Y0..Y9 (see Table 3 "Pin Description" in the
+  # datasheet cited in `physical:` below), not an 8-bit D0..D7 bus.
+  - { name: Y0,     type: output, scope: "video port output bit[0]" }
+  - { name: Y1,     type: output, scope: "video port output bit[1]" }
+  - { name: Y2,     type: output, scope: "video port output bit[2]" }
+  - { name: Y3,     type: output, scope: "video port output bit[3]" }
+  - { name: Y4,     type: output, scope: "video port output bit[4]" }
+  - { name: Y5,     type: output, scope: "video port output bit[5]" }
+  - { name: Y6,     type: output, scope: "video port output bit[6]" }
+  - { name: Y7,     type: output, scope: "video port output bit[7]" }
+  - { name: Y8,     type: output, scope: "video port output bit[8]" }
+  - { name: Y9,     type: output, scope: "video port output bit[9]" }
   - { name: HREF,   type: output, scope: "DVP line-valid" }
   - { name: VSYNC,  type: output, scope: "DVP frame-valid" }
   - { name: PCLK,   type: output, scope: "DVP pixel clock" }
   - { name: XCLK,   type: input, scope: "DVP master input clock (typ. 24 MHz from host)" }
+  - { name: DOGND,  type: ground, scope: "ground for digital video port" }
+  - { name: AGND,   type: ground, scope: "ground for analog circuit" }
+  - { name: SGND,   type: ground, scope: "ground for sensor array" }
+  - { name: DGND,   type: ground, scope: "ground for digital core" }
+  - { name: EGND,   type: ground, scope: "ground for internal regulator" }
+  - { name: DOVDD,  type: power, scope: "power for digital video port" }
+  - { name: SVDD,   type: power, scope: "power for sensor array" }
+  - { name: EVDD,   type: power, scope: "power for internal regulator" }
 
 resolutions:
   max:            [1600, 1200]    # UXGA
@@ -49,3 +69,49 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per OmniVision OV2640 datasheet Rev 1.6 (Feb 28, 2006), Table 3
+  # "Pin Description" -- 38-pin CSP2, 5725 x 6285 um.  Excludes
+  # EXPST_B (A2, snapshot-exposure trigger), STROBE (A6, LED-flash
+  # output), FREX (B2, snapshot trigger), VREFN/VREFH (A5/C5, internal
+  # analog reference bypass nodes) and NC (D6) -- all out of the
+  # power/gnd/DVP/SCCB/PWDN/RESET scope for this sweep.
+  refdes_prefix: U
+  package:       "38-pin CSP2"
+  footprint:     csp2_38_5p7x6p3mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: A1, signal: DOGND }
+    - { pad: A3, signal: AGND }
+    - { pad: A4, signal: SGND }
+    - { pad: B1, signal: DOVDD }
+    - { pad: B3, signal: AVDD }
+    - { pad: B4, signal: SVDD }
+    - { pad: B5, signal: SVDD }
+    - { pad: B6, signal: PWDN }
+    - { pad: C1, signal: SDA }
+    - { pad: C2, signal: SCL }
+    - { pad: C3, signal: HREF }
+    - { pad: C4, signal: XCLK }
+    - { pad: C6, signal: RESETB }
+    - { pad: D2, signal: VSYNC }
+    - { pad: E1, signal: Y1 }
+    - { pad: E2, signal: Y0 }
+    - { pad: E3, signal: PCLK }
+    - { pad: E4, signal: EGND }
+    - { pad: E5, signal: Y6 }
+    - { pad: E6, signal: DGND }
+    - { pad: F1, signal: EVDD }
+    - { pad: F2, signal: DVDD }
+    - { pad: F3, signal: Y2 }
+    - { pad: F4, signal: Y4 }
+    - { pad: F5, signal: Y8 }
+    - { pad: F6, signal: DVDD }
+    - { pad: G1, signal: EVDD }
+    - { pad: G2, signal: DGND }
+    - { pad: G3, signal: Y3 }
+    - { pad: G4, signal: Y5 }
+    - { pad: G5, signal: Y7 }
+    - { pad: G6, signal: Y9 }

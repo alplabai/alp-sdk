@@ -32,3 +32,31 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: MODE, type: input,  scope: "internal 200k pull-up; selects ABZ vs I2C/SSI mode" }
+  - { name: OUT,  type: analog, scope: "analog voltage output or PWM output (unused in I2C mode)" }
+  - { name: PUSH, type: output, scope: "button/press-detect output (magnet Z-axis proximity)" }
+  - { name: A,    type: bidir,  scope: "incremental A/U output, or I2C SDA, or SSI DO" }
+  - { name: B,    type: bidir,  scope: "incremental B/V output, or I2C SCL, or SSI CLK" }
+  - { name: Z,    type: bidir,  scope: "internal 200k pull-up; incremental Z/W output, or SSI CSN" }
+
+physical:
+  # pins per MagnTek MT6701 datasheet v1.9 (2024.05, magntek.com.cn),
+  # section 1.1 "SOP-8 Package" pin table.  All 8 pins are signal-bearing
+  # (no N.C. on the SOP-8 variant).  This driver uses the chip in I2C
+  # mode: pin A = SDA, pin B = SCL (MODE strapped accordingly on-board).
+  refdes_prefix: U
+  package:       SOP-8
+  footprint:     sop_8
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1", signal: "VDD" }
+    - { pad: "2", signal: "MODE" }
+    - { pad: "3", signal: "OUT" }
+    - { pad: "4", signal: "GND" }
+    - { pad: "5", signal: "PUSH" }
+    - { pad: "6", signal: "A" }
+    - { pad: "7", signal: "B" }
+    - { pad: "8", signal: "Z" }

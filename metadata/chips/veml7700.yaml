@@ -19,6 +19,31 @@ i2c:
 sensor:
   resolution_bits: 16
 
+signals:
+  - { name: SCL, type: input, scope: "I2C serial clock" }
+  - { name: SDA, type: bidir, scope: "I2C serial data" }
+
+physical:
+  # Pins per Vishay VEML7700 datasheet Rev 1.0 (19-Nov-15, Document
+  # Number 84286), "Pinning" diagram + "FEATURES" (miniature
+  # transparent optical package, side-view, 6.8 x 3.0 x 2.5mm --
+  # informally an "OPLGA-4", though the datasheet does not itself use
+  # that acronym). All 4 pins are populated; the datasheet explicitly
+  # notes "Interrupt pin not available for VEML7700" (unlike siblings
+  # that break out a 5th INT pad), so no pin is omitted as NC here.
+  refdes_prefix: U
+  package:              "OPLGA-4 (optical, side-view)"
+  footprint:             oplga_4
+  dimension_mm:          "6.8 x 3.0 x 2.5"
+  operating_temp_deg_c:  "-25..85"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "1", signal: "SCL" }
+    - { pad: "2", signal: "VDD" }
+    - { pad: "3", signal: "GND" }
+    - { pad: "4", signal: "SDA" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_VEML7700
   baremetal:      ALP_SDK_CHIP_VEML7700

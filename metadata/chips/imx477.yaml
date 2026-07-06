@@ -19,6 +19,29 @@ i2c:
 mipi:
   lanes_supported: [2, 4]
 
+signals:
+  - { name: SDA,     type: bidir,  scope: "CCI/I2C data" }
+  - { name: SCL,     type: input,  scope: "CCI/I2C clock" }
+  - { name: XCLR,    type: input,  scope: "chip clear (reset), pull-down" }
+  - { name: SLASEL,  type: input,  scope: "I2C slave-address select strap, pull-down" }
+  - { name: GPO,     type: output, scope: "general-purpose output" }
+  - { name: FSTROBE,  type: output, scope: "flash-strobe output" }
+  - { name: XVS,     type: bidir,  scope: "vertical-sync I/O for dual-sensor synchronization" }
+  - { name: INCK,    type: input,  scope: "external master clock input" }
+  - { name: DCKP,    type: output, scope: "MIPI CSI-2 clock lane, positive" }
+  - { name: DCKN,    type: output, scope: "MIPI CSI-2 clock lane, negative" }
+  - { name: DMO1P,   type: output, scope: "MIPI CSI-2 data lane 1, positive" }
+  - { name: DMO1N,   type: output, scope: "MIPI CSI-2 data lane 1, negative" }
+  - { name: DMO2P,   type: output, scope: "MIPI CSI-2 data lane 2, positive" }
+  - { name: DMO2N,   type: output, scope: "MIPI CSI-2 data lane 2, negative" }
+  - { name: DMO3P,   type: output, scope: "MIPI CSI-2 data lane 3, positive" }
+  - { name: DMO3N,   type: output, scope: "MIPI CSI-2 data lane 3, negative" }
+  - { name: DMO4P,   type: output, scope: "MIPI CSI-2 data lane 4, positive" }
+  - { name: DMO4N,   type: output, scope: "MIPI CSI-2 data lane 4, negative" }
+  - { name: VANA,    type: power,  scope: "analog supply domain, 2.8V" }
+  - { name: VDIG,    type: power,  scope: "digital core supply domain, 1.05V" }
+  - { name: VIF,     type: power,  scope: "interface supply domain, 1.8V" }
+
 resolutions:
   max:            [4056, 3040]
 
@@ -35,3 +58,59 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per Sony "IMX477-AACK-C" datasheet section 3 "Pin
+  # Description" (Table 1, ball-grid pads A1-M10 on a 92-pin
+  # high-precision ceramic package, outline 10.70x8.50x1.62mm). The
+  # `datasheet.primary` field above still notes Sony's own IMX477 doc
+  # as NDA-only, but a full IMX477-AACK-C pin table circulates on
+  # public distributor/vendor mirrors (e.g. docs.arducam.com) with no
+  # confidentiality marking visible on the pages transcribed here
+  # (contrast AR0234's onsemi ball-map, which IS watermarked
+  # confidential on every page and was therefore left unpopulated).
+  # Only signal-bearing pads are populated: I2C, XCLR/SLASEL/GPO/
+  # FSTROBE/XVS/INCK control, MIPI CSI-2 lanes, and a representative
+  # sample of the VANA/VDIG/VIF power/ground balls (the full ball map
+  # has dozens of same-domain VDD*/VSS* instances; not all are
+  # enumerated). The Gyro/OIS-combined-system pins (GYINT/SCK/SDI/
+  # SCSB/SDO/TEST1-3, all "NC" or "Digital GND" when OIS is unused),
+  # the debug pins (SWDIO/SWTCK, both "NC"), the analog test pins
+  # (TVMON/TVCDSIN, both "NC"), and the analog regulator-capacitor
+  # pins (VRLRD/VRL/VPI, internal bias network, no board signal) are
+  # excluded per NC/non-signal-bearing scope.
+  refdes_prefix: U
+  package:              "92-pin high-precision ceramic package (CLGA)"
+  footprint:             clga_92
+  dimension_mm:          "10.70 x 8.50 x 1.62"
+  operating_temp_deg_c:  "-20..75"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "J9",  signal: "XCLR" }
+    - { pad: "A8",  signal: "SLASEL" }
+    - { pad: "A7",  signal: "SDA" }
+    - { pad: "B7",  signal: "SCL" }
+    - { pad: "A9",  signal: "GPO" }
+    - { pad: "E1",  signal: "FSTROBE" }
+    - { pad: "A2",  signal: "XVS" }
+    - { pad: "K10", signal: "INCK" }
+    - { pad: "L3",  signal: "DMO1P" }
+    - { pad: "M3",  signal: "DMO1N" }
+    - { pad: "L7",  signal: "DMO2P" }
+    - { pad: "M7",  signal: "DMO2N" }
+    - { pad: "L2",  signal: "DMO3P" }
+    - { pad: "M2",  signal: "DMO3N" }
+    - { pad: "L8",  signal: "DMO4P" }
+    - { pad: "M8",  signal: "DMO4N" }
+    - { pad: "L5",  signal: "DCKP" }
+    - { pad: "M5",  signal: "DCKN" }
+    - { pad: "D3",  signal: "VANA" }
+    - { pad: "K5",  signal: "VANA" }
+    - { pad: "B1",  signal: "VDIG" }
+    - { pad: "J1",  signal: "VDIG" }
+    - { pad: "C1",  signal: "VIF" }
+    - { pad: "K1",  signal: "VIF" }
+    - { pad: "E3",  signal: "GND" }
+    - { pad: "B2",  signal: "GND" }
+    - { pad: "C4",  signal: "GND" }

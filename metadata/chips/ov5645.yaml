@@ -25,6 +25,15 @@ signals:
   - { name: MIPI_D0, type: output, scope: "MIPI CSI-2 D-PHY data lane 0" }
   - { name: MIPI_D1, type: output, scope: "MIPI CSI-2 D-PHY data lane 1" }
   - { name: XCLK,    type: input, scope: "master input clock (typ. 24 MHz)" }
+  - { name: VSYNC,   type: output, scope: "DVP VSYNC output pad; present on-die but unused in this MIPI-only driver scope" }
+  - { name: DOGND,   type: ground, scope: "ground for I/O circuit" }
+  - { name: DGND,    type: ground, scope: "ground for digital circuit" }
+  - { name: AGND,    type: ground, scope: "ground for analog circuit" }
+  - { name: SGND,    type: ground, scope: "ground for sensor circuit" }
+  - { name: EGND,    type: ground, scope: "ground for MIPI TX circuit" }
+  - { name: DOVDD,   type: power, scope: "power for I/O circuit" }
+  - { name: PVDD,    type: power, scope: "power for PLL circuit" }
+  - { name: EVDD,    type: power, scope: "power for MIPI TX circuit" }
 
 resolutions:
   max:            [2592, 1944]
@@ -46,3 +55,62 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per OmniVision OV5645 datasheet ("PRELIMINARY SPECIFICATION" v1.1,
+  # 07.17.2012), Table 1-1 "signal descriptions" -- 66-pin CSP3,
+  # 6200 x 4860 um.  MCN/MCP -> MIPI_CK, MDN0/MDP0 -> MIPI_D0,
+  # MDN1/MDP1 -> MIPI_D1 (differential pairs collapsed onto the SDK's
+  # existing single logical-lane signal names).  Excludes SPI_CLK/
+  # SPI_D0/SPI_D1 (unused SPI receiver, not wired on this driver's scope),
+  # FREX/STROBE/GPIO0-3 (unused optional features), VCMSINK/VCMGND/VN/VH
+  # (autofocus VCM driver + its analog references -- OV5645 has an
+  # embedded AF VCM driver this SDK does not drive), and NC balls -- all
+  # out of the power/gnd/DVP-or-MIPI/SCCB/PWDN/RESET scope for this sweep.
+  refdes_prefix: U
+  package:       "66-pin CSP3"
+  footprint:     csp3_66_6p2x4p9mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: A2,  signal: DVDD }
+    - { pad: A3,  signal: DOGND }
+    - { pad: A5,  signal: DGND }
+    - { pad: A8,  signal: DOVDD }
+    - { pad: A9,  signal: DGND }
+    - { pad: B1,  signal: DGND }
+    - { pad: B2,  signal: DVDD }
+    - { pad: B3,  signal: DOVDD }
+    - { pad: B4,  signal: AVDD }
+    - { pad: B5,  signal: DVDD }
+    - { pad: B8,  signal: DOGND }
+    - { pad: B9,  signal: DVDD }
+    - { pad: B10, signal: AVDD }
+    - { pad: C1,  signal: DGND }
+    - { pad: C2,  signal: DOVDD }
+    - { pad: C3,  signal: AGND }
+    - { pad: C8,  signal: PWDN }
+    - { pad: C9,  signal: RESETB }
+    - { pad: C10, signal: AGND }
+    - { pad: G1,  signal: DGND }
+    - { pad: G2,  signal: SDA }
+    - { pad: G3,  signal: SCL }
+    - { pad: G4,  signal: VSYNC }
+    - { pad: G5,  signal: MIPI_CK }
+    - { pad: G6,  signal: MIPI_CK }
+    - { pad: G7,  signal: DOGND }
+    - { pad: G10, signal: AVDD }
+    - { pad: H1,  signal: DGND }
+    - { pad: H2,  signal: DVDD }
+    - { pad: H3,  signal: DOVDD }
+    - { pad: H4,  signal: MIPI_D0 }
+    - { pad: H5,  signal: MIPI_D0 }
+    - { pad: H6,  signal: MIPI_D1 }
+    - { pad: H7,  signal: MIPI_D1 }
+    - { pad: H10, signal: AGND }
+    - { pad: J2,  signal: DVDD }
+    - { pad: J3,  signal: XCLK }
+    - { pad: J4,  signal: SGND }
+    - { pad: J5,  signal: EGND }
+    - { pad: J6,  signal: EVDD }
+    - { pad: J7,  signal: PVDD }

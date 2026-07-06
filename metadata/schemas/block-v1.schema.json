@@ -30,6 +30,13 @@
       "items": {
         "type": "object", "additionalProperties": false,
         "required": ["id", "physical_form", "visibility"],
+        "allOf": [
+          {
+            "comment": "A pre-routed module realization must carry its connector pinout (mirrors the chip footprint rule).",
+            "if": { "properties": { "physical_form": { "const": "module" } }, "required": ["physical_form"] },
+            "then": { "required": ["connector"] }
+          }
+        ],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
           "physical_form": { "type": "string", "enum": ["discrete", "module"] },

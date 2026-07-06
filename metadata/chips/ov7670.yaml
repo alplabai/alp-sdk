@@ -21,11 +21,24 @@ signals:
   - { name: SDA,    type: bidir, scope: "SCCB data"  }
   - { name: PWDN,   type: input, scope: "host power-down" }
   - { name: RESETB, type: input, scope: "host hardware reset" }
-  - { name: D0..D7, type: output, scope: "DVP 8-bit parallel" }
+  # D0..D7 expanded to individual pads (was a shorthand range) so each
+  # DVP bus ball can be resolved in `physical.pins` below; see Table 1
+  # "Pin Description" in the datasheet cited above.
+  - { name: D0,     type: output, scope: "DVP video component output bit[0]" }
+  - { name: D1,     type: output, scope: "DVP video component output bit[1]" }
+  - { name: D2,     type: output, scope: "DVP video component output bit[2]" }
+  - { name: D3,     type: output, scope: "DVP video component output bit[3]" }
+  - { name: D4,     type: output, scope: "DVP video component output bit[4]" }
+  - { name: D5,     type: output, scope: "DVP video component output bit[5]" }
+  - { name: D6,     type: output, scope: "DVP video component output bit[6]" }
+  - { name: D7,     type: output, scope: "DVP video component output bit[7]" }
   - { name: HREF,   type: output, scope: "DVP line-valid" }
   - { name: VSYNC,  type: output, scope: "DVP frame-valid" }
   - { name: PCLK,   type: output, scope: "DVP pixel clock" }
   - { name: XCLK,   type: input, scope: "master clock (typ. 24 MHz)" }
+  - { name: AGND,   type: ground, scope: "analog ground" }
+  - { name: DOGND,  type: ground, scope: "digital I/O ground" }
+  - { name: DOVDD,  type: power, scope: "digital I/O power supply (1.7 V ~ 3.0 V)" }
 
 resolutions:
   max:            [640, 480]
@@ -49,3 +62,38 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per OmniVision OV7670/OV7171 datasheet Rev 1.01 (Jul 8, 2005),
+  # Table 1 "Pin Description" -- 24-ball CSP2, 3785 x 4235 um.  All 24
+  # balls are signal-bearing in this datasheet (no NC balls); VREF1/VREF2
+  # (analog reference bypass nodes, balls C2/B2) and STROBE (ball E2, LED
+  # flash-strobe output) are the only balls omitted here as out of the
+  # power/gnd/DVP/SCCB/PWDN/RESET scope for this sweep.
+  refdes_prefix: U
+  package:       "24-ball CSP2"
+  footprint:     csp2_24_3p8x4p2mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: A1, signal: AVDD }
+    - { pad: A2, signal: SDA }
+    - { pad: A3, signal: SCL }
+    - { pad: A4, signal: D1 }
+    - { pad: A5, signal: D3 }
+    - { pad: B1, signal: PWDN }
+    - { pad: B3, signal: AGND }
+    - { pad: B4, signal: D0 }
+    - { pad: B5, signal: D2 }
+    - { pad: C1, signal: DVDD }
+    - { pad: D1, signal: VSYNC }
+    - { pad: D2, signal: HREF }
+    - { pad: E1, signal: PCLK }
+    - { pad: E3, signal: XCLK }
+    - { pad: E4, signal: D7 }
+    - { pad: E5, signal: D5 }
+    - { pad: F1, signal: DOVDD }
+    - { pad: F2, signal: RESETB }
+    - { pad: F3, signal: DOGND }
+    - { pad: F4, signal: D6 }
+    - { pad: F5, signal: D4 }

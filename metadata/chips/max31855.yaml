@@ -33,3 +33,32 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: "T+",  type: analog, scope: "thermocouple input, positive" }
+  - { name: "T-",  type: analog, scope: "thermocouple input, negative" }
+  - { name: SCK,   type: input,  scope: "SPI clock input" }
+  - { name: CS,    type: input,  scope: "SPI chip select, active low" }
+  - { name: SO,    type: output, scope: "SPI serial data output" }
+
+physical:
+  # pins per Maxim MAX31855 datasheet 19-5793 Rev 2 (2/12), SO-8 typical
+  # application circuit (Fig. "Typical Application Circuit") + text pinout
+  # widely reproduced by distributors (Adafruit mirror cross-checked).
+  refdes_prefix: U
+  package:       SO-8
+  footprint:     so_8
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1", signal: "GND" }
+    - { pad: "2", signal: "T-" }
+    - { pad: "3", signal: "T+" }
+    - { pad: "4", signal: "VCC" }
+    - { pad: "5", signal: "SCK" }
+    - { pad: "6", signal: "CS" }
+    - { pad: "7", signal: "SO" }
+    # pad 8 = DNC (do not connect) per datasheet; omitted (not signal-bearing).
+  passives:
+    # 0.1uF VCC-GND decouple per the datasheet's Typical Application Circuit.
+    - { role: decouple, value: 100nF, net: VCC, refdes_prefix: C }

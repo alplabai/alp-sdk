@@ -24,6 +24,8 @@ signals:
       v2n_route:  "Renesas RTC_ALARM",
       aen_route:  "Alif P15_0_FLEX (RTC_ALARM)" }
   - { name: CLKOUT, type: output,       scope: "programmable source (32 kHz default, alarm route optional)" }
+  - { name: VBACKUP, type: power,       scope: "backup supply / integrated trickle-charger input (coin cell or supercap)" }
+  - { name: EVI,     type: input,       scope: "external event input; latches an event timestamp on transition" }
 
 power:
   vdd_min_v:      1.1
@@ -44,3 +46,24 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per Micro Crystal RV-3028-C7 datasheet ("DIMENSIONS" front page),
+  # "PIN CONNECTIONS TOP VIEW" table (pins 1-8) + "ORDERING INFORMATION"
+  # (package/termination). Metal lid is internally tied to VSS (pin 5) --
+  # noted on the datasheet's block-diagram page, not a separate pad.
+  refdes_prefix: U
+  package:       SON-8
+  footprint:     microcrystal_son_8
+  dimension_mm:  "3.2 x 1.5 x 0.8"
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1", signal: CLKOUT }
+    - { pad: "2", signal: INT }
+    - { pad: "3", signal: SCL }
+    - { pad: "4", signal: SDA }
+    - { pad: "5", signal: VSS }
+    - { pad: "6", signal: VBACKUP }
+    - { pad: "7", signal: VDD }
+    - { pad: "8", signal: EVI }

@@ -16,6 +16,40 @@ sensor:
   sensitivity_db: -26
   snr_db:         61
 
+signals:
+  - { name: SCK,     type: input,  scope: "I2S bit clock" }
+  - { name: SD,       type: output, scope: "I2S serial data out; needs a 100kOhm pull-down" }
+  - { name: WS,       type: input,  scope: "I2S word-select (L/R clock)" }
+  - { name: LR_SEL,   type: input,  scope: "L/R channel-select strap" }
+  - { name: CHIPEN,   type: input,  scope: "chip-enable strap" }
+
+physical:
+  # Pins per InvenSense DS-INMP441-00 Rev 1.0, Table 6 "Pin
+  # Description" (9-terminal LGA, 4.72mm x 3.76mm x 1.00mm). All 9
+  # pads are populated -- none are datasheet-labelled NC. Per the
+  # datasheet's "Power-Supply Decoupling" note, place a 0.1uF X7R (or
+  # better) capacitor between pin 7 (VDD) and ground, as close to the
+  # part as possible; pin 6 (GND) is explicitly called out as the
+  # decoupling-capacitor ground point.
+  refdes_prefix: U
+  package:              "9-terminal LGA (CAV)"
+  footprint:             lga_9_cav
+  dimension_mm:          "4.72 x 3.76 x 1.00"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "1", signal: "SCK" }
+    - { pad: "2", signal: "SD" }
+    - { pad: "3", signal: "WS" }
+    - { pad: "4", signal: "LR_SEL" }
+    - { pad: "5", signal: "GND" }
+    - { pad: "6", signal: "GND" }
+    - { pad: "7", signal: "VDD" }
+    - { pad: "8", signal: "CHIPEN" }
+    - { pad: "9", signal: "GND" }
+  passives:
+    - { role: decouple, value: 100nF, net: VDD, refdes_prefix: C }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_INMP441
   baremetal:      ALP_SDK_CHIP_INMP441

@@ -24,6 +24,31 @@ resolutions:
   max:            [1280, 800]
   features:       [global_shutter, monochrome]
 
+signals:
+  - { name: SDA,        type: bidir, scope: "SCCB data" }
+  - { name: SCL,        type: input, scope: "SCCB input clock" }
+  - { name: SID,        type: input, scope: "SCCB ID select strap -- sets the 7-bit address (see i2c.addresses above)" }
+  - { name: XSHUTDOWN,  type: input, scope: "combined reset + power-down (active low, internal pull-down)" }
+  - { name: XCLK,       type: input, scope: "system input clock" }
+  - { name: PCLK,       type: bidir, scope: "DVP output clock" }
+  - { name: HREF,       type: bidir, scope: "DVP output horizontal reference" }
+  - { name: "D8",              type: bidir, scope: "DVP output data[8]" }
+  - { name: "D9",              type: bidir, scope: "DVP output data[9]" }
+  - { name: "D1/GPIO1/ROI1",   type: bidir, scope: "DVP output data[1] / GPIO / ROI1 select (muxed pad)" }
+  - { name: "D0/GPIO0/ROI0",   type: bidir, scope: "DVP output data[0] / GPIO / ROI0 select (muxed pad)" }
+  - { name: "MDN1/D7",         type: bidir, scope: "MIPI negative data lane 1 / DVP output data[7] (muxed pad)" }
+  - { name: "MDP0/D2",         type: bidir, scope: "MIPI positive data lane 0 / DVP output data[2] (muxed pad)" }
+  - { name: "MCP/D4",          type: bidir, scope: "MIPI positive clock lane / DVP output data[4] (muxed pad)" }
+  - { name: "MDP1/D6",         type: bidir, scope: "MIPI positive data lane 1 / DVP output data[6] (muxed pad)" }
+  - { name: "MDN0/D3",         type: bidir, scope: "MIPI negative data lane 0 / DVP output data[3] (muxed pad)" }
+  - { name: "MCN/D5",          type: bidir, scope: "MIPI negative clock lane / DVP output data[5] (muxed pad)" }
+  - { name: DOGND,      type: ground, scope: "ground for I/O" }
+  - { name: AGND,       type: ground, scope: "ground for analog circuit" }
+  - { name: EGND,       type: ground, scope: "MIPI/PLL digital ground" }
+  - { name: DOVDD,      type: power, scope: "power for I/O circuit" }
+  - { name: PVDD,       type: power, scope: "PLL analog power" }
+  - { name: EVDD,       type: power, scope: "MIPI/PLL digital power" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_OV9281
   baremetal:      ALP_SDK_CHIP_OV9281
@@ -37,3 +62,69 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per OmniVision OV9281 "PRELIMINARY SPECIFICATION" version 1.01
+  # (09.18.2015), Table 1-1 "signal descriptions" -- 64-pin CSP5
+  # (4 NC), package body 5232 x 4458 um (typ, Table 9-1).  Muxed DVP/
+  # MIPI/GPIO/ROI pads keep the datasheet's combined pad label as the
+  # signal name.  Excludes ILPWM/STROBE/ULPM (shutter/ALS/strobe
+  # indicator outputs), ATEST (analog test), VN1/VN2/VN3/VH (internal
+  # analog references), TM (test mode), the standalone GPIO2/CONTEXT pad,
+  # and NC balls -- out of the power/gnd/DVP-or-MIPI/SCCB/PWDN/RESET
+  # scope for this sweep.
+  refdes_prefix: U
+  package:       "64-pin CSP5 (4 NC)"
+  footprint:     csp5_64_5p2x4p5mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: A2, signal: DVDD }
+    - { pad: A3, signal: DOGND }
+    - { pad: A4, signal: SDA }
+    - { pad: A5, signal: XSHUTDOWN }
+    - { pad: A7, signal: DOGND }
+    - { pad: B1, signal: DVDD }
+    - { pad: B2, signal: DOGND }
+    - { pad: B3, signal: DVDD }
+    - { pad: B4, signal: "D8" }
+    - { pad: B7, signal: DOVDD }
+    - { pad: B8, signal: AVDD }
+    - { pad: C1, signal: AVDD }
+    - { pad: C2, signal: PCLK }
+    - { pad: C3, signal: "D1/GPIO1/ROI1" }
+    - { pad: C4, signal: "D9" }
+    - { pad: C5, signal: DVDD }
+    - { pad: C8, signal: AGND }
+    - { pad: D1, signal: HREF }
+    - { pad: D2, signal: AGND }
+    - { pad: D3, signal: DOVDD }
+    - { pad: D4, signal: "D0/GPIO0/ROI0" }
+    - { pad: D5, signal: PVDD }
+    - { pad: D8, signal: DVDD }
+    - { pad: E1, signal: SID }
+    - { pad: E2, signal: XCLK }
+    - { pad: E3, signal: EGND }
+    - { pad: E4, signal: SCL }
+    - { pad: E5, signal: EGND }
+    - { pad: F1, signal: DOGND }
+    - { pad: F2, signal: DVDD }
+    - { pad: F3, signal: EVDD }
+    - { pad: F4, signal: DOGND }
+    - { pad: F5, signal: "MDN1/D7" }
+    - { pad: F6, signal: DOGND }
+    - { pad: F8, signal: AGND }
+    - { pad: G1, signal: DVDD }
+    - { pad: G2, signal: DOGND }
+    - { pad: G3, signal: "MDP0/D2" }
+    - { pad: G4, signal: "MCP/D4" }
+    - { pad: G5, signal: "MDP1/D6" }
+    - { pad: G6, signal: DVDD }
+    - { pad: G7, signal: AVDD }
+    - { pad: G8, signal: AVDD }
+    - { pad: H2, signal: DOVDD }
+    - { pad: H3, signal: "MDN0/D3" }
+    - { pad: H4, signal: "MCN/D5" }
+    - { pad: H5, signal: EVDD }
+    - { pad: H6, signal: DOVDD }
+    - { pad: H7, signal: AGND }

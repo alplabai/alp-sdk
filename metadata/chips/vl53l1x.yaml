@@ -20,6 +20,48 @@ ranging:
   max_distance_m: 4.0
   zones:          1
 
+signals:
+  - { name: AVDDVCSEL, type: power,  scope: "VCSEL laser-emitter supply; tie to main AVDD supply" }
+  - { name: AVSSVCSEL, type: ground, scope: "VCSEL laser-emitter ground; tie to main ground" }
+  - { name: XSHUT,      type: input,  scope: "shutdown pin, active low; must always be driven, pull-up needed if host state unknown" }
+  - { name: GPIO1,      type: output, scope: "interrupt output, open-drain; leave unconnected if unused" }
+  - { name: SDA,        type: bidir,  scope: "I2C serial data" }
+  - { name: SCL,        type: input,  scope: "I2C serial clock" }
+
+physical:
+  # Pins per STMicroelectronics VL53L1X datasheet DocID031281 Rev 3
+  # (Nov 2018), section 1.3 "Device pinout" (Table 2: Optical LGA12,
+  # 4.9 x 2.5 x 1.56mm). Pad 8 (DNC) is datasheet-labelled "Do not
+  # connect, must be left floating" and is omitted below; all other
+  # 11 pads are populated, including the GND2/GND3/GND4 pads which the
+  # datasheet forces onto the same ground domain as GND (note: "GND2,
+  # GND3, and GND4 are standard pins that we force to the ground
+  # domain in the application schematics").
+  refdes_prefix: U
+  package:              "Optical LGA12"
+  footprint:             optical_lga12
+  dimension_mm:          "4.9 x 2.5 x 1.56"
+  operating_temp_deg_c:  "-20..85"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "1",  signal: "AVDDVCSEL" }
+    - { pad: "2",  signal: "AVSSVCSEL" }
+    - { pad: "3",  signal: "GND" }
+    - { pad: "4",  signal: "GND" }
+    - { pad: "5",  signal: "XSHUT" }
+    - { pad: "6",  signal: "GND" }
+    - { pad: "7",  signal: "GPIO1" }
+    - { pad: "9",  signal: "SDA" }
+    - { pad: "10", signal: "SCL" }
+    - { pad: "11", signal: "AVDD" }
+    - { pad: "12", signal: "GND" }
+  passives:
+    # Datasheet application schematic note: "XSHUT and GPIO1 pull up
+    # recommended values are 10 kOhms".
+    - { role: pullup, value: 10kOhm, net: XSHUT, refdes_prefix: R }
+    - { role: pullup, value: 10kOhm, net: GPIO1, refdes_prefix: R }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_VL53L1X
   baremetal:      ALP_SDK_CHIP_VL53L1X

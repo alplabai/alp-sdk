@@ -20,6 +20,59 @@ ranging:
   max_distance_m: 4.0
   zones:          64               # 8x8
 
+signals:
+  - { name: I2C_RST, type: input,  scope: "I2C interface reset, active high; toggle 0->1->0 to reset the I2C slave only (not the sensor itself)" }
+  - { name: INT,      type: bidir,  scope: "interrupt output, defaults to open-drain (tristate); 47kOhm pull-up to IOVDD required" }
+  - { name: IOVDD,    type: power,  scope: "1.8V, 2.8V, or 3.3V supply for digital core and I/O" }
+  - { name: LPn,      type: input,  scope: "comms enable: 0 = disable I2C comms in LP mode, 1 = enable; 47kOhm pull-up to IOVDD required" }
+  - { name: RSVD6,    type: bidir,  scope: "reserved general-purpose I/O, defaults to open-drain (tristate); 47kOhm pull-up to IOVDD required" }
+  - { name: SDA,      type: bidir,  scope: "I2C serial data; 2.2kOhm pull-up to IOVDD required" }
+  - { name: SCL,      type: input,  scope: "I2C serial clock; 2.2kOhm pull-up to IOVDD required" }
+
+physical:
+  # Pins per STMicroelectronics VL53L5CX datasheet DS13754 Rev 5 (Dec
+  # 2021), section 1.5 "Device pinout" (Table 3: Optical LGA16,
+  # 6.4 x 3.0 x 1.5mm). Pad C5 (RSVD5) is datasheet-labelled "Do not
+  # connect" and is omitted below. Pads A2/A6/A7/C6 (RSVD4/RSVD1/RSVD2/
+  # RSVD3) and B4 (THERMALPAD) are datasheet-instructed "Connect to
+  # ground" / "Connect to a ground plane" -- real functional pads
+  # (not floating NC), mapped to the GND net. Pad C2 (RSVD6) is a
+  # reserved GPIO-shaped pad with real open-drain behaviour, kept as
+  # its own signal rather than grounded.
+  refdes_prefix: U
+  package:              "Optical LGA16"
+  footprint:             optical_lga16
+  dimension_mm:          "6.4 x 3.0 x 1.5"
+  operating_temp_deg_c:  "-30..85"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "A1", signal: "I2C_RST" }
+    - { pad: "A2", signal: "GND" }
+    - { pad: "A3", signal: "INT" }
+    - { pad: "A4", signal: "IOVDD" }
+    - { pad: "A5", signal: "LPn" }
+    - { pad: "A6", signal: "GND" }
+    - { pad: "A7", signal: "GND" }
+    - { pad: "B1", signal: "AVDD" }
+    - { pad: "B4", signal: "GND" }
+    - { pad: "B7", signal: "AVDD" }
+    - { pad: "C1", signal: "GND" }
+    - { pad: "C2", signal: "RSVD6" }
+    - { pad: "C3", signal: "SDA" }
+    - { pad: "C4", signal: "SCL" }
+    - { pad: "C6", signal: "GND" }
+    - { pad: "C7", signal: "GND" }
+  passives:
+    # Datasheet Table 3 "VL53L5CX pin description" + Figure 5
+    # "Typical application schematic" pull resistor callouts.
+    - { role: pulldown, value: 47kOhm, net: I2C_RST, refdes_prefix: R }
+    - { role: pullup,   value: 47kOhm, net: INT,      refdes_prefix: R }
+    - { role: pullup,   value: 47kOhm, net: LPn,      refdes_prefix: R }
+    - { role: pullup,   value: 47kOhm, net: RSVD6,    refdes_prefix: R }
+    - { role: pullup,   value: "2.2kOhm", net: SDA,   refdes_prefix: R }
+    - { role: pullup,   value: "2.2kOhm", net: SCL,   refdes_prefix: R }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_VL53L5CX
   baremetal:      ALP_SDK_CHIP_VL53L5CX

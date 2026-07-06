@@ -48,6 +48,17 @@ signals:
 
 target_expected_idcode:  "0x6BA02477"   # Cortex-M33 r0p1 SW-DPv2
 
+physical:
+  # gd32_swd is a host-side bit-bang SWD *controller*, not a physical
+  # part -- there is no on-module silicon of its own (mpn_population
+  # above is explicitly "N/A").  The real silicon it targets is the
+  # GD32G553MEY7TR, whose footprint/pinout lives in gd32g553.yaml
+  # (physical.package: WLCSP-81).  This minimal block only records
+  # that gd32_swd is a debug-interface software entry, not a BOM line.
+  package:     "n/a -- debug-interface software module; no dedicated silicon (target: GD32G553MEY7TR, see gd32g553.yaml)"
+  visibility:  public
+  provenance:  web_provisional
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_GD32_SWD
   baremetal:      ALP_SDK_CHIP_GD32_SWD

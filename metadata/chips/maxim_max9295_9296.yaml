@@ -37,3 +37,18 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+# physical: INCOMPLETE -- MAX9295A / MAX9296A package + pin-level data could
+# not be sourced this sweep.  The primary ADI datasheet PDFs (max9295a.pdf,
+# max9296a.pdf) and a public-guide mirror timed out on every fetch attempt
+# from this environment; distributor/aggregator mirrors (Alldatasheet,
+# SnapEDA, Antmicro Open Hardware Portal, DigiKey) either served a
+# different part's datasheet, a bot-check page, or no pinout data at all.
+# Per the "never invent" rule, no `package`/`pins` fields are populated --
+# only the two MPNs this manifest covers are confirmed by name (MAX9295A
+# serialiser, MAX9296A deserialiser; see `mpn_population` above).  A future
+# sweep should retry with direct manufacturer-account PDF access or a
+# vendored copy of the datasheet.
+physical:
+  visibility: public
+  provenance: web_provisional

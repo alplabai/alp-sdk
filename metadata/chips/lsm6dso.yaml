@@ -22,6 +22,50 @@ sensor:
   ranges_g:        [2, 4, 8, 16]
   ranges_dps:      [125, 250, 500, 1000, 2000]
 
+signals:
+  - { name: SCL,   type: input,  scope: "I2C/I3C clock (SPI SPC when SPI is used instead)" }
+  - { name: SDA,   type: bidir,  scope: "I2C/I3C data (SPI SDI/3-wire SDO when SPI is used instead)" }
+  - { name: SA0,   type: input,  scope: "I2C LSB of device address strap (SPI 4-wire SDO when SPI is used instead)" }
+  - { name: CS,    type: input,  scope: "SPI-enable / I2C-I3C-SPI mode select; tie high for I2C-only operation" }
+  - { name: INT1,  type: output, scope: "programmable interrupt 1" }
+  - { name: INT2,  type: output, scope: "programmable interrupt 2 / data-enable" }
+  - { name: SDx,   type: input,  scope: "Mode-1 tie-off strap (unused master-I2C/aux-SPI pin); connect to VDDIO or GND" }
+  - { name: SCx,   type: input,  scope: "Mode-1 tie-off strap (unused master-I2C/aux-SPI pin); connect to VDDIO or GND" }
+
+physical:
+  # Pins per STMicroelectronics LSM6DSO datasheet DS12140 Rev 2,
+  # Table 1 "Pin description" (14-pin LGA, package outline
+  # LGA-14L 2.5 x 3.0 x 0.86mm max, Figure 25). This manifest's bus is
+  # I2C-only (Mode 1 in the datasheet's 4-mode pin-function table), so
+  # pin 1 is mapped to its I2C role (SA0) and pins 2/3 (SDx/SCx) are
+  # mapped to their Mode-1 tie-off role ("Connect to VDDIO or GND") --
+  # they are real functional pads, not NC. Pin 10 (OCS_Aux) and pin 11
+  # (SDO_Aux) are excluded: in Mode 1/2 (I2C-only, no auxiliary SPI)
+  # the datasheet marks both "Leave unconnected".
+  refdes_prefix: U
+  package:              "LGA-14L"
+  footprint:             lga_14l
+  dimension_mm:          "2.5 x 3.0 x 0.86"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "1",  signal: "SA0" }
+    - { pad: "2",  signal: "SDx" }
+    - { pad: "3",  signal: "SCx" }
+    - { pad: "4",  signal: "INT1" }
+    - { pad: "5",  signal: "VDDIO" }
+    - { pad: "6",  signal: "GND" }
+    - { pad: "7",  signal: "GND" }
+    - { pad: "8",  signal: "VDD" }
+    - { pad: "9",  signal: "INT2" }
+    - { pad: "12", signal: "CS" }
+    - { pad: "13", signal: "SCL" }
+    - { pad: "14", signal: "SDA" }
+  passives:
+    # Datasheet footnote (1) on VDDIO/VDD: "Recommended 100 nF filter capacitor."
+    - { role: decouple, value: 100nF, net: VDDIO, refdes_prefix: C }
+    - { role: decouple, value: 100nF, net: VDD,   refdes_prefix: C }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_LSM6DSO
   baremetal:      ALP_SDK_CHIP_LSM6DSO
