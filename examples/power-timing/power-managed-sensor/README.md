@@ -32,7 +32,7 @@ cores:
       heap_kib:  16
 ```
 
-The orchestrator (`scripts/alp_orchestrate.py:_slice_alp_conf`)
+The orchestrator (`scripts/alp_orchestrate/`)
 turns the `power:` block into:
 
 ```
@@ -51,7 +51,7 @@ edits a single `CONFIG_PM_*` line; the policy lives in
 ## SoM choice: AEN301
 
 AEN301 is the small AEN SKU -- lower static power than the
-AEN701 used by the `production-deployment` flagship. The
+AEN801 used by the `production-deployment` flagship. The
 M55-HE (high-efficiency) core is the right home for the
 always-on sensor task; the M55-HP (high-performance) core stays
 parked (`os: "off"`) unless burst compute is needed (e.g. a

@@ -123,6 +123,15 @@ sudo dd if=tmp/deploy/images/e1m-nx9101-a55/alp-image-edge-e1m-nx9101-a55.wic \
         of=/dev/sdX bs=4M conv=fsync
 ```
 
+One-liner alternative for an app with a `board.yaml` (manifest-driven
+-- the `yocto_wic` flash backend picks `bmaptool` when available and
+falls back to `dd`; it requires `flash_args.confirm: true` before it
+actually writes -- see [cli.md](cli.md)):
+
+```bash
+west alp-build <app> && west alp-flash <app>
+```
+
 ## 4. EEPROM manifest verify
 
 From the Linux shell after first boot:

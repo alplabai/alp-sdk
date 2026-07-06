@@ -107,8 +107,8 @@
 #include "alp/dsp.h"
 /* BOARD_I2S_AUDIO is a portable alias that resolves to the on-board
  * audio codec I2S bus on whichever EVK is being targeted:
- *   E1M EVK  (AEN)  → E1M_I2S0  (TAS2563 amps via 74LVC157 mux)
- *   E1M-X EVK (V2N) → E1M_X_I2S0 (TAS2563 smart-amp I2S)
+ *   E1M EVK  (AEN)  → ALP_E1M_I2S0  (TAS2563 amps via 74LVC157 mux)
+ *   E1M-X EVK (V2N) → ALP_E1M_X_I2S0 (TAS2563 smart-amp I2S)
  * Include via <alp/board.h>; ALP_BOARD_* is emitted by the build
  * system from the board.yaml preset. */
 #include "alp/board.h"
@@ -369,10 +369,10 @@ int main(void)
      * their respective I2S bus (the codec handles the PDM-to-I2S
      * conversion on its own pins).  BOARD_I2S_AUDIO resolves to
      * the audio codec I2S bus on whichever EVK is targeted
-     * (E1M_I2S0 on AEN, E1M_X_I2S0 on V2N).  On native_sim
+     * (ALP_E1M_I2S0 on AEN, ALP_E1M_X_I2S0 on V2N).  On native_sim
      * neither open() succeeds; the loop tolerates that. */
 	alp_audio_config_t cfg = {
-		.peripheral_id    = BOARD_I2S_AUDIO, /* E1M EVK: E1M_I2S0; E1M-X EVK: E1M_X_I2S0 */
+		.peripheral_id    = BOARD_I2S_AUDIO, /* E1M EVK: ALP_E1M_I2S0; E1M-X EVK: ALP_E1M_X_I2S0 */
 		.sample_rate_hz   = SR_HZ,
 		.channels         = CHANNELS,
 		.format           = ALP_AUDIO_FMT_S16_LE,

@@ -6,7 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 # aen-dualcore-ipc — bidirectional HE↔HP shared-memory request/response
 
 Real data IPC between the two M55 cores, built on the proven dual-core boot
-(`se_service_boot_cpu`) + MHU-1 doorbell. HE (requester) writes a `{seq, len,
+(the portable `alp_mproc_boot_core`, SE-boot-service-backed on AEN) + MHU-1
+doorbell. HE (requester) writes a `{seq, len,
 payload}` message into a shared global-SRAM0 mailbox and rings HP; HP (responder)
 replies with `payload+1` into a reply mailbox and rings HE; HE verifies the reply
 and counts the round-trip. Board-aware single app (HP build = master + responder,

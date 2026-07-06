@@ -20,10 +20,13 @@ on:
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
+      - 'scripts/alp_orchestrate/**'
+      - 'scripts/check_emit_snapshots.py'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
+      - 'tests/fixtures/emit-snapshots/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
@@ -59,10 +62,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version-file: .python-version
 
       - name: Install Python deps
         # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
@@ -76,6 +79,12 @@ jobs:
       # accidentally claim the same silicon pad on a SoM pinout.
       - name: Check pin conflicts in every SoM peripheral map
         run: python3 scripts/check_pin_conflicts.py
+
+      # Catches inference-backend / model-format naming drift: every
+      # backend a preset selects must be a canonical string the device
+      # dispatcher decodes (else it silently falls back to AUTO/TFLITE).
+      - name: Check inference backend <-> dispatcher canonicalisation
+        run: python3 scripts/check_inference_backend_parity.py
 
       # Smoke-test the board.yaml loader on the canonical example so
       # any schema / loader regression is caught at PR time rather
@@ -195,6 +204,19 @@ jobs:
               echo "--- v2-check: $f ---"
               python3 scripts/validate_board_yaml.py --input "$f"
           done < <(find examples tests -name board.yaml 2>/dev/null)
+
+      # End-to-end: every E1M board route resolves to a function the SoM
+      # capability table actually backs (or is a documented open pad).
+      # Catches a carrier wiring a pad the module doesn't expose.
+      - name: Check E1M board routes against the SoM capability table
+        run: python3 scripts/check_e1m_route_capability.py
+
+      # Behaviour-pin for the #285 orchestrator modularization: the
+      # `--emit` contract surfaces (system-manifest / build-plan) stay
+      # byte-identical across the three vendor families.  A refactor that
+      # moves code but alters a byte fails here.
+      - name: Check --emit snapshots are byte-identical
+        run: python3 scripts/check_emit_snapshots.py
 
       # Cross-validate: every `id:` in every metadata/socs/.../*.json
       # cores[] block must have a matching key in every consuming

@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/carrier-netlist-v1.schema.json",
+  "title": "alp-sdk carrier netlist handoff (v1)",
+  "description": "Stable JSON handoff for Alp Studio: carrier-facing nets plus carrier BOM rows derived from board.yaml/presets and chip/block manifests. This is not a PCB layout, Gerber, DRC-clean board, or KiCad file; Studio or another EDA frontend consumes it to create those downstream artifacts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "generated_by", "board", "som", "hw_rev", "silicon_variant", "nets", "bom", "caveats"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "alp.carrier_netlist" },
+    "generated_by": { "type": "string" },
+    "board": { "type": ["string", "null"] },
+    "som": { "type": "string" },
+    "hw_rev": { "type": ["string", "null"] },
+    "silicon_variant": { "type": ["string", "null"] },
+    "nets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/net" }
+    },
+    "bom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["carrier"],
+      "properties": {
+        "carrier": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bom_row" }
+        }
+      }
+    },
+    "caveats": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["e1m", "board-macro", "som-dispatch"] },
+        "ref": { "type": "string" },
+        "pin": { "type": ["string", "integer"] }
+      }
+    },
+    "net": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["net_id", "e1m", "board_category", "board_macro", "board_role", "dispatch", "endpoints"],
+      "properties": {
+        "net_id": { "type": "string" },
+        "e1m": { "type": "string" },
+        "board_category": { "type": ["string", "null"] },
+        "board_macro": { "type": ["string", "null"] },
+        "board_role": { "type": ["string", "null"] },
+        "board_doc": { "type": "string" },
+        "active_low": { "type": "boolean" },
+        "dispatch": { "type": "string" },
+        "dispatch_pin": { "type": ["string", "integer"] },
+        "som_doc": { "type": "string" },
+        "endpoints": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/endpoint" }
+        },
+        "caveats": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "passive": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": { "type": "string" },
+        "value": { "type": "string" },
+        "net": { "type": "string" },
+        "refdes_prefix": { "type": "string" }
+      }
+    },
+    "physical": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "refdes_prefix": { "type": "string" },
+        "package": { "type": "string" },
+        "footprint": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["public", "internal"] },
+        "provenance": { "type": "string" }
+      }
+    },
+    "realization": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "physical_form": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["public", "internal"] }
+      }
+    },
+    "bom_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item_id", "kind", "scope", "source", "quantity"],
+      "properties": {
+        "item_id": { "type": "string" },
+        "kind": { "type": "string", "enum": ["chip", "block", "unknown"] },
+        "scope": { "type": "string", "const": "carrier" },
+        "source": { "type": ["string", "null"] },
+        "display_name": { "type": "string" },
+        "vendor": { "type": "string" },
+        "mpn_population": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "bus": { "type": "string" },
+        "quantity": { "type": ["integer", "null"], "minimum": 1 },
+        "physical": { "$ref": "#/$defs/physical" },
+        "realization": { "$ref": "#/$defs/realization" },
+        "parts": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "passives": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/passive" }
+        },
+        "caveats": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

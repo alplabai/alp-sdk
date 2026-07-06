@@ -8,7 +8,7 @@ You'll declare both halves in a single `board.yaml`, let
 flashable bundle that covers Linux + Zephyr + the on-module GD32
 helper MCU.
 
-The same pattern generalises to **E1M-AEN701** (A32 + M55-HP + M55-HE),
+The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE),
 **E1M-NX9101** (A55 + M33), and any future heterogeneous SoM.
 
 > If you're targeting a single-OS SoM (e.g. AEN E3/E4 with M55 cores
@@ -75,12 +75,11 @@ The `cores.<id>.app:` path is the binding; `m33_sm/` matches its core
 ID (canonical), while `linux/` is an explicit alias set by
 `app: ./linux`.  Omitting `app:` entirely is also valid — the core
 then builds the SoM's stock default app (`alp-image-edge` on a Linux
-core, `alp-stock-shim` on a Zephyr core).  The Linux default produces
-working firmware; the Zephyr `alp-stock-shim` is currently a
-placeholder whose image body is not yet in the SDK tree, so the
-orchestrator resolves it to no build command and flags the slice
-`stock-shim-unimplemented` (issue #49) — override `cores.<id>.app`
-with a real app to build that peer core.
+core, `alp-stock-shim` on a Zephyr core).  Both defaults are
+buildable: `alp-image-edge` for Linux-class cores, and the minimal
+SDK-owned `firmware/alp-stock-shim/` idle image for Zephyr peer
+cores.  Override `cores.<id>.app` with a real app when that peer core
+should run project firmware instead of the stock idle image.
 
 Single-OS examples don't change shape: they keep their flat `src/`
 layout and declare a single core in `board.yaml`.  The sub-directory
@@ -327,7 +326,7 @@ build itself — the `alp` CLI / IDE extension does — consumes the plan
 instead of re-deriving it:
 
 ```bash
-python3 scripts/alp_orchestrate.py --input board.yaml --emit build-plan
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit build-plan
 ```
 
 The JSON carries one entry per non-`off` core (build dir, the exact

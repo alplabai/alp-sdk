@@ -67,12 +67,14 @@
  * bench-validated on real E8 silicon (aen-se-crypto, Flow C RAM-run): the SE
  * backend binds at priority 110 and the SE CryptoCell computed SHA-256("abc")
  * to the NIST known-answer and the AES-128-GCM round-trip, both MATCH.  With
- * it OFF (or for an alg the SE declines at open -- SHA-384/512) the op returns
- * ALP_ERR_NOSUPPORT at hash_open and the dispatcher falls through to the PSA
- * backend.  An over-ceiling SHA-256 input cannot fall through that way because
- * the dispatcher binds one backend at hash_open and never re-selects; instead
- * the SE hash handle migrates itself to the PSA backend in place once the
- * buffered byte count exceeds the single-shot ceiling (see se_hash_update).
+ * it OFF every hash/AEAD open declines with ALP_ERR_NOSUPPORT (as do
+ * SHA-384/512, which the E8 SE does not implement) and the dispatcher
+ * re-selects the next backend at open time (alp_backend_select_next, issue
+ * #239), landing on PSA before any data is consumed.  An over-ceiling
+ * SHA-256 input cannot fall through that way -- bytes have already been fed
+ * to the bound backend -- so the SE hash handle instead migrates itself to
+ * the PSA backend in place once the buffered byte count exceeds the
+ * single-shot ceiling (see se_hash_update).
  *
  * @par Address translation: every send_*_addr the SE dereferences is a
  *      GLOBAL address (the SE's view of M55-local memory), produced by
@@ -363,10 +365,20 @@ se_hash_open(alp_hash_alg_t alg, alp_hash_backend_state_t *state, alp_capabiliti
 {
 	(void)caps_out;
 
+	/* Issue #239: with the send seam compiled out this backend cannot
+	 * finish ANY digest, so declare the limit here at open time -- the
+	 * dispatcher re-selects on NOSUPPORT (alp_backend_select_next) and
+	 * binds the PSA backend before a single byte is consumed.  Failing
+	 * later, at finish, would be a hard app error: no re-selection can
+	 * replay data fed to a dead stream. */
+	if (!IS_ENABLED(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM)) {
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	/* Only SHA-256 maps to the E8 CryptoCell mbedtls SHA service
 	 * (MBEDTLS_HASH_SHA256).  Let SHA-384/512 fall through to PSA by
-	 * declining here -- the dispatcher relays NOSUPPORT and the caller
-	 * retries against the next backend. */
+	 * declining here -- the dispatcher re-selects on NOSUPPORT at open
+	 * (issue #239) and retries against the next backend. */
 	if (alg != ALP_HASH_SHA256) {
 		return ALP_ERR_NOSUPPORT;
 	}
@@ -463,8 +475,9 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 	}
 	return s;
 #else
-	/* Send seam not wired: decline so the dispatcher falls through to
-	 * the PSA backend, which finishes the digest on the M55. */
+	/* Unreachable by construction: with the send seam off, se_hash_open
+	 * declines at open (issue #239) and no SE hash handle exists.  Keep
+	 * the defensive decline so the vtable entry still compiles. */
 	be->in_use     = false;
 	state->be_data = NULL;
 	if (digest_len != NULL) {
@@ -531,6 +544,14 @@ static alp_status_t se_aead_open(alp_aead_alg_t            alg,
 {
 	(void)caps_out;
 
+	/* Issue #239 (same shape as se_hash_open): without the send seam no
+	 * encrypt/decrypt can ever complete, so decline at open and let the
+	 * dispatcher re-select the PSA backend instead of handing out a
+	 * handle whose every I/O op would hard-fail. */
+	if (!IS_ENABLED(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM)) {
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	uint32_t key_bits;
 	if (se_aead_keybits(alg, key_len, &key_bits) != ALP_OK) {
 		return ALP_ERR_INVAL;
@@ -570,28 +591,64 @@ static alp_status_t se_aead_encrypt(alp_aead_backend_state_t *state,
 	uint32_t key_bits;
 	(void)se_aead_keybits(state->alg, be->key_len, &key_bits);
 
+	/* Issue #246: the SE forwards send_iv_length / send_tag_length to its
+	 * mbedtls core unchecked, so a short tag would silently downgrade the
+	 * authentication strength.  Enforce the public contract before the
+	 * packet is built: IV is 12 B for both AES-GCM and ChaCha20-Poly1305
+	 * (<alp/security.h> @param iv), and the tag is exactly 16 B -- the
+	 * only length the PSA sibling backend round-trips (zephyr_drv.c
+	 * z_aead_encrypt rejects every other produced/tag_len combination),
+	 * so behavior does not diverge by backend. */
+	if (iv_len != 12u || tag_len != 16u) {
+		return ALP_ERR_INVAL;
+	}
+	/* Issue #245: aad == NULL with aad_len == 0 is a legitimate
+	 * "no associated data" call (<alp/security.h> @param aad), but
+	 * local_to_global(NULL) would hand the SE a translated bogus global
+	 * address.  Follow the packet convention for absent buffers -- the
+	 * memset(&pkt, 0, ...) leaves unused addr fields 0 -- and reject the
+	 * contradictory NULL-with-length combination outright. */
+	if (aad == NULL && aad_len != 0u) {
+		return ALP_ERR_INVAL;
+	}
+	const uint32_t aad_gaddr = (aad_len != 0u) ? local_to_global(aad) : 0u;
+
 	if (state->alg == ALP_AEAD_CHACHA20_POLY1305) {
+		/* Issue #237: the SE chachapoly service takes its 256-bit key
+		 * ONLY via send_context_addr -- a 32-byte context buffer seeded
+		 * with the key (alif-dfp services_test_crypto.c:1064-1095 does
+		 * memcpy(context, key, 32) and passes the context address; the
+		 * struct has no send_key_addr field, see
+		 * mbedtls_chachapoly_crypt_svc_t in services_lib_protocol.h).
+		 * Stage a disposable copy so an SE write-back to the context can
+		 * never corrupt the stored key. */
+		uint8_t se_ctx[32];
+		memcpy(se_ctx, be->key, sizeof(se_ctx));
+
 		/* mbedtls_chachapoly_crypt_svc_t (services_lib_protocol.h):
 		 * send_crypt_type = MBEDTLS_CHACHAPOLY_ENCRYPT_AND_TAG (0). */
 		mbedtls_chachapoly_crypt_svc_t pkt;
 		memset(&pkt, 0, sizeof(pkt));
 		pkt.header.hdr_service_id = SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT; /* 408 */
-		pkt.send_crypt_type       = MBEDTLS_CHACHAPOLY_ENCRYPT_AND_TAG;          /* 0 */
+		pkt.send_context_addr     = local_to_global(se_ctx);
+		pkt.send_crypt_type       = MBEDTLS_CHACHAPOLY_ENCRYPT_AND_TAG; /* 0 */
 		pkt.send_length           = (uint32_t)plain_len;
 		pkt.send_nonce_addr       = local_to_global(iv);
-		pkt.send_aad_addr         = local_to_global(aad);
+		pkt.send_aad_addr         = aad_gaddr;
 		pkt.send_aad_len          = (uint32_t)aad_len;
 		pkt.send_tag_addr         = local_to_global(tag_out);
 		pkt.send_input_addr       = local_to_global(plain);
 		pkt.send_output_addr      = local_to_global(cipher_out);
-		/* send_context_addr is the SE-side chachapoly context; the
-		 * single-shot path leaves it 0 (set up SE-side). */
-		(void)iv_len;
-		(void)tag_len;
-		return (alp_se_crypto_send_request(
-		            &pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT) == 0)
-		           ? se_rc_to_alp((int)pkt.resp_error_code)
-		           : ALP_ERR_IO;
+
+		const int rc = alp_se_crypto_send_request(
+		    &pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT);
+
+		/* Wipe the staged key copy off the stack.  The barrier keeps the
+		 * compiler from eliding the memset on the dying frame. */
+		memset(se_ctx, 0, sizeof(se_ctx));
+		__asm__ volatile("" ::: "memory");
+
+		return (rc == 0) ? se_rc_to_alp((int)pkt.resp_error_code) : ALP_ERR_IO;
 	}
 
 	/* AES-GCM via the single-shot CCM/GCM service.  mbedtls_ccm_gcm_svc_t
@@ -608,7 +665,7 @@ static alp_status_t se_aead_encrypt(alp_aead_backend_state_t *state,
 	pkt.send_length           = (uint32_t)plain_len;
 	pkt.send_iv_addr          = local_to_global(iv);
 	pkt.send_iv_length        = (uint32_t)iv_len;
-	pkt.send_add_addr         = local_to_global(aad);
+	pkt.send_add_addr         = aad_gaddr; /* 0 when no AAD (issue #245) */
 	pkt.send_add_length       = (uint32_t)aad_len;
 	pkt.send_input_addr       = local_to_global(plain);
 	pkt.send_output_addr      = local_to_global(cipher_out);
@@ -618,6 +675,8 @@ static alp_status_t se_aead_encrypt(alp_aead_backend_state_t *state,
 	           ? se_rc_to_alp((int)pkt.resp_error_code)
 	           : ALP_ERR_IO;
 #else
+	/* Unreachable by construction: with the send seam off, se_aead_open
+	 * declines at open (issue #239) and no SE AEAD handle exists. */
 	(void)iv;
 	(void)iv_len;
 	(void)aad;
@@ -651,25 +710,47 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 	uint32_t key_bits;
 	(void)se_aead_keybits(state->alg, be->key_len, &key_bits);
 
+	/* Issues #245/#246: same parameter validation as se_aead_encrypt --
+	 * 12-B IV + 16-B tag per the <alp/security.h> contract and PSA-backend
+	 * parity; NULL aad only with aad_len == 0, passed to the SE as
+	 * address 0 per the all-zeros packet convention for absent buffers. */
+	if (iv_len != 12u || tag_len != 16u) {
+		return ALP_ERR_INVAL;
+	}
+	if (aad == NULL && aad_len != 0u) {
+		return ALP_ERR_INVAL;
+	}
+	const uint32_t aad_gaddr = (aad_len != 0u) ? local_to_global(aad) : 0u;
+
 	if (state->alg == ALP_AEAD_CHACHA20_POLY1305) {
+		/* Issue #237: stage the 256-bit key into a disposable 32-byte SE
+		 * context -- the chachapoly service's only key channel (see the
+		 * encrypt path above for the alif-dfp reference). */
+		uint8_t se_ctx[32];
+		memcpy(se_ctx, be->key, sizeof(se_ctx));
+
 		/* MBEDTLS_CHACHAPOLY_AUTH_DECRYPT (1, services_lib_api.h). */
 		mbedtls_chachapoly_crypt_svc_t pkt;
 		memset(&pkt, 0, sizeof(pkt));
 		pkt.header.hdr_service_id = SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT; /* 408 */
-		pkt.send_crypt_type       = MBEDTLS_CHACHAPOLY_AUTH_DECRYPT;             /* 1 */
+		pkt.send_context_addr     = local_to_global(se_ctx);
+		pkt.send_crypt_type       = MBEDTLS_CHACHAPOLY_AUTH_DECRYPT; /* 1 */
 		pkt.send_length           = (uint32_t)cipher_len;
 		pkt.send_nonce_addr       = local_to_global(iv);
-		pkt.send_aad_addr         = local_to_global(aad);
+		pkt.send_aad_addr         = aad_gaddr;
 		pkt.send_aad_len          = (uint32_t)aad_len;
 		pkt.send_tag_addr         = local_to_global(tag);
 		pkt.send_input_addr       = local_to_global(cipher);
 		pkt.send_output_addr      = local_to_global(plain_out);
-		(void)iv_len;
-		(void)tag_len;
-		return (alp_se_crypto_send_request(
-		            &pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT) == 0)
-		           ? se_rc_to_alp((int)pkt.resp_error_code)
-		           : ALP_ERR_IO;
+
+		const int rc = alp_se_crypto_send_request(
+		    &pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CHACHAPOLY_CRYPT);
+
+		/* Wipe the staged key copy (see encrypt path). */
+		memset(se_ctx, 0, sizeof(se_ctx));
+		__asm__ volatile("" ::: "memory");
+
+		return (rc == 0) ? se_rc_to_alp((int)pkt.resp_error_code) : ALP_ERR_IO;
 	}
 
 	/* AES-GCM auth-decrypt: MBEDTLS_GCM_AUTH_DECRYPT (6, services_lib_api.h).
@@ -684,7 +765,7 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 	pkt.send_length           = (uint32_t)cipher_len;
 	pkt.send_iv_addr          = local_to_global(iv);
 	pkt.send_iv_length        = (uint32_t)iv_len;
-	pkt.send_add_addr         = local_to_global(aad);
+	pkt.send_add_addr         = aad_gaddr; /* 0 when no AAD (issue #245) */
 	pkt.send_add_length       = (uint32_t)aad_len;
 	pkt.send_input_addr       = local_to_global(cipher);
 	pkt.send_output_addr      = local_to_global(plain_out);
@@ -694,6 +775,7 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 	           ? se_rc_to_alp((int)pkt.resp_error_code)
 	           : ALP_ERR_IO;
 #else
+	/* Unreachable by construction (see se_aead_encrypt / issue #239). */
 	(void)iv;
 	(void)iv_len;
 	(void)aad;

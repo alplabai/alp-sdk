@@ -107,13 +107,23 @@ module.
 | Alif Ensemble DevKit | UART2 | P1_0 / P1_1 |
 | E1M carrier (E1M-EVK) | UART5 | P3_4 / P3_5 |
 
-On a bench whose only USB serial is the SE-UART, use a **RAM console** read over
-SWD (`prj.conf`: `CONFIG_RAM_CONSOLE=y`, `CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048`,
-`CONFIG_UART_CONSOLE=n`, `CONFIG_CONSOLE=y`). `printk()` accumulates in
-`ram_console_buf`; resolve its address (`nm zephyr.elf | grep ram_console_buf`)
-and `mem8 <addr>, 0x800` in J-Link, then ASCII-decode. Have each test print one
-`RESULT PASS: ...` / `RESULT FAIL: ...` line. SEGGER **RTT** is the live-terminal
-alternative over the same SWD link.
+The `examples/aen/*` apps now **default to the Alp UART console** on this UART
+(the board `_defconfig` selects it, and each app's `prj.conf` sets
+`CONFIG_SERIAL=y` / `CONFIG_UART_CONSOLE=y` / `CONFIG_UART_INTERRUPT_DRIVEN=y`
+explicitly): attach a 115200 8N1 terminal to the carrier console UART and
+`printk()`/`RESULT` lines appear directly. A few apps deliberately keep the RAM
+console (the `dualcore-*` pair, `hp-core-smoke`, `mcuboot-smoke`, `power-*`, and
+`uart-ns16550-loopback` — each documents why in its `prj.conf`).
+
+On a bench whose only USB serial is the SE-UART (no terminal on the app console),
+fall back to a **RAM console** read over SWD — each converted `prj.conf` ships
+this as a commented block: uncomment `CONFIG_RAM_CONSOLE=y`,
+`CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048`, `CONFIG_UART_CONSOLE=n` (and comment the
+four UART lines). `printk()` then accumulates in `ram_console_buf`; resolve its
+address (`nm zephyr.elf | grep ram_console_buf`) and `mem8 <addr>, 0x800` in
+J-Link, then ASCII-decode. Have each test print one `RESULT PASS: ...` /
+`RESULT FAIL: ...` line. SEGGER **RTT** is the live-terminal alternative over the
+same SWD link.
 
 ### Flow C — J-Link RAM-run (no MRAM write)
 

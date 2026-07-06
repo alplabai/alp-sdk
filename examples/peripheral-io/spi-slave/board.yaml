@@ -1,11 +1,12 @@
 # board.yaml -- per-app project configuration for the
 # spi-slave example.
 #
-# Demonstrates the *shape* of SPI slave-mode application code.
-# As of v0.6 the Alp SDK does NOT expose SPI slave mode through
-# <alp/peripheral.h>; this example documents the gap and shows
-# what the slave-side main.c would look like when the API lands.
-# See the prominent TODO block in src/main.c.
+# SPI target (slave) mode via the portable alp_spi_target_*
+# surface in <alp/peripheral.h> (v0.9): transfer-based
+# request/response protocol clocked by an external controller.
+# Needs controller-driver slave support at runtime; the example
+# degrades cleanly (diagnostic + exit) where none exists -- e.g.
+# every native_sim build.
 #
 # Customer workflow: copy this directory, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
@@ -13,7 +14,7 @@
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via OVERLAY_CONFIG.
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 supported_boards:

@@ -102,6 +102,8 @@ manifest:
     - name: bearssl-mirror     # BearSSL community git mirror (upstream is
       url-base: https://github.com/bearsslmirror
                               # tarball-only; mirror tracks main branch).
+    - name: micro-ROS
+      url-base: https://github.com/micro-ROS
 
   # Groups disabled by default.  Entries pinned below for audit
   # in source control, but `west update` on a v0.3 workspace does
@@ -223,6 +225,17 @@ manifest:
       path: modules/lib/nanopb
       groups:
         - extras-v04
+
+    # micro-ROS Zephyr module for the ADR 0018 Zephyr+ROS 2 flagship.
+    # Pinned to the Humble branch revision verified on 2026-07-05; the
+    # module's modules/libmicroros/Kconfig exposes the real master enable
+    # symbol CONFIG_MICROROS.  Kept default-enabled so a board.yaml
+    # `libraries: [micro-ros]` selection can build in the standard
+    # alp-sdk workspace without an out-of-band EXTRA_ZEPHYR_MODULES path.
+    - name: micro_ros_zephyr_module
+      remote: micro-ROS
+      revision: cfbddc5e4334317a1036e883ce8f6af12b1da66a
+      path: modules/lib/micro_ros_zephyr_module
 
     # ---------------------------------------------------------------
     # extras-tier1 -- §D.lib batch.  14 libraries that aren't in

@@ -56,3 +56,17 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Package/temp per ti.com/product/CC3501E public product page (2026-07);
+  # the CC3501E is a bare QFN die (not an antenna-integrated module), but is
+  # treated with the lighter module-style physical block here because its
+  # RF-side pinout (antenna match, PA, LNA) is NDA-gated -- only the
+  # host-control side (SPI1 + WIFI_EN/NRST GPIOs, declared under signals:
+  # above) is in the alp-sdk driver's scope.
+  package:              "QFN (RSH), 56-pin"
+  dimension_mm:         "7 x 7"
+  antenna:              "none in-package; RF pins route to board-level matching network + antenna (E1M-AEN board design, NDA-gated)"
+  operating_temp_deg_c: "-40..105"
+  visibility:            public
+  provenance:            web_provisional

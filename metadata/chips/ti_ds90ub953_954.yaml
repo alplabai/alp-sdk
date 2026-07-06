@@ -9,7 +9,7 @@ mpn_population:
   - "DS90UB954-Q1"
 
 datasheet:
-  primary:        "TI SNLS554 (DS90UB953-Q1), SNLS555 (DS90UB954-Q1)"
+  primary:        "TI SNLS552E (DS90UB953-Q1, Sep 2017 - rev Apr 2024), SNLS570C (DS90UB954-Q1, Aug 2017 - rev Jan 2023)"
 
 bus:              i2c
 i2c:
@@ -24,6 +24,96 @@ interconnect:
   max_cable_m:    15
   payload:        mipi_csi2 + back_channel_i2c + back_channel_gpio
 
+# Signal names below are the DS90UB953-Q1 (serialiser) pin names verbatim
+# from TI SNLS552E Table 4-1 "Pin Functions".  This manifest covers a PAIR
+# of physically distinct ICs (see `physical:` note below) -- these signals
+# are the serialiser side only.  The deserialiser (DS90UB954-Q1) exposes an
+# analogous but non-identical pin set (RIN+/-, CSI output lanes, additional
+# GPIO4-6/INTB, BISTEN, LOCK, PASS, VDD_SEL, ...) that is NOT enumerated
+# here -- see SNLS570C Table 5-1 if that side needs its own signal list.
+signals:
+  - { name: PDB,         type: input,      scope: "power-down (active-high enable); NOT 3.3V tolerant; internal 1M-ohm pulldown" }
+  - { name: MODE,        type: input,      scope: "operating-mode select strap, sampled at PDB low-to-high transition" }
+  - { name: RES0,        type: input,      scope: "reserved strap -- datasheet requires tying to GND" }
+  - { name: CLKIN,       type: input,      scope: "reference clock input (non-sync external-clock mode only); leave open otherwise" }
+  - { name: "CLK_OUT/IDX", type: bidir,    scope: "IDX strap (sampled at PDB low-to-high; sets I2C pullup rail + device address), reconfigured post-strap as CLK_OUT output" }
+  - { name: I2C_SCL,     type: open_drain, scope: "I2C clock (config + FPD-Link III back-channel); pulled up to 1.8V or 3.3V per IDX" }
+  - { name: I2C_SDA,     type: open_drain, scope: "I2C data (config + FPD-Link III back-channel); pulled up to 1.8V or 3.3V per IDX" }
+  - { name: GPIO_0,      type: bidir,      scope: "general-purpose I/O; default input, 300k-ohm pulldown" }
+  - { name: GPIO_1,      type: bidir,      scope: "general-purpose I/O; default input, 300k-ohm pulldown" }
+  - { name: GPIO_2,      type: bidir,      scope: "general-purpose I/O; default input, 300k-ohm pulldown" }
+  - { name: GPIO_3,      type: bidir,      scope: "general-purpose I/O; default input, 300k-ohm pulldown" }
+  - { name: CSI_D0P,     type: input,      scope: "MIPI CSI-2 D-PHY data lane 0, positive (from image sensor)" }
+  - { name: CSI_D0N,     type: input,      scope: "MIPI CSI-2 D-PHY data lane 0, negative (from image sensor)" }
+  - { name: CSI_D1P,     type: input,      scope: "MIPI CSI-2 D-PHY data lane 1, positive (from image sensor)" }
+  - { name: CSI_D1N,     type: input,      scope: "MIPI CSI-2 D-PHY data lane 1, negative (from image sensor)" }
+  - { name: CSI_D2P,     type: input,      scope: "MIPI CSI-2 D-PHY data lane 2, positive (from image sensor)" }
+  - { name: CSI_D2N,     type: input,      scope: "MIPI CSI-2 D-PHY data lane 2, negative (from image sensor)" }
+  - { name: CSI_D3P,     type: input,      scope: "MIPI CSI-2 D-PHY data lane 3, positive (from image sensor)" }
+  - { name: CSI_D3N,     type: input,      scope: "MIPI CSI-2 D-PHY data lane 3, negative (from image sensor)" }
+  - { name: CSI_CLKP,    type: input,      scope: "MIPI CSI-2 D-PHY clock lane, positive (from image sensor)" }
+  - { name: CSI_CLKN,    type: input,      scope: "MIPI CSI-2 D-PHY clock lane, negative (from image sensor)" }
+  - { name: DOUT+,       type: bidir,      scope: "FPD-Link III differential output (forward video) + back-channel input; AC-coupled" }
+  - { name: DOUT-,       type: bidir,      scope: "FPD-Link III differential output (forward video) + back-channel input; AC-coupled" }
+  - { name: VDDD,        type: power,      scope: "1.8V digital core supply" }
+  - { name: VDDDRV,      type: power,      scope: "1.8V analog driver supply" }
+  - { name: VDDPLL,      type: power,      scope: "1.8V analog PLL supply" }
+  - { name: VDDD_CAP,    type: analog,     scope: "internal digital-regulator decoupling-capacitor node; do not connect to an external supply" }
+  - { name: VDDDRV_CAP,  type: analog,     scope: "internal driver-regulator decoupling-capacitor node; do not connect to an external supply" }
+  - { name: VDDPLL_CAP,  type: analog,     scope: "internal PLL-regulator decoupling-capacitor node; do not connect to an external supply" }
+  - { name: LPF1,        type: analog,     scope: "PLL loop-filter node 1" }
+  - { name: LPF2,        type: analog,     scope: "PLL loop-filter node 2" }
+
+# Physical block below is the DS90UB953-Q1 (serialiser) pinout ONLY, per
+# TI SNLS552E Table 4-1 / Figure 4-1 (32-pin VQFN, RHB package, 5.00mm x
+# 5.00mm nominal body).  This manifest's mpn_population also covers the
+# DS90UB954-Q1 deserialiser, which is a PHYSICALLY DISTINCT die/package
+# (48-pin VQFN, RGZ package, 7.00mm x 7.00mm nominal body per SNLS570C) --
+# its pin table is intentionally NOT transcribed here; add a second
+# `physical`-shaped block (or split this manifest) if the deserialiser
+# side needs its own footprint/pin data.  Pin 22 (RES1, "do not connect,
+# leave floating" per datasheet) is treated as NC and omitted below.
+physical:
+  refdes_prefix: U
+  package:       VQFN-32
+  footprint:     vqfn_32
+  dimension_mm:  "5.00 x 5.00"
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "CSI_D1P" }
+    - { pad: "2",  signal: "CSI_D1N" }
+    - { pad: "3",  signal: "CSI_D0P" }
+    - { pad: "4",  signal: "CSI_D0N" }
+    - { pad: "5",  signal: "CSI_CLKP" }
+    - { pad: "6",  signal: "CSI_CLKN" }
+    - { pad: "7",  signal: "RES0" }
+    - { pad: "8",  signal: "PDB" }
+    - { pad: "9",  signal: "LPF1" }
+    - { pad: "10", signal: "VDDPLL_CAP" }
+    - { pad: "11", signal: "VDDPLL" }
+    - { pad: "12", signal: "LPF2" }
+    - { pad: "13", signal: "DOUT-" }
+    - { pad: "14", signal: "DOUT+" }
+    - { pad: "15", signal: "VDDDRV_CAP" }
+    - { pad: "16", signal: "VDDDRV" }
+    - { pad: "17", signal: "GPIO_0" }
+    - { pad: "18", signal: "GPIO_1" }
+    - { pad: "19", signal: "CLK_OUT/IDX" }
+    - { pad: "20", signal: "CLKIN" }
+    - { pad: "21", signal: "MODE" }
+    - { pad: "23", signal: "I2C_SDA" }
+    - { pad: "24", signal: "I2C_SCL" }
+    - { pad: "25", signal: "VDDD" }
+    - { pad: "26", signal: "VDDD_CAP" }
+    - { pad: "27", signal: "GPIO_2" }
+    - { pad: "28", signal: "GPIO_3" }
+    - { pad: "29", signal: "CSI_D3P" }
+    - { pad: "30", signal: "CSI_D3N" }
+    - { pad: "31", signal: "CSI_D2P" }
+    - { pad: "32", signal: "CSI_D2N" }
+    - { pad: "DAP", signal: "GND" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_TI_DS90UB953_954
   baremetal:      ALP_SDK_CHIP_TI_DS90UB953_954
@@ -32,6 +122,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

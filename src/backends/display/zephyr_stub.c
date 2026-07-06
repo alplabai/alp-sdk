@@ -10,11 +10,15 @@
  * see the same "tracked stub" contract documented in
  * docs/abi-markers.md for [BACKEND-STUB] surfaces.
  *
- * Real backends (Zephyr `display_*` driver-class wrapper for
- * SSD1306 / ILI9341 / ST7789 / similar parts on AEN, V2N DSI and
- * parallel-RGB framebuffer paths) land per the tracking issue
- * below with their own silicon-specific entries in
- * src/backends/display/ at higher priority than this wildcard.
+ * The real Zephyr `display_*` driver-class wrapper lives in
+ * zephyr_drv.c (silicon_ref="*", priority 50, gated on
+ * CONFIG_ALP_SDK_DISPLAY_ZEPHYR_DRV) and always wins over this
+ * stub on builds that link CONFIG_DISPLAY.  This stub remains the
+ * selected backend on OSes / builds without a display subsystem,
+ * keeping alp_display_open linkable with a clean
+ * NOT_IMPLEMENTED degrade.  Vendor-specific paths (V2N DSI and
+ * parallel-RGB framebuffer, Alif LCD-IF) still land per the
+ * tracking issue below at priority 100 on their silicon.
  *
  * @par Tracking: github.com/alplabai/alp-sdk/issues/23
  */
@@ -75,6 +79,7 @@ static const alp_display_ops_t _ops = {
 	.close    = NULL,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(display);
 ALP_BACKEND_REGISTER(display,
                      zephyr_stub,
                      {

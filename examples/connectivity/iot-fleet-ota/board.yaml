@@ -14,7 +14,7 @@
 # customer-buildable half of the contract.  The Mender server
 # side is owned externally (separate repo, Hakan).
 som:
-  sku: E1M-AEN701          # Alif Ensemble + on-SoM OPTIGA Trust M.
+  sku: E1M-AEN801          # Alif Ensemble + on-SoM OPTIGA Trust M.
                             # The OPTIGA holds the production
                             # ECDSA-P256 key (slot 0xE0F0); same
                             # key gates both secure boot and OTA
@@ -51,7 +51,7 @@ cores:
       - mbedtls
 
 # No additional chips: the on-SoM OPTIGA Trust M is part of the
-# E1M-AEN701 preset and the CC3501E Wi-Fi bridge is wired
+# E1M-AEN801 preset and the CC3501E Wi-Fi bridge is wired
 # through cores.m55_hp.iot.wifi: true.  No extra `chips:` entries
 # needed.
 
@@ -78,7 +78,7 @@ boot:
 # ----------------------------------------------------------------
 # `provider: mender` triggers two emitters:
 #
-#   - Yocto slices (`os: yocto`): scripts/alp_orchestrate.py's
+#   - Yocto slices (`os: yocto`): scripts/alp_orchestrate/'s
 #     _slice_local_conf() emits `INHERIT += "mender-full"` and
 #     `MENDER_*` weak-assignments into local.conf.  Customers
 #     forking this skeleton for V2N101 (Linux + M33) inherit the

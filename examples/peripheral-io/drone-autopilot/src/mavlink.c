@@ -341,11 +341,11 @@ int alp_mavlink_init(uint8_t sysid, uint8_t compid)
      * papered over: a real flight build must route the GCS SiK radio
      * to a dedicated port (board-specific, TBD pinout) and point this
      * open() at that port instead.  Do not ship as-is. */
-	LOG_WRN("drone-autopilot: MAVLink GCS shares E1M_UART0 with the GNSS "
+	LOG_WRN("drone-autopilot: MAVLink GCS shares ALP_E1M_UART0 with the GNSS "
 	        "link -- route to a dedicated UART before flight (no free "
 	        "third port in v0.5).");
 	s_uart = alp_uart_open(&(alp_uart_config_t){
-	    .port_id  = E1M_UART0,
+	    .port_id  = ALP_E1M_UART0,
 	    .baudrate = 57600,
 	});
 	return s_uart ? 0 : -1;

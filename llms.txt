@@ -1,0 +1,64 @@
+# Alp SDK
+
+> A vendor-neutral SDK for heterogeneous E1M / E1M-X system-on-modules (Alif Ensemble, Renesas RZ/V2N, NXP i.MX 93). One declarative `board.yaml` fans out into per-core Zephyr (Cortex-M) and Yocto (Cortex-A) build slices; apps target one portable `<alp/*>` C API and stay source-compatible across a SoM family.
+
+For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent guide). Claude Code users additionally get `CLAUDE.md` (repo skills + the code-review-graph MCP); all other agents use AGENTS.md.
+
+## Getting started
+
+- [README.md](README.md): project overview, architecture diagram, and quick orientation.
+- [docs/getting-started.md](docs/getting-started.md): clone → `native_sim` build → real silicon, with the `west alp-build` workflow.
+- [docs/firmware-quickstart.md](docs/firmware-quickstart.md): the shortest hand-written-firmware path.
+- [CONTRIBUTING.md](CONTRIBUTING.md): contributor workflow, branching, and local CI expectations.
+
+## Board configuration (board.yaml + the --emit contract)
+
+- [docs/board-config.md](docs/board-config.md): authoritative `board.yaml` schema reference and every loader emit mode.
+- [metadata/schemas/board.schema.json](metadata/schemas/board.schema.json): the machine-readable `board.yaml` JSON Schema.
+- [metadata/templates/board.yaml](metadata/templates/board.yaml): copy-friendly commented `board.yaml` template.
+- [docs/adr/0014-build-plan-emit-cli-contract.md](docs/adr/0014-build-plan-emit-cli-contract.md): ADR 0014 — the `--emit` CLI as the tool-facing build-plan contract.
+- [scripts/alp_project.py](scripts/alp_project.py): per-core loader (`--emit zephyr-conf | cmake-args | yocto-conf | hw-info-h | dts-overlay | west-libraries | os-topology`).
+- [scripts/alp_orchestrate/](scripts/alp_orchestrate/): system orchestrator package, invoked `python -m alp_orchestrate` (`--emit system-manifest | build-plan | ipc-contract-h | dts-reservations | dts-partitions | storage-mounts-c | tfm-sysbuild-conf`).
+
+## Hardware
+
+- [docs/soms/aen.md](docs/soms/aen.md): Alif Ensemble (E1M-AEN) SoM family.
+- [docs/soms/v2n.md](docs/soms/v2n.md): Renesas RZ/V2N (E1M-X V2N) SoM family.
+- [docs/soms/v2n-m1.md](docs/soms/v2n-m1.md): RZ/V2N + DEEPX DX-M1 (E1M-X V2N-M1) family.
+- [docs/soms/imx93.md](docs/soms/imx93.md): NXP i.MX 93 (E1M-NX9101) family.
+- [docs/boards/e1m-evk.md](docs/boards/e1m-evk.md): 35×35 EVK reference board (AEN family).
+- [docs/boards/e1m-x-evk.md](docs/boards/e1m-x-evk.md): 45×65 X-EVK reference board (V2N / V2N-M1).
+- [docs/e1m-pinout.md](docs/e1m-pinout.md): the canonical 52-pad E1M pinout and instance-ID order.
+- [docs/portability-matrix.md](docs/portability-matrix.md): empirical intra-family `som.sku:`-swap portability proof.
+- [docs/os-support-matrix.md](docs/os-support-matrix.md): OS / core-class support per SoM.
+- [docs/peripheral-support-matrix.md](docs/peripheral-support-matrix.md): generated SoM × peripheral-class presence matrix (single-source from metadata).
+- [metadata/e1m_modules](metadata/e1m_modules): per-MPN SoM presets (the silicon source of truth).
+- [metadata/socs](metadata/socs): per-SoC capability JSON the loader validates against.
+
+## Portable API (include/alp/)
+
+- [include/alp/peripheral.h](include/alp/peripheral.h): GPIO + core peripheral primitives (`alp_gpio_open`, `alp_last_error`, `ALP_OK`).
+- [include/alp/e1m_pinout.h](include/alp/e1m_pinout.h): portable `ALP_E1M_*` instance IDs for E1M parts.
+- [include/alp/e1m_x_pinout.h](include/alp/e1m_x_pinout.h): portable `ALP_E1M_X_*` instance IDs for E1M-X parts.
+- [include/alp/adc.h](include/alp/adc.h): ADC wrapper API.
+- [include/alp/pwm.h](include/alp/pwm.h): PWM wrapper API.
+- [include/alp/inference.h](include/alp/inference.h): portable NPU / model-inference API.
+- [include/alp/hw_info.h](include/alp/hw_info.h): runtime hardware identity (EEPROM manifest + board-ID ADC).
+
+## Examples
+
+- [examples/README.md](examples/README.md): index of all example apps.
+- [examples/peripheral-io/gpio-button-led/src/main.c](examples/peripheral-io/gpio-button-led/src/main.c): the teaching reference — fully annotated portable-API app.
+- [examples/peripheral-io/i2c-scanner](examples/peripheral-io/i2c-scanner): minimal I²C bus scan.
+- [examples/peripheral-io/spi-loopback](examples/peripheral-io/spi-loopback): minimal SPI loopback.
+- [examples/aen/edgeai-vision-aen](examples/aen/edgeai-vision-aen): end-to-end camera → Ethos-U inference → display reference app.
+- [examples/connectivity/iot-connected-camera](examples/connectivity/iot-connected-camera): camera → DRP-AI → MQTT reference app.
+
+## Validation
+
+- [scripts/alp_cli/doctor.py](scripts/alp_cli/doctor.py): `alp doctor` — HW-free environment preflight (toolchain / west / Zephyr-pin / deps), with `--json`.
+- [scripts/validate_board_yaml.py](scripts/validate_board_yaml.py): the `board.yaml` validator (also exposed as the `alp validate` CLI command).
+- [scripts/check_example_portability.py](scripts/check_example_portability.py): gate enforcing the portable-API rule for examples.
+- [scripts/check_doc_drift.py](scripts/check_doc_drift.py): gate catching docs that drifted from code/metadata.
+- [docs/testing.md](docs/testing.md): the full local verification pass (twister + checks) CI runs short of HIL.
+- [docs/local-ci.md](docs/local-ci.md): reproducing the CI gates locally before pushing.

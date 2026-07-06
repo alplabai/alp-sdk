@@ -55,7 +55,7 @@ def _scaffold(dest: Path, som: str, preset: str, peripherals: list[str]) -> None
     shutil.copytree(TEMPLATE_DIR, dest)
     board_yaml = dest / "board.yaml"
     text = board_yaml.read_text(encoding="utf-8")
-    text = text.replace("E1M-AEN701", som)
+    text = text.replace("E1M-AEN801", som)
     text = text.replace("preset: e1m-evk", f"preset: {preset}")
     if peripherals:
         # Peripherals are an array of strings (not objects) per the board.yaml schema.
@@ -70,7 +70,7 @@ def _scaffold(dest: Path, som: str, preset: str, peripherals: list[str]) -> None
 
 @click.command(name="init", help="Scaffold a new Alp SDK project.")
 @click.argument("name", type=str)
-@click.option("--som", default=None, help="SoM SKU (e.g. E1M-AEN701).")
+@click.option("--som", default=None, help="SoM SKU (e.g. E1M-AEN801).")
 @click.option("--preset", default=None, help="Board preset (e.g. e1m-evk).")
 @click.option(
     "--peripherals",

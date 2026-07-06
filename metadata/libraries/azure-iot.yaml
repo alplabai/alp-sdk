@@ -1,0 +1,63 @@
+# Azure SDK for Embedded C (ADR 0018 library manifest).
+#
+# Part of the ADR 0018 cloud / connectivity Tier-B group: the Azure IoT client
+# for constrained devices.  Upstream is the Azure SDK for Embedded C
+# (github.com/Azure/azure-sdk-for-c), whose az_iot layer provides the Azure IoT
+# Hub / Device Provisioning Service (DPS) protocol clients.
+#
+# West pin + Kconfig grounding (verified 2026-07-05):
+#   Azure IoT embedded-C is NOT in the pinned Zephyr v4.4.0 workspace.  Verified:
+#   `west list` has no azure entry and `ls $ZEPHYR_BASE/../modules/lib` has none.
+#   The manifest therefore carries its own west project pin:
+#     https://github.com/Azure/azure-sdk-for-c.git @ 1.5.0
+#     (tag commit 6d6e634a3bb7f4d6bb5666ec8e1005ecd248e635).
+#   As with aws-iot.yaml, the Azure SDK for Embedded C is a generic CMake C SDK
+#   with NO official upstream Zephyr module.yml or master Kconfig symbol, so
+#   packaging/build glue remains a follow-up.  The source revision is now
+#   reproducible and `--emit west-libraries` can produce a concrete west
+#   project entry.
+#
+# Enablement is BY MODULE PRESENCE, not a Kconfig gate.  There is no single
+# upstream `CONFIG_AZURE_IOT=y` enable symbol to transcribe (the SDK is a set
+# of protocol-serialization helpers configured in app code, not one Zephyr
+# master switch).  `integration.zephyr` therefore carries `module:` + a `west:`
+# pin and NO `kconfig:`; inventing a symbol is forbidden (ADR 0018).  The
+# emitter renders the selection tag with no CONFIG line until packaging
+# confirms a real enable symbol, if one exists.
+#
+# Version:  `1.5.0` -- exact upstream release tag from
+#   github.com/Azure/azure-sdk-for-c.
+# License:  MIT -- cited from the upstream Azure SDK for C project (MIT, per its
+#   LICENSE.txt at github.com/Azure/azure-sdk-for-c).  NOT verified from an
+#   in-tree LICENSE file, because the SDK is not in this checkout
+#   (not-in-tree-verified).
+#
+# TLS note (bench-gated follow-up): the Azure IoT Hub MQTT transport needs a TLS
+# stack; the workspace already pins mbedtls (west module `mbedtls`), the natural
+# provider, but wiring the transport shim onto it is app + packaging work, not
+# built here.
+schema_version: 1
+name: azure-iot
+description: "Azure SDK for Embedded C -- Azure IoT Hub / DPS client for constrained devices."
+tier: B
+version: "1.5.0"
+license: MIT
+
+requires:
+  # Only the Zephyr integration path is expressible today (see header), so
+  # `os: [zephyr]` rejects a selection whose live cores run no Zephyr with the
+  # constraint named.  No core_class: the SDK is arch-neutral generic C, not a
+  # Cortex-M-only library, so pinning a class would over-claim.
+  os: [zephyr]
+
+integration:
+  zephyr:
+    # Enable-by-presence source pin (see header): the REAL upstream repo is
+    # named, with NO invented Kconfig.  Emit renders a library tag plus a west
+    # project entry, but no CONFIG line until Zephyr packaging confirms one.
+    module: azure-sdk-for-c
+    west:
+      name: azure-sdk-for-c
+      url: https://github.com/Azure/azure-sdk-for-c.git
+      revision: 1.5.0
+      path: modules/lib/azure-sdk-for-c

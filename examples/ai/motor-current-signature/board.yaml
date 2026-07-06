@@ -1,0 +1,36 @@
+# board.yaml -- DC motor current-signature health monitor.
+#
+# An M55 node reads the on-board INA236 high-side current/voltage/power monitor,
+# extracts a feature window, classifies the motor operating state
+# (OFF/NORMAL/INRUSH/OVERLOAD/STALL), and emits an AI anomaly score for
+# off-taxonomy faults.  Same source targets the V2N DEEPX path when som.sku is
+# flipped.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "INA236 current monitor bus" }
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    app: ./src
+    inference:
+      default_arena_kib: 64
+    libraries:
+      - tflite_micro
+    peripherals:
+      - i2c                   # INA236 link.
+
+chips:
+  - ina236                    # high-side current/voltage/power monitor.
+
+diagnostics:
+  log_level: info

@@ -23,6 +23,19 @@ signals:
   - { name: NRESET, type: input, scope: "active-low hardware reset" }
   - { name: BUSY,   type: output, scope: "command-busy back to host" }
   - { name: DIO1,   type: output, scope: "IRQ line 1" }
+  - { name: DIO2,   type: bidir,  scope: "multi-purpose digital I/O / RF-switch control" }
+  - { name: DIO3,   type: bidir,  scope: "multi-purpose digital I/O / external TCXO supply voltage" }
+  - { name: XTA,    type: analog, scope: "crystal oscillator connection / external reference clock input" }
+  - { name: XTB,    type: analog, scope: "crystal oscillator connection" }
+  - { name: RFI_P,  type: analog, scope: "RF receiver input" }
+  - { name: RFI_N,  type: analog, scope: "RF receiver input" }
+  - { name: RFO,    type: analog, scope: "RF transmitter output" }
+  - { name: VDD_IN, type: power,  scope: "input voltage for the PA regulator VR_PA" }
+  - { name: VBAT,   type: power,  scope: "supply for the RFIC" }
+  - { name: VBAT_IO, type: power, scope: "supply for the digital I/O interface pins (except DIO3)" }
+  - { name: VR_PA,  type: power,  scope: "regulated PA supply output; externally tied to VDD_IN" }
+  - { name: VREG,   type: power,  scope: "regulated output voltage from the internal LDO/DC-DC" }
+  - { name: DCC_SW, type: output, scope: "DC-DC switcher output (inductor node)" }
 
 kconfig:
   zephyr:         ALP_SDK_CHIP_SEMTECH_SX1262
@@ -32,7 +45,46 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per Semtech SX1261/2 datasheet Rev 1.2 (Jun 2019, this manifest's
+  # cited datasheet), §2.1 "I/O Description", Table 2-1 "SX1261/2 Pinout in
+  # QFN 4x4 24L" -- a fully enumerated 0-24 pad table (pad 0 = exposed GND
+  # paddle), transcribed pad-for-pad.
+  refdes_prefix: U
+  package:       QFN-24
+  footprint:     semtech_qfn24_4x4mm
+  dimension_mm:  "4 x 4"
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "0",  signal: GND }
+    - { pad: "1",  signal: VDD_IN }
+    - { pad: "2",  signal: GND }
+    - { pad: "3",  signal: XTA }
+    - { pad: "4",  signal: XTB }
+    - { pad: "5",  signal: GND }
+    - { pad: "6",  signal: DIO3 }
+    - { pad: "7",  signal: VREG }
+    - { pad: "8",  signal: GND }
+    - { pad: "9",  signal: DCC_SW }
+    - { pad: "10", signal: VBAT }
+    - { pad: "11", signal: VBAT_IO }
+    - { pad: "12", signal: DIO2 }
+    - { pad: "13", signal: DIO1 }
+    - { pad: "14", signal: BUSY }
+    - { pad: "15", signal: NRESET }
+    - { pad: "16", signal: MISO }
+    - { pad: "17", signal: MOSI }
+    - { pad: "18", signal: SCLK }
+    - { pad: "19", signal: NSS }
+    - { pad: "20", signal: GND }
+    - { pad: "21", signal: RFI_P }
+    - { pad: "22", signal: RFI_N }
+    - { pad: "23", signal: RFO }
+    - { pad: "24", signal: VR_PA }

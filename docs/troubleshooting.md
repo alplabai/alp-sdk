@@ -22,7 +22,7 @@ for the catalogue):
 
 ```yaml
 som:
-  sku: E1M-V2N101    # or E1M-AEN701, E1M-V2M101, E1M-NX9101, etc.
+  sku: E1M-V2N101    # or E1M-AEN801, E1M-V2M101, E1M-NX9101, etc.
 ```
 
 ### `alp_project: schema violation at <loc>: ...`
@@ -224,7 +224,7 @@ Re-run `scripts/program_eeprom.py` against the module.
 
 The EEPROM-side hw_info reader isn't configured.  Set
 `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` in `prj.conf` to the
-bus id matching `E1M_I2C0` on your board.
+bus id matching `ALP_E1M_I2C0` on your board.
 
 ## CI / tooling issues
 

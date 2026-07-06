@@ -16,10 +16,13 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "scripts"))
+
 LOADER = REPO / "scripts" / "alp_project.py"
 TEMPLATE = REPO / "metadata" / "templates" / "board.yaml.example"
 
@@ -49,6 +52,38 @@ def _write_board(tmp: Path, body: str) -> Path:
 class TestLoaderContract(unittest.TestCase):
     """Schema + preset resolution behaviour."""
 
+    def test_peripheral_kconfig_registry_is_shared(self) -> None:
+        """alp_project and alp_orchestrate consume one metadata registry."""
+        import alp_project
+        import alp_registries
+        from alp_orchestrate.slugs import _PERIPHERAL_KCONFIG as orchestrate_map
+
+        registry_map = alp_registries.peripheral_kconfig()
+        self.assertEqual(alp_project._PERIPHERAL_KCONFIG, registry_map)
+        self.assertEqual(orchestrate_map, registry_map)
+        self.assertEqual(registry_map["uart"], "SERIAL")
+
+    def test_peripheral_kconfig_registry_schema_is_gated(self) -> None:
+        """validate_metadata rejects malformed peripheral registry data."""
+        import validate_metadata
+
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "peripheral-kconfig.json"
+            bad.write_text("""
+                {
+                  "schemaVersion": "peripheral-kconfig-v1",
+                  "peripherals": {
+                    "uart": "SERIAL",
+                    "bad-token": "not_upper"
+                  }
+                }
+            """, encoding="utf-8")
+            with mock.patch.object(validate_metadata, "REPO", Path(td)), \
+                 mock.patch.object(validate_metadata, "PERIPHERAL_KCONFIG_REGISTRY", bad):
+                failures = validate_metadata._check_peripheral_kconfig()
+        self.assertTrue(failures)
+        self.assertIn("peripherals", failures[0][1][0])
+
     def test_canonical_template_passes(self) -> None:
         """The shipped board.yaml.example must compile cleanly in
         every emit mode -- it's the canonical reference customers
@@ -67,7 +102,7 @@ class TestLoaderContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -76,7 +111,7 @@ class TestLoaderContract(unittest.TestCase):
             rv = _run_loader(input_path=path)
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
             self.assertIn("CONFIG_ALP_SDK=y", rv.stdout)
-            self.assertIn("CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y", rv.stdout)
+            self.assertIn("CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y", rv.stdout)
 
     def test_bad_sku_pattern_fails_schema(self) -> None:
         """The schema enforces the E1M-(AEN|V2N|V2M|NX9)... SKU pattern;
@@ -137,7 +172,7 @@ class TestLoaderContract(unittest.TestCase):
             path = _write_board(Path(td), """
                 name: test-board
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -158,7 +193,7 @@ class TestZephyrEmit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -194,7 +229,7 @@ class TestZephyrEmit(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as td:
                     path = _write_board(Path(td), f"""
                         som:
-                          sku: E1M-AEN701
+                          sku: E1M-AEN801
                         cores:
                           m55_hp:
                             os: zephyr
@@ -213,7 +248,7 @@ class TestZephyrEmit(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as td:
                     path = _write_board(Path(td), f"""
                         som:
-                          sku: E1M-AEN701
+                          sku: E1M-AEN801
                         diagnostics:
                           log_level: {log_level}
                         cores:
@@ -276,18 +311,18 @@ class TestDtsOverlayEmit(unittest.TestCase):
         """The alp,pin-array is the full 52-entry positional map in
         e1m_pinout.h canonical order, so alp_z_gpio_resolve(pin_id) is a
         direct index -- including the secondary-function pads opened as
-        GPIO (PWM/ENC/ADC/DAC).  Without this, alp_gpio_open(E1M_GPIO_PWM3)
+        GPIO (PWM/ENC/ADC/DAC).  Without this, alp_gpio_open(ALP_E1M_GPIO_PWM3)
         et al. can't resolve."""
         rv = _run_loader(input_path=TEMPLATE, emit="dts-overlay")
         out = rv.stdout
         # Exactly 52 positional slots.
         self.assertEqual(out.count("<&gpio0 0 GPIO_ACTIVE_HIGH>"), 52)
         # Canonical slots present + correctly indexed in the comments.
-        self.assertIn("[ 0] E1M_GPIO_IO0", out)
-        self.assertIn("[ 4] E1M_GPIO_IO4", out)
-        self.assertIn("[29] E1M_GPIO_PWM3", out)   # RGB-red pad as GPIO
-        self.assertIn("[42] E1M_GPIO_ADC0", out)
-        self.assertIn("[51] E1M_GPIO_DAC1", out)
+        self.assertIn("[ 0] ALP_E1M_GPIO_IO0", out)
+        self.assertIn("[ 4] ALP_E1M_GPIO_IO4", out)
+        self.assertIn("[29] ALP_E1M_GPIO_PWM3", out)   # RGB-red pad as GPIO
+        self.assertIn("[42] ALP_E1M_GPIO_ADC0", out)
+        self.assertIn("[51] ALP_E1M_GPIO_DAC1", out)
 
 
 class TestHwInfoHEmit(unittest.TestCase):
@@ -303,9 +338,9 @@ class TestHwInfoHEmit(unittest.TestCase):
         # canonical template (which sets every field).
         self.assertIn("#ifndef ALP_HW_INFO_BUILD_H", out)
         self.assertIn("#define ALP_HW_INFO_BUILD_H", out)
-        self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN701"', out)
+        self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN801"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_FAMILY      "aen"', out)
-        self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r1"', out)
+        self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r2"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_NAME      "E1M-EVK"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_HW_REV    "r1"', out)
         self.assertIn('#define ALP_HW_BUILD_OS              "zephyr"', out)
@@ -317,7 +352,7 @@ class TestHwInfoHEmit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -334,7 +369,7 @@ class TestHwInfoHEmit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                   hw_rev: r1
                 cores:
                   m55_hp:
@@ -370,7 +405,7 @@ class TestWestLibrariesEmit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -380,6 +415,31 @@ class TestWestLibrariesEmit(unittest.TestCase):
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
             self.assertIn("name-allowlist:", rv.stdout)
             self.assertIn("[]", rv.stdout)
+
+    def test_top_level_cloud_libraries_emit_exact_west_projects(self) -> None:
+        """ADR 0018 top-level libraries can carry their own west project pins
+        when Zephyr's own west.yml does not import the upstream repo."""
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                som:
+                  sku: E1M-V2N101
+                libraries: [aws-iot, azure-iot]
+                cores:
+                  m33_sm:
+                    os: zephyr
+                    app: ./src
+            """)
+            rv = _run_loader(input_path=path, emit="west-libraries")
+            self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+            out = rv.stdout
+            self.assertIn("name: aws-iot-device-sdk-embedded-C", out)
+            self.assertIn("url: https://github.com/aws/aws-iot-device-sdk-embedded-C.git", out)
+            self.assertIn("revision: v3.1.5", out)
+            self.assertIn("path: modules/lib/aws-iot-device-sdk-embedded-C", out)
+            self.assertIn("name: azure-sdk-for-c", out)
+            self.assertIn("url: https://github.com/Azure/azure-sdk-for-c.git", out)
+            self.assertIn("revision: 1.5.0", out)
+            self.assertIn("path: modules/lib/azure-sdk-for-c", out)
 
 
 class TestValidatorPeripheralCheck(unittest.TestCase):
@@ -651,24 +711,30 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", out)
         self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y", out)
+        self.assertNotIn("DRPAI", out)
 
-    def test_v2n101_zephyr_emits_tflm_plus_drpai(self) -> None:
-        """E1M-V2N101 has DRP-AI3 on V2N silicon, no Ethos, no DEEPX."""
+    def test_v2n101_zephyr_emits_tflm_only(self) -> None:
+        """E1M-V2N101 M33 slice gets TFLM only: the DRP-AI3 engine is
+        A55/Linux-side (MERA runtime), so no Zephyr inference backend
+        Kconfig exists for it (issues #58/#59)."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2N101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", out)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y", out)
+        self.assertNotIn("DRPAI", out)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y", out)
 
-    def test_v2m101_zephyr_emits_tflm_plus_drpai(self) -> None:
-        """E1M-V2M101 = V2N + DEEPX.  On Zephyr only DRPAI is wired
-        (DEEPX is host-Linux-only via the PCIe driver); the Yocto
-        emit path carries the concurrent-NPU plumbing."""
+    def test_v2m101_zephyr_emits_tflm_only(self) -> None:
+        """E1M-V2M101 = V2N + DEEPX.  Neither engine is Zephyr-side
+        (DRP-AI3 = A55 MERA runtime, DX-M1 = A55 PCIe libdxrt); the
+        Yocto emit path carries the concurrent-NPU plumbing."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2M101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", out)
-        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y", out)
+        self.assertNotIn("DRPAI", out)
+        # The DX-M1 *chip driver* (CONFIG_ALP_SDK_CHIP_DEEPX_DXM1 --
+        # M33-side management, not inference) legitimately stays; only
+        # the inference-backend namespace must be DEEPX-free.
+        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_DEEPX", out)
 
     # --- G-1 + G-2 -- per-variant Ethos-U + per-CPU-class TFLM ------------
     #
@@ -717,7 +783,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
 
     def test_v2n101_emits_no_ethos_variants(self) -> None:
         """V2N has no Ethos-U at all; none of the per-variant switches
-        fire even though _DRPAI does."""
+        fire (and no DRP-AI Kconfig exists -- A55-side engine)."""
         rc, out, err = self._v2_zephyr_slice("E1M-V2N101", "m33_sm")
         self.assertEqual(rc, 0, msg=err)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
@@ -761,7 +827,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         rc, out, err = self._v2_cmake_slice(
             "E1M-V2M101", "a55_cluster", "baremetal")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn("ALP_SDK_USE_DRPAI=ON", out)
+        self.assertIn("ALP_SDK_USE_DRPAI_V2N=ON", out)
         self.assertIn("ALP_SDK_USE_DEEPX_DXM1=ON", out)
 
     def test_v2n101_baremetal_cmake_args_drpai_only(self) -> None:
@@ -771,7 +837,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         rc, out, err = self._v2_cmake_slice(
             "E1M-V2N101", "a55_cluster", "baremetal")
         self.assertEqual(rc, 0, msg=err)
-        self.assertIn("ALP_SDK_USE_DRPAI=ON", out)
+        self.assertIn("ALP_SDK_USE_DRPAI_V2N=ON", out)
         self.assertNotIn("ALP_SDK_USE_DEEPX_DXM1=ON", out)
 
     # --- Schema-level rejection of inference.backend ------------------
@@ -783,7 +849,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         validation time."""
         body = """
             som:
-              sku: E1M-AEN701
+              sku: E1M-AEN801
             cores:
               m55_hp:
                 os: zephyr
@@ -806,7 +872,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         memory budget) and stays as a per-core knob."""
         body = """
             som:
-              sku: E1M-AEN701
+              sku: E1M-AEN801
             cores:
               m55_hp:
                 os: zephyr
@@ -890,7 +956,7 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
     def test_alp_board_cmake_args_e1m_evk(self) -> None:
         """cmake-args for preset e1m-evk must emit -DALP_BOARD_E1M_EVK."""
         rc, out, err = self._cmake_args(
-            "E1M-AEN701", "e1m-evk", "a32_cluster", "baremetal")
+            "E1M-AEN801", "e1m-evk", "a32_cluster", "baremetal")
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("-DALP_BOARD_E1M_EVK", out,
                       msg=f"ALP_BOARD_E1M_EVK missing from cmake-args:\n{out}")
@@ -900,7 +966,7 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
         any ALP_BOARD_* define -- the guard is `if project.board_name`."""
         body = """
             som:
-              sku: E1M-AEN701
+              sku: E1M-AEN801
             cores:
               m55_hp:
                 os: baremetal
@@ -925,7 +991,7 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
         """zephyr-conf for preset e1m-evk must include ALP_BOARD_E1M_EVK in
         CONFIG_COMPILER_OPT so the facade resolves on every Zephyr build."""
         rc, out, err = self._zephyr_conf(
-            "E1M-AEN701", "e1m-evk", "m55_hp")
+            "E1M-AEN801", "e1m-evk", "m55_hp")
         self.assertEqual(rc, 0, msg=err)
         self.assertIn('CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"', out,
                       msg=f"exact CONFIG_COMPILER_OPT line missing from zephyr-conf:\n{out}")
@@ -943,7 +1009,7 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
         CONFIG_COMPILER_OPT with ALP_BOARD_* -- guarded on board_name."""
         body = """
             som:
-              sku: E1M-AEN701
+              sku: E1M-AEN801
             cores:
               m55_hp:
                 os: zephyr

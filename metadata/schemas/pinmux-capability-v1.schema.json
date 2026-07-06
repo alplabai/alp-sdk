@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/pinmux-capability-v1.schema.json",
+  "title": "ALP per-family pin-mux capability table (metadata/pinmux/<family>.yaml) v1",
+  "description": "Structured, queryable projection of a SoM family's pin-mux: each E1M edge pad maps to the silicon function/peripheral that backs it and the on-module silicon that owns it.  GENERATED from metadata/e1m_modules/<family>/*.tsv by scripts/gen_pinmux_capability.py and gated byte-in-sync (the TSVs remain the single source).  A CLI/IDE queries this table instead of parsing the heterogeneous raw TSVs.  Pad exclusivity (no silicon pad backing two E1M functions) is enforced separately by scripts/check_pin_conflicts.py.",
+  "type": "object",
+  "required": ["schemaVersion", "family", "display_name", "pads"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "pinmux-capability-v1" },
+    "family": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "display_name": { "type": "string", "minLength": 1 },
+    "pads": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["e1m_pad", "e1m_function", "owner", "silicon_peripheral", "silicon_pad"],
+        "properties": {
+          "e1m_pad": {
+            "type": "string",
+            "minLength": 1,
+            "description": "E1M edge-connector ball name.  The literal \"TBD\" when the family's source TSVs are pad-first peripheral maps that don't carry the edge ball (V2N) -- never invented."
+          },
+          "e1m_function": {
+            "type": "string",
+            "minLength": 1,
+            "description": "E1M-standard function name.  The literal \"TBD\" when the source row is an on-module / inter-chip net that doesn't surface at the E1M connector, or when the source TSV doesn't state the E1M function."
+          },
+          "owner": {
+            "enum": ["alif", "cc3501e", "renesas", "gd32"],
+            "description": "On-module silicon that drives the pad.  Per-family legal values: aen -> alif | cc3501e; v2n -> renesas | gd32."
+          },
+          "silicon_peripheral": {
+            "type": "string",
+            "description": "Silicon peripheral/function backing the pad.  Empty when the pad is plain GPIO (no dedicated peripheral mux) -- faithful to the source TSV's empty cell."
+          },
+          "silicon_pad": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

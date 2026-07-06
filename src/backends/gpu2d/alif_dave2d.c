@@ -101,6 +101,24 @@ static d2_s32 _pitch_px(const alp_gpu2d_surface_t *s)
 	return bpp != 0 ? (d2_s32)(s->stride_bytes / (d2_u32)bpp) : 0;
 }
 
+/*
+ * Coordinate guards for the fixed-point submit path.  The ops below
+ * shift pixel coordinates <<4 into the engine's n.4 fixed-point
+ * d2_point / d2_width and pass blit origins as d2_blitpos; an
+ * unguarded uint32_t would silently truncate/wrap in those casts and
+ * the engine would render at a garbage offset.  Both limits are
+ * derived from the pack's own typedef width (sizeof), so a pack
+ * revision that widens the types widens the guard with it -- no
+ * hardware range value is invented here.
+ *
+ * D2_FIXED4_MAX: largest pixel value whose <<4 still fits the SIGNED
+ * positive range of the type.  D2_POS_MAX: largest unshifted pixel
+ * value for the type (signed positive range assumed -- conservative
+ * by half if a pack revision makes it unsigned).
+ */
+#define D2_FIXED4_MAX(type) ((uint32_t)(((UINT64_C(1) << (sizeof(type) * 8u - 1u)) - 1u) >> 4))
+#define D2_POS_MAX(type)    ((uint32_t)((UINT64_C(1) << (sizeof(type) * 8u - 1u)) - 1u))
+
 static alp_status_t _fmt_to_d2(alp_gpu2d_format_t fmt, d2_u32 *out)
 {
 	switch (fmt) {
@@ -134,8 +152,9 @@ static alp_status_t _fmt_to_d2(alp_gpu2d_format_t fmt, d2_u32 *out)
  * d2_setblendmode factor pairs.  ADDITIVE and MULTIPLY do NOT have a
  * documented single-pass d2_setblendmode equivalent (the driver's
  * fixed blend stage is a Porter-Duff factor multiply-add, not a
- * channel product or a saturating add of dst), so they return
- * NOSUPPORT here; the software fallback serves them losslessly.
+ * channel product or a saturating add of dst), so dave2d_blend never
+ * routes them here -- it delegates them to the software fallback's
+ * CPU path (or returns NOSUPPORT when sw_fallback is compiled out).
  * Revisit if a bench check shows the engine's extended-blend path
  * covers them.  BENCH-UNVERIFIED.
  */
@@ -152,8 +171,9 @@ static alp_status_t _blend_to_d2(alp_gpu2d_blend_mode_t mode, d2_u32 *src_bf, d2
 		return ALP_OK;
 	case ALP_GPU2D_BLEND_ADDITIVE:
 	case ALP_GPU2D_BLEND_MULTIPLY:
-		/* No documented single-pass d2 factor pair; sw_fallback owns
-         * these.  BENCH-UNVERIFIED -- see header. */
+		/* No documented single-pass d2 factor pair; dave2d_blend
+         * delegates these to the sw path before reaching here.
+         * BENCH-UNVERIFIED -- see header. */
 		return ALP_ERR_NOSUPPORT;
 	default:
 		return ALP_ERR_NOSUPPORT;
@@ -211,6 +231,19 @@ static alp_status_t dave2d_fill_rect(alp_gpu2d_backend_state_t *state,
 	if (rc != ALP_OK) {
 		return rc;
 	}
+	/* Clip to the dst surface exactly like the sw_fallback does (shared
+	 * helper in gpu2d_ops.h): an unclipped rect handed to the engine is
+	 * an out-of-bounds DMA write into whatever follows the framebuffer. */
+	if (!alp_gpu2d_clip_rect(dst, x, y, &w, &h)) {
+		return ALP_OK; /* fully clipped: nothing to do, not an error */
+	}
+	/* Reject coordinates whose 16.4 fixed-point encoding (<<4 below)
+	 * would overflow d2_point / d2_width -- the casts are otherwise
+	 * silent.  x + w never wraps: both are clipped <= dst->width. */
+	if ((uint64_t)x + w > D2_FIXED4_MAX(d2_point) || (uint64_t)y + h > D2_FIXED4_MAX(d2_point) ||
+	    w > D2_FIXED4_MAX(d2_width) || h > D2_FIXED4_MAX(d2_width)) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 	/* BENCH-UNVERIFIED: clean the dst range from cache after the
      * engine writes it (docs/aen-accelerator-backends-design.md §1). */
 	d2_startframe(dev);
@@ -245,6 +278,22 @@ static alp_status_t dave2d_blit(alp_gpu2d_backend_state_t *state,
 	if (rc != ALP_OK) {
 		return rc;
 	}
+	/* Clip against BOTH surfaces (same order/shape as sw_fallback):
+	 * the engine reads sx..sx+w from src and writes dx..dx+w into
+	 * dst, and neither walk may leave its surface. */
+	if (!alp_gpu2d_clip_rect(src, sx, sy, &w, &h)) {
+		return ALP_OK; /* fully clipped: nothing to do, not an error */
+	}
+	if (!alp_gpu2d_clip_rect(dst, dx, dy, &w, &h)) {
+		return ALP_OK;
+	}
+	/* Fixed-point overflow guard: dx/dy/w/h are shifted <<4 into
+	 * d2_point / d2_width; sx/sy pass unshifted as d2_blitpos. */
+	if ((uint64_t)sx + w > D2_POS_MAX(d2_blitpos) || (uint64_t)sy + h > D2_POS_MAX(d2_blitpos) ||
+	    (uint64_t)dx + w > D2_FIXED4_MAX(d2_point) || (uint64_t)dy + h > D2_FIXED4_MAX(d2_point) ||
+	    w > D2_FIXED4_MAX(d2_width) || h > D2_FIXED4_MAX(d2_width)) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 	d2_startframe(dev);
 	d2_setblitsrc(
 	    dev, src->base, _pitch_px(src), (d2_u32)src->width, (d2_u32)src->height, src_mode);
@@ -276,9 +325,26 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 {
 	d2_device   *dev = (d2_device *)state->be_data;
 	d2_u32       src_bf, dst_bf, src_mode;
+
+	if (mode == ALP_GPU2D_BLEND_ADDITIVE || mode == ALP_GPU2D_BLEND_MULTIPLY) {
+#if defined(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK)
+		/* The engine has no documented single-pass mapping for these
+	     * two modes (see _blend_to_d2); serve them from the portable
+	     * CPU path so the ADR 0008 "write once" contract holds on AEN
+	     * too.  The sw ops ignore be_data, so our state passes through
+	     * unchanged.  BENCH-UNVERIFIED coherency caveat: the CPU
+	     * composite reads/writes caller memory directly -- the same
+	     * cache-maintenance follow-up flagged in the file header
+	     * applies where it mixes with prior engine writes. */
+		return alp_gpu2d_sw_ops()->blend(state, src, sx, sy, dst, dx, dy, w, h, mode);
+#else
+		return ALP_ERR_NOSUPPORT; /* sw_fallback compiled out */
+#endif
+	}
+
 	alp_status_t rc = _blend_to_d2(mode, &src_bf, &dst_bf);
 	if (rc != ALP_OK) {
-		return rc; /* ADDITIVE / MULTIPLY -> NOSUPPORT; sw_fallback owns them */
+		return rc;
 	}
 	rc = _fmt_to_d2(src->format, &src_mode);
 	if (rc != ALP_OK) {
@@ -287,6 +353,19 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
 	rc = _bind_dst(dev, dst);
 	if (rc != ALP_OK) {
 		return rc;
+	}
+	/* Same clip + fixed-point guard as dave2d_blit -- the blend path
+	 * feeds the identical d2_blitcopy coordinate set. */
+	if (!alp_gpu2d_clip_rect(src, sx, sy, &w, &h)) {
+		return ALP_OK; /* fully clipped: nothing to do, not an error */
+	}
+	if (!alp_gpu2d_clip_rect(dst, dx, dy, &w, &h)) {
+		return ALP_OK;
+	}
+	if ((uint64_t)sx + w > D2_POS_MAX(d2_blitpos) || (uint64_t)sy + h > D2_POS_MAX(d2_blitpos) ||
+	    (uint64_t)dx + w > D2_FIXED4_MAX(d2_point) || (uint64_t)dy + h > D2_FIXED4_MAX(d2_point) ||
+	    w > D2_FIXED4_MAX(d2_width) || h > D2_FIXED4_MAX(d2_width)) {
+		return ALP_ERR_OUT_OF_RANGE;
 	}
 	d2_startframe(dev);
 	d2_setblendmode(dev, src_bf, dst_bf);

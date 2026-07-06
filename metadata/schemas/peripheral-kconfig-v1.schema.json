@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/peripheral-kconfig-v1.schema.json",
+  "title": "ALP board.yaml peripheral -> Zephyr subsystem Kconfig registry (metadata/registries/peripheral-kconfig.json) v1",
+  "description": "Single source for mapping board.yaml `peripherals:` tokens to the Zephyr subsystem Kconfig symbols emitted into per-slice alp.conf files.  This is build-policy data, not silicon metadata: a token such as `uart` maps to Zephyr's `SERIAL` subsystem, while the Alp wrapper Kconfigs default on from those subsystem symbols.",
+  "type": "object",
+  "required": ["schemaVersion", "peripherals"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "peripheral-kconfig-v1" },
+    "_comment": { "type": "string" },
+    "peripherals": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        }
+      }
+    }
+  }
+}

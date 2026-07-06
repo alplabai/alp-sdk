@@ -137,6 +137,9 @@ static const alp_pwm_ops_t _ops = {
 	.close         = sw_close,
 };
 
+/* Export the pwm static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(pwm);
+
 ALP_BACKEND_REGISTER(pwm,
                      sw_fallback,
                      {

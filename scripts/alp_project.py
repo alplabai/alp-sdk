@@ -48,6 +48,7 @@ pip packages):
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import re
 import sys
@@ -64,6 +65,8 @@ try:
 except ImportError:
     sys.exit("alp_project: jsonschema is required.  Install via `pip install jsonschema`.")
 
+from alp_registries import peripheral_kconfig
+
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
@@ -72,13 +75,14 @@ SDK_VERSION_FILE = METADATA_ROOT / "sdk_version.yaml"
 
 
 # ---------------------------------------------------------------------
-# SKU + silicon → Kconfig mapping
+# SKU-family mapping
 # ---------------------------------------------------------------------
 #
-# The mapping is small (5 families × a handful of SKUs each) so we
-# bake it inline rather than reading another metadata file.  When a
-# new SoM family lands, add the entry here + update the schema's
-# `som.sku` pattern.
+# The SKU-prefix -> family-dir map is a small, pure derivation with no
+# second on-disk source, so we keep it inline.  When a new SoM family
+# lands, add the entry here + update the schema's `som.sku` pattern.
+# (The silicon -> Kconfig mapping, by contrast, now lives in the
+# versioned registry below -- see silicon_to_kconfig().)
 
 _SKU_FAMILY = re.compile(r"^E1M-(AEN|V2N|V2M|NX9)")
 
@@ -91,17 +95,39 @@ def _sku_family(sku: str) -> str:
     return {"AEN": "aen", "V2N": "v2n", "V2M": "v2n-m1", "NX9": "imx93"}[m.group(1)]
 
 
-# Map silicon refs to the Zephyr Kconfig that selects them.
-_SILICON_TO_KCONFIG: dict[str, str] = {
-    "alif:ensemble:e3": "ALP_SOC_ALIF_ENSEMBLE_E3",
-    "alif:ensemble:e4": "ALP_SOC_ALIF_ENSEMBLE_E4",
-    "alif:ensemble:e5": "ALP_SOC_ALIF_ENSEMBLE_E5",
-    "alif:ensemble:e6": "ALP_SOC_ALIF_ENSEMBLE_E6",
-    "alif:ensemble:e7": "ALP_SOC_ALIF_ENSEMBLE_E7",
-    "alif:ensemble:e8": "ALP_SOC_ALIF_ENSEMBLE_E8",
-    "renesas:rzv2n:n44": "ALP_SOC_RENESAS_RZV2N_N44",
-    "nxp:imx9:imx93": "ALP_SOC_NXP_IMX9_IMX93",
-}
+# Silicon ref -> Zephyr SoC-select Kconfig symbol.
+#
+# This is NOT a hand-maintained table: the symbol is computed from the
+# ref, and the single source of the allowlist is the versioned registry
+# at metadata/registries/silicon-kconfig.json.  Both this emitter and
+# scripts/alp_orchestrate/ consume `silicon_to_kconfig()` so the
+# mapping has exactly one definition (the prior _SILICON_TO_KCONFIG dict
+# was duplicated across both files -- "duplicated truth is a bug").
+SILICON_KCONFIG_REGISTRY = METADATA_ROOT / "registries" / "silicon-kconfig.json"
+
+
+@functools.lru_cache(maxsize=1)
+def _load_silicon_kconfig() -> tuple[str, frozenset[str]]:
+    """Load (socSymbolPrefix, knownSilicon) from the versioned registry."""
+    data = json.loads(SILICON_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
+    return data["socSymbolPrefix"], frozenset(data["knownSilicon"])
+
+
+def silicon_to_kconfig(silicon: str | None) -> str | None:
+    """Return the Zephyr Kconfig symbol that selects *silicon*, or ``None``.
+
+    The symbol is computed as ``socSymbolPrefix + ref.upper().replace(':','_')``;
+    e.g. ``alif:ensemble:e7`` -> ``ALP_SOC_ALIF_ENSEMBLE_E7``.  ``None`` is
+    returned for any ref not in the registry allowlist (so an accelerator
+    such as ``deepx:dx:m1`` -- or an unknown ref -- emits no CONFIG line,
+    matching the prior dict's ``.get()`` behaviour).
+    """
+    if silicon is None:
+        return None
+    prefix, known = _load_silicon_kconfig()
+    if silicon not in known:
+        return None
+    return prefix + silicon.upper().replace(":", "_")
 
 
 # ---------------------------------------------------------------------
@@ -110,15 +136,20 @@ _SILICON_TO_KCONFIG: dict[str, str] = {
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        sys.exit(f"alp_project: file not found: {path}")
+    """Delegate to the orchestrator loader's `_load_yaml` (one parse, one home).
+
+    Same checks, same message texts -- the loader raises OrchestratorError with
+    exactly the text this used to print after its "alp_project: " prefix, so the
+    CLI-facing behaviour is byte-identical (sys.exit, code 1). Lazy import:
+    alp_orchestrate imports this module at load time (the resolve_memory_map
+    edge), so the reverse import must happen at call time.
+    """
+    from alp_orchestrate.loader import OrchestratorError
+    from alp_orchestrate.loader import _load_yaml as _loader_load_yaml
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as e:
-        sys.exit(f"alp_project: failed to parse {path}: {e}")
-    if not isinstance(data, dict):
-        sys.exit(f"alp_project: {path} did not parse to a top-level mapping")
-    return data
+        return _loader_load_yaml(path)
+    except OrchestratorError as e:
+        sys.exit(f"alp_project: {e}")
 
 
 def _validate_and_load(path: Path) -> dict[str, Any]:
@@ -274,7 +305,7 @@ def _resolve_pad_routes(
     `e1m_routes:` block: when an E1M pad appears in both, the board
     supplies the role (e.g. `bmi323_int1`) and the SoM supplies the
     dispatch path (e.g. CC3501E GPIO 14). The two blocks together
-    let a customer swap SoMs (AEN701 -> NX9101) without touching the
+    let a customer swap SoMs (AEN801 -> NX9101) without touching the
     board YAML or any app source -- the [[som-swappable-without-board-changes]]
     promise.
     """
@@ -293,6 +324,38 @@ def _resolve_pad_routes(
         # duplicates, surface the later entry (most-recent author wins).
         indexed[e1m] = entry
     return indexed
+
+
+def _hwrev_pad_route_overrides(
+    sku: str,
+    hw_rev: str | None,
+    metadata_root: Path,
+) -> list[dict[str, Any]]:
+    """Per-rev pad-route overrides for the selected ``hw_rev``.
+
+    The base SoM ``pad_routes:`` tracks the *production* revision.  A board
+    revision whose routing differs declares the deviating pads as data in
+    the family ``hw-revisions.yaml`` ``pad_route_overrides:`` block; this
+    returns that rev's list (empty when it declares none, so the base
+    ``pad_routes:`` then applies verbatim).  Applying these is what makes
+    ``--emit composed-route-table`` differ between revisions of one SKU --
+    e.g. AEN ``r1`` restores IO8/IO10 to Alif GPIOs and IO21 to the CC3501E,
+    the pre-2626-R2 routing.
+    """
+    if not hw_rev:
+        return []
+    try:
+        family = _sku_family(sku)
+    except ValueError:
+        return []
+    path = metadata_root / "e1m_modules" / family / "hw-revisions.yaml"
+    if not path.is_file():
+        return []
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    rev = (data.get("hw_revisions") or {}).get(hw_rev) or {}
+    overrides = rev.get("pad_route_overrides") or []
+    return [e for e in overrides
+            if isinstance(e, dict) and isinstance(e.get("e1m"), str)]
 
 
 def _compose_route(
@@ -438,9 +501,13 @@ def resolve_capabilities(
       2. Read ``soc["capabilities"]`` (defaults to ``{}`` when absent --
          older SoC JSONs that pre-date this field continue to work).
       3. Read ``sku_preset.get("capabilities", {})``.
-      4. Return a merged dict; SoM-side wins on key collision so that
-         SoM add-on chips / GD32 bridge capabilities can override the
-         host silicon's defaults.
+      4. Merge; SoM-side wins on key collision so that SoM add-on chips /
+         GD32 bridge capabilities can override the host silicon's defaults.
+      5. Apply the SKU's ``silicon_capabilities.unpopulated`` RESTRICTION
+         list: each listed silicon capability is forced to 0 (count) /
+         ``False`` (flag).  A SKU can only remove what the silicon offers
+         (enforced by scripts/validate_metadata.py); presets without the
+         field keep the full silicon capability set.
     """
     silicon = sku_preset.get("silicon", "")
     parts = silicon.split(":")
@@ -454,7 +521,36 @@ def resolve_capabilities(
     som_caps: dict[str, Any] = sku_preset.get("capabilities") or {}
 
     # SoM side wins on collision (bridge / add-on overrides silicon default).
-    return {**soc_caps, **som_caps}
+    merged: dict[str, Any] = {**soc_caps, **som_caps}
+
+    # SKU-level restriction: capabilities the silicon offers but this SKU
+    # leaves unpopulated (per-SKU granularity -- one family, many SKUs).
+    # Preserve the value class so count-style caps (ethos_u55_count, ...)
+    # restrict to 0 and flag-style caps restrict to False.
+    for name in som_unpopulated_capabilities(sku_preset):
+        base = soc_caps.get(name)
+        if isinstance(base, int) and not isinstance(base, bool):
+            merged[name] = 0
+        else:
+            merged[name] = False
+    return merged
+
+
+def som_unpopulated_capabilities(sku_preset: dict[str, Any]) -> list[str]:
+    """Return the SKU's `silicon_capabilities.unpopulated` list (or []).
+
+    Single accessor for the per-SKU capability RESTRICTION block so the
+    loader (`resolve_capabilities`), the emitters (`alp_orchestrate/kconfig.py`,
+    which passes `-DALP_SOM_<TOKEN>` only for restricted SKUs) and the header
+    generator (`gen_soc_caps.py`) agree on where the field lives.
+    """
+    block = sku_preset.get("silicon_capabilities") or {}
+    if not isinstance(block, dict):
+        return []
+    names = block.get("unpopulated") or []
+    if not isinstance(names, list):
+        return []
+    return [str(n) for n in names]
 
 
 # ---------------------------------------------------------------------
@@ -682,25 +778,10 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
 }
 
 
-# Peripheral name (from board.yaml's `peripherals:` array) ->
-# Zephyr Kconfig symbol the loader sets.  Mirrors the per-class
-# wrapper enables in zephyr/Kconfig (ALP_SDK_PERIPH_*) which all
-# `default y if <SUBSYS>` -- so enabling the Zephyr subsystem
-# here lights up both the subsystem driver AND the alp wrapper.
-_PERIPHERAL_KCONFIG: dict[str, str] = {
-    "adc":      "ADC",
-    "can":      "CAN",
-    "counter":  "COUNTER",
-    "gpio":     "GPIO",
-    "i2c":      "I2C",
-    "i2s":      "I2S",
-    "pwm":      "PWM",
-    "rtc":      "RTC",
-    "sensor":   "SENSOR",    # underlying class for the qenc helper
-    "spi":      "SPI",
-    "uart":     "SERIAL",    # Zephyr's UART class symbol is SERIAL
-    "watchdog": "WATCHDOG",
-}
+# Peripheral name (from board.yaml's `peripherals:` array) -> Zephyr Kconfig
+# symbol.  Single-sourced in metadata/registries/peripheral-kconfig.json and
+# shared with alp_orchestrate/slugs.py.
+_PERIPHERAL_KCONFIG: dict[str, str] = peripheral_kconfig()
 
 
 # Library-name -> Kconfig flag(s) to set when the library appears
@@ -803,7 +884,7 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
 # invent gpio bank numbers or per-pad GPIO_ACTIVE_* flags.  The
 # emitted .overlay declares the board's bus aliases and a stub
 # alp,pin-array with one entry per EVK_PIN_* macro, each annotated
-# with a comment naming the macro and the E1M_GPIO_IO<N> it
+# with a comment naming the macro and the ALP_E1M_GPIO_IO<N> it
 # resolves to.  Customers fill the gpio bank / index columns with
 # their SoM's actual DT controller phandles once the upstream board
 # files land in alplabai/alp-zephyr-modules.
@@ -816,14 +897,14 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
 # job is to surface every alias the board wants, not to second-
 # guess vendor DT naming.
 
-# Match `#define <NAME> E1M_<CLASS><N>` (with optional trailing
+# Match `#define <NAME> ALP_E1M_<CLASS><N>` (with optional trailing
 # token).  Class is one of the bus / pwm / gpio / analog-converter
 # names we care about.  ADC + DAC join the set so the portable
 # <alp/adc.h> / <alp/dac.h> backends -- which resolve their channels
 # via the `alp-adcN` / `alp-dacN` DT aliases -- get a generated alias
 # scaffold from the board's `e1m_routes.adc` / `.dac` entries.
 _DEFINE_E1M_RE = re.compile(
-    r"^\s*#\s*define\s+(\w+)\s+E1M_(I2C|SPI|UART|PWM|ADC|DAC|GPIO_IO)(\d+)\b",
+    r"^\s*#\s*define\s+(\w+)\s+ALP_E1M_(I2C|SPI|UART|PWM|ADC|DAC|GPIO_IO)(\d+)\b",
     re.MULTILINE,
 )
 
@@ -851,10 +932,10 @@ _BUS_BUCKETS: tuple[tuple[str, str, str], ...] = (
 # invariant".  The alp,pin-array `gpios` property MUST list these 52
 # entries in this exact order so the GPIO backend's positional resolve
 # (alp_z_gpio_resolve -> alp_pins[pin_id]) lands on the right pad,
-# including secondary-function pads opened as GPIO via E1M_GPIO_<class><N>
+# including secondary-function pads opened as GPIO via ALP_E1M_GPIO_<class><N>
 # (PWM -> 26..33, ENC -> 34..41, ADC -> 42..49, DAC -> 50..51).
 def _e1m_gpio_canonical() -> list[str]:
-    """Return the 52 E1M_GPIO_<suffix> names in canonical index order."""
+    """Return the 52 ALP_E1M_GPIO_<suffix> names in canonical index order."""
     names: list[str] = [f"IO{n}" for n in range(26)]      # 0..25
     names += [f"PWM{n}" for n in range(8)]                 # 26..33
     for e in range(4):                                     # 34..41
@@ -895,7 +976,7 @@ def _read_board_header_with_includes(header_path: Path) -> str:
     """Read `header_path` and inline any `#include "alp/boards/<file>.h"`
     that exists under include/.  Used so the loader picks up the
     generated routes header (alp_e1m_evk_routes.h) which holds the
-    EVK_* -> E1M_* macro bindings since slice 1c.
+    EVK_* -> ALP_E1M_* macro bindings since slice 1c.
 
     Single-level inlining is sufficient -- the generated routes header
     only `#include`s `alp/e1m_pinout.h`, which carries no EVK_* macros.
@@ -915,7 +996,7 @@ def _parse_board_macros(
     header_path: Path,
 ) -> dict[str, list[tuple[str, int]]]:
     """Return {class_name: [(macro_name, channel_index), ...]} for
-    each E1M_<CLASS><N> reference in the board header."""
+    each ALP_E1M_<CLASS><N> reference in the board header."""
     raw = _read_board_header_with_includes(header_path)
     text = _strip_c_comments(_collapse_line_continuations(raw))
     out: dict[str, list[tuple[str, int]]] = {
@@ -1031,7 +1112,7 @@ def _emit_dts_overlay(
     # by e1m_pinout.h's "Devicetree / overlay invariant" so the GPIO
     # backend's positional resolve (alp_pins[pin_id]) lands on the right
     # pad, including secondary-function pads opened as GPIO via
-    # E1M_GPIO_<class><N>.  Every slot is present even when the board
+    # ALP_E1M_GPIO_<class><N>.  Every slot is present even when the board
     # doesn't route it; <&gpioX Y FLAGS> triplets are TBD pending the
     # upstream SoM board file.
     io_by_idx = {idx: m for (m, idx) in macros.get("GPIO_IO", [])}
@@ -1050,7 +1131,7 @@ def _emit_dts_overlay(
         terminator = ";" if i == len(canonical) - 1 else ","
         # Annotate IO / PWM slots with the board macro routed to that pad
         # (parsed from the board header); other classes carry the bare
-        # E1M_GPIO_<suffix> so the customer knows which pad the slot is.
+        # ALP_E1M_GPIO_<suffix> so the customer knows which pad the slot is.
         routed = ""
         if suffix.startswith("IO"):
             n = int(suffix[2:])
@@ -1062,7 +1143,7 @@ def _emit_dts_overlay(
                 routed = f"  default fn: {pwm_by_idx[n]}"
         lines.append(
             f"            <&gpio0 0 GPIO_ACTIVE_HIGH>{terminator}"
-            f"  /* [{i:2d}] E1M_GPIO_{suffix}{routed} */"
+            f"  /* [{i:2d}] ALP_E1M_GPIO_{suffix}{routed} */"
         )
     lines.append("    };")
     lines.append("")
@@ -1109,12 +1190,22 @@ _OTA_PROVIDER_WEST_MODULES: dict[str, str] = {
 }
 
 
+def _load_curated_library_manifest(lib: str) -> dict[str, Any] | None:
+    """Load a top-level ADR 0018 library manifest if one exists."""
+    path = METADATA_ROOT / "libraries" / f"{lib}.yaml"
+    if not path.is_file():
+        return None
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return doc if isinstance(doc, dict) else None
+
+
 def _emit_west_libraries(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
     board_preset: dict[str, Any] | None,
     *,
     v2_libraries: list[str] | None = None,
+    v2_project_libraries: list[str] | None = None,
 ) -> str:
     """Emit a west.yml fragment that the customer's manifest can
     import to pin the Zephyr modules board.yaml's `libraries:` array
@@ -1124,21 +1215,57 @@ def _emit_west_libraries(
     v1 path (`v2_libraries is None`): reads project-level `libraries:`.
     v2 path: callers compute the union across the Zephyr-runtime cores
     (or pick one when `--core <id>` is supplied) and pass it in via
-    `v2_libraries`.
+    `v2_libraries`.  `v2_project_libraries` carries the top-level ADR 0018
+    curated library manifests; these may either import a Zephyr-owned module
+    by name or emit a standalone west project pin from the manifest's
+    `integration.zephyr.west` block.
     """
     del sku_preset, board_preset  # unused -- libraries are SoM-agnostic
     if v2_libraries is not None:
         libs = list(v2_libraries)
     else:
         libs = project.get("libraries") or []
-    modules: list[tuple[str, str]] = []   # (library, west-module)
+    project_libs = list(v2_project_libraries
+                        if v2_project_libraries is not None
+                        else [])
+    modules: list[tuple[str, str]] = []   # (library, Zephyr-owned west module)
+    west_projects: list[tuple[str, dict[str, Any]]] = []
     unsupported: list[str] = []
+    seen_modules: set[str] = set()
+    seen_projects: set[str] = set()
+
+    def add_module(lib: str, mod: str) -> None:
+        if mod not in seen_modules:
+            modules.append((lib, mod))
+            seen_modules.add(mod)
+
+    def add_west_project(lib: str, west: dict[str, Any]) -> None:
+        name = str(west.get("name") or "")
+        if name and name not in seen_projects:
+            west_projects.append((lib, west))
+            seen_projects.add(name)
+
     for lib in libs:
         mod = _LIBRARY_WEST_MODULES.get(lib)
         if mod is None:
             unsupported.append(lib)
         else:
-            modules.append((lib, mod))
+            add_module(lib, mod)
+
+    for lib in project_libs:
+        manifest = _load_curated_library_manifest(lib)
+        zephyr = ((manifest or {}).get("integration") or {}).get("zephyr") or {}
+        if not zephyr:
+            continue
+        west = zephyr.get("west")
+        if isinstance(west, dict):
+            add_west_project(lib, west)
+            continue
+        mod = zephyr.get("module")
+        if isinstance(mod, str) and mod:
+            add_module(lib, mod)
+        else:
+            unsupported.append(lib)
 
     # OTA provider-driven dispatch (ADR 0009 follow-up): out-of-tree
     # Zephyr OTA clients need their own west.yml entry.  Mender-MCU-client
@@ -1171,15 +1298,23 @@ def _emit_west_libraries(
         for lib, mod in modules:
             lines.append(f"          - {mod}        # board.yaml libraries: '{lib}'")
     else:
-        lines.append("          # board.yaml `libraries:` is empty -- nothing to pin.")
+        lines.append("          # no selected Zephyr-owned modules -- nothing to allowlist.")
         lines.append("          []")
+
+    if west_projects:
+        lines.append("")
+        lines.append("    # ADR 0018 libraries not imported by Zephyr's own west.yml.")
+        for lib, west in west_projects:
+            lines.append(f"    - name: {west['name']}")
+            lines.append(f"      url: {west['url']}")
+            lines.append(f"      revision: {west['revision']}")
+            lines.append(f"      path: {west['path']}        # board.yaml libraries: '{lib}'")
 
     if unsupported:
         lines.append("")
-        lines.append("# The following libraries are not Zephyr modules today")
-        lines.append("# and don't need a west.yml entry (the loader wires their")
-        lines.append("# include path + compile-time profile via metadata/library-")
-        lines.append("# profiles/<lib>/ at CMake-configure time):")
+        lines.append("# The following libraries have no Zephyr west project entry today")
+        lines.append("# (header-only/profile libraries ride the loader's include path;")
+        lines.append("# Yocto-only or in-tree Zephyr subsystems do not need a project pin):")
         for lib in unsupported:
             lines.append(f"#   - {lib}")
     return "\n".join(lines) + "\n"
@@ -1346,57 +1481,37 @@ def _emit_hw_info_h(
 
 
 # ---------------------------------------------------------------------
-# Composed-route-table emitter (demonstrator)
+# Carrier route / netlist emitters
 # ---------------------------------------------------------------------
 #
-# Purpose: give early visibility into what _resolve_pad_routes() +
-# _compose_route() return for the current (board x SoM) pair.
-# Output is JSON to stdout (or --output path).  Informs the larger
-# codegen design (Zephyr DTS overlays for proxy peripherals, etc.)
-# without committing to a production schema yet.
+# `composed-route-table` stays as the original debug surface.  The
+# route-row helper below is shared by the production `carrier-netlist`
+# contract so the two views cannot drift on hw_rev pad-route overrides.
 
 
-def _emit_composed_route_table(
+def _composed_route_rows(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
     board_preset: dict[str, Any] | None,
     metadata_root: Path,
-) -> str:
-    """Emit a JSON summary of the fully-composed pad route table for
-    the current (board x SoM) pair.
+) -> tuple[list[dict[str, Any]], str | None, str | None]:
+    """Return composed route rows plus the selected hw_rev / variant.
 
-    The table is derived by calling _resolve_pad_routes() (SoM side) and
-    _compose_route() (join with board side) for every E1M pad that
-    appears in either the board's e1m_routes: block or the SoM's
-    pad_routes: block.
-
-    JSON shape::
-
-        {
-          "board": "<name or null>",
-          "som": "<SKU>",
-          "silicon_variant": "<order_code or null>",
-          "routes": [
-            {
-              "e1m": "E1M_GPIO_IO15",
-              "board_category": "gpio",
-              "board_macro": "EVK_PIN_BMI323_INT1",
-              "board_role": null,
-              "board_doc": "...",
-              "active_low": true,
-              "dispatch": "cc3501e",
-              "dispatch_pin": 14,
-              "som_doc": "..."
-            },
-            ...
-          ]
-        }
-
-    Pads that only appear in the SoM's pad_routes: block (i.e. no
-    board-side role assigned) are included with null board_* fields
-    so the table is complete for the SoM-standalone scenario.
+    Rows cover every E1M pad named by the board and every SoM-only pad
+    that has a dispatch route.  Board-defined rows preserve YAML order;
+    SoM-only rows are sorted by E1M ID for deterministic output.
     """
     pad_routes = _resolve_pad_routes(sku_preset)
+
+    # Apply the selected board revision's pad-route overrides on top of the
+    # base (production-rev) pad_routes, so the composed table -- and thus
+    # `--emit composed-route-table` -- differs by hw_rev.  The rev comes from
+    # the board's `som.hw_rev`, falling back to the SoM's `default_hw_rev`.
+    hw_rev = ((project.get("som") or {}).get("hw_rev")
+              or sku_preset.get("default_hw_rev"))
+    for ov in _hwrev_pad_route_overrides(project["som"]["sku"], hw_rev,
+                                         metadata_root):
+        pad_routes[ov["e1m"]] = ov
 
     # Resolve silicon variant order_code for the top-level summary field.
     variant = _resolve_silicon_variant(sku_preset, metadata_root)
@@ -1465,13 +1580,251 @@ def _emit_composed_route_table(
             row["som_doc"] = composed["som_doc"]
         routes.append(row)
 
-    board_name = (board_preset or {}).get("name") or project.get("name")
+    return routes, hw_rev, silicon_variant_str
 
+
+def _emit_composed_route_table(
+    project: dict[str, Any],
+    sku_preset: dict[str, Any],
+    board_preset: dict[str, Any] | None,
+    metadata_root: Path,
+) -> str:
+    """Emit a JSON summary of the fully-composed pad route table for
+    the current (board x SoM) pair.
+
+    The table is derived by calling _resolve_pad_routes() (SoM side) and
+    _compose_route() (join with board side) for every E1M pad that
+    appears in either the board's e1m_routes: block or the SoM's
+    pad_routes: block.
+
+    Pads that only appear in the SoM's pad_routes: block (i.e. no
+    board-side role assigned) are included with null board_* fields
+    so the table is complete for the SoM-standalone scenario.
+    """
+    routes, hw_rev, silicon_variant_str = _composed_route_rows(
+        project, sku_preset, board_preset, metadata_root)
+    board_name = (board_preset or {}).get("name") or project.get("name")
     result: dict[str, Any] = {
         "board": board_name,
         "som": project["som"]["sku"],
+        "hw_rev": hw_rev,
         "silicon_variant": silicon_variant_str,
         "routes": routes,
+    }
+    return json.dumps(result, indent=2) + "\n"
+
+
+def _manifest_path(kind: str, item_id: str, metadata_root: Path) -> Path:
+    return metadata_root / kind / f"{item_id}.yaml"
+
+
+def _load_optional_manifest(kind: str, item_id: str,
+                            metadata_root: Path) -> dict[str, Any] | None:
+    path = _manifest_path(kind, item_id, metadata_root)
+    if not path.is_file():
+        return None
+    return _load_yaml(path)
+
+
+def _passive_rows(passives: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for passive in passives or []:
+        if not isinstance(passive, dict):
+            continue
+        row: dict[str, Any] = {
+            "role": passive.get("role"),
+            "value": passive.get("value"),
+            "net": passive.get("net"),
+            "refdes_prefix": passive.get("refdes_prefix"),
+        }
+        rows.append({k: v for k, v in row.items() if v is not None})
+    return rows
+
+
+def _chip_bom_row(item_id: str, manifest: dict[str, Any],
+                  manifest_relpath: str) -> dict[str, Any]:
+    physical = manifest.get("physical") or {}
+    caveats: list[str] = []
+    if not physical:
+        caveats.append("missing_physical")
+    elif physical.get("visibility") == "internal":
+        caveats.append("physical_detail_internal")
+    if len(manifest.get("mpn_population") or []) > 1:
+        caveats.append("mpn_population_candidates")
+
+    row: dict[str, Any] = {
+        "item_id": item_id,
+        "kind": "chip",
+        "scope": "carrier",
+        "source": manifest_relpath,
+        "display_name": manifest.get("display_name"),
+        "vendor": manifest.get("vendor"),
+        "mpn_population": manifest.get("mpn_population") or [],
+        "bus": manifest.get("bus"),
+        "quantity": None,
+        "physical": {
+            "refdes_prefix": physical.get("refdes_prefix"),
+            "package": physical.get("package"),
+            "footprint": physical.get("footprint"),
+            "visibility": physical.get("visibility"),
+            "provenance": physical.get("provenance"),
+        },
+        "passives": _passive_rows(physical.get("passives")),
+    }
+    row["physical"] = {k: v for k, v in row["physical"].items()
+                       if v is not None}
+    if caveats:
+        row["caveats"] = caveats
+    return row
+
+
+def _block_bom_row(item_id: str, manifest: dict[str, Any],
+                   manifest_relpath: str) -> dict[str, Any]:
+    realizations = [
+        r for r in manifest.get("realizations") or []
+        if isinstance(r, dict)
+    ]
+    realization = realizations[0] if realizations else {}
+    caveats: list[str] = []
+    if not realizations:
+        caveats.append("missing_realization")
+    elif len(realizations) > 1:
+        caveats.append("multiple_realizations")
+    if realization.get("visibility") == "internal":
+        caveats.append("physical_detail_internal")
+    if not realization.get("parts"):
+        caveats.append("no_concrete_parts")
+
+    row: dict[str, Any] = {
+        "item_id": item_id,
+        "kind": "block",
+        "scope": "carrier",
+        "source": manifest_relpath,
+        "display_name": manifest.get("display_name"),
+        "quantity": None,
+        "realization": {
+            "id": realization.get("id"),
+            "physical_form": realization.get("physical_form"),
+            "visibility": realization.get("visibility"),
+        },
+        "parts": realization.get("parts") or [],
+        "passives": _passive_rows(realization.get("passives")),
+    }
+    row["realization"] = {k: v for k, v in row["realization"].items()
+                          if v is not None}
+    if caveats:
+        row["caveats"] = caveats
+    return row
+
+
+def _carrier_bom_rows(
+    board_preset: dict[str, Any] | None,
+    metadata_root: Path,
+) -> list[dict[str, Any]]:
+    """Build carrier BOM rows from board `populated: true`.
+
+    `populated:` is a logical population map, not a line-item BOM with
+    refdes or count, so rows deliberately leave `quantity` null unless a
+    future metadata field makes it authoritative.
+    """
+    rows: list[dict[str, Any]] = []
+    if board_preset is None:
+        return rows
+
+    populated = board_preset.get("populated") or {}
+    for item_id in sorted(k for k, v in populated.items() if v is True):
+        chip = _load_optional_manifest("chips", item_id, metadata_root)
+        if chip is not None:
+            rows.append(_chip_bom_row(
+                item_id, chip, f"metadata/chips/{item_id}.yaml"))
+            continue
+
+        block = _load_optional_manifest("blocks", item_id, metadata_root)
+        if block is not None:
+            rows.append(_block_bom_row(
+                item_id, block, f"metadata/blocks/{item_id}.yaml"))
+            continue
+
+        rows.append({
+            "item_id": item_id,
+            "kind": "unknown",
+            "scope": "carrier",
+            "source": None,
+            "quantity": None,
+            "caveats": ["missing_manifest"],
+        })
+    return rows
+
+
+def _route_to_net(row: dict[str, Any]) -> dict[str, Any]:
+    net_id = row.get("board_macro") or row["e1m"]
+    endpoints: list[dict[str, Any]] = [
+        {"kind": "e1m", "ref": row["e1m"]},
+    ]
+    if row.get("board_macro"):
+        endpoints.append({"kind": "board-macro", "ref": row["board_macro"]})
+    if row.get("dispatch") and row["dispatch"] != "direct":
+        endpoint: dict[str, Any] = {
+            "kind": "som-dispatch",
+            "ref": row["dispatch"],
+        }
+        if "dispatch_pin" in row:
+            endpoint["pin"] = row["dispatch_pin"]
+        endpoints.append(endpoint)
+
+    net: dict[str, Any] = {
+        "net_id": net_id,
+        "e1m": row["e1m"],
+        "board_category": row.get("board_category"),
+        "board_macro": row.get("board_macro"),
+        "board_role": row.get("board_role"),
+        "dispatch": row.get("dispatch", "direct"),
+        "endpoints": endpoints,
+    }
+    for key in ("board_doc", "active_low", "dispatch_pin", "som_doc"):
+        if key in row:
+            net[key] = row[key]
+    caveats = []
+    if row.get("board_macro") is None:
+        caveats.append("som_only_no_carrier_role")
+    if caveats:
+        net["caveats"] = caveats
+    return net
+
+
+def _emit_carrier_netlist(
+    project: dict[str, Any],
+    sku_preset: dict[str, Any],
+    board_preset: dict[str, Any] | None,
+    metadata_root: Path,
+) -> str:
+    """Emit the Studio-facing carrier netlist + BOM handoff contract.
+
+    This is intentionally not a KiCad, Gerber, or layout artifact.  It
+    exposes only public carrier-facing facts derivable from board.yaml,
+    board presets, chip/block manifests, and SoM pad dispatch metadata.
+    """
+    routes, hw_rev, silicon_variant_str = _composed_route_rows(
+        project, sku_preset, board_preset, metadata_root)
+    board_name = (board_preset or {}).get("name") or project.get("name")
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "alp.carrier_netlist",
+        "generated_by": "scripts/alp_project.py --emit carrier-netlist",
+        "board": board_name,
+        "som": project["som"]["sku"],
+        "hw_rev": hw_rev,
+        "silicon_variant": silicon_variant_str,
+        "nets": [_route_to_net(row) for row in routes],
+        "bom": {
+            "carrier": _carrier_bom_rows(board_preset, metadata_root),
+        },
+        "caveats": [
+            "carrier_handoff_not_pcb_layout",
+            "no_kicad_or_gerber_output",
+            "som_internals_excluded",
+            "quantity_null_when_board_populated_has_no_count",
+        ],
     }
     return json.dumps(result, indent=2) + "\n"
 
@@ -1480,7 +1833,7 @@ def _emit_composed_route_table(
 # v2 emit shims
 # ---------------------------------------------------------------------
 #
-# The orchestrator (scripts/alp_orchestrate.py) owns the v2 board.yaml
+# The orchestrator (scripts/alp_orchestrate/) owns the v2 board.yaml
 # loader + carve-out resolver + system-manifest emitter.  These shims
 # route the v2-only `--emit` modes (and the per-core
 # `--emit zephyr-conf --core <id>`) through the orchestrator.
@@ -1651,6 +2004,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             project_v1_shaped, project.som_preset,
             project.board_preset,
             v2_libraries=v2_libraries,
+            v2_project_libraries=sorted(project.libraries),
         )
         return _write_or_print(out, args.output)
 
@@ -1664,6 +2018,17 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
         core_ids = [args.core]
     else:
         core_ids = sorted(project.cores.keys())
+
+    # Resolve + compatibility-validate any top-level `libraries:` once, up
+    # front, so an unknown name or a failed `requires:` constraint surfaces
+    # as a clean one-line error (ADR 0018) rather than a traceback mid-emit.
+    if project.libraries:
+        try:
+            from alp_orchestrate.libraries import resolve_selection
+            resolve_selection(project, args.metadata_root)
+        except OrchestratorError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
 
     parts: list[str] = []
     for cid in core_ids:
@@ -1725,8 +2090,9 @@ def main() -> int:
                                  "ipc-contract-h",
                                  # Per-core natural-vs-effective OS facts (issue #95).
                                  "os-topology",
-                                 # Demonstrator: JSON route-table dump.
-                                 "composed-route-table"],
+                                 # Carrier routing / Studio handoff JSON.
+                                 "composed-route-table",
+                                 "carrier-netlist"],
                         default="zephyr-conf",
                         help="Output format (default: zephyr-conf).")
     parser.add_argument("--output", type=Path, default=None,
@@ -1747,22 +2113,27 @@ def main() -> int:
     args = parser.parse_args()
 
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
-    # ipc-contract-h) route through alp_orchestrate.py directly.
+    # ipc-contract-h) route through alp_orchestrate/ directly.
     if args.emit in ("system-manifest", "dts-reservations",
                      "ipc-contract-h", "os-topology"):
         return _run_v2_emit(args)
 
     project = _validate_and_load(args.input)
 
-    # composed-route-table only needs the SoM + board definitions; it
-    # does not require the per-core slice machinery.
-    if args.emit == "composed-route-table":
+    # composed-route-table / carrier-netlist only need the SoM + board
+    # definitions; they do not require the per-core slice machinery.
+    if args.emit in ("composed-route-table", "carrier-netlist"):
         sku_preset_rt = _resolve_sku(project["som"]["sku"], args.metadata_root)
         board_preset_rt = _resolve_inline_or_preset_board(
             project, args.metadata_root)
-        out = _emit_composed_route_table(
-            project, sku_preset_rt, board_preset_rt, args.metadata_root
-        )
+        if args.emit == "composed-route-table":
+            out = _emit_composed_route_table(
+                project, sku_preset_rt, board_preset_rt, args.metadata_root
+            )
+        else:
+            out = _emit_carrier_netlist(
+                project, sku_preset_rt, board_preset_rt, args.metadata_root
+            )
         return _write_or_print(out, args.output)
 
     # board.yamls flow through the per-core / project-wide emit path

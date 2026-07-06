@@ -1,0 +1,15 @@
+# Alp SDK block manifest: generic PDM-microphone surface (blk_pdm_mic).
+schema_version: 1
+block_id:       pdm_mic
+display_name:   "Generic PDM microphone surface"
+kconfig:        ALP_SDK_BLOCK_PDM_MIC
+interface:
+  - { signal: PDM_CLK,  dir: output }
+  - { signal: PDM_DATA, dir: input }
+realizations:
+  - id:            discrete_generic
+    physical_form: discrete
+    visibility:    internal        # EVK uses 4x PDM MEMS mics; concrete MPN promoted with the reference design
+    parts: []
+    passives:
+      - { role: decouple, value: 100nF, net: VDD, refdes_prefix: C }

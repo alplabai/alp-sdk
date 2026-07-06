@@ -16,7 +16,7 @@ never names a form-factor-specific instance ID:
 
 * **E1M EVK** -- the base E1M (35x35 mm) SoM carries the Alif
   Ensemble, whose native 2-channel DAC drives `ANA_OUT0` / `ANA_OUT1`
-  directly.  `BOARD_DAC0` resolves to `E1M_DAC0`.
+  directly.  `BOARD_DAC0` resolves to `ALP_E1M_DAC0`.
 * **E1M-X EVK** -- the E1M-X (45x65 mm, V2N family) SoM carries the
   Renesas RZ/V2N.  The RZ/V2N SoC itself has no DAC peripheral
   (`ALP_SOC_DAC_COUNT 0`), so the SoM provides DAC0/DAC1 via the

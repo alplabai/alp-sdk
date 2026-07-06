@@ -16,8 +16,8 @@
  * Move to bus mode (loopback=false) only after this works.
  *
  * Runs on both EVKs: BOARD_CAN0 (from <alp/board.h>) resolves to
- * E1M_CAN0 on E1M EVK (TCAN1044A transceiver, header J9) and
- * E1M_X_CAN0 on E1M-X EVK (TCAN1044 transceiver U51).
+ * ALP_E1M_CAN0 on E1M EVK (TCAN1044A transceiver, header J9) and
+ * ALP_E1M_X_CAN0 on E1M-X EVK (TCAN1044 transceiver U51).
  */
 
 #include <stdio.h>
@@ -27,9 +27,14 @@
 
 #include "alp/can.h"
 
+/* alp_has() / ALP_HAS() -- gate on what the silicon offers, never on
+ * a board name (#ifdef CONFIG_BOARD_* forks don't port to new SoMs). */
+#include "alp/cap.h"
+
 /* BOARD_CAN0 is the portable alias from <alp/board.h>
- * (E1M_CAN0 on E1M EVK; E1M_X_CAN0 on E1M-X EVK). */
+ * (ALP_E1M_CAN0 on E1M EVK; ALP_E1M_X_CAN0 on E1M-X EVK). */
 #include "alp/board.h"
+#include "alp/peripheral.h"
 
 /* Volatile because the rx callback runs from the CAN driver's RX
  * thread (Zephyr's `can_rx` worker) and the main loop polls. */
@@ -54,17 +59,33 @@ static void on_rx(const alp_can_frame_t *f, void *user)
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
+	/* Capability gate: skip cleanly on CAN-less silicon.  On a SoC
+	 * with no CAN controller (e.g. an NPU-only part) this prints a
+	 * diagnostic instead of a confusing open() failure.  Under
+	 * native_sim no SoC is selected, the capability layer is
+	 * permissive, and the demo proceeds to the loopback path. */
+	if (!alp_has(ALP_CAP_ID_HW_CAN)) {
+		printf("[can] no CAN controller on this SoC (%s) -- skipping\n", ALP_SOC_REF_STR);
+		printf("[can] done\n");
+		return 0;
+	}
+
 	printf("[can] open BOARD_CAN0 @ 500 kbps loopback\n");
 
 	alp_can_t *bus = alp_can_open(&(alp_can_config_t){
-	    .bus_id = BOARD_CAN0, /* E1M_CAN0 on E1M EVK; E1M_X_CAN0 on E1M-X EVK */
+	    .bus_id = BOARD_CAN0, /* ALP_E1M_CAN0 on E1M EVK; ALP_E1M_X_CAN0 on E1M-X EVK */
 	    /* 500 kbps is the most common automotive default; bump to
          * 1 Mbps for industrial buses or down to 125 kbps for long
          * cable runs. */
 	    .bitrate_nominal_hz = 500000,
 	    /* CLASSIC mode = ISO 11898-1, ≤ 8 byte payload.  Switch to
          * ALP_CAN_MODE_FD for ≤ 64 byte payload + bit-rate switch
-         * (and set bitrate_data_hz appropriately). */
+         * (and set bitrate_data_hz appropriately).  ALP_HAS(HW_CAN_FD)
+         * answers "does this SoC's controller do FD?" at compile time. */
 	    .mode = ALP_CAN_MODE_CLASSIC,
 	    /* Loopback off the wire -- self-test only.  Set to false
          * once you're driving real CAN_H/CAN_L. */

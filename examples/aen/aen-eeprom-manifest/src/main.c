@@ -74,7 +74,7 @@ int main(void)
 	 * 24C128's standard 7-bit address. */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
 	    .bus_id     = 0u,
-	    .bitrate_hz = 400000u,
+	    .bitrate_hz = 100000u,
 	});
 	if (bus == NULL) {
 		printf("[manifest] alp_i2c_open failed: err=%d\n", (int)alp_last_error());

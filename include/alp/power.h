@@ -185,6 +185,115 @@ void alp_power_close(alp_power_t *handle);
  */
 const alp_capabilities_t *alp_power_capabilities(const alp_power_t *handle);
 
+/* ------------------------------------------------------------------ */
+/* Operating-point profiles                                            */
+/*                                                                     */
+/* Some SoCs keep the power/clock tree behind a system-controller      */
+/* firmware: the application core never pokes PLL / DC-DC / power-     */
+/* domain registers directly, it reads and writes a per-core PROFILE   */
+/* instead.  This handle-less surface exposes the two profiles every   */
+/* such platform keeps -- the active RUN operating point and the       */
+/* STANDBY (off/retention) operating point -- through portable fields. */
+/* ------------------------------------------------------------------ */
+
+/** Which operating-point profile to read/write. */
+typedef enum {
+	ALP_POWER_PROFILE_RUN     = 0, /**< The active operating point. */
+	ALP_POWER_PROFILE_STANDBY = 1, /**< The standby/off operating point +
+	                                    wake configuration. */
+} alp_power_profile_id_t;
+
+/**
+ * @brief One operating-point profile in portable units.
+ *
+ * Frequencies are Hz and rails are millivolts.  The domain / memory /
+ * wake bitmasks are IMPLEMENTATION-DEFINED: their bit legends are SoC
+ * business documented in the per-SoM HW reference, and portable code
+ * must treat them as opaque tokens (read-modify-write them, log them,
+ * compare them -- never construct them from portable constants).
+ *
+ * A zero field means "unknown / not reported" on @ref
+ * alp_power_profile_get and "keep the current value" on @ref
+ * alp_power_profile_set.
+ */
+typedef struct alp_power_profile_t {
+	uint32_t cpu_clk_hz;    /**< Core clock of the calling core's domain
+	                             in Hz.  RUN: the active CPU clock;
+	                             STANDBY: the standby-scaled clock. */
+	uint32_t rail_mv;       /**< Core DC-DC rail in millivolts. */
+	uint32_t power_domains; /**< Implementation-defined bitmask of power
+	                             domains held on in this profile. */
+	uint32_t memory_blocks; /**< Implementation-defined bitmask of memory
+	                             blocks retained/powered in this profile. */
+	uint32_t wake_events;   /**< Implementation-defined wake-event bitmask.
+	                             Meaningful for STANDBY only; 0 for RUN. */
+	uint32_t io_mv;         /**< Flexible-IO bank rail in millivolts
+	                             (e.g. 3300 or 1800); 0 when the SoC has
+	                             no switchable IO rail. */
+} alp_power_profile_t;
+
+/**
+ * @brief Read an operating-point profile.
+ *
+ * Read-only: nothing about the live operating point changes.  On SoCs
+ * whose profiles live behind a system-controller firmware this is a
+ * bounded mailbox round-trip; the call never hangs.
+ *
+ * @param[in]  which  @ref ALP_POWER_PROFILE_RUN or
+ *                    @ref ALP_POWER_PROFILE_STANDBY.
+ * @param[out] out    Zero-filled, then populated with every field the
+ *                    backend can source.
+ *
+ * @return  @ref ALP_OK on success.
+ *          @ref ALP_ERR_INVAL on NULL @p out or an invalid @p which.
+ *          @ref ALP_ERR_NOSUPPORT when the active build has no
+ *                                 profile-capable backend.
+ *          @ref ALP_ERR_NOT_READY when the controller is
+ *                                 asleep/unreachable (retryable).
+ *          @ref ALP_ERR_IO on a transport fault.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.9 -- operating-point profile surface.
+ */
+alp_status_t alp_power_profile_get(alp_power_profile_id_t which, alp_power_profile_t *out);
+
+/**
+ * @brief Change an operating-point profile (read-modify-write).
+ *
+ * @warning This call CHANGES the live power/clock operating point.  A
+ *          wrong rail voltage or clock selection can brown out the
+ *          core or stall the SoC; treat every call like a firmware
+ *          update -- know the target values from the per-SoM HW
+ *          reference and have a recovery plan before running it on
+ *          hardware.
+ *
+ * The backend reads the current profile, overwrites exactly the
+ * fields the caller set to a NON-ZERO value, and writes the result
+ * back -- so a partial update ({ .rail_mv = 800 }) touches nothing
+ * else.  Frequencies must match a value the silicon supports exactly;
+ * the backend never rounds (a mismatch returns @ref ALP_ERR_INVAL).
+ *
+ * @param[in] which    @ref ALP_POWER_PROFILE_RUN or
+ *                     @ref ALP_POWER_PROFILE_STANDBY.
+ * @param[in] profile  Fields to apply; zero fields keep their current
+ *                     value.  @c wake_events is writable only on the
+ *                     STANDBY profile.
+ *
+ * @return  @ref ALP_OK when the controller accepted the new profile.
+ *          @ref ALP_ERR_INVAL on NULL @p profile, an invalid
+ *                             @p which, or a value the silicon cannot
+ *                             realise exactly.
+ *          @ref ALP_ERR_NOSUPPORT when the active build has no
+ *                                 profile-capable backend.
+ *          @ref ALP_ERR_NOT_READY / @ref ALP_ERR_IO as for
+ *          @ref alp_power_profile_get.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.9 -- operating-point profile surface.
+ */
+alp_status_t alp_power_profile_set(alp_power_profile_id_t     which,
+                                   const alp_power_profile_t *profile);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

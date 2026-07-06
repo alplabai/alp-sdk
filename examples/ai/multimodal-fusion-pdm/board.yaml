@@ -1,0 +1,37 @@
+# board.yaml -- multimodal fusion predictive-maintenance.
+#
+# An M55 node reads three on-board sensors -- ICM-42670 (vibration), INA236
+# (current), BME280 (temperature) -- and fuses them into one motor-health
+# verdict via cross-modal corroboration.  Same source targets the V2N
+# accelerator path when som.sku is flipped.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "ICM-42670 + INA236 + BME280 shared bus" }
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    app: ./src
+    inference:
+      default_arena_kib: 64
+    libraries:
+      - tflite_micro
+    peripherals:
+      - i2c                   # all three sensors.
+
+chips:
+  - icm42670                  # vibration (accel).
+  - ina236                    # current/voltage/power.
+  - bme280                    # temperature/humidity/pressure.
+
+diagnostics:
+  log_level: info

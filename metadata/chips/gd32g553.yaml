@@ -70,6 +70,11 @@ signals:
       notes: "host pad configured open-drain; drive low to assert reset, HiZ to release" }
   - { name: GD32_SWDIO_HDR, type: bidir, v2n_route: "(programming header, GD32 PA13)" }
   - { name: GD32_SWCLK_HDR, type: input, v2n_route: "(programming header, GD32 PA14)" }
+  - { name: VDDA,  type: power,  notes: "analog supply; datasheet ball J5" }
+  - { name: VSSA,  type: ground, notes: "analog ground; datasheet ball H6" }
+  - { name: VREFP, type: power,  notes: "ADC reference; VREFN is internally tied to VSSA per datasheet note (1)" }
+  - { name: VBAT,  type: power,  notes: "backup-domain supply; datasheet ball B9" }
+  - { name: BOOT0, type: input,  notes: "boot-mode strap, shared with GPIO PB8 (datasheet ball B7)" }
 
 # --------------------------------------------------------------------
 # E1M PWM routing on the GD32 side.  All eight E1M PWM channels ride
@@ -102,6 +107,51 @@ pwm_routing:
     GD32G553 datasheet -- note that on TIMER0, MCH2 (not MCH1) maps
     to E1M PWM1 on V2N pad PB1; firmware honours the datasheet
     layout.
+
+physical:
+  # Pins per GigaDevice GD32G553xx datasheet Rev 1.0.1, table 2-5
+  # "GD32G553MxY7TR WLCSP81 pin definitions" (81-ball WLCSP, 4x4mm
+  # per GigaDevice ordering collateral).  Per the task scope for this
+  # sweep, only the power/ground/key-function balls are populated
+  # here -- NOT all 81 balls (most are general-purpose GPIO with long
+  # alternate-function lists; see the datasheet directly for those).
+  # SWDIO/SWCLK/NRST reuse the GD32_SWDIO/GD32_SWCLK/GD32_NRST signals
+  # declared above, since those already describe this exact physical
+  # net (GD32 PA13/PA14/NRST) from the V2N routing side.
+  refdes_prefix: U
+  package:       WLCSP-81
+  footprint:     wlcsp_81_4p0x4p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "A1", signal: "VDD" }
+    - { pad: "B1", signal: "VSS" }
+    - { pad: "E1", signal: "VDD" }
+    - { pad: "F1", signal: "VSS" }
+    - { pad: "J1", signal: "VDD" }
+    - { pad: "J2", signal: "VSS" }
+    - { pad: "A8", signal: "VSS" }
+    - { pad: "A9", signal: "VDD" }
+    - { pad: "H9", signal: "VSS" }
+    - { pad: "J9", signal: "VDD" }
+    - { pad: "J5", signal: "VDDA" }
+    - { pad: "H6", signal: "VSSA" }
+    - { pad: "J6", signal: "VREFP" }
+    - { pad: "B9", signal: "VBAT" }
+    - { pad: "D8", signal: "GD32_NRST" }   # datasheet "PG10-NRST"
+    - { pad: "B2", signal: "GD32_SWDIO" }  # datasheet "PA13", default JTMS/SWDIO
+    - { pad: "C3", signal: "GD32_SWCLK" }  # datasheet "PA14", default JTCK/SWCLK
+    - { pad: "B7", signal: "BOOT0" }       # datasheet "PB8/BOOT0"
+  passives:
+    # Per datasheet Figure 4-1 "Recommended power supply decoupling
+    # capacitors": 100nF per VDD pin + one shared 4.7uF bulk cap; VDDA
+    # gets 1uF + 10nF; VREFP gets 1uF; VBAT gets 10nF.
+    - { role: decouple, value: 100nF, net: VDD,   refdes_prefix: C }
+    - { role: bulk,      value: 4.7uF, net: VDD,   refdes_prefix: C }
+    - { role: decouple,  value: 1uF,   net: VDDA,  refdes_prefix: C }
+    - { role: decouple,  value: 10nF,  net: VDDA,  refdes_prefix: C }
+    - { role: decouple,  value: 1uF,   net: VREFP, refdes_prefix: C }
+    - { role: decouple,  value: 10nF,  net: VBAT,  refdes_prefix: C }
 
 protocol:
   doc:            "docs/gd32-bridge-protocol.md"

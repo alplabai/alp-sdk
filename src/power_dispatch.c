@@ -36,6 +36,7 @@
 #include "backends/power/power_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(power);
+ALP_BACKEND_ANCHOR(power);
 
 /* Reuse the existing TLS-backed last-error mechanism from
  * src/zephyr/last_error.c.  Forward-declared here to avoid pulling
@@ -146,4 +147,67 @@ void alp_power_close(alp_power_t *h)
 const alp_capabilities_t *alp_power_capabilities(const alp_power_t *h)
 {
 	return (h != NULL) ? &h->cached_caps : NULL;
+}
+
+/* ================================================================== */
+/* Operating-point profiles (class "power_profile", handle-less)       */
+/*                                                                     */
+/* A separate registry class from "power": the profile surface lives   */
+/* behind a system-controller firmware on the SoCs that have one, and  */
+/* its silicon-specific backend must not displace the portable         */
+/* request_sleep winner above.  Handle-less TMU pattern: cache the      */
+/* selected ops vtable on first call.                                  */
+/* ================================================================== */
+
+ALP_BACKEND_DEFINE_CLASS(power_profile);
+ALP_BACKEND_ANCHOR(power_profile);
+
+static const alp_power_profile_ops_t *_cached_profile_ops = NULL;
+
+static const alp_power_profile_ops_t *_get_profile_ops(void)
+{
+	if (_cached_profile_ops != NULL) {
+		return _cached_profile_ops;
+	}
+	const alp_backend_t *be = alp_backend_select("power_profile", ALP_SOC_REF_STR);
+	if (be == NULL) {
+		return NULL;
+	}
+	_cached_profile_ops = (const alp_power_profile_ops_t *)be->ops;
+	return _cached_profile_ops;
+}
+
+static bool _profile_id_valid(alp_power_profile_id_t which)
+{
+	return which == ALP_POWER_PROFILE_RUN || which == ALP_POWER_PROFILE_STANDBY;
+}
+
+alp_status_t alp_power_profile_get(alp_power_profile_id_t which, alp_power_profile_t *out)
+{
+	if (out == NULL || !_profile_id_valid(which)) {
+		return ALP_ERR_INVAL;
+	}
+	memset(out, 0, sizeof(*out));
+	const alp_power_profile_ops_t *ops = _get_profile_ops();
+	if (ops == NULL || ops->get == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	return ops->get(which, out);
+}
+
+alp_status_t alp_power_profile_set(alp_power_profile_id_t which, const alp_power_profile_t *profile)
+{
+	if (profile == NULL || !_profile_id_valid(which)) {
+		return ALP_ERR_INVAL;
+	}
+	/* wake_events is a standby-profile concept; rejecting it here keeps
+	 * every backend's RUN read-modify-write path honest. */
+	if (which == ALP_POWER_PROFILE_RUN && profile->wake_events != 0u) {
+		return ALP_ERR_INVAL;
+	}
+	const alp_power_profile_ops_t *ops = _get_profile_ops();
+	if (ops == NULL || ops->set == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	return ops->set(which, profile);
 }

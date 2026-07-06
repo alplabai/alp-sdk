@@ -83,6 +83,23 @@ static struct {
 	volatile uint16_t req_len;
 } job;
 
+/* Little-endian store helper for the socket reply wire (parallels protocol.c). */
+static void wk_put_le16(uint8_t *p, uint16_t v)
+{
+	p[0] = (uint8_t)(v & 0xFFu);
+	p[1] = (uint8_t)((v >> 8) & 0xFFu);
+}
+
+/* Read a 16-bit LE field out of the (volatile) request buffer byte-by-byte. */
+static uint16_t wk_get_le16(const volatile uint8_t *p, size_t off)
+{
+	return (uint16_t)p[off] | ((uint16_t)p[off + 1u] << 8);
+}
+
+/* recv reply header = alp_cc3501e_sock_recv_resp_t: from(sock_addr 20) |
+ * data_len(LE16) | reserved(LE16).  The received bytes follow inline. */
+#define WK_SOCK_RECV_HDR 24u
+
 /* Run the blocking HAL body for @p cmd and publish DONE/ERR.  Called from
  * the drain (RUNNING) and from the synchronous stub path in worker_submit.
  * NOT ISR context -- may block.  v0.2 services only GET_MAC; future
@@ -130,6 +147,72 @@ static void worker_execute(uint8_t cmd)
 		 * worker-routed off the SPI ISR exactly like WIFI_SCAN_START. */
 		rv = cc3501e_hw_ble_scan(buf, ALP_CC3501E_MAX_PAYLOAD, &len);
 		break;
+	case ALP_CC3501E_CMD_BLE_ADV_START: {
+		/* Ext-adv config+start BLOCKS on the shared-HIF HCI ack (2 s), so -- like
+		 * the connect ops -- it MUST run here in the drain, not the SPI ISR (that
+		 * was the adv-wedge -4).  The 7-byte header (connectable | reserved |
+		 * itvl_min LE16 | itvl_max LE16 | adv_data_len) + inline adv_data were
+		 * stashed in job.req by worker_submit_payload; the protocol handler already
+		 * length-validated them.  Argless reply (OK carries no payload). */
+		const uint8_t  connectable  = (uint8_t)job.req[0];
+		const uint16_t itvl_min     = (uint16_t)job.req[2] | ((uint16_t)job.req[3] << 8);
+		const uint16_t itvl_max     = (uint16_t)job.req[4] | ((uint16_t)job.req[5] << 8);
+		const uint8_t  adv_data_len = (uint8_t)job.req[6];
+		rv                          = cc3501e_hw_ble_adv_start(
+		    connectable, itvl_min, itvl_max, (const uint8_t *)job.req + 7, adv_data_len);
+		break;
+	}
+	case ALP_CC3501E_CMD_BLE_ADV_STOP:
+		/* Stops the adv set; issues HCI over the shared HIF + re-syncs the bridge
+		 * SPI (blocks), so it is worker-routed off the SPI ISR.  Argless. */
+		rv = cc3501e_hw_ble_adv_stop();
+		break;
+	case ALP_CC3501E_CMD_BLE_DISABLE:
+		/* Tears down adv+scan via NimBLE; issues HCI over the shared HIF + re-syncs
+		 * the bridge SPI (blocks), so it is worker-routed off the SPI ISR.  Argless. */
+		rv = cc3501e_hw_ble_disable();
+		break;
+	case ALP_CC3501E_CMD_BLE_CONNECT:
+		/* GAP connect blocks on the connection-complete HCI event over the shared
+		 * HIF, so it is worker-routed off the SPI ISR.  Payload = addr_type(1) |
+		 * addr[6], stashed in job.req by worker_submit_payload (validated by the
+		 * protocol handler).  Argless reply. */
+		rv = cc3501e_hw_ble_connect((uint8_t)job.req[0], (const uint8_t *)job.req + 1);
+		break;
+	case ALP_CC3501E_CMD_BLE_GATT_REGISTER:
+		/* Registers the attribute table + issues HCI (blocks), so it is worker-routed
+		 * off the SPI ISR.  Payload = the whole opaque descriptor (job.req_len bytes). */
+		rv = cc3501e_hw_ble_gatt_register((const uint8_t *)job.req, job.req_len);
+		break;
+	case ALP_CC3501E_CMD_BLE_GATT_NOTIFY: {
+		/* Pushes a notification (blocks on HCI over the shared HIF), so it is
+		 * worker-routed off the SPI ISR.  Payload = handle(LE16) | data[job.req_len-2]. */
+		const uint16_t handle = (uint16_t)job.req[0] | ((uint16_t)job.req[1] << 8);
+		rv                    = cc3501e_hw_ble_gatt_notify(
+		    handle, (const uint8_t *)job.req + 2, (uint16_t)(job.req_len - 2u));
+		break;
+	}
+	case ALP_CC3501E_CMD_BLE_GATT_WRITE: {
+		/* GATT write (blocks on HCI over the shared HIF), so it is worker-routed off
+		 * the SPI ISR.  Payload = handle(LE16) | data[job.req_len-2]. */
+		const uint16_t handle = (uint16_t)job.req[0] | ((uint16_t)job.req[1] << 8);
+		rv                    = cc3501e_hw_ble_gatt_write(
+		    handle, (const uint8_t *)job.req + 2, (uint16_t)(job.req_len - 2u));
+		break;
+	}
+	case ALP_CC3501E_CMD_BLE_GATT_READ: {
+		/* GATT read (blocks on the read-response HCI over the shared HIF), so it is
+		 * worker-routed off the SPI ISR.  Payload = handle(LE16); the attribute value
+		 * is packed into buf and published so the payload+reply worker path copies it
+		 * back to the host (see handle_worker_routed_payload_reply). */
+		const uint16_t handle  = (uint16_t)job.req[0] | ((uint16_t)job.req[1] << 8);
+		uint16_t       out_len = 0u;
+		rv = cc3501e_hw_ble_gatt_read(handle, buf, (uint16_t)ALP_CC3501E_MAX_PAYLOAD, &out_len);
+		if (rv == CC3501E_HW_OK) {
+			len = out_len;
+		}
+		break;
+	}
 	case ALP_CC3501E_CMD_WIFI_CONNECT_STA:
 	case ALP_CC3501E_CMD_WIFI_AP_START: {
 		/* Association BLOCKS until the connect/IP event (seconds), so -- unlike the
@@ -148,9 +231,95 @@ static void worker_execute(uint8_t cmd)
 		         : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
 		break;
 	}
+	case ALP_CC3501E_CMD_SOCK_OPEN: {
+		/* job.req = alp_cc3501e_sock_open_t: family(0) | type(1) | protocol(2) |
+		 * reserved(3).  Reply DATA = alp_cc3501e_sock_handle_t: handle(LE16) |
+		 * reserved(2). */
+		uint16_t handle = 0u;
+		rv              = cc3501e_hw_sock_open(job.req[0], job.req[1], job.req[2], &handle);
+		if (rv == CC3501E_HW_OK) {
+			wk_put_le16(buf, handle);
+			buf[2] = 0u;
+			buf[3] = 0u;
+			len    = 4u;
+		}
+		break;
+	}
+	case ALP_CC3501E_CMD_SOCK_CONNECT: {
+		/* job.req = alp_cc3501e_sock_connect_t: handle(LE16 @0) | reserved(@2) |
+		 * peer sock_addr @4 { family(@4) | reserved(@5) | port(LE16 @6) |
+		 * addr[16] @8 }.  v1 IPv4: only addr[8..11] are meaningful. */
+		const uint16_t handle = wk_get_le16(job.req, 0u);
+		const uint8_t  family = job.req[4];
+		const uint16_t port   = wk_get_le16(job.req, 6u);
+		uint8_t        addr[4];
+		for (unsigned i = 0u; i < 4u; ++i)
+			addr[i] = job.req[8u + i];
+		rv = cc3501e_hw_sock_connect(handle, family, port, addr);
+		break;
+	}
+	case ALP_CC3501E_CMD_SOCK_SEND: {
+		/* job.req = alp_cc3501e_sock_send_t: handle(LE16 @0) | flags(@2) |
+		 * reserved(@3) | data_len(LE16 @4) | reserved2(@6) | data @8.  Reply
+		 * DATA = uint16_t LE byte count actually queued. */
+		const uint16_t handle   = wk_get_le16(job.req, 0u);
+		const uint8_t  flags    = job.req[2];
+		const uint16_t data_len = wk_get_le16(job.req, 4u);
+		uint16_t       sent     = 0u;
+		/* The data rides inline in job.req at offset 8 (the handler validated
+		 * req_len == 8 + data_len <= MAX_PAYLOAD); pass it in place, mirroring how
+		 * the WIFI_CONNECT case reads ssid/psk straight out of job.req. */
+		rv = cc3501e_hw_sock_send(handle, flags, (const uint8_t *)&job.req[8], data_len, &sent);
+		if (rv == CC3501E_HW_OK) {
+			wk_put_le16(buf, sent);
+			len = 2u;
+		}
+		break;
+	}
+	case ALP_CC3501E_CMD_SOCK_RECV: {
+		/* job.req = alp_cc3501e_sock_recv_t: handle(LE16 @0) | max_len(LE16 @2).
+		 * Reply = recv_resp header (WK_SOCK_RECV_HDR) + up to max_len bytes.  Cap
+		 * the data so header + data + the status byte fit one frame. */
+		const uint16_t handle       = wk_get_le16(job.req, 0u);
+		const uint16_t max_len      = wk_get_le16(job.req, 2u);
+		const uint16_t data_cap     = (uint16_t)(ALP_CC3501E_MAX_PAYLOAD - WK_SOCK_RECV_HDR - 1u);
+		uint8_t        from_addr[4] = { 0 };
+		uint16_t       from_port    = 0u;
+		uint16_t       recv_len     = 0u;
+		rv                          = cc3501e_hw_sock_recv(
+		    handle, max_len, &buf[WK_SOCK_RECV_HDR], data_cap, &recv_len, from_addr, &from_port);
+		if (rv == CC3501E_HW_OK) {
+			/* Build the from sock_addr (family | reserved | port(LE16) | addr[16]);
+			 * STREAM leaves it zeroed (recv fills only for DGRAM). */
+			memset(buf, 0, WK_SOCK_RECV_HDR);
+			buf[0] = (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4;
+			wk_put_le16(&buf[2], from_port);
+			for (unsigned i = 0u; i < 4u; ++i)
+				buf[4u + i] = from_addr[i];
+			wk_put_le16(&buf[20], recv_len); /* data_len */
+			len = (size_t)WK_SOCK_RECV_HDR + (size_t)recv_len;
+		}
+		break;
+	}
+	case ALP_CC3501E_CMD_SOCK_CLOSE: {
+		/* job.req = alp_cc3501e_sock_close_t: handle(LE16 @0) | reserved(@2). */
+		rv = cc3501e_hw_sock_close(wk_get_le16(job.req, 0u));
+		break;
+	}
 	default:
 		rv = CC3501E_HW_ERR_NOTIMPL;
 		break;
+	}
+
+	/* Defensive clamp before the publish memcpy: every HAL body above is
+	 * CONTRACTED to report len <= ALP_CC3501E_MAX_PAYLOAD (it fills buf,
+	 * which is exactly that size), but a misbehaving backend that reports
+	 * a larger len must corrupt at most its own answer -- never overrun
+	 * job.result[] and smash the worker state the SPI ISR reads.
+	 * Truncation is safe to publish: the poller copies min(out_cap,
+	 * result_len) and the protocol layer length-checks every reply. */
+	if (len > sizeof(job.result)) {
+		len = sizeof(job.result);
 	}
 
 	/* Publish the result atomically wrt the SPI ISR: fill result[] first,

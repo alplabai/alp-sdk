@@ -35,3 +35,15 @@ west-commands:
       - name: alp-renode
         class: AlpRenode
         help: Boot the system manifest in Renode (Phase 3 stub)
+  # Read-only inspector for the orchestrator's --emit seam (no build).
+  - file: scripts/west_commands/alp_emit.py
+    commands:
+      - name: alp-emit
+        class: AlpEmit
+        help: Print a generated config artefact from board.yaml (no build)
+  # Read-only memory-budget report: per-slice flash/RAM used vs SoM total.
+  - file: scripts/west_commands/alp_size.py
+    commands:
+      - name: alp-size
+        class: AlpSize
+        help: Report per-slice flash/RAM footprint against the SoM budget

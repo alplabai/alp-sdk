@@ -65,6 +65,9 @@ CTestTestfile.cmake
 Makefile
 *.cmake
 !CMakeLists.txt
+# Hand-written tooling Makefile (NOT a CMake build artifact) -- the
+# native_sim container's convenience targets.  Keep it tracked.
+!tools/native-sim-container/Makefile
 # Toolchain files MUST stay tracked -- the bridge builds invoke
 # them via -DCMAKE_TOOLCHAIN_FILE in CI + locally.
 !firmware/gd32-bridge/toolchain/*.cmake

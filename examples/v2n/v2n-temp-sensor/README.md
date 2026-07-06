@@ -8,7 +8,9 @@ ten-sample loop.
 ## What it shows
 
 * `alp_i2c_open(...)` -- BRD_I2C handle.
-* `tmp112_init(...)` -- ACK-probe at 7-bit address `0x40`.
+* `tmp112_init(...)` -- ACK-probe at 7-bit address `0x48`
+  (`TMP112_I2C_ADDR_GND`; ADD0 strapped to GND per
+  [`metadata/chips/tmp112.yaml`](../../../metadata/chips/tmp112.yaml)).
 * `tmp112_read_temp_milli_c(...)` -- 12-/13-bit conversion read,
   returned as signed milli-degrees.
 * Clean shutdown in `_deinit`.

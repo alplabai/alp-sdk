@@ -1,6 +1,6 @@
 # v2n-pwm-fan-control
 
-Drive a fan from `E1M_PWM0` on V2N.  Walks duty cycle through a
+Drive a fan from `ALP_E1M_PWM0` on V2N.  Walks duty cycle through a
 five-stop curve at a fixed 25 kHz board (above audible) using the
 portable `<alp/pwm.h>` surface, so the wave shape is observable on
 a scope.
@@ -10,7 +10,7 @@ a scope.
 1. The canonical `alp_pwm_open` + `alp_pwm_set_duty` + `alp_pwm_close`
    usage pattern -- same call sequence as `examples/peripheral-io/pwm-led-fade/`,
    just with a fan curve instead of a sinusoidal sweep.
-2. The portable `E1M_PWM0..PWM7` instance IDs from
+2. The portable `ALP_E1M_PWM0..PWM7` instance IDs from
    [`<alp/e1m_pinout.h>`](../../../include/alp/e1m_pinout.h) -- the
    application names the **E1M-standard** PWM channel, not the
    underlying SoC peripheral.  The SDK resolves which silicon
@@ -33,10 +33,10 @@ To run the same fan curve on a different SoM, edit `board.yaml`:
 
 ```yaml
 som:
-  sku: E1M-AEN701      # or E1M-V2M101, E1M-N93xxx, ...
+  sku: E1M-AEN801      # or E1M-V2M101, E1M-N93xxx, ...
 ```
 
-The `alp_pwm_open(E1M_PWM0)` call dispatches to whichever
+The `alp_pwm_open(ALP_E1M_PWM0)` call dispatches to whichever
 peripheral physically drives the pad on the active SoM (Alif GPT on
 AEN, GD32 IO-MCU bridge on V2N, NXP TPU on i.MX 93) -- the
 application never names a specific block.
@@ -58,6 +58,6 @@ across the full ramp is straightforward.
 
 * [`<alp/pwm.h>`](../../../include/alp/pwm.h) -- portable PWM surface.
 * [`<alp/e1m_pinout.h>`](../../../include/alp/e1m_pinout.h) -- the
-  E1M-standard `E1M_PWM*` instance IDs.
+  E1M-standard `ALP_E1M_PWM*` instance IDs.
 * [`examples/peripheral-io/pwm-led-fade/`](../pwm-led-fade/) -- companion
   example using the same API on a single LED.

@@ -74,11 +74,13 @@
 #define ISP_NODE DT_NODELABEL(isp)
 
 /*
- * Expected reg base + IRQs, transcribed from the DFP Device header (AE822FA0E5597
- * rtss_he/soc.h: ISP_IRQ_IRQn=367, ISP_MI_IRQ_IRQn=368) and the fork e4_e6_e8.dtsi
- * (isp@49046000).  We read the LIVE values from devicetree and compare -- so this
- * stays correct if the node ever moves, and catches a binding that resolved to
- * the wrong node.
+ * Expected reg base + IRQs.  The two IRQs are DFP-confirmed (AE822FA0E5597
+ * rtss_he/soc.h: ISP_IRQ_IRQn=367, ISP_MI_IRQ_IRQn=368).  The reg base
+ * 0x49046000 is NOT in the DFP CMSIS header -- that header defines no ISP_BASE
+ * to cross-check against -- so its sole source-of-truth is the fork
+ * e4_e6_e8.dtsi (isp@49046000).  We read the LIVE values from devicetree and
+ * compare -- so this stays correct if the node ever moves, and catches a
+ * binding that resolved to the wrong node.
  */
 #define ISP_BASE_EXPECTED 0x49046000U
 #define ISP_IRQ0_EXPECTED 367U /* "isp"    */

@@ -75,7 +75,7 @@ ZTEST(alp_wdt_registry, test_open_returns_null_on_null_cfg)
 {
 	/* The dispatcher rejects NULL cfg with ALP_ERR_INVAL before
      * consulting the registry; alp_wdt_open returns NULL. */
-	alp_wdt_t *h = alp_wdt_open(0u, NULL);
+	alp_wdt_t *h = alp_wdt_open(NULL);
 	zassert_is_null(h);
 }
 

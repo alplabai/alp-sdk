@@ -5,8 +5,8 @@
  * §D.lib library-knob smoke test.
  *
  * Walks the libraries that have Zephyr-native module integration
- * (lvgl / mbedtls / cmsis-dsp + tflite-micro pulled in through the
- * Zephyr west.yml allowlist) and confirms each one's headers
+ * (lvgl / mbedtls / cmsis-dsp / nanopb / zcbor pulled in through
+ * the Zephyr west.yml allowlist) and confirms each one's headers
  * include + at least one entry-point symbol links.  Doesn't run
  * meaningful logic against the libraries; the goal is to catch
  * upstream-pin breakage at twister time, before any HiL runner.
@@ -34,6 +34,18 @@
 
 #if defined(CONFIG_FILE_SYSTEM_LITTLEFS)
 #include <zephyr/fs/fs.h>
+#endif
+
+#if defined(CONFIG_LVGL)
+#include <lvgl.h>
+#endif
+
+#if defined(CONFIG_NANOPB)
+#include <pb_encode.h>
+#endif
+
+#if defined(CONFIG_ZCBOR)
+#include <zcbor_encode.h>
 #endif
 
 ZTEST_SUITE(alp_lib_knobs, NULL, NULL, NULL, NULL, NULL);
@@ -90,6 +102,53 @@ ZTEST(alp_lib_knobs, test_littlefs_headers_resolve)
      * confirms the fs.h header chain reaches littlefs's
      * Kconfig-gated definitions.  Build-time check only. */
 	zassert_true(true, "header path resolved at compile time");
+#else
+	ztest_test_skip();
+#endif
+}
+
+/* ------------------------------------------------------------------ */
+/* lvgl -- header path + version macro reachability.  The Tier-A CI  */
+/* lane supplies a dummy display node so CONFIG_LVGL links headless. */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_lib_knobs, test_lvgl_headers_resolve)
+{
+#if defined(CONFIG_LVGL)
+	zassert_true(LV_VERSION_CHECK(9, 0, 0), "LVGL v9 headers did not resolve");
+#else
+	ztest_test_skip();
+#endif
+}
+
+/* ------------------------------------------------------------------ */
+/* nanopb -- header inclusion + one encoder factory symbol resolves. */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_lib_knobs, test_nanopb_links)
+{
+#if defined(CONFIG_NANOPB)
+	pb_byte_t    buffer[8] = { 0 };
+	pb_ostream_t stream    = pb_ostream_from_buffer(buffer, sizeof(buffer));
+
+	zassert_equal(stream.bytes_written, 0, "new nanopb stream is unexpectedly non-empty");
+#else
+	ztest_test_skip();
+#endif
+}
+
+/* ------------------------------------------------------------------ */
+/* zcbor -- header inclusion + one encoder state symbol resolves.    */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_lib_knobs, test_zcbor_links)
+{
+#if defined(CONFIG_ZCBOR)
+	uint8_t       payload[8] = { 0 };
+	zcbor_state_t states[1];
+
+	zcbor_new_encode_state(states, ARRAY_SIZE(states), payload, sizeof(payload), 1);
+	zassert_equal(states[0].payload, payload, "zcbor encoder state did not keep the payload");
 #else
 	ztest_test_skip();
 #endif

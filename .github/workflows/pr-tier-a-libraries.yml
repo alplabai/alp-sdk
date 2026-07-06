@@ -1,0 +1,208 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR 0018 Tier-A library gate.
+#
+# Tier A means the library is version-pinned and CI-built for each
+# supported SoM family.  This workflow generates the per-family
+# alp.conf from a synthetic board.yaml, then builds the shared Zephyr
+# library_knobs smoke app with those real emitted CONFIG lines.
+#
+# native_sim can only prove the Tier-A libraries whose Zephyr Kconfig
+# can build on the host architecture: lvgl, cmsis-dsp, nanopb, and
+# zcbor.  cmsis-nn is still Tier A, but upstream Zephyr gates it with
+# `depends on CPU_CORTEX_M`; its metadata and emission stay covered by
+# the Python tests until a real Cortex-M board build lane is available.
+
+name: pr-tier-a-libraries
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - '.github/workflows/pr-tier-a-libraries.yml'
+      - 'metadata/libraries/**'
+      - 'metadata/e1m_modules/**'
+      - 'metadata/registries/tier-a-library-ci.json'
+      - 'metadata/schemas/library-v1.schema.json'
+      - 'metadata/schemas/tier-a-library-ci-v1.schema.json'
+      - 'scripts/alp_project.py'
+      - 'scripts/validate_metadata.py'
+      - 'tests/scripts/test_library_layer.py'
+      - 'tests/scripts/test_alp_project.py'
+      - 'tests/zephyr/library_knobs/**'
+      - 'west.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - '.github/workflows/pr-tier-a-libraries.yml'
+      - 'metadata/libraries/**'
+      - 'metadata/e1m_modules/**'
+      - 'metadata/registries/tier-a-library-ci.json'
+      - 'metadata/schemas/library-v1.schema.json'
+      - 'metadata/schemas/tier-a-library-ci-v1.schema.json'
+      - 'scripts/alp_project.py'
+      - 'scripts/validate_metadata.py'
+      - 'tests/scripts/test_library_layer.py'
+      - 'tests/scripts/test_alp_project.py'
+      - 'tests/zephyr/library_knobs/**'
+      - 'west.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tier-a-library-build:
+    name: tier-a-libraries · ${{ matrix.som }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - som: E1M-AEN701
+            core: m55_hp
+          - som: E1M-V2N101
+            core: m33_sm
+          - som: E1M-V2M101
+            core: m33_sm
+          - som: E1M-NX9101
+            core: m33
+
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: host
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: alp-sdk/.python-version
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              ninja-build gperf ccache dfu-util device-tree-compiler \
+              python3-dev python3-pip python3-setuptools python3-wheel \
+              libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
+              g++-multilib libsdl2-dev libmagic1
+
+      - name: Install west
+        run: pip3 install west
+
+      - name: west init Zephyr workspace
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p zephyrproject
+          cd zephyrproject
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 .
+          west update --narrow -o=--depth=1
+          west zephyr-export
+
+      - name: Cache Zephyr modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ github.workspace }}/zephyrproject/modules
+            ${{ github.workspace }}/zephyrproject/zephyr
+          key: zephyr-v4.4.0-tier-a-${{ runner.os }}
+
+      - name: Cache ccache objects
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-tier-a-${{ matrix.som }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-tier-a-${{ matrix.som }}-
+
+      - name: pip install Zephyr + alp-sdk requirements
+        working-directory: ${{ github.workspace }}/zephyrproject
+        run: |
+          pip3 install -r zephyr/scripts/requirements.txt
+          pip3 install jsonschema pyyaml
+
+      - name: Generate Tier-A alp.conf for ${{ matrix.som }}
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tier-a"
+          python3 - "$RUNNER_TEMP/tier-a/board.yaml" "${{ matrix.som }}" "${{ matrix.core }}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          out = Path(sys.argv[1])
+          sku = sys.argv[2]
+          core = sys.argv[3]
+          registry = json.loads(
+              Path("metadata/registries/tier-a-library-ci.json").read_text(encoding="utf-8")
+          )
+          libraries = "\n".join(f"  - {name}" for name in registry["hostBuild"]["libraries"])
+          out.write_text(
+              f"som:\n"
+              f"  sku: {sku}\n"
+              f"libraries:\n"
+              f"{libraries}\n"
+              f"cores:\n"
+              f"  {core}:\n"
+              f"    os: zephyr\n"
+              f"    app: ./app\n",
+              encoding="utf-8",
+          )
+          PY
+          python3 scripts/alp_project.py \
+            --input "$RUNNER_TEMP/tier-a/board.yaml" \
+            --emit zephyr-conf \
+            --core "${{ matrix.core }}" \
+            > "$RUNNER_TEMP/tier-a/alp.conf"
+          cat "$RUNNER_TEMP/tier-a/alp.conf" \
+            tests/zephyr/library_knobs/prj_tier_a_native_sim.conf \
+            > "$RUNNER_TEMP/tier-a/tier-a-extra.conf"
+
+      - name: Build Tier-A library smoke on native_sim
+        working-directory: ${{ github.workspace }}/zephyrproject
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+        run: |
+          west build -p always \
+            -b native_sim/native/64 \
+            "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr/library_knobs" \
+            -- \
+            -DEXTRA_CONF_FILE="$RUNNER_TEMP/tier-a/tier-a-extra.conf" \
+            -DDTC_OVERLAY_FILE="$GITHUB_WORKSPACE/alp-sdk/tests/zephyr/library_knobs/overlays/native_sim_tier_a.overlay"
+
+  cmsis-nn-metadata:
+    name: tier-a-libraries · cmsis-nn metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: alp-sdk/.python-version
+
+      - name: Install Python deps
+        run: pip install click jsonschema pyyaml pytest
+
+      - name: Validate Tier-A library metadata and emit tests
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          python3 scripts/validate_metadata.py
+          python3 -m pytest tests/scripts/test_library_layer.py tests/scripts/test_alp_project.py -q

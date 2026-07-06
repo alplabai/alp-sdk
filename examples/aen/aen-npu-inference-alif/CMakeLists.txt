@@ -75,13 +75,17 @@ set(_gen_args
 	--accel         ${AEN_NPU_ACCEL}
 	--model         ${AEN_NPU_MODEL}
 	--name          ${AEN_NPU_MODEL_NAME}
-	--system-config ${AEN_NPU_SYSTEM_CONFIG}
-	--memory-mode   ${AEN_NPU_MEMORY_MODE}
 	--build-dir     ${AEN_NPU_GEN_DIR}
 	--out           ${AEN_NPU_MODEL_H}
 )
+# --system-config/--memory-mode name sections that live ONLY in the Alif
+# proprietary ensemble_vela.ini (e.g. Ethos_U85_SRAM_Only) -- pass them ONLY
+# when that config is supplied, else Vela errors "Section ... not found" against
+# its built-in vela.ini.  Without the Alif config Vela falls back to its default
+# system-config (the build succeeds; the command stream just won't match bench).
 if(AEN_NPU_VELA_CONFIG)
-	list(APPEND _gen_args --config ${AEN_NPU_VELA_CONFIG})
+	list(APPEND _gen_args --config ${AEN_NPU_VELA_CONFIG}
+	     --system-config ${AEN_NPU_SYSTEM_CONFIG} --memory-mode ${AEN_NPU_MEMORY_MODE})
 endif()
 
 add_custom_command(

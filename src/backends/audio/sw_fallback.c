@@ -181,6 +181,9 @@ static const alp_audio_ops_t _ops = {
 	.out_close      = sw_out_close,
 };
 
+/* Export the audio static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(audio);
+
 ALP_BACKEND_REGISTER(audio,
                      sw_fallback,
                      {

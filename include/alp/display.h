@@ -7,19 +7,22 @@
  * @file display.h
  * @brief Alp SDK display abstraction.
  *
- * Portable surface only.  Every op is currently served by the
- * priority-0 NOT_IMPLEMENTED stub (src/backends/display/zephyr_stub.c)
- * -- no real backend exists yet.  The planned real backends are
- * tracked by issue #23:
- *   - a Zephyr `display_*` driver wrapper (so generic SSD1306 /
- *     SSD1351 / similar parts resolve via devicetree),
+ * Portable surface only.  On Zephyr builds that link
+ * CONFIG_DISPLAY, ops are served by the real `display_*`
+ * driver-class wrapper (src/backends/display/zephyr_drv.c) -- any
+ * panel with an upstream Zephyr display driver resolves via the
+ * `alp-display0..3` devicetree aliases.  Elsewhere the priority-0
+ * NOT_IMPLEMENTED stub (zephyr_stub.c) keeps the surface linkable.
+ * Still tracked by issue #23:
  *   - the V2N DSI / parallel-RGB framebuffer path,
  *   - the Alif LCD-IF path,
- *   - alp_display_lvgl_attach() for LVGL flush integration.
+ *   - alp_gui_lvgl_attach() for LVGL flush integration
+ *     (<alp/gui.h>).
  *
 
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      v0.3 placeholder; no real backend impl yet.
+ *      v0.3 surface; Zephyr driver-class backend since v0.9
+ *      (code-complete, native_sim-tested, no silicon run yet).
  *      See docs/abi-markers.md for the convention.
  */
 

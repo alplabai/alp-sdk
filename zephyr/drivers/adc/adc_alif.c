@@ -981,9 +981,16 @@ static int adc_init(const struct device *dev)
 
 	adc_context_init(&data->ctx);
 
-	err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
-	if (err != 0) {
-		return err;
+	/* pinctrl is optional: the ADC inputs are fixed-function analog pads, so an
+	 * enabled adc node carries no pinctrl-0 and config->pcfg is NULL.  Applying it
+	 * unconditionally dereferences NULL in pinctrl_lookup_state (bench: precise
+	 * bus fault in adc_init / analog-validate).  Guard on the property, same as
+	 * dac_alif.c. */
+	if (config->pcfg != NULL) {
+		err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
+		if (err != 0) {
+			return err;
+		}
 	}
 
 	/* adc clock configuration */

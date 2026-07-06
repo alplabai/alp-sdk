@@ -106,10 +106,10 @@ jobs:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version-file: .python-version
 
       - name: Install Python deps
         # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
@@ -170,10 +170,10 @@ jobs:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version-file: .python-version
 
       - name: Install Python deps
         run: pip install jsonschema pyyaml

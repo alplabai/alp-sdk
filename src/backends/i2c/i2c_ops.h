@@ -44,12 +44,33 @@ struct alp_i2c_ops {
 	                           uint8_t                 *rdata,
 	                           size_t                   rlen);
 	void (*close)(alp_i2c_backend_state_t *state);
+	/* Target (slave) mode -- optional.  Backends without target
+	 * support leave both NULL; the dispatcher then fails
+	 * alp_i2c_target_open with ALP_ERR_NOSUPPORT. */
+	alp_status_t (*target_open)(const alp_i2c_target_config_t *cfg, alp_i2c_backend_state_t *state);
+	void (*target_close)(alp_i2c_backend_state_t *state);
 };
 
 struct alp_i2c {
 	alp_i2c_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
+	bool                    in_use;
+};
+
+/* Lifecycle states for struct alp_i2c_target.  Driven atomically by
+ * src/i2c_dispatch.c (see src/common/alp_slot_claim.h) so concurrent
+ * closes race cleanly: exactly one caller unregisters the target and
+ * returns the slot, instead of two closes tearing down (and a
+ * concurrent open re-initialising) the same slot at once. */
+#define ALP_I2C_TARGET_LC_UNOPENED 0u /* slot claimed but open unfinished / closed */
+#define ALP_I2C_TARGET_LC_IDLE     1u
+#define ALP_I2C_TARGET_LC_CLOSING  2u
+
+struct alp_i2c_target {
+	alp_i2c_backend_state_t state;
+	const alp_backend_t    *backend;
+	uint8_t                 lifecycle; /* ALP_I2C_TARGET_LC_*; atomic access only */
 	bool                    in_use;
 };
 

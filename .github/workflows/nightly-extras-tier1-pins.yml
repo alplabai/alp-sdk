@@ -52,7 +52,9 @@ jobs:
       - name: Set up Python + west
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          # Repo is checked out under alp-sdk/ (path:), but setup-python (a
+          # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
+          python-version-file: alp-sdk/.python-version
 
       - name: Install west
         run: pip3 install --user west

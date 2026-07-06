@@ -49,7 +49,7 @@ def test_alp_model_build_threads_compile_opts(tmp_path, monkeypatch):
 
 def test_alp_model_build_emits_alpmodel(tmp_path):
     (tmp_path / "models").mkdir()
-    # A real (compilable) fixture, not dummy bytes: E1M-AEN701 resolves ethos_u
+    # A real (compilable) fixture, not dummy bytes: E1M-AEN801 resolves ethos_u
     # targets, so when `vela` is installed (dev/bench boxes, per running-local-ci)
     # the build invokes the real compiler -- which rejects garbage. The tiny
     # fixture compiles on cpu and (when present) vela alike, keeping this green
@@ -58,7 +58,7 @@ def test_alp_model_build_emits_alpmodel(tmp_path):
                 tmp_path / "models" / "m.tflite")
     (tmp_path / "board.yaml").write_text(
         "name: demo\n"
-        "som:\n  sku: E1M-AEN701\n"
+        "som:\n  sku: E1M-AEN801\n"
         "cores: {}\n"
         "models:\n  - name: demo\n    source: models/m.tflite\n",
         encoding="utf-8")
@@ -84,7 +84,7 @@ def test_alp_model_build_cpu_e2e_with_real_tflite(tmp_path):
     shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", models / "tiny.tflite")
     (tmp_path / "board.yaml").write_text(
         "name: demo\n"
-        "som:\n  sku: E1M-AEN701\n"
+        "som:\n  sku: E1M-AEN801\n"
         "cores: {}\n"
         "models:\n  - name: tiny\n    source: models/tiny.tflite\n",
         encoding="utf-8")

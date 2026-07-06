@@ -9,12 +9,12 @@
  * pad does NOT lock the pad out of the portable surfaces: the same pad
  * stays usable as a plain digital GPIO and as its portable E1M
  * peripheral.  This example proves that on a single pad -- the Arduino
- * A1 analog input (EVK_ADC_ARDUINO_A1 = E1M_ADC1) -- by exercising all
+ * A1 analog input (EVK_ADC_ARDUINO_A1 = ALP_E1M_ADC1) -- by exercising all
  * three surfaces in turn:
  *
- *   Way 1  plain GPIO        alp_gpio_open(E1M_GPIO_ADC1)
+ *   Way 1  plain GPIO        alp_gpio_open(ALP_E1M_GPIO_ADC1)
  *                            -- every analog/timer pad has a universal
- *                               GPIO secondary at E1M_GPIO_<class><N>;
+ *                               GPIO secondary at ALP_E1M_GPIO_<class><N>;
  *                               here ADC1's pad is index 43.
  *   Way 2  portable ADC      alp_adc_open(EVK_ADC_ARDUINO_A1)
  *                            -- the cross-vendor <alp/adc.h> surface,
@@ -54,19 +54,23 @@
 
 int main(void)
 {
-	printf("[flex] vendor-ext composability: one pad (E1M_ADC1), three ways\n");
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
+	printf("[flex] vendor-ext composability: one pad (ALP_E1M_ADC1), three ways\n");
 
 	/* ── Way 1: the pad as a plain digital GPIO ──────────────────
      * The analog peripheral is not "claimed" forever.  An app that
      * doesn't need ADC1's analog function drives its pad digitally
-     * through the GPIO-secondary index E1M_GPIO_ADC1 (= 43 in the
+     * through the GPIO-secondary index ALP_E1M_GPIO_ADC1 (= 43 in the
      * positional e1m_pinout.h order).  We open, configure as a
      * push-pull output, drive it, then close -- releasing the pad. */
-	alp_gpio_t *as_gpio = alp_gpio_open(E1M_GPIO_ADC1);
+	alp_gpio_t *as_gpio = alp_gpio_open(ALP_E1M_GPIO_ADC1);
 	if (as_gpio != NULL) {
 		alp_gpio_configure(as_gpio, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 		alp_gpio_write(as_gpio, true);
-		printf("[flex] way 1: E1M_GPIO_ADC1 driven as a digital GPIO output -- ok\n");
+		printf("[flex] way 1: ALP_E1M_GPIO_ADC1 driven as a digital GPIO output -- ok\n");
 		alp_gpio_close(as_gpio);
 	} else {
 		printf("[flex] way 1: GPIO open skipped (last_err=%d)\n", (int)alp_last_error());
@@ -78,7 +82,7 @@ int main(void)
      * surface -- the call is byte-identical on AEN, V2N, and every
      * other E1M-conformant SoM. */
 	alp_adc_t *adc = alp_adc_open(&(alp_adc_config_t){
-	    .channel_id      = EVK_ADC_ARDUINO_A1, /* = E1M_ADC1 */
+	    .channel_id      = EVK_ADC_ARDUINO_A1, /* = ALP_E1M_ADC1 */
 	    .resolution_bits = 12,
 	    .reference       = ALP_ADC_REF_INTERNAL,
 	});
@@ -94,7 +98,7 @@ int main(void)
 
 	int32_t      uv = 0;
 	alp_status_t s  = alp_adc_read_uv(adc, &uv);
-	printf("[flex] way 2: E1M_ADC1 read as portable ADC -> status=%d uv=%d\n", (int)s, (int)uv);
+	printf("[flex] way 2: ALP_E1M_ADC1 read as portable ADC -> status=%d uv=%d\n", (int)s, (int)uv);
 
 	/* ── Way 3: an Alif vendor extension, layered ADDITIVELY ─────
      * The extension takes the SAME handle from Way 2 and adds a

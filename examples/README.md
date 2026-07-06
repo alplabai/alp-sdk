@@ -62,10 +62,10 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `gpio-button-led`            | GPIO open + configure (input + output); the canonical first build.       |
 | `i2c-scanner`                | Walk an I2C bus + report every device that ACKs.                         |
 | `i2c-master`                 | Read a known I2C device (TMP112) at a known address.                     |
-| `i2c-slave`                  | Slave-mode shape + SDK gap notice (master-only today; not yet implemented). |
+| `i2c-slave`                  | I2C target (slave) mode -- register-file pattern over `alp_i2c_target_open` callbacks. |
 | `i2c-device-hub`             | Read every populated IC on the EVK sensor/power bus through its real chip driver -- one bus, many devices. |
 | `spi-master`                 | Discrete SPI master -- write / transceive / read patterns.                |
-| `spi-slave`                  | Slave-mode shape + SDK gap notice (master-only today; not yet implemented). |
+| `spi-slave`                  | SPI target (slave) mode -- transfer-based request/response via `alp_spi_target_transceive`. |
 | `spi-loopback`               | SPI MOSI ↔ MISO loopback (jumper between the two pins).                  |
 | `uart-echo`                  | Open a UART; loop received bytes back to TX.                             |
 | `uart-hello-world`           | Canonical "printf via UART" walkthrough -- producer-only counterpart.     |
@@ -149,7 +149,7 @@ its `cores:` keys.
 | Directory                | What it shows                                                                                |
 |--------------------------|----------------------------------------------------------------------------------------------|
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
-| `rpmsg-aen`              | AEN E7 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
+| `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
 | `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; build pending iMX93 HW map). **(iMX93)** |
 | `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |

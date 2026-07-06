@@ -34,6 +34,8 @@
 #include "backends/gpu2d/gpu2d_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(gpu2d);
+/* Pull the gpu2d registry section into a static-archive link (#368). */
+ALP_BACKEND_ANCHOR(gpu2d);
 
 /* Reuse the existing TLS-backed last-error mechanism from
  * src/zephyr/last_error.c.  Forward-declared here to avoid pulling
@@ -65,6 +67,27 @@ static void _free(struct alp_gpu2d *h)
 	h->in_use = false;
 }
 
+/* Bytes-per-pixel per portable format.  Mirrors the sw_fallback /
+ * dave2d tables; kept here (not in gpu2d_ops.h) because the
+ * dispatcher needs it for surface validation even when no backend
+ * that defines its own copy is compiled in. */
+static uint32_t _fmt_bpp(alp_gpu2d_format_t fmt)
+{
+	switch (fmt) {
+	case ALP_GPU2D_FMT_ARGB8888:
+	case ALP_GPU2D_FMT_RGBA8888:
+		return 4u;
+	case ALP_GPU2D_FMT_RGB888:
+		return 3u;
+	case ALP_GPU2D_FMT_RGB565:
+		return 2u;
+	case ALP_GPU2D_FMT_A8:
+		return 1u;
+	default:
+		return 0u;
+	}
+}
+
 static alp_status_t _validate_surface(const alp_gpu2d_surface_t *s)
 {
 	if (s == NULL) {
@@ -74,6 +97,16 @@ static alp_status_t _validate_surface(const alp_gpu2d_surface_t *s)
 		return ALP_ERR_INVAL;
 	}
 	if ((unsigned)s->format > (unsigned)ALP_GPU2D_FMT_RGBA8888) {
+		return ALP_ERR_INVAL;
+	}
+	/* A row must fit inside its stride: stride_bytes >= width * bpp.
+	 * Checked as a division so a huge width cannot overflow the
+	 * multiply into a false pass.  Without this, a malformed stride
+	 * makes the sw_fallback's row addressing (y * stride + x * bpp)
+	 * step past base + height * stride -- an out-of-bounds write on
+	 * caller memory -- and feeds the D/AVE 2D backend a truncated
+	 * pixel pitch (see _pitch_px in alif_dave2d.c). */
+	if (s->stride_bytes / _fmt_bpp(s->format) < s->width) {
 		return ALP_ERR_INVAL;
 	}
 	return ALP_OK;

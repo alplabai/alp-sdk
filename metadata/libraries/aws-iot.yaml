@@ -1,0 +1,64 @@
+# AWS IoT Device SDK for Embedded C (ADR 0018 library manifest).
+#
+# Part of the ADR 0018 cloud / connectivity Tier-B group: the AWS-managed MQTT /
+# device-shadow / jobs client stack for constrained devices.  Upstream is the
+# AWS IoT Device SDK for Embedded C (github.com/aws/aws-iot-device-sdk-embedded-C),
+# an umbrella of the coreMQTT / coreHTTP / device-shadow / jobs libraries.
+#
+# West pin + Kconfig grounding (verified 2026-07-05):
+#   AWS IoT embedded-C is NOT in the pinned Zephyr v4.4.0 workspace.  Verified:
+#   `west list` shows only cmsis / cmsis-dsp / cmsis_6 / lvgl / mbedtls /
+#   nanopb-not-listed / open-amp / zcbor (+ hals + mcuboot); there is no
+#   aws / iot entry, and `ls $ZEPHYR_BASE/../modules/lib` has none.  The
+#   manifest therefore carries its own west project pin:
+#     https://github.com/aws/aws-iot-device-sdk-embedded-C.git @ v3.1.5
+#     (tag object 380929bbc27dfa2443892c2e96c62ba62cf09afd; peeled commit
+#      fea3abbb65e102dd03f1238b34eecf8da311daf0).
+#   The AWS SDK is still a generic CMake C SDK with NO official upstream Zephyr
+#   module.yml or master Kconfig symbol, so packaging/build glue is a follow-up;
+#   the pin at least makes the source revision reproducible and lets
+#   `--emit west-libraries` produce a concrete west project entry.
+#
+# Enablement is BY MODULE PRESENCE, not a Kconfig gate.  There is no single
+# upstream `CONFIG_AWS_IOT=y` enable symbol to transcribe (the SDK is configured
+# through per-library CMake options + app code, not one Zephyr master switch).
+# `integration.zephyr` therefore carries `module:` + a `west:` pin and NO
+# `kconfig:`; inventing a symbol is forbidden (ADR 0018).  The emitter renders
+# the selection tag with no CONFIG line until packaging confirms a real enable
+# symbol, if one exists.
+#
+# Version:  `v3.1.5` -- exact upstream release tag from
+#   github.com/aws/aws-iot-device-sdk-embedded-C.
+# License:  Apache-2.0 -- cited from the upstream AWS IoT Device SDK for
+#   Embedded C project (Apache-2.0).  NOT verified from an in-tree LICENSE file,
+#   because the SDK is not in this checkout (not-in-tree-verified).
+#
+# TLS note (bench-gated follow-up): the MQTT transport needs a TLS stack; the
+# workspace already pins mbedtls (west module `mbedtls`), the natural provider,
+# but wiring the transport-interface shim onto it is app + packaging work, not
+# built here.
+schema_version: 1
+name: aws-iot
+description: "AWS IoT Device SDK for Embedded C -- MQTT / device-shadow / jobs client."
+tier: B
+version: "v3.1.5"
+license: Apache-2.0
+
+requires:
+  # Only the Zephyr integration path is expressible today (see header), so
+  # `os: [zephyr]` rejects a selection whose live cores run no Zephyr with the
+  # constraint named.  No core_class: the SDK is arch-neutral generic C, not a
+  # Cortex-M-only library, so pinning a class would over-claim.
+  os: [zephyr]
+
+integration:
+  zephyr:
+    # Enable-by-presence source pin (see header): the REAL upstream repo is
+    # named, with NO invented Kconfig.  Emit renders a library tag plus a west
+    # project entry, but no CONFIG line until Zephyr packaging confirms one.
+    module: aws-iot-device-sdk-embedded-C
+    west:
+      name: aws-iot-device-sdk-embedded-C
+      url: https://github.com/aws/aws-iot-device-sdk-embedded-C.git
+      revision: v3.1.5
+      path: modules/lib/aws-iot-device-sdk-embedded-C

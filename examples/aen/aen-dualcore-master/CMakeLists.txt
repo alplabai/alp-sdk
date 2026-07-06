@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # aen-dualcore-master -- the SES-booted core starts the OTHER M55 at runtime via
-# se_service_boot_cpu() (B1 Option B). Build for BOTH boards; each board's
+# the portable alp_mproc_boot_core() (<alp/mproc.h>; the SE boot service backs
+# it on AEN -- B1 Option B). Build for BOTH boards; each board's
 # fully-qualified boards/<board>.overlay auto-applies (SE mailboxes + per-core
 # itcm/dtcm global_base + ITCM retarget). The HP build is the working master on
 # E8 (the SES boots the HP entry from a dual ATOC); it releases HE.

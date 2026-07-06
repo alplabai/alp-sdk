@@ -2,7 +2,7 @@
 """Tests for `--emit composed-route-table` in alp_project.py.
 
 Runs the emitter via subprocess for one (board x SoM) pair and
-validates the JSON shape.  Uses E1M-AEN701 + E1M-EVK because that
+validates the JSON shape.  Uses E1M-AEN801 + E1M-EVK because that
 combination exercises both the board e1m_routes: block and the
 SoM's pad_routes: CC3501E dispatch entries in one shot.
 """
@@ -13,15 +13,16 @@ import json
 import sys
 from pathlib import Path
 
+import jsonschema
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 METADATA = REPO / "metadata"
 SCRIPT = REPO / "scripts" / "alp_project.py"
 
-# E1M-AEN701 + E1M-EVK: the canonical reference combination.
+# E1M-AEN801 + E1M-EVK: the canonical reference combination.
 # board.yaml used by the gpio-button-led example.
-AEN701_EVK_BOARD = REPO / "examples" / "peripheral-io" / "gpio-button-led" / "board.yaml"
+AEN801_EVK_BOARD = REPO / "examples" / "peripheral-io" / "gpio-button-led" / "board.yaml"
 
 # E1M-V2N101 + E1M-X-EVK: the X-EVK now carries real e1m_routes, so the
 # composition is a mix -- GD32 IO-MCU pads (PWM/ENC/ADC/DAC + the GPIOs
@@ -30,6 +31,7 @@ AEN701_EVK_BOARD = REPO / "examples" / "peripheral-io" / "gpio-button-led" / "bo
 # to direct.  That fallthrough is TBD, not ground truth -- see the
 # TestV2n101XEvk docstring.
 V2N101_XEVK_BOARD = REPO / "examples" / "v2n" / "v2n-pwm-fan-control" / "board.yaml"
+CARRIER_NETLIST_SCHEMA = METADATA / "schemas" / "carrier-netlist-v1.schema.json"
 
 
 @pytest.fixture(scope="module")
@@ -54,12 +56,24 @@ def _run_emitter(board_yaml: Path, alp_project) -> dict:
     return json.loads(raw)
 
 
-class TestAen701Evk:
-    """E1M-AEN701 + E1M-EVK: board has e1m_routes, SoM has CC3501E dispatch."""
+def _run_carrier_netlist(board_yaml: Path, alp_project) -> dict:
+    """Load the project and run _emit_carrier_netlist() directly."""
+    project = alp_project._load_yaml(board_yaml)
+    sku_preset = alp_project._resolve_sku(project["som"]["sku"], METADATA)
+    board_preset = alp_project._resolve_inline_or_preset_board(
+        project, METADATA)
+    raw = alp_project._emit_carrier_netlist(
+        project, sku_preset, board_preset, METADATA
+    )
+    return json.loads(raw)
+
+
+class TestAen801Evk:
+    """E1M-AEN801 + E1M-EVK: board has e1m_routes, SoM has CC3501E dispatch."""
 
     @pytest.fixture(scope="class")
     def result(self, alp_project):
-        return _run_emitter(AEN701_EVK_BOARD, alp_project)
+        return _run_emitter(AEN801_EVK_BOARD, alp_project)
 
     def test_top_level_keys_present(self, result):
         for key in ("board", "som", "silicon_variant", "routes"):
@@ -67,11 +81,11 @@ class TestAen701Evk:
 
     def test_board_and_som_values(self, result):
         assert result["board"] == "E1M-EVK"
-        assert result["som"] == "E1M-AEN701"
+        assert result["som"] == "E1M-AEN801"
 
     def test_silicon_variant_resolved(self, result):
-        # AEN701 carries AE722F80F55D5LS (Alif Ensemble E7).
-        assert result["silicon_variant"] == "AE722F80F55D5LS"
+        # AEN801 carries AE822FA0E5597LS0 (Alif Ensemble E8).
+        assert result["silicon_variant"] == "AE822FA0E5597LS0"
 
     def test_routes_is_non_empty_list(self, result):
         routes = result["routes"]
@@ -88,7 +102,7 @@ class TestAen701Evk:
 
     def test_bmi323_int1_route_is_cc3501e(self, result):
         """EVK_PIN_BMI323_INT1 (E1M_GPIO_IO15) terminates on CC3501E GPIO_14
-        on the AEN701.  This is the canonical cross-SoM routing example."""
+        on the AEN801.  This is the canonical cross-SoM routing example."""
         bmi_rows = [r for r in result["routes"] if r.get("e1m") == "E1M_GPIO_IO15"]
         assert bmi_rows, "E1M_GPIO_IO15 not found in route table"
         row = bmi_rows[0]
@@ -98,7 +112,7 @@ class TestAen701Evk:
         assert row.get("board_category") == "gpio"
 
     def test_direct_dispatch_pads_present(self, result):
-        """Pads not in the AEN701's pad_routes default to dispatch: direct."""
+        """Pads not in the AEN801's pad_routes default to dispatch: direct."""
         direct_rows = [r for r in result["routes"] if r.get("dispatch") == "direct"]
         assert len(direct_rows) > 0
 
@@ -122,7 +136,7 @@ class TestAen701Evk:
 
     def test_json_output_is_valid_json(self, alp_project):
         """The emitter must return well-formed JSON (no trailing garbage)."""
-        project = alp_project._load_yaml(AEN701_EVK_BOARD)
+        project = alp_project._load_yaml(AEN801_EVK_BOARD)
         sku_preset = alp_project._resolve_sku(project["som"]["sku"], METADATA)
         board_preset = alp_project._resolve_board("e1m-evk", METADATA)
         raw = alp_project._emit_composed_route_table(
@@ -224,3 +238,94 @@ class TestV2n101XEvk:
         assert len(gd32) == 40
         assert len(direct) == 25
         assert len(routes) == 65
+
+
+class TestPerRevPadRouteOverride:
+    """The composed route table differs by hw_rev: the base pad_routes track
+    the production rev (r2); r1's pad_route_overrides restore the pre-2626-R2
+    routing.  This is what makes `--emit composed-route-table` rev-differentiated
+    (the byte-for-byte two-rev seam)."""
+
+    @staticmethod
+    def _dispatch(alp_project, hw_rev):
+        sku_preset = alp_project._resolve_sku("E1M-AEN801", METADATA)
+        project = {"name": "t", "som": {"sku": "E1M-AEN801", "hw_rev": hw_rev}}
+        out = json.loads(alp_project._emit_composed_route_table(
+            project, sku_preset, None, METADATA))
+        assert out["hw_rev"] == hw_rev
+        return {r["e1m"]: (r["dispatch"], r.get("dispatch_pin"))
+                for r in out["routes"]
+                if r["e1m"] in ("E1M_GPIO_IO8", "E1M_GPIO_IO10", "E1M_GPIO_IO21")}
+
+    def test_r2_is_the_production_base(self, alp_project):
+        d = self._dispatch(alp_project, "r2")
+        assert d["E1M_GPIO_IO8"] == ("cc3501e", 30)
+        assert d["E1M_GPIO_IO10"] == ("cc3501e", 35)
+        assert "E1M_GPIO_IO21" not in d          # unrouted in r2
+
+    def test_r1_override_restores_pre_r2_routing(self, alp_project):
+        d = self._dispatch(alp_project, "r1")
+        assert d["E1M_GPIO_IO8"] == ("direct", None)     # Alif GPIO
+        assert d["E1M_GPIO_IO10"] == ("direct", None)    # Alif GPIO
+        assert d["E1M_GPIO_IO21"] == ("cc3501e", 30)     # CC3501E GPIO_30
+
+    def test_r1_and_r2_emit_differ(self, alp_project):
+        assert self._dispatch(alp_project, "r1") != self._dispatch(alp_project, "r2")
+
+
+class TestCarrierNetlist:
+    """Studio-facing carrier netlist + BOM contract."""
+
+    @pytest.fixture(scope="class")
+    def aen_result(self, alp_project):
+        return _run_carrier_netlist(AEN801_EVK_BOARD, alp_project)
+
+    @pytest.fixture(scope="class")
+    def xevk_result(self, alp_project):
+        return _run_carrier_netlist(V2N101_XEVK_BOARD, alp_project)
+
+    def test_schema_is_valid_draft202012(self):
+        schema = json.loads(CARRIER_NETLIST_SCHEMA.read_text(encoding="utf-8"))
+        jsonschema.Draft202012Validator.check_schema(schema)
+
+    def test_aen_output_validates_against_schema(self, aen_result):
+        schema = json.loads(CARRIER_NETLIST_SCHEMA.read_text(encoding="utf-8"))
+        jsonschema.Draft202012Validator(schema).validate(aen_result)
+
+    def test_top_level_identity(self, aen_result):
+        assert aen_result["schema_version"] == 1
+        assert aen_result["kind"] == "alp.carrier_netlist"
+        assert aen_result["board"] == "E1M-EVK"
+        assert aen_result["som"] == "E1M-AEN801"
+        assert aen_result["silicon_variant"] == "AE822FA0E5597LS0"
+
+    def test_cc3501e_route_becomes_net_endpoint(self, aen_result):
+        nets = {n["net_id"]: n for n in aen_result["nets"]}
+        net = nets["EVK_PIN_BMI323_INT1"]
+        assert net["e1m"] == "E1M_GPIO_IO15"
+        assert net["dispatch"] == "cc3501e"
+        assert {
+            "kind": "som-dispatch",
+            "ref": "cc3501e",
+            "pin": 14,
+        } in net["endpoints"]
+
+    def test_carrier_bom_includes_populated_chip_and_block(self, aen_result):
+        rows = {r["item_id"]: r for r in aen_result["bom"]["carrier"]}
+        assert rows["bmi323"]["kind"] == "chip"
+        assert rows["bmi323"]["mpn_population"] == ["BMI323"]
+        assert rows["bmi323"]["physical"]["footprint"] == "lga_14_2p5x3p0mm"
+        assert rows["button_led"]["kind"] == "block"
+        assert rows["button_led"]["realization"]["physical_form"] == "discrete"
+        assert "no_concrete_parts" in rows["button_led"]["caveats"]
+
+    def test_on_module_helper_not_in_carrier_bom(self, aen_result, xevk_result):
+        aen_rows = {r["item_id"] for r in aen_result["bom"]["carrier"]}
+        xevk_rows = {r["item_id"] for r in xevk_result["bom"]["carrier"]}
+        assert "cc3501e" not in aen_rows
+        assert "gd32g553" not in xevk_rows
+
+    def test_carrier_netlist_is_not_layout_artifact(self, aen_result):
+        assert "carrier_handoff_not_pcb_layout" in aen_result["caveats"]
+        assert "no_kicad_or_gerber_output" in aen_result["caveats"]
+        assert "som_internals_excluded" in aen_result["caveats"]

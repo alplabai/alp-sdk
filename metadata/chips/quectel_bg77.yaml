@@ -31,7 +31,24 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pre-routed SMD module (not a bare IC) -- light module-form physical only.
+  # Per Quectel BG77 Hardware Design V1.3 (2022-05-21), §2.1 "General
+  # Description" + §2.3 "Functional Diagram" physical-characteristics table.
+  # Module reflow-mounts via 94 LGA pads on its underside; no discrete
+  # board-mount package/pin-map applies (the LGA pad map itself is a
+  # module-internal detail, not a per-pin footprint entry). Antenna is exposed
+  # as two 50-ohm LGA pads (ANT_MAIN cellular, ANT_GNSS integrated GNSS), not
+  # an on-module antenna element.
+  package:              "SMD LGA module, 94 LGA pads"
+  dimension_mm:         "14.9 x 12.9 x 1.7"
+  antenna:              "ANT_MAIN (main cellular RF, 50 ohm) + ANT_GNSS (integrated GNSS, 50 ohm) LGA pads"
+  operating_temp_deg_c: "-35..75 (operating); -40..85 (extended)"
+  visibility:           public
+  provenance:           web_provisional

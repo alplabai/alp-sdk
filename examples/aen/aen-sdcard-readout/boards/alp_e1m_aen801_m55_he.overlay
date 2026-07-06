@@ -12,8 +12,10 @@
  * PADS -- TBD, see [[project_pending_hw_configs]]: this overlay wires the SD "D"
  * pad route (CLK=P4_1, CMD=P4_2, D0..D3=P6_0..P6_3) from the upstream
  * alif-ensemble-pinctrl.h as a documented default; confirm the E1M-AEN801 SoM/EVK
- * SD routing against the schematic.  (Data lines also want pad read-enable, not in
- * the upstream alif,pinctrl binding -- needed for real reads, omitted here.)
+ * SD routing against the schematic.  The bidirectional CMD + D0..D3 lines set the
+ * pad read-enable (REN) -- the alif,pinctrl binding DOES carry `read-enable`, so
+ * the SoC can sample the card's CMD/DATA response lines (CLK is output-only and
+ * omits it).
  *
  * CARD REACHABILITY -- the EVK microSD is behind a 74LVC157 SDIO mux whose
  * EN (IO20) + SEL (IO21) are BOTH on the CC3501E side (driven over the SPI
@@ -31,11 +33,20 @@
 
 &pinctrl {
 	pinctrl_sdmmc: pinctrl_sdmmc {
+		/* CLK is push-pull output only -- no pad read-enable needed. */
 		group0 {
-			pinmux = <PIN_P4_1__SD_CLK_D>, <PIN_P4_2__SD_CMD_D>,
+			pinmux = <PIN_P4_1__SD_CLK_D>;
+			drive-strength = <8>;
+		};
+		/* CMD + D0..D3 are bidirectional: the pad receiver (read-enable /
+		 * REN bit) MUST be on so the SoC can sample the card's CMD/DATA
+		 * response lines, otherwise enumeration can never complete. */
+		group1 {
+			pinmux = <PIN_P4_2__SD_CMD_D>,
 				 <PIN_P6_0__SD_D0_D>, <PIN_P6_1__SD_D1_D>,
 				 <PIN_P6_2__SD_D2_D>, <PIN_P6_3__SD_D3_D>;
 			drive-strength = <8>;
+			read-enable = <1>;
 		};
 	};
 };

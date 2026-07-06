@@ -1,0 +1,22 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Headless display binding for the ADR 0018 Tier-A library lane.
+ * LVGL's Zephyr integration needs `zephyr,display` even when the
+ * test only compiles and links widget code, so point it at the
+ * upstream dummy display controller instead of native_sim's SDL
+ * display.
+ */
+
+/ {
+	chosen {
+		zephyr,display = &dummy_dc;
+	};
+
+	dummy_dc: dummy_dc {
+		compatible = "zephyr,dummy-dc";
+		height = <240>;
+		width = <320>;
+	};
+};

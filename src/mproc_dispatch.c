@@ -316,3 +316,42 @@ const alp_capabilities_t *alp_hwsem_capabilities(const alp_hwsem_t *sem)
 {
 	return (sem != NULL) ? &sem->cached_caps : NULL;
 }
+
+/* ================================================================== */
+/* Peer-core boot (class "mproc_boot", handle-less)                    */
+/*                                                                     */
+/* A separate registry class from "mproc": releasing a peer core is a  */
+/* boot-authority concern, and its silicon-specific backend (the Alif  */
+/* SE-service body) must not displace the portable zephyr_drv winner   */
+/* of the IPC-primitive class.  Handle-less TMU pattern: cache the     */
+/* selected ops vtable on first call.                                  */
+/* ================================================================== */
+
+ALP_BACKEND_DEFINE_CLASS(mproc_boot);
+
+static const alp_mproc_boot_ops_t *_cached_boot_ops = NULL;
+
+static const alp_mproc_boot_ops_t *_get_boot_ops(void)
+{
+	if (_cached_boot_ops != NULL) {
+		return _cached_boot_ops;
+	}
+	const alp_backend_t *be = alp_backend_select("mproc_boot", ALP_SOC_REF_STR);
+	if (be == NULL) {
+		return NULL;
+	}
+	_cached_boot_ops = (const alp_mproc_boot_ops_t *)be->ops;
+	return _cached_boot_ops;
+}
+
+alp_status_t alp_mproc_boot_core(alp_core_id_t core, uintptr_t entry_addr)
+{
+	if (core == ALP_CORE_SELF) {
+		return ALP_ERR_INVAL;
+	}
+	const alp_mproc_boot_ops_t *ops = _get_boot_ops();
+	if (ops == NULL || ops->boot_core == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	return ops->boot_core(core, entry_addr);
+}

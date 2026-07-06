@@ -10,7 +10,7 @@ what's behind them; this example *reads* a known sensor.
 
 ## What this shows
 
-* `alp_i2c_open()` -- open `E1M_I2C0` at 400 kHz Fast-mode.
+* `alp_i2c_open()` -- open `ALP_E1M_I2C0` at 400 kHz Fast-mode.
 * `tmp112_init()` -- chip-driver probe + configure.
 * `tmp112_set_rate()` -- tune the conversion cadence.
 * `tmp112_read_temp_milli_c()` -- one register read per second.
@@ -26,16 +26,18 @@ V2N-M1 families per
 
 7-bit address depends on the ADD0 strap:
 
-| ADD0 strap | Address | SoM defaults                    |
-|------------|---------|---------------------------------|
-| GND        | 0x48    | E1M-AEN (this example's default) |
-| V+         | 0x49    | (none today)                    |
-| SDA        | 0x40    | E1M-V2N, E1M-V2M (V2N-M1)       |
-| SCL        | 0x4B    | (none today)                    |
+| ADD0 strap | Address | SoM defaults                              |
+|------------|---------|-------------------------------------------|
+| GND        | 0x48    | E1M-AEN + E1M-V2N families (this default) |
+| V+         | 0x49    | (none today)                              |
+| SDA        | 0x4A    | (none today)                              |
+| SCL        | 0x4B    | (none today)                              |
 
-If you copy this example to a V2N project, change `TMP112_ADDR_7BIT`
-to `0x40` -- the V2N straps ADD0 to SDA (see TMP112 datasheet SBOS473K
-table 2 or [`include/alp/chips/tmp112.h`](../../../include/alp/chips/tmp112.h)).
+All current SoM families strap ADD0 to GND, so `TMP112_ADDR_7BIT`
+works unchanged across them (see the `scope:` note in
+[`metadata/chips/tmp112.yaml`](../../../metadata/chips/tmp112.yaml),
+TMP112 datasheet SBOS473K table 2, or
+[`include/alp/chips/tmp112.h`](../../../include/alp/chips/tmp112.h)).
 
 ## Build
 
@@ -46,8 +48,8 @@ west build -b native_sim/native/64 examples/peripheral-io/i2c-master \
 west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
-# Example for E1M-AEN701:
-west build -b alp_e1m_aen701_m55_hp examples/peripheral-io/i2c-master
+# Example for E1M-AEN801:
+west build -b alp_e1m_aen801_m55_hp examples/peripheral-io/i2c-master
 west flash
 ```
 
@@ -56,7 +58,7 @@ west flash
 Real hardware (TMP112 populated, room temperature):
 
 ```
-[i2c-master] open E1M_I2C0 @ 400 kHz
+[i2c-master] open ALP_E1M_I2C0 @ 400 kHz
 [i2c-master] tmp112_init @ 0x48 -> 0 (OK)
 [i2c-master] sample 0: 23.625 degC
 [i2c-master] sample 1: 23.687 degC
@@ -69,7 +71,7 @@ Real hardware (TMP112 populated, room temperature):
 native_sim (emul I2C, no TMP112 registered):
 
 ```
-[i2c-master] open E1M_I2C0 @ 400 kHz
+[i2c-master] open ALP_E1M_I2C0 @ 400 kHz
 [i2c-master] tmp112_init @ 0x48 -> -5 (populated? right address?)
 [i2c-master] done
 ```

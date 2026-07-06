@@ -1,0 +1,58 @@
+# micro-ROS -- ROS 2 client for microcontrollers (ADR 0018 library manifest).
+#
+# The Cortex-M / Zephyr half of the ADR 0018 flagship: a micro-ROS node runs
+# on the M-class Zephyr peer and talks to a ROS 2 agent on the Cortex-A / Yocto
+# peer (see metadata/libraries/ros2.yaml).  Together they are the heterogeneous
+# Zephyr+Yocto robotics proof ADR 0010 exists to enable.
+#
+# West pin + Kconfig grounding (verified 2026-07-05):
+#   alp-sdk/west.yml pins github.com/micro-ROS/micro_ros_zephyr_module from the
+#   Humble release branch at cfbddc5e4334317a1036e883ce8f6af12b1da66a.  The
+#   module's modules/libmicroros/Kconfig declares `menuconfig MICROROS`, so the
+#   real enable symbol is CONFIG_MICROROS=y.  Transport/RMW/executor details
+#   still belong in app-specific prj.conf / colcon meta; this manifest only
+#   enables the module's master support switch.
+#
+# Cross-core transport (BENCH-GATED, its own follow-up):
+#   A micro-ROS node on M reaches the ROS 2 agent on A either over UDP on a
+#   virtual net or a custom RMW over RPMsg.  alp-sdk already has the RPMsg
+#   substrate the latter would ride: open-amp is pinned (west module
+#   `open-amp`), the A55/Linux side has a framed RPMsg transport
+#   (src/backends/rpc/yocto_drv.c binding <alp/rpc.h> onto /dev/rpmsg_ctrl0,
+#   ADR 0016), and examples/multicore/rpmsg-v2n proves the A55<->M33 channel.
+#   But NOTHING wires a micro-ROS RMW onto it today, and there is no ROS 2
+#   agent packaged on the A side yet.  The RMW bridge is a separate design
+#   (likely its own ADR) and must be proven on the bench -- it is NOT built here.
+#
+# Version:  `humble` -- the micro-ROS Humble release line, chosen to pair with
+#   the meta-ros2-humble A-side that meta-alp-sdk already grounds (ros2.yaml).
+#   The reproducible source pin is the exact west.yml revision above.
+# License:  Apache-2.0 -- cited from the upstream micro-ROS project (the whole
+#   micro-ROS stack and micro_ros_zephyr_module are Apache-2.0).
+schema_version: 1
+name: micro-ros
+description: "micro-ROS -- ROS 2 client for microcontrollers (Cortex-M / Zephyr node)."
+# Tier B for now: the metadata/libraries/README.md promotion bar for Tier A is
+# CI-built + a shipped teaching example + breakage-blocks-release.  micro-ROS
+# meets only the pin + manifest part today.  It promotes to Tier A once the CI
+# build lane and the microros<->ros2 example land (its named follow-ups).
+tier: B
+version: "humble"
+license: Apache-2.0
+
+requires:
+  # micro-ROS is the Zephyr / M-class client in the alp-sdk heterogeneous
+  # topology (ADR 0010): it runs on the Cortex-M peer while ROS 2 owns the
+  # Cortex-A / Yocto side (ros2.yaml).  `os: [zephyr]` rejects a selection on a
+  # core that does not run Zephyr with a clear message; `core_class: m` pins the
+  # deployment role.  (Unlike cmsis-nn there is no CPU_CORTEX_M `depends on` to
+  # cite -- the module is not pinned -- so this constraint encodes the alp-sdk
+  # deployment model, not an upstream Kconfig dependency.)
+  os: [zephyr]
+  core_class: m
+
+integration:
+  zephyr:
+    module: micro_ros_zephyr_module
+    kconfig:
+      - CONFIG_MICROROS=y

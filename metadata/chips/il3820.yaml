@@ -22,6 +22,16 @@ signals:
   - { name: DC,   type: input, scope: "D/C# command/data" }
   - { name: RESET, type: input, scope: "active-low hardware reset" }
   - { name: BUSY, type: output, scope: "panel-busy back to host" }
+  - { name: VCI,    type: power, scope: "main analog/logic supply (VCIA/VCIBG bond to the same net)" }
+  - { name: EXTVDD, type: input, scope: "VDD-regulator bypass select; tie to VSS to use the on-chip regulator" }
+  - { name: VPP,    type: power, scope: "OTP programming supply; leave unconnected when OTP is unused" }
+  - { name: CLS,    type: input, scope: "internal-oscillator/CL enable strap; tie per GoodDisplay reference app" }
+  - { name: MS_SEL, type: input, scope: "cascade master/slave select (M/S#); tie high for single-chip use" }
+  - { name: BS0,    type: input, scope: "MCU host-interface mode-select strap, bit 0" }
+  - { name: BS1,    type: input, scope: "MCU host-interface mode-select strap, bit 1" }
+  - { name: BS2,    type: input, scope: "MCU host-interface mode-select strap, bit 2" }
+  - { name: TSDA,   type: bidir,  scope: "I2C data to an external panel temperature sensor" }
+  - { name: TSCL,   type: output, scope: "I2C clock to an external panel temperature sensor" }
 
 resolutions:
   max:            [400, 300]
@@ -35,7 +45,58 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per GoodDisplay "E Paper IC Specifications IL3820" (2016.4.7),
+  # section 5 "Pin Description".  IL3820 ships only as a COG bare die
+  # (gold-bump, waffle-pack; ordering options IL3820C = bump-face-up,
+  # IL3820C0 = bump-face-down) -- the public datasheet names every pin
+  # but does NOT publish numeric bump/pad IDs for the control/power
+  # pads (only the panel gate/source-driver bump ORDER is numbered, in
+  # Figure 8-1, which is out of scope here).  Per pin name is used
+  # verbatim as the `pad` string below since no numeric ID exists to
+  # transcribe.  Booster/analog application-only pads (GDR, RESE,
+  # PREVGH, PREVGL, VGH, VGL, VSH, VSL, VCOM) are intentionally
+  # omitted -- they are not bus/power/gnd/INT/reset/key-IO pads.
+  refdes_prefix: U
+  package:              "COG bare die (gold bump, waffle pack)"
+  footprint:             cog_die
+  operating_temp_deg_c:  "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "VCI",       signal: "VCI" }
+    - { pad: "VCIA",      signal: "VCI" }
+    - { pad: "VCIBG",     signal: "VCI" }
+    - { pad: "VDDIO",     signal: "VDDIO" }
+    - { pad: "VDD",       signal: "VDD" }
+    - { pad: "EXTVDD",    signal: "EXTVDD" }
+    - { pad: "VSS",       signal: "VSS" }
+    - { pad: "VSSA",      signal: "VSS" }
+    - { pad: "VSSBG",     signal: "VSS" }
+    - { pad: "VSSGS",     signal: "VSS" }
+    - { pad: "VPP",       signal: "VPP" }
+    - { pad: "SCLK(D0)",  signal: "SCLK" }
+    - { pad: "SDIN(D1)",  signal: "MOSI" }
+    - { pad: "CS#",       signal: "CS" }
+    - { pad: "D/C#",      signal: "DC" }
+    - { pad: "RES#",      signal: "RESET" }
+    - { pad: "BUSY",      signal: "BUSY" }
+    - { pad: "CLS",       signal: "CLS" }
+    - { pad: "M/S#",      signal: "MS_SEL" }
+    - { pad: "BS2",       signal: "BS2" }
+    - { pad: "BS1",       signal: "BS1" }
+    - { pad: "BS0",       signal: "BS0" }
+    - { pad: "TSDA",      signal: "TSDA" }
+    - { pad: "TSCL",      signal: "TSCL" }
+  passives:
+    # Table 13-1 "Reference Component Value": C0 = 1uF on VCI, C1 =
+    # 1uF on VDD (also explicitly mandated by the VDD pin-description
+    # text: "an external capacitor is required between VDD and VSS").
+    - { role: decouple, value: 1uF, net: VCI, refdes_prefix: C }
+    - { role: decouple, value: 1uF, net: VDD, refdes_prefix: C }

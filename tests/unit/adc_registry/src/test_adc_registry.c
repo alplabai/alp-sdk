@@ -6,6 +6,9 @@
  *
  * Backends visible on this test build:
  *   alif_e7         (priority 100, alif:ensemble:e7)
+ *   zephyr_drv      (priority 100, "*" wildcard) -- the portable
+ *                    Zephyr adc_* backend, compiled with CONFIG_ADC
+ *                    like its i2c/spi/uart/can siblings.
  *   gd32_bridge     (priority 100, renesas:rzv2n:n44) -- registers
  *                    only when CONFIG_ALP_SOC_RENESAS_RZV2N_N44 is set;
  *                    not selected here (we build with ALIF=y).
@@ -73,14 +76,15 @@ ZTEST(alp_adc_registry, test_realhw_picked_over_sw_on_alif_e7)
 	zassert_equal(be->priority, 100);
 }
 
-ZTEST(alp_adc_registry, test_sw_fallback_picked_for_unknown_silicon)
+ZTEST(alp_adc_registry, test_zephyr_wildcard_picked_for_unknown_silicon)
 {
-	/* No real backend registers for fictional silicon -- only the
-     * sw_fallback wildcard matches. */
+	/* No exact-match backend registers for fictional silicon; between
+     * the two wildcards the portable zephyr_drv (priority 100) beats
+     * sw_fallback (priority 0) -- tier 1 of the selector. */
 	const alp_backend_t *be = alp_backend_select("adc", "fictional:soc:zz");
 	zassert_not_null(be);
-	zassert_equal(strcmp(be->vendor, "sw_fallback"), 0);
-	zassert_equal(be->priority, 0);
+	zassert_equal(strcmp(be->vendor, "zephyr"), 0);
+	zassert_equal(be->priority, 100);
 }
 
 ZTEST(alp_adc_registry, test_select_returns_null_for_null_class)
@@ -97,9 +101,9 @@ ZTEST(alp_adc_registry, test_select_returns_null_for_null_silicon_ref)
 
 ZTEST(alp_adc_registry, test_backend_count_for_adc)
 {
-	/* alif_e7 + sw_fallback registered on this build.
+	/* alif_e7 + zephyr_drv + sw_fallback registered on this build.
      * gd32_bridge is NOT (it's CONFIG_ALP_SOC_RENESAS_RZV2N_N44-gated). */
-	zassert_equal(alp_backend_count("adc"), 2u);
+	zassert_equal(alp_backend_count("adc"), 3u);
 }
 
 /* ---------- Public-API behaviour tests ------------------------------ */
@@ -139,8 +143,10 @@ ZTEST(alp_adc_registry, test_alif_handle_advertises_oversample_cap)
 	zassert_true(alp_capabilities_has(caps, ALP_INSTANCE_CAP_HW_TRIGGER));
 }
 
-ZTEST(alp_adc_registry, test_sw_handle_advertises_no_hw_caps)
+ZTEST(alp_adc_registry, test_wildcard_handle_advertises_no_hw_caps)
 {
+	/* Unknown silicon resolves to the portable zephyr_drv wildcard,
+     * whose base_caps is 0 -- no HW capability may leak through. */
 	alp_adc_t *h = _make_fake_handle("fictional:soc:zz");
 	zassert_not_null(h);
 	const alp_capabilities_t *caps = alp_adc_capabilities(h);

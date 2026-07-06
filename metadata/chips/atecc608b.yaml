@@ -29,7 +29,34 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SDA, type: bidir, scope: "I2C data" }
+  - { name: SCL, type: input, scope: "I2C clock input" }
+
+physical:
+  # Pins per Microchip ATECC608B Summary Datasheet DS40002239A (2020), Table 1
+  # "Pin Configuration" + Figure 1 "Package Types" for the 8-pad UDFN (MAH
+  # package option, 2x3x0.6mm, matches MPN suffix "MAHDA-T"). Pins 1-3, 7 are
+  # NC and omitted. The exposed backside paddle is recommended tied to GND
+  # per the datasheet note but is not a numbered pin on this package.
+  refdes_prefix: U
+  package:       UDFN-8
+  footprint:     microchip_udfn_8_2x3mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "4", signal: "GND" }
+    - { pad: "5", signal: "SDA" }
+    - { pad: "6", signal: "SCL" }
+    - { pad: "8", signal: "VCC" }
+    - { pad: "PAD", signal: "GND" }
+  passives:
+    - { role: decouple, value: 100nF, net: VCC, refdes_prefix: C }   # standard MCU-side bypass practice; not chip-datasheet-specified
+    - { role: pullup,   value: 4k7,   net: SDA, refdes_prefix: R }
+    - { role: pullup,   value: 4k7,   net: SCL, refdes_prefix: R }

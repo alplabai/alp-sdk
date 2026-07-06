@@ -8,16 +8,16 @@
  * Headline edge-AI demo on the E1M-AEN family.
  *
  *   ┌──────────────────┐                ┌──────────────────────┐
- *   │  E1M-AEN701 SoM  │  MIPI / DVP    │ OmniVision OV5640    │
+ *   │  E1M-AEN801 SoM  │  MIPI / DVP    │ OmniVision OV5640    │
  *   │ + Cortex-M55 HP  │ ◀──── frames ──│ camera (RGB565 / VGA)│
  *   └────────┬─────────┘                └──────────────────────┘
  *            │   <alp/camera.h> hands the frame to the inference
  *            │   pipeline:
  *            ▼
  *      ┌──────────────────────┐
- *      │ TFLM + Ethos-U55      │  ── person_detect.tflite
+ *      │ TFLM + Ethos-U85      │  ── person_detect.tflite
  *      │ (CONFIG_ALP_TFLM_     │     compiled with Vela for
- *      │  ETHOS_U55=y on E7)   │     ethos-u55-256.
+ *      │  ETHOS_U85=y on E8)   │     ethos-u85-256.
  *      └─────────┬─────────────┘
  *                │  ── bounding-box list + per-class score
  *                ▼
@@ -37,8 +37,8 @@
  *      `capabilities:` block, no app-source changes.
  *   2. "How fast?"  --  the per-frame latency strip prints the
  *      microseconds from `alp_inference_invoke()` entry to exit.
- *      Customers compare AEN701 (U55) vs AEN801 (U85) by
- *      flipping `som.sku` in `board.yaml`.
+ *      Customers compare E8 / E6 / E4 by flipping `som.sku`
+ *      in `board.yaml`.
  *   3. "Does it run portably?"  --  the app source uses zero
  *      vendor-specific symbols; the SoC-family routing is in the
  *      loader, not the source.  Re-targeting from AEN to NX9101

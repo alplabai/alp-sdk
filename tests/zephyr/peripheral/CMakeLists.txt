@@ -12,7 +12,9 @@ project(alp_sdk_peripheral_test LANGUAGES C)
 target_sources(app PRIVATE
     src/main.c
     src/i2c.c
+    src/i2c_target.c
     src/spi.c
+    src/spi_target.c
     src/gpio.c
     src/uart.c
     src/pwm.c

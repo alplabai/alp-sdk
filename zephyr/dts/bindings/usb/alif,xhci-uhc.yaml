@@ -1,0 +1,22 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Alif Ensemble USB controller (DWC3-family xHCI USB-2.0) in host mode.
+#
+# NOTE: no "uhc.yaml" base exists in Zephyr 4.4.  The usb-controller.yaml
+# base provides maximum-speed, vbus-gpios, and bus: usb (used by NXP UHC
+# bindings as the closest existing ancestor).
+# The Alif Ensemble USB IP is an xHCI USB-2.0 dual-role controller (DWC3-
+# family) @ 0x48200000 / IRQ 101 (AE402FA0E5597 DFP soc.h).
+
+description: Alif Ensemble USB controller (DWC3-family) in xHCI host mode
+
+compatible: "alif,xhci-uhc"
+
+include: [usb-controller.yaml]
+
+properties:
+  reg:
+    required: true
+  interrupts:
+    required: true

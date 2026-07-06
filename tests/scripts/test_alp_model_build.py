@@ -18,7 +18,7 @@ def test_build_model_writes_alpmodel_with_cpu_blob_and_coverage(tmp_path):
     src.write_bytes(b"TFL3-DUMMY")
     # Inject only the CPU adapter so the result is independent of which compiler
     # toolchains happen to be installed on the build host.
-    out = build_model(sku="E1M-AEN701", name="demo", source=src, out_dir=tmp_path,
+    out = build_model(sku="E1M-AEN801", name="demo", source=src, out_dir=tmp_path,
                       metadata_root=_META, adapters=[CpuAdapter()])
     assert out == tmp_path / "demo.alpmodel"
     mft, blobs = read_package(out.read_bytes())
@@ -26,10 +26,12 @@ def test_build_model_writes_alpmodel_with_cpu_blob_and_coverage(tmp_path):
     cpu = [t for t in mft.targets if t.backend == "cpu"]
     assert len(cpu) == 1
     assert blobs[cpu[0].blob] == b"TFL3-DUMMY"
-    # Ethos-U has no injected adapter -> recorded as coverage skips (both variants).
+    # Ethos-U has no injected adapter -> recorded as coverage skips (all E8 variants).
     ethos_u_skips = [c for c in mft.coverage if c.backend == "ethos_u" and c.status == "skipped"]
-    assert len(ethos_u_skips) == 2
-    assert {c.accel_config for c in ethos_u_skips} == {"ethos-u55-256", "ethos-u55-128"}
+    assert len(ethos_u_skips) == 3
+    assert {c.accel_config for c in ethos_u_skips} == {
+        "ethos-u85-256", "ethos-u55-256", "ethos-u55-128"
+    }
 
 
 def test_build_model_errors_when_no_blob_compiled(tmp_path):
@@ -37,7 +39,7 @@ def test_build_model_errors_when_no_blob_compiled(tmp_path):
     src = tmp_path / "m.pt"
     src.write_bytes(b"PYTORCH")
     with pytest.raises(ValueError, match="no blob compiled"):
-        build_model(sku="E1M-AEN701", name="demo", source=src, out_dir=tmp_path,
+        build_model(sku="E1M-AEN801", name="demo", source=src, out_dir=tmp_path,
                     metadata_root=_META, adapters=[CpuAdapter()])
 
 
@@ -58,12 +60,12 @@ def test_build_model_records_unavailable_tool_as_skip(tmp_path):
 
     src = tmp_path / "m.tflite"
     src.write_bytes(b"TFL3-DUMMY")
-    out = build_model(sku="E1M-AEN701", name="demo", source=src, out_dir=tmp_path,
+    out = build_model(sku="E1M-AEN801", name="demo", source=src, out_dir=tmp_path,
                       metadata_root=_META, adapters=[CpuAdapter(), _Unavail()])
     mft, _ = read_package(out.read_bytes())
     ethos_u_skips = [c for c in mft.coverage
                      if c.backend == "ethos_u" and c.status == "skipped"]
-    assert len(ethos_u_skips) == 2                      # both u55 accel-config variants
+    assert len(ethos_u_skips) == 3                      # u85 plus both u55 accel-config variants
     assert all("not installed" in c.reason for c in ethos_u_skips)
 
 

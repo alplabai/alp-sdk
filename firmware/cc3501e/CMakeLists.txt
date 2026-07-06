@@ -60,6 +60,7 @@ set(CC3501E_BRIDGE_SOURCES
     src/main.c
     src/protocol.c
     src/worker.c
+    src/event_ring.c
     src/transport_spi.c
     src/transport_sdio.c
 )
@@ -98,11 +99,24 @@ elseif(NOT CC3501E_CONTROL_TRANSPORT STREQUAL "spi")
 endif()
 
 # Firmware *release* version (own semver; source of truth firmware-version.txt).
+# Parse the SemVer and pack MINOR/PATCH into the u16 marker reported by
+# GET_DIAG_INFO.fw_version, so the runtime value is DERIVED from this file and
+# can never drift (see the CC3501E_BRIDGE_FW_VERSION_U16 comment in src/protocol.c).
+# Pre-1.0 packing: (MINOR << 8) | PATCH -> 0.2.0 = 0x0200.  ti/build_ti.sh mirrors
+# this for the TI build (that path does not go through CMake).
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/firmware-version.txt CC3501E_BRIDGE_FW_VERSION LIMIT_COUNT 1)
-message(STATUS "cc3501e-bridge firmware version: ${CC3501E_BRIDGE_FW_VERSION}")
+if(NOT CC3501E_BRIDGE_FW_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(FATAL_ERROR "firmware-version.txt not SemVer major.minor.patch: '${CC3501E_BRIDGE_FW_VERSION}'")
+endif()
+math(EXPR CC3501E_BRIDGE_FW_VERSION_U16 "(${CMAKE_MATCH_2} << 8) | ${CMAKE_MATCH_3}" OUTPUT_FORMAT HEXADECIMAL)
+message(STATUS "cc3501e-bridge firmware version: ${CC3501E_BRIDGE_FW_VERSION} (fw_version marker ${CC3501E_BRIDGE_FW_VERSION_U16})")
 message(STATUS "cc3501e-bridge HAL backend: ${CC3501E_HAL_BACKEND}; transport: ${CC3501E_CONTROL_TRANSPORT}")
 
 add_executable(cc3501e-bridge ${CC3501E_BRIDGE_SOURCES})
+
+# Feed the derived fw_version marker to protocol.c (overrides its #ifndef fallback).
+target_compile_definitions(cc3501e-bridge PRIVATE
+    CC3501E_BRIDGE_FW_VERSION_U16=${CC3501E_BRIDGE_FW_VERSION_U16})
 
 # Include paths: firmware src + hal, and the repo-root include/ so the
 # firmware includes the CANONICAL <alp/protocol/cc3501e.h> directly --

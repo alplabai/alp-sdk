@@ -6,13 +6,13 @@
  *
  * The mirror of the HP host overlay.  HE is the remote, so its tx/rx frames
  * are the OPPOSITE windows of the same two MHU instances:
- *   - tx (HE -> HP) : MHU1 HE-TX window @0x400B0000, HE IRQ 44
- *   - rx (HP -> HE) : MHU0 HE-RX window @0x40080000, HE IRQ 41
+ *   - tx (HE -> HP) : NS MHU1 TX window @0x400B0000, HE IRQ 44
+ *   - rx (HP -> HE) : NS MHU1 RX window @0x400A0000, HE IRQ 43
  *
  * Addresses + IRQs are clean-room-transcribed from the Alif DFP E8 part
  * (AE822FA0E5597, rtss_he/soc.h):
  *   MHU_M55HE_M55HP_1_TX_BASE = 0x400B0000, MHU_M55HE_M55HP_1_TX_IRQn = 44
- *   MHU_M55HP_M55HE_0_RX_BASE = 0x40080000, MHU_M55HP_M55HE_0_RX_IRQn = 41
+ *   MHU_M55HP_M55HE_1_RX_BASE = 0x400A0000, MHU_M55HP_M55HE_1_RX_IRQn = 43
  * The HE -> HP TX window (0x400B0000) is bench-proven by aen-dualcore-doorbell
  * (commit b81a3738): HE wrote CH0_SET @0x400B0000 and HP saw every ring at its
  * paired RX @0x400A0000.

@@ -63,3 +63,58 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: VIN,      type: power,  scope: "primary supply input, 2.4-5.5V; 3 balls in parallel (D1/D2/D3)" }
+  - { name: SW,        type: output, scope: "switch node of the internal power FETs; feeds the external output inductor; 3 balls in parallel (C1/C2/C3)" }
+  - { name: PGND,      type: ground, scope: "power ground return for the switching stage; 3 balls (B1/B2/B3)" }
+  - { name: AGND,      type: ground, scope: "analog ground reference (single ball, A1)" }
+  - { name: VOS,       type: analog, scope: "output-voltage sense pin; datasheet requires a direct connection to the output capacitor node" }
+  - { name: VSET_VID,  type: bidir,  scope: "start-up VOUT + I2C slave-address select via external resistor (datasheet Table 8-1); after start-up the same ball is either the VID input (VOUT-register 1/2 select, device option 'A') or the PG output (device option 'B'), per datasheet Table 5-1 device-options" }
+  - { name: EN,        type: input,  scope: "device enable, active high; do not leave floating" }
+  - { name: SDA,       type: bidir,  scope: "I2C serial data; do not leave floating, tie to AGND if unused" }
+  - { name: SCL,       type: input,  scope: "I2C serial clock; do not leave floating, tie to AGND if unused" }
+
+physical:
+  # Pins per TI TPS62864/TPS62866 datasheet SLVSEI1C (rev. Oct 2020),
+  # Section 6 "Pin Configuration and Functions" (Figure 6-1 / Table 6-1),
+  # and Section 13 mechanical package drawing (4224261/B, Aug 2019).
+  # Package is a 15-ball DSBGA ("YCG" TI package code -- die-size ball
+  # grid array / WCSP), NOT a WSON: the orderable-part table (Section 13
+  # "Package Option Addendum") lists TPS628640xYCGR as "DSBGA (YCG) | 15",
+  # 1.05 x 1.78 x 0.5mm body, 0.35mm ball pitch, grid A1..E3 (no C-column
+  # skip, 5 rows x 3 columns, all 15 balls signal-bearing -- no NC balls
+  # on this package). Ball A2's dual VID/PG behaviour after start-up
+  # depends on the populated device option (see signals: VSET_VID note);
+  # this manifest keeps the VSET_VID name already used by register_table
+  # above and by the driver's runtime VOUT1/VOUT2 select comments.
+  refdes_prefix: U
+  package:       DSBGA-15
+  footprint:     dsbga_15_1p05x1p78x0p5mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "A1", signal: "AGND" }
+    - { pad: "A2", signal: "VSET_VID" }
+    - { pad: "A3", signal: "VOS" }
+    - { pad: "B1", signal: "PGND" }
+    - { pad: "B2", signal: "PGND" }
+    - { pad: "B3", signal: "PGND" }
+    - { pad: "C1", signal: "SW" }
+    - { pad: "C2", signal: "SW" }
+    - { pad: "C3", signal: "SW" }
+    - { pad: "D1", signal: "VIN" }
+    - { pad: "D2", signal: "VIN" }
+    - { pad: "D3", signal: "VIN" }
+    - { pad: "E1", signal: "EN" }
+    - { pad: "E2", signal: "SDA" }
+    - { pad: "E3", signal: "SCL" }
+  passives:
+    # Values per datasheet Section 9.2.2 "Smaller Application Solution"
+    # (Table 9-6), the documented BOM for the 4A (TPS628640) variant at
+    # 0.9V/4A. R1 (VSET divider) is intentionally omitted: its value is
+    # rail-dependent per Table 8-1 and already captured per-instance by
+    # this manifest's i2c.addresses[].voltage_mv entries above.
+    - { role: decouple, value: 22uF,   net: VIN, refdes_prefix: C }   # C1, X5R 0402
+    - { role: bulk,     value: 22uF,   net: VOS, refdes_prefix: C }   # C2, X5R 0402 (output cap, sensed at VOS)
+    - { role: series,   value: 0.24uH, net: SW,  refdes_prefix: L }   # L1, output filter inductor

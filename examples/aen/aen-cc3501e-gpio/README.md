@@ -28,13 +28,13 @@ Two ways to use it:
 
 1. **Portable** (what an application normally writes):
    ```c
-   alp_gpio_t *io = alp_gpio_open(E1M_GPIO_IO13);
+   alp_gpio_t *io = alp_gpio_open(ALP_E1M_GPIO_IO13);
    alp_gpio_configure(io, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
    alp_gpio_write(io, true);
    ```
    With `CONFIG_ALP_SDK_GPIO_CC3501E_PROXY=y` and the route table in
    [`src/cc3501e_gpio_routes.c`](src/cc3501e_gpio_routes.c), the SDK
-   silently routes `E1M_GPIO_IO13` over the bridge to raw CC3501E
+   silently routes `ALP_E1M_GPIO_IO13` over the bridge to raw CC3501E
    `GPIO_13` — the app never names the coprocessor.
 
 2. **Direct** (what this demo does, to make each bridge op visible in the
@@ -47,8 +47,8 @@ Two ways to use it:
    Here `pad` is the **raw** CC3501E GPIO index — the same wire op the
    portable path emits underneath.
 
-The route table ties `E1M_GPIO_IO13` → raw CC3501E GPIO 13, so "pad 13" in
-this demo is the same pad a portable `alp_gpio_open(E1M_GPIO_IO13)` reaches.
+The route table ties `ALP_E1M_GPIO_IO13` → raw CC3501E GPIO 13, so "pad 13" in
+this demo is the same pad a portable `alp_gpio_open(ALP_E1M_GPIO_IO13)` reaches.
 
 ## The proxied pads
 
@@ -57,16 +57,16 @@ BDE-BW35N netlist):
 
 | E1M IO        | raw CC35 GPIO | carrier net      |
 |---------------|---------------|------------------|
-| `E1M_GPIO_IO8`  | 30 | I2S_EN |
-| `E1M_GPIO_IO9`  | 12 | PCIE_IO_EXP.RST |
-| `E1M_GPIO_IO10` | 35 | PCIE0_I2C.EN |
-| `E1M_GPIO_IO11` | 2  | USB2_SELECT |
-| `E1M_GPIO_IO13` | 13 | I2S_SELECT (← **demo pad**) |
-| `E1M_GPIO_IO15` | 14 | S_BMI323.INT1 |
-| `E1M_GPIO_IO16` | 17 | EN_W_DIS2n (open-drain) |
-| `E1M_GPIO_IO18` | 18 | M2E_SDIO_WAKEn |
-| `E1M_GPIO_IO19` | 19 | M2E_UART.WAKEn_L |
-| `E1M_GPIO_IO20` | 26 | MUX_EN |
+| `ALP_E1M_GPIO_IO8`  | 30 | I2S_EN |
+| `ALP_E1M_GPIO_IO9`  | 12 | PCIE_IO_EXP.RST |
+| `ALP_E1M_GPIO_IO10` | 35 | PCIE0_I2C.EN |
+| `ALP_E1M_GPIO_IO11` | 2  | USB2_SELECT |
+| `ALP_E1M_GPIO_IO13` | 13 | I2S_SELECT (← **demo pad**) |
+| `ALP_E1M_GPIO_IO15` | 14 | S_BMI323.INT1 |
+| `ALP_E1M_GPIO_IO16` | 17 | EN_W_DIS2n (open-drain) |
+| `ALP_E1M_GPIO_IO18` | 18 | M2E_SDIO_WAKEn |
+| `ALP_E1M_GPIO_IO19` | 19 | M2E_UART.WAKEn_L |
+| `ALP_E1M_GPIO_IO20` | 26 | MUX_EN |
 
 The two camera-enable LDOs are `which=0` → CAM_EN_LDO0 (CC35 GPIO_1) and
 `which=1` → CAM_EN_LDO1 (CC35 GPIO_0).

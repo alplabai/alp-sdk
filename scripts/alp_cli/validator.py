@@ -6,6 +6,13 @@ Runs three passes:
                        (codes ALP-B005..B009).
   3. compat_pass     - peripherals vs. SoC capability table
                        (codes ALP-B010+).
+
+This module is also the ONE shared board.schema.json implementation:
+`load_board_schema()` / `iter_schema_errors()` are consumed by
+`scripts/validate_board_yaml.py` (the customer-side pre-flight `west
+alp-build` shells) and `scripts/alp_orchestrate/` (the fan-out loader),
+so the schema file, draft dialect, and error ordering are decided in
+exactly one place.
 """
 
 from __future__ import annotations
@@ -28,8 +35,29 @@ PRESET_DIR = METADATA / "boards"
 SOC_DIR = METADATA / "socs"
 
 
-def _load_schema() -> dict[str, Any]:
-    return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+def load_board_schema(schema_path: Path | None = None) -> dict[str, Any]:
+    """Load board.schema.json (the SDK's copy unless *schema_path* overrides).
+
+    The one place the schema file is resolved + parsed; every validator
+    (this module, validate_board_yaml.py, alp_orchestrate) goes through it.
+    """
+    return json.loads((schema_path or SCHEMA_PATH).read_text(encoding="utf-8"))
+
+
+def iter_schema_errors(
+    data: dict[str, Any], schema_path: Path | None = None
+) -> list[jsonschema.ValidationError]:
+    """Validate *data* against board.schema.json; errors sorted by path.
+
+    The shared JSON-Schema pass: one schema file, one draft dialect
+    (2020-12, matching the schema's own `$schema` declaration), one error
+    ordering -- so every consumer reports identical violations.
+    """
+    validator = jsonschema.Draft202012Validator(load_board_schema(schema_path))
+    # Stringify path parts: absolute_path mixes ints (array indices) and
+    # strs (keys); a raw list comparison would TypeError across siblings.
+    return sorted(validator.iter_errors(data),
+                  key=lambda e: [str(p) for p in e.absolute_path])
 
 
 def validate_board_yaml(path: Path) -> DiagnosticCollector:
@@ -53,8 +81,7 @@ def validate_board_yaml(path: Path) -> DiagnosticCollector:
         )
         return collector
 
-    schema = _load_schema()
-    _schema_pass(data, schema, path, collector)
+    _schema_pass(data, path, collector)
     _xref_pass(data, path, collector)
     _compat_pass(data, path, collector)
     return collector
@@ -279,14 +306,12 @@ def _soc_has_kind(caps: dict[str, int], kind: str) -> bool:
 
 def _schema_pass(
     data: dict[str, Any],
-    schema: dict[str, Any],
     path: Path,
     collector: DiagnosticCollector,
 ) -> None:
     # Strip __pos__ keys before handing to jsonschema (they're not in the schema).
     clean = _strip_pos(data)
-    validator = jsonschema.Draft7Validator(schema)
-    for err in validator.iter_errors(clean):
+    for err in iter_schema_errors(clean):
         diag = _schema_error_to_diagnostic(err, data, path)
         if diag is not None:
             collector.add(diag)

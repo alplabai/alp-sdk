@@ -32,7 +32,23 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pre-routed SMD module (not a bare IC) -- light module-form physical only.
+  # Per Quectel BG95 Series Hardware Design V1.5 (2022-10-09), §2.1 "General
+  # Description" + §2.3 "Functional Diagram" physical-characteristics table.
+  # Module reflow-mounts via 102 LGA pads on its underside; no discrete
+  # board-mount package/pin-map applies. Antenna is exposed as 50-ohm LGA
+  # pads (ANT_MAIN cellular, ANT_GNSS); ANT_WIFI is BG95-MF-variant only and
+  # not populated on the other mpn_population SKUs this manifest lists.
+  package:              "SMD LGA module, 102 LGA pads"
+  dimension_mm:         "23.6 x 19.9 x 2.2"
+  antenna:              "ANT_MAIN (main cellular RF, 50 ohm) + ANT_GNSS (GNSS, 50 ohm) LGA pads; ANT_WIFI on BG95-MF only"
+  operating_temp_deg_c: "-35..75 (operating); -40..85 (extended)"
+  visibility:           public
+  provenance:           web_provisional

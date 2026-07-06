@@ -75,10 +75,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
               ca-certificates curl gnupg
-          curl -fsSL https://github.com/renode/renode/releases/download/v1.15.3/renode_1.15.3_amd64.deb \
-              -o /tmp/renode.deb
-          sudo apt-get install -y /tmp/renode.deb
-          renode --version
+          # v1.15.3 portable-dotnet build: self-contained .NET, no Mono/GTK#
+          # system deps.  The .deb needs gtk-sharp2 / *-cil-dev packages that
+          # Ubuntu 24.04 (== ubuntu-latest) dropped, breaking apt install (#339).
+          curl -fsSL https://github.com/renode/renode/releases/download/v1.15.3/renode-1.15.3.linux-portable-dotnet.tar.gz \
+              -o /tmp/renode.tar.gz
+          mkdir -p "$HOME/renode"
+          tar -xzf /tmp/renode.tar.gz -C "$HOME/renode" --strip-components=1
+          echo "$HOME/renode" >> "$GITHUB_PATH"
+          # $GITHUB_PATH only applies to later steps, so smoke-check by full path.
+          "$HOME/renode/renode" --version
 
       # Download the V2N A55 bitbake image from the upstream
       # pr-bitbake.yml run (when triggered via workflow_run) or

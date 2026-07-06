@@ -28,7 +28,81 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: STEP,    type: input,  scope: "microstep advance; rising-edge triggered" }
+  - { name: DIR,     type: input,  scope: "direction select; latched on next STEP edge" }
+  - { name: ENABLE,  type: input,  scope: "nENABLE, active-low; disables all FET outputs" }
+  - { name: MS1,     type: input,  scope: "microstep select bit 0; 100k internal pulldown" }
+  - { name: MS2,     type: input,  scope: "microstep select bit 1; 50k internal pulldown" }
+  - { name: MS3,     type: input,  scope: "microstep select bit 2; 100k internal pulldown" }
+  - { name: RESET,   type: input,  scope: "nRESET, active-low; sets translator to Home state" }
+  - { name: SLEEP,   type: input,  scope: "nSLEEP, active-low; low disables charge pump + regulator" }
+  - { name: ROSC,    type: analog, scope: "off-time timing; tie VDD/GND or resistor-to-GND per decay mode" }
+  - { name: REF,     type: analog, scope: "VREF; sets ITripMax with sense resistor: ITripMax = VREF/(8*Rsense)" }
+  - { name: VCP,     type: power,  scope: "charge pump reservoir output; needs 0.1uF cap to VBB1" }
+  - { name: CP1,     type: analog, scope: "charge pump capacitor terminal (0.1uF to CP2)" }
+  - { name: CP2,     type: analog, scope: "charge pump capacitor terminal (0.1uF to CP1)" }
+  - { name: VREG,    type: power,  scope: "internal 7V regulator output; needs 0.22uF decouple to GND" }
+  - { name: VBB1,    type: power,  scope: "bridge-1 motor supply, 8-35V" }
+  - { name: VBB2,    type: power,  scope: "bridge-2 motor supply, 8-35V" }
+  - { name: OUT1A,   type: output, scope: "bridge-1 motor coil output A" }
+  - { name: OUT1B,   type: output, scope: "bridge-1 motor coil output B" }
+  - { name: OUT2A,   type: output, scope: "bridge-2 motor coil output A" }
+  - { name: OUT2B,   type: output, scope: "bridge-2 motor coil output B" }
+  - { name: SENSE1,  type: analog, scope: "bridge-1 current-sense resistor terminal" }
+  - { name: SENSE2,  type: analog, scope: "bridge-2 current-sense resistor terminal" }
+  - { name: VDD,     type: power,  scope: "logic supply, 3-5.5V" }
+  - { name: GND,     type: ground }
+
+physical:
+  # Pins per Allegro A4988 datasheet 4988-DS Rev. 8 (April 5, 2022),
+  # "Pinout Diagram" / "Terminal List Table" (28-contact QFN, ET package,
+  # 5x5x0.90mm, exposed thermal pad). NC pins (7, 20, 25) omitted: not
+  # signal-bearing. PAD is the exposed thermal pad; datasheet requires GND
+  # pins be tied together via the PAD ground plane underneath the device.
+  refdes_prefix: U
+  package:       QFN-28
+  footprint:     qfn_28_5x5x0p9mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "OUT2B" }
+    - { pad: "2",  signal: "ENABLE" }
+    - { pad: "3",  signal: "GND" }
+    - { pad: "4",  signal: "CP1" }
+    - { pad: "5",  signal: "CP2" }
+    - { pad: "6",  signal: "VCP" }
+    - { pad: "8",  signal: "VREG" }
+    - { pad: "9",  signal: "MS1" }
+    - { pad: "10", signal: "MS2" }
+    - { pad: "11", signal: "MS3" }
+    - { pad: "12", signal: "RESET" }
+    - { pad: "13", signal: "ROSC" }
+    - { pad: "14", signal: "SLEEP" }
+    - { pad: "15", signal: "VDD" }
+    - { pad: "16", signal: "STEP" }
+    - { pad: "17", signal: "REF" }
+    - { pad: "18", signal: "GND" }
+    - { pad: "19", signal: "DIR" }
+    - { pad: "21", signal: "OUT1B" }
+    - { pad: "22", signal: "VBB1" }
+    - { pad: "23", signal: "SENSE1" }
+    - { pad: "24", signal: "OUT1A" }
+    - { pad: "26", signal: "OUT2A" }
+    - { pad: "27", signal: "SENSE2" }
+    - { pad: "28", signal: "VBB2" }
+    - { pad: "PAD", signal: "GND" }
+  passives:
+    - { role: decouple, value: 0.22uF, net: VDD,    refdes_prefix: C }
+    - { role: decouple, value: 0.22uF, net: VREG,   refdes_prefix: C }
+    - { role: decouple, value: 0.1uF,  net: VCP,    refdes_prefix: C }   # VCP-to-VBB1 reservoir cap
+    - { role: series,   value: 0.1uF,  net: CP1,    refdes_prefix: C }   # CP1-to-CP2 charge-pump cap
+    - { role: bulk,     value: 100uF,  net: VBB1,   refdes_prefix: C }
+    - { role: series,   value: 100mOhm, net: SENSE1, refdes_prefix: R } # RS1, 0.05-0.2ohm typical
+    - { role: series,   value: 100mOhm, net: SENSE2, refdes_prefix: R } # RS2, 0.05-0.2ohm typical

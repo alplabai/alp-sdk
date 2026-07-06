@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Native-sim unit tests for the CC3501E OTA host wrappers
+# (chips/cc3501e/cc3501e.c), driven against a software model of the
+# firmware OTA slave.  Lives under tests/zephyr/ (not tests/unit/) so the
+# pr-twister gate actually runs it -- tests/unit/ is not yet in any
+# twister root (issue #90).
+
+tests:
+  alp_sdk.cc3501e.host_ota:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - cc3501e
+      - ota

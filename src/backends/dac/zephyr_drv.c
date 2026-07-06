@@ -50,9 +50,9 @@ static const struct device *const alp_dac_devs[] = {
 /* DAC full-scale reference (millivolts), per channel, sourced from the DT node's
  * `alif,reference-mv` property.  The mv->code conversion divides by this, so it
  * MUST be the converter's true full-scale reference, NOT the 3.3 V supply rail:
- * on the Alif Ensemble DAC12 the full-scale IS the DAC VREF (~0.9 V per the
- * board notes -- a bench-pending value carried in DT, see the binding), so a
- * hardcoded 3300 here would make every setpoint ~3.6x too low.  Channels whose
+ * on the Alif Ensemble DAC12 the full-scale IS the DAC VREF (0.750 V,
+ * matching alif,reference-mv=750 / DAC12_VREF_CONT=0x4, carried in DT, see the
+ * binding), so a hardcoded 3300 here would make every setpoint ~4.4x too low.  Channels whose
  * alias node lacks the property (e.g. the 3.3 V GD32/V2N DAC route) default to
  * 3300, preserving the historical rail-referenced behaviour for those SoCs. */
 #define ALP_DAC_REF_MV_OR_DEFAULT(idx)                                                             \
@@ -136,7 +136,7 @@ z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilitie
 	/* Bring up the channel at 12-bit.  The full-scale reference is NOT
      * assumed to be the 3.3 V rail -- it is read from the DT node's
      * `alif,reference-mv` (the converter's true VREF; on the Alif
-     * Ensemble DAC12 that is the ~0.9 V DAC VREF, not the supply).
+     * Ensemble DAC12 that is the 0.750 V DAC VREF, not the supply).
      * Channels whose alias node lacks the property default to 3300 mV. */
 	const struct dac_channel_cfg dacfg = {
 		.channel_id = (uint8_t)cfg->channel_id,

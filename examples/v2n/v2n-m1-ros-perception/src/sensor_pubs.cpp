@@ -17,7 +17,7 @@ SensorPublishers::SensorPublishers(rclcpp::Node &parent) : parent_(parent)
 {
 	// Shared I²C bus -- LSM6DSO + INA236 sit on it.
 	const alp_i2c_config_t i2c_cfg = {
-		.bus_id     = E1M_I2C0,
+		.bus_id     = ALP_E1M_I2C0,
 		.bitrate_hz = 400000,
 	};
 	i2c_ = alp_i2c_open(&i2c_cfg);
@@ -41,7 +41,7 @@ SensorPublishers::SensorPublishers(rclcpp::Node &parent) : parent_(parent)
 
 	// GNSS UART (factory-default 9600 8N1).
 	const alp_uart_config_t gps_cfg = {
-		.port_id   = E1M_UART0,
+		.port_id   = ALP_E1M_UART0,
 		.baudrate  = 9600,
 		.data_bits = 8,
 		.stop_bits = 1,

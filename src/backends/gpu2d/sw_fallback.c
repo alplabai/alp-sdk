@@ -157,25 +157,8 @@ static void _pack(uint8_t *p, alp_gpu2d_format_t fmt, uint32_t argb)
 
 /* ---- per-op clipping ------------------------------------------------ */
 
-/* Clip a w x h rect at (x,y) to the surface; returns false (skip op)
- * if the rect is fully outside or x/y already past the edge. */
-static bool _clip(const alp_gpu2d_surface_t *s, uint32_t x, uint32_t y, uint32_t *w, uint32_t *h)
-{
-	if (x >= s->width || y >= s->height) {
-		return false;
-	}
-	/* Clamp without computing x + *w (which overflows for a caller
-     * passing a huge "fill everything" width, wrapping below s->width
-     * and skipping the clamp).  s->width - x is safe: x < s->width
-     * already holds.  Same for h. */
-	if (*w > s->width - x) {
-		*w = s->width - x;
-	}
-	if (*h > s->height - y) {
-		*h = s->height - y;
-	}
-	return (*w != 0u && *h != 0u);
-}
+/* Clipping lives in gpu2d_ops.h (alp_gpu2d_clip_rect) so the hardware
+ * backends clamp the exact same rects this fallback does. */
 
 /* ---- blend math ----------------------------------------------------- */
 
@@ -279,7 +262,7 @@ static alp_status_t sw_fill_rect(alp_gpu2d_backend_state_t *state,
 	if (bpp == 0u) {
 		return ALP_ERR_NOSUPPORT;
 	}
-	if (!_clip(dst, x, y, &w, &h)) {
+	if (!alp_gpu2d_clip_rect(dst, x, y, &w, &h)) {
 		return ALP_OK; /* fully clipped: nothing to do, not an error */
 	}
 	for (uint32_t row = 0; row < h; ++row) {
@@ -303,11 +286,12 @@ static alp_status_t sw_fill_rect(alp_gpu2d_backend_state_t *state,
  * @return ALP_OK, or ALP_ERR_NOSUPPORT for an unknown format.
  *
  * The rect is clipped against the source first, then the destination,
- * so neither surface is read or written out of bounds.  Rows are
- * copied top-to-bottom; overlapping same-buffer upward copies are
- * safe, a downward overlapping copy on one buffer can alias (the
- * portable fallback does not reverse-iterate -- callers needing
- * overlap-safe moves should use distinct buffers).
+ * so neither surface is read or written out of bounds.  Pixels are
+ * copied top-to-bottom, left-to-right; an overlapping same-buffer
+ * copy toward earlier memory (dy < sy, or dy == sy with dx <= sx)
+ * is safe, a copy toward later memory can alias (the portable
+ * fallback does not reverse-iterate -- callers needing overlap-safe
+ * moves in both directions should use distinct buffers).
  */
 static alp_status_t sw_blit(alp_gpu2d_backend_state_t *state,
                             const alp_gpu2d_surface_t *src,
@@ -325,10 +309,10 @@ static alp_status_t sw_blit(alp_gpu2d_backend_state_t *state,
 	if (sbpp == 0u || dbpp == 0u) {
 		return ALP_ERR_NOSUPPORT;
 	}
-	if (!_clip(src, sx, sy, &w, &h)) {
+	if (!alp_gpu2d_clip_rect(src, sx, sy, &w, &h)) {
 		return ALP_OK;
 	}
-	if (!_clip(dst, dx, dy, &w, &h)) {
+	if (!alp_gpu2d_clip_rect(dst, dx, dy, &w, &h)) {
 		return ALP_OK;
 	}
 	for (uint32_t row = 0; row < h; ++row) {
@@ -377,10 +361,10 @@ static alp_status_t sw_blend(alp_gpu2d_backend_state_t *state,
 	if (sbpp == 0u || dbpp == 0u) {
 		return ALP_ERR_NOSUPPORT;
 	}
-	if (!_clip(src, sx, sy, &w, &h)) {
+	if (!alp_gpu2d_clip_rect(src, sx, sy, &w, &h)) {
 		return ALP_OK;
 	}
-	if (!_clip(dst, dx, dy, &w, &h)) {
+	if (!alp_gpu2d_clip_rect(dst, dx, dy, &w, &h)) {
 		return ALP_OK;
 	}
 	for (uint32_t row = 0; row < h; ++row) {
@@ -404,6 +388,17 @@ static const alp_gpu2d_ops_t _ops = {
 	.blend     = sw_blend,
 	.close     = NULL,
 };
+
+const alp_gpu2d_ops_t *alp_gpu2d_sw_ops(void)
+{
+	/* Cross-backend delegation hook -- see the declaration in
+	 * gpu2d_ops.h.  The ops are stateless (no be_data), so callers
+	 * may pass any backend state through. */
+	return &_ops;
+}
+
+/* Export the gpu2d static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(gpu2d);
 
 ALP_BACKEND_REGISTER(gpu2d,
                      sw_fallback,

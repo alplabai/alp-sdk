@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: rail-predictive-maintenance
+  description: |
+    Train-mounted rail-condition survey: ICM-42670 vibration -> DSP
+    features -> AI classifier (deterministic fallback) -> geotagged to
+    GNSS lat/lon + chainage -> one CSV record per 25 m segment.
+    native_sim replays a canned NMEA track + synthetic vibration.
+common:
+  tags: ai inference industrial predictive-maintenance gnss marketing showcase
+tests:
+  # native_sim runs the full canned pipeline to completion (console-matched).
+  alp_sdk.example.rail_predictive_maintenance.e1m_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - industrial
+      - aen
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[rail\\] done"
+
+  alp_sdk.example.rail_predictive_maintenance.e1m_x_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - industrial
+      - v2n
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[rail\\] done"
+
+  # AEN silicon cross-build is build-only (no host runner; CI is the AEN gate).
+  alp_sdk.example.rail_predictive_maintenance.aen_build:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    platform_allow:
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    build_only: true
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - industrial
+      - aen

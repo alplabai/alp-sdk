@@ -159,8 +159,11 @@ static int pwm_alif_set_cycles(const struct device *dev, uint32_t channel, uint3
 	 * disable level. */
     if (pulse_cycles == 0U) {
         alif_utimer_disable_driver(timer_base, driver);
-        alif_utimer_disable_driver_output(timer_base, driver, config->timer_id);
-        return 0;
+		/* GLB_DRIVER_OEN is a GLOBAL (not per-timer) register -- pass glb_base,
+	 * not timer_base, or the OEN clear lands at the wrong address and the pad
+	 * keeps driving. */
+		alif_utimer_disable_driver_output(glb_base, driver, config->timer_id);
+		return 0;
     }
 
     /* Program period (reload) and duty (compare). */

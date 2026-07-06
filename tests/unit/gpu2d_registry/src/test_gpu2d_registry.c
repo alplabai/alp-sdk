@@ -39,20 +39,21 @@ ZTEST_SUITE(alp_gpu2d_registry, NULL, NULL, NULL, NULL, NULL);
 /* Scratch backing buffer + valid surfaces for the dispatcher edge
  * tests.  Both src and dst point at the same scratch -- these tests
  * only exercise the dispatcher's pointer/dim/format-range and mode
- * validation, not the pixel content. */
-static uint8_t                   _scratch[16];
+ * validation, not the pixel content.  stride_bytes must satisfy the
+ * dispatcher's stride >= width * bpp check (4 px * 4 B = 16). */
+static uint8_t                   _scratch[4 * 4 * 4];
 static const alp_gpu2d_surface_t _valid_src = {
 	.base         = _scratch,
 	.width        = 4,
 	.height       = 4,
-	.stride_bytes = 4,
+	.stride_bytes = 16,
 	.format       = ALP_GPU2D_FMT_RGBA8888,
 };
 static const alp_gpu2d_surface_t _valid_dst = {
 	.base         = _scratch,
 	.width        = 4,
 	.height       = 4,
-	.stride_bytes = 4,
+	.stride_bytes = 16,
 	.format       = ALP_GPU2D_FMT_RGBA8888,
 };
 
@@ -136,6 +137,41 @@ ZTEST(alp_gpu2d_registry, test_invalid_surface_rejected)
 	bad        = _valid_dst;
 	bad.format = (alp_gpu2d_format_t)99;
 	zassert_equal(alp_gpu2d_fill_rect(g, &bad, 0u, 0u, 2u, 2u, 0xff112233u), ALP_ERR_INVAL);
+	alp_gpu2d_close(g);
+}
+
+ZTEST(alp_gpu2d_registry, test_undersized_stride_rejected)
+{
+	/* Regression for the dispatcher's stride validation: a surface
+     * whose rows do not fit inside stride_bytes (stride < width *
+     * bpp) must be rejected as INVAL before any backend op runs --
+     * the sw_fallback's row addressing (y * stride + x * bpp) would
+     * otherwise write past base + height * stride. */
+	alp_gpu2d_t *g = alp_gpu2d_open();
+	zassert_not_null(g);
+	alp_gpu2d_surface_t bad = _valid_dst;
+	bad.stride_bytes        = 8; /* 4 px RGBA8888 rows need 16 B */
+	zassert_equal(alp_gpu2d_fill_rect(g, &bad, 0u, 0u, 2u, 2u, 0xff112233u), ALP_ERR_INVAL);
+	zassert_equal(alp_gpu2d_blit(g, &bad, 0u, 0u, &_valid_dst, 0u, 0u, 2u, 2u), ALP_ERR_INVAL);
+	zassert_equal(alp_gpu2d_blit(g, &_valid_src, 0u, 0u, &bad, 0u, 0u, 2u, 2u), ALP_ERR_INVAL);
+	zassert_equal(
+	    alp_gpu2d_blend(g, &bad, 0u, 0u, &_valid_dst, 0u, 0u, 2u, 2u, ALP_GPU2D_BLEND_REPLACE),
+	    ALP_ERR_INVAL);
+	alp_gpu2d_close(g);
+}
+
+ZTEST(alp_gpu2d_registry, test_huge_width_stride_check_does_not_overflow)
+{
+	/* The stride check must be overflow-safe: with width 0x40000001
+     * and a 4-byte format, a naive width * bpp wraps to 4 and would
+     * falsely pass a stride of 0xFFFFFFFF.  The division form
+     * (stride / bpp < width) rejects it. */
+	alp_gpu2d_t *g = alp_gpu2d_open();
+	zassert_not_null(g);
+	alp_gpu2d_surface_t bad = _valid_dst;
+	bad.width               = 0x40000001u;
+	bad.stride_bytes        = 0xFFFFFFFFu;
+	zassert_equal(alp_gpu2d_fill_rect(g, &bad, 0u, 0u, 1u, 1u, 0xff112233u), ALP_ERR_INVAL);
 	alp_gpu2d_close(g);
 }
 

@@ -13,8 +13,6 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
-
 #include "alp/peripheral.h"
 #include "alp/chips/gd32g553.h"
 
@@ -117,7 +115,7 @@ int main(void)
 			       attempt,
 			       (int)s);
 			attempt++;
-			k_msleep(200);
+			alp_delay_ms(200);
 		}
 	} while (s != ALP_OK);
 
@@ -154,7 +152,7 @@ int main(void)
 			       v.patch);
 		}
 
-		k_msleep(500);
+		alp_delay_ms(500);
 	}
 	/* not reached */
 

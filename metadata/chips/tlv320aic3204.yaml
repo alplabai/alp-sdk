@@ -22,6 +22,89 @@ audio:
   bitdepth_max:   32
   features:       [stereo, mic_input, line_output, headphone_amp, minidsp]
 
+signals:
+  - { name: MCLK,       type: input,  scope: "master clock input" }
+  - { name: BCLK,       type: bidir,  scope: "audio serial data bus (primary) bit clock" }
+  - { name: WCLK,       type: bidir,  scope: "audio serial data bus (primary) word clock" }
+  - { name: DIN,        type: input,  scope: "audio serial data bus data input (pin also marked MFP1: digital-mic input / GP clock input / GPI secondary functions)" }
+  - { name: DOUT,       type: output, scope: "audio serial data bus data output (pin also marked MFP2: GPO / CLKOUT / INT1-INT2 output / secondary-bus clock output secondary functions)" }
+  - { name: IOVDD,      type: power,  scope: "IO voltage supply, 1.1-3.6V" }
+  - { name: IOVSS,      type: ground, scope: "IO ground supply" }
+  - { name: MFP3,       type: input,  scope: "datasheet pin name SCLK/MFP3 (SPI clock when SPI_SELECT=1); in this I2C-mode manifest, functions as headphone-detect input / digital-mic input / secondary-bus input / GPI" }
+  - { name: SCL,        type: input,  scope: "I2C serial clock (datasheet pin name SCL/SS; SPI chip-select when SPI_SELECT=1)" }
+  - { name: SDA,        type: bidir,  scope: "I2C serial data (datasheet pin name SDA/MOSI; SPI data-in when SPI_SELECT=1)" }
+  - { name: MFP4,       type: output, scope: "datasheet pin name MISO/MFP4 (SPI data-out when SPI_SELECT=1); in this I2C-mode manifest, available as GPO / CLKOUT / INT1-INT2 output / secondary-bus outputs" }
+  - { name: SPI_SELECT, type: input,  scope: "control-mode select strap; tie low (0) to select I2C mode as used by this manifest" }
+  - { name: IN1_L,      type: analog, scope: "multifunction analog input; single-ended MIC1/Line1 left, or differential MIC/Line right negative" }
+  - { name: IN1_R,      type: analog, scope: "multifunction analog input; single-ended MIC1/Line1 right, or differential MIC/Line right positive" }
+  - { name: IN2_L,      type: analog, scope: "multifunction analog input; single-ended MIC2/Line2 left, or differential MIC/Line left positive" }
+  - { name: IN2_R,      type: analog, scope: "multifunction analog input; single-ended MIC2/Line2 right, or differential MIC/Line left negative" }
+  - { name: AVSS,       type: ground, scope: "analog ground supply" }
+  - { name: REF,        type: analog, scope: "reference-voltage output for filtering (decoupling-capacitor node)" }
+  - { name: MICBIAS,    type: analog, scope: "microphone bias voltage output" }
+  - { name: IN3_L,      type: analog, scope: "multifunction analog input; single-ended MIC3/Line3 left, or differential MIC/Line left positive / MIC/Line right negative" }
+  - { name: IN3_R,      type: analog, scope: "multifunction analog input; single-ended MIC3/Line3 right, or differential MIC/Line left negative / MIC/Line right positive" }
+  - { name: LOL,        type: analog, scope: "left line output" }
+  - { name: LOR,        type: analog, scope: "right line output" }
+  - { name: HPL,        type: analog, scope: "left headphone (high-power) output driver" }
+  - { name: HPVDD,      type: power,  scope: "LDO input supply and headphone power supply, 1.9-3.6V (datasheet pin name LDOIN/HPVDD)" }
+  - { name: HPR,        type: analog, scope: "right headphone (high-power) output driver" }
+  - { name: DVSS,       type: ground, scope: "digital ground and chip substrate" }
+  - { name: LDO_SELECT, type: input,  scope: "D-LDO enable strap (1=D-LDO enabled: DVDD pin is filtering output; 0=disabled: DVDD pin is direct digital-supply input)" }
+  - { name: RESET,      type: input,  scope: "reset, active low" }
+  - { name: GPIO,       type: bidir,  scope: "general-purpose digital IO (pin also marked MFP5: CLKOUT/INT1/INT2 output, ADC WCLK output, secondary-bus clock output, digital-mic clock output secondary functions)" }
+
+physical:
+  # Pins per TI TLV320AIC3204 datasheet SLOS602E (Sep 2019), section 6 "Pin
+  # Configuration and Functions", RHB package (32-pin VQFN, 5x5mm) -- this is
+  # the package selected by MPN suffix RHBT in mpn_population above.  (The
+  # datasheet field above cites lit. SLAS549G; SLOS602E is the document
+  # actually reachable at TI's public symlink for this part as of sourcing.)
+  # This manifest documents the I2C-mode wiring (SPI_SELECT strapped low);
+  # SPI-mode alternate pin names (SS/MOSI/MISO/SCLK) are noted in the signal
+  # scope text above but not used as signal names, matching this repo's
+  # as5048a_b.yaml precedent for dual-protocol parts scoped to one bus.  The
+  # thermal pad ("Connect to PCB ground plane. Not internally connected.")
+  # is not a signal-bearing pin and is omitted.
+  refdes_prefix: U
+  package:       QFN-32
+  footprint:     qfn_32_5x5mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "MCLK" }
+    - { pad: "2",  signal: "BCLK" }
+    - { pad: "3",  signal: "WCLK" }
+    - { pad: "4",  signal: "DIN" }
+    - { pad: "5",  signal: "DOUT" }
+    - { pad: "6",  signal: "IOVDD" }
+    - { pad: "7",  signal: "IOVSS" }
+    - { pad: "8",  signal: "MFP3" }
+    - { pad: "9",  signal: "SCL" }
+    - { pad: "10", signal: "SDA" }
+    - { pad: "11", signal: "MFP4" }
+    - { pad: "12", signal: "SPI_SELECT" }
+    - { pad: "13", signal: "IN1_L" }
+    - { pad: "14", signal: "IN1_R" }
+    - { pad: "15", signal: "IN2_L" }
+    - { pad: "16", signal: "IN2_R" }
+    - { pad: "17", signal: "AVSS" }
+    - { pad: "18", signal: "REF" }
+    - { pad: "19", signal: "MICBIAS" }
+    - { pad: "20", signal: "IN3_L" }
+    - { pad: "21", signal: "IN3_R" }
+    - { pad: "22", signal: "LOL" }
+    - { pad: "23", signal: "LOR" }
+    - { pad: "24", signal: "AVDD" }
+    - { pad: "25", signal: "HPL" }
+    - { pad: "26", signal: "HPVDD" }
+    - { pad: "27", signal: "HPR" }
+    - { pad: "28", signal: "DVSS" }
+    - { pad: "29", signal: "DVDD" }
+    - { pad: "30", signal: "LDO_SELECT" }
+    - { pad: "31", signal: "RESET" }
+    - { pad: "32", signal: "GPIO" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_TLV320AIC3204
   baremetal:      ALP_SDK_CHIP_TLV320AIC3204
@@ -30,6 +113,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested

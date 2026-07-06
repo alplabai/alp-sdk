@@ -1,6 +1,22 @@
 /*
  * Copyright (C) 2025 Alif Semiconductor.
+ * Copyright (c) 2026 Alp Lab AB
+ *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * ====== ADR 0017 Tier-2 (vendored fork-driver copy, INTERIM -> retire onto
+ * sdk-alif fork, BENCH-UNVERIFIED) ======
+ * The Alif Ensemble PDM (pulse-density-modulation microphone) block is driven by
+ * a vendored copy of the Apache-2.0 zephyr_alif fork driver
+ * (drivers/audio/alif_pdm.c, compatible "alif,alif_pdm").  hal_alif ships no PDM
+ * / DMIC class driver, so this is a genuine fork-driver copy carried in-tree so
+ * it survives a `west update`.  Retire onto the opt-in sdk-alif fork compatible
+ * once the pdm node is repointed AND bench-verified (task #21).  See
+ * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * ==================================================================
+ *
+ * Vendored from the fork with only this provenance header added; the register
+ * map lives in the companion alif_pdm_reg.h.  vendor-ext, BENCH-UNVERIFIED.
  */
 
 #define DT_DRV_COMPAT alif_alif_pdm

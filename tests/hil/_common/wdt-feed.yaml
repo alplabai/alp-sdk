@@ -4,7 +4,7 @@
 # conformant SoM (every supported SoC ships a watchdog block).
 #
 # What this proves end-to-end:
-#   - alp_wdt_open(id=0, 5 s timeout) returns a real handle.
+#   - alp_wdt_open(wdt_id=0, 5 s timeout) returns a real handle.
 #   - 3 successive alp_wdt_feed() calls return ALP_OK (the watchdog
 #     accepts the pet).
 #   - alp_wdt_disable() either succeeds (rare; programmable WDTs) or
