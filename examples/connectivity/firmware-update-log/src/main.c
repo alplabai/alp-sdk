@@ -11,15 +11,22 @@
  *
  * On a TF-M build with a real secure owner, the same API can bind to
  * HW_ENFORCED: each entry is a secure-world write-once asset, and the counter
- * is kept in protected storage. On Alif E4/E8 this storage must be backed by
- * the SE/firewall policy, so normal application firmware cannot rewrite
- * history.
+ * is kept in protected storage.
  *
- * On AEN dual-M55 builds the hardware path is split by role. HP is the trusted
- * owner and writes the MRAM log. HE is the application client and talks to HP
- * through a tiny MHU mailbox service. HE reports HW_ENFORCED only after the
- * owner replies and the board profile says the MRAM log partition has already
- * been proven firewall-protected from HE writes.
+ * On AEN dual-M55 builds the hardware path is split by role: HP is the trusted
+ * owner that writes the MRAM log, and HE is the application client that reaches
+ * HP through a tiny MHU mailbox service. That split is HARDWARE-enforced by
+ * blocking HE from writing the MRAM log partition directly. The block does NOT
+ * come from the MRAM slave-side firewall (FC13, 0x80000000+): that range is
+ * owned and opened to the application masters by the SERAM firmware and is
+ * outside the OEM device config (Alif AUGD0005, "Open Firewall configuration").
+ * It comes instead from the HE core's own MASTER-side firewall (FC8), which the
+ * OEM ATOC device config CAN program: an allow-all region for every master plus
+ * a higher-priority deny carve-out over the log window for HE's master id. With
+ * that policy HE boots and runs normally but bus-faults on any direct write to
+ * the log partition -- silicon-proven on E8 (the probe below reports RESULT_FAULT
+ * at STAGE_WRITE and the MRAM stays unchanged). HE reports HW_ENFORCED once that
+ * FC8 policy is provisioned (CONFIG_..._FIREWALL_PROVEN) and the HP owner answers.
  *
  * Flow: open the log, append one update record (as MCUboot/a secure service
  * would after verifying an image), then verify the whole chain and print it.

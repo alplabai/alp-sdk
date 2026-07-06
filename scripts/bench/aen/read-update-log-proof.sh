@@ -111,8 +111,30 @@ if [ "$EXPECT_FIREWALL_PROBE" -eq 1 ]; then
 	mram_line=""
 	mram_words=""
 	if printf '%s\n' "$fw_offset" | grep -Eq '^[0-9A-F]{8}$' && [ "$fw_offset" != "FFFFFFFF" ]; then
-		mram_addr=$(printf '0x%08X' $((0x80000000 + 0x$fw_offset)))
-		cat > /tmp/firmware-update-log-mram-read.jlink <<EOF
+		# Read the log window the AUTHORITATIVE way: via the Secure Enclave
+		# (getmramdata, bus master id 0), which is not subject to HE's master-side
+		# firewall (FC8). A proven HW-enforced policy denies HE's own master id the
+		# same window, and that denial also blocks the HE debug AP -- so a J-Link/SWD
+		# read of the window is blocked or returns garbage and CANNOT be trusted for
+		# the verdict (it produced a false FAIL before this path existed). SWD is only
+		# a fallback for when SETOOLS/SE-UART are not wired.
+		off_hex=$(printf '%s' "$fw_offset" | sed 's/^0*//')
+		[ -z "$off_hex" ] && off_hex=0
+		if [ -n "${SETOOLS_DIR:-}" ] && [ -n "${SE_UART:-}" ] && [ -x "$SETOOLS_DIR/maintenance" ]; then
+			( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" \
+				-opt getmramdata "0x$off_hex" ) \
+				>/tmp/firmware-update-log-mram-se.out 2>&1 || true
+			# Strip ANSI colour codes SETOOLS emits, then take the four 0xXXXXXXXX
+			# words from the "[0x<off>] 0x.. 0x.. 0x.. 0x.." data line.
+			mram_words=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/firmware-update-log-mram-se.out | awk '
+				/\[0x/ { n = 0; for (i = 1; i <= NF; i++) if ($i ~ /^0x[0-9A-Fa-f]{8}$/) w[n++] = toupper(substr($i, 3)) }
+				END { for (j = 0; j < n && j < 4; j++) printf "%s%s", (j ? " " : ""), w[j] }')
+			[ -n "$mram_words" ] && mram_line="MRAM(SE) @0x$fw_offset = $mram_words"
+		fi
+		if [ -z "$mram_words" ]; then
+			# SWD fallback -- UNRELIABLE when the window denies the HE debug AP.
+			mram_addr=$(printf '0x%08X' $((0x80000000 + 0x$fw_offset)))
+			cat > /tmp/firmware-update-log-mram-read.jlink <<EOF
 device $JLINK_DEVICE_READ
 si SWD
 speed $JLINK_SPEED
@@ -120,13 +142,14 @@ connect
 mem32 $mram_addr, 0x4
 exit
 EOF
-		"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-mram-read.jlink \
-			2>/tmp/firmware-update-log-mram-read.err \
-			>/tmp/firmware-update-log-mram-read.out || true
-		mram_line=$(awk -v addr="${mram_addr#0x}" \
-			'toupper($1) == toupper(addr) && $2 == "=" { print; exit }' \
-			/tmp/firmware-update-log-mram-read.out)
-		mram_words=$(printf '%s\n' "$mram_line" | awk '{ print toupper($3" "$4" "$5" "$6) }')
+			"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-mram-read.jlink \
+				2>/tmp/firmware-update-log-mram-read.err \
+				>/tmp/firmware-update-log-mram-read.out || true
+			mram_line=$(awk -v addr="${mram_addr#0x}" \
+				'toupper($1) == toupper(addr) && $2 == "=" { print; exit }' \
+				/tmp/firmware-update-log-mram-read.out)
+			mram_words=$(printf '%s\n' "$mram_line" | awk '{ print toupper($3" "$4" "$5" "$6) }')
+		fi
 	fi
 	baseline_words=$(printf '%s\n' "${ALP_AEN_FIREWALL_PROBE_BASELINE:-}" | tr ',:' '  ' | awk '
 		{ for (i = 1; i <= NF; i++) printf "%s%s", (i == 1 ? "" : " "), toupper($i) }

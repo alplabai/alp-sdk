@@ -13,15 +13,21 @@ The hardware-enforced tier is available when the selected backend has a real
 secure owner. The TF-M route keeps entries as write-once secure-world assets
 and keeps the high-watermark counter in protected storage. On Alif E4/E8, the
 AEN route uses the second M55 as the trusted owner: the application core sends
-requests over MHU, the owner writes the MRAM log, and the Alif SE/device
-firewall must block the application core from writing that MRAM partition.
+requests over MHU, the owner writes the MRAM log, and the platform blocks the
+application core from writing that MRAM partition directly. That block is
+programmed through the OEM ATOC device config, on HE's **master-side** firewall
+(FC8) — not the MRAM slave-side firewall, which the SERAM firmware owns. It is
+silicon-proven on E8: HE bus-faults on a direct write to the log window while
+running normally otherwise. The AEN route reports `HW_ENFORCED` once that FC8
+policy is provisioned and the HP owner answers; otherwise it stays
+`SW_TAMPER_EVIDENT`. See "Hardware enforcement status" below.
 
 ## Assurance levels
 
 | Level | Value | What you get |
 |---|---|---|
 | `SW_TAMPER_EVIDENT` | `0` | SHA-256 hash-chain + monotonic counter (NVS-persisted where the board provides an `alp_ulog_partition`; RAM otherwise). Detects mutation, truncation, rollback, and reorder of historical entries. App-cooperative: a process with write access to the store can forge entries. Use for audit trails where cooperative tamper-evidence is sufficient. |
-| `HW_ENFORCED` | `1` | Trusted-owner store isolated from the application core. Normal application firmware cannot rewrite old entries when the owner and its storage are isolated by the platform. On TF-M this is a secure partition and protected storage. On AEN this is an M55 owner plus SE/device firewall-protected MRAM; a non-decrementable rollback anchor still depends on the board's provisioned secure counter or equivalent device policy. |
+| `HW_ENFORCED` | `1` | Trusted-owner store isolated from the application core. Normal application firmware cannot rewrite old entries when the owner and its storage are isolated by the platform. On TF-M this is a secure partition and protected storage. On AEN this is an M55 owner **plus** an MRAM log partition the application core is physically blocked from writing — provisioned on HE's master-side firewall (FC8) via the OEM device config and silicon-proven on E8 (see below). A non-decrementable rollback anchor further depends on a provisioned secure counter or equivalent device policy. |
 
 Call `alp_update_log_assurance()` to query which level is active at runtime.
 
@@ -61,6 +67,37 @@ true:
 That Kconfig bit does not program the firewall. It is the public build-time
 latch saying the SE/device firewall policy has already been provisioned and
 silicon-proven for this board.
+
+### Hardware enforcement status (E8) — proven
+
+Condition 2 is **satisfiable with OEM tooling** and silicon-proven on E8 (Alp Lab
+bench, 2026-07-06). The key was targeting the right firewall component:
+
+- The MRAM **slave-side** firewall (FC13, `0x80000000+`) is owned and opened to the
+  application masters by the SERAM firmware, and is excluded from the OEM device
+  config (Alif AUGD0005, "Open Firewall configuration"). An OEM FC13 region over
+  the log window is accepted into the table but does not gate the write — the early
+  probes confirmed HE still wrote `alp_ulog_partition`.
+- HE's **master-side** firewall (FC8, which filters everything the HE core emits)
+  *is* OEM-programmable through the ATOC device config. The proven policy is two
+  regions: an allow-all region (`any_master`, `0x0`, 4 GB, `acc=0xfff`) plus a
+  higher-priority deny carve-out over the log window (`0x80090000`, 4 KB, HE master
+  id 17, `acc=0x000`). Region priority is **highest-index-wins**, so the deny must
+  sit at a higher `region_index` than the allow.
+- Result: HE boots and runs normally, but a direct `flash_write` to the log window
+  raises a **BusFault** (probe beacon `RESULT_FAULT` at `STAGE_WRITE`), and the SE
+  read (`maintenance -opt getmramdata`) confirms the MRAM is unchanged.
+
+Notes for anyone reproducing this:
+
+- Provision the FC8 policy over the SE-UART (`app-write-mram -e APP` then `-p`), not
+  J-Link Flow D: a bricking firewall config can't be cleared by Flow D because its
+  MRAM loader runs its RAMCode on the HE core. The SE writes MRAM independently, so
+  the SE-UART path both provisions and recovers.
+- The deny carve-out also blocks the **HE debug AP** read of the window, so the
+  SWD-based `read-update-log-proof.sh` verdict false-fails ("MRAM changed"). Verify
+  with the SE read (`getmramdata`, master 0) instead, or keep the design's read path
+  on a non-HE master. Tracked upstream (#111).
 
 The AEN flash helpers build app-only ATOC packages by default. That preserves
 the board's existing DEVICE/firewall policy, which is the policy the proof is
