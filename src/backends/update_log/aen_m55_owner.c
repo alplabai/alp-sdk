@@ -55,6 +55,14 @@
 #define AEN_ULOG_MAGIC   0x554C4F47U /* "ULOG" */
 #define AEN_ULOG_VERSION 1U
 
+/* Bench proof beacons in global SRAM0, away from the request/reply mailboxes.
+ * They are deliberately simple so a J-Link `mem32` read can prove owner/client
+ * progress even when the UART capture misses early boot text. */
+#define AEN_ULOG_HP_BEACON       ((volatile uint32_t *)0x02000060U)
+#define AEN_ULOG_HE_BEACON       ((volatile uint32_t *)0x02001060U)
+#define AEN_ULOG_HP_BEACON_MAGIC 0x554C4F90U
+#define AEN_ULOG_HE_BEACON_MAGIC 0x554C4FE0U
+
 enum aen_ulog_op {
 	AEN_ULOG_OP_READY  = 1,
 	AEN_ULOG_OP_APPEND = 2,
@@ -121,6 +129,14 @@ static alp_status_t aen_firewall_proven(void)
 static bool     g_client_mhu_ready;
 static uint32_t g_client_seq;
 
+static void client_beacon(enum aen_ulog_op op, uint32_t seq, alp_status_t status)
+{
+	AEN_ULOG_HE_BEACON[0] = AEN_ULOG_HE_BEACON_MAGIC;
+	AEN_ULOG_HE_BEACON[1] = (uint32_t)op;
+	AEN_ULOG_HE_BEACON[2] = seq;
+	AEN_ULOG_HE_BEACON[3] = (uint32_t)status;
+}
+
 static alp_status_t client_call(enum aen_ulog_op              op,
                                 uint64_t                      arg,
                                 const alp_update_log_entry_t *entry,
@@ -135,6 +151,8 @@ static alp_status_t client_call(enum aen_ulog_op              op,
 	if (seq == 0U) {
 		seq = ++g_client_seq;
 	}
+
+	client_beacon(op, seq, ALP_ERR_NOT_READY);
 
 	AEN_ULOG_REQ->magic   = AEN_ULOG_MAGIC;
 	AEN_ULOG_REQ->version = AEN_ULOG_VERSION;
@@ -162,11 +180,14 @@ static alp_status_t client_call(enum aen_ulog_op              op,
 			if (rsp_out != NULL) {
 				*rsp_out = *AEN_ULOG_RSP;
 			}
-			return (alp_status_t)AEN_ULOG_RSP->status;
+			alp_status_t status = (alp_status_t)AEN_ULOG_RSP->status;
+			client_beacon(op, seq, status);
+			return status;
 		}
 		k_msleep(1);
 	}
 
+	client_beacon(op, seq, ALP_ERR_TIMEOUT);
 	return ALP_ERR_TIMEOUT;
 }
 
@@ -174,6 +195,7 @@ static alp_status_t aen_ready(void)
 {
 	alp_status_t rc = aen_firewall_proven();
 	if (rc != ALP_OK) {
+		client_beacon(AEN_ULOG_OP_READY, 0U, rc);
 		return rc;
 	}
 	rc = client_call(AEN_ULOG_OP_READY, 0U, NULL, NULL);
@@ -299,8 +321,13 @@ void alp_update_log_aen_m55_owner_run(void)
 
 	alp_update_log_t *log      = alp_update_log_open();
 	uint32_t          last_seq = 0U;
+	uint32_t          served   = 0U;
 
-	AEN_ULOG_RSP->seq = 0U;
+	AEN_ULOG_RSP->seq     = 0U;
+	AEN_ULOG_HP_BEACON[0] = AEN_ULOG_HP_BEACON_MAGIC;
+	AEN_ULOG_HP_BEACON[1] = (log != NULL) ? (uint32_t)ALP_OK : (uint32_t)ALP_ERR_NOT_READY;
+	AEN_ULOG_HP_BEACON[2] = 0U;
+	AEN_ULOG_HP_BEACON[3] = 0U;
 
 	for (;;) {
 		aen_mhu_drain();
@@ -348,6 +375,9 @@ void alp_update_log_aen_m55_owner_run(void)
 			}
 		}
 
+		AEN_ULOG_HP_BEACON[1] = (uint32_t)rc;
+		AEN_ULOG_HP_BEACON[2] = AEN_ULOG_REQ->op;
+		AEN_ULOG_HP_BEACON[3] = ++served;
 		owner_reply(seq, rc, value, verdict, bad_seq, &entry);
 	}
 }

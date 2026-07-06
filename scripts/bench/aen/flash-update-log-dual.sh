@@ -112,3 +112,26 @@ if grep -qi "Could not connect to the target device" /tmp/firmware-update-log-du
 fi
 
 echo "flash complete; capture labgrid console for HP owner + HE client output" >&2
+
+sleep 3
+cat > /tmp/firmware-update-log-dual-read.jlink <<EOF
+device $JLINK_DEVICE_READ
+si SWD
+speed $JLINK_SPEED
+connect
+mem32 0x02000060, 0x10
+Sleep 400
+mem32 0x0200006C, 0x4
+mem32 0x02001060, 0x10
+exit
+EOF
+
+$JLINK -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-read.jlink \
+	2>/tmp/firmware-update-log-dual-read.err \
+	>/tmp/firmware-update-log-dual-read.out || true
+
+echo "----- update-log SRAM0 proof beacons -----"
+echo "HP @0x02000060: [magic, last_status, last_op, served_count]"
+echo "HE @0x02001060: [magic, last_op, last_seq, last_status]"
+grep -iE "^02000060|^0200006C|^02001060| = " /tmp/firmware-update-log-dual-read.out | head -12
+echo "------------------------------------------"

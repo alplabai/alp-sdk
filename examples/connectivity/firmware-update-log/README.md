@@ -120,6 +120,13 @@ scripts/bench/aen/flash-update-log-dual.sh \
     build/firmware-update-log-hp build/firmware-update-log-he
 ```
 
+After a real flash, the helper also reads SRAM0 proof beacons over SWD:
+
+| Address | Words |
+|---|---|
+| `0x02000060` | HP owner: `magic`, last status, last operation, served request count |
+| `0x02001060` | HE client: `magic`, last operation, last sequence, last status |
+
 On a board that enables the TF-M owner or the AEN M55 owner with the firewall
 proof latch, the HE application's first line reports:
 
