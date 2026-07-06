@@ -50,3 +50,18 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Murata Type 2FY (LBEE5HY2FY-922) datasheet Rev. 11 (Nov 2025), section 6
+  # "Dimensions, Markings, and Terminal Configurations" (Table 5) + section 9
+  # "Operating Condition" (Table 9).  Pre-routed 72-pad LGA-style module
+  # (GND-shielded, stainless-steel-lid can); host only wires the side-channel
+  # GPIO/SDIO/UART/I2S lines already captured in `side_channel_lines` /
+  # `bulk_traffic_lines` above -- no per-pad `pins[]` block here (module
+  # form, per task scope).
+  package:              "72-pad LGA module (GND-shielded metal can)"
+  dimension_mm:         "7.9 x 7.3 x 1.1"
+  antenna:              "external -- module exposes an ANT pad (RF terminal); no on-board chip/trace antenna"
+  operating_temp_deg_c: "-40..85"
+  visibility:           public
+  provenance:           web_provisional

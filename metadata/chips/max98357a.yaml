@@ -33,3 +33,42 @@ families:
 verification:
   hil_silicon:    untested
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SD_MODE,   type: input,  scope: "shutdown + I2S channel-select strap; active-high enable" }
+  - { name: DIN,       type: input,  scope: "I2S/TDM digital audio data input" }
+  - { name: BCLK,      type: input,  scope: "I2S bit clock input" }
+  - { name: LRCLK,     type: input,  scope: "I2S left/right frame clock input" }
+  - { name: GAIN_SLOT, type: input,  scope: "gain-select strap (I2S/LJ mode) or TDM channel-select" }
+  - { name: OUTP,      type: output, scope: "positive speaker amplifier output" }
+  - { name: OUTN,      type: output, scope: "negative speaker amplifier output" }
+
+physical:
+  # pins per Maxim MAX98357A/MAX98357B datasheet 19-6779 Rev 7 (2/16),
+  # "Pin Configurations" / "Pin Description" table -- TQFN-16 column
+  # (WLP-9 variant also exists per the same table; TQFN chosen as the
+  # primary footprint since it's the through-hole-friendlier/breakout-
+  # common package and matches the MAX98357AETE+ MPN in mpn_population).
+  refdes_prefix: U
+  package:       TQFN-16
+  footprint:     tqfn_16_3p0x3p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "DIN" }
+    - { pad: "2",  signal: "GAIN_SLOT" }
+    - { pad: "3",  signal: "GND" }
+    - { pad: "4",  signal: "SD_MODE" }
+    # pads 5, 6 = N.C. per datasheet; omitted (not signal-bearing).
+    - { pad: "7",  signal: "VDD" }
+    - { pad: "8",  signal: "VDD" }
+    - { pad: "9",  signal: "OUTP" }
+    - { pad: "10", signal: "OUTN" }
+    - { pad: "11", signal: "GND" }
+    # pads 12, 13 = N.C. per datasheet; omitted (not signal-bearing).
+    - { pad: "14", signal: "LRCLK" }
+    - { pad: "15", signal: "GND" }
+    - { pad: "16", signal: "BCLK" }
+    # exposed pad (EP): "not internally connected" per datasheet;
+    # bond to a solid ground plane for thermal dissipation only --
+    # not a signal-bearing pin, omitted.
