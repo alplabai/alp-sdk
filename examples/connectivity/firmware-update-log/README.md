@@ -108,16 +108,24 @@ For the dual-core AEN package, use a two-entry ATOC: HP is `M55_HP`
 `["load", "boot"]` at `0x50000000`, and HE is `M55_HE` `["load"]` at
 `0x58000000`. HP then releases HE at runtime with the portable
 `alp_mproc_boot_core()` path and serves HE's update-log requests over MHU.
-The bench helper below builds that exact package; `--package-only` validates the
-ATOC without writing MRAM.
+The bench helper below builds that exact package. Keep the normal HE build
+fail-closed. Use the `-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON` build only after
+the board has been provisioned so the MRAM log partition rejects HE writes.
+`--package-only` validates the ATOC without writing MRAM.
 
 ```
+west build -p always \
+    -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/connectivity/firmware-update-log \
+    -d build/firmware-update-log-he-proven \
+    -- -DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON
+
 scripts/bench/aen/flash-update-log-dual.sh --package-only \
-    build/firmware-update-log-hp build/firmware-update-log-he
+    build/firmware-update-log-hp build/firmware-update-log-he-proven
 
 ALP_CONFIRM_DESTRUCTIVE_FLASH=yes \
 scripts/bench/aen/flash-update-log-dual.sh \
-    build/firmware-update-log-hp build/firmware-update-log-he
+    build/firmware-update-log-hp build/firmware-update-log-he-proven
 ```
 
 After a real flash, the helper also reads SRAM0 proof beacons over SWD:
@@ -126,6 +134,11 @@ After a real flash, the helper also reads SRAM0 proof beacons over SWD:
 |---|---|
 | `0x02000060` | HP owner: `magic`, last status, last operation, served request count |
 | `0x02001060` | HE client: `magic`, last operation, last sequence, last status |
+
+For a hardware-enforced run, the HE beacon's last status word must be `0`
+(`ALP_OK`) after the owner has served the append/verify/count/get requests.
+Use `scripts/bench/aen/read-update-log-proof.sh --expect-hw` to re-read those
+beacons without reflashing.
 
 On a board that enables the TF-M owner or the AEN M55 owner with the firewall
 proof latch, the HE application's first line reports:

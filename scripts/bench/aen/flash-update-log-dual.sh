@@ -26,8 +26,8 @@ if [ "$#" -ne 2 ]; then
 	exit 2
 fi
 
-HP_BD="$1"
-HE_BD="$2"
+HP_BD="$(cd "$1" && pwd)"
+HE_BD="$(cd "$2" && pwd)"
 HP_BIN="$HP_BD/zephyr/zephyr.bin"
 HE_BIN="$HE_BD/zephyr/zephyr.bin"
 
@@ -112,26 +112,10 @@ if grep -qi "Could not connect to the target device" /tmp/firmware-update-log-du
 fi
 
 echo "flash complete; capture labgrid console for HP owner + HE client output" >&2
-
 sleep 3
-cat > /tmp/firmware-update-log-dual-read.jlink <<EOF
-device $JLINK_DEVICE_READ
-si SWD
-speed $JLINK_SPEED
-connect
-mem32 0x02000060, 0x10
-Sleep 400
-mem32 0x0200006C, 0x4
-mem32 0x02001060, 0x10
-exit
-EOF
-
-$JLINK -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-read.jlink \
-	2>/tmp/firmware-update-log-dual-read.err \
-	>/tmp/firmware-update-log-dual-read.out || true
-
-echo "----- update-log SRAM0 proof beacons -----"
-echo "HP @0x02000060: [magic, last_status, last_op, served_count]"
-echo "HE @0x02001060: [magic, last_op, last_seq, last_status]"
-grep -iE "^02000060|^0200006C|^02001060| = " /tmp/firmware-update-log-dual-read.out | head -12
-echo "------------------------------------------"
+READBACK_ARGS=()
+if grep -q '^CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN=y' "$HE_BD/zephyr/.config" \
+	2>/dev/null; then
+	READBACK_ARGS=(--expect-hw)
+fi
+"$HERE/read-update-log-proof.sh" "${READBACK_ARGS[@]}"
