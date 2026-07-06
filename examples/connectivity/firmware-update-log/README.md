@@ -62,6 +62,13 @@ That Kconfig bit does not program the firewall. It is the public build-time
 latch saying the SE/device firewall policy has already been provisioned and
 silicon-proven for this board.
 
+The AEN flash helpers build app-only ATOC packages by default. That preserves
+the board's existing DEVICE/firewall policy, which is the policy the proof is
+meant to test. Only set `ALP_AEN_INCLUDE_DEVICE_CONFIG=yes` when you
+intentionally want the package to replace the DEVICE config too; doing that
+with a generic config can remove the very firewall rule you are trying to
+prove.
+
 The proof is a negative test: build the HE firewall-probe profile and let HE try
 to write the MRAM log partition directly. A valid hardware-enforced board either
 rejects that write without changing the bytes, or raises a CPU fault during the
@@ -145,7 +152,7 @@ For the dual-core AEN package, use a two-entry ATOC: HP is `M55_HP`
 The bench helper below builds that exact package. Keep the normal HE build
 fail-closed. Use the `-DALP_AEN_UPDATE_LOG_FIREWALL_PROVEN=ON` build only after
 the board has been provisioned so the MRAM log partition rejects HE writes.
-`--package-only` validates the ATOC without writing MRAM.
+`--package-only` validates the app-only ATOC without writing MRAM.
 
 ```
 west build -p always \

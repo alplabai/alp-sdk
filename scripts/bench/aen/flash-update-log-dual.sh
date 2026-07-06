@@ -6,9 +6,11 @@
 #   - HP owner:  M55_HP, loadAddress 0x50000000, flags ["load", "boot"]
 #   - HE client: M55_HE, loadAddress 0x58000000, flags ["load"]
 #
-# The package is written to MRAM only when ALP_CONFIRM_DESTRUCTIVE_FLASH=yes is
-# present. Use --package-only to validate the SETOOLS package without touching
-# the board.
+# The default package is app-only so it preserves the board's existing
+# DEVICE/firewall policy. Set ALP_AEN_INCLUDE_DEVICE_CONFIG=yes only when
+# intentionally replacing that policy. The package is written to MRAM only when
+# ALP_CONFIRM_DESTRUCTIVE_FLASH=yes is present. Use --package-only to validate
+# the SETOOLS package without touching the board.
 set -e
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -62,15 +64,22 @@ HE_IMG=firmware-update-log-he.bin
 cp -f "$HP_BIN" "$SET/build/images/$HP_IMG"
 cp -f "$HE_BIN" "$SET/build/images/$HE_IMG"
 
-cat > "$SET/build/config/firmware-update-log-dual.json" <<JSON
 {
-    "DEVICE":   { "disabled": false, "binary": "app-device-config.json", "version": "0.5.00", "signed": true },
+	echo "{"
+	if [ "${ALP_AEN_INCLUDE_DEVICE_CONFIG:-no}" = "yes" ]; then
+		echo '    "DEVICE":   { "disabled": false, "binary": "app-device-config.json", "version": "0.5.00", "signed": true },'
+		echo ">>> including DEVICE config in update-log dual ATOC (ALP_AEN_INCLUDE_DEVICE_CONFIG=yes)" >&2
+	else
+		echo ">>> app-only update-log dual ATOC; preserving existing DEVICE/firewall policy" >&2
+	fi
+	cat <<JSON
     "HP-OWNER": { "disabled": false, "binary": "$HP_IMG", "version": "1.0.0", "signed": true,
                   "cpu_id": "M55_HP", "loadAddress": "0x50000000", "flags": ["load", "boot"] },
     "HE-CLIENT": { "disabled": false, "binary": "$HE_IMG", "version": "1.0.0", "signed": true,
                    "cpu_id": "M55_HE", "loadAddress": "0x58000000", "flags": ["load"] }
 }
 JSON
+} > "$SET/build/config/firmware-update-log-dual.json"
 
 cd "$SET"
 echo ">>> AEN firmware-update-log dual-entry ATOC" >&2

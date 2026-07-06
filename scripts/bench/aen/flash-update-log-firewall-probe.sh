@@ -2,9 +2,12 @@
 # scripts/bench/aen/flash-update-log-firewall-probe.sh [--package-only] <he-probe-build-dir>
 #
 # Build and optionally flash the HE direct-write MRAM firewall probe for
-# examples/connectivity/firmware-update-log. The probe is destructive when the
-# firewall is absent: it intentionally tries to change the first 16 bytes of
-# alp_ulog_partition from HE, then reports failure if the bytes changed.
+# examples/connectivity/firmware-update-log. The default package is app-only so
+# it preserves the board's existing DEVICE/firewall policy. Set
+# ALP_AEN_INCLUDE_DEVICE_CONFIG=yes only when intentionally replacing that
+# policy. The probe is destructive when the firewall is absent: it intentionally
+# tries to change the first 16 bytes of alp_ulog_partition from HE, then reports
+# failure if the bytes changed.
 set -e
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -48,13 +51,20 @@ esac
 HE_IMG=firmware-update-log-he-firewall-probe.bin
 cp -f "$HE_BIN" "$SET/build/images/$HE_IMG"
 
-cat > "$SET/build/config/firmware-update-log-firewall-probe.json" <<JSON
 {
-    "DEVICE":   { "disabled": false, "binary": "app-device-config.json", "version": "0.5.00", "signed": true },
+	echo "{"
+	if [ "${ALP_AEN_INCLUDE_DEVICE_CONFIG:-no}" = "yes" ]; then
+		echo '    "DEVICE":   { "disabled": false, "binary": "app-device-config.json", "version": "0.5.00", "signed": true },'
+		echo ">>> including DEVICE config in firewall-probe ATOC (ALP_AEN_INCLUDE_DEVICE_CONFIG=yes)" >&2
+	else
+		echo ">>> app-only firewall-probe ATOC; preserving existing DEVICE/firewall policy" >&2
+	fi
+	cat <<JSON
     "HE-PROBE": { "disabled": false, "binary": "$HE_IMG", "version": "1.0.0", "signed": true,
                   "cpu_id": "M55_HE", "loadAddress": "0x58000000", "flags": ["load", "boot"] }
 }
 JSON
+} > "$SET/build/config/firmware-update-log-firewall-probe.json"
 
 cd "$SET"
 echo ">>> AEN firmware-update-log HE firewall-probe ATOC" >&2
