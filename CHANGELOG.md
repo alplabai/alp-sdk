@@ -347,19 +347,18 @@ live bring-up is bench-gated (`TODO(aen601-bench)` in `board.cmake`).
   pinmux groups; the decompiled dtb confirms `status="okay"` + `console=ttyS0`.
   On-bus I2C device nodes (bmi323@0x68, icm42670@0x69, bmp581@0x47,
   ina236 @0x40-0x42 / 0x49-0x4B, tcal9538@0x72) grounded from the board header and
-  verified in the decompiled dtb.  Design + build path:
-  `docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md`.
-- **`examples/aen/aen-a32-carrier-bringup` — A32-Linux carrier bring-up example
-  (SP2 Task 1).**  New Yocto userspace example that exercises the E1M-EVK carrier
+  verified in the decompiled dtb.
+- **`examples/aen/aen-a32-carrier-bringup` — A32-Linux carrier bring-up example.**
+  New Yocto userspace example that exercises the E1M-EVK carrier
   peripherals from the Cortex-A32 Linux cluster: `alp_i2c_*` bus scan over
   `/dev/i2c-N`, `tcal9538` IO-expander toggle/read, `bmi323`/`icm42670` IMU
   chip-id (runtime-detected, post-respin strap), and `alp_gpio_*` LED + INT
   line over the gpiochip v2 chardev ABI.  Builds with CMake inside a Yocto SDK
   environment; board-gated `TODO(e1m-evk-hw)` constants isolate the three
-  `/dev`-enumeration values needed on the bench.  Host syntax-check gate passes
+  `/dev`-enumeration values needed on hardware.  Host syntax-check gate passes
   (`cc -std=c11 -Wall -Wextra -Iinclude -fsyntax-only`, exit 0).
 - **`meta-alp-sdk/recipes-examples/aen-a32-carrier-bringup_0.6.bb` — Yocto recipe
-  that cross-builds and bakes the example into `alif-tiny-image` (SP2 Task 2).**
+  that cross-builds and bakes the example into `alif-tiny-image`.**
   Inherits `cmake`; sources the branch `feat/aen-a32-yocto-bringup` via
   `SRC_URI` + `SRCREV=${AUTOREV}`; `S` points directly at the example subdir
   so only the example is compiled against the staged `alp-sdk` sysroot.
@@ -372,24 +371,21 @@ live bring-up is bench-gated (`TODO(aen601-bench)` in `board.cmake`).
   packages for `cortexa32` musl.  ROS 2 is dropped on AEN (XIP footprint), so the
   A32 image installs `alp-sdk` only — `bitbake alif-tiny-image` bakes a bootable
   rootfs with the `<alp/*>` runtime on the E8 A32.
-- **`examples/multicore/rpmsg-aen/` retargeted to E1M-AEN801 (SP3 Task 2).**  The
+- **`examples/multicore/rpmsg-aen/` retargeted to E1M-AEN801.**  The
   example's default `board.yaml` now declares `som.sku: E1M-AEN801`; the
   orchestrator resolves the 256 KiB `alp_default_rpmsg` carve-out from E8's sram0
-  (0x023c0000) using the grounded base added in SP3 Task 1.  The former AEN701
-  config is preserved as `board-aen701.yaml` (still blocked on its
-  `mailbox.controller: TBD`) and documented as the explicit alternate
-  (`west alp-build ... --input board-aen701.yaml`).  Dual-SKU build flow and a
-  known-issue note (LSM6DSO comment vs. bmi323 preset) added to the README.
+  (0x023c0000) using the grounded E8 sram0 base.  The former AEN701 alternate is
+  deferred until its mailbox metadata is grounded.
 - **`meta-alp-sdk/recipes-firmware/aen-m55-hp-fw_0.6.bb` — M55-HP rpmsg firmware
-  install shell (SP3 Task 4).**  A Yocto recipe that installs the Cortex-M55-HP
+  install shell.**  A Yocto recipe that installs the Cortex-M55-HP
   Zephyr ELF to `/lib/firmware/alp/E1M-AEN801/m55_hp.elf` — the path the carrier
   DTS `firmware-name` property and `alp-remoteproc-start.sh` expect.  The ELF is a
   prebuilt binary built out-of-tree from `examples/multicore/rpmsg-aen/m55_hp` via
   `west build` and is **not redistributed in the public layer** (kept out of git by
-  the top-level `*.elf` rule; supplied by alp-sdk-internal / the integrator).  The
+  the top-level `*.elf` rule; supplied by an integration layer or local build).  The
   recipe is `SKIP_RECIPE`-gated by default — clear the skip and place the ELF at
   `files/m55_hp.elf` to bake.  `COMPATIBLE_MACHINE = "e1m-aen801-a32"`.
-- **AEN801 multicore image baked end-to-end (SP3 Task 5).**  `alif-tiny-image` for
+- **AEN801 multicore image baked end-to-end.**  `alif-tiny-image` for
   `MACHINE=e1m-aen801-a32` now bakes with `alp-remoteproc` (committed to
   `IMAGE_INSTALL:append`) and — with a local `SKIP_RECIPE` clear + the untracked ELF —
   `aen-m55-hp-fw` in the rootfs manifest (`cortexa32hf-neon 0.6-r0`).  The deployed

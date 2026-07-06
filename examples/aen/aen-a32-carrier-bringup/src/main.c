@@ -36,7 +36,7 @@
 /*
  * Board-gated runtime mappings -- TODO(e1m-evk-hw).
  *
- * The SP1 carrier DTS routes EVK_I2C_BUS_SENSORS (E1M_I2C0) to Alif
+ * The AEN801 carrier DTS routes EVK_I2C_BUS_SENSORS (E1M_I2C0) to Alif
  * I2C2, but the kernel assigns the /dev/i2c-N adapter index at boot.
  * Confirm with `i2cdetect -l` on the target and set N to match.
  */

@@ -5,15 +5,15 @@ built by a single `west alp-build` invocation.
 
 | Example | SoM default | Cores | Transport | Status |
 |---------|-------------|-------|-----------|--------|
-| [`rpmsg-aen/`](rpmsg-aen/) | E1M-AEN801 | A32 Linux + M55-HP Zephyr | RPMsg over MHUv2 | `[UNTESTED]` structural draft; carveout resolves; M55-HP firmware baked locally |
+| [`rpmsg-aen/`](rpmsg-aen/) | E1M-AEN801 | A32 Linux + M55-HP Zephyr | RPMsg over MHUv2 | `[UNTESTED]` structural draft; carveout resolves; M55-HP firmware can be baked locally |
 | [`rpmsg-v2n/`](rpmsg-v2n/) | E1M-V2N101 | A55 Linux + M33-SM Zephyr | RPMsg over SCI-UART | `[UNTESTED]` structural draft |
 | [`rpmsg-imx93/`](rpmsg-imx93/) | E1M-NX9101 | A55 Linux + M33 Zephyr | RPMsg | `[UNTESTED]` structural draft |
 | [`mproc-mailbox/`](mproc-mailbox/) | — | native_sim | Mailbox loopback | Zephyr CI only |
 | [`heterogeneous-offload/`](heterogeneous-offload/) | — | A + M | Offload demo | `[UNTESTED]` |
 
-## AEN801 multicore (SP3)
+## AEN801 multicore
 
-`rpmsg-aen/` is the primary AEN801 multicore example.  As of SP3 (2026-06-26):
+`rpmsg-aen/` is the primary AEN801 multicore example.  As of 2026-06-26:
 
 - `board.yaml` defaults to **E1M-AEN801** (Alif Ensemble E8: dual A32 + M55-HP).
 - The orchestrator resolves the **256 KiB `alp_default_rpmsg` carveout** from
@@ -24,11 +24,11 @@ built by a single `west alp-build` invocation.
 - `alp-remoteproc` is baked into `alif-tiny-image` via `IMAGE_INSTALL:append` in
   `e1m-aen801-a32.conf`; the systemd unit starts the M55-HP firmware on boot.
 - `aen-m55-hp-fw` (the prebuilt M55-HP ELF) is `SKIP_RECIPE`-gated in the public
-  layer; supply the ELF locally or via `alp-sdk-internal` and clear the skip to
+  layer; supply the ELF locally or from an integration layer and clear the skip to
   bake.
 
-AEN701 (`board-aen701.yaml`) remains an alternate; it is **blocked** until
-`mailbox.controller: TBD` in `metadata/e1m_modules/E1M-AEN701.yaml` is filled.
+AEN701 remains deferred until `mailbox.controller: TBD` in
+`metadata/e1m_modules/E1M-AEN701.yaml` is filled.
 
 ## Build
 

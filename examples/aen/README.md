@@ -20,7 +20,7 @@ into the `alif-tiny-image`.
 
 | Directory                                                          | What it shows                                                                        |
 |--------------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| [`aen-a32-carrier-bringup`](aen-a32-carrier-bringup/)             | **SP2** -- E1M-EVK carrier bring-up from A32 Linux: i2c-dev bus scan + tcal9538 IO-expander toggle + bmi323/icm42670 IMU chip-id (runtime-detected) + gpiochip LED drive + INT read. Portable `alp_*` surface over Linux userspace ABIs. |
+| [`aen-a32-carrier-bringup`](aen-a32-carrier-bringup/)             | A32 Linux E1M-EVK carrier bring-up: i2c-dev bus scan + tcal9538 IO-expander toggle + bmi323/icm42670 IMU chip-id (runtime-detected) + gpiochip LED drive + INT read. Portable `alp_*` surface over Linux userspace ABIs. |
 
 ### Flagship + system
 

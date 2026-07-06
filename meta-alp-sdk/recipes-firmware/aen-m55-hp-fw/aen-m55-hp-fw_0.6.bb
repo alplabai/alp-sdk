@@ -5,7 +5,7 @@
 # The firmware itself is a PREBUILT Cortex-M55 ELF -- a binary blob, so
 # it is NOT redistributed in the public meta-alp-sdk layer (the repo's
 # top-level `*.elf` rule keeps it out of public git; see the
-# classifying-public-vs-internal policy).  The ELF is built out-of-tree
+# public/private split policy).  The ELF is built out-of-tree
 # from examples/multicore/rpmsg-aen/m55_hp via:
 #
 #   cd ~/zephyrproject        # a west workspace with Zephyr 4.4+
@@ -19,11 +19,9 @@
 # linker script does not declare these sections); the warnings are benign
 # -- GNU ld auto-emits __start_/__stop_ bracket symbols for C-identifier-
 # named sections even when orphaned, so all backends register correctly.
-# Verified: all 27 __start_alp_backends_* symbols present in FLASH with
-# correct __stop_ pairs (see docs/superpowers/notes/2026-06-25-aen-bsp-grounding.md).
 #
 # To bake: place the built ELF at this recipe's files/m55_hp.elf (it is
-# git-ignored by the top-level `*.elf` rule) -- or have alp-sdk-internal
+# git-ignored by the top-level `*.elf` rule) -- or have an integration layer
 # supply it -- then clear the skip below (e.g.
 # `SKIP_RECIPE[aen-m55-hp-fw] = ""` in local/auto.conf).
 
@@ -31,7 +29,7 @@ SUMMARY = "E1M-AEN801 M55-HP rpmsg producer firmware (remoteproc)"
 DESCRIPTION = "Cortex-M55-HP Zephyr firmware for the rpmsg-aen demo; \
                installed where alp-remoteproc scans so the A32 Linux \
                side can boot it over MHUv2.  Prebuilt artifact, built \
-               out-of-tree and supplied by alp-sdk-internal / the integrator."
+               out-of-tree and supplied by an integration layer or local build."
 HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
@@ -39,7 +37,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 # Default-skip: the public layer ships no ELF.  Clear this skip once the
 # prebuilt firmware is placed at files/m55_hp.elf (scarthgap honors
 # SKIP_RECIPE; PNBLACKLIST has been inert since honister).
-SKIP_RECIPE[aen-m55-hp-fw] ?= "M55-HP firmware is a prebuilt binary not redistributed in the public layer; place the west-built ELF at files/m55_hp.elf (or have alp-sdk-internal supply it) and clear this skip to bake."
+SKIP_RECIPE[aen-m55-hp-fw] ?= "M55-HP firmware is a prebuilt binary not redistributed in the public layer; place the west-built ELF at files/m55_hp.elf (or supply it from an integration layer) and clear this skip to bake."
 EXCLUDE_FROM_WORLD = "1"
 
 SRC_URI = "file://m55_hp.elf"

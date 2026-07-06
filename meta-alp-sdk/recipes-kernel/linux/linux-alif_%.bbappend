@@ -10,9 +10,8 @@
 # from the Alif devkit-e8 peripheral selection so the build chain
 # (env -> kernel -> our dtb) is proven end-to-end on real sources. The E1M-EVK
 # peripheral selection (console UART instance, carrier I2C buses + devices, OSPI
-# NOR/HyperRAM, MHU to the M55s for SP3) is refined against the E1M-EVK -> Alif
-# HW mapping (metadata/boards/e1m-evk.yaml) once provided -- see
-# docs/superpowers/specs/2026-06-25-aen-a32-yocto-bringup-design.md (§12b).
+# NOR/HyperRAM, MHU to the M55s) is refined against the E1M-EVK -> Alif HW
+# mapping in metadata/boards/e1m-evk.yaml and the E1M-AEN801 SoM preset.
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 

@@ -34,6 +34,16 @@
     "aen": [
       {
         "board": "e1m-evk",
+        "name": "aen-a32-carrier-bringup",
+        "path": "examples/aen/aen-a32-carrier-bringup",
+        "som": "E1M-AEN801",
+        "summary": "Bring-up smoke test for the **E1M-EVK** carrier peripherals, run from a Linux/Yocto user-space app on the **E1M-AEN801 Cortex-A32**. It walks the portable `alp_*` surface over the Linux userspace ABIs:",
+        "supported_boards": [
+          "e1m-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
         "name": "aen-analog-validate",
         "path": "examples/aen/aen-analog-validate",
         "som": "E1M-AEN801",
@@ -316,7 +326,7 @@
         "name": "rpmsg-aen",
         "path": "examples/multicore/rpmsg-aen",
         "som": "E1M-AEN801",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct, but the end-to-end RPMsg path still needs AEN801 > bench validation."
+        "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct. AEN801 (the default) resolves its RPMsg carve-out > from sram0 (0x02000000); the full west build is pending silicon > bring-up of the MHUv2 mailbox driver."
       },
       {
         "board": "e1m-evk",

@@ -89,7 +89,7 @@
 	/*
 	 * On-bus EVK-carrier devices (addresses from
 	 * include/alp/boards/alp_e1m_evk.h).  Nodes whose Alif-kernel
-	 * driver is absent simply don't bind -- harmless; the SP2
+	 * driver is absent simply don't bind -- harmless; the Linux
 	 * userspace alp_i2c (/dev/i2c-N) path is unaffected.  Confirm the
 	 * exact `compatible` strings the booted kernel binds at bench.
 	 */
@@ -175,7 +175,7 @@
 	};
 };
 
-/* SP3 multicore: rpmsg over MHUv2 to M55-HP.
+/* AEN801 multicore: rpmsg over MHUv2 to M55-HP.
  *
  * Carveout -- generated from examples/multicore/rpmsg-aen/board.yaml
  * (alp_default_rpmsg at sram0+0x1c0000, 256 KiB); do not hand-edit.

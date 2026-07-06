@@ -149,7 +149,7 @@ ipc:
 # AEN801 (the lead E8 part) RESOLVES its mailbox controller
 # (alif_mhuv2), so it sails past the controller-TBD guard.  The E8
 # SoC JSON now carries per-region `base` addresses (grounded from the
-# Alif kernel fork DTS in SP3 Task 1), so the carve-out RESOLVES
+# Alif kernel fork DTS), so the carve-out RESOLVES
 # rather than blocking.  This fixture verifies the happy path for an
 # M55-HP↔M55-HE rpmsg channel on the E8 (both cores can access sram0).
 AEN801_M55_IPC = """
@@ -393,7 +393,7 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
 
 def test_resolve_carve_outs_aen801_m55_ipc_resolves(tmp_path: Path) -> None:
     """AEN801 E8 SoC JSON now carries per-region SRAM base addresses
-    (grounded from the Alif kernel fork DTS in SP3 Task 1).  The
+    (grounded from the Alif kernel fork DTS).  The
     M55-HP↔M55-HE rpmsg channel must RESOLVE (status='ok', base
     allocated from sram0) rather than crash or block.
 
@@ -406,8 +406,8 @@ def test_resolve_carve_outs_aen801_m55_ipc_resolves(tmp_path: Path) -> None:
     assert len(resolved) == 1
     entry = resolved[0]
     assert entry.status == "ok", (
-        f"AEN801 M55-HP↔M55-HE carveout should resolve after SP3 Task 1 "
-        f"grounded the E8 memory bases; got status={entry.status!r}, "
+        f"AEN801 M55-HP↔M55-HE carveout should resolve after grounding "
+        f"the E8 memory bases; got status={entry.status!r}, "
         f"reason={entry.reason!r}"
     )
     assert entry.base is not None
