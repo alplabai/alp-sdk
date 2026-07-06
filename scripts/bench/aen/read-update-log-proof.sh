@@ -33,6 +33,8 @@ if [ "$#" -ne 0 ]; then
 fi
 
 JLINK="$(bench_jlink_exe)" || exit $?
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 
 cat > /tmp/firmware-update-log-dual-read.jlink <<EOF
 device $JLINK_DEVICE_READ
@@ -47,7 +49,7 @@ mem32 0x02001080, 0x10
 exit
 EOF
 
-$JLINK -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-read.jlink \
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-read.jlink \
 	2>/tmp/firmware-update-log-dual-read.err \
 	>/tmp/firmware-update-log-dual-read.out || true
 

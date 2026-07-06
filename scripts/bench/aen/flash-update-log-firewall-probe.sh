@@ -34,6 +34,8 @@ grep -q '^CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE=y' "$HE_BD/zephyr/.co
 bench_require_setools || exit $?
 SET="$SETOOLS_DIR"
 JLINK="$(bench_jlink_exe)" || exit $?
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 
 rv=$(xxd -e -l 8 "$HE_BIN" | awk '{print $3}')
 echo ">>> HE firewall-probe reset vector: 0x$rv" >&2
@@ -87,10 +89,11 @@ g
 exit
 EOF
 
-$JLINK -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-write.jlink 2>&1 | tee /tmp/firmware-update-log-firewall-probe-write.out | \
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-write.jlink 2>&1 | tee /tmp/firmware-update-log-firewall-probe-write.out | \
 	grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" | head -40
 
-if grep -qi "Could not connect to the target device" /tmp/firmware-update-log-firewall-probe-write.out; then
+if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" \
+	/tmp/firmware-update-log-firewall-probe-write.out; then
 	echo "!! $JLINK_DEVICE_FLASH profile failed to connect" >&2
 	exit 2
 fi

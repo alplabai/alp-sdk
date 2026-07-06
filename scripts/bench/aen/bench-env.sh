@@ -113,6 +113,10 @@ export JLINK_DEVICE_READ="${JLINK_DEVICE_READ:-Cortex-M55}"
 # JLINK_SPEED — SWD clock in kHz.
 export JLINK_SPEED="${JLINK_SPEED:-4000}"
 
+# JLINK_SN / JLINK_SERIAL — optional SEGGER probe serial selector. Leave unset
+# on a single-probe bench; set it when multiple J-Links are visible on the host.
+export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
+
 # --------------------------------------------------------------------
 # Tool resolution helpers
 # --------------------------------------------------------------------

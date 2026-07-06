@@ -37,6 +37,8 @@ HE_BIN="$HE_BD/zephyr/zephyr.bin"
 bench_require_setools || exit $?
 SET="$SETOOLS_DIR"
 JLINK="$(bench_jlink_exe)" || exit $?
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 
 check_itcm_vector() {
 	local role="$1"
@@ -103,10 +105,11 @@ g
 exit
 EOF
 
-$JLINK -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-write.jlink 2>&1 | tee /tmp/firmware-update-log-dual-write.out | \
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-write.jlink 2>&1 | tee /tmp/firmware-update-log-dual-write.out | \
 	grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" | head -40
 
-if grep -qi "Could not connect to the target device" /tmp/firmware-update-log-dual-write.out; then
+if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" \
+	/tmp/firmware-update-log-dual-write.out; then
 	echo "!! $JLINK_DEVICE_FLASH profile failed to connect" >&2
 	exit 2
 fi
