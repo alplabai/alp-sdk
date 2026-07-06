@@ -7,6 +7,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added — Studio carrier-netlist handoff
+
+`scripts/alp_project.py --emit carrier-netlist` and `alp emit
+carrier-netlist` now produce a schema-versioned JSON handoff for Alp
+Studio: carrier-facing nets composed from board `e1m_routes:` + SoM
+`pad_routes:`, plus carrier BOM rows from board `populated:` and
+chip/block manifests.  The artifact is explicitly netlist/BOM only:
+SoM internals stay excluded and the SDK does not claim KiCad, Gerber,
+DRC, or PCB-layout output.
+
 ### Added — xhci_core: arch-neutral host logic validated + driver wired
 
 `xhci_core.{c,h}` — pure-C, no-MMIO xHCI ring/context/init-sequence logic
