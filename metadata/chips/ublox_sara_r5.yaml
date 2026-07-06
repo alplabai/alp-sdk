@@ -20,6 +20,24 @@ cellular:
   modes:          [lte_cat_m1]
   carrier_certified: true
 
+physical:
+  # Pre-routed cellular module (not a bare die/package) -- lighter
+  # module form, no pins/footprint. Per u-blox SARA-R5 series product
+  # summary UBX-18051286 (miniature "SARA" LGA form factor) and the
+  # SARA-R5 system integration manual: 96-pad LGA, 26.0 x 16.0 x 2.2mm,
+  # extended operating temperature range -40 to +85 degC. Module has no
+  # on-board cellular antenna: the ANT LGA pad carries the RF I/O for
+  # an external cellular antenna (matching PCB trace / u.FL connector
+  # on the carrier). Module also breaks out a 96-pad UART/I2C/SPI/USB
+  # interface not modeled here since this form omits pins per the
+  # module template.
+  package:              "96-pad LGA (miniature SARA form factor)"
+  dimension_mm:         "26.0 x 16.0 x 2.2"
+  antenna:              external
+  operating_temp_deg_c: "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_UBLOX_SARA_R5
   baremetal:      ALP_SDK_CHIP_UBLOX_SARA_R5

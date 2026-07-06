@@ -20,6 +20,9 @@ i2c:
 signals:
   - { name: SDA, type: bidir, scope: "I2C0 / BRD_I2C on the host" }
   - { name: SCL, type: input, scope: "I2C0 / BRD_I2C on the host" }
+  - { name: ADD0, type: input, scope: "address-select strap; tie to V+, GND, SDA, or SCL for one of 4 bus addresses" }
+  - { name: ALERT, type: open_drain_output, scope: "overtemperature alert (SMBus-alert compatible); open-drain, requires pullup; unused on E1M-AEN/E1M-V2N (tie to GND if unused per datasheet)" }
+  - { name: "V+", type: power, notes: "datasheet's own supply-pin name; maps to VDD, 1.4-3.6V" }
 
 precision:
   accuracy_c:     0.5
@@ -40,3 +43,31 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per TI TMP112/TMP112D datasheet SBOS473L (Mar 2009, rev. Jul 2024),
+  # section 5 "Pin Configuration and Functions", Table 5-1, "DRL Package"
+  # column -- the 6-pin SOT563 (1.6x1.6x0.6mm) used by the plain TMP112A/B/D/N
+  # variants (this manifest's mpn_population). All 6 pins are signal-bearing;
+  # no NC pins on this package. Pullup/decouple values per section 8.2.1
+  # "Design Requirements" (5k-ohm pullups on SCL/SDA/ALERT, 0.01uF supply
+  # bypass cap). The X2SON-5 package (TMP112D/D0-D3, 5-pin, ADD0 XOR ALERT
+  # shared on one pin) is a different SKU not in this manifest's population
+  # and is not represented here.
+  refdes_prefix: U
+  package:       SOT563-6
+  footprint:     sot563_6_1p6x1p6mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1", signal: "SCL" }
+    - { pad: "2", signal: "GND" }
+    - { pad: "3", signal: "ALERT" }
+    - { pad: "4", signal: "ADD0" }
+    - { pad: "5", signal: "V+" }
+    - { pad: "6", signal: "SDA" }
+  passives:
+    - { role: decouple, value: 0.01uF, net: "V+",  refdes_prefix: C }
+    - { role: pullup,   value: 5k,     net: SCL,   refdes_prefix: R }
+    - { role: pullup,   value: 5k,     net: SDA,   refdes_prefix: R }
+    - { role: pullup,   value: 5k,     net: ALERT, refdes_prefix: R }

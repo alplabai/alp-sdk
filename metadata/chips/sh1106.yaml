@@ -33,3 +33,30 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # INCOMPLETE: no refdes_prefix/footprint/pins[] here -- deliberately, not
+  # from missing data. Per Sino Wealth SH1106 datasheet v2.3 (this
+  # manifest's cited datasheet), §"Pad Configuration"/"Pad Description" +
+  # feature list ("Available in COG form, thickness: 300 um"): the SH1106
+  # ships as a bare COG (Chip-On-Glass) die that the *panel* manufacturer
+  # bonds directly onto the OLED glass's own electrode traces -- it has no
+  # discrete board-mount package of its own, unlike every other part in
+  # this batch. The die exposes 266 numbered bump pads total, but all but a
+  # handful are SEG0-131 / COM0-63 lines that route only to the display
+  # glass's own electrodes and never appear on a PCB net -- adding pins[]
+  # against those pad numbers would misrepresent this as a placeable BOM
+  # part. In practice every alp-sdk board integrates this chip pre-bonded
+  # inside a purchased "SH1106 OLED module" (its own small PCB/FPC exposing
+  # VDD/GND/SCL/SDA + optional RES/CS), which is a separate, board-specific
+  # part not covered by this chip-level manifest.
+  #
+  # For reference, the functionally relevant *pad names* (not board-mount
+  # pad numbers) for I2C operation per the "Pad Description" table are:
+  # VDD1 (logic supply, 1.65-3.5V), VDD2 (charge-pump supply, 3.0-4.2V),
+  # VSS (ground), D0/SCL + D1/SDA(SI) (the bus pair once IM0-2 strap the
+  # part into I2C mode), A0/SA0 (I2C address-select strap), CS and RES
+  # (chip-select / reset, both board straps in most COG integrations).
+  package:      "COG (Chip-On-Glass), no discrete board-mount package"
+  visibility:   public
+  provenance:   web_provisional

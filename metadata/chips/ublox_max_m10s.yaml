@@ -18,6 +18,23 @@ uart:
 gnss:
   constellations: [gps, glonass, galileo, beidou]
 
+physical:
+  # Pre-routed GNSS module (not a bare die/package) -- lighter module
+  # form, no pins/footprint. Per u-blox MAX-M10S datasheet UBX-20035208
+  # R08, section 6 "Mechanical specifications" (Table 21: typical
+  # 10.1 x 9.7 x 2.5mm, 18-pad LCC) and section 4.2 "Operating
+  # conditions" (Topr -40 to +85 degC). Module has no on-board antenna:
+  # RF_IN is the GNSS RF input and VCC_RF biases an external active
+  # antenna; both active and passive external antennas are supported.
+  # Module also breaks out an 18-pad UART/I2C/SPI interface not
+  # modeled here since this form omits pins per the module template.
+  package:              "18-pad LCC (leadless chip carrier)"
+  dimension_mm:         "10.1 x 9.7 x 2.5"
+  antenna:              external
+  operating_temp_deg_c: "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_UBLOX_MAX_M10S
   baremetal:      ALP_SDK_CHIP_UBLOX_MAX_M10S

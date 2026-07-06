@@ -20,6 +20,84 @@ motor:
   microstep_modes: [1, 2, 4, 8, 16, 32, 64, 128, 256]
   current_a:      2.0
 
+signals:
+  # Full chip-native pin set per TMC2209 datasheet, section 2 "Pin
+  # Assignments" / 2.2 "Signal Descriptions TMC2209" (pin table + Figure 2.1
+  # pinning diagram are unchanged across Rev 1.03-1.09); bus:/uart: above
+  # names only the host-facing single-wire UART this driver exposes today.
+  - { name: OA1,       type: output, scope: "motor coil A output 1" }
+  - { name: OA2,       type: output, scope: "motor coil A output 2" }
+  - { name: OB1,       type: output, scope: "motor coil B output 1" }
+  - { name: OB2,       type: output, scope: "motor coil B output 2" }
+  - { name: VS,        type: power,  scope: "motor supply voltage, 4.75-29V DC" }
+  - { name: VCC_IO,    type: power,  scope: "3.3-5V IO supply for all digital pins" }
+  - { name: "5VOUT",   type: power,  scope: "internal 5V regulator output; 2.2-4.7uF decouple to GND" }
+  - { name: GND,       type: ground }
+  - { name: ENN,       type: input,  scope: "enable-not; high floats all motor outputs" }
+  - { name: STEP,      type: input,  scope: "step pulse input" }
+  - { name: DIR,       type: input,  scope: "direction input; internal pull-down" }
+  - { name: MS1_AD0,   type: input,  scope: "microstep resolution select bit 0 / UART address bit 0; internal pull-down" }
+  - { name: MS2_AD1,   type: input,  scope: "microstep resolution select bit 1 / UART address bit 1; internal pull-down" }
+  - { name: SPREAD,    type: input,  scope: "chopper mode select: low=StealthChop, high=SpreadCycle; may float" }
+  - { name: STDBY,     type: input,  scope: "standby; pull high to disable internal regulator; 100k internal pull-down" }
+  - { name: DIAG,      type: output, scope: "diagnostic / StallGuard output; high on stall or driver error" }
+  - { name: INDEX,     type: output, scope: "configurable index pulse output" }
+  - { name: CLK,       type: input,  scope: "clock input; tie to GND for internal osc, or supply 10-16MHz external clock" }
+  - { name: PDN_UART,  type: bidir,  scope: "power-down-not control input, or single-wire UART I/O when UART mode enabled" }
+  - { name: VREF,      type: analog, scope: "analog reference for current scaling, or reference current for internal sense-resistor mode" }
+  - { name: CPI,       type: analog, scope: "charge pump capacitor input; tie to CPO with 22nF 50V capacitor" }
+  - { name: CPO,       type: analog, scope: "charge pump capacitor output" }
+  - { name: VCP,       type: power,  scope: "charge pump voltage; tie to VS with 100nF capacitor" }
+  - { name: BRA,       type: analog, scope: "coil-A current-sense resistor connection; tie to GND if using internal sense resistor" }
+  - { name: BRB,       type: analog, scope: "coil-B current-sense resistor connection; tie to GND if using internal sense resistor" }
+
+physical:
+  # Pins per TMC2209 datasheet Rev. 1.05 (2020-May-18), section 2.1 "Package
+  # Outline TMC2209" (Figure 2.1 pinning diagram) + 2.2 "Signal Descriptions
+  # TMC2209" (28-pad QFN, TMC2209-LA order code, 5x5mm/0.5mm pitch, exposed
+  # die pad = GND). Pin 25 ("-", unused) omitted: not signal-bearing.
+  refdes_prefix: U
+  package:       QFN-28
+  footprint:     qfn_28_5x5x0p9mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "OB2" }
+    - { pad: "2",  signal: "ENN" }
+    - { pad: "3",  signal: "GND" }
+    - { pad: "4",  signal: "CPO" }
+    - { pad: "5",  signal: "CPI" }
+    - { pad: "6",  signal: "VCP" }
+    - { pad: "7",  signal: "SPREAD" }
+    - { pad: "8",  signal: "5VOUT" }
+    - { pad: "9",  signal: "MS1_AD0" }
+    - { pad: "10", signal: "MS2_AD1" }
+    - { pad: "11", signal: "DIAG" }
+    - { pad: "12", signal: "INDEX" }
+    - { pad: "13", signal: "CLK" }
+    - { pad: "14", signal: "PDN_UART" }
+    - { pad: "15", signal: "VCC_IO" }
+    - { pad: "16", signal: "STEP" }
+    - { pad: "17", signal: "VREF" }
+    - { pad: "18", signal: "GND" }
+    - { pad: "19", signal: "DIR" }
+    - { pad: "20", signal: "STDBY" }
+    - { pad: "21", signal: "OA2" }
+    - { pad: "22", signal: "VS" }
+    - { pad: "23", signal: "BRA" }
+    - { pad: "24", signal: "OA1" }
+    - { pad: "26", signal: "OB1" }
+    - { pad: "27", signal: "BRB" }
+    - { pad: "28", signal: "VS" }
+    - { pad: "PAD", signal: "GND" }
+  passives:
+    - { role: series,   value: 22nF,   net: CPI,    refdes_prefix: C }   # CPI-to-CPO charge-pump cap
+    - { role: decouple, value: 100nF,  net: VCP,    refdes_prefix: C }   # VCP-to-VS tie cap
+    - { role: decouple, value: 2.2uF,  net: "5VOUT", refdes_prefix: C }  # 5VOUT-to-GND, 2.2-4.7uF range
+    - { role: bulk,     value: 100uF,  net: VS,     refdes_prefix: C }
+    - { role: series,   value: 100mOhm, net: BRA,   refdes_prefix: R }  # RSA, current-sense; sets IRMS per Sec.8 table
+    - { role: series,   value: 100mOhm, net: BRB,   refdes_prefix: R }  # RSB
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_TMC2209
   baremetal:      ALP_SDK_CHIP_TMC2209
