@@ -11,6 +11,27 @@ hand-written firmware as a first-class consumer.
 > it with cross-version navigation + search.  Stuck on something?
 > Ask on [**community.alplab.ai**](https://community.alplab.ai/).
 
+> **Two front ends: `alp` CLI vs `west`.**  The SDK ships two
+> equivalent entry points, and both consume the same `board.yaml`:
+>
+> - **`alp` CLI** — the single-image quick path.  `pip install -e .`
+>   once per clone, then `alp init` scaffolds a project and `alp run`
+>   builds it for `native_sim` and prints its stdout straight
+>   through.  This is the headline
+>   [README Quickstart](../README.md#quickstart) — if you just want
+>   a hello-world running in two minutes, start there.  The full
+>   verb reference (`build` / `flash` / `emit` / `doctor` /
+>   `monitor` / `new-som` / …) lives in [`docs/cli.md`](cli.md).
+> - **`west alp-build`** — the multi-core / heterogeneous path this
+>   walkthrough uses.  It fans a `board.yaml` out into per-core
+>   build slices, runs the full pre-flight (schema validation, SoC
+>   caps, hw_info header) and delegates to `west build`.
+>
+> Nothing is lost switching between them: `alp run` uses the same
+> loader and validator under the hood.  Pick `alp` for a first
+> taste, `west alp-build` once your project spans more than one
+> core or OS.
+
 If you'd rather skim, the fastest path is:
 
 ```bash
@@ -30,7 +51,9 @@ creates the Zephyr workspace one level up from `alp-sdk/`, runs
 `west update --narrow`, installs the Zephyr Python deps + the
 SDK's extras (`jsonschema`, `imgtool`), and prints OS-specific
 `apt` / `brew` commands for the optional native libraries the
-Yocto-side backends need.
+Yocto-side backends need.  Windows-native users run the PowerShell
+twin, `scripts/bootstrap.ps1`, instead (see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §4).
 
 `west alp-build` validates the example's `board.yaml`, generates
 the build-time config from it, and delegates to `west build`.
@@ -44,6 +67,29 @@ real-hardware HIL), see [`docs/testing.md`](testing.md):
 bash scripts/test-all.sh
 ```
 
+## Linux / Yocto path — start here
+
+Everything below targets the **Zephyr / MCU side**: M-class cores
+plus `native_sim` on your host.  If you came here for the **Linux
+side** of a V2N / V2N-M1 SoM — a kernel + root filesystem for the
+Cortex-A55 cluster — that is a separate flow with different
+constraints, worth knowing before you allocate an afternoon:
+
+- **The Renesas BSP is license-gated.**  The build consumes the
+  RZ/V2N AI SDK BSP Source Code package (`RTK0EF0189F06300SJ`),
+  fetched from your own Renesas account.  alp-sdk does not (and
+  cannot) redistribute it.
+- **Disk + host:** budget **~60 GB free** and a **Linux host or
+  WSL2 Ubuntu** — Yocto does not build on native Windows or macOS.
+- The bootloader is production-flashed by Alp Lab; you build only
+  kernel + rootfs.
+
+Start at [`docs/build-yocto-v2n.md`](build-yocto-v2n.md) for the
+V2N-specific BSP / deploy / verification detail, and
+[`meta-alp-sdk/README.md`](../meta-alp-sdk/README.md) for the layer
+assembly.  The Zephyr sections below still apply to the same SoM's
+M33 core — the two paths coexist on one module.
+
 ## 1. Prerequisites
 
 The SDK is supported equally on **macOS**, **Windows**, and
@@ -54,7 +100,7 @@ you install them.
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v4.4.0 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
-| Python      | 3.10+            | For `west`, the v0.6 orchestrator (`alp_project.py` + `alp_orchestrate.py`), validators. |
+| Python      | 3.10+ (dev/CI pin: 3.12) | 3.10 is the support **floor** (`pyproject.toml` `requires-python`); dev/CI standardise on the **pin** in the repo-root `.python-version` file. Match the pin to reproduce CI exactly -- `alp doctor` warns on a mismatch. |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
@@ -81,6 +127,21 @@ pip install west
 wsl --install -d Ubuntu
 ```
 
+**Verify your setup first.**  Before building anything, run the
+read-only preflight -- it checks every tool above (plus the Zephyr
+pin, the `.west` workspace and the workspace venv) and prints a
+`[PASS]`/`[WARN]`/`[FAIL]` line with a fix hint for each:
+
+```bash
+alp doctor              # human-readable report; exit 1 on any FAIL
+alp doctor --strict     # also fail on WARN (handy in CI)
+alp doctor --json       # machine-readable (used by the VS Code extension)
+```
+
+It is HW-free (no build, no board, no flash), so it is safe to run
+anytime.  Resolve every `[FAIL]` before continuing; `[WARN]` lines
+are for optional / real-silicon-only tooling (Zephyr SDK, hal_alif).
+
 For real-silicon builds you'll also need the Zephyr SDK
 (`zephyr-sdk-1.0.1` matches the v0.6 Zephyr v4.4 pin — see
 `docs/zephyr-version-policy.md`) and a JTAG / SWD probe matching
@@ -104,7 +165,7 @@ rationale.
 
 You write Zephyr / Yocto / bare-metal app code directly against
 `<alp/...>` headers.  Pick instance IDs by hand from
-`<alp/e1m_pinout.h>` (`E1M_I2C0`, `E1M_PWM3`, …).  Your
+`<alp/e1m_pinout.h>` (`ALP_E1M_I2C0`, `ALP_E1M_PWM3`, …).  Your
 app stays portable across every E1M-conformant SoM.  The rest
 of this document covers this path.
 
@@ -139,9 +200,15 @@ After this:
 `west update --narrow -o=--depth=1` keeps the clone shallow —
 saves ~30 GB of unrelated git history.
 
-Importing alp-sdk via `west init -m` also surfaces the
-`west alp-build` extension command (see `scripts/west_commands/alp.py`)
-that the rest of this walkthrough uses.
+Importing alp-sdk via `west init -m` also surfaces the SDK's
+west-extension commands — `west alp-build`
+(`scripts/west_commands/alp_build.py`) plus its siblings
+`alp-image` / `alp-flash` / `alp-clean` / `alp-emit` / `alp-size` /
+`alp-renode`, all registered via `scripts/west-commands.yml` — that
+the rest of this walkthrough uses.  Every one of them is equally
+reachable through the `alp` CLI (`alp build`, `alp flash`, `alp size`,
+…) documented in [`docs/cli.md`](cli.md); the two front doors drive
+the same pipeline.
 
 ## 4. First build: the GPIO example
 
@@ -247,6 +314,36 @@ unwrapped peripherals exit after printing the
 `alp_last_error()` diagnostic — that's expected and proves the
 wrapper plumbing compiles + links cleanly.
 
+## 6.5. Pull in a curated third-party library
+
+Need a GUI, DSP, or serialization library?  Add one line to your
+project's `board.yaml` — the top-level `libraries:` key (ADR 0018):
+
+```yaml
+som:
+  sku: E1M-AEN701
+libraries: [lvgl, cmsis-dsp]   # curated third-party libraries
+cores:
+  m55_hp:
+    app: ./src
+```
+
+Each name resolves to a manifest under
+[`metadata/libraries/`](../metadata/libraries/); the loader emits the
+right wiring per OS (Zephyr `CONFIG_LVGL=y` in `alp.conf`, Yocto
+`IMAGE_INSTALL` for the A-cores, …) and refuses a library the target
+can't run, naming the failing constraint.  Check what's selected and
+whether it's compatible:
+
+```bash
+alp doctor            # a "libraries" line reports tier + licence + fit
+```
+
+The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,
+`zcbor` (all Tier A).  See
+[`metadata/libraries/README.md`](../metadata/libraries/) for
+the full list and how to add one.
+
 ## 7. Targeting real silicon
 
 When `alplabai/alp-zephyr-modules` publishes the EVK board
@@ -257,6 +354,12 @@ for V2N), build with that as the `-b` target:
 west build -b alp_e1m_evk_aen alp-sdk/examples/peripheral-io/gpio-button-led
 west flash
 ```
+
+The `alp` CLI equivalents are `alp build --board <name>` and
+`alp flash`; once the board is running, `alp monitor --port <port>`
+opens its serial console (run it portless to list the host's serial
+ports; `--baud` overrides the 115200 default).  See
+[`docs/cli.md`](cli.md).
 
 Each example's `boards/` directory has an overlay that maps
 the example's `alp,pin-array` slots to specific EVK pins.  The
@@ -385,7 +488,7 @@ development.  See the "Using with VS Code" section in
 adds schema-aware `board.yaml` editing (autocomplete on SKUs,
 boards, libraries; inline diagnostics from `validate_board_yaml.py`
 in the Problems panel), a GUI configurator panel with dropdowns
-for every released MPN + board, west wrappers (build / flash /
+for supported SoM presets + boards, west wrappers (build / flash /
 run native_sim), per-OS dependency bootstrap, and a one-keypress
 *Alp: Generate all* command for the six loader emit modes.  Build
 + install locally:

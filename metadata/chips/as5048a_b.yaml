@@ -31,7 +31,47 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SDA,   type: bidir,  scope: "I2C data (AS5048B variant, pin 1). AS5048A pin 1 is CSn (SPI chip select) instead." }
+  - { name: SCL,   type: input,  scope: "I2C clock (AS5048B variant, pin 2). AS5048A pin 2 is CLK (SPI clock) instead." }
+  - { name: A2,    type: input,  scope: "I2C address-select pin 3 (AS5048B variant). AS5048A pin 3 is MISO instead." }
+  - { name: A1,    type: input,  scope: "I2C address-select pin 4 (AS5048B variant). AS5048A pin 4 is MOSI instead." }
+  - { name: PWM,   type: output, scope: "pulse-width-modulated absolute angle output; both variants" }
+  - { name: VDD,   type: power,  scope: "physical pin marked VDD5V; positive supply 3.0-5.5V" }
+  - { name: VDD3V, type: power,  scope: "physical pin marked VDD3V; internal LDO output regulated from VDD5V. Connect directly to VDD5V for 3.3V-only supply; must be buffered by a 10uF cap to GND in 5V-supply mode (must not float)." }
+  - { name: GND,   type: ground }
+
+physical:
+  # This block documents the AS5048B (I2C) variant, matching this manifest's
+  # bus: i2c scope. Pins per ams AS5048A/AS5048B datasheet v1-11 (2018-Jan-29),
+  # Figure 4/6 "TSSOP14 Pin Configurations/Descriptions" (14-pin TSSOP,
+  # 5x6.4mm body). AS5048A (SPI) shares the same package but pins 1-4 differ
+  # (CSn/CLK/MISO/MOSI instead of SDA/SCL/A2/A1) -- see signal scope notes.
+  # TEST pins 6-10 are "left open during normal operation" and are omitted;
+  # TEST pin 5 must be tied to GND and is included as a strap requirement.
+  refdes_prefix: U
+  package:       TSSOP-14
+  footprint:     tssop_14_5x6p4mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "SDA" }
+    - { pad: "2",  signal: "SCL" }
+    - { pad: "3",  signal: "A2" }
+    - { pad: "4",  signal: "A1" }
+    - { pad: "5",  signal: "GND" }
+    - { pad: "11", signal: "VDD" }
+    - { pad: "12", signal: "VDD3V" }
+    - { pad: "13", signal: "GND" }
+    - { pad: "14", signal: "PWM" }
+  passives:
+    - { role: decouple, value: 100nF, net: VDD,   refdes_prefix: C }
+    - { role: decouple, value: 10uF,  net: VDD3V, refdes_prefix: C }   # mandatory in 5V operation per datasheet
+    - { role: pullup,   value: 4k7,   net: SDA,   refdes_prefix: R }
+    - { role: pullup,   value: 4k7,   net: SCL,   refdes_prefix: R }

@@ -5,16 +5,19 @@
  * implementations.  NOT a public header -- customer code never
  * sees this struct.  Layout may change between SDK versions.
  *
- * Slice 3 ships five inference backends:
+ * Zephyr/M-class registry backends:
  *
  *   - tflm           (priority 50, "*")  -- portable TFLM CPU executor.
  *   - ethos_u_aen    (priority 100, alif:ensemble:e3/e4/e5/e6/e7/e8)
  *                                       -- TFLM + Ethos-U op resolver on AEN.
  *   - ethos_u_n93    (priority 100, nxp:imx9:imx93)
  *                                       -- TFLM + Ethos-U op resolver on i.MX 93.
- *   - drpai_v2n      (priority 100, renesas:rzv2n:n44) NOT_IMPLEMENTED stub.
- *   - deepx_dxm1     (priority 100, deepx:dx:m1)       NOT_IMPLEMENTED stub.
  *   - sw_fallback    (priority 0,   "*") -- stateless NOSUPPORT stub.
+ *
+ * There is deliberately NO M-class DRP-AI or DEEPX DX-M1 backend:
+ * both engines are A55/Linux-side only (MERA runtime / PCIe libdxrt;
+ * issues #58/#59) and live in src/yocto/inference_{drpai,deepx}.cpp
+ * behind the Yocto dispatcher, not this registry.
  *
  * Vendor extensions plug in via the alp_<vendor>_inference_*
  * surface defined in <alp/ext/<vendor>/inference.h>; each

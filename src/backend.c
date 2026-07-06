@@ -49,6 +49,29 @@
 extern const alp_backend_class_range_t __start_alp_backend_classes[];
 extern const alp_backend_class_range_t __stop_alp_backend_classes[];
 
+#ifdef ALP_BACKEND_STATIC_ANCHORS
+/* Static-archive self-anchor for the class-range section (#368).  The
+ * per-class dispatchers drop their alp_backend_classes entries, but a
+ * consumer that only ever calls alp_backend_count / ALP_BACKEND_AVAILABLE
+ * (e.g. a diagnostic tool) pulls THIS file without pulling any
+ * dispatcher, so on a plain-CMake static link the section has zero
+ * contributions and the __start_/__stop_ bounds above go undefined.
+ * This retained empty sentinel keeps the section present so those
+ * bounds always resolve.  class_name "" never matches a real class
+ * (strcmp), and start == stop == NULL means the range walkers below
+ * skip it -- so it is inert at runtime.  Inert on Zephyr (whole-archive
+ * links always carry a dispatcher; the macro is undefined there). */
+static const alp_backend_class_range_t _alp_backend_classes_anchor
+    __attribute__((used,
+                   retain,
+                   aligned(__alignof__(alp_backend_class_range_t)),
+                   section("alp_backend_classes"))) = {
+	    .class_name = "",
+	    .start      = NULL,
+	    .stop       = NULL,
+    };
+#endif
+
 static bool is_wildcard(const alp_backend_t *be)
 {
 	return (be->silicon_ref != NULL && be->silicon_ref[0] == '*' && be->silicon_ref[1] == '\0');
@@ -80,8 +103,15 @@ static bool candidate_beats_best(const alp_backend_t *cand, const alp_backend_t 
 	return strcmp(cand->vendor, best->vendor) < 0;
 }
 
-static const alp_backend_t *
-select_in_range(const alp_backend_t *start, const alp_backend_t *stop, const char *silicon_ref)
+/* Best match in [start, stop) that ranks strictly BELOW `prev` in the
+ * tiebreaker order (prev == NULL means unconstrained -- plain best).
+ * Candidates tied with `prev` on every tier are skipped too: the docs
+ * forbid registering duplicate {class, priority, match-type, vendor}
+ * rows, so a full tie can only be prev itself or a mis-registration. */
+static const alp_backend_t *select_in_range(const alp_backend_t *start,
+                                            const alp_backend_t *stop,
+                                            const char          *silicon_ref,
+                                            const alp_backend_t *prev)
 {
 	const alp_backend_t *best = NULL;
 	for (const alp_backend_t *be = start; be < stop; ++be) {
@@ -91,6 +121,9 @@ select_in_range(const alp_backend_t *start, const alp_backend_t *stop, const cha
 		if (!wild && !exact) {
 			continue;
 		}
+		if (prev != NULL && (be == prev || !candidate_beats_best(prev, be))) {
+			continue; /* at or above prev's rank -- already tried */
+		}
 		if (best == NULL || candidate_beats_best(be, best)) {
 			best = be;
 		}
@@ -98,7 +131,8 @@ select_in_range(const alp_backend_t *start, const alp_backend_t *stop, const cha
 	return best;
 }
 
-const alp_backend_t *alp_backend_select(const char *class_name, const char *silicon_ref)
+const alp_backend_t *
+alp_backend_select_next(const char *class_name, const char *silicon_ref, const alp_backend_t *prev)
 {
 	if (class_name == NULL) {
 		return NULL;
@@ -110,10 +144,15 @@ const alp_backend_t *alp_backend_select(const char *class_name, const char *sili
 	     c < __stop_alp_backend_classes;
 	     ++c) {
 		if (strcmp(c->class_name, class_name) == 0) {
-			return select_in_range(c->start, c->stop, silicon_ref);
+			return select_in_range(c->start, c->stop, silicon_ref, prev);
 		}
 	}
 	return NULL;
+}
+
+const alp_backend_t *alp_backend_select(const char *class_name, const char *silicon_ref)
+{
+	return alp_backend_select_next(class_name, silicon_ref, NULL);
 }
 
 size_t alp_backend_count(const char *class_name)

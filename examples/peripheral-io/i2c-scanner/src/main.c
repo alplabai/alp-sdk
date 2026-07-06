@@ -11,17 +11,21 @@
 #include "alp/peripheral.h"
 
 /* BOARD_I2C_SENSORS is a portable cross-EVK alias from <alp/board.h>:
- *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> E1M_I2C0
- *   E1M-X EVK -> XEVK_I2C_BUS_SENSORS -> E1M_X_I2C0
+ *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> ALP_E1M_I2C0
+ *   E1M-X EVK -> XEVK_I2C_BUS_SENSORS -> ALP_E1M_X_I2C0
  * Rebind it in board.yaml `pins:` to port to another board. */
 #include "alp/board.h"
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[i2c] open BOARD_I2C_SENSORS @ 100 kHz\n");
 
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
+	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: ALP_E1M_I2C0; E1M-X EVK: ALP_E1M_X_I2C0 */
 	    .bitrate_hz = 100000,
 	});
 	if (bus == NULL) {

@@ -1,7 +1,7 @@
 # board.yaml -- Alp SDK project configuration.
 #
 # Copy this template to your application root and edit the values
-# for your board.  scripts/alp_orchestrate.py reads this file,
+# for your board.  scripts/alp_orchestrate/ reads this file,
 # resolves the SoM topology, fans out into per-core build slices
 # (Zephyr / Yocto / baremetal), and emits a system manifest that
 # `west alp-image` / `west alp-flash` / OTA consume.

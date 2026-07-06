@@ -29,6 +29,22 @@ v2n_m1_path_mapping:
   path_0: "DEEPX DX-M1 NPU (on-module)"
   path_1: "E1M edge connector"
 
+signals:
+  - { name: PD,   type: input, scope: "power-down control strap (see gpios.pd above for board routing + polarity)" }
+  - { name: SEL,  type: input, scope: "path-select control strap (see gpios.sel above for board routing)" }
+  - { name: A0+,  type: analog, scope: "differential I/O, channel 0, port A (+)" }
+  - { name: A0-,  type: analog, scope: "differential I/O, channel 0, port A (-)" }
+  - { name: A1+,  type: analog, scope: "differential I/O, channel 1, port A (+)" }
+  - { name: A1-,  type: analog, scope: "differential I/O, channel 1, port A (-)" }
+  - { name: B0+,  type: analog, scope: "differential I/O, channel 0, port B (+)" }
+  - { name: B0-,  type: analog, scope: "differential I/O, channel 0, port B (-)" }
+  - { name: B1+,  type: analog, scope: "differential I/O, channel 1, port B (+)" }
+  - { name: B1-,  type: analog, scope: "differential I/O, channel 1, port B (-)" }
+  - { name: C0+,  type: analog, scope: "differential I/O, channel 0, port C -- muxed output/common (+)" }
+  - { name: C0-,  type: analog, scope: "differential I/O, channel 0, port C -- muxed output/common (-)" }
+  - { name: C1+,  type: analog, scope: "differential I/O, channel 1, port C -- muxed output/common (+)" }
+  - { name: C1-,  type: analog, scope: "differential I/O, channel 1, port C -- muxed output/common (-)" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_PI3DBS12212
   baremetal:      ALP_SDK_CHIP_PI3DBS12212
@@ -40,3 +56,47 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per Diodes Inc PI3DBS12212A datasheet DS40393 Rev 3-2 (Sep 2020),
+  # "Pin Description" + "Pin Configuration" tables -- 18-contact X2QFN
+  # (XUA package, 2x2mm), matching the XUAEX-suffixed MPN in
+  # `mpn_population` above.  SEL truth table: SEL=0 routes A->C, SEL=1
+  # routes B->C (per the datasheet's SEL description) -- note this reads
+  # as a straight 2:1 mux per input port (A vs B) into a shared output
+  # (C), not a "4 differential channel" cross-bar; `pi3dbs12212.h`'s
+  # PI3DBS_STATE_PATH_0 / PATH_1 naming maps onto this SEL value.
+  #
+  # NOTE (found during this sweep, not fixed here -- out of scope for a
+  # metadata-only edit): the datasheet's PD description reads "PD = 1,
+  # Power down is enabled" (i.e. PD high = disabled), which is the
+  # OPPOSITE polarity of both this file's `gpios.pd.active_level: high`
+  # comment ("high = mux enabled") and pi3dbs12212.h's doc comment
+  # ("Driven low to disable the mux ... driven high to enable").  Flagging
+  # for maintainer follow-up; not corrected here since that's a driver-
+  # logic fix, not a footprint fact.
+  refdes_prefix: U
+  package:       X2QFN-18
+  footprint:     x2qfn_18_2p0x2p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "A0+" }
+    - { pad: "2",  signal: "A0-" }
+    - { pad: "3",  signal: GND }
+    - { pad: "4",  signal: "A1+" }
+    - { pad: "5",  signal: "A1-" }
+    - { pad: "6",  signal: SEL }
+    - { pad: "7",  signal: VDD }
+    - { pad: "8",  signal: "C1-" }
+    - { pad: "9",  signal: "C1+" }
+    - { pad: "10", signal: "C0-" }
+    - { pad: "11", signal: "C0+" }
+    - { pad: "12", signal: GND }
+    - { pad: "13", signal: "B1-" }
+    - { pad: "14", signal: "B1+" }
+    - { pad: "15", signal: "B0-" }
+    - { pad: "16", signal: "B0+" }
+    - { pad: "17", signal: VDD }
+    - { pad: "18", signal: PD }
+    - { pad: "EP",  signal: GND }

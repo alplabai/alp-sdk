@@ -33,10 +33,10 @@ chip populations -- all hidden behind portable symbols.
 
 The customer-facing manifestation is two header namespaces:
 
-- `<alp/e1m_pinout.h>` exposes `E1M_PWM0..7`, `E1M_I2C0..1`,
-  `E1M_GPIO_IO0..IO25`, ...
-- `<alp/e1m_x_pinout.h>` exposes `E1M_X_PWM0..7`, `E1M_X_I2C0..1`,
-  `E1M_X_GPIO_IO0..IO35`, ...
+- `<alp/e1m_pinout.h>` exposes `ALP_E1M_PWM0..7`, `ALP_E1M_I2C0..1`,
+  `ALP_E1M_GPIO_IO0..IO25`, ...
+- `<alp/e1m_x_pinout.h>` exposes `ALP_E1M_X_PWM0..7`, `ALP_E1M_X_I2C0..1`,
+  `ALP_E1M_X_GPIO_IO0..IO35`, ...
 
 Choosing which header to `#include` is choosing the product
 line.
@@ -51,7 +51,7 @@ som:
   sku: E1M-AEN801    # was E1M-AEN701
 ```
 
-The orchestrator (`scripts/alp_orchestrate.py`) resolves the
+The orchestrator (`scripts/alp_orchestrate/`) resolves the
 new preset under `metadata/e1m_modules/E1M-AEN801.yaml`,
 regenerates `alp.conf` with the AEN801-specific Kconfig flags,
 and `west build` does the rest.

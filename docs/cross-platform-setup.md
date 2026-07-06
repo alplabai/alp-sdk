@@ -58,6 +58,24 @@ load-bearing decision behind this matrix.  ADR
 [0010](adr/0010-heterogeneous-os-orchestration.md) is why
 heterogeneous orchestration is its own row.
 
+### 1.1 Python version: floor vs pin
+
+Every host workflow needs Python.  Two numbers matter, and they
+are deliberately different:
+
+- **Support floor: 3.10.**  `pyproject.toml` declares
+  `requires-python = ">=3.10"` — the SDK's Python tooling
+  (validators, `alp` CLI, orchestrator) runs on any 3.10+.
+- **Dev/CI pin: 3.12.**  The repo-root `.python-version` file is
+  the single source; every CI workflow's `actions/setup-python`
+  reads it via `python-version-file`, so CI always runs exactly
+  the pinned version.
+
+To reproduce CI byte-for-byte, match the pin locally — `pyenv`
+and `uv` pick `.python-version` up automatically.  `alp doctor`
+WARNs (never FAILs) when the running interpreter differs from
+the pin; anything >= 3.10 remains supported.
+
 ---
 
 ## 2. Linux setup (Debian / Ubuntu / Fedora)
@@ -256,6 +274,13 @@ Windows users targeting Yocto see §5 (WSL2) below.
 The examples in this section use **PowerShell 7+** syntax.  Open
 PowerShell as Administrator for the first-time install steps; the
 day-to-day workflow runs as a normal user.
+
+> **Shortcut:** `pwsh scripts\bootstrap.ps1` automates §4.2 + §4.5
+> (venv + Python deps + west workspace + the editable `alp` CLI install) once the
+> §4.1 base toolchain is present — it prints the matching `winget`
+> one-liner for anything missing and is idempotent.  The Arm GNU
+> Toolchain (§4.3) and Zephyr SDK stay manual (GUI installers).  The
+> sections below remain the manual walkthrough the script automates.
 
 ### 4.1 Base toolchain via winget
 
@@ -613,7 +638,8 @@ explicitly — Windows does not honour Unix shebangs.
 The following scripts under `scripts/` are intentionally Bash:
 
 - `scripts/bootstrap.sh` — fresh-clone setup.  Works on
-  Linux / macOS / WSL.  Windows-native users follow §4 manually.
+  Linux / macOS / WSL.  Windows-native users run the PowerShell
+  twin `scripts/bootstrap.ps1` (see §4), or follow §4 manually.
 - `scripts/test-all.sh` — local CI driver.  Works on
   Linux / macOS / WSL.  Windows-native users invoke the
   individual Python tests directly (see §6.4).

@@ -12,11 +12,20 @@
 
 /** Device facts the selection runs against (injectable so the algorithm
  *  is unit-tested without a live SoC).  @c avail_silicon must be non-NULL
- *  when @c n_avail_silicon > 0. */
+ *  when @c n_avail_silicon > 0.
+ *
+ *  Availability is ENGINE-gated, not SoC-string-gated: a ref belongs in
+ *  @c soc_ref / @c avail_silicon only when this build compiles an
+ *  inference-engine backend that can actually drive that silicon from
+ *  the running core.  Hosting an NPU on the die is not enough -- e.g. a
+ *  V2N M33 build must pass @c soc_ref = NULL because the DRP-AI3 engine
+ *  is A55/Linux-side only (issues #58/#59); see the env composition in
+ *  src/common/alp_model_loader.c. */
 typedef struct {
-	const char        *soc_ref;       /* ALP_SOC_REF_STR */
-	const char *const *avail_silicon; /* silicon refs runnable on this build
-					      (host SoC + any compiled-in discrete) */
+	const char        *soc_ref;       /* host SoC ref when its on-SoC NPU engine is
+					      compiled in (Ethos-U on M-class); else NULL */
+	const char *const *avail_silicon; /* refs of every other compiled-in engine
+					      (A55-side DRP-AI, discrete DX-M1, ...) */
 	size_t             n_avail_silicon;
 	uint32_t           arena_sram_kib; /* device NPU arena budget; 0 = unknown -> skip SRAM gate */
 	alp_inference_backend_t preferred_backend; /* SoM preferred (tiebreak); AUTO if none */

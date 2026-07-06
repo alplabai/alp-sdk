@@ -74,22 +74,37 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["e1m", "macro"],
+      "description": "Mirrors board.schema.json's route_entry (the shared preset carries the same e1m_routes shape a customer would write inline).  Keep the two in lockstep.",
       "properties": {
         "e1m":         { "type": "string" },
         "macro":       { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
         "doc":         { "type": "string", "description": "One-line Doxygen @brief documenting what the pad is wired to on this board." },
         "active_low":  { "type": "boolean", "description": "Board convention -- pressed/asserted = 0 V.  Documentation only; the app passes ALP_GPIO_ACTIVE_LOW at alp_gpio_open() time if it wants auto-inversion." },
         "pull":        { "type": "string", "enum": ["up", "down", "none"], "default": "none", "description": "Physical pull-resistor present on the PCB (board-static fact).  Apps still pass the matching ALP_GPIO_PULL_{UP,DOWN} at alp_gpio_open() time -- this field documents what the board ships with, it does not drive the controller's internal pulls." },
-        "debounce_ms": { "type": "integer", "minimum": 0, "description": "RC-debounce time constant in milliseconds for the board's hardware debounce (mostly buttons).  Documentation hint; the app may add software debounce on top." }
+        "debounce_ms": { "type": "integer", "minimum": 0, "description": "RC-debounce time constant in milliseconds for the board's hardware debounce (mostly buttons).  Documentation hint; the app may add software debounce on top." },
+        "board_alias": {
+          "type": "string",
+          "pattern": "^BOARD_[A-Z0-9_]+$",
+          "description": "Portable cross-EVK alias (e1m-spec STANDARD.md §7.2 common role). gen_board_header.py emits `#define <board_alias> <macro>` into the generated routes header. The SAME board_alias MUST be declared on every board that exposes the role (enforced by tests/scripts/test_board_alias_parity.py)."
+        }
       }
     },
-    "route_entry_list_gpio":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_GPIO_IO[0-9]+$" } } }] } },
-    "route_entry_list_buses": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_(I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+)$" } } }] } },
-    "route_entry_list_pwm":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_PWM[0-9]+$" } } }] } },
-    "route_entry_list_adc":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_ADC[0-9]+$" } } }] } },
-    "route_entry_list_dac":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_DAC[0-9]+$" } } }] } },
-    "route_entry_list_i2s":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_I2S[0-9]+$" } } }] } },
-    "route_entry_list_can":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_CAN[0-9]+$" } } }] } },
-    "route_entry_list_qenc":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M_ENC[0-9]+$" } } }] } }
+    "route_entry_list_gpio": {
+      "type": "array",
+      "description": "GPIO routes.  Accepts the IO pads (E1M_GPIO_IO<N>) and the GPIO-secondary index of any analog/timer pad (E1M_GPIO_PWM<N> / ADC<N> / DAC<N> / ENC<N>_<X|Y>).  The `E1M_X_` prefix form covers the 45x65 E1M-X form factor's connector namespace.",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/route_entry" },
+          { "properties": { "e1m": { "pattern": "^E1M(_X)?_GPIO_(IO[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|ENC[0-9]+_[XY])$" } } }
+        ]
+      }
+    },
+    "route_entry_list_buses": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_(I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+)$" } } }] } },
+    "route_entry_list_pwm":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_PWM[0-9]+$" } } }] } },
+    "route_entry_list_adc":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_ADC[0-9]+$" } } }] } },
+    "route_entry_list_dac":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_DAC[0-9]+$" } } }] } },
+    "route_entry_list_i2s":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_I2S[0-9]+$" } } }] } },
+    "route_entry_list_can":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_CAN[0-9]+$" } } }] } },
+    "route_entry_list_qenc":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_ENC[0-9]+$" } } }] } }
   }
 }

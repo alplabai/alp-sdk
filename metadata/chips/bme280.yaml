@@ -30,7 +30,43 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SCL,   type: input,  scope: "I2C serial clock (datasheet pin name SCK; shared with SPI SCK)" }
+  - { name: SDA,   type: bidir,  scope: "I2C serial data (datasheet pin name SDI; shared with SPI SDI/SDO)" }
+  - { name: SDO,   type: input,  scope: "I2C address-select strap; GND=0x76 default, VDDIO=0x77 (SPI serial data out)" }
+  - { name: CSB,   type: input,  scope: "protocol-select strap; tie directly to VDDIO to select I2C mode" }
+  - { name: VDD,   type: power,  scope: "sensor supply, 1.71-3.6V" }
+  - { name: VDDIO, type: power,  scope: "interface supply, 1.2-3.6V" }
+  - { name: GND,   type: ground }
+
+physical:
+  # Pins per Bosch BME280 datasheet BST-BME280-DS001-24 Rev. 1.24 (Feb 2024),
+  # chapter 7.1 "Pin-out" (Table 35) and Figure 16/17 (8-pin metal-lid LGA,
+  # 2.5x2.5x0.93mm). All 8 pins are signal-bearing (no NC balls on this
+  # package). Signal names use logical bus roles (SCL/SDA) per Alp SDK
+  # convention; see scope notes above for the datasheet's physical pin marks.
+  refdes_prefix: U
+  package:       LGA-8
+  footprint:     lga_8_2p5x2p5mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1", signal: "GND" }
+    - { pad: "2", signal: "CSB" }
+    - { pad: "3", signal: "SDA" }
+    - { pad: "4", signal: "SCL" }
+    - { pad: "5", signal: "SDO" }
+    - { pad: "6", signal: "VDDIO" }
+    - { pad: "7", signal: "GND" }
+    - { pad: "8", signal: "VDD" }
+  passives:
+    - { role: decouple, value: 100nF, net: VDD,   refdes_prefix: C }
+    - { role: decouple, value: 100nF, net: VDDIO, refdes_prefix: C }
+    - { role: pullup,   value: 4k7,   net: SCL,   refdes_prefix: R }
+    - { role: pullup,   value: 4k7,   net: SDA,   refdes_prefix: R }

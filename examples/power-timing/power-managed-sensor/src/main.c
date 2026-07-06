@@ -37,7 +37,7 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
+#include <alp/peripheral.h>
 
 /* Steady-state RTC wake cadence, in seconds.  This is the app-level
  * sample period: board.yaml declares "RTC is a wake source," and the
@@ -70,7 +70,7 @@ int main(void)
 		printf("[pm] stage %d: wake-source=%s\n", i + 1, stages[i]);
 		printf("[pm]   sample acquired, host channel push -> ok\n");
 		printf("[pm]   re-entering deep sleep\n");
-		k_msleep(20);
+		alp_delay_ms(20);
 	}
 
 	printf("[pm] done\n");

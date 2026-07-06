@@ -1,6 +1,18 @@
 /*
  * Copyright (C) 2025 Alif Semiconductor.
+ * Copyright (c) 2026 Alp Lab AB
+ *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * ====== ADR 0017 Tier-2 (vendored fork-driver copy, INTERIM -> retire onto
+ * sdk-alif fork, BENCH-UNVERIFIED) ======
+ * PDM register map for the vendored Alif Ensemble PDM fork-driver copy
+ * (drivers/audio/alif_pdm.c, compatible "alif,alif_pdm").  hal_alif ships no PDM
+ * / DMIC class driver, so this header is carried in-tree alongside the driver so
+ * both survive a `west update`.  Retire onto the opt-in sdk-alif fork once the
+ * pdm node is repointed AND bench-verified (task #21).  See
+ * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * ==================================================================
  */
 
 #ifndef ZEPHYR_DRIVERS_AUDIO_ALIF_PDM_REG_H_

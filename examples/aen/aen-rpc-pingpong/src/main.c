@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * aen-rpc-pingpong -- a real Zephyr ipc_service / OpenAMP-RPMsg ping/pong between
- * the two E8 M55 cores. HP is the host + boots HE (se_service_boot_cpu); both
- * open the ipc0 instance and register a "pingpong" endpoint over the
- * alif,mhuv2-mbox MBOX driver. HP sends a ping; HE echoes a pong; HP counts.
+ * the two E8 M55 cores. HP is the host + boots HE via the portable
+ * alp_mproc_boot_core() (<alp/mproc.h>; the backend registry routes it to the
+ * SoM's boot authority -- the SE boot service on AEN); both open the ipc0
+ * instance and register a "pingpong" endpoint over the alif,mhuv2-mbox MBOX
+ * driver. HP sends a ping; HE echoes a pong; HP counts.
  * Resolves alp-sdk #45 (mailbox.controller) / #50 (alp_rpc_open NOT_READY).
  *
  * The transport runs over the non-secure HE<->HP MHU-1 pair (per-core alias) +
@@ -26,12 +28,13 @@
 #include <zephyr/device.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/ipc/ipc_service.h>
-#include <se_service.h>
 
-#define EXTSYS_1_HE     3U
-#define HE_LOAD_ADDR    0x58000000U
+#include <alp/mproc.h>
+
+#define HE_LOAD_ADDR    0x58000000U /* HE ITCM global alias = HE-APP loadAddress */
 #define PINGPONG_ROUNDS 16U
 
+/* Core-role selection (HP vs HE build of this app), not a peripheral-presence gate. */
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define ROLE        "HP"
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)
@@ -97,9 +100,9 @@ int main(void)
 	*B_CNT         = 0U;
 
 #if IS_HOST
-	int brc = se_service_boot_cpu(EXTSYS_1_HE, HE_LOAD_ADDR);
+	alp_status_t brc = alp_mproc_boot_core(ALP_CORE_M55_HE, HE_LOAD_ADDR);
 
-	printk("[HP] boot_cpu rc=%d\n", brc);
+	printk("[HP] boot_core rc=%d\n", (int)brc);
 #endif
 
 	const struct device *ipc = DEVICE_DT_GET(DT_NODELABEL(ipc0));

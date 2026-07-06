@@ -22,6 +22,16 @@ signals:
   - { name: DC,   type: input, scope: "D/C# command/data" }
   - { name: RESET, type: input, scope: "optional hardware reset" }
   - { name: BL,   type: input, scope: "backlight LED" }
+  - { name: VCI,     type: power, scope: "analog supply, 2.5-3.3V" }
+  - { name: VDDI,    type: power, scope: "interface/logic supply, 1.65-3.3V" }
+  - { name: VCORE,   type: power, scope: "internally-regulated logic rail; bring out only for its stabilizing capacitor" }
+  - { name: EXTC,    type: input, scope: "extended-command-set enable strap; tie to VDDI to unlock extended registers" }
+  - { name: IM3,     type: input, scope: "interface mode-select strap, bit 3" }
+  - { name: IM2,     type: input, scope: "interface mode-select strap, bit 2" }
+  - { name: IM1,     type: input, scope: "interface mode-select strap, bit 1" }
+  - { name: IM0,     type: input, scope: "interface mode-select strap, bit 0" }
+  - { name: LEDPWM,  type: output, scope: "on-die backlight PWM output (drives an external LED driver, not the panel LEDs directly)" }
+  - { name: LEDON,   type: output, scope: "on-die backlight enable output (drives an external LED driver)" }
 
 resolutions:
   max:            [240, 320]
@@ -34,7 +44,56 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per Ilitek ILI9341_DS_V1.11 section 4 "Pin Description" and
+  # section 5 "Pad Arrangement and Coordination" (full numbered
+  # bump/pad table, pads 1-1278; ILI9341 ships as a bare COG die,
+  # Chip Size 15860um x 650um, bumps face-up). Only the host-interface
+  # (4-wire SPI) and power/control pads used by this driver's 4-wire
+  # SPI mode are populated; the LCD glass-side gate/source driver
+  # outputs (S1-S720/G1-G320), the charge-pump/gamma network
+  # (VCOM/C11-C22/VGH/VGL/DDVDH/GVDD/VCL) and the RGB-interface-only
+  # pads (VSYNC/HSYNC/ENABL/DOTCLK/DB[]) are out of scope (not used in
+  # 4-wire-serial mode; no stabilizing-capacitor values are published,
+  # so no passives[] is populated to avoid inventing values).
+  #
+  # Bump-level dual function: pad "DCX" (bump 116) acts as the serial
+  # clock (SCL) in 4-wire-serial mode, and pad "WRX" (bump 117) acts
+  # as the D/C select in 4-wire-serial mode -- both per the pin
+  # description text for "D/CX (SCL)" and "WRX (D/CX)".
+  refdes_prefix: U
+  package:              "COG bare die (bump-up)"
+  footprint:             cog_die
+  dimension_mm:          "15.86 x 0.65"
+  operating_temp_deg_c:  "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "114", signal: "RESET" }
+    - { pad: "115", signal: "CS" }
+    - { pad: "116", signal: "SCLK" }
+    - { pad: "117", signal: "DC" }
+    - { pad: "125", signal: "MOSI" }
+    - { pad: "109", signal: "EXTC" }
+    - { pad: "110", signal: "IM3" }
+    - { pad: "111", signal: "IM2" }
+    - { pad: "112", signal: "IM1" }
+    - { pad: "113", signal: "IM0" }
+    - { pad: "151", signal: "LEDPWM" }
+    - { pad: "152", signal: "LEDON" }
+    - { pad: "74",  signal: "VCI" }
+    - { pad: "81",  signal: "VCI" }
+    - { pad: "162", signal: "VDDI" }
+    - { pad: "168", signal: "VDDI" }
+    - { pad: "85",  signal: "VSS" }
+    - { pad: "90",  signal: "VSS" }
+    - { pad: "82",  signal: "VSS" }
+    - { pad: "91",  signal: "VSS" }
+    - { pad: "98",  signal: "VSS" }
+    - { pad: "169", signal: "VCORE" }

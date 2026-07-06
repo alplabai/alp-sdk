@@ -22,6 +22,15 @@ signals:
   - { name: DC,   type: input, scope: "D/C# command/data" }
   - { name: RESET, type: input, scope: "optional hardware reset" }
   - { name: BL,   type: input, scope: "backlight LED" }
+  - { name: VCI,       type: power, scope: "analog supply, 2.5-3.3V" }
+  - { name: IOVCC,     type: power, scope: "digital I/O supply, 1.65-3.3V" }
+  - { name: VCORE,     type: power, scope: "internally-generated logic rail; bring out only for its stabilizing capacitor" }
+  - { name: IM0,       type: input, scope: "interface mode-select strap, bit 0" }
+  - { name: IM1,       type: input, scope: "interface mode-select strap, bit 1" }
+  - { name: IM2,       type: input, scope: "interface mode-select strap, bit 2" }
+  - { name: TE,        type: output, scope: "tearing-effect sync output" }
+  - { name: SDO,       type: output, scope: "3-/4-wire serial read data output" }
+  - { name: CABC_PWM,  type: output, scope: "content-adaptive backlight PWM output (drives an external LED driver)" }
 
 resolutions:
   max:            [320, 480]
@@ -34,7 +43,51 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per Ilitek ILI9488 datasheet (343-page rev "Version: 100")
+  # section 3.3 "Pin Descriptions" (Bus Interface Pins / Charge-pump
+  # and Regulator Circuit / Power Pads tables) and section 3.4 "Pad
+  # Assignment" (die pad-name diagram). ILI9488 ships as a bare COG
+  # die (Chip Size ~22828um x 758um); the pad-assignment diagram gives
+  # the running order of pad NAMES around the die but no numeric
+  # bump/pad-ID column, so the pin name itself is used as the `pad`
+  # string (no numeric ID exists to transcribe). Only the
+  # host-interface (4-wire SPI)/power/control pads are populated; the
+  # LCD glass-side driver outputs (S1-S960/G1-G480), the DSI/MIPI
+  # pads (unused by this driver), the charge-pump/gamma caps
+  # (VCOM/C11-C52/VGH/VGL/VCL/DDVDH/DDVDL) and the DPI-only pads
+  # (VSYNC/HSYNC/ENABLE/DOTCLK/DB[]) are out of scope for a 4-wire
+  # SPI application; no stabilizing-capacitor values are published
+  # for VCORE/VCI/IOVCC, so no passives[] is populated to avoid
+  # inventing values.
+  refdes_prefix: U
+  package:              "COG bare die"
+  footprint:             cog_die
+  dimension_mm:          "22.828 x 0.758"
+  operating_temp_deg_c:  "-30..70"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "RESX",      signal: "RESET" }
+    - { pad: "CSX",       signal: "CS" }
+    - { pad: "WRX/SCL",   signal: "SCLK" }
+    - { pad: "D/CX",      signal: "DC" }
+    - { pad: "SDA",       signal: "MOSI" }
+    - { pad: "IM2",       signal: "IM2" }
+    - { pad: "IM1",       signal: "IM1" }
+    - { pad: "IM0",       signal: "IM0" }
+    - { pad: "TE",        signal: "TE" }
+    - { pad: "SDO",       signal: "SDO" }
+    - { pad: "CABC_PWM",  signal: "CABC_PWM" }
+    - { pad: "VCI",       signal: "VCI" }
+    - { pad: "IOVCC",     signal: "IOVCC" }
+    - { pad: "VDD(VCORE)", signal: "VCORE" }
+    - { pad: "DGND",      signal: "GND" }
+    - { pad: "AGND",      signal: "GND" }
+    - { pad: "VGS",       signal: "GND" }

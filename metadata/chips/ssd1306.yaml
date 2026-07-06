@@ -17,9 +17,17 @@ i2c:
   max_clock_hz:    400000
 
 signals:
-  - { name: SCL, type: input,  scope: "I2C clock from host" }
-  - { name: SDA, type: bidir,  scope: "I2C data (open-drain)" }
-  - { name: RST, type: input,  scope: "optional hardware reset (active-low)" }
+  - { name: SCL,   type: input,  scope: "I2C clock from host (die pad D0)" }
+  - { name: SDA,   type: bidir,  scope: "I2C data (open-drain); die pads D1 (SDAin, must be bonded) + D2 (SDAout, optional) tied together" }
+  - { name: RST,   type: input,  scope: "optional hardware reset (active-low, die pad RES#)" }
+  - { name: SA0,   type: input,  scope: "I2C slave-address-select strap (die pad D/C# doubles as SA0 in I2C mode); LOW selects 0x3C (default), tie to VDD for 0x3D (alt_addresses)" }
+  - { name: BS0,   type: input,  scope: "MCU-interface-select strap bit 0; tie to VSS for I2C mode (Table 7-1)" }
+  - { name: BS1,   type: input,  scope: "MCU-interface-select strap bit 1; tie to VDD for I2C mode (Table 7-1)" }
+  - { name: BS2,   type: input,  scope: "MCU-interface-select strap bit 2; tie to VSS for I2C mode (Table 7-1)" }
+  - { name: CL,    type: input,  scope: "external clock input; unused/tie to VSS when the internal oscillator is enabled via CLS=VDD" }
+  - { name: CLS,   type: input,  scope: "internal-clock-enable strap; tie to VDD to run off the on-die oscillator (no external CL source wired)" }
+  - { name: IREF,  type: input,  scope: "segment-driver reference-current pin; external resistor to VSS sets IREF (~12.5uA target); resistor value depends on VCC (760k ohm @ VCC=12V, 400k ohm @ VCC=7.5V per datasheet Fig 8-15) so no fixed value is populated here" }
+  - { name: VCOMH, type: output, scope: "COM-signal deselect-voltage output; external capacitor to VSS required (value app-dependent, not populated)" }
 
 # SoM families this chip is mechanically + electrically compatible with.
 # The EVK populates the SSD1306 on its 35x35 board directly off the
@@ -38,3 +46,84 @@ verification:
   status: "[UNTESTED]"           # paper-correct only; HiL sweep in v0.6
   silicon_revisions_seen: []
   hil_pass: false
+
+# Pins per Solomon Systech SSD1306 Section 5 "Die Pad Floor Plan" (Table
+# 5-1, "SSD1306Z" bare COG die, gold-bumps-up, die size 6.76mm x 0.86mm,
+# 281 pads total) cross-referenced against Section 7 "Pin Description"
+# and Section 8.1 "MCU Interface Selection" (Table 7-1 BS[2:0] strap
+# truth table + Table 8-1 per-mode pin assignment) for the I2C tie-offs.
+# The specific PDF fetched for this sweep was stamped "Rev 1.1 Apr 2008"
+# (mirrored via a third-party host); this manifest's existing
+# `datasheet.primary` cites "Rev 1.5 (Apr 2008)" -- both are the same
+# Solomon Systech Apr-2008 document family and the pad numbers, pin
+# names and I2C-mode tie-off tables referenced here are unlikely to
+# have been renumbered between dot revisions, but this has not been
+# independently re-confirmed against a Rev 1.5 copy.
+#
+# Only the pads relevant to I2C operation are populated. Per Table 8-1
+# "MCU interface assignment under different bus interface mode", the
+# I2C row is: D[7:3]=tie LOW, D2=SDAout, D1=SDAin, D0=SCL, E=tie LOW,
+# R/W#=tie LOW, CS#=tie LOW, D/C#=SA0, RES#=RES#. Those "tie LOW" pads
+# are mapped straight to the VSS net below (they carry no host-driven
+# signal in I2C mode) rather than to a named `signals:` entry. The
+# SEG0-127 / COM0-63 glass-driver output pads, the charge-pump network
+# (C1P/C1N/C2P/C2N/VBAT/VBREF/BGGND -- "reserved, keep NC or tie to
+# VDD/GND", used only if the on-die charge pump generates VCC from
+# VBAT), the FR tearing-sync output (datasheet: "keep NC if unused";
+# unused by this driver) and the TR0-6 test pins are out of scope. The
+# VDD/VSS/VLSS/VCC/VCOMH/IREF power pads repeat many times across the
+# die edge (once per SEG/COM driver-row segment for uniform biasing);
+# only a representative subset of each is listed here, not all
+# instances in Table 5-1. VLSS ("analog ground pin ... connected to VSS
+# externally" per Section 7) is mapped to the VSS net directly. No
+# passives[] is populated: the IREF resistor and VCOMH/charge-pump
+# capacitor values in the datasheet's application examples are only
+# given for specific VCC/VBAT operating points (e.g. 760k ohm @
+# VCC=12V) that this manifest does not fix, so a value would be
+# invented for this board.
+physical:
+  refdes_prefix: U
+  package:              "COG bare die (bump-up)"
+  footprint:             cog_die
+  dimension_mm:          "6.76 x 0.86"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "55", signal: "RST" }
+    - { pad: "56", signal: "SA0" }
+    - { pad: "62", signal: "SCL" }
+    - { pad: "63", signal: "SDA" }
+    - { pad: "64", signal: "SDA" }
+    - { pad: "44", signal: "BS0" }
+    - { pad: "46", signal: "BS1" }
+    - { pad: "49", signal: "BS2" }
+    - { pad: "52", signal: "CL" }
+    - { pad: "73", signal: "CLS" }
+    - { pad: "78", signal: "IREF" }
+    - { pad: "79", signal: "IREF" }
+    - { pad: "80", signal: "VCOMH" }
+    - { pad: "81", signal: "VCOMH" }
+    - { pad: "54", signal: "VSS" }
+    - { pad: "58", signal: "VSS" }
+    - { pad: "59", signal: "VSS" }
+    - { pad: "65", signal: "VSS" }
+    - { pad: "67", signal: "VSS" }
+    - { pad: "68", signal: "VSS" }
+    - { pad: "69", signal: "VSS" }
+    - { pad: "70", signal: "VSS" }
+    - { pad: "84", signal: "VSS" }
+    - { pad: "85", signal: "VSS" }
+    - { pad: "86", signal: "VSS" }
+    - { pad: "39", signal: "VSS" }
+    - { pad: "45", signal: "VSS" }
+    - { pad: "50", signal: "VSS" }
+    - { pad: "57", signal: "VSS" }
+    - { pad: "66", signal: "VSS" }
+    - { pad: "71", signal: "VSS" }
+    - { pad: "89", signal: "VSS" }
+    - { pad: "42", signal: "VDD" }
+    - { pad: "47", signal: "VDD" }
+    - { pad: "60", signal: "VDD" }
+    - { pad: "74", signal: "VDD" }
+    - { pad: "82", signal: "VCC" }
+    - { pad: "83", signal: "VCC" }

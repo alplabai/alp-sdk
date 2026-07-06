@@ -23,7 +23,7 @@ the loader translates each block into backend config.
 firmware project targets.  Every backend's config -- Zephyr's
 `alp.conf`, plain-CMake `-D` flags, Yocto's `local.conf` -- is
 **derived** from it by `scripts/alp_project.py` +
-`scripts/alp_orchestrate.py`.  The schema lives at
+`scripts/alp_orchestrate/`.  The schema lives at
 [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json);
 this tutorial walks every top-level block.
 
@@ -56,14 +56,14 @@ som:
 
 `sku` resolves to a preset at
 `metadata/e1m_modules/E1M-<MPN>.yaml`.  The SDK ships presets
-for every released MPN:
+for production SoMs plus placeholder presets for active bring-up:
 
-| Family            | MPNs (paste any into `som.sku`)                            |
-|-------------------|------------------------------------------------------------|
-| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801` |
-| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                     |
-| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                     |
-| NXP i.MX 93       | `E1M-NX9101`                                               |
+| Family            | MPNs (paste any into `som.sku`)                                               |
+|-------------------|-------------------------------------------------------------------------------|
+| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`                 |
+| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                                        |
+| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                        |
+| NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 `hw_rev` cross-checks against the family's `hw-revisions.yaml`.
 If the customer's SDK version is older than the rev's
@@ -190,7 +190,7 @@ automatically; the app doesn't say "TX is output" by hand.
 
 The reason direction stays in the firmware: the same pad can
 have multiple legitimate directions in different apps.  The
-drone-autopilot uses `E1M_PWM3` as a PWM output driving an ESC
+drone-autopilot uses `ALP_E1M_PWM3` as a PWM output driving an ESC
 channel; gpio-button-led uses the same pad as a GPIO output
 driving the red status LED.
 
@@ -464,9 +464,9 @@ The build absorbs three outputs per project:
 Inspect the resolved layout:
 
 ```bash
-python3 scripts/alp_orchestrate.py --input board.yaml --emit system-manifest \
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit system-manifest \
     | yq '.storage[]'
-python3 scripts/alp_orchestrate.py --input board.yaml --emit dts-partitions
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit dts-partitions
 ```
 
 The loader rejects typoed `flash_device:` references at parse time

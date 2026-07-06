@@ -83,6 +83,21 @@ struct alp_mproc_ops {
 };
 
 /* ------------------------------------------------------------------ */
+/* Peer-core boot vtable (class "mproc_boot", handle-less)             */
+/*                                                                     */
+/* A SEPARATE registry class from 'mproc': releasing a peer core is a  */
+/* boot-authority concern (SoC secure / system-controller firmware),   */
+/* not an IPC-primitive concern, and its silicon-specific backend must */
+/* not displace the portable zephyr_drv winner of the mproc class.     */
+/* ------------------------------------------------------------------ */
+
+typedef struct alp_mproc_boot_ops {
+	/** Ask the boot authority to start @p core at @p entry_addr
+	 *  (global address map).  Bounded; returns rather than hangs. */
+	alp_status_t (*boot_core)(alp_core_id_t core, uintptr_t entry_addr);
+} alp_mproc_boot_ops_t;
+
+/* ------------------------------------------------------------------ */
 /* Public handle layouts -- owned by the dispatcher pools              */
 /* ------------------------------------------------------------------ */
 

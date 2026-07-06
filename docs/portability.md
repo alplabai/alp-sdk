@@ -45,11 +45,11 @@ The promise has a **scope**.  It is not "any SoM, any time".  It is:
   `E1M-AEN601` ↔ `E1M-AEN701` ↔ `E1M-AEN801` ↔ `E1M-NX9101`.
   Same 35 × 35 mm form factor, same `<alp/e1m_pinout.h>` symbol
   namespace, same E1M-spec instance reservations
-  (`E1M_I2C_COUNT == 2`, `E1M_PWM_COUNT == 8`, etc.).
+  (`ALP_E1M_I2C_COUNT == 2`, `ALP_E1M_PWM_COUNT == 8`, etc.).
 - **E1M-X family.**  `E1M-V2N101` ↔ `E1M-V2N102` ↔ `E1M-V2M101` ↔
   `E1M-V2M102`.  Same 45 × 65 mm form factor, same
   `<alp/e1m_x_pinout.h>` namespace, same E1M-X-spec reservations
-  (`E1M_X_PCIE_COUNT == 1`, `E1M_X_ETH_COUNT == 2`, …).
+  (`ALP_E1M_X_PCIE_COUNT == 1`, `ALP_E1M_X_ETH_COUNT == 2`, …).
 
 Within each family the SDK guarantees that an app's source compiles
 unchanged across every SKU; the generated `alp.conf` differs only in
@@ -70,8 +70,8 @@ on `E1M-V2N101` and vice versa, by design:
   Cortex-A55 + Cortex-M33);
 - different NPU choices (Ethos-U / DRP-AI / DEEPX);
 - and most visibly to your source code, **different header
-  namespaces** — `<alp/e1m_pinout.h>` exports `E1M_PWM0` etc., while
-  `<alp/e1m_x_pinout.h>` exports `E1M_X_PWM0` etc.  These are
+  namespaces** — `<alp/e1m_pinout.h>` exports `ALP_E1M_PWM0` etc., while
+  `<alp/e1m_x_pinout.h>` exports `ALP_E1M_X_PWM0` etc.  These are
   intentionally distinct symbols; mixing them is a build error.
 
 The rationale for keeping the two product lines distinct is in
@@ -166,8 +166,8 @@ the U55 line:
 (`CONFIG_I2C=y` is the Zephyr-subsystem class symbol the loader
 emits per `peripherals: [i2c]`; the Alp wrapper Kconfigs
 `ALP_SDK_PERIPH_*` flip `default y` once the underlying class is
-on.  See the `_PERIPHERAL_KCONFIG` table in
-[`scripts/alp_project.py`](../scripts/alp_project.py).)
+on.  See the shared registry at
+[`metadata/registries/peripheral-kconfig.json`](../metadata/registries/peripheral-kconfig.json).)
 
 The `_U85=y` line is the visible footprint of fix G-1 (resolved
 2026-05-18 — see the matrix doc).  Before that fix, AEN801 and
@@ -191,7 +191,7 @@ incantation, USB-DFU fallback, and the `west alp-flash` wrapper
 for multi-image SoMs.
 
 That is the swap test.  No source change.  The `main.c` from
-`examples/peripheral-io/i2c-scanner/src/main.c` opens `E1M_I2C0` via
+`examples/peripheral-io/i2c-scanner/src/main.c` opens `ALP_E1M_I2C0` via
 `alp_i2c_open()`, gets a real handle on both SKUs, scans the
 bus.  Same code, same diagnostic output, the SDK just routed
 through a different SoC under the hood.
@@ -250,9 +250,11 @@ And, on the Linux/CMake side
 
 (DEEPX lives on the Linux PCIe path, not Zephyr.)
 
-The DRP-AI3 driver enable (`CONFIG_ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y`) is
-unchanged — both SKUs carry the same RZ/V2N silicon, so DRP-AI3 is
-present on both.  V2M101 lights up DEEPX *in addition*.
+The DRP-AI3 engine enable (`-DALP_SDK_USE_DRPAI_V2N=ON`, also on the
+Linux/CMake side — the engine is A55-driven via the MERA runtime, so
+there is no Zephyr Kconfig for it) is unchanged — both SKUs carry the
+same RZ/V2N silicon, so DRP-AI3 is present on both.  V2M101 lights up
+DEEPX *in addition*.
 
 **The application code does not change.**  An app written like
 this, on V2N101, picks DRP-AI3.  The same app, on V2M101, can
@@ -304,7 +306,7 @@ see Section 5 for the runtime fallback pattern that uses this.
 
 ---
 
-## 3. Dual namespace — `E1M_*` vs `E1M_X_*`
+## 3. Dual namespace — `ALP_E1M_*` vs `ALP_E1M_X_*`
 
 The headers under `include/alp/` deliberately expose two parallel
 pinout namespaces, one per form factor.
@@ -318,9 +320,9 @@ pinout namespaces, one per form factor.
 | Power envelope | mW-class | W-class |
 | NPU options | Ethos-U55 / U65 / U85 | DRP-AI3 (V2N), DRP-AI3 + DEEPX DX-M1 (V2M) |
 | Board | `E1M-EVK` or compatible | `E1M-X-EVK` or compatible |
-| GPIO count | 26 (`E1M_GPIO_IO0..IO25`) | 36 (`E1M_X_GPIO_IO0..IO35`) |
-| Ethernet | 1 MAC (`E1M_ETH0`) | 2 MAC (`E1M_X_ETH0`, `E1M_X_ETH1`) |
-| PCIe | not routed | 1 instance (`E1M_X_PCIE0`) |
+| GPIO count | 26 (`ALP_E1M_GPIO_IO0..IO25`) | 36 (`ALP_E1M_X_GPIO_IO0..IO35`) |
+| Ethernet | 1 MAC (`ALP_E1M_ETH0`) | 2 MAC (`ALP_E1M_X_ETH0`, `ALP_E1M_X_ETH1`) |
+| PCIe | not routed | 1 instance (`ALP_E1M_X_PCIE0`) |
 | Header | `<alp/e1m_pinout.h>` | `<alp/e1m_x_pinout.h>` |
 
 A flat single-namespace alternative was considered and rejected
@@ -428,7 +430,7 @@ static string-literal pointers, callers must not free.
 
 ### 4.2  Form-factor differences (the namespace error)
 
-Trying to use `E1M_PWM0` on an E1M-X SoM is a build error — the
+Trying to use `ALP_E1M_PWM0` on an E1M-X SoM is a build error — the
 symbol doesn't exist in `<alp/e1m_x_pinout.h>`.  This is **by
 design**.
 
@@ -438,7 +440,7 @@ design**.
 #include "alp/pwm.h"
 
 alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
-    .channel_id = E1M_PWM0,          /* WRONG namespace */
+    .channel_id = ALP_E1M_PWM0,          /* WRONG namespace */
     .period_ns  = 1000000u,
 });
 ```
@@ -453,7 +455,7 @@ and `alp_pwm_open()` returns NULL.  The fix is one-line:
 #include "alp/pwm.h"
 
 alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
-    .channel_id = E1M_X_PWM0,        /* correct namespace */
+    .channel_id = ALP_E1M_X_PWM0,        /* correct namespace */
     .period_ns  = 1000000u,
 });
 ```
@@ -469,10 +471,10 @@ and key the `#include` off it:
 ```c
 #if defined(MY_PRODUCT_USES_E1M_X)
 #  include "alp/e1m_x_pinout.h"
-#  define MY_LED  E1M_X_PWM0
+#  define MY_LED  ALP_E1M_X_PWM0
 #else
 #  include "alp/e1m_pinout.h"
-#  define MY_LED  E1M_PWM0
+#  define MY_LED  ALP_E1M_PWM0
 #endif
 ```
 
@@ -586,9 +588,9 @@ generated headers:
   (useful for portable libraries that don't lock to one SoC).
 - [`include/alp/e1m_pinout.h`](../include/alp/e1m_pinout.h) /
   [`include/alp/e1m_x_pinout.h`](../include/alp/e1m_x_pinout.h) —
-  the form-factor portability bound.  `E1M_I2C_COUNT == 2`
+  the form-factor portability bound.  `ALP_E1M_I2C_COUNT == 2`
   means "every E1M-conformant SoM routes at least 2 I2C
-  instances; you can use `E1M_I2C0..E1M_I2C1` portably; higher
+  instances; you can use `ALP_E1M_I2C0..ALP_E1M_I2C1` portably; higher
   indices are vendor-specific extensions and may or may not be
   routed on the active SoM".
 
@@ -611,6 +613,44 @@ The pattern is "lean on runtime detection by default; reach for
 `_Static_assert` only when the requirement is sharp enough that
 silently degrading at runtime would be a worse customer experience
 than a build error."
+
+**Gate on capabilities, not board names.**  The umbrella header
+[`include/alp/cap.h`](../include/alp/cap.h) wraps the raw counts in
+`ALP_HAS(<CAP>)` (a compile-time constant expression, safe in `#if`
+and `static_assert`) and `alp_has(ALP_CAP_ID_<CAP>)` (the runtime
+twin).  Reaching for `#ifdef CONFIG_BOARD_<NAME>` to skip a
+peripheral is the anti-pattern — it forks the source per board and
+silently breaks when the next SoM arrives.  Ask the silicon instead:
+
+```c
+#include "alp/cap.h"
+
+int main(void)
+{
+    /* Runtime gate: skip cleanly on ADC-less silicon.  Same source
+     * runs on every SoM -- no #ifdef CONFIG_BOARD_* forks. */
+    if (!alp_has(ALP_CAP_ID_HW_ADC)) {
+        printf("no ADC on this SoC (%s) -- skipping\n", ALP_SOC_REF_STR);
+        return 0;
+    }
+
+    /* Compile-time gate: the unused branch disappears from the
+     * binary entirely on parts that lack the feature. */
+#if ALP_HAS(HW_CAN_FD)
+    /* ... configure ALP_CAN_MODE_FD + bitrate_data_hz ... */
+#endif
+    /* ... */
+}
+```
+
+See
+[`examples/peripheral-io/adc-voltmeter`](../examples/peripheral-io/adc-voltmeter/src/main.c)
+for the pattern in a full example (capability gate → open →
+instance-level `alp_adc_capabilities()`), and
+[`examples/peripheral-io/hello-world`](../examples/peripheral-io/hello-world/src/main.c)
+for the minimal teaching block.  Note that when no SoC is selected
+(`native_sim`) the capability layer is permissive — gates pass and
+the `alp_*_open()` contract from §5.1 provides the graceful failure.
 
 ### 5.3  Runtime detection — the fallback ladder pattern
 
@@ -691,7 +731,7 @@ of `alp_inference_open()` with an explicit backend either succeeds
 `ALP_ERR_NOSUPPORT`.
 
 The same pattern generalises to other capability classes — request
-`alp_spi_open()` with `bus_id = E1M_SPI1` on a SoM that doesn't
+`alp_spi_open()` with `bus_id = ALP_E1M_SPI1` on a SoM that doesn't
 route SPI1 and you get NULL + `ALP_ERR_NOSUPPORT`; fall through
 to SPI0 or report the gap to the user as you see fit.
 

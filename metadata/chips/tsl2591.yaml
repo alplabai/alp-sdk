@@ -28,7 +28,43 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SCL, type: input,  scope: "I2C serial clock input terminal" }
+  - { name: SDA, type: bidir,  scope: "I2C serial data I/O terminal" }
+  - { name: INT, type: output, scope: "interrupt, open-drain output, active-low" }
+  - { name: VDD, type: power,  scope: "supply voltage" }
+  - { name: GND, type: ground, scope: "power supply ground; all voltages referenced to GND" }
+
+physical:
+  # Pins per ams(-OSRAM) TSL2591 datasheet (confirmed identical pinout across
+  # "Datasheet - Apr. 2013 - ams163.5" and later [v3-00] 2023-Feb-08 revision),
+  # "Pin Assignment" chapter (Figure 3/4), package FN Dual Flat No-Lead, top
+  # view. Ordering Information lists delivery form ODFN-6 (TSL25911FN, fixed
+  # I2C address 0x29). All 6 pads are physically present; pad 4 (NC) is not
+  # signal-bearing and is omitted below.
+  refdes_prefix: U
+  package:       "ODFN-6"
+  footprint:     odfn_6
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1", signal: "SCL" }
+    - { pad: "2", signal: "INT" }
+    - { pad: "3", signal: "GND" }
+    # pad 4 = N.C. per datasheet; omitted (not signal-bearing).
+    - { pad: "5", signal: "VDD" }
+    - { pad: "6", signal: "SDA" }
+  passives:
+    # Values per "Application Information" (Figure 16, Typical Application
+    # Hardware Circuit): 1uF low-ESR decoupling at VDD; ams OSRAM EVM uses
+    # 1.5k I2C pull-ups at 400kbps; 10k pull-up recommended for INT.
+    - { role: decouple, value: 1uF,  net: VDD, refdes_prefix: C }
+    - { role: pullup,   value: 1k5,  net: SCL, refdes_prefix: R }
+    - { role: pullup,   value: 1k5,  net: SDA, refdes_prefix: R }
+    - { role: pullup,   value: 10k,  net: INT, refdes_prefix: R }

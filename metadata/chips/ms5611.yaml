@@ -29,7 +29,42 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: PS,      type: input,  scope: "protocol select: high (VDD) = I2C, low (GND) = SPI" }
+  - { name: CSB,     type: input,  scope: "SPI chip select, active low (unused in I2C mode)" }
+  - { name: SDO,     type: output, scope: "SPI data out (unused in I2C mode)" }
+  - { name: SDI_SDA, type: bidir,  scope: "SPI data in / I2C data (SDA)" }
+  - { name: SCLK,    type: input,  scope: "SPI clock / I2C clock (SCL)" }
+
+physical:
+  # pins per TE Connectivity MS5611-01BA03 datasheet (06/2017 mirror,
+  # also cross-checked against the older MEAS Switzerland DA5611-01BA03_011
+  # Oct-2012 mirror -- identical "PIN CONFIGURATION" table in both), QFN
+  # 5.0 x 3.0 x 1.0 mm package.  Note: the manifest task brief assumed a
+  # 10-pin package, but both datasheet mirrors' pin table only names 8
+  # pins (1-4, 6-8); pad 5 carries no signal name in either source and is
+  # treated as N.C. per the "never invent" rule.
+  refdes_prefix: U
+  package:       QFN-8
+  footprint:     qfn_8_5p0x3p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1", signal: "VDD" }
+    - { pad: "2", signal: "PS" }
+    - { pad: "3", signal: "GND" }
+    - { pad: "4", signal: "CSB" }
+    # pad 5: unlabelled in both datasheet mirrors' pin table; treated as N.C.
+    - { pad: "6", signal: "SDO" }
+    - { pad: "7", signal: "SDI_SDA" }
+    - { pad: "8", signal: "SCLK" }
+  passives:
+    # "VDD Capacitor From VDD to GND 100nF min" per the datasheet's
+    # electrical-characteristics table.
+    - { role: decouple, value: 100nF, net: VDD, refdes_prefix: C }

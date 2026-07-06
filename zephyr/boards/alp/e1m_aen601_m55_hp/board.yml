@@ -1,0 +1,8 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+board:
+  name: alp_e1m_aen601_m55_hp
+  full_name: E1M-AEN601 (Alif Ensemble E6) Cortex-M55 HP carrier
+  vendor: alp
+  socs:
+    - name: ae612fa0e5597ls0

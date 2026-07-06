@@ -53,7 +53,7 @@
 extern "C" {
 #endif
 
-#define ALP_CC3501E_PROTOCOL_VERSION 1
+#define ALP_CC3501E_PROTOCOL_VERSION 3
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -98,7 +98,8 @@ extern "C" {
  *
  *   0x00..0x0F  meta (ping, version, reset)
  *   0x10..0x2F  Wi-Fi
- *   0x30..0x4F  BLE
+ *   0x30..0x3F  BLE
+ *   0x40..0x4F  OTA
  *   0x50..0x5F  GPIO proxy
  *   0x60..0x6F  power / camera-enable
  *   0x70..0x7F  diagnostics
@@ -116,6 +117,20 @@ typedef enum {
      * beyond what GET_VERSION returns.  v2-firmware-only; v1
      * firmware rejects with ALP_CC3501E_RESP_ERR_INVALID. */
 	ALP_CC3501E_CMD_GET_DIAG_INFO = 0x04,
+	/* Async-event queue drain (host-POLLED).  The reply DATA is a packed list
+	 * of queued async events, each @ref alp_cc3501e_event_entry_t
+	 * { evt_opcode(1) | len(1) | payload[len] }; an empty list (data_len == 0,
+	 * status OK) means nothing was queued.  The firmware DRAINS the queue on
+	 * each poll so an event is delivered exactly once.
+	 *
+	 * WHY POLLED: the async EVT_* frames (WIFI 0x18..0x1A, BLE 0x3C..0x3F,
+	 * GPIO 0x54) have no slave->master attention line on this HW rev -- the
+	 * CC35 GPIO17 -> Alif P2_6 line is a BODGE not routed on the stock EVK --
+	 * so the host cannot be interrupt-notified; it polls this opcode instead
+	 * (a bodged unit can drive P2_6 to trigger the poll early, but the polled
+	 * path is the benchable default).  0x05 is the first free opcode in the
+	 * meta group (0x00..0x0F; 0x00..0x04 are taken above). */
+	ALP_CC3501E_CMD_GET_PENDING_EVENTS = 0x05,
 
 	/* Wi-Fi */
 	ALP_CC3501E_CMD_WIFI_SCAN_START   = 0x10,
@@ -171,6 +186,15 @@ typedef enum {
 	ALP_CC3501E_CMD_OTA_FINISH = 0x42, /* no payload; install + deferred reboot */
 	ALP_CC3501E_CMD_OTA_ABORT  = 0x43, /* no payload; cancel the session      */
 	ALP_CC3501E_CMD_OTA_STATUS = 0x44, /* reply alp_cc3501e_ota_status_t      */
+
+	/* Bulk-data stream sink (proto v2).  The host sends up to
+	 * ALP_CC3501E_MAX_PAYLOAD-header bytes per frame; the firmware receives +
+	 * discards them (counting the total, reported via GET_DIAG_INFO) and acks.
+	 * A back-to-back sequence of these is a FRAMED bulk stream: each frame's
+	 * payload phase rides the host's DMA path (>= the SPI DMA threshold), and
+	 * every frame is acked so the link never desyncs -- unlike clocking raw
+	 * throwaway bytes.  Empty reply data. */
+	ALP_CC3501E_CMD_STREAM_WRITE = 0x45, /* req: opaque bulk bytes; reply: none */
 
 	/* GPIO proxy.  IO11 / IO13 / IO15..IO21 hang off CC3501E
      * GPIOs; these commands let the Alif read/write them via the
@@ -284,6 +308,36 @@ typedef struct {
 	uint8_t  last_error;
 	uint8_t  reserved[3];
 } alp_cc3501e_diag_info_t;
+
+/* ------------------------------------------------------------------ */
+/* Async-event queue payload format (CMD_GET_PENDING_EVENTS)           */
+/* ------------------------------------------------------------------ */
+
+/** Fixed per-event header size on the wire (evt_opcode + len). */
+#define ALP_CC3501E_EVENT_HDR_BYTES 2u
+
+/** One entry in a CMD_GET_PENDING_EVENTS (0x05) reply.  The reply DATA (the
+ *  bytes after the frame's status byte) is a packed list of ZERO OR MORE
+ *  entries, each laid out on the wire with NO padding as:
+ *
+ *    offset 0            evt_opcode (1)   -- one of the ALP_CC3501E_EVT_* opcodes
+ *    offset 1            len        (1)   -- payload byte count (0..255)
+ *    offset 2            payload[len]     -- event-specific bytes (the matching
+ *                                            EVT_* struct; empty for the Wi-Fi
+ *                                            connect/disconnect events)
+ *
+ *  The next entry begins immediately at offset (2 + len); the list ends when
+ *  the reply DATA is exhausted.  The firmware packs WHOLE entries only -- an
+ *  event whose payload would overflow the reply is held back for the next poll,
+ *  never split -- and DRAINS each entry it emits, so every event is delivered
+ *  exactly once.  Field-level meanings:
+ *   - evt_opcode: the async opcode (e.g. @ref ALP_CC3501E_EVT_WIFI_CONNECTED).
+ *   - len: number of payload bytes that follow inline. */
+typedef struct {
+	uint8_t evt_opcode;
+	uint8_t len;
+	/* uint8_t payload[len];   -- packed inline, no padding */
+} alp_cc3501e_event_entry_t;
 
 /* ------------------------------------------------------------------ */
 /* Power policy payload formats                                        */

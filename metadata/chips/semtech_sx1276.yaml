@@ -23,6 +23,25 @@ signals:
   - { name: NSS,    type: input }
   - { name: NRESET, type: input, scope: "active-low hardware reset" }
   - { name: DIO0,   type: output, scope: "IRQ line 0" }
+  - { name: DIO1,     type: bidir,  scope: "digital I/O, software configured (DCLK in some modes)" }
+  - { name: DIO2,     type: bidir,  scope: "digital I/O, software configured (DATA in some modes)" }
+  - { name: DIO3,     type: bidir,  scope: "digital I/O, software configured" }
+  - { name: DIO4,     type: bidir,  scope: "digital I/O, software configured" }
+  - { name: DIO5,     type: bidir,  scope: "digital I/O, software configured" }
+  - { name: XTA,      type: analog, scope: "crystal connection or TCXO input" }
+  - { name: XTB,      type: analog, scope: "crystal connection" }
+  - { name: RFI_LF,   type: analog, scope: "RF input for low-frequency bands 2 & 3" }
+  - { name: RFI_HF,   type: analog, scope: "RF input for high-frequency band 1 (grounded on the SX1278 variant)" }
+  - { name: RFO_LF,   type: analog, scope: "RF output for low-frequency bands 2 & 3" }
+  - { name: RFO_HF,   type: analog, scope: "RF output for high-frequency band 1 (grounded on the SX1278 variant)" }
+  - { name: PA_BOOST, type: analog, scope: "optional high-power PA output, all frequency bands" }
+  - { name: RXTX,     type: output, scope: "Rx/Tx switch control, high in Tx (RXTX/RF_MOD)" }
+  - { name: VR_ANA,   type: power,  scope: "regulated supply voltage for analogue circuitry" }
+  - { name: VBAT_ANA, type: power,  scope: "supply voltage for analogue circuitry" }
+  - { name: VR_DIG,   type: power,  scope: "regulated supply voltage for digital blocks" }
+  - { name: VBAT_DIG, type: power,  scope: "supply voltage for digital blocks" }
+  - { name: VBAT_RF,  type: power,  scope: "supply voltage for RF blocks (grounded on the SX1278 variant)" }
+  - { name: VR_PA,    type: power,  scope: "regulated supply for the PA" }
 
 kconfig:
   zephyr:         ALP_SDK_CHIP_SEMTECH_SX1276
@@ -32,7 +51,53 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per Semtech SX1276/77/78/79 datasheet Rev 7 (May 2020, this
+  # manifest's cited datasheet), §1.3/1.4 "Pin Diagram"/"Pin Description",
+  # Table 2 -- a fully enumerated 0-28 pad table (pad 0 = exposed GND
+  # paddle), transcribed pad-for-pad for the SX1276/77/79 variant (pin
+  # numbering/names for the chip_id this manifest models). The SX1278
+  # variant grounds pins 21/22/24 (RFI_HF/RFO_HF/VBAT_RF) instead -- not
+  # modeled here since chip_id is sx1276-specific. Package dimensions (mm)
+  # not confirmed in the extracted text -- omitted rather than guessed.
+  refdes_prefix: U
+  package:       QFN-28
+  footprint:     semtech_qfn28
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "0",  signal: GND }
+    - { pad: "1",  signal: RFI_LF }
+    - { pad: "2",  signal: VR_ANA }
+    - { pad: "3",  signal: VBAT_ANA }
+    - { pad: "4",  signal: VR_DIG }
+    - { pad: "5",  signal: XTA }
+    - { pad: "6",  signal: XTB }
+    - { pad: "7",  signal: NRESET }
+    - { pad: "8",  signal: DIO0 }
+    - { pad: "9",  signal: DIO1 }
+    - { pad: "10", signal: DIO2 }
+    - { pad: "11", signal: DIO3 }
+    - { pad: "12", signal: DIO4 }
+    - { pad: "13", signal: DIO5 }
+    - { pad: "14", signal: VBAT_DIG }
+    - { pad: "15", signal: GND }
+    - { pad: "16", signal: SCLK }
+    - { pad: "17", signal: MISO }
+    - { pad: "18", signal: MOSI }
+    - { pad: "19", signal: NSS }
+    - { pad: "20", signal: RXTX }
+    - { pad: "21", signal: RFI_HF }
+    - { pad: "22", signal: RFO_HF }
+    - { pad: "23", signal: GND }
+    - { pad: "24", signal: VBAT_RF }
+    - { pad: "25", signal: VR_PA }
+    - { pad: "26", signal: GND }
+    - { pad: "27", signal: PA_BOOST }
+    - { pad: "28", signal: RFO_LF }

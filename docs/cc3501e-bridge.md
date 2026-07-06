@@ -342,6 +342,44 @@ that ISOLATE all the downstream buses:
 
 The Alif's bring-up code then sequences enables once it's ready.
 
+## OTA
+
+The bridge carries the CC3501E's own firmware update: the Alif host
+streams a **signed GPE-format vendor image** over the inter-chip SPI
+into the CC3501E's **non-primary vendor slot** (PSA-FWU), and the
+device installs + swap-boots it.  The wire contract lives in
+[`include/alp/protocol/cc3501e.h`](../include/alp/protocol/cc3501e.h)
+(the OTA opcode group `0x40..0x4F`):
+
+| Opcode | Command | Payload |
+|--------|---------|---------|
+| `0x40` | `ALP_CC3501E_CMD_OTA_BEGIN`  | `alp_cc3501e_ota_begin_t` (`total_len` LE32) |
+| `0x41` | `ALP_CC3501E_CMD_OTA_WRITE`  | `alp_cc3501e_ota_write_t` (offset LE32) + 1..`ALP_CC3501E_OTA_MAX_CHUNK` image bytes |
+| `0x42` | `ALP_CC3501E_CMD_OTA_FINISH` | none — install + deferred swap reboot |
+| `0x43` | `ALP_CC3501E_CMD_OTA_ABORT`  | none — cancel the session |
+| `0x44` | `ALP_CC3501E_CMD_OTA_STATUS` | reply `alp_cc3501e_ota_status_t` (state / bytes_written / total_len) |
+
+The flow is strictly sequential — `BEGIN(total_len)` →
+`WRITE(offset, bytes)`* → `FINISH` — and each `WRITE`'s `offset` must
+equal the device's running write cursor (out-of-order writes are
+rejected; a host that missed a reply re-syncs to the real cursor via
+`OTA_STATUS`).  On `FINISH` the device installs the staged image and
+arms a deferred reboot: the bridge link **drops** while the cold
+BL2/MCUboot swaps the slot to primary (TRIAL boot), and the swapped
+image accepts itself on its first housekeeping tick.  Host-side
+helpers: `cc3501e_ota_update()` (whole-image convenience) plus the
+granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` in
+[`include/alp/chips/cc3501e.h`](../include/alp/chips/cc3501e.h).
+
+Each OTA payload is itself a signed vendor image whose version must
+exceed the running primary (monotonic anti-rollback).  Build, signing,
+and the silicon-validated status (staged/install proven; the final cold
+swap-boot needs a correctly-activated, cold-bootable unit) are covered
+in [`docs/cc3501e-production.md`](cc3501e-production.md) § "OTA".  The
+host obtains the image via the device-side Mender contract
+([`docs/ota-device-contract.md`](ota-device-contract.md)); the OTA
+server is a separate repo.
+
 ## v0.x roadmap
 
 | Step                                             | Where it lands                          |
@@ -350,10 +388,11 @@ The Alif's bring-up code then sequences enables once it's ready.
 | Alif-side SPI client (`chips/cc3501e/`)          | ✅ landed in alp-sdk              |
 | `<alp/iot.h>` / `<alp/ble.h>` route via CC3501E  | Follow-up: dispatcher branch in iot_zephyr.c / ble_zephyr.c |
 | Firmware tree (embedded)                         | `firmware/cc3501e/` ✅ (per [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)) |
-| Bring-up firmware (PING + GET_VERSION + GET_MAC + RESET) | `firmware/cc3501e/` v0.1 ✅ (silicon-free + stub; bench build pending) |
-| Wi-Fi station mode                               | `firmware/cc3501e/` v0.2            |
-| BLE peripheral + advertise                       | `firmware/cc3501e/` v0.3            |
-| GPIO proxy + camera-enable                       | `firmware/cc3501e/` v0.4            |
+| Bring-up firmware (PING + GET_VERSION + GET_MAC + RESET) | `firmware/cc3501e/` v0.1 ✅ **silicon-validated** (E1M-AEN801 EVK bench) |
+| Wi-Fi station mode                               | `firmware/cc3501e/` v0.2 ✅ shipped (scan / STA connect / AP / RSSI / IP); scan + async STA connect **silicon-validated** |
+| BLE peripheral + advertise                       | `firmware/cc3501e/` v0.3 ✅ shipped (GAP advertise / scan / connect + GATT); NimBLE enable + scan **silicon-validated** |
+| GPIO proxy + camera-enable                       | `firmware/cc3501e/` v0.4 ✅ shipped + **silicon-validated** (`examples/aen/aen-cc3501e-gpio`, warm-boot harness pass=8 fail=0) |
+| OTA over the bridge (§ "OTA" above)              | `firmware/cc3501e/` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
 | Full feature parity with `<alp/iot.h>` /
   `<alp/ble.h>`                                    | `firmware/cc3501e/` v1.0            |
 

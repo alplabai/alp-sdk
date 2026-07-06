@@ -86,6 +86,7 @@ static const alp_power_ops_t _ops = {
 	.close                 = NULL,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(power);
 ALP_BACKEND_REGISTER(power,
                      zephyr_stub,
                      {
@@ -94,5 +95,47 @@ ALP_BACKEND_REGISTER(power,
                          .base_caps   = 0u,
                          .priority    = 0,
                          .ops         = &_ops,
+                         .probe       = NULL,
+                     });
+
+/* ------------------------------------------------------------------ */
+/* Operating-point-profile stub (class "power_profile")                 */
+/*                                                                      */
+/* Wildcard priority-0 registration so alp_power_profile_get/_set link  */
+/* + return gracefully on every build.  No portable software source     */
+/* exists for an operating-point profile, so both ops report            */
+/* ALP_ERR_NOSUPPORT; real backends (the Alif SE aiPM body) register    */
+/* per silicon_ref at higher priority.                                  */
+/* ------------------------------------------------------------------ */
+
+static alp_status_t stub_profile_get(alp_power_profile_id_t which, alp_power_profile_t *out)
+{
+	(void)which;
+	(void)out; /* dispatcher already zero-filled it */
+	return ALP_ERR_NOSUPPORT;
+}
+
+static alp_status_t stub_profile_set(alp_power_profile_id_t     which,
+                                     const alp_power_profile_t *profile)
+{
+	(void)which;
+	(void)profile;
+	return ALP_ERR_NOSUPPORT;
+}
+
+static const alp_power_profile_ops_t _profile_ops = {
+	.get = stub_profile_get,
+	.set = stub_profile_set,
+};
+
+ALP_BACKEND_ANCHOR_DEFINE(power_profile);
+ALP_BACKEND_REGISTER(power_profile,
+                     zephyr_stub,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "stub",
+                         .base_caps   = 0u,
+                         .priority    = 0,
+                         .ops         = &_profile_ops,
                          .probe       = NULL,
                      });

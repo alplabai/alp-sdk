@@ -1,0 +1,49 @@
+# Alp SDK chip manifest: Murata LBES5PL2EL (Type 2EL) tri-radio module.
+schema_version:   1
+chip_id:          murata_lbes5pl2el
+driver_status:    planned          # Linux/Android/MCUXpresso host stack;
+                                   # no Alp SDK chip-driver body yet.
+display_name:     "Murata LBES5PL2EL Type 2EL Wi-Fi 6 + Bluetooth 5.3 + 802.15.4 (NXP IW612)"
+vendor:           murata
+mpn_population:
+  - "LBES5PL2EL"
+  - "LBES5PL2EL-923"
+silicon_under_lid:
+  - "NXP IW612"
+
+datasheet:
+  primary:        "https://www.murata.com/en-us/products/connectivitymodule/wi-fi-bluetooth/overview/lineup/type2el"
+
+notes: |
+  Candidate N93 on-module Wi-Fi/Bluetooth/802.15.4 combo. Murata lists
+  Type 2EL as an NXP IW612-based 2.4/5 GHz Wi-Fi 6 + Bluetooth 5.3
+  BR/EDR/LE + 802.15.4 module with SDIO for Wi-Fi, UART for Bluetooth,
+  PCM audio, and SPI/GPIO for the 802.15.4 side.
+
+bus:              sdio              # Wi-Fi data path; Bluetooth uses UART.
+
+host_interfaces:
+  wifi:           SDIO
+  bluetooth:      UART
+  audio:          PCM
+  ieee802154:     SPI/GPIO
+
+radio:
+  wifi:           "802.11a/b/g/n/ac/ax 1x1, 2.4GHz + 5GHz, up to 601Mbps PHY"
+  bluetooth:      "Bluetooth 5.3 BR/EDR/LE, up to 2Mbps PHY"
+  ieee802154:     true
+
+physical:
+  dimension_mm:   "7.7 x 8.8 x 1.3"
+  antenna:        external
+  operating_temp_deg_c: "-40..85"
+
+kconfig:
+  yocto:          n/a
+
+families:
+  - nxp-imx9
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard

@@ -44,7 +44,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.x'
+          python-version-file: .python-version
 
       - name: Doc-drift check (dead symbols + docs index)
         run: python3 scripts/check_doc_drift.py

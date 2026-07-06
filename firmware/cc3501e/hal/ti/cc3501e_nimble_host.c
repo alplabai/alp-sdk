@@ -34,6 +34,7 @@
 
 #include "nimble/nimble_npl.h"
 #include "nimble/nimble_port.h"
+#include "nimble/ble.h" /* BLE_ERR_REM_USER_CONN_TERM (nimble/ble.h:216) */
 #include "host/ble_hs.h"
 #include "host/util/util.h"
 #include "services/gap/ble_svc_gap.h"
@@ -72,6 +73,62 @@
 static struct ble_npl_task s_task_host;
 static uint8_t             s_own_addr_type = BLE_OWN_ADDR_PUBLIC;
 static OsiSyncObj_t        s_host_init_sync; /* signalled by ble_sync_cb */
+
+/* ------------------------------------------------------------------ */
+/* Connection + GATT-client rendezvous state (worker-thread ownership).  */
+/*                                                                      */
+/* One active link at a time (v0.3): s_conn_handle mirrors the single    */
+/* GAP connection -- set on BLE_GAP_EVENT_CONNECT (either role: our      */
+/* central connect OR a central connecting to our advertiser) and        */
+/* cleared on BLE_GAP_EVENT_DISCONNECT.  The connect/disconnect/GATT-     */
+/* client bodies run on the bridge worker task (never the SPI ISR), so    */
+/* they may block on these OSI sync objects while the NimBLE host task     */
+/* delivers the matching GAP/GATT completion callback and signals them.    */
+/* The sync objects are created once (lazy) and never deleted so an async  */
+/* peer-initiated DISCONNECT can always signal s_disc_sync.               */
+static volatile uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+static int               s_syncs_ready;
+static OsiSyncObj_t      s_conn_sync;     /* signalled on BLE_GAP_EVENT_CONNECT    */
+static OsiSyncObj_t      s_disc_sync;     /* signalled on BLE_GAP_EVENT_DISCONNECT */
+static OsiSyncObj_t      s_gattc_op_sync; /* signalled on a GATT read/write completion */
+static volatile int      s_conn_status;   /* status field of the CONNECT event    */
+static volatile int      s_gattc_op_status;
+static uint8_t          *s_gattc_read_buf; /* caller buffer for the pending read   */
+static uint16_t          s_gattc_read_cap;
+static volatile uint16_t s_gattc_read_len;
+
+/* Create the connect/disconnect/GATT sync objects exactly once.  Called from the
+ * worker before it initiates a blocking GAP/GATT op; idempotent. */
+static int cc3501e_ensure_syncs(void)
+{
+	if (s_syncs_ready) {
+		return 0;
+	}
+	if (osi_SyncObjCreate(&s_conn_sync) != OSI_OK) {
+		return -1;
+	}
+	if (osi_SyncObjCreate(&s_disc_sync) != OSI_OK) {
+		return -1;
+	}
+	if (osi_SyncObjCreate(&s_gattc_op_sync) != OSI_OK) {
+		return -1;
+	}
+	s_syncs_ready = 1;
+	return 0;
+}
+
+/* Poll an OSI sync object in 1-second ticks up to @max_seconds (osi_SyncObjWait
+ * blocks in whole-second units on this port -- see the scan path).  0 -> signalled,
+ * -1 -> timed out. */
+static int cc3501e_wait_signaled(OsiSyncObj_t *sync, uint32_t max_seconds)
+{
+	for (uint32_t i = 0u; i < max_seconds; i++) {
+		if (osi_SyncObjWait(sync, OSI_WAIT_FOR_SECOND) == OSI_OK) {
+			return 0;
+		}
+	}
+	return -1;
+}
 
 /* nimble.a brings these in depending on BLE_STORE_CONFIG_PERSIST (syscfg.h
  * default = 1 -> persistent store).  Both symbols are in nimble.a; pick the
@@ -159,7 +216,19 @@ static int cc3501e_gap_event_cb(struct ble_gap_event *event, void *arg)
 		(void)ble_gap_ext_adv_start(CC3501E_BLE_ADV_INSTANCE, 0, 0);
 		break;
 	case BLE_GAP_EVENT_CONNECT:
+		/* A central connected to our advertiser (peripheral role): latch the
+		 * handle so GATT notify/read/write target it.  (status != 0 => the
+		 * attempt failed; leave the handle cleared.) */
+		if (event->connect.status == 0) {
+			s_conn_handle = event->connect.conn_handle;
+		}
+		break;
 	case BLE_GAP_EVENT_DISCONNECT:
+		s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+		if (s_syncs_ready) {
+			osi_SyncObjSignal(&s_disc_sync);
+		}
+		break;
 	default:
 		break;
 	}
@@ -376,6 +445,21 @@ int cc3501e_nimble_adv_stop(void)
 	return ble_gap_ext_adv_stop(CC3501E_BLE_ADV_INSTANCE);
 }
 
+int cc3501e_nimble_host_disable(void)
+{
+	/* Nothing to tear down if the host never came up -- report success so a
+	 * BLE_DISABLE on an already-off stack is idempotent. */
+	if (!ble_hs_is_enabled()) {
+		return 0;
+	}
+	/* Stop the two GAP roles that hold the shared HIF: the ext-adv set and any
+	 * in-flight discovery.  Both are idempotent (EALREADY when not active), so
+	 * their return codes are swallowed -- disable is best-effort teardown. */
+	(void)ble_gap_ext_adv_stop(CC3501E_BLE_ADV_INSTANCE);
+	(void)ble_gap_disc_cancel();
+	return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* GAP discovery (BLE scan) -- collect advertisers + their names.       */
 /*                                                                      */
@@ -500,4 +584,271 @@ int cc3501e_nimble_scan(cc3501e_nimble_scan_rec_t *out,
 		*out_count = n;
 	}
 	return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* GAP central connect + connection lifecycle.                          */
+/*                                                                      */
+/* cc3501e_nimble_connect() issues ble_gap_connect() and blocks (bounded) */
+/* on the BLE_GAP_EVENT_CONNECT delivered to cc3501e_conn_gap_event_cb.   */
+/* Once connected, that callback becomes the connection's event sink and  */
+/* also fields the eventual BLE_GAP_EVENT_DISCONNECT.                     */
+/* ------------------------------------------------------------------ */
+#define CC3501E_BLE_CONNECT_TIMEOUT_MS 8000
+
+/* Single event sink for a central-initiated connection (ble_gap.h:2116 says a
+ * successful connection inherits the connect callback for later events, incl.
+ * DISCONNECT). */
+static int cc3501e_conn_gap_event_cb(struct ble_gap_event *event, void *arg)
+{
+	(void)arg;
+	switch (event->type) {
+	case BLE_GAP_EVENT_CONNECT: /* ble_gap.h:169; event.connect{status,conn_handle} */
+		s_conn_status = event->connect.status;
+		if (event->connect.status == 0) {
+			s_conn_handle = event->connect.conn_handle;
+		} else {
+			s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+		}
+		osi_SyncObjSignal(&s_conn_sync);
+		break;
+	case BLE_GAP_EVENT_DISCONNECT: /* ble_gap.h:172; event.disconnect.reason */
+		s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+		osi_SyncObjSignal(&s_disc_sync);
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+int cc3501e_nimble_connect(uint8_t addr_type, const uint8_t addr[6])
+{
+	if (!ble_hs_is_enabled()) {
+		return -1;
+	}
+	if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+		return -1; /* one active link at a time (v0.3) */
+	}
+	if (cc3501e_ensure_syncs() != 0) {
+		return -1;
+	}
+
+	/* ble.h:295 ble_addr_t {type,val[6]}: the peer to connect to. */
+	ble_addr_t peer;
+	peer.type = addr_type;
+	memcpy(peer.val, addr, 6);
+
+	s_conn_status = -1;
+	(void)osi_SyncObjClear(&s_conn_sync); /* drop any stale signal */
+
+	/* ble_gap.h:2133 ble_gap_connect(own_addr_type, peer, duration_ms, params,
+	 * cb, cb_arg); NULL params => stack defaults. */
+	int rc = ble_gap_connect(s_own_addr_type,
+	                         &peer,
+	                         CC3501E_BLE_CONNECT_TIMEOUT_MS,
+	                         NULL,
+	                         cc3501e_conn_gap_event_cb,
+	                         NULL);
+	if (rc != 0) {
+		return rc;
+	}
+
+	/* Wait for the CONNECT event (timeout budget + a margin). */
+	if (cc3501e_wait_signaled(&s_conn_sync, (CC3501E_BLE_CONNECT_TIMEOUT_MS / 1000u) + 2u) != 0) {
+		(void)ble_gap_conn_cancel(); /* ble_gap.h:2204 -- abort the in-flight attempt */
+		return -1;
+	}
+	if (s_conn_status != 0 || s_conn_handle == BLE_HS_CONN_HANDLE_NONE) {
+		return -1; /* controller reported a failed connection */
+	}
+	return 0;
+}
+
+int cc3501e_nimble_disconnect(void)
+{
+	if (!ble_hs_is_enabled()) {
+		return -1;
+	}
+	uint16_t h = s_conn_handle;
+	if (h == BLE_HS_CONN_HANDLE_NONE) {
+		return 0; /* already disconnected -- idempotent */
+	}
+	if (cc3501e_ensure_syncs() != 0) {
+		return -1;
+	}
+	(void)osi_SyncObjClear(&s_disc_sync);
+
+	/* ble_gap.h:2227 ble_gap_terminate(conn_handle, hci_reason); the standard
+	 * local-initiated reason is REMOTE USER TERMINATED (ble.h:216 = 0x13). */
+	int rc = ble_gap_terminate(h, BLE_ERR_REM_USER_CONN_TERM);
+	if (rc != 0) {
+		/* Already gone (EALREADY/ENOTCONN): reflect the cleared state, report OK. */
+		s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+		return 0;
+	}
+	if (cc3501e_wait_signaled(&s_disc_sync, 4u) != 0) {
+		return -1;
+	}
+	return 0;
+}
+
+int cc3501e_nimble_scan_stop(void)
+{
+	if (!ble_hs_is_enabled()) {
+		return -1;
+	}
+	/* ble_gap.h:2086 ble_gap_disc_cancel(); BLE_HS_EALREADY when no scan is
+	 * running -> idempotent success (matches the disable teardown path). */
+	int rc = ble_gap_disc_cancel();
+	return (rc == 0 || rc == BLE_HS_EALREADY) ? 0 : rc;
+}
+
+/* ------------------------------------------------------------------ */
+/* GATT client (against the connected peer).                            */
+/*                                                                      */
+/* ble_gattc_read / ble_gattc_write_flat both complete asynchronously via */
+/* a ble_gatt_attr_fn callback (ble_gatt.h:275): error->status carries the */
+/* result and, for a read, attr->om the value mbuf (host frees it after    */
+/* the callback -- we copy it out flat).                                  */
+/* ------------------------------------------------------------------ */
+static int cc3501e_gattc_read_cb(uint16_t                     conn_handle,
+                                 const struct ble_gatt_error *error,
+                                 struct ble_gatt_attr        *attr,
+                                 void                        *arg)
+{
+	(void)conn_handle;
+	(void)arg;
+	s_gattc_op_status = (error != NULL) ? (int)error->status : 0;
+	if (s_gattc_op_status == 0 && attr != NULL && attr->om != NULL) {
+		uint16_t n  = 0u;
+		int      rc = ble_hs_mbuf_to_flat(attr->om, s_gattc_read_buf, s_gattc_read_cap, &n);
+		if (rc != 0) {
+			s_gattc_op_status = rc;
+		} else {
+			s_gattc_read_len = n;
+		}
+	}
+	osi_SyncObjSignal(&s_gattc_op_sync);
+	return 0;
+}
+
+static int cc3501e_gattc_write_cb(uint16_t                     conn_handle,
+                                  const struct ble_gatt_error *error,
+                                  struct ble_gatt_attr        *attr,
+                                  void                        *arg)
+{
+	(void)conn_handle;
+	(void)attr;
+	(void)arg;
+	s_gattc_op_status = (error != NULL) ? (int)error->status : 0;
+	osi_SyncObjSignal(&s_gattc_op_sync);
+	return 0;
+}
+
+int cc3501e_nimble_gatt_read(uint16_t handle, uint8_t *out, uint16_t cap, uint16_t *out_len)
+{
+	if (out_len != NULL) {
+		*out_len = 0u;
+	}
+	if (!ble_hs_is_enabled() || out == NULL) {
+		return -1;
+	}
+	if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE) {
+		return -1; /* no peer connected */
+	}
+	if (cc3501e_ensure_syncs() != 0) {
+		return -1;
+	}
+	(void)osi_SyncObjClear(&s_gattc_op_sync);
+	s_gattc_op_status = -1;
+	s_gattc_read_buf  = out;
+	s_gattc_read_cap  = cap;
+	s_gattc_read_len  = 0u;
+
+	/* ble_gatt.h:452 ble_gattc_read(conn_handle, attr_handle, cb, cb_arg). */
+	int rc = ble_gattc_read(s_conn_handle, handle, cc3501e_gattc_read_cb, NULL);
+	if (rc != 0) {
+		return rc;
+	}
+	if (cc3501e_wait_signaled(&s_gattc_op_sync, 4u) != 0) {
+		return -1;
+	}
+	if (s_gattc_op_status != 0) {
+		return -1;
+	}
+	if (out_len != NULL) {
+		*out_len = s_gattc_read_len;
+	}
+	return 0;
+}
+
+int cc3501e_nimble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t len)
+{
+	if (!ble_hs_is_enabled()) {
+		return -1;
+	}
+	if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE) {
+		return -1;
+	}
+	if (cc3501e_ensure_syncs() != 0) {
+		return -1;
+	}
+	(void)osi_SyncObjClear(&s_gattc_op_sync);
+	s_gattc_op_status = -1;
+
+	/* ble_gatt.h:597 ble_gattc_write_flat(conn_handle, attr_handle, data,
+	 * data_len, cb, cb_arg) -- acknowledged write, completes via the callback. */
+	int rc = ble_gattc_write_flat(s_conn_handle, handle, data, len, cc3501e_gattc_write_cb, NULL);
+	if (rc != 0) {
+		return rc;
+	}
+	if (cc3501e_wait_signaled(&s_gattc_op_sync, 4u) != 0) {
+		return -1;
+	}
+	return (s_gattc_op_status == 0) ? 0 : -1;
+}
+
+/* ------------------------------------------------------------------ */
+/* GATT server.                                                         */
+/*                                                                      */
+/* v0.3 LIMITATION: the host's GATT_REGISTER descriptor has no defined    */
+/* wire format yet, so the firmware exposes a FIXED demo service          */
+/* registered once at BLE enable (cc3501e_gatt_svr_init: primary 0xFFF0   */
+/* with a single read/write/notify characteristic 0xFFF1, value handle    */
+/* s_chr_val_handle).  cc3501e_nimble_gatt_register() therefore does not   */
+/* parse the descriptor -- it confirms the demo service is present and     */
+/* returns OK so the host can drive notify/read/write against a known      */
+/* attribute.  A descriptor-driven dynamic table is a follow-up.          */
+/* ------------------------------------------------------------------ */
+int cc3501e_nimble_gatt_register(const uint8_t *desc, uint16_t desc_len)
+{
+	(void)desc;
+	(void)desc_len;
+	if (!ble_hs_is_enabled()) {
+		return -1;
+	}
+	/* s_chr_val_handle is assigned by ble_gatts_add_svcs() during host start; a
+	 * nonzero handle means the fixed demo service is live. */
+	return (s_chr_val_handle != 0u) ? 0 : -1;
+}
+
+int cc3501e_nimble_gatt_notify(uint16_t handle, const uint8_t *data, uint16_t len)
+{
+	if (!ble_hs_is_enabled()) {
+		return -1;
+	}
+	if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE) {
+		return -1; /* nobody to notify */
+	}
+	/* handle==0 -> notify the fixed demo characteristic value handle. */
+	uint16_t att = (handle != 0u) ? handle : s_chr_val_handle;
+
+	/* ble_hs_mbuf.h:57 ble_hs_mbuf_from_flat(buf,len) builds the value mbuf;
+	 * ble_gatts_notify_custom (ble_gatt.h:658) consumes/frees it. */
+	struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
+	if (om == NULL) {
+		return -1;
+	}
+	return ble_gatts_notify_custom(s_conn_handle, att, om);
 }

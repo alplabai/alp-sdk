@@ -12,6 +12,9 @@ into the topic-specific docs.
 - [cross-platform-setup.md](cross-platform-setup.md) — per-OS
   quickstart (Linux + macOS + Windows native + WSL2).  *NEW —
   Codified in [ADR 0012](adr/0012-cross-platform-developer-host.md).*
+- [cli.md](cli.md) — the `alp` CLI verb reference
+  (init / build / run / flash / emit / validate / model / doctor /
+  monitor) + when to use `alp` vs `west alp-*`.
 - [firmware-quickstart.md](firmware-quickstart.md) — minimal "what
   does a board.yaml + main.c look like" walkthrough.
 - [troubleshooting.md](troubleshooting.md) — common failure modes
@@ -25,6 +28,10 @@ into the topic-specific docs.
 - [portability-matrix.md](portability-matrix.md) — the empirical
   guarantee: 21/21 E1M + 12/12 E1M-X cells green, all Phase B
   gaps resolved.
+- [peripheral-support-matrix.md](peripheral-support-matrix.md) —
+  auto-generated SoM × peripheral-class presence matrix, projected
+  from the single-source SoC metadata (presence only; driver
+  maturity lives in the OS support matrix).
 - [ADR 0011 — intra-family portability](adr/0011-intra-family-portability.md)
   — architectural decision: portability is INTRA-family;
   cross-form-factor is intentionally a separate product-line choice.
@@ -91,6 +98,11 @@ into the topic-specific docs.
   signing, and provisioning a shippable CC3501E coprocessor image.
 - [cc3501e-gpio-bench.md](cc3501e-gpio-bench.md) — warm-boot bench
   validation of the CC3501E GPIO proxy (machine-checkable contract).
+- [cc3501e-companion-commands.md](cc3501e-companion-commands.md) —
+  reference for the `alp companion` console command surface
+  (wifi / ble / sock / diag) + the host-driver OTA + GPIO-proxy APIs.
+- [console.md](console.md) — the interactive `alp` command tree on the
+  Zephyr shell (safety tiers, command list, companion binding, banner).
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a

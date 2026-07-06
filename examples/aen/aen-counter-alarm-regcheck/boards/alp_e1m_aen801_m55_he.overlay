@@ -5,10 +5,11 @@
  * On-silicon UTIMER COMPARE-A alarm validation overlay for the E1M-AEN801 (Alif
  * Ensemble E8, M55-HE), bench RAM-run via J-Link.  Identical node setup to
  * aen-counter-utimer-regcheck: enable both the alif,utimer PARENT (utimer0 @
- * 0x48001000, holding the timer + global reg windows + the comp_capt_a IRQ) and
+ * 0x48001000, holding the timer + global reg windows + the comp_a_buf1 IRQ) and
  * its alif,utimer-counter CHILD (utimer0_counter, the device the driver binds).
- * The COMPARE-A match raises CHAN_INTERRUPT_COMPARE_A_BUF1 on comp_capt_a, which
- * the driver wires to the alarm ISR.
+ * The COMPARE-A match raises CHAN_INTERRUPT_COMPARE_A_BUF1 on comp_a_buf1 (bit2,
+ * UTIMER_IRQ2_IRQn = 379 per the DFP), which the driver wires to the alarm ISR
+ * (NOT comp_capt_a / bit0 / IRQ 377, which is CAPTURE_A -- the bring-up bug).
  */
 
 /*

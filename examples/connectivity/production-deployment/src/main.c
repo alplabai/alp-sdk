@@ -85,7 +85,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <zephyr/kernel.h>
+#include "alp/peripheral.h"
 
 #include "alp/hw_info.h"
 #include "alp/iot.h"
@@ -225,7 +225,7 @@ int main(void)
 #ifdef CONFIG_BOARD_NATIVE_SIM
 		break; /* one iteration is enough for the framing test */
 #else
-		k_sleep(K_SECONDS(HEARTBEAT_INTERVAL_S));
+		alp_delay_ms(HEARTBEAT_INTERVAL_S * 1000u);
 #endif
 	}
 

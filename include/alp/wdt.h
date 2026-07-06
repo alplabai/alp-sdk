@@ -19,7 +19,8 @@
  *
  * Typical usage:
  * @code
- *     alp_wdt_t *wdt = alp_wdt_open(0, &(alp_wdt_config_t){
+ *     alp_wdt_t *wdt = alp_wdt_open(&(alp_wdt_config_t){
+ *         .wdt_id     = 0,
  *         .timeout_ms = 5000,
  *         .on_timeout = ALP_WDT_RESET_SOC,
  *     });
@@ -30,7 +31,7 @@
  * @endcode
  *
  * @par ABI status: [ABI-STABLE]
- *      v0.2.
+ *      v0.2.  v0.9.0: wdt_id moved into alp_wdt_config_t so alp_wdt_open(const alp_wdt_config_t *) matches every other config-taking open (pre-1.0 signature change).
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -59,8 +60,9 @@ typedef struct alp_wdt alp_wdt_t;
 
 /** Configuration passed to @ref alp_wdt_open. */
 typedef struct {
-	uint32_t         timeout_ms;
-	alp_wdt_action_t on_timeout;
+	uint32_t         wdt_id;     /**< Studio-resolved watchdog index (ALP_E1M_WDT0..WDT1). */
+	uint32_t         timeout_ms; /**< Feed deadline in milliseconds; must be non-zero. */
+	alp_wdt_action_t on_timeout; /**< Action when the deadline is missed. */
 } alp_wdt_config_t;
 
 /**
@@ -70,15 +72,15 @@ typedef struct {
  * must call @ref alp_wdt_feed before @c timeout_ms elapses or the
  * configured @c on_timeout action triggers.
  *
- * @param[in] wdt_id  Studio-resolved watchdog index (0..1).
- * @param[in] cfg     Configuration.  Must be non-NULL with non-zero
- *                    @c timeout_ms.
+ * @param[in] cfg  Configuration.  Must be non-NULL with non-zero
+ *                 @c timeout_ms; @c wdt_id must be a valid watchdog
+ *                 index on the active SoM (ALP_E1M_WDT0..WDT1).
  * @return Open handle on success;
- *         NULL if @p cfg is invalid, @p wdt_id is out of range, the
- *         underlying device isn't ready, or the SoC rejected the
+ *         NULL if @p cfg is invalid, @c cfg->wdt_id is out of range,
+ *         the underlying device isn't ready, or the SoC rejected the
  *         requested timeout (too long for the hardware).
  */
-alp_wdt_t *alp_wdt_open(uint32_t wdt_id, const alp_wdt_config_t *cfg);
+alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg);
 
 /**
  * @brief Reset the watchdog timer.

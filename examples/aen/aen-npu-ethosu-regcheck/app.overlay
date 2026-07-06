@@ -64,7 +64,7 @@
 	 */
 	ethosu_npu: ethosu85@49042000 {
 		compatible = "arm,ethos-u";
-		reg = <0x49042000 0x1000>;
+		reg = <0x49042000 0x13a0>;
 		interrupts = <366 3>;
 		interrupt-parent = <&nvic>;
 		secure-enable;

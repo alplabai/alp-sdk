@@ -20,6 +20,82 @@ motor:
   microstep_modes: [1, 2, 4, 8, 16, 32]
   current_a:      2.2
 
+signals:
+  # Full chip-native pin set per TI DRV8825 datasheet SLVSA73F, section 6
+  # "Pin Configuration and Functions"; families:/peripherals: above name only
+  # the host-facing subset (step/dir/mode/nenbl) this driver exposes today.
+  - { name: CP1,      type: bidir,  scope: "charge-pump flying capacitor" }
+  - { name: CP2,      type: bidir,  scope: "charge-pump flying capacitor" }
+  - { name: VCP,      type: bidir,  scope: "high-side gate drive voltage" }
+  - { name: VMA,      type: power,  scope: "bridge A power supply (8.2..45V); both VMx pins must tie to the same supply" }
+  - { name: VMB,      type: power,  scope: "bridge B power supply (8.2..45V); both VMx pins must tie to the same supply" }
+  - { name: AOUT1,    type: output, scope: "bridge A output 1; connect to stepper winding A" }
+  - { name: AOUT2,    type: output, scope: "bridge A output 2; connect to stepper winding A" }
+  - { name: BOUT1,    type: output, scope: "bridge B output 1; connect to stepper winding B" }
+  - { name: BOUT2,    type: output, scope: "bridge B output 2; connect to stepper winding B" }
+  - { name: ISENA,    type: bidir,  scope: "bridge A ground / current-sense resistor connection" }
+  - { name: ISENB,    type: bidir,  scope: "bridge B ground / current-sense resistor connection" }
+  - { name: AVREF,    type: input,  scope: "bridge A current-set reference input; normally tied with BVREF to V3P3OUT" }
+  - { name: BVREF,    type: input,  scope: "bridge B current-set reference input; normally tied with AVREF to V3P3OUT" }
+  - { name: V3P3OUT,  type: output, scope: "3.3V regulator output; can supply xVREF" }
+  - { name: nRESET,   type: input,  scope: "active-low reset; initializes indexer logic + disables H-bridge outputs" }
+  - { name: nSLEEP,   type: input,  scope: "logic-high to enable device, logic-low for low-power sleep mode" }
+  - { name: nFAULT,   type: open_drain_output, scope: "logic-low on overtemp/overcurrent fault" }
+  - { name: DECAY,    type: input,  scope: "decay mode: low=slow, open=mixed, high=fast" }
+  - { name: DIR,      type: input,  scope: "direction input; sets stepping direction" }
+  - { name: nENBL,    type: input,  scope: "logic-high disables outputs + indexer; logic-low enables" }
+  - { name: STEP,     type: input,  scope: "rising edge advances the indexer one step" }
+  - { name: MODE0,    type: input,  scope: "microstep mode select bit 0 (full..1/32 step, with MODE1/MODE2)" }
+  - { name: MODE1,    type: input,  scope: "microstep mode select bit 1 (full..1/32 step, with MODE0/MODE2)" }
+  - { name: MODE2,    type: input,  scope: "microstep mode select bit 2 (full..1/32 step, with MODE0/MODE1)" }
+  - { name: nHOME,    type: open_drain_output, scope: "logic-low at the home state of the step table" }
+
+physical:
+  # pins per TI DRV8825 datasheet SLVSA73F (Apr 2010, rev Jul 2014), Table
+  # "Pin Functions" (28-pin HTSSOP/PWP, matches the DRV8825PWPR order code).
+  # Pin 23 (NC) omitted: not signal-bearing.
+  refdes_prefix: U
+  package:       HTSSOP-28
+  footprint:     htssop_28_9p7x6p4mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "CP1" }
+    - { pad: "2",  signal: "CP2" }
+    - { pad: "3",  signal: "VCP" }
+    - { pad: "4",  signal: "VMA" }
+    - { pad: "5",  signal: "AOUT1" }
+    - { pad: "6",  signal: "ISENA" }
+    - { pad: "7",  signal: "AOUT2" }
+    - { pad: "8",  signal: "BOUT2" }
+    - { pad: "9",  signal: "ISENB" }
+    - { pad: "10", signal: "BOUT1" }
+    - { pad: "11", signal: "VMB" }
+    - { pad: "12", signal: "AVREF" }
+    - { pad: "13", signal: "BVREF" }
+    - { pad: "14", signal: "GND" }
+    - { pad: "15", signal: "V3P3OUT" }
+    - { pad: "16", signal: "nRESET" }
+    - { pad: "17", signal: "nSLEEP" }
+    - { pad: "18", signal: "nFAULT" }
+    - { pad: "19", signal: "DECAY" }
+    - { pad: "20", signal: "DIR" }
+    - { pad: "21", signal: "nENBL" }
+    - { pad: "22", signal: "STEP" }
+    - { pad: "24", signal: "MODE0" }
+    - { pad: "25", signal: "MODE1" }
+    - { pad: "26", signal: "MODE2" }
+    - { pad: "27", signal: "nHOME" }
+    - { pad: "28", signal: "GND" }
+  passives:
+    # Values per SLVSA73F Table "Pin Functions" (EXTERNAL COMPONENTS column).
+    - { role: decouple, value: 0.01uF, net: CP1,     refdes_prefix: C }
+    - { role: decouple, value: 0.1uF,  net: VCP,     refdes_prefix: C }
+    - { role: series,   value: 1M,     net: VCP,     refdes_prefix: R }
+    - { role: decouple, value: 0.1uF,  net: VMA,     refdes_prefix: C }
+    - { role: decouple, value: 0.1uF,  net: VMB,     refdes_prefix: C }
+    - { role: decouple, value: 0.47uF, net: V3P3OUT, refdes_prefix: C }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_DRV8825
   baremetal:      ALP_SDK_CHIP_DRV8825
@@ -28,6 +104,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

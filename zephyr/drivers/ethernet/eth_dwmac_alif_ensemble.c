@@ -104,6 +104,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #include <zephyr/irq.h>
 
 #include "eth_dwmac_priv.h"
+#include "eth.h" /* upstream drivers/ethernet helper: gen_random_mac() */
 
 /*
  * RMII 50 MHz reference-clock source select.  The GMAC DMA software-reset
@@ -277,7 +278,38 @@ BUILD_ASSERT(IS_ENABLED(CONFIG_NOCACHE_MEMORY) || !IS_ENABLED(CONFIG_DCACHE),
 static struct dwmac_dma_desc dwmac_tx_descs[NB_TX_DESCS] __desc_mem;
 static struct dwmac_dma_desc dwmac_rx_descs[NB_RX_DESCS] __desc_mem;
 
+/*
+ * Station MAC address source -- standard Zephyr ethernet-controller
+ * semantics (upstream dts/bindings/ethernet/ethernet-controller.yaml):
+ *
+ *   - `zephyr,random-mac-address` set (the SoC-dtsi default): generate a
+ *     per-boot random locally-administered address via the upstream
+ *     gen_random_mac() helper, so two AEN801 units never come up with the
+ *     same MAC (#246).  Per the upstream binding, any `local-mac-address`
+ *     is IGNORED while this flag is set.
+ *   - flag absent: use `local-mac-address` verbatim (per-unit provisioning:
+ *     a board/provisioning overlay deletes the flag and supplies the real
+ *     address -- see the ethernet node comment in
+ *     zephyr/dts/alif/ensemble_e8_peripherals.dtsi).
+ *
+ * The 02:01:56 prefix keeps the OUI-style locally-administered convention
+ * of this repo's existing bench MAC 02:01:56:78:43:21 (first three octets,
+ * e.g. tests/hil/aen801-evk/eth_mac_init/app.overlay); gen_random_mac()
+ * ORs in the locally-administered bit regardless.  No real vendor OUI is
+ * invented here.
+ */
+#define DWMAC_ALIF_LAA_B0 0x02
+#define DWMAC_ALIF_LAA_B1 0x01
+#define DWMAC_ALIF_LAA_B2 0x56
+
+BUILD_ASSERT(DT_INST_PROP(0, zephyr_random_mac_address) ||
+                 DT_INST_NODE_HAS_PROP(0, local_mac_address),
+             "eth_dwmac_alif: the ethernet node needs zephyr,random-mac-address "
+             "or a local-mac-address");
+
+#if !DT_INST_PROP(0, zephyr_random_mac_address)
 static const uint8_t dwmac_mac_addr[6] = DT_INST_PROP(0, local_mac_address);
+#endif
 
 int dwmac_platform_init(struct dwmac_priv *p)
 {
@@ -314,8 +346,15 @@ int dwmac_platform_init(struct dwmac_priv *p)
 		    DEVICE_DT_INST_GET(0), 0);
 	irq_enable(DT_INST_IRQN(0));
 
-	/* retrieve the MAC address from the DT local-mac-address property */
+	/* Station MAC: per-boot random locally-administered address by
+	 * default, DT local-mac-address when a provisioning overlay pins one
+	 * (see the source-selection comment above dwmac_mac_addr).
+	 */
+#if DT_INST_PROP(0, zephyr_random_mac_address)
+	gen_random_mac(p->mac_addr, DWMAC_ALIF_LAA_B0, DWMAC_ALIF_LAA_B1, DWMAC_ALIF_LAA_B2);
+#else
 	memcpy(p->mac_addr, dwmac_mac_addr, sizeof(p->mac_addr));
+#endif
 
 	return 0;
 }

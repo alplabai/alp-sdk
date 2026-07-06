@@ -1,0 +1,15 @@
+# Alp SDK block manifest: generic button + LED helper (blk_button_led).
+schema_version: 1
+block_id:       button_led
+display_name:   "Generic momentary button + indicator LED"
+kconfig:        ALP_SDK_BLOCK_BUTTON_LED
+interface:
+  - { signal: BTN, dir: input,  pull: up }
+  - { signal: LED, dir: output, rail: 3V3, max_ma: 10 }
+realizations:
+  - id:            discrete_generic
+    physical_form: discrete
+    visibility:    internal        # concrete button/LED MPN is carrier-specific; promote per reference design
+    parts: []                      # parts + footprints land with a chosen reference button/LED (do NOT invent an MPN)
+    passives:
+      - { role: series, value: 330R, net: LED, refdes_prefix: R }

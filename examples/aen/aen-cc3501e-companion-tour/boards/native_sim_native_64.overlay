@@ -1,0 +1,52 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Host-emulated stand-ins for aen-cc3501e-bringup under native_sim, so the
+ * example builds in CI (twister build_only) with no silicon.
+ *
+ *   - alp-spi1  -> an emulated SPI controller (no slave attached, so the
+ *                  transceive path runs but reads back 0x00; the build, not
+ *                  a live round-trip, is what this target proves).
+ *   - alp,pin-array -> the two SoM-internal CC3501E control nets, in the
+ *                  SAME order the app's CC3501E_PIN_* indices expect:
+ *                    [0] WIFI_EN  (Alif P15_5)
+ *                    [1] E_WIFI.NRST (Alif P15_1_FLEX)
+ *                  This bring-up app uses its own compact 2-pin control
+ *                  array (these nets are not E1M edge pads), not the 52-slot
+ *                  positional E1M map the portable IO examples use.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+    aliases {
+        alp-spi1 = &spi1_emul;
+    };
+
+    gpio_emul0: gpio_emul0 {
+        compatible = "zephyr,gpio-emul";
+        status = "okay";
+        gpio-controller;
+        rising-edge;
+        falling-edge;
+        #gpio-cells = <2>;
+        ngpios = <8>;
+    };
+
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio_emul0 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
+                <&gpio_emul0 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+    };
+
+    soc {
+        spi1_emul: spi@200 {
+            compatible = "zephyr,spi-emul-controller";
+            status = "okay";
+            reg = <0 0x200 4>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+        };
+    };
+};

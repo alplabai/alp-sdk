@@ -43,6 +43,7 @@
 #include "backends/tmu/tmu_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(tmu);
+ALP_BACKEND_ANCHOR(tmu);
 
 static const alp_tmu_ops_t *_cached_ops = NULL;
 

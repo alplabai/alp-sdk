@@ -7,6 +7,336 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added — Studio carrier-netlist handoff
+
+`scripts/alp_project.py --emit carrier-netlist` and `alp emit
+carrier-netlist` now produce a schema-versioned JSON handoff for Alp
+Studio: carrier-facing nets composed from board `e1m_routes:` + SoM
+`pad_routes:`, plus carrier BOM rows from board `populated:` and
+chip/block manifests.  The artifact is explicitly netlist/BOM only:
+SoM internals stay excluded and the SDK does not claim KiCad, Gerber,
+DRC, or PCB-layout output.
+
+### Added — xhci_core: arch-neutral host logic validated + driver wired
+
+`xhci_core.{c,h}` — pure-C, no-MMIO xHCI ring/context/init-sequence logic
+(spec §4/5/6) verified by a native_sim ztest suite (`tests/unit/xhci_core`,
+`alp.xhci_core.unit`, 3/3 PASS).  `uhc_xhci_alif.c` now calls
+`xhci_ring_init` (command ring) and `xhci_init_sequence` to build an
+op-reg image in RAM (`data->op_image`) via the host-validated path; the
+MMIO write-out (DCBAAP/CRCR/CONFIG copy from the image with volatile writes,
+then USBCMD.R/S at enable) is `TODO(aen401-bench)`.  The AEN401
+`usb-host-storage` build still links clean (FLASH 58 968 B,
+arm-zephyr-eabi 14.3.0).  All MMIO-dependent paths (DWC3 G\*-register
+soft-reset, CAPLENGTH read, HCRST/CNR poll, event ISR, transfer scheduling,
+enumeration) remain `TODO(aen401-bench)`.
+
+### Added — AEN401 (E4) USB host skeleton: board + driver + backend + example
+
+End-to-end USB host foundation for the E1M-AEN401 (Alif Ensemble E4, Cortex-M55).
+Compile-verified; live bring-up is bench-gated (`TODO(aen401-bench)` markers).
+
+- **`zephyr/boards/alp/e1m_aen401_m55_hp/`** — new Zephyr board for
+  `alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp`.  Mirrors the AEN801 M55-HP
+  structure (E1M-EVK console on UART5/P3_4-P3_5, MRAM flash controller,
+  MCUboot-compatible partition map).  Declares an `alif,xhci-uhc` USB host
+  controller node (`zephyr_uhc0` label) at `0x48200000` / IRQ 101 (grounded from
+  the Alif DFP `soc.h` for AE402FA0E5597).
+
+- **`zephyr/drivers/usb/uhc/uhc_xhci_alif.c`** — xHCI USB-2.0 host UHC driver
+  skeleton for the Alif Ensemble USB (DWC3-family).  Full `struct uhc_api` op table
+  (`lock` → `ep_dequeue`); xHCI capability register map from the xHCI spec §5.3;
+  DWC3 G\*-register host-mode init (GCTL @ 0xC110, PrtCapDir=host) + xHCI
+  command/event/transfer ring sequencing documented as `TODO(aen401-bench)` code
+  comments.  `CONFIG_UHC_XHCI_ALIF` Kconfig; binding at
+  `zephyr/dts/bindings/usb/alif,xhci-uhc.yaml`.
+
+- **`src/backends/usb/zephyr_drv.c`** — host-side ops (`z_host_open/enable/
+  disable/close`) wired to Zephyr's `usbh_init/enable/disable/shutdown` API
+  behind `CONFIG_USB_HOST_STACK && DT_HAS_COMPAT_STATUS_OKAY(alif_xhci_uhc)`.
+  Builds without either guard fall through to the existing NOSUPPORT stubs.
+
+- **`examples/peripheral-io/usb-host-storage/`** — USB mass-storage host example
+  using `alp_usb_host_open/enable/disable/close` (`<alp/usb.h>`).  Build-verified
+  for `alp_e1m_aen401_m55_hp`; map confirms the xHCI skeleton ops and the
+  `USBH_CONTROLLER_DEFINE` context are linked at the correct MRAM addresses.
+
+### Added — AEN601 (E6) board wrapper: real firmware unlock
+
+SDK Zephyr board for the E1M-AEN601 (Alif Ensemble E6, `AE612FA0E5597LS0`),
+mirroring the AEN401/AEN801 M55-HP baseline.  E6 silicon is already supported
+upstream (`soc/alif/ensemble/e6`, Zephyr v4.4.0), so this wrapper is the only
+missing piece; with it the module produces a real `zephyr.bin` (no upstream
+dependency).  Compile-verified (`samples/hello_world` links, 18 KB in MRAM);
+live bring-up is bench-gated (`TODO(aen601-bench)` in `board.cmake`).
+
+- **`zephyr/boards/alp/e1m_aen601_m55_hp/`** — new board
+  `alp_e1m_aen601_m55_hp/ae612fa0e5597ls0/rtss_hp`.  E1M-EVK console on
+  UART5 (P3_4/P3_5), on-die MRAM flash controller, MCUboot-compatible
+  5632 KiB partition map (identical layout to AEN401/AEN801).  Boot + console
+  only; on-module buses and USB are added once grounded + benched on E6.
+
+### Changed
+
+- **I2C/SPI target (slave) mode hardening** (`[ABI-EXPERIMENTAL]` surface, so
+  no compat shims):
+  - `alp_spi_target_transceive` now takes a trailing `timeout_ms`
+    (`UINT32_MAX` = wait forever, matching the SDK's other blocking calls).
+    Finite timeouts ride Zephyr's async SPI API and need `CONFIG_SPI_ASYNC`;
+    sync-only builds answer `ALP_ERR_NOSUPPORT` instead of silently blocking.
+    A timed-out transfer stays armed in the driver (no portable SPI-slave
+    cancel): the handle answers `ALP_ERR_BUSY` until it completes, and the
+    caller's buffers must stay valid until then.
+  - `alp_spi_target_close` now returns `alp_status_t` and refuses with
+    `ALP_ERR_BUSY` while a transceive is blocked in another thread (or a
+    timed-out transfer is still armed) — previously this was a use-after-free
+    window where close freed the backend sidecar under a live
+    `spi_transceive`.
+  - `rx_len` now reports **bytes** (per the documented contract) instead of
+    Zephyr frames when `bits_per_word` > 8.
+  - `alp_i2c_target_open` rejects the reserved 7-bit address ranges
+    0x00-0x07 / 0x78-0x7F with `ALP_ERR_INVAL` (contract was already
+    0x08..0x77); `alp_spi_target_open` validates `mode` (0..3) and
+    `bits_per_word` (<= 32) the same way.
+  - The SPI target Zephyr backend gets its **own sidecar pool** sized by
+    `CONFIG_ALP_SDK_MAX_SPI_TARGET_HANDLES` (it used to share — and could
+    starve — the controller-mode pool sized by
+    `CONFIG_ALP_SDK_MAX_SPI_HANDLES`).
+  - All I2C/SPI handle + sidecar pools claim slots with an atomic
+    compare-exchange (`src/common/alp_slot_claim.h`) instead of an unlocked
+    check-then-set, and `alp_init` uses the same builtin-atomic once-guard;
+    concurrent opens/closes can no longer double-claim a slot or double-free
+    a registration.  New ztests in `tests/zephyr/peripheral/src/{i2c,spi}_target.c`
+    pin the validation + degrade paths on native_sim.
+
+- **BREAKING: pin/instance macros renamed `E1M_*` -> `ALP_E1M_*` and
+  `E1M_X_*` -> `ALP_E1M_X_*`** (`<alp/e1m_pinout.h>`, `<alp/e1m_x_pinout.h>`).
+  The pinout id macros were the SDK's last unprefixed public symbols and could
+  collide with vendor BSP defines; they now carry the uniform `ALP_` namespace
+  (e.g. `ALP_E1M_I2C0`, `ALP_E1M_X_PWM0`, `ALP_E1M_ADC_COUNT`).  No compat
+  aliases are kept -- update callers by prefixing `ALP_`.  Board YAML
+  `e1m:`/`e1m_routes:`/`pad_routes:` metadata keeps the connector-namespace
+  `E1M_*`/`E1M_X_*` pad names; `scripts/gen_board_header.py` now prefixes
+  `ALP_` when emitting the C tokens.
+
+### Added
+
+- **Persistent backing store for the software `<alp/update_log.h>` tier**
+  (#262).  With `CONFIG_ALP_SDK_UPDATE_LOG_PERSIST` (default y when
+  `CONFIG_NVS` is enabled) and a board-provided `alp_ulog_partition` fixed
+  partition, the sw tier's keyed store **and** its monotonic counter live in
+  Zephyr NVS, so the tamper-evident audit chain survives reboot and firmware
+  update.  Boards without the partition (or with NVS off) keep the previous
+  RAM-store behaviour.  The log is append-only and never wraps: a full
+  partition makes `alp_update_log_append()` return `ALP_ERR_NOMEM` with the
+  existing chain intact (appends are free-space-gated up front so a
+  mid-transaction flash-full cannot leave an honest log looking rolled
+  back).  Assurance is unchanged — still `SW_TAMPER_EVIDENT`
+  (app-cooperative); the app-immutable `HW_ENFORCED` TF-M tier remains #111.
+  native_sim coverage: persist-across-reinit, persisted mutation/delete tamper
+  verdicts, full-log NOMEM-no-wrap, and RAM-fallback scenarios
+  (`alp.unit.update_log{,.persist}`).
+- **Trusted boot-metadata append contract for `<alp/update_log.h>`** (#263).
+  `alp_update_log_entry_from_boot_metadata()` and
+  `alp_update_log_append_boot()` add the app-facing path for entries whose
+  firmware version, image hash, and verification status come from an
+  authenticated boot-metadata provider rather than app-filled fields.  The
+  default provider returns `ALP_ERR_NOSUPPORT`; board integrations can override
+  the internal provider with MCUboot shared-data / Alif SE verification facts.
+  native_sim coverage proves app-supplied identity fields cannot override the
+  trusted provider on this path.
+- **Real Zephyr display backend** for `<alp/display.h>` (issue #23):
+  `src/backends/display/zephyr_drv.c` wraps the upstream Zephyr
+  `display_*` driver class (`display_write`/`display_clear`/
+  `display_blanking_on`/`_off`/`display_get_capabilities`/
+  `display_set_pixel_format`; ADR-0017 Tier 1) so any panel with an
+  upstream display driver resolves via the new `alp-display0..3` DT
+  aliases.  Registered `silicon_ref="*"` priority 50 behind
+  `CONFIG_ALP_SDK_DISPLAY_ZEPHYR_DRV` (default y with
+  `CONFIG_DISPLAY`); the priority-0 stub remains and boards without a
+  display node degrade cleanly (`ALP_ERR_NOT_READY` /
+  `ALP_ERR_NOT_IMPLEMENTED`).  Drivers without a clear op get a
+  chunked zero-fill software fallback; blit rects are bounds-checked
+  against the panel (`ALP_ERR_OUT_OF_RANGE`).  Covered by
+  `tests/zephyr/display/` on native_sim against the upstream dummy
+  display controller — code complete, **no silicon run yet**.  The
+  LVGL re-export path keeps owning the `zephyr,display` chosen node;
+  see the zephyr_drv.c header for the hand-off rules.
+- **I2C/SPI target (slave) mode** in `<alp/peripheral.h>` (`[ABI-EXPERIMENTAL]`):
+  `alp_i2c_target_open`/`alp_i2c_target_close` (byte-granular write/read/stop
+  ISR callbacks, dispatched to Zephyr's `i2c_target_register`) and
+  `alp_spi_target_open`/`alp_spi_target_transceive`/`alp_spi_target_close`
+  (transfer-based slave over `SPI_OP_MODE_SLAVE`).  Wired through the backend
+  registry with graceful `ALP_ERR_NOSUPPORT` degradation where the controller
+  driver (or native_sim emulation) lacks target support.  The
+  `examples/peripheral-io/{i2c,spi}-slave` examples now run against the real
+  API — their local `TODO(api-gap)` shims are gone.
+- **`alp_init()` / `alp_deinit()`** SDK-lifecycle entry points in
+  `<alp/peripheral.h>`: idempotent and currently thin, but applications SHOULD
+  call `alp_init()` before the first `alp_*_open` so future backends (bridge
+  links, vendor HAL bring-up) can rely on it.  Every
+  `examples/peripheral-io/*` example now calls it first.
+- **`k_msleep`/`k_sleep` scrub across `examples/**`**: every example source
+  whose only `<zephyr/kernel.h>` use was sleeping now calls the portable
+  `alp_delay_ms` and drops the Zephyr include; files using kernel APIs beyond
+  sleeping are untouched.
+- **`<alp/version.h>`** (`[ABI-STABLE]`): compile-time SDK version macros
+  (`ALP_VERSION_MAJOR/MINOR/PATCH`, `ALP_VERSION`, `ALP_VERSION_STRING`,
+  `ALP_VERSION_AT_LEAST(maj,min,pat)`), per-class `ALP_ABI_STATUS_*` tier
+  macros mirroring `docs/abi-markers.md`, and the runtime
+  `alp_version_string()` getter.  `scripts/bump_version.py` /
+  `scripts/check_version_doc_sync.py` keep the header, `pyproject.toml`, and
+  `metadata/sdk_version.yaml` in lockstep.
+- **SE-backed portable surfaces** (`[ABI-EXPERIMENTAL]` at function
+  granularity; Alif SE-service backends registered per silicon ref,
+  vendor `<se_service.h>` confined to `src/backends/**`):
+  `alp_soc_info_read()` + `alp_soc_secure_fw_ping()` in `<alp/hw_info.h>`
+  (SoC identity: secure-fw version, part number, die rev, lifecycle, unique
+  serial — `soc_ref` stamped from the build even where no runtime source
+  exists), `alp_power_profile_get()`/`alp_power_profile_set()` in
+  `<alp/power.h>` (RUN/STANDBY operating points; exact-match values, RMW
+  set), and `alp_mproc_boot_core()` in `<alp/mproc.h>` (portable peer-core
+  release).  Seven AEN examples converted off the vendor SE API;
+  `examples/aen/aen-se-service-info` stays as the sanctioned vendor
+  bring-up reference.
+- **`alp` CLI as the single front door**: new `alp build` / `alp run` /
+  `alp flash` / `alp emit` / `alp doctor` (host-environment preflight) /
+  `alp monitor` (serial console) verbs beside `init`/`validate`/`model`,
+  a Windows-native `scripts/bootstrap.ps1` companion to `bootstrap.sh`,
+  and the validator collapse onto one diagnostic-rich implementation.
+  Verb reference: [`docs/cli.md`](docs/cli.md).
+- **`alp new-som` scaffold verb** — the vendor-N+1 porting kit: generates
+  a schema-valid SoM preset (`metadata/e1m_modules/<SKU>.yaml`) and, when
+  the SoC has no spec yet, the `metadata/socs/<vendor>/<family>/<part>.json`
+  skeleton — every hardware-fact field an explicit `TBD`, values never
+  invented — then prints the numbered porting checklist.
+  [`docs/porting-new-som.md`](docs/porting-new-som.md) now opens
+  scaffold-first.
+- **Portable-API conformance suite** (`tests/zephyr/conformance/`): one
+  data-driven ztest suite (13 peripheral classes × 8 contract cases —
+  NULL/INVAL, close-NULL, double-close, capability shape, degrade paths)
+  every backend must pass; runs on `native_sim` in `pr-twister` as
+  `alp_sdk.conformance.portable_api` and gates new SoM ports (see the
+  "Conformance gate" section of `docs/porting-new-som.md`).
+- **Capability-layer adoption in examples**: `adc-voltmeter`,
+  `can-loopback` (`HW_CAN`), and `i2s-tone` (`HW_I2S`) now gate on
+  `alp_has()`/`ALP_HAS` instead of board-name `#if`s;
+  `docs/portability.md` §5.2 documents the "gate on capabilities, not
+  board names" pattern.
+- **SoM-preset schema tightened + multi-family pinmux**
+  (`metadata/schemas/som-preset-v1.schema.json`): `additionalProperties:
+  false` with one canonical shape for `memory` / `on_module` (incl.
+  `pmic_main`, `i2c_devices`) / `inference`; every preset normalised;
+  pinmux-capability generation goes multi-family with the new
+  `metadata/pinmux/v2n.yaml` beside `aen.yaml`, swept by
+  `scripts/validate_metadata.py` (which now also validates
+  `metadata/boards/`).
+- **CI drift gates for generated files**: `include/alp/cap.h` /
+  `src/cap.c` and the per-board routes headers are regenerated in CI and
+  diffed against the tree, so a metadata edit can no longer land without
+  its generated C.
+
+- **Acoustic safety-event example** (`examples/audio/acoustic-safety-events/`):
+  always-listening security/safety node — PDM mic → per-frame `acoustic_event`
+  DSP (8 FFT band energies, spectral centroid/flatness/rolloff, crest factor,
+  zero-crossing rate, RMS) → a deterministic 4-class event classifier
+  (AMBIENT/GLASS_BREAK/ALARM/SCREAM) + an `<alp/inference.h>` classifier with a
+  deterministic fallback. The core is host-unit-tested on `native_sim`
+  (`tests/unit/acoustic_event`); model is a stub with a training recipe in
+  `models/README.md`; HiL bench-gated.
+- **Wind-turbine acoustic anomaly example** (`examples/audio/acoustic-anomaly-wind-turbine/`):
+  nacelle acoustic condition monitor — PDM mic → DSP features (`acoustic_features`:
+  FFT band energies / spectral flatness / centroid / kurtosis + healthy-baseline
+  anomaly fallback) → rotor-order normalisation (`rotor_speed` tacho + tacholess RPM
+  → BPF; `bpf_modulation` Goertzel at blade-pass harmonics) → per-interval anomaly
+  score for drivetrain tonals + gross blade aero-anomalies. Three pure-C DSP cores
+  host-unit-tested on `native_sim` (`tests/unit/acoustic_features`,
+  `tests/unit/rotor_speed`, `tests/unit/bpf_modulation`); model is a stub with a
+  training recipe in `models/README.md`; HiL bench-gated.
+- **Cold-chain integrity example** (`examples/ai/cold-chain-monitor/`):
+  environmental edge AI — BME280 T/RH/P → sliding-window `cold_chain` metrics
+  (mean/min/max, temperature slope, **Mean Kinetic Temperature** per ICH/USP,
+  Magnus dewpoint, excursion minutes) → a deterministic 4-state classifier
+  (OK / TEMP_EXCURSION / MKT_EXCEEDED / CONDENSATION_RISK) + an
+  `<alp/inference.h>` anomaly score with a deterministic fallback. The core is
+  host-unit-tested on `native_sim` (`tests/unit/cold_chain`); model is a stub
+  with a training recipe in `models/README.md`; HiL bench-gated.
+- **Visual-defect detection example** (`examples/ai/visual-defect-detection/`):
+  camera-fed surface-anomaly inspection — an autoencoder reconstructs the
+  "normal" surface and high reconstruction error flags a defect (unsupervised, no
+  defect labels). `defect_map` downsamples the RGB565 frame to a 64x64 luma grid,
+  scores each of 64 tiles (reconstruction error, or a statistical mean/variance/
+  gradient fallback), and classifies into a worst-tile location, coverage %,
+  severity, and PASS/FAIL. Core host-unit-tested on `native_sim`
+  (`tests/unit/defect_map`); model is a stub with a recipe in `models/README.md`;
+  HiL bench-gated.
+- **Multimodal fusion PdM example** (`examples/ai/multimodal-fusion-pdm/`):
+  fuses vibration (ICM-42670) + current (INA236) + temperature (BME280) into one
+  motor-health verdict — `fusion_health` scores each modality vs a healthy
+  baseline, counts cross-modal corroboration, and maps the pattern to a fault
+  hypothesis (HEALTHY / BEARING_WEAR / ELECTRICAL_FAULT / MECHANICAL_OVERLOAD /
+  UNCORROBORATED) with a confidence-weighted health score — plus an
+  `<alp/inference.h>` fused model with the deterministic rule as fallback. Core
+  host-unit-tested on `native_sim` (`tests/unit/fusion_health`); model is a stub
+  with a recipe in `models/README.md`; HiL bench-gated.
+- **DC motor current-signature example** (`examples/ai/motor-current-signature/`):
+  electrical-modality PdM — INA236 current/voltage/power → windowed
+  `current_features` (mean/ripple-RMS/crest/slope/power + dominant ripple
+  frequency) → a deterministic 5-state classifier (OFF/NORMAL/INRUSH/OVERLOAD/
+  STALL; the ripple magnitude separates a stalled rotor from a turning overload)
+  + an `<alp/inference.h>` anomaly score with a deterministic fallback. The core
+  is host-unit-tested on `native_sim` (`tests/unit/current_features`); model is a
+  stub with a training recipe in `models/README.md`; HiL bench-gated.
+- **Wearable activity + fall example** (`examples/ai/wearable-activity-fall/`):
+  body-worn IMU edge node — ICM-42670 accel+gyro → windowed motion features
+  (`motion_features`: per-axis/magnitude RMS, SMA, step cadence via FFT, jerk,
+  tilt + a deterministic idle/walk/run fallback) → activity classifier via
+  `<alp/inference.h>`, plus a rule-based 3-phase fall detector (`fall_detect`:
+  free-fall → impact → post-impact stillness). Two pure-C cores host-unit-tested
+  on `native_sim` (`tests/unit/motion_features`, `tests/unit/fall_detect`); model
+  is a stub with a training recipe in `models/README.md`; HiL bench-gated.
+- **Rail predictive-maintenance example** (`examples/ai/rail-predictive-maintenance/`):
+  train-mounted rail-condition survey — ICM-42670 vibration → DSP feature
+  extraction (`rail_features`: RMS/crest/kurtosis/FFT band energies/dominant
+  frequency/rail wavelength) → AI classifier via `<alp/inference.h>` with a
+  deterministic fallback → geotagged to GNSS lat/lon + haversine chainage
+  (`rail_position`) → one CSV record per 25 m segment. The two pure-C DSP cores
+  are host-unit-tested on `native_sim` (`tests/unit/rail_features`,
+  `tests/unit/rail_position`); HiL bench-gated.
+- **`alp_dac_capabilities()`** (`<alp/dac.h>`): additive capabilities getter for
+  opened DAC handles — DAC was the only opened-handle class without one.  Same
+  signature/doc/lifetime contract as `alp_adc_capabilities()`; the dispatcher
+  returns the caps the backend populated at open time.
+
+### Changed — analog + WDT API consistency (pre-1.0 breaking)
+
+- **`alp_wdt_open(const alp_wdt_config_t *)`**: the watchdog instance id moved
+  into the config struct as `wdt_id` (matching the `bus_id` / `channel_id` /
+  `counter_id` convention of every other config-taking open).  All in-tree
+  callers (examples, tests, stub backend, HiL specs) migrated; there is no
+  two-argument compatibility shim.
+- **`alp_adc_stream_read` → `alp_adc_stream_read_mv`** and
+  **`alp_adc_filter_read` → `alp_adc_filter_read_mv`**: every ADC read entry
+  point now carries its unit suffix (`_raw` / `_uv` / `_mv` / `_bins`).
+  Parameter lists and wire formats are unchanged — the one-shot path stays
+  `int32_t` µV, the stream path stays `uint16_t` mV, the DSP filter path stays
+  `int16_t` mV.  A new "Units" block in `<alp/adc.h>` documents the µV/mV split
+  and the conversion between the scales.
+- **Channel-id docs unified on E1M symbols**: `<alp/adc.h>` and `<alp/pwm.h>`
+  now document `channel_id` as `E1M_ADC0..ADC7` / `E1M_PWM0..PWM7` (bounds
+  `E1M_ADC_COUNT` / `E1M_PWM_COUNT` from `<alp/e1m_pinout.h>`), matching the
+  `E1M_DAC0` / `E1M_DAC_COUNT` convention `<alp/dac.h>` already used.
+
+### Fixed
+
+- **`alif_flash --mram-xip` no longer silently flashes a stale slot0.**  The
+  SE-UART-only `alif_flash` runner burns only the signed ATOC (`app-write-mram
+  -p`); a slot0-XIP app is *not* embedded in that ATOC, so the runner left the
+  app blob at MRAM `0x80010000` blank/stale and the SE booted a garbage image.
+  Writing the raw slot0 app blob needs the J-Link Alif MRAM loader, which this
+  runner does not drive — `--mram-xip` now fails fast and points at the two-blob
+  bench Flow D helper (`scripts/bench/aen/flash-jlink-mramxip.sh`).
+
 ## [v0.8.1] - 2026-06-24
 
 ### Fixed — documentation: current-state silicon-validation accuracy (post-v0.8.0)
@@ -201,6 +531,67 @@ boards (FIB `v0.0.207`).
   `cc3501e_hw_ble_enable`, bridge re-sync before enable, `BleIf_EnableBLE`
   retry) and verified not to regress the clean-boot enable + scan.  Tracked in
   `ti/WIFI_BLE_INTEGRATION.md`.  (#250, #233)
+
+### Added — cc3501e-bridge: OTA-over-bridge, Wi-Fi/BLE protocol layers, POWER_POLICY (retroactive correction)
+
+> **Correction (2026-07-02):** the entries below shipped in the v0.8.0
+> cycle (PRs #232, #234 and the v0.2/v0.3 protocol-layer commits, all
+> merged before the 2026-06-24 tag) but were missing when v0.8.0 was
+> tagged — the notes then still framed the firmware as the v0.1
+> META-only bring-up.  Recorded retroactively; nothing below is new in
+> a later release.  (#247)
+
+- **OTA over the bridge (PR #232).**  The host streams a signed GPE-format
+  vendor image into the CC3501E's non-primary vendor slot via PSA-FWU:
+  new wire opcodes `ALP_CC3501E_CMD_OTA_BEGIN..OTA_STATUS` (`0x40..0x44`)
+  with sequential-cursor `WRITE` chunks (`1..ALP_CC3501E_OTA_MAX_CHUNK`),
+  host helpers `cc3501e_ota_update()` + granular
+  `cc3501e_ota_begin/_write/_finish/_abort/_status()`, a RAM-stage +
+  flash-window recovery fix for reliable streaming, and the reproducible
+  production packaging recipe (HSM-signed full image,
+  `docs/cc3501e-production.md`).  Silicon-validated through
+  install/STAGED; the final cold swap-boot needs a correctly-activated
+  (cold-bootable) unit.
+- **Wi-Fi v0.2 protocol layer** — `WIFI_SCAN` / `CONNECT_STA` / `AP` /
+  `GET_RSSI` / `GET_IP` opcode handlers in the firmware parser, with
+  `SCAN` + `RSSI` worker-routed off the SPI ISR on the `ti` backend
+  (scan and async STA connect are the silicon-validated subset — see
+  the section above).
+- **BLE v0.3 protocol layer** — GAP advertise / scan / connect + GATT
+  register/notify/read/write opcode handlers, and the NimBLE
+  enable + advertise path linked into (and fitting) the vendor image
+  (NimBLE enable + scan are the silicon-validated subset).
+- **POWER_POLICY applied for real (PR #234).**  `ALP_CC3501E_CMD_POWER_POLICY`
+  is now applied through the CC35xx power driver on the firmware side,
+  with the `cc3501e_power_policy()` host helper — alongside the
+  `aen-cc3501e-gpio` GPIO-proxy + camera-enable example and the
+  warm-boot bench-validation harness recorded above.
+
+### Added — security: SE-CryptoCell hardware-crypto backend, default ON on E8 (retroactive correction)
+
+> **Correction (2026-07-02):** shipped in the v0.8.0 cycle (PRs #208 /
+> #229 / #230, merged 2026-06-18/19, before the tag) but missing from
+> these notes — and a **default-on crypto rerouting** belongs in the
+> release notes.  Recorded retroactively.  (#247)
+
+- The `<alp/security.h>` hash / AEAD / random surface on the Alif
+  Ensemble E8 now routes **by default** into the Secure Enclave's
+  CryptoCell (`src/backends/security/se_cryptocell.c`) instead of
+  MbedTLS-PSA on the M55: the backend registers at
+  `silicon_ref="alif:ensemble:e8"` priority 110, one step ahead of the
+  `"*"` priority-100 PSA backend.  Compute travels over the existing
+  RTSS-HE ↔ SE MHUv2 mailbox via a thin public
+  `se_service_send_request()` added to hal_alif as west-patch
+  `zephyr/patches/hal_alif/0002-…` (the SE-CryptoCell host library is
+  proprietary and is NOT vendored; only wire facts from the Apache-2.0
+  hal_alif headers are used).  (#208, #229)
+- `CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM` flipped default
+  n → **y** after bench validation on real E8 silicon (`aen-se-crypto`:
+  SHA-256 NIST FIPS 180-4 known-answer MATCH, AES-128-GCM round-trip
+  MATCH, TRNG OK).  Algorithms the SE declines (SHA-384/512, an
+  over-ceiling single-shot input) still return `ALP_ERR_NOSUPPORT`
+  and fall through to the MbedTLS-PSA backend, so nothing loses
+  coverage.  (#230)
 
 ### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
 

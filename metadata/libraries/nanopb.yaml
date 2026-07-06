@@ -1,0 +1,30 @@
+# nanopb -- small-footprint Protocol Buffers (ADR 0018 library manifest).
+#
+# Serialization for cloud/IPC customers; already pulled in unconditionally by
+# the SDK's mproc IPC framing, this manifest makes it a first-class
+# `libraries: [nanopb]` selection for application code.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * west module `nanopb`, path modules/lib/nanopb,
+#     west.yml revision 5499fd4c9a478f8139eeb07a82c3b4468d6067f7
+#   * enable symbol CONFIG_NANOPB
+#     ($ZEPHYR_BASE/modules/nanopb/Kconfig: `menuconfig NANOPB`)
+#   * upstream version 0.4.9.1
+#     (modules/lib/nanopb/CHANGELOG.txt:1 "nanopb-0.4.9.1 (2024-12-01)")
+#   * licence Zlib  (modules/lib/nanopb/LICENSE.txt -- the zlib licence text,
+#     "This software is provided 'as-is', without any express or implied
+#     warranty...")
+#
+# No `requires:` -- pure-C, no capability/core/RAM floor of note.
+schema_version: 1
+name: nanopb
+description: "nanopb -- small-code-size Protocol Buffers (protobuf) encoder/decoder."
+tier: A
+version: "0.4.9.1"
+license: Zlib
+
+integration:
+  zephyr:
+    module: nanopb
+    kconfig:
+      - CONFIG_NANOPB=y

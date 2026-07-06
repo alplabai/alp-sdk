@@ -21,6 +21,89 @@ audio:
   bitdepth_max:   24
   features:       [stereo, mic_input, line_output, headphone_amp]
 
+signals:
+  - { name: MICBIAS,       type: analog, scope: "microphone bias output" }
+  - { name: LINPUT3_JD2,   type: analog, scope: "left line input 3 / positive differential MIC input / jack-detect input" }
+  - { name: LINPUT2,       type: analog, scope: "left channel line input / positive differential MIC input" }
+  - { name: LINPUT1,       type: analog, scope: "left channel single-ended MIC input / negative differential MIC input" }
+  - { name: RINPUT1,       type: analog, scope: "right channel single-ended MIC input / negative differential MIC input" }
+  - { name: RINPUT2,       type: analog, scope: "right channel line input / positive differential MIC input" }
+  - { name: RINPUT3_JD3,   type: analog, scope: "right line input 3 / positive differential MIC input / jack-detect input" }
+  - { name: DCVDD,         type: power,  scope: "digital core supply" }
+  - { name: DGND,          type: ground, scope: "digital ground; return path for DCVDD + DBVDD" }
+  - { name: DBVDD,         type: power,  scope: "digital buffer (I/O) supply" }
+  - { name: MCLK,          type: input,  scope: "master clock" }
+  - { name: BCLK,          type: bidir,  scope: "audio interface bit clock" }
+  - { name: DACLRC,        type: bidir,  scope: "audio interface DAC left/right clock" }
+  - { name: DACDAT,        type: input,  scope: "DAC digital audio data" }
+  - { name: ADCLRC_GPIO1,  type: bidir,  scope: "audio interface ADC left/right clock, or GPIO1" }
+  - { name: ADCDAT,        type: output, scope: "ADC digital audio data" }
+  - { name: SCLK,          type: input,  scope: "control interface clock input" }
+  - { name: SDIN,          type: bidir,  scope: "control interface data input / 2-wire acknowledge output" }
+  - { name: SPK_RN,        type: analog, scope: "right speaker negative output" }
+  - { name: SPKGND2,       type: ground, scope: "ground for speaker drivers 2" }
+  - { name: SPKVDD2,       type: power,  scope: "supply for speaker drivers 2" }
+  - { name: SPK_RP,        type: analog, scope: "right speaker positive output" }
+  - { name: SPK_LN,        type: analog, scope: "left speaker negative output" }
+  - { name: SPKGND1,       type: ground, scope: "ground for speaker drivers 1" }
+  - { name: SPK_LP,        type: analog, scope: "left speaker positive output" }
+  - { name: SPKVDD1,       type: power,  scope: "supply for speaker drivers 1" }
+  - { name: VMID,          type: analog, scope: "midrail voltage decoupling-capacitor node" }
+  - { name: AGND,          type: ground, scope: "analog ground; return path for AVDD" }
+  - { name: HP_R,          type: analog, scope: "right output (line or headphone)" }
+  - { name: OUT3,          type: analog, scope: "mono / left / right / buffered-midrail output for capless mode" }
+  - { name: HP_L,          type: analog, scope: "left output (line or headphone)" }
+
+physical:
+  # Pins per Wolfson/Cirrus WM8960 datasheet Rev 4.2 (Aug 2013),
+  # "PIN CONFIGURATION" + "PIN DESCRIPTION" (32-lead QFN, 5 x 5 x
+  # 0.9mm). All 32 leads plus the exposed die-attach ground paddle
+  # (pad 33) are populated -- no pin is datasheet-labelled NC. Pad 33
+  # is mapped to AGND per the datasheet note: "It is recommended that
+  # the QFN ground paddle should be connected to analogue ground on
+  # the application PCB."
+  refdes_prefix: U
+  package:              "32-lead QFN"
+  footprint:             qfn_32
+  dimension_mm:          "5 x 5 x 0.9"
+  operating_temp_deg_c:  "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "1",  signal: "MICBIAS" }
+    - { pad: "2",  signal: "LINPUT3_JD2" }
+    - { pad: "3",  signal: "LINPUT2" }
+    - { pad: "4",  signal: "LINPUT1" }
+    - { pad: "5",  signal: "RINPUT1" }
+    - { pad: "6",  signal: "RINPUT2" }
+    - { pad: "7",  signal: "RINPUT3_JD3" }
+    - { pad: "8",  signal: "DCVDD" }
+    - { pad: "9",  signal: "DGND" }
+    - { pad: "10", signal: "DBVDD" }
+    - { pad: "11", signal: "MCLK" }
+    - { pad: "12", signal: "BCLK" }
+    - { pad: "13", signal: "DACLRC" }
+    - { pad: "14", signal: "DACDAT" }
+    - { pad: "15", signal: "ADCLRC_GPIO1" }
+    - { pad: "16", signal: "ADCDAT" }
+    - { pad: "17", signal: "SCLK" }
+    - { pad: "18", signal: "SDIN" }
+    - { pad: "19", signal: "SPK_RN" }
+    - { pad: "20", signal: "SPKGND2" }
+    - { pad: "21", signal: "SPKVDD2" }
+    - { pad: "22", signal: "SPK_RP" }
+    - { pad: "23", signal: "SPK_LN" }
+    - { pad: "24", signal: "SPKGND1" }
+    - { pad: "25", signal: "SPK_LP" }
+    - { pad: "26", signal: "SPKVDD1" }
+    - { pad: "27", signal: "VMID" }
+    - { pad: "28", signal: "AGND" }
+    - { pad: "29", signal: "HP_R" }
+    - { pad: "30", signal: "OUT3" }
+    - { pad: "31", signal: "HP_L" }
+    - { pad: "32", signal: "AVDD" }
+    - { pad: "33", signal: "AGND" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_WM8960
   baremetal:      ALP_SDK_CHIP_WM8960
@@ -29,6 +112,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested

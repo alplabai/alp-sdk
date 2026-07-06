@@ -18,8 +18,13 @@ display_name: "E1M-NX9101 (NXP i.MX 93 -- exact SKU TBD)"
 
 on_module:
   silicon:              nxp:imx9:imx93         # 2x Cortex-A55 + Cortex-M33 + Ethos-U65
-  wifi_ble:             TBD                    # one of Murata Type 2DL/2EL/2KL/2LL per BOM
-  pmic:                 pca9451a               # NXP PCA9451A
+  # One of the catalogued Murata NXP-paired modules per final BOM:
+  # murata_lbee5pl2dl (Type 2DL / IW611),
+  # murata_lbes5pl2el (Type 2EL / IW612),
+  # murata_lbee0zz2kl (Type 2KL / IW610F), or
+  # murata_lbes0zz2ll (Type 2LL / IW610G).
+  wifi_ble:             TBD
+  pmic_main:            pca9451a               # NXP PCA9451A (canonical key -- matches V2N's pmic_main)
   ethernet_phy:         TBD                    # variant of RTL or NXP PHY per BOM
 
 memory:
@@ -29,6 +34,12 @@ memory:
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u65                    # i.MX 93 ships Ethos-U65
+  npu_population:
+    # Single Ethos-U65 instance -- the count is authoritative from
+    # metadata/socs/nxp/imx9/imx93.json (`capabilities.ethos_u65_count: 1`).
+    # NXP's role label + host-core pairing are not yet in-repo-authoritative
+    # (pending the IMX93RM ingestion / HW-config writeup) -> TBD, never invented.
+    - { variant: u65, role: TBD, paired_with: TBD }
 
 capabilities:
   optiga_trust_m:       true       # Populated on the E1M-NX9101 module.
@@ -74,6 +85,12 @@ default_hw_rev:         r1                  # see metadata/e1m_modules/<family>/
 
 default_board:        E1M-EVK                # 35x35 board same as AEN family
 
+# Machine-visible placeholder marker (issue #43): `preliminary: true`
+# is the som-preset-v1 schema's canonical flag for "do not treat this
+# preset as a released, canonical MPN" -- here it covers BOTH the
+# preliminary BOM AND the fact that the E1M-NX9101 SKU string itself
+# is a placeholder (see the file header).  Tooling that needs "is this
+# a shipping SoM?" must key off this flag, never off the SKU string.
 status:
-  preliminary:          true                   # production SKU + BOM choices TBD
+  preliminary:          true                   # placeholder MPN + production BOM choices TBD
   partial_hw_config:    true

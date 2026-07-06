@@ -8,8 +8,9 @@ prints a PASS/FAIL/SKIP table.
 
 Probed devices (addresses per `metadata/e1m_modules/E1M-V2N101.yaml`):
 DA9292 (0x1E), ACT88760 (0x25+0x26), OPTIGA Trust M (0x30), TMP112
-(0x40 per metadata -- the example also tries the datasheet 0x48..0x4B
-range and reports the discrepancy), TPS628640 (0x4D, assembly
+(0x48 per metadata since the issue-#41 fix, still bench-unverified --
+the example probes the old 0x40 plus the full datasheet 0x48..0x4B
+range and reports where it ACKs), TPS628640 (0x4D, assembly
 option -> SKIP when absent), RV-3028-C7 (0x52), 5L35023B (0x68), and
 the GD32G553 supervisor over its I2C bridge transport (0x70).
 

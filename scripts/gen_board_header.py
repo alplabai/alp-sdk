@@ -5,10 +5,12 @@ Generate include/alp/boards/alp_<board>_routes.h from each
 metadata/boards/<name>.yaml `e1m_routes:` block.
 
 The generated header mirrors the YAML `e1m_routes:` block into plain
-`#define EVK_* E1M_*` lines so hand-written firmware can keep using
+`#define EVK_* ALP_E1M_*` lines so hand-written firmware can keep using
 the established board macros (EVK_PIN_BMI323_INT1, EVK_I2C_BUS_SENSORS,
 EVK_PWM_LED_RED, ...) while the YAML stays the single editable source
-of truth.  Idempotent: running twice produces byte-identical output.
+of truth.  The YAML carries the connector-namespace pad names
+(`E1M_...` / `E1M_X_...`); the generator prefixes `ALP_` when emitting
+the C token.  Idempotent: running twice produces byte-identical output.
 
 The remaining sections of `include/alp/boards/alp_<board>.h`
 (mux enums, INA236 tuning constants, overlay-pad indices, on-board
@@ -44,15 +46,21 @@ OUT_DIR = REPO / "include" / "alp" / "boards"
 
 
 _SECTIONS: list[tuple[str, str]] = [
-    ("gpio",  "GPIO routes (E1M_GPIO_IO<N> -> board-side feature)"),
-    ("buses", "Bus assignments (E1M_I2C / I3C / SPI / UART -> board role)"),
-    ("pwm",   "PWM channels (E1M_PWM<N> -> board-side feature)"),
-    ("adc",   "ADC channels (E1M_ADC<N> -> board-side signal)"),
-    ("dac",   "DAC channels (E1M_DAC<N> -> board-side signal)"),
-    ("i2s",   "I2S instances (E1M_I2S<N> -> board-side codec / mic role)"),
-    ("can",   "CAN buses (E1M_CAN<N> -> board-side bus role)"),
-    ("qenc",  "Quadrature encoder channels (E1M_ENC<N> -> board-side encoder)"),
+    ("gpio",  "GPIO routes (ALP_E1M_GPIO_IO<N> -> board-side feature)"),
+    ("buses", "Bus assignments (ALP_E1M_I2C / I3C / SPI / UART -> board role)"),
+    ("pwm",   "PWM channels (ALP_E1M_PWM<N> -> board-side feature)"),
+    ("adc",   "ADC channels (ALP_E1M_ADC<N> -> board-side signal)"),
+    ("dac",   "DAC channels (ALP_E1M_DAC<N> -> board-side signal)"),
+    ("i2s",   "I2S instances (ALP_E1M_I2S<N> -> board-side codec / mic role)"),
+    ("can",   "CAN buses (ALP_E1M_CAN<N> -> board-side bus role)"),
+    ("qenc",  "Quadrature encoder channels (ALP_E1M_ENC<N> -> board-side encoder)"),
 ]
+
+
+def _c_token(e1m: str) -> str:
+    """YAML `e1m:` pad name (connector namespace, `E1M_...`) -> the C
+    macro token the pinout headers define (`ALP_E1M_...`)."""
+    return f"ALP_{e1m}"
 
 
 def _board_slug(name: str) -> str:
@@ -66,7 +74,7 @@ def _pinout_include(routes: dict[str, Any]) -> str:
     E1M (35x35) and E1M-X (45x65) are deliberately separate pinout
     namespaces (`<alp/e1m_pinout.h>` vs `<alp/e1m_x_pinout.h>`); a
     board's routes live entirely in one.  Detect E1M-X by the
-    `E1M_X_` macro prefix so the generated header includes the
+    `E1M_X_` pad-name prefix so the generated header includes the
     matching pad definitions.
     """
     for entries in routes.values():
@@ -128,12 +136,12 @@ def _emit_section(title: str, entries: list[dict[str, Any]]) -> list[str]:
     widest = max(len(e["macro"]) for e in entries)
     for entry in entries:
         macro = entry["macro"]
-        e1m = entry["e1m"]
+        token = _c_token(entry["e1m"])
         doc = _build_doc(entry)
         if doc:
-            out.append(f"#define {macro:<{widest}} {e1m}  /**< {doc} */")
+            out.append(f"#define {macro:<{widest}} {token}  /**< {doc} */")
         else:
-            out.append(f"#define {macro:<{widest}} {e1m}")
+            out.append(f"#define {macro:<{widest}} {token}")
     out.append("")
     return out
 
@@ -159,7 +167,7 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
         " * regenerate after changing the YAML.",
         " *",
         " * Mirrors the board YAML's `e1m_routes:` block into plain",
-        " * `#define EVK_<NAME> E1M_<...>` lines so hand-written firmware",
+        " * `#define EVK_<NAME> ALP_E1M_<...>` lines so hand-written firmware",
         " * can keep using the board-named macros while the YAML stays",
         " * the single editable source of truth.",
         " *",

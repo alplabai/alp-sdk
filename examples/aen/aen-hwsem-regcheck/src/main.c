@@ -14,9 +14,9 @@
  * Take then give HWSEM instance 0 through the driver's take/give API and confirm
  * the latch's REL count tracks the operations on silicon, two independent ways:
  *
- *   1. in-firmware:  this app reads the count, takes the latch (count -> 1),
- *      re-takes to show the latch is now owned (count stays nonzero), gives it
- *      back (count -> 0), and prints every API return code + a single
+ *   1. in-firmware:  this app reads the baseline count (free latch -> 0), takes
+ *      the latch once (count -> nonzero), gives it back (count -> 0), and prints
+ *      every API return code + a single
  *      'RESULT PASS:' / 'RESULT FAIL:' line.
  *   2. over J-Link:  the human reads the HWSEM REL register with mem32
  *      (0x4902E004 = base 0x4902E000 + REL 0x04, see the overlay) across the

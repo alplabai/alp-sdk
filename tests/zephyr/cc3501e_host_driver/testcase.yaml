@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Native-sim unit tests for the CC3501E companion host wrappers
+# (chips/cc3501e/cc3501e.c: Wi-Fi / BLE / socket / GPIO-proxy / power /
+# diagnostics), driven against a software model of the firmware SPI slave.
+# Sibling of cc3501e_host_ota (the OTA wrappers).  Lives under tests/zephyr/
+# (not tests/unit/) so the pr-twister gate actually runs it -- tests/unit/
+# is not yet in any twister root (issue #90).
+
+tests:
+  alp_sdk.cc3501e.host_driver:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - cc3501e
+      - wifi
+      - ble
+      - sockets

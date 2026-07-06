@@ -78,14 +78,14 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg);
 /**
  * @brief Get geometry + total size for the device.
  *
- * @param[in]  s     Handle from @ref alp_storage_open.
- * @param[out] info  Receives total_bytes / block_size / erase_size.
- *                   Must be non-NULL.
+ * @param[in]  storage  Handle from @ref alp_storage_open.
+ * @param[out] info     Receives total_bytes / block_size / erase_size.
+ *                      Must be non-NULL.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
-alp_status_t alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);
+alp_status_t alp_storage_get_info(alp_storage_t *storage, alp_storage_info_t *info);
 
 /**
  * @brief Read @p len bytes starting at @p offset into @p data.
@@ -94,17 +94,17 @@ alp_status_t alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info);
  * that read-modify-write internally; for raw flash, callers should
  * align both to the device's block_size.
  *
- * @param[in]  s       Handle from @ref alp_storage_open.
- * @param[in]  offset  Byte offset from device start.
- * @param[out] data    Destination buffer.  Must be non-NULL when
- *                     @p len > 0.
- * @param[in]  len     Number of bytes to read.
+ * @param[in]  storage  Handle from @ref alp_storage_open.
+ * @param[in]  offset   Byte offset from device start.
+ * @param[out] data     Destination buffer.  Must be non-NULL when
+ *                      @p len > 0.
+ * @param[in]  len      Number of bytes to read.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_OUT_OF_RANGE (offset + len past device end) /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
-alp_status_t alp_storage_read(alp_storage_t *s, uint64_t offset, void *data, size_t len);
+alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t offset, void *data, size_t len);
 
 /**
  * @brief Write @p len bytes from @p data starting at @p offset.
@@ -114,18 +114,19 @@ alp_status_t alp_storage_read(alp_storage_t *s, uint64_t offset, void *data, siz
  * doesn't care about the underlying medium can ignore the
  * write-after-erase rule.
  *
- * @param[in] s       Handle from @ref alp_storage_open.
- * @param[in] offset  Byte offset from device start.
- * @param[in] data    Source buffer.  Must be non-NULL when
- *                    @p len > 0.
- * @param[in] len     Number of bytes to write.
+ * @param[in] storage  Handle from @ref alp_storage_open.
+ * @param[in] offset   Byte offset from device start.
+ * @param[in] data     Source buffer.  Must be non-NULL when
+ *                     @p len > 0.
+ * @param[in] len      Number of bytes to write.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (handle is
  *         read_only or device not present) / ALP_ERR_OUT_OF_RANGE
  *         (offset + len past device end) / ALP_ERR_NOSUPPORT /
  *         ALP_ERR_IO.
  */
-alp_status_t alp_storage_write(alp_storage_t *s, uint64_t offset, const void *data, size_t len);
+alp_status_t
+alp_storage_write(alp_storage_t *storage, uint64_t offset, const void *data, size_t len);
 
 /**
  * @brief Erase the region [@p offset, @p offset + @p len).
@@ -134,15 +135,15 @@ alp_status_t alp_storage_write(alp_storage_t *s, uint64_t offset, const void *da
  * @ref alp_storage_get_info); misaligned bounds reject with
  * ALP_ERR_INVAL rather than partially erasing.
  *
- * @param[in] s       Handle from @ref alp_storage_open.
- * @param[in] offset  Byte offset from device start; @c erase_size-aligned.
- * @param[in] len     Region length; @c erase_size-aligned.
+ * @param[in] storage  Handle from @ref alp_storage_open.
+ * @param[in] offset   Byte offset from device start; @c erase_size-aligned.
+ * @param[in] len      Region length; @c erase_size-aligned.
  *
  * @return ALP_OK / ALP_ERR_INVAL (alignment or read_only) /
  *         ALP_ERR_NOT_READY / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
-alp_status_t alp_storage_erase(alp_storage_t *s, uint64_t offset, uint64_t len);
+alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t offset, uint64_t len);
 
 /**
  * @brief Flush any backend-side write cache to media.
@@ -150,29 +151,29 @@ alp_status_t alp_storage_erase(alp_storage_t *s, uint64_t offset, uint64_t len);
  * Implicit on @ref alp_storage_close; callers needing
  * "write-then-power-off" durability should sync first.
  *
- * @param[in] s  Handle from @ref alp_storage_open.
+ * @param[in] storage  Handle from @ref alp_storage_open.
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT /
  *         ALP_ERR_IO.
  */
-alp_status_t alp_storage_sync(alp_storage_t *s);
+alp_status_t alp_storage_sync(alp_storage_t *storage);
 
 /**
  * @brief Release the handle.  Implicitly syncs.
  *
- * NULL is a no-op.  After this call @p s is invalid.
+ * NULL is a no-op.  After this call @p storage is invalid.
  *
- * @param[in] s  Handle from @ref alp_storage_open, or NULL.
+ * @param[in] storage  Handle from @ref alp_storage_open, or NULL.
  */
-void alp_storage_close(alp_storage_t *s);
+void alp_storage_close(alp_storage_t *storage);
 
 /**
  * @brief Query the capabilities of an opened storage handle.
  *
- * @param s  Handle from @ref alp_storage_open, or NULL.
- * @return Pointer valid for the handle's lifetime; NULL if @p s is NULL.
+ * @param storage  Handle from @ref alp_storage_open, or NULL.
+ * @return Pointer valid for the handle's lifetime; NULL if @p storage is NULL.
  */
-const alp_capabilities_t *alp_storage_capabilities(const alp_storage_t *s);
+const alp_capabilities_t *alp_storage_capabilities(const alp_storage_t *storage);
 
 /* ================================================================== */
 /* Inline AES (on-the-fly XIP encryption / decryption)                 */

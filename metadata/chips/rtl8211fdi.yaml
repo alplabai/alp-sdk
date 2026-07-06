@@ -37,6 +37,25 @@ signals:
   - { name: MDIO,     type: bidir,        v2n_route: "J29 / P29 (ET0 / ET1)" }
   - { name: PHY_INTR, type: open_drain,   v2n_route: "M27 / T29 (ET0 / ET1)",
       notes: "active-low; goes high-impedance when no event pending" }
+  - { name: RESET,    type: input,        notes: "PHYRSTB, active-low, must be held >=10ms" }
+  - { name: MDI0,     type: analog,       notes: "MDIP0/MDIN0 -- 1000Base-T pair A / 10-100 TX pair" }
+  - { name: MDI1,     type: analog,       notes: "MDIP1/MDIN1 -- 1000Base-T pair B / 10-100 RX pair" }
+  - { name: MDI2,     type: analog,       notes: "MDIP2/MDIN2 -- 1000Base-T pair C" }
+  - { name: MDI3,     type: analog,       notes: "MDIP3/MDIN3 -- 1000Base-T pair D" }
+  - { name: XTAL_IN,  type: input,        notes: "25MHz crystal input; tie to GND if driven by an external oscillator" }
+  - { name: XTAL_OUT, type: output,       notes: "25MHz crystal output" }
+  - { name: TXC,      type: input,        notes: "RGMII transmit reference clock" }
+  - { name: TXD0,     type: input,        notes: "RGMII transmit data bit 0" }
+  - { name: TXD1,     type: input,        notes: "RGMII transmit data bit 1" }
+  - { name: TXD2,     type: input,        notes: "RGMII transmit data bit 2" }
+  - { name: TXD3,     type: input,        notes: "RGMII transmit data bit 3" }
+  - { name: TXCTL,    type: input,        notes: "RGMII transmit control (TXEN/TXCTL)" }
+  - { name: RXC,      type: output,       notes: "RGMII receive reference clock" }
+  - { name: RXD0,     type: output,       notes: "RGMII receive data bit 0" }
+  - { name: RXD1,     type: output,       notes: "RGMII receive data bit 1" }
+  - { name: RXD2,     type: output,       notes: "RGMII receive data bit 2" }
+  - { name: RXD3,     type: output,       notes: "RGMII receive data bit 3" }
+  - { name: RXCTL,    type: output,       notes: "RGMII receive control (RXDV/RXCTL)" }
 
 kconfig:
   zephyr:         ALP_SDK_CHIP_RTL8211FDI
@@ -50,3 +69,55 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per Realtek RTL8211F(D)(I)-VD-CG Datasheet Rev 1.1 (Track ID
+  # JATR-8275-15) -- same primary datasheet this manifest already cites --
+  # §5 "Pin Assignments (40-Pin QFN)" + §6 "Pin Descriptions" tables 1-9.
+  # Only power/MDI-magnetics/RGMII/MDIO/clock/reset pins are listed per the
+  # task scope; the mode-select straps (PHYAD[2:0], PLLOFF, TXDLY, RXDLY,
+  # CFG_EXT, CFG_LDO[1:0] -- pins 22-24, 32-34, dual-purpose with LED0-2),
+  # LEDs, RSET reference resistor (39), and REG_OUT switching-regulator
+  # output (30) are real signal-bearing pins too but out of scope for this
+  # sweep -- omitted rather than guessed at.
+  refdes_prefix: U
+  package:       QFN-40
+  footprint:     realtek_qfn_40
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: MDI0 }
+    - { pad: "2",  signal: MDI0 }
+    - { pad: "3",  signal: AVDD }    # AVDD10 -- 1.0V analog
+    - { pad: "4",  signal: MDI1 }
+    - { pad: "5",  signal: MDI1 }
+    - { pad: "6",  signal: MDI2 }
+    - { pad: "7",  signal: MDI2 }
+    - { pad: "8",  signal: AVDD }    # AVDD10 -- 1.0V analog
+    - { pad: "9",  signal: MDI3 }
+    - { pad: "10", signal: MDI3 }
+    - { pad: "11", signal: AVDD }    # AVDD33 -- 3.3V analog
+    - { pad: "12", signal: RESET }   # PHYRSTB
+    - { pad: "13", signal: MDC }
+    - { pad: "14", signal: MDIO }
+    - { pad: "15", signal: TXD3 }
+    - { pad: "16", signal: TXD2 }
+    - { pad: "17", signal: TXD1 }
+    - { pad: "18", signal: TXD0 }
+    - { pad: "19", signal: TXCTL }
+    - { pad: "20", signal: TXC }
+    - { pad: "21", signal: DVDD }    # DVDD10 -- 1.0V digital core
+    - { pad: "22", signal: RXD3 }
+    - { pad: "23", signal: RXD2 }
+    - { pad: "24", signal: RXD1 }
+    - { pad: "25", signal: RXD0 }
+    - { pad: "26", signal: RXCTL }
+    - { pad: "27", signal: RXC }
+    - { pad: "28", signal: VDDIO }   # DVDD_RG -- RGMII I/O pad power
+    - { pad: "29", signal: DVDD }    # DVDD33 -- 3.3V digital
+    - { pad: "31", signal: PHY_INTR } # INTB/PMEB
+    - { pad: "36", signal: XTAL_IN }
+    - { pad: "37", signal: XTAL_OUT }
+    - { pad: "38", signal: AVDD }    # AVDD10 -- 1.0V analog
+    - { pad: "40", signal: AVDD }    # AVDD33 -- 3.3V analog
+    - { pad: "41", signal: GND }     # + Exposed Pad (E-Pad), analog+digital ground

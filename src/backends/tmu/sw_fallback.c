@@ -122,6 +122,7 @@ static const alp_tmu_ops_t _ops = {
 	.hypot = sw_hypot,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(tmu);
 ALP_BACKEND_REGISTER(tmu,
                      sw_fallback,
                      {

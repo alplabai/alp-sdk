@@ -187,6 +187,67 @@ int cc3501e_hw_wifi_conn_status(uint8_t *state, uint8_t *fail_reason, int8_t *rs
 }
 
 /* --------------------------------------------------------------- */
+/* TCP/UDP sockets (v0.5) -- no IP stack on the host stub: report     */
+/* NOTIMPL so the protocol path stays exercisable (handlers parse +   */
+/* validate, then map NOTIMPL -> RESP_ERR_NOT_READY).                 */
+/* --------------------------------------------------------------- */
+int cc3501e_hw_sock_open(uint8_t family, uint8_t type, uint8_t protocol, uint16_t *handle_out)
+{
+	(void)family;
+	(void)type;
+	(void)protocol;
+	if (handle_out != 0) *handle_out = 0u;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, const uint8_t addr[4])
+{
+	(void)handle;
+	(void)family;
+	(void)port;
+	(void)addr;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_sock_send(
+    uint16_t handle, uint8_t flags, const uint8_t *data, uint16_t data_len, uint16_t *sent_out)
+{
+	(void)handle;
+	(void)flags;
+	(void)data;
+	(void)data_len;
+	if (sent_out != 0) *sent_out = 0u;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_sock_recv(uint16_t  handle,
+                         uint16_t  max_len,
+                         uint8_t  *buf,
+                         uint16_t  cap,
+                         uint16_t *recv_len_out,
+                         uint8_t   from_addr[4],
+                         uint16_t *from_port_out)
+{
+	(void)handle;
+	(void)max_len;
+	(void)buf;
+	(void)cap;
+	if (recv_len_out != 0) *recv_len_out = 0u;
+	if (from_addr != 0) {
+		for (unsigned i = 0u; i < 4u; ++i)
+			from_addr[i] = 0u;
+	}
+	if (from_port_out != 0) *from_port_out = 0u;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_sock_close(uint16_t handle)
+{
+	(void)handle;
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+/* --------------------------------------------------------------- */
 /* BLE 5.4 (v0.3) -- no BLE host on the stub: report NOTIMPL so the   */
 /* protocol path stays exercisable (handlers parse + validate, then   */
 /* map NOTIMPL -> RESP_ERR_NOT_READY).                                */

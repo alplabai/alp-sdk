@@ -20,6 +20,15 @@ sensor:
   axes:           3
   ranges_gauss:   [2, 8]
 
+signals:
+  - { name: SCL,   type: input, scope: "I2C master/slave clock" }
+  - { name: SDA,   type: bidir, scope: "I2C master/slave data" }
+  - { name: DRDY,  type: output, scope: "data-ready interrupt; default low, high until data registers are read" }
+  - { name: S1,    type: power, scope: "tie to VDDIO (I/O supply reference strap)" }
+  - { name: SETP,  type: analog, scope: "set/reset strap positive -- external S/R capacitor (C2) connection" }
+  - { name: SETC,  type: analog, scope: "set/reset strap -- driver side of the S/R capacitor (C2)" }
+  - { name: C1,    type: analog, scope: "reservoir capacitor (C1) connection" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_QMC5883L
   baremetal:      ALP_SDK_CHIP_QMC5883L
@@ -28,7 +37,36 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per QST QMC5883L datasheet v1.0 (Feb 2016), Table 5 "Pin
+  # Configurations" -- 16-pin LGA, 3 x 3 x 0.9 mm.  Pins 3, 5, 6, 7, 14 are
+  # datasheet-labelled NC and omitted.  SETP/SETC need an external S/R
+  # capacitor (C2) between them and C1 needs a reservoir capacitor to GND
+  # per the datasheet's "External Connection" application circuits
+  # (figures 5/6); no capacitor values were recoverable from the public
+  # datasheet's text layer (component labels are image-only in the
+  # reference schematics), so no `passives:` block is populated here --
+  # omitted rather than guessed.
+  refdes_prefix: U
+  package:       LGA-16
+  footprint:     lga_16_3p0x3p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: SCL }
+    - { pad: "2",  signal: VDD }
+    - { pad: "4",  signal: S1 }
+    - { pad: "8",  signal: SETP }
+    - { pad: "9",  signal: GND }
+    - { pad: "10", signal: C1 }
+    - { pad: "11", signal: GND }
+    - { pad: "12", signal: SETC }
+    - { pad: "13", signal: VDDIO }
+    - { pad: "15", signal: DRDY }
+    - { pad: "16", signal: SDA }

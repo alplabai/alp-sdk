@@ -303,15 +303,15 @@ static void mhuv2_recv_isr(const struct device *dev)
 			recv_ch_status_reg = RECV->CH_INT_ST0;
 		} else if (ch_id >= CHCOMB_INT_ST1_BEGIN &&
 			ch_id <= CHCOMB_INT_ST1_END) {
-			offset = CHCOMB_INT_ST0_END;
+			offset = CHCOMB_INT_ST1_BEGIN;
 			recv_ch_status_reg = RECV->CH_INT_ST1;
 		} else if (ch_id >= CHCOMB_INT_ST2_BEGIN &&
 			ch_id <= CHCOMB_INT_ST2_END) {
-			offset = CHCOMB_INT_ST1_END;
+			offset = CHCOMB_INT_ST2_BEGIN;
 			recv_ch_status_reg = RECV->CH_INT_ST2;
 		} else if (ch_id >= CHCOMB_INT_ST3_BEGIN &&
 			ch_id <= CHCOMB_INT_ST3_END) {
-			offset = CHCOMB_INT_ST2_END;
+			offset = CHCOMB_INT_ST3_BEGIN;
 			recv_ch_status_reg = RECV->CH_INT_ST3;
 		}
 		if ((recv_ch_status_reg) & (0x1 << (ch_id - offset))) {
@@ -382,12 +382,16 @@ static int mhuv2_poll_out(const struct device *dev, uint32_t ch_id,
 
 	ret = mhuv2_send_access_request(SND);
 	if (ret < 0) {
-		return ret;
+		/* Access not granted: restore the NVIC line before returning */
+		goto out;
 	}
 
 	/* Send busy error if the previous ch xfer is not yet completed */
 	if ((SND->CHANNEL[ch_id].CH_ST & MHU_CH_INT_ST_SET) == MHU_CH_INT_ST_SET) {
-		return -EBUSY;
+		/* Reset access request and restore the NVIC line before returning */
+		SND->ACCESS_REQUEST = !MHU_ACC_REQ;
+		ret                 = -EBUSY;
+		goto out;
 	}
 
 	/* Clear Interrupt Status */
@@ -415,16 +419,15 @@ static int mhuv2_poll_out(const struct device *dev, uint32_t ch_id,
 	/* Reset access request */
 	SND->ACCESS_REQUEST = !MHU_ACC_REQ;
 
+	ret = ack ? 0 : -EAGAIN;
+
+out:
 	if (prev_irq_en_sts) {
 		/* Enable interrupt if enabled previously */
 		irq_enable(config->irq_num);
 	}
 
-	if (!ack) {
-		return -EAGAIN;
-	}
-
-	return 0;
+	return ret;
 }
 
 /**

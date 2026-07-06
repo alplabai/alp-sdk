@@ -1,0 +1,24 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+config UHC_XHCI_ALIF
+	bool "Alif Ensemble xHCI USB host controller driver"
+	default y
+	depends on DT_HAS_ALIF_XHCI_UHC_ENABLED
+	depends on UHC_DRIVER
+	help
+	  xHCI USB-2.0 host driver for the Alif Ensemble USB (DWC3-family,
+	  controller base 0x48200000, IRQ 101).
+
+	  The uhc_api op table, DT binding, xHCI capability register map
+	  (from the xHCI spec §5.3), and DWC3 G*-register init comments
+	  (GCTL @ 0xC110 from the Alif DFP) are real.  Every host bring-up
+	  path (DWC3 soft-reset, port-power, event-ring ISR, slot/endpoint
+	  context management, transfer TRB rings) carries a TODO(aen401-bench)
+	  marker with the intended register sequence as a code comment.
+
+	  Do NOT enable this driver in production until the bench-gated paths
+	  are filled in and validated on real AEN401 silicon.
+
+	  Driver: zephyr/drivers/usb/uhc/uhc_xhci_alif.c
+	  Binding: zephyr/dts/bindings/usb/alif,xhci-uhc.yaml

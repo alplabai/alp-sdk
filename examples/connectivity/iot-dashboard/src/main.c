@@ -53,7 +53,7 @@
 #include "alp/chips/bme280.h"
 
 /* EVK_I2C_BUS_SENSORS is a board-macro from the generated routes header
- * (= E1M_I2C0); rebind it in board.yaml `pins:` to port to another board. */
+ * (= ALP_E1M_I2C0); rebind it in board.yaml `pins:` to port to another board. */
 #include "alp/boards/alp_e1m_evk_routes.h"
 
 #include "dashboard_ui.h"
@@ -118,7 +118,7 @@ int main(void)
 
 	/* Sensor bus + chip bring-up. */
 	s_i2c = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = EVK_I2C_BUS_SENSORS, /* = E1M_I2C0 */
+	    .bus_id     = EVK_I2C_BUS_SENSORS, /* = ALP_E1M_I2C0 */
 	    .bitrate_hz = 400000,
 	});
 	if (s_i2c == NULL || bme280_init(&s_env, s_i2c, BME280_I2C_ADDR_LOW) != ALP_OK) {

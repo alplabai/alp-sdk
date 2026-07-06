@@ -20,14 +20,16 @@
  * WHAT RUNS WHERE (current bench reality):
  *   - alp_random_bytes  -> SE TRNG, LIVE today (public
  *                          se_service_get_rnd_num under the hood).
- *   - alp_hash_* / alp_aead_*  -> SE CryptoCell SHA / AES-GCM.  These need
- *                          the generic SE send-request seam
- *                          (CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM);
- *                          with it OFF the SE backend declines and the
- *                          dispatcher falls through to the MbedTLS-PSA
- *                          backend, so the round-trips still PASS -- just on
- *                          the M55.  Either way the API contract holds and
- *                          the RESULT line reports which surfaces answered.
+ *   - alp_hash_* / alp_aead_*  -> SE CryptoCell SHA / AES-GCM.  These ride the
+ *                          generic SE send-request seam
+ *                          (CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM),
+ *                          which DEFAULTS ON, so by default the SE CryptoCell
+ *                          computes them on-silicon (bench-validated).  For an
+ *                          alg the SE declines (SHA-384/512, over-ceiling
+ *                          input) the dispatcher falls through to the
+ *                          MbedTLS-PSA backend on the M55.  Either way the API
+ *                          contract holds and the RESULT line reports which
+ *                          surfaces answered.
  *
  * PASS gate: SHA-256("abc") matches the NIST known-answer vector, the
  * AES-128-GCM ciphertext decrypts back to the plaintext with a valid tag,
@@ -80,7 +82,16 @@ static bool test_sha256_abc(void)
 	alp_status_t s          = alp_hash_update(h, (const uint8_t *)"abc", 3u);
 	if (s == ALP_OK) {
 		s = alp_hash_finish(h, digest, sizeof(digest), &dlen);
+		/* Contract nuance (<alp/security.h>): finish implicitly closes
+		 * the context ON SUCCESS ONLY.  A failed finish leaves the
+		 * handle open, so it must be closed explicitly or the backend
+		 * slot leaks and later opens start failing. */
+		if (s != ALP_OK) {
+			alp_hash_close(h);
+		}
 	} else {
+		/* Update failed before finish ever ran: release the handle
+		 * (close is the "abandon without finalising" path). */
 		alp_hash_close(h);
 	}
 

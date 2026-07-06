@@ -10,7 +10,7 @@
  * cc3501e_bridge_bringup() once, gets a ready @ref cc3501e_t, and from there uses the
  * portable surfaces:
  *   - cc3501e_* (chips/cc3501e)            -- MAC / Wi-Fi / BLE / GPIO-proxy / OTA
- *   - alp_gpio_open(E1M_GPIO_IOxx)         -- proxied E1M IOs (when the proxy is built)
+ *   - alp_gpio_open(ALP_E1M_GPIO_IOxx)         -- proxied E1M IOs (when the proxy is built)
  *
  * To reuse in your own AEN application: copy this pair (cc3501e_bridge.{c,h}) into your
  * app, or call cc3501e_bridge_bringup() directly.  The bus / pins / clock are the

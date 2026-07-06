@@ -18,6 +18,8 @@
 #include "backends/i2s/i2s_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(i2s);
+/* Pull the i2s registry section into a static-archive link (#368). */
+ALP_BACKEND_ANCHOR(i2s);
 
 extern void alp_z_set_last_error(alp_status_t s);
 extern void alp_z_clear_last_error(void);

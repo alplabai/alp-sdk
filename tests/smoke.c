@@ -14,9 +14,10 @@
 #include "alp/camera.h"
 #include "alp/gui.h"
 #include "alp/iot.h"
+#include "alp/version.h"
 
 int main(void)
 {
-	printf("Alp SDK smoke: headers compiled and linked.\n");
+	printf("Alp SDK smoke: headers compiled and linked (SDK v%s).\n", alp_version_string());
 	return 0;
 }

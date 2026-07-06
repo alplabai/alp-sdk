@@ -190,6 +190,106 @@ alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info,
                                               const char          *expected_sku,
                                               const char          *expected_hw_rev);
 
+/* ------------------------------------------------------------------ */
+/* SoC identity -- silicon-level identifiers reported by the SoC's     */
+/* secure / system-controller firmware (where one exists)              */
+/* ------------------------------------------------------------------ */
+
+/** Byte budget for the build-time silicon reference string. */
+#define ALP_SOC_INFO_REF_LEN 32u
+/** Byte budget for the secure-firmware version string (incl. NUL). */
+#define ALP_SOC_INFO_FW_VERSION_LEN 80u
+/** Maximum SoC unique-serial length in bytes. */
+#define ALP_SOC_INFO_SERIAL_MAX_LEN 16u
+
+/**
+ * @brief Silicon-level identity as returned by @ref alp_soc_info_read.
+ *
+ * Complements @ref alp_hw_info_t -- the EEPROM manifest identifies the
+ * assembled MODULE (SKU / hw_rev / factory serial), while this struct
+ * identifies the SILICON -- the SoC die revision, the factory-fused
+ * unique serial, and the version of the secure / system-controller
+ * firmware servicing the die.  On SoCs whose power/boot/identity
+ * services live behind a dedicated controller core, the backend
+ * queries that controller; fields it cannot source stay zero/empty.
+ */
+typedef struct alp_soc_info_t {
+	char     soc_ref[ALP_SOC_INFO_REF_LEN];                  /**< Build-time silicon reference
+	                                         (soc_caps ALP_SOC_REF_STR, e.g.
+	                                         "alif:ensemble:e8").  Always
+	                                         filled, even when the runtime
+	                                         query fails. */
+	char     secure_fw_version[ALP_SOC_INFO_FW_VERSION_LEN]; /**< Secure / system-controller
+	                                                          firmware version string
+	                                                          (NUL-terminated).  Empty when
+	                                                          the platform has no queryable
+	                                                          controller firmware. */
+	uint32_t part_number;                         /**< SoC part-number code as reported by the
+	                           silicon (vendor-defined encoding); 0 when
+	                           unavailable. */
+	uint32_t revision_id;                         /**< SoC die-revision identifier; 0 when
+	                           unavailable. */
+	uint32_t lifecycle;                           /**< Secure-lifecycle state code
+	                           (implementation-defined encoding; see the
+	                           per-SoM HW reference for the legend).  0
+	                           when unavailable. */
+	uint8_t  serial[ALP_SOC_INFO_SERIAL_MAX_LEN]; /**< Factory-fused SoC
+	                                                  unique serial bytes. */
+	uint8_t  serial_len;                          /**< Valid bytes in @ref serial (0 when
+	                         unavailable). */
+} alp_soc_info_t;
+
+/**
+ * @brief Read the silicon-level identity of the running SoC.
+ *
+ * Zero-fills @p out, stamps @ref alp_soc_info_t::soc_ref from the
+ * build-time silicon reference, then asks the active backend to fill
+ * the runtime fields (secure-firmware version, part number, die
+ * revision, lifecycle, unique serial).  On platforms without a
+ * queryable secure / system controller the call returns
+ * @ref ALP_ERR_NOSUPPORT with @c soc_ref as the only populated field
+ * -- callers that just need "which silicon is this build for" can
+ * use that best-effort result unconditionally.
+ *
+ * @param[out] out  Identity destination.  Zero-filled + @c soc_ref
+ *                  stamped even on failure (except INVAL).
+ *
+ * @return  @ref ALP_OK on a full runtime read.
+ *          @ref ALP_ERR_INVAL when @p out is NULL.
+ *          @ref ALP_ERR_NOSUPPORT when no runtime identity source
+ *                                 exists on this build (soc_ref is
+ *                                 still valid).
+ *          @ref ALP_ERR_NOT_READY when the controller firmware is
+ *                                 asleep/unreachable (retryable).
+ *          @ref ALP_ERR_IO on a transport fault or a
+ *                          controller-rejected request; fields that
+ *                          were read before the fault stay filled.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.9 -- portable SoC-identity surface (first consumer:
+ *      the AEN SE-service examples).
+ */
+alp_status_t alp_soc_info_read(alp_soc_info_t *out);
+
+/**
+ * @brief Liveness ping of the SoC's secure / system-controller firmware.
+ *
+ * A bounded round-trip that proves the controller answers before the
+ * caller trusts identity or power-profile reads.  Purely diagnostic:
+ * no state is read or written.
+ *
+ * @return  @ref ALP_OK when the controller answered.
+ *          @ref ALP_ERR_NOSUPPORT when this build has no controller
+ *                                 transport (e.g. native_sim).
+ *          @ref ALP_ERR_NOT_READY when the controller is
+ *                                 asleep/unreachable (retryable).
+ *          @ref ALP_ERR_IO on a transport fault.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.9 -- companion to @ref alp_soc_info_read.
+ */
+alp_status_t alp_soc_secure_fw_ping(void);
+
 /* Compile-time guard: the manifest must be exactly 128 bytes and
  * tightly packed so the production programmer's binary lines up
  * byte-for-byte with the runtime reader's view. */

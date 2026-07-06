@@ -5,6 +5,10 @@
 # se_services client) + a zero-risk SoC lifecycle-state (LCS) read on the
 # E1M-AEN801 (Ensemble E8, M55-HE), via the bench RAM-run + RAM-console flow.
 #
+# DELIBERATELY VENDOR-SPECIFIC: this is the sanctioned bring-up escape hatch
+# (it pokes the vendor transport by design).  Customer code uses the portable
+# wrappers instead -- see aen-se-service-query + src/main.c's header note.
+#
 # Plain prj.conf app (no alp_project.py board.yaml emit): the SE-service stack
 # Kconfigs (CONFIG_ARM_MHUV2 / CONFIG_HAS_ALIF_SE_SERVICES, the alp-sdk symbols
 # that compile the in-tree MHUv2 IPM driver + hal_alif's se_service.c) are

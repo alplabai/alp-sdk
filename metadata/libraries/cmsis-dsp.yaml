@@ -1,0 +1,46 @@
+# CMSIS-DSP -- Arm CMSIS DSP compute library (ADR 0018 library manifest).
+#
+# The M55 Helium / Cortex-A Neon signal-processing story.  Already in the
+# Zephyr module set; this manifest formalises `libraries: [cmsis-dsp]`.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * west module `cmsis-dsp`, path modules/lib/cmsis-dsp,
+#     west.yml revision 97512610ec92058f0119450b9e743eeb7e95b5c8
+#   * umbrella symbol CONFIG_CMSIS_DSP + per-component switches
+#     ($ZEPHYR_BASE/modules/cmsis-dsp/Kconfig: `menuconfig CMSIS_DSP`,
+#     `config CMSIS_DSP_BASICMATH` ... `config CMSIS_DSP_TRANSFORM`).
+#     Enabling CMSIS_DSP alone only pulls in BASICMATH; the component groups
+#     below are turned on so kernels like arm_rfft_fast_* (TRANSFORM),
+#     arm_biquad_cascade_* (FILTERING), arm_correlate_* (STATISTICS) link
+#     cleanly -- LD --gc-sections drops the unused ones.  This mirrors the
+#     SDK's established per-core cmsis_dsp enable (scripts/alp_project.py
+#     _LIBRARY_KCONFIG).
+#   * licence Apache-2.0  (modules/lib/cmsis-dsp/Include/arm_math.h:
+#     "SPDX-License-Identifier: Apache-2.0")
+#
+# No `requires:` -- CMSIS-DSP has no CPU_CORTEX_M dependency in its Kconfig
+# (it also builds for Cortex-A with Neon), so it is not constrained to a core
+# class here.  Optimised paths engage automatically when Helium (M55) / Neon
+# (A-class) is present.
+schema_version: 1
+name: cmsis-dsp
+description: "Arm CMSIS-DSP -- fixed/floating-point DSP kernels (FFT, filters, matrix, statistics)."
+tier: A
+version: "97512610ec92058f0119450b9e743eeb7e95b5c8"
+license: Apache-2.0
+
+integration:
+  zephyr:
+    module: cmsis-dsp
+    kconfig:
+      - CONFIG_CMSIS_DSP=y
+      - CONFIG_CMSIS_DSP_BASICMATH=y
+      - CONFIG_CMSIS_DSP_COMPLEXMATH=y
+      - CONFIG_CMSIS_DSP_CONTROLLER=y
+      - CONFIG_CMSIS_DSP_FASTMATH=y
+      - CONFIG_CMSIS_DSP_FILTERING=y
+      - CONFIG_CMSIS_DSP_INTERPOLATION=y
+      - CONFIG_CMSIS_DSP_MATRIX=y
+      - CONFIG_CMSIS_DSP_STATISTICS=y
+      - CONFIG_CMSIS_DSP_SUPPORT=y
+      - CONFIG_CMSIS_DSP_TRANSFORM=y

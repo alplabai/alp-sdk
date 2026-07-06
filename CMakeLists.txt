@@ -154,6 +154,16 @@ if(NOT DEFINED ZEPHYR_BASE)
     endif()
     target_link_libraries(alp_sdk PUBLIC alp_sdk_headers)
     add_library(alp::sdk ALIAS alp_sdk)
+    # Plain-CMake builds link libalp_sdk as an ordinary (static or shared)
+    # library, NOT with Zephyr's whole-archive model.  A static-archive
+    # link only pulls the backend-registry members a dispatcher actually
+    # references, which drops every backend that lives purely in an
+    # alp_backends_<class> section and leaves the section-bound
+    # __start_/__stop_ symbols undefined (issue #368).  This switch turns
+    # on the ALP_BACKEND_ANCHOR macros (see <alp/backend.h>) so each
+    # dispatcher force-references its section-carrying backend and pulls
+    # it into the link.  Harmless (inert) for the shared build.
+    target_compile_definitions(alp_sdk PRIVATE ALP_BACKEND_STATIC_ANCHORS=1)
 endif()
 
 # Common helpers (always built).

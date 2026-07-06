@@ -40,13 +40,11 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
-
 #include "alp/peripheral.h"
 
 /* BOARD_UART_DEBUG is a portable cross-EVK alias from <alp/board.h>:
- *   E1M EVK  -> EVK_UART_PORT_DEBUG  -> E1M_UART0
- *   E1M-X EVK -> XEVK_UART_PORT_DEBUG -> E1M_X_UART0
+ *   E1M EVK  -> EVK_UART_PORT_DEBUG  -> ALP_E1M_UART0
+ *   E1M-X EVK -> XEVK_UART_PORT_DEBUG -> ALP_E1M_X_UART0
  * Rebind it in board.yaml `pins:` to port this app to another board
  * without touching the code below. */
 #include "alp/board.h"
@@ -58,6 +56,10 @@ static uint8_t rx_backing[64];
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[ringbuf] open BOARD_UART_DEBUG @ 115200 8N1\n");
 
 	/* The classic open() — no different from the uart-echo example.
@@ -65,7 +67,7 @@ int main(void)
      * mix polled reads with ringbuf reads on the same handle work,
      * though the typical pattern is one or the other. */
 	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-	    .port_id   = BOARD_UART_DEBUG, /* E1M EVK: E1M_UART0; E1M-X EVK: E1M_X_UART0 */
+	    .port_id   = BOARD_UART_DEBUG, /* E1M EVK: ALP_E1M_UART0; E1M-X EVK: ALP_E1M_X_UART0 */
 	    .baudrate  = 115200,
 	    .data_bits = 8,
 	    .stop_bits = 1,
@@ -102,10 +104,10 @@ int main(void)
      * silently drains the controller FIFO into the ring. */
 	printf("[ringbuf] attached; backing=%zu bytes\n", sizeof(rx_backing));
 
-	/* k_msleep emulates "doing real work for a while".  On native_sim
+	/* alp_delay_ms emulates "doing real work for a while".  On native_sim
      * we won't actually receive any bytes during this nap, but the
      * code path is identical to a production loop. */
-	k_msleep(50);
+	alp_delay_ms(50);
 
 	/* Drain whatever the IRQ has staged.  Non-blocking: if the ring
      * is empty, got=0 and we move on.  This is the pattern apps

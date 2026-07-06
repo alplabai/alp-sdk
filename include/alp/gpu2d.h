@@ -27,8 +27,10 @@
  *   - all others : portable software fallback (CPU fill/blit/blend;
  *                  src/backends/gpu2d/sw_fallback.c).  This is what
  *                  V2N, i.MX 93 (whose 2D engine is PXP, not a
- *                  GPU2D peer -- see ADR 0008), Yocto, and
- *                  bare-metal builds use.
+ *                  GPU2D peer -- see ADR 0008), and ALP_OS=yocto
+ *                  Linux builds use.  Plain-CMake bare-metal builds
+ *                  still link the NOSUPPORT stub (no backend
+ *                  registry there yet).
  *
  * Concurrency: the singleton handle returned by @ref alp_gpu2d_open
  * is reentrant under a shared driver mutex.  Callers must serialise
@@ -118,12 +120,21 @@ typedef struct {
 typedef struct alp_gpu2d alp_gpu2d_t;
 
 /**
- * @brief Acquire the system-wide GPU2D accelerator handle.
+ * @brief Acquire a GPU2D handle.
  *
- * The handle is single-instance per process (mirrors how DAVE2D
- * exposes itself).  Subsequent open() calls return the same
- * underlying handle.  Backends without a 2D accelerator return
- * NULL with @ref alp_last_error = @ref ALP_ERR_NOSUPPORT.
+ * With the portable software fallback enabled (the default,
+ * CONFIG_ALP_SDK_GPU2D_SW_FALLBACK) open() succeeds on every SoM --
+ * SoMs without a 2D accelerator are served by the CPU path, so
+ * there is no NOSUPPORT case at open time.  NULL is returned only
+ * when no backend is compiled in at all (@ref alp_last_error =
+ * ALP_ERR_NOT_PRESENT_ON_THIS_SOC) or when the handle pool is
+ * exhausted (ALP_ERR_NOMEM).
+ *
+ * The pool defaults to ONE handle (the 2D engine is a system-wide
+ * singleton): a second open() before @ref alp_gpu2d_close fails
+ * with ALP_ERR_NOMEM rather than aliasing the live handle.  The
+ * pool size is the CONFIG_ALP_SDK_MAX_GPU2D_HANDLES compile-time
+ * override (no Kconfig entry today -- define it on the build).
  *
  * @return Handle on success, NULL with alp_last_error set on
  *         failure.
@@ -158,11 +169,15 @@ alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *handle,
 /**
  * @brief Copy a sub-rect from @p src into @p dst (no blend).
  *
- * Source + destination may overlap on the same buffer; backends
- * handle the safe direction internally.  Format conversion is
- * performed if @p src->format != @p dst->format and both are
- * in the backend's supported set; otherwise the call returns
- * @ref ALP_ERR_NOSUPPORT.
+ * Overlap contract: pixels are processed top-to-bottom,
+ * left-to-right, so an overlapping same-buffer copy toward EARLIER
+ * memory (dy < sy, or dy == sy with dx <= sx) is safe; a copy
+ * toward later memory may read pixels the op already wrote
+ * (backends do not reverse-iterate).  Callers needing overlap-safe
+ * moves in both directions must use distinct buffers.  Format
+ * conversion is performed if @p src->format != @p dst->format and
+ * both are in the backend's supported set; otherwise the call
+ * returns @ref ALP_ERR_NOSUPPORT.
  *
  * @param[in] handle  Handle from @ref alp_gpu2d_open.
  * @param[in] src     Source surface.

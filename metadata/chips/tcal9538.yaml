@@ -1,0 +1,90 @@
+# Alp SDK chip manifest: TI TCAL9538 8-bit I2C-bus I/O expander.
+schema_version:   1
+chip_id:          tcal9538
+driver_status:    complete         # init (probe+cache) / set_direction(s) / set / get.
+                                    # Latched-interrupt regs (0x40+) deferred to v0.3.x.
+display_name:     "TI TCAL9538 8-bit I2C-bus, SMBus I/O expander"
+vendor:           ti
+mpn_population:
+  - "TCAL9538"
+  - "TCAL9538PWR"                  # TSSOP (PW), 16-pin
+  - "TCAL9538RSVR"                 # UQFN (RSV), 16-pin
+  - "TCAL9538DTUR"                 # X2QFN (DTU), 16-pin
+
+datasheet:
+  primary:        "TI TCAL9538 datasheet (SCPS280B, Nov 2022, rev. May 2025)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x70, scope: "A1=0, A0=0 (TCAL9538_I2C_ADDR_BASE)" }
+    - { addr_7bit: 0x72, scope: "A1=1, A0=0 (E1M EVK: U35/U37, 2x instances at BRD_I2C0)" }
+  address_strap_range: "0x70..0x73 (A1A0 2-bit strap)"
+  max_clock_hz:   1000000         # 100kHz / 400kHz / 1MHz (fast-mode-plus) per datasheet.
+
+gpios:
+  count:          8
+  pin_names:      [P0, P1, P2, P3, P4, P5, P6, P7]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_TCAL9538
+  baremetal:      ALP_SDK_CHIP_TCAL9538
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SCL,    type: input,       scope: "I2C serial clock; connect to VCC through a pull-up" }
+  - { name: SDA,    type: bidir,       scope: "I2C serial data; connect to VCC through a pull-up" }
+  - { name: A0,     type: input,       scope: "address strap bit 0; tie directly to VCC or GND" }
+  - { name: A1,     type: input,       scope: "address strap bit 1; tie directly to VCC or GND" }
+  - { name: RESET,  type: input,       scope: "active-low reset; pull up to VCC if unused" }
+  - { name: INT,    type: open_drain_output, scope: "active-low interrupt; connect to VCC through a pull-up" }
+  - { name: P0,     type: bidir,       scope: "port I/O, push-pull; input by default at power-on" }
+  - { name: P1,     type: bidir,       scope: "port I/O, push-pull; input by default at power-on" }
+  - { name: P2,     type: bidir,       scope: "port I/O, push-pull; input by default at power-on" }
+  - { name: P3,     type: bidir,       scope: "port I/O, push-pull; input by default at power-on" }
+  - { name: P4,     type: bidir,       scope: "port I/O, push-pull; input by default at power-on" }
+  - { name: P5,     type: bidir,       scope: "port I/O, push-pull; input by default at power-on" }
+  - { name: P6,     type: bidir,       scope: "port I/O, push-pull; input by default at power-on" }
+  - { name: P7,     type: bidir,       scope: "port I/O, push-pull; input by default at power-on" }
+  - { name: VCC,    type: power }
+  - { name: GND,    type: ground }
+
+physical:
+  # Pins per TI TCAL9538 datasheet SCPS280B (Nov 2022, rev. May 2025),
+  # s4 "Pin Configuration and Functions", Table 4-1 "Pin Functions",
+  # PW (TSSOP-16) column.  All 16 pins are signal-bearing (no NC balls).
+  refdes_prefix: U
+  package:       TSSOP-16
+  footprint:     tssop_16_5x6p4mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "RESET" }
+    - { pad: "2",  signal: "A0" }
+    - { pad: "3",  signal: "A1" }
+    - { pad: "4",  signal: "P0" }
+    - { pad: "5",  signal: "P1" }
+    - { pad: "6",  signal: "P2" }
+    - { pad: "7",  signal: "P3" }
+    - { pad: "8",  signal: "GND" }
+    - { pad: "9",  signal: "P4" }
+    - { pad: "10", signal: "P5" }
+    - { pad: "11", signal: "P6" }
+    - { pad: "12", signal: "P7" }
+    - { pad: "13", signal: "INT" }
+    - { pad: "14", signal: "SCL" }
+    - { pad: "15", signal: "SDA" }
+    - { pad: "16", signal: "VCC" }
+  passives:
+    - { role: decouple, value: 100nF, net: VCC, refdes_prefix: C }
+    - { role: pullup,   value: 10k,   net: SCL, refdes_prefix: R }
+    - { role: pullup,   value: 10k,   net: SDA, refdes_prefix: R }
+    - { role: pullup,   value: 10k,   net: INT, refdes_prefix: R }

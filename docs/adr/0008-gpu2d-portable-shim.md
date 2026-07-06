@@ -67,7 +67,12 @@ Backends (as implemented per issue #24):
   (the SKUs whose SoC JSON sets `dave2d: true`) at priority 100,
   driven through the documented `d2_*` API of the proprietary
   Alif D/AVE 2D pack (build-time pull only).  Bench-unverified at
-  authoring time.
+  authoring time.  Backend selection is per-SoC-exclusive (no
+  per-op fallback in the dispatcher), so blend modes the engine
+  cannot express single-pass (ADDITIVE / MULTIPLY) are delegated
+  to the software path by the backend itself, via the internal
+  `alp_gpu2d_sw_ops()` hook -- the "write once" contract holds
+  op-by-op, not just SoM-by-SoM.
 - **V2N / V2N-M1 / i.MX 93 / native_sim / other**
   (`src/backends/gpu2d/sw_fallback.c`) -- the portable software
   fallback, wildcard `"*"` at priority 0.  It does the *real* CPU

@@ -5,7 +5,7 @@ current/voltage monitors, read from a Linux/Yocto user-space app on
 the V2N Cortex-A55.
 
 It opens the on-board sensor I2C bus (`XEVK_I2C_BUS_SENSORS` =
-`E1M_X_I2C0`, i.e. `/dev/i2c-0`), calibrates one `ina236` driver
+`ALP_E1M_X_I2C0`, i.e. `/dev/i2c-0`), calibrates one `ina236` driver
 instance per rail using the shunt values from
 `<alp/boards/alp_e1m_x_evk.h>`, and prints bus voltage / current /
 power once a second.

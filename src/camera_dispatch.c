@@ -24,6 +24,7 @@
 #include "backends/camera/camera_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(camera);
+ALP_BACKEND_ANCHOR(camera);
 
 /* Reuse the existing TLS-backed last-error mechanism from
  * src/zephyr/last_error.c.  Forward-declared here to avoid

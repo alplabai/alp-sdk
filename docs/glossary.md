@@ -49,6 +49,14 @@ the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
 **Board** -- A board that an E1M SoM plugs into.  The SDK ships
 presets for the E1M-EVK + E1M-X-EVK reference boards.
 
+**Capability layer** -- The generated `<alp/cap.h>` /
+`<alp/cap_instance.h>` surface (`alp_has()` / `ALP_HAS()` +
+per-instance queries) that lets portable code gate on what the
+active silicon offers (`ALP_CAP_ID_HW_CAN`, `HW_I2S`, …) instead of
+`#if`-ing on board or SoM names.  Generated from the SoC/SoM
+metadata; the "gate on capabilities, not board names" pattern is
+documented in [`docs/portability.md`](portability.md) §5.2.
+
 **Carve-out** -- A physical memory region reserved for cross-core
 IPC, declared in `board.yaml ipc[]` and resolved against the
 auto-derived region table (from `metadata/socs/.../<part>.json
@@ -66,6 +74,14 @@ Symbols use the chip's natural name (e.g. `lsm6dso_init`); the
 **CMI** -- Code Matrix Index, Qorvo's term for the ACT88760 PMIC's
 configuration profile.  V2N populates the **CMI 120.E1** variant.
 
+**Conformance suite** -- The data-driven ztest suite at
+`tests/zephyr/conformance/` (13 peripheral classes × 8 contract
+cases) that every backend must pass; runs on `native_sim` as the
+`alp_sdk.conformance.portable_api` Twister scenario and is the
+proof gate for a new SoM port's backends (see
+[`docs/porting-new-som.md`](porting-new-som.md) "Conformance
+gate").
+
 **Core id** -- A normalized identifier (e.g. `a55_cluster`,
 `m33_sm`, `m55_hp`) assigned to each on-die programmable core in
 `metadata/socs/.../*.json cores[]`.  Used by `board.yaml cores:`
@@ -75,9 +91,11 @@ rather than by `cores[]` array index.
 **DEEPX DX-M1** -- An on-module AI accelerator populated on V2N-M1
 SKUs only.  See [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
-**DRP-AI3** -- Renesas's on-die NPU on the RZ/V2N silicon, exposed
-through the SDK's `<alp/inference.h>` dispatcher when
-`ALP_SDK_INFERENCE_BACKEND_DRPAI_V2N=y`.
+**DRP-AI3** -- Renesas's on-die NPU on the RZ/V2N silicon, driven
+from the A55/Linux side only (the MERA / DRP-AI TVM runtime) and
+exposed through the SDK's `<alp/inference.h>` dispatcher when the
+Yocto build enables `ALP_SDK_USE_DRPAI_V2N`.  The V2N M33 (Zephyr)
+core cannot reach the engine and runs TFLM instead.
 
 **DSP chain** -- A composable pipeline of filter / window / FFT
 stages under `<alp/dsp.h>` (standalone) and
@@ -135,10 +153,45 @@ Distinguishes board respins of the same SKU.
 EEPROM manifest + BOARD_ID ADC.  See
 [`<alp/hw_info.h>`](../include/alp/hw_info.h).
 
+**Inline AES** -- On-the-fly encryption of external flash traffic by
+an inline-AES-capable controller (Alif SecAES on OSPI / HexSPI;
+`inline_aes: true` in the AEN SoC JSONs).  Configured through
+`alp_storage_configure_inline_aes()` in
+[`<alp/storage.h>`](../include/alp/storage.h); backends without an
+inline-AES path return `ALP_ERR_NOSUPPORT`.  Key material travels the
+OPTIGA path only -- the SDK never sees the AES key in clear (see
+[`docs/threat-model.md`](threat-model.md)).
+
+**ISP** -- Image Signal Processor.  On AEN silicon this is the
+VeriSilicon **ISP Pico** (`vsi,isp-pico`), populated on the E4 / E6 /
+E8 variants (never E7).  Coarse controls ride the portable
+`alp_camera_configure_isp()`; the finer ISP-Pico-only knobs live in
+the vendor-ext `<alp/ext/alif/camera.h>`.  See
+[`docs/aen-accelerator-backends-design.md`](aen-accelerator-backends-design.md).
+
 **Kconfig** -- Linux kernel's configuration language.  Zephyr +
 the SDK use it for per-feature opt-in.
 
 ## L-P
+
+**LCS** -- Lifecycle State of the Alif Secure Enclave: `0x0` CM (chip
+manufacturer), `0x1` **DM** (device manufacturer -- debug open, fully
+re-provisionable; the state Alp ships modules in), onward to secure /
+RMA states.  Read via `se_service_system_get_device_data()`; see
+[`docs/aen-se-services.md`](aen-se-services.md) +
+[`docs/aen-provisioning.md`](aen-provisioning.md).  The OPTIGA Trust M
+secure element has its own, separate lifecycle bits surfaced by
+[`<alp/chips/optiga_trust_m.h>`](../include/alp/chips/optiga_trust_m.h).
+
+**Library manifest** -- A `metadata/libraries/<name>.yaml` file: the
+single source of truth for one curated third-party library (ADR 0018).
+Declares its per-OS `integration:` wiring (Zephyr Kconfig / Yocto
+`IMAGE_INSTALL` / baremetal CMake), `requires:` compatibility
+constraints, curation `tier:`, pinned `version:`, and SPDX `license:`.
+Selected project-wide via the top-level `libraries: [<name>, ...]` key
+in `board.yaml`; the orchestrator emits the wiring and rejects an
+incompatible selection at emit time.  See
+[`metadata/libraries/README.md`](../metadata/libraries/).
 
 **Loader** -- `scripts/alp_project.py` -- reads `board.yaml`,
 resolves SoM SKU preset + board preset, emits the per-backend
@@ -208,6 +261,16 @@ Quad Cortex-A55 + Cortex-M33 + DRP-AI3.
 an application's source.  Optional; required to run as a Twister
 target.
 
+**SE-CryptoCell** -- The hardware-crypto backend for
+[`<alp/security.h>`](../include/alp/security.h) on the Alif Ensemble
+E8: hash / AEAD / random compute is pushed into the Secure Enclave's
+CryptoCell over the RTSS-HE ↔ SE MHUv2 mailbox
+(`src/backends/security/se_cryptocell.c`), registered one priority
+step ahead of the portable MbedTLS-PSA backend -- so E8 apps get SE
+key-isolated crypto by default (v0.8.0), and algorithms the SE
+declines fall through to PSA on the M55.  Nothing in
+`<alp/security.h>` names the SE.
+
 **sysbuild** -- Zephyr's umbrella build system for multi-image
 projects (application + MCUboot + ...).  AEN's secure-boot
 profile lives at `zephyr/sysbuild/aen/sysbuild.conf`.
@@ -265,8 +328,28 @@ order, and pointers to helper-MCU firmware.  The single source of
 truth consumed by `west alp-image`, `west alp-flash`, the OTA
 bundler, and (eventually) alp-studio.
 
+**Target mode** -- Operating an I²C or SPI controller as the bus
+*target* (slave): an external controller owns the clock and our
+firmware answers.  Portable surface `alp_i2c_target_*` (byte-granular
+ISR callbacks) / `alp_spi_target_*` (transfer-based, preloaded TX)
+in `<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`); drivers
+without target support degrade with `ALP_ERR_NOSUPPORT`.  Reference
+examples: `examples/peripheral-io/i2c-slave` + `spi-slave`.
+
 **TBD** -- "To be determined".  Used in metadata where the
 authoritative value is pending (e.g. a board-rev divider voltage).
+
+**Tier A / Tier B (libraries)** -- The two curation tiers for
+curated third-party libraries (ADR 0018), recorded in each
+library manifest `tier:` field.  **Tier A (curated):**
+version-pinned, built in alp-sdk CI for at least one board per
+supported family, ships a teaching example -- breakage blocks
+release.  **Tier B (recipe-only):** wiring + compatibility metadata
+are maintained and emitted, but the library is not built in alp-sdk
+CI; `alp doctor` labels it.  Promotion B → A requires a dedicated
+owner and a CI build lane.  (Distinct from the driver/library
+integration ladder in
+[ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md).)
 
 **Topology block** -- The `topology:` block in
 `metadata/e1m_modules/<SKU>.yaml` that declares the default OS +

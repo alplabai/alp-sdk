@@ -114,7 +114,7 @@ alp-sdk/
 ├── cmake/                           # find_package + Zephyr module helpers
 │   └── AlpSdkConfig.cmake.in
 ├── scripts/                         # CODEGEN + ORCHESTRATION
-│   ├── alp_orchestrate.py           # board.yaml → per-core slice fan-out + manifest
+│   ├── alp_orchestrate/             # board.yaml → per-core slice fan-out + manifest
 │   ├── alp_project.py               # per-slice Kconfig / cmake-args / DTS overlay emit
 │   ├── gen_soc_caps.py              # SoC JSONs → include/alp/soc_caps.h
 │   ├── gen_board_header.py        # board YAML → include/alp/boards/<board>_routes.h
@@ -190,7 +190,7 @@ canonical core IDs of the active SoM's SoC (`a55_cluster`,
 `m33_sm`, `m55_hp`, `m55_he`, …).  Each entry declares the runtime,
 app source, peripherals, libraries, inference, iot, plus the new
 `memory:` and `power:` sub-blocks for stack/heap sizing and
-sleep-mode wake sources.  `scripts/alp_orchestrate.py` loads the file, resolves
+sleep-mode wake sources.  `scripts/alp_orchestrate/` loads the file, resolves
 each entry against the SoM preset's `topology:` defaults, and emits
 one **slice** per non-`off` core:
 
@@ -215,7 +215,7 @@ default to Zephyr, Cortex-A cores default to Yocto Linux.  The
 customer writes an explicit `os:` only when overriding the default
 (`os: off` to skip a peer core, `os: baremetal` on a Cortex-M that
 normally takes Zephyr).  Yocto-on-A55 + Zephyr-on-M33 on a single
-V2N SoM is one `alp_orchestrate.py` invocation, not two.  Full
+V2N SoM is one `alp_orchestrate/` invocation, not two.  Full
 walkthrough: [`docs/heterogeneous-builds.md`](heterogeneous-builds.md).
 
 ### Sparse capabilities flow
@@ -237,6 +237,17 @@ default).  No SoM YAML repeats facts already in the SoC JSON — per
 the memory note `[[silicon-determined-fields-not-customer-facing]]`,
 every silicon-fixed value has exactly one home.
 
+The reverse direction — a SKU that populates **less** than its
+silicon offers — is a *restriction*, declared as
+`silicon_capabilities.unpopulated: [...]` in the SoM preset.  A SKU
+can only remove capabilities its SoC JSON declares truthy (enforced
+by `scripts/validate_metadata.py`), never add through this field;
+`resolve_capabilities()` forces each listed key to `false`/`0` after
+the merge, and `scripts/gen_soc_caps.py` drops the matching
+`ALP_CAP_*` flags in `<alp/soc_caps.h>` behind an `ALP_SOM_<SKU>`
+gate.  SKUs without the field (all current SKUs) inherit the full
+silicon capability set, so family-level behaviour is unchanged.
+
 ### on_module: auto-enable
 
 A SoM's preset YAML carries an `on_module:` block that names the
@@ -246,7 +257,7 @@ Wi-Fi/BLE radio, supervisor MCU, Ethernet PHY, …).  The customer's
 `E1M-V2N101` to `E1M-AEN701` automatically swaps the on-module chip
 set with zero edits.
 
-`scripts/alp_orchestrate.py` `_slugs_from_on_module` walks the
+`scripts/alp_orchestrate/` `_slugs_from_on_module` walks the
 `on_module:` block (scalar fields, plus the `i2c_devices:` and
 `ospi_memories:` sub-blocks) and the `helper_firmware:` list, then
 emits `CONFIG_ALP_SDK_CHIP_<NAME>=y` per chip slug (or
@@ -269,8 +280,8 @@ The active generators are:
 
 | Script                                  | Reads                                                | Writes                                                                         |
 |-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
-| `scripts/alp_orchestrate.py`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON external build front-ends consume (ADR 0014) |
-| `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator) |
+| `scripts/alp_orchestrate/`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON external build front-ends consume (ADR 0014) |
+| `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator) and `--emit carrier-netlist` (Studio-facing carrier nets + BOM handoff, not PCB layout) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
 | `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
 | `scripts/validate_board_yaml.py`        | `board.yaml`                                         | (validator only — non-zero exit on schema error)                               |
@@ -326,7 +337,7 @@ not others.
 | BLE              | `alp/ble.h`          | Zephyr `bt` host stack (peripheral + central + GATT).           | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
 | Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions, plus framed RPC over RPMsg / OpenAMP (`rpc.h`, opened with the generated `system_ipc.h`); placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec in v0.4-final). | v0.1 surface; framing scaffolding v0.4-prep; full impl v0.3+ |
-| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`alp model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends: `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `drpai_v2n_stub` (DRP-AI3), `deepx_dxm1_stub` (DEEPX DX-M1), `sw_fallback`.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
+| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`alp model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3 + DEEPX DX-M1 are A55/Linux-side only (`src/yocto/inference_{drpai,deepx}.cpp`, #58/#59).  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
 | Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
 | 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
 

@@ -59,7 +59,7 @@
         "sku": {
           "type": "string",
           "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$",
-          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93)."
+          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93; E1M-NX9101 is a placeholder preset until the production MPN lands)."
         },
         "hw_rev": {
           "type": "string",
@@ -138,6 +138,12 @@
           "enum": ["error", "warn", "info", "debug", "trace"],
           "default": "info",
           "description": "Default log level for every Alp SDK module that does not appear in `modules:` below."
+        },
+        "console": {
+          "type": "string",
+          "enum": ["auto", "alp", "uart", "ram", "linux", "none"],
+          "default": "auto",
+          "description": "Console backend the loader wires per slice.  `auto` (default) selects by the slice OS: a Zephyr slice gets the Alp UART console (`alp`/`uart` -- printf lands on the module console UART, e.g. E1M edge UART0), a Yocto slice gets the Linux console.  `ram` forces the Zephyr RAM console for serial-less bench boards (read `ram_console_buf` over SWD).  `none` emits no console Kconfig and inherits the board default.  The board layer owns the physical console UART (`zephyr,console` DT chosen); this knob only picks the backend."
         },
         "modules": {
           "type": "object",
@@ -335,6 +341,13 @@
       "uniqueItems": true,
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" },
       "description": "Chip drivers the application links directly via <alp/chips/<name>.h>.  Each entry enables the matching CONFIG_ALP_SDK_CHIP_<NAME>=y.  Shared across cores (project-wide chip population)."
+    },
+
+    "libraries": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "description": "Curated third-party libraries to pull into the project (ADR 0018).  Each entry names a manifest under metadata/libraries/<name>.yaml; the orchestrator emits its per-OS wiring (Zephyr Kconfig / Yocto IMAGE_INSTALL / baremetal CMake) through the --emit contract and rejects a selection incompatible with the target SoM/core.  Project-wide: applied to every core whose OS the manifest supports.  Distinct from the per-core `cores.<id>.libraries:` curated-token list."
     },
 
     "features": {

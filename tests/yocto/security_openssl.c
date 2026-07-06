@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Plain-CMake tests for the Yocto/OpenSSL security backend
- * (src/yocto/security_yocto.c).
+ * (src/backends/security/yocto_drv.c, dispatched through
+ * src/security_dispatch.c since the #33 registry migration).
  *
  * Covers SHA-256 KAT, AES-128-GCM + ChaCha20-Poly1305 round-trip,
  * tag-mismatch detection on decrypt, NULL-arg refusal, and
@@ -77,6 +78,9 @@ static void test_hash_short_digest_buffer_refused(void)
 	size_t  glen = 99;
 	ALP_ASSERT_EQ_INT(alp_hash_finish(h, short_buf, sizeof(short_buf), &glen), ALP_ERR_INVAL);
 	ALP_ASSERT_EQ_INT(glen, 0);
+	/* Since the #33 dispatcher migration, finish() releases the handle
+	 * on failure too -- this close is a safe no-op, kept to prove
+	 * double-release safety. */
 	alp_hash_close(h);
 }
 
@@ -233,9 +237,12 @@ static void test_aead_close_null_is_safe(void)
 /* TRNG                                                                */
 /* ------------------------------------------------------------------ */
 
-static void test_random_bytes_zero_len_is_ok(void)
+static void test_random_bytes_zero_len_refused(void)
 {
-	ALP_ASSERT_EQ_INT(alp_random_bytes(NULL, 0), ALP_OK);
+	/* Dispatcher contract (matches the Zephyr side since #33):
+	 * len == 0 is INVAL -- a zero-length "random fill" is a caller
+	 * bug, not a no-op. */
+	ALP_ASSERT_EQ_INT(alp_random_bytes(NULL, 0), ALP_ERR_INVAL);
 }
 
 static void test_random_bytes_null_with_nonzero_refused(void)
@@ -277,7 +284,7 @@ int main(void)
 	test_aead_unsupported_alg_refused();
 	test_aead_close_null_is_safe();
 
-	test_random_bytes_zero_len_is_ok();
+	test_random_bytes_zero_len_refused();
 	test_random_bytes_null_with_nonzero_refused();
 	test_random_bytes_fills_buffer();
 

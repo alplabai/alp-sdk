@@ -22,7 +22,7 @@ ZTEST(alp_peripheral, test_dac_null_cfg)
 
 ZTEST(alp_peripheral, test_dac_out_of_range_channel)
 {
-	/* Channel id 9 is out of range for any E1M part (E1M_DAC_COUNT = 2). */
+	/* Channel id 9 is out of range for any E1M part (ALP_E1M_DAC_COUNT = 2). */
 	alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){
 	    .channel_id = 9u,
 	    .initial_mv = 0u,

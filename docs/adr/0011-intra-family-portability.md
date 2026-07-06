@@ -10,13 +10,13 @@ The SDK targets two distinct product lines:
 
 - **E1M** (35×35 mm) — Cortex-M-class, mW-class single-die SoCs.
   Today: Alif Ensemble (AEN3xx..AEN8xx) and NXP i.MX 93 RT-core
-  (NX9101).  Symbol namespace: `<alp/e1m_pinout.h>` (`E1M_PWM0`,
-  `E1M_I2C0`, `E1M_GPIO_IO0..IO25`, …).
+  (NX9101).  Symbol namespace: `<alp/e1m_pinout.h>` (`ALP_E1M_PWM0`,
+  `ALP_E1M_I2C0`, `ALP_E1M_GPIO_IO0..IO25`, …).
 - **E1M-X** (45×65 mm) — heterogeneous Cortex-A55 + Cortex-M33,
   higher-TDP silicon.  Today: Renesas RZ/V2N (V2N101/102) and the
   same with DEEPX DX-M1 (V2M101/102).  Symbol namespace:
-  `<alp/e1m_x_pinout.h>` (`E1M_X_PWM0`, `E1M_X_I2C0`,
-  `E1M_X_GPIO_IO0..IO35`, …).
+  `<alp/e1m_x_pinout.h>` (`ALP_E1M_X_PWM0`, `ALP_E1M_X_I2C0`,
+  `ALP_E1M_X_GPIO_IO0..IO35`, …).
 
 Customers reasonably expect the SDK to deliver on "swap the SoM, no
 code changes" — but that promise has two very different meanings:
@@ -52,7 +52,7 @@ portability story.
 **Cross-form-factor (E1M ↔ E1M-X) is intentionally not supported
 by source-level portability.**
 
-- The dual-namespace headers (`E1M_*` vs `E1M_X_*`) are the
+- The dual-namespace headers (`ALP_E1M_*` vs `ALP_E1M_X_*`) are the
   customer-facing manifestation of the split: choosing which header
   to `#include` is choosing the product line.
 - The matrix in [`docs/portability-matrix.md`](../portability-matrix.md)
@@ -66,7 +66,7 @@ by source-level portability.**
 
 ## Alternatives considered
 
-**A. Single namespace.**  Merge `E1M_*` and `E1M_X_*` into one
+**A. Single namespace.**  Merge `ALP_E1M_*` and `ALP_E1M_X_*` into one
 flat namespace — `ALP_PWM0` etc. — covering both form factors.
 Rejected because:
 
@@ -75,8 +75,8 @@ Rejected because:
   mis-target — picking an E1M-X SKU for a battery-powered sensor
   node, or an E1M SKU for a vision pipeline that needs DRP-AI.
 - The E1M-X form factor exposes 36 GPIO pads
-  (`E1M_X_GPIO_IO0..IO35`) where E1M exposes 26
-  (`E1M_GPIO_IO0..IO25`); a flat namespace either truncates the
+  (`ALP_E1M_X_GPIO_IO0..IO35`) where E1M exposes 26
+  (`ALP_E1M_GPIO_IO0..IO25`); a flat namespace either truncates the
   E1M-X side (losing useful pads) or pads out the E1M side (broken
   symbols on E1M SKUs).
 
@@ -106,7 +106,7 @@ because:
   fragmentation the SDK exists to prevent.
 
 **D. Single namespace with compile-time guards.**  One header
-exposing both `E1M_*` and `E1M_X_*`, with `#if defined(ALP_E1M_X)`
+exposing both `ALP_E1M_*` and `ALP_E1M_X_*`, with `#if defined(ALP_E1M_X)`
 guards picking the active set.  Rejected because:
 
 - Same downsides as option A (false equivalence) plus `#ifdef`

@@ -1,0 +1,80 @@
+# Alp SDK chip manifest: Bosch BMI323 6-axis IMU.
+schema_version:   1
+chip_id:          bmi323
+driver_status:    complete         # init / config / raw accel+gyro+temp read + ODR/FS config.
+                                    # On-chip fusion engine + virtual sensors deferred to v0.3.
+display_name:     "Bosch BMI323 6-axis IMU"
+vendor:           bosch
+mpn_population:
+  - "BMI323"
+
+datasheet:
+  primary:        "Bosch BMI323 datasheet (BST-BMI323-DS000-13, rev 1.7, Apr 2026)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x68, scope: "SDO = GND (default, second on-board IMU on the E1M/E1M-X EVKs)" }
+    - { addr_7bit: 0x69, scope: "SDO = VDDIO" }
+  address_strap_range: "0x68..0x69 (SDO strap)"
+  max_clock_hz:   1000000         # I2C Fast-mode-plus (Fm+) per datasheet features list.
+
+sensor:
+  axes:            6
+  who_am_i:        0x43            # CHIP_ID (reg 0x00); BMI323_CHIP_ID.
+  ranges_g:        [2, 4, 8, 16]
+  ranges_dps:      [125, 250, 500, 1000, 2000]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_BMI323
+  baremetal:      ALP_SDK_CHIP_BMI323
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SCL,   type: input,  scope: "I2C serial clock (pin name SCx; shared with SPI SCK)" }
+  - { name: SDA,   type: bidir,  scope: "I2C serial data (pin name SDx; shared with SPI SDI/SDA)" }
+  - { name: SDO,   type: input,  scope: "I2C address-select strap; GND=0x68 default, VDDIO=0x69" }
+  - { name: CSB,   type: input,  scope: "SPI chip-select; tie to VDDIO to select I2C/I3C mode" }
+  - { name: INT1,  type: output, scope: "interrupt 1; push-pull or open-drain, register-configurable" }
+  - { name: INT2,  type: output, scope: "interrupt 2; push-pull or open-drain, register-configurable" }
+  - { name: GNDIO, type: ground, scope: "I/O ground, separate from the analog/digital GND pin" }
+  - { name: VDD,   type: power }
+  - { name: VDDIO, type: power }
+  - { name: GND,   type: ground }
+
+physical:
+  # Pins per Bosch BMI323 datasheet BST-BMI323-DS000-13 (rev 1.7, Apr 2026),
+  # Chapter 8 "Pin Out and Connection Diagrams", Table 56 "Pin-out and pin
+  # connections" (2.5x3.0x0.83mm 14-pin LGA overmold).  NC pins (2, 3, 10, 11)
+  # omitted: not signal-bearing.
+  refdes_prefix: U
+  package:       LGA-14
+  footprint:     lga_14_2p5x3p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "SDO" }
+    - { pad: "4",  signal: "INT1" }
+    - { pad: "5",  signal: "VDDIO" }
+    - { pad: "6",  signal: "GNDIO" }
+    - { pad: "7",  signal: "GND" }
+    - { pad: "8",  signal: "VDD" }
+    - { pad: "9",  signal: "INT2" }
+    - { pad: "12", signal: "CSB" }
+    - { pad: "13", signal: "SCL" }
+    - { pad: "14", signal: "SDA" }
+  passives:
+    # "It is recommended to use 100nF capacitors for decoupling at pin 5
+    # (VDDIO) and pin 8 (VDD)." -- BST-BMI323-DS000-13 s8.2.
+    - { role: decouple, value: 100nF, net: VDD,   refdes_prefix: C }
+    - { role: decouple, value: 100nF, net: VDDIO, refdes_prefix: C }
+    - { role: pullup,   value: 10k,   net: SCL,   refdes_prefix: R }
+    - { role: pullup,   value: 10k,   net: SDA,   refdes_prefix: R }

@@ -19,6 +19,38 @@ sensor:
   sensitivity_db: -26
   snr_db:         65
 
+signals:
+  - { name: WS,    type: input,  scope: "I2S serial data-word select" }
+  - { name: LR,    type: input,  scope: "left/right channel select; low=left, high=right" }
+  - { name: SCK,   type: input,  scope: "I2S serial data clock" }
+  - { name: SD,    type: output, scope: "I2S serial data output; tristates when not driving" }
+
+physical:
+  # Pins per InvenSense/TDK ICS-43434 datasheet DS-000069 Rev 1.0,
+  # "TABLE 8. PIN FUNCTION DESCRIPTIONS" (bottom-port, 6-pad SMD,
+  # 3.50 x 2.65 x 0.98mm per the datasheet's small-outline claim).
+  refdes_prefix: U
+  package:              "6-pad bottom-port SMD"
+  footprint:             smd_6_3p50x2p65mm
+  operating_temp_deg_c:  "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "1", signal: "WS" }
+    - { pad: "2", signal: "LR" }
+    - { pad: "3", signal: "GND" }
+    - { pad: "4", signal: "SCK" }
+    - { pad: "5", signal: "VDD" }
+    - { pad: "6", signal: "SD" }
+  passives:
+    # Datasheet POWER SUPPLY DECOUPLING note: "placing a 0.1uF ceramic
+    # X7R or better capacitor between Pin 5 (VDD) and ground is
+    # strongly recommended".  Also: "SD trace should have a 100kOhm
+    # pull-down resistor to discharge the line" while all mics on a
+    # shared bus are tristated.
+    - { role: decouple, value: 100nF, net: VDD, refdes_prefix: C }
+    - { role: pulldown, value: 100k,  net: SD,  refdes_prefix: R }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_ICS_43434
   baremetal:      ALP_SDK_CHIP_ICS_43434
@@ -27,6 +59,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

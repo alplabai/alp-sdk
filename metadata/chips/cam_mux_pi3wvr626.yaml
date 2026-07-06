@@ -1,0 +1,89 @@
+# Alp SDK chip manifest: Diodes Inc PI3WVR626 2:1 MIPI CSI mux.
+schema_version:   1
+chip_id:          cam_mux_pi3wvr626
+driver_status:    complete         # GPIO-driven thin shim: init / select / get / deinit.
+display_name:     "Diodes/Pericom PI3WVR626 2:1 MIPI CSI 2-data-lane mux"
+vendor:           diodes-incorporated
+mpn_population:
+  - "PI3WVR626"
+  - "PI3WVR626XEBEX"               # 24-contact X1QFN (XEB), T&R ordering code
+
+datasheet:
+  primary:        "Diodes Incorporated PI3WVR626 datasheet (DS42006 Rev 4-2, May 2023)"
+
+bus:              none                  # signal mux only; no config bus, pure GPIO SEL/OE control.
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_CAM_MUX_PI3WVR626
+  baremetal:      ALP_SDK_CHIP_CAM_MUX_PI3WVR626
+
+families:
+  - aen                                 # on the E1M EVK only (E1M-X EVK leaves it unpopulated).
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard
+
+signals:
+  # Control (only SEL is host-driven; OE is normally hardwired low on the
+  # carrier -- see chips/cam_mux_pi3wvr626.c / alp_e1m_evk.h CAM_MUX.SEL net).
+  - { name: SEL,    type: input,  scope: "switch select; LOW=route A inputs, HIGH=route B inputs" }
+  - { name: OE,     type: input,  scope: "output enable, active low; HIGH=all I/O high-Z" }
+  # COM (output) port -- one MIPI D-PHY/C-PHY clock pair + 2 data-lane pairs.
+  - { name: CLK+,   type: bidir,  scope: "COM port clock, positive differential" }
+  - { name: CLK-,   type: bidir,  scope: "COM port clock, negative differential" }
+  - { name: "D1+",  type: bidir,  scope: "COM port data lane 1, positive differential" }
+  - { name: "D1-",  type: bidir,  scope: "COM port data lane 1, negative differential" }
+  - { name: "D2+",  type: bidir,  scope: "COM port data lane 2, positive differential" }
+  - { name: "D2-",  type: bidir,  scope: "COM port data lane 2, negative differential" }
+  # Input A (selected when SEL=LOW).
+  - { name: CLKA+,  type: bidir,  scope: "camera-A clock, positive differential" }
+  - { name: CLKA-,  type: bidir,  scope: "camera-A clock, negative differential" }
+  - { name: D1A+,   type: bidir,  scope: "camera-A data lane 1, positive differential" }
+  - { name: D1A-,   type: bidir,  scope: "camera-A data lane 1, negative differential" }
+  - { name: D2A+,   type: bidir,  scope: "camera-A data lane 2, positive differential" }
+  - { name: D2A-,   type: bidir,  scope: "camera-A data lane 2, negative differential" }
+  # Input B (selected when SEL=HIGH).
+  - { name: CLKB+,  type: bidir,  scope: "camera-B clock, positive differential" }
+  - { name: CLKB-,  type: bidir,  scope: "camera-B clock, negative differential" }
+  - { name: D1B+,   type: bidir,  scope: "camera-B data lane 1, positive differential" }
+  - { name: D1B-,   type: bidir,  scope: "camera-B data lane 1, negative differential" }
+  - { name: D2B+,   type: bidir,  scope: "camera-B data lane 2, positive differential" }
+  - { name: D2B-,   type: bidir,  scope: "camera-B data lane 2, negative differential" }
+  - { name: VDD,    type: power }
+  - { name: GND,    type: ground }
+
+physical:
+  # Pins per Diodes PI3WVR626 datasheet DS42006 Rev 4-2 (May 2023), page 4
+  # "Pin Configuration" / "Pin Description" table (24-pin, 2.5x2.5mm X1QFN).
+  # All 24 pins are signal-bearing (no NC balls on this package).
+  refdes_prefix: U
+  package:       QFN-24
+  footprint:     x1qfn_24_2p5x2p5mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "CLKB-" }
+    - { pad: "2",  signal: "CLKA-" }
+    - { pad: "3",  signal: "CLKB+" }
+    - { pad: "4",  signal: "CLKA+" }
+    - { pad: "5",  signal: "OE" }
+    - { pad: "6",  signal: "CLK+" }
+    - { pad: "7",  signal: "CLK-" }
+    - { pad: "8",  signal: "D1+" }
+    - { pad: "9",  signal: "GND" }
+    - { pad: "10", signal: "D1-" }
+    - { pad: "11", signal: "D2+" }
+    - { pad: "12", signal: "D2-" }
+    - { pad: "13", signal: "SEL" }
+    - { pad: "14", signal: "D2B-" }
+    - { pad: "15", signal: "D2A-" }
+    - { pad: "16", signal: "D2B+" }
+    - { pad: "17", signal: "D2A+" }
+    - { pad: "18", signal: "VDD" }
+    - { pad: "19", signal: "D1B-" }
+    - { pad: "20", signal: "D1A-" }
+    - { pad: "21", signal: "GND" }
+    - { pad: "22", signal: "D1B+" }
+    - { pad: "23", signal: "D1A+" }
+    - { pad: "24", signal: "GND" }

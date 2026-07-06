@@ -29,16 +29,18 @@ MANIFEST_DIR = REPO / "metadata" / "chips"
 # authoring metadata/chips/<id>.yaml; do not add new entries (a new driver
 # without a manifest must fail the gate, not be allowlisted away).
 KNOWN_DRIVER_NO_MANIFEST = {
-    "bmi323",
-    "bmp581",
-    "cam_mux_pi3wvr626",
     "lis2dw12",
     "ssd1331",
-    "tcal9538",
 }
 
 # Manifests intentionally without a driver (planned-but-unimplemented parts).
 KNOWN_MANIFEST_NO_DRIVER = {
+    # N93 BOM candidates: catalogued so E1M-NX9xxx can pick one once the
+    # production module lands; Linux/NXP host stack owns the data path.
+    "murata_lbee0zz2kl",
+    "murata_lbee5pl2dl",
+    "murata_lbes0zz2ll",
+    "murata_lbes5pl2el",
     "pca9451a",  # PMIC: metadata declared; driver intentionally not yet built.
 }
 

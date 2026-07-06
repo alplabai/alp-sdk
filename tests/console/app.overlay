@@ -1,0 +1,30 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the alp-sdk console ztest under native_sim.
+ *
+ * Exposes a single gpio-emul controller and wires its pin 0 into the
+ * alp,pin-array at index 0.  alp_gpio_open(0) resolves to pin 0 of
+ * gpio_emul0 -- the gpio-emul reset default is low, so `alp gpio read 0`
+ * returns "= 0" without any explicit drive.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	gpio_emul0: gpio_emul0 {
+		compatible = "zephyr,gpio-emul";
+		status = "okay";
+		gpio-controller;
+		rising-edge;
+		falling-edge;
+		#gpio-cells = <2>;
+		ngpios = <4>;
+	};
+
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&gpio_emul0 0 GPIO_ACTIVE_HIGH>;   /* [0] console test pin */
+	};
+};

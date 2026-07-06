@@ -7,8 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 
 The completion of **B1**. Earlier doorbell attempts could not be tested because
 only one M55 ran (a dual-boot ATOC boots one core) and a J-Link debug-AP write to
-the sender did not propagate. Now `aen-dualcore-master` brings both cores up
-(`se_service_boot_cpu`), so a **real HE-core sender** can ring HP.
+the sender did not propagate. Now `aen-dualcore-master` brings both cores up (the
+portable `alp_mproc_boot_core`, SE-boot-service-backed on AEN), so a **real
+HE-core sender** can ring HP.
 
 The HP build is the master + receiver (boots HE, then polls the MHU-1 receiver);
 the HE build is the sender (rings the MHU-1 sender). MHU-1 is the **non-secure

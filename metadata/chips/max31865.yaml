@@ -28,7 +28,64 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: BIAS,     type: output, scope: "bias voltage output for external RTD divider" }
+  - { name: REFIN_P,  type: analog, scope: "positive reference voltage input" }
+  - { name: REFIN_N,  type: analog, scope: "negative reference voltage input" }
+  - { name: ISENSOR,  type: analog, scope: "low side of external RREF sense resistor" }
+  - { name: FORCE_P,  type: output, scope: "high-side RTD drive" }
+  - { name: FORCE2,   type: output, scope: "RTD force-sense (Kelvin) pin" }
+  - { name: FORCE_N,  type: output, scope: "low-side RTD drive" }
+  - { name: RTDIN_P,  type: analog, scope: "positive RTD sense input" }
+  - { name: RTDIN_N,  type: analog, scope: "negative RTD sense input" }
+  - { name: SDI,      type: input,  scope: "SPI data in" }
+  - { name: SCLK,     type: input,  scope: "SPI clock" }
+  - { name: CS,       type: input,  scope: "SPI chip select, active low" }
+  - { name: SDO,      type: output, scope: "SPI data out" }
+  - { name: DRDY,     type: output, scope: "data-ready interrupt, active low, open-drain" }
+  - { name: GND1,     type: ground }
+  - { name: GND2,     type: ground }
+  - { name: DGND,     type: ground, scope: "digital ground" }
+
+physical:
+  # pins per Maxim MAX31865 datasheet Rev 3 (Aug 2015), TQFN-20 5x5mm
+  # (SnapEDA-confirmed package: 20-TQFN 5x5). The primary ADI PDF was
+  # unreachable from this environment (repeated fetch timeouts on
+  # analog.com); the numbered pin table below is transcribed from a
+  # secondary web reproduction of the same datasheet table (sunpcb.com
+  # pinout guide), cross-checked against the pin *names* independently
+  # corroborated by a second AI-summarized source -- hence
+  # `web_provisional`, pending maintainer confirmation against the
+  # primary PDF.
+  refdes_prefix: U
+  package:       TQFN-20
+  footprint:     tqfn_20_5p0x5p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "BIAS" }
+    - { pad: "2",  signal: "REFIN_P" }
+    - { pad: "3",  signal: "REFIN_N" }
+    - { pad: "4",  signal: "ISENSOR" }
+    - { pad: "5",  signal: "FORCE_P" }
+    - { pad: "6",  signal: "FORCE2" }
+    - { pad: "7",  signal: "RTDIN_P" }
+    - { pad: "8",  signal: "RTDIN_N" }
+    - { pad: "9",  signal: "FORCE_N" }
+    - { pad: "10", signal: "GND2" }
+    - { pad: "11", signal: "SDI" }
+    - { pad: "12", signal: "SCLK" }
+    - { pad: "13", signal: "CS" }
+    - { pad: "14", signal: "SDO" }
+    - { pad: "15", signal: "DGND" }
+    - { pad: "16", signal: "GND1" }
+    # pad 17 = N.C. per datasheet; omitted (not signal-bearing).
+    - { pad: "18", signal: "DRDY" }
+    - { pad: "19", signal: "DVDD" }
+    - { pad: "20", signal: "VDD" }

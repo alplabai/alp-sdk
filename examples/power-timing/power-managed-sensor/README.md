@@ -32,7 +32,7 @@ cores:
       heap_kib:  16
 ```
 
-The orchestrator (`scripts/alp_orchestrate.py:_slice_alp_conf`)
+The orchestrator (`scripts/alp_orchestrate/`)
 turns the `power:` block into:
 
 ```

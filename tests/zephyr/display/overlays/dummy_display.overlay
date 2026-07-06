@@ -1,0 +1,24 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the alp-sdk display ztest.  Wires the
+ * upstream dummy display controller (drivers/display/display_dummy.c,
+ * compatible "zephyr,dummy-dc") to the alp-display0 alias the
+ * zephyr_drv backend looks up.  The dummy driver validates
+ * display_write geometry against the declared resolution and
+ * supports blanking + set_pixel_format, so the whole portable
+ * surface is exercisable without a panel.
+ */
+
+/ {
+	aliases {
+		alp-display0 = &dummy_dc;
+	};
+
+	dummy_dc: dummy_dc {
+		compatible = "zephyr,dummy-dc";
+		height = <240>;
+		width = <320>;
+	};
+};

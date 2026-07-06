@@ -39,6 +39,19 @@ dependencies:
   - chip:  tps628640
     note:  "DEEPX-specific buck rails on BRD_I2C (0x44/0x48/0x4F)"
 
+physical:
+  # V2N-M1 populates the board-down (BGA) DX-M1 package -- its exact body
+  # size/pinout is vendor-NDA-gated and not published.  The dimensions below
+  # are for the publicly documented M.2 card variant of the SAME silicon
+  # (deepx.ai/products/dx-m1/, accessed 2026-07), given here for reference
+  # since both variants share electrical/thermal characteristics.
+  package:              "M.2 2280, M-Key (board-down BGA variant used on V2N-M1; card variant shown)"
+  dimension_mm:         "22 x 80"          # M.2 2280 card outline
+  antenna:               "n/a (PCIe Gen3 x4 accelerator; no RF)"
+  operating_temp_deg_c: "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_DEEPX_DXM1
   baremetal:      ALP_SDK_CHIP_DEEPX_DXM1

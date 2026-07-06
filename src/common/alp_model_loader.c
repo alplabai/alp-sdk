@@ -20,17 +20,30 @@ extern void alp_internal_set_last_error(alp_status_t s);
 
 #if defined(CONFIG_ALP_SDK_MODEL_READER)
 
-/* Device facts available to *every* SoM build via soc_caps + Kconfig.
- * The host SoC ref is always available; on-module discrete accelerators
- * are added when their backend is compiled in. */
-static const char *_avail_silicon[] = {
-	ALP_SOC_REF_STR,
-/* The on-module DEEPX DX-M1 (V2N-M1) becomes selectable when its backend
-     * is compiled in -- via the Zephyr Kconfig or the Yocto CMake option. */
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_DEEPX_DXM1) || defined(ALP_SDK_USE_DEEPX_DXM1)
+/* Silicon refs whose inference ENGINES this build actually drives.
+ *
+ * Availability is engine-gated, not SoC-string-gated: hosting an NPU
+ * on the die does not mean THIS core-class can run it.  On the RZ/V2N
+ * the DRP-AI3 engine is driven only by the A55/Linux MERA runtime
+ * (src/yocto/inference_drpai.cpp) and the DEEPX DX-M1 hangs off the
+ * A55's PCIe (src/yocto/inference_deepx.cpp, libdxrt) -- an M33
+ * Zephyr build must not offer either (issues #58/#59), or selection
+ * would hand back a target no compiled-in backend can open.  The
+ * Ethos-U NPUs, by contrast, ARE driven by the M-class core itself,
+ * so their engine Kconfigs gate the host SoC ref below. */
+static const char *const _avail_silicon[] = {
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	/* DRP-AI3 on the RZ/V2N N44 -- A55/Linux MERA runtime engine
+	 * (ref matches the soc_caps.h renesas:rzv2n:n44 entry). */
+	"renesas:rzv2n:n44",
+#endif
+#if defined(ALP_SDK_USE_DEEPX_DXM1)
+	/* A55 PCIe-attached DEEPX DX-M1 (dxrt engine, V2N-M1 SoM). */
 	"deepx:dx:m1",
 #endif
+	NULL, /* sentinel: keeps the array non-empty with no engines */
 };
+#define N_AVAIL_SILICON (sizeof(_avail_silicon) / sizeof(_avail_silicon[0]) - 1u)
 
 alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 {
@@ -57,9 +70,19 @@ alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 	}
 
 	alp_model_select_env_t env = {
-		.soc_ref           = ALP_SOC_REF_STR,
+	/* Engine-gated soc_ref: the host SoC ref counts as available
+	 * only when this build compiles an engine backend that drives
+	 * the on-SoC NPU from this core (Ethos-U on M-class).  A V2N
+	 * M33 build passes NULL here so DRP-AI targets are never
+	 * offered to a core that cannot run them (issue #58). */
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) ||                                       \
+    defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
+		.soc_ref = ALP_SOC_REF_STR,
+#else
+		.soc_ref = NULL,
+#endif
 		.avail_silicon     = _avail_silicon,
-		.n_avail_silicon   = sizeof(_avail_silicon) / sizeof(_avail_silicon[0]),
+		.n_avail_silicon   = N_AVAIL_SILICON,
 		.arena_sram_kib    = (uint32_t)ALP_SOC_NPU_ARENA_SRAM_KIB,
 		.preferred_backend = ALP_INFERENCE_BACKEND_AUTO, /* board define wiring is a follow-up */
 	};

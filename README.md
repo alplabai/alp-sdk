@@ -50,7 +50,7 @@ alp run
 
 `alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `alp run` builds for `native_sim` by default and prints the app's stdout straight through; pass `--board <name>` for a real-hardware build (`--flash` to chain flash).
 
-`alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.
+`alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `alp doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  The full verb set — `build` / `flash` / `emit` / `size` / `image` / `clean` / `renode` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
 ## Two consumer paths
 
@@ -58,8 +58,8 @@ The SDK supports both flows equally — pick whichever fits.
 
 - **Standalone / hand-written firmware.**  Write a Zephyr (or Yocto,
   or bare-metal) app against `<alp/...>` headers directly.  Pick
-  instance IDs by hand from `<alp/e1m_pinout.h>` — `E1M_I2C0`,
-  `E1M_PWM3`, etc. — and your app is portable across every
+  instance IDs by hand from `<alp/e1m_pinout.h>` — `ALP_E1M_I2C0`,
+  `ALP_E1M_PWM3`, etc. — and your app is portable across every
   E1M-conformant SoM.  Capability validation runs at runtime in
   `*_open`; `alp_last_error()` tells you why an open failed.
 - **alp-studio codegen.**  The
@@ -78,9 +78,10 @@ should be able to write by hand.
 ## Portability promise — swap-and-run within a family
 
 Change `som.sku:` in `board.yaml`, rebuild, ship — **within a SoM
-family**.  Empirically proven across all 7 E1M SKUs (AEN301..801 +
-NX9101) and all 4 E1M-X SKUs (V2N101, V2N102, V2M101, V2M102) for
-the canonical portable examples; matrix at
+family**.  Empirically proven across the 6 released E1M AEN SKUs,
+the placeholder N93 bring-up preset (`E1M-NX9101`), and all 4
+E1M-X SKUs (V2N101, V2N102, V2M101, V2M102) for the canonical
+portable examples; matrix at
 [`docs/portability-matrix.md`](docs/portability-matrix.md).
 
 Cross-form-factor portability between E1M and E1M-X is intentionally
@@ -136,7 +137,7 @@ directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
 som:
-  sku: E1M-V2N101      # your MPN -- the SDK ships a preset for every released MPN
+  sku: E1M-V2N101      # your MPN -- the SDK ships presets for supported SoMs
   hw_rev: r1
 
 preset: e1m-x-evk      # or write your board out inline -- see docs/board-config.md
@@ -230,9 +231,9 @@ the SoM preset's `topology:` block.  Customers override on a
 per-core basis via the project's `cores:` block.
 
 Want a GUI?  Install the [VS Code extension](https://github.com/alplabai/alp-sdk-vscode) — schema-aware
-editing, a configurator panel with dropdowns for every released MPN
-and board, one-keypress "Generate all" for the four emit modes,
-inline validator diagnostics in the Problems panel, west wrappers.
+editing, a configurator panel with dropdowns for supported SoM
+presets and boards, one-keypress "Generate all" for the four emit
+modes, inline validator diagnostics in the Problems panel, west wrappers.
 
 ## Development hosts
 
@@ -350,7 +351,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 | Audio / camera / display | `audio.h` (PDM in + I²S out), `camera.h`, `gui.h` (LVGL), `display.h` (panels) — chip drivers: SSD1306, SSD1331, ST7789, OV5640, CAM_MUX, TAS2563, PDM mic |
 | Connectivity & security | `iot.h` (Wi-Fi/MQTT), `ble.h` (BLE 5.4), `security.h` (MbedTLS PSA Crypto), `storage.h` (LittleFS), OPTIGA Trust M chip driver |
 | DSP / graphics / power | `dsp.h` (FFT / FAC / IIR chain), `tmu.h` (trig-/math-unit offload), `gpu2d.h` (2D blit/fill), `power.h` (sleep + wake sources) — HW-accelerated where the SoC provides it, SW fallback (CMSIS-DSP / libm / Zephyr PM) otherwise |
-| Inference dispatcher | `inference.h` — portable models load via **`alp_inference_open_alpmodel()`** (the `.alpmodel` package + selection engine — see *AI framework* above), which dispatches to the registry-backed backend selector + tensor-arena management.  Backends registered today: `tflm` (CPU reference kernels, portable), `ethos_u_aen` (Ethos-U on Alif Ensemble — U55 every SKU, U85 on E4/E6/E8 Transformer-capable), `ethos_u_n93` (Ethos-U U65 on i.MX 93), `drpai_v2n_stub` (DRP-AI3 on RZ/V2N — tracked by issue #58), `deepx_dxm1_stub` (DEEPX DX-M1 — tracked by issue #59), `sw_fallback` (NOSUPPORT floor).  Selector picks the highest-priority backend matching the SoM's silicon ref; exact match beats `*` wildcard at equal priority. |
+| Inference dispatcher | `inference.h` — portable models load via **`alp_inference_open_alpmodel()`** (the `.alpmodel` package + selection engine — see *AI framework* above), which dispatches to the registry-backed backend selector + tensor-arena management.  Backends registered today: `tflm` (CPU reference kernels, portable), `ethos_u_aen` (Ethos-U on Alif Ensemble — U55 every SKU, U85 on E4/E6/E8 Transformer-capable), `ethos_u_n93` (Ethos-U U65 on i.MX 93), `sw_fallback` (NOSUPPORT floor).  DRP-AI3 and DEEPX DX-M1 are A55/Linux-side engines (`src/yocto/inference_{drpai,deepx}.cpp` — MERA runtime / `libdxrt` over PCIe) dispatched by the Yocto inference dispatcher, deliberately absent from the M-class registry (#58/#59).  Selector picks the highest-priority backend matching the SoM's silicon ref; exact match beats `*` wildcard at equal priority. |
 | Multi-proc / IPC | `mproc.h` (mailbox + shared memory + hardware semaphore) + `rpc.h` (framed RPC over RPMsg / OpenAMP) — the heterogeneous Zephyr↔Yocto path |
 | Hardware info | `hw_info.h` — 128-byte EEPROM manifest + BOARD_ID ADC + `assert_matches_build()` |
 | Vendor escape hatches | `ext/<vendor>/…` — Alif / Renesas / NXP / DEEPX surfaces for capabilities the portable `<alp/*>` API can't express (camera, inference, ADC, storage, power) |
@@ -387,7 +388,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate.py      │
+  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate/        │
   │ (v0.8)        │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
   │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │

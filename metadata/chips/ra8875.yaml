@@ -37,7 +37,45 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins + power architecture per RAiO RA8875 datasheet v1.2 (Eng), §4
+  # "Pin Description" (signal table) + §9-1 "Pin Assignment" (LQFP-100
+  # numbered diagram, product code RA8875L3N) + §6-10-2 "Power Architecture"
+  # (Figure 6-47, decoupling values). Pin numbers derived by counting the
+  # Figure 9-1 pin-name sequence against its printed corner markers
+  # (1 / 26 / 51 / 76) and 5-pin tick marks -- cross-checked internally
+  # consistent (25 names per LQFP side) but not vendor-confirmed; treat as
+  # web_provisional. Only the driver-relevant 4-wire-SPI + control + primary
+  # power pins are listed; the parallel-MCU/LCD-panel/touch/keyscan/serial-
+  # flash pins (not used by this SPI-only driver) are omitted rather than
+  # guessed against the diagram.
+  refdes_prefix: U
+  package:       LQFP-100
+  footprint:     raio_lqfp_100
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "7",  signal: WAIT }    # WAIT# -- panel-busy output
+    - { pad: "8",  signal: INT }     # INT#  -- interrupt output
+    - { pad: "9",  signal: RESET }   # RST#  -- active-low hardware reset
+    - { pad: "13", signal: VDDIO }   # VDDP  -- 3.3V IO power
+    - { pad: "16", signal: GND }
+    - { pad: "17", signal: DVDD }    # CORE_VDD -- 1.8V core power (internal LDO)
+    - { pad: "32", signal: SCLK }    # SCL   -- serial clock (4-wire/3-wire SPI or IIC)
+    - { pad: "33", signal: MOSI }    # SDI   -- serial data in
+    - { pad: "34", signal: MISO }    # SDO   -- serial data out
+    - { pad: "35", signal: CS }      # SCS#  -- serial chip select
+    - { pad: "76", signal: AVDD }    # ADC_VDD -- 3.3V touch-ADC analog power
+  passives:
+    # Figure 6-47 "Power Connection for RA8875" calls out 0.1uF bypass caps
+    # beside each power pad; listing the three primary rails this manifest's
+    # pins[] exposes.
+    - { role: decouple, value: 100nF, net: VDDIO, refdes_prefix: C }
+    - { role: decouple, value: 100nF, net: DVDD,  refdes_prefix: C }
+    - { role: decouple, value: 100nF, net: AVDD,  refdes_prefix: C }

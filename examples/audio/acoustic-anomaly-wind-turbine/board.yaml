@@ -1,0 +1,30 @@
+# board.yaml -- nacelle acoustic anomaly monitor for wind turbines.
+#
+# A low-power M55-HE node listens to a PDM mic, extracts DSP features,
+# normalises blade-periodic energy to rotor order (BPF), and emits a
+# per-interval anomaly score for drivetrain tonals + gross blade aero
+# anomalies.  Same source targets the V2N DEEPX path when som.sku is
+# flipped.
+
+som:
+  sku: E1M-AEN701
+
+preset: e1m-evk
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+    libraries:
+      - tflite_micro
+    inference:
+      default_arena_kib: 64
+    peripherals:
+      - gpio                 # tacho pulse input (rotor speed).
+
+# PDM mic input is the Zephyr DMIC audio subsystem (not a peripheral
+# enum), wired via CONFIG_AUDIO_DMIC=y in testcase.yaml -- same
+# convention as audio-wake-word.
+
+diagnostics:
+  log_level: info

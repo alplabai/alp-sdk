@@ -6,13 +6,12 @@
  * once per second and print the value.  Classic V2N starter app.
  *
  * On V2N + V2N-M1 the TMP112 sits on BRD_I2C at 7-bit address
- * 0x40.  Same chip on E1M-AEN (on the Alif LPI2C bus); the example
+ * 0x48 (ADD0 strapped to GND -- see metadata/chips/tmp112.yaml).
+ * Same chip on E1M-AEN (on the Alif LPI2C bus); the example
  * is portable -- pick the right bus id for your board.
  */
 
 #include <stdio.h>
-
-#include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
 #include "alp/chips/tmp112.h"
@@ -33,7 +32,7 @@ int main(void)
 	}
 
 	tmp112_t     sensor;
-	alp_status_t s = tmp112_init(&sensor, bus, 0x40u);
+	alp_status_t s = tmp112_init(&sensor, bus, TMP112_I2C_ADDR_GND);
 	if (s != ALP_OK) {
 		/* Bus reachable but the TMP112 isn't ACKing -- either the
          * chip isn't populated, the address is wrong, or the bus
@@ -59,7 +58,7 @@ int main(void)
 		} else {
 			printf("[temp] sample %d: read failed (status=%d)\n", i, (int)s);
 		}
-		k_msleep(1000);
+		alp_delay_ms(1000);
 	}
 
 	tmp112_deinit(&sensor);

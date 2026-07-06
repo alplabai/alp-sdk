@@ -20,7 +20,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-hp-core-smoke`](aen-hp-core-smoke/)          | **bench** -- first light on the second M55 (RTSS-HP); every other AEN app runs on the M55-HE. |
 | [`aen-power-smoke`](aen-power-smoke/)              | **bench** -- Stage-A low-power smoke: architectural Cortex-M55 WFI sleep + wake, no PM subsystem. |
 | [`aen-power-iwic`](aen-power-iwic/)                | **bench** -- Stage-B IWIC deep-sleep over the Alif PM layer on pinned Zephyr 4.4.0. |
-| [`aen-aipm-read`](aen-aipm-read/)                  | **bench** -- READ-ONLY dump of the live SE aiPM (Autonomous Intelligent Power Management) RUN/OFF power+clock profiles. |
+| [`aen-aipm-read`](aen-aipm-read/)                  | **bench** -- READ-ONLY dump of the live RUN/STANDBY operating-point profiles via the portable `alp_power_profile_get()` (SE aiPM-backed on AEN). |
 | [`aen-wdt-feed`](aen-wdt-feed/)                    | CMSDK watchdog install + feed over the upstream `arm,cmsdk-watchdog` driver (Tier-1). |
 
 ### Dual-core (B1) + IPC
@@ -28,7 +28,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-dualcore-probe`](aen-dualcore-probe/)        | **bench** -- the decisive B1 test: does a dual-entry ATOC boot BOTH M55 cores? Heartbeat stamps in global SRAM0. |
-| [`aen-dualcore-master`](aen-dualcore-master/)      | **bench** -- the SES-booted core starts the other M55 at runtime via `se_service_boot_cpu()` over the `seservice0` MHU. |
+| [`aen-dualcore-master`](aen-dualcore-master/)      | **bench** -- the SES-booted core starts the other M55 at runtime via the portable `alp_mproc_boot_core()` (SE boot service over the `seservice0` MHU on AEN). |
 | [`aen-dualcore-doorbell`](aen-dualcore-doorbell/)  | **bench** -- HE->HP MHU-1 doorbell with both M55 cores live (the completion of B1). |
 | [`aen-dualcore-ipc`](aen-dualcore-ipc/)            | **bench** -- bidirectional HE<->HP shared-memory request/response over a global-SRAM0 mailbox. |
 | [`aen-rpc-pingpong`](aen-rpc-pingpong/)            | OpenAMP RPMsg (`ipc_service`) ping/pong between the two M55 cores over the `alif,mhuv2-mbox` MBOX driver. |
@@ -38,8 +38,8 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
-| [`aen-se-service-info`](aen-se-service-info/)      | **staging** -- SE SERVICE transport binds + a single LCS read over the bench RAM-run flow. |
-| [`aen-se-service-query`](aen-se-service-query/)    | **bench** -- READ-ONLY dump of the broader SE service surface (version, LCS, ...). |
+| [`aen-se-service-info`](aen-se-service-info/)      | **staging** -- SE SERVICE transport binds + a single LCS read over the bench RAM-run flow (deliberately vendor-specific bring-up regcheck; customer code uses the portable wrappers instead). |
+| [`aen-se-service-query`](aen-se-service-query/)    | **bench** -- READ-ONLY dump of the portable SE-backed surfaces: SoC identity (`<alp/hw_info.h>`), RUN/STANDBY profiles (`<alp/power.h>`), TRNG (`<alp/security.h>`). |
 | [`aen-se-crypto`](aen-se-crypto/)                  | SHA-256 known-answer + AES-128-GCM round-trip + TRNG through `<alp/security.h>`, backed by the SE CryptoCell (else MbedTLS-PSA fallback). |
 | [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M sanity + ECDSA-P256 sign over BRD_I2C (LPI2C0, M55-HE) via the portable `<alp/...>` API; the §5.2 bench OPTIGA check. |
 
@@ -70,6 +70,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-ethernet-link`](aen-ethernet-link/)          | Bring up the E8 GMAC (`eth_dwmac` + the `alif,ethernet` glue) and report net-if state (Zephyr net-if API). |
 | [`aen-cc3501e-bringup`](aen-cc3501e-bringup/)      | Host (Alif M55-HE) side of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor bring-up (power-gate, reset, control link). |
+| [`aen-cc3501e-companion-tour`](aen-cc3501e-companion-tour/) | **capstone** -- full-surface tour of the CC3501E companion API: init -> ping -> diag -> Wi-Fi scan/connect/IP -> TCP socket -> BLE enable/scan -> proxied-GPIO read. |
 | [`aen-can-regcheck`](aen-can-regcheck/)            | **staging** -- Alif CAN-FD controller bind-only staging check (bus wiring HW-blocked). |
 | [`aen-sdcard-readout`](aen-sdcard-readout/)        | Probe a microSD over the E8 SD Host Controller (`snps,dwc-sdhc` + SDMMC disk) via the disk-access API. |
 | [`aen-spi-regcheck`](aen-spi-regcheck/)            | **bench** -- Alif DWC_ssi SPI driver (`alif,dwc-ssi-spi`, spi0 @ 0x48103000) register validation. |

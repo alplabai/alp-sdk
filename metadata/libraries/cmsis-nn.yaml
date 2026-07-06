@@ -1,0 +1,44 @@
+# CMSIS-NN -- Arm CMSIS neural-network kernels (ADR 0018 library manifest).
+#
+# The Cortex-M inference-kernel companion to CMSIS-DSP; pairs with tflite_micro
+# on the M55.  Formalises `libraries: [cmsis-nn]`.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * west module `cmsis-nn`, path modules/lib/cmsis-nn,
+#     west.yml revision d20117c9e88cf9018d6fa06744dddac700c3e3a1
+#   * umbrella symbol CONFIG_CMSIS_NN + per-layer switches
+#     ($ZEPHYR_BASE/modules/cmsis-nn/Kconfig: `menuconfig CMSIS_NN`,
+#     `config CMSIS_NN_ACTIVATION` ... `config CMSIS_NN_SVD`).  The layer set
+#     below matches Zephyr's own coverage test
+#     ($ZEPHYR_BASE/tests/lib/cmsis_nn/prj.conf).
+#   * licence Apache-2.0  (Arm CMSIS family; module glue
+#     $ZEPHYR_BASE/modules/cmsis-nn/Kconfig header:
+#     "SPDX-License-Identifier: Apache-2.0")
+schema_version: 1
+name: cmsis-nn
+description: "Arm CMSIS-NN -- quantised neural-network kernels for Cortex-M."
+tier: A
+version: "d20117c9e88cf9018d6fa06744dddac700c3e3a1"
+license: Apache-2.0
+
+requires:
+  # Grounded: the module Kconfig is `menuconfig CMSIS_NN` with
+  # `depends on CPU_CORTEX_M` (and `select CMSIS_DSP`) in
+  # $ZEPHYR_BASE/modules/cmsis-nn/Kconfig -- CMSIS-NN is a Cortex-M library.
+  core_class: m
+
+integration:
+  zephyr:
+    module: cmsis-nn
+    kconfig:
+      - CONFIG_CMSIS_NN=y
+      - CONFIG_CMSIS_NN_ACTIVATION=y
+      - CONFIG_CMSIS_NN_BASICMATH=y
+      - CONFIG_CMSIS_NN_CONCATENATION=y
+      - CONFIG_CMSIS_NN_CONVOLUTION=y
+      - CONFIG_CMSIS_NN_FULLYCONNECTED=y
+      - CONFIG_CMSIS_NN_NNSUPPORT=y
+      - CONFIG_CMSIS_NN_POOLING=y
+      - CONFIG_CMSIS_NN_RESHAPE=y
+      - CONFIG_CMSIS_NN_SOFTMAX=y
+      - CONFIG_CMSIS_NN_SVD=y

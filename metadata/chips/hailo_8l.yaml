@@ -22,6 +22,20 @@ signals:
   - { name: CLKREQ#, type: bidir, scope: "PCIe CLKREQ# negotiation" }
   - { name: PERST#, type: input, scope: "host-driven PERST# release after rails settle" }
 
+physical:
+  # Hailo-8L is a pre-routed M.2 AI accelerator MODULE, not a bare
+  # die -- module-style physical block per the Hailo-8L M.2 ET
+  # product brief Rev 2.0 (2023) "Technical Specifications" table.
+  # This board population uses the Key B+M / 2242 SKU (matches
+  # pcie.form_factor: m_2_2242 above); the module edge connector is
+  # the standard M.2 Key B+M card-edge (no separate antenna -- this
+  # is a PCIe compute accelerator, not an RF module).
+  package:               "M.2 Key B+M, 2242 (breakable to 2260/2280 per Hailo-8L M.2 ET spec)"
+  dimension_mm:          "22 x 42"
+  operating_temp_deg_c:  "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_HAILO_8L
   baremetal:      ALP_SDK_CHIP_HAILO_8L
@@ -30,6 +44,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

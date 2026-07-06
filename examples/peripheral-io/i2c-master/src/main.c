@@ -34,22 +34,20 @@
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
-
 #include "alp/peripheral.h"
 #include "alp/chips/tmp112.h"
 
 /* BOARD_I2C_SENSORS is a portable cross-EVK alias from <alp/board.h>:
- *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> E1M_I2C0
- *   E1M-X EVK -> XEVK_I2C_BUS_SENSORS -> E1M_X_I2C0
+ *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> ALP_E1M_I2C0
+ *   E1M-X EVK -> XEVK_I2C_BUS_SENSORS -> ALP_E1M_X_I2C0
  * Rebind it in board.yaml `pins:` to port to another board. */
 #include "alp/board.h"
 
-/* TMP112 7-bit I2C address with ADD0 = GND (the strap the AEN
- * SoM uses by default).  V2N's TMP112 sits at 0x40 because the
- * SoM ties ADD0 to SDA -- if you copy this example to a V2N
- * project, change this constant.  See the TMP112 datasheet
- * SBOS473K table 2 or include/alp/chips/tmp112.h. */
+/* TMP112 7-bit I2C address with ADD0 = GND -- the default strap
+ * on both the E1M-AEN and E1M-V2N SoM families (see
+ * metadata/chips/tmp112.yaml).  The ADD0 strap selects one of
+ * 0x48..0x4B; see the TMP112 datasheet SBOS473K table 2 or
+ * include/alp/chips/tmp112.h if your board straps differently. */
 #define TMP112_ADDR_7BIT TMP112_I2C_ADDR_GND /* 0x48 */
 
 /* Number of samples to take before exiting.  Capped so the
@@ -65,6 +63,10 @@
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[i2c-master] open BOARD_I2C_SENSORS @ 400 kHz\n");
 
 	/* Open the bus at 400 kHz (I2C Fast-mode).  TMP112 supports up
@@ -73,7 +75,7 @@ int main(void)
      * baseline for unknown devices; 1 MHz (Fast-mode Plus) needs
      * confirmation in the chip's datasheet and short bus traces. */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: E1M_I2C0; E1M-X EVK: E1M_X_I2C0 */
+	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: ALP_E1M_I2C0; E1M-X EVK: ALP_E1M_X_I2C0 */
 	    .bitrate_hz = 400000,
 	});
 	if (bus == NULL) {
@@ -153,7 +155,7 @@ int main(void)
              * will likely succeed. */
 			printf("[i2c-master] sample %u: read -> %d\n", i, (int)s);
 		}
-		k_msleep(SAMPLE_PERIOD_MS);
+		alp_delay_ms(SAMPLE_PERIOD_MS);
 	}
 
 	/* Clean shutdown -- deinit the chip driver (which leaves the

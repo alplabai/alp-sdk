@@ -20,8 +20,9 @@
  *
  * PHY POWER/RESET are ALIF pins (per the SoM TSV), NOT CC3501E as the first cut
  * claimed: E_PHY_PWRDWN = P15_4 (lpgpio) and E_PHY_RESET = P11_6 (gpio11). Both
- * are added below and driven by main(); the alp-sdk E8 dtsi carries gpio0..gpio9
- * only, so gpio11 + lpgpio are created here (reg/IRQ/ngpios from the fork dtsi).
+ * are driven by main(); the alp-sdk E8 dtsi already carries gpio0..gpio9 AND
+ * lpgpio, so lpgpio just needs status="okay" -- only gpio11 is newly created
+ * here (reg/IRQ/ngpios from the fork dtsi).
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
@@ -78,22 +79,23 @@
 		#gpio-cells = <2>;
 		status = "okay";
 	};
+};
 
-	/* PHY power-down line E_PHY_PWRDWN = P15_4 (lpgpio pin 4). lpgpio@42002000
-	 * (AON/LP domain) from the fork dts. */
-	lpgpio: gpio@42002000 {
-		compatible = "snps,designware-gpio";
-		reg = <0x42002000 0x1000>;
-		ngpios = <8>;
-		gpio-controller;
-		#gpio-cells = <2>;
-		status = "okay";
-	};
+/* PHY power-down line E_PHY_PWRDWN = P15_4 (lpgpio pin 4). lpgpio@42002000
+ * (AON/LP domain) already exists in the alp-sdk E8 dtsi; just enable it. */
+&lpgpio {
+	status = "okay";
 };
 
 &ethernet {
 	pinctrl-0 = <&pinctrl_eth>;
 	pinctrl-names = "default";
-	local-mac-address = [02 01 56 78 43 21];
+	/* Station MAC: inherits zephyr,random-mac-address from the SoC dtsi
+	 * (per-boot random locally-administered 02:01:56:xx:xx:xx) -- DHCP
+	 * doesn't care which MAC asks, and a random one means two boards on
+	 * the same bench switch never collide.  To pin a fixed per-unit MAC
+	 * instead:
+	 *   /delete-property/ zephyr,random-mac-address;
+	 *   local-mac-address = [ .. ]; */
 	status = "okay";
 };

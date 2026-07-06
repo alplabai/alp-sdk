@@ -77,10 +77,75 @@ i2c:
   max_clock_hz:   400000           # Fast-mode -- datasheet I2C bus AC chars table 13
 
 signals:
+  # Logical V2N board-level roles (as consumed by the driver / board wiring).
   - { name: Audio_CLKB,    type: output, v2n_route: "P10 (E1M AR9 AUDIO_CLK)" }
   - { name: Audio_CLKB_OE, type: input,  v2n_route: "P67 (host-driven enable)" }
   - { name: SDA,           type: bidir,  v2n_route: "P06 (BRD_I2C.SDA)" }
   - { name: SCL,           type: input,  v2n_route: "P07 (BRD_I2C.SCL)" }
+
+  # Chip-native pin names per Renesas 5L35023 datasheet Table 1 "Pin
+  # Descriptions" (24-VFQFPN); used only by physical.pins below.
+  - { name: VDDA,             type: power,  scope: "VDD 1.8V (analog)" }
+  - { name: SDA_DFC0,         type: bidir,  scope: "I2C data; also DFC0 function selected by SEL_DFC power-on latch" }
+  - { name: SEL_DFC_SCL_DFC1, type: input,  scope: "I2C clock; SEL_DFC power-on latch selects I2C vs DFC control-pin mode (datasheet pin name SEL_DFC/SCL_DFC1)" }
+  - { name: X2,               type: bidir,  scope: "crystal oscillator interface output" }
+  - { name: CLKIN_X1,         type: input,  scope: "crystal oscillator interface input, or single-ended CLKIN" }
+  - { name: VBAT,             type: power,  scope: "32.768kHz DCO supply; usually a coin-cell battery, 1.8V" }
+  - { name: REF,              type: output, scope: "1.8V reference clock output" }
+  - { name: VDD18,            type: power,  scope: "VDD 1.8V" }
+  - { name: OE2,              type: input,  scope: "output-enable control 2, multi-function pin (see OE function table)" }
+  - { name: VDDSE2,           type: power,  scope: "output supply for SE2; sets SE2 output voltage level" }
+  - { name: SE2,              type: output, scope: "single-ended clock output 2" }
+  - { name: VDDSE1,           type: power,  scope: "output supply for SE1; sets SE1 output voltage level" }
+  - { name: SE1,              type: output, scope: "single-ended clock output 1" }
+  - { name: OE1,              type: input,  scope: "output-enable control 1; pull to 6.5V when burning OTP registers" }
+  - { name: VDDDIFF1,         type: power,  scope: "output supply for DIFF1; sets DIFF1 output voltage level" }
+  - { name: DIFF1B,           type: output, scope: "differential clock output 1, complement (LVCMOS/LP-HCSL, OTP-selectable)" }
+  - { name: DIFF1,            type: output, scope: "differential clock output 1, true (LVCMOS/LP-HCSL, OTP-selectable)" }
+  - { name: SE3,              type: output, scope: "single-ended clock output 3" }
+  - { name: VDDSE3,           type: power,  scope: "output supply for SE3; sets SE3 output voltage level" }
+  - { name: OE3,              type: input,  scope: "output-enable control 3, multi-function pin (see OE function table)" }
+  - { name: VDDDIFF2,         type: power,  scope: "output supply for DIFF2; sets DIFF2 output voltage level" }
+  - { name: DIFF2B,           type: output, scope: "differential clock output 2, complement (LVCMOS/LP-HCSL, OTP-selectable)" }
+  - { name: DIFF2,            type: output, scope: "differential clock output 2, true (LVCMOS/LP-HCSL, OTP-selectable)" }
+  - { name: EPAD,             type: ground, scope: "exposed thermal/ground pad; connect to ground plane" }
+
+physical:
+  # pins per Renesas 5L35023 datasheet (renesas.com/en/document/dst/5l35023-datasheet,
+  # accessed 2026-07), Figure 1 "Pin Assignments for 4x4mm 24-VFQFPN Package" +
+  # Table 1 "Pin Descriptions". Pin 7 (NC) omitted: not signal-bearing.
+  # No public decoupling-cap table found for this part; passives omitted rather
+  # than invented -- follow Renesas layout guidelines when laying out a board.
+  refdes_prefix: U
+  package:       VFQFPN-24
+  footprint:     vfqfpn_24_4p0x4p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "VDDA" }
+    - { pad: "2",  signal: "SDA_DFC0" }
+    - { pad: "3",  signal: "SEL_DFC_SCL_DFC1" }
+    - { pad: "4",  signal: "X2" }
+    - { pad: "5",  signal: "CLKIN_X1" }
+    - { pad: "6",  signal: "VBAT" }
+    - { pad: "8",  signal: "REF" }
+    - { pad: "9",  signal: "VDD18" }
+    - { pad: "10", signal: "OE2" }
+    - { pad: "11", signal: "VDDSE2" }
+    - { pad: "12", signal: "SE2" }
+    - { pad: "13", signal: "VDDSE1" }
+    - { pad: "14", signal: "SE1" }
+    - { pad: "15", signal: "OE1" }
+    - { pad: "16", signal: "VDDDIFF1" }
+    - { pad: "17", signal: "DIFF1B" }
+    - { pad: "18", signal: "DIFF1" }
+    - { pad: "19", signal: "SE3" }
+    - { pad: "20", signal: "VDDSE3" }
+    - { pad: "21", signal: "OE3" }
+    - { pad: "22", signal: "VDDDIFF2" }
+    - { pad: "23", signal: "DIFF2B" }
+    - { pad: "24", signal: "DIFF2" }
+    - { pad: "EPAD", signal: "EPAD" }
 
 kconfig:
   zephyr:         ALP_SDK_CHIP_CLK_5L35023B

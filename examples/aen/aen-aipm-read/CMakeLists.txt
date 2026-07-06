@@ -1,24 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# aen-aipm-read -- query the SE for the live aiPM RUN / OFF power+clock profiles
-# (run_profile_t / off_profile_t: clock source LFRC/LFXO/HFRC/HFXO/PLL, CPU
-# frequency selector, retained memory_blocks, on power_domains, DC-DC mV) and
-# DECODE each numeric selector into a human-readable legend, on the
-# E1M-AEN801 (Ensemble E8, M55-HE), via the bench RAM-run + RAM-console flow.
+# aen-aipm-read -- read the live RUN / STANDBY power+clock operating-point
+# profiles (CPU clock Hz, DC-DC rail mV, implementation-defined domain/memory/
+# wake masks, flexible-IO rail) through the PORTABLE <alp/power.h> profile
+# surface, on the E1M-AEN801 (Ensemble E8, M55-HE), via the bench RAM-run +
+# RAM-console flow.
 #
-# This is the aiPM-focused companion to aen-se-service-query: same proven,
-# READ-ONLY SE mailbox path, but it leans on the two aiPM getters
-# (se_service_get_run_cfg / se_service_get_off_cfg) and turns the raw enum
-# values they return into named clock/freq/domain/memory output.  ONLY
-# non-mutating queries are called; set_run_cfg / set_off_cfg are deliberately
-# never invoked (a wrong power/clock value can brown out the rail) -- see
-# src/main.c.
+# This is the profile-focused companion to aen-se-service-query: same proven,
+# READ-ONLY controller-mailbox path, reached through alp_power_profile_get()
+# (the SDK's E8 backend maps the SE aiPM ordinals to Hz/mV).  ONLY the
+# non-mutating side is called; alp_power_profile_set is deliberately never
+# invoked (a wrong power/clock value can brown out the rail) -- see src/main.c.
 #
 # Plain prj.conf app (no alp_project.py board.yaml emit): the SE-service stack
 # Kconfigs (CONFIG_ARM_MHUV2 / CONFIG_HAS_ALIF_SE_SERVICES -- the alp-sdk
-# symbols that compile the in-tree MHUv2 IPM driver + hal_alif's se_service.c)
-# are sourced under CONFIG_ALP_SDK, which prj.conf sets, and the DT nodes are
-# enabled by the board overlay.  See src/main.c + the board overlay.
+# symbols that compile the in-tree MHUv2 IPM driver + hal_alif's se_service.c
+# the SDK backend consumes) are sourced under CONFIG_ALP_SDK, which prj.conf
+# sets, and the DT nodes are enabled by the board overlay.  See src/main.c +
+# the board overlay.
 
 cmake_minimum_required(VERSION 3.20)
 

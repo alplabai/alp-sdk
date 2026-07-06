@@ -16,10 +16,11 @@
  *
  * UTIMER per-timer register map for utimer0 (parent reg[0] base 0x48001000), the
  * ground-truth the human reads over J-Link to confirm the count advances:
- *     CNTR (live counter value) = 0x48001000 + 0x44 = 0x48001044
- *   (offset per the hal_alif utimer.c CNTR register; confirm vs the Alif TRM at
- *    bench bring-up -- the in-firmware counter_get_value() is the primary
- *    evidence and does not depend on this address.)
+ *     CNTR (live counter value) = 0x48001000 + 0xA0 = 0x480010A0
+ *   (per-timer offset 0xA0 = UTIMER_CNTR per the DFP AE822FA0E5597 rtss_he
+ *    soc.h; offset 0x44 is UTIMER_DMA_CLEAR_SRC_B_1, NOT the counter -- the
+ *    in-firmware counter_get_value() is the primary evidence and does not
+ *    depend on this address.)
  *
  * The utimer0 parent carries clock-frequency = <100000000> (a PLACEHOLDER tick
  * rate from the dtsi; see the bench note in main.c) -- it only scales

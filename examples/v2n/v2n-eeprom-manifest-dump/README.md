@@ -54,7 +54,7 @@ attempting to deploy firmware to it.
 ## Adapting
 
 The example's `board.yaml` declares the EEPROM at the V2N default
-bus (E1M_I2C0) + address (`0x50`).  Change those values if your
+bus (ALP_E1M_I2C0) + address (`0x50`).  Change those values if your
 board wires the EEPROM elsewhere.
 
 ## See also

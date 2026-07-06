@@ -158,6 +158,14 @@ against the SKU's `som.yaml` preset.
    west flash
    ```
 
+   One-liner alternative (manifest-driven -- builds every slice
+   declared in the example's `board.yaml`, then flashes them in
+   `boot_order:`; see [cli.md](cli.md)):
+
+   ```bash
+   west alp-build examples/peripheral-io/gpio-button-led && west alp-flash examples/peripheral-io/gpio-button-led
+   ```
+
    Expected output on the UART: the
    `[gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED` banner
    from the SDK's first-build tutorial.
