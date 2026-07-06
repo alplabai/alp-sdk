@@ -41,10 +41,11 @@ rollback, and reorder, but code that can write the partition can rebuild the
 store and counter consistently. App-immutability requires the `HW_ENFORCED`
 tier (secure isolation + protected counter).
 
-On the E1M-AEN801 / Alif E8 board, this example carries an AEN-specific overlay
-that runs the image from MRAM slot0 and carves a dedicated MRAM
-`alp_ulog_partition` for NVS. The overlay keeps that partition away from the
-top-of-MRAM ATOC package used by the SE boot flow.
+On the E1M-AEN801 / Alif E8 board, this example carries AEN-specific overlays
+for a dual-M55 image. The SE ATOC package loads HP to its ITCM global alias
+(`0x50000000`) and loads HE to its ITCM global alias (`0x58000000`). The update
+log itself is stored in a dedicated MRAM `alp_ulog_partition` for NVS, kept away
+from the top-of-MRAM ATOC package used by the SE boot flow.
 
 The AEN bench config also sets
 `CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED=y`. That is deliberate: MRAM/NVS
@@ -101,6 +102,22 @@ The HP owner build prints:
 ```
 [update-log] AEN HP owner: MRAM writer service starting
 [update-log] owner storage: MRAM NVS (alp_ulog_partition)
+```
+
+For the dual-core AEN package, use a two-entry ATOC: HP is `M55_HP`
+`["load", "boot"]` at `0x50000000`, and HE is `M55_HE` `["load"]` at
+`0x58000000`. HP then releases HE at runtime with the portable
+`alp_mproc_boot_core()` path and serves HE's update-log requests over MHU.
+The bench helper below builds that exact package; `--package-only` validates the
+ATOC without writing MRAM.
+
+```
+scripts/bench/aen/flash-update-log-dual.sh --package-only \
+    build/firmware-update-log-hp build/firmware-update-log-he
+
+ALP_CONFIRM_DESTRUCTIVE_FLASH=yes \
+scripts/bench/aen/flash-update-log-dual.sh \
+    build/firmware-update-log-hp build/firmware-update-log-he
 ```
 
 On a board that enables the TF-M owner or the AEN M55 owner with the firewall

@@ -4,12 +4,19 @@
  *
  * HP owner overlay for firmware-update-log.
  *
- * Start from the same MRAM partition map as the HE client so both images agree
- * on alp_ulog_partition, then enable the SE-service nodes HP needs for
- * alp_mproc_boot_core(ALP_CORE_M55_HE, ...).
+ * HP is loaded to its ITCM global alias (0x50000000) and owns the MRAM update
+ * log partition. Enable the SE-service nodes HP needs for
+ * alp_mproc_boot_core(ALP_CORE_M55_HE, 0x58000000).
  */
 
-#include "alp_e1m_aen801_m55_he.overlay"
+#include "alp_e1m_aen801_m55_log_mram.dtsi"
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
 
 &seservice0r {
 	status = "okay";

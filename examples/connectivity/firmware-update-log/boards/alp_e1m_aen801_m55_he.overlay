@@ -2,50 +2,17 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * E1M-AEN801 / Alif Ensemble E8 MRAM layout for firmware-update-log.
+ * E1M-AEN801 / Alif Ensemble E8 HE client overlay for firmware-update-log.
  *
- * The board's production MRAM map uses the top 128 KiB as generic storage.
- * The Alif ATOC package also lives at the top of MRAM in the Flow-D boot path,
- * so this example uses a smaller demo map:
- *
- *   0x000000..0x00ffff  boot placeholder
- *   0x010000..0x08ffff  slot0 image, booted by the SE from MRAM
- *   0x090000..0x09ffff  alp_ulog_partition, Zephyr NVS update-log store
- *   0x560000..0x57ffff  reserved for the Alif ATOC package
- *
- * The update-log partition is deliberately away from the ATOC area. In the
- * hardware-enforced flow, HP owns this partition and HE must be blocked from
- * writing it by the SE/device firewall. Without that firewall policy, MRAM/NVS
- * is only persistence, not app-immutability.
+ * HE is loaded to its ITCM global alias (0x58000000) by the dual-entry ATOC.
+ * The audit log itself stays in MRAM through the shared alp_ulog_partition.
  */
 
-/delete-node/ &boot_partition;
-/delete-node/ &slot0_partition;
-/delete-node/ &slot1_partition;
-/delete-node/ &scratch_partition;
-/delete-node/ &storage_partition;
+#include "alp_e1m_aen801_m55_log_mram.dtsi"
 
-&mram_storage {
-	partitions {
-		boot_partition: partition@0 {
-			label = "mcuboot";
-			reg = <0x0 DT_SIZE_K(64)>;
-		};
-
-		slot0_partition: partition@10000 {
-			label = "image-0";
-			reg = <0x10000 DT_SIZE_K(512)>;
-		};
-
-		alp_ulog_partition: partition@90000 {
-			label = "alp-ulog";
-			reg = <0x90000 DT_SIZE_K(64)>;
-		};
-
-		atoc_reserved_partition: partition@560000 {
-			label = "alif-atoc";
-			reg = <0x560000 DT_SIZE_K(128)>;
-			read-only;
-		};
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
 	};
 };
