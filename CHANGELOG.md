@@ -5,7 +5,9 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.9.0 candidate
+## [Unreleased] - v0.10.0 candidate
+
+## [v0.9.0] - 2026-07-06
 
 ### Added — Studio carrier-netlist handoff
 
