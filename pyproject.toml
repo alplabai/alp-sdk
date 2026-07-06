@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alp-sdk-cli"
-version = "0.6.0"
+version = "0.9.0"
 description = "Command-line front-end for the Alp SDK"
 requires-python = ">=3.10"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "cbor2>=5.0",
     "questionary>=2.0",
     "colorama>=0.4.6",
+    "pyserial>=3.5",
 ]
 
 [project.optional-dependencies]
@@ -36,13 +37,20 @@ model-compile = [
     "tflite>=2.10",
     "flatbuffers>=23.1.21",
 ]
+# Customer-facing MCP (Model Context Protocol) server -- exposes the SDK
+# catalog + validator/emit runtime to an MCP-capable agent.  Optional: only
+# needed to run the `alp-mcp` stdio server.
+mcp = [
+    "mcp>=1.2",
+]
 
 [project.scripts]
 alp = "alp_cli.main:cli"
+alp-mcp = "alp_mcp.server:main"
 
 [tool.setuptools]
 package-dir = {"" = "scripts"}
 
 [tool.setuptools.packages.find]
 where = ["scripts"]
-include = ["alp_cli*"]
+include = ["alp_cli*", "alp_mcp*"]

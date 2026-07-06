@@ -11,7 +11,7 @@ Compare the same demo across SoMs to see what the
 `capabilities:` block in `metadata/e1m_modules/E1M-*.yaml` is
 actually buying you at runtime:
 
-- **E1M-AEN701** has GPU2D + DAVE2D + DMA2D populated.  The
+- **E1M-AEN801** has GPU2D + DAVE2D + DMA2D populated.  The
   §D.lib.loader emits `CONFIG_ALP_LVGL_GPU2D=y` +
   `CONFIG_ALP_LVGL_DMA2D=y`, and LVGL hardware-accelerates the
   blits.

@@ -2,54 +2,58 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-se-service-query -- exercise the READ-ONLY Secure-Enclave (SE) service
- * surface on the E1M-AEN801 (Ensemble E8, M55-HE), via the bench RAM-run +
- * RAM-console flow.  The companion to aen-se-service-info (which proved the
- * transport binds + the single LCS read); this app dumps the broader set of
- * ZERO-RISK SE queries the hal_alif client exposes, to characterise what the SE
- * reports on a maker-provisioned E8.
+ * aen-se-service-query -- exercise the READ-ONLY portable surfaces that the
+ * Secure Enclave (SE) services back on the E1M-AEN801 (Ensemble E8, M55-HE),
+ * via the bench RAM-run + RAM-console flow.  The companion to
+ * aen-se-service-info (the vendor-specific transport bring-up regcheck): where
+ * that app proves the SE MAILBOXES bind, this one shows what CUSTOMER CODE
+ * calls once they do -- and it carries no vendor include.
  *
- * SAFETY -- ONLY READ-ONLY / NON-MUTATING SE SERVICES ARE CALLED HERE:
- *   se_service_heartbeat            -- liveness ping
- *   se_service_get_se_revision      -- SE firmware revision string
- *   se_service_get_toc_number       -- number of TOC entries
- *   se_service_get_toc_version      -- TOC version
- *   se_service_get_device_part_number
- *   se_service_system_get_device_data -- LCS + revision + part/serial (the #192 read)
- *   se_service_get_run_cfg          -- current run power/clock profile
- *   se_service_get_off_cfg          -- off/standby power/wake profile
- *   se_service_get_rnd_num          -- TRNG sanity (8 bytes)
+ * Portable surfaces exercised (all read-only / non-mutating):
+ *   alp_soc_secure_fw_ping   (<alp/hw_info.h>)  -- controller liveness
+ *   alp_soc_info_read        (<alp/hw_info.h>)  -- SoC identity: secure-fw
+ *                             version string, part number, die revision,
+ *                             lifecycle state, factory-fused serial
+ *   alp_power_profile_get    (<alp/power.h>)    -- RUN + STANDBY operating
+ *                             points (Hz / mV / opaque masks)
+ *   alp_random_bytes         (<alp/security.h>) -- TRNG sanity (8 bytes; on
+ *                             the E8 the security dispatcher routes this into
+ *                             the SE CryptoCell TRNG)
  *
- * DELIBERATELY NOT CALLED (mutating / destructive -- a wrong value can brown out
- * the rail, change the security posture, or BRICK secure boot; these need a
- * recovery plan + explicit sign-off before any bench run):
- *   se_service_update_stoc          -- REWRITES the secure-boot TOC in MRAM
- *   se_service_set_run_cfg / set_off_cfg / clock_set_divider -- power/clock change
- *   se_service_boot_es0 / shutdown_es0 / boot_reset_soc / boot_reset_cpu
- *   se_service_se_sleep_req / system_set_services_debug
+ * On the E8 the registry backends behind these surfaces ride the bench-proven
+ * SE-service mailbox; every round-trip is bounded, so the app never hangs.
+ * The mutating SE side (secure-boot TOC update, run/off profile writes, boot /
+ * reset / sleep requests) is exactly what the portable surface does NOT map
+ * here -- alp_power_profile_set exists but is deliberately never invoked (a
+ * wrong value can brown out the rail; see the <alp/power.h> warning).
  *
- * Every call below bounds its wait inside se_service.c (returns 0 / -EAGAIN /
- * -EBUSY / a positive SE error), so the app never hangs.  PASS gate: the SE
- * answers every read-only query rc=0.
+ * Vendor-specific reads the previous revision dumped raw (the secure-boot TOC
+ * entry count/version) are Alif bring-up detail with no portable meaning; the
+ * vendor-scoped aen-se-service-info regcheck is where SE-transport poking
+ * belongs.  The lifecycle state (LCS) survives portably as the
+ * implementation-defined alp_soc_info_t::lifecycle code (E8 legend, from the
+ * Alif SE service reference: 0x0 CM, 0x1 DM, 0x5 secure-enabled, 0x7 RMA).
+ *
+ * PASS gate: every portable call returns ALP_OK.  On builds without the SE
+ * backends (native_sim) the same code links; the identity/profile calls
+ * report ALP_ERR_NOSUPPORT and soc_ref still names the build's silicon.
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include <zephyr/kernel.h>
-#include <zephyr/device.h>
-#include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
 
-/* hal_alif SE service client (Apache-2.0). */
-#include <se_service.h>
+#include <alp/hw_info.h>
+#include <alp/power.h>
+#include <alp/security.h>
 
-/* SE firmware revision string buffer (VERSION_RESPONSE_LENGTH = 80). */
-#define SE_REV_LEN 80
-
-/* LCS legend (Alif SE service reference). */
-static const char *lcs_name(uint8_t lcs)
+/* E8 lifecycle legend (Alif SE service reference).  The portable field is an
+ * implementation-defined code; this decode is REPORTING sugar for the bench
+ * log, keyed on the build's silicon -- not portable API. */
+static const char *lifecycle_name(uint32_t lcs)
 {
 	switch (lcs) {
 	case 0x0U:
@@ -76,108 +80,81 @@ static void hexdump(const char *label, const uint8_t *p, size_t n)
 
 int main(void)
 {
-	int  rc;
-	bool all_ok = true;
+	alp_status_t rc;
+	bool         all_ok = true;
 
-	printk("\n=== aen-se-service-query (read-only SE surface) ===\n");
+	printk("\n=== aen-se-service-query (portable read-only surface) ===\n");
 
-	/* 0. Liveness: a heartbeat round-trip proves the SE answers the mailboxes. */
-	rc = se_service_heartbeat();
-	printk("heartbeat            : rc=%d\n", rc);
-	all_ok &= (rc == 0);
+	/* 0. Liveness: a bounded ping proves the controller answers before we
+	 *    trust the identity + profile reads. */
+	rc = alp_soc_secure_fw_ping();
+	printk("secure_fw_ping       : rc=%d\n", (int)rc);
+	all_ok &= (rc == ALP_OK);
 
-	/* 1. SE firmware revision string. */
-	uint8_t se_rev[SE_REV_LEN];
+	/* 1. SoC identity: soc_ref is build-time truth (filled even on
+	 *    failure); the runtime fields come from the controller. */
+	alp_soc_info_t info;
 
-	memset(se_rev, 0, sizeof(se_rev));
-	rc                     = se_service_get_se_revision(se_rev);
-	se_rev[SE_REV_LEN - 1] = '\0';
-	printk("se_revision          : rc=%d \"%s\"\n", rc, (const char *)se_rev);
-	all_ok &= (rc == 0);
-
-	/* 2. TOC count + version. */
-	uint32_t toc_num = 0U, toc_ver = 0U;
-
-	rc = se_service_get_toc_number(&toc_num);
-	printk("toc_number           : rc=%d n=%u\n", rc, toc_num);
-	all_ok &= (rc == 0);
-
-	rc = se_service_get_toc_version(&toc_ver);
-	printk("toc_version          : rc=%d 0x%08x\n", rc, toc_ver);
-	all_ok &= (rc == 0);
-
-	/* 3. Device part number. */
-	uint32_t part = 0U;
-
-	rc = se_service_get_device_part_number(&part);
-	printk("device_part_number   : rc=%d 0x%08x\n", rc, part);
-	all_ok &= (rc == 0);
-
-	/* 4. Full device data: LCS + revision + part + serial (the #192 read, expanded). */
-	get_device_revision_data_t dev = { 0 };
-
-	rc = se_service_system_get_device_data(&dev);
-	printk("device_data          : rc=%d\n", rc);
-	all_ok &= (rc == 0);
-	if (rc == 0) {
-		printk("        revision_id = 0x%08x\n", (uint32_t)dev.revision_id);
-		printk("        LCS         = 0x%02x  (%s)\n", (unsigned int)dev.LCS, lcs_name(dev.LCS));
-		hexdump("ALIF_PN    ", (const uint8_t *)dev.ALIF_PN, sizeof(dev.ALIF_PN));
-		hexdump("SerialN    ", (const uint8_t *)dev.SerialN, sizeof(dev.SerialN));
+	rc = alp_soc_info_read(&info);
+	printk("soc_info_read        : rc=%d\n", (int)rc);
+	all_ok &= (rc == ALP_OK);
+	printk("        soc_ref     = \"%s\"\n", info.soc_ref);
+	if (rc == ALP_OK) {
+		printk("        secure_fw   = \"%s\"\n", info.secure_fw_version);
+		printk("        part_number = 0x%08x\n", info.part_number);
+		printk("        revision_id = 0x%08x\n", info.revision_id);
+		printk(
+		    "        lifecycle   = 0x%02x  (%s)\n", info.lifecycle, lifecycle_name(info.lifecycle));
+		hexdump("serial     ", info.serial, info.serial_len);
 	}
 
-	/* 5. Current RUN power/clock profile (read-only -- set_run_cfg is NOT called). */
-	run_profile_t run = { 0 };
+	/* 2. RUN operating-point profile (read-only -- profile_set is NOT
+	 *    called). */
+	alp_power_profile_t run = { 0 };
 
-	rc = se_service_get_run_cfg(&run);
-	printk("run_cfg              : rc=%d\n", rc);
-	all_ok &= (rc == 0);
-	if (rc == 0) {
-		printk("        dcdc_voltage=%u mV  power_domains=0x%08x  memory_blocks=0x%08x\n",
-		       run.dcdc_voltage,
-		       run.power_domains,
-		       run.memory_blocks);
-		printk("        run_clk_src=%d cpu_clk_freq=%d aon_clk_src=%d vdd_ioflex_3V3=%d\n",
-		       (int)run.run_clk_src,
-		       (int)run.cpu_clk_freq,
-		       (int)run.aon_clk_src,
-		       (int)run.vdd_ioflex_3V3);
+	rc = alp_power_profile_get(ALP_POWER_PROFILE_RUN, &run);
+	printk("profile_get(RUN)     : rc=%d\n", (int)rc);
+	all_ok &= (rc == ALP_OK);
+	if (rc == ALP_OK) {
+		printk("        cpu=%u Hz  rail=%u mV  io=%u mV\n", run.cpu_clk_hz, run.rail_mv, run.io_mv);
+		printk("        domains=0x%08x  memories=0x%08x\n", run.power_domains, run.memory_blocks);
 	}
 
-	/* 6. OFF / standby profile (read-only -- set_off_cfg is NOT called). */
-	off_profile_t off = { 0 };
+	/* 3. STANDBY operating-point profile (read-only). */
+	alp_power_profile_t stby = { 0 };
 
-	rc = se_service_get_off_cfg(&off);
-	printk("off_cfg              : rc=%d\n", rc);
-	all_ok &= (rc == 0);
-	if (rc == 0) {
-		printk("        dcdc_voltage=%u mV  wakeup_events=0x%08x  ewic_cfg=0x%08x\n",
-		       off.dcdc_voltage,
-		       off.wakeup_events,
-		       off.ewic_cfg);
-		printk("        vtor=0x%08x vtor_ns=0x%08x\n", off.vtor_address, off.vtor_address_ns);
+	rc = alp_power_profile_get(ALP_POWER_PROFILE_STANDBY, &stby);
+	printk("profile_get(STANDBY) : rc=%d\n", (int)rc);
+	all_ok &= (rc == ALP_OK);
+	if (rc == ALP_OK) {
+		printk(
+		    "        cpu=%u Hz  rail=%u mV  io=%u mV\n", stby.cpu_clk_hz, stby.rail_mv, stby.io_mv);
+		printk("        domains=0x%08x  memories=0x%08x  wake=0x%08x\n",
+		       stby.power_domains,
+		       stby.memory_blocks,
+		       stby.wake_events);
 	}
 
-	/* 7. TRNG sanity: pull 8 bytes from the SE entropy source. */
+	/* 4. TRNG sanity: 8 random bytes through the portable security
+	 *    surface (SE CryptoCell on the E8, PSA elsewhere). */
 	uint8_t rnd[8] = { 0 };
 
-	rc = se_service_get_rnd_num(rnd, sizeof(rnd));
-	printk("get_rnd_num(8)       : rc=%d\n", rc);
-	all_ok &= (rc == 0);
-	if (rc == 0) {
+	rc = alp_random_bytes(rnd, sizeof(rnd));
+	printk("random_bytes(8)      : rc=%d\n", (int)rc);
+	all_ok &= (rc == ALP_OK);
+	if (rc == ALP_OK) {
 		hexdump("rnd        ", rnd, sizeof(rnd));
 	}
 
 	if (all_ok) {
-		printk("RESULT PASS: SE answered every read-only query (heartbeat + se_revision "
-		       "+ toc + part + device_data[LCS=0x%02x] + run_cfg[%umV] + off_cfg + rnd) "
-		       "-- no mutating service called (update_stoc/set_run_cfg gated out)\n",
-		       (unsigned int)dev.LCS,
-		       run.dcdc_voltage);
+		printk("RESULT PASS: every portable read-only call answered ALP_OK "
+		       "(ping + soc_info[lifecycle=0x%02x] + RUN/STANDBY profiles + rnd) "
+		       "-- no mutating surface called (alp_power_profile_set gated out)\n",
+		       info.lifecycle);
 	} else {
-		printk("RESULT FAIL: at least one read-only SE query did not return rc=0 "
-		       "(SE asleep/unreachable on this boot, or a service unsupported) -- see "
-		       "the per-call rc above\n");
+		printk("RESULT FAIL: at least one portable call did not return ALP_OK "
+		       "(NOSUPPORT = backend not on this build; NOT_READY = controller "
+		       "asleep/unreachable on this boot) -- see the per-call rc above\n");
 	}
 
 	return 0;

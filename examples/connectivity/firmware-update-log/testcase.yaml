@@ -3,8 +3,8 @@ sample:
   name: firmware-update-log
   description: |
     Portable tamper-evident firmware-update audit log via
-    <alp/update_log.h>. Software tier runs on native_sim; the same
-    code is hardware-enforced where a secure backend is present.
+    <alp/update_log.h>. Native_sim exercises the software tier; TF-M
+    builds report HW_ENFORCED only when a secure owner is present.
 tests:
   alp_sdk.examples.connectivity.firmware_update_log.native_sim:
     platform_allow:
@@ -19,3 +19,18 @@ tests:
       type: one_line
       regex:
         - "verify: OK"
+  alp_sdk.examples.connectivity.firmware_update_log.require_hw.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    extra_configs:
+      - CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED=y
+    tags:
+      - alp-sdk
+      - example
+      - update_log
+      - security
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "HW_ENFORCED required, but no secure owner/firewall-backed backend is active"

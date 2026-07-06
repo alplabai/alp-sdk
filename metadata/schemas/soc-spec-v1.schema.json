@@ -342,7 +342,7 @@
         "alp_module_skus": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Alp Lab module SKUs (e.g. E1M-AEN701) that ship this Alif variant. Lets the studio resolve E1M SKU → SoC variant in one hop."
+          "description": "Alp Lab module SKUs (e.g. E1M-AEN801) that ship this Alif variant. Lets the studio resolve E1M SKU → SoC variant in one hop."
         }
       }
     }

@@ -9,10 +9,13 @@
  *   - NULL handle -> ALP_ERR_INVAL.
  *   - non-DEEPX backend -> ALP_ERR_NOT_PRESENT_ON_THIS_SOC.
  *
- * After the gate the calls return NOSUPPORT today; the
- * deepx_dxm1 backend itself is a NOT_IMPLEMENTED stub (see
- * issue #59).  When the DEEPX SDK adapter lands, the bodies
- * below dispatch through the per-handle slot + tile state.
+ * After the gate the calls return NOSUPPORT today.  On Zephyr the
+ * vendor gate is always the terminal answer: the registry ships NO
+ * deepx-vendor inference backend because the DX-M1 hangs off the
+ * A55's PCIe and is driven by libdxrt on Linux only
+ * (src/yocto/inference_deepx.cpp; issue #59) -- an M-class handle
+ * can never be DEEPX-backed.  Wiring these knobs through to the
+ * Yocto handle is follow-up work gated on the DEEPX SDK adapter.
  */
 
 #include <stdbool.h>
@@ -45,10 +48,10 @@ alp_status_t alp_deepx_inference_slot_pin(alp_inference_t *inf, alp_deepx_infere
 	if ((unsigned)slot >= ALP_DEEPX_INFERENCE_SLOT_COUNT) {
 		return ALP_ERR_INVAL;
 	}
-	/* Slot-pin enforcement lands when the deepx_dxm1 backend
-     * grows past its NOT_IMPLEMENTED stub (issue #59).  The
-     * BUSY check against other in-flight handles requires
-     * adapter-side reservation state. */
+	/* Slot-pin enforcement lands when these knobs are wired to
+     * the A55-side dxrt body (issue #59).  The BUSY check
+     * against other in-flight handles requires adapter-side
+     * reservation state. */
 	return ALP_ERR_NOSUPPORT;
 }
 

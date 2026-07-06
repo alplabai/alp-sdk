@@ -81,3 +81,20 @@ verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard + probe_both_slaves + vset_offsets + status_decode
   register_map:   verified_2026_06_06  # AA82BZ workbook + Datasheet Rev C, cell-by-cell
+
+physical:
+  # INCOMPLETE: package type/size below (WLCSP-81, 3.85x3.85mm) is publicly
+  # confirmed via Qorvo product-page/distributor listings ("13-OUT 81-Pin
+  # WLCSP", "3.85mm x 3.85mm"). The ball map itself is NOT public -- Qorvo's
+  # own product page marks ACT88760 "Not Recommended For New Designs" and
+  # gates the full datasheet behind that notice; this manifest's existing
+  # `datasheet:` block (Rev C, Users Guide, CMI profile, "Customer Facing"
+  # register-map xlsx) are Alp-internal/NDA documents, not public sources,
+  # so per the public/internal split they cannot be used to populate a
+  # pin-level ball map in this public manifest. No pins[] populated -- do
+  # not guess ball assignments for nIRQ/nRESET/PWREN/nPB or the ADD1/ADD2
+  # I2C pins from the internal docs.
+  package:      "WLCSP-81"
+  dimension_mm: "3.85 x 3.85"
+  visibility:   public
+  provenance:   web_provisional

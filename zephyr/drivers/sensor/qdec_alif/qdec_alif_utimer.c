@@ -1,6 +1,32 @@
-/* Copyright (c) 2025 Alif Semiconductor
+/*
+ * Copyright (c) 2025 Alif Semiconductor.
+ * Copyright (c) 2026 Alp Lab AB
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * ====== ADR 0017 Tier-2 (vendored VERBATIM fork-driver copy, INTERIM, task #21) ======
+ * The Alif Ensemble UTIMER quadrature-decoder is driven by a vendored copy of
+ * the Apache-2.0 Alif qdec sensor driver (drivers/sensor/qdec_alif/
+ * qdec_alif_utimer.c, compatible "alif,utimer-qdec").  Upstream Zephyr v4.4
+ * ships no Alif qdec driver and hal_alif exposes no Zephyr device for the
+ * quadrature block -- only the register-helper library (drivers/utimer/include/
+ * utimer.h, alif_utimer_*) this file calls -- so the qdec source is carried
+ * in-tree VERBATIM so it survives a `west update`.  Retire onto the opt-in
+ * sdk-alif fork compatible once the qdec node is repointed AND bench-verified
+ * (task #21).  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * ==================================================================
+ *
+ * Node shape (matches the sibling counter/PWM utimer drivers): the
+ * "alif,utimer-qdec" compatible sits on a CHILD node of the "alif,utimer"
+ * PARENT.  This driver binds the CHILD and reaches the parent via
+ * DT_INST_PARENT() for the two reg windows ("global" 0x48000000 + "timer",
+ * the per-channel block, e.g. 0x4800d000 for QEC0 = UTIMER channel 12), the
+ * timer-id, and the clock phandle.  Position is read by POLLING the counter
+ * value (sensor_sample_fetch); the driver registers no ISR.  The reported
+ * SENSOR_CHAN_ROTATION value is scaled to DEGREES
+ * (counter * 360 / counts-per-revolution), not raw counts.
+ * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the live
+ * quadrature decode / filter / clock programming are bench follow-ups).
  */
 
 #define DT_DRV_COMPAT alif_utimer_qdec

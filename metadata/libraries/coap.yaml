@@ -1,0 +1,47 @@
+# CoAP -- Constrained Application Protocol (ADR 0018 library manifest).
+#
+# Part of the ADR 0018 cloud / connectivity Tier-B group.  CoAP (RFC 7252) is
+# the constrained-device REST transport LwM2M rides on (metadata/libraries/
+# lwm2m.yaml `select COAP`); it is also useful stand-alone for a lightweight
+# device<->cloud request/response channel.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * IN-TREE Zephyr subsystem -- NOT a separate west module.  It lives in the
+#     zephyr repo itself at subsys/net/lib/coap/ (west module `zephyr`,
+#     west.yml revision v4.4.0), so `integration.zephyr.module` is null.
+#   * enable symbol CONFIG_COAP
+#     ($ZEPHYR_BASE/subsys/net/lib/coap/Kconfig:6 `config COAP` /
+#     "CoAP Support").
+#   * upstream version 4.4.0 -- the pinned Zephyr release the subsystem ships
+#     with ($ZEPHYR_BASE/VERSION: VERSION_MAJOR/MINOR = 4/4, PATCHLEVEL 0).
+#   * licence Apache-2.0
+#     ($ZEPHYR_BASE/subsys/net/lib/coap/Kconfig:4 "SPDX-License-Identifier:
+#     Apache-2.0"; the whole zephyr repo is Apache-2.0, $ZEPHYR_BASE/LICENSE).
+#
+# Tier B: the ADR 0018 initial curation groups cloud/connectivity as Tier B and
+# promotes per demand.  Even though CoAP is upstream and cheap, it is not yet
+# CI-built with a shipped teaching example (the Tier-A bar in
+# metadata/libraries/README.md), so B is the honest tier until a build lane +
+# example land.
+schema_version: 1
+name: coap
+description: "CoAP (RFC 7252) -- Constrained Application Protocol REST transport."
+tier: B
+version: "4.4.0"
+license: Apache-2.0
+
+requires:
+  # CoAP is a Zephyr networking subsystem: it exists only under Zephyr, so
+  # `os: [zephyr]` rejects a selection whose live cores run no Zephyr with the
+  # constraint named.  No capability/RAM floor is cited -- the subsystem is
+  # arch-neutral (no `depends on CPU_CORTEX_M`) and its footprint scales with
+  # app config, so inventing a RAM number would be dishonest.
+  os: [zephyr]
+
+integration:
+  zephyr:
+    # In-tree Zephyr subsystem: no separate west module to pin (the `zephyr`
+    # project itself carries it).  null per the schema's header-only/in-tree case.
+    module: null
+    kconfig:
+      - CONFIG_COAP=y

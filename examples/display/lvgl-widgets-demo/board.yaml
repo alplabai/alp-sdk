@@ -7,7 +7,7 @@
 # the E1M-EVK SPI0 + GPIO IO0 (D/C) + GPIO IO1 (reset) pads, and
 # `west build`.
 som:
-  sku: E1M-AEN701           # E7 has the Cortex-A32 + 13.5 MB SRAM that
+  sku: E1M-AEN801           # E8 has the Cortex-A32 + SRAM headroom that
                              # LVGL widgets needs comfortably.
 
 preset: e1m-evk
@@ -26,8 +26,8 @@ cores:
     libraries:
       - lvgl
     # SPI for the display + GPIO for the D/C# + reset pins.  The
-    # st7789 chip driver wraps these into <alp/chips/st7789.h>'s
-    # init / set_window / write_pixels surface.
+    # board devicetree binds these to Zephyr's MIPI DBI Type C
+    # controller and the ST7789 display driver; the app stays on LVGL.
     peripherals:
       - spi
       - gpio

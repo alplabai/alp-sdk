@@ -47,3 +47,20 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # pins per Infineon OPTIGA Trust M datasheet, Revision 3.70 (2024-10-09),
+  # Table 6 "Contact definitions and functions of PG-USON-10-2,-4 packages".
+  refdes_prefix: U
+  package:       USON-10
+  footprint:     uson_10_3p0x3p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "01", signal: "GND" }
+    # pads 02, 04, 05, 06, 07 = NC (not connected / do not connect
+    # externally; leave floating) per datasheet Table 6; omitted.
+    - { pad: "03", signal: "SDA" }
+    - { pad: "08", signal: "SCL" }
+    - { pad: "09", signal: "RST" }
+    - { pad: "10", signal: "VCC" }

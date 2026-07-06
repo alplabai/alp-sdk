@@ -5,6 +5,7 @@
 #include <alp/peripheral.h>
 #include <alp/update_log.h>
 
+#include "../../../../src/backends/update_log/update_log_ops.h"
 #include "../../../../src/update_log/engine.h"
 #include "../../../../src/update_log/store.h"
 #include "../../../../src/update_log/sha256.h"
@@ -153,6 +154,34 @@ static alp_update_log_entry_t mk_entry(uint64_t ts, const char *ver, alp_update_
 	return e;
 }
 
+void alp_ulog_sw_tier_test_reset(bool wipe);
+
+static bool                   g_boot_meta_ready;
+static alp_update_log_entry_t g_boot_meta;
+
+alp_status_t alp_update_log_boot_metadata_read(alp_update_log_entry_t *entry_out)
+{
+	if (entry_out == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (!g_boot_meta_ready) {
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	*entry_out = g_boot_meta;
+	return ALP_OK;
+}
+
+static void set_boot_meta(const char *version, uint8_t hash_byte, alp_update_status_t status)
+{
+	memset(&g_boot_meta, 0, sizeof(g_boot_meta));
+	strncpy(g_boot_meta.fw_version, version, ALP_UPDATE_LOG_FWVER_MAX);
+	memset(g_boot_meta.image_hash, hash_byte, sizeof(g_boot_meta.image_hash));
+	g_boot_meta.status = status;
+	g_boot_meta.seq    = 99; /* provider value must not leak through */
+	g_boot_meta_ready  = true;
+}
+
 ZTEST(alp_update_log, test_append_assigns_seq_and_chains)
 {
 	struct td_store          t;
@@ -299,6 +328,102 @@ ZTEST(alp_update_log, test_count_and_get)
 	zassert_equal(ulog_engine_get(&s, 9, &e), ALP_ERR_NOT_FOUND);
 }
 
+/* --- Tier selection + degrade (issues #111, #239) ---------------------
+ *
+ * The real HW_ENFORCED TF-M tier only registers under BUILD_WITH_TFM, which
+ * native_sim cannot build, so we exercise the dispatcher's ranked-walk +
+ * open-time fall-through with a stand-in HW_ENFORCED backend registered
+ * straight into the update_log class section. Its ready() verdict is driven
+ * by g_fake_hw_ready so a single backend covers all three dispatcher
+ * branches: bind (ALP_OK), degrade to the next tier (ALP_ERR_NOSUPPORT),
+ * and surface a hard error (anything else). It is priority 20 (> the SW
+ * tier's 10) so alp_update_log_open() always offers it first; its default
+ * verdict is ALP_ERR_NOSUPPORT so every OTHER test in this suite still
+ * degrades cleanly to the SW tier, exactly as on a real board whose HW tier
+ * is not yet provisioned. */
+
+static alp_status_t g_fake_hw_ready = ALP_ERR_NOSUPPORT;
+
+static alp_status_t fake_hw_ready(void)
+{
+	return g_fake_hw_ready;
+}
+static alp_status_t fake_hw_append(const alp_update_log_entry_t *e)
+{
+	(void)e;
+	return ALP_OK;
+}
+static alp_status_t fake_hw_verify(alp_update_log_verdict_t *v, uint64_t *bad)
+{
+	(void)bad;
+	if (v) *v = ALP_UPDATE_LOG_VERIFY_OK;
+	return ALP_OK;
+}
+static alp_status_t fake_hw_count(uint64_t *out)
+{
+	if (out) *out = 0;
+	return ALP_OK;
+}
+static alp_status_t fake_hw_get(uint64_t seq, alp_update_log_entry_t *out)
+{
+	(void)seq;
+	(void)out;
+	return ALP_ERR_NOT_FOUND;
+}
+static const alp_update_log_ops_t _fake_hw_ops = {
+	.assurance = ALP_UPDATE_LOG_HW_ENFORCED,
+	.ready     = fake_hw_ready,
+	.append    = fake_hw_append,
+	.verify    = fake_hw_verify,
+	.count     = fake_hw_count,
+	.get       = fake_hw_get,
+};
+ALP_BACKEND_REGISTER(update_log,
+                     fake_hw,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "fake_hw",
+                         .base_caps   = 0u,
+                         .priority    = 20,
+                         .ops         = &_fake_hw_ops,
+                         .probe       = NULL,
+                     });
+
+/* HW tier ready -> the dispatcher binds it and reports HW_ENFORCED. */
+ZTEST(alp_update_log, test_selection_prefers_hw_when_ready)
+{
+	g_fake_hw_ready       = ALP_OK;
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_assurance(log), ALP_UPDATE_LOG_HW_ENFORCED);
+	alp_update_log_close(log);
+	g_fake_hw_ready = ALP_ERR_NOSUPPORT; /* restore for the rest of the suite */
+}
+
+/* HW tier declines with NOSUPPORT -> the dispatcher falls through to the SW
+ * tamper-evident tier, which serves a fully working log. */
+ZTEST(alp_update_log, test_selection_degrades_to_sw_when_hw_not_ready)
+{
+	g_fake_hw_ready       = ALP_ERR_NOSUPPORT;
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_assurance(log), ALP_UPDATE_LOG_SW_TAMPER_EVIDENT);
+	alp_update_log_entry_t e = mk_entry(1, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(alp_update_log_append(log, &e), ALP_OK);
+	alp_update_log_close(log);
+}
+
+/* A non-NOSUPPORT ready() verdict is a hard error: it is surfaced, NOT
+ * masked by silently dropping to a lower tier. */
+ZTEST(alp_update_log, test_selection_hard_error_surfaces)
+{
+	g_fake_hw_ready       = ALP_ERR_IO;
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_is_null(log);
+	zassert_equal(alp_last_error(), ALP_ERR_IO);
+	g_fake_hw_ready = ALP_ERR_NOSUPPORT; /* restore for the rest of the suite */
+}
+
 /* --- Task 5: public-surface smoke (dispatch + sw_tier backend). Keep LAST. --- */
 
 ZTEST(alp_update_log, test_public_surface_sw_tier)
@@ -318,3 +443,239 @@ ZTEST(alp_update_log, test_public_surface_sw_tier)
 	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
 	alp_update_log_close(log);
 }
+
+/* --- Trusted boot metadata path (#263) -------------------------------
+ *
+ * The production provider is weak/default-NOSUPPORT until a board wires
+ * MCUboot shared data or Alif SE verification.  This test's strong provider
+ * proves the public helper and append path copy identity/status from that
+ * provider only; app-filled entries cannot override it.
+ */
+
+ZTEST(alp_update_log, test_boot_metadata_helper_reports_nosupport_without_provider)
+{
+	g_boot_meta_ready        = false;
+	alp_update_log_entry_t e = mk_entry(11, "forged", ALP_UPDATE_STATUS_ROLLED_BACK);
+	zassert_equal(alp_update_log_entry_from_boot_metadata(&e, 1234), ALP_ERR_NOSUPPORT);
+}
+
+ZTEST(alp_update_log, test_boot_metadata_helper_overwrites_app_fields)
+{
+	set_boot_meta("3.2.1", 0xA5, ALP_UPDATE_STATUS_CONFIRMED);
+
+	alp_update_log_entry_t e = mk_entry(11, "forged", ALP_UPDATE_STATUS_ROLLED_BACK);
+	e.seq                    = 7;
+	zassert_equal(alp_update_log_entry_from_boot_metadata(&e, 1234), ALP_OK);
+	zassert_equal(e.seq, 0);
+	zassert_equal(e.timestamp, 1234);
+	zassert_equal(e.status, ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(strcmp(e.fw_version, "3.2.1"), 0);
+	for (size_t i = 0; i < sizeof(e.image_hash); i++) {
+		zassert_equal(e.image_hash[i], 0xA5);
+	}
+}
+
+ZTEST(alp_update_log, test_append_boot_stores_trusted_metadata)
+{
+	alp_ulog_sw_tier_test_reset(true);
+	g_fake_hw_ready = ALP_ERR_NOSUPPORT;
+	set_boot_meta("4.5.6", 0x5A, ALP_UPDATE_STATUS_PENDING_CONFIRM);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_append_boot(log, 5678), ALP_OK);
+
+	uint64_t n = 0;
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, 1);
+
+	alp_update_log_entry_t got;
+	zassert_equal(alp_update_log_get(log, 0, &got), ALP_OK);
+	zassert_equal(got.seq, 0);
+	zassert_equal(got.timestamp, 5678);
+	zassert_equal(got.status, ALP_UPDATE_STATUS_PENDING_CONFIRM);
+	zassert_equal(strcmp(got.fw_version, "4.5.6"), 0);
+	for (size_t i = 0; i < sizeof(got.image_hash); i++) {
+		zassert_equal(got.image_hash[i], 0x5A);
+	}
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
+	g_boot_meta_ready = false;
+}
+
+/* --- Persistence (#262): sw-tier store modes ------------------------
+ *
+ * alp_ulog_sw_tier_test_reset(false) emulates a reboot: it drops every
+ * piece of RAM state the backend holds (RAM store, RAM counter, cached
+ * NVS mount), so anything still readable afterwards came from the NVS
+ * partition.  wipe=true additionally clears the partition (pristine
+ * store) -- each test starts and ends with a wipe so the suite is
+ * order-independent.
+ */
+
+#ifdef CONFIG_ALP_SDK_UPDATE_LOG_PERSIST
+alp_status_t
+alp_ulog_sw_tier_test_corrupt_persisted_entry(uint64_t seq, size_t offset, uint8_t xor_mask);
+alp_status_t alp_ulog_sw_tier_test_delete_persisted_entry(uint64_t seq);
+
+static void append_three_persisted_entries(void)
+{
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	const char *vers[3] = { "1.0.0", "1.1.0", "2.0.0" };
+	for (int i = 0; i < 3; i++) {
+		alp_update_log_entry_t e =
+		    mk_entry((uint64_t)(i + 1) * 100, vers[i], ALP_UPDATE_STATUS_CONFIRMED);
+		zassert_equal(alp_update_log_append(log, &e), ALP_OK);
+	}
+	alp_update_log_close(log);
+}
+
+ZTEST(alp_update_log, test_persist_entries_survive_reinit)
+{
+	alp_ulog_sw_tier_test_reset(true); /* pristine store */
+
+	append_three_persisted_entries();
+
+	alp_ulog_sw_tier_test_reset(false); /* "reboot": keep flash only */
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	const char *vers[3] = { "1.0.0", "1.1.0", "2.0.0" };
+	uint64_t    n       = 0;
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, 3, "entries lost across re-init (got %llu)", (unsigned long long)n);
+
+	alp_update_log_verdict_t v;
+	zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+
+	for (int i = 0; i < 3; i++) {
+		alp_update_log_entry_t got;
+		zassert_equal(alp_update_log_get(log, (uint64_t)i, &got), ALP_OK);
+		zassert_equal(got.seq, (uint64_t)i);
+		zassert_equal(got.timestamp, (uint64_t)(i + 1) * 100);
+		zassert_equal(got.status, ALP_UPDATE_STATUS_CONFIRMED);
+		zassert_equal(strcmp(got.fw_version, vers[i]), 0);
+		uint8_t want[32];
+		memset(want, (int)((uint64_t)(i + 1) * 100), 32);
+		zassert_mem_equal(got.image_hash, want, 32);
+	}
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true); /* leave a clean store behind */
+}
+
+ZTEST(alp_update_log, test_persist_verify_detects_mutated_entry)
+{
+	alp_ulog_sw_tier_test_reset(true);
+	append_three_persisted_entries();
+
+	alp_ulog_sw_tier_test_reset(false); /* "reboot": keep flash only */
+	zassert_equal(alp_ulog_sw_tier_test_corrupt_persisted_entry(1, 12, 0xFF), ALP_OK);
+	alp_ulog_sw_tier_test_reset(false);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 0;
+	zassert_equal(alp_update_log_verify(log, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN);
+	zassert_equal(bad, 2);
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
+}
+
+ZTEST(alp_update_log, test_persist_verify_detects_deleted_entry)
+{
+	alp_ulog_sw_tier_test_reset(true);
+	append_three_persisted_entries();
+
+	alp_ulog_sw_tier_test_reset(false); /* "reboot": keep flash only */
+	zassert_equal(alp_ulog_sw_tier_test_delete_persisted_entry(2), ALP_OK);
+	alp_ulog_sw_tier_test_reset(false);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 0;
+	zassert_equal(alp_update_log_verify(log, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_TRUNCATED);
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
+}
+
+ZTEST(alp_update_log, test_persist_full_log_nomem_no_wrap)
+{
+	alp_ulog_sw_tier_test_reset(true);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+
+	/* Fill the 16 KiB partition. Each append persists entry + meta +
+	 * counter; the store must eventually report NOMEM -- never wrap. */
+	uint64_t     appended = 0;
+	alp_status_t rc       = ALP_OK;
+	for (int i = 0; i < 2000; i++) {
+		alp_update_log_entry_t e = mk_entry((uint64_t)i + 1, "9.9.9", ALP_UPDATE_STATUS_CONFIRMED);
+		rc                       = alp_update_log_append(log, &e);
+		if (rc != ALP_OK) {
+			break;
+		}
+		appended++;
+	}
+	zassert_equal(rc, ALP_ERR_NOMEM, "full log must report NOMEM (got %d)", (int)rc);
+	zassert_true(appended > 0);
+
+	/* The failed append must not have damaged the chain. */
+	uint64_t n = 0;
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, appended);
+	alp_update_log_verdict_t v;
+	zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+
+	/* Still full (and still verifiable) after a "reboot". */
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(false);
+	log = alp_update_log_open();
+	zassert_not_null(log);
+	alp_update_log_entry_t e = mk_entry(7, "9.9.9", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(alp_update_log_append(log, &e), ALP_ERR_NOMEM);
+	zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
+}
+
+#else /* !CONFIG_ALP_SDK_UPDATE_LOG_PERSIST */
+
+ZTEST(alp_update_log, test_ram_fallback_entries_do_not_survive_reinit)
+{
+	alp_ulog_sw_tier_test_reset(true);
+
+	alp_update_log_t *log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_assurance(log), ALP_UPDATE_LOG_SW_TAMPER_EVIDENT);
+	alp_update_log_entry_t e = mk_entry(1, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(alp_update_log_append(log, &e), ALP_OK);
+	uint64_t n = 0;
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, 1);
+	alp_update_log_close(log);
+
+	/* RAM store: a re-init (reboot) loses everything -- the documented
+	 * fallback behaviour when no alp_ulog_partition exists. */
+	alp_ulog_sw_tier_test_reset(false);
+	log = alp_update_log_open();
+	zassert_not_null(log);
+	zassert_equal(alp_update_log_count(log, &n), ALP_OK);
+	zassert_equal(n, 0, "RAM fallback must not persist (got %llu)", (unsigned long long)n);
+	alp_update_log_verdict_t v;
+	zassert_equal(alp_update_log_verify(log, &v, NULL), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK); /* empty log verifies clean */
+	alp_update_log_close(log);
+	alp_ulog_sw_tier_test_reset(true);
+}
+
+#endif /* CONFIG_ALP_SDK_UPDATE_LOG_PERSIST */

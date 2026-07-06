@@ -87,6 +87,7 @@ static const alp_camera_ops_t _ops = {
 	.close         = NULL,
 };
 
+ALP_BACKEND_ANCHOR_DEFINE(camera);
 ALP_BACKEND_REGISTER(camera,
                      zephyr_stub,
                      {

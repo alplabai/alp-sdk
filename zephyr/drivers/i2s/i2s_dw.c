@@ -1,6 +1,30 @@
 /*
  * Copyright (C) 2025 Alif Semiconductor.
+ * Copyright (c) 2026 Alp Lab AB
+ *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * ====== ADR 0017 Tier-2 (vendored fork-driver copy, INTERIM) ======
+ * The Alif Ensemble audio I2S is driven by a vendored copy of the Apache-2.0
+ * zephyr_alif fork driver (drivers/i2s/i2s_dw.c, compatible
+ * "snps,designware-i2s").  Upstream Zephyr v4.4 + hal_alif ship NO DesignWare
+ * I2S class driver, so this is a genuine fork-driver copy carried in-tree so it
+ * survives a `west update`.  Retire onto the opt-in sdk-alif fork compatible
+ * once the i2s nodes are repointed AND bench-verified (task #21).  See
+ * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * ==================================================================
+ *
+ * FIFO/interrupt-driven (no DMA subsystem needed).  alp-sdk edits beyond this
+ * provenance header are confined to the clock path: the driver calls
+ * clock_control_set_rate() to program the I2Sx bit-clock divider off the
+ * 76.8 MHz CGU master source enabled by the Tier-1.5 clockctrl west-patch
+ * (zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch),
+ * and tolerates -ENOSYS/-ENOTSUP from clock_control_configure()/set_rate() on
+ * SoCs whose clockctrl lacks those ops (e.g. native_sim).  The register block
+ * layout, IRQ scheme, and FIFO trigger levels are the fork's.
+ * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the TX
+ * tone-out / clock programming were exercised on the bench as PARTIAL/PASS but
+ * the achieved SCLK rate is a bench follow-up).
  */
 #define DT_DRV_COMPAT snps_designware_i2s
 

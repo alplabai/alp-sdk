@@ -23,6 +23,17 @@ signals:
   - { name: DC,   type: input, scope: "D/C# command/data select" }
   - { name: RESET, type: input, scope: "optional hardware reset (active low)" }
   - { name: BL,   type: input, scope: "backlight LED PWM (host-driven)" }
+  - { name: VDDI,    type: power, scope: "interface/logic supply" }
+  - { name: VDDI_LED, type: power, scope: "supply for the on-die LED-driver block; tie to GND if unused" }
+  - { name: AGND,    type: power, scope: "analog/booster ground" }
+  - { name: DGND,    type: power, scope: "digital I/O ground" }
+  - { name: EXTC,    type: input, scope: "extended-command-set enable strap; tie to VDDI or DGND" }
+  - { name: IM3,     type: input, scope: "interface mode-select strap, bit 3" }
+  - { name: IM2,     type: input, scope: "interface mode-select strap, bit 2" }
+  - { name: IM1,     type: input, scope: "interface mode-select strap, bit 1" }
+  - { name: IM0,     type: input, scope: "interface mode-select strap, bit 0" }
+  - { name: LEDPWM,  type: output, scope: "on-die backlight PWM output (drives an external LED driver, not the panel LEDs directly)" }
+  - { name: LEDON,   type: output, scope: "on-die backlight enable output (drives an external LED driver)" }
 
 resolutions:
   max:            [240, 320]
@@ -36,7 +47,63 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per the Sitronix ST7789V pad table ("3 Pad Arrangement" /
+  # "4 Pad Center Coordinates") and "6 Pin Description" (host-serial
+  # interface, IM3:0 mode-select strap, and power pins). ST7789V ships
+  # as a bare COG (chip-on-glass) die, Face Up, Chip size 15155um x
+  # 698um. Only the host-interface pads used by this driver's 4-wire
+  # SPI mode (IM3:IM0 = 0110) plus power/ground and the on-die
+  # backlight-driver pads are populated. Same bump-level dual function
+  # as the Ilitek ILI9341 die (see ili9341.yaml): pad "DCX" (pad 116)
+  # acts as the serial clock (SCL) in 4-line-serial mode, and pad
+  # "WRX" (pad 117) acts as the D/CX select in 4-line-serial mode --
+  # per the pin-description text for "DCX" ("This pin is used to be
+  # serial interface clock") and "WRX" ("Display data/command
+  # selection pin in 4-line serial interface"). The LCD-glass-side
+  # gate/source driver outputs (G1-G320/S1-S720), the charge-pump/
+  # gamma network (VCOM/VGH/VGL/VAP/VAN/V20/AVDD/AVCL/VAG/VDDS/VDDGX/
+  # VCC/VPP) and the parallel/RGB-interface-only pads (DB[17:0]/
+  # VSYNC/HSYNC/ENABLE/DOTCLK/SDO/RDX/TE) are out of scope for 4-wire
+  # SPI mode; no stabilizing-capacitor values are published for the
+  # charge-pump network in this excerpt, so no passives[] is
+  # populated to avoid inventing values. AGND/DGND are a
+  # representative sample of the many ground pads in the populated
+  # row, not an exhaustive list.
+  refdes_prefix: U
+  package:              "COG bare die (bump-up, Face Up)"
+  footprint:             cog_die
+  dimension_mm:          "15.155 x 0.698"
+  operating_temp_deg_c:  "-30..85"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "114", signal: "RESET" }
+    - { pad: "115", signal: "CS" }
+    - { pad: "116", signal: "SCLK" }
+    - { pad: "117", signal: "DC" }
+    - { pad: "125", signal: "MOSI" }
+    - { pad: "109", signal: "EXTC" }
+    - { pad: "110", signal: "IM3" }
+    - { pad: "111", signal: "IM2" }
+    - { pad: "112", signal: "IM1" }
+    - { pad: "113", signal: "IM0" }
+    - { pad: "151", signal: "LEDPWM" }
+    - { pad: "152", signal: "LEDON" }
+    - { pad: "153", signal: "VDDI_LED" }
+    - { pad: "154", signal: "VDDI_LED" }
+    - { pad: "74",  signal: "VDD" }
+    - { pad: "81",  signal: "VDD" }
+    - { pad: "162", signal: "VDDI" }
+    - { pad: "168", signal: "VDDI" }
+    - { pad: "82",  signal: "AGND" }
+    - { pad: "90",  signal: "AGND" }
+    - { pad: "97",  signal: "AGND" }
+    - { pad: "98",  signal: "DGND" }
+    - { pad: "105", signal: "DGND" }

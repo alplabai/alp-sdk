@@ -119,7 +119,8 @@ ZTEST_SUITE(alp_chips, NULL, NULL, NULL, NULL, NULL);
 ZTEST(alp_chips, test_lsm6dso_init_null_args)
 {
 	lsm6dso_t  dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 100000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 100000 });
 	zassert_not_null(bus);
 
 	zassert_equal(
@@ -142,7 +143,8 @@ ZTEST(alp_chips, test_lsm6dso_post_init_calls_reject_uninitialised)
      * because reads on a successfully-initialised driver return
      * ALP_OK and the assertion below is conditional. */
 	lsm6dso_t  dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 100000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 100000 });
 	zassert_not_null(bus);
 
 	alp_status_t s = lsm6dso_init(&dev, bus, LSM6DSO_I2C_ADDR_LOW);
@@ -165,7 +167,8 @@ ZTEST(alp_chips, test_lsm6dso_post_init_calls_reject_uninitialised)
 ZTEST(alp_chips, test_ssd1306_init_invalid_geometry)
 {
 	ssd1306_t  dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	zassert_equal(ssd1306_init(&dev, bus, SSD1306_I2C_ADDR_LOW, 96, 48),
@@ -328,7 +331,8 @@ ZTEST(alp_chips, test_ssd1306_clear_wipes_only_fb)
 ZTEST(alp_chips, test_bme280_init_null_args)
 {
 	bme280_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	zassert_equal(
@@ -345,7 +349,8 @@ ZTEST(alp_chips, test_bme280_post_init_calls_reject_uninitialised)
 	/* No real chip behind the emul controller — CHIP_ID won't be 0x60,
      * so init fails and downstream reads must report NOT_READY. */
 	bme280_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	alp_status_t s = bme280_init(&dev, bus, BME280_I2C_ADDR_LOW);
@@ -375,7 +380,8 @@ ZTEST(alp_chips, test_bme280_post_init_calls_reject_uninitialised)
 ZTEST(alp_chips, test_lis2dw12_init_null_args)
 {
 	lis2dw12_t dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 100000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 100000 });
 	zassert_not_null(bus);
 
 	zassert_equal(lis2dw12_init(NULL, bus, LIS2DW12_I2C_ADDR_LOW), ALP_ERR_INVAL);
@@ -388,7 +394,8 @@ ZTEST(alp_chips, test_lis2dw12_init_null_args)
 ZTEST(alp_chips, test_lis2dw12_post_init_calls_reject_uninitialised)
 {
 	lis2dw12_t dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 100000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 100000 });
 	zassert_not_null(bus);
 
 	alp_status_t s = lis2dw12_init(&dev, bus, LIS2DW12_I2C_ADDR_LOW);
@@ -470,7 +477,8 @@ ZTEST(alp_chips, test_ssd1331_rgb565_helper)
 ZTEST(alp_chips, test_ov5640_init_null_args)
 {
 	ov5640_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	zassert_equal(ov5640_init(NULL, bus, OV5640_I2C_ADDR), ALP_ERR_INVAL);
@@ -483,7 +491,8 @@ ZTEST(alp_chips, test_ov5640_init_null_args)
 ZTEST(alp_chips, test_ov5640_post_init_calls_reject_uninitialised)
 {
 	ov5640_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	alp_status_t s = ov5640_init(&dev, bus, OV5640_I2C_ADDR);
@@ -533,7 +542,8 @@ ZTEST(alp_chips, test_pdm_mic_calls_return_nosupport)
 ZTEST(alp_chips, test_icm42670_init_null_args)
 {
 	icm42670_t dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	zassert_equal(icm42670_init(NULL, bus, ICM42670_I2C_ADDR_LOW), ALP_ERR_INVAL);
@@ -549,7 +559,8 @@ ZTEST(alp_chips, test_icm42670_post_init_calls_reject_uninitialised)
      * WHO_AM_I check returns wrong/no value -- we expect failure
      * and that subsequent reads report NOT_READY. */
 	icm42670_t dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	alp_status_t s = icm42670_init(&dev, bus, ICM42670_I2C_ADDR_LOW);
@@ -571,7 +582,8 @@ ZTEST(alp_chips, test_icm42670_post_init_calls_reject_uninitialised)
 ZTEST(alp_chips, test_bmi323_init_null_args)
 {
 	bmi323_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	zassert_equal(bmi323_init(NULL, bus, BMI323_I2C_ADDR_LOW), ALP_ERR_INVAL);
@@ -584,7 +596,8 @@ ZTEST(alp_chips, test_bmi323_init_null_args)
 ZTEST(alp_chips, test_bmi323_post_init_calls_reject_uninitialised)
 {
 	bmi323_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	alp_status_t s = bmi323_init(&dev, bus, BMI323_I2C_ADDR_LOW);
@@ -606,7 +619,8 @@ ZTEST(alp_chips, test_bmi323_post_init_calls_reject_uninitialised)
 ZTEST(alp_chips, test_bmp581_init_null_args)
 {
 	bmp581_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	zassert_equal(bmp581_init(NULL, bus, BMP581_I2C_ADDR_LOW), ALP_ERR_INVAL);
@@ -640,7 +654,8 @@ ZTEST(alp_chips, test_bmp581_compensate_pure_arithmetic)
 ZTEST(alp_chips, test_bmp581_post_init_calls_reject_uninitialised)
 {
 	bmp581_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	alp_status_t s = bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW);
@@ -686,9 +701,9 @@ ZTEST(alp_chips, test_public_headers_co_compile)
      * collision the translation unit fails to build — getting
      * here at runtime is the success signal. */
 	zassert_equal((int)ALP_OK, 0, "ALP_OK must remain 0 across header-set evolution");
-	zassert_equal((unsigned)E1M_GPIO_IO0, 0u);
+	zassert_equal((unsigned)ALP_E1M_GPIO_IO0, 0u);
 	zassert_equal((unsigned)EVK_PWM_LED_RED,
-	              E1M_PWM3,
+	              ALP_E1M_PWM3,
 	              "EVK feature names must layer atop the global e1m_pinout map");
 }
 
@@ -780,7 +795,8 @@ ZTEST(alp_chips, test_mproc_surface_v01_nosupport)
 ZTEST(alp_chips, test_fake_lsm6dso_init_succeeds_against_fake)
 {
 	fake_lsm6dso_reset();
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	lsm6dso_t dev;
@@ -799,7 +815,8 @@ ZTEST(alp_chips, test_fake_lsm6dso_init_succeeds_against_fake)
 ZTEST(alp_chips, test_fake_lsm6dso_set_accel_writes_ctrl1_xl)
 {
 	fake_lsm6dso_reset();
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	lsm6dso_t dev;
@@ -823,7 +840,8 @@ ZTEST(alp_chips, test_fake_lsm6dso_set_accel_writes_ctrl1_xl)
 ZTEST(alp_chips, test_fake_lsm6dso_set_gyro_writes_ctrl2_g)
 {
 	fake_lsm6dso_reset();
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	lsm6dso_t dev;
@@ -840,7 +858,8 @@ ZTEST(alp_chips, test_fake_lsm6dso_set_gyro_writes_ctrl2_g)
 ZTEST(alp_chips, test_fake_lsm6dso_read_accel_decodes_le16)
 {
 	fake_lsm6dso_reset();
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	lsm6dso_t dev;
@@ -872,7 +891,8 @@ ZTEST(alp_chips, test_fake_lsm6dso_read_accel_decodes_le16)
 ZTEST(alp_chips, test_fake_ssd1306_init_streams_documented_opcodes)
 {
 	fake_ssd1306_reset_logs();
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	ssd1306_t dev;
@@ -916,7 +936,8 @@ ZTEST(alp_chips, test_fake_ssd1306_init_streams_documented_opcodes)
 ZTEST(alp_chips, test_fake_ssd1306_display_pushes_full_framebuffer)
 {
 	fake_ssd1306_reset_logs();
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	ssd1306_t dev;
@@ -962,7 +983,8 @@ ZTEST(alp_chips, test_fake_ssd1306_display_pushes_full_framebuffer)
 ZTEST(alp_chips, test_fake_bme280_init_loads_calibration)
 {
 	fake_bme280_reset();
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	bme280_t dev;
@@ -987,7 +1009,8 @@ ZTEST(alp_chips, test_fake_bme280_init_loads_calibration)
 ZTEST(alp_chips, test_fake_bme280_read_raw_decodes_msb_first)
 {
 	fake_bme280_reset();
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	bme280_t dev;
@@ -1011,7 +1034,8 @@ ZTEST(alp_chips, test_fake_bme280_read_raw_decodes_msb_first)
 ZTEST(alp_chips, test_fake_bme280_compensate_matches_datasheet_example)
 {
 	fake_bme280_reset();
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 
 	bme280_t dev;
@@ -1062,7 +1086,7 @@ ZTEST(alp_chips, test_gd32g553_init_invalid_i2c_addr)
 {
 	gd32g553_t ctx;
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 100000,
 	});
 	zassert_not_null(bus);
@@ -1200,7 +1224,7 @@ ZTEST(alp_chips, test_clk_5l35023b_init_null_args)
 {
 	clk_5l35023b_t ctx;
 	alp_i2c_t     *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 100000,
 	});
 	zassert_not_null(bus);
@@ -1561,7 +1585,7 @@ ZTEST(alp_chips, test_act8760_init_null_args)
 {
 	act8760_t  ctx;
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -1596,7 +1620,7 @@ ZTEST(alp_chips, test_da9292_init_null_args)
 {
 	da9292_t   ctx;
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -1661,7 +1685,7 @@ ZTEST(alp_chips, test_tps628640_init_null_args)
 {
 	tps628640_t ctx;
 	alp_i2c_t  *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -1767,7 +1791,7 @@ ZTEST(alp_chips, test_rv3028c7_init_null_args)
 {
 	rv3028c7_t ctx;
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -1818,7 +1842,7 @@ ZTEST(alp_chips, test_tmp112_init_null_args)
 {
 	tmp112_t   ctx;
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -1863,7 +1887,7 @@ ZTEST(alp_chips, test_ina236_init_null_args)
 	                                ina236_adcrange_t adcrange);
 	ina236_t            ctx;
 	alp_i2c_t          *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -1886,7 +1910,7 @@ ZTEST(alp_chips, test_eeprom_24c128_init_null_args)
 {
 	eeprom_24c128_t ctx;
 	alp_i2c_t      *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -1937,7 +1961,7 @@ ZTEST(alp_chips, test_tcal9538_init_null_args)
 {
 	tcal9538_t ctx;
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -1985,7 +2009,7 @@ ZTEST(alp_chips, test_optiga_trust_m_init_null_args)
 {
 	optiga_trust_m_t ctx;
 	alp_i2c_t       *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -2079,7 +2103,7 @@ ZTEST(alp_chips, test_tas2563_init_null_args)
 {
 	tas2563_t  ctx;
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	zassert_not_null(bus);
@@ -2201,7 +2225,8 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
 ZTEST(alp_chips, test_ov2640_init_null_args)
 {
 	ov2640_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(ov2640_init(NULL, bus, OV2640_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(ov2640_init(&dev, NULL, OV2640_I2C_ADDR), ALP_ERR_INVAL);
@@ -2212,7 +2237,8 @@ ZTEST(alp_chips, test_ov2640_init_null_args)
 ZTEST(alp_chips, test_ov5645_init_null_args)
 {
 	ov5645_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(ov5645_init(NULL, bus, OV5645_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(ov5645_init(&dev, NULL, OV5645_I2C_ADDR), ALP_ERR_INVAL);
@@ -2223,7 +2249,8 @@ ZTEST(alp_chips, test_ov5645_init_null_args)
 ZTEST(alp_chips, test_ov7670_init_null_args)
 {
 	ov7670_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(ov7670_init(NULL, bus, OV7670_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(ov7670_init(&dev, NULL, OV7670_I2C_ADDR), ALP_ERR_INVAL);
@@ -2234,7 +2261,8 @@ ZTEST(alp_chips, test_ov7670_init_null_args)
 ZTEST(alp_chips, test_ov9281_init_null_args)
 {
 	ov9281_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(ov9281_init(NULL, bus, OV9281_I2C_ADDR_LOW), ALP_ERR_INVAL);
 	zassert_equal(ov9281_init(&dev, NULL, OV9281_I2C_ADDR_LOW), ALP_ERR_INVAL);
@@ -2245,7 +2273,8 @@ ZTEST(alp_chips, test_ov9281_init_null_args)
 ZTEST(alp_chips, test_ar0234_init_null_args)
 {
 	ar0234_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(ar0234_init(NULL, bus, AR0234_I2C_ADDR_LOW), ALP_ERR_INVAL);
 	zassert_equal(ar0234_init(&dev, NULL, AR0234_I2C_ADDR_LOW), ALP_ERR_INVAL);
@@ -2256,7 +2285,8 @@ ZTEST(alp_chips, test_ar0234_init_null_args)
 ZTEST(alp_chips, test_imx219_init_null_args)
 {
 	imx219_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(imx219_init(NULL, bus, IMX219_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(imx219_init(&dev, NULL, IMX219_I2C_ADDR), ALP_ERR_INVAL);
@@ -2267,7 +2297,8 @@ ZTEST(alp_chips, test_imx219_init_null_args)
 ZTEST(alp_chips, test_imx477_init_null_args)
 {
 	imx477_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(imx477_init(NULL, bus, IMX477_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(imx477_init(&dev, NULL, IMX477_I2C_ADDR), ALP_ERR_INVAL);
@@ -2278,7 +2309,8 @@ ZTEST(alp_chips, test_imx477_init_null_args)
 ZTEST(alp_chips, test_gc2145_init_null_args)
 {
 	gc2145_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(gc2145_init(NULL, bus, GC2145_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(gc2145_init(&dev, NULL, GC2145_I2C_ADDR), ALP_ERR_INVAL);
@@ -2289,7 +2321,8 @@ ZTEST(alp_chips, test_gc2145_init_null_args)
 ZTEST(alp_chips, test_ti_ds90ub_init_null_args)
 {
 	ti_ds90ub_t dev;
-	alp_i2c_t  *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t  *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(ti_ds90ub_init(NULL, bus, DS90UB953_I2C_ADDR_DEFAULT, DS90UB954_I2C_ADDR_DEFAULT),
 	              ALP_ERR_INVAL);
@@ -2304,7 +2337,8 @@ ZTEST(alp_chips, test_ti_ds90ub_init_null_args)
 ZTEST(alp_chips, test_maxim_gmsl2_init_null_args)
 {
 	maxim_gmsl2_t dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t    *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(maxim_gmsl2_init(NULL, bus, MAX9295_I2C_ADDR_DEFAULT, MAX9296_I2C_ADDR_DEFAULT),
 	              ALP_ERR_INVAL);
@@ -2349,7 +2383,8 @@ ZTEST(alp_chips, test_ra8875_init_null_args)
 ZTEST(alp_chips, test_sh1106_init_null_args)
 {
 	sh1106_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(sh1106_init(NULL, bus, SH1106_I2C_ADDR_LOW), ALP_ERR_INVAL);
 	zassert_equal(sh1106_init(&dev, NULL, SH1106_I2C_ADDR_LOW), ALP_ERR_INVAL);
@@ -2398,7 +2433,8 @@ ZTEST(alp_chips, test_hailo_8l_init_null_args)
 ZTEST(alp_chips, test_bmp390_init_null_args)
 {
 	bmp390_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(bmp390_init(NULL, bus, BMP390_I2C_ADDR_PRIMARY), ALP_ERR_INVAL);
 	zassert_equal(bmp390_init(&dev, NULL, BMP390_I2C_ADDR_PRIMARY), ALP_ERR_INVAL);
@@ -2409,7 +2445,8 @@ ZTEST(alp_chips, test_bmp390_init_null_args)
 ZTEST(alp_chips, test_ms5611_init_null_args)
 {
 	ms5611_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(ms5611_init(NULL, bus, MS5611_I2C_ADDR_PRIMARY), ALP_ERR_INVAL);
 	zassert_equal(ms5611_init(&dev, NULL, MS5611_I2C_ADDR_PRIMARY), ALP_ERR_INVAL);
@@ -2420,7 +2457,8 @@ ZTEST(alp_chips, test_ms5611_init_null_args)
 ZTEST(alp_chips, test_lps22hb_init_null_args)
 {
 	lps22hb_t  dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(lps22hb_init(NULL, bus, LPS22HB_I2C_ADDR_HIGH), ALP_ERR_INVAL);
 	zassert_equal(lps22hb_init(&dev, NULL, LPS22HB_I2C_ADDR_HIGH), ALP_ERR_INVAL);
@@ -2431,7 +2469,8 @@ ZTEST(alp_chips, test_lps22hb_init_null_args)
 ZTEST(alp_chips, test_vl53l1x_init_null_args)
 {
 	vl53l1x_t  dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(vl53l1x_init(NULL, bus, VL53L1X_I2C_ADDR_DEFAULT), ALP_ERR_INVAL);
 	zassert_equal(vl53l1x_init(&dev, NULL, VL53L1X_I2C_ADDR_DEFAULT), ALP_ERR_INVAL);
@@ -2442,7 +2481,8 @@ ZTEST(alp_chips, test_vl53l1x_init_null_args)
 ZTEST(alp_chips, test_vl53l5cx_init_null_args)
 {
 	vl53l5cx_t dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(vl53l5cx_init(NULL, bus, VL53L5CX_I2C_ADDR_DEFAULT), ALP_ERR_INVAL);
 	zassert_equal(vl53l5cx_init(&dev, NULL, VL53L5CX_I2C_ADDR_DEFAULT), ALP_ERR_INVAL);
@@ -2488,7 +2528,8 @@ ZTEST(alp_chips, test_a4988_init_null_args)
 ZTEST(alp_chips, test_as5048b_init_null_args)
 {
 	as5048b_t  dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(as5048b_init(NULL, bus, AS5048B_I2C_ADDR_BASE), ALP_ERR_INVAL);
 	zassert_equal(as5048b_init(&dev, NULL, AS5048B_I2C_ADDR_BASE), ALP_ERR_INVAL);
@@ -2499,7 +2540,8 @@ ZTEST(alp_chips, test_as5048b_init_null_args)
 ZTEST(alp_chips, test_mt6701_init_null_args)
 {
 	mt6701_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(mt6701_init(NULL, bus, MT6701_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(mt6701_init(&dev, NULL, MT6701_I2C_ADDR), ALP_ERR_INVAL);
@@ -2531,7 +2573,8 @@ ZTEST(alp_chips, test_max31865_init_null_args)
 ZTEST(alp_chips, test_tsl2591_init_null_args)
 {
 	tsl2591_t  dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(tsl2591_init(NULL, bus, TSL2591_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(tsl2591_init(&dev, NULL, TSL2591_I2C_ADDR), ALP_ERR_INVAL);
@@ -2542,7 +2585,8 @@ ZTEST(alp_chips, test_tsl2591_init_null_args)
 ZTEST(alp_chips, test_qmc5883l_init_null_args)
 {
 	qmc5883l_t dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(qmc5883l_init(NULL, bus, QMC5883L_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(qmc5883l_init(&dev, NULL, QMC5883L_I2C_ADDR), ALP_ERR_INVAL);
@@ -2553,7 +2597,8 @@ ZTEST(alp_chips, test_qmc5883l_init_null_args)
 ZTEST(alp_chips, test_veml7700_init_null_args)
 {
 	veml7700_t dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(veml7700_init(NULL, bus, VEML7700_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(veml7700_init(&dev, NULL, VEML7700_I2C_ADDR), ALP_ERR_INVAL);
@@ -2624,7 +2669,8 @@ ZTEST(alp_chips, test_atgm336h_init_null_args)
 ZTEST(alp_chips, test_atecc608b_init_null_args)
 {
 	atecc608b_t dev;
-	alp_i2c_t  *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t  *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(atecc608b_init(NULL, bus, ATECC608B_I2C_ADDR_DEFAULT), ALP_ERR_INVAL);
 	zassert_equal(atecc608b_init(&dev, NULL, ATECC608B_I2C_ADDR_DEFAULT), ALP_ERR_INVAL);
@@ -2653,7 +2699,8 @@ ZTEST(alp_chips, test_inmp441_init_null_args)
 ZTEST(alp_chips, test_wm8960_init_null_args)
 {
 	wm8960_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(wm8960_init(NULL, bus, WM8960_I2C_ADDR), ALP_ERR_INVAL);
 	zassert_equal(wm8960_init(&dev, NULL, WM8960_I2C_ADDR), ALP_ERR_INVAL);
@@ -2664,7 +2711,8 @@ ZTEST(alp_chips, test_wm8960_init_null_args)
 ZTEST(alp_chips, test_tlv320aic3204_init_null_args)
 {
 	tlv320aic3204_t dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t      *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(tlv320aic3204_init(NULL, bus, TLV320AIC3204_I2C_ADDR_LOW), ALP_ERR_INVAL);
 	zassert_equal(tlv320aic3204_init(&dev, NULL, TLV320AIC3204_I2C_ADDR_LOW), ALP_ERR_INVAL);
@@ -2682,7 +2730,8 @@ ZTEST(alp_chips, test_max98357a_init_null_args)
 ZTEST(alp_chips, test_es8388_init_null_args)
 {
 	es8388_t   dev;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){ .bus_id = E1M_I2C0, .bitrate_hz = 400000 });
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
 	zassert_not_null(bus);
 	zassert_equal(es8388_init(NULL, bus, ES8388_I2C_ADDR_LOW), ALP_ERR_INVAL);
 	zassert_equal(es8388_init(&dev, NULL, ES8388_I2C_ADDR_LOW), ALP_ERR_INVAL);

@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * One emulated SPI bus exposed via the alp-spi0 alias.  The
- * example's slave-mode open returns NULL (API gap), so the bus
- * never gets a real transaction -- but the alias must exist for
+ * example targets BOARD_SPI_ARDUINO (alp-spi1), which native_sim
+ * does not provide, so alp_spi_target_open degrades cleanly
+ * (NOT_READY diagnostic) -- the alp-spi0 alias exists only for
  * the loader's DT-resolution pass to succeed.
  */
 

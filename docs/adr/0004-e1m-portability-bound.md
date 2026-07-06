@@ -94,7 +94,7 @@ escape hatch.
   files that already encode SoC counts; only `e1m_pinout.h` is
   hand-curated.
 - Apps that mix portable and vendor-extension calls (e.g.
-  `E1M_CAN0` + `bus_id = 1`) silently lose portability.  Code
+  `ALP_E1M_CAN0` + `bus_id = 1`) silently lose portability.  Code
   review and the studio's per-block check are the safety net.
 
 ## See also

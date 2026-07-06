@@ -164,6 +164,54 @@ void cc3501e_hw_wifi_mark_connecting(void);
 int  cc3501e_hw_wifi_conn_status(uint8_t *state, uint8_t *fail_reason, int8_t *rssi_dbm);
 
 /* --------------------------------------------------------------- */
+/* TCP/UDP sockets (v0.5)                                            */
+/* --------------------------------------------------------------- */
+
+/* Route to the firmware IP stack's BSD socket API (lwIP sockets: lwip_socket /
+ * lwip_connect / lwip_send / lwip_recvfrom / lwip_close in the ti backend); the
+ * stub + the silicon-free host build report NOTIMPL (-> RESP_ERR_NOT_READY).
+ *
+ * These bodies BLOCK (a socket op is a tcpip_apimsg round-trip to the lwIP core
+ * thread; connect/recv can wait for the network), so the protocol handlers
+ * WORKER-ROUTE all five off the SPI ISR -- exactly like the blocking Wlan_* ops.
+ *
+ * v1 IP-stack surface is IPv4-only: @p family is an alp_cc3501e_sock_family_t
+ * (only IPV4 accepted), @p type an alp_cc3501e_sock_type_t (STREAM=TCP,
+ * DGRAM=UDP), @p protocol the IP protocol number (0 = default for the type).
+ * Addresses are 4 raw IPv4 octets in network (big-endian) order; @p port is
+ * host byte order (the backend converts to network order on the wire). */
+
+/* Allocate a socket; returns the firmware-side handle (non-zero; 0 is the
+ * invalid handle) in @p handle_out. */
+int cc3501e_hw_sock_open(uint8_t family, uint8_t type, uint8_t protocol, uint16_t *handle_out);
+
+/* STREAM: start + complete the TCP handshake to @p addr:@p port.  DGRAM: set the
+ * default peer for later sends.  Blocks until the handshake resolves. */
+int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, const uint8_t addr[4]);
+
+/* Queue @p data_len bytes on the socket; @p sent_out receives the byte count the
+ * stack accepted.  @p flags mirrors alp_cc3501e_sock_send_t::flags (bit 0 = MORE). */
+int cc3501e_hw_sock_send(
+    uint16_t handle, uint8_t flags, const uint8_t *data, uint16_t data_len, uint16_t *sent_out);
+
+/* Receive up to min(@p max_len, @p cap) bytes into @p buf; @p recv_len_out gets
+ * the byte count (0 = nothing available within the socket's receive timeout, or
+ * peer closed -- still CC3501E_HW_OK, non-blocking semantics at the wire).  For
+ * DGRAM sockets @p from_addr / @p from_port_out receive the datagram source
+ * (zeroed for STREAM).  Any out pointer other than @p buf may be NULL. */
+int cc3501e_hw_sock_recv(uint16_t  handle,
+                         uint16_t  max_len,
+                         uint8_t  *buf,
+                         uint16_t  cap,
+                         uint16_t *recv_len_out,
+                         uint8_t   from_addr[4],
+                         uint16_t *from_port_out);
+
+/* Release the socket (STREAM: issue the TCP teardown).  The handle is invalid
+ * afterwards and the firmware may reuse its value. */
+int cc3501e_hw_sock_close(uint16_t handle);
+
+/* --------------------------------------------------------------- */
 /* BLE 5.4 (v0.3)                                                    */
 /* --------------------------------------------------------------- */
 

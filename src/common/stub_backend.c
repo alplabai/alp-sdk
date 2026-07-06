@@ -164,6 +164,22 @@ void alp_i2c_close(alp_i2c_t *b)
 }
 #endif /* !ALP_VENDOR_OVERRIDES_I2C */
 
+/* I2C target (slave) mode -- Zephyr-only today.  Gated independently
+ * of ALP_VENDOR_OVERRIDES_I2C so a vendor wrapper can adopt target
+ * mode later without re-implementing the controller-mode surface. */
+#if !defined(ALP_VENDOR_OVERRIDES_I2C_TARGET)
+alp_i2c_target_t *alp_i2c_target_open(const alp_i2c_target_config_t *cfg)
+{
+	(void)cfg;
+	z_last_error = ALP_ERR_NOSUPPORT;
+	return NULL;
+}
+void alp_i2c_target_close(alp_i2c_target_t *t)
+{
+	(void)t;
+}
+#endif /* !ALP_VENDOR_OVERRIDES_I2C_TARGET */
+
 #if !defined(ALP_VENDOR_OVERRIDES_SPI)
 alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 {
@@ -198,6 +214,34 @@ void alp_spi_close(alp_spi_t *b)
 	(void)b;
 }
 #endif /* !ALP_VENDOR_OVERRIDES_SPI */
+
+/* SPI target (slave) mode -- Zephyr-only today.  Gated independently
+ * of ALP_VENDOR_OVERRIDES_SPI so a vendor wrapper can adopt target
+ * mode later without re-implementing the controller-mode surface. */
+#if !defined(ALP_VENDOR_OVERRIDES_SPI_TARGET)
+alp_spi_target_t *alp_spi_target_open(const alp_spi_target_config_t *cfg)
+{
+	(void)cfg;
+	z_last_error = ALP_ERR_NOSUPPORT;
+	return NULL;
+}
+alp_status_t alp_spi_target_transceive(
+    alp_spi_target_t *b, const uint8_t *t, uint8_t *r, size_t l, size_t *rl, uint32_t to_ms)
+{
+	(void)b;
+	(void)t;
+	(void)r;
+	(void)l;
+	(void)to_ms;
+	if (rl != NULL) *rl = 0;
+	return ALP_ERR_NOSUPPORT;
+}
+alp_status_t alp_spi_target_close(alp_spi_target_t *t)
+{
+	(void)t;
+	return ALP_OK; /* nothing was ever opened -- close is a no-op */
+}
+#endif /* !ALP_VENDOR_OVERRIDES_SPI_TARGET */
 
 #if !defined(ALP_VENDOR_OVERRIDES_GPIO)
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
@@ -545,9 +589,8 @@ void alp_rtc_close(alp_rtc_t *r)
 #endif /* !ALP_VENDOR_OVERRIDES_RTC */
 
 #if !defined(ALP_VENDOR_OVERRIDES_WDT)
-alp_wdt_t *alp_wdt_open(uint32_t id, const alp_wdt_config_t *cfg)
+alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg)
 {
-	(void)id;
 	(void)cfg;
 	z_last_error = ALP_ERR_NOSUPPORT;
 	return NULL;
@@ -572,6 +615,7 @@ void alp_wdt_close(alp_wdt_t *w)
 /* Higher libraries (camera, iot, audio, ble, security, mproc, display) */
 /* ------------------------------------------------------------------ */
 
+#if !defined(ALP_VENDOR_OVERRIDES_DISPLAY)
 alp_display_t *alp_display_open(const alp_display_config_t *cfg)
 {
 	(void)cfg;
@@ -592,7 +636,9 @@ void alp_display_close(alp_display_t *d)
 {
 	(void)d;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_DISPLAY */
 
+#if !defined(ALP_VENDOR_OVERRIDES_CAMERA)
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg)
 {
 	(void)cfg;
@@ -625,7 +671,9 @@ void alp_camera_close(alp_camera_t *c)
 {
 	(void)c;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_CAMERA */
 
+#if !defined(ALP_VENDOR_OVERRIDES_WIFI)
 alp_wifi_t *alp_wifi_open(void)
 {
 	return NULL;
@@ -646,6 +694,7 @@ void alp_wifi_close(alp_wifi_t *w)
 {
 	(void)w;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_WIFI */
 
 #if !defined(ALP_VENDOR_OVERRIDES_MQTT)
 alp_mqtt_t *alp_mqtt_open(const alp_mqtt_config_t *cfg)
@@ -763,6 +812,7 @@ void alp_audio_out_close(alp_audio_out_t *o)
 }
 #endif /* !ALP_VENDOR_OVERRIDES_AUDIO_OUT */
 
+#if !defined(ALP_VENDOR_OVERRIDES_BLE)
 alp_ble_t *alp_ble_open(void)
 {
 	return NULL;
@@ -849,6 +899,7 @@ alp_status_t alp_ble_gatt_write(
 	(void)t;
 	return ALP_ERR_NOSUPPORT;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_BLE */
 
 #if !defined(ALP_VENDOR_OVERRIDES_SECURITY)
 alp_hash_t *alp_hash_open(alp_hash_alg_t a)
@@ -1058,43 +1109,43 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 	(void)cfg;
 	return NULL;
 }
-alp_status_t alp_storage_get_info(alp_storage_t *s, alp_storage_info_t *info)
+alp_status_t alp_storage_get_info(alp_storage_t *storage, alp_storage_info_t *info)
 {
-	(void)s;
+	(void)storage;
 	if (info) *info = (alp_storage_info_t){ 0 };
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_storage_read(alp_storage_t *s, uint64_t o, void *d, size_t l)
+alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t o, void *d, size_t l)
 {
-	(void)s;
+	(void)storage;
 	(void)o;
 	(void)d;
 	(void)l;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_storage_write(alp_storage_t *s, uint64_t o, const void *d, size_t l)
+alp_status_t alp_storage_write(alp_storage_t *storage, uint64_t o, const void *d, size_t l)
 {
-	(void)s;
+	(void)storage;
 	(void)o;
 	(void)d;
 	(void)l;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_storage_erase(alp_storage_t *s, uint64_t o, uint64_t l)
+alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t o, uint64_t l)
 {
-	(void)s;
+	(void)storage;
 	(void)o;
 	(void)l;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_storage_sync(alp_storage_t *s)
+alp_status_t alp_storage_sync(alp_storage_t *storage)
 {
-	(void)s;
+	(void)storage;
 	return ALP_ERR_NOSUPPORT;
 }
-void alp_storage_close(alp_storage_t *s)
+void alp_storage_close(alp_storage_t *storage)
 {
-	(void)s;
+	(void)storage;
 }
 
 alp_usb_dev_t *alp_usb_device_open(const alp_usb_device_config_t *cfg)
@@ -1156,6 +1207,7 @@ void alp_usb_host_close(alp_usb_host_t *h)
 /* power (alp/power.h)                                                 */
 /* ------------------------------------------------------------------ */
 
+#if !defined(ALP_VENDOR_OVERRIDES_POWER)
 alp_power_t *alp_power_open(void)
 {
 	z_last_error = ALP_ERR_NOSUPPORT;
@@ -1182,11 +1234,18 @@ void alp_power_close(alp_power_t *p)
 {
 	(void)p;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_POWER */
 
 /* ------------------------------------------------------------------ */
 /* GPU2D (alp/gpu2d.h)                                                 */
 /* ------------------------------------------------------------------ */
 
+/* Muted when the OS backend compiles the real class dispatcher
+ * (src/gpu2d_dispatch.c + the portable sw_fallback) -- the Yocto
+ * build does, so Linux apps get the REAL CPU fill/blit/blend
+ * instead of NOSUPPORT (same #33 migration pattern as rtc/wdt/
+ * can/pwm/adc/i2s/counter above). */
+#if !defined(ALP_VENDOR_OVERRIDES_GPU2D)
 alp_gpu2d_t *alp_gpu2d_open(void)
 {
 	z_last_error = ALP_ERR_NOSUPPORT;
@@ -1257,25 +1316,34 @@ void alp_gpu2d_close(alp_gpu2d_t *g)
 {
 	(void)g;
 }
+const alp_capabilities_t *alp_gpu2d_capabilities(const alp_gpu2d_t *g)
+{
+	(void)g;
+	return NULL;
+}
+#endif /* !ALP_VENDOR_OVERRIDES_GPU2D */
 
 /* ------------------------------------------------------------------ */
 /* Camera ISP (alp/camera.h v0.5 extension)                            */
 /* ------------------------------------------------------------------ */
 
+#if !defined(ALP_VENDOR_OVERRIDES_CAMERA)
 alp_status_t alp_camera_configure_isp(alp_camera_t *c, const alp_camera_isp_config_t *isp)
 {
 	if (isp == NULL) return ALP_ERR_INVAL;
 	(void)c;
 	return ALP_ERR_NOSUPPORT;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_CAMERA */
 
 /* ------------------------------------------------------------------ */
 /* Storage inline-AES (alp/storage.h v0.5 extension)                   */
 /* ------------------------------------------------------------------ */
 
-alp_status_t alp_storage_configure_inline_aes(alp_storage_t *s, const alp_storage_aes_config_t *cfg)
+alp_status_t alp_storage_configure_inline_aes(alp_storage_t                  *storage,
+                                              const alp_storage_aes_config_t *cfg)
 {
 	if (cfg == NULL) return ALP_ERR_INVAL;
-	(void)s;
+	(void)storage;
 	return ALP_ERR_NOSUPPORT;
 }

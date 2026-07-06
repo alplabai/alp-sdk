@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # V2N-specific HiL smoke for examples/v2n/v2n-temp-sensor.  Reads
-# the on-module TMP112 over BRD_I2C @ 0x40.  V2N + V2M only --
+# the on-module TMP112 over BRD_I2C @ 0x48 (ADD0 = GND, see
+# metadata/chips/tmp112.yaml).  V2N + V2M only --
 # the AEN family's TMP112 sits on a different bus.
 #
 # What this proves end-to-end:
@@ -11,7 +12,7 @@
 schema_version: 1
 name: v2n-temp-sensor
 description: |
-  V2N on-module TMP112 read at BRD_I2C @ 0x40.
+  V2N on-module TMP112 read at BRD_I2C @ 0x48.
 
 example: examples/v2n/v2n-temp-sensor
 

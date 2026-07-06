@@ -177,7 +177,7 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 #endif /* ALP_ADC_HAS_BRIDGE_PATH */
 }
 
-alp_status_t alp_adc_stream_read(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got)
+alp_status_t alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got)
 {
 	if (got == NULL) return ALP_ERR_INVAL;
 	*got = 0u;
@@ -330,7 +330,8 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
 	return f;
 }
 
-alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
+alp_status_t
+alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
 {
 	if (got == NULL) return ALP_ERR_INVAL;
 	*got = 0u;
@@ -343,7 +344,7 @@ alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size
 	const size_t want =
 	    (cap < GD32G553_BRIDGE_ADC_STREAM_READ_MAX) ? cap : GD32G553_BRIDGE_ADC_STREAM_READ_MAX;
 	size_t       got_raw = 0u;
-	alp_status_t s       = alp_adc_stream_read(filter->stream, raw, want, &got_raw);
+	alp_status_t s       = alp_adc_stream_read_mv(filter->stream, raw, want, &got_raw);
 	if (s != ALP_OK) return s;
 	if (got_raw == 0u) return ALP_OK;
 
@@ -388,7 +389,8 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
 	return NULL;
 }
 
-alp_status_t alp_adc_filter_read(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
+alp_status_t
+alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
 {
 	/* Mirror the bridge-path contract's pre-checks even when the
      * backend isn't wired -- callers passing a NULL got / NULL
@@ -534,7 +536,7 @@ alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, si
 		                              : (size_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX;
 		uint16_t     raw[GD32G553_BRIDGE_ADC_STREAM_READ_MAX];
 		size_t       got_raw = 0u;
-		alp_status_t s       = alp_adc_stream_read(spec->stream, raw, want, &got_raw);
+		alp_status_t s       = alp_adc_stream_read_mv(spec->stream, raw, want, &got_raw);
 		if (s != ALP_OK) return s;
 		if (got_raw == 0u) {
 			/* Backend ring was empty; caller should poll again

@@ -1,0 +1,370 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * cold_chain implementation -- see cold_chain.h.  The two non-obvious formulas
+ * (Mean Kinetic Temperature and the Magnus dewpoint) are derived inline.
+ */
+#include "cold_chain.h"
+
+#include <math.h>
+#include <string.h>
+
+/* -------------------------------------------------------------------------
+ * Window management.
+ *
+ * The window is a plain fixed-size array (not a ring buffer): samples are
+ * written once and not overwritten.  A new monitoring epoch always starts
+ * with cc_window_reset(), which resets only the count, not the array -- the
+ * next cc_window_push() calls will overwrite stale entries naturally.
+ * This design keeps the implementation interrupt-safe (no head/tail pair to
+ * update atomically) and cache-friendly (linear scan for feature extraction).
+ * ------------------------------------------------------------------------- */
+
+void cc_window_reset(struct cc_window_state *st)
+{
+	/* Zero the counter; the sample array is written lazily as samples arrive. */
+	st->count = 0;
+}
+
+void cc_window_push(struct cc_window_state *st, struct cc_sample s)
+{
+	/* Silently ignore pushes after the window is full.  The caller is
+	 * expected to call cc_window_reset() to begin a new epoch.  Dropping
+	 * excess samples (rather than wrapping around a ring buffer) keeps all
+	 * n samples in chronological order at s[0..n-1], which the slope
+	 * computation relies on for its mirror-index approach. */
+	if (st->count < CC_WINDOW_N) {
+		st->s[st->count++] = s;
+	}
+}
+
+bool cc_window_full(const struct cc_window_state *st)
+{
+	/* The window is full when count reaches the compile-time maximum.
+	 * The Task-2 classifier gates on this before running inference. */
+	return st->count >= CC_WINDOW_N;
+}
+
+/* -------------------------------------------------------------------------
+ * Mean Kinetic Temperature (ICH Q1A / USP <1079>).
+ *
+ * MKT is the constant temperature that would inflict the same Arrhenius-rate
+ * cumulative degradation as the real, fluctuating profile:
+ *
+ *     MKT = (ΔH/R) / ( -ln( (1/n) Σ exp( -(ΔH/R) / T_i ) ) )
+ *
+ * with T_i in KELVIN.  Because exp(-c/T) is convex, Jensen's inequality gives
+ * MKT >= the arithmetic mean -- a short hot excursion raises MKT more than a
+ * plain average would, which is exactly why cold-chain auditing uses MKT.
+ * The accumulation runs in double precision because the exponentials are tiny.
+ * ------------------------------------------------------------------------- */
+static float mkt_celsius(const struct cc_window_state *st, int n)
+{
+	/* Accumulate Σ exp(-ΔH/R / T_i) in double to preserve relative precision
+	 * in the sum; individual terms are tiny -- ~2e-16 at 4 °C, ~1.4e-14 at
+	 * 40 °C -- so a hot spike's term dwarfs the cold-baseline terms. */
+	double sum_exp = 0.0;
+	for (int i = 0; i < n; i++) {
+		/* Convert each Celsius reading to Kelvin before taking the exponential.
+		 * Using double here preserves ~15 significant digits vs. ~7 for float. */
+		double t_kelvin = (double)st->s[i].temp_c + 273.15;
+		sum_exp += exp(-(double)CC_DH_OVER_R / t_kelvin);
+	}
+	/* Each Boltzmann factor is proportional to the Arrhenius reaction rate at
+	 * its temperature.  The ratio between any two factors is
+	 * exp(ΔH/R × (1/T_cold − 1/T_hot)); for T_cold=277 K (4 C) versus
+	 * T_hot=313 K (40 C) that ratio is exp(10000·(1/277.15 − 1/313.15)) ≈ 63.
+	 * A single hour at 40 C therefore delivers the same cumulative chemical
+	 * damage as ~63 hours at 4 C -- exactly the asymmetry MKT captures. */
+	/* Divide by n to get the mean of the Boltzmann-weighted exponentials. */
+	double mean_exp = sum_exp / (double)n;
+	/* mean_exp is in (0,1) for any real temperature, so -ln(mean_exp) > 0 and
+	 * no runtime guard is needed; invert to MKT_K = (ΔH/R) / (-ln(mean_exp)). */
+	double mkt_kelvin = (double)CC_DH_OVER_R / (-log(mean_exp));
+	/* Convert back to Celsius for the application layer. */
+	return (float)(mkt_kelvin - 273.15);
+}
+
+/* -------------------------------------------------------------------------
+ * Magnus dewpoint approximation (a = 17.62, b = 243.12 °C):
+ *
+ *     γ  = ln(RH/100) + a·T / (b + T)
+ *     Td = b·γ / (a - γ)
+ *
+ * Valid for RH in (0, 100]; we clamp RH to >= 1% to keep the log finite.
+ * Error < 0.35 °C over 0..60 °C / 1..100% RH, which is adequate for
+ * condensation-risk detection.
+ * ------------------------------------------------------------------------- */
+static float dewpoint_celsius(float temp_c, float rh_pct)
+{
+	/* Magnus coefficients (Alduchov & Eskridge 1996 optimisation). */
+	const float a = 17.62f, b = 243.12f;
+	/* Clamp RH to a safe range: log(0) = -∞, log(>100%) is physically wrong.
+	 * The 1% floor is conservative: at RH=1% the dewpoint is roughly -50 C
+	 * for a 20 C ambient -- far below any real cold-chain scenario.  This
+	 * guard only fires on corrupt or uninitialised sensor readings. */
+	float rh = (rh_pct < 1.0f) ? 1.0f : ((rh_pct > 100.0f) ? 100.0f : rh_pct);
+	/* γ combines the saturation vapour-pressure (log term, <= 0 for RH <= 100%)
+	 * and the temperature term (positive).  γ may be negative (cold/dry air) or
+	 * positive (warm/humid, e.g. +0.65 at 20 C / 50% RH); either way γ < a, so
+	 * the denominator (a - γ) stays positive and Td <= T for RH <= 100% -- the
+	 * dewpoint never exceeds the ambient, as physically expected. */
+	float gamma = logf(rh / 100.0f) + (a * temp_c) / (b + temp_c);
+	/* Solve for the temperature at which RH would equal 100%. */
+	return (b * gamma) / (a - gamma);
+}
+
+/* -------------------------------------------------------------------------
+ * Main feature extraction pass.
+ * ------------------------------------------------------------------------- */
+
+void cc_feat_extract(const struct cc_window_state *st,
+                     const struct cc_config       *cfg,
+                     struct cc_features           *out)
+{
+	/* Cap at CC_WINDOW_N; cc_window_push() never exceeds it but the cast
+	 * from uint16_t makes the compiler happy with signed loop indices. */
+	const int n = (st->count < CC_WINDOW_N) ? st->count : CC_WINDOW_N;
+
+	/* Zero all output fields; early return leaves them at zero for empty windows. */
+	memset(out, 0, sizeof(*out));
+	if (n <= 0) {
+		return;
+	}
+
+	/* ------------------------------------------------------------------
+	 * First pass: means, min/max temperature, and the out-of-band sample
+	 * count.  A single pass keeps cache pressure low on the M55.
+	 *
+	 * We intentionally combine all four aggregates (mean_t, mean_rh,
+	 * min_t, max_t) into one loop iteration to maximise data locality:
+	 * each cc_sample is 12 bytes and fits in a single cache line fetch.
+	 * ------------------------------------------------------------------ */
+	float sum_t = 0.0f, sum_rh = 0.0f;
+	/* Seed min/max with the first sample to avoid a sentinel like FLT_MAX. */
+	float min_t = st->s[0].temp_c, max_t = st->s[0].temp_c;
+	int   out_of_band = 0;
+	for (int i = 0; i < n; i++) {
+		float t = st->s[i].temp_c;
+		sum_t += t;
+		sum_rh += st->s[i].rh_pct;
+		/* Track the coldest and warmest readings seen in the window. */
+		if (t < min_t) {
+			min_t = t;
+		}
+		if (t > max_t) {
+			max_t = t;
+		}
+		/* A reading counts as an excursion when it leaves the product's band. */
+		if (t < cfg->t_lo || t > cfg->t_hi) {
+			out_of_band++;
+		}
+	}
+	/* Store the four scalar aggregates. */
+	out->mean_temp_c = sum_t / (float)n;
+	out->mean_rh_pct = sum_rh / (float)n;
+	out->min_temp_c  = min_t;
+	out->max_temp_c  = max_t;
+	/* Convert out-of-band sample count to minutes via the per-sample duration. */
+	out->excursion_min = (float)out_of_band * CC_SAMPLE_MIN;
+
+	/* ------------------------------------------------------------------
+	 * Warming/cooling trend: last-quarter mean minus first-quarter mean,
+	 * divided by the window duration in minutes (positive = warming).
+	 *
+	 * Using quarter-window means rather than raw endpoints suppresses the
+	 * noise of a single outlier reading biasing the trend estimate.  This
+	 * is a simple but effective linear trend approximation that avoids the
+	 * overhead of a full least-squares regression on the M55.
+	 * ------------------------------------------------------------------ */
+	int q = n / 4;
+	/* Guard: if the window is very short (< 4 samples), use a single sample. */
+	if (q < 1) {
+		q = 1;
+	}
+	/* Accumulate the first and last quarters separately. */
+	float first = 0.0f, last = 0.0f;
+	for (int i = 0; i < q; i++) {
+		first += st->s[i].temp_c;
+		/* Mirror-index from the end to get the last quarter. */
+		last += st->s[n - 1 - i].temp_c;
+	}
+	/* Slope = ΔT / Δt in °C/min; normalise both differences by the same q.
+	 * Expanding: slope = (mean_last_q - mean_first_q) / (n * CC_SAMPLE_MIN),
+	 * where n * CC_SAMPLE_MIN is the full window duration in minutes.  Using
+	 * the full-window span (not just the quarter) gives a globally consistent
+	 * rate: a positive value means the window is warming, negative is cooling. */
+	out->temp_slope_c_per_min = ((last - first) / (float)q) / ((float)n * CC_SAMPLE_MIN);
+
+	/* Dewpoint uses the window-mean T/RH so it lines up with the classifier's
+	 * mean-temperature comparison. */
+	out->dewpoint_c = dewpoint_celsius(out->mean_temp_c, out->mean_rh_pct);
+
+	/* Mean kinetic temperature over the whole window (expensive: n exp() calls;
+	 * runs last so the earlier cheap fields are ready for early-exit callers). */
+	out->mkt_c = mkt_celsius(st, n);
+}
+
+/* -------------------------------------------------------------------------
+ * Feature packing -- lay the metrics out in a fixed order for the AI model.
+ *
+ * The order here must match the column order used when the classifier was
+ * trained (see tools/training/feature_extractor.py).  If a feature is added
+ * or removed, CC_FEATURE_DIM must be updated AND the model must be retrained.
+ *
+ * The function intentionally takes a raw float pointer + capacity so that the
+ * same vector can be passed directly to the .alpmodel inference call without
+ * an intermediate copy.
+ * ------------------------------------------------------------------------- */
+
+size_t cc_feat_pack(const struct cc_features *f, float *vec, size_t cap)
+{
+	/* Refuse to write a partial vector: the model expects exactly CC_FEATURE_DIM
+	 * floats and must not receive a shorter, ambiguously-padded slice. */
+	if (cap < (size_t)CC_FEATURE_DIM) {
+		return 0;
+	}
+	/* Pack in the same order the training pipeline used to build the model.
+	 * Any reordering here must be mirrored in the Python feature_extractor. */
+	size_t i = 0;
+	/* Temperature statistics (3 floats): mean captures the typical exposure
+	 * level; min and max bound the extremes.  Together they let the autoencoder
+	 * distinguish a fluctuating-but-safe profile from one that is narrowly
+	 * within band but trending toward the edge of the safe region. */
+	vec[i++] = f->mean_temp_c;
+	vec[i++] = f->min_temp_c;
+	vec[i++] = f->max_temp_c;
+	/* Humidity mean (1 float). */
+	vec[i++] = f->mean_rh_pct;
+	/* Trend and derived physics metrics (4 floats): temp_slope gives the
+	 * direction of change; dewpoint and mkt carry the condensation-risk and
+	 * cumulative-damage signals respectively; excursion_min directly encodes
+	 * the regulatory breach duration independent of the current temperature. */
+	vec[i++] = f->temp_slope_c_per_min;
+	vec[i++] = f->dewpoint_c;
+	vec[i++] = f->mkt_c;
+	vec[i++] = f->excursion_min;
+	return i; /* == CC_FEATURE_DIM */
+}
+
+/* -------------------------------------------------------------------------
+ * 4-state integrity classifier.
+ *
+ * The three checks are ordered by severity: ACUTE (product currently outside
+ * its temperature band, or it has already spent too many minutes out of band)
+ * takes priority over CUMULATIVE MKT damage, which takes priority over
+ * HUMIDITY risk.  This ordering means the most urgent condition is always
+ * surfaced first and the operator sees one unambiguous action.
+ * ------------------------------------------------------------------------- */
+
+cc_state_t cc_classify(const struct cc_features *f, const struct cc_config *cfg)
+{
+	/* ACUTE first: the product is currently too warm/cold, or it has spent more
+	 * than the allowed minutes out of band.  We compare the window mean (not a
+	 * single instantaneous reading) against t_lo/t_hi so that a lone noisy
+	 * sample does not trigger a false alert; the excursion_min counter catches
+	 * that same spike as a cumulative time-in-breach penalty.  Acute alerts
+	 * demand immediate operator action: move product, repair the cold store. */
+	if (f->mean_temp_c < cfg->t_lo || f->mean_temp_c > cfg->t_hi ||
+	    f->excursion_min > cfg->excursion_min_limit) {
+		return CC_TEMP_EXCURSION;
+	}
+	/* CUMULATIVE: even after the temperature has recovered to the safe band, a
+	 * brief hot excursion may have delivered enough Arrhenius-weighted thermal
+	 * energy to push MKT past the regulatory limit.  Because the Boltzmann
+	 * exponential grows steeply with temperature, a spike to 20 C for 1 hour
+	 * raises MKT far more than 1 hour at 9 C.  ICH Q1A / USP <1079> reference
+	 * limit for most vaccines: MKT <= 8 C (same as the storage ceiling). */
+	if (f->mkt_c > cfg->mkt_limit_c) {
+		return CC_MKT_EXCEEDED;
+	}
+	/* HUMIDITY: condensation risk arises from two independent conditions --
+	 *   (a) The gap between ambient temperature and the dewpoint is smaller than
+	 *       dewpoint_margin_c: the air is close to saturation and a small drop
+	 *       (draught, cold surface) will start condensing water on the goods.
+	 *   (b) RH > 90% regardless of the gap: so-saturated air condenses on any
+	 *       surface even 1-2 C cooler than ambient.
+	 * Both conditions risk label detachment, mould growth, and corrosion. */
+	if ((f->mean_temp_c - f->dewpoint_c) < cfg->dewpoint_margin_c || f->mean_rh_pct > 90.0f) {
+		return CC_CONDENSATION_RISK;
+	}
+	return CC_OK;
+}
+
+const char *cc_state_name(cc_state_t s)
+{
+	/* Map each state to a stable, upper-case string (the enum member name
+	 * without the CC_ prefix).  Returns "UNKNOWN" for any out-of-range
+	 * value — safe to log even if the caller passes a corrupt byte. */
+	switch (s) {
+	case CC_OK:
+		return "OK";
+	case CC_TEMP_EXCURSION:
+		return "TEMP_EXCURSION";
+	case CC_MKT_EXCEEDED:
+		return "MKT_EXCEEDED";
+	case CC_CONDENSATION_RISK:
+		return "CONDENSATION_RISK";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+/* -------------------------------------------------------------------------
+ * Deterministic anomaly score.
+ *
+ * Combines two contributions into a single 0..1 float so that the main
+ * application loop can log an anomaly severity even when no AI model is
+ * loaded (e.g., first boot, model download in progress, OTA mid-flight).
+ *
+ * Score is the MAX of:
+ *   (a) excursion depth: how far the mean T is outside the band, normalised
+ *       by the band width -- score reaches 1.0 when the mean is one full band
+ *       width past an edge (e.g. for a 2..8 C band, mean = 14 C);
+ *   (b) MKT overshoot: how much MKT exceeds the limit, normalised by the
+ *       limit itself so that 2x the MKT limit = score 1.0.
+ *
+ * Taking the max (not the sum) keeps the score interpretable: 0.9 always
+ * means "very close to or past a hard limit", regardless of which limit.
+ * The score is clamped to [0, 1] and saturates at 1.0.
+ * ------------------------------------------------------------------------- */
+
+float cc_anomaly_fallback(const struct cc_features *f, const struct cc_config *cfg)
+{
+	float score = 0.0f;
+
+	/* Excursion depth: how far the mean T is past the band edge, normalised by
+	 * the band width.  Score = 0 when in-band; score = 1 when the mean is one
+	 * full band width outside the edge.  For a 2..8 C fridge (band = 6 C),
+	 * mean_temp_c = 14 C gives score = 6/6 = 1.0.  Using the mean (not an
+	 * instantaneous reading) keeps the score robust against sensor glitches. */
+	float band = cfg->t_hi - cfg->t_lo;
+	if (band > 1e-6f) {
+		float over = 0.0f;
+		if (f->mean_temp_c > cfg->t_hi) {
+			over = f->mean_temp_c - cfg->t_hi;
+		} else if (f->mean_temp_c < cfg->t_lo) {
+			over = cfg->t_lo - f->mean_temp_c;
+		}
+		score = over / band;
+	}
+	/* MKT overshoot: how far MKT exceeds the cumulative-damage limit, normalised
+	 * by the limit so 2× the MKT limit saturates at score = 1.0.  For a
+	 * vaccine fridge with mkt_limit_c = 8 C, MKT = 12 C → mkt_term = 4/8 =
+	 * 0.5.  Taking max() (not sum) keeps the score interpretable: 0.9 always
+	 * means "very close to or past a hard limit", regardless of which one. */
+	if (f->mkt_c > cfg->mkt_limit_c && cfg->mkt_limit_c > 1e-6f) {
+		float mkt_term = (f->mkt_c - cfg->mkt_limit_c) / cfg->mkt_limit_c;
+		if (mkt_term > score) {
+			score = mkt_term;
+		}
+	}
+	if (score < 0.0f) {
+		score = 0.0f;
+	}
+	if (score > 1.0f) {
+		score = 1.0f;
+	}
+	return score;
+}

@@ -190,7 +190,8 @@
 	 * First bring-up uses a FIXED-LINK PHY: upstream Zephyr v4.4 ships no
 	 * snps,designware-mdio driver, so the on-SoM TI DP83825I (RMII, 100/full)
 	 * runs unmanaged.  A board enables this node (status="okay") + supplies
-	 * pinctrl_eth (the RMII pin group) + a real local-mac-address.
+	 * pinctrl_eth (the RMII pin group); the station MAC defaults to a random
+	 * locally-administered one (see the node property below).
 	 *
 	 * ADR 0017 Tier-1.5 (in-tree glue over the UPSTREAM core; kept, not
 	 * fork-consumed -- the fork forked the core).  INTERIM until E8 bench.
@@ -206,7 +207,16 @@
 		reg = <0x48100000 0x1000>;
 		interrupts = <148 3>;
 		clocks = <&clockctrl ALIF_ETHERNET_CLK>;
-		local-mac-address = [02 01 56 78 43 21];
+		/* Station MAC: per-boot RANDOM locally-administered address (the
+		 * standard Zephyr ethernet-controller mechanism; the glue prefixes
+		 * it 02:01:56, this repo's LAA convention).  A hard-coded
+		 * local-mac-address here would ship EVERY AEN801 with the same
+		 * MAC.  Per-unit provisioning overrides it:
+		 *   /delete-property/ zephyr,random-mac-address;
+		 *   local-mac-address = [ .. real per-unit address .. ];
+		 * in the board/provisioning overlay (the binding ignores
+		 * local-mac-address while the random flag is set). */
+		zephyr,random-mac-address;
 		phy-connection-type = "rmii";
 		phy-handle = <&eth_phy>;
 		/* pinctrl-0 + pinctrl-names supplied by the enabling board overlay
@@ -365,8 +375,9 @@
 	 * programming).  A board enables a node + its child + the alp-{pwm,counter}
 	 * alias.  ADR 0017 Tier-1.5 (thin Zephyr drivers over the Apache-2.0 hal_alif
 	 * alif_utimer_* register library; the fork ships UTIMER bindings only, no
-	 * driver -- so there is no Tier-2 path to retire onto).  INTERIM until E8
-	 * bench, then promotes to permanent.  BENCH-UNVERIFIED.
+	 * driver -- so there is no Tier-2 path to retire onto).  The counter path
+	 * (alif,utimer-counter on utimer0) is BENCH-VERIFIED (2026-06-17 E8 alarm
+	 * pass) and promoted to permanent; the PWM path remains BENCH-UNVERIFIED.
 	 *
 	 * utimer0 backs the portable alp_counter surface; utimer3/6/10/11 back the
 	 * eight E1M PWM pads.

@@ -4,9 +4,15 @@
 #
 #   - Metadata edits that didn't trigger a soc_caps.h regeneration.
 #     scripts/gen_soc_caps.py reads metadata/socs/**.json and emits
-#     include/alp/soc_caps.h; if the committed header doesn't match
+#     include/alp/soc_caps.h plus the capability dispatch pair
+#     include/alp/cap.h + src/cap.c; if a committed copy doesn't match
 #     what the script would produce, the PR is asking reviewers to
 #     accept stale capability tables.
+#
+#   - Board YAML edits that didn't trigger a routes-header regeneration.
+#     scripts/gen_board_header.py reads metadata/boards/*.yaml
+#     `e1m_routes:` blocks and emits
+#     include/alp/boards/alp_<board>_routes.h.
 #
 #   - Public-header additions/removals that didn't bump the ABI
 #     snapshot at docs/abi/v<N>-snapshot.json.  The snapshot's
@@ -21,7 +27,23 @@ on:
     paths:
       - 'metadata/**'
       - 'include/alp/**'
+      - 'docs/diagnostics/**'
+      - 'examples/**'
+      - 'src/cap.c'
       - 'scripts/gen_soc_caps.py'
+      - 'scripts/gen_board_header.py'
+      - 'scripts/gen_pinmux_capability.py'
+      - 'scripts/gen_support_matrix.py'
+      - 'scripts/gen_catalog.py'
+      - 'scripts/gen_error_catalog.py'
+      # The portability matrix re-runs the som.sku swap-test through
+      # scripts/alp_project.py + the alp_orchestrate/ package, so any
+      # emit-pipeline change can move its generated block.
+      - 'scripts/gen_portability_matrix.py'
+      - 'scripts/alp_project.py'
+      - 'scripts/alp_orchestrate/**'
+      - 'docs/portability-matrix.md'
+      - 'scripts/check_*.py'
       - 'scripts/abi_snapshot.py'
       - '.github/workflows/pr-generated-files.yml'
   push:
@@ -29,6 +51,9 @@ on:
     paths:
       - 'metadata/**'
       - 'include/alp/**'
+      - 'src/cap.c'
+      - 'docs/diagnostics/**'
+      - 'examples/**'
   workflow_dispatch:
 
 concurrency:
@@ -50,10 +75,10 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version-file: .python-version
 
       # gen_soc_caps.py formats its output with clang-format-22 (the same version
       # the diff-only style gate pins) so the generated headers match the repo
@@ -66,22 +91,79 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/clang-format" --version
 
-      - name: Regenerate soc_caps.h from metadata
+      # gen_board_header.py + gen_pinmux_capability.py (and the matrix /
+      # catalog generators below) read YAML metadata; the pinmux generator
+      # also schema-validates its output.  setup-python's interpreter ships
+      # neither package, so install them explicitly.
+      - name: Install generator dependencies
+        run: python3 -m pip install --user pyyaml jsonschema
+
+      # gen_soc_caps.py emits include/alp/soc_caps.h AND the capability
+      # dispatch pair include/alp/cap.h + src/cap.c (CAP_H_OUT / CAP_C_OUT);
+      # all three are diff-gated below.
+      - name: Regenerate soc_caps.h + cap.h/cap.c from metadata
         run: python3 scripts/gen_soc_caps.py
 
-      - name: Regenerate ABI snapshot (current = v0.8)
-        # The committed v0.8 snapshot is the CURRENT working snapshot
-        # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 are FROZEN historical records --
+      # Board-macro routes headers: include/alp/boards/alp_<board>_routes.h
+      # is projected from each metadata/boards/<name>.yaml `e1m_routes:`
+      # block by scripts/gen_board_header.py.  Regenerate and let the diff
+      # gate below flag any drift.
+      - name: Regenerate board routes headers from board YAMLs
+        run: python3 scripts/gen_board_header.py
+
+      - name: Regenerate pin-mux capability tables from the pinout TSVs
+        run: python3 scripts/gen_pinmux_capability.py
+
+      # Same single-source contract as soc_caps.h: the peripheral-support
+      # matrix is projected from metadata/e1m_modules/*.yaml + metadata/socs/
+      # by scripts/gen_support_matrix.py.  Regenerate and let the diff gate
+      # below flag any drift.
+      - name: Regenerate peripheral-support matrix from metadata
+        run: python3 scripts/gen_support_matrix.py
+
+      # Same single-source contract: the intra-family portability matrix
+      # (docs/portability-matrix.md, generated blocks only) is produced by
+      # scripts/gen_portability_matrix.py.  It regenerates TWO blocks:
+      #   1. the som.sku swap-test matrix (metadata/e1m_modules/E1M-*.yaml x
+      #      the pinned portable examples) through scripts/alp_project.py;
+      #   2. the ADR 0018 library-compatibility table -- rows are the
+      #      manifests auto-discovered from metadata/libraries/*.yaml, each
+      #      (library x SKU) cell reusing alp_orchestrate/libraries.py's own
+      #      emit-side `requires:` resolution.
+      # So a change to a manifest under metadata/libraries/ (covered by the
+      # metadata/** path filter) or to the resolver (scripts/alp_orchestrate/**)
+      # can move this doc.  Regenerate and let the diff gate below flag any
+      # drift.  Hand-written prose outside the BEGIN/END markers is preserved.
+      - name: Regenerate intra-family portability matrix from metadata
+        run: python3 scripts/gen_portability_matrix.py
+
+      # Same single-source contract again: metadata/catalog.json is the
+      # machine-readable SDK map an agent / MCP server reads.  It is projected
+      # from metadata/, examples/, include/alp/, and scripts/ by
+      # scripts/gen_catalog.py; regenerate and let the diff gate flag drift.
+      - name: Regenerate machine-readable SDK catalog
+        run: python3 scripts/gen_catalog.py
+
+      # Single-source error catalog: projected from the ALP_ERR_* enum in
+      # include/alp/peripheral.h + the docs/diagnostics/ALP-B*.md landing
+      # pages by scripts/gen_error_catalog.py (what `alp explain` reads).
+      # Regenerate and let the diff gate below flag any drift.
+      - name: Regenerate error catalog from headers + diagnostic docs
+        run: python3 scripts/gen_error_catalog.py
+
+      - name: Regenerate ABI snapshot (current = v0.9)
+        # The committed v0.9 snapshot is the CURRENT working snapshot
+        # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 + v0.8 are FROZEN historical records --
         # the in-tree convention per docs/abi-markers.md).  Regenerate
-        # v0.8 from the current headers and compare.
+        # v0.9 from the current headers and compare.
         #
         # The snapshot's `generated` field is a date stamp; re-running
         # on the same headers always changes that one line, so the
         # diff below masks it with --ignore-matching-lines.
         run: |
           python3 scripts/abi_snapshot.py \
-              --version v0.8 \
-              --output docs/abi/v0.8-snapshot.json
+              --version v0.9 \
+              --output docs/abi/v0.9-snapshot.json
 
       - name: Fail if generated files differ from committed copies
         run: |
@@ -89,10 +171,24 @@ jobs:
           # else must match.
           if ! git diff --exit-code \
                   --ignore-matching-lines='"generated":' \
-                  -- include/alp/soc_caps.h docs/abi/v0.8-snapshot.json; then
+                  -- include/alp/soc_caps.h docs/abi/v0.9-snapshot.json \
+                     include/alp/cap.h \
+                     src/cap.c \
+                     include/alp/boards/ \
+                     metadata/pinmux/ \
+                     metadata/catalog.json \
+                     metadata/error-catalog.json \
+                     docs/peripheral-support-matrix.md \
+                     docs/portability-matrix.md; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
-            echo "::error::  python3 scripts/abi_snapshot.py --version v0.8 --output docs/abi/v0.8-snapshot.json"
+            echo "::error::  python3 scripts/gen_board_header.py"
+            echo "::error::  python3 scripts/gen_pinmux_capability.py"
+            echo "::error::  python3 scripts/gen_support_matrix.py"
+            echo "::error::  python3 scripts/gen_portability_matrix.py"
+            echo "::error::  python3 scripts/gen_catalog.py"
+            echo "::error::  python3 scripts/gen_error_catalog.py"
+            echo "::error::  python3 scripts/abi_snapshot.py --version v0.9 --output docs/abi/v0.9-snapshot.json"
             echo "::error::and commit the result."
             exit 1
           fi

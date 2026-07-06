@@ -1,0 +1,35 @@
+# board.yaml -- wearable activity recognition + fall detection.
+#
+# A body-worn M55 node reads the on-board ICM-42670 6-axis IMU, classifies
+# coarse activity (idle/walk/run/stairs) with a small NPU model, and detects
+# falls with a rule-based 3-phase detector.  Same source targets the V2N DEEPX
+# path when som.sku is flipped.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "ICM-42670 IMU bus" }
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    app: ./src
+    inference:
+      default_arena_kib: 64
+    libraries:
+      - tflite_micro
+    peripherals:
+      - i2c                   # ICM-42670 link.
+
+chips:
+  - icm42670                  # 6-axis IMU; accel + gyro.
+
+diagnostics:
+  log_level: info

@@ -19,6 +19,62 @@ motor:
   channels:       2
   current_a_per_ch: 1.5
 
+signals:
+  # Full chip-native pin set per TI DRV8833 datasheet SLVSAR1E, section 5
+  # "Pin Configuration and Functions"; families:/peripherals: above name only
+  # the host-facing subset (in1..in4/nsleep) this driver exposes today.
+  - { name: AIN1,   type: input,  scope: "bridge A input 1; controls state of AOUT1" }
+  - { name: AIN2,   type: input,  scope: "bridge A input 2; controls state of AOUT2" }
+  - { name: BIN1,   type: input,  scope: "bridge B input 1; controls state of BOUT1" }
+  - { name: BIN2,   type: input,  scope: "bridge B input 2; controls state of BOUT2" }
+  - { name: nSLEEP, type: input,  scope: "logic-high to enable device, logic-low for low-power sleep + logic reset" }
+  - { name: nFAULT, type: open_drain_output, scope: "logic-low on overtemp/overcurrent fault" }
+  - { name: AISEN,  type: bidir,  scope: "bridge A ground / current-sense resistor connection (or GND if unused)" }
+  - { name: BISEN,  type: bidir,  scope: "bridge B ground / current-sense resistor connection (or GND if unused)" }
+  - { name: AOUT1,  type: output, scope: "bridge A output 1; connect to motor winding A" }
+  - { name: AOUT2,  type: output, scope: "bridge A output 2; connect to motor winding A" }
+  - { name: BOUT1,  type: output, scope: "bridge B output 1; connect to motor winding B" }
+  - { name: BOUT2,  type: output, scope: "bridge B output 2; connect to motor winding B" }
+  - { name: VCP,    type: bidir,  scope: "high-side gate drive voltage" }
+  - { name: VINT,   type: power,  scope: "internal supply bypass node" }
+  - { name: VM,     type: power,  scope: "motor supply voltage (2.7..10.8V)" }
+
+physical:
+  # pins per TI DRV8833 datasheet SLVSAR1E (Jan 2011, rev Jul 2015), section
+  # 5 "Pin Configuration and Functions" pin table -- HTSSOP (PWP) column.
+  # NOTE: mpn_population's "DRV8833C" order-code suffix is not in the
+  # public ordering table (which lists PWP/HTSSOP-16, RTY/WQFN-16, PW/
+  # TSSOP-16); HTSSOP-16 (PWP) assumed as the lead package here -- confirm
+  # against the actual BOM part before layout.
+  refdes_prefix: U
+  package:       HTSSOP-16
+  footprint:     htssop_16_5p0x4p4mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",    signal: "nSLEEP" }
+    - { pad: "2",    signal: "AOUT1" }
+    - { pad: "3",    signal: "AISEN" }
+    - { pad: "4",    signal: "AOUT2" }
+    - { pad: "5",    signal: "BOUT2" }
+    - { pad: "6",    signal: "BISEN" }
+    - { pad: "7",    signal: "BOUT1" }
+    - { pad: "8",    signal: "nFAULT" }
+    - { pad: "9",    signal: "BIN1" }
+    - { pad: "10",   signal: "BIN2" }
+    - { pad: "11",   signal: "VCP" }
+    - { pad: "12",   signal: "VM" }
+    - { pad: "13",   signal: "GND" }
+    - { pad: "14",   signal: "VINT" }
+    - { pad: "15",   signal: "AIN2" }
+    - { pad: "16",   signal: "AIN1" }
+    - { pad: "PPAD", signal: "GND" }
+  passives:
+    # Values per SLVSAR1E Table "Pin Functions" (EXTERNAL COMPONENTS column).
+    - { role: decouple, value: 2.2uF, net: VINT, refdes_prefix: C }
+    - { role: bulk,      value: 10uF, net: VM,   refdes_prefix: C }
+    - { role: decouple,  value: 0.01uF, net: VCP, refdes_prefix: C }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_DRV8833
   baremetal:      ALP_SDK_CHIP_DRV8833
@@ -27,6 +83,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

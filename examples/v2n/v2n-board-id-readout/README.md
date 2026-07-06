@@ -7,7 +7,7 @@ SKU on the module.
 ## What it does
 
 1. Calls `alp_hw_info_read(&info)` -- internally opens
-   `E1M_I2C0`, reads the 128-byte manifest at offset 0, validates
+   `ALP_E1M_I2C0`, reads the 128-byte manifest at offset 0, validates
    magic + schema_version + CRC32, populates the struct.
 2. Prints every field (family, SKU, hw_rev, serial, mfg date).
 3. Asserts `info.som_sku == "E1M-V2N101"` via

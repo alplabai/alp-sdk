@@ -26,7 +26,11 @@ param(
     [Parameter(Mandatory = $true)][string]$SigningModule,  # HSM signing module (sign.py shim)
     [Parameter(Mandatory = $true)][string]$ToolboxExe,     # simplelink-wifi-toolbox.exe
     [Parameter(Mandatory = $true)][string]$ConfBin,        # cc35xx-conf.bin (memory/flash config)
-    [string]$Version       = "0.1.0.0", # GPE image version (>= the version on the unit; monotonic)
+    # GPE image version = vendor-RoT ANTI-ROLLBACK gate (monotonic, >= the unit's),
+    # DISTINCT from the app SemVer (firmware-version.txt / GET_DIAG_INFO.fw_version).
+    # Bench unit poisoned to 0.9.0.7 -> major MUST be >= 1. See deploy_validate.sh
+    # for the date-derived default (major.yy.mmdd.hhmm).
+    [string]$Version       = "1.0.0.0", # GPE image version; MUST be monotonic (major>=1)
     [string]$FlashType     = "PY25Q64LB",
     [string]$XdsSerial     = "",         # XDS110 serial for -Program (e.g. L50015YR)
     [switch]$RollbackProtection,         # burn anti-rollback fuses (recommended for production)

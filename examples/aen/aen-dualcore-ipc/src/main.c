@@ -38,8 +38,11 @@
  *   receiver frame: CH0_ST  = +0x00 ; CH0_CLR        = +0x08
  *
  * Roles (board-aware single app):
- *   HP build = master: se_service_boot_cpu(EXTSYS_1=HE, 0x58000000) FIRST, then
- *              the responder loop (recv request, reply payload+1, ring HE).
+ *   HP build = master: alp_mproc_boot_core(ALP_CORE_M55_HE, 0x58000000) FIRST
+ *              (the portable peer-core release from <alp/mproc.h>; the backend
+ *              registry routes it to the SoM's boot authority -- the SE boot
+ *              service on AEN), then the responder loop (recv request, reply
+ *              payload+1, ring HE).
  *   HE build = requester: build a request, ring HP, wait for the reply, verify.
  *
  * Shared mailbox layout in global SRAM0 (fixed offsets, clear of the beacons):
@@ -57,7 +60,8 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/barrier.h>
-#include <se_service.h>
+
+#include <alp/mproc.h>
 
 /* ----- non-secure MHU-1 frames (CPU-relative aliases; see file header) ----- */
 #define MHU1_TX_FRAME 0x400B0000U /* "my sender frame to the other core"     */
@@ -69,9 +73,8 @@
 #define RX_CH0_CLR    (MHU1_RX_FRAME + 0x08U)
 #define DOORBELL_BIT  0x1U
 
-/* ----- se_service_boot_cpu enum (hal_alif services_lib_api.h) ----- */
-#define EXTSYS_1_HE  3U
-#define HE_LOAD_ADDR 0x58000000U
+/* ----- peer-core release (portable <alp/mproc.h> boot surface) ----- */
+#define HE_LOAD_ADDR 0x58000000U /* HE ITCM global alias = HE-APP loadAddress */
 
 /* ----- round-trip parameters ----- */
 #define IPC_PAYLOAD_WORDS 14U /* 14 + seq + len = 16 words = 64 bytes/mailbox */
@@ -94,7 +97,8 @@ struct ipc_msg {
 #define RT_BAD    ((volatile uint32_t *)0x02002084U)       /* HE reply mismatches  */
 #define HP_SERVED ((volatile uint32_t *)0x02002088U)       /* HP requests serviced */
 
-/* Per-core liveness beacon (same scheme as master/doorbell). */
+/* Per-core liveness beacon (same scheme as master/doorbell).  The board #if
+ * is core-role selection (HP vs HE build), not a peripheral-presence gate. */
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define ROLE        "HP"
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)
@@ -145,10 +149,12 @@ int main(void)
 	 * the SES), then service requests: for each HE doorbell, read REQ_MBOX,
 	 * write RPL_MBOX with payload[i]+1 and the echoed seq, and ring HE back.
 	 */
-	*HP_SERVED = 0U;
-	int rc     = se_service_boot_cpu(EXTSYS_1_HE, HE_LOAD_ADDR);
+	*HP_SERVED      = 0U;
+	alp_status_t rc = alp_mproc_boot_core(ALP_CORE_M55_HE, HE_LOAD_ADDR);
 
-	printk("se_service_boot_cpu(HE, 0x%08x) rc=%d -- responder up on MHU-1\n", HE_LOAD_ADDR, rc);
+	printk("alp_mproc_boot_core(M55-HE, 0x%08x) rc=%d -- responder up on MHU-1\n",
+	       HE_LOAD_ADDR,
+	       (int)rc);
 
 	mhu_sender_ready(); /* my TX frame = the HP->HE reply ring */
 
@@ -213,6 +219,7 @@ int main(void)
 			REQ_MBOX->payload[i] = (seq << 8) + i;
 		}
 		REQ_MBOX->len = IPC_PAYLOAD_WORDS;
+		barrier_dmem_fence_full();
 		REQ_MBOX->seq = seq; /* seq LAST: HP keys off it via the doorbell */
 
 		mhu_ring(); /* hint HP that a request is ready */

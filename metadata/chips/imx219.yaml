@@ -19,6 +19,30 @@ i2c:
 mipi:
   lanes_supported: [1, 2, 4]
 
+signals:
+  - { name: SDA,     type: bidir,  scope: "CCI/I2C data" }
+  - { name: SCL,     type: input,  scope: "CCI/I2C clock" }
+  - { name: XCLR,    type: input,  scope: "chip clear (reset)" }
+  - { name: POREN,   type: input,  scope: "power-on-reset enable strap; tie to VDIG" }
+  - { name: GPO,     type: bidir,  scope: "general-purpose I/O; tie to GND when unused" }
+  - { name: FSTROBE, type: output, scope: "flash-strobe output" }
+  - { name: INCK,    type: input,  scope: "external master clock input" }
+  - { name: DCKP,    type: output, scope: "MIPI CSI-2 clock lane, positive" }
+  - { name: DCKN,    type: output, scope: "MIPI CSI-2 clock lane, negative" }
+  - { name: DMO1P,   type: output, scope: "MIPI CSI-2 data lane 1, positive" }
+  - { name: DMO1N,   type: output, scope: "MIPI CSI-2 data lane 1, negative" }
+  - { name: DMO2P,   type: output, scope: "MIPI CSI-2 data lane 2, positive" }
+  - { name: DMO2N,   type: output, scope: "MIPI CSI-2 data lane 2, negative" }
+  - { name: DMO3P,   type: output, scope: "MIPI CSI-2 data lane 3, positive" }
+  - { name: DMO3N,   type: output, scope: "MIPI CSI-2 data lane 3, negative" }
+  - { name: DMO4P,   type: output, scope: "MIPI CSI-2 data lane 4, positive" }
+  - { name: DMO4N,   type: output, scope: "MIPI CSI-2 data lane 4, negative" }
+  - { name: VANA,    type: power,  scope: "analog supply domain, 2.8V" }
+  - { name: VDIG,    type: power,  scope: "digital core/IO supply domain, 1.2V" }
+  - { name: VIF,     type: power,  scope: "interface supply domain, 1.8V" }
+  - { name: VCP,     type: analog, scope: "internal regulator output; needs external decouple cap" }
+  - { name: VBO,     type: analog, scope: "internal regulator output; needs external decouple cap" }
+
 resolutions:
   max:            [3280, 2464]
 
@@ -30,7 +54,67 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pins per Sony "IMX219PQH5-C" datasheet Table 1 "Pin Description"
+  # and Table 2 "Pin Coordinates" (numbered pads 1-65, die-level CSP,
+  # Chip size 5.095mm x 4.930mm w/ scribe). The `datasheet.primary`
+  # field above still notes Sony's own IMX219 doc as NDA-only, but a
+  # full IMX219PQH5-C pin/coordinate table circulates on public
+  # mirrors (e.g. opensourceinstruments.com/Electronics/Data/IMX219PQ.pdf)
+  # with no confidentiality marking visible on the pages transcribed
+  # here (contrast AR0234's onsemi ball-map, which IS watermarked
+  # confidential on every page and was therefore left unpopulated).
+  # Only signal-bearing pads are populated: I2C, XCLR/POREN/GPO/
+  # FSTROBE/INCK control, MIPI CSI-2 lanes, and a representative
+  # sample of the VANA/VDIG/VIF power/ground pins (the full die has
+  # dozens of same-domain VDD*/VSS* instances; not all are
+  # enumerated). TENABLE ("NC") and the two analog test pads
+  # (TVCDSIN/TVMON, both "NC, For test") are excluded per NC scope.
+  refdes_prefix: U
+  package:              "65-pad CSP"
+  footprint:             csp_65
+  dimension_mm:          "5.095 x 4.930"
+  operating_temp_deg_c:  "-20..60"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "21", signal: "POREN" }
+    - { pad: "22", signal: "XCLR" }
+    - { pad: "24", signal: "GPO" }
+    - { pad: "25", signal: "FSTROBE" }
+    - { pad: "26", signal: "SDA" }
+    - { pad: "27", signal: "SCL" }
+    - { pad: "30", signal: "INCK" }
+    - { pad: "42", signal: "DMO1N" }
+    - { pad: "43", signal: "DMO1P" }
+    - { pad: "44", signal: "DMO2N" }
+    - { pad: "45", signal: "DMO2P" }
+    - { pad: "47", signal: "DCKN" }
+    - { pad: "48", signal: "DCKP" }
+    - { pad: "50", signal: "DMO3N" }
+    - { pad: "51", signal: "DMO3P" }
+    - { pad: "52", signal: "DMO4N" }
+    - { pad: "53", signal: "DMO4P" }
+    - { pad: "16", signal: "VCP" }
+    - { pad: "17", signal: "VBO" }
+    - { pad: "1",  signal: "VDIG" }
+    - { pad: "40", signal: "VDIG" }
+    - { pad: "3",  signal: "VANA" }
+    - { pad: "9",  signal: "VANA" }
+    - { pad: "63", signal: "VANA" }
+    - { pad: "31", signal: "VIF" }
+    - { pad: "2",  signal: "GND" }
+    - { pad: "4",  signal: "GND" }
+    - { pad: "41", signal: "GND" }
+    - { pad: "62", signal: "GND" }
+  passives:
+    # Table 1 "Pin Description" remarks column: pin 16 (VCP) "Connect
+    # to capacitor (2.2uF)"; pin 17 (VBO) "Connect to capacitor (1.0uF)".
+    - { role: decouple, value: 2.2uF, net: VCP, refdes_prefix: C }
+    - { role: decouple, value: 1.0uF, net: VBO, refdes_prefix: C }

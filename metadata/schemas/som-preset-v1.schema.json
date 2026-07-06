@@ -2,10 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/som-preset-v1.schema.json",
   "title": "ALP SoM preset (metadata/e1m_modules/<SKU>.yaml) v1",
-  "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  This schema validates the structural shape of every released-MPN preset; per-section tightness varies (the i2c_devices block is strictly typed; populated-parts refs stay loose because chip names are an open set governed by metadata/chips/<name>.yaml).",
+  "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  Every released-MPN preset shares ONE canonical shape: the top-level key set, `memory:`, `on_module:`, `inference:`, and `status:` are closed (additionalProperties: false) so cross-family key drift fails validation instead of passing silently.  The only deliberately-open spots are the ones where genuine per-family variance is legitimate, and each carries its own description saying why: `capabilities:` (open set of accelerator flags matched against library hw-backends.yaml), `i2c_devices` bus KEYS (bus identifiers differ per family), `bus_pads` (per-silicon pad naming), and `helper_firmware[].flash_args` (shape follows the flash backend).",
   "type": "object",
-  "required": ["schema_version", "sku", "family", "silicon", "topology"],
-  "additionalProperties": true,
+  "required": [
+    "schema_version", "sku", "family", "silicon", "display_name",
+    "on_module", "memory", "inference", "topology",
+    "default_hw_rev", "default_board", "status"
+  ],
+  "additionalProperties": false,
   "allOf": [
     {
       "if": {
@@ -57,29 +61,132 @@
     },
     "on_module": {
       "type": "object",
-      "additionalProperties": true,
-      "description": "Populated on-module chips + I2C bus topology.  Most fields stay open since chip names + roles are an open set; the `i2c_devices` sub-block is strictly typed.",
+      "additionalProperties": false,
+      "required": ["silicon"],
+      "description": "Populated on-module chips + I2C bus topology.  The key set is CLOSED: every legal on-module role is enumerated below (union of all released families), so a new family inventing a synonym key (e.g. `pmic` for `pmic_main`) fails validation.  Adding a genuinely new on-module role means extending this enumeration deliberately, in the schema, with review.",
       "properties": {
+        "silicon": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+:[a-z0-9_-]+:[a-z0-9_-]+$",
+          "description": "Main silicon triple ref -- repeats the top-level `silicon:` for self-contained reads of the block."
+        },
+        "pmic_main":          { "$ref": "#/$defs/chip_ref", "description": "Primary PMIC.  Canonical key on every family that populates one (imx93's former `pmic:` normalised to this)." },
+        "pmic_secondary":     { "$ref": "#/$defs/chip_ref", "description": "Secondary PMIC (e.g. V2N's DA9292).  Absent on single-PMIC families." },
+        "clock_generator":    { "$ref": "#/$defs/chip_ref" },
+        "rtc_external":       { "$ref": "#/$defs/chip_ref" },
+        "temperature_sensor": { "$ref": "#/$defs/chip_ref" },
+        "eeprom":             { "$ref": "#/$defs/chip_ref" },
+        "secure_element":     { "$ref": "#/$defs/chip_ref" },
+        "wifi_ble":           { "$ref": "#/$defs/chip_ref" },
+        "supervisor_mcu":     { "$ref": "#/$defs/chip_ref", "description": "On-module supervisor / IO MCU (V2N family's GD32G553).  Absent on families without one." },
+        "ethernet_phy":       { "$ref": "#/$defs/chip_ref" },
+        "ethernet_phy_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of populated Ethernet PHY instances.  Only meaningful alongside `ethernet_phy:`; families with a single PHY (or none) omit it."
+        },
+        "nor_flash":          { "$ref": "#/$defs/chip_ref", "description": "SoC controller / peripheral name that reaches the on-module NOR flash (routing annotation, not a chip slug -- e.g. `xspi`)." },
+        "emmc":               { "$ref": "#/$defs/chip_ref", "description": "SoC controller / peripheral name that reaches the on-module eMMC (routing annotation -- e.g. `sd0`)." },
+        "npu":                { "$ref": "#/$defs/chip_ref", "description": "Discrete on-module NPU chip (V2M's DEEPX DX-M1).  On-die NPUs (Ethos-U, DRP-AI) are silicon facts and do NOT appear here." },
+        "pcie_mux":           { "$ref": "#/$defs/chip_ref" },
+        "ospi_memories": {
+          "type": "object",
+          "propertyNames": { "pattern": "^ospi[0-9]+$" },
+          "additionalProperties": { "$ref": "#/$defs/ospi_memory" },
+          "description": "Per-OSPI-instance external memory population (AEN family).  Keys are OSPI controller instances (`ospi0`, `ospi1`)."
+        },
+        "hyperram": { "$ref": "#/$defs/hyperram" },
         "i2c_devices": {
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/i2c_bus"
           },
-          "description": "Per-bus I2C device tables.  Keys are bus identifiers (e.g. `brd_i2c`, `e1m_i2c0`) consumed by the SDK loader."
+          "description": "Per-bus I2C device tables, allowed on every family.  Keys are bus identifiers (e.g. `brd_i2c`, `e1m_i2c0`) consumed by the SDK loader; the key set stays OPEN because bus names are a per-family fact (V2N's `brd_i2c` is a GD32-adjacent Renesas bus, AEN's is the Alif LPI2C0)."
         }
       }
     },
     "memory": {
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "required": ["dram_mbit", "flash_mbit"],
+      "description": "Off-SoC module memory capacities, REQUIRED on every preset in one canonical shape.  `TBD` encodes 'pending the authoritative HW config' or 'per-BOM-variant' (per the no-inventing-values rule); on-die SRAM/MRAM is derived from the SoC variant, never declared here.",
+      "properties": {
+        "dram_mbit": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "const": "TBD" }
+          ],
+          "description": "External volatile memory in Mbit (LPDDR4X on V2N/V2M, HyperRAM on AEN)."
+        },
+        "flash_mbit": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "const": "TBD" }
+          ],
+          "description": "External non-volatile memory in Mbit (eMMC on V2N/V2M, OSPI NOR on AEN)."
+        }
+      }
     },
     "inference": {
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "required": ["preferred_backend"],
+      "description": "Inference-accelerator selection.  One canonical shape: `preferred_backend` always; `ethos_u_variant` + `npu_population` are REQUIRED whenever the preferred backend is `ethos_u` (every Ethos-bearing SoM must enumerate its NPU instances -- the kconfig emitter reads the population list).  Non-Ethos backends (drpai, deepx_dxm1) have no per-instance population table.",
+      "properties": {
+        "preferred_backend": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Canonical backend key (`ethos_u`, `drpai`, `deepx_dxm1`, ...).  Cross-checked against the device dispatcher by scripts/check_inference_backend_parity.py."
+        },
+        "ethos_u_variant": {
+          "type": "string",
+          "pattern": "^u[0-9]+$",
+          "description": "Primary Ethos-U variant (`u55`, `u65`, `u85`) when multiple are populated."
+        },
+        "npu_population": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/npu_instance" },
+          "description": "Per-instance NPU population.  REQUIRED for NPU-bearing (`ethos_u`) SoMs; each entry names the variant, the silicon's role label, and the host core/subsystem it pairs with."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "preferred_backend": { "const": "ethos_u" } },
+            "required": ["preferred_backend"]
+          },
+          "then": { "required": ["ethos_u_variant", "npu_population"] }
+        }
+      ]
+    },
+    "capabilities": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "type": "boolean" },
+      "description": "Per-SoM hardware-accelerator / feature capability flags.  DELIBERATELY OPEN keys (values pinned to booleans): the key set is matched against each library's metadata/library-profiles/<name>/hw-backends.yaml, which grows with the library catalogue -- enumerating it here would couple the preset schema to every library release.  ADDITIVE direction only: declare capabilities the SoM ADDS on top of the silicon (on-module chips, bridge features).  Removing a silicon capability the SKU leaves unpopulated goes in `silicon_capabilities.unpopulated` instead, never as a `false` here."
+    },
+    "silicon_capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unpopulated"],
+      "description": "SKU-level RESTRICTION of the referenced silicon's capability set.  A SKU can only remove (mark unpopulated / not-bonded-out) what its SoC JSON `capabilities:` block offers -- never add; additions belong in `capabilities:`.  Optional; when absent the SKU inherits the SoC's full capability set (the default for every current SKU).  Semantic cross-check (scripts/validate_metadata.py): every listed name must resolve to a truthy entry in the referenced SoC JSON's `capabilities:` block and must not also appear in this preset's `capabilities:` block.",
+      "properties": {
+        "unpopulated": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": "Capability keys from the SoC JSON `capabilities:` block that this SKU does NOT populate (e.g. an accelerator fused off / not bonded out on this order code).  The loader's resolve_capabilities() forces each listed key to false/0 and scripts/gen_soc_caps.py drops the matching ALP_CAP_* flag for ALP_SOM_<SKU>-gated builds."
+        }
+      }
     },
     "topology": {
       "type": "object",
-      "description": "Per-core default runtime + app mapping.  Keys are canonical `cores[].id` values from the resolved SoC spec (e.g. `a55_cluster`, `m33_sm`, `m55_hp`, `m55_he`, `a32_cluster`, `m33`).  Customer's board.yaml `cores:` block inherits + overrides.",
+      "description": "Per-core default runtime + app mapping.  Keys are canonical `cores[].id` values from the resolved SoC spec (e.g. `a55_cluster`, `m33_sm`, `m55_hp`, `m55_he`, `a32_cluster`, `m33`).  Customer's board.yaml `cores:` block inherits + overrides.  Key set stays open here (it must mirror the SoC's cores[].id set, enforced by the pr-metadata-validate cross-check, not by this schema).",
       "additionalProperties": {
         "$ref": "#/$defs/topology_entry"
       }
@@ -100,7 +207,7 @@
             { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" },
             { "type": "string", "const": "TBD" }
           ],
-          "description": "Vendor mailbox controller identifier (e.g. `renesas_mhu`, `nxp_mu`, `alif_evtrtr`).  TBD when the hand-written HW config still owes the value."
+          "description": "Vendor mailbox controller identifier (e.g. `renesas_mhu`, `nxp_mu`, `alif_mhuv2`).  TBD when the hand-written HW config still owes the value."
         },
         "channels": {
           "type": "array",
@@ -127,10 +234,118 @@
     },
     "status": {
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "required": ["preliminary", "partial_hw_config"],
+      "properties": {
+        "preliminary": {
+          "type": "boolean",
+          "description": "True while the silicon / datasheet the preset encodes is itself preliminary."
+        },
+        "partial_hw_config": {
+          "type": "boolean",
+          "description": "True while any field in the preset is still TBD pending the user-supplied authoritative HW config."
+        }
+      }
     }
   },
   "$defs": {
+    "chip_ref": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "Chip-id slug matching a `metadata/chips/<chip>.yaml` manifest, or an SoC-controller routing annotation (`xspi`, `sd0`)."
+        },
+        {
+          "type": "string",
+          "const": "TBD",
+          "description": "Part choice pending the user-supplied HW-config writeup / BOM decision."
+        }
+      ]
+    },
+    "ospi_memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chip", "role"],
+      "properties": {
+        "chip": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "Storage-part MPN (e.g. `MX25UM25645GXDI00`), or the literal `TBD`.  MPN, not a chips/ slug: storage parts have no chip driver."
+        },
+        "assembled": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "string", "enum": ["optional"] }
+          ],
+          "description": "Population status: true (default), false (DNI), or \"optional\" (assembled per BOM variant)."
+        },
+        "capacity_mbit": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "const": "TBD" }
+          ]
+        },
+        "chip_select": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "role": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "What the memory is for (`app_storage`, `data_log`, ...)."
+        }
+      }
+    },
+    "hyperram": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chip", "capacity_mbit"],
+      "properties": {
+        "chip": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "HyperRAM MPN (e.g. `W958D8NBYA5I`), or the literal `TBD`."
+        },
+        "capacity_mbit": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "string", "const": "TBD" }
+          ]
+        },
+        "interface": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "SoC controller instance the HyperRAM hangs off (e.g. `ospi0`)."
+        },
+        "chip_select": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "npu_instance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variant", "role", "paired_with"],
+      "properties": {
+        "variant": {
+          "type": "string",
+          "pattern": "^u[0-9]+$",
+          "description": "Ethos-U variant of this instance (`u55`, `u65`, `u85`)."
+        },
+        "role": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "Silicon's role label for the instance (e.g. `NPU-HE`, `NPU-HP`, `NPU-HG`)."
+        },
+        "paired_with": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "Host core / subsystem the instance is paired with (e.g. `M55-HE`, `HG-subsystem`).  `TBD` when the pairing awaits the HW-config writeup."
+        }
+      }
+    },
     "topology_entry": {
       "type": "object",
       "required": [],
@@ -276,7 +491,7 @@
             { "type": "object", "additionalProperties": true },
             { "type": "string", "const": "TBD" }
           ],
-          "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  Object shape varies per `flash_method`; TBD when the method is TBD."
+          "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  DELIBERATELY OPEN object: the shape follows `flash_method`'s backend contract, which this schema cannot enumerate; TBD when the method is TBD."
         }
       }
     },
@@ -315,12 +530,12 @@
       "properties": {
         "bus_master": {
           "type": "string",
-          "description": "Which silicon drives the bus (informational)."
+          "description": "Which silicon drives the bus (informational).  Omitted when no on-module silicon masters the bus (e.g. AEN's slave-only LPI2C0 housekeeping bus, ADR 0017)."
         },
         "bus_pads": {
           "type": "object",
           "additionalProperties": true,
-          "description": "Per-silicon bus pad assignments (informational)."
+          "description": "Per-silicon bus pad assignments (informational).  DELIBERATELY OPEN: keys name the silicon, values follow that vendor's pad-naming convention."
         },
         "devices": {
           "type": "array",

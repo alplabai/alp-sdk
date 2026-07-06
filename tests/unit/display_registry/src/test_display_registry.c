@@ -8,6 +8,9 @@
  *
  * Backends visible on this test build:
  *   zephyr_stub     (priority 0, "*" wildcard, vendor "stub")
+ * The real zephyr_drv backend (priority 50, issue #23) gates on
+ * CONFIG_DISPLAY, which is off here -- its behaviour is covered by
+ * tests/zephyr/display/ against the upstream dummy display.
  *
  * The test build pins CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y so the
  * dispatcher's `alp_backend_select("display", ALP_SOC_REF_STR)`
@@ -36,8 +39,8 @@ ZTEST_SUITE(alp_display_registry, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(alp_display_registry, test_stub_picked_for_alif_e7)
 {
-	/* The wildcard stub is the only display backend registered in
-     * Slice 8a; any silicon_ref resolves to it. */
+	/* The wildcard stub is the only display backend registered on
+     * this CONFIG_DISPLAY=n build; any silicon_ref resolves to it. */
 	const alp_backend_t *be = alp_backend_select("display", "alif:ensemble:e7");
 	zassert_not_null(be);
 	zassert_equal(strcmp(be->vendor, "stub"), 0);
@@ -83,7 +86,7 @@ ZTEST(alp_display_registry, test_display_capabilities_returns_null_for_null_hand
 
 ZTEST(alp_display_registry, test_backend_count_for_display)
 {
-	/* Only zephyr_stub registered on this build -- no vendor-specific
-     * display backends exist in Slice 8a. */
+	/* Only zephyr_stub registered on this build -- the real
+     * zephyr_drv backend needs CONFIG_DISPLAY (off here). */
 	zassert_equal(alp_backend_count("display"), 1u);
 }

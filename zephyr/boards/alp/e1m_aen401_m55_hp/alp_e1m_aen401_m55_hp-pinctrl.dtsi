@@ -1,0 +1,29 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN401 (Alif Ensemble E4) Cortex-M55-HP carrier pin control.
+ *
+ * Console: the E1M edge "UART0" maps to Alif UART5 (P3_4 RX_A / P3_5 TX_A)
+ * on the AEN module PCB; the Alp E1M-EVK carrier wires its USB-UART console
+ * to it.  Confirmed against the shared AEN-family SoM pinout (common with
+ * AEN801 -- same E1M connector mapping).
+ *
+ * GPIO / I2C / SPI / USB pin groups are added alongside their drivers.
+ * Only the console is wired here for the USB-host bring-up baseline.
+ */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+&pinctrl {
+	pinctrl_uart5: pinctrl_uart5 {
+		group0 {
+			pinmux = <PIN_P3_4__UART5_RX_A>;
+			input-enable;
+		};
+
+		group1 {
+			pinmux = <PIN_P3_5__UART5_TX_A>;
+		};
+	};
+};

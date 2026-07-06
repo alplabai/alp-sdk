@@ -17,7 +17,7 @@
  *      between, prints both raw tick values + their delta + every API return
  *      code, and a single 'RESULT PASS:' / 'RESULT FAIL:' line.
  *   2. over J-Link:  the human reads the UTIMER CNTR register with mem32
- *      (0x48001044, see the overlay) across the same window -- the ground truth
+ *      (0x480010A0, see the overlay) across the same window -- the ground truth
  *      on silicon, independent of any printk.
  *
  * Counter node shape (see the overlay): the counter_alif_utimer driver binds the
@@ -94,7 +94,7 @@ int main(void)
 		return 0;
 	}
 
-	/* --- J-Link readback window #1: mem32 0x48001044 (UTIMER0 CNTR) --- */
+	/* --- J-Link readback window #1: mem32 0x480010A0 (UTIMER0 CNTR) --- */
 
 	/* 5. let the counter advance, then read again. */
 	k_busy_wait(READ_GAP_US);
@@ -106,7 +106,7 @@ int main(void)
 		return 0;
 	}
 
-	/* --- J-Link readback window #2: mem32 0x48001044 (UTIMER0 CNTR) --- */
+	/* --- J-Link readback window #2: mem32 0x480010A0 (UTIMER0 CNTR) --- */
 
 	/* 6. verdict: a free-running up-counter must have advanced between the two
 	 *    reads.  Use unsigned wrap so a (very unlikely) 32-bit wrap across the

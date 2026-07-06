@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: aen-cc3501e-companion-tour
+  description: |
+    Capstone full-surface tour of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4
+    companion API from the Alif Ensemble E8 host (M55-HE): init -> ping ->
+    diag -> Wi-Fi scan/connect/IP -> a TCP socket round-trip -> Wi-Fi
+    teardown -> BLE enable/scan/disable -> a proxied-GPIO read.  Each step
+    is guarded and failures print + continue -- it is a teaching demo of the
+    hand-written-firmware path, not a pass/fail gate.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_companion_tour.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - cc3501e
+      - wifi
+      - ble
+      - sockets
+    build_only: true

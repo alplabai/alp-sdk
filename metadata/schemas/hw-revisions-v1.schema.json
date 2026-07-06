@@ -42,6 +42,11 @@
           "type": "string",
           "enum": ["production", "preview", "preliminary", "reserved", "tbd", "deprecated"]
         },
+        "board_rev": {
+          "type": "string",
+          "pattern": "^R[0-9]+$",
+          "description": "Altium board-design revision this SoM rev corresponds to (e.g. `R2`).  The SDK hw-rev key tracks it (rN == board RN).  The schematic/netlist export is labelled `<YYWW>-R<n>` (e.g. `2626-R2`, where `2626` is the YYWW date code = 2026 week 26, i.e. the `released` date) and lives privately under metadata/e1m_modules/<family>/netlists/ in alp-sdk-internal."
+        },
         "released": {
           "type": "string",
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
@@ -55,6 +60,21 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Bullet list of changes from the previous rev (pin moves, chip swaps, RC bumps).  Customer-visible summary; deeper internal detail is held outside this tree."
+        },
+        "pad_route_overrides": {
+          "type": "array",
+          "description": "Machine-readable per-rev routing deltas.  The base SoM `pad_routes:` tracks the production rev; a rev whose routing differs lists the deviating pads here, and `--emit composed-route-table` applies them for that rev.  Each entry replaces the base `pad_routes:` entry for its `e1m` pad.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["e1m"],
+            "properties": {
+              "e1m": { "type": "string", "pattern": "^E1M_[A-Z0-9_]+$" },
+              "dispatch": { "type": "string" },
+              "dispatch_pin": { "type": ["integer", "string"] },
+              "doc": { "type": "string" }
+            }
+          }
         }
       }
     }

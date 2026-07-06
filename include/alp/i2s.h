@@ -89,10 +89,24 @@ typedef struct {
  */
 alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg);
 
-/** @brief Begin streaming.  TX direction starts producing the bit clock. */
+/**
+ * @brief Begin streaming.  TX direction starts producing the bit clock.
+ *
+ * @param[in] i2s  Handle from @ref alp_i2s_open.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_IO.
+ */
 alp_status_t alp_i2s_start(alp_i2s_t *i2s);
 
-/** @brief Drain any in-flight frames and stop the clock. */
+/**
+ * @brief Drain any in-flight frames and stop the clock.
+ *
+ * @param[in] i2s  Handle from @ref alp_i2s_open.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_IO.
+ */
 alp_status_t alp_i2s_stop(alp_i2s_t *i2s);
 
 /**

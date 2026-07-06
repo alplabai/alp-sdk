@@ -13,8 +13,8 @@
  * etc.
  *
  * Runs on both EVKs: BOARD_SPI_ARDUINO (from <alp/board.h>) resolves
- * to E1M_SPI1 on E1M EVK (through the on-module CC3501E) and
- * E1M_X_SPI1 on E1M-X EVK (level-shifted Arduino header SPI).
+ * to ALP_E1M_SPI1 on E1M EVK (through the on-module CC3501E) and
+ * ALP_E1M_X_SPI1 on E1M-X EVK (level-shifted Arduino header SPI).
  */
 
 #include <stdio.h>
@@ -29,6 +29,10 @@
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[spi] open BOARD_SPI_ARDUINO @ 1 MHz mode 0\n");
 
 	alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){

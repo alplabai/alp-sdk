@@ -6,7 +6,7 @@
  *
  * Strong override of the WEAK cc3501e_gpio_routes[] / cc3501e_gpio_route_count in
  * src/backends/gpio/cc3501e_proxy.c.  Maps the portable E1M GPIO pin_id
- * (alp_gpio_open(E1M_GPIO_IOxx)) -> the RAW CC3501E GPIO index the inter-chip bridge
+ * (alp_gpio_open(ALP_E1M_GPIO_IOxx)) -> the RAW CC3501E GPIO index the inter-chip bridge
  * drives, so an alp_gpio_* call on a proxied E1M IO is routed over the bridge while
  * the Alif's own pins delegate to the platform driver.
  *
@@ -28,16 +28,16 @@
 #include <alp/e1m_pinout.h>
 
 const cc3501e_gpio_route_t cc3501e_gpio_routes[] = {
-	{ E1M_GPIO_IO8, 30u },  /* I2S_EN           <- CC35 GPIO_30 */
-	{ E1M_GPIO_IO9, 12u },  /* PCIE_IO_EXP.RST  <- GPIO_12 */
-	{ E1M_GPIO_IO10, 35u }, /* PCIE0_I2C.EN     <- GPIO_35 */
-	{ E1M_GPIO_IO11, 2u },  /* USB2_SELECT      <- GPIO_2  */
-	{ E1M_GPIO_IO13, 13u }, /* I2S_SELECT       <- GPIO_13 */
-	{ E1M_GPIO_IO15, 14u }, /* S_BMI323.INT1    <- GPIO_14 */
-	{ E1M_GPIO_IO16, 17u }, /* EN_W_DIS2n       <- GPIO_17 (open-drain W_DISABLE2) */
-	{ E1M_GPIO_IO18, 18u }, /* M2E_SDIO_WAKEn   <- GPIO_18 */
-	{ E1M_GPIO_IO19, 19u }, /* M2E_UART.WAKEn_L <- GPIO_19 */
-	{ E1M_GPIO_IO20, 26u }, /* MUX_EN           <- GPIO_26 */
+	{ ALP_E1M_GPIO_IO8, 30u },  /* I2S_EN           <- CC35 GPIO_30 */
+	{ ALP_E1M_GPIO_IO9, 12u },  /* PCIE_IO_EXP.RST  <- GPIO_12 */
+	{ ALP_E1M_GPIO_IO10, 35u }, /* PCIE0_I2C.EN     <- GPIO_35 */
+	{ ALP_E1M_GPIO_IO11, 2u },  /* USB2_SELECT      <- GPIO_2  */
+	{ ALP_E1M_GPIO_IO13, 13u }, /* I2S_SELECT       <- GPIO_13 */
+	{ ALP_E1M_GPIO_IO15, 14u }, /* S_BMI323.INT1    <- GPIO_14 */
+	{ ALP_E1M_GPIO_IO16, 17u }, /* EN_W_DIS2n       <- GPIO_17 (open-drain W_DISABLE2) */
+	{ ALP_E1M_GPIO_IO18, 18u }, /* M2E_SDIO_WAKEn   <- GPIO_18 */
+	{ ALP_E1M_GPIO_IO19, 19u }, /* M2E_UART.WAKEn_L <- GPIO_19 */
+	{ ALP_E1M_GPIO_IO20, 26u }, /* MUX_EN           <- GPIO_26 */
 };
 
 const size_t cc3501e_gpio_route_count =

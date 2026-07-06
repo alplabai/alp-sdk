@@ -266,7 +266,7 @@ The host driver opens SPI1 via:
 
 ```c
 alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
-    .bus_id        = E1M_SPI1,
+    .bus_id        = ALP_E1M_SPI1,
     .freq_hz       = 8000000,          // current default; TBD by signal-integrity
     .mode          = ALP_SPI_MODE_0,   // CPOL = 0, CPHA = 0
     .bits_per_word = 8,
@@ -374,7 +374,7 @@ If/when SDIO is exposed, the host driver opens via:
 
 ```c
 alp_sdio_t *bus = alp_sdio_open(&(alp_sdio_config_t){
-    .bus_id    = E1M_SDIO,
+    .bus_id    = ALP_E1M_SDIO,
     .bus_width = 4,                       // 1 or 4-bit; TBD by signal-integrity
     .freq_hz   = 50000000,                // SDIO 2.0 50 MHz default
     .obi       = ALP_SDIO_OBI_DEDICATED,  // out-of-band IRQ on GPIO_29 per datasheet (TBD)
@@ -892,11 +892,14 @@ helper).
 
 #### 3.11.4 Wire-protocol additions for boot/OTA
 
-- **Reserve `0xF0..0xFF` for OTA / bootloader opcodes.** Mirror the
-  gd32-bridge protocol's convention (cf. `docs/gd32-bridge-protocol.md`
-  §10 Path A — bootloader opcodes reserved 0xF0..0xFF, replying
-  `STATUS_NOSUPPORT` until the FMC integration lands). This is purely
-  reservation; do not allocate or implement at this commit.
+- **SUPERSEDED by the shipped protocol.** This plan originally proposed
+  reserving `0xF0..0xFF` for OTA / bootloader opcodes (mirroring the
+  gd32-bridge convention, `docs/gd32-bridge-protocol.md` §10 Path A).
+  The shipped OTA instead landed in the `0x40..0x4F` group as
+  `ALP_CC3501E_CMD_OTA_BEGIN..OTA_STATUS` = **`0x40..0x44`**
+  (see `include/alp/protocol/cc3501e.h` and
+  `docs/cc3501e-bridge.md` § "OTA"); `0x80..0xFF` stays reserved for
+  vendor extensions.
 
 ---
 
@@ -956,6 +959,7 @@ helper).
 | `0x20..0x24` | SOCK_OPEN/CONNECT/SEND/RECV/CLOSE | host→fw       | Allocated; no payload struct yet |
 | `0x30..0x3B` | BLE_ENABLE..GATT_WRITE        | host→fw           | Allocated |
 | `0x3C..0x3F` | EVT_BLE_*                     | fw→host           | Allocated; ADV_REPORT struct defined |
+| `0x40..0x44` | OTA_BEGIN/WRITE/FINISH/ABORT/STATUS | host→fw     | **Shipped** (post-plan); BEGIN/WRITE/STATUS structs defined — see `docs/cc3501e-bridge.md` § "OTA" |
 | `0x50..0x53` | GPIO_CONFIGURE/WRITE/READ/SET_INT | host→fw       | Allocated; CONFIGURE + WRITE structs defined; SET_INTERRUPT struct missing |
 | `0x54`       | EVT_GPIO_INTERRUPT            | fw→host           | Allocated; payload struct missing |
 | `0x60..0x61` | CAM_ENABLE/DISABLE            | host→fw           | Allocated |
@@ -975,9 +979,10 @@ helper).
 7. Payload structs for BLE GATT_REGISTER, GATT_NOTIFY, GATT_READ,
    GATT_WRITE.
 8. Payload structs for DIAG_GET_STATS / DIAG_LOG_LEVEL.
-9. Reserved-range marker comments for the 4 unallocated future groups
-   (`0xA0..0xAF` UART, `0xB0..0xBF` ADC, `0xC0..0xCF` Timer/Capture,
-   `0xF0..0xFF` OTA/Bootloader). Pure documentation hygiene.
+9. Reserved-range marker comments for the unallocated future groups
+   (`0xA0..0xAF` UART, `0xB0..0xBF` ADC, `0xC0..0xCF` Timer/Capture).
+   Pure documentation hygiene.  (OTA is no longer a future group — it
+   shipped at `0x40..0x44`, §3.11.4.)
 
 ### 4.4 Handoff checklist for `alplabai/cc3501e-firmware`
 
@@ -1026,8 +1031,10 @@ ones.
 
 **Changes:**
 - Add reserved-range comments for `0xA0..0xAF` UART proxy, `0xB0..0xBF`
-  ADC proxy, `0xC0..0xCF` Timer/Capture proxy, `0xF0..0xFF` OTA/
-  Bootloader. Mark them all as "do not allocate at this commit".
+  ADC proxy, `0xC0..0xCF` Timer/Capture proxy. Mark them all as "do not
+  allocate at this commit".  (The `0xF0..0xFF` OTA/Bootloader
+  reservation this commit originally listed is superseded — OTA shipped
+  at `0x40..0x44`, §3.11.4.)
 - Add a one-paragraph "wire format vs TI SimpleLink wire format"
   note pointing at the §3.10 finding (alp-sdk wire ≠ `_SL_PROTOCOL_*`).
 
@@ -1038,7 +1045,7 @@ ones.
 ```
 ### Changed
 - `<alp/protocol/cc3501e.h>` — document reserved opcode ranges for
-  future UART/ADC/Timer/OTA proxies (no behavioural change).
+  future UART/ADC/Timer proxies (no behavioural change).
 ```
 
 ### 5.2 host-cc3501e-2 — Named enums for GPIO direction + pull

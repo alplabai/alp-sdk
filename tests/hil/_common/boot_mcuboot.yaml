@@ -2,7 +2,7 @@
 #
 # Portable HiL smoke for the board.yaml `boot:` block (PR #3).
 #
-# The orchestrator's emit_sysbuild_conf() in scripts/alp_orchestrate.py
+# The orchestrator's emit_sysbuild_conf() in scripts/alp_orchestrate/
 # turns `boot: { method: mcuboot, signing: { algorithm: ecdsa_p256, ... }, ... }`
 # into a sysbuild.conf overlay carrying:
 #
@@ -20,7 +20,7 @@
 # `boot:` block; its src/ slice is the test app.
 #
 # Hardware fixtures expected:
-#   - Standard E1M EVK + AEN701 SoM (the OPTIGA Trust M slot type
+#   - Standard E1M EVK + AEN801 SoM (the OPTIGA Trust M slot type
 #     dictates the signature algorithm the bootloader can verify).
 #   - Signed image flashed via `west flash`; sysbuild builds MCUboot
 #     + the signed app image automatically.

@@ -12,7 +12,8 @@ RTSS-HE on the Alif Ensemble E8 (AEN801), over the `alif,mhuv2-mbox` MBOX driver
 real MHU windows, the RPMsg static-vrings backend binds, and endpoints exchange
 data.
 
-- **HP** (host): boots HE (`se_service_boot_cpu`), opens `ipc0`, registers the
+- **HP** (host): boots HE (the portable `alp_mproc_boot_core`,
+  SE-boot-service-backed on AEN), opens `ipc0`, registers the
   `pingpong` endpoint, sends 16 `ping`s, counts `pong`s.
 - **HE** (remote): opens `ipc0`, registers `pingpong`, echoes each `ping` as a `pong`.
 

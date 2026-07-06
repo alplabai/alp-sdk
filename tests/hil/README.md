@@ -9,7 +9,7 @@ Real-silicon verification harness.  The layout is two-tier:
 
 A runner script ([`run_smoke.py`](run_smoke.py)) reads the specs
 and drives the hardware.  When invoked against a board directory
-(e.g. `tests/hil/aen701-evk/`), it walks `_common/` + the board's
+(e.g. `tests/hil/aen801-evk/`), it walks `_common/` + the board's
 own specs, using the board's `_runner.yaml` for every spec.  A
 board-local spec named identically to a shared one **overrides**
 it (per-board tuning).
@@ -31,14 +31,14 @@ HiL spec under this tree passes against the matching board.
 
 | Item          | Spec                                                        |
 |---------------|-------------------------------------------------------------|
-| **SoM**       | One supported per smoke-spec directory (today: AEN701)      |
+| **SoM**       | One supported per smoke-spec directory (today: AEN801)      |
 | **Board**   | The E1M EVK that matches (today: E1M-EVK -- 35x35 reference)|
 | **Debug**     | SEGGER J-Link or Alif's recommended SWD adapter on J2       |
 | **Serial**    | USB-C from the EVK exposes the UART (Linux: `/dev/ttyACM0`) |
 | **Power**     | 12 V barrel jack OR USB-C from the runner host              |
 | **Toolchain** | Zephyr workspace at `$ZEPHYR_BASE` + the per-SoM board file |
 
-The per-SoM Zephyr board target (e.g. `alp_e1m_evk_aen` for AEN701)
+The per-SoM Zephyr board target (e.g. `alp_e1m_aen801_m55_hp` for AEN801)
 ships in [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
 once published.  Until that lands, point the runner at your own DT
 overlay via `--board` and `--west-args` (the runner is target-agnostic).
@@ -51,16 +51,16 @@ Wire the board (J-Link on J2, USB-C on the host), then from the SDK
 root:
 
 ```bash
-# Lint every spec for AEN701 (12 from _common/, 0 board-specific).
+# Lint every spec for AEN801 (12 from _common/, plus any board-specific specs).
 # No hardware needed.
-python3 tests/hil/run_smoke.py --validate tests/hil/aen701-evk/
+python3 tests/hil/run_smoke.py --validate tests/hil/aen801-evk/
 
 # Dry-run -- print every `west build` / `west flash` command without
 # running them.  Useful to confirm board targets + paths.
-python3 tests/hil/run_smoke.py --dry-run tests/hil/aen701-evk/
+python3 tests/hil/run_smoke.py --dry-run tests/hil/aen801-evk/
 
 # Real run.  Builds, flashes, captures serial, asserts.
-python3 tests/hil/run_smoke.py tests/hil/aen701-evk/
+python3 tests/hil/run_smoke.py tests/hil/aen801-evk/
 
 # V2N101 mode -- pulls in 12 portable specs + 2 V2N-specific ones
 # (GD32 bridge ping, on-module TMP112).
@@ -105,7 +105,7 @@ editing the dir's `_runner.yaml`.
 Each `*.yaml` file under `<sku>-<board>/` describes one smoke test:
 
 ```yaml
-# tests/hil/aen701-evk/gpio-button-led.yaml
+# tests/hil/aen801-evk/gpio-button-led.yaml
 schema_version: 1
 name: gpio-button-led
 description: Verifies GPIO read (button) + GPIO write (LED) end-to-end.

@@ -56,9 +56,9 @@ into alp-sdk so a clean checkout reproduces a working board. Branch:
 
 The carrier audio + board-rev data has landed in
 `metadata/boards/e1m-x-evk.yaml` (`audio:` block + `board_id`): the two
-TAS2563 amps on `E1M_X_I2C0`, I2S on `E1M_X_I2S0`, the TMUX1574 path
+TAS2563 amps on `ALP_E1M_X_I2C0`, I2S on `ALP_E1M_X_I2S0`, the TMUX1574 path
 mux, the `\SD_N` / `IRQ_N` control lines on E1M IOs, and `board_id` on
-`E1M_X_ADC7`.
+`ALP_E1M_X_ADC7`.
 
 Still pending: add the `ti,tas2563` codec nodes + audio-graph-card to
 the carrier `e1m-x-evk.dtsi` (the `CONFIG_SND_SOC_TAS2562=y` fragment is

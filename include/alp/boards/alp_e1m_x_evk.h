@@ -11,7 +11,7 @@
  * shipping families that fit:
  *   - E1M-X-V2N  (Renesas RZ/V2N, with optional DEEPX DX-M1)
  *
- * Pin/bus ROUTES (E1M_X_GPIO_IO<N> -> board feature, I2C/SPI/UART
+ * Pin/bus ROUTES (ALP_E1M_X_GPIO_IO<N> -> board feature, I2C/SPI/UART
  * bus roles, PWM channels) are generated from
  * `metadata/boards/e1m-x-evk.yaml` into the companion header
  * `<alp/boards/alp_e1m_x_evk_routes.h>` -- include that for pin
@@ -20,7 +20,7 @@
  * mirroring `<alp/boards/alp_e1m_evk.h>` for the 35x35 EVK.
  *
  * On-board chips live on the sensor I2C bus
- * @ref XEVK_I2C_BUS_SENSORS (E1M_X_I2C0; Linux `i2c-0`).
+ * @ref XEVK_I2C_BUS_SENSORS (ALP_E1M_X_I2C0; Linux `i2c-0`).
  *
  * @par Verification status: [BENCH-CONFIRMED ADDRESSES] -- the I2C
  *      addresses + INA236 register semantics below were confirmed

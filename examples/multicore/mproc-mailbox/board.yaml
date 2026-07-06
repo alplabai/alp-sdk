@@ -4,7 +4,7 @@
 # Targets AEN-Zephyr; the peer-side (M55-HE) firmware lands
 # alongside the v0.4 dual-image build flow.
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 cores:

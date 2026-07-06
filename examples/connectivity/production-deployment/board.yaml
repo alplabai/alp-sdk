@@ -2,7 +2,7 @@
 # production-deployment flagship.
 #
 # v1.0 reference application for a field-deployable IoT product.
-# Designed against AEN701 (the security-target SoM: dual-Cortex-M55
+# Designed against AEN801 (the security-target SoM: dual-Cortex-M55
 # silicon with on-module OPTIGA Trust M + TF-M secure-boot fabric).
 # Demonstrates EVERY v0.6 declarative block applied at production
 # stance:
@@ -25,7 +25,7 @@
 # boards; the SDK's declarative surface stays identical across
 # SoMs.
 som:
-  sku: E1M-AEN701              # security-target SoM (OPTIGA + TF-M)
+  sku: E1M-AEN801              # security-target SoM (OPTIGA + TF-M)
 
 preset: e1m-evk
 cores:
@@ -136,7 +136,7 @@ ota:
 security:
   psa:
     persistent_slots: 32
-    its_storage:      mram_main     # AEN E7: 5.5 MiB MRAM (secure half)
+    its_storage:      mram_main     # AEN E8: 5.5 MiB MRAM (secure half)
     ps_storage:       ospi0         # on-module OSPI for app-tier creds
     tfm:              true
     attestation_root: optiga_trust_m
@@ -146,7 +146,7 @@ security:
 # ----------------------------------------------------------------
 # Explicit partition table backing the MCUboot slot layout + the
 # Zephyr settings subsystem + an app_data littlefs mount.  Sizes
-# add up to ~2.4 MiB out of the AEN E7's 5.5 MiB MRAM -- the
+# add up to ~2.4 MiB out of the AEN E8's 5.5 MiB MRAM -- the
 # remainder stays available for code + MCUboot itself + the
 # TF-M secure partition.
 storage:

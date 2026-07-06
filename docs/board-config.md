@@ -19,7 +19,7 @@ the SDK's per-MPN preset:
 
 ```yaml
 som:
-  sku: E1M-AEN701        # your MPN -- the SDK ships a preset
+  sku: E1M-AEN801        # your MPN -- the SDK ships a preset
                           # at metadata/e1m_modules/<MPN>.yaml
 
 preset: e1m-evk          # or write your custom board out inline -- see below
@@ -30,7 +30,7 @@ cores:
     app: ./src           # path (relative to board.yaml) of the Zephyr app
 ```
 
-That's the whole config for a vanilla "E1M-AEN701 on the EVK,
+That's the whole config for a vanilla "E1M-AEN801 on the EVK,
 M55-HP core running Zephyr" build.  Optional per-core blocks
 (`peripherals`, `libraries`, `inference`, `iot`, `diagnostics`)
 add capability on top — omit them to get the defaults from the
@@ -40,7 +40,7 @@ block).  See
 multi-core (`a55_cluster` + `m33_sm`, `a32_cluster` + `m55_hp` +
 `m55_he`) shape and the cross-core `ipc:` block.
 
-Released MPNs the SDK ships SoM presets for (look under
+SDK-shipped SoM presets (look under
 `metadata/e1m_modules/<MPN>.yaml`):
 
 | Family            | MPNs (paste any into `som.sku`)                                              |
@@ -48,7 +48,7 @@ Released MPNs the SDK ships SoM presets for (look under
 | Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`               |
 | Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                                       |
 | RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                       |
-| NXP i.MX 93       | `E1M-NX9101` (production MPN TBD pending HW config)                          |
+| NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 Stock board presets (paste into `preset:`):
 
@@ -182,6 +182,7 @@ Top-level fields:
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
 | `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
+| `libraries`      | no       | Project-wide curated third-party libraries (ADR 0018), e.g. `[lvgl, cmsis-dsp]`.  Each names a manifest under `metadata/libraries/<name>.yaml`; the orchestrator emits its per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (project-wide, ADR 0018)](#libraries-project-wide-adr-0018) below.  Distinct from the per-core `cores.<id>.libraries:` token list. |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
 *Either `preset:` (preset mode) or inline `name:` + `populated:` +
@@ -212,7 +213,7 @@ loader picks the natural runtime from each core's `cores[].type`
 in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
 -> `yocto`, anything else -> `off`.  Helper:
 `_default_os_from_core_type()` in
-[`scripts/alp_orchestrate.py`](../scripts/alp_orchestrate.py).
+[`scripts/alp_orchestrate/`](../scripts/alp_orchestrate/).
 
 The OS is **not** user-selectable: the runtime follows the core
 class, full stop.  A `board.yaml` may only **disable** a core
@@ -283,11 +284,19 @@ LSM6DSO and an SSD1306 OLED are not soldered on the EVK -- apps that
 want them attach the part to the I2C/Qwiic header and declare it in
 their board.yaml `chips:` array.
 
+For Alp Studio and other EDA frontends, `scripts/alp_project.py --emit
+carrier-netlist` composes the board and SoM layers into a deterministic
+JSON handoff: carrier-facing nets from `e1m_routes:` plus carrier BOM
+rows from `populated:` and the chip/block manifests under `metadata/`.
+This artifact deliberately excludes SoM-internal parts and is not a
+KiCad, Gerber, DRC, or PCB-layout output; downstream tools consume it
+to create those files.
+
 ### `som` block
 
 ```yaml
 som:
-  sku: E1M-AEN701          # required
+  sku: E1M-AEN801          # required
 
   hw_rev: r1               # optional -- defaults to the SKU preset's
                             # `default_hw_rev`.  Validated at build
@@ -307,7 +316,7 @@ som:
 
 #### `silicon_variant:` (forward MPN reference, set by Alp)
 
-Each released SoM preset declares a top-level `silicon_variant:`
+Each production SoM preset declares a top-level `silicon_variant:`
 field naming the exact vendor order code the module is built
 around -- `AE302F80F55D5LE` for `E1M-AEN301`, `R9A09G056N44GBG`
 for `E1M-V2N101`, etc.  The loader uses it to forward-resolve the
@@ -318,7 +327,7 @@ which carries the per-variant MRAM / SRAM / package /
 
 The reverse path (`alp_module_skus` arrays inside each SoC JSON
 variant) stays in place as a fallback for legacy presets that
-omit the field, AND for the released `E1M-NX9101` preset which
+omit the field, AND for the placeholder `E1M-NX9101` preset which
 carries `silicon_variant: TBD` per the no-inventing-values rule.
 Resolver: `_resolve_silicon_variant()` in
 [`scripts/alp_project.py`](../scripts/alp_project.py).
@@ -370,12 +379,12 @@ The `e1m_routes:` block is the single editable source of truth
 for the board-side C macros hand-written firmware uses
 (`PIN_BMI323_INT1`, `I2C_BUS_SENSORS`, `PWM_LED_RED`, …).  Each
 entry binds an E1M-standard pad or peripheral instance
-(`E1M_GPIO_IO<N>`, `E1M_PWM<N>`, `E1M_I2C<N>` / `E1M_SPI<N>` /
-`E1M_UART<N>` / `E1M_I3C<N>`) to a board-side macro plus optional
+(`ALP_E1M_GPIO_IO<N>`, `ALP_E1M_PWM<N>`, `ALP_E1M_I2C0/1` / `ALP_E1M_SPI0/1` /
+`ALP_E1M_UART0/1` / `ALP_E1M_I3C0`) to a board-side macro plus optional
 `doc:` / `active_low:` / `routes_via:` flags.
 [`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
 reads the block and emits `include/alp/boards/alp_<name>_routes.h`
-with one `#define <MACRO> E1M_<…>` line per entry.
+with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 
 #### Preset mode (SDK-internal shortcut)
 
@@ -445,7 +454,7 @@ automatically; the app doesn't say "TX is output" by hand.
 
 The reason direction stays in the firmware: the same physical
 pad can have multiple legitimate directions in different apps.
-The drone-autopilot uses `E1M_PWM3` as a PWM output driving an
+The drone-autopilot uses `ALP_E1M_PWM3` as a PWM output driving an
 ESC channel; gpio-button-led uses the same pad as a GPIO output
 driving the red status LED.  `board.yaml` describes the
 **wiring** (pad ↔ feature), which is universal; direction is a
@@ -495,29 +504,29 @@ metadata/
 │   ├── E1M-AEN401.yaml      # partial_hw_config: true
 │   ├── E1M-AEN501.yaml      # partial_hw_config: true
 │   ├── E1M-AEN601.yaml      # partial_hw_config: true
-│   ├── E1M-AEN701.yaml      # v0.3 fully-populated worked example
-│   ├── E1M-AEN801.yaml      # partial_hw_config: true
+│   ├── E1M-AEN701.yaml      # lower-priority E7 preset
+│   ├── E1M-AEN801.yaml      # lead AEN E8 preset
 │   ├── E1M-V2N101.yaml      # v0.3 fully-populated worked example
 │   ├── E1M-V2N102.yaml      # partial_hw_config: true
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
-│   └── E1M-NX9101.yaml      # i.MX 93 (production MPN TBD pending HW config)
+│   └── E1M-NX9101.yaml      # i.MX 93 placeholder MPN (production E1M-NX9xxx TBD)
 └── boards/
     ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)
     ├── e1m-x-evk.yaml          # 45x65 EVK (V2N / V2N-M1)
     └── custom-example.yaml     # template downstream consumers copy + edit
 ```
 
-v0.3 ships the schema + every released MPN's preset (11 SoM SKUs
-across 4 families) + the two stock boards + a copy-friendly
-custom-example template.  Two SKUs (`E1M-AEN701`, `E1M-V2N101`)
-have their hardware configuration fully populated; the others
-carry `partial_hw_config: true` so the loader knows to expect
-SKU-specific overrides from the consumer's `board.yaml`.  Per
-the project memory note, values not in the silicon datasheet
-stay `TBD` (e.g. `board_id.adc_channel` in family-level
-`hw-revisions.yaml`) until the user supplies them
-authoritatively.
+v0.3 ships the schema + ten production SoM presets, the
+placeholder N93 bring-up preset (`E1M-NX9101`), the two stock
+boards, and a copy-friendly custom-example template.  Two SKUs
+(`E1M-AEN801`, `E1M-V2N101`) are the primary worked presets; lower-priority
+or not-yet-final SKUs carry `partial_hw_config: true` so
+the loader knows to expect SKU-specific overrides from the
+consumer's `board.yaml`.  Per the project memory note, values
+not in the silicon datasheet stay `TBD` (e.g.
+`board_id.adc_channel` in family-level `hw-revisions.yaml`)
+until the user supplies them authoritatively.
 
 ### `libraries` block (user-facing, no wrapper)
 
@@ -618,7 +627,7 @@ The `profile:` file follows the same shape as
 for a worked example.
 
 Loader rules (enforced by `_validate_consistency()` in
-`scripts/alp_orchestrate.py`):
+`scripts/alp_orchestrate/`):
 
 - Each entry MUST declare exactly one of `kconfig:` / `profile:`.
 - `name:` is globally unique across every core's
@@ -626,6 +635,103 @@ Loader rules (enforced by `_validate_consistency()` in
 - `name:` must NOT collide with the curated `libraries:` enum --
   use the curated path for curated entries.
 - `profile:` must resolve to a file (repo-relative).
+
+### `libraries` (project-wide, ADR 0018) {#libraries-project-wide-adr-0018}
+
+The **top-level** `libraries:` key (a sibling of `som:` / `cores:`,
+not nested under a core) selects *curated third-party libraries* the
+SDK integrates across the whole project — GUI, DSP/NN, serialization,
+and so on:
+
+```yaml
+som:
+  sku: E1M-AEN801
+libraries: [lvgl, cmsis-dsp, nanopb]   # <-- project-wide
+cores:
+  m55_hp:
+    app: ./src
+```
+
+Each name resolves to a manifest at
+[`metadata/libraries/<name>.yaml`](../metadata/libraries/) — the single
+source of truth for that library's per-OS wiring, pinned upstream
+version, SPDX licence, curation tier, and compatibility constraints.
+The orchestrator emits the wiring through the ordinary `--emit`
+contract (ADR 0014): the library's Kconfig symbols land in each Zephyr
+slice's `alp.conf`, its `IMAGE_INSTALL` entries in each Yocto slice's
+`local.conf`, its CMake pin in each baremetal slice's args. Selecting a
+library the target cannot satisfy fails emit with the failing
+constraint named — the same clear-error contract as schema validation.
+
+Two curation tiers bound CI cost (ADR 0018):
+
+- **Tier A — curated**: version-pinned, built in alp-sdk CI for at
+  least one board per family, ships a teaching example. Breakage blocks
+  release.
+- **Tier B — recipe-only**: wiring + compatibility metadata are
+  maintained and emitted, but the library is not built in alp-sdk CI.
+  `alp doctor` labels it.
+
+`alp doctor` reports the selected libraries for the project in scope
+(tier + licence + compatibility), reading the same manifests, so the
+CLI and alp-studio's library picker never disagree.
+
+**This is a different mechanism from the per-core `cores.<id>.libraries:`
+token list above.** The per-core list is a closed enum wired through
+`metadata/library-profiles/` (compile-time config headers + HW-backend
+bindings); the top-level `libraries:` is the manifest-driven ADR 0018
+selection. Use the top-level key for the curated third-party libraries
+that ship a `metadata/libraries/<name>.yaml` manifest.
+
+See [`metadata/libraries/README.md`](../metadata/libraries/)
+for the manifest shape, the full library list, and how to add one.
+
+#### Flagship: micro-ROS + ROS 2 across one heterogeneous project
+
+The `libraries:` mechanism spans both OSes of a heterogeneous SoM in a
+single project — the proof ADR 0018 exists for and the peer model
+[ADR 0010](adr/0010-heterogeneous-os-orchestration.md) defines. A
+robotics project runs a **micro-ROS** node on the Cortex-M / Zephyr
+peer and **ROS 2** on the Cortex-A / Yocto peer, both selected from the
+same top-level `libraries:` key:
+
+```yaml
+som:
+  sku: E1M-V2N101
+libraries: [micro-ros, ros2]   # M-side client + A-side agent, one file
+cores:
+  a55_cluster:                 # Cortex-A55 -> Yocto runs ROS 2
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+  m33_sm:                      # Cortex-M33 -> Zephyr runs the micro-ROS node
+    os: zephyr
+    app: ./m33
+```
+
+Each library resolves to the peer it belongs on: `micro-ros`
+(`requires: {os: [zephyr], core_class: m}`) wires only into the Zephyr
+slice's `alp.conf`; `ros2` (`requires: {os: [yocto], core_class: a}`)
+appends `rclcpp` to the Yocto slice's `IMAGE_INSTALL`. Select either on
+the wrong peer and emit fails naming the `os` / `core_class` constraint.
+
+Two honest limits are recorded in the manifest headers rather than
+hidden:
+
+- **micro-ROS is not yet pinned** in the Zephyr v4.4.0 `west.yml`. Its
+  manifest names the upstream `micro_ros_zephyr_module` (branch
+  `humble`) as a west prerequisite and enables **by module presence**
+  (no invented Kconfig); emit renders the selection tag with no
+  `CONFIG_` line until the module is added to `west.yml`.
+- **ROS 2 is Tier B (recipe-only)**: its wiring is grounded in
+  `meta-alp-sdk` (`rclcpp`; `meta-ros2-humble` as a `LAYERRECOMMENDS`),
+  but alp-sdk CI does not build it, and a build must add
+  `meta-ros2-humble` to `bblayers.conf`.
+- The **cross-core RMW bridge** that carries ROS topics between the two
+  peers (UDP-on-virtio, or a custom RMW over the RPMsg transport of
+  [ADR 0016](adr/0016-cross-core-peripheral-proxy-wire-schema.md)) is
+  bench-gated and out of scope for the manifests — it is its own
+  design.
 
 ## How the loader compiles the file
 
@@ -710,12 +816,16 @@ echo 'require alp-generated.conf' >> build/conf/local.conf
 ### west.yml libraries auto-pin (`--emit west-libraries`)
 
 `--emit west-libraries` produces a `west.yml` fragment listing the
-Zephyr modules the board.yaml's `libraries:` array requires
-(`lvgl`, `mbedtls`, `cmsis-dsp`, `fs/littlefs`).  Header-only C++
-libraries (`etl`, `fmt`, `nlohmann_json`, `doctest`) aren't Zephyr
-modules -- they ride the loader's compile-time profile hook
-instead -- so the emitter lists them in a trailing comment rather
-than the allowlist.
+Zephyr modules and exact west project pins the board.yaml's library
+declarations require.  Zephyr-owned modules (`lvgl`, `mbedtls`,
+`cmsis-dsp`, `fs/littlefs`) land in the `zephyr` import
+`name-allowlist:`.  ADR 0018 libraries whose manifests carry an
+`integration.zephyr.west` pin, such as `aws-iot` and `azure-iot`,
+land as concrete `projects:` entries with exact upstream release
+tags.  Header-only C++ libraries (`etl`, `fmt`, `nlohmann_json`,
+`doctest`) aren't Zephyr modules -- they ride the loader's
+compile-time profile hook instead -- so the emitter lists them in a
+trailing comment rather than the allowlist.
 
 ```bash
 python3 $ALP_SDK/scripts/alp_project.py \
@@ -783,7 +893,7 @@ UART, PWM, GPIO_IO), and emits a Zephyr `.overlay` declaring:
   channel.
 - An `alp_pins` node with `compatible = "alp,pin-array"` and one
   `gpios` entry per `EVK_PIN_*` macro that resolves to an
-  `E1M_GPIO_IO<N>`.  Each entry's `<&gpioX Y FLAGS>` triplet
+  `ALP_E1M_GPIO_IO<N>`.  Each entry's `<&gpioX Y FLAGS>` triplet
   is a TBD placeholder; the trailing comment carries the macro
   name and the E1M IO index so the customer can fill the columns
   in place without renumbering.
@@ -795,9 +905,20 @@ python3 $ALP_SDK/scripts/alp_project.py \
     --output build/generated/alp.overlay
 ```
 
-Encoders, cameras, displays, and other non-bus device classes land
-in the dts-overlay emitter in v0.4 once the upstream SoM board
-files lock the gpio bank/index columns.
+The dts-overlay emitter still synthesizes only the bus aliases and
+GPIO pin array above.  Display devices are supported through the
+Zephyr devicetree path today, but the board preset or app overlay
+must provide the concrete display node.  For SPI TFTs, use Zephyr's
+MIPI DBI Type C binding (`compatible = "zephyr,mipi-dbi-spi"`) with
+the panel driver child (for example `sitronix,st7789v`), then expose
+that child as `zephyr,display` for LVGL and/or `alp-display0` for
+`<alp/display.h>`.  Application code stays on LVGL or the portable
+display API; it does not initialise the panel driver directly.
+
+First-class display synthesis in the dts-overlay emitter remains a
+follow-up once the upstream SoM board files lock the gpio bank/index
+columns.  Encoders, cameras, and other non-bus device classes follow
+the same rule.
 
 ### What the loader does NOT yet do (v0.4 follow-ups)
 
@@ -857,7 +978,7 @@ metadata/
 │   ├── v2n/hw-revisions.yaml                   # V2N family revs (board_id.adc_channel TBD)
 │   ├── v2n-m1/hw-revisions.yaml                # V2N-M1 family revs (mirrors V2N + DEEPX)
 │   ├── imx93/hw-revisions.yaml                 # i.MX 93 family revs (adc_channel TBD)
-│   └── E1M-AEN701.yaml                     # MPN preset; `default_hw_rev: r1`
+│   └── E1M-AEN801.yaml                     # MPN preset; `default_hw_rev: r2`
 │                                                #  points into the family table.
 └── boards/
     ├── e1m-evk.yaml                            # board preset; carries its own
@@ -1125,8 +1246,8 @@ aggregate `alp_storage_mounts[]` array for boot-time iteration.
 Inspect the resolved layout with:
 
 ```bash
-python3 scripts/alp_orchestrate.py --input board.yaml --emit dts-partitions
-python3 scripts/alp_orchestrate.py --input board.yaml --emit system-manifest \
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit dts-partitions
+PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit system-manifest \
     | yq '.storage[]'
 ```
 
@@ -1171,7 +1292,7 @@ not a separate M55-HE core).  See `docs/adr/0013-tfm-boundary-m55-hp-trustzone.m
 
 JSON Schema validates one field at a time; many real-world
 mistakes only become apparent when two fields disagree.
-`scripts/alp_orchestrate.py:_validate_consistency()` runs after
+`scripts/alp_orchestrate/` runs after
 the schema pass and enforces a small set of cross-field rules.
 A violation raises `OrchestratorError`; warnings print to
 `stderr` and let the load continue.

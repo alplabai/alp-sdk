@@ -21,6 +21,39 @@ precision:
   accuracy_hpa:   0.1
   range_hpa:      [260, 1260]
 
+signals:
+  - { name: SCL,       type: input,  scope: "I2C clock (SPI SPC when SPI is used instead)" }
+  - { name: SDA,       type: bidir,  scope: "I2C data (SPI SDI when SPI is used instead)" }
+  - { name: SA0,       type: input,  scope: "I2C LSB of device address strap (SPI SDO when SPI is used instead)" }
+  - { name: CS,        type: input,  scope: "SPI-enable / I2C-SPI mode select; tie high for I2C-only operation" }
+  - { name: INT_DRDY,  type: output, scope: "interrupt / data-ready" }
+
+physical:
+  # Pins per STMicroelectronics LPS22HB datasheet Rev 6 (DocID027083),
+  # Table 2 "Pin description" (10-pin HLGA, Figure 23: HLGA-10L,
+  # 2.0 x 2.0 x 0.76mm typ.). All 10 pads are populated -- pin 3
+  # ("Reserved") is a genuine functional pad, not NC (datasheet: "3
+  # Reserved -- Connect to GND"). This manifest's bus is I2C-only, so
+  # pad 5 is mapped to its I2C role (SA0); its alternate SPI role
+  # (SDO) is unused here.
+  refdes_prefix: U
+  package:              "HLGA-10L"
+  footprint:             hlga_10l
+  dimension_mm:          "2.0 x 2.0 x 0.76"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "1",  signal: "VDDIO" }
+    - { pad: "2",  signal: "SCL" }
+    - { pad: "3",  signal: "GND" }
+    - { pad: "4",  signal: "SDA" }
+    - { pad: "5",  signal: "SA0" }
+    - { pad: "6",  signal: "CS" }
+    - { pad: "7",  signal: "INT_DRDY" }
+    - { pad: "8",  signal: "GND" }
+    - { pad: "9",  signal: "GND" }
+    - { pad: "10", signal: "VDD" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_LPS22HB
   baremetal:      ALP_SDK_CHIP_LPS22HB
@@ -29,6 +62,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

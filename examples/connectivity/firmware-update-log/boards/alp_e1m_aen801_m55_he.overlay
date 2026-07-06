@@ -1,0 +1,18 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN801 / Alif Ensemble E8 HE client overlay for firmware-update-log.
+ *
+ * HE is loaded to its ITCM global alias (0x58000000) by the dual-entry ATOC.
+ * The audit log itself stays in MRAM through the shared alp_ulog_partition.
+ */
+
+#include "alp_e1m_aen801_m55_log_mram.dtsi"
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

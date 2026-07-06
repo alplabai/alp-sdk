@@ -22,14 +22,10 @@
 # base is grounded (0x02000000); the `alp_default_rpmsg` carve-out
 # resolves from that region.  The mailbox controller is `alif_mhuv2`
 # (ARM MHUv2, bench-unverified on silicon but not TBD).
-#
-# For the AEN701 (E7) alternate -- still blocked on its
-# `mailbox.controller: TBD` -- pass `--input board-aen701.yaml`
-# explicitly.
 
 som:
   sku: E1M-AEN801
-  hw_rev: r1
+  hw_rev: r2
 
 preset: e1m-evk             # BMP581 + BMI323 (on-board IMU) are
                             # populated by the EVK preset defaults.

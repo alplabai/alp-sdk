@@ -2,7 +2,7 @@
 
 The `nightly-aen-hil` workflow requires a self-hosted GitHub
 Actions runner attached to a real **E1M EVK** populated with an
-**E1M-AEN701** SoM.  This document is the runner's installation
+**E1M-AEN801** SoM.  This document is the runner's installation
 contract — when it changes, the workflow's expectations change
 with it.
 
@@ -10,7 +10,7 @@ with it.
 
 - E1M Development Board (UG-E1M-001) — see
   [`docs/boards/e1m-evk.md`](../boards/e1m-evk.md).
-- E1M-AEN701 SoM seated in the M.2 / E1M socket.
+- E1M-AEN801 SoM seated in the M.2 / E1M socket.
 - Power: 12 V via the barrel jack OR USB-C with the host.
 - Debug: SEGGER J-Link or Alif's recommended SWD adapter on J2
   (FTSH-105 10-pin).

@@ -105,6 +105,10 @@ static void mav_rx_entry(void *p1, void *p2, void *p3)
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	LOG_INF("drone-autopilot booting (state machine in DISARMED)");
 
 	/* ── Sensor + actuator bring-up ────────────────────────────────

@@ -131,8 +131,12 @@ int bridge_hw_adc_configure(uint8_t  channel,
  * STREAM_READ drains up to `max_samples` samples (firmware caps at
  * GD32_BRIDGE_ADC_STREAM_READ_MAX); STREAM_END stops the pacing
  * timer + DMA and restores the converter's single-shot state.
- * Buffer overruns are returned as STATUS_BUSY on subsequent
- * STREAM_READ. */
+ * A ring overrun -- the DMA writer lapped the host's read cursor,
+ * detected exactly by total-written (per-reload lap counter * ring
+ * size + live write index) vs total-read accounting -- answers
+ * BRIDGE_HW_ERR_BUSY (wire: STATUS_BUSY, "poll faster") ONCE, drops
+ * the corrupt backlog and resyncs the read cursor to the live write
+ * position so the NEXT read returns fresh, gap-free samples. */
 int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t sample_rate_hz);
 int bridge_hw_adc_stream_read(uint8_t   stream_id,
                               uint8_t   max_samples,

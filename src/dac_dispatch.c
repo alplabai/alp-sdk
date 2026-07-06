@@ -24,6 +24,7 @@
 #include "backends/dac/dac_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(dac);
+ALP_BACKEND_ANCHOR(dac);
 
 extern void alp_z_set_last_error(alp_status_t s);
 extern void alp_z_clear_last_error(void);
@@ -123,4 +124,9 @@ void alp_dac_close(alp_dac_t *h)
 		h->state.ops->close(&h->state);
 	}
 	_free(h);
+}
+
+const alp_capabilities_t *alp_dac_capabilities(const alp_dac_t *h)
+{
+	return (h != NULL) ? &h->cached_caps : NULL;
 }

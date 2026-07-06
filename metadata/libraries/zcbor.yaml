@@ -1,0 +1,27 @@
+# zcbor -- low-footprint CBOR codec (ADR 0018 library manifest).
+#
+# The CBOR half of the serialization story (pairs with nanopb); used by
+# LwM2M/CoAP and SUIT/OTA metadata paths.  Formalises `libraries: [zcbor]`.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * west module `zcbor`, path modules/lib/zcbor,
+#     west.yml revision 9164bd18dcd88ff9d9ef98279501fc1093571017
+#   * enable symbol CONFIG_ZCBOR
+#     ($ZEPHYR_BASE/modules/zcbor/Kconfig: `config ZCBOR`)
+#   * upstream version 0.9.1  (modules/lib/zcbor/zcbor/VERSION -> "0.9.1";
+#     `git describe --tags` -> 0.9.1-2-g9164bd1)
+#   * licence Apache-2.0  (modules/lib/zcbor/LICENSE -- Apache License 2.0)
+#
+# No `requires:` -- pure-C, no capability/core/RAM floor of note.
+schema_version: 1
+name: zcbor
+description: "zcbor -- low-footprint CBOR (RFC 8949) encoder/decoder + code generator."
+tier: A
+version: "0.9.1"
+license: Apache-2.0
+
+integration:
+  zephyr:
+    module: zcbor
+    kconfig:
+      - CONFIG_ZCBOR=y

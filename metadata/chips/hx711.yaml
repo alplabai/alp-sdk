@@ -18,6 +18,57 @@ adc:
   resolution_bits: 24
   gain_options:    [128, 64, 32]
 
+signals:
+  - { name: VSUP,   type: power,  scope: "regulator supply, 2.7-5.5V" }
+  - { name: BASE,   type: analog, scope: "regulator control output (NC when on-chip regulator unused)" }
+  - { name: VFB,    type: analog, scope: "regulator control input (tie to AGND when on-chip regulator unused)" }
+  - { name: AGND,   type: ground, scope: "analog ground" }
+  - { name: VBG,    type: analog, scope: "reference bypass output" }
+  - { name: "INA-", type: analog, scope: "channel A negative input" }
+  - { name: "INA+", type: analog, scope: "channel A positive input" }
+  - { name: "INB-", type: analog, scope: "channel B negative input" }
+  - { name: "INB+", type: analog, scope: "channel B positive input" }
+  - { name: PD_SCK, type: input,  scope: "power-down control (active high) + serial clock input" }
+  - { name: DOUT,   type: output, scope: "serial data output" }
+  - { name: XO,     type: bidir,  scope: "crystal I/O (NC when on-chip oscillator used)" }
+  - { name: XI,     type: input,  scope: "crystal I/O or external clock input; 0 = use on-chip oscillator" }
+  - { name: RATE,   type: input,  scope: "output data rate select; 0=10Hz, 1=80Hz" }
+
+physical:
+  # Pins per Avia Semiconductor HX711 datasheet, "Pin Description"
+  # table (SOP-16L package).  All 16 pins are populated -- none are
+  # datasheet-labelled NC (BASE/VFB/XO carry "(NC when not used)"
+  # usage notes for the on-chip regulator/oscillator, but they are
+  # real functional pads, unlike ES8388's literal NC pins).
+  refdes_prefix: U
+  package:              SOP-16L
+  footprint:             sop_16l
+  operating_temp_deg_c:  "-40..85"
+  visibility:            public
+  provenance:            web_provisional
+  pins:
+    - { pad: "1",  signal: "VSUP" }
+    - { pad: "2",  signal: "BASE" }
+    - { pad: "3",  signal: "AVDD" }
+    - { pad: "4",  signal: "VFB" }
+    - { pad: "5",  signal: "AGND" }
+    - { pad: "6",  signal: "VBG" }
+    - { pad: "7",  signal: "INA-" }
+    - { pad: "8",  signal: "INA+" }
+    - { pad: "9",  signal: "INB-" }
+    - { pad: "10", signal: "INB+" }
+    - { pad: "11", signal: "PD_SCK" }
+    - { pad: "12", signal: "DOUT" }
+    - { pad: "13", signal: "XO" }
+    - { pad: "14", signal: "XI" }
+    - { pad: "15", signal: "RATE" }
+    - { pad: "16", signal: "DVDD" }
+  passives:
+    # Datasheet POWER SUPPLY DECOUPLING note: "placing a 0.1uF ceramic
+    # X7R or better capacitor between Pin 6 (VBG) and ground is
+    # strongly recommended".
+    - { role: decouple, value: 100nF, net: VBG, refdes_prefix: C }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_HX711
   baremetal:      ALP_SDK_CHIP_HX711
@@ -26,6 +77,7 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

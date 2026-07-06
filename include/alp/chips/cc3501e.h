@@ -25,7 +25,7 @@
  *
  * @code
  *   alp_spi_t *bus = alp_spi_open(&(alp_spi_config_t){
- *       .bus_id = E1M_SPI1,   // inter-chip SPI bus
+ *       .bus_id = ALP_E1M_SPI1,   // inter-chip SPI bus
  *       .freq_hz = 8000000,
  *       .mode = ALP_SPI_MODE_0,
  *       .bits_per_word = 8,
@@ -72,6 +72,10 @@ struct cc3501e {
 	alp_spi_t         *bus;        /**< SPI1 to the CC3501E (Alif master). */
 	alp_gpio_t        *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t        *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
+	alp_gpio_t        *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17 -> Alif P2_6):
+	                                *   HIGH when the SPI slave is armed+idle.  When populated,
+	                                *   cc3501e_request() waits on it before each reply phase
+	                                *   instead of a fixed settle gap.  NULL = legacy fixed gap. */
 	cc3501e_event_cb_t event_cb;
 	void              *event_user;
 	uint8_t            rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
@@ -132,6 +136,108 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);
 /** Retrieve the firmware's protocol version (compare against
  *  `ALP_CC3501E_PROTOCOL_VERSION` to confirm wire compatibility). */
 alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
+
+/**
+ * @brief Send one FRAMED bulk-data frame to the CC3501E stream sink (proto v2).
+ *
+ * Wraps @ref ALP_CC3501E_CMD_STREAM_WRITE -- the request payload (@p len bytes)
+ * is clocked in a single SPI transfer, so it rides the host peripheral-DMA path
+ * when @p len reaches the SPI DMA threshold (@c CONFIG_SPI_DW_ALIF_DMA_MIN_LEN).
+ * The firmware sinks + acks the frame, so unlike raw throwaway clocking the link
+ * stays framed and never desyncs.  Send frames back-to-back for a bulk stream.
+ *
+ * @param ctx   Initialised, reset driver context.
+ * @param data  Bulk bytes to send (may be NULL only if @p len is 0).
+ * @param len   Byte count, at most @c ALP_CC3501E_MAX_PAYLOAD minus the header.
+ * @return ALP_OK on ack; ALP_ERR_INVAL on a bad arg / oversized frame; the
+ *         mapped firmware status otherwise.
+ */
+alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t len);
+
+/* ------------------------------------------------------------------ */
+/* Meta + diagnostics host helpers (backend-independent)              */
+/*                                                                    */
+/* Thin wrappers over @ref cc3501e_request for the meta (0x00/0x02/    */
+/* 0x04) and diagnostics (0x70/0x71) opcodes.  The firmware answers    */
+/* these from in-RAM bookkeeping (no radio op), so they use a short    */
+/* request budget and never poll-by-repeat.                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Liveness probe: PING the CC3501E firmware (PING, opcode 0x00).
+ *
+ * Sends a header-only PING and treats the firmware's OK status as proof the
+ * link + firmware are alive.  Cheaper + more direct than @ref cc3501e_get_version
+ * (which round-trips the protocol version); use this when only "is it alive?"
+ * matters.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK on a successful round-trip; ALP_ERR_IO on a desync / no reply;
+ *         ALP_ERR_NOT_READY if @p ctx is not initialised.
+ */
+alp_status_t cc3501e_ping(cc3501e_t *ctx);
+
+/**
+ * @brief Request an in-band firmware soft reset (RESET, opcode 0x02).
+ *
+ * The firmware ACKs the command and then performs a DEFERRED reboot (it drains
+ * the reply first).  Unlike @ref cc3501e_reset / @ref cc3501e_hard_reset -- which
+ * pulse the WIFI_EN / nRESET GPIO lines -- this needs no host pins; it is a
+ * firmware-side reboot over the wire.  The bridge link drops after the ack, so
+ * re-establish it with @ref cc3501e_sync (and confirm with @ref cc3501e_ping)
+ * once the firmware is back up.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK once the reset is acked (reboot follows); otherwise the mapped
+ *         error.
+ */
+alp_status_t cc3501e_soft_reset(cc3501e_t *ctx);
+
+/**
+ * @brief Read extended firmware diagnostics (GET_DIAG_INFO, opcode 0x04).
+ *
+ * Decodes the 16-byte @ref alp_cc3501e_diag_info_t reply field-by-field: the
+ * firmware release @c fw_version (distinct from the protocol version that
+ * @ref cc3501e_get_version returns), the @c reset_cause
+ * (@ref alp_cc3501e_reset_cause_t), the active @c role (@ref alp_cc3501e_role_t),
+ * @c uptime_ms, @c free_heap_bytes, and the @c last_error the firmware last
+ * emitted (@ref alp_cc3501e_resp_t).  Non-disturbing: no side effects on radio
+ * state.  v2-firmware-only -- v1 firmware rejects with RESP_ERR_INVALID.
+ *
+ * @param ctx  Initialised driver context.
+ * @param out  Receives the decoded diagnostics snapshot on success.
+ * @return ALP_OK with @p out filled; ALP_ERR_INVAL on a NULL @p out;
+ *         ALP_ERR_IO on a short reply; otherwise the mapped error.
+ */
+alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out);
+
+/**
+ * @brief Read the firmware frame counters (DIAG_GET_STATS, opcode 0x70).
+ *
+ * The reply data is two little-endian 32-bit counters: frames the firmware
+ * answered OK, and frames it answered with a non-OK status.  The protocol
+ * header defines the opcode but NO reply struct for these, so they come back
+ * through out-params rather than a typedef.
+ *
+ * @param ctx         Initialised driver context.
+ * @param frames_ok   Receives the count of OK-answered frames.
+ * @param frames_err  Receives the count of error-answered frames.
+ * @return ALP_OK with both counters filled; ALP_ERR_INVAL if either out-param
+ *         is NULL; ALP_ERR_IO on a short reply; otherwise the mapped error.
+ */
+alp_status_t cc3501e_diag_stats(cc3501e_t *ctx, uint32_t *frames_ok, uint32_t *frames_err);
+
+/**
+ * @brief Set the firmware log verbosity (DIAG_LOG_LEVEL, opcode 0x71).
+ *
+ * The request payload is a single log-level byte; higher values are more
+ * verbose (the firmware clamps to its supported range).  No reply data.
+ *
+ * @param ctx    Initialised driver context.
+ * @param level  Firmware log level to apply.
+ * @return ALP_OK once applied; otherwise the mapped error.
+ */
+alp_status_t cc3501e_diag_log_level(cc3501e_t *ctx, uint8_t level);
 
 /* ------------------------------------------------------------------ */
 /* Wi-Fi host helpers                                                  */
@@ -249,6 +355,20 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
                                uint32_t               timeout_ms);
 
 /**
+ * @brief Abort an in-progress Wi-Fi scan (WIFI_SCAN_STOP, opcode 0x11).
+ *
+ * No payload, no reply data -- success is the OK status.  The firmware tears
+ * the scan down as a radio op, so the bridge can be briefly down; the budget is
+ * floored internally to the radio down-window and the request is re-issued on a
+ * bounded backoff until it lands, like @ref cc3501e_wifi_get_mac.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK once the firmware acknowledged the stop; ALP_ERR_TIMEOUT if it
+ *         stayed busy for the whole down-window; mapped error otherwise.
+ */
+alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);
+
+/**
  * @brief Associate with a Wi-Fi AP (WIFI_CONNECT_STA, opcode 0x12).
  *
  * Submits the SSID / security / passphrase as the on-wire
@@ -269,6 +389,59 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
  */
 alp_status_t cc3501e_wifi_connect(
     cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);
+
+/**
+ * @brief Tear down the STA association (WIFI_DISCONNECT, opcode 0x13).
+ *
+ * No payload, no reply data -- success is the OK status.  Disconnect is a radio
+ * op (Wlan_Disconnect), so the bridge can be briefly down while it runs; the
+ * budget is floored internally to the radio down-window and the request is
+ * re-issued on a bounded backoff until it lands, like @ref cc3501e_wifi_get_mac.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK once the firmware acknowledged the disconnect; ALP_ERR_TIMEOUT
+ *         if it stayed busy for the whole down-window; mapped error otherwise.
+ */
+alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
+
+/**
+ * @brief Start a Wi-Fi soft-AP (WIFI_AP_START, opcode 0x14).
+ *
+ * Brings the CC3501E up as an access point advertising @p ssid.  The on-wire
+ * payload is identical to @ref cc3501e_wifi_connect -- an
+ * @ref alp_cc3501e_wifi_connect_t header (ssid_len / psk_len / security)
+ * followed by the inline SSID then the inline passphrase, packed with no
+ * padding.  AP bring-up is a radio op (the firmware worker-routes it and the
+ * bridge is briefly down), so while the firmware reports RESP_ERR_BUSY the
+ * request is re-issued on a bounded backoff until RESP_OK or the deadline.
+ *
+ * @param ctx         Initialised driver context.
+ * @param ssid        NUL-terminated AP SSID (<= 32 bytes; longer is rejected).
+ * @param sec_type    Security: 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE
+ *                    (matches @ref alp_cc3501e_wifi_connect_t::security).
+ * @param pass        NUL-terminated passphrase (may be NULL/"" for an open AP).
+ * @param timeout_ms  Upper bound on the AP-start poll budget (floored to the
+ *                    radio down-window).
+ * @return ALP_OK once the AP is up; ALP_ERR_TIMEOUT if still starting at the
+ *         deadline; ALP_ERR_INVAL on an over-long SSID/passphrase; mapped
+ *         error otherwise.
+ */
+alp_status_t cc3501e_wifi_ap_start(
+    cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);
+
+/**
+ * @brief Stop the Wi-Fi soft-AP (WIFI_AP_STOP, opcode 0x15).
+ *
+ * No payload, no reply data -- success is the OK status.  Tearing the AP down
+ * is a radio op, so the bridge can be briefly down while it runs; the budget is
+ * floored internally to the radio down-window and the request is re-issued on a
+ * bounded backoff until it lands, like @ref cc3501e_wifi_disconnect.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK once the firmware acknowledged the AP stop; ALP_ERR_TIMEOUT
+ *         if it stayed busy for the whole down-window; mapped error otherwise.
+ */
+alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx);
 
 /**
  * @brief Read the current STA RSSI in dBm (WIFI_GET_RSSI, opcode 0x16).
@@ -299,6 +472,150 @@ alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi);
  *       bytes after the status byte.  See cc3501e.c gap note.
  */
 alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);
+
+/**
+ * @brief Poll the non-blocking STA connection state (WIFI_STATUS, opcode 0x1B).
+ *
+ * Reads the firmware's connection-state latch without a radio op (ISR-safe on
+ * the firmware side): how the host collects the outcome of an async
+ * @ref cc3501e_wifi_connect submit -- CONNECTING while the association runs,
+ * then CONNECTED or FAILED once the WLAN connect event lands.  The reply is the
+ * fixed 4-byte @ref alp_cc3501e_wifi_status_t wire layout (state | fail_reason |
+ * rssi_dbm | reserved), decoded into @p out.
+ *
+ * @param ctx  Initialised driver context.
+ * @param out  Receives the decoded status snapshot: @c state is a
+ *             @ref alp_cc3501e_wifi_conn_state_t, @c fail_reason a
+ *             @ref alp_cc3501e_wifi_fail_t (valid when state == CONN_FAILED) and
+ *             @c rssi_dbm the STA RSSI (valid when state == CONNECTED).
+ * @return ALP_OK with @p out filled; ALP_ERR_INVAL if @p out is NULL;
+ *         ALP_ERR_IO on a short reply; otherwise the mapped error.
+ */
+alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);
+
+/* ------------------------------------------------------------------ */
+/* TCP/UDP sockets (0x20..0x24)                                        */
+/*                                                                     */
+/* A minimal BSD-style socket API offloaded to the CC3501E's IP stack: */
+/* the host opens a handle, connects it, sends + receives bytes, then  */
+/* closes it.  Each call is one worker-routed firmware op (the socket   */
+/* bodies block on the lwIP core thread), so every wrapper is a        */
+/* poll-by-repeat over the bridge like the Wi-Fi getters.  v1 is        */
+/* IPv4-only; addresses are 4 octets in network (big-endian) order.     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Open a socket on the CC3501E IP stack (SOCK_OPEN, opcode 0x20).
+ *
+ * Allocates a socket in the firmware IP stack and returns its handle.  The
+ * handle is opaque and non-zero (0 is the invalid handle); pass it to every
+ * later socket call for this socket.  Worker-routed poll-by-repeat: re-issued
+ * while the firmware reports RESP_ERR_BUSY until the socket is allocated.
+ *
+ * @param ctx         Initialised driver context.
+ * @param family      Address family (@ref ALP_CC3501E_SOCK_FAMILY_IPV4; IPv6
+ *                    reserved in v1).
+ * @param type        @ref ALP_CC3501E_SOCK_TYPE_STREAM (TCP) or
+ *                    @ref ALP_CC3501E_SOCK_TYPE_DGRAM (UDP).
+ * @param protocol    IP protocol number, or 0 for the type's default
+ *                    (TCP for STREAM, UDP for DGRAM).
+ * @param handle_out  Receives the socket handle on success (must not be NULL).
+ * @param timeout_ms  Upper bound on the poll-by-repeat budget.
+ * @return ALP_OK with @p handle_out set; ALP_ERR_NOT_READY if the firmware IP
+ *         stack is unavailable (stub / no-Wi-Fi build); mapped error otherwise.
+ */
+alp_status_t cc3501e_sock_open(cc3501e_t *ctx,
+                               uint8_t    family,
+                               uint8_t    type,
+                               uint8_t    protocol,
+                               uint16_t  *handle_out,
+                               uint32_t   timeout_ms);
+
+/**
+ * @brief Connect a socket to a peer (SOCK_CONNECT, opcode 0x21).
+ *
+ * For STREAM sockets this runs the TCP handshake to @p ip : @p port; for DGRAM
+ * sockets it sets the default peer for later @ref cc3501e_sock_send calls.  The
+ * firmware body blocks on the handshake, so this is a worker-routed
+ * poll-by-repeat until it resolves.
+ *
+ * @param ctx         Initialised driver context.
+ * @param handle      Socket handle from @ref cc3501e_sock_open.
+ * @param ip          Destination IPv4 address, 4 octets in network order
+ *                    (@c ip[0] is the most significant octet, a.b.c.d).
+ * @param port        Destination TCP/UDP port, host byte order (the firmware
+ *                    converts to network order on the wire).
+ * @param timeout_ms  Upper bound on the connect poll budget.
+ * @return ALP_OK once connected; ALP_ERR_NOT_READY on the stub build; mapped
+ *         error (e.g. ALP_ERR_IO on a refused/timed-out handshake) otherwise.
+ */
+alp_status_t cc3501e_sock_connect(
+    cc3501e_t *ctx, uint16_t handle, const uint8_t ip[4], uint16_t port, uint32_t timeout_ms);
+
+/**
+ * @brief Send bytes on a socket (SOCK_SEND, opcode 0x22).
+ *
+ * Queues @p len bytes on the socket and reports how many the stack accepted in
+ * @p sent_out.  @p len is bounded by one frame
+ * (<= ALP_CC3501E_MAX_PAYLOAD - 8, the send-header size); larger buffers must be
+ * split by the caller.  Worker-routed poll-by-repeat.
+ *
+ * @param ctx         Initialised driver context.
+ * @param handle      Socket handle from @ref cc3501e_sock_open.
+ * @param data        Payload bytes to send.
+ * @param len         Number of bytes in @p data.
+ * @param sent_out    Receives the accepted byte count (may be NULL).
+ * @param timeout_ms  Upper bound on the send poll budget.
+ * @return ALP_OK once queued; ALP_ERR_INVAL if @p len exceeds one frame;
+ *         ALP_ERR_NOT_READY on the stub build; mapped error otherwise.
+ */
+alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
+                               uint16_t       handle,
+                               const uint8_t *data,
+                               size_t         len,
+                               size_t        *sent_out,
+                               uint32_t       timeout_ms);
+
+/**
+ * @brief Receive bytes from a socket (SOCK_RECV, opcode 0x23).
+ *
+ * Requests up to @p cap bytes from the socket's receive queue into @p buf.  A
+ * zero-length result (@p recv_len_out set to 0 with ALP_OK) means no data was
+ * available within the firmware's receive window, or the peer closed the
+ * connection -- the caller polls again to distinguish (or stops on a subsequent
+ * zero after a close).  Worker-routed poll-by-repeat over the bridge.
+ *
+ * @param ctx           Initialised driver context.
+ * @param handle        Socket handle from @ref cc3501e_sock_open.
+ * @param buf           Destination buffer for received bytes.
+ * @param cap           Capacity of @p buf (also bounds the firmware request).
+ * @param recv_len_out  Receives the number of bytes written to @p buf (may be
+ *                      NULL).
+ * @param timeout_ms    Upper bound on the receive poll budget.
+ * @return ALP_OK with @p recv_len_out set (possibly 0); ALP_ERR_NOT_READY on the
+ *         stub build; mapped error otherwise.
+ */
+alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
+                               uint16_t   handle,
+                               uint8_t   *buf,
+                               size_t     cap,
+                               size_t    *recv_len_out,
+                               uint32_t   timeout_ms);
+
+/**
+ * @brief Close a socket (SOCK_CLOSE, opcode 0x24).
+ *
+ * Releases the firmware-side socket and, for STREAM sockets, issues the TCP
+ * teardown.  The handle is invalid afterwards and the firmware may reuse its
+ * value.  Worker-routed poll-by-repeat.
+ *
+ * @param ctx         Initialised driver context.
+ * @param handle      Socket handle from @ref cc3501e_sock_open.
+ * @param timeout_ms  Upper bound on the close poll budget.
+ * @return ALP_OK once closed; ALP_ERR_NOT_READY on the stub build; mapped error
+ *         otherwise.
+ */
+alp_status_t cc3501e_sock_close(cc3501e_t *ctx, uint16_t handle, uint32_t timeout_ms);
 
 /**
  * @brief Enable the CC3501E BLE controller + NimBLE host (BLE_ENABLE, 0x30).
@@ -357,6 +674,189 @@ alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
                               size_t                     cap,
                               size_t                    *count,
                               uint32_t                   timeout_ms);
+
+/* ------------------------------------------------------------------ */
+/* BLE control (disable / advertise / connect / GATT, 0x31..0x3B).    */
+/*                                                                    */
+/* Thin wrappers over the firmware BLE handlers.  WIRE GAP: the        */
+/* protocol header carries the BLE opcodes + alp_cc3501e_ble_adv_      */
+/* start_t, but has NO payload struct for CONNECT (0x36) or the four   */
+/* GATT ops (0x38..0x3B); those wire layouts are defined only by the   */
+/* firmware handlers (firmware/cc3501e/src/protocol.c handle_ble_*)    */
+/* and are documented per-function + in cc3501e.c.  GATT async         */
+/* notifications (EVT_BLE_GATT_WRITE_REQ, 0x3F) need the async-event   */
+/* path (not wired on this HW rev); these wrappers issue the outbound  */
+/* commands only.                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Disable the CC3501E BLE controller + NimBLE host (BLE_DISABLE, 0x31).
+ *
+ * Undoes @ref cc3501e_ble_enable.  No payload; success is the OK status.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget (per-request retry on transient IO).
+ * @return ALP_OK once BLE is torn down; ALP_ERR_NOT_READY if BLE was not
+ *         enabled / not built into the firmware; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_disable(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Start BLE advertising (BLE_ADV_START, 0x32).
+ *
+ * Packs the 7-byte wire header the firmware @c handle_ble_adv_start parses
+ * (connectable | reserved | interval_min_ms(LE16) | interval_max_ms(LE16) |
+ * adv_data_len) followed by the inline advertising-data bytes.  NOTE: the doc
+ * struct @ref alp_cc3501e_ble_adv_start_t is 8 bytes with an alignment pad the
+ * wire omits, so the header is hand-packed to 7 bytes (see cc3501e.c).
+ *
+ * @param ctx              Initialised bridge handle (BLE must be enabled).
+ * @param connectable      true = connectable advertising, false = non-connectable.
+ * @param interval_min_ms  Minimum advertising interval, milliseconds.
+ * @param interval_max_ms  Maximum advertising interval, milliseconds.
+ * @param adv_data         Advertising-data bytes (may be NULL only if
+ *                         @p adv_data_len is 0).
+ * @param adv_data_len     Advertising-data length (0..255).
+ * @param timeout_ms       Caller budget.
+ * @return ALP_OK once advertising is up; ALP_ERR_INVAL on a NULL @p adv_data
+ *         with a non-zero length; ALP_ERR_NOT_READY if BLE is not enabled;
+ *         otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_adv_start(cc3501e_t     *ctx,
+                                   bool           connectable,
+                                   uint16_t       interval_min_ms,
+                                   uint16_t       interval_max_ms,
+                                   const uint8_t *adv_data,
+                                   uint8_t        adv_data_len,
+                                   uint32_t       timeout_ms);
+
+/**
+ * @brief Stop BLE advertising (BLE_ADV_STOP, 0x33).
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once advertising is stopped; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_adv_stop(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Stop an in-progress BLE scan (BLE_SCAN_STOP, 0x35).
+ *
+ * Cancels the NimBLE GAP discovery started by @ref cc3501e_ble_scan before its
+ * window elapses.  No payload; success is the OK status.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once the scan is stopped; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_scan_stop(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Initiate a BLE central connection to a peer (BLE_CONNECT, 0x36).
+ *
+ * The wire payload the firmware @c handle_ble_connect parses is
+ * addr_type(1) | addr[6] (7 bytes; addr_type FIRST).  No header struct exists
+ * for this opcode -- the layout is defined only by the firmware handler.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled).
+ * @param addr        6-byte peer address (little-endian, as carried on the wire
+ *                    and reported by @ref cc3501e_ble_scan_record_t::addr).
+ * @param addr_type   Peer address type (0 = public, 1 = random, per NimBLE).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once the connection is established; ALP_ERR_INVAL on a NULL
+ *         @p addr; ALP_ERR_NOT_READY if BLE is not enabled; otherwise mapped.
+ */
+alp_status_t
+cc3501e_ble_connect(cc3501e_t *ctx, const uint8_t addr[6], uint8_t addr_type, uint32_t timeout_ms);
+
+/**
+ * @brief Disconnect the active BLE connection (BLE_DISCONNECT, 0x37).
+ *
+ * No payload -- the firmware tracks the single active connection itself.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once disconnected; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_disconnect(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Register a GATT attribute table with the firmware (BLE_GATT_REGISTER, 0x38).
+ *
+ * The firmware @c handle_ble_gatt_register takes the payload as an OPAQUE
+ * attribute-table descriptor (>= 1 byte): there is no host-side header struct
+ * and no fixed UUID/handle layout on the wire, so the host ships the descriptor
+ * bytes verbatim and the firmware parses them.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled).
+ * @param descriptor  Opaque attribute-table descriptor bytes (non-NULL).
+ * @param len         Descriptor length (1..@ref ALP_CC3501E_MAX_PAYLOAD).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once registered; ALP_ERR_INVAL on a NULL/empty/oversized
+ *         descriptor; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
+                                       const uint8_t *descriptor,
+                                       size_t         len,
+                                       uint32_t       timeout_ms);
+
+/**
+ * @brief Send a GATT notification on a characteristic (BLE_GATT_NOTIFY, 0x39).
+ *
+ * Wire (firmware @c handle_ble_gatt_notify): handle(LE16) | value bytes.  No
+ * header struct -- the layout is defined only by the firmware handler.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled + connected).
+ * @param handle      Characteristic-value attribute handle to notify on.
+ * @param data        Value bytes to notify (may be NULL only if @p len is 0).
+ * @param len         Value length (0..@ref ALP_CC3501E_MAX_PAYLOAD minus 2).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once the notification is queued; ALP_ERR_INVAL on a bad arg /
+ *         oversized value; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_gatt_notify(
+    cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);
+
+/**
+ * @brief Read a GATT attribute value (BLE_GATT_READ, 0x3A).
+ *
+ * Wire request (firmware @c handle_ble_gatt_read): handle(LE16); the reply DATA
+ * (after the status byte) is the attribute value bytes.  No header struct --
+ * the layout is defined only by the firmware handler.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled + connected).
+ * @param handle      Attribute handle to read.
+ * @param out         Receives the value bytes (may be NULL only if @p cap is 0);
+ *                    truncated to @p cap.
+ * @param cap         Capacity of @p out in bytes.
+ * @param out_len     Receives the number of value bytes copied (may be NULL).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK with @p out / @p out_len filled; ALP_ERR_INVAL on a NULL
+ *         @p out with non-zero @p cap; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx,
+                                   uint16_t   handle,
+                                   uint8_t   *out,
+                                   size_t     cap,
+                                   size_t    *out_len,
+                                   uint32_t   timeout_ms);
+
+/**
+ * @brief Write a GATT attribute value (BLE_GATT_WRITE, 0x3B).
+ *
+ * Wire (firmware @c handle_ble_gatt_write): handle(LE16) | value bytes --
+ * identical framing to @ref cc3501e_ble_gatt_notify.  No header struct.
+ *
+ * @param ctx         Initialised bridge handle (BLE must be enabled + connected).
+ * @param handle      Attribute handle to write.
+ * @param data        Value bytes to write (may be NULL only if @p len is 0).
+ * @param len         Value length (0..@ref ALP_CC3501E_MAX_PAYLOAD minus 2).
+ * @param timeout_ms  Caller budget.
+ * @return ALP_OK once the write is accepted; ALP_ERR_INVAL on a bad arg /
+ *         oversized value; otherwise the mapped error.
+ */
+alp_status_t cc3501e_ble_gatt_write(
+    cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);
 
 /* ------------------------------------------------------------------ */
 /* GPIO proxy (0x50..0x53) + camera enables (0x60/0x61).              */
@@ -510,22 +1010,83 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 
 /* Granular OTA controls (cc3501e_ota_update wraps these for the common path). */
 
-/** Open an OTA session: declare @p total_len; the device picks its non-primary
- *  vendor slot and brings it READY. */
+/**
+ * @brief Open an OTA session (OTA_BEGIN, opcode 0x40).
+ *
+ * Declares the full image size up front; the device picks its NON-primary
+ * vendor slot and brings it to READY (PSA-FWU), arming the session's write
+ * cursor at offset 0.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param total_len   Full signed GPE vendor-image size in bytes (manifest +
+ *                    body) that the session will stream.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK once the session is open; otherwise the mapped error (e.g.
+ *         ALP_ERR_BUSY if a session is already in flight).
+ */
 alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t timeout_ms);
 
-/** Stream one sequential image chunk at absolute @p offset.  @p len must be
- *  1..ALP_CC3501E_OTA_MAX_CHUNK and @p offset must equal the device cursor. */
+/**
+ * @brief Stream one SEQUENTIAL image chunk (OTA_WRITE, opcode 0x41).
+ *
+ * Preconditions (both enforced): @p offset MUST equal the device's running
+ * write cursor -- out-of-order writes are rejected by the firmware -- and
+ * @p len MUST be 1..ALP_CC3501E_OTA_MAX_CHUNK bytes (the wire frame is a
+ * 4-byte LE offset + the raw bytes, bounded by ALP_CC3501E_MAX_PAYLOAD).
+ * After a missed reply, re-sync to the device's actual cursor with
+ * @ref cc3501e_ota_status instead of blindly re-sending.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param offset      Absolute byte offset into the image; must equal the
+ *                    device's write cursor (bytes_written so far).
+ * @param data        Chunk bytes to append (must be non-NULL).
+ * @param len         Chunk length: 1..ALP_CC3501E_OTA_MAX_CHUNK.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK once the chunk is accepted; ALP_ERR_INVAL on a NULL @p data
+ *         or an out-of-range @p len; otherwise the mapped error (a
+ *         cursor-mismatched offset surfaces as the firmware's INVALID).
+ */
 alp_status_t cc3501e_ota_write(
     cc3501e_t *ctx, uint32_t offset, const uint8_t *data, size_t len, uint32_t timeout_ms);
 
-/** Finalize: the device installs the staged image + arms the swap reboot. */
+/**
+ * @brief Finalize the session (OTA_FINISH, opcode 0x42).
+ *
+ * The device installs the fully-streamed image into its non-primary vendor
+ * slot and arms the deferred swap reboot (the bridge link drops while the
+ * device reboots and BL2/MCUboot swaps the slot to primary).
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK once FINISH is acked (reboot follows); otherwise the mapped
+ *         error (e.g. an incomplete stream is rejected).
+ */
 alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms);
 
-/** Cancel an in-flight session on the device. */
+/**
+ * @brief Cancel an in-flight OTA session (OTA_ABORT, opcode 0x43).
+ *
+ * Resets the device-side session back to IDLE, discarding streamed bytes.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK once the session is cancelled; otherwise the mapped error.
+ */
 alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);
 
-/** Query device session state into @p out (state / bytes_written / total_len). */
+/**
+ * @brief Query the device-side OTA session state (OTA_STATUS, opcode 0x44).
+ *
+ * Fills @p out with the session state, the bytes accepted so far (the write
+ * cursor a resuming host must continue from), and the total declared at
+ * BEGIN.  Read-only: safe to call at any point in the session.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param out         Receives the @ref alp_cc3501e_ota_status_t snapshot.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK with @p out filled; ALP_ERR_INVAL on a NULL @p out;
+ *         ALP_ERR_IO on a short reply; otherwise the mapped error.
+ */
 alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, uint32_t timeout_ms);
 
 /* ------------------------------------------------------------------ */
@@ -587,6 +1148,34 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 
 /** Register or replace the async-event callback.  Pass cb=NULL to detach. */
 alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);
+
+/**
+ * @brief Poll the firmware for queued async events and dispatch them to the
+ *        registered callback (CMD_GET_PENDING_EVENTS, opcode 0x05).
+ *
+ * This is the PRIMARY, benchable async-event mechanism on the current HW rev:
+ * the CC35 GPIO17 -> Alif P2_6 attention line is a bodge NOT routed on the stock
+ * EVK, so there is no interrupt to push events -- the host POLLS instead.  Each
+ * call sends one GET_PENDING_EVENTS request, decodes the packed reply (a list of
+ * @ref alp_cc3501e_event_entry_t { evt_opcode | len | payload[len] }), and
+ * invokes the @ref cc3501e_set_event_callback callback once per queued event
+ * (with the EVT_* opcode + its payload).  The firmware drains the ring as it
+ * replies, so each event is delivered exactly once.
+ *
+ * Call it periodically (e.g. from a low-rate app thread; the SDK console runs a
+ * ~500 ms poll when a companion is registered).  A no-op returning ALP_OK when
+ * no callback is registered (the events stay queued in the firmware until a
+ * callback is attached).  On the opt-in interrupt path
+ * (CONFIG_ALP_SDK_CC3501E_EVENT_IRQ) the P2_6 edge ISR schedules this call from
+ * a workqueue instead of / alongside the timer poll.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK once the queue was drained + dispatched (even with zero
+ *         events); ALP_ERR_NOT_READY if @p ctx is not initialised; the mapped
+ *         firmware/link error (e.g. ALP_ERR_IO if the bridge was briefly down)
+ *         otherwise -- the caller simply retries on the next poll.
+ */
+alp_status_t cc3501e_poll_events(cc3501e_t *ctx);
 
 /** Free internal state.  Does not close the SPI bus -- caller owns it. */
 void cc3501e_deinit(cc3501e_t *ctx);

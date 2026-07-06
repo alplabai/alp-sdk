@@ -33,7 +33,10 @@ on_module:
       devices:
         - { chip: rv3028c7,         role: rtc,                       address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,            address_7bit: "0x30" }
-        - { chip: tmp112,           role: temp_sensor,               address_7bit: "0x40" }
+        # 0x48 = ADD0 strapped to GND (chip default) per metadata/chips/tmp112.yaml;
+        # 0x40 was outside the physically possible 0x48..0x4B strap range.
+        # Bench verification on real silicon still pending.
+        - { chip: tmp112,           role: temp_sensor,               address_7bit: "0x48" }
         - { chip: clk_5l35023b,     role: clock_generator,           address_7bit: "0x68" }
         - { chip: gd32g553,         role: supervisor_mcu_i2c_slave,  address_7bit: "0x70" }
         - { chip: act8760,          role: pmic_main_page0,           address_7bit: "0x25" }

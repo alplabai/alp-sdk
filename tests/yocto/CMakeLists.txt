@@ -22,6 +22,42 @@ target_compile_features(alp_test_inference_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
 
+# GPU2D dispatcher + portable sw_fallback on the plain-CMake Yocto
+# build (#24): proves Linux apps get the REAL CPU fill/blit/blend,
+# not the old NOSUPPORT stub.  Portable pure C -- no Linux gate.
+add_executable(alp_test_gpu2d_dispatcher
+    ${CMAKE_CURRENT_SOURCE_DIR}/gpu2d_dispatcher.c
+)
+target_link_libraries(alp_test_gpu2d_dispatcher PRIVATE alp::sdk)
+target_include_directories(alp_test_gpu2d_dispatcher PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_features(alp_test_gpu2d_dispatcher PRIVATE c_std_99)
+
+add_test(NAME alp_test_gpu2d_dispatcher
+         COMMAND alp_test_gpu2d_dispatcher)
+
+# Static-archive link regression for the backend registry (#368).
+# Links ONLY against the (static) libalp_sdk.a and compiles NO backend
+# TU of its own -- deliberately UNLIKE the sw_fallback / ALSA tests
+# below, which recompile the backends into the executable and so mask
+# the bug.  Before the ALP_BACKEND_ANCHOR fix this target fails to link
+# with `undefined reference to __start_alp_backends_<class>` for every
+# registry class it touches; the anchors force each section-carrying
+# sw_fallback member into the link.  Portable pure C -- no Linux/pkg
+# gate, runs on every CI host.
+add_executable(alp_test_registry_static_link
+    ${CMAKE_CURRENT_SOURCE_DIR}/registry_static_link.c
+)
+target_link_libraries(alp_test_registry_static_link PRIVATE alp::sdk)
+target_include_directories(alp_test_registry_static_link PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_features(alp_test_registry_static_link PRIVATE c_std_99)
+
+add_test(NAME alp_test_registry_static_link
+         COMMAND alp_test_registry_static_link)
+
 # v0.4: Yocto I2C wrapper failure-path coverage.  Real-adapter HIL
 # coverage is parked under docs/ci/HW-IN-LOOP.md until the self-hosted
 # `hil-yocto` runner lands.  Linux-only -- the underlying source
@@ -88,8 +124,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         pkg_check_modules(ALSA_TEST QUIET alsa)
     endif()
     if(MOSQUITTO_TEST_FOUND)
+        # MQTT is a registry backend since #33; compile the mqtt backend
+        # TUs straight into the test so the alp_backends_mqtt linker
+        # section is populated and the libmosquitto backend (priority
+        # 100) wins selection -- same archive-extraction rationale as
+        # alp_test_audio_alsa below.
         add_executable(alp_test_iot_mqtt
             ${CMAKE_CURRENT_SOURCE_DIR}/iot_mqtt.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/sw_fallback.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/yocto_drv.c
         )
         target_link_libraries(alp_test_iot_mqtt PRIVATE alp::sdk)
         target_include_directories(alp_test_iot_mqtt PRIVATE
@@ -133,8 +176,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         pkg_check_modules(OPENSSL_TEST QUIET libssl libcrypto)
     endif()
     if(OPENSSL_TEST_FOUND)
+        # Security is a registry backend since #33; compile the backend
+        # TUs into the test so the alp_backends_security section is
+        # populated and the OpenSSL backend (priority 100) wins
+        # selection -- same rationale as alp_test_audio_alsa.
         add_executable(alp_test_security_openssl
             ${CMAKE_CURRENT_SOURCE_DIR}/security_openssl.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/sw_fallback.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/yocto_drv.c
         )
         target_link_libraries(alp_test_security_openssl PRIVATE alp::sdk)
         target_include_directories(alp_test_security_openssl PRIVATE
@@ -145,4 +194,27 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME alp_test_security_openssl
                  COMMAND alp_test_security_openssl)
     endif()
+
+    # Registry sw_fallback wiring for the #33-remainder classes (mqtt /
+    # security / wifi / ble).  Deliberately compiles ONLY the priority-0
+    # sw_fallback backends into the executable -- never the yocto_drv
+    # vendor backends -- so the dispatcher deterministically selects
+    # sw_fallback regardless of which optional host libs (libmosquitto /
+    # OpenSSL) are installed.  Runnable on every Linux CI host; no
+    # pkg-config gate.
+    add_executable(alp_test_registry_sw_fallback
+        ${CMAKE_CURRENT_SOURCE_DIR}/registry_sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/wifi/sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/ble/sw_fallback.c
+    )
+    target_link_libraries(alp_test_registry_sw_fallback PRIVATE alp::sdk)
+    target_include_directories(alp_test_registry_sw_fallback PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_registry_sw_fallback PRIVATE c_std_99)
+
+    add_test(NAME alp_test_registry_sw_fallback
+             COMMAND alp_test_registry_sw_fallback)
 endif()

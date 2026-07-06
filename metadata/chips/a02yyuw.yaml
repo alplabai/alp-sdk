@@ -27,7 +27,24 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Waterproof probe module on a fixed cable, not a bare IC -- module form,
+  # no pins/footprint. Per DFRobot A02YYUW (SEN0311) product datasheet
+  # ("Dimension Diagram" + "Specification" + "Shipping List"). Probe housing
+  # 84.6 x 29.6 x 29.0mm (incl. mounting-ear flanges; 72.6mm body length
+  # excluding ears); 300mm captive cable terminated in a JST PH2.0 4-pin
+  # connector (VCC/GND/RX/TX, 4-pin, 2.0mm pitch) -- shipped in the box per
+  # the datasheet's shipping list. No onboard antenna concept applies
+  # (ultrasonic transducer, not RF); antenna field set to n/a.
+  package:              "closed waterproof ultrasonic probe on captive cable, JST PH2.0-4P connector"
+  dimension_mm:         "84.6 x 29.6 x 29.0 (probe housing); 300 cable to connector"
+  antenna:              n/a
+  operating_temp_deg_c: "-15..60"
+  visibility:           public
+  provenance:    web_provisional

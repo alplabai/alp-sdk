@@ -20,7 +20,6 @@
  * Sensor bring-up + the PWM bank live in autopilot_init().
  */
 
-#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
 #include <string.h>
@@ -109,7 +108,7 @@ int autopilot_init(autopilot_state_t *s)
 	s->mode = AP_MODE_DISARMED;
 
 	s_i2c = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = E1M_I2C0,
+	    .bus_id     = ALP_E1M_I2C0,
 	    .bitrate_hz = 400000,
 	});
 	if (!s_i2c) {
@@ -132,11 +131,11 @@ int autopilot_init(autopilot_state_t *s)
      * polarity directly -- customers wire an external inverter or use
      * a microcontroller-side inverter chip. */
 	s_gps_uart = alp_uart_open(&(alp_uart_config_t){
-	    .port_id  = E1M_UART0,
+	    .port_id  = ALP_E1M_UART0,
 	    .baudrate = 9600,
 	});
 	s_rc_uart  = alp_uart_open(&(alp_uart_config_t){
-	    .port_id  = E1M_UART1,
+	    .port_id  = ALP_E1M_UART1,
 	    .baudrate = 100000,
 	});
 	if (s_gps_uart) ublox_neo_m9n_init(&s_gps, s_gps_uart);
@@ -147,7 +146,7 @@ int autopilot_init(autopilot_state_t *s)
      * entirely). */
 	for (int i = 0; i < AUTOPILOT_N_MOTORS; i++) {
 		s_esc[i] = alp_pwm_open(&(alp_pwm_config_t){
-		    .channel_id = E1M_PWM0 + i,
+		    .channel_id = ALP_E1M_PWM0 + i,
 		    .period_ns  = 2500000, /* 400 Hz. */
 		    .polarity   = ALP_PWM_POLARITY_NORMAL,
 		});
@@ -203,7 +202,7 @@ void autopilot_rate_loop(autopilot_state_t *s)
 		mixer_x_quad(thr, tau_p, tau_q, tau_r, s->motor_cmd);
 		autopilot_emit_motors(s);
 
-		k_msleep(1);
+		alp_delay_ms(1);
 	}
 }
 
@@ -240,7 +239,7 @@ void autopilot_attitude_loop(autopilot_state_t *s)
 			s->setp_pitch = pid_step(&s_atti_pitch, pitch_sp, s->pitch, dt_s);
 		}
 
-		k_msleep(4);
+		alp_delay_ms(4);
 	}
 }
 
@@ -292,7 +291,7 @@ void autopilot_nav_loop(autopilot_state_t *s)
 			s->stick_throttle          = 0.55f + alt_correction * 0.10f;
 		}
 
-		k_msleep(40);
+		alp_delay_ms(40);
 	}
 }
 

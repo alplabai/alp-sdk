@@ -1,0 +1,35 @@
+# board.yaml -- cold-chain integrity monitor.
+#
+# A low-power M55 node reads the on-board BME280 temperature/humidity/pressure
+# sensor on a slow logging cadence, computes the cold-chain metrics (MKT,
+# dewpoint, excursion time), and classifies the integrity state.  Same source
+# targets the V2N DEEPX path when som.sku is flipped.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+pins:
+  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "BME280 environment sensor bus" }
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    app: ./src
+    inference:
+      default_arena_kib: 64
+    libraries:
+      - tflite_micro
+    peripherals:
+      - i2c                   # BME280 link.
+
+chips:
+  - bme280                    # temperature / humidity / pressure.
+
+diagnostics:
+  log_level: info

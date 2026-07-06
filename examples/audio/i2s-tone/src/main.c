@@ -25,10 +25,14 @@
 
 #include "alp/i2s.h"
 
+/* alp_has() / ALP_HAS() -- gate on what the silicon offers, never on
+ * a board name (#ifdef CONFIG_BOARD_* forks don't port to new SoMs). */
+#include "alp/cap.h"
+
 /* BOARD_I2S_AUDIO is a portable alias that resolves to the on-board
  * audio codec I2S bus on whichever EVK is being targeted:
- *   E1M EVK  (AEN)  → E1M_I2S0  (TAS2563 amps via 74LVC157 mux)
- *   E1M-X EVK (V2N) → E1M_X_I2S0 (TAS2563 smart-amp I2S)
+ *   E1M EVK  (AEN)  → ALP_E1M_I2S0  (TAS2563 amps via 74LVC157 mux)
+ *   E1M-X EVK (V2N) → ALP_E1M_X_I2S0 (TAS2563 smart-amp I2S)
  * Include via <alp/board.h>; ALP_BOARD_* is emitted by the build
  * system from the board.yaml preset. */
 #include "alp/board.h"
@@ -52,10 +56,20 @@
 
 int main(void)
 {
+	/* Capability gate: skip cleanly on I2S-less silicon instead of
+	 * forking the example with #ifdef CONFIG_BOARD_*.  Under
+	 * native_sim no SoC is selected, the capability layer is
+	 * permissive, and the demo proceeds to the open() below. */
+	if (!alp_has(ALP_CAP_ID_HW_I2S)) {
+		printf("[i2s] no I2S controller on this SoC (%s) -- skipping\n", ALP_SOC_REF_STR);
+		printf("[i2s] done\n");
+		return 0;
+	}
+
 	printf("[i2s] open BOARD_I2S_AUDIO @ 48 kHz s16 stereo TX\n");
 
 	alp_i2s_t *i2s = alp_i2s_open(&(alp_i2s_config_t){
-	    .bus_id         = BOARD_I2S_AUDIO, /* E1M EVK: E1M_I2S0; E1M-X EVK: E1M_X_I2S0 */
+	    .bus_id         = BOARD_I2S_AUDIO, /* E1M EVK: ALP_E1M_I2S0; E1M-X EVK: ALP_E1M_X_I2S0 */
 	    .sample_rate_hz = SR,
 	    .word_bits      = 16, /* 16/24/32 supported */
 	    .channels       = 2,  /* 1 = mono, 2 = stereo */

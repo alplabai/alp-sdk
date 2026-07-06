@@ -41,6 +41,8 @@
 #include "alp/dac.h"   /* alp_dac_* lives in dac.h */
 #include "alp/board.h" /* BOARD_DAC0 -> the selected EVK's DAC0 pad */
 
+#include "alp/peripheral.h"
+
 /* ------------------------------------------------------------------
  * Waveform parameters.  Tweak these for your application.
  * ------------------------------------------------------------------ */
@@ -117,13 +119,17 @@ static uint16_t lut_to_mv(int16_t q15)
 
 int main(void)
 {
+	/* Bring up the SDK runtime before anything else -- thin today,
+	 * but future backends rely on it (see <alp/peripheral.h>). */
+	(void)alp_init();
+
 	printf("[dac] open BOARD_DAC0 (initial %u mV)\n", SINE_DC_OFFSET_MV);
 
 	/* Open the DAC at the centre voltage.  The wrapper rounds to
      * the converter's hardware-achievable resolution.
      *
      * channel_id = BOARD_DAC0 -> the selected board's DAC0 pad
-     * (E1M_DAC0 on E1M / Alif; E1M_X_DAC0 -> GD32 PA4 on E1M-X / V2N). */
+     * (ALP_E1M_DAC0 on E1M / Alif; ALP_E1M_X_DAC0 -> GD32 PA4 on E1M-X / V2N). */
 	alp_dac_t *dac = alp_dac_open(&(alp_dac_config_t){
 	    .channel_id = BOARD_DAC0,
 	    .initial_mv = SINE_DC_OFFSET_MV,

@@ -79,10 +79,12 @@ jobs:
       # Mirror pr-metadata-validate.yml's Python setup -- same
       # toolchain version pin keeps the orchestrator behaviour
       # consistent across the metadata gate + this gate.
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          # Repo is checked out under alp-sdk/ (path:), but setup-python (a
+          # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
+          python-version-file: alp-sdk/.python-version
 
       - name: Install Python deps
         run: pip install jsonschema pyyaml
@@ -182,7 +184,7 @@ jobs:
           app_path="${{ steps.pick.outputs.example_path }}"
           board_yaml="${{ steps.pick.outputs.board_yaml }}"
           python scripts/validate_board_yaml.py --input "${board_yaml}"
-          python scripts/alp_orchestrate.py \
+          PYTHONPATH="$PWD/scripts" python -m alp_orchestrate \
               --input "${board_yaml}" \
               --build-root "${app_path}/build" || true
 
@@ -230,7 +232,7 @@ jobs:
           # dir state.  Mirror `west alp-clean` by hand: remove the
           # build dir + the orchestrator state cache.
           rm -rf "${app_path}/build" "${app_path}/.alp-build-state.json"
-          python scripts/alp_orchestrate.py \
+          PYTHONPATH="$PWD/scripts" python -m alp_orchestrate \
               --input "${board_yaml}" \
               --build-root "${app_path}/build" || true
           cp "${manifest_a}" /tmp/system-manifest-run-b.yaml

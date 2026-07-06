@@ -33,7 +33,8 @@ header. One channel `alp_pingpong` carries two methods: HP → HE `ping`, HE →
 `pong`. `alp_rpc_subscribe()` filters by method, so each side's callback fires
 only for the direction it consumes.
 
-- **HP** (host): boots HE (`se_service_boot_cpu`), `alp_rpc_open`, subscribes
+- **HP** (host): boots HE (the portable `alp_mproc_boot_core`,
+  SE-boot-service-backed on AEN), `alp_rpc_open`, subscribes
   `pong`, sends 16 `ping`s, counts `pong`s.
 - **HE** (remote): `alp_rpc_open`, subscribes `ping`, echoes each as a `pong`
   via `alp_rpc_send`.

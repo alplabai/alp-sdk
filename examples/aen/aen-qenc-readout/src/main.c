@@ -5,22 +5,27 @@
  * aen-qenc-readout -- read a quadrature encoder on the Ensemble E8 UTIMER via the
  * vendored alif,utimer-qdec sensor driver, on the E1M-AEN801 (M55-HE).  Drives the
  * standard Zephyr sensor API (sensor_sample_fetch / sensor_channel_get) on
- * DT_ALIAS(alp_qenc0) and reports SENSOR_CHAN_ROTATION (raw UTIMER counts).
+ * DT_ALIAS(alp_qenc0) and reports SENSOR_CHAN_ROTATION.  The driver scales the
+ * raw UTIMER counter to DEGREES (val1 = counter * 360 / counts-per-revolution),
+ * so the value ranges 0..359, not raw counts.
  *
  * The UTIMER runs in quadrature-decoder mode: two phase inputs (X = channel A,
  * Y = channel B) advance/retreat the counter; the reload value wraps at
  * counts-per-revolution.  Turn the encoder shaft between samples to see the
- * count move.
+ * angle move.  NOTE: because the reading is quantised to whole degrees, shaft
+ * motion smaller than ~1 degree (360 / counts-per-revolution of a rev) will
+ * not change val1 and reads as no motion.
  *
  * PASS gate: device ready, sample_fetch + channel_get return 0 across the poll
- * loop AND the reported count CHANGES (the shaft was turned -> live decode).  A
- * run that reads cleanly but never changes (no shaft motion / encoder not wired)
- * is reported PARTIAL -- the driver path is proven; spin the encoder.
+ * loop AND the reported angle CHANGES (the shaft was turned -> live decode).  A
+ * run that reads cleanly but never changes (no shaft motion / sub-degree motion
+ * / encoder not wired) is reported PARTIAL -- the driver path is proven; spin
+ * the encoder through at least a degree.
  */
 
 #include <stdio.h>
 
-#include <zephyr/kernel.h>
+#include <alp/peripheral.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
 
@@ -45,14 +50,14 @@ int main(void)
 		int rc = sensor_sample_fetch(qenc);
 		if (rc != 0) {
 			printf("[qenc] sample_fetch[%d] -> %d\n", i, rc);
-			k_msleep(POLL_MS);
+			alp_delay_ms(POLL_MS);
 			continue;
 		}
 		struct sensor_value v = { 0 };
 		rc                    = sensor_channel_get(qenc, SENSOR_CHAN_ROTATION, &v);
 		if (rc != 0) {
 			printf("[qenc] channel_get[%d] -> %d\n", i, rc);
-			k_msleep(POLL_MS);
+			alp_delay_ms(POLL_MS);
 			continue;
 		}
 		ok_reads++;
@@ -61,14 +66,14 @@ int main(void)
 		} else if (v.val1 != first) {
 			moved = true;
 		}
-		printf("[qenc] count[%d] = %d\n", i, v.val1);
-		k_msleep(POLL_MS);
+		printf("[qenc] angle[%d] = %d deg (0-359)\n", i, v.val1);
+		alp_delay_ms(POLL_MS);
 	}
 
 	printf("[qenc] RESULT %s: %s (%d/%d clean reads)\n",
 	       (ok_reads > 0 && moved) ? "PASS" : "PARTIAL",
-	       moved          ? "count changed = live quadrature decode"
-	       : ok_reads > 0 ? "reads clean but count static (spin the encoder / check wiring)"
+	       moved          ? "angle changed = live quadrature decode"
+	       : ok_reads > 0 ? "reads clean but angle static (spin the encoder >=1 deg / check wiring)"
 	                      : "no clean reads",
 	       ok_reads,
 	       SAMPLES);

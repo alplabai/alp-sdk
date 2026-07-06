@@ -96,6 +96,9 @@ static const alp_i2s_ops_t _ops = {
 	.close = sw_close,
 };
 
+/* Export the i2s static-archive anchor the dispatcher references (#368). */
+ALP_BACKEND_ANCHOR_DEFINE(i2s);
+
 ALP_BACKEND_REGISTER(i2s,
                      sw_fallback,
                      {

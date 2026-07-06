@@ -68,20 +68,19 @@ static alp_status_t _errno_to_alp(int err)
 }
 
 /**
- * @brief Open /dev/watchdog<wdt_id>, program the timeout, read caps.
+ * @brief Open /dev/watchdog<cfg->wdt_id>, program the timeout, read caps.
  *
  * Opening the node arms the watchdog immediately (Linux semantics).
- * The alp config carries timeout_ms; WDIOC_SETTIMEOUT works in whole
- * seconds, so we round up to at least 1 s.  WDIOC_GETSUPPORT tells us
- * whether magic-close is available for the close()-disarm path.
+ * The alp config carries wdt_id + timeout_ms; WDIOC_SETTIMEOUT works
+ * in whole seconds, so we round up to at least 1 s.  WDIOC_GETSUPPORT
+ * tells us whether magic-close is available for the close()-disarm
+ * path.
  */
-static alp_status_t y_open(uint32_t                 wdt_id,
-                           const alp_wdt_config_t  *cfg,
-                           alp_wdt_backend_state_t *st,
-                           alp_capabilities_t      *caps_out)
+static alp_status_t
+y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
 	char path[32];
-	int  n = snprintf(path, sizeof(path), "/dev/watchdog%u", (unsigned)wdt_id);
+	int  n = snprintf(path, sizeof(path), "/dev/watchdog%u", (unsigned)cfg->wdt_id);
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
 	int fd = open(path, O_WRONLY | O_CLOEXEC);
@@ -117,7 +116,7 @@ static alp_status_t y_open(uint32_t                 wdt_id,
 	}
 
 	st->dev         = NULL;
-	st->wdt_id      = wdt_id;
+	st->wdt_id      = cfg->wdt_id;
 	st->channel_id  = 0;
 	st->cfg         = *cfg;
 	st->be_data     = d;

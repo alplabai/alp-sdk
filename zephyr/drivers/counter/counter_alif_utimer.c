@@ -13,18 +13,19 @@
  *
  * ============================== STATUS ==============================
  * ADR 0017 Tier-1.5 (in-tree thin driver over the Apache-2.0 hal_alif HW
- * library) -- INTERIM, BENCH-UNVERIFIED.  Kept in-tree, not retired onto the
+ * library) -- BENCH-VERIFIED, PERMANENT.  Kept in-tree, not retired onto the
  * fork: the fork ships UTIMER bindings only (no counter driver), and hal_alif's
  * alif_utimer_* library exposes no Zephyr device model -- so this thin shell is
- * the only path to an AEN hardware counter.  INTERIM until E8 bench, then
- * permanent.  See docs/adr/0017 + task #21.
+ * the only path to an AEN hardware counter.  Promoted from INTERIM to permanent
+ * per the 2026-06-17 E8 bench pass.  See docs/adr/0017 + task #21.
  *
  * Upstream Zephyr v4.4 ships NO Alif counter/timer driver, and the Apache-2.0
  * alifsemi/zephyr_alif fork ships only the DTS bindings + nodes for the UTIMER
  * (its drivers/ tree has ethernet/i2c/gpio/spi only -- no counter source).
  * hal_alif (modules/hal/alif) ships ONLY the register-helper library
  * (drivers/utimer/include/utimer.h, alif_utimer_*).  So this driver is newly
- * authored against that helper API; it has NOT been run on real silicon.
+ * authored against that helper API; it has been verified on real E8 silicon
+ * (2026-06-17 bench pass).
  * ====================================================================
  *
  * Node shape (matches the fork + the sibling alp-sdk PWM driver):
@@ -384,7 +385,8 @@ static DEVICE_API(counter, counter_alif_utimer_api) = {
  * The compatible "alif,utimer-counter" sits on the CHILD node; the two reg
  * windows + timer-id + clock-frequency + the COMPARE-A interrupt live on the
  * PARENT alif,utimer node.  Parent reg[0] is the per-timer block, reg[1] the
- * global block; the IRQ is the parent's "comp_capt_a" line.
+ * global block; the IRQ is the parent's "comp_a_buf1" line (bit2,
+ * UTIMER_IRQ2_IRQn = 379), NOT "comp_capt_a" (bit0, CAPTURE_A, IRQ 377).
  */
 #define COUNTER_ALIF_UTIMER_INIT(inst)                                                      \
 	static void counter_alif_utimer_irq_cfg_##inst(const struct device *dev);           \

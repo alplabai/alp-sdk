@@ -1,0 +1,25 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Dedicated update-log NVS partition for the alp.unit.update_log
+ * scenarios.  native_sim's stock flash0 is 2 MiB with its standard
+ * partitions ending at 0x100000 (boards/native/native_sim/native_sim.dts),
+ * so the upper half is free -- carve 16 KiB (4 x 4096-byte erase blocks;
+ * NVS needs >= 2 sectors, one of which is reserved for garbage
+ * collection) right after them.
+ *
+ * Real boards opt in the same way: add an `alp_ulog_partition` fixed
+ * partition to a writable flash device (offsets are board-specific and
+ * bench-verified -- see the CONFIG_ALP_SDK_UPDATE_LOG_PERSIST help).
+ * Without the partition the software tier falls back to the RAM store.
+ */
+
+&flash0 {
+    partitions {
+        alp_ulog_partition: partition@100000 {
+            label = "alp-ulog";
+            reg = <0x00100000 0x00004000>;
+        };
+    };
+};

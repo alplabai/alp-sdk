@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "tier-a-library-ci-v1",
+  "_comment": "ADR 0018 Tier-A library CI contract. hostBuild.libraries are the Tier-A Zephyr libraries the native_sim lane can honestly build; hostBuild.excludedLibraries lists Tier-A libraries whose upstream Kconfig cannot build on native_sim. familyMatrix names one Zephyr slice per supported SoM family. Consumed by .github/workflows/pr-tier-a-libraries.yml and validated by scripts/validate_metadata.py; intended as the portability-matrix cross-check source.",
+  "hostBuild": {
+    "platform": "native_sim/native/64",
+    "libraries": [
+      "lvgl",
+      "cmsis-dsp",
+      "nanopb",
+      "zcbor"
+    ],
+    "excludedLibraries": {
+      "cmsis-nn": "Zephyr's CMSIS-NN Kconfig depends on CPU_CORTEX_M, so native_sim cannot build it; metadata and emission are covered by Python tests until a real Cortex-M board build lane is available."
+    }
+  },
+  "familyMatrix": [
+    {
+      "family": "alif-ensemble",
+      "som": "E1M-AEN801",
+      "core": "m55_hp"
+    },
+    {
+      "family": "renesas-rzv2n",
+      "som": "E1M-V2N101",
+      "core": "m33_sm"
+    },
+    {
+      "family": "renesas-rzv2n-deepx",
+      "som": "E1M-V2M101",
+      "core": "m33_sm"
+    },
+    {
+      "family": "nxp-imx9",
+      "som": "E1M-NX9101",
+      "core": "m33"
+    }
+  ]
+}

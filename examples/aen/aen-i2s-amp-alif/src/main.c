@@ -127,11 +127,32 @@ int main(void)
 		return 0;
 	}
 
-	/* DRAIN blocks until every queued block has been clocked out, then stops. */
+	/* Wait for the ISR to actually clock every queued block out BEFORE asking
+	 * the driver to DRAIN: the i2s_dw DRAIN tears the TX channel/clock down
+	 * rather than blocking, so triggering it immediately would stop the
+	 * controller before the tone was transmitted and the PASS gate would never
+	 * observe a real drain.  A block is returned to the slab only once the ISR
+	 * has finished sending it, so num_free climbs back to BLOCK_COUNT exactly
+	 * when the last queued block has been clocked out. */
+	bool consumed = false;
+	for (int waited_ms = 0; waited_ms <= TX_TIMEOUT_MS; waited_ms += 10) {
+		if (k_mem_slab_num_free_get(&i2s_slab) == BLOCK_COUNT) {
+			consumed = true;
+			break;
+		}
+		k_msleep(10);
+	}
+	printf("[i2s] TX blocks clocked out: %s (slab free %u/%u)\n",
+	       consumed ? "yes" : "TIMEOUT",
+	       k_mem_slab_num_free_get(&i2s_slab),
+	       BLOCK_COUNT);
+
+	/* Now every block is on the wire; DRAIN just flushes the (empty) FIFO and
+	 * stops the TX channel cleanly. */
 	rc = i2s_trigger(i2s, I2S_DIR_TX, I2S_TRIGGER_DRAIN);
 	printf("[i2s] i2s_trigger(DRAIN) -> %d\n", rc);
 
-	bool drained = (rc == 0) && (queued == BLOCKS_TO_SEND);
+	bool drained = (rc == 0) && consumed && (queued == BLOCKS_TO_SEND);
 	printf("[i2s] RESULT %s: %s\n",
 	       drained ? "PASS" : "PARTIAL",
 	       drained ? "i2s3 TX clocked the tone out with the 76.8MHz audio clock ON (SCLK/WS/SDO "

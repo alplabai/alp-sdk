@@ -49,34 +49,37 @@ the PR for experimental symbols.
 
 | Header                | Marker             | Rationale                                                         |
 |-----------------------|--------------------|-------------------------------------------------------------------|
-| `peripheral.h` (I²C/SPI/UART/GPIO) | `[ABI-STABLE]` | v0.1 surface; locked across every since-then release. |
+| `peripheral.h` (I²C/SPI/UART/GPIO) | `[ABI-STABLE]` | v0.1 surface; locked across every since-then release.  v0.9 adds the I²C/SPI target (slave) mode surfaces (`alp_i2c_target_*` / `alp_spi_target_*`) and the `alp_init` / `alp_deinit` SDK-lifecycle entry points, all marked `[ABI-EXPERIMENTAL]` at function granularity (the file-level marker stays STABLE — the mixed-tier mechanism in "What the markers mean" above). |
 | `pwm.h`               | `[ABI-STABLE]`     | v0.2 surface; locked.                                             |
-| `adc.h`               | `[ABI-STABLE]`     | v0.2 + v0.5 additive (filter/spectrum handle types).  Base surface stable; new `alp_adc_filter_t` / `alp_adc_spectrum_t` may evolve `[ABI-EXPERIMENTAL]` at function granularity.  v0.8.0: the DAC half (`alp_dac_*`) split out to `dac.h` (same signatures; a source-include move, not a symbol change). |
-| `dac.h`               | `[ABI-STABLE]`     | v0.1 surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`); split out of `adc.h` into its own header in v0.8.0 when DAC moved to the registry/dispatcher pattern.  Signatures unchanged. |
+| `adc.h`               | `[ABI-STABLE]`     | v0.2 + v0.5 additive (filter/spectrum handle types).  Base surface stable; new `alp_adc_filter_t` / `alp_adc_spectrum_t` may evolve `[ABI-EXPERIMENTAL]` at function granularity.  v0.8.0: the DAC half (`alp_dac_*`) split out to `dac.h` (same signatures; a source-include move, not a symbol change).  v0.9.0: `alp_adc_stream_read` / `alp_adc_filter_read` renamed to `alp_adc_stream_read_mv` / `alp_adc_filter_read_mv` so every read entry point carries its unit suffix (pre-1.0 rename; parameter lists unchanged). |
+| `dac.h`               | `[ABI-STABLE]`     | v0.1 surface (`alp_dac_open` / `write_mv` / `read_mv` / `close`); split out of `adc.h` into its own header in v0.8.0 when DAC moved to the registry/dispatcher pattern.  Signatures unchanged.  v0.9.0: additive `alp_dac_capabilities`, aligning DAC with every other opened-handle class. |
 | `counter.h`           | `[ABI-STABLE]`     | v0.2.                                                              |
 | `i2s.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
 | `can.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
 | `rtc.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
-| `wdt.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
+| `wdt.h`               | `[ABI-STABLE]`     | v0.2.  v0.9.0: `wdt_id` moved into `alp_wdt_config_t` so `alp_wdt_open(const alp_wdt_config_t *)` matches every other config-taking open (pre-1.0 signature change). |
 | `audio.h`             | `[ABI-STABLE]`     | v0.2 decl + v0.3 impl; PDM-in / I²S-out shape stable.             |
 | `iot.h`               | `[ABI-STABLE]`     | v0.2-v0.4; Wi-Fi station + MQTT (TLS) signatures stable.          |
 | `security.h`          | `[ABI-STABLE]`     | v0.3 MbedTLS PSA Crypto wrapper.                                  |
 | `ble.h`               | `[ABI-STABLE]`     | v0.2 decl + v0.3 impl; advertise + connect + GATT-read shape stable. |
 | `inference.h`         | `[ABI-STABLE]`     | v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dxm1); v0.5 adds `alp_inference_open_alpmodel()` + the `.alpmodel` loader/selection engine. |
-| `mproc.h`             | `[ABI-STABLE]`     | v0.3 mailbox + shmem + hwsem.                                     |
-| `hw_info.h`           | `[ABI-STABLE]`     | v0.3 EEPROM manifest (sole SoM-rev source); `som_board_id_mv` removed pre-1.0 (no-legacy-compat). |
-| `e1m_pinout.h`        | `[ABI-STABLE]`     | v0.1 portable instance IDs (`E1M_I2C0`, etc.); pinned by e1m-spec. |
+| `mproc.h`             | `[ABI-STABLE]`     | v0.3 mailbox + shmem + hwsem.  v0.9 adds `alp_mproc_boot_core` (peer-core release), marked `[ABI-EXPERIMENTAL]` at function granularity. |
+| `hw_info.h`           | `[ABI-STABLE]`     | v0.3 EEPROM manifest (sole SoM-rev source); `som_board_id_mv` removed pre-1.0 (no-legacy-compat).  v0.9 adds the SoC-identity block (`alp_soc_info_read` / `alp_soc_secure_fw_ping`), marked `[ABI-EXPERIMENTAL]` at function granularity. |
+| `e1m_pinout.h`        | `[ABI-STABLE]`     | v0.1 portable instance IDs (`ALP_E1M_I2C0`, etc.); pinned by e1m-spec. |
+| `version.h`           | `[ABI-STABLE]`     | v0.9 new -- compile-time SDK version macros (`ALP_VERSION*`, `ALP_VERSION_AT_LEAST`), the per-class `ALP_ABI_STATUS_*` tier macros mirroring this table, and the runtime `alp_version_string()` getter.  Pure constants + one read-only getter; the values change every release by design, the symbol set is stable. |
 | `soc_caps.h`          | `[ABI-STABLE]`     | v0.1 generated; capability constants.                              |
 | `gui.h`               | `[ABI-STABLE]`     | v0.2 LVGL re-export shim.                                          |
 | `camera.h`            | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_camera_configure_isp` (ISP-Pico toggles) — surface tentative pending real hardware feedback.  Base capture path stable; ISP block experimental. |
 | `storage.h`           | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_storage_configure_inline_aes` (SecAES on OSPI / HexSPI) -- surface tentative.  Base storage placeholders (v0.4 work) are still stubs. |
-| `display.h`           | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; no real backend impl yet.                       |
+| `display.h`           | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; v0.9 adds the real Zephyr display backend (ADR-0017 Tier 1, `src/backends/display/zephyr_drv.c`), native_sim-verified against the upstream dummy controller -- no silicon run yet, so the surface stays experimental pending hardware. |
 | `usb.h`               | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; surface skeleton only.                          |
 | `dsp.h`               | `[ABI-EXPERIMENTAL]` | v0.5 new -- standalone DSP-chain API (FIR/IIR/WINDOW/FFT).  Composes ADC-pipeline filter/spectrum types; both sides may co-evolve. |
 | `gpu2d.h`             | `[ABI-EXPERIMENTAL]` | v0.5 new -- AEN audit headline gap.  Surface designed for portability but only one silicon family populates it today. |
-| `power.h`             | `[ABI-EXPERIMENTAL]` | v0.5 new -- system-power-mode surface (sleep / deep-sleep / standby + wake-source bitmaps). |
+| `power.h`             | `[ABI-EXPERIMENTAL]` | v0.5 new -- system-power-mode surface (sleep / deep-sleep / standby + wake-source bitmaps).  v0.9 adds the operating-point-profile surface (`alp_power_profile_get` / `alp_power_profile_set`). |
 | `tmu.h`               | `[ABI-EXPERIMENTAL]` | Wave-1 GD32 CORDIC TMU helpers; surface limited and may be folded into `<alp/dsp.h>` for v1.0. |
 | `update_log.h`        | `[ABI-EXPERIMENTAL]` | v0.7 new; experimental until the hardware-enforced backend is silicon-proven. |
+| `i2c_regfile.h`       | `[ABI-EXPERIMENTAL]` | v0.9 new -- register-file target (slave) helper layered over the `[ABI-EXPERIMENTAL]` `alp_i2c_target_*` surface in `peripheral.h`; ships the "register-pointer + auto-increment file" state machine once.  Tracks the wrapped surface's tier exactly. |
+| `console.h`           | `[ABI-EXPERIMENTAL]` | v0.9 new -- app-facing companion-console binder (`alp_console_companion_set`) for the `alp companion` CLI verb.  No-op where the companion is a singleton (V2N auto-binds the GD32 supervisor); Alif apps register their CC3501E handle.  Experimental with the CC3501E companion surface it depends on. |
 
 ### Chip-driver headers (`include/alp/chips/*.h`)
 

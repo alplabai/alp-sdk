@@ -64,6 +64,31 @@ not the firmware *release* version — the diag-struct comment that
 implied otherwise was a header doc slip (now fixed); the release version
 is surfaced via `GET_DIAG_INFO.fw_version` in v2.
 
+## Three version numbers (keep them straight)
+
+The bridge carries **three** independent version numbers; each gates a
+different thing and they must not be conflated:
+
+| Version | Source of truth | Surfaced by | Gates |
+|---|---|---|---|
+| **App SemVer** | `firmware-version.txt` (e.g. `0.2.0`) | `GET_DIAG_INFO.fw_version` (u16) | firmware release identity — human-facing "what's running" |
+| **Wire protocol version** | `ALP_CC3501E_PROTOCOL_VERSION` in `<alp/protocol/cc3501e.h>` (currently `3`) | `GET_VERSION` (0x01) | host↔firmware wire compatibility (host refuses a mismatch) |
+| **GPE flash/image version** | `--version` in `ti/deploy_validate.sh` (date-derived) | — (programmer only) | CC35 vendor-RoT anti-rollback (unit rejects `<=` the programmed value) |
+
+**App SemVer → `fw_version` marker.** The runtime u16 is *derived* from
+`firmware-version.txt`, never hand-typed, so it cannot drift. Both build
+paths parse the SemVer and pass the packed value in:
+`CMakeLists.txt` (`target_compile_definitions`) and `ti/build_ti.sh`
+(`-DCC3501E_BRIDGE_FW_VERSION_U16`). Pre-1.0 packing is
+`(MINOR << 8) | PATCH`, so `0.2.0 → 0x0200`. `src/protocol.c` keeps an
+`#ifndef` fallback equal to the current release for standalone compiles.
+
+**GPE flash version** is *not* the app version. It is a monotonic
+anti-rollback counter the vendor RoT enforces. `deploy_validate.sh`
+derives it as `major.<yy>.<mmdd>.<hhmm>` (e.g. `1.26.0705.1432`) with
+`major >= 1`, because the bench unit was poisoned to `0.9.0.7` by ad-hoc
+bumps; `1.x` always beats it and every flash strictly increases.
+
 ## Selectable host-control transport
 
 SPI is the default + always-available baseline; SDIO is opt-in and

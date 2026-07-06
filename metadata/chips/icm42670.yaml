@@ -32,7 +32,47 @@ families:
   - aen
   - v2n
   - v2n-m1
+  - imx93   # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SCL,    type: input,  scope: "I2C" }
+  - { name: SDA,    type: bidir,  scope: "I2C" }
+  - { name: AP_AD0, type: input,  scope: "I2C slave-address LSB strap (AP_SDO in 4-wire SPI mode; unused here)" }
+  - { name: AP_CS,  type: input,  scope: "SPI chip select; tie to VDDIO for I2C-only use (unused here)" }
+  - { name: INT1,   type: output, scope: "interrupt 1; push-pull or open-drain, register-configurable" }
+  - { name: INT2,   type: output, scope: "interrupt 2; push-pull or open-drain, register-configurable" }
+  - { name: FSYNC,  type: input,  scope: "frame-sync input; tie to GND if unused" }
+  - { name: VDD,    type: power }
+  - { name: VDDIO,  type: power }
+  - { name: GND,    type: ground }
+
+physical:
+  # pins per TDK InvenSense ICM-42670-P datasheet DS-000451 Rev. 1.0 (04/15/2021),
+  # Table 9 "Signal Descriptions" / Figure 4 "Pin Out Diagram" (2.5x3.0x0.76mm 14-pin LGA).
+  # RESV pins (2, 3, 10, 11 -- NC or strap to GND/VDDIO) omitted: not signal-bearing.
+  refdes_prefix: U
+  package:       LGA-14
+  footprint:     lga_14_2p5x3p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "AP_AD0" }
+    - { pad: "4",  signal: "INT1" }
+    - { pad: "5",  signal: "VDDIO" }
+    - { pad: "6",  signal: "GND" }
+    - { pad: "7",  signal: "FSYNC" }
+    - { pad: "8",  signal: "VDD" }
+    - { pad: "9",  signal: "INT2" }
+    - { pad: "12", signal: "AP_CS" }
+    - { pad: "13", signal: "SCL" }
+    - { pad: "14", signal: "SDA" }
+  passives:
+    - { role: decouple, value: 100nF, net: VDD,   refdes_prefix: C }
+    - { role: decouple, value: 2u2,   net: VDD,   refdes_prefix: C }
+    - { role: decouple, value: 10nF,  net: VDDIO, refdes_prefix: C }
+    - { role: pullup,   value: 10k,   net: SCL,   refdes_prefix: R }
+    - { role: pullup,   value: 10k,   net: SDA,   refdes_prefix: R }

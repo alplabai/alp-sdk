@@ -7,11 +7,56 @@
  * @file update_log.h
  * @brief Portable, tamper-evident firmware-update audit log.
  *
- * One surface across SoMs. The software tier (every target today) gives a
+ * One surface across SoMs. The software tier (every target) gives a
  * hash-chained, monotonic-counter-anchored log that detects mutation,
  * truncation, rollback, and reorder. On SoMs with a secure backend the
- * same API is hardware-enforced (TF-M Protected Storage + a non-decrementable
- * monotonic counter). Query @ref alp_update_log_assurance to learn which.
+ * same API is hardware-enforced through a secure owner (secure-world
+ * Protected Storage + a replay-protected high-watermark counter). Query @ref
+ * alp_update_log_assurance to learn which.
+ *
+ * @par Persistence vs. trust boundary (software tier)
+ *      With @c CONFIG_ALP_SDK_UPDATE_LOG_PERSIST and an
+ *      @c alp_ulog_partition fixed partition in the devicetree, the
+ *      software tier stores the log and its monotonic counter in Zephyr
+ *      NVS, so entries survive reboot and firmware update. Without the
+ *      partition it falls back to RAM (entries vanish on reboot).
+ *      Persistence does NOT change the assurance level: the software tier
+ *      is tamper-EVIDENT, not tamper-proof -- @ref alp_update_log_verify
+ *      detects out-of-band mutation, truncation, rollback, and reorder,
+ *      but code that can write the backing partition can rebuild the store
+ *      and counter consistently and forge history. App-immutability is the
+ *      @ref ALP_UPDATE_LOG_HW_ENFORCED tier's job.
+ *
+ * @par Hardware-enforced tier status (`ALP_UPDATE_LOG_HW_ENFORCED`)
+ *      The application-side backend is a client; the log writer and backing
+ *      store live behind a hardware boundary the application core cannot
+ *      rewrite. The TF-M route (@c CONFIG_ALP_SDK_UPDATE_LOG_TFM) uses a
+ *      secure owner with PSA Protected Storage. The Alif E4/E8 AEN route uses
+ *      a trusted M55 owner plus an SE/device-firewalled MRAM log partition;
+ *      physical rollback protection still depends on a board-provisioned
+ *      non-decrementable counter or equivalent device policy.
+ *      If the trusted owner or the hardware isolation proof is absent,
+ *      @ref alp_update_log_open transparently falls through to the software
+ *      tier, or fails closed when
+ *      @c CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED is set. Query
+ *      @ref alp_update_log_assurance rather than assume the tier -- it is the
+ *      only portable signal of which assurance actually backs the log on a
+ *      given SoM.
+ *
+ * @par Full log (software tier)
+ *      The log is append-only and never wraps -- wrapping would erase
+ *      audit history. When the backing partition is full,
+ *      @ref alp_update_log_append fails cleanly and the existing chain
+ *      stays intact and verifiable.
+ *
+ * @par Authenticated boot metadata
+ *      Prefer @ref alp_update_log_append_boot for update-result entries
+ *      when the platform provides authenticated boot metadata. That path
+ *      asks the SDK's boot-metadata provider for the booted image version,
+ *      image SHA-256, and verification status, then appends the entry
+ *      without accepting app-supplied identity fields. Platforms without
+ *      a provider return @c ALP_ERR_NOSUPPORT so callers can avoid writing
+ *      forged-but-well-formed audit entries by accident.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      v0.7 new. Surface may change until the hardware backend is
@@ -46,7 +91,7 @@ typedef enum {
 /** How strongly the log is protected on this SoM. */
 typedef enum {
 	ALP_UPDATE_LOG_SW_TAMPER_EVIDENT = 0, /**< Hash-chain + counter; app-cooperative. */
-	ALP_UPDATE_LOG_HW_ENFORCED       = 1, /**< TF-M-isolated store + HW monotonic counter. */
+	ALP_UPDATE_LOG_HW_ENFORCED       = 1, /**< Secure-world store + protected counter. */
 } alp_update_log_assurance_t;
 
 /** Result of walking the chain in @ref alp_update_log_verify. */
@@ -81,9 +126,44 @@ alp_update_log_t *alp_update_log_open(void);
 
 /**
  * @brief Append one entry. @c seq is assigned by the engine.
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ * @param log   The update log handle (from @ref alp_update_log_open).
+ * @param entry Entry to append; every field except @c seq is caller-filled.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT;
+ *         ALP_ERR_NOMEM when the store is full (the log never wraps --
+ *         existing entries stay intact and verifiable).
  */
 alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_entry_t *entry);
+
+/**
+ * @brief Build an entry from authenticated boot metadata. [ABI-EXPERIMENTAL]
+ * @param[out] entry_out Entry populated from the trusted boot-metadata provider.
+ *                       @c seq is zeroed; the append engine assigns it later.
+ * @param timestamp      Best-effort epoch to store in the entry; 0 = unset.
+ * @return ALP_OK when authenticated metadata is available;
+ *         ALP_ERR_NOSUPPORT when this platform has no provider yet;
+ *         ALP_ERR_INVAL for NULL output.
+ *
+ * The provider, not app code, supplies @c fw_version, @c image_hash, and
+ * @c status. This helper is the testable contract for MCUboot shared-data /
+ * Alif SE verification integrations: app-supplied identity fields cannot
+ * override authenticated values on the trusted path.
+ */
+alp_status_t alp_update_log_entry_from_boot_metadata(alp_update_log_entry_t *entry_out,
+                                                     uint64_t                timestamp);
+
+/**
+ * @brief Append one entry sourced from authenticated boot metadata. [ABI-EXPERIMENTAL]
+ * @param log       The update log handle (from @ref alp_update_log_open).
+ * @param timestamp Best-effort epoch to store in the entry; 0 = unset.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT;
+ *         ALP_ERR_NOMEM when the store is full.
+ *
+ * This is the preferred update-audit path once a board wires a real
+ * boot-metadata provider. It intentionally does not accept an
+ * @ref alp_update_log_entry_t from the caller, so firmware cannot forge the
+ * logged booted-image version, image hash, or verification status.
+ */
+alp_status_t alp_update_log_append_boot(alp_update_log_t *log, uint64_t timestamp);
 
 /**
  * @brief Walk the chain and report integrity.

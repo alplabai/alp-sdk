@@ -36,6 +36,59 @@ silicon family without editing existing files.
 That's it. The registry walker at `alp_backend_select()` picks up the
 new entry automatically.
 
+Adding a **new class** additionally needs one
+`ALP_BACKEND_SECTION_ROM(<class>)` line in
+`zephyr/linker/alp-backend-sections.ld`. Zephyr's ld-script boards
+link with `--orphan-handling=warn` plus `--fatal-warnings`, so an
+undeclared `alp_backends_<class>` section is a hard link error on
+real hardware — and the omission never shows up in native CI, because
+the host linker script used by `native_sim` auto-places orphan
+sections.
+
+A new class reachable from the **plain-CMake static build** also needs
+a **static-archive anchor** (see below) so its section survives a
+static-library link.
+
+## Static-archive anchors (plain-CMake) — issue #368
+
+Zephyr links whole objects (`zephyr_library`), so every backend
+translation unit joins the link and its `alp_backends_<class>` section
+is always present. A plain-CMake build instead links `libalp_sdk.a` as
+an ordinary **static archive**, and a static link only pulls an archive
+member when an already-included object references one of its symbols.
+
+A backend TU (typically `sw_fallback.c`) is *nothing but* an
+`ALP_BACKEND_REGISTER` row in the `alp_backends_<class>` section — no
+code references it. So on a static link the member is never pulled, the
+section is absent, and the `__start_/__stop_alp_backends_<class>` bounds
+the (always-linked) dispatcher reads through `ALP_BACKEND_DEFINE_CLASS`
+go **undefined** — the consumer link fails with
+`undefined reference to __start_alp_backends_<class>`.
+
+The fix is an **anchor**: the section-carrying backend TU exports one
+global symbol via `ALP_BACKEND_ANCHOR_DEFINE(<class>)`, and the
+dispatcher takes its address via `ALP_BACKEND_ANCHOR(<class>)`. The
+dispatcher is always pulled (it owns `alp_<class>_open`), so the
+address-of forces the backend member — and with it the section and its
+bound symbols — into the link. Both macros are inert unless the
+top-level CMake defines `ALP_BACKEND_STATIC_ANCHORS` (the non-Zephyr
+build), so they are no-ops on Zephyr and can sit unconditionally next to
+the `ALP_BACKEND_REGISTER` / `ALP_BACKEND_DEFINE_CLASS` they pair with.
+The anchor pulls the portable `sw_fallback` (the guaranteed priority-0
+catch-all); higher-priority vendor backends still win selection whenever
+they are also in the link (always true for the whole-archive shared
+`libalp_sdk.so` that is the real Linux/Yocto shipping artifact).
+
+`src/backend.c` carries the same anchor for the `alp_backend_classes`
+class table, so a consumer that calls only `alp_backend_count()` /
+`ALP_BACKEND_AVAILABLE(...)` (e.g. a diagnostic tool) without pulling
+any dispatcher still links.
+
+The regression is guarded by `tests/yocto/registry_static_link.c`, which
+links a bare consumer against only the static archive (compiling no
+backend TU of its own) — the one test in the suite that exercises the
+bare-archive link model #368 is about.
+
 ## Selection tiebreaker
 
 When multiple backends match the active silicon, `alp_backend_select()`
@@ -64,6 +117,12 @@ Same pattern, with `silicon_ref = "*"` and `priority = 0`. The file
 MUST live at `src/backends/<class>/sw_fallback.c` and MUST carry
 `@par Cost:` and `@par Performance:` tags in its top comment block
 (enforced by `scripts/check_sw_fallback_tags.py` at CI time).
+
+If the class is reachable from the plain-CMake static build, add the
+static-archive anchor pair: `ALP_BACKEND_ANCHOR_DEFINE(<class>)` in the
+`sw_fallback.c` (next to `ALP_BACKEND_REGISTER`) and
+`ALP_BACKEND_ANCHOR(<class>)` in the dispatcher (next to
+`ALP_BACKEND_DEFINE_CLASS`). See *Static-archive anchors* above.
 
 ## Adding a vendor extension
 

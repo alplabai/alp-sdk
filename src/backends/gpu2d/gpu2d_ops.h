@@ -30,6 +30,32 @@
 
 typedef struct alp_gpu2d_ops alp_gpu2d_ops_t;
 
+/** Clip a @p w x @p h rect at (@p x, @p y) to the surface bounds;
+ *  returns false (skip the op -- fully clipped, not an error) if the
+ *  origin is already past the edge or nothing remains after the clamp.
+ *
+ *  Shared by every backend so the hardware paths reject/clamp the same
+ *  rects the software fallback does: an unclipped rect handed to an
+ *  engine is an out-of-bounds DMA write.  The clamp deliberately avoids
+ *  computing `x + *w` (which overflows for a caller passing a huge
+ *  "fill everything" width, wrapping below s->width and skipping the
+ *  clamp); `s->width - x` is safe because `x < s->width` already holds.
+ *  Same for h. */
+static inline bool
+alp_gpu2d_clip_rect(const alp_gpu2d_surface_t *s, uint32_t x, uint32_t y, uint32_t *w, uint32_t *h)
+{
+	if (x >= s->width || y >= s->height) {
+		return false;
+	}
+	if (*w > s->width - x) {
+		*w = s->width - x;
+	}
+	if (*h > s->height - y) {
+		*h = s->height - y;
+	}
+	return (*w != 0u && *h != 0u);
+}
+
 /** Backend-owned per-handle state.  GPU2D's public open() takes no
  *  config so the dispatcher mirrors nothing here today; be_data lets
  *  vendor backends hang on whatever HAL state they need. */
@@ -72,6 +98,24 @@ struct alp_gpu2d_ops {
 	                      alp_gpu2d_blend_mode_t     mode);
 	void (*close)(alp_gpu2d_backend_state_t *state);
 };
+
+/**
+ * @brief Ops table of the portable software fallback backend.
+ * @return The sw_fallback vtable (never NULL).
+ *
+ * Internal cross-backend hook: a silicon backend whose engine cannot
+ * express an op (e.g. D/AVE 2D has no documented single-pass
+ * ADDITIVE / MULTIPLY blend) delegates that op to the CPU path
+ * instead of returning ALP_ERR_NOSUPPORT, keeping the ADR 0008
+ * "write once" contract (the op works, just slower).  The sw ops
+ * never touch state->be_data, so a delegating backend may pass its
+ * own state through unchanged.  Declared unconditionally (plain-
+ * CMake builds have no Kconfig macros); DEFINED only when
+ * sw_fallback.c is in the build -- Zephyr-side that is
+ * CONFIG_ALP_SDK_GPU2D_SW_FALLBACK, so a caller must guard on it
+ * there (as alif_dave2d.c does) or the link breaks.
+ */
+const alp_gpu2d_ops_t *alp_gpu2d_sw_ops(void);
 
 /**
  * Handle struct layout.  Opaque to customers via the public

@@ -1,71 +1,71 @@
 # spi-slave
 
-Demonstrate the *shape* of SPI slave-mode application code on the
-Alp SDK.
+Claim the bus in target (slave) mode using the portable
+`alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.9,
+`[ABI-EXPERIMENTAL]`) and answer an external SPI controller.
 
-## SDK gap notice
+## What it shows
 
-**As of v0.8.0 the Alp SDK does NOT support SPI slave mode through
-`<alp/peripheral.h>`.**  The header exposes master-only calls
-(`alp_spi_open`, `alp_spi_write`, `alp_spi_read`,
-`alp_spi_transceive`).  Slave-mode support is tracked for future release.
+* `alp_init()` -- SDK runtime bring-up before the first open,
+  with its return CHECKED (future backends can fail bring-up).
+* `alp_spi_target_open()` -- claim a bus in slave mode (the
+  external controller owns SCK + /CS; no `cs_pin_id` on our side).
+* `alp_spi_target_transceive()` -- the transfer-based slave idiom:
+  preload a TX reply, wait (bounded by `timeout_ms`) for the
+  controller to clock a transfer, decode what arrived, preload
+  the next reply.  SPI is full-duplex, so a slave can never
+  answer a command within the SAME transfer -- replies always
+  lag one frame.
+* The **bounded-wait pattern**: a finite `timeout_ms` keeps the
+  thread responsive when the controller goes quiet (and is what
+  makes a clean `close` possible -- close refuses with
+  `ALP_ERR_BUSY` while a transceive is blocked).  Drivers without
+  an async path report `ALP_ERR_NOSUPPORT` for finite timeouts
+  (Zephyr: needs `CONFIG_SPI_ASYNC`); the example degrades to the
+  unbounded `UINT32_MAX` wait and says so.
+* A tiny request/response protocol over 5-byte fixed frames:
+  PING (`0x01`) echoes the payload, GET_VERSION (`0x02`) returns
+  the SDK version bytes (`ALP_VERSION_MAJOR/MINOR/PATCH` from
+  `<alp/version.h>`) plus a tag char, unknown commands fill with
+  `0xEE`.
+* `alp_spi_target_close()` -- release the bus.
 
-Note: Zephyr's own SPI slave support is itself patchy -- many SoC
-drivers don't implement `spi_slave_register`.  When the Alp SDK
-slave-mode wrapper lands, expect `ALP_ERR_NOSUPPORT` on backends
-whose upstream driver hasn't implemented slave mode yet.
+## Availability
 
-This example exists to:
+This example's `prj.conf` sets `CONFIG_SPI_SLAVE=y` -- an
+app-level upstream-Zephyr toggle the `board.yaml` derivation does
+not cover; every in-tree SPI driver compiles its slave/target
+path only when it is set.
 
-1. **Document the gap** so customers don't waste time hunting for
-   a non-existent header.
-2. **Stake out the proposed API shape** so when the slave-mode
-   surface lands, this example is the migration template.
-3. **Show the recommended callback-based state-machine pattern** --
-   the idiom every embedded engineer expects for "respond to
-   whatever the master clocks in".
-
-The code in `src/main.c` defines a local `alp_spi_slave_*` shim
-that returns `ALP_ERR_NOSUPPORT` from every call.  When the real
-surface lands, delete the shim block and the downstream
-application code keeps compiling against the upstream names.
-
-## What this WILL show (once the API lands)
-
-* `alp_spi_slave_open()` -- claim a bus as slave.
-* `alp_spi_slave_set_callbacks()` -- register per-byte and
-  end-of-transfer ISR callbacks.
-* A tiny request/response protocol: PING (0x01) echoes payload,
-  GET_VERSION (0x02) returns a 4-byte version string.
-* `alp_spi_slave_close()` -- release the bus.
-
-## What this DOES show today
+Zephyr's SPI slave support is patchy -- some SoC controller
+drivers reject `SPI_OP_MODE_SLAVE`.  Backends or drivers without
+slave mode fail with `ALP_ERR_NOSUPPORT` (or `ALP_ERR_NOT_READY`
+when the bus alias is unset), which the example handles by
+printing the diagnostic and exiting -- that is the expected
+outcome on **native_sim**, which does not wire `BOARD_SPI_ARDUINO`
+(only the `alp-spi0` loader alias exists there):
 
 ```
-[spi-slave] open as slave on E1M_SPI1 (mode 0, 8 bits)
-[spi-slave] Alp SDK v0.6 does NOT support SPI slave mode
-[spi-slave]   <alp/peripheral.h> is master-only today
-[spi-slave]   Note: Zephyr's own SPI slave support is patchy too;
-[spi-slave]         some SoC drivers don't implement spi_slave_register.
-[spi-slave]   tracking: v0.7 API surface addition
+[spi-slave] listening on BOARD_SPI_ARDUINO (mode 0, 8 bits)
+[spi-slave] target open failed: alp_last_error=-2
+[spi-slave]   SPI target (slave) mode is unavailable here
 [spi-slave] done
 ```
 
-## Test setup (once the API lands)
-
-To exercise SPI slave mode end-to-end on real hardware:
+## Test setup (real hardware)
 
 1. Flash this example onto board A (the slave).
-2. Adapt `examples/peripheral-io/spi-master` to send the protocol bytes:
+2. Adapt `examples/peripheral-io/spi-master` to send 5-byte frames:
    * `[0x01, 0xDE, 0xAD, 0xBE, 0xEF]` for PING (expect
-     `[0x00, 0xDE, 0xAD, 0xBE, 0xEF]` back on MISO).
+     `[0x00, 0xDE, 0xAD, 0xBE, 0xEF]` back on the NEXT frame).
    * `[0x02, 0xFF, 0xFF, 0xFF, 0xFF]` for GET_VERSION (expect
-     `[0x00, 0x00, 0x06, 0x00, 'A']`).
+     `[0x00, <major>, <minor>, <patch>, 'A']` on the NEXT frame --
+     the SDK version bytes from `<alp/version.h>`).
 3. Wire SCK-SCK, MOSI-MOSI, MISO-MISO, /CS-/CS, GND-GND between
-   the two boards.  The master drives all four lines; the slave
-   listens.
-4. Power both boards.  Board A's console should show `transfers`
-   incrementing as board B sends commands.
+   the two boards.  The master drives SCK + MOSI + /CS; the slave
+   drives MISO.
+4. Power both boards.  Board A's console shows one `transfer N`
+   line per frame board B clocks.
 
 ## Other useful tools
 
@@ -79,8 +79,9 @@ To exercise SPI slave mode end-to-end on real hardware:
 
 ## Reference
 
-- [`<alp/peripheral.h>`](../../../include/alp/peripheral.h) SPI surface (master-only today).
+- [`<alp/peripheral.h>`](../../../include/alp/peripheral.h) -- the
+  "SPI -- target (slave) mode" section documents the full contract.
 - [`examples/peripheral-io/spi-loopback/`](../spi-loopback/) -- single-chip self-test.
 - [`examples/peripheral-io/spi-master/`](../spi-master/) -- discrete master companion.
-- Zephyr `spi_slave_register` -- the upstream API the future
-  `alp_spi_slave_*` will dispatch through on the Zephyr backend.
+- Zephyr `spi_transceive` with `SPI_OP_MODE_SLAVE` -- the upstream
+  mechanism the Zephyr backend dispatches through.

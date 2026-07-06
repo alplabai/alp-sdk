@@ -3,8 +3,7 @@
 > `[UNTESTED]` -- v0.6 structural draft.  Board.yaml + sources are
 > shape-correct.  AEN801 (the default) resolves its RPMsg carve-out
 > from sram0 (0x02000000); the full west build is pending silicon
-> bring-up of the MHUv2 mailbox driver.  AEN701 remains blocked on
-> its `mailbox.controller: TBD` in the SoM preset.
+> bring-up of the MHUv2 mailbox driver.
 
 Heterogeneous compute on **E1M-AEN801** (Alif Ensemble E8):
 
@@ -20,7 +19,6 @@ Heterogeneous compute on **E1M-AEN801** (Alif Ensemble E8):
 ```
 examples/multicore/rpmsg-aen/
 ├── board.yaml          (AEN801 default; declares a32_cluster + m55_hp + ipc)
-├── board-aen701.yaml   (AEN701 alternate; blocked until mailbox lands)
 ├── README.md           (this file)
 ├── CMakeLists.txt      (multi-slice project marker)
 ├── linux/              (a32_cluster's Yocto slice)
@@ -32,23 +30,6 @@ examples/multicore/rpmsg-aen/
     └── src/main.c      (producer reading sensors + publishing)
 ```
 
-## Board SKUs
-
-| File                | SoM SKU      | Silicon | Status                              |
-|---------------------|--------------|---------|-------------------------------------|
-| `board.yaml`        | E1M-AEN801   | E8      | Default; carve-out resolves         |
-| `board-aen701.yaml` | E1M-AEN701   | E7      | Alternate; blocked (mailbox TBD)    |
-
-`linux/CMakeLists.txt` and `m55_hp/CMakeLists.txt` both hardcode `../board.yaml`,
-so the default build always targets AEN801.  To build for the AEN701 alternate
-(once its mailbox metadata is filled in), pass `--input board-aen701.yaml`
-explicitly to `west alp-build`.
-
-> **Known issue:** the M55-HP producer source comment references `LSM6DSO`, but
-> the `e1m-evk` preset populates `bmi323` instead.  This is a pre-existing draft
-> mismatch in the source comment -- the code is correct; only the comment is
-> stale.  Board-gated, out of SP3 scope; flagged for a follow-up cleanup.
-
 ## Memory map
 
 The AEN801 resolves its `alp_default_rpmsg` carve-out from sram0
@@ -59,11 +40,6 @@ The 256 KiB carve-out is placed at 0x023c0000 by the top-down allocator.
 |------------------------------|------------|----------------------------------------------|
 | `sram0` (0x02000000, 4 MiB)  | All cores  | On-die SRAM, cacheable.  Holds RPMsg carve-out. |
 | `mram_main` (base TBD)       | All cores  | On-die MRAM; base not yet grounded in e8.json. |
-
-For AEN701, the `alp_default_rpmsg` carve-out is blocked because
-`mailbox.controller` in `metadata/e1m_modules/E1M-AEN701.yaml` is still `TBD`.
-Once that field is filled with the authoritative Zephyr binding name (expected:
-`alif_mhuv2`), the carve-out will resolve on the next orchestrator run.
 
 ## Boot order
 
@@ -98,12 +74,6 @@ Iterate on the M-side only:
 
 ```bash
 west alp-build alp-sdk/examples/multicore/rpmsg-aen --core m55_hp
-```
-
-AEN701 alternate (blocked until mailbox metadata is filled in):
-
-```bash
-west alp-build alp-sdk/examples/multicore/rpmsg-aen --input board-aen701.yaml
 ```
 
 ### Manual M55-HP build (without the orchestrator)

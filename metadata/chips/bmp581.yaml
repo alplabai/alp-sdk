@@ -1,0 +1,82 @@
+# Alp SDK chip manifest: Bosch BMP581 barometric pressure sensor.
+schema_version:   1
+chip_id:          bmp581
+driver_status:    complete         # init / ODR+OSR config / raw 24-bit P+T read + compensate.
+                                    # SPI lands in v0.3 (I2C-only for now).
+display_name:     "Bosch BMP581 ultra-low-power barometric pressure sensor"
+vendor:           bosch
+mpn_population:
+  - "BMP581"
+
+datasheet:
+  primary:        "Bosch BMP581 datasheet (BST-BMP581-DS004-13, rev 1.13, Apr 2025)"
+
+bus:              i2c
+i2c:
+  addresses:
+    # "The I2C slave address of BMP581 is 7'h46 for SDO = 1'b0 and 7'h47 for
+    # SDO = 1'b1." -- BST-BMP581-DS004-13 s5.6.  NOTE: the driver's on-board
+    # SDO strap selects the address, NOT the CSB pin (CSB is the separate
+    # SPI/I2C protocol-select strap, tied to VDDIO for I2C/I3C mode).
+    - { addr_7bit: 0x46, scope: "SDO = GND (default, on-board barometer on the E1M/E1M-X EVKs)" }
+    - { addr_7bit: 0x47, scope: "SDO = VDDIO" }
+  address_strap_range: "0x46..0x47 (SDO strap)"
+  max_clock_hz:   1000000         # I2C Fast-mode-plus (Fm+) per datasheet features list.
+
+sensor:
+  who_am_i:        0x50            # CHIP_ID (reg 0x01); BMP581_CHIP_ID.
+
+precision:
+  accuracy_hpa:    0.5              # absolute pressure accuracy (max)
+  range_kpa:       [30, 125]
+  range_c:         [-40, 85]
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_BMP581
+  baremetal:      ALP_SDK_CHIP_BMP581
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+
+verification:
+  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SCL,   type: input,  scope: "I2C serial clock (pin name SCK; shared with SPI SCK)" }
+  - { name: SDA,   type: bidir,  scope: "I2C serial data (pin name SDI; shared with SPI SDI/SDO)" }
+  - { name: SDO,   type: input,  scope: "I2C address-select strap; GND=0x46 default, VDDIO=0x47" }
+  - { name: CSB,   type: input,  scope: "SPI/I2C protocol-select strap; tie to VDDIO for I2C/I3C mode" }
+  - { name: INT,   type: output, scope: "interrupt output; recommend tying to GND if unused (disable INT_CONFIG.int_en)" }
+  - { name: VDD,   type: power }
+  - { name: VDDIO, type: power }
+  - { name: GND,   type: ground }
+
+physical:
+  # Pins per Bosch BMP581 datasheet BST-BMP581-DS004-13 (rev 1.13, Apr 2025),
+  # Chapter 6 "Pin out and connection diagrams", Table 28 "Pin description"
+  # (10-pin metal-lid LGA, 2.0x2.0mm footprint, max 0.8mm height).  All 10
+  # pins are signal-bearing (no NC balls on this package).
+  refdes_prefix: U
+  package:       LGA-10
+  footprint:     lga_10_2p0x2p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "VDDIO" }
+    - { pad: "2",  signal: "SCL" }
+    - { pad: "3",  signal: "GND" }
+    - { pad: "4",  signal: "SDA" }
+    - { pad: "5",  signal: "SDO" }
+    - { pad: "6",  signal: "CSB" }
+    - { pad: "7",  signal: "INT" }
+    - { pad: "8",  signal: "GND" }
+    - { pad: "9",  signal: "GND" }
+    - { pad: "10", signal: "VDD" }
+  passives:
+    - { role: decouple, value: 100nF, net: VDD,   refdes_prefix: C }
+    - { role: decouple, value: 100nF, net: VDDIO, refdes_prefix: C }
+    - { role: pullup,   value: 10k,   net: SCL,   refdes_prefix: R }
+    - { role: pullup,   value: 10k,   net: SDA,   refdes_prefix: R }
