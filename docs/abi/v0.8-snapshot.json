@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-03",
+  "generated": "2026-07-06",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1428,8 +1428,8 @@
       "macros": {},
       "typedefs": {
         "alp_cap_id_t": {
-          "definition": "typedef enum { ALP_CAP_ID_HW_I2C, ALP_CAP_ID_HW_SPI, ALP_CAP_ID_HW_UART, ALP_CAP_ID_HW_I2S, ALP_CAP_ID_HW_PDM, ALP_CAP_ID_HW_ADC, ALP_CAP_ID_HW_DAC, ALP_CAP_ID_HW_CAN, ALP_CAP_ID_HW_CAN_FD, ALP_CAP_ID_HW_RTC, ALP_CAP_ID_HW_WDT, ALP_CAP_ID_HW_QENC, ALP_CAP_ID_HW_TIMER, ALP_CAP_ID_HW_PWM, ALP_CAP_ID_HW_ETHERNET, ALP_CAP_ID_HW_USB, ALP_CAP_ID_HW_MIPI_CSI, ALP_CAP_ID_HW_MIPI_DSI, ALP_CAP_ID_XSPI_DMA, ALP_CAP_ID_HEXSPI_DMA, ALP_CAP_ID_EMMC_DMA, ALP_CAP_ID_QUADSPI_DMA, ALP_CAP_ID_NPU_DRPAI, ALP_CAP_ID_HELIUM_MVE, ALP_CAP_ID_NEON, ALP_CAP_ID_GPU2D, ALP_CAP_ID_DAVE2D, ALP_CAP_ID_CRYPTOCELL, ALP_CAP_ID_INLINE_AES, ALP_CAP_ID_CAU, ALP_CAP_ID_DMA2D, ALP_CAP_ID_COUNT } alp_cap_id_t;",
-          "hash": "b5f55c03569ac7e0"
+          "definition": "typedef enum { ALP_CAP_ID_HW_I2C, ALP_CAP_ID_HW_SPI, ALP_CAP_ID_HW_UART, ALP_CAP_ID_HW_I2S, ALP_CAP_ID_HW_PDM, ALP_CAP_ID_HW_ADC, ALP_CAP_ID_HW_DAC, ALP_CAP_ID_HW_CAN, ALP_CAP_ID_HW_CAN_FD, ALP_CAP_ID_HW_RTC, ALP_CAP_ID_HW_WDT, ALP_CAP_ID_HW_QENC, ALP_CAP_ID_HW_TIMER, ALP_CAP_ID_HW_PWM, ALP_CAP_ID_HW_ETHERNET, ALP_CAP_ID_HW_USB, ALP_CAP_ID_HW_MIPI_CSI, ALP_CAP_ID_HW_MIPI_DSI, ALP_CAP_ID_HW_LCDIF, ALP_CAP_ID_XSPI_DMA, ALP_CAP_ID_HEXSPI_DMA, ALP_CAP_ID_EMMC_DMA, ALP_CAP_ID_QUADSPI_DMA, ALP_CAP_ID_NPU_DRPAI, ALP_CAP_ID_HELIUM_MVE, ALP_CAP_ID_NEON, ALP_CAP_ID_GPU2D, ALP_CAP_ID_DAVE2D, ALP_CAP_ID_CRYPTOCELL, ALP_CAP_ID_INLINE_AES, ALP_CAP_ID_CAU, ALP_CAP_ID_DMA2D, ALP_CAP_ID_COUNT } alp_cap_id_t;",
+          "hash": "325dd5f6c2f30e21"
         }
       }
     },
@@ -2031,13 +2031,53 @@
           "hash": "975f356be3f3038d",
           "signature": "alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx);"
         },
+        "cc3501e_ble_adv_start": {
+          "hash": "d093691c81df79ee",
+          "signature": "alp_status_t cc3501e_ble_adv_start(cc3501e_t *ctx, bool connectable, uint16_t interval_min_ms, uint16_t interval_max_ms, const uint8_t *adv_data, uint8_t adv_data_len, uint32_t timeout_ms);"
+        },
+        "cc3501e_ble_adv_stop": {
+          "hash": "53c987bb8eb24634",
+          "signature": "alp_status_t cc3501e_ble_adv_stop(cc3501e_t *ctx, uint32_t timeout_ms);"
+        },
+        "cc3501e_ble_connect": {
+          "hash": "bc8d95021c9ff02f",
+          "signature": "alp_status_t cc3501e_ble_connect(cc3501e_t *ctx, const uint8_t addr[6], uint8_t addr_type, uint32_t timeout_ms);"
+        },
+        "cc3501e_ble_disable": {
+          "hash": "af854a7520087891",
+          "signature": "alp_status_t cc3501e_ble_disable(cc3501e_t *ctx, uint32_t timeout_ms);"
+        },
+        "cc3501e_ble_disconnect": {
+          "hash": "27cd58b0220d6a30",
+          "signature": "alp_status_t cc3501e_ble_disconnect(cc3501e_t *ctx, uint32_t timeout_ms);"
+        },
         "cc3501e_ble_enable": {
           "hash": "90164016198120b9",
           "signature": "alp_status_t cc3501e_ble_enable(cc3501e_t *ctx, uint32_t timeout_ms);"
         },
+        "cc3501e_ble_gatt_notify": {
+          "hash": "0a2003d04e2df9b9",
+          "signature": "alp_status_t cc3501e_ble_gatt_notify(cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);"
+        },
+        "cc3501e_ble_gatt_read": {
+          "hash": "8ae7be08ff3c1ab0",
+          "signature": "alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx, uint16_t handle, uint8_t *out, size_t cap, size_t *out_len, uint32_t timeout_ms);"
+        },
+        "cc3501e_ble_gatt_register": {
+          "hash": "58af9a2f1dbf9868",
+          "signature": "alp_status_t cc3501e_ble_gatt_register(cc3501e_t *ctx, const uint8_t *descriptor, size_t len, uint32_t timeout_ms);"
+        },
+        "cc3501e_ble_gatt_write": {
+          "hash": "2f85524f7e1a32fe",
+          "signature": "alp_status_t cc3501e_ble_gatt_write(cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);"
+        },
         "cc3501e_ble_scan": {
           "hash": "86e2819557a0c4b3",
           "signature": "alp_status_t cc3501e_ble_scan(cc3501e_t *ctx, cc3501e_ble_scan_record_t *out_records, size_t cap, size_t *count, uint32_t timeout_ms);"
+        },
+        "cc3501e_ble_scan_stop": {
+          "hash": "c3399daa5f57d8e1",
+          "signature": "alp_status_t cc3501e_ble_scan_stop(cc3501e_t *ctx, uint32_t timeout_ms);"
         },
         "cc3501e_cam_enable": {
           "hash": "2d17bbe2c00c975e",
@@ -2046,6 +2086,18 @@
         "cc3501e_deinit": {
           "hash": "8fc892d1d03fcca7",
           "signature": "void cc3501e_deinit(cc3501e_t *ctx);"
+        },
+        "cc3501e_diag_info": {
+          "hash": "03f2a6b35f619073",
+          "signature": "alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out);"
+        },
+        "cc3501e_diag_log_level": {
+          "hash": "e7f1515074dcd5d8",
+          "signature": "alp_status_t cc3501e_diag_log_level(cc3501e_t *ctx, uint8_t level);"
+        },
+        "cc3501e_diag_stats": {
+          "hash": "30c7ddce134198ac",
+          "signature": "alp_status_t cc3501e_diag_stats(cc3501e_t *ctx, uint32_t *frames_ok, uint32_t *frames_err);"
         },
         "cc3501e_get_version": {
           "hash": "c358ccfe7990379b",
@@ -2099,6 +2151,14 @@
           "hash": "864d474aa2153b8c",
           "signature": "alp_status_t cc3501e_ota_write(cc3501e_t *ctx, uint32_t offset, const uint8_t *data, size_t len, uint32_t timeout_ms);"
         },
+        "cc3501e_ping": {
+          "hash": "4ea2638cf2f6d61d",
+          "signature": "alp_status_t cc3501e_ping(cc3501e_t *ctx);"
+        },
+        "cc3501e_poll_events": {
+          "hash": "35e4744e8763489f",
+          "signature": "alp_status_t cc3501e_poll_events(cc3501e_t *ctx);"
+        },
         "cc3501e_power_policy": {
           "hash": "5fed7bfe53c7205e",
           "signature": "alp_status_t cc3501e_power_policy(cc3501e_t *ctx, const alp_cc3501e_power_policy_t *policy, uint32_t timeout_ms);"
@@ -2115,13 +2175,53 @@
           "hash": "518c5cd8722d69fc",
           "signature": "alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);"
         },
+        "cc3501e_sock_close": {
+          "hash": "c1a5ae4afc683c47",
+          "signature": "alp_status_t cc3501e_sock_close(cc3501e_t *ctx, uint16_t handle, uint32_t timeout_ms);"
+        },
+        "cc3501e_sock_connect": {
+          "hash": "b8dc905c51cef122",
+          "signature": "alp_status_t cc3501e_sock_connect(cc3501e_t *ctx, uint16_t handle, const uint8_t ip[4], uint16_t port, uint32_t timeout_ms);"
+        },
+        "cc3501e_sock_open": {
+          "hash": "ed2f790c98ba85e3",
+          "signature": "alp_status_t cc3501e_sock_open(cc3501e_t *ctx, uint8_t family, uint8_t type, uint8_t protocol, uint16_t *handle_out, uint32_t timeout_ms);"
+        },
+        "cc3501e_sock_recv": {
+          "hash": "baef43c94faf07d1",
+          "signature": "alp_status_t cc3501e_sock_recv(cc3501e_t *ctx, uint16_t handle, uint8_t *buf, size_t cap, size_t *recv_len_out, uint32_t timeout_ms);"
+        },
+        "cc3501e_sock_send": {
+          "hash": "ebd9576e605e2e1e",
+          "signature": "alp_status_t cc3501e_sock_send(cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, size_t *sent_out, uint32_t timeout_ms);"
+        },
+        "cc3501e_soft_reset": {
+          "hash": "8b6a753c63aabbac",
+          "signature": "alp_status_t cc3501e_soft_reset(cc3501e_t *ctx);"
+        },
+        "cc3501e_stream_write": {
+          "hash": "7ada7d88fa6aba32",
+          "signature": "alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t len);"
+        },
         "cc3501e_sync": {
           "hash": "0a45ddf6957a686e",
           "signature": "alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);"
         },
+        "cc3501e_wifi_ap_start": {
+          "hash": "4020b63947297071",
+          "signature": "alp_status_t cc3501e_wifi_ap_start(cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);"
+        },
+        "cc3501e_wifi_ap_stop": {
+          "hash": "8b780ef3b063ccb6",
+          "signature": "alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx);"
+        },
         "cc3501e_wifi_connect": {
           "hash": "33db68006b4a08fe",
           "signature": "alp_status_t cc3501e_wifi_connect(cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);"
+        },
+        "cc3501e_wifi_disconnect": {
+          "hash": "9e33ae4cf0fd4891",
+          "signature": "alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);"
         },
         "cc3501e_wifi_get_ip": {
           "hash": "b463b4a2535b3d65",
@@ -2139,6 +2239,10 @@
           "hash": "624698bc2548730a",
           "signature": "alp_status_t cc3501e_wifi_scan(cc3501e_t *ctx, cc3501e_scan_record_t *out_records, size_t cap, size_t *count, uint32_t timeout_ms);"
         },
+        "cc3501e_wifi_scan_stop": {
+          "hash": "db59c094adbf57e7",
+          "signature": "alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);"
+        },
         "cc3501e_wifi_sec_kind": {
           "hash": "abe1748964ec79c8",
           "signature": "cc3501e_wifi_sec_t cc3501e_wifi_sec_kind(uint16_t security_info);"
@@ -2146,6 +2250,10 @@
         "cc3501e_wifi_sec_name": {
           "hash": "dd5cbf349356b45d",
           "signature": "const char * cc3501e_wifi_sec_name(uint16_t security_info);"
+        },
+        "cc3501e_wifi_status": {
+          "hash": "2a5d4b86bb0e805c",
+          "signature": "alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);"
         }
       },
       "macros": {
@@ -5718,6 +5826,21 @@
         }
       }
     },
+    "alp/console.h": {
+      "functions": {
+        "alp_console_companion_set": {
+          "hash": "322f7c690085fdba",
+          "signature": "void alp_console_companion_set(cc3501e_t *ctx);"
+        }
+      },
+      "macros": {
+        "ALP_CONSOLE_H_": {
+          "hash": "849b96eaea1969dc",
+          "value": "#include <alp/chips/cc3501e.h>"
+        }
+      },
+      "typedefs": {}
+    },
     "alp/counter.h": {
       "functions": {
         "alp_counter_cancel_alarm": {
@@ -8274,6 +8397,10 @@
           "hash": "6c6c1cc020705b8b",
           "value": "0x80u"
         },
+        "ALP_CC3501E_EVENT_HDR_BYTES": {
+          "hash": "ca97663d60bb61a4",
+          "value": "2u"
+        },
         "ALP_CC3501E_FLAG_ASYNC_EVENT": {
           "hash": "8ca20156e70067cd",
           "value": "0x02"
@@ -8299,8 +8426,8 @@
           "value": "(ALP_CC3501E_MAX_PAYLOAD - 4u)"
         },
         "ALP_CC3501E_PROTOCOL_VERSION": {
-          "hash": "230499938620b789",
-          "value": "1"
+          "hash": "107ea4113bf0938b",
+          "value": "3"
         },
         "ALP_CC3501E_SYNC_IDLE": {
           "hash": "1b62c9b80bf39ade",
@@ -8341,8 +8468,8 @@
           "hash": "4e46a21806d6caeb"
         },
         "alp_cc3501e_cmd_t": {
-          "definition": "typedef enum { ALP_CC3501E_CMD_PING = 0x00, ALP_CC3501E_CMD_GET_VERSION = 0x01, ALP_CC3501E_CMD_RESET = 0x02, ALP_CC3501E_CMD_GET_MAC = 0x03, ALP_CC3501E_CMD_GET_DIAG_INFO = 0x04, ALP_CC3501E_CMD_WIFI_SCAN_START = 0x10, ALP_CC3501E_CMD_WIFI_SCAN_STOP = 0x11, ALP_CC3501E_CMD_WIFI_CONNECT_STA = 0x12, ALP_CC3501E_CMD_WIFI_DISCONNECT = 0x13, ALP_CC3501E_CMD_WIFI_AP_START = 0x14, ALP_CC3501E_CMD_WIFI_AP_STOP = 0x15, ALP_CC3501E_CMD_WIFI_GET_RSSI = 0x16, ALP_CC3501E_CMD_WIFI_GET_IP = 0x17, ALP_CC3501E_EVT_WIFI_SCAN_RESULT = 0x18, ALP_CC3501E_EVT_WIFI_CONNECTED = 0x19, ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, ALP_CC3501E_CMD_WIFI_STATUS = 0x1B, ALP_CC3501E_CMD_SOCK_OPEN = 0x20, ALP_CC3501E_CMD_SOCK_CONNECT = 0x21, ALP_CC3501E_CMD_SOCK_SEND = 0x22, ALP_CC3501E_CMD_SOCK_RECV = 0x23, ALP_CC3501E_CMD_SOCK_CLOSE = 0x24, ALP_CC3501E_CMD_BLE_ENABLE = 0x30, ALP_CC3501E_CMD_BLE_DISABLE = 0x31, ALP_CC3501E_CMD_BLE_ADV_START = 0x32, ALP_CC3501E_CMD_BLE_ADV_STOP = 0x33, ALP_CC3501E_CMD_BLE_SCAN_START = 0x34, ALP_CC3501E_CMD_BLE_SCAN_STOP = 0x35, ALP_CC3501E_CMD_BLE_CONNECT = 0x36, ALP_CC3501E_CMD_BLE_DISCONNECT = 0x37, ALP_CC3501E_CMD_BLE_GATT_REGISTER = 0x38, ALP_CC3501E_CMD_BLE_GATT_NOTIFY = 0x39, ALP_CC3501E_CMD_BLE_GATT_READ = 0x3A, ALP_CC3501E_CMD_BLE_GATT_WRITE = 0x3B, ALP_CC3501E_EVT_BLE_ADV_REPORT = 0x3C, ALP_CC3501E_EVT_BLE_CONNECTED = 0x3D, ALP_CC3501E_EVT_BLE_DISCONNECTED = 0x3E, ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, ALP_CC3501E_CMD_OTA_BEGIN = 0x40, ALP_CC3501E_CMD_OTA_WRITE = 0x41, ALP_CC3501E_CMD_OTA_FINISH = 0x42, ALP_CC3501E_CMD_OTA_ABORT = 0x43, ALP_CC3501E_CMD_OTA_STATUS = 0x44, ALP_CC3501E_CMD_GPIO_CONFIGURE = 0x50, ALP_CC3501E_CMD_GPIO_WRITE = 0x51, ALP_CC3501E_CMD_GPIO_READ = 0x52, ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53, ALP_CC3501E_EVT_GPIO_INTERRUPT = 0x54, ALP_CC3501E_CMD_CAM_ENABLE = 0x60, ALP_CC3501E_CMD_CAM_DISABLE = 0x61, ALP_CC3501E_CMD_POWER_POLICY = 0x62, ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70, ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71, } alp_cc3501e_cmd_t;",
-          "hash": "a19fcbc801650d61"
+          "definition": "typedef enum { ALP_CC3501E_CMD_PING = 0x00, ALP_CC3501E_CMD_GET_VERSION = 0x01, ALP_CC3501E_CMD_RESET = 0x02, ALP_CC3501E_CMD_GET_MAC = 0x03, ALP_CC3501E_CMD_GET_DIAG_INFO = 0x04, ALP_CC3501E_CMD_GET_PENDING_EVENTS = 0x05, ALP_CC3501E_CMD_WIFI_SCAN_START = 0x10, ALP_CC3501E_CMD_WIFI_SCAN_STOP = 0x11, ALP_CC3501E_CMD_WIFI_CONNECT_STA = 0x12, ALP_CC3501E_CMD_WIFI_DISCONNECT = 0x13, ALP_CC3501E_CMD_WIFI_AP_START = 0x14, ALP_CC3501E_CMD_WIFI_AP_STOP = 0x15, ALP_CC3501E_CMD_WIFI_GET_RSSI = 0x16, ALP_CC3501E_CMD_WIFI_GET_IP = 0x17, ALP_CC3501E_EVT_WIFI_SCAN_RESULT = 0x18, ALP_CC3501E_EVT_WIFI_CONNECTED = 0x19, ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, ALP_CC3501E_CMD_WIFI_STATUS = 0x1B, ALP_CC3501E_CMD_SOCK_OPEN = 0x20, ALP_CC3501E_CMD_SOCK_CONNECT = 0x21, ALP_CC3501E_CMD_SOCK_SEND = 0x22, ALP_CC3501E_CMD_SOCK_RECV = 0x23, ALP_CC3501E_CMD_SOCK_CLOSE = 0x24, ALP_CC3501E_CMD_BLE_ENABLE = 0x30, ALP_CC3501E_CMD_BLE_DISABLE = 0x31, ALP_CC3501E_CMD_BLE_ADV_START = 0x32, ALP_CC3501E_CMD_BLE_ADV_STOP = 0x33, ALP_CC3501E_CMD_BLE_SCAN_START = 0x34, ALP_CC3501E_CMD_BLE_SCAN_STOP = 0x35, ALP_CC3501E_CMD_BLE_CONNECT = 0x36, ALP_CC3501E_CMD_BLE_DISCONNECT = 0x37, ALP_CC3501E_CMD_BLE_GATT_REGISTER = 0x38, ALP_CC3501E_CMD_BLE_GATT_NOTIFY = 0x39, ALP_CC3501E_CMD_BLE_GATT_READ = 0x3A, ALP_CC3501E_CMD_BLE_GATT_WRITE = 0x3B, ALP_CC3501E_EVT_BLE_ADV_REPORT = 0x3C, ALP_CC3501E_EVT_BLE_CONNECTED = 0x3D, ALP_CC3501E_EVT_BLE_DISCONNECTED = 0x3E, ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, ALP_CC3501E_CMD_OTA_BEGIN = 0x40, ALP_CC3501E_CMD_OTA_WRITE = 0x41, ALP_CC3501E_CMD_OTA_FINISH = 0x42, ALP_CC3501E_CMD_OTA_ABORT = 0x43, ALP_CC3501E_CMD_OTA_STATUS = 0x44, ALP_CC3501E_CMD_STREAM_WRITE = 0x45, ALP_CC3501E_CMD_GPIO_CONFIGURE = 0x50, ALP_CC3501E_CMD_GPIO_WRITE = 0x51, ALP_CC3501E_CMD_GPIO_READ = 0x52, ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53, ALP_CC3501E_EVT_GPIO_INTERRUPT = 0x54, ALP_CC3501E_CMD_CAM_ENABLE = 0x60, ALP_CC3501E_CMD_CAM_DISABLE = 0x61, ALP_CC3501E_CMD_POWER_POLICY = 0x62, ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70, ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71, } alp_cc3501e_cmd_t;",
+          "hash": "ab50f76e70bdfa46"
         },
         "alp_cc3501e_gpio_direction_t": {
           "definition": "typedef enum { ALP_CC3501E_GPIO_DIR_INPUT = 0u, ALP_CC3501E_GPIO_DIR_OUTPUT = 1u, ALP_CC3501E_GPIO_DIR_OPEN_DRAIN = 2u, } alp_cc3501e_gpio_direction_t;",
@@ -8399,6 +8526,10 @@
         "connectable": {
           "definition": "typedef struct { uint8_t connectable;",
           "hash": "4d4692a9c09b9d43"
+        },
+        "evt_opcode": {
+          "definition": "typedef struct { uint8_t evt_opcode;",
+          "hash": "fcbef9d17594582d"
         },
         "family": {
           "definition": "typedef struct { uint8_t family;",
@@ -8747,6 +8878,10 @@
           "hash": "1aadee7172fb0900",
           "value": "(ALP_SOC_I2S_COUNT > 0)"
         },
+        "ALP_CAP_HW_LCDIF": {
+          "hash": "e7982d60d184e2d8",
+          "value": "(ALP_SOC_LCDIF_COUNT > 0)"
+        },
         "ALP_CAP_HW_MIPI_CSI": {
           "hash": "d6b4fe2c839d101a",
           "value": "(ALP_SOC_MIPI_CSI_COUNT > 0)"
@@ -8889,6 +9024,10 @@
         },
         "ALP_SOC_INLINE_AES": {
           "hash": "58e7e017d23b14b0",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_LCDIF_COUNT": {
+          "hash": "1d58f7f427bfe001",
           "value": "UINT16_MAX"
         },
         "ALP_SOC_MIPI_CSI_COUNT": {
