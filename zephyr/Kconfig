@@ -1928,6 +1928,21 @@ config ALP_SDK_UPDATE_LOG_TFM_PSA_OWNER
 	  UIDs does not satisfy the audit-log requirement that old entries
 	  are non-modifiable by application firmware.
 
+config ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED
+	bool "Fail open() unless the update log is hardware-enforced"
+	default n
+	depends on ALP_SDK_UPDATE_LOG
+	help
+	  Refuse the software tamper-evident fallback and make
+	  alp_update_log_open() fail unless the selected backend reports
+	  ALP_UPDATE_LOG_HW_ENFORCED.
+
+	  Use this in demos or product builds whose policy requires old log
+	  entries to be physically unreachable by normal application firmware.
+	  It is intentionally fail-closed: on boards without a ready TF-M /
+	  secure-owner backend, open() returns NULL with ALP_ERR_NOSUPPORT
+	  instead of silently continuing with MRAM/NVS persistence.
+
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
 # wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT
 # contract so apps can link cleanly against <alp/iot.h>.

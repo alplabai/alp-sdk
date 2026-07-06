@@ -19,3 +19,18 @@ tests:
       type: one_line
       regex:
         - "verify: OK"
+  alp_sdk.examples.connectivity.firmware_update_log.require_hw.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    extra_configs:
+      - CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED=y
+    tags:
+      - alp-sdk
+      - example
+      - update_log
+      - security
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "HW_ENFORCED required, but no secure owner/backend is active"

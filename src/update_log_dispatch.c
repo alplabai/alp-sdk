@@ -54,6 +54,13 @@ alp_update_log_t *alp_update_log_open(void)
 		if (ops != NULL) {
 			rc = (ops->ready != NULL) ? ops->ready() : ALP_OK;
 			if (rc == ALP_OK) {
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED)
+				if (ops->assurance != ALP_UPDATE_LOG_HW_ENFORCED) {
+					rc = ALP_ERR_NOSUPPORT;
+					be = alp_backend_select_next("update_log", ALP_SOC_REF_STR, be);
+					continue;
+				}
+#endif
 				g_log.ops       = ops;
 				g_log.assurance = ops->assurance;
 				g_log.in_use    = true;

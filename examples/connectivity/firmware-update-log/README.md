@@ -39,6 +39,19 @@ rollback, and reorder, but code that can write the partition can rebuild the
 store and counter consistently. App-immutability requires the `HW_ENFORCED`
 tier (secure isolation + protected counter).
 
+On the E1M-AEN801 / Alif E8 board, this example carries an AEN-specific overlay
+that runs the image from MRAM slot0 and carves a dedicated MRAM
+`alp_ulog_partition` for NVS. The overlay keeps that partition away from the
+top-of-MRAM ATOC package used by the SE boot flow.
+
+The AEN bench config also sets
+`CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED=y`. That is deliberate: the
+current public Alif Zephyr path can make the software tier durable in MRAM, but
+the MRAM driver is still writable by normal M55 firmware. Until a secure
+TF-M/owner backend is wired and proven, the AEN image fails closed instead of
+using the MRAM/NVS software tier as a substitute for application-immutable
+storage.
+
 The log is append-only and never wraps: when the partition is full,
 `alp_update_log_append()` returns `ALP_ERR_NOMEM` and the existing chain
 stays intact and verifiable.
@@ -54,9 +67,24 @@ A passing run prints (among other lines):
 
 ```
 [update-log] assurance: SW_TAMPER_EVIDENT (software tier)
+[update-log] storage: RAM fallback
 [update-log] verify: OK
 [update-log] 1 entry:
   #0  v=1.4.2  status=0  ts=1718000000
+```
+
+With the current AEN fail-closed config, no hardware-enforced backend is active
+yet, so the board prints:
+
+```
+[update-log] HW_ENFORCED required, but no secure owner/backend is active
+```
+
+If `CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED` is temporarily disabled only
+to inspect the software MRAM tier, the storage line reports:
+
+```
+[update-log] storage: MRAM NVS (alp_ulog_partition)
 ```
 
 On a board that enables `CONFIG_ALP_SDK_UPDATE_LOG_TFM=y` and provides the

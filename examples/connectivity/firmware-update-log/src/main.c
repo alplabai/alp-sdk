@@ -23,6 +23,18 @@
 
 #include <alp/update_log.h>
 
+#include <zephyr/storage/flash_map.h>
+
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_PERSIST) && PARTITION_EXISTS(alp_ulog_partition)
+#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HE)
+#define UPDATE_LOG_STORAGE_STR "MRAM NVS (alp_ulog_partition)"
+#else
+#define UPDATE_LOG_STORAGE_STR "persistent NVS (alp_ulog_partition)"
+#endif
+#else
+#define UPDATE_LOG_STORAGE_STR "RAM fallback"
+#endif
+
 static const char *assurance_str(alp_update_log_assurance_t a)
 {
 	return (a == ALP_UPDATE_LOG_HW_ENFORCED) ? "HW_ENFORCED (secure tier)"
@@ -50,7 +62,11 @@ int main(void)
 	/* Open the device's update log. NULL means no backend on this SoM. */
 	alp_update_log_t *log = alp_update_log_open();
 	if (log == NULL) {
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED)
+		printf("[update-log] HW_ENFORCED required, but no secure owner/backend is active\n");
+#else
 		printf("[update-log] no backend present\n");
+#endif
 		return 0;
 	}
 
@@ -58,6 +74,7 @@ int main(void)
 	 * chip has secure hardware; the backend reports only what this build and
 	 * boot path really wired. */
 	printf("[update-log] assurance: %s\n", assurance_str(alp_update_log_assurance(log)));
+	printf("[update-log] storage: %s\n", UPDATE_LOG_STORAGE_STR);
 
 	/* Record an update result. This example fills the fields by hand so the
 	 * flow is easy to read. Production code should prefer
