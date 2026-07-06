@@ -4,11 +4,16 @@
  *
  * firmware-update-log -- portable, tamper-evident update audit log.
  *
- * This is the ONE API a customer uses regardless of SoM. On a SoM with a
- * secure backend the very same code is hardware-enforced (TF-M Protected
- * Storage + a monotonic counter); here on native_sim it runs the software
- * tier. The assurance readout tells you which you got -- so the app can log
- * or branch on the guarantee level without ever naming a vendor mechanism.
+ * This is the ONE API a product uses regardless of SoM. On native_sim and on
+ * boards without a secure storage backend, the software tier builds a hash
+ * chain and verifies that nobody changed, removed, rolled back, or reordered
+ * old records. That is tamper-evident, not app-immutable.
+ *
+ * On a TF-M build with a real secure owner, the same API can bind to
+ * HW_ENFORCED: each entry is a secure-world write-once asset, and the counter
+ * is kept in protected storage. On Alif E4/E8 this storage must be backed by
+ * the SE/firewall policy, so normal application firmware cannot rewrite
+ * history.
  *
  * Flow: open the log, append one update record (as MCUboot/a secure service
  * would after verifying an image), then verify the whole chain and print it.
@@ -20,7 +25,7 @@
 
 static const char *assurance_str(alp_update_log_assurance_t a)
 {
-	return (a == ALP_UPDATE_LOG_HW_ENFORCED) ? "HW_ENFORCED (TF-M isolated)"
+	return (a == ALP_UPDATE_LOG_HW_ENFORCED) ? "HW_ENFORCED (secure tier)"
 	                                         : "SW_TAMPER_EVIDENT (software tier)";
 }
 
@@ -49,11 +54,16 @@ int main(void)
 		return 0;
 	}
 
-	/* Tell the operator exactly how strong the guarantee is on this silicon. */
+	/* Print the actual guarantee. Do not assume HW_ENFORCED just because the
+	 * chip has secure hardware; the backend reports only what this build and
+	 * boot path really wired. */
 	printf("[update-log] assurance: %s\n", assurance_str(alp_update_log_assurance(log)));
 
-	/* Record an update result. In production the bootloader/secure service
-     * fills these in after verifying the image it just installed. */
+	/* Record an update result. This example fills the fields by hand so the
+	 * flow is easy to read. Production code should prefer
+	 * alp_update_log_append_boot(), once the board provides authenticated boot
+	 * metadata, so the version/hash/status come from verified boot facts
+	 * instead of from normal application data. */
 	alp_update_log_entry_t e;
 	memset(&e, 0, sizeof(e));
 	strncpy(e.fw_version, "1.4.2", ALP_UPDATE_LOG_FWVER_MAX);
@@ -66,9 +76,10 @@ int main(void)
 		return 0;
 	}
 
-	/* Verify the whole chain -- detects mutation/truncation/rollback/reorder
-     * of any historical entry (software-detectable in this tier; hardware-
-     * enforced where the secure backend is present). */
+	/* Verify the whole chain. On the software tier this detects a broken
+	 * history, but it cannot stop privileged firmware from rebuilding both the
+	 * log and its counter. On the hardware tier, old entries live behind the
+	 * secure boundary, so normal firmware cannot rewrite them. */
 	alp_update_log_verdict_t v;
 	uint64_t                 bad = 0;
 	if (alp_update_log_verify(log, &v, &bad) == ALP_OK) {

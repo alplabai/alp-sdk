@@ -1864,8 +1864,10 @@ config ALP_SDK_UPDATE_LOG
 
 	  The software tier works on every target and reports assurance
 	  SW_TAMPER_EVIDENT. A hardware-enforced backend (TF-M Protected
-	  Storage + monotonic counter) is a later slice; until it lands the
-	  surface stays experimental. See docs/abi-markers.md.
+	  Storage + replay-protected counter asset) reports HW_ENFORCED
+	  where a real Secure Processing Environment is present. The
+	  surface stays experimental until that tier is silicon-proven on
+	  each SoM. See docs/abi-markers.md.
 
 config ALP_SDK_UPDATE_LOG_PERSIST
 	bool "Persist the software update-log tier in NVS"
@@ -1889,35 +1891,42 @@ config ALP_SDK_UPDATE_LOG_PERSIST
 	  HW_ENFORCED tier (issue #111) is the app-immutable answer.
 
 config ALP_SDK_UPDATE_LOG_TFM
-	bool "Register the hardware-enforced (TF-M) update-log tier"
+	bool "Register the TF-M secure-service update-log tier"
 	default n
 	depends on ALP_SDK_UPDATE_LOG && BUILD_WITH_TFM
 	help
-	  Register the HW_ENFORCED update-log tier
-	  (src/backends/update_log/alif_tfm_stub.c) into the update_log
+	  Register the HW_ENFORCED update-log client backend
+	  (src/backends/update_log/tfm_psa.c) into the update_log
 	  backend section at a higher priority than the software tier, so
-	  the dispatcher prefers it wherever TF-M isolation is advertised.
-	  This is the app-IMMUTABLE tier the software tamper-evident tier
-	  cannot provide: the log store and its monotonic anchor live in
-	  the Secure Processing Environment, unreachable by the non-secure
-	  application.
+	  the dispatcher tries it before the software tier.
 
-	  This depends on BUILD_WITH_TFM because the assurance is only real
-	  under TF-M: the store binds to PSA Protected Storage (psa_ps_set /
-	  psa_ps_get, psa/protected_storage.h) in the SPE, and the monotonic
-	  anchor to the TF-M platform NV-counter service. Without TF-M the
-	  same PSA API is served from the non-secure image (Zephyr's
-	  secure_storage subsystem) -- that is the software tier's boundary,
-	  not this one.
+	  This backend is a CLIENT only. It does not call PSA Protected
+	  Storage directly from the normal application, because that would
+	  make the application the owner of its own log history. It binds
+	  only when the secure-service seam answers ready(); otherwise
+	  alp_update_log_open() falls through to the software tier.
 
-	  STATUS: stub. The tier registers but its ready() probe returns
-	  ALP_ERR_NOSUPPORT until the secure store + hardware monotonic
-	  counter are wired and provisioned on silicon, so the dispatcher
-	  transparently falls through to the SW tamper-evident tier
-	  (issues #111, #239). Enabling this today changes nothing at
-	  runtime; it exists so a TF-M-capable board can opt the tier into
-	  the registry once the on-silicon slice lands. It cannot build on
-	  native_sim (no TF-M there); leave it off.
+	  The app-IMMUTABLE guarantee requires a secure owner that the
+	  non-secure application cannot rewrite. On Alif E4/E8 that means
+	  a secure M55/TF-M image plus an Alif SE/firewall-protected storage
+	  region for the log state.
+
+config ALP_SDK_UPDATE_LOG_TFM_PSA_OWNER
+	bool "Build the TF-M PSA Protected Storage update-log owner"
+	default n
+	depends on ALP_SDK_UPDATE_LOG_TFM && TFM_PARTITION_PROTECTED_STORAGE
+	help
+	  Compile src/update_log/tfm_psa_secure_owner.c, the secure-side
+	  owner implementation behind the TF-M client backend. It stores
+	  every entry as a PSA Protected Storage WRITE_ONCE asset, stores
+	  mutable metadata as a PSA asset, and keeps the high-watermark
+	  counter as a Protected Storage asset.
+
+	  Enable this only in the Secure Processing Environment / secure
+	  partition that owns the log. A normal non-secure Zephyr app must
+	  not use this option as a shortcut: direct app ownership of PSA
+	  UIDs does not satisfy the audit-log requirement that old entries
+	  are non-modifiable by application firmware.
 
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
 # wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT

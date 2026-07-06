@@ -7,11 +7,12 @@
  * @file update_log.h
  * @brief Portable, tamper-evident firmware-update audit log.
  *
- * One surface across SoMs. The software tier (every target today) gives a
+ * One surface across SoMs. The software tier (every target) gives a
  * hash-chained, monotonic-counter-anchored log that detects mutation,
  * truncation, rollback, and reorder. On SoMs with a secure backend the
- * same API is hardware-enforced (TF-M Protected Storage + a non-decrementable
- * monotonic counter). Query @ref alp_update_log_assurance to learn which.
+ * same API is hardware-enforced through a secure owner (secure-world
+ * Protected Storage + a replay-protected high-watermark counter). Query @ref
+ * alp_update_log_assurance to learn which.
  *
  * @par Persistence vs. trust boundary (software tier)
  *      With @c CONFIG_ALP_SDK_UPDATE_LOG_PERSIST and an
@@ -24,19 +25,21 @@
  *      detects out-of-band mutation, truncation, rollback, and reorder,
  *      but code that can write the backing partition can rebuild the store
  *      and counter consistently and forge history. App-immutability is the
- *      @ref ALP_UPDATE_LOG_HW_ENFORCED tier's job (TF-M isolation + a
- *      hardware counter; issue #111).
+ *      @ref ALP_UPDATE_LOG_HW_ENFORCED tier's job.
  *
  * @par Hardware-enforced tier status (`ALP_UPDATE_LOG_HW_ENFORCED`)
- *      Not yet built. The tier is registered on TF-M-capable builds
- *      (@c CONFIG_ALP_SDK_UPDATE_LOG_TFM) but declines at open() until its
- *      secure store (PSA Protected Storage in the SPE) and a hardware
- *      monotonic counter are wired on silicon, so @ref alp_update_log_open
- *      transparently falls through to the software tamper-evident tier and
- *      @ref alp_update_log_assurance reports @ref
- *      ALP_UPDATE_LOG_SW_TAMPER_EVIDENT today (issue #111). Query it rather
- *      than assume the tier -- it is the only portable signal of which
- *      assurance actually backs the log on a given SoM.
+ *      Built for TF-M secure-service builds
+ *      (@c CONFIG_ALP_SDK_UPDATE_LOG_TFM). The application-side backend is a
+ *      client; the secure owner stores each entry as a PSA WRITE_ONCE asset
+ *      and keeps the metadata and high-watermark counter in the Secure
+ *      Processing Environment. On Alif E4/E8, this is the TrustZone-M route:
+ *      the secure storage region must be protected by the Alif SE/firewall
+ *      policy. If that secure owner is absent, @ref alp_update_log_open
+ *      transparently falls through to the software tier and @ref
+ *      alp_update_log_assurance reports @ref
+ *      ALP_UPDATE_LOG_SW_TAMPER_EVIDENT. Query it rather than assume the tier
+ *      -- it is the only portable signal of which assurance actually backs the
+ *      log on a given SoM.
  *
  * @par Full log (software tier)
  *      The log is append-only and never wraps -- wrapping would erase
@@ -86,7 +89,7 @@ typedef enum {
 /** How strongly the log is protected on this SoM. */
 typedef enum {
 	ALP_UPDATE_LOG_SW_TAMPER_EVIDENT = 0, /**< Hash-chain + counter; app-cooperative. */
-	ALP_UPDATE_LOG_HW_ENFORCED       = 1, /**< TF-M-isolated store + HW monotonic counter. */
+	ALP_UPDATE_LOG_HW_ENFORCED       = 1, /**< Secure-world store + protected counter. */
 } alp_update_log_assurance_t;
 
 /** Result of walking the chain in @ref alp_update_log_verify. */

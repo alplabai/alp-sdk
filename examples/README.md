@@ -110,7 +110,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `iot-connected-camera`   | End-to-end IoT -- capture a frame, publish it to MQTT.                             |
 | `iot-dashboard`          | BME280 env samples → MQTT-over-TLS publish + a live LVGL dashboard. **(AEN)**      |
 | `iot-fleet-ota`          | Secure OTA firmware update with rollback; the v0.6 declarative `boot:` + `ota:` reference. |
-| `firmware-update-log`    | Portable tamper-evident update audit log -- one API, hardware-enforced on a secure backend, software tier on native_sim. |
+| `firmware-update-log`    | Portable update audit log -- software tamper-evident tier everywhere, TF-M secure-owner hardware tier where the secure backend is wired. |
 | `production-deployment`  | Field-product lifecycle flagship -- secure-boot + OTA + EEPROM provisioning + attestation in one `board.yaml`. |
 
 ### Display / GUI

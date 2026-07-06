@@ -5,16 +5,21 @@ Portable, tamper-evident firmware-update audit log using `<alp/update_log.h>`.
 ## One API across SoMs
 
 The same application code works on every Alp SoM. The backend is selected
-automatically at boot. On native_sim (and any SoM without a dedicated secure
-element) the software tier runs. On SoMs with TF-M and a hardware monotonic
-counter the same API is hardware-enforced — no application change required.
+automatically at boot. On native_sim and on boards without secure storage, the
+software tier builds and verifies a tamper-evident chain, but it does not make
+old entries physically immutable to application firmware.
+
+The hardware-enforced tier is available when the TF-M secure-service backend
+has a real secure owner. It keeps entries as write-once secure-world assets and
+keeps the high-watermark counter in protected storage. On Alif E4/E8, that
+secure owner must use storage covered by the Alif SE/firewall policy.
 
 ## Assurance levels
 
 | Level | Value | What you get |
 |---|---|---|
 | `SW_TAMPER_EVIDENT` | `0` | SHA-256 hash-chain + monotonic counter (NVS-persisted where the board provides an `alp_ulog_partition`; RAM otherwise). Detects mutation, truncation, rollback, and reorder of historical entries. App-cooperative: a process with write access to the store can forge entries. Use for audit trails where cooperative tamper-evidence is sufficient. |
-| `HW_ENFORCED` | `1` | TF-M Protected Storage (Secure Processing Environment, unreachable from NS) + a hardware non-decrementable monotonic counter (PSA NV or OPTIGA). An attacker with full OS access cannot forge or roll back entries without breaking TF-M isolation. Present where the secure backend is registered. |
+| `HW_ENFORCED` | `1` | Secure-world store + protected high-watermark counter. Entries are PSA Protected Storage `WRITE_ONCE` assets behind a secure service. Normal application firmware cannot rewrite old entries when the TF-M owner and its storage are correctly isolated by the platform. |
 
 Call `alp_update_log_assurance()` to query which level is active at runtime.
 
@@ -32,7 +37,7 @@ Persistence does **not** change the assurance level: the software tier stays
 tamper-*evident* — `verify()` catches out-of-band mutation, truncation,
 rollback, and reorder, but code that can write the partition can rebuild the
 store and counter consistently. App-immutability requires the `HW_ENFORCED`
-tier (TF-M isolation + hardware counter, issue #111).
+tier (secure isolation + protected counter).
 
 The log is append-only and never wraps: when the partition is full,
 `alp_update_log_append()` returns `ALP_ERR_NOMEM` and the existing chain
@@ -54,8 +59,15 @@ A passing run prints (among other lines):
   #0  v=1.4.2  status=0  ts=1718000000
 ```
 
+On a board that enables `CONFIG_ALP_SDK_UPDATE_LOG_TFM=y` and provides the
+secure owner, the first line reports:
+
+```
+[update-log] assurance: HW_ENFORCED (secure tier)
+```
+
 ## Design reference
 
-Full threat model, wire format, and acceptance criteria for the hardware
-backend are in:
+Full threat model, wire format, and acceptance criteria for the hardware backend
+are in:
 `docs/superpowers/specs/2026-06-11-secure-update-audit-log-design.md`

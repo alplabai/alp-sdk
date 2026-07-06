@@ -12,8 +12,8 @@ typedef struct alp_update_log_ops {
 	 * dispatcher calls this once per alp_update_log_open() and, on
 	 * ALP_ERR_NOSUPPORT, falls through to the next-ranked backend
 	 * (issue #239 pattern). It lets a higher-priority tier that cannot
-	 * serve on this boot -- e.g. the HW_ENFORCED TF-M tier before its
-	 * secure store + monotonic counter are provisioned (issue #111) --
+	 * serve on this boot -- e.g. the HW_ENFORCED TF-M tier when its secure
+	 * owner is not present or not ready --
 	 * decline cleanly so the SW tamper-evident tier serves instead,
 	 * rather than binding a backend whose append() would just fail. Any
 	 * status other than ALP_OK / ALP_ERR_NOSUPPORT is a hard error and
