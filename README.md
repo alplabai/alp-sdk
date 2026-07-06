@@ -8,7 +8,7 @@
 [![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.0-blue)](docs/zephyr-version-policy.md)
 
 > [!WARNING]
-> **Partially silicon-verified (`v0.8`):** every chip driver, peripheral wrapper, and
+> **Partially silicon-verified (`v0.9`):** every chip driver, peripheral wrapper, and
 > example builds clean and passes its CI tests on `native_sim`. Two SoM
 > families now carry silicon evidence: the E1M-X V2N (GD32-bridge stack,
 > verified v0.6) and E1M-AEN801 (peripheral matrix, NPU inference, cc3501e
@@ -262,7 +262,7 @@ by upstream `bitbake` / OE-core constraint.  Codified in
 
 ## Status
 
-**v0.8 ramp — paper-correct, mostly pre-HIL; partial silicon-verified additions** — recorded in
+**v0.9 ramp — paper-correct, mostly pre-HIL; partial silicon-verified additions** — recorded in
 [`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
 landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in

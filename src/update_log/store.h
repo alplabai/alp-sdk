@@ -8,7 +8,7 @@
 #include "alp/peripheral.h"
 
 /* Keyed blob store. SW tier: Zephyr NVS (persistent) or RAM (fallback).
- * Secure (future): TF-M Protected Storage. */
+ * HW tier: TF-M Protected Storage / equivalent secure-world asset store. */
 typedef struct {
 	alp_status_t (*put)(void *ctx, const char *key, const uint8_t *buf, size_t len);
 	alp_status_t (*get)(void *ctx, const char *key, uint8_t *buf, size_t cap, size_t *out_len);
@@ -17,7 +17,7 @@ typedef struct {
 } alp_secure_store_if;
 
 /* Monotonic counter. SW tier: NVS-persisted or in-process (fallback).
- * Secure (future): PSA NV / OPTIGA. */
+ * HW tier: secure-world replay-protected high-watermark. */
 typedef struct {
 	alp_status_t (*read)(void *ctx, uint32_t id, uint64_t *out_val);
 	alp_status_t (*increment)(void *ctx, uint32_t id, uint64_t *out_val);

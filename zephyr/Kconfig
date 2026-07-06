@@ -1864,8 +1864,10 @@ config ALP_SDK_UPDATE_LOG
 
 	  The software tier works on every target and reports assurance
 	  SW_TAMPER_EVIDENT. A hardware-enforced backend (TF-M Protected
-	  Storage + monotonic counter) is a later slice; until it lands the
-	  surface stays experimental. See docs/abi-markers.md.
+	  Storage + replay-protected counter asset) reports HW_ENFORCED
+	  where a real Secure Processing Environment is present. The
+	  surface stays experimental until that tier is silicon-proven on
+	  each SoM. See docs/abi-markers.md.
 
 config ALP_SDK_UPDATE_LOG_PERSIST
 	bool "Persist the software update-log tier in NVS"
@@ -1889,35 +1891,129 @@ config ALP_SDK_UPDATE_LOG_PERSIST
 	  HW_ENFORCED tier (issue #111) is the app-immutable answer.
 
 config ALP_SDK_UPDATE_LOG_TFM
-	bool "Register the hardware-enforced (TF-M) update-log tier"
+	bool "Register the TF-M secure-service update-log tier"
 	default n
 	depends on ALP_SDK_UPDATE_LOG && BUILD_WITH_TFM
 	help
-	  Register the HW_ENFORCED update-log tier
-	  (src/backends/update_log/alif_tfm_stub.c) into the update_log
+	  Register the HW_ENFORCED update-log client backend
+	  (src/backends/update_log/tfm_psa.c) into the update_log
 	  backend section at a higher priority than the software tier, so
-	  the dispatcher prefers it wherever TF-M isolation is advertised.
-	  This is the app-IMMUTABLE tier the software tamper-evident tier
-	  cannot provide: the log store and its monotonic anchor live in
-	  the Secure Processing Environment, unreachable by the non-secure
-	  application.
+	  the dispatcher tries it before the software tier.
 
-	  This depends on BUILD_WITH_TFM because the assurance is only real
-	  under TF-M: the store binds to PSA Protected Storage (psa_ps_set /
-	  psa_ps_get, psa/protected_storage.h) in the SPE, and the monotonic
-	  anchor to the TF-M platform NV-counter service. Without TF-M the
-	  same PSA API is served from the non-secure image (Zephyr's
-	  secure_storage subsystem) -- that is the software tier's boundary,
-	  not this one.
+	  This backend is a CLIENT only. It does not call PSA Protected
+	  Storage directly from the normal application, because that would
+	  make the application the owner of its own log history. It binds
+	  only when the secure-service seam answers ready(); otherwise
+	  alp_update_log_open() falls through to the software tier.
 
-	  STATUS: stub. The tier registers but its ready() probe returns
-	  ALP_ERR_NOSUPPORT until the secure store + hardware monotonic
-	  counter are wired and provisioned on silicon, so the dispatcher
-	  transparently falls through to the SW tamper-evident tier
-	  (issues #111, #239). Enabling this today changes nothing at
-	  runtime; it exists so a TF-M-capable board can opt the tier into
-	  the registry once the on-silicon slice lands. It cannot build on
-	  native_sim (no TF-M there); leave it off.
+	  The app-IMMUTABLE guarantee requires a secure owner that the
+	  non-secure application cannot rewrite. On Alif E4/E8 that means
+	  a secure M55/TF-M image plus an Alif SE/firewall-protected storage
+	  region for the log state.
+
+config ALP_SDK_UPDATE_LOG_TFM_PSA_OWNER
+	bool "Build the TF-M PSA Protected Storage update-log owner"
+	default n
+	depends on ALP_SDK_UPDATE_LOG_TFM && TFM_PARTITION_PROTECTED_STORAGE
+	help
+	  Compile src/update_log/tfm_psa_secure_owner.c, the secure-side
+	  owner implementation behind the TF-M client backend. It stores
+	  every entry as a PSA Protected Storage WRITE_ONCE asset, stores
+	  mutable metadata as a PSA asset, and keeps the high-watermark
+	  counter as a Protected Storage asset.
+
+	  Enable this only in the Secure Processing Environment / secure
+	  partition that owns the log. A normal non-secure Zephyr app must
+	  not use this option as a shortcut: direct app ownership of PSA
+	  UIDs does not satisfy the audit-log requirement that old entries
+	  are non-modifiable by application firmware.
+
+config ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	bool "Register the Alif dual-M55 update-log client backend"
+	default n
+	depends on ALP_SDK_UPDATE_LOG
+	depends on ALP_SOC_ALIF_ENSEMBLE_E4 || ALP_SOC_ALIF_ENSEMBLE_E8
+	help
+	  Register the Alif E4/E8 dual-M55 update-log client backend. The
+	  normal application core sends append/verify/count/get requests over
+	  the RTSS MHU mailbox to a trusted M55 owner, and the owner writes the
+	  log in MRAM.
+
+	  This backend reports ALP_UPDATE_LOG_HW_ENFORCED only when its ready()
+	  probe sees both requirements: a responding owner and an explicit
+	  proof latch that the SE/device firewall already blocks the
+	  application core from writing the MRAM log partition. Without that
+	  firewall proof it declines with ALP_ERR_NOSUPPORT, so
+	  CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED remains fail-closed.
+
+config ALP_SDK_UPDATE_LOG_AEN_M55_OWNER
+	bool "Build the Alif dual-M55 update-log owner service"
+	default n
+	depends on ALP_SDK_UPDATE_LOG
+	depends on ALP_SOC_ALIF_ENSEMBLE_E4 || ALP_SOC_ALIF_ENSEMBLE_E8
+	help
+	  Build the trusted-owner service used by
+	  ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT. The owner opens the local
+	  update-log store, normally backed by MRAM NVS, then services MHU
+	  requests from the application core. It is not itself a registered
+	  HW_ENFORCED backend; the security property exists only when the
+	  SE/device firewall lets this owner write the MRAM log partition and
+	  denies the application core.
+
+config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN
+	bool "Assert that the Alif MRAM log partition is firewall-protected"
+	default n
+	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	help
+	  Let the AEN dual-M55 client report HW_ENFORCED after the owner also
+	  answers ready(). Enable only in a board/profile whose provisioning
+	  has already locked the MRAM log partition so the application core
+	  cannot write or erase it, and after a silicon test has proven that a
+	  direct application-core write is rejected.
+
+	  This option does not program the firewall. The policy is provisioned
+	  outside the public SDK by Alif SE/DEVICE configuration tooling.
+
+config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE
+	bool "Run the Alif HE direct-write firewall probe"
+	default n
+	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	help
+	  Build a one-shot HE diagnostic image that tries to write directly to
+	  alp_ulog_partition through Zephyr's MRAM flash driver and records the
+	  result in an SRAM proof beacon. This is the negative proof for the
+	  hardware-enforced AEN update-log path: HE must not be able to change
+	  the MRAM log partition directly.
+
+	  This probe is intentionally separate from the normal demo. If the
+	  firewall is missing, the probe writes the first 16 bytes of the log
+	  partition and reports failure. If the firewall is active, the write is
+	  expected to return an error, block HE readback, or raise a CPU fault
+	  during the write; the probe stamps that result for SWD readback.
+
+config ALP_SDK_UPDATE_LOG_AEN_M55_RPC_TIMEOUT_MS
+	int "Alif dual-M55 update-log request timeout in milliseconds"
+	default 2000
+	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	help
+	  Timeout for one client request to the M55 owner. A timeout means the
+	  owner image is absent, not released, or not servicing the shared
+	  mailbox, so ready() declines and the dispatcher can fail closed.
+
+config ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED
+	bool "Fail open() unless the update log is hardware-enforced"
+	default n
+	depends on ALP_SDK_UPDATE_LOG
+	help
+	  Refuse the software tamper-evident fallback and make
+	  alp_update_log_open() fail unless the selected backend reports
+	  ALP_UPDATE_LOG_HW_ENFORCED.
+
+	  Use this in demos or product builds whose policy requires old log
+	  entries to be physically unreachable by normal application firmware.
+	  It is intentionally fail-closed: on boards without a ready TF-M /
+	  secure-owner backend, open() returns NULL with ALP_ERR_NOSUPPORT
+	  instead of silently continuing with MRAM/NVS persistence.
 
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
 # wrapper still compiles and honours the v0.1 NULL-with-NOSUPPORT

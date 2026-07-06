@@ -511,20 +511,24 @@ zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/securit
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/security/se_cryptocell.c)
 # Update-log surface (<alp/update_log.h>) -- experimental, opt-in.
-# Pure engine + software tamper-evident tier + the Alif TF-M
-# (HW_ENFORCED) tier. Gated on CONFIG_ALP_SDK_UPDATE_LOG.  The dispatch
-# owns the public surface + the singleton handle; sw_tier registers the
-# universal silicon_ref="*" backend; alif_tfm_stub's seams compile
-# unconditionally (so they can't bitrot) but its backend registration is
-# gated behind CONFIG_ALP_SDK_UPDATE_LOG_TFM (=> BUILD_WITH_TFM), so it
-# only enters the registry where the platform advertises TF-M isolation.
+# Pure engine + software tamper-evident tier + the TF-M secure-service
+# client. Gated on CONFIG_ALP_SDK_UPDATE_LOG.  The dispatch owns the
+# public surface + the singleton handle; sw_tier registers the universal
+# silicon_ref="*" backend; tfm_psa registers only when the build enables
+# the TF-M client, and it binds only when a secure owner answers ready().
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log_boot_metadata.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/engine.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/sha256.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/sw_tier.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/alif_tfm_stub.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/tfm_psa.c)
+if(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT OR CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/aen_m55_owner.c)
+endif()
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG_TFM_PSA_OWNER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/tfm_psa_secure_owner.c)
 # Audio registry sources.  The dispatcher owns two handle pools
 # (alp_audio_in_t + alp_audio_out_t) keyed off the same class
 # registry; the portable Zephyr backend wires DMIC input +
