@@ -30,6 +30,10 @@
 Kconfig*  text eol=lf
 CMakeLists.txt text eol=lf
 
+# Patch files preserve upstream diff context; context markers followed by tabs
+# are valid patch syntax, not source indentation damage.
+*.patch text eol=lf -whitespace
+
 # Shell / Python helpers must stay LF so they remain executable
 # under WSL and macOS.
 *.sh      text eol=lf
