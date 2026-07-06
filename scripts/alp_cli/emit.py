@@ -42,6 +42,7 @@ PROJECT_EMIT_MODES = [
     "ipc-contract-h",
     "os-topology",
     "composed-route-table",
+    "carrier-netlist",
 ]
 
 # Mirror the orchestrator's --emit choices (alp_orchestrate.cli) == the

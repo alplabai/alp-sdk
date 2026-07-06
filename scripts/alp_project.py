@@ -1481,55 +1481,25 @@ def _emit_hw_info_h(
 
 
 # ---------------------------------------------------------------------
-# Composed-route-table emitter (demonstrator)
+# Carrier route / netlist emitters
 # ---------------------------------------------------------------------
 #
-# Purpose: give early visibility into what _resolve_pad_routes() +
-# _compose_route() return for the current (board x SoM) pair.
-# Output is JSON to stdout (or --output path).  Informs the larger
-# codegen design (Zephyr DTS overlays for proxy peripherals, etc.)
-# without committing to a production schema yet.
+# `composed-route-table` stays as the original debug surface.  The
+# route-row helper below is shared by the production `carrier-netlist`
+# contract so the two views cannot drift on hw_rev pad-route overrides.
 
 
-def _emit_composed_route_table(
+def _composed_route_rows(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
     board_preset: dict[str, Any] | None,
     metadata_root: Path,
-) -> str:
-    """Emit a JSON summary of the fully-composed pad route table for
-    the current (board x SoM) pair.
+) -> tuple[list[dict[str, Any]], str | None, str | None]:
+    """Return composed route rows plus the selected hw_rev / variant.
 
-    The table is derived by calling _resolve_pad_routes() (SoM side) and
-    _compose_route() (join with board side) for every E1M pad that
-    appears in either the board's e1m_routes: block or the SoM's
-    pad_routes: block.
-
-    JSON shape::
-
-        {
-          "board": "<name or null>",
-          "som": "<SKU>",
-          "silicon_variant": "<order_code or null>",
-          "routes": [
-            {
-              "e1m": "E1M_GPIO_IO15",
-              "board_category": "gpio",
-              "board_macro": "EVK_PIN_BMI323_INT1",
-              "board_role": null,
-              "board_doc": "...",
-              "active_low": true,
-              "dispatch": "cc3501e",
-              "dispatch_pin": 14,
-              "som_doc": "..."
-            },
-            ...
-          ]
-        }
-
-    Pads that only appear in the SoM's pad_routes: block (i.e. no
-    board-side role assigned) are included with null board_* fields
-    so the table is complete for the SoM-standalone scenario.
+    Rows cover every E1M pad named by the board and every SoM-only pad
+    that has a dispatch route.  Board-defined rows preserve YAML order;
+    SoM-only rows are sorted by E1M ID for deterministic output.
     """
     pad_routes = _resolve_pad_routes(sku_preset)
 
@@ -1610,14 +1580,251 @@ def _emit_composed_route_table(
             row["som_doc"] = composed["som_doc"]
         routes.append(row)
 
-    board_name = (board_preset or {}).get("name") or project.get("name")
+    return routes, hw_rev, silicon_variant_str
 
+
+def _emit_composed_route_table(
+    project: dict[str, Any],
+    sku_preset: dict[str, Any],
+    board_preset: dict[str, Any] | None,
+    metadata_root: Path,
+) -> str:
+    """Emit a JSON summary of the fully-composed pad route table for
+    the current (board x SoM) pair.
+
+    The table is derived by calling _resolve_pad_routes() (SoM side) and
+    _compose_route() (join with board side) for every E1M pad that
+    appears in either the board's e1m_routes: block or the SoM's
+    pad_routes: block.
+
+    Pads that only appear in the SoM's pad_routes: block (i.e. no
+    board-side role assigned) are included with null board_* fields
+    so the table is complete for the SoM-standalone scenario.
+    """
+    routes, hw_rev, silicon_variant_str = _composed_route_rows(
+        project, sku_preset, board_preset, metadata_root)
+    board_name = (board_preset or {}).get("name") or project.get("name")
     result: dict[str, Any] = {
         "board": board_name,
         "som": project["som"]["sku"],
         "hw_rev": hw_rev,
         "silicon_variant": silicon_variant_str,
         "routes": routes,
+    }
+    return json.dumps(result, indent=2) + "\n"
+
+
+def _manifest_path(kind: str, item_id: str, metadata_root: Path) -> Path:
+    return metadata_root / kind / f"{item_id}.yaml"
+
+
+def _load_optional_manifest(kind: str, item_id: str,
+                            metadata_root: Path) -> dict[str, Any] | None:
+    path = _manifest_path(kind, item_id, metadata_root)
+    if not path.is_file():
+        return None
+    return _load_yaml(path)
+
+
+def _passive_rows(passives: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for passive in passives or []:
+        if not isinstance(passive, dict):
+            continue
+        row: dict[str, Any] = {
+            "role": passive.get("role"),
+            "value": passive.get("value"),
+            "net": passive.get("net"),
+            "refdes_prefix": passive.get("refdes_prefix"),
+        }
+        rows.append({k: v for k, v in row.items() if v is not None})
+    return rows
+
+
+def _chip_bom_row(item_id: str, manifest: dict[str, Any],
+                  manifest_relpath: str) -> dict[str, Any]:
+    physical = manifest.get("physical") or {}
+    caveats: list[str] = []
+    if not physical:
+        caveats.append("missing_physical")
+    elif physical.get("visibility") == "internal":
+        caveats.append("physical_detail_internal")
+    if len(manifest.get("mpn_population") or []) > 1:
+        caveats.append("mpn_population_candidates")
+
+    row: dict[str, Any] = {
+        "item_id": item_id,
+        "kind": "chip",
+        "scope": "carrier",
+        "source": manifest_relpath,
+        "display_name": manifest.get("display_name"),
+        "vendor": manifest.get("vendor"),
+        "mpn_population": manifest.get("mpn_population") or [],
+        "bus": manifest.get("bus"),
+        "quantity": None,
+        "physical": {
+            "refdes_prefix": physical.get("refdes_prefix"),
+            "package": physical.get("package"),
+            "footprint": physical.get("footprint"),
+            "visibility": physical.get("visibility"),
+            "provenance": physical.get("provenance"),
+        },
+        "passives": _passive_rows(physical.get("passives")),
+    }
+    row["physical"] = {k: v for k, v in row["physical"].items()
+                       if v is not None}
+    if caveats:
+        row["caveats"] = caveats
+    return row
+
+
+def _block_bom_row(item_id: str, manifest: dict[str, Any],
+                   manifest_relpath: str) -> dict[str, Any]:
+    realizations = [
+        r for r in manifest.get("realizations") or []
+        if isinstance(r, dict)
+    ]
+    realization = realizations[0] if realizations else {}
+    caveats: list[str] = []
+    if not realizations:
+        caveats.append("missing_realization")
+    elif len(realizations) > 1:
+        caveats.append("multiple_realizations")
+    if realization.get("visibility") == "internal":
+        caveats.append("physical_detail_internal")
+    if not realization.get("parts"):
+        caveats.append("no_concrete_parts")
+
+    row: dict[str, Any] = {
+        "item_id": item_id,
+        "kind": "block",
+        "scope": "carrier",
+        "source": manifest_relpath,
+        "display_name": manifest.get("display_name"),
+        "quantity": None,
+        "realization": {
+            "id": realization.get("id"),
+            "physical_form": realization.get("physical_form"),
+            "visibility": realization.get("visibility"),
+        },
+        "parts": realization.get("parts") or [],
+        "passives": _passive_rows(realization.get("passives")),
+    }
+    row["realization"] = {k: v for k, v in row["realization"].items()
+                          if v is not None}
+    if caveats:
+        row["caveats"] = caveats
+    return row
+
+
+def _carrier_bom_rows(
+    board_preset: dict[str, Any] | None,
+    metadata_root: Path,
+) -> list[dict[str, Any]]:
+    """Build carrier BOM rows from board `populated: true`.
+
+    `populated:` is a logical population map, not a line-item BOM with
+    refdes or count, so rows deliberately leave `quantity` null unless a
+    future metadata field makes it authoritative.
+    """
+    rows: list[dict[str, Any]] = []
+    if board_preset is None:
+        return rows
+
+    populated = board_preset.get("populated") or {}
+    for item_id in sorted(k for k, v in populated.items() if v is True):
+        chip = _load_optional_manifest("chips", item_id, metadata_root)
+        if chip is not None:
+            rows.append(_chip_bom_row(
+                item_id, chip, f"metadata/chips/{item_id}.yaml"))
+            continue
+
+        block = _load_optional_manifest("blocks", item_id, metadata_root)
+        if block is not None:
+            rows.append(_block_bom_row(
+                item_id, block, f"metadata/blocks/{item_id}.yaml"))
+            continue
+
+        rows.append({
+            "item_id": item_id,
+            "kind": "unknown",
+            "scope": "carrier",
+            "source": None,
+            "quantity": None,
+            "caveats": ["missing_manifest"],
+        })
+    return rows
+
+
+def _route_to_net(row: dict[str, Any]) -> dict[str, Any]:
+    net_id = row.get("board_macro") or row["e1m"]
+    endpoints: list[dict[str, Any]] = [
+        {"kind": "e1m", "ref": row["e1m"]},
+    ]
+    if row.get("board_macro"):
+        endpoints.append({"kind": "board-macro", "ref": row["board_macro"]})
+    if row.get("dispatch") and row["dispatch"] != "direct":
+        endpoint: dict[str, Any] = {
+            "kind": "som-dispatch",
+            "ref": row["dispatch"],
+        }
+        if "dispatch_pin" in row:
+            endpoint["pin"] = row["dispatch_pin"]
+        endpoints.append(endpoint)
+
+    net: dict[str, Any] = {
+        "net_id": net_id,
+        "e1m": row["e1m"],
+        "board_category": row.get("board_category"),
+        "board_macro": row.get("board_macro"),
+        "board_role": row.get("board_role"),
+        "dispatch": row.get("dispatch", "direct"),
+        "endpoints": endpoints,
+    }
+    for key in ("board_doc", "active_low", "dispatch_pin", "som_doc"):
+        if key in row:
+            net[key] = row[key]
+    caveats = []
+    if row.get("board_macro") is None:
+        caveats.append("som_only_no_carrier_role")
+    if caveats:
+        net["caveats"] = caveats
+    return net
+
+
+def _emit_carrier_netlist(
+    project: dict[str, Any],
+    sku_preset: dict[str, Any],
+    board_preset: dict[str, Any] | None,
+    metadata_root: Path,
+) -> str:
+    """Emit the Studio-facing carrier netlist + BOM handoff contract.
+
+    This is intentionally not a KiCad, Gerber, or layout artifact.  It
+    exposes only public carrier-facing facts derivable from board.yaml,
+    board presets, chip/block manifests, and SoM pad dispatch metadata.
+    """
+    routes, hw_rev, silicon_variant_str = _composed_route_rows(
+        project, sku_preset, board_preset, metadata_root)
+    board_name = (board_preset or {}).get("name") or project.get("name")
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "alp.carrier_netlist",
+        "generated_by": "scripts/alp_project.py --emit carrier-netlist",
+        "board": board_name,
+        "som": project["som"]["sku"],
+        "hw_rev": hw_rev,
+        "silicon_variant": silicon_variant_str,
+        "nets": [_route_to_net(row) for row in routes],
+        "bom": {
+            "carrier": _carrier_bom_rows(board_preset, metadata_root),
+        },
+        "caveats": [
+            "carrier_handoff_not_pcb_layout",
+            "no_kicad_or_gerber_output",
+            "som_internals_excluded",
+            "quantity_null_when_board_populated_has_no_count",
+        ],
     }
     return json.dumps(result, indent=2) + "\n"
 
@@ -1883,8 +2090,9 @@ def main() -> int:
                                  "ipc-contract-h",
                                  # Per-core natural-vs-effective OS facts (issue #95).
                                  "os-topology",
-                                 # Demonstrator: JSON route-table dump.
-                                 "composed-route-table"],
+                                 # Carrier routing / Studio handoff JSON.
+                                 "composed-route-table",
+                                 "carrier-netlist"],
                         default="zephyr-conf",
                         help="Output format (default: zephyr-conf).")
     parser.add_argument("--output", type=Path, default=None,
@@ -1912,15 +2120,20 @@ def main() -> int:
 
     project = _validate_and_load(args.input)
 
-    # composed-route-table only needs the SoM + board definitions; it
-    # does not require the per-core slice machinery.
-    if args.emit == "composed-route-table":
+    # composed-route-table / carrier-netlist only need the SoM + board
+    # definitions; they do not require the per-core slice machinery.
+    if args.emit in ("composed-route-table", "carrier-netlist"):
         sku_preset_rt = _resolve_sku(project["som"]["sku"], args.metadata_root)
         board_preset_rt = _resolve_inline_or_preset_board(
             project, args.metadata_root)
-        out = _emit_composed_route_table(
-            project, sku_preset_rt, board_preset_rt, args.metadata_root
-        )
+        if args.emit == "composed-route-table":
+            out = _emit_composed_route_table(
+                project, sku_preset_rt, board_preset_rt, args.metadata_root
+            )
+        else:
+            out = _emit_carrier_netlist(
+                project, sku_preset_rt, board_preset_rt, args.metadata_root
+            )
         return _write_or_print(out, args.output)
 
     # board.yamls flow through the per-core / project-wide emit path

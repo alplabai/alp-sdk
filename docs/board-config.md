@@ -284,6 +284,14 @@ LSM6DSO and an SSD1306 OLED are not soldered on the EVK -- apps that
 want them attach the part to the I2C/Qwiic header and declare it in
 their board.yaml `chips:` array.
 
+For Alp Studio and other EDA frontends, `scripts/alp_project.py --emit
+carrier-netlist` composes the board and SoM layers into a deterministic
+JSON handoff: carrier-facing nets from `e1m_routes:` plus carrier BOM
+rows from `populated:` and the chip/block manifests under `metadata/`.
+This artifact deliberately excludes SoM-internal parts and is not a
+KiCad, Gerber, DRC, or PCB-layout output; downstream tools consume it
+to create those files.
+
 ### `som` block
 
 ```yaml

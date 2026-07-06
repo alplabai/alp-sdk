@@ -635,8 +635,7 @@ west build \
 
 > **Future work flag.**  The `--emit zephyr-board` emitter is on the
 > roadmap (see [[zephyr-board-from-yaml]]) but not yet wired in
-> `scripts/alp_project.py` as of 2026-05-18 — the script's `--emit`
-> choices currently end at `composed-route-table`.  Until the
+> `scripts/alp_project.py` as of 2026-05-18.  Until the
 > emitter lands, customers either hand-author a minimal Zephyr
 > board file under `boards/arm/alp_e1m_aen901_m55_hp/` (mirroring
 > the existing AEN701 board files), or run the example under

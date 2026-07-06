@@ -318,6 +318,7 @@ implementation that owns it (never a fork):
 | `ipc-contract-h` | Cross-core IPC contract header | orchestrator |
 | `os-topology` | Per-core natural-vs-effective OS facts | orchestrator |
 | `composed-route-table` | JSON route-table dump (demonstrator) | `alp_project.py` |
+| `carrier-netlist` | Studio-facing carrier nets + BOM JSON handoff | `alp_project.py` |
 | `dts-partitions` | DTS fixed-partitions overlay (`storage:` entries) | orchestrator |
 | `storage-mounts-c` | Static C storage mount table | orchestrator |
 | `tfm-sysbuild-conf` | TF-M sysbuild child-image overlay (`security.psa:`) | orchestrator |
