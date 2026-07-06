@@ -328,7 +328,7 @@ not others.
 
 | Library          | Header(s)            | Backed by                                                      | Status |
 |------------------|----------------------|----------------------------------------------------------------|--------|
-| Display          | `alp/display.h`      | Zephyr `display_*` (SSD1306 first).                            | v0.1 surface; full impl v0.3 |
+| Display          | `alp/display.h`      | Zephyr `display_*` driver class, including Zephyr MIPI DBI Type C SPI panels (`zephyr,mipi-dbi-spi` + ST7789V / ILI9341-class panel drivers). | Zephyr wrapper code-complete and native_sim-tested; DBI Type C path has build-only coverage, silicon bring-up pending |
 | Camera           | `alp/camera.h`       | Zephyr `video_*` API.  V2N MIPI CSI-2 wrapper in v0.2.          | v0.2 video stack (CPI / CSI-2 / D-PHY / ARX3A0) ported to Zephyr v4.4 + binds on E8; live capture bench-pending (sensor wiring); ISP-Pico ext + portable ISP config vendor-gated |
 | GUI/LVGL         | `alp/gui.h`          | Upstream LVGL with an Alp `lv_conf.h`.                         | Header re-export only — no custom widgets |
 | DSP              | `alp/dsp.h`          | Composable chain primitives — FIR/IIR/FFT/WINDOW via `alp_dsp_chain_t`; CMSIS-DSP SW fallback when `ALP_HAS_CMSIS_DSP` is set; GD32 FAC/CORDIC HW path on V2N via the bridge.  CMSIS-DSP low-level math (`arm_math.h`) consumed directly from app code — the SDK does not re-export it. | v0.5 surface (Wave-2 DSP); see ADR 0007. |

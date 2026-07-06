@@ -19,16 +19,14 @@
  * ── Why this layout? ───────────────────────────────────────────
  *
  *   1. `board.yaml` is the only file that names hardware.  It
- *      lists `chips: [st7789]` so the SDK's project loader pulls
- *      in chips/st7789/st7789.c, and `libraries: [lvgl]` so
- *      Zephyr's LVGL module gets enabled with the right include
- *      path + compile-time config.
+ *      declares the LVGL library plus the SPI/GPIO resources the
+ *      board devicetree binds to Zephyr's MIPI DBI Type C display
+ *      path.
  *
  *   2. `src/main.c` (this file) talks to the panel ONLY through
- *      the portable surfaces:
- *        - <alp/peripheral.h>  for SPI / GPIO open
- *        - <alp/chips/st7789.h> for the chip-specific init
- *        - <alp/gui.h>         (optional) for the LVGL bind glue
+ *      the portable LVGL surface:
+ *        - <lvgl.h>    for the UI API
+ *        - <alp/gui.h> (optional) for the future LVGL bind glue
  *      No `gd32g553_*` / `alif_*` / `renesas_*` symbols appear
  *      anywhere -- per the SDK's "Portable peripheral surfaces
  *      only in app + library code" rule.  Board-specific
@@ -69,7 +67,7 @@ int main(void)
 	/* Zephyr's display subsystem is the bedrock LVGL renders into.
      * The DEVICE_DT_GET path resolves whichever node devicetree
      * marks as the default display -- on the E1M-EVK that's the
-     * ST7789 we declared in board.yaml's `chips:`. */
+     * ST7789 panel behind the MIPI DBI Type C display node. */
 	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 	if (!device_is_ready(display)) {
 		LOG_ERR("display %s not ready", display->name);

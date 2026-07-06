@@ -127,16 +127,17 @@ lv_label_set_text(label, "Hello E1M");
 lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
 ```
 
-Enable: set `iot:` and `display:` features in your board.yaml; the
-loader translates them to `CONFIG_LVGL=y` + `CONFIG_DISPLAY=y` in
-the generated alp.conf.  Or for finer control, drop a Zephyr
-`prj.conf` override (see "Today's gaps" in `docs/board-config.md`).
+Enable: add `lvgl` to the target core's `libraries:` list.  The
+loader translates that to `CONFIG_LVGL=y` in the generated
+alp.conf; the app's `prj.conf` still owns demo-specific LVGL knobs
+such as draw-buffer size, color depth, and bundled demo entrypoints.
 
-Driver-side wiring (which display, which framebuffer) comes from
-the board preset -- e.g. `metadata/boards/e1m-evk.yaml`
-populates the SSD1306 OLED, and `<alp/boards/alp_e1m_evk.h>` maps
-the I²C bus + reset pin.  Your app code just calls `lv_*` against
-the resolved display.
+Driver-side wiring comes from devicetree.  For SPI TFTs, the board
+preset or app overlay declares Zephyr's MIPI DBI Type C controller
+(`compatible = "zephyr,mipi-dbi-spi"`) plus the panel child
+(`sitronix,st7789v`, `ilitek,ili9341`, ...), then marks that panel as
+`zephyr,display`.  Your app code just calls `lv_*` against the
+resolved display.
 
 ### LittleFS
 

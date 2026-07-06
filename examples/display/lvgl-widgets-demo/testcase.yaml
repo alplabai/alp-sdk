@@ -4,9 +4,9 @@ sample:
   name: lvgl-widgets-demo
   description: |
     Wraps the upstream lv_demo_widgets() showcase on a 240x320
-    ST7789 panel via the SDK's chips/st7789/ driver + the lvgl
-    library knob.  native_sim builds the UI against LVGL's SDL2
-    backend; AEN target build verifies the cross-compile.
+    ST7789 panel via Zephyr's display subsystem + the lvgl library
+    knob.  native_sim builds the UI against the dummy display; AEN
+    target build verifies the cross-compile.
 common:
   tags: lvgl demo example
 tests:
