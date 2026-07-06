@@ -115,10 +115,33 @@ block, the dual-M55 owner/client flow, and the single-core SAU block — therefo
 to E4 unchanged. The one genuinely open item is the anti-rollback NV counter (tracked
 under #111).
 
-A **single-core** variant of the same guarantee is proven separately in
-`examples/aen/aen-tz-secure-log-probe`: on one M55, TrustZone-M (the SAU) marks the
-log window Secure so a Non-Secure application store to it faults (AttributionUnit
-Violation). That is the path for single-M55 SKUs with no second core to own the log.
+A **single-core** variant of the same guarantee is proven in
+`examples/aen/aen-tz-secure-log-probe` (the app blocked from the log) and
+`examples/aen/aen-tz-secure-log-append` (the full owner/client append): on one M55,
+TrustZone-M (the SAU) marks the log window Secure, the Non-Secure app appends only via
+the Secure owner, and its own direct store faults. That is the path for single-M55 SKUs
+with no second core to own the log.
+
+### Anti-rollback across a full reflash (#111)
+
+Two rollback scopes, and they are covered very differently:
+
+- **Against the application** — solved. The owner holds the log and its monotonic
+  sequence counter inside the firewall/SAU-protected region; the app cannot rewind
+  either (proven above), and `verify()` detects any content mutation, truncation,
+  reorder, or in-place rollback.
+- **Against a full reflash** — needs a monotonic anchor stored *outside* the rewindable
+  MRAM, and **current E8 SE firmware exposes no runtime-writable one**: there is no SE
+  NV-counter/secure-storage mailbox (`se_service.h` has none), no runtime OTP-write
+  path (SETOOLS OTP programming is provisioning-time only), and no per-log MCUboot
+  security counter. So a reflash-surviving anchor cannot be built on the SDK side today.
+
+The E8-available levers, all needing a step the SDK can't take alone, are: the SES
+firmware anti-rollback version as a coarse per-update epoch (readable at runtime via
+`se_service_get_toc_version()`, if the SES enforces version monotonicity for downgrades);
+a future SE NV-counter mailbox; OTP customer words with a runtime-burn capability the SE
+would have to expose; or a remote-attestation anchor. Until one exists, the tier is
+honest about scope: **app-immutable, not reflash-immutable** — #111.
 
 The AEN flash helpers build app-only ATOC packages by default. That preserves
 the board's existing DEVICE/firewall policy, which is the policy the proof is
