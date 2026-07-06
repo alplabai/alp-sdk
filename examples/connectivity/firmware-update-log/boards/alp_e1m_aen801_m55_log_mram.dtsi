@@ -1,0 +1,49 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Shared MRAM layout for the AEN firmware-update-log HE client and HP owner.
+ *
+ * The demo images are loaded to each core's ITCM by the SE ATOC package. The
+ * audit-log body is the part that lives in MRAM, in alp_ulog_partition below.
+ *
+ *   0x000000..0x00ffff  boot placeholder
+ *   0x010000..0x08ffff  unused by this ITCM-loaded demo
+ *   0x090000..0x09ffff  alp_ulog_partition, Zephyr NVS update-log store
+ *   0x560000..0x57ffff  reserved for the Alif ATOC package
+ *
+ * In the hardware-enforced flow, HP owns alp_ulog_partition and HE must be
+ * blocked from writing it by the SE/device firewall. Without that firewall
+ * policy, MRAM/NVS is persistence only, not application-immutability.
+ */
+
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &scratch_partition;
+/delete-node/ &storage_partition;
+
+&mram_storage {
+	partitions {
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x0 DT_SIZE_K(64)>;
+		};
+
+		slot0_partition: partition@10000 {
+			label = "image-0-unused";
+			reg = <0x10000 DT_SIZE_K(512)>;
+		};
+
+		alp_ulog_partition: partition@90000 {
+			label = "alp-ulog";
+			reg = <0x90000 DT_SIZE_K(64)>;
+		};
+
+		atoc_reserved_partition: partition@560000 {
+			label = "alif-atoc";
+			reg = <0x560000 DT_SIZE_K(128)>;
+			read-only;
+		};
+	};
+};
