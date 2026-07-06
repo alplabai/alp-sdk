@@ -1988,8 +1988,8 @@ config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE
 	  This probe is intentionally separate from the normal demo. If the
 	  firewall is missing, the probe writes the first 16 bytes of the log
 	  partition and reports failure. If the firewall is active, the write is
-	  expected to return an error or raise a CPU fault during the write; the
-	  probe stamps that result for SWD readback.
+	  expected to return an error, block HE readback, or raise a CPU fault
+	  during the write; the probe stamps that result for SWD readback.
 
 config ALP_SDK_UPDATE_LOG_AEN_M55_RPC_TIMEOUT_MS
 	int "Alif dual-M55 update-log request timeout in milliseconds"

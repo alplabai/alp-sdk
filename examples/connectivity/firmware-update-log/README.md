@@ -71,9 +71,10 @@ prove.
 
 The proof is a negative test: build the HE firewall-probe profile and let HE try
 to write the MRAM log partition directly. A valid hardware-enforced board either
-rejects that write without changing the bytes, or raises a CPU fault during the
-write. If the bytes change, the firewall is not active and the `HW_ENFORCED`
-profile must not be used.
+rejects that write, blocks HE from reading the partition back, or raises a CPU
+fault during the write. The bench helper captures the first 16 bytes before the
+probe runs and compares them over SWD after the probe. If the bytes change, the
+firewall is not active and the `HW_ENFORCED` profile must not be used.
 
 The log is append-only and never wraps: when the partition is full,
 `alp_update_log_append()` returns `ALP_ERR_NOMEM` and the existing chain
@@ -131,6 +132,19 @@ west build -p always \
 scripts/bench/aen/flash-update-log-firewall-probe.sh --package-only \
     build/firmware-update-log-he-probe
 
+# To test a newly provisioned board-specific DEVICE/firewall policy, place that
+# JSON under the SETOOLS build/config directory and include it deliberately:
+ALP_AEN_INCLUDE_DEVICE_CONFIG=yes \
+ALP_AEN_DEVICE_CONFIG_JSON=<board-specific-device-config.json> \
+scripts/bench/aen/flash-update-log-firewall-probe.sh --package-only \
+    build/firmware-update-log-he-probe
+
+ALP_CONFIRM_DESTRUCTIVE_FLASH=yes \
+scripts/bench/aen/flash-update-log-firewall-probe.sh \
+    build/firmware-update-log-he-probe
+
+ALP_AEN_INCLUDE_DEVICE_CONFIG=yes \
+ALP_AEN_DEVICE_CONFIG_JSON=<board-specific-device-config.json> \
 ALP_CONFIRM_DESTRUCTIVE_FLASH=yes \
 scripts/bench/aen/flash-update-log-firewall-probe.sh \
     build/firmware-update-log-he-probe
@@ -145,9 +159,10 @@ and exits non-zero.
 | Result word | Meaning |
 |---|---|
 | `2` | CPU fault occurred while HE was attempting the direct MRAM write. |
-| `3` | Direct write returned, but the protected MRAM bytes did not change. |
+| `3` | Direct write returned, but HE could not install its attempted pattern. |
 | `4` | HE changed `alp_ulog_partition`; hardware enforcement is not active. |
 | `5` | Probe setup/read failed; fix the board/build before claiming enforcement. |
+| `6` | HE could not read the partition back; the helper must use SWD and the pre-flash baseline to decide pass/fail. |
 
 For the dual-core AEN package, use a two-entry ATOC: HP is `M55_HP`
 `["load", "boot"]` at `0x50000000`, and HE is `M55_HE` `["load"]` at
