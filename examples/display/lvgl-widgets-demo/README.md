@@ -7,10 +7,10 @@ tree -- the headline showcase of every standard LVGL widget
 ## What it shows
 
 - LVGL renders into the Zephyr display subsystem unchanged.
-- The SDK's `st7789` chip driver handles the panel-specific init.
+- Zephyr's MIPI DBI Type C display path handles ST7789 panel init
+  from devicetree.
 - Customer code (`src/main.c`) stays board-portable: no
-  vendor-specific symbols, only `<alp/*>` peripheral surfaces +
-  the portable LVGL API.
+  vendor-specific symbols, only the portable LVGL API.
 
 ## Hardware needed
 
@@ -42,5 +42,6 @@ for UI iteration without touching hardware.
 ## Verification status
 
 `[UNTESTED]` -- the demo compiles and lv_demo_widgets() is the
-upstream LVGL reference target.  Real-hardware bring-up on the
-E1M-EVK lands once the v1.0 HiL sweep runs.
+upstream LVGL reference target.  The underlying MIPI DBI Type C
+devicetree path has build-only CI coverage; real-hardware bring-up
+on the E1M-EVK lands once the v1.0 HiL sweep runs.

@@ -26,8 +26,8 @@ cores:
     libraries:
       - lvgl
     # SPI for the display + GPIO for the D/C# + reset pins.  The
-    # st7789 chip driver wraps these into <alp/chips/st7789.h>'s
-    # init / set_window / write_pixels surface.
+    # board devicetree binds these to Zephyr's MIPI DBI Type C
+    # controller and the ST7789 display driver; the app stays on LVGL.
     peripherals:
       - spi
       - gpio

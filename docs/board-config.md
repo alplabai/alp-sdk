@@ -905,9 +905,20 @@ python3 $ALP_SDK/scripts/alp_project.py \
     --output build/generated/alp.overlay
 ```
 
-Encoders, cameras, displays, and other non-bus device classes land
-in the dts-overlay emitter in v0.4 once the upstream SoM board
-files lock the gpio bank/index columns.
+The dts-overlay emitter still synthesizes only the bus aliases and
+GPIO pin array above.  Display devices are supported through the
+Zephyr devicetree path today, but the board preset or app overlay
+must provide the concrete display node.  For SPI TFTs, use Zephyr's
+MIPI DBI Type C binding (`compatible = "zephyr,mipi-dbi-spi"`) with
+the panel driver child (for example `sitronix,st7789v`), then expose
+that child as `zephyr,display` for LVGL and/or `alp-display0` for
+`<alp/display.h>`.  Application code stays on LVGL or the portable
+display API; it does not initialise the panel driver directly.
+
+First-class display synthesis in the dts-overlay emitter remains a
+follow-up once the upstream SoM board files lock the gpio bank/index
+columns.  Encoders, cameras, and other non-bus device classes follow
+the same rule.
 
 ### What the loader does NOT yet do (v0.4 follow-ups)
 
