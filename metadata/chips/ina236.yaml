@@ -24,6 +24,43 @@ kconfig:
   zephyr:         ALP_SDK_CHIP_INA236
   baremetal:      ALP_SDK_CHIP_INA236
 
+signals:
+  - { name: SCL,   type: input,  scope: "I2C" }
+  - { name: SDA,   type: bidir,  scope: "I2C" }
+  - { name: A0,    type: input,  scope: "I2C address strap; tie to GND/SCL/SDA/VS per Table 7-1" }
+  - { name: ALERT, type: output, scope: "multifunction alert, open-drain" }
+  - { name: VS,    type: power }
+  - { name: GND,   type: ground }
+  - { name: IN+,   type: analog, scope: "current-sense positive input" }
+  - { name: IN-,   type: analog, scope: "current-sense negative input; bus-voltage reference" }
+
+physical:
+  # pins per TI INA236 datasheet SBOSA81D (May 2021, rev. Aug 2023; the manifest's
+  # SBOS868 is the same device's original 2018 literature number, since renumbered
+  # by TI), Section 5 "Pin Configuration and Functions", Table 5-1 "Pin Functions",
+  # DDF (SOT-23-8) column -- matches mpn_population INA236AIDDFR (DDF suffix).
+  # NOTE: current TI datasheet lists DSBGA-8 and SOT-23-8 packages only, not
+  # VSSOP-10 -- corrected here from the earlier assumption.
+  refdes_prefix: U
+  package:       SOT-23-8
+  footprint:     sot23_8_1p6x2p9mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1", signal: "IN+" }
+    - { pad: "2", signal: "IN-" }
+    - { pad: "3", signal: "GND" }
+    - { pad: "4", signal: "VS" }
+    - { pad: "5", signal: "SCL" }
+    - { pad: "6", signal: "SDA" }
+    - { pad: "7", signal: "A0" }
+    - { pad: "8", signal: "ALERT" }
+  passives:
+    - { role: decouple, value: 100nF, net: VS,  refdes_prefix: C }
+    - { role: pullup,   value: 4k7,   net: SCL, refdes_prefix: R }
+    - { role: pullup,   value: 4k7,   net: SDA, refdes_prefix: R }
+    - { role: pullup,   value: 4k7,   net: ALERT, refdes_prefix: R }
+
 families:
   - aen
   - v2n
