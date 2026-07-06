@@ -109,6 +109,11 @@ the trusted owner, and HE's own direct write bus-faults. The remaining gaps are 
 parity (E8 = E4 + A32; expected but not yet E4-bench-proven) and the anti-rollback NV
 counter — both tracked under #111.
 
+A **single-core** variant of the same guarantee is proven separately in
+`examples/aen/aen-tz-secure-log-probe`: on one M55, TrustZone-M (the SAU) marks the
+log window Secure so a Non-Secure application store to it faults (AttributionUnit
+Violation). That is the path for single-M55 SKUs with no second core to own the log.
+
 The AEN flash helpers build app-only ATOC packages by default. That preserves
 the board's existing DEVICE/firewall policy, which is the policy the proof is
 meant to test. Only set `ALP_AEN_INCLUDE_DEVICE_CONFIG=yes` when you

@@ -1,0 +1,6 @@
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+	};
+};
+&itcm { /delete-property/ zephyr,code-partition; };
