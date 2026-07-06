@@ -68,7 +68,7 @@ signatures), if you have one in mind.
    breakdown + how to run individual layers.
 
    Don't want to set up west + Zephyr by hand?
-   [`tools/native-sim-container/`](tools/native-sim-container/README.md)
+   [`tools/native-sim-container/`](tools/native-sim-container/)
    freezes the `native_sim` PR gate in a container --
    `make -C tools/native-sim-container test` reproduces
    `pr-twister.yml` locally with no hardware.

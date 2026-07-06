@@ -205,7 +205,7 @@ alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info,
 /**
  * @brief Silicon-level identity as returned by @ref alp_soc_info_read.
  *
- * Complements @ref alp_hw_info_t: the EEPROM manifest identifies the
+ * Complements @ref alp_hw_info_t -- the EEPROM manifest identifies the
  * assembled MODULE (SKU / hw_rev / factory serial), while this struct
  * identifies the SILICON -- the SoC die revision, the factory-fused
  * unique serial, and the version of the secure / system-controller

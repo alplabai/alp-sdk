@@ -112,7 +112,7 @@ typedef struct alp_backend_class_range {
  *
  * On a plain-CMake STATIC libalp_sdk.a the archive member that carries
  * a class's ALP_BACKEND_REGISTER entry (typically its sw_fallback TU)
- * is nothing but data in the alp_backends_<class> linker section -- no
+ * is nothing but data in the `alp_backends_<class>` linker section -- no
  * code references it.  A static-library link only pulls a member when
  * an already-included object needs one of its symbols, so that member
  * never joins the link; the section is then absent and the

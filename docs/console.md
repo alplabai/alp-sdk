@@ -276,7 +276,7 @@ rebooting...
 
 ---
 
-## Companion binding
+## Companion binding {#companion-binding}
 
 ### V2N (RZ/V2N + GD32 supervisor)
 

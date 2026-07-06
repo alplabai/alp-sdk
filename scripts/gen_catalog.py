@@ -231,7 +231,7 @@ def build_examples() -> dict[str, list[dict]]:
         summary = (_summary_from_readme(ex_dir / "README.md")
                    or _summary_from_main_c(ex_dir / "src"))
         entry: dict = {
-            "path": str(ex_dir.relative_to(REPO)),
+            "path": ex_dir.relative_to(REPO).as_posix(),
             "name": ex_dir.name,
         }
         som = (doc.get("som") or {}).get("sku")
@@ -265,7 +265,7 @@ def build_emit_modes() -> list[dict]:
     if not choices:
         raise SystemExit(
             "gen_catalog: could not read --emit choices from "
-            f"{CLI.relative_to(REPO)}")
+            f"{CLI.relative_to(REPO).as_posix()}")
     modes: list[dict] = []
     for mode in sorted(choices):
         desc = EMIT_MODE_DESCRIPTIONS.get(mode)
@@ -299,7 +299,7 @@ def build_portable_api() -> list[dict]:
     api: list[dict] = []
     for header in sorted(INCLUDE.glob("*.h")):
         api.append({
-            "header":    str(header.relative_to(REPO)),
+            "header":    header.relative_to(REPO).as_posix(),
             "functions": _public_functions(header),
         })
     return api
@@ -327,7 +327,7 @@ def build_gates() -> list[dict]:
     gates: list[dict] = []
     for script in sorted(SCRIPTS.glob("check_*.py")):
         gates.append({
-            "script":  str(script.relative_to(REPO)),
+            "script":  script.relative_to(REPO).as_posix(),
             "purpose": _docstring_oneliner(script),
         })
     return gates
@@ -368,12 +368,12 @@ def main() -> int:
                   "`python3 scripts/gen_catalog.py` and commit the result.",
                   file=sys.stderr)
             return 1
-        print(f"OK   {OUT.relative_to(REPO)}  ({n_soms} SoMs, in sync)")
+        print(f"OK   {OUT.relative_to(REPO).as_posix()}  ({n_soms} SoMs, in sync)")
         return 0
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(text, encoding="utf-8")
-    print(f"wrote {OUT.relative_to(REPO)}  ({n_soms} SoMs)")
+    print(f"wrote {OUT.relative_to(REPO).as_posix()}  ({n_soms} SoMs)")
     return 0
 
 

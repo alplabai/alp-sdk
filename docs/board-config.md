@@ -628,7 +628,7 @@ Loader rules (enforced by `_validate_consistency()` in
   use the curated path for curated entries.
 - `profile:` must resolve to a file (repo-relative).
 
-### `libraries` (project-wide, ADR 0018)
+### `libraries` (project-wide, ADR 0018) {#libraries-project-wide-adr-0018}
 
 The **top-level** `libraries:` key (a sibling of `som:` / `cores:`,
 not nested under a core) selects *curated third-party libraries* the
@@ -675,7 +675,7 @@ bindings); the top-level `libraries:` is the manifest-driven ADR 0018
 selection. Use the top-level key for the curated third-party libraries
 that ship a `metadata/libraries/<name>.yaml` manifest.
 
-See [`metadata/libraries/README.md`](../metadata/libraries/README.md)
+See [`metadata/libraries/README.md`](../metadata/libraries/)
 for the manifest shape, the full library list, and how to add one.
 
 #### Flagship: micro-ROS + ROS 2 across one heterogeneous project

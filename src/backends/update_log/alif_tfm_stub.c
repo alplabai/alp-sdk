@@ -7,6 +7,8 @@
  * live in the Secure Processing Environment, unreachable by the
  * non-secure app.
  *
+ * @par Tracking: github.com/alplabai/alp-sdk/issues/111
+ *
  * @par What this tier WOULD bind to (the two engine seams, store.h)
  *   - store   -> PSA Protected Storage. The API is groundable in the
  *     pinned Zephyr tree (subsys/secure_storage/include/psa/protected_storage.h):
@@ -42,8 +44,6 @@
  * The seam stubs below are compiled unconditionally (they cannot bitrot
  * against store.h) and stand in for the psa_ps / NV-counter bindings the
  * on-silicon slice will replace.
- *
- * @par Tracking: github.com/alplabai/alp-sdk/issues/111
  */
 #include "alp/update_log.h"
 #include "update_log/store.h"
