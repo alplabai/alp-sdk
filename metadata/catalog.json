@@ -275,6 +275,13 @@
         "summary": "Wraps the upstream **`lv_demo_benchmark()`** -- the canonical LVGL performance harness. Walks a fixed scene set (gradients, alpha blends, text rendering, image rotation, ...) and reports per-scene FPS at the end."
       },
       {
+        "board": "e1m-x-evk",
+        "name": "lvgl-dashboard-x-evk",
+        "path": "examples/display/lvgl-dashboard-x-evk",
+        "som": "E1M-V2N101",
+        "summary": "A minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel (RK055HDMIPI4MA0, 720 x 1280 @ 60 Hz)."
+      },
+      {
         "board": "e1m-evk",
         "name": "lvgl-music-player",
         "path": "examples/display/lvgl-music-player",
