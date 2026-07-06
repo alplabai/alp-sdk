@@ -56,10 +56,28 @@ static uint32_t get_le32(const uint8_t *p)
 	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-/* Firmware *release* version reported by GET_DIAG_INFO.fw_version (u16) --
- * distinct from ALP_CC3501E_PROTOCOL_VERSION (GET_VERSION).  Encodes
- * firmware-version.txt 0.1.0 as 0x0001 (the first release). */
-#define CC3501E_BRIDGE_FW_VERSION_U16 0x0002u
+/* Firmware *release* version reported by GET_DIAG_INFO.fw_version (u16).
+ *
+ * SINGLE SOURCE OF TRUTH = firmware-version.txt.  The build systems parse
+ * that SemVer and pass the packed value in on the command line, so the
+ * runtime marker can never drift from the release version:
+ *   - CMake (stub build):  target_compile_definitions in CMakeLists.txt
+ *   - ti build:            -DCC3501E_BRIDGE_FW_VERSION_U16 in ti/build_ti.sh
+ *
+ * Packing (pre-1.0 SemVer 0.MINOR.PATCH): high byte = MINOR, low byte =
+ * PATCH, i.e. 0.2.0 -> 0x0200, 0.2.5 -> 0x0205.  MAJOR is 0 pre-1.0; fold
+ * it into the encoding when the first 1.x ships.
+ *
+ * This is distinct from BOTH:
+ *   - ALP_CC3501E_PROTOCOL_VERSION (GET_VERSION) -- the wire-compat gate.
+ *   - the GPE flash/image version (ti/deploy_validate.sh) -- the vendor-RoT
+ *     anti-rollback gate; monotonic + date-derived, NOT this app SemVer.
+ *
+ * The #ifndef fallback keeps a standalone compile (no -D) sane and MUST
+ * track firmware-version.txt's current value. */
+#ifndef CC3501E_BRIDGE_FW_VERSION_U16
+#define CC3501E_BRIDGE_FW_VERSION_U16 0x0200u /* fallback = firmware-version.txt 0.2.0 */
+#endif
 
 /* Diagnostics state (firmware-side): last_error = the most recent non-OK
  * response emitted; the frame counters feed DIAG_GET_STATS.  All are

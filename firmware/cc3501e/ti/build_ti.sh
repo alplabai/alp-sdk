@@ -88,6 +88,20 @@ cflags=(-c -mcpu=cortex-m33 -mthumb -mfloat-abi=hard -mfpu=fpv5-sp-d16
         -DDeviceFamily_CC35XX -DCC35XX -DCC3501E_RTOS_FREERTOS -Oz
         -ffunction-sections -fdata-sections -Wall)
 
+# Derive the GET_DIAG_INFO.fw_version marker from firmware-version.txt (the SINGLE
+# source of truth) so this TI build path stays in lockstep with the CMake build and
+# never drifts from the release version.  Pre-1.0 packing: (MINOR<<8)|PATCH -> 0.2.0
+# = 0x0200.  This is the APP SemVer marker -- DISTINCT from the GPE flash version in
+# deploy_validate.sh (anti-rollback gate) and ALP_CC3501E_PROTOCOL_VERSION (wire gate).
+fwver="$(head -n1 "$fw/firmware-version.txt" | tr -d '[:space:]')"
+if [[ "$fwver" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+  fw_u16=$(printf '0x%04x' $(( (${BASH_REMATCH[2]} << 8) | ${BASH_REMATCH[3]} )))
+else
+  echo "firmware-version.txt not SemVer major.minor.patch: '$fwver'" >&2; exit 4
+fi
+echo "== fw_version marker: $fwver -> $fw_u16 (from firmware-version.txt) =="
+cflags+=("-DCC3501E_BRIDGE_FW_VERSION_U16=$fw_u16")
+
 txdef=()
 [ "$TRANSPORT" = sdio ] && txdef+=(-DCC3501E_CONTROL_TRANSPORT_SDIO=1)
 [ "$OTA_SELFTEST" = 1 ] && txdef+=(-DCC3501E_OTA_SELFTEST)
