@@ -523,6 +523,10 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/sha256.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/sw_tier.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/tfm_psa.c)
+if(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT OR CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/update_log/aen_m55_owner.c)
+endif()
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_UPDATE_LOG_TFM_PSA_OWNER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/update_log/tfm_psa_secure_owner.c)
 # Audio registry sources.  The dispatcher owns two handle pools

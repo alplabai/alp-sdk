@@ -9,17 +9,19 @@ automatically at boot. On native_sim and on boards without secure storage, the
 software tier builds and verifies a tamper-evident chain, but it does not make
 old entries physically immutable to application firmware.
 
-The hardware-enforced tier is available when the TF-M secure-service backend
-has a real secure owner. It keeps entries as write-once secure-world assets and
-keeps the high-watermark counter in protected storage. On Alif E4/E8, that
-secure owner must use storage covered by the Alif SE/firewall policy.
+The hardware-enforced tier is available when the selected backend has a real
+secure owner. The TF-M route keeps entries as write-once secure-world assets
+and keeps the high-watermark counter in protected storage. On Alif E4/E8, the
+AEN route uses the second M55 as the trusted owner: the application core sends
+requests over MHU, the owner writes the MRAM log, and the Alif SE/device
+firewall must block the application core from writing that MRAM partition.
 
 ## Assurance levels
 
 | Level | Value | What you get |
 |---|---|---|
 | `SW_TAMPER_EVIDENT` | `0` | SHA-256 hash-chain + monotonic counter (NVS-persisted where the board provides an `alp_ulog_partition`; RAM otherwise). Detects mutation, truncation, rollback, and reorder of historical entries. App-cooperative: a process with write access to the store can forge entries. Use for audit trails where cooperative tamper-evidence is sufficient. |
-| `HW_ENFORCED` | `1` | Secure-world store + protected high-watermark counter. Entries are PSA Protected Storage `WRITE_ONCE` assets behind a secure service. Normal application firmware cannot rewrite old entries when the TF-M owner and its storage are correctly isolated by the platform. |
+| `HW_ENFORCED` | `1` | Trusted-owner store isolated from the application core. Normal application firmware cannot rewrite old entries when the owner and its storage are isolated by the platform. On TF-M this is a secure partition and protected storage. On AEN this is an M55 owner plus SE/device firewall-protected MRAM; a non-decrementable rollback anchor still depends on the board's provisioned secure counter or equivalent device policy. |
 
 Call `alp_update_log_assurance()` to query which level is active at runtime.
 
@@ -45,12 +47,19 @@ that runs the image from MRAM slot0 and carves a dedicated MRAM
 top-of-MRAM ATOC package used by the SE boot flow.
 
 The AEN bench config also sets
-`CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED=y`. That is deliberate: the
-current public Alif Zephyr path can make the software tier durable in MRAM, but
-the MRAM driver is still writable by normal M55 firmware. Until a secure
-TF-M/owner backend is wired and proven, the AEN image fails closed instead of
-using the MRAM/NVS software tier as a substitute for application-immutable
-storage.
+`CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED=y`. That is deliberate: MRAM/NVS
+is durable, but not automatically application-immutable. The HE build enables
+the AEN dual-M55 client backend and fails closed unless both conditions are
+true:
+
+1. the HP owner image is running and answers the mailbox request; and
+2. the board profile enables `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN`
+   after provisioning has locked the MRAM log partition against HE writes and
+   the direct-write rejection has been proven on silicon.
+
+That Kconfig bit does not program the firewall. It is the public build-time
+latch saying the SE/device firewall policy has already been provisioned and
+silicon-proven for this board.
 
 The log is append-only and never wraps: when the partition is full,
 `alp_update_log_append()` returns `ALP_ERR_NOMEM` and the existing chain
@@ -73,11 +82,11 @@ A passing run prints (among other lines):
   #0  v=1.4.2  status=0  ts=1718000000
 ```
 
-With the current AEN fail-closed config, no hardware-enforced backend is active
-yet, so the board prints:
+With the current public AEN fail-closed config, the firewall-proof latch is not
+enabled, so the HE board prints:
 
 ```
-[update-log] HW_ENFORCED required, but no secure owner/backend is active
+[update-log] HW_ENFORCED required, but no secure owner/firewall-backed backend is active
 ```
 
 If `CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED` is temporarily disabled only
@@ -87,8 +96,15 @@ to inspect the software MRAM tier, the storage line reports:
 [update-log] storage: MRAM NVS (alp_ulog_partition)
 ```
 
-On a board that enables `CONFIG_ALP_SDK_UPDATE_LOG_TFM=y` and provides the
-secure owner, the first line reports:
+The HP owner build prints:
+
+```
+[update-log] AEN HP owner: MRAM writer service starting
+[update-log] owner storage: MRAM NVS (alp_ulog_partition)
+```
+
+On a board that enables the TF-M owner or the AEN M55 owner with the firewall
+proof latch, the HE application's first line reports:
 
 ```
 [update-log] assurance: HW_ENFORCED (secure tier)

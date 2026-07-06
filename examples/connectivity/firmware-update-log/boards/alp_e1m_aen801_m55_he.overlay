@@ -13,9 +13,10 @@
  *   0x090000..0x09ffff  alp_ulog_partition, Zephyr NVS update-log store
  *   0x560000..0x57ffff  reserved for the Alif ATOC package
  *
- * The update-log partition is deliberately away from the ATOC area. It is
- * still writable by the normal M55 application; the example's assurance remains
- * SW_TAMPER_EVIDENT until a secure owner/firewall-backed backend is present.
+ * The update-log partition is deliberately away from the ATOC area. In the
+ * hardware-enforced flow, HP owns this partition and HE must be blocked from
+ * writing it by the SE/device firewall. Without that firewall policy, MRAM/NVS
+ * is only persistence, not app-immutability.
  */
 
 /delete-node/ &boot_partition;

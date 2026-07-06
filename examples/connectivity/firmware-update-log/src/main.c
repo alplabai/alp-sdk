@@ -15,6 +15,12 @@
  * the SE/firewall policy, so normal application firmware cannot rewrite
  * history.
  *
+ * On AEN dual-M55 builds the hardware path is split by role. HP is the trusted
+ * owner and writes the MRAM log. HE is the application client and talks to HP
+ * through a tiny MHU mailbox service. HE reports HW_ENFORCED only after the
+ * owner replies and the board profile says the MRAM log partition has already
+ * been proven firewall-protected from HE writes.
+ *
  * Flow: open the log, append one update record (as MCUboot/a secure service
  * would after verifying an image), then verify the whole chain and print it.
  */
@@ -23,10 +29,14 @@
 
 #include <alp/update_log.h>
 
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
+#include <alp/mproc.h>
+#endif
+
 #include <zephyr/storage/flash_map.h>
 
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_PERSIST) && PARTITION_EXISTS(alp_ulog_partition)
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HE)
+#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HE) || defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 #define UPDATE_LOG_STORAGE_STR "MRAM NVS (alp_ulog_partition)"
 #else
 #define UPDATE_LOG_STORAGE_STR "persistent NVS (alp_ulog_partition)"
@@ -35,6 +45,12 @@
 #define UPDATE_LOG_STORAGE_STR "RAM fallback"
 #endif
 
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
+#define HE_LOAD_ADDR 0x58000000U
+void alp_update_log_aen_m55_owner_run(void);
+#endif
+
+#if !defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
 static const char *assurance_str(alp_update_log_assurance_t a)
 {
 	return (a == ALP_UPDATE_LOG_HW_ENFORCED) ? "HW_ENFORCED (secure tier)"
@@ -56,14 +72,30 @@ static const char *verdict_str(alp_update_log_verdict_t v)
 		return "?";
 	}
 }
+#endif
 
 int main(void)
 {
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
+	printf("[update-log] AEN HP owner: MRAM writer service starting\n");
+	printf("[update-log] owner storage: %s\n", UPDATE_LOG_STORAGE_STR);
+
+	/* HP releases HE after the package has loaded the HE image. From then on,
+	 * HE can only append by sending an MHU request back to this owner. */
+	alp_status_t rc = alp_mproc_boot_core(ALP_CORE_M55_HE, HE_LOAD_ADDR);
+	printf("[update-log] released HE rc=%d\n", (int)rc);
+
+	/* This call does not return. It opens the local MRAM/NVS log and serves
+	 * HE append/verify/count/get requests. */
+	alp_update_log_aen_m55_owner_run();
+	return 0;
+#else
 	/* Open the device's update log. NULL means no backend on this SoM. */
 	alp_update_log_t *log = alp_update_log_open();
 	if (log == NULL) {
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED)
-		printf("[update-log] HW_ENFORCED required, but no secure owner/backend is active\n");
+		printf("[update-log] HW_ENFORCED required, but no secure owner/firewall-backed backend is "
+		       "active\n");
 #else
 		printf("[update-log] no backend present\n");
 #endif
@@ -121,4 +153,5 @@ int main(void)
 
 	alp_update_log_close(log);
 	return 0;
+#endif
 }

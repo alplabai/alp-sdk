@@ -28,18 +28,20 @@
  *      @ref ALP_UPDATE_LOG_HW_ENFORCED tier's job.
  *
  * @par Hardware-enforced tier status (`ALP_UPDATE_LOG_HW_ENFORCED`)
- *      Built for TF-M secure-service builds
- *      (@c CONFIG_ALP_SDK_UPDATE_LOG_TFM). The application-side backend is a
- *      client; the secure owner stores each entry as a PSA WRITE_ONCE asset
- *      and keeps the metadata and high-watermark counter in the Secure
- *      Processing Environment. On Alif E4/E8, this is the TrustZone-M route:
- *      the secure storage region must be protected by the Alif SE/firewall
- *      policy. If that secure owner is absent, @ref alp_update_log_open
- *      transparently falls through to the software tier and @ref
- *      alp_update_log_assurance reports @ref
- *      ALP_UPDATE_LOG_SW_TAMPER_EVIDENT. Query it rather than assume the tier
- *      -- it is the only portable signal of which assurance actually backs the
- *      log on a given SoM.
+ *      The application-side backend is a client; the log writer and backing
+ *      store live behind a hardware boundary the application core cannot
+ *      rewrite. The TF-M route (@c CONFIG_ALP_SDK_UPDATE_LOG_TFM) uses a
+ *      secure owner with PSA Protected Storage. The Alif E4/E8 AEN route uses
+ *      a trusted M55 owner plus an SE/device-firewalled MRAM log partition;
+ *      physical rollback protection still depends on a board-provisioned
+ *      non-decrementable counter or equivalent device policy.
+ *      If the trusted owner or the hardware isolation proof is absent,
+ *      @ref alp_update_log_open transparently falls through to the software
+ *      tier, or fails closed when
+ *      @c CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED is set. Query
+ *      @ref alp_update_log_assurance rather than assume the tier -- it is the
+ *      only portable signal of which assurance actually backs the log on a
+ *      given SoM.
  *
  * @par Full log (software tier)
  *      The log is append-only and never wraps -- wrapping would erase

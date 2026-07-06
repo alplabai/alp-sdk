@@ -1928,6 +1928,61 @@ config ALP_SDK_UPDATE_LOG_TFM_PSA_OWNER
 	  UIDs does not satisfy the audit-log requirement that old entries
 	  are non-modifiable by application firmware.
 
+config ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	bool "Register the Alif dual-M55 update-log client backend"
+	default n
+	depends on ALP_SDK_UPDATE_LOG
+	depends on ALP_SOC_ALIF_ENSEMBLE_E4 || ALP_SOC_ALIF_ENSEMBLE_E8
+	help
+	  Register the Alif E4/E8 dual-M55 update-log client backend. The
+	  normal application core sends append/verify/count/get requests over
+	  the RTSS MHU mailbox to a trusted M55 owner, and the owner writes the
+	  log in MRAM.
+
+	  This backend reports ALP_UPDATE_LOG_HW_ENFORCED only when its ready()
+	  probe sees both requirements: a responding owner and an explicit
+	  proof latch that the SE/device firewall already blocks the
+	  application core from writing the MRAM log partition. Without that
+	  firewall proof it declines with ALP_ERR_NOSUPPORT, so
+	  CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED remains fail-closed.
+
+config ALP_SDK_UPDATE_LOG_AEN_M55_OWNER
+	bool "Build the Alif dual-M55 update-log owner service"
+	default n
+	depends on ALP_SDK_UPDATE_LOG
+	depends on ALP_SOC_ALIF_ENSEMBLE_E4 || ALP_SOC_ALIF_ENSEMBLE_E8
+	help
+	  Build the trusted-owner service used by
+	  ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT. The owner opens the local
+	  update-log store, normally backed by MRAM NVS, then services MHU
+	  requests from the application core. It is not itself a registered
+	  HW_ENFORCED backend; the security property exists only when the
+	  SE/device firewall lets this owner write the MRAM log partition and
+	  denies the application core.
+
+config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN
+	bool "Assert that the Alif MRAM log partition is firewall-protected"
+	default n
+	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	help
+	  Let the AEN dual-M55 client report HW_ENFORCED after the owner also
+	  answers ready(). Enable only in a board/profile whose provisioning
+	  has already locked the MRAM log partition so the application core
+	  cannot write or erase it, and after a silicon test has proven that a
+	  direct application-core write is rejected.
+
+	  This option does not program the firewall. The policy is provisioned
+	  outside the public SDK by Alif SE/DEVICE configuration tooling.
+
+config ALP_SDK_UPDATE_LOG_AEN_M55_RPC_TIMEOUT_MS
+	int "Alif dual-M55 update-log request timeout in milliseconds"
+	default 2000
+	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	help
+	  Timeout for one client request to the M55 owner. A timeout means the
+	  owner image is absent, not released, or not servicing the shared
+	  mailbox, so ready() declines and the dispatcher can fail closed.
+
 config ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED
 	bool "Fail open() unless the update log is hardware-enforced"
 	default n

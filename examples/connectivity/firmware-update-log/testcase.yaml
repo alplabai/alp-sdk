@@ -33,4 +33,4 @@ tests:
     harness_config:
       type: one_line
       regex:
-        - "HW_ENFORCED required, but no secure owner/backend is active"
+        - "HW_ENFORCED required, but no secure owner/firewall-backed backend is active"
