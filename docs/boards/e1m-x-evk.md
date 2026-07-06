@@ -85,10 +85,10 @@ deltas (verify when the HW config writeup lands):
 | Connector | J6 — DSI0 lane set (4 data pairs wired to the E1M-X SoM) |
 | Panel | Rocktech RK055HDMIPI4MA0 — 5.5″ 720×1280, Himax HX8394-F controller |
 | Link config | 2-lane MIPI-DSI, RGB565 (per the NXP / Rocktech reference configuration) |
-| Backlight | SoM-side boost converter driven by Renesas PA5 (GPT1 ch2 B-output); `pwm-backlight` device tree node; 5 kHz PWM. |
-| Panel reset | LCD1_RST = E1M IO13 → GD32 PF1; Linux drives it via the `gpio-gd32-bridge` GPIO expander at BRD_I2C 0x70. |
-| Panel power | LCD1_PWR_EN = E1M IO15 — **unrouted on V2N-family SoMs** but pulled high on the carrier, so the panel powers by default without explicit firmware action. |
-| Touch controller | Goodix GT911 on DSI1_CSI_I2C = E1M I2C3 → GD32 PC8/PC9 (the bridge's secondary I2C transport). **Linux has no I2C master to this bus today** — GT911 INT also lands on the GD32. Touch support is deferred to a GD32 I2C-proxy follow-up; a goodix polled-mode patch ships dormant on the branch in the meantime. |
+| Backlight | SoM-side PWM exposed to Linux as a `pwm-backlight` device tree node; 5 kHz PWM. |
+| Panel reset | LCD1_RST = E1M-X IO13; Linux drives it via `gpio-gd32-bridge` on V2N-family SoMs. |
+| Panel power | LCD1_PWR_EN = E1M-X IO15 — **unavailable on V2N-family SoMs** but pulled high on the carrier, so the panel powers by default without explicit firmware action. |
+| Touch controller | Goodix GT911 on DSI1_CSI_I2C = E1M-X I2C3. **Linux has no I2C master to this bus today on V2N-family SoMs**. Touch support is deferred to a bridge I2C-proxy follow-up; a goodix polled-mode patch ships dormant on the branch in the meantime. |
 | Silicon note | Datasheet R01DS0466 rev 1.20 section #AC0/#BC0 states those part suffixes do not support MIPI-DSI Display Command Set (DCS) control — HX8394 init (which uses DCS commands) is impossible on `#AC0` parts. The SoM is moving to a later-suffix DCS-capable part; older `#AC0` boards will fail at panel init by design. |
 | Bring-up status | Code complete on `feat/v2n-lcd-display1` (kernel patches 0004–0006, DT nodes, weston image, LVGL example); **HIL on silicon pending** (bench ladder G0–G8). |
 
@@ -97,7 +97,7 @@ deltas (verify when the HW config writeup lands):
 The carrier fully wires the DSI1 lane set to J28 for future dual-DSI
 SoMs.  V2N-family SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) have only
 one MIPI-DSI output — the DSI1 pads are unpopulated on the SoM.
-Display 2, its LCD2_RST (IO21), LCD2_PWR_EN (IO22), and CTP2 sideband
+Display 2, its LCD2_RST (E1M-X IO21), LCD2_PWR_EN (E1M-X IO22), and CTP2 sideband
 (IO17/IO19) are therefore **permanently unavailable on V2N/V2M** at this
 hardware revision.
 

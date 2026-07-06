@@ -1245,13 +1245,13 @@ silicon**, after the suite itself caught and drove the fixes below:
 
 E1M-X Display 1 (RK055HDMIPI4MA0, Himax HX8394-F, 5.5″ 720×1280):
 kernel hx8394 panel driver backport with `rocktech,rk055hdmipi4ma0`
-descriptor; `gpio-gd32-bridge` GPIO expander driver (LCD1_RST via GD32
-PF1 over BRD_I2C at 0x70); GPT1 ch2 / PA5 `pwm-backlight` node;
+descriptor; `gpio-gd32-bridge` GPIO expander driver (LCD1_RST via the
+V2N-family bridge over BRD_I2C); GPT1 ch2 `pwm-backlight` node;
 weston + weston-init + libdrm + libdrm-tests + alp-lvgl-dashboard added
 to `alp-image-edge`; `examples/display/lvgl-dashboard-x-evk` LVGL
 dashboard example + BitBake recipe.  Goodix GT911 polled-mode fallback
-ships dormant — touch is gated on the GD32 I2C-proxy follow-up (GT911
-I2C bus terminates at GD32 PC8/PC9, no Linux master today).  HIL
+ships dormant — touch is gated on the bridge I2C-proxy follow-up (GT911
+I2C bus has no Linux master today on V2N-family SoMs).  HIL
 pending (bench ladder G0–G8).
 
 ### Changed — 25 MHz link: SCI-B FIFO burst engine + reply re-read made real (2026-06-04)

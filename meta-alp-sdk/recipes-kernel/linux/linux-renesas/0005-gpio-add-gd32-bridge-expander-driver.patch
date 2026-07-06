@@ -114,10 +114,9 @@ index 000000000000..acc6ca9c7966
 +#define GD32_NGPIO		18
 +
 +static const char * const gd32_bridge_gpio_names[GD32_NGPIO] = {
-+	"IO8/PB10",  "IO9/PA7",   "IO10/PA12", "IO11/PB0",  "IO12/PC1",
-+	"IO13/PF1",  "IO14/PB5",  "IO16/PC0",  "IO24/PC14", "IO25/PC15",
-+	"IO27/PB11", "IO28/PC2",  "IO29/PD11", "IO30/PD10", "IO31/PE12",
-+	"IO32/PD2",  "IO34/PD8",  "IO35/PD1",
++	"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
++	"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
++	"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
 +};
 +
 +struct gd32_bridge_gpio {
