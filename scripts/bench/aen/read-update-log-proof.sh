@@ -56,6 +56,8 @@ EOF
 hp_line=$(awk 'toupper($1) == "02000060" && $2 == "=" { print; exit }' /tmp/firmware-update-log-dual-read.out)
 he_line=$(awk 'toupper($1) == "02001060" && $2 == "=" { print; exit }' /tmp/firmware-update-log-dual-read.out)
 fw_line=$(awk 'toupper($1) == "02001080" && $2 == "=" { print; exit }' /tmp/firmware-update-log-dual-read.out)
+fw_fault_line=$(awk 'toupper($1) == "02001090" && $2 == "=" { print; exit }' /tmp/firmware-update-log-dual-read.out)
+fw_offset_line=$(awk 'toupper($1) == "020010A0" && $2 == "=" { print; exit }' /tmp/firmware-update-log-dual-read.out)
 
 echo "----- update-log SRAM0 proof beacons -----"
 echo "HP @0x02000060: [magic, last_status, last_op, served_count]"
@@ -64,6 +66,8 @@ echo "FW @0x02001080: [magic, result, stage, detail, pc, cfsr, bfar, hfsr, offse
 [ -n "$hp_line" ] && echo "$hp_line"
 [ -n "$he_line" ] && echo "$he_line"
 [ -n "$fw_line" ] && echo "$fw_line"
+[ -n "$fw_fault_line" ] && echo "$fw_fault_line"
+[ -n "$fw_offset_line" ] && echo "$fw_offset_line"
 echo "------------------------------------------"
 
 if [ "$EXPECT_FIREWALL_PROBE" -eq 0 ] && { [ -z "$hp_line" ] || [ -z "$he_line" ]; }; then
@@ -94,14 +98,31 @@ if [ "$EXPECT_FIREWALL_PROBE" -eq 1 ]; then
 	fi
 	fw_magic=$(printf '%s\n' "$fw_line" | awk '{ print toupper($3) }')
 	fw_result=$(printf '%s\n' "$fw_line" | awk '{ print toupper($4) }')
+	fw_stage=$(printf '%s\n' "$fw_line" | awk '{ print toupper($5) }')
+	fw_detail=$(printf '%s\n' "$fw_line" | awk '{ print toupper($6) }')
+	fw_offset=$(printf '%s\n' "$fw_offset_line" | awk '{ print toupper($3) }')
+	[ -z "$fw_offset" ] && fw_offset="????????"
 	if [ "$fw_magic" != "46575052" ]; then
 		echo "firewall probe magic mismatch; FW=$fw_magic" >&2
 		exit 1
 	fi
 	case "$fw_result" in
 		00000002|00000003)
+			echo "firewall verdict: PASS - HE could not modify alp_ulog_partition"
+			;;
+		00000004)
+			echo "firewall verdict: FAIL - HE changed alp_ulog_partition at offset 0x$fw_offset" >&2
+			echo "firewall detail: write stage=0x$fw_stage flash_write status=0x$fw_detail" >&2
+			echo "firewall probe did not prove HE write rejection; result=0x$fw_result" >&2
+			exit 1
+			;;
+		00000005)
+			echo "firewall verdict: ERROR - probe setup/read failed; stage=0x$fw_stage detail=0x$fw_detail" >&2
+			echo "firewall probe did not prove HE write rejection; result=0x$fw_result" >&2
+			exit 1
 			;;
 		*)
+			echo "firewall verdict: ERROR - unexpected probe result 0x$fw_result" >&2
 			echo "firewall probe did not prove HE write rejection; result=0x$fw_result" >&2
 			exit 1
 			;;

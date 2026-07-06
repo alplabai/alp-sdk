@@ -136,7 +136,11 @@ scripts/bench/aen/flash-update-log-firewall-probe.sh \
     build/firmware-update-log-he-probe
 ```
 
-The probe stamps an SRAM0 beacon at `0x02001080`:
+The probe stamps an SRAM0 beacon at `0x02001080`. The read helper decodes that
+beacon directly: a protected board prints
+`firewall verdict: PASS - HE could not modify alp_ulog_partition`; a writable
+partition prints `firewall verdict: FAIL - HE changed alp_ulog_partition ...`
+and exits non-zero.
 
 | Result word | Meaning |
 |---|---|
@@ -180,7 +184,9 @@ After a real flash, the helper also reads SRAM0 proof beacons over SWD:
 For a hardware-enforced run, the HE beacon's last status word must be `0`
 (`ALP_OK`) after the owner has served the append/verify/count/get requests.
 Use `scripts/bench/aen/read-update-log-proof.sh --expect-hw` to re-read those
-beacons without reflashing.
+beacons without reflashing. Use
+`scripts/bench/aen/read-update-log-proof.sh --expect-firewall-probe` to re-read
+and decode the direct-write firewall probe without reflashing.
 
 On a board that enables the TF-M owner or the AEN M55 owner with the firewall
 proof latch, the HE application's first line reports:
