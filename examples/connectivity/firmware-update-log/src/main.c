@@ -29,6 +29,13 @@
 
 #include <alp/update_log.h>
 
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE)
+#include <cmsis_core.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/flash.h>
+#include <zephyr/fatal.h>
+#endif
+
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
 #include <alp/mproc.h>
 #endif
@@ -74,6 +81,123 @@ static const char *verdict_str(alp_update_log_verdict_t v)
 }
 #endif
 
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE)
+#define FIREWALL_PROBE_BEACON       ((volatile uint32_t *)0x02001080U)
+#define FIREWALL_PROBE_MAGIC        0x46575052U /* "FWPR" */
+#define FIREWALL_PROBE_RESULT_START 1U
+#define FIREWALL_PROBE_RESULT_FAULT 2U
+#define FIREWALL_PROBE_RESULT_PASS  3U
+#define FIREWALL_PROBE_RESULT_FAIL  4U
+#define FIREWALL_PROBE_RESULT_ERROR 5U
+
+#define FIREWALL_PROBE_STAGE_IDLE        0U
+#define FIREWALL_PROBE_STAGE_READ_BEFORE 1U
+#define FIREWALL_PROBE_STAGE_WRITE       2U
+#define FIREWALL_PROBE_STAGE_READ_AFTER  3U
+
+static volatile uint32_t g_firewall_probe_stage;
+
+static void firewall_probe_stamp(uint32_t result, uint32_t stage, uint32_t detail, uint32_t pc)
+{
+	FIREWALL_PROBE_BEACON[0] = FIREWALL_PROBE_MAGIC;
+	FIREWALL_PROBE_BEACON[1] = result;
+	FIREWALL_PROBE_BEACON[2] = stage;
+	FIREWALL_PROBE_BEACON[3] = detail;
+	FIREWALL_PROBE_BEACON[4] = pc;
+	FIREWALL_PROBE_BEACON[5] = SCB->CFSR;
+	FIREWALL_PROBE_BEACON[6] = SCB->BFAR;
+	FIREWALL_PROBE_BEACON[7] = SCB->HFSR;
+#if PARTITION_EXISTS(alp_ulog_partition)
+	FIREWALL_PROBE_BEACON[8] = PARTITION_OFFSET(alp_ulog_partition);
+#else
+	FIREWALL_PROBE_BEACON[8] = 0xFFFFFFFFU;
+#endif
+	__DSB();
+	__ISB();
+}
+
+void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
+{
+	uint32_t stage  = g_firewall_probe_stage;
+	uint32_t pc     = (esf != NULL) ? esf->basic.pc : 0U;
+	uint32_t result = (stage == FIREWALL_PROBE_STAGE_WRITE) ? FIREWALL_PROBE_RESULT_FAULT
+	                                                        : FIREWALL_PROBE_RESULT_ERROR;
+
+	firewall_probe_stamp(result, stage, reason, pc);
+	for (;;) {
+		__WFE();
+	}
+}
+
+static int run_firewall_probe(void)
+{
+#if !PARTITION_EXISTS(alp_ulog_partition)
+	firewall_probe_stamp(FIREWALL_PROBE_RESULT_ERROR, FIREWALL_PROBE_STAGE_IDLE, 1U, 0U);
+	printf("[update-log] firewall probe: alp_ulog_partition is missing\n");
+	return 1;
+#else
+	const struct device *flash = PARTITION_DEVICE(alp_ulog_partition);
+	const off_t          off   = PARTITION_OFFSET(alp_ulog_partition);
+	uint8_t              before[16];
+	uint8_t              after[16];
+	uint8_t              pattern[16];
+
+	firewall_probe_stamp(FIREWALL_PROBE_RESULT_START, FIREWALL_PROBE_STAGE_IDLE, 0U, 0U);
+	printf("[update-log] HE direct-write firewall probe: MRAM offset=0x%08lx\n", (long)off);
+
+	if (!device_is_ready(flash)) {
+		firewall_probe_stamp(FIREWALL_PROBE_RESULT_ERROR, FIREWALL_PROBE_STAGE_IDLE, 2U, 0U);
+		printf("[update-log] firewall probe: MRAM flash device is not ready\n");
+		return 1;
+	}
+
+	g_firewall_probe_stage = FIREWALL_PROBE_STAGE_READ_BEFORE;
+	int rc                 = flash_read(flash, off, before, sizeof(before));
+	g_firewall_probe_stage = FIREWALL_PROBE_STAGE_IDLE;
+	if (rc != 0) {
+		firewall_probe_stamp(
+		    FIREWALL_PROBE_RESULT_ERROR, FIREWALL_PROBE_STAGE_READ_BEFORE, (uint32_t)-rc, 0U);
+		printf("[update-log] firewall probe: pre-read failed rc=%d\n", rc);
+		return 1;
+	}
+
+	for (size_t i = 0; i < sizeof(pattern); i++) {
+		pattern[i] = before[i] ^ 0xA5U;
+	}
+
+	g_firewall_probe_stage = FIREWALL_PROBE_STAGE_WRITE;
+	rc                     = flash_write(flash, off, pattern, sizeof(pattern));
+	g_firewall_probe_stage = FIREWALL_PROBE_STAGE_IDLE;
+
+	g_firewall_probe_stage = FIREWALL_PROBE_STAGE_READ_AFTER;
+	int read_rc            = flash_read(flash, off, after, sizeof(after));
+	g_firewall_probe_stage = FIREWALL_PROBE_STAGE_IDLE;
+	if (read_rc != 0) {
+		firewall_probe_stamp(
+		    FIREWALL_PROBE_RESULT_ERROR, FIREWALL_PROBE_STAGE_READ_AFTER, (uint32_t)-read_rc, 0U);
+		printf("[update-log] firewall probe: post-read failed rc=%d\n", read_rc);
+		return 1;
+	}
+
+	bool changed = (memcmp(before, after, sizeof(before)) != 0);
+	if (changed) {
+		firewall_probe_stamp(FIREWALL_PROBE_RESULT_FAIL,
+		                     FIREWALL_PROBE_STAGE_WRITE,
+		                     (rc == 0) ? 0U : (uint32_t)-rc,
+		                     0U);
+		printf("[update-log] FAIL: HE direct MRAM write changed alp_ulog_partition\n");
+		return 1;
+	}
+
+	firewall_probe_stamp(
+	    FIREWALL_PROBE_RESULT_PASS, FIREWALL_PROBE_STAGE_WRITE, (rc == 0) ? 0U : (uint32_t)-rc, 0U);
+	printf("[update-log] PASS: HE direct MRAM write did not change alp_ulog_partition");
+	printf(" (rc=%d)\n", rc);
+	return 0;
+#endif
+}
+#endif
+
 int main(void)
 {
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
@@ -90,6 +214,10 @@ int main(void)
 	alp_update_log_aen_m55_owner_run();
 	return 0;
 #else
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE)
+	return run_firewall_probe();
+#endif
+
 	/* Open the device's update log. NULL means no backend on this SoM. */
 	alp_update_log_t *log = alp_update_log_open();
 	if (log == NULL) {

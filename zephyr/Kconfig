@@ -1974,6 +1974,23 @@ config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN
 	  This option does not program the firewall. The policy is provisioned
 	  outside the public SDK by Alif SE/DEVICE configuration tooling.
 
+config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE
+	bool "Run the Alif HE direct-write firewall probe"
+	default n
+	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	help
+	  Build a one-shot HE diagnostic image that tries to write directly to
+	  alp_ulog_partition through Zephyr's MRAM flash driver and records the
+	  result in an SRAM proof beacon. This is the negative proof for the
+	  hardware-enforced AEN update-log path: HE must not be able to change
+	  the MRAM log partition directly.
+
+	  This probe is intentionally separate from the normal demo. If the
+	  firewall is missing, the probe writes the first 16 bytes of the log
+	  partition and reports failure. If the firewall is active, the write is
+	  expected to return an error or raise a CPU fault during the write; the
+	  probe stamps that result for SWD readback.
+
 config ALP_SDK_UPDATE_LOG_AEN_M55_RPC_TIMEOUT_MS
 	int "Alif dual-M55 update-log request timeout in milliseconds"
 	default 2000

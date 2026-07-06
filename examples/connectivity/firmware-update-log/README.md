@@ -62,6 +62,12 @@ That Kconfig bit does not program the firewall. It is the public build-time
 latch saying the SE/device firewall policy has already been provisioned and
 silicon-proven for this board.
 
+The proof is a negative test: build the HE firewall-probe profile and let HE try
+to write the MRAM log partition directly. A valid hardware-enforced board either
+rejects that write without changing the bytes, or raises a CPU fault during the
+write. If the bytes change, the firewall is not active and the `HW_ENFORCED`
+profile must not be used.
+
 The log is append-only and never wraps: when the partition is full,
 `alp_update_log_append()` returns `ALP_ERR_NOMEM` and the existing chain
 stays intact and verifiable.
@@ -104,6 +110,34 @@ The HP owner build prints:
 [update-log] owner storage: MRAM NVS (alp_ulog_partition)
 ```
 
+Before enabling the proven profile, run the HE direct-write firewall probe. This
+is destructive only when the firewall is missing: in that case HE changes the
+first 16 bytes of `alp_ulog_partition` and the helper reports failure.
+
+```
+west build -p always \
+    -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/connectivity/firmware-update-log \
+    -d build/firmware-update-log-he-probe \
+    -- -DALP_AEN_UPDATE_LOG_FIREWALL_PROBE=ON
+
+scripts/bench/aen/flash-update-log-firewall-probe.sh --package-only \
+    build/firmware-update-log-he-probe
+
+ALP_CONFIRM_DESTRUCTIVE_FLASH=yes \
+scripts/bench/aen/flash-update-log-firewall-probe.sh \
+    build/firmware-update-log-he-probe
+```
+
+The probe stamps an SRAM0 beacon at `0x02001080`:
+
+| Result word | Meaning |
+|---|---|
+| `2` | CPU fault occurred while HE was attempting the direct MRAM write. |
+| `3` | Direct write returned, but the protected MRAM bytes did not change. |
+| `4` | HE changed `alp_ulog_partition`; hardware enforcement is not active. |
+| `5` | Probe setup/read failed; fix the board/build before claiming enforcement. |
+
 For the dual-core AEN package, use a two-entry ATOC: HP is `M55_HP`
 `["load", "boot"]` at `0x50000000`, and HE is `M55_HE` `["load"]` at
 `0x58000000`. HP then releases HE at runtime with the portable
@@ -134,6 +168,7 @@ After a real flash, the helper also reads SRAM0 proof beacons over SWD:
 |---|---|
 | `0x02000060` | HP owner: `magic`, last status, last operation, served request count |
 | `0x02001060` | HE client: `magic`, last operation, last sequence, last status |
+| `0x02001080` | HE firewall probe: `magic`, result, stage, detail, fault PC/status, partition offset |
 
 For a hardware-enforced run, the HE beacon's last status word must be `0`
 (`ALP_OK`) after the owner has served the append/verify/count/get requests.
