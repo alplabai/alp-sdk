@@ -1,0 +1,22 @@
+# board.yaml -- LVGL dashboard on the E1M-X V2N MIPI-DSI panel.
+#
+# First Linux-side display example: the RK055HDMIPI4MA0 panel is a
+# PLATFORM device (DRM/KMS via the carrier device tree), not an SDK
+# chip driver -- so there is no `chips:` entry.  LVGL 9 comes from
+# the Yocto distro (meta-oe `lvgl` package, DRM backend), not the
+# Zephyr `libraries:` loader.  Customer workflow: copy this dir,
+# build the alp-image-edge image (the alp-lvgl-dashboard recipe
+# packages this app), boot, run `alp-lvgl-dashboard`.
+som:
+  sku: E1M-V2N101            # any V2x SKU works -- same PCB, same panel path
+
+preset: e1m-x-evk
+
+cores:
+  a55_cluster:
+    app: ./src               # Linux userspace app (DRM/KMS + evdev)
+  m33_sm:
+    os: "off"                # display is wholly A55-owned
+
+diagnostics:
+  log_level: info

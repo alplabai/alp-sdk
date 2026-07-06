@@ -23,3 +23,8 @@ IMAGE_FEATURES += "debug-tweaks"
 IMAGE_INSTALL += " \
     libdrm-tests                   \
 "
+
+# LVGL dashboard example (Linux/DRM panel) -- dev-only bench example app.
+# weston/libdrm/DEEPX/rootfs sizing now come from alp-image-common.inc;
+# only the example package is edge-specific.
+IMAGE_INSTALL += " alp-lvgl-dashboard"
