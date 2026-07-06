@@ -99,6 +99,16 @@ Notes for anyone reproducing this:
   with the SE read (`getmramdata`, master 0) instead, or keep the design's read path
   on a non-HE master. Tracked upstream (#111).
 
+The full dual-core path is also proven end-to-end on E8 (2026-07-06): with the FC8
+policy active (deny sized to the whole 64 KB `alp_ulog_partition`), the SES boots the
+HP owner, HP releases HE, and the HE client runs `open`/`append`/`verify`/`count`/`get`
+entirely over the MHU mailbox — HP served all five requests (`ALP_OK`) and wrote the
+entry to the MRAM NVS store (confirmed by the SE `getmramdata` read), while HE never
+touches the partition directly. So HE reports `HW_ENFORCED`, the log is written only by
+the trusted owner, and HE's own direct write bus-faults. The remaining gaps are E4
+parity (E8 = E4 + A32; expected but not yet E4-bench-proven) and the anti-rollback NV
+counter — both tracked under #111.
+
 The AEN flash helpers build app-only ATOC packages by default. That preserves
 the board's existing DEVICE/firewall policy, which is the policy the proof is
 meant to test. Only set `ALP_AEN_INCLUDE_DEVICE_CONFIG=yes` when you
