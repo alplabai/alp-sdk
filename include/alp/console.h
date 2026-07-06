@@ -22,6 +22,10 @@ extern "C" {
  * automatically).  Pass NULL to unbind.
  *
  * @param ctx  Initialised CC3501E context, or NULL.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      v0.9 new; companion-console binder tracking the [ABI-EXPERIMENTAL]
+ *      CC3501E companion surface it depends on.  See docs/abi-markers.md.
  */
 void alp_console_companion_set(cc3501e_t *ctx);
 

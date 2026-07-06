@@ -71,13 +71,15 @@ the PR for experimental symbols.
 | `gui.h`               | `[ABI-STABLE]`     | v0.2 LVGL re-export shim.                                          |
 | `camera.h`            | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_camera_configure_isp` (ISP-Pico toggles) — surface tentative pending real hardware feedback.  Base capture path stable; ISP block experimental. |
 | `storage.h`           | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_storage_configure_inline_aes` (SecAES on OSPI / HexSPI) -- surface tentative.  Base storage placeholders (v0.4 work) are still stubs. |
-| `display.h`           | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; no real backend impl yet.                       |
+| `display.h`           | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; v0.9 adds the real Zephyr display backend (ADR-0017 Tier 1, `src/backends/display/zephyr_drv.c`), native_sim-verified against the upstream dummy controller -- no silicon run yet, so the surface stays experimental pending hardware. |
 | `usb.h`               | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; surface skeleton only.                          |
 | `dsp.h`               | `[ABI-EXPERIMENTAL]` | v0.5 new -- standalone DSP-chain API (FIR/IIR/WINDOW/FFT).  Composes ADC-pipeline filter/spectrum types; both sides may co-evolve. |
 | `gpu2d.h`             | `[ABI-EXPERIMENTAL]` | v0.5 new -- AEN audit headline gap.  Surface designed for portability but only one silicon family populates it today. |
 | `power.h`             | `[ABI-EXPERIMENTAL]` | v0.5 new -- system-power-mode surface (sleep / deep-sleep / standby + wake-source bitmaps).  v0.9 adds the operating-point-profile surface (`alp_power_profile_get` / `alp_power_profile_set`). |
 | `tmu.h`               | `[ABI-EXPERIMENTAL]` | Wave-1 GD32 CORDIC TMU helpers; surface limited and may be folded into `<alp/dsp.h>` for v1.0. |
 | `update_log.h`        | `[ABI-EXPERIMENTAL]` | v0.7 new; experimental until the hardware-enforced backend is silicon-proven. |
+| `i2c_regfile.h`       | `[ABI-EXPERIMENTAL]` | v0.9 new -- register-file target (slave) helper layered over the `[ABI-EXPERIMENTAL]` `alp_i2c_target_*` surface in `peripheral.h`; ships the "register-pointer + auto-increment file" state machine once.  Tracks the wrapped surface's tier exactly. |
+| `console.h`           | `[ABI-EXPERIMENTAL]` | v0.9 new -- app-facing companion-console binder (`alp_console_companion_set`) for the `alp companion` CLI verb.  No-op where the companion is a singleton (V2N auto-binds the GD32 supervisor); Alif apps register their CC3501E handle.  Experimental with the CC3501E companion surface it depends on. |
 
 ### Chip-driver headers (`include/alp/chips/*.h`)
 
