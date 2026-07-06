@@ -47,7 +47,7 @@ extern "C" {
 /**
  * @brief Encode a MAJOR.MINOR.PATCH triple into one comparable integer.
  *
- * Same encoding as @ref ALP_VERSION: `(major << 16) | (minor << 8) | patch`.
+ * Same encoding as @ref ALP_VERSION -- `(major << 16) | (minor << 8) | patch`.
  * Usable in `#if` preprocessor conditionals.
  */
 #define ALP_VERSION_ENCODE(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))

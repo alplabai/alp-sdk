@@ -341,7 +341,7 @@ alp doctor            # a "libraries" line reports tier + licence + fit
 
 The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,
 `zcbor` (all Tier A).  See
-[`metadata/libraries/README.md`](../metadata/libraries/README.md) for
+[`metadata/libraries/README.md`](../metadata/libraries/) for
 the full list and how to add one.
 
 ## 7. Targeting real silicon

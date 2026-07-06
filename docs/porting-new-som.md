@@ -571,7 +571,7 @@ CONFIG_ALP_PERIPHERAL_I2C=y
 The `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E9=y` line is the headline
 result — the loader successfully resolved the new SoM through the
 new SoC JSON.  The Kconfig symbol is **computed** from the ref
-(`ALP_SOC_ + <REF>.upper().replace(':','_')`), so the swap-test
+(`ALP_SOC_ + ref.upper().replace(':','_')`), so the swap-test
 goes green once the new ref is added to the allowlist in
 `metadata/registries/silicon-kconfig.json`.  (The existing Alif
 rows run `ALP_SOC_ALIF_ENSEMBLE_E3` through `E8`; a brand-new SoC

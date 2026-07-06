@@ -101,8 +101,8 @@ the differentiators:
   the whole SDK premise is emitting exactly this kind of glue.
 - **A real package manager (west-only, or a custom `alp pkg`).**
   Over-scoped: west already pins Zephyr-side modules and Yocto already
-  has layers; the missing piece is unified *selection + compatibility
-  + emission*, not fetching. Rejected.
+  has layers; the missing piece is unified
+  *selection + compatibility + emission*, not fetching. Rejected.
 - **Per-library Kconfig only (no metadata).** Works for Zephyr,
   invisible to Yocto/baremetal and to studio, and splits the truth
   between Kconfig and YAML. Rejected on the single-source principle.

@@ -140,7 +140,7 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
 /**
  * @brief Send one FRAMED bulk-data frame to the CC3501E stream sink (proto v2).
  *
- * Wraps @ref ALP_CC3501E_CMD_STREAM_WRITE: the request payload (@p len bytes)
+ * Wraps @ref ALP_CC3501E_CMD_STREAM_WRITE -- the request payload (@p len bytes)
  * is clocked in a single SPI transfer, so it rides the host peripheral-DMA path
  * when @p len reaches the SPI DMA threshold (@c CONFIG_SPI_DW_ALIF_DMA_MIN_LEN).
  * The firmware sinks + acks the frame, so unlike raw throwaway clocking the link
@@ -408,7 +408,7 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  * @brief Start a Wi-Fi soft-AP (WIFI_AP_START, opcode 0x14).
  *
  * Brings the CC3501E up as an access point advertising @p ssid.  The on-wire
- * payload is identical to @ref cc3501e_wifi_connect: an
+ * payload is identical to @ref cc3501e_wifi_connect -- an
  * @ref alp_cc3501e_wifi_connect_t header (ssid_len / psk_len / security)
  * followed by the inline SSID then the inline passphrase, packed with no
  * padding.  AP bring-up is a radio op (the firmware worker-routes it and the

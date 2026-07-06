@@ -91,7 +91,7 @@ def _emit_pending_warnings(rel: Path, doc) -> None:
 def _check_files(label, files, validator, loader, key_for_summary):
     failures: list[tuple[Path, list[str]]] = []
     for path in files:
-        rel = path.relative_to(REPO)
+        rel = path.relative_to(REPO).as_posix()
         try:
             doc = loader(path)
         except Exception as e:
@@ -128,7 +128,7 @@ def _check_silicon_capability_restrictions(som_files) -> list:
     """
     failures: list[tuple[Path, list[str]]] = []
     for path in som_files:
-        rel = path.relative_to(REPO)
+        rel = path.relative_to(REPO).as_posix()
         try:
             doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         except Exception:
@@ -194,7 +194,7 @@ def _check_silicon_kconfig() -> list:
     failures: list[tuple[Path, list[str]]] = []
     if not SILICON_KCONFIG_REGISTRY.is_file():
         return failures  # optional gate; skip when absent
-    rel = SILICON_KCONFIG_REGISTRY.relative_to(REPO)
+    rel = SILICON_KCONFIG_REGISTRY.relative_to(REPO).as_posix()
     try:
         data = json.loads(SILICON_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
     except Exception as e:
@@ -217,7 +217,7 @@ def _check_silicon_kconfig() -> list:
         soc_path = SOCS / parts[0] / parts[1] / f"{parts[2]}.json"
         if not soc_path.is_file():
             msgs.append(f"knownSilicon[{ref}]: no SoC spec at "
-                        f"{soc_path.relative_to(REPO)}")
+                        f"{soc_path.relative_to(REPO).as_posix()}")
 
     if msgs:
         print(f"FAIL {rel}")
@@ -235,7 +235,7 @@ def _check_peripheral_kconfig() -> list:
     failures: list[tuple[Path, list[str]]] = []
     if not PERIPHERAL_KCONFIG_REGISTRY.is_file():
         return failures
-    rel = PERIPHERAL_KCONFIG_REGISTRY.relative_to(REPO)
+    rel = PERIPHERAL_KCONFIG_REGISTRY.relative_to(REPO).as_posix()
     try:
         data = json.loads(PERIPHERAL_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
     except Exception as e:
@@ -272,7 +272,7 @@ def _check_chip_semantics(chip_files) -> list:
     """
     failures: list[tuple[Path, list[str]]] = []
     for path in chip_files:
-        rel = path.relative_to(REPO)
+        rel = path.relative_to(REPO).as_posix()
         try:
             doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         except Exception:
@@ -308,9 +308,9 @@ def _check_chip_physical(chip_files) -> list:
     failures: list = []
     for path in chip_files:
         try:
-            rel = path.relative_to(REPO)
+            rel = path.relative_to(REPO).as_posix()
         except ValueError:
-            rel = path  # out-of-tree (e.g. a test fixture); report as-is
+            rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
         try:
             doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         except Exception:
@@ -355,9 +355,9 @@ def _check_block_realizations(block_files, chip_files) -> list:
     chip_ids = {p.stem for p in chip_files}
     for path in block_files:
         try:
-            rel = path.relative_to(REPO)
+            rel = path.relative_to(REPO).as_posix()
         except ValueError:
-            rel = path  # out-of-tree (e.g. a test fixture); report as-is
+            rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
         try:
             doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         except Exception:
@@ -404,9 +404,9 @@ def _check_library_semantics(library_files) -> list:
     vocab = _capability_vocabulary()
     for path in library_files:
         try:
-            rel = path.relative_to(REPO)
+            rel = path.relative_to(REPO).as_posix()
         except ValueError:
-            rel = path  # out-of-tree (e.g. a test fixture); report as-is
+            rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
         try:
             doc = yaml.safe_load(path.read_text(encoding="utf-8"))
         except Exception:
@@ -456,7 +456,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     failures: list[tuple[Path, list[str]]] = []
     if not TIER_A_LIBRARY_CI_REGISTRY.is_file():
         return failures
-    rel = TIER_A_LIBRARY_CI_REGISTRY.relative_to(REPO)
+    rel = TIER_A_LIBRARY_CI_REGISTRY.relative_to(REPO).as_posix()
     try:
         data = json.loads(TIER_A_LIBRARY_CI_REGISTRY.read_text(encoding="utf-8"))
     except Exception as e:

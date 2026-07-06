@@ -191,7 +191,7 @@ constraints, curation `tier:`, pinned `version:`, and SPDX `license:`.
 Selected project-wide via the top-level `libraries: [<name>, ...]` key
 in `board.yaml`; the orchestrator emits the wiring and rejects an
 incompatible selection at emit time.  See
-[`metadata/libraries/README.md`](../metadata/libraries/README.md).
+[`metadata/libraries/README.md`](../metadata/libraries/).
 
 **Loader** -- `scripts/alp_project.py` -- reads `board.yaml`,
 resolves SoM SKU preset + board preset, emits the per-backend
@@ -341,7 +341,7 @@ authoritative value is pending (e.g. a board-rev divider voltage).
 
 **Tier A / Tier B (libraries)** -- The two curation tiers for
 curated third-party libraries (ADR 0018), recorded in each
-[library manifest](#library-manifest) `tier:` field.  **Tier A (curated):**
+library manifest `tier:` field.  **Tier A (curated):**
 version-pinned, built in alp-sdk CI for at least one board per
 supported family, ships a teaching example -- breakage blocks
 release.  **Tier B (recipe-only):** wiring + compatibility metadata

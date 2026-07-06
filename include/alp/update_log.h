@@ -27,7 +27,7 @@
  *      @ref ALP_UPDATE_LOG_HW_ENFORCED tier's job (TF-M isolation + a
  *      hardware counter; issue #111).
  *
- * @par Hardware-enforced tier status (@ref ALP_UPDATE_LOG_HW_ENFORCED)
+ * @par Hardware-enforced tier status (`ALP_UPDATE_LOG_HW_ENFORCED`)
  *      Not yet built. The tier is registered on TF-M-capable builds
  *      (@c CONFIG_ALP_SDK_UPDATE_LOG_TFM) but declines at open() until its
  *      secure store (PSA Protected Storage in the SPE) and a hardware
