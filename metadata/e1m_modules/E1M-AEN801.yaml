@@ -1,6 +1,14 @@
 # Stock preset for E1M-AEN801 (the SoM, NOT the EVK board).
-# See E1M-AEN701.yaml header for the file's role + the
-# project memory note governing what stays TBD.
+#
+# Customer board.yaml files reference this preset by setting:
+#   som:
+#     sku: E1M-AEN801
+#
+# This file lists ONLY components physically populated on the
+# E1M-AEN module PCB. Board-side parts live in metadata/boards/<name>.yaml.
+#
+# Per the project memory note, any SKU-specific hardware value not
+# supplied authoritatively stays TBD rather than being inferred.
 
 schema_version: 1
 
@@ -12,7 +20,7 @@ silicon_variant: AE822FA0E5597LS0        # see metadata/socs/alif/ensemble/e8.js
 display_name: "E1M-AEN801 (Alif Ensemble E8 -- 2x A32 + 2x M55 + 3x Ethos-U, preliminary)"
 
 on_module:
-  silicon:              alif:ensemble:e8       # 2x A32, dual-NPU 204 GOPS, includes Ethos-U85
+  silicon:              alif:ensemble:e8       # 2x A32, 2x Cortex-M55, 2x U55 + 1x U85
   wifi_ble:             cc3501e
   secure_element:       optiga_trust_m
   rtc_external:         rv3028c7

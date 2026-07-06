@@ -13,7 +13,7 @@
 # kHz cadences -- all in portable C with no vendor symbols.
 
 som:
-  sku: E1M-AEN701           # E7's M55 HP core handles the 1 kHz
+  sku: E1M-AEN801           # E8's M55 HP core handles the 1 kHz
                              # rate loop comfortably; Helium MVE
                              # accelerates Madgwick.
 

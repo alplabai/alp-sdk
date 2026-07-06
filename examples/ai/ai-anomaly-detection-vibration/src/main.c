@@ -62,7 +62,7 @@
  *      the model runs entirely on the on-die NPU; only the score
  *      leaves the device.
  *   2. "Is it cheap enough to deploy on every machine?" -- yes,
- *      the Ethos-U + M55 HP combo on AEN701 drops to a single
+ *      the Ethos-U + M55 HP combo on AEN801 drops to a single
  *      microamp average when the inference path is clock-gated
  *      between windows.  Battery-powered nodes run for months.
  *   3. "Does the same source target V2N for the AI-PLC story?"

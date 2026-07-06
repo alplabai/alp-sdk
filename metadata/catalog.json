@@ -87,7 +87,7 @@
         "board": "e1m-evk",
         "name": "ai-anomaly-detection-vibration",
         "path": "examples/ai/ai-anomaly-detection-vibration",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to > `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`. HiL bring-up with a > real motor / pump and a customer-trained model is v0.6 work.",
         "supported_boards": [
           "e1m-evk",
@@ -98,7 +98,7 @@
         "board": "e1m-evk",
         "name": "cold-chain-monitor",
         "path": "examples/ai/cold-chain-monitor",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `cold_chain` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic environment data covering the states. HiL with a > real BME280 + a trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -109,7 +109,7 @@
         "board": "e1m-evk",
         "name": "motor-current-signature",
         "path": "examples/ai/motor-current-signature",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `current_features` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic current covering all five states. HiL > on a real motor + a trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -120,7 +120,7 @@
         "board": "e1m-evk",
         "name": "multimodal-fusion-pdm",
         "path": "examples/ai/multimodal-fusion-pdm",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `fusion_health` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic per-modality data covering every > scenario. HiL with the three real sensors + a trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -131,7 +131,7 @@
         "board": "e1m-evk",
         "name": "rail-predictive-maintenance",
         "path": "examples/ai/rail-predictive-maintenance",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The DSP cores > (`rail_features`, `rail_position`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > a canned NMEA track + synthetic vibration. HiL on a real bogie with a > customer-trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -142,7 +142,7 @@
         "board": "e1m-evk",
         "name": "visual-defect-detection",
         "path": "examples/ai/visual-defect-detection",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `defect_map` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic clean + defect frames. HiL with a real CSI camera + > a trained autoencoder is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -153,7 +153,7 @@
         "board": "e1m-evk",
         "name": "wearable-activity-fall",
         "path": "examples/ai/wearable-activity-fall",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The two cores > (`motion_features`, `fall_detect`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic motion (incl. an injected fall). HiL on a real wearable + a trained > model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -166,21 +166,21 @@
         "board": "e1m-evk",
         "name": "acoustic-anomaly-wind-turbine",
         "path": "examples/audio/acoustic-anomaly-wind-turbine",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The three DSP cores > (`acoustic_features`, `rotor_speed`, `bpf_modulation`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic acoustics + a canned RPM track. HiL on a real nacelle with a > customer-trained model is bench-gated."
       },
       {
         "board": "e1m-evk",
         "name": "acoustic-safety-events",
         "path": "examples/audio/acoustic-safety-events",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `acoustic_event` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic audio cycling the four event types. > HiL with a real mic + a trained model is bench-gated."
       },
       {
         "board": "e1m-evk",
         "name": "audio-loopback",
         "path": "examples/audio/audio-loopback",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/audio.h>`. Reads PCM blocks from the on-module PDM microphone, runs them through the ALP DSP chain (DC-block in v0.2), and pushes them straight back out over I²S. Demonstrates the full `audio_in` / `audio_out` lifecycle."
       },
       {
@@ -198,14 +198,14 @@
         "board": "e1m-evk",
         "name": "audio-wake-word",
         "path": "examples/audio/audio-wake-word",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ![status: UNTESTED](https://img.shields.io/badge/status-%5BUNTESTED%5D-orange) > v0.5 paper-correct. Builds clean on `native_sim/native/64`; real > PDM mic capture + Ethos-U55 dispatch + Vela-compiled model land > in v0.6 AEN HiL."
       },
       {
         "board": "e1m-evk",
         "name": "i2s-tone",
         "path": "examples/audio/i2s-tone",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/i2s.h>`. Generates a 1 kHz sine wave and writes it as 16-bit stereo PCM to ALP_E1M_I2S0.",
         "supported_boards": [
           "e1m-evk",
@@ -218,7 +218,7 @@
         "board": "e1m-evk",
         "name": "ai-camera-viewer",
         "path": "examples/camera-vision/ai-camera-viewer",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on > `native_sim/native/64`; real OV5640 + Ethos-U dispatch + Vela- > compiled model land in v0.6 AEN HiL."
       },
       {
@@ -241,21 +241,21 @@
         "board": "e1m-evk",
         "name": "iot-dashboard",
         "path": "examples/connectivity/iot-dashboard",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on > `native_sim/native/64`; real WiFi + MQTT + TLS bring-up gates on > v0.6 AEN HiL."
       },
       {
         "board": "e1m-evk",
         "name": "iot-fleet-ota",
         "path": "examples/connectivity/iot-fleet-ota",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Secure OTA firmware update with rollback. The production-readiness proof for \"how do we update 10 000 units in the field?\"."
       },
       {
         "board": "e1m-evk",
         "name": "production-deployment",
         "path": "examples/connectivity/production-deployment",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "The v1.0 reference application for a field-deployable IoT product. Demonstrates the full manufactured -> deployed -> updated -> attested lifecycle on a single app, so customers see how the SDK's secure-boot, OTA, EEPROM-provisioning, and remote-attestation pieces fit together."
       }
     ],
@@ -264,28 +264,28 @@
         "board": "e1m-evk",
         "name": "drone-hud",
         "path": "examples/display/drone-hud",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds on > `native_sim/native/64`; HiL silicon bring-up of the IMU + GPS + > battery + display chain lands in v0.6."
       },
       {
         "board": "e1m-evk",
         "name": "lvgl-benchmark",
         "path": "examples/display/lvgl-benchmark",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_benchmark()`** -- the canonical LVGL performance harness. Walks a fixed scene set (gradients, alpha blends, text rendering, image rotation, ...) and reports per-scene FPS at the end."
       },
       {
         "board": "e1m-evk",
         "name": "lvgl-music-player",
         "path": "examples/display/lvgl-music-player",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_music()`** -- album-art carousel, time slider, track list, equaliser visualiser. This is a **display-only** demo: it renders and animates the player UI but does not decode or play any audio."
       },
       {
         "board": "e1m-evk",
         "name": "lvgl-widgets-demo",
         "path": "examples/display/lvgl-widgets-demo",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_widgets()`** from LVGL's `demos/` tree -- the headline showcase of every standard LVGL widget (buttons, sliders, tabs, charts, meters, lists, animations)."
       }
     ],
@@ -301,15 +301,15 @@
         "board": "e1m-evk",
         "name": "mproc-mailbox",
         "path": "examples/multicore/mproc-mailbox",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/mproc.h>`. Demonstrates the M55-HP side of a Cortex-M55-HP ↔ Cortex-M55-HE mailbox roundtrip on AEN: stage a payload in shared SRAM, signal the peer via the hardware mailbox, wait for a reply, read the result back."
       },
       {
         "board": "e1m-evk",
         "name": "rpmsg-aen",
         "path": "examples/multicore/rpmsg-aen",
-        "som": "E1M-AEN701",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct, but the build will fail at carve-out resolution > until the user supplies authoritative AEN memory-map values in > `metadata/e1m_modules/E1M-AEN701.yaml`."
+        "som": "E1M-AEN801",
+        "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct, but the end-to-end RPMsg path still needs AEN801 > bench validation."
       },
       {
         "board": "e1m-evk",
@@ -345,7 +345,7 @@
         "board": "e1m-evk",
         "name": "can-loopback",
         "path": "examples/peripheral-io/can-loopback",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/can.h>`. Brings up CAN0 in loopback mode, sends a frame, demonstrates the receive-callback contract.",
         "supported_boards": [
           "e1m-evk",
@@ -367,14 +367,14 @@
         "board": "e1m-evk",
         "name": "drone-autopilot",
         "path": "examples/peripheral-io/drone-autopilot",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
       },
       {
         "board": "e1m-evk",
         "name": "gpio-button-led",
         "path": "examples/peripheral-io/gpio-button-led",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Read a button and toggle an LED -- both as plain GPIO, through the `<alp/blocks/button_led.h>` block helper.",
         "supported_boards": [
           "e1m-evk",
@@ -385,7 +385,7 @@
         "board": "e1m-evk",
         "name": "hello-world",
         "path": "examples/peripheral-io/hello-world",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "The canonical \"first program\" for the Alp SDK. No peripherals, no chips, no board-specific wiring -- just a periodic `printf` loop so you can confirm the toolchain, flash flow, and log console are wired correctly before chasing harder bugs.",
         "supported_boards": [
           "e1m-evk",
@@ -403,7 +403,7 @@
         "board": "e1m-evk",
         "name": "i2c-master",
         "path": "examples/peripheral-io/i2c-master",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Discrete I2C master that reads a known device at a known address. Pattern: open the bus, init the chip driver, loop reading the sensor every second, close cleanly.",
         "supported_boards": [
           "e1m-evk",
@@ -414,7 +414,7 @@
         "board": "e1m-evk",
         "name": "i2c-scanner",
         "path": "examples/peripheral-io/i2c-scanner",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/peripheral.h>` I²C. Walks every 7-bit address on `ALP_E1M_I2C0` and reports which respond.",
         "supported_boards": [
           "e1m-evk",
@@ -425,7 +425,7 @@
         "board": "e1m-evk",
         "name": "i2c-slave",
         "path": "examples/peripheral-io/i2c-slave",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the register-file helper from `<alp/i2c_regfile.h>` (v0.9, `[ABI-EXPERIMENTAL]`), a pure layer over the portable `alp_i2c_target_*` surface in `<alp/peripheral.h>`.",
         "supported_boards": [
           "e1m-evk",
@@ -436,7 +436,7 @@
         "board": "e1m-evk",
         "name": "pwm-led-fade",
         "path": "examples/peripheral-io/pwm-led-fade",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/pwm.h>`. Fades an LED on PWM channel `ALP_E1M_PWM0` from 0 % to 100 % and back, demonstrating the canonical open / set-duty / close pattern.",
         "supported_boards": [
           "e1m-evk",
@@ -447,7 +447,7 @@
         "board": "e1m-evk",
         "name": "qenc-readout",
         "path": "examples/peripheral-io/qenc-readout",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for the quadrature-decoder side of `<alp/counter.h>`. Reads `ALP_E1M_ENC0`'s position once per 100 ms for ~1 second.",
         "supported_boards": [
           "e1m-evk",
@@ -458,7 +458,7 @@
         "board": "e1m-evk",
         "name": "spi-loopback",
         "path": "examples/peripheral-io/spi-loopback",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/peripheral.h>` SPI. Demonstrates the canonical transceive pattern.",
         "supported_boards": [
           "e1m-evk",
@@ -469,7 +469,7 @@
         "board": "e1m-evk",
         "name": "spi-master",
         "path": "examples/peripheral-io/spi-master",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Discrete SPI master. Send a known byte pattern out MOSI, log whatever clocks back on MISO.",
         "supported_boards": [
           "e1m-evk",
@@ -480,7 +480,7 @@
         "board": "e1m-evk",
         "name": "spi-slave",
         "path": "examples/peripheral-io/spi-slave",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Claim the bus in target (slave) mode using the portable `alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`) and answer an external SPI controller.",
         "supported_boards": [
           "e1m-evk",
@@ -491,7 +491,7 @@
         "board": "e1m-evk",
         "name": "uart-echo",
         "path": "examples/peripheral-io/uart-echo",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/peripheral.h>` UART. Reads single bytes from the UART and writes them back.",
         "supported_boards": [
           "e1m-evk",
@@ -502,14 +502,14 @@
         "board": "e1m-evk",
         "name": "uart-hello-world",
         "path": "examples/peripheral-io/uart-hello-world",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "The canonical \"printf via UART\" walkthrough. Opens a UART port with `alp_uart_open()`, sends a greeting + a monotonically- increasing counter every second, demonstrates error handling."
       },
       {
         "board": "e1m-evk",
         "name": "uart-rx-ringbuf",
         "path": "examples/peripheral-io/uart-rx-ringbuf",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-feature example for `<alp/peripheral.h>`'s opt-in interrupt-driven RX ring buffer (`CONFIG_ALP_SDK_UART_RX_RINGBUF`).",
         "supported_boards": [
           "e1m-evk",
@@ -527,7 +527,7 @@
         "board": "e1m-evk",
         "name": "vendor-ext-composability",
         "path": "examples/peripheral-io/vendor-ext-composability",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "One pad, three ways -- a proof that the Alp SDK's vendor-extension layer (`<alp/ext/<vendor>/...>`) is **additive, never exclusive**."
       }
     ],
@@ -536,7 +536,7 @@
         "board": "e1m-evk",
         "name": "counter-alarm",
         "path": "examples/power-timing/counter-alarm",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/counter.h>`. Schedules a one-shot alarm 100 ms in the future and prints from the callback.",
         "supported_boards": [
           "e1m-evk",
@@ -554,7 +554,7 @@
         "board": "e1m-evk",
         "name": "rtc-clock",
         "path": "examples/power-timing/rtc-clock",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/rtc.h>`. Sets the wall-clock to a fixed instant, sleeps a few hundred ms, then reads it back to verify the RTC ticked.",
         "supported_boards": [
           "e1m-evk",
@@ -565,7 +565,7 @@
         "board": "e1m-evk",
         "name": "timer-periodic-interrupt",
         "path": "examples/power-timing/timer-periodic-interrupt",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "The canonical \"periodic ISR plus main-thread coordination\" example.",
         "supported_boards": [
           "e1m-evk",
@@ -576,7 +576,7 @@
         "board": "e1m-evk",
         "name": "wdt-feed",
         "path": "examples/power-timing/wdt-feed",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/wdt.h>`. Installs a 5 second watchdog timeout and feeds it from a background loop.",
         "supported_boards": [
           "e1m-evk",

@@ -80,7 +80,7 @@ extern "C" {
  *  in 128 bytes including header + CRC, without padding the
  *  strings past values released MPNs ever need. */
 #define ALP_HW_INFO_FAMILY_LEN 16u /**< e.g. "aen". */
-#define ALP_HW_INFO_SKU_LEN    24u /**< e.g. "E1M-AEN701". */
+#define ALP_HW_INFO_SKU_LEN    24u /**< e.g. "E1M-AEN801". */
 #define ALP_HW_INFO_HW_REV_LEN 8u  /**< e.g. "r1". */
 #define ALP_HW_INFO_SERIAL_LEN 24u /**< Factory-assigned. */
 
@@ -102,7 +102,7 @@ typedef struct alp_hw_info_eeprom_t {
 	uint32_t magic;                          /**< @ref ALP_HW_INFO_MAGIC. */
 	uint32_t schema_version;                 /**< @ref ALP_HW_INFO_SCHEMA_VERSION. */
 	char     family[ALP_HW_INFO_FAMILY_LEN]; /**< Family slug, e.g. "aen". */
-	char     sku[ALP_HW_INFO_SKU_LEN];       /**< MPN string, e.g. "E1M-AEN701". */
+	char     sku[ALP_HW_INFO_SKU_LEN];       /**< MPN string, e.g. "E1M-AEN801". */
 	char     hw_rev[ALP_HW_INFO_HW_REV_LEN]; /**< Revision, e.g. "r1". */
 	char     serial[ALP_HW_INFO_SERIAL_LEN]; /**< Factory-assigned serial. */
 	uint16_t mfg_year;                       /**< Manufacturing year (e.g. 2026). */

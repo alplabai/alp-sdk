@@ -1,5 +1,5 @@
 # Stock preset for E1M-AEN601 (the SoM, NOT the EVK board).
-# See E1M-AEN701.yaml header for the file's role + the
+# See E1M-AEN801.yaml header for the file's role + the
 # project memory note governing what stays TBD.
 
 schema_version: 1
@@ -9,10 +9,10 @@ family: alif-ensemble
 silicon: alif:ensemble:e6
 silicon_variant: AE612FA0E5597LS0        # see metadata/socs/alif/ensemble/e6.json variants[]
 
-display_name: "E1M-AEN601 (Alif Ensemble E6 -- 1x A32 + 2x M55 + 3x Ethos-U55, preliminary)"
+display_name: "E1M-AEN601 (Alif Ensemble E6 -- 1x A32 + 2x M55 + 3x Ethos-U, preliminary)"
 
 on_module:
-  silicon:              alif:ensemble:e6       # 1x A32, dual-NPU 204 GOPS
+  silicon:              alif:ensemble:e6       # 1x A32, 2x Cortex-M55, 2x U55 + 1x U85
   wifi_ble:             cc3501e
   secure_element:       optiga_trust_m
   rtc_external:         rv3028c7

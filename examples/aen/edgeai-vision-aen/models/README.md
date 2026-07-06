@@ -13,7 +13,7 @@ in here for v0.2.
    `NHWC` layout matching the v0.2 input pipeline.  Reference:
    MobileNetV2 1.0/224 INT8 (`mobilenet_v2_1.0_224_quant.tflite`).
 2. Compile through Arm's [Vela](https://github.com/nxp-imx/ethos-u-vela)
-   compiler targeting the Ethos-U55-HP variant on E7:
+   compiler targeting the Ethos-U55-HP variant on E8:
 
    ```bash
    vela mobilenet_v2_1.0_224_quant.tflite \

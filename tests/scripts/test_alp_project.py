@@ -102,7 +102,7 @@ class TestLoaderContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -111,7 +111,7 @@ class TestLoaderContract(unittest.TestCase):
             rv = _run_loader(input_path=path)
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
             self.assertIn("CONFIG_ALP_SDK=y", rv.stdout)
-            self.assertIn("CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y", rv.stdout)
+            self.assertIn("CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y", rv.stdout)
 
     def test_bad_sku_pattern_fails_schema(self) -> None:
         """The schema enforces the E1M-(AEN|V2N|V2M|NX9)... SKU pattern;
@@ -172,7 +172,7 @@ class TestLoaderContract(unittest.TestCase):
             path = _write_board(Path(td), """
                 name: test-board
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -193,7 +193,7 @@ class TestZephyrEmit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -229,7 +229,7 @@ class TestZephyrEmit(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as td:
                     path = _write_board(Path(td), f"""
                         som:
-                          sku: E1M-AEN701
+                          sku: E1M-AEN801
                         cores:
                           m55_hp:
                             os: zephyr
@@ -248,7 +248,7 @@ class TestZephyrEmit(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as td:
                     path = _write_board(Path(td), f"""
                         som:
-                          sku: E1M-AEN701
+                          sku: E1M-AEN801
                         diagnostics:
                           log_level: {log_level}
                         cores:
@@ -338,7 +338,7 @@ class TestHwInfoHEmit(unittest.TestCase):
         # canonical template (which sets every field).
         self.assertIn("#ifndef ALP_HW_INFO_BUILD_H", out)
         self.assertIn("#define ALP_HW_INFO_BUILD_H", out)
-        self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN701"', out)
+        self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN801"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_FAMILY      "aen"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r2"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_NAME      "E1M-EVK"', out)
@@ -352,7 +352,7 @@ class TestHwInfoHEmit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -369,7 +369,7 @@ class TestHwInfoHEmit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                   hw_rev: r1
                 cores:
                   m55_hp:
@@ -405,7 +405,7 @@ class TestWestLibrariesEmit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-AEN701
+                  sku: E1M-AEN801
                 cores:
                   m55_hp:
                     os: zephyr
@@ -849,7 +849,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         validation time."""
         body = """
             som:
-              sku: E1M-AEN701
+              sku: E1M-AEN801
             cores:
               m55_hp:
                 os: zephyr
@@ -872,7 +872,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         memory budget) and stays as a per-core knob."""
         body = """
             som:
-              sku: E1M-AEN701
+              sku: E1M-AEN801
             cores:
               m55_hp:
                 os: zephyr
@@ -956,7 +956,7 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
     def test_alp_board_cmake_args_e1m_evk(self) -> None:
         """cmake-args for preset e1m-evk must emit -DALP_BOARD_E1M_EVK."""
         rc, out, err = self._cmake_args(
-            "E1M-AEN701", "e1m-evk", "a32_cluster", "baremetal")
+            "E1M-AEN801", "e1m-evk", "a32_cluster", "baremetal")
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("-DALP_BOARD_E1M_EVK", out,
                       msg=f"ALP_BOARD_E1M_EVK missing from cmake-args:\n{out}")
@@ -966,7 +966,7 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
         any ALP_BOARD_* define -- the guard is `if project.board_name`."""
         body = """
             som:
-              sku: E1M-AEN701
+              sku: E1M-AEN801
             cores:
               m55_hp:
                 os: baremetal
@@ -991,7 +991,7 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
         """zephyr-conf for preset e1m-evk must include ALP_BOARD_E1M_EVK in
         CONFIG_COMPILER_OPT so the facade resolves on every Zephyr build."""
         rc, out, err = self._zephyr_conf(
-            "E1M-AEN701", "e1m-evk", "m55_hp")
+            "E1M-AEN801", "e1m-evk", "m55_hp")
         self.assertEqual(rc, 0, msg=err)
         self.assertIn('CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"', out,
                       msg=f"exact CONFIG_COMPILER_OPT line missing from zephyr-conf:\n{out}")
@@ -1009,7 +1009,7 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
         CONFIG_COMPILER_OPT with ALP_BOARD_* -- guarded on board_name."""
         body = """
             som:
-              sku: E1M-AEN701
+              sku: E1M-AEN801
             cores:
               m55_hp:
                 os: zephyr

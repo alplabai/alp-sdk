@@ -7,7 +7,7 @@
 # the E1M-AEN module's side-channel SDIO.
 
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk             # External chips wired into the EVK
                             # headers (BME280, ST7789) are listed in

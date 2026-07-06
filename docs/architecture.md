@@ -254,7 +254,7 @@ A SoM's preset YAML carries an `on_module:` block that names the
 chips physically present on the module (PMIC, RTC, secure element,
 Wi-Fi/BLE radio, supervisor MCU, Ethernet PHY, …).  The customer's
 `board.yaml` does **not** repeat these — swapping `som.sku:` from
-`E1M-V2N101` to `E1M-AEN701` automatically swaps the on-module chip
+`E1M-V2N101` to `E1M-AEN801` automatically swaps the on-module chip
 set with zero edits.
 
 `scripts/alp_orchestrate/` `_slugs_from_on_module` walks the

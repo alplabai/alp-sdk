@@ -19,7 +19,7 @@ the SDK's per-MPN preset:
 
 ```yaml
 som:
-  sku: E1M-AEN701        # your MPN -- the SDK ships a preset
+  sku: E1M-AEN801        # your MPN -- the SDK ships a preset
                           # at metadata/e1m_modules/<MPN>.yaml
 
 preset: e1m-evk          # or write your custom board out inline -- see below
@@ -30,7 +30,7 @@ cores:
     app: ./src           # path (relative to board.yaml) of the Zephyr app
 ```
 
-That's the whole config for a vanilla "E1M-AEN701 on the EVK,
+That's the whole config for a vanilla "E1M-AEN801 on the EVK,
 M55-HP core running Zephyr" build.  Optional per-core blocks
 (`peripherals`, `libraries`, `inference`, `iot`, `diagnostics`)
 add capability on top — omit them to get the defaults from the
@@ -296,7 +296,7 @@ to create those files.
 
 ```yaml
 som:
-  sku: E1M-AEN701          # required
+  sku: E1M-AEN801          # required
 
   hw_rev: r1               # optional -- defaults to the SKU preset's
                             # `default_hw_rev`.  Validated at build
@@ -504,8 +504,8 @@ metadata/
 │   ├── E1M-AEN401.yaml      # partial_hw_config: true
 │   ├── E1M-AEN501.yaml      # partial_hw_config: true
 │   ├── E1M-AEN601.yaml      # partial_hw_config: true
-│   ├── E1M-AEN701.yaml      # v0.3 fully-populated worked example
-│   ├── E1M-AEN801.yaml      # partial_hw_config: true
+│   ├── E1M-AEN701.yaml      # lower-priority E7 preset
+│   ├── E1M-AEN801.yaml      # lead AEN E8 preset
 │   ├── E1M-V2N101.yaml      # v0.3 fully-populated worked example
 │   ├── E1M-V2N102.yaml      # partial_hw_config: true
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
@@ -520,8 +520,8 @@ metadata/
 v0.3 ships the schema + ten production SoM presets, the
 placeholder N93 bring-up preset (`E1M-NX9101`), the two stock
 boards, and a copy-friendly custom-example template.  Two SKUs
-(`E1M-AEN701`, `E1M-V2N101`) have their hardware configuration
-fully populated; the others carry `partial_hw_config: true` so
+(`E1M-AEN801`, `E1M-V2N101`) are the primary worked presets; lower-priority
+or not-yet-final SKUs carry `partial_hw_config: true` so
 the loader knows to expect SKU-specific overrides from the
 consumer's `board.yaml`.  Per the project memory note, values
 not in the silicon datasheet stay `TBD` (e.g.
@@ -645,7 +645,7 @@ and so on:
 
 ```yaml
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 libraries: [lvgl, cmsis-dsp, nanopb]   # <-- project-wide
 cores:
   m55_hp:
@@ -978,7 +978,7 @@ metadata/
 │   ├── v2n/hw-revisions.yaml                   # V2N family revs (board_id.adc_channel TBD)
 │   ├── v2n-m1/hw-revisions.yaml                # V2N-M1 family revs (mirrors V2N + DEEPX)
 │   ├── imx93/hw-revisions.yaml                 # i.MX 93 family revs (adc_channel TBD)
-│   └── E1M-AEN701.yaml                     # MPN preset; `default_hw_rev: r1`
+│   └── E1M-AEN801.yaml                     # MPN preset; `default_hw_rev: r2`
 │                                                #  points into the family table.
 └── boards/
     ├── e1m-evk.yaml                            # board preset; carries its own

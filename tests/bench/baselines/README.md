@@ -9,7 +9,7 @@ on every PR).
 ## Filename convention
 
 `<som-sku>-<os>.yaml`, e.g. `E1M-V2N101-yocto.yaml`,
-`E1M-AEN701-zephyr.yaml`.  One file per `(SoM, OS)` pair the SDK
+`E1M-AEN801-zephyr.yaml`.  One file per `(SoM, OS)` pair the SDK
 supports; the captain owns refreshing them at every release tag
 once HiL hardware is provisioned.
 

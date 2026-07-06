@@ -25,7 +25,7 @@ OV5640 --> <alp/camera.h> --> <alp/inference.h> --> <alp/display.h>
   comes from `metadata/e1m_modules/<SKU>.yaml`:
   - **V2M101 (V2N-M1)** -> DEEPX DX-M1 (29 TOPS)
   - **V2M201 (V2H-M1)** -> DEEPX DX-M2 (113 TOPS) -- ships v0.6
-  - AEN701 -> Ethos-U55 (fallback target for this skeleton)
+  - AEN801 -> Ethos-U85 (lead target for this skeleton)
 - **Display** bounding-box overlay + FPS counter via portable
   framebuffer blits.
 

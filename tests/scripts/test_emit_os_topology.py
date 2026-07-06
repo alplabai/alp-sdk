@@ -41,13 +41,13 @@ def _by_id(topo: dict) -> dict:
 def test_class_derived_os_no_override(tmp_path: Path) -> None:
     body = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
         cores:
           m55_hp:
             app: ./src
     """
     topo = core_os_topology(load_board_yaml(_write_board(tmp_path, body)))
-    assert topo["sku"] == "E1M-AEN701"
+    assert topo["sku"] == "E1M-AEN801"
     cores = _by_id(topo)
     # M-class -> Zephyr (RTOS); A-class -> Yocto (Linux).
     assert cores["m55_hp"]["runtime_class"] == "rtos"
@@ -67,7 +67,7 @@ def test_class_derived_os_no_override(tmp_path: Path) -> None:
 def test_baremetal_and_off_overrides_flagged(tmp_path: Path) -> None:
     body = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
         cores:
           m55_hp:
             os: baremetal

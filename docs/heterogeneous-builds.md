@@ -8,7 +8,7 @@ You'll declare both halves in a single `board.yaml`, let
 flashable bundle that covers Linux + Zephyr + the on-module GD32
 helper MCU.
 
-The same pattern generalises to **E1M-AEN701** (A32 + M55-HP + M55-HE),
+The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE),
 **E1M-NX9101** (A55 + M33), and any future heterogeneous SoM.
 
 > If you're targeting a single-OS SoM (e.g. AEN E3/E4 with M55 cores

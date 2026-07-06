@@ -91,7 +91,7 @@ NOT a goal — they are separate product lines with separate
 - [`docs/portability.md`](docs/portability.md) — customer cookbook
   with the swap-test recipe, dual-namespace decision tree, the
   runtime-detection ladder pattern, and worked examples
-  (AEN701 → AEN801, V2N101 → V2M101).
+  (AEN601 → AEN801, V2N101 → V2M101).
 - [`docs/portability-matrix.md`](docs/portability-matrix.md) — the
   empirical guarantee (21/21 E1M + 12/12 E1M-X cells green; all 5
   Phase B gaps resolved).

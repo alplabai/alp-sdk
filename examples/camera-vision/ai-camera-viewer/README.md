@@ -23,7 +23,6 @@ OV5640 ──▶ <alp/camera.h> ──▶ <alp/inference.h> ──▶ post-proce
 - **TFLM + Ethos-U** dispatch via the `<alp/inference.h>`
   `ALP_INFERENCE_BACKEND_AUTO` path.  The §D.lib.loader resolves
   the right NPU shim from the SKU's `capabilities:` block:
-  - AEN701 → `CONFIG_ALP_TFLM_ETHOS_U55=y`
   - AEN401 / AEN601 / AEN801 → `CONFIG_ALP_TFLM_ETHOS_U85=y` +
     `_U55=y`
   - NX9101 → `CONFIG_ALP_TFLM_ETHOS_U65=y`
@@ -39,8 +38,8 @@ Three questions answered side-by-side:
    `alp_inference_open(...)` path dispatches to the NPU; no
    vendor-specific code in the app.
 2. **How fast?**  The on-screen latency strip prints per-invoke
-   microseconds.  Flip `som.sku` in `board.yaml` from `E1M-AEN701`
-   to `E1M-AEN801` to compare U55 vs U85.
+   microseconds.  Flip `som.sku` in `board.yaml` between E8, E6,
+   and E4 AEN SKUs to compare the preferred NPU path.
 3. **Does it run portably?**  Re-target to NX9101 (Ethos-U65) by
    changing one line in `board.yaml`.  Same model file; the
    loader emits the right Kconfig set and Vela's
@@ -48,7 +47,7 @@ Three questions answered side-by-side:
 
 ## Hardware needed
 
-- E1M-AEN family SoM (E7 recommended).
+- E1M-AEN family SoM (E8 recommended).
 - E1M-EVK board.
 - OV5640 camera on the EVK camera connector (MIPI / DVP).
 - ST7789 240×320 TFT on SPI1 + 2 GPIOs.
@@ -60,7 +59,7 @@ license question).  To run a real model:
 
 ```
 # Compile your .tflite for the target NPU with Arm's Vela compiler:
-vela --accelerator-config ethos-u55-256 \
+vela --accelerator-config ethos-u85-256 \
      --output-dir models/                \
      models/person_detect.tflite
 

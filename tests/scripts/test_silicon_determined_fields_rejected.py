@@ -95,7 +95,7 @@ def test_inference_backend_rejected(
     now trip the schema's `additionalProperties: false` rule."""
     body = f"""
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
 
         cores:
           m55_hp:
@@ -115,7 +115,7 @@ def test_inference_arena_only_accepted(tmp_path: Path) -> None:
     one knob the schema still carries) must load cleanly."""
     body = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
 
         cores:
           m55_hp:
@@ -126,7 +126,7 @@ def test_inference_arena_only_accepted(tmp_path: Path) -> None:
     path = _write_board(tmp_path, body)
     # Must not raise.
     project = load_board_yaml(path)
-    assert project.sku == "E1M-AEN701"
+    assert project.sku == "E1M-AEN801"
 
 
 def test_inference_arena_below_minimum_rejected(tmp_path: Path) -> None:
@@ -134,7 +134,7 @@ def test_inference_arena_below_minimum_rejected(tmp_path: Path) -> None:
     request must fail (catches a regression where the bound is dropped)."""
     body = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
 
         cores:
           m55_hp:
@@ -155,7 +155,7 @@ def test_top_level_os_rejected(tmp_path: Path) -> None:
     any board.yaml that still uses the v1 top-level `os:` field."""
     body = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
 
         os: zephyr
 
@@ -174,7 +174,7 @@ def test_top_level_inference_rejected(tmp_path: Path) -> None:
     per-core, so a top-level instance violates additionalProperties."""
     body = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
 
         inference:
           default_arena_kib: 256
@@ -190,7 +190,7 @@ def test_top_level_peripherals_rejected(tmp_path: Path) -> None:
     """Same for top-level `peripherals:` -- v1 shape, v2 forbids it."""
     body = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
 
         peripherals:
           - i2c
@@ -209,7 +209,7 @@ def test_top_level_libraries_accepted(tmp_path: Path) -> None:
     `cores.<id>.libraries:` list).  It loads and is captured on the model."""
     body = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
 
         libraries:
           - lvgl
@@ -228,7 +228,7 @@ def test_top_level_iot_rejected(tmp_path: Path) -> None:
     """And top-level `iot:`."""
     body = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
 
         iot:
           wifi: true
@@ -284,7 +284,7 @@ def test_inference_block_rejects_unknown_fields(
     schema."""
     body = f"""
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
 
         cores:
           m55_hp:
