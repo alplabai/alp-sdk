@@ -63,8 +63,8 @@ def test_known_presence_cells():
     text = _render()
     # AEN801 (Alif E8) declares ethernet: 1.
     assert _present(text, "E1M-AEN801", "Ethernet")
-    # AEN401 (Alif E4) has an empty peripherals block -> Ethernet absent.
-    assert not _present(text, "E1M-AEN401", "Ethernet")
+    # AEN401 (Alif E4) shares the E3 sibling's GMAC -> Ethernet present.
+    assert _present(text, "E1M-AEN401", "Ethernet")
     # The V2N SoC (n44) has PCIe Gen3; the Alif parts do not.
     assert _present(text, "E1M-V2N101", "PCIe")
     assert not _present(text, "E1M-AEN801", "PCIe")
