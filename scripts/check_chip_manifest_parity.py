@@ -29,12 +29,8 @@ MANIFEST_DIR = REPO / "metadata" / "chips"
 # authoring metadata/chips/<id>.yaml; do not add new entries (a new driver
 # without a manifest must fail the gate, not be allowlisted away).
 KNOWN_DRIVER_NO_MANIFEST = {
-    "bmi323",
-    "bmp581",
-    "cam_mux_pi3wvr626",
     "lis2dw12",
     "ssd1331",
-    "tcal9538",
 }
 
 # Manifests intentionally without a driver (planned-but-unimplemented parts).
