@@ -31,3 +31,20 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # Pre-routed GNSS module (not a bare die/package) -- lighter module form,
+  # no pins/footprint. Per AllyStar/Hangzhou ZhongKe Microelectronics
+  # ATGM336H-5N User Manual Rev 1.2 (2016-07-15), section 2.1 "Appearance
+  # Size" and section 2.6 "Technical Specifications" ("Size: 10.1mm x 9.7mm
+  # x 2.4mm"). Module exposes an RF_IN pad (no onboard chip antenna) plus a
+  # VCC_RF antenna-power output; both active and passive external antennas
+  # are supported. Module also breaks out an 18-pad UART/I2C interface
+  # (TXD/RXD/1PPS/ON-OFF/VBAT + reserved SDA/SCL) not modeled here since this
+  # form omits pins per the module template.
+  package:              "18-pad SMD module (castellated pads, 0.65/1.1mm pitch)"
+  dimension_mm:         "10.1 x 9.7 x 2.4"
+  antenna:              external
+  operating_temp_deg_c: "-40..85"
+  visibility:           public
+  provenance:    web_provisional

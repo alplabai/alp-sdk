@@ -34,3 +34,41 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+signals:
+  - { name: SCK,    type: input,  scope: "I2C SCL (4-/3-wire SPI clock in SPI mode; unused here)" }
+  - { name: SDI,    type: bidir,  scope: "I2C SDA (SPI data-in / 3-wire SPI data-in-out; unused here)" }
+  - { name: SDO,    type: input,  scope: "I2C address-select bit (SA0): GND=0x76, VDDIO=0x77 (SPI data-out; unused here)" }
+  - { name: CSB,    type: input,  scope: "SPI chip select; tie to VDDIO for I2C-only use" }
+  - { name: INT,    type: output, scope: "interrupt output; push-pull or open-drain, register-configurable" }
+  - { name: VDD,    type: power,  scope: "analog supply" }
+  - { name: VDDIO,  type: power,  scope: "digital interface supply" }
+  - { name: VSS,    type: ground }
+
+physical:
+  # pins per Bosch Sensortec BMP390 datasheet BST-BMP390-DS002-07 Rev 1.7 (03/2021),
+  # Table 52 "Pin description" / Figure 23 "Pin-out top and bottom view"
+  # (2.0x2.0x0.8mm 10-pin metal-lid LGA). No NC/RESV pins on this package.
+  refdes_prefix: U
+  package:       LGA-10
+  footprint:     lga_10_2p0x2p0mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "VDDIO" }
+    - { pad: "2",  signal: "SCK" }
+    - { pad: "3",  signal: "VSS" }
+    - { pad: "4",  signal: "SDI" }
+    - { pad: "5",  signal: "SDO" }
+    - { pad: "6",  signal: "CSB" }
+    - { pad: "7",  signal: "INT" }
+    - { pad: "8",  signal: "VSS" }
+    - { pad: "9",  signal: "VSS" }
+    - { pad: "10", signal: "VDD" }
+  passives:
+    # Values per BST-BMP390-DS002-07 sections 6.2/6.3 connection diagrams
+    # (C1/C2 = 100nF; R1/R2 = 4.7k I2C pull-ups on SCK/SDI when used as SCL/SDA).
+    - { role: decouple, value: 100nF, net: VDDIO, refdes_prefix: C }
+    - { role: decouple, value: 100nF, net: VDD,   refdes_prefix: C }
+    - { role: pullup,   value: 4k7,   net: SCK,   refdes_prefix: R }
+    - { role: pullup,   value: 4k7,   net: SDI,   refdes_prefix: R }

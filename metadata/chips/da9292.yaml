@@ -46,6 +46,110 @@ signals:
   - { name: VSEL1, type: input,             v2n_route: TBD, notes: "selects between CHx_VOUT_VSEL_LO/_HI" }
   - { name: VSEL2, type: input,             v2n_route: TBD, notes: "selects between CHx_VOUT_VSEL_LO/_HI" }
 
+  # Remaining chip-native pins per Renesas DA9292 datasheet R16DS0518EJ0220
+  # Rev 2.2 (Mar 2025) Table 1 "Pin Description" -- power/phase pins + the
+  # I2C bus + the two remote-sense feedback pins per channel; used only by
+  # physical.pins below.
+  - { name: VDD1,  type: power, scope: "power supply for phase1 (3x balls A1/B1/C1)" }
+  - { name: LX1,   type: power, scope: "LX (switch) node of phase1 (3x balls A2/B2/C2)" }
+  - { name: GND1,  type: ground, scope: "power ground of phase1 (3x balls A3/B3/C3)" }
+  - { name: GND2,  type: ground, scope: "power ground of phase2 (3x balls A4/B4/C4)" }
+  - { name: LX2,   type: power, scope: "LX (switch) node of phase2 (3x balls A5/B5/C5)" }
+  - { name: VDD2,  type: power, scope: "power supply for phase2 (3x balls A6/B6/C6)" }
+  - { name: FBN1,  type: analog, scope: "negative remote-sense input for CH1" }
+  - { name: FBP1,  type: analog, scope: "positive remote-sense input for CH1" }
+  - { name: FBN2,  type: analog, scope: "negative remote-sense input for CH2" }
+  - { name: FBP2,  type: analog, scope: "positive remote-sense input for CH2" }
+  - { name: AGND,  type: ground, scope: "ground of internal analog circuitry" }
+  - { name: SCL,   type: input,  scope: "I2C clock (BRD_I2C)" }
+  - { name: SDA,   type: bidir,  scope: "I2C data (BRD_I2C)" }
+  - { name: CONF,  type: input,  scope: "configuration mode select strap: 1ch-4phase or 2ch-2phase+2phase" }
+  - { name: VDD3,  type: power, scope: "power supply for phase3 (3x balls G1/H1/J1)" }
+  - { name: LX3,   type: power, scope: "LX (switch) node of phase3 (3x balls G2/H2/J2)" }
+  - { name: GND3,  type: ground, scope: "power ground of phase3 (3x balls G3/H3/J3)" }
+  - { name: GND4,  type: ground, scope: "power ground of phase4 (3x balls G4/H4/J4)" }
+  - { name: LX4,   type: power, scope: "LX (switch) node of phase4 (3x balls G5/H5/J5)" }
+  - { name: VDD4,  type: power, scope: "power supply for phase4 (3x balls G6/H6/J6)" }
+  - { name: VDDIO, type: power, scope: "power supply for IO" }
+  - { name: AVDD,  type: power, scope: "power supply for internal analog circuitry" }
+
+physical:
+  # pins per Renesas DA9292 datasheet R16DS0518EJ0220 Rev 2.2 (Mar 2025),
+  # Table 1 "Pin Description" (Section 2.1) and Appendix A.2.1 "54-WLCSP"
+  # symbol pin table.  54-ball WLCSP, 9 rows (A..J, no I) x 6 columns, full
+  # matrix (no NC balls).  Body 3.66-3.70mm x 2.46-2.50mm, 0.40mm ball pitch
+  # (Appendix A.4.1 "Footprint Design Information").
+  refdes_prefix: U
+  package:       WLCSP-54
+  footprint:     wlcsp_54_3p7x2p5mm_p0p4
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "A1", signal: "VDD1" }
+    - { pad: "A2", signal: "LX1" }
+    - { pad: "A3", signal: "GND1" }
+    - { pad: "A4", signal: "GND2" }
+    - { pad: "A5", signal: "LX2" }
+    - { pad: "A6", signal: "VDD2" }
+    - { pad: "B1", signal: "VDD1" }
+    - { pad: "B2", signal: "LX1" }
+    - { pad: "B3", signal: "GND1" }
+    - { pad: "B4", signal: "GND2" }
+    - { pad: "B5", signal: "LX2" }
+    - { pad: "B6", signal: "VDD2" }
+    - { pad: "C1", signal: "VDD1" }
+    - { pad: "C2", signal: "LX1" }
+    - { pad: "C3", signal: "GND1" }
+    - { pad: "C4", signal: "GND2" }
+    - { pad: "C5", signal: "LX2" }
+    - { pad: "C6", signal: "VDD2" }
+    - { pad: "D1", signal: "FBN1" }
+    - { pad: "D2", signal: "EN1" }
+    - { pad: "D3", signal: "VSEL1" }
+    - { pad: "D4", signal: "INT_N" }
+    - { pad: "D5", signal: "TW_N" }
+    - { pad: "D6", signal: "VDDIO" }
+    - { pad: "E1", signal: "FBP1" }
+    - { pad: "E2", signal: "AGND" }
+    - { pad: "E3", signal: "SCL" }
+    - { pad: "E4", signal: "SDA" }
+    - { pad: "E5", signal: "CE" }
+    - { pad: "E6", signal: "FBP2" }
+    - { pad: "F1", signal: "AVDD" }
+    - { pad: "F2", signal: "PB_N" }
+    - { pad: "F3", signal: "CONF" }
+    - { pad: "F4", signal: "VSEL2" }
+    - { pad: "F5", signal: "EN2" }
+    - { pad: "F6", signal: "FBN2" }
+    - { pad: "G1", signal: "VDD3" }
+    - { pad: "G2", signal: "LX3" }
+    - { pad: "G3", signal: "GND3" }
+    - { pad: "G4", signal: "GND4" }
+    - { pad: "G5", signal: "LX4" }
+    - { pad: "G6", signal: "VDD4" }
+    - { pad: "H1", signal: "VDD3" }
+    - { pad: "H2", signal: "LX3" }
+    - { pad: "H3", signal: "GND3" }
+    - { pad: "H4", signal: "GND4" }
+    - { pad: "H5", signal: "LX4" }
+    - { pad: "H6", signal: "VDD4" }
+    - { pad: "J1", signal: "VDD3" }
+    - { pad: "J2", signal: "LX3" }
+    - { pad: "J3", signal: "GND3" }
+    - { pad: "J4", signal: "GND4" }
+    - { pad: "J5", signal: "LX4" }
+    - { pad: "J6", signal: "VDD4" }
+  passives:
+    # Values per datasheet Table 44 "Recommended Capacitor Types" (Section 9.1).
+    # VDDIO has no dedicated row in that table (only VDDx/AVDD/VOUT are
+    # listed) so its bypass value is left unspecified here rather than
+    # inferred.
+    - { role: decouple, value: 0.1uF, net: VDD1,  refdes_prefix: C }
+    - { role: decouple, value: 0.1uF, net: VDD2,  refdes_prefix: C }
+    - { role: decouple, value: 0.1uF, net: VDD3,  refdes_prefix: C }
+    - { role: decouple, value: 0.1uF, net: VDD4,  refdes_prefix: C }
+    - { role: decouple, value: 1uF,   net: AVDD,  refdes_prefix: C }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_DA9292
   baremetal:      ALP_SDK_CHIP_DA9292

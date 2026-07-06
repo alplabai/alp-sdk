@@ -26,6 +26,25 @@ signals:
 resolutions:
   max:            [200, 200]
 
+physical:
+  # GDEW0154T8 is a pre-routed e-paper MODULE (glass + IL0373 driver IC
+  # + FPC tail), not a bare discrete part -- module-style physical
+  # block per GoodDisplay "GDEW0154T8 V3.3 Specification" section 1.3
+  # (outline) + 1.5 (I/O terminals).  The module exposes its full
+  # 24-pin FPC pinout (many balls are internal driver-IC nets: VGH/VGL/
+  # VSH/VSL/PREVGH/PREVGL/VCOM/VPP/VDD/TSCL/TSDA/BS1/GDR/RESE, not
+  # meant for host GPIO use); the host-relevant subset is already
+  # captured in signals: above (SCLK=D0, MOSI=D1, CS, DC, RESET=RES#,
+  # BUSY) and matches the driver's chips/gdew0154t8/gdew0154t8.c SPI
+  # bring-up sequence.  Connector: 24-pin FPC tail, bottom-contact,
+  # mates to a ZIF socket (exact pitch not given in the public
+  # specification excerpt sourced here).
+  package:               "24-pin FPC tail (bottom-contact ZIF), IL0373 driver IC"
+  dimension_mm:          "31.80 x 37.32 x 0.98"
+  operating_temp_deg_c:  "0..50"
+  visibility:            public
+  provenance:            web_provisional
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_GDEW0154T8
   baremetal:      ALP_SDK_CHIP_GDEW0154T8

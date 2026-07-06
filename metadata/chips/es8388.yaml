@@ -22,6 +22,71 @@ audio:
   bitdepth_max:   24
   features:       [stereo, mic_input, line_output, headphone_amp]
 
+signals:
+  - { name: MCLK,    type: input,  scope: "master clock" }
+  - { name: PVDD,    type: power,  scope: "digital IO supply" }
+  - { name: DGND,    type: ground, scope: "digital ground (return path for DVDD + PVDD)" }
+  - { name: SCLK,    type: bidir,  scope: "audio data bit clock" }
+  - { name: DSDIN,   type: input,  scope: "DAC audio data" }
+  - { name: LRCK,    type: bidir,  scope: "audio data left/right clock" }
+  - { name: ASDOUT,  type: output, scope: "ADC audio data" }
+  - { name: VREF,    type: analog, scope: "decoupling-capacitor node" }
+  - { name: ROUT1,   type: analog, scope: "right output 1 (line or speaker/headphone)" }
+  - { name: LOUT1,   type: analog, scope: "left output 1 (line or speaker/headphone)" }
+  - { name: HPGND,   type: ground, scope: "ground for analog output drivers (LOUT1/2, ROUT1/2)" }
+  - { name: ROUT2,   type: analog, scope: "right output 2 (line or speaker/headphone)" }
+  - { name: LOUT2,   type: analog, scope: "left output 2 (line or speaker/headphone)" }
+  - { name: HPVDD,   type: power,  scope: "supply for analog output drivers (LOUT1/2, ROUT1/2)" }
+  - { name: AGND,    type: ground, scope: "analog ground" }
+  - { name: ADCVREF, type: analog, scope: "decoupling-capacitor node" }
+  - { name: VMID,    type: analog, scope: "decoupling-capacitor node" }
+  - { name: RIN2,    type: analog, scope: "right channel input 2" }
+  - { name: LIN2,    type: analog, scope: "left channel input 2" }
+  - { name: RIN1,    type: analog, scope: "right channel input 1" }
+  - { name: LIN1,    type: analog, scope: "left channel input 1" }
+  - { name: CE,      type: input,  scope: "control select / device address selection" }
+  - { name: CDATA,   type: bidir,  scope: "control data input/output" }
+  - { name: CCLK,    type: input,  scope: "control clock input" }
+
+physical:
+  # Pins per Everest Semiconductor ES8388 datasheet Rev 5.0 (Jul 2018),
+  # section 2 "28-PIN QFN AND PIN DESCRIPTIONS".  ES8388 is a 28-pin QFN
+  # (NOT the LQFP-48 package assumed before sourcing the datasheet --
+  # corrected here from the real pin table).  Pins 9 and 25 are
+  # datasheet-labelled NC and are omitted below.
+  refdes_prefix: U
+  package:       QFN-28
+  footprint:     qfn_28
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "1",  signal: "MCLK" }
+    - { pad: "2",  signal: "DVDD" }
+    - { pad: "3",  signal: "PVDD" }
+    - { pad: "4",  signal: "DGND" }
+    - { pad: "5",  signal: "SCLK" }
+    - { pad: "6",  signal: "DSDIN" }
+    - { pad: "7",  signal: "LRCK" }
+    - { pad: "8",  signal: "ASDOUT" }
+    - { pad: "10", signal: "VREF" }
+    - { pad: "11", signal: "ROUT1" }
+    - { pad: "12", signal: "LOUT1" }
+    - { pad: "13", signal: "HPGND" }
+    - { pad: "14", signal: "ROUT2" }
+    - { pad: "15", signal: "LOUT2" }
+    - { pad: "16", signal: "HPVDD" }
+    - { pad: "17", signal: "AVDD" }
+    - { pad: "18", signal: "AGND" }
+    - { pad: "19", signal: "ADCVREF" }
+    - { pad: "20", signal: "VMID" }
+    - { pad: "21", signal: "RIN2" }
+    - { pad: "22", signal: "LIN2" }
+    - { pad: "23", signal: "RIN1" }
+    - { pad: "24", signal: "LIN1" }
+    - { pad: "26", signal: "CE" }
+    - { pad: "27", signal: "CDATA" }
+    - { pad: "28", signal: "CCLK" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_ES8388
   baremetal:      ALP_SDK_CHIP_ES8388

@@ -37,3 +37,19 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+
+physical:
+  # INCOMPLETE: package size/type below is from the onsemi AR0234CS public
+  # marketing summary page (Table 1 "Key Performance Parameters" -- "Package
+  # Options: 9.995 x 5.595 CSP"), which is not confidentiality-marked. The
+  # full 83-ball CSP ball map / pin-description table (datasheet section
+  # "CONFIGURATION AND PINOUT", rev AR0234CS/D March 2020) is stamped
+  # "CONFIDENTIAL AND PROPRIETARY -- NOT FOR PUBLIC RELEASE" by onsemi on
+  # every page that contains it, even on copies re-hosted by public
+  # distributor sites. Per the repo's public/internal split, that per-ball
+  # signal map must not be transcribed into this public manifest without an
+  # onsemi NDA. No pins[] populated -- do not guess ball assignments.
+  package:      "83-ball CSP"
+  dimension_mm: "9.995 x 5.595 (die/package outline only; height not public)"
+  visibility:   public
+  provenance:   web_provisional

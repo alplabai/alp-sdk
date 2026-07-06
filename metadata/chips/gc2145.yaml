@@ -19,6 +19,68 @@ i2c:
 resolutions:
   max:            [1600, 1200]
 
+signals:
+  - { name: AVDD,   type: power,  scope: "power for analog circuit / sensor array" }
+  - { name: IOVDD,  type: power,  scope: "power supply for I/O circuits" }
+  - { name: DVDD,   type: power,  scope: "power for digital core" }
+  - { name: AGND,   type: ground, scope: "ground for analog circuit" }
+  - { name: DGND,   type: ground, scope: "ground for digital circuit" }
+  - { name: VREF,   type: power,  scope: "internal power (decoupling node, datasheet 'Internal power')" }
+  - { name: TXLOW,  type: power,  scope: "internal power (decoupling node, datasheet 'Internal power')" }
+  - { name: VPIX,   type: power,  scope: "internal power (decoupling node, datasheet 'Internal power')" }
+  - { name: PWDN,   type: input,  scope: "power down, active high" }
+  - { name: SBCL,   type: input,  scope: "SCCB (I2C-like) input clock" }
+  - { name: SBDA,   type: bidir,  scope: "SCCB (I2C-like) data" }
+  - { name: RESETB, type: input,  scope: "reset, active low" }
+  - { name: MCLK,   type: input,  scope: "sensor master input clock" }
+  - { name: MDP0,   type: output, scope: "MIPI Data<0> (+)" }
+  - { name: MDN0,   type: output, scope: "MIPI Data<0> (-)" }
+  - { name: MDP1,   type: output, scope: "MIPI Data<1> (+)" }
+  - { name: MDN1,   type: output, scope: "MIPI Data<1> (-)" }
+  - { name: MCP,    type: output, scope: "MIPI clock (+)" }
+  - { name: MCN,    type: output, scope: "MIPI clock (-)" }
+
+physical:
+  # Pins per GalaxyCore GC2145 CSP datasheet Rev V1.0 (2013-12-01),
+  # section 3 "CSP Package" + section 3.2 "Signal Descriptions" (35-ball
+  # CSP, 4.330 x 3.720 x 0.750mm).  Per the task scope for this sweep,
+  # only power/MIPI/SCCB(I2C)/control pads are populated here -- the
+  # parallel DVP bus (VSYNC/HSYNC/PCLK/D<0:7>, balls A4/A5/B4/B6/C5/C6/
+  # D5/D6/E5/E6/F5) is signal-bearing too but intentionally omitted from
+  # this pass.  Ball C3 is datasheet-labelled NC (no physical ball) and
+  # is omitted -- this reconciles the 36 named grid positions down to
+  # the datasheet's stated 35-ball total.
+  refdes_prefix: U
+  package:       CSP-35
+  footprint:     csp_35_4p3x3p7mm
+  visibility:    public
+  provenance:    web_provisional
+  pins:
+    - { pad: "A1", signal: "AVDD" }
+    - { pad: "A2", signal: "PWDN" }
+    - { pad: "A3", signal: "SBCL" }
+    - { pad: "A6", signal: "IOVDD" }
+    - { pad: "B1", signal: "VREF" }
+    - { pad: "B2", signal: "AGND" }
+    - { pad: "B3", signal: "SBDA" }
+    - { pad: "B5", signal: "DVDD" }
+    - { pad: "C1", signal: "TXLOW" }
+    - { pad: "C2", signal: "RESETB" }
+    - { pad: "C4", signal: "DGND" }
+    - { pad: "D1", signal: "AGND" }
+    - { pad: "D2", signal: "VPIX" }
+    - { pad: "D3", signal: "DVDD" }
+    - { pad: "D4", signal: "DGND" }
+    - { pad: "E1", signal: "AVDD" }
+    - { pad: "E2", signal: "MDP0" }
+    - { pad: "E3", signal: "MDN1" }
+    - { pad: "E4", signal: "MCP" }
+    - { pad: "F1", signal: "MCLK" }
+    - { pad: "F2", signal: "MDN0" }
+    - { pad: "F3", signal: "MDP1" }
+    - { pad: "F4", signal: "MCN" }
+    - { pad: "F6", signal: "DVDD" }
+
 kconfig:
   zephyr:         ALP_SDK_CHIP_GC2145
   baremetal:      ALP_SDK_CHIP_GC2145
