@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-name: issue-auto-label
+name: triage-auto-label
 
 on:
   issues:
@@ -8,40 +8,45 @@ on:
       - opened
       - edited
       - reopened
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+  workflow_dispatch:
+    inputs:
+      target_kind:
+        description: Which item to classify
+        required: true
+        default: issue
+        type: choice
+        options:
+          - issue
+          - pull_request
+      target_number:
+        description: Issue or pull request number
+        required: true
+        type: string
 
 permissions:
   contents: read
   issues: write
+  pull-requests: read
 
 jobs:
   label:
-    name: Auto-label issues
-    # Defensive guard: skip pull_request-shaped payloads.
-    if: ${{ github.event.issue.pull_request == null }}
+    name: Auto-label triage items
     runs-on: ubuntu-latest
 
     steps:
-      - name: Apply labels from issue content
+      - name: Apply labels from issue or PR content
         uses: actions/github-script@v8
         with:
           script: |
-            const issue = context.payload.issue;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-
-            const currentLabels = new Set(
-              (issue.labels || [])
-                .map((l) => (typeof l === "string" ? l : l.name))
-                .filter(Boolean)
-            );
-
             const manualOverrideLabel = "triage/manual";
-            if (currentLabels.has(manualOverrideLabel)) {
-              core.info(`Skipping: "${manualOverrideLabel}" override is set.`);
-              return;
-            }
-
-            // Labels this workflow may manage automatically.
             const autoManagedLabels = new Set([
               "bug",
               "enhancement",
@@ -49,114 +54,241 @@ jobs:
               "question",
             ]);
 
-            // Skip when a maintainer already applied any non-managed label.
+            const repoLabels = await github.paginate(
+              github.rest.issues.listLabelsForRepo,
+              { owner, repo, per_page: 100 }
+            );
+            const knownLabels = new Set(repoLabels.map((l) => l.name));
+
+            const docPathPatterns = [
+              /^docs\//,
+              /(^|\/)[^/]+\.md$/,
+              /^\.github\/ISSUE_TEMPLATE\//,
+            ];
+
+            const getCurrentLabels = (item) =>
+              new Set(
+                (item.labels || [])
+                  .map((l) => (typeof l === "string" ? l : l.name))
+                  .filter(Boolean)
+              );
+
+            const matchesAny = (text, patterns) =>
+              patterns.some((pattern) => new RegExp(pattern, "i").test(text));
+
+            function classifyFromText(text, kind) {
+              const matched = new Set();
+
+              if (
+                matchesAny(text, [
+                  "\\bdocs?\\b",
+                  "\\bdocumentation\\b",
+                  "\\breadme\\b",
+                  "\\btutorial\\b",
+                  "\\bguide\\b",
+                  "\\bboard\\.yaml\\b",
+                  "\\bmetadata\\b",
+                ])
+              ) {
+                matched.add("documentation");
+              }
+
+              if (
+                matchesAny(text, [
+                  "\\bbug\\b",
+                  "\\berror\\b",
+                  "\\bfail(?:ed|ing|ure)?\\b",
+                  "\\bcrash\\b",
+                  "\\bpanic\\b",
+                  "\\bregression\\b",
+                  "\\bsecurity\\b",
+                  "\\bfix(?:ed|es|ing)?\\b",
+                  "\\bbuild\\s+(?:break|broken|fail(?:ed|ure)?)\\b",
+                  "\\bci\\s+(?:break|broken|fail(?:ed|ure)?)\\b",
+                ])
+              ) {
+                matched.add("bug");
+              }
+
+              if (
+                matchesAny(text, [
+                  "\\bfeature\\b",
+                  "\\benhancement\\b",
+                  "\\brequest\\b",
+                  "\\bimprov(?:e|ement)\\b",
+                  "\\badd support\\b",
+                  "\\bzephyr\\b",
+                  "\\byocto\\b",
+                ])
+              ) {
+                matched.add("enhancement");
+              }
+
+              if (
+                kind === "issue" &&
+                (matchesAny(text, [
+                  "^\\s*\\[?question\\]?",
+                  "\\bhow\\s+(?:do|can|to)\\b",
+                  "\\bwhat\\s+(?:is|are|does)\\b",
+                  "\\bwhy\\b",
+                  "\\bcan\\s+someone\\s+help\\b",
+                ]) ||
+                  /\?\s*$/.test(text.trim()))
+              ) {
+                matched.add("question");
+              }
+
+              if (
+                kind === "issue" &&
+                matchesAny(text, [
+                  "module\\s*\\/\\s*component[\\s\\S]{0,160}\\b(?:docs?|metadata|ci|tooling)\\b",
+                  "applies\\s+to:\\s*\\(?[^\\n]*\\b(?:docs?|metadata|ci|tooling)\\b",
+                ])
+              ) {
+                matched.add("documentation");
+              }
+
+              return matched;
+            }
+
+            function selectLabels(matched, kind, changedFiles) {
+              const selected = new Set();
+              const primaryPriority = kind === "issue"
+                ? ["bug", "enhancement", "question"]
+                : ["bug", "enhancement"];
+
+              for (const label of primaryPriority) {
+                if (matched.has(label)) {
+                  selected.add(label);
+                  break;
+                }
+              }
+
+              if (matched.has("documentation")) {
+                selected.add("documentation");
+              }
+
+              if (
+                kind === "pull_request" &&
+                changedFiles.length > 0 &&
+                changedFiles.every((path) => docPathPatterns.some((pattern) => pattern.test(path)))
+              ) {
+                selected.add("documentation");
+              }
+
+              return selected;
+            }
+
+            async function loadTarget() {
+              if (context.eventName === "issues") {
+                if (context.payload.issue.pull_request) {
+                  core.info("Skipping issue event for a pull-request payload.");
+                  return null;
+                }
+                return {
+                  kind: "issue",
+                  item: context.payload.issue,
+                  number: context.payload.issue.number,
+                  changedFiles: [],
+                };
+              }
+
+              if (context.eventName === "pull_request_target") {
+                const pr = context.payload.pull_request;
+                const files = await github.paginate(
+                  github.rest.pulls.listFiles,
+                  {
+                    owner,
+                    repo,
+                    pull_number: pr.number,
+                    per_page: 100,
+                  }
+                );
+                return {
+                  kind: "pull_request",
+                  item: pr,
+                  number: pr.number,
+                  changedFiles: files.map((f) => f.filename),
+                };
+              }
+
+              const kind = core.getInput("target_kind");
+              const number = Number(core.getInput("target_number"));
+              if (!Number.isInteger(number) || number <= 0) {
+                core.setFailed("workflow_dispatch requires a positive numeric target_number.");
+                return null;
+              }
+
+              if (kind === "pull_request") {
+                const { data: pr } = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: number,
+                });
+                const files = await github.paginate(
+                  github.rest.pulls.listFiles,
+                  {
+                    owner,
+                    repo,
+                    pull_number: number,
+                    per_page: 100,
+                  }
+                );
+                return {
+                  kind,
+                  item: pr,
+                  number,
+                  changedFiles: files.map((f) => f.filename),
+                };
+              }
+
+              const { data: issue } = await github.rest.issues.get({
+                owner,
+                repo,
+                issue_number: number,
+              });
+              if (issue.pull_request) {
+                core.setFailed(
+                  "target_kind=issue was used for a pull request. Re-run with target_kind=pull_request."
+                );
+                return null;
+              }
+              return {
+                kind,
+                item: issue,
+                number,
+                changedFiles: [],
+              };
+            }
+
+            const target = await loadTarget();
+            if (!target) {
+              return;
+            }
+
+            const currentLabels = getCurrentLabels(target.item);
+            if (currentLabels.has(manualOverrideLabel)) {
+              core.info(`Skipping: "${manualOverrideLabel}" override is set.`);
+              return;
+            }
+
             const hasManualLabels = [...currentLabels].some(
               (label) => !autoManagedLabels.has(label)
             );
             if (hasManualLabels) {
-              core.info("Skipping: issue already has manual labels.");
+              core.info("Skipping: item already has manual labels.");
               return;
             }
 
-            const text = `${issue.title || ""}\n${issue.body || ""}`.toLowerCase();
-            const matched = new Set();
-
-            const matchesAny = (patterns) =>
-              patterns.some((pattern) => new RegExp(pattern, "i").test(text));
-
-            // Content keyword rules.
-            if (
-              matchesAny([
-                "\\bdocs?\\b",
-                "\\bdocumentation\\b",
-                "\\breadme\\b",
-                "\\btutorial\\b",
-                "\\bguide\\b",
-                "\\bboard\\.yaml\\b",
-                "\\bmetadata\\b",
-              ])
-            ) {
-              matched.add("documentation");
-            }
-
-            if (
-              matchesAny([
-                "\\bbug\\b",
-                "\\berror\\b",
-                "\\bfail(?:ed|ing|ure)?\\b",
-                "\\bcrash\\b",
-                "\\bpanic\\b",
-                "\\bregression\\b",
-                "\\bsecurity\\b",
-                "\\bbuild\\s+(?:break|broken|fail(?:ed|ure)?)\\b",
-                "\\bci\\s+(?:break|broken|fail(?:ed|ure)?)\\b",
-              ])
-            ) {
-              matched.add("bug");
-            }
-
-            if (
-              matchesAny([
-                "\\bfeature\\b",
-                "\\benhancement\\b",
-                "\\brequest\\b",
-                "\\bimprov(?:e|ement)\\b",
-                "\\badd support\\b",
-                "\\bzephyr\\b",
-                "\\byocto\\b",
-              ])
-            ) {
-              matched.add("enhancement");
-            }
-
-            if (
-              matchesAny([
-                "^\\s*\\[?question\\]?",
-                "\\bhow\\s+(?:do|can|to)\\b",
-                "\\bwhat\\s+(?:is|are|does)\\b",
-                "\\bwhy\\b",
-                "\\bcan\\s+someone\\s+help\\b",
-              ]) ||
-              /\?\s*$/.test((issue.title || "").trim())
-            ) {
-              matched.add("question");
-            }
-
-            // Issue template "Module / Component" hints.
-            if (
-              matchesAny([
-                "module\\s*\\/\\s*component[\\s\\S]{0,160}\\b(?:docs?|metadata|ci|tooling)\\b",
-                "applies\\s+to:\\s*\\(?[^\\n]*\\b(?:docs?|metadata|ci|tooling)\\b",
-              ])
-            ) {
-              matched.add("documentation");
-            }
-
-            // Clear precedence among primary class labels.
-            const primaryPriority = ["bug", "enhancement", "question"];
-            const selected = new Set();
-            for (const label of primaryPriority) {
-              if (matched.has(label)) {
-                selected.add(label);
-                break;
-              }
-            }
-            // Documentation may be additive.
-            if (matched.has("documentation")) {
-              selected.add("documentation");
-            }
+            const text = `${target.item.title || ""}\n${target.item.body || ""}`.toLowerCase();
+            const matched = classifyFromText(text, target.kind);
+            const selected = selectLabels(matched, target.kind, target.changedFiles);
 
             if (selected.size === 0) {
               core.info("No rule matched.");
               return;
             }
 
-            // Restrict to labels that already exist in the repository.
-            const repoLabels = await github.paginate(
-              github.rest.issues.listLabelsForRepo,
-              { owner, repo, per_page: 100 }
-            );
-            const knownLabels = new Set(repoLabels.map((l) => l.name));
             const labelsToAdd = [...selected].filter(
               (label) => knownLabels.has(label) && !currentLabels.has(label)
             );
@@ -169,8 +301,10 @@ jobs:
             await github.rest.issues.addLabels({
               owner,
               repo,
-              issue_number: issue.number,
+              issue_number: target.number,
               labels: labelsToAdd,
             });
 
-            core.info(`Added labels: ${labelsToAdd.join(", ")}`);
+            core.info(
+              `Added labels to ${target.kind} #${target.number}: ${labelsToAdd.join(", ")}`
+            );
