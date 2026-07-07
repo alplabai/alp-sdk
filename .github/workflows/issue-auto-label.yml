@@ -8,6 +8,8 @@ on:
       - opened
       - edited
       - reopened
+  # Safe here because the job never checks out or executes PR code; it only
+  # reads PR metadata + changed-file paths and writes labels through the API.
   pull_request_target:
     types:
       - opened
@@ -72,8 +74,9 @@ jobs:
               /^tools\/.+\/README\.md$/,
               /^firmware\/.+\/README\.md$/,
             ];
-            // The feature request template keeps the "Applies to" row within
-            // four lines of the "Module / Component" heading.
+            // `.github/ISSUE_TEMPLATE/feature_request.md` keeps the
+            // `- **Applies to:**` row within four lines of the
+            // `## Module / Component` heading.
             const templateFieldLookaheadLines = 4;
 
             const getCurrentLabels = (item) =>
@@ -300,8 +303,8 @@ jobs:
               return;
             }
 
-            const title = (target.item.title || "").toLowerCase();
-            const body = (target.item.body || "").toLowerCase();
+            const title = target.item.title || "";
+            const body = target.item.body || "";
             const matched = classifyFromText(title, body, target.kind);
             const selected = selectLabels(matched, target.kind, target.changedFiles);
 
