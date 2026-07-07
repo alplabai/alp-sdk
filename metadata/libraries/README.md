@@ -27,12 +27,15 @@ manifest-driven **top-level** `libraries:` selection.
 | `cmsis-nn`  | A    | (west pin) | Apache-2.0 | zephyr    | Cortex-M |
 | `nanopb`    | A    | 0.4.9.1    | Zlib       | zephyr    | — |
 | `zcbor`     | A    | 0.9.1      | Apache-2.0 | zephyr    | — |
+| `modbus`    | A    | 4.4.0      | Apache-2.0 | zephyr    | Cortex-M; Zephyr in-tree subsys |
 | `micro-ros` | B    | humble     | Apache-2.0 | zephyr    | Cortex-M; west pin + CONFIG_MICROROS ‡ |
 | `ros2`      | B    | humble     | Apache-2.0 | yocto     | Cortex-A; meta-ros2-humble layer ‡ |
 | `lwm2m`     | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
 | `coap`      | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
 | `aws-iot`   | B    | v3.1.5     | Apache-2.0 | zephyr    | Zephyr; west project pin § |
 | `azure-iot` | B    | 1.5.0      | MIT        | zephyr    | Zephyr; west project pin § |
+| `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; optional west pin; CAN controller |
+| `micropython` | B  | v1.24.1    | MIT        | zephyr    | Cortex-M; source pin; dedicated owner needed |
 
 `alp doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
@@ -80,6 +83,22 @@ device-to-cloud story; all Tier B (recipe-only), split by grounding:
   is invented; emit renders the selection tag and `--emit west-libraries` emits
   concrete west project entries, with no `CONFIG_` line until packaging confirms
   a real symbol.
+
+**The ADR 0018 industrial / scripting additions.** Three manifests close the
+remaining curation set without inventing capabilities or symbols:
+
+- `modbus` is a **Tier A Zephyr in-tree subsystem** (`CONFIG_MODBUS` from
+  `subsys/modbus/Kconfig`, version `4.4.0`, Apache-2.0).  The native_sim CI
+  lane uses `CONFIG_MODBUS_RAW_ADU`; serial RTU/ASCII deployments need a UART
+  plus a devicetree `zephyr,modbus-serial` node.
+- `canopennode` is **Tier B CAN**: Zephyr pins it as an optional west project
+  in `submanifests/optional.yaml` and its integration glue exposes
+  `CONFIG_CANOPENNODE`.  It needs a real Zephyr CAN controller, but alp-sdk has
+  no CAN capability key, so the manifest records only OS/core constraints.
+- `micropython` is **Tier B scripting**: the pinned workspace has no
+  `modules/lib/micropython` checkout, so the manifest is an enable-by-presence
+  source pin to upstream `micropython/micropython` at `v1.24.1` with no
+  invented Kconfig.  Tier-A promotion needs a dedicated owner (ADR 0018).
 
 **Memfault — deliberately NOT shipped.** Memfault's `memfault-firmware-sdk` is
 not pinned in `west.yml`, and its licence is the proprietary **Memfault SDK
