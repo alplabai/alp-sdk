@@ -67,6 +67,9 @@ jobs:
             const knownLabels = new Set(repoLabels.map((l) => l.name));
 
             const docPathPatterns = [
+              // Repo docs live under `docs/`; root-level markdown covers files
+              // like README.md / CONTRIBUTING.md / CHANGELOG.md; nested README
+              // files in examples/tools/firmware count as documentation too.
               /^docs\//,
               /^[^/]+\.md$/,
               /^\.github\/ISSUE_TEMPLATE\//,
@@ -88,6 +91,23 @@ jobs:
 
             const matchesAny = (text, patterns) =>
               patterns.some((pattern) => new RegExp(pattern, "i").test(text));
+
+            function hasDocComponentHeading(lines) {
+              return lines.some((line, index) => {
+                if (!/##\s*module\s*\/\s*component/i.test(line)) {
+                  return false;
+                }
+                return lines
+                  .slice(index, index + templateFieldLookaheadLines)
+                  .some((candidate) => /\b(?:docs?|metadata|ci|tooling)\b/i.test(candidate));
+              });
+            }
+
+            function hasDocAppliesField(lines) {
+              return lines.some((line) =>
+                /-\s*\*\*applies to:\*\*.*\b(?:docs?|metadata|ci|tooling)\b/i.test(line)
+              );
+            }
 
             function classifyFromText(title, body, kind) {
               const matched = new Set();
@@ -152,17 +172,7 @@ jobs:
               }
 
               const templateComponentDocHint =
-                lines.some((line, index) => {
-                  if (!/##\s*module\s*\/\s*component/i.test(line)) {
-                    return false;
-                  }
-                  return lines
-                    .slice(index, index + templateFieldLookaheadLines)
-                    .some((candidate) => /\b(?:docs?|metadata|ci|tooling)\b/i.test(candidate));
-                }) ||
-                lines.some((line) =>
-                  /-\s*\*\*applies to:\*\*.*\b(?:docs?|metadata|ci|tooling)\b/i.test(line)
-                );
+                hasDocComponentHeading(lines) || hasDocAppliesField(lines);
 
               if (
                 kind === "issue" &&
@@ -295,11 +305,11 @@ jobs:
               return;
             }
 
-            const hasManualLabels = [...currentLabels].some(
+            const hasNonAutoManagedLabels = [...currentLabels].some(
               (label) => !autoManagedLabels.has(label)
             );
-            if (hasManualLabels) {
-              core.info("Skipping: item already has manual labels.");
+            if (hasNonAutoManagedLabels) {
+              core.info("Skipping: item already has non-auto-managed labels.");
               return;
             }
 
