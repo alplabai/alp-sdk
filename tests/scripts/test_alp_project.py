@@ -25,6 +25,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 LOADER = REPO / "scripts" / "alp_project.py"
 TEMPLATE = REPO / "metadata" / "templates" / "board.yaml.example"
+X_EVK_LVGL = REPO / "examples" / "display" / "lvgl-dashboard-x-evk" / "board.yaml"
 
 
 def _run_loader(
@@ -429,6 +430,29 @@ class TestNativeSimOverlayEmit(unittest.TestCase):
         self.assertIn("[51] ALP_E1M_GPIO_DAC1", out)
         # The last entry is semicolon-terminated (not a comma).
         self.assertRegex(out, r">;\s*/\*")
+
+    def test_e1m_x_overlay_uses_e1m_x_gpio_namespace(self) -> None:
+        rv = _run_loader(input_path=X_EVK_LVGL, emit="native-sim-overlay")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        out = rv.stdout
+        self.assertIn("E1M-X canonical order (e1m_x_pinout.h)", out)
+        self.assertEqual(out.count("GPIO_ACTIVE_HIGH>"), 99)
+        self.assertIn("[ 0] ALP_E1M_X_GPIO_IO0", out)
+        self.assertIn("[62] ALP_E1M_X_GPIO_I2C2_SDA", out)
+        self.assertIn("[73] ALP_E1M_X_GPIO_LCD_B0", out)
+        self.assertIn("[98] ALP_E1M_X_GPIO_LCD_VSYNC", out)
+        self.assertNotIn("ALP_E1M_GPIO_IO0", out)
+
+    def test_e1m_x_overlay_splits_99_pads_across_four_gpio_emul_controllers(
+        self,
+    ) -> None:
+        out = _run_loader(input_path=X_EVK_LVGL, emit="native-sim-overlay").stdout
+        for idx in range(4):
+            self.assertIn(f"gpio_emul{idx}: gpio_emul{idx}", out)
+        self.assertEqual(out.count("ngpios = <32>"), 3)
+        self.assertIn("ngpios = <3>", out)
+        self.assertIn("<&gpio_emul2 31 GPIO_ACTIVE_HIGH>", out)  # [95] LCD_B22
+        self.assertIn("<&gpio_emul3  2 GPIO_ACTIVE_HIGH>", out)  # [98] LCD_VSYNC
 
 
 class TestHwInfoHEmit(unittest.TestCase):
