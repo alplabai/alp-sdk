@@ -73,7 +73,7 @@ jobs:
             const getCurrentLabels = (item) =>
               new Set(
                 (item.labels || [])
-                  .map((l) => (typeof l === "string" ? l : l.name))
+                  .map((l) => l.name)
                   .filter(Boolean)
               );
 
@@ -82,6 +82,7 @@ jobs:
 
             function classifyFromText(text, kind) {
               const matched = new Set();
+              const lines = text.split(/\r?\n/);
 
               if (
                 matchesAny(text, [
@@ -142,11 +143,17 @@ jobs:
 
               if (
                 kind === "issue" &&
-                // Keep this in sync with `.github/ISSUE_TEMPLATE/feature_request.md`.
-                matchesAny(text, [
-                  "module\\s*\\/\\s*component[\\s\\S]{0,160}\\b(?:docs?|metadata|ci|tooling)\\b",
-                  "applies\\s+to:\\s*\\(?[^\\n]*\\b(?:docs?|metadata|ci|tooling)\\b",
-                ])
+                (
+                  lines.some((line, index) =>
+                    /##\s*module\s*\/\s*component/i.test(line) &&
+                    lines
+                      .slice(index, index + 4)
+                      .some((candidate) => /\b(?:docs?|metadata|ci|tooling)\b/i.test(candidate))
+                  ) ||
+                  lines.some((line) =>
+                    /-\s*\*\*applies to:\*\*.*\b(?:docs?|metadata|ci|tooling)\b/i.test(line)
+                  )
+                )
               ) {
                 matched.add("documentation");
               }
@@ -157,6 +164,10 @@ jobs:
             function selectLabels(matched, kind, changedFiles) {
               const selected = new Set();
               const primaryPriority = primaryPriorityByKind[kind] || [];
+              const isDocOnlyPr =
+                kind === "pull_request" &&
+                changedFiles.length > 0 &&
+                changedFiles.every((path) => docPathPatterns.some((pattern) => pattern.test(path)));
 
               for (const label of primaryPriority) {
                 if (matched.has(label)) {
@@ -165,15 +176,7 @@ jobs:
                 }
               }
 
-              if (matched.has("documentation")) {
-                selected.add("documentation");
-              }
-
-              if (
-                kind === "pull_request" &&
-                changedFiles.length > 0 &&
-                changedFiles.every((path) => docPathPatterns.some((pattern) => pattern.test(path)))
-              ) {
+              if (matched.has("documentation") || isDocOnlyPr) {
                 selected.add("documentation");
               }
 
@@ -211,6 +214,11 @@ jobs:
                   number: pr.number,
                   changedFiles: files.map((f) => f.filename),
                 };
+              }
+
+              if (context.eventName !== "workflow_dispatch") {
+                core.setFailed(`Unsupported event: ${context.eventName}`);
+                return null;
               }
 
               const kind = core.getInput("target_kind");
