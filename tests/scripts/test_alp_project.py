@@ -327,6 +327,39 @@ class TestDtsOverlayEmit(unittest.TestCase):
         self.assertNotIn("alp-i2c", out)
         self.assertNotIn("alp-adc", out)
 
+    def test_overlay_aen_adc_uses_requested_e1m_adc_instance(self) -> None:
+        example = REPO / "examples" / "peripheral-io" / "adc-voltmeter" / "board.yaml"
+        rv = _run_loader(input_path=example, emit="dts-overlay")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        out = rv.stdout
+        self.assertIn("alp_adc_in1: alp-adc-in1", out)
+        self.assertIn("io-channels = <&adc12_0 1>;", out)
+        self.assertIn("alp-adc1 = &alp_adc_in1;", out)
+        self.assertIn("channel@1", out)
+        self.assertNotIn("alp-adc0 = &alp_adc_in0;", out)
+        self.assertNotIn("alp-adc1 = &adc1;", out)
+
+    def test_overlay_aen_i2c1_is_not_suppressed_by_i2c0_catalog_wiring(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                som:
+                  sku: E1M-AEN801
+                preset: e1m-evk
+                pins:
+                  - E1M_I2C1
+                cores:
+                  m55_hp:
+                    app: ./src
+                    peripherals:
+                      - i2c
+            """)
+            rv = _run_loader(input_path=path, emit="dts-overlay")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        out = rv.stdout
+        self.assertIn("alp-i2c1 = &i2c1;", out)
+        self.assertNotIn("alp-i2c0 = &i2c2;", out)
+        self.assertNotIn("pinctrl_i2c2", out)
+
     def test_overlay_emits_alp_pin_array(self) -> None:
         rv = _run_loader(input_path=TEMPLATE, emit="dts-overlay")
         out = rv.stdout

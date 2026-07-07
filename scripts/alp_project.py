@@ -1010,6 +1010,102 @@ def _parse_board_macros(
     return out
 
 
+def _project_pin_indices(project: dict[str, Any], class_name: str) -> set[int]:
+    """Return E1M route indices for one class named in board.yaml `pins:`."""
+    pattern = re.compile(rf"^E1M_{re.escape(class_name)}(\d+)$")
+    indices: set[int] = set()
+    for pin in project.get("pins", []) or []:
+        if isinstance(pin, str):
+            e1m = pin
+        elif isinstance(pin, dict):
+            e1m = pin.get("e1m")
+        else:
+            continue
+        if not isinstance(e1m, str):
+            continue
+        m = pattern.match(e1m)
+        if m:
+            indices.add(int(m.group(1)))
+    return indices
+
+
+def _route_indices_for_catalog(
+    project: dict[str, Any],
+    macros: dict[str, list[tuple[str, int]]],
+    class_name: str,
+    default_indices: set[int],
+) -> set[int]:
+    """Route indices a SoM-family catalog entry should own.
+
+    Apps that name concrete `pins:` get exactly those aliases.  Older or
+    chip-bound examples without `pins:` keep the catalog's historical default
+    instance, e.g. AEN portable I2C0 -> SoC i2c2.
+    """
+    requested = _project_pin_indices(project, class_name)
+    if requested:
+        return requested
+    board_indices = {idx for _macro, idx in macros.get(class_name, [])}
+    return board_indices & default_indices
+
+
+def _emit_aen_adc_wiring(indices: set[int]) -> str:
+    """Emit AEN ADC consumer nodes for the requested portable ADC ids."""
+    ordered = sorted(indices)
+    lines: list[str] = ["/ {"]
+    for idx in ordered:
+        lines.append(f"\talp_adc_in{idx}: alp-adc-in{idx} {{")
+        lines.append('\t\tcompatible = "alp,adc-input";')
+        lines.append(f"\t\tio-channels = <&adc12_0 {idx}>;")
+        lines.append("\t};")
+    lines.append("\taliases {")
+    for idx in ordered:
+        lines.append(f"\t\talp-adc{idx} = &alp_adc_in{idx};")
+    lines.append("\t};")
+    lines.append("};")
+    lines.append("&adc12_0 {")
+    lines.append('\tstatus = "okay";')
+    for idx in ordered:
+        lines.append(f"\tchannel@{idx} {{")
+        lines.append(f"\t\treg = <{idx}>;")
+        lines.append('\t\tzephyr,gain = "ADC_GAIN_1";')
+        lines.append('\t\tzephyr,reference = "ADC_REF_INTERNAL";')
+        lines.append("\t\tzephyr,vref-mv = <1800>;")
+        lines.append("\t\tzephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;")
+        lines.append("\t\tzephyr,resolution = <12>;")
+        lines.append("\t};")
+    lines.append("};")
+    return "\n".join(lines) + "\n"
+
+
+def _catalog_owned_alias_indices(
+    fam: str,
+    phandle_prefix: str,
+    project: dict[str, Any],
+    macros: dict[str, list[tuple[str, int]]],
+) -> set[int]:
+    """Return portable alias indices emitted by SoM-family special wiring."""
+    if fam == "aen" and phandle_prefix == "i2c":
+        return _route_indices_for_catalog(project, macros, "I2C", {0}) & {0}
+    if fam == "aen" and phandle_prefix == "adc":
+        return _route_indices_for_catalog(project, macros, "ADC", {0})
+    return set()
+
+
+def _catalog_generic_alias_indices(
+    fam: str,
+    phandle_prefix: str,
+    project: dict[str, Any],
+    macros: dict[str, list[tuple[str, int]]],
+    class_name: str,
+) -> set[int]:
+    """Return generic alias indices to emit for a catalog-owned class."""
+    if fam == "aen" and phandle_prefix == "i2c":
+        return _route_indices_for_catalog(project, macros, class_name, {0})
+    if fam == "aen" and phandle_prefix == "adc":
+        return _route_indices_for_catalog(project, macros, class_name, {0})
+    return {idx for _macro, idx in macros.get(class_name, [])}
+
+
 # ---------------------------------------------------------------------
 # Carrier peripheral DT-wiring catalog (single source of truth)
 # ---------------------------------------------------------------------
@@ -1063,30 +1159,6 @@ _PERIPH_DT_WIRING: dict[str, dict[str, dict[str, Any]]] = {
         },
         "adc": {
             "include": ["zephyr/dt-bindings/adc/adc.h"],
-            "dts": (
-                "/ {\n"
-                "\t/* alp-adc0 -> io-channels consumer; ADC_DT_SPEC_GET reads\n"
-                "\t * .dev from the controller + .channel from input cell 0. */\n"
-                "\talp_adc_in0: alp-adc-in0 {\n"
-                "\t\tcompatible = \"alp,adc-input\";\n"
-                "\t\tio-channels = <&adc12_0 0>;\n"
-                "\t};\n"
-                "\taliases {\n"
-                "\t\talp-adc0 = &alp_adc_in0;\n"
-                "\t};\n"
-                "};\n"
-                "&adc12_0 {\n"
-                "\tstatus = \"okay\";\n"
-                "\tchannel@0 {\n"
-                "\t\treg = <0>;\n"
-                "\t\tzephyr,gain = \"ADC_GAIN_1\";\n"
-                "\t\tzephyr,reference = \"ADC_REF_INTERNAL\";\n"
-                "\t\tzephyr,vref-mv = <1800>;\n"
-                "\t\tzephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;\n"
-                "\t\tzephyr,resolution = <12>;\n"
-                "\t};\n"
-                "};\n"
-            ),
         },
     },
 }
@@ -1180,13 +1252,18 @@ def _emit_dts_overlay(
     # Bus aliases -- one per unique channel the board wires.
     lines.append("    aliases {")
     for class_name, alp_prefix, phandle_prefix in _BUS_BUCKETS:
-        # Skip buckets whose peripheral token the catalog owns for this SoM
-        # family -- the _PERIPH_DT_WIRING fragment emits the correct alias
-        # (e.g. alp-adc0 -> &alp_adc_in0) at the tail, so emitting the generic
-        # alp-<x>0 -> &<x>0 here would produce a duplicate / conflicting alias.
-        if phandle_prefix in wiring:
+        # Catalog-owned classes (AEN i2c/adc) are instance-specific: the
+        # catalog owns only the aliases it remaps, while requested sibling
+        # instances can still receive the generic scaffold.
+        if phandle_prefix in wiring and phandle_prefix not in set(v2_peripherals or []):
             continue
-        entries = sorted(set(idx for _macro, idx in macros.get(class_name, [])))
+        if phandle_prefix in wiring:
+            entries = sorted(
+                _catalog_generic_alias_indices(fam, phandle_prefix, project, macros, class_name)
+                - _catalog_owned_alias_indices(fam, phandle_prefix, project, macros)
+            )
+        else:
+            entries = sorted(set(idx for _macro, idx in macros.get(class_name, [])))
         if not entries:
             continue
         lines.append(f"        /* {class_name} */")
@@ -1251,10 +1328,26 @@ def _emit_dts_overlay(
     # is None) emits nothing here.  A per-example overlay still layers last.
     # `fam`/`wiring` were computed once near the top of the function (and also
     # gate the generic alias skip above), so they are reused here verbatim.
-    emitted = [(p, wiring[p]) for p in sorted(set(v2_peripherals or [])) if p in wiring]
+    emitted: list[tuple[str, dict[str, Any], str]] = []
+    for p in sorted(set(v2_peripherals or [])):
+        if p not in wiring:
+            continue
+        entry = wiring[p]
+        if fam == "aen" and p == "adc":
+            indices = _route_indices_for_catalog(project, macros, "ADC", {0})
+            if not indices:
+                continue
+            emitted.append((p, entry, _emit_aen_adc_wiring(indices)))
+            continue
+        if fam == "aen" and p == "i2c":
+            indices = _route_indices_for_catalog(project, macros, "I2C", {0})
+            if 0 not in indices:
+                continue
+        emitted.append((p, entry, entry.get("dts", "")))
+
     if emitted:
         incs: list[str] = []
-        for _p, entry in emitted:
+        for _p, entry, _dts in emitted:
             for inc in entry.get("include", []):
                 if inc not in incs:
                     incs.append(inc)
@@ -1265,9 +1358,9 @@ def _emit_dts_overlay(
             lines.append(f"#include <{inc}>")
         if incs:
             lines.append("")
-        for p, entry in emitted:
+        for p, _entry, dts in emitted:
             lines.append(f"/* peripheral: {p} */")
-            lines.append(entry["dts"].rstrip("\n"))
+            lines.append(dts.rstrip("\n"))
             lines.append("")
 
     return "\n".join(lines) + "\n"
@@ -2157,6 +2250,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             "sku":    project.sku,
             "hw_rev": project.hw_rev,
         },
+        "pins": list(project.raw.get("pins") or []),
         "board": ({
             "name":   project.board_name,
             "hw_rev": project.board_hw_rev,
