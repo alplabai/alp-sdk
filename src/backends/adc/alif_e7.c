@@ -87,7 +87,7 @@ typedef struct alif_e7_adc_state {
 	uint8_t                   resolution_bits;
 	uint16_t                  oversample_ratio; /* sourced from cfg->oversampling_ratio at open */
 	alp_alif_adc_trigger_t    trigger_source;
-	int16_t                   sample_buf;
+	int32_t                   sample_buf; /* 4B: adc_alif needs a 4-byte buffer */
 	bool                      in_use;
 } alif_e7_adc_state_t;
 
