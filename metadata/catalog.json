@@ -252,6 +252,13 @@
         "summary": "Secure OTA firmware update with rollback. The production-readiness proof for \"how do we update 10 000 units in the field?\"."
       },
       {
+        "board": "e1m-x-evk",
+        "name": "modbus-server",
+        "path": "examples/connectivity/modbus-server",
+        "som": "E1M-V2N101",
+        "summary": "Modbus teaching example for the ADR 0018 `libraries: [modbus]` manifest."
+      },
+      {
         "board": "e1m-evk",
         "name": "production-deployment",
         "path": "examples/connectivity/production-deployment",
