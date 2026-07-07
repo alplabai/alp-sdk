@@ -1010,6 +1010,88 @@ def _parse_board_macros(
     return out
 
 
+# ---------------------------------------------------------------------
+# Carrier peripheral DT-wiring catalog (single source of truth)
+# ---------------------------------------------------------------------
+#
+# Declaring a peripheral in board.yaml (`cores.<id>.peripherals`) sets the
+# subsystem CONFIG via the conf emit -- but that alone does NOT bind hardware:
+# the controller node sits `disabled` in the SoC dtsi, so e.g. ADC_ALIF never
+# selects and `alp adc read` returns -ENOENT.  Examples used to paper over this
+# with a hand-written boards/*.overlay enabling the node + the alp-<x>N alias /
+# io-channels consumer the portable backends resolve.
+#
+# This catalog moves that wiring into the codegen: `_emit_dts_overlay` renders
+# the fragment for each declared peripheral, so `peripherals: [adc]` ALONE
+# yields a working `alp adc read` with NO per-example overlay.  Keyed by SoM
+# family (from `_sku_family`); each entry carries the dt-bindings `#include`s it
+# needs + a self-contained DTS fragment (DT permits repeated `/{}` and
+# `&label{}` sections).  To add or fix a peripheral's wiring, edit ONE entry
+# here -- never per example.  A per-example boards/*.overlay still layers last
+# and wins (override tier), so this is opt-in-complete, not a straitjacket.
+_PERIPH_DT_WIRING: dict[str, dict[str, dict[str, Any]]] = {
+    "aen": {
+        "i2c": {
+            "include": ["zephyr/dt-bindings/i2c/i2c.h",
+                        "zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h"],
+            "dts": (
+                "&pinctrl {\n"
+                "\tpinctrl_i2c2: pinctrl_i2c2 {\n"
+                "\t\tgroup0 {\n"
+                "\t\t\tpinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;\n"
+                "\t\t\tinput-enable;\n"
+                "\t\t\tbias-pull-down;\n"
+                "\t\t};\n"
+                "\t};\n"
+                "};\n"
+                "&i2c2 {\n"
+                "\tstatus = \"okay\";\n"
+                "\tpinctrl-0 = <&pinctrl_i2c2>;\n"
+                "\tpinctrl-names = \"default\";\n"
+                "\tclock-frequency = <I2C_BITRATE_STANDARD>;\n"
+                "};\n"
+                "/ {\n"
+                "\taliases {\n"
+                "\t\talp-i2c0 = &i2c2;\n"
+                "\t};\n"
+                "};\n"
+            ),
+        },
+        "gpio": {
+            "include": [],
+            "dts": "&gpio8 {\n\tstatus = \"okay\";\n};\n",
+        },
+        "adc": {
+            "include": ["zephyr/dt-bindings/adc/adc.h"],
+            "dts": (
+                "/ {\n"
+                "\t/* alp-adc0 -> io-channels consumer; ADC_DT_SPEC_GET reads\n"
+                "\t * .dev from the controller + .channel from input cell 0. */\n"
+                "\talp_adc_in0: alp-adc-in0 {\n"
+                "\t\tcompatible = \"alp,adc-input\";\n"
+                "\t\tio-channels = <&adc12_0 0>;\n"
+                "\t};\n"
+                "\taliases {\n"
+                "\t\talp-adc0 = &alp_adc_in0;\n"
+                "\t};\n"
+                "};\n"
+                "&adc12_0 {\n"
+                "\tstatus = \"okay\";\n"
+                "\tchannel@0 {\n"
+                "\t\treg = <0>;\n"
+                "\t\tzephyr,gain = \"ADC_GAIN_1\";\n"
+                "\t\tzephyr,reference = \"ADC_REF_INTERNAL\";\n"
+                "\t\tzephyr,vref-mv = <1800>;\n"
+                "\t\tzephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;\n"
+                "\t\tzephyr,resolution = <12>;\n"
+                "\t};\n"
+                "};\n"
+            ),
+        },
+    },
+}
+
+
 def _emit_dts_overlay(
     project: dict[str, Any],
     sku_preset: dict[str, Any],
@@ -1059,6 +1141,11 @@ def _emit_dts_overlay(
     lines.append("")
 
     sku = project["som"]["sku"]
+    # Carrier peripheral DT-wiring catalog for this SoM family.  Computed
+    # ONCE here and reused both to skip the generic bus aliases the catalog
+    # owns (below) and to emit the catalog fragments at the tail.
+    fam = _sku_family(sku)
+    wiring = _PERIPH_DT_WIRING.get(fam, {})
     board_name = (board_preset or {}).get("name", "")
     if not board_name:
         lines.append("// No board declared in board.yaml; nothing to emit.")
@@ -1093,6 +1180,12 @@ def _emit_dts_overlay(
     # Bus aliases -- one per unique channel the board wires.
     lines.append("    aliases {")
     for class_name, alp_prefix, phandle_prefix in _BUS_BUCKETS:
+        # Skip buckets whose peripheral token the catalog owns for this SoM
+        # family -- the _PERIPH_DT_WIRING fragment emits the correct alias
+        # (e.g. alp-adc0 -> &alp_adc_in0) at the tail, so emitting the generic
+        # alp-<x>0 -> &<x>0 here would produce a duplicate / conflicting alias.
+        if phandle_prefix in wiring:
+            continue
         entries = sorted(set(idx for _macro, idx in macros.get(class_name, [])))
         if not entries:
             continue
@@ -1149,6 +1242,33 @@ def _emit_dts_overlay(
     lines.append("")
 
     lines.append("};")
+
+    # ── carrier peripheral wiring (catalog-driven) ──────────────────────
+    # For each declared peripheral carrying a _PERIPH_DT_WIRING entry, append
+    # its controller node-enable + the alp-<x>N alias / io-channels consumer
+    # the portable backends resolve -- so `peripherals: [adc]` ALONE binds the
+    # hardware (no hand-written boards/*.overlay).  The v1 path (v2_peripherals
+    # is None) emits nothing here.  A per-example overlay still layers last.
+    # `fam`/`wiring` were computed once near the top of the function (and also
+    # gate the generic alias skip above), so they are reused here verbatim.
+    emitted = [(p, wiring[p]) for p in sorted(set(v2_peripherals or [])) if p in wiring]
+    if emitted:
+        incs: list[str] = []
+        for _p, entry in emitted:
+            for inc in entry.get("include", []):
+                if inc not in incs:
+                    incs.append(inc)
+        lines.append("")
+        lines.append("/* ---- carrier peripheral wiring "
+                     "(auto, from board.yaml `peripherals:`) ---- */")
+        for inc in incs:
+            lines.append(f"#include <{inc}>")
+        if incs:
+            lines.append("")
+        for p, entry in emitted:
+            lines.append(f"/* peripheral: {p} */")
+            lines.append(entry["dts"].rstrip("\n"))
+            lines.append("")
 
     return "\n".join(lines) + "\n"
 
