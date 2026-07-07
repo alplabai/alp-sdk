@@ -63,6 +63,12 @@
 #define AEN_ULOG_HP_BEACON_MAGIC 0x554C4F90U
 #define AEN_ULOG_HE_BEACON_MAGIC 0x554C4FE0U
 
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_RPC_TIMEOUT_MS)
+#define AEN_ULOG_MHU_READY_TIMEOUT_MS CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_RPC_TIMEOUT_MS
+#else
+#define AEN_ULOG_MHU_READY_TIMEOUT_MS 2000
+#endif
+
 enum aen_ulog_op {
 	AEN_ULOG_OP_READY  = 1,
 	AEN_ULOG_OP_APPEND = 2,
@@ -105,11 +111,17 @@ static void aen_mhu_drain(void)
 	}
 }
 
-static void aen_mhu_sender_ready(void)
+static alp_status_t aen_mhu_sender_ready(void)
 {
 	sys_write32(1U, AEN_ULOG_TX_ACC_REQ);
-	while (sys_read32(AEN_ULOG_TX_ACC_RDY) == 0U) {
+	int64_t deadline = k_uptime_get() + AEN_ULOG_MHU_READY_TIMEOUT_MS;
+	while (k_uptime_get() < deadline) {
+		if (sys_read32(AEN_ULOG_TX_ACC_RDY) != 0U) {
+			return ALP_OK;
+		}
+		k_msleep(1);
 	}
+	return (sys_read32(AEN_ULOG_TX_ACC_RDY) != 0U) ? ALP_OK : ALP_ERR_TIMEOUT;
 }
 
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT)
@@ -143,7 +155,11 @@ static alp_status_t client_call(enum aen_ulog_op              op,
                                 struct aen_ulog_rsp          *rsp_out)
 {
 	if (!g_client_mhu_ready) {
-		aen_mhu_sender_ready();
+		alp_status_t rc = aen_mhu_sender_ready();
+		if (rc != ALP_OK) {
+			client_beacon(op, g_client_seq, rc);
+			return rc;
+		}
 		g_client_mhu_ready = true;
 	}
 
@@ -317,7 +333,14 @@ static void owner_reply(uint32_t                      seq,
 
 void alp_update_log_aen_m55_owner_run(void)
 {
-	aen_mhu_sender_ready();
+	alp_status_t ready_rc = aen_mhu_sender_ready();
+	if (ready_rc != ALP_OK) {
+		AEN_ULOG_HP_BEACON[0] = AEN_ULOG_HP_BEACON_MAGIC;
+		AEN_ULOG_HP_BEACON[1] = (uint32_t)ready_rc;
+		AEN_ULOG_HP_BEACON[2] = 0U;
+		AEN_ULOG_HP_BEACON[3] = 0U;
+		return;
+	}
 
 	alp_update_log_t *log      = alp_update_log_open();
 	uint32_t          last_seq = 0U;

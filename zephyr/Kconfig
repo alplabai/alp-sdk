@@ -1994,11 +1994,11 @@ config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE
 config ALP_SDK_UPDATE_LOG_AEN_M55_RPC_TIMEOUT_MS
 	int "Alif dual-M55 update-log request timeout in milliseconds"
 	default 2000
-	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT
+	depends on ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT || ALP_SDK_UPDATE_LOG_AEN_M55_OWNER
 	help
-	  Timeout for one client request to the M55 owner. A timeout means the
-	  owner image is absent, not released, or not servicing the shared
-	  mailbox, so ready() declines and the dispatcher can fail closed.
+	  Timeout for MHU access readiness and one client request to the M55 owner.
+	  A timeout means the owner image is absent, not released, or not servicing
+	  the shared mailbox, so ready() declines and the dispatcher can fail closed.
 
 config ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED
 	bool "Fail open() unless the update log is hardware-enforced"

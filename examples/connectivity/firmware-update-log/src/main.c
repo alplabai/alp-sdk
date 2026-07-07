@@ -232,8 +232,9 @@ int main(void)
 	alp_status_t rc = alp_mproc_boot_core(ALP_CORE_M55_HE, HE_LOAD_ADDR);
 	printf("[update-log] released HE rc=%d\n", (int)rc);
 
-	/* This call does not return. It opens the local MRAM/NVS log and serves
-	 * HE append/verify/count/get requests. */
+	/* This call normally does not return. It opens the local MRAM/NVS log and
+	 * serves HE append/verify/count/get requests; if MHU access never becomes
+	 * ready, it records that failure in the HP beacon and returns. */
 	alp_update_log_aen_m55_owner_run();
 	return 0;
 #else
