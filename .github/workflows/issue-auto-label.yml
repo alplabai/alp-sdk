@@ -69,13 +69,11 @@ jobs:
             const docPathPatterns = [
               // Repo docs live under `docs/`; root-level markdown covers files
               // like README.md / CONTRIBUTING.md / CHANGELOG.md; nested README
-              // files in examples/tools/firmware count as documentation too.
+              // files anywhere in the tree count as documentation too.
               /^docs\//,
               /^[^/]+\.md$/,
               /^\.github\/ISSUE_TEMPLATE\//,
-              /^examples\/.+\/README\.md$/,
-              /^tools\/.+\/README\.md$/,
-              /^firmware\/.+\/README\.md$/,
+              /\/README\.md$/,
             ];
             // `.github/ISSUE_TEMPLATE/feature_request.md` keeps the
             // `- **Applies to:**` row within four lines of the
@@ -147,11 +145,9 @@ jobs:
                 matchesAny(text, [
                   "\\bfeature\\b",
                   "\\benhancement\\b",
-                  "\\brequest\\b",
+                  "\\bfeature\\s+request\\b",
                   "\\bimprov(?:e|ement)\\b",
                   "\\badd support\\b",
-                  "\\bzephyr\\b",
-                  "\\byocto\\b",
                 ])
               ) {
                 matched.add("enhancement");
@@ -160,7 +156,8 @@ jobs:
               if (
                 kind === "issue" &&
                 (matchesAny(text, [
-                  "\\[?question\\]?",
+                  "\\[question\\]",
+                  "\\bquestion\\b",
                   "\\bhow\\s+(?:do|can|to)\\b",
                   "\\bwhat\\s+(?:is|are|does)\\b",
                   "\\bwhy\\b",
