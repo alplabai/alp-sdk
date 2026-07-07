@@ -1,0 +1,176 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: issue-auto-label
+
+on:
+  issues:
+    types:
+      - opened
+      - edited
+      - reopened
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  label:
+    name: Auto-label issues
+    # Defensive guard: skip pull_request-shaped payloads.
+    if: ${{ github.event.issue.pull_request == null }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Apply labels from issue content
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const currentLabels = new Set(
+              (issue.labels || [])
+                .map((l) => (typeof l === "string" ? l : l.name))
+                .filter(Boolean)
+            );
+
+            const manualOverrideLabel = "triage/manual";
+            if (currentLabels.has(manualOverrideLabel)) {
+              core.info(`Skipping: "${manualOverrideLabel}" override is set.`);
+              return;
+            }
+
+            // Labels this workflow may manage automatically.
+            const autoManagedLabels = new Set([
+              "bug",
+              "enhancement",
+              "documentation",
+              "question",
+            ]);
+
+            // Skip when a maintainer already applied any non-managed label.
+            const hasManualLabels = [...currentLabels].some(
+              (label) => !autoManagedLabels.has(label)
+            );
+            if (hasManualLabels) {
+              core.info("Skipping: issue already has manual labels.");
+              return;
+            }
+
+            const text = `${issue.title || ""}\n${issue.body || ""}`.toLowerCase();
+            const matched = new Set();
+
+            const matchesAny = (patterns) =>
+              patterns.some((pattern) => new RegExp(pattern, "i").test(text));
+
+            // Content keyword rules.
+            if (
+              matchesAny([
+                "\\bdocs?\\b",
+                "\\bdocumentation\\b",
+                "\\breadme\\b",
+                "\\btutorial\\b",
+                "\\bguide\\b",
+                "\\bboard\\.yaml\\b",
+                "\\bmetadata\\b",
+              ])
+            ) {
+              matched.add("documentation");
+            }
+
+            if (
+              matchesAny([
+                "\\bbug\\b",
+                "\\berror\\b",
+                "\\bfail(?:ed|ing|ure)?\\b",
+                "\\bcrash\\b",
+                "\\bpanic\\b",
+                "\\bregression\\b",
+                "\\bsecurity\\b",
+                "\\bbuild\\s+(?:break|broken|fail(?:ed|ure)?)\\b",
+                "\\bci\\s+(?:break|broken|fail(?:ed|ure)?)\\b",
+              ])
+            ) {
+              matched.add("bug");
+            }
+
+            if (
+              matchesAny([
+                "\\bfeature\\b",
+                "\\benhancement\\b",
+                "\\brequest\\b",
+                "\\bimprov(?:e|ement)\\b",
+                "\\badd support\\b",
+                "\\bzephyr\\b",
+                "\\byocto\\b",
+              ])
+            ) {
+              matched.add("enhancement");
+            }
+
+            if (
+              matchesAny([
+                "^\\s*\\[?question\\]?",
+                "\\bhow\\s+(?:do|can|to)\\b",
+                "\\bwhat\\s+(?:is|are|does)\\b",
+                "\\bwhy\\b",
+                "\\bcan\\s+someone\\s+help\\b",
+              ]) ||
+              /\?\s*$/.test((issue.title || "").trim())
+            ) {
+              matched.add("question");
+            }
+
+            // Issue template "Module / Component" hints.
+            if (
+              matchesAny([
+                "module\\s*\\/\\s*component[\\s\\S]{0,160}\\b(?:docs?|metadata|ci|tooling)\\b",
+                "applies\\s+to:\\s*\\(?[^\\n]*\\b(?:docs?|metadata|ci|tooling)\\b",
+              ])
+            ) {
+              matched.add("documentation");
+            }
+
+            // Clear precedence among primary class labels.
+            const primaryPriority = ["bug", "enhancement", "question"];
+            const selected = new Set();
+            for (const label of primaryPriority) {
+              if (matched.has(label)) {
+                selected.add(label);
+                break;
+              }
+            }
+            // Documentation may be additive.
+            if (matched.has("documentation")) {
+              selected.add("documentation");
+            }
+
+            if (selected.size === 0) {
+              core.info("No rule matched.");
+              return;
+            }
+
+            // Restrict to labels that already exist in the repository.
+            const repoLabels = await github.paginate(
+              github.rest.issues.listLabelsForRepo,
+              { owner, repo, per_page: 100 }
+            );
+            const knownLabels = new Set(repoLabels.map((l) => l.name));
+            const labelsToAdd = [...selected].filter(
+              (label) => knownLabels.has(label) && !currentLabels.has(label)
+            );
+
+            if (labelsToAdd.length === 0) {
+              core.info("No new known labels to add.");
+              return;
+            }
+
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: issue.number,
+              labels: labelsToAdd,
+            });
+
+            core.info(`Added labels: ${labelsToAdd.join(", ")}`);
