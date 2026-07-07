@@ -72,6 +72,8 @@ jobs:
               /^tools\/.+\/README\.md$/,
               /^firmware\/.+\/README\.md$/,
             ];
+            // The feature request template keeps the "Applies to" row within
+            // four lines of the "Module / Component" heading.
             const templateFieldLookaheadLines = 4;
 
             const getCurrentLabels = (item) =>
@@ -135,7 +137,7 @@ jobs:
               if (
                 kind === "issue" &&
                 (matchesAny(text, [
-                  "^\\s*\\[?question\\]?",
+                  "\\[?question\\]?",
                   "\\bhow\\s+(?:do|can|to)\\b",
                   "\\bwhat\\s+(?:is|are|does)\\b",
                   "\\bwhy\\b",
