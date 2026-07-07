@@ -226,7 +226,7 @@ jobs:
                   "\\bcannot\\s+repro(?:duce)?\\b",
                   "\\bcan(?:not|'t)\\s+repro(?:duce)?\\b",
                   "\\bnot\\s+repro(?:ducible)?\\b",
-                  "\\boff.topic\\b",
+                  "\\boff[.-]?topic\\b",
                   "\\bnot\\s+a\\s+bug\\b",
                   "\\bnot\\s+an\\s+issue\\b",
                 ])
