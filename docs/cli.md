@@ -311,6 +311,7 @@ implementation that owns it (never a fork):
 | `cmake-args` | Per-core `-D` CMake argument list | `alp_project.py` |
 | `yocto-conf` | Per-core `local.conf` fragment | `alp_project.py` |
 | `dts-overlay` | Board DTS overlay (bus aliases + pin array) | `alp_project.py` |
+| `native-sim-overlay` | native_sim overlay: `alp,pin-array` on `zephyr,gpio-emul` | `alp_project.py` |
 | `hw-info-h` | Build-time `hw_info.h` macro header | `alp_project.py` |
 | `west-libraries` | `west.yml` fragment for `libraries:` deps | `alp_project.py` |
 | `system-manifest` | Full-system manifest (slices, boot order) | orchestrator |

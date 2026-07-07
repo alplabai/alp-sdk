@@ -355,6 +355,49 @@ class TestDtsOverlayEmit(unittest.TestCase):
         self.assertIn("[51] ALP_E1M_GPIO_DAC1", out)
 
 
+class TestNativeSimOverlayEmit(unittest.TestCase):
+    """native-sim-overlay emission -- the canonical alp,pin-array on
+    zephyr,gpio-emul so GPIO apps link + resolve under native_sim."""
+
+    def test_overlay_structure(self) -> None:
+        rv = _run_loader(input_path=TEMPLATE, emit="native-sim-overlay")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        out = rv.stdout
+        self.assertIn("#include <zephyr/dt-bindings/gpio/gpio.h>", out)
+        self.assertIn('compatible = "zephyr,gpio-emul"', out)
+        self.assertIn('compatible = "alp,pin-array"', out)
+        self.assertTrue(out.rstrip().endswith("};"),
+                        msg="overlay must terminate with `};`")
+
+    def test_two_gpio_emul_controllers_split_52_pads(self) -> None:
+        """gpio-emul caps at 32 pins, so E1M's 52 pads span two
+        controllers: gpio_emul0 (32) + gpio_emul1 (20)."""
+        out = _run_loader(input_path=TEMPLATE, emit="native-sim-overlay").stdout
+        self.assertIn("gpio_emul0: gpio_emul0", out)
+        self.assertIn("gpio_emul1: gpio_emul1", out)
+        self.assertIn("ngpios = <32>", out)   # emul0 backs indices 0..31
+        self.assertIn("ngpios = <20>", out)   # emul1 backs indices 32..51
+
+    def test_pin_array_is_positional_52(self) -> None:
+        """Full 52-entry positional map so alp_z_gpio_resolve(pin_id)
+        resolves any pad under native_sim (ALP_PIN_COUNT = DT gpios len)."""
+        out = _run_loader(input_path=TEMPLATE, emit="native-sim-overlay").stdout
+        # 52 positional triplets total, split across the two controllers.
+        self.assertEqual(out.count("GPIO_ACTIVE_HIGH>"), 52)
+        self.assertIn("<&gpio_emul0  0 GPIO_ACTIVE_HIGH>", out)   # [ 0] IO0
+        self.assertIn("<&gpio_emul0 31 GPIO_ACTIVE_HIGH>", out)   # [31] PWM5
+        self.assertIn("<&gpio_emul1  0 GPIO_ACTIVE_HIGH>", out)   # [32] PWM6
+        self.assertIn("<&gpio_emul1 19 GPIO_ACTIVE_HIGH>", out)   # [51] DAC1
+        # Canonical slots present + correctly indexed in the comments.
+        self.assertIn("[ 0] ALP_E1M_GPIO_IO0", out)
+        self.assertIn("[31] ALP_E1M_GPIO_PWM5", out)
+        self.assertIn("[32] ALP_E1M_GPIO_PWM6", out)
+        self.assertIn("[42] ALP_E1M_GPIO_ADC0", out)
+        self.assertIn("[51] ALP_E1M_GPIO_DAC1", out)
+        # The last entry is semicolon-terminated (not a comma).
+        self.assertRegex(out, r">;\s*/\*")
+
+
 class TestHwInfoHEmit(unittest.TestCase):
     """hw-info-h emission -- companion to the public <alp/hw_info.h>.
     Bakes board.yaml identifiers into ALP_HW_BUILD_* macros so apps

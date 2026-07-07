@@ -35,6 +35,7 @@ PROJECT_EMIT_MODES = [
     "cmake-args",
     "yocto-conf",
     "dts-overlay",
+    "native-sim-overlay",
     "hw-info-h",
     "west-libraries",
     "system-manifest",
