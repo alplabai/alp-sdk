@@ -1,0 +1,60 @@
+# CANopenNode -- CANopen protocol stack (ADR 0018 library manifest).
+#
+# Tier-B industrial connectivity entry: CANopenNode implements the CANopen
+# application/protocol stack used by automation nodes on a CAN bus.  Zephyr
+# carries the integration glue in-tree, while the stack source is an optional
+# west module.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * optional west module `canopennode`, path modules/lib/canopennode,
+#     $ZEPHYR_BASE/submanifests/optional.yaml revision
+#     dec12fa3f0d790cafa8414a4c2930ea71ab72ffd
+#     (remote `upstream` url-base https://github.com/zephyrproject-rtos).
+#   * source checkout is absent in this filtered workspace:
+#     `west list canopennode` fails and
+#     `ls $ZEPHYR_BASE/../modules/lib/canopennode` is absent.  No local
+#     upstream CHANGELOG/VERSION file can be read, so `version:` uses the exact
+#     optional west revision SHA as the reproducible source pin.
+#   * enable symbol CONFIG_CANOPENNODE
+#     ($ZEPHYR_BASE/modules/canopennode/Kconfig:9 `config CANOPENNODE`).  It
+#     `select CRC` and `depends on CAN && !CAN_FD_MODE`.
+#   * licence Apache-2.0 for the Zephyr integration glue
+#     ($ZEPHYR_BASE/modules/canopennode/Kconfig:4 "SPDX-License-Identifier:
+#     Apache-2.0"; the source checkout LICENSE is not locally present because
+#     the optional module is filtered out).
+#
+# Capability note: CANopenNode needs a real Zephyr CAN controller and CAN bus
+# wiring.  That prerequisite is satisfiable today -- CAN is a GA peripheral on
+# the Renesas (RZ/V2N) and Alif (Ensemble) E1M families, wired through the
+# portable <alp/*> peripheral layer and the Zephyr CAN subsystem / devicetree.
+# It is NOT expressed as an ADR 0018 capability key, though: alp-sdk's
+# capability vocabulary carries hardware accelerator / DMA / NPU / crypto facts
+# (cau, cryptocell, dave2d, dma2d, drp_ai, emmc_dma, ethos_u*, gpu2d,
+# helium_mve, hexspi_dma, inline_aes, neon, quadspi_dma, xspi_dma), not
+# bus/peripheral presence -- peripheral coverage is a devicetree/ADR 0003 fact,
+# not a capability.  So this manifest does NOT invent a `can` capability; CAN
+# availability is verified by the CAN subsystem and devicetree per family.
+schema_version: 1
+name: canopennode
+description: "CANopenNode -- CANopen protocol stack for Zephyr CAN devices."
+tier: B
+version: "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd"
+license: Apache-2.0
+
+requires:
+  # The curated SDK integration is Zephyr/Cortex-M firmware.  The additional
+  # hard requirement is a CAN controller, but no honest capability key exists
+  # for it in alp-sdk today (see header), so only OS/core class are encoded.
+  os: [zephyr]
+  core_class: m
+
+integration:
+  zephyr:
+    module: canopennode
+    west:
+      name: canopennode
+      url: https://github.com/zephyrproject-rtos/canopennode
+      revision: dec12fa3f0d790cafa8414a4c2930ea71ab72ffd
+      path: modules/lib/canopennode
+    kconfig:
+      - CONFIG_CANOPENNODE=y

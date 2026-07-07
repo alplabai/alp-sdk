@@ -1,0 +1,48 @@
+# MicroPython -- Python runtime for microcontrollers (ADR 0018 manifest).
+#
+# Tier-B scripting entry: MicroPython provides an embedded Python runtime for
+# constrained systems.  Upstream carries a Zephyr port under `ports/zephyr`, but
+# this pinned Zephyr v4.4.0 workspace does NOT import the MicroPython source.
+#
+# West pin + Kconfig grounding (not-in-tree-verified 2026-07-07):
+#   MicroPython is NOT in the pinned Zephyr v4.4.0 workspace.  Verified:
+#   `ls $ZEPHYR_BASE/../modules/lib/micropython` is absent, and the active
+#   Zephyr west manifest/submanifests have no MicroPython project.  The
+#   manifest therefore carries its own west project pin:
+#     https://github.com/micropython/micropython.git @ v1.24.1
+#   Upstream's Zephyr support is a port (`ports/zephyr`), not a single Zephyr
+#   module master switch.  There is no locally grounded
+#   `CONFIG_MICROPYTHON=y` to transcribe, so `integration.zephyr` carries
+#   `module:` + a `west:` pin and NO `kconfig:`; inventing a symbol is
+#   forbidden (ADR 0018).
+#
+# Version:  `v1.24.1` -- exact upstream stable release tag.
+# License:  MIT -- MicroPython's upstream project licence.  NOT verified from
+#   an in-tree LICENSE file, because the source is not in this checkout
+#   (not-in-tree-verified).
+#
+# Maintenance note: MicroPython is intentionally Tier B.  Tier-A promotion is
+# heavy-maintenance work and needs a dedicated owner: the Zephyr port, heap
+# sizing, filesystem/REPL policy, frozen modules, and CI smoke app all need
+# product choices rather than a metadata-only switch.
+schema_version: 1
+name: micropython
+description: "MicroPython -- embedded Python runtime via upstream ports/zephyr."
+tier: B
+version: "v1.24.1"
+license: MIT
+
+requires:
+  # alp-sdk curates this as a Zephyr/Cortex-M scripting runtime.  The source
+  # pin is enable-by-presence (see header), so no Kconfig line is emitted.
+  os: [zephyr]
+  core_class: m
+
+integration:
+  zephyr:
+    module: micropython
+    west:
+      name: micropython
+      url: https://github.com/micropython/micropython.git
+      revision: v1.24.1
+      path: modules/lib/micropython

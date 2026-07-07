@@ -441,6 +441,32 @@ class TestWestLibrariesEmit(unittest.TestCase):
             self.assertIn("revision: 1.5.0", out)
             self.assertIn("path: modules/lib/azure-sdk-for-c", out)
 
+    def test_top_level_industrial_scripting_libraries_emit_exact_west_projects(self) -> None:
+        """CANopenNode and MicroPython carry exact west project pins: the
+        optional Zephyr module pin for CANopenNode and the not-in-tree
+        upstream source pin for MicroPython."""
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                som:
+                  sku: E1M-V2N101
+                libraries: [canopennode, micropython]
+                cores:
+                  m33_sm:
+                    os: zephyr
+                    app: ./src
+            """)
+            rv = _run_loader(input_path=path, emit="west-libraries")
+            self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+            out = rv.stdout
+            self.assertIn("name: canopennode", out)
+            self.assertIn("url: https://github.com/zephyrproject-rtos/canopennode", out)
+            self.assertIn("revision: dec12fa3f0d790cafa8414a4c2930ea71ab72ffd", out)
+            self.assertIn("path: modules/lib/canopennode", out)
+            self.assertIn("name: micropython", out)
+            self.assertIn("url: https://github.com/micropython/micropython.git", out)
+            self.assertIn("revision: v1.24.1", out)
+            self.assertIn("path: modules/lib/micropython", out)
+
 
 class TestValidatorPeripheralCheck(unittest.TestCase):
     """validate_board_yaml.py end-to-end smoke test on a shipped v2
