@@ -210,7 +210,7 @@ int main(void)
 
 	/* Keep the normal Alp SDK bring-up call even though the Modbus API itself
 	 * is Zephyr's third-party subsystem.  Real applications usually mix
-	 * portable <alp/*> peripherals with curated third-party protocol stacks. */
+	 * portable <alp/...> peripherals with curated third-party protocol stacks. */
 	(void)alp_init();
 
 	printf("[modbus] RAW_ADU server example starting\n");
