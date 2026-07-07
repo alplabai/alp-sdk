@@ -66,9 +66,13 @@ jobs:
 
             const docPathPatterns = [
               /^docs\//,
-              /(^|\/)[^/]+\.md$/,
+              /^[^/]+\.md$/,
               /^\.github\/ISSUE_TEMPLATE\//,
+              /^examples\/.+\/README\.md$/,
+              /^tools\/.+\/README\.md$/,
+              /^firmware\/.+\/README\.md$/,
             ];
+            const templateFieldLookaheadLines = 4;
 
             const getCurrentLabels = (item) =>
               new Set(
@@ -80,8 +84,9 @@ jobs:
             const matchesAny = (text, patterns) =>
               patterns.some((pattern) => new RegExp(pattern, "i").test(text));
 
-            function classifyFromText(text, kind) {
+            function classifyFromText(title, body, kind) {
               const matched = new Set();
+              const text = `${title}\n${body}`;
               const lines = text.split(/\r?\n/);
 
               if (
@@ -136,24 +141,27 @@ jobs:
                   "\\bwhy\\b",
                   "\\bcan\\s+someone\\s+help\\b",
                 ]) ||
-                  /\?\s*$/.test(text.trim()))
+                  /\?\s*$/.test(title.trim()))
               ) {
                 matched.add("question");
               }
 
+              const templateComponentDocHint =
+                lines.some((line, index) => {
+                  if (!/##\s*module\s*\/\s*component/i.test(line)) {
+                    return false;
+                  }
+                  return lines
+                    .slice(index, index + templateFieldLookaheadLines)
+                    .some((candidate) => /\b(?:docs?|metadata|ci|tooling)\b/i.test(candidate));
+                }) ||
+                lines.some((line) =>
+                  /-\s*\*\*applies to:\*\*.*\b(?:docs?|metadata|ci|tooling)\b/i.test(line)
+                );
+
               if (
                 kind === "issue" &&
-                (
-                  lines.some((line, index) =>
-                    /##\s*module\s*\/\s*component/i.test(line) &&
-                    lines
-                      .slice(index, index + 4)
-                      .some((candidate) => /\b(?:docs?|metadata|ci|tooling)\b/i.test(candidate))
-                  ) ||
-                  lines.some((line) =>
-                    /-\s*\*\*applies to:\*\*.*\b(?:docs?|metadata|ci|tooling)\b/i.test(line)
-                  )
-                )
+                templateComponentDocHint
               ) {
                 matched.add("documentation");
               }
@@ -221,8 +229,9 @@ jobs:
                 return null;
               }
 
-              const kind = core.getInput("target_kind");
-              const number = Number(core.getInput("target_number"));
+              const inputs = context.payload.inputs || {};
+              const kind = inputs.target_kind;
+              const number = Number(inputs.target_number);
               if (!Number.isInteger(number) || number <= 0) {
                 core.setFailed("workflow_dispatch requires a positive numeric target_number.");
                 return null;
@@ -289,8 +298,9 @@ jobs:
               return;
             }
 
-            const text = `${target.item.title || ""}\n${target.item.body || ""}`.toLowerCase();
-            const matched = classifyFromText(text, target.kind);
+            const title = (target.item.title || "").toLowerCase();
+            const body = (target.item.body || "").toLowerCase();
+            const matched = classifyFromText(title, body, target.kind);
             const selected = selectLabels(matched, target.kind, target.changedFiles);
 
             if (selected.size === 0) {
