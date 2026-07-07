@@ -51,12 +51,16 @@ jobs:
             const manualOverrideLabel = "triage/manual";
             const autoManagedLabels = new Set([
               "bug",
+              "duplicate",
               "enhancement",
               "documentation",
+              "good first issue",
+              "help wanted",
+              "invalid",
               "question",
             ]);
             const primaryPriorityByKind = {
-              issue: ["bug", "enhancement", "question"],
+              issue: ["bug", "enhancement", "question", "duplicate", "invalid", "help wanted", "good first issue"],
               pull_request: ["bug", "enhancement"],
             };
 
@@ -176,6 +180,58 @@ jobs:
                 templateComponentDocHint
               ) {
                 matched.add("documentation");
+              }
+
+              if (
+                kind === "issue" &&
+                matchesAny(text, [
+                  "\\bduplicate\\b",
+                  "\\balready\\s+(?:reported|exists|filed|opened)\\b",
+                  "\\bsame\\s+(?:as|issue)\\b",
+                  "\\bdup(?:licate)?\\s+of\\b",
+                ])
+              ) {
+                matched.add("duplicate");
+              }
+
+              if (
+                kind === "issue" &&
+                matchesAny(text, [
+                  "\\bhelp\\s+wanted\\b",
+                  "\\blooking\\s+for\\s+(?:help|contributors?)\\b",
+                  "\\bcontributions?\\s+welcome\\b",
+                  "\\bwould\\s+(?:love|appreciate)\\s+(?:help|contributions?)\\b",
+                ])
+              ) {
+                matched.add("help wanted");
+              }
+
+              if (
+                kind === "issue" &&
+                matchesAny(text, [
+                  "\\bgood\\s+first\\s+issue\\b",
+                  "\\bbeginner\\s+friendly\\b",
+                  "\\beasy\\s+(?:fix|issue|task)\\b",
+                  "\\bstarter\\s+(?:issue|task)\\b",
+                  "\\bnewcomer\\b",
+                ])
+              ) {
+                matched.add("good first issue");
+              }
+
+              if (
+                kind === "issue" &&
+                matchesAny(text, [
+                  "\\binvalid\\b",
+                  "\\bcannot\\s+repro(?:duce)?\\b",
+                  "\\bcan(?:not|'t)\\s+repro(?:duce)?\\b",
+                  "\\bnot\\s+repro(?:ducible)?\\b",
+                  "\\boff.topic\\b",
+                  "\\bnot\\s+a\\s+bug\\b",
+                  "\\bnot\\s+an\\s+issue\\b",
+                ])
+              ) {
+                matched.add("invalid");
               }
 
               return matched;
