@@ -7,6 +7,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.9.0 candidate
 
+### Added — native_sim board overlay emit
+
+`scripts/alp_project.py --emit native-sim-overlay` (and `alp emit
+native-sim-overlay`) emit a native_sim board overlay: the canonical
+52-entry `alp,pin-array` mapped onto `zephyr,gpio-emul` controllers so a
+GPIO app links and resolves on `native_sim/native/64` (host emulation,
+emulated CI) with no silicon.  Unlike `--emit dts-overlay` — which stubs
+every pin-array triplet at `<&gpio0 0>` pending the upstream SoM board
+file — `gpio-emul` is the backing controller under native_sim, so the
+overlay is complete and directly buildable (`gpio-emul` caps at 32 pins,
+so the 52 pads span two controllers).  The pad ABI stays sourced from one
+place (`_e1m_gpio_canonical()`); consumers (Alp Studio, `alp init`
+scaffolds) wrap the emit instead of hand-authoring the pin map.
+
 ### Added — Studio carrier-netlist handoff
 
 `scripts/alp_project.py --emit carrier-netlist` and `alp emit
