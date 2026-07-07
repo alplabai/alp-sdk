@@ -308,12 +308,12 @@ scoped subprocess.
 **SoC** -- System-on-Chip.  The main silicon under a SoM's lid.
 
 **SoM** -- System-on-Module.  Alp's per-SoC PCB module that plugs
-into a board (e.g. E1M-V2N101, E1M-AEN701).
+into a board (e.g. E1M-V2N101, E1M-AEN801).
 
 **SoM preset** (`E1M-<MPN>.yaml`) -- Per-SKU manifest declaring
 silicon, populated chips, I²C device addresses, memory specs,
 default board.  Lives at `metadata/e1m_modules/<SKU>.yaml`
-(e.g. `E1M-AEN701.yaml`, `E1M-V2N101.yaml`).  Earlier docs
+(e.g. `E1M-AEN801.yaml`, `E1M-V2N101.yaml`).  Earlier docs
 called this `som.yaml`; the file name carries the SKU now so
 each preset is distinguishable in a directory listing.
 

@@ -33,7 +33,7 @@ on-board sensor chips.
 
 ## Hardware needed
 
-- E1M-AEN family SoM (E7 recommended for SRAM headroom).
+- E1M-AEN family SoM (E8 recommended for SRAM headroom).
 - E1M-EVK board with:
   - LSM6DSO IMU breakout on I²C0 (already on the EVK).
   - uBlox NEO-M9N GNSS on UART0 (or any UART; edit `board.yaml`).

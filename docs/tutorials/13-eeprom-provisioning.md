@@ -35,7 +35,7 @@ offset  size  field        description
    0     4    magic         'ALPH' (0x41 0x4C 0x50 0x48)
    4     1    schema_v1     0x01
    5     4    family        ASCII zero-padded ("AEN_", "V2N_", ...)
-   9    16    sku           ASCII zero-padded ("E1M-AEN701")
+   9    16    sku           ASCII zero-padded ("E1M-AEN801")
   25     8    hw_rev        ASCII zero-padded ("r1")
   33    16    serial        ASCII; production-assigned
   49     8    mfg_date      BCD: YYYYMMDD
@@ -80,7 +80,7 @@ python3 -c "from aardvark_py import *; print(aa_find_devices(1))"
 Per-device inputs:
 
 - **family** (`AEN_`, `V2N_`, `V2M_`, `NX9_`) -- from the SKU.
-- **sku** (`E1M-AEN701`) -- the SoM MPN.
+- **sku** (`E1M-AEN801`) -- the SoM MPN.
 - **hw_rev** (`r1`, `r2`, ...) -- the PCB revision.
 - **serial** (`A20260514-0001`) -- production-assigned;
   recommend a date prefix + sequence number.
@@ -95,8 +95,8 @@ CRC32 is computed by the script.
 cd ~/work/alp-sdk
 
 python3 scripts/program_eeprom.py \
-    --sku        E1M-AEN701 \
-    --hw_rev     r1 \
+    --sku        E1M-AEN801 \
+    --hw_rev     r2 \
     --serial     A20260514-0001 \
     --mfg_date   2026-05-14 \
     --i2c-adapter aardvark0 \
@@ -112,8 +112,8 @@ Expected output:
   magic       : 0x41 0x4C 0x50 0x48  ('ALPH')
   schema_v1   : 0x01
   family      : 'AEN_'
-  sku         : 'E1M-AEN701'
-  hw_rev      : 'r1'
+  sku         : 'E1M-AEN801'
+  hw_rev      : 'r2'
   serial      : 'A20260514-0001'
   mfg_date    : 2026-05-14 (BCD 20260514)
   crc32       : 0xC4B2A1E0 (LE)
@@ -156,7 +156,7 @@ int main(void) {
 Expected on the UART:
 
 ```
-[hw_info] family=aen sku=E1M-AEN701 hw_rev=r1
+[hw_info] family=aen sku=E1M-AEN801 hw_rev=r2
 [hw_info] serial=A20260514-0001 mfg_date=2026-05-14
 ```
 
@@ -172,7 +172,7 @@ boot-time assertion:
 
 ```c
 if (alp_hw_info_assert_matches_build(&info,
-                                      "E1M-AEN701", "r1") != ALP_OK) {
+                                      "E1M-AEN801", "r2") != ALP_OK) {
     /* This firmware was built for a different SoM; refuse to run. */
     k_panic();
 }

@@ -115,7 +115,7 @@ Cross-reference against
 * Bytes 0..3:   magic `ALPH` (`0x41 0x4C 0x50 0x48`)
 * Byte 4:       `schema_v1` = `0x01`
 * Bytes 5..8:   family ASCII = `AEN_`
-* Bytes 9..24:  SKU ASCII (`E1M-AEN701` zero-padded)
+* Bytes 9..24:  SKU ASCII (`E1M-AEN801` zero-padded)
 * Bytes 25..32: hw_rev ASCII (`r1` zero-padded)
 * Bytes 33..48: serial number ASCII
 * Bytes 49..56: mfg_date BCD (`YYYYMMDD`)
@@ -426,7 +426,7 @@ top of the per-subsystem checks.
    ```
 
    Expect the console to report the Ethos-U variant the SKU
-   preset declares (`u55` on AEN701; `u85` primary + dual `u55`
+   preset declares (`u85` primary + dual `u55`
    on AEN801 -- see the `inference.npu_population` block).  A
    variant mismatch means the board DTS NPU node disagrees with
    the SoC JSON `npus[]`.

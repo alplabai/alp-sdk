@@ -1,0 +1,31 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * HP owner overlay for firmware-update-log.
+ *
+ * HP is loaded to its ITCM global alias (0x50000000) and owns the MRAM update
+ * log partition. Enable the SE-service nodes HP needs for
+ * alp_mproc_boot_core(ALP_CORE_M55_HE, 0x58000000).
+ */
+
+#include "alp_e1m_aen801_m55_log_mram.dtsi"
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&seservice0r {
+	status = "okay";
+};
+
+&seservice0s {
+	status = "okay";
+};
+
+&se_service {
+	status = "okay";
+};

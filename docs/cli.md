@@ -66,7 +66,7 @@ Rules of thumb:
 ### `alp init` -- scaffold a new project
 
 ```bash
-alp init my-app --som E1M-AEN701 --preset e1m-evk --peripherals uart,gpio
+alp init my-app --som E1M-AEN801 --preset e1m-evk --peripherals uart,gpio
 alp init my-app          # interactive: pick SoM / preset / peripherals
 ```
 
@@ -77,7 +77,7 @@ list.  Omit any flag to be prompted interactively.
 | Option | Meaning |
 |---|---|
 | `NAME` (argument) | New project directory (must not exist) |
-| `--som` | SoM SKU, e.g. `E1M-AEN701` |
+| `--som` | SoM SKU, e.g. `E1M-AEN801` |
 | `--preset` | Board preset from `metadata/boards/`, e.g. `e1m-evk` |
 | `--peripherals` | Comma-separated starter peripherals (`uart,gpio,i2c,spi,pwm`) |
 

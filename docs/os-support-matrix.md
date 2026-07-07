@@ -47,10 +47,14 @@ full per-(library × core × runtime) picture.
 | Library     | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto | iMX93: a55_cluster Yocto |
 |-------------|-------------------------------|------------------------|---------------------------|--------------------------|
 | Peripherals (I2C/SPI/GPIO/UART) | stub | stub | stub | planned |
-| Display     | stub                          | stub                   | stub                      | planned |
+| Display     | stub                          | stub [^disp1]          | stub [^disp1]             | planned |
 | Camera      | stub                          | stub (planned v0.2 MIPI CSI-2) | stub (planned v0.2) | planned |
 | GUI/LVGL    | planned                       | planned                | planned                   | planned |
 | IoT         | stub                          | stub                   | stub                      | planned |
+
+[^disp1]: Display 1 (RK055HDMIPI4MA0, HX8394-F, 2-lane MIPI-DSI) bring-up code-complete on
+    `feat/v2n-lcd-display1` (kernel patches 0004–0006, weston image, LVGL example); row flips
+    on HIL pass.  Display 2 (J28, DSI1 lane set) is permanently unavailable on V2N/V2M SoMs.
 
 ### Cortex-M (Zephyr)
 
@@ -214,7 +218,7 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
-| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; no panel has been driven on real hardware through this class yet.  (The v0.1 Display "GA (SSD1306)" rows are the **chip-driver + LVGL re-export path**, not this class.)  V2N DSI / parallel-RGB + Alif LCD-IF vendor backends still pending |
+| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; a build-only native_sim scenario instantiates Zephyr MIPI DBI Type C (`zephyr,mipi-dbi-spi`) with an ST7789V child panel and proves the DT/Kconfig/backend wiring.  No panel has been driven on real hardware through this class yet.  V2N DSI / parallel-RGB + Alif LCD-IF vendor backends still pending |
 | Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `tflm` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are **real, bench-unverified** (link needs the Yocto sysroot; default-off CMake options); the former M-class DRP-AI/DEEPX stubs are removed — both engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
@@ -229,7 +233,7 @@ hasn't been measured.
 | Peer-core boot | `mproc.h` (`alp_mproc_boot_core`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service boot authority on AEN); NOSUPPORT where the platform boots peers by other means | surface + AEN SE backend; **bench-gated** |
 | SDK version / ABI feature-test | `version.h` (v0.9, `[ABI-STABLE]`) | all OSes (compile-time macros + `alp_version_string()`) | present; value-sync CI-gated (`check_version_doc_sync.py`) |
 | Update audit log | `update_log.h` (v0.7, `[ABI-EXPERIMENTAL]`) | M (Zephyr only today): hash-chain engine + SW tier — **NVS-persistent** when the board carves an `alp_ulog_partition` (`CONFIG_ALP_SDK_UPDATE_LOG_PERSIST`), RAM fallback otherwise; tamper-EVIDENT, not tamper-proof; Yocto/baremetal: not built | code complete (native_sim unit-tested: chain verdicts, persist-across-reinit, persisted mutation/delete tamper verdicts, full-log NOMEM-no-wrap, RAM fallback, tier selection + degrade); on-silicon persistence proof remains board-port-specific. Trusted boot-metadata append API present; provider defaults to NOSUPPORT until MCUboot shared-data / Alif SE facts are wired — #263 |
-| Update audit log — HW_ENFORCED tier | `update_log.h` `ALP_UPDATE_LOG_HW_ENFORCED` (`CONFIG_ALP_SDK_UPDATE_LOG_TFM`) | M (TF-M builds only): app-immutable tier — store → PSA Protected Storage in the SPE, anchor → HW monotonic counter | **stub** — dispatcher-side plumbing + capability-gated registration + degrade landed; `ready()` returns NOSUPPORT so `alp_update_log_open()` falls through to the SW tier (native_sim-tested). Prerequisites for GA: `psa_ps_set`/`psa_ps_get` under `BUILD_WITH_TFM` + a HW monotonic-counter service (neither the pinned Zephyr nor hal_alif v2.2.0 SE — OTP-only — exposes a non-secure NV counter) — #111 |
+| Update audit log — HW_ENFORCED tier | `update_log.h` `ALP_UPDATE_LOG_HW_ENFORCED` (`CONFIG_ALP_SDK_UPDATE_LOG_TFM`, `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT`) | M: app-immutable tier — application client -> trusted owner. TF-M route uses PSA Protected Storage. AEN route uses an M55 owner that writes MRAM while the app M55 talks to it over MHU | TF-M client + PSA owner source present. AEN E4/E8 dual-M55 client/owner source present; the AEN client reports `HW_ENFORCED` only when the HP owner answers and `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN` is enabled for a board profile whose MRAM log partition has been firewall-locked against app-core writes. Firewall lock is OEM-authorable and **silicon-proven on E8 (2026-07-06)**: HE's master-side firewall (FC8) via the ATOC device config (allow-all + higher-priority HE-deny carve-out over the log window) makes HE bus-fault on a direct write while running normally — no SE audit-log or NV-counter mailbox needed. Remaining follow-up = board-profile provisioning + the NV monotonic-counter rollback anchor — #111 |
 
 ## CMSIS-DSP per-SoM validation
 

@@ -53,6 +53,9 @@ scripts/bench/aen/ram-run.sh     "$BENCH_ROOT/build/aen-gpio-bench"   # Flow C
 | `flash-jlink.sh <build-dir> [read-bytes]` | **D** | J-Link **direct MRAM flash** (no SE-UART). `app-gen-toc` builds the signed ATOC, the part-number device profile unlocks the built-in Alif MRAM loader, `loadbin`/`verifybin` write the package at its per-build start address (parsed from `app-package-map.txt`), `RSetType 2`/`r`/`g` pin-resets so the SE reloads it, then a generic-device RAM-console read-back. |
 | `flash-jlink-mramxip.sh <build-dir> [read-bytes]` | **D** | J-Link **MRAM-XIP / slot0 two-blob** flash for an app linked into MRAM slot0 (a real NPU model that overflows ITCM). Writes the app → `0x80010000` + the signed ATOC → its parsed address; needs `CONFIG_USE_DT_CODE_PARTITION=y` in the app build. See the script header for the gotcha on returning to ITCM apps afterwards. |
 | `flash-run.sh <build-dir> [read-bytes]` | **A** | **Production MRAM flash** over the SE-UART. Stages the signed-ATOC JSON, `app-gen-toc` + `app-write-mram` burn over `$SE_UART` (SES auto-enters maintenance, resets + boots), then a J-Link read-back of the RAM console. |
+| `flash-update-log-firewall-probe.sh [--package-only] <he-build-dir>` | **D** | Firmware-update-log HE direct-write MRAM firewall probe. Builds an app-only ATOC by default so any already-provisioned DEVICE/firewall policy is preserved; set `ALP_AEN_INCLUDE_DEVICE_CONFIG=yes` only for deliberate DEVICE replacement, and `ALP_AEN_DEVICE_CONFIG_JSON=<file>` to name a board-specific config already staged under SETOOLS `build/config`. |
+| `flash-update-log-dual.sh [--package-only] <hp-build-dir> <he-build-dir>` | **D** | Firmware-update-log dual-M55 package: HP owner boots first and releases HE client. Builds an app-only ATOC by default for the same firewall-policy reason as the probe helper. |
+| `read-update-log-proof.sh [--expect-hw\|--expect-firewall-probe]` | (B) | Re-read the firmware-update-log SRAM0 proof beacons without reflashing. Use this after the probe or dual-M55 run to prove what the silicon actually did; the firewall mode decodes PASS/FAIL and exits non-zero if HE changed the MRAM log partition. |
 | `ram-run.sh <build-dir> [sleep_ms] [size] [preload]` | **C** | **RAM-run** an ITCM image (no MRAM write): `loadbin` to `0x0`, `setpc <entry>` (thumb-bit cleared), `go`, sleep, halt, dump + ASCII-decode the RAM console. Optional `preload` JLink file runs after halt / before loadbin (e.g. clear a SoC integration reg). |
 | `reread.sh <build-dir> [size]` | (B) | Re-read `ram_console_buf` over SWD with no reflash — attach generic device, halt, `mem8`, ASCII-decode. |
 | `flash-all-flowd.sh [app ...]` | **D** | Batch Flow D over a list of apps (argv, else `apps.txt`). Strictly serial (one board / one probe), resilient (a failed app is logged, the batch continues), scrapes each app's `RESULT` line into a summary. |
@@ -77,6 +80,7 @@ by exporting before you invoke a helper.
 | `JLINK_DEVICE_FLASH` | `AE822FA0E5597LS0_M55_HE` | Part-number device profile — unlocks the built-in Alif MRAM loader (Flow D). |
 | `JLINK_DEVICE_READ` | `Cortex-M55` | Generic device for all reads/attach/RAM-run (attaches to the live core). |
 | `JLINK_SPEED` | `4000` | SWD clock (kHz). |
+| `JLINK_SN` / `JLINK_SERIAL` | *(none)* | Optional SEGGER probe serial selector; set this on benches with multiple J-Links. |
 | `JLINK_EXE` | `JLinkExe` | JLink Commander binary (override for a non-PATH install). |
 
 ## Which flow? (A / B / C / D)

@@ -6,7 +6,7 @@ from alp_cli.diagnostic import Diagnostic, render
 def _sample_source() -> str:
     return (
         "som:\n"
-        "  sku: E1M-AEN701\n"
+        "  sku: E1M-AEN801\n"
         "preset: e1m-evk\n"
         "peripherals:\n"
         "  - { pad: P21, signal: I2C0_SCL }\n"
@@ -24,7 +24,7 @@ def test_render_error_includes_code_path_caret_hint_and_doclink(tmp_path: Path):
         col=11,
         span=3,
         code="ALP-B005",
-        message="pad 'P21' not present on E1M-AEN701",
+        message="pad 'P21' not present on E1M-AEN801",
         hint="did you mean 'P20'? (closest match, distance 1)",
         doc_url=None,
     )

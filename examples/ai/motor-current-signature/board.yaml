@@ -7,7 +7,7 @@
 # flipped.
 
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 supported_boards:

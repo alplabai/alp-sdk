@@ -41,7 +41,7 @@ The whole "what does this app target?" surface lives in
 
 ```yaml
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 preset: e1m-evk
 cores:
   m55_hp:

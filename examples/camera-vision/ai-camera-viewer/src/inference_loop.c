@@ -74,8 +74,8 @@ void inference_loop_run(viewer_state_t *state)
 	}
 
 	/* Inference setup.  AUTO routes to the best available backend
-     * for the active SoM (ETHOS_U55 on AEN701, ETHOS_U85 on
-     * AEN401 / AEN601 / AEN801, U65 on NX9101, DRPAI on V2N,
+     * for the active SoM (ETHOS_U85 on AEN401 / AEN601 / AEN801,
+     * U65 on NX9101, DRPAI on V2N,
      * CPU on native_sim). */
 	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
 	    .backend     = ALP_INFERENCE_BACKEND_AUTO,

@@ -321,7 +321,7 @@ project's `board.yaml` — the top-level `libraries:` key (ADR 0018):
 
 ```yaml
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 libraries: [lvgl, cmsis-dsp]   # curated third-party libraries
 cores:
   m55_hp:
@@ -461,9 +461,9 @@ fetched when a customer opts in to the `vendor-sdks` group.
 
 The SoC choice flows from `board.yaml`'s `som.sku` field
 automatically (board.yaml, current since v0.6) — the loader
-resolves the MPN to the silicon ref (`alif:ensemble:e7` for
-`E1M-AEN701`) and emits the matching
-`CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y` line, so you never set it by
+resolves the MPN to the silicon ref (`alif:ensemble:e8` for
+`E1M-AEN801`) and emits the matching
+`CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y` line, so you never set it by
 hand.  The validator also cross-checks every entry in
 `peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`
 caps -- a board.yaml asking for `i2s` on a SoC that doesn't route

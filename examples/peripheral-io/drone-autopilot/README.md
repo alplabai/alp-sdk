@@ -43,7 +43,7 @@ motor mixer → ESCs.
 
 ## Hardware
 
-- E1M-AEN701 SoM.
+- E1M-AEN801 SoM.
 - E1M-EVK board (4× PWM out, 1× SBUS UART in, I²C0).
 - External 4S LiPo battery wired through the board's INA236
   shunt for telemetry.

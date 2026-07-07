@@ -83,7 +83,7 @@ AEN-first order inverted:
    HS200, USB-OVC, CA55-cluster watchdog, branded/reproducible
    firmware banners, and the hardened `alp-image-prod` /
    `alp` distro) boots the bench board from eMMC.
-2. **next** -- E1M-AEN701 bring-up.  Verifies the AEN-family
+2. **next** -- E1M-AEN801 bring-up.  Verifies the AEN-family
    chip drivers (the on-module ones: act8760, da9292,
    clk_5l35023b, etc.) + a representative sample of the §D.AI
    chips (st7789, sh1106, the camera SCCB path).

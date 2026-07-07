@@ -8,7 +8,7 @@
 # real audio output path (a WM8960 / TLV320 codec over I²S plus an
 # MP3 decoder) is intentionally out of scope here.
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 

@@ -31,7 +31,7 @@ own quickstart.
 
 | If your hardware is...                      | `som.sku` to declare | Board default     | One-pager                                         |
 |---------------------------------------------|----------------------|---------------------|---------------------------------------------------|
-| E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN701` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 |
+| E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 |
 | E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 |
 | E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           |
 | E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             |

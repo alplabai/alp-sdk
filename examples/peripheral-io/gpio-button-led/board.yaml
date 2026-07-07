@@ -24,7 +24,7 @@
 # in docs/board-config.md.
 
 som:
-  sku: E1M-AEN701          # Alif Ensemble E7 SoM
+  sku: E1M-AEN801          # Alif Ensemble E8 SoM
 
 preset: e1m-evk            # 35x35 EVK -- reference board.  The EVK
                            # routes the user button to the encoder
@@ -41,7 +41,7 @@ pins:
   - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW, doc: "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce" }
   - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED, doc: "RGB LED red -- the PWM3 pad as a digital GPIO; the app opens it by the EVK_PIN_LED_RED macro" }
 
-# Single-core slice on AEN701: M55-HP runs the demo.  M55-HE inherits
+# Single-core slice on AEN801: M55-HP runs the demo.  M55-HE inherits
 # the SoM topology default (stock-shim Zephyr image), keeping the
 # peer-core RPMsg boot path intact for advanced users.
 cores:

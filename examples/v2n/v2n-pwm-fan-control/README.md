@@ -33,7 +33,7 @@ To run the same fan curve on a different SoM, edit `board.yaml`:
 
 ```yaml
 som:
-  sku: E1M-AEN701      # or E1M-V2M101, E1M-N93xxx, ...
+  sku: E1M-AEN801      # or E1M-V2M101, E1M-N93xxx, ...
 ```
 
 The `alp_pwm_open(ALP_E1M_PWM0)` call dispatches to whichever

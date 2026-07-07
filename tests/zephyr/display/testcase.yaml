@@ -33,6 +33,28 @@ tests:
       - display
       - backend
 
+  # DBI Type C integration scenario: instantiate Zephyr's upstream
+  # zephyr,mipi-dbi-spi controller plus an ST7789V child panel and
+  # expose the child as both zephyr,display and alp-display0.  This is
+  # build-only because native_sim's SPI-emul controller still needs a
+  # target emulator for real transfer IO; runtime display semantics are
+  # covered by the dummy-dc scenario above.
+  alp_sdk.display.mipi_dbi_type_c_build:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    build_only: true
+    extra_args:
+      - "DTC_OVERLAY_FILE=overlays/mipi_dbi_type_c_st7789.overlay"
+      - "EXTRA_CONF_FILE=prj_mipi_dbi_type_c.conf"
+    tags:
+      - alp-sdk
+      - display
+      - mipi-dbi
+      - backend
+
   # Stub-fallback scenario: CONFIG_DISPLAY=n removes the zephyr_drv
   # backend entirely; the wildcard priority-0 stub is selected and
   # open degrades with ALP_ERR_NOT_IMPLEMENTED.

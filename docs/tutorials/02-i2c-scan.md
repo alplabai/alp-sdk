@@ -39,7 +39,7 @@ int main(void) {
 }
 ```
 
-## Expected output on E1M-AEN701 + E1M-EVK
+## Expected output on E1M-AEN801 + E1M-EVK
 
 ```
 0x30 ACK   -- OPTIGA Trust M

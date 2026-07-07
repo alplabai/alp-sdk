@@ -36,8 +36,8 @@ west build -b native_sim/native/64 examples/peripheral-io/hello-world \
 west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
-# Example for E1M-AEN701:
-west build -b alp_e1m_aen701_m55_hp examples/peripheral-io/hello-world
+# Example for E1M-AEN801:
+west build -b alp_e1m_aen801_m55_hp examples/peripheral-io/hello-world
 west flash
 ```
 

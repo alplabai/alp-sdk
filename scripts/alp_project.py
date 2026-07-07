@@ -305,7 +305,7 @@ def _resolve_pad_routes(
     `e1m_routes:` block: when an E1M pad appears in both, the board
     supplies the role (e.g. `bmi323_int1`) and the SoM supplies the
     dispatch path (e.g. CC3501E GPIO 14). The two blocks together
-    let a customer swap SoMs (AEN701 -> NX9101) without touching the
+    let a customer swap SoMs (AEN801 -> NX9101) without touching the
     board YAML or any app source -- the [[som-swappable-without-board-changes]]
     promise.
     """

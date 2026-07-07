@@ -47,7 +47,7 @@ def test_init_non_interactive_scaffolds_project(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         cli,
-        ["init", "my-app", "--som", "E1M-AEN701", "--preset", "e1m-evk",
+        ["init", "my-app", "--som", "E1M-AEN801", "--preset", "e1m-evk",
          "--peripherals", "uart,gpio"],
     )
     assert result.exit_code == 0, result.output
@@ -56,7 +56,7 @@ def test_init_non_interactive_scaffolds_project(tmp_path: Path, monkeypatch):
     assert (proj / "src" / "main.c").is_file()
     assert (proj / "CMakeLists.txt").is_file()
     board_yaml = (proj / "board.yaml").read_text(encoding="utf-8")
-    assert "E1M-AEN701" in board_yaml
+    assert "E1M-AEN801" in board_yaml
     assert "e1m-evk" in board_yaml
 
 
@@ -65,7 +65,7 @@ def test_init_refuses_existing_directory(tmp_path: Path, monkeypatch):
     (tmp_path / "already-there").mkdir()
     result = CliRunner().invoke(
         cli,
-        ["init", "already-there", "--som", "E1M-AEN701", "--preset", "e1m-evk"],
+        ["init", "already-there", "--som", "E1M-AEN801", "--preset", "e1m-evk"],
     )
     assert result.exit_code != 0
     assert "already exists" in result.output
@@ -82,7 +82,7 @@ def test_run_finds_board_yaml_from_subdirectory(tmp_path: Path, monkeypatch, moc
     monkeypatch.chdir(tmp_path)
     proj = tmp_path / "proj"
     (proj / "src").mkdir(parents=True)
-    (proj / "board.yaml").write_text("som:\n  sku: E1M-AEN701\npreset: e1m-evk\n")
+    (proj / "board.yaml").write_text("som:\n  sku: E1M-AEN801\npreset: e1m-evk\n")
     subdir = proj / "src"
     monkeypatch.chdir(subdir)
     # Mock the actual build/exec so the test doesn't shell out.
@@ -108,7 +108,7 @@ def _project(tmp_path: Path) -> Path:
     proj = tmp_path / "proj"
     proj.mkdir()
     (proj / "board.yaml").write_text(
-        "som:\n  sku: E1M-AEN701\npreset: e1m-evk\n", encoding="utf-8"
+        "som:\n  sku: E1M-AEN801\npreset: e1m-evk\n", encoding="utf-8"
     )
     return proj
 
