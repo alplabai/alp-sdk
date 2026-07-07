@@ -255,7 +255,7 @@
     "E8 ships an ISP and JPEG encoder (E3/E7 do not).",
     "WLCSP216 package exposes 136× 1.8-V GPIOs; FBGA194 exposes 120 (note: 'GPIO[0-14]' subset on FBGA per datasheet table 7-1).",
     "AE822FA0E5597LS0 is the variant Alp Lab uses on the E1M-AEN801 module SKU.",
-    "memory_regions is INTENTIONALLY PARTIAL (TODO(aen-memory-map)): only sram0's base (0x02000000) is grounded from the Alif linux-alif kernel fork DTS (ensemble-ex.dtsi memory1@2000000, checked 2026-06-26).  sram1, mram_main, and M55 TCM bases are absent from the fork DTS and stay unlisted.  resolve_memory_map returns only grounded region(s); any IPC carveout requesting an unlisted region remains blocked until those bases are HW-mapped.",
+    "memory_regions is INTENTIONALLY PARTIAL (TODO(aen-memory-map)): only sram0's base (0x02000000) is grounded from the Alif linux-alif kernel fork DTS (ensemble-ex.dtsi memory1@2000000, checked 2026-06-26).  sram1, mram_main, and M55 TCM bases are absent from the fork DTS and stay unlisted.  resolve_memory_map overlays these grounded facts onto the variant-derived size/access table, so size-only regions remain available for storage validation while IPC carveouts that require an unlisted base stay blocked until those bases are HW-mapped.",
     "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE822FA0E5597). Host mode supported."
   ]
 }

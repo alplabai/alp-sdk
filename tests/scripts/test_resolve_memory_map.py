@@ -2,8 +2,9 @@
 """Tests for `resolve_memory_map()` in alp_project.py.
 
 Covers the silicon-variant-derived path (no memory_map in preset),
-the override path (preset declares memory_map verbatim), and the
-TBD fallback (silicon_variant cannot be resolved).
+the SoC-level fixed-region overlay path, the override path (preset
+declares memory_map verbatim), and the TBD fallback (silicon_variant
+cannot be resolved).
 """
 from __future__ import annotations
 
@@ -64,6 +65,32 @@ def test_aen301_derives_regions_from_e3_variant(alp_project):
     assert by_name["sram0"]["size_kib"] == 4096
     assert sorted(by_name["sram0"]["accessible_from"]) == ["m55_he", "m55_hp"]
     assert by_name["sram0"]["cacheable"] is True
+
+
+def test_aen801_overlays_partial_soc_memory_regions(alp_project):
+    """E8 grounds only sram0's base today.  That SoC-level fact must
+    override the variant-derived SRAM0 entry without dropping MRAM and
+    the remaining size-only SRAM/TCM regions derived from the variant."""
+    preset = {
+        "sku": "E1M-AEN801",
+        "silicon": "alif:ensemble:e8",
+        "silicon_variant": "AE822FA0E5597LS0",
+    }
+    regions = alp_project.resolve_memory_map(preset, METADATA)
+    by_name = {r["name"]: r for r in regions}
+
+    assert by_name["sram0"]["base"] == 0x02000000
+    assert by_name["sram0"]["size_kib"] == 4096
+    assert sorted(by_name["sram0"]["accessible_from"]) == [
+        "a32_cluster",
+        "m55_he",
+        "m55_hp",
+    ]
+
+    assert by_name["mram_main"]["size_kib"] == int(5.5 * 1024)
+    assert "base" not in by_name["mram_main"]
+    assert by_name["sram1"]["size_kib"] == 4096
+    assert "base" not in by_name["sram1"]
 
 
 def test_preset_with_memory_map_override_wins_verbatim(alp_project):
