@@ -348,8 +348,10 @@ ships through `meta-imx` -- a separate release cycle.
 - 📋 **OTFAD inline-AES driver upstreaming.**  The
   `<alp/storage.h>` inline-AES surface (`alp_storage_configure_inline_aes`)
   reaches NXP silicon through NXP's OTFAD driver; that
-  driver is mainline in Linux but not yet in Zephyr.  Open
-  upstreaming work tracked at `zephyrproject-rtos/zephyr#TBD`.
+  driver is mainline in Linux but not yet in Zephyr.  No
+  public Zephyr issue or PR exists as of 2026-07-08; Alp-side
+  tracking remains in `alplabai/alp-sdk#456` until an upstream
+  tracker is filed.
 
 **Next action**: 2026-Q3 sync after the v26.06.00 MCUXpresso
 release stabilises + meta-imx mickledore ships.
