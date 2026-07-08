@@ -737,7 +737,25 @@ hidden:
 
 `scripts/alp_project.py` reads `board.yaml`, validates against the
 schema, resolves the SoM SKU + board presets, applies overrides,
-and emits one of three formats.  Common workflows below.
+and emits the requested build artifacts.  Common workflows below.
+
+### West extension -- validate, generate, and build
+
+The SDK ships first-class west extension commands via
+[`scripts/west-commands.yml`](../scripts/west-commands.yml).  The
+usual application build entry point is:
+
+```bash
+west alp-build -b <board> <app-dir>
+```
+
+`west alp-build` validates `<app-dir>/board.yaml`, emits the generated
+per-slice configuration and system manifest, then dispatches the
+underlying Zephyr / Yocto / baremetal build steps for the enabled
+cores.  Companion commands (`west alp-image`, `west alp-flash`,
+`west alp-clean`, `west alp-emit`, `west alp-size`, and
+`west alp-renode`) consume the same build state for bundle, flash,
+inspection, sizing, and simulation workflows.
 
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`
 
@@ -920,16 +938,13 @@ follow-up once the upstream SoM board files lock the gpio bank/index
 columns.  Encoders, cameras, and other non-bus device classes follow
 the same rule.
 
-### What the loader does NOT yet do (v0.4 follow-ups)
+### What the loader does NOT yet do
 
 - **Cross-validation against `metadata/socs/*.json`** -- the loader
   trusts the SKU preset's `silicon:` field; it doesn't yet
   validate that requested features (e.g. 16-bit ADC) match the
   SoC's documented caps.  The `<alp/soc_caps.h>` runtime check
   catches mismatches at `_open` time today.
-- **First-class `west` integration** -- planned as a custom
-  `west alp-build` command that wraps the configure + generate +
-  build sequence.
 
 ## Hardware revision tracking
 
