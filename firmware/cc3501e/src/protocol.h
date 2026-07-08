@@ -47,17 +47,17 @@
  * only the DATA bytes (after the status) and RETURNS the status; the
  * transport prepends the status byte and builds the 4-byte header.
  *
- * WIRE FRAMING (3-wire, this HW rev): the E1M-AEN rev wires only
- * SCLK/MOSI/MISO -- no CS, no host IRQ (both arrive next rev).  With no
- * CS edge to delimit transactions, a request/reply is clocked as four
- * deterministic fixed-count transfers in lockstep -- request header,
- * request payload, reply header, reply payload -- each side deriving the
- * next length from an exchanged header.  The Alif-side driver
- * (chips/cc3501e/cc3501e.c) implements the matching sequence + reads the
- * status byte; the TI SPI-slave backend
- * (hal/ti/transport_hw_ti_spi.c) implements the slave side.  Both are
- * reconciled to this header (the spec), [UNTESTED] until the AEN801
- * bench bring-up.  See DESIGN.md for the next-rev CS/IRQ hardening.
+ * WIRE FRAMING (current E1M-AEN HW rev): the Alif dwc-ssi master drives
+ * hardware SS0 around each protocol phase while the CC3501E SPI slave
+ * advances on transfer-complete callbacks.  A request/reply is clocked as
+ * four SS0-framed phases -- request header, request payload, reply header,
+ * reply payload -- each side deriving the next length from an exchanged
+ * header.  READY gates reply phases so the host does not clock a slave that
+ * has not re-armed yet.  The Alif-side driver (chips/cc3501e/cc3501e.c)
+ * implements the matching sequence + reads the status byte; the TI SPI-slave
+ * backend (hal/ti/transport_hw_ti_spi.c) implements the slave side.  Both are
+ * reconciled to this header (the spec) and bench-validated on AEN801.  See
+ * DESIGN.md for the remaining HOST_IRQ / async-event hardening.
  */
 
 /* Maximum reply DATA bytes a handler may emit (after the status byte).

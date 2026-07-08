@@ -26,9 +26,10 @@
 
 /* ---- E1M-AEN SoM bridge defaults (override per board variant) ---------------- */
 
-/* Inter-chip SPI: Alif = master, CC3501E = slave.  No chip-select this HW rev --
- * the link is fixed-count lockstep (ALP_SPI_NO_CS); mode 0 matches the CC3501E
- * vendor image frameFormat. */
+/* Inter-chip SPI: Alif = master, CC3501E = slave.  P14_7 is muxed as the
+ * dwc-ssi hardware SS0 chip-select; ALP_SPI_NO_CS means "no software GPIO CS"
+ * here, so the controller frames each protocol phase.  Mode 0 matches the
+ * CC3501E vendor image frameFormat. */
 #ifndef CC3501E_BRIDGE_SPI_BUS_ID
 #define CC3501E_BRIDGE_SPI_BUS_ID 1u
 #endif
@@ -60,7 +61,7 @@
 /**
  * @brief Bring up the SoM's CC3501E coprocessor over the inter-chip bridge.
  *
- * Opens the bridge SPI (no-CS lockstep) + the WIFI_EN / nRESET control pins, binds
+ * Opens the hardware-SS0 bridge SPI + the WIFI_EN / nRESET control pins, binds
  * them to @p fw, attaches the GPIO proxy (when CONFIG_ALP_SDK_GPIO_CC3501E_PROXY is
  * built), and runs the power + reset sequence (TI SWRU626 + the Puya cold-boot
  * hard-reset workaround).  Blocks ~900 ms for the boot budget; leaves WIFI_EN HIGH.

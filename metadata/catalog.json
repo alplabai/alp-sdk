@@ -740,7 +740,7 @@
       "script": "scripts/check_cross_platform.py"
     },
     {
-      "purpose": "Doc-drift gate -- fails (exit 1) when customer-facing documentation references SDK identifiers that no longer exist, or when a top-level doc isn't linked from the docs index.",
+      "purpose": "Doc-drift gate -- fails (exit 1) when customer-facing documentation references SDK identifiers that no longer exist, when a top-level doc isn't linked from the docs index, or when CC3501E docs/examples describe the current bridge as the obsolete CS-less design.",
       "script": "scripts/check_doc_drift.py"
     },
     {

@@ -412,7 +412,7 @@ server is a separate repo.
 |--------------------------------------------------|-----------------------------------------|
 | Wire protocol v1 frozen                          | `include/alp/protocol/cc3501e.h` ✅ |
 | Alif-side SPI client (`chips/cc3501e/`)          | ✅ landed in alp-sdk              |
-| `<alp/iot.h>` / `<alp/ble.h>` route via CC3501E  | Follow-up: dispatcher branch in iot_zephyr.c / ble_zephyr.c |
+| `<alp/iot.h>` / `<alp/ble.h>` route via CC3501E  | ✅ landed: exact AEN backend selects the CC3501E route; bench-validated open/scan on E1M-AEN801 |
 | Firmware tree (embedded)                         | `firmware/cc3501e/` ✅ (per [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)) |
 | Bring-up firmware (PING + GET_VERSION + GET_MAC + RESET) | `firmware/cc3501e/` v0.1 ✅ **silicon-validated** (E1M-AEN801 EVK bench) |
 | Wi-Fi station mode                               | `firmware/cc3501e/` v0.2 ✅ shipped (scan / STA connect / AP / RSSI / IP); scan + async STA connect **silicon-validated** |
@@ -420,7 +420,7 @@ server is a separate repo.
 | GPIO proxy + camera-enable                       | `firmware/cc3501e/` v0.4 ✅ shipped + **silicon-validated** (`examples/aen/aen-cc3501e-gpio`, warm-boot harness pass=8 fail=0) |
 | OTA over the bridge (§ "OTA" above)              | `firmware/cc3501e/` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
 | Full feature parity with `<alp/iot.h>` /
-  `<alp/ble.h>`                                    | `firmware/cc3501e/` v1.0            |
+  `<alp/ble.h>`                                    | Remaining v1.0 work: HOST_IRQ async-event delivery and full runtime GATT/event parity |
 
 ## See also
 

@@ -3,10 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Doc-drift gate -- fails (exit 1) when customer-facing documentation
-references SDK identifiers that no longer exist, or when a top-level
-doc isn't linked from the docs index.
+references SDK identifiers that no longer exist, when a top-level
+doc isn't linked from the docs index, or when CC3501E docs/examples
+describe the current bridge as the obsolete CS-less design.
 
-Two independent checks:
+Three independent checks:
 
   (a) Dead-symbol references.  Every `ALP_[A-Z0-9_]+` and
       `alp_[a-z0-9_]+` token mentioned in a customer doc must exist as
@@ -37,12 +38,19 @@ Two independent checks:
       the check the updating-docs skill documents in prose; here it is
       mechanised so CI enforces it.
 
+  (c) CC3501E bridge-current wording.  Customer docs, the CC3501E firmware
+      wrapper comments, and the AEN CC3501E examples must not describe the
+      current bridge as the older CS-less / fixed-count design.  Explicitly
+      historical "earlier r1" notes are allowed; current-rev guidance must say
+      hardware SS0 + READY, with HOST_IRQ / async events as the remaining
+      future work.
+
 Run from the repo root:
 
     python3 scripts/check_doc_drift.py                  # both checks
     python3 scripts/check_doc_drift.py --allow ALP_FOO  # extend allowlist
 
-Exits non-zero if either check finds a problem.
+Exits non-zero if any check finds a problem.
 """
 
 from __future__ import annotations
@@ -99,6 +107,47 @@ _SCAN_EXCLUDE_DOCS = {
     "cc3501e-integration-plan.md",   # CC3501E integration *plan* (proposed API)
     "v0.6-tbd-and-assumptions.md",   # in-flight v0.6 TBDs / assumptions
 }
+
+_CC3501E_BRIDGE_SCAN_SUFFIXES = {
+    ".c",
+    ".h",
+    ".md",
+    ".overlay",
+    ".ps1",
+    ".sh",
+    ".syscfg",
+    ".yaml",
+    ".yml",
+}
+
+_CC3501E_BRIDGE_SCAN_GLOBS = (
+    "docs/cc3501e*.md",
+    "firmware/cc3501e/**/*",
+    "examples/aen/aen-cc3501e-*/**/*",
+    "examples/aen/aen-usb-firstlight/**/*",
+    "examples/peripheral-io/alp-console/**/*",
+)
+
+_CC3501E_STALE_BRIDGE_RE = re.compile(
+    r"(?:\b(?:current|this)\b.*\b(?:CS-less|no\s+CS|no\s+chip-select|"
+    r"fixed-count|fixed-clock-count)\b)"
+    r"|(?:\b(?:CS-less|no-CS)\s+lockstep\b)"
+    r"|(?:\bfixed-(?:count|clock-count)\b)"
+    r"|(?:\b3-wire\s+(?:CS-less|deterministic|SPI bridge)\b)"
+    r"|(?:\bwires only SCLK/MOSI/MISO\b)"
+    r"|(?:\bSS tied asserted\b)"
+    r"|(?:\bnext board rev\b.*\bCS\b)"
+    r"|(?:\bCS line \+ host-IRQ\b)"
+    r"|(?:\bCS-less framing fragility\b)",
+    re.IGNORECASE,
+)
+
+_CC3501E_STALE_ALLOWED_RE = re.compile(
+    r"\b(?:earlier|old|obsolete|prior|previous|previously|r1|resolved)\b"
+    r"|(?:\bnot\b.{0,40}\b(?:CS-less|fixed-count|fixed-clock-count|lockstep)\b)"
+    r"|(?:\bdo not revert\b.{0,40}\bThree Pin\b)",
+    re.IGNORECASE,
+)
 
 
 def collect_known_symbols(root: pathlib.Path) -> set[str]:
@@ -225,6 +274,38 @@ def find_index_gaps(root: pathlib.Path) -> list[str]:
     return gaps
 
 
+def cc3501e_bridge_current_files(root: pathlib.Path) -> list[pathlib.Path]:
+    """Files whose CC3501E bridge-current wording should stay in sync."""
+    seen: set[pathlib.Path] = set()
+    out: list[pathlib.Path] = []
+    for pattern in _CC3501E_BRIDGE_SCAN_GLOBS:
+        for path in root.glob(pattern):
+            if not path.is_file():
+                continue
+            if path.suffix not in _CC3501E_BRIDGE_SCAN_SUFFIXES:
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            out.append(path)
+    return sorted(out)
+
+
+def find_cc3501e_bridge_stale_claims(root: pathlib.Path) -> list[tuple[str, int, str]]:
+    """Return stale current-rev CC3501E bridge wording references."""
+    stale: list[tuple[str, int, str]] = []
+    for path in cc3501e_bridge_current_files(root):
+        rel = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            if not _CC3501E_STALE_BRIDGE_RE.search(line):
+                continue
+            if _CC3501E_STALE_ALLOWED_RE.search(line):
+                continue
+            stale.append((rel, line_no, line.strip()))
+    return stale
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -242,6 +323,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     known = collect_known_symbols(root)
     dead = find_dead_symbols(root, known, allow)
     gaps = find_index_gaps(root)
+    stale_cc3501e = find_cc3501e_bridge_stale_claims(root)
 
     if dead:
         print("Dead SDK-symbol references "
@@ -254,13 +336,21 @@ def main(argv: Optional[list[str]] = None) -> int:
               file=sys.stderr)
         for name in gaps:
             print(f"  docs/{name}", file=sys.stderr)
+    if stale_cc3501e:
+        print("Stale CC3501E bridge-current wording "
+              "(current rev is hardware SS0 + READY; HOST_IRQ is future):",
+              file=sys.stderr)
+        for rel, line_no, line in stale_cc3501e:
+            print(f"  {rel}:{line_no}  {line}", file=sys.stderr)
 
-    if dead or gaps:
+    if dead or gaps or stale_cc3501e:
         print(f"\ndoc-drift: {len(dead)} dead ref(s), {len(gaps)} index "
-              f"gap(s) -- failing.", file=sys.stderr)
+              f"gap(s), {len(stale_cc3501e)} stale CC3501E bridge "
+              f"claim(s) -- failing.", file=sys.stderr)
         return 1
 
-    print("doc-drift: OK (no dead symbol refs, docs index complete).")
+    print("doc-drift: OK (no dead symbol refs, docs index complete, "
+          "CC3501E bridge wording current).")
     return 0
 
 

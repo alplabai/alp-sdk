@@ -649,16 +649,16 @@ void cc3501e_hw_notify_reply_sent(void)
 /* (which feeds the same psa_fwu_* sequence from an embedded array).      */
 /* Single session; bytes arrive sequentially (offset == cursor).         */
 
-/* RAM-STAGED OTA (silicon-critical, r1 no-CS/no-IRQ bridge): the psa_fwu_* flash
+/* RAM-STAGED OTA (silicon-critical, hardware-SS0/READY bridge): the psa_fwu_* flash
  * ops share the CC35 HIF/DMA with the bridge SPI slave, so EVERY flash op tears
- * the bridge DMA down (like a radio op) -- doing one per 256 B WRITE desynced the
- * lockstep + churned the link across the ~135-chunk stream, no reinit dance made
+ * the bridge DMA down (like a radio op) -- doing one per 256 B WRITE disrupted the
+ * phased bridge + churned the link across the ~135-chunk stream, no reinit dance made
  * it reliable (silicon 2026-06-19).  So WRITES never touch flash: each chunk is a
  * synchronous RAM memcpy into image_buf (ISR-safe, no DMA disruption -> the bulk
  * transfer stays clean).  ALL the flash happens ONCE at FINISH (psa_fwu_start +
  * write the whole staged image + install), deferred to cc3501e_hw_ota_pump() on
- * the bring-up task with a single bridge re-arm after.  (r2 adds CS + a host-IRQ;
- * then per-chunk flash + a smaller buffer become viable.) */
+ * the bring-up task with a single bridge re-arm after.  HOST_IRQ/async-event work
+ * can revisit per-chunk flash + a smaller buffer.) */
 #define CC3501E_OTA_IMAGE_MAX (64u * 1024u) /* max staged image; begin rejects larger */
 /* FINISH flash block for the OTA-over-bridge path (distinct from the SELFTEST
  * installer's CC3501E_OTA_WRITE_CHUNK; a --ota-selftest build compiles both, so
@@ -687,8 +687,8 @@ static struct {
  * op_rc == OTA_OP_INFLIGHT.  The pump publishes the result + frees the slot
  * (auto-resets op to IDLE); the host observes completion through OTA_STATUS
  * (state / cursor), NOT by re-collecting -- so a WRITE poll never has to re-send
- * its 256 B payload while the device is mid-flash (which would desync the bridge
- * lockstep during the flash blackout).  Fast + ISR-safe (no flash here). */
+	 * its 256 B payload while the device is mid-flash (which would disrupt the
+	 * phased bridge during the flash blackout).  Fast + ISR-safe (no flash here). */
 static int ota_submit(uint8_t o)
 {
 	if (ota.op_rc == OTA_OP_INFLIGHT) return CC3501E_HW_BUSY; /* an op is running */

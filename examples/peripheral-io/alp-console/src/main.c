@@ -79,8 +79,8 @@ static void bind_companion(void)
 	/*
 	 * cc3501e_bridge_bringup() is silicon-validated on the E1M-AEN801
 	 * (see memory/reference-v2n-mali-kbase-rebuild.md and the
-	 * aen-cc3501e-bringup bench log).  It opens the inter-chip SPI
-	 * (no-CS lockstep, mode 0, 1 MHz) + the WIFI_EN / nRESET LP-GPIO
+		 * aen-cc3501e-bringup bench log).  It opens the inter-chip SPI
+		 * (hardware-SS0, mode 0, 1 MHz) + the WIFI_EN / nRESET LP-GPIO
 	 * pads, then runs the Puya cold-boot hard-reset + TI SWRU626
 	 * power sequence.  The bus_id, pin indices, and SPI frequency are
 	 * the E1M-AEN SoM defaults from cc3501e_bridge.h -- override them

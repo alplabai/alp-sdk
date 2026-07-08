@@ -29,12 +29,14 @@
  *   SPI1.SCK     P14_6          out         GPIO_27  (CC35 SPI0 slave)
  *   SPI1.MOSI    P14_5          out         GPIO_28
  *   SPI1.MISO    P14_4          in          GPIO_29
+ *   SPI1.SS0     P14_7          out         CC35 SPI0 CSN
+ *   READY        P2_6           in          GPIO_17
  *
- * The current E1M-AEN rev wires only SCLK/MOSI/MISO -- NO chip-select and
- * NO host-IRQ line (both arrive next rev).  The link is therefore clocked
- * as a sequence of deterministic, fixed-count transfers in lockstep; the
- * framing lives in the host driver (chips/cc3501e/cc3501e.c) and its
- * mirror on the firmware side (firmware/cc3501e/hal/ti/transport_hw_ti_spi.c).
+ * The current E1M-AEN rev uses the dwc-ssi hardware SS0 chip-select on
+ * P14_7 and a READY input on P2_6.  Each protocol phase is framed by SS0;
+ * READY tells the host when the slave has re-armed for the next phase.  The
+ * framing lives in the host driver (chips/cc3501e/cc3501e.c) and its mirror
+ * on the firmware side (firmware/cc3501e/hal/ti/transport_hw_ti_spi.c).
  * This app just opens the bus and calls the driver.
  *
  * This file is ~50 % comment by design: examples are documentation for
@@ -75,10 +77,10 @@
 
 /*
  * 8 MHz for first bring-up.  A slave cannot pace SCK, so the safe move is
- * to start slow and raise the clock only once the lockstep is proven on
- * silicon.  (The host driver's settle gap before each reply read is sized
- * for the v0.1 instant-dispatch META path; slow Wi-Fi/BLE replies need the
- * next-rev host-IRQ line, not a faster clock.)
+ * to start slow and raise the clock only once the hardware-SS0 phase
+ * framing is proven on silicon.  READY gates reply phases; slow Wi-Fi/BLE
+ * commands still use the worker/poll model until HOST_IRQ async delivery
+ * lands.
  */
 #define CC3501E_SPI_FREQ_HZ                                                                        \
 	1000000u /* 1 MHz: SILICON-VALIDATED cold-boot value.  At 8 MHz with the
@@ -190,7 +192,8 @@ volatile cc3501e_witness_t g_cc3501e_witness __attribute__((used));
 
 /* PING (META opcode 0x00) uses the public cc3501e_ping() from <alp/chips/cc3501e.h>
  * -- a bare liveness probe: ALP_OK means the coprocessor parsed the frame and
- * answered in lockstep. (This example previously carried a local copy; it now
+ * answered over the hardware-framed bridge. (This example previously carried
+ * a local copy; it now
  * uses the SDK's.) */
 
 /* Pretty-print the extended diagnostics block (META opcode 0x04).
@@ -434,7 +437,8 @@ int main(void)
 	 * reset() already waited out the boot budget, so the first PING
 	 * usually lands; the retry loop just absorbs any residual ramp/boot
 	 * jitter.  A serviced PING proves the firmware parsed a frame and
-	 * staged its reply in lockstep -- the core thing this bring-up checks.
+	 * staged its reply over the hardware-framed bridge -- the core thing this
+	 * bring-up checks.
 	 */
 	g_cc3501e_witness.phase = CC3501E_PHASE_PING;
 	bool up                 = false;
