@@ -149,7 +149,7 @@ RPMsg proxy is a separate slice.
 |----------------------|---------|----------------|
 | BLE (`<alp/ble.h>`)  | declared| AEN CC3501E backend or Zephyr `bt` host stack |
 | Security (`<alp/security.h>`) | declared | MbedTLS PSA + per-SoC HW accelerator routing |
-| MProc (`<alp/mproc.h>`) | declared | Zephyr `mbox_*` — the AEN MHU is now backed by alp-sdk's `alif,mhuv2-mbox` driver (AEN801, bench-unverified, #45/#50) — + `hwsem_*` + shared-memory regions |
+| MProc (`<alp/mproc.h>`) | declared | Zephyr `mbox_*` — the AEN MHU is backed by alp-sdk's `alif,mhuv2-mbox` driver (dual-M55 RPMsg bench-validated on AEN801, #225) — + `hwsem_*` + shared-memory regions |
 
 ## v0.4.0 prep — landed on `main` (2026-05-11)
 

@@ -4,65 +4,6 @@
  *
  * Devicetree overlay for the M55-HE slice of an E1M-AEN801
  * (Alif Ensemble E8) heterogeneous project.
- *
- * NOTE: the AEN inter-core mailbox is now wired to the ARM MHUv2
- *       (compatible "alif,mhuv2-mbox", carried by this SDK).  ipc0's
- *       `mboxes` references the APSS<->RTSS-HE MHU0 sender/receiver
- *       pair.  vendor-ext, BENCH-UNVERIFIED: the driver, the register
- *       map, and the node addresses/IRQs come from the ARM MHUv2 spec
- *       + the alifsemi/zephyr_alif fork DTS and have NOT been validated
- *       on real silicon.  AEN801 is the lead part; the rollout of this
- *       wiring to AEN301..701 follows after AEN801 bench-passes.
  */
 
-#include "../../build/generated/dts-reservations.dtsi"
-
-/ {
-    chosen {
-        zephyr,ipc     = &ipc0;
-        zephyr,ipc-shm = &alp_default_rpmsg;
-    };
-
-    soc {
-        ipc0: ipc@0 {
-            compatible = "zephyr,ipc-openamp-static-vrings";
-            memory-region = <&alp_default_rpmsg>;
-            /*
-             * Doorbell 0 == alp_default_rpmsg, matching the YAML
-             * mailbox.channels id 0.  tx first, then rx (mbox-names
-             * below).
-             */
-            mboxes = <&mhu_seh_tx 0>, <&mhu_seh_rx 0>;
-            mbox-names = "tx", "rx";
-            role = "remote";
-            status = "okay";
-        };
-
-        /*
-         * APSS <-> RTSS-HE MHU0 pair (ARM MHUv2).  Addresses/IRQs
-         * transcribed from the zephyr_alif fork's HE dtsi
-         * (ensemble_rtss_he.dtsi).  vendor-ext, BENCH-UNVERIFIED.
-         *
-         * mhu0 (wired): rx @0x40000000 IRQ33, tx @0x40010000 IRQ34.
-         * mhu1 (@0x40020000 IRQ35 / @0x40030000 IRQ36) exists too but is
-         * left out -- only mhu0 backs the alp_default_rpmsg link.
-         */
-        mhu_seh_rx: mhu@40000000 {
-            compatible = "alif,mhuv2-mbox";
-            reg = <0x40000000 0x1000>;
-            interrupts = <33 3>;
-            alif,direction = "rx";
-            #mbox-cells = <1>;
-            status = "okay";
-        };
-
-        mhu_seh_tx: mhu@40010000 {
-            compatible = "alif,mhuv2-mbox";
-            reg = <0x40010000 0x1000>;
-            interrupts = <34 3>;
-            alif,direction = "tx";
-            #mbox-cells = <1>;
-            status = "okay";
-        };
-    };
-};
+#include "alp_e1m_aen_m55_he_mhuv2.overlay.inc"

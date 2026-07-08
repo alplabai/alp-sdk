@@ -74,9 +74,9 @@ is 0 and `alp_mbox_send` passes the data through shmem, not the
 MHU).  Sends are explicit; **receives arrive via a registered
 callback** -- there is no blocking `*_recv` call.
 
-> The AEN MHUv2 driver is **vendor-ext, BENCH-UNVERIFIED**:
-> authored from the ARM MHUv2 spec + the zephyr_alif fork DTS,
-> not yet validated on real silicon.
+> The AEN MHUv2 driver is **vendor-ext** and bench-validated for the
+> dual-M55 RPMsg path on E1M-AEN801 (#225, 2026-06-19).  A32<->M55
+> Linux remoteproc overlays are endpoint-specific.
 
 ```c
 alp_mbox_t *mbox = alp_mbox_open(&(alp_mbox_config_t){

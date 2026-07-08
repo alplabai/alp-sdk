@@ -103,17 +103,13 @@ topology:
 # here ONLY for non-stock partitioning (none of the current 11 SKUs
 # need one).
 
-# Alif IPC controller name TBD pending the hand-written HW config.
-# Strong candidate (DO NOT promote to truth yet): the Zephyr binding is
-# almost certainly `alif_mhuv2` (Arm MHU) -- AEN exposes MHU0 + MHU1 with a
-# 32-byte payload limit (see docs/tutorials/15-mproc-mailbox.md).
-# Corroborated by the Alif Linux BSP: meta-alif-ensemble + linux_alif enable
-# Arm MHUv2 (apss-mhu -> mhuv2.cfg), so the inter-core mailbox IP is MHUv2.
-# Still confirm the exact Zephyr binding name against the Alif hand-written
-# HW-config doc + generated board DTS before it replaces TBD; see the bench
-# step in docs/bring-up-aen.md "§6 mailbox controller".
+# Inter-core mailbox IP: ARM MHUv2.  The controller token matches alp-sdk's
+# `alif,mhuv2-mbox` Zephyr MBOX driver; endpoint-specific overlays select the
+# MHU pair for the requested core topology.  The E1M-AEN801 bench validated the
+# driver with dual-M55 OpenAMP RPMsg on 2026-06-19 (#225), and the AEN family
+# shares the Alif Ensemble MHUv2 integration exposed by the zephyr_alif DTS.
 mailbox:
-  controller: TBD                          # candidate: alif_mhuv2 -- confirm vs Alif HW config before committing
+  controller: alif_mhuv2
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }
     - { id: 1, reserved_for: app }
