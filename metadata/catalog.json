@@ -184,13 +184,12 @@
         "summary": "Per-peripheral example for `<alp/audio.h>`. Reads PCM blocks from the on-module PDM microphone, runs them through the ALP DSP chain (DC-block in v0.2), and pushes them straight back out over I²S. Demonstrates the full `audio_in` / `audio_out` lifecycle."
       },
       {
-        "board": "e1m-evk",
+        "board": "e1m-x-evk",
         "name": "audio-noise-suppression",
         "path": "examples/audio/audio-noise-suppression",
         "som": "E1M-V2N101",
         "summary": "Real-time noise suppression demo on the V2N (and V2H by SKU flip). Target market: USB-C headsets, true-wireless hearables, desktop conferencing rigs -- anywhere you want cloud-grade denoising at sub-perceptual latency without shipping audio off-device.",
         "supported_boards": [
-          "e1m-evk",
           "e1m-x-evk"
         ]
       },
@@ -222,7 +221,7 @@
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on > `native_sim/native/64`; real OV5640 + Ethos-U dispatch + Vela- > compiled model land in v0.6 AEN HiL."
       },
       {
-        "board": "e1m-evk",
+        "board": "e1m-x-evk",
         "name": "ai-object-detection-realtime",
         "path": "examples/camera-vision/ai-object-detection-realtime",
         "som": "E1M-V2M101",

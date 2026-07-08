@@ -122,6 +122,24 @@ def _available_presets(metadata_root: Path) -> list[str]:
     return [p.stem for p in boards_dir.glob("*.yaml")]
 
 
+def _check_board_hosts_som_family(
+    sku: str,
+    som_preset: dict[str, Any],
+    preset: str,
+    board_preset: dict[str, Any],
+) -> None:
+    family = som_preset.get("family")
+    allowed_raw = board_preset.get("hosts_som_families")
+    if not isinstance(family, str) or not isinstance(allowed_raw, list):
+        return
+    allowed = [str(item) for item in allowed_raw]
+    if family in allowed:
+        return
+    raise OrchestratorError(
+        f"board preset '{preset}' hosts SoM families {allowed}, "
+        f"but {sku} is family '{family}'")
+
+
 def _synthesize_inline_board(project: dict[str, Any]) -> dict[str, Any]:
     """Build a board-shaped dict from a project's inline top-level fields.
 
@@ -231,8 +249,9 @@ def load_board_yaml(path: Path, *,
     # Either way the rest of the loader sees a single board_preset
     # dict with `name`, `populated`, `e1m_routes`.
     if "preset" in project:
-        board_preset = _resolve_board_preset(
-            project["preset"], metadata_root)
+        board_preset = _resolve_board_preset(project["preset"], metadata_root)
+        _check_board_hosts_som_family(
+            sku, som_preset, project["preset"], board_preset)
     else:
         board_preset = _synthesize_inline_board(project)
     board_name = board_preset.get("name")

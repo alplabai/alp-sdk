@@ -19,7 +19,7 @@
     "hosts_som_families": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-      "description": "SoM families this board mechanically + electrically supports (alif-ensemble, renesas-rzv2n, ...).  Informational; the orchestrator does not currently enforce."
+      "description": "SoM families this board mechanically + electrically supports (alif-ensemble, renesas-rzv2n, ...).  The validators reject `board.yaml` files that pair a shared board preset with a SoM preset whose `family:` is not listed here."
     },
     "populated": {
       "type": "object",

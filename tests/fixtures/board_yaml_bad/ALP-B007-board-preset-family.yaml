@@ -1,0 +1,8 @@
+som:
+  sku: E1M-V2N101
+
+preset: e1m-evk
+
+cores:
+  m33_sm:
+    app: ./src

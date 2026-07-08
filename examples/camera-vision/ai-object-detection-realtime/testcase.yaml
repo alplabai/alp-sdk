@@ -7,7 +7,7 @@ sample:
     OV5640 camera + <alp/inference.h> dispatch to DEEPX DX-M1
     (29 TOPS on V2M101) + bounding-box overlay on the ST7789
     display + live FPS counter.  Showcase for the V2N-M1
-    edge-AI story; the same source compiles for AEN / V2N /
+    edge-AI story; the same source compiles for V2N /
     V2N-M1 by flipping `som.sku` in board.yaml.
 common:
   tags: ai inference object-detection vision marketing showcase

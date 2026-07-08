@@ -22,7 +22,7 @@
 
 name: E1M-X-EVK
 display_name: "E1M-X Development Board (45x65 board)"
-hosts_som_families: [renesas-rzv2n]
+hosts_som_families: [renesas-rzv2n, renesas-rzv2n-deepx]
 
 # Standard population -- parts confirmed present on the EVK BOM.
 # Each `true` becomes CONFIG_ALP_SDK_CHIP_<NAME>=y at build time;

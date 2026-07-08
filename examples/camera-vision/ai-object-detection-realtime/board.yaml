@@ -2,7 +2,7 @@
 #
 # Camera -> NPU inference -> bounding-box overlay on display +
 # live FPS counter.  Targets the V2N-M1 (DEEPX DX-M1, 29 TOPS)
-# E1M SoM out of the box; swap `som.sku` to E1M-V2M201 for the
+# E1M-X SoM out of the box; swap `som.sku` to E1M-V2M201 for the
 # V2H-M1 (DEEPX DX-M2, 113 TOPS) variant when it lands -- the
 # app source is portable and doesn't change.
 #
@@ -25,15 +25,15 @@ som:
   # alp_inference_open(.backend = DEEPX_DXM1 or DRPAI).
   sku: E1M-V2M101
 
-preset: e1m-evk
+preset: e1m-x-evk
 
-# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+# E1M-X pads this app uses (subset of the X-EVK preset's `e1m_routes:`).
 pins:
-  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
-  - { e1m: E1M_SPI1, macro: EVK_SPI_BUS_ARDUINO, doc: "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC" }
+  - { e1m: E1M_X_I2C0, macro: XEVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
+  - { e1m: E1M_X_SPI1, macro: XEVK_SPI_BUS_ARDUINO, doc: "Arduino UNO header SPI on the X-EVK expansion header" }
 
-# OV5640 + ST7789 plug into the EVK headers for this demo (not part
-# of the EVK's default `populated:` table).  Listing them in the
+# OV5640 + ST7789 plug into the X-EVK headers for this demo (not part
+# of the X-EVK's default `populated:` table).  Listing them in the
 # project's `chips:` array flips on the matching chip drivers without
 # needing a per-project board fork.
 chips:

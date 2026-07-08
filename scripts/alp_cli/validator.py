@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
+import yaml
 
 from alp_cli.diagnostic import Diagnostic, DiagnosticCollector
 from alp_cli.yaml_pos import load_with_positions, node_position
@@ -92,8 +93,10 @@ def _xref_pass(
 ) -> None:
     som = data.get("som") or {}
     sku = som.get("sku")
+    som_doc: dict[str, Any] | None = None
     if isinstance(sku, str):
-        if not _sku_resolves(sku):
+        sku_path = _sku_path(sku)
+        if sku_path is None:
             line, col = node_position(som, "sku", target="value")
             collector.add(
                 Diagnostic(
@@ -107,10 +110,14 @@ def _xref_pass(
                     hint=_sku_suggestion(sku),
                 )
             )
+        else:
+            som_doc = _load_metadata_yaml(sku_path)
 
     preset = data.get("preset")
+    board_doc: dict[str, Any] | None = None
     if isinstance(preset, str):
-        if not (PRESET_DIR / f"{preset}.yaml").is_file():
+        preset_path = PRESET_DIR / f"{preset}.yaml"
+        if not preset_path.is_file():
             line, col = node_position(data, "preset", target="value")
             collector.add(
                 Diagnostic(
@@ -124,12 +131,78 @@ def _xref_pass(
                     hint=_preset_suggestion(preset),
                 )
             )
+        else:
+            board_doc = _load_metadata_yaml(preset_path)
+
+    if isinstance(preset, str) and isinstance(sku, str) and som_doc and board_doc:
+        _check_board_hosts_som_family(
+            data, path, collector, sku, som_doc, preset, board_doc)
 
 
-def _sku_resolves(sku: str) -> bool:
-    for _candidate in SOM_DIR.rglob(f"{sku}.yaml"):
-        return True
-    return False
+def _load_metadata_yaml(path: Path) -> dict[str, Any] | None:
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _sku_path(sku: str) -> Path | None:
+    for candidate in SOM_DIR.rglob(f"{sku}.yaml"):
+        return candidate
+    return None
+
+
+def _check_board_hosts_som_family(
+    data: dict[str, Any],
+    path: Path,
+    collector: DiagnosticCollector,
+    sku: str,
+    som_doc: dict[str, Any],
+    preset: str,
+    board_doc: dict[str, Any],
+) -> None:
+    family = som_doc.get("family")
+    allowed = board_doc.get("hosts_som_families") or []
+    if not isinstance(family, str) or not isinstance(allowed, list):
+        return
+    allowed = [str(item) for item in allowed]
+    if family in allowed:
+        return
+
+    line, col = node_position(data, "preset", target="value")
+    compatible = _compatible_presets(family)
+    hint = (
+        f"use a board preset whose hosts_som_families includes '{family}'"
+    )
+    if compatible:
+        hint += f" (for example: {', '.join(compatible)})"
+    hint += ", or define a compatible board inline"
+    collector.add(
+        Diagnostic(
+            severity="error",
+            path=path,
+            line=line,
+            col=col,
+            span=len(preset),
+            code="ALP-B007",
+            message=(
+                f"board preset '{preset}' hosts SoM families {allowed}, "
+                f"but {sku} is family '{family}'"
+            ),
+            hint=hint,
+        )
+    )
+
+
+def _compatible_presets(family: str) -> list[str]:
+    out: list[str] = []
+    for board_path in sorted(PRESET_DIR.glob("*.yaml")):
+        doc = _load_metadata_yaml(board_path) or {}
+        families = doc.get("hosts_som_families") or []
+        if isinstance(families, list) and family in [str(item) for item in families]:
+            out.append(board_path.stem)
+    return out
 
 
 def _all_skus() -> list[str]:

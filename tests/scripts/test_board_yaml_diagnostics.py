@@ -6,6 +6,7 @@ import pytest
 from alp_cli.validator import validate_board_yaml
 
 
+REPO = Path(__file__).resolve().parents[2]
 FIX_GOOD = Path(__file__).parent.parent / "fixtures" / "board_yaml_good"
 FIX_BAD = Path(__file__).parent.parent / "fixtures" / "board_yaml_bad"
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "validate_board_yaml.py"
@@ -62,6 +63,26 @@ def test_bad_sku_emits_ALP_B005():
 def test_bad_preset_emits_ALP_B006():
     c = validate_board_yaml(FIX_BAD / "ALP-B006-bad-preset.yaml")
     assert "ALP-B006" in _codes(c)
+
+
+def test_board_preset_family_mismatch_emits_ALP_B007():
+    c = validate_board_yaml(FIX_BAD / "ALP-B007-board-preset-family.yaml")
+    assert "ALP-B007" in _codes(c)
+
+
+def test_standalone_validator_rejects_board_preset_family_mismatch():
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(REPO / "scripts" / "validate_board_yaml.py"),
+            "--input",
+            str(FIX_BAD / "ALP-B007-board-preset-family.yaml"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 3
+    assert "ALP-B007" in proc.stderr
 
 
 def test_peripheral_not_on_soc_emits_ALP_B010():

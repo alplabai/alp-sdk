@@ -19,8 +19,11 @@ For each (SKU × example) cell:
 2. Set `som.sku:` to the target SKU and adjust `cores.<key>:` to match
    the SKU's `topology:` block (`m55_hp` for E1M-AEN, `m33` for
    E1M-NX9101, `m33_sm` for E1M-X V2N/V2M).
-3. Run `python scripts/alp_project.py --input <temp/board.yaml> --core <core_id> --emit zephyr-conf`.
-4. Capture `alp.conf`; diff across SKUs within each example.
+3. If the original `preset:` does not host the target SoM family, select a
+   compatible preset from the example's `supported_boards:` list and remap
+   `pins:` through matching `board_alias:` route roles.
+4. Run `python scripts/alp_project.py --input <temp/board.yaml> --core <core_id> --emit zephyr-conf`.
+5. Capture `alp.conf`; diff across SKUs within each example.
 
 `west build` is not the gate — the contract is that
 generated `alp.conf` is uniform within the family up to documented
@@ -67,12 +70,12 @@ prose and survives regeneration.
 
 | SKU \ Example | Silicon | adc-voltmeter | pwm-led-fade | v2n-pwm-fan-control | Notes (from metadata) |
 | --- | --- | :---: | :---: | :---: | --- |
-| E1M-V2M101 | `renesas:rzv2n:n44` | ✅ | ✅ | ✅ | 32 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
-| E1M-V2M102 | `renesas:rzv2n:n44` | ✅ | ✅ | ✅ | 64 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
-| E1M-V2N101 | `renesas:rzv2n:n44` | ✅ | ✅ | ✅ | 32 Gbit DRAM |
-| E1M-V2N102 | `renesas:rzv2n:n44` | ✅ | ✅ | ✅ | 64 Gbit DRAM |
+| E1M-V2M101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
+| E1M-V2M102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
+| E1M-V2N101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM |
+| E1M-V2N102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM |
 
-**12 / 12 cells generate cleanly.**
+**8 / 12 cells generate cleanly (4 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
 
 Legend: ✅ `--emit zephyr-conf` succeeds for every app-carrying core · ❌ it does not.
 <!-- END GENERATED: gen_portability_matrix -->
