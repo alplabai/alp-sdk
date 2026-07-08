@@ -36,8 +36,9 @@
  * peripheral in SPI_MODE_CALLBACK with DMA on the free host-DMA       *
  * channels 12 (RX) / 13 (TX), and the driver's transfer-complete      *
  * callback (on_transfer, hal/ti/transport_hw_ti_spi.c) advances the   *
- * request-header -> request-payload -> reply-header -> reply-payload  *
- * lockstep, dispatching each complete frame from callback context.    *
+	 * request-header -> request-payload -> reply-header -> reply-payload  *
+	 * hardware-SS0 phases, dispatching each complete frame from callback  *
+	 * context.                                                           *
  * This bring-up task only DRAINS the async worker (the seconds-long   *
  * Wlan_* radio ops run here, off the SPI callback) and runs the       *
  * housekeeping tick every 10 ms.                                      *

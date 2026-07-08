@@ -109,7 +109,7 @@ spi0.spi.csnPin.$assign  = "GPIO16";  /* CS -> GPIO16 (only silicon-legal CS; pu
 /* SHIP-CRITICAL (host-DMA on the FREE channels 12/13): the on-chip Wi-Fi/BLE
  * radio is a SEPARATE subsystem (NWP) from the AP M33 the bridge runs on, so its
  * DMA ops do not block the AP CPU -- the bridge SPI callback keeps re-arming the
- * lockstep while the radio works.  The radio lower-MAC claims only host-DMA
+ * hardware-SS0 phases while the radio works.  The radio lower-MAC claims only host-DMA
  * channels 0..11 (TRM swru626 §11: UART 0-3, SPI 4-5, TEMP 6-10, HIF hard-codes
  * ch11 in hif.c).  The controller has 14 channels (0..13); 12 and 13 are FREE --
  * the radio never remuxes them.  Pin the bridge SPI's RX DMA to ch12, TX DMA to

@@ -79,7 +79,8 @@ module, configuring the inter-chip SPI instance per
 | SCLK | `GPIO_27` | inter-chip.tsv |
 | MOSI | `GPIO_28` | inter-chip.tsv |
 | MISO | `GPIO_29` | inter-chip.tsv |
-| CS | none (SS tied asserted on the SoM) | 3-wire rev; **confirm SWRU626 §18** |
+| CS | `GPIO_16` CSN, framed by Alif hardware SS0 | current E1M-AEN bridge |
+| READY | `GPIO_17` | host gates reply phases on READY |
 
 The generated `ti_drivers_config.{c,h}` becomes part of
 `SIMPLELINK_CC33XX_SOURCES` / `SIMPLELINK_CC33XX_INCLUDES` (see

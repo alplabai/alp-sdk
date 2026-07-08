@@ -170,8 +170,8 @@ int main(void)
 	 * Step 1 -- configure the proxied pad as a push-pull OUTPUT with no
 	 * internal pull.  This is GPIO_CONFIGURE (0x50) over the bridge: the
 	 * host hands the CC3501E the pad index + direction + pull and the
-	 * firmware programs its own GPIO controller.  ALP_OK = the firmware
-	 * accepted the config and answered in lockstep.
+		 * firmware programs its own GPIO controller.  ALP_OK = the firmware
+		 * accepted the config and answered over the hardware-framed bridge.
 	 */
 	s = cc3501e_gpio_configure(
 	    &fw, DEMO_PAD, ALP_CC3501E_GPIO_DIR_OUTPUT, ALP_CC3501E_GPIO_PULL_NONE, DEMO_OP_TIMEOUT_MS);

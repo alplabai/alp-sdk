@@ -20,7 +20,9 @@
  *   -----------   ---------------   -----------------------
  *   GPIO_27       WIFI_SPI0.SCK     P14_6  SPI1_SCLK_C   -> SCLK
  *   GPIO_28       WIFI_SPI0.MOSI    P14_5  SPI1_MOSI_C   -> CC3501E data IN  (PICO)
- *   GPIO_29       WIFI_SPI0.MISO    P14_4  SPI1_MISO_C   -> CC3501E data OUT (POCI)
+	 *   GPIO_29       WIFI_SPI0.MISO    P14_4  SPI1_MISO_C   -> CC3501E data OUT (POCI)
+	 *   GPIO_16       WIFI_SPI0.CSN     P14_7  SPI1_SS0_C    -> hardware SS0
+	 *   GPIO_17       WIFI_SPI0.READY   P2_6                 -> phase-ready GPIO
  *
  * ============================ HARDWARE NOTE ============================
  * *** SoM rev BUG: the SPI0 data lines are CROSSED. ***  The CC35xx silicon
@@ -42,9 +44,10 @@
  * crossed.  (It happens to equal the LaunchPad LP_SPI0_BUS default.)
  * ======================================================================
  *
- * CS-less 3-wire: this HW rev wires only SCLK/MOSI/MISO (no CS, no host IRQ),
- * so "Three Pin" mode (no CSN pin) is used and the firmware's deterministic
- * lockstep frames transactions without a CS edge.
+	 * Hardware-framed SPI: the Alif dwc-ssi master drives SS0 per protocol phase,
+	 * and GPIO17 reports READY once the slave has re-armed.  SysConfig must stay in
+	 * Four Pin CS Active Low mode so the TI SPI-peripheral driver observes a CSN
+	 * resource; do not revert this board file to Three Pin mode.
  */
 
 /* ======== Kernel ======== */
@@ -55,14 +58,13 @@ var SPI  = scripting.addModule("/ti/drivers/SPI");
 var spi0 = SPI.addInstance();
 spi0.$name                = "CONFIG_SPI_0";
 /*
- * BENCH FIX 2026-06-17: the CC35 SPI *peripheral* needs its CS (ss_in_n)
- * asserted to shift + drive POCI. In "Three Pin" mode the driver still left a
- * default CS0 on GPIO26 configured as a floating input -> slave never selected
- * -> POCI high-Z (scope: flat ~1V), ping_ok=0. GPIO26 is ALSO the SoM's
- * SDIO_MUX_EN (74LVC157 /E) so it can't be tied. Fix: route the CS to GPIO16,
- * which the SoM already pulls LOW -> CS permanently asserted -> slave
- * continuously selected, no extra wire. (CS is never toggled by the Alif host;
- * the 3-wire deterministic-count framing is unchanged.)
+	 * BENCH FIX 2026-06-17, kept for current hardware-SS0 framing: the CC35 SPI
+	 * *peripheral* needs its CS (ss_in_n) resource asserted to shift + drive POCI.
+	 * In Three Pin mode the driver still left a default CS0 on GPIO26 configured
+	 * as a floating input -> slave never selected -> POCI high-Z (scope: flat
+	 * ~1V), ping_ok=0. GPIO26 is ALSO the SoM's SDIO_MUX_EN (74LVC157 /E) so it
+	 * can't be used. Fix: route the CS resource to GPIO16, the CC35-side CSN net
+	 * paired with the Alif hardware SS0 transfer framing.
  */
 spi0.mode                 = "Four Pin CS Active Low";
 spi0.duplex               = "Full";       /* both data lines (RX requests + TX replies) */
@@ -77,7 +79,7 @@ spi0.defaultTxBufferValue = "0xA5";       /* idle MISO = the 0xA5 SYNC marker (A
 spi0.spi.sclkPin.$assign = "GPIO27";  /* <- Alif SCLK/P14_6 (correctly wired) */
 spi0.spi.picoPin.$assign = "GPIO29";  /* peripheral data IN  (needs Alif MOSI here -- HW cross) */
 spi0.spi.pociPin.$assign = "GPIO28";  /* peripheral data OUT (needs Alif MISO here -- HW cross) */
-spi0.spi.csnPin.$assign  = "GPIO16";  /* CS -> GPIO16 (only silicon-legal CS of the W_DISABLE pair; GPIO17 = resource conflict). Must be tied/pulled LOW to assert (see note above). */
+spi0.spi.csnPin.$assign  = "GPIO16";  /* CSN resource paired with Alif SPI1_SS0_C; GPIO17 is READY. */
 
 /* host-DMA on the FREE channels 12/13 (SHIP-CRITICAL -- keep in sync with
  * cc3501e_aen_wifi.syscfg).  The transport opens the slave SPI_MODE_CALLBACK so
