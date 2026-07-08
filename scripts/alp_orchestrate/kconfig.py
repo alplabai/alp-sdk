@@ -289,16 +289,30 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     if console_lines:
         lines.extend(console_lines)
 
-    # On-module HW manifest EEPROM: when the SoM preset carries one
-    # (`on_module.eeprom`), point the hw_info reader -- and the improved
-    # console banner's boot-time manifest read -- at portable bus 0, the
-    # `alp-i2c0` alias every SoM routes its manifest EEPROM to (e.g. AEN's
-    # 24C128 @0x50 on SoC I2C2).  Harmless on examples without that bus
-    # wired: the read just returns NOT_READY and the banner says so.
-    if (project.som_preset.get("on_module") or {}).get("eeprom"):
-        lines.append("# On-module HW manifest EEPROM -> portable bus 0 (alp-i2c0);")
+    # HW manifest EEPROM: the SoM preset provides the default bus,
+    # while board.yaml `features.hw_info.eeprom` can pin the exact
+    # app/project address and manifest offset.  Harmless on examples
+    # without that bus wired: the read returns NOT_READY and the banner
+    # says so.
+    hw_info_eeprom = project.hw_info_eeprom_config()
+    if hw_info_eeprom is not None:
+        source = hw_info_eeprom.get("source")
+        if source == "features.hw_info.eeprom":
+            lines.append(
+                "# HW manifest EEPROM from board.yaml `features.hw_info.eeprom`;")
+        else:
+            lines.append("# On-module HW manifest EEPROM -> portable bus 0 (alp-i2c0);")
         lines.append("# enables alp_hw_info_read() + the console banner manifest line.")
-        lines.append("CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0")
+        lines.append(
+            "CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID="
+            f"{hw_info_eeprom['bus_id']}")
+        if source == "features.hw_info.eeprom":
+            lines.append(
+                "CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT="
+                f"0x{hw_info_eeprom['addr_7bit']:02x}")
+            lines.append(
+                "CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET="
+                f"{hw_info_eeprom['offset']}")
         lines.append("")
 
     if kconfig:

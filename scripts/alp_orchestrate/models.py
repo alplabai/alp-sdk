@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -22,6 +23,40 @@ class OrchestratorError(RuntimeError):
     Carries a human-readable message; the caller (west wrapper / CI)
     prints it and exits non-zero.
     """
+
+
+_E1M_I2C_BUS_RE = re.compile(r"^e1m(?:_x)?_i2c([0-9]+)$")
+
+
+def _feature_i2c_bus_id(bus: Any) -> int:
+    if not isinstance(bus, str):
+        raise OrchestratorError(
+            "features.hw_info.eeprom.bus must be an E1M I2C bus slug "
+            "such as `e1m_i2c0`.")
+    match = _E1M_I2C_BUS_RE.fullmatch(bus)
+    if match is None:
+        raise OrchestratorError(
+            f"features.hw_info.eeprom.bus: {bus!r} is not supported; "
+            "use an E1M I2C bus slug such as `e1m_i2c0`.")
+    return int(match.group(1), 10)
+
+
+def _feature_non_negative_int(raw: dict[str, Any], key: str) -> int:
+    value = raw.get(key)
+    if not isinstance(value, int) or value < 0:
+        raise OrchestratorError(
+            f"features.hw_info.eeprom.{key} must be a non-negative integer.")
+    return value
+
+
+def _normalise_hw_info_eeprom(raw: dict[str, Any], source: str) -> dict[str, Any]:
+    return {
+        "source":    source,
+        "bus":       raw.get("bus"),
+        "bus_id":    _feature_i2c_bus_id(raw.get("bus")),
+        "addr_7bit": _feature_non_negative_int(raw, "addr_7bit"),
+        "offset":    _feature_non_negative_int(raw, "offset"),
+    }
 
 
 # ---------------------------------------------------------------------
@@ -252,6 +287,34 @@ class BoardProject:
     security: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
+    def hw_info_eeprom_feature(self) -> Optional[dict[str, Any]]:
+        """Return the explicit ``features.hw_info.eeprom`` projection."""
+        hw_info = self.features.get("hw_info")
+        if not isinstance(hw_info, dict):
+            return None
+        eeprom = hw_info.get("eeprom")
+        if eeprom is None:
+            return None
+        if not isinstance(eeprom, dict):
+            raise OrchestratorError(
+                "features.hw_info.eeprom must be a mapping.")
+        return _normalise_hw_info_eeprom(eeprom, "features.hw_info.eeprom")
+
+    def hw_info_eeprom_config(self) -> Optional[dict[str, Any]]:
+        """Return the effective EEPROM reader config for Kconfig emit."""
+        explicit = self.hw_info_eeprom_feature()
+        if explicit is not None:
+            return explicit
+        if (self.som_preset.get("on_module") or {}).get("eeprom"):
+            return {
+                "source":    "som.on_module.eeprom",
+                "bus":       "e1m_i2c0",
+                "bus_id":    0,
+                "addr_7bit": 0x50,
+                "offset":    0,
+            }
+        return None
+
 
 @dataclass
 class SystemManifest:
@@ -265,16 +328,26 @@ class SystemManifest:
     helper_mcus: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        hw_info: dict[str, Any] = {
+            "sku":          self.project.sku,
+            "som_hw_rev":   self.project.hw_rev,
+            "board_name":   self.project.board_name,
+            "board_hw_rev": self.project.board_hw_rev,
+            "silicon":      self.project.som_preset.get("silicon"),
+        }
+        eeprom = self.project.hw_info_eeprom_feature()
+        if eeprom is not None:
+            hw_info["eeprom"] = {
+                "bus":       eeprom["bus"],
+                "bus_id":    eeprom["bus_id"],
+                "addr_7bit": eeprom["addr_7bit"],
+                "offset":    eeprom["offset"],
+            }
+
         out: dict[str, Any] = {
             "schema_version": 1,
             "generated_by":   "scripts/alp_orchestrate.py",
-            "hw_info": {
-                "sku":             self.project.sku,
-                "som_hw_rev":      self.project.hw_rev,
-                "board_name":    self.project.board_name,
-                "board_hw_rev":  self.project.board_hw_rev,
-                "silicon":         self.project.som_preset.get("silicon"),
-            },
+            "hw_info":        hw_info,
             "slices":      [s.to_manifest_entry() for s in self.slices],
             "ipc":         [c.to_manifest_entry() for c in self.carve_outs],
             "helper_mcus": list(self.helper_mcus),
