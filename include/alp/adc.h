@@ -27,7 +27,7 @@
  * Typical usage (one-shot):
  * @code
  *     alp_adc_t *th = alp_adc_open(&(alp_adc_config_t){
- *         .channel_id = ALP_E1M_ADC0,
+ *         .channel_id = ALP_E1M_ADC0,     // E1M; use ALP_E1M_X_ADC0 on E1M-X
  *         .resolution_bits = 12,
  *         .reference  = ALP_ADC_REF_INTERNAL,
  *     });
@@ -38,7 +38,7 @@
  * Typical usage (streaming, V2N family only today):
  * @code
  *     alp_adc_stream_t *s = alp_adc_stream_open(&(alp_adc_stream_config_t){
- *         .channel_id     = ALP_E1M_ADC0,
+ *         .channel_id     = ALP_E1M_X_ADC0,
  *         .sample_rate_hz = 100000,
  *     });
  *     uint16_t buf[32];
@@ -107,9 +107,9 @@ typedef struct alp_adc alp_adc_t;
 
 /** Configuration passed to @ref alp_adc_open. */
 typedef struct {
-	uint32_t      channel_id;      /**< Studio-resolved ADC channel index (ALP_E1M_ADC0..ADC7). */
-	uint8_t       resolution_bits; /**< 8 / 10 / 12 / 14 / 16 typical. 0 = use DT default. */
-	uint16_t      acquisition_us;  /**< Sample-and-hold time, microseconds. */
+	uint32_t channel_id; /**< Form-factor ADC instance ID: ALP_E1M_ADC0..7 or ALP_E1M_X_ADC0..7. */
+	uint8_t  resolution_bits; /**< 8 / 10 / 12 / 14 / 16 typical. 0 = use DT default. */
+	uint16_t acquisition_us;  /**< Sample-and-hold time, microseconds. */
 	alp_adc_ref_t reference;
 	uint8_t       gain_num; /**< Gain numerator (e.g. 1 for 1/1). */
 	uint8_t       gain_den; /**< Gain denominator (e.g. 6 for 1/6). */
@@ -139,7 +139,8 @@ typedef struct {
  * continuous acquisition use @ref alp_adc_stream_open.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL; @c channel_id must
- *                 be < @ref ALP_E1M_ADC_COUNT (ALP_E1M_ADC0..ADC7).
+ *                 be less than the selected form factor's ADC count
+ *                 (@ref ALP_E1M_ADC_COUNT or @ref ALP_E1M_X_ADC_COUNT).
  * @return Open handle on success, or NULL if the channel can't be
  *         resolved, configured, or the pool is exhausted.
  */
@@ -210,7 +211,7 @@ typedef struct alp_adc_stream alp_adc_stream_t;
 
 /** Configuration passed to @ref alp_adc_stream_open. */
 typedef struct {
-	uint32_t channel_id;     /**< Studio-resolved ADC channel index (ALP_E1M_ADC0..ADC7). */
+	uint32_t channel_id; /**< Form-factor ADC instance ID: ALP_E1M_ADC0..7 or ALP_E1M_X_ADC0..7. */
 	uint32_t sample_rate_hz; /**< Target sample rate (Hz).  Backend rounds
                                     *  down to its nearest achievable value and
                                     *  caps at the active SoM's hardware ceiling
@@ -231,7 +232,8 @@ typedef struct {
  * @return Open handle on success, or NULL with @ref alp_last_error set to
  *         one of:
  *         - @ref ALP_ERR_INVAL on NULL cfg or zero sample-rate,
- *         - @ref ALP_ERR_OUT_OF_RANGE on channel_id >= @ref ALP_E1M_ADC_COUNT,
+ *         - @ref ALP_ERR_OUT_OF_RANGE on channel_id beyond the selected
+ *           form factor's ADC count,
  *         - @ref ALP_ERR_NOSUPPORT on SoMs without a streaming backend,
  *         - @ref ALP_ERR_NOT_READY when the backend transport is not
  *           configured (e.g. V2N supervisor with no bus ids set),
@@ -300,7 +302,7 @@ typedef struct alp_adc_filter alp_adc_filter_t;
 
 /** Configuration passed to @ref alp_adc_filter_open. */
 typedef struct {
-	uint32_t channel_id;     /**< ADC channel index (ALP_E1M_ADC0..ADC7). */
+	uint32_t channel_id; /**< Form-factor ADC instance ID: ALP_E1M_ADC0..7 or ALP_E1M_X_ADC0..7. */
 	uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
 	/** DSP stages, filter-terminated (no FFT).  Copied into the
      *  internal chain at open time; caller may free immediately. */
@@ -322,7 +324,8 @@ typedef struct {
  *         - @ref ALP_ERR_INVAL on NULL cfg, NULL stages, n_stages == 0,
  *           or an FFT-terminated chain.
  *         - @ref ALP_ERR_OUT_OF_RANGE on channel_id >=
- *           @ref ALP_E1M_ADC_COUNT or any per-stage bound violation.
+ *           the selected form factor's ADC count, or any per-stage
+ *           bound violation.
  *         - @ref ALP_ERR_NOSUPPORT on SoMs without a streaming ADC.
  *         - @ref ALP_ERR_NOT_READY when the backend transport is not
  *           configured.
@@ -367,7 +370,7 @@ typedef struct alp_adc_spectrum alp_adc_spectrum_t;
 
 /** Configuration passed to @ref alp_adc_spectrum_open. */
 typedef struct {
-	uint32_t channel_id;     /**< ADC channel index (ALP_E1M_ADC0..ADC7). */
+	uint32_t channel_id; /**< Form-factor ADC instance ID: ALP_E1M_ADC0..7 or ALP_E1M_X_ADC0..7. */
 	uint32_t sample_rate_hz; /**< Target acquisition rate (Hz). */
 	/** DSP stages, FFT-terminated (optional WINDOW immediately
      *  before FFT).  Copied at open time. */

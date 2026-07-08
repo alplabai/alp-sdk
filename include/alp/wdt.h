@@ -20,7 +20,7 @@
  * Typical usage:
  * @code
  *     alp_wdt_t *wdt = alp_wdt_open(&(alp_wdt_config_t){
- *         .wdt_id     = 0,
+ *         .wdt_id     = ALP_E1M_WDT0,     // E1M; use ALP_E1M_X_WDT0 on E1M-X
  *         .timeout_ms = 5000,
  *         .on_timeout = ALP_WDT_RESET_SOC,
  *     });
@@ -60,8 +60,8 @@ typedef struct alp_wdt alp_wdt_t;
 
 /** Configuration passed to @ref alp_wdt_open. */
 typedef struct {
-	uint32_t         wdt_id;     /**< Studio-resolved watchdog index (ALP_E1M_WDT0..WDT1). */
-	uint32_t         timeout_ms; /**< Feed deadline in milliseconds; must be non-zero. */
+	uint32_t wdt_id;     /**< Form-factor WDT instance ID: ALP_E1M_WDT0..1 or ALP_E1M_X_WDT0..1. */
+	uint32_t timeout_ms; /**< Feed deadline in milliseconds; must be non-zero. */
 	alp_wdt_action_t on_timeout; /**< Action when the deadline is missed. */
 } alp_wdt_config_t;
 
@@ -74,7 +74,8 @@ typedef struct {
  *
  * @param[in] cfg  Configuration.  Must be non-NULL with non-zero
  *                 @c timeout_ms; @c wdt_id must be a valid watchdog
- *                 index on the active SoM (ALP_E1M_WDT0..WDT1).
+ *                 index on the active SoM (ALP_E1M_WDT0..1 or
+ *                 ALP_E1M_X_WDT0..1).
  * @return Open handle on success;
  *         NULL if @p cfg is invalid, @c cfg->wdt_id is out of range,
  *         the underlying device isn't ready, or the SoC rejected the

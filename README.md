@@ -58,9 +58,12 @@ The SDK supports both flows equally — pick whichever fits.
 
 - **Standalone / hand-written firmware.**  Write a Zephyr (or Yocto,
   or bare-metal) app against `<alp/...>` headers directly.  Pick
-  instance IDs by hand from `<alp/e1m_pinout.h>` — `ALP_E1M_I2C0`,
-  `ALP_E1M_PWM3`, etc. — and your app is portable across every
-  E1M-conformant SoM.  Capability validation runs at runtime in
+  instance IDs from the pinout namespace for your form factor:
+  `<alp/e1m_pinout.h>` gives E1M IDs such as `ALP_E1M_I2C0` and
+  `ALP_E1M_PWM3`, while `<alp/e1m_x_pinout.h>` gives E1M-X IDs such
+  as `ALP_E1M_X_I2C0` and `ALP_E1M_X_PWM3`.  Apps stay portable
+  within that form factor/family; E1M and E1M-X are intentionally
+  separate namespaces.  Capability validation runs at runtime in
   `*_open`; `alp_last_error()` tells you why an open failed.
 - **alp-studio codegen.**  The
   [studio](https://github.com/alplabai/alp-studio) reads the SoM
@@ -93,8 +96,9 @@ NOT a goal — they are separate product lines with separate
   runtime-detection ladder pattern, and worked examples
   (AEN601 → AEN801, V2N101 → V2M101).
 - [`docs/portability-matrix.md`](docs/portability-matrix.md) — the
-  empirical guarantee (21/21 E1M + 12/12 E1M-X cells green; all 5
-  Phase B gaps resolved).
+  generated swap-test matrix for the pinned E1M and E1M-X examples,
+  including any cells that fail because an example does not claim a
+  compatible board/pinout path.
 - [ADR 0011](docs/adr/0011-intra-family-portability.md) —
   architectural decision: load-bearing intra-family scope,
   alternatives rejected (single namespace, lowest-common-denominator

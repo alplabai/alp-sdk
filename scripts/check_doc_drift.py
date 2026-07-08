@@ -45,6 +45,12 @@ Three independent checks:
       hardware SS0 + READY, with HOST_IRQ / async events as the remaining
       future work.
 
+  (d) E1M-X pinout namespace guidance.  Standalone/general docs that teach
+      developers to pick pinout instance IDs must present the E1M and E1M-X
+      namespaces together (`<alp/e1m_pinout.h>` + `<alp/e1m_x_pinout.h>`).
+      E1M-only guidance in those docs is drift because the form factors are
+      intentionally separate product lines.
+
 Run from the repo root:
 
     python3 scripts/check_doc_drift.py                  # both checks
@@ -146,6 +152,24 @@ _CC3501E_STALE_ALLOWED_RE = re.compile(
     r"\b(?:earlier|old|obsolete|prior|previous|previously|r1|resolved)\b"
     r"|(?:\bnot\b.{0,40}\b(?:CS-less|fixed-count|fixed-clock-count|lockstep)\b)"
     r"|(?:\bdo not revert\b.{0,40}\bThree Pin\b)",
+    re.IGNORECASE,
+)
+
+_PINOUT_GUIDANCE_DOCS = (
+    "README.md",
+    "docs/getting-started.md",
+    "docs/firmware-quickstart.md",
+    "docs/architecture.md",
+)
+
+_E1M_PINOUT_GUIDANCE_RE = re.compile(
+    r"(?:<alp/e1m_pinout\.h>|`?ALP_E1M_(?:I2C|SPI|UART|I2S|PWM|ADC|DAC|WDT|GPIO)[A-Z0-9_]*`?)"
+)
+_E1M_X_PINOUT_GUIDANCE_RE = re.compile(
+    r"(?:<alp/e1m_x_pinout\.h>|`?ALP_E1M_X_[A-Z0-9_]*`?)"
+)
+_PINOUT_TEACHING_RE = re.compile(
+    r"\b(?:standalone|hand-written|portable|portability|form factor|instance IDs?|pinout)\b",
     re.IGNORECASE,
 )
 
@@ -306,6 +330,27 @@ def find_cc3501e_bridge_stale_claims(root: pathlib.Path) -> list[tuple[str, int,
     return stale
 
 
+def find_e1m_x_pinout_guidance_gaps(root: pathlib.Path) -> list[tuple[str, int, str]]:
+    """Return E1M-only pinout guidance in standalone/general docs."""
+    gaps: list[tuple[str, int, str]] = []
+    for rel in _PINOUT_GUIDANCE_DOCS:
+        path = root / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        line_no = 1
+        for para in re.split(r"\n\s*\n", text):
+            if (
+                _E1M_PINOUT_GUIDANCE_RE.search(para)
+                and _PINOUT_TEACHING_RE.search(para)
+                and not _E1M_X_PINOUT_GUIDANCE_RE.search(para)
+            ):
+                first = next((ln.strip() for ln in para.splitlines() if ln.strip()), "")
+                gaps.append((rel, line_no, first))
+            line_no += para.count("\n") + 2
+    return gaps
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -324,6 +369,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     dead = find_dead_symbols(root, known, allow)
     gaps = find_index_gaps(root)
     stale_cc3501e = find_cc3501e_bridge_stale_claims(root)
+    e1m_x_pinout_gaps = find_e1m_x_pinout_guidance_gaps(root)
 
     if dead:
         print("Dead SDK-symbol references "
@@ -342,15 +388,22 @@ def main(argv: Optional[list[str]] = None) -> int:
               file=sys.stderr)
         for rel, line_no, line in stale_cc3501e:
             print(f"  {rel}:{line_no}  {line}", file=sys.stderr)
+    if e1m_x_pinout_gaps:
+        print("E1M-only pinout guidance in standalone/general docs "
+              "(also mention <alp/e1m_x_pinout.h> / ALP_E1M_X_*):",
+              file=sys.stderr)
+        for rel, line_no, line in e1m_x_pinout_gaps:
+            print(f"  {rel}:{line_no}  {line}", file=sys.stderr)
 
-    if dead or gaps or stale_cc3501e:
+    if dead or gaps or stale_cc3501e or e1m_x_pinout_gaps:
         print(f"\ndoc-drift: {len(dead)} dead ref(s), {len(gaps)} index "
               f"gap(s), {len(stale_cc3501e)} stale CC3501E bridge "
-              f"claim(s) -- failing.", file=sys.stderr)
+              f"claim(s), {len(e1m_x_pinout_gaps)} E1M-X pinout "
+              f"guidance gap(s) -- failing.", file=sys.stderr)
         return 1
 
     print("doc-drift: OK (no dead symbol refs, docs index complete, "
-          "CC3501E bridge wording current).")
+          "CC3501E bridge wording current, E1M-X pinout guidance current).")
     return 0
 
 

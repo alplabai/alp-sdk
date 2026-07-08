@@ -447,11 +447,13 @@ schedulers, custom driver classes) adds bug surface without
 portability gain.  The Alp value is *studio-friendly + OS-portable +
 ABI-stable*, not *vendor-diversity over Zephyr*.
 
-## E1M as the portability bound
+## E1M / E1M-X as the portability bound
 
-Per the `alplabai/e1m-spec` standard, every E1M-conformant SoM **SHALL
+Per the `alplabai/e1m-spec` standard, every SoM in a form factor **SHALL
 route a fixed minimum set of peripheral instances** with their primary
-functions pinned to specific pads:
+functions pinned to specific pads.  The E1M and E1M-X form factors use
+separate C namespaces so apps do not accidentally claim cross-form-factor
+portability:
 
 - 2 × I²C, 2 × SPI, 2 × UART, 2 × I²S, 2 × PDM, 1 × I³C
 - 1 × CAN-FD, 1 × Ethernet, 1 × MIPI CSI, 1 × MIPI DSI
@@ -459,16 +461,19 @@ functions pinned to specific pads:
 - 8 × single-ended ADC (`ADC0..ADC7`), 2 × DAC
 
 These minimums are the **portability contract**: an app that uses
-`E1M_<CLASS><N>` for `N < E1M_<CLASS>_COUNT` is guaranteed to
-work on every conformant SoM.  Higher indices are vendor-specific
-extensions — the wrapper accepts them up to the SoC's documented count
-(e.g. RZ/V2N's six CAN channels), but apps that use them lose the
-"swap the SoM, no software changes" property.
+`ALP_E1M_<CLASS><N>` with `N < ALP_E1M_<CLASS>_COUNT` is portable
+within the 35 x 35 mm E1M family; an app that uses
+`ALP_E1M_X_<CLASS><N>` with `N < ALP_E1M_X_<CLASS>_COUNT` is portable
+within the 45 x 65 mm E1M-X family.  Higher indices are vendor-specific
+extensions — the wrapper accepts them up to the SoC's documented count,
+but apps that use them lose the "swap the SoM, no software changes"
+property.
 
 The constants live in [`<alp/e1m_pinout.h>`](../include/alp/e1m_pinout.h)
-as `E1M_*_COUNT` macros.  alp-studio's pin allocator enforces the
-E1M bound for portable blocks; the SDK's runtime layer enforces only
-the SoC-specific bound (so vendor-extension blocks work too).  Three
+and [`<alp/e1m_x_pinout.h>`](../include/alp/e1m_x_pinout.h).  alp-studio's
+pin allocator enforces the selected form-factor bound for portable blocks;
+the SDK's runtime layer enforces only the SoC-specific bound (so vendor-
+extension blocks work too).  Three
 tiers of validation:
 
 ```
@@ -485,7 +490,7 @@ range against the SoC, DT alias unset, etc.) via the
 
 ## Capability validation
 
-Every E1M-conformant SoM ships with a different peripheral inventory
+Every E1M or E1M-X SoM ships with a different peripheral inventory
 — Alif Ensemble E3 has a 24-bit ADC plus three 12-bit ADCs, an Alif
 E7 has the same, while NXP i.MX 93 tops out at 12 bits.  Apps that
 declare a 16-bit ADC config must fail predictably when run on a SoC
