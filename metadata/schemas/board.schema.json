@@ -11,9 +11,15 @@
   },
   "allOf": [
     {
-      "description": "`preset:` is mutually exclusive with inline `populated:` / `e1m_routes:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
+      "description": "`preset:` is mutually exclusive with inline `name:` / `populated:` / `e1m_routes:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
       "not": {
         "anyOf": [
+          {
+            "allOf": [
+              { "required": ["preset"] },
+              { "required": ["name"] }
+            ]
+          },
           {
             "allOf": [
               { "required": ["preset"] },
@@ -27,6 +33,18 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "description": "Inline board declarations with board-side population or E1M routes need a stable `name:` for generated route headers and diagnostics.",
+      "if": {
+        "anyOf": [
+          { "required": ["populated"] },
+          { "required": ["e1m_routes"] }
+        ]
+      },
+      "then": {
+        "required": ["name"]
       }
     }
   ],
