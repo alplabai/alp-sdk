@@ -286,6 +286,8 @@ jobs:
 
       - name: Gate — root public headers stay chip-neutral
         run: python3 scripts/check_public_header_purity.py
+      - name: Gate — no hard-coded home-directory paths in build/exec files
+        run: python3 scripts/check_local_paths.py
 
       - name: Gate — sw_fallback.c files carry Cost + Performance tags
         run: python3 scripts/check_sw_fallback_tags.py

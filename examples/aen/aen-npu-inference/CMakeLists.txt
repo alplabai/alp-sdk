@@ -12,10 +12,10 @@
 # MicroInterpreter + MicroMutableOpResolver::AddEthosU() -> Invoke().
 #
 # Modules required at build time (pass via -DEXTRA_ZEPHYR_MODULES):
-#   <alp-sdk>                    (the SDK; provides ALP_SDK Kconfig)
-#   <zephyr-workspace>/modules/hal/alif
-#   <zephyr-workspace>/modules/hal/ethos_u
-#   <tflite-micro path>          (TFLM sources + Zephyr glue)
+#   <alp-sdk>                                   (the SDK; provides ALP_SDK Kconfig)
+#   <zephyr-workspace>/modules/hal/alif         (hal_alif -- SoC support)
+#   <zephyr-workspace>/modules/hal/ethos_u      (Arm Ethos-U core driver lib)
+#   <tflite-micro path>                         (TFLM sources + Zephyr glue)
 #
 # The model-gen step (gen_model.py) runs vela from .venv-vela and writes
 # model.h into the build tree, so the source tree carries no generated blob.
