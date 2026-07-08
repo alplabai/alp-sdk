@@ -578,8 +578,8 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
 
     For each enabled library that ships a
     `metadata/library-profiles/<name>/hw-backends.yaml`, pick the
-    highest-priority matching backend per accelerator class given the
-    active SoM SKU and emit the matching `CONFIG_*=y` line.
+    highest-priority implemented matching backend per accelerator class
+    given the active SoM SKU and emit the matching `CONFIG_*=y` line.
 
     Match rules (per priority entry; checked in order, all specified
     keys must match):
@@ -598,6 +598,9 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
         + V2N).
       - All three omitted = universal entry (e.g. plain FPU, generic
         DMA), matches any SKU.
+      - `status: planned` / `status: stub` entries are retained as
+        metadata for the roadmap but are not emitted as active build
+        claims.
     """
     import re
     from pathlib import Path
@@ -679,7 +682,10 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
             sf   = kv.get("soc_family")
             cap  = kv.get("requires_cap")
             kcv  = kv.get("kconfig")
+            status = kv.get("status", "implemented").strip().lower()
             if not kcv:
+                continue
+            if status in {"planned", "stub"}:
                 continue
             # All specified matchers must succeed.
             if sili is not None and sili != silicon_ref:

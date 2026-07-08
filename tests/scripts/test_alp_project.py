@@ -728,14 +728,14 @@ class TestHwBackendsLoader(unittest.TestCase):
         self.assertEmitted ("E1M-AEN801", "CONFIG_ALP_LITTLEFS_XSPI_DMA=y")
 
     def test_v2n101_drp_ai_plus_cau(self) -> None:
-        """V2N101: no Ethos, primary NPU is DRP-AI; mbedtls/bearssl
-        route through GD32 bridge CAU."""
+        """V2N101: no Ethos, primary NPU is DRP-AI; TLS-library CAU
+        entries remain planned until a real library consumer lands."""
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_TFLM_DRP_AI=y")
         self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_ETHOS_U55=y")
         self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_ETHOS_U85=y")
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_TFLM_NEON=y")
-        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_CAU=y")
-        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_BEARSSL_CAU=y")
+        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_CAU=y")
+        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_BEARSSL_CAU=y")
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_LITTLEFS_EMMC_DMA=y")
         self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
         # Regression guard: the cmsis_dsp profile dir must equal its
@@ -764,15 +764,12 @@ class TestHwBackendsLoader(unittest.TestCase):
                 self.assertEmitted (sku, "CONFIG_ALP_MINIMP3_I2S_DMA=y")
 
     def test_optiga_truth_cross_family(self) -> None:
-        """OPTIGA Trust M is populated on AEN + V2N + NX9101.  With
-        `requires_cap: optiga_trust_m`, mbedtls/bearssl's OPTIGA
-        gate fires across all three families -- but only when no
-        higher-priority crypto accelerator (CryptoCell / Inline-AES
-        / CAU) wins first.  AEN picks CryptoCell; NX9101 has no
-        higher-priority crypto so OPTIGA fires there."""
-        self.assertEmitted    ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
+        """OPTIGA Trust M is populated on AEN + V2N + NX9101, but the
+        mbedTLS/BearSSL handshake integration is still planned.  The
+        loader must not emit active TLS offload claims for it."""
+        self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
         self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
-        self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
+        self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
         self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
 
     def test_sw_fallback_always_emitted(self) -> None:

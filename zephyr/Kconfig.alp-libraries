@@ -184,13 +184,13 @@ config ALP_JSMN_SW
 	default y
 
 config ALP_BEARSSL_CAU
-	bool "BearSSL backed by GD32 CAU"
+	bool "BearSSL backed by GD32 CAU (planned)"
 config ALP_BEARSSL_CRYPTOCELL
-	bool "BearSSL backed by Alif CryptoCell"
+	bool "BearSSL backed by Alif CryptoCell (planned)"
 config ALP_BEARSSL_INLINE_AES
-	bool "BearSSL backed by Alif inline-AES instruction"
+	bool "BearSSL backed by Alif inline-AES instruction (planned)"
 config ALP_BEARSSL_OPTIGA
-	bool "BearSSL TLS handshake via OPTIGA Trust M"
+	bool "BearSSL TLS handshake via OPTIGA Trust M (planned)"
 config ALP_BEARSSL_PURE_C
 	bool "BearSSL pure-C (SW fallback)"
 	default y
@@ -265,19 +265,19 @@ config ALP_LVGL_SW_BLIT
 	default y
 
 config ALP_MBEDTLS_CRYPTOCELL
-	bool "mbedTLS AES/RSA/ECDSA via Alif CryptoCell"
+	bool "mbedTLS AES/RSA/ECDSA via Alif CryptoCell (planned)"
 	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
 config ALP_MBEDTLS_INLINE_AES
-	bool "mbedTLS AES via Alif M55 inline-AES instruction"
+	bool "mbedTLS AES via Alif M55 inline-AES instruction (planned)"
 	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
 config ALP_MBEDTLS_CAU
-	bool "mbedTLS AES via GD32 bridge CAU"
+	bool "mbedTLS AES via GD32 bridge CAU (planned)"
 config ALP_MBEDTLS_OPTIGA
-	bool "mbedTLS TLS handshake via OPTIGA Trust M"
+	bool "mbedTLS TLS handshake via OPTIGA Trust M (planned)"
 config ALP_MBEDTLS_PURE_C
 	bool "mbedTLS pure-C (SW fallback)"
 	default y

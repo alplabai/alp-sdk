@@ -42,9 +42,10 @@ cores:
       wifi: true
       mqtt: true
       tls: true
-    # mbedtls covers the TLS stack the MQTT pub/sub + OPTIGA-handshake
-    # paths use.  Required by v0.6 cross-field validator (P2.3 rule 3)
-    # whenever `iot.tls: true`.
+    # mbedtls covers the TLS stack used by MQTT pub/sub.  OPTIGA
+    # handshake offload remains a planned library-profile binding.
+    # Required by v0.6 cross-field validator (P2.3 rule 3) whenever
+    # `iot.tls: true`.
     libraries:
       - mbedtls
     # Memory tuning -- production stance keeps headroom for the

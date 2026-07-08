@@ -117,6 +117,13 @@ Until then, the profiles are documentation: consumers can copy
 them into their projects directly if they're wiring the libraries
 manually in v0.3.
 
+Accelerator priority entries may carry `status: planned` or
+`status: stub`.  Those entries document the intended accelerator
+binding, but the loaders skip them so generated configs do not claim
+hardware acceleration before a real library consumer exists.  Omit
+`status:` only for an implemented entry that is safe to emit as an
+active `CONFIG_*=y` line.
+
 ## See also
 
 - [`docs/recommended-libraries.md`](../../docs/recommended-libraries.md)

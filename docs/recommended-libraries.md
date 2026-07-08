@@ -205,6 +205,13 @@ backend.  A `sw_fallback:` floor (always `required: true`) backs
 every library so a slice with no matching capability still builds
 and runs.
 
+Priority entries may carry `status: planned` or `status: stub`.
+Those rows remain in metadata as the intended binding, but the
+loaders skip them until the library actually consumes the emitted
+symbol.  This keeps generated `alp.conf` files from claiming
+hardware acceleration that would still run through the library's
+software path.
+
 **Coverage status (v0.6).**  All 25 libraries in the schema enum
 ship a per-library `hw-backends.yaml`:
 
