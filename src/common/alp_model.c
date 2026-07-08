@@ -95,9 +95,13 @@ alp_status_t alp_model_parse(const uint8_t *data, size_t size, alp_model_t *out)
 	out->flags       = rd_u16(data + 6);
 	uint32_t mft_off = rd_u32(data + 8), mft_len = rd_u32(data + 12);
 	uint32_t tbl_off = rd_u32(data + 16), blob_count = rd_u32(data + 20);
-	if ((size_t)mft_off + mft_len > size) return ALP_ERR_INVAL;
+	/* Subtraction-style bounds checks: adding the untrusted u32 offset and
+     * length first can wrap size_t on 32-bit targets and let a crafted
+     * container slip past validation. Check the base first, then compare
+     * the remainder against the space left before EOF. */
+	if (mft_off > size || mft_len > size - mft_off) return ALP_ERR_INVAL;
 
-	if ((size_t)tbl_off + (size_t)blob_count * 8u > size) return ALP_ERR_INVAL;
+	if (tbl_off > size || blob_count > (size - tbl_off) / 8u) return ALP_ERR_INVAL;
 
 	uint32_t idx[ALP_MODEL_MAX_TARGETS] = { 0 };
 	/* Backup-state budget = n_states - 2.  The depth (8 states ~= 6
@@ -144,7 +148,7 @@ alp_status_t alp_model_parse(const uint8_t *data, size_t size, alp_model_t *out)
 		size_t   e    = (size_t)tbl_off + (size_t)bi * 8u; /* in-bounds via the table check above */
 		uint32_t boff = rd_u32(data + e);
 		uint32_t blen = rd_u32(data + e + 4);
-		if ((size_t)boff + (size_t)blen > size) return ALP_ERR_INVAL;
+		if (boff > size || blen > size - boff) return ALP_ERR_INVAL;
 		out->targets[i].blob     = data + boff;
 		out->targets[i].blob_len = blen;
 	}
