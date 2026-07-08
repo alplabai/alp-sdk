@@ -41,7 +41,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-se-service-info`](aen-se-service-info/)      | **staging** -- SE SERVICE transport binds + a single LCS read over the bench RAM-run flow (deliberately vendor-specific bring-up regcheck; customer code uses the portable wrappers instead). |
 | [`aen-se-service-query`](aen-se-service-query/)    | **bench** -- READ-ONLY dump of the portable SE-backed surfaces: SoC identity (`<alp/hw_info.h>`), RUN/STANDBY profiles (`<alp/power.h>`), TRNG (`<alp/security.h>`). |
 | [`aen-se-crypto`](aen-se-crypto/)                  | SHA-256 known-answer + AES-128-GCM round-trip + TRNG through `<alp/security.h>`, backed by the SE CryptoCell (else MbedTLS-PSA fallback). |
-| [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M sanity + ECDSA-P256 sign over BRD_I2C (LPI2C0, M55-HE) via the portable `<alp/...>` API; the §5.2 bench OPTIGA check. |
+| [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M I2C_STATE probe over BRD_I2C (LPI2C0, M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT` until host-library integration. |
 
 ### NPU + AI accelerators
 

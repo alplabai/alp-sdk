@@ -223,11 +223,12 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-se
 west flash
 ```
 
-Expect a successful OPTIGA read/sign on the console.  An
-all-zeros / all-FFs device ID or a probe failure means the
-OPTIGA wasn't bonded out correctly on this assembly.  (Running on
-hardware needs BRD_I2C / LPI2C0 wired to portable bus 0 -- the
-alp-sdk Alif LPI2C bring-up.)
+Expect an I2C_STATE probe result on the console.  On an OPTIGA-populated
+SoM the current driver then reports `ALP_ERR_NOSUPPORT` for product-info
+and raw-APDU calls; a future Infineon host-library integration owns the
+read/sign path.  On the current bench batch the example reports
+`RESULT SKIP` if BRD_I2C/LPI2C0 is not ready yet, or if BRD_I2C opens
+but the OPTIGA is DNI and the probe returns `ALP_ERR_NOT_READY`.
 
 ### 5.3 Ethernet PHY link
 

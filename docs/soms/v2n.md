@@ -111,7 +111,7 @@ Both files are tab-delimited; consume directly or via
 | `v2n-rtc-multi-alarm`            | Multi-source callbacks on the rv3028c7 dispatcher.          |
 | `v2n-temp-sensor`                | TMP112 read loop -- classic starter app.                    |
 | `v2n-pwm-fan-control`            | Ramp a GD32-side PWM channel along a five-stop fan curve.   |
-| `v2n-secure-element-sign`        | OPTIGA Trust M init + ECDSA-P256 sign via raw APDU.         |
+| `v2n-secure-element-sign`        | OPTIGA Trust M I2C_STATE probe; APDU/product-info paths return `ALP_ERR_NOSUPPORT` today. |
 | `v2n-xspi-flash-readwrite`       | Erase + write + verify one page on the on-module xSPI NOR.  |
 | `v2n-emmc-block-stat`            | Read on-module eMMC geometry + first block via disk-access. |
 | `v2n-gd32-swd-flash`             | Host-driven SWD bit-bang -- IDCODE read, halt, erase/write/verify, reset. |

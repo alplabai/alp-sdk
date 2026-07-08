@@ -72,7 +72,7 @@
         "name": "aen-secure-element-sign",
         "path": "examples/aen/aen-secure-element-sign",
         "som": "E1M-AEN801",
-        "summary": "Init the OPTIGA Trust M on the E1M-AEN's **BRD_I2C**, read its product info object as a sanity check, and issue an **ECDSA-P256 sign** APDU against a fixed SHA-256 message digest."
+        "summary": "Probe the OPTIGA Trust M on the E1M-AEN's **BRD_I2C** and confirm the current probe-only driver contract. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
       },
       {
         "board": "e1m-evk",
@@ -712,7 +712,7 @@
         "name": "v2n-secure-element-sign",
         "path": "examples/v2n/v2n-secure-element-sign",
         "som": "E1M-V2N101",
-        "summary": "Init the OPTIGA Trust M on V2N's BRD_I2C, read its product info object as a sanity check, and issue an **ECDSA-P256 sign** APDU against a fixed SHA-256 message digest."
+        "summary": "Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current probe-only driver contract. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
       },
       {
         "board": "e1m-x-evk",
