@@ -16,7 +16,7 @@
  *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
- * @par Driver status: [stub-impl] — init + clear + draw-pixel +
+ * @par Driver status: [complete-impl] — init + clear + draw-pixel +
  *   display.  Geometry fixed at 128 × 64.
  *
  * Datasheet: Sino Wealth SH1106 v2.4 (Mar 2008).

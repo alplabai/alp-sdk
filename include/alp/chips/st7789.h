@@ -15,7 +15,7 @@
  *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
- * @par Driver status: [stub-impl] — init sequence + window-write +
+ * @par Driver status: [partial-impl] — init sequence + window-write +
  *   set-pixel-window only.  Full font/blit primitives lean on LVGL
  *   or the SDK's gfx_compat thin shim.
  *

@@ -298,6 +298,9 @@ jobs:
       - name: Gate — chip driver <-> metadata manifest parity
         run: python3 scripts/check_chip_manifest_parity.py
 
+      - name: Gate — chip header driver-status labels match metadata
+        run: python3 scripts/check_chip_header_status.py
+
       # Validate every HiL smoke spec under tests/hil/ parses against
       # its board's _runner.yaml.  Cheap host-side check (no hardware
       # needed); catches a spec that references a deleted example,
