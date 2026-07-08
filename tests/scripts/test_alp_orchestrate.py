@@ -32,6 +32,7 @@ from alp_orchestrate import (                       # noqa: E402
     Slice,
     StorageEntry,
     _slice_alp_conf,
+    _slice_local_conf,
     _slugs_from_helper_firmware,
     _slugs_from_on_module,
     emit_dts_partitions,
@@ -1323,6 +1324,114 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
 
     assert "CONFIG_ALP_SDK_CHIP_TBD" not in conf
     assert "SoM-intrinsic chip drivers" in conf
+
+
+def test_slice_alp_conf_iot_aen_uses_cc3501e_provider(tmp_path: Path) -> None:
+    """cores.*.iot resolves AEN Wi-Fi/BLE to the CC3501E bridge, while
+    MQTT/TLS still emit the Zephyr protocol-library gates."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    libraries: [mbedtls]
+    iot: { wifi: true, mqtt: true, tls: true, ble: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+
+    assert "on_module.wifi_ble: cc3501e" in conf
+    assert "CONFIG_ALP_SDK_CHIP_CC3501E=y" in conf
+    assert "CONFIG_ALP_SDK_WIFI_CC3501E=y" in conf
+    assert "CONFIG_ALP_SDK_BLE_CC3501E=y" in conf
+    assert "CONFIG_MQTT_LIB=y" in conf
+    assert "CONFIG_ALP_SDK_IOT_MQTT=y" in conf
+    assert "CONFIG_TLS_CREDENTIALS=y" in conf
+    assert "CONFIG_MQTT_LIB_TLS=y" in conf
+    assert "CONFIG_MBEDTLS=y" in conf
+
+    # AEN uses the exact bridge backend, not the generic Zephyr wifi_mgmt
+    # or HCI paths.
+    assert "CONFIG_ALP_SDK_IOT_WIFI=y" not in conf
+    assert "CONFIG_ALP_SDK_BLE=y" not in conf
+
+
+def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
+    tmp_path: Path,
+) -> None:
+    """A SoM whose wireless provider is still TBD emits the generic Zephyr
+    networking / MQTT / TLS / BLE gates rather than a false provider."""
+    body = """
+som:
+  sku: E1M-NX9101
+
+cores:
+  m33:
+    os: zephyr
+    app: ./m33
+    libraries: [mbedtls]
+    iot: { wifi: true, mqtt: true, tls: true, ble: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m33"])
+
+    for expected in (
+        "CONFIG_NETWORKING=y",
+        "CONFIG_NET_IPV4=y",
+        "CONFIG_NET_SOCKETS=y",
+        "CONFIG_WIFI=y",
+        "CONFIG_NET_MGMT=y",
+        "CONFIG_NET_MGMT_EVENT=y",
+        "CONFIG_NET_L2_WIFI_MGMT=y",
+        "CONFIG_ALP_SDK_IOT_WIFI=y",
+        "CONFIG_NET_TCP=y",
+        "CONFIG_MQTT_LIB=y",
+        "CONFIG_ALP_SDK_IOT_MQTT=y",
+        "CONFIG_TLS_CREDENTIALS=y",
+        "CONFIG_MQTT_LIB_TLS=y",
+        "CONFIG_BT=y",
+        "CONFIG_BT_PERIPHERAL=y",
+        "CONFIG_BT_CENTRAL=y",
+        "CONFIG_ALP_SDK_BLE=y",
+    ):
+        assert expected in conf
+
+    assert "CONFIG_ALP_SDK_WIFI_CC3501E=y" not in conf
+    assert "CONFIG_ALP_SDK_BLE_CC3501E=y" not in conf
+
+
+def test_slice_local_conf_iot_v2n_murata_linux_handoff(tmp_path: Path) -> None:
+    """V2N's Murata/CYW provider is Linux-owned: local.conf gets stable
+    userland/runtime deps and leaves kernel/firmware to the BSP layer."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+    libraries: [mbedtls]
+    iot: { wifi: true, mqtt: true, tls: true, ble: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_local_conf(project, project.cores["a55_cluster"])
+
+    assert "on_module.wifi_ble: murata_lbee5hy2fy" in conf
+    assert "BSP/machine recipes supply kernel/firmware packages" in conf
+    assert (
+        'IMAGE_INSTALL:append = " wpa-supplicant iw wireless-regdb '
+        'bluez5 ca-certificates"'
+    ) in conf
+    assert 'PACKAGECONFIG:append:pn-alp-sdk = " mqtt security"' in conf
+
 
 # ---------------------------------------------------------------------
 # Storage partition resolver + emitters (v0.6 schema-only gap closed).

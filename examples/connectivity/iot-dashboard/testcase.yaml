@@ -6,8 +6,8 @@ sample:
     BME280 environment sensor + OPTIGA Trust M + ST7789 TFT.
     mbedtls supplies TLS while MQTT publish enters through the
     portable <alp/iot.h> surface.  The same source builds on AEN
-    (external WiFi) or V2N (on-module Murata).  native_sim stubs
-    WiFi + MQTT.
+    (on-module CC3501E bridge) or V2N (Linux-owned Murata/CYW).
+    native_sim stubs Wi-Fi + MQTT.
 common:
   tags: lvgl iot mqtt tls demo example
 tests:

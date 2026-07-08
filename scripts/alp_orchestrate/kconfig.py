@@ -230,6 +230,175 @@ def _emit_zephyr_console(console: str) -> list[str]:
     return []
 
 
+_LINUX_WIRELESS_PROVIDER_PREFIXES = ("murata_", "cyw")
+
+
+def _wireless_provider(project: BoardProject) -> Optional[str]:
+    """Return the SoM's on-module Wi-Fi/BLE provider slug, if known."""
+    om = project.som_preset.get("on_module") or {}
+    provider = om.get("wifi_ble")
+    if not isinstance(provider, str):
+        return None
+    provider = provider.strip()
+    if not provider or provider == "TBD":
+        return None
+    return provider
+
+
+def _is_linux_wireless_provider(provider: Optional[str]) -> bool:
+    """True when Wi-Fi/BLE data paths are owned by the Linux BSP stack."""
+    if provider is None:
+        return False
+    return provider.startswith(_LINUX_WIRELESS_PROVIDER_PREFIXES)
+
+
+def _zephyr_iot_kconfig(project: BoardProject, slice_: Slice) -> list[str]:
+    """Kconfig lines for ``cores.<id>.iot`` on a Zephyr slice."""
+    iot = slice_.iot or {}
+    if not any(iot.get(k) for k in ("wifi", "mqtt", "tls", "ble")):
+        return []
+
+    provider = _wireless_provider(project)
+    lines: list[str] = [
+        f"# IoT features declared on core `{slice_.core_id}` "
+        "(board.yaml `cores.*.iot`)",
+    ]
+    if provider:
+        lines.append(
+            f"# Wireless provider resolved from `{project.sku}` "
+            f"on_module.wifi_ble: {provider}.")
+    else:
+        lines.append("# Wireless provider is TBD/absent; using generic Zephyr stack gates.")
+
+    emitted: set[str] = set()
+
+    def add(line: str) -> None:
+        if line.startswith("CONFIG_"):
+            if line in emitted:
+                return
+            emitted.add(line)
+        lines.append(line)
+
+    def add_network_base() -> None:
+        add("CONFIG_NETWORKING=y")
+        add("CONFIG_NET_IPV4=y")
+        add("CONFIG_NET_SOCKETS=y")
+
+    linux_owned = _is_linux_wireless_provider(provider)
+
+    if iot.get("wifi"):
+        if provider == "cc3501e":
+            add("# Wi-Fi: AEN CC3501E bridge backend, not Zephyr wifi_mgmt.")
+            add("CONFIG_ALP_SDK_WIFI_CC3501E=y")
+        elif linux_owned:
+            add("# Wi-Fi: provider data path is Linux/BSP-owned on this SoM;")
+            add("# no Zephyr wifi_mgmt backend is emitted for this slice.")
+        else:
+            add("# Wi-Fi: generic Zephyr wifi_mgmt station path.")
+            add_network_base()
+            add("CONFIG_WIFI=y")
+            add("CONFIG_NET_MGMT=y")
+            add("CONFIG_NET_MGMT_EVENT=y")
+            add("CONFIG_NET_L2_WIFI_MGMT=y")
+            add("CONFIG_ALP_SDK_IOT_WIFI=y")
+
+    if iot.get("mqtt"):
+        add("# MQTT: Zephyr mqtt_client over the active socket provider.")
+        add_network_base()
+        add("CONFIG_NET_TCP=y")
+        add("CONFIG_MQTT_LIB=y")
+        add("CONFIG_ALP_SDK_IOT_MQTT=y")
+
+    if iot.get("tls"):
+        add("# TLS: credential store + TLS-capable protocol clients.")
+        add("CONFIG_TLS_CREDENTIALS=y")
+        if iot.get("mqtt"):
+            add("CONFIG_MQTT_LIB_TLS=y")
+
+    if iot.get("ble"):
+        if provider == "cc3501e":
+            add("# BLE: AEN CC3501E bridge backend, not Zephyr HCI.")
+            add("CONFIG_ALP_SDK_BLE_CC3501E=y")
+        elif linux_owned:
+            add("# BLE: provider data path is Linux/BSP-owned on this SoM;")
+            add("# no Zephyr BT-host backend is emitted for this slice.")
+        else:
+            add("# BLE: generic Zephyr BT host path.")
+            add("CONFIG_BT=y")
+            add("CONFIG_BT_PERIPHERAL=y")
+            add("CONFIG_BT_CENTRAL=y")
+            add("CONFIG_ALP_SDK_BLE=y")
+
+    lines.append("")
+    return lines
+
+
+def _yocto_iot_lines(project: BoardProject, slice_: Slice) -> list[str]:
+    """local.conf lines for ``cores.<id>.iot`` on a Yocto slice."""
+    iot = slice_.iot or {}
+    if not any(iot.get(k) for k in ("wifi", "mqtt", "tls", "ble")):
+        return []
+
+    provider = _wireless_provider(project)
+    lines: list[str] = [
+        "",
+        f"# IoT features declared on core `{slice_.core_id}` "
+        "(board.yaml `cores.*.iot`)",
+    ]
+    if provider:
+        lines.append(
+            f"# Wireless provider resolved from `{project.sku}` "
+            f"on_module.wifi_ble: {provider}.")
+    else:
+        lines.append("# Wireless provider is TBD/absent; emit generic Linux userland.")
+
+    image_pkgs: list[str] = []
+    packageconfig: list[str] = []
+
+    def add_unique(seq: list[str], value: str) -> None:
+        if value not in seq:
+            seq.append(value)
+
+    linux_owned = _is_linux_wireless_provider(provider)
+
+    if iot.get("wifi"):
+        if provider == "cc3501e":
+            lines.append("# Wi-Fi: CC3501E is controlled by the Zephyr/companion path.")
+        else:
+            if linux_owned:
+                lines.append(
+                    "# Wi-Fi: Linux owns this provider's SDIO/firmware path; "
+                    "BSP/machine recipes supply kernel/firmware packages.")
+            add_unique(image_pkgs, "wpa-supplicant")
+            add_unique(image_pkgs, "iw")
+            add_unique(image_pkgs, "wireless-regdb")
+
+    if iot.get("ble"):
+        if provider == "cc3501e":
+            lines.append("# BLE: CC3501E is controlled by the Zephyr/companion path.")
+        else:
+            if linux_owned:
+                lines.append(
+                    "# BLE: Linux owns this provider's HCI path; BSP/machine "
+                    "recipes supply controller firmware.")
+            add_unique(image_pkgs, "bluez5")
+
+    if iot.get("mqtt"):
+        add_unique(packageconfig, "mqtt")
+
+    if iot.get("tls"):
+        add_unique(packageconfig, "security")
+        add_unique(image_pkgs, "ca-certificates")
+
+    if image_pkgs:
+        lines.append(f'IMAGE_INSTALL:append = " {" ".join(image_pkgs)}"')
+    if packageconfig:
+        lines.append(
+            f'PACKAGECONFIG:append:pn-alp-sdk = " {" ".join(packageconfig)}"')
+
+    return lines
+
+
 def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     """Per-core Kconfig fragment for a Zephyr slice.
 
@@ -459,6 +628,10 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         for s in sorted(all_subsystems):
             lines.append(f"CONFIG_{s}=y")
         lines.append("")
+
+    iot_lines = _zephyr_iot_kconfig(project, slice_)
+    if iot_lines:
+        lines.extend(iot_lines)
 
     if slice_.libraries:
         lines.append(f"# Libraries declared on core "
@@ -830,6 +1003,9 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("# Peripherals declared for this Yocto slice are "
                      f"BSP/kernel-owned ({joined}); no Zephyr Kconfig or "
                      "local.conf package knob is emitted here.")
+    iot_lines = _yocto_iot_lines(project, slice_)
+    if iot_lines:
+        lines.extend(iot_lines)
     if slice_.libraries:
         imageinstall = " ".join(
             f"lib-{lib.replace('_', '-')}" for lib in slice_.libraries)

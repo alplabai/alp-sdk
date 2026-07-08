@@ -17,8 +17,8 @@
  *   │  E1M-AEN801 SoM  │ ──────▶ │ BME280  │ (T / H / P)
  *   │ + Cortex-M55 HP  │         └─────────┘
  *   └────────┬─────────┘
- *            │  SDIO  ┌─────────────────────────┐
- *            ├──────▶ │ Murata LBEE5HY2FY WiFi  │ ── TLS ─▶ broker.example
+ *            │ bridge ┌─────────────────────────┐
+ *            ├──────▶ │ TI CC3501E Wi-Fi/BLE    │ ── TLS ─▶ broker.example
  *            │        └─────────────────────────┘
  *            │  I²C0  ┌─────────────────────────┐
  *            ├──────▶ │ OPTIGA Trust M          │  planned trust anchor

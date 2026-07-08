@@ -12,8 +12,8 @@ LVGL dashboard on a 240×320 ST7789.
 ## What it shows
 
 - **BME280** environment sensor on I²C0.
-- **Murata LBEE5HY2FY** WiFi 6 + BLE 5.4 module for the network
-  link (SDIO from the AEN host).
+- **TI CC3501E** Wi-Fi 6 + BLE 5.4 coprocessor for the network
+  link through the AEN bridge backend.
 - **OPTIGA Trust M** is the planned trust-anchor / TLS-handshake
   offload path; the current driver is probe-only, so this example
   still runs the TLS library through its software path.

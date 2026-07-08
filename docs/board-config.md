@@ -200,7 +200,20 @@ the SoM preset's `topology.<id>` when omitted):
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
 | `libraries`    | Library opt-in list for this slice.                                                    |
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
-| `iot`          | Wi-Fi / MQTT / BLE / TLS toggles.                                                      |
+| `iot`          | Wi-Fi / MQTT / BLE / TLS toggles; emitted per OS and wireless provider.                |
+
+`cores.<id>.iot` is an emitted build surface, not a comment-only
+declaration.  On Zephyr, `wifi` / `ble` first resolve
+`metadata/e1m_modules/<SKU>.yaml` `on_module.wifi_ble`: AEN emits
+the exact CC3501E bridge backends, unknown native-radio providers
+emit generic Zephyr `wifi_mgmt` / BT-host gates, and Linux-owned
+Murata/CYW providers stay off Zephyr.  `mqtt` emits Zephyr's
+`mqtt_client` stack and `tls` emits the credential/TLS gates.  On
+Yocto, `wifi` / `ble` emit stable userland packages such as
+`wpa-supplicant`, `iw`, `wireless-regdb`, and `bluez5`; the
+BSP/machine layer remains responsible for provider-specific kernel
+modules and firmware.  `mqtt` / `tls` add the matching `alp-sdk`
+recipe `PACKAGECONFIG` tokens plus CA certificates.
 
 ### OS inference from core type
 

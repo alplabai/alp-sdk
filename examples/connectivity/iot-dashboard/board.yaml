@@ -3,9 +3,8 @@
 # Reads BME280 temperature/humidity/pressure, publishes the
 # samples to an MQTT broker (TLS via mbedTLS today; OPTIGA
 # handshake offload is planned), and renders a live LVGL dashboard
-# on a 240x320 ST7789.  The
-# WiFi connection comes up via the Murata LBEE5HY2FY module on
-# the E1M-AEN module's side-channel SDIO.
+# on a 240x320 ST7789.  The Wi-Fi connection comes up through
+# the E1M-AEN module's on-module CC3501E bridge backend.
 
 som:
   sku: E1M-AEN801
@@ -40,17 +39,16 @@ cores:
     peripherals:
       - i2c                  # BME280.
       - spi                  # Display.
-      - gpio                 # Display ancillaries + Murata GPIOs.
+      - gpio                 # Display ancillaries + CC3501E control GPIOs.
 
 chips:
   - bme280                   # Environment sensor.
   - optiga_trust_m           # Planned TLS trust-anchor / handshake offload.
   - st7789                   # 240x320 TFT.
   # WiFi connectivity comes through the <alp/iot.h> alp_wifi_*
-  # surface; on AEN the radio link is via an external WiFi module
-  # on the board (LWM2M-style), not an on-module chip.  V2N
-  # carries `murata_lbee5hy2fy` on-module; the same source builds
-  # against that path if `som.sku` is swapped to E1M-V2N101.
+  # surface; on AEN the generator resolves `on_module.wifi_ble:
+  # cc3501e` and emits the CC3501E bridge backend.  V2N carries
+  # `murata_lbee5hy2fy` on-module and uses the Linux/BSP path.
 
 diagnostics:
   log_level: info
