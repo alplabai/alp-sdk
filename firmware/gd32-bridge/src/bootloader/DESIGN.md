@@ -27,9 +27,8 @@ of a partitioned part needs the factory metadata record from
 host-driven SWD reflash this HW rev); the default (unarmed) image remains
 the cannot-brick-itself configuration.
 
-Integration detail (final flash sizes, commit/rollback policy, signing,
-threat model) is captured in the maintainer-held design doc
-(`alp-sdk-internal/docs/gd32-bridge-ota-path-a-design.md`), not mirrored here.
+Integration detail beyond the public flash-layout and wire contract is tracked
+outside this repo; this file documents the recoverable public bootloader path.
 
 ## OTA opcode contract
 

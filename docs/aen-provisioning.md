@@ -92,11 +92,9 @@ The rest of this document is that path.
 ## 2. Wire the SE-UART — the part everyone gets wrong
 
 The SES maintenance UART (**SEUART**) is **not** the application console. On
-the E1M-AEN it is a dedicated, reserved pair (on the E1M-AEN801: SoC balls
-`A13`/`A14` → series R → E1M edge `AD3` (`SEUART_TX`) / `AE3` (`SEUART_RX`),
-also on SoM test points `TP4`/`TP5`). The *documented* edge UARTs (`UART0`,
-`UART1`) are the **application** console — connecting there, the SES never
-hears you.
+E1M-AEN modules it is a dedicated, reserved service pair exposed by the carrier
+as `SEUART_TX` / `SEUART_RX`. The documented edge UARTs (`UART0`, `UART1`) are
+the **application** console — connecting there, the SES never hears you.
 
 Wire it **crossed**, and mind every one of these — each was a real failure
 mode on the bench:
@@ -106,7 +104,7 @@ mode on the bench:
 | **1.8 V logic level** (adapter VCCIO = 1.8 V, *not* 3.3 V/5 V) | The SoM IO is 1.8 V. A 3.3 V FT232's RX threshold (~2.0 V) won't register a 1.8 V HIGH → you'll see the signal on a scope but the UART decodes **nothing**. Also protects the SoM's non-3.3 V-tolerant RX pin. |
 | **Crossed** TX/RX: adapter **TXD → SEUART_RX**, adapter **RXD ← SEUART_TX** | Straight-through = no comms either way. "Both wires connected" ≠ "crossed". |
 | **Common GND** (adapter GND ↔ SoM GND) | The classic "scope sees a clean signal but the UART gets 0 bytes" cause — no shared reference, no framing. |
-| **Right pads** (`SEUART` `TP4`/`TP5` / `AD3`/`AE3`, *not* `UART0`/`UART1`) | Wrong pad = you're on the app console; the SES is silent there. |
+| **Right service pins** (`SEUART_TX` / `SEUART_RX`, *not* `UART0`/`UART1`) | Wrong pins = you're on the app console; the SES is silent there. |
 | **Baud = 57600** (E8/E6/E4) or **55000** (E7/E5/E3/E1) | Wrong baud → "Target did not respond". |
 
 **Sanity-check the adapter before blaming the board:** jumper the adapter's

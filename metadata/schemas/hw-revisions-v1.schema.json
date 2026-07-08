@@ -45,7 +45,7 @@
         "board_rev": {
           "type": "string",
           "pattern": "^R[0-9]+$",
-          "description": "Altium board-design revision this SoM rev corresponds to (e.g. `R2`).  The SDK hw-rev key tracks it (rN == board RN).  The schematic/netlist export is labelled `<YYWW>-R<n>` (e.g. `2626-R2`, where `2626` is the YYWW date code = 2026 week 26, i.e. the `released` date) and lives privately under metadata/e1m_modules/<family>/netlists/ in alp-sdk-internal."
+          "description": "Altium board-design revision this SoM rev corresponds to (e.g. `R2`).  The SDK hw-rev key tracks this public revision label (rN == board RN)."
         },
         "released": {
           "type": "string",

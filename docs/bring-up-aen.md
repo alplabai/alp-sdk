@@ -494,6 +494,5 @@ anything not covered here.
 - [`docs/getting-started.md`](getting-started.md) -- first-build
   walkthrough (the `gpio-button-led` example is what this
   bring-up flashes in §4).
-- Internal AEN feature audit (private repo) -- which AEN silicon
-  blocks the SDK does + doesn't expose; reference for "is X
-  on the AEN supported" questions.
+- [`docs/os-support-matrix.md`](os-support-matrix.md) -- which SDK
+  surfaces have real AEN backends versus fallback/stub coverage.

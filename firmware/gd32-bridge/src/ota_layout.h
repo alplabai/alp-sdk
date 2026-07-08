@@ -10,8 +10,7 @@
  * 1 KB (MAIN_FLASH_PAGE_SIZE_DBANK) and addresses >= 0x08040000 are
  * bank 1.  2 KB is a multiple of the page size in both bank modes, so
  * all region bases/sizes stay valid; hal/fmc_ota.c walks the REAL page
- * size and selects the bank per address.  Layout matches the design
- * proposal (alp-sdk-internal/docs/gd32-bridge-ota-path-a-design.md §2):
+ * size and selects the bank per address.  Public slot map:
  *
  *   0x08000000  bootloader   32 KB   (never erased by OTA)
  *   0x08008000  metadata      8 KB   (A/B records, one per page)

@@ -10,13 +10,9 @@
  * drives, so an alp_gpio_* call on a proxied E1M IO is routed over the bridge while
  * the Alif's own pins delegate to the platform driver.
  *
- * Built from the E1M-AEN netlist: SoM U4 = BDE-BW35N, edge connector E1 -- each
- * WIFI_GPIOxx net ties U4.GPIO_N to E1.<pin> (PinName = IOxx) which mates the carrier
- * E2.<same coord>; the carrier net gives the function.  e1m_pinout.h's pad comments
- * (e.g. IO13 = pad E3) match the connector coords, confirming the binding.
- *
- * *** NEXT-REV SoM netlist -- "similar to, NOT identical to" the current bench rev.
- * Confirm against the current rev before trusting on silicon. ***
+ * Sanitized E1M-AEN route metadata maps each proxied WIFI_GPIOxx signal to the
+ * public E1M GPIO ID that application code opens.  Confirm the table against
+ * the active board metadata before relying on it for a new hardware revision.
  *
  * IO17 (EN_W_DIS1n) is intentionally OMITTED: its CC3501E pin GPIO_16 is the bridge
  * SPI0 dummy-CS this rev, so it is not host-proxied (bench call: "GPIO16 is ok for now").

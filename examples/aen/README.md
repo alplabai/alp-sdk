@@ -128,6 +128,6 @@ i2c, pwm, ...) stay at the top level of `examples/`.
   one-pager + supported peripherals.
 - [`docs/getting-started.md`](../../docs/getting-started.md) --
   EVK bring-up flow that lands you ready to run these examples.
-- AEN feature coverage matrix -- maintained in the
-  internal `alp-sdk-internal` repo as `AEN-FEATURE-AUDIT-2026-05.md`
-  (what the SDK exposes vs the silicon's full surface).
+- [`docs/os-support-matrix.md`](../../docs/os-support-matrix.md) --
+  what the SDK exposes with real AEN backends versus fallback/stub
+  coverage.

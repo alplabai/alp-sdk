@@ -20,7 +20,8 @@
 #   3. Zephyr twister (skipped if ZEPHYR_BASE is unset)
 #   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
 #   5. board.yaml metadata schema validate
-#   6. Doxygen zero-warnings build (skipped if no Doxygen)
+#   6. Public/private text classifier
+#   7. Doxygen zero-warnings build (skipped if no Doxygen)
 #
 # Each stage prints `[stage] PASS` or `[stage] FAIL`; the script
 # returns non-zero if any required stage failed.  Skipped stages
@@ -191,6 +192,13 @@ stage_doc_yaml_fragments() {
     python3 scripts/lint_doc_yaml_fragments.py || return 1
 }
 
+stage_public_private() {
+    if [ ! -f scripts/check_public_private.py ]; then
+        return 99
+    fi
+    python3 scripts/check_public_private.py || return 1
+}
+
 stage_pytest_scripts() {
     # Runs the full pytest suite under tests/scripts/ -- linter,
     # silicon-determined-field rejection (a3cd4fd regression lock),
@@ -279,6 +287,12 @@ else
         run_stage "doc-yaml-fragments" stage_doc_yaml_fragments
     else
         skip_stage "doc-yaml-fragments" "scripts/lint_doc_yaml_fragments.py missing"
+    fi
+
+    if [ -f scripts/check_public_private.py ]; then
+        run_stage "public-private" stage_public_private
+    else
+        skip_stage "public-private" "scripts/check_public_private.py missing"
     fi
 
     # Pytest -- subsumes metadata-validate's unittest coverage and adds

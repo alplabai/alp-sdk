@@ -178,9 +178,7 @@ const alp_capabilities_t *alp_storage_capabilities(const alp_storage_t *storage)
 /* ================================================================== */
 /* Inline AES (on-the-fly XIP encryption / decryption)                 */
 /*                                                                     */
-/* Wave-2 audit (internal AEN feature audit, §4.3) flagged       */
-/* on-the-fly inline AES for external flash as a NEEDS-PORTABLE-       */
-/* SURFACE gap.  AEN-family OSPI / HexSPI controllers can transparently */
+/* AEN-family OSPI / HexSPI controllers can transparently */
 /* encrypt + decrypt data between the host bus and the external chip   */
 /* (XIP code stays AES-protected; the host sees plaintext, the flash   */
 /* sees ciphertext).  Customers migrating from V2N to AEN otherwise    */

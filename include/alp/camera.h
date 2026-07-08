@@ -138,8 +138,7 @@ const alp_capabilities_t *alp_camera_capabilities(const alp_camera_t *c);
 /* ================================================================== */
 /* ISP (Image Signal Processor) configuration                          */
 /*                                                                     */
-/* Wave-2 audit (internal AEN feature audit, §4.3) NEEDS-       */
-/* PORTABLE-SURFACE: AEN-family E4 / E6 / E8 ship a dedicated ISP     */
+/* AEN-family E4 / E6 / E8 ship a dedicated ISP                       */
 /* (Alif's hardened VeriSilicon ISP Pico (vsi,isp-pico) path) that    */
 /* Zephyr's portable                                                  */
 /* drivers/video/ class doesn't expose at the on-chip-ISP level --     */
