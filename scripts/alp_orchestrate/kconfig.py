@@ -437,9 +437,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # array, which adds to the union per spec §4.6).
     periph_subsystems: set[str] = set()
     for periph in slice_.peripherals or []:
-        kc = _PERIPHERAL_KCONFIG.get(periph)
-        if kc:
-            periph_subsystems.add(kc)
+        periph_subsystems.update(_PERIPHERAL_KCONFIG.get(periph, ()))
     all_subsystems = chip_subsystems | periph_subsystems
     if all_subsystems:
         lines.append(f"# Zephyr subsystems required on core "
@@ -813,6 +811,11 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("# Console: Linux console (kernel `console=` cmdline "
                      "-> SoM debug UART; userspace -> stdout/tty).")
     lines.append(f'MACHINE = "{machine}"')
+    if slice_.peripherals:
+        joined = ", ".join(sorted(slice_.peripherals))
+        lines.append("# Peripherals declared for this Yocto slice are "
+                     f"BSP/kernel-owned ({joined}); no Zephyr Kconfig or "
+                     "local.conf package knob is emitted here.")
     if slice_.libraries:
         imageinstall = " ".join(
             f"lib-{lib.replace('_', '-')}" for lib in slice_.libraries)
