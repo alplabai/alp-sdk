@@ -17,6 +17,28 @@ that terminates on the CC3501E (see
 must be reached via the CC3501E firmware over the inter-chip
 SPI bus (Alif **SPI1** master ↔ CC3501E **SPI0** slave).
 
+## Portable APIs vs diagnostics
+
+Application code should normally stay on the portable surfaces:
+
+- [`<alp/iot.h>`](../include/alp/iot.h) for Wi-Fi station handles
+  (`alp_wifi_open`, `alp_wifi_connect`, `alp_wifi_disconnect`).
+- [`<alp/ble.h>`](../include/alp/ble.h) for BLE central/peripheral handles
+  (`alp_ble_open`, scan, advertise, connect, and GATT).
+- [`<alp/peripheral.h>`](../include/alp/peripheral.h) for E1M GPIOs, including
+  pins proxied through the CC3501E route table.
+
+On E1M-AEN builds, the bridge helper initialises the CC3501E once, attaches the
+live `cc3501e_t` handle, and the Wi-Fi/BLE dispatchers choose the
+`ti-cc3501e` backend for `alif:ensemble:e3` through `alif:ensemble:e8`.
+
+[`<alp/chips/cc3501e.h>`](../include/alp/chips/cc3501e.h) and the
+[`alp companion`](cc3501e-companion-commands.md) console are intentionally
+lower-level. Use them for diagnostics, firmware-version checks, raw Wi-Fi/BLE
+scan records, socket bring-up, OTA, and bridge health; do not build portable
+application logic around the chip-specific names unless you need that
+diagnostic detail.
+
 ## Inter-chip wiring
 
 Per [`metadata/e1m_modules/aen/inter-chip.tsv`](../metadata/e1m_modules/aen/inter-chip.tsv):

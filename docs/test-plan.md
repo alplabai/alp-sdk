@@ -82,7 +82,7 @@ A release does **not** tag until every row gating it is `verified`.
 | `<alp/can.h>` AEN-Zephyr | `src/backends/can/zephyr_drv.c` | ⏳ untested | CAN-FD frame sent + acknowledged against a second node | HIL | v0.2 |
 | `<alp/rtc.h>` AEN-Zephyr | `src/backends/rtc/zephyr_drv.c` | ⏳ untested | Wall-clock advances 1 s ± kernel jitter over 60 s | HIL | v0.2 |
 | `<alp/wdt.h>` AEN-Zephyr | `src/backends/wdt/zephyr_drv.c` | ⏳ untested | Watchdog reset observed when feed thread is starved | HIL | v0.2 |
-| Real Wi-Fi station + MQTT on AEN-Zephyr | `src/backends/wifi/zephyr_drv.c + src/backends/mqtt/zephyr_drv.c` | ⏳ untested | Publish + subscribe roundtrip against a known broker | HIL | v0.2 |
+| Real CC3501E Wi-Fi/BLE dispatch on AEN-Zephyr | `src/backends/wifi/cc3501e.c + src/backends/ble/cc3501e.c` | ⏳ untested | `alp_wifi_open()` selects the CC3501E provider and `alp_ble_open()` + scan complete on real AEN silicon | HIL via `aen-cc3501e-companion-tour` `PORTABLE_WIRELESS:` lines | v0.9 |
 | EdgeAI vision reference app | `examples/aen/edgeai-vision-aen/` | ⏳ untested | ≥10 fps inference on real E1M EVK | HIL | v0.2 |
 
 ## v0.3.0 — IoT app, multi-proc, board.yaml
@@ -93,7 +93,7 @@ A release does **not** tag until every row gating it is `verified`.
 | `<alp/inference.h>` DEEPX DX-M1 (A55) | `src/yocto/inference_yocto.c` + `inference_deepx.cpp` | 🟡 code-complete, bench-unverified | Real `dxrt::InferenceEngine` body loads a `.dxnn` model + runs inference; outputs match a host-CPU reference | Body header-compiles against the **real** `dx_rt` headers (`dxrt::InferenceEngine`, replacing a fictional `dxnn_*` API); `tests/yocto/inference_dispatcher.c` covers NULL/INVAL; **real link needs the RZ/V Yocto sysroot, on-silicon run needs the DX-M1 PCIe card** | v0.8 |
 | `<alp/inference.h>` DRP-AI (A55) | `src/yocto/inference_drpai.cpp` | 🟡 code-complete, bench-unverified | Real `MeraDrpRuntimeWrapper` body loads a `drpai_dir` model (tar staged to a tempdir) + runs inference | Body header-compiles against the **real** `MeraDrpRuntimeWrapper.h`; **cross-link needs the RZ/V Yocto SDK sysroot + EdgeCortix MERA libs, on-silicon run needs the V2N board** | v0.8 |
 | `<alp/audio.h>` real impl | `src/backends/audio/zephyr_drv.c` | ⏳ untested | PDM mic captures audio playable through I²S DAC, no buffer underruns | HIL | v0.3 |
-| `<alp/ble.h>` real impl | `src/backends/ble/zephyr_drv.c` | ⏳ untested | Advertise + connect + GATT read from a second BLE device | HIL | v0.3 |
+| `<alp/ble.h>` real impl | `src/backends/ble/zephyr_drv.c` + `src/backends/ble/cc3501e.c` | ⏳ untested | Advertise + connect + GATT read from a second BLE device; AEN provider opens and scans through CC3501E | HIL | v0.3 |
 | `<alp/security.h>` real impl | `src/backends/security/zephyr_drv.c` | ⏳ untested | SHA-256 + AES-128-GCM round-trip against MbedTLS reference vectors | unit test or HIL | v0.3 |
 | `<alp/mproc.h>` real impl | `src/backends/mproc/zephyr_drv.c` | ⏳ untested | M55-HP <-> M55-HE shared-memory mailbox echoes a payload | HIL | v0.3 |
 | `board.yaml` loader (`scripts/alp_project.py`) | `scripts/alp_project.py` | 🟡 partial | Schema-level + capability-level checks unit-tested; cross-OS round-trips not exercised on hardware | `tests/scripts/test_alp_project.py`; **HIL exercise gates v0.3** | v0.3 |

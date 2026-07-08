@@ -1090,6 +1090,37 @@ alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);
 alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, uint32_t timeout_ms);
 
 /* ------------------------------------------------------------------ */
+/* Portable API wiring for AEN CC3501E backends.                       */
+/*                                                                    */
+/* The application owns the bridge lifecycle: it initialises cc3501e_t */
+/* once, resets the firmware, then attaches that live handle to each   */
+/* portable backend it enabled.  The attach calls do not take          */
+/* ownership; @p ctx must remain valid while portable handles are open. */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Attach the live bridge handle to the portable Wi-Fi backend.
+ *
+ * Only defined when CONFIG_ALP_SDK_WIFI_CC3501E is set.  After a successful
+ * attach, @ref alp_wifi_open routes through the CC3501E backend on AEN silicon.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return ALP_OK; ALP_ERR_INVAL on a NULL or uninitialised @p ctx.
+ */
+alp_status_t alp_wifi_cc3501e_attach(cc3501e_t *ctx);
+
+/**
+ * @brief Attach the live bridge handle to the portable BLE backend.
+ *
+ * Only defined when CONFIG_ALP_SDK_BLE_CC3501E is set.  After a successful
+ * attach, @ref alp_ble_open routes through the CC3501E backend on AEN silicon.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return ALP_OK; ALP_ERR_INVAL on a NULL or uninitialised @p ctx.
+ */
+alp_status_t alp_ble_cc3501e_attach(cc3501e_t *ctx);
+
+/* ------------------------------------------------------------------ */
 /* Portable GPIO proxy wiring (CONFIG_ALP_SDK_GPIO_CC3501E_PROXY).     */
 /*                                                                    */
 /* When the proxy backend is built, alp_gpio_open(pin_id) on the AEN   */

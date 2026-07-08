@@ -11,10 +11,10 @@
  * The ops vtable carries function pointers for both surfaces; the
  * dispatcher maintains two separate handle pools (radio + conn).
  *
- * Slice 4b ships no vendor extensions for BLE: on V2N the CC3501E
- * proxy is handled inside the Zephyr backend as a
- * tilab,cc3501-bluetooth-class DT node which the BT host subsystem
- * routes transparently; no second registry tier is needed.
+ * AEN's CC3501E coprocessor is a real registry backend
+ * (src/backends/ble/cc3501e.c) that wraps chips/cc3501e after the
+ * application attaches the live bridge handle.  Other Zephyr targets
+ * continue to use the wildcard BT-host backend.
  */
 
 #include <stdbool.h>

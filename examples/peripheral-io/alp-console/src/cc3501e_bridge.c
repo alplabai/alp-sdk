@@ -153,6 +153,12 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
 	(void)alp_gpio_cc3501e_attach(fw);
 #endif
+#ifdef CONFIG_ALP_SDK_WIFI_CC3501E
+	(void)alp_wifi_cc3501e_attach(fw);
+#endif
+#ifdef CONFIG_ALP_SDK_BLE_CC3501E
+	(void)alp_ble_cc3501e_attach(fw);
+#endif
 	/* Power + reset sequence (cold-cycle + Puya hard-reset workaround).  A non-OK
 	 * cc3501e_reset here is NOT fatal: a cold CC35 commonly mis-reads on first
 	 * contact and only aligns after the hard-reset soak below, so fall through

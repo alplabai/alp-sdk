@@ -2038,6 +2038,17 @@ config ALP_SDK_IOT_WIFI
 	  Requires CONFIG_WIFI=y and a wifi-management subsystem (e.g.
 	  CONFIG_WIFI_NM_WPA_SUPPLICANT=y on AEN-Zephyr).
 
+config ALP_SDK_WIFI_CC3501E
+	bool "CC3501E Wi-Fi backend for <alp/iot.h>"
+	depends on ALP_SDK_CHIP_CC3501E
+	default y if ALP_SDK_CHIP_CC3501E
+	help
+	  Register the E1M-AEN CC3501E as the portable Wi-Fi station backend.
+	  The app still brings the companion up once and attaches its live
+	  cc3501e_t handle; after that alp_wifi_open/connect/disconnect route over
+	  the inter-chip bridge.  This exact-silicon backend wins over the wildcard
+	  Zephyr wifi_mgmt backend on alif:ensemble:e3..e8.
+
 config ALP_SDK_WIFI_SW_FALLBACK
 	bool "Software Wi-Fi fallback (no-op stub)"
 	depends on ALP_SDK
@@ -2358,6 +2369,17 @@ config ALP_SDK_BLE
 
 	  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y and/or
 	  CONFIG_BT_CENTRAL=y for the matching role.
+
+config ALP_SDK_BLE_CC3501E
+	bool "CC3501E BLE backend for <alp/ble.h>"
+	depends on ALP_SDK_CHIP_CC3501E
+	default y if ALP_SDK_CHIP_CC3501E
+	help
+	  Register the E1M-AEN CC3501E as the portable BLE backend.  The firmware
+	  on the CC3501E owns the controller and NimBLE host; alp_ble_open() enables
+	  it through the bridge after the application attaches the live cc3501e_t
+	  handle.  This exact-silicon backend wins over the wildcard Zephyr BT
+	  backend on alif:ensemble:e3..e8.
 
 config ALP_SDK_BLE_SW_FALLBACK
 	bool "Software BLE fallback (no-op stub)"
@@ -3008,9 +3030,9 @@ config ALP_SDK_CHIP_CC3501E
 	  project at alplabai/cc3501e-firmware (per ADR 0005);
 	  this driver only knows the wire protocol declared in
 	  <alp/protocol/cc3501e.h>.  Pull this in on E1M-AEN
-	  builds; <alp/iot.h> and <alp/ble.h> dispatchers will
-	  route through it once their CC3501E branches land
-	  (v0.3.x follow-up).
+	  builds; <alp/iot.h> and <alp/ble.h> dispatchers route through
+	  the CC3501E backends when ALP_SDK_WIFI_CC3501E /
+	  ALP_SDK_BLE_CC3501E are enabled.
 
 config ALP_SDK_CHIP_TMP112
 	bool "TI TMP112 digital temperature sensor"

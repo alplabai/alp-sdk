@@ -11,10 +11,10 @@
  * own class registry (alp_mqtt_* in src/mqtt_dispatch.c) since
  * MQTT is a per-broker client, not a hardware peripheral.
  *
- * Slice 4b ships no vendor extensions for Wi-Fi: on V2N the
- * CC3501E coprocessor is handled inside the Zephyr backend as a
- * tilab,cc3501-wifi-class DT node which net_mgmt routes
- * transparently; no second registry tier is needed.
+ * AEN's CC3501E coprocessor is a real registry backend
+ * (src/backends/wifi/cc3501e.c) that wraps chips/cc3501e after the
+ * application attaches the live bridge handle.  Other Zephyr targets
+ * continue to use the wildcard wifi_mgmt backend.
  */
 
 #include <stdbool.h>

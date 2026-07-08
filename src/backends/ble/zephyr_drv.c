@@ -6,11 +6,11 @@
  * design spec Section 2 backend matrix (zephyr_drv wins on every
  * SoC unless a more specific backend registers).
  *
- * V2N CC3501E note: the CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on
- * the AEN SoM is wired into Zephyr's DT as a
- * tilab,cc3501-bluetooth-class node so the BT host subsystem
- * dispatches HCI through TI's controller-side driver transparently;
- * the Zephyr backend handles V2N without a separate registry entry.
+ * AEN CC3501E note: AEN does NOT route through Zephyr HCI today.
+ * When CONFIG_ALP_SDK_BLE_CC3501E is enabled, the exact-silicon
+ * CC3501E backend registers at higher priority and wraps chips/cc3501e
+ * directly.  This wildcard backend remains the portable Zephyr path for
+ * SoCs that expose a native Zephyr BT controller.
  *
  * Gated on CONFIG_ALP_SDK_BLE -- when OFF the I/O ops return
  * NOSUPPORT but the registry entry still links so the dispatcher

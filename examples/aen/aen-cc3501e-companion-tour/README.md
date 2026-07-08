@@ -5,16 +5,19 @@ Wi-Fi 6 + BLE 5.4 coprocessor, driven from the Alif **M55-HE** core on the
 **E1M-AEN801** (Alif Ensemble E8) SoM.
 
 Where [`aen-cc3501e-bringup`](../aen-cc3501e-bringup) is the *minimal* power +
-`PING` soak, this app walks the **whole companion API** in one linear
-sequence — as living documentation of the hand-written-firmware path. Every
-call goes through the portable driver in
-[`<alp/chips/cc3501e.h>`](../../../include/alp/chips/cc3501e.h) over the
-inter-chip SPI1 bridge; the app never touches the raw wire protocol.
+`PING` soak, this app walks the portable wireless checkpoint plus the
+diagnostic companion API in one linear sequence — as living documentation of
+the hand-written-firmware path. Application-level Wi-Fi/BLE calls go through
+[`<alp/iot.h>`](../../../include/alp/iot.h) and
+[`<alp/ble.h>`](../../../include/alp/ble.h); bridge diagnostics go through
+[`<alp/chips/cc3501e.h>`](../../../include/alp/chips/cc3501e.h). The app never
+touches the raw wire protocol.
 
 ## The tour
 
 ```
 init  ->  ping  ->  diag info
+      ->  portable Wi-Fi open  ->  portable BLE open + scan
       ->  Wi-Fi scan  ->  Wi-Fi connect  ->  get IP
       ->  TCP socket: open -> connect -> send -> recv -> close
       ->  Wi-Fi disconnect
@@ -54,6 +57,11 @@ table in [`src/cc3501e_gpio_routes.c`](src/cc3501e_gpio_routes.c) (built with
 `CONFIG_ALP_SDK_GPIO_CC3501E_PROXY=y`): `alp_gpio_open(ALP_E1M_GPIO_IO15)`
 routes over the bridge while every other pin delegates to the platform GPIO
 driver.
+
+The portable checkpoint prints stable `PORTABLE_WIRELESS:` lines. On real AEN
+silicon, `wifi_open PASS` proves `alp_wifi_open()` selected the attached
+CC3501E provider, and `ble_scan PASS count=N` proves `<alp/ble.h>` reached the
+same radio path.
 
 See [`aen-cc3501e-bringup`](../aen-cc3501e-bringup) for the inter-chip wiring
 table, the bench build/flash recipe (two J-Links), and the

@@ -111,7 +111,7 @@ plan in `VERSIONS.md`.
 | **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | code complete¹     | code complete¹       | code complete¹     |
 | **Audio** (`<alp/audio.h>`) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub | stub |
 | **Camera** (`<alp/camera.h>`) | planned              | planned                  | planned                   | planned                   | stub               | stub                 | stub               |
-| **IoT** (`<alp/iot.h>`)   | **GA** (Wi-Fi+MQTT)      | **GA** (Wi-Fi+MQTT)      | **GA** (Wi-Fi+MQTT)       | **GA** (Wi-Fi+MQTT)       | stub               | stub                 | stub               |
+| **IoT** (`<alp/iot.h>`)   | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | stub | stub | stub |
 
 ¹ **code complete** — migrated to the registry/dispatcher pattern with real Linux
 backends in the v0.8 cycle (issue #33), which also lands the per-class
@@ -147,7 +147,7 @@ RPMsg proxy is a separate slice.
 
 | Library              | Surface | Backed-by plan |
 |----------------------|---------|----------------|
-| BLE (`<alp/ble.h>`)  | declared| Zephyr `bt` host stack |
+| BLE (`<alp/ble.h>`)  | declared| AEN CC3501E backend or Zephyr `bt` host stack |
 | Security (`<alp/security.h>`) | declared | MbedTLS PSA + per-SoC HW accelerator routing |
 | MProc (`<alp/mproc.h>`) | declared | Zephyr `mbox_*` — the AEN MHU is now backed by alp-sdk's `alif,mhuv2-mbox` driver (AEN801, bench-unverified, #45/#50) — + `hwsem_*` + shared-memory regions |
 
@@ -185,7 +185,7 @@ need v0.4 fall back cleanly to the v0.3 state above.
 | **Peripherals (UART RX ringbuf)** (`<alp/peripheral.h>`) | code complete (untested) — LwRB-backed IRQ drain | code complete (untested) — LwRB-backed IRQ drain | code complete (untested) | code complete (untested) | stub | stub | stub |
 | **IoT — MQTT cleartext** (`<alp/iot.h>`) | planned (Zephyr `mqtt_*`) | planned (Zephyr `mqtt_*`) | planned (Zephyr `mqtt_*`) | planned (Zephyr `mqtt_*`) | stub | stub | stub |
 | **IoT — MQTT TLS** (`mqtts://`)      | planned                  | planned                  | planned                   | planned                   | stub               | stub                 | stub               |
-| **IoT — Wi-Fi station** (`<alp/iot.h>`) | planned               | planned                  | planned                   | planned                   | stub               | stub                 | stub               |
+| **IoT — Wi-Fi station** (`<alp/iot.h>`) | CC3501E backend       | CC3501E backend          | CC3501E backend           | CC3501E backend           | stub               | stub                 | stub               |
 | **Audio** (`<alp/audio.h>`)          | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub | stub |
 | **Security** (`<alp/security.h>`)    | surface declared (impl v0.3) | surface declared (impl v0.3) | surface declared (impl v0.3) | surface declared (impl v0.3) | stub | stub | stub |
 | **mproc IPC framing** (`<alp/mproc.h>`) | code complete (untested) — placeholder 12-byte envelope; replaced by nanopb-generated codec in v0.4-final | code complete (untested) — placeholder 12-byte envelope | code complete (untested) | code complete (untested) | stub | stub | stub |
