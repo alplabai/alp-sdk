@@ -47,6 +47,10 @@ __attribute__((weak)) bool ota_fmc_program(uint32_t addr, const uint8_t *data, s
 __attribute__((weak)) void ota_system_reset(void)
 {
 }
+__attribute__((weak)) const void *ota_fmc_flash_ptr(uint32_t addr)
+{
+	return (const void *)(uintptr_t)addr;
+}
 
 #if defined(BRIDGE_OTA_PARTITIONED)
 
@@ -86,7 +90,7 @@ static void wr_u32(uint8_t *p, uint32_t v)
 /* ---- A/B metadata --------------------------------------------------- */
 static bool meta_read(uint32_t addr, ota_meta_record_t *r)
 {
-	const ota_meta_record_t *p = (const ota_meta_record_t *)addr;
+	const ota_meta_record_t *p = (const ota_meta_record_t *)ota_fmc_flash_ptr(addr);
 	if (p->magic != OTA_META_MAGIC || p->struct_version != OTA_META_STRUCT_VER) {
 		return false;
 	}
@@ -246,7 +250,7 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
 	if (dlen == 0u || dlen != len - 5u) {
 		return STATUS_INVAL; /* extended/truncated capture: drop */
 	}
-	if ((uint32_t)off + dlen > OTA_SLOT_SIZE) {
+	if (off > OTA_SLOT_SIZE || dlen > OTA_SLOT_SIZE - off) {
 		s_state = OTA_ST_ERROR;
 		s_err   = 3u;
 		return STATUS_OUT_OF_RANGE;
@@ -260,7 +264,7 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
      * PARTIAL overlap still falls through to the program path (and
      * PGERRs) -- fixed-size streaming never produces one. */
 	if (off + (uint32_t)dlen <= s_last_off) {
-		const uint8_t *flash = (const uint8_t *)(ota_slot_base(s_inactive) + off);
+		const uint8_t *flash = (const uint8_t *)ota_fmc_flash_ptr(ota_slot_base(s_inactive) + off);
 		if (memcmp(flash, &req[5], dlen) == 0) {
 			s_state = OTA_ST_READY;
 			if (cap >= 4u) {
@@ -301,7 +305,8 @@ static gd32_bridge_status_t h_verify(uint8_t *reply, size_t cap, size_t *rlen)
          * protocol-misuse brick.  Refuse instead. */
 		return STATUS_NOT_READY;
 	}
-	s_img_crc     = ota_crc32(0u, (const uint8_t *)ota_slot_base(s_inactive), s_img_len);
+	s_img_crc =
+	    ota_crc32(0u, (const uint8_t *)ota_fmc_flash_ptr(ota_slot_base(s_inactive)), s_img_len);
 	const bool ok = (s_img_crc == s_expected_crc);
 	s_state       = ok ? OTA_ST_VERIFIED : OTA_ST_ERROR;
 	if (!ok) {
