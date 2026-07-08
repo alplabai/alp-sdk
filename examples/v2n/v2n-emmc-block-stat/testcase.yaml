@@ -5,7 +5,8 @@ sample:
   description: |
     Read block-device statistics (sector count, erase block size,
     error counters) from the V2N's on-module eMMC 5.1 via
-    `<alp/storage.h>`.
+    Zephyr's disk-access API.  This is low-level V2N storage
+    bring-up, not coverage for the portable SDK storage facade.
 
 tests:
   alp_sdk.examples.v2n.emmc_block_stat.native_sim:

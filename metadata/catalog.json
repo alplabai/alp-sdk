@@ -760,6 +760,10 @@
       "script": "scripts/check_example_portability.py"
     },
     {
+      "purpose": "Reject examples that claim Alp storage coverage while using Zephyr storage APIs.",
+      "script": "scripts/check_example_storage_claims.py"
+    },
+    {
       "purpose": "Inference backend/format <-> dispatcher canonicalisation gate.",
       "script": "scripts/check_inference_backend_parity.py"
     },
