@@ -698,9 +698,7 @@ class TestValidatorPeripheralCheck(unittest.TestCase):
             capture_output=True, text=True, check=False,
         )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
-        self.assertIn(f"OK   schema:", rv.stdout)
-        self.assertIn("OK   board preset: e1m-evk", rv.stdout)
-        self.assertIn("OK   som E1M-AEN801 hw_rev:", rv.stdout)
+        self.assertIn(f"{example}: clean", rv.stdout)
 
 
 class TestHwBackendsLoader(unittest.TestCase):
