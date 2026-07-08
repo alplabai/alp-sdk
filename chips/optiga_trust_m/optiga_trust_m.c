@@ -17,16 +17,14 @@
  * For v0.3 we ship:
  *   - I2C address probe via a 4-byte read of the I2C_STATE register
  *     at 0x82.
- *   - Send-APDU + receive-response thin wrapper that lets apps
- *     hand-roll commands against Infineon's SRM until the host
- *     library lands.
- *   - read_product_info convenience wrapper that issues
- *     GET_DATA_OBJECT(0xE0C2).
+ *   - Argument validation for the future product-info and raw-APDU
+ *     entry points.
  *
- * The send_apdu / read_product_info paths return NOSUPPORT in
- * this initial drop -- Trust M's transport requires the
- * sequence-numbered info-pack layer that v0.3.x lands; v0.3
- * confirms wiring + I2C connectivity only.
+ * The send_apdu / read_product_info paths return NOSUPPORT after
+ * validation.  Trust M's APDU transport requires the sequence-numbered
+ * info-pack layer; that should come from Infineon's host library rather
+ * than a partial in-repo reimplementation.  This driver confirms wiring
+ * + I2C connectivity only.
  */
 
 #include <string.h>
@@ -46,9 +44,8 @@ alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t 
 	ctx->addr = (addr_7bit != 0) ? addr_7bit : OPTIGA_TRUST_M_I2C_ADDR;
 
 	/* Probe by reading the I2C state register.  Trust M ACKs at
-     * its address even before OPEN_APPLICATION; if no ACK,
-     * NOT_READY tells the caller the chip isn't populated /
-     * mis-strapped. */
+	 * its address before OPEN_APPLICATION; if no ACK, NOT_READY tells
+	 * the caller the chip isn't populated / mis-strapped. */
 	uint8_t      reg      = OPTIGA_REG_I2C_STATE;
 	uint8_t      state[4] = { 0 };
 	alp_status_t s        = alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, state, sizeof(state));
@@ -66,16 +63,15 @@ alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
                                       size_t           *resp_len,
                                       uint32_t          timeout_ms)
 {
-	(void)apdu;
-	(void)apdu_len;
-	(void)resp;
-	(void)resp_cap;
 	(void)timeout_ms;
 	if (resp_len != NULL) *resp_len = 0;
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-	/* Full transport (info-pack sequence + CRC16) lands in v0.3.x
-     * via Infineon's host library.  Returning NOSUPPORT here is
-     * faithful to that contract without surfacing fake success. */
+	if (apdu == NULL || apdu_len == 0u || resp == NULL || resp_cap == 0u || resp_len == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	/* Full transport (info-pack sequence + CRC16) lands via Infineon's
+	 * host library.  Returning NOSUPPORT here is faithful to that
+	 * contract without surfacing fake success. */
 	return ALP_ERR_NOSUPPORT;
 }
 
@@ -84,8 +80,8 @@ alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;
-	/* GET_DATA_OBJECT(0xE0C2) needs the full APDU stack; defer to
-     * v0.3.x for the same reason as send_apdu. */
+	/* GET_DATA_OBJECT(0xE0C2) needs the full APDU stack; defer for the
+	 * same reason as send_apdu. */
 	return ALP_ERR_NOSUPPORT;
 }
 

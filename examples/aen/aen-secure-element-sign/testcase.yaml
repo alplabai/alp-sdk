@@ -3,10 +3,10 @@
 sample:
   name: aen-secure-element-sign
   description: |
-    Sign a payload with the OPTIGA Trust M secure element on the
-    E1M-AEN (Alif Ensemble) SoM via the SoM-portable <alp/*> API,
-    over the on-module BRD_I2C (LPI2C0) owned by the M55-HE core.
-    AEN sibling of examples/v2n/v2n-secure-element-sign.
+    Probe the OPTIGA Trust M secure element on the E1M-AEN
+    (Alif Ensemble) SoM via the SoM-portable <alp/*> API, over
+    the on-module BRD_I2C (LPI2C0) owned by the M55-HE core.  The
+    current driver exposes product-info/raw-APDU as NOSUPPORT stubs.
 
 tests:
   alp_sdk.examples.aen.secure_element_sign.native_sim:

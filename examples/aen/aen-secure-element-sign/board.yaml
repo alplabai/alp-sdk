@@ -1,12 +1,13 @@
 # board.yaml -- per-app project configuration for the
 # aen-secure-element-sign example.
 #
-# OPTIGA Trust M secure-element sanity + ECDSA-P256 sign on the
-# E1M-AEN (Alif Ensemble) SoM.  The Trust M is on BRD_I2C -- the
+# OPTIGA Trust M probe-only sanity on the E1M-AEN (Alif Ensemble) SoM.
+# The Trust M is on BRD_I2C -- the
 # on-module LP-island I2C (LPI2C0) -- owned by the M55-HE subsystem,
 # so the app core is m55_he.  Everything else goes through the
-# SoM-portable <alp/*> API, so this is the AEN sibling of
-# examples/v2n/v2n-secure-element-sign with an identical src/.
+# SoM-portable <alp/*> API, so this stays the AEN sibling of
+# examples/v2n/v2n-secure-element-sign while keeping AEN-specific bench
+# skip wording in its source.
 
 som:
   sku: E1M-AEN801          # Alif Ensemble E8 (the lead AEN part).

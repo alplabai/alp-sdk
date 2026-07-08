@@ -3,10 +3,9 @@
 sample:
   name: v2n-secure-element-sign
   description: |
-    Sign a payload with the OPTIGA Trust M secure element on the
-    V2N SoM, then verify the signature via `<alp/security.h>`
-    (MbedTLS PSA Crypto).  Demonstrates the SoM-portable secure
-    element surface.
+    Probe the OPTIGA Trust M secure element on the V2N SoM and
+    confirm product-info/raw-APDU calls are cleanly blocked with
+    ALP_ERR_NOSUPPORT until the host-library transport is integrated.
 
 tests:
   alp_sdk.examples.v2n.secure_element_sign.native_sim:

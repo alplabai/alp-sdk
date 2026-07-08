@@ -169,7 +169,7 @@ SoM EEPROM manifest).
 | `v2n/v2n-rtc-multi-alarm`       | Register per-source callbacks on the rv3028c7 multi-source dispatcher.   |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
 | `v2n/v2n-pwm-fan-control`       | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board). |
-| `v2n/v2n-secure-element-sign`   | OPTIGA Trust M init + product info + raw-APDU ECDSA-P256 sign.           |
+| `v2n/v2n-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe; product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
 | `v2n/v2n-xspi-flash-readwrite`  | Erase + write + read-back one page on the on-module xSPI NOR.            |
 | `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
@@ -182,7 +182,7 @@ Ensemble) family on the E1M-EVK board (lead part: E8).
 | Directory                       | What it shows                                                            |
 |---------------------------------|--------------------------------------------------------------------------|
 | `aen/edgeai-vision-aen`         | Flagship EdgeAI vision pipeline -- CSI camera -> VeriSilicon ISP Pico (vsi,isp-pico) -> Ethos-U55 -> OLED. |
-| `aen/aen-secure-element-sign`   | OPTIGA Trust M init + product info + raw-APDU ECDSA-P256 sign over BRD_I2C (M55-HE). |
+| `aen/aen-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe over BRD_I2C (M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
 
 ## Anatomy of a single-OS example
 

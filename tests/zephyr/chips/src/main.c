@@ -2037,6 +2037,37 @@ ZTEST(alp_chips, test_optiga_trust_m_calls_reject_uninitialised)
 	optiga_trust_m_deinit(NULL);
 }
 
+ZTEST(alp_chips, test_optiga_trust_m_probe_only_api_contract)
+{
+	optiga_trust_m_t              ctx = { .initialised = true };
+	optiga_trust_m_product_info_t info;
+	uint8_t                       apdu[4] = { 0x31u, 0x11u, 0x00u, 0x00u };
+	uint8_t                       resp[8];
+	size_t                        resp_len = 123u;
+
+	zassert_equal(optiga_trust_m_read_product_info(&ctx, NULL), ALP_ERR_INVAL);
+	zassert_equal(optiga_trust_m_read_product_info(&ctx, &info), ALP_ERR_NOSUPPORT);
+
+	zassert_equal(
+	    optiga_trust_m_send_apdu(&ctx, NULL, sizeof apdu, resp, sizeof resp, &resp_len, 100u),
+	    ALP_ERR_INVAL);
+	zassert_equal(optiga_trust_m_send_apdu(&ctx, apdu, 0u, resp, sizeof resp, &resp_len, 100u),
+	              ALP_ERR_INVAL);
+	zassert_equal(
+	    optiga_trust_m_send_apdu(&ctx, apdu, sizeof apdu, NULL, sizeof resp, &resp_len, 100u),
+	    ALP_ERR_INVAL);
+	zassert_equal(optiga_trust_m_send_apdu(&ctx, apdu, sizeof apdu, resp, 0u, &resp_len, 100u),
+	              ALP_ERR_INVAL);
+	zassert_equal(optiga_trust_m_send_apdu(&ctx, apdu, sizeof apdu, resp, sizeof resp, NULL, 100u),
+	              ALP_ERR_INVAL);
+
+	resp_len = 123u;
+	zassert_equal(
+	    optiga_trust_m_send_apdu(&ctx, apdu, sizeof apdu, resp, sizeof resp, &resp_len, 100u),
+	    ALP_ERR_NOSUPPORT);
+	zassert_equal(resp_len, 0u);
+}
+
 /* ------------------------------------------------------------------ */
 /* cam_mux_pi3wvr626 -- MIPI CSI 2:1 mux (GPIO-only)                  */
 /* ------------------------------------------------------------------ */

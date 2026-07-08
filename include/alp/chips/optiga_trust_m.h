@@ -7,10 +7,10 @@
  * @file optiga_trust_m.h
  * @brief Infineon OPTIGA Trust M secure-element driver
  *
- * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
- *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
- *   sequencing as paper-correct only until the v1.0 verification
- *   sweep lands.
+ * @par Driver scope: [PROBE-ONLY] -- driver compiles, validates its public
+ *   arguments, and probes the chip by reading I2C_STATE.  Product-info
+ *   and raw-APDU entry points intentionally return ALP_ERR_NOSUPPORT
+ *   until the Infineon host-library transport is integrated.
  *        (SLS32AIA010MLUSON10XTMA2).
  *
  * Hardware security IC providing ECC-256/384/521, RSA-1k/2k,
@@ -22,20 +22,19 @@
  * provisioning).
  *
  * v0.3 driver scope.  This header surfaces the lifecycle bits a
- * developer needs to confirm the part is wired correctly and
- * read its product info (`OPEN_APPLICATION` + `GET_DATA_OBJECT
- * Coprocessor UID`).  The full APDU command set --
- * key generation, TLS handshake handler, ECDSA, AES wrapping,
- * SHA, secure NVM read/write -- lands in v0.3.x once Infineon's
- * **OPTIGA Trust M Host Library** is vendored as a Zephyr
- * module.  At that point the cleanest architectural fit is
- * registering OPTIGA's PSA driver with `<alp/security.h>`'s
- * MbedTLS PSA wrapper, so apps that call alp_aead_open / etc.
- * pick up hardware acceleration transparently.
+ * developer needs to confirm the part is wired correctly.  `init()`
+ * reads I2C_STATE only; it does not send OPEN_APPLICATION.  Product
+ * info (`GET_DATA_OBJECT Coprocessor UID`) and raw APDU transport are
+ * declared so callers can compile against the planned surface, but the
+ * implementation returns ALP_ERR_NOSUPPORT after argument validation.
  *
- * For raw-APDU access today, applications can call
- * `optiga_trust_m_send_apdu` directly with a frame built per
- * Infineon's "Solution Reference Manual" (`SRM_OPTIGA_Trust_M.pdf`).
+ * The full APDU command set -- key generation, TLS handshake handler,
+ * ECDSA, AES wrapping, SHA, secure NVM read/write -- lands only after
+ * Infineon's **OPTIGA Trust M Host Library** is integrated as a Zephyr
+ * module.  At that point the cleanest architectural fit is registering
+ * OPTIGA's PSA driver with `<alp/security.h>`'s MbedTLS PSA wrapper, so
+ * apps that call alp_aead_open / etc. pick up hardware acceleration
+ * transparently.
  */
 
 #ifndef ALP_CHIPS_OPTIGA_TRUST_M_H
@@ -69,25 +68,29 @@ typedef struct {
 	uint8_t    addr;
 } optiga_trust_m_t;
 
-/** @brief Probe the chip + open a host application context.
+/** @brief Probe the chip's I2C_STATE register.
  *
- *  Sends the OPEN_APPLICATION APDU and waits for the success
- *  response.  Returns ALP_ERR_NOT_READY if the chip doesn't ACK
- *  on its I2C address (mis-strap / not populated). */
+ *  Returns ALP_ERR_NOT_READY if the chip doesn't ACK on its I2C
+ *  address (mis-strap / not populated).  Does not open a Trust M
+ *  application session; APDU transport is not implemented yet. */
 alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
 
-/** @brief Read the chip's product-info object (GET_DATA_OBJECT 0xE0C2). */
+/** @brief Planned product-info read (GET_DATA_OBJECT 0xE0C2).
+ *
+ *  Current implementation validates @p ctx and @p out, then returns
+ *  ALP_ERR_NOSUPPORT because product info needs the full APDU transport.
+ */
 alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx,
                                               optiga_trust_m_product_info_t *out);
 
 /**
  * @brief Send a raw APDU command frame and read the response.
  *
- * Applications that need crypto operations the MbedTLS PSA
- * wrapper hasn't picked up yet can hand-roll APDUs against
- * Infineon's SRM until the v0.3.x PSA driver lands.  Wraps
- * the Trust M data-link-layer transport (PRESET frame, GET
- * frame, error retries).
+ * Planned raw-APDU escape hatch for crypto operations the MbedTLS PSA
+ * wrapper has not picked up yet.  Current implementation validates
+ * pointers, lengths, and initialisation state, then returns
+ * ALP_ERR_NOSUPPORT because the Trust M data-link/info-pack transport
+ * is not implemented in-tree.
  *
  * @param[in]  ctx         OPTIGA Trust M context (must be initialised first).
  * @param[in]  apdu        Bytes of the command APDU.

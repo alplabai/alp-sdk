@@ -1,64 +1,53 @@
 # v2n-secure-element-sign
 
-Init the OPTIGA Trust M on V2N's BRD_I2C, read its product info
-object as a sanity check, and issue an **ECDSA-P256 sign** APDU
-against a fixed SHA-256 message digest.
+Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current
+probe-only driver contract.  The driver reads I2C_STATE to prove the
+part is reachable; product-info and raw-APDU helpers return
+`ALP_ERR_NOSUPPORT` until the Infineon host-library transport is
+integrated.
 
 ## What it shows
 
 1. Opening BRD_I2C at 400 kHz and initialising
    [`optiga_trust_m_t`](../../../include/alp/chips/optiga_trust_m.h).
-   `optiga_trust_m_init` performs the data-link-layer
-   `OPEN_APPLICATION` handshake; failing this means the chip
-   isn't on the bus or isn't strapped to address 0x30.
-2. `optiga_trust_m_read_product_info` confirms the chip is
-   responding to APDUs (not just ACKing the I2C address) and
-   prints the firmware identifier / build number.
-3. A hand-rolled `CalcSign` (0x31) APDU per Infineon's Solution
-   Reference Manual table 16:
-   ```
-   Cmd=0x31 | Param=0x11(ECDSA-SHA256) | InLen(BE16)
-     Tag=0x01 Len(BE16)=32 digest[32]
-     Tag=0x03 Len(BE16)=2  OID[2]=0xE0 0xF0
-   ```
-4. `optiga_trust_m_send_apdu` clocks the APDU out, waits up to
-   1 second for the reply, and prints the first 16 bytes of the
-   ECDSA signature.
+   `optiga_trust_m_init` performs an I2C_STATE register read only;
+   failing this means the chip is not on the bus or is not strapped to
+   address 0x30.
+2. `optiga_trust_m_read_product_info` returns `ALP_ERR_NOSUPPORT`
+   because GET_DATA_OBJECT needs the full APDU transport.
+3. `optiga_trust_m_send_apdu` validates a non-empty APDU buffer and
+   returns `ALP_ERR_NOSUPPORT` without fabricating a signature.
 
-## Expected output (provisioned chip)
+## Expected output (OPTIGA-populated SoM)
 
 ```
-[se] product info: chip_type=8C8FCA0F00B2 fw_id=2624 build=0E16
-[se] CalcSign reply: stacode=0x00  outlen=70  total=74
-[se] signature[0..15]: 304402206A...
+[se] I2C_STATE probe -> ALP_OK
+[se] read_product_info -> -5 (expected NOSUPPORT)
+[se] send_apdu -> -5 resp_len=0 (expected NOSUPPORT, zero bytes)
+[se] RESULT PASS: Trust M I2C_STATE probe works; product-info/raw-APDU are cleanly blocked with ALP_ERR_NOSUPPORT
 ```
 
-## Expected output (factory-fresh / unprovisioned chip)
+## Expected output (missing or held-in-reset chip)
 
 ```
-[se] CalcSign reply: stacode=0x01  outlen=2  total=6
-[se] chip reported error; check production provisioning for key slot 0xE0F0
+[se] RESULT FAIL: optiga_trust_m_init -> -2 (Trust M not ACKing)
 ```
 
-`stacode=0x01` + a short payload typically means
-"data object referenced does not exist" (the production line
-hasn't generated an ECC key into slot 0xE0F0 yet).  See SRM
-table 17 for the full status-code table.
+The eventual signing path belongs with the Infineon host-library/PSA
+integration, not a partial hand-rolled APDU transport in this example.
 
 ## Wiring this into a real app
 
-The example uses `optiga_trust_m_send_apdu` directly because the
-v0.3 driver doesn't yet expose a typed `_sign(digest, out_sig)`
-helper.  Once Infineon's Host Library is vendored into the SDK
-and registered as a PSA driver against `<alp/security.h>`'s
-MbedTLS PSA wrapper, application code can call
-`alp_aead_open` / future `alp_sign_*` and get hardware
-acceleration transparently -- this raw-APDU path is the
-near-term bridge.
+The example calls `optiga_trust_m_send_apdu` only to prove the current
+driver returns `ALP_ERR_NOSUPPORT` for APDU transport.  Once Infineon's
+Host Library is integrated and registered as a PSA driver against
+`<alp/security.h>`'s MbedTLS PSA wrapper, application code can call
+`alp_aead_open` / future `alp_sign_*` and get hardware acceleration
+transparently.
 
 ## See also
 
 * [`<alp/chips/optiga_trust_m.h>`](../../../include/alp/chips/optiga_trust_m.h)
-  -- driver header (init + product info + raw APDU send).
+  -- driver header (I2C_STATE probe + NOSUPPORT APDU/product-info stubs).
 * Infineon "Solution Reference Manual OPTIGA Trust M"
   (`SRM_OPTIGA_Trust_M.pdf`) -- APDU command set + status codes.
