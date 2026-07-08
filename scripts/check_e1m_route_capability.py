@@ -52,7 +52,6 @@ KNOWN_UNBACKED: dict[tuple[str, str], dict[str, str]] = {
         "E1M_GPIO_IO21": "2626-R2: IO21 unrouted on the module (GPIO_30 moved to IO8).",
         "E1M_GPIO_IO22": "2626-R2: left open on the module (CC3501E CS+IRQ took the Alif pins); EVK wires it to PCIe MUX_PD.",
         "E1M_GPIO_IO23": "2626-R2: left open on the module; EVK wires it to PCIe MUX_SEL.",
-        "E1M_GPIO_IO9":  "Not backed by the AEN capability table; needs module/table review.",
     },
 }
 
