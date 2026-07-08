@@ -9,10 +9,10 @@
  * Section 2 backend matrix (zephyr_drv wins on every SoC unless a
  * more specific backend registers).
  *
- * V2N CC3501E note: the CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on
- * the AEN SoM provides the underlying socket stack; the Zephyr mqtt
- * client runs above and is SoM-agnostic, so no separate registry
- * entry is needed for V2N.
+ * AEN CC3501E note: Wi-Fi/BLE radio operations route through the exact
+ * CC3501E backends, not this MQTT backend.  MQTT remains a protocol client
+ * above a socket provider; the chip-level cc3501e_sock_* helpers stay under
+ * <alp/chips/cc3501e.h> for bridge diagnostics.
  *
  * Gated on CONFIG_ALP_SDK_IOT_MQTT -- when OFF the I/O ops return
  * NOSUPPORT but the registry entry still links so the dispatcher

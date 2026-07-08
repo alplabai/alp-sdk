@@ -65,10 +65,10 @@ uart:~$ alp companion ble scan
   ...
 ```
 
-> **Order matters on the bench:** run `ble enable` from a clean boot (or before a
-> `wifi scan`). A Wi-Fi scan immediately followed by `ble enable` can return
-> `-4` — two back-to-back heavy radio ops desync the CS-less inter-chip bridge.
-> A firmware fix is tracked (see `docs/cc3501e-production.md`).
+> **Order matters on older bench firmware:** if a stale CC3501E image returns
+> `-4` after back-to-back heavy radio ops, cold-boot the companion and update the
+> bridge firmware. Current AEN hardware uses SS0 framing and READY gating, so the
+> host link should remain framed across Wi-Fi/BLE radio work.
 
 ### RGB status LED
 

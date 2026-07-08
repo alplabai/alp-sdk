@@ -55,9 +55,10 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	(void)alp_gpio_configure(nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 
-	/* 2. Inter-chip SPI (Alif = master).  No chip-select this HW rev -- the link is
-	 *    fixed-count lockstep (ALP_SPI_NO_CS); mode 0 matches the CC3501E vendor
-	 *    image frameFormat. */
+	/* 2. Inter-chip SPI (Alif = master).  CS is the dwc-ssi hardware SS0
+	 *    muxed on P14_7; the app passes ALP_SPI_NO_CS so no software GPIO CS
+	 *    is installed and the SPI controller drives SS0 per transfer.  Mode 0
+	 *    matches the CC3501E vendor image frameFormat. */
 	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
 	    .bus_id        = CC3501E_BRIDGE_SPI_BUS_ID,
 	    .freq_hz       = CC3501E_BRIDGE_SPI_FREQ_HZ,
@@ -105,6 +106,12 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	}
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
 	(void)alp_gpio_cc3501e_attach(fw);
+#endif
+#ifdef CONFIG_ALP_SDK_WIFI_CC3501E
+	(void)alp_wifi_cc3501e_attach(fw);
+#endif
+#ifdef CONFIG_ALP_SDK_BLE_CC3501E
+	(void)alp_ble_cc3501e_attach(fw);
 #endif
 	return cc3501e_reset(fw);
 }

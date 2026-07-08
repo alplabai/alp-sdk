@@ -4,16 +4,28 @@
 # CC3501E companion command + API reference
 
 The on-module **TI CC3501E** Wi-Fi 6 + BLE 5.4 coprocessor is driven from
-the Alif host through the portable driver in
-[`<alp/chips/cc3501e.h>`](../include/alp/chips/cc3501e.h)
-(`chips/cc3501e/cc3501e.c`) over the inter-chip SPI bridge. Two ways in:
+the Alif host over the inter-chip SPI bridge. Application firmware should use
+the portable Wi-Fi and BLE APIs first:
+
+- [`<alp/iot.h>`](../include/alp/iot.h) — `alp_wifi_open()`,
+  `alp_wifi_connect()`, `alp_wifi_disconnect()`.
+- [`<alp/ble.h>`](../include/alp/ble.h) — `alp_ble_open()`, scan,
+  advertise, connect, and GATT operations.
+
+On E1M-AEN builds, those dispatchers select the exact CC3501E backend after
+the application bring-up helper attaches its live
+[`cc3501e_t`](../include/alp/chips/cc3501e.h) handle. The lower-level
+`cc3501e_*` API and the `alp companion` shell remain the diagnostics and
+bring-up surface for firmware-version, raw scan records, sockets, OTA, and
+bridge health. Two diagnostic ways in:
 
 - **Interactively** — the `alp companion` command tree on the Zephyr shell
   (the companion console backend under `src/zephyr/console/`). This page is
   its reference.
-- **From firmware** — the `cc3501e_*` C API directly (see the
+- **From firmware diagnostics** — the `cc3501e_*` C API directly (see the
   [`aen-cc3501e-companion-tour`](../examples/aen/aen-cc3501e-companion-tour)
-  example, which walks the whole surface in sequence).
+  example, which walks the portable checkpoint and the diagnostic surface in
+  sequence).
 
 > The same `alp companion` group binds the **GD32** supervisor on V2N SoMs
 > (`CONFIG_ALP_SDK_V2N_SUPERVISOR`) instead of the CC3501E; there it exposes

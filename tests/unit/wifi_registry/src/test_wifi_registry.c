@@ -5,6 +5,7 @@
  * the bare selector + capability-getter + public-API edges.
  *
  * Backends visible on this test build:
+ *   cc3501e_e3..e8 (priority 200, exact AEN silicon refs)
  *   zephyr_drv      (priority 100, "*" wildcard)
  *   sw_fallback     (priority 0,   "*" wildcard)
  *
@@ -12,9 +13,10 @@
  * dispatcher's `alp_backend_select("wifi", ALP_SOC_REF_STR)`
  * exercises the same selector code path real customer builds hit.
  * Tests that need a different silicon_ref call alp_backend_select
- * directly.  CONFIG_WIFI stays OFF -- the test only exercises the
- * dispatcher's null-handle gates and the selector, neither of
- * which touches the Wi-Fi management subsystem.
+ * directly.  CONFIG_WIFI stays OFF -- the Zephyr wifi_mgmt backend body is not
+ * active.  The CC3501E open path is still safe here because open only checks
+ * that a live bridge handle was attached; connect/disconnect remain silicon
+ * bench tests.
  */
 
 #include <stdbool.h>
@@ -26,8 +28,10 @@
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
+#include <alp/chips/cc3501e.h>
 #include <alp/iot.h>
 #include <alp/peripheral.h>
+#include <alp/soc_caps.h>
 
 #include "../../../../src/backends/wifi/wifi_ops.h"
 
@@ -35,12 +39,20 @@ ZTEST_SUITE(alp_wifi_registry, NULL, NULL, NULL, NULL, NULL);
 
 /* ---------- Selector / priority tests ------------------------------- */
 
-ZTEST(alp_wifi_registry, test_zephyr_drv_picked_over_sw_on_alif_e7)
+ZTEST(alp_wifi_registry, test_cc3501e_picked_for_active_alif_e7)
 {
-	const alp_backend_t *be = alp_backend_select("wifi", "alif:ensemble:e7");
+	const alp_backend_t *be = alp_backend_select("wifi", ALP_SOC_REF_STR);
 	zassert_not_null(be);
-	zassert_equal(strcmp(be->vendor, "zephyr"), 0);
-	zassert_equal(be->priority, 100);
+	zassert_equal(strcmp(be->vendor, "ti-cc3501e"), 0);
+	zassert_equal(be->priority, 200);
+}
+
+ZTEST(alp_wifi_registry, test_cc3501e_picked_for_aen_exact_refs)
+{
+	const alp_backend_t *be = alp_backend_select("wifi", "alif:ensemble:e8");
+	zassert_not_null(be);
+	zassert_equal(strcmp(be->vendor, "ti-cc3501e"), 0);
+	zassert_equal(be->priority, 200);
 }
 
 ZTEST(alp_wifi_registry, test_sw_fallback_picked_for_unknown_silicon)
@@ -83,11 +95,25 @@ ZTEST(alp_wifi_registry, test_wifi_capabilities_returns_null_for_null_handle)
 	zassert_is_null(alp_wifi_capabilities(NULL));
 }
 
+ZTEST(alp_wifi_registry, test_wifi_open_uses_attached_cc3501e_backend)
+{
+	cc3501e_t fake = {
+		.initialised = true,
+	};
+	zassert_equal(alp_wifi_cc3501e_attach(&fake), ALP_OK);
+
+	alp_wifi_t *wifi = alp_wifi_open();
+	zassert_not_null(wifi);
+	zassert_not_null(wifi->backend);
+	zassert_equal(strcmp(wifi->backend->vendor, "ti-cc3501e"), 0);
+	zassert_equal(wifi->backend->priority, 200);
+	alp_wifi_close(wifi);
+}
+
 /* ---------- Registry inventory test -------------------------------- */
 
 ZTEST(alp_wifi_registry, test_backend_count_for_wifi)
 {
-	/* zephyr_drv + sw_fallback registered on this build.
-     * No vendor-specific backends exist for Wi-Fi in Slice 4b. */
-	zassert_equal(alp_backend_count("wifi"), 2u);
+	/* Six exact AEN CC3501E refs + zephyr_drv + sw_fallback. */
+	zassert_equal(alp_backend_count("wifi"), 8u);
 }

@@ -490,11 +490,10 @@ int main(void)
 	 * if the link never came up (the helpers just time out and record it).
 	 */
 	/* DEFERRED: do NOT read the radio (GET_MAC -> Wlan_Start) here -- that fires
-	 * the radio bring-up before the PING link is established, and Wlan_Start
-	 * disrupts the CS-less link before it has settled (cold first-contact never
-	 * recovers).  The soak below reads the MAC only AFTER the link is solidly up
-	 * (ping_ok >= threshold) -- "wait until ready to read".  Kept the function for
-	 * the scan/connect path, gated the same way later. */
+	 * the radio bring-up before the bridge is proven alive.  The soak below reads
+	 * the MAC only AFTER the link is solidly up (ping_ok >= threshold) -- "wait
+	 * until ready to read".  Kept the function for the scan/connect path, gated
+	 * the same way later. */
 	(void)cc3501e_wifi_probe;
 
 	/*
@@ -557,8 +556,8 @@ int main(void)
 
 #ifdef CC3501E_OTA_DEMO
 		/* One-shot OTA demo, run only once the link is solidly up (same
-		 * ping_ok discipline as the DMA bench): OTA's FINISH does a flash burst
-		 * that disrupts the CS-less link, so gate it behind a stable link. */
+		 * ping_ok discipline as the DMA bench): OTA's FINISH does a flash burst,
+		 * so gate it behind a stable bridge. */
 		if (!ota_done && g_cc3501e_witness.ping_ok >= 20u) {
 			ota_done = true;
 			cc3501e_demo_ota(&fw);
@@ -574,10 +573,9 @@ int main(void)
 		}
 		printf("[cc3501e-bringup] soak PING #%u -> %d\n", i, (int)s);
 
-		/* Once the link is aligned (PING ok), keep retrying GET_MAC until it
-		 * lands -- the boot-time probe can run during the CS-less cold
-		 * first-contact misalignment window; retrying here lands the
-		 * worker-routed Wi-Fi identity read end-to-end on the stable link. */
+		/* Once the link is alive (PING ok), keep retrying GET_MAC until it
+		 * lands -- retrying here lands the worker-routed Wi-Fi identity read
+		 * end-to-end on the stable link. */
 		if (g_cc3501e_witness.mac_ok == 0u && s == ALP_OK && g_cc3501e_witness.ping_ok >= 20u) {
 			uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
 			alp_status_t ms              = cc3501e_wifi_get_mac(&fw, mac, CC3501E_MAC_TIMEOUT_MS);

@@ -66,8 +66,9 @@
  * BENCH-TBD: interrupts = <138 3> follows the consecutive pattern from
  * spi0's IRQ 137 -- confirm SPI1_IRQ against the fork's e1.dtsi / TRM.
  *
- * No cs-gpios / HW-SS: this rev runs CS-less 3-wire (the host driver
- * clocks fixed-count lockstep transfers; see chips/cc3501e/cc3501e.c).
+ * No cs-gpios: P14_7 is muxed as SPI1_SS0_C above and the dwc-ssi peripheral
+ * drives hardware SS0 per transfer.  The host opens ALP_SPI_NO_CS so no GPIO CS
+ * is installed, allowing the SPI driver to use its hardware slave-select path.
  */
 &clockctrl {
 	status = "okay";

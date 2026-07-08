@@ -51,18 +51,17 @@
  *
  * ==== THE r2 HOST-IRQ CAVEAT (READ BEFORE USING INTERRUPTS) ========
  *
- * This HW rev wires the bridge as a CS-less 3-wire SPI link: SCLK + MOSI +
- * MISO, with NO chip-select and -- crucially -- NO host-IRQ line.  The
- * Alif is always the SPI master; the CC3501E is always the slave.  A slave
- * with no attention line CANNOT spontaneously tell the master "an edge
- * happened on a GPIO".  So:
+ * This HW rev uses hardware SS0 for SPI framing and a READY input for per-phase
+ * gating, but it still does not expose GPIO edge events as portable application
+ * callbacks.  The Alif is always the SPI master; the CC3501E is always the
+ * slave.  Without a dedicated async event delivery path, the slave cannot
+ * spontaneously tell the master "an edge happened on a GPIO".  So:
  *
  *   - cc3501e_gpio_set_interrupt() ARMS the edge on the CC3501E's own GPIO
  *     controller -- that part is real, it latches edges in the coprocessor.
- *   - but the async ALP_CC3501E_EVT_GPIO_INTERRUPT frame it would emit has
- *     no path back to the host until the r2 board adds a slave->master IRQ
- *     line.  Until then the host MUST POLL cc3501e_gpio_read() to observe a
- *     level change; the armed interrupt does not call you back.
+ *   - but the async ALP_CC3501E_EVT_GPIO_INTERRUPT frame is not a portable
+ *     callback path in this example.  The host must poll cc3501e_gpio_read() to
+ *     observe a level change; the armed interrupt does not call you back.
  *
  * The step below therefore only proves the ARM round-trips; do not build a
  * design that depends on EVT_GPIO_INTERRUPT delivery on this rev.
@@ -237,15 +236,13 @@ int main(void)
 	 * Step 8 -- ARM a RISING-edge interrupt on the proxied pad.
 	 * GPIO_SET_INTERRUPT (0x53), edge=RISING, enabled=true.
 	 *
-	 * IMPORTANT (see the r2 caveat at the top): this ONLY arms the edge on
-	 * the CC3501E's GPIO controller.  On this CS-less, no-host-IRQ rev the
-	 * coprocessor has no way to notify the Alif when the edge fires -- the
-	 * async EVT_GPIO_INTERRUPT frame has no slave->master attention line.
-	 * So a PASS here means "the firmware accepted the arm request", NOT
-	 * "you will get an interrupt callback".  To observe the edge today you
-	 * must POLL cc3501e_gpio_read() in a loop; spontaneous delivery waits
-	 * for the r2 host-IRQ line.  (EDGE_BOTH is unsupported on the CC35xx
-	 * controller -- arm RISING or FALLING, never both.)
+	 * IMPORTANT (see the caveat at the top): this ONLY arms the edge on
+	 * the CC3501E's GPIO controller.  The async EVT_GPIO_INTERRUPT frame is
+	 * not a portable callback path in this example.  A PASS here means "the
+	 * firmware accepted the arm request", NOT "you will get an interrupt
+	 * callback".  To observe the edge today you must POLL cc3501e_gpio_read()
+	 * in a loop.  (EDGE_BOTH is unsupported on the CC35xx controller -- arm
+	 * RISING or FALLING, never both.)
 	 */
 	s = cc3501e_gpio_set_interrupt(
 	    &fw, DEMO_PAD, ALP_CC3501E_GPIO_EDGE_RISING, true, DEMO_OP_TIMEOUT_MS);

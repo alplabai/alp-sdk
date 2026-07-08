@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-06",
+  "generated": "2026-07-08",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2027,9 +2027,17 @@
     },
     "alp/chips/cc3501e.h": {
       "functions": {
+        "alp_ble_cc3501e_attach": {
+          "hash": "a4ffa6f73eff85b2",
+          "signature": "alp_status_t alp_ble_cc3501e_attach(cc3501e_t *ctx);"
+        },
         "alp_gpio_cc3501e_attach": {
           "hash": "975f356be3f3038d",
           "signature": "alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx);"
+        },
+        "alp_wifi_cc3501e_attach": {
+          "hash": "4ca3e9a5b04cf9cf",
+          "signature": "alp_status_t alp_wifi_cc3501e_attach(cc3501e_t *ctx);"
         },
         "cc3501e_ble_adv_start": {
           "hash": "d093691c81df79ee",
