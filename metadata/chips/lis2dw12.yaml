@@ -1,0 +1,48 @@
+# Alp SDK chip manifest: STMicroelectronics LIS2DW12 accelerometer.
+schema_version:   1
+chip_id:          lis2dw12
+driver_status:    partial          # I2C lifecycle/config/raw accel/temp read; SPI/FIFO deferred.
+display_name:     "STMicroelectronics LIS2DW12 3-axis ultra-low-power accelerometer"
+vendor:           st
+mpn_population:
+  - "LIS2DW12"
+
+datasheet:
+  primary:        "STMicroelectronics LIS2DW12 datasheet (DocID030334, rev 4, Mar 2018)"
+
+bus:              i2c
+i2c:
+  addresses:
+    - { addr_7bit: 0x18, scope: "SDO/SA0 = GND (default)" }
+    - { addr_7bit: 0x19, scope: "SDO/SA0 = VDDIO" }
+  max_clock_hz:   400000
+
+sensor:
+  axes:            3
+  who_am_i:        0x44
+  ranges_g:        [2, 4, 8, 16]
+  odr_hz:          [1.6, 12.5, 25, 50, 100, 200, 400, 800, 1600]
+
+signals:
+  - { name: SCL, type: input, scope: "I2C serial clock (SPC in SPI mode)" }
+  - { name: SDA, type: bidir, scope: "I2C serial data (SDI/SDO in SPI mode)" }
+  - { name: SDO, type: input, scope: "I2C address-select strap; GND=0x18 default, VDDIO=0x19" }
+  - { name: CS, type: input, scope: "SPI chip select; tie high for I2C-only use" }
+  - { name: INT1, type: output, scope: "interrupt 1 / data-ready" }
+  - { name: INT2, type: output, scope: "interrupt 2 / wake-up" }
+  - { name: VDD, type: power }
+  - { name: VDDIO, type: power }
+  - { name: GND, type: ground }
+
+kconfig:
+  zephyr:         ALP_SDK_CHIP_LIS2DW12
+
+families:
+  - aen
+  - v2n
+  - v2n-m1
+  - imx93
+
+verification:
+  hil_silicon:    untested
+  smoke_tests:    null_arg_guard
