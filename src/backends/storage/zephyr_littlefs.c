@@ -103,6 +103,27 @@ static alp_status_t _errno_to_alp(int err)
 	}
 }
 
+/*
+ * The public API takes 64-bit offsets/lengths, but fs_seek() narrows to
+ * off_t.  A near-UINT64_MAX offset would narrow to a negative/aliased
+ * seek target and turn a bad request into out-of-file I/O.  Reject any
+ * [offset, offset+len) range that wraps or does not round-trip through
+ * off_t before touching the file.  littlefs grows on write, so there is
+ * no fixed capacity to bound against -- only representability matters.
+ */
+static bool _lfs_range_representable(uint64_t offset, uint64_t len)
+{
+	if (len > UINT64_MAX - offset) {
+		return false; /* offset + len wraps */
+	}
+	uint64_t end = offset + len;
+	off_t    oe  = (off_t)end;
+	if (oe < 0 || (uint64_t)oe != end) {
+		return false; /* end not representable as off_t */
+	}
+	return true;
+}
+
 static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
                              alp_storage_backend_state_t *st,
                              alp_capabilities_t          *caps_out)
@@ -157,6 +178,7 @@ lfs_read(alp_storage_backend_state_t *st, uint64_t offset, void *data, size_t le
 {
 	lfs_state_t *s = (lfs_state_t *)st->be_data;
 	if (s == NULL || !s->open) return ALP_ERR_NOT_READY;
+	if (!_lfs_range_representable(offset, len)) return ALP_ERR_OUT_OF_RANGE;
 	int err = fs_seek(&s->file, (off_t)offset, FS_SEEK_SET);
 	if (err != 0) return _errno_to_alp(err);
 	ssize_t got = fs_read(&s->file, data, len);
@@ -170,6 +192,7 @@ lfs_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data, si
 {
 	lfs_state_t *s = (lfs_state_t *)st->be_data;
 	if (s == NULL || !s->open) return ALP_ERR_NOT_READY;
+	if (!_lfs_range_representable(offset, len)) return ALP_ERR_OUT_OF_RANGE;
 	int err = fs_seek(&s->file, (off_t)offset, FS_SEEK_SET);
 	if (err != 0) return _errno_to_alp(err);
 	ssize_t put = fs_write(&s->file, data, len);
@@ -184,6 +207,7 @@ static alp_status_t lfs_erase(alp_storage_backend_state_t *st, uint64_t offset, 
 	if (s == NULL || !s->open) return ALP_ERR_NOT_READY;
 	/* littlefs has no per-region erase -- emulate by overwriting
      * the region with 0xFF, matching NOR-flash erased state. */
+	if (!_lfs_range_representable(offset, len)) return ALP_ERR_OUT_OF_RANGE;
 	static const uint8_t _erased = 0xFFu;
 	int                  err     = fs_seek(&s->file, (off_t)offset, FS_SEEK_SET);
 	if (err != 0) return _errno_to_alp(err);
