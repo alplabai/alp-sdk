@@ -739,6 +739,23 @@ hidden:
 schema, resolves the SoM SKU + board presets, applies overrides,
 and emits one of three formats.  Common workflows below.
 
+### Convenience wrapper: `west alp-build`
+
+First-class `west` integration ships today: `scripts/west-commands.yml`
+registers `alp-build`, `alp-image`, `alp-flash`, `alp-clean`,
+`alp-renode`, `alp-emit`, and `alp-size`.  The canonical one-shot flow is
+
+```bash
+west alp-build -b <board> <app-dir>
+```
+
+which validates `board.yaml`, generates the build-time config, then
+delegates to `west build` (implemented in
+`scripts/west_commands/alp_build.py`).  The lower-level
+`scripts/alp_project.py --emit ...` invocations below are what that
+wrapper runs under the hood -- use them directly when you need a single
+emitted artefact or are wiring a non-west build.
+
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`
 
 The canonical pattern is to run the loader at configure time and
@@ -927,9 +944,6 @@ the same rule.
   validate that requested features (e.g. 16-bit ADC) match the
   SoC's documented caps.  The `<alp/soc_caps.h>` runtime check
   catches mismatches at `_open` time today.
-- **First-class `west` integration** -- planned as a custom
-  `west alp-build` command that wraps the configure + generate +
-  build sequence.
 
 ## Hardware revision tracking
 
