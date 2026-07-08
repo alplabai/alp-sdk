@@ -284,7 +284,16 @@ static void probe_tps628640(alp_i2c_t *bus)
 	}
 	tps628640_t buck;
 
-	if (tps628640_init(&buck, bus, 0x4D, 600) != ALP_OK) {
+	alp_status_t rc = tps628640_init(&buck, bus, 0x4D, 600);
+	if (rc == ALP_ERR_NOT_READY) {
+		/* Optional/partial: the buck ACKs but its typed probe reports
+		 * not-ready (absent regulator rail, partially powered, or a
+		 * build that intentionally doesn't read it).  A BOM-optional
+		 * chip must degrade to SKIP, not fail the whole board run. */
+		report("tps628640", 0x4D, R_SKIP, "ACKs but not ready (optional rail)");
+		return;
+	}
+	if (rc != ALP_OK) {
 		report("tps628640", 0x4D, R_FAIL, "ACKs but VOUT1 read failed");
 		return;
 	}
