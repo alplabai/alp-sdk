@@ -16,7 +16,7 @@
  *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
- * @par Driver status: [stub-impl]
+ * @par Driver status: [partial-impl]
  *
  * Datasheet: Ilitek ILI9488 v1.00 (May 2012).
  */
