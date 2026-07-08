@@ -2,7 +2,7 @@
 # Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 """
-Cross-family portability lint for examples/*/board.yaml.
+Cross-family portability lint for examples/*/{board.yaml,testcase.yaml}.
 
 What this catches
 -----------------
@@ -35,6 +35,11 @@ The lint enforces two invariants:
       can confirm the portability claim in examples/README.md
       matches reality.
 
+  (c) HARD ERROR: every board listed in `supported_boards:` must
+      have a matching Twister variant in `testcase.yaml`, selected
+      by the corresponding `ALP_BOARD_<SLUG>` compiler define.  The
+      catalog claim and CI build matrix must not drift apart.
+
 Run from the alp-sdk repo root:
 
     python3 scripts/check_example_portability.py
@@ -47,6 +52,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sys
+from collections.abc import Iterator
 from typing import Optional
 
 try:
@@ -123,6 +129,68 @@ def load_som_optional_chips() -> dict[str, set[str]]:
     return out
 
 
+def board_define_for_supported_board(board: str) -> str:
+    """Return the compiler define selected by a supported_boards entry."""
+    return f"ALP_BOARD_{board.upper().replace('-', '_')}"
+
+
+def _iter_yaml_strings(value: object) -> Iterator[str]:
+    """Yield scalar strings from parsed YAML data."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_yaml_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_yaml_strings(item)
+
+
+def _testcase_strings(testcase_yaml: pathlib.Path) -> tuple[list[str], Optional[str]]:
+    try:
+        with testcase_yaml.open(encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        return [], f"testcase.yaml is not valid YAML: {exc}"
+    return list(_iter_yaml_strings(doc)), None
+
+
+def check_supported_board_testcases(
+    example_dir: pathlib.Path,
+    supported_boards: object,
+) -> list[str]:
+    """Verify supported_boards has explicit ALP_BOARD_* testcase variants."""
+    if supported_boards in (None, []):
+        return []
+    if not isinstance(supported_boards, list):
+        return ["supported_boards must be a list"]
+
+    testcase_yaml = example_dir / "testcase.yaml"
+    if not testcase_yaml.exists():
+        return [
+            "supported_boards is declared but testcase.yaml is missing -- "
+            "add one Twister scenario per supported board"
+        ]
+
+    strings, parse_error = _testcase_strings(testcase_yaml)
+    if parse_error:
+        return [parse_error]
+
+    testcase_text = "\n".join(strings)
+    errors: list[str] = []
+    for board in supported_boards:
+        if not isinstance(board, str):
+            errors.append(f"supported_boards entry {board!r} is not a string")
+            continue
+        define = board_define_for_supported_board(board)
+        if define not in testcase_text:
+            errors.append(
+                f"supported_boards declares '{board}' but testcase.yaml has no "
+                f"{define} variant"
+            )
+    return errors
+
+
 def classify(chip_families: dict[str, list[str]],
              example_chips: list[str]) -> str:
     """Classify an example into ring1 / ring2 / ring3."""
@@ -160,6 +228,9 @@ def check_example(example_dir: pathlib.Path,
 
     errors: list[str] = []
     notes:  list[str] = []
+
+    errors.extend(check_supported_board_testcases(example_dir,
+                                                  doc.get("supported_boards")))
 
     if family is None and som_sku:
         errors.append(

@@ -121,6 +121,12 @@ on-V2N GD32 bridge directly) live under `examples/v2n/...` and
 declare a single SKU's family -- the prefix is a contract, not a
 docstring.
 
+For examples that declare multiple `supported_boards:` entries,
+the lint also checks `testcase.yaml`: each supported board must
+have a Twister variant that sets the matching `ALP_BOARD_<SLUG>`
+compiler define (for example `ALP_BOARD_E1M_X_EVK`).  This keeps
+the catalog claim tied to an actual CI build.
+
 ## Optional populations + the runtime check
 
 When your `board.yaml` declares a chip that's `assembled:
