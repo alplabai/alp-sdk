@@ -21,7 +21,7 @@ The E1M-AEN family carries the **Alif Ensemble** SoC plus the
 on-module **TI CC3501E** Wi-Fi 6 + BLE 5.4 combo module.  E1M-edge
 peripherals split between the two: `from-alif.tsv` covers everything
 the Alif SoC owns directly; `from-cc3501e.tsv` covers the pads the
-CC3501E owns (notably SPI1 + IO11 / IO13 / IO15..IO21).
+CC3501E owns (notably SPI1 + IO8..IO11 / IO13 / IO15..IO20).
 
 Apps targeting CC3501E-owned pads dispatch through the
 [`<alp/chips/cc3501e.h>`](../../../include/alp/chips/cc3501e.h)

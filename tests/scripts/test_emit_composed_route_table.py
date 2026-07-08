@@ -111,6 +111,20 @@ class TestAen801Evk:
         assert row.get("dispatch_pin") == 14
         assert row.get("board_category") == "gpio"
 
+    def test_cc3501e_gpio_routes_match_aen801_metadata(self, result):
+        """Route-table composition must carry the AEN801 CC3501E GPIO pins."""
+        by_e1m = {r["e1m"]: r for r in result["routes"]}
+        expected = {
+            "E1M_GPIO_IO9": ("EVK_PIN_PCIE_IOEXP_RST", 12),
+            "E1M_GPIO_IO16": ("EVK_PIN_W_DISABLE2", 17),
+            "E1M_GPIO_IO17": ("EVK_PIN_W_DISABLE1", 16),
+        }
+        for e1m, (macro, dispatch_pin) in expected.items():
+            row = by_e1m[e1m]
+            assert row["board_macro"] == macro
+            assert row["dispatch"] == "cc3501e"
+            assert row.get("dispatch_pin") == dispatch_pin
+
     def test_direct_dispatch_pads_present(self, result):
         """Pads not in the AEN801's pad_routes default to dispatch: direct."""
         direct_rows = [r for r in result["routes"] if r.get("dispatch") == "direct"]

@@ -97,8 +97,8 @@ mailbox:
 # role (e.g. EVK_PIN_BMI323_INT1) stays SoM-agnostic.
 #
 # Source of truth:
-#   - metadata/e1m_modules/aen/from-cc3501e.tsv  (SPI1 bus)
-#   - AEN family hardware design (IO11/13/15..21 termination)
+#   - metadata/e1m_modules/aen/from-cc3501e.tsv
+#   - AEN family hardware design (CC3501E-owned GPIO pads)
 pad_routes:
   # SPI1 inter-chip bus -- CC3501E hosts the SPI peripheral.
   - { e1m: E1M_SPI1,      dispatch: cc3501e,
@@ -107,6 +107,8 @@ pad_routes:
   # GPIO pads that physically terminate on CC3501E (not on Alif silicon).
   - { e1m: E1M_GPIO_IO8,  dispatch: cc3501e, dispatch_pin: 30,
       doc: "CC3501E GPIO_30 (board 2626-R2; GPIO30 moved here from IO21)." }
+  - { e1m: E1M_GPIO_IO9,  dispatch: cc3501e, dispatch_pin: 12,
+      doc: "CC3501E GPIO_12." }
   - { e1m: E1M_GPIO_IO10, dispatch: cc3501e, dispatch_pin: 35,
       doc: "CC3501E GPIO_35 (board 2626-R2)." }
   - { e1m: E1M_GPIO_IO11, dispatch: cc3501e, dispatch_pin: 2,
@@ -115,10 +117,10 @@ pad_routes:
       doc: "CC3501E GPIO_13." }
   - { e1m: E1M_GPIO_IO15, dispatch: cc3501e, dispatch_pin: 14,
       doc: "CC3501E GPIO_14." }
-  - { e1m: E1M_GPIO_IO16, dispatch: cc3501e, dispatch_pin: 16,
-      doc: "CC3501E GPIO_16." }
-  - { e1m: E1M_GPIO_IO17, dispatch: cc3501e, dispatch_pin: 17,
-      doc: "CC3501E GPIO_17." }
+  - { e1m: E1M_GPIO_IO16, dispatch: cc3501e, dispatch_pin: 17,
+      doc: "CC3501E GPIO_17 (bridge READY/host-IRQ on current firmware)." }
+  - { e1m: E1M_GPIO_IO17, dispatch: cc3501e, dispatch_pin: 16,
+      doc: "CC3501E GPIO_16 (bridge SPI0 CS on current firmware)." }
   - { e1m: E1M_GPIO_IO18, dispatch: cc3501e, dispatch_pin: 18,
       doc: "CC3501E GPIO_18." }
   - { e1m: E1M_GPIO_IO19, dispatch: cc3501e, dispatch_pin: 19,

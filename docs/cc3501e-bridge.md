@@ -293,10 +293,14 @@ modes to "just work" through `ALP_CC3501E_CMD_GPIO_CONFIGURE` +
 
 ### Open-drain output
 
-Required for M.2 E-key `W_DISABLE1` (CC3501E `GPIO_17` ↔ E1M
-`IO17`, Wi-Fi disable) and `W_DISABLE2` (CC3501E `GPIO_16` ↔
-E1M `IO16`, Bluetooth disable).  Per the M.2 spec these are
-open-drain active-low: write 0 to assert, write 1 (or
+Required for M.2 E-key `W_DISABLE1` (CC3501E `GPIO_16` ↔ E1M
+`IO17`, Wi-Fi disable) and `W_DISABLE2` (CC3501E `GPIO_17` ↔
+E1M `IO16`, Bluetooth disable).  The current firmware also uses
+these raw CC3501E pins for the bridge (`GPIO16` as SPI0 CS and
+`GPIO17` as READY/host-IRQ), so the SoM metadata records the
+physical wiring while example-local proxy tables omit IO17.  Per
+the M.2 spec the W_DISABLE lines are open-drain active-low: write 0
+to assert, write 1 (or
 Hi-Z / release) to deassert.  Firmware must:
 
 - Accept `ALP_CC3501E_GPIO_DIR_OPEN_DRAIN` in the configure
