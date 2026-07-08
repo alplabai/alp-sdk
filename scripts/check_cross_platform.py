@@ -193,7 +193,10 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "scripts/bench/aen/flash-jlink-mramxip.sh",
     "scripts/bench/aen/flash-jlink-hp.sh",
     "scripts/bench/aen/flash-run.sh",
+    "scripts/bench/aen/flash-update-log-dual.sh",
+    "scripts/bench/aen/flash-update-log-firewall-probe.sh",
     "scripts/bench/aen/ram-run.sh",
+    "scripts/bench/aen/read-update-log-proof.sh",
     "scripts/bench/aen/reread.sh",
     "scripts/bench/aen/flash-all-flowd.sh",
 })
