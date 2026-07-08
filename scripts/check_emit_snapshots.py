@@ -54,6 +54,27 @@ CASES = [
 ]
 
 
+def _normalize_root(text: str, repo: str) -> str:
+    """Replace every rendering of the SDK checkout root with ``<SDK_ROOT>``.
+
+    ``build-plan`` output is JSON, so a Windows checkout root
+    (``C:\\Users\\...\\alp-sdk``) appears with its backslashes doubled inside
+    JSON strings.  Normalising only the raw ``repo`` string leaves those
+    JSON-escaped absolute paths in the emitted snapshot, which breaks the
+    byte-for-byte gate on Windows even though the committed goldens use
+    ``<SDK_ROOT>``.  Cover the JSON-escaped form and the forward-slash form as
+    well as the raw path.  On POSIX all three variants collapse to ``repo``,
+    so the Linux output is unchanged.
+    """
+    for variant in (
+        repo.replace("\\", "\\\\"),  # JSON-escaped Windows path (do first)
+        repo,                        # raw path (POSIX, or unescaped Windows)
+        repo.replace("\\", "/"),     # forward-slash Windows path
+    ):
+        text = text.replace(variant, "<SDK_ROOT>")
+    return text
+
+
 def _emit(tool: Path, board: str, mode: str) -> str:
     """Run the emitter from the repo root; normalise the SDK-root path."""
     env = {**os.environ}
@@ -68,7 +89,7 @@ def _emit(tool: Path, board: str, mode: str) -> str:
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
                          f"--emit {mode} (rc={rv.returncode}):\n{rv.stderr}")
-    return rv.stdout.replace(str(REPO), "<SDK_ROOT>")
+    return _normalize_root(rv.stdout, str(REPO))
 
 
 def main() -> int:
