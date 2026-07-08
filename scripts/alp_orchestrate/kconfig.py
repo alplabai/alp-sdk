@@ -48,7 +48,9 @@ def _emit_extra_library_profile(
     matcher in `alp_project._emit_library_hw_backends`: each accelerator
     class declares a `priority:` list whose entries carry
     `silicon:` / `soc_family:` / `requires_cap:` matchers plus a
-    `kconfig:` directive.  First matching entry per class wins; an
+    `kconfig:` directive.  Entries marked `status: planned` or
+    `status: stub` are metadata only and are not emitted as active
+    build claims.  First matching implemented entry per class wins; an
     `sw_fallback:` block with `kconfig:` is always emitted at the end
     so the build has a SW floor when no HW backend matches.
 
@@ -103,6 +105,9 @@ def _emit_extra_library_profile(
             return False
 
     def _entry_matches(e: dict[str, Any]) -> bool:
+        status = str(e.get("status", "implemented")).strip().lower()
+        if status in {"planned", "stub"}:
+            return False
         sili = e.get("silicon")
         sf = e.get("soc_family")
         cap = e.get("requires_cap")

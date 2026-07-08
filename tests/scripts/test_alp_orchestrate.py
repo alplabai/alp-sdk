@@ -1865,11 +1865,11 @@ def test_extra_libraries_profile_happy(tmp_path: Path) -> None:
     slice_ = project.cores["m33_sm"]
     conf = _slice_alp_conf(project, slice_)
     assert "extra_libraries[mylib_profile]" in conf
-    # V2N101 has optiga_trust_m capability + cau capability;
-    # _emit_extra_library_profile is deterministic in priority order.
-    # mbedtls profile's first-matching V2N entry is `cau` (priority
-    # ordering); regardless, *some* CONFIG_ALP_MBEDTLS_* must land,
-    # and the sw_fallback line is always emitted.
+    # V2N101 has optiga_trust_m + cau capabilities, but those mbedTLS
+    # accelerator entries are `status: planned`; the profile walker
+    # must skip them and emit only the sw_fallback line.
+    assert "CONFIG_ALP_MBEDTLS_CAU=y" not in conf
+    assert "CONFIG_ALP_MBEDTLS_OPTIGA=y" not in conf
     assert "CONFIG_ALP_MBEDTLS_PURE_C=y" in conf
     assert "sw_fallback" in conf
 
