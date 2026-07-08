@@ -81,9 +81,13 @@ topology:
 # here ONLY for non-stock partitioning (none of the current 11 SKUs
 # need one).
 
-# Alif IPC controller name TBD pending the hand-written HW config.
+# Inter-core mailbox IP: ARM MHUv2.  The controller token matches alp-sdk's
+# `alif,mhuv2-mbox` Zephyr MBOX driver; endpoint-specific overlays select the
+# MHU pair for the requested core topology.  The E1M-AEN801 bench validated the
+# driver with dual-M55 OpenAMP RPMsg on 2026-06-19 (#225), and the AEN family
+# shares the Alif Ensemble MHUv2 integration exposed by the zephyr_alif DTS.
 mailbox:
-  controller: TBD
+  controller: alif_mhuv2
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }
     - { id: 1, reserved_for: app }
