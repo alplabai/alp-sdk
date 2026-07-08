@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # scripts/bench/aen/flash-update-log-dual.sh [--package-only] <hp-build-dir> <he-build-dir>
 #
+# Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
+# drives the Alif SETOOLS + JLinkExe over the labgrid-held AEN bench).
+# Runs under WSL2 on Windows. See docs/aen-bench-bringup.md.
+#
 # Build the dual-entry ATOC package for examples/connectivity/firmware-update-log
 # on E1M-AEN801 / Alif E8:
 #   - HP owner:  M55_HP, loadAddress 0x50000000, flags ["load", "boot"]

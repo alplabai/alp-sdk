@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # scripts/bench/aen/flash-update-log-firewall-probe.sh [--package-only] <he-probe-build-dir>
 #
+# Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
+# drives the Alif SETOOLS + JLinkExe over the labgrid-held AEN bench).
+# Runs under WSL2 on Windows. See docs/aen-bench-bringup.md.
+#
 # Build and optionally flash the HE direct-write MRAM firewall probe for
 # examples/connectivity/firmware-update-log. The default package is app-only so
 # it preserves the board's existing DEVICE/firewall policy. Set
