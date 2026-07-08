@@ -93,3 +93,104 @@ ZTEST(alp_rpc_registry, test_backend_count_for_rpc)
      * No vendor-specific backends exist for RPC in Slice 4c. */
 	zassert_equal(alp_backend_count("rpc"), 2u);
 }
+
+/* ---------- Frame-size overflow guard ------------------------------ */
+
+ZTEST(alp_rpc_registry, test_frame_size_fits_and_reports_total)
+{
+	size_t total = 0;
+	zassert_true(alp_rpc_frame_size(4u, 10u, 64u, &total));
+	zassert_equal(total, 15u); /* method + NUL + payload */
+}
+
+ZTEST(alp_rpc_registry, test_frame_size_exact_fit)
+{
+	size_t total = 0;
+	/* method(4) + NUL(1) + payload(59) == cap(64) */
+	zassert_true(alp_rpc_frame_size(4u, 59u, 64u, &total));
+	zassert_equal(total, 64u);
+}
+
+ZTEST(alp_rpc_registry, test_frame_size_one_over_rejected)
+{
+	size_t total = 0;
+	zassert_false(alp_rpc_frame_size(4u, 60u, 64u, &total));
+}
+
+ZTEST(alp_rpc_registry, test_frame_size_method_too_long_rejected)
+{
+	size_t total = 0;
+	zassert_false(alp_rpc_frame_size(64u, 0u, 64u, &total));
+}
+
+ZTEST(alp_rpc_registry, test_frame_size_near_sizemax_payload_does_not_wrap)
+{
+	/* A near-SIZE_MAX payload must be rejected, not wrap the framed
+     * total past `cap`. */
+	size_t total = 0;
+	zassert_false(alp_rpc_frame_size(4u, SIZE_MAX, 64u, &total));
+	zassert_false(alp_rpc_frame_size(4u, SIZE_MAX - 3u, 64u, &total));
+}
+
+/* ---------- alp_rpc_call request-pointer guard --------------------- */
+
+static bool _fake_call_reached;
+
+static alp_status_t _fake_call(alp_rpc_backend_state_t *st,
+                               const char              *method,
+                               const void              *req,
+                               size_t                   req_len,
+                               void                    *resp,
+                               size_t                  *resp_len,
+                               uint32_t                 timeout_ms)
+{
+	(void)st;
+	(void)method;
+	(void)req;
+	(void)req_len;
+	(void)resp;
+	(void)resp_len;
+	(void)timeout_ms;
+	_fake_call_reached = true;
+	return ALP_OK;
+}
+
+static const alp_rpc_ops_t _fake_ops = {
+	.call = _fake_call,
+};
+
+static struct alp_rpc_channel _make_fake_channel(void)
+{
+	struct alp_rpc_channel ch;
+	memset(&ch, 0, sizeof(ch));
+	ch.in_use    = true;
+	ch.state.ops = &_fake_ops;
+	return ch;
+}
+
+ZTEST(alp_rpc_registry, test_rpc_call_null_req_nonzero_len_rejected)
+{
+	/* Mirrors the alp_rpc_send guard: req == NULL with a non-zero length
+     * must be rejected in the dispatcher before reaching the backend. */
+	_fake_call_reached        = false;
+	struct alp_rpc_channel ch = _make_fake_channel();
+	zassert_equal(ALP_ERR_INVAL, alp_rpc_call(&ch, "m", NULL, 8, NULL, NULL, 0));
+	zassert_false(_fake_call_reached, "backend call must not be reached");
+}
+
+ZTEST(alp_rpc_registry, test_rpc_call_null_req_zero_len_reaches_backend)
+{
+	_fake_call_reached        = false;
+	struct alp_rpc_channel ch = _make_fake_channel();
+	zassert_equal(ALP_OK, alp_rpc_call(&ch, "m", NULL, 0, NULL, NULL, 0));
+	zassert_true(_fake_call_reached);
+}
+
+ZTEST(alp_rpc_registry, test_rpc_call_valid_req_reaches_backend)
+{
+	_fake_call_reached            = false;
+	struct alp_rpc_channel ch     = _make_fake_channel();
+	uint8_t                buf[8] = { 0 };
+	zassert_equal(ALP_OK, alp_rpc_call(&ch, "m", buf, sizeof(buf), NULL, NULL, 0));
+	zassert_true(_fake_call_reached);
+}

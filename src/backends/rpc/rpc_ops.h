@@ -81,4 +81,33 @@ struct alp_rpc_channel {
 	bool                    in_use;
 };
 
+/* ------------------------------------------------------------------ */
+/* Shared frame-size helper                                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Compute the on-wire framed length for a `method_len`-byte method name
+ * (plus its NUL terminator) followed by a `payload_len`-byte payload,
+ * storing it in *total_out.  Returns false if the frame would not fit
+ * in `cap`.
+ *
+ * Overflow-safe: the naive `method_len + 1 + payload_len` sum can wrap
+ * size_t for a near-SIZE_MAX payload_len and slip past a `total > cap`
+ * comparison, so the room left in the frame is computed by subtraction
+ * only.  Both the Zephyr and Yocto frame builders route through this.
+ */
+static inline bool
+alp_rpc_frame_size(size_t method_len, size_t payload_len, size_t cap, size_t *total_out)
+{
+	if (method_len >= cap) {
+		return false; /* no room for the method name + its NUL */
+	}
+	size_t avail = cap - method_len - 1u; /* >= 0: method_len < cap */
+	if (payload_len > avail) {
+		return false;
+	}
+	*total_out = method_len + 1u + payload_len; /* <= cap, cannot wrap */
+	return true;
+}
+
 #endif /* ALP_BACKENDS_RPC_OPS_H */
