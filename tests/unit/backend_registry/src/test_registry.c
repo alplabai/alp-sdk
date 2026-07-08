@@ -23,6 +23,7 @@ ZTEST_SUITE(alp_registry, NULL, NULL, NULL, NULL, NULL);
  *
  * Classes:
  *   tb_prio      -- two exacts at different priorities (tier 1)
+ *   tb_priowild  -- one exact + one higher-priority wildcard (tier 1)
  *   tb_exactwild -- one exact + one wildcard at equal priority (tier 2)
  *   tb_twoexact  -- two exacts at equal priority (tier 3a)
  *   tb_twowild   -- two wildcards at equal priority (tier 3b)
@@ -160,6 +161,38 @@ ZTEST(alp_registry, test_tiebreak_higher_priority_wins)
 	zassert_not_null(be);
 	zassert_equal(be->priority, 200, "expected prio=200, got %u", (unsigned)be->priority);
 	zassert_equal(strcmp(be->vendor, "zenith"), 0, "expected vendor=zenith, got %s", be->vendor);
+}
+
+/* Tier 1 ranks before match type: a high-priority wildcard beats a
+ * lower-priority exact silicon_ref match. */
+ALP_BACKEND_DEFINE_CLASS(tb_priowild);
+ALP_BACKEND_REGISTER(tb_priowild,
+                     wild,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "generic",
+                         .base_caps   = 0u,
+                         .priority    = 200,
+                         .ops         = NULL,
+                         .probe       = NULL,
+                     });
+ALP_BACKEND_REGISTER(tb_priowild,
+                     exact,
+                     {
+                         .silicon_ref = "vendor:soc:t1b",
+                         .vendor      = "specific",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = NULL,
+                         .probe       = NULL,
+                     });
+
+ZTEST(alp_registry, test_tiebreak_higher_priority_wildcard_beats_lower_priority_exact)
+{
+	const alp_backend_t *be = alp_backend_select("tb_priowild", "vendor:soc:t1b");
+	zassert_not_null(be);
+	zassert_equal(be->priority, 200, "expected prio=200, got %u", (unsigned)be->priority);
+	zassert_equal(strcmp(be->vendor, "generic"), 0, "expected vendor=generic, got %s", be->vendor);
 }
 
 /* Tier 2: at equal priority, exact silicon_ref match beats "*" wildcard. */
