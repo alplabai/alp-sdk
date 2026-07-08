@@ -162,6 +162,44 @@ ZTEST(alp_registry, test_tiebreak_higher_priority_wins)
 	zassert_equal(strcmp(be->vendor, "zenith"), 0, "expected vendor=zenith, got %s", be->vendor);
 }
 
+/* Tier 1 (cont.): a HIGH-priority wildcard beats a LOWER-priority exact
+ * match.  Documents the public backend.h contract that exact-vs-wildcard is
+ * only an equal-priority tiebreaker, NOT an override of priority ranking. */
+ALP_BACKEND_DEFINE_CLASS(tb_wildprio);
+ALP_BACKEND_REGISTER(tb_wildprio,
+                     wildhigh,
+                     {
+                         .silicon_ref = "*",
+                         .vendor      = "zephyr",
+                         .base_caps   = 0u,
+                         .priority    = 200,
+                         .ops         = NULL,
+                         .probe       = NULL,
+                     });
+ALP_BACKEND_REGISTER(tb_wildprio,
+                     exactlow,
+                     {
+                         .silicon_ref = "vendor:soc:t1b",
+                         .vendor      = "alif",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = NULL,
+                         .probe       = NULL,
+                     });
+
+ZTEST(alp_registry, test_tiebreak_high_priority_wildcard_beats_low_priority_exact)
+{
+	const alp_backend_t *be = alp_backend_select("tb_wildprio", "vendor:soc:t1b");
+	zassert_not_null(be);
+	zassert_equal(
+	    be->priority, 200, "high-priority wildcard must win, got prio %u", (unsigned)be->priority);
+	zassert_equal(strcmp(be->vendor, "zephyr"),
+	              0,
+	              "expected the wildcard (vendor=zephyr) to beat the lower-priority "
+	              "exact backend, got %s",
+	              be->vendor);
+}
+
 /* Tier 2: at equal priority, exact silicon_ref match beats "*" wildcard. */
 ALP_BACKEND_DEFINE_CLASS(tb_exactwild);
 ALP_BACKEND_REGISTER(tb_exactwild,

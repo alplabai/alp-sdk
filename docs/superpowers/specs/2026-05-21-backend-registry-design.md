@@ -200,7 +200,7 @@ The `feedback_portable_peripheral_api` memory tightens: app code MUST go through
 
 ### Mechanism
 
-Pure-software backends register at `priority = 0` (lowest) with `silicon_ref = "*"` (wildcard). The selector treats `"*"` as fall-through: considered only when no exact-match backend exists.
+Pure-software backends register at `priority = 0` (lowest) with `silicon_ref = "*"` (wildcard). At `priority = 0` a wildcard fallback loses to any higher-priority backend (exact or wildcard) and, at equal priority, to an exact-match row — so in practice it is only picked when nothing else claims the class. (Superseded wording: earlier drafts described `"*"` as considered *only when no exact-match backend exists*; the shipped selector ranks by `priority` first and uses exact-vs-wildcard only as an equal-priority tiebreaker, so a high-priority wildcard can beat a lower-priority exact backend. See `alp_backend_select()` in `include/alp/backend.h` and `src/backend.c`.)
 
 ### File layout
 

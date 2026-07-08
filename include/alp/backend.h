@@ -33,8 +33,13 @@ extern "C" {
  * @brief One row in a per-class linker section.
  *
  * @par Special silicon_ref:
- *      "*" -- wildcard.  Considered only when no exact-match backend
- *             exists.  Used by software fallback backends.
+ *      "*" -- wildcard.  Matches any SoC.  A wildcard row does NOT
+ *             lose automatically to an exact-match row: the selector
+ *             ranks by `priority` first and only prefers exact over
+ *             wildcard as a tiebreaker at equal priority (see
+ *             alp_backend_select()).  A high-priority wildcard can
+ *             therefore win over a lower-priority exact backend.
+ *             Commonly used by software fallback backends.
  */
 typedef struct alp_backend {
 	const char *silicon_ref;
