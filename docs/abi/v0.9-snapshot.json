@@ -5835,16 +5835,11 @@
       }
     },
     "alp/console.h": {
-      "functions": {
-        "alp_console_companion_set": {
-          "hash": "322f7c690085fdba",
-          "signature": "void alp_console_companion_set(cc3501e_t *ctx);"
-        }
-      },
+      "functions": {},
       "macros": {
         "ALP_CONSOLE_H_": {
-          "hash": "849b96eaea1969dc",
-          "value": "#include <alp/chips/cc3501e.h>"
+          "hash": "43c4171daf396a08",
+          "value": "#ifdef __cplusplus"
         }
       },
       "typedefs": {}
@@ -7413,6 +7408,21 @@
           "hash": "23a43a1151fc6b0f"
         }
       }
+    },
+    "alp/ext/cc3501e/console.h": {
+      "functions": {
+        "alp_console_companion_set": {
+          "hash": "322f7c690085fdba",
+          "signature": "void alp_console_companion_set(cc3501e_t *ctx);"
+        }
+      },
+      "macros": {
+        "ALP_EXT_CC3501E_CONSOLE_H_": {
+          "hash": "078e77a680aa12a8",
+          "value": "#include <alp/chips/cc3501e.h>"
+        }
+      },
+      "typedefs": {}
     },
     "alp/ext/deepx/inference.h": {
       "functions": {
