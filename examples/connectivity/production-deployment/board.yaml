@@ -35,9 +35,9 @@ cores:
                                # placeholder slot.
   m55_hp:
     app: ./src
-    # IoT features (WiFi + MQTT + TLS) ride the per-core `iot:` block;
-    # the orchestrator translates wifi/mqtt/tls into
-    # CONFIG_ALP_SDK_IOT_WIFI / _MQTT / _SECURITY.
+    # IoT features (Wi-Fi + MQTT + TLS) ride the per-core `iot:` block;
+    # the orchestrator resolves the SoM wireless provider, then emits
+    # the CC3501E bridge backend plus MQTT/TLS Kconfig for this AEN slice.
     iot:
       wifi: true
       mqtt: true

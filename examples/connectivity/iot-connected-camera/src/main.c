@@ -119,13 +119,14 @@ static alp_wifi_t *g_wifi;
 static int stage_network_connect(void)
 {
 	printf("[iotcam] stage 4: network\n");
-	/* TODO(v0.3): on a real V2N + Zephyr build, the on-module
-     * Murata LBEE5HY2FY (Infineon CYW55513) provides Wi-Fi 6 +
-     * BLE 5.4.  Provisioning via SoftAP + alp_iot_wifi_provision()
-     * (lands v0.3.x); for the skeleton we just open the handle.
-     *
-     * v0.1 stub returns NULL — alp_iot_* is documented header-only
-     * surface in v0.1. */
+	/* TODO(v0.3): on V2N, the on-module Murata LBEE5HY2FY
+	 * (Infineon CYW55513) Wi-Fi/BLE data paths are Linux-owned on
+	 * the A55 Yocto slice.  On AEN Zephyr, the same portable surface
+	 * resolves to the CC3501E bridge backend.  For this skeleton we
+	 * just open the handle.
+	 *
+	 * v0.1 stub returns NULL — alp_iot_* is documented header-only
+	 * surface in v0.1. */
 	g_wifi = alp_wifi_open();
 	if (g_wifi == NULL) {
 		printf("[iotcam]   alp_wifi_open                 skip (v0.3 deliverable)\n");

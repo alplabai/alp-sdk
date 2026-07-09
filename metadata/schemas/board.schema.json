@@ -686,7 +686,7 @@
         "iot": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Connectivity feature toggles for this slice.",
+          "description": "Connectivity feature toggles for this slice.  Zephyr emits the provider-aware Wi-Fi/BLE backend gates plus MQTT/TLS Kconfig; Yocto emits the Linux userland/runtime package hand-off while the BSP owns provider kernel/firmware packages.",
           "properties": {
             "wifi": { "type": "boolean", "default": false },
             "mqtt": { "type": "boolean", "default": false },
