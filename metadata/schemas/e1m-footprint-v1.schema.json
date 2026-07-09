@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alplab.ai/schemas/e1m-footprint-v1.schema.json",
+  "title": "E1M module footprint (physical pad geometry)",
+  "description": "The E1M physical footprint: pad-grid positions + the standard's fixed function->pad assignment. One shared file per footprint revision; the E1M footprint is a common standard across module variants (AEN/V2N/NX9). Hand-transcribed source data (not generated). Positions are grid indices (row-letter order x column 1..34); millimetre coordinates are added from the mechanical drawing / CAD when confirmed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "standard", "footprint_rev", "provenance", "view", "a1_corner", "source", "body", "grid", "rows", "pads"],
+  "properties": {
+    "schemaVersion": { "const": "e1m-footprint-v1" },
+    "standard": { "const": "e1m" },
+    "footprint_rev": {
+      "type": "string",
+      "description": "Datasheet/standard revision this transcription follows, e.g. 'DS-AEN-001 Rev 0.8'."
+    },
+    "provenance": {
+      "enum": ["datasheet_confirmed", "web_provisional"],
+      "description": "datasheet_confirmed once mm coordinates + row order are checked against the mechanical drawing / CAD footprint; web_provisional while positions are grid-index-derived and pitch/mm are pending."
+    },
+    "view": {
+      "enum": ["top", "bottom"],
+      "description": "Which face of the module the pad grid is drawn from, per the mechanical drawing's view caption."
+    },
+    "a1_corner": {
+      "enum": ["top-left", "top-right", "bottom-left", "bottom-right"],
+      "description": "Which corner of the drawn view pad A1 (row[0] + col 1) occupies, per the mechanical drawing's view caption."
+    },
+    "source": { "type": "string", "description": "Human-readable source citation." },
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width_mm", "height_mm", "pad_count"],
+      "properties": {
+        "width_mm": { "type": "number" },
+        "height_mm": { "type": "number" },
+        "pad_count": { "type": "integer" }
+      }
+    },
+    "grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["columns", "pitch_mm"],
+      "properties": {
+        "columns": { "type": "integer", "description": "Highest column index (1-based)." },
+        "pitch_mm": { "type": ["number", "null"], "description": "Nominal pad pitch; null until confirmed from the mechanical drawing." }
+      }
+    },
+    "rows": {
+      "type": "array",
+      "description": "Authoritative ordered row-letter sequence (ALP's own non-JEDEC ordering, top->bottom). A pad's y-index is its position in this list.",
+      "items": { "type": "string", "pattern": "^[A-Z]{1,2}$" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "pads": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pad", "row", "col", "band", "type"],
+        "properties": {
+          "pad": { "type": "string", "pattern": "^[A-Z]{1,2}[0-9]{1,2}$", "description": "LGA pad id = row + col, e.g. 'A3', 'AD2'." },
+          "row": { "type": "string", "pattern": "^[A-Z]{1,2}$" },
+          "col": { "type": "integer", "minimum": 1 },
+          "band": { "enum": ["top", "bottom", "left", "right"] },
+          "type": { "enum": ["signal", "analog", "power", "ground", "nc", "reserved"] },
+          "e1m_function": {
+            "type": "string",
+            "description": "The E1M standard's fixed function on this pad (e.g. 'PWM6'). Present for muxable/functional pads; joins to pinmux-capability e1m_function. Omit for power/ground/nc/reserved."
+          },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  }
+}

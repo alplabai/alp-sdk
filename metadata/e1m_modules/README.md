@@ -51,6 +51,14 @@ by `scripts/gen_pinmux_capability.py` and drift-gated by
 SoM presets and `metadata/boards/` in one gate (CI:
 `pr-metadata-validate.yml`).
 
+The E1M connector's **physical footprint** (pad-grid geometry -- one
+shared file per footprint revision, since AEN/V2N/NX9 all share the
+same E1M connector standard) is hand-transcribed, not generated, at
+`metadata/e1m/footprint.yaml` against
+`metadata/schemas/e1m-footprint-v1.schema.json`. It is schema- and
+join-validated against every `metadata/pinmux/<family>.yaml` by
+`scripts/check_e1m_footprint.py` (CI: `pr-metadata-validate.yml`).
+
 ### Per-SKU capability restriction (`silicon_capabilities:`)
 
 Capability flags default to the **silicon's** set: the SoC JSON's
