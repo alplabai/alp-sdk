@@ -35,6 +35,7 @@ flash_args contract:
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -87,22 +88,14 @@ class YoctoWicFlash:
         bmaptool = shutil.which("bmaptool")
         dd = shutil.which("dd")
 
-        if bmaptool:
-            cmd = [bmaptool, "copy", str(artefact), str(target)]
-        elif dd:
-            bs = (ctx.flash_args or {}).get("bs") or "4M"
-            if compress == "gz":
-                cmd = ["sh", "-c",
-                       f"gunzip -c {artefact} | "
-                       f"dd of={target} bs={bs} conv=fsync status=progress"]
-            elif compress == "xz":
-                cmd = ["sh", "-c",
-                       f"xz -dc {artefact} | "
-                       f"dd of={target} bs={bs} conv=fsync status=progress"]
-            else:
-                cmd = [dd, f"if={artefact}", f"of={target}", f"bs={bs}",
-                       "conv=fsync", "status=progress"]
-        else:
+        confirm = bool((ctx.flash_args or {}).get("confirm")) or \
+            os.environ.get("ALP_FLASH_FORCE") == "1"
+        # Only a confirmed, non-dry-run flash actually shells out -- a
+        # dry-run (or an unconfirmed call) just reports the plan, so it
+        # must not require bmaptool/dd to be installed on this host.
+        will_execute = confirm and not ctx.dry_run
+
+        if not bmaptool and not dd and will_execute:
             return FlashResult(
                 ok=False,
                 elapsed_s=time.monotonic() - start,
@@ -112,8 +105,28 @@ class YoctoWicFlash:
                          "a host with coreutils."),
             )
 
-        confirm = bool((ctx.flash_args or {}).get("confirm")) or \
-            os.environ.get("ALP_FLASH_FORCE") == "1"
+        bs = (ctx.flash_args or {}).get("bs") or "4M"
+
+        if bmaptool or (not dd and not will_execute):
+            # Either bmaptool is really present, or neither tool is on
+            # PATH and this is only a plan (dry-run / unconfirmed) --
+            # show the preferred (bmaptool) shape of the command.
+            tool = bmaptool or "bmaptool"
+            cmd = [tool, "copy", str(artefact), str(target)]
+        elif compress == "gz":
+            cmd = ["sh", "-c",
+                   f"gunzip -c {shlex.quote(str(artefact))} | "
+                   f"dd of={shlex.quote(str(target))} "
+                   f"bs={shlex.quote(str(bs))} conv=fsync status=progress"]
+        elif compress == "xz":
+            cmd = ["sh", "-c",
+                   f"xz -dc {shlex.quote(str(artefact))} | "
+                   f"dd of={shlex.quote(str(target))} "
+                   f"bs={shlex.quote(str(bs))} conv=fsync status=progress"]
+        else:
+            dd_bin = dd or "dd"
+            cmd = [dd_bin, f"if={artefact}", f"of={target}", f"bs={bs}",
+                   "conv=fsync", "status=progress"]
 
         if ctx.dry_run or not confirm:
             why = ("dry-run" if ctx.dry_run

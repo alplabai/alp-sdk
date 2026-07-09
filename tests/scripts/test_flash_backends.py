@@ -13,6 +13,7 @@ Run locally:
 
 from __future__ import annotations
 
+import shlex
 import sys
 import types
 from pathlib import Path
@@ -210,6 +211,69 @@ def test_yocto_wic_without_confirm_dry_runs_even_when_dry_run_false() -> None:
     assert result.ok is True                   # dry-runs, doesn't fail
     assert run_mock.call_count == 0
     assert "confirm" in result.message.lower()
+
+
+def test_yocto_wic_dry_run_succeeds_without_bmaptool_or_dd() -> None:
+    """#465: a dry-run plan must not require bmaptool/dd to be
+    installed on this host -- only a confirmed, real flash does."""
+    backend = YoctoWicFlash()
+    with patch("flash_backends.yocto_wic.shutil.which",
+               return_value=None), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb", "confirm": True},
+            dry_run=True,
+            artefact="/tmp/image.wic",
+        ))
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    assert "bmaptool" in " ".join(result.command)
+    assert "/dev/sdb" in " ".join(result.command)
+
+
+def test_yocto_wic_unconfirmed_plan_succeeds_without_bmaptool_or_dd() -> None:
+    """Same as above but via the unconfirmed (not dry_run) path."""
+    backend = YoctoWicFlash()
+    with patch("flash_backends.yocto_wic.shutil.which",
+               return_value=None), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb"},          # confirm omitted
+            dry_run=False,
+            artefact="/tmp/image.wic",
+        ))
+    assert result.ok is True
+    assert run_mock.call_count == 0
+
+
+def test_yocto_wic_shell_quotes_metachar_artefact_path() -> None:
+    """#466: artefact/target/bs values interpolated into the `sh -c`
+    pipeline must be shell-quoted so paths with spaces/metacharacters
+    can't break out of the intended command."""
+    backend = YoctoWicFlash()
+    dangerous_artefact = "/tmp/evil dir/image$(rm -rf ~).wic.gz"
+    with patch("flash_backends.yocto_wic.shutil.which",
+               side_effect=lambda t: "/bin/dd" if t == "dd" else None), \
+         patch("flash_backends.yocto_wic.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb", "confirm": True},
+            artefact=dangerous_artefact,
+        ))
+    assert result.ok is True
+    invoked_cmd = run_mock.call_args[0][0]
+    assert invoked_cmd[0] == "sh"
+    assert invoked_cmd[1] == "-c"
+    shell_str = invoked_cmd[2]
+    # The dangerous substring must appear only inside a quoted token,
+    # never as bare shell syntax that `$(...)` could expand.
+    assert shlex.quote(str(Path(dangerous_artefact))) in shell_str
+    # Round-trip through shlex to prove the pipeline parses to the
+    # expected literal argv with no injected command.
+    parsed = shlex.split(shell_str)
+    assert parsed[0] == "gunzip"
+    assert parsed[2] == str(Path(dangerous_artefact))
+    assert "rm" not in [tok for tok in parsed if tok not in (str(Path(dangerous_artefact)),)]
 
 
 # ---------------------------------------------------------------------
