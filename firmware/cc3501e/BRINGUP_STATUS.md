@@ -98,6 +98,20 @@ unit. The validated host-side workaround is to hard-reset the CC3501E after each
 power-cycle: drive WIFI_EN, let the first boot settle, then pulse nRESET. This
 is implemented in `cc3501e_hard_reset` / `cc3501e_reset`.
 
+**Bench read 2026-07-09 (`e1m-aen-evk-01`, XDS110 `L50015YR` present):** the
+unit's activation record (`activation_report.txt` `vendor_fuse_report`) reports
+`boot_sector_programmed = 0`, with every `request_validation_status` /
+`request_execution_status` entry `= 0` — the mis-activation signature. The auth
+fuses themselves are set (`action_request_authentication_enable = 1`,
+`vendor_sbl_container_enable = 1`, `vendor_container_authentication_enable = 1`),
+so the vendor SBL will authenticate an image but the **cold-launch boot sector
+was never programmed**. This is why cold swap-boot cannot be exercised here: the
+bench unit needs re-activation through the vendor GUI wizard first. Note also
+that flashing the bring-up app does not discriminate activation state — its
+startup `cc3501e_hard_reset` (the WARM workaround above) drives the reset on
+every boot and masks the cold-launch binding; only a true cold POR swap tests
+it.
+
 ## 6. GPIO proxy
 
 GPIO proxy and camera-enable opcodes are shipped. The firmware guards reserved
