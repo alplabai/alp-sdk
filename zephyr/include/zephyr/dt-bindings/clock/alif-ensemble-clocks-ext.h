@@ -136,7 +136,7 @@
  * inventing a register gate.  The drivers are now PORTED to the v4.4 video API
  * (the ALP_VIDEO_ALIF_BROKEN gate is retired), but no real clock is programmed
  * (the dummy clock above).  Re-author the real IDs when the camera stack is
- * bench-brought-up (task #21).  vendor-ext, BENCH-UNVERIFIED.
+ * bench-brought-up.  vendor-ext, BENCH-UNVERIFIED.
  */
 #define ALIF_CPI_CLK      ALIF_CLK(2U)
 #define ALIF_CSI_CLK      ALIF_CLK(2U)
@@ -153,7 +153,7 @@
  * module 0 / en_mask 0 -> alif_clock_control_on() no-ops at the !EN_MASK guard),
  * so the cdc200/mipi_dsi DT nodes are well-formed without inventing a register
  * gate.  Re-author the real IDs when the display stack gets a driver + bench
- * bring-up (task #21).  vendor-ext, BENCH-UNVERIFIED.
+ * bring-up.  vendor-ext, BENCH-UNVERIFIED.
  */
 #define ALIF_DPI_CLK              ALIF_CLK(2U)
 #define ALIF_DSI_CLK              ALIF_CLK(2U)

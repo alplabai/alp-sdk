@@ -42,7 +42,7 @@
  * vendor-ext, BENCH-UNVERIFIED.  Runtime capture HW-blocked on this batch
  * (no camera sensor wired).
  *
- * @par Tracking: github.com/alplabai/alp-sdk/issues/21
+ * @par Tracking: github.com/alplabai/alp-sdk/issues/223
  */
 
 #include <errno.h>

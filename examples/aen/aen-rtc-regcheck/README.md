@@ -131,4 +131,4 @@ west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
    advance` -> check the VBAT clock-gate (above).
 
 **BENCH-VALIDATION app -- not a customer teaching example.**
-ADR 0017 Tier-2 (consume an opt-in fork driver), INTERIM, task #21.
+ADR 0017 Tier-2 (consume an opt-in fork driver), INTERIM.

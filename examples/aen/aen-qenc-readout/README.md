@@ -50,4 +50,4 @@ stays 0 because no encoder shaft is wired to the QEC0 pads on this bench.
 >    (The QEC0 X/Y input pads now carry `input-enable` — the upstream pad
 >    read-enable bit — so the input buffers sense; that part is no longer a gap.)
 
-Tier-2 retires onto the opt-in fork once a real encoder is decoded (task #21).
+Tier-2 retires onto the opt-in fork once a real encoder is decoded.

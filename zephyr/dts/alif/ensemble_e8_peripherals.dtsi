@@ -173,7 +173,7 @@
 	 * master node would be a dead end.  That trio is ADR 0017 Tier-3: the
 	 * Secure Enclave masters the bus and the reads are surfaced through Alif SE
 	 * services as a portable board-info/manifest API (tasks #16/#17).  The
-	 * removed alif,lpi2c driver (task #21) was the master-TX-only dead end.
+	 * removed alif,lpi2c driver was the master-TX-only dead end.
 	 * A next-rev board moves the housekeeping bus to a master-capable I2C
 	 * (LPI2C0 -> I2C0 on P7_0/P7_1 -- task #11).
 	 */
@@ -239,7 +239,7 @@
 	 * fork's e1.dtsi; ALIF_SPI_CLK is a frequency-only dummy (no gate reg).
 	 *
 	 * ADR 0017 Tier-2 (fork-driver copy; hal_alif has no SSI lib) -- INTERIM,
-	 * retires onto the fork once spi0 is repointed + bench-verified (task #21).
+	 * retires onto the fork once spi0 is repointed + bench-verified.
 	 *
 	 * BENCH-UNVERIFIED.  Netlist-grounded as the customer-facing edge SPI master
 	 * (SoC P5_x); a board enables it (status="okay") + supplies pinctrl + the CS
@@ -285,7 +285,7 @@
 	 * write, and the driver does not write VBAT either -- so on this build path
 	 * the gate is enabled by no visible code.  Confirm on the E8 bench whether
 	 * the always-on VBAT domain already has it running (read CCVR; if it never
-	 * advances, the VBAT gate is the cause).  Tier-2, INTERIM, task #21.
+	 * advances, the VBAT gate is the cause).  Tier-2, INTERIM.
 	 */
 	rtc0: lprtc@42000000 {
 		compatible = "snps,dw-apb-rtc";
@@ -323,8 +323,7 @@
 	 * in the always-on VBAT TIMER_CLKSEL (0x1A609004) from the `clock-source`
 	 * prop.  Whether the chosen VBAT LF source is itself running on the
 	 * alp-sdk upstream-Zephyr build path is bench-TBD (read CURRENTVAL; if it
-	 * never advances, the source clock is the cause).  Tier-1.5, INTERIM,
-	 * task #21.
+	 * never advances, the source clock is the cause).  Tier-1.5, INTERIM.
 	 */
 	lptimer0: lptimer@42001000 {
 		compatible = "alif,lptimer";
@@ -348,7 +347,7 @@
 	 * header (AE822FA0E5597 rtss_he soc.h: CRC0_BASE 0x48107000,
 	 * CRC1_BASE 0x48108000; CRC_Type size 0x100).  Disabled by default; a
 	 * board / example enables an instance (status = "okay").  ADR 0017
-	 * Tier-1.5 (in-tree-thin over the silicon).  BENCH-UNVERIFIED, task #21.
+	 * Tier-1.5 (in-tree-thin over the silicon).  BENCH-UNVERIFIED.
 	 */
 	crc0: crc@48107000 {
 		compatible = "alif,crc";
@@ -620,7 +619,7 @@
 	 *
 	 * ADR 0017 Tier-2 (fork-driver copy; hal_alif has no ADC class driver) --
 	 * INTERIM, retires onto the fork once the nodes are repointed +
-	 * bench-verified (task #21).  BENCH-UNVERIFIED.
+	 * bench-verified.  BENCH-UNVERIFIED.
 	 */
 	adc12_0: adc@49020000 {
 		compatible = "alif,adc";
@@ -787,7 +786,7 @@
 	 *
 	 * ADR 0017 Tier-2 (fork-driver copy; hal_alif has no DAC class driver) --
 	 * INTERIM, retires onto the fork once the nodes are repointed +
-	 * bench-verified (task #21).  BENCH-UNVERIFIED.
+	 * bench-verified.  BENCH-UNVERIFIED.
 	 */
 	dac0: dac@49028000 {
 		compatible = "alif,dac";
@@ -858,7 +857,7 @@
 	 *
 	 * ADR 0017 Tier-2 (clean-room driver; hal_alif has no comparator class
 	 * driver) -- INTERIM, retires onto the fork once a fork comparator driver is
-	 * available + bench-verified (task #21).  BENCH-UNVERIFIED.
+	 * available + bench-verified.  BENCH-UNVERIFIED.
 	 */
 	cmp0: cmp@49023000 {
 		compatible = "alif,cmp";
@@ -905,7 +904,7 @@
 	 * status="disabled" here -- a board overlay enables them -- and even then NO
 	 * real clock is programmed (the dummy clock above).  Re-author the real
 	 * camera clock IDs via alif-ensemble-clocks-ext.h when the stack is
-	 * bench-brought-up (task #21).
+	 * bench-brought-up.
 	 *
 	 * NO pinctrl-0: the fork cam node references &pinctrl_cam8 (the 8-bit CPI
 	 * data pads), not defined in this tree; the driver applies pinctrl only IF
@@ -916,7 +915,7 @@
 	 * ADR 0017 Tier-2 (fork-driver copies; upstream + hal_alif ship no camera
 	 * video / mipi_dphy drivers) -- INTERIM, retires onto the fork once the
 	 * nodes are repointed + the drivers ported to the v4.4 video API +
-	 * bench-verified (task #21).  Runtime frame CAPTURE is HW-blocked on this
+	 * bench-verified.  Runtime frame CAPTURE is HW-blocked on this
 	 * batch (no camera sensor wired).  BENCH-UNVERIFIED.
 	 */
 	dphy: d-phy@49033000 {
@@ -977,7 +976,7 @@
 	 * default n.  Left status="disabled": enabling it needs the libisp
 	 * wrapper bumped (FLAGGED hal_alif version mismatch -- see the Kconfig)
 	 * + a camera -> isp -> sink media-controller graph (bench-unknown).
-	 * BENCH-UNVERIFIED.  Task #21.
+	 * BENCH-UNVERIFIED.
 	 */
 	isp: isp@49046000 {
 		compatible = "vsi,isp-pico";
@@ -1105,8 +1104,7 @@
 	 * "rx"; seservice0s mhu@40050000 IRQ 38 "tx") -- the same SoC, identical
 	 * addresses.  No clocks/pinctrl: the mailboxes are core-internal (no pads, no
 	 * peripheral clock gate).  status="disabled" by default; an app overlay okays
-	 * the pair + the se_service root node below.  ADR 0017 Tier-2 (INTERIM,
-	 * task #21).  BENCH-UNVERIFIED.
+	 * the pair + the se_service root node below.  ADR 0017 Tier-2 (INTERIM).  BENCH-UNVERIFIED.
 	 *
 	 * (seservice1r/s @ 0x40060000/0x40070000 IRQ 39/40 are the SE<->second-RTSS
 	 * mailboxes; the rtsshp_rtsshe_* MHUs @ 0x40080000.. are inter-RTSS -- neither

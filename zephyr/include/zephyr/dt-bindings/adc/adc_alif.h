@@ -25,7 +25,7 @@
  *
  * ADR 0017 Tier-2: ships in-tree alongside the vendored fork driver (the fork
  * binding header is missing upstream).  Retires onto the fork header once the
- * fork publishes it and adc nodes are repointed (task #21).
+ * fork publishes it and adc nodes are repointed.
  */
 
 #ifndef ZEPHYR_INCLUDE_DT_BINDINGS_ADC_ADC_ALIF_H_

@@ -28,7 +28,7 @@ endif()
 # slot0/slot1; this fork copy sets FLASH_HAS_DRIVER_ENABLED.  Pure CMSIS
 # register/memory access: no private upstream header and no hal_alif library,
 # so no extra include path.  Binding under zephyr/dts/bindings/flash_controller/;
-# node in the board overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# node in the board overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_sources_ifdef(CONFIG_MRAM_FLASH_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_mram_alif.c)
 
@@ -195,7 +195,7 @@ if(CONFIG_HWSEM_ALIF)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/misc/alif_hwsem)
 endif()
 
-# (Retired, task #21 / ADR 0017) No Alif LPI2C driver: LPI2C0 is slave-only
+# (Retired per ADR 0017) No Alif LPI2C driver: LPI2C0 is slave-only
 # (TRM §3.17.4), so a master driver is a dead end; the housekeeping trio is
 # Tier-3 (Alif SE services), edge I2C is Tier-1 upstream i2c_dw.
 
@@ -282,7 +282,7 @@ zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_LPTIMER
 # USE_ALIF_HAL_ANALOG to pull that in.  The driver reuses upstream's private
 # adc_context.h, so put drivers/adc on the include path (the spi_context.h
 # precedent above).  Bindings under zephyr/dts/bindings/adc/; nodes in the E8
-# SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# SoC overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_ADC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/adc/adc_alif.c)
 if(CONFIG_ADC_ALIF)
@@ -295,7 +295,7 @@ endif()
 # USE_ALIF_HAL_ANALOG to pull that in (shared with ADC_ALIF).  Unlike the ADC, the
 # DAC driver pulls in no private upstream context header, so no extra include dir
 # is needed.  Bindings under zephyr/dts/bindings/dac/; nodes in the E8 SoC
-# overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dac/dac_alif.c)
 
@@ -321,7 +321,7 @@ zephyr_library_sources_ifdef(CONFIG_CRC_ALIF
 # that in (shared with ADC_ALIF / DAC_ALIF).  No private upstream context header,
 # so no extra include dir is needed.  Binding under
 # zephyr/dts/bindings/comparator/; nodes in the E8 SoC overlay.  ADR 0017 Tier-2
-# (INTERIM, task #21).
+# (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_CMP_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/comparator/comparator_alif.c)
 
@@ -331,7 +331,7 @@ zephyr_library_sources_ifdef(CONFIG_CMP_ALIF
 # clock_control/pinctrl (no hal_alif library, like flash_mram_alif); implements the
 # Zephyr DMIC API.  Binding zephyr/dts/bindings/audio/alif,alif-pdm.yaml + the
 # private header zephyr/include/zephyr/drivers/pdm/pdm_alif.h; node in the E8 SoC
-# overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_ALIF_PDM
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/audio/alif_pdm.c)
 if(CONFIG_ALIF_PDM)
@@ -348,7 +348,7 @@ endif()
 # DesignWare I2S driver.  Implements the standard Zephyr I2S API; FIFO/interrupt
 # driven (no DMA subsystem dependency -- see CONFIG_I2S_DW).  Binding
 # zephyr/dts/bindings/i2s/snps,designware-i2s.yaml; node in the app overlay.
-# ADR 0017 Tier-2 (INTERIM, task #21).
+# ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_I2S_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2s/i2s_dw.c)
 if(CONFIG_I2S_DW)
@@ -438,7 +438,7 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 # Zephyr clock_control / pinctrl / can.h class APIs; it needs only the
 # soc_common.h supplied by our Ensemble soc-bridge above (no hal_alif lib, no
 # extra include path).  Binding under zephyr/dts/bindings/can/cast,can.yaml;
-# node in the E8 SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# node in the E8 SoC overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_CAN_ALIF_CAST
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/can/can_cast.c)
 

@@ -38,8 +38,9 @@
  *     routes through this backend's latched state today and grows
  *     real MMIO writes when the N44 port lands.
  *
- * @par Tracking: github.com/alplabai/alp-sdk/issues/20 (sensor path)
- * @par Tracking: github.com/alplabai/alp-sdk/issues/21 (ISP path)
+ * Sensor and ISP register-map work here is blocked on the Renesas RZ/V2N
+ * ISP register map (see the "actual register poke" TBD above); no open
+ * tracking issue exists yet for that follow-up.
  */
 
 #include <errno.h>

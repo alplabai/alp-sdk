@@ -118,7 +118,7 @@ Bench-verification on real E8 silicon remains the acceptance gate for every tier
 
   The migration is deliberate (a planned PR per peripheral), not a revert-storm —
   working code is not removed before its replacement is proven + bench-verified.
-  Tracked as task #21.
+  Tracked per-peripheral in this section (no single umbrella tracking issue).
 - **New AEN peripheral work follows the tiers from day one** — but Tier 1.5 needs
   a HW library that actually covers the *data path*, verified per peripheral:
   - **NPU (task #19)** and **ISP (task #20)** are **Tier 1.5** — `hal_alif` ships

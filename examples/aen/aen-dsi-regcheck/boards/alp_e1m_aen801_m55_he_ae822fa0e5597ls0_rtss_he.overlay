@@ -22,7 +22,7 @@
  * these with ALIF_DPI_CLK / ALIF_DSI_CLK / ALIF_CDC200_PIX_SYST_ACLK /
  * ALIF_MIPI_TXDPHY_CLK in the fork 7-arg encoding, which MUST NOT be copied onto
  * the upstream clockctrl (wrong register block) -- so the real IDs are deferred
- * to the driver-port + bench bring-up (task #21).
+ * to the driver-port + bench bring-up.
  *
  * SCOPE: this proves the chain BINDS (DT_HAS_*_ENABLED + phandle wiring).  LIVE
  * display is HW-blocked: no display-class driver yet, and the AEN801 panel part

@@ -57,4 +57,4 @@ on SoCs whose clockctrl lacks `.set_rate` (e.g. `native_sim`).
 
 See [[project_pending_hw_configs]]. Folding the CGU 76.8 MHz enable + the divider
 `.set_rate` into a Tier-1.5 clockctrl patch is the clean follow-up; Tier-2 retires
-onto the opt-in fork once the amp chain is acoustically validated (task #21).
+onto the opt-in fork once the amp chain is acoustically validated.

@@ -7,7 +7,7 @@
  * with upstream's arm,dma-pl330 (no symbol/DT collision, the spi_dw_alif pattern).
  * Enables host-side DMA for continuous SPI streams (the CC3501E bridge).
  * Retires onto the opt-in sdk-alif fork once the DMA nodes repoint to the fork
- * compatibles AND bench-verified (task #21).
+ * compatibles AND bench-verified.
  */
 /*
  * Copyright 2020 Broadcom

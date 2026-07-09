@@ -8,7 +8,7 @@
 # alp-sdk in-tree "arm,mhuv2" driver).  Property shape matches Alif's
 # zephyr_alif fork binding (the same hal_alif consumer); upstream Zephyr v4.4
 # ships no such binding, so the alp-sdk carries this clean re-author.
-# ADR 0017 Tier-2 (INTERIM, task #21).
+# ADR 0017 Tier-2 (INTERIM).
 
 description: Secure Enclave services through Arm MHUv2 on Alif Ensemble SoCs
 

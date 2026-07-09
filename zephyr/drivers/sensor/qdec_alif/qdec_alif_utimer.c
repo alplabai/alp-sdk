@@ -4,7 +4,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * ====== ADR 0017 Tier-2 (vendored VERBATIM fork-driver copy, INTERIM, task #21) ======
+ * ====== ADR 0017 Tier-2 (vendored VERBATIM fork-driver copy, INTERIM) ======
  * The Alif Ensemble UTIMER quadrature-decoder is driven by a vendored copy of
  * the Apache-2.0 Alif qdec sensor driver (drivers/sensor/qdec_alif/
  * qdec_alif_utimer.c, compatible "alif,utimer-qdec").  Upstream Zephyr v4.4
@@ -12,8 +12,8 @@
  * quadrature block -- only the register-helper library (drivers/utimer/include/
  * utimer.h, alif_utimer_*) this file calls -- so the qdec source is carried
  * in-tree VERBATIM so it survives a `west update`.  Retire onto the opt-in
- * sdk-alif fork compatible once the qdec node is repointed AND bench-verified
- * (task #21).  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * sdk-alif fork compatible once the qdec node is repointed AND bench-verified.
+ * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
  * Node shape (matches the sibling counter/PWM utimer drivers): the

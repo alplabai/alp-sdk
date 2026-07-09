@@ -12,7 +12,7 @@
 # RETIRED), so they build in when their DT node is enabled.  The overlay enables
 # csi/dphy/arx3a0 AND cam (all status="okay"): it now supplies the fork-only
 # global-base + the cam->csi->arx3a0 graph, so cam instantiates too and the PASS
-# gate requires CAM_BOUND (task #21).
+# gate requires CAM_BOUND.
 # Live frame capture is HW-blocked on this batch (no camera sensor wired).
 # See src/main.c + the board overlay.
 

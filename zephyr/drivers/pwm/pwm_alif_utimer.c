@@ -23,7 +23,7 @@
  * fork: there is no fork PWM driver to consume (bindings only), and hal_alif's
  * alif_utimer_* library exposes no Zephyr device model -- so this thin shell is
  * the only path to AEN PWM.  INTERIM until E8 bench, then permanent.  See
- * docs/adr/0017 + task #21.
+ * docs/adr/0017.
  *
  * Written over the hal_alif register-poke library (modules/hal/alif
  * drivers/utimer/{include/utimer.h,src/utimer.c}); that library exposes NO

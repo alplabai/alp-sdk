@@ -111,4 +111,4 @@ the matching board target (Zephyr's per-board overlay convention) -- it
    crc mismatch` -> follow the reflect/invert bench-confirm steps above.
 
 **BENCH-VALIDATION app -- not a customer teaching example.**
-ADR 0017 Tier-1.5 (clean-room in-tree-thin over the silicon), task #21.
+ADR 0017 Tier-1.5 (clean-room in-tree-thin over the silicon).

@@ -17,7 +17,7 @@
  * fork: the fork ships UTIMER bindings only (no counter driver), and hal_alif's
  * alif_utimer_* library exposes no Zephyr device model -- so this thin shell is
  * the only path to an AEN hardware counter.  Promoted from INTERIM to permanent
- * per the 2026-06-17 E8 bench pass.  See docs/adr/0017 + task #21.
+ * per the 2026-06-17 E8 bench pass.  See docs/adr/0017.
  *
  * Upstream Zephyr v4.4 ships NO Alif counter/timer driver, and the Apache-2.0
  * alifsemi/zephyr_alif fork ships only the DTS bindings + nodes for the UTIMER
