@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Bench slot0 SES-boot MRAM flash erase/program/readback proof for the
+# E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): drives the alp-sdk Tier-2
+# flash_mram_alif driver ("alif,mram-flash-controller") through the portable
+# Zephyr flash_* API against the safe `storage` partition (person_detect slot0
+# restored after).  Closes issue #512.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-mram-flash-validate
+  description: |
+    Bench slot0 SES-boot MRAM flash (alif,mram-flash-controller)
+    erase/program/readback proof for the E1M-AEN801 (Alif Ensemble E8,
+    Cortex-M55-HE): exercises the alp-sdk Tier-2 flash_mram_alif driver through
+    the portable Zephyr flash_* class API against the safe `storage`
+    fixed-partition and verifies the written pattern byte-exact.  Flow-D slot0
+    flash; the canonical person_detect slot0 is restored after the run.
+
+tests:
+  alp_sdk.examples.aen.mram_flash_validate.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - flash
+      - mram
+    build_only: true   # the erase/program/readback check is a bench flash, not a CI run.
