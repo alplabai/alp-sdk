@@ -7,10 +7,12 @@
  * @file pwm.h
  * @brief Alp SDK pulse-width-modulation abstraction.
  *
- * The E1M standard reserves eight PWM channels (`PWM0..PWM7` in
- * `<alp/e1m_pinout.h>`).  Every E1M-conformant SoM routes them; the
- * studio's pin allocator binds them to the SoC's underlying timer/
- * compare blocks.  Apps see a uniform `alp_pwm_*` surface.
+ * The E1M and E1M-X standards each reserve eight PWM channels.  E1M
+ * firmware uses `ALP_E1M_PWM0..7` from `<alp/e1m_pinout.h>`; E1M-X
+ * firmware uses `ALP_E1M_X_PWM0..7` from `<alp/e1m_x_pinout.h>`.
+ * The studio's pin allocator binds the selected form-factor ID to the
+ * SoC's underlying timer/compare blocks.  Apps see a uniform
+ * `alp_pwm_*` surface.
  *
  * Backends:
  *   - Zephyr   : `pwm_*` driver class.
@@ -20,7 +22,7 @@
  * Typical usage:
  * @code
  *     alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
- *         .channel_id = ALP_E1M_PWM0,
+ *         .channel_id = ALP_E1M_PWM0,     // E1M; use ALP_E1M_X_PWM0 on E1M-X
  *         .period_ns  = 1000000,               // 1 kHz
  *         .polarity   = ALP_PWM_POLARITY_NORMAL,
  *     });
@@ -77,8 +79,8 @@ typedef struct alp_pwm alp_pwm_t;
 
 /** Configuration passed to @ref alp_pwm_open. */
 typedef struct {
-	uint32_t           channel_id; /**< Studio-resolved PWM channel index (ALP_E1M_PWM0..PWM7). */
-	uint32_t           period_ns;  /**< PWM period in nanoseconds. 0 = use DT default. */
+	uint32_t channel_id; /**< Form-factor PWM instance ID: ALP_E1M_PWM0..7 or ALP_E1M_X_PWM0..7. */
+	uint32_t period_ns;  /**< PWM period in nanoseconds. 0 = use DT default. */
 	alp_pwm_polarity_t polarity;
 } alp_pwm_config_t;
 
@@ -91,8 +93,9 @@ typedef struct {
  * the caller sets a non-zero duty via @ref alp_pwm_set_duty.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL; @c channel_id must
- *                 be < @ref ALP_E1M_PWM_COUNT (ALP_E1M_PWM0..PWM7) and
- *                 resolvable to a ready Zephyr pwm device.
+ *                 be less than the selected form factor's PWM count
+ *                 (@ref ALP_E1M_PWM_COUNT or @ref ALP_E1M_X_PWM_COUNT)
+ *                 and resolvable to a ready Zephyr pwm device.
  * @return Open handle on success, or NULL on any of:
  *         - @p cfg is NULL
  *         - @c channel_id out of range or alias unset

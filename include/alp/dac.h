@@ -24,7 +24,7 @@
  * Typical usage:
  * @code
  *     alp_dac_t *out = alp_dac_open(&(alp_dac_config_t){
- *         .channel_id = ALP_E1M_DAC0,
+ *         .channel_id = ALP_E1M_DAC0,     // E1M; use ALP_E1M_X_DAC0 on E1M-X
  *         .initial_mv = 0u,
  *     });
  *     alp_dac_write_mv(out, 1650u);   // mid-rail on a 3.3 V reference
@@ -53,7 +53,7 @@ typedef struct alp_dac alp_dac_t;
 
 /** Configuration passed to @ref alp_dac_open. */
 typedef struct {
-	uint32_t channel_id; /**< Studio-resolved DAC channel index (ALP_E1M_DAC0..DAC1). */
+	uint32_t channel_id; /**< Form-factor DAC instance ID: ALP_E1M_DAC0..1 or ALP_E1M_X_DAC0..1. */
 	uint16_t initial_mv; /**< Initial output in millivolts; 0 = ground. */
 } alp_dac_config_t;
 
@@ -65,8 +65,9 @@ typedef struct {
  * a free handle from the SDK's pool, and primes the output.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL; @c channel_id must
- *                 be < @ref ALP_E1M_DAC_COUNT and resolvable on the
- *                 active SoM.
+ *                 be less than the selected form factor's DAC count
+ *                 (@ref ALP_E1M_DAC_COUNT or @ref ALP_E1M_X_DAC_COUNT)
+ *                 and resolvable on the active SoM.
  * @return Open handle on success, or NULL on any of:
  *         - @p cfg is NULL
  *         - @c channel_id out of range or unresolvable
