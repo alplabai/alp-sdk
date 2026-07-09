@@ -19,7 +19,7 @@
 #   PUBLIC_KEY=... SIGNING_MODULE=... CONF_BIN=... TOOL_SETTINGS=... ./deploy_validate.sh
 set -euo pipefail
 
-TOOLBOX="${TOOLBOX:-/home/caner/ti/simplelink_wifi_toolbox_4_2_4/simplelink_wifi_toolbox_lin_4_2_4/simplelink-wifi-toolbox}"
+TOOLBOX="${TOOLBOX:?set TOOLBOX to the staged simplelink-wifi-toolbox binary (simplelink_wifi_toolbox_*/simplelink_wifi_toolbox_lin_*/simplelink-wifi-toolbox)}"
 PUBLIC_KEY="${PUBLIC_KEY:?stage + set: Alp validation public key (PEM)}"
 SIGNING_MODULE="${SIGNING_MODULE:?stage + set: sign.py shim (keys wired to the validation keypair)}"
 CONF_BIN="${CONF_BIN:?stage + set: cc35xx-conf.bin}"
@@ -49,7 +49,8 @@ XDS_SERIAL="${XDS_SERIAL:-L50015YR}"     # CC3501E XDS110 on this bench
 _e=$(date +%s)
 VERSION="${VERSION:-0.$(( (_e >> 16) & 255 )).$(( (_e >> 8) & 255 )).$(( _e & 255 ))}"
 
-OUT=/home/caner/alp-sdk/firmware/cc3501e/build/ti
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUT="$(cd "$HERE/.." && pwd)/build/ti"
 VOUT="$OUT/cc3501e-bridge.out"
 PKG="$OUT/bench"
 [ -f "$VOUT" ] || { echo "missing $VOUT -- run: firmware/cc3501e/ti/build_ti.sh --wifi"; exit 1; }

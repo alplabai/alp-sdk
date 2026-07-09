@@ -13,22 +13,25 @@
 #
 # Usage:
 #   ./build_ti.sh                                  # default SPI bridge, no WiFi/BLE
-#   SDK_DIR=/home/caner/ti/simplelink_wifi_sdk_10_10_01_08 ./build_ti.sh --wifi
+#   SDK_DIR=<path-to-simplelink_wifi_sdk_10_10_01_08> ./build_ti.sh --wifi
 #   ./build_ti.sh --wifi --ble                     # + WiFi host driver + NimBLE
 #   ./build_ti.sh --transport sdio --ota-selftest
+#
+# All tool/SDK locations are staged locally (not in the repo) -- set them via
+# env vars or the matching --flag below; there is no default install path.
 #
 # Output: <repo>/firmware/cc3501e/build/ti/cc3501e-bridge.{out,hex,bin}
 set -euo pipefail
 
-# --- config (override via env or flags) --------------------------------------
-SDK_DIR="${SDK_DIR:-/home/caner/ti/simplelink_wifi_sdk_10_10_01_08}"
-TICLANG_ROOT="${TICLANG_ROOT:-/home/caner/ti/ti-cgt-armllvm_5.1.1.LTS}"
-SYSCONFIG_CLI="${SYSCONFIG_CLI:-/home/caner/ti/sysconfig-1.28.0/sysconfig_cli.sh}"
+# --- config (set via env or flags -- no default install path is assumed) -----
+SDK_DIR="${SDK_DIR:-}"
+TICLANG_ROOT="${TICLANG_ROOT:-}"
+SYSCONFIG_CLI="${SYSCONFIG_CLI:-}"
 # SimpleLink Wi-Fi Toolbox -- provides the SysConfig MemoryConfigurator module
 # (/ti/memoryconfig/MemoryConfigurator) that the main SDK product does NOT ship.
 # Passed as a SECOND --product to generate the flash-map (see the demo makefile's
 # SIMPLELINK_WIFI_TOOLBOX_INSTALL_DIR). TOOLBOX = the dir holding .metadata/product.json.
-TOOLBOX="${TOOLBOX:-/home/caner/ti/simplelink_wifi_toolbox_4_2_4/simplelink_wifi_toolbox_lin_4_2_4}"
+TOOLBOX="${TOOLBOX:-}"
 TRANSPORT="spi"          # spi | sdio
 OTA_SELFTEST=0
 WIFI_HOST_DRIVER=0
@@ -50,6 +53,10 @@ done
 # -Ble implies -WifiHostDriver (shared HIF -> Wlan_Start first; NimBLE reuses the
 # Wi-Fi OSI/Report seam). See build_ti.ps1 lines 33-37.
 [ "$BLE" = 1 ] && WIFI_HOST_DRIVER=1
+
+for v in SDK_DIR TICLANG_ROOT SYSCONFIG_CLI TOOLBOX; do
+  [ -n "${!v}" ] || { echo "set $v (env var or matching --flag) to the staged TI SDK/toolchain/toolbox -- see docs" >&2; exit 2; }
+done
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fw="$(cd "$HERE/.." && pwd)"                 # firmware/cc3501e
