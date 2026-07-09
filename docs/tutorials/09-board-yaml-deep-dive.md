@@ -519,9 +519,9 @@ diagnostics:
 ```
 
 Run `python3 scripts/validate_board_yaml.py --input board.yaml`
-to lint before building.  Exit 0 = ok; exit 1 = schema error
-(JSON-pointer location in the message); exit 2 = missing
-preset; exit 3 = hw_rev incompatible with SDK version.
+to lint before building.  Exit 0 = no hard errors (warnings such
+as ALP-B010 may still print); exit 1 = schema, cross-reference, or
+orchestrator consistency error.
 
 ## What you can't put in `board.yaml`
 

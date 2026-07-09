@@ -345,15 +345,17 @@ alp validate path/to/board.yaml
 ```
 
 Runs the rich diagnostic validator (JSON-Schema pass, SoM/preset
-cross-references, peripheral-vs-SoC capability check) and renders
-every finding as a Rust-style diagnostic block with an `ALP-Bxxx`
-code -- decode any code with `alp explain ALP-B001`.  Exit code 0
-when clean, 1 on errors.
+cross-references, peripheral-vs-SoC capability check), then the
+same orchestrator consistency pass used by build preflight.  It
+renders every diagnostic finding as a Rust-style block with an
+`ALP-Bxxx` code -- decode any code with `alp explain ALP-B001`.
+Exit code 0 means no hard errors; warnings such as ALP-B010 still
+return 0.  Hard schema/xref/consistency errors return 1.
 
-The schema pass is the SAME shared implementation used by
-`scripts/validate_board_yaml.py` (the `west alp-build` pre-flight)
-and the orchestrator's loader, so all front doors report identical
-violations.
+`scripts/validate_board_yaml.py` is a compatibility wrapper around
+the same rich validator plus consistency pass, so `alp validate`,
+the script entry point, and build preflight reject the same
+board.yaml contracts.
 
 ### `alp model` -- compile + package AI models
 

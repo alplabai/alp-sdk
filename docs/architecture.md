@@ -284,7 +284,7 @@ The active generators are:
 | `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator) and `--emit carrier-netlist` (Studio-facing carrier nets + BOM handoff, not PCB layout) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
 | `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
-| `scripts/validate_board_yaml.py`        | `board.yaml`                                         | (validator only — non-zero exit on schema error)                               |
+| `scripts/validate_board_yaml.py`        | `board.yaml`                                         | (validator only -- non-zero exit on schema/xref/consistency error)             |
 | `scripts/validate_metadata.py`          | `metadata/**/*.{json,yaml}`                          | (validator only)                                                               |
 
 All generated artefacts are byte-stable across rebuilds (deterministic
