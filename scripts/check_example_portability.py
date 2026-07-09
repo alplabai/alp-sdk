@@ -9,17 +9,21 @@ What this catches
 
 The Alp SDK's portability story is layered:
 
-  Ring 1 -- cross-family examples.  Same main.c builds on every E1M-X
-            family.  Declares no chip drivers in board.yaml; relies
-            on <alp/peripheral.h> + the thin wrappers.
+  Ring 1 -- cross-family examples.  Same main.c builds on every family
+            it targets.  Declares no chip drivers in board.yaml, and
+            its declared som.sku / supported_boards genuinely reach
+            >= 2 SoM families; relies on <alp/peripheral.h> + the
+            thin wrappers.
 
   Ring 2 -- chip-bound examples.  Uses <alp/chips/<chip>.h> but the
             chip is populated on multiple SoM families, so the
             example runs unchanged on any of them.
 
-  Ring 3 -- SoM-bound examples.  Uses a chip that only one family
-            populates.  Customer can copy the example but it won't
-            build cleanly on a different family.
+  Ring 3 -- SoM-bound examples.  Either uses a chip that only one
+            family populates, or declares no chip but its som.sku /
+            supported_boards resolve to exactly one family (e.g. a
+            V2N-only board bring-up demo).  Customer can copy the
+            example but it won't build cleanly on a different family.
 
 The lint enforces two invariants:
 
@@ -90,12 +94,25 @@ _SKU_PINOUT_TABLE = (
     ("E1M-NX9", "e1m"),
 )
 
+# metadata/boards/<slug>.yaml's `hosts_som_families:` uses the
+# vendor-style family names carried in the SoM preset's `family:`
+# field (e.g. "renesas-rzv2n"); the chip-manifest `families:` lists
+# (and _SKU_FAMILY_TABLE above) use the short slug ("v2n").  Mirror of
+# the table in scripts/program_eeprom.py -- keep both in sync.
+_VENDOR_FAMILY_TO_SLUG = {
+    "alif-ensemble": "aen",
+    "renesas-rzv2n": "v2n",
+    "renesas-rzv2n-deepx": "v2n-m1",
+    "nxp-imx9": "imx93",
+}
+
 _SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 _SOURCE_SKIP_DIRS = {"build", ".git", ".west", "__pycache__"}
 _E1M_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/e1m_pinout\.h[>"]')
 _E1M_X_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/e1m_x_pinout\.h[>"]')
 _E1M_TOKEN_RE = re.compile(r"\bALP_E1M_(?!X_)[A-Z0-9_]+\b")
 _E1M_X_TOKEN_RE = re.compile(r"\bALP_E1M_X_[A-Z0-9_]+\b")
+_CHIP_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/chips/([A-Za-z0-9_]+)\.h[>"]')
 
 
 def som_family_for_sku(sku: str) -> Optional[str]:
@@ -188,6 +205,41 @@ def check_pinout_namespace(example_dir: pathlib.Path,
     return errors
 
 
+def check_chip_includes_declared(example_dir: pathlib.Path,
+                                 declared_chips: list) -> list[str]:
+    """Return hard errors for `<alp/chips/*.h>` includes missing from
+    board.yaml's `chips:` list (issue #514).
+
+    The family-compatibility check (a) and the ring classification
+    both walk only the declared `chips:` array -- an example that
+    `#include`s a chip driver without declaring it slips past both:
+    it can wire an incompatible chip with no diagnostic, and it can
+    misreport its own portability ring as if it used no chip at all.
+    """
+    declared = set(declared_chips)
+    errors: list[str] = []
+    seen: set[str] = set()
+    for src in source_files(example_dir):
+        text = _strip_block_comments(
+            src.read_text(encoding="utf-8", errors="replace"))
+        rel = src.relative_to(example_dir).as_posix()
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            match = _CHIP_INCLUDE_RE.match(re.sub(r"//.*", "", line))
+            if not match:
+                continue
+            chip = match.group(1)
+            if chip in declared or chip in seen:
+                continue
+            seen.add(chip)
+            errors.append(
+                f"{rel}:{line_no}: includes alp/chips/{chip}.h but "
+                f"board.yaml has no matching chips: entry -- add '{chip}' "
+                "so the family-compatibility check and portability ring "
+                "can account for it"
+            )
+    return errors
+
+
 def load_chip_families() -> dict[str, list[str]]:
     """Map chip_id -> families list, scraped from metadata/chips/*.yaml."""
     out: dict[str, list[str]] = {}
@@ -229,6 +281,29 @@ def load_som_optional_chips() -> dict[str, set[str]]:
                 if assembled is not True:
                     optional.add(chip)
         out[sku] = optional
+    return out
+
+
+def load_board_host_families() -> dict[str, set[str]]:
+    """Map board preset slug -> the set of chip-family slugs
+    (aen / v2n / v2n-m1 / imx93) it hosts.
+
+    Scraped from metadata/boards/<slug>.yaml's `hosts_som_families:`
+    and translated through _VENDOR_FAMILY_TO_SLUG.  Used to decide
+    whether a no-chip example's `supported_boards:` fan-out actually
+    reaches more than one SoM family (issue #519) -- an entry like
+    `e1m-x-evk` alone already spans two families (v2n, v2n-m1).
+    """
+    out: dict[str, set[str]] = {}
+    for board_yaml in sorted((ROOT / "metadata" / "boards").glob("*.yaml")):
+        with board_yaml.open(encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+        hosts = doc.get("hosts_som_families") or []
+        if not isinstance(hosts, list):
+            continue
+        out[board_yaml.stem] = {
+            _VENDOR_FAMILY_TO_SLUG.get(str(h), str(h)) for h in hosts
+        }
     return out
 
 
@@ -294,11 +369,44 @@ def check_supported_board_testcases(
     return errors
 
 
+def _no_chip_ring(family: Optional[str],
+                  supported_boards: object,
+                  board_host_families: dict[str, set[str]]) -> str:
+    """Classify a chip-less example (issue #519).
+
+    A `chips:`-less board.yaml carries no chip-population constraint,
+    but that does NOT make it cross-family by default -- it's only
+    ring1 if the example's own declarations (som.sku's family plus any
+    supported_boards fan-out) actually reach >= 2 SoM families.  A
+    single-SoM demo (e.g. a V2N-only eMMC/xSPI/PWM bring-up example)
+    with no supported_boards stays SoM-bound -- ring3.
+    """
+    families: set[str] = set()
+    if family:
+        families.add(family)
+    if isinstance(supported_boards, list):
+        for board in supported_boards:
+            if isinstance(board, str):
+                families |= board_host_families.get(board, set())
+
+    if len(families) >= 2:
+        return "ring1-cross-family"
+    if len(families) == 1:
+        return "ring3-som-bound"
+    # som.sku is missing/unrecognised and supported_boards resolved
+    # nothing -- can't make a portability claim either way.
+    return "ring-unknown"
+
+
 def classify(chip_families: dict[str, list[str]],
-             example_chips: list[str]) -> str:
+             example_chips: list[str],
+             family: Optional[str] = None,
+             supported_boards: object = None,
+             board_host_families: Optional[dict[str, set[str]]] = None) -> str:
     """Classify an example into ring1 / ring2 / ring3."""
     if not example_chips:
-        return "ring1-cross-family"
+        return _no_chip_ring(family, supported_boards,
+                             board_host_families or {})
 
     # Collect the intersection of families across every chip the
     # example references.  An example runs on a family iff every
@@ -316,9 +424,12 @@ def classify(chip_families: dict[str, list[str]],
 
 def check_example(example_dir: pathlib.Path,
                   chip_families: dict[str, list[str]],
-                  som_optional: dict[str, set[str]]
+                  som_optional: dict[str, set[str]],
+                  board_host_families: Optional[dict[str, set[str]]] = None
                   ) -> tuple[str, list[str], list[str]]:
     """Return (classification, hard-error list, info-level note list)."""
+    if board_host_families is None:
+        board_host_families = load_board_host_families()
     board_yaml = example_dir / "board.yaml"
     if not board_yaml.exists():
         return "no-board-yaml", [], []
@@ -385,8 +496,11 @@ def check_example(example_dir: pathlib.Path,
                 )
 
     errors.extend(check_pinout_namespace(example_dir, pinout_namespace))
+    errors.extend(check_chip_includes_declared(example_dir, chips))
 
-    return classify(chip_families, chips), errors, notes
+    ring = classify(chip_families, chips, family,
+                    doc.get("supported_boards"), board_host_families)
+    return ring, errors, notes
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -400,6 +514,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     chip_families = load_chip_families()
     som_optional  = load_som_optional_chips()
+    board_host_families = load_board_host_families()
 
     examples_dir = ROOT / "examples"
     # Walk one OR two levels deep: cross-family examples live directly
@@ -425,7 +540,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     classification: dict[str, list[str]] = {}
 
     for ex in examples:
-        ring, errors, notes = check_example(ex, chip_families, som_optional)
+        ring, errors, notes = check_example(ex, chip_families, som_optional,
+                                            board_host_families)
         classification.setdefault(ring, []).append(ex.name)
         for e in errors:
             print(f"FAIL  {ex.name}: {e}", file=sys.stderr)

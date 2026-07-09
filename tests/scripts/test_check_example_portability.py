@@ -27,6 +27,13 @@ def _write_example(tmp_path: Path,
     return example
 
 
+def _write_source(example: Path, rel: str, body: str) -> Path:
+    path = example / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(body).lstrip("\n"), encoding="utf-8")
+    return path
+
+
 def test_supported_board_slug_maps_to_compiler_define() -> None:
     assert (
         portability.board_define_for_supported_board("e1m-x-evk")
@@ -111,6 +118,147 @@ def test_supported_boards_fail_when_testcase_is_missing(
         "supported_boards is declared but testcase.yaml is missing -- "
         "add one Twister scenario per supported board"
     ]
+
+
+def test_no_chip_single_family_som_is_som_bound(tmp_path: Path) -> None:
+    """Issue #519: a no-chip example bound to one SoM family (no
+    supported_boards fan-out) must NOT default to ring1-cross-family."""
+    example = _write_example(
+        tmp_path,
+        """
+        som:
+          sku: E1M-V2N101
+        preset: e1m-x-evk
+        cores:
+          m33_sm:
+            app: ./src
+            peripherals:
+              - emmc
+        """,
+    )
+
+    ring, errors, notes = portability.check_example(example, {}, {})
+
+    assert ring == "ring3-som-bound"
+    assert errors == []
+    assert notes == []
+
+
+def test_no_chip_example_with_two_family_supported_boards_is_cross_family(
+    tmp_path: Path,
+) -> None:
+    """A no-chip example whose supported_boards fan-out genuinely spans
+    >= 2 SoM families stays ring1-cross-family."""
+    example = _write_example(
+        tmp_path,
+        """
+        som:
+          sku: E1M-AEN801
+        supported_boards:
+          - e1m-evk
+          - e1m-x-evk
+        cores:
+          m55_hp:
+            app: ./src
+        """,
+        """
+        tests:
+          example.e1m:
+            extra_configs:
+              - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+          example.e1m_x:
+            extra_configs:
+              - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+        """,
+    )
+
+    ring, errors, notes = portability.check_example(example, {}, {})
+
+    assert ring == "ring1-cross-family"
+    assert errors == []
+
+
+def test_no_chip_ring_single_board_hosting_two_families_is_cross_family() -> None:
+    """`e1m-x-evk` alone hosts both v2n and v2n-m1 (renesas-rzv2n /
+    renesas-rzv2n-deepx); declaring it as the sole supported board is
+    enough to earn ring1, even without a second board entry."""
+    ring = portability._no_chip_ring(
+        "v2n",
+        ["e1m-x-evk"],
+        {"e1m-x-evk": {"v2n", "v2n-m1"}},
+    )
+    assert ring == "ring1-cross-family"
+
+
+def test_no_chip_ring_unknown_family_and_no_supported_boards() -> None:
+    ring = portability._no_chip_ring(None, None, {})
+    assert ring == "ring-unknown"
+
+
+def test_load_board_host_families_translates_vendor_family_names() -> None:
+    families = portability.load_board_host_families()
+    assert families["e1m-evk"] == {"aen", "imx93"}
+    assert families["e1m-x-evk"] == {"v2n", "v2n-m1"}
+
+
+def test_chip_include_missing_from_board_yaml_is_a_hard_error(
+    tmp_path: Path,
+) -> None:
+    """Issue #514: an `#include <alp/chips/*.h>` not declared in
+    board.yaml's `chips:` list slips past the family-compatibility
+    check and the ring classification -- flag it."""
+    example = _write_example(
+        tmp_path,
+        """
+        som:
+          sku: E1M-AEN801
+        preset: e1m-evk
+        cores:
+          m55_hp:
+            app: ./src
+        """,
+    )
+    _write_source(example, "src/main.c", """
+        #include "alp/chips/bmi323.h"
+
+        void app(void) {}
+        """)
+
+    _, errors, _ = portability.check_example(example, {}, {})
+
+    assert errors == [
+        "src/main.c:1: includes alp/chips/bmi323.h but board.yaml has no "
+        "matching chips: entry -- add 'bmi323' so the family-compatibility "
+        "check and portability ring can account for it"
+    ]
+
+
+def test_chip_include_declared_in_board_yaml_is_not_flagged(
+    tmp_path: Path,
+) -> None:
+    example = _write_example(
+        tmp_path,
+        """
+        som:
+          sku: E1M-AEN801
+        preset: e1m-evk
+        chips:
+          - bmi323
+        cores:
+          m55_hp:
+            app: ./src
+        """,
+    )
+    _write_source(example, "src/main.c", """
+        #include "alp/chips/bmi323.h"
+
+        void app(void) {}
+        """)
+
+    _, errors, _ = portability.check_example(
+        example, portability.load_chip_families(), {})
+
+    assert errors == []
 
 
 def test_yaml_comment_does_not_satisfy_supported_board_variant(
