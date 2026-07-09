@@ -116,7 +116,9 @@ loops back fine via its internal ground but never hears the board; swap it.)
 ```bash
 python3 - <<'PY'
 import serial, time
-s = serial.Serial('/dev/ttyUSB0', 57600, timeout=1)   # 55000 for E7/E5/E3/E1
+# <your-serial-device>: your OS's port name for the SE-UART adapter --
+# see docs/cross-platform-setup.md §7.7 for the per-OS naming convention.
+s = serial.Serial('<your-serial-device>', 57600, timeout=1)   # 55000 for E7/E5/E3/E1
 buf=b""; t0=time.time()
 while time.time()-t0 < 30: buf += s.read(4096)
 print(len(buf), "bytes"); print(buf.decode('ascii','replace'))
@@ -139,10 +141,12 @@ serial can drop the baud between opens.)
 
 ## 3. Configure SETOOLS for your part
 
-From the SETOOLS dir, auto-detect over the SE-UART:
+From the SETOOLS dir, auto-detect over the SE-UART (`<your-serial-device>`
+is your OS's port name for the adapter — see docs/cross-platform-setup.md
+§7.7 for the per-OS naming convention):
 
 ```bash
-./tools-config -a -c /dev/ttyUSB0 -b 57600
+./tools-config -a -c <your-serial-device> -b 57600
 ```
 
 It probes the SES and reports e.g. `Target part# AE822FA0E5597LS0 matches
@@ -168,7 +172,7 @@ a mismatched DEVICE config is the documented crash cause):
 
 ```bash
 ./app-gen-toc -f build/config/app-blink-only.json     # builds build/AppTocPackage.bin (tagged with the tools-config part)
-./app-write-mram -c /dev/ttyUSB0 -b 57600             # resets to maintenance, writes the ATOC
+./app-write-mram -c <your-serial-device> -b 57600     # resets to maintenance, writes the ATOC
 ```
 
 `app-write-mram` resets the target into **Maintenance mode** (cores held)

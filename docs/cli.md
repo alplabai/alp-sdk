@@ -387,11 +387,14 @@ misbehaves.
 
 ### `alp monitor` -- serial console
 
+<!-- cross-platform-lint:ignore -->
 ```bash
-alp monitor --port COM7                # Windows
-alp monitor --port /dev/ttyUSB0       # Linux
-alp monitor                            # lists available ports if none given
+alp monitor --port COM7                       # Windows
+alp monitor --port /dev/ttyUSB0               # Linux
+alp monitor --port /dev/cu.usbserial-1420     # macOS
+alp monitor                                    # lists available ports if none given
 ```
+<!-- cross-platform-lint:resume -->
 
 Opens pyserial's miniterm (Ctrl+] to quit).  Baud defaults to 115200
 (`--baud` to override).  When no port is given or the requested one
