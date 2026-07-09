@@ -132,25 +132,37 @@ full-set-regen script is **not** currently staged in the bench signing dir; the
 `gen-out-*/` trees are prior outputs, not a reproducible command. Confirm by
 re-reading the fuse: `boot_sector_programmed` `0 → 1`.
 
-### Validating the full cold swap-boot cycle (#493 criterion 1)
+### Cold swap-boot cycle — bench result 2026-07-09 (#493 criterion 1: STAGED proven, SWAP fails)
 
-The unit is activated, so run the real-image OTA cycle directly:
+Ran the real-image OTA cycle on `e1m-aen-evk-01` (E8 slot0 = the
+`-DCC3501E_OTA_REAL=ON` app, SE-UART `app-write-mram`). Result:
 
-1. Build the host app with a **genuine** image:
-   `west build -b alp_e1m_aen801_m55_he/.../rtss_he examples/aen/aen-cc3501e-bringup
-   -- -DCC3501E_OTA_REAL=ON` (streams `cc3501e_ota_candidate`, the signed GPE
-   image, over the bridge — not the inert blob).
-2. Flash + run: `cc3501e_ota_update` streams → FINISH → `psa_fwu_install` →
-   **STAGED** (the real-image confirmation the inert blob never gave).
-3. **True cold POR** (PSU power-cycle, not a host `cc3501e_hard_reset` — the WARM
-   reset masks activation state): the armed vendor SBL swaps secondary→primary
-   and boots the STAGED image as a MCUboot TRIAL.
-4. `GET_VERSION` / `GET_DIAG_INFO.fw_version` after reboot must report the new
-   image; the first post-swap boot then `psa_fwu_accept`s it (self-accept), or a
-   failed boot rolls back to the prior slot.
+- **Real-image STAGED: PROVEN.** The genuine signed candidate (31428 B,
+  v0.0.4.0 GPE) streamed over the bridge and `psa_fwu` accepted it:
+  `OTA status: state=2 written=31428/31428 B`, `OTA -> STAGED (genuine image
+  accepted by psa_fwu)`. This is the real-image confirmation the inert blob
+  never gave. The STAGED image **persisted across a verified true cold POR** (a
+  second `cc3501e_ota_update` after the POR returned `-1`/INVAL because a staged
+  image was already pending).
+- **Cold swap-boot: FAILED.** After a verified true cold POR (PSU power-cycle,
+  power drop + `Cortex-M55 identified` re-up both confirmed on the J-Link), the
+  CC3501E booted its PRIMARY slot **unchanged** — `GET_VERSION -> protocol v1`
+  (host expects v3), `fw_version=0x0001`, identical to before. The STAGED image
+  was **not promoted** to primary. No accept/rollback/trial observed (no swap
+  occurred).
 
-That closes #493 criterion 1. This is the remaining bench step — it does NOT
-require re-activation.
+So the STAGE/install half is silicon-proven with a real image; the
+**secondary→primary promotion is the open bug.** A STAGED image that persisted
+across a cold POR was not swapped in. Leading hypothesis: promotion needs a step
+beyond `psa_fwu_install`→STAGED (the deferred `psa_fwu_request_reboot()` latch /
+an MCUboot pending-swap marker) that a bare host PSU cold POR does not carry — a
+firmware self-reboot after FINISH may be the intended trigger. Alternative not
+yet ruled out: the vendor SBL is not actually armed on the live unit (the
+`boot_sector_programmed=1` is historical, never live-confirmed — the live fuse
+read is blocked by the toolbox RoT gate). Root-cause in progress.
+
+**#493 criterion 1 is NOT closed** — the swap-promotion path needs a fix
+(firmware and/or the bench trigger). Re-activation is NOT the blocker.
 
 ## 6. GPIO proxy
 
