@@ -14,7 +14,7 @@ description: |
   driver, only the analog_ctrl VREF helper library reached via
   CONFIG_USE_ALIF_HAL_ANALOG): INTERIM.  Retires onto the opt-in sdk-alif fork
   compatible once the adc nodes are repointed AND bench-verified.  See
-  docs/adr/0017 + task #21.  BENCH-UNVERIFIED.
+  docs/adr/0017.  BENCH-UNVERIFIED.
 
   The node carries up to five reg blocks (reg-names "adc_reg", "analog_reg",
   "comp_reg", "aon_regs", "adc_vref"); the driver maps them via

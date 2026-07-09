@@ -93,4 +93,4 @@ west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
 
 **BENCH-VALIDATION app -- not a customer teaching example.**
 ADR 0017 Tier-1.5 (thin in-tree Zephyr driver over the LPTIMER
-registers), INTERIM, task #21.
+registers), INTERIM.

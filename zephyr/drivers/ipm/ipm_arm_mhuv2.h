@@ -12,7 +12,7 @@
  * small upstreamable Zephyr patch (zephyr/patches.yml ->
  * 0002-ipm-add-poll-out-poll-in.patch) makes valid by adding those two
  * ipm_driver_api fields + syscalls that upstream Zephyr v4.4 lacks.
- * ADR 0017 Tier-2 (INTERIM, task #21).
+ * ADR 0017 Tier-2 (INTERIM).
  */
 #ifndef ZEPHYR_DRIVERS_IPM_ARM_MHUV2_H_
 #define ZEPHYR_DRIVERS_IPM_ARM_MHUV2_H_

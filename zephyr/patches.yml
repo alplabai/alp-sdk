@@ -95,6 +95,6 @@ patches:
       public se_service_send_request(packet, size) that mirrors the get_rnd_num
       preamble (se_service_ensure_ready + svc_mutex) and hands the packet to the
       existing static send_msg_to_se(). Pure additive; the SE still enforces its
-      own service policy. Unblocks ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
-      (default off; runtime SE round-trip bench-pending). Upstream to hal_alif
-      then drop. See #222.
+      own service policy. Unblocked ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM,
+      which now defaults ON and is bench-validated on real E8 silicon (see
+      zephyr/Kconfig). Upstream to hal_alif then drop.

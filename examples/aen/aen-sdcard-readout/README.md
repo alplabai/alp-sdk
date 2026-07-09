@@ -61,4 +61,4 @@ cleanly. No card enumerates because the SD slot is not reachable on this bench:
 So on this bench the SDHC **controller + driver are proven** (builds, inits,
 `disk_access_init` runs cleanly) but the card is **unreachable until the CC3501E
 bridge + its GPIO-proxy firmware exist**. Tier-2 retires onto the opt-in fork once
-a card is actually read (task #21).
+a card is actually read.

@@ -11,7 +11,7 @@
  * hal_alif ship NO camera-capture (CPI) class driver, so this is a genuine
  * fork-driver copy carried in-tree so it survives a `west update`.  Retire onto
  * the opt-in sdk-alif fork compatible once the cam nodes are repointed AND
- * bench-verified (task #21).  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * bench-verified.  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
  * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by

@@ -12,7 +12,7 @@
  * Kconfig subtree + this driver are carried in-tree so they survive a
  * `west update`.  Pulled in because video_csi_dw.c hard-depends on the D-PHY
  * (dphy_dw_slave_setup/select).  Retire onto the opt-in sdk-alif fork once the
- * dphy node is repointed AND bench-verified (task #21).
+ * dphy node is repointed AND bench-verified.
  * ==================================================================
  *
  * Vendored VERBATIM from the fork (only this provenance header is added).

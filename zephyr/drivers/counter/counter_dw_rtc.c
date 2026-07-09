@@ -21,7 +21,7 @@
  *
  * ============================== STATUS ==============================
  * ADR 0017 Tier-2 (consume an opt-in fork driver) -- INTERIM, BENCH-UNVERIFIED.
- * INTERIM until E8 bench, then revisit.  See docs/adr/0017 + task #21.
+ * INTERIM until E8 bench, then revisit.  See docs/adr/0017.
  *
  * IMPORTANT -- NOT a calendar RTC.  This is a DesignWare COUNTER: it has no
  * battery-backed date/time registers and does NOT satisfy the alp_rtc_*

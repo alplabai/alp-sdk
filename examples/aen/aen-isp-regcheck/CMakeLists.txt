@@ -10,7 +10,7 @@
 # libisp wrapper, and the locally vendored 2025 wrapper is API-incompatible with
 # the 2026 isp_pico.c (missing <zephyr/drivers/video/isp-vsi.h>; 2-arg vs 3-arg
 # isp_vsi_bottom_half), so the driver does not compile+link against it (a known
-# EXTERNAL hal_alif blocker, task #21).  So this app validates the DT BIND of the
+# EXTERNAL hal_alif blocker).  So this app validates the DT BIND of the
 # isp node WITHOUT the driver, and reports the wrapper blocker at runtime.
 # See src/main.c + the board overlay.
 

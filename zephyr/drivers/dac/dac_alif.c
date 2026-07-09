@@ -11,8 +11,8 @@
  * driver -- only the analog_ctrl VREF helper library (drivers/analog, pulled in
  * via CONFIG_USE_ALIF_HAL_ANALOG) -- so this is a genuine fork-driver copy
  * carried in-tree so it survives a `west update`.  Retire onto the opt-in
- * sdk-alif fork compatible once the dac nodes are repointed AND bench-verified
- * (task #21).  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * sdk-alif fork compatible once the dac nodes are repointed AND bench-verified.
+ * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  *
  * NOTE on the tier label: the auto-memory previously recorded the Alif DAC as
  * "Tier-1.5" -- that label predates seeing the source.  Now that the driver is
