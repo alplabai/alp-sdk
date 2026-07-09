@@ -112,6 +112,51 @@ startup `cc3501e_hard_reset` (the WARM workaround above) drives the reset on
 every boot and masks the cold-launch binding; only a true cold POR swap tests
 it.
 
+### Re-activating a unit (unblocks the cold swap-boot acceptance)
+
+Programming the cold-launch boot sector re-arms the vendor SBL. This is a
+**one-time, hard-to-reverse** operation (it writes the vendor container / boot
+sector) — do it deliberately, on a unit you can afford to re-provision, and
+confirm the debug fuses are still open (`permanently_lock_debug_enable = 0`)
+first. Two paths:
+
+1. **Linux toolbox full flash-set regen (preferred — no Windows needed).** The
+   signed reflash pipeline was reverse-engineered on Linux: `build_ti.sh
+   --wifi --ble` builds the vendor image, then a **full** flash-set regen
+   (`programming_image` + `action_requests` + `vendor_image` + **`boot_sector`**,
+   all fresh-signed with the VALIDATION key) is programmed via
+   `simplelink-wifi-toolbox programmer -i XDS110 -param1 L50015YR programming
+   --tool_settings ...`. `deploy_validate.sh` alone is **insufficient** — it
+   only refreshes `vendor_image`, and `programming_instructions` is coupled to
+   the boot sector. Use the full set. (The exact staged command sequence lives
+   in the bench signing dir, not the repo.)
+2. **Windows vendor GUI activation wizard (fallback).** Establishes the
+   cold-launch binding in one session if the Linux path is unavailable.
+
+**Confirm activation** by re-reading the activation record: `boot_sector_programmed`
+must flip `0 → 1` and the `request_execution_status` entries go to `1`. Only
+then is the unit cold-bootable.
+
+### Validating the full cold swap-boot cycle (after re-activation)
+
+Once a unit reads `boot_sector_programmed = 1`, run the real-image OTA cycle:
+
+1. Build the host app with a **genuine** image:
+   `west build -b alp_e1m_aen801_m55_he/.../rtss_he examples/aen/aen-cc3501e-bringup
+   -- -DCC3501E_OTA_REAL=ON` (streams `cc3501e_ota_candidate`, the signed GPE
+   image, over the bridge — not the inert blob).
+2. Flash + run: `cc3501e_ota_update` streams → FINISH → `psa_fwu_install` →
+   **STAGED** (this half is WARM-verifiable on any unit and is the real-image
+   confirmation the inert blob never gave).
+3. **True cold POR** (PSU power-cycle, not a host `cc3501e_hard_reset`): the
+   re-armed vendor SBL swaps secondary→primary and boots the STAGED image as a
+   MCUboot TRIAL.
+4. `GET_VERSION` / `GET_DIAG_INFO.fw_version` after reboot must report the new
+   image; the first post-swap boot then `psa_fwu_accept`s it (self-accept), or
+   a failed boot rolls back to the prior slot.
+
+That closes #493 criterion 1.
+
 ## 6. GPIO proxy
 
 GPIO proxy and camera-enable opcodes are shipped. The firmware guards reserved
