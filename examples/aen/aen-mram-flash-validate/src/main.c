@@ -66,8 +66,8 @@ static const struct device *const flash_dev = FIXED_PARTITION_DEVICE(SCRATCH_PAR
 
 /* One erase block (1024 B, the node's erase-block-size) is enough to prove the
  * path; the written pattern is 256 B = 16 * 16-byte program units. */
-#define ERASE_UNIT   1024U
-#define PATTERN_LEN  256U
+#define ERASE_UNIT  1024U
+#define PATTERN_LEN 256U
 
 /* Never let main() return.  On this SoC an idle M55 -- the kernel idle thread's
  * low-power wait once main returns -- lets the SES gate the debug (SWD/DAP)
@@ -105,7 +105,8 @@ int main(void)
 	}
 	printk("flash device ready: %s\n", flash_dev->name);
 	printk("scratch = storage partition: off=0x%06lx size=%u B (abs 0x%08lx)\n",
-	       (unsigned long)SCRATCH_OFF, (unsigned)SCRATCH_SIZE,
+	       (unsigned long)SCRATCH_OFF,
+	       (unsigned)SCRATCH_SIZE,
 	       (unsigned long)(0x80000000UL + SCRATCH_OFF));
 
 	/* 2. static parameters: write_block_size (expect 16) + erase_value
@@ -117,12 +118,12 @@ int main(void)
 		park();
 	}
 	printk("write_block_size=%u erase_value=0x%02x\n",
-	       (unsigned)fp->write_block_size, fp->erase_value);
+	       (unsigned)fp->write_block_size,
+	       fp->erase_value);
 
 	/* 3. ERASE one unit at the scratch offset. */
 	rc = flash_erase(flash_dev, SCRATCH_OFF, ERASE_UNIT);
-	printk("flash_erase(0x%06lx, %u) rc=%d\n",
-	       (unsigned long)SCRATCH_OFF, ERASE_UNIT, rc);
+	printk("flash_erase(0x%06lx, %u) rc=%d\n", (unsigned long)SCRATCH_OFF, ERASE_UNIT, rc);
 	if (rc != 0) {
 		printk("RESULT FAIL: flash_erase rc=%d\n", rc);
 		park();
@@ -139,7 +140,9 @@ int main(void)
 	for (i = 0; i < PATTERN_LEN; i++) {
 		if (rbuf[i] != fp->erase_value) {
 			printk("RESULT FAIL: erase mismatch at +%u: 0x%02x != 0x%02x\n",
-			       i, rbuf[i], fp->erase_value);
+			       i,
+			       rbuf[i],
+			       fp->erase_value);
 			park();
 		}
 	}
@@ -151,8 +154,7 @@ int main(void)
 		wbuf[i] = (i < 4) ? 0xA5 : (uint8_t)(i & 0xFF);
 	}
 	rc = flash_write(flash_dev, SCRATCH_OFF, wbuf, PATTERN_LEN);
-	printk("flash_write(0x%06lx, %u) rc=%d\n",
-	       (unsigned long)SCRATCH_OFF, PATTERN_LEN, rc);
+	printk("flash_write(0x%06lx, %u) rc=%d\n", (unsigned long)SCRATCH_OFF, PATTERN_LEN, rc);
 	if (rc != 0) {
 		printk("RESULT FAIL: flash_write rc=%d\n", rc);
 		park();
@@ -172,7 +174,10 @@ int main(void)
 		for (i = 0; i < PATTERN_LEN; i++) {
 			if (rbuf[i] != wbuf[i]) {
 				printk("RESULT FAIL: program mismatch at +%u: "
-				       "0x%02x != 0x%02x\n", i, rbuf[i], wbuf[i]);
+				       "0x%02x != 0x%02x\n",
+				       i,
+				       rbuf[i],
+				       wbuf[i]);
 				break;
 			}
 		}
