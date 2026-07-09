@@ -40,6 +40,12 @@ The lint enforces two invariants:
       by the corresponding `ALP_BOARD_<SLUG>` compiler define.  The
       catalog claim and CI build matrix must not drift apart.
 
+  (d) HARD ERROR: source files must use the pinout namespace that
+      matches the target SoM form factor.  E1M examples may use
+      <alp/e1m_pinout.h> / ALP_E1M_*; E1M-X examples may use
+      <alp/e1m_x_pinout.h> / ALP_E1M_X_*.  Cross-EVK code should
+      usually use <alp/board.h> BOARD_* aliases instead.
+
 Run from the alp-sdk repo root:
 
     python3 scripts/check_example_portability.py
@@ -51,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import re
 import sys
 from collections.abc import Iterator
 from typing import Optional
@@ -76,6 +83,20 @@ _SKU_FAMILY_TABLE = (
     ("E1M-NX9", "imx93"),
 )
 
+_SKU_PINOUT_TABLE = (
+    ("E1M-V2M", "e1m-x"),
+    ("E1M-V2N", "e1m-x"),
+    ("E1M-AEN", "e1m"),
+    ("E1M-NX9", "e1m"),
+)
+
+_SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
+_SOURCE_SKIP_DIRS = {"build", ".git", ".west", "__pycache__"}
+_E1M_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/e1m_pinout\.h[>"]')
+_E1M_X_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/e1m_x_pinout\.h[>"]')
+_E1M_TOKEN_RE = re.compile(r"\bALP_E1M_(?!X_)[A-Z0-9_]+\b")
+_E1M_X_TOKEN_RE = re.compile(r"\bALP_E1M_X_[A-Z0-9_]+\b")
+
 
 def som_family_for_sku(sku: str) -> Optional[str]:
     """Return the SoM family slug for an E1M SKU, or None if unrecognised."""
@@ -83,6 +104,88 @@ def som_family_for_sku(sku: str) -> Optional[str]:
         if sku.startswith(prefix):
             return family
     return None
+
+
+def pinout_namespace_for_sku(sku: str) -> Optional[str]:
+    """Return the pinout namespace expected for the SoM form factor."""
+    for prefix, namespace in _SKU_PINOUT_TABLE:
+        if sku.startswith(prefix):
+            return namespace
+    return None
+
+
+def _strip_block_comments(text: str) -> str:
+    """Remove C block comments while preserving line numbers."""
+    return re.sub(r"/\*.*?\*/",
+                  lambda m: "\n" * m.group(0).count("\n"),
+                  text,
+                  flags=re.DOTALL)
+
+
+def _strip_line_comments_and_literals(line: str) -> str:
+    line = re.sub(r"//.*", "", line)
+    line = re.sub(r'"(?:\\.|[^"\\])*"', '""', line)
+    line = re.sub(r"'(?:\\.|[^'\\])*'", "''", line)
+    return line
+
+
+def source_files(example_dir: pathlib.Path) -> list[pathlib.Path]:
+    out: list[pathlib.Path] = []
+    for p in example_dir.rglob("*"):
+        if not p.is_file() or p.suffix not in _SOURCE_SUFFIXES:
+            continue
+        rel_parts = p.relative_to(example_dir).parts
+        if any(part in _SOURCE_SKIP_DIRS for part in rel_parts[:-1]):
+            continue
+        out.append(p)
+    return sorted(out)
+
+
+def check_pinout_namespace(example_dir: pathlib.Path,
+                           namespace: Optional[str]) -> list[str]:
+    """Return hard errors for E1M/E1M-X pinout namespace mismatches."""
+    if namespace not in {"e1m", "e1m-x"}:
+        return []
+
+    errors: list[str] = []
+    for src in source_files(example_dir):
+        text = src.read_text(encoding="utf-8", errors="replace")
+        rel = src.relative_to(example_dir).as_posix()
+        without_blocks = _strip_block_comments(text)
+
+        for line_no, line in enumerate(without_blocks.splitlines(), start=1):
+            line_no_comment = re.sub(r"//.*", "", line)
+            if namespace == "e1m-x" and _E1M_INCLUDE_RE.search(line_no_comment):
+                errors.append(
+                    f"{rel}:{line_no}: includes alp/e1m_pinout.h but "
+                    "the example targets an E1M-X SoM; use "
+                    "alp/e1m_x_pinout.h or alp/board.h"
+                )
+            elif namespace == "e1m" and _E1M_X_INCLUDE_RE.search(line_no_comment):
+                errors.append(
+                    f"{rel}:{line_no}: includes alp/e1m_x_pinout.h but "
+                    "the example targets an E1M SoM; use "
+                    "alp/e1m_pinout.h or alp/board.h"
+                )
+
+            code = _strip_line_comments_and_literals(line)
+            if namespace == "e1m-x":
+                match = _E1M_TOKEN_RE.search(code)
+                if match:
+                    errors.append(
+                        f"{rel}:{line_no}: uses {match.group(0)} but "
+                        "the example targets an E1M-X SoM; use ALP_E1M_X_* "
+                        "or a BOARD_* alias"
+                    )
+            else:
+                match = _E1M_X_TOKEN_RE.search(code)
+                if match:
+                    errors.append(
+                        f"{rel}:{line_no}: uses {match.group(0)} but "
+                        "the example targets an E1M SoM; use ALP_E1M_* "
+                        "or a BOARD_* alias"
+                    )
+    return errors
 
 
 def load_chip_families() -> dict[str, list[str]]:
@@ -224,6 +327,7 @@ def check_example(example_dir: pathlib.Path,
 
     som_sku = (doc.get("som") or {}).get("sku", "")
     family  = som_family_for_sku(som_sku)
+    pinout_namespace = pinout_namespace_for_sku(som_sku)
     chips   = doc.get("chips") or []
 
     errors: list[str] = []
@@ -236,6 +340,13 @@ def check_example(example_dir: pathlib.Path,
         errors.append(
             f"unknown som.sku prefix '{som_sku}' -- can't classify; "
             f"add the prefix to _SKU_FAMILY_TABLE in {pathlib.Path(__file__).name}"
+        )
+
+    if pinout_namespace is None and som_sku:
+        errors.append(
+            f"unknown som.sku prefix '{som_sku}' -- can't validate the "
+            f"E1M/E1M-X pinout namespace; add the prefix to "
+            f"_SKU_PINOUT_TABLE in {pathlib.Path(__file__).name}"
         )
 
     # SDK-level block helpers live under `blocks/<name>/`, not
@@ -272,6 +383,8 @@ def check_example(example_dir: pathlib.Path,
                     f"chip '{chip}' is BOM-optional on {som_sku} -- main.c "
                     f"should handle alp_*_init returning ALP_ERR_NOT_READY"
                 )
+
+    errors.extend(check_pinout_namespace(example_dir, pinout_namespace))
 
     return classify(chip_families, chips), errors, notes
 
