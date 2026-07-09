@@ -331,8 +331,9 @@ static void mbox_rx_cb(const struct device *dev,
      * mismatch, declared length overflow) are dropped silently --
      * the peer is expected to retry on Sequence-gap detection at
      * the application layer.  Dropping silently here matches the
-     * v0.4-final nanopb behaviour: a decoder failure surfaces as
-     * "no message arrived" rather than a corrupted payload. */
+     * intended eventual nanopb behaviour (deferred, no committed
+     * version): a decoder failure surfaces as "no message arrived"
+     * rather than a corrupted payload. */
 	const uint8_t *payload     = NULL;
 	size_t         payload_len = 0;
 	if (cb_data != NULL) {

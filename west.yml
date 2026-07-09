@@ -111,9 +111,11 @@ manifest:
   # Flip via `west update --group-filter +<group>` (or by editing
   # this filter line) when the consuming work lands.
   #
-  # `extras-v04`     - lwrb + nanopb pins for v0.4 wave-2 consumers.
-  #                    See vendors/lwrb/README.md +
-  #                    vendors/nanopb/README.md.
+  # `extras-lwrb-nanopb` - lwrb + nanopb pins for the SDK-internal
+  #                    consumers (UART RX ring buffer, mproc IPC
+  #                    framing).  Deferred / interim as of v0.9 --
+  #                    no committed release swaps this group on; see
+  #                    vendors/lwrb/README.md + vendors/nanopb/README.md.
   # `extras-tier1`   - upstream pins for the 14 Tier 1 §D.lib batch
   #                    libraries that aren't in Zephyr's modules
   #                    tree (u8g2, libcoap, tinygsm, libwebsockets,
@@ -135,7 +137,7 @@ manifest:
   #                    docs/vendor-partnerships.md for the licence
   #                    story before enabling on a customer build.
   group-filter:
-    - -extras-v04
+    - -extras-lwrb-nanopb
     - -extras-tier1
     - -vendor-sdks
 
@@ -208,23 +210,25 @@ manifest:
           # is enabled.  Our SDK uses it via the upstream Zephyr
           # module (no extras-tier1 pin needed for v0.5).
 
-    # SDK-internal dependencies pinned ahead of their v0.4 consumers.
-    # Behind the `extras-v04` group (disabled above) so v0.3
-    # workspaces never see them on `west update`.  The vendor stub
-    # headers under `vendors/{lwrb,nanopb}/include/` keep SDK source
-    # link-clean until v0.4 swaps the real upstream in.
+    # SDK-internal dependencies pinned ahead of their consumers landing
+    # for real.  Behind the `extras-lwrb-nanopb` group (disabled above)
+    # so a default workspace never sees them on `west update`.  The
+    # vendor stub headers under `vendors/{lwrb,nanopb}/include/` keep
+    # SDK source link-clean until the group is flipped on and the real
+    # upstream sources swap in -- interim/deferred as of v0.9, no
+    # committed release date.
     - name: lwrb
       remote: majerle
       revision: v3.2.0
       path: modules/lib/lwrb
       groups:
-        - extras-v04
+        - extras-lwrb-nanopb
     - name: nanopb
       remote: nanopb
       revision: nanopb-0.4.9
       path: modules/lib/nanopb
       groups:
-        - extras-v04
+        - extras-lwrb-nanopb
 
     # micro-ROS Zephyr module for the ADR 0018 Zephyr+ROS 2 flagship.
     # Pinned to the Humble branch revision verified on 2026-07-05; the

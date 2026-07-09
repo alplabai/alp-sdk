@@ -16,7 +16,8 @@ ML pre-processing.
 payload in shared SRAM, signals HE via a hardware mailbox, HE
 echoes the payload back with a prefix.  Understand the SDK's
 `<alp/mproc.h>` surface (mailbox + shmem + hwsem) + the
-v0.4-prep nanopb framing.
+interim placeholder framing that stands in for the (deferred,
+no committed version) nanopb wire.
 
 **Time:** 30 minutes (after the EVK is on the bench and the
 peer firmware is built).
@@ -241,13 +242,14 @@ int main(void) {
 }
 ```
 
-## 4. v0.4 nanopb framing (when ready)
+## 4. nanopb framing (interim placeholder, real codec deferred)
 
-Pre-v0.4, the offset+length tuple is hand-encoded as 8 raw
-bytes.  v0.4-prep merged a nanopb-based framing helper at
-`src/common/proto/alp_mproc_frame.c` that wraps every mbox
-payload in a 12-byte envelope (magic / sequence / length).  Opt
-in via:
+By default the offset+length tuple is hand-encoded as 8 raw
+bytes.  An interim placeholder framing helper at
+`src/common/proto/alp_mproc_frame.c` wraps every mbox
+payload in a 12-byte envelope (magic / sequence / length) instead
+of the real nanopb wire, which is deferred with no committed
+version.  Opt in via:
 
 ```yaml
 # board.yaml -- v2 shape: ipc: is a top-level array of carve-outs
@@ -259,11 +261,12 @@ ipc:
     name: he_offload                # -> ALP_IPC_<NAME>_ADDR / _SIZE / ... macros
 ```
 
-Once the v0.4 `extras-v04` group lands the upstream MaJerle/lwrb
-+ nanopb/nanopb packs, the framing flips from "placeholder
-hand-rolled" to "nanopb-generated codec".  That future switch needs
-a schema-backed emitted block before it belongs in `board.yaml`; the
-application code above does not change; the framing is transparent inside
+Once the `extras-lwrb-nanopb` group lands the upstream MaJerle/lwrb
++ nanopb/nanopb packs (interim/deferred as of v0.9, no committed
+version), the framing flips from "placeholder hand-rolled" to
+"nanopb-generated codec".  That future switch needs a schema-backed
+emitted block before it belongs in `board.yaml`; the application code
+above does not change; the framing is transparent inside
 `alp_mbox_send`.
 
 ## 5. Build + flash

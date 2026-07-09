@@ -1142,10 +1142,11 @@ config ALP_SDK_UART_RX_RINGBUF
 	  an interrupt-driven RX callback that drains the controller's FIFO
 	  into a caller-supplied LwRB-backed ring; consumer code drains
 	  bytes via alp_uart_rx_ringbuf_pop without polling.  Backed by
-	  the SDK-internal LwRB stub (vendors/lwrb/) until the v0.4
-	  extras-v04 west group flips upstream LwRB in.  When OFF the
-	  helpers return NULL / ALP_ERR_NOSUPPORT so apps can link
-	  cleanly.
+	  the SDK-internal LwRB stub (vendors/lwrb/) until the
+	  extras-lwrb-nanopb west group flips upstream LwRB in
+	  (interim/deferred as of v0.9, no committed release date).
+	  When OFF the helpers return NULL / ALP_ERR_NOSUPPORT so apps
+	  can link cleanly.
 
 config ALP_SDK_MAX_UART_RX_RINGBUF_HANDLES
 	int "Maximum concurrent alp_uart_rx_ringbuf_t handles"

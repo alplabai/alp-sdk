@@ -961,11 +961,12 @@ zephyr_library_sources(
 # LwRB: publish the vendor stub headers on the include path so SDK
 # code compiles against <lwrb/lwrb.h> regardless of whether the
 # upstream MaJerle/lwrb module is on the workspace.  When the
-# `extras-v04` west group is enabled the upstream sources end up at
+# `extras-lwrb-nanopb` group is enabled the upstream sources end up at
 # modules/lib/lwrb/src/include/ and (once registered as a Zephyr
 # module via EXTRA_ZEPHYR_MODULES) win the include search ahead of
 # our stub; the ABI is identical so the SDK source is unchanged
-# across the swap.
+# across the swap.  Interim/deferred as of v0.9 -- no committed
+# release date for the swap.
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/lwrb/include)
 
 # Compile our in-tree LwRB stub impl whenever the upstream module is
@@ -1000,10 +1001,11 @@ zephyr_library_include_directories(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference
 )
 
-# nanopb placeholder framing for <alp/mproc.h> (v0.4 prep).  Always
-# compiled so the failure-path tests link; only invoked at runtime
-# when CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y.  Replaced by the
-# nanopb-generated codec when the `extras-v04` west group lands.
+# nanopb placeholder framing for <alp/mproc.h>.  Always compiled so
+# the failure-path tests link; only invoked at runtime when
+# CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y.  Replaced by the
+# nanopb-generated codec when the `extras-lwrb-nanopb` west group
+# lands -- interim/deferred as of v0.9, no committed release date.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/proto/alp_mproc_frame.c
 )

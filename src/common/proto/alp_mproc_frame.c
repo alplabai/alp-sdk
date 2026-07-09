@@ -7,9 +7,10 @@
  *
  * Hand-rolled little-endian put/get so the impl is portable across
  * every E1M target without pulling in endian.h or compiler intrinsics.
- * Replaced wholesale by the nanopb-generated codec when the v0.4
- * `extras-v04` west group lands the real upstream + the generator
- * step at build time.
+ * Replaced wholesale by the nanopb-generated codec when the
+ * `extras-lwrb-nanopb` west group lands the real upstream + the
+ * generator step at build time -- interim/deferred as of v0.9, no
+ * committed release date.
  */
 
 #include <string.h>

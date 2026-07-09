@@ -9,23 +9,25 @@
  *
  * Why a separate helper:
  *
- *   The v0.4-final mproc wire format is protobuf, encoded against
+ *   The eventual mproc wire format is protobuf, encoded against
  *   `metadata/protos/alp_mproc.proto` using nanopb (vendors/nanopb/).
  *   Generating the .pb.c sources requires the nanopb generator
  *   (Python), which depends on the upstream MaJerle/lwrb +
- *   nanopb/nanopb packs landed via the `extras-v04` west group.
- *   Until that lands the SDK ships a *placeholder* binary framing
- *   here -- a fixed 12-byte header plus the caller's payload --
- *   that exercises the same code path inside `mproc_zephyr.c` so
- *   the wiring is shaken out before the real codec drops in.
+ *   nanopb/nanopb packs landed via the `extras-lwrb-nanopb` west
+ *   group.  That group is interim/deferred as of v0.9 -- no
+ *   committed release date.  Until it lands the SDK ships a
+ *   *placeholder* binary framing here -- a fixed 12-byte header
+ *   plus the caller's payload -- that exercises the same code path
+ *   inside `mproc_zephyr.c` so the wiring is shaken out before the
+ *   real codec drops in.
  *
  *   Wire-format compatibility note: the placeholder envelope is
- *   NOT compatible with the v0.4-final protobuf wire.  Firmwares
+ *   NOT compatible with the eventual protobuf wire.  Firmwares
  *   built against this header MUST NOT talk to firmwares built
  *   against the nanopb-generated codec.  The CONFIG_ flag stays
- *   off by default so v0.3 / v0.4-prep workspaces keep using the
- *   raw passthrough; flip it on when both ends of an IPC channel
- *   build against this same source.
+ *   off by default so workspaces keep using the raw passthrough
+ *   until both ends of an IPC channel build against this same
+ *   source.
  *
  * Header layout (little-endian):
  *
