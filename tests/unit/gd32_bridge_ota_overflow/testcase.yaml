@@ -1,0 +1,16 @@
+tests:
+  alp.unit.gd32_bridge_ota_overflow:
+    # 32-bit only: ota.c's meta/flash-address casts assume uintptr_t ==
+    # uint32_t (true on the real Cortex-M33 target), which trips
+    # -Werror=int-to-pointer-cast on a 64-bit host.  Pre-existing property
+    # of the production source, not something this guard-only change
+    # should widen scope to touch.
+    platform_allow:
+      - native_sim
+    integration_platforms:
+      - native_sim
+    tags:
+      - alp
+      - gd32-bridge
+      - ota
+      - unit

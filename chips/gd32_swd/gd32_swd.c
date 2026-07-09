@@ -526,10 +526,16 @@ alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size)
 	if (!ctx->connected) return ALP_ERR_NOT_READY;
 	if (size == 0u) return ALP_ERR_INVAL;
 	if (addr < GD32_SWD_FMC_FLASH_BASE) return ALP_ERR_INVAL;
+	/* Wrap-safe capacity guard: addr/size come straight from the caller
+     * (host bridge), so `addr + size` can overflow uint32_t before any
+     * comparison runs.  Reject size > flash capacity first so the
+     * subtraction below cannot itself underflow. */
+	const uint32_t flash_end = GD32_SWD_FMC_FLASH_BASE + GD32_SWD_FMC_FLASH_BYTES;
+	if (size > GD32_SWD_FMC_FLASH_BYTES || addr > flash_end - size) return ALP_ERR_INVAL;
 
 	/* Round the start down + the end up to sector boundaries. */
 	const uint32_t start_sector  = (addr - GD32_SWD_FMC_FLASH_BASE) / GD32_SWD_FMC_SECTOR_BYTES;
-	const uint32_t end_byte_excl = addr + size;
+	const uint32_t end_byte_excl = addr + size; /* safe: addr <= flash_end - size */
 	const uint32_t end_sector_excl =
 	    (end_byte_excl - GD32_SWD_FMC_FLASH_BASE + GD32_SWD_FMC_SECTOR_BYTES - 1u) /
 	    GD32_SWD_FMC_SECTOR_BYTES;
@@ -571,6 +577,10 @@ alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx, uint32_t addr, const uint8_t 
 	if (data == NULL || len == 0u) return ALP_ERR_INVAL;
 	if ((addr & 0x7u) != 0u) return ALP_ERR_INVAL; /* doubleword-aligned */
 	if (addr < GD32_SWD_FMC_FLASH_BASE) return ALP_ERR_INVAL;
+	/* Wrap-safe capacity guard (see gd32_swd_flash_erase): reject an
+     * oversized len first so the subtraction below cannot underflow. */
+	const uint32_t flash_end = GD32_SWD_FMC_FLASH_BASE + GD32_SWD_FMC_FLASH_BYTES;
+	if (len > GD32_SWD_FMC_FLASH_BYTES || addr > flash_end - (uint32_t)len) return ALP_ERR_INVAL;
 
 	alp_status_t s = fmc_unlock(ctx);
 	if (s != ALP_OK) return s;
@@ -622,6 +632,10 @@ alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx, uint32_t addr, const uint8_t
 	if (!ctx->connected) return ALP_ERR_NOT_READY;
 	if (data == NULL || len == 0u) return ALP_ERR_INVAL;
 	if ((addr & 0x3u) != 0u) return ALP_ERR_INVAL; /* word-aligned */
+	if (addr < GD32_SWD_FMC_FLASH_BASE) return ALP_ERR_INVAL;
+	/* Wrap-safe capacity guard (see gd32_swd_flash_erase). */
+	const uint32_t flash_end = GD32_SWD_FMC_FLASH_BASE + GD32_SWD_FMC_FLASH_BYTES;
+	if (len > GD32_SWD_FMC_FLASH_BYTES || addr > flash_end - (uint32_t)len) return ALP_ERR_INVAL;
 
 	size_t offset = 0u;
 	while (offset < len) {

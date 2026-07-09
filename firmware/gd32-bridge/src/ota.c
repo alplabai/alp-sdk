@@ -246,11 +246,16 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
 	if (dlen == 0u || dlen != len - 5u) {
 		return STATUS_INVAL; /* extended/truncated capture: drop */
 	}
-	if ((uint32_t)off + dlen > OTA_SLOT_SIZE) {
+	/* Wrap-safe bound check: off/dlen are wire-controlled, so `off + dlen`
+     * can overflow uint32_t before the comparison runs.  dlen <= 0xFF
+     * (single length byte) is always <= OTA_SLOT_SIZE, so the subtraction
+     * below cannot itself underflow. */
+	if ((uint32_t)dlen > OTA_SLOT_SIZE || off > OTA_SLOT_SIZE - (uint32_t)dlen) {
 		s_state = OTA_ST_ERROR;
 		s_err   = 3u;
 		return STATUS_OUT_OF_RANGE;
 	}
+	const uint32_t end = off + (uint32_t)dlen; /* safe: off <= OTA_SLOT_SIZE - dlen */
 	/* The transport is AT-LEAST-ONCE: the slave can decode a request
      * twice (silicon-caught 2026-06-04: chunk #256 replayed
      * deterministically), and re-programming ECC flash hard-faults.
@@ -259,7 +264,7 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
      * without programming, different bytes are real corruption.  A
      * PARTIAL overlap still falls through to the program path (and
      * PGERRs) -- fixed-size streaming never produces one. */
-	if (off + (uint32_t)dlen <= s_last_off) {
+	if (end <= s_last_off) {
 		const uint8_t *flash = (const uint8_t *)(ota_slot_base(s_inactive) + off);
 		if (memcmp(flash, &req[5], dlen) == 0) {
 			s_state = OTA_ST_READY;
@@ -279,8 +284,8 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
 		s_err   = 4u;
 		return STATUS_IO;
 	}
-	if (off + (uint32_t)dlen > s_last_off) {
-		s_last_off = off + (uint32_t)dlen; /* cumulative high-water = received bytes */
+	if (end > s_last_off) {
+		s_last_off = end; /* cumulative high-water = received bytes */
 	}
 	s_state = OTA_ST_READY;
 	if (cap >= 4u) {

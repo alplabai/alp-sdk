@@ -71,6 +71,11 @@ extern "C" {
 /** GD32G553 flash base address (per the GD32G553 datasheet). */
 #define GD32_SWD_FMC_FLASH_BASE 0x08000000u
 
+/** GD32G553MEY7TR total main-flash capacity in bytes (512 KB, per the
+ *  datasheet / `gd32g553_flash.ld`).  Used to bound erase/write/verify
+ *  requests to the physical flash window. */
+#define GD32_SWD_FMC_FLASH_BYTES 0x00080000u
+
 /** Sector size on the GD32G553 in bytes. */
 #define GD32_SWD_FMC_SECTOR_BYTES 2048u
 
@@ -131,16 +136,23 @@ alp_status_t gd32_swd_halt(gd32_swd_t *ctx);
  *        covers @p addr .. @p addr + @p size - 1.
  *
  * Address + size are rounded out to sector boundaries
- * (@ref GD32_SWD_FMC_SECTOR_BYTES).
+ * (@ref GD32_SWD_FMC_SECTOR_BYTES).  Rejects (@ref ALP_ERR_INVAL) any
+ * range below @ref GD32_SWD_FMC_FLASH_BASE or extending past
+ * @ref GD32_SWD_FMC_FLASH_BYTES of physical capacity -- checked with a
+ * wrap-safe comparison since @p addr / @p size are caller-supplied.
  */
 alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size);
 
 /** Program @p len bytes from @p data into flash starting at @p addr.
- *  Destination must be erased.  Doubleword-aligned. */
+ *  Destination must be erased.  Doubleword-aligned.  Rejects
+ *  (@ref ALP_ERR_INVAL) a range outside the physical flash window,
+ *  same wrap-safe bound as @ref gd32_swd_flash_erase. */
 alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx, uint32_t addr, const uint8_t *data, size_t len);
 
 /** Read @p len bytes from flash starting at @p addr and compare
- *  against @p data.  Returns @ref ALP_OK on full match. */
+ *  against @p data.  Returns @ref ALP_OK on full match.  Rejects
+ *  (@ref ALP_ERR_INVAL) a range outside the physical flash window,
+ *  same wrap-safe bound as @ref gd32_swd_flash_erase. */
 alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx, uint32_t addr, const uint8_t *data, size_t len);
 
 /** Release the core from debug halt + issue a system reset.  Uses
