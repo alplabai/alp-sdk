@@ -13,16 +13,19 @@
 #
 # Usage:
 #   ./build_ti.sh                                  # default SPI bridge, no WiFi/BLE
-#   SDK_DIR=<ti-sdk> TICLANG_ROOT=<ti-cgt-armllvm> \
-#     SYSCONFIG_CLI=<sysconfig_cli.sh> TOOLBOX=<simplelink-wifi-toolbox> \
-#     ./build_ti.sh --wifi
+#   SDK_DIR=<ti-sdk>/simplelink_wifi_sdk_10_10_01_08 ./build_ti.sh --wifi
 #   ./build_ti.sh --wifi --ble                     # + WiFi host driver + NimBLE
 #   ./build_ti.sh --transport sdio --ota-selftest
+#
+# The TI SDK / toolchain / SysConfig / toolbox locations are NOT bundled;
+# point at your staged copies via the env vars (or flags) below.
 #
 # Output: <repo>/firmware/cc3501e/build/ti/cc3501e-bridge.{out,hex,bin}
 set -euo pipefail
 
 # --- config (override via env or flags) --------------------------------------
+# No defaults: these point at externally-staged TI tooling and are validated
+# below so the script fails with a clear message on any workstation/CI checkout.
 SDK_DIR="${SDK_DIR:-}"
 TICLANG_ROOT="${TICLANG_ROOT:-}"
 SYSCONFIG_CLI="${SYSCONFIG_CLI:-}"
@@ -57,13 +60,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fw="$(cd "$HERE/.." && pwd)"                 # firmware/cc3501e
 repo="$(cd "$fw/../.." && pwd)"              # repo root
 out="$fw/build/ti"
-
-: "${SDK_DIR:?set SDK_DIR to the TI SimpleLink Wi-Fi SDK root}"
-: "${TICLANG_ROOT:?set TICLANG_ROOT to the TI ARM LLVM toolchain root}"
-: "${SYSCONFIG_CLI:?set SYSCONFIG_CLI to sysconfig_cli.sh}"
-: "${TOOLBOX:?set TOOLBOX to the SimpleLink Wi-Fi Toolbox product root}"
-
 tc="$TICLANG_ROOT/bin/tiarmclang"
+# Require the externally-staged TI tooling before touching it, so an
+# unset/empty var fails with a clear message instead of a confusing MISSING
+# path (e.g. "/.metadata/product.json").
+for v in SDK_DIR TICLANG_ROOT SYSCONFIG_CLI TOOLBOX; do
+  [ -n "${!v}" ] || { echo "set $v (env var or the matching --flag) to your staged TI SDK/toolchain/SysConfig/toolbox -- see build_ti.ps1 for the reference layout"; exit 3; }
+done
 for p in "$SDK_DIR/.metadata/product.json" "$tc" "$SYSCONFIG_CLI" "$TOOLBOX/.metadata/product.json"; do
   [ -e "$p" ] || { echo "MISSING: $p (stage the TI SDK/toolchain/toolbox -- see docs)"; exit 3; }
 done

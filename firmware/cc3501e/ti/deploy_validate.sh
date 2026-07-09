@@ -19,17 +19,12 @@
 #   PUBLIC_KEY=... SIGNING_MODULE=... CONF_BIN=... TOOL_SETTINGS=... ./deploy_validate.sh
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fw="$(cd "$HERE/.." && pwd)"
-
-TOOLBOX="${TOOLBOX:-}"
+TOOLBOX="${TOOLBOX:?stage + set: SimpleLink Wi-Fi Toolbox launcher dir (the simplelink-wifi-toolbox executable)}"
 PUBLIC_KEY="${PUBLIC_KEY:?stage + set: Alp validation public key (PEM)}"
 SIGNING_MODULE="${SIGNING_MODULE:?stage + set: sign.py shim (keys wired to the validation keypair)}"
 CONF_BIN="${CONF_BIN:?stage + set: cc35xx-conf.bin}"
 TOOL_SETTINGS="${TOOL_SETTINGS:?stage + set: tool_settings.json}"
 XDS_SERIAL="${XDS_SERIAL:-L50015YR}"     # CC3501E XDS110 on this bench
-
-: "${TOOLBOX:?set TOOLBOX to the simplelink-wifi-toolbox executable path}"
 
 # GPE image/flash version = the CC35 vendor-RoT gate.  It is NOT the app SemVer
 # (that lives in firmware-version.txt and is reported via GET_DIAG_INFO.fw_version)
@@ -54,7 +49,11 @@ XDS_SERIAL="${XDS_SERIAL:-L50015YR}"     # CC3501E XDS110 on this bench
 _e=$(date +%s)
 VERSION="${VERSION:-0.$(( (_e >> 16) & 255 )).$(( (_e >> 8) & 255 )).$(( _e & 255 ))}"
 
-OUT="${OUT:-$fw/build/ti}"
+# Output root is derived from this script's location (mirrors build_ti.sh's
+# out="$fw/build/ti"), so the script targets THIS checkout, not a fixed path.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fw="$(cd "$HERE/.." && pwd)" # firmware/cc3501e
+OUT="$fw/build/ti"
 VOUT="$OUT/cc3501e-bridge.out"
 PKG="$OUT/bench"
 [ -f "$VOUT" ] || { echo "missing $VOUT -- run: firmware/cc3501e/ti/build_ti.sh --wifi"; exit 1; }
