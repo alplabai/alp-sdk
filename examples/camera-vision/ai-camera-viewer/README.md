@@ -1,8 +1,11 @@
 # ai-camera-viewer
 
-> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on
-> `native_sim/native/64`; real OV5640 + Ethos-U dispatch + Vela-
-> compiled model land in v0.6 AEN HiL.
+> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on
+> `native_sim/native/64` against the full `<alp/camera.h>` /
+> `<alp/inference.h>` surfaces (both ship today; Ethos-U dispatch
+> runs through `alp_inference_open(...)` same as any other backend).
+> What's still missing is a real Vela-compiled `person_detect.tflite`
+> model and AEN HiL bench validation.
 
 Headline edge-AI demo: an E1M-AEN module captures camera
 frames, runs a person-detect model on the on-die Ethos-U NPU,
