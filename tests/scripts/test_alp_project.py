@@ -11,6 +11,7 @@ Or via CI as configured in .github/workflows/pr-metadata-validate.yml.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -32,14 +33,20 @@ def _run_loader(
     *,
     input_path: Path,
     emit: str = "zephyr-conf",
+    core: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Invoke alp_project.py and return the completed process.  Uses
     the same interpreter the test suite is running under so the
     pyyaml + jsonschema deps line up."""
+    cmd = [
+        sys.executable, str(LOADER),
+        "--input", str(input_path),
+        "--emit", emit,
+    ]
+    if core is not None:
+        cmd.extend(["--core", core])
     return subprocess.run(
-        [sys.executable, str(LOADER),
-         "--input", str(input_path),
-         "--emit", emit],
+        cmd,
         capture_output=True, text=True, check=False,
     )
 
@@ -62,7 +69,21 @@ class TestLoaderContract(unittest.TestCase):
         registry_map = alp_registries.peripheral_kconfig()
         self.assertEqual(alp_project._PERIPHERAL_KCONFIG, registry_map)
         self.assertEqual(orchestrate_map, registry_map)
-        self.assertEqual(registry_map["uart"], "SERIAL")
+        self.assertEqual(registry_map["uart"], ("SERIAL",))
+
+    def test_peripheral_kconfig_registry_covers_schema_enum(self) -> None:
+        """Every schema-accepted peripheral token must emit Kconfig."""
+        import alp_registries
+
+        schema = json.loads(
+            (REPO / "metadata" / "schemas" / "board.schema.json")
+            .read_text(encoding="utf-8")
+        )
+        enum = set(
+            schema["$defs"]["core_entry"]["properties"]["peripherals"]
+            ["items"]["enum"]
+        )
+        self.assertEqual(set(alp_registries.peripheral_kconfig()), enum)
 
     def test_peripheral_kconfig_registry_schema_is_gated(self) -> None:
         """validate_metadata rejects malformed peripheral registry data."""
@@ -241,6 +262,63 @@ class TestZephyrEmit(unittest.TestCase):
                     rv = _run_loader(input_path=path)
                     self.assertEqual(rv.returncode, 0, msg=rv.stderr)
                     self.assertIn(kconfig, rv.stdout)
+
+    def test_schema_peripherals_emit_storage_network_usb_kconfig(self) -> None:
+        """Non-wrapper Zephyr subsystem tokens must not silently no-op."""
+        cases = {
+            "emmc": {
+                "path": REPO / "examples" / "v2n" / "v2n-emmc-block-stat" / "board.yaml",
+                "core": "m33_sm",
+                "kconfig": [
+                    "CONFIG_DISK_ACCESS=y",
+                    "CONFIG_DISK_DRIVER_MMC=y",
+                    "CONFIG_MMC_STACK=y",
+                ],
+            },
+            "ethernet": {
+                "path": REPO / "examples" / "v2n" / "v2n-ethernet-dual" / "board.yaml",
+                "core": "m33_sm",
+                "kconfig": [
+                    "CONFIG_NETWORKING=y",
+                    "CONFIG_NET_L2_ETHERNET=y",
+                ],
+            },
+            "flash": {
+                "path": REPO / "examples" / "v2n" / "v2n-xspi-flash-readwrite" / "board.yaml",
+                "core": "m33_sm",
+                "kconfig": [
+                    "CONFIG_FLASH=y",
+                    "CONFIG_FLASH_PAGE_LAYOUT=y",
+                ],
+            },
+            "usb": {
+                "path": REPO / "examples" / "peripheral-io" / "usb-host-storage" / "board.yaml",
+                "core": "m55_hp",
+                "kconfig": [
+                    "CONFIG_USB_DEVICE_STACK=y",
+                    "CONFIG_USB_HOST_STACK=y",
+                ],
+            },
+        }
+        for periph, case in cases.items():
+            with self.subTest(peripheral=periph):
+                rv = _run_loader(input_path=case["path"], core=case["core"])
+                self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+                for kconfig in case["kconfig"]:
+                    self.assertIn(kconfig, rv.stdout)
+
+    def test_yocto_peripherals_are_explicit_bsp_owned_noops(self) -> None:
+        """Yocto slices should not silently drop board.yaml peripherals."""
+        rv = _run_loader(
+            input_path=REPO / "examples" / "multicore" / "rpmsg-v2n" / "board.yaml",
+            emit="yocto-conf",
+            core="a55_cluster",
+        )
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertIn(
+            "BSP/kernel-owned (emmc, ethernet, usb); no Zephyr Kconfig",
+            rv.stdout,
+        )
 
     def test_log_level_maps_to_kconfig_default(self) -> None:
         cases = {"error": 1, "warn": 2, "info": 3, "debug": 4, "trace": 4}

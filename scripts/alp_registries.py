@@ -15,7 +15,10 @@ PERIPHERAL_KCONFIG_REGISTRY = METADATA_ROOT / "registries" / "peripheral-kconfig
 
 
 @functools.lru_cache(maxsize=1)
-def peripheral_kconfig() -> dict[str, str]:
-    """Return the board.yaml peripheral token -> Zephyr Kconfig symbol map."""
+def peripheral_kconfig() -> dict[str, tuple[str, ...]]:
+    """Return board.yaml peripheral tokens -> Zephyr Kconfig symbol bundles."""
     data = json.loads(PERIPHERAL_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
-    return dict(data["peripherals"])
+    return {
+        token: tuple(symbols)
+        for token, symbols in data["peripherals"].items()
+    }

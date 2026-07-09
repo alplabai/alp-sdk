@@ -790,9 +790,9 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
 
 
 # Peripheral name (from board.yaml's `peripherals:` array) -> Zephyr Kconfig
-# symbol.  Single-sourced in metadata/registries/peripheral-kconfig.json and
+# symbols.  Single-sourced in metadata/registries/peripheral-kconfig.json and
 # shared with alp_orchestrate/slugs.py.
-_PERIPHERAL_KCONFIG: dict[str, str] = peripheral_kconfig()
+_PERIPHERAL_KCONFIG: dict[str, tuple[str, ...]] = peripheral_kconfig()
 
 
 # Library-name -> Kconfig flag(s) to set when the library appears

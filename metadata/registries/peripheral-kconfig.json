@@ -1,18 +1,22 @@
 {
   "schemaVersion": "peripheral-kconfig-v1",
-  "_comment": "Single source for board.yaml `peripherals:` token -> Zephyr subsystem Kconfig symbol. Consumed by scripts/alp_project.py and scripts/alp_orchestrate/slugs.py so per-slice config emitters do not duplicate this table.",
+  "_comment": "Single source for board.yaml `peripherals:` token -> Zephyr subsystem Kconfig symbols. Consumed by scripts/alp_project.py and scripts/alp_orchestrate/slugs.py so per-slice config emitters do not duplicate this table.",
   "peripherals": {
-    "adc": "ADC",
-    "can": "CAN",
-    "counter": "COUNTER",
-    "gpio": "GPIO",
-    "i2c": "I2C",
-    "i2s": "I2S",
-    "pwm": "PWM",
-    "rtc": "RTC",
-    "sensor": "SENSOR",
-    "spi": "SPI",
-    "uart": "SERIAL",
-    "watchdog": "WATCHDOG"
+    "adc": ["ADC"],
+    "can": ["CAN"],
+    "counter": ["COUNTER"],
+    "emmc": ["DISK_ACCESS", "DISK_DRIVER_MMC", "MMC_STACK"],
+    "ethernet": ["NETWORKING", "NET_L2_ETHERNET"],
+    "flash": ["FLASH", "FLASH_PAGE_LAYOUT"],
+    "gpio": ["GPIO"],
+    "i2c": ["I2C"],
+    "i2s": ["I2S"],
+    "pwm": ["PWM"],
+    "rtc": ["RTC"],
+    "sensor": ["SENSOR"],
+    "spi": ["SPI"],
+    "uart": ["SERIAL"],
+    "usb": ["USB_DEVICE_STACK", "USB_HOST_STACK"],
+    "watchdog": ["WATCHDOG"]
   }
 }

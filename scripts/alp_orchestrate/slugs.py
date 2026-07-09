@@ -122,4 +122,4 @@ def _slugs_from_helper_firmware(helper_firmware: list) -> list[str]:
     return sorted(seen)
 
 
-_PERIPHERAL_KCONFIG: dict[str, str] = peripheral_kconfig()
+_PERIPHERAL_KCONFIG: dict[str, tuple[str, ...]] = peripheral_kconfig()
