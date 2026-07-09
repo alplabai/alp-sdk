@@ -1538,13 +1538,19 @@ ZTEST(alp_chips, test_gd32_swd_flash_arg_validation)
 {
 	/* .connected = true so the function reaches the argument-check
      * branch before bus access. */
-	gd32_swd_t ctx    = { .initialised = true, .connected = true };
-	uint8_t    buf[8] = { 0 };
+	gd32_swd_t     ctx       = { .initialised = true, .connected = true };
+	uint8_t        buf[8]    = { 0 };
+	const uint32_t flash_end = GD32_SWD_FMC_FLASH_BASE + 512u * 1024u;
 
 	/* size == 0 -> INVAL. */
 	zassert_equal(gd32_swd_flash_erase(&ctx, GD32_SWD_FMC_FLASH_BASE, 0u), ALP_ERR_INVAL);
 	/* addr below flash base -> INVAL. */
 	zassert_equal(gd32_swd_flash_erase(&ctx, 0x00000000u, 4096u), ALP_ERR_INVAL);
+	/* Flash range checks reject exact-end, past-end, and wrapped
+     * ranges before any FMC unlock/program/read operation. */
+	zassert_equal(gd32_swd_flash_erase(&ctx, flash_end, 1u), ALP_ERR_INVAL);
+	zassert_equal(gd32_swd_flash_erase(&ctx, flash_end - 1u, 2u), ALP_ERR_INVAL);
+	zassert_equal(gd32_swd_flash_erase(&ctx, UINT32_MAX - 1u, 4u), ALP_ERR_INVAL);
 
 	/* NULL data / zero len -> INVAL on write + verify. */
 	zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE, NULL, 8u), ALP_ERR_INVAL);
@@ -1556,6 +1562,20 @@ ZTEST(alp_chips, test_gd32_swd_flash_arg_validation)
 	zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE + 1u, buf, sizeof buf),
 	              ALP_ERR_INVAL);
 	zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE + 1u, buf, sizeof buf),
+	              ALP_ERR_INVAL);
+
+	/* Aligned addresses that fall outside the 512 KiB flash window
+     * must be rejected as ranges, not passed through to the SWD bus. */
+	zassert_equal(gd32_swd_flash_write(&ctx, flash_end, buf, sizeof buf), ALP_ERR_INVAL);
+	zassert_equal(gd32_swd_flash_write(&ctx, flash_end - 8u, buf, sizeof buf + 1u), ALP_ERR_INVAL);
+	zassert_equal(gd32_swd_flash_write(&ctx, UINT32_MAX - 7u, buf, sizeof buf), ALP_ERR_INVAL);
+	zassert_equal(gd32_swd_flash_write(&ctx, GD32_SWD_FMC_FLASH_BASE, buf, SIZE_MAX),
+	              ALP_ERR_INVAL);
+
+	zassert_equal(gd32_swd_flash_verify(&ctx, flash_end, buf, sizeof buf), ALP_ERR_INVAL);
+	zassert_equal(gd32_swd_flash_verify(&ctx, flash_end - 4u, buf, sizeof buf), ALP_ERR_INVAL);
+	zassert_equal(gd32_swd_flash_verify(&ctx, UINT32_MAX - 3u, buf, sizeof buf), ALP_ERR_INVAL);
+	zassert_equal(gd32_swd_flash_verify(&ctx, GD32_SWD_FMC_FLASH_BASE, buf, SIZE_MAX),
 	              ALP_ERR_INVAL);
 }
 
