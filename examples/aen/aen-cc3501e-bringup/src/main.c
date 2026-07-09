@@ -344,34 +344,63 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
  *
  * WHAT A REAL DEPLOYMENT PASSES: `image` must be a genuine SIGNED GPE vendor
  * image (manifest + body) built for the CC3501E -- the same artefact
- * firmware/cc3501e/ produces.  The blob below is a small INERT pattern: it
- * exercises the host encode/stream/framing path end-to-end but is NOT a
- * valid image, so on real silicon the firmware's psa_fwu_start rejects it at
- * FINISH (an expected, safe failure -- nothing gets staged).  Swap in a real
- * signed image on the bench to stage a genuine update.
+ * firmware/cc3501e/ produces.  This demo has TWO payload modes:
  *
- * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md): the receive ->
- * RAM-stage -> psa_fwu install-to-STAGED pipeline is silicon-validated, but
- * the final COLD swap-boot is gated by the vendor-SBL cold-boot issue on the
- * current mis-activated bench units.  So this demo proves the streaming +
- * framing + state machine; it does not (yet) prove a live A/B swap on those
- * units.  Opt in with -DEXTRA_CFLAGS=-DCC3501E_OTA_DEMO; left OFF by default
- * so a normal bring-up run never kicks a (disruptive) flash cycle.
+ *   default            -- a small INERT pattern.  It exercises the host
+ *                         encode/stream/framing path end-to-end but is NOT a
+ *                         valid image, so on real silicon the firmware's
+ *                         psa_fwu_start rejects it at FINISH (an expected, safe
+ *                         failure -- nothing gets staged).  Proves the wire
+ *                         path only.
+ *   -DCC3501E_OTA_REAL -- streams the genuine `cc3501e_ota_candidate[]` (the
+ *                         signed GPE vendor image v0.0.4.0, the SAME artefact
+ *                         firmware/cc3501e/'s `--ota-selftest` build installs).
+ *                         psa_fwu_start ACCEPTS the real manifest, so FINISH
+ *                         reaches a genuine STAGED -- this proves the real
+ *                         image streams->FINISH->STAGED over the bridge, not
+ *                         just the framing.  (Requires the CMake side to
+ *                         compile the candidate source -- see CMakeLists.txt.)
+ *
+ * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md §5): the receive ->
+ * RAM-stage -> psa_fwu install-to-STAGED pipeline is silicon-validated.  The
+ * real-image STAGED (this mode) is WARM-verifiable on any bench unit.  The
+ * final COLD swap-boot is a SEPARATE gate -- the bench units are fuse-proven
+ * mis-activated (`boot_sector_programmed = 0`), so the vendor SBL never
+ * relaunches a STAGED image on cold POR until a unit is re-activated via the
+ * vendor GUI wizard.  So even this mode proves STAGED, not the live A/B swap,
+ * on the current units.  Opt in at build time with `-DCC3501E_OTA_DEMO=ON`
+ * (inert blob) or `-DCC3501E_OTA_REAL=ON` (genuine candidate); left OFF by
+ * default so a normal bring-up run never kicks a (disruptive) flash cycle.
  */
 #ifdef CC3501E_OTA_DEMO
 #define CC3501E_OTA_DEMO_TIMEOUT_MS 20000u
 static void cc3501e_demo_ota(cc3501e_t *fw)
 {
+#ifdef CC3501E_OTA_REAL
+	/* Genuine signed GPE vendor image (v0.0.4.0), shared with the firmware's
+	 * --ota-selftest build.  psa_fwu_start accepts its real manifest, so FINISH
+	 * reaches a true STAGED. */
+	extern const unsigned char cc3501e_ota_candidate[];
+	extern const unsigned int  cc3501e_ota_candidate_len;
+	const uint8_t             *image      = cc3501e_ota_candidate;
+	const size_t               image_len  = (size_t)cc3501e_ota_candidate_len;
+	const bool                 real_image = true;
+#else
 	/* Illustrative inert blob (NOT a signed image -- see the note above). */
-	static uint8_t image[1024];
-	for (size_t i = 0; i < sizeof(image); ++i) {
-		image[i] = (uint8_t)(i * 31u + 7u);
+	static uint8_t inert[1024];
+	for (size_t i = 0; i < sizeof(inert); ++i) {
+		inert[i] = (uint8_t)(i * 31u + 7u);
 	}
+	const uint8_t *image      = inert;
+	const size_t   image_len  = sizeof(inert);
+	const bool     real_image = false;
+#endif
 
-	printf("[cc3501e-bringup] OTA: streaming a %u B demo blob via cc3501e_ota_update...\n",
-	       (unsigned)sizeof(image));
+	printf("[cc3501e-bringup] OTA: streaming a %u B %s image via cc3501e_ota_update...\n",
+	       (unsigned)image_len,
+	       real_image ? "SIGNED candidate" : "inert demo");
 
-	alp_status_t s = cc3501e_ota_update(fw, image, sizeof(image), CC3501E_OTA_DEMO_TIMEOUT_MS);
+	alp_status_t s = cc3501e_ota_update(fw, image, image_len, CC3501E_OTA_DEMO_TIMEOUT_MS);
 
 	/* Read back the session state regardless of the update result -- this is
 	 * the field-diagnostic call (`alp companion ota status` uses the same). */
@@ -384,15 +413,23 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 	}
 
 	if (s == ALP_OK) {
-		printf("[cc3501e-bringup] OTA -> STAGED; the CC35 will swap+boot the new "
-		       "slot on its next reboot (production path)\n");
+		printf("[cc3501e-bringup] OTA -> STAGED (genuine image accepted by psa_fwu); "
+		       "the CC35 swaps+boots the new slot on its next COLD POR -- gated on a "
+		       "re-activated unit (BRINGUP_STATUS.md §5)\n");
 	} else if (s == ALP_ERR_NOT_READY) {
 		printf("[cc3501e-bringup] OTA -> NOT_READY (no PSA-FWU in this CC3501E image) "
 		       "-- expected on a non-OTA firmware build\n");
+	} else if (real_image) {
+		/* A genuine image should reach STAGED; a non-OK here is a real fault
+		 * (bridge/psa_fwu), not the expected inert rejection.  Reset the session. */
+		printf("[cc3501e-bringup] OTA -> %d (signed image did NOT stage -- unexpected; "
+		       "check the bridge / psa_fwu path); aborting the session\n",
+		       (int)s);
+		(void)cc3501e_ota_abort(fw, CC3501E_OTA_DEMO_TIMEOUT_MS);
 	} else {
 		/* An inert blob fails at FINISH (image validation) -- the host stream +
-		 * framing still round-tripped, which is what this demo proves.  Reset the
-		 * half-open session so the slot is clean for a real image. */
+		 * framing still round-tripped, which is what the default mode proves.  Reset
+		 * the half-open session so the slot is clean for a real image. */
 		printf("[cc3501e-bringup] OTA -> %d (inert blob rejected at FINISH as expected); "
 		       "aborting the session\n",
 		       (int)s);
