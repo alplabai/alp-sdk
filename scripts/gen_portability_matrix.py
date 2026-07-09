@@ -19,7 +19,10 @@ swap-test recipe (docs/portability-matrix.md § Method) for every
      dir, set `som.sku:` to the target SKU and remap `cores.<key>:` to
      the target preset's `topology:` keys (exact-key match first, then
      the unique same-OS-class key -- `board:` entries are Zephyr-class,
-     `machine:` entries are Yocto-class).
+     `machine:` entries are Yocto-class).  If the original board preset
+     does not host the target SoM family, select a compatible entry from
+     the example's `supported_boards:` list and remap `pins:` through
+     matching `board_alias:` route roles.
   3. Run `scripts/alp_project.py --input <tmp> --core <key> --emit
      zephyr-conf` for every app-carrying core.  The cell is PASS iff
      every emit exits 0.
@@ -60,6 +63,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 METADATA = REPO / "metadata"
 MODULES = METADATA / "e1m_modules"
+BOARDS = METADATA / "boards"
 ALP_PROJECT = REPO / "scripts" / "alp_project.py"
 DOC = REPO / "docs" / "portability-matrix.md"
 
@@ -146,6 +150,20 @@ def family_skus(presets: dict[str, dict], prefixes: tuple[str, ...]) -> list[str
     return sorted(s for s in presets if s.startswith(prefixes))
 
 
+def load_board_presets() -> dict[str, dict]:
+    """Map board preset slug -> parsed metadata/boards/<slug>.yaml."""
+    presets: dict[str, dict] = {}
+    for path in sorted(BOARDS.glob("*.yaml")):
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        presets[path.stem] = doc
+    return presets
+
+
+def _board_hosts_family(board_preset: dict | None, family: str) -> bool:
+    families = (board_preset or {}).get("hosts_som_families") or []
+    return isinstance(families, list) and family in [str(item) for item in families]
+
+
 def _topology_class(entry: dict) -> str | None:
     """Classify a `topology:` entry: Zephyr slices carry `board:`,
     Yocto/Linux slices carry `machine:` (see the SoM preset schema)."""
@@ -187,8 +205,98 @@ def remap_cores(cores: dict, src_topology: dict, dst_topology: dict) -> dict:
     return out
 
 
+def _route_entries(board_preset: dict) -> list[dict]:
+    routes = board_preset.get("e1m_routes") or {}
+    out: list[dict] = []
+    for section in ("gpio", "buses", "pwm", "adc", "dac", "i2s", "can", "qenc"):
+        out.extend(entry for entry in (routes.get(section) or [])
+                   if isinstance(entry, dict))
+    return out
+
+
+def _route_by_alias(board_preset: dict) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for entry in _route_entries(board_preset):
+        alias = entry.get("board_alias")
+        if isinstance(alias, str):
+            out[alias] = entry
+    return out
+
+
+def _alias_for_pin(source_board: dict, pin: dict) -> str | None:
+    macro = pin.get("macro")
+    e1m = pin.get("e1m")
+    for entry in _route_entries(source_board):
+        if (isinstance(macro, str) and entry.get("macro") == macro) or (
+            isinstance(e1m, str) and entry.get("e1m") == e1m
+        ):
+            alias = entry.get("board_alias")
+            return alias if isinstance(alias, str) else None
+    return None
+
+
+def _remap_pins(doc: dict, source_board: dict, target_board: dict) -> None:
+    pins = doc.get("pins")
+    if not pins:
+        return
+    target_by_alias = _route_by_alias(target_board)
+    remapped = []
+    for idx, pin in enumerate(pins):
+        if not isinstance(pin, dict):
+            raise CellError(
+                f"pins[{idx}] is not remappable across board presets")
+        alias = _alias_for_pin(source_board, pin)
+        if alias is None:
+            raise CellError(
+                f"pins[{idx}] has no board_alias route for board-preset remap")
+        target = target_by_alias.get(alias)
+        if target is None:
+            raise CellError(
+                f"pins[{idx}] route alias `{alias}` is absent on target board")
+        next_pin = dict(pin)
+        next_pin["e1m"] = target["e1m"]
+        next_pin["macro"] = target["macro"]
+        if target.get("doc"):
+            next_pin["doc"] = target["doc"]
+        remapped.append(next_pin)
+    doc["pins"] = remapped
+
+
+def _select_board_for_target(
+    doc: dict,
+    sku: str,
+    dst_preset: dict,
+    board_presets: dict[str, dict],
+) -> tuple[str | None, str | None]:
+    """Return (selected_preset, original_preset) for a target SKU.
+
+    The current `preset:` wins when it already hosts the target family.
+    Otherwise, the example must explicitly list a compatible preset in
+    `supported_boards:`.  This keeps the matrix from inventing a carrier
+    migration the example did not claim.
+    """
+    original = doc.get("preset")
+    if not isinstance(original, str):
+        return None, None
+    family = dst_preset.get("family")
+    if not isinstance(family, str):
+        return original, original
+
+    candidates = [original]
+    candidates.extend(str(p) for p in doc.get("supported_boards") or [])
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if _board_hosts_family(board_presets.get(candidate), family):
+            return candidate, original
+    raise CellError(
+        f"no supported board preset for SoM family `{family}` on {sku}")
+
+
 def run_cell(example_dir: Path, sku: str, presets: dict[str, dict],
-             tmpdir: Path) -> None:
+             board_presets: dict[str, dict], tmpdir: Path) -> None:
     """Run the swap test for one (SKU x example) cell; raise CellError on FAIL.
 
     Mirrors the doc's Method: rewrite som.sku + cores keys, then emit
@@ -211,6 +319,16 @@ def run_cell(example_dir: Path, sku: str, presets: dict[str, dict],
     doc["cores"] = remap_cores(doc.get("cores") or {},
                                src_preset.get("topology") or {},
                                dst_preset.get("topology") or {})
+    selected_board, original_board = _select_board_for_target(
+        doc, sku, dst_preset, board_presets)
+    if selected_board is not None:
+        doc["preset"] = selected_board
+    if selected_board != original_board:
+        source_board = board_presets.get(str(original_board))
+        target_board = board_presets.get(str(selected_board))
+        if source_board is None or target_board is None:
+            raise CellError("board preset remap source/target missing")
+        _remap_pins(doc, source_board, target_board)
 
     emit_cores = [k for k, v in doc["cores"].items()
                   if isinstance(v, dict) and "app" in v]
@@ -277,6 +395,7 @@ def sweep(presets: dict[str, dict],
 
     Returns [(title, skus, {(sku, example): passed})] in FAMILIES order.
     """
+    board_presets = load_board_presets()
     results = []
     for fam in FAMILIES:
         skus = family_skus(presets, fam["sku_prefixes"])
@@ -284,7 +403,7 @@ def sweep(presets: dict[str, dict],
         for sku in skus:
             for name, rel in fam["examples"]:
                 try:
-                    run_cell(REPO / rel, sku, presets, tmpdir)
+                    run_cell(REPO / rel, sku, presets, board_presets, tmpdir)
                     cells[(sku, name)] = True
                 except CellError as err:
                     print(f"gen_portability_matrix: {sku} x {name}: {err}",

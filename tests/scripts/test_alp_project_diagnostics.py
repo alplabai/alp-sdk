@@ -24,3 +24,14 @@ def test_alp_project_exits_nonzero_on_bad_yaml():
     )
     assert proc.returncode != 0
     assert "ALP-B001" in proc.stderr or "ALP-B001" in proc.stdout
+
+
+def test_alp_project_exits_nonzero_on_board_preset_family_mismatch():
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "--input",
+         str(FIX_BAD / "ALP-B007-board-preset-family.yaml"),
+         "--emit", "zephyr-conf"],
+        capture_output=True, text=True,
+    )
+    assert proc.returncode != 0
+    assert "ALP-B007" in proc.stderr or "ALP-B007" in proc.stdout

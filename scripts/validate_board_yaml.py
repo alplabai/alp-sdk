@@ -12,6 +12,9 @@ build kicks off:
      `metadata/e1m_modules/<SKU>.yaml`.
   4. When `preset:` is used, the shared board definition at
      `metadata/boards/<preset>.yaml` exists.
+  5. When `preset:` is used, the selected board's
+     `hosts_som_families:` includes the selected SoM preset's
+     `family:`.
 
 Customer usage (from the app root):
 
@@ -28,9 +31,11 @@ Exit codes:
   1  YAML parse or schema violation
   2  missing SoM SKU preset or missing board preset referenced
      by `preset:`
-  3  hardware-revision / SDK-version incompatibility (the chosen
-     hw_rev's [min_sdk_version, max_sdk_version] window does not
-     cover metadata/sdk_version.yaml)
+  3  hardware / capability incompatibility (the board preset does
+     not host the selected SoM family, the chosen hw_rev's
+     [min_sdk_version, max_sdk_version] window does not cover
+     metadata/sdk_version.yaml, or the app asks for a peripheral
+     not routed by the selected SoC)
 """
 
 from __future__ import annotations
@@ -322,19 +327,64 @@ def _check_peripherals_vs_soc(
 
 
 def _check_board_preset(project: dict[str, Any], metadata_root: Path) -> int:
-    """Return 0 on OK, 2 on missing preset."""
+    """Return 0 on OK, 2 on missing preset, 3 on incompatibility."""
     preset = project.get("preset")
     if preset:
         preset_path = metadata_root / "boards" / f"{preset}.yaml"
-        if preset_path.is_file():
-            print(f"OK   board preset: {preset}")
+        if not preset_path.is_file():
+            print(f"FAIL board: `preset: {preset}` does not resolve",
+                  file=sys.stderr)
+            print(f"     expected shared definition at "
+                  f"{preset_path.relative_to(REPO) if preset_path.is_relative_to(REPO) else preset_path}",
+                  file=sys.stderr)
+            return 2
+        try:
+            board_doc = yaml.safe_load(
+                preset_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as e:
+            print(f"FAIL board preset: {preset_path} failed to parse ({e})",
+                  file=sys.stderr)
+            return 2
+        if not isinstance(board_doc, dict):
+            print(f"FAIL board preset: {preset_path} is not a mapping",
+                  file=sys.stderr)
+            return 2
+
+        print(f"OK   board preset: {preset}")
+
+        sku = project["som"]["sku"]
+        sku_preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
+        if not sku_preset_path.is_file():
+            # Already reported by _check_som_preset.
             return 0
-        print(f"FAIL board: `preset: {preset}` does not resolve",
+        try:
+            som_doc = yaml.safe_load(
+                sku_preset_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            # Already reported by _check_som_preset.
+            return 0
+        if not isinstance(som_doc, dict):
+            return 0
+
+        family = som_doc.get("family")
+        allowed_raw = board_doc.get("hosts_som_families")
+        if not isinstance(family, str) or not isinstance(allowed_raw, list):
+            return 0
+        allowed = [str(item) for item in allowed_raw]
+        if family in allowed:
+            return 0
+
+        print(f"FAIL board preset: ALP-B007 `preset: {preset}` hosts "
+              f"SoM families {allowed}, but {sku} is family '{family}'",
               file=sys.stderr)
-        print(f"     expected shared definition at "
-              f"{preset_path.relative_to(REPO) if preset_path.is_relative_to(REPO) else preset_path}",
-              file=sys.stderr)
-        return 2
+        compatible = _compatible_board_presets(metadata_root, family)
+        if compatible:
+            print(f"     use one of: {', '.join(compatible)}",
+                  file=sys.stderr)
+        else:
+            print("     choose a compatible board preset or define a "
+                  "compatible board inline", file=sys.stderr)
+        return 3
 
     # Inline board definition.  Schema already enforced
     # `name:` is present; check populated/e1m_routes are non-empty.
@@ -348,6 +398,22 @@ def _check_board_preset(project: dict[str, Any], metadata_root: Path) -> int:
     else:
         print(f"OK   board: '{name}' defined inline (empty -- headless / inference-only)")
     return 0
+
+
+def _compatible_board_presets(metadata_root: Path, family: str) -> list[str]:
+    boards_dir = metadata_root / "boards"
+    out: list[str] = []
+    if not boards_dir.is_dir():
+        return out
+    for board_path in sorted(boards_dir.glob("*.yaml")):
+        try:
+            doc = yaml.safe_load(board_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            continue
+        families = doc.get("hosts_som_families") if isinstance(doc, dict) else None
+        if isinstance(families, list) and family in [str(item) for item in families]:
+            out.append(board_path.stem)
+    return out
 
 
 def main() -> int:
@@ -377,7 +443,7 @@ def main() -> int:
     hw_rv = _check_hw_compat(project, args.metadata_root)
     periph_rv = _check_peripherals_vs_soc(project, args.metadata_root)
 
-    if hw_rv == 3 or periph_rv == 3:
+    if board_rv == 3 or hw_rv == 3 or periph_rv == 3:
         print(f"\n{args.input}: hardware / capability incompatibility",
               file=sys.stderr)
         return 3

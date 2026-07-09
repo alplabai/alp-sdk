@@ -7,13 +7,13 @@ sample:
     conferencing.  TAS2563 mic -> <alp/dsp.h> Hann+FFT spectrum ->
     <alp/inference.h> RNNoise-style denoiser -> TAS2563 speaker,
     ~10 ms end-to-end latency target.  Uses BOARD_I2S_AUDIO for
-    portability across E1M EVK (AEN) and E1M-X EVK (V2N);
-    native_sim exercises the framing path.
+    portability across E1M-X EVK V2N/V2M variants; native_sim
+    exercises the framing path.
 
 tests:
-  alp_sdk.examples.audio_noise_suppression.e1m_evk:
+  alp_sdk.examples.audio_noise_suppression.e1m_x_evk_native:
     extra_configs:
-      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     platform_allow:
       - native_sim/native/64
     # native_sim has no I2S controller / NPU -- this overlay keeps the
@@ -26,7 +26,7 @@ tests:
       - audio
       - dsp
       - ai
-      - aen
+      - v2n
     build_only: true
     harness: console
     harness_config:
@@ -34,7 +34,7 @@ tests:
       regex:
         - "\\[ns\\] done"
 
-  alp_sdk.examples.audio_noise_suppression.e1m_x_evk:
+  alp_sdk.examples.audio_noise_suppression.e1m_x_evk_rzv2n:
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
     # Build-only until the alp_e1m_x_evk Zephyr board file lands

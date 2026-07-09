@@ -313,6 +313,22 @@ features: {}
     assert "features" in str(excinfo.value)
 
 
+def test_load_board_yaml_rejects_board_preset_family_mismatch(tmp_path: Path) -> None:
+    path = _write_board(tmp_path, """
+        som:
+          sku: E1M-V2N101
+
+        preset: e1m-evk
+
+        cores:
+          m33_sm:
+            app: ./src
+    """)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    assert "hosts SoM families" in str(excinfo.value)
+
+
 # ---------------------------------------------------------------------
 # 4b. Phase B gap fix G-4: cross-class `som.sku:` swap diagnostic
 # ---------------------------------------------------------------------

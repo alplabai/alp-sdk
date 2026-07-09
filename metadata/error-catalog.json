@@ -37,6 +37,13 @@
       "kind": "runtime-diagnostic",
       "summary": "(Diagnostic landing page -- narrative to be added.)"
     },
+    "ALP-B007": {
+      "code": "ALP-B007",
+      "doc": "docs/diagnostics/ALP-B007.md",
+      "fix": "Use a board preset that hosts the SoM family, or define a compatible custom board inline in `board.yaml`.",
+      "kind": "runtime-diagnostic",
+      "summary": "The selected board preset does not list the selected SoM preset's `family:` in `hosts_som_families:`."
+    },
     "ALP-B010": {
       "code": "ALP-B010",
       "doc": "docs/diagnostics/ALP-B010.md",
