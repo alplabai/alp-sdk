@@ -17,18 +17,20 @@
 //   - New messages get new top-level types; new enum values append
 //     to the end of an existing enum.
 //
-// Code generation lands in v0.4-final:
+// Code generation is deferred (interim as of v0.9, no committed
+// release date):
 //   python -m nanopb.generator metadata/protos/alp_mproc.proto \
 //       --output-dir build/generated/alp_mproc
 //   -> emits alp_mproc.pb.h + alp_mproc.pb.c
 //
-// Until then a placeholder binary framing helper at
+// Until that lands a placeholder binary framing helper at
 // src/common/proto/alp_mproc_frame.{h,c} exercises the wrapping +
 // unwrapping code path inside src/zephyr/mproc_zephyr.c when
 // CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y.  The placeholder wire is
 // intentionally NOT compatible with this proto's nanopb-generated
 // wire -- the flag transitions to the generator-emitted codec once
-// the `extras-v04` west group lands upstream nanopb on the workspace.
+// the `extras-lwrb-nanopb` west group lands upstream nanopb on the
+// workspace.
 
 syntax = "proto3";
 

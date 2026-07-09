@@ -27,8 +27,9 @@
  *
  *   4. IPC envelope framing (always on -- no MPROC backend needed).
  *      Exercises alp_mproc_frame_encode / alp_mproc_frame_decode
- *      directly so the v0.4-prep placeholder codec stays correct
- *      ahead of the nanopb-generated wire format.  The
+ *      directly so the interim placeholder codec stays correct
+ *      ahead of the (deferred, no committed version) nanopb-generated
+ *      wire format.  The
  *      alp_sdk.mproc.nanopb_framing scenario additionally compiles
  *      CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y so the framing branch
  *      in alp_mbox_send / mbox_rx_cb builds cleanly.
@@ -113,10 +114,11 @@ ZTEST(alp_mproc, test_hwsem_lifecycle_null_handle_safe)
 #endif /* !CONFIG_ALP_SDK_MPROC */
 
 /* ------------------------------------------------------------------ */
-/* IPC envelope (src/common/proto/alp_mproc_frame.{h,c}) — v0.4 prep   */
+/* IPC envelope (src/common/proto/alp_mproc_frame.{h,c}) — interim,   */
+/* deferred (no committed version for the real nanopb wire)           */
 /*                                                                     */
 /* Placeholder binary framing exercised here directly because no real  */
-/* mbox peer is available under native_sim.  When the v0.4-final       */
+/* mbox peer is available under native_sim.  When the eventual         */
 /* nanopb codec drops in, these tests get rewritten against the        */
 /* generated pb_encode / pb_decode entry points and verify the same    */
 /* round-trip contract.                                                */

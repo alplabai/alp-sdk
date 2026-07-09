@@ -28,7 +28,8 @@ tests:
       - peripheral
       - caps
 
-  # v0.4-prep scenario: flips CONFIG_ALP_SDK_UART_RX_RINGBUF=y so the
+  # Interim scenario (LwRB upstream swap deferred, no committed
+  # version): flips CONFIG_ALP_SDK_UART_RX_RINGBUF=y so the
   # LwRB-backed RX ring buffer code path in peripheral_uart.c is
   # compile-verified.  The failure-path tests in this suite run
   # against both this overlay (feature on) and the default config

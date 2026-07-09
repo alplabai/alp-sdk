@@ -13,8 +13,8 @@ unconditionally when the relevant subsystem is compiled.
 
 The Zephyr backend's audio path (`src/zephyr/audio_zephyr.c`) uses
 Zephyr's `k_mem_slab` today, which is fine for fixed-block DMA
-staging.  But several v0.4 sites want a true byte-granular ring
-with `producer / consumer in different ISRs`-safe semantics:
+staging.  But several sites want a true byte-granular ring with
+`producer / consumer in different ISRs`-safe semantics:
 
 - UART RX scratch in `src/zephyr/peripheral_uart.c` (poll-mode
   reads draining a producer-side ISR).
@@ -33,10 +33,13 @@ License + maintenance + footprint all pass the
 
 ## Status
 
-**v0.4-prep.**  First consumer landed: the Zephyr UART backend's
-opt-in byte-granular RX ring buffer (`alp_uart_rx_ringbuf_*`,
-gated on `CONFIG_ALP_SDK_UART_RX_RINGBUF`).  The vendor anchor
-now ships:
+**Interim / deferred as of v0.9.**  There is no committed release
+that flips the upstream module on -- the in-tree stub is the real,
+shipping implementation today, not a placeholder waiting on a
+specific tag.  First (and so far only) consumer landed: the Zephyr
+UART backend's opt-in byte-granular RX ring buffer
+(`alp_uart_rx_ringbuf_*`, gated on `CONFIG_ALP_SDK_UART_RX_RINGBUF`).
+The vendor anchor ships:
 
 - The stub `<lwrb/lwrb.h>` (Apache-2.0) declaring the upstream
   public ABI as of v3.2.0.
@@ -46,10 +49,12 @@ now ships:
   `lwrb_advance` symbols.  Correct single-producer /
   single-consumer semantics with the canonical empty/full
   disambiguation; ~140 LoC.  Replaced wholesale by upstream
-  `MaJerle/lwrb` once the `extras-v04` west group is enabled.
+  `MaJerle/lwrb` once the `extras-lwrb-nanopb` west group is
+  enabled.
 - The west-manifest pin (`MaJerle/lwrb@v3.2.0`) sitting behind
-  the `extras-v04` group filter, ready to flip on once the v0.4
-  Zephyr-module wiring lands.
+  the `extras-lwrb-nanopb` group filter, ready to flip on whenever
+  the Zephyr-module wiring below lands -- no version is currently
+  committed to that work.
 
 The Zephyr build picks up the vendor headers via
 `zephyr/CMakeLists.txt`'s `zephyr_include_directories(...lwrb/include)`
@@ -65,9 +70,9 @@ consumer's own Kconfig flag (`CONFIG_ALP_SDK_UART_RX_RINGBUF` for
 the UART path) gates whether the library is *used*; the library
 itself is pulled in unconditionally.
 
-## Wiring (v0.4)
+## Wiring (deferred, no committed release)
 
-The west.yml pin is **shipped** as of v0.3:
+The west.yml pin is **shipped** (pinned since v0.3):
 
 ```yaml
 - name: lwrb
@@ -75,15 +80,15 @@ The west.yml pin is **shipped** as of v0.3:
   revision: v3.2.0
   path: modules/lib/lwrb
   groups:
-    - extras-v04        # disabled by default -- see top-level group-filter
+    - extras-lwrb-nanopb   # disabled by default -- see top-level group-filter
 ```
 
-Behind the `extras-v04` group (disabled by default in the
-manifest's `group-filter:`), so `west update` on a v0.3 workspace
-does not fetch the upstream source -- the stub header in this
-directory keeps SDK builds link-clean.  Flip the group on with
-`west update --group-filter +extras-v04` (or edit the manifest)
-when the v0.4 consumer lands.
+Behind the `extras-lwrb-nanopb` group (disabled by default in the
+manifest's `group-filter:`), so a default `west update` does not
+fetch the upstream source -- the stub header in this directory
+keeps SDK builds link-clean.  Flip the group on with
+`west update --group-filter +extras-lwrb-nanopb` (or edit the
+manifest) when the Zephyr-module wiring below lands.
 
 LwRB does **not** ship a `zephyr/module.yml` at its repo root, so
 a bare `west.yml` import won't auto-register it as a Zephyr module
@@ -103,7 +108,7 @@ drop a tagged tarball under `vendors/lwrb/src/` and compile it
 directly from our CMakeLists.  Higher carrying cost on upgrade
 (manual re-vendor) but zero supply-chain surface.
 
-v0.4 picks (a) unless we hit a reason not to.  Either way: once
+The upstream swap picks (a) unless we hit a reason not to.  Either way: once
 the upstream sources are on the include path the real
 `lwrb/lwrb.h` wins ahead of this directory's stub.  No
 source-code change in the SDK is needed for the swap -- both
@@ -120,5 +125,6 @@ license terms).
 
 - [`docs/recommended-libraries.md`](../../docs/recommended-libraries.md)
   -- the Tier 3 "already integrated / Zephyr-native" entry.
-- [`vendors/nanopb/`](../nanopb/) -- companion v0.3 scaffolding for
-  protobuf-based IPC framing.
+- [`vendors/nanopb/`](../nanopb/) -- companion SDK-internal
+  scaffolding for protobuf-based IPC framing (same
+  interim/deferred status).
