@@ -81,7 +81,12 @@ def test_standalone_validator_rejects_board_preset_family_mismatch():
         capture_output=True,
         text=True,
     )
-    assert proc.returncode == 3
+    # validate_board_yaml.py is now a thin wrapper over the shared validator +
+    # orchestrator loader (entrypoint parity): it collapses the legacy 0/1/2/3
+    # exit ladder to 0 (clean) / 1 (any error).  The ALP-B007 family-mismatch
+    # diagnostic still fires via the orchestrator path -- only the numeric code
+    # changes (3 -> 1).
+    assert proc.returncode == 1
     assert "ALP-B007" in proc.stderr
 
 
