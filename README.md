@@ -136,7 +136,7 @@ indexes the common ones with fixes.
 
 ## 30-second quick start
 
-A v0.8 project is **one declarative file** plus per-core app
+A v0.9 project is **one declarative file** plus per-core app
 directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
@@ -523,7 +523,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: main        # pin to a release tag — v0.8.1 is the latest; `main` tracks the next candidate
+      revision: main        # pin to a release tag — v0.9.0 is the latest; `main` tracks the next candidate
       path: modules/lib/alp-sdk
 ```
 
