@@ -104,11 +104,43 @@ add_library(alp::sdk_headers ALIAS alp_sdk_headers)
 # libalp_chips.a that apps (e.g. the alp_perception ROS node) link
 # alongside libalp_sdk.so.
 # ---------------------------------------------------------------------
+# Full roster of OS-agnostic chip drivers (chips/<id>/<id>.c).  This MUST
+# stay a superset of every chips/<id>/<id>.c on disk minus the
+# CHIP_LIST_EXCLUDED_WITH_REASON allowlist in
+# scripts/check_cmake_chip_list_parity.py, which gates that in CI
+# (issue #476: the list used to be a 17-entry hand subset that
+# silently dropped required SoM drivers -- PMIC, clock, Ethernet PHY,
+# NPU/wireless sideband -- from the plain-CMake / Yocto
+# libalp_chips.a build).  Mirrors the Zephyr-side per-chip
+# CONFIG_ALP_SDK_CHIP_<NAME> roster in zephyr/CMakeLists.txt /
+# zephyr/Kconfig -- every driver buildable there is buildable here
+# too, since none of the chips/<id>/<id>.c cores include a
+# Zephyr/vendor header (they call back into <alp/peripheral.h> only).
 set(ALP_SDK_CHIP_LIST
-    tcal9538 ina236 tas2563 lsm6dso bmi323 bmp581 icm42670
-    ssd1306 ssd1331 tmp112 rv3028c7 optiga_trust_m eeprom_24c128
-    ov5640 cam_mux_pi3wvr626 ublox_neo_m9n
+    a02yyuw a4988 act8760 ar0234 as5048a_b atecc608b atgm336h
+    bme280 bmi323 bmp390 bmp581 cam_mux_pi3wvr626 cc3501e
+    clk_5l35023b da9292 deepx_dxm1 drv8825 drv8833 eeprom_24c128
+    es8388 gc2145 gd32g553 gd32_swd gdew0154t8 hailo_8l hx711
+    icm42670 ics_43434 il3820 ili9341 ili9488 imx219 imx477
+    ina236 inmp441 lis2dw12 lps22hb lsm6dso max31855 max31865
+    max98357a maxim_max9295_9296 ms5611 mt6701 murata_lbee5hy2fy
+    optiga_trust_m ov2640 ov5640 ov5645 ov7670 ov9281
+    pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
+    rtl8211fdi rv3028c7 semtech_sx1262 semtech_sx1276 sh1106
+    ssd1306 ssd1331 st7789 tas2563 tcal9538 ti_ds90ub953_954
+    tlv320aic3204 tmc2209 tmp112 tps628640 tsl2591 ublox_max_m10s
+    ublox_neo_m9n ublox_sara_r5 veml7700 vl53l1x vl53l5cx wm8960
     CACHE INTERNAL "Chip drivers selectable via ALP_SDK_CHIP_<NAME>")
+
+# Drivers deliberately withheld from libalp_chips.a (plain-CMake /
+# Yocto), with a documented reason, live in the
+# CHIP_LIST_EXCLUDED_WITH_REASON allowlist at the top of
+# scripts/check_cmake_chip_list_parity.py -- EMPTY today, since every
+# chips/<id>/<id>.c on disk is OS-agnostic and compiles against
+# alp_sdk_headers alone.  That script is the single place a future
+# Zephyr-only/vendor-only driver core gets excluded (with a reason),
+# instead of silently falling out of ALP_SDK_CHIP_LIST.
+
 option(ALP_BUILD_CHIPS_ONLY
     "Build the libalp_chips static archive from the enabled chip drivers (Yocto alp-chips recipe)." OFF)
 foreach(_chip IN LISTS ALP_SDK_CHIP_LIST)
