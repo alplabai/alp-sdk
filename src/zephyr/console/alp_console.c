@@ -17,6 +17,7 @@
 
 #include <alp/peripheral.h>
 #include <alp/console.h>
+#include <alp/ext/cc3501e/console.h>
 #include <alp/version.h> /* ALP_VERSION_STRING -- the single SDK-version source */
 
 #if defined(CONFIG_ALP_SDK_HW_INFO)

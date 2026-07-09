@@ -3,31 +3,28 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Alp SoM console -- application-facing hooks.
+ *
+ * The portable `alp` Zephyr-shell command group (board / gpio / i2c /
+ * adc / pwm / mem / clk / companion) is registered automatically on any
+ * console-enabled build; applications need not call anything to get it.
+ *
+ * This root header is deliberately CHIP-NEUTRAL: it pulls in no
+ * `<alp/chips/...>` surface so the public console API stays portable
+ * across AEN, V2N/GD32, i.MX93, and future companions.  Companion
+ * attach is companion-specific and lives behind an extension header:
+ * to bind a CC3501E companion (Alif SoMs), include
+ * <alp/ext/cc3501e/console.h>.  SoMs whose companion is a singleton
+ * (e.g. the V2N GD32 supervisor) bind it automatically.
  */
 #ifndef ALP_CONSOLE_H_
 #define ALP_CONSOLE_H_
-
-#include <alp/chips/cc3501e.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * @brief Bind the CC3501E companion the `alp companion` command talks to.
- *
- * On Alif there is no companion singleton, so the application opens its
- * CC3501E (cc3501e_init) and registers the handle here once.  No-op on
- * SoMs whose companion is a singleton (V2N binds the GD32 supervisor
- * automatically).  Pass NULL to unbind.
- *
- * @param ctx  Initialised CC3501E context, or NULL.
- *
- * @par ABI status: [ABI-EXPERIMENTAL]
- *      v0.9 new; companion-console binder tracking the [ABI-EXPERIMENTAL]
- *      CC3501E companion surface it depends on.  See docs/abi-markers.md.
- */
-void alp_console_companion_set(cc3501e_t *ctx);
+/* No portable symbols yet: the console command group self-registers and
+ * companion binding is chip-specific (see <alp/ext/<companion>/console.h>). */
 
 #ifdef __cplusplus
 }

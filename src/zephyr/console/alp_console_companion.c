@@ -15,6 +15,7 @@
 #include <zephyr/shell/shell.h>
 
 #include <alp/console.h>
+#include <alp/ext/cc3501e/console.h>
 #include <alp/peripheral.h>
 
 #include "alp_console.h"

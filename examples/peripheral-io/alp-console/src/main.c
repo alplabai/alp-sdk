@@ -53,6 +53,7 @@
  */
 #if defined(CONFIG_ALP_SDK_CHIP_CC3501E)
 #include <alp/console.h>
+#include <alp/ext/cc3501e/console.h>
 #include <alp/chips/cc3501e.h>
 
 /*
