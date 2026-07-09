@@ -27,8 +27,10 @@ on:
       - 'metadata/schemas/tier-a-library-ci-v1.schema.json'
       - 'scripts/alp_project.py'
       - 'scripts/validate_metadata.py'
+      - 'scripts/gen_tier_a_ci_matrix.py'
       - 'tests/scripts/test_library_layer.py'
       - 'tests/scripts/test_alp_project.py'
+      - 'tests/scripts/test_gen_tier_a_ci_matrix.py'
       - 'tests/zephyr/library_knobs/**'
       - 'west.yml'
   push:
@@ -42,8 +44,10 @@ on:
       - 'metadata/schemas/tier-a-library-ci-v1.schema.json'
       - 'scripts/alp_project.py'
       - 'scripts/validate_metadata.py'
+      - 'scripts/gen_tier_a_ci_matrix.py'
       - 'tests/scripts/test_library_layer.py'
       - 'tests/scripts/test_alp_project.py'
+      - 'tests/scripts/test_gen_tier_a_ci_matrix.py'
       - 'tests/zephyr/library_knobs/**'
       - 'west.yml'
   workflow_dispatch:
@@ -53,23 +57,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  compute-family-matrix:
+    name: tier-a-libraries · compute family matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: alp-sdk/.python-version
+
+      - name: Derive build matrix from familyMatrix registry
+        id: matrix
+        working-directory: alp-sdk
+        run: |
+          echo "matrix=$(python3 scripts/gen_tier_a_ci_matrix.py)" >> "$GITHUB_OUTPUT"
+
   tier-a-library-build:
     name: tier-a-libraries · ${{ matrix.som }}
+    needs: compute-family-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - som: E1M-AEN701
-            core: m55_hp
-          - som: E1M-V2N101
-            core: m33_sm
-          - som: E1M-V2M101
-            core: m33_sm
-          - som: E1M-NX9101
-            core: m33
+      matrix: ${{ fromJson(needs.compute-family-matrix.outputs.matrix) }}
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: host
