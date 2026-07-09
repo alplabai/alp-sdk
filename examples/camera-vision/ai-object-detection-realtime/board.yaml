@@ -64,11 +64,13 @@ cores:
       - i2c                   # OV5640 SCCB + display init.
       - spi                   # ST7789 framebuffer push.
       - gpio                  # Camera RST/PWDN + display D/C#.
-# NOTE: dedicated CSI / display subsystem entries land in v0.6
-# alongside the V2N MIPI receiver work; today the OV5640 + ST7789
-# chip drivers in the project `chips:` array already pull in I2C /
-# SPI / GPIO, and the portable <alp/camera.h> + <alp/display.h>
-# APIs route through those drivers under the hood.
+# NOTE: there's no dedicated `csi` / `display` peripheral kind in
+# board.yaml -- that's not a version gap, it's how every camera/
+# display example expresses this (see
+# examples/ai/visual-defect-detection, examples/display/lvgl-widgets-
+# demo): the OV5640 + ST7789 chip drivers in the project `chips:`
+# array pull in I2C / SPI / GPIO, and the portable <alp/camera.h> +
+# <alp/display.h> APIs route through those drivers under the hood.
 
 diagnostics:
   log_level: info
