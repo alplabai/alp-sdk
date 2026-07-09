@@ -16,7 +16,9 @@ def _run(*args, **kw):
 
 def _scaffold(root: Path, version: str = "0.9.0", *, readme_minor: str = None,
               release_pin: str = None, board_config_version: str = None,
-              cli_version: str = None, banner_version: str = None):
+              cli_version: str = None, banner_version: str = None,
+              dev_tooling_minor: str = None, hetero_flow_minor: str = None,
+              verification_status_minor: str = None):
     """Build a minimal repo-shaped tree with every version copy the gate
     checks, all in sync at `version` unless a specific override is given
     (used to inject drift for the *_fails tests)."""
@@ -26,6 +28,10 @@ def _scaffold(root: Path, version: str = "0.9.0", *, readme_minor: str = None,
     board_config_version = board_config_version if board_config_version is not None else version
     cli_version = cli_version if cli_version is not None else version
     banner_version = banner_version if banner_version is not None else version
+    dev_tooling_minor = dev_tooling_minor if dev_tooling_minor is not None else mm
+    hetero_flow_minor = hetero_flow_minor if hetero_flow_minor is not None else mm
+    verification_status_minor = (
+        verification_status_minor if verification_status_minor is not None else mm)
 
     (root / "metadata").mkdir(parents=True, exist_ok=True)
     (root / "metadata" / "sdk_version.yaml").write_text(
@@ -57,7 +63,12 @@ def _scaffold(root: Path, version: str = "0.9.0", *, readme_minor: str = None,
         f"> Partially silicon-verified (`v{readme_minor}`): blah\n\n"
         f"**v{readme_minor} ramp — paper-correct, mostly pre-HIL**\n\n"
         f"A v{readme_minor} project is **one declarative file** plus per-core.\n\n"
-        f"      revision: main        # pin to a release tag — v{release_pin} is the latest\n",
+        f"      revision: main        # pin to a release tag — v{release_pin} is the latest\n\n"
+        "  ┌───────────────┐\n"
+        "  │ Dev Tooling   │\n"
+        f"  │ (v{dev_tooling_minor})        │\n"
+        "  └───────────────┘\n\n"
+        f"# Zephyr (heterogeneous slice, v{hetero_flow_minor} flow)\n",
         encoding="utf-8")
 
     (root / "docs").mkdir(parents=True, exist_ok=True)
@@ -68,6 +79,10 @@ def _scaffold(root: Path, version: str = "0.9.0", *, readme_minor: str = None,
         "```\nmetadata/\n"
         f'├── sdk_version.yaml   # SDK release version (currently "version: {board_config_version}")\n'
         "```\n", encoding="utf-8")
+    (root / "docs" / "verification-status.md").write_text(
+        f"## Where v{verification_status_minor} actually sits\n\n"
+        "| Layer | Status |\n|---|---|\n",
+        encoding="utf-8")
 
 
 def test_all_in_sync_passes(tmp_path):
@@ -113,6 +128,27 @@ def test_stale_readme_quickstart_minor_fails(tmp_path):
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 1
     assert "quick-start" in (proc.stdout + proc.stderr).lower()
+
+
+def test_stale_dev_tooling_label_fails(tmp_path):
+    _scaffold(tmp_path, dev_tooling_minor="0.8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "Dev Tooling" in proc.stdout + proc.stderr
+
+
+def test_stale_heterogeneous_flow_comment_fails(tmp_path):
+    _scaffold(tmp_path, hetero_flow_minor="0.8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "heterogeneous" in (proc.stdout + proc.stderr).lower()
+
+
+def test_stale_verification_status_heading_fails(tmp_path):
+    _scaffold(tmp_path, verification_status_minor="0.8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "verification-status.md" in proc.stdout + proc.stderr
 
 
 def test_stale_version_h_fails(tmp_path):

@@ -5,10 +5,13 @@ The release flow (`scripts/bump_version.py`, the `cutting-a-release` skill)
 updates every place that tracks the version; this check makes any miss a CI
 failure instead of a silent drift.  Verified copies:
 
-  1. README.md *current-state* prose labels (MAJOR.MINOR only) -- the README
-     sat at "Mostly pre-silicon (`v0.6`)" / "v0.6 ramp" through the entire
-     v0.7.0 release before this check existed, plus the "A vX.Y project is
-     one declarative file" quick-start line.
+  1. README.md / docs/verification-status.md *current-state* prose labels
+     (MAJOR.MINOR only) -- the README sat at "Mostly pre-silicon (`v0.6`)" /
+     "v0.6 ramp" through the entire v0.7.0 release before this check existed,
+     plus the "A vX.Y project is one declarative file" quick-start line, the
+     "Dev Tooling (vX.Y)" architecture-diagram label, the "heterogeneous
+     slice, vX.Y flow" build comment, and verification-status.md's
+     "Where vX.Y actually sits" heading.
   2. include/alp/version.h -- the ALP_VERSION_MAJOR/MINOR/PATCH macros and
      the ALP_VERSION_STRING literal (full MAJOR.MINOR.PATCH).
   3. pyproject.toml -- the alp-sdk-cli `[project]` version (full
@@ -26,11 +29,16 @@ failure instead of a silent drift.  Verified copies:
      literally says "currently `version: ...`", i.e. it is NOT a static
      placeholder, it purports to state the real value.
 
-For the README's badge/heading labels this deliberately checks ONLY the
-small set of *current-state* labels (anchored by regex), not every `v0.x`
-token -- the README's historical references ("the silicon-verified slice
-landed in v0.6", "from v0.6 onward") are correct and must stay.  Add a new
-anchor here when a new current-state label appears.
+This deliberately checks ONLY a small set of *current-state* labels
+(anchored by regex), not every `v0.x` token in the tree -- the many
+historical/narrative references across README.md, docs/os-support-matrix.md,
+docs/test-plan.md, docs/abi-markers.md, docs/gd32-bridge-protocol.md (a
+DIFFERENT, GD32-bridge-protocol version, not the SDK version), ADRs, and
+frozen docs/abi/vX.Y-snapshot.json files ("the silicon-verified slice landed
+in v0.6", "verified v0.8", "split out of adc.h in v0.8", "SE_RESET (v0.8)",
+etc.) describe what happened AT a past version and are correct as-is -- they
+must stay untouched.  Add a new anchor here only when a new *current-state*
+("as of today") label appears; don't chase every historical mention.
 
 Authoritative version: `metadata/sdk_version.yaml` (`version: MAJOR.MINOR.PATCH`).
 The MAJOR.MINOR-only anchors track the MAJOR.MINOR (e.g. `v0.7`); the rest
@@ -46,17 +54,23 @@ import re
 import sys
 
 
-# (description, compiled regex with ONE capture group = the vMAJOR.MINOR
-# token).  Each anchor matches a current-state label whose version MUST
-# equal the declared MAJOR.MINOR.  Keep these tightly anchored so historical
-# refs ("landed in v0.6") are never matched.
-_README_MINOR_ANCHORS: list[tuple[str, re.Pattern[str]]] = [
-    ("intro badge — 'Partially silicon-verified (`vX.Y`)'",
+# (relpath-under-repo, description, regex) for MAJOR.MINOR-only anchors.
+# Each anchor matches a current-state label whose version MUST equal the
+# declared MAJOR.MINOR.  Keep these tightly anchored so historical refs
+# ("landed in v0.6", "verified v0.8") are never matched.
+_MINOR_ANCHORS: list[tuple[str, str, re.Pattern[str]]] = [
+    ("README.md", "intro badge — 'Partially silicon-verified (`vX.Y`)'",
      re.compile(r"Partially silicon-verified \(`v(\d+\.\d+)`\)")),
-    ("Status heading — '**vX.Y ramp — paper-correct'",
+    ("README.md", "Status heading — '**vX.Y ramp — paper-correct'",
      re.compile(r"\*\*v(\d+\.\d+) ramp — paper-correct")),
-    ("Quick-start intro — 'A vX.Y project is one declarative file'",
+    ("README.md", "Quick-start intro — 'A vX.Y project is one declarative file'",
      re.compile(r"A v(\d+\.\d+) project is \*\*one declarative file\*\*")),
+    ("README.md", "architecture-diagram label — 'Dev Tooling (vX.Y)'",
+     re.compile(r"Dev Tooling[^\n]*\n[^\n]*\(v(\d+\.\d+)\)")),
+    ("README.md", "build snippet comment — 'heterogeneous slice, vX.Y flow'",
+     re.compile(r"heterogeneous slice, v(\d+\.\d+) flow")),
+    ("docs/verification-status.md", "section heading — 'Where vX.Y actually sits'",
+     re.compile(r"Where v(\d+\.\d+) actually sits")),
 ]
 
 # (relpath-under-repo, description, regex) for full MAJOR.MINOR.PATCH
@@ -84,20 +98,21 @@ def declared_version(repo: pathlib.Path) -> tuple[int, int, int]:
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
 
-def check_readme_minor_anchors(repo: pathlib.Path, want_minor: str) -> list[str]:
-    """Check the README current-state prose labels (MAJOR.MINOR only)."""
-    readme = repo / "README.md"
-    text = readme.read_text(encoding="utf-8")
+def check_minor_anchors(repo: pathlib.Path, want_minor: str) -> list[str]:
+    """Check the MAJOR.MINOR-only current-state prose labels across the tree
+    (README.md + docs/verification-status.md)."""
     drifts: list[str] = []
-    for desc, rx in _README_MINOR_ANCHORS:
+    for rel, desc, rx in _MINOR_ANCHORS:
+        path = repo / rel
+        text = path.read_text(encoding="utf-8")
         found = rx.search(text)
         if found is None:
-            drifts.append(f"  MISSING  {desc}: anchor not found in README.md "
+            drifts.append(f"  MISSING  {desc}: anchor not found in {rel} "
                           f"(was it reworded? update scripts/check_version_doc_sync.py)")
             continue
         got = found.group(1)
         if got != want_minor:
-            drifts.append(f"  STALE    {desc}: README says v{got}, "
+            drifts.append(f"  STALE    {desc}: {rel} says v{got}, "
                           f"sdk_version.yaml declares v{want_minor}")
     return drifts
 
@@ -210,7 +225,7 @@ def main() -> int:
     want_str = ".".join(str(p) for p in want)
 
     drifts = (
-        check_readme_minor_anchors(repo, want_minor)
+        check_minor_anchors(repo, want_minor)
         + check_full_triple_doc_anchors(repo, want_str)
         + check_version_h(repo, want)
         + check_pyproject(repo, want_str)
@@ -227,9 +242,10 @@ def main() -> int:
               "refs stay). -- failing.", file=sys.stderr)
         return 1
 
-    print(f"check_version_doc_sync: OK (README labels, include/alp/version.h, "
-          f"pyproject.toml, scripts/alp_cli/__init__.py, src/zephyr/alp_banner.c, "
-          f"docs/architecture.md, docs/board-config.md all match v{want_str}).")
+    print(f"check_version_doc_sync: OK (README labels, docs/verification-status.md, "
+          f"include/alp/version.h, pyproject.toml, scripts/alp_cli/__init__.py, "
+          f"src/zephyr/alp_banner.c, docs/architecture.md, docs/board-config.md "
+          f"all match v{want_str}).")
     return 0
 
 

@@ -40,7 +40,10 @@ What this touches:
     CHANGELOG.md                    -- slice [Unreleased] into the new version section.
     docs/abi/v<MAJOR.MINOR>-snapshot.json  -- regenerated.
     README.md                       -- the current-state version labels (e.g.
-                                       "Partially silicon-verified (`vX.Y`)", "vX.Y ramp");
+                                       "Partially silicon-verified (`vX.Y`)", "vX.Y ramp",
+                                       "Dev Tooling (vX.Y)", "heterogeneous slice, vX.Y flow");
+                                       enforced by scripts/check_version_doc_sync.py.
+    docs/verification-status.md     -- the "Where vX.Y actually sits" heading;
                                        enforced by scripts/check_version_doc_sync.py.
     include/alp/version.h           -- ALP_VERSION_MAJOR/MINOR/PATCH +
                                        ALP_VERSION_STRING macros;
@@ -89,6 +92,7 @@ CLI_INIT = REPO / "scripts" / "alp_cli" / "__init__.py"
 BANNER_C = REPO / "src" / "zephyr" / "alp_banner.c"
 ARCHITECTURE_MD = REPO / "docs" / "architecture.md"
 BOARD_CONFIG_MD = REPO / "docs" / "board-config.md"
+VERIFICATION_STATUS_MD = REPO / "docs" / "verification-status.md"
 ABI_DIR = REPO / "docs" / "abi"
 ABI_SNAPSHOT_TOOL = REPO / "scripts" / "abi_snapshot.py"
 
@@ -165,6 +169,8 @@ def update_readme_version_labels(current: str, new_version: str, dry_run: bool) 
         (rf"(Partially silicon-verified \(`v){re.escape(old_mm)}(`\))", rf"\g<1>{new_mm}\g<2>"),
         (rf"(\*\*v){re.escape(old_mm)}( ramp — paper-correct)", rf"\g<1>{new_mm}\g<2>"),
         (rf"(A v){re.escape(old_mm)}( project is \*\*one declarative file\*\*)", rf"\g<1>{new_mm}\g<2>"),
+        (rf"(Dev Tooling[^\n]*\n[^\n]*\()v{re.escape(old_mm)}(\))", rf"\g<1>v{new_mm}\g<2>"),
+        (rf"(heterogeneous slice, v){re.escape(old_mm)}( flow)", rf"\g<1>{new_mm}\g<2>"),
     ]
     total = 0
     for pat, repl in subs:
@@ -176,6 +182,28 @@ def update_readme_version_labels(current: str, new_version: str, dry_run: bool) 
     if not dry_run:
         README.write_text(text, encoding="utf-8")
     print(f"  updated {README.relative_to(REPO)}: {total} current-state label(s) "
+          f"v{old_mm} -> v{new_mm}")
+
+
+def update_verification_status_doc(current: str, new_version: str, dry_run: bool) -> None:
+    """Bump docs/verification-status.md's "Where vX.Y actually sits" heading
+    to the new MAJOR.MINOR.  Keep in lockstep with
+    scripts/check_version_doc_sync.py's _MINOR_ANCHORS.
+    """
+    old_mm = ".".join(current.split(".")[:2])
+    new_mm = ".".join(new_version.split(".")[:2])
+    if old_mm == new_mm:
+        return
+    text = VERIFICATION_STATUS_MD.read_text(encoding="utf-8")
+    new_text, n = re.subn(rf"(Where v){re.escape(old_mm)}( actually sits)",
+                          rf"\g<1>{new_mm}\g<2>", text)
+    if n == 0:
+        print(f"  skipped {VERIFICATION_STATUS_MD.relative_to(REPO)}: "
+              f"no current-state v{old_mm} heading found")
+        return
+    if not dry_run:
+        VERIFICATION_STATUS_MD.write_text(new_text, encoding="utf-8")
+    print(f"  updated {VERIFICATION_STATUS_MD.relative_to(REPO)}: heading "
           f"v{old_mm} -> v{new_mm}")
 
 
@@ -332,6 +360,7 @@ def main() -> int:
     update_sdk_version_yaml(args.to, args.dry_run)
     slice_changelog(args.to, args.dry_run)
     update_readme_version_labels(current, args.to, args.dry_run)
+    update_verification_status_doc(current, args.to, args.dry_run)
     update_version_h(args.to, args.dry_run)
     update_pyproject(args.to, args.dry_run)
     update_cli_init(args.to, args.dry_run)
