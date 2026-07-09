@@ -1,0 +1,8 @@
+som:
+  sku: E1M-AEN801
+e1m_routes:
+  buses:
+    - { e1m: E1M_I2C0, macro: I2C_BUS_SENSORS }
+cores:
+  m55_hp:
+    app: ./src

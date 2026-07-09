@@ -1,0 +1,7 @@
+som:
+  sku: E1M-AEN801
+preset: e1m-evk
+name: misleading-custom-name
+cores:
+  m55_hp:
+    app: ./src
