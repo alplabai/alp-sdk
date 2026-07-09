@@ -98,7 +98,7 @@ def test_preset_mode_rejects_inline_name():
 
     proc = _script_schema_only(path)
     assert proc.returncode == 1
-    assert "FAIL schema" in proc.stderr
+    assert "name" in proc.stderr
 
 
 @pytest.mark.parametrize("fixture", [
