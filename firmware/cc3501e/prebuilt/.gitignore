@@ -1,0 +1,3 @@
+# The root .gitignore ignores *.bin (build artifacts).  The signed prebuilt
+# firmware binaries shipped here ARE committed, so re-include them.
+!cc3501e-*.bin
