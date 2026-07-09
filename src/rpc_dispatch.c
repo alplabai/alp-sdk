@@ -162,6 +162,7 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch,
 {
 	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
 	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
+	if (req == NULL && req_len > 0) return ALP_ERR_INVAL;
 	if (resp != NULL && resp_len == NULL) return ALP_ERR_INVAL;
 	if (ch->state.ops == NULL || ch->state.ops->call == NULL) {
 		return ALP_ERR_NOT_IMPLEMENTED;

@@ -85,6 +85,30 @@ ZTEST(alp_rpc_registry, test_rpc_capabilities_returns_null_for_null_handle)
 	zassert_is_null(alp_rpc_capabilities(NULL));
 }
 
+/* ---------- #469: alp_rpc_call rejects NULL req with req_len > 0 ---- */
+
+ZTEST(alp_rpc_registry, test_rpc_call_rejects_null_req_with_nonzero_len)
+{
+	/* alp_rpc_send already gated this (payload == NULL && len > 0);
+	 * alp_rpc_call was missing the mirror check on req/req_len,
+	 * risking a NULL-deref (or an unbounded read) downstream in a
+	 * backend that trusts req_len without checking req.  A NULL or
+	 * not-in-use channel would short-circuit to NOT_READY before this
+	 * check runs, so a stack-local handle with in_use=true (ops still
+	 * NULL) is used to reach the argument-validation gates without a
+	 * real open(). */
+	struct alp_rpc_channel ch;
+	memset(&ch, 0, sizeof(ch));
+	ch.in_use = true;
+
+	uint8_t resp[4];
+	size_t  resp_len = sizeof(resp);
+	zassert_equal(alp_rpc_call(&ch, "method", NULL, 4u, resp, &resp_len, 1000u), ALP_ERR_INVAL);
+
+	/* req == NULL with req_len == 0 is legitimate (no request body). */
+	zassert_not_equal(alp_rpc_call(&ch, "method", NULL, 0u, resp, &resp_len, 1000u), ALP_ERR_INVAL);
+}
+
 /* ---------- Registry inventory test -------------------------------- */
 
 ZTEST(alp_rpc_registry, test_backend_count_for_rpc)

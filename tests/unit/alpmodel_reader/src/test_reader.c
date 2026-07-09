@@ -55,3 +55,36 @@ ZTEST(alpmodel_reader, test_oversized_blob_count_rejected)
 	alp_model_t m;
 	zassert_equal(ALP_ERR_INVAL, alp_model_parse(buf, alp_model_fixture_len, &m));
 }
+
+/* #468: mft_off+mft_len, tbl_off+blob_count*8, and boff+blen were
+ * computed with a plain add-then-compare -- on a 32-bit size_t target
+ * those sums wrap and can slip a range check that a non-overflowing
+ * compare would reject.  These feed near-UINT32_MAX header fields so
+ * the arithmetic itself is stressed even on this (64-bit host)
+ * native_sim build. */
+
+ZTEST(alpmodel_reader, test_huge_manifest_off_len_rejected)
+{
+	uint8_t buf[64];
+	memcpy(buf, alp_model_fixture, sizeof(buf));
+	/* mft_off (u32 @ offset 8) and mft_len (u32 @ offset 12) both near
+	 * UINT32_MAX -- must be rejected, not silently accepted via a
+	 * wrapped sum. */
+	memset(buf + 8, 0xFF, 4);
+	memset(buf + 12, 0xFF, 4);
+	alp_model_t m;
+	zassert_equal(ALP_ERR_INVAL, alp_model_parse(buf, sizeof(buf), &m));
+}
+
+ZTEST(alpmodel_reader, test_huge_blob_count_does_not_wrap_table_check)
+{
+	uint8_t buf[64];
+	memcpy(buf, alp_model_fixture, sizeof(buf));
+	/* blob_count (u32 @ offset 20) = UINT32_MAX -- blob_count*8
+	 * overflows a 32-bit size_t; the range check must reject this via
+	 * overflow-safe (64-bit) arithmetic rather than wrapping into a
+	 * small value that looks in-range. */
+	memset(buf + 20, 0xFF, 4);
+	alp_model_t m;
+	zassert_equal(ALP_ERR_INVAL, alp_model_parse(buf, sizeof(buf), &m));
+}

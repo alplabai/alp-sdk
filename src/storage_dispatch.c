@@ -26,6 +26,7 @@
 #include <alp/soc_caps.h>
 #include <alp/storage.h>
 
+#include "alp_range.h"
 #include "backends/storage/storage_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(storage);
@@ -114,6 +115,10 @@ alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t off, void *data, 
 	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
 	if (len == 0u) return ALP_OK;
 	if (data == NULL) return ALP_ERR_INVAL;
+	/* Universal overflow guard ahead of the backend: off+len must not
+     * wrap 64 bits regardless of device size (each backend still
+     * checks the real device/partition size on top of this). */
+	if (!alp_range_ok(off, (uint64_t)len, UINT64_MAX)) return ALP_ERR_OUT_OF_RANGE;
 	if (storage->state.ops->read == NULL) return ALP_ERR_NOSUPPORT;
 	return storage->state.ops->read(&storage->state, off, data, len);
 }
@@ -124,6 +129,7 @@ alp_status_t alp_storage_write(alp_storage_t *storage, uint64_t off, const void 
 	if (storage->state.read_only) return ALP_ERR_NOT_READY;
 	if (len == 0u) return ALP_OK;
 	if (data == NULL) return ALP_ERR_INVAL;
+	if (!alp_range_ok(off, (uint64_t)len, UINT64_MAX)) return ALP_ERR_OUT_OF_RANGE;
 	if (storage->state.ops->write == NULL) return ALP_ERR_NOSUPPORT;
 	return storage->state.ops->write(&storage->state, off, data, len);
 }
@@ -133,6 +139,7 @@ alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t off, uint64_t le
 	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
 	if (storage->state.read_only) return ALP_ERR_INVAL;
 	if (len == 0u) return ALP_OK;
+	if (!alp_range_ok(off, len, UINT64_MAX)) return ALP_ERR_OUT_OF_RANGE;
 	if (storage->state.ops->erase == NULL) return ALP_ERR_NOSUPPORT;
 	return storage->state.ops->erase(&storage->state, off, len);
 }

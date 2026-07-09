@@ -68,6 +68,7 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+#include "alp_range.h"
 #include "rpc_ops.h"
 
 #if defined(ALP_SDK_HAVE_OPENAMP_USERLAND)
@@ -172,10 +173,15 @@ frame_build(uint8_t *out, size_t cap, const char *method, const void *payload, s
 	if (method_len == ALP_RPC_METHOD_MAX_LEN) {
 		return -EINVAL;
 	}
-	size_t total = method_len + 1u + payload_len;
-	if (total > cap) {
+	/* method_len+1 is small (bounded by ALP_RPC_METHOD_MAX_LEN) so it
+     * can't overflow on its own, but payload_len is caller-controlled
+     * and can be near SIZE_MAX -- check containment without ever
+     * forming method_len+1+payload_len, which would wrap past `cap`
+     * and let an oversized payload through to the memcpy below. */
+	if (!alp_range_ok((uint64_t)method_len + 1u, (uint64_t)payload_len, (uint64_t)cap)) {
 		return -ENOMEM;
 	}
+	size_t total = method_len + 1u + payload_len;
 	memcpy(out, method, method_len);
 	out[method_len] = '\0';
 	if (payload_len > 0) {

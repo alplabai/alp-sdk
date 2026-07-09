@@ -26,6 +26,7 @@
  */
 
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -38,7 +39,15 @@
 #include <alp/soc_caps.h>
 #include <alp/storage.h>
 
+#include "alp_range.h"
 #include "storage_ops.h"
+
+/* off_t is 32-bit signed on every picolibc/newlib target this backend
+ * runs on. Bound offset+len against that range before the (off_t)
+ * cast below -- otherwise an offset near UINT64_MAX truncates instead
+ * of failing, silently seeking to the wrong file location rather than
+ * being rejected. */
+#define LFS_OFFSET_MAX ((uint64_t)INT32_MAX)
 
 typedef struct lfs_state {
 	struct fs_file_t file;
@@ -157,6 +166,7 @@ lfs_read(alp_storage_backend_state_t *st, uint64_t offset, void *data, size_t le
 {
 	lfs_state_t *s = (lfs_state_t *)st->be_data;
 	if (s == NULL || !s->open) return ALP_ERR_NOT_READY;
+	if (!alp_range_ok(offset, (uint64_t)len, LFS_OFFSET_MAX)) return ALP_ERR_OUT_OF_RANGE;
 	int err = fs_seek(&s->file, (off_t)offset, FS_SEEK_SET);
 	if (err != 0) return _errno_to_alp(err);
 	ssize_t got = fs_read(&s->file, data, len);
@@ -170,6 +180,7 @@ lfs_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data, si
 {
 	lfs_state_t *s = (lfs_state_t *)st->be_data;
 	if (s == NULL || !s->open) return ALP_ERR_NOT_READY;
+	if (!alp_range_ok(offset, (uint64_t)len, LFS_OFFSET_MAX)) return ALP_ERR_OUT_OF_RANGE;
 	int err = fs_seek(&s->file, (off_t)offset, FS_SEEK_SET);
 	if (err != 0) return _errno_to_alp(err);
 	ssize_t put = fs_write(&s->file, data, len);
@@ -182,6 +193,7 @@ static alp_status_t lfs_erase(alp_storage_backend_state_t *st, uint64_t offset, 
 {
 	lfs_state_t *s = (lfs_state_t *)st->be_data;
 	if (s == NULL || !s->open) return ALP_ERR_NOT_READY;
+	if (!alp_range_ok(offset, len, LFS_OFFSET_MAX)) return ALP_ERR_OUT_OF_RANGE;
 	/* littlefs has no per-region erase -- emulate by overwriting
      * the region with 0xFF, matching NOR-flash erased state. */
 	static const uint8_t _erased = 0xFFu;

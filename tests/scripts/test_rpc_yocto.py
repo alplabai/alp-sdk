@@ -327,6 +327,38 @@ class TestRpcYoctoStructure:
             f"framing helper '{helper}' missing from yocto_drv.c"
         )
 
+    def test_frame_build_guards_total_overflow(
+        self, rpc_source: str, zephyr_source: str
+    ) -> None:
+        """#469: frame_build's `total = method_len + 1 + payload_len`
+        wraps a 64-bit size_t when payload_len is caller-controlled
+        and near SIZE_MAX, so `total > cap` silently passes and an
+        oversized payload reaches the memcpy below.  Both the Linux
+        and Zephyr backends must reject via an overflow-safe range
+        check (alp_range_ok) computed *before* `total` is formed."""
+        for label, src in (("yocto_drv.c", rpc_source), ("zephyr_drv.c", zephyr_source)):
+            m = re.search(
+                r"frame_build\s*\([^)]*\)\s*\{(.*?)\n\}",
+                src,
+                flags=re.DOTALL,
+            )
+            assert m is not None, f"frame_build body not found in {label}"
+            body = m.group(1)
+            guard = re.search(
+                r"alp_range_ok\s*\([^;]*cap\)\s*\)\s*\{\s*return\s+-ENOMEM;",
+                body,
+                flags=re.DOTALL,
+            )
+            assert guard is not None, (
+                f"{label}: frame_build must reject via alp_range_ok(...cap) "
+                "before computing method_len+1+payload_len"
+            )
+            # The guard must appear before `total` is computed, not after.
+            total_idx = body.index("size_t total")
+            assert guard.start() < total_idx, (
+                f"{label}: alp_range_ok guard must run before `total` is computed"
+            )
+
     def test_method_max_len_matches_header(
         self, rpc_source: str, header_source: str
     ) -> None:

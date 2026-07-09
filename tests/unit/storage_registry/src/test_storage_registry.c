@@ -226,6 +226,38 @@ ZTEST(alp_storage_registry, test_vendor_ext_gates_non_matching_backends)
 	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 }
 
+/* ---------- (h.5) read/write/erase reject an overflowing off+len range --- */
+
+ZTEST(alp_storage_registry, test_read_write_erase_reject_overflowing_range)
+{
+	/* #467: alp_storage_read/write/erase used to forward raw
+	 * off+len straight to the backend; a huge offset near
+	 * UINT64_MAX combined with a nonzero len would make `off + len`
+	 * wrap past the device size in the backend's own compare. The
+	 * dispatcher now rejects any range that would overflow a 64-bit
+	 * sum *before* it ever reaches a backend. */
+	alp_storage_config_t cfg = {
+		.kind        = ALP_STORAGE_KIND_QSPI_FLASH,
+		.instance_id = 0u,
+		.freq_hz     = 0u,
+		.read_only   = false,
+	};
+	alp_storage_t *h = alp_storage_open(&cfg);
+	zassert_not_null(h);
+
+	uint8_t buf[8] = { 0 };
+	zassert_equal(alp_storage_read(h, UINT64_MAX - 3u, buf, sizeof(buf)), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(alp_storage_write(h, UINT64_MAX - 3u, buf, sizeof(buf)), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(alp_storage_erase(h, UINT64_MAX - 3u, sizeof(buf)), ALP_ERR_OUT_OF_RANGE);
+
+	/* Sanity: an in-range call still reaches the backend (sw_fallback
+	 * returns NOSUPPORT unconditionally per test (f)) -- proves the
+	 * new guard doesn't over-reject legitimate offsets. */
+	zassert_equal(alp_storage_read(h, 0u, buf, sizeof(buf)), ALP_ERR_NOSUPPORT);
+
+	alp_storage_close(h);
+}
+
 /* ---------- (h) OTFAD window-bounds validation reaches the body ---------- */
 
 ZTEST(alp_storage_registry, test_otfad_window_alignment_validation)
