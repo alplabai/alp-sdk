@@ -1,0 +1,13 @@
+identifier: alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33
+name: E1M-V2N101 Cortex-M33 system manager
+type: mcu
+arch: arm
+toolchain:
+  - zephyr
+  - gnuarmemb
+supported:
+  - gpio
+  - i2c
+  - spi
+  - uart
+vendor: alp

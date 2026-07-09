@@ -1,0 +1,118 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-V2N101 (RZ/V2N R9A09G056-N44 + DEEPX DX-M1) Cortex-M33 system-manager.
+ *
+ * Reuses the upstream RZ/V2N SoC devicetree + the EVK SCI_UART0 console and
+ * adds the on-module GD32G553 supervisor links:
+ *   - SCI7 Simple-SPI (alias alp-spi1): P76 MOSI7 / P77 MISO7 / P96 SCK7 +
+ *     P97 GPIO chip-select (master SCI-SPI has no hardware slave-select)
+ *   - RIIC8 / BRD_I2C (alias alp-i2c0): P06 SDA / P07 SCL  (GD32 slave @ 0x70)
+ *
+ * The on-module silicon is the n44 variant; Zephyr only models the n48gbg
+ * SoC, which is devicetree-identical for the M33 + SPI/I2C peripherals
+ * (the n44/n48 delta is GPU/ISP/crypto fusing only).
+ */
+
+/dts-v1/;
+
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <arm/renesas/rz/rzv/r9a09g056.dtsi>
+#include "alp_e1m_v2n101_m33_sm-pinctrl.dtsi"
+
+/ {
+	model = "Alp E1M-V2N101 Cortex-M33 system manager";
+	compatible = "alp,e1m-v2n101-m33-sm";
+
+	chosen {
+		zephyr,sram = &sram;
+		/*
+		 * No CM33 serial console on this board.  The only console is the
+		 * A55's (Linux, on the shared debug UART); sci0 here is the EVK
+		 * "Pmod USB-UART", which is NOT wired as a CM33 console on the SoM.
+		 * Bringing it up enables RX on a floating RXD, whose receive-error
+		 * interrupt (sci0 eri = NVIC 114) escalates to a Zephyr fatal
+		 * (arch_system_halt) and hangs the CM33 before main() ever runs.
+		 * Leave the console unset (sci0 is disabled below).  Re-add these
+		 * and re-enable sci0 only when a Pmod USB-UART is attached.
+		 */
+	};
+
+	aliases {
+		alp-spi1 = &gd32_spi;
+		alp-i2c0 = &i2c8;
+	};
+
+	sram: memory@8003000 {
+		compatible = "mmio-sram";
+		reg = <0x08003000 0xfbfff>;
+	};
+
+	/*
+	 * alp pin map for alp_spi/alp_gpio id resolution.  alp_spi_open(cs_pin_id=N)
+	 * resolves its chip-select gpio_dt_spec from gpios[N] of this node (see the
+	 * SPI backend's alp_z_gpio_resolve()).  Index 0 = the GD32 SPI chip-select
+	 * on P97, matching the example's cs_pin_id = 0.
+	 */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&gpio9 7 GPIO_ACTIVE_LOW>;
+	};
+};
+
+/*
+ * sci0 = EVK "Pmod USB-UART" console.  DISABLED on this board: it is not wired
+ * as a CM33 console here, and opening it (RX enabled on a floating RXD) faults
+ * the CM33 in its receive-error ISR (sci0 eri / NVIC 114) -> Zephyr fatal ->
+ * arch_system_halt, before the app runs.  Keep pinctrl for easy re-enable.
+ */
+&sci0 {
+	pinctrl-0 = <&sci0_pins>;
+	pinctrl-names = "default";
+	status = "disabled";
+
+	uart0: uart {
+		current-speed = <115200>;
+		status = "disabled";
+	};
+};
+
+/*
+ * GD32 supervisor SPI fast path -- SCI channel 7 in clock-synchronous
+ * "Simple SPI" mode (sci7@42802800, compatible renesas,rz-sci-b).  The board
+ * wires the GD32 to P76/P77/P96/P97, which per the RZ/V2N PFC (Table 1.2-3) are
+ * MOSI7/MISO7/SCK7/SS7 = SCI channel 7 -- NOT the dedicated SPI_B IP.  The sci7
+ * parent (from the SoC dtsi) already supplies reg, channel = <7> and the fixed
+ * CM33 vectors (eri=156, rxi=157, txi=158, tei=159); here we enable it, point it
+ * at the SCI7 SPI pins, and attach the SPI child.
+ *
+ * Master Simple-SPI has NO hardware slave-select (the FSP sets CCR0.SSE only in
+ * slave mode), so the GD32 chip-select on P97 is driven as a GPIO via cs-gpios
+ * (gpio9 pin 7) -- the GD32's PA8 CS-EXTI needs per-transaction framing.
+ */
+&sci7 {
+	pinctrl-0 = <&sci7_spi_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	gd32_spi: spi {
+		compatible = "renesas,rz-sci-b-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cs-gpios = <&gpio9 7 GPIO_ACTIVE_LOW>;
+		status = "okay";
+	};
+};
+
+&gpio9 {
+	status = "okay";
+};
+
+&i2c8 {
+	pinctrl-0 = <&i2c8_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	status = "okay";
+};
