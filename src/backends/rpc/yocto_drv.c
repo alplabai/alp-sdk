@@ -172,8 +172,10 @@ frame_build(uint8_t *out, size_t cap, const char *method, const void *payload, s
 	if (method_len == ALP_RPC_METHOD_MAX_LEN) {
 		return -EINVAL;
 	}
-	size_t total = method_len + 1u + payload_len;
-	if (total > cap) {
+	/* Overflow-safe capacity check (see alp_rpc_frame_size): a near-SIZE_MAX
+     * payload_len must not wrap the framed total past `cap`. */
+	size_t total;
+	if (!alp_rpc_frame_size(method_len, payload_len, cap, &total)) {
 		return -ENOMEM;
 	}
 	memcpy(out, method, method_len);
