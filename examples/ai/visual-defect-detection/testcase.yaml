@@ -29,6 +29,24 @@ tests:
       regex:
         - "\\[defect\\] done"
 
+  alp_sdk.example.visual_defect_detection.e1m_x_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - ai
+      - vision
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[defect\\] done"
+
   alp_sdk.example.visual_defect_detection.aen_build:
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
