@@ -72,7 +72,9 @@ cd <setools>/app-release-exec-linux
 
 # 2. Write it to MRAM over the SE-UART. The device AUTO-enters maintenance
 #    (SET_MAINTENANCE_FLAG + reset) — no jumper, no strap. Baud is dynamic.
-./app-write-mram -c /dev/ttyUSB0 -p .
+#    <your-serial-device>: your OS's port name for the SE-UART adapter --
+#    see docs/cross-platform-setup.md §7.7 for the per-OS naming convention.
+./app-write-mram -c <your-serial-device> -p .
 ```
 
 A clean write ends with `100% ... Done`. On the next reset the SES loads and

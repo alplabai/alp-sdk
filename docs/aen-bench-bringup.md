@@ -90,7 +90,9 @@ cd <setools>/app-release-exec-linux
 ./app-gen-toc -f build/config/<cfg>.json
 # 2. Write to MRAM over the SE-UART. The device AUTO-enters maintenance
 #    (SET_MAINTENANCE_FLAG + reset) — no jumper, no strap. Baud 57600, dynamic.
-./app-write-mram -c /dev/ttyUSB0 -p .
+#    <your-serial-device>: your OS's port name for the SE-UART adapter --
+#    see docs/cross-platform-setup.md §7.7 for the per-OS naming convention.
+./app-write-mram -c <your-serial-device> -p .
 ```
 
 A clean write ends `100% ... Done`; on reset the SES loads + boots the ATOC
@@ -185,7 +187,8 @@ shift per build/config, don't hardcode):
 ninja -C <build>                                   # -> zephyr/zephyr.bin
 cp <build>/zephyr/zephyr.bin <setools>/build/images/zephyr_<app>_he.bin
 ./app-gen-toc -f build/config/app-zephyr-he.json   # -> build/AppTocPackage.bin
-./app-write-mram -c /dev/ttyUSB0 -p .              # run once, read the "Burning:" addrs, Ctrl-C
+./app-write-mram -c <your-serial-device> -p .      # run once, read the "Burning:" addrs, Ctrl-C
+#   <your-serial-device>: see docs/cross-platform-setup.md §7.7 for the per-OS port name
 ```
 
 ```
