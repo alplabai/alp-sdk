@@ -5,8 +5,18 @@
 # docs/gd32-bridge-protocol.md.
 schema_version:   1
 chip_id:          gd32g553
-driver_status:    partial               # host driver: full surface
-                                        # firmware: scaffold + PING + GET_VERSION
+driver_status:    partial               # host driver: full surface.
+                                        # firmware: PING/GET_VERSION/GPIO/PWM/ADC/DAC/QENC/
+                                        # COUNTER/TRNG/TMU/PWM_CAPTURE/PWM_SINGLE_PULSE/
+                                        # TIMER_SYNC/POWER_MODE_SET/ADC_STREAM/ADC_DSP_CHAIN_*
+                                        # bodies landed (see docs/gd32-bridge-protocol.md +
+                                        # firmware/gd32-bridge/hal/gd32/init.c).  Still partial:
+                                        # PWM_CONFIGURE + ADC_CONFIGURE only accept defaults
+                                        # (#495 / #494); ADC DSP chains bind but don't yet
+                                        # transform stream samples (#496); PWM_CAPTURE edges
+                                        # pending a V2N pad-routing rework.  All of the above
+                                        # are still HiL-gated end to end -- see
+                                        # docs/v1.0-readiness.md §1a.
 display_name:     "GigaDevice GD32G553MEY7TR Cortex-M33 supervisor MCU"
 vendor:           gigadevice
 mpn_population:
