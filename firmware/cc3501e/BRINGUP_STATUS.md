@@ -151,18 +151,42 @@ Ran the real-image OTA cycle on `e1m-aen-evk-01` (E8 slot0 = the
   was **not promoted** to primary. No accept/rollback/trial observed (no swap
   occurred).
 
-So the STAGE/install half is silicon-proven with a real image; the
-**secondary→primary promotion is the open bug.** A STAGED image that persisted
-across a cold POR was not swapped in. Leading hypothesis: promotion needs a step
-beyond `psa_fwu_install`→STAGED (the deferred `psa_fwu_request_reboot()` latch /
-an MCUboot pending-swap marker) that a bare host PSU cold POR does not carry — a
-firmware self-reboot after FINISH may be the intended trigger. Alternative not
-yet ruled out: the vendor SBL is not actually armed on the live unit (the
-`boot_sector_programmed=1` is historical, never live-confirmed — the live fuse
-read is blocked by the toolbox RoT gate). Root-cause in progress.
+**ROOT CAUSE (root-cause pass): the bench procedure was wrong, not (yet) a
+silicon block.** The STAGED→primary swap is completed by the CC35 firmware's
+**own `psa_fwu_request_reboot()`** after FINISH (the deferred `ota_reboot_pending`
+latch: armed at the end of `ota_do_finish()`, fired in `cc3501e_hw_tick()`), NOT
+by a host PSU cold POR. A bare PSU cycle carries no swap request, so the SBL
+cold-boots straight into the unchanged primary and leaves STAGED inert. The
+SELFTEST path proves the pattern — `cc3501e_ota_install()` does `psa_fwu_install()`
+→ **immediately** `psa_fwu_request_reboot()`, never "install then wait for an
+external POR". "SBL not armed" is refuted by the 2026-06-17 cold-revert evidence
+in `cc3501e_hw_ti.c` (cold power-on actively reverted unconfirmed TRIAL images →
+the SBL demonstrably evaluates FWU state at cold POR). Caveat: the Puya
+host-hard-reset-after-power-cycle workaround + the warm/debug-launch trailer-check
+bypass make a bare PSU POR **doubly** invalid as the promotion trigger on this
+unit.
 
-**#493 criterion 1 is NOT closed** — the swap-promotion path needs a fix
-(firmware and/or the bench trigger). Re-activation is NOT the blocker.
+**Corrected procedure — the discriminating test (one OTA cycle, no new tooling):**
+re-run `cc3501e_ota_update`; the moment the host prints STAGED, **do NOT touch the
+PSU** — loop PING/GET_VERSION for ~30–60 s and watch the READY line/console.
+Three conclusive outcomes:
+
+1. **Bridge drops and comes back at protocol v3** → the mechanism works; the swap
+   was procedural (PSU POR instead of the firmware self-reboot). Then confirm
+   permanence: the new image's first tick must `psa_fwu_accept()`, after which one
+   true cold POR should retain v3. **→ closes #493 criterion 1.**
+2. **Bridge drops, comes back still v1, STAGED still pending** → the requested
+   reboot fired but the SBL didn't honor it → escalate to activation: unblock the
+   toolbox RoT "Update Signing Module" gate for one live `get_fuse_data`, or repeat
+   on a second correctly-activated unit.
+3. **No self-reboot at all** → firmware defect: `psa_fwu_request_reboot()` returns
+   without effect and its rc is discarded (`cc3501e_hw_tick()`, + the sibling calls
+   in `cc3501e_ota_install()`/accept). Fix = check + surface those rcs via
+   console/`GET_DIAG_INFO` so armed/requested/refused are distinguishable, and
+   investigate the FWU-service state that refused the reboot.
+
+**#493 criterion 1 is NOT yet closed**, but the remaining step is the corrected
+test above — **not** re-activation, and (unless outcome 3) not a firmware change.
 
 ## 6. GPIO proxy
 
