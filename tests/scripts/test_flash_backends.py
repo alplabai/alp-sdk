@@ -166,6 +166,78 @@ def test_yocto_wic_falls_back_to_dd_when_bmaptool_absent() -> None:
     assert "of=/dev/sdb" in joined
 
 
+def test_yocto_wic_gzip_fallback_dry_run_keeps_path_as_argv_token() -> None:
+    backend = YoctoWicFlash()
+    artefact = "/tmp/image with spaces; touch nope.wic.gz"
+    with patch("flash_backends.yocto_wic.shutil.which",
+               side_effect=lambda t: {
+                   "dd": "/bin/dd",
+                   "gunzip": "/usr/bin/gunzip",
+               }.get(t)), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb", "confirm": True},
+            dry_run=True,
+            artefact=artefact,
+        ))
+
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    artefact_token = str(Path(artefact))
+    assert result.command[:3] == ["/usr/bin/gunzip", "-c", artefact_token]
+    assert "|" in result.command
+    assert "sh" not in result.command
+    assert artefact_token in result.command
+
+
+def test_yocto_wic_xz_fallback_streams_without_shell() -> None:
+    backend = YoctoWicFlash()
+    artefact = "/tmp/image; touch nope.wic.xz"
+    bs = "4M; touch nope"
+    popen_calls: list[list[str]] = []
+
+    class _FakeStdout:
+        def close(self) -> None:
+            pass
+
+    class _FakePopen:
+        def __init__(self, cmd, **_kwargs):
+            popen_calls.append(list(cmd))
+            self.stdout = _FakeStdout()
+
+        def wait(self) -> int:
+            return 0
+
+    with patch("flash_backends.yocto_wic.shutil.which",
+               side_effect=lambda t: {
+                   "dd": "/bin/dd",
+                   "xz": "/usr/bin/xz",
+               }.get(t)), \
+         patch("flash_backends.yocto_wic.subprocess.Popen",
+               _FakePopen), \
+         patch("flash_backends.yocto_wic.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb", "confirm": True, "bs": bs},
+            artefact=artefact,
+        ))
+
+    assert result.ok is True
+    artefact_token = str(Path(artefact))
+    assert popen_calls == [["/usr/bin/xz", "-dc", artefact_token]]
+    invoked_cmd = run_mock.call_args[0][0]
+    assert invoked_cmd == [
+        "/bin/dd",
+        "of=/dev/sdb",
+        f"bs={bs}",
+        "conv=fsync",
+        "status=progress",
+    ]
+    assert "sh" not in result.command
+    assert artefact_token in result.command
+    assert f"bs={bs}" in result.command
+
+
 def test_yocto_wic_refuses_non_dev_target() -> None:
     backend = YoctoWicFlash()
     with patch("flash_backends.yocto_wic.shutil.which",
@@ -193,6 +265,42 @@ def test_yocto_wic_missing_tool_returns_clear_error() -> None:
     msg = result.message.lower()
     assert "bmaptool" in msg
     assert "dd" in msg
+
+
+def test_yocto_wic_dry_run_without_tools_still_plans() -> None:
+    backend = YoctoWicFlash()
+    with patch("flash_backends.yocto_wic.shutil.which", return_value=None), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb", "confirm": True},
+            dry_run=True,
+            artefact="/tmp/image.wic.gz",
+        ))
+
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    assert result.command == [
+        "bmaptool", "copy", str(Path("/tmp/image.wic.gz")), "/dev/sdb"
+    ]
+    assert "dry-run" in result.message
+
+
+def test_yocto_wic_no_confirm_without_tools_still_plans() -> None:
+    backend = YoctoWicFlash()
+    with patch("flash_backends.yocto_wic.shutil.which", return_value=None), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"target": "/dev/sdb"},
+            dry_run=False,
+            artefact="/tmp/image.wic",
+        ))
+
+    assert result.ok is True
+    assert run_mock.call_count == 0
+    assert result.command == [
+        "bmaptool", "copy", str(Path("/tmp/image.wic")), "/dev/sdb"
+    ]
+    assert "confirm" in result.message.lower()
 
 
 def test_yocto_wic_without_confirm_dry_runs_even_when_dry_run_false() -> None:

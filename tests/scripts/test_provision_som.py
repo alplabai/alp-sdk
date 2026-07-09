@@ -3,6 +3,7 @@
 and a stub som_ledger so the private ledger isn't a dependency."""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -53,9 +54,9 @@ def _stub_ledger(tmp_path):
     return s, log
 
 
-def _run(*args):
+def _run(*args, env=None):
     return subprocess.run([sys.executable, str(SCRIPT), *args],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, env=env)
 
 
 def test_dry_run_bootloader_only_plans_bl2_fip_skips_image(tmp_path):
@@ -70,7 +71,9 @@ def test_dry_run_bootloader_only_plans_bl2_fip_skips_image(tmp_path):
 
 def test_dry_run_complete_bundle_plans_emmc(tmp_path):
     d = _make_bundle(tmp_path, status="complete", with_image=True)
-    proc = _run("--bundle", str(d), "--serial", "2026W24-0001")
+    env = os.environ.copy()
+    env["PATH"] = ""
+    proc = _run("--bundle", str(d), "--serial", "2026W24-0001", env=env)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "yocto_wic" in proc.stdout or "emmc" in proc.stdout.lower()
 
