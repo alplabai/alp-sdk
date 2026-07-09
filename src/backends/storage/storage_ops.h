@@ -65,4 +65,32 @@ struct alp_storage {
 	bool                        in_use;
 };
 
+/* ------------------------------------------------------------------ */
+/* Shared range-check helper                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Overflow-safe range check for a fixed-capacity backend (raw
+ * flash_area).  Returns true iff [offset, offset+len) lies wholly
+ * within `capacity`.
+ *
+ * The public API takes 64-bit offsets/lengths, so a caller can pass
+ * values near UINT64_MAX.  The naive `offset + len > capacity` test can
+ * wrap the sum and let an out-of-range request through, after which the
+ * backend narrows `offset` to off_t and issues out-of-bounds flash I/O.
+ * Headroom is therefore computed by subtraction only.  Because a valid
+ * offset is then <= capacity (which fits the backend's off_t), the
+ * narrowing casts at the call site are safe.
+ */
+static inline bool alp_storage_range_in_capacity(uint64_t offset, uint64_t len, uint64_t capacity)
+{
+	if (offset > capacity) {
+		return false;
+	}
+	if (len > capacity - offset) {
+		return false;
+	}
+	return true;
+}
+
 #endif /* ALP_BACKENDS_STORAGE_OPS_H */
