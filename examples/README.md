@@ -43,6 +43,19 @@ marks the ones locked to specific silicon:
 * **(iMX93)** -- NXP i.MX93.
 * **(E1M-X)** -- E1M-X form-factor pad / peripheral.
 
+"Portable" means the board/SoM is swappable across the tagged
+families -- it does not mean every example avoids naming a chip in
+source.  A chip bring-up demo or a single-sensor/single-display
+tutorial is expected to `#include <alp/chips/<chip>.h>` directly and
+declare that chip in its `board.yaml` `chips:` list; that is the
+accepted, intentional contract for this SDK (see
+[`docs/portability.md`](../docs/portability.md) Sec 4.4), not
+portability debt.  `scripts/check_example_portability.py` reports
+this as Ring 2 ("chip-bound") or Ring 3 ("SoM-bound") -- only the
+general, peripheral-agnostic Ring 1 examples are expected to stay on
+the portable `<alp/peripheral.h>` + `BOARD_*` surface with no
+chip-driver include.
+
 Many v0.5--v0.6 examples are still `[UNTESTED]` -- they build on
 `native_sim/native/64` and cross-compile, but await hardware-in-the-
 loop bring-up.  Each example's own `README.md` carries its status.
