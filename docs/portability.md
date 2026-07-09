@@ -529,6 +529,20 @@ Two helpful patterns:
   of `board.yaml` so the build fails fast if the board doesn't
   populate them.
 
+This is also the load-bearing case for **chip-bound examples**.
+`scripts/check_example_portability.py` classifies every example into
+one of three rings; Ring 2 ("chip-bound" -- the chip is populated on
+more than one family) and Ring 3 ("SoM-bound" -- only one family
+populates it) are an **accepted, intentional category**, not
+portability debt to migrate. A chip bring-up demo or a
+single-sensor/single-display tutorial is *supposed* to
+`#include <alp/chips/<chip>.h>` directly and declare that chip in
+`board.yaml` `chips:` -- that is how the example teaches the specific
+part. Only Ring 1 examples (the general/peripheral-agnostic ones) are
+expected to stay on the portable `<alp/peripheral.h>` + `BOARD_*`
+surface with no chip-driver include. See `examples/README.md` for the
+customer-facing version of this contract.
+
 ---
 
 ## 5. Capability validation — runtime, not `#ifdef`

@@ -39,6 +39,17 @@ The lint enforces two invariants:
       can confirm the portability claim in examples/README.md
       matches reality.
 
+      Rings 2 and 3 are an ACCEPTED, intentional category, not
+      migration debt: a chip bring-up demo or a single-sensor /
+      single-display tutorial is expected to `#include
+      <alp/chips/<chip>.h>` directly and declare that chip in its
+      `board.yaml` `chips:` list.  Only Ring 1 examples -- the
+      general/portable ones -- are held to staying on
+      `<alp/peripheral.h>` + `BOARD_*` aliases with no chip-driver
+      include.  See docs/portability.md Sec 4.4 and
+      examples/README.md for the customer-facing statement of this
+      contract.
+
   (c) HARD ERROR: every board listed in `supported_boards:` must
       have a matching Twister variant in `testcase.yaml`, selected
       by the corresponding `ALP_BOARD_<SLUG>` compiler define.  The
