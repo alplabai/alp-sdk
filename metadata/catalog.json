@@ -764,8 +764,16 @@
       "script": "scripts/check_inference_backend_parity.py"
     },
     {
+      "purpose": "CI gate: no hard-coded home-directory paths in executable / build files.",
+      "script": "scripts/check_local_paths.py"
+    },
+    {
       "purpose": "Validate that every silicon pad referenced in the SoM peripheral maps is claimed by **exactly one** peripheral.",
       "script": "scripts/check_pin_conflicts.py"
+    },
+    {
+      "purpose": "CI gate: root public headers stay chip-neutral.",
+      "script": "scripts/check_public_header_purity.py"
     },
     {
       "purpose": "Public/private classifier gate for the public alp-sdk repository.",
@@ -908,9 +916,7 @@
       "header": "include/alp/cap_instance.h"
     },
     {
-      "functions": [
-        "alp_console_companion_set"
-      ],
+      "functions": [],
       "header": "include/alp/console.h"
     },
     {
