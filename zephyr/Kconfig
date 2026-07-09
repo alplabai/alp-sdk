@@ -3135,23 +3135,24 @@ config ALP_SDK_CHIP_ACT8760
 	  the chip's CMI via Qorvo's ActiveCiPS dongle; runtime I2C
 	  is volatile-only and used here for telemetry + DVS.
 	  Provides act8760_init, act8760_get_status, raw register
-	  R/W on either page, and rail-by-rail VSET access (the
-	  VSET register offsets are still TODO; see act8760.c).
+	  R/W on either page, and rail-by-rail active VSET0 access.
+	  DVS slots VSET1..3 and typed mV conversion intentionally
+	  remain raw-register work until a caller needs them.
 
 config ALP_SDK_CHIP_TPS628640
-	bool "TI TPS628640 single-channel buck (multi-instance, stub)"
+	bool "TI TPS628640 single-channel buck regulator"
 	depends on I2C
 	help
-	  Compile chips/tps628640/tps628640.c.  Stub-status driver
-	  for the TI TPS628640 / TPS628641 / TPS628642 family of
+	  Compile chips/tps628640/tps628640.c.  Driver for the TI
+	  TPS628640 / TPS628641 / TPS628642 family of
 	  single-channel I2C-controlled bucks; V2N-M1 populates four
 	  instances at 0x44 (1.05 V DDR5_VDD), 0x48 (0.85 V LPDDR),
 	  0x4D (0.6 V LPDDR4X, optional V2N-common), 0x4F (0.5 V
-	  DDR5_VDDQ).  The driver currently exposes only probe + raw
-	  register R/W -- VSET decode awaits the TI datasheet being
-	  added to the vendor datasheet.
-	  Until then carriers rely on the chip's factory OTP voltage
-	  and don't write to it from firmware.
+	  DDR5_VDDQ).  Surface covers probe, VOUT1 / VOUT2 set/get
+	  in mV, STATUS read-and-clear, software enable, FPWM mode,
+	  ramp-speed selection, reset-to-defaults, and raw register
+	  R/W.  Firmware still must enforce each rail's board-safe
+	  voltage window before writing a new setpoint.
 
 config ALP_SDK_CHIP_PI3DBS12212
 	bool "Diodes PI3DBS12212A 2:1 differential mux (GPIO-only)"
@@ -3225,17 +3226,18 @@ config ALP_SDK_CHIP_RTL8211FDI
 	  magic-packet detection via the page 0xD8A register block.
 
 config ALP_SDK_CHIP_CLK_5L35023B
-	bool "Renesas / IDT 5L35023B audio clock generator (stub)"
+	bool "Renesas / IDT 5L35023B audio clock generator"
 	depends on I2C
 	help
-	  Compile chips/clk_5l35023b/clk_5l35023b.c.  Stub-status driver
+	  Compile chips/clk_5l35023b/clk_5l35023b.c.  Partial driver
 	  for the 5L35023B clock generator that sources Audio_CLKB on
-	  the V2N module (output to Renesas P10; OE on P67).  Provides
-	  init / probe + raw register R/W + a register-dump path for
-	  production test.  No frequency-config helpers until the
-	  maintainer adds the chip datasheet to the internal design
-	  archive and mirrors the Renesas RZ/V2N EVK BSP init sequence
-	  into the driver.
+	  the V2N module (output to Renesas P10; OE on P67).  Surface
+	  covers lifecycle, raw register R/W, sequential register dump,
+	  Dash-Code-ID readback, I2C address-strap decode, and soft
+	  power-down.  Full PLL / OUTDIV / spread-spectrum frequency
+	  programming remains a higher-layer policy; V2N normally relies
+	  on the chip's OTP defaults plus the board-driven Audio_CLKB_OE
+	  line for output gating.
 
 config ALP_SDK_CHIP_MURATA_LBEE5HY2FY
 	bool "Murata LBEE5HY2FY-922 Wi-Fi 6 + BLE 5.4 module GPIO surface"
