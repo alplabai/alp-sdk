@@ -1649,22 +1649,27 @@ config ALP_SDK_POWER
 	bool "Enable <alp/power.h> system-power-mode surface"
 	default y
 	help
-	  Compile src/power_dispatch.c + src/backends/power/zephyr_stub.c
-	  (Slice 7 -- registry migration).  Provides the portable
-	  alp_power_open / configure_wake_source / request_sleep /
-	  close surface that backends route either through Zephyr's
-	  pm_policy_* primitives (off-V2N) or through the GD32G553
-	  supervisor's CMD_POWER_MODE_SET opcode (0x28) on V2N.
+	  Compile src/power_dispatch.c, the class dispatcher behind the
+	  portable alp_power_open / configure_wake_source / request_sleep /
+	  close surface (and the sibling alp_power_profile_get / _set
+	  surface).  Real backends register over this dispatcher by
+	  silicon_ref + priority -- see ALP_SDK_POWER_PM_POLICY (Zephyr
+	  pm_policy_* sleep-mode backend, "*" wildcard, priority 100),
+	  ALP_SDK_POWER_EXT_RENESAS (V2N GD32G553 supervisor
+	  CMD_POWER_MODE_SET vendor extension) and
+	  ALP_SDK_POWER_PROFILE_ALIF_SE (Alif SE aiPM operating-point
+	  profile, separate "power_profile" class) for what each one
+	  actually implements.
 
-	  Slice 7 ships the surface on top of the backend registry with
-	  a wildcard stub backend: open() returns a valid handle and
-	  configure_wake_source() succeeds silently, but request_sleep()
-	  returns ALP_ERR_NOT_IMPLEMENTED.  The dispatcher still enforces
-	  the legacy INVAL pre-checks (RUN-mode, invalid enum,
-	  no-wake-source-and-no-timer).  The per-backend HAL bodies
-	  (Zephyr pm_state tables on AEN + the GD32 firmware-side
-	  wake-handler + the supervisor re-init state machine) land in
-	  follow-up commits per issue #22.
+	  src/backends/power/zephyr_stub.c is the always-present,
+	  priority-0 "*" wildcard fallback: open() returns a valid
+	  handle and configure_wake_source() succeeds silently so
+	  application setup code keeps linking/running unchanged, but
+	  request_sleep() (and both power_profile ops, when no higher-
+	  priority profile backend is linked) return ALP_ERR_NOSUPPORT.
+	  The dispatcher still enforces the INVAL pre-checks (RUN-mode,
+	  invalid enum, no-wake-source-and-no-timer) ahead of the
+	  backend call.
 
 config ALP_SDK_CAMERA_ZEPHYR_VIDEO
 	bool "Compile the real Zephyr drivers/video/ camera backend"
