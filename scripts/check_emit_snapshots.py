@@ -54,6 +54,26 @@ CASES = [
 ]
 
 
+def _normalise_sdk_root(text: str) -> str:
+    """Replace every spelling of the repo checkout root with <SDK_ROOT>.
+
+    The emitted output is JSON, so on Windows the checkout root shows up
+    JSON-escaped (backslashes doubled, e.g. ``C:\\\\Users\\\\...``) in
+    addition to its raw form; some emit paths also normalise separators to
+    forward slashes first.  A single `str(REPO)` replace only ever catches
+    one of these spellings, so replace all three -- longest / most-specific
+    (the escaped form) first, so it can't be partially eaten by the shorter
+    raw replace.
+    """
+    repo_raw = str(REPO)
+    repo_escaped = repo_raw.replace("\\", "\\\\")
+    repo_posix = REPO.as_posix()
+    for needle in (repo_escaped, repo_raw, repo_posix):
+        if needle:
+            text = text.replace(needle, "<SDK_ROOT>")
+    return text
+
+
 def _emit(tool: Path, board: str, mode: str) -> str:
     """Run the emitter from the repo root; normalise the SDK-root path."""
     env = {**os.environ}
@@ -68,7 +88,7 @@ def _emit(tool: Path, board: str, mode: str) -> str:
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
                          f"--emit {mode} (rc={rv.returncode}):\n{rv.stderr}")
-    return rv.stdout.replace(str(REPO), "<SDK_ROOT>")
+    return _normalise_sdk_root(rv.stdout)
 
 
 def main() -> int:
