@@ -8,26 +8,34 @@
  * Behaviour differs from the Camera / Display / GPU2D stubs:
  * stub_open returns ALP_OK so the dispatcher hands the caller a
  * real handle, and stub_configure_wake_source accepts the bitmap
- * silently.  request_sleep is the actual "not implemented" gate.
- * Customer wake-bitmap setup code links + runs unchanged; only the
- * actual sleep call sees the NOT_IMPLEMENTED status.
+ * silently.  request_sleep (and both power_profile ops further
+ * below) is the actual "not supported" gate.  Customer wake-bitmap
+ * setup code links + runs unchanged; only the actual sleep / profile
+ * call sees the ALP_ERR_NOSUPPORT status.
  *
- * Real backends (Zephyr pm_policy_* + per-SoC pm_state tables on
- * AEN; GD32G553 supervisor CMD_POWER_MODE_SET opcode 0x28 on V2N)
- * land per the tracking issue below with their own silicon-specific
- * entries at higher priority than this wildcard.
+ * Real backends already exist and out-rank this wildcard at higher
+ * priority on the silicon_refs they claim: src/backends/power/
+ * zephyr_pm_policy.c (Zephyr pm_policy_* + per-SoC pm_state tables,
+ * "*" at priority 100, gated by ALP_SDK_POWER_PM_POLICY / CONFIG_PM),
+ * src/backends/ext/renesas/power.c (GD32G553 supervisor
+ * CMD_POWER_MODE_SET opcode 0x28 on V2N, gated by
+ * ALP_SDK_POWER_EXT_RENESAS), and src/backends/power/
+ * alif_se_profile.c (Alif SE aiPM operating-point profile on the
+ * separate "power_profile" class, gated by
+ * ALP_SDK_POWER_PROFILE_ALIF_SE).  This stub only wins where none of
+ * those are linked into the build, or none claims the build's
+ * silicon_ref.
  *
- * @par Yocto / Linux path: deferred to slice #33.
+ * @par Yocto / Linux path: not implemented.
  *      The Yocto `/sys/power/state`-write + `/sys/class/rtc/rtcN/
  *      wakealarm` path documented in <alp/power.h> is *not* served
- *      by this stub.  Linux backends land in a dedicated slice per
- *      the standing "src/yocto/ off-limits" guardrail; until
- *      then customers building against ALP_OS=yocto see
- *      ALP_ERR_NOT_IMPLEMENTED from request_sleep.  Open + wake-
- *      source configuration still succeed so application setup
- *      code keeps linking unchanged across both consumer paths.
- *
- * @par Tracking: github.com/alplabai/alp-sdk/issues/22
+ *      by this stub, or by any other backend today.  Per the
+ *      standing "src/yocto/ off-limits" guardrail it lands in a
+ *      dedicated slice when scheduled; until then customers building
+ *      against ALP_OS=yocto see ALP_ERR_NOSUPPORT from
+ *      request_sleep.  Open + wake-source configuration still
+ *      succeed so application setup code keeps linking unchanged
+ *      across both consumer paths.
  */
 
 #include <stdint.h>
