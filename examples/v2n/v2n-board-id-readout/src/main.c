@@ -23,10 +23,9 @@ int main(void)
 	printf("[board-id] read SoM hardware-info manifest\n");
 
 	/* alp_hw_info_read fills in family / SKU / hw_rev / serial +
-     * manufacturing date from the EEPROM manifest.  The Kconfig
-     * symbols CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID +
-     * CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT must be set to the
-     * board's wiring (ALP_E1M_I2C0 on V2N; 0x50 strap default). */
+	 * manufacturing date from the EEPROM manifest.  `board.yaml`
+	 * `features.hw_info.eeprom` emits the Kconfig symbols for the
+	 * board's wiring (ALP_E1M_I2C0 on V2N; 0x50 strap default). */
 	alp_hw_info_t info;
 	alp_status_t  s = alp_hw_info_read(&info);
 

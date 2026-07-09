@@ -1091,6 +1091,27 @@ hand-edit in `prj.conf` / `local.conf` / sysbuild.conf,
 optional; sensible defaults from the SoM family / SDK baseline
 apply when omitted.
 
+### Hardware-info EEPROM (`features.hw_info.eeprom:`)
+
+```yaml
+features:
+  hw_info:
+    eeprom:
+      bus: e1m_i2c0        # -> CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0
+      addr_7bit: 0x50      # CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT
+      offset: 0            # CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET
+```
+
+Project-wide.  This declares where the 128-byte
+`alp_hw_info_eeprom_t` manifest lives when an app needs to pin the
+EEPROM bus/address/offset explicitly.  The orchestrator emits the
+values into Zephyr `alp.conf` and projects them into
+`system-manifest.yaml` under `hw_info.eeprom`.
+
+`features:` is not a free-form pass-through.  Only typed feature
+blocks with emitter support are accepted; unsupported keys are schema
+errors so configuration cannot be silently ignored.
+
 ### Per-slice memory (`cores.<id>.memory:`)
 
 ```yaml

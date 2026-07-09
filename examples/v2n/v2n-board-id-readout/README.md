@@ -13,6 +13,11 @@ SKU on the module.
 3. Asserts `info.som_sku == "E1M-V2N101"` via
    `alp_hw_info_assert_matches_build()`.
 
+The example's `board.yaml` declares that EEPROM location under
+`features.hw_info.eeprom`; the loader emits the matching
+`CONFIG_ALP_SDK_HW_INFO_EEPROM_*` values and projects the resolved
+bus/address/offset into `system-manifest.yaml`.
+
 ## Expected output (factory-programmed module)
 
 ```

@@ -18,7 +18,19 @@
         "som_hw_rev": { "type": ["string", "null"] },
         "board_name": { "type": ["string", "null"] },
         "board_hw_rev": { "type": ["string", "null"] },
-        "silicon": { "type": ["string", "null"] }
+        "silicon": { "type": ["string", "null"] },
+        "eeprom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bus", "bus_id", "addr_7bit", "offset"],
+          "description": "Resolved features.hw_info.eeprom manifest location, when declared in board.yaml.",
+          "properties": {
+            "bus": { "type": "string" },
+            "bus_id": { "type": "integer", "minimum": 0 },
+            "addr_7bit": { "type": "integer", "minimum": 80, "maximum": 87 },
+            "offset": { "type": "integer", "minimum": 0 }
+          }
+        }
       }
     },
     "slices": {

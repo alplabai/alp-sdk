@@ -181,7 +181,7 @@ Top-level blocks the schema accepts (full reference:
 | `ota` | Mender / MCUmgr config → Yocto local.conf / sysbuild integration |
 | `storage` | Flash partitions (DTS overlay emit lands in v0.6) |
 | `security.psa` | PSA Crypto + TF-M (sysbuild child image lands in v0.6) |
-| `features` | Free-form passthrough for app-specific extras |
+| `features` | Typed emitted feature blocks such as `hw_info.eeprom`; unsupported keys are rejected |
 
 ### Per-core slice fan-out
 

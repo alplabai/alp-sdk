@@ -279,6 +279,40 @@ def test_load_board_yaml_rejects_unknown_core(tmp_path: Path) -> None:
     assert "did you mean" in msg.lower()
 
 
+def test_load_board_yaml_rejects_unknown_features_key(tmp_path: Path) -> None:
+    path = _write_board(tmp_path, """
+som:
+  sku: E1M-AEN801
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+features:
+  ipc:
+    framing: nanopb
+""")
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "features" in msg
+    assert "ipc" in msg
+
+
+def test_load_board_yaml_rejects_empty_features_block(tmp_path: Path) -> None:
+    path = _write_board(tmp_path, """
+som:
+  sku: E1M-AEN801
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+features: {}
+""")
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    assert "features" in str(excinfo.value)
+
+
 # ---------------------------------------------------------------------
 # 4b. Phase B gap fix G-4: cross-class `som.sku:` swap diagnostic
 # ---------------------------------------------------------------------
@@ -531,6 +565,42 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
                 if h["name"] == "gd32_bridge")
     assert gd32["chip"] == "gd32g553"
     assert gd32["flash_method"] == "swd_probe"
+
+
+def test_emit_system_manifest_includes_hw_info_eeprom_feature(
+    tmp_path: Path,
+) -> None:
+    path = _write_board(tmp_path, """
+som:
+  sku: E1M-V2N101
+
+preset: e1m-x-evk
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    peripherals: [i2c]
+
+chips:
+  - eeprom_24c128
+
+features:
+  hw_info:
+    eeprom:
+      bus: e1m_i2c0
+      addr_7bit: 0x54
+      offset: 32
+""")
+    parsed = yaml.safe_load(emit_system_manifest(load_board_yaml(path)))
+
+    assert parsed["hw_info"]["eeprom"] == {
+        "bus":       "e1m_i2c0",
+        "bus_id":    0,
+        "addr_7bit": 0x54,
+        "offset":    32,
+    }
 
 
 # ---------------------------------------------------------------------
@@ -1169,6 +1239,41 @@ def test_slice_alp_conf_real_v2n101(tmp_path: Path) -> None:
         if line.startswith("CONFIG_ALP_SDK_CHIP_"):
             assert "TBD" not in line
             assert "RENESAS" not in line  # silicon slug must not appear
+
+
+def test_slice_alp_conf_hw_info_eeprom_feature_overrides_defaults(
+    tmp_path: Path,
+) -> None:
+    path = _write_board(tmp_path, """
+som:
+  sku: E1M-V2N101
+
+preset: e1m-x-evk
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    peripherals: [i2c]
+
+chips:
+  - eeprom_24c128
+
+features:
+  hw_info:
+    eeprom:
+      bus: e1m_i2c0
+      addr_7bit: 0x54
+      offset: 32
+""")
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m33_sm"])
+
+    assert "features.hw_info.eeprom" in conf
+    assert "CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0" in conf
+    assert "CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT=0x54" in conf
+    assert "CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET=32" in conf
 
 
 def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:

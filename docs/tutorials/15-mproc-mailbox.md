@@ -252,25 +252,18 @@ in via:
 ```yaml
 # board.yaml -- v2 shape: ipc: is a top-level array of carve-outs
 # the orchestrator allocates from the SoM preset's memory_map.
-# The nanopb framing rides per-app via an extra Kconfig overlay
-# (CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y) emitted by the loader
-# when `features.ipc.framing: nanopb` is set.
 ipc:
   - kind: raw_shmem
     endpoints: [m55_hp, m55_he]
     carve_out_kb: 64
     name: he_offload                # -> ALP_IPC_<NAME>_ADDR / _SIZE / ... macros
-
-features:
-  ipc:
-    framing: nanopb              # v0.4-prep; placeholder framing
-                                  # rides automatically when this is unset
 ```
 
 Once the v0.4 `extras-v04` group lands the upstream MaJerle/lwrb
 + nanopb/nanopb packs, the framing flips from "placeholder
-hand-rolled" to "nanopb-generated codec".  The application code
-above doesn't change; the framing is transparent inside
+hand-rolled" to "nanopb-generated codec".  That future switch needs
+a schema-backed emitted block before it belongs in `board.yaml`; the
+application code above does not change; the framing is transparent inside
 `alp_mbox_send`.
 
 ## 5. Build + flash

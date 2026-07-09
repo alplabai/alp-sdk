@@ -370,8 +370,44 @@
 
     "features": {
       "type": "object",
-      "additionalProperties": true,
-      "description": "App-specific feature configuration that doesn't map cleanly onto the strict-typed blocks above.  Free-form map; the loader passes structured entries through to the right backend."
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Typed feature configuration with explicit loader/emitter support.  Unsupported feature keys are rejected so board.yaml cannot silently accept a block no backend consumes.",
+      "properties": {
+        "hw_info": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "Runtime hardware-info reader configuration emitted into the system manifest and per-slice build config.",
+          "properties": {
+            "eeprom": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["bus", "addr_7bit", "offset"],
+              "description": "EEPROM location of the 128-byte alp_hw_info_eeprom_t manifest.",
+              "properties": {
+                "bus": {
+                  "type": "string",
+                  "pattern": "^e1m(_x)?_i2c[0-9]+$",
+                  "description": "Portable E1M I2C bus slug (for example, e1m_i2c0).  The emitter resolves the trailing index to CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID."
+                },
+                "addr_7bit": {
+                  "type": "integer",
+                  "minimum": 80,
+                  "maximum": 87,
+                  "description": "7-bit address strap for a 24C128-family EEPROM (0x50..0x57)."
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "description": "Byte offset of the alp_hw_info_eeprom_t manifest inside the EEPROM."
+                }
+              }
+            }
+          }
+        }
+      }
     },
 
     "models": {
