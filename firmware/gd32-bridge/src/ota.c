@@ -2,8 +2,8 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * gd32-bridge OTA — Path A state machine.  See ota.h + ota_layout.h and
- * the design at alp-sdk-internal/docs/gd32-bridge-ota-path-a-design.md.
+ * gd32-bridge OTA — Path A state machine.  See ota.h + ota_layout.h for
+ * the public wire and flash-layout contract.
  *
  * Safe-by-default: without -DBRIDGE_OTA_PARTITIONED the dispatcher returns
  * STATUS_NOSUPPORT and touches no flash.  Even when partitioned, the real

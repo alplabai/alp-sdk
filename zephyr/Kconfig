@@ -1805,11 +1805,10 @@ config ALP_SDK_GPU2D
 	  D/AVE 2D real backend (ALP_SDK_GPU2D_ALIF_DAVE2D) on AEN
 	  silicon.
 
-	  Surfaces the headline gap the Alif Ensemble feature audit
-	  (internal AEN feature audit) called out: customers
-	  migrating from V2N to AEN otherwise silently lose 2D
-	  acceleration because Zephyr has no portable `gpu` / `2d`
-	  driver class.
+	  Surfaces the AEN-family 2D acceleration path through a
+	  portable SDK class.  Without this layer, customers migrating
+	  from V2N to AEN silently lose 2D acceleration because Zephyr
+	  has no portable `gpu` / `2d` driver class.
 
 config ALP_SDK_GPU2D_SW_FALLBACK
 	bool "Portable software 2D fallback (real CPU fill/blit/blend)"

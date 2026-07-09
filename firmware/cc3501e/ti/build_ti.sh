@@ -13,7 +13,9 @@
 #
 # Usage:
 #   ./build_ti.sh                                  # default SPI bridge, no WiFi/BLE
-#   SDK_DIR=/home/caner/ti/simplelink_wifi_sdk_10_10_01_08 ./build_ti.sh --wifi
+#   SDK_DIR=<ti-sdk> TICLANG_ROOT=<ti-cgt-armllvm> \
+#     SYSCONFIG_CLI=<sysconfig_cli.sh> TOOLBOX=<simplelink-wifi-toolbox> \
+#     ./build_ti.sh --wifi
 #   ./build_ti.sh --wifi --ble                     # + WiFi host driver + NimBLE
 #   ./build_ti.sh --transport sdio --ota-selftest
 #
@@ -21,14 +23,14 @@
 set -euo pipefail
 
 # --- config (override via env or flags) --------------------------------------
-SDK_DIR="${SDK_DIR:-/home/caner/ti/simplelink_wifi_sdk_10_10_01_08}"
-TICLANG_ROOT="${TICLANG_ROOT:-/home/caner/ti/ti-cgt-armllvm_5.1.1.LTS}"
-SYSCONFIG_CLI="${SYSCONFIG_CLI:-/home/caner/ti/sysconfig-1.28.0/sysconfig_cli.sh}"
+SDK_DIR="${SDK_DIR:-}"
+TICLANG_ROOT="${TICLANG_ROOT:-}"
+SYSCONFIG_CLI="${SYSCONFIG_CLI:-}"
 # SimpleLink Wi-Fi Toolbox -- provides the SysConfig MemoryConfigurator module
 # (/ti/memoryconfig/MemoryConfigurator) that the main SDK product does NOT ship.
 # Passed as a SECOND --product to generate the flash-map (see the demo makefile's
 # SIMPLELINK_WIFI_TOOLBOX_INSTALL_DIR). TOOLBOX = the dir holding .metadata/product.json.
-TOOLBOX="${TOOLBOX:-/home/caner/ti/simplelink_wifi_toolbox_4_2_4/simplelink_wifi_toolbox_lin_4_2_4}"
+TOOLBOX="${TOOLBOX:-}"
 TRANSPORT="spi"          # spi | sdio
 OTA_SELFTEST=0
 WIFI_HOST_DRIVER=0
@@ -55,6 +57,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fw="$(cd "$HERE/.." && pwd)"                 # firmware/cc3501e
 repo="$(cd "$fw/../.." && pwd)"              # repo root
 out="$fw/build/ti"
+
+: "${SDK_DIR:?set SDK_DIR to the TI SimpleLink Wi-Fi SDK root}"
+: "${TICLANG_ROOT:?set TICLANG_ROOT to the TI ARM LLVM toolchain root}"
+: "${SYSCONFIG_CLI:?set SYSCONFIG_CLI to sysconfig_cli.sh}"
+: "${TOOLBOX:?set TOOLBOX to the SimpleLink Wi-Fi Toolbox product root}"
+
 tc="$TICLANG_ROOT/bin/tiarmclang"
 for p in "$SDK_DIR/.metadata/product.json" "$tc" "$SYSCONFIG_CLI" "$TOOLBOX/.metadata/product.json"; do
   [ -e "$p" ] || { echo "MISSING: $p (stage the TI SDK/toolchain/toolbox -- see docs)"; exit 3; }

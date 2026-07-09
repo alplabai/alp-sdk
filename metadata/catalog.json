@@ -769,6 +769,10 @@
       "script": "scripts/check_pin_conflicts.py"
     },
     {
+      "purpose": "Public/private classifier gate for the public alp-sdk repository.",
+      "script": "scripts/check_public_private.py"
+    },
+    {
       "purpose": "Validate SoM-release bundle manifests against the public metadata/schemas/som-release-bundle-v1.schema.json contract.",
       "script": "scripts/check_som_bundle.py"
     },

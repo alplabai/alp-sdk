@@ -1,7 +1,7 @@
 # CC3501E bridge — Wi-Fi + BLE host integration recipe (SDK 10.10.01.08, ticlang)
 
 Grounded from the TI SDK 2026-06-18 (deep agent maps). SDK at
-`C:\Users\Caner\Desktop\ti_simplelink_sdk\simplelink_wifi_sdk_10_10_01_08`.
+`<ti-sdk>/simplelink_wifi_sdk_10_10_01_08`.
 Both stacks run ON the CC35 app core; the bridge SPI-slave (to the Alif) feeds a
 FreeRTOS **worker** (P0-4) that calls these — never the SPI ISR.
 

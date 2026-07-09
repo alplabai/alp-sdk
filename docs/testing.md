@@ -196,6 +196,7 @@ Every CI workflow has a local counterpart that runs the same coverage:
 | `pr-static-analysis.yml`       | `bash scripts/test-all.sh` (clang-format-diff stage)      |
 | `pr-generated-files.yml`       | `python3 scripts/gen_soc_caps.py --check`                 |
 | `pr-metadata-validate.yml`     | `python3 scripts/validate_metadata.py` + alp_project.py   |
+| public/private classifier      | `python3 scripts/check_public_private.py`                 |
 | `pr-doxygen.yml`               | `doxygen Doxyfile` (zero-warnings)                        |
 | (extension CI lives in `alplabai/alp-sdk-vscode`) | `cd ../alp-sdk-vscode && npm test`                     |
 | `coverity.yml`                 | none (Coverity Scan only)                                 |

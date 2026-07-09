@@ -305,7 +305,7 @@ hardware-free environment triage.  Verb reference:
 | Secure boot                                      | [`docs/secure-boot.md`](secure-boot.md)           |
 | OTA (Mender device contract)                     | [`docs/ota.md`](ota.md), [`docs/ota-device-contract.md`](ota-device-contract.md) |
 | Verification + release matrix                    | [`docs/test-plan.md`](test-plan.md)               |
-| HiL rig design                                   | maintained in `alplabai/alp-sdk-internal` (internal) |
+| HiL runner contract                              | [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md)          |
 | Porting to a new SoM                             | [`docs/porting-new-som.md`](porting-new-som.md)   |
 
 ## 9. Getting help

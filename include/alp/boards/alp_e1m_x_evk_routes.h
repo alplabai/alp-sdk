@@ -94,7 +94,7 @@ extern "C" {
 /* DAC channels (ALP_E1M_DAC<N> -> board-side signal) */
 /* ------------------------------------------------------------------ */
 
-#define XEVK_DAC0 ALP_E1M_X_DAC0  /**< DAC0 analog output.  Header J15.2 (DAC0_OUT) is the x2-buffered copy, but the buffered path is INOPERABLE on this carrier revision (carrier erratum, fixed next rev; rework details in the internal carrier errata).  Bench use taps the raw 1.8 V-full-scale DAC0 net instead. */
+#define XEVK_DAC0 ALP_E1M_X_DAC0  /**< DAC0 analog output.  Header J15.2 (DAC0_OUT) is the x2-buffered copy, but the buffered path is INOPERABLE on this carrier revision (carrier erratum, fixed next rev). Bench validation taps the raw 1.8 V-full-scale DAC0 net instead. */
 #define XEVK_DAC1 ALP_E1M_X_DAC1  /**< DAC1 analog output. */
 
 /* ------------------------------------------------------------------ */
