@@ -185,8 +185,36 @@ Three conclusive outcomes:
    console/`GET_DIAG_INFO` so armed/requested/refused are distinguishable, and
    investigate the FWU-service state that refused the reboot.
 
-**#493 criterion 1 is NOT yet closed**, but the remaining step is the corrected
-test above — **not** re-activation, and (unless outcome 3) not a firmware change.
+**#493 criterion 1 is NOT yet closed.** Corrected-procedure run 2026-07-09: the
+test was **blocked upstream** — a genuine STAGED image from a prior run is stuck
+pending in the CC35 secondary slot, and there is **no non-destructive way to
+clear or promote it over the bridge**:
+
+- A fresh `cc3501e_ota_update` short-circuits to `-1` (INVAL, "slot already
+  pending") **before** `OTA_FINISH`, so `ota_reboot_pending` is never armed and
+  `psa_fwu_request_reboot()` is never issued — the test cannot reach any of the
+  three outcomes above.
+- `OTA_ABORT` (protocol.c) cancels only an **in-flight** session; it does not
+  clear a committed STAGED image. There is no OTA reject/erase opcode, and the
+  staged image survived a verified true cold POR — so nothing on the bench frees
+  the slot.
+- **Chicken-and-egg:** a fresh FINISH needs a free slot; the slot frees only via
+  a swap; the swap needs the request armed by a fresh FINISH.
+
+Corroboration (strengthens the root cause): across **two** bare-nRESET CC35
+reboots (the E8 `cc3501e_bridge_bringup` Puya WIFI_EN+nRESET workaround, one per
+E8 boot) the image stayed pending, un-promoted — confirming a bare reset carrying
+no `psa_fwu_request_reboot()` does NOT promote.
+
+**The unblock is CC35-firmware-side** (needs a TI-toolchain rebuild + reflash):
+either (a) add a bridge OTA reject/erase path (or make `psa_fwu_start` replace a
+pending image) so a fresh FINISH is reachable, or (b) add a
+"request-reboot-for-existing-pending-image" bridge command that calls
+`psa_fwu_request_reboot()` on the already-committed image — the cleaner test,
+since it directly promotes the stuck v3 image and exercises the swap path. Until
+one lands, crit-1 stays blocked on this jammed slot. (The exact PSA "already
+pending" error mapped to host `-1` lives in the license/vendor FWU path, not this
+repo's `src/` — TBD.)
 
 ## 6. GPIO proxy
 
