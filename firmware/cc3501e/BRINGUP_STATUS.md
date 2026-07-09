@@ -98,64 +98,59 @@ unit. The validated host-side workaround is to hard-reset the CC3501E after each
 power-cycle: drive WIFI_EN, let the first boot settle, then pulse nRESET. This
 is implemented in `cc3501e_hard_reset` / `cc3501e_reset`.
 
-**Bench read 2026-07-09 (`e1m-aen-evk-01`, XDS110 `L50015YR` present):** the
-unit's activation record (`activation_report.txt` `vendor_fuse_report`) reports
-`boot_sector_programmed = 0`, with every `request_validation_status` /
-`request_execution_status` entry `= 0` — the mis-activation signature. The auth
-fuses themselves are set (`action_request_authentication_enable = 1`,
-`vendor_sbl_container_enable = 1`, `vendor_container_authentication_enable = 1`),
-so the vendor SBL will authenticate an image but the **cold-launch boot sector
-was never programmed**. This is why cold swap-boot cannot be exercised here: the
-bench unit needs re-activation through the vendor GUI wizard first. Note also
-that flashing the bring-up app does not discriminate activation state — its
-startup `cc3501e_hard_reset` (the WARM workaround above) drives the reset on
-every boot and masks the cold-launch binding; only a true cold POR swap tests
-it.
+**Activation state — CORRECTED 2026-07-09 (`e1m-aen-evk-01`, XDS110 `L50015YR`):**
+the bench unit is **already activated**. The `boot_sector_programmed = 0`
+figure that an earlier read reported is from a **stale, pre-activation
+baseline** (`activation_report.txt`, dated 2026-07-03 17:32 — the
+factory/pre-provision snapshot), NOT a current device read. The authoritative
+current state is the device fuse read-backs: **30 `programming_report.txt`
+dumps across 2026-07-05 (05:26 → 21:48) all read `boot_sector_programmed = 1`,
+`non_recoverable_failure = 0`** — i.e. the boot sector was programmed sometime
+between Jul 3 and Jul 5 and has read as programmed ever since. The auth fuses
+are set and `permanently_lock_debug_enable = 0` (debug open). So the vendor SBL
+is armed; **cold swap-boot should be exercisable directly — no re-activation is
+needed on this unit.**
 
-### Re-activating a unit (unblocks the cold swap-boot acceptance)
+Caveat on re-confirming live: a fresh `get_fuse_data` today via the vendor-key
+path is blocked at the toolbox's "Action Required: Update Signing Module" RoT
+gate (a tooling limitation, not a fuse-0 signal). A clean live re-read would use
+a signed `query` action request (`flash-images-builder build action_request
+--type query` → sign → `programmer … query`); the 30 historical device reads are
+already consistent at `1`.
 
-Programming the cold-launch boot sector re-arms the vendor SBL. This is a
-**one-time, hard-to-reverse** operation (it writes the vendor container / boot
-sector) — do it deliberately, on a unit you can afford to re-provision, and
-confirm the debug fuses are still open (`permanently_lock_debug_enable = 0`)
-first. Two paths:
+### Re-activating a fresh / mis-activated unit (only if needed)
 
-1. **Linux toolbox full flash-set regen (preferred — no Windows needed).** The
-   signed reflash pipeline was reverse-engineered on Linux: `build_ti.sh
-   --wifi --ble` builds the vendor image, then a **full** flash-set regen
-   (`programming_image` + `action_requests` + `vendor_image` + **`boot_sector`**,
-   all fresh-signed with the VALIDATION key) is programmed via
-   `simplelink-wifi-toolbox programmer -i XDS110 -param1 L50015YR programming
-   --tool_settings ...`. `deploy_validate.sh` alone is **insufficient** — it
-   only refreshes `vendor_image`, and `programming_instructions` is coupled to
-   the boot sector. Use the full set. (The exact staged command sequence lives
-   in the bench signing dir, not the repo.)
-2. **Windows vendor GUI activation wizard (fallback).** Establishes the
-   cold-launch binding in one session if the Linux path is unavailable.
+Not needed for the current bench unit (already activated). For a genuinely
+fresh or mis-activated unit, programming the cold-launch boot sector re-arms the
+vendor SBL — a **one-time, hard-to-reverse** operation. Confirm
+`permanently_lock_debug_enable = 0` first, then use the full signed flash set
+(`programming_image` + `action_requests` + `vendor_image` + `boot_sector`, all
+signed with the VALIDATION key), programmed via `simplelink-wifi-toolbox
+programmer -i XDS110 -param1 L50015YR programming`. `deploy_validate.sh` alone is
+**insufficient** — it refreshes only `vendor_image`. NOTE: a ready-to-run
+full-set-regen script is **not** currently staged in the bench signing dir; the
+`gen-out-*/` trees are prior outputs, not a reproducible command. Confirm by
+re-reading the fuse: `boot_sector_programmed` `0 → 1`.
 
-**Confirm activation** by re-reading the activation record: `boot_sector_programmed`
-must flip `0 → 1` and the `request_execution_status` entries go to `1`. Only
-then is the unit cold-bootable.
+### Validating the full cold swap-boot cycle (#493 criterion 1)
 
-### Validating the full cold swap-boot cycle (after re-activation)
-
-Once a unit reads `boot_sector_programmed = 1`, run the real-image OTA cycle:
+The unit is activated, so run the real-image OTA cycle directly:
 
 1. Build the host app with a **genuine** image:
    `west build -b alp_e1m_aen801_m55_he/.../rtss_he examples/aen/aen-cc3501e-bringup
    -- -DCC3501E_OTA_REAL=ON` (streams `cc3501e_ota_candidate`, the signed GPE
    image, over the bridge — not the inert blob).
 2. Flash + run: `cc3501e_ota_update` streams → FINISH → `psa_fwu_install` →
-   **STAGED** (this half is WARM-verifiable on any unit and is the real-image
-   confirmation the inert blob never gave).
-3. **True cold POR** (PSU power-cycle, not a host `cc3501e_hard_reset`): the
-   re-armed vendor SBL swaps secondary→primary and boots the STAGED image as a
-   MCUboot TRIAL.
+   **STAGED** (the real-image confirmation the inert blob never gave).
+3. **True cold POR** (PSU power-cycle, not a host `cc3501e_hard_reset` — the WARM
+   reset masks activation state): the armed vendor SBL swaps secondary→primary
+   and boots the STAGED image as a MCUboot TRIAL.
 4. `GET_VERSION` / `GET_DIAG_INFO.fw_version` after reboot must report the new
-   image; the first post-swap boot then `psa_fwu_accept`s it (self-accept), or
-   a failed boot rolls back to the prior slot.
+   image; the first post-swap boot then `psa_fwu_accept`s it (self-accept), or a
+   failed boot rolls back to the prior slot.
 
-That closes #493 criterion 1.
+That closes #493 criterion 1. This is the remaining bench step — it does NOT
+require re-activation.
 
 ## 6. GPIO proxy
 
