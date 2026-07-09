@@ -9,5 +9,16 @@ cores:
     app: ./src
     peripherals:
       - i2c
+# Every real chip driver src/main.c includes directly (issue #514's lint
+# gap: an undeclared <alp/chips/*.h> include skips the family-compatibility
+# check and misreports the portability ring).
+chips:
+  - icm42670
+  - bmi323
+  - bmp581
+  - ina236
+  - tas2563
+  - tcal9538
+  - eeprom_24c128
 diagnostics:
   log_level: info
