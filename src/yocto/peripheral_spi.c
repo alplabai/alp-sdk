@@ -47,7 +47,7 @@
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
-#include "yocto_errno.h"
+#include "common/alp_errno.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_SPI_HANDLES
 #define ALP_SDK_YOCTO_MAX_SPI_HANDLES 4
@@ -134,21 +134,21 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 
 	int fd = open(path, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		return NULL;
 	}
 
 	uint8_t mode_byte = (uint8_t)cfg->mode;
 	if (ioctl(fd, SPI_IOC_WR_MODE, &mode_byte) < 0 ||
 	    ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		(void)close(fd);
 		return NULL;
 	}
 	if (cfg->freq_hz != 0) {
 		uint32_t freq = cfg->freq_hz;
 		if (ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &freq) < 0) {
-			alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+			alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 			(void)close(fd);
 			return NULL;
 		}
@@ -191,7 +191,7 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		.bits_per_word = bus->bits_per_word,
 	};
 	if (ioctl(bus->fd, SPI_IOC_MESSAGE(1), &xfer) < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	return ALP_OK;
 }
@@ -206,7 +206,7 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 	}
 	ssize_t n = write(bus->fd, tx, len);
 	if (n < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	if ((size_t)n != len) {
 		return ALP_ERR_IO;
@@ -224,7 +224,7 @@ alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
 	}
 	ssize_t n = read(bus->fd, rx, len);
 	if (n < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	if ((size_t)n != len) {
 		return ALP_ERR_IO;
