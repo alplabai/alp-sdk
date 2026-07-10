@@ -28,10 +28,7 @@ MANIFEST_DIR = REPO / "metadata" / "chips"
 # Drivers known to lack a manifest today. BACKLOG ONLY -- shrink this list by
 # authoring metadata/chips/<id>.yaml; do not add new entries (a new driver
 # without a manifest must fail the gate, not be allowlisted away).
-KNOWN_DRIVER_NO_MANIFEST = {
-    "lis2dw12",
-    "ssd1331",
-}
+KNOWN_DRIVER_NO_MANIFEST: set[str] = set()
 
 # Manifests intentionally without a driver (planned-but-unimplemented parts).
 KNOWN_MANIFEST_NO_DRIVER = {
