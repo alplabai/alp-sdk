@@ -159,12 +159,20 @@ def emit(entries: list[Entry]) -> str:
         " * indexes the tables below via [-status]. */",
         f"#define ALP_STATUS_TABLE_SIZE ((size_t)(-{floor.name}) + 1u)",
         "",
+        # clang-format's AlignConsecutiveAssignments is non-deterministic on
+        # these tables (the single-line entries sit between multi-line
+        # description entries, so run-detection flip-flops the padding between
+        # clang-format runs).  Fence the tables off so this generator's
+        # alignment is the single source of truth and the in-sync gate stays
+        # stable; the surrounding function bodies are still clang-formatted.
+        "/* clang-format off */",
         "static const char *const _status_names[ALP_STATUS_TABLE_SIZE] = {",
     ]
     for e, d in zip(real, designators):
         key = d.ljust(width)
         lines.append(f"    {key} = {_c_string(e.name)},")
     lines.append("};")
+    lines.append("/* clang-format on */")
     lines.append("")
     lines.append("const char *alp_status_name(alp_status_t status)")
     lines.append("{")
@@ -177,11 +185,13 @@ def emit(entries: list[Entry]) -> str:
     lines.append("")
     lines.append("#if defined(CONFIG_ALP_STATUS_DESCRIPTIONS)")
     lines.append("")
+    lines.append("/* clang-format off */")
     lines.append("static const char *const _status_descriptions[ALP_STATUS_TABLE_SIZE] = {")
     for e, d in zip(real, designators):
         key = d.ljust(width)
         lines.append(f"    {key} = {_c_string(e.description)},")
     lines.append("};")
+    lines.append("/* clang-format on */")
     lines.append("")
     lines.append("const char *alp_status_description(alp_status_t status)")
     lines.append("{")
