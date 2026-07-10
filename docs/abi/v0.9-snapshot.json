@@ -60,7 +60,24 @@
           "signature": "alp_status_t alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_ADC_CONFIG_DEFAULT": {
+          "hash": "c6292af4fc323133",
+          "value": "(id)"
+        },
+        "ALP_ADC_FILTER_CONFIG_DEFAULT": {
+          "hash": "36c5e9bdbb7afb50",
+          "value": "(id)"
+        },
+        "ALP_ADC_SPECTRUM_CONFIG_DEFAULT": {
+          "hash": "d3efef32c503f438",
+          "value": "(id)"
+        },
+        "ALP_ADC_STREAM_CONFIG_DEFAULT": {
+          "hash": "400be8dba7bc84e3",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_adc_filter_t": {
           "definition": "typedef struct alp_adc_filter alp_adc_filter_t;",
@@ -143,7 +160,12 @@
           "signature": "alp_status_t alp_audio_out_write(alp_audio_out_t *out, const void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_AUDIO_CONFIG_DEFAULT": {
+          "hash": "5ecba91d4f593c78",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_audio_format_t": {
           "definition": "typedef enum { ALP_AUDIO_FMT_S16_LE = 0, ALP_AUDIO_FMT_S24_LE = 1, ALP_AUDIO_FMT_S32_LE = 2 } alp_audio_format_t;",
@@ -267,6 +289,10 @@
         }
       },
       "macros": {
+        "ALP_BLE_ADV_CONFIG_DEFAULT": {
+          "hash": "50500ac94cded860",
+          "value": "(id)"
+        },
         "ALP_BLE_GATT_PROP_INDICATE": {
           "hash": "017f9dd2c2e72250",
           "value": "0x20"
@@ -1326,7 +1352,12 @@
           "signature": "alp_status_t alp_camera_stop(alp_camera_t *c);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_CAMERA_CONFIG_DEFAULT": {
+          "hash": "87a0d099ec73235e",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_camera_t": {
           "definition": "typedef struct alp_camera alp_camera_t;",
@@ -5915,6 +5946,10 @@
         "ALP_COUNTER_CONFIG_DEFAULT": {
           "hash": "a5bd1d5fdb13d5c8",
           "value": "(id) ((alp_counter_config_t){ .counter_id = (id) })"
+        },
+        "ALP_QENC_CONFIG_DEFAULT": {
+          "hash": "ec6d201c2018ee49",
+          "value": "(id)"
         }
       },
       "typedefs": {
@@ -6007,7 +6042,12 @@
           "signature": "alp_display_t * alp_display_open(const alp_display_config_t *cfg);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_DISPLAY_CONFIG_DEFAULT": {
+          "hash": "73c74079692a36e5",
+          "value": "(id) ((alp_display_config_t){ .display_id = (id) })"
+        }
+      },
       "typedefs": {
         "alp_display_t": {
           "definition": "typedef struct alp_display alp_display_t;",
@@ -7785,7 +7825,12 @@
           "signature": "alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint32_t timeout_ms);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_I2S_CONFIG_DEFAULT": {
+          "hash": "2f928d2d01b5ba02",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_i2s_dir_t": {
           "definition": "typedef enum { ALP_I2S_DIR_RX = 0, ALP_I2S_DIR_TX = 1, ALP_I2S_DIR_BOTH = 2 } alp_i2s_dir_t;",
@@ -7844,7 +7889,12 @@
           "signature": "alp_inference_t * alp_inference_open_alpmodel(const alp_model_open_opts_t *opts);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_INFERENCE_CONFIG_DEFAULT": {
+          "hash": "3fa66519832b6c90",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_inference_backend_t": {
           "definition": "typedef enum { ALP_INFERENCE_BACKEND_AUTO = 0, ALP_INFERENCE_BACKEND_CPU = 1, ALP_INFERENCE_BACKEND_ETHOS_U = 2, ALP_INFERENCE_BACKEND_DRPAI = 3, ALP_INFERENCE_BACKEND_DEEPX_DXM1 = 4 } alp_inference_backend_t;",
@@ -7927,7 +7977,12 @@
           "signature": "alp_wifi_t * alp_wifi_open(void);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_MQTT_CONFIG_DEFAULT": {
+          "hash": "b9ceaa19cff643fe",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_mqtt_msg_cb_t": {
           "definition": "typedef void (*alp_mqtt_msg_cb_t)(const char *topic, const uint8_t *payload, size_t len, void *user);",
@@ -8062,7 +8117,16 @@
           "signature": "alp_status_t alp_shmem_view(alp_shmem_t *s, void **base_out, size_t *size_out);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_MBOX_CONFIG_DEFAULT": {
+          "hash": "aeb72de8faf0baa1",
+          "value": "(id) ((alp_mbox_config_t){ .channel = (id), .peer = ALP_CORE_SELF })"
+        },
+        "ALP_SHMEM_CONFIG_DEFAULT": {
+          "hash": "c8991feee2020c07",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_core_id_t": {
           "definition": "typedef enum { ALP_CORE_SELF = 0, ALP_CORE_M55_HP = 1, ALP_CORE_M55_HE = 2, ALP_CORE_A32_0 = 3, ALP_CORE_A32_1 = 4, ALP_CORE_A32_CLUSTER = 5, ALP_CORE_M33_SM = 6, ALP_CORE_A55_CLUSTER = 7, ALP_CORE_M33 = 8 } alp_core_id_t;",
@@ -8266,6 +8330,10 @@
           "hash": "afc0dc303fdbf1a7",
           "value": "(id) ((alp_i2c_config_t){ .bus_id = (id), .bitrate_hz = 100000u })"
         },
+        "ALP_I2C_TARGET_CONFIG_DEFAULT": {
+          "hash": "2cca70af9a7edfd0",
+          "value": "(id)"
+        },
         "ALP_SPI_CONFIG_DEFAULT": {
           "hash": "e9b7b641ff66df59",
           "value": "(id)"
@@ -8273,6 +8341,10 @@
         "ALP_SPI_NO_CS": {
           "hash": "e4997898b273a23e",
           "value": "0xFFFFFFFFu"
+        },
+        "ALP_SPI_TARGET_CONFIG_DEFAULT": {
+          "hash": "6c5685530db1c509",
+          "value": "(id)"
         },
         "ALP_UART_CONFIG_DEFAULT": {
           "hash": "8ebbc877dcba1a5c",
@@ -8681,6 +8753,10 @@
           "hash": "de2c9b51e7bb06a6",
           "value": "0x00u"
         },
+        "ALP_PWM_CAPTURE_CONFIG_DEFAULT": {
+          "hash": "3555135d825480cc",
+          "value": "(id)"
+        },
         "ALP_PWM_CONFIG_DEFAULT": {
           "hash": "5fd5d79db3f46e49",
           "value": "(id)"
@@ -8745,6 +8821,10 @@
         }
       },
       "macros": {
+        "ALP_RPC_CONFIG_DEFAULT": {
+          "hash": "94b9128f8242828e",
+          "value": "(id)"
+        },
         "ALP_RPC_DEFAULT_MBOX_CH": {
           "hash": "0a9d80500b4b162f",
           "value": "0u"
@@ -9196,7 +9276,12 @@
           "signature": "alp_status_t alp_storage_write(alp_storage_t *storage, uint64_t offset, const void *data, size_t len);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_STORAGE_CONFIG_DEFAULT": {
+          "hash": "d73b3f51294ab7eb",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_storage_aes_mode_t": {
           "definition": "typedef enum { ALP_STORAGE_AES_OFF = 0, ALP_STORAGE_AES_CTR = 1, ALP_STORAGE_AES_XTS = 2, } alp_storage_aes_mode_t;",
@@ -9397,7 +9482,12 @@
           "signature": "alp_usb_host_t * alp_usb_host_open(void);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_USB_DEVICE_CONFIG_DEFAULT": {
+          "hash": "1c8ea2ea54920a02",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_usb_dev_t": {
           "definition": "typedef struct alp_usb_dev alp_usb_dev_t;",

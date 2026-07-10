@@ -202,6 +202,23 @@ typedef struct {
 } alp_qenc_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_qenc_config_t for encoder @p id.
+ *
+ * Identity from @p id; canonical default: @c pulses_per_rev = 0 --
+ * the field is informational only (the hardware decoder counts
+ * quadrature edges regardless), so 0 ("unknown / not specified") is
+ * a safe default rather than inventing a mechanical resolution
+ * specific to some encoder model.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_QENC_CONFIG_DEFAULT(id)                                                                \
+	((alp_qenc_config_t){ .encoder_id = (id), .pulses_per_rev = 0u })
+
+/**
  * @brief Acquire a quadrature-decoder handle.
  *
  * Resolves @p cfg->encoder_id via the `alp-qenc<N>` devicetree alias.

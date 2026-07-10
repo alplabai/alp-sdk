@@ -253,6 +253,21 @@ typedef struct {
 } alp_pwm_capture_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_pwm_capture_config_t for channel @p id.
+ *
+ * Identity from @p id; canonical default: @c edge = @ref
+ * ALP_PWM_CAPTURE_EDGE_RISING (the enum's zero value, and the simplest
+ * measurement mode -- period-only, no pulse-width decode).
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_PWM_CAPTURE_CONFIG_DEFAULT(id)                                                         \
+	((alp_pwm_capture_config_t){ .channel_id = (id), .edge = ALP_PWM_CAPTURE_EDGE_RISING })
+
+/**
  * @brief Reconfigure a PWM channel as an input-capture source.
  *
  * Switches the channel's pin from output mode to input-capture
