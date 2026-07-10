@@ -390,10 +390,16 @@ The flow is strictly sequential — `BEGIN(total_len)` →
 `WRITE(offset, bytes)`* → `FINISH` — and each `WRITE`'s `offset` must
 equal the device's running write cursor (out-of-order writes are
 rejected; a host that missed a reply re-syncs to the real cursor via
-`OTA_STATUS`).  On `FINISH` the device installs the staged image and
-arms a deferred reboot: the bridge link **drops** while the cold
-BL2/MCUboot swaps the slot to primary (TRIAL boot), and the swapped
-image accepts itself on its first housekeeping tick.  Host-side
+`OTA_STATUS`).  On `FINISH` the device installs the staged image
+(`OTA_STATUS state` → 2/STAGED) and arms a deferred reboot: the CC35's
+OWN `psa_fwu_request_reboot()` fires once the FINISH ack has drained, the
+bridge link **drops** while BL2/MCUboot swaps the slot to primary (TRIAL
+boot), and the swapped image accepts itself on its first housekeeping
+tick.  The payload's signed version must **exceed** the running primary —
+a downgrade is refused at install (`state` → 3/ERROR), a forward image is
+accepted.  `OTA_STATUS reserved[0]` carries the last swap-reboot rc
+(0 = success, non-zero = the swap was refused, e.g. anti-rollback).
+Host-side
 
 `OTA_PROMOTE` (proto v4) exists for one recovery case: a bare reset
 (e.g. the Puya cold-boot host-reset workaround) can leave an image
@@ -408,9 +414,10 @@ granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` in
 
 Each OTA payload is itself a signed vendor image whose version must
 exceed the running primary (monotonic anti-rollback).  Build, signing,
-and the silicon-validated status (staged/install proven; the final cold
-swap-boot needs a correctly-activated, cold-bootable unit) are covered
-in [`docs/cc3501e-production.md`](cc3501e-production.md) § "OTA".  The
+and the silicon-validated status (the full cycle — stream → STAGE →
+self-reboot swap → cold-POR persist — is proven end-to-end on the
+E1M-AEN801 EVK, 2026-07-10) are covered in
+[`docs/cc3501e-production.md`](cc3501e-production.md) § "OTA".  The
 host obtains the image via the device-side Mender contract
 ([`docs/ota-device-contract.md`](ota-device-contract.md)); the OTA
 server is a separate repo.

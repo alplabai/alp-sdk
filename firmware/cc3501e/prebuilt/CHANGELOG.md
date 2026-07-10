@@ -31,10 +31,11 @@ The AEN SoM presets' `helper_firmware.cc3501e_otp` now point
 `flash_args.device`/`mode` stay TBD until the public cc3501e-flasher CLI
 ships (they are bench/host-specific, not SoM properties).
 
-**Not yet production-complete:** the full signed OTA cycle's final **cold
-swap-boot** (stream → FINISH → cold swap → GET_VERSION after reboot →
-self-accept/rollback) is still gated on a correctly-activated,
-cold-bootable unit — the current bench units carry the vendor-SBL
-cold-boot issue (see `firmware/cc3501e/BRINGUP_STATUS.md`). Chip-level OTA
-is receive→stage→install (STAGED) validated; field-OTA acceptance/rollback
-is not yet proven on hardware.
+**Full OTA cycle validated on hardware (2026-07-10):** stream → FINISH →
+STAGED → the CC35's own `psa_fwu_request_reboot()` swap (the bridge drops,
+then returns) → the swapped image runs and **self-accepts across a true
+cold POR** (no rollback). Proven on the E1M-AEN801 EVK with a FORWARD
+candidate — the OTA payload's signed version must EXCEED the running
+primary (monotonic anti-rollback: a downgrade is refused at `psa_fwu`
+install). A first OTA after a failed one recovers cleanly (no bridge
+wedge, no CC35 reset). See `firmware/cc3501e/BRINGUP_STATUS.md` §5.

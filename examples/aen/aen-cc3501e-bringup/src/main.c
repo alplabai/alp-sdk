@@ -352,25 +352,26 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
  *                         psa_fwu_start rejects it at FINISH (an expected, safe
  *                         failure -- nothing gets staged).  Proves the wire
  *                         path only.
- *   -DCC3501E_OTA_REAL -- streams the genuine `cc3501e_ota_candidate[]` (the
- *                         signed GPE vendor image v0.0.4.0, the SAME artefact
- *                         firmware/cc3501e/'s `--ota-selftest` build installs).
- *                         psa_fwu_start ACCEPTS the real manifest, so FINISH
- *                         reaches a genuine STAGED -- this proves the real
- *                         image streams->FINISH->STAGED over the bridge, not
- *                         just the framing.  (Requires the CMake side to
- *                         compile the candidate source -- see CMakeLists.txt.)
+ *   -DCC3501E_OTA_REAL -- streams the genuine `cc3501e_ota_candidate[]` (a
+ *                         signed GPE vendor image built for the CC3501E, at a
+ *                         GPE version ABOVE the running primary so it is a
+ *                         FORWARD update).  psa_fwu_start ACCEPTS it, FINISH
+ *                         reaches STAGED (`state`=2), and the CC35's own
+ *                         `psa_fwu_request_reboot()` swaps it in.  (A DOWNGRADE
+ *                         candidate is refused at install, `state`=3/ERROR --
+ *                         monotonic anti-rollback.)  Requires the CMake side to
+ *                         compile the candidate source -- see CMakeLists.txt.
  *
- * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md §5): the receive ->
- * RAM-stage -> psa_fwu install-to-STAGED pipeline is silicon-validated.  The
- * real-image STAGED (this mode) is WARM-verifiable on any bench unit.  The
- * final COLD swap-boot is a SEPARATE gate -- the bench units are fuse-proven
- * mis-activated (`boot_sector_programmed = 0`), so the vendor SBL never
- * relaunches a STAGED image on cold POR until a unit is re-activated via the
- * vendor GUI wizard.  So even this mode proves STAGED, not the live A/B swap,
- * on the current units.  Opt in at build time with `-DCC3501E_OTA_DEMO=ON`
- * (inert blob) or `-DCC3501E_OTA_REAL=ON` (genuine candidate); left OFF by
- * default so a normal bring-up run never kicks a (disruptive) flash cycle.
+ * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md §5): the FULL cycle is
+ * silicon-proven on the E1M-AEN801 EVK (2026-07-10) -- stream -> STAGED -> the
+ * firmware's own swap-reboot (the bridge drops, then returns) -> the swapped
+ * image self-accepts and PERSISTS across a true cold POR.  The swap is driven
+ * by the CC35's `psa_fwu_request_reboot()` after FINISH, NOT a host cold POR.
+ * `OTA_STATUS reserved[0]` (printed below as `reboot_rc`) surfaces the swap
+ * result: 0 = success, non-zero = refused (e.g. a downgrade).  Opt in at build
+ * time with `-DCC3501E_OTA_DEMO=ON` (inert blob) or `-DCC3501E_OTA_REAL=ON`
+ * (genuine forward candidate); left OFF by default so a normal bring-up run
+ * never kicks a (disruptive) flash cycle.
  */
 #ifdef CC3501E_OTA_DEMO
 #define CC3501E_OTA_DEMO_TIMEOUT_MS 20000u
