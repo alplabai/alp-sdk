@@ -10,9 +10,6 @@ som:
   sku: E1M-AEN801
 
 preset: e1m-evk
-supported_boards:
-  - e1m-evk
-  - e1m-x-evk
 cores:
   m55_hp:
     app: ./src
