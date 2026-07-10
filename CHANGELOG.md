@@ -7,6 +7,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — `--emit zephyr-board` generator (#523)
+
+- `scripts/alp_project.py --input <board.yaml> --core <core_id> --emit
+  zephyr-board --output <dir>` (`scripts/gen_zephyr_board.py`) generates
+  the per-core Zephyr board tree from the SoM preset + SoC JSON instead
+  of hand-authoring it under `zephyr/boards/alp/<board>/`.  The Alif
+  Ensemble (`aen`) family is fully generated (every file except
+  `board.cmake`); the committed `e1m_aen801_m55_hp` / `e1m_aen801_m55_he`
+  trees were regenerated in place, byte-identical to their prior
+  hand-authored content plus a standard "auto-generated, do not edit"
+  banner (`tests/scripts/test_gen_zephyr_board.py` pins the match).  The
+  Renesas RZ/V2N family (`v2n` / `v2n-m1`) generates the family-agnostic
+  files only (`board.yml`, `Kconfig.alp_<board>`, the twister `.yaml`);
+  its `.dts` / pinctrl `.dtsi` / `_defconfig` stay hand-authored until the
+  on-module GD32G553 supervisor's Renesas-side pin wiring lands in
+  `metadata/pinmux/*.yaml`.  New SoC-JSON fields backing the generator:
+  `cores[].zephyr_cpucluster` / `itcm_global_base` / `dtcm_global_base`,
+  `variants[].zephyr_soc_variant`; new SoM-preset fields:
+  `topology.<core>.zephyr_full_name` / `zephyr_twister_name`.  Wired into
+  `alp emit zephyr-board` too.  See `docs/architecture.md`'s generators
+  inventory and `docs/porting-new-som.md` §10.
+
 ### Fixed — build-plan / emit path resolution (#596, #597, #598)
 
 - **`--emit build-plan` / `west alp-build` (#596):** relative `app:`

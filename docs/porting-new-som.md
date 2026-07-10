@@ -613,9 +613,10 @@ The merge happens in `resolve_capabilities()`:
 
 ## 10. Step 7 — Build a real binary (optional)
 
-Generating Zephyr board files (`<board>.dts`, `<board>.yaml`,
-`<board>_defconfig`, `<board>.cmake`, `Kconfig.board`,
-`Kconfig.defconfig`) is **planned to be a one-shot transcription**:
+`--emit zephyr-board` (`scripts/gen_zephyr_board.py`, issue #523) generates
+the Zephyr board tree (`<board>.dts`, `<board>.yaml`, `<board>_defconfig`,
+`Kconfig.<board>`, `Kconfig.defconfig`, the pinctrl `.dtsi`, `board.yml`)
+from the SoM preset + SoC JSON:
 
 ```bash
 python scripts/alp_project.py \
@@ -634,14 +635,23 @@ west build \
     examples/peripheral-io/i2c-scanner-aen901
 ```
 
-> **Future work flag.**  The `--emit zephyr-board` emitter is on the
-> roadmap (see [[zephyr-board-from-yaml]]) but not yet wired in
-> `scripts/alp_project.py` as of 2026-05-18.  Until the
-> emitter lands, customers either hand-author a minimal Zephyr
-> board file under `boards/arm/alp_e1m_aen901_m55_hp/` (mirroring
-> the existing AEN801 board files), or run the example under
-> `native_sim` for a non-silicon smoke build.  When the emitter
-> lands this section becomes a literal copy-paste.
+> **Current coverage (issue #523).**  The Alif Ensemble (`aen`) family
+> (e.g. E1M-AEN801, and by extension a new AEN SKU like AEN901 above) is
+> fully generated -- every file except `board.cmake`.  Adding a new AEN
+> SKU only requires: a `zephyr_cpucluster` / `itcm_global_base` /
+> `dtcm_global_base` entry per core in its SoC JSON (an existing E7/E8
+> SoC JSON already carries these), a `topology.<core>.zephyr_full_name`
+> string in the SoM preset, and the console pad's row in
+> `metadata/pinmux/aen.yaml`.  The Renesas RZ/V2N family (`v2n` /
+> `v2n-m1`) generates only the family-agnostic files (`board.yml`,
+> `Kconfig.alp_<board>`, the twister `.yaml`) -- its `.dts` / pinctrl
+> `.dtsi` / `_defconfig` stay hand-authored (mirror the nearest sibling,
+> e.g. E1M-V2N101) until the on-module GD32G553 supervisor's Renesas-side
+> pin assignments land in metadata.  `board.cmake` (flasher/debugger
+> runner args) stays hand-authored for every family -- see
+> `docs/architecture.md`'s generators-inventory entry for why.
+> `tests/scripts/test_gen_zephyr_board.py` pins the covered files
+> byte-identical to their committed board tree.
 
 Either way, the resulting `.elf` is a real binary that exercises
 the new SoM's BSP path.  Run it on hardware once silicon arrives,
