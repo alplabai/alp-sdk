@@ -38,7 +38,7 @@ STATUS_RE = re.compile(r"@par\s+Driver status:\s*([^\n—-]+)")
 
 def _norm_label(raw: str) -> str | None:
     """Header label -> canonical status word, or None if unrecognised."""
-    s = raw.strip().strip("[]").lower().replace("-impl", "").strip()
+    s = raw.strip().strip("[]").lower().strip()
     return s if s in VALID else None
 
 

@@ -718,6 +718,10 @@
   },
   "gates": [
     {
+      "purpose": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
+      "script": "scripts/check_chip_header_status.py"
+    },
+    {
       "purpose": "Chip driver <-> manifest parity gate -- fails (exit 1) when a chip driver ships without its machine-readable metadata manifest, or a manifest ships with no driver, unless the mismatch is on an explicit allowlist.",
       "script": "scripts/check_chip_manifest_parity.py"
     },
