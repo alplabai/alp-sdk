@@ -723,7 +723,23 @@ static int ota_do_begin(void)
 	} else if (i2.impl.Primary && !i1.impl.Primary) {
 		target = (psa_fwu_component_t)Vendor_Image_Slot_1;
 	} else {
-		return CC3501E_HW_ERR_IO;
+		/* Ambiguous primary (both or neither read Primary) -- a prior FAILED or
+		 * aborted OTA, or an incomplete swap, can leave a slot in a TRIAL/FAILED
+		 * state so the primary is unresolvable.  Do NOT bail here: that stranded the
+		 * slot and made the FIRST OTA after a failure error out (and wedge the
+		 * bridge) until a CC35 reset (#611).  Instead walk BOTH slots back to READY,
+		 * re-query, and pick the non-primary as target (default slot 2). */
+		(void)psa_fwu_reject(PSA_ERROR_GENERIC_ERROR); /* any STAGED -> FAILED (global) */
+		(void)psa_fwu_cancel((psa_fwu_component_t)Vendor_Image_Slot_1);
+		(void)psa_fwu_clean((psa_fwu_component_t)Vendor_Image_Slot_1);
+		(void)psa_fwu_cancel((psa_fwu_component_t)Vendor_Image_Slot_2);
+		(void)psa_fwu_clean((psa_fwu_component_t)Vendor_Image_Slot_2);
+		if (psa_fwu_query((psa_fwu_component_t)Vendor_Image_Slot_2, &i2) == PSA_SUCCESS &&
+		    i2.impl.Primary) {
+			target = (psa_fwu_component_t)Vendor_Image_Slot_1;
+		} else {
+			target = (psa_fwu_component_t)Vendor_Image_Slot_2;
+		}
 	}
 	if (psa_fwu_query(target, &ti) != PSA_SUCCESS) return CC3501E_HW_ERR_IO;
 	/* Walk ANY stuck state back to READY so a fresh stage always succeeds -- the
