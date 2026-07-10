@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * E1M-V2N101 (RZ/V2N R9A09G056-N44 + DEEPX DX-M1) Cortex-M33 system-manager.
+ * E1M-V2N101 (RZ/V2N R9A09G056-N44) Cortex-M33 system-manager.
  *
  * Reuses the upstream RZ/V2N SoC devicetree + the EVK SCI_UART0 console and
  * adds the on-module GD32G553 supervisor links:

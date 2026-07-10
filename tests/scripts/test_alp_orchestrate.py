@@ -215,7 +215,7 @@ def test_load_board_yaml_v2n_happy(tmp_path: Path) -> None:
 
     assert m33.os == "zephyr"
     assert m33.app == "./m33"
-    assert m33.board == "alp_e1m_v2n101_m33_sm"      # inherited
+    assert m33.board == "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"      # inherited
     assert m33.toolchain == "arm-zephyr-eabi"
     assert m33.peripherals == ["adc", "pwm", "i2c", "gpio"]
     assert m33.libraries == ["cmsis_dsp"]
@@ -2804,7 +2804,7 @@ cores:
     assert m33["command"]["args"][:3] == [
         "build",
         "-b",
-        "alp_e1m_v2n101_m33_sm",
+        "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33",
     ]
     assert m33["command"]["args"][3] == str(
         REPO / "firmware" / "alp-stock-shim")
