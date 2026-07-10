@@ -30,6 +30,7 @@ if(CONFIG_ALP_SDK_TESTING)
         src/behavior_i2c.c
         src/behavior_spi.c
         src/behavior_adc.c
+        src/behavior_can.c
     )
 else()
     target_sources(app PRIVATE
