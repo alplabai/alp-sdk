@@ -17,12 +17,50 @@
 
 cmake_minimum_required(VERSION 3.20)
 
+# ---------------------------------------------------------------------
+# Version -- metadata/sdk_version.yaml is the single source of truth;
+# scripts/bump_version.py mirrors it into the ALP_VERSION_MAJOR/MINOR/
+# PATCH macros in include/alp/version.h on every release bump
+# (scripts/check_version_doc_sync.py keeps the two in lockstep).  Parse
+# those macros here instead of the YAML directly so CMake needs no
+# YAML parser.  This file previously hardcoded VERSION 0.1.0, which
+# never tracked a real release: PROJECT_VERSION (and therefore the
+# installed AlpSdkConfigVersion.cmake `find_package(alp-sdk 0.9 ...)`
+# resolves against) now always matches ALP_VERSION_STRING (issue #607).
+# ---------------------------------------------------------------------
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/alp/version.h" _alp_version_h_lines
+    REGEX "^#define[ \t]+ALP_VERSION_(MAJOR|MINOR|PATCH)[ \t]+[0-9]+")
+foreach(_alp_version_h_line IN LISTS _alp_version_h_lines)
+    if(_alp_version_h_line MATCHES "ALP_VERSION_MAJOR[ \t]+([0-9]+)")
+        set(_alp_sdk_version_major "${CMAKE_MATCH_1}")
+    elseif(_alp_version_h_line MATCHES "ALP_VERSION_MINOR[ \t]+([0-9]+)")
+        set(_alp_sdk_version_minor "${CMAKE_MATCH_1}")
+    elseif(_alp_version_h_line MATCHES "ALP_VERSION_PATCH[ \t]+([0-9]+)")
+        set(_alp_sdk_version_patch "${CMAKE_MATCH_1}")
+    endif()
+endforeach()
+if(NOT DEFINED _alp_sdk_version_major OR NOT DEFINED _alp_sdk_version_minor
+        OR NOT DEFINED _alp_sdk_version_patch)
+    message(FATAL_ERROR
+        "alp-sdk: could not parse ALP_VERSION_MAJOR/MINOR/PATCH from "
+        "include/alp/version.h -- has the macro layout changed?")
+endif()
+set(_alp_sdk_version
+    "${_alp_sdk_version_major}.${_alp_sdk_version_minor}.${_alp_sdk_version_patch}")
+
 project(alp-sdk
-    VERSION 0.1.0
+    VERSION ${_alp_sdk_version}
     LANGUAGES C CXX
     DESCRIPTION "Unification SDK for Alp Lab E1M edge AI modules"
     HOMEPAGE_URL "https://github.com/alplabai/alp-sdk"
 )
+
+unset(_alp_version_h_lines)
+unset(_alp_version_h_line)
+unset(_alp_sdk_version_major)
+unset(_alp_sdk_version_minor)
+unset(_alp_sdk_version_patch)
+unset(_alp_sdk_version)
 
 # ---------------------------------------------------------------------
 # Options
@@ -89,7 +127,13 @@ if(ALP_HAS_CMSIS_DSP)
     target_compile_definitions(alp_sdk_headers INTERFACE ALP_HAS_CMSIS_DSP=1)
 endif()
 
-# Convenience alias for downstream users.
+# Convenience alias for downstream users (add_subdirectory() / build-tree
+# consumers).  EXPORT_NAME makes the INSTALLED package's namespaced target
+# match this alias too: install(EXPORT ... NAMESPACE alp::) would otherwise
+# generate "alp::alp_sdk_headers" (it namespaces the raw target name, not
+# this hand-written ALIAS), leaving an installed find_package(alp-sdk)
+# consumer linking "alp::sdk_headers" unable to find the target (#607).
+set_target_properties(alp_sdk_headers PROPERTIES EXPORT_NAME sdk_headers)
 add_library(alp::sdk_headers ALIAS alp_sdk_headers)
 
 # ---------------------------------------------------------------------
@@ -185,6 +229,10 @@ if(NOT DEFINED ZEPHYR_BASE)
         add_library(alp_sdk STATIC)
     endif()
     target_link_libraries(alp_sdk PUBLIC alp_sdk_headers)
+    # See the alp_sdk_headers EXPORT_NAME comment above -- same reasoning:
+    # without this, install(EXPORT ... NAMESPACE alp::) emits
+    # "alp::alp_sdk" instead of "alp::sdk" for an installed package (#607).
+    set_target_properties(alp_sdk PROPERTIES EXPORT_NAME sdk)
     add_library(alp::sdk ALIAS alp_sdk)
     # Plain-CMake builds link libalp_sdk as an ordinary (static or shared)
     # library, NOT with Zephyr's whole-archive model.  A static-archive
@@ -225,16 +273,34 @@ endif()
 
 # ---------------------------------------------------------------------
 # find_package() support
+#
+# Issue #607: the config/version files were (a) generated into the
+# BUILD tree only -- nothing ever installed them, nor the
+# exported-targets file the config's `include(...)` line expects, so
+# an installed SDK could never satisfy `find_package(alp-sdk 0.9
+# REQUIRED)` -- and (b) named with the CamelCase "AlpSdk" package
+# name, which `find_package(<name>)`'s file-name convention
+# (`<name>Config.cmake` / `<lowercased-name>-config.cmake`) never
+# matches for a project named "alp-sdk": CMake would look for
+# "alp-sdk-config.cmake", not "AlpSdkConfig.cmake".  Renamed to match
+# PROJECT_NAME.  GNUInstallDirs must be included before
+# configure_package_config_file() so the install destination honours
+# ${CMAKE_INSTALL_LIBDIR} (lib vs lib64) instead of a hardcoded "lib".
 # ---------------------------------------------------------------------
 
+include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+
+set(ALP_SDK_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
+    CACHE STRING "Install location of the alp-sdk-config*.cmake package files")
+
 configure_package_config_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/AlpSdkConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/AlpSdkConfig.cmake
-    INSTALL_DESTINATION lib/cmake/AlpSdk
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/alp-sdk-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
+    INSTALL_DESTINATION ${ALP_SDK_INSTALL_CMAKEDIR}
 )
 write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/AlpSdkConfigVersion.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
@@ -245,10 +311,12 @@ write_basic_package_version_file(
 # what lets the meta-alp-sdk Yocto recipe package libalp_sdk.so + the
 # <alp/*> headers into the target sysroot (so e.g. the alp_perception
 # ROS node's find_library(alp_sdk) / find_path(alp/peripheral.h)
-# resolve).
+# resolve), AND what makes an installed SDK a real
+# `find_package(alp-sdk CONFIG)` package for external CMake consumers
+# (issue #607).
 if(ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE)
-    include(GNUInstallDirs)
-    install(TARGETS alp_sdk
+    install(TARGETS alp_sdk alp_sdk_headers
+        EXPORT AlpSdkTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -257,4 +325,17 @@ if(ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE)
     install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/alp
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         PATTERN "chips" EXCLUDE)
+
+    # Exported-targets file (alp-sdk-targets.cmake) the generated
+    # alp-sdk-config.cmake `include(... OPTIONAL)`s, plus the config +
+    # version files themselves -- all three previously existed only in
+    # the build tree.
+    install(EXPORT AlpSdkTargets
+        FILE ${PROJECT_NAME}-targets.cmake
+        NAMESPACE alp::
+        DESTINATION ${ALP_SDK_INSTALL_CMAKEDIR})
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
+        DESTINATION ${ALP_SDK_INSTALL_CMAKEDIR})
 endif()

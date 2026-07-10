@@ -57,6 +57,12 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/update_log/sw_tier.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../update_log/engine.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../update_log/sha256.c
+    # OS-agnostic .alpmodel loader (<alp/inference.h> alp_inference_open_alpmodel).
+    # Degrades to its own NOSUPPORT body when CONFIG_ALP_SDK_MODEL_READER is
+    # unset (always true here -- plain CMake has no Kconfig), so it needs no
+    # zcbor (the real CBOR-manifest reader is a Zephyr-only west module).
+    # The Yocto backend already compiles this file; baremetal didn't (#593).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model_loader.c
 )
 
 target_compile_definitions(alp_sdk PRIVATE

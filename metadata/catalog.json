@@ -784,6 +784,10 @@
       "script": "scripts/check_pin_conflicts.py"
     },
     {
+      "purpose": "Plain-CMake link-completeness gate (issue #593).",
+      "script": "scripts/check_plain_cmake_link_complete.py"
+    },
+    {
       "purpose": "CI gate: root public headers stay chip-neutral.",
       "script": "scripts/check_public_header_purity.py"
     },

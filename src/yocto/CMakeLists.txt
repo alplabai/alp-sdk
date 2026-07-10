@@ -46,6 +46,20 @@ if(DEFINED ZEPHYR_BASE)
     return()
 endif()
 
+# Some dispatcher/backend sources include their sibling headers
+# root-relative (e.g. src/update_log/engine.c's #include
+# "update_log/engine.h", src/backends/update_log/sw_tier.c's #include
+# "backends/update_log/update_log_ops.h") rather than relative to
+# their own directory, so `src/` must be on the include path -- the
+# same fix src/baremetal/CMakeLists.txt already carries (issue #598
+# precedent).  Anchored off CMAKE_CURRENT_SOURCE_DIR (this listfile's
+# own dir, src/yocto), not CMAKE_SOURCE_DIR, so an add_subdirectory()
+# consumer resolves alp-sdk's own src/ instead of its own tree's.
+get_filename_component(_alp_sdk_yocto_root "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    ABSOLUTE)
+target_include_directories(alp_sdk PRIVATE ${_alp_sdk_yocto_root}/src)
+unset(_alp_sdk_yocto_root)
+
 option(ALP_SDK_USE_DEEPX_DXM1
     "Wire the DEEPX DX-M1 backend hook (src/yocto/inference_deepx.cpp) for \
 <alp/inference.h>.  Enable on e1m-x-v2n-m1 builds.  Links the proprietary \
@@ -112,12 +126,11 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/counter/sw_fallback.c
     # Audio + RPC migrate onto the same registry / dispatcher pattern
     # (#33).  The dispatchers own the public alp_audio_in_*/alp_audio_out_*
-    # / alp_rpc_* symbols.  For audio, stub_backend.c is muted below via
-    # ALP_VENDOR_OVERRIDES_AUDIO_IN/OUT; rpc was never a stub class (no
-    # stub_backend.c rpc surface), so its old rpc_yocto.c direct-impl is
-    # simply dropped and rpc_dispatch.c is the sole owner -- no override
-    # macro is needed.  The sw_fallback backends are the portable
-    # priority-0 catch-alls; the
+    # / alp_rpc_* symbols; stub_backend.c is muted below via
+    # ALP_VENDOR_OVERRIDES_AUDIO_IN/OUT/RPC.  (stub_backend.c gained a
+    # bare-metal alp_rpc_* NOSUPPORT stub per #593 -- the mute keeps
+    # rpc_dispatch.c the sole owner here.)  The sw_fallback backends are
+    # the portable priority-0 catch-alls; the
     # real Linux backends (ALSA snd_pcm_* for audio, OpenAMP-userland
     # RPMsg for rpc) live in backends/<class>/yocto_drv.c and are added
     # in their existing gated blocks below (ALSA gate / open-amp gate).
@@ -160,6 +173,37 @@ target_sources(alp_sdk PRIVATE
     # yocto_drv.c backends of the classes above.
     ${CMAKE_CURRENT_SOURCE_DIR}/../gpu2d_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/gpu2d/sw_fallback.c
+    # DAC / DSP / TMU / SoC-info / Camera / Display / Power / update_log
+    # (#593): these classes already migrated onto the registry /
+    # dispatcher pattern for the baremetal backend
+    # (src/baremetal/CMakeLists.txt) but were never wired into Yocto,
+    # leaving alp_dac_*/alp_dsp_chain_*/alp_tmu_*/alp_soc_info_read/
+    # alp_soc_secure_fw_ping/alp_camera_capabilities/alp_display_blit/
+    # alp_display_capabilities/alp_display_get_caps/alp_power_capabilities/
+    # alp_power_profile_get/alp_power_profile_set/alp_update_log_* absent
+    # from libalp_sdk.a on Yocto despite being documented public API.
+    # Same portable dispatcher + sw_fallback / wildcard-stub pair as
+    # baremetal; none of these files touch a Zephyr or Linux-specific
+    # header, so they build unmodified here.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../dac_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dac/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dsp/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../soc_info_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/soc_info/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tmu_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/tmu/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../camera_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/camera/zephyr_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../display_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/display/zephyr_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../power_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/power/zephyr_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../update_log_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../update_log_boot_metadata.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/update_log/sw_tier.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../update_log/engine.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../update_log/sha256.c
     # The shared dispatchers call alp_z_set_last_error/clear (defined
     # Zephyr-side in src/zephyr/last_error.c, which the Yocto build does
     # not compile).  This shim forwards them onto the common last-error
@@ -211,6 +255,21 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_WIFI=1
     ALP_VENDOR_OVERRIDES_BLE=1
     ALP_VENDOR_OVERRIDES_GPU2D=1
+    # rpc_dispatch.c is also added unconditionally above and owns every
+    # alp_rpc_* symbol; mute stub_backend.c's rpc block in the same
+    # unconditional scope now that it carries one (#593/#607 fix --
+    # previously stub_backend.c had no rpc surface at all, so no mute
+    # was needed; adding the bare-metal rpc stub means Yocto now needs
+    # this override to avoid a duplicate-definition link error).
+    ALP_VENDOR_OVERRIDES_RPC=1
+    # Camera / Display / Power dispatchers are also added unconditionally
+    # above (#593); stub_backend.c's camera/display/power blocks must be
+    # muted in this same unconditional scope for the same reason as the
+    # classes above -- their dispatchers own the symbols regardless of
+    # which silicon backend (if any) is linked underneath.
+    ALP_VENDOR_OVERRIDES_CAMERA=1
+    ALP_VENDOR_OVERRIDES_DISPLAY=1
+    ALP_VENDOR_OVERRIDES_POWER=1
 )
 
 # v0.4: real Yocto peripheral wrappers binding against Linux
@@ -222,6 +281,27 @@ target_compile_definitions(alp_sdk PRIVATE
 # building plain-CMake on macOS/Windows still produce a link-clean
 # library against the stub peripheral surface.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Threads / ALSA / OpenAMP / Mosquitto / OpenSSL are implementation
+    # details of libalp_sdk's Linux userspace backends, not part of the
+    # public <alp/*> API surface.  When alp_sdk is a SHARED library its
+    # own link step already resolves these (they end up as its own
+    # DT_NEEDED entries), so re-declaring them PUBLIC just forces every
+    # downstream find_package(alp-sdk) consumer to separately locate
+    # Threads/ALSA/etc. themselves for no benefit -- and breaks the
+    # consumer entirely when one of these optional libs (OpenAMP,
+    # Mosquitto, OpenSSL) wasn't present when alp-sdk itself was built,
+    # since an installed CMake package can't re-run the same
+    # pkg_check_modules() this file just did (#607).  The STATIC
+    # add_subdirectory() embedded-consumer path is unaffected either
+    # way (PUBLIC is the correct, and only working, choice there: a
+    # static archive can't pull in its own dependent shared libs), so
+    # this stays PUBLIC when ALP_SDK_BUILD_SHARED is OFF.
+    if(ALP_SDK_BUILD_SHARED)
+        set(_alp_sdk_link_visibility PRIVATE)
+    else()
+        set(_alp_sdk_link_visibility PUBLIC)
+    endif()
+
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
@@ -257,8 +337,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # compile-tested on every Linux build so apps that don't pull in
         # OpenAMP still link cleanly.  The dispatcher + sw_fallback +
         # backend.c are pulled in unconditionally above; rpc_dispatch.c
-        # owns the public alp_rpc_* symbols (no stub_backend.c rpc stub
-        # exists, so no ALP_VENDOR_OVERRIDES_RPC mute is needed).
+        # owns the public alp_rpc_* symbols (stub_backend.c is muted via
+        # ALP_VENDOR_OVERRIDES_RPC in the unconditional block above).
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_drv.c
     )
     # Only the I2C/SPI/UART/GPIO wrappers are Linux-gated here; the
@@ -274,7 +354,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # other wrappers don't touch pthread today but linking the whole
     # alp_sdk target keeps consumer link lines simple.
     find_package(Threads REQUIRED)
-    target_link_libraries(alp_sdk PUBLIC Threads::Threads)
+    target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} Threads::Threads)
 
     # OpenAMP user-space libraries (libmetal + open-amp).  On Yocto
     # these come from meta-openamp; on plain Debian/Ubuntu install
@@ -289,7 +369,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             target_compile_definitions(alp_sdk PRIVATE
                 ALP_SDK_HAVE_OPENAMP_USERLAND=1
             )
-            target_link_libraries(alp_sdk PUBLIC PkgConfig::OPENAMP_USER)
+            target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::OPENAMP_USER)
         else()
             message(STATUS
                 "alp-sdk yocto: open-amp/libmetal not found via pkg-config; "
@@ -321,7 +401,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 # sw_fallback rather than failing to link.
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/mqtt/yocto_drv.c
             )
-            target_link_libraries(alp_sdk PUBLIC PkgConfig::MOSQUITTO)
+            target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::MOSQUITTO)
         else()
             message(STATUS
                 "alp-sdk yocto: libmosquitto not found via pkg-config; "
@@ -352,7 +432,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 # sw_fallback rather than failing to link.
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/security/yocto_drv.c
             )
-            target_link_libraries(alp_sdk PUBLIC PkgConfig::OPENSSL)
+            target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::OPENSSL)
         else()
             message(STATUS
                 "alp-sdk yocto: OpenSSL (libssl + libcrypto) not found via pkg-config; "
@@ -391,7 +471,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             # (ALP_VENDOR_OVERRIDES_AUDIO_IN/OUT are defined unconditionally
             # above -- audio_dispatch.c owns alp_audio_* whether or not ALSA is
             # present; this block only adds the real ALSA backend + link.)
-            target_link_libraries(alp_sdk PUBLIC PkgConfig::ALSA)
+            target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::ALSA)
         else()
             message(STATUS
                 "alp-sdk yocto: ALSA libasound not found via pkg-config; "
@@ -400,6 +480,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 "(Debian/Ubuntu) or the matching Yocto recipe to enable.")
         endif()
     endif()
+    unset(_alp_sdk_link_visibility)
 endif()
 
 # ------------------------------------------------------------------ #

@@ -112,7 +112,7 @@ alp-sdk/
 │   ├── gd32-bridge/                 # GD32G553 bridge firmware (V2N supervisor)
 │   └── cc3501e/                     # TI CC3501E Wi-Fi bridge firmware (AEN)
 ├── cmake/                           # find_package + Zephyr module helpers
-│   └── AlpSdkConfig.cmake.in
+│   └── alp-sdk-config.cmake.in
 ├── scripts/                         # CODEGEN + ORCHESTRATION
 │   ├── alp_orchestrate/             # board.yaml → per-core slice fan-out + manifest
 │   ├── alp_project.py               # per-slice Kconfig / cmake-args / DTS overlay emit
