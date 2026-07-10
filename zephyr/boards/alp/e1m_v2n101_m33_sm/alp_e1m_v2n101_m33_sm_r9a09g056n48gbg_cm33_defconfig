@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+CONFIG_XIP=n
+
+# CM33 serial console (sci0 = EVK "Pmod USB-UART") DISABLED on this board:
+# the only console is the A55's; sci0 is not wired as a CM33 console here, and
+# opening it faults on the floating RX (sci0 eri -> Zephyr fatal -> hang before
+# main()).  Re-enable all three (and sci0 in the dts) only with a Pmod attached.
+CONFIG_SERIAL=y
+CONFIG_CONSOLE=n
+CONFIG_UART_CONSOLE=n
+
+# On-module GD32G553 supervisor bridge transports
+CONFIG_SPI=y
+CONFIG_I2C=y

@@ -1813,7 +1813,7 @@
         },
         "m33_sm": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_v2n101_m33_sm",
+          "board": "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }

@@ -72,7 +72,12 @@ topology:
     toolchain: poky-glibc
   m33_sm:
     app: alp-stock-shim
-    board: alp_e1m_v2n101_m33_sm      # Zephyr board target
+    # Qualified Zephyr board target: the RZ/V2N SoC is multi-cluster
+    # (A55 + M33), so `west build -b` needs the <soc>/<cpucluster>
+    # qualifiers.  Zephyr models the die as the n48gbg variant (the
+    # n44/n48 delta is GPU/ISP/crypto fusing, devicetree-identical for
+    # the M33 + SPI/I2C).
+    board: alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33
     toolchain: arm-zephyr-eabi
 
 # Memory layout (SRAM banks + MRAM) is derived from the SoC variant
