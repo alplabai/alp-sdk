@@ -17,8 +17,8 @@
  *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
- * @par Driver status: [stub-impl] — config-write + RTD-read; full
- *   fault-state machine pending.
+ * @par Driver status: [complete-impl] — config-write + RTD-read with
+ *   fault-flag reporting.
  *
  * Datasheet: ADI (Maxim) MAX31865 (Rev 3, Aug 2015).
  */

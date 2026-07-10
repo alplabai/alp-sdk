@@ -16,6 +16,7 @@ on:
       - 'metadata/**'
       - 'examples/**/board.yaml'
       - 'include/alp/boards/**'
+      - 'include/alp/chips/**'
       - '.github/workflows/pr-metadata-validate.yml'
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
@@ -24,6 +25,7 @@ on:
       - 'scripts/check_emit_snapshots.py'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
+      - 'scripts/check_chip_header_status.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'tests/fixtures/emit-snapshots/**'
@@ -37,10 +39,12 @@ on:
       - 'metadata/**'
       - 'examples/**/board.yaml'
       - 'include/alp/boards/**'
+      - 'include/alp/chips/**'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
+      - 'scripts/check_chip_header_status.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
@@ -297,6 +301,9 @@ jobs:
 
       - name: Gate — chip driver <-> metadata manifest parity
         run: python3 scripts/check_chip_manifest_parity.py
+
+      - name: Gate — chip header driver-status labels match metadata
+        run: python3 scripts/check_chip_header_status.py
 
       # Validate every HiL smoke spec under tests/hil/ parses against
       # its board's _runner.yaml.  Cheap host-side check (no hardware
