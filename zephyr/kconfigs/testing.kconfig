@@ -49,3 +49,17 @@ config ALP_SDK_TESTING_UART
 	  any real or emulated UART controller.  The first
 	  <alp/testing/*> double whose read() path resolves a timeout
 	  against the virtual clock instead of ever blocking.
+
+config ALP_SDK_TESTING_CAN
+	bool "CAN test double (<alp/testing/can.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 CAN test-double backend
+	  (src/backends/can/testing_drv.c).  Lets a ztest drive
+	  alp_can_* through installed rx filters dispatched
+	  synchronously off an injected frame (immediate or deferred
+	  against the virtual clock, mirroring the GPIO double's
+	  edge_at), an injectable controller bus-error state
+	  (error-active/error-passive/bus-off), and TX read-back,
+	  without any real or emulated CAN controller.
