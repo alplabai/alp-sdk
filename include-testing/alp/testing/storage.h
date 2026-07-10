@@ -98,6 +98,17 @@
  *       @ref ALP_ERR_NOSUPPORT, matching every non-vendor-extension
  *       storage backend, including `sw_fallback.c`) -- there is no
  *       injection API for it here.
+ *
+ * @note Every @ref alp_storage_write on this double is immediately
+ *       durable -- @ref alp_storage_sync is a no-op that only honours an
+ *       armed @ref ALP_TESTING_STORAGE_OP_SYNC fault (`testing_drv.c`'s
+ *       `t_sync()` has no write-behind cache to flush). This double
+ *       therefore models power loss at write-BYTE granularity only (via
+ *       @ref alp_testing_storage_inject_power_loss_after) and cannot
+ *       express the "an unsynced write is lost on power loss, a synced
+ *       one survives" durability distinction that `<alp/storage.h>`'s
+ *       @ref alp_storage_sync documents -- a known v1 limitation of this
+ *       double, not of the portable API.
  */
 
 #ifndef ALP_TESTING_STORAGE_H

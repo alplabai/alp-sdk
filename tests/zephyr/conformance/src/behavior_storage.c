@@ -347,29 +347,50 @@ ZTEST(alp_testing_storage_behavior, test_fail_next_sync)
 #define POWER_LOSS_TEST_BYTES_WRITTEN 3u /* N: persisted before the simulated power loss */
 
 /* THE STORAGE-SPECIFIC MUST (issue #610 §2): a mid-write power loss
- * leaves a provably TORN write -- the persisted prefix matches the
- * payload, the rest does not, and alp_storage_write() itself surfaces
- * the documented power-loss/I/O status. */
+ * leaves a provably TORN write -- the persisted prefix matches the NEW
+ * payload, the untouched tail retains the PRIOR bytes (not zeroed, not
+ * overwritten), and alp_storage_write() itself surfaces the documented
+ * power-loss/I/O status.
+ *
+ * A region that was never written before reads back as fresh-zero
+ * regardless of whether an implementation actually leaves prior bytes
+ * untouched OR erroneously zeroes the torn tail -- either way the
+ * assertion "torn tail == 0" passes, so it does not distinguish the two.
+ * To make the "prior bytes untouched" property load-bearing, this test
+ * primes the region with a KNOWN non-zero pattern (0xAA) before arming
+ * the cut, writes a DIFFERENT payload (0x55) over it, and then asserts
+ * the torn tail equals the OLD 0xAA pattern -- not zero, and not the new
+ * payload's tail. */
 ZTEST(alp_testing_storage_behavior, test_power_loss_leaves_torn_write)
 {
-	const uint32_t storage_id                           = 49;
-	const uint8_t  payload[POWER_LOSS_TEST_PAYLOAD_LEN] = { 0xC0, 0xFF, 0xEE, 0x11,
-		                                                    0x22, 0x33, 0x44, 0x55 };
-	const size_t   torn_len = POWER_LOSS_TEST_PAYLOAD_LEN - POWER_LOSS_TEST_BYTES_WRITTEN;
+	const uint32_t storage_id = 49;
+	const size_t   len        = POWER_LOSS_TEST_PAYLOAD_LEN;
+	const size_t   n          = POWER_LOSS_TEST_BYTES_WRITTEN;
+	const size_t   torn_len   = len - n;
 
-	zassert_equal(alp_testing_storage_set_capacity(storage_id, sizeof(payload)),
-	              ALP_OK,
-	              "set_capacity failed");
-	zassert_equal(
-	    alp_testing_storage_inject_power_loss_after(storage_id, POWER_LOSS_TEST_BYTES_WRITTEN),
-	    ALP_OK,
-	    "inject_power_loss_after failed");
+	uint8_t old_pattern[POWER_LOSS_TEST_PAYLOAD_LEN];
+	uint8_t new_payload[POWER_LOSS_TEST_PAYLOAD_LEN];
+	memset(old_pattern, 0xAA, sizeof(old_pattern));
+	memset(new_payload, 0x55, sizeof(new_payload));
+
+	zassert_equal(alp_testing_storage_set_capacity(storage_id, len), ALP_OK, "set_capacity failed");
 
 	alp_storage_t *h = open_storage(storage_id);
 	zassert_not_null(h, "storage test double must open ANY instance");
 
-	/* M (sizeof(payload) == 8) > N (POWER_LOSS_TEST_BYTES_WRITTEN == 3). */
-	alp_status_t s = alp_storage_write(h, 0, payload, sizeof(payload));
+	/* Prime with a KNOWN non-zero pattern -- see the comment above. */
+	zassert_equal(alp_storage_write(h, 0, old_pattern, sizeof(old_pattern)),
+	              ALP_OK,
+	              "priming write() failed");
+
+	zassert_equal(alp_testing_storage_inject_power_loss_after(storage_id, n),
+	              ALP_OK,
+	              "inject_power_loss_after failed");
+
+	/* M (len == 8) > N (n == 3): write a DIFFERENT payload over the
+	 * primed region; the power-loss cut tears it after the first N
+	 * bytes. */
+	alp_status_t s = alp_storage_write(h, 0, new_payload, sizeof(new_payload));
 	zassert_equal(
 	    s, ALP_ERR_IO, "a power-loss-interrupted write must surface the documented ALP_ERR_IO");
 	zassert_true(status_in_enum(s), "status %d outside alp_status_t", (int)s);
@@ -382,39 +403,214 @@ ZTEST(alp_testing_storage_behavior, test_power_loss_leaves_torn_write)
 	    ALP_OK,
 	    "read_back failed");
 	zassert_mem_equal(persisted_prefix,
-	                  payload,
+	                  new_payload,
 	                  sizeof(persisted_prefix),
-	                  "the first bytes_written bytes of the payload MUST be persisted");
+	                  "the first bytes_written bytes of the NEW payload MUST be persisted");
 
 	uint8_t torn_tail[POWER_LOSS_TEST_PAYLOAD_LEN] = { 0 };
-	zassert_equal(alp_testing_storage_read_back(
-	                  storage_id, POWER_LOSS_TEST_BYTES_WRITTEN, torn_tail, torn_len),
+	zassert_equal(alp_testing_storage_read_back(storage_id, n, torn_tail, torn_len),
 	              ALP_OK,
 	              "read_back failed");
-	zassert_true(memcmp(torn_tail, &payload[POWER_LOSS_TEST_BYTES_WRITTEN], torn_len) != 0,
-	             "the remainder of the payload beyond bytes_written must NOT have been persisted "
-	             "(torn write) -- read_back matched the payload's tail exactly");
 
-	/* Fresh backing (never written before this call) is zero-filled --
-	 * confirms the unpersisted tail was left untouched, not garbage. */
-	for (size_t i = 0; i < torn_len; ++i) {
-		zassert_equal(torn_tail[i], 0, "unpersisted tail byte %zu must be the untouched 0 fill", i);
-	}
+	/* The load-bearing assertion: the torn tail must equal the OLD
+	 * pattern that was already there -- NOT zero, and NOT the new
+	 * payload's tail. An implementation that erroneously zeroed the
+	 * unpersisted tail (instead of leaving prior bytes untouched) would
+	 * pass a zero-only check identically; comparing against a known
+	 * non-zero prior value is what actually proves "untouched". */
+	zassert_mem_equal(torn_tail,
+	                  &old_pattern[n],
+	                  torn_len,
+	                  "the torn tail must retain the PRIOR bytes untouched, not be zeroed or "
+	                  "otherwise overwritten");
+	zassert_true(memcmp(torn_tail, &new_payload[n], torn_len) != 0,
+	             "the torn tail must NOT match the new payload's tail -- that would mean the "
+	             "write was not actually torn");
 
 	/* One-shot: the NEXT write is unaffected by the power-loss cut. */
-	zassert_equal(alp_storage_write(h, 0, payload, sizeof(payload)),
+	zassert_equal(alp_storage_write(h, 0, new_payload, sizeof(new_payload)),
 	              ALP_OK,
 	              "inject_power_loss_after must be one-shot");
 
-	uint8_t full_readback[sizeof(payload)] = { 0 };
+	uint8_t full_readback[POWER_LOSS_TEST_PAYLOAD_LEN] = { 0 };
 	zassert_equal(
 	    alp_testing_storage_read_back(storage_id, 0, full_readback, sizeof(full_readback)),
 	    ALP_OK,
 	    "read_back failed");
 	zassert_mem_equal(full_readback,
-	                  payload,
-	                  sizeof(payload),
+	                  new_payload,
+	                  sizeof(new_payload),
 	                  "the follow-up write must persist the WHOLE payload");
+
+	alp_storage_close(h);
+}
+
+/* Fix #2 (issue #610 §2 review follow-up): the torn-write test above
+ * only exercises offset 0, where "tear at offset+bytes_written" and
+ * "tear at bare bytes_written" are indistinguishable. Repeat at a
+ * NON-ZERO offset to prove the double uses offset+bytes_written, not a
+ * bare bytes_written, as the tear point. */
+ZTEST(alp_testing_storage_behavior, test_power_loss_leaves_torn_write_at_nonzero_offset)
+{
+	const uint32_t storage_id = 53;
+	const uint64_t offset     = 5u;
+	const size_t   len        = POWER_LOSS_TEST_PAYLOAD_LEN;
+	const size_t   n          = POWER_LOSS_TEST_BYTES_WRITTEN;
+	const size_t   torn_len   = len - n;
+
+	uint8_t old_pattern[POWER_LOSS_TEST_PAYLOAD_LEN];
+	uint8_t new_payload[POWER_LOSS_TEST_PAYLOAD_LEN];
+	memset(old_pattern, 0xAA, sizeof(old_pattern));
+	memset(new_payload, 0x55, sizeof(new_payload));
+
+	zassert_equal(
+	    alp_testing_storage_set_capacity(storage_id, offset + len), ALP_OK, "set_capacity failed");
+
+	alp_storage_t *h = open_storage(storage_id);
+	zassert_not_null(h, "storage test double must open ANY instance");
+
+	zassert_equal(alp_storage_write(h, offset, old_pattern, sizeof(old_pattern)),
+	              ALP_OK,
+	              "priming write() failed");
+
+	zassert_equal(alp_testing_storage_inject_power_loss_after(storage_id, n),
+	              ALP_OK,
+	              "inject_power_loss_after failed");
+
+	alp_status_t s = alp_storage_write(h, offset, new_payload, sizeof(new_payload));
+	zassert_equal(s,
+	              ALP_ERR_IO,
+	              "a power-loss-interrupted write at a non-zero offset must still surface "
+	              "ALP_ERR_IO");
+
+	uint8_t persisted_prefix[POWER_LOSS_TEST_BYTES_WRITTEN];
+	zassert_equal(alp_testing_storage_read_back(
+	                  storage_id, offset, persisted_prefix, sizeof(persisted_prefix)),
+	              ALP_OK,
+	              "read_back failed");
+	zassert_mem_equal(persisted_prefix,
+	                  new_payload,
+	                  sizeof(persisted_prefix),
+	                  "the persisted prefix must be at [offset, offset+bytes_written) -- the tear "
+	                  "point must be offset+bytes_written, not bare bytes_written");
+
+	uint8_t torn_tail[POWER_LOSS_TEST_PAYLOAD_LEN] = { 0 };
+	zassert_equal(alp_testing_storage_read_back(storage_id, offset + n, torn_tail, torn_len),
+	              ALP_OK,
+	              "read_back failed");
+	zassert_mem_equal(torn_tail,
+	                  &old_pattern[n],
+	                  torn_len,
+	                  "the torn tail at [offset+bytes_written, offset+len) must retain the PRIOR "
+	                  "bytes untouched");
+
+	alp_storage_close(h);
+}
+
+/* Fix #3a (issue #610 §2 review follow-up): double-arm ordering. An
+ * armed fail_next(OP_WRITE, ...) fires BEFORE an armed power-loss cut
+ * (see the @note on alp_testing_storage_inject_power_loss_after() in
+ * <alp/testing/storage.h> and t_write()'s check order in
+ * testing_drv.c) -- the fail_next branch returns before ever touching
+ * the backing buffer, so nothing persists, and the power-loss cut
+ * (untouched by the failed write) stays armed for the NEXT write. */
+ZTEST(alp_testing_storage_behavior, test_fail_next_write_fires_before_armed_power_loss)
+{
+	const uint32_t storage_id                           = 54;
+	const uint8_t  payload[POWER_LOSS_TEST_PAYLOAD_LEN] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	const size_t   n                                    = POWER_LOSS_TEST_BYTES_WRITTEN;
+
+	zassert_equal(alp_testing_storage_set_capacity(storage_id, sizeof(payload)),
+	              ALP_OK,
+	              "set_capacity failed");
+
+	alp_storage_t *h = open_storage(storage_id);
+	zassert_not_null(h, "storage test double must open ANY instance");
+
+	zassert_equal(
+	    alp_testing_storage_fail_next(storage_id, ALP_TESTING_STORAGE_OP_WRITE, ALP_ERR_BUSY),
+	    ALP_OK,
+	    "fail_next failed");
+	zassert_equal(alp_testing_storage_inject_power_loss_after(storage_id, n),
+	              ALP_OK,
+	              "inject_power_loss_after failed");
+
+	alp_status_t s1 = alp_storage_write(h, 0, payload, sizeof(payload));
+	zassert_equal(
+	    s1, ALP_ERR_BUSY, "an armed fail_next(OP_WRITE) must fire before an armed power-loss cut");
+
+	uint8_t rb[POWER_LOSS_TEST_PAYLOAD_LEN] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+		                                        0xFFu, 0xFFu, 0xFFu, 0xFFu };
+	zassert_equal(
+	    alp_testing_storage_read_back(storage_id, 0, rb, sizeof(rb)), ALP_OK, "read_back failed");
+	for (size_t i = 0; i < sizeof(rb); ++i) {
+		zassert_equal(
+		    rb[i],
+		    0,
+		    "the fail_next()-rejected write must not have persisted any bytes, got 0x%02x at %zu",
+		    rb[i],
+		    i);
+	}
+
+	/* fail_next was one-shot and is now disarmed; the power-loss cut
+	 * armed earlier was untouched by the failed write and fires on THIS
+	 * write instead. */
+	alp_status_t s2 = alp_storage_write(h, 0, payload, sizeof(payload));
+	zassert_equal(s2,
+	              ALP_ERR_IO,
+	              "the power-loss cut armed before the failed write must still be armed for the "
+	              "next write");
+
+	uint8_t persisted_prefix[POWER_LOSS_TEST_BYTES_WRITTEN];
+	zassert_equal(
+	    alp_testing_storage_read_back(storage_id, 0, persisted_prefix, sizeof(persisted_prefix)),
+	    ALP_OK,
+	    "read_back failed");
+	zassert_mem_equal(persisted_prefix,
+	                  payload,
+	                  sizeof(persisted_prefix),
+	                  "the deferred power-loss cut must tear this second write");
+
+	alp_storage_close(h);
+}
+
+/* Fix #3b (issue #610 §2 review follow-up): bytes_written >= len clamps
+ * to len -- the WHOLE payload persists (see the @param doc on
+ * alp_testing_storage_inject_power_loss_after() in
+ * <alp/testing/storage.h>) -- but the write() call still returns
+ * ALP_ERR_IO, modelling a power loss that occurred after the last byte
+ * was latched but before write() could report success. */
+ZTEST(alp_testing_storage_behavior, test_power_loss_bytes_written_ge_len_clamps_but_still_errors)
+{
+	const uint32_t storage_id = 55;
+	const uint8_t  payload[]  = { 0x10, 0x20, 0x30, 0x40 };
+
+	zassert_equal(alp_testing_storage_set_capacity(storage_id, sizeof(payload)),
+	              ALP_OK,
+	              "set_capacity failed");
+
+	alp_storage_t *h = open_storage(storage_id);
+	zassert_not_null(h, "storage test double must open ANY instance");
+
+	/* bytes_written (len + 100) > len (4). */
+	zassert_equal(alp_testing_storage_inject_power_loss_after(storage_id, sizeof(payload) + 100u),
+	              ALP_OK,
+	              "inject_power_loss_after failed");
+
+	alp_status_t s = alp_storage_write(h, 0, payload, sizeof(payload));
+	zassert_equal(s,
+	              ALP_ERR_IO,
+	              "bytes_written >= len must still surface ALP_ERR_IO -- write() itself never got "
+	              "to report success");
+
+	uint8_t rb[sizeof(payload)] = { 0 };
+	zassert_equal(
+	    alp_testing_storage_read_back(storage_id, 0, rb, sizeof(rb)), ALP_OK, "read_back failed");
+	zassert_mem_equal(rb,
+	                  payload,
+	                  sizeof(rb),
+	                  "bytes_written >= len must clamp to len -- the WHOLE payload is persisted "
+	                  "despite the ALP_ERR_IO return");
 
 	alp_storage_close(h);
 }
