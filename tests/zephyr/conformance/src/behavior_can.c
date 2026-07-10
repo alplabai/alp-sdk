@@ -393,3 +393,46 @@ ZTEST(alp_testing_can_behavior, test_reset_all_frees_side_state)
 
 	alp_can_close(h2);
 }
+
+/* #610 review (test-completeness): reset_all() must free every
+ * deferred RX frame that was scheduled but never fired (advance_ms()
+ * never reached it) -- mirrors behavior_gpio.c's
+ * test_reset_all_frees_unfired_deferred_edges, but this double's own
+ * reset_deferred_rx() hook (src/backends/can/testing_drv.c) was never
+ * itself exercised by a test; only GPIO's equivalent was. Without that
+ * hook clearing g_deferred, this pool (capacity
+ * ALP_TESTING_CAN_MAX_DEFERRED == 8) leaks one slot per unfired
+ * inject_rx_at() across every alp_testing_reset_all(). */
+ZTEST(alp_testing_can_behavior, test_reset_all_frees_unfired_deferred_rx)
+{
+	const uint32_t bus_id = 9;
+
+	alp_can_frame_t frame = { 0 };
+	frame.id              = 0x900;
+	frame.payload_len     = 0;
+
+	/* Fill the deferred-RX pool without ever advancing the clock, so
+	 * nothing fires and nothing frees itself the normal way. */
+	for (uint32_t i = 0; i < 8; ++i) {
+		zassert_equal(alp_testing_can_inject_rx_at(bus_id, 100 + i, &frame),
+		              ALP_OK,
+		              "inject_rx_at() #%u failed while filling the deferred pool",
+		              i);
+	}
+	/* Sanity: prove the pool really is exhausted before the reset --
+	 * otherwise the leak this test guards against could go unnoticed. */
+	zassert_equal(alp_testing_can_inject_rx_at(bus_id, 200, &frame),
+	              ALP_ERR_NOMEM,
+	              "deferred-RX pool should already be full before reset_all()");
+
+	alp_testing_reset_all();
+
+	/* This is the fix under test: every slot must be free again, so
+	 * refilling the pool from scratch succeeds start to finish. */
+	for (uint32_t i = 0; i < 8; ++i) {
+		zassert_equal(alp_testing_can_inject_rx_at(bus_id, 100 + i, &frame),
+		              ALP_OK,
+		              "inject_rx_at() #%u failed after reset_all() -- deferred-RX pool leaked",
+		              i);
+	}
+}

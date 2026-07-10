@@ -289,3 +289,41 @@ ZTEST(alp_testing_i2c_behavior, test_reset_all_frees_side_state)
 
 	alp_i2c_close(h);
 }
+
+/* #610 review (test-completeness): the I2C test double models the
+ * OTHER device on the bus, not this MCU's own target (slave) mode --
+ * <alp/peripheral.h>'s alp_i2c_target_open() doc and this double's own
+ * header comment both say target_open/target_close are left NULL so
+ * the dispatcher's own ALP_ERR_NOSUPPORT degrade path fires, but no
+ * test asserted it. Pin it here. */
+static void stub_on_write(uint8_t byte, void *user)
+{
+	ARG_UNUSED(byte);
+	ARG_UNUSED(user);
+}
+
+static alp_status_t stub_on_read(uint8_t *byte, void *user)
+{
+	ARG_UNUSED(user);
+	*byte = 0;
+	return ALP_OK;
+}
+
+ZTEST(alp_testing_i2c_behavior, test_target_open_is_nosupport_on_this_double)
+{
+	const uint32_t bus_id = 26;
+
+	alp_i2c_target_config_t cfg = ALP_I2C_TARGET_CONFIG_DEFAULT(bus_id);
+	cfg.own_addr_7bit           = 0x50;
+	cfg.on_write                = stub_on_write;
+	cfg.on_read                 = stub_on_read;
+
+	alp_i2c_target_t *tgt = alp_i2c_target_open(&cfg);
+	zassert_is_null(tgt,
+	                "target_open() must fail on this double -- it models the OTHER device, "
+	                "not this MCU's target mode");
+	zassert_equal(alp_last_error(),
+	              ALP_ERR_NOSUPPORT,
+	              "target_open() failure must surface ALP_ERR_NOSUPPORT (target_open left NULL "
+	              "in this double's ops table)");
+}
