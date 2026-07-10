@@ -1386,12 +1386,12 @@
           "hash": "4a2ce1b68a43f910",
           "value": "(id)"
         },
-        "ALP_CAN_MAX_DLC_CLASSIC": {
-          "hash": "0bcbd63b336d2595",
+        "ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC": {
+          "hash": "daba941eb46a3ff5",
           "value": "8"
         },
-        "ALP_CAN_MAX_DLC_FD": {
-          "hash": "4c148452abc24a14",
+        "ALP_CAN_MAX_PAYLOAD_BYTES_FD": {
+          "hash": "3321a8f05f76cd5e",
           "value": "64"
         }
       },
