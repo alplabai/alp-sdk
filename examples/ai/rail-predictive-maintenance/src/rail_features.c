@@ -9,9 +9,39 @@
 #include <math.h>
 #include <string.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
+/*
+ * SPECTRAL + STATISTICAL MATH -- library-backed, not hand-rolled.
+ * ---------------------------------------------------------------
+ * This example deliberately does NOT re-derive an FFT or the moment
+ * statistics by hand.  Two library surfaces do the numeric work, and
+ * the SAME source builds for native_sim and the Cortex-M55 alike:
+ *
+ *   1. The FFT goes through the portable <alp/dsp.h> chain API.  Its
+ *      backend runs ARM CMSIS-DSP (arm_rfft_fast_f32, Helium-vectorised)
+ *      on the M55, a hardware DSP block where the SoM has one, and a
+ *      portable-C radix-2 fallback under native_sim -- selected by the
+ *      backend registry, not an #ifdef here.  We call the alp wrapper
+ *      (not arm_rfft_* directly) because alp-sdk SHIPS a portable FFT
+ *      surface: keeping the example on it lets the identical source run
+ *      on the V2N (A55 + DRP-AI) and NXP paths, which have no CMSIS-M.
+ *
+ *   2. The scalar window statistics (mean, RMS, abs-peak) call ARM
+ *      CMSIS-DSP arm_*_f32 kernels DIRECTLY -- alp-sdk has no portable
+ *      scalar-stats surface to wrap, and these kernels are the idiomatic
+ *      accelerated path on Cortex-M.  They are guarded by __has_include
+ *      with a portable-C fallback so the native_sim gate still builds.
+ */
+#if defined(__has_include)
+#if __has_include("arm_math.h")
+#include "arm_math.h"
+#define RAIL_HAS_CMSIS_DSP 1
 #endif
+#endif
+#ifndef RAIL_HAS_CMSIS_DSP
+#define RAIL_HAS_CMSIS_DSP 0
+#endif
+
+#include <alp/dsp.h>
 
 /*
  * rail_feat_state_reset
@@ -55,146 +85,6 @@ bool rail_feat_window_full(const struct rail_feat_state *st)
 }
 
 /*
- * fft_radix2 -- in-place iterative radix-2 DIT Cooley-Tukey FFT.
- *
- * MATHEMATICAL BACKGROUND
- * -----------------------
- * The N-point Discrete Fourier Transform is defined as:
- *
- *   X[k] = SUM_{n=0}^{N-1} x[n] * W_N^{nk},   W_N = e^{-j*2*pi/N}
- *
- * Direct evaluation of all N output bins costs O(N^2) complex
- * multiplications.  The Cooley-Tukey factorisation cuts this to
- * O(N * log2(N)) by exploiting the half-cycle symmetry of the twiddle
- * factors:
- *
- *   W_N^{k + N/2} = -W_N^k   (180-degree phase shift = sign flip)
- *
- * This lets each N-point DFT be split into two N/2-point DFTs and
- * recombined with one butterfly operation per output pair.
- *
- * DECIMATION-IN-TIME (DIT) VARIANT
- * ----------------------------------
- * DIT splits the input by even/odd index at each level of recursion.
- * The recursion is unrolled into log2(N) sequential butterfly passes
- * over the full array (iterative Gentleman-Sande formulation), which
- * avoids all recursive stack frames -- important for the M55 default
- * stack size.
- *
- * For N = RAIL_WINDOW_N = 256: log2(256) = 8 butterfly passes.
- *
- * PARAMETERS
- *   re[0..n-1]  real parts on entry (time-domain signal); on return,
- *               the real parts of X[0..n-1].
- *   im[0..n-1]  imaginary parts on entry (zero for a real signal); on
- *               return, the imaginary parts of X[0..n-1].
- *   n           transform length; MUST be a power of 2.
- */
-/* In-place iterative radix-2 FFT, N = RAIL_WINDOW_N, re/im length N. */
-static void fft_radix2(float *re, float *im, int n)
-{
-	/*
-	 * STEP 1: Bit-reversal permutation.
-	 *
-	 * DIT Cooley-Tukey requires the input in bit-reversed index order
-	 * before the butterfly passes begin.  Example for N = 8:
-	 *
-	 *   natural order:  0  1  2  3  4  5  6  7
-	 *   bit-reversed:   0  4  2  6  1  5  3  7
-	 *
-	 * For N = 256 (8-bit index), index 3 (0000 0011b) maps to 192
-	 * (1100 0000b).
-	 *
-	 * The loop maintains j as the running bit-reversal of i using a
-	 * carry-propagation trick (no lookup table):
-	 *   - 'bit' starts at the MSB of the n-element index space.
-	 *   - While j has 'bit' set: clear it, shift 'bit' right (propagate
-	 *     the carry downward through the reversed index representation).
-	 *   - Finally set 'bit' in j to advance it to bit_reverse(i+1).
-	 * Swapping re[i] with re[j] (and im[i] with im[j]) only when i < j
-	 * guarantees each pair is exchanged exactly once.
-	 */
-	/* Bit-reversal permutation. */
-	for (int i = 1, j = 0; i < n; i++) {
-		int bit = n >> 1;
-		for (; j & bit; bit >>= 1) {
-			j ^= bit;
-		}
-		j ^= bit;
-		if (i < j) {
-			float tr = re[i];
-			re[i]    = re[j];
-			re[j]    = tr;
-			float ti = im[i];
-			im[i]    = im[j];
-			im[j]    = ti;
-		}
-	}
-	/*
-	 * STEP 2: Butterfly passes (stages s = 1 .. log2(n)).
-	 *
-	 * At stage s (len = 2^s), the array is partitioned into n/len
-	 * blocks of len elements each.  Each block is the result of
-	 * combining two adjacent DFTs of size len/2 (already computed in
-	 * previous stages) into one DFT of size len using the radix-2
-	 * butterfly for k = 0 .. len/2 - 1:
-	 *
-	 *   A'[k] = A[k] + W_len^k * B[k]          (upper output)
-	 *   B'[k] = A[k] - W_len^k * B[k]          (lower output)
-	 *
-	 * where A and B are the lower and upper half of the block, and
-	 * W_len^k = e^{-j*2*pi*k/len} is the twiddle factor for bin k.
-	 *
-	 * TWIDDLE RECURRENCE
-	 * ------------------
-	 * Calling cosf/sinf inside the inner butterfly loop is expensive
-	 * (on M55 without an FP sin/cos instruction each call is ~50+
-	 * cycles).  Instead, the unit-circle phasor [wr + j*wi] is
-	 * stepped by one angular increment per butterfly via complex
-	 * multiplication by the per-stage base phasor:
-	 *
-	 *   [wlr + j*wli] = [cos(-2*pi/len), sin(-2*pi/len)]
-	 *
-	 * Recurrence:
-	 *   wr' = wr*wlr - wi*wli
-	 *   wi' = wr*wli + wi*wlr
-	 *
-	 * [wlr, wli] is computed once per stage with cosf/sinf.  Over
-	 * 128 steps (the largest half-block at N=256) the accumulated
-	 * rounding error stays below 1-2 ULP.
-	 */
-	for (int len = 2; len <= n; len <<= 1) {
-		float ang = -2.0f * (float)M_PI / (float)len;
-		float wlr = cosf(ang);
-		float wli = sinf(ang);
-		for (int i = 0; i < n; i += len) {
-			float wr = 1.0f, wi = 0.0f;
-			for (int k = 0; k < len / 2; k++) {
-				/*
-				 * Butterfly: a and b are the lower/upper indices.
-				 *   tr = real(W*B[k]) = wr*re[b] - wi*im[b]
-				 *   ti = imag(W*B[k]) = wr*im[b] + wi*re[b]
-				 * Then:  A'[k] = A[k] + W*B[k]  (overwrite re[a])
-				 *        B'[k] = A[k] - W*B[k]  (overwrite re[b])
-				 */
-				int   a  = i + k;
-				int   b  = i + k + len / 2;
-				float tr = wr * re[b] - wi * im[b];
-				float ti = wr * im[b] + wi * re[b];
-				re[b]    = re[a] - tr;
-				im[b]    = im[a] - ti;
-				re[a] += tr;
-				im[a] += ti;
-				/* Advance twiddle phasor by one angular step. */
-				float nwr = wr * wlr - wi * wli;
-				wi        = wr * wli + wi * wlr;
-				wr        = nwr;
-			}
-		}
-	}
-}
-
-/*
  * rail_feat_extract -- reduce one vibration window to a feature vector.
  *
  * PIPELINE OVERVIEW
@@ -222,79 +112,111 @@ void rail_feat_extract(const struct rail_feat_state *st,
 		return;
 	}
 
-	/* Mean (DC) removal. */
+	/*
+	 * MEAN-CENTRE THE WINDOW (shared by the stats AND the FFT).
+	 *
+	 * xc[i] = sample[i] - mean is the AC (vibration) component with the
+	 * DC bias (gravity, sensor offset) removed.  The tail [n, N) is
+	 * zero-padded so the fixed-size FFT can run on a short window;
+	 * zero-padding adds no spectral energy, it only interpolates the
+	 * spectrum to finer bin spacing.  xc is static (single sensor
+	 * thread, no re-entrancy) to keep a 1 kB buffer off the stack.
+	 */
+	static float xc[RAIL_WINDOW_N];
+	float        peak;
+	float        var;
+
+#if RAIL_HAS_CMSIS_DSP
+	/*
+	 * CMSIS-DSP path (Cortex-M55: Helium-vectorised kernels).
+	 * arm_mean_f32 / arm_offset_f32 / arm_rms_f32 / arm_absmax_f32 are
+	 * the idiomatic accelerated primitives; alp-sdk has no portable
+	 * scalar-stats surface to wrap, so we call them directly.
+	 */
+	float mean;
+	arm_mean_f32(st->samples, (uint32_t)n, &mean);
+	arm_offset_f32(st->samples, -mean, xc, (uint32_t)n);
+
+	uint32_t peak_idx;
+	arm_rms_f32(xc, (uint32_t)n, &out->rms); /* rms = sqrt(mean(xc^2))    */
+	arm_absmax_f32(xc, (uint32_t)n, &peak, &peak_idx);
+	var = out->rms * out->rms; /* mean(xc)=0 => var = rms^2  */
+#else
+	/* Portable-C fallback (native_sim, or any target without CMSIS-DSP). */
 	float mean = 0.0f;
 	for (int i = 0; i < n; i++) {
 		mean += st->samples[i];
 	}
 	mean /= (float)n;
 
-	/*
-	 * TIME-DOMAIN STATISTICS
-	 * ----------------------
-	 *
-	 * All statistics operate on x[i] = sample[i] - mean, i.e. the
-	 * AC (vibration) component with the DC bias removed.
-	 *
-	 * RMS (root-mean-square)
-	 *   rms = sqrt( (1/n) * SUM x[i]^2 ) = sqrt(E[x^2])
-	 *   Measures broadband vibration energy.  For a pure sine of
-	 *   amplitude A: rms = A / sqrt(2) ~= 0.707 * A.  Used as the
-	 *   primary energy indicator for ROUGH_RCF classification.
-	 *
-	 * Crest factor  (CF = peak / rms)
-	 *   For band-limited Gaussian noise CF ~= 3-4.  A single-cycle
-	 *   impulse (wheel flat, joint impact) drives CF to 10-20 because
-	 *   the transient spike inflates peak far more than RMS, which is
-	 *   averaged over the whole window.  Guard: rms < 1e-9 clamps CF
-	 *   to 0 to prevent division by a near-zero denominator.
-	 *
-	 * Kurtosis  (K = E[x^4] / E[x^2]^2)
-	 *   The 4th standardised central moment.  Gaussian noise gives
-	 *   K ~= 3 (mesokurtic).  Impulsive events push K well above 5
-	 *   because the 4th power amplifies rare large deviations far
-	 *   more than the variance term in the denominator.  Used with
-	 *   crest factor as the dual criterion for JOINT_WELD detection.
-	 *   Guard: var < 1e-12 (zero signal) clamps K to 0.
-	 */
-	/* Time-domain moments: RMS, peak, kurtosis. */
-	float sum2 = 0.0f, peak = 0.0f, sum4 = 0.0f;
+	float sum2 = 0.0f;
+	peak       = 0.0f;
 	for (int i = 0; i < n; i++) {
-		float x  = st->samples[i] - mean;
-		float ax = fabsf(x);
-		sum2 += x * x;
-		sum4 += x * x * x * x;
+		xc[i]    = st->samples[i] - mean;
+		float ax = fabsf(xc[i]);
+		sum2 += xc[i] * xc[i];
 		if (ax > peak) {
 			peak = ax;
 		}
 	}
-	float var         = sum2 / (float)n;
-	out->rms          = sqrtf(var);
-	out->crest_factor = (out->rms > 1e-9f) ? (peak / out->rms) : 0.0f;
-	out->kurtosis     = (var > 1e-12f) ? ((sum4 / (float)n) / (var * var)) : 0.0f;
+	var      = sum2 / (float)n;
+	out->rms = sqrtf(var);
+#endif
+	for (int i = n; i < RAIL_WINDOW_N; i++) {
+		xc[i] = 0.0f; /* zero-pad the FFT tail on a short window */
+	}
 
 	/*
-	 * SPECTRAL ANALYSIS
-	 * -----------------
+	 * TIME-DOMAIN FEATURES derived from the centred window:
 	 *
-	 * The FFT always runs on RAIL_WINDOW_N = 256 points.  If the
-	 * window holds fewer than 256 samples (session edge or partial
-	 * window), the remaining entries are zero-padded.  Zero-padding
-	 * does not add spectral energy; it refines the frequency resolution
-	 * by interpolating the existing spectrum to finer bin spacing.
-	 *
-	 * Static local buffers: feature extraction is called from a single
-	 * sensor processing thread; no re-entrancy, so static is safe and
-	 * avoids a 2 kB VLA on the call stack.
+	 *   Crest factor (peak/RMS) -- for band-limited Gaussian noise
+	 *     CF ~= 3-4; a single-cycle impulse (wheel flat, joint impact)
+	 *     drives CF to 10-20.  Guard rms < 1e-9 clamps CF to 0.
+	 *   Kurtosis (K = E[x^4]/E[x^2]^2) -- the 4th standardised moment;
+	 *     Gaussian noise gives K ~= 3, impulsive events push K past 5.
+	 *     CMSIS-DSP ships no 4th-moment kernel, so the sum-of-4th-powers
+	 *     stays a portable loop over xc.  Guard var < 1e-12 clamps K to 0.
 	 */
-	/* Spectrum over a fixed RAIL_WINDOW_N FFT (zero-pad a short window). */
-	static float re[RAIL_WINDOW_N];
-	static float im[RAIL_WINDOW_N];
-	for (int i = 0; i < RAIL_WINDOW_N; i++) {
-		re[i] = (i < n) ? (st->samples[i] - mean) : 0.0f;
-		im[i] = 0.0f;
+	out->crest_factor = (out->rms > 1e-9f) ? (peak / out->rms) : 0.0f;
+	float sum4        = 0.0f;
+	for (int i = 0; i < n; i++) {
+		float x2 = xc[i] * xc[i];
+		sum4 += x2 * x2;
 	}
-	fft_radix2(re, im, RAIL_WINDOW_N);
+	out->kurtosis = (var > 1e-12f) ? ((sum4 / (float)n) / (var * var)) : 0.0f;
+
+	/*
+	 * SPECTRUM via the portable <alp/dsp.h> chain (NOT a hand-rolled FFT).
+	 * ------------------------------------------------------------------
+	 * A single ALP_DSP_STAGE_FFT (rectangular, no window) transforms the
+	 * centred window to magnitude bins.  The backend runs CMSIS-DSP
+	 * arm_rfft_fast_f32 on the M55 and a portable-C radix-2 FFT under
+	 * native_sim -- the example source is identical either way.
+	 *
+	 * The chain consumes int16 samples (the accelerometer's native ADC
+	 * format).  We scale the float window to fill the int16 range before
+	 * feeding it: the absolute scale is irrelevant here because every
+	 * downstream spectral feature -- the dominant bin (an argmax) and the
+	 * normalised band energies -- is scale-invariant.
+	 */
+	static int16_t samp_q15[RAIL_WINDOW_N];
+	float          scale = (peak > 1e-9f) ? (30000.0f / peak) : 0.0f;
+	for (int i = 0; i < RAIL_WINDOW_N; i++) {
+		samp_q15[i] = (int16_t)lrintf(xc[i] * scale);
+	}
+
+	static float    mag[RAIL_WINDOW_N];
+	alp_dsp_stage_t stages[] = {
+		{ .kind  = ALP_DSP_STAGE_FFT,
+		  .u.fft = { .n_points = RAIL_WINDOW_N, .output_format = ALP_DSP_FFT_OUTPUT_MAGNITUDE } },
+	};
+	alp_dsp_chain_t *chain = alp_dsp_chain_open(stages, 1u);
+	size_t           got   = 0;
+	memset(mag, 0, sizeof(mag));
+	if (chain != NULL) {
+		(void)alp_dsp_chain_apply_bins(chain, samp_q15, RAIL_WINDOW_N, mag, RAIL_WINDOW_N, &got);
+		alp_dsp_chain_close(chain);
+	}
 
 	/*
 	 * DOMINANT FREQUENCY BIN
@@ -316,7 +238,7 @@ void rail_feat_extract(const struct rail_feat_state *st,
 	int       dom_bin = 1;
 	float     dom_val = -1.0f;
 	for (int k = 0; k < half; k++) {
-		mag2[k] = re[k] * re[k] + im[k] * im[k];
+		mag2[k] = mag[k] * mag[k];         /* magnitude-squared (power) per bin */
 		if (k >= 1 && mag2[k] > dom_val) { /* skip DC bin 0 */
 			dom_val = mag2[k];
 			dom_bin = k;

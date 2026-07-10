@@ -2,9 +2,12 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * motion_features -- pure-C windowed accel+gyro feature extraction for the
- * wearable activity / fall example.  Arch-neutral (stdint/math only): builds
- * for native_sim and the Cortex-M55 alike; host-unit-tested.
+ * motion_features -- windowed accel+gyro feature extraction for the wearable
+ * activity / fall example.  Arch-neutral: the public API here is stdint/math
+ * only, and the implementation's CMSIS-DSP acceleration (magnitude-series
+ * stats, jerk RMS, FFT via <alp/dsp.h>) is __has_include-guarded with a
+ * portable-C fallback, so the same source builds for native_sim and the
+ * Cortex-M55 alike; host-unit-tested.
  *
  * Usage pattern (per 2.56 s window at 100 Hz):
  *

@@ -9,9 +9,39 @@
 #include <math.h>
 #include <string.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
+/*
+ * SPECTRAL + STATISTICAL MATH -- library-backed, not hand-rolled.
+ * ---------------------------------------------------------------
+ * This example deliberately does NOT re-derive an FFT or the time-domain
+ * moment statistics by hand.  Two library surfaces do the numeric work,
+ * and the SAME source builds for native_sim and the Cortex-M55 alike:
+ *
+ *   1. The FFT goes through the portable <alp/dsp.h> chain API.  Its
+ *      backend runs ARM CMSIS-DSP (arm_rfft_fast_f32, Helium-vectorised)
+ *      on the M55, a hardware DSP block where the SoM has one, and a
+ *      portable-C radix-2 fallback under native_sim -- selected by the
+ *      backend registry, not an #ifdef here.  We call the alp wrapper
+ *      (not arm_rfft_* directly) because alp-sdk SHIPS a portable FFT
+ *      surface: keeping the example on it lets the identical source run
+ *      on the V2N (A55 + DRP-AI) and NXP paths, which have no CMSIS-M.
+ *
+ *   2. The scalar window statistics (mean, RMS, abs-peak) call ARM
+ *      CMSIS-DSP arm_*_f32 kernels DIRECTLY -- alp-sdk has no portable
+ *      scalar-stats surface to wrap, and these kernels are the idiomatic
+ *      accelerated path on Cortex-M.  They are guarded by __has_include
+ *      with a portable-C fallback so the native_sim gate still builds.
+ */
+#if defined(__has_include)
+#if __has_include("arm_math.h")
+#include "arm_math.h"
+#define ACO_HAS_CMSIS_DSP 1
 #endif
+#endif
+#ifndef ACO_HAS_CMSIS_DSP
+#define ACO_HAS_CMSIS_DSP 0
+#endif
+
+#include <alp/dsp.h>
 
 /* ---------------------------------------------------------------------------
  * Frame accumulator helpers.
@@ -37,91 +67,6 @@ void aco_frame_push(struct aco_frame_state *st, float sample)
 bool aco_frame_full(const struct aco_frame_state *st)
 {
 	return st->count >= ACO_FRAME_N;
-}
-
-/* ---------------------------------------------------------------------------
- * fft_radix2 -- in-place iterative Cooley-Tukey DIT (decimation-in-time) FFT.
- *
- * Prerequisites: n must be a power of two; re[] and im[] hold the real and
- * imaginary parts on entry and the complex DFT spectrum on exit.
- *
- * The algorithm consists of two sequential passes:
- *
- * PASS 1 -- Bit-reversal permutation.
- *   Cooley-Tukey DIT requires the input in bit-reversed index order before
- *   the butterfly stages begin.  The permutation is computed in-place with a
- *   single O(n) scan using a second index j that tracks the bit-reversed
- *   counterpart of i.  j is advanced with the standard Gray-code trick:
- *   walk a bitmask from the MSB downward, XOR-clearing each set bit in j
- *   until the first unset bit is found, then XOR-set it.  Whenever i < j the
- *   elements at those positions are swapped (each pair is touched once).
- *
- * PASS 2 -- Butterfly stages (log2(n) passes, stage width 'len').
- *   Each stage decomposes the DFT of length 'len' into two DFTs of length
- *   'len/2'.  For butterfly index k within a group starting at i:
- *
- *       a = i + k,   b = i + k + len/2
- *       T = W^k * X[b]           (complex multiply by twiddle factor)
- *       X[b] = X[a] - T
- *       X[a] = X[a] + T
- *
- *   where W^k = exp(-j * 2*pi*k / len).  Instead of calling cosf/sinf for
- *   every butterfly, the twiddle is advanced with a single complex multiply
- *   per step (the recurrence W^(k+1) = W^k * W^1), costing 4 multiplies +
- *   2 adds rather than two transcendental calls.
- * ---------------------------------------------------------------------------
- */
-static void fft_radix2(float *re, float *im, int n)
-{
-	/* --- Pass 1: bit-reversal permutation --- */
-	for (int i = 1, j = 0; i < n; i++) {
-		/* Advance j to its next bit-reversed value.
-		 * Walk 'bit' from the MSB; XOR-clear each already-set bit until
-		 * we reach the first unset position, then XOR-set it. */
-		int bit = n >> 1;
-		for (; j & bit; bit >>= 1) {
-			j ^= bit;
-		}
-		j ^= bit;
-		if (i < j) {
-			/* Swap complex samples at i and j (each unordered pair once). */
-			float tr = re[i];
-			re[i]    = re[j];
-			re[j]    = tr;
-			float ti = im[i];
-			im[i]    = im[j];
-			im[j]    = ti;
-		}
-	}
-
-	/* --- Pass 2: log2(n) butterfly stages --- */
-	for (int len = 2; len <= n; len <<= 1) {
-		/* Unit twiddle step for this stage: W_step = exp(-j*2*pi/len).
-		 * Computed once per stage; used to advance W^k by one position. */
-		float ang = -2.0f * (float)M_PI / (float)len;
-		float wlr = cosf(ang);
-		float wli = sinf(ang);
-		for (int i = 0; i < n; i += len) {
-			/* Running twiddle W^k, initialised to W^0 = 1 + j*0. */
-			float wr = 1.0f, wi = 0.0f;
-			for (int k = 0; k < len / 2; k++) {
-				int a = i + k;
-				int b = i + k + len / 2;
-				/* T = W^k * X[b]  (complex multiply). */
-				float tr = wr * re[b] - wi * im[b];
-				float ti = wr * im[b] + wi * re[b];
-				/* Radix-2 butterfly: X[a] += T, X[b] = X[a] - T. */
-				re[b] = re[a] - tr;
-				im[b] = im[a] - ti;
-				re[a] += tr;
-				im[a] += ti;
-				/* Twiddle recurrence: W^(k+1) = W^k * W_step. */
-				float nwr = wr * wlr - wi * wli;
-				wi        = wr * wli + wi * wlr;
-				wr        = nwr;
-			}
-		}
-	}
 }
 
 /* ---------------------------------------------------------------------------
@@ -166,29 +111,89 @@ void aco_feat_extract(const struct aco_frame_state *st, float sr_hz, struct aco_
 	 *   Division is guarded by a near-zero variance threshold to avoid NaN.
 	 * --------------------------------------------------------------------------
 	 */
+	/*
+	 * xc[] holds the DC-removed window shared by the time-domain stats AND
+	 * the FFT below; the tail [n, ACO_FRAME_N) is zero-padded so a short
+	 * frame can still feed the fixed-size FFT.  peak (largest |xc[i]|) is
+	 * kept for scaling the int16 feed to the <alp/dsp.h> chain further
+	 * down.  static: aco_feat_extract is not re-entrant (single codec
+	 * path), keeps a 1 kB buffer off the stack.
+	 */
+	static float xc[ACO_FRAME_N];
+	float        peak;
+
+#if ACO_HAS_CMSIS_DSP
+	/*
+	 * CMSIS-DSP path (Cortex-M55: Helium-vectorised kernels).
+	 * arm_mean_f32 / arm_offset_f32 / arm_rms_f32 / arm_absmax_f32 are the
+	 * idiomatic accelerated primitives; alp-sdk has no portable
+	 * scalar-stats surface to wrap, so we call them directly.
+	 */
+	float mean;
+	arm_mean_f32(st->samples, (uint32_t)n, &mean);
+	arm_offset_f32(st->samples, -mean, xc, (uint32_t)n);
+
+	uint32_t peak_idx;
+	arm_rms_f32(xc, (uint32_t)n, &out->total_rms); /* rms = sqrt(mean(xc^2)) */
+	arm_absmax_f32(xc, (uint32_t)n, &peak, &peak_idx);
+	float var = out->total_rms * out->total_rms; /* mean(xc)=0 => var = rms^2 */
+#else
+	/* Portable-C fallback (native_sim, or any target without CMSIS-DSP). */
 	float mean = 0.0f;
 	for (int i = 0; i < n; i++) {
 		mean += st->samples[i];
 	}
 	mean /= (float)n;
 
-	/* sum2 = sum of squared deviations; sum4 = sum of fourth-power deviations. */
-	float sum2 = 0.0f, sum4 = 0.0f;
+	float sum2 = 0.0f;
+	peak       = 0.0f;
 	for (int i = 0; i < n; i++) {
-		float x = st->samples[i] - mean;
-		sum2 += x * x;
-		sum4 += x * x * x * x;
+		xc[i]    = st->samples[i] - mean;
+		float ax = fabsf(xc[i]);
+		sum2 += xc[i] * xc[i];
+		if (ax > peak) {
+			peak = ax;
+		}
 	}
 	float var      = sum2 / (float)n;
 	out->total_rms = sqrtf(var);
-	out->kurtosis  = (var > 1e-12f) ? ((sum4 / (float)n) / (var * var)) : 0.0f;
+#endif
+	for (int i = n; i < ACO_FRAME_N; i++) {
+		xc[i] = 0.0f; /* zero-pad the FFT tail on a short frame */
+	}
 
-	/* ----- Sub-pass B: frequency-domain statistics ---------------------------
+	/*
+	 * Kurtosis (4th standardised central moment): CMSIS-DSP ships no
+	 * 4th-moment kernel, so the sum-of-4th-powers stays a portable loop
+	 * over xc, mirroring the CMSIS/fallback split above.
+	 *   kurtosis = E[(x-mu)^4] / (E[(x-mu)^2])^2 = (sum4/n) / var^2
+	 *   Gaussian noise gives kurtosis ~= 3; impulsive fault signatures
+	 *   such as rolling-element bearing spall impacts push it above 10.
+	 */
+	float sum4 = 0.0f;
+	for (int i = 0; i < n; i++) {
+		float x2 = xc[i] * xc[i];
+		sum4 += x2 * x2;
+	}
+	out->kurtosis = (var > 1e-12f) ? ((sum4 / (float)n) / (var * var)) : 0.0f;
+
+	/*
+	 * ----- Sub-pass B: frequency-domain statistics via the portable
+	 * <alp/dsp.h> chain (NOT a hand-rolled FFT). ---------------------------
 	 *
-	 * The DC-removed samples are placed in re[]; any remaining positions up to
-	 * ACO_FRAME_N are zero-padded (valid for a DFT on the available data).
-	 * The FFT of ACO_FRAME_N (= 256) points gives 128 positive-frequency bins;
-	 * bin k corresponds to frequency f_k = k * sr_hz / ACO_FRAME_N.
+	 * A single ALP_DSP_STAGE_FFT (rectangular, no window) transforms the
+	 * DC-removed frame to magnitude bins.  The backend runs CMSIS-DSP
+	 * arm_rfft_fast_f32 on the M55 and a portable-C radix-2 FFT under
+	 * native_sim -- the example source is identical either way.
+	 *
+	 * The chain consumes int16 samples (the codec's native PCM format).
+	 * We scale the float frame to fill the int16 range before feeding it:
+	 * the absolute scale is irrelevant here because every downstream
+	 * spectral feature below (centroid, flatness, band energies) is
+	 * ratio-based and therefore scale-invariant.
+	 *
+	 * The FFT of ACO_FRAME_N (= 256) points gives 128 positive-frequency
+	 * bins; bin k corresponds to frequency f_k = k * sr_hz / ACO_FRAME_N.
 	 * Bin 0 (DC) is discarded; only bins 1..half-1 are used.
 	 *
 	 * Spectral centroid:
@@ -205,30 +210,36 @@ void aco_feat_extract(const struct aco_frame_state *st, float sr_hz, struct aco_
 	 *   A small epsilon (1e-9) floors each magnitude to avoid log(0).
 	 * --------------------------------------------------------------------------
 	 */
-	/* Static scratch buffers avoid VLA stack pressure on Cortex-M; they are
-	 * safe here because aco_feat_extract is not re-entrant (single codec path).
-	 * im[] is zeroed explicitly each call; re[] is fully overwritten below. */
-	static float re[ACO_FRAME_N];
-	static float im[ACO_FRAME_N];
+	static int16_t samp_q15[ACO_FRAME_N];
+	float          scale = (peak > 1e-9f) ? (30000.0f / peak) : 0.0f;
 	for (int i = 0; i < ACO_FRAME_N; i++) {
-		re[i] = (i < n) ? (st->samples[i] - mean) : 0.0f;
-		im[i] = 0.0f;
+		samp_q15[i] = (int16_t)lrintf(xc[i] * scale);
 	}
-	/* Run the in-place DIT FFT; re[]/im[] become the complex DFT output. */
-	fft_radix2(re, im, ACO_FRAME_N);
 
-	/* half = N/2 = 128: positive-frequency bin count; mag[] stores the
-	 * single-sided magnitudes used by both the spectral stats and band C.
-	 * mag_total/centroid_num: centroid denominator and numerator respectively.
-	 * log_sum/lin_sum: per-bin log and linear accumulations for flatness. */
-	const int half = ACO_FRAME_N / 2;
-	float     mag[ACO_FRAME_N / 2];
+	static float    mag[ACO_FRAME_N];
+	alp_dsp_stage_t stages[] = {
+		{ .kind  = ALP_DSP_STAGE_FFT,
+		  .u.fft = { .n_points = ACO_FRAME_N, .output_format = ALP_DSP_FFT_OUTPUT_MAGNITUDE } },
+	};
+	alp_dsp_chain_t *chain = alp_dsp_chain_open(stages, 1u);
+	size_t           got   = 0;
+	memset(mag, 0, sizeof(mag));
+	if (chain != NULL) {
+		(void)alp_dsp_chain_apply_bins(chain, samp_q15, ACO_FRAME_N, mag, ACO_FRAME_N, &got);
+		alp_dsp_chain_close(chain);
+	}
+
+	/* half = N/2 = 128: positive-frequency bin count; mag[] (from the
+	 * chain above) stores the single-sided magnitudes used by both the
+	 * spectral stats and band C.  mag_total/centroid_num: centroid
+	 * denominator and numerator respectively.  log_sum/lin_sum: per-bin
+	 * log and linear accumulations for flatness. */
+	const int half      = ACO_FRAME_N / 2;
 	float     mag_total = 0.0f, centroid_num = 0.0f;
 	float     log_sum = 0.0f, lin_sum = 0.0f;
 	int       active = 0;
 	for (int k = 1; k < half; k++) {
-		float m = sqrtf(re[k] * re[k] + im[k] * im[k]);
-		mag[k]  = m;
+		float m = mag[k];
 		float f = (float)k * sr_hz / (float)ACO_FRAME_N;
 		mag_total += m;
 		centroid_num += f * m;

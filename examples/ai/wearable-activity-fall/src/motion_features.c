@@ -5,9 +5,8 @@
  * motion_features implementation -- see motion_features.h.
  *
  * This file implements the windowed IMU feature extraction pipeline used by the
- * wearable activity-recognition + fall-detection example.  It is intentionally
- * self-contained (stdint/math only) so it builds identically for native_sim and
- * Cortex-M55.  Read this file alongside motion_features.h.
+ * wearable activity-recognition + fall-detection example.  It builds identically
+ * for native_sim and Cortex-M55.  Read this file alongside motion_features.h.
  *
  * Pipeline overview (one 2.56 s window at 100 Hz = 256 samples):
  *
@@ -33,6 +32,30 @@
  *       |
  *       v
  *   model inference  OR  mot_activity_fallback()  (when no model is loaded)
+ *
+ * SPECTRAL + STATISTICAL MATH -- library-backed, not hand-rolled.
+ * ---------------------------------------------------------------
+ * This example deliberately does NOT re-derive an FFT or the RMS/mean
+ * statistics by hand.  Two library surfaces do the numeric work, and the
+ * SAME source builds for native_sim and the Cortex-M55 alike:
+ *
+ *   1. The FFT goes through the portable <alp/dsp.h> chain API.  Its
+ *      backend runs ARM CMSIS-DSP (arm_rfft_fast_f32, Helium-vectorised)
+ *      on the M55, a hardware DSP block where the SoM has one, and a
+ *      portable-C radix-2 fallback under native_sim -- selected by the
+ *      backend registry, not an #ifdef here.  We call the alp wrapper
+ *      (not arm_rfft_* directly) because alp-sdk SHIPS a portable FFT
+ *      surface: keeping the example on it lets the identical source run
+ *      on the V2N (A55 + DRP-AI) and NXP paths, which have no CMSIS-M.
+ *
+ *   2. The |a| / |gyro| magnitude-series statistics (mean, AC RMS) and the
+ *      jerk RMS call ARM CMSIS-DSP arm_*_f32 kernels DIRECTLY -- alp-sdk
+ *      has no portable scalar-stats surface to wrap, and these kernels are
+ *      the idiomatic accelerated path on Cortex-M.  They are guarded by
+ *      __has_include with a portable-C fallback so the native_sim gate
+ *      still builds.  The per-axis accel/gyro AC RMS stays a portable loop
+ *      (see the comment at its call site) because the IMU sample buffer is
+ *      array-of-structs, not a layout CMSIS kernels can consume directly.
  */
 #include "motion_features.h"
 
@@ -42,6 +65,18 @@
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+#if defined(__has_include)
+#if __has_include("arm_math.h")
+#include "arm_math.h"
+#define MOT_HAS_CMSIS_DSP 1
+#endif
+#endif
+#ifndef MOT_HAS_CMSIS_DSP
+#define MOT_HAS_CMSIS_DSP 0
+#endif
+
+#include <alp/dsp.h>
 
 /* ===========================================================================
  * Window management
@@ -74,152 +109,6 @@ void mot_window_push(struct mot_window_state *st, struct mot_sample s)
 bool mot_window_full(const struct mot_window_state *st)
 {
 	return st->count >= MOT_WINDOW_N;
-}
-
-/* ===========================================================================
- * Radix-2 Cooley-Tukey DIT FFT  (in-place, iterative)
- *
- * Mathematical background
- * -----------------------
- * The Discrete Fourier Transform of a length-N complex sequence x[n] is:
- *
- *   X[k] = sum_{n=0}^{N-1}  x[n] * W_N^{nk},   k = 0, 1, ..., N-1
- *
- * where  W_N = e^{-j*2*pi/N}  is the primitive N-th root of unity ("twiddle
- * base").  Naive evaluation costs O(N^2) complex multiplications.
- *
- * Cooley-Tukey factorisation (radix-2)
- * -------------------------------------
- * When N = 2^M, the DFT can be split recursively into two DFTs of length N/2
- * over the even-indexed and odd-indexed sub-sequences:
- *
- *   X[k]       = E[k] + W_N^k  * O[k]          (k = 0 .. N/2-1)
- *   X[k + N/2] = E[k] - W_N^k  * O[k]
- *
- * where E = DFT of x[0], x[2], x[4], ...  and  O = DFT of x[1], x[3], ...
- *
- * Applying this recursively gives O(N log2 N) multiplications.
- *
- * Iterative ("bottom-up") implementation
- * ---------------------------------------
- * Rather than actual recursion (which allocates log2 N stack frames), the
- * iterative form:
- *   1. Pre-permutes the input into bit-reversed order  (Phase 1).
- *   2. Merges sub-DFTs of length 2, 4, 8, ..., N with "butterfly" operations
- *      (Phase 2, log2 N passes).
- *
- * --------------------------------------------------------------------------
- * Phase 1: bit-reversal permutation
- * --------------------------------------------------------------------------
- * At the base of the recursion, sample x[n] ends up at position rev(n),
- * where rev(n) is the binary representation of n with its bits reversed.
- *
- * Example for N = 8 (3-bit indices):
- *   n = 0 (000) → rev = 000 = 0  (stays)
- *   n = 1 (001) → rev = 100 = 4  (swap 1 ↔ 4)
- *   n = 2 (010) → rev = 010 = 2  (stays)
- *   n = 3 (011) → rev = 110 = 6  (swap 3 ↔ 6)
- *   n = 4 (100) → rev = 001 = 1  (already swapped)
- *   ...
- *
- * The in-place swap loop uses the standard j-tracking trick:
- *   - j tracks the bit-reversed position of the current index i.
- *   - For each increment of i (in binary), the bit-reversed j is advanced by
- *     flipping bits from the most-significant bit downward using XOR, stopping
- *     when there is no carry.  This is equivalent to incrementing a counter
- *     whose bits run in reverse order.
- *   - Only swap when i < j so each pair is exchanged exactly once.
- *
- * --------------------------------------------------------------------------
- * Phase 2: butterfly stages  (len = 2, 4, 8, ..., N)
- * --------------------------------------------------------------------------
- * At stage s (sub-DFT length = len = 2^s) the data array is partitioned
- * into N/len blocks of length len.  Inside each block, a "butterfly" merges
- * the upper half (indices 0..len/2-1, call it A) and the lower half
- * (indices len/2..len-1, call it B) using the DIT combine formula:
- *
- *   U[k]          =  A[k]  +  W_len^k  *  B[k]
- *   U[k + len/2]  =  A[k]  -  W_len^k  *  B[k]
- *
- * where W_len^k = e^{-j*2*pi*k/len} is the twiddle factor for bin k.
- *
- * --------------------------------------------------------------------------
- * Twiddle factor recurrence  (avoids per-butterfly trigonometric calls)
- * --------------------------------------------------------------------------
- * Instead of calling cosf/sinf for every k, the code seeds W_0 = 1 + 0j
- * and advances iteratively:
- *
- *   W_{k+1} = W_k  *  W_1
- *
- * where  W_1 = e^{-j*2*pi/len} = (wlr, wli)  is computed once per stage
- * from ang = -2*pi/len.
- *
- * Complex multiply:
- *   nwr = wr*wlr - wi*wli        (real part)
- *   wi  = wr*wli + wi*wlr        (imag part, using old wr)
- *   wr  = nwr
- *
- * This costs 4 multiplications + 2 additions per butterfly step (cheaper
- * than one sinf/cosf) and stays on the unit circle to avoid magnitude drift.
- *
- * N must be a power of two.  Caller guarantees MOT_WINDOW_N = 256 = 2^8.
- * =========================================================================== */
-static void fft_radix2(float *re, float *im, int n)
-{
-	/* ---- Phase 1: bit-reversal permutation -------------------------------- */
-	for (int i = 1, j = 0; i < n; i++) {
-		/* Advance j to the bit-reversed position of i.
-		 * Peel carry bits from the MSB downward using XOR until no carry. */
-		int bit = n >> 1;
-		for (; j & bit; bit >>= 1) {
-			j ^= bit;
-		}
-		j ^= bit;
-		/* Swap the complex sample at position i with position j.
-		 * The guard (i < j) ensures each pair is swapped at most once. */
-		if (i < j) {
-			float tr = re[i];
-			re[i]    = re[j];
-			re[j]    = tr;
-			float ti = im[i];
-			im[i]    = im[j];
-			im[j]    = ti;
-		}
-	}
-
-	/* ---- Phase 2: butterfly merge stages  (len doubles each pass) --------- */
-	for (int len = 2; len <= n; len <<= 1) {
-		/* Base twiddle for this stage: W_1 = e^{-j*2*pi/len}. */
-		float ang = -2.0f * (float)M_PI / (float)len;
-		float wlr = cosf(ang); /* real part of stage twiddle base */
-		float wli = sinf(ang); /* imag part of stage twiddle base */
-
-		/* Process every length-len sub-block starting at offset i. */
-		for (int i = 0; i < n; i += len) {
-			/* Start with W_0 = 1 + 0j; advance via recurrence each step. */
-			float wr = 1.0f, wi = 0.0f;
-
-			for (int k = 0; k < len / 2; k++) {
-				int a = i + k;           /* index in the "A" (upper) half */
-				int b = i + k + len / 2; /* index in the "B" (lower) half */
-
-				/* Multiply B[k] by the current twiddle factor W_k. */
-				float tr = wr * re[b] - wi * im[b];
-				float ti = wr * im[b] + wi * re[b];
-
-				/* DIT butterfly: U = A + W*B,  L = A - W*B. */
-				re[b] = re[a] - tr;
-				im[b] = im[a] - ti;
-				re[a] += tr;
-				im[a] += ti;
-
-				/* Advance twiddle: W_{k+1} = W_k * W_1 (complex multiply). */
-				float nwr = wr * wlr - wi * wli;
-				wi        = wr * wli + wi * wlr;
-				wr        = nwr;
-			}
-		}
-	}
 }
 
 /* ===========================================================================
@@ -256,7 +145,9 @@ static void fft_radix2(float *re, float *im, int n)
  *   running      : SMA ≈ 1.8--2.5 g
  *   free-fall    : SMA → 0 g
  *
- * Dividing by N normalises across partial and full windows.
+ * Dividing by N normalises across partial and full windows.  Left as a
+ * portable loop: it combines three strided (array-of-structs) fields per
+ * sample, which is not a shape a CMSIS elementwise kernel can consume.
  *
  * ---------------------------------------------------------------------------
  * Jerk RMS
@@ -269,6 +160,10 @@ static void fft_radix2(float *re, float *im, int n)
  *
  *   jerk_rms = sqrt( (1/(N-1)) * sum_{i=1}^{N-1} jerk[i]^2 )
  *
+ * amag[] is a contiguous time series, so this is a natural CMSIS-DSP fit:
+ * arm_sub_f32(amag+1, amag, ..., N-1) computes every backward difference in
+ * one vectorised call (pDst[k] = amag[k+1] - amag[k]), then arm_scale_f32
+ * converts to g/s and arm_rms_f32 finishes the RMS in a single pass.
  * Scaling by sr_hz converts from "g per sample" to "g per second", making
  * the value sample-rate-independent so models trained at one sr_hz transfer
  * to another.  High jerk_rms indicates sharp, impulsive motion:
@@ -287,7 +182,9 @@ static void fft_radix2(float *re, float *im, int n)
  *
  * atan2 handles all quadrants and avoids division-by-zero when mean_az ≈ 0.
  * Example: device flat on a table → tilt ≈ 0°; worn on the side of the
- * wrist → tilt ≈ 90°.  The AI model uses tilt as a weak posture cue.
+ * wrist → tilt ≈ 90°.  The AI model uses tilt as a weak posture cue.  A
+ * single atan2 call has no vector shape for CMSIS to accelerate, so it
+ * stays a plain scalar expression.
  *
  * ---------------------------------------------------------------------------
  * Dominant cadence frequency via FFT
@@ -298,22 +195,13 @@ static void fft_radix2(float *re, float *im, int n)
  *   running : ~2.5--4.0 Hz
  *   cycling : ~1.0--1.5 Hz (pedal rate, not step rate)
  *
- * Procedure:
- *   1. Build the |a| time series (amag[]), already computed in pass A.
- *   2. Subtract the mean (mean_amag) to suppress the DC bin in the FFT.
- *   3. Zero-pad or truncate to MOT_WINDOW_N = 256 samples.
- *   4. Run the radix-2 FFT on the real-valued series (imag = 0).
- *   5. Search bins k = 1 .. N/2-1 for the peak of re[k]^2 + im[k]^2.
- *   6. Convert winning bin k to Hz:  f = k * sr_hz / N.
- *
  * Frequency resolution:  delta_f = sr_hz / N = 100 / 256 ≈ 0.39 Hz/bin.
  * Nyquist limit:         f_max   = sr_hz / 2 = 50 Hz  (bin N/2-1 = 127).
  * Bin 0 is DC (suppressed by mean removal, explicitly skipped).
  * Negative-frequency bins (k >= N/2) mirror the positive bins for real input;
- * only bins 1..N/2-1 carry independent spectral information.
- *
- * Using magnitude-squared (re[k]^2 + im[k]^2) for the peak search avoids
- * N/2 sqrtf calls; argmax is the same as for magnitude.
+ * only bins 1..N/2-1 carry independent spectral information.  See the
+ * "SPECTRUM" comment at the FFT call site below for how the transform itself
+ * is obtained.
  * =========================================================================== */
 void mot_feat_extract(const struct mot_window_state *st, float sr_hz, struct mot_features *out)
 {
@@ -324,18 +212,26 @@ void mot_feat_extract(const struct mot_window_state *st, float sr_hz, struct mot
 		return;
 	}
 
-	/* ---- Pass A: per-axis means, |a| series, SMA -------------------------- */
 	/*
-	 * mean_a[k]  : sum of axis k accel samples (divided below → DC mean).
-	 *              Approximates the gravity projection onto axis k when motion
-	 *              is not dominated by rapid dynamics.
-	 * amag[i]    : Euclidean magnitude of sample i = sqrt(ax^2+ay^2+az^2) [g].
-	 * mean_amag  : mean of amag[], subtracted before the FFT (DC removal).
-	 * sma        : accumulator for the SMA numerator (sum of L1 norms).
+	 * PASS A -- per-axis raw sums, |a| and |gyro| magnitude series, SMA.
+	 *
+	 * amag[i]/gmag[i] : Euclidean magnitude of sample i's accel/gyro vector.
+	 *   These end up as CONTIGUOUS time series (unlike the raw AoS sample
+	 *   buffer), which is exactly the shape the CMSIS-DSP mean/RMS kernels
+	 *   below want -- that is why the per-sample combine of 3 strided
+	 *   fields happens once here instead of being folded into each stat.
+	 * mean_a[]/mean_g[] : running sums of the strided per-axis fields,
+	 *   divided below.  Kept as a portable loop: CMSIS-DSP kernels require
+	 *   stride-1 arrays, and the IMU sample buffer is array-of-structs
+	 *   (ax,ay,az,gx,gy,gz interleaved per sample) -- deinterleaving 6
+	 *   channels into 6 scratch buffers just to call arm_mean_f32 would
+	 *   cost more (extra O(N) copies + 6 * MOT_WINDOW_N * 4B of static RAM)
+	 *   than the 3-element running sum it would replace.
 	 */
 	float        mean_a[3] = { 0, 0, 0 }, mean_g[3] = { 0, 0, 0 };
 	static float amag[MOT_WINDOW_N];
-	float        mean_amag = 0.0f, sma = 0.0f;
+	static float gmag[MOT_WINDOW_N];
+	float        sma = 0.0f;
 	for (int i = 0; i < n; i++) {
 		const struct mot_sample *s = &st->s[i];
 		mean_a[0] += s->ax;
@@ -345,7 +241,7 @@ void mot_feat_extract(const struct mot_window_state *st, float sr_hz, struct mot
 		mean_g[1] += s->gy;
 		mean_g[2] += s->gz;
 		amag[i] = sqrtf(s->ax * s->ax + s->ay * s->ay + s->az * s->az);
-		mean_amag += amag[i];
+		gmag[i] = sqrtf(s->gx * s->gx + s->gy * s->gy + s->gz * s->gz);
 		/* SMA numerator: L1 norm of the raw accel vector (gravity included). */
 		sma += fabsf(s->ax) + fabsf(s->ay) + fabsf(s->az);
 	}
@@ -353,24 +249,16 @@ void mot_feat_extract(const struct mot_window_state *st, float sr_hz, struct mot
 		mean_a[k] /= (float)n;
 		mean_g[k] /= (float)n;
 	}
-	mean_amag /= (float)n;
 	/* Normalise SMA to a per-sample mean (window-length independent). */
 	out->sma = sma / (float)n;
 
-	/* ---- Pass B: axis AC RMS for accel + gyro, |a| AC RMS, |gyro| mean --- */
 	/*
-	 * da[k] = s->a[k] - mean_a[k]  : AC component of accel axis k.
-	 * dg[k] = s->g[k] - mean_g[k]  : AC component of gyro  axis k.
-	 * sa[k]  : sum of da[k]^2 → after division, variance of axis k accel.
-	 * sg[k]  : sum of dg[k]^2 → variance of axis k gyro.
-	 * dm     : AC component of the |a| magnitude series (amag[i] - mean_amag).
-	 * s_amag : sum of dm^2 → variance of the magnitude signal (for amag_rms).
-	 * mean_gmag : mean of |gyro| magnitude; the |gyro| AC RMS is a two-pass
-	 *             computation (need mean before computing deviations) so it is
-	 *             done in pass B (mean) + pass C (RMS).
+	 * PASS B -- per-axis accel/gyro AC RMS.  Stays a portable loop for the
+	 * same array-of-structs reason as mean_a[]/mean_g[] above: da[]/dg[]
+	 * are 3-element per-sample vectors carved out of strided fields, not
+	 * contiguous arrays a CMSIS elementwise kernel can walk.
 	 */
 	float sa[3] = { 0, 0, 0 }, sg[3] = { 0, 0, 0 };
-	float s_amag = 0.0f, s_gmag = 0.0f, mean_gmag = 0.0f;
 	for (int i = 0; i < n; i++) {
 		const struct mot_sample *s = &st->s[i];
 		float da[3]                = { s->ax - mean_a[0], s->ay - mean_a[1], s->az - mean_a[2] };
@@ -379,42 +267,79 @@ void mot_feat_extract(const struct mot_window_state *st, float sr_hz, struct mot
 			sa[k] += da[k] * da[k];
 			sg[k] += dg[k] * dg[k];
 		}
-		float dm = amag[i] - mean_amag;
-		s_amag += dm * dm;
-		/* |gyro| = L2 norm of the angular-rate vector.  Accumulate the mean
-		 * so pass C can subtract it for the AC (dynamic rotation) component. */
-		float gm = sqrtf(s->gx * s->gx + s->gy * s->gy + s->gz * s->gz);
-		mean_gmag += gm;
 	}
-	mean_gmag /= (float)n;
-
-	/* ---- Pass C: |gyro| AC RMS  (two-pass: mean known from pass B) -------- */
-	for (int i = 0; i < n; i++) {
-		const struct mot_sample *s = &st->s[i];
-		/* Subtract the DC mean to isolate the dynamic rotation component. */
-		float gm = sqrtf(s->gx * s->gx + s->gy * s->gy + s->gz * s->gz) - mean_gmag;
-		s_gmag += gm * gm;
-	}
-
-	/* Finalise AC RMS from accumulated sum-of-squares: sqrt( S / N ). */
 	for (int k = 0; k < 3; k++) {
 		out->a_rms[k] = sqrtf(sa[k] / (float)n);
 		out->g_rms[k] = sqrtf(sg[k] / (float)n);
 	}
+
+	/*
+	 * |a| / |gyro| magnitude-series stats + jerk RMS -- CMSIS-DSP path.
+	 * ------------------------------------------------------------------
+	 * amag[]/gmag[] are contiguous, stride-1 float arrays (built in pass A
+	 * above), so mean + AC RMS map directly onto arm_mean_f32 /
+	 * arm_offset_f32 / arm_rms_f32, and the jerk backward-difference onto
+	 * arm_sub_f32 + arm_scale_f32 + arm_rms_f32.  amag_ac[] doubles as the
+	 * mean-centred series fed to the FFT below (zero-padded past n).
+	 */
+	static float amag_ac[MOT_WINDOW_N];
+	static float gmag_ac[MOT_WINDOW_N];
+	static float jerk[MOT_WINDOW_N];
+	float        mean_amag, mean_gmag, peak;
+
+#if MOT_HAS_CMSIS_DSP
+	uint32_t peak_idx;
+	arm_mean_f32(amag, (uint32_t)n, &mean_amag);
+	arm_mean_f32(gmag, (uint32_t)n, &mean_gmag);
+	arm_offset_f32(amag, -mean_amag, amag_ac, (uint32_t)n);
+	arm_offset_f32(gmag, -mean_gmag, gmag_ac, (uint32_t)n);
+	arm_rms_f32(amag_ac, (uint32_t)n, &out->amag_rms);
+	arm_rms_f32(gmag_ac, (uint32_t)n, &out->gmag_rms);
+	arm_absmax_f32(amag_ac, (uint32_t)n, &peak, &peak_idx);
+	if (n > 1) {
+		/* jerk[k] = amag[k+1] - amag[k], all N-1 differences in one call. */
+		arm_sub_f32(&amag[1], &amag[0], jerk, (uint32_t)(n - 1));
+		arm_scale_f32(jerk, sr_hz, jerk, (uint32_t)(n - 1));
+		arm_rms_f32(jerk, (uint32_t)(n - 1), &out->jerk_rms);
+	} else {
+		out->jerk_rms = 0.0f;
+	}
+#else
+	/* Portable-C fallback (native_sim, or any target without CMSIS-DSP). */
+	mean_amag = 0.0f;
+	mean_gmag = 0.0f;
+	for (int i = 0; i < n; i++) {
+		mean_amag += amag[i];
+		mean_gmag += gmag[i];
+	}
+	mean_amag /= (float)n;
+	mean_gmag /= (float)n;
+
+	float s_amag = 0.0f, s_gmag = 0.0f;
+	peak = 0.0f;
+	for (int i = 0; i < n; i++) {
+		amag_ac[i] = amag[i] - mean_amag;
+		gmag_ac[i] = gmag[i] - mean_gmag;
+		s_amag += amag_ac[i] * amag_ac[i];
+		s_gmag += gmag_ac[i] * gmag_ac[i];
+		float ampk = fabsf(amag_ac[i]);
+		if (ampk > peak) {
+			peak = ampk;
+		}
+	}
 	out->amag_rms = sqrtf(s_amag / (float)n);
 	out->gmag_rms = sqrtf(s_gmag / (float)n);
 
-	/* ---- Jerk RMS --------------------------------------------------------- */
-	/*
-	 * First backward difference of the |a| series, scaled to g/s.
-	 * Summed over N-1 pairs; the first sample has no predecessor.
-	 */
 	float s_jerk = 0.0f;
 	for (int i = 1; i < n; i++) {
-		float d = (amag[i] - amag[i - 1]) * sr_hz; /* per-second jerk */
-		s_jerk += d * d;
+		jerk[i - 1] = (amag[i] - amag[i - 1]) * sr_hz; /* per-second jerk */
+		s_jerk += jerk[i - 1] * jerk[i - 1];
 	}
 	out->jerk_rms = (n > 1) ? sqrtf(s_jerk / (float)(n - 1)) : 0.0f;
+#endif
+	for (int i = n; i < MOT_WINDOW_N; i++) {
+		amag_ac[i] = 0.0f; /* zero-pad the FFT tail on a short window */
+	}
 
 	/* ---- Tilt of the mean accel vector from vertical (Z) ------------------ */
 	/*
@@ -425,34 +350,55 @@ void mot_feat_extract(const struct mot_window_state *st, float sr_hz, struct mot
 	out->tilt_deg = atan2f(sqrtf(mean_a[0] * mean_a[0] + mean_a[1] * mean_a[1]), mean_a[2]) *
 	                180.0f / (float)M_PI;
 
-	/* ---- Dominant frequency of the |a| envelope via FFT (DC removed) ----- */
 	/*
-	 * Load the AC accel-magnitude series into the FFT input buffers.
-	 * Samples beyond the live count (i >= n) are zero-padded; with a full
-	 * window (n == MOT_WINDOW_N = 256) there is no padding.
-	 * Imaginary part is zero because the input signal is real-valued.
+	 * SPECTRUM via the portable <alp/dsp.h> chain (NOT a hand-rolled FFT).
+	 * ------------------------------------------------------------------
+	 * A single ALP_DSP_STAGE_FFT (rectangular, no window) transforms the
+	 * mean-centred |a| series to magnitude bins.  The backend runs CMSIS-DSP
+	 * arm_rfft_fast_f32 on the M55 and a portable-C radix-2 FFT under
+	 * native_sim -- the example source is identical either way.
+	 *
+	 * The chain consumes int16 samples (the accelerometer's native ADC
+	 * format).  We scale the float amag_ac[] window to fill the int16 range
+	 * before feeding it: the absolute scale is irrelevant here because
+	 * dom_freq_hz is derived from an argmax over the output bins, which is
+	 * scale-invariant.
 	 */
-	static float re[MOT_WINDOW_N];
-	static float im[MOT_WINDOW_N];
+	static int16_t samp_q15[MOT_WINDOW_N];
+	float          scale = (peak > 1e-9f) ? (30000.0f / peak) : 0.0f;
 	for (int i = 0; i < MOT_WINDOW_N; i++) {
-		re[i] = (i < n) ? (amag[i] - mean_amag) : 0.0f;
-		im[i] = 0.0f;
+		samp_q15[i] = (int16_t)lrintf(amag_ac[i] * scale);
 	}
-	fft_radix2(re, im, MOT_WINDOW_N);
+
+	static float    mag[MOT_WINDOW_N];
+	alp_dsp_stage_t stages[] = {
+		{ .kind  = ALP_DSP_STAGE_FFT,
+		  .u.fft = { .n_points = MOT_WINDOW_N, .output_format = ALP_DSP_FFT_OUTPUT_MAGNITUDE } },
+	};
+	alp_dsp_chain_t *chain = alp_dsp_chain_open(stages, 1u);
+	size_t           got   = 0;
+	memset(mag, 0, sizeof(mag));
+	if (chain != NULL) {
+		(void)alp_dsp_chain_apply_bins(chain, samp_q15, MOT_WINDOW_N, mag, MOT_WINDOW_N, &got);
+		alp_dsp_chain_close(chain);
+	}
 
 	/*
-	 * Search positive-frequency bins 1 .. N/2-1 for the peak spectral power.
-	 * Start dom_val at -1 so the first bin (k = 1) always wins the first
-	 * comparison even if its power is zero, giving a deterministic result on
-	 * an all-zeros input.
+	 * DOMINANT FREQUENCY BIN
+	 * ----------------------
+	 * The search starts at k = 1 to skip bin 0 (DC); even after mean
+	 * removal a floating-point residual can linger there, and the relevant
+	 * cadence content always starts at k >= 1.  Comparing magnitude
+	 * directly (rather than magnitude-squared) is equivalent for an argmax
+	 * -- both are monotonic in the true spectral amplitude -- so no squaring
+	 * step is needed here.
 	 */
 	const int half    = MOT_WINDOW_N / 2;
 	int       dom_bin = 1;
 	float     dom_val = -1.0f;
 	for (int k = 1; k < half; k++) {
-		float m2 = re[k] * re[k] + im[k] * im[k];
-		if (m2 > dom_val) {
-			dom_val = m2;
+		if (mag[k] > dom_val) {
+			dom_val = mag[k];
 			dom_bin = k;
 		}
 	}
