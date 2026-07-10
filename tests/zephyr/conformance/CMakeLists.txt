@@ -31,6 +31,7 @@ if(CONFIG_ALP_SDK_TESTING)
         src/behavior_spi.c
         src/behavior_adc.c
         src/behavior_can.c
+        src/behavior_storage.c
     )
 else()
     target_sources(app PRIVATE

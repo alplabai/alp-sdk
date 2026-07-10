@@ -99,3 +99,17 @@ config ALP_SDK_TESTING_CAN
 	  edge_at), an injectable controller bus-error state
 	  (error-active/error-passive/bus-off), and TX read-back,
 	  without any real or emulated CAN controller.
+
+config ALP_SDK_TESTING_STORAGE
+	bool "Storage test double (<alp/testing/storage.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 Storage test-double backend
+	  (src/backends/storage/testing_drv.c).  Lets a ztest drive
+	  alp_storage_* against a small fixed-capacity RAM-backed
+	  device: an injectable logical capacity, per-byte corruption
+	  marks, one-shot read/write/erase/sync faults, and a
+	  power-loss-mid-write model that leaves a provably torn write
+	  (partial data persisted) for journaling/recovery tests,
+	  without any real Zephyr flash_area or littlefs backend.
