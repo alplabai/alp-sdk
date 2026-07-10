@@ -117,6 +117,41 @@ ZTEST(cc3501e_bridge_transport, test_get_mac_not_ready_on_stub)
 	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued GET_MAC on stub -> NOT_READY");
 }
 
+ZTEST(cc3501e_bridge_transport, test_ota_promote_not_ready_on_stub)
+{
+	/* OTA_PROMOTE requests the swap-reboot for an image already committed to
+	 * STAGED (the unjam path when a bare reset left a slot pending).  It is a
+	 * direct handler (not worker-routed), so one transaction resolves it: the
+	 * silicon-free stub HAL has no PSA-FWU -> cc3501e_hw_ota_promote reports
+	 * NOTIMPL, mapped to NOT_READY rather than a fabricated OK. */
+	const uint8_t op[] = { ALP_CC3501E_CMD_OTA_PROMOTE, 0x00u, 0x00u, 0x00u };
+	uint8_t       reply[32];
+
+	transport_spi_init();
+	transaction(op, sizeof op);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "OTA_PROMOTE error reply is header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_PROMOTE, 1u);
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_NOT_READY,
+	              "OTA_PROMOTE on the silicon-free stub -> NOT_READY");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ota_promote_with_payload_is_invalid)
+{
+	/* OTA_PROMOTE takes no payload; a non-empty one is a caller bug -> INVALID. */
+	const uint8_t op[] = { ALP_CC3501E_CMD_OTA_PROMOTE, 0x00u, 0x01u, 0x00u, 0xAAu };
+	uint8_t       reply[32];
+
+	transport_spi_init();
+	transaction(op, sizeof op);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "bad-len OTA_PROMOTE reply is header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_PROMOTE, 1u);
+	zassert_equal(
+	    reply[4], ALP_CC3501E_RESP_ERR_INVALID, "OTA_PROMOTE with payload -> RESP_ERR_INVALID");
+}
+
 ZTEST(cc3501e_bridge_transport, test_unknown_opcode_rejected)
 {
 	/* An opcode in the reserved vendor-extension range (>= 0x80) is never a

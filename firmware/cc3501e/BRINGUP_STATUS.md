@@ -98,6 +98,150 @@ unit. The validated host-side workaround is to hard-reset the CC3501E after each
 power-cycle: drive WIFI_EN, let the first boot settle, then pulse nRESET. This
 is implemented in `cc3501e_hard_reset` / `cc3501e_reset`.
 
+**Activation state — CORRECTED 2026-07-09 (`e1m-aen-evk-01`, XDS110 `L50015YR`):**
+the bench unit is **already activated**. The `boot_sector_programmed = 0`
+figure that an earlier read reported is from a **stale, pre-activation
+baseline** (`activation_report.txt`, dated 2026-07-03 17:32 — the
+factory/pre-provision snapshot), NOT a current device read. The authoritative
+current state is the device fuse read-backs: **30 `programming_report.txt`
+dumps across 2026-07-05 (05:26 → 21:48) all read `boot_sector_programmed = 1`,
+`non_recoverable_failure = 0`** — i.e. the boot sector was programmed sometime
+between Jul 3 and Jul 5 and has read as programmed ever since. The auth fuses
+are set and `permanently_lock_debug_enable = 0` (debug open). So the vendor SBL
+is armed; **cold swap-boot should be exercisable directly — no re-activation is
+needed on this unit.**
+
+Caveat on re-confirming live: a fresh `get_fuse_data` today via the vendor-key
+path is blocked at the toolbox's "Action Required: Update Signing Module" RoT
+gate (a tooling limitation, not a fuse-0 signal). A clean live re-read would use
+a signed `query` action request (`flash-images-builder build action_request
+--type query` → sign → `programmer … query`); the 30 historical device reads are
+already consistent at `1`.
+
+### Re-activating a fresh / mis-activated unit (only if needed)
+
+Not needed for the current bench unit (already activated). For a genuinely
+fresh or mis-activated unit, programming the cold-launch boot sector re-arms the
+vendor SBL — a **one-time, hard-to-reverse** operation. Confirm
+`permanently_lock_debug_enable = 0` first, then use the full signed flash set
+(`programming_image` + `action_requests` + `vendor_image` + `boot_sector`, all
+signed with the VALIDATION key), programmed via `simplelink-wifi-toolbox
+programmer -i XDS110 -param1 L50015YR programming`. `deploy_validate.sh` alone is
+**insufficient** — it refreshes only `vendor_image`. NOTE: a ready-to-run
+full-set-regen script is **not** currently staged in the bench signing dir; the
+`gen-out-*/` trees are prior outputs, not a reproducible command. Confirm by
+re-reading the fuse: `boot_sector_programmed` `0 → 1`.
+
+### Cold swap-boot cycle — bench result 2026-07-09 (#493 criterion 1: STAGED proven, SWAP fails)
+
+Ran the real-image OTA cycle on `e1m-aen-evk-01` (E8 slot0 = the
+`-DCC3501E_OTA_REAL=ON` app, SE-UART `app-write-mram`). Result:
+
+- **Real-image STAGED: PROVEN.** The genuine signed candidate (31428 B,
+  v0.0.4.0 GPE) streamed over the bridge and `psa_fwu` accepted it:
+  `OTA status: state=2 written=31428/31428 B`, `OTA -> STAGED (genuine image
+  accepted by psa_fwu)`. This is the real-image confirmation the inert blob
+  never gave. The STAGED image **persisted across a verified true cold POR** (a
+  second `cc3501e_ota_update` after the POR returned `-1`/INVAL because a staged
+  image was already pending).
+- **Cold swap-boot: FAILED.** After a verified true cold POR (PSU power-cycle,
+  power drop + `Cortex-M55 identified` re-up both confirmed on the J-Link), the
+  CC3501E booted its PRIMARY slot **unchanged** — `GET_VERSION -> protocol v1`
+  (host expects v3), `fw_version=0x0001`, identical to before. The STAGED image
+  was **not promoted** to primary. No accept/rollback/trial observed (no swap
+  occurred).
+
+**ROOT CAUSE (root-cause pass): the bench procedure was wrong, not (yet) a
+silicon block.** The STAGED→primary swap is completed by the CC35 firmware's
+**own `psa_fwu_request_reboot()`** after FINISH (the deferred `ota_reboot_pending`
+latch: armed at the end of `ota_do_finish()`, fired in `cc3501e_hw_tick()`), NOT
+by a host PSU cold POR. A bare PSU cycle carries no swap request, so the SBL
+cold-boots straight into the unchanged primary and leaves STAGED inert. The
+SELFTEST path proves the pattern — `cc3501e_ota_install()` does `psa_fwu_install()`
+→ **immediately** `psa_fwu_request_reboot()`, never "install then wait for an
+external POR". "SBL not armed" is refuted by the 2026-06-17 cold-revert evidence
+in `cc3501e_hw_ti.c` (cold power-on actively reverted unconfirmed TRIAL images →
+the SBL demonstrably evaluates FWU state at cold POR). Caveat: the Puya
+host-hard-reset-after-power-cycle workaround + the warm/debug-launch trailer-check
+bypass make a bare PSU POR **doubly** invalid as the promotion trigger on this
+unit.
+
+**Corrected procedure — the discriminating test (one OTA cycle, no new tooling):**
+re-run `cc3501e_ota_update`; the moment the host prints STAGED, **do NOT touch the
+PSU** — loop PING/GET_VERSION for ~30–60 s and watch the READY line/console.
+Three conclusive outcomes:
+
+1. **Bridge drops and comes back at protocol v3** → the mechanism works; the swap
+   was procedural (PSU POR instead of the firmware self-reboot). Then confirm
+   permanence: the new image's first tick must `psa_fwu_accept()`, after which one
+   true cold POR should retain v3. **→ closes #493 criterion 1.**
+2. **Bridge drops, comes back still v1, STAGED still pending** → the requested
+   reboot fired but the SBL didn't honor it → escalate to activation: unblock the
+   toolbox RoT "Update Signing Module" gate for one live `get_fuse_data`, or repeat
+   on a second correctly-activated unit.
+3. **No self-reboot at all** → firmware defect: `psa_fwu_request_reboot()` returns
+   without effect and its rc is discarded (`cc3501e_hw_tick()`, + the sibling calls
+   in `cc3501e_ota_install()`/accept). Fix = check + surface those rcs via
+   console/`GET_DIAG_INFO` so armed/requested/refused are distinguishable, and
+   investigate the FWU-service state that refused the reboot.
+
+**#493 CRITERION 1 — CLOSED (2026-07-10).** The full OTA cold-swap cycle is
+silicon-proven on E8: a FORWARD candidate (the plain radio-free bridge signed at
+GPE **v0.90.0.0**, above the primary) streamed → `state=2 written=37016/37016 B`
+**STAGED** → the CC35's own `psa_fwu_request_reboot()` swapped it (bridge dropped
+~2 s, then returned) → post-swap the CC35 runs the radio-free candidate
+(`WIFI_SCAN`/`GET_MAC`/`BLE` go NOT_READY where pre-swap found 5 APs — the proof)
+→ **self-accepted and PERSISTED across a true cold POR** (no rollback). The key
+was a candidate version ABOVE the primary: a downgrade (the old v0.0.4.0
+candidate) is refused at `psa_fwu` install (`state=3` ERROR), a forward one is
+accepted. Regenerate the forward candidate with `firmware/cc3501e/ti/build_ti.sh`
+(plain) → `build+sign vendor_image --version <above primary>` → bin2c (recipe in
+`cc3501e_ota_candidate.c`). **Known follow-up (non-blocking):** the FIRST OTA
+attempt after a failed/aborted OTA can return `-1` and wedge the bridge until a
+CC35 reset — the `OTA_BEGIN` clear does not cover every stuck slot state; the
+forward image stages reliably from a clean slot.
+
+--- history (how we got here) ---
+
+Corrected-procedure run 2026-07-09: the
+test was **blocked upstream** — a genuine STAGED image from a prior run is stuck
+pending in the CC35 secondary slot, and there is **no non-destructive way to
+clear or promote it over the bridge**:
+
+- A fresh `cc3501e_ota_update` short-circuits to `-1` (INVAL, "slot already
+  pending") **before** `OTA_FINISH`, so `ota_reboot_pending` is never armed and
+  `psa_fwu_request_reboot()` is never issued — the test cannot reach any of the
+  three outcomes above.
+- `OTA_ABORT` (protocol.c) cancels only an **in-flight** session; it does not
+  clear a committed STAGED image. There is no OTA reject/erase opcode, and the
+  staged image survived a verified true cold POR — so nothing on the bench frees
+  the slot.
+- **Chicken-and-egg:** a fresh FINISH needs a free slot; the slot frees only via
+  a swap; the swap needs the request armed by a fresh FINISH.
+
+Corroboration (strengthens the root cause): across **two** bare-nRESET CC35
+reboots (the E8 `cc3501e_bridge_bringup` Puya WIFI_EN+nRESET workaround, one per
+E8 boot) the image stayed pending, un-promoted — confirming a bare reset carrying
+no `psa_fwu_request_reboot()` does NOT promote.
+
+**The unblock is now IMPLEMENTED (proto v4): `OTA_PROMOTE` (opcode 0x46).** It
+arms the same deferred swap-reboot `FINISH` uses, for an image already committed
+to STAGED — so the pending slot can be promoted without a fresh session (which is
+unreachable while the slot is occupied). Surface: host `cc3501e_ota_promote()`,
+firmware `cc3501e_hw_ota_promote()` (ti) / NOTIMPL (stub), example
+`-DCC3501E_OTA_PROMOTE=ON`. Native transport test covers the opcode
+(NOT_READY on stub, INVALID on bad payload).
+
+**Bench step to close crit-1** (needs a CC35 firmware rebuild + reflash, since the
+promote opcode must be present in the CC35's *running* firmware — the current
+primary v1 predates it): (1) `build_ti.sh` the CC35 firmware with this change +
+reflash it; (2) run the E8 app with `-DCC3501E_OTA_PROMOTE=ON` — it calls
+`cc3501e_ota_promote()`, the firmware arms `psa_fwu_request_reboot()`, the bridge
+drops as the CC35 self-reboots, and BL2/MCUboot swaps the pending image to
+primary; (3) confirm `GET_VERSION` reports the new image, then one true cold POR
+retains it. (The exact PSA "already pending" error mapped to host `-1` lives in
+the license/vendor FWU path, not this repo's `src/` — TBD.)
+
 ## 6. GPIO proxy
 
 GPIO proxy and camera-enable opcodes are shipped. The firmware guards reserved

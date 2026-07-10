@@ -39,6 +39,11 @@ SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
 DEV="$JLINK_DEVICE_FLASH"
+# Select the AEN J-Link by serial: the bench has TWO J-Links (AEN + the CC3501E
+# XDS110/V2N), so without SelectEmuBySN JLinkExe picks arbitrarily and "Cannot
+# connect to the probe".  Set JLINK_SN (default = the AEN probe) to disambiguate.
+JLINK_SN="${JLINK_SN:-603000869}"
+SEL="${JLINK_SN:+SelectEmuBySN $JLINK_SN}"
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
@@ -81,6 +86,7 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 # 3. J-Link: part-number device unlocks the MRAM loader; write BOTH blobs, verify,
 #    sanity-check the reset vector, then PIN reset (RSetType 2) -> SE boot ROM boots it.
 cat > /tmp/flowd-mramxip.jlink <<EOF
+$SEL
 si SWD
 speed $JLINK_SPEED
 device $DEV
@@ -105,6 +111,7 @@ fi
 # 4. SES has re-booted the app; attach read-only (generic device) + dump RAM console.
 sleep 3
 cat > /tmp/flowd-mramxip-read.jlink <<EOF
+$SEL
 device $JLINK_DEVICE_READ
 si SWD
 speed $JLINK_SPEED

@@ -1318,6 +1318,11 @@ alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms)
 	return poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_ABORT, NULL, 0, NULL, 0, NULL, timeout_ms);
 }
 
+alp_status_t cc3501e_ota_promote(cc3501e_t *ctx, uint32_t timeout_ms)
+{
+	return poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_PROMOTE, NULL, 0, NULL, 0, NULL, timeout_ms);
+}
+
 alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, uint32_t timeout_ms)
 {
 	if (out == NULL) return ALP_ERR_INVAL;

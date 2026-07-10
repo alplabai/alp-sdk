@@ -35,3 +35,28 @@ target_sources(app PRIVATE src/cc3501e_bridge.c)
 # cc3501e_gpio_routes[] (E1M IO pin_id -> raw CC3501E GPIO). Built unconditionally;
 # only consulted when CONFIG_ALP_SDK_GPIO_CC3501E_PROXY is enabled (prj.conf).
 target_sources(app PRIVATE src/cc3501e_gpio_routes.c)
+
+# Opt-in OTA streaming demo (Step 7.5 in main.c). Left OFF by default so a
+# normal bring-up run never kicks a (disruptive) flash cycle.
+#   -DCC3501E_OTA_DEMO=ON  -- stream an inert blob (proves the wire path only).
+#   -DCC3501E_OTA_REAL=ON  -- stream the genuine signed candidate image
+#                             (v0.0.4.0), so FINISH reaches a real STAGED. This
+#                             compiles the shared candidate blob from firmware/
+#                             so the extern resolves; it implies OTA_DEMO.
+#   -DCC3501E_OTA_PROMOTE=ON -- do not stream; request the swap-reboot for an
+#                             image a prior OTA_REAL run left STAGED-but-pending
+#                             (unjams the slot). Implies OTA_DEMO (the call site).
+option(CC3501E_OTA_DEMO "Enable the opt-in CC3501E OTA streaming demo" OFF)
+option(CC3501E_OTA_REAL "OTA demo streams the real signed candidate image" OFF)
+option(CC3501E_OTA_PROMOTE "OTA demo promotes an already-committed pending image" OFF)
+if(CC3501E_OTA_DEMO OR CC3501E_OTA_REAL OR CC3501E_OTA_PROMOTE)
+    target_compile_definitions(app PRIVATE CC3501E_OTA_DEMO)
+endif()
+if(CC3501E_OTA_REAL)
+    target_compile_definitions(app PRIVATE CC3501E_OTA_REAL)
+    target_sources(app PRIVATE
+        ${ALP_SDK_ROOT}/firmware/cc3501e/hal/ti/cc3501e_ota_candidate.c)
+endif()
+if(CC3501E_OTA_PROMOTE)
+    target_compile_definitions(app PRIVATE CC3501E_OTA_PROMOTE)
+endif()

@@ -60,9 +60,13 @@ verified in the Alp SDK as of today".  It complements:
   on-silicon campaign brought up the peripheral matrix, NPU
   inference, dual-core RPC, and SE-crypto — all `RESULT PASS` (the
   per-row evidence lives in
-  [`docs/aen-bench-bringup.md`](aen-bench-bringup.md)).  The full
-  **customer** secure-boot / OTA production chain (MCUboot-slot0) is
-  still bench-pending, so validate that path on your own HiL before
+  [`docs/aen-bench-bringup.md`](aen-bench-bringup.md)).  The
+  **CC3501E companion OTA cold-swap cycle is silicon-proven** on the
+  E1M-AEN801 EVK (2026-07-10): stream → STAGE → the CC35's own
+  `psa_fwu_request_reboot()` swap → self-accept + persist across a true
+  cold POR (`docs/cc3501e-production.md` § OTA).  The E8's **own**
+  secure-boot / OTA production chain (MCUboot-slot0) is a separate path
+  and is still bench-pending, so validate that on your own HiL before
   shipping it.
 - **You should NOT ship production firmware against the remaining
   families (i.MX 93, V2M) unless you've done your own HiL.**

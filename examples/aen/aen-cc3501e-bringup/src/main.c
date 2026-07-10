@@ -344,55 +344,135 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
  *
  * WHAT A REAL DEPLOYMENT PASSES: `image` must be a genuine SIGNED GPE vendor
  * image (manifest + body) built for the CC3501E -- the same artefact
- * firmware/cc3501e/ produces.  The blob below is a small INERT pattern: it
- * exercises the host encode/stream/framing path end-to-end but is NOT a
- * valid image, so on real silicon the firmware's psa_fwu_start rejects it at
- * FINISH (an expected, safe failure -- nothing gets staged).  Swap in a real
- * signed image on the bench to stage a genuine update.
+ * firmware/cc3501e/ produces.  This demo has TWO payload modes:
  *
- * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md): the receive ->
- * RAM-stage -> psa_fwu install-to-STAGED pipeline is silicon-validated, but
- * the final COLD swap-boot is gated by the vendor-SBL cold-boot issue on the
- * current mis-activated bench units.  So this demo proves the streaming +
- * framing + state machine; it does not (yet) prove a live A/B swap on those
- * units.  Opt in with -DEXTRA_CFLAGS=-DCC3501E_OTA_DEMO; left OFF by default
- * so a normal bring-up run never kicks a (disruptive) flash cycle.
+ *   default            -- a small INERT pattern.  It exercises the host
+ *                         encode/stream/framing path end-to-end but is NOT a
+ *                         valid image, so on real silicon the firmware's
+ *                         psa_fwu_start rejects it at FINISH (an expected, safe
+ *                         failure -- nothing gets staged).  Proves the wire
+ *                         path only.
+ *   -DCC3501E_OTA_REAL -- streams the genuine `cc3501e_ota_candidate[]` (a
+ *                         signed GPE vendor image built for the CC3501E, at a
+ *                         GPE version ABOVE the running primary so it is a
+ *                         FORWARD update).  psa_fwu_start ACCEPTS it, FINISH
+ *                         reaches STAGED (`state`=2), and the CC35's own
+ *                         `psa_fwu_request_reboot()` swaps it in.  (A DOWNGRADE
+ *                         candidate is refused at install, `state`=3/ERROR --
+ *                         monotonic anti-rollback.)  Requires the CMake side to
+ *                         compile the candidate source -- see CMakeLists.txt.
+ *
+ * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md §5): the FULL cycle is
+ * silicon-proven on the E1M-AEN801 EVK (2026-07-10) -- stream -> STAGED -> the
+ * firmware's own swap-reboot (the bridge drops, then returns) -> the swapped
+ * image self-accepts and PERSISTS across a true cold POR.  The swap is driven
+ * by the CC35's `psa_fwu_request_reboot()` after FINISH, NOT a host cold POR.
+ * `OTA_STATUS reserved[0]` (printed below as `reboot_rc`) surfaces the swap
+ * result: 0 = success, non-zero = refused (e.g. a downgrade).  Opt in at build
+ * time with `-DCC3501E_OTA_DEMO=ON` (inert blob) or `-DCC3501E_OTA_REAL=ON`
+ * (genuine forward candidate); left OFF by default so a normal bring-up run
+ * never kicks a (disruptive) flash cycle.
  */
 #ifdef CC3501E_OTA_DEMO
 #define CC3501E_OTA_DEMO_TIMEOUT_MS 20000u
+#ifdef CC3501E_OTA_PROMOTE
+/*
+ * Promote (unjam) an already-committed pending image.  The over-bridge install
+ * leaves the image STAGED and relies on the CC35's OWN `psa_fwu_request_reboot()`
+ * (armed at FINISH) to swap it.  An image left pending by a bare reset (which
+ * carries no swap request) jams the slot: a fresh `cc3501e_ota_update`
+ * short-circuits on the occupied slot and can never re-arm the reboot.
+ * `cc3501e_ota_promote()` requests the swap-reboot for that committed image.
+ * Build with -DCC3501E_OTA_PROMOTE=ON to swap-boot an image a prior
+ * -DCC3501E_OTA_REAL run left STAGED-but-unpromoted.
+ */
+static void cc3501e_demo_ota_promote(cc3501e_t *fw)
+{
+	printf("[cc3501e-bringup] OTA: promoting the pending image (cc3501e_ota_promote)...\n");
+	alp_status_t s = cc3501e_ota_promote(fw, CC3501E_OTA_DEMO_TIMEOUT_MS);
+	if (s == ALP_OK) {
+		printf("[cc3501e-bringup] OTA promote acked -- the CC35 swaps+boots the pending "
+		       "slot; the bridge drops during its reboot, then GET_VERSION should report "
+		       "the new image\n");
+	} else if (s == ALP_ERR_NOT_READY) {
+		printf("[cc3501e-bringup] OTA promote -> NOT_READY (no PSA-FWU in this build)\n");
+	} else {
+		printf("[cc3501e-bringup] OTA promote -> %d\n", (int)s);
+	}
+}
+#endif /* CC3501E_OTA_PROMOTE */
+
 static void cc3501e_demo_ota(cc3501e_t *fw)
 {
+#ifdef CC3501E_OTA_PROMOTE
+	/* Unjam/promote mode: do NOT stream -- request the swap for an image a prior
+	 * run left STAGED-but-unpromoted (a fresh stream would short-circuit). */
+	cc3501e_demo_ota_promote(fw);
+	return;
+#endif
+#ifdef CC3501E_OTA_REAL
+	/* Genuine signed GPE vendor image -- the plain radio-free bridge signed at a
+	 * version HIGHER than the flashed primary (a FORWARD update), so psa_fwu
+	 * accepts it (a downgrade is refused at install).  FINISH reaches a true
+	 * STAGED and the CC35's own psa_fwu_request_reboot() swaps it in. */
+	extern const unsigned char cc3501e_ota_candidate[];
+	extern const unsigned int  cc3501e_ota_candidate_len;
+	const uint8_t             *image      = cc3501e_ota_candidate;
+	const size_t               image_len  = (size_t)cc3501e_ota_candidate_len;
+	const bool                 real_image = true;
+#else
 	/* Illustrative inert blob (NOT a signed image -- see the note above). */
-	static uint8_t image[1024];
-	for (size_t i = 0; i < sizeof(image); ++i) {
-		image[i] = (uint8_t)(i * 31u + 7u);
+	static uint8_t inert[1024];
+	for (size_t i = 0; i < sizeof(inert); ++i) {
+		inert[i] = (uint8_t)(i * 31u + 7u);
 	}
+	const uint8_t *image      = inert;
+	const size_t   image_len  = sizeof(inert);
+	const bool     real_image = false;
+#endif
 
-	printf("[cc3501e-bringup] OTA: streaming a %u B demo blob via cc3501e_ota_update...\n",
-	       (unsigned)sizeof(image));
+	printf("[cc3501e-bringup] OTA: streaming a %u B %s image via cc3501e_ota_update...\n",
+	       (unsigned)image_len,
+	       real_image ? "SIGNED candidate" : "inert demo");
 
-	alp_status_t s = cc3501e_ota_update(fw, image, sizeof(image), CC3501E_OTA_DEMO_TIMEOUT_MS);
+	alp_status_t s = cc3501e_ota_update(fw, image, image_len, CC3501E_OTA_DEMO_TIMEOUT_MS);
 
 	/* Read back the session state regardless of the update result -- this is
 	 * the field-diagnostic call (`alp companion ota status` uses the same). */
 	alp_cc3501e_ota_status_t st = { 0 };
 	if (cc3501e_ota_status(fw, &st, CC3501E_OTA_DEMO_TIMEOUT_MS) == ALP_OK) {
-		printf("[cc3501e-bringup] OTA status: state=%u written=%u/%u B\n",
+		/* state: 1=WRITING, 2=STAGED (FINISH ok), 3=ERROR (FINISH rejected the
+		 * image -- e.g. anti-rollback on a downgrade).  reserved[0] = the last
+		 * swap-reboot rc: 0 = success/none, non-zero = the swap was REFUSED. */
+		printf("[cc3501e-bringup] OTA status: state=%u written=%u/%u B reboot_rc=%d\n",
 		       (unsigned)st.state,
 		       (unsigned)st.bytes_written,
-		       (unsigned)st.total_len);
+		       (unsigned)st.total_len,
+		       (int)(int8_t)st.reserved[0]);
 	}
 
 	if (s == ALP_OK) {
-		printf("[cc3501e-bringup] OTA -> STAGED; the CC35 will swap+boot the new "
-		       "slot on its next reboot (production path)\n");
+		printf("[cc3501e-bringup] OTA -> STAGED (image accepted by psa_fwu); the CC35's "
+		       "own psa_fwu_request_reboot() swaps it in -- the bridge drops, then "
+		       "reboots into the new image (a forward image; a radio-free candidate "
+		       "makes WIFI_SCAN go NOT_READY, proving the swap)\n");
 	} else if (s == ALP_ERR_NOT_READY) {
 		printf("[cc3501e-bringup] OTA -> NOT_READY (no PSA-FWU in this CC3501E image) "
 		       "-- expected on a non-OTA firmware build\n");
+	} else if (real_image) {
+		/* A genuine FORWARD image should reach STAGED; a non-OK here is a real fault.
+		 * state=3 (ERROR) with a downgrade image means anti-rollback refused it at
+		 * install -- use a candidate version above the primary.  Reset the session. */
+		printf("[cc3501e-bringup] OTA -> %d (signed image did NOT stage; state=%u -- if "
+		       "ERROR(3), the candidate is likely a downgrade the SBL refused); "
+		       "aborting the session\n",
+		       (int)s,
+		       (unsigned)st.state);
+		(void)cc3501e_ota_abort(fw, CC3501E_OTA_DEMO_TIMEOUT_MS);
 	} else {
 		/* An inert blob fails at FINISH (image validation) -- the host stream +
-		 * framing still round-tripped, which is what this demo proves.  Reset the
-		 * half-open session so the slot is clean for a real image. */
+		 * framing still round-tripped, which is what the default mode proves.  Reset
+		 * the half-open session so the slot is clean for a real image. */
 		printf("[cc3501e-bringup] OTA -> %d (inert blob rejected at FINISH as expected); "
 		       "aborting the session\n",
 		       (int)s);

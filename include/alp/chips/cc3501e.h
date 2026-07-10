@@ -1075,6 +1075,25 @@ alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms);
 alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);
 
 /**
+ * @brief Promote an already-committed pending image (OTA_PROMOTE, opcode 0x46).
+ *
+ * Requests the deferred swap-reboot for an image already installed to STAGED --
+ * for example one left pending by a bare reset that carried no swap request. A
+ * committed STAGED image survives a reset while the device's RAM session state
+ * resets to IDLE, so a fresh @ref cc3501e_ota_finish is unreachable (a new
+ * session is rejected while a slot is occupied); this is the only path to
+ * request the swap for such an image. The bridge link drops while the device
+ * reboots and BL2/MCUboot swaps the pending slot to primary. If nothing is
+ * pending the reboot is a clean no-op.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Per-request poll-by-repeat budget.
+ * @return ALP_OK once the promote is acked (reboot follows); otherwise the
+ *         mapped error (e.g. ALP_ERR_NOT_READY on a non-OTA firmware build).
+ */
+alp_status_t cc3501e_ota_promote(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
  * @brief Query the device-side OTA session state (OTA_STATUS, opcode 0x44).
  *
  * Fills @p out with the session state, the bytes accepted so far (the write
