@@ -21,11 +21,26 @@
 #   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
 #   5. board.yaml metadata schema validate
 #   6. Public/private text classifier
-#   7. Doxygen zero-warnings build (skipped if no Doxygen)
+#   7. Required scripts/check_*.py gates (the same list
+#      pr-metadata-validate.yml / pr-doc-drift.yml run as hard
+#      gates -- see REQUIRED_GATE_SCRIPTS below)
+#   8. Doxygen zero-warnings build (skipped if no Doxygen)
 #
 # Each stage prints `[stage] PASS` or `[stage] FAIL`; the script
-# returns non-zero if any required stage failed.  Skipped stages
-# don't fail the run; they're logged as `[stage] SKIP <reason>`.
+# returns non-zero if any required stage failed.  A stage function
+# signals "prerequisite not available" by returning exit code 99;
+# run_stage() turns that into `[stage] SKIP`, never `FAIL` -- skipped
+# stages don't fail the run.
+#
+# Worktree-safe: this script resolves its own location via
+# `${BASH_SOURCE[0]}`, so REPO_ROOT is always the checkout the script
+# was invoked from -- including a `git worktree add` checkout, whose
+# `.git` is a *file* (a gitlink), not a directory.  The twister stage
+# additionally pins that same REPO_ROOT as the LAST entry of
+# EXTRA_ZEPHYR_MODULES (appended, not just defaulted when unset) so a
+# worktree's own sources always win module-name resolution, even when
+# an inherited EXTRA_ZEPHYR_MODULES already points elsewhere -- other
+# modules already listed there are preserved, not dropped.
 #
 # Flags:
 #   --quick           skip twister + Doxygen (the slow stages)
@@ -83,11 +98,18 @@ run_stage() {
     local name="$1"; shift
     echo
     echo "===== [${name}] ====="
-    if "$@"; then
+    "$@"
+    local rc=$?
+    # Convention: a stage function returns 99 to mean "a prerequisite
+    # (tool / optional script / env var) isn't available here" -- that
+    # is a SKIP, never a FAIL, regardless of which stage it came from.
+    if [ "${rc}" -eq 99 ]; then
+        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_NOTES+=("prerequisite unavailable")
+        echo "[${name}] SKIP (prerequisite unavailable)"
+    elif [ "${rc}" -eq 0 ]; then
         STAGE_NAMES+=("${name}"); STAGE_STATUS+=("PASS"); STAGE_NOTES+=("")
         echo "[${name}] PASS"
     else
-        local rc=$?
         STAGE_NAMES+=("${name}"); STAGE_STATUS+=("FAIL"); STAGE_NOTES+=("exit=${rc}")
         echo "[${name}] FAIL (exit=${rc})"
     fi
@@ -130,6 +152,29 @@ stage_twister() {
     if [ -z "${ZEPHYR_BASE:-}" ]; then
         return 99
     fi
+    # Pin THIS checkout as the alp-sdk Zephyr module -- always, even
+    # if EXTRA_ZEPHYR_MODULES is already set (e.g. exported from a
+    # shell rc pointing at a primary checkout, per docs/local-ci.md).
+    # Without this, running test-all.sh from a `git worktree add`
+    # checkout compiled tests from the worktree against alp-sdk
+    # sources from wherever EXTRA_ZEPHYR_MODULES already pointed -- a
+    # silent mixed-revision link (#608).
+    #
+    # zephyr_module.py's parse_modules() keys modules by module NAME
+    # (see zephyr/scripts/zephyr_module.py) and a later entry with the
+    # same name overwrites an earlier one, so appending REPO_ROOT as
+    # the LAST entry makes it win a name collision against a
+    # differently-pathed alp-sdk module earlier in the list --
+    # without dropping any other (non-alp-sdk) module already listed.
+    local -a _existing=() _modules=()
+    local _m _joined
+    IFS=';' read -ra _existing <<< "${EXTRA_ZEPHYR_MODULES:-}"
+    for _m in "${_existing[@]}"; do
+        [ -n "${_m}" ] && [ "${_m}" != "${REPO_ROOT}" ] && _modules+=("${_m}")
+    done
+    _modules+=("${REPO_ROOT}")
+    _joined=$(IFS=';'; echo "${_modules[*]}")
+    export EXTRA_ZEPHYR_MODULES="${_joined}"
     python3 "${ZEPHYR_BASE}/scripts/twister" \
         --testsuite-root "${REPO_ROOT}/tests/zephyr" \
         --testsuite-root "${REPO_ROOT}/examples" \
@@ -142,12 +187,23 @@ stage_clang_format() {
     if ! command -v clang-format >/dev/null 2>&1; then
         return 99
     fi
+    # The helper ships under two names depending on how it was
+    # installed: the apt/`/usr/share/clang/...` layout names it
+    # `clang-format-diff.py`; the pip `clang-format` wheel (see
+    # docs/testing.md) puts a same-named `clang-format-diff.py` on
+    # PATH, while some distros symlink an extensionless
+    # `clang-format-diff`.  Check PATH for both spellings before
+    # falling back to the apt path glob.
     local diff_tool
-    diff_tool=$(ls /usr/share/clang/clang-format*/clang-format-diff.py 2>/dev/null | head -1)
+    diff_tool=$(command -v clang-format-diff.py 2>/dev/null || true)
     if [ -z "${diff_tool}" ]; then
         diff_tool=$(command -v clang-format-diff 2>/dev/null || true)
     fi
     if [ -z "${diff_tool}" ]; then
+        diff_tool=$(ls /usr/share/clang/clang-format*/clang-format-diff.py 2>/dev/null | head -1)
+    fi
+    if [ -z "${diff_tool}" ]; then
+        echo "clang-format is installed but no clang-format-diff(.py) helper was found on PATH or under /usr/share/clang -- skipping"
         return 99
     fi
     # Default to HEAD~1; consumers in CI override via $DIFF_BASE.
@@ -213,6 +269,80 @@ stage_pytest_scripts() {
     python3 -m pytest tests/scripts/ -q || return 1
 }
 
+# Registry of the scripts/check_*.py (+ a couple of validate_*.py)
+# gates that pr-metadata-validate.yml / pr-doc-drift.yml run as hard,
+# non-informational CI gates -- i.e. every gate below is a required
+# check today, not the "informational" ones (check_test_coverage.py,
+# check_cross_platform.py) CI itself doesn't fail on.  Kept as one
+# list so this wrapper and CI can't silently drift apart: wiring a
+# script into a workflow as a hard gate and NOT adding it here is the
+# defect #608 flagged (check_stub_issues.py failed on review while
+# this wrapper never ran it).
+REQUIRED_GATE_SCRIPTS=(
+    check_pin_conflicts.py
+    check_e1m_pinout.py
+    check_inference_backend_parity.py
+    check_e1m_route_capability.py
+    check_emit_snapshots.py
+    check_stub_issues.py
+    check_vendor_ext_tags.py
+    check_public_header_purity.py
+    check_local_paths.py
+    check_sw_fallback_tags.py
+    check_som_bundle.py
+    check_chip_manifest_parity.py
+    check_chip_header_status.py
+    check_example_portability.py
+    check_doc_drift.py
+    check_version_doc_sync.py
+)
+
+stage_required_gate_scripts() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 99
+    fi
+    local script path failed=0 ran=0
+    for script in "${REQUIRED_GATE_SCRIPTS[@]}"; do
+        path="scripts/${script}"
+        if [ ! -f "${path}" ]; then
+            continue
+        fi
+        ran=1
+        echo "--- ${path} ---"
+        python3 "${path}" || failed=1
+    done
+
+    # board.yaml schema sweep -- canonical template + every
+    # examples/*/board.yaml + tests/*/board.yaml, mirroring the
+    # pr-metadata-validate.yml "schema sweep" step.
+    if [ -f scripts/validate_board_yaml.py ]; then
+        ran=1
+        if [ -f metadata/templates/board.yaml.example ]; then
+            echo "--- validate_board_yaml.py (canonical template) ---"
+            python3 scripts/validate_board_yaml.py \
+                --input metadata/templates/board.yaml.example || failed=1
+        fi
+        while IFS= read -r f; do
+            echo "--- validate_board_yaml.py ${f} ---"
+            python3 scripts/validate_board_yaml.py --input "${f}" || failed=1
+        done < <(find examples tests -name board.yaml 2>/dev/null)
+    fi
+
+    # gd32-bridge protocol vectors must not drift from the generator
+    # (mirrors the pr-metadata-validate.yml gd32-bridge step).
+    if [ -f firmware/gd32-bridge/tests/gen_protocol_vectors.py ]; then
+        ran=1
+        echo "--- gd32-bridge protocol vectors --check ---"
+        python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py --check \
+            || failed=1
+    fi
+
+    if [ "${ran}" -eq 0 ]; then
+        return 99
+    fi
+    return "${failed}"
+}
+
 stage_hil_spec_validate() {
     # Cheap host-side validation of every HiL smoke spec under
     # tests/hil/.  Catches stale board targets, missing example
@@ -254,12 +384,10 @@ stage_doxygen() {
 START=$(date +%s)
 
 if [ "${ZEPHYR_ONLY}" -eq 1 ]; then
-    if rc=$(stage_twister; echo $?) 2>/dev/null; then :; fi
-    case "${rc:-}" in
-        99) skip_stage "twister" "ZEPHYR_BASE not set" ;;
-        0)  run_stage "twister" stage_twister ;;
-        *)  run_stage "twister" stage_twister ;;
-    esac
+    # Run the suite exactly once.  run_stage() already turns a 99
+    # return (ZEPHYR_BASE unset) into SKIP, so no pre-check/case
+    # dance -- and no second, output-hiding invocation -- is needed.
+    run_stage "twister" stage_twister
 else
     run_stage "yocto-build-and-ctest" stage_yocto_build_and_ctest
     run_stage "baremetal-build"       stage_baremetal_build
@@ -294,6 +422,11 @@ else
     else
         skip_stage "public-private" "scripts/check_public_private.py missing"
     fi
+
+    # Required scripts/check_*.py gates -- see REQUIRED_GATE_SCRIPTS
+    # above.  Keeps this wrapper's coverage aligned with the hard
+    # gates pr-metadata-validate.yml / pr-doc-drift.yml run in CI.
+    run_stage "required-gate-scripts" stage_required_gate_scripts
 
     # Pytest -- subsumes metadata-validate's unittest coverage and adds
     # the linter + regression locks for a3cd4fd / e3a4c6b.
