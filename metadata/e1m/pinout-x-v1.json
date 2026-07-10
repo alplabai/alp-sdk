@@ -1,0 +1,4411 @@
+{
+  "loom_format_version": 1,
+  "id": "E1M-X",
+  "version": "1.0",
+  "footprint_class": "FC_45x65",
+  "outline_mm": {
+    "w": 45,
+    "h": 65
+  },
+  "pads": [
+    {
+      "id": "A1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A2",
+      "silkscreen": "USB_CC1",
+      "default": "USB_CC1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A3",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A4",
+      "silkscreen": "PWM6",
+      "default": "PWM",
+      "instance": "PWM6",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A5",
+      "silkscreen": "PWM4",
+      "default": "PWM",
+      "instance": "PWM4",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A6",
+      "silkscreen": "PWM2",
+      "default": "PWM",
+      "instance": "PWM2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A7",
+      "silkscreen": "PWM0",
+      "default": "PWM",
+      "instance": "PWM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A8",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A9",
+      "silkscreen": "ENC3_X",
+      "default": "ENC_X",
+      "instance": "ENC3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A10",
+      "silkscreen": "ENC2_X",
+      "default": "ENC_X",
+      "instance": "ENC2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A11",
+      "silkscreen": "ENC1_X",
+      "default": "ENC_X",
+      "instance": "ENC1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A12",
+      "silkscreen": "ENC0_X",
+      "default": "ENC_X",
+      "instance": "ENC0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A13",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A14",
+      "silkscreen": "ANA_S6",
+      "default": "ADC",
+      "instance": "ADC6",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A15",
+      "silkscreen": "ANA_S4",
+      "default": "ADC",
+      "instance": "ADC4",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A16",
+      "silkscreen": "ANA_S2",
+      "default": "ADC",
+      "instance": "ADC2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A17",
+      "silkscreen": "ANA_S0",
+      "default": "ADC",
+      "instance": "ADC0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A18",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A19",
+      "silkscreen": "DAC0",
+      "default": "DAC",
+      "instance": "DAC0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A20",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A21",
+      "silkscreen": "CAN_STBY",
+      "default": "CAN_STBY",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A22",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A23",
+      "silkscreen": "I2C3_SDA",
+      "default": "I2C_SDA",
+      "instance": "I2C3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A24",
+      "silkscreen": "I2C3_SCL",
+      "default": "I2C_SCL",
+      "instance": "I2C3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A25",
+      "silkscreen": "IO35",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "A26",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A27",
+      "silkscreen": "PCIE1_TX0_P",
+      "default": "PCIE_TX0_P",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A28",
+      "silkscreen": "PCIE1_TX1_P",
+      "default": "PCIE_TX1_P",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A29",
+      "silkscreen": "PCIE1_TX2_P",
+      "default": "PCIE_TX2_P",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A30",
+      "silkscreen": "PCIE1_TX3_P",
+      "default": "PCIE_TX3_P",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A31",
+      "silkscreen": "PCIE1_RX0_P",
+      "default": "PCIE_RX0_P",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A32",
+      "silkscreen": "PCIE1_RX1_P",
+      "default": "PCIE_RX1_P",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A33",
+      "silkscreen": "PCIE1_RX2_P",
+      "default": "PCIE_RX2_P",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A34",
+      "silkscreen": "PCIE1_RX3_P",
+      "default": "PCIE_RX3_P",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A35",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A36",
+      "silkscreen": "PCIE1_CLK_P",
+      "default": "PCIE_CLK_P",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A37",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A38",
+      "silkscreen": "PCIE0_TX0_P",
+      "default": "PCIE_TX0_P",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A39",
+      "silkscreen": "PCIE0_TX1_P",
+      "default": "PCIE_TX1_P",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A40",
+      "silkscreen": "PCIE0_TX2_P",
+      "default": "PCIE_TX2_P",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A41",
+      "silkscreen": "PCIE0_TX3_P",
+      "default": "PCIE_TX3_P",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A42",
+      "silkscreen": "PCIE0_RX0_P",
+      "default": "PCIE_RX0_P",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A43",
+      "silkscreen": "PCIE0_RX1_P",
+      "default": "PCIE_RX1_P",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A44",
+      "silkscreen": "PCIE0_RX2_P",
+      "default": "PCIE_RX2_P",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A45",
+      "silkscreen": "PCIE0_RX3_P",
+      "default": "PCIE_RX3_P",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A46",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A47",
+      "silkscreen": "PCIE0_CLK_P",
+      "default": "PCIE_CLK_P",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A48",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A49",
+      "silkscreen": "DSI1_C_P",
+      "default": "MIPI_DSI_CLK_P",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A50",
+      "silkscreen": "DSI1_3_P",
+      "default": "MIPI_DSI_DATA3_P",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A51",
+      "silkscreen": "DSI1_2_P",
+      "default": "MIPI_DSI_DATA2_P",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A52",
+      "silkscreen": "DSI1_1_P",
+      "default": "MIPI_DSI_DATA1_P",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A53",
+      "silkscreen": "DSI1_0_P",
+      "default": "MIPI_DSI_DATA0_P",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A54",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A55",
+      "silkscreen": "BL_LED_K",
+      "default": "BL_LED_K",
+      "alt": []
+    },
+    {
+      "id": "A56",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A57",
+      "silkscreen": "DSI0_C_P",
+      "default": "MIPI_DSI_CLK_P",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A58",
+      "silkscreen": "DSI0_3_P",
+      "default": "MIPI_DSI_DATA3_P",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A59",
+      "silkscreen": "DSI0_2_P",
+      "default": "MIPI_DSI_DATA2_P",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A60",
+      "silkscreen": "DSI0_1_P",
+      "default": "MIPI_DSI_DATA1_P",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A61",
+      "silkscreen": "DSI0_0_P",
+      "default": "MIPI_DSI_DATA0_P",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "A62",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "A64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B1",
+      "silkscreen": "USB0_30_D_P",
+      "default": "USB_DP",
+      "instance": "USB0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B2",
+      "silkscreen": "USB_CC2",
+      "default": "USB_CC2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B3",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B4",
+      "silkscreen": "PWM7",
+      "default": "PWM",
+      "instance": "PWM7",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B5",
+      "silkscreen": "PWM5",
+      "default": "PWM",
+      "instance": "PWM5",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B6",
+      "silkscreen": "PWM3",
+      "default": "PWM",
+      "instance": "PWM3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B7",
+      "silkscreen": "PWM1",
+      "default": "PWM",
+      "instance": "PWM1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B8",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B9",
+      "silkscreen": "ENC3_Y",
+      "default": "ENC_Y",
+      "instance": "ENC3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B10",
+      "silkscreen": "ENC2_Y",
+      "default": "ENC_Y",
+      "instance": "ENC2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B11",
+      "silkscreen": "ENC1_Y",
+      "default": "ENC_Y",
+      "instance": "ENC1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B12",
+      "silkscreen": "ENC0_Y",
+      "default": "ENC_Y",
+      "instance": "ENC0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B13",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B14",
+      "silkscreen": "ANA_S7",
+      "default": "ADC",
+      "instance": "ADC7",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B15",
+      "silkscreen": "ANA_S5",
+      "default": "ADC",
+      "instance": "ADC5",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B16",
+      "silkscreen": "ANA_S3",
+      "default": "ADC",
+      "instance": "ADC3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B17",
+      "silkscreen": "ANA_S1",
+      "default": "ADC",
+      "instance": "ADC1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B18",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B19",
+      "silkscreen": "DAC1",
+      "default": "DAC",
+      "instance": "DAC1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B20",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B21",
+      "silkscreen": "CAN0H/CAN0_TX",
+      "default": "CAN_H",
+      "instance": "CAN0",
+      "alt": [
+        {
+          "signal": "CAN_TX",
+          "instance": "CAN0"
+        },
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B22",
+      "silkscreen": "CAN0L/CAN0_RX",
+      "default": "CAN_L",
+      "instance": "CAN0",
+      "alt": [
+        {
+          "signal": "CAN_RX",
+          "instance": "CAN0"
+        },
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B23",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B24",
+      "silkscreen": "CAN1H/CAN1_TX",
+      "default": "CAN_H",
+      "instance": "CAN1",
+      "alt": [
+        {
+          "signal": "CAN_TX",
+          "instance": "CAN1"
+        },
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B25",
+      "silkscreen": "CAN1L/CAN1_RX",
+      "default": "CAN_L",
+      "instance": "CAN1",
+      "alt": [
+        {
+          "signal": "CAN_RX",
+          "instance": "CAN1"
+        },
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B26",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B27",
+      "silkscreen": "PCIE1_TX0_N",
+      "default": "PCIE_TX0_N",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B28",
+      "silkscreen": "PCIE1_TX1_N",
+      "default": "PCIE_TX1_N",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B29",
+      "silkscreen": "PCIE1_TX2_N",
+      "default": "PCIE_TX2_N",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B30",
+      "silkscreen": "PCIE1_TX3_N",
+      "default": "PCIE_TX3_N",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B31",
+      "silkscreen": "PCIE1_RX0_N",
+      "default": "PCIE_RX0_N",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B32",
+      "silkscreen": "PCIE1_RX1_N",
+      "default": "PCIE_RX1_N",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B33",
+      "silkscreen": "PCIE1_RX2_N",
+      "default": "PCIE_RX2_N",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B34",
+      "silkscreen": "PCIE1_RX3_N",
+      "default": "PCIE_RX3_N",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B35",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B36",
+      "silkscreen": "PCIE1_CLK_N",
+      "default": "PCIE_CLK_N",
+      "instance": "PCIE1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B37",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B38",
+      "silkscreen": "PCIE0_TX0_N",
+      "default": "PCIE_TX0_N",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B39",
+      "silkscreen": "PCIE0_TX1_N",
+      "default": "PCIE_TX1_N",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B40",
+      "silkscreen": "PCIE0_TX2_N",
+      "default": "PCIE_TX2_N",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B41",
+      "silkscreen": "PCIE0_TX3_N",
+      "default": "PCIE_TX3_N",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B42",
+      "silkscreen": "PCIE0_RX0_N",
+      "default": "PCIE_RX0_N",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B43",
+      "silkscreen": "PCIE0_RX1_N",
+      "default": "PCIE_RX1_N",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B44",
+      "silkscreen": "PCIE0_RX2_N",
+      "default": "PCIE_RX2_N",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B45",
+      "silkscreen": "PCIE0_RX3_N",
+      "default": "PCIE_RX3_N",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B46",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B47",
+      "silkscreen": "PCIE0_CLK_N",
+      "default": "PCIE_CLK_N",
+      "instance": "PCIE0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B48",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B49",
+      "silkscreen": "DSI1_C_N",
+      "default": "MIPI_DSI_CLK_N",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B50",
+      "silkscreen": "DSI1_3_N",
+      "default": "MIPI_DSI_DATA3_N",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B51",
+      "silkscreen": "DSI1_2_N",
+      "default": "MIPI_DSI_DATA2_N",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B52",
+      "silkscreen": "DSI1_1_N",
+      "default": "MIPI_DSI_DATA1_N",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B53",
+      "silkscreen": "DSI1_0_N",
+      "default": "MIPI_DSI_DATA0_N",
+      "instance": "DSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B54",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B55",
+      "silkscreen": "BL_LED_A",
+      "default": "BL_LED_A",
+      "alt": []
+    },
+    {
+      "id": "B56",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B57",
+      "silkscreen": "DSI0_C_N",
+      "default": "MIPI_DSI_CLK_N",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B58",
+      "silkscreen": "DSI0_3_N",
+      "default": "MIPI_DSI_DATA3_N",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B59",
+      "silkscreen": "DSI0_2_N",
+      "default": "MIPI_DSI_DATA2_N",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B60",
+      "silkscreen": "DSI0_1_N",
+      "default": "MIPI_DSI_DATA1_N",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B61",
+      "silkscreen": "DSI0_0_N",
+      "default": "MIPI_DSI_DATA0_N",
+      "instance": "DSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B62",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "B63",
+      "silkscreen": "SPI2_MISO",
+      "default": "SPI_MISO",
+      "instance": "SPI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "B64",
+      "silkscreen": "SPI2_MOSI",
+      "default": "SPI_MOSI",
+      "instance": "SPI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "C1",
+      "silkscreen": "USB0_30_D_N",
+      "default": "USB_DM",
+      "instance": "USB0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "silkscreen": "USB0_30_VBUS",
+      "default": "USB_VBUS",
+      "instance": "USB0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "C3",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "C62",
+      "silkscreen": "CAM_HSYNC",
+      "default": "PARCAM_HSYNC",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "C63",
+      "silkscreen": "SPI2_SCLK",
+      "default": "SPI_SCK",
+      "instance": "SPI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "C64",
+      "silkscreen": "SPI2_CS0",
+      "default": "SPI_CS0",
+      "instance": "SPI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "D1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "D2",
+      "silkscreen": "USB0_30_ID",
+      "default": "USB_ID",
+      "instance": "USB0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "D3",
+      "silkscreen": "LCD_B0",
+      "default": "LCD_B0",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "D62",
+      "silkscreen": "CAM_VSYNC",
+      "default": "PARCAM_VSYNC",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "D63",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "D64",
+      "silkscreen": "SPI2_CS1",
+      "default": "SPI_CS1",
+      "instance": "SPI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "E1",
+      "silkscreen": "USB0_30_RX0_P",
+      "default": "USB_RX_P",
+      "instance": "USB0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "E2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "E3",
+      "silkscreen": "LCD_B1",
+      "default": "LCD_B1",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "E62",
+      "silkscreen": "CAM_PCLK",
+      "default": "PARCAM_PCLK",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "E63",
+      "silkscreen": "I2C2_SDA",
+      "default": "I2C_SDA",
+      "instance": "I2C2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "E64",
+      "silkscreen": "I2C2_SCL",
+      "default": "I2C_SCL",
+      "instance": "I2C2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "F1",
+      "silkscreen": "USB0_30_RX0_N",
+      "default": "USB_RX_N",
+      "instance": "USB0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "F2",
+      "silkscreen": "USB2_20_VBUS",
+      "default": "USB_VBUS",
+      "instance": "USB2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "F3",
+      "silkscreen": "LCD_B2",
+      "default": "LCD_B2",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "F62",
+      "silkscreen": "CAM_XVCLK",
+      "default": "PARCAM_XVCLK",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "F63",
+      "silkscreen": "IO25",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "F64",
+      "silkscreen": "IO26",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "G1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "G2",
+      "silkscreen": "USB2_20_ID",
+      "default": "USB_ID",
+      "instance": "USB2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "G3",
+      "silkscreen": "LCD_B3",
+      "default": "LCD_B3",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "G62",
+      "silkscreen": "CAM_D1",
+      "default": "PARCAM_D1",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "G63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "G64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "H1",
+      "silkscreen": "USB0_30_TX0_P",
+      "default": "USB_TX_P",
+      "instance": "USB0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "H2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "H3",
+      "silkscreen": "LCD_B4",
+      "default": "LCD_B4",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "H62",
+      "silkscreen": "CAM_D2",
+      "default": "PARCAM_D2",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "H63",
+      "silkscreen": "CAM_VFB0",
+      "default": "POWER_CAM_LDO_FB",
+      "instance": "CAM0",
+      "alt": []
+    },
+    {
+      "id": "H64",
+      "silkscreen": "+V_CAM0",
+      "default": "POWER_CAM_LDO_OUT",
+      "instance": "CAM0",
+      "alt": []
+    },
+    {
+      "id": "I1",
+      "silkscreen": "USB0_30_TX0_N",
+      "default": "USB_TX_N",
+      "instance": "USB0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "I2",
+      "silkscreen": "USB2_20_P",
+      "default": "USB_DP",
+      "instance": "USB2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "I3",
+      "silkscreen": "LCD_B5",
+      "default": "LCD_B5",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "I62",
+      "silkscreen": "CAM_D3",
+      "default": "PARCAM_D3",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "I63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "I64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "J1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "J2",
+      "silkscreen": "USB2_20_N",
+      "default": "USB_DM",
+      "instance": "USB2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "J3",
+      "silkscreen": "LCD_B6",
+      "default": "LCD_B6",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "J62",
+      "silkscreen": "CAM_D4",
+      "default": "PARCAM_D4",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "J63",
+      "silkscreen": "CAM_VFB1",
+      "default": "POWER_CAM_LDO_FB",
+      "instance": "CAM1",
+      "alt": []
+    },
+    {
+      "id": "J64",
+      "silkscreen": "+V_CAM1",
+      "default": "POWER_CAM_LDO_OUT",
+      "instance": "CAM1",
+      "alt": []
+    },
+    {
+      "id": "K1",
+      "silkscreen": "USB1_30_D_P",
+      "default": "USB_DP",
+      "instance": "USB1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "K2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "K3",
+      "silkscreen": "LCD_B7",
+      "default": "LCD_B7",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "K62",
+      "silkscreen": "CAM_D5",
+      "default": "PARCAM_D5",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "K63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "K64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "L1",
+      "silkscreen": "USB1_30_D_N",
+      "default": "USB_DM",
+      "instance": "USB1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "L2",
+      "silkscreen": "IO0",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "L3",
+      "silkscreen": "LCD_B8",
+      "default": "LCD_B8",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "L62",
+      "silkscreen": "CAM_D6",
+      "default": "PARCAM_D6",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "L63",
+      "silkscreen": "CAM_VFB2",
+      "default": "POWER_CAM_LDO_FB",
+      "instance": "CAM2",
+      "alt": []
+    },
+    {
+      "id": "L64",
+      "silkscreen": "+V_CAM2",
+      "default": "POWER_CAM_LDO_OUT",
+      "instance": "CAM2",
+      "alt": []
+    },
+    {
+      "id": "M1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "M2",
+      "silkscreen": "IO1",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "M3",
+      "silkscreen": "LCD_B9",
+      "default": "LCD_B9",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "M62",
+      "silkscreen": "CAM_D7",
+      "default": "PARCAM_D7",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "M63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "M64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "N1",
+      "silkscreen": "USB1_30_RX0_P",
+      "default": "USB_RX_P",
+      "instance": "USB1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "N2",
+      "silkscreen": "IO2",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "N3",
+      "silkscreen": "LCD_B10",
+      "default": "LCD_B10",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "N62",
+      "silkscreen": "CAM_D8",
+      "default": "PARCAM_D8",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "N63",
+      "silkscreen": "CAM_VFB3",
+      "default": "POWER_CAM_LDO_FB",
+      "instance": "CAM3",
+      "alt": []
+    },
+    {
+      "id": "N64",
+      "silkscreen": "+V_CAM3",
+      "default": "POWER_CAM_LDO_OUT",
+      "instance": "CAM3",
+      "alt": []
+    },
+    {
+      "id": "O1",
+      "silkscreen": "USB1_30_RX0_N",
+      "default": "USB_RX_N",
+      "instance": "USB1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "O2",
+      "silkscreen": "IO3",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "O3",
+      "silkscreen": "LCD_B11",
+      "default": "LCD_B11",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "O62",
+      "silkscreen": "CAM_D9",
+      "default": "PARCAM_D9",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "O63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "O64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "P1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "P2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "P3",
+      "silkscreen": "LCD_B12",
+      "default": "LCD_B12",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "P62",
+      "silkscreen": "CAM_D10",
+      "default": "PARCAM_D10",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "P63",
+      "silkscreen": "CSI0_3_P",
+      "default": "MIPI_CSI2_DATA3_P",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "P64",
+      "silkscreen": "CSI0_3_N",
+      "default": "MIPI_CSI2_DATA3_N",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Q1",
+      "silkscreen": "USB1_30_TX0_P",
+      "default": "USB_TX_P",
+      "instance": "USB1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Q2",
+      "silkscreen": "USB1_30_VBUS",
+      "default": "USB_VBUS",
+      "instance": "USB1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Q3",
+      "silkscreen": "LCD_B13",
+      "default": "LCD_B13",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Q62",
+      "silkscreen": "CAM_D11",
+      "default": "PARCAM_D11",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Q63",
+      "silkscreen": "CSI0_2_P",
+      "default": "MIPI_CSI2_DATA2_P",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Q64",
+      "silkscreen": "CSI0_2_N",
+      "default": "MIPI_CSI2_DATA2_N",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "R1",
+      "silkscreen": "USB1_30_TX0_N",
+      "default": "USB_TX_N",
+      "instance": "USB1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "R2",
+      "silkscreen": "USB1_30_ID",
+      "default": "USB_ID",
+      "instance": "USB1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "R3",
+      "silkscreen": "LCD_B14",
+      "default": "LCD_B14",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "R62",
+      "silkscreen": "CAM_D12",
+      "default": "PARCAM_D12",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "R63",
+      "silkscreen": "CSI0_C_P",
+      "default": "MIPI_CSI2_CLK_P",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "R64",
+      "silkscreen": "CSI0_C_N",
+      "default": "MIPI_CSI2_CLK_N",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "S1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "S2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "S3",
+      "silkscreen": "LCD_B15",
+      "default": "LCD_B15",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "S62",
+      "silkscreen": "CAM_D13",
+      "default": "PARCAM_D13",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "S63",
+      "silkscreen": "CSI0_1_P",
+      "default": "MIPI_CSI2_DATA1_P",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "S64",
+      "silkscreen": "CSI0_1_N",
+      "default": "MIPI_CSI2_DATA1_N",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "T1",
+      "silkscreen": "VDD_5V_IN",
+      "default": "POWER_5V0",
+      "alt": []
+    },
+    {
+      "id": "T2",
+      "silkscreen": "VDD_5V_IN",
+      "default": "POWER_5V0",
+      "alt": []
+    },
+    {
+      "id": "T3",
+      "silkscreen": "LCD_B16",
+      "default": "LCD_B16",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "T62",
+      "silkscreen": "CAM_D14",
+      "default": "PARCAM_D14",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "T63",
+      "silkscreen": "CSI0_0_P",
+      "default": "MIPI_CSI2_DATA0_P",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "T64",
+      "silkscreen": "CSI0_0_N",
+      "default": "MIPI_CSI2_DATA0_N",
+      "instance": "CSI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "U1",
+      "silkscreen": "VDD_5V_IN",
+      "default": "POWER_5V0",
+      "alt": []
+    },
+    {
+      "id": "U2",
+      "silkscreen": "VDD_5V_IN",
+      "default": "POWER_5V0",
+      "alt": []
+    },
+    {
+      "id": "U3",
+      "silkscreen": "LCD_B17",
+      "default": "LCD_B17",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "U62",
+      "silkscreen": "CAM_D15",
+      "default": "PARCAM_D15",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "U63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "U64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "V1",
+      "silkscreen": "VDD_5V_IN",
+      "default": "POWER_5V0",
+      "alt": []
+    },
+    {
+      "id": "V2",
+      "silkscreen": "VDD_5V_IN",
+      "default": "POWER_5V0",
+      "alt": []
+    },
+    {
+      "id": "V3",
+      "silkscreen": "LCD_B18",
+      "default": "LCD_B18",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "V62",
+      "silkscreen": "CAM_D16",
+      "default": "PARCAM_D16",
+      "instance": "PARCAM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "V63",
+      "silkscreen": "CSI1_3_P",
+      "default": "MIPI_CSI2_DATA3_P",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "V64",
+      "silkscreen": "CSI1_3_N",
+      "default": "MIPI_CSI2_DATA3_N",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "W1",
+      "silkscreen": "VIO_OUT",
+      "default": "POWER_VIO_OUT",
+      "alt": []
+    },
+    {
+      "id": "W2",
+      "silkscreen": "VIO_OUT",
+      "default": "POWER_VIO_OUT",
+      "alt": []
+    },
+    {
+      "id": "W3",
+      "silkscreen": "LCD_B19",
+      "default": "LCD_B19",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "W62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "W63",
+      "silkscreen": "CSI1_2_P",
+      "default": "MIPI_CSI2_DATA2_P",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "W64",
+      "silkscreen": "CSI1_2_N",
+      "default": "MIPI_CSI2_DATA2_N",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "X1",
+      "silkscreen": "BOOT2",
+      "default": "BOOT",
+      "instance": "BOOT2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "X2",
+      "silkscreen": "BOOT1",
+      "default": "BOOT",
+      "instance": "BOOT1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "X3",
+      "silkscreen": "LCD_B20",
+      "default": "LCD_B20",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "X62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "X63",
+      "silkscreen": "CSI1_C_P",
+      "default": "MIPI_CSI2_CLK_P",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "X64",
+      "silkscreen": "CSI1_C_N",
+      "default": "MIPI_CSI2_CLK_N",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Y1",
+      "silkscreen": "BOOT3",
+      "default": "BOOT",
+      "instance": "BOOT3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Y2",
+      "silkscreen": "BOOT0",
+      "default": "BOOT",
+      "instance": "BOOT0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Y3",
+      "silkscreen": "LCD_B21",
+      "default": "LCD_B21",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Y62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "Y63",
+      "silkscreen": "CSI1_1_P",
+      "default": "MIPI_CSI2_DATA1_P",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Y64",
+      "silkscreen": "CSI1_1_N",
+      "default": "MIPI_CSI2_DATA1_N",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Z1",
+      "silkscreen": "PORn",
+      "default": "RESET",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Z2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "Z3",
+      "silkscreen": "LCD_B22",
+      "default": "LCD_B22",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Z62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "Z63",
+      "silkscreen": "CSI1_0_P",
+      "default": "MIPI_CSI2_DATA0_P",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "Z64",
+      "silkscreen": "CSI1_0_N",
+      "default": "MIPI_CSI2_DATA0_N",
+      "instance": "CSI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AA1",
+      "silkscreen": "MODULE_EN",
+      "default": "MODULE_EN",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AA2",
+      "silkscreen": "UART0_TX",
+      "default": "UART_TX",
+      "instance": "UART0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AA3",
+      "silkscreen": "LCD_B23",
+      "default": "LCD_B23",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AA62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AA63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AA64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AB1",
+      "silkscreen": "MODULE_STBY",
+      "default": "MODULE_STBY",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AB2",
+      "silkscreen": "UART0_RX",
+      "default": "UART_RX",
+      "instance": "UART0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AB3",
+      "silkscreen": "LCD_HSYNC",
+      "default": "LCD_HSYNC",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AB62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AB63",
+      "silkscreen": "CSI2_3_P",
+      "default": "MIPI_CSI2_DATA3_P",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AB64",
+      "silkscreen": "CSI2_3_N",
+      "default": "MIPI_CSI2_DATA3_N",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AC1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AC2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AC3",
+      "silkscreen": "LCD_VSYNC",
+      "default": "LCD_VSYNC",
+      "instance": "LCD0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AC62",
+      "silkscreen": "DBG_TX",
+      "default": "DBG_TX",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AC63",
+      "silkscreen": "CSI2_2_P",
+      "default": "MIPI_CSI2_DATA2_P",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AC64",
+      "silkscreen": "CSI2_2_N",
+      "default": "MIPI_CSI2_DATA2_N",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AD1",
+      "silkscreen": "SPI0_MISO",
+      "default": "SPI_MISO",
+      "instance": "SPI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AD2",
+      "silkscreen": "SPI0_MOSI",
+      "default": "SPI_MOSI",
+      "instance": "SPI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AD3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AD62",
+      "silkscreen": "DBG_RX",
+      "default": "DBG_RX",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AD63",
+      "silkscreen": "CSI2_C_P",
+      "default": "MIPI_CSI2_CLK_P",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AD64",
+      "silkscreen": "CSI2_C_N",
+      "default": "MIPI_CSI2_CLK_N",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AE1",
+      "silkscreen": "SPI0_CS0",
+      "default": "SPI_CS0",
+      "instance": "SPI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AE2",
+      "silkscreen": "SPI0_SCLK",
+      "default": "SPI_SCK",
+      "instance": "SPI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AE3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AE62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AE63",
+      "silkscreen": "CSI2_1_P",
+      "default": "MIPI_CSI2_DATA1_P",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AE64",
+      "silkscreen": "CSI2_1_N",
+      "default": "MIPI_CSI2_DATA1_N",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AF1",
+      "silkscreen": "SPI0_CS1",
+      "default": "SPI_CS1",
+      "instance": "SPI0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AF2",
+      "silkscreen": "IO4",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AF3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AF62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AF63",
+      "silkscreen": "CSI2_0_P",
+      "default": "MIPI_CSI2_DATA0_P",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AF64",
+      "silkscreen": "CSI2_0_N",
+      "default": "MIPI_CSI2_DATA0_N",
+      "instance": "CSI2",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AG1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AG2",
+      "silkscreen": "IO5",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AG3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AG62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AG63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AG64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AH1",
+      "silkscreen": "I2C0_SCL",
+      "default": "I2C_SCL",
+      "instance": "I2C0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AH2",
+      "silkscreen": "I2C0_SDA",
+      "default": "I2C_SDA",
+      "instance": "I2C0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AH3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AH62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AH63",
+      "silkscreen": "CSI3_3_P",
+      "default": "MIPI_CSI2_DATA3_P",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AH64",
+      "silkscreen": "CSI3_3_N",
+      "default": "MIPI_CSI2_DATA3_N",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AI1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AI2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AI3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AI62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AI63",
+      "silkscreen": "CSI3_2_P",
+      "default": "MIPI_CSI2_DATA2_P",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AI64",
+      "silkscreen": "CSI3_2_N",
+      "default": "MIPI_CSI2_DATA2_N",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AJ1",
+      "silkscreen": "JTAG_TCK/SWDCLK",
+      "default": "JTAG_TCK",
+      "instance": "JTAG0",
+      "alt": [
+        {
+          "signal": "SWD_CLK",
+          "instance": "JTAG0"
+        },
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AJ2",
+      "silkscreen": "JTAG_TDI",
+      "default": "JTAG_TDI",
+      "instance": "JTAG0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AJ3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AJ62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AJ63",
+      "silkscreen": "CSI3_C_P",
+      "default": "MIPI_CSI2_CLK_P",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AJ64",
+      "silkscreen": "CSI3_C_N",
+      "default": "MIPI_CSI2_CLK_N",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AK1",
+      "silkscreen": "JTAG_TMS/SWDIO",
+      "default": "JTAG_TMS",
+      "instance": "JTAG0",
+      "alt": [
+        {
+          "signal": "SWD_IO",
+          "instance": "JTAG0"
+        },
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AK2",
+      "silkscreen": "JTAG_TDO",
+      "default": "JTAG_TDO",
+      "instance": "JTAG0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AK3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AK62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AK63",
+      "silkscreen": "CSI3_1_P",
+      "default": "MIPI_CSI2_DATA1_P",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AK64",
+      "silkscreen": "CSI3_1_N",
+      "default": "MIPI_CSI2_DATA1_N",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AL1",
+      "silkscreen": "JTAG_nRST",
+      "default": "JTAG_NRST",
+      "instance": "JTAG0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AL2",
+      "silkscreen": "IO6",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AL3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AL62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AL63",
+      "silkscreen": "CSI3_0_P",
+      "default": "MIPI_CSI2_DATA0_P",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AL64",
+      "silkscreen": "CSI3_0_N",
+      "default": "MIPI_CSI2_DATA0_N",
+      "instance": "CSI3",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AM1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AM2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AM3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AM62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AM63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AM64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AN1",
+      "silkscreen": "ANT_6GHz",
+      "default": "ANT_6GHZ",
+      "alt": []
+    },
+    {
+      "id": "AN2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AN3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AN62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AN63",
+      "silkscreen": "IO27",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AN64",
+      "silkscreen": "IO28",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AO1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AO2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AO3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AO62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AO63",
+      "silkscreen": "IO29",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AO64",
+      "silkscreen": "IO30",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AP1",
+      "silkscreen": "ANT_5GHz",
+      "default": "ANT_5GHZ",
+      "alt": []
+    },
+    {
+      "id": "AP2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AP3",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AP62",
+      "silkscreen": "RSVD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AP63",
+      "silkscreen": "IO31",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AP64",
+      "silkscreen": "IO32",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AQ1",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ3",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ4",
+      "silkscreen": "I2S0_SDI",
+      "default": "I2S_SDI",
+      "instance": "I2S0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ5",
+      "silkscreen": "I2S0_SCLK",
+      "default": "I2S_SCLK",
+      "instance": "I2S0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ6",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ7",
+      "silkscreen": "PDM_C0",
+      "default": "PDM_CLK",
+      "instance": "PDM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ8",
+      "silkscreen": "PDM_C1",
+      "default": "PDM_CLK",
+      "instance": "PDM1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ9",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ10",
+      "silkscreen": "I2S1_SDO",
+      "default": "I2S_SDO",
+      "instance": "I2S1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ11",
+      "silkscreen": "I2S1_WS",
+      "default": "I2S_WS",
+      "instance": "I2S1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ12",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ13",
+      "silkscreen": "SPI1_MISO",
+      "default": "SPI_MISO",
+      "instance": "SPI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ14",
+      "silkscreen": "SPI1_MOSI",
+      "default": "SPI_MOSI",
+      "instance": "SPI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ15",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ16",
+      "silkscreen": "RTC_CLKOUT",
+      "default": "RTC_CLKOUT",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ17",
+      "silkscreen": "UART1_TX",
+      "default": "UART_TX",
+      "instance": "UART1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ18",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ19",
+      "silkscreen": "I3C_SCL",
+      "default": "I3C_SCL",
+      "instance": "I3C0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ20",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ21",
+      "silkscreen": "IO9",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AQ22",
+      "silkscreen": "IO11",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AQ23",
+      "silkscreen": "IO13",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AQ24",
+      "silkscreen": "IO15",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AQ25",
+      "silkscreen": "+S_CAP",
+      "default": "POWER_SUPER_CAP",
+      "alt": []
+    },
+    {
+      "id": "AQ26",
+      "silkscreen": "IO17",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AQ27",
+      "silkscreen": "IO19",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AQ28",
+      "silkscreen": "IO21",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AQ29",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ30",
+      "silkscreen": "SD_VDD_OUT",
+      "default": "POWER_SD_VDD_OUT",
+      "instance": "SDIO0",
+      "alt": []
+    },
+    {
+      "id": "AQ31",
+      "silkscreen": "SD_CLK",
+      "default": "SD_CLK",
+      "instance": "SDIO0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ32",
+      "silkscreen": "SD_D0",
+      "default": "SD_D0",
+      "instance": "SDIO0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ33",
+      "silkscreen": "SD_D2",
+      "default": "SD_D2",
+      "instance": "SDIO0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ34",
+      "silkscreen": "SD_DET",
+      "default": "SD_DET",
+      "instance": "SDIO0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ35",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ36",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ37",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ38",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ39",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ40",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ41",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ42",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ43",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ44",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ45",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AQ46",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ47",
+      "silkscreen": "I2C1_SCL",
+      "default": "I2C_SCL",
+      "instance": "I2C1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ48",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ49",
+      "silkscreen": "ETH1_DD_P",
+      "default": "ETH_DD_P",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ50",
+      "silkscreen": "ETH1_DC_P",
+      "default": "ETH_DC_P",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ51",
+      "silkscreen": "ETH1_DB_P",
+      "default": "ETH_DB_P",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ52",
+      "silkscreen": "ETH1_DA_P",
+      "default": "ETH_DA_P",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ53",
+      "silkscreen": "ETH1_LED0",
+      "default": "ETH_LED0",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ54",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ55",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ56",
+      "silkscreen": "ETH0_DD_P",
+      "default": "ETH_DD_P",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ57",
+      "silkscreen": "ETH0_DC_P",
+      "default": "ETH_DC_P",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ58",
+      "silkscreen": "ETH0_DB_P",
+      "default": "ETH_DB_P",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ59",
+      "silkscreen": "ETH0_DA_P",
+      "default": "ETH_DA_P",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ60",
+      "silkscreen": "ETH0_LED0",
+      "default": "ETH_LED0",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AQ61",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AQ62",
+      "silkscreen": "RVSD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AQ63",
+      "silkscreen": "IO33",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AQ64",
+      "silkscreen": "IO34",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR1",
+      "silkscreen": "ANT_2.4GHz",
+      "default": "ANT_2_4GHZ",
+      "alt": []
+    },
+    {
+      "id": "AR2",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR3",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR4",
+      "silkscreen": "I2S0_SDO",
+      "default": "I2S_SDO",
+      "instance": "I2S0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR5",
+      "silkscreen": "I2S0_WS",
+      "default": "I2S_WS",
+      "instance": "I2S0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR6",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR7",
+      "silkscreen": "PDM_D0",
+      "default": "PDM_DATA",
+      "instance": "PDM0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR8",
+      "silkscreen": "PDM_D1",
+      "default": "PDM_DATA",
+      "instance": "PDM1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR9",
+      "silkscreen": "AUDIO_CLK",
+      "default": "AUDIO_CLK",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR10",
+      "silkscreen": "I2S1_SDI",
+      "default": "I2S_SDI",
+      "instance": "I2S1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR11",
+      "silkscreen": "I2S1_SCLK",
+      "default": "I2S_SCLK",
+      "instance": "I2S1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR12",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR13",
+      "silkscreen": "SPI1_CS1",
+      "default": "SPI_CS1",
+      "instance": "SPI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR14",
+      "silkscreen": "SPI1_CS0",
+      "default": "SPI_CS0",
+      "instance": "SPI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR15",
+      "silkscreen": "SPI1_SCLK",
+      "default": "SPI_SCK",
+      "instance": "SPI1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR16",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR17",
+      "silkscreen": "UART1_RX",
+      "default": "UART_RX",
+      "instance": "UART1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR18",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR19",
+      "silkscreen": "I3C_SDA",
+      "default": "I3C_SDA",
+      "instance": "I3C0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR20",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR21",
+      "silkscreen": "IO8",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR22",
+      "silkscreen": "IO10",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR23",
+      "silkscreen": "IO12",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR24",
+      "silkscreen": "IO14",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR25",
+      "silkscreen": "IO16",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR26",
+      "silkscreen": "IO18",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR27",
+      "silkscreen": "IO20",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR28",
+      "silkscreen": "IO22",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR29",
+      "silkscreen": "IO24",
+      "default": "GPIO",
+      "alt": []
+    },
+    {
+      "id": "AR30",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR31",
+      "silkscreen": "SD_CMD",
+      "default": "SD_CMD",
+      "instance": "SDIO0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR32",
+      "silkscreen": "SD_RST",
+      "default": "SD_RST",
+      "instance": "SDIO0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR33",
+      "silkscreen": "SD_D1",
+      "default": "SD_D1",
+      "instance": "SDIO0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR34",
+      "silkscreen": "SD_D3",
+      "default": "SD_D3",
+      "instance": "SDIO0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR35",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR36",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR37",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR38",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR39",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR40",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR41",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR42",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR43",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR44",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR45",
+      "silkscreen": "NC",
+      "default": "NC",
+      "alt": []
+    },
+    {
+      "id": "AR46",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR47",
+      "silkscreen": "I2C1_SDA",
+      "default": "I2C_SDA",
+      "instance": "I2C1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR48",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR49",
+      "silkscreen": "ETH1_DD_N",
+      "default": "ETH_DD_N",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR50",
+      "silkscreen": "ETH1_DC_N",
+      "default": "ETH_DC_N",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR51",
+      "silkscreen": "ETH1_DB_N",
+      "default": "ETH_DB_N",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR52",
+      "silkscreen": "ETH1_DA_N",
+      "default": "ETH_DA_N",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR53",
+      "silkscreen": "ETH1_LED1",
+      "default": "ETH_LED1",
+      "instance": "ETH1",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR54",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR55",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR56",
+      "silkscreen": "ETH0_DD_N",
+      "default": "ETH_DD_N",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR57",
+      "silkscreen": "ETH0_DC_N",
+      "default": "ETH_DC_N",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR58",
+      "silkscreen": "ETH0_DB_N",
+      "default": "ETH_DB_N",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR59",
+      "silkscreen": "ETH0_DA_N",
+      "default": "ETH_DA_N",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR60",
+      "silkscreen": "ETH0_LED1",
+      "default": "ETH_LED1",
+      "instance": "ETH0",
+      "alt": [
+        {
+          "signal": "GPIO"
+        }
+      ]
+    },
+    {
+      "id": "AR61",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR62",
+      "silkscreen": "RVSD",
+      "default": "RSVD",
+      "alt": []
+    },
+    {
+      "id": "AR63",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    },
+    {
+      "id": "AR64",
+      "silkscreen": "GND",
+      "default": "GND",
+      "alt": []
+    }
+  ]
+}
