@@ -183,3 +183,37 @@ ZTEST(alp_can_registry, test_sw_fallback_round_trip)
 	ops->close(st);
 	ops->close(st);
 }
+
+/* ---------- (g) alp_can_remove_filter -- through the real public dispatcher */
+
+ZTEST(alp_can_registry, test_alp_can_remove_filter_public_dispatch)
+{
+	/* Unlike (f) above, this drives the actual public
+     * alp_can_remove_filter() dispatcher entry point
+     * (src/can_dispatch.c), not the raw backend op -- exercises the
+     * NOT_READY guard clause plus the real dispatch-to-backend call. */
+	zassert_equal(alp_can_remove_filter(NULL, 0), ALP_ERR_NOT_READY);
+
+	const alp_can_ops_t *ops = _find_sw_fallback_ops();
+	zassert_not_null(ops);
+
+	struct alp_can h;
+	memset(&h, 0, sizeof(h));
+	alp_capabilities_t caps = { 0 };
+	alp_can_config_t   cfg  = {
+		.bus_id             = 0u,
+		.bitrate_nominal_hz = 500000u,
+		.bitrate_data_hz    = 0u,
+		.mode               = ALP_CAN_MODE_CLASSIC,
+		.loopback           = false,
+	};
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+	h.state.ops = ops; /* alp_can_open() normally wires this before open() */
+	h.in_use    = true;
+
+	/* Real dispatch to the sw_fallback op, which is idempotent ALP_OK. */
+	zassert_equal(alp_can_remove_filter(&h, 0), ALP_OK);
+	zassert_equal(alp_can_remove_filter(&h, 0), ALP_OK);
+
+	ops->close(&h.state);
+}

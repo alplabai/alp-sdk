@@ -251,6 +251,50 @@ ZTEST(alp_chips, test_button_led_calls_reject_uninitialised)
 	zassert_equal(alp_button_led_toggle(&bl), ALP_ERR_NOT_READY);
 }
 
+static void test_button_led_press_cb_(void *user)
+{
+	int *count = (int *)user;
+	if (count != NULL) (*count)++;
+}
+
+ZTEST(alp_chips, test_button_led_set_press_callback_uninitialised_not_ready)
+{
+	alp_button_led_t bl = { 0 };
+	zassert_equal(alp_button_led_set_press_callback(&bl, test_button_led_press_cb_, NULL),
+	              ALP_ERR_NOT_READY);
+}
+
+ZTEST(alp_chips, test_button_led_set_press_callback_real_gpio_irq_roundtrip)
+{
+	/* Same overlay wiring as test_button_led_init_valid_pair: pin
+     * index 0 -> button (pull-up), index 1 -> LED, on the chips
+     * test's gpio_emul. */
+	alp_button_led_t bl;
+	alp_status_t     s = alp_button_led_init(&bl,
+	                                         &(alp_button_led_config_t){
+	                                             .button_pin_id     = 0,
+	                                             .led_pin_id        = 1,
+	                                             .active_low_button = true,
+	                                         });
+	zassert_equal(s, ALP_OK, "init failed: %d", (int)s);
+
+	int press_count = 0;
+
+	/* Registers a real gpio_pin_interrupt_configure_dt() on the
+     * emulated button pin -- exercises the actual dispatch path, not
+     * just a NULL guard. */
+	zassert_equal(alp_button_led_set_press_callback(&bl, test_button_led_press_cb_, &press_count),
+	              ALP_OK);
+	zassert_equal(bl.press_cb, test_button_led_press_cb_);
+	zassert_equal_ptr(bl.cb_user, &press_count);
+
+	/* cb == NULL clears the callback and disables the IRQ. */
+	zassert_equal(alp_button_led_set_press_callback(&bl, NULL, NULL), ALP_OK);
+	zassert_is_null(bl.press_cb);
+
+	alp_button_led_deinit(&bl);
+}
+
 /* ------------------------------------------------------------------ */
 /* ssd1306 framebuffer logic                                           */
 /*                                                                     */
@@ -705,6 +749,29 @@ ZTEST(alp_chips, test_public_headers_co_compile)
 	zassert_equal((unsigned)EVK_PWM_LED_RED,
 	              ALP_E1M_PWM3,
 	              "EVK feature names must layer atop the global e1m_pinout map");
+}
+
+/* ------------------------------------------------------------------ */
+/* <alp/gui.h> -- alp_gui_lvgl_attach() guard-clause contract           */
+/*                                                                      */
+/* The real LVGL hand-off (issue #23) isn't implemented on any backend  */
+/* yet; src/gui_lvgl_stub.c ships only the two paths that ARE fully     */
+/* specified today: NULL display -> INVAL, every current build ->      */
+/* NOSUPPORT (this native_sim test build never sets ALP_HAS_LVGL).      */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gui_lvgl_attach_null_display_is_inval)
+{
+	zassert_equal(alp_gui_lvgl_attach(NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_gui_lvgl_attach_valid_display_is_nosupport)
+{
+	/* No backend wires the real bridge yet, so a non-NULL handle
+     * (even a bogus one -- the guard clause never dereferences it)
+     * degrades to NOSUPPORT rather than a fabricated success. */
+	alp_display_t *fake_handle = (alp_display_t *)0x1;
+	zassert_equal(alp_gui_lvgl_attach(fake_handle), ALP_ERR_NOSUPPORT);
 }
 
 /* ------------------------------------------------------------------ */
