@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# **[UNTESTED]**: this scenario does not currently build -- TinyGSM
+# needs Arduino's String class (WString.h), which is beyond this
+# example's small Arduino-Stream shim (see README.md "Why this
+# doesn't build"). Kept in the canonical per-example shape (matching
+# every other example's testcase.yaml) so the file exists as a
+# correct template; do not add this to a CI run that expects every
+# scenario to pass.
+
+sample:
+  name: tinygsm-modem-at
+  description: |
+    Drives TinyGSM's TinyGsm modem class against a mock AT-transcript
+    Stream (AT -> OK, AT+CGMI -> SIMCOM) and prints init()/
+    getModemInfo() results. UNTESTED: TinyGSM's ArduinoCompat layer
+    needs Arduino's String class, which this example's small Stream
+    shim does not provide, so this scenario does not build.
+
+tests:
+  alp_sdk.example.tinygsm_modem_at:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - tinygsm-modem-at
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[tinygsm-modem-at\\] done"

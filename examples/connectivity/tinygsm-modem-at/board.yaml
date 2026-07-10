@@ -1,0 +1,34 @@
+# board.yaml -- per-app project configuration for the
+# tinygsm-modem-at example.
+#
+# **[UNTESTED]**: does not build in this workspace -- TinyGSM's
+# `ArduinoCompat` layer (the module's own opt-in non-Arduino
+# integration point, `#define ARDUINO_DASH`) needs Arduino's `String`
+# class (`WString.h`), which is out of scope for "a small
+# Arduino-Stream shim" -- see the example's README "Why this doesn't
+# build" for the exact, empirically-confirmed chain. This board.yaml
+# is still wired the way a working checkout would need it: per-core
+# `libraries: [tinygsm]` resolves against
+# metadata/library-profiles/tinygsm/hw-backends.yaml (pure
+# synchronous-UART is the floor; UART-DMA selects automatically by
+# SoM capability).
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    # A real modem integration needs a UART -- this example replays a
+    # canned AT transcript through a mock Stream instead, so no
+    # peripheral is opened. See README.md "Swapping in a real UART".
+    peripherals: []
+    libraries:
+      - tinygsm
+
+diagnostics:
+  log_level: info
