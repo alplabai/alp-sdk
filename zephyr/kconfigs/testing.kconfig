@@ -49,3 +49,27 @@ config ALP_SDK_TESTING_UART
 	  any real or emulated UART controller.  The first
 	  <alp/testing/*> double whose read() path resolves a timeout
 	  against the virtual clock instead of ever blocking.
+
+config ALP_SDK_TESTING_I2C
+	bool "I2C test double (<alp/testing/i2c.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 I2C test-double backend
+	  (src/backends/i2c/testing_drv.c).  Lets a ztest drive
+	  alp_i2c_* (controller mode) against simulated per-address
+	  devices: canned read responses, write read-back, and one-shot
+	  NACK/short/timeout bus faults (<alp/testing/common.h>), without
+	  any real or emulated I2C controller.
+
+config ALP_SDK_TESTING_SPI
+	bool "SPI test double (<alp/testing/spi.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 SPI test-double backend
+	  (src/backends/spi/testing_drv.c).  Lets a ztest drive
+	  alp_spi_* (controller mode) against a simulated device: canned
+	  MISO bytes, MOSI read-back, and one-shot NACK/short/timeout bus
+	  faults (<alp/testing/common.h>), without any real or emulated
+	  SPI controller.
