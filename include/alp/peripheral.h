@@ -71,6 +71,45 @@ typedef enum {
 } alp_status_t;
 
 /**
+ * @brief Return the stable symbolic name of a status code (e.g. "ALP_OK",
+ *        "ALP_ERR_INVAL").
+ *
+ * Generated from the @ref alp_status_t enum by
+ * scripts/gen_status_strings.py (src/status_strings.c) -- the enum is the
+ * single source of truth, so every member (except the
+ * @ref ALP_STATUS_ENUM_FLOOR sentinel) has a matching name here.  Cheap
+ * (pure `.rodata` table lookup) and always compiled, unlike @ref
+ * alp_status_description.
+ *
+ * @param status  Any @ref alp_status_t value.
+ * @return Pointer to a static string.  A value outside the declared
+ *         `ALP_STATUS_ENUM_FLOOR..ALP_OK` range returns the documented
+ *         fallback `"ALP_STATUS_UNKNOWN"` -- never NULL.
+ */
+const char *alp_status_name(alp_status_t status);
+
+/**
+ * @brief Return a short human-readable description of a status code.
+ *
+ * Generated from each @ref alp_status_t member's inline doc comment
+ * (first sentence) by scripts/gen_status_strings.py.  Intended for logs
+ * and diagnostics, not for programmatic branching -- switch on the
+ * @ref alp_status_t value itself for that.
+ *
+ * The description table is compiled in only when
+ * `CONFIG_ALP_STATUS_DESCRIPTIONS` is enabled (default y); a
+ * footprint-sensitive build can turn it off to drop the string table
+ * while @ref alp_status_name stays available.  When compiled out, this
+ * function still returns a documented fallback string instead of NULL.
+ *
+ * @param status  Any @ref alp_status_t value.
+ * @return Pointer to a static string.  Never NULL: an out-of-range value
+ *         returns a documented fallback, and a build with the
+ *         description table disabled returns a string saying so.
+ */
+const char *alp_status_description(alp_status_t status);
+
+/**
  * @brief Read the most recent error encountered on this thread.
  *
  * `alp_*_open` functions return NULL on failure for the v0.1 ABI

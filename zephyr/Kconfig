@@ -21,6 +21,20 @@ config ALP_SDK_BANNER
 	  hardware revision from the EEPROM manifest; otherwise it falls
 	  back to the build-time board name (CONFIG_BOARD).
 
+config ALP_STATUS_DESCRIPTIONS
+	bool "Compile alp_status_description() string table"
+	default y
+	help
+	  Compile the string table backing alp_status_description() (generated
+	  from the alp_status_t enum's doc comments by
+	  scripts/gen_status_strings.py, src/status_strings.c).  Its sibling
+	  alp_status_name() is always compiled (a small, always-present
+	  symbolic-name table); this option exists so a footprint-sensitive
+	  build can drop the longer description strings while keeping the
+	  cheap name lookup.  When disabled, alp_status_description() still
+	  returns a documented fallback string (never NULL) saying
+	  descriptions are compiled out.
+
 config ALP_SDK_SOM_SKU
 	string "SoM SKU identity string (boot-banner fallback)"
 	default ""
