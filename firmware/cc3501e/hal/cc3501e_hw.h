@@ -280,6 +280,12 @@ int cc3501e_hw_ota_abort(void);
  * IDLE after the reset that jammed the slot). */
 int cc3501e_hw_ota_promote(void);
 
+/* Result of the last psa_fwu_request_reboot() (0 if none requested).  Since
+ * request_reboot only RETURNS on refusal (success reboots), a non-zero value
+ * means the swap was REFUSED (e.g. BL2 anti-rollback on a downgrade) -- lets the
+ * host distinguish "refused" from "never fired".  Surfaced in OTA_STATUS. */
+int8_t cc3501e_hw_ota_reboot_rc(void);
+
 /* Report session progress: @p state = alp_cc3501e_ota_state_t, @p
  * bytes_written = bytes accepted so far, @p total_len = the BEGIN value.
  * Any out pointer may be NULL. */

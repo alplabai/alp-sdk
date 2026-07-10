@@ -357,6 +357,11 @@ static volatile bool reply_drained;
  * calls psa_fwu_request_reboot() once reply_drained confirms the FINISH ack has
  * clocked back (same ack-before-reboot race fix as reset_pending). */
 static volatile bool ota_reboot_pending;
+/* Result of the last psa_fwu_request_reboot() -- request_reboot only RETURNS if
+ * the swap was refused (BL2 anti-rollback on a downgrade, no pending image, …);
+ * on success it reboots and never returns.  0 = none requested yet.  Surfaced in
+ * the OTA_STATUS reserved byte so the host can tell "refused" from "never fired". */
+static volatile int8_t ota_reboot_rc;
 
 /* Runs a queued OTA op's flash work off the SPI ISR (defined with the OTA
  * section below); called from cc3501e_hw_tick on the bring-up task. */
@@ -587,7 +592,11 @@ void cc3501e_hw_tick(void)
 	 * request the PSA-FWU reboot so the cold BL2/MCUboot swaps the STAGED slot to
 	 * primary (TRIAL).  Same ack-before-reboot race fix as CMD_RESET above. */
 	if (ota_reboot_pending && reply_drained) {
-		psa_fwu_request_reboot(); /* swap-reboot -- does not return */
+		ota_reboot_pending = false; /* one-shot: don't re-request every tick if refused */
+		/* Returns ONLY if the swap was refused (e.g. BL2 anti-rollback on a
+		 * downgrade); on success it reboots and never returns.  Capture the rc so
+		 * the host can distinguish "refused" from "never fired" via OTA_STATUS. */
+		ota_reboot_rc = (int8_t)psa_fwu_request_reboot();
 	}
 }
 
@@ -717,13 +726,16 @@ static int ota_do_begin(void)
 		return CC3501E_HW_ERR_IO;
 	}
 	if (psa_fwu_query(target, &ti) != PSA_SUCCESS) return CC3501E_HW_ERR_IO;
-	if (ti.state != PSA_FWU_READY) {
-		if (ti.state == PSA_FWU_WRITING || ti.state == PSA_FWU_CANDIDATE) {
-			psa_fwu_cancel(target); /* slow: erase */
-		} else {
-			psa_fwu_clean(target);
-		}
-	}
+	/* Walk ANY stuck state back to READY so a fresh stage always succeeds -- the
+	 * common jam is a prior STAGED image the swap-reboot never promoted (e.g. a
+	 * downgrade BL2 refused), and STAGED needs reject(->FAILED) BEFORE clean, not
+	 * clean alone.  Mirror ota_do_finish's recovery (same order); each rc no-ops
+	 * when N/A.  This lets a new (forward) OTA replace a stuck pending image
+	 * instead of returning BAD_STATE forever.  (`ti` kept for the query above.) */
+	(void)ti;
+	(void)psa_fwu_cancel(target);                  /* WRITING/CANDIDATE -> FAILED */
+	(void)psa_fwu_reject(PSA_ERROR_GENERIC_ERROR); /* STAGED           -> FAILED */
+	(void)psa_fwu_clean(target);                   /* FAILED/UPDATED   -> READY  */
 	ota.target    = target;
 	ota.total_len = ota.op_total;
 	ota.cursor    = 0u;
@@ -898,6 +910,11 @@ int cc3501e_hw_ota_abort(void)
 	ota.op        = OTA_OP_IDLE;
 	ota.op_rc     = 0;
 	return CC3501E_HW_OK;
+}
+
+int8_t cc3501e_hw_ota_reboot_rc(void)
+{
+	return ota_reboot_rc;
 }
 
 int cc3501e_hw_ota_promote(void)

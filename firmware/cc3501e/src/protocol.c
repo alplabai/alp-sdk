@@ -1139,7 +1139,9 @@ static alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
 	const int rv      = cc3501e_hw_ota_status(&state, &written, &total);
 	if (rv != CC3501E_HW_OK) return hw_to_resp(rv);
 	reply_data[0] = state;
-	reply_data[1] = 0u;
+	/* reserved[0] carries the last swap-reboot rc (0 = none / success; non-zero =
+	 * the swap was refused, e.g. BL2 anti-rollback on a downgrade). */
+	reply_data[1] = (uint8_t)cc3501e_hw_ota_reboot_rc();
 	reply_data[2] = 0u;
 	reply_data[3] = 0u;
 	put_le32(&reply_data[4], written);

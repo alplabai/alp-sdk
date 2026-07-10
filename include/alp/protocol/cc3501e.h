@@ -739,7 +739,10 @@ typedef enum {
 
 /** Reply payload of CMD_OTA_STATUS: lets the host resume / verify progress. */
 typedef struct {
-	uint8_t  state; /**< @ref alp_cc3501e_ota_state_t. */
+	uint8_t state; /**< @ref alp_cc3501e_ota_state_t. */
+	/** reserved[0] = last swap-reboot rc: 0 = none requested / success (the device
+	 *  reboots on success and never reports it), non-zero = the swap was REFUSED
+	 *  (e.g. BL2 anti-rollback on a downgrade).  reserved[1..2] unused. */
 	uint8_t  reserved[3];
 	uint32_t bytes_written; /**< bytes accepted into the slot so far. */
 	uint32_t total_len;     /**< total declared at BEGIN. */
