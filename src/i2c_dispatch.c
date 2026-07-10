@@ -20,8 +20,7 @@
 
 ALP_BACKEND_DEFINE_CLASS(i2c);
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_I2C_HANDLES
 #define CONFIG_ALP_SDK_MAX_I2C_HANDLES 4
@@ -85,39 +84,68 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
+/* Gate on the lifecycle byte via alp_handle_op_enter(), not a plain
+ * in_use read (issue #629): in_use is claimed/released atomically in
+ * _alloc/_free, but every op below used to read it with a plain load,
+ * so a racing alp_i2c_close() could free the slot while write/read/
+ * write_read was still dereferencing bus->state. */
+
 alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, size_t len)
 {
-	if (bus == NULL || !bus->in_use) return ALP_ERR_NOT_READY;
-	if (data == NULL && len > 0) return ALP_ERR_INVAL;
-	return bus->state.ops->write(&bus->state, addr, data, len);
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = (data == NULL && len > 0)
+	                      ? ALP_ERR_INVAL
+	                      : bus->state.ops->write(&bus->state, addr, data, len);
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t len)
 {
-	if (bus == NULL || !bus->in_use) return ALP_ERR_NOT_READY;
-	if (data == NULL && len > 0) return ALP_ERR_INVAL;
-	return bus->state.ops->read(&bus->state, addr, data, len);
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = (data == NULL && len > 0)
+	                      ? ALP_ERR_INVAL
+	                      : bus->state.ops->read(&bus->state, addr, data, len);
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 alp_status_t alp_i2c_write_read(
     alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen)
 {
-	if (bus == NULL || !bus->in_use) return ALP_ERR_NOT_READY;
-	if ((wdata == NULL && wlen > 0) || (rdata == NULL && rlen > 0)) {
-		return ALP_ERR_INVAL;
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return bus->state.ops->write_read(&bus->state, addr, wdata, wlen, rdata, rlen);
+	alp_status_t rc;
+	if ((wdata == NULL && wlen > 0) || (rdata == NULL && rlen > 0)) {
+		rc = ALP_ERR_INVAL;
+	} else {
+		rc = bus->state.ops->write_read(&bus->state, addr, wdata, wlen, rdata, rlen);
+	}
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 void alp_i2c_close(alp_i2c_t *bus)
 {
-	if (bus == NULL || !bus->in_use) return;
+	if (bus == NULL) return;
+	/* Gate out new ops and drain any in-flight one before touching
+	 * state.ops (issue #629). Losing the CAS (already closed/closing/
+	 * never-opened) makes this a no-op, matching the existing
+	 * void-close idempotency contract. */
+	if (!alp_handle_begin_close(&bus->lifecycle, &bus->active_ops)) return;
 	if (bus->state.ops != NULL && bus->state.ops->close != NULL) {
 		bus->state.ops->close(&bus->state);
 	}
+	alp_lifecycle_set(&bus->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(bus);
 }
 

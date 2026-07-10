@@ -71,6 +71,45 @@ typedef enum {
 } alp_status_t;
 
 /**
+ * @brief Return the stable symbolic name of a status code (e.g. "ALP_OK",
+ *        "ALP_ERR_INVAL").
+ *
+ * Generated from the @ref alp_status_t enum by
+ * scripts/gen_status_strings.py (src/status_strings.c) -- the enum is the
+ * single source of truth, so every member (except the
+ * @ref ALP_STATUS_ENUM_FLOOR sentinel) has a matching name here.  Cheap
+ * (pure `.rodata` table lookup) and always compiled, unlike @ref
+ * alp_status_description.
+ *
+ * @param status  Any @ref alp_status_t value.
+ * @return Pointer to a static string.  A value outside the declared
+ *         `ALP_STATUS_ENUM_FLOOR..ALP_OK` range returns the documented
+ *         fallback `"ALP_STATUS_UNKNOWN"` -- never NULL.
+ */
+const char *alp_status_name(alp_status_t status);
+
+/**
+ * @brief Return a short human-readable description of a status code.
+ *
+ * Generated from each @ref alp_status_t member's inline doc comment
+ * (first sentence) by scripts/gen_status_strings.py.  Intended for logs
+ * and diagnostics, not for programmatic branching -- switch on the
+ * @ref alp_status_t value itself for that.
+ *
+ * The description table is compiled in only when
+ * `CONFIG_ALP_STATUS_DESCRIPTIONS` is enabled (default y); a
+ * footprint-sensitive build can turn it off to drop the string table
+ * while @ref alp_status_name stays available.  When compiled out, this
+ * function still returns a documented fallback string instead of NULL.
+ *
+ * @param status  Any @ref alp_status_t value.
+ * @return Pointer to a static string.  Never NULL: an out-of-range value
+ *         returns a documented fallback, and a build with the
+ *         description table disabled returns a string saying so.
+ */
+const char *alp_status_description(alp_status_t status);
+
+/**
  * @brief Read the most recent error encountered on this thread.
  *
  * `alp_*_open` functions return NULL on failure for the v0.1 ABI
@@ -87,7 +126,9 @@ typedef enum {
  *
  * The value is **thread-local** — concurrent open() calls on
  * different threads don't clobber each other's diagnostic.  A
- * successful open() on a thread clears its slot.
+ * successful open() on a thread clears its slot.  Every thread's
+ * initial state (before that thread has called any `alp_*_open`) is
+ * @ref ALP_OK.
  *
  * @return The thread's last error code, or @ref ALP_OK if no error
  *         has been recorded since the last successful open().
@@ -459,6 +500,32 @@ typedef struct {
 } alp_i2c_target_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_i2c_target_config_t for bus @p id.
+ *
+ * Identity from @p id.  @c own_addr_7bit, @c on_write, and @c on_read
+ * are all mandatory -- @ref alp_i2c_target_open rejects a reserved
+ * address (0x00-0x07 / 0x78-0x7F) or a NULL callback with
+ * @ref ALP_ERR_INVAL -- so they default to 0 / NULL / NULL, a
+ * deliberate "you must set this" sentinel: 0x00 falls in the reserved
+ * range, so a caller who forgets to set @c own_addr_7bit fails loudly
+ * at open() rather than silently claiming an unintended address.
+ * @c on_stop and @c user default to NULL (both documented optional).
+ * Set @c own_addr_7bit / @c on_write / @c on_read before calling open().
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_I2C_TARGET_CONFIG_DEFAULT(id)                                                          \
+	((alp_i2c_target_config_t){ .bus_id        = (id),                                             \
+	                            .own_addr_7bit = 0u,                                               \
+	                            .on_write      = NULL,                                             \
+	                            .on_read       = NULL,                                             \
+	                            .on_stop       = NULL,                                             \
+	                            .user          = NULL })
+
+/**
  * @brief Register this MCU as an I2C target (slave) on @p cfg->bus_id.
  *
  * The callbacks start firing as soon as this returns; prime any state
@@ -635,6 +702,23 @@ typedef struct {
 	uint8_t        bits_per_word; /**< Usually 8 (0 defaults to 8; max 32) -- must
 	                               *   match the external controller. */
 } alp_spi_target_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_spi_target_config_t for bus @p id.
+ *
+ * Identity from @p id; canonical defaults: @c mode = @ref
+ * ALP_SPI_MODE_0 (CPOL=0/CPHA=0, matching the controller-mode default),
+ * @c bits_per_word = 0 (documented as defaulting to 8). Both @c mode
+ * and @c bits_per_word MUST still match whatever the external
+ * controller drives.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_SPI_TARGET_CONFIG_DEFAULT(id)                                                          \
+	((alp_spi_target_config_t){ .bus_id = (id), .mode = ALP_SPI_MODE_0, .bits_per_word = 0u })
 
 /**
  * @brief Claim @p cfg->bus_id in target (slave) mode.

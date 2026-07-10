@@ -21,12 +21,12 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/uart/uart_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(uart);
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_UART_HANDLES
 #define CONFIG_ALP_SDK_MAX_UART_HANDLES 4
@@ -37,9 +37,11 @@ static struct alp_uart _pool[CONFIG_ALP_SDK_MAX_UART_HANDLES];
 static struct alp_uart *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_UART_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim (issue #629): only the winner of the flag flip
+		 * may touch the slot's other fields -- in_use is the
+		 * struct's last member, so zero everything before it. */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_uart, in_use));
 			return &_pool[i];
 		}
 	}
@@ -48,7 +50,7 @@ static struct alp_uart *_alloc(void)
 
 static void _free(struct alp_uart *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
@@ -88,31 +90,59 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len)
 {
-	if (port == NULL || !port->in_use) return ALP_ERR_NOT_READY;
-	if (data == NULL && len > 0) return ALP_ERR_INVAL;
-	if (len == 0) return ALP_OK;
-	return port->state.ops->write(&port->state, data, len);
+	/* Gate on the lifecycle byte, not in_use -- in_use is now touched
+	 * only by the atomic claim/release in _alloc/_free (issue #629). */
+	if (port == NULL || !alp_handle_op_enter(&port->lifecycle, &port->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (data == NULL && len > 0) {
+		rc = ALP_ERR_INVAL;
+	} else if (len == 0) {
+		rc = ALP_OK;
+	} else {
+		rc = port->state.ops->write(&port->state, data, len);
+	}
+	alp_handle_op_leave(&port->active_ops);
+	return rc;
 }
 
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms)
 {
-	if (port == NULL || !port->in_use) return ALP_ERR_NOT_READY;
-	if (data == NULL && len > 0) return ALP_ERR_INVAL;
-	if (len == 0) return ALP_OK;
-	return port->state.ops->read(&port->state, data, len, timeout_ms);
+	if (port == NULL || !alp_handle_op_enter(&port->lifecycle, &port->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (data == NULL && len > 0) {
+		rc = ALP_ERR_INVAL;
+	} else if (len == 0) {
+		rc = ALP_OK;
+	} else {
+		rc = port->state.ops->read(&port->state, data, len, timeout_ms);
+	}
+	alp_handle_op_leave(&port->active_ops);
+	return rc;
 }
 
 void alp_uart_close(alp_uart_t *port)
 {
-	if (port == NULL || !port->in_use) return;
+	if (port == NULL) return;
+	/* Gate out new ops and drain any in-flight one before touching
+	 * state.ops (issue #629): a racing close can't free a slot an
+	 * op is using. Losing the CAS (already closed/closing/never-
+	 * opened) makes this a no-op, matching the existing void-close
+	 * idempotency contract. */
+	if (!alp_handle_begin_close(&port->lifecycle, &port->active_ops)) return;
 	if (port->state.ops != NULL && port->state.ops->close != NULL) {
 		port->state.ops->close(&port->state);
 	}
+	alp_lifecycle_set(&port->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(port);
 }
 

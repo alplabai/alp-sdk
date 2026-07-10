@@ -64,6 +64,11 @@ zephyr_library_named(alp_sdk)
 zephyr_library_sources(
     # Runtime capability table -- always compiled; pure .rodata, no Kconfig guard.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/cap.c
+    # alp_status_name() / alp_status_description() -- generated from the
+    # alp_status_t enum (scripts/gen_status_strings.py).  The name table is
+    # always compiled (pure .rodata); the description table gates on
+    # CONFIG_ALP_STATUS_DESCRIPTIONS internally so this TU compiles either way.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/status_strings.c
     # SDK lifecycle (alp_init / alp_deinit) -- OS-agnostic, always compiled.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/init.c
     # Runtime SDK-version accessor -- always compiled; pure .rodata.
@@ -833,6 +838,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ACT8760
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/act8760/act8760.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DA9292
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/da9292/da9292.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PCA9451A
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pca9451a/pca9451a.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TPS628640
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tps628640/tps628640.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PI3DBS12212
@@ -1206,4 +1213,35 @@ zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/usb/uhc/xhci_core.c)
 if(CONFIG_UHC_XHCI_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
+endif()
+
+# <alp/testing/*> virtual-backend test doubles (epic #610).  Hard-gated
+# on CONFIG_ZTEST at the Kconfig layer (zephyr/kconfigs/testing.kconfig);
+# FATAL_ERROR here too so a workspace that somehow forces
+# CONFIG_ALP_SDK_TESTING=y without ZTEST fails the build loudly instead
+# of silently shipping a priority-255 wildcard backend that would
+# hijack every real board's peripheral selection.
+if(CONFIG_ALP_SDK_TESTING)
+    if(NOT CONFIG_ZTEST)
+        message(FATAL_ERROR
+            "CONFIG_ALP_SDK_TESTING requires CONFIG_ZTEST -- the "
+            "<alp/testing/*> doubles register priority-255 wildcard "
+            "backends that must never ship in a non-test image.")
+    endif()
+
+    # include-testing/ is a SEPARATE include root from the public SDK
+    # (${ZEPHYR_CURRENT_MODULE_DIR}/include, added unconditionally
+    # above) -- only test builds see <alp/testing/*>.
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include-testing)
+
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing)
+
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/virtual_clock.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/instance_table.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/reset_registry.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_GPIO
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/testing_drv.c)
 endif()

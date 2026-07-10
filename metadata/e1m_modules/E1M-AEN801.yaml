@@ -79,10 +79,12 @@ topology:
     app: alp-stock-shim
     board: alp_e1m_aen801_m55_hp        # Zephyr board target
     toolchain: arm-zephyr-eabi
+    zephyr_full_name: "E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HP carrier"
   m55_he:
     app: alp-stock-shim
     board: alp_e1m_aen801_m55_he        # Zephyr board target
     toolchain: arm-zephyr-eabi
+    zephyr_full_name: "E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HE carrier"
 
 # Memory layout (SRAM banks + MRAM) is derived from the SoC variant
 # resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json

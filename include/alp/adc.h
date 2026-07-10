@@ -128,6 +128,31 @@ typedef struct {
 } alp_adc_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_adc_config_t for channel @p id.
+ *
+ * Identity from @p id; canonical defaults: @c resolution_bits = 0 and
+ * @c acquisition_us = 0 (both "use the backend/DT default"),
+ * @c reference = @ref ALP_ADC_REF_INTERNAL (on-die bandgap -- needs no
+ * external reference wiring), @c gain_num = 1 / @c gain_den = 1 (unity
+ * gain, 1/1), @c oversampling_ratio = 0 and @c sample_cycles = 0 (both
+ * documented as "backend default" when zero).
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_ADC_CONFIG_DEFAULT(id)                                                                 \
+	((alp_adc_config_t){ .channel_id         = (id),                                               \
+	                     .resolution_bits    = 0u,                                                 \
+	                     .acquisition_us     = 0u,                                                 \
+	                     .reference          = ALP_ADC_REF_INTERNAL,                               \
+	                     .gain_num           = 1u,                                                 \
+	                     .gain_den           = 1u,                                                 \
+	                     .oversampling_ratio = 0u,                                                 \
+	                     .sample_cycles      = 0u })
+
+/**
  * @brief Acquire and configure an ADC channel.
  *
  * Resolves @p cfg->channel_id via the `alp-adc<N>` devicetree alias,
@@ -217,6 +242,24 @@ typedef struct {
                                     *  caps at the active SoM's hardware ceiling
                                     *  (~1.5 MSps on V2N at 12-bit). */
 } alp_adc_stream_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_adc_stream_config_t for channel @p id.
+ *
+ * Identity from @p id; @c sample_rate_hz has no universally-safe rate
+ * to default to (it's the whole point of the config) so it defaults to
+ * 0 -- a deliberate "you must choose" sentinel: @ref alp_adc_stream_open
+ * rejects a zero sample-rate with @ref ALP_ERR_INVAL, so a caller who
+ * forgets to set it fails loudly at open() rather than streaming at an
+ * unintended rate.  Set @c sample_rate_hz before calling open().
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_ADC_STREAM_CONFIG_DEFAULT(id)                                                          \
+	((alp_adc_stream_config_t){ .channel_id = (id), .sample_rate_hz = 0u })
 
 /**
  * @brief Open a DMA-backed continuous-conversion stream on an ADC channel.
@@ -312,6 +355,25 @@ typedef struct {
 } alp_adc_filter_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_adc_filter_config_t for channel @p id.
+ *
+ * Identity from @p id.  @c sample_rate_hz, @c stages, and @c n_stages
+ * are all mandatory with no sensible default -- @ref alp_adc_filter_open
+ * rejects a zero rate, a NULL @c stages, or @c n_stages == 0 with
+ * @ref ALP_ERR_INVAL -- so the default zero-initializes them as an
+ * explicit "you must set this" sentinel rather than inventing a chain.
+ * Set @c sample_rate_hz / @c stages / @c n_stages before calling open().
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_ADC_FILTER_CONFIG_DEFAULT(id)                                                          \
+	((alp_adc_filter_config_t){                                                                    \
+	    .channel_id = (id), .sample_rate_hz = 0u, .stages = NULL, .n_stages = 0u })
+
+/**
  * @brief Open a streaming ADC source with a FIR/IIR DSP chain applied.
  *
  * Composes @ref alp_adc_stream_open + @ref alp_dsp_chain_open under
@@ -378,6 +440,25 @@ typedef struct {
 	/** Stage count (1..@ref ALP_DSP_MAX_STAGES). */
 	size_t n_stages;
 } alp_adc_spectrum_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_adc_spectrum_config_t for channel @p id.
+ *
+ * Identity from @p id.  Same "you must set this" reasoning as
+ * @ref ALP_ADC_FILTER_CONFIG_DEFAULT -- @c sample_rate_hz, @c stages, and
+ * @c n_stages are all mandatory (@ref alp_adc_spectrum_open rejects a
+ * zero rate, a NULL @c stages, or @c n_stages == 0), so they default to
+ * a zero sentinel rather than an invented FFT chain.  Set them before
+ * calling open().
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_ADC_SPECTRUM_CONFIG_DEFAULT(id)                                                        \
+	((alp_adc_spectrum_config_t){                                                                  \
+	    .channel_id = (id), .sample_rate_hz = 0u, .stages = NULL, .n_stages = 0u })
 
 /**
  * @brief Open a streaming ADC source with an FFT-terminated DSP chain.

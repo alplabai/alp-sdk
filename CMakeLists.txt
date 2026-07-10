@@ -102,6 +102,15 @@ option(ALP_BUILD_FUZZ     "Build Alp SDK libFuzzer harnesses (tests/fuzz/, clang
 option(ALP_HAS_LVGL       "Compile <alp/gui.h> against LVGL"  OFF)
 option(ALP_HAS_CMSIS_DSP  "Allow Alp SDK internals (audio etc.) to call CMSIS-DSP.  Application code uses CMSIS-DSP directly; ALP no longer re-exports it." OFF)
 
+# Mirrors the Zephyr Kconfig CONFIG_ALP_STATUS_DESCRIPTIONS (zephyr/Kconfig,
+# default y) for plain-CMake (baremetal/yocto) consumers: alp_status_name()
+# is always compiled, but its sibling alp_status_description()'s string
+# table (src/status_strings.c) is gated behind this so a footprint-sensitive
+# build can drop it.  ON by default here too, matching the Kconfig default.
+option(ALP_SDK_STATUS_DESCRIPTIONS
+    "Compile the alp_status_description() string table (src/status_strings.c)"
+    ON)
+
 # Build libalp_sdk as a shared library and install it + the <alp/*>
 # headers.  Linux/Yocto consumers (e.g. the meta-alp-sdk recipe, ROS 2
 # nodes that link libalp_sdk.so) set this ON; embedded users who
@@ -169,7 +178,7 @@ set(ALP_SDK_CHIP_LIST
     ina236 inmp441 lis2dw12 lps22hb lsm6dso max31855 max31865
     max98357a maxim_max9295_9296 ms5611 mt6701 murata_lbee5hy2fy
     optiga_trust_m ov2640 ov5640 ov5645 ov7670 ov9281
-    pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
+    pca9451a pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
     rtl8211fdi rv3028c7 semtech_sx1262 semtech_sx1276 sh1106
     ssd1306 ssd1331 st7789 tas2563 tcal9538 ti_ds90ub953_954
     tlv320aic3204 tmc2209 tmp112 tps628640 tsl2591 ublox_max_m10s
@@ -244,6 +253,13 @@ if(NOT DEFINED ZEPHYR_BASE)
     # dispatcher force-references its section-carrying backend and pulls
     # it into the link.  Harmless (inert) for the shared build.
     target_compile_definitions(alp_sdk PRIVATE ALP_BACKEND_STATIC_ANCHORS=1)
+    # Plain-CMake mirror of the Zephyr Kconfig CONFIG_ALP_STATUS_DESCRIPTIONS
+    # (default y) -- src/status_strings.c reads the same macro name on
+    # every OS backend, so define it here when the option is ON instead of
+    # introducing a second feature-test macro just for this build mode.
+    if(ALP_SDK_STATUS_DESCRIPTIONS)
+        target_compile_definitions(alp_sdk PRIVATE CONFIG_ALP_STATUS_DESCRIPTIONS=1)
+    endif()
 endif()
 
 # Common helpers (always built).

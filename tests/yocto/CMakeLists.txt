@@ -24,6 +24,27 @@ target_compile_features(alp_test_delay PRIVATE c_std_99)
 add_test(NAME alp_test_delay
          COMMAND alp_test_delay)
 
+# Shared errno -> alp_status_t baseline mapper (#630): the reviewed
+# baseline contract + the per-operation override mechanism (CAN's
+# EAGAIN-as-timeout worked example).  Pure POSIX <errno.h> + the header
+# under test -- no Linux-only ioctl/sysfs surface, so this runs
+# ungated like alp_test_delay above.
+add_executable(alp_test_alp_errno
+    ${CMAKE_CURRENT_SOURCE_DIR}/alp_errno.c
+)
+target_link_libraries(alp_test_alp_errno PRIVATE alp::sdk)
+target_include_directories(alp_test_alp_errno PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    # alp_sdk only exposes src/ to itself (PRIVATE, src/yocto/CMakeLists.txt) --
+    # add it here too so this test can include the header under test
+    # ("common/alp_errno.h") the same root-relative way the backends do.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+)
+target_compile_features(alp_test_alp_errno PRIVATE c_std_99)
+
+add_test(NAME alp_test_alp_errno
+         COMMAND alp_test_alp_errno)
+
 add_executable(alp_test_inference_dispatcher
     ${CMAKE_CURRENT_SOURCE_DIR}/inference_dispatcher.c
 )
@@ -51,6 +72,48 @@ target_compile_features(alp_test_gpu2d_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_gpu2d_dispatcher
          COMMAND alp_test_gpu2d_dispatcher)
 
+# GPU2D static handle-pool race regression (#629): the exact
+# duplicate-slot / op-vs-close reproduction from the issue, against
+# the real sw_fallback backend.  Needs pthreads on every host this
+# runs on (same gate as alp_test_last_error_threading below).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+
+    add_executable(alp_test_gpu2d_slot_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/gpu2d_slot_race.c
+    )
+    target_link_libraries(alp_test_gpu2d_slot_race PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_gpu2d_slot_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_gpu2d_slot_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_gpu2d_slot_race
+             COMMAND alp_test_gpu2d_slot_race)
+
+    # Stateless dispatcher ops-cache race regression (#628): concurrent
+    # cold first calls into TMU / SoC-info / security.  Recompiles the
+    # security sw_fallback TU straight into the executable -- same
+    # archive-extraction rationale as alp_test_audio_alsa below -- so
+    # the random-bytes fast path resolves regardless of OpenSSL
+    # presence on the host.
+    add_executable(alp_test_dispatch_cache_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_cache_race.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/sw_fallback.c
+    )
+    target_link_libraries(alp_test_dispatch_cache_race PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_dispatch_cache_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_dispatch_cache_race PRIVATE c_std_99)
+    if(UNIX)
+        target_link_libraries(alp_test_dispatch_cache_race PRIVATE m)
+    endif()
+
+    add_test(NAME alp_test_dispatch_cache_race
+             COMMAND alp_test_dispatch_cache_race)
+endif()
+
 # Static-archive link regression for the backend registry (#368).
 # Links ONLY against the (static) libalp_sdk.a and compiles NO backend
 # TU of its own -- deliberately UNLIKE the sw_fallback / ALSA tests
@@ -71,6 +134,26 @@ target_compile_features(alp_test_registry_static_link PRIVATE c_std_99)
 
 add_test(NAME alp_test_registry_static_link
          COMMAND alp_test_registry_static_link)
+
+# Thread-local alp_last_error() regression (#627).  ALP_LAST_ERROR_TLS
+# (src/common/alp_internal.h) only qualifies the storage with
+# _Thread_local on a hosted Linux target, so this test is gated the
+# same way alp_test_peripheral_i2c below is.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+
+    add_executable(alp_test_last_error_threading
+        ${CMAKE_CURRENT_SOURCE_DIR}/last_error_threading.c
+    )
+    target_link_libraries(alp_test_last_error_threading PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_last_error_threading PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_last_error_threading PRIVATE c_std_99)
+
+    add_test(NAME alp_test_last_error_threading
+             COMMAND alp_test_last_error_threading)
+endif()
 
 # v0.4: Yocto I2C wrapper failure-path coverage.  Real-adapter HIL
 # coverage is parked under docs/ci/HW-IN-LOOP.md until the self-hosted

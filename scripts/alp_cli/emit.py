@@ -44,6 +44,7 @@ PROJECT_EMIT_MODES = [
     "os-topology",
     "composed-route-table",
     "carrier-netlist",
+    "zephyr-board",
 ]
 
 # Mirror the orchestrator's --emit choices (alp_orchestrate.cli) == the

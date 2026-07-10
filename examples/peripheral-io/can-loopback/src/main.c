@@ -48,9 +48,9 @@ static void on_rx(const alp_can_frame_t *f, void *user)
 {
 	(void)user;
 	rx_count++;
-	printk("[can] rx id=0x%03x dlc=%u data[0..3]=%02x %02x %02x %02x\n",
+	printk("[can] rx id=0x%03x len=%u data[0..3]=%02x %02x %02x %02x\n",
 	       f->id,
-	       f->dlc,
+	       f->payload_len,
 	       f->data[0],
 	       f->data[1],
 	       f->data[2],
@@ -116,9 +116,9 @@ int main(void)
      * RX path; on a real bus, an external transceiver drives the
      * differential pair. */
 	alp_can_frame_t tx = {
-		.id   = 0x123,
-		.dlc  = 8,
-		.data = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 },
+		.id          = 0x123,
+		.payload_len = 8,
+		.data        = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 },
 	};
 	s = alp_can_send(bus, &tx, 100); /* 100 ms timeout for TX mailbox */
 	printf("[can] send id=0x%03x -> %d\n", tx.id, (int)s);

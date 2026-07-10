@@ -146,6 +146,28 @@ typedef struct {
 } alp_rpc_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_rpc_config_t for channel @p id.
+ *
+ * Identity from @p id (the @c name); every other field uses the
+ * ALREADY-documented per-field default: @c src_ept = 0 (the backend
+ * derives it from @c name via FNV-1a hash), @c dst_ept = 0 (the
+ * backend uses `src_ept + 1`), @c mbox_ch = @ref
+ * ALP_RPC_DEFAULT_MBOX_CH, @c cacheable = false (the v0.6 default --
+ * non-cacheable carve-out).
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_RPC_CONFIG_DEFAULT(id)                                                                 \
+	((alp_rpc_config_t){ .name      = (id),                                                        \
+	                     .src_ept   = 0u,                                                          \
+	                     .dst_ept   = 0u,                                                          \
+	                     .mbox_ch   = ALP_RPC_DEFAULT_MBOX_CH,                                     \
+	                     .cacheable = false })
+
+/**
  * @brief Generic inbound-message callback.
  *
  * Receives the parsed method name plus the opaque payload that

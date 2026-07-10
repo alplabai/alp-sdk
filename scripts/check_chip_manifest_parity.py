@@ -38,7 +38,6 @@ KNOWN_MANIFEST_NO_DRIVER = {
     "murata_lbee5pl2dl",
     "murata_lbes0zz2ll",
     "murata_lbes5pl2el",
-    "pca9451a",  # PMIC: metadata declared; driver intentionally not yet built.
 }
 
 

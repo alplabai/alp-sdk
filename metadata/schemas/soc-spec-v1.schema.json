@@ -250,7 +250,19 @@
         "l1_kb":             { "type": "integer" },
         "l2_kb":             { "type": "integer" },
         "shared_l2":         { "type": "boolean" },
-        "mmu":               { "type": "boolean" }
+        "mmu":               { "type": "boolean" },
+        "zephyr_cpucluster": {
+          "type": "string",
+          "description": "Zephyr multi-image board qualifier for this core (e.g. \"rtss_hp\", \"cm33\") -- the `<board>/<soc>/<cpucluster>` third segment `scripts/alp_project.py --emit zephyr-board` uses to name per-core board artefacts. Distinct from `id` because upstream Zephyr's own cluster-naming convention doesn't always match the SDK's core id."
+        },
+        "itcm_global_base": {
+          "type": "integer",
+          "description": "System-bus-visible alias base address (decimal) of this core's ITCM window, when the vendor fork's devicetree exposes one (e.g. Alif Ensemble RTSS cores). Consumed by `--emit zephyr-board` to retarget the `&itcm` node's `global_base` property; omit for cores with no such alias."
+        },
+        "dtcm_global_base": {
+          "type": "integer",
+          "description": "System-bus-visible alias base address (decimal) of this core's DTCM window. See itcm_global_base."
+        }
       }
     },
 
@@ -338,6 +350,10 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Alp Lab module SKUs (e.g. E1M-AEN801) that ship this Alif variant. Lets the studio resolve E1M SKU → SoC variant in one hop."
+        },
+        "zephyr_soc_variant": {
+          "type": "string",
+          "description": "Zephyr upstream SOC_* Kconfig / devicetree symbol this variant builds against, when it differs from `order_code` (e.g. a die upstream Zephyr doesn't model separately because it's devicetree-identical to a sibling it does model). `--emit zephyr-board` uses this in place of order_code for board filenames / Kconfig selects when present."
         }
       }
     }

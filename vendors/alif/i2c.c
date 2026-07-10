@@ -28,6 +28,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alp_internal.h"
+
 #include "Driver_I2C.h"
 
 extern ARM_DRIVER_I2C        Driver_I2C0;
@@ -60,38 +62,43 @@ static alp_status_t alif_to_alp(int32_t st)
     }
 }
 
-static alp_status_t z_last_error;
+/* Last-error stamping goes through alp_internal_set_last_error (the
+ * one canonical, thread-local slot -- see src/common/alp_internal.h)
+ * rather than a vendor-local static: stub_backend.c's alp_last_error
+ * reader is now unconditional, so a second static + a duplicate
+ * accessor here would just be an unreachable, stale copy. */
 
 alp_i2c_t          *alp_i2c_open(const alp_i2c_config_t *cfg)
 {
     if (cfg == NULL) {
-        z_last_error = ALP_ERR_INVAL;
+        alp_internal_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
     if (cfg->bus_id >= sizeof(alp_alif_i2c_drivers) / sizeof(alp_alif_i2c_drivers[0])) {
-        z_last_error = ALP_ERR_OUT_OF_RANGE;
+        alp_internal_set_last_error(ALP_ERR_OUT_OF_RANGE);
         return NULL;
     }
     ARM_DRIVER_I2C *d = alp_alif_i2c_drivers[cfg->bus_id];
     if (d == NULL) {
-        z_last_error = ALP_ERR_NOT_READY;
+        alp_internal_set_last_error(ALP_ERR_NOT_READY);
         return NULL;
     }
     if (d->Initialize(NULL) != ARM_DRIVER_OK) {
-        z_last_error = ALP_ERR_IO;
+        alp_internal_set_last_error(ALP_ERR_IO);
         return NULL;
     }
     if (d->PowerControl(ARM_POWER_FULL) != ARM_DRIVER_OK) {
-        z_last_error = ALP_ERR_IO;
+        alp_internal_set_last_error(ALP_ERR_IO);
         return NULL;
     }
     int32_t speed = (cfg->bitrate_hz >= 1000000)  ? ARM_I2C_BUS_SPEED_FAST_PLUS
                     : (cfg->bitrate_hz >= 400000) ? ARM_I2C_BUS_SPEED_FAST
                                                   : ARM_I2C_BUS_SPEED_STANDARD;
     if (d->Control(ARM_I2C_BUS_SPEED, (uint32_t)speed) != ARM_DRIVER_OK) {
-        z_last_error = ALP_ERR_IO;
+        alp_internal_set_last_error(ALP_ERR_IO);
         return NULL;
     }
+    alp_internal_set_last_error(ALP_OK);
     /* Opaque cast -- consumers never dereference alp_i2c_t. */
     return (alp_i2c_t *)d;
 }
@@ -124,11 +131,6 @@ void alp_i2c_close(alp_i2c_t *bus)
     ARM_DRIVER_I2C *d = (ARM_DRIVER_I2C *)bus;
     (void)d->PowerControl(ARM_POWER_OFF);
     (void)d->Uninitialize();
-}
-
-alp_status_t alp_last_error(void)
-{
-    return z_last_error;
 }
 
 #endif /* ALP_HAS_ALIF_HAL */

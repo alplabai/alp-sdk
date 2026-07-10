@@ -34,6 +34,7 @@
 #include <alp/rtc.h>
 
 #include "rtc_ops.h"
+#include "common/alp_errno.h"
 
 /* Per-handle backend data: the open RTC chardev fd.  Boxed onto the
  * heap so the void* be_data slot in alp_rtc_backend_state_t owns it. */
@@ -41,29 +42,15 @@ typedef struct {
 	int fd;
 } y_rtc_data_t;
 
-/** @brief Map a (positive) errno value to the closest alp_status_t. */
-static alp_status_t _errno_to_alp(int err)
-{
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case EINVAL:
-		return ALP_ERR_INVAL;
-	case EBUSY:
-		return ALP_ERR_BUSY;
-	case ENOTTY:
-	case ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
-}
-
 /**
  * @brief Open /dev/rtc<rtc_id> and stash the fd in the handle state.
  *
  * The kernel RTC has no queryable capability surface beyond presence,
- * so caps stay 0.  Errors from open() map errno -> ALP_ERR_IO.
+ * so caps stay 0.  Errors from open() route through the shared
+ * @ref alp_status_from_posix_errno baseline (#630) -- a missing
+ * /dev/rtcN (ENOENT/ENODEV) now correctly surfaces as
+ * ALP_ERR_NOT_READY instead of falling through to ALP_ERR_IO, which
+ * this backend's now-removed local mapping switch didn't cover.
  */
 static alp_status_t
 y_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
@@ -73,7 +60,7 @@ y_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_ou
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
 	int fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (fd < 0) return _errno_to_alp(errno);
+	if (fd < 0) return alp_status_from_posix_errno(errno);
 
 	y_rtc_data_t *d = (y_rtc_data_t *)malloc(sizeof(*d));
 	if (d == NULL) {
@@ -113,7 +100,7 @@ static alp_status_t y_set_time(alp_rtc_backend_state_t *st, const alp_rtc_time_t
 	rt.tm_sec  = (int)t->second;
 	/* tm_yday / tm_isdst are ignored by the kernel RTC core. */
 
-	if (ioctl(d->fd, RTC_SET_TIME, &rt) < 0) return _errno_to_alp(errno);
+	if (ioctl(d->fd, RTC_SET_TIME, &rt) < 0) return alp_status_from_posix_errno(errno);
 	return ALP_OK;
 }
 
@@ -130,7 +117,7 @@ static alp_status_t y_get_time(alp_rtc_backend_state_t *st, alp_rtc_time_t *t)
 
 	struct rtc_time rt;
 	memset(&rt, 0, sizeof(rt));
-	if (ioctl(d->fd, RTC_RD_TIME, &rt) < 0) return _errno_to_alp(errno);
+	if (ioctl(d->fd, RTC_RD_TIME, &rt) < 0) return alp_status_from_posix_errno(errno);
 
 	t->year        = (uint16_t)(rt.tm_year + 1900);
 	t->month       = (uint8_t)(rt.tm_mon + 1);

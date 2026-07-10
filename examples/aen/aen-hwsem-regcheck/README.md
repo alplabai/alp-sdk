@@ -66,7 +66,7 @@ dual-core arbitration test is **TBD** (needs the dual-core boot).
 | HE MASTER ID | `0x410FD222` | DFP `Device/soc/AE822FA0E5597/include/rtss_he/core_defines.h` `HWSEM_MASTERID` |
 | HP MASTER ID | `0x410FD221` | DFP `Device/soc/AE822FA0E5597/include/rtss_hp/core_defines.h` `HWSEM_MASTERID` |
 | Driver | `alif,hwsem`, `DT_DRV_COMPAT alif_hwsem`, no Zephyr class | `zephyr/drivers/misc/alif_hwsem/hwsem_alif.c` |
-| Kconfig | `HWSEM_ALIF`, `depends on DT_HAS_ALIF_HWSEM_ENABLED` | `zephyr/kconfig/vendor-alif-peripherals.kconfig` |
+| Kconfig | `HWSEM_ALIF`, `depends on DT_HAS_ALIF_HWSEM_ENABLED` | `zephyr/kconfigs/vendor-alif-peripherals.kconfig` |
 
 The register **offsets** and **master ids** were transcribed
 **clean-room** (value only, no DFP source copied) from the Alif DFP

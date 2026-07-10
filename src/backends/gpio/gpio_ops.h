@@ -55,12 +55,21 @@ struct alp_gpio {
 	alp_gpio_backend_state_t state;
 	const alp_backend_t     *backend;
 	alp_capabilities_t       cached_caps;
-	bool                     in_use;
 	alp_gpio_dir_t           dir;
 	alp_gpio_pull_t          pull;
 	alp_gpio_edge_t          edge;
 	alp_gpio_cb_t            cb;
 	void                    *cb_user;
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close, issue #629) -- placed (with in_use) after the
+	 * fields alp_gpio_open() explicitly re-initialises post-claim, so
+	 * moving in_use to the last member (required for the atomic-claim
+	 * zeroing in src/gpio_dispatch.c: memset up to offsetof(...,
+	 * in_use)) doesn't change what a fresh claim zeroes. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 /* Platform (Zephyr) gpio backend ops accessor -- defined in zephyr_drv.c.

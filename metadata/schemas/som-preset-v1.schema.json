@@ -371,6 +371,14 @@
         "toolchain": {
           "type": "string",
           "description": "Toolchain identifier (e.g. `poky-glibc`, `arm-zephyr-eabi`)."
+        },
+        "zephyr_full_name": {
+          "type": "string",
+          "description": "Human-readable board title for `os: zephyr` entries -- feeds `--emit zephyr-board`'s generated `board.yml` `full_name:`, the twister board `.yaml` `name:` (families that reuse it verbatim), and the board `.dts` header comment / `model =` property (parenthetical stripped). Free text so it stays a literal, reviewable fact rather than a string built by regex over other fields."
+        },
+        "zephyr_twister_name": {
+          "type": "string",
+          "description": "Twister board-metadata `name:` field for `os: zephyr` entries, when it differs from `zephyr_full_name` (some families drop the SoC parenthetical here). Defaults to `zephyr_full_name` when absent."
         }
       },
       "allOf": [

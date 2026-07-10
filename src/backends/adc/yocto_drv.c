@@ -51,6 +51,7 @@
 #include <alp/peripheral.h>
 
 #include "adc_ops.h"
+#include "common/alp_errno.h"
 
 /* The IIO sysfs channel files we read are conventionally short ASCII;
  * 64 bytes covers an integer raw code, a "<int>.<frac>" scale, or an
@@ -70,31 +71,6 @@ typedef struct {
 	unsigned channel;
 	long     offset_raw; /* in_voltage<ch>_offset, raw counts; 0 if absent */
 } y_adc_data_t;
-
-/** @brief Map a (positive) errno value to the closest alp_status_t. */
-static alp_status_t _errno_to_alp(int err)
-{
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case EINVAL:
-		return ALP_ERR_INVAL;
-	case EBUSY:
-	case EAGAIN:
-		return ALP_ERR_BUSY;
-	case ENODEV:
-	case ENOENT:
-		return ALP_ERR_NOT_READY;
-	case ENOTSUP:
-#if defined(EOPNOTSUPP) && (EOPNOTSUPP != ENOTSUP)
-	case EOPNOTSUPP:
-#endif
-	case ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
-}
 
 /**
  * @brief Read a small IIO sysfs attribute file into @p buf.
@@ -119,14 +95,14 @@ _read_attr(unsigned device_id, unsigned channel, const char *suffix, char *buf, 
 
 	int fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
-		return _errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 
 	ssize_t r = read(fd, buf, buflen - 1u);
 	int     e = errno;
 	close(fd);
 	if (r < 0) {
-		return _errno_to_alp(e);
+		return alp_status_from_posix_errno(e);
 	}
 	buf[r] = '\0';
 	/* Strip the trailing newline the kernel appends. */

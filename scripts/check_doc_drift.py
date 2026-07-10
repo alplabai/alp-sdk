@@ -14,7 +14,7 @@ Three independent checks:
       a token in one of the SDK's authoritative sources of truth:
         * C-API public headers    include/**/*.h
         * Kconfig config symbols   zephyr/Kconfig[.alp-libraries],
-                                 zephyr/kconfig/*.kconfig
+                                 zephyr/kconfigs/*.kconfig
         * generated identifiers    scripts/alp_project.py + scripts/gen_*.py
           (board target names like alp_e1m_evk_*, the alp_hw_info_build
            CMake helper, ALP_HW_BUILD_* / ALP_SOC_* macros)
@@ -185,7 +185,7 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
     a whole-tree walk, so this stays fast and skips build artefacts):
       * C-API headers           include/**/*.h, src/**/*.h
       * Kconfig config symbols   zephyr/Kconfig[.alp-libraries],
-                                 zephyr/kconfig/*.kconfig
+                                 zephyr/kconfigs/*.kconfig
       * CMake options / helpers  CMakeLists.txt, src/**/CMakeLists.txt,
                                  cmake/**/*.cmake  (ALP_OS, ALP_SDK*,
                                  alp_hw_info_build, ...)
@@ -212,11 +212,11 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
     harvest_tree(root / "include", "*.h")
     harvest_tree(root / "src", "*.h")
     # Kconfig config namespace (ALP_SDK_*).  zephyr/Kconfig only sources the
-    # per-subsystem fragments under zephyr/kconfig/ (issue #458 split) plus a
+    # per-subsystem fragments under zephyr/kconfigs/ (issue #458 split) plus a
     # couple of driver-tree Kconfig files, so harvest those directly too.
     for kconfig in ("zephyr/Kconfig", "zephyr/Kconfig.alp-libraries"):
         harvest(root / kconfig)
-    harvest_tree(root / "zephyr" / "kconfig", "*.kconfig")
+    harvest_tree(root / "zephyr" / "kconfigs", "*.kconfig")
     # CMake options / helper functions (ALP_OS, ALP_SDK*, alp_hw_info_build).
     harvest(root / "CMakeLists.txt")
     harvest_tree(root / "src", "CMakeLists.txt")

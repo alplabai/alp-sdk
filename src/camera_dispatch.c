@@ -31,8 +31,7 @@ ALP_BACKEND_ANCHOR(camera);
  * pulling in the broader handles.h header (which carries
  * unrelated peripheral pool declarations the dispatcher does
  * not touch). */
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_CAMERA_HANDLES
 #define CONFIG_ALP_SDK_MAX_CAMERA_HANDLES 2

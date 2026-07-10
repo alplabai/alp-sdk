@@ -129,6 +129,37 @@ typedef struct {
 } alp_inference_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_inference_config_t for model
+ *        buffer @p id.
+ *
+ * Identity from @p id (the @c model_data pointer -- there is no
+ * separate instance-id field for an inference handle).  @c model_size
+ * is mandatory and paired with @c model_data with no sensible
+ * default, so it defaults to 0 as a "you must set this" sentinel --
+ * set it to the actual byte length of the buffer passed as @p id
+ * before calling open(). @c format defaults to @ref
+ * ALP_INFERENCE_MODEL_TFLITE (the enum's zero value and the most
+ * common on-disk model format), @c backend defaults to @ref
+ * ALP_INFERENCE_BACKEND_AUTO (route to whichever NPU/CPU backend is
+ * available on the active SoM), @c arena_bytes = 0 and @c arena = NULL
+ * both use the ALREADY-documented backend defaults ("if 0, the
+ * backend uses a built-in default" / "NULL to let the backend use
+ * heap").
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_INFERENCE_CONFIG_DEFAULT(id)                                                           \
+	((alp_inference_config_t){ .model_data  = (id),                                                \
+	                           .model_size  = 0u,                                                  \
+	                           .format      = ALP_INFERENCE_MODEL_TFLITE,                          \
+	                           .backend     = ALP_INFERENCE_BACKEND_AUTO,                          \
+	                           .arena_bytes = 0u,                                                  \
+	                           .arena       = NULL })
+
+/**
  * @brief Load a compiled model and prepare it for invocation.
  *
  * Verifies the model's format / signature, allocates per-tensor

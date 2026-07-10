@@ -338,6 +338,16 @@ CLI's CWD, so the plan is deterministic, write-free, and versioned by
 its own `schemaVersion` — see
 [ADR 0014](adr/0014-build-plan-emit-cli-contract.md) for the contract.
 
+Its shape is pinned by
+[`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json);
+`scripts/check_build_plan.py` validates the emitter's output against it,
+the same emitter-and-contract lockstep `check_system_manifest.py`
+enforces for the manifest above.  Validate a real plan with:
+
+```bash
+python3 scripts/check_build_plan.py --plan build-plan.json
+```
+
 ### Iterating on one slice
 
 The Yocto cold build takes hours; the Zephyr build takes seconds.

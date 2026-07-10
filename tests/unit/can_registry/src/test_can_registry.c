@@ -24,6 +24,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <zephyr/drivers/can.h>
+#include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
 #include <alp/backend.h>
@@ -31,6 +33,7 @@
 #include <alp/can.h>
 
 #include "../../../../src/backends/can/can_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_can_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -162,8 +165,8 @@ ZTEST(alp_can_registry, test_sw_fallback_round_trip)
 
 	/* send returns NOSUPPORT */
 	alp_can_frame_t frame = {
-		.id  = 0x123,
-		.dlc = 8u,
+		.id          = 0x123,
+		.payload_len = 8u,
 	};
 	zassert_equal(ops->send(st, &frame, 10u), ALP_ERR_NOSUPPORT);
 
@@ -210,6 +213,11 @@ ZTEST(alp_can_registry, test_alp_can_remove_filter_public_dispatch)
 	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
 	h.state.ops = ops; /* alp_can_open() normally wires this before open() */
 	h.in_use    = true;
+	/* alp_can_open() also stamps this after a successful backend open
+	 * (issue #629's op-vs-close guard, src/common/alp_slot_claim.h) --
+	 * a hand-built handle that skips it would see every op gated
+	 * NOT_READY regardless of in_use. */
+	h.lifecycle = ALP_HANDLE_LC_OPEN;
 
 	/* Real dispatch to the sw_fallback op, which is idempotent ALP_OK. */
 	zassert_equal(alp_can_remove_filter(&h, 0), ALP_OK);
@@ -243,9 +251,10 @@ ZTEST(alp_can_registry, test_send_enforces_started_handle_contract)
 	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
 	h.state.ops = ops;
 	h.in_use    = true;
-	h.started   = false; /* never started */
+	h.lifecycle = ALP_HANDLE_LC_OPEN; /* see the (g) test above */
+	h.started   = false;              /* never started */
 
-	alp_can_frame_t frame = { .id = 0x123, .dlc = 8u };
+	alp_can_frame_t frame = { .id = 0x123, .payload_len = 8u };
 
 	/* send before start -> ALP_ERR_NOT_READY, never reaches the
      * backend. */
@@ -284,7 +293,7 @@ ZTEST(alp_can_registry, test_zephyr_drv_send_contract_end_to_end)
 	alp_can_t *h = alp_can_open(&cfg);
 	zassert_not_null(h);
 
-	alp_can_frame_t frame = { .id = 0x123, .dlc = 8u };
+	alp_can_frame_t frame = { .id = 0x123, .payload_len = 8u };
 
 	/* send before start */
 	zassert_equal(alp_can_send(h, &frame, 100u), ALP_ERR_NOT_READY);
@@ -401,4 +410,44 @@ ZTEST(alp_can_registry, test_zephyr_drv_close_unregisters_filters)
 		zassert_equal(alp_can_add_filter(hb, &f, _rx_cb_noop, NULL, &fid), ALP_OK);
 	}
 	alp_can_close(hb);
+}
+
+/* ---------- (l) payload_len <-> wire-DLC boundary mapping (#633) ---------- */
+
+ZTEST(alp_can_registry, test_zephyr_drv_fd_dlc_byte_boundaries)
+{
+	/* zephyr_drv.c is the ONLY place a wire-encoded CAN-FD DLC nibble
+	 * (0..15) ever appears -- it converts exactly once at the backend
+	 * boundary via Zephyr's can_dlc_to_bytes()/can_bytes_to_dlc(), and
+	 * alp_can_frame_t::payload_len is always the decoded byte count on
+	 * either side of that call.  This locks the exact byte set the FD
+	 * DLC table encodes (#633's acceptance list) so a future edit to
+	 * the conversion call can't silently drift the byte mapping. */
+	static const uint8_t fd_payload_bytes[] = { 0, 1,  2,  3,  4,  5,  6,  7,
+		                                        8, 12, 16, 20, 24, 32, 48, 64 };
+
+	for (size_t dlc = 0; dlc < ARRAY_SIZE(fd_payload_bytes); ++dlc) {
+		uint8_t bytes = can_dlc_to_bytes((uint8_t)dlc);
+		zassert_equal(bytes,
+		              fd_payload_bytes[dlc],
+		              "dlc=%zu -> bytes=%u (want %u)",
+		              dlc,
+		              bytes,
+		              fd_payload_bytes[dlc]);
+		/* Round-trip: the exact table byte counts must map back to
+		 * their originating DLC (the encode direction z_send() uses). */
+		zassert_equal(can_bytes_to_dlc(fd_payload_bytes[dlc]), (uint8_t)dlc);
+	}
+
+	/* Intermediate byte counts that are NOT exact FD DLC steps must
+	 * round UP to the next valid step (ceiling), per Zephyr's
+	 * documented can_bytes_to_dlc() policy -- never silently truncated
+	 * or rounded down, which would drop payload bytes on the wire. */
+	zassert_equal(can_bytes_to_dlc(9), 9);   /* -> 12-byte step (DLC 9) */
+	zassert_equal(can_bytes_to_dlc(11), 9);  /* -> 12-byte step (DLC 9) */
+	zassert_equal(can_bytes_to_dlc(13), 10); /* -> 16-byte step (DLC 10) */
+	zassert_equal(can_bytes_to_dlc(17), 11); /* -> 20-byte step (DLC 11) */
+	zassert_equal(can_bytes_to_dlc(25), 13); /* -> 32-byte step (DLC 13) */
+	zassert_equal(can_bytes_to_dlc(33), 14); /* -> 48-byte step (DLC 14) */
+	zassert_equal(can_bytes_to_dlc(49), 15); /* -> 64-byte step (DLC 15) */
 }

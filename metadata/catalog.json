@@ -847,6 +847,10 @@
   },
   "gates": [
     {
+      "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json).",
+      "script": "scripts/check_build_plan.py"
+    },
+    {
       "purpose": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
       "script": "scripts/check_chip_header_status.py"
     },
@@ -1249,6 +1253,8 @@
         "alp_spi_target_transceive",
         "alp_spi_transceive",
         "alp_spi_write",
+        "alp_status_description",
+        "alp_status_name",
         "alp_uart_capabilities",
         "alp_uart_close",
         "alp_uart_open",

@@ -45,10 +45,10 @@ def test_os_support_matrix_scopes_se_rows_to_aen801_e8():
 def _effective_kconfig_text() -> str:
     """Concatenate the top-level Kconfig with every sourced subsystem
     fragment (issue #458 split the former zephyr/Kconfig monolith into
-    zephyr/kconfig/*.kconfig).  Mirrors what the real Kconfig parser sees
+    zephyr/kconfigs/*.kconfig).  Mirrors what the real Kconfig parser sees
     after `rsource` inlines each fragment in place."""
     parts = [(ROOT / "zephyr" / "Kconfig").read_text(encoding="utf-8")]
-    fragment_dir = ROOT / "zephyr" / "kconfig"
+    fragment_dir = ROOT / "zephyr" / "kconfigs"
     for fragment in sorted(fragment_dir.glob("*.kconfig")):
         parts.append(fragment.read_text(encoding="utf-8"))
     return "\n".join(parts)

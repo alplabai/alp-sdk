@@ -27,7 +27,7 @@
  *     });
  *     alp_can_start(bus);
  *     alp_can_send(bus, &(alp_can_frame_t){
- *         .id = 0x123, .dlc = 8, .data = {1,2,3,4,5,6,7,8}
+ *         .id = 0x123, .payload_len = 8, .data = {1,2,3,4,5,6,7,8}
  *     }, 100);
  * @endcode
  *
@@ -56,18 +56,26 @@ typedef enum {
 } alp_can_mode_t;
 
 /** Maximum payload bytes per frame, by mode. */
-#define ALP_CAN_MAX_DLC_CLASSIC 8
-#define ALP_CAN_MAX_DLC_FD      64
+#define ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC 8
+#define ALP_CAN_MAX_PAYLOAD_BYTES_FD      64
 
-/** A single CAN frame (TX or RX). */
+/**
+ * A single CAN frame (TX or RX).
+ *
+ * @c payload_len is a decoded **byte count**, not a wire CAN/CAN-FD DLC
+ * (Data Length Code) nibble.  A real CAN-FD DLC is a 4-bit encoded value
+ * (0..15) that maps non-linearly onto 0..64 bytes above 8; that mapping is
+ * a backend-internal concern (see e.g. Zephyr's `can_dlc_to_bytes()` /
+ * `can_bytes_to_dlc()`) and never appears in this portable struct.
+ */
 typedef struct {
-	uint32_t id;     /**< 11-bit (standard) or 29-bit (extended). */
-	bool     ext_id; /**< true = 29-bit, false = 11-bit. */
-	bool     rtr;    /**< Remote-transmission request. */
-	bool     fd;     /**< CAN-FD frame. */
-	bool     brs;    /**< Bit-rate switch (FD only). */
-	uint8_t  dlc;    /**< Data length, 0..@ref ALP_CAN_MAX_DLC_FD. */
-	uint8_t  data[ALP_CAN_MAX_DLC_FD];
+	uint32_t id;          /**< 11-bit (standard) or 29-bit (extended). */
+	bool     ext_id;      /**< true = 29-bit, false = 11-bit. */
+	bool     rtr;         /**< Remote-transmission request. */
+	bool     fd;          /**< CAN-FD frame. */
+	bool     brs;         /**< Bit-rate switch (FD only). */
+	uint8_t  payload_len; /**< Payload bytes, 0..@ref ALP_CAN_MAX_PAYLOAD_BYTES_FD. */
+	uint8_t  data[ALP_CAN_MAX_PAYLOAD_BYTES_FD];
 } alp_can_frame_t;
 
 /** Receive-side filter.  A frame matches when (frame.id & mask) == (id & mask). */
@@ -165,11 +173,11 @@ alp_status_t alp_can_stop(alp_can_t *can);
  * @brief Transmit a frame.  Blocks up to @p timeout_ms for slot availability.
  *
  * @param[in] can         Handle from @ref alp_can_open after @ref alp_can_start.
- * @param[in] frame       Frame to transmit.  @c dlc must respect the mode.
+ * @param[in] frame       Frame to transmit.  @c payload_len must respect the mode.
  * @param[in] timeout_ms  Max wait for a free TX mailbox.
  * @return ALP_OK on success;
  *         ALP_ERR_NOT_READY if @p can is NULL or stopped;
- *         ALP_ERR_INVAL if @p frame is NULL or DLC out of range;
+ *         ALP_ERR_INVAL if @p frame is NULL or @c payload_len out of range;
  *         ALP_ERR_TIMEOUT if all TX mailboxes are occupied;
  *         ALP_ERR_IO on bus error (e.g. error-passive state).
  */

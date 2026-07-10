@@ -7,6 +7,9 @@
  * (alp_uart_rx_ringbuf_*) since it sits behind the same backend.
  */
 
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/serial/uart_emul.h>
 #include <zephyr/ztest.h>
 
 #include "alp/peripheral.h"
@@ -28,6 +31,134 @@ ZTEST(alp_peripheral, test_uart_invalid_port_returns_null)
 {
 	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){ .port_id = 99 });
 	zassert_is_null(u, "out-of-range port_id must yield NULL");
+}
+
+/* ------------------------------------------------------------------ */
+/* #626: alp_uart_read() timeout_ms contract.                          */
+/*                                                                     */
+/* timeout_ms == 0 is a single non-blocking poll; a positive value     */
+/* bounds the ENTIRE call; a deadline reached with at least one byte   */
+/* already collected is a partial read (ALP_OK), not a timeout -- see  */
+/* alp_uart_read() in <alp/peripheral.h> and its Yocto twin in         */
+/* src/yocto/peripheral_uart.c (#595/#621).                            */
+/*                                                                     */
+/* port_id 1 (alp-uart1) is a zephyr,uart-emul device, not native_sim's*/
+/* real uart0 -- unlike uart0, its RX FIFO can be filled directly with */
+/* uart_emul_put_rx_data(), which is what lets these tests drive the   */
+/* read path deterministically without a live external UART peer.     */
+/* ------------------------------------------------------------------ */
+
+static const struct device *const _uart1_emul_dev = DEVICE_DT_GET(DT_ALIAS(alp_uart1));
+
+static alp_uart_t *_open_uart1(void)
+{
+	/* Every RX byte from a prior test must be gone before the next
+     * one opens the port -- otherwise a leftover byte would turn a
+     * "no data" case into a "data available" case. */
+	uart_emul_flush_rx_data(_uart1_emul_dev);
+	return alp_uart_open(&(alp_uart_config_t){
+	    .port_id   = 1,
+	    .baudrate  = 115200,
+	    .data_bits = 8,
+	    .stop_bits = 1,
+	    .parity    = ALP_UART_PARITY_NONE,
+	});
+}
+
+ZTEST(alp_peripheral, test_uart_read_zero_timeout_no_data_returns_immediately)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u, "alp_uart_open should succeed for port_id=1");
+
+	uint8_t       byte    = 0xAAu;
+	const int64_t before  = k_uptime_get();
+	alp_status_t  s       = alp_uart_read(u, &byte, 1, 0);
+	const int64_t elapsed = k_uptime_get() - before;
+
+	zassert_equal(
+	    s, ALP_ERR_TIMEOUT, "empty RX + timeout_ms=0 must be ALP_ERR_TIMEOUT, got %d", (int)s);
+	/* Generous margin: this must be a single poll, not the old
+     * accidental "block forever" (or even a short k_msleep(1) loop). */
+	zassert_true(elapsed < 10, "timeout_ms=0 slept instead of polling once (%lld ms)", elapsed);
+
+	alp_uart_close(u);
+}
+
+ZTEST(alp_peripheral, test_uart_read_zero_timeout_with_queued_byte_returns_ok)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+
+	uint8_t sent = 0x42u;
+	zassert_equal(uart_emul_put_rx_data(_uart1_emul_dev, &sent, 1), 1u);
+
+	uint8_t      got = 0;
+	alp_status_t s   = alp_uart_read(u, &got, 1, 0);
+	zassert_equal(s, ALP_OK, "queued byte + timeout_ms=0 must return ALP_OK, got %d", (int)s);
+	zassert_equal(got, sent);
+
+	alp_uart_close(u);
+}
+
+ZTEST(alp_peripheral, test_uart_read_finite_timeout_no_data_bounds_the_wait)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+
+	uint8_t       byte    = 0;
+	const int64_t before  = k_uptime_get();
+	alp_status_t  s       = alp_uart_read(u, &byte, 1, 50);
+	const int64_t elapsed = k_uptime_get() - before;
+
+	zassert_equal(
+	    s, ALP_ERR_TIMEOUT, "no data before deadline must be ALP_ERR_TIMEOUT, got %d", (int)s);
+	zassert_true(elapsed >= 50, "finite timeout returned early (%lld ms < 50)", elapsed);
+	/* One absolute deadline for the WHOLE call -- must not run away
+     * into a much longer wait (generous margin for scheduler jitter). */
+	zassert_true(elapsed < 500, "finite timeout ran long past its deadline (%lld ms)", elapsed);
+
+	alp_uart_close(u);
+}
+
+ZTEST(alp_peripheral, test_uart_read_data_available_returns_promptly)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+
+	uint8_t sent = 0x7Eu;
+	zassert_equal(uart_emul_put_rx_data(_uart1_emul_dev, &sent, 1), 1u);
+
+	uint8_t       got     = 0;
+	const int64_t before  = k_uptime_get();
+	alp_status_t  s       = alp_uart_read(u, &got, 1, 1000);
+	const int64_t elapsed = k_uptime_get() - before;
+
+	zassert_equal(s, ALP_OK, "got %d", (int)s);
+	zassert_equal(got, sent);
+	zassert_true(elapsed < 50,
+	             "read with data already queued must not wait out the deadline (%lld ms)",
+	             elapsed);
+
+	alp_uart_close(u);
+}
+
+ZTEST(alp_peripheral, test_uart_read_partial_arrival_then_deadline_returns_ok)
+{
+	alp_uart_t *u = _open_uart1();
+	zassert_not_null(u);
+
+	/* Only the first of the two requested bytes ever arrives -- the
+     * deadline expires with a partial read in flight, which the
+     * documented contract folds to ALP_OK (not ALP_ERR_TIMEOUT). */
+	uint8_t sent = 0x01u;
+	zassert_equal(uart_emul_put_rx_data(_uart1_emul_dev, &sent, 1), 1u);
+
+	uint8_t      buf[2] = { 0, 0 };
+	alp_status_t s      = alp_uart_read(u, buf, sizeof(buf), 60);
+	zassert_equal(s, ALP_OK, "partial read at deadline must be ALP_OK, got %d", (int)s);
+	zassert_equal(buf[0], sent);
+
+	alp_uart_close(u);
 }
 
 /* UART RX ringbuf: failure paths exercised on every build.  On builds

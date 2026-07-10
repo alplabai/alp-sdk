@@ -28,9 +28,11 @@ For each (SKU × example) cell:
 `west build` is not the gate — the contract is that
 generated `alp.conf` is uniform within the family up to documented
 silicon-determined deltas.  Per-SoM Zephyr board files are emitted by
-`scripts/alp_project.py --emit zephyr-board` from the same YAML
-sources; once they exist for a given SoM, `west build` against that
-board is the customer's final step.
+`scripts/alp_project.py --emit zephyr-board` from the same YAML sources
+(full board-tree generation for the Alif Ensemble family; the
+family-agnostic subset for Renesas RZ/V2N — see `docs/architecture.md`
+and `docs/porting-new-som.md` §10); `west build` against that board is
+the customer's final step.
 
 The tables below are **auto-generated**: `scripts/gen_portability_matrix.py`
 re-runs steps 1–3 for every cell against the single-source SoM presets
@@ -288,7 +290,7 @@ fallback) and emits one `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
 line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
 `_U85=y` (the U55 pair alongside the U85); AEN301/501/701 emit only
 `_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
-Matching Kconfig entries live at `zephyr/kconfig/iot-audio-inference.kconfig`
+Matching Kconfig entries live at `zephyr/kconfigs/iot-audio-inference.kconfig`
 § *Per-variant Ethos-U silicon switches*; the TFLM driver source
 (`src/zephyr/inference_tflm.cpp`) reads the per-variant macros via
 `alp_inference_tflm_npu_variant_name()` and logs the active variant
@@ -308,7 +310,7 @@ one `CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y` per slice.
 Verified: M55_HP slices on every AEN SKU emit `_HELIUM=y`; A55 slices
 on V2N101 emit `_NEON=y`; the V2N M33_SM slice + NX9101 M33 slice
 both emit `_REF=y` (baseline ARMv8-M, no DSP / MVE).  Matching Kconfig
-entries live at `zephyr/kconfig/iot-audio-inference.kconfig` § *Per-CPU-class
+entries live at `zephyr/kconfigs/iot-audio-inference.kconfig` § *Per-CPU-class
 TFLM kernel selectors*; the TFLM driver source surfaces the choice via
 `alp_inference_tflm_cpu_kernel_variant()`.
 
