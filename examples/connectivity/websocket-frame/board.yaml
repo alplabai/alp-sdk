@@ -1,0 +1,34 @@
+# board.yaml -- libwebsockets WebSocket frame encode/decode teaching
+# example.
+#
+# `cores.m55_hp.libraries: [libwebsockets]` makes alp_project.py emit
+# CONFIG_ALP_LWS_NO_TLS=y -- the SW-fallback default from
+# metadata/library-profiles/libwebsockets/hw-backends.yaml.  It does
+# NOT add the upstream module's include path or build its sources:
+# libwebsockets ships no `zephyr/module.yml` (see README's
+# "Integration reality"), and its public header
+# (`include/libwebsockets.h`) unconditionally `#include`s a
+# `lws_config.h` that only exists after running libwebsockets' own
+# CMake configure step -- out of scope for a small teaching example.
+# `src/main.c` therefore hand-rolls the RFC 6455 frame this example
+# demonstrates instead of calling into the library.
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    libraries:
+      - libwebsockets
+    # No transport, no peripheral: this is an offline frame encode/
+    # decode round trip, proving the byte layout before it ever
+    # touches a TCP socket.
+    peripherals: []
+
+diagnostics:
+  log_level: info
