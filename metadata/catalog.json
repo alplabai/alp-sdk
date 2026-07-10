@@ -883,6 +883,10 @@
       "script": "scripts/check_e1m_route_capability.py"
     },
     {
+      "purpose": "Validate metadata/emit-registry-v1.json against the public IDE/tool contract (metadata/schemas/emit-registry-v1.schema.json) AND assert its mode set is exactly the real `--emit` surface the SDK exposes.",
+      "script": "scripts/check_emit_registry.py"
+    },
+    {
       "purpose": "Byte-for-byte `--emit` snapshot regression gate.",
       "script": "scripts/check_emit_snapshots.py"
     },
