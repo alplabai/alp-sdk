@@ -1323,6 +1323,16 @@ if(CONFIG_ALP_SDK_TESTING)
 
     zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_UART
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/testing_drv.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_I2C
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/testing_drv.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_SPI
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/testing_drv.c)
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_ADC
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/testing_drv.c)
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_CAN
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/testing_drv.c)
 endif()
 
 # ---------------------------------------------------------------------------
