@@ -136,7 +136,7 @@ typedef struct {
  * MQTT keepalive interval), @c clean_session = true (start without
  * stale broker-side session state -- the simpler, more common
  * default), @c tls = NULL (documented as equivalent to a
- * zero-initialised @ref alp_mqtt_tls_config_t: OS default CA path, no
+ * zero-initialised @ref alp_mqtt_tls_config_t -- OS default CA path, no
  * client cert, verify peer). Set @c tls for an `mqtts://` broker that
  * needs a pinned CA / client certificate.
  *

@@ -445,7 +445,7 @@ typedef struct {
  * @brief Default-initialize an @ref alp_adc_spectrum_config_t for channel @p id.
  *
  * Identity from @p id.  Same "you must set this" reasoning as
- * @ref ALP_ADC_FILTER_CONFIG_DEFAULT: @c sample_rate_hz, @c stages, and
+ * @ref ALP_ADC_FILTER_CONFIG_DEFAULT -- @c sample_rate_hz, @c stages, and
  * @c n_stages are all mandatory (@ref alp_adc_spectrum_open rejects a
  * zero rate, a NULL @c stages, or @c n_stages == 0), so they default to
  * a zero sentinel rather than an invented FFT chain.  Set them before
