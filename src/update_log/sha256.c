@@ -41,7 +41,11 @@ static const WORD k[64] = {
 };
 
 /*********************** FUNCTION DEFINITIONS ***********************/
-void sha256_transform(SHA256_CTX *ctx, const BYTE data[])
+/* Internal-only: not part of sha256.h's public surface (only
+ * sha256_update()/sha256_final() below call it), so it stays private
+ * to this translation unit instead of a global symbol with no
+ * prototype (-Wmissing-prototypes, issue #634). */
+static void sha256_transform(SHA256_CTX *ctx, const BYTE data[])
 {
 	WORD a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
 
@@ -131,15 +135,19 @@ void sha256_final(SHA256_CTX *ctx, BYTE hash[])
 	}
 
 	// Append to the padding the total message's length in bits and transform.
+	// Each store below narrows the 64-bit bitlen to one serialized byte on
+	// purpose (little/big-endian length split) -- explicit BYTE casts make
+	// that narrowing visible to -Wconversion instead of an implicit one
+	// (issue #634).
 	ctx->bitlen += ctx->datalen * 8;
-	ctx->data[63] = ctx->bitlen;
-	ctx->data[62] = ctx->bitlen >> 8;
-	ctx->data[61] = ctx->bitlen >> 16;
-	ctx->data[60] = ctx->bitlen >> 24;
-	ctx->data[59] = ctx->bitlen >> 32;
-	ctx->data[58] = ctx->bitlen >> 40;
-	ctx->data[57] = ctx->bitlen >> 48;
-	ctx->data[56] = ctx->bitlen >> 56;
+	ctx->data[63] = (BYTE)(ctx->bitlen);
+	ctx->data[62] = (BYTE)(ctx->bitlen >> 8);
+	ctx->data[61] = (BYTE)(ctx->bitlen >> 16);
+	ctx->data[60] = (BYTE)(ctx->bitlen >> 24);
+	ctx->data[59] = (BYTE)(ctx->bitlen >> 32);
+	ctx->data[58] = (BYTE)(ctx->bitlen >> 40);
+	ctx->data[57] = (BYTE)(ctx->bitlen >> 48);
+	ctx->data[56] = (BYTE)(ctx->bitlen >> 56);
 	sha256_transform(ctx, ctx->data);
 
 	// Since this implementation uses little endian byte ordering and SHA uses big endian,

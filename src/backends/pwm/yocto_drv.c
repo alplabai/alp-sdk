@@ -72,9 +72,18 @@
 /* Recover the enclosing portable handle from its embedded state slot.
  * The dispatcher reads h->period_ns to bounds-check pulse_ns before
  * forwarding here, so open() must populate it.  <zephyr/sys/util.h>'s
- * CONTAINER_OF is unavailable on Linux, so define the offset locally. */
+ * CONTAINER_OF is unavailable on Linux, so define the offset locally.
+ *
+ * The intermediate (void *) cast (rather than a direct char*->type* cast)
+ * is deliberate: `st_ptr` is always the `state` member embedded inside a
+ * real `struct alp_pwm` (every caller here hands this macro &h->state), so
+ * the recovered pointer's alignment is correct by construction -- but a
+ * direct cast still trips -Wcast-align=strict because the compiler can't
+ * see that invariant.  Routing through void* (alignment-agnostic by
+ * definition) is the standard container_of idiom for this, matching how
+ * Zephyr's own CONTAINER_OF avoids the same diagnostic (issue #634). */
 #define ALP_PWM_HANDLE_OF(st_ptr)                                                                  \
-	((struct alp_pwm *)((char *)(st_ptr) - offsetof(struct alp_pwm, state)))
+	((struct alp_pwm *)(void *)((char *)(st_ptr) - offsetof(struct alp_pwm, state)))
 
 /* Per-handle backend data: the channel's sysfs directory and channel
  * index, boxed onto the heap so the void* be_data slot owns it. */

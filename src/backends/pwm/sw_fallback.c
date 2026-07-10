@@ -38,9 +38,19 @@
 /* CONTAINER_OF without <zephyr/sys/util.h>: this TU is also linked into the
  * Yocto/host build (src/yocto/CMakeLists.txt), whose toolchain has no Zephyr
  * headers.  offsetof comes from <stddef.h> above.  Guarded so a Zephyr build
- * that already defines it (transitively) keeps its own. */
+ * that already defines it (transitively) keeps its own.
+ *
+ * The intermediate (void *) cast (rather than a direct char*->type* cast)
+ * is deliberate: `st` is always the `state` member embedded inside a real
+ * `struct alp_pwm` (the dispatcher only ever hands this macro &h->state),
+ * so the recovered pointer's alignment is correct by construction -- but
+ * a direct cast still trips -Wcast-align=strict because the compiler
+ * can't see that invariant.  Routing through void* (alignment-agnostic
+ * by definition) is the standard container_of idiom for this, matching
+ * how Zephyr's own <zephyr/sys/util.h> CONTAINER_OF avoids the same
+ * diagnostic (issue #634). */
 #ifndef CONTAINER_OF
-#define CONTAINER_OF(ptr, type, member) ((type *)((char *)(ptr) - offsetof(type, member)))
+#define CONTAINER_OF(ptr, type, member) ((type *)(void *)((char *)(ptr) - offsetof(type, member)))
 #endif
 
 #include <alp/backend.h>

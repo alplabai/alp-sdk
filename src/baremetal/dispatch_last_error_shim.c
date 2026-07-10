@@ -12,6 +12,7 @@
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
+#include "alp_z_last_error.h"
 
 void alp_z_set_last_error(alp_status_t s)
 {
