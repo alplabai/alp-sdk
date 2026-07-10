@@ -1320,6 +1320,9 @@ if(CONFIG_ALP_SDK_TESTING)
 
     zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_GPIO
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/testing_drv.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_UART
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/testing_drv.c)
 endif()
 
 # ---------------------------------------------------------------------------
