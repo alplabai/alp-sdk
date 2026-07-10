@@ -214,10 +214,17 @@ stage_twister() {
     _modules+=("${REPO_ROOT}")
     _joined=$(IFS=';'; echo "${_modules[*]}")
     export EXTRA_ZEPHYR_MODULES="${_joined}"
+    # Match pr-twister.yml FAITHFULLY: same testsuite roots (incl.
+    # tests/unit) AND warnings-as-errors.  Twister builds strict in CI, so
+    # a warning like -Werror=comment ('/*' inside a comment) fails there;
+    # forcing CONFIG_COMPILER_WARNINGS_AS_ERRORS=y here catches that class
+    # locally instead of on the PR (bit examples/.../u8g2 main.c, #650).
     python3 "${ZEPHYR_BASE}/scripts/twister" \
+        --testsuite-root "${REPO_ROOT}/tests/unit" \
         --testsuite-root "${REPO_ROOT}/tests/zephyr" \
         --testsuite-root "${REPO_ROOT}/examples" \
         -p native_sim/native/64 \
+        --extra-args=CONFIG_COMPILER_WARNINGS_AS_ERRORS=y \
         --inline-logs \
         --no-detailed-test-id
 }
