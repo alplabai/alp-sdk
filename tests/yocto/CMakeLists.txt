@@ -24,6 +24,27 @@ target_compile_features(alp_test_delay PRIVATE c_std_99)
 add_test(NAME alp_test_delay
          COMMAND alp_test_delay)
 
+# Shared errno -> alp_status_t baseline mapper (#630): the reviewed
+# baseline contract + the per-operation override mechanism (CAN's
+# EAGAIN-as-timeout worked example).  Pure POSIX <errno.h> + the header
+# under test -- no Linux-only ioctl/sysfs surface, so this runs
+# ungated like alp_test_delay above.
+add_executable(alp_test_alp_errno
+    ${CMAKE_CURRENT_SOURCE_DIR}/alp_errno.c
+)
+target_link_libraries(alp_test_alp_errno PRIVATE alp::sdk)
+target_include_directories(alp_test_alp_errno PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    # alp_sdk only exposes src/ to itself (PRIVATE, src/yocto/CMakeLists.txt) --
+    # add it here too so this test can include the header under test
+    # ("common/alp_errno.h") the same root-relative way the backends do.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+)
+target_compile_features(alp_test_alp_errno PRIVATE c_std_99)
+
+add_test(NAME alp_test_alp_errno
+         COMMAND alp_test_alp_errno)
+
 add_executable(alp_test_inference_dispatcher
     ${CMAKE_CURRENT_SOURCE_DIR}/inference_dispatcher.c
 )

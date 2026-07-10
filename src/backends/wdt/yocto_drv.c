@@ -40,6 +40,7 @@
 #include <alp/wdt.h>
 
 #include "wdt_ops.h"
+#include "common/alp_errno.h"
 
 /* Per-handle backend data: the open watchdog chardev fd plus whether
  * the driver advertised magic-close support (so close() can disarm
@@ -49,24 +50,6 @@ typedef struct {
 	bool magic_close;
 } y_wdt_data_t;
 
-/** @brief Map a (positive) errno value to the closest alp_status_t. */
-static alp_status_t _errno_to_alp(int err)
-{
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case EINVAL:
-		return ALP_ERR_INVAL;
-	case EBUSY:
-		return ALP_ERR_BUSY;
-	case ENOTTY:
-	case ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
-}
-
 /**
  * @brief Open /dev/watchdog<cfg->wdt_id>, program the timeout, read caps.
  *
@@ -74,7 +57,11 @@ static alp_status_t _errno_to_alp(int err)
  * The alp config carries wdt_id + timeout_ms; WDIOC_SETTIMEOUT works
  * in whole seconds, so we round up to at least 1 s.  WDIOC_GETSUPPORT
  * tells us whether magic-close is available for the close()-disarm
- * path.
+ * path.  Errors route through the shared @ref
+ * alp_status_from_posix_errno baseline (#630) -- a missing
+ * /dev/watchdogN (ENOENT/ENODEV) now correctly surfaces as
+ * ALP_ERR_NOT_READY instead of falling through to ALP_ERR_IO, which
+ * this backend's now-removed local mapping switch didn't cover.
  */
 static alp_status_t
 y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
@@ -84,7 +71,7 @@ y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
 	int fd = open(path, O_WRONLY | O_CLOEXEC);
-	if (fd < 0) return _errno_to_alp(errno);
+	if (fd < 0) return alp_status_from_posix_errno(errno);
 
 	y_wdt_data_t *d = (y_wdt_data_t *)malloc(sizeof(*d));
 	if (d == NULL) {
@@ -105,7 +92,7 @@ y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 			int e = errno;
 			close(fd);
 			free(d);
-			return _errno_to_alp(e);
+			return alp_status_from_posix_errno(e);
 		}
 	}
 
@@ -130,7 +117,7 @@ static alp_status_t y_feed(alp_wdt_backend_state_t *st)
 	y_wdt_data_t *d = (y_wdt_data_t *)st->be_data;
 	if (d == NULL) return ALP_ERR_NOT_READY;
 	int dummy = 0;
-	if (ioctl(d->fd, WDIOC_KEEPALIVE, &dummy) < 0) return _errno_to_alp(errno);
+	if (ioctl(d->fd, WDIOC_KEEPALIVE, &dummy) < 0) return alp_status_from_posix_errno(errno);
 	return ALP_OK;
 }
 
@@ -149,7 +136,7 @@ static alp_status_t y_disable(alp_wdt_backend_state_t *st)
 	int flags = WDIOS_DISABLECARD;
 	if (ioctl(d->fd, WDIOC_SETOPTIONS, &flags) < 0) {
 		if (errno == EOPNOTSUPP) return ALP_ERR_NOSUPPORT;
-		return _errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	return ALP_OK;
 }

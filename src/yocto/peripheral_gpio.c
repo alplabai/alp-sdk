@@ -68,7 +68,7 @@
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
-#include "yocto_errno.h"
+#include "common/alp_errno.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_GPIO_HANDLES
 #define ALP_SDK_YOCTO_MAX_GPIO_HANDLES 16
@@ -144,7 +144,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	}
 	int chip_fd = open(chip_path, O_RDWR | O_CLOEXEC);
 	if (chip_fd < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		return NULL;
 	}
 
@@ -157,7 +157,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	(void)snprintf(req.consumer, sizeof(req.consumer), "alp-sdk");
 
 	if (ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, &req) < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		(void)close(chip_fd);
 		return NULL;
 	}
@@ -191,7 +191,7 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
 		cfg.flags |= GPIO_V2_LINE_FLAG_INPUT;
 	}
 	if (ioctl(pin->line_fd, GPIO_V2_LINE_SET_CONFIG_IOCTL, &cfg) < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	pin->is_output = (dir == ALP_GPIO_OUTPUT);
 	return ALP_OK;
@@ -212,7 +212,7 @@ alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 		.mask = 1ULL, /* line 0 in this request */
 	};
 	if (ioctl(pin->line_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &vals) < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	return ALP_OK;
 }
@@ -227,7 +227,7 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 		.mask = 1ULL,
 	};
 	if (ioctl(pin->line_fd, GPIO_V2_LINE_GET_VALUES_IOCTL, &vals) < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	*level = (vals.bits & 1ULL) != 0;
 	return ALP_OK;
@@ -355,13 +355,13 @@ static alp_status_t irq_start_dispatcher_locked(void)
 	}
 	g_irq.wake_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
 	if (g_irq.wake_fd < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	int rc = pthread_create(&g_irq.thread, NULL, irq_dispatcher, NULL);
 	if (rc != 0) {
 		(void)close(g_irq.wake_fd);
 		g_irq.wake_fd = -1;
-		return alp_yocto_errno_to_alp(rc);
+		return alp_status_from_posix_errno(rc);
 	}
 	/* Best-effort detach so we don't leak the join handle; we never
      * stop the thread explicitly. */
@@ -404,7 +404,7 @@ alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, voi
 	struct gpio_v2_line_config cfg = { 0 };
 	cfg.flags                      = GPIO_V2_LINE_FLAG_INPUT | edge_flags;
 	if (ioctl(pin->line_fd, GPIO_V2_LINE_SET_CONFIG_IOCTL, &cfg) < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 
 	pthread_mutex_lock(&g_irq.mu);
