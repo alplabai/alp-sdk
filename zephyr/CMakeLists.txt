@@ -1182,3 +1182,34 @@ zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF
 if(CONFIG_UHC_XHCI_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
 endif()
+
+# <alp/testing/*> virtual-backend test doubles (epic #610).  Hard-gated
+# on CONFIG_ZTEST at the Kconfig layer (zephyr/kconfigs/testing.kconfig);
+# FATAL_ERROR here too so a workspace that somehow forces
+# CONFIG_ALP_SDK_TESTING=y without ZTEST fails the build loudly instead
+# of silently shipping a priority-255 wildcard backend that would
+# hijack every real board's peripheral selection.
+if(CONFIG_ALP_SDK_TESTING)
+    if(NOT CONFIG_ZTEST)
+        message(FATAL_ERROR
+            "CONFIG_ALP_SDK_TESTING requires CONFIG_ZTEST -- the "
+            "<alp/testing/*> doubles register priority-255 wildcard "
+            "backends that must never ship in a non-test image.")
+    endif()
+
+    # include-testing/ is a SEPARATE include root from the public SDK
+    # (${ZEPHYR_CURRENT_MODULE_DIR}/include, added unconditionally
+    # above) -- only test builds see <alp/testing/*>.
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include-testing)
+
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing)
+
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/virtual_clock.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/instance_table.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/reset_registry.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_GPIO
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/testing_drv.c)
+endif()
