@@ -59,8 +59,7 @@ ALP_BACKEND_DEFINE_CLASS(security);
 /* Pull the security registry section into a static-archive link (#368). */
 ALP_BACKEND_ANCHOR(security);
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_HASH_HANDLES
 #define CONFIG_ALP_SDK_MAX_HASH_HANDLES 2

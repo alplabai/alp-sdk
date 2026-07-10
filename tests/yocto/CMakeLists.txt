@@ -72,6 +72,26 @@ target_compile_features(alp_test_registry_static_link PRIVATE c_std_99)
 add_test(NAME alp_test_registry_static_link
          COMMAND alp_test_registry_static_link)
 
+# Thread-local alp_last_error() regression (#627).  ALP_LAST_ERROR_TLS
+# (src/common/alp_internal.h) only qualifies the storage with
+# _Thread_local on a hosted Linux target, so this test is gated the
+# same way alp_test_peripheral_i2c below is.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+
+    add_executable(alp_test_last_error_threading
+        ${CMAKE_CURRENT_SOURCE_DIR}/last_error_threading.c
+    )
+    target_link_libraries(alp_test_last_error_threading PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_last_error_threading PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_last_error_threading PRIVATE c_std_99)
+
+    add_test(NAME alp_test_last_error_threading
+             COMMAND alp_test_last_error_threading)
+endif()
+
 # v0.4: Yocto I2C wrapper failure-path coverage.  Real-adapter HIL
 # coverage is parked under docs/ci/HW-IN-LOOP.md until the self-hosted
 # `hil-yocto` runner lands.  Linux-only -- the underlying source

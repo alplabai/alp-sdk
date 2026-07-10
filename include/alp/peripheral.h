@@ -87,7 +87,9 @@ typedef enum {
  *
  * The value is **thread-local** — concurrent open() calls on
  * different threads don't clobber each other's diagnostic.  A
- * successful open() on a thread clears its slot.
+ * successful open() on a thread clears its slot.  Every thread's
+ * initial state (before that thread has called any `alp_*_open`) is
+ * @ref ALP_OK.
  *
  * @return The thread's last error code, or @ref ALP_OK if no error
  *         has been recorded since the last successful open().

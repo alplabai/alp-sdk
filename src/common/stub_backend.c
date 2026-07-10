@@ -48,26 +48,23 @@
 #include "alp_internal.h"
 
 /* ------------------------------------------------------------------ */
-/* alp_last_error — single-global fallback (no TLS on baremetal).      */
+/* alp_last_error — one canonical last-error slot, thread-local on a   */
+/* hosted Linux target (ALP_LAST_ERROR_TLS, see alp_internal.h).       */
 /*                                                                      */
-/* Owns the process-wide last-error slot.  Cross-TU writers go through  */
-/* alp_internal_set_last_error (declared in alp_internal.h); local      */
-/* writers in this file write z_last_error directly for brevity.       */
+/* This is the single storage every non-Zephyr layer reads/writes:     */
+/* cross-TU writers (incl. the vendor/<som> peripheral wrappers under  */
+/* ALP_VENDOR_OVERRIDES_PERIPHERAL) go through alp_internal_set_last_-  */
+/* error; local writers in this file write z_last_error directly for   */
+/* brevity.  Defined unconditionally -- no vendor build owns a         */
+/* separate static or a duplicate alp_last_error reader anymore.       */
 /* ------------------------------------------------------------------ */
 
-static alp_status_t z_last_error;
+static ALP_LAST_ERROR_TLS alp_status_t z_last_error;
 
-#if !defined(ALP_VENDOR_OVERRIDES_PERIPHERAL)
 alp_status_t alp_last_error(void)
 {
 	return z_last_error;
 }
-#endif
-/* When ALP_VENDOR_OVERRIDES_PERIPHERAL=1 the vendor wrapper provides
- * its own alp_last_error reader against a vendor-side static; we
- * keep z_last_error around for the non-peripheral stubs in this
- * file to write into, but reads from it aren't reachable through
- * the public API in that configuration. */
 
 void alp_internal_set_last_error(alp_status_t s)
 {

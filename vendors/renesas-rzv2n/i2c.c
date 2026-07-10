@@ -22,6 +22,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alp_internal.h"
+
 #include "r_riic_master.h"
 
 extern i2c_master_instance_t        g_i2c_master0;
@@ -52,28 +54,33 @@ static alp_status_t fsp_to_alp(fsp_err_t err)
     }
 }
 
-static alp_status_t z_last_error;
+/* Last-error stamping goes through alp_internal_set_last_error (the
+ * one canonical, thread-local slot -- see src/common/alp_internal.h)
+ * rather than a vendor-local static: stub_backend.c's alp_last_error
+ * reader is now unconditional, so a second static + a duplicate
+ * accessor here would just be an unreachable, stale copy. */
 
 alp_i2c_t          *alp_i2c_open(const alp_i2c_config_t *cfg)
 {
     if (cfg == NULL) {
-        z_last_error = ALP_ERR_INVAL;
+        alp_internal_set_last_error(ALP_ERR_INVAL);
         return NULL;
     }
     if (cfg->bus_id >= sizeof(alp_v2n_i2c_drivers) / sizeof(alp_v2n_i2c_drivers[0])) {
-        z_last_error = ALP_ERR_OUT_OF_RANGE;
+        alp_internal_set_last_error(ALP_ERR_OUT_OF_RANGE);
         return NULL;
     }
     i2c_master_instance_t *inst = alp_v2n_i2c_drivers[cfg->bus_id];
     if (inst == NULL) {
-        z_last_error = ALP_ERR_NOT_READY;
+        alp_internal_set_last_error(ALP_ERR_NOT_READY);
         return NULL;
     }
     fsp_err_t err = inst->p_api->open(inst->p_ctrl, inst->p_cfg);
     if (err != FSP_SUCCESS) {
-        z_last_error = fsp_to_alp(err);
+        alp_internal_set_last_error(fsp_to_alp(err));
         return NULL;
     }
+    alp_internal_set_last_error(ALP_OK);
     return (alp_i2c_t *)inst;
 }
 
@@ -109,11 +116,6 @@ void alp_i2c_close(alp_i2c_t *bus)
     if (bus == NULL) return;
     i2c_master_instance_t *inst = (i2c_master_instance_t *)bus;
     (void)inst->p_api->close(inst->p_ctrl);
-}
-
-alp_status_t alp_last_error(void)
-{
-    return z_last_error;
 }
 
 #endif /* ALP_HAS_RENESAS_FSP */

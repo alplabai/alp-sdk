@@ -9,12 +9,14 @@
 
 #include "../backends/inference/alp_model_select.h"
 
-/* TLS last-error setters (same ones the dispatchers use). */
+/* Thread-local last-error setters (same ones the dispatchers use);
+ * consumed via the private contract headers rather than hand-written
+ * externs (issue #627). */
 #if defined(__ZEPHYR__)
-extern void alp_z_set_last_error(alp_status_t s);
+#include "alp_z_last_error.h"
 #define SET_ERR(s) alp_z_set_last_error(s)
 #else
-extern void alp_internal_set_last_error(alp_status_t s);
+#include "alp_internal.h"
 #define SET_ERR(s) alp_internal_set_last_error(s)
 #endif
 

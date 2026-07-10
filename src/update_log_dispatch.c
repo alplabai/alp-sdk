@@ -32,8 +32,7 @@
 ALP_BACKEND_DEFINE_CLASS(update_log);
 ALP_BACKEND_ANCHOR(update_log);
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 static struct alp_update_log g_log;
 

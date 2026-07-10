@@ -149,10 +149,11 @@ static alp_inference_backend_t resolve_auto(void)
 /*                                                                     */
 /* The dispatcher calls alp_internal_set_last_error (declared in       */
 /* src/common/alp_internal.h) so failures here are visible through the */
-/* public alp_last_error() reader -- the same slot the peripheral      */
-/* stubs in stub_backend.c write to.  Cross-TU correlation works in    */
-/* non-vendor-override builds (the yocto path doesn't set              */
-/* ALP_VENDOR_OVERRIDES_PERIPHERAL, so this just works).               */
+/* public alp_last_error() reader -- the same thread-local slot the    */
+/* peripheral stubs in stub_backend.c write to, regardless of vendor   */
+/* overrides (that slot has exactly one owner now -- see               */
+/* alp_internal.h).  A successful open() clears it so a later caller   */
+/* on this thread doesn't see a stale earlier failure.                 */
 /* ------------------------------------------------------------------ */
 
 /* ================================================================== */
@@ -207,6 +208,7 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 		pool_release(h);
 		return NULL;
 	}
+	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
 

@@ -33,7 +33,7 @@ ALP_BACKEND_ANCHOR(adc);
  * src/zephyr/last_error.c.  Declared in src/zephyr/handles.h but
  * we forward-declare here to avoid pulling in the broader handles
  * header (which carries unrelated peripheral declarations). */
-extern void alp_z_set_last_error(alp_status_t s);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_ADC_HANDLE_POOL
 #define CONFIG_ALP_SDK_ADC_HANDLE_POOL 8
