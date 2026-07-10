@@ -36,6 +36,7 @@ signals:
 
 kconfig:
   zephyr:         ALP_SDK_CHIP_LIS2DW12
+  baremetal:      ALP_SDK_CHIP_LIS2DW12
 
 families:
   - aen
