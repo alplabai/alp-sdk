@@ -34,15 +34,31 @@
  *      advances when the CPU goes idle). Instead, on every call it
  *      computes, from the RX bytes/errors already queued plus any
  *      @ref alp_testing_uart_rx_feed_at entries due at or before
- *      `now + timeout_ms`, how much is deliverable inside that
- *      window: if it can satisfy the request (fully or partially --
- *      matching @ref alp_uart_read's documented partial-fill
- *      contract), it advances the virtual clock (via
- *      @ref alp_testing_clock_advance_ms) to the timestamp of the
- *      last byte it consumed and returns @ref ALP_OK; otherwise it
- *      advances the clock by the FULL @p timeout_ms and returns
- *      @ref ALP_ERR_TIMEOUT -- exactly as if a real port had waited
- *      out the deadline.
+ *      `now + timeout_ms`, how much is deliverable inside that window.
+ *      @p timeout_ms bounds the WHOLE call, not the gap between two
+ *      already-arrived bytes (the same contract @ref alp_uart_read
+ *      documents in `<alp/peripheral.h>`), so the clock advancement
+ *      depends on whether the request was satisfied IN FULL:
+ *        - Full fill (`len` bytes collected): the request was
+ *          satisfied outright, so the virtual clock advances (via
+ *          @ref alp_testing_clock_advance_ms) only to the timestamp
+ *          of the last byte consumed -- reading data that was already
+ *          ready costs no simulated time -- and returns @ref ALP_OK.
+ *        - Partial fill (more than zero but fewer than `len` bytes
+ *          collected -- the queue ran dry or the next entry falls
+ *          beyond the deadline): a real port keeps listening until
+ *          the deadline instead of returning the moment its queue
+ *          empties, so the clock advances by the FULL @p timeout_ms
+ *          and returns @ref ALP_OK with the partial bytes in @p data.
+ *        - Nothing collected: the clock likewise advances by the FULL
+ *          @p timeout_ms and returns @ref ALP_ERR_TIMEOUT -- exactly
+ *          as if a real port had waited out the deadline.
+ *      An in-stream error reached at the head of the queue with
+ *      nothing collected yet on that call (@ref
+ *      alp_testing_uart_rx_inject_error) is a distinct event, not a
+ *      short read waiting out the deadline: it returns immediately
+ *      with the injected status and advances the clock only to that
+ *      entry's own ready_ts.
  *
  * @note `alp_uart_open()` on this double ALWAYS succeeds (a deliberate
  *       ergonomic choice, mirroring the GPIO double's `open()` --
@@ -103,10 +119,11 @@ alp_status_t alp_testing_uart_rx_feed(uint32_t port_id, const uint8_t *d, size_t
  * alp_testing_uart_rx_feed, but the queued chunk is not deliverable to
  * @ref alp_uart_read until the virtual clock's "now" (@ref
  * alp_testing_clock_now_ms) is `>= at_ms`. A read whose deadline
- * (`now + timeout_ms`) reaches or passes @p at_ms can consume it (and
- * advances the clock to @p at_ms in doing so, per the read contract on
- * @ref alp_uart_read); a read whose deadline falls short leaves it
- * queued for a later call.
+ * (`now + timeout_ms`) reaches or passes @p at_ms can consume it --
+ * see this file's header for whether that advances the clock to
+ * exactly @p at_ms (a full fill) or to the full deadline (a partial
+ * fill); a read whose deadline falls short leaves it queued for a
+ * later call.
  *
  * @param[in] port_id  The same id the app passes to @ref alp_uart_open.
  * @param[in] at_ms    Virtual-clock timestamp (@ref alp_testing_clock_now_ms)

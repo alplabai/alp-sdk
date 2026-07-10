@@ -161,6 +161,41 @@ ZTEST(alp_testing_uart_behavior, test_timeout_boundary_delivered_before_deadline
 	alp_uart_close(h);
 }
 
+/* Timeout boundary, exact edge: a deferred feed due AT the deadline
+ * (ready_ts == now + timeout_ms) is inclusive -- t_read() rejects an
+ * entry only when `head->ready_ts > deadline`, so ready_ts == deadline
+ * must still be consumed.  Pinned explicitly so a future `>` -> `>=`
+ * refactor of that comparison is caught: this is a full fill (exactly
+ * the 1 requested byte), so the clock lands on the delivery timestamp,
+ * which in this case coincides with the deadline itself. */
+ZTEST(alp_testing_uart_behavior, test_timeout_boundary_delivered_exactly_at_deadline)
+{
+	const uint32_t port_id    = 18;
+	const uint8_t  byte       = 0x55;
+	const uint64_t timeout_ms = 100;
+	const uint64_t start      = alp_testing_clock_now_ms();
+	const uint64_t at_ms      = start + timeout_ms; /* T, exactly */
+
+	zassert_equal(
+	    alp_testing_uart_rx_feed_at(port_id, at_ms, &byte, 1), ALP_OK, "rx_feed_at failed");
+
+	alp_uart_t *h = open_port(port_id);
+	zassert_not_null(h, "uart test double must open ANY instance");
+
+	uint8_t got = 0;
+	zassert_equal(alp_uart_read(h, &got, 1, (uint32_t)timeout_ms),
+	              ALP_OK,
+	              "read() must succeed when ready_ts lands EXACTLY on the deadline "
+	              "(inclusive comparison)");
+	zassert_equal(got, byte, "read() did not observe the byte due exactly at the deadline");
+	zassert_equal(alp_testing_clock_now_ms(),
+	              start + timeout_ms,
+	              "virtual clock must advance to the deadline, which coincides with the "
+	              "delivery timestamp here");
+
+	alp_uart_close(h);
+}
+
 /* Timeout boundary, upper edge: a deferred feed due strictly AFTER the
  * deadline is unreachable within the window -- read() must time out
  * and advance the virtual clock by the FULL timeout_ms. */
@@ -191,11 +226,18 @@ ZTEST(alp_testing_uart_behavior, test_timeout_boundary_delivered_after_deadline)
 /* Partial/short read: fewer bytes are queued than requested, and
  * nothing more is forthcoming within the window -- alp_uart_read()
  * documents ALP_OK with the partial data whenever at least one byte
- * arrived before the deadline. */
+ * arrived before the deadline.  Per that same contract (timeout_ms
+ * bounds the WHOLE call, not the gap between bytes -- see
+ * <alp/peripheral.h>), a real port would keep listening until the
+ * deadline rather than return the instant its queue ran dry, so the
+ * virtual clock must land on the deadline (now + timeout_ms), NOT the
+ * timestamp of the last byte actually consumed. */
 ZTEST(alp_testing_uart_behavior, test_partial_short_read)
 {
-	const uint32_t port_id = 14;
-	const uint8_t  msg[]   = { 'a', 'b' };
+	const uint32_t port_id    = 14;
+	const uint8_t  msg[]      = { 'a', 'b' };
+	const uint32_t timeout_ms = 50;
+	const uint64_t start      = alp_testing_clock_now_ms();
 
 	zassert_equal(alp_testing_uart_rx_feed(port_id, msg, sizeof(msg)), ALP_OK, "rx_feed failed");
 
@@ -203,10 +245,15 @@ ZTEST(alp_testing_uart_behavior, test_partial_short_read)
 	zassert_not_null(h, "uart test double must open ANY instance");
 
 	uint8_t buf[5] = { 0 };
-	zassert_equal(alp_uart_read(h, buf, sizeof(buf), 50),
+	zassert_equal(alp_uart_read(h, buf, sizeof(buf), timeout_ms),
 	              ALP_OK,
 	              "read() must return ALP_OK on a partial fill (>0 bytes collected)");
 	zassert_mem_equal(buf, msg, sizeof(msg), "short read did not deliver the queued bytes");
+	zassert_equal(alp_testing_clock_now_ms(),
+	              start + timeout_ms,
+	              "a partial fill must wait out the WHOLE timeout_ms (alp_uart_read bounds the "
+	              "entire call, not the gap between bytes) -- the clock must land on the "
+	              "deadline, not on the last-consumed byte's timestamp");
 
 	alp_uart_close(h);
 }

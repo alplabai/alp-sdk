@@ -273,14 +273,25 @@ static alp_status_t t_write(alp_uart_backend_state_t *st, const uint8_t *data, s
  * later-queued entry's own ready_ts would otherwise qualify (a real
  * wire cannot deliver byte N+1 before byte N).
  *
- *   - Enough collected (>0 bytes, or an error reached at the head)
- *     within the window: advance the virtual clock to the timestamp
- *     of the last item consumed (never further -- reading data that
- *     was already ready costs no simulated time) and return ALP_OK
- *     (or the injected error's status).
- *   - Nothing collected within the window: advance the virtual clock
- *     by the FULL timeout_ms (exactly as a real port would have
- *     waited out the deadline) and return ALP_ERR_TIMEOUT.
+ * `timeout_ms` bounds the WHOLE call, not the gap between bytes (see
+ * @ref alp_uart_read's contract in <alp/peripheral.h>), so a full and
+ * a partial fill advance the clock differently:
+ *
+ *   - Full fill (`collected == len`): the request was satisfied
+ *     outright, so advance the virtual clock only to the timestamp of
+ *     the last item consumed (never further -- reading data that was
+ *     already ready costs no simulated time) and return ALP_OK.
+ *   - Partial fill (`0 < collected < len`) or nothing collected at
+ *     all: a real port would keep listening until the deadline
+ *     instead of returning the moment its queue ran dry, so advance
+ *     the virtual clock by the FULL timeout_ms and return ALP_OK with
+ *     the partial bytes already copied into `data`, or ALP_ERR_TIMEOUT
+ *     if nothing was collected.
+ *   - An error reached at the head with nothing collected yet on this
+ *     call returns immediately with the injected status (see the
+ *     `is_error` branch inside the loop below) -- that is a distinct
+ *     event, not a short read waiting out the deadline, so it keeps
+ *     advancing only to the error entry's own ready_ts.
  */
 static alp_status_t
 t_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout_ms)
@@ -314,17 +325,28 @@ t_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout
 			head->off += take;
 			collected += take;
 		}
+		/* advance_to tracks the MAX ready_ts among entries consumed so
+		 * far this call, not merely the most-recently-consumed one --
+		 * relevant if a future change lets entries be consumed
+		 * out of ready_ts order. */
 		if (head->ready_ts > advance_to) advance_to = head->ready_ts;
 		if (head->off == head->len) rx_pop_front(slot);
 	}
 
-	if (collected > 0) {
+	if (collected == len) {
+		/* Full fill: the request was satisfied outright, so it costs
+		 * only the simulated time up to the last byte's arrival. */
 		(void)alp_testing_clock_advance_ms(advance_to - now);
 		return ALP_OK;
 	}
 
+	/* Partial fill or nothing collected: alp_uart_read's timeout_ms
+	 * bounds the ENTIRE call (<alp/peripheral.h>), so a real port that
+	 * received fewer than `len` bytes blocks until the deadline rather
+	 * than returning early just because its queue ran dry -- advance
+	 * by the FULL timeout_ms either way. */
 	(void)alp_testing_clock_advance_ms(timeout_ms);
-	return ALP_ERR_TIMEOUT;
+	return (collected > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
 }
 
 static void t_close(alp_uart_backend_state_t *st)
