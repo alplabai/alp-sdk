@@ -27,7 +27,13 @@
 #endif
 #define CC3501E_USB2_SELECT_PAD 2u
 
-/* SWD-readable witness for the CC3501E mux-drive (magic "USMX"). */
+/* SWD-readable witness for the CC3501E mux-drive (magic "USMX"): lets a bench
+ * engineer confirm the mux was actually routed by reading this struct out of
+ * RAM over the debug probe, without needing a UART attached. bringup is the
+ * cc3501e_bridge_bringup() alp_status_t; gpio_cfg/gpio_wr are the GPIO-proxy
+ * configure/write return codes for the mux-select pad; level is the drive
+ * level requested (USB2_SEL_LVL). __attribute__((used)) keeps it in the
+ * image even though nothing but SWD reads it. */
 volatile struct {
 	uint32_t magic;
 	int32_t  bringup;
@@ -36,6 +42,10 @@ volatile struct {
 	int32_t  level;
 } g_usbmux __attribute__((used)) = { .magic = 0x55534d58u, .level = USB2_SEL_LVL };
 
+/* uhc_init() requires an event callback but this example polls the
+ * synchronous return codes of uhc_init/uhc_enable and the driver's own data
+ * snapshot below instead of reacting to async UHC events, so the callback
+ * is intentionally a no-op stub. */
 static int fl_cb(const struct device *dev, const struct uhc_event *const event)
 {
 	ARG_UNUSED(dev);
@@ -73,14 +83,25 @@ int main(void)
 	/* 2. USB host first-light + enumeration. */
 	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(zephyr_uhc0));
 
+	/* device_is_ready() reflects the driver's own init hook (registered at
+	 * PRE_KERNEL/POST_KERNEL from the zephyr_uhc0 node in the board overlay);
+	 * a false here means the DWC3/xHCI controller failed to attach at boot
+	 * (devicetree status/pinctrl issue), not a runtime USB fault. */
 	if (!device_is_ready(dev)) {
 		printk("RESULT FAIL: uhc device not ready\n");
 		return 0;
 	}
+	/* uhc_init(): DWC3 core reset + PHY bring-up + xHCI event/command/transfer
+	 * ring setup -- the controller exists and is addressable, but is not yet
+	 * running (no VBUS/port state machine active). */
 	if (uhc_init(dev, fl_cb, NULL) != 0) {
 		printk("RESULT FAIL: uhc_init/first-light\n");
 		return 0;
 	}
+	/* uhc_enable(): starts the controller (R/S) and drives the full port
+	 * enumeration sequence -- port reset, xHCI Enable Slot, Address Device,
+	 * then an EP0 GET_DESCRIPTOR -- so a 0 return here means a device was
+	 * actually found and answered on J13, not just that USB was armed. */
 	int en = uhc_enable(dev);
 
 	printk("RESULT: uhc_enable rc=%d -- enum_stage/descriptor in g_..._data_0.fl\n", en);

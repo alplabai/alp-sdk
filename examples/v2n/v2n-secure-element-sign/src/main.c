@@ -57,6 +57,12 @@ int main(void)
 		return 0;
 	}
 
+	/* apdu[] content is irrelevant here: send_apdu validates only
+     * pointers/lengths before returning NOSUPPORT, so any non-empty
+     * frame exercises the same path.  resp_len is pre-loaded with the
+     * poison value 123 (impossible for an 8-byte resp buffer) so the
+     * check below proves the driver actually zeroes *resp_len on the
+     * NOSUPPORT path rather than leaving the caller's stale value. */
 	uint8_t apdu[4]  = { 0x31u, 0x11u, 0x00u, 0x00u };
 	uint8_t resp[8]  = { 0 };
 	size_t  resp_len = 123u;

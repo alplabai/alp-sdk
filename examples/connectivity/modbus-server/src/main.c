@@ -159,6 +159,10 @@ static int client_raw_cb(const int iface, const struct modbus_adu *adu, void *us
 
 static int init_modbus(void)
 {
+	/* The server is purely reactive -- it answers whatever request arrives
+	 * via server_raw_cb, so it has no rx_timeout of its own. The client
+	 * issues blocking calls (modbus_read_holding_regs() etc. below) and
+	 * needs rx_timeout to bound how long it waits on response_ready. */
 	struct modbus_iface_param server_param = {
 		.mode = MODBUS_MODE_RAW,
 		.server = {

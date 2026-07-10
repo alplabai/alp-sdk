@@ -39,8 +39,16 @@ LOG_MODULE_REGISTER(curr, LOG_LEVEL_INF);
 #define INA236_ADDR       0x40u
 #define INA236_SHUNT_OHMS 0.01f /* 10 mOhm sense resistor */
 #define INA236_MAX_A      8.0f
-#define N_WINDOWS         5
+#define N_WINDOWS         5 /* one window per state in the synth_sample demo track */
 
+/*
+ * Reference thresholds for a generic brushed-DC motor; a real deployment
+ * tunes these to the specific motor's rated current and expected ripple
+ * (see current_features.h for what each field gates). Held as a single
+ * static config rather than per-instance state because this demo runs one
+ * motor for its whole lifetime -- a multi-motor product would carry one
+ * curr_config per monitored motor.
+ */
 static const struct curr_config CFG = { .off_a          = 0.05f,
 	                                    .overload_a     = 2.5f,
 	                                    .ripple_min_a   = 0.05f,
@@ -50,7 +58,12 @@ static const struct curr_config CFG = { .off_a          = 0.05f,
  * tensor forces the deterministic anomaly fallback.  See models/README.md. */
 static const uint8_t s_model[] = { 0x00 };
 
-/* Synthetic current per window: one window per operating state. */
+/* Synthetic current per window: one window per operating state.  The 40 Hz
+ * ripple tone stands in for commutation ripple; a real motor's ripple
+ * frequency instead tracks its rotor speed (see the MCSA overview at the
+ * top of current_features.c), but a fixed tone is enough to exercise
+ * ripple_freq_hz end-to-end on native_sim without simulating a full motor
+ * model. */
 static struct curr_sample synth_sample(int window, int i)
 {
 	float              t   = (float)i / CURR_SR_HZ;
@@ -79,6 +92,16 @@ static struct curr_sample synth_sample(int window, int i)
 	return s;
 }
 
+/*
+ * anomaly_score returns a 0..1 severity independent of current_classify()'s
+ * discrete state: the deterministic classifier answers "which of the five
+ * known states is this", while the anomaly score (AI, or curr_anomaly_fallback
+ * when no usable model is loaded) answers "how far outside normal bounds is
+ * this", including off-taxonomy faults the five-state classifier cannot
+ * name.  The tensor dtype/size_bytes checks below are the real fallback
+ * trigger: alp_inference_open() accepts the 1-byte stub model_data, so
+ * inf != NULL alone does not mean a usable model is loaded.
+ */
 static float anomaly_score(alp_inference_t *inf, const struct curr_features *f)
 {
 	if (inf != NULL) {
@@ -107,17 +130,31 @@ int main(void)
 	static struct curr_window_state win;
 	bool                            mon_ok = false;
 
+	/* BOARD_I2C_SENSORS is the portable sensor-bus alias from board.yaml's
+	 * pins: section -- it resolves to whichever underlying I2C controller
+	 * the target carrier wires the INA236 to, so this source does not need
+	 * a carrier-specific bus index. */
 	alp_i2c_t *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = BOARD_I2C_SENSORS, .bitrate_hz = 400000 });
+	/* INA236_ADCRANGE_81MV selects the ±81.92 mV shunt full-scale range,
+	 * matched to INA236_SHUNT_OHMS/INA236_MAX_A (10 mOhm * 8 A = 80 mV): the
+	 * narrower range gives finer ADC resolution than the alternative
+	 * ±20.48 V range would, at the cost of clipping above ~8 A. */
 	if (bus != NULL &&
 	    ina236_init(
 	        &mon, bus, INA236_ADDR, INA236_SHUNT_OHMS, INA236_MAX_A, INA236_ADCRANGE_81MV) ==
 	        ALP_OK) {
 		mon_ok = true;
 	} else {
+		/* Expected on native_sim (no real I2C device answers); the loop
+		 * below falls back to synth_sample() for every sample. */
 		LOG_WRN("INA236 unavailable; using synthetic current");
 	}
 
+	/* s_model is a 1-byte placeholder, not a trained autoencoder -- it only
+	 * satisfies alp_inference_open's non-NULL model_data contract.
+	 * anomaly_score() detects the resulting unusable tensor and falls back
+	 * to curr_anomaly_fallback() on every call. */
 	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
 	    .backend    = ALP_INFERENCE_BACKEND_AUTO,
 	    .format     = ALP_INFERENCE_MODEL_TFLITE,
@@ -132,6 +169,9 @@ int main(void)
 		for (int i = 0; i < CURR_WINDOW_N; i++) {
 			struct curr_sample s;
 			if (mon_ok) {
+				/* Raw INA236 register units are micro-A/milli-V/micro-W;
+				 * convert once here so the rest of the pipeline (features,
+				 * classifier, printk) works in plain SI units throughout. */
 				ina236_sample_t r;
 				if (ina236_read_all(&mon, &r) == ALP_OK) {
 					s.current_a = (float)r.current_ua / 1e6f;
@@ -146,6 +186,10 @@ int main(void)
 			curr_window_push(&win, s);
 		}
 
+		/* One CURR record per 1.28 s window (CURR_WINDOW_N / CURR_SR_HZ):
+		 * the classifier gives the discrete operating state, the anomaly
+		 * score gives a continuous severity that can flag drift even
+		 * within a single named state. */
 		struct curr_features f;
 		curr_feat_extract(&win, CURR_SR_HZ, &f);
 		curr_state_t st = current_classify(&f, &CFG);
@@ -160,6 +204,9 @@ int main(void)
 		       (double)an);
 	}
 
+	/* Teardown mirrors the open order; each close is guarded on the
+	 * matching _ok flag / non-NULL handle so a partially-initialised run
+	 * does not deinit hardware that was never brought up. */
 	if (inf != NULL) {
 		alp_inference_close(inf);
 	}
