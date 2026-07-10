@@ -1,0 +1,233 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# I2S/CAN/RTC/WDT handle pools + native_sim fallbacks, and the per-class
+# <alp/*.h> peripheral wrapper enables
+# (PWM/ADC/COUNTER/QENC/I2S/CAN/RTC/WDT/TMU).
+
+config ALP_SDK_MAX_I2S_HANDLES
+	int "Maximum concurrent alp_i2s_t handles"
+	default 2
+
+config ALP_SDK_I2S_SW_FALLBACK
+	bool "Software I2S fallback (stateless stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stateless I2S stub backend that registers as a
+	  wildcard at priority 0.  open() succeeds, start / stop / close
+	  are no-ops, write / read return ALP_ERR_NOSUPPORT.  For
+	  native_sim build / test only -- production firmware MUST NOT
+	  rely on this since no real codec / DAC / microphone is driven.
+
+config ALP_SDK_MAX_CAN_HANDLES
+	int "Maximum concurrent alp_can_t handles"
+	default 4
+
+config ALP_SDK_CAN_SW_FALLBACK
+	bool "Software CAN fallback (stateless stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a stateless CAN stub backend that registers as a
+	  wildcard at priority 0.  open() succeeds, start / stop / close
+	  / remove_filter are no-ops, send / add_filter return
+	  ALP_ERR_NOSUPPORT.  For native_sim build / test only --
+	  production firmware MUST NOT rely on this since no real
+	  transceiver / peer node is driven.
+
+config ALP_SDK_MAX_RTC_HANDLES
+	int "Maximum concurrent alp_rtc_t handles"
+	default 2
+
+config ALP_SDK_MAX_WDT_HANDLES
+	int "Maximum concurrent alp_wdt_t handles"
+	default 2
+
+# Per-class peripheral wrappers — opt-in so apps that don't use a
+# given Zephyr subsystem don't link the wrapper.  Each defaults on
+# when its underlying Zephyr driver class is enabled.
+
+config ALP_SDK_PERIPH_PWM
+	bool "Enable <alp/pwm.h> wrapper"
+	default y if PWM
+	depends on PWM
+	help
+	  Compile src/zephyr/peripheral_pwm.c.  Provides alp_pwm_*
+	  on top of Zephyr's pwm_* API.  Resolves channel_id via the
+	  alp-pwm0..alp-pwm7 DT aliases.  On V2N (CONFIG_ALP_SOC_RENESAS_RZV2N_N44),
+	  the wrapper instead dispatches through the GD32 supervisor
+	  singleton (CONFIG_ALP_SDK_V2N_SUPERVISOR) -- the Renesas
+	  RZ/V2N has no PWM peripherals per soc_caps; all eight E1M
+	  channels reach the GD32 IO-MCU.
+
+config ALP_SDK_PERIPH_ADC
+	bool "Enable <alp/adc.h> wrapper"
+	default y if ADC
+	depends on ADC
+	help
+	  Compile src/zephyr/peripheral_adc.c.  Provides alp_adc_*
+	  on top of Zephyr's adc_* API.  Resolves channel_id via the
+	  alp-adc0..alp-adc7 DT aliases (each pointing at a node with
+	  an io-channels phandle and the standard ADC channel-config
+	  properties).
+
+config ALP_SDK_ADC_SW_FALLBACK
+	bool "Software ADC fallback (polled, deterministic saw wave)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles src/backends/adc/sw_fallback.c, which registers a
+	  wildcard ADC backend at priority 0 in the .alp_backends_adc
+	  linker section.  The registry selector picks this backend
+	  only when no hardware backend matches the active SoC ref.
+	  Off by default on real silicon; default on for native_sim
+	  builds so examples compile without a real ADC peripheral.
+
+config ALP_SDK_RTC_SW_FALLBACK
+	bool "Software RTC fallback (deterministic frozen clock)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a software RTC backend that registers as a wildcard
+	  at priority 0.  Picked only when no hardware backend matches.
+	  Frozen-clock semantics -- ticks 1 s per get_time call from
+	  2026-01-01 00:00:00.  Tests use this; production firmware
+	  should keep it off.
+
+config ALP_SDK_WDT_SW_FALLBACK
+	bool "Software WDT fallback (no-op stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a no-op software watchdog backend that registers as
+	  a wildcard at priority 0.  For native_sim builds and tests
+	  only -- production firmware MUST NOT rely on this since it
+	  never actually resets the SoC.
+
+config ALP_SDK_COUNTER_SW_FALLBACK
+	bool "Software counter fallback (deterministic tick generator)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a deterministic software counter backend that
+	  registers as a wildcard at priority 0.  Alarms are not
+	  supported in this backend (alp_counter_set_alarm returns
+	  ALP_ERR_NOSUPPORT).  For native_sim build / test only.
+
+config ALP_SDK_QENC_SW_FALLBACK
+	bool "Software QEnc fallback (deterministic step counter)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a deterministic software quadrature-encoder backend
+	  that registers as a wildcard at priority 0.  get_position
+	  advances by +7 per call.  For native_sim build / test only.
+
+config ALP_SDK_PERIPH_COUNTER
+	bool "Enable <alp/counter.h> free-running counter wrapper"
+	default y if COUNTER
+	depends on COUNTER
+	help
+	  Legacy gating Kconfig for the <alp/counter.h> surface.  After
+	  Slice 4a the dispatcher (src/counter_dispatch.c) and its
+	  Zephyr backend (src/backends/counter/zephyr_drv.c) are compiled
+	  unconditionally; this symbol is retained for backwards
+	  compatibility with older build configs but has no effect on
+	  what gets linked.  See ALP_SDK_COUNTER_SW_FALLBACK for the
+	  software-backend opt-in.
+
+config ALP_SDK_PERIPH_QENC
+	bool "Enable <alp/counter.h> quadrature-decoder wrapper"
+	default y if SENSOR
+	depends on SENSOR
+	help
+	  Legacy gating Kconfig for the quadrature-decoder half of the
+	  <alp/counter.h> surface.  After Slice 4a the dispatcher
+	  (src/qenc_dispatch.c) and its Zephyr backend
+	  (src/backends/qenc/zephyr_drv.c) are compiled unconditionally;
+	  this symbol is retained for backwards compatibility with older
+	  build configs but has no effect on what gets linked.  See
+	  ALP_SDK_QENC_SW_FALLBACK for the software-backend opt-in.
+
+config ALP_SDK_PERIPH_I2S
+	bool "Enable <alp/i2s.h> wrapper"
+	default y if I2S
+	depends on I2S
+	help
+	  Compile src/zephyr/peripheral_i2s.c.  Provides alp_i2s_*
+	  on top of Zephyr's i2s_* API with a 2-block ping-pong
+	  memory slab.
+
+config ALP_SDK_PERIPH_CAN
+	bool "Enable <alp/can.h> wrapper (classic CAN + CAN-FD)"
+	default y if CAN
+	depends on CAN
+	help
+	  Compile src/zephyr/peripheral_can.c.  Provides alp_can_*
+	  on top of Zephyr's can_* API.  CAN-FD only when
+	  CONFIG_CAN_FD_MODE=y.
+
+config ALP_SDK_PERIPH_RTC
+	bool "Enable <alp/rtc.h> wrapper"
+	default y if RTC
+	depends on RTC
+	help
+	  Legacy gating Kconfig for the <alp/rtc.h> surface.  After
+	  Slice 4a the dispatcher (src/rtc_dispatch.c) and its
+	  Zephyr backend (src/backends/rtc/zephyr_drv.c) are compiled
+	  unconditionally; this symbol is retained for backwards
+	  compatibility with older build configs but has no effect on
+	  what gets linked.  See ALP_SDK_RTC_SW_FALLBACK for the
+	  software-backend opt-in.
+
+config ALP_SDK_PERIPH_WDT
+	bool "Enable <alp/wdt.h> wrapper"
+	default y if WATCHDOG
+	depends on WATCHDOG
+	help
+	  Legacy gating Kconfig for the <alp/wdt.h> surface.  After
+	  Slice 4a the dispatcher (src/wdt_dispatch.c) and its
+	  Zephyr backend (src/backends/wdt/zephyr_drv.c) are compiled
+	  unconditionally; this symbol is retained for backwards
+	  compatibility with older build configs but has no effect on
+	  what gets linked.  See ALP_SDK_WDT_SW_FALLBACK for the
+	  software-backend opt-in.
+
+config ALP_SDK_PERIPH_TMU
+	bool "Enable <alp/tmu.h> wrapper (CORDIC math accelerator surface)"
+	default y
+	help
+	  Compile the TMU registry sources -- src/tmu_dispatch.c plus
+	  src/backends/tmu/zephyr_drv.c (and, when
+	  ALP_SDK_TMU_SW_FALLBACK=y, src/backends/tmu/sw_fallback.c).
+	  Provides alp_tmu_sin / cos / tan / atan / atan2 / sqrt / log /
+	  exp / sinh / cosh / tanh / hypot on top of either the V2N
+	  supervisor's GD32G5 TMU (CORDIC) accelerator (when
+	  CONFIG_ALP_SDK_V2N_SUPERVISOR=y) or libm directly (every other
+	  SoM).  The customer-facing header is SoM-agnostic; the V2N
+	  dispatch is internal.
+
+	  After Slice 4d the dispatcher caches the selected backend's
+	  ops vtable on first call -- TMU is handle-less, so there is no
+	  per-call selector cost on the hot path.  See
+	  ALP_SDK_TMU_SW_FALLBACK for the software-backend opt-in.
+
+config ALP_SDK_TMU_SW_FALLBACK
+	bool "Software TMU fallback (libm)"
+	depends on ALP_SDK && ALP_SDK_PERIPH_TMU
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles a libm-direct TMU backend that registers as a wildcard
+	  at priority 0.  For native_sim build / test and for any SoM
+	  whose dedicated TMU backend is not linked into the build --
+	  every alp_tmu_* primitive then routes through sinf / cosf /
+	  ... and returns ALP_OK.  Marginal cost is ~24 bytes for the ops
+	  vtable when the rest of the firmware already pulls in libm.

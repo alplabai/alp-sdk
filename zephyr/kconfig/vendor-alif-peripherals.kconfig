@@ -1,0 +1,756 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Alif Ensemble vendor/fork peripheral drivers: MHUv2 mailbox, HWSEM, Ethernet
+# DWMAC, DWC_ssi SPI, SE-service MHUv2 transport, UTIMER PWM/counter, DW
+# RTC/LPTIMER counters, UTIMER QDEC, DWC SDHC, ADC/DAC analog, CRC, comparator,
+# PDM mic, DesignWare I2S, camera/video (CPI + MIPI D-PHY/CSI-2 + ARX3A0 + ISP-
+# Pico), and CAN-FD.
+
+# Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
+# BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
+# `west update`.  Mainline Zephyr v4.4 ships no `arm,mhuv2` binding; the
+# opt-in alifsemi/zephyr_alif fork does, so a DISTINCT compatible
+# `alif,mhuv2-mbox` is used to stay collision-free and let the stack build on
+# the default upstream-Zephyr + hal_alif base.  Backs alp_rpc_open (OpenAMP
+# static-vrings) on AEN801 (E8); rollout to AEN301..701 follows after AEN801
+# bench-passes.  Driver: zephyr/drivers/mbox/mbox_alif_mhuv2.c;
+# binding: zephyr/dts/bindings/mbox/alif,mhuv2-mbox.yaml.
+config MBOX_ALIF_MHUV2
+	bool "Alif Ensemble MHUv2 mailbox (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on MBOX
+	depends on DT_HAS_ALIF_MHUV2_MBOX_ENABLED
+	help
+	  Enable the ARM MHUv2 inter-core doorbell mailbox driver as integrated in
+	  the Alif Ensemble family (E1/E3/E5/E7/E8).  Doorbell (signalling) mode
+	  only: no payload travels through the MHU; data rides the OpenAMP
+	  static-vrings in shared SRAM and the MHU only rings a per-bit doorbell.
+	  vendor-ext, BENCH-UNVERIFIED -- authored from the ARM MHUv2 spec + the
+	  zephyr_alif fork DTS; not yet validated on real silicon.
+
+# Alif Ensemble hardware-semaphore (HWSEM) -- AMP mutual-exclusion latch shared
+# between the two RTSS cores (M55-HE <-> M55-HP).  HWSEM has NO upstream Zephyr
+# device class, so this is a "misc" (no-class) driver exposing a small take/give
+# API (zephyr/drivers/misc/alif_hwsem/hwsem_alif.h).  Distinct compatible
+# `alif,hwsem` keeps it collision-free on the default upstream-Zephyr + hal_alif
+# base.  Driver: zephyr/drivers/misc/alif_hwsem/hwsem_alif.c;
+# binding: zephyr/dts/bindings/misc/alif,hwsem.yaml.
+config HWSEM_ALIF
+	bool "Alif Ensemble hardware semaphore (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on DT_HAS_ALIF_HWSEM_ENABLED
+	help
+	  Enable the Alif Ensemble HWSEM driver -- an AMP request/release latch
+	  arbitrating a shared resource between the two RTSS cores (M55-HE and
+	  M55-HP).  The take/give pair is keyed by the calling core's MASTER ID
+	  (its CPUID), so a release only frees the latch for its owner.  Exposes a
+	  tiny take/give API (hwsem_alif.h), NOT a standard Zephyr device-class API
+	  (HWSEM has no upstream class).  vendor-ext, BENCH-UNVERIFIED -- authored
+	  clean-room from the Alif DFP HWSEM register header; not yet validated on
+	  real silicon.
+
+#
+# (Retired per ADR 0017) There is intentionally NO Alif LPI2C driver.
+# The on-module LPI2C0 housekeeping bus is SLAVE-ONLY (TRM §3.17.4), so a
+# master-mode controller driver is a dead end; the RTC/TMP112/OPTIGA reads are
+# Tier-3 (Alif SE services).  Edge I2C masters are Tier-1 upstream i2c_dw
+# (snps,designware-i2c).  The former alif,lpi2c TX-only driver was removed.
+#
+
+config ETH_DWMAC_ALIF
+	bool "Alif Ensemble DesignWare MAC glue (ADR 0017 Tier-1.5, BENCH-VERIFIED E8 2026-06-17)"
+	default y
+	depends on DT_HAS_ALIF_ETHERNET_ENABLED
+	select ETH_DWMAC
+	select PINCTRL
+	select NOCACHE_MEMORY if ARCH_HAS_NOCACHE_MEMORY_SUPPORT
+	help
+	  Alif Ensemble platform glue (compatible "alif,ethernet") backing the
+	  UPSTREAM eth_dwmac (Synopsys DesignWare GMAC) core.  Enables the
+	  GMAC peripheral clock via the alif clock controller, wires the IRQ +
+	  pinctrl, and hands the descriptor rings to the core.  First bring-up
+	  is fixed-link (no upstream MDIO driver in Zephyr v4.4).
+	  BENCH-VERIFIED E8 2026-06-17: the E1M-AEN801 (Cortex-M55-HE) pulled a
+	  real DHCP lease and was server-side REACHABLE.  Driver:
+	  zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c.
+
+	  DMA-BUFFER PLACEMENT (required on the M55): the GMAC is a DMA bus master
+	  and the upstream core hands it the raw CPU pointer (no local_to_global
+	  translation), so the descriptor rings AND the net_buf packet pool MUST
+	  live in the global on-chip SRAM0 (sram@2000000, @0x02000000, CPU addr ==
+	  DMA addr), NEVER in the M55 DTCM (CPU-local, not on the GMAC AXI path --
+	  buffers there are invisible to the DMA and no frame moves).  Pin this in
+	  the board overlay via `chosen { zephyr,sram = &sram0; }` and keep
+	  CONFIG_DCACHE=n (or a nocache region) so CPU and DMA share a coherent
+	  view; the driver BUILD_ASSERTs the cache-coherency half of this.
+
+	  ADR 0017 Tier-1.5 (in-tree thin glue over an UPSTREAM core): kept
+	  in-tree, NOT retired onto the fork -- the sdk-alif fork forked the
+	  DWMAC *core* (consuming it violates one-upstream-base), and upstream
+	  Kconfig.dwmac offers no Ensemble path (STM32-only / MMU-gated; the M55
+	  has an MPU).  Retiring would be an unconditional silent Ethernet loss.
+	  See docs/adr/0017.
+
+choice ETH_DWMAC_ALIF_RMII_REFCLK
+	prompt "Alif GMAC RMII 50 MHz reference-clock source"
+	depends on ETH_DWMAC_ALIF
+	default ETH_DWMAC_ALIF_RMII_REFCLK_AUTO
+	help
+	  Selects the source of the GMAC RMII 50 MHz reference clock via the Alif
+	  ETH_CTRL register (CLKCTL_PER_MST 0x4903F000 + 0x80, bit 4).  The DWMAC
+	  DMA software-reset cannot complete without a running RMII ref-clock, so
+	  this MUST match the carrier wiring.  Bit-4 encodings transcribed from the
+	  Apache-2.0 zephyr_alif fork (ALIF_ETH_RMII_{REFCLK_PIN,PLL_CLK_50M});
+	  confirm against the Alif Ensemble TRM.
+
+config ETH_DWMAC_ALIF_RMII_REFCLK_AUTO
+	bool "Auto-detect (external pin, fall back to internal PLL)"
+	help
+	  Try the external REFCLK pin first (production wiring); if no clock is
+	  present -- detected because the GMAC DMA soft-reset cannot complete --
+	  fall back to the SoC internal 50 MHz PLL.  This is the robust default: it
+	  brings Ethernet up on both fully-populated carriers (external oscillator
+	  into P11_0) and boards without the RMII oscillator populated, with no
+	  per-board configuration.  Bench-validated on the E1M-AEN801 (E8, 2026-06-17):
+	  with the PHY power-enable (P15_4) asserted early, auto-detect found the
+	  on-module external 50 MHz RMII oscillator (P11_0) and selected it
+	  (ETH_CTRL bit 4 = 0); the MAC reset completed and the SOM pulled a real
+	  DHCP lease.  (The internal-PLL fallback path remains, but was not the
+	  bench-verified path.)
+
+config ETH_DWMAC_ALIF_RMII_REFCLK_EXTERNAL
+	bool "Force external REFCLK pin (P11_0 input)"
+	help
+	  ETH_CTRL bit 4 = 0, no fallback.  The carrier/SoM feeds a 50 MHz
+	  oscillator into the RMII REFCLK pin (P11_0).  This is the E1M-AEN801
+	  production wiring; use it to skip the auto-detect reset probe.
+
+config ETH_DWMAC_ALIF_RMII_REFCLK_INTERNAL_PLL
+	bool "Force internal 50 MHz PLL (SoC drives the PHY)"
+	help
+	  ETH_CTRL bit 4 = 1, no fallback.  The SoC generates the 50 MHz RMII
+	  reference clock internally and drives it out to the PHY.  Use when no
+	  external RMII oscillator is populated and you want to skip the probe.
+
+endchoice
+
+config SPI_DW_ALIF
+	bool "Alif Ensemble DWC_ssi SPI (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on DT_HAS_ALIF_DWC_SSI_SPI_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble DesignWare DWC_ssi SPI controller driver, vendored from
+	  the Apache-2.0 zephyr_alif fork (drivers/spi/spi_dw_alif.c).  Binds the
+	  distinct compatible "alif,dwc-ssi-spi" so it does NOT collide with
+	  upstream Zephyr's DW-apb-SSI spi_dw (which owns "snps,designware-spi").
+	  The DWC_ssi CTRLR0 register layout differs from DW-apb-SSI -- set the
+	  node's `dwc-ssi` property.  Not silicon-validated.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no SSI
+	  library): INTERIM.  Retires onto the opt-in sdk-alif fork once `spi0`
+	  is repointed to the fork compatible AND bench-verified (hard-deleting
+	  before the repoint lands would be a silent SPI-master regression).  A
+	  pure-Tier-1 end-state is one small upstream patch away (set SSI_IS_MST,
+	  CTRLR0[31], under CONFIG_SPI_DW_HSSI -- filed, non-blocking).
+
+config SPI_DW_ALIF_USE_DMA
+	bool "Alif DWC_ssi SPI DMA code path"
+	default n
+	depends on SPI_DW_ALIF
+	help
+	  Compile the DMA transfer path of the Alif DWC_ssi SPI driver.  DMA is
+	  only actually engaged when the node wires `dmas`/`dma-names` AND the
+	  transfer is at least SPI_DW_ALIF_DMA_MIN_LEN bytes; smaller transfers
+	  stay on the PIO/interrupt path.  Drives the vendored peripheral-flow
+	  PL330 (alif,dma-pl330) + event-router (alif,dma-event-router).
+
+config SPI_DW_ALIF_DMA_MIN_LEN
+	int "Minimum transfer length (bytes) to use the SPI DMA path"
+	default 64
+	depends on SPI_DW_ALIF_USE_DMA
+	help
+	  Transfers shorter than this stay on the PIO/interrupt path -- DMA channel
+	  setup + the FIFO-watermark handshake dominate (and a sub-FIFO-depth
+	  transfer never reaches the burst watermark, so it would stall).  Tiny
+	  control frames (e.g. the CC3501E bridge's 4-8 byte lockstep transfers)
+	  thus keep working on PIO while large continuous streams use DMA.
+
+# ----------------------------------------------------------------------------
+# Secure-Enclave (SE) SERVICE transport -- Arm MHUv2 IPM driver + hal_alif client
+# ----------------------------------------------------------------------------
+# The SE service client lives in the Apache-2.0 hal_alif module
+# (se_services/zephyr/src/se_service.c) and talks to the SE over two Arm MHUv2
+# mailboxes via Zephyr's IPM API.  Two symbols gate it: ARM_MHUV2 (the in-tree
+# IPM driver) and HAS_ALIF_SE_SERVICES (which compiles the hal_alif client).
+# BOTH are `select`ed only by the Alif zephyr_alif FORK SoC Kconfig
+# (SOC_SUPPORT_ARM_MHUV2 / soc/alif/ensemble/Kconfig) -- upstream Zephyr v4.4
+# does NOT define or select either, so on the alp-sdk (upstream + hal_alif)
+# stack the whole SE path is dark.  alp-sdk, as the integration layer, DEFINES
+# both here (the USE_ALIF_HAL_UTIMER precedent below: define what hal_alif only
+# selects) so the in-tree MHUv2 driver builds and se_service.c links.
+
+config ARM_MHUV2
+	bool "Arm MHUv2 mailbox (IPM) -- SE service transport (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on DT_HAS_ARM_MHUV2_ENABLED
+	select IPM
+	help
+	  Arm Message Handling Unit v2 (MHUv2) mailbox driver, exposed through
+	  Zephyr's IPM API (compatible "arm,mhuv2"), vendored from the Apache-2.0
+	  zephyr_alif fork (drivers/ipm/ipm_arm_mhuv2.c).  Upstream Zephyr v4.4
+	  ships only the MHUv1 ipm_mhu.c; this is the v2 mailbox the Ensemble SE
+	  service channel uses.  Drives the RTSS <-> SE seservice0r/seservice0s
+	  mailboxes in the E8 SoC overlay.  ADR 0017 Tier-2 (INTERIM).
+
+	  NOTE: hal_alif's se_service.c uses ipm_poll_out()/ipm_poll_in() on its
+	  pre-scheduler path.  Those are a fork extension to Zephyr's IPM API absent
+	  from upstream v4.4; the alp-sdk carries the small upstreamable Zephyr patch
+	  that adds them (zephyr/patches.yml).  Without that patch this driver's
+	  .poll_out/.poll_in tail (and se_service.c) will not compile.
+
+config HAS_ALIF_SE_SERVICES
+	bool "hal_alif Secure-Enclave service client (vendor-ext, BENCH-UNVERIFIED)"
+	default y if DT_HAS_ALIF_SECURE_ENCLAVE_SERVICES_ENABLED
+	depends on ARM_MHUV2
+	help
+	  Compile the Apache-2.0 hal_alif SE service client
+	  (se_services/zephyr/src/se_service.c -- gated by hal_alif on
+	  CONFIG_HAS_ALIF_SE_SERVICES, which only the fork SoC Kconfig otherwise
+	  selects).  Provides se_service_system_get_device_data() (the SoC
+	  lifecycle-state / LCS read), se_service_get_run_cfg(), the ES0 boot/run
+	  power-manager calls, and se_service_update_stoc().  Needs the SE mailboxes
+	  enabled (ARM_MHUV2 + the se_service DT node).  ADR 0017: alp-sdk CONSUMES
+	  the hal_alif client (does not reimplement the SE protocol).
+
+# hal_alif (drivers/CMakeLists.txt) gates its UTIMER HW library on
+# CONFIG_USE_ALIF_HAL_UTIMER but never DEFINES that symbol -- it only `select`s
+# it (under ALIF_BLE_HOST) and uses it in add_subdirectory_ifdef. On upstream
+# Zephyr + hal_alif (no fork) nothing defines it, so a bare `select` is a no-op
+# and drivers/utimer never builds.  alp-sdk, as the integration layer, defines
+# it here so the PWM/counter drivers below can select it to pull in
+# modules/hal/alif drivers/utimer (publishes <utimer.h> + compiles utimer.c).
+config USE_ALIF_HAL_UTIMER
+	bool
+	help
+	  Pull in the hal_alif UTIMER register library (drivers/utimer).  Selected
+	  by PWM_ALIF_UTIMER / COUNTER_ALIF_UTIMER; not user-facing.
+
+config PWM_ALIF_UTIMER
+	bool "Alif Ensemble UTIMER PWM (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on PWM
+	depends on DT_HAS_ALIF_PWM_ENABLED
+	select PINCTRL
+	select USE_ALIF_HAL_UTIMER
+	help
+	  Alif Ensemble UTIMER PWM-class driver (compatible "alif,pwm"), written
+	  over the hal_alif drivers/utimer register library (USE_ALIF_HAL_UTIMER
+	  pulls in modules/hal/alif drivers/utimer).  Upstream Zephyr v4.4 + hal_alif
+	  ship no PWM-class device for the Alif UTIMER.  Edge-aligned PWM only;
+	  capture/dead-time route through the GD32-bridge backend on V2N.  Not
+	  silicon-validated.  Driver: zephyr/drivers/pwm/pwm_alif_utimer.c.
+
+config COUNTER_ALIF_UTIMER
+	bool "Alif Ensemble UTIMER counter (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on COUNTER
+	depends on DT_HAS_ALIF_UTIMER_COUNTER_ENABLED
+	select USE_ALIF_HAL_UTIMER
+	help
+	  Zephyr counter-class driver for the Alif Ensemble UTIMER, built on the
+	  hal_alif utimer helpers.  Binds the "alif,utimer-counter" child node and
+	  reaches the parent "alif,utimer" (reg / timer-id / clock-frequency / IRQ)
+	  via DT_INST_PARENT, mirroring the sibling PWM driver.  Backs the portable
+	  alp_counter surface via the alp-counter0 alias.  Not silicon-validated.
+	  Driver: zephyr/drivers/counter/counter_alif_utimer.c.
+
+config COUNTER_RTC_SNPS_DW
+	bool "Synopsys DesignWare APB RTC counter (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on COUNTER
+	depends on DT_HAS_SNPS_DW_APB_RTC_ENABLED
+	help
+	  Zephyr counter-class driver for the Synopsys DesignWare APB RTC
+	  (compatible "snps,dw-apb-rtc"), the E8 always-on LPRTC at
+	  lprtc@42000000 (IRQ 58, 32768 Hz).  A free-running 32-bit up-counter
+	  (CCVR) with ONE compare/alarm channel (CMR) -- NOT a calendar RTC, so it
+	  does NOT satisfy the alp_rtc_* calendar surface as-is (that needs a
+	  counter->calendar shim, still TBD; see the aen-rtc-regcheck README).
+	  Vendored Tier-2 from the Apache-2.0 zephyr_alif fork
+	  (drivers/counter/counter_dw_rtc.{c,h}); upstream Zephyr v4.4 ships no
+	  snps,dw-apb-rtc driver (counter_dw_timer.c is the DIFFERENT snps,dw-timers
+	  DW APB Timers IP).  Backs the portable alp_counter surface via the
+	  alp-counter alias.  Not silicon-validated.  Driver:
+	  zephyr/drivers/counter/counter_dw_rtc.c.
+
+config COUNTER_ALIF_LPTIMER
+	bool "Alif Ensemble LPTIMER counter (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on COUNTER
+	depends on DT_HAS_ALIF_LPTIMER_ENABLED
+	help
+	  Zephyr counter-class driver for the Alif Ensemble LPTIMER (low-power
+	  timer), compatible "alif,lptimer".  On the E8 SoM this binds the
+	  always-on lptimer@42001000 block: four independent 32-bit DOWN-counters
+	  (channels 0..3, IRQs 60..63), each clocked from the VBAT-domain
+	  low-frequency source (32 kHz / 128 kHz / external / cascade) and firing
+	  an underflow interrupt on count-reaches-zero.  Free-running mode loads
+	  0xFFFFFFFF and counts down; get_value() returns the decrementing
+	  CURRENTVAL.  A DISTINCT always-on IP from the LPRTC (COUNTER_RTC_SNPS_DW,
+	  lprtc@42000000) and the UTIMER counter (COUNTER_ALIF_UTIMER).  Backs the
+	  portable alp_counter surface via the alp-counter alias.
+	  ADR 0017 Tier-1.5 -- a thin in-tree Zephyr driver written directly over
+	  the memory-mapped LPTIMER registers; the alifsemi/zephyr_alif fork ships
+	  no Zephyr LPTIMER driver and no "alif,lptimer" binding, and hal_alif
+	  exposes no Zephyr device for it, so there is no Tier-2 fork path to
+	  consume.  Not silicon-validated.  Driver:
+	  zephyr/drivers/counter/counter_alif_lptimer.c.
+
+config QDEC_ALIF
+	bool "Alif Ensemble UTIMER quadrature decoder (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on SENSOR
+	depends on DT_HAS_ALIF_UTIMER_QDEC_ENABLED
+	select PINCTRL
+	select USE_ALIF_HAL_UTIMER
+	help
+	  Zephyr sensor-class quadrature decoder for the Alif Ensemble UTIMER,
+	  vendored VERBATIM from the Apache-2.0 zephyr_alif fork
+	  (drivers/sensor/qdec_alif/qdec_alif_utimer.c) -- upstream Zephyr v4.4 +
+	  hal_alif ship no Alif QDEC driver.  Built on the hal_alif utimer helpers
+	  (USE_ALIF_HAL_UTIMER); binds the "alif,utimer-qdec" child node and reaches
+	  the parent "alif,utimer" (reg / timer-id / clocks) via DT_INST_PARENT,
+	  mirroring the sibling counter/PWM drivers.  Exposes SENSOR_CHAN_ROTATION,
+	  backing the portable alp_qenc surface via the alp-qenc0 alias.  Not
+	  silicon-validated.  ADR 0017 Tier-2 (INTERIM).
+	  Driver: zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c.
+
+config SDHC_DWC
+	bool "Alif Ensemble DesignWare SD Host Controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on SDHC
+	depends on DT_HAS_SNPS_DWC_SDHC_ENABLED
+	select SDHC_SUPPORTS_NATIVE_MODE
+	select EVENTS
+	help
+	  Synopsys DesignWare Core SD Host Controller driver (compatible
+	  "snps,dwc-sdhc"), vendored VERBATIM from the Apache-2.0 zephyr_alif fork
+	  (drivers/sdhc/sdhc_dwc.c + sdhc_dwc.h) -- upstream Zephyr v4.4 + hal_alif
+	  ship no DesignWare SDHC driver.  Implements the Zephyr SDHC API; the card's
+	  internal ADMA2/SDMA engine handles data transfers (no Alif system-DMA
+	  dependency).  Binding zephyr/dts/bindings/sdhc/snps,dwc-sdhc.yaml.
+
+	  The CPU<->bus DMA address translation (which would pull in the hal_alif
+	  soc_memory_map.h / itcm,dtcm `global_base` props -- the same dtsi gap the
+	  NPU work hit) is left OFF (CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=n), so the
+	  driver uses identity addressing.  Enable + add the global_base props once a
+	  card is actually reachable and DMA transfers are validated.
+
+	  ADR 0017 Tier-2 (INTERIM).  Driver: zephyr/drivers/sdhc/sdhc_dwc.c.
+
+if SDHC_DWC
+
+config SDHC_BUFFER_ALIGNMENT
+	int "SDHC buffer alignment"
+	default 512
+
+config SDHC_DESCRIPTOR_SECTION
+	string "Linker section for SDHC DMA descriptors"
+	default ""
+
+config SDHC_DWC_SDMA
+	bool "Use SDMA mode"
+
+config SDHC_DWC_ADMA
+	bool "Use ADMA2 mode"
+	default y
+	depends on !SDHC_DWC_SDMA
+
+config SDHC_DWC_ADMA_MAX_DESC
+	int "SDHC DWC ADMA Maximum Descriptor count"
+	depends on SDHC_DWC_ADMA
+	default 32
+
+config SDHC_DWC_DMA_ADDR_TRANSLATE
+	bool "Enable CPU-to-bus DMA address translation"
+	help
+	  Pulls in the hal_alif soc_memory_map.h (needs itcm/dtcm `global_base`
+	  props absent from the alp-sdk E8 dtsi).  Leave disabled until a card is
+	  reachable and DMA is validated.
+
+endif # SDHC_DWC
+
+# hal_alif (drivers/CMakeLists.txt) gates its analog VREF library
+# (drivers/analog -> analog_ctrl.c) on CONFIG_USE_ALIF_HAL_ANALOG via
+# add_subdirectory_ifdef, but -- exactly like USE_ALIF_HAL_UTIMER above --
+# hal_alif never DEFINES the symbol.  On upstream Zephyr v4.4 + hal_alif (no
+# fork) nothing defines it, so drivers/analog never builds and the ADC driver's
+# enable_adc_ref_voltage() / adc_vref_cnt extern would not link.  alp-sdk, as the
+# integration layer, defines it here so ADC_ALIF can select it to pull in
+# modules/hal/alif drivers/analog (publishes analog_ctrl.h on the include path +
+# compiles analog_ctrl.c with the adc_vref_cnt/dac*_vref_cnt counters).
+config USE_ALIF_HAL_ANALOG
+	bool
+	help
+	  Pull in the hal_alif analog VREF library (drivers/analog).  Selected by
+	  ADC_ALIF (and any future DAC/comparator driver); not user-facing.
+
+config ADC_ALIF
+	bool "Alif Ensemble ADC (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on ADC
+	depends on DT_HAS_ALIF_ADC_ENABLED
+	select PINCTRL
+	select USE_ALIF_HAL_ANALOG
+	help
+	  Alif Ensemble ADC class driver (12-bit x3 + 24-bit x1), vendored VERBATIM
+	  from the Apache-2.0 zephyr_alif fork (drivers/adc/adc_alif.c).  Binds the
+	  fork-native compatible "alif,adc" (no upstream Zephyr Alif ADC exists, so
+	  no collision).  Built over the hal_alif analog_ctrl VREF helper library
+	  (USE_ALIF_HAL_ANALOG pulls in modules/hal/alif drivers/analog).  Single-shot
+	  + continuous conversion, single/multi-channel scan, comparator, and PGA in
+	  differential mode.  Not silicon-validated.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no ADC class
+	  driver): INTERIM.  Retires onto the opt-in sdk-alif fork once the adc nodes
+	  are repointed to the fork compatible AND bench-verified.
+	  Driver: zephyr/drivers/adc/adc_alif.c.
+
+config DAC_ALIF
+	bool "Alif Ensemble DAC (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on DAC
+	depends on DT_HAS_ALIF_DAC_ENABLED
+	select PINCTRL
+	select USE_ALIF_HAL_ANALOG
+	help
+	  Alif Ensemble DAC12 class driver (2x 12-bit current-output DACs), vendored
+	  VERBATIM from the Apache-2.0 zephyr_alif fork (drivers/dac/dac_alif.c).
+	  Binds the fork-native compatible "alif,dac" (no upstream Zephyr Alif DAC
+	  exists, so no collision).  Built over the hal_alif analog_ctrl VREF helper
+	  library (USE_ALIF_HAL_ANALOG pulls in modules/hal/alif drivers/analog --
+	  the same library ADC_ALIF uses).  Write-only IP with NO interrupt; the
+	  setpoint goes through the DAC_IN register.  Not silicon-validated.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no DAC class
+	  driver): INTERIM.  Retires onto the opt-in sdk-alif fork once the dac nodes
+	  are repointed to the fork compatible AND bench-verified.
+	  Driver: zephyr/drivers/dac/dac_alif.c.
+
+config CRC_ALIF
+	bool "Alif Ensemble CRC engine (ADR 0017 Tier-1.5 clean-room, BENCH-UNVERIFIED)"
+	default y
+	depends on CRC_DRIVER
+	depends on DT_HAS_ALIF_CRC_ENABLED
+	select CRC_DRIVER_HAS_CRC8_CCITT
+	select CRC_DRIVER_HAS_CRC16
+	select CRC_DRIVER_HAS_CRC16_CCITT
+	select CRC_DRIVER_HAS_CRC32_C
+	select CRC_DRIVER_HAS_CRC32_IEEE
+	help
+	  Alif Ensemble hardware CRC engine class driver (compatible "alif,crc"),
+	  implementing the UPSTREAM Zephyr v4.4 CRC class API
+	  (<zephyr/drivers/crc.h>: crc_begin / crc_update / crc_finish over
+	  struct crc_ctx).  CLEAN-ROOM, NOT vendored: the Apache-2.0 zephyr_alif
+	  fork's CRC driver targets a fork-private API (crc_compute() +
+	  struct crc_params, CONFIG_CRC_DRV) that does not exist upstream and so
+	  cannot be consumed verbatim -- the register model is re-authored
+	  value-only from the Alif DFP (drivers/include/crc.h + soc.h), with the
+	  programming sequence cross-checked against the fork CMSIS Driver_CRC.c.
+
+	  Polled, memory-mapped block (no interrupt, no DMA used by the driver),
+	  so it pulls in NO hal_alif library (like flash_mram_alif).  Maps the
+	  upstream enum crc_type onto the engine's CRC_8_CCITT / CRC_16 /
+	  CRC_16_CCITT / CRC_32 / CRC_32C algorithms; other types return -ENOTSUP.
+	  On the E8 SoM this binds crc0@48107000 / crc1@48108000.  Not
+	  silicon-validated.  ADR 0017 Tier-1.5 (in-tree-thin over the silicon;
+	  there is no Tier-2 fork path to retire onto).
+	  Driver: zephyr/drivers/crc/crc_alif.c.
+
+config CMP_ALIF
+	bool "Alif Ensemble analog comparator (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on COMPARATOR
+	depends on DT_HAS_ALIF_CMP_ENABLED
+	select PINCTRL
+	select USE_ALIF_HAL_ANALOG
+	help
+	  Alif Ensemble analog comparator (HSCMP: cmp0..cmp3) class driver,
+	  implementing the upstream Zephyr v4.4 comparator API
+	  (<zephyr/drivers/comparator.h>) over the fork-native compatible "alif,cmp"
+	  (no upstream Zephyr Alif comparator exists, so no collision).  Built over
+	  the hal_alif analog_ctrl VREF/clock helper library (USE_ALIF_HAL_ANALOG
+	  pulls in modules/hal/alif drivers/analog -- the same library ADC_ALIF /
+	  DAC_ALIF use): the CMP clock-gate (CLKCTRL_PER_SLV->CMP_CTRL) and the DAC6
+	  internal reference are programmed through that helper, so an
+	  internal-reference compare needs no external wiring.  Not silicon-validated.
+
+	  Unlike ADC_ALIF / DAC_ALIF, this is NOT a vendored fork copy: hal_alif and
+	  the available fork checkout ship no comparator class driver `.c` (only the
+	  binding + DT nodes + a sample), so the register sequencing was authored
+	  clean-room against the Alif DFP register definitions.  ADR 0017 Tier-2:
+	  INTERIM.  Retires onto the opt-in sdk-alif fork once a fork comparator
+	  driver is available, repointed AND bench-verified.
+	  Driver: zephyr/drivers/comparator/comparator_alif.c.
+
+config ALIF_PDM
+	bool "Alif Ensemble LPPDM PDM mic capture (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on AUDIO_DMIC
+	depends on DT_HAS_ALIF_ALIF_PDM_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble LPPDM PDM-microphone class driver, vendored VERBATIM from the
+	  Apache-2.0 zephyr_alif fork (drivers/audio/alif_pdm.c).  Implements the Zephyr
+	  DMIC API over the alif,alif-pdm IP; pure CMSIS + Zephyr clock_control/pinctrl
+	  (no hal_alif library, like flash_mram_alif).  Binds the fork-native compatible
+	  "alif,alif-pdm" (no upstream Zephyr Alif PDM exists, so no collision).  The
+	  76.8 MHz block clock is gated via ALIF_LPPDM_76M8_CLK.  Not silicon-validated.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy -- hal_alif ships no PDM class
+	  driver): INTERIM.  Retires onto the opt-in sdk-alif fork once bench-verified.
+	  Driver: zephyr/drivers/audio/alif_pdm.c.
+
+config I2S_DW
+	bool "Alif Ensemble DesignWare I2S (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
+	default y
+	depends on I2S
+	depends on DT_HAS_SNPS_DESIGNWARE_I2S_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble DesignWare I2S controller driver (compatible
+	  "snps,designware-i2s"), vendored VERBATIM from the Apache-2.0 zephyr_alif
+	  fork (drivers/i2s/i2s_dw.c) -- upstream Zephyr v4.4 ships no DesignWare I2S
+	  driver and hal_alif ships none either.  Implements the standard Zephyr I2S
+	  API (i2s_configure / i2s_write / i2s_read / i2s_trigger), FIFO/interrupt
+	  driven (the dma_config struct fields are present but no dma_*() is called,
+	  so it runs without the Alif DMA subsystem).  The I2Sx block clock is gated
+	  via ALIF_I2Sx_76M8_CLK.
+
+	  alp-sdk patch vs the fork: i2s_dw.c tolerates -ENOSYS/-ENOTSUP from
+	  clock_control_set_rate() / _configure() (our upstream clockctrl has only
+	  .on/.off/.get_rate).  The bit-clock divider is therefore NOT programmed
+	  from the requested sample rate -- exact SCLK is BENCH-UNVERIFIED until the
+	  clockctrl gains a real .set_rate for the I2Sx_CTRL divider.
+
+	  ADR 0017 Tier-2 (a genuine fork-driver copy): INTERIM.  Retires onto the
+	  opt-in fork once bench-verified.  Driver: zephyr/drivers/i2s/i2s_dw.c.
+
+if I2S_DW
+
+config I2S_DW_RX_BLOCK_COUNT
+	int "I2S DesignWare RX queue length"
+	default 10
+
+config I2S_DW_TX_BLOCK_COUNT
+	int "I2S DesignWare TX queue length"
+	default 10
+
+endif # I2S_DW
+
+# ---------------------------------------------------------------------------
+# Alif Ensemble CAMERA CAPTURE path (CPI controller + DesignWare MIPI CSI-2
+# bridge + DesignWare MIPI D-PHY + ON Semi ARX3A0 sensor) -- ADR 0017 Tier-2,
+# vendored from the Apache-2.0 zephyr_alif fork.  Upstream Zephyr v4.4 +
+# hal_alif ship NONE of these (no CPI/CSI video drivers, no mipi_dphy class),
+# so they are carried in-tree so they survive a `west update` (the ADC_ALIF /
+# MHUv2 precedents).
+#
+# The fork video drivers originally implemented the OLDER Zephyr video API
+# whose callbacks took `enum video_endpoint_id ep` -- a type upstream v4.4
+# REMOVED in the video-API rework (v4.4 callbacks are (dev, fmt) / (dev, caps) /
+# (dev, enable, type) / (dev, cid)).  The video drivers have now been PORTED to
+# the v4.4 API by Alp Lab AB (each API-shim change is marked at its call site;
+# see the per-driver provenance headers); the former ALP_VIDEO_ALIF_BROKEN gate
+# is RETIRED and the driver TUs build in directly when their DT node is enabled.
+# Runtime capture stays HW-blocked on this batch (no camera sensor wired).
+# vendor-ext, BENCH-UNVERIFIED.
+# ---------------------------------------------------------------------------
+config VIDEO_ALIF_CAM
+	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on VIDEO
+	depends on DT_HAS_ALIF_CAM_ENABLED
+	select PINCTRL
+	help
+	  Alif Ensemble Camera Parallel Interface (CPI) capture controller, vendored
+	  from the Apache-2.0 zephyr_alif fork (drivers/video/video_alif.c,
+	  compatible "alif,cam") and PORTED to the v4.4 video API by Alp Lab AB.
+	  Upstream Zephyr v4.4 + hal_alif ship no CPI class driver.
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Retires onto the opt-in
+	  sdk-alif fork once the cam node is repointed AND bench-verified.
+	  Driver: zephyr/drivers/video/video_alif.c.
+
+config VIDEO_ALIF_CAM_INIT_PRIORITY
+	int "CPI video initialization priority"
+	default 59
+	depends on VIDEO_ALIF_CAM
+	help
+	  System initialization priority for the Alif CPI driver (default video
+	  device init priority is 60).
+
+config VIDEO_ALIF_CAM_EXTENDED
+	bool "CPI has extended registers and ports (ISP / memory-dump endpoints)"
+	depends on VIDEO_ALIF_CAM
+	help
+	  The CPI has extended registers and ports to forward video signals to the
+	  ISP and dump the frame to memory.
+
+config MIPI_DPHY
+	bool "MIPI-DPHY host controllers (vendored, ADR 0017 Tier-2 INTERIM)"
+	select EXPERIMENTAL
+	help
+	  MIPI-DPHY host-controller class.  Upstream Zephyr v4.4 has NO mipi_dphy
+	  class; this subtree is vendored from the Apache-2.0 zephyr_alif fork so the
+	  DesignWare CSI-2 driver can reach the D-PHY.  Selected by the CSI driver
+	  (VIDEO_MIPI_CSI2_DW).
+
+config MIPI_DPHY_DW
+	bool "DesignWare MIPI-DPHY host controller for Alif"
+	default y
+	depends on MIPI_DPHY
+	depends on DT_HAS_SNPS_DESIGNWARE_DPHY_ENABLED
+	help
+	  Alif DesignWare MIPI D-PHY host-controller driver, vendored VERBATIM from
+	  the Apache-2.0 zephyr_alif fork (drivers/mipi_dphy/dphy_dw.c, compatible
+	  "snps,designware-dphy").  Pulled in by the CSI driver (dphy_dw_slave_*).
+	  Driver: zephyr/drivers/mipi_dphy/dphy_dw.c.
+
+config MIPI_DPHY_INIT_PRIORITY
+	int "MIPI-DPHY initialization priority"
+	default 39
+	depends on MIPI_DPHY_DW
+	help
+	  MIPI-DPHY host-controller init priority (ahead of the CSI bridge at 41).
+
+config VIDEO_MIPI_CSI2_DW
+	bool "DesignWare MIPI CSI-2 host bridge for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on VIDEO
+	depends on DT_HAS_SNPS_DESIGNWARE_CSI_ENABLED
+	depends on DT_HAS_SNPS_DESIGNWARE_DPHY_ENABLED
+	select MIPI_DPHY
+	help
+	  DesignWare MIPI CSI-2 host bridge in front of the Alif CPI, vendored
+	  from the Apache-2.0 zephyr_alif fork (drivers/video/video_csi_dw.c,
+	  compatible "snps,designware-csi") and PORTED to the v4.4 video API by Alp
+	  Lab AB.  Hard-depends on the vendored MIPI-DPHY driver.
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.
+	  Driver: zephyr/drivers/video/video_csi_dw.c.
+
+config VIDEO_MIPI_CSI2_DW_INIT_PRIORITY
+	int "MIPI CSI-2 host bridge initialization priority"
+	default 41
+	depends on VIDEO_MIPI_CSI2_DW
+	help
+	  Init priority for the DesignWare CSI-2 bridge (after the D-PHY at 39).
+
+config VIDEO_ARX3A0
+	bool "ON Semi ARX3A0 MIPI CSI-2 sensor (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on VIDEO
+	depends on DT_HAS_ONNN_ARX3A0_ENABLED
+	select I2C
+	help
+	  ON Semiconductor ARX3A0 CMOS MIPI CSI-2 image sensor, vendored from the
+	  Apache-2.0 zephyr_alif fork (drivers/video/arx3a0.c, compatible
+	  "onnn,arx3a0") and PORTED to the v4.4 video API by Alp Lab AB.
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.
+	  Driver: zephyr/drivers/video/arx3a0.c.
+
+# ---------------------------------------------------------------------------
+# Alif Ensemble ISP-Pico (Verisilicon ISP Nano "Pico", compatible
+# "vsi,isp-pico") -- ADR 0017 Tier-2, OPT-IN (default n).  An m2m video device
+# (input EP = camera/CPI, output EP = processed frame) vendored from the
+# Apache-2.0 zephyr_alif fork (drivers/video/isp_pico.c) and PORTED to the v4.4
+# video API by Alp Lab AB.  It links the hal_alif libisp wrapper
+# (modules/hal/alif/drivers/isp/isp_wrapper -> Lib/libisp_gcc.a, the Vivante
+# blob), so it selects USE_ALIF_ISP_LIB.
+#
+# HAL_ALIF VERSION MISMATCH (FLAGGED): the vendored isp_pico.c is the
+# 2026 fork driver; the locally vendored hal_alif isp_wrapper is 2025 and does
+# NOT export isp_vsi_set_param / isp_vsi_get_param, ships a 2-arg
+# isp_vsi_bottom_half() vs this driver's 3-arg call, and ships no
+# <zephyr/drivers/video/isp-vsi.h> (only isp_conf.h / isp_param_conf.h).  So
+# this driver COMPILES against v4.4 but WILL NOT LINK against the local hal_alif
+# until the wrapper is bumped.  Hence default n -- the default build stays green
+# regardless; turning it on against the 2025 wrapper is a known link failure.
+# Do NOT fabricate the missing hal_alif API.  vendor-ext, BENCH-UNVERIFIED.
+# ---------------------------------------------------------------------------
+config VIDEO_ISP_VSI
+	bool "Alif Ensemble ISP-Pico (Verisilicon, ADR 0017 Tier-2 INTERIM, OPT-IN)"
+	default n
+	depends on VIDEO
+	depends on DT_HAS_VSI_ISP_PICO_ENABLED
+	select USE_ALIF_ISP_LIB
+	help
+	  Alif Ensemble ISP-Pico (Verisilicon ISP Nano) video m2m driver, vendored
+	  from the Apache-2.0 zephyr_alif fork (drivers/video/isp_pico.c, compatible
+	  "vsi,isp-pico") and PORTED to the v4.4 video API by Alp Lab AB.  Links the
+	  hal_alif libisp wrapper (the Vivante ISP blob, USE_ALIF_ISP_LIB).
+
+	  OPT-IN, default n.  FLAGGED hal_alif version mismatch: the vendored 2026
+	  isp_pico.c needs a newer hal_alif libisp wrapper than the locally vendored
+	  2025 one (missing isp_vsi_set_param / isp_vsi_get_param / isp-vsi.h; 2-arg
+	  vs 3-arg isp_vsi_bottom_half), so it compiles but does NOT link against the
+	  local wrapper.  Bump the hal_alif wrapper before enabling.
+	  Driver: zephyr/drivers/video/isp_pico.c.
+
+config VIDEO_ISP_VSI_INIT_PRIORITY
+	int "ISP-Pico initialization priority"
+	default 60
+	depends on VIDEO_ISP_VSI
+	help
+	  System initialization priority for the Alif ISP-Pico driver.
+
+# ---------------------------------------------------------------------------
+# Alif Ensemble CAN-FD (CAST CAN-CTRL IP, compatible "cast,can"), vendored from
+# the Apache-2.0 zephyr_alif fork (zephyr/drivers/can/can_cast.c + can_cast.h).
+# Upstream Zephyr v4.4 ships only the Bosch M_CAN driver (can_mcan.c), whose
+# register map does NOT match the CAST IP, and hal_alif ships no CAN class
+# driver -- so this fork copy is the only Zephyr can_* device for the part.  The
+# portable <alp/can.h> backend (src/backends/can/zephyr_drv.c) binds it via the
+# alp_can0 alias.  ADR 0017 Tier-2 (fork-driver copy): INTERIM, retires onto the
+# opt-in sdk-alif fork once bench-verified.  BENCH-UNVERIFIED.
+# ---------------------------------------------------------------------------
+config CAN_ALIF_CAST
+	bool "Alif Ensemble CAN-FD controller (CAST IP, ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on CAN
+	depends on DT_HAS_CAST_CAN_ENABLED
+	select PINCTRL
+	select CAN_HAS_RX_TIMESTAMP if CAN_RX_TIMESTAMP
+	help
+	  Alif Ensemble CAN-FD controller (CAST CAN-CTRL IP, compatible "cast,can"),
+	  vendored from the Apache-2.0 zephyr_alif fork (drivers/can/can_cast.c).
+	  Upstream Zephyr v4.4 + hal_alif ship no CAN class driver for this IP
+	  (upstream's can_mcan.c is the Bosch M_CAN, a different register map).
+
+	  Driver: zephyr/drivers/can/can_cast.c.
+
+config CAN_MAX_FILTER
+	int "Maximum number of CAN acceptance filters (CAST IP)"
+	default 2
+	range 1 3
+	depends on CAN_ALIF_CAST
+	help
+	  Number of CAN-RX acceptance-filter slots the cast,can driver installs.
+	  The driver BUILD_ASSERTs CAN_MAX_ACCEPTANCE_FILTERS (= 16, can_cast.h:92)
+	  > CONFIG_CAN_MAX_FILTER, so up to 15 is legal; the fork's own loopback
+	  sample uses 3.  Capped at 3 here as a conservative default.  Fork-specific
+	  symbol (absent from upstream CAN).
+
+config CAN_RBUF_AFWL
+	int "CAN receive-buffer almost-full warning limit (CAST IP)"
+	default 1
+	range 1 15
+	depends on CAN_ALIF_CAST
+	help
+	  Receive-buffer almost-full warning limit (AFWL) the cast,can driver
+	  programs into CANFD_LIMIT.  The CAST IP maximum is CAN_RBUF_AFWL_MAX = 15
+	  (can_cast.h:98).  Fork-specific symbol (absent from upstream CAN).
+

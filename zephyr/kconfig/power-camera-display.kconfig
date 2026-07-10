@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# <alp/dsp.h> standalone DSP chain, <alp/power.h> system-power surface + its
+# Zephyr pm_policy and V2N vendor-extension backends, and the portable
+# camera/display backends (Zephyr video, V2N N44 ISP, Alif ISP-Pico, Zephyr
+# display).
+
+config ALP_SDK_DSP
+	bool "Enable <alp/dsp.h> standalone DSP-chain API"
+	default n
+	help
+	  Compile the DSP registry sources -- src/dsp_dispatch.c plus
+	  src/backends/dsp/sw_fallback.c.  Provides the standalone
+	  alp_dsp_chain_* surface for in-RAM FIR / IIR / window /
+	  FFT processing against int16 mV-scale buffers.  Uses
+	  CMSIS-DSP when ALP_HAS_CMSIS_DSP=1; otherwise falls back
+	  to a portable-C math kernel set (naive FIR convolution,
+	  direct-form-1 biquad cascade, radix-2 Cooley-Tukey FFT).
+
+	  Slice 4d migration: the legacy OS-agnostic body that lived at
+	  src/common/dsp_chain.c is now the sw_fallback backend.  There
+	  is no separate zephyr_drv backend today -- the V2N GD32G5
+	  HW-FFT surfaces via wave-2's alp_adc_filter_t /
+	  alp_adc_spectrum_t in <alp/adc.h>, not through this
+	  standalone class.  Future HW backends (V2N standalone-FFT,
+	  AEN once the wave-2 bridge stabilises) pre-empt the
+	  sw_fallback transparently when registered at higher priority.
+
+	  Static cost: ~30 KB for the chain pool (two concurrent
+	  chains sized to ALP_DSP_MAX_FIR_TAPS / IIR_SECTIONS /
+	  FFT_POINTS).  Pulls in math.h transcendentals (sinf, cosf,
+	  sqrtf, lrintf).  Off by default to keep tight firmware
+	  images lean.
+
+config ALP_SDK_POWER
+	bool "Enable <alp/power.h> system-power-mode surface"
+	default y
+	help
+	  Compile src/power_dispatch.c, the class dispatcher behind the
+	  portable alp_power_open / configure_wake_source / request_sleep /
+	  close surface (and the sibling alp_power_profile_get / _set
+	  surface).  Real backends register over this dispatcher by
+	  silicon_ref + priority -- see ALP_SDK_POWER_PM_POLICY (Zephyr
+	  pm_policy_* sleep-mode backend, "*" wildcard, priority 100),
+	  ALP_SDK_POWER_EXT_RENESAS (V2N GD32G553 supervisor
+	  CMD_POWER_MODE_SET vendor extension) and
+	  ALP_SDK_POWER_PROFILE_ALIF_SE (Alif SE aiPM operating-point
+	  profile, separate "power_profile" class) for what each one
+	  actually implements.
+
+	  src/backends/power/zephyr_stub.c is the always-present,
+	  priority-0 "*" wildcard fallback: open() returns a valid
+	  handle and configure_wake_source() succeeds silently so
+	  application setup code keeps linking/running unchanged, but
+	  request_sleep() (and both power_profile ops, when no higher-
+	  priority profile backend is linked) return ALP_ERR_NOSUPPORT.
+	  The dispatcher still enforces the INVAL pre-checks (RUN-mode,
+	  invalid enum, no-wake-source-and-no-timer) ahead of the
+	  backend call.
+
+config ALP_SDK_CAMERA_ZEPHYR_VIDEO
+	bool "Compile the real Zephyr drivers/video/ camera backend"
+	depends on VIDEO
+	default y
+	help
+	  Compile src/backends/camera/zephyr_video.c, the portable
+	  camera backend that wraps Zephyr's drivers/video/ class
+	  (video_get_caps + video_set_format + video_buffer_alloc +
+	  video_enqueue / video_dequeue + video_stream_start / _stop)
+	  into the alp_camera_* vtable.  Registered at silicon_ref="*"
+	  priority 50 so it always wins over the zephyr_stub fallback
+	  (priority 0) on builds that link Zephyr's video subsystem;
+	  loses to vendor-specific real backends (V2N N44 ISP at
+	  priority 100 on its silicon_ref) where present.
+
+	  configure_isp returns ALP_ERR_NOSUPPORT -- the portable
+	  Zephyr video class has no in-line ISP surface; vendor
+	  backends ride on top to add the configure_isp op.
+
+	  Depends on CONFIG_VIDEO so the video_* symbols are visible
+	  at link time.
+
+config ALP_SDK_CAMERA_V2N_N44_ISP
+	bool "Compile the Renesas RZ/V2N N44 ISP-aware camera backend"
+	depends on VIDEO
+	default y if ALP_SOC_RENESAS_RZV2N_N44
+	help
+	  Compile src/backends/camera/v2n_n44_isp.c, the V2N N44
+	  ISP-aware camera backend.  Registered at
+	  silicon_ref="renesas:rzv2n:n44" priority 100 -- always
+	  wins selection over the wildcard zephyr_video + zephyr_stub
+	  on V2N silicon.
+
+	  Sensor pipeline (open / start / stop / capture / release /
+	  close) routes through the same Zephyr drivers/video/ API
+	  the portable zephyr_video backend uses; configure_isp
+	  validates + latches the requested config and returns
+	  ALP_OK -- the matching MMIO writes against the V2N N44
+	  ISP control registers land when the Renesas SoC port
+	  grows the ISP driver per the V2N Hardware User's Manual
+	  r01uh1003ej §18 "Image Signal Processor".
+
+	  Off on non-V2N builds; the zephyr_video backend remains
+	  the default on every other supported SoC.
+
+config ALP_SDK_CAMERA_ALIF_ISP
+	bool "Compile the Alif Ensemble ISP-Pico camera backend (OPT-IN)"
+	depends on VIDEO
+	depends on VIDEO_ISP_VSI
+	default n
+	help
+	  Compile src/backends/camera/alif_isp_pico.c, the Alif Ensemble
+	  ISP-Pico-aware camera backend.  Registered at
+	  silicon_ref="alif:ensemble:e8" priority 100 -- wins selection
+	  over the wildcard zephyr_video + zephyr_stub on E8 silicon when
+	  enabled.  Mirrors the V2N N44 ISP backend (sensor pipeline routes
+	  through the portable Zephyr v4.4 video API; configure_isp latches
+	  the requested config).
+
+	  OPT-IN, default n -- it depends on CONFIG_VIDEO_ISP_VSI, which
+	  links the hal_alif libisp Vivante blob.  See the FLAGGED hal_alif
+	  version mismatch under VIDEO_ISP_VSI: the vendored 2026 isp_pico.c
+	  needs a newer hal_alif wrapper than the locally vendored 2025 one,
+	  so the ISP driver compiles but does NOT link against the local
+	  wrapper.  Bump the hal_alif wrapper before enabling.
+
+config ALP_SDK_DISPLAY_ZEPHYR_DRV
+	bool "Compile the real Zephyr display driver-class backend"
+	depends on DISPLAY
+	default y
+	help
+	  Compile src/backends/display/zephyr_drv.c, the portable
+	  display backend that wraps Zephyr's drivers/display.h class
+	  (display_write + display_clear + display_blanking_on /
+	  _off + display_get_capabilities + display_set_pixel_format)
+	  into the alp_display_* vtable.  Any panel with an upstream
+	  Zephyr display driver (SSD1306, SSD1331, ILI9341, ST7789V,
+	  dummy-dc, ...) resolves via the alp-display0..3 devicetree
+	  aliases.  Registered at silicon_ref="*" priority 50 so it
+	  always wins over the zephyr_stub fallback (priority 0) on
+	  builds that link Zephyr's display subsystem; loses to future
+	  vendor-specific real backends (V2N DSI / parallel-RGB, Alif
+	  LCD-IF) at priority 100 on their silicon.
+
+	  Boards without an alp-displayN alias degrade cleanly:
+	  alp_display_open returns NULL with ALP_ERR_NOT_READY.
+
+	  Do not point an alp-displayN alias at the panel LVGL owns
+	  (the zephyr,display chosen node) when CONFIG_LVGL=y -- two
+	  writers on one panel conflict.  See the zephyr_drv.c header.
+
+	  Depends on CONFIG_DISPLAY so the display_* symbols are
+	  visible at link time.
+
+config ALP_SDK_POWER_PM_POLICY
+	bool "Compile the real Zephyr pm_policy_* power backend"
+	depends on ALP_SDK_POWER
+	depends on PM
+	default y
+	help
+	  Compile src/backends/power/zephyr_pm_policy.c, which uses
+	  Zephyr's pm_policy_state_lock_get / pm_policy_state_lock_put
+	  to translate alp_power_request_sleep into a constraint over
+	  the active per-SoC pm_state table.  Registered as
+	  silicon_ref="*" at priority 100 so it always wins over the
+	  zephyr_stub fallback (priority 0) on builds that link the PM
+	  subsystem.
+
+	  Off on builds without CONFIG_PM (where the pm_policy_* symbols
+	  vanish); the zephyr_stub at priority 0 keeps alp_power_open
+	  succeeding so application setup code keeps linking unchanged.
+
+config ALP_SDK_POWER_EXT_RENESAS
+	bool "Compile the Renesas V2N power vendor-extension body"
+	depends on ALP_SDK_POWER
+	depends on ALP_SDK_V2N_SUPERVISOR
+	default y if ALP_SOC_RENESAS_RZV2N_N44
+	help
+	  Compile src/backends/ext/renesas/power.c, which implements
+	  the alp_renesas_power_supervisor_mode_set vendor-extension
+	  surface declared in <alp/ext/renesas/power.h>.  Routes through
+	  the GD32G553 supervisor's CMD_POWER_MODE_SET opcode (0x28) via
+	  the existing v2n_supervisor singleton mutex; no new bus plumbing
+	  introduced.
+
+	  Off on non-V2N builds; the header alone (always installed) is
+	  enough for portable apps to compile-test against the symbol.
