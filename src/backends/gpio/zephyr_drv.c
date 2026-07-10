@@ -29,6 +29,7 @@
 
 #include "alp_slot_claim.h"
 #include "gpio_ops.h"
+#include "gpio_resolve.h"
 
 #define DT_DRV_COMPAT alp_pin_array
 

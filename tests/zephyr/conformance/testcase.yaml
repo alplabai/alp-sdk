@@ -36,12 +36,26 @@ tests:
   alp_sdk.conformance.test_doubles:
     extra_configs:
       - CONFIG_ALP_SDK_TESTING=y
-    platform_allow:
-      - native_sim
-      - native_sim/native/64
-    integration_platforms:
-      - native_sim/native/64
     tags:
       - alp-sdk
       - conformance
       - testing
+  # Same build, under the Alp-maintainer strict-warning profile + -Werror
+  # (issue #634).  native_sim/native/64 only -- this suite's prj.conf pulls
+  # in most first-party dispatchers/backends (see CONFIG_* list above), so
+  # it's representative first-party Zephyr-module coverage for the profile
+  # without forcing every real-SoM board build (whose vendor-driver mix
+  # under zephyr/drivers/** is out of this profile's scope -- see
+  # zephyr/CMakeLists.txt's per-source COMPILE_OPTIONS restriction) into
+  # this gate.  build-only: the point is a clean, error-free compile, not
+  # re-running the conformance assertions a second time.
+  alp_sdk.conformance.portable_api.strict_warnings:
+    extra_configs:
+      - CONFIG_ALP_SDK_STRICT_WARNINGS=y
+      - CONFIG_ALP_SDK_WERROR=y
+    build_only: true
+    tags:
+      - alp-sdk
+      - conformance
+      - peripheral
+      - strict-warnings

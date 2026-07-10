@@ -66,6 +66,14 @@
 #include "alp_internal.h"
 #include "common/alp_errno.h"
 
+/* Private test seam (issue #595 / #634): the bounded poll()+read() loop
+ * alp_uart_read() runs, split out so tests/yocto/peripheral_uart.c can
+ * drive it directly against a hermetic socketpair() fd.  Not part of any
+ * public include/alp header -- this forward declaration exists only so the
+ * definition below has a prototype in this TU (-Wmissing-prototypes);
+ * the test file carries its own matching `extern` declaration. */
+alp_status_t alp_uart_read_fd_bounded(int fd, uint8_t *data, size_t len, uint32_t timeout_ms);
+
 #ifndef ALP_SDK_YOCTO_MAX_UART_HANDLES
 #define ALP_SDK_YOCTO_MAX_UART_HANDLES 4
 #endif

@@ -14,6 +14,49 @@ config ALP_SDK_BANNER
 	  hardware revision from the EEPROM manifest; otherwise it falls
 	  back to the build-time board name (CONFIG_BOARD).
 
+config ALP_SDK_STRICT_WARNINGS
+	bool "Build the alp_sdk zephyr_library with the Alp-maintainer strict warning profile"
+	default n
+	help
+	  Compile ONLY this module's own zephyr_library sources under this
+	  module's src/ tree (dispatchers + src/zephyr/**/backends -- never
+	  zephyr/drivers/**, zephyr/soc-bridge/**, hal_alif, or any other
+	  vendored/upstream code) with a "core" subset of the plain-CMake
+	  ALP_SDK_STRICT_WARNINGS profile (cmake/alp-sdk-warnings.cmake):
+	  -Wall -Wextra -Wformat=2 -Wshadow -Wmissing-prototypes
+	  -Wdouble-promotion.
+
+	  This is a REDUCED set, not the plain-CMake profile's full 12 flags:
+	  -Wpedantic / -Wconversion / -Wsign-conversion / -Wcast-align /
+	  -Wundef / -Wstrict-prototypes all fire from Zephyr's OWN header
+	  code (empty structs and zero-arg variadic macros in
+	  zephyr/include/zephyr/{sys/sflist.h,sys/__assert.h,device.h};
+	  narrowing conversions in zephyr/include/zephyr/sys/{util.h,
+	  atomic.h}; Zephyr's own CONTAINER_OF cast in sys/util.h;
+	  `#if CONFIG_FOO` Kconfig tests -- never `#if defined(...)` -- in
+	  zephyr/include/zephyr/{rtio/sqe.h,logging/log.h}; and a
+	  non-prototype declaration in zephyr/include/zephyr/sys/
+	  cbprintf.h) whenever a first-party TU merely includes
+	  <zephyr/kernel.h> and friends -- Zephyr's own top-level include
+	  dir is a plain -I, not -isystem, so GCC does not suppress
+	  diagnostics attributed there.  That is upstream Zephyr's code,
+	  not ours to fix (ADR 0017), so those six stay out of the
+	  REQUIRED Zephyr-side profile; the plain-CMake build (which never
+	  includes Zephyr headers) keeps the full 12-flag set unmodified.
+
+	  Off by default so it never affects an ordinary application build;
+	  turn it on to reproduce the local/CI strict-warning gate for the
+	  Zephyr module (issue #634).  Combine with
+	  CONFIG_ALP_SDK_WERROR to promote the set to build errors.
+
+config ALP_SDK_WERROR
+	bool "Promote CONFIG_ALP_SDK_STRICT_WARNINGS to build errors"
+	default n
+	depends on ALP_SDK_STRICT_WARNINGS
+	help
+	  Adds -Werror on top of CONFIG_ALP_SDK_STRICT_WARNINGS's flag set,
+	  for this module's own zephyr_library only.
+
 config ALP_STATUS_DESCRIPTIONS
 	bool "Compile alp_status_description() string table"
 	default y
