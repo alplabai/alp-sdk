@@ -34,6 +34,7 @@
 #include <alp/peripheral.h>
 
 #include "../../../../src/backends/uart/uart_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_uart_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -184,7 +185,10 @@ ZTEST(alp_uart_registry, test_rx_ringbuf_returns_nosupport_on_sw_fallback)
 
 	struct alp_uart h;
 	memset(&h, 0, sizeof(h));
-	h.in_use                = true;
+	h.in_use = true;
+	/* alp_uart_open() also stamps this after a successful backend open
+	 * (issue #629's op-vs-close guard, src/common/alp_slot_claim.h). */
+	h.lifecycle             = ALP_HANDLE_LC_OPEN;
 	alp_capabilities_t caps = { 0 };
 	alp_uart_config_t  cfg  = {
 		.port_id   = 0u,

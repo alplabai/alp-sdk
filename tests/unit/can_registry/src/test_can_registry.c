@@ -33,6 +33,7 @@
 #include <alp/can.h>
 
 #include "../../../../src/backends/can/can_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_can_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -212,6 +213,11 @@ ZTEST(alp_can_registry, test_alp_can_remove_filter_public_dispatch)
 	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
 	h.state.ops = ops; /* alp_can_open() normally wires this before open() */
 	h.in_use    = true;
+	/* alp_can_open() also stamps this after a successful backend open
+	 * (issue #629's op-vs-close guard, src/common/alp_slot_claim.h) --
+	 * a hand-built handle that skips it would see every op gated
+	 * NOT_READY regardless of in_use. */
+	h.lifecycle = ALP_HANDLE_LC_OPEN;
 
 	/* Real dispatch to the sw_fallback op, which is idempotent ALP_OK. */
 	zassert_equal(alp_can_remove_filter(&h, 0), ALP_OK);
@@ -245,7 +251,8 @@ ZTEST(alp_can_registry, test_send_enforces_started_handle_contract)
 	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
 	h.state.ops = ops;
 	h.in_use    = true;
-	h.started   = false; /* never started */
+	h.lifecycle = ALP_HANDLE_LC_OPEN; /* see the (g) test above */
+	h.started   = false;              /* never started */
 
 	alp_can_frame_t frame = { .id = 0x123, .payload_len = 8u };
 
