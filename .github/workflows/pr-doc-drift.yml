@@ -10,7 +10,7 @@ name: pr-doc-drift
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'README.md'
       - 'docs/**'
@@ -20,7 +20,7 @@ on:
       - 'scripts/check_version_doc_sync.py'
       - '.github/workflows/pr-doc-drift.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'README.md'
       - 'docs/**'

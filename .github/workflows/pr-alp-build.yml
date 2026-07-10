@@ -29,7 +29,7 @@ name: pr-alp-build
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'scripts/**'
@@ -37,7 +37,7 @@ on:
       - 'src/**'
       - '.github/workflows/pr-alp-build.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'scripts/**'

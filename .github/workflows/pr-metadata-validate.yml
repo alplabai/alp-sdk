@@ -11,7 +11,7 @@ name: pr-metadata-validate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
@@ -36,7 +36,7 @@ on:
       - 'README.md'
       - 'docs/**/*.md'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
