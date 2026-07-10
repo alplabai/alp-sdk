@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: jsmn-json-parse
+  description: |
+    jsmn teaching example. Tokenizes an in-RAM JSON config string with
+    jsmn_parse and walks the token array to extract a string + an int
+    field. Builds and runs on native_sim (no hardware, no vendored
+    module fetch beyond the checked-in vendors/jsmn/ header).
+
+tests:
+  alp_sdk.examples.jsmn_json_parse.native_sim:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - jsmn-json-parse
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[jsmn-json-parse\\] done"
