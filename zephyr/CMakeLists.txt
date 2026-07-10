@@ -64,6 +64,11 @@ zephyr_library_named(alp_sdk)
 zephyr_library_sources(
     # Runtime capability table -- always compiled; pure .rodata, no Kconfig guard.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/cap.c
+    # alp_status_name() / alp_status_description() -- generated from the
+    # alp_status_t enum (scripts/gen_status_strings.py).  The name table is
+    # always compiled (pure .rodata); the description table gates on
+    # CONFIG_ALP_STATUS_DESCRIPTIONS internally so this TU compiles either way.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/status_strings.c
     # SDK lifecycle (alp_init / alp_deinit) -- OS-agnostic, always compiled.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/init.c
     # Runtime SDK-version accessor -- always compiled; pure .rodata.

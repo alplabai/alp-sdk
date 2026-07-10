@@ -9,6 +9,13 @@
 #     what the script would produce, the PR is asking reviewers to
 #     accept stale capability tables.
 #
+#   - alp_status_t enum edits that didn't trigger a status_strings.c
+#     regeneration.  scripts/gen_status_strings.py reads the
+#     alp_status_t enum in include/alp/peripheral.h and emits
+#     src/status_strings.c (alp_status_name / alp_status_description);
+#     if a committed copy doesn't match what the script would produce,
+#     the PR is asking reviewers to accept a stale status table.
+#
 #   - Board YAML edits that didn't trigger a routes-header regeneration.
 #     scripts/gen_board_header.py reads metadata/boards/*.yaml
 #     `e1m_routes:` blocks and emits
@@ -30,7 +37,9 @@ on:
       - 'docs/diagnostics/**'
       - 'examples/**'
       - 'src/cap.c'
+      - 'src/status_strings.c'
       - 'scripts/gen_soc_caps.py'
+      - 'scripts/gen_status_strings.py'
       - 'scripts/gen_board_header.py'
       - 'scripts/gen_pinmux_capability.py'
       - 'scripts/gen_support_matrix.py'
@@ -52,6 +61,7 @@ on:
       - 'metadata/**'
       - 'include/alp/**'
       - 'src/cap.c'
+      - 'src/status_strings.c'
       - 'docs/diagnostics/**'
       - 'examples/**'
   workflow_dispatch:
@@ -103,6 +113,13 @@ jobs:
       # all three are diff-gated below.
       - name: Regenerate soc_caps.h + cap.h/cap.c from metadata
         run: python3 scripts/gen_soc_caps.py
+
+      # alp_status_name() / alp_status_description() (src/status_strings.c)
+      # are projected from the alp_status_t enum in include/alp/peripheral.h
+      # by scripts/gen_status_strings.py.  Regenerate and let the diff gate
+      # below flag any drift.
+      - name: Regenerate status_strings.c from the alp_status_t enum
+        run: python3 scripts/gen_status_strings.py
 
       # Board-macro routes headers: include/alp/boards/alp_<board>_routes.h
       # is projected from each metadata/boards/<name>.yaml `e1m_routes:`
@@ -174,6 +191,7 @@ jobs:
                   -- include/alp/soc_caps.h docs/abi/v0.9-snapshot.json \
                      include/alp/cap.h \
                      src/cap.c \
+                     src/status_strings.c \
                      include/alp/boards/ \
                      metadata/pinmux/ \
                      metadata/catalog.json \
@@ -182,6 +200,7 @@ jobs:
                      docs/portability-matrix.md; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
+            echo "::error::  python3 scripts/gen_status_strings.py"
             echo "::error::  python3 scripts/gen_board_header.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
             echo "::error::  python3 scripts/gen_support_matrix.py"

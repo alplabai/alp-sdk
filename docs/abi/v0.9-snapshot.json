@@ -8216,6 +8216,14 @@
           "hash": "add1df22e2fbb139",
           "signature": "alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);"
         },
+        "alp_status_description": {
+          "hash": "3d9031f403385a8f",
+          "signature": "const char * alp_status_description(alp_status_t status);"
+        },
+        "alp_status_name": {
+          "hash": "a354725e9fb169c8",
+          "signature": "const char * alp_status_name(alp_status_t status);"
+        },
         "alp_uart_capabilities": {
           "hash": "e51cfb1268f534d4",
           "signature": "const alp_capabilities_t * alp_uart_capabilities(const alp_uart_t *port);"
