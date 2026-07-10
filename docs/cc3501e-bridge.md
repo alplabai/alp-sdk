@@ -384,6 +384,7 @@ device installs + swap-boots it.  The wire contract lives in
 | `0x42` | `ALP_CC3501E_CMD_OTA_FINISH` | none — install + deferred swap reboot |
 | `0x43` | `ALP_CC3501E_CMD_OTA_ABORT`  | none — cancel the session |
 | `0x44` | `ALP_CC3501E_CMD_OTA_STATUS` | reply `alp_cc3501e_ota_status_t` (state / bytes_written / total_len) |
+| `0x46` | `ALP_CC3501E_CMD_OTA_PROMOTE` | none — request the swap-reboot for an already-committed pending image (`0x45` is `STREAM_WRITE`) |
 
 The flow is strictly sequential — `BEGIN(total_len)` →
 `WRITE(offset, bytes)`* → `FINISH` — and each `WRITE`'s `offset` must
@@ -393,6 +394,14 @@ rejected; a host that missed a reply re-syncs to the real cursor via
 arms a deferred reboot: the bridge link **drops** while the cold
 BL2/MCUboot swaps the slot to primary (TRIAL boot), and the swapped
 image accepts itself on its first housekeeping tick.  Host-side
+
+`OTA_PROMOTE` (proto v4) exists for one recovery case: a bare reset
+(e.g. the Puya cold-boot host-reset workaround) can leave an image
+committed to STAGED but **un-promoted**, and — because a slot is now
+occupied — a fresh `BEGIN`/`FINISH` short-circuits and can never re-arm
+the swap request.  `OTA_PROMOTE` arms the same deferred swap-reboot
+`FINISH` would, promoting the pending image without a new session.  If
+nothing is pending the reboot is a clean no-op.
 helpers: `cc3501e_ota_update()` (whole-image convenience) plus the
 granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` in
 [`include/alp/chips/cc3501e.h`](../include/alp/chips/cc3501e.h).

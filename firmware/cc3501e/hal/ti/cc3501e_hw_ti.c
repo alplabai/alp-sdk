@@ -900,6 +900,21 @@ int cc3501e_hw_ota_abort(void)
 	return CC3501E_HW_OK;
 }
 
+int cc3501e_hw_ota_promote(void)
+{
+	/* Promote an ALREADY-committed pending image: arm the same deferred swap-reboot
+	 * the FINISH path uses.  A STAGED image survives a bare nRESET (which carries no
+	 * swap request) with the RAM session state reset to IDLE, so ota.state cannot
+	 * gate this -- the host calls it deliberately when a pending image is jammed in
+	 * the slot (a fresh FINISH is unreachable while a slot is occupied).  The tick
+	 * fires psa_fwu_request_reboot() once this reply drains; BL2/MCUboot then swaps
+	 * the pending slot to primary (TRIAL).  If nothing is pending the reboot is a
+	 * clean no-op. */
+	reply_drained      = false;
+	ota_reboot_pending = true;
+	return CC3501E_HW_OK;
+}
+
 int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)
 {
 	if (state != 0) *state = ota.state;

@@ -53,7 +53,10 @@
 extern "C" {
 #endif
 
-#define ALP_CC3501E_PROTOCOL_VERSION 3
+/* v4 adds OTA_PROMOTE (0x46) -- request the swap-reboot for an already-committed
+ * pending image.  Additive: a v3 host never sends it; v3 firmware rejects it with
+ * RESP_ERR_INVALID, so the bump is a capability signal, not a break. */
+#define ALP_CC3501E_PROTOCOL_VERSION 4
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -186,6 +189,11 @@ typedef enum {
 	ALP_CC3501E_CMD_OTA_FINISH = 0x42, /* no payload; install + deferred reboot */
 	ALP_CC3501E_CMD_OTA_ABORT  = 0x43, /* no payload; cancel the session      */
 	ALP_CC3501E_CMD_OTA_STATUS = 0x44, /* reply alp_cc3501e_ota_status_t      */
+	/* 0x45 is STREAM_WRITE (below), so OTA_PROMOTE takes the next free code.
+	 * Requests the swap-reboot for an image ALREADY committed to STAGED (e.g.
+	 * one left pending by a bare reset that carried no swap request) -- the
+	 * unjam/promote path FINISH cannot re-reach once a slot is occupied. */
+	ALP_CC3501E_CMD_OTA_PROMOTE = 0x46, /* no payload; request swap of a pending image */
 
 	/* Bulk-data stream sink (proto v2).  The host sends up to
 	 * ALP_CC3501E_MAX_PAYLOAD-header bytes per frame; the firmware receives +

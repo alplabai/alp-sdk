@@ -206,15 +206,23 @@ reboots (the E8 `cc3501e_bridge_bringup` Puya WIFI_EN+nRESET workaround, one per
 E8 boot) the image stayed pending, un-promoted — confirming a bare reset carrying
 no `psa_fwu_request_reboot()` does NOT promote.
 
-**The unblock is CC35-firmware-side** (needs a TI-toolchain rebuild + reflash):
-either (a) add a bridge OTA reject/erase path (or make `psa_fwu_start` replace a
-pending image) so a fresh FINISH is reachable, or (b) add a
-"request-reboot-for-existing-pending-image" bridge command that calls
-`psa_fwu_request_reboot()` on the already-committed image — the cleaner test,
-since it directly promotes the stuck v3 image and exercises the swap path. Until
-one lands, crit-1 stays blocked on this jammed slot. (The exact PSA "already
-pending" error mapped to host `-1` lives in the license/vendor FWU path, not this
-repo's `src/` — TBD.)
+**The unblock is now IMPLEMENTED (proto v4): `OTA_PROMOTE` (opcode 0x46).** It
+arms the same deferred swap-reboot `FINISH` uses, for an image already committed
+to STAGED — so the pending slot can be promoted without a fresh session (which is
+unreachable while the slot is occupied). Surface: host `cc3501e_ota_promote()`,
+firmware `cc3501e_hw_ota_promote()` (ti) / NOTIMPL (stub), example
+`-DCC3501E_OTA_PROMOTE=ON`. Native transport test covers the opcode
+(NOT_READY on stub, INVALID on bad payload).
+
+**Bench step to close crit-1** (needs a CC35 firmware rebuild + reflash, since the
+promote opcode must be present in the CC35's *running* firmware — the current
+primary v1 predates it): (1) `build_ti.sh` the CC35 firmware with this change +
+reflash it; (2) run the E8 app with `-DCC3501E_OTA_PROMOTE=ON` — it calls
+`cc3501e_ota_promote()`, the firmware arms `psa_fwu_request_reboot()`, the bridge
+drops as the CC35 self-reboots, and BL2/MCUboot swaps the pending image to
+primary; (3) confirm `GET_VERSION` reports the new image, then one true cold POR
+retains it. (The exact PSA "already pending" error mapped to host `-1` lives in
+the license/vendor FWU path, not this repo's `src/` — TBD.)
 
 ## 6. GPIO proxy
 

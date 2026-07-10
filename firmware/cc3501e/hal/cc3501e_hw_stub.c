@@ -374,6 +374,11 @@ int cc3501e_hw_ota_abort(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
+int cc3501e_hw_ota_promote(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
 int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)
 {
 	if (state != 0) *state = 0u;

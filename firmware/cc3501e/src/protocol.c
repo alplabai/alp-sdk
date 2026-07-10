@@ -1104,6 +1104,23 @@ static alp_cc3501e_resp_t handle_ota_abort(const uint8_t *req,
 	return hw_to_resp(cc3501e_hw_ota_abort());
 }
 
+/* OTA_PROMOTE (0x46): no payload.  Requests the swap-reboot for an image already
+ * committed to STAGED -- unjams a slot left pending by a bare reset (which
+ * carried no swap request), which FINISH can no longer re-reach. */
+static alp_cc3501e_resp_t handle_ota_promote(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply_data,
+                                             size_t         reply_cap,
+                                             size_t        *reply_data_len)
+{
+	(void)req;
+	(void)reply_data;
+	(void)reply_cap;
+	*reply_data_len = 0u;
+	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
+	return hw_to_resp(cc3501e_hw_ota_promote());
+}
+
 /* OTA_STATUS (0x44): reply = alp_cc3501e_ota_status_t
  * { state(1) | reserved(3) | bytes_written(LE32) | total_len(LE32) }. */
 static alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
@@ -1186,6 +1203,9 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
 		break;
 	case ALP_CC3501E_CMD_OTA_STATUS:
 		h = handle_ota_status;
+		break;
+	case ALP_CC3501E_CMD_OTA_PROMOTE:
+		h = handle_ota_promote;
 		break;
 	case ALP_CC3501E_CMD_STREAM_WRITE:
 		h = handle_stream_write;
