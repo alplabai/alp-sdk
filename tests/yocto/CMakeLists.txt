@@ -10,6 +10,20 @@
 # stay self-contained and the failure messages are useful when
 # the suite runs under CTest.
 
+# Delay fallback regression (#594) -- shared with tests/baremetal/ since
+# both link src/common/stub_backend.c's alp_delay_us/alp_delay_ms.
+add_executable(alp_test_delay
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/delay.c
+)
+target_link_libraries(alp_test_delay PRIVATE alp::sdk)
+target_include_directories(alp_test_delay PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_features(alp_test_delay PRIVATE c_std_99)
+
+add_test(NAME alp_test_delay
+         COMMAND alp_test_delay)
+
 add_executable(alp_test_inference_dispatcher
     ${CMAKE_CURRENT_SOURCE_DIR}/inference_dispatcher.c
 )
