@@ -90,6 +90,27 @@ typedef struct {
 } alp_can_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_can_config_t for bus @p id.
+ *
+ * Identity from @p id; canonical defaults: @c bitrate_nominal_hz = 500 kHz
+ * (a widely-interoperable classic-CAN rate), @c bitrate_data_hz = 0
+ * (classic — no data-phase rate), @c mode = @ref ALP_CAN_MODE_CLASSIC,
+ * @c loopback = false (on the wire, not local self-test). For CAN-FD set
+ * @c mode = @ref ALP_CAN_MODE_FD and a non-zero @c bitrate_data_hz.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_CAN_CONFIG_DEFAULT(id)                                                                 \
+	((alp_can_config_t){ .bus_id             = (id),                                               \
+	                     .bitrate_nominal_hz = 500000u,                                            \
+	                     .bitrate_data_hz    = 0u,                                                 \
+	                     .mode               = ALP_CAN_MODE_CLASSIC,                               \
+	                     .loopback           = false })
+
+/**
  * @brief Receive-side dispatch callback.
  *
  * Invoked from the bus's RX worker thread when an incoming frame

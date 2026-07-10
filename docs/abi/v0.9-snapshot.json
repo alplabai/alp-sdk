@@ -1382,6 +1382,10 @@
         }
       },
       "macros": {
+        "ALP_CAN_CONFIG_DEFAULT": {
+          "hash": "4a2ce1b68a43f910",
+          "value": "(id)"
+        },
         "ALP_CAN_MAX_DLC_CLASSIC": {
           "hash": "0bcbd63b336d2595",
           "value": "8"
@@ -5907,7 +5911,12 @@
           "signature": "alp_status_t alp_qenc_reset_position(alp_qenc_t *enc);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_COUNTER_CONFIG_DEFAULT": {
+          "hash": "a5bd1d5fdb13d5c8",
+          "value": "(id) ((alp_counter_config_t){ .counter_id = (id) })"
+        }
+      },
       "typedefs": {
         "alp_counter_alarm_cb_t": {
           "definition": "typedef void (*alp_counter_alarm_cb_t)(alp_counter_t *counter, uint32_t ticks, void *user);",
@@ -5954,7 +5963,12 @@
           "signature": "alp_status_t alp_dac_write_mv(alp_dac_t *dac, uint16_t mv);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_DAC_CONFIG_DEFAULT": {
+          "hash": "782b0565757eb05c",
+          "value": "(id) ((alp_dac_config_t){ .channel_id = (id), .initial_mv = 0u })"
+        }
+      },
       "typedefs": {
         "alp_dac_t": {
           "definition": "typedef struct alp_dac alp_dac_t;",
@@ -8240,9 +8254,21 @@
         }
       },
       "macros": {
+        "ALP_I2C_CONFIG_DEFAULT": {
+          "hash": "afc0dc303fdbf1a7",
+          "value": "(id) ((alp_i2c_config_t){ .bus_id = (id), .bitrate_hz = 100000u })"
+        },
+        "ALP_SPI_CONFIG_DEFAULT": {
+          "hash": "e9b7b641ff66df59",
+          "value": "(id)"
+        },
         "ALP_SPI_NO_CS": {
           "hash": "e4997898b273a23e",
           "value": "0xFFFFFFFFu"
+        },
+        "ALP_UART_CONFIG_DEFAULT": {
+          "hash": "8ebbc877dcba1a5c",
+          "value": "(id)"
         }
       },
       "typedefs": {
@@ -8646,6 +8672,10 @@
         "ALP_PWM_BREAK_NONE": {
           "hash": "de2c9b51e7bb06a6",
           "value": "0x00u"
+        },
+        "ALP_PWM_CONFIG_DEFAULT": {
+          "hash": "5fd5d79db3f46e49",
+          "value": "(id)"
         }
       },
       "typedefs": {
@@ -9581,7 +9611,12 @@
           "signature": "alp_wdt_t * alp_wdt_open(const alp_wdt_config_t *cfg);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_WDT_CONFIG_DEFAULT": {
+          "hash": "4821b5ad5459288b",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_wdt_action_t": {
           "definition": "typedef enum { ALP_WDT_RESET_SOC = 0, ALP_WDT_RESET_CPU = 1, ALP_WDT_INTERRUPT_ONLY = 2 } alp_wdt_action_t;",
