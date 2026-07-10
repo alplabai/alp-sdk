@@ -127,6 +127,33 @@ typedef struct {
 	const alp_mqtt_tls_config_t *tls;
 } alp_mqtt_config_t;
 
+/**
+ * @brief Default-initialize an @ref alp_mqtt_config_t for broker @p id.
+ *
+ * Identity from @p id (the @c broker_uri); canonical defaults:
+ * @c client_id / @c username / @c password = NULL (unauthenticated,
+ * backend-assigned client id), @c keepalive_s = 60 (the conventional
+ * MQTT keepalive interval), @c clean_session = true (start without
+ * stale broker-side session state -- the simpler, more common
+ * default), @c tls = NULL (documented as equivalent to a
+ * zero-initialised @ref alp_mqtt_tls_config_t: OS default CA path, no
+ * client cert, verify peer). Set @c tls for an `mqtts://` broker that
+ * needs a pinned CA / client certificate.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_MQTT_CONFIG_DEFAULT(id)                                                                \
+	((alp_mqtt_config_t){ .broker_uri    = (id),                                                   \
+	                      .client_id     = NULL,                                                   \
+	                      .username      = NULL,                                                   \
+	                      .password      = NULL,                                                   \
+	                      .keepalive_s   = 60u,                                                    \
+	                      .clean_session = true,                                                   \
+	                      .tls           = NULL })
+
 typedef enum { ALP_MQTT_QOS_0 = 0, ALP_MQTT_QOS_1 = 1, ALP_MQTT_QOS_2 = 2 } alp_mqtt_qos_t;
 
 typedef void (*alp_mqtt_msg_cb_t)(const char    *topic,

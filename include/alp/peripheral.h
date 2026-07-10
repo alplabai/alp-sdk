@@ -459,6 +459,32 @@ typedef struct {
 } alp_i2c_target_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_i2c_target_config_t for bus @p id.
+ *
+ * Identity from @p id.  @c own_addr_7bit, @c on_write, and @c on_read
+ * are all mandatory -- @ref alp_i2c_target_open rejects a reserved
+ * address (0x00-0x07 / 0x78-0x7F) or a NULL callback with
+ * @ref ALP_ERR_INVAL -- so they default to 0 / NULL / NULL, a
+ * deliberate "you must set this" sentinel: 0x00 falls in the reserved
+ * range, so a caller who forgets to set @c own_addr_7bit fails loudly
+ * at open() rather than silently claiming an unintended address.
+ * @c on_stop and @c user default to NULL (both documented optional).
+ * Set @c own_addr_7bit / @c on_write / @c on_read before calling open().
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_I2C_TARGET_CONFIG_DEFAULT(id)                                                          \
+	((alp_i2c_target_config_t){ .bus_id        = (id),                                             \
+	                            .own_addr_7bit = 0u,                                               \
+	                            .on_write      = NULL,                                             \
+	                            .on_read       = NULL,                                             \
+	                            .on_stop       = NULL,                                             \
+	                            .user          = NULL })
+
+/**
  * @brief Register this MCU as an I2C target (slave) on @p cfg->bus_id.
  *
  * The callbacks start firing as soon as this returns; prime any state
@@ -635,6 +661,23 @@ typedef struct {
 	uint8_t        bits_per_word; /**< Usually 8 (0 defaults to 8; max 32) -- must
 	                               *   match the external controller. */
 } alp_spi_target_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_spi_target_config_t for bus @p id.
+ *
+ * Identity from @p id; canonical defaults: @c mode = @ref
+ * ALP_SPI_MODE_0 (CPOL=0/CPHA=0, matching the controller-mode default),
+ * @c bits_per_word = 0 (documented as defaulting to 8). Both @c mode
+ * and @c bits_per_word MUST still match whatever the external
+ * controller drives.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_SPI_TARGET_CONFIG_DEFAULT(id)                                                          \
+	((alp_spi_target_config_t){ .bus_id = (id), .mode = ALP_SPI_MODE_0, .bits_per_word = 0u })
 
 /**
  * @brief Claim @p cfg->bus_id in target (slave) mode.
