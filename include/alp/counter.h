@@ -55,6 +55,15 @@ typedef struct {
 } alp_counter_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_counter_config_t for counter @p id.
+ *
+ * The counter has no tunable fields beyond its identity, so the default
+ * simply names the instance: @code alp_counter_config_t cfg =
+ * ALP_COUNTER_CONFIG_DEFAULT(0); @endcode
+ */
+#define ALP_COUNTER_CONFIG_DEFAULT(id) ((alp_counter_config_t){ .counter_id = (id) })
+
+/**
  * @brief Alarm callback fired when a previously-scheduled deadline
  *        ticks elapse.
  *

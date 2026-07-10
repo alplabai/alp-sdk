@@ -58,6 +58,14 @@ typedef struct {
 } alp_dac_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_dac_config_t for channel @p id.
+ *
+ * Identity from @p id; canonical default: @c initial_mv = 0 (the output
+ * starts at ground — the safe, unsurprising power-on level).
+ */
+#define ALP_DAC_CONFIG_DEFAULT(id) ((alp_dac_config_t){ .channel_id = (id), .initial_mv = 0u })
+
+/**
  * @brief Acquire and initialise a DAC channel at @c initial_mv.
  *
  * Resolves @p cfg->channel_id to the underlying converter (a Zephyr

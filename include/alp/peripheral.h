@@ -299,6 +299,20 @@ typedef struct {
 } alp_i2c_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_i2c_config_t for bus @p id.
+ *
+ * Fills the identity field from @p id and every other field with its
+ * canonical default: @c bitrate_hz = 100 kHz (I2C standard-mode, the
+ * universally-safe rate). Override any field after expansion:
+ * @code
+ * alp_i2c_config_t cfg = ALP_I2C_CONFIG_DEFAULT(ALP_E1M_I2C0);
+ * cfg.bitrate_hz = 400000u; // fast-mode
+ * alp_i2c_t *bus = alp_i2c_open(&cfg);
+ * @endcode
+ */
+#define ALP_I2C_CONFIG_DEFAULT(id) ((alp_i2c_config_t){ .bus_id = (id), .bitrate_hz = 100000u })
+
+/**
  * @brief Acquire an I2C bus handle.
  *
  * @param[in] cfg  Bus configuration.  Must be non-NULL.
@@ -498,6 +512,22 @@ typedef struct {
 	uint32_t       cs_pin_id;     /**< Studio-resolved chip-select pin, or
                                    *   @ref ALP_SPI_NO_CS for none. */
 } alp_spi_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_spi_config_t for bus @p id.
+ *
+ * Identity from @p id; canonical defaults: @c freq_hz = 1 MHz,
+ * @c mode = @ref ALP_SPI_MODE_0 (CPOL=0/CPHA=0), @c bits_per_word = 8,
+ * @c cs_pin_id = @ref ALP_SPI_NO_CS (no controller-driven chip-select).
+ * Set @c cs_pin_id / @c mode / @c freq_hz for the target device after
+ * expansion.
+ */
+#define ALP_SPI_CONFIG_DEFAULT(id)                                                                 \
+	((alp_spi_config_t){ .bus_id        = (id),                                                    \
+	                     .freq_hz       = 1000000u,                                                \
+	                     .mode          = ALP_SPI_MODE_0,                                          \
+	                     .bits_per_word = 8u,                                                      \
+	                     .cs_pin_id     = ALP_SPI_NO_CS })
 
 /**
  * @brief Acquire an SPI bus handle.
@@ -705,6 +735,20 @@ typedef struct {
 	uint8_t           stop_bits; /**< 1 or 2. */
 	alp_uart_parity_t parity;
 } alp_uart_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_uart_config_t for port @p id.
+ *
+ * Identity from @p id; canonical defaults = 115200 8N1:
+ * @c baudrate = 115200, @c data_bits = 8, @c stop_bits = 1,
+ * @c parity = @ref ALP_UART_PARITY_NONE.
+ */
+#define ALP_UART_CONFIG_DEFAULT(id)                                                                \
+	((alp_uart_config_t){ .port_id   = (id),                                                       \
+	                      .baudrate  = 115200u,                                                    \
+	                      .data_bits = 8u,                                                         \
+	                      .stop_bits = 1u,                                                         \
+	                      .parity    = ALP_UART_PARITY_NONE })
 
 /**
  * @brief Acquire a UART port handle.

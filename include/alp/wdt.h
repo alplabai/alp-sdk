@@ -66,6 +66,18 @@ typedef struct {
 } alp_wdt_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_wdt_config_t for watchdog @p id.
+ *
+ * Identity from @p id; canonical defaults: @c timeout_ms = 1000 (a
+ * conservative 1 s feed deadline — @c timeout_ms must be non-zero, so
+ * zero-init is not valid here and the default supplies a usable value),
+ * @c on_timeout = @ref ALP_WDT_RESET_SOC (full SoC reset, the safest
+ * action). Shorten @c timeout_ms for a tighter deadline after expansion.
+ */
+#define ALP_WDT_CONFIG_DEFAULT(id)                                                                 \
+	((alp_wdt_config_t){ .wdt_id = (id), .timeout_ms = 1000u, .on_timeout = ALP_WDT_RESET_SOC })
+
+/**
  * @brief Install a watchdog timeout and arm the timer.
  *
  * The watchdog starts feeding-required immediately on return.  Apps
