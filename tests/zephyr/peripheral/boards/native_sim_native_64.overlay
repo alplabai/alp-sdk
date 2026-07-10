@@ -4,8 +4,9 @@
  *
  * Devicetree overlay for the alp-sdk peripheral ztest under
  * native_sim.  Wires three emulated GPIOs, one emulated I2C bus,
- * one emulated SPI bus, and the existing native_sim UART (uart0)
- * to the alias names alp_sdk's Zephyr backend looks up.
+ * one emulated SPI bus, the existing native_sim UART (uart0), and
+ * one emulated UART (uart-emul) to the alias names alp_sdk's Zephyr
+ * backend looks up.
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
@@ -16,6 +17,20 @@
         alp-i2c0  = &i2c0_emul;
         alp-spi0  = &spi0_emul;
         alp-uart0 = &uart0;
+        alp-uart1 = &uart1_emul;
+    };
+
+    /* #626: alp_uart_read()'s timeout_ms == 0 / finite / partial-fill
+     * contract needs bytes we control injecting into RX -- uart0 is
+     * native_sim's real backing UART with no test-side RX hook, so a
+     * second, purely emulated UART (uart_emul_put_rx_data()) backs
+     * the timeout tests in src/uart.c instead of port 0. */
+    uart1_emul: uart-emul-alp-uart1 {
+        compatible = "zephyr,uart-emul";
+        status = "okay";
+        current-speed = <115200>;
+        rx-fifo-size = <256>;
+        tx-fifo-size = <256>;
     };
 
     /* native_sim's /soc has #address-cells=2, #size-cells=1, so

@@ -134,25 +134,39 @@ static alp_status_t
 z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout_ms)
 {
 	const struct device *dev = (const struct device *)st->dev;
-	const int64_t deadline   = (timeout_ms == 0) ? INT64_MAX : k_uptime_get() + (int64_t)timeout_ms;
+	/* One absolute deadline for the WHOLE call (not one budget per
+     * byte), so timeout_ms bounds inter-byte gaps too.  timeout_ms == 0
+     * yields deadline == now: the "deadline already reached" check
+     * below is what turns that into a single non-blocking poll,
+     * matching the portable contract -- see alp_uart_read() in
+     * <alp/peripheral.h> and its Yocto twin in src/yocto/peripheral_uart.c
+     * (#595/#621).  The old (timeout_ms == 0) ? INT64_MAX : ... form
+     * made a zero timeout mean "wait forever" instead. */
+	const int64_t deadline = k_uptime_get() + (int64_t)timeout_ms;
 
-	for (size_t i = 0; i < len; i++) {
-		int err;
-		do {
-			err = uart_poll_in(dev, &data[i]);
-			if (err == -1 && k_uptime_get() >= deadline) {
-				return ALP_ERR_TIMEOUT;
-			}
-			if (err == -1) {
-				/* k_msleep(1) instead of k_yield() so the system
-                 * tick actually advances on native_sim (k_yield
-                 * with no other ready thread is a no-op there,
-                 * making the timeout deadline unreachable). */
-				k_msleep(1);
-			}
-		} while (err == -1);
+	size_t got = 0;
+	while (got < len) {
+		int err = uart_poll_in(dev, &data[got]);
+		if (err == 0) {
+			got++;
+			continue;
+		}
+		if (err != -1) {
+			/* Genuine driver error -- map and report directly. */
+			return _errno_to_alp(err);
+		}
 
-		if (err != 0) return _errno_to_alp(err);
+		/* err == -1: no byte ready yet.  Deadline expiry with at
+         * least one byte already collected is a partial read, per
+         * the documented contract -- only an empty read times out. */
+		if (k_uptime_get() >= deadline) {
+			return (got > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+		}
+		/* k_msleep(1) instead of k_yield() so the system
+         * tick actually advances on native_sim (k_yield
+         * with no other ready thread is a no-op there,
+         * making the timeout deadline unreachable). */
+		k_msleep(1);
 	}
 	return ALP_OK;
 }
