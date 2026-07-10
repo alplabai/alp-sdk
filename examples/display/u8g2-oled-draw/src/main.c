@@ -71,7 +71,8 @@ int main(void)
 	/* Fonts are separately-linked glyph tables (u8g2_font_6x10_tr is
 	 * defined in src/u8g2_font_6x10_tr.c, NOT the vendored
 	 * u8g2_fonts.c -- see that file's header comment for why). "tr"
-	 * suffix = Transparent background, Right-handed (ASCII range).
+	 * suffix = Transparent glyph background, reduced/restricted
+	 * charset (ASCII 32-127).
 	 * DrawStr's (x, y) is the text BASELINE, not the top-left glyph
 	 * corner -- y=28 keeps a 10px-tall font's descenders inside the
 	 * 32px canvas. */

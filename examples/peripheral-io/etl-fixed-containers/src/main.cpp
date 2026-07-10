@@ -79,7 +79,14 @@ int main(void)
 	 * container backed by an intrusive binary tree over a pool of
 	 * MAX_SIZE pre-allocated nodes (no per-insert allocation).
 	 * Lookup is the familiar O(log n) map semantics; capacity is
-	 * capped at compile time just like the vector above. */
+	 * capped at compile time just like the vector above.
+	 *
+	 * CAVEAT: the key type here is `const char *`, so the default
+	 * comparator orders by POINTER value, not string contents. This
+	 * only does the right thing below because the compiler pools the
+	 * identical "b" literals to one address. For runtime/non-literal
+	 * string keys you MUST key on a value type (etl::string<N>) or
+	 * pass a strcmp-based comparator, or lookups silently miss. */
 	etl::map<const char *, int, 4> scores;
 
 	scores["a"] = 1;

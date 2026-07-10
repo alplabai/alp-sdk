@@ -1,13 +1,12 @@
 # board.yaml -- per-app project configuration for the
 # libhelix-decode example.
 #
-# **[UNTESTED]**: the `libhelix` west module's pinned revision failed
-# to check out in this workspace (`modules/lib/libhelix` is an empty
-# git repo -- see the example's README "Module status" section), so
-# this board.yaml cannot actually be built here.  It is still wired
-# the same way a working library would be so the example is a correct
-# template for when the fetch is fixed: per-core `libraries:
-# [libhelix]` resolves against
+# **[UNTESTED]**: builds and runs on native_sim (the portable MP3
+# frame-sync + header-parse path); the real Helix fixed-point PCM
+# decode is ARM-only (real/assembly.h #errors on generic x86-64) and
+# RCSL-licensed -- see the example's README "Why native_sim only
+# parses headers" and src/main.c's banner for the real MP3Decode()
+# path.  Per-core `libraries: [libhelix]` resolves against
 # metadata/library-profiles/libhelix/hw-backends.yaml (pure-C SW
 # fallback is the floor; FPU/I2S-DMA backends select automatically by
 # SoM capability).

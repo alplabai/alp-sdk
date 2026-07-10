@@ -47,8 +47,8 @@ is the next step once you have a real CoAP server to talk to.
 
 libcoap is a **real, fetched module** at
 `<west-workspace>/modules/lib/libcoap` (ships its own `zephyr/module.yml` +
-`zephyr/CMakeLists.txt` + `zephyr/Kconfig`). Two gaps this example's
-`CMakeLists.txt`/`prj.conf` route around, both documented inline:
+`zephyr/CMakeLists.txt` + `zephyr/Kconfig`). Three gaps this example's
+`CMakeLists.txt`/`prj.conf` route around, all documented inline:
 
 1. `board.yaml`'s `cores.m55_hp.libraries: [libcoap]` only emits
    `CONFIG_ALP_COAP_NO_TLS=y` (the SW-fallback marker from

@@ -1,14 +1,13 @@
 # board.yaml -- per-app project configuration for the
 # tinygsm-modem-at example.
 #
-# **[UNTESTED]**: does not build in this workspace -- TinyGSM's
-# `ArduinoCompat` layer (the module's own opt-in non-Arduino
-# integration point, `#define ARDUINO_DASH`) needs Arduino's `String`
-# class (`WString.h`), which is out of scope for "a small
-# Arduino-Stream shim" -- see the example's README "Why this doesn't
-# build" for the exact, empirically-confirmed chain. This board.yaml
-# is still wired the way a working checkout would need it: per-core
-# `libraries: [tinygsm]` resolves against
+# **[UNTESTED]**: builds and runs on native_sim (mock transcript),
+# not bench-run against a real modem.  The example drives the modem AT
+# exchange directly over a mock Stream rather than linking libtinygsm,
+# whose AT engine needs Arduino's full `String` class (`WString.h`) --
+# see the example's README "Why the real library isn't linked" and
+# src/main.cpp's banner for the real `TinyGsm modem(stream)` sequence.
+# Per-core `libraries: [tinygsm]` resolves against
 # metadata/library-profiles/tinygsm/hw-backends.yaml (pure
 # synchronous-UART is the floor; UART-DMA selects automatically by
 # SoM capability).
