@@ -759,6 +759,17 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/alif_dave2d.c)
 
+# gfx_compat -- maintainer-written in-tree shim (west.yml documents it
+# ships at src/lib/gfx_compat/, no west pin).  A native library apps
+# call directly (`#include "gfx_compat.h"`), NOT an <alp/gpu2d.h>
+# backend -- unrelated to the class dispatcher above.  Compiled
+# whenever CONFIG_ALP_GFX_COMPAT_SW is on (see
+# src/lib/gfx_compat/Kconfig, default y); the include dir is
+# published unconditionally so the header always resolves even if a
+# future HW-backend Kconfig replaces the SW default.
+add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/src/lib/gfx_compat
+    ${CMAKE_CURRENT_BINARY_DIR}/alp_sdk_gfx_compat)
+
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
@@ -1017,6 +1028,27 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/proto/alp_mproc_frame.c
 )
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/nanopb/include)
+
+# Header-only 3p libraries vendored in-tree (Task 0 of the
+# 3p-library-examples batch) because the west topdir workspace this
+# SDK builds against cannot fetch a worktree-only west.yml pin (see
+# vendors/{etl,fmt,doctest,jsmn,minimp3}/README.md).  Each profile
+# header directory is also added so `#include "etl_profile.h"` /
+# `#include "fmt_config.h"` / `#include "doctest_config.h"` resolve
+# ahead of any app-local default (metadata/library-profiles/README.md's
+# "profile wins over upstream defaults" contract).  jsmn + minimp3
+# already carry an `extras-tier1` west pin (unfetched in this
+# workspace) -- vendored the same way since both are genuinely
+# single-header libraries; no profile header exists for either (their
+# `libraries:` Kconfig entry is pure-SW, no tunable defines).
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/etl/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profiles/etl)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/fmt/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profiles/fmt)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/doctest/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profiles/doctest)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/jsmn/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/minimp3/include)
 
 # Instance-capability helpers (<alp/cap_instance.h>).  Hand-written
 # runtime logic that does not depend on per-SoC metadata; always

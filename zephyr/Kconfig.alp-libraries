@@ -97,18 +97,13 @@ config ALP_U8G2_SW_BLIT
 	default y
 
 # ----------------------------------------------------------------------
-# gfx_compat (maintainer-written thin shim)
+# gfx_compat (maintainer-written thin shim) -- Kconfig lives at
+# src/lib/gfx_compat/Kconfig (rsourced below), alongside the shim's
+# CMakeLists.txt + sources, since this library has no upstream/west
+# pin of its own to keep separate from.
 # ----------------------------------------------------------------------
 
-config ALP_GFX_COMPAT_GPU2D
-	bool "gfx_compat -> Alif GPU2D backend"
-config ALP_GFX_COMPAT_DMA2D
-	bool "gfx_compat -> generic DMA2D backend"
-config ALP_GFX_COMPAT_SPI_DMA
-	bool "gfx_compat SPI push via DMA"
-config ALP_GFX_COMPAT_SW
-	bool "gfx_compat pure-C SW blit (fallback)"
-	default y
+rsource "../src/lib/gfx_compat/Kconfig"
 
 # ----------------------------------------------------------------------
 # madgwick_ahrs + pid + modbus
