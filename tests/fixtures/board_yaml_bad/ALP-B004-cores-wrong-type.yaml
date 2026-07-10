@@ -1,0 +1,7 @@
+# #602 regression: `cores:` is a schema-invalid scalar (not a mapping).
+# The rich validator must report this cleanly as ALP-B004 -- not
+# crash with an AttributeError from `_compat_pass`'s `.items()` call.
+som:
+  sku: E1M-AEN801
+preset: e1m-evk
+cores: wrong-type

@@ -38,7 +38,7 @@ def main() -> int:
         return 1
 
     source_text = args.input.read_text(encoding="utf-8")
-    collector = validate_board_yaml(args.input)
+    collector = validate_board_yaml(args.input, metadata_root=args.metadata_root)
     for diag in collector:
         print(render(diag, source_text=source_text, color=not args.no_color),
               file=sys.stderr)

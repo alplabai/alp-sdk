@@ -273,38 +273,35 @@ def load_board_yaml(path: Path, *,
             f"{bad_topology} that aren't in SoC {silicon}'s "
             f"cores[] (known: {soc_core_ids})")
 
-    # Phase B gap fix G-4: catch the cross-class `som.sku:` swap where
-    # `cores.<key>` doesn't match this SoM preset's `topology:`.
-    # Example: customer has `cores.m55_hp:` and swaps som.sku from
-    # E1M-AEN801 (topology: m55_hp + m55_he + a32_cluster) to
-    # E1M-NX9101 (topology: m33 + a55_cluster).  Pre-fix the slice-
+    # Phase B gap fix G-4 (hardened by #603): catch the cross-class
+    # `som.sku:` swap where `cores.<key>` doesn't match this SoM preset's
+    # `topology:`.  Example: customer has `cores.m55_hp:` and swaps
+    # som.sku from E1M-AEN801 (topology: m55_hp + m55_he + a32_cluster)
+    # to E1M-NX9101 (topology: m33 + a55_cluster).  Pre-fix the slice-
     # build loop iterated topology keys, NOT project_cores keys, so
     # `cores.m55_hp:` was silently dropped and the customer got an
-    # empty slice with no diagnostic.  Hard-fail when NO project key
-    # matches topology; soft-warn for unmatched keys when SOME match
-    # (the customer likely forgot to rename one of several cores).
-    # The SoC-level mismatch check (topology is a subset of SoC core
-    # IDs per the bad_topology guard above) is subsumed by this
-    # topology-level check: anything not in topology is wrong from
-    # the customer's POV, whether it's SoC-absent or merely SoM-
-    # preset-absent.
+    # empty slice with no diagnostic.
+    #
+    # #603: EVERY unmatched key under `cores:` is a hard error, not just
+    # the all-unmatched case -- a `cores:` mapping with one valid core
+    # and one typo used to only warn-and-drop the typo, so a misspelled
+    # core silently vanished from the build while the file still
+    # validated "clean".  There is no compatibility policy that
+    # tolerates an unknown core key, so this is unconditional.  The
+    # SoC-level mismatch check (topology is a subset of SoC core IDs
+    # per the bad_topology guard above) is subsumed by this topology-
+    # level check: anything not in topology is wrong from the
+    # customer's POV, whether it's SoC-absent or merely SoM-preset-
+    # absent.
     topology_keys = set(som_topology.keys())
     project_keys = set(project_cores.keys())
     unmatched = sorted(project_keys - topology_keys)
-    matched = project_keys & topology_keys
-    if unmatched and project_keys:
+    if unmatched:
         sku_topology = sorted(topology_keys)
-        if not matched:
-            raise OrchestratorError(
-                f"board.yaml `cores:` declares {unmatched} but the "
-                f"SoM SKU {sku}'s `topology:` exposes no such core. "
-                f"Did you mean one of: {sku_topology}?")
-        for key in unmatched:
-            print(
-                f"alp_orchestrate: WARN: board.yaml `cores.{key}:` "
-                f"has no match in SoM SKU {sku}'s `topology:` "
-                f"(exposes: {sku_topology}); slice will be dropped.",
-                file=sys.stderr)
+        raise OrchestratorError(
+            f"board.yaml `cores:` declares unknown core id(s) {unmatched} "
+            f"that {sku}'s `topology:` does not expose. "
+            f"Did you mean one of: {sku_topology}?")
 
     # Index SoC cores[] by id so we can look up `type` for the OS
     # default inference (Finding A: pre-2026-05-18 every SoM YAML's

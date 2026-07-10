@@ -25,7 +25,7 @@ from typing import Any, Optional
 from .buildplan import _shared_artefacts, _slice_build_dir, _slice_config_artefact
 from .carveout import resolve_carve_outs
 from .manifest import _helper_mcus, emit_system_manifest
-from .models import BoardProject, Slice, SystemManifest
+from .models import BoardProject, OrchestratorError, Slice, SystemManifest
 from .paths import REPO
 from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
 
@@ -211,6 +211,17 @@ class Orchestrator:
         parallel: bool = True,
     ) -> SystemManifest:
         """Run every non-off slice, write the manifest, return it."""
+        # #603: an explicit `--core` that doesn't name a real core of this
+        # project used to silently skip every slice (each iteration's
+        # `cid != only_core` check tripped for every core), write an
+        # all-skipped manifest, and exit 0 -- a typo'd `--core` looked
+        # exactly like a successful, deliberately-scoped build.  Fail
+        # fast instead, before any artefact is written.
+        if only_core is not None and only_core not in self.project.cores:
+            raise OrchestratorError(
+                f"--core {only_core!r} is not a core of this project. "
+                f"Known core IDs: {sorted(self.project.cores)}")
+
         self.build_root.mkdir(parents=True, exist_ok=True)
         # 1. Shared artefacts.
         self._materialise_shared()

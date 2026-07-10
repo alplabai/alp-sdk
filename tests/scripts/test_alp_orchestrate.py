@@ -352,8 +352,10 @@ cores:
 
 
 # Customer remembered to rename one core (m33) but forgot the second
-# (m55_hp).  m33 builds; m55_hp triggers a soft WARN so the customer
-# notices the drop without losing the working m33 slice.
+# (m55_hp).  Pre-#603 this only soft-WARNed and silently dropped the
+# `m55_hp` slice while the file still validated "clean"; #603 makes
+# this a hard error like the all-unmatched case above -- there is no
+# compatibility policy that tolerates an unknown core key.
 G4_PARTIAL_MATCH = """
 som:
   sku: E1M-NX9101
@@ -384,25 +386,18 @@ def test_unknown_cores_key_raises(tmp_path: Path) -> None:
     assert "topology" in msg
 
 
-def test_partial_match_warns(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """G-4 soft-warn: SOME `cores:` keys match, SOME don't.  The
-    matching keys still build slices; the dropped keys emit a stderr
-    WARN so the customer sees what was discarded."""
+def test_partial_match_raises(tmp_path: Path) -> None:
+    """#603: a PARTIAL `cores:` mismatch (one valid key, one typo) is
+    now also a hard error -- it must NOT silently drop the typo'd
+    slice and report the file as clean."""
     path = _write_board(tmp_path, G4_PARTIAL_MATCH)
-    project = load_board_yaml(path)
-
-    captured = capsys.readouterr()
-    assert "m55_hp" in captured.err
-    assert "WARN" in captured.err
-    assert "E1M-NX9101" in captured.err
-    # The matching `m33` slice still builds.
-    assert "m33" in project.cores
-    assert project.cores["m33"].app == "./m33"
-    # The unmatched key is NOT in the slice map (silently dropped by
-    # the soc_core_ids loop, but the WARN above made it visible).
-    assert "m55_hp" not in project.cores
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "m55_hp" in msg
+    assert "did you mean" in msg.lower()
+    assert "m33" in msg
+    assert "E1M-NX9101" in msg
 
 
 # ---------------------------------------------------------------------
@@ -669,6 +664,28 @@ def test_orchestrator_fan_out_skips_when_tools_absent(
         state = json.loads(orch.state_path.read_text(encoding="utf-8"))
         for entry in state.values():
             assert entry.get("status") != "ok" or entry.get("hash") is None
+
+
+def test_fan_out_rejects_unknown_only_core(tmp_path: Path) -> None:
+    """#603: `--core <unknown>` used to silently skip every real slice,
+    still write a manifest, and return a clean (0-slice-failed)
+    manifest -- indistinguishable from a deliberately-scoped success.
+    `fan_out(only_core=...)` must reject it immediately, before any
+    artefact is written."""
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+
+    build_root = tmp_path / "build"
+    orch = Orchestrator(project, build_root)
+    with pytest.raises(OrchestratorError) as excinfo:
+        orch.fan_out(only_core="m99_garbage", parallel=False)
+    msg = str(excinfo.value)
+    assert "m99_garbage" in msg
+    assert "a55_cluster" in msg
+    assert "m33_sm" in msg
+    # No manifest / build-root artefacts get written for a rejected
+    # --core -- the failure happens before materialisation.
+    assert not (build_root / "system-manifest.yaml").is_file()
 
 
 # ---------------------------------------------------------------------

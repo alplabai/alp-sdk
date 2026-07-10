@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -53,6 +54,42 @@ def test_bad_enum_emits_ALP_B003():
 def test_wrong_type_emits_ALP_B004():
     c = validate_board_yaml(FIX_BAD / "ALP-B004-wrong-type.yaml")
     assert "ALP-B004" in _codes(c)
+
+
+def test_som_wrong_type_reports_clean_diagnostic_not_crash():
+    """#602: a top-level `som:` scalar used to crash `_xref_pass` with
+    an AttributeError (`'str' object has no attribute 'get'`) instead
+    of reporting the schema violation."""
+    c = validate_board_yaml(FIX_BAD / "ALP-B004-som-wrong-type.yaml")
+    assert "ALP-B004" in _codes(c)
+    assert c.has_errors()
+
+
+def test_cores_wrong_type_reports_clean_diagnostic_not_crash():
+    """#602: a top-level `cores:` scalar used to crash `_compat_pass`
+    with an AttributeError (`'str' object has no attribute 'items'`)
+    instead of reporting the schema violation."""
+    c = validate_board_yaml(FIX_BAD / "ALP-B004-cores-wrong-type.yaml")
+    assert "ALP-B004" in _codes(c)
+    assert c.has_errors()
+
+
+def test_som_wrong_type_standalone_validator_reports_clean_diagnostic():
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(REPO / "scripts" / "validate_board_yaml.py"),
+            "--input",
+            str(FIX_BAD / "ALP-B004-som-wrong-type.yaml"),
+            "--no-color",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 1
+    assert "Traceback" not in proc.stderr
+    assert "ALP-B004" in proc.stderr
 
 
 def test_bad_sku_emits_ALP_B005():
@@ -119,3 +156,71 @@ def test_inline_board_data_requires_name(fixture: str):
     proc = _script_schema_only(path)
     assert proc.returncode == 1
     assert "name" in proc.stderr
+
+
+def _isolated_metadata_root(tmp_path: Path) -> Path:
+    """Copy the repo's metadata/ tree + add a new board preset that
+    exists ONLY in the copy, never in the repo's own metadata/ --
+    proving the rich validator resolved the override root, not the
+    repo default."""
+    root = tmp_path / "metadata-copy"
+    shutil.copytree(REPO / "metadata", root)
+    (root / "boards" / "custom-local-604.yaml").write_text(
+        "name: custom-local-604\n"
+        "hosts_som_families: [alif-ensemble]\n"
+        "populated: {}\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_metadata_root_honoured_by_rich_validator(tmp_path: Path):
+    """#604: `validate_board_yaml(..., metadata_root=...)` used to
+    ignore the override and always resolve SoM/preset/SoC metadata
+    from the repo's own `metadata/`, so a customer's out-of-tree
+    board preset failed ALP-B006 here even though the SAME preset
+    validated fine through `load_board_yaml(metadata_root=...)`."""
+    metadata_root = _isolated_metadata_root(tmp_path)
+    board = tmp_path / "board.yaml"
+    board.write_text(
+        "som:\n  sku: E1M-AEN801\n"
+        "preset: custom-local-604\n"
+        "cores:\n  m55_hp:\n    app: .\n",
+        encoding="utf-8",
+    )
+
+    # Custom preset does not exist in the repo's own metadata --
+    # without the override this must fail ALP-B006.
+    c_default = validate_board_yaml(board)
+    assert "ALP-B006" in _codes(c_default)
+
+    # With the override root, the preset resolves cleanly.
+    c_override = validate_board_yaml(board, metadata_root=metadata_root)
+    assert "ALP-B006" not in _codes(c_override)
+    assert not c_override.has_errors()
+
+
+def test_metadata_root_honoured_by_validate_board_yaml_script(tmp_path: Path):
+    """#604 script-level parity: `validate_board_yaml.py --metadata-root`
+    must thread the override into the rich validator's ALP-Bxxx pass,
+    not just the orchestrator consistency pass."""
+    metadata_root = _isolated_metadata_root(tmp_path)
+    board = tmp_path / "board.yaml"
+    board.write_text(
+        "som:\n  sku: E1M-AEN801\n"
+        "preset: custom-local-604\n"
+        "cores:\n  m55_hp:\n    app: .\n",
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [
+            sys.executable, str(SCRIPT),
+            "--input", str(board),
+            "--metadata-root", str(metadata_root),
+            "--no-color",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "ALP-B006" not in (proc.stdout + proc.stderr)
