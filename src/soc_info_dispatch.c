@@ -27,24 +27,33 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_dispatch_cache.h"
 #include "backends/soc_info/soc_info_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(soc_info);
 ALP_BACKEND_ANCHOR(soc_info);
 
+/* Cache published through alp_dispatch_cache_{load,store}() (acquire
+ * load / release store) rather than a plain pointer -- concurrent
+ * first calls otherwise race a plain read against a plain write,
+ * which is a C data race even though every writer resolves the same
+ * immutable-after-link backend (issue #628). */
 static const alp_soc_info_ops_t *_cached_ops = NULL;
 
 static const alp_soc_info_ops_t *_get_ops(void)
 {
-	if (_cached_ops != NULL) {
-		return _cached_ops;
+	const alp_soc_info_ops_t *ops =
+	    (const alp_soc_info_ops_t *)alp_dispatch_cache_load((const void *const *)&_cached_ops);
+	if (ops != NULL) {
+		return ops;
 	}
 	const alp_backend_t *be = alp_backend_select("soc_info", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		return NULL;
 	}
-	_cached_ops = (const alp_soc_info_ops_t *)be->ops;
-	return _cached_ops;
+	ops = (const alp_soc_info_ops_t *)be->ops;
+	alp_dispatch_cache_store((const void **)&_cached_ops, (const void *)ops);
+	return ops;
 }
 
 alp_status_t alp_soc_info_read(alp_soc_info_t *out)

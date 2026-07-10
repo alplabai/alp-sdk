@@ -69,10 +69,21 @@ struct alp_spi_ops {
 	alp_status_t (*target_close)(alp_spi_backend_state_t *state);
 };
 
+/* lifecycle/active_ops (distinct namespace from ALP_SPI_TARGET_LC_*
+ * below -- see src/common/alp_slot_claim.h's ALP_HANDLE_LC_*) drive
+ * the generic open/op/close guard for CONTROLLER-mode handles:
+ * alp_spi_transceive used to gate solely on the atomically-claimed
+ * in_use flag with a PLAIN read, so a racing alp_spi_close() could
+ * free the slot out from under an in-flight transceive (issue #629).
+ * Placed before in_use so the atomic-claim zeroing in
+ * src/spi_dispatch.c (memset up to offsetof(..., in_use)) resets both
+ * on every fresh claim. */
 struct alp_spi {
 	alp_spi_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
+	uint8_t                 lifecycle;
+	uint32_t                active_ops;
 	bool                    in_use;
 };
 

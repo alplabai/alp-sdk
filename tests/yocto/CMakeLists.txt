@@ -51,6 +51,48 @@ target_compile_features(alp_test_gpu2d_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_gpu2d_dispatcher
          COMMAND alp_test_gpu2d_dispatcher)
 
+# GPU2D static handle-pool race regression (#629): the exact
+# duplicate-slot / op-vs-close reproduction from the issue, against
+# the real sw_fallback backend.  Needs pthreads on every host this
+# runs on (same gate as alp_test_last_error_threading below).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+
+    add_executable(alp_test_gpu2d_slot_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/gpu2d_slot_race.c
+    )
+    target_link_libraries(alp_test_gpu2d_slot_race PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_gpu2d_slot_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_gpu2d_slot_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_gpu2d_slot_race
+             COMMAND alp_test_gpu2d_slot_race)
+
+    # Stateless dispatcher ops-cache race regression (#628): concurrent
+    # cold first calls into TMU / SoC-info / security.  Recompiles the
+    # security sw_fallback TU straight into the executable -- same
+    # archive-extraction rationale as alp_test_audio_alsa below -- so
+    # the random-bytes fast path resolves regardless of OpenSSL
+    # presence on the host.
+    add_executable(alp_test_dispatch_cache_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_cache_race.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/sw_fallback.c
+    )
+    target_link_libraries(alp_test_dispatch_cache_race PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_dispatch_cache_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_dispatch_cache_race PRIVATE c_std_99)
+    if(UNIX)
+        target_link_libraries(alp_test_dispatch_cache_race PRIVATE m)
+    endif()
+
+    add_test(NAME alp_test_dispatch_cache_race
+             COMMAND alp_test_dispatch_cache_race)
+endif()
+
 # Static-archive link regression for the backend registry (#368).
 # Links ONLY against the (static) libalp_sdk.a and compiles NO backend
 # TU of its own -- deliberately UNLIKE the sw_fallback / ALSA tests

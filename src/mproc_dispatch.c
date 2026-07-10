@@ -29,6 +29,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_dispatch_cache.h"
 #include "backends/mproc/mproc_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(mproc);
@@ -328,19 +329,25 @@ const alp_capabilities_t *alp_hwsem_capabilities(const alp_hwsem_t *sem)
 
 ALP_BACKEND_DEFINE_CLASS(mproc_boot);
 
+/* Published through alp_dispatch_cache_{load,store}() -- see
+ * src/tmu_dispatch.c's header comment; same TMU-pattern race fix
+ * (issue #628). */
 static const alp_mproc_boot_ops_t *_cached_boot_ops = NULL;
 
 static const alp_mproc_boot_ops_t *_get_boot_ops(void)
 {
-	if (_cached_boot_ops != NULL) {
-		return _cached_boot_ops;
+	const alp_mproc_boot_ops_t *ops = (const alp_mproc_boot_ops_t *)alp_dispatch_cache_load(
+	    (const void *const *)&_cached_boot_ops);
+	if (ops != NULL) {
+		return ops;
 	}
 	const alp_backend_t *be = alp_backend_select("mproc_boot", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		return NULL;
 	}
-	_cached_boot_ops = (const alp_mproc_boot_ops_t *)be->ops;
-	return _cached_boot_ops;
+	ops = (const alp_mproc_boot_ops_t *)be->ops;
+	alp_dispatch_cache_store((const void **)&_cached_boot_ops, (const void *)ops);
+	return ops;
 }
 
 alp_status_t alp_mproc_boot_core(alp_core_id_t core, uintptr_t entry_addr)

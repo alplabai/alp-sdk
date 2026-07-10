@@ -33,6 +33,7 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +46,7 @@
 #include <alp/iot.h>
 #include <alp/peripheral.h>
 
+#include "alp_slot_claim.h"
 #include "mqtt_ops.h"
 
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
@@ -74,7 +76,6 @@
 
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
 struct mqtt_be {
-	bool                    in_use;
 	alp_mqtt_msg_cb_t       msg_cb;
 	void                   *msg_user;
 	struct mqtt_client      client;
@@ -89,6 +90,12 @@ struct mqtt_be {
 	struct mqtt_utf8        username_utf8;
 	struct mqtt_utf8        password_utf8;
 	uint16_t                next_msg_id; /* monotonic, wraps past 0xFFFF */
+	/* Moved to the last member (was first) so the atomic-claim zeroing
+	 * below (memset up to offsetof(..., in_use)) still resets every
+	 * other field, matching the pre-fix full-struct memset -- issue
+	 * #629: the claim now flips this flag with a single compare-
+	 * exchange instead of an unlocked check-then-set. */
+	bool in_use;
 };
 
 static struct mqtt_be g_mqtt_be_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
@@ -96,9 +103,8 @@ static struct mqtt_be g_mqtt_be_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
 static struct mqtt_be *mqtt_be_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_mqtt_be_pool); ++i) {
-		if (!g_mqtt_be_pool[i].in_use) {
-			memset(&g_mqtt_be_pool[i], 0, sizeof(g_mqtt_be_pool[i]));
-			g_mqtt_be_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_mqtt_be_pool[i].in_use)) {
+			memset(&g_mqtt_be_pool[i], 0, offsetof(struct mqtt_be, in_use));
 			return &g_mqtt_be_pool[i];
 		}
 	}
@@ -107,7 +113,7 @@ static struct mqtt_be *mqtt_be_acquire(void)
 
 static void mqtt_be_release(struct mqtt_be *be)
 {
-	if (be != NULL) be->in_use = false;
+	if (be != NULL) alp_slot_release(&be->in_use);
 }
 
 static alp_status_t errno_to_alp(int err)

@@ -84,14 +84,23 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
+/* Gate on the lifecycle byte via alp_handle_op_enter(), not a plain
+ * in_use read (issue #629): in_use is claimed/released atomically in
+ * _alloc/_free, but transceive used to read it with a plain load, so
+ * a racing alp_spi_close() could free the slot while transceive was
+ * still dereferencing bus->state. */
 alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len)
 {
-	if (bus == NULL || !bus->in_use) return ALP_ERR_NOT_READY;
-	if (len == 0) return ALP_OK;
-	return bus->state.ops->transceive(&bus->state, tx, rx, len);
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = (len == 0) ? ALP_OK : bus->state.ops->transceive(&bus->state, tx, rx, len);
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
@@ -106,10 +115,16 @@ alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
 
 void alp_spi_close(alp_spi_t *bus)
 {
-	if (bus == NULL || !bus->in_use) return;
+	if (bus == NULL) return;
+	/* Gate out new ops and drain any in-flight one before touching
+	 * state.ops (issue #629). Losing the CAS (already closed/closing/
+	 * never-opened) makes this a no-op, matching the existing
+	 * void-close idempotency contract. */
+	if (!alp_handle_begin_close(&bus->lifecycle, &bus->active_ops)) return;
 	if (bus->state.ops != NULL && bus->state.ops->close != NULL) {
 		bus->state.ops->close(&bus->state);
 	}
+	alp_lifecycle_set(&bus->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(bus);
 }
 

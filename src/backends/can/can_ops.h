@@ -59,9 +59,18 @@ struct alp_can {
 	alp_can_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
-	bool                    in_use;
 	alp_can_config_t        cfg; /* snapshot of caller's config */
 	bool                    started;
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close, issue #629) -- placed (with in_use) after cfg/
+	 * started so moving in_use to the last member (required for the
+	 * atomic-claim zeroing in src/can_dispatch.c: memset up to
+	 * offsetof(..., in_use)) still resets cfg/started to zero on
+	 * every fresh claim, matching the pre-fix full-struct memset. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 #endif /* ALP_BACKENDS_CAN_OPS_H */
