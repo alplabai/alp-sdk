@@ -111,8 +111,8 @@ alp_status_t alp_can_send(alp_can_t *can, const alp_can_frame_t *frame, uint32_t
 	if (can == NULL || !can->in_use) return ALP_ERR_NOT_READY;
 	if (!can->started) return ALP_ERR_NOT_READY;
 	if (frame == NULL) return ALP_ERR_INVAL;
-	if (frame->dlc > ALP_CAN_MAX_DLC_FD) return ALP_ERR_INVAL;
-	if (!frame->fd && frame->dlc > ALP_CAN_MAX_DLC_CLASSIC) return ALP_ERR_INVAL;
+	if (frame->payload_len > ALP_CAN_MAX_PAYLOAD_BYTES_FD) return ALP_ERR_INVAL;
+	if (!frame->fd && frame->payload_len > ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC) return ALP_ERR_INVAL;
 	if (can->state.ops->send == NULL) return ALP_ERR_NOSUPPORT;
 	return can->state.ops->send(&can->state, frame, timeout_ms);
 }
