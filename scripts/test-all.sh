@@ -75,7 +75,7 @@ set -uo pipefail
 # Resolve repo root regardless of where the script is invoked from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-cd "${REPO_ROOT}"
+cd "${REPO_ROOT}" || exit 1
 
 # -------- Flag parsing --------------------------------------------------------
 
@@ -203,7 +203,12 @@ stage_twister() {
     local -a _existing=() _modules=()
     local _m _joined
     IFS=';' read -ra _existing <<< "${EXTRA_ZEPHYR_MODULES:-}"
-    for _m in "${_existing[@]}"; do
+    # `${arr[@]+"${arr[@]}"}` is the set-u-safe empty-array expansion: on
+    # bash 3.2 (the macOS default) `"${_existing[@]}"` on an EMPTY array
+    # trips `set -u` with "unbound variable" -- the `+` guard expands to
+    # nothing when the array is empty/unset instead.  (Bit macOS/Windows
+    # python-smoke via test_test_all_worktree.py.)
+    for _m in ${_existing[@]+"${_existing[@]}"}; do
         [ -n "${_m}" ] && [ "${_m}" != "${REPO_ROOT}" ] && _modules+=("${_m}")
     done
     _modules+=("${REPO_ROOT}")
@@ -215,6 +220,34 @@ stage_twister() {
         -p native_sim/native/64 \
         --inline-logs \
         --no-detailed-test-id
+}
+
+stage_shellcheck() {
+    # Static-lint the project shell scripts so a shell bug (an SC2164
+    # cd-without-guard, a `set -u` empty-array trap, a POSIX-portability
+    # slip that only bites macOS's bash 3.2) is caught on Linux BEFORE it
+    # reddens macOS/Windows python-smoke.  Resolve shellcheck on PATH or
+    # the no-root ~/.local/bin install.
+    local sc
+    sc=$(command -v shellcheck 2>/dev/null || true)
+    if [ -z "${sc}" ] && [ -x "${HOME}/.local/bin/shellcheck" ]; then
+        sc="${HOME}/.local/bin/shellcheck"
+    fi
+    if [ -z "${sc}" ]; then
+        return 99
+    fi
+    # test-all.sh is the load-bearing local-CI wrapper (it runs in a macOS
+    # CI test, test_test_all_worktree.py), so lint it at warning level;
+    # lint the rest of scripts/*.sh at error level to avoid drowning in
+    # pre-existing style warnings.
+    local rc=0
+    "${sc}" -S warning scripts/test-all.sh || rc=1
+    local other
+    for other in scripts/*.sh; do
+        [ "${other}" = "scripts/test-all.sh" ] && continue
+        "${sc}" -S error "${other}" || rc=1
+    done
+    return "${rc}"
 }
 
 stage_clang_format() {
@@ -246,8 +279,14 @@ stage_clang_format() {
         # Shallow clone -- nothing to diff against.
         return 99
     fi
+    # Exclude vendors/** + zephyr/** exactly like pr-static-analysis.yml's
+    # clang-format gate: those subtrees keep their UPSTREAM project's style
+    # (GigaDevice/Zephyr/Renesas-FSP), our .clang-format does not govern
+    # them, and CI never flags them -- so neither should the local mirror.
+    # (Without this, a vendored .c drift produced a FALSE local failure.)
     local out
-    out=$(git diff -U0 "${base}" -- '*.c' '*.h' | python3 "${diff_tool}" -p1 || true)
+    out=$(git diff -U0 "${base}" -- '*.c' '*.h' ':!vendors/**' ':!zephyr/**' \
+          | python3 "${diff_tool}" -p1 || true)
     if [ -n "${out}" ]; then
         echo "${out}"
         return 1
@@ -529,6 +568,15 @@ else
         run_stage "clang-format-diff" stage_clang_format
     else
         skip_stage "clang-format-diff" "clang-format not installed"
+    fi
+
+    # Shell-script static lint -- catches shell bugs (cd-without-guard,
+    # set-u empty-array traps, POSIX slips) on Linux before they redden
+    # macOS/Windows CI.  Skips cleanly if shellcheck isn't installed.
+    if command -v shellcheck >/dev/null 2>&1 || [ -x "${HOME}/.local/bin/shellcheck" ]; then
+        run_stage "shellcheck" stage_shellcheck
+    else
+        skip_stage "shellcheck" "shellcheck not installed (PATH or ~/.local/bin)"
     fi
 
     run_stage "metadata-validate" stage_metadata_validate
