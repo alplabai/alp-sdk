@@ -26,6 +26,12 @@ typedef struct alp_uart_backend_state {
 	uint32_t              port_id;
 	void                 *be_data;
 	const alp_uart_ops_t *ops;
+	/* Opaque back-ref (struct alp_uart_rx_ringbuf *) set while an RX
+     * ring buffer is attached to this port; NULL otherwise.  Enforces
+     * single-owner attach and lets the backend's close() detach it
+     * before the handle is released.  Zephyr-only today -- other
+     * backends never set this field. */
+	void *rx_ringbuf;
 } alp_uart_backend_state_t;
 
 struct alp_uart_ops {

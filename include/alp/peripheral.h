@@ -732,10 +732,22 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
 /**
  * @brief Blocking UART read with millisecond timeout.
  *
+ * @p timeout_ms bounds the ENTIRE call, not just the gap between two
+ * already-arrived bytes.  If the deadline is reached with zero bytes
+ * collected, the call returns @ref ALP_ERR_TIMEOUT.  If at least one
+ * byte arrived before the deadline but fewer than @p len, the call
+ * returns @ref ALP_OK with the partial bytes in @p data -- the
+ * caller has no count of how many, so read in smaller chunks (or
+ * pair with @ref alp_uart_rx_ringbuf_attach) when a partial-fill
+ * count matters.  @c timeout_ms == 0 is a single non-blocking poll:
+ * return immediately with @ref ALP_ERR_TIMEOUT if no byte is already
+ * available.
+ *
  * @param[in]  port        Handle from @ref alp_uart_open.
  * @param[out] data        Destination buffer.
  * @param[in]  len         Byte count to read.
- * @param[in]  timeout_ms  Max wait.
+ * @param[in]  timeout_ms  Max wait for the whole call; 0 = poll once,
+ *                         don't block.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
@@ -744,6 +756,11 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t
 
 /**
  * @brief Release the UART port handle.  Idempotent on NULL.
+ *
+ * If a ring buffer is attached via @ref alp_uart_rx_ringbuf_attach, it
+ * is detached (RX IRQs disabled, pool slot released) before the port
+ * handle itself is released -- callers do not need to detach manually
+ * before closing.
  *
  * @param[in] port  Handle from @ref alp_uart_open, or NULL.
  */
@@ -781,6 +798,19 @@ typedef struct alp_uart_rx_ringbuf alp_uart_rx_ringbuf_t;
 /**
  * @brief Attach a byte-granular RX ring buffer to an open UART port.
  *
+ * Exclusive ownership: at most one ring buffer may be attached to a
+ * port at a time (the underlying driver exposes a single IRQ callback
+ * slot per UART device).  Attaching a second buffer while the first
+ * is still attached is refused with @ref ALP_ERR_BUSY -- detach the
+ * first (or close the port) before attaching a replacement.
+ *
+ * Lifetime: @ref alp_uart_close() on the parent port automatically
+ * detaches an attached ring buffer (disabling RX IRQs and releasing
+ * the pool slot) before the port handle is released, so the buffer
+ * can never outlive its parent.  Calling @ref alp_uart_rx_ringbuf_detach
+ * explicitly first (e.g. to attach a replacement without closing the
+ * port) is also fine -- detach is idempotent.
+ *
  * @param port           UART handle from alp_uart_open().
  * @param backing        Caller-owned buffer; must outlive the returned
  *                       handle.  Should be >= 64 bytes to absorb the
@@ -791,7 +821,8 @@ typedef struct alp_uart_rx_ringbuf alp_uart_rx_ringbuf_t;
  *
  * @return Handle on success; NULL with alp_last_error() set on failure.
  *         Returns NULL + ALP_ERR_NOSUPPORT on builds without
- *         CONFIG_ALP_SDK_UART_RX_RINGBUF.
+ *         CONFIG_ALP_SDK_UART_RX_RINGBUF; NULL + ALP_ERR_BUSY when a
+ *         ring buffer is already attached to @p port.
  */
 alp_uart_rx_ringbuf_t *
 alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_size);
