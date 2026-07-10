@@ -40,7 +40,7 @@ project(catch2_selftest LANGUAGES C CXX)
 # vendors/catch2/ -- see that directory's README.md for the why. The
 # alp-sdk Zephyr module (zephyr/CMakeLists.txt) compiles
 # catch_amalgamated.cpp and adds its include path automatically because
-# board.yaml's `libraries: [catch2]` sets CONFIG_ALP_CATCH2_SW=y;
+# board.yaml's `libraries: [catch2]` sets CONFIG_ALP_SDK_CATCH2_VENDORED=y;
 # nothing to wire here beyond this app's own source.
 target_sources(app PRIVATE src/main.cpp)
 

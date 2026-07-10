@@ -248,22 +248,25 @@ manifest:
           # backend's MbedTLS-PSA fallthrough, examples/aen/aen-se-crypto)
           # resolves on `west update` without the bench-side symlink.
           - tf-psa-crypto
-          # nanopb (modules/lib/nanopb, no `groups:` restriction in
-          # Zephyr's own west.yml -- default-enabled there) backs
+          # NOTE: nanopb is intentionally NOT allowlisted here. It backs
           # `libraries: [nanopb]` (metadata/libraries/nanopb.yaml,
-          # CONFIG_NANOPB) and examples/connectivity/nanopb-encode-decode.
-          # Was missing from the allowlist -- same trap as littlefs
-          # above (#3p-lib-examples Task 0): the stale comment here used
-          # to claim "our SDK uses it via the upstream Zephyr module",
-          # but nothing actually allowlisted it, so an alp-sdk-topdir
-          # workspace's `west update` never fetched it and
-          # ZEPHYR_NANOPB_MODULE_DIR stayed unset. NOTE: this is
-          # DIFFERENT from the dormant `nanopb` pin under the
-          # `extras-lwrb-nanopb` group below (SDK-internal mproc IPC
-          # framing, a separate consumer on a separate revision) --
-          # that group stays disabled by default, so there is no path
-          # collision under default settings.
-          - nanopb
+          # CONFIG_NANOPB) and examples/connectivity/nanopb-encode-decode,
+          # and Zephyr's own west.yml carries an unconditioned
+          # `modules/lib/nanopb` project -- but alp-sdk's own manifest
+          # ALSO defines a project named `nanopb` at that same path
+          # (below, under the disabled-by-default `extras-lwrb-nanopb`
+          # group, SDK-internal mproc IPC framing). West's import
+          # resolution lets a same-named top-level project shadow an
+          # imported one regardless of the name-allowlist, so adding
+          # `nanopb` here has no effect either way: the disabled group
+          # always wins and the import entry is dead weight. CI
+          # (pr-twister.yml) doesn't go through this manifest at all --
+          # it inits its topdir straight from Zephyr's own west.yml
+          # (`west init -m zephyr`), so nanopb already resolves there
+          # via Zephyr's unconditioned project, independent of this
+          # file. See littlefs's allowlist entry above for the pattern
+          # that DOES work (no colliding top-level project of the same
+          # name to shadow it).
 
     # SDK-internal dependencies pinned ahead of their consumers landing
     # for real.  Behind the `extras-lwrb-nanopb` group (disabled above)

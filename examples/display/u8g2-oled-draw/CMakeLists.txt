@@ -41,8 +41,8 @@ project(u8g2_oled_draw LANGUAGES C)
 # see that directory's README.md for the file list + why. The alp-sdk
 # Zephyr module (zephyr/CMakeLists.txt) compiles it into this build
 # automatically because board.yaml's `libraries: [u8g2]` sets
-# CONFIG_ALP_U8G2_SW_BLIT=y; nothing to wire here beyond the app's own
-# sources. Building against the FULL upstream u8g2 checkout instead
+# CONFIG_ALP_SDK_U8G2_VENDORED_CORE=y; nothing to wire here beyond the
+# app's own sources. Building against the FULL upstream u8g2 checkout instead
 # (real panel drivers, bundled fonts) is still possible for a customer
 # who wants one -- point ZEPHYR_MODULES at a checkout with csrc/u8g2.h
 # and add its csrc/ to the include path ahead of the vendored one --

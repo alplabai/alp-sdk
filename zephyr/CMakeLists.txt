@@ -132,6 +132,22 @@ endif()
 if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_LITTLEFS)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_littlefs.c)
+    # zephyr_littlefs.c includes <zephyr/fs/littlefs.h>, which itself
+    # includes <lfs.h> from the upstream littlefs module -- but that
+    # header lives outside ZEPHYR_BASE, so the compiler can't find it
+    # without this module's include dir on the path. Zephyr's own
+    # subsys/fs/littlefs_fs.c gets this for free via the `LITTLEFS`
+    # INTERFACE target (zephyr/modules/littlefs/CMakeLists.txt); our
+    # alp-sdk zephyr module is a separate CMake library, so it needs
+    # its own copy of the include path. ZEPHYR_LITTLEFS_MODULE_DIR is
+    # set by Zephyr's module-resolution pass whenever modules/fs/littlefs
+    # is present (default-enabled `fs` group in Zephyr's own west.yml,
+    # so both an alp-sdk-topdir workspace and CI's `west init -m zephyr`
+    # workspace pick it up) -- guard on it being defined rather than
+    # assuming presence.
+    if(DEFINED ZEPHYR_LITTLEFS_MODULE_DIR)
+        zephyr_library_include_directories(${ZEPHYR_LITTLEFS_MODULE_DIR})
+    endif()
 endif()
 
 # Renesas RZ SPI_B (RSPI) controller driver -- carried here (not upstream
