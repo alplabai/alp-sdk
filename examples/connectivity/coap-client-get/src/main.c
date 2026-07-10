@@ -3,35 +3,37 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * coap-client-get -- build a CoAP GET request PDU offline, then parse a
- * canned CoAP response PDU offline. No socket, no coap_context_t, no
- * coap_session_t -- this isolates the PDU codec half of libcoap (the part
- * worth exercising on native_sim) from the transport half (a real UDP
- * socket / DTLS session -- see README.md).
+ * canned CoAP response PDU offline. No socket, no net_context, no
+ * coap_client -- this isolates the PDU codec half of CoAP (the part worth
+ * exercising on native_sim) from the transport half (a real UDP socket --
+ * see README.md).
  *
- * libcoap (https://github.com/obgm/libcoap) is the full-featured CoAP
- * (RFC 7252) implementation most embedded Linux/RTOS CoAP clients and
- * servers are built on -- client + server, UDP/TCP/WS, optional DTLS via
- * mbedTLS/OpenSSL/etc. This build enables client-only, no-TLS (see
- * board.yaml + prj.conf: CONFIG_LIBCOAP_CLIENT_SUPPORT=y, DTLS backends
- * off), matching metadata/library-profiles/libcoap/hw-backends.yaml's
- * `sw_fallback: CONFIG_ALP_COAP_NO_TLS=y` floor.
+ * CoAP (RFC 7252) is the constrained-device REST transport this SDK ships
+ * as the IN-TREE Zephyr subsystem `subsys/net/lib/coap/` (board.yaml's
+ * `libraries: [coap]` -- see metadata/libraries/coap.yaml -- emits
+ * CONFIG_NETWORKING=y + CONFIG_COAP=y; there is no separate west module to
+ * fetch). This build never opens CONFIG_COAP_CLIENT's socket-based client
+ * (that's an [EXPERIMENTAL] higher layer over net sockets) -- everything
+ * here is the low-level `coap_packet_*` / `coap_header_*` codec API in
+ * <zephyr/net/coap.h>, which needs only CONFIG_COAP.
  *
- * `coap_pdu_init()` gives you a `coap_pdu_t` with its OWN internal byte
- * buffer already reserved (the `size` argument) -- `coap_add_token()` /
- * `coap_add_option()` / `coap_add_data()` lay the token, options and
- * payload into that buffer in wire order. This example builds a PDU that
- * way and inspects it via the public getters (`coap_pdu_get_code()`,
- * `coap_pdu_get_token()`, the `coap_option_iterator_t` walk) rather than
- * poking at the struct directly -- `coap_pdu_t`'s fields are declared in
- * `coap_pdu_internal.h`, explicitly `@ingroup internal_api` upstream, and
- * not something app code should depend on (session-bound sending is what
- * turns this buffer into wire bytes for a real socket; see README.md).
+ * `coap_packet_init()` binds a `struct coap_packet` to a caller-owned byte
+ * buffer and writes the fixed 4-byte CoAP header + token into it directly
+ * (no separate "buffer" vs "PDU" object the way some CoAP libraries split
+ * it) -- `coap_packet_append_option()` / `coap_packet_append_payload()`
+ * then append into that same buffer in wire order. This example builds a
+ * request that way and inspects it via the public getters
+ * (`coap_header_get_code()`, `coap_header_get_token()`, `coap_find_options()`)
+ * rather than reading `struct coap_packet`'s fields directly -- those are
+ * documented as "CoAP lib maintains" internal bookkeeping, not something
+ * app code should depend on.
  *
  * The response side works from real wire bytes -- `canned_response[]`
  * below is a hand-encoded RFC 7252 CoAP/UDP datagram (a 2.05 Content ACK,
  * echoing the request's token, carrying a tiny text payload), the same
- * shape a `recvfrom()` would hand you. `coap_pdu_parse()` is the public,
- * session-free entry point for turning those bytes into a `coap_pdu_t`.
+ * shape a `recvfrom()` would hand you. `coap_packet_parse()` is the public
+ * entry point for turning those bytes into a `struct coap_packet` -- no
+ * live session required.
  *
  * What success looks like:
  *
@@ -44,7 +46,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <coap3/coap.h>
+#include <zephyr/net/coap.h>
 
 /* A GET on coap://<host>/sensor -- Uri-Path is the only option a minimal
  * request needs; host/port live in the (absent, here) transport layer, not
@@ -52,10 +54,15 @@
  * session's peer address doesn't already imply them. */
 #define COAP_EXAMPLE_URI_PATH "sensor"
 
+/* Working buffer coap_packet_init() writes the request header/token/options
+ * into. 32 bytes is generous for a 4-byte header + 4-byte token + one short
+ * Uri-Path option. */
+#define REQUEST_BUF_SIZE 32
+
 /* Fixed 4-byte token -- CoAP tokens correlate a response to its request
  * (like a request ID); a real client randomizes this per-request via
- * coap_session_new_token(). Fixed here so `canned_response[]` below can
- * echo the exact same bytes, the way a real server's ACK would. */
+ * coap_next_token(). Fixed here so `canned_response[]` below can echo the
+ * exact same bytes, the way a real server's ACK would. */
 static const uint8_t kRequestToken[4] = { 0xa1, 0xb2, 0xc3, 0xd4 };
 
 /* A real 2.05-Content CoAP/UDP response, hand-encoded per RFC 7252 sec 3:
@@ -69,103 +76,105 @@ static const uint8_t kRequestToken[4] = { 0xa1, 0xb2, 0xc3, 0xd4 };
  *               default text/plain;charset=utf-8 applies)
  *
  * This is exactly what recvfrom() would place in your socket buffer --
- * coap_pdu_parse() below is the public, session-free way to decode it. */
+ * coap_packet_parse() below is the public way to decode it. */
 static const uint8_t canned_response[] = {
 	0x64, 0x45, 0x00, 0x01, 0xa1, 0xb2, 0xc3, 0xd4, 0xff, '2', '3', '.', '5', 'C',
 };
 
 /* Builds the GET request PDU and prints it via the PUBLIC getters -- no
- * struct field access, no wire-buffer serialization (that step needs a
- * coap_session_t; see README.md). Returns 1 on success. */
+ * struct field access, no wire-buffer send (that step needs a live socket;
+ * see README.md). Returns 1 on success. */
 static int build_and_print_get_request(void)
 {
-	/* type=CON (server must ACK), code=GET, mid=1 (a real client reads
-	 * this from coap_new_message_id_lkd() on a live session), size=64
-	 * (this PDU's own working-buffer reservation for token+options+
-	 * payload -- unrelated to the wire-header space discussed above). */
-	coap_pdu_t *pdu = coap_pdu_init(COAP_MESSAGE_CON, COAP_REQUEST_CODE_GET, 1, 64);
+	static uint8_t     request_buf[REQUEST_BUF_SIZE];
+	struct coap_packet request;
 
-	if (!pdu) {
+	/* ver=1, type=CON (server must ACK), tkl=4, code=GET, id=1 (a real
+	 * client reads a fresh id from coap_next_id() per request). */
+	int ret = coap_packet_init(&request,
+	                           request_buf,
+	                           sizeof(request_buf),
+	                           COAP_VERSION_1,
+	                           COAP_TYPE_CON,
+	                           sizeof(kRequestToken),
+	                           kRequestToken,
+	                           COAP_METHOD_GET,
+	                           1);
+
+	if (ret < 0) {
 		return 0;
 	}
 
-	/* Token, then options in ascending option-number order (Uri-Path is
-	 * the only one here, so ordering is moot) -- libcoap enforces that
-	 * add-order at the API level (options after payload data is a
-	 * documented failure case). */
-	if (!coap_add_token(pdu, sizeof(kRequestToken), kRequestToken)) {
-		coap_delete_pdu(pdu);
-		return 0;
-	}
-	if (!coap_add_option(pdu,
-	                     COAP_OPTION_URI_PATH,
-	                     strlen(COAP_EXAMPLE_URI_PATH),
-	                     (const uint8_t *)COAP_EXAMPLE_URI_PATH)) {
-		coap_delete_pdu(pdu);
+	/* Options must be appended in ascending option-number order (Uri-Path
+	 * is the only one here, so ordering is moot) -- coap_packet_append_
+	 * option() enforces that add-order internally via its delta encoding. */
+	ret = coap_packet_append_option(&request,
+	                                COAP_OPTION_URI_PATH,
+	                                (const uint8_t *)COAP_EXAMPLE_URI_PATH,
+	                                strlen(COAP_EXAMPLE_URI_PATH));
+	if (ret < 0) {
 		return 0;
 	}
 
-	coap_bin_const_t token = coap_pdu_get_token(pdu);
+	uint8_t token[COAP_TOKEN_MAX_LEN];
+	uint8_t tkl = coap_header_get_token(&request, token);
 
-	printf("[coap-client-get] request: code=0x%02x (GET), token=", coap_pdu_get_code(pdu));
-	for (size_t i = 0; i < token.length; i++) {
-		printf("%02x", token.s[i]);
+	printf("[coap-client-get] request: code=0x%02x (GET), token=", coap_header_get_code(&request));
+	for (uint8_t i = 0; i < tkl; i++) {
+		printf("%02x", token[i]);
 	}
 
-	/* Walk every option (COAP_OPT_ALL) the same way a request logger or
-	 * a proxy re-targeting the request would -- coap_option_next()
-	 * returns NULL once the option list is exhausted. */
-	coap_opt_iterator_t opt_iter;
+	/* coap_find_options() re-parses the packet's own option list -- the
+	 * same call a request logger or a proxy re-targeting the request would
+	 * make -- and hands back every Uri-Path option found (there's exactly
+	 * one here; a real multi-segment path repeats this option). */
+	struct coap_option opt;
+	int                n_opts = coap_find_options(&request, COAP_OPTION_URI_PATH, &opt, 1);
 
-	coap_option_iterator_init(pdu, &opt_iter, COAP_OPT_ALL);
-	coap_opt_t *opt;
-
-	while ((opt = coap_option_next(&opt_iter))) {
-		if (opt_iter.number == COAP_OPTION_URI_PATH) {
-			printf(", Uri-Path=\"%.*s\"", (int)coap_opt_length(opt), coap_opt_value(opt));
-		}
+	if (n_opts > 0) {
+		printf(", Uri-Path=\"%.*s\"", opt.len, opt.value);
 	}
 	printf("\n");
 
-	coap_delete_pdu(pdu);
 	return 1;
 }
 
 /* Parses `canned_response[]` (bytes as if just handed back by recvfrom())
- * into a fresh PDU and prints the response code + payload. coap_pdu_parse()
- * is the exact function a real client calls right after recvfrom(); no
- * coap_session_t required for parsing. */
+ * into a fresh `struct coap_packet` and prints the response code + payload.
+ * coap_packet_parse() is the exact function a real client calls right after
+ * recvfrom(); no live socket/session required for parsing. */
 static int parse_canned_response(void)
 {
-	coap_pdu_t *pdu = coap_pdu_init(COAP_MESSAGE_ACK, 0, 0, sizeof(canned_response));
+	/* coap_packet_parse() writes through `data`, so it must be a mutable
+	 * copy, not the `static const` wire bytes above. */
+	static uint8_t     response_buf[sizeof(canned_response)];
+	struct coap_option options[1];
+	struct coap_packet response;
 
-	if (!pdu) {
-		return 0;
-	}
-	if (!coap_pdu_parse(COAP_PROTO_UDP, canned_response, sizeof(canned_response), pdu)) {
+	memcpy(response_buf, canned_response, sizeof(canned_response));
+
+	int ret = coap_packet_parse(
+	    &response, response_buf, sizeof(response_buf), options, ARRAY_SIZE(options));
+
+	if (ret < 0) {
 		printf("[coap-client-get] response parse failed\n");
-		coap_delete_pdu(pdu);
 		return 0;
 	}
 
-	coap_pdu_code_t code = coap_pdu_get_code(pdu);
+	uint8_t code = coap_header_get_code(&response);
 
 	printf("[coap-client-get] response: %u bytes, code=0x%02x (2.05 Content)\n",
 	       (unsigned)sizeof(canned_response),
 	       code);
 
-	size_t         data_len  = 0;
-	const uint8_t *data      = NULL;
-	int            have_data = coap_get_data(pdu, &data_len, &data);
+	uint16_t       payload_len = 0;
+	const uint8_t *payload     = coap_packet_get_payload(&response, &payload_len);
 
-	if (have_data) {
-		printf("[coap-client-get] payload: \"%.*s\"\n", (int)data_len, data);
+	if (payload_len > 0) {
+		printf("[coap-client-get] payload: \"%.*s\"\n", (int)payload_len, payload);
 	}
 
-	int ok = (code == COAP_RESPONSE_CODE_CONTENT) && have_data;
-
-	coap_delete_pdu(pdu);
-	return ok;
+	return (code == COAP_RESPONSE_CODE_CONTENT) && (payload_len > 0);
 }
 
 int main(void)

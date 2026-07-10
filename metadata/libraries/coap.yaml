@@ -19,10 +19,11 @@
 #     Apache-2.0"; the whole zephyr repo is Apache-2.0, $ZEPHYR_BASE/LICENSE).
 #
 # Tier B: the ADR 0018 initial curation groups cloud/connectivity as Tier B and
-# promotes per demand.  Even though CoAP is upstream and cheap, it is not yet
-# CI-built with a shipped teaching example (the Tier-A bar in
-# metadata/libraries/README.md), so B is the honest tier until a build lane +
-# example land.
+# promotes per demand.  examples/connectivity/coap-client-get now builds +
+# runs on native_sim CI (the "ships one teaching example" + "builds in CI"
+# legs of the Tier-A bar in metadata/libraries/README.md), but B->A promotion
+# is a deliberate human call (the "breakage blocks release" leg), not a
+# metadata edit -- stays B until that promotion lands.
 schema_version: 1
 name: coap
 description: "CoAP (RFC 7252) -- Constrained Application Protocol REST transport."
@@ -44,4 +45,9 @@ integration:
     # project itself carries it).  null per the schema's header-only/in-tree case.
     module: null
     kconfig:
+      # CONFIG_COAP lives `if NETWORKING` (subsys/net/lib/Kconfig sourced
+      # inside subsys/net/Kconfig's `if NETWORKING` block) -- emit the
+      # prerequisite explicitly so a Kconfig fragment that only sets
+      # CONFIG_COAP=y doesn't silently drop it for an unmet dependency.
+      - CONFIG_NETWORKING=y
       - CONFIG_COAP=y

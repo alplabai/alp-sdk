@@ -342,7 +342,12 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
     "tflite_micro":   ("CONFIG_ALP_TFLM_REF_KERNELS=y",
                        "# tflite_micro: include path + tflm_config.h via v0.4 loader hook",),
     "u8g2":           ("CONFIG_ALP_U8G2_SW_BLIT=y",
-                       "# u8g2: include path + u8g2_config.h via v0.4 loader hook",),
+                       # Compiles vendors/u8g2/csrc/ into the build (see
+                       # zephyr/CMakeLists.txt) -- unlike ALP_U8G2_SW_BLIT
+                       # above (a fallback-capability marker, `default y`
+                       # for every build), this gates a real compiled
+                       # source addition and must stay selection-scoped.
+                       "CONFIG_ALP_SDK_U8G2_VENDORED_CORE=y",),
     "gfx_compat":     ("CONFIG_ALP_GFX_COMPAT_SW=y",
                        "# gfx_compat: maintainer-shipped thin shim; no external dep",),
 
@@ -366,7 +371,15 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
     "libhelix":       ("CONFIG_ALP_LIBHELIX_PURE_C=y",),
 
     # §D.lib.test
-    "catch2":         ("CONFIG_ALP_CATCH2_SW=y",),
+    "catch2":         ("CONFIG_ALP_CATCH2_SW=y",
+                       # Compiles vendors/catch2/src/catch_amalgamated.cpp
+                       # into the build (see zephyr/CMakeLists.txt) --
+                       # unlike ALP_CATCH2_SW above (a fallback-capability
+                       # marker, `default y` for every build), this gates
+                       # a real C++ compiled source addition and must stay
+                       # selection-scoped so a C-only app never pulls in a
+                       # C++ TU it has no libstdc++ linked for.
+                       "CONFIG_ALP_SDK_CATCH2_VENDORED=y",),
 }
 
 

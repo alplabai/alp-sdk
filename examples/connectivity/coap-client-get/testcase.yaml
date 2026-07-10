@@ -3,10 +3,11 @@
 sample:
   name: coap-client-get
   description: |
-    libcoap teaching example. Builds a CoAP GET request PDU offline and
-    parses a canned CoAP response PDU -- no socket. Builds and runs on
-    native_sim against the upstream libcoap module (client-only,
-    DTLS/TCP/OSCORE disabled).
+    CoAP (RFC 7252) teaching example. Builds a CoAP GET request PDU offline
+    and parses a canned CoAP response PDU -- no socket. Builds and runs on
+    native_sim against the in-tree Zephyr `subsys/net/lib/coap` subsystem
+    (CONFIG_COAP), the low-level packet codec only -- no CONFIG_COAP_CLIENT
+    socket layer.
 
 tests:
   alp_sdk.examples.coap_client_get.native_sim:

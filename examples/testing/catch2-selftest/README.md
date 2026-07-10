@@ -16,15 +16,19 @@ framework with no hardware surface.
   via `board.yaml`'s `libraries: [catch2]` -- no `<alp/*>` wrapper,
   just Catch2's own API (`TEST_CASE`, `CHECK`, `Catch::Session`).
 * The **west-module-without-a-Zephyr-module** case: Catch2
-  (`catchorg/Catch2`, west.yml path `modules/lib/catch2`) is a
-  large, generic CMake project with no `zephyr/module.yml`, so it
-  cannot ride in via Zephyr's usual
+  (`catchorg/Catch2`) is a large, generic CMake project with no
+  `zephyr/module.yml`, so it cannot ride in via Zephyr's usual
   `ZEPHYR_EXTRA_MODULES`/module-scan auto-include the way `nanopb`
-  or `hal_ethos_u` do. This example's own `CMakeLists.txt` locates
-  the fetched checkout (via the `ZEPHYR_MODULES` CMake cache
-  variable -- see Build below) and compiles Catch2's recommended
-  amalgamated pair, `extras/catch_amalgamated.{hpp,cpp}`, directly
-  as extra sources on the `app` target.
+  does -- and its `extras-tier1` west pin (`west.yml`) is behind a
+  disabled-by-default group, so a standard `west update` never
+  fetches it anyway. Catch2's recommended amalgamated pair,
+  `extras/catch_amalgamated.{hpp,cpp}` (the single-header +
+  single-TU distribution meant for exactly this "no generator build"
+  case), is vendored in-tree at `vendors/catch2/` instead -- see
+  that directory's README.md. The alp-sdk Zephyr module
+  (`zephyr/CMakeLists.txt`) compiles it automatically whenever
+  `CONFIG_ALP_CATCH2_SW` is set (`board.yaml`'s `libraries: [catch2]`),
+  so this example needs no manual `ZEPHYR_MODULES` search.
 * A custom `main()` (`CATCH_AMALGAMATED_CUSTOM_MAIN`, not the
   amalgamated file's built-in default `main()`) so the example can
   print the SDK's uniform `[catch2-selftest] done` marker only after
@@ -42,26 +46,13 @@ framework with no hardware surface.
 
 ## Build
 
-Catch2 has no `zephyr/module.yml`, so a plain `west build` won't
-locate it -- you must point `ZEPHYR_MODULES` at BOTH the SDK root
-and the Catch2 checkout (`modules/lib/catch2` in a west workspace
-that pins `catchorg/Catch2`):
-
 ```bash
-west twister -T examples/testing/catch2-selftest -p native_sim/native/64 \
-    -x ZEPHYR_MODULES="<alp-sdk-root>;<path-to-catch2-checkout>" -v
-```
-
-Equivalently with a direct `west build` (bypassing twister):
-
-```bash
-west build -b native_sim/native/64 examples/testing/catch2-selftest \
-    -- -DZEPHYR_MODULES="<alp-sdk-root>;<path-to-catch2-checkout>"
+west build -b native_sim/native/64 examples/testing/catch2-selftest
 west build -t run
 ```
 
-If Catch2 isn't fetched as a west module in your workspace, pass its
-path directly instead: `-DCATCH2_MODULE_DIR=<path-to-catch2-checkout>`.
+No `ZEPHYR_MODULES`/`-x` flags needed -- the vendored amalgamated
+distribution builds standalone.
 
 ## Expected output
 

@@ -1057,6 +1057,66 @@ zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profile
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/jsmn/include)
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/minimp3/include)
 
+# u8g2's minimal core draw-pipeline subset (vendors/u8g2/README.md --
+# no zephyr/module.yml upstream, same "genuinely single-header-free but
+# small" case as the header-only libs above, except this one needs
+# compiled sources). Gated on CONFIG_ALP_SDK_U8G2_VENDORED_CORE, NOT
+# CONFIG_ALP_U8G2_SW_BLIT -- the latter `default y`s for EVERY build
+# (a fallback-capability marker, true whether or not an app selected
+# u8g2), so gating real compiled sources on it broke every other
+# example's link (undefined `u8x8_*`/`u8g2_*` symbols never called, but
+# worse: it also silently pulled Catch2's C++ TU into C-only apps
+# before this was caught -- see the Kconfig symbol's help text). Only
+# a slice with `libraries: [u8g2]` sets CONFIG_ALP_SDK_U8G2_VENDORED_CORE
+# (scripts/alp_project_emit.py's `_LIBRARY_KCONFIG["u8g2"]`);
+# examples/display/u8g2-oled-draw is the first (and so far only)
+# consumer.
+zephyr_include_directories_ifdef(CONFIG_ALP_SDK_U8G2_VENDORED_CORE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc
+)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_U8G2_VENDORED_CORE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8x8_setup.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8x8_display.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8x8_8x8.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_setup.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_buffer.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_hvline.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_ll_hvline.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_box.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_font.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_kerning.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_intersection.c
+)
+
+# Catch2's amalgamated single-TU distribution (vendors/catch2/README.md
+# -- no zephyr/module.yml upstream, same case as u8g2 above). Gated on
+# CONFIG_ALP_SDK_CATCH2_VENDORED, NOT CONFIG_ALP_CATCH2_SW (see the
+# u8g2 comment above -- same `default y`-for-every-build trap, except
+# for Catch2 it's worse: a C-only app unconditionally picking up a C++
+# TU needing `operator new`/`operator delete` fails EVERY plain-C
+# example's link, not just this one). Only a slice with
+# `libraries: [catch2]` sets CONFIG_ALP_SDK_CATCH2_VENDORED
+# (scripts/alp_project_emit.py's `_LIBRARY_KCONFIG["catch2"]`);
+# examples/testing/catch2-selftest is the first (and so far only)
+# consumer.
+zephyr_include_directories_ifdef(CONFIG_ALP_SDK_CATCH2_VENDORED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/catch2/include
+)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CATCH2_VENDORED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/catch2/src/catch_amalgamated.cpp
+)
+# Mirrors examples/testing/catch2-selftest/CMakeLists.txt's
+# target_compile_definitions(app ...) -- both catch_amalgamated.cpp
+# (compiled here, into the alp-sdk module library) and the app's own
+# main.cpp (which #includes catch_amalgamated.hpp) must see the SAME
+# macro state, or the two TUs parse the shared header differently
+# (ODR risk). See that CMakeLists.txt's comment for what each macro
+# does.
+zephyr_library_compile_definitions_ifdef(CONFIG_ALP_SDK_CATCH2_VENDORED
+    CATCH_AMALGAMATED_CUSTOM_MAIN
+    CATCH_CONFIG_NO_POSIX_SIGNALS
+)
+
 # Instance-capability helpers (<alp/cap_instance.h>).  Hand-written
 # runtime logic that does not depend on per-SoC metadata; always
 # compiled so any subsystem can call alp_capabilities_has().

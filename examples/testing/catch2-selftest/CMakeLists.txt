@@ -36,44 +36,13 @@ list(APPEND OVERLAY_CONFIG ${_alp_generated})
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(catch2_selftest LANGUAGES C CXX)
 
-# --------------------------------------------------------------------
-# Locate the west-fetched Catch2 module (west.yml's `catchorg/Catch2`
-# `extras-cpp`-adjacent entry, pinned at modules/lib/catch2).
-# Catch2 carries no zephyr/module.yml (it's a generic CMake project,
-# not a Zephyr module), so it can't ride in via ZEPHYR_EXTRA_MODULES'
-# usual CMakeLists.txt/Kconfig auto-include -- it never becomes a
-# `zephyr_library()`.  Instead we scan the ZEPHYR_MODULES cache
-# variable (populated from `west twister ... -x
-# ZEPHYR_MODULES="<alp-sdk-root>;<path-to-catch2-checkout>"`, see the
-# README) for the checkout and compile Catch2's own recommended
-# "amalgamated" single-TU distribution
-# (extras/catch_amalgamated.{hpp,cpp}) directly into this app.
-# --------------------------------------------------------------------
-set(CATCH2_MODULE_DIR "" CACHE PATH
-    "Path to a Catch2 checkout containing extras/catch_amalgamated.cpp")
-
-if(NOT CATCH2_MODULE_DIR)
-    foreach(_mod ${ZEPHYR_MODULES})
-        if(EXISTS ${_mod}/extras/catch_amalgamated.cpp)
-            set(CATCH2_MODULE_DIR ${_mod})
-        endif()
-    endforeach()
-endif()
-
-if(NOT CATCH2_MODULE_DIR)
-    message(FATAL_ERROR
-        "catch2-selftest: no Catch2 checkout found. Fetch the "
-        "`catchorg/Catch2` west module (west.yml, path "
-        "modules/lib/catch2) and pass it via "
-        "-x ZEPHYR_MODULES=\"<alp-sdk-root>;<path-to-catch2>\", "
-        "or set -DCATCH2_MODULE_DIR=<path-to-catch2> directly.")
-endif()
-
-target_sources(app PRIVATE
-    src/main.cpp
-    ${CATCH2_MODULE_DIR}/extras/catch_amalgamated.cpp
-)
-target_include_directories(app PRIVATE ${CATCH2_MODULE_DIR}/extras)
+# Catch2's amalgamated single-TU distribution is vendored in-tree at
+# vendors/catch2/ -- see that directory's README.md for the why. The
+# alp-sdk Zephyr module (zephyr/CMakeLists.txt) compiles
+# catch_amalgamated.cpp and adds its include path automatically because
+# board.yaml's `libraries: [catch2]` sets CONFIG_ALP_CATCH2_SW=y;
+# nothing to wire here beyond this app's own source.
+target_sources(app PRIVATE src/main.cpp)
 
 # Tell catch_amalgamated.cpp to skip its own default main() -- src/main.cpp
 # supplies one so it can print the SDK's `[catch2-selftest] done` marker.

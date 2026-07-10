@@ -36,62 +36,19 @@ list(APPEND OVERLAY_CONFIG ${_alp_generated})
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(u8g2_oled_draw LANGUAGES C)
 
-# --- Locate the u8g2 module -------------------------------------------------
-#
-# u8g2 (https://github.com/olikraus/u8g2) ships no zephyr/module.yml, so
-# Zephyr's module loader (zephyr_module.cmake) silently skips it even when
-# it's listed on ZEPHYR_MODULES -- board.yaml's `libraries: [u8g2]` only
-# gets us CONFIG_ALP_U8G2_SW_BLIT=y (see zephyr/Kconfig.alp-libraries), not
-# an include path or compiled sources. This example does that wiring by
-# hand: ZEPHYR_MODULES is still the right place to *locate* the checkout
-# (twister passes it via -x ZEPHYR_MODULES="<sdk>;<u8g2-checkout>"), we
-# just don't rely on Zephyr's module loader to build it.
-if(DEFINED ENV{ALP_U8G2_MODULE_DIR})
-    set(U8G2_MODULE_DIR $ENV{ALP_U8G2_MODULE_DIR})
-else()
-    foreach(_mod ${ZEPHYR_MODULES})
-        if(EXISTS ${_mod}/csrc/u8g2.h)
-            set(U8G2_MODULE_DIR ${_mod})
-        endif()
-    endforeach()
-endif()
-
-if(NOT DEFINED U8G2_MODULE_DIR)
-    message(FATAL_ERROR
-        "u8g2 module not found. Pass its checkout on ZEPHYR_MODULES, e.g.\n"
-        "  west twister -T examples/display/u8g2-oled-draw -p native_sim/native/64 \\\n"
-        "      -x ZEPHYR_MODULES=\"$ENV{ALP_SDK_ROOT};/path/to/u8g2\"\n"
-        "or set ALP_U8G2_MODULE_DIR directly. (No zephyr/module.yml ships "
-        "upstream, so ZEPHYR_MODULES only helps us *find* the checkout --"
-        "see this file's u8g2 comment block.)")
-endif()
-
-# --- Minimal u8g2 core subset -----------------------------------------------
-#
-# u8g2's csrc/ has ~120 files; u8g2_fonts.c alone bundles every font (tens
-# of MB) and u8g2_d_setup.c wires ~200 real panel drivers. Neither is
-# reachable from this "no real panel" example, so we hand-pick the core
-# draw pipeline (setup/buffer/hvline/box/font/kerning + the u8x8 glue those
-# lean on) and supply our own RAM/null device + one extracted font glyph
-# table locally -- see src/u8g2_ram_null.c and src/u8g2_font_6x10_tr.c.
-set(U8G2_CORE_SOURCES
-    ${U8G2_MODULE_DIR}/csrc/u8x8_setup.c
-    ${U8G2_MODULE_DIR}/csrc/u8x8_display.c
-    ${U8G2_MODULE_DIR}/csrc/u8x8_8x8.c
-    ${U8G2_MODULE_DIR}/csrc/u8g2_setup.c
-    ${U8G2_MODULE_DIR}/csrc/u8g2_buffer.c
-    ${U8G2_MODULE_DIR}/csrc/u8g2_hvline.c
-    ${U8G2_MODULE_DIR}/csrc/u8g2_ll_hvline.c
-    ${U8G2_MODULE_DIR}/csrc/u8g2_box.c
-    ${U8G2_MODULE_DIR}/csrc/u8g2_font.c
-    ${U8G2_MODULE_DIR}/csrc/u8g2_kerning.c
-    ${U8G2_MODULE_DIR}/csrc/u8g2_intersection.c
-)
-
-target_include_directories(app PRIVATE ${U8G2_MODULE_DIR}/csrc)
+# u8g2's minimal core draw pipeline (u8g2_SetupBuffer/hvline/box/font +
+# the u8x8 HAL it rides on) is vendored in-tree at vendors/u8g2/csrc --
+# see that directory's README.md for the file list + why. The alp-sdk
+# Zephyr module (zephyr/CMakeLists.txt) compiles it into this build
+# automatically because board.yaml's `libraries: [u8g2]` sets
+# CONFIG_ALP_U8G2_SW_BLIT=y; nothing to wire here beyond the app's own
+# sources. Building against the FULL upstream u8g2 checkout instead
+# (real panel drivers, bundled fonts) is still possible for a customer
+# who wants one -- point ZEPHYR_MODULES at a checkout with csrc/u8g2.h
+# and add its csrc/ to the include path ahead of the vendored one --
+# not needed for this example, which only exercises the vendored core.
 target_sources(app PRIVATE
     src/main.c
     src/u8g2_ram_null.c
     src/u8g2_font_6x10_tr.c
-    ${U8G2_CORE_SOURCES}
 )

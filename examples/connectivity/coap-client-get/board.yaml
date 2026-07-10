@@ -1,21 +1,22 @@
-# board.yaml -- libcoap PDU build/parse teaching example (no socket).
+# board.yaml -- CoAP PDU build/parse teaching example (no socket).
 #
-# `cores.m55_hp.libraries: [libcoap]` makes alp_project.py emit
-# CONFIG_ALP_COAP_NO_TLS=y (this example's crypto-off SW-fallback marker
-# from metadata/library-profiles/libcoap/hw-backends.yaml). It does NOT
-# by itself enable the upstream module's own CONFIG_LIBCOAP -- that
-# Kconfig symbol lives in the fetched module's own zephyr/Kconfig, so
-# prj.conf carries it explicitly. See README.md.
+# `libraries: [coap]` is the ADR 0018 top-level part: alp_project.py reads
+# metadata/libraries/coap.yaml and emits CONFIG_NETWORKING=y + CONFIG_COAP=y
+# into the generated alp.conf fragment -- CoAP is the IN-TREE Zephyr
+# subsystem at subsys/net/lib/coap/ (west module `zephyr` itself carries it,
+# no separate west pin to fetch). prj.conf keeps only the app-specific stack
+# size. See README.md.
 som:
   sku: E1M-AEN801
 
 preset: e1m-evk
 
+libraries:
+  - coap
+
 cores:
   m55_hp:
     app: ./src
-    libraries:
-      - libcoap
     # PDU construction/parsing only -- no socket opened, no peripheral.
     peripherals: []
 

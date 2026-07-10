@@ -18,10 +18,10 @@ cores:
     peripherals: []
     # Emits CONFIG_ALP_CATCH2_SW=y (Kconfig.alp-libraries: "Catch2
     # (always pure-SW)", no HW-accelerator binding possible -- see
-    # metadata/library-profiles/catch2/hw-backends.yaml). The Catch2
-    # sources themselves come from the west-fetched `catchorg/Catch2`
-    # module (modules/lib/catch2, no zephyr/module.yml -- wired in
-    # by this example's CMakeLists.txt, NOT by the loader).
+    # metadata/library-profiles/catch2/hw-backends.yaml). That same
+    # Kconfig symbol gates the alp-sdk Zephyr module compiling the
+    # vendored Catch2 amalgamated distribution (vendors/catch2/,
+    # no zephyr/module.yml upstream -- see that directory's README.md).
     libraries: [catch2]
 
 diagnostics:

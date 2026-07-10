@@ -248,9 +248,22 @@ manifest:
           # backend's MbedTLS-PSA fallthrough, examples/aen/aen-se-crypto)
           # resolves on `west update` without the bench-side symlink.
           - tf-psa-crypto
-          # nanopb is also pulled in by Zephyr's tree when ALP_NANOPB
-          # is enabled.  Our SDK uses it via the upstream Zephyr
-          # module (no extras-tier1 pin needed for v0.5).
+          # nanopb (modules/lib/nanopb, no `groups:` restriction in
+          # Zephyr's own west.yml -- default-enabled there) backs
+          # `libraries: [nanopb]` (metadata/libraries/nanopb.yaml,
+          # CONFIG_NANOPB) and examples/connectivity/nanopb-encode-decode.
+          # Was missing from the allowlist -- same trap as littlefs
+          # above (#3p-lib-examples Task 0): the stale comment here used
+          # to claim "our SDK uses it via the upstream Zephyr module",
+          # but nothing actually allowlisted it, so an alp-sdk-topdir
+          # workspace's `west update` never fetched it and
+          # ZEPHYR_NANOPB_MODULE_DIR stayed unset. NOTE: this is
+          # DIFFERENT from the dormant `nanopb` pin under the
+          # `extras-lwrb-nanopb` group below (SDK-internal mproc IPC
+          # framing, a separate consumer on a separate revision) --
+          # that group stays disabled by default, so there is no path
+          # collision under default settings.
+          - nanopb
 
     # SDK-internal dependencies pinned ahead of their consumers landing
     # for real.  Behind the `extras-lwrb-nanopb` group (disabled above)

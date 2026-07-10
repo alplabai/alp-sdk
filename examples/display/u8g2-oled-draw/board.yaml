@@ -15,11 +15,11 @@ preset: e1m-evk
 cores:
   m55_hp:
     app: ./src
-    # u8g2 has no zephyr/module.yml upstream (see CMakeLists.txt),
-    # so `libraries: [u8g2]` only buys the CONFIG_ALP_U8G2_SW_BLIT
-    # Kconfig knob (see zephyr/Kconfig.alp-libraries) -- it does NOT
-    # wire the module's csrc/ include path or sources. This example's
-    # own CMakeLists.txt does that by hand.
+    # u8g2 has no zephyr/module.yml upstream, so `libraries: [u8g2]`
+    # sets the CONFIG_ALP_U8G2_SW_BLIT Kconfig knob (see
+    # zephyr/Kconfig.alp-libraries) -- the alp-sdk Zephyr module then
+    # compiles the vendored core draw pipeline (vendors/u8g2/csrc/,
+    # gated on that same Kconfig symbol) automatically. See README.md.
     libraries:
       - u8g2
     peripherals: []

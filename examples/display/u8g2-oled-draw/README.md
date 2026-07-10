@@ -20,49 +20,48 @@ art -- the same draw calls a real SSD1306 build would issue.
   the core u8g2 drawing primitives.
 * Reading the u8g2 RAM buffer directly (there's no "get pixel" call in
   u8g2's own API -- see `u8g2_ram_null_dump()`).
-* Why this example ships its own `CMakeLists.txt` source list instead
-  of a `libraries: [u8g2]` auto-wire (see "Why the manual CMake" below).
+* Why u8g2's core draw pipeline is vendored in-tree instead of
+  west-fetched (see "Why vendored" below).
 
-## Why the manual CMake
+## Why vendored
 
-u8g2 (vendored at a path passed via `ZEPHYR_MODULES`, e.g.
-`modules/lib/u8g2`) ships **no** `zephyr/module.yml`, so Zephyr's module
-loader silently skips it even when it's listed on `ZEPHYR_MODULES`.
-`board.yaml`'s `libraries: [u8g2]` still buys the
-`CONFIG_ALP_U8G2_SW_BLIT` Kconfig knob (see
-`zephyr/Kconfig.alp-libraries`), documenting the backend selection the
-same way every other library does -- it just doesn't wire sources.
+u8g2 ships **no** `zephyr/module.yml`, so Zephyr's module loader
+silently skips it even when its checkout sits on `ZEPHYR_MODULES` --
+and its `extras-tier1` west pin (`west.yml`) is behind a
+disabled-by-default group, so a standard CI/customer `west update`
+never fetches it anyway. u8g2's `csrc/` tree is also not something
+you'd want to compile wholesale even if it were fetched: `u8g2_fonts.c`
+alone bundles every font u8g2 ships (tens of MB of glyph data) and
+`u8g2_d_setup.c` wires ~200 real panel drivers, neither reachable from
+a "no real panel" example.
 
-u8g2's `csrc/` tree is also not something you'd want to compile
-wholesale: `u8g2_fonts.c` alone bundles every font u8g2 ships (tens of
-MB of glyph data) and `u8g2_d_setup.c` wires ~200 real panel drivers.
-Neither is reachable from a "no real panel" example, so
-`CMakeLists.txt` hand-picks the core draw pipeline (setup, buffer,
-hvline, box, font, kerning, intersection -- plus the u8x8 glue those
-lean on) and this directory supplies its own null device
-(`src/u8g2_ram_null.c`) and a single extracted font glyph table
-(`src/u8g2_font_6x10_tr.c`, copied verbatim out of `u8g2_fonts.c` --
-see that file's header comment). If a future example needs a second
-font or a real panel driver, extend `U8G2_CORE_SOURCES` in
-`CMakeLists.txt` rather than pulling in the bundled files wholesale.
+`vendors/u8g2/csrc/` (see that directory's README.md) carries only the
+hand-picked core draw pipeline (setup, buffer, hvline, box, font,
+kerning, intersection -- plus the u8x8 glue those lean on), compiled
+into the build by the alp-sdk Zephyr module (`zephyr/CMakeLists.txt`)
+whenever `CONFIG_ALP_U8G2_SW_BLIT` is set (`board.yaml`'s
+`libraries: [u8g2]` -- see `zephyr/Kconfig.alp-libraries`) -- the same
+auto-wire every other library gets; this example needs **no** manual
+CMake beyond its own `src/*.c` list. This directory supplies its own
+null device (`src/u8g2_ram_null.c`) and a single extracted font glyph
+table (`src/u8g2_font_6x10_tr.c`, copied verbatim out of
+`u8g2_fonts.c` -- see that file's header comment). If a future example
+needs a second font or a real panel driver, extend
+`vendors/u8g2/csrc/`'s file list (or point at a full external checkout
+-- see that README) rather than vendoring the bundled files wholesale.
 
 ## Build
 
 ```bash
-# From the alp-sdk root, with the u8g2 checkout available locally
-# (it has no west.yml pin -- see "Why the manual CMake" above):
-west twister -T examples/display/u8g2-oled-draw -p native_sim/native/64 \
-    -x ZEPHYR_MODULES="$(pwd);/path/to/u8g2"
-
-# Equivalent `west build`:
-west build -b native_sim/native/64 examples/display/u8g2-oled-draw \
-    -- -DZEPHYR_MODULES="$(pwd);/path/to/u8g2"
+west build -b native_sim/native/64 examples/display/u8g2-oled-draw
 west build -t run
 ```
 
-If the u8g2 checkout lives somewhere `ZEPHYR_MODULES` search can't
-reach (e.g. it's not a west module at all), set `ALP_U8G2_MODULE_DIR`
-instead -- see `CMakeLists.txt`.
+No `ZEPHYR_MODULES`/`-x` flags needed -- the vendored core builds
+standalone. A customer wanting the full upstream tree (real panel
+drivers, bundled fonts) instead of the vendored subset can still point
+at an external checkout; see `vendors/u8g2/README.md` and this
+example's `CMakeLists.txt` comment.
 
 ## Expected output
 
