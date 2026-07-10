@@ -17,6 +17,14 @@ if(NOT DEFINED ZEPHYR_BASE)
         # unconditionally (zephyr/CMakeLists.txt); baremetal/yocto
         # never did, leaving alp_has/alp_cap_name undefined (#593).
         ${CMAKE_CURRENT_SOURCE_DIR}/../cap.c
+        # alp_status_name() / alp_status_description() -- generated from the
+        # alp_status_t enum (scripts/gen_status_strings.py).  Pure C reading
+        # <alp/peripheral.h>; the description table gates on
+        # CONFIG_ALP_STATUS_DESCRIPTIONS internally, which the top-level
+        # CMakeLists.txt defines by default for plain-CMake builds too
+        # (ALP_SDK_STATUS_DESCRIPTIONS option) -- mirrors the cap.c precedent
+        # of always shipping the same symbol on every OS backend (#593).
+        ${CMAKE_CURRENT_SOURCE_DIR}/../status_strings.c
         # <alp/hw_info.h> EEPROM-manifest reader.  Despite the
         # `_zephyr` filename it is OS-agnostic (no Zephyr headers --
         # only Kconfig `CONFIG_ALP_SDK_HW_INFO*` feature-test macros,
