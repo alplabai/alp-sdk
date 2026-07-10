@@ -13,6 +13,9 @@
 
 #include "u8g2.h"
 
+/* Verbatim u8g2 font glyph table; do not hand-format. */
+/* clang-format off */
+
 /*
   Fontname: -Misc-Fixed-Medium-R-Normal--10-100-75-75-C-60-ISO10646-1
   Copyright: Public domain terminal emulator font.  Share and enjoy.
