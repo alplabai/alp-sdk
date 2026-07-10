@@ -109,6 +109,21 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 		alp_internal_set_last_error(ALP_ERR_INVAL);
 		return NULL;
 	}
+	/* ALP_SPI_NO_CS (0xFFFFFFFF) has no spidev mapping: the kernel's
+     * spidev minor is a DT-assigned chip-select index, not a "there is
+     * no CS" sentinel, so formatting it in verbatim used to probe
+     * "/dev/spidev<bus>.4294967295" and fail with a confusing ENOENT.
+     * There is no portable Linux convention today for "controller must
+     * not drive CS" independent of a specific DT-registered spidev
+     * node, so refuse before opening a nonsensical path rather than
+     * misrepresent the request.  Boards that manage CS externally
+     * should bind the kernel-registered spidev node for that bus at
+     * its real (board-assigned) minor and drive CS themselves via
+     * alp_gpio_*, exactly like the CMSIS/Zephyr backends do. */
+	if (cfg->cs_pin_id == ALP_SPI_NO_CS) {
+		alp_internal_set_last_error(ALP_ERR_NOSUPPORT);
+		return NULL;
+	}
 
 	char path[40];
 	int  n = snprintf(path, sizeof(path), "/dev/spidev%u.%u", cfg->bus_id, cfg->cs_pin_id);

@@ -73,39 +73,79 @@ void alp_internal_set_last_error(alp_status_t s)
 }
 
 /* ------------------------------------------------------------------ */
-/* Delay primitives -- minimal calibrated busy-loop fallback.          */
+/* Delay primitives.                                                   */
 /*                                                                     */
-/* Yocto + baremetal don't (yet) ship a real impl, so the public       */
-/* alp_delay_us / alp_delay_ms surface lands here as a portable spin   */
-/* loop.  Iteration count is rough -- the function-call + bounds-check */
-/* overhead dominates at high us values; tuning is intentionally       */
-/* avoided to keep stub_backend.c portable across SoCs.  Apps that     */
-/* need cycle-accurate sub-microsecond timing should run on Zephyr     */
-/* (where the backend dispatches to k_busy_wait) or wait for the       */
-/* per-backend HAL bodies to land.                                     */
+/* On a Linux host (the real Yocto target, and the ALP_SOM=none        */
+/* "baremetal" plain-CMake build, which -- absent a vendor cross       */
+/* toolchain file -- also compiles and runs natively on the CI host)   */
+/* clock_nanosleep(CLOCK_MONOTONIC) gives an accurate, scheduler-       */
+/* yielding wait; the loop below retries across EINTR (the request is  */
+/* relative, so clock_nanosleep rewrites `ts` with the remaining time   */
+/* on interruption) so a signal never truncates the sleep short of the  */
+/* contract's "at least" floor.                                        */
+/*                                                                     */
+/* A genuine non-Linux bare-metal target (no vendor HAL delay override  */
+/* exists yet -- see vendors/<som>/) has no clock to measure against,   */
+/* so it falls through to a busy-loop.  The loop deliberately           */
+/* over-provisions its per-microsecond iteration count rather than risk */
+/* an early return; slower cores simply overshoot; "at least us elapses"*/
+/* never becomes "well under us".  A vendor HAL bring-up should replace  */
+/* it with a cycle-counter-driven wait (SysTick / DWT->CYCCNT / core     */
+/* timer) once one lands.                                               */
 /* ------------------------------------------------------------------ */
+
+#if defined(__linux__)
+
+#include <errno.h>
+#include <time.h>
+
+static void z_delay_clock_nanosleep(long sec, long nsec)
+{
+	struct timespec ts = { .tv_sec = sec, .tv_nsec = nsec };
+	while (clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &ts) == EINTR) {
+		/* `ts` now holds the remaining time; retry until it elapses. */
+	}
+}
 
 void alp_delay_us(uint32_t us)
 {
 	if (us == 0u) return;
-	/* ~10 NOPs per us at ~1 GHz with -O0 is in the right ballpark for
-     * SoCs in the Apache-2.0 target list.  Volatile prevents the
-     * optimiser from collapsing the loop. */
-	volatile uint32_t spin = us * 10u;
-	while (spin != 0u) {
-		--spin;
+	z_delay_clock_nanosleep((long)(us / 1000000u), (long)(us % 1000000u) * 1000L);
+}
+
+void alp_delay_ms(uint32_t ms)
+{
+	if (ms == 0u) return;
+	z_delay_clock_nanosleep((long)(ms / 1000u), (long)(ms % 1000u) * 1000000L);
+}
+
+#else /* !__linux__ -- no OS clock; fall back to an over-provisioned spin */
+
+/* Deliberately large: chosen so even a multi-GHz core still spins for
+ * at least 1 us per iteration of the outer loop below.  Overflow-safe
+ * by construction -- the multiplication is bounded to one us worth of
+ * spins per outer-loop pass instead of `us * SPINS_PER_US` in one shot. */
+#define ALP_DELAY_STUB_SPINS_PER_US 100000u
+
+void alp_delay_us(uint32_t us)
+{
+	for (uint32_t i = 0u; i < us; i++) {
+		volatile uint32_t spin = ALP_DELAY_STUB_SPINS_PER_US;
+		while (spin != 0u) {
+			--spin;
+		}
 	}
 }
 
 void alp_delay_ms(uint32_t ms)
 {
 	if (ms == 0u) return;
-	/* Defer to the us path so a future calibration improvement
-     * benefits both surfaces simultaneously. */
 	for (uint32_t i = 0u; i < ms; i++) {
 		alp_delay_us(1000u);
 	}
 }
+
+#endif /* __linux__ */
 
 /* ------------------------------------------------------------------ */
 /* I2C / SPI / GPIO / UART (peripheral.h)                              */
