@@ -939,6 +939,10 @@
       "script": "scripts/check_system_manifest.py"
     },
     {
+      "purpose": "Validate metadata/templates/catalog-v1.json against the public template contract (metadata/schemas/template-catalog-v1.schema.json) AND drift-check every record against the real tree.",
+      "script": "scripts/check_template_catalog.py"
+    },
+    {
       "purpose": "Test-coverage audit: walk every public header in include/alp/, list the declared functions, and check that at least one test file under tests/ mentions each one.",
       "script": "scripts/check_test_coverage.py"
     },
