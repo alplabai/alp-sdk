@@ -217,3 +217,188 @@ ZTEST(alp_can_registry, test_alp_can_remove_filter_public_dispatch)
 
 	ops->close(&h.state);
 }
+
+/* ---------- (h) alp_can_send enforces the started-handle contract (#601) -- */
+
+ZTEST(alp_can_registry, test_send_enforces_started_handle_contract)
+{
+	/* Drive alp_can_send() through the real public dispatcher
+     * (src/can_dispatch.c) against the sw_fallback ops directly --
+     * the started-handle guard is dispatcher-level and must fire
+     * *before* any backend is reached, so seeing NOT_READY (not the
+     * sw_fallback's own NOSUPPORT) here proves the gate ran first. */
+	const alp_can_ops_t *ops = _find_sw_fallback_ops();
+	zassert_not_null(ops);
+
+	struct alp_can h;
+	memset(&h, 0, sizeof(h));
+	alp_capabilities_t caps = { 0 };
+	alp_can_config_t   cfg  = {
+		.bus_id             = 0u,
+		.bitrate_nominal_hz = 500000u,
+		.bitrate_data_hz    = 0u,
+		.mode               = ALP_CAN_MODE_CLASSIC,
+		.loopback           = false,
+	};
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+	h.state.ops = ops;
+	h.in_use    = true;
+	h.started   = false; /* never started */
+
+	alp_can_frame_t frame = { .id = 0x123, .dlc = 8u };
+
+	/* send before start -> ALP_ERR_NOT_READY, never reaches the
+     * backend. */
+	zassert_equal(alp_can_send(&h, &frame, 10u), ALP_ERR_NOT_READY);
+
+	/* send once "started" -> gate opens, backend is reached (and
+     * sw_fallback's send is unconditionally NOSUPPORT, which is how we
+     * tell "gate open" apart from "gate closed"). */
+	h.started = true;
+	zassert_equal(alp_can_send(&h, &frame, 10u), ALP_ERR_NOSUPPORT);
+
+	/* send after stop -> ALP_ERR_NOT_READY again. */
+	h.started = false;
+	zassert_equal(alp_can_send(&h, &frame, 10u), ALP_ERR_NOT_READY);
+
+	ops->close(&h.state);
+}
+
+/* ---------- (i) real zephyr_drv end-to-end: start/send/stop/restart ------- */
+
+ZTEST(alp_can_registry, test_zephyr_drv_send_contract_end_to_end)
+{
+	/* boards/native_sim*.overlay aliases alp-can0 to native_sim's
+     * built-in emulated `can_loopback0`, so this goes through the real
+     * zephyr_drv backend (not sw_fallback) -- covers the full public
+     * open/start/send/stop/restart cycle against a real Zephyr CAN
+     * device (#601's acceptance list: before start, after stop,
+     * restart then send). */
+	alp_can_config_t cfg = {
+		.bus_id             = 0u,
+		.bitrate_nominal_hz = 500000u,
+		.bitrate_data_hz    = 0u,
+		.mode               = ALP_CAN_MODE_CLASSIC,
+		.loopback           = false,
+	};
+	alp_can_t *h = alp_can_open(&cfg);
+	zassert_not_null(h);
+
+	alp_can_frame_t frame = { .id = 0x123, .dlc = 8u };
+
+	/* send before start */
+	zassert_equal(alp_can_send(h, &frame, 100u), ALP_ERR_NOT_READY);
+
+	zassert_equal(alp_can_start(h), ALP_OK);
+	zassert_equal(alp_can_send(h, &frame, 100u), ALP_OK);
+
+	zassert_equal(alp_can_stop(h), ALP_OK);
+	/* send after stop */
+	zassert_equal(alp_can_send(h, &frame, 100u), ALP_ERR_NOT_READY);
+
+	/* restart followed by a successful send */
+	zassert_equal(alp_can_start(h), ALP_OK);
+	zassert_equal(alp_can_send(h, &frame, 100u), ALP_OK);
+
+	alp_can_close(h);
+}
+
+/* ---------- (j) remove_filter frees the cb_table slot -- no leak (#599) --- */
+
+ZTEST(alp_can_registry, test_zephyr_drv_remove_filter_frees_slot)
+{
+	alp_can_config_t cfg = {
+		.bus_id             = 0u,
+		.bitrate_nominal_hz = 500000u,
+		.bitrate_data_hz    = 0u,
+		.mode               = ALP_CAN_MODE_CLASSIC,
+		.loopback           = false,
+	};
+	alp_can_t *h = alp_can_open(&cfg);
+	zassert_not_null(h);
+	zassert_equal(alp_can_start(h), ALP_OK);
+
+	/* More than MAX_FILTERS (16) sequential add/remove cycles must not
+     * exhaust the cb_table -- each remove has to free the slot it used,
+     * or this loop starts failing well before 20 iterations. */
+	alp_can_filter_t cycle_filter = { .id = 0x100u, .mask = 0x7FFu, .ext_id = false };
+	for (int i = 0; i < 20; ++i) {
+		int32_t fid = -1;
+		zassert_equal(alp_can_add_filter(h, &cycle_filter, _rx_cb_noop, NULL, &fid), ALP_OK);
+		zassert_equal(alp_can_remove_filter(h, fid), ALP_OK);
+	}
+
+	/* Fill every one of the 16 slots, confirm the 17th is genuinely
+     * NOMEM (no spare capacity left at all), then free exactly one and
+     * confirm the next add succeeds.  Before the fix, remove_filter()
+     * never cleared cb_table, so this add would still return
+     * ALP_ERR_NOMEM even though nothing else is active -- this is the
+     * issue's literal acceptance criterion. */
+	int32_t fids[16];
+	for (int i = 0; i < 16; ++i) {
+		alp_can_filter_t f = { .id = (uint32_t)(0x200 + i), .mask = 0x7FFu };
+		zassert_equal(alp_can_add_filter(h, &f, _rx_cb_noop, NULL, &fids[i]), ALP_OK);
+	}
+	int32_t          overflow_fid = -1;
+	alp_can_filter_t f17          = { .id = 0x300u, .mask = 0x7FFu };
+	zassert_equal(alp_can_add_filter(h, &f17, _rx_cb_noop, NULL, &overflow_fid), ALP_ERR_NOMEM);
+
+	zassert_equal(alp_can_remove_filter(h, fids[0]), ALP_OK);
+	int32_t reused_fid = -1;
+	zassert_equal(alp_can_add_filter(h, &f17, _rx_cb_noop, NULL, &reused_fid), ALP_OK);
+
+	/* Removing an id that was never installed must fail -- previously
+     * remove_filter() unconditionally returned ALP_OK regardless of
+     * whether the id was real. */
+	zassert_equal(alp_can_remove_filter(h, 0x7FFF), ALP_ERR_INVAL);
+
+	/* Leave the device clean for the next test. */
+	for (int i = 1; i < 16; ++i) {
+		zassert_equal(alp_can_remove_filter(h, fids[i]), ALP_OK);
+	}
+	zassert_equal(alp_can_remove_filter(h, reused_fid), ALP_OK);
+
+	alp_can_close(h);
+}
+
+/* ---------- (k) close() unregisters filters at the device level (#599) ---- */
+
+ZTEST(alp_can_registry, test_zephyr_drv_close_unregisters_filters)
+{
+	alp_can_config_t cfg = {
+		.bus_id             = 0u,
+		.bitrate_nominal_hz = 500000u,
+		.bitrate_data_hz    = 0u,
+		.mode               = ALP_CAN_MODE_CLASSIC,
+		.loopback           = false,
+	};
+
+	/* Handle A: fill every device-level filter slot, then close
+     * WITHOUT removing any of them first -- before the fix, z_close()
+     * never called can_remove_rx_filter(), so these stayed live on the
+     * shared can_loopback0 device past close. */
+	alp_can_t *ha = alp_can_open(&cfg);
+	zassert_not_null(ha);
+	zassert_equal(alp_can_start(ha), ALP_OK);
+	for (int i = 0; i < 16; ++i) {
+		alp_can_filter_t f   = { .id = (uint32_t)(0x400 + i), .mask = 0x7FFu };
+		int32_t          fid = -1;
+		zassert_equal(alp_can_add_filter(ha, &f, _rx_cb_noop, NULL, &fid), ALP_OK);
+	}
+	alp_can_close(ha); /* filters left installed on purpose */
+
+	/* Handle B: reopen (fresh sidecar) and fill every device-level slot
+     * again.  If close() actually unregistered handle A's filters, the
+     * underlying can_loopback0 device has 16 free slots and every add
+     * here succeeds; if it leaked them, the device is still full and
+     * add_filter fails immediately. */
+	alp_can_t *hb = alp_can_open(&cfg);
+	zassert_not_null(hb);
+	zassert_equal(alp_can_start(hb), ALP_OK);
+	for (int i = 0; i < 16; ++i) {
+		alp_can_filter_t f   = { .id = (uint32_t)(0x500 + i), .mask = 0x7FFu };
+		int32_t          fid = -1;
+		zassert_equal(alp_can_add_filter(hb, &f, _rx_cb_noop, NULL, &fid), ALP_OK);
+	}
+	alp_can_close(hb);
+}
