@@ -1,21 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# **[UNTESTED]**: this scenario does not currently build -- TinyGSM
-# needs Arduino's String class (WString.h), which is beyond this
-# example's small Arduino-Stream shim (see README.md "Why this
-# doesn't build"). Kept in the canonical per-example shape (matching
-# every other example's testcase.yaml) so the file exists as a
-# correct template; do not add this to a CI run that expects every
-# scenario to pass.
+# Builds + runs on native_sim.  The example drives the modem AT
+# exchange over a mock transcript Stream; it does not link libtinygsm
+# (whose AT engine needs Arduino's full String class) -- see README.md
+# "Why the real library isn't linked".
 
 sample:
   name: tinygsm-modem-at
   description: |
-    Drives TinyGSM's TinyGsm modem class against a mock AT-transcript
-    Stream (AT -> OK, AT+CGMI -> SIMCOM) and prints init()/
-    getModemInfo() results. UNTESTED: TinyGSM's ArduinoCompat layer
-    needs Arduino's String class, which this example's small Stream
-    shim does not provide, so this scenario does not build.
+    Runs the cellular-modem AT bring-up flow TinyGSM drives (AT
+    liveness, then ATI / AT+CGMI / AT+GMM for getModemInfo) against a
+    mock AT-transcript Stream, and prints the assembled modem info.
+    The real TinyGsm modem(stream) call sequence is documented in
+    src/main.cpp; linking the upstream library needs a full Arduino
+    String, so this example demonstrates the same exchange directly.
 
 tests:
   alp_sdk.example.tinygsm_modem_at:

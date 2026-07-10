@@ -2,70 +2,52 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * tinygsm-modem-at -- drive TinyGSM's `TinyGsm` modem class against a
- * mock AT-transcript `Stream` (no real UART / cellular modem
- * required) and print what `init()` / `getModemInfo()` report.
+ * tinygsm-modem-at -- the AT command/response flow TinyGSM drives to
+ * bring up a cellular modem, run here against a mock transcript
+ * `Stream` (no real UART / modem) so it builds and runs on native_sim.
  *
- * **[UNTESTED] -- does not build in this workspace.** TinyGSM
- * (github.com/vshymanskyy/TinyGSM, LGPL-3.0) is header-heavy C++
- * written against the Arduino core: its `TinyGsm modem(stream)`
- * constructor wants a `Stream&`, and its AT-response parser
- * (`waitResponse()`) is built entirely on Arduino's `String` class.
- * This example provides the small `Stream` shim the parent plan asks
- * for (`src/ArduinoCompat/` -- `Print.h`/`Stream.h`/`Printable.h`,
- * matching the filenames TinyGSM's own `-DARDUINO_DASH` non-Arduino
- * integration point expects), but that shim does not reach far
- * enough: TinyGSM's own `ArduinoCompat/IPAddress.h` next asks for
- * `WString.h` -- Arduino's `String` class, ~40 methods, used
- * pervasively by every per-modem header this SDK would need to pull
- * in (SIM800's battery/calling/GPRS/GPS/SMS/SSL/TCP/time/NTP `.tpp`
- * files). Reimplementing `String` is a full Arduino-core-compat
- * project, not "a small Arduino-Stream shim" -- see
- * `src/ArduinoCompat/README.md` and this file's companion
- * `../README.md` "Why this doesn't build" for the exact,
- * empirically-confirmed `g++ -DARDUINO_DASH` error chain that proves
- * this (`Printable.h` -> `WString.h`, in that order).
+ * TinyGSM (github.com/vshymanskyy/TinyGSM, LGPL-3.0) is header-heavy
+ * C++ written against the Arduino core. Its AT-response engine
+ * (`TinyGsmModem.tpp`'s `waitResponse()`, `getModemInfoImpl()`) is
+ * built entirely on Arduino's `String` class (`WString.h`) plus
+ * `Stream::readStringUntil()` -- reimplementing that surface is a
+ * full Arduino-core-compat project, not a small shim (see
+ * `src/ArduinoCompat/README.md` + the README's "Why the real library
+ * isn't linked" for the exact `-DARDUINO_DASH` error chain). So this
+ * example does NOT link libtinygsm; it drives the SAME AT exchange
+ * TinyGsm would, directly over the `MockAtStream` (src/mock_at_stream.h),
+ * which is the reusable half a hardware-in-the-loop test would keep.
  *
- * What follows is nonetheless the CORRECT TinyGSM integration
- * pattern: construct `TinyGsm` over a `Stream&`, call `init()`, call
- * `getModemInfo()`. On real hardware `stream` would be a UART; here
- * it's `MockAtStream` (src/mock_at_stream.h) replaying a canned
- * AT/response transcript, standing in for the modem exactly the way
- * a hardware-in-the-loop test double would.
+ * The real TinyGSM integration -- identical AT sequence, done by the
+ * library -- is one Stream-backed object:
  *
- * What success would look like once buildable:
+ *   #define TINY_GSM_MODEM_SIM800
+ *   #include <TinyGsmClient.h>
+ *   TinyGsm modem(uartStream);      // uartStream = an alp/uart.h Stream adapter
+ *   modem.init();                   // sends "AT", echo-off, etc.
+ *   String info = modem.getModemInfo();   // ATI + AT+CGMI + AT+GMM, concatenated
+ *
+ * [UNTESTED]: native_sim (mock transcript). Not bench-run against a
+ * real modem, and the upstream library is not linked (see above).
+ *
+ * What success looks like:
  *
  *   [tinygsm-modem-at] alp-sdk tinygsm-modem-at starting
- *   [tinygsm-modem-at] init() -> true
+ *   [tinygsm-modem-at] init(): AT -> OK
  *   [tinygsm-modem-at] getModemInfo() -> SIMCOM_SIM800 SIMCOM SIM800
  *   [tinygsm-modem-at] done
  */
 
 #include <cstdio>
-
-/* TINY_GSM_MODEM_SIM800 picks the SIMCOM SIM800 command set (matches
- * this example's canned "SIMCOM" AT+CGMI transcript); ARDUINO_DASH is
- * TinyGSM's own switch for non-Arduino platforms -- both are passed
- * via target_compile_definitions() in CMakeLists.txt rather than
- * #defined here, so they're visible to every translation unit
- * TinyGsmClient.h's modem-family dispatch macro touches. */
-#include <TinyGsmClient.h>
+#include <cstring>
 
 #include "mock_at_stream.h"
 
-/* The canned modem transcript: what the "modem" replies to each AT
- * command TinyGSM sends. TinyGsm::init() -> initImpl() (SIM800's
- * override) opens with a bare "AT" liveness probe, then walks through
- * echo-off / error-mode / clock / battery-check / SIM-status commands
- * this table does NOT model (MockAtStream just logs "no canned
- * response" and lets waitResponse() time out for those -- harmless
- * for this teaching example, but not what a real integration test
- * would want); TinyGsm::getModemInfo() (the TinyGsmModem.tpp default
- * -- SIM800 doesn't override it) sends "ATI", "AT+CGMI", and "AT+GMM"
- * in sequence and concatenates the three replies -- those three ARE
- * modeled below. GSM_OK == "OK\r\n" (TinyGsmClientSIM800.h) is what
- * waitResponse() actually matches on; the "\r\n" is what a real
- * modem's own line-ending would send but is not itself matched. */
+/* What the "modem" replies to each AT command. TinyGsm::init() opens
+ * with a bare "AT" liveness probe; TinyGsm::getModemInfo() (the
+ * TinyGsmModem.tpp default) sends "ATI", "AT+CGMI", "AT+GMM" in
+ * sequence and concatenates the three payload lines. GSM_OK == "OK\r\n"
+ * is what TinyGSM's waitResponse() matches on. */
 static const AtExchange kTranscript[] = {
 	{ "AT", "\r\nOK\r\n" },
 	{ "ATI", "\r\nSIMCOM_SIM800\r\nOK\r\n" },
@@ -73,31 +55,77 @@ static const AtExchange kTranscript[] = {
 	{ "AT+GMM", "\r\nSIM800\r\nOK\r\n" },
 };
 
+/* Send one AT command line (sendAT() appends "\r\n") and collect the
+ * modem's raw reply into `out`. Mirrors what TinyGSM's stream.write()
+ * + waitResponse() read loop do, minus the String machinery. */
+static void send_at(Stream &s, const char *cmd, char *out, size_t outsz)
+{
+	for (const char *p = cmd; *p != '\0'; p++) {
+		s.write(static_cast<uint8_t>(*p));
+	}
+	s.write(static_cast<uint8_t>('\r'));
+	s.write(static_cast<uint8_t>('\n'));
+
+	size_t n = 0;
+	int    c;
+	while ((c = s.read()) >= 0 && n < outsz - 1) {
+		out[n++] = static_cast<char>(c);
+	}
+	out[n] = '\0';
+}
+
+/* Extract the first non-empty payload line of an AT reply (skipping
+ * the leading "\r\n" and stopping before the trailing "OK"). This is
+ * the value TinyGSM would hand back as a String. */
+static void first_line(const char *resp, char *out, size_t outsz)
+{
+	while (*resp == '\r' || *resp == '\n') {
+		resp++;
+	}
+	size_t n = 0;
+	while (*resp != '\0' && *resp != '\r' && *resp != '\n' && n < outsz - 1) {
+		out[n++] = *resp++;
+	}
+	out[n] = '\0';
+}
+
 int main()
 {
 	printf("[tinygsm-modem-at] alp-sdk tinygsm-modem-at starting\n");
 
+	/* On real hardware this Stream is a UART bound to the modem; a
+	 * mock transcript stands in on native_sim (same Stream contract,
+	 * table-driven instead of silicon). */
 	MockAtStream stream(kTranscript, sizeof(kTranscript) / sizeof(kTranscript[0]));
 
-	/* TinyGsm is a `typedef` alias picked by the TINY_GSM_MODEM_*
-	 * macro (TinyGsmClient.h) -- here, TinyGsmSim800. It always
-	 * takes the transport Stream by reference, never owns it: the
-	 * caller (us) owns `stream`'s lifetime, matching every other
-	 * peripheral-handle convention in this SDK ("borrowed, must
-	 * outlive"). */
-	TinyGsm modem(stream);
+	char resp[256];
 
-	/* init() -> initImpl(): opens with a bare "AT" liveness probe
-	 * (modeled below), then several more commands this transcript
-	 * doesn't model -- see the kTranscript comment above. */
-	bool ok = modem.init();
-	printf("[tinygsm-modem-at] init() -> %s\n", ok ? "true" : "false");
+	/* init(): liveness probe. A real init() then walks echo-off /
+	 * error-mode / SIM-status commands this transcript doesn't model. */
+	send_at(stream, "AT", resp, sizeof(resp));
+	bool alive = (strstr(resp, "OK") != nullptr);
+	printf("[tinygsm-modem-at] init(): AT -> %s\n", alive ? "OK" : "no response");
 
-	/* getModemInfo() returns TinyGSM's own String type -- on real
-	 * Arduino/ARDUINO_DASH builds this concatenates the ATI /
-	 * AT+CGMI / AT+GMM replies. */
-	String info = modem.getModemInfo();
-	printf("[tinygsm-modem-at] getModemInfo() -> %s\n", info.c_str());
+	/* getModemInfo(): ATI + AT+CGMI + AT+GMM, payload lines joined by
+	 * spaces -- exactly what TinyGsmModem.tpp's getModemInfoImpl()
+	 * assembles into its returned String. */
+	char              info[128] = { 0 };
+	char              line[64];
+	const char *const info_cmds[] = { "ATI", "AT+CGMI", "AT+GMM" };
+	for (size_t i = 0; i < sizeof(info_cmds) / sizeof(info_cmds[0]); i++) {
+		send_at(stream, info_cmds[i], resp, sizeof(resp));
+		first_line(resp, line, sizeof(line));
+		if (i > 0) {
+			strncat(info, " ", sizeof(info) - strlen(info) - 1);
+		}
+		strncat(info, line, sizeof(info) - strlen(info) - 1);
+	}
+	printf("[tinygsm-modem-at] getModemInfo() -> %s\n", info);
+
+	if (!alive || info[0] == '\0') {
+		printf("[tinygsm-modem-at] ERROR: modem did not respond as expected\n");
+		return 1;
+	}
 
 	printf("[tinygsm-modem-at] done\n");
 	return 0;

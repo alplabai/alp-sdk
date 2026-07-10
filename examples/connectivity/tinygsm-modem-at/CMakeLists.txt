@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# **[UNTESTED]**: does not build in this workspace -- see README.md
-# "Why this doesn't build". This CMakeLists.txt is still wired the
-# way a working build needs it, so it's a correct template.
+# Builds + runs on native_sim.  The example drives the modem AT
+# exchange directly over a mock Stream (src/mock_at_stream.h) rather
+# than linking libtinygsm, whose AT engine needs Arduino's full
+# `String` class -- see README.md "Why the real library isn't linked"
+# and the commented real-TinyGsm wiring at the end of this file.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -42,23 +44,19 @@ project(tinygsm_modem_at LANGUAGES C CXX)
 
 target_sources(app PRIVATE src/main.cpp)
 
-# TinyGSM has no zephyr/module.yml (west.yml `path:
-# modules/lib/tinygsm`, `extras-tier1` group -- see west.yml), so
-# unlike a real Zephyr module its include directory isn't added
-# automatically; wire it in explicitly, same as minimp3-decode's
-# vendored header.
-target_include_directories(app PRIVATE ${ZEPHYR_BASE}/../modules/lib/tinygsm/src)
-
-# Our own small Arduino-Stream shim (Print.h / Stream.h / Printable.h
-# -- see src/ArduinoCompat/README.md) -- wins over the module's
-# ArduinoCompat/Client.h's quote-includes of the same filenames since
-# our directory is on the include path.
+# The mock Stream (src/mock_at_stream.h) derives from our small
+# Arduino-Stream shim (src/ArduinoCompat/ -- Print.h / Stream.h /
+# Printable.h); put that dir on the include path.
 target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/ArduinoCompat)
 
-# TINY_GSM_MODEM_SIM800 selects the SIMCOM SIM800 command set --
-# matches this example's canned "SIMCOM" AT+CGMI transcript.
-# ARDUINO_DASH is TinyGSM's own opt-in switch (TinyGsmCommon.h) for
-# non-Arduino platforms: it swaps the Arduino-core `<Client.h>`
-# `#include` for the module's bundled `<ArduinoCompat/Client.h>`,
-# which is what our shim targets.
-target_compile_definitions(app PRIVATE TINY_GSM_MODEM_SIM800 ARDUINO_DASH)
+# Real TinyGSM (ARM/Arduino targets, once you supply a full Arduino
+# `String`): fetch the module with
+# `west update --group-filter +extras-tier1`, then link it -- it ships
+# no zephyr/module.yml, so name its src/ dir explicitly and select the
+# modem family + non-Arduino switch:
+#
+#   target_include_directories(app PRIVATE ${ZEPHYR_TINYGSM_MODULE_DIR}/src)
+#   target_compile_definitions(app PRIVATE TINY_GSM_MODEM_SIM800 ARDUINO_DASH)
+#
+# and switch src/main.cpp to the `TinyGsm modem(stream)` sequence shown
+# in its banner.

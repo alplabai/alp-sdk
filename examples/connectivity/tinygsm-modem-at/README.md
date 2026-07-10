@@ -1,15 +1,19 @@
 # tinygsm-modem-at
 
-Drives [TinyGSM](https://github.com/vshymanskyy/TinyGSM)'s `TinyGsm`
-modem class against a mock AT-transcript `Stream` (`AT` -> `OK`,
-`AT+CGMI` -> `SIMCOM`, ...) and prints what `init()` /
-`getModemInfo()` report. No real UART or cellular modem required.
+Runs the cellular-modem AT bring-up flow [TinyGSM](https://github.com/vshymanskyy/TinyGSM)
+drives -- an `AT` liveness probe, then `ATI` / `AT+CGMI` / `AT+GMM`
+for `getModemInfo()` -- against a mock AT-transcript `Stream`, and
+prints the assembled modem info. No real UART or cellular modem
+required.
 
-**[UNTESTED] -- does not build in this workspace.** See "Why this
-doesn't build" below for the exact, empirically-confirmed reason, and
-"What this teaches instead" for what you still get out of it.
+**[UNTESTED]** -- builds and runs on `native_sim` (mock transcript);
+not bench-run against a real modem. It drives the AT exchange
+*directly* over the mock `Stream` rather than linking the upstream
+TinyGSM library -- see "Why the real library isn't linked" below for
+the reason, and `src/main.cpp` for the real `TinyGsm modem(stream)`
+call sequence it mirrors.
 
-## Why this doesn't build
+## Why the real library isn't linked
 
 TinyGSM (`modules/lib/tinygsm`, `west.yml`'s `extras-tier1` group) is
 written against the Arduino core and ships no `zephyr/module.yml`, so
@@ -59,15 +63,19 @@ not "a small Arduino-Stream shim" -- see
 [`src/ArduinoCompat/README.md`](src/ArduinoCompat/README.md) for the
 full accounting.
 
-## What this teaches instead
+## What this builds instead
 
-`src/main.cpp` writes out the **correct, real TinyGSM integration
-pattern** regardless: construct `TinyGsm modem(stream)` over a
-`Stream&`, call `modem.init()`, call `modem.getModemInfo()`. The mock
-(`src/mock_at_stream.h`) replays a canned AT-command/response
-transcript through that same `Stream&` interface a real UART would
-present -- functionally the same contract, just table-driven instead
-of silicon-driven.
+`src/main.cpp` drives the **same AT exchange TinyGSM would** --
+`init()`'s `AT` liveness probe, then `getModemInfo()`'s `ATI` /
+`AT+CGMI` / `AT+GMM` sequence with the three payload lines joined into
+one info string -- directly over the mock `Stream`, with no dependency
+on Arduino's `String`. So it builds and runs on `native_sim`. The
+**real, library-driven** form of exactly this flow --
+`TinyGsm modem(stream); modem.init(); modem.getModemInfo();` -- is
+written out in `src/main.cpp`'s banner, ready to swap in on a target
+that supplies a full Arduino `String`. The mock
+(`src/mock_at_stream.h`) presents the same `Stream&` contract a real
+UART would, so that swap changes only what backs the stream.
 
 ## Swapping in a real UART
 
