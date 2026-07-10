@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: doctest-selftest
+  description: |
+    Minimal doctest v2.4.11 unit-test binary -- 3 TEST_CASEs over a
+    trivial clamp() helper. HOST unit-test example: the framework's
+    own pass summary IS the app output; the SDK's uniform
+    `[doctest-selftest] done` marker is printed only after doctest
+    reports zero failures.
+
+tests:
+  alp_sdk.example.doctest_selftest:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[doctest-selftest\\] done"
+    tags:
+      - alp-sdk
+      - example
+      - testing
+      - doctest-selftest

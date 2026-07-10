@@ -1,0 +1,31 @@
+# board.yaml -- per-app project configuration for the
+# doctest-selftest example.
+#
+# This is a HOST unit-test example, not a firmware demo: the "app"
+# is a small doctest test binary that builds and runs on native_sim
+# and exits 0.  No peripherals, no chips -- `libraries: [doctest]`
+# is the whole point.  `som.sku`/`preset` are kept identical to
+# hello-world purely so scripts/alp_project.py has a SoM to derive
+# the baseline SoC config from; doctest itself never touches
+# hardware and this example never runs on real silicon.
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []
+    # Pulls in vendors/doctest/include (the vendored single header,
+    # Task 0 of the 3p-library-examples batch) and
+    # metadata/library-profiles/doctest/doctest_config.h onto the
+    # include path -- see zephyr/CMakeLists.txt. doctest has no
+    # Kconfig knob of its own (it's header-only); the loader emits
+    # a documentation-only comment line in alp.conf for this entry.
+    libraries: [doctest]
+
+diagnostics:
+  log_level: info
