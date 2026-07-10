@@ -111,11 +111,11 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_CAN_CONFIG_DEFAULT(id)                                                                 \
-	((alp_can_config_t){ .bus_id             = (id),                                               \
-	                     .bitrate_nominal_hz = 500000u,                                            \
-	                     .bitrate_data_hz    = 0u,                                                 \
-	                     .mode               = ALP_CAN_MODE_CLASSIC,                               \
+#define ALP_CAN_CONFIG_DEFAULT(id) \
+	((alp_can_config_t){ .bus_id             = (id), \
+	                     .bitrate_nominal_hz = 500000u, \
+	                     .bitrate_data_hz    = 0u, \
+	                     .mode               = ALP_CAN_MODE_CLASSIC, \
 	                     .loopback           = false })
 
 /**

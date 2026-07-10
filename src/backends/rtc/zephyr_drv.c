@@ -21,9 +21,9 @@
 
 #include "rtc_ops.h"
 
-#define ALP_RTC_DEV_OR_NULL(idx)                                                                   \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_rtc, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_rtc, idx)))),                                  \
+#define ALP_RTC_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_rtc, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_rtc, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {

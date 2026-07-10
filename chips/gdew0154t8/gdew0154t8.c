@@ -61,8 +61,11 @@ alp_status_t gdew0154t8_hw_reset(gdew0154t8_t *dev)
 	return ALP_OK;
 }
 
-alp_status_t gdew0154t8_init(
-    gdew0154t8_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gpio_t *reset, alp_gpio_t *busy)
+alp_status_t gdew0154t8_init(gdew0154t8_t *dev,
+                             alp_spi_t    *spi,
+                             alp_gpio_t   *dc,
+                             alp_gpio_t   *reset,
+                             alp_gpio_t   *busy)
 {
 	if (dev == NULL || spi == NULL || dc == NULL) return ALP_ERR_INVAL;
 	memset(dev, 0, sizeof(*dev));

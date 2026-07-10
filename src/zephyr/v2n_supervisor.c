@@ -52,8 +52,8 @@
 #define CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS 100
 #endif
 
-#define V2N_BOTH_BUSES_DISABLED                                                                    \
-	((CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID < 0) &&                                             \
+#define V2N_BOTH_BUSES_DISABLED \
+	((CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID < 0) && \
 	 (CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID < 0))
 
 static struct {

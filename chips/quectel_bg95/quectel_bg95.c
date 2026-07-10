@@ -49,8 +49,11 @@ alp_status_t quectel_bg95_send_cmd(quectel_bg95_t *dev, const char *at_cmd)
 	return s;
 }
 
-alp_status_t quectel_bg95_read_response(
-    quectel_bg95_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms)
+alp_status_t quectel_bg95_read_response(quectel_bg95_t *dev,
+                                        uint8_t        *buf,
+                                        size_t          max,
+                                        size_t         *received_out,
+                                        uint32_t        timeout_ms)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (buf == NULL || max == 0) return ALP_ERR_INVAL;

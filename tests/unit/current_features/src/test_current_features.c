@@ -75,9 +75,10 @@ ZTEST(current_features, test_inrush_slope_is_negative)
 	zassert_true(f.slope_a < -1.0f, "decaying inrush -> strongly negative slope");
 }
 
-static const struct curr_config CFG = {
-	.off_a = 0.05f, .overload_a = 2.5f, .ripple_min_a = 0.05f, .inrush_slope_a = 1.0f
-};
+static const struct curr_config CFG = { .off_a          = 0.05f,
+	                                    .overload_a     = 2.5f,
+	                                    .ripple_min_a   = 0.05f,
+	                                    .inrush_slope_a = 1.0f };
 
 static struct curr_features feat_of(float dc_a, float ripple_a)
 {

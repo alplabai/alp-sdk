@@ -80,9 +80,9 @@
  * device_is_ready (no display driver instantiates cdc200/mipi_dsi yet).
  */
 #define CDC_BOUND (DT_NODE_HAS_STATUS(CDC_NODE, okay) && DT_NODE_HAS_COMPAT(CDC_NODE, tes_cdc_2_1))
-#define DSI_BOUND                                                                                  \
+#define DSI_BOUND \
 	(DT_NODE_HAS_STATUS(DSI_NODE, okay) && DT_NODE_HAS_COMPAT(DSI_NODE, snps_designware_dsi))
-#define DPHY_BOUND                                                                                 \
+#define DPHY_BOUND \
 	(DT_NODE_HAS_STATUS(DPHY_NODE, okay) && DT_NODE_HAS_COMPAT(DPHY_NODE, snps_designware_dphy))
 
 /*

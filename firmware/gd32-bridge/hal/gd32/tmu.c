@@ -68,8 +68,11 @@ static uint32_t f32_to_bits(float f)
 	return b;
 }
 
-int bridge_hw_tmu_compute(
-    uint8_t function, uint8_t format, uint32_t in_a, uint32_t in_b, uint32_t *result_out)
+int bridge_hw_tmu_compute(uint8_t   function,
+                          uint8_t   format,
+                          uint32_t  in_a,
+                          uint32_t  in_b,
+                          uint32_t *result_out)
 {
 	if (result_out == 0) return BRIDGE_HW_ERR_INVAL;
 	*result_out = 0u;

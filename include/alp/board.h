@@ -23,7 +23,7 @@
 #elif defined(ALP_BOARD_E1M_EVK)
 #include "alp/boards/alp_e1m_evk_routes.h"
 #else
-#error                                                                                             \
+#error \
     "alp/board.h: no ALP_BOARD_* board selected. Set the example's board.yaml preset (e1m-evk / e1m-x-evk), or pass -DALP_BOARD_E1M_EVK / -DALP_BOARD_E1M_X_EVK."
 #endif
 

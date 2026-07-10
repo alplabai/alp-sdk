@@ -59,8 +59,8 @@
  * erase/program: one failed op otherwise poisons every later
  * ota_fmc_wait_ready with the latched error (silicon-verified: a single
  * PGERR short-circuited the whole remaining OTA session). */
-#define OTA_FMC_STAT_ERR_MASK                                                                      \
-	(FMC_STAT_WPERR | FMC_STAT_PGERR | FMC_STAT_PGSERR | FMC_STAT_PGAERR | FMC_STAT_RPERR |        \
+#define OTA_FMC_STAT_ERR_MASK \
+	(FMC_STAT_WPERR | FMC_STAT_PGERR | FMC_STAT_PGSERR | FMC_STAT_PGAERR | FMC_STAT_RPERR | \
 	 FMC_STAT_PGMERR | FMC_STAT_OBERR)
 
 bool ota_fmc_supported(void)

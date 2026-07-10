@@ -133,8 +133,8 @@ static int fake_bme280_init(const struct emul *target, const struct device *pare
 	return 0;
 }
 
-#define FAKE_BME280_DEFINE(n)                                                                      \
-	static struct fake_bme280_data fake_bme280_data_##n;                                           \
+#define FAKE_BME280_DEFINE(n) \
+	static struct fake_bme280_data fake_bme280_data_##n; \
 	EMUL_DT_INST_DEFINE(n, fake_bme280_init, &fake_bme280_data_##n, NULL, &fake_bme280_api, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_BME280_DEFINE)

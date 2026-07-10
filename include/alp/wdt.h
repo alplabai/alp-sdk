@@ -79,7 +79,7 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_WDT_CONFIG_DEFAULT(id)                                                                 \
+#define ALP_WDT_CONFIG_DEFAULT(id) \
 	((alp_wdt_config_t){ .wdt_id = (id), .timeout_ms = 1000u, .on_timeout = ALP_WDT_RESET_SOC })
 
 /**

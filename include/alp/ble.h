@@ -118,12 +118,12 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_BLE_ADV_CONFIG_DEFAULT(id)                                                             \
-	((alp_ble_adv_config_t){ .name            = (id),                                              \
-	                         .services        = NULL,                                              \
-	                         .num_services    = 0u,                                                \
-	                         .interval_min_ms = 100u,                                              \
-	                         .interval_max_ms = 200u,                                              \
+#define ALP_BLE_ADV_CONFIG_DEFAULT(id) \
+	((alp_ble_adv_config_t){ .name            = (id), \
+	                         .services        = NULL, \
+	                         .num_services    = 0u, \
+	                         .interval_min_ms = 100u, \
+	                         .interval_max_ms = 200u, \
 	                         .connectable     = true })
 
 /**

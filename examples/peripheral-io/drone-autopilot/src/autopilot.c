@@ -82,24 +82,34 @@ static inline float pid_step(pid_t *p, float setp, float meas, float dt_s)
 /* Per-axis PID instances.  Gains here are conservative starting
  * points; real flight tuning lives in a sysbuild-time KConfig
  * overlay so customers don't have to recompile to twiddle. */
-static pid_t s_rate_p = {
-	.kp = 0.10f, .ki = 0.05f, .kd = 0.001f, .out_min = -1.0f, .out_max = 1.0f
-};
-static pid_t s_rate_q = {
-	.kp = 0.10f, .ki = 0.05f, .kd = 0.001f, .out_min = -1.0f, .out_max = 1.0f
-};
+static pid_t s_rate_p = { .kp      = 0.10f,
+	                      .ki      = 0.05f,
+	                      .kd      = 0.001f,
+	                      .out_min = -1.0f,
+	                      .out_max = 1.0f };
+static pid_t s_rate_q = { .kp      = 0.10f,
+	                      .ki      = 0.05f,
+	                      .kd      = 0.001f,
+	                      .out_min = -1.0f,
+	                      .out_max = 1.0f };
 static pid_t s_rate_r = { .kp = 0.08f, .ki = 0.02f, .kd = 0.0f, .out_min = -1.0f, .out_max = 1.0f };
 
-static pid_t s_atti_roll = {
-	.kp = 4.0f, .ki = 0.0f, .kd = 0.0f, .out_min = -250.f, .out_max = 250.f
-}; /* dps */
-static pid_t s_atti_pitch = {
-	.kp = 4.0f, .ki = 0.0f, .kd = 0.0f, .out_min = -250.f, .out_max = 250.f
-};
+static pid_t s_atti_roll  = { .kp      = 4.0f,
+	                          .ki      = 0.0f,
+	                          .kd      = 0.0f,
+	                          .out_min = -250.f,
+	                          .out_max = 250.f }; /* dps */
+static pid_t s_atti_pitch = { .kp      = 4.0f,
+	                          .ki      = 0.0f,
+	                          .kd      = 0.0f,
+	                          .out_min = -250.f,
+	                          .out_max = 250.f };
 
-static pid_t s_alt_pid = {
-	.kp = 1.5f, .ki = 0.15f, .kd = 0.5f, .out_min = -3.0f, .out_max = 3.0f
-}; /* m/s */
+static pid_t s_alt_pid = { .kp      = 1.5f,
+	                       .ki      = 0.15f,
+	                       .kd      = 0.5f,
+	                       .out_min = -3.0f,
+	                       .out_max = 3.0f }; /* m/s */
 
 /* ───────── Bring-up ───────── */
 int autopilot_init(autopilot_state_t *s)

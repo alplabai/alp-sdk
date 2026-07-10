@@ -57,8 +57,8 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_CAMERA_CONFIG_DEFAULT(id)                                                              \
-	((alp_camera_config_t){                                                                        \
+#define ALP_CAMERA_CONFIG_DEFAULT(id) \
+	((alp_camera_config_t){ \
 	    .camera_id = (id), .width = 0u, .height = 0u, .fps = 30u, .format = ALP_PIXFMT_RGB565 })
 
 typedef struct {

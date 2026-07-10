@@ -34,9 +34,9 @@
 
 #include "can_ops.h"
 
-#define ALP_CAN_DEV_OR_NULL(idx)                                                                   \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_can, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_can, idx)))),                                  \
+#define ALP_CAN_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_can, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_can, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {

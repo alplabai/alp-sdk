@@ -123,8 +123,11 @@ alp_status_t alp_mqtt_publish(alp_mqtt_t    *h,
 	return h->state.ops->publish(&h->state, topic, payload, len, qos, retain);
 }
 
-alp_status_t alp_mqtt_subscribe(
-    alp_mqtt_t *h, const char *topic_filter, alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user)
+alp_status_t alp_mqtt_subscribe(alp_mqtt_t       *h,
+                                const char       *topic_filter,
+                                alp_mqtt_qos_t    qos,
+                                alp_mqtt_msg_cb_t cb,
+                                void             *user)
 {
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
 	if (topic_filter == NULL || cb == NULL) return ALP_ERR_INVAL;

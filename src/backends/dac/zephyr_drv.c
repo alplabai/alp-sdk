@@ -37,9 +37,9 @@
 #if defined(CONFIG_DAC)
 #include <zephyr/drivers/dac.h>
 
-#define ALP_DAC_DEV_OR_NULL(idx)                                                                   \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_dac, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_dac, idx)))),                                  \
+#define ALP_DAC_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_dac, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_dac, idx)))), \
 	            (NULL))
 
 static const struct device *const alp_dac_devs[] = {
@@ -55,9 +55,9 @@ static const struct device *const alp_dac_devs[] = {
  * binding), so a hardcoded 3300 here would make every setpoint ~4.4x too low.  Channels whose
  * alias node lacks the property (e.g. the 3.3 V GD32/V2N DAC route) default to
  * 3300, preserving the historical rail-referenced behaviour for those SoCs. */
-#define ALP_DAC_REF_MV_OR_DEFAULT(idx)                                                             \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_dac, idx))),                                   \
-	            (DT_PROP_OR(DT_ALIAS(_CONCAT(alp_dac, idx)), alif_reference_mv, 3300)),            \
+#define ALP_DAC_REF_MV_OR_DEFAULT(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_dac, idx))), \
+	            (DT_PROP_OR(DT_ALIAS(_CONCAT(alp_dac, idx)), alif_reference_mv, 3300)), \
 	            (3300))
 
 static const uint16_t alp_dac_ref_mv[] = {

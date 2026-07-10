@@ -32,7 +32,7 @@
 #include "alp/update_log.h"
 #include "backends/update_log/update_log_ops.h"
 
-#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT) ||                                           \
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT) || \
     defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
 
 /* Same CPU-relative MHU-1 aliases as examples/aen/aen-dualcore-ipc. From either

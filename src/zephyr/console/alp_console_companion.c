@@ -1327,14 +1327,22 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
                   cmd_companion_ota_begin,
                   2,
                   0),
-    SHELL_CMD_ARG(
-        abort, NULL, "cancel the OTA session (back to idle)", cmd_companion_ota_abort, 1, 0),
+    SHELL_CMD_ARG(abort,
+                  NULL,
+                  "cancel the OTA session (back to idle)",
+                  cmd_companion_ota_abort,
+                  1,
+                  0),
     SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
     alp_companion_diag_subcmds,
-    SHELL_CMD_ARG(
-        info, NULL, "fw version / reset cause / uptime / role", cmd_companion_diag_info, 1, 0),
+    SHELL_CMD_ARG(info,
+                  NULL,
+                  "fw version / reset cause / uptime / role",
+                  cmd_companion_diag_info,
+                  1,
+                  0),
     SHELL_CMD_ARG(stats, NULL, "frame counters (ok / err)", cmd_companion_diag_stats, 1, 0),
     SHELL_CMD_ARG(loglevel,
                   NULL,
@@ -1353,8 +1361,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
                   cmd_companion_wifi_connect,
                   2,
                   2),
-    SHELL_CMD_ARG(
-        disconnect, NULL, "tear down the STA association", cmd_companion_wifi_disconnect, 1, 0),
+    SHELL_CMD_ARG(disconnect,
+                  NULL,
+                  "tear down the STA association",
+                  cmd_companion_wifi_disconnect,
+                  1,
+                  0),
     SHELL_CMD_ARG(ap,
                   NULL,
                   "ap <ssid> [pass] [wpa3]  -- start a soft-AP (no pass = open)",
@@ -1365,8 +1377,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     /* clang-format off */
     SHELL_CMD_ARG(ap-stop, NULL, "stop the soft-AP", cmd_companion_wifi_ap_stop, 1, 0),
     /* clang-format on */
-    SHELL_CMD_ARG(
-        status, NULL, "show connection state + rssi + ip", cmd_companion_wifi_status, 1, 0),
+    SHELL_CMD_ARG(status,
+                  NULL,
+                  "show connection state + rssi + ip",
+                  cmd_companion_wifi_status,
+                  1,
+                  0),
     SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
@@ -1403,10 +1419,18 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
     alp_companion_ble_subcmds,
-    SHELL_CMD_ARG(
-        enable, NULL, "enable the BLE controller + NimBLE host", cmd_companion_ble_enable, 1, 0),
-    SHELL_CMD_ARG(
-        disable, NULL, "disable the BLE controller + NimBLE host", cmd_companion_ble_disable, 1, 0),
+    SHELL_CMD_ARG(enable,
+                  NULL,
+                  "enable the BLE controller + NimBLE host",
+                  cmd_companion_ble_enable,
+                  1,
+                  0),
+    SHELL_CMD_ARG(disable,
+                  NULL,
+                  "disable the BLE controller + NimBLE host",
+                  cmd_companion_ble_disable,
+                  1,
+                  0),
     SHELL_CMD_ARG(scan,
                   NULL,
                   "scan for BLE advertisers (needs `ble enable` first)",
@@ -1417,8 +1441,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     /* clang-format off */
     SHELL_CMD_ARG(scan-stop, NULL, "stop an in-progress scan", cmd_companion_ble_scan_stop, 1, 0),
     /* clang-format on */
-    SHELL_CMD_ARG(
-        adv, NULL, "start connectable advertising (fixed interval)", cmd_companion_ble_adv, 1, 0),
+    SHELL_CMD_ARG(adv,
+                  NULL,
+                  "start connectable advertising (fixed interval)",
+                  cmd_companion_ble_adv,
+                  1,
+                  0),
     /* clang-format off */
     SHELL_CMD_ARG(adv-stop, NULL, "stop advertising", cmd_companion_ble_adv_stop, 1, 0),
     /* clang-format on */
@@ -1428,10 +1456,16 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
                   cmd_companion_ble_connect,
                   2,
                   1),
-    SHELL_CMD_ARG(
-        disconnect, NULL, "drop the active BLE connection", cmd_companion_ble_disconnect, 1, 0),
-    SHELL_CMD(
-        gatt, &alp_companion_ble_gatt_subcmds, "GATT (register / read / write / notify)", NULL),
+    SHELL_CMD_ARG(disconnect,
+                  NULL,
+                  "drop the active BLE connection",
+                  cmd_companion_ble_disconnect,
+                  1,
+                  0),
+    SHELL_CMD(gatt,
+              &alp_companion_ble_gatt_subcmds,
+              "GATT (register / read / write / notify)",
+              NULL),
     SHELL_SUBCMD_SET_END);
 #endif /* !CONFIG_ALP_SDK_V2N_SUPERVISOR */
 
@@ -1500,8 +1534,12 @@ static int cmd_companion_gpio_write(const struct shell *sh, size_t argc, char **
 
 SHELL_STATIC_SUBCMD_SET_CREATE(
     alp_companion_gpio_subcmds,
-    SHELL_CMD_ARG(
-        read, NULL, "read <0..31>  -- sample a GD32 GPIO pin", cmd_companion_gpio_read, 2, 0),
+    SHELL_CMD_ARG(read,
+                  NULL,
+                  "read <0..31>  -- sample a GD32 GPIO pin",
+                  cmd_companion_gpio_read,
+                  2,
+                  0),
 #if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE)
     SHELL_CMD_ARG(write,
                   NULL,
@@ -1529,8 +1567,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
               "CC3501E BLE (enable / disable / scan / scan-stop / adv / adv-stop / connect / "
               "disconnect / gatt)",
               NULL),
-    SHELL_CMD(
-        diag, &alp_companion_diag_subcmds, "CC3501E diagnostics (info / stats / loglevel)", NULL),
+    SHELL_CMD(diag,
+              &alp_companion_diag_subcmds,
+              "CC3501E diagnostics (info / stats / loglevel)",
+              NULL),
     SHELL_CMD(sock,
               &alp_companion_sock_subcmds,
               "CC3501E TCP/UDP sockets (tcp-get <ip> <port> <path>)",
@@ -1545,10 +1585,19 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
                   cmd_companion_reset,
                   1,
                   0),
-    SHELL_CMD_ARG(
-        bench, NULL, "bench [n] -- time n GET_VERSION round-trips", cmd_companion_bench, 1, 1),
+    SHELL_CMD_ARG(bench,
+                  NULL,
+                  "bench [n] -- time n GET_VERSION round-trips",
+                  cmd_companion_bench,
+                  1,
+                  1),
 #endif
     SHELL_SUBCMD_SET_END);
 
-SHELL_SUBCMD_ADD(
-    (alp), companion, &alp_companion_subcmds, "Companion chip bridge (GD32 / CC3501E)", NULL, 1, 0);
+SHELL_SUBCMD_ADD((alp),
+                 companion,
+                 &alp_companion_subcmds,
+                 "Companion chip bridge (GD32 / CC3501E)",
+                 NULL,
+                 1,
+                 0);

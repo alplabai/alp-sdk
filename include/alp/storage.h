@@ -75,7 +75,7 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_STORAGE_CONFIG_DEFAULT(id)                                                             \
+#define ALP_STORAGE_CONFIG_DEFAULT(id) \
 	((alp_storage_config_t){ .kind = (id), .instance_id = 0u, .freq_hz = 0u, .read_only = false })
 
 /** Block geometry, populated by @ref alp_storage_get_info. */

@@ -138,8 +138,11 @@ static bool meta_current(ota_meta_record_t *out, uint32_t *which_addr)
  * active slot's entry is rewritten (and only when `update_entry` -- a
  * ROLLBACK flips `active_slot` without touching the descriptors, so the
  * rolled-to slot keeps the len/CRC recorded when it was last written). */
-static bool meta_commit(
-    uint8_t active_slot, bool update_entry, uint32_t fw_ver, uint32_t img_len, uint32_t img_crc)
+static bool meta_commit(uint8_t  active_slot,
+                        bool     update_entry,
+                        uint32_t fw_ver,
+                        uint32_t img_len,
+                        uint32_t img_crc)
 {
 	ota_meta_record_t rec;
 	ota_meta_record_t cur;

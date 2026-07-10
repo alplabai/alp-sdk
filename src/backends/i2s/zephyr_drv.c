@@ -32,9 +32,9 @@
 
 #include "i2s_ops.h"
 
-#define ALP_I2S_DEV_OR_NULL(idx)                                                                   \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_i2s, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_i2s, idx)))),                                  \
+#define ALP_I2S_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_i2s, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_i2s, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {
@@ -219,8 +219,11 @@ z_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
 	return ALP_OK;
 }
 
-static alp_status_t z_read(
-    alp_i2s_backend_state_t *st, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
+static alp_status_t z_read(alp_i2s_backend_state_t *st,
+                           void                    *block,
+                           size_t                   bytes,
+                           size_t                  *bytes_out,
+                           uint32_t                 timeout_ms)
 {
 	(void)timeout_ms; /* upstream i2s_read has no per-call timeout */
 	alp_z_i2s_side_t    *s   = (alp_z_i2s_side_t *)st->be_data;

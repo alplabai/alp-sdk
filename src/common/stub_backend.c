@@ -284,8 +284,12 @@ alp_spi_target_t *alp_spi_target_open(const alp_spi_target_config_t *cfg)
 	z_last_error = ALP_ERR_NOSUPPORT;
 	return NULL;
 }
-alp_status_t alp_spi_target_transceive(
-    alp_spi_target_t *b, const uint8_t *t, uint8_t *r, size_t l, size_t *rl, uint32_t to_ms)
+alp_status_t alp_spi_target_transceive(alp_spi_target_t *b,
+                                       const uint8_t    *t,
+                                       uint8_t          *r,
+                                       size_t            l,
+                                       size_t           *rl,
+                                       uint32_t          to_ms)
 {
 	(void)b;
 	(void)t;
@@ -742,8 +746,11 @@ alp_status_t alp_can_send(alp_can_t *c, const alp_can_frame_t *f, uint32_t t)
 	(void)t;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_can_add_filter(
-    alp_can_t *c, const alp_can_filter_t *f, alp_can_rx_cb_t cb, void *u, int32_t *id)
+alp_status_t alp_can_add_filter(alp_can_t              *c,
+                                const alp_can_filter_t *f,
+                                alp_can_rx_cb_t         cb,
+                                void                   *u,
+                                int32_t                *id)
 {
 	(void)c;
 	(void)f;
@@ -1077,8 +1084,11 @@ alp_status_t alp_ble_gatt_register_service(alp_ble_t                   *b,
 	(void)h;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_ble_gatt_notify(
-    alp_ble_t *b, alp_ble_conn_t *c, alp_ble_attr_handle_t h, const uint8_t *p, size_t l)
+alp_status_t alp_ble_gatt_notify(alp_ble_t            *b,
+                                 alp_ble_conn_t       *c,
+                                 alp_ble_attr_handle_t h,
+                                 const uint8_t        *p,
+                                 size_t                l)
 {
 	(void)b;
 	(void)c;
@@ -1114,8 +1124,12 @@ alp_status_t alp_ble_disconnect(alp_ble_conn_t *c)
 	(void)c;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_ble_gatt_read(
-    alp_ble_conn_t *c, alp_ble_attr_handle_t h, uint8_t *o, size_t cap, size_t *ol, uint32_t t)
+alp_status_t alp_ble_gatt_read(alp_ble_conn_t       *c,
+                               alp_ble_attr_handle_t h,
+                               uint8_t              *o,
+                               size_t                cap,
+                               size_t               *ol,
+                               uint32_t              t)
 {
 	(void)c;
 	(void)h;
@@ -1125,8 +1139,11 @@ alp_status_t alp_ble_gatt_read(
 	(void)t;
 	return ALP_ERR_NOSUPPORT;
 }
-alp_status_t alp_ble_gatt_write(
-    alp_ble_conn_t *c, alp_ble_attr_handle_t h, const uint8_t *d, size_t l, uint32_t t)
+alp_status_t alp_ble_gatt_write(alp_ble_conn_t       *c,
+                                alp_ble_attr_handle_t h,
+                                const uint8_t        *d,
+                                size_t                l,
+                                uint32_t              t)
 {
 	(void)c;
 	(void)h;

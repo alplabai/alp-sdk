@@ -142,14 +142,14 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_ADC_CONFIG_DEFAULT(id)                                                                 \
-	((alp_adc_config_t){ .channel_id         = (id),                                               \
-	                     .resolution_bits    = 0u,                                                 \
-	                     .acquisition_us     = 0u,                                                 \
-	                     .reference          = ALP_ADC_REF_INTERNAL,                               \
-	                     .gain_num           = 1u,                                                 \
-	                     .gain_den           = 1u,                                                 \
-	                     .oversampling_ratio = 0u,                                                 \
+#define ALP_ADC_CONFIG_DEFAULT(id) \
+	((alp_adc_config_t){ .channel_id         = (id), \
+	                     .resolution_bits    = 0u, \
+	                     .acquisition_us     = 0u, \
+	                     .reference          = ALP_ADC_REF_INTERNAL, \
+	                     .gain_num           = 1u, \
+	                     .gain_den           = 1u, \
+	                     .oversampling_ratio = 0u, \
 	                     .sample_cycles      = 0u })
 
 /**
@@ -258,7 +258,7 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_ADC_STREAM_CONFIG_DEFAULT(id)                                                          \
+#define ALP_ADC_STREAM_CONFIG_DEFAULT(id) \
 	((alp_adc_stream_config_t){ .channel_id = (id), .sample_rate_hz = 0u })
 
 /**
@@ -369,8 +369,8 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_ADC_FILTER_CONFIG_DEFAULT(id)                                                          \
-	((alp_adc_filter_config_t){                                                                    \
+#define ALP_ADC_FILTER_CONFIG_DEFAULT(id) \
+	((alp_adc_filter_config_t){ \
 	    .channel_id = (id), .sample_rate_hz = 0u, .stages = NULL, .n_stages = 0u })
 
 /**
@@ -456,8 +456,8 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_ADC_SPECTRUM_CONFIG_DEFAULT(id)                                                        \
-	((alp_adc_spectrum_config_t){                                                                  \
+#define ALP_ADC_SPECTRUM_CONFIG_DEFAULT(id) \
+	((alp_adc_spectrum_config_t){ \
 	    .channel_id = (id), .sample_rate_hz = 0u, .stages = NULL, .n_stages = 0u })
 
 /**

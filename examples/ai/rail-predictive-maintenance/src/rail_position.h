@@ -62,8 +62,11 @@ bool rail_pos_update(struct rail_pos_state *st, double lat, double lon, bool has
  * @p speed_mps, and @p has_fix (status 'A' = fix, 'V' = void).  Returns
  * false if the sentence is not an RMC line.
  */
-bool rail_pos_parse_rmc(
-    const char *nmea, double *lat, double *lon, float *speed_mps, bool *has_fix);
+bool rail_pos_parse_rmc(const char *nmea,
+                        double     *lat,
+                        double     *lon,
+                        float      *speed_mps,
+                        bool       *has_fix);
 
 #ifdef __cplusplus
 }

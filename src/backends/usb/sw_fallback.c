@@ -60,8 +60,11 @@ sw_dev_write(alp_usb_dev_state_t *st, const uint8_t *data, size_t len, uint32_t 
 	return ALP_ERR_NOT_IMPLEMENTED;
 }
 
-static alp_status_t sw_dev_read(
-    alp_usb_dev_state_t *st, uint8_t *data, size_t len, size_t *out_len, uint32_t timeout_ms)
+static alp_status_t sw_dev_read(alp_usb_dev_state_t *st,
+                                uint8_t             *data,
+                                size_t               len,
+                                size_t              *out_len,
+                                uint32_t             timeout_ms)
 {
 	(void)st;
 	(void)data;

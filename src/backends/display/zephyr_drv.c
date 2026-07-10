@@ -58,9 +58,9 @@
 
 #include "display_ops.h"
 
-#define ALP_DISPLAY_DEV_OR_NULL(idx)                                                               \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_display, idx))),                               \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_display, idx)))),                              \
+#define ALP_DISPLAY_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_display, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_display, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {

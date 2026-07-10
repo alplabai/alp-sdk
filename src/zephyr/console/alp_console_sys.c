@@ -11,7 +11,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
 
-#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_REBOOT) && IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE) &&  \
+#if IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_CMD_REBOOT) && IS_ENABLED(CONFIG_ALP_SDK_CONSOLE_UNSAFE) && \
     IS_ENABLED(CONFIG_REBOOT)
 #include <zephyr/sys/reboot.h>
 #endif

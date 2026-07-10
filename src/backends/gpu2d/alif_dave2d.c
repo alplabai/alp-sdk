@@ -323,8 +323,8 @@ static alp_status_t dave2d_blend(alp_gpu2d_backend_state_t *state,
                                  uint32_t                   h,
                                  alp_gpu2d_blend_mode_t     mode)
 {
-	d2_device   *dev = (d2_device *)state->be_data;
-	d2_u32       src_bf, dst_bf, src_mode;
+	d2_device *dev = (d2_device *)state->be_data;
+	d2_u32     src_bf, dst_bf, src_mode;
 
 	if (mode == ALP_GPU2D_BLEND_ADDITIVE || mode == ALP_GPU2D_BLEND_MULTIPLY) {
 #if defined(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK)

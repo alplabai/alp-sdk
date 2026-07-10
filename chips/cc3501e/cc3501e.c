@@ -556,8 +556,11 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx)
 	    ctx, ALP_CC3501E_CMD_WIFI_SCAN_STOP, NULL, 0, NULL, 0, NULL, CC3501E_WIFI_DOWN_WINDOW_MS);
 }
 
-alp_status_t cc3501e_wifi_connect(
-    cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms)
+alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
+                                  const char *ssid,
+                                  uint8_t     sec_type,
+                                  const char *pass,
+                                  uint32_t    timeout_ms)
 {
 	if (ssid == NULL) return ALP_ERR_INVAL;
 	size_t ssid_len = strlen(ssid);
@@ -599,8 +602,11 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx)
 	    ctx, ALP_CC3501E_CMD_WIFI_DISCONNECT, NULL, 0, NULL, 0, NULL, CC3501E_WIFI_DOWN_WINDOW_MS);
 }
 
-alp_status_t cc3501e_wifi_ap_start(
-    cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms)
+alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
+                                   const char *ssid,
+                                   uint8_t     sec_type,
+                                   const char *pass,
+                                   uint32_t    timeout_ms)
 {
 	if (ssid == NULL) return ALP_ERR_INVAL;
 	size_t ssid_len = strlen(ssid);
@@ -756,8 +762,11 @@ alp_status_t cc3501e_sock_open(cc3501e_t *ctx,
 	return ALP_OK;
 }
 
-alp_status_t cc3501e_sock_connect(
-    cc3501e_t *ctx, uint16_t handle, const uint8_t ip[4], uint16_t port, uint32_t timeout_ms)
+alp_status_t cc3501e_sock_connect(cc3501e_t    *ctx,
+                                  uint16_t      handle,
+                                  const uint8_t ip[4],
+                                  uint16_t      port,
+                                  uint32_t      timeout_ms)
 {
 	if (ip == NULL) return ALP_ERR_INVAL;
 	/* SOCK_CONNECT (0x21) wire = alp_cc3501e_sock_connect_t: handle(LE16) |
@@ -1025,8 +1034,11 @@ alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
 	    ctx, ALP_CC3501E_CMD_BLE_GATT_REGISTER, descriptor, len, NULL, 0, NULL, timeout_ms);
 }
 
-alp_status_t cc3501e_ble_gatt_notify(
-    cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms)
+alp_status_t cc3501e_ble_gatt_notify(cc3501e_t     *ctx,
+                                     uint16_t       handle,
+                                     const uint8_t *data,
+                                     size_t         len,
+                                     uint32_t       timeout_ms)
 {
 	if (data == NULL && len > 0u) return ALP_ERR_INVAL;
 	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u)) return ALP_ERR_INVAL;
@@ -1040,8 +1052,12 @@ alp_status_t cc3501e_ble_gatt_notify(
 	    ctx, ALP_CC3501E_CMD_BLE_GATT_NOTIFY, buf, 2u + len, NULL, 0, NULL, timeout_ms);
 }
 
-alp_status_t cc3501e_ble_gatt_read(
-    cc3501e_t *ctx, uint16_t handle, uint8_t *out, size_t cap, size_t *out_len, uint32_t timeout_ms)
+alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx,
+                                   uint16_t   handle,
+                                   uint8_t   *out,
+                                   size_t     cap,
+                                   size_t    *out_len,
+                                   uint32_t   timeout_ms)
 {
 	if (out == NULL && cap > 0u) return ALP_ERR_INVAL;
 	if (out_len != NULL) *out_len = 0;
@@ -1056,8 +1072,11 @@ alp_status_t cc3501e_ble_gatt_read(
 	    ctx, ALP_CC3501E_CMD_BLE_GATT_READ, req, sizeof(req), out, cap, out_len, timeout_ms);
 }
 
-alp_status_t cc3501e_ble_gatt_write(
-    cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms)
+alp_status_t cc3501e_ble_gatt_write(cc3501e_t     *ctx,
+                                    uint16_t       handle,
+                                    const uint8_t *data,
+                                    size_t         len,
+                                    uint32_t       timeout_ms)
 {
 	if (data == NULL && len > 0u) return ALP_ERR_INVAL;
 	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - 2u)) return ALP_ERR_INVAL;
@@ -1228,8 +1247,11 @@ alp_status_t cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uin
 	return ALP_OK;
 }
 
-alp_status_t cc3501e_gpio_set_interrupt(
-    cc3501e_t *ctx, uint8_t pad, alp_cc3501e_gpio_edge_t edge, bool enabled, uint32_t timeout_ms)
+alp_status_t cc3501e_gpio_set_interrupt(cc3501e_t              *ctx,
+                                        uint8_t                 pad,
+                                        alp_cc3501e_gpio_edge_t edge,
+                                        bool                    enabled,
+                                        uint32_t                timeout_ms)
 {
 	alp_cc3501e_gpio_set_interrupt_t s = {
 		.cc3501e_gpio = pad,
@@ -1288,8 +1310,11 @@ alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t time
 	    ctx, ALP_CC3501E_CMD_OTA_BEGIN, req, sizeof(req), NULL, 0, NULL, timeout_ms);
 }
 
-alp_status_t cc3501e_ota_write(
-    cc3501e_t *ctx, uint32_t offset, const uint8_t *data, size_t len, uint32_t timeout_ms)
+alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
+                               uint32_t       offset,
+                               const uint8_t *data,
+                               size_t         len,
+                               uint32_t       timeout_ms)
 {
 	if (data == NULL || len == 0u || len > ALP_CC3501E_OTA_MAX_CHUNK) {
 		return ALP_ERR_INVAL;

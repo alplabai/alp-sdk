@@ -70,7 +70,7 @@
  * is called with is a plain offset-0 cast -- spelled out via offsetof
  * rather than assumed, so a future field reorder fails loudly instead
  * of silently miscasting. */
-#define ALP_TESTING_OWNER_OF(state_ptr)                                                            \
+#define ALP_TESTING_OWNER_OF(state_ptr) \
 	((struct alp_gpio *)((char *)(state_ptr) - offsetof(struct alp_gpio, state)))
 
 typedef struct {

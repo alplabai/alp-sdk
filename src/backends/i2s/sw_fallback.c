@@ -71,8 +71,11 @@ sw_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t 
 	return ALP_ERR_NOSUPPORT;
 }
 
-static alp_status_t sw_read(
-    alp_i2s_backend_state_t *st, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
+static alp_status_t sw_read(alp_i2s_backend_state_t *st,
+                            void                    *block,
+                            size_t                   bytes,
+                            size_t                  *bytes_out,
+                            uint32_t                 timeout_ms)
 {
 	(void)st;
 	(void)block;

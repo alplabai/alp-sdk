@@ -20,9 +20,9 @@
 
 #include "qenc_ops.h"
 
-#define ALP_QENC_DEV_OR_NULL(idx)                                                                  \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_qenc, idx))),                                  \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_qenc, idx)))),                                 \
+#define ALP_QENC_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_qenc, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_qenc, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {
