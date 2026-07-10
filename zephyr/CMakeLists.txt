@@ -1323,6 +1323,9 @@ if(CONFIG_ALP_SDK_TESTING)
 
     zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_UART
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/testing_drv.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_ADC
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/testing_drv.c)
 endif()
 
 # ---------------------------------------------------------------------------

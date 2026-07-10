@@ -49,3 +49,17 @@ config ALP_SDK_TESTING_UART
 	  any real or emulated UART controller.  The first
 	  <alp/testing/*> double whose read() path resolves a timeout
 	  against the virtual clock instead of ever blocking.
+
+config ALP_SDK_TESTING_ADC
+	bool "ADC test double (<alp/testing/adc.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 ADC test-double backend
+	  (src/backends/adc/testing_drv.c).  Lets a ztest drive
+	  alp_adc_* through a queued FIFO of raw conversion codes
+	  (latching the last value once the FIFO drains) and injected
+	  read faults, without any real or emulated ADC controller.
+	  Sets reference_uv / resolution_bits from the open() config (or
+	  a sane 3.3V/12-bit default) so alp_adc_read_uv()'s raw -> uV
+	  conversion in src/adc_dispatch.c is exercised correctly.

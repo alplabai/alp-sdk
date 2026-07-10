@@ -27,6 +27,7 @@ if(CONFIG_ALP_SDK_TESTING)
     target_sources(app PRIVATE
         src/behavior_gpio.c
         src/behavior_uart.c
+        src/behavior_adc.c
     )
 else()
     target_sources(app PRIVATE
