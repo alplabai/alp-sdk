@@ -178,7 +178,7 @@ set(ALP_SDK_CHIP_LIST
     ina236 inmp441 lis2dw12 lps22hb lsm6dso max31855 max31865
     max98357a maxim_max9295_9296 ms5611 mt6701 murata_lbee5hy2fy
     optiga_trust_m ov2640 ov5640 ov5645 ov7670 ov9281
-    pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
+    pca9451a pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
     rtl8211fdi rv3028c7 semtech_sx1262 semtech_sx1276 sh1106
     ssd1306 ssd1331 st7789 tas2563 tcal9538 ti_ds90ub953_954
     tlv320aic3204 tmc2209 tmp112 tps628640 tsl2591 ublox_max_m10s

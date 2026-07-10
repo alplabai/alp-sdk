@@ -38,6 +38,7 @@
 #include "alp/chips/gd32_swd.h"
 #include "alp/chips/act8760.h"
 #include "alp/chips/da9292.h"
+#include "alp/chips/pca9451a.h"
 #include "alp/chips/tps628640.h"
 #include "alp/chips/rv3028c7.h"
 #include "alp/chips/tmp112.h"
@@ -1762,6 +1763,109 @@ ZTEST(alp_chips, test_da9292_get_fault_pins)
      * the bridge's 0xFF "no sample" sentinel. */
 	zassert_equal(da9292_get_fault_pins(NULL, NULL, &flags), ALP_OK);
 	zassert_equal(flags, 0x00u);
+}
+
+/* ------------------------------------------------------------------ */
+/* pca9451a -- NXP PCA9451A on-module PMIC (E1M-NX9101)                */
+/*                                                                     */
+/* E1M-NX9101 doesn't exist on the bench yet (issue #474) -- these are */
+/* host-side smoke tests against a real alp_i2c_t handle backed by the */
+/* native_sim i2c-emul controller (no fake target attached), following */
+/* the same lifecycle/NULL/range-validation pattern the act8760 and    */
+/* da9292 PMIC drivers use.  Silicon validation is deferred to the     */
+/* NX9101 HiL bring-up.                                                */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_pca9451a_init_null_args)
+{
+	pca9451a_t ctx;
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	zassert_equal(pca9451a_init(NULL, bus), ALP_ERR_INVAL, "NULL ctx must be invalid");
+	zassert_equal(pca9451a_init(&ctx, NULL), ALP_ERR_INVAL, "NULL bus must be invalid");
+
+	/* _init_at takes the same constraints plus an explicit address. */
+	zassert_equal(
+	    pca9451a_init_at(NULL, bus, PCA9451A_I2C_ADDR), ALP_ERR_INVAL, "NULL ctx must be invalid");
+	zassert_equal(
+	    pca9451a_init_at(&ctx, NULL, PCA9451A_I2C_ADDR), ALP_ERR_INVAL, "NULL bus must be invalid");
+	zassert_equal(pca9451a_init_at(&ctx, bus, 0u), ALP_ERR_INVAL, "addr=0 must be invalid");
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_pca9451a_post_init_calls_reject_uninitialised)
+{
+	/* Drives the real reg_read() path against the native_sim i2c-emul
+     * controller (no fake PCA9451A target attached) -- exercises the
+     * actual init() transfer, not just a NULL guard.  Without a real
+     * chip behind the controller the probe is expected to fail, so
+     * subsequent calls must report NOT_READY; if a future fake target
+     * makes the ACK succeed, the branch below is skipped and the test
+     * still passes (same conditional idiom as the icm42670/lsm6dso/
+     * bme280 cases above). */
+	pca9451a_t ctx;
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	alp_status_t s = pca9451a_init(&ctx, bus);
+	if (s != ALP_OK) {
+		pca9451a_status_t status;
+		bool              enabled;
+		int32_t           uv;
+		uint8_t           v;
+		zassert_equal(pca9451a_get_status(&ctx, &status), ALP_ERR_NOT_READY);
+		zassert_equal(pca9451a_rail_set_enable(&ctx, PCA9451A_RAIL_BUCK1, true), ALP_ERR_NOT_READY);
+		zassert_equal(pca9451a_rail_is_enabled(&ctx, PCA9451A_RAIL_BUCK1, &enabled),
+		              ALP_ERR_NOT_READY);
+		zassert_equal(pca9451a_rail_set_voltage_uv(&ctx, PCA9451A_RAIL_BUCK1, 800000),
+		              ALP_ERR_NOT_READY);
+		zassert_equal(pca9451a_rail_get_voltage_uv(&ctx, PCA9451A_RAIL_BUCK1, &uv),
+		              ALP_ERR_NOT_READY);
+		zassert_equal(pca9451a_read_reg(&ctx, PCA9451A_REG_DEV_ID, &v), ALP_ERR_NOT_READY);
+		zassert_equal(pca9451a_write_reg(&ctx, PCA9451A_REG_DEV_ID, 0u), ALP_ERR_NOT_READY);
+	}
+
+	pca9451a_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_pca9451a_rail_set_voltage_range_validation)
+{
+	/* Force .initialised so the range check is reached before any
+     * bus access -- same idiom as test_da9292_set_voltage_range_validation. */
+	pca9451a_t ctx = { .initialised = true };
+
+	/* Below each rail kind's documented floor -> OUT_OF_RANGE. */
+	zassert_equal(pca9451a_rail_set_voltage_uv(&ctx, PCA9451A_RAIL_BUCK1, 100000),
+	              ALP_ERR_OUT_OF_RANGE,
+	              "BUCK1 (DVS buck) floor is 600000 uV");
+	zassert_equal(pca9451a_rail_set_voltage_uv(&ctx, PCA9451A_RAIL_BUCK4, 100000),
+	              ALP_ERR_OUT_OF_RANGE,
+	              "BUCK4 (std buck) floor is 600000 uV");
+	zassert_equal(pca9451a_rail_set_voltage_uv(&ctx, PCA9451A_RAIL_LDO1, 100000),
+	              ALP_ERR_OUT_OF_RANGE,
+	              "LDO1 floor is 1600000 uV");
+	zassert_equal(pca9451a_rail_set_voltage_uv(&ctx, PCA9451A_RAIL_LDO2, 100000),
+	              ALP_ERR_OUT_OF_RANGE,
+	              "LDO2 floor is 800000 uV");
+	zassert_equal(pca9451a_rail_set_voltage_uv(&ctx, PCA9451A_RAIL_LDO5, 100000),
+	              ALP_ERR_OUT_OF_RANGE,
+	              "LDO5 floor is 1800000 uV");
+
+	/* Out-of-range rail index -> INVAL, checked before any bus access. */
+	zassert_equal(pca9451a_rail_set_voltage_uv(&ctx, (pca9451a_rail_t)PCA9451A_RAIL_COUNT, 1000000),
+	              ALP_ERR_INVAL);
+	bool enabled;
+	zassert_equal(pca9451a_rail_is_enabled(&ctx, (pca9451a_rail_t)PCA9451A_RAIL_COUNT, &enabled),
+	              ALP_ERR_INVAL);
 }
 
 /* ------------------------------------------------------------------ */

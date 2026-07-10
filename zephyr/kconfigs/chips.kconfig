@@ -258,13 +258,16 @@ config ALP_SDK_CHIP_PCA9451A
 	bool "NXP PCA9451A multi-channel PMIC (E1M-NX9101)"
 	depends on I2C
 	help
-	  Declares the PCA9451A on-module PMIC on the i.MX 93-based
-	  E1M-NX9101 SoM.  Manifest-only stub (metadata/chips/pca9451a.yaml
-	  driver_status: stub) -- the chip-driver source + headers land
-	  alongside the NX9101 bring-up.  Declaring the Kconfig now so
-	  scripts/alp_orchestrate.py's `CONFIG_ALP_SDK_CHIP_PCA9451A=y`
-	  emit (from on_module.pmic_main: pca9451a) resolves cleanly under
-	  Zephyr Kconfig even while no `.c` body exists.
+	  Compile chips/pca9451a/pca9451a.c.  Declares the PCA9451A
+	  on-module PMIC on the i.MX 93-based E1M-NX9101 SoM.  Register
+	  map verified against the upstream Linux kernel's NXP-authored
+	  PCA9450-family driver (PCA9451A is software-compatible per
+	  NXP).  Provides pca9451a_init (ACK-only DEV_ID probe), raw
+	  register R/W, INT1 latched-interrupt decode, and per-rail
+	  enable/disable + voltage set/get (microvolts) across all 6
+	  bucks + 5 LDOs.  metadata/chips/pca9451a.yaml driver_status:
+	  partial -- E1M-NX9101 doesn't exist on the bench yet, so this
+	  is host-unit-tested only, not silicon-validated.
 
 config ALP_SDK_CHIP_DA9292
 	bool "Renesas DA9292 multi-phase buck PMIC (secondary on V2N)"
