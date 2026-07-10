@@ -118,6 +118,15 @@ option(ALP_SDK_STATUS_DESCRIPTIONS
 # install-free build they expect.
 option(ALP_SDK_BUILD_SHARED "Build libalp_sdk.so + install lib/headers (Linux/Yocto)"  OFF)
 
+# Alp-maintainer strict-warning profile (issue #634) -- defines the
+# alp_sdk_warnings INTERFACE target + the ALP_SDK_STRICT_WARNINGS /
+# ALP_SDK_WERROR options (both OFF by default) plus the
+# alp_sdk_apply_strict_warnings() helper.  Included before any first-party
+# target below: alp_chips links alp_sdk_warnings PRIVATE directly (it is
+# 100% first-party, no vendor sources ever land in it); alp_sdk instead
+# calls the per-source helper further down, once its SOURCES are complete.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/alp-sdk-warnings.cmake)
+
 # ---------------------------------------------------------------------
 # Public header library
 # ---------------------------------------------------------------------
@@ -204,6 +213,7 @@ endforeach()
 if(ALP_BUILD_CHIPS_ONLY)
     add_library(alp_chips STATIC)
     target_link_libraries(alp_chips PUBLIC alp_sdk_headers)
+    target_link_libraries(alp_chips PRIVATE alp_sdk_warnings)
     set(_alp_chips_enabled "")
     foreach(_chip IN LISTS ALP_SDK_CHIP_LIST)
         string(TOUPPER "${_chip}" _chip_uc)
@@ -265,10 +275,21 @@ endif()
 # Common helpers (always built).
 add_subdirectory(src/common)
 
-# OS backend.
+# OS backend.  Also add_subdirectory()s vendors/<som>/ on demand
+# (ALP_SOM=aen/v2n), which target_sources()s straight into alp_sdk.
 add_subdirectory(src/${ALP_OS})
 
 # Vendor wrappers — added on demand by the OS backend's CMakeLists.
+
+if(NOT DEFINED ZEPHYR_BASE)
+    # First-party-only strict-warning profile (issue #634): applied
+    # per-source (never a blanket target_link_libraries) so the
+    # vendors/<som>/*.c wrapper sources just pulled into alp_sdk above stay
+    # untouched -- see cmake/alp-sdk-warnings.cmake for the full rationale.
+    # Must run AFTER add_subdirectory(src/${ALP_OS}) so alp_sdk's SOURCES
+    # property already includes every backend/vendor file.
+    alp_sdk_apply_strict_warnings(alp_sdk "${CMAKE_CURRENT_SOURCE_DIR}/src/")
+endif()
 
 # ---------------------------------------------------------------------
 # Tests

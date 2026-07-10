@@ -252,6 +252,11 @@ alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor
 	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;
 	*out = (alp_inference_tensor_t){ 0 };
+#if !defined(ALP_SDK_USE_DEEPX_DXM1) && !defined(ALP_SDK_USE_DRPAI_V2N)
+	/* No real inference backend compiled in -- every case below drops out,
+	 * leaving `index` unused (issue #634). */
+	(void)index;
+#endif
 	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
@@ -272,6 +277,11 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
 	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;
 	*out = (alp_inference_tensor_t){ 0 };
+#if !defined(ALP_SDK_USE_DEEPX_DXM1) && !defined(ALP_SDK_USE_DRPAI_V2N)
+	/* No real inference backend compiled in -- every case below drops out,
+	 * leaving `index` unused (issue #634). */
+	(void)index;
+#endif
 	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:

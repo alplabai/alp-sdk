@@ -131,6 +131,49 @@ jobs:
       - name: Test
         run: ctest --test-dir build/yocto --output-on-failure
 
+  strict-warnings:
+    # Issue #634: first-party alp-sdk C (dispatchers + src/backends/**,
+    # NEVER vendors/**) must compile warning-free under the Alp-maintainer
+    # strict profile (cmake/alp-sdk-warnings.cmake).  -Werror turns that
+    # into a hard gate.  Runs both plain-CMake backends -- baremetal (+
+    # AEN/V2N vendor-scaffolding variants, to prove those sources stay
+    # excluded) and yocto with every optional real backend (mosquitto/
+    # ALSA/OpenSSL) wired in, so the strict profile actually sees them.
+    name: plain-cmake · strict-warnings (#634)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: baremetal
+            args: -DALP_OS=baremetal -DALP_BUILD_TESTS=ON
+          - name: baremetal-aen
+            args: -DALP_OS=baremetal -DALP_SOM=aen
+          - name: baremetal-v2n
+            args: -DALP_OS=baremetal -DALP_SOM=v2n
+          - name: yocto
+            args: -DALP_OS=yocto -DALP_BUILD_TESTS=ON
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Yocto-side runtime deps
+        if: matrix.name == 'yocto'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libmosquitto-dev libasound2-dev libssl-dev pkg-config
+      - name: Configure
+        run: >
+          cmake -B build/strict-${{ matrix.name }} -S . ${{ matrix.args }}
+          -DALP_SDK_STRICT_WARNINGS=ON -DALP_SDK_WERROR=ON
+      # -Werror already fails the build on any first-party warning; the
+      # grep below is a belt-and-braces check that the log is actually
+      # clean (e.g. a warning emitted by a build step other than the
+      # compiler proper wouldn't trip -Werror).
+      - name: Build (warning-free)
+        run: |
+          cmake --build build/strict-${{ matrix.name }} --parallel 2>&1 | tee build.log
+          ! grep -q "warning:" build.log
+
   link-complete:
     # Issue #593: every public <alp/*.h> function must be a real symbol
     # in BOTH the baremetal and yocto plain-CMake libalp_sdk.a archives

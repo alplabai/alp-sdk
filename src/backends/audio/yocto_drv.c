@@ -125,6 +125,12 @@ static alp_status_t alsa_to_alp(int rc)
 	}
 }
 
+/* Private test seam (issue #634): forward-declared so the definition below
+ * has a prototype in this TU (-Wmissing-prototypes) without exporting it
+ * through any public include/alp header -- see the doc comment on the
+ * definition for why it's non-static. */
+int alp_yocto_alsa_wait_arg(uint32_t timeout_ms);
+
 /**
  * @brief Portable `timeout_ms` -> ALSA `snd_pcm_wait()` argument.
  *
@@ -499,6 +505,24 @@ typedef int (*y_alsa_wait_fn)(snd_pcm_t *pcm, int timeout_ms);
 typedef snd_pcm_sframes_t (*y_alsa_writei_fn)(snd_pcm_t        *pcm,
                                               const void       *buf,
                                               snd_pcm_uframes_t frames);
+
+/* Private test seam (issue #634): forward-declared so the definition below
+ * has a prototype in this TU (-Wmissing-prototypes) without exporting it
+ * through any public include/alp header -- see the doc comment on the
+ * definition for why it's non-static. */
+alp_status_t alp_yocto_alsa_out_write_core(snd_pcm_t         *pcm,
+                                           alp_audio_format_t format,
+                                           uint8_t            channels,
+                                           uint8_t            sample_bytes,
+                                           uint8_t            volume,
+                                           uint8_t           *scratch,
+                                           uint16_t           scratch_frames,
+                                           const void        *buf,
+                                           size_t             frames,
+                                           size_t            *out_frames,
+                                           uint32_t           timeout_ms,
+                                           y_alsa_wait_fn     wait_fn,
+                                           y_alsa_writei_fn   writei_fn);
 
 /**
  * @brief Allocation-free chunked write core (#632).

@@ -11,6 +11,7 @@
 #include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
+#include "alp_z_last_error.h"
 #include "handles.h"
 
 /* Per-thread error code.  Zephyr's __thread keyword maps to its

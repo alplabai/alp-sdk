@@ -20,6 +20,7 @@
  * driver works out of the box gets the portable API for free.
  */
 
+#include <stdint.h>
 #include <string.h>
 
 #include <zephyr/device.h>
@@ -122,9 +123,17 @@ z_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilitie
 	if (cfg->channel_id >= ARRAY_SIZE(_specs)) {
 		return ALP_ERR_INVAL;
 	}
+	/* ALP_SOC_ADC_MAX_RESOLUTION_BITS is UINT16_MAX under CONFIG_ALP_SOC_NONE
+     * (e.g. native_sim with no SoC selected) -- provably >= any uint8_t
+     * cfg->resolution_bits, so the #if below compiles the check out
+     * entirely there instead of leaving a runtime comparison GCC's
+     * -Wtype-limits (correctly) flags as provably-always-false for that
+     * sentinel (issue #634; same fix as src/adc_dispatch.c). */
+#if ALP_SOC_ADC_MAX_RESOLUTION_BITS < UINT8_MAX
 	if (cfg->resolution_bits != 0 && cfg->resolution_bits > ALP_SOC_ADC_MAX_RESOLUTION_BITS) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
+#endif
 	const struct adc_dt_spec *spec = &_specs[cfg->channel_id];
 	if (spec->dev == NULL || !device_is_ready(spec->dev)) {
 		return ALP_ERR_NOT_READY;

@@ -30,6 +30,7 @@
 #include <alp/soc_caps.h>
 
 #include "alp_slot_claim.h"
+#include "backends/gpio/gpio_resolve.h"
 #include "spi_ops.h"
 
 #define ALP_SPI_DEV_OR_NULL(idx)                                                                   \

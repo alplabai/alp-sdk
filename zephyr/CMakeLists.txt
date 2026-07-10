@@ -1321,3 +1321,82 @@ if(CONFIG_ALP_SDK_TESTING)
     zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_GPIO
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/testing_drv.c)
 endif()
+
+# ---------------------------------------------------------------------------
+# Alp-maintainer strict-warning profile (issue #634).
+#
+# Applied PER-SOURCE-FILE, not with a blanket zephyr_library_compile_options()
+# -- the alp_sdk zephyr_library above also carries the Alp-authored driver
+# glue under zephyr/drivers/** and the zephyr/soc-bridge/** vendor bridge
+# copy (both ADR 0017 Tier-1.5/Tier-2, deliberately kept in their upstream
+# Zephyr driver style, never this SDK's own house style -- see
+# applying-the-alp-sdk-c-house-style).  A target-wide
+# zephyr_library_compile_options() would strict-warn (and, with
+# CONFIG_ALP_SDK_WERROR, hard-error) that vendor-shaped code too, which
+# breaks the "vendored/upstream code never gets -Werror" rule this profile
+# exists to uphold.  Restricting COMPILE_OPTIONS to every source under this
+# module's own src/ tree keeps the profile first-party-only.  Must run
+# after every zephyr_library_sources()/_ifdef() call above so
+# target_property(... SOURCES) sees the complete list.
+#
+# The flag SET is deliberately a reduced "core" subset of the plain-CMake
+# alp_sdk_warnings profile (cmake/alp-sdk-warnings.cmake), not the full
+# 12-flag list -- confirmed empirically (issue #634) against a spread of
+# first-party TUs (src/zephyr/delay_zephyr.c, last_error.c,
+# console/alp_console_gpio.c): every one of the flags below is fine, but
+# these four are NOT, because they fire on code physically inside
+# Zephyr's OWN headers (Zephyr's top-level include dir is a plain -I,
+# not -isystem, so GCC does not suppress diagnostics attributed there):
+#   -Wpedantic          empty structs / zero-arg variadic macros in
+#                        zephyr/include/zephyr/{sys/sflist.h,
+#                        sys/__assert.h,device.h}
+#   -Wconversion /
+#   -Wsign-conversion    narrowing/sign conversions in
+#                        zephyr/include/zephyr/sys/{util.h,atomic.h},
+#                        arch/common/*.h
+#   -Wcast-align         Zephyr's OWN CONTAINER_OF macro
+#                        (zephyr/include/zephyr/sys/util.h)
+#   -Wundef              CONFIG_* Kconfig symbols Zephyr's own headers
+#                        test with plain `#if CONFIG_FOO` (never
+#                        `#if defined(...)`) and which autoconf.h simply
+#                        omits when unset -- zephyr/include/zephyr/
+#                        {rtio/sqe.h,logging/log.h} et al
+#   -Wstrict-prototypes  a non-prototype function declaration in
+#                        zephyr/include/zephyr/sys/cbprintf.h
+# All of the above is upstream Zephyr's own code, never ours to fix
+# (ADR 0017), so the required Zephyr-side profile omits them; per the
+# issue's own roadmap ("Establish a required core profile first, then
+# evaluate higher-noise checks such as conversion and cast alignment
+# separately"), plain-CMake -- which never includes Zephyr headers --
+# keeps the full 12-flag set unmodified.
+if(CONFIG_ALP_SDK_STRICT_WARNINGS)
+    set(_alp_sdk_warn_flags "")
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
+        list(APPEND _alp_sdk_warn_flags
+            -Wall -Wextra -Wformat=2 -Wshadow
+            -Wmissing-prototypes -Wdouble-promotion)
+    else()
+        message(WARNING
+            "alp-sdk: CONFIG_ALP_SDK_STRICT_WARNINGS has no flag mapping for "
+            "CMAKE_C_COMPILER_ID='${CMAKE_C_COMPILER_ID}' -- building without "
+            "the strict profile.")
+    endif()
+    if(_alp_sdk_warn_flags AND CONFIG_ALP_SDK_WERROR)
+        list(APPEND _alp_sdk_warn_flags -Werror)
+    endif()
+
+    if(_alp_sdk_warn_flags)
+        get_target_property(_alp_sdk_all_sources alp_sdk SOURCES)
+        foreach(_alp_sdk_src IN LISTS _alp_sdk_all_sources)
+            string(FIND "${_alp_sdk_src}" "${ZEPHYR_CURRENT_MODULE_DIR}/src/" _alp_sdk_pos)
+            if(_alp_sdk_pos EQUAL 0)
+                set_source_files_properties(${_alp_sdk_src} PROPERTIES
+                    COMPILE_OPTIONS "${_alp_sdk_warn_flags}")
+            endif()
+        endforeach()
+        unset(_alp_sdk_all_sources)
+        unset(_alp_sdk_src)
+        unset(_alp_sdk_pos)
+    endif()
+    unset(_alp_sdk_warn_flags)
+endif()

@@ -5,7 +5,7 @@
  * Yocto-side last-error shim for the shared class dispatchers.
  *
  * The portable class dispatchers (src/rtc_dispatch.c, src/wdt_dispatch.c,
- * and the rest of src/*_dispatch.c) are written Zephyr-first: they call
+ * and the rest of src/<class>_dispatch.c) are written Zephyr-first: they call
  * the thread-local helpers alp_z_set_last_error() / alp_z_clear_last_error()
  * that src/zephyr/last_error.c defines.  That file is NOT compiled on the
  * Yocto/Linux plain-CMake build -- here the last-error slot lives in
@@ -25,6 +25,7 @@
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
+#include "alp_z_last_error.h"
 
 void alp_z_set_last_error(alp_status_t s)
 {
