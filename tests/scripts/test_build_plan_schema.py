@@ -4,7 +4,11 @@
 alp-sdk-vscode 'Wave C' consumer contract, see #610).
 
 These pin: the schema itself is valid Draft 2020-12; the emitter's real
-output for a representative multi-core project validates clean; and an
+output for a representative multi-core project validates clean; the real
+build-plan fixtures `scripts/check_emit_snapshots.py` pins for the four
+multicore examples all conform; the currently-less-common emitter paths
+(baremetal backend, sysbuild/TF-M conditional shared artefacts, the
+`yocto-recipe-missing` warning, `appDir: null`) each validate too; and an
 obviously-broken plan (missing a required field, an unknown top-level
 key) is rejected -- so schema drift from the emitter is caught here
 rather than downstream in the CLI.
@@ -91,6 +95,158 @@ def test_real_build_plan_conforms(tmp_path: Path):
     backends = {s["backend"] for s in plan["slices"]}
     assert backends == {"yocto", "zephyr"}
     assert plan["sharedArtefacts"]
+
+
+# The same four multicore examples `scripts/check_emit_snapshots.py` pins a
+# byte-for-byte golden for (ADR 0014) -- validating their real emitted plans
+# here is the schema-side half of that same emitter <-> contract lockstep.
+_PINNED_SNAPSHOT_BOARDS = [
+    "examples/multicore/rpmsg-aen/board.yaml",
+    "examples/multicore/rpmsg-imx93/board.yaml",
+    "examples/multicore/heterogeneous-offload/board.yaml",
+    "examples/multicore/rpmsg-v2n/board.yaml",
+]
+
+
+@pytest.mark.parametrize("board_rel", _PINNED_SNAPSHOT_BOARDS)
+def test_pinned_emit_snapshot_boards_conform(board_rel: str):
+    """The real board.yaml fixtures check_emit_snapshots.py pins a
+    byte-for-byte golden for all emit a schema-conformant build plan."""
+    board_yaml = REPO / board_rel
+    project = load_board_yaml(board_yaml)
+    plan = json.loads(emit_build_plan(
+        project, board_yaml=board_yaml, build_root=Path("build")))
+    validator = jsonschema.Draft202012Validator(
+        _schema(), format_checker=jsonschema.FormatChecker())
+    errors = list(validator.iter_errors(plan))
+    assert errors == [], "\n".join(str(e) for e in errors)
+
+
+AEN801_BAREMETAL_AND_STOCK_IMAGE = """
+som:
+  sku: E1M-AEN801
+
+cores:
+  m55_hp:
+    os: baremetal
+    app: ./src
+"""
+
+
+def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
+    """`os: baremetal` on m55_hp (with the SoM preset's other cores left
+    at their defaults) exercises: the `baremetal` backend enum value,
+    its `cmake-args.txt` configArtefact, the baremetal `command` shape
+    (`tool: cmake`, `-S`/`-B` args), AND the A-class core's stock-image
+    Yocto slice, which reports `appDir: null` (issue #597 -- there is no
+    app source dir to report for the `alp-image-edge` token)."""
+    path = _write_board(tmp_path, AEN801_BAREMETAL_AND_STOCK_IMAGE)
+    project = load_board_yaml(path)
+    plan = json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    validator = jsonschema.Draft202012Validator(
+        _schema(), format_checker=jsonschema.FormatChecker())
+    assert list(validator.iter_errors(plan)) == []
+
+    by_id = {s["coreId"]: s for s in plan["slices"]}
+    baremetal = by_id["m55_hp"]
+    assert baremetal["backend"] == "baremetal"
+    assert baremetal["configArtefacts"][0]["path"].endswith("cmake-args.txt")
+    assert baremetal["command"]["tool"] == "cmake"
+    assert "-S" in baremetal["command"]["args"]
+    assert "-B" in baremetal["command"]["args"]
+
+    stock_image = by_id["a32_cluster"]
+    assert stock_image["backend"] == "yocto"
+    assert stock_image["appDir"] is None
+
+
+AEN801_YOCTO_APP_NO_RECIPE = """
+som:
+  sku: E1M-AEN801
+
+cores:
+  a32_cluster:
+    os: yocto
+    app: ./linux
+"""
+
+
+def test_yocto_recipe_missing_warning_conforms(tmp_path: Path):
+    """An app-only Yocto slice with no `recipe:` (issue #597) is carried
+    with `command: null` plus a `yocto-recipe-missing` warning -- and the
+    resulting plan still validates against the schema."""
+    path = _write_board(tmp_path, AEN801_YOCTO_APP_NO_RECIPE)
+    project = load_board_yaml(path)
+    plan = json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    codes = [w["code"] for w in plan["warnings"]]
+    assert "yocto-recipe-missing" in codes
+    slice_ = next(s for s in plan["slices"] if s["coreId"] == "a32_cluster")
+    assert slice_["command"] is None
+
+    validator = jsonschema.Draft202012Validator(
+        _schema(), format_checker=jsonschema.FormatChecker())
+    assert list(validator.iter_errors(plan)) == []
+
+
+AEN301_MCUBOOT_AND_TFM = """
+som:
+  sku: E1M-AEN301
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
+
+boot:
+  method: mcuboot
+  signing:
+    algorithm: ecdsa_p256
+    key_file: keys/dev_ec.pem
+
+storage:
+  - name: psa_its
+    size_kib: 64
+    fs: raw
+    flash_device: mram_main
+  - name: psa_ps
+    size_kib: 64
+    fs: raw
+    flash_device: mram_main
+
+security:
+  psa:
+    persistent_slots: 32
+    its_storage: psa_its
+    ps_storage: psa_ps
+    tfm: true
+    attestation_root: optiga_trust_m
+"""
+
+
+def test_sysbuild_and_tfm_conditional_shared_artefacts_conform(tmp_path: Path):
+    """`boot:` (-> build/alp_sysbuild.conf) and `security.psa.tfm: true`
+    (-> build/sysbuild/tfm/tfm.conf) are both conditional sharedArtefacts
+    (absence-emits-nothing); combined on one project they both appear,
+    and the plan still validates against the schema."""
+    path = _write_board(tmp_path, AEN301_MCUBOOT_AND_TFM)
+    project = load_board_yaml(path)
+    plan = json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    shared_paths = {a["path"] for a in plan["sharedArtefacts"]}
+    assert any(p.endswith("alp_sysbuild.conf") for p in shared_paths)
+    assert any(p.endswith("sysbuild/tfm/tfm.conf") for p in shared_paths)
+
+    validator = jsonschema.Draft202012Validator(
+        _schema(), format_checker=jsonschema.FormatChecker())
+    assert list(validator.iter_errors(plan)) == []
 
 
 V2N_OFF_AND_COMMANDLESS = """
