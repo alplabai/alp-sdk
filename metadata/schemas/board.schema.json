@@ -579,11 +579,15 @@
         },
         "app": {
           "type": "string",
-          "description": "Path to the app source directory for this core.  Required for `os: zephyr` (must contain prj.conf or CMakeLists.txt), `os: baremetal` (must contain CMakeLists.txt).  For `os: yocto` either `app:` (custom CMake project recipe) or `image:` (override the stock recipe)."
+          "description": "Path to the app source directory for this core.  Required for `os: zephyr` (must contain prj.conf or CMakeLists.txt), `os: baremetal` (must contain CMakeLists.txt).  For `os: yocto`, `app:` is a project-root-relative *source directory*, not a bitbake target -- pair it with `recipe:` naming the bitbake recipe that packages it (or set `image:` instead to build a stock image, ignoring any `app:`)."
         },
         "image": {
           "type": "string",
-          "description": "Yocto image recipe name (e.g. `alp-image-edge`).  Used when `os: yocto` and no custom `app:` is supplied."
+          "description": "Yocto image recipe name (e.g. `alp-image-edge`).  Used when `os: yocto`; takes priority over `app:`/`recipe:` when both are set (the app source dir is retained for tooling but not built directly)."
+        },
+        "recipe": {
+          "type": "string",
+          "description": "Yocto bitbake recipe name that packages this core's `app:` source directory (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice (`app:` set, no `image:`) -- without it the slice has no valid bitbake target and the emitted plan carries `command: null` plus a `yocto-recipe-missing` warning rather than an invalid `bitbake <path>` command."
         },
         "peripherals": {
           "type": "array",

@@ -65,12 +65,26 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_POWER=1
 )
 
+# `CMAKE_SOURCE_DIR` is the TOP-LEVEL project's source dir -- correct only
+# when alp-sdk itself is the top-level CMake project.  A consumer that
+# `add_subdirectory()`s alp-sdk (the README's documented embedded-consumer
+# path) has CMAKE_SOURCE_DIR pointing at ITS OWN root, so `src`/`vendors`
+# resolved from it silently search the consumer's tree instead of
+# alp-sdk's -- the private-include and vendors-subdirectory failures from
+# issue #598.  `CMAKE_CURRENT_SOURCE_DIR` is per-listfile (always this
+# file's own directory, `<alp-sdk>/src/baremetal`, regardless of nesting),
+# so anchor off that instead.
+get_filename_component(_alp_sdk_root "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    ABSOLUTE)
+
 target_include_directories(alp_sdk PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
+    ${_alp_sdk_root}/src
 )
 
 if(ALP_SOM STREQUAL "aen")
-    add_subdirectory(${CMAKE_SOURCE_DIR}/vendors/alif vendors_alif)
+    add_subdirectory(${_alp_sdk_root}/vendors/alif vendors_alif)
 elseif(ALP_SOM STREQUAL "v2n")
-    add_subdirectory(${CMAKE_SOURCE_DIR}/vendors/renesas-rzv2n vendors_renesas_rzv2n)
+    add_subdirectory(${_alp_sdk_root}/vendors/renesas-rzv2n vendors_renesas_rzv2n)
 endif()
+
+unset(_alp_sdk_root)

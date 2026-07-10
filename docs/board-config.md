@@ -194,8 +194,9 @@ the SoM preset's `topology.<id>` when omitted):
 
 | Field          | Notes                                                                                  |
 |----------------|----------------------------------------------------------------------------------------|
-| `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.                          |
-| `image`        | Yocto image recipe name (e.g. `alp-image-edge`).                                       |
+| `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.  For `os: yocto` an app-only slice, pair with `recipe:` -- `app:` is a source path, never a bitbake target. |
+| `image`        | Yocto image recipe name (e.g. `alp-image-edge`).  Takes priority over `app:`/`recipe:` when both are set. |
+| `recipe`       | Yocto bitbake recipe packaging this slice's `app:` (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice -- otherwise the plan blocks the slice (`yocto-recipe-missing`) instead of emitting an invalid `bitbake <path>`. |
 | `os`           | NOT an OS picker — the runtime is class-derived (M→Zephyr, A→Yocto). Only `off` (skip slice) or `baremetal` (rare) are settable; a cross-class OS is rejected. |
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
 | `libraries`    | Library opt-in list for this slice.                                                    |

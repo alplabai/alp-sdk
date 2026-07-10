@@ -123,8 +123,13 @@ def emit_build_plan(
     """
     # Orchestrator-side (stay inline until orchestrator.py); lazy to avoid
     # a buildplan<->package import cycle.
-    from .orchestrator import _slice_command
+    from .orchestrator import STOCK_IMAGE_APP, _resolve_app_path, _slice_command
     build_root = Path(build_root)
+    # Anchor every slice's relative `app:` on the board.yaml's own
+    # directory, never the emitting process's CWD -- the plan must be
+    # byte-identical no matter where `--emit build-plan` is invoked from
+    # (issue #596).
+    base_dir = Path(board_yaml).resolve().parent
     slices_out: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
 
@@ -137,15 +142,32 @@ def emit_build_plan(
         # reads `build_dir` off the slice (baremetal -B), and the
         # project's own Slice objects must stay untouched.
         cmd = _slice_command(
-            project, replace(slice_, build_dir=build_dir))
+            project, replace(slice_, build_dir=build_dir),
+            base_dir=base_dir)
         if cmd is None:
-            warnings.append({
-                "code":    "no-command",
-                "coreId":  slice_.core_id,
-                "message": (f"no build command for core "
-                            f"'{slice_.core_id}' (os: {slice_.os}) "
-                            f"-- missing app/board/image"),
-            })
+            if (slice_.os == "yocto" and slice_.app
+                    and not slice_.image and not slice_.recipe):
+                # An app-only Yocto slice with no `recipe:` has no valid
+                # bitbake target -- `app:` is a source directory, not a
+                # recipe name (issue #597).  Block the plan explicitly
+                # instead of ever emitting `bitbake <path>`.
+                warnings.append({
+                    "code":    "yocto-recipe-missing",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}' has app: "
+                                f"'{slice_.app}' but no recipe: -- add "
+                                f"the bitbake recipe name that packages "
+                                f"this app source, or set image: to "
+                                f"build a stock image instead"),
+                })
+            else:
+                warnings.append({
+                    "code":    "no-command",
+                    "coreId":  slice_.core_id,
+                    "message": (f"no build command for core "
+                                f"'{slice_.core_id}' (os: {slice_.os}) "
+                                f"-- missing app/board/image"),
+                })
         config_artefacts: list[dict[str, str]] = []
         artefact = _slice_config_artefact(project, slice_)
         if artefact is not None:
@@ -154,10 +176,19 @@ def emit_build_plan(
                 "path":     (build_dir / name).as_posix(),
                 "contents": contents,
             })
+        # `appDir` retains the resolved source directory independent of
+        # `command` -- tooling that wants the app source (e.g. to watch
+        # it for incremental rebuilds) doesn't have to reverse-engineer
+        # it out of a yocto/zephyr/baremetal-shaped command (issue #597).
+        # `alp-image-edge` is the A-core stock-image token, not a source
+        # path -- there is no app dir to report for it.
+        app_dir = (_resolve_app_path(slice_.app, base_dir).as_posix()
+                   if slice_.app and slice_.app != STOCK_IMAGE_APP else None)
         slices_out.append({
             "coreId":          slice_.core_id,
             "backend":         slice_.os,
             "buildDir":        build_dir.as_posix(),
+            "appDir":          app_dir,
             "configArtefacts": config_artefacts,
             "command": None if cmd is None else {
                 "tool": cmd[0],

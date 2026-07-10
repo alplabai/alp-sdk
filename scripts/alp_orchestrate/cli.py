@@ -77,7 +77,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return 1
         return 0
 
-    orchestrator = Orchestrator(project, args.build_root)
+    orchestrator = Orchestrator(project, args.build_root,
+                                board_yaml=args.input)
     try:
         manifest = orchestrator.fan_out(
             only_core=args.core, parallel=not args.no_parallel)

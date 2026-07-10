@@ -9,6 +9,7 @@
       "coreId": "a55_cluster",
       "backend": "yocto",
       "buildDir": "build/a55_cluster-yocto",
+      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-v2n/linux",
       "configArtefacts": [
         {
           "path": "build/a55_cluster-yocto/local.conf",
@@ -30,6 +31,7 @@
       "coreId": "m33_sm",
       "backend": "zephyr",
       "buildDir": "build/m33_sm-zephyr",
+      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-v2n/m33_sm",
       "configArtefacts": [
         {
           "path": "build/m33_sm-zephyr/alp.conf",
@@ -42,7 +44,7 @@
           "build",
           "-b",
           "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33",
-          "<SDK_ROOT>"
+          "<SDK_ROOT>/examples/multicore/rpmsg-v2n/m33_sm"
         ],
         "cwd": "build/m33_sm-zephyr"
       },

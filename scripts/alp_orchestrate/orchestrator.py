@@ -53,9 +53,18 @@ class Orchestrator:
         self,
         project: BoardProject,
         build_root: Path,
+        board_yaml: Optional[Path] = None,
     ) -> None:
         self.project = project
         self.build_root = Path(build_root)
+        # `board_yaml` anchors every slice's relative `app:` path (issue
+        # #596) -- pass the project's actual board.yaml so build commands
+        # resolve identically regardless of the caller's CWD.  Callers that
+        # omit it (legacy in-repo call sites, tests that don't care about
+        # app-path resolution) fall back to CWD, matching the historical
+        # behaviour.
+        self.base_dir = (Path(board_yaml).resolve().parent
+                          if board_yaml is not None else Path.cwd())
         self.state_path = self.build_root / ".alp-build-state.json"
         self._state: dict[str, Any] = self._load_state()
 
@@ -160,7 +169,7 @@ class Orchestrator:
                              f"on non-{slice_.os} dev hosts")
             return slice_
 
-        cmd = _slice_command(self.project, slice_)
+        cmd = _slice_command(self.project, slice_, base_dir=self.base_dir)
         if cmd is None:
             slice_.status = "skipped"
             slice_.reason = ("no command resolver implemented yet for "
@@ -329,21 +338,39 @@ def _slice_flash_recipe(
 STOCK_SHIM_APP = "alp-stock-shim"
 STOCK_SHIM_DIR = REPO / "firmware" / "alp-stock-shim"
 
+# A-core "stock image" app token (Yocto side).  Every shipped SoM preset's
+# topology.<a-core-id> defaults `app:` to this value (see
+# metadata/e1m_modules/*.yaml) -- unlike a customer's own `app:` (a
+# filesystem path to their app source), this token IS already the real
+# bitbake recipe name for the stock alp-image-edge image, so it is exempt
+# from the `recipe:` requirement `_slice_command` enforces for a
+# project-supplied app-only Yocto slice (issue #597).
+STOCK_IMAGE_APP = "alp-image-edge"
+
 
 def _slice_command(
     project: BoardProject,
     slice_: Slice,
+    base_dir: Path,
 ) -> Optional[list[str]]:
     """Resolve the build command for a slice.  Returns None when there is no
     buildable command yet -- the caller carries the slice as `skipped` /
-    `no-command`, never dropped."""
+    `no-command`, never dropped.
+
+    `base_dir` anchors every relative `app:` path -- the directory holding
+    the project's `board.yaml` (or an equivalent explicit root), NEVER the
+    caller's process CWD.  A relative `app:` means "relative to the project
+    file that named it", so the same board.yaml must resolve identically no
+    matter where `west` / `alp-orchestrate` happens to be invoked from
+    (issue #596).
+    """
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
             return None
         cmd = [
             "west", "build",
             "-b", slice_.board,
-            str(_zephyr_app_dir(slice_.app)),
+            str(_zephyr_app_dir(slice_.app, base_dir)),
         ]
         # ADR 0014 Phase-3 conf->build: wire the generated sysbuild
         # overlays into the build command itself.  `_shared_artefacts`
@@ -362,31 +389,49 @@ def _slice_command(
                 cmd += ["--sysbuild-config", "../alp_sysbuild.conf"]
         return cmd
     if slice_.os == "yocto":
-        target = slice_.image or slice_.app
-        if not target:
-            return None
-        return ["bitbake", str(target)]
+        # `image:` always names a real recipe (e.g. `alp-image-edge`) --
+        # safe to hand straight to bitbake.  `app:` is a filesystem path to
+        # the app's source directory (mirrors the zephyr/baremetal `app:`
+        # convention), NOT a recipe name -- `bitbake <path>` is never a
+        # valid target (issue #597), so an app-only slice needs an explicit
+        # `recipe:` naming the bitbake recipe that packages that source.
+        if slice_.image:
+            return ["bitbake", str(slice_.image)]
+        if slice_.app == STOCK_IMAGE_APP:
+            return ["bitbake", slice_.app]
+        if slice_.app:
+            if not slice_.recipe:
+                return None
+            return ["bitbake", str(slice_.recipe)]
+        return None
     if slice_.os == "baremetal":
         if not slice_.app:
             return None
-        return ["cmake", "-S", str(_resolve_app_path(slice_.app)),
+        return ["cmake", "-S", str(_resolve_app_path(slice_.app, base_dir)),
                 "-B", str(slice_.build_dir)]
     return None
 
 
-def _resolve_app_path(app: str) -> Path:
-    """Resolve `./linux` or absolute paths from a slice.app."""
+def _resolve_app_path(app: str, base_dir: Path) -> Path:
+    """Resolve `./linux` or absolute paths from a slice.app.
+
+    Relative paths resolve against `base_dir` (the project's board.yaml
+    directory) -- never the process's current working directory, so the
+    result is identical regardless of the caller's CWD (issue #596).
+    """
     if app == STOCK_SHIM_APP:
         return STOCK_SHIM_DIR
     p = Path(app)
     if p.is_absolute():
         return p
-    return (Path.cwd() / p).resolve()
+    return (Path(base_dir) / p).resolve()
 
 
-def _zephyr_app_dir(app: str) -> Path:
+def _zephyr_app_dir(app: str, base_dir: Path) -> Path:
     """Resolve a Zephyr slice's `app:` to the directory holding the
     application `CMakeLists.txt` (what `west build` needs).
+
+    `base_dir` anchors relative paths -- see `_resolve_app_path`.
 
     Two example conventions are supported:
 
@@ -399,7 +444,7 @@ def _zephyr_app_dir(app: str) -> Path:
         no CMakeLists.txt of its own, so fall back to its parent (the
         example root) which does.
     """
-    p = _resolve_app_path(app)
+    p = _resolve_app_path(app, base_dir)
     if (p / "CMakeLists.txt").is_file():
         return p
     if (p.parent / "CMakeLists.txt").is_file():

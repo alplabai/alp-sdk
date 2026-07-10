@@ -82,6 +82,29 @@ jobs:
       - name: Build
         run: cmake --build build/baremetal-v2n --parallel
 
+  consumer-add-subdirectory:
+    # Issue #598: the README documents add_subdirectory() as a first-class
+    # consumption mode, but nothing built alp-sdk as a NESTED project until
+    # this job -- every job above builds alp-sdk as the top-level project,
+    # which can't catch a CMAKE_SOURCE_DIR-vs-CMAKE_CURRENT_SOURCE_DIR path
+    # bug (they're identical at the top level).  This job configures/builds
+    # tests/cmake-consumer/add-subdirectory-smoke, a separate top-level
+    # CMake project that add_subdirectory()s alp-sdk the documented way.
+    name: plain-cmake · add_subdirectory() consumer (#598)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        som: ["none", "aen"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure
+        run: >
+          cmake -B build/consumer-${{ matrix.som }}
+          -S tests/cmake-consumer/add-subdirectory-smoke
+          -DALP_OS=baremetal -DALP_SOM=${{ matrix.som }}
+      - name: Build
+        run: cmake --build build/consumer-${{ matrix.som }} --parallel
+
   yocto:
     name: plain-cmake · yocto backend + tests
     runs-on: ubuntu-latest
