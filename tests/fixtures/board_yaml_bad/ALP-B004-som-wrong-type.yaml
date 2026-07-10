@@ -1,0 +1,10 @@
+# #602 regression: `som:` is a schema-invalid scalar (not a mapping).
+# The rich validator must report this cleanly as ALP-B004 -- not
+# crash with an AttributeError from a downstream semantic pass that
+# assumed `som` was already a dict.
+som: wrong-type
+preset: e1m-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []

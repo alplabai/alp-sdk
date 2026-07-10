@@ -1258,5 +1258,103 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
                          msg="ALP_BOARD_* must not appear for a nameless board")
 
 
+class TestEmitModeCoreOsMismatch(unittest.TestCase):
+    """#605: an explicit `--core` naming a core whose os doesn't match
+    the `--emit` mode's supported runtime(s) is a hard error, not a
+    warn-and-continue (zephyr-conf / yocto-conf) or a silent success
+    (cmake-args)."""
+
+    def _emit(self, sku: str, core: str, os_: str,
+              emit: str) -> tuple[int, str, str]:
+        body = f"""
+            som:
+              sku: {sku}
+            cores:
+              {core}:
+                os: {os_}
+                app: ./src
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = subprocess.run(
+                [sys.executable, str(LOADER),
+                 "--input", str(path),
+                 "--emit", emit,
+                 "--core", core],
+                capture_output=True, text=True, check=False,
+            )
+        return rv.returncode, rv.stdout, rv.stderr
+
+    def test_zephyr_conf_rejects_yocto_core(self) -> None:
+        rc, out, err = self._emit("E1M-AEN801", "a32_cluster", "yocto",
+                                   "zephyr-conf")
+        self.assertEqual(rc, 1, msg=f"stdout={out}")
+        self.assertIn("a32_cluster", err)
+        self.assertIn("yocto", err)
+        self.assertFalse(out.strip(), msg="no Kconfig should be emitted")
+
+    def test_yocto_conf_rejects_zephyr_core(self) -> None:
+        rc, out, err = self._emit("E1M-AEN801", "m55_hp", "zephyr",
+                                   "yocto-conf")
+        self.assertEqual(rc, 1, msg=f"stdout={out}")
+        self.assertIn("m55_hp", err)
+        self.assertIn("zephyr", err)
+        self.assertFalse(out.strip(), msg="no local.conf should be emitted")
+
+    def test_cmake_args_rejects_yocto_core(self) -> None:
+        """cmake-args is generic across (baremetal, zephyr) only --
+        a yocto core used to emit silently with no warning at all."""
+        rc, out, err = self._emit("E1M-AEN801", "a32_cluster", "yocto",
+                                   "cmake-args")
+        self.assertEqual(rc, 1, msg=f"stdout={out}")
+        self.assertIn("a32_cluster", err)
+        self.assertFalse(out.strip(), msg="no cmake args should be emitted")
+
+    def test_zephyr_conf_accepts_zephyr_core(self) -> None:
+        rc, out, err = self._emit("E1M-AEN801", "m55_hp", "zephyr",
+                                   "zephyr-conf")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertTrue(out.strip())
+
+    def test_yocto_conf_accepts_yocto_core(self) -> None:
+        rc, out, err = self._emit("E1M-AEN801", "a32_cluster", "yocto",
+                                   "yocto-conf")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertTrue(out.strip())
+
+    def test_cmake_args_accepts_baremetal_core(self) -> None:
+        rc, out, err = self._emit("E1M-AEN801", "m55_hp", "baremetal",
+                                   "cmake-args")
+        self.assertEqual(rc, 0, msg=err)
+        self.assertTrue(out.strip())
+
+    def test_unscoped_sum_still_skips_incompatible_cores_silently(self) -> None:
+        """Without --core, the sum-across-cores convenience path keeps
+        its historical silent-skip behaviour -- only an explicit,
+        single-core selection is a hard error."""
+        body = """
+            som:
+              sku: E1M-AEN801
+            cores:
+              a32_cluster:
+                os: yocto
+                image: some-image
+              m55_hp:
+                os: zephyr
+                app: ./src
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), body)
+            rv = subprocess.run(
+                [sys.executable, str(LOADER),
+                 "--input", str(path),
+                 "--emit", "zephyr-conf"],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertIn("core: m55_hp", rv.stdout)
+        self.assertNotIn("core: a32_cluster", rv.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

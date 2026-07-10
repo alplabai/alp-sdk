@@ -157,9 +157,17 @@ def _load_yaml(path: Path) -> dict[str, Any]:
         sys.exit(f"alp_project: {e}")
 
 
-def _validate_and_load(path: Path) -> dict[str, Any]:
+def _validate_and_load(
+    path: Path, metadata_root: Path = METADATA_ROOT
+) -> dict[str, Any]:
     """Validate *path* with the rich diagnostic validator, then return a
     plain ``dict`` for the downstream emitters.
+
+    *metadata_root* threads the CLI's `--metadata-root` override into the
+    rich validator's SoM/preset/SoC lookups (#604) -- without it a
+    customer's out-of-tree metadata copy validated fine via
+    `load_board_yaml(metadata_root=...)` downstream but failed here first
+    against the repo's own metadata.
 
     If the validator finds errors, each one is rendered as a Rust-style
     diagnostic block to *stderr* and the process exits with code 1.
@@ -185,7 +193,7 @@ def _validate_and_load(path: Path) -> dict[str, Any]:
     if not path.is_file():
         sys.exit(f"alp_project: file not found: {path}")
 
-    collector = validate_board_yaml(path)
+    collector = validate_board_yaml(path, metadata_root=metadata_root)
     if collector.has_errors():
         source_text = path.read_text(encoding="utf-8")
         for diag in collector:
@@ -2389,19 +2397,38 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             print(f"alp_project: {e}", file=sys.stderr)
             return 1
 
+    # #605: the os class(es) each per-core `--emit` mode is valid for.
+    # `zephyr-conf` / `yocto-conf` are OS-SPECIFIC -- they hand a Kconfig
+    # fragment / local.conf snippet to a build system that only makes
+    # sense for that one runtime.  `cmake-args` is GENERIC across the two
+    # runtimes that actually consume raw CMake args (baremetal + zephyr).
+    # An explicit `--core` naming a core outside its emit mode's classes
+    # used to warn-and-emit-anyway (zephyr-conf/yocto-conf) or emit
+    # silently with no warning at all (cmake-args) -- automation reading
+    # the output got valid-looking config for the wrong consumption path.
+    # That is now a hard error; the unscoped (`--core` omitted) sum-
+    # across-cores path keeps silently skipping incompatible cores, since
+    # it is explicitly a "give me everything applicable" query.
+    _EMIT_OS_CLASSES: dict[str, tuple[str, ...]] = {
+        "zephyr-conf": ("zephyr",),
+        "yocto-conf": ("yocto",),
+        "cmake-args": ("baremetal", "zephyr"),
+    }
+
     parts: list[str] = []
     for cid in core_ids:
         slice_ = project.cores[cid]
         if slice_.os == "off":
             continue
+        allowed_os = _EMIT_OS_CLASSES.get(args.emit)
+        if allowed_os is not None and slice_.os not in allowed_os:
+            if args.core is None:
+                continue
+            print(f"alp_project: --core {cid} has os: {slice_.os}, which "
+                  f"--emit {args.emit} does not support (supported os: "
+                  f"{', '.join(allowed_os)})", file=sys.stderr)
+            return 1
         if args.emit == "zephyr-conf":
-            if slice_.os != "zephyr":
-                # When --core is unset, filter by os: zephyr; with --core,
-                # honour the explicit selection but warn.
-                if args.core is None:
-                    continue
-                print(f"alp_project: --core {cid} has os: {slice_.os}; "
-                      f"emitting Kconfig fragment anyway", file=sys.stderr)
             parts.append(f"# --- core: {cid} ({slice_.os}) ---")
             parts.append(_slice_alp_conf(project, slice_))
             hw_lines = _emit_library_hw_backends(slice_.libraries, project.sku)
@@ -2410,17 +2437,9 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                 parts.extend(hw_lines)
                 parts.append("")
         elif args.emit == "yocto-conf":
-            if slice_.os != "yocto":
-                if args.core is None:
-                    continue
-                print(f"alp_project: --core {cid} has os: {slice_.os}; "
-                      f"emitting local.conf snippet anyway", file=sys.stderr)
             parts.append(f"# --- core: {cid} ({slice_.os}) ---")
             parts.append(_slice_local_conf(project, slice_))
         elif args.emit == "cmake-args":
-            if slice_.os not in ("baremetal", "zephyr"):
-                if args.core is None:
-                    continue
             parts.append(f"# --- core: {cid} ({slice_.os}) ---")
             parts.append(_slice_cmake_args(project, slice_))
         else:
@@ -2478,7 +2497,7 @@ def main() -> int:
                      "ipc-contract-h", "os-topology"):
         return _run_v2_emit(args)
 
-    project = _validate_and_load(args.input)
+    project = _validate_and_load(args.input, args.metadata_root)
 
     # composed-route-table / carrier-netlist only need the SoM + board
     # definitions; they do not require the per-core slice machinery.
