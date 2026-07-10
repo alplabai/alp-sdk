@@ -29,6 +29,14 @@ test framework with no hardware surface.
 * A custom `main()` (not `DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN`) so the
   example can print the SDK's uniform `[doctest-selftest] done`
   marker only after doctest reports zero test failures.
+* **The `int main(void)` gotcha.** `src/main.cpp` deliberately
+  declares `int main(void)`, not `main(int argc, char **argv)`:
+  Zephyr's kernel init (`kernel/init.c`) calls the application's
+  `main()` as `extern int main(void); main();` unless
+  `CONFIG_BOOTARGS=y` -- no argc/argv are ever placed on the
+  stack/registers, so asking for them reads garbage. See
+  `catch2-selftest`'s README for the segfault this exact mistake
+  caused there.
 
 ## Build
 

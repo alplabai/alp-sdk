@@ -94,15 +94,26 @@ TEST_CASE("clamp: value above the range saturates to hi, boundary is inclusive")
 	CHECK(clamp(10, 0, 10) == 10);
 }
 
-int main(int argc, char **argv)
+int main(void)
 {
-	/* doctest::Context owns one test run: it parses argv for
-	 * doctest's own flags (--test-case=, --reporters=, etc.),
-	 * runs every registered TEST_CASE, and prints the summary
-	 * block shown in the file header comment above. */
+	/* `int main(void)`, NOT `main(int argc, char **argv)`: unless
+	 * the app sets CONFIG_BOOTARGS, Zephyr's kernel init
+	 * (kernel/init.c) invokes the application entry point through
+	 * a bare `extern int main(void); main();` call -- no arguments
+	 * are ever placed in the argc/argv registers. Declaring `main`
+	 * with (argc, argv) parameters here would silently read
+	 * whatever garbage happened to be left in those registers at
+	 * the call site instead of a real command line (this exact
+	 * mistake segfaulted catch2-selftest's first draft inside
+	 * Catch2's argv-walking applyCommandLine() -- see that
+	 * example's README). We skip command-line parsing entirely --
+	 * there IS no host command line to parse on native_sim -- and
+	 * just run every registered TEST_CASE with doctest's defaults.
+	 *
+	 * doctest::Context owns one test run: it runs every registered
+	 * TEST_CASE and prints the summary block shown in the file
+	 * header comment above. */
 	doctest::Context ctx;
-
-	ctx.applyCommandLine(argc, argv);
 
 	int res = ctx.run();
 
