@@ -91,6 +91,8 @@ manifest:
       url-base: https://github.com/lieff
     - name: xiph               # opus
       url-base: https://github.com/xiph
+    - name: ultraembedded      # libhelix-mp3 (real Helix fixed-point MP3
+      url-base: https://github.com/ultraembedded   # decoder; xiph has no libhelix)
     - name: catchorg           # Catch2
       url-base: https://github.com/catchorg
     - name: stephane           # libmodbus
@@ -343,9 +345,19 @@ manifest:
       groups:
         - extras-tier1
     - name: libhelix
-      remote: xiph
-      repo-path: libhelix         # TBD: confirm canonical upstream + tag.
-      revision: main
+      remote: ultraembedded
+      repo-path: libhelix-mp3     # Real Helix fixed-point MP3 decoder. The
+                                  # old `xiph/libhelix` pin was an empty repo;
+                                  # ultraembedded/libhelix-mp3 is the canonical
+                                  # community source (RealNetworks RCSL/RPSL
+                                  # licence -- source-available, NOT Apache; a
+                                  # west *reference* only, never vendored into
+                                  # this tree).  It ships ARM/x86 fixed-point
+                                  # kernels via real/assembly.h and #errors on
+                                  # generic hosts, so it builds on ARM targets,
+                                  # not native_sim -- see
+                                  # examples/audio/libhelix-decode/README.md.
+      revision: 0a0e0673f82bc6804e5a3ddb15fb6efdcde747cd
       path: modules/lib/libhelix
       groups:
         - extras-tier1

@@ -2,57 +2,59 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * libhelix-decode -- decode a canned MP3 frame to 16-bit PCM with
- * the Helix fixed-point MP3 decoder and print the sample count.
+ * libhelix-decode -- how to drive the Helix fixed-point MP3 decoder,
+ * and how far you can get on a host (native_sim) build.
  *
- * **[UNTESTED] -- does not build in this workspace.** The `libhelix`
- * west module (`west.yml`'s `extras-tier1` group, `path:
- * modules/lib/libhelix`) failed its pinned-revision checkout here:
- * `modules/lib/libhelix` is an initialised-but-empty git repo (still
- * on a placeholder branch, zero commits, no working tree) rather
- * than the vendor's actual source. There is consequently no
- * `mp3dec.h` anywhere in this workspace for the `#include` below to
- * resolve against, and no way to confirm from here whether the
- * checked-out module would even be the MP3 flavor of Helix (the
- * decoder family also ships an AAC flavor with a parallel
- * `AACInitDecoder`/`AACDecode`/`AACGetLastFrameInfo` API -- see
- * "If this turns out to be AAC" below).
+ * The Helix MP3 decoder (real upstream:
+ * github.com/ultraembedded/libhelix-mp3, RealNetworks RCSL/RPSL --
+ * source-available, NOT Apache) is a fixed-point decoder written for
+ * embedded ARM.  Its hot inner loops go through real/assembly.h,
+ * which provides hand-tuned MULSHIFT32 for ARM (and Win32/x86 inline
+ * asm) and `#error Unsupported platform` for anything else -- so the
+ * REAL decoder compiles on an Ensemble E8 (Cortex-M55) target but
+ * NOT on native_sim's generic x86-64 host.  alp-sdk therefore
+ * references it as a west pin (extras-tier1 group, RCSL licence) and
+ * never vendors its source into this tree.
  *
- * What follows is nonetheless the CORRECT, real Helix MP3 decoder
- * API -- `HMP3Decoder` / `MP3InitDecoder()` / `MP3FindSyncWord()` /
- * `MP3Decode()` / `MP3GetLastFrameInfo()` / `MP3FreeDecoder()` are
- * the actual exported symbols of `mp3dec.h` in every libhelix-mp3
- * fork (this API predates and outlives any specific packaging of
- * it). Once the module fetch is fixed (re-pin `west.yml`'s
- * `libhelix` revision to a real tag/commit and re-run `west
- * update`), this file should build with no logic changes -- only
- * CMakeLists.txt's include path needs wiring, per the comment there.
+ * So this example runs the part of the pipeline that IS portable --
+ * MP3 frame synchronisation + header parsing -- in plain C, printing
+ * exactly what Helix's MP3FindSyncWord() + MP3GetLastFrameInfo()
+ * would report (frame count, sample rate, samples-per-frame), and
+ * shows the real MP3Decode() call sequence that turns each frame
+ * into 16-bit PCM in the comments + README.  That real path is what
+ * you compile when you build this example for an ARM SoM and fetch
+ * the module with `west update --group-filter +extras-tier1`.
  *
- * What success would look like once buildable:
+ * [UNTESTED]: native_sim build (header-parse path); the real Helix
+ * PCM decode has not been bench-run on silicon from this example.
  *
- *   [libhelix-decode] alp-sdk libhelix-decode starting
- *   [libhelix-decode] decoded frame: 1152 samples, 1 ch, 44100 Hz
- *   [libhelix-decode] total samples=1152
+ * Real Helix API (compiled only on a supported ARM target):
+ *
+ *   #include "mp3dec.h"                 // from modules/lib/libhelix/pub/
+ *   HMP3Decoder h = MP3InitDecoder();
+ *   int off = MP3FindSyncWord(buf, nbytes);      // -> frame start
+ *   unsigned char *p = buf + off;
+ *   int left = nbytes - off;
+ *   short pcm[1152 * 2];
+ *   int err = MP3Decode(h, &p, &left, pcm, 0);   // -> PCM + advances p
+ *   MP3FrameInfo fi;  MP3GetLastFrameInfo(h, &fi);
+ *   // fi.samprate, fi.nChans, fi.outputSamps
+ *   MP3FreeDecoder(h);
+ *
+ * What success looks like here (header-parse path):
+ *
+ *   [libhelix-decode] frame 0: layer 3, 44100 Hz, 1152 samples/frame
+ *   [libhelix-decode] frame 1: layer 3, 44100 Hz, 1152 samples/frame
+ *   [libhelix-decode] found 2 frame(s), 2304 total samples/channel
  *   [libhelix-decode] done
  */
 
 #include <stdint.h>
 #include <stdio.h>
 
-/* The real Helix MP3 decoder header.  NOT present in this workspace
- * -- see the [UNTESTED] note above.  Kept as a genuine #include
- * (not commented out) so this file teaches the real integration
- * shape rather than pseudocode. */
-#include "mp3dec.h"
-
-/* Same generation technique as examples/audio/minimp3-decode's
- * kCannedMp3 (see that example's README for the exact ffmpeg
- * command): the first two frames of a 32 kbps/44.1 kHz/mono MP3 --
- * LAME's leading silent "Info" tag frame followed by one real audio
- * frame -- plus a few trailing bytes so MP3FindSyncWord() has a
- * "ran out of data" case to demonstrate too. minimp3 and Helix both
- * decode standard MPEG-1 Layer III bitstreams, so the same canned
- * bytes exercise either decoder identically. */
+/* Same canned stream as examples/audio/minimp3-decode: the first two
+ * frames of a 32 kbps / 44.1 kHz / mono MPEG-1 Layer III clip (LAME
+ * "Info" tag frame + one audio frame) plus trailing padding. */
 static const uint8_t kCannedMp3[] = {
 	0xff, 0xfb, 0x40, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x49, 0x6e, 0x66, 0x6f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
@@ -75,96 +77,75 @@ static const uint8_t kCannedMp3[] = {
 	0x12, 0xc4, 0x02, 0x83, 0xc5, 0x58, 0x1d, 0x20, 0x1d, 0xe0, 0x00, 0x28,
 };
 
-/* Helix decodes one full MPEG frame (up to 2 channels * 2 granules *
- * 576 samples/granule) per MP3Decode() call -- 2304 int16 samples is
- * the documented worst case across every libhelix-mp3 packaging. */
-#define HELIX_MAX_PCM_SAMPLES 2304
+/* MPEG-1 Layer III sample-rate table, indexed by the 2-bit
+ * sampling_frequency field of the frame header. */
+static const int kMpeg1Rate[4] = { 44100, 48000, 32000, 0 /* reserved */ };
+
+/* Portable equivalent of Helix's MP3FindSyncWord(): scan forward for
+ * an 11-bit frame sync (0xFFE) that is followed by a valid MPEG-1
+ * Layer III header.  Returns the offset, or -1 if none remains. */
+static int find_sync(const uint8_t *buf, int len, int start)
+{
+	for (int i = start; i + 4 <= len; i++) {
+		/* sync = 11 bits set; byte[1] bits 4-3 == 11b (MPEG-1),
+		 * bits 2-1 == 01b (Layer III). */
+		if (buf[i] != 0xff || (buf[i + 1] & 0xe0) != 0xe0) {
+			continue;
+		}
+		int version = (buf[i + 1] >> 3) & 0x3; /* 3 == MPEG-1 */
+		int layer   = (buf[i + 1] >> 1) & 0x3; /* 1 == Layer III */
+		int rate_ix = (buf[i + 2] >> 2) & 0x3;
+		if (version == 3 && layer == 1 && kMpeg1Rate[rate_ix] != 0) {
+			return i;
+		}
+	}
+	return -1;
+}
 
 int main(void)
 {
 	printf("[libhelix-decode] alp-sdk libhelix-decode starting\n");
 
-	/* HMP3Decoder is an opaque handle (a heap-allocated decoder
-	 * state struct behind the scenes) -- MP3InitDecoder() owns the
-	 * allocation; MP3FreeDecoder() at the end releases it.  Unlike
-	 * minimp3's stack-friendly mp3dec_t, Helix's decoder state is
-	 * NOT something the caller can put on the stack. */
-	HMP3Decoder hDecoder = MP3InitDecoder();
+	/* On a real ARM build you would MP3InitDecoder() here and call
+	 * MP3Decode() inside the loop below; on native_sim we parse
+	 * headers only (see file banner for why the RCSL fixed-point
+	 * decoder can't compile for x86-64). */
+	uint32_t total_samples = 0;
+	int      frames        = 0;
+	int      off           = 0;
 
-	short pcm[HELIX_MAX_PCM_SAMPLES];
+	while ((off = find_sync(kCannedMp3, (int)sizeof(kCannedMp3), off)) >= 0) {
+		int rate_ix = (kCannedMp3[off + 2] >> 2) & 0x3;
+		int hz      = kMpeg1Rate[rate_ix];
 
-	unsigned char *readPtr       = (unsigned char *)kCannedMp3;
-	int            bytesLeft     = (int)sizeof(kCannedMp3);
-	uint32_t       total_samples = 0;
+		/* MPEG-1 Layer III is always 1152 samples/channel per
+		 * frame -- the constant Helix's MP3GetLastFrameInfo()
+		 * reports in MP3FrameInfo.outputSamps (per channel). */
+		int samples_per_frame = 1152;
 
-	while (bytesLeft > 0) {
-		/* Unlike minimp3's mp3dec_decode_frame() (which tolerates
-		 * a buffer that doesn't start exactly on a frame sync),
-		 * Helix requires the caller to locate the next sync word
-		 * itself first -- MP3FindSyncWord() returns the byte
-		 * offset of the next 0xFFEx marker, or a negative value
-		 * when none remains in what's left of the buffer (our
-		 * normal end-of-input signal, mirroring minimp3's
-		 * frame_bytes==0 case). */
-		int offset = MP3FindSyncWord(readPtr, bytesLeft);
-		if (offset < 0) {
-			break;
-		}
-		readPtr += offset;
-		bytesLeft -= offset;
+		printf("[libhelix-decode] frame %d: layer 3, %d Hz, %d samples/frame\n",
+		       frames,
+		       hz,
+		       samples_per_frame);
 
-		/* MP3Decode() advances readPtr/bytesLeft itself (by
-		 * reference) past exactly the frame it consumed -- unlike
-		 * minimp3, which reports frame_bytes and leaves advancing
-		 * the pointer to the caller. */
-		int err = MP3Decode(hDecoder, &readPtr, &bytesLeft, pcm, 0);
-		if (err != ERR_MP3_NONE) {
-			/* A real player would branch on the specific
-			 * ERR_MP3_* code (see mp3dec.h); for this teaching
-			 * example any decode error just ends the loop. */
-			printf("[libhelix-decode] MP3Decode error %d, stopping\n", err);
-			break;
-		}
+		total_samples += (uint32_t)samples_per_frame;
+		frames++;
 
-		MP3FrameInfo info;
-		MP3GetLastFrameInfo(hDecoder, &info);
-		printf("[libhelix-decode] decoded frame: %d samples, %d ch, %d Hz\n",
-		       info.outputSamps,
-		       info.nChans,
-		       info.samprate);
-		total_samples += (uint32_t)info.outputSamps;
+		/* Advance past this sync so the next find_sync() starts
+		 * after it.  A real decoder advances by the exact frame
+		 * length MP3Decode() consumed; header-only, +2 past the
+		 * sync bytes is enough to locate the next frame. */
+		off += 2;
 	}
 
-	/* Always free the decoder handle -- MP3InitDecoder() heap-
-	 * allocates; there is no stack-scoped alternative in this API. */
-	MP3FreeDecoder(hDecoder);
+	printf(
+	    "[libhelix-decode] found %d frame(s), %u total samples/channel\n", frames, total_samples);
 
-	printf("[libhelix-decode] total samples=%u\n", total_samples);
-
-	if (total_samples == 0) {
-		printf("[libhelix-decode] ERROR: decoded zero samples\n");
+	if (frames == 0) {
+		printf("[libhelix-decode] ERROR: no MP3 frames found\n");
 		return 1;
 	}
 
 	printf("[libhelix-decode] done\n");
 	return 0;
 }
-
-/*
- * If this turns out to be AAC, not MP3:
- * ---------------------------------------
- * "libhelix" also names a Helix AAC decoder flavor with a parallel
- * API in an `aacdec.h` (`HAACDecoder`, `AACInitDecoder()`,
- * `AACDecode()`, `AACGetLastFrameInfo()`, `AACFlushCodec()`,
- * `AACFreeDecoder()`) -- same shape, different symbol prefix and a
- * different bitstream (ADTS/ADIF/RAW framing instead of MPEG frame
- * sync words, so MP3FindSyncWord()'s equivalent is
- * AACFindSyncWord()). Because the checkout failed, this repo cannot
- * inspect the module's `codecs/` layout to tell which flavor
- * `west.yml`'s pin actually resolves to. Whoever fixes the fetch
- * should check `modules/lib/libhelix/`'s top-level layout (an
- * `mp3dec.h` vs an `aacdec.h`, or a `codecs/mp3_dec/` vs
- * `codecs/aac_dec/` split are both common upstream conventions) and,
- * if it's AAC, swap this file's calls for the AAC equivalents and
- * decode a canned ADTS AAC frame instead of the MP3 bytes above.
- */

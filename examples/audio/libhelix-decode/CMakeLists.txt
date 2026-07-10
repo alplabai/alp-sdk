@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# **[UNTESTED]**: the `libhelix` west module's pinned revision failed
-# to check out in this workspace (empty `modules/lib/libhelix` --
-# see README.md "Module status").  This CMakeLists.txt is still
-# wired the way a working checkout would need it -- `EXTRA_ZEPHYR_MODULES`
-# carrying the module path -- so it's a correct template, not a build
-# that currently succeeds.
+# libhelix-decode builds the PORTABLE half of the example (MP3 frame
+# sync + header parse) on any target, including native_sim.  The real
+# Helix fixed-point PCM decode compiles only on a supported ARM target
+# (real/assembly.h #errors on generic x86-64) and links the
+# west-fetched module (extras-tier1 group, RCSL licence); see
+# src/main.c's banner + README.md for the real MP3Decode() wiring.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -45,15 +45,17 @@ project(libhelix_decode LANGUAGES C)
 
 target_sources(app PRIVATE src/main.c)
 
-# NOT WIRED: the libhelix west module (west.yml `path:
-# modules/lib/libhelix`, extras-tier1 group) failed its pinned-revision
-# checkout in this workspace (empty repo -- see README.md "Module
-# status"), so there is no `mp3dec.h` anywhere to point at yet, and
-# adding a speculative include path here would be misleading. Once a
-# real checkout lands, wire it exactly like minimp3-decode's
-# CMakeLists.txt does:
+# Real Helix PCM decode (ARM targets only): once you build for an
+# Ensemble E8 SoM and `west update --group-filter +extras-tier1`
+# fetches modules/lib/libhelix (ultraembedded/libhelix-mp3), compile
+# the decoder core and add its public headers, e.g.:
 #
-#   target_include_directories(app PRIVATE <module-root-or-include-dir>)
+#   target_include_directories(app PRIVATE ${ZEPHYR_LIBHELIX_MODULE_DIR}/pub)
+#   target_sources(app PRIVATE
+#       ${ZEPHYR_LIBHELIX_MODULE_DIR}/mp3dec.c
+#       ${ZEPHYR_LIBHELIX_MODULE_DIR}/mp3tabs.c
+#       ${ZEPHYR_LIBHELIX_MODULE_DIR}/real/*.c)
 #
-# (libhelix, like minimp3 and tinygsm, ships no zephyr/module.yml, so
-# west alone won't add its include path even after a successful fetch.)
+# then switch src/main.c to the MP3Decode() path shown in its banner.
+# The module ships no zephyr/module.yml, so west won't add its include
+# path automatically -- name it explicitly as above.

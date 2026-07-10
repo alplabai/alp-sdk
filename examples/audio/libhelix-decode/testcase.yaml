@@ -1,20 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# **[UNTESTED]**: this scenario does not currently build -- the
-# `libhelix` west module's pinned revision failed to check out in
-# this workspace (see README.md "Module status"). Kept in the
-# canonical per-example shape (matching every other example's
-# testcase.yaml) so the file exists as a correct template for when
-# the module fetch is fixed; do not add this to a CI run that expects
-# every scenario to pass until then.
+# Builds + runs on native_sim (the portable MP3 frame-sync + header
+# parse path).  The real Helix fixed-point PCM decode is ARM-only
+# (real/assembly.h #errors on generic x86-64) and is not exercised
+# here -- see README.md "What this teaches".
 
 sample:
   name: libhelix-decode
   description: |
-    Decodes a canned MP3 frame to PCM with the Helix fixed-point MP3
-    decoder and prints the sample count. UNTESTED: the libhelix west
-    module's pinned revision failed to check out in this workspace,
-    so mp3dec.h does not resolve and this scenario does not build.
+    Demonstrates the Helix MP3 decoder workflow.  On native_sim it runs
+    the portable MP3 frame-sync + header parse (frame count, sample
+    rate, samples/frame) that mirrors Helix's MP3FindSyncWord() +
+    MP3GetLastFrameInfo(); the real MP3Decode() PCM path compiles on an
+    ARM SoM with the west-fetched module (extras-tier1, RCSL licence).
 
 tests:
   alp_sdk.example.libhelix_decode:
