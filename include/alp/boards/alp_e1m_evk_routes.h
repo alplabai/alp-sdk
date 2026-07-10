@@ -120,6 +120,43 @@ extern "C" {
 #define EVK_ENC_ROTARY ALP_E1M_ENC0  /**< PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
 
 /* ------------------------------------------------------------------ */
+/* On-board I2C device addresses (from `i2c_devices:`) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_I2C_ADDR_ICM42670      0x69u  /**< U12 IMU (AD0->VIO). Collides with U13 @0x69 until the respin. BENCH-CONFIRMED 2026-06-16 (E1M-AEN801): U12 + U13 both answer at 0x69 and collide -- see EVK_I2C_ADDR_BMI323. */
+#define EVK_I2C_ADDR_BMI323        0x68u  /**< U13 IMU; respin target (SDO->GND = datasheet default). Pre-respin batch mis-straps it to 0x69 (collides w/ U12, see EVK_I2C_ADDR_ICM42670). */
+#define EVK_I2C_ADDR_BMP581        0x47u  /**< U14 barometer (SDO->VIO; 0x46 if SDO->GND). */
+#define EVK_I2C_ADDR_TCAL9538_MAIN 0x72u  /**< U35 main I/O expander (A1=1, A0=0). Handles LCD/camera/capacitive-touch control + four sensor interrupt inputs. */
+#define EVK_I2C_ADDR_TCAL9538      EVK_I2C_ADDR_TCAL9538_MAIN  /**< Alias for EVK_I2C_ADDR_TCAL9538_MAIN. */
+#define EVK_I2C_ADDR_TCAL9538_PCIE 0x71u  /**< U37 PCIe I/O expander (A0=1, A1=0). Handles the I2C-mux SEL + PCIe slot RST/WAKE/CLKREQ signals + M2E_ALERT. */
+#define EVK_I2C_ADDR_TCA6408A_MAIN 0x20u  /**< U35 main I/O expander, TCA6408ARSVR alternative (R112 fitted, R145 DNP). PCA9538-register-compatible, so chips/tcal9538 drives it unchanged. BENCH-CONFIRMED 2026-06-16: read back config=0xFF + a live input port. */
+#define EVK_I2C_ADDR_TAS2563_LOW   0x4Du  /**< U27 smart amp (AD0 = 10k to GND). */
+#define EVK_I2C_ADDR_TAS2563_HIGH  0x4Eu  /**< U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) is occupied on this EVK by U32 INA236B (+V_CAM0 rail, pre-respin) -- firmware that wants to write both amps must issue two targeted unit-address writes. */
+#define EVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND. */
+#define EVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max). A0 = V+. */
+#define EVK_I2C_ADDR_INA236_VIO    0x42u  /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max). A0 = SDA. */
+#define EVK_I2C_ADDR_INA236_VCAM0  0x4Bu  /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max). Re-strapped A0=SCL -> 0x4B from the next batch; PRE-RESPIN boards had it at 0x48, which collides with the TAS2563 broadcast address (unreadable there). */
+#define EVK_I2C_ADDR_INA236_VCAM1  0x49u  /**< U34 INA236B, +V_CAM1 rail (50 mOhm shunt, 1.6 A max). A0 = V+. */
+#define EVK_I2C_ADDR_INA236_5V     0x4Au  /**< U30 INA236B, +5V rail (20 mOhm shunt, 4.0 A max). A0 = SDA. */
+
+/* ------------------------------------------------------------------ */
+/* INA236 calibration constants (from `i2c_devices[].calibration`) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_INA236_SHUNT_3V3_OHMS   0.020f  /**< Shunt for EVK_I2C_ADDR_INA236_3V3. */
+#define EVK_INA236_MAX_3V3_A        4.0f  /**< Max current for EVK_I2C_ADDR_INA236_3V3. */
+#define EVK_INA236_SHUNT_1V8_OHMS   0.020f  /**< Shunt for EVK_I2C_ADDR_INA236_1V8. */
+#define EVK_INA236_MAX_1V8_A        4.0f  /**< Max current for EVK_I2C_ADDR_INA236_1V8. */
+#define EVK_INA236_SHUNT_VIO_OHMS   0.050f  /**< Shunt for EVK_I2C_ADDR_INA236_VIO. */
+#define EVK_INA236_MAX_VIO_A        1.6f  /**< Max current for EVK_I2C_ADDR_INA236_VIO. */
+#define EVK_INA236_SHUNT_VCAM0_OHMS 0.050f  /**< Shunt for EVK_I2C_ADDR_INA236_VCAM0. */
+#define EVK_INA236_MAX_VCAM0_A      1.6f  /**< Max current for EVK_I2C_ADDR_INA236_VCAM0. */
+#define EVK_INA236_SHUNT_VCAM1_OHMS 0.050f  /**< Shunt for EVK_I2C_ADDR_INA236_VCAM1. */
+#define EVK_INA236_MAX_VCAM1_A      1.6f  /**< Max current for EVK_I2C_ADDR_INA236_VCAM1. */
+#define EVK_INA236_SHUNT_5V_OHMS    0.020f  /**< Shunt for EVK_I2C_ADDR_INA236_5V. */
+#define EVK_INA236_MAX_5V_A         4.0f  /**< Max current for EVK_I2C_ADDR_INA236_5V. */
+
+/* ------------------------------------------------------------------ */
 /* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */
 /* Same BOARD_* names on every board; include via <alp/board.h>.       */
 /* ------------------------------------------------------------------ */
