@@ -93,7 +93,7 @@ def declared_version(repo: pathlib.Path) -> tuple[int, int, int]:
     m = re.search(r"^version:\s*(\d+)\.(\d+)\.(\d+)\s*$", text, re.MULTILINE)
     if not m:
         print(f"check_version_doc_sync: could not parse 'version:' from "
-              f"{sdk_version_yaml.relative_to(repo)}", file=sys.stderr)
+              f"{sdk_version_yaml.relative_to(repo).as_posix()}", file=sys.stderr)
         sys.exit(2)
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
@@ -142,7 +142,7 @@ def check_version_h(repo: pathlib.Path, want: tuple[int, int, int]) -> list[str]
     update_version_h() rewrite patterns.
     """
     version_h = repo / "include" / "alp" / "version.h"
-    rel = version_h.relative_to(repo)
+    rel = version_h.relative_to(repo).as_posix()
     text = version_h.read_text(encoding="utf-8")
     want_str = ".".join(str(p) for p in want)
     drifts: list[str] = []
@@ -165,7 +165,7 @@ def check_version_h(repo: pathlib.Path, want: tuple[int, int, int]) -> list[str]
 def check_pyproject(repo: pathlib.Path, want_str: str) -> list[str]:
     """Check pyproject.toml's [project] version (full triple)."""
     pyproject = repo / "pyproject.toml"
-    rel = pyproject.relative_to(repo)
+    rel = pyproject.relative_to(repo).as_posix()
     text = pyproject.read_text(encoding="utf-8")
     m = re.search(r'^version\s*=\s*"([^"]*)"', text, re.MULTILINE)
     if m is None:
@@ -183,7 +183,7 @@ def check_cli_init(repo: pathlib.Path, want_str: str) -> list[str]:
     "0.6.0" for two releases with nothing catching it (#445).
     """
     cli_init = repo / "scripts" / "alp_cli" / "__init__.py"
-    rel = cli_init.relative_to(repo)
+    rel = cli_init.relative_to(repo).as_posix()
     text = cli_init.read_text(encoding="utf-8")
     m = re.search(r'^__version__\s*=\s*"([^"]*)"', text, re.MULTILINE)
     if m is None:
@@ -201,7 +201,7 @@ def check_banner_c(repo: pathlib.Path, want_str: str) -> list[str]:
     the illustrative sample line in the file's doc-comment can drift.
     """
     banner_c = repo / "src" / "zephyr" / "alp_banner.c"
-    rel = banner_c.relative_to(repo)
+    rel = banner_c.relative_to(repo).as_posix()
     text = banner_c.read_text(encoding="utf-8")
     m = re.search(r"Alp SDK (\d+\.\d+\.\d+)", text)
     if m is None:
