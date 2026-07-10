@@ -56,11 +56,11 @@ static const char *const _status_descriptions[ALP_STATUS_TABLE_SIZE] = {
 	    "Hardware does not exist on this silicon (silicon-absent).",
 	[-ALP_ERR_NOT_IMPLEMENTED] = "Backend exists for this silicon but the implementation is a "
 	                             "tracked stub (planned, not yet wired).",
-	[-ALP_ERR_VERSION]         = "Format/container version is newer than this reader supports.",
+	[-ALP_ERR_VERSION] = "Format/container version is newer than this reader supports.",
 	[-ALP_ERR_NO_BACKEND] =
 	    ".alpmodel has no blob for any backend available on this SoM (and no CPU fallback).",
-	[-ALP_ERR_NO_FIT]    = "A backend matched but no blob fits the device NPU envelope (e.g. arena "
-	                       "SRAM too small), and no CPU fallback.",
+	[-ALP_ERR_NO_FIT] = "A backend matched but no blob fits the device NPU envelope (e.g. arena "
+	                    "SRAM too small), and no CPU fallback.",
 	[-ALP_ERR_NOT_FOUND] = "An explicitly-requested backend is absent from the package.",
 	[-ALP_ERR_NOT_PROVISIONED] =
 	    "Hardware identity store (e.g. the on-module EEPROM manifest) is blank / unprogrammed -- "

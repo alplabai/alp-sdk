@@ -120,6 +120,22 @@ def emit(entries: list[Entry]) -> str:
     real = [e for e in entries if e.name != SENTINEL]
     floor = next(e for e in entries if e.name == SENTINEL)
 
+    # Sanity: the real statuses must densely cover floor..0 with no gaps, and
+    # ALP_STATUS_ENUM_FLOOR must equal the most-negative captured value.  A gap
+    # means a member was dropped by the parser -- e.g. an auto-incremented
+    # enumerator written without an explicit `= -N`, which _ENTRY_RE cannot
+    # match -- and would otherwise SILENTLY return "ALP_STATUS_UNKNOWN" for a
+    # real code.  Fail loudly so adding a status can never half-land.
+    values = {e.value for e in real}
+    missing = set(range(floor.value, 1)) - values
+    if missing or floor.value != min(values):
+        sys.exit(
+            "gen_status_strings: alp_status_t is not dense/self-consistent "
+            f"(missing values {sorted(missing)}; ALP_STATUS_ENUM_FLOOR={floor.value}, "
+            f"min captured={min(values)}).  Give every enumerator an explicit "
+            "'= -N' and keep ALP_STATUS_ENUM_FLOOR equal to the most-negative value."
+        )
+
     # Pre-align designated initialiser keys so the python-only output is
     # already close to clang-format's AlignConsecutiveAssignments columns
     # (the gen_soc_caps.py cap.c precedent) -- clang-format still runs
