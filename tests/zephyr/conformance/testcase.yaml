@@ -27,7 +27,8 @@ tests:
       - conformance
       - peripheral
 
-  # <alp/testing/*> virtual-backend behavioral suite (epic #610 PR1).
+  # <alp/testing/*> virtual-backend behavioral suite (epic #610: PR1
+  # GPIO, PR2 UART -- the first virtual-clock TIMEOUT consumer).
   # native_sim ONLY, deliberately: CONFIG_ALP_SDK_TESTING registers a
   # priority-255 silicon_ref="*" backend per enabled class, which
   # outranks every real backend -- pointing this at a qualified board

@@ -36,3 +36,16 @@ config ALP_SDK_TESTING_GPIO
 	  (src/backends/gpio/testing_drv.c).  Lets a ztest drive
 	  alp_gpio_* through injected input levels / edges / output
 	  read-back without any real or emulated GPIO controller.
+
+config ALP_SDK_TESTING_UART
+	bool "UART test double (<alp/testing/uart.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 UART test-double backend
+	  (src/backends/uart/testing_drv.c).  Lets a ztest drive
+	  alp_uart_* through injected RX bytes/errors (immediate or
+	  deferred against the virtual clock) and TX read-back, without
+	  any real or emulated UART controller.  The first
+	  <alp/testing/*> double whose read() path resolves a timeout
+	  against the virtual clock instead of ever blocking.

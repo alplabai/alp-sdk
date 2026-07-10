@@ -15,13 +15,18 @@ project(alp_sdk_conformance_test LANGUAGES C)
 # instance).  CONFIG_ALP_SDK_TESTING's priority-255 wildcard backends
 # are therefore built as a SEPARATE app image (the
 # alp_sdk.conformance.test_doubles scenario) that swaps main.c out for
-# src/behavior_gpio.c instead of adding to the same binary -- the two
-# suites test different, mutually-incompatible backend selections for
-# the same class and must never run in one process.  main.c itself is
-# untouched; only this file's source list is scenario-conditional.
+# the per-class behavior_*.c files (src/behavior_gpio.c,
+# src/behavior_uart.c, ...) instead of adding to the same binary -- the
+# two suites test different, mutually-incompatible backend selections
+# for the same class and must never run in one process.  main.c itself
+# is untouched; only this file's source list is scenario-conditional.
+# Adding class N+1's test double: add its behavior_<class>.c to the
+# list below (one file per class, mirroring one testing_drv.c per
+# class under src/backends/<class>/).
 if(CONFIG_ALP_SDK_TESTING)
     target_sources(app PRIVATE
         src/behavior_gpio.c
+        src/behavior_uart.c
     )
 else()
     target_sources(app PRIVATE
