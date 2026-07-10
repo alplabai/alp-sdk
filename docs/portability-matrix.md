@@ -28,9 +28,11 @@ For each (SKU × example) cell:
 `west build` is not the gate — the contract is that
 generated `alp.conf` is uniform within the family up to documented
 silicon-determined deltas.  Per-SoM Zephyr board files are emitted by
-`scripts/alp_project.py --emit zephyr-board` from the same YAML
-sources; once they exist for a given SoM, `west build` against that
-board is the customer's final step.
+`scripts/alp_project.py --emit zephyr-board` from the same YAML sources
+(full board-tree generation for the Alif Ensemble family; the
+family-agnostic subset for Renesas RZ/V2N — see `docs/architecture.md`
+and `docs/porting-new-som.md` §10); `west build` against that board is
+the customer's final step.
 
 The tables below are **auto-generated**: `scripts/gen_portability_matrix.py`
 re-runs steps 1–3 for every cell against the single-source SoM presets

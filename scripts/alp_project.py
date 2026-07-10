@@ -228,6 +228,37 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
         } if project.board_name else None),
     }
 
+    # --- zephyr-board: writes a directory of files, not a single stream --
+    if args.emit == "zephyr-board":
+        if args.core is None:
+            print("alp_project: --emit zephyr-board requires --core "
+                  "(it generates one core's board tree)", file=sys.stderr)
+            return 1
+        if args.output is None:
+            print("alp_project: --emit zephyr-board requires --output "
+                  "<dir> (it writes a board-tree directory, not a stream)",
+                  file=sys.stderr)
+            return 1
+        from gen_zephyr_board import ZephyrBoardEmitError, emit_zephyr_board
+        try:
+            files = emit_zephyr_board(project.sku, args.core, args.metadata_root)
+        except ZephyrBoardEmitError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+        # `--output` names the board DIRECTORY itself (matching
+        # docs/porting-new-som.md's `--output build/boards/<board>/`
+        # example, then `west build --board-root build/boards`), so the
+        # generator's `<board_dir>/<file>` keys have their board_dir
+        # prefix stripped before joining against `--output`.
+        for relpath, content in files.items():
+            _, fname = relpath.split("/", 1)
+            target = args.output / fname
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            print(f"alp_project: wrote {target} ({len(content)} bytes)",
+                  file=sys.stderr)
+        return 0
+
     # --- legacy project-wide emits, v2-flavoured -------------------------
     if args.emit == "dts-overlay":
         # The DTS overlay is shaped by the board header (bus aliases +
@@ -389,7 +420,9 @@ def main() -> int:
                                  "os-topology",
                                  # Carrier routing / Studio handoff JSON.
                                  "composed-route-table",
-                                 "carrier-netlist"],
+                                 "carrier-netlist",
+                                 # Zephyr board-tree generator (issue #523).
+                                 "zephyr-board"],
                         default="zephyr-conf",
                         help="Output format (default: zephyr-conf).")
     parser.add_argument("--output", type=Path, default=None,
@@ -400,7 +433,9 @@ def main() -> int:
                         help="When the project is v2, limit emits to this "
                              "core ID.  For per-core emit modes "
                              "(zephyr-conf, yocto-conf, cmake-args) this "
-                             "picks the single slice to emit.  For "
+                             "picks the single slice to emit.  Required "
+                             "for zephyr-board (which generates exactly "
+                             "one core's board tree).  For "
                              "project-wide emit modes (dts-overlay, "
                              "hw-info-h, west-libraries) this scopes the "
                              "union calculation to a single slice (e.g. "
