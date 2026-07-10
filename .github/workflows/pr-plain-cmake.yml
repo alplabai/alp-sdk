@@ -130,3 +130,62 @@ jobs:
       # HIL coverage is parked behind docs/ci/HW-IN-LOOP.md.
       - name: Test
         run: ctest --test-dir build/yocto --output-on-failure
+
+  link-complete:
+    # Issue #593: every public <alp/*.h> function must be a real symbol
+    # in BOTH the baremetal and yocto plain-CMake libalp_sdk.a archives
+    # (a dispatcher, a real backend, or an explicit stub_backend.c
+    # NOSUPPORT stub) -- never silently absent, or a portable app that
+    # links clean on Zephyr fails at final link switching to baremetal
+    # or Yocto.  Cross-checks `nm`'s defined-symbol list for each
+    # archive against metadata/catalog.json's portable_api inventory
+    # (the same list the doc-drift / ABI-snapshot gates already treat
+    # as the source of truth for the portable surface).
+    name: plain-cmake · link-completeness (#593)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check
+        run: python3 scripts/check_plain_cmake_link_complete.py
+
+  find-package-consumer:
+    # Issue #607: an INSTALLED alp-sdk (ALP_SDK_BUILD_SHARED=ON) must be
+    # a real CMake package -- `find_package(alp-sdk 0.9 REQUIRED)`
+    # resolves, `alp::sdk` links, and the reported version matches the
+    # authoritative include/alp/version.h (not a stale hardcoded 0.1.0).
+    # Installs to a throwaway prefix, then configures/builds
+    # tests/cmake-consumer/find-package-smoke as a SEPARATE top-level
+    # CMake project against that prefix (the same external-consumer
+    # shape as consumer-add-subdirectory, but for the find_package()
+    # path instead of add_subdirectory()).
+    name: plain-cmake · find_package() consumer (#607)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Yocto-side runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libmosquitto-dev libasound2-dev libssl-dev pkg-config
+      - name: Configure + build + install alp-sdk
+        run: |
+          cmake -B build/install-review -S . -DALP_OS=yocto \
+              -DALP_SDK_BUILD_SHARED=ON \
+              -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/alp-prefix"
+          cmake --build build/install-review --parallel
+          cmake --install build/install-review
+      - name: Configure + build the find_package() consumer
+        run: |
+          cmake -B build/consumer-findpkg \
+              -S tests/cmake-consumer/find-package-smoke \
+              -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/alp-prefix"
+          cmake --build build/consumer-findpkg --parallel
+      - name: Run + verify the reported version
+        run: |
+          out="$(LD_LIBRARY_PATH="$RUNNER_TEMP/alp-prefix/lib" \
+              ./build/consumer-findpkg/find_package_smoke)"
+          echo "$out"
+          echo "$out" | grep -qx "alp-sdk version: 0.9.0"

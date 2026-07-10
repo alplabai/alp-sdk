@@ -1,0 +1,15 @@
+@PACKAGE_INIT@
+
+# alp-sdk-config.cmake — find_package(alp-sdk 0.9 CONFIG REQUIRED)
+#
+# Imports targets:
+#   alp::sdk_headers  — interface library exposing <alp/...>
+#   alp::sdk          — static library with the selected OS backend
+#
+# Only produced for an installed, standalone build
+# (-DALP_SDK_BUILD_SHARED=ON); the add_subdirectory() embedded-consumer
+# flow never installs and has no use for this file.
+
+include("${CMAKE_CURRENT_LIST_DIR}/alp-sdk-targets.cmake" OPTIONAL)
+
+check_required_components(${CMAKE_FIND_PACKAGE_NAME})
