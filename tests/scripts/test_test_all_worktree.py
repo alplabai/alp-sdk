@@ -30,8 +30,12 @@ REPO = Path(__file__).resolve().parents[2]
 TEST_ALL = REPO / "scripts" / "test-all.sh"
 
 pytestmark = pytest.mark.skipif(
-    shutil.which("git") is None or shutil.which("bash") is None,
-    reason="git and bash are required to exercise a real worktree checkout",
+    sys.platform.startswith("win")
+    or shutil.which("git") is None
+    or shutil.which("bash") is None,
+    reason="exercises the POSIX bash script scripts/test-all.sh via a real "
+    "git worktree; not applicable on Windows (git worktree add fails on the "
+    "runner) and needs git+bash",
 )
 
 
