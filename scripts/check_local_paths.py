@@ -37,6 +37,7 @@ HOME_PATH_RE = re.compile(r"/home/[A-Za-z0-9._-]+/")
 SCANNED_SUFFIXES = {
     ".sh", ".ps1", ".bat", ".cmake", ".conf", ".cfg", ".ini",
     ".c", ".h", ".cpp", ".hpp", ".py", ".yaml", ".yml", ".overlay", ".dts", ".dtsi",
+    ".kconfig",
 }
 SCANNED_NAMES = {"CMakeLists.txt", "Makefile", "Kconfig"}
 

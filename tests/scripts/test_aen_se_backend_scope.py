@@ -42,8 +42,20 @@ def test_os_support_matrix_scopes_se_rows_to_aen801_e8():
         assert "boot authority on AEN)" not in line
 
 
+def _effective_kconfig_text() -> str:
+    """Concatenate the top-level Kconfig with every sourced subsystem
+    fragment (issue #458 split the former zephyr/Kconfig monolith into
+    zephyr/kconfig/*.kconfig).  Mirrors what the real Kconfig parser sees
+    after `rsource` inlines each fragment in place."""
+    parts = [(ROOT / "zephyr" / "Kconfig").read_text(encoding="utf-8")]
+    fragment_dir = ROOT / "zephyr" / "kconfig"
+    for fragment in sorted(fragment_dir.glob("*.kconfig")):
+        parts.append(fragment.read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
 def test_kconfig_help_does_not_claim_aen_wide_se_fallback():
-    kconfig = (ROOT / "zephyr" / "Kconfig").read_text(encoding="utf-8")
+    kconfig = _effective_kconfig_text()
 
     assert "returns ALP_ERR_NOSUPPORT on AEN builds" not in kconfig
     assert "return ALP_ERR_NOSUPPORT on AEN builds" not in kconfig
