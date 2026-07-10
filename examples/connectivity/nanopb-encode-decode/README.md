@@ -23,7 +23,7 @@ fresh struct, and asserts the round trip.
 ## Library integration
 
 nanopb is a **real, fetched module** at
-`/home/caner/modules/lib/nanopb` (tag `0.4.9`, zlib license) -- not the
+`<west-workspace>/modules/lib/nanopb` (tag `0.4.9`, zlib license) -- not the
 `vendors/nanopb/` stub headers, which are a *different*, SDK-internal
 placeholder for `<alp/mproc.h>` IPC framing (see
 [`vendors/nanopb/README.md`](../../../vendors/nanopb/README.md); those
@@ -57,8 +57,8 @@ source /tmp/nanopb-venv/bin/activate
 
 python -m grpc_tools.protoc \
     -I examples/connectivity/nanopb-encode-decode/src \
-    -I /home/caner/modules/lib/nanopb/generator/proto \
-    --plugin=protoc-gen-nanopb=/home/caner/modules/lib/nanopb/generator/protoc-gen-nanopb \
+    -I <west-workspace>/modules/lib/nanopb/generator/proto \
+    --plugin=protoc-gen-nanopb=<west-workspace>/modules/lib/nanopb/generator/protoc-gen-nanopb \
     --nanopb_out=examples/connectivity/nanopb-encode-decode/src \
     examples/connectivity/nanopb-encode-decode/src/device_status.proto
 ```
@@ -73,7 +73,7 @@ trip is entirely in-RAM.
 
 ```bash
 west build -b native_sim/native/64 examples/connectivity/nanopb-encode-decode \
-    -- -DEXTRA_ZEPHYR_MODULES="$(pwd);/home/caner/modules/lib/nanopb"
+    -- -DEXTRA_ZEPHYR_MODULES="$(pwd);<west-workspace>/modules/lib/nanopb"
 west build -t run
 ```
 
