@@ -193,12 +193,14 @@ typedef struct {
 /**
  * @brief Default-initialize an @ref alp_shmem_config_t for region @p id.
  *
- * Identity from @p id (the region @c name).  @c size is mandatory
- * with no sensible default (it must match what both cores agreed to
- * share), so it defaults to 0 as a "you must set this" sentinel --
- * set it before calling open(). @c cacheable defaults to false, the
- * documented choice "required for the simple core A writes, core B
- * reads pattern."
+ * Identity from @p id (the region @c name).  @c size defaults to 0:
+ * on current SoMs the backend derives the region extent from the
+ * devicetree node, so @c size is advisory / backend-authoritative and
+ * open() neither consults nor rejects it -- set it to document the
+ * bytes both cores agreed to share (and for a future size-checking
+ * backend), not because open() requires it. @c cacheable defaults to
+ * false, the documented choice "required for the simple core A writes,
+ * core B reads pattern."
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -282,8 +284,10 @@ typedef struct {
  * Identity from @p id; @c peer has no universally-correct default --
  * which peer core exists depends on the active SoM's topology -- so
  * it defaults to @ref ALP_CORE_SELF, a sentinel that does not name a
- * real counterpart. Set @c peer to the actual peer core before
- * calling open().
+ * real counterpart. Current backends route by @c channel alone and do
+ * not consult @c peer, so open() accepts the sentinel; set @c peer to
+ * the actual counterpart core to document the intended topology (and
+ * for a future topology-checking backend).
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
