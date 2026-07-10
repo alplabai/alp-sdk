@@ -18,7 +18,7 @@ name: pr-plain-cmake
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'include/**'
       - 'src/**'
@@ -26,7 +26,7 @@ on:
       - 'cmake/**'
       - '.github/workflows/pr-plain-cmake.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'include/**'
       - 'src/**'

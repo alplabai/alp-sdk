@@ -23,7 +23,7 @@ name: pr-generated-files
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'include/alp/**'
@@ -47,7 +47,7 @@ on:
       - 'scripts/abi_snapshot.py'
       - '.github/workflows/pr-generated-files.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'include/alp/**'
