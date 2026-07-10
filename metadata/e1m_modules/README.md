@@ -8,6 +8,13 @@ compatibility table.  Each `E1M-<SKU>.yaml file` directory carries the
 per-SKU manifest (silicon ref, populated on-module chips, I2C
 device addresses, memory specs).
 
+The E1M **standard** each family maps against — the fixed pad geometry
+and default function per pad — is vendored as a verbatim snapshot under
+[`metadata/e1m/`](../e1m/) (`pinout-v1.json` for E1M, `pinout-x-v1.json`
+for E1M-X).  `scripts/check_e1m_pinout.py` cross-checks every non-`TBD`
+`e1m_pad`/`e1m_function` in these families against it. See
+[`docs/e1m-pinout.md`](../../docs/e1m-pinout.md).
+
 ## Families
 
 | Family | SKUs                          | Silicon                           |
