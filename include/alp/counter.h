@@ -60,6 +60,11 @@ typedef struct {
  * The counter has no tunable fields beyond its identity, so the default
  * simply names the instance: @code alp_counter_config_t cfg =
  * ALP_COUNTER_CONFIG_DEFAULT(0); @endcode
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_COUNTER_CONFIG_DEFAULT(id) ((alp_counter_config_t){ .counter_id = (id) })
 

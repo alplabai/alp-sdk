@@ -309,6 +309,11 @@ typedef struct {
  * cfg.bitrate_hz = 400000u; // fast-mode
  * alp_i2c_t *bus = alp_i2c_open(&cfg);
  * @endcode
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_I2C_CONFIG_DEFAULT(id) ((alp_i2c_config_t){ .bus_id = (id), .bitrate_hz = 100000u })
 
@@ -521,6 +526,11 @@ typedef struct {
  * @c cs_pin_id = @ref ALP_SPI_NO_CS (no controller-driven chip-select).
  * Set @c cs_pin_id / @c mode / @c freq_hz for the target device after
  * expansion.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_SPI_CONFIG_DEFAULT(id)                                                                 \
 	((alp_spi_config_t){ .bus_id        = (id),                                                    \
@@ -742,6 +752,11 @@ typedef struct {
  * Identity from @p id; canonical defaults = 115200 8N1:
  * @c baudrate = 115200, @c data_bits = 8, @c stop_bits = 1,
  * @c parity = @ref ALP_UART_PARITY_NONE.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_UART_CONFIG_DEFAULT(id)                                                                \
 	((alp_uart_config_t){ .port_id   = (id),                                                       \

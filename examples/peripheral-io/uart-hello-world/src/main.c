@@ -73,23 +73,21 @@ int main(void)
 
 	/* Open UART0 at the lowest-common-denominator serial framing.
      *
-     * 115200 8N1 is what every serial console + USB-UART bridge
-     * supports out of the box.  Override these fields when talking
-     * to a chip that demands different framing -- e.g. some
-     * industrial PLCs use 7-E-1, RS-485 multidrop uses 9-bit
-     * frames, some legacy GPS modules want 9600 baud.
+     * ALP_UART_CONFIG_DEFAULT(id) fills the identity from `id` and every
+     * other field with its canonical default -- here exactly 115200 8N1,
+     * what every serial console + USB-UART bridge supports out of the box.
+     * So there is nothing to override for this app; override a field after
+     * the macro when a chip demands different framing (7-E-1 PLCs, 9-bit
+     * RS-485 multidrop, 9600-baud GPS):
+     *     alp_uart_config_t cfg = ALP_UART_CONFIG_DEFAULT(ALP_E1M_UART0);
+     *     cfg.baudrate = 9600;   // then pass &cfg to alp_uart_open
      *
      * The ALP_E1M_UART0 instance ID is portable across every
-     * E1M-conformant SoM (E1M-AEN, E1M-V2N, ...): the SDK's
-     * loader resolves it to the right SoC USART node at build
-     * time via the devicetree `alp-uart0` alias. */
-	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
-	    .port_id   = ALP_E1M_UART0,
-	    .baudrate  = 115200,
-	    .data_bits = 8,
-	    .stop_bits = 1,
-	    .parity    = ALP_UART_PARITY_NONE,
-	});
+     * E1M-conformant SoM (E1M-AEN, E1M-V2N, ...): the SDK's loader
+     * resolves it to the right SoC USART node at build time via the
+     * devicetree `alp-uart0` alias. */
+	alp_uart_config_t cfg = ALP_UART_CONFIG_DEFAULT(ALP_E1M_UART0);
+	alp_uart_t       *u   = alp_uart_open(&cfg);
 	if (u == NULL) {
 		/* Likely causes (in descending order of frequency):
          *

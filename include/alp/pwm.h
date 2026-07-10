@@ -91,6 +91,11 @@ typedef struct {
  * devicetree default period), @c polarity = @ref ALP_PWM_POLARITY_NORMAL
  * (high during the active portion). Set @c period_ns for an explicit
  * frequency after expansion.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_PWM_CONFIG_DEFAULT(id)                                                                 \
 	((alp_pwm_config_t){ .channel_id = (id), .period_ns = 0u, .polarity = ALP_PWM_POLARITY_NORMAL })

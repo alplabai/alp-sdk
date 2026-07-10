@@ -97,6 +97,11 @@ typedef struct {
  * (classic — no data-phase rate), @c mode = @ref ALP_CAN_MODE_CLASSIC,
  * @c loopback = false (on the wire, not local self-test). For CAN-FD set
  * @c mode = @ref ALP_CAN_MODE_FD and a non-zero @c bitrate_data_hz.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_CAN_CONFIG_DEFAULT(id)                                                                 \
 	((alp_can_config_t){ .bus_id             = (id),                                               \

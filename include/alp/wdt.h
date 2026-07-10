@@ -73,6 +73,11 @@ typedef struct {
  * zero-init is not valid here and the default supplies a usable value),
  * @c on_timeout = @ref ALP_WDT_RESET_SOC (full SoC reset, the safest
  * action). Shorten @c timeout_ms for a tighter deadline after expansion.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_WDT_CONFIG_DEFAULT(id)                                                                 \
 	((alp_wdt_config_t){ .wdt_id = (id), .timeout_ms = 1000u, .on_timeout = ALP_WDT_RESET_SOC })
