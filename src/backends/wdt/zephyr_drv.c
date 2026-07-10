@@ -20,9 +20,9 @@
 
 #include "wdt_ops.h"
 
-#define ALP_WDT_DEV_OR_NULL(idx)                                                                   \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_wdt, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_wdt, idx)))),                                  \
+#define ALP_WDT_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_wdt, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_wdt, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {

@@ -82,7 +82,7 @@
  * commands still use the worker/poll model until HOST_IRQ async delivery
  * lands.
  */
-#define CC3501E_SPI_FREQ_HZ                                                                        \
+#define CC3501E_SPI_FREQ_HZ \
 	1000000u /* 1 MHz: SILICON-VALIDATED cold-boot value.  At 8 MHz with the
                                       * Alif SSI rx_delay=0 the master sampled MISO before the CC35's bit
                                       * propagated back over the long on-SoM traces + the crossed-data

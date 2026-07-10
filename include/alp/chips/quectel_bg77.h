@@ -51,8 +51,11 @@ alp_status_t quectel_bg77_power_on(quectel_bg77_t *dev);
 alp_status_t quectel_bg77_send_cmd(quectel_bg77_t *dev, const char *at_cmd);
 
 /** @brief Read up to @p max bytes of UART response. */
-alp_status_t quectel_bg77_read_response(
-    quectel_bg77_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms);
+alp_status_t quectel_bg77_read_response(quectel_bg77_t *dev,
+                                        uint8_t        *buf,
+                                        size_t          max,
+                                        size_t         *received_out,
+                                        uint32_t        timeout_ms);
 
 /** @brief Release driver context. */
 void quectel_bg77_deinit(quectel_bg77_t *dev);

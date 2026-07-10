@@ -49,7 +49,7 @@
 
 #if defined(CONFIG_ALP_SDK_RPC)
 
-#if !defined(CONFIG_OPENAMP) || !defined(CONFIG_IPC_SERVICE) ||                                    \
+#if !defined(CONFIG_OPENAMP) || !defined(CONFIG_IPC_SERVICE) || \
     !defined(CONFIG_IPC_SERVICE_BACKEND_RPMSG)
 #error "alp_rpc requires CONFIG_ALP_SDK_RPC=y + CONFIG_OPENAMP=y + " \
        "CONFIG_IPC_SERVICE=y + CONFIG_IPC_SERVICE_BACKEND_RPMSG=y"

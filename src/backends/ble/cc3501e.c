@@ -260,16 +260,16 @@ static const alp_ble_ops_t _ops = {
 	.gatt_write            = cc35_gatt_write,
 };
 
-#define ALP_BLE_CC3501E_REGISTER(_name, _ref)                                                      \
-	ALP_BACKEND_REGISTER(ble,                                                                      \
-	                     _name,                                                                    \
-	                     {                                                                         \
-	                         .silicon_ref = _ref,                                                  \
-	                         .vendor      = "ti-cc3501e",                                          \
-	                         .base_caps   = 0u,                                                    \
-	                         .priority    = 200,                                                   \
-	                         .ops         = &_ops,                                                 \
-	                         .probe       = NULL,                                                  \
+#define ALP_BLE_CC3501E_REGISTER(_name, _ref) \
+	ALP_BACKEND_REGISTER(ble, \
+	                     _name, \
+	                     { \
+	                         .silicon_ref = _ref, \
+	                         .vendor      = "ti-cc3501e", \
+	                         .base_caps   = 0u, \
+	                         .priority    = 200, \
+	                         .ops         = &_ops, \
+	                         .probe       = NULL, \
 	                     })
 
 ALP_BLE_CC3501E_REGISTER(cc3501e_e3, "alif:ensemble:e3");

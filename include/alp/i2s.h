@@ -88,13 +88,13 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_I2S_CONFIG_DEFAULT(id)                                                                 \
-	((alp_i2s_config_t){ .bus_id         = (id),                                                   \
-	                     .sample_rate_hz = 48000u,                                                 \
-	                     .word_bits      = 16u,                                                    \
-	                     .channels       = 2u,                                                     \
-	                     .format         = ALP_I2S_FMT_I2S,                                        \
-	                     .direction      = ALP_I2S_DIR_RX,                                         \
+#define ALP_I2S_CONFIG_DEFAULT(id) \
+	((alp_i2s_config_t){ .bus_id         = (id), \
+	                     .sample_rate_hz = 48000u, \
+	                     .word_bits      = 16u, \
+	                     .channels       = 2u, \
+	                     .format         = ALP_I2S_FMT_I2S, \
+	                     .direction      = ALP_I2S_DIR_RX, \
 	                     .block_frames   = 256u })
 
 /**

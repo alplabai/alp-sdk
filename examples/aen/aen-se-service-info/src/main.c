@@ -119,7 +119,7 @@ static const char *lcs_name(uint8_t lcs)
  */
 #define MHU_RX_BOUND (DT_NODE_HAS_STATUS(MHU_RX, okay) && DT_NODE_HAS_COMPAT(MHU_RX, arm_mhuv2))
 #define MHU_TX_BOUND (DT_NODE_HAS_STATUS(MHU_TX, okay) && DT_NODE_HAS_COMPAT(MHU_TX, arm_mhuv2))
-#define SE_BOUND                                                                                   \
+#define SE_BOUND \
 	(DT_NODE_HAS_STATUS(SE_NODE, okay) && DT_NODE_HAS_COMPAT(SE_NODE, alif_secure_enclave_services))
 
 int main(void)

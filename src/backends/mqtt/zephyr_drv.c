@@ -143,8 +143,11 @@ static alp_status_t errno_to_alp(int err)
 /* Parse "mqtt(s)?://host[:port]" into host/port/tls.  Returns 0 on
  * success.  No URI-encoding handling -- broker addresses in v0.2 are
  * expected to be plain hostnames or IPs. */
-static int parse_broker_uri(
-    const char *uri, char *host_buf, size_t host_buf_len, uint16_t *port_out, bool *tls_out)
+static int parse_broker_uri(const char *uri,
+                            char       *host_buf,
+                            size_t      host_buf_len,
+                            uint16_t   *port_out,
+                            bool       *tls_out)
 {
 	if (uri == NULL) return -EINVAL;
 

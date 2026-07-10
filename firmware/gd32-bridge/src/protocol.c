@@ -97,8 +97,11 @@ handle_ping(const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_get_version(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_get_version(const uint8_t *req,
+                                               size_t         req_len,
+                                               uint8_t       *reply,
+                                               size_t         reply_cap,
+                                               size_t        *reply_len)
 {
 	(void)req;
 	if (req_len != 0u) return STATUS_INVAL;
@@ -110,8 +113,11 @@ static gd32_bridge_status_t handle_get_version(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_get_build_id(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_get_build_id(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply,
+                                                size_t         reply_cap,
+                                                size_t        *reply_len)
 {
 	(void)req;
 	if (req_len != 0u) return STATUS_INVAL;
@@ -121,8 +127,11 @@ static gd32_bridge_status_t handle_get_build_id(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_reset_reason(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_reset_reason(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply,
+                                                size_t         reply_cap,
+                                                size_t        *reply_len)
 {
 	(void)req;
 	if (req_len != 0u) return STATUS_INVAL;
@@ -134,8 +143,11 @@ static gd32_bridge_status_t handle_reset_reason(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_gpio_read(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_gpio_read(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply,
+                                             size_t         reply_cap,
+                                             size_t        *reply_len)
 {
 	if (req_len != 4u) return STATUS_INVAL;
 	if (reply_cap < 4u) return STATUS_NOMEM;
@@ -148,8 +160,11 @@ static gd32_bridge_status_t handle_gpio_read(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_gpio_write(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_gpio_write(const uint8_t *req,
+                                              size_t         req_len,
+                                              uint8_t       *reply,
+                                              size_t         reply_cap,
+                                              size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -162,8 +177,11 @@ static gd32_bridge_status_t handle_gpio_write(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_pwm_set(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_pwm_set(const uint8_t *req,
+                                           size_t         req_len,
+                                           uint8_t       *reply,
+                                           size_t         reply_cap,
+                                           size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -181,8 +199,11 @@ static gd32_bridge_status_t handle_pwm_set(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_pwm_get(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_pwm_get(const uint8_t *req,
+                                           size_t         req_len,
+                                           uint8_t       *reply,
+                                           size_t         reply_cap,
+                                           size_t        *reply_len)
 {
 	if (req_len != 1u) return STATUS_INVAL;
 	if (reply_cap < 8u) return STATUS_NOMEM;
@@ -197,8 +218,11 @@ static gd32_bridge_status_t handle_pwm_get(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_adc_read(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_adc_read(const uint8_t *req,
+                                            size_t         req_len,
+                                            uint8_t       *reply,
+                                            size_t         reply_cap,
+                                            size_t        *reply_len)
 {
 	if (req_len != 2u) return STATUS_INVAL;
 	uint8_t channel = req[0];
@@ -227,8 +251,11 @@ static gd32_bridge_status_t handle_adc_read(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_da9292_forward(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_da9292_forward(const uint8_t *req,
+                                                  size_t         req_len,
+                                                  uint8_t       *reply,
+                                                  size_t         reply_cap,
+                                                  size_t        *reply_len)
 {
 	(void)req;
 	if (req_len != 0u) return STATUS_INVAL;
@@ -238,8 +265,11 @@ static gd32_bridge_status_t handle_da9292_forward(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_se_reset(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_se_reset(const uint8_t *req,
+                                            size_t         req_len,
+                                            uint8_t       *reply,
+                                            size_t         reply_cap,
+                                            size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -253,8 +283,11 @@ static gd32_bridge_status_t handle_se_reset(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_dac_set(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_dac_set(const uint8_t *req,
+                                           size_t         req_len,
+                                           uint8_t       *reply,
+                                           size_t         reply_cap,
+                                           size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -271,8 +304,11 @@ static gd32_bridge_status_t handle_dac_set(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_dac_get(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_dac_get(const uint8_t *req,
+                                           size_t         req_len,
+                                           uint8_t       *reply,
+                                           size_t         reply_cap,
+                                           size_t        *reply_len)
 {
 	if (req_len != 1u) return STATUS_INVAL;
 	if (reply_cap < 2u) return STATUS_NOMEM;
@@ -287,8 +323,11 @@ static gd32_bridge_status_t handle_dac_get(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_qenc_read(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_qenc_read(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply,
+                                             size_t         reply_cap,
+                                             size_t        *reply_len)
 {
 	if (req_len != 1u) return STATUS_INVAL;
 	if (reply_cap < 4u) return STATUS_NOMEM;
@@ -302,8 +341,11 @@ static gd32_bridge_status_t handle_qenc_read(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_qenc_reset(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_qenc_reset(const uint8_t *req,
+                                              size_t         req_len,
+                                              uint8_t       *reply,
+                                              size_t         reply_cap,
+                                              size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -316,8 +358,11 @@ static gd32_bridge_status_t handle_qenc_reset(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_counter_read(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_counter_read(const uint8_t *req,
+                                                size_t         req_len,
+                                                uint8_t       *reply,
+                                                size_t         reply_cap,
+                                                size_t        *reply_len)
 {
 	if (req_len != 1u) return STATUS_INVAL;
 	if (reply_cap < 4u) return STATUS_NOMEM;
@@ -331,8 +376,11 @@ static gd32_bridge_status_t handle_counter_read(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_pwm_configure(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_pwm_configure(const uint8_t *req,
+                                                 size_t         req_len,
+                                                 uint8_t       *reply,
+                                                 size_t         reply_cap,
+                                                 size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -351,8 +399,11 @@ static gd32_bridge_status_t handle_pwm_configure(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_adc_configure(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_adc_configure(const uint8_t *req,
+                                                 size_t         req_len,
+                                                 uint8_t       *reply,
+                                                 size_t         reply_cap,
+                                                 size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -388,8 +439,11 @@ static gd32_bridge_status_t handle_adc_configure(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_adc_stream_begin(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_adc_stream_begin(const uint8_t *req,
+                                                    size_t         req_len,
+                                                    uint8_t       *reply,
+                                                    size_t         reply_cap,
+                                                    size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -409,8 +463,11 @@ static gd32_bridge_status_t handle_adc_stream_begin(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_adc_stream_read(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_adc_stream_read(const uint8_t *req,
+                                                   size_t         req_len,
+                                                   uint8_t       *reply,
+                                                   size_t         reply_cap,
+                                                   size_t        *reply_len)
 {
 	if (req_len != 2u) return STATUS_INVAL;
 	const uint8_t stream_id   = req[0];
@@ -461,8 +518,11 @@ static gd32_bridge_status_t handle_adc_stream_read(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_adc_stream_end(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_adc_stream_end(const uint8_t *req,
+                                                  size_t         req_len,
+                                                  uint8_t       *reply,
+                                                  size_t         reply_cap,
+                                                  size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -480,8 +540,11 @@ static gd32_bridge_status_t handle_adc_stream_end(
  * shares the central mapping for its BUSY/IO discrimination. */
 static gd32_bridge_status_t status_from_hw(int rv);
 
-static gd32_bridge_status_t handle_trng_read(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_trng_read(const uint8_t *req,
+                                             size_t         req_len,
+                                             uint8_t       *reply,
+                                             size_t         reply_cap,
+                                             size_t        *reply_len)
 {
 	if (req_len != 1u) return STATUS_INVAL;
 	const uint8_t want = req[0];
@@ -493,8 +556,11 @@ static gd32_bridge_status_t handle_trng_read(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_tmu_compute(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_tmu_compute(const uint8_t *req,
+                                               size_t         req_len,
+                                               uint8_t       *reply,
+                                               size_t         reply_cap,
+                                               size_t        *reply_len)
 {
 	if (req_len != 12u) return STATUS_INVAL;
 	if (reply_cap < 4u) return STATUS_NOMEM;
@@ -546,8 +612,11 @@ static gd32_bridge_status_t status_from_hw(int rv)
 	return STATUS_IO;
 }
 
-static gd32_bridge_status_t handle_pwm_capture_begin(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_pwm_capture_begin(const uint8_t *req,
+                                                     size_t         req_len,
+                                                     uint8_t       *reply,
+                                                     size_t         reply_cap,
+                                                     size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -558,8 +627,11 @@ static gd32_bridge_status_t handle_pwm_capture_begin(
 	return status_from_hw(rv);
 }
 
-static gd32_bridge_status_t handle_pwm_capture_read(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_pwm_capture_read(const uint8_t *req,
+                                                    size_t         req_len,
+                                                    uint8_t       *reply,
+                                                    size_t         reply_cap,
+                                                    size_t        *reply_len)
 {
 	if (req_len != 1u) return STATUS_INVAL;
 	if (reply_cap < 8u) return STATUS_NOMEM;
@@ -577,8 +649,11 @@ static gd32_bridge_status_t handle_pwm_capture_read(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_pwm_capture_end(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_pwm_capture_end(const uint8_t *req,
+                                                   size_t         req_len,
+                                                   uint8_t       *reply,
+                                                   size_t         reply_cap,
+                                                   size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -588,8 +663,11 @@ static gd32_bridge_status_t handle_pwm_capture_end(
 	return status_from_hw(rv);
 }
 
-static gd32_bridge_status_t handle_pwm_single_pulse(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_pwm_single_pulse(const uint8_t *req,
+                                                    size_t         req_len,
+                                                    uint8_t       *reply,
+                                                    size_t         reply_cap,
+                                                    size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -603,8 +681,11 @@ static gd32_bridge_status_t handle_pwm_single_pulse(
 	return status_from_hw(rv);
 }
 
-static gd32_bridge_status_t handle_timer_sync(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_timer_sync(const uint8_t *req,
+                                              size_t         req_len,
+                                              uint8_t       *reply,
+                                              size_t         reply_cap,
+                                              size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -618,8 +699,11 @@ static gd32_bridge_status_t handle_timer_sync(
 /* v0.5 (§2B.3) -- system power-mode set                              */
 /* ----------------------------------------------------------------- */
 
-static gd32_bridge_status_t handle_power_mode_set(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_power_mode_set(const uint8_t *req,
+                                                  size_t         req_len,
+                                                  uint8_t       *reply,
+                                                  size_t         reply_cap,
+                                                  size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -639,8 +723,11 @@ static gd32_bridge_status_t handle_power_mode_set(
 /* Wire frames per docs/gd32-bridge-protocol.md §3.x.                 */
 /* ----------------------------------------------------------------- */
 
-static gd32_bridge_status_t handle_adc_dsp_chain_open(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_adc_dsp_chain_open(const uint8_t *req,
+                                                      size_t         req_len,
+                                                      uint8_t       *reply,
+                                                      size_t         reply_cap,
+                                                      size_t        *reply_len)
 {
 	(void)req;
 	if (req_len != 0u) return STATUS_INVAL;
@@ -657,8 +744,11 @@ static gd32_bridge_status_t handle_adc_dsp_chain_open(
 	return STATUS_OK;
 }
 
-static gd32_bridge_status_t handle_adc_dsp_stage_push(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_adc_dsp_stage_push(const uint8_t *req,
+                                                      size_t         req_len,
+                                                      uint8_t       *reply,
+                                                      size_t         reply_cap,
+                                                      size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -686,8 +776,11 @@ static gd32_bridge_status_t handle_adc_dsp_stage_push(
 	return status_from_hw(rv);
 }
 
-static gd32_bridge_status_t handle_adc_dsp_chain_bind(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_adc_dsp_chain_bind(const uint8_t *req,
+                                                      size_t         req_len,
+                                                      uint8_t       *reply,
+                                                      size_t         reply_cap,
+                                                      size_t        *reply_len)
 {
 	(void)reply;
 	(void)reply_cap;
@@ -715,8 +808,11 @@ uint8_t protocol_link_features(void)
 	return link_features;
 }
 
-static gd32_bridge_status_t handle_link_features(
-    const uint8_t *req, size_t req_len, uint8_t *reply, size_t reply_cap, size_t *reply_len)
+static gd32_bridge_status_t handle_link_features(const uint8_t *req,
+                                                 size_t         req_len,
+                                                 uint8_t       *reply,
+                                                 size_t         reply_cap,
+                                                 size_t        *reply_len)
 {
 	if (req_len != 1u) return STATUS_INVAL;
 	if (reply_cap < 1u) return STATUS_NOMEM;

@@ -101,8 +101,12 @@ alp_status_t alp_display_get_caps(alp_display_t *h, alp_display_caps_t *out)
 	return h->state.ops->get_caps(&h->state, out);
 }
 
-alp_status_t alp_display_blit(
-    alp_display_t *h, uint16_t x, uint16_t y, uint16_t w, uint16_t h_rect, const void *pixels)
+alp_status_t alp_display_blit(alp_display_t *h,
+                              uint16_t       x,
+                              uint16_t       y,
+                              uint16_t       w,
+                              uint16_t       h_rect,
+                              const void    *pixels)
 {
 	if (h == NULL || !h->in_use) {
 		return ALP_ERR_NOT_READY;

@@ -50,8 +50,11 @@ alp_status_t ublox_sara_r5_power_on(ublox_sara_r5_t *dev);
 alp_status_t ublox_sara_r5_send_cmd(ublox_sara_r5_t *dev, const char *at_cmd);
 
 /** @brief Read up to @p max bytes of UART response. */
-alp_status_t ublox_sara_r5_read_response(
-    ublox_sara_r5_t *dev, uint8_t *buf, size_t max, size_t *received_out, uint32_t timeout_ms);
+alp_status_t ublox_sara_r5_read_response(ublox_sara_r5_t *dev,
+                                         uint8_t         *buf,
+                                         size_t           max,
+                                         size_t          *received_out,
+                                         uint32_t         timeout_ms);
 
 /** @brief Release driver context. */
 void ublox_sara_r5_deinit(ublox_sara_r5_t *dev);

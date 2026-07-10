@@ -141,8 +141,11 @@ alp_usb_device_write(alp_usb_dev_t *h, const uint8_t *data, size_t len, uint32_t
 	return h->state.ops->dev_write(&h->state, data, len, timeout_ms);
 }
 
-alp_status_t alp_usb_device_read(
-    alp_usb_dev_t *h, uint8_t *data, size_t len, size_t *out_len, uint32_t timeout_ms)
+alp_status_t alp_usb_device_read(alp_usb_dev_t *h,
+                                 uint8_t       *data,
+                                 size_t         len,
+                                 size_t        *out_len,
+                                 uint32_t       timeout_ms)
 {
 	if (out_len != NULL) *out_len = 0;
 	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;

@@ -60,9 +60,9 @@
  * so the time source is explicit and SoM-overridable: point `alp-lprtc-counter`
  * at the snps,dw-apb-rtc node (lprtc@42000000) in the board overlay.  If the
  * alias is absent the device pointer is NULL and open() returns NOT_READY. */
-#define ALP_LPRTC_COUNTER_DEV                                                                      \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(alp_lprtc_counter)),                                       \
-	            (DEVICE_DT_GET(DT_ALIAS(alp_lprtc_counter))),                                      \
+#define ALP_LPRTC_COUNTER_DEV \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(alp_lprtc_counter)), \
+	            (DEVICE_DT_GET(DT_ALIAS(alp_lprtc_counter))), \
 	            (NULL))
 
 static const struct device *const _lprtc = ALP_LPRTC_COUNTER_DEV;

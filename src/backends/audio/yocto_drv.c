@@ -484,8 +484,11 @@ static alp_status_t y_out_stop(alp_audio_out_backend_state_t *state)
  * the loop short-circuits.  Performed only on S16_LE for v0.4 prep;
  * other formats pass through unmodified (a software scaler for S24
  * + S32 lands when the inference / codec paths exercise them). */
-static void apply_software_volume(
-    alp_audio_format_t format, uint8_t channels, uint8_t volume, void *buf, size_t frames)
+static void apply_software_volume(alp_audio_format_t format,
+                                  uint8_t            channels,
+                                  uint8_t            volume,
+                                  void              *buf,
+                                  size_t             frames)
 {
 	if (volume == 255u || frames == 0) return;
 	if (format != ALP_AUDIO_FMT_S16_LE) return;

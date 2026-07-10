@@ -88,9 +88,9 @@ typedef struct alp_backend_class_range {
 /* Section name MUST be a valid C identifier (no leading dot) so GNU
  * ld auto-emits __start_alp_backends_&lt;class&gt; and __stop_&lt;class&gt;
  * bound symbols.  `retain` keeps the entry through --gc-sections. */
-#define ALP_BACKEND_REGISTER(class, name, ...)                                                     \
-	static const alp_backend_t _alp_be_##class##_##name __attribute__((                            \
-	    used, retain, aligned(__alignof__(alp_backend_t)), section("alp_backends_" #class))) =     \
+#define ALP_BACKEND_REGISTER(class, name, ...) \
+	static const alp_backend_t _alp_be_##class##_##name __attribute__(( \
+	    used, retain, aligned(__alignof__(alp_backend_t)), section("alp_backends_" #class))) = \
 	    __VA_ARGS__
 
 /**
@@ -100,22 +100,22 @@ typedef struct alp_backend_class_range {
  * alp_&lt;class&gt;_open) instantiates this once.  Tells the selector how
  * to find the section for a class name.
  */
-#define ALP_BACKEND_DEFINE_CLASS(class)                                                            \
-	extern const alp_backend_t __start_alp_backends_##class[];                                     \
-	extern const alp_backend_t __stop_alp_backends_##class[];                                      \
+#define ALP_BACKEND_DEFINE_CLASS(class) \
+	extern const alp_backend_t __start_alp_backends_##class[]; \
+	extern const alp_backend_t __stop_alp_backends_##class[]; \
 	/* aligned(__alignof__(struct alp_backend_class_range)) forces the
      * entries to pack contiguously at the struct's natural alignment
      * (8 bytes on LP64).  Without this the section min-alignment can
      * exceed sizeof(struct), the linker inserts trailing pad between
-     * entries, and the walker `++c` reads garbage from the pad.  */                             \
-	static const alp_backend_class_range_t _alp_class_range_##class __attribute__((                \
-	    used,                                                                                      \
-	    retain,                                                                                    \
-	    aligned(__alignof__(alp_backend_class_range_t)),                                           \
-	    section("alp_backend_classes"))) = {                                                       \
-		.class_name = #class,                                                                      \
-		.start      = __start_alp_backends_##class,                                                \
-		.stop       = __stop_alp_backends_##class,                                                 \
+     * entries, and the walker `++c` reads garbage from the pad.  */ \
+	static const alp_backend_class_range_t _alp_class_range_##class __attribute__(( \
+	    used, \
+	    retain, \
+	    aligned(__alignof__(alp_backend_class_range_t)), \
+	    section("alp_backend_classes"))) = { \
+		.class_name = #class, \
+		.start      = __start_alp_backends_##class, \
+		.stop       = __stop_alp_backends_##class, \
 	}
 
 /**
@@ -152,11 +152,11 @@ typedef struct alp_backend_class_range {
  * pair with.
  */
 #ifdef ALP_BACKEND_STATIC_ANCHORS
-#define ALP_BACKEND_ANCHOR_DEFINE(class)                                                           \
+#define ALP_BACKEND_ANCHOR_DEFINE(class) \
 	const int _alp_backend_anchor_##class __attribute__((used, retain)) = 0
-#define ALP_BACKEND_ANCHOR(class)                                                                  \
-	extern const int         _alp_backend_anchor_##class;                                          \
-	static const void *const _alp_backend_anchor_ref_##class __attribute__((used)) =               \
+#define ALP_BACKEND_ANCHOR(class) \
+	extern const int         _alp_backend_anchor_##class; \
+	static const void *const _alp_backend_anchor_ref_##class __attribute__((used)) = \
 	    (const void *)&_alp_backend_anchor_##class
 #else
 /* Whole-archive (Zephyr) links never need the anchor: expand to a bare

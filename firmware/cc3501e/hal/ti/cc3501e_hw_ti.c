@@ -1413,8 +1413,11 @@ static void wifi_conn_set(uint8_t state, uint8_t fail_reason, int8_t rssi)
 #define CC3501E_STA_DHCP_TRIES   50u
 #define CC3501E_STA_DHCP_POLL_US 200000u
 
-int cc3501e_hw_wifi_connect_sta(
-    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
+int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
+                                uint8_t        ssid_len,
+                                const uint8_t *psk,
+                                uint8_t        psk_len,
+                                uint8_t        security)
 {
 	if (ssid == 0 || ssid_len == 0u) {
 		/* The latch was armed CONNECTING at submit (mark_connecting); a bad arg must
@@ -1527,8 +1530,11 @@ int cc3501e_hw_wifi_disconnect(void)
 	return CC3501E_HW_OK;
 }
 
-int cc3501e_hw_wifi_ap_start(
-    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
+int cc3501e_hw_wifi_ap_start(const uint8_t *ssid,
+                             uint8_t        ssid_len,
+                             const uint8_t *psk,
+                             uint8_t        psk_len,
+                             uint8_t        security)
 {
 	if (ssid == 0 || ssid_len == 0u || ssid_len >= WLAN_SSID_MAX_LENGTH) {
 		return CC3501E_HW_ERR_INVAL;
@@ -1629,8 +1635,11 @@ int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_wifi_connect_sta(
-    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
+int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
+                                uint8_t        ssid_len,
+                                const uint8_t *psk,
+                                uint8_t        psk_len,
+                                uint8_t        security)
 {
 	(void)ssid;
 	(void)ssid_len;
@@ -1645,8 +1654,11 @@ int cc3501e_hw_wifi_disconnect(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_wifi_ap_start(
-    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
+int cc3501e_hw_wifi_ap_start(const uint8_t *ssid,
+                             uint8_t        ssid_len,
+                             const uint8_t *psk,
+                             uint8_t        psk_len,
+                             uint8_t        security)
 {
 	(void)ssid;
 	(void)ssid_len;
@@ -1752,8 +1764,11 @@ int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, cons
 	return CC3501E_HW_OK;
 }
 
-int cc3501e_hw_sock_send(
-    uint16_t handle, uint8_t flags, const uint8_t *data, uint16_t data_len, uint16_t *sent_out)
+int cc3501e_hw_sock_send(uint16_t       handle,
+                         uint8_t        flags,
+                         const uint8_t *data,
+                         uint16_t       data_len,
+                         uint16_t      *sent_out)
 {
 	(void)flags; /* MORE hint is advisory; lwip_send has no matching flag here */
 	if (sent_out != 0) *sent_out = 0u;
@@ -1845,8 +1860,11 @@ int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, cons
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_sock_send(
-    uint16_t handle, uint8_t flags, const uint8_t *data, uint16_t data_len, uint16_t *sent_out)
+int cc3501e_hw_sock_send(uint16_t       handle,
+                         uint8_t        flags,
+                         const uint8_t *data,
+                         uint16_t       data_len,
+                         uint16_t      *sent_out)
 {
 	(void)handle;
 	(void)flags;
@@ -1894,7 +1912,7 @@ int cc3501e_hw_sock_close(uint16_t handle)
 /* so the stub / silicon-free path is unchanged. */
 #ifdef CC3501E_BLE
 #ifndef CC3501E_WIFI
-#error                                                                                             \
+#error \
     "CC3501E_BLE requires CC3501E_WIFI (shared HIF -> Wlan_Start first); build with -Ble (which implies -WifiHostDriver)."
 #endif
 /* BLE_ENABLE: start Wi-Fi first (shared HIF), then bring up the NimBLE host.

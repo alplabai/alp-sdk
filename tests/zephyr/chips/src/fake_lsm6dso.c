@@ -76,9 +76,9 @@ static int fake_lsm6dso_init(const struct emul *target, const struct device *par
 	return 0;
 }
 
-#define FAKE_LSM6DSO_DEFINE(n)                                                                     \
-	static struct fake_lsm6dso_data fake_lsm6dso_data_##n;                                         \
-	EMUL_DT_INST_DEFINE(                                                                           \
+#define FAKE_LSM6DSO_DEFINE(n) \
+	static struct fake_lsm6dso_data fake_lsm6dso_data_##n; \
+	EMUL_DT_INST_DEFINE( \
 	    n, fake_lsm6dso_init, &fake_lsm6dso_data_##n, NULL, &fake_lsm6dso_api, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_LSM6DSO_DEFINE)

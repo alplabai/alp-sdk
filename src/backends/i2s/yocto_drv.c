@@ -356,8 +356,11 @@ y_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
  * wait for available frames via snd_pcm_wait() (clamped to INT_MAX --
  * see _clamp_wait_ms); 0 means "don't block".
  */
-static alp_status_t y_read(
-    alp_i2s_backend_state_t *st, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
+static alp_status_t y_read(alp_i2s_backend_state_t *st,
+                           void                    *block,
+                           size_t                   bytes,
+                           size_t                  *bytes_out,
+                           uint32_t                 timeout_ms)
 {
 	if (bytes_out != NULL) *bytes_out = 0u;
 

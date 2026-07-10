@@ -207,7 +207,7 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_SHMEM_CONFIG_DEFAULT(id)                                                               \
+#define ALP_SHMEM_CONFIG_DEFAULT(id) \
 	((alp_shmem_config_t){ .name = (id), .size = 0u, .cacheable = false })
 
 /**

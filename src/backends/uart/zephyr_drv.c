@@ -27,9 +27,9 @@
 
 #include "uart_ops.h"
 
-#define ALP_UART_DEV_OR_NULL(idx)                                                                  \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_uart, idx))),                                  \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_uart, idx)))),                                 \
+#define ALP_UART_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_uart, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_uart, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {

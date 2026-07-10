@@ -387,8 +387,11 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);
  *         the deadline; ALP_ERR_INVAL on an over-long SSID/passphrase;
  *         mapped error otherwise.
  */
-alp_status_t cc3501e_wifi_connect(
-    cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);
+alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
+                                  const char *ssid,
+                                  uint8_t     sec_type,
+                                  const char *pass,
+                                  uint32_t    timeout_ms);
 
 /**
  * @brief Tear down the STA association (WIFI_DISCONNECT, opcode 0x13).
@@ -426,8 +429,11 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  *         deadline; ALP_ERR_INVAL on an over-long SSID/passphrase; mapped
  *         error otherwise.
  */
-alp_status_t cc3501e_wifi_ap_start(
-    cc3501e_t *ctx, const char *ssid, uint8_t sec_type, const char *pass, uint32_t timeout_ms);
+alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
+                                   const char *ssid,
+                                   uint8_t     sec_type,
+                                   const char *pass,
+                                   uint32_t    timeout_ms);
 
 /**
  * @brief Stop the Wi-Fi soft-AP (WIFI_AP_STOP, opcode 0x15).
@@ -549,8 +555,11 @@ alp_status_t cc3501e_sock_open(cc3501e_t *ctx,
  * @return ALP_OK once connected; ALP_ERR_NOT_READY on the stub build; mapped
  *         error (e.g. ALP_ERR_IO on a refused/timed-out handshake) otherwise.
  */
-alp_status_t cc3501e_sock_connect(
-    cc3501e_t *ctx, uint16_t handle, const uint8_t ip[4], uint16_t port, uint32_t timeout_ms);
+alp_status_t cc3501e_sock_connect(cc3501e_t    *ctx,
+                                  uint16_t      handle,
+                                  const uint8_t ip[4],
+                                  uint16_t      port,
+                                  uint32_t      timeout_ms);
 
 /**
  * @brief Send bytes on a socket (SOCK_SEND, opcode 0x22).
@@ -814,8 +823,11 @@ alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
  * @return ALP_OK once the notification is queued; ALP_ERR_INVAL on a bad arg /
  *         oversized value; otherwise the mapped error.
  */
-alp_status_t cc3501e_ble_gatt_notify(
-    cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);
+alp_status_t cc3501e_ble_gatt_notify(cc3501e_t     *ctx,
+                                     uint16_t       handle,
+                                     const uint8_t *data,
+                                     size_t         len,
+                                     uint32_t       timeout_ms);
 
 /**
  * @brief Read a GATT attribute value (BLE_GATT_READ, 0x3A).
@@ -855,8 +867,11 @@ alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx,
  * @return ALP_OK once the write is accepted; ALP_ERR_INVAL on a bad arg /
  *         oversized value; otherwise the mapped error.
  */
-alp_status_t cc3501e_ble_gatt_write(
-    cc3501e_t *ctx, uint16_t handle, const uint8_t *data, size_t len, uint32_t timeout_ms);
+alp_status_t cc3501e_ble_gatt_write(cc3501e_t     *ctx,
+                                    uint16_t       handle,
+                                    const uint8_t *data,
+                                    size_t         len,
+                                    uint32_t       timeout_ms);
 
 /* ------------------------------------------------------------------ */
 /* GPIO proxy (0x50..0x53) + camera enables (0x60/0x61).              */
@@ -935,8 +950,11 @@ alp_status_t cc3501e_gpio_read(cc3501e_t *ctx, uint8_t pad, bool *level_out, uin
  * @param timeout_ms  Caller budget.
  * @return ALP_OK once armed/disabled; otherwise the mapped error.
  */
-alp_status_t cc3501e_gpio_set_interrupt(
-    cc3501e_t *ctx, uint8_t pad, alp_cc3501e_gpio_edge_t edge, bool enabled, uint32_t timeout_ms);
+alp_status_t cc3501e_gpio_set_interrupt(cc3501e_t              *ctx,
+                                        uint8_t                 pad,
+                                        alp_cc3501e_gpio_edge_t edge,
+                                        bool                    enabled,
+                                        uint32_t                timeout_ms);
 
 /**
  * @brief Drive a CC3501E camera-enable LDO (CAM_ENABLE 0x60 / CAM_DISABLE 0x61).
@@ -1046,8 +1064,11 @@ alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t time
  *         or an out-of-range @p len; otherwise the mapped error (a
  *         cursor-mismatched offset surfaces as the firmware's INVALID).
  */
-alp_status_t cc3501e_ota_write(
-    cc3501e_t *ctx, uint32_t offset, const uint8_t *data, size_t len, uint32_t timeout_ms);
+alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
+                               uint32_t       offset,
+                               const uint8_t *data,
+                               size_t         len,
+                               uint32_t       timeout_ms);
 
 /**
  * @brief Finalize the session (OTA_FINISH, opcode 0x42).

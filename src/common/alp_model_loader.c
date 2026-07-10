@@ -77,7 +77,7 @@ alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 	 * the on-SoC NPU from this core (Ethos-U on M-class).  A V2N
 	 * M33 build passes NULL here so DRP-AI targets are never
 	 * offered to a core that cannot run them (issue #58). */
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) ||                                       \
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) || \
     defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
 		.soc_ref = ALP_SOC_REF_STR,
 #else

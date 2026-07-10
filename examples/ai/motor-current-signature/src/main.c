@@ -41,9 +41,10 @@ LOG_MODULE_REGISTER(curr, LOG_LEVEL_INF);
 #define INA236_MAX_A      8.0f
 #define N_WINDOWS         5
 
-static const struct curr_config CFG = {
-	.off_a = 0.05f, .overload_a = 2.5f, .ripple_min_a = 0.05f, .inrush_slope_a = 1.0f
-};
+static const struct curr_config CFG = { .off_a          = 0.05f,
+	                                    .overload_a     = 2.5f,
+	                                    .ripple_min_a   = 0.05f,
+	                                    .inrush_slope_a = 1.0f };
 
 /* 1-byte stub so alp_inference_open's non-NULL contract is met; an unusable
  * tensor forces the deterministic anomaly fallback.  See models/README.md. */

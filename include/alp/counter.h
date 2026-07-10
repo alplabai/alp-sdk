@@ -215,7 +215,7 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_QENC_CONFIG_DEFAULT(id)                                                                \
+#define ALP_QENC_CONFIG_DEFAULT(id) \
 	((alp_qenc_config_t){ .encoder_id = (id), .pulses_per_rev = 0u })
 
 /**

@@ -80,10 +80,10 @@
  * CMD_ADC_READ (1 + N*2 bytes) and CMD_ADC_STREAM_READ (1 + N*2
  * bytes), so the same formula applies; sample-count ceiling is
  * the larger of the two opcode-side limits. */
-#define GD32_BRIDGE_MAX_PAYLOAD_BYTES                                                              \
-	(1u + ((GD32_BRIDGE_ADC_STREAM_READ_MAX > GD32_BRIDGE_ADC_MAX_SAMPLES                          \
-	            ? GD32_BRIDGE_ADC_STREAM_READ_MAX                                                  \
-	            : GD32_BRIDGE_ADC_MAX_SAMPLES) *                                                   \
+#define GD32_BRIDGE_MAX_PAYLOAD_BYTES \
+	(1u + ((GD32_BRIDGE_ADC_STREAM_READ_MAX > GD32_BRIDGE_ADC_MAX_SAMPLES \
+	            ? GD32_BRIDGE_ADC_STREAM_READ_MAX \
+	            : GD32_BRIDGE_ADC_MAX_SAMPLES) * \
 	       2u))
 
 typedef enum {

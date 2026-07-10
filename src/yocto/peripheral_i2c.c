@@ -197,8 +197,12 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
 	return ALP_OK;
 }
 
-alp_status_t alp_i2c_write_read(
-    alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen)
+alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
+                                uint8_t        addr,
+                                const uint8_t *wdata,
+                                size_t         wlen,
+                                uint8_t       *rdata,
+                                size_t         rlen)
 {
 	if (bus == NULL || !bus->in_use) {
 		return ALP_ERR_INVAL;

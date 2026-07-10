@@ -64,7 +64,7 @@ static void copy_field(char *dst, size_t dst_len, const char *src, size_t src_le
 	}
 }
 
-#if defined(CONFIG_ALP_SDK_HW_INFO) && defined(CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID) &&        \
+#if defined(CONFIG_ALP_SDK_HW_INFO) && defined(CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID) && \
     (CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0) && defined(CONFIG_ALP_SDK_CHIP_EEPROM_24C128)
 #define ALP_HW_INFO_EEPROM_ENABLED 1
 #else

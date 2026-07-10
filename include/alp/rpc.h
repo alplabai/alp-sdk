@@ -160,11 +160,11 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_RPC_CONFIG_DEFAULT(id)                                                                 \
-	((alp_rpc_config_t){ .name      = (id),                                                        \
-	                     .src_ept   = 0u,                                                          \
-	                     .dst_ept   = 0u,                                                          \
-	                     .mbox_ch   = ALP_RPC_DEFAULT_MBOX_CH,                                     \
+#define ALP_RPC_CONFIG_DEFAULT(id) \
+	((alp_rpc_config_t){ .name      = (id), \
+	                     .src_ept   = 0u, \
+	                     .dst_ept   = 0u, \
+	                     .mbox_ch   = ALP_RPC_DEFAULT_MBOX_CH, \
 	                     .cacheable = false })
 
 /**

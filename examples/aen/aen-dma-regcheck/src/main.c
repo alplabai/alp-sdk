@@ -89,7 +89,7 @@ static uint8_t dst_buf[XFER_LEN] __attribute__((section("SRAM0")));
  * Compile-time staging fact: the node exists, is enabled, and binds to the
  * upstream PL330 compatible.
  */
-#define DMA_BOUND                                                                                  \
+#define DMA_BOUND \
 	(DT_NODE_HAS_STATUS(DMA_NODE, okay) && DT_NODE_HAS_COMPAT(DMA_NODE, arm_dma_pl330))
 
 /* The alp_dma0 alias must resolve to the SAME node the PL330 driver binds. */

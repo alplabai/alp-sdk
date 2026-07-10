@@ -145,13 +145,13 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_MQTT_CONFIG_DEFAULT(id)                                                                \
-	((alp_mqtt_config_t){ .broker_uri    = (id),                                                   \
-	                      .client_id     = NULL,                                                   \
-	                      .username      = NULL,                                                   \
-	                      .password      = NULL,                                                   \
-	                      .keepalive_s   = 60u,                                                    \
-	                      .clean_session = true,                                                   \
+#define ALP_MQTT_CONFIG_DEFAULT(id) \
+	((alp_mqtt_config_t){ .broker_uri    = (id), \
+	                      .client_id     = NULL, \
+	                      .username      = NULL, \
+	                      .password      = NULL, \
+	                      .keepalive_s   = 60u, \
+	                      .clean_session = true, \
 	                      .tls           = NULL })
 
 typedef enum { ALP_MQTT_QOS_0 = 0, ALP_MQTT_QOS_1 = 1, ALP_MQTT_QOS_2 = 2 } alp_mqtt_qos_t;
@@ -222,8 +222,11 @@ alp_status_t alp_mqtt_publish(alp_mqtt_t    *m,
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO /
  *         ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_mqtt_subscribe(
-    alp_mqtt_t *m, const char *topic_filter, alp_mqtt_qos_t qos, alp_mqtt_msg_cb_t cb, void *user);
+alp_status_t alp_mqtt_subscribe(alp_mqtt_t       *m,
+                                const char       *topic_filter,
+                                alp_mqtt_qos_t    qos,
+                                alp_mqtt_msg_cb_t cb,
+                                void             *user);
 
 /**
  * @brief Drive the MQTT state machine for up to @p timeout_ms.

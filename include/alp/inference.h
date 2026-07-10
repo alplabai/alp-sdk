@@ -151,12 +151,12 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_INFERENCE_CONFIG_DEFAULT(id)                                                           \
-	((alp_inference_config_t){ .model_data  = (id),                                                \
-	                           .model_size  = 0u,                                                  \
-	                           .format      = ALP_INFERENCE_MODEL_TFLITE,                          \
-	                           .backend     = ALP_INFERENCE_BACKEND_AUTO,                          \
-	                           .arena_bytes = 0u,                                                  \
+#define ALP_INFERENCE_CONFIG_DEFAULT(id) \
+	((alp_inference_config_t){ .model_data  = (id), \
+	                           .model_size  = 0u, \
+	                           .format      = ALP_INFERENCE_MODEL_TFLITE, \
+	                           .backend     = ALP_INFERENCE_BACKEND_AUTO, \
+	                           .arena_bytes = 0u, \
 	                           .arena       = NULL })
 
 /**

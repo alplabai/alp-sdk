@@ -78,16 +78,16 @@ static const alp_wifi_ops_t _ops = {
 	.close      = cc35_close,
 };
 
-#define ALP_WIFI_CC3501E_REGISTER(_name, _ref)                                                     \
-	ALP_BACKEND_REGISTER(wifi,                                                                     \
-	                     _name,                                                                    \
-	                     {                                                                         \
-	                         .silicon_ref = _ref,                                                  \
-	                         .vendor      = "ti-cc3501e",                                          \
-	                         .base_caps   = 0u,                                                    \
-	                         .priority    = 200,                                                   \
-	                         .ops         = &_ops,                                                 \
-	                         .probe       = NULL,                                                  \
+#define ALP_WIFI_CC3501E_REGISTER(_name, _ref) \
+	ALP_BACKEND_REGISTER(wifi, \
+	                     _name, \
+	                     { \
+	                         .silicon_ref = _ref, \
+	                         .vendor      = "ti-cc3501e", \
+	                         .base_caps   = 0u, \
+	                         .priority    = 200, \
+	                         .ops         = &_ops, \
+	                         .probe       = NULL, \
 	                     })
 
 ALP_WIFI_CC3501E_REGISTER(cc3501e_e3, "alif:ensemble:e3");

@@ -411,8 +411,12 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_i2c_write_read(
-    alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen);
+alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
+                                uint8_t        addr,
+                                const uint8_t *wdata,
+                                size_t         wlen,
+                                uint8_t       *rdata,
+                                size_t         rlen);
 
 /**
  * @brief Release the I2C bus handle.  Idempotent on NULL.
@@ -517,12 +521,12 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_I2C_TARGET_CONFIG_DEFAULT(id)                                                          \
-	((alp_i2c_target_config_t){ .bus_id        = (id),                                             \
-	                            .own_addr_7bit = 0u,                                               \
-	                            .on_write      = NULL,                                             \
-	                            .on_read       = NULL,                                             \
-	                            .on_stop       = NULL,                                             \
+#define ALP_I2C_TARGET_CONFIG_DEFAULT(id) \
+	((alp_i2c_target_config_t){ .bus_id        = (id), \
+	                            .own_addr_7bit = 0u, \
+	                            .on_write      = NULL, \
+	                            .on_read       = NULL, \
+	                            .on_stop       = NULL, \
 	                            .user          = NULL })
 
 /**
@@ -599,11 +603,11 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_SPI_CONFIG_DEFAULT(id)                                                                 \
-	((alp_spi_config_t){ .bus_id        = (id),                                                    \
-	                     .freq_hz       = 1000000u,                                                \
-	                     .mode          = ALP_SPI_MODE_0,                                          \
-	                     .bits_per_word = 8u,                                                      \
+#define ALP_SPI_CONFIG_DEFAULT(id) \
+	((alp_spi_config_t){ .bus_id        = (id), \
+	                     .freq_hz       = 1000000u, \
+	                     .mode          = ALP_SPI_MODE_0, \
+	                     .bits_per_word = 8u, \
 	                     .cs_pin_id     = ALP_SPI_NO_CS })
 
 /**
@@ -717,7 +721,7 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_SPI_TARGET_CONFIG_DEFAULT(id)                                                          \
+#define ALP_SPI_TARGET_CONFIG_DEFAULT(id) \
 	((alp_spi_target_config_t){ .bus_id = (id), .mode = ALP_SPI_MODE_0, .bits_per_word = 0u })
 
 /**
@@ -842,11 +846,11 @@ typedef struct {
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_UART_CONFIG_DEFAULT(id)                                                                \
-	((alp_uart_config_t){ .port_id   = (id),                                                       \
-	                      .baudrate  = 115200u,                                                    \
-	                      .data_bits = 8u,                                                         \
-	                      .stop_bits = 1u,                                                         \
+#define ALP_UART_CONFIG_DEFAULT(id) \
+	((alp_uart_config_t){ .port_id   = (id), \
+	                      .baudrate  = 115200u, \
+	                      .data_bits = 8u, \
+	                      .stop_bits = 1u, \
 	                      .parity    = ALP_UART_PARITY_NONE })
 
 /**

@@ -82,7 +82,7 @@
  * see that invariant.  Routing through void* (alignment-agnostic by
  * definition) is the standard container_of idiom for this, matching how
  * Zephyr's own CONTAINER_OF avoids the same diagnostic (issue #634). */
-#define ALP_PWM_HANDLE_OF(st_ptr)                                                                  \
+#define ALP_PWM_HANDLE_OF(st_ptr) \
 	((struct alp_pwm *)(void *)((char *)(st_ptr) - offsetof(struct alp_pwm, state)))
 
 /* Per-handle backend data: the channel's sysfs directory and channel

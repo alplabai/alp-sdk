@@ -79,9 +79,9 @@ extern "C" {
  */
 #define XEVK_I2C_ADDR_INA236_3V3 0x40u /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). */
 #define XEVK_I2C_ADDR_INA236_1V8 0x41u /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). */
-#define XEVK_I2C_ADDR_INA236_VCAM2                                                                 \
+#define XEVK_I2C_ADDR_INA236_VCAM2 \
 	0x48u /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). */
-#define XEVK_I2C_ADDR_INA236_VCAM3                                                                 \
+#define XEVK_I2C_ADDR_INA236_VCAM3 \
 	0x49u                             /**< U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). */
 #define XEVK_I2C_ADDR_INA236_5V 0x4Au /**< U30 INA236B, +5V rail    (20 mOhm shunt, 4.0 A max). */
 

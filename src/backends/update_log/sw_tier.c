@@ -140,7 +140,7 @@ static alp_status_t sw_ram_erase(const char *k)
  * table entry (struct nvs_ate); nvs_calc_free_space() reports post-GC
  * capacity but records cannot span sector boundaries, so pad by one
  * entry's worth of boundary slack. */
-#define SW_NVS_APPEND_WORST                                                                        \
+#define SW_NVS_APPEND_WORST \
 	(2u * ULOG_ENTRY_WIRE_LEN + ULOG_META_WIRE_LEN + sizeof(uint64_t) + 3u * 8u)
 
 static struct nvs_fs g_nvs;
