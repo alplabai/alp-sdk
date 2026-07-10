@@ -214,8 +214,13 @@ alp_pwm_capture_t *alp_pwm_capture_open(const alp_pwm_capture_config_t *cfg)
 alp_status_t
 alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out, uint32_t *pulse_ns_out)
 {
-	if (cap == NULL || !cap->in_use) return ALP_ERR_NOT_READY;
+	/* Validate the arguments BEFORE dereferencing the handle: "both
+	 * outputs NULL" is a caller programming error independent of handle
+	 * state, and checking it first keeps the result deterministic even
+	 * when a test passes a not-ready/garbage handle (reading cap->in_use
+	 * first is otherwise order-dependent on the handle's memory). */
 	if (period_ns_out == NULL && pulse_ns_out == NULL) return ALP_ERR_INVAL;
+	if (cap == NULL || !cap->in_use) return ALP_ERR_NOT_READY;
 	if (cap->state.ops->capture_read == NULL) return ALP_ERR_NOSUPPORT;
 	return cap->state.ops->capture_read(&cap->state, period_ns_out, pulse_ns_out);
 }
