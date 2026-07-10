@@ -1130,6 +1130,8 @@
         "alp_spi_target_transceive",
         "alp_spi_transceive",
         "alp_spi_write",
+        "alp_status_description",
+        "alp_status_name",
         "alp_uart_capabilities",
         "alp_uart_close",
         "alp_uart_open",
