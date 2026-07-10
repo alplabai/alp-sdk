@@ -3,9 +3,11 @@
  *
  * Generic per-class keyed instance table -- see instance_table.h.
  * Also hosts alp_testing_reset_all() (<alp/testing/common.h>): the
- * one place that knows both "every class's table" (this file's sweep
- * list) and "the virtual clock" (<alp/testing/clock.h>), so it is the
- * natural owner of the cross-class reset.
+ * one place that knows "every class's table" (this file's sweep
+ * list), "the virtual clock" (<alp/testing/clock.h>), and "every
+ * registered reset hook" (reset_registry.h, for class-double
+ * side-state that lives outside both of those), so it is the natural
+ * owner of the cross-class reset.
  */
 
 #include <stddef.h>
@@ -15,6 +17,7 @@
 #include <alp/testing/common.h>
 
 #include "instance_table.h"
+#include "reset_registry.h"
 
 /*
  * Sweep list of every table a class double has initialised.  A fixed
@@ -120,4 +123,7 @@ void alp_testing_reset_all(void)
 {
 	alp_testing_clock_reset();
 	alp_testing_instance_table_reset_all();
+	/* Last: hooks may assume the clock + instance tables are already
+	 * clean (e.g. a hook that re-touches its own table). */
+	alp_testing_reset_hooks_run_all();
 }

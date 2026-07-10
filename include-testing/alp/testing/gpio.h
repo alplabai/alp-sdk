@@ -25,6 +25,17 @@
  * on a pin id that has been touched at least once (by an injector
  * call or by `alp_gpio_open`), and fail with @ref ALP_ERR_INVAL for
  * one that never has -- there is nothing yet to read back.
+ *
+ * @note `alp_gpio_open()` on this double ALWAYS succeeds (a
+ *       deliberate ergonomic choice -- see `testing_drv.c`'s open(),
+ *       NOT a fallthrough-avoidance necessity), so an app under test
+ *       that opens a genuinely-invalid pin id still gets back a live
+ *       handle: this double cannot catch a wrong-pin application bug.
+ *       Proving open() rejects an invalid instance is the real
+ *       backend's conformance job (see the invalid-instance case in
+ *       `tests/zephyr/conformance/src/main.c`), not this one's. Do
+ *       not read "open() succeeded" as "pin_id was valid" when
+ *       writing a test against this double.
  */
 
 #ifndef ALP_TESTING_GPIO_H

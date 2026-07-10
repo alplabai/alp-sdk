@@ -7,10 +7,21 @@
  * GPIO backend and alp_gpio_open() rides on it transparently -- see
  * the priority note on ALP_BACKEND_REGISTER in <alp/backend.h>.
  *
- * open()       -- ALWAYS succeeds (never NOSUPPORT: that would trigger
- *                  alp_backend_select_next() fallthrough to the next
- *                  backend instead of serving the test).  Binds (or
- *                  creates) the pin's instance-table slot.
+ * open()       -- ALWAYS succeeds.  This is a deliberate ergonomic
+ *                  choice, NOT a fallthrough-avoidance necessity:
+ *                  alp_gpio_open() (src/gpio_dispatch.c) calls
+ *                  alp_backend_select() ONCE and returns NULL on a
+ *                  non-OK open -- there is no alp_backend_select_next()
+ *                  fallthrough for gpio (nor uart/i2c/spi/adc/can/
+ *                  storage; only the update_log/security dispatchers
+ *                  walk that chain).  A "*" silicon_ref double has no
+ *                  valid-pin-range knowledge to reject an id with, and
+ *                  the injection API (<alp/testing/gpio.h>) needs
+ *                  inject-before-open to work, so open() binds (or
+ *                  creates) the pin's instance-table slot
+ *                  unconditionally instead of validating pin_id -- see
+ *                  the @note on <alp/testing/gpio.h> for the
+ *                  test-authoring consequence.
  * configure()  -- no-op, returns ALP_OK (direction/pull are not
  *                  observable through this double).
  * write()      -- records the driven level + increments the write count.
@@ -47,6 +58,7 @@
 
 #include "gpio_ops.h"
 #include "instance_table.h"
+#include "reset_registry.h"
 #include "virtual_clock.h"
 
 #ifndef ALP_TESTING_GPIO_MAX_PINS
@@ -85,11 +97,46 @@ static void slot_reset(void *slot_v)
 	slot->armed_edge              = ALP_GPIO_EDGE_NONE;
 }
 
+/* Deferred-edge trampoline pool: alp_testing_clock_schedule() takes an
+ * opaque ctx, so a pending edge_at() needs somewhere to park its
+ * (pin_id, edge) pair between scheduling and firing.  Declared ahead
+ * of table() so reset_deferred_edges() below can be registered as a
+ * reset hook from table()'s one-time init block. */
+typedef struct {
+	bool            used;
+	uint32_t        pin_id;
+	alp_gpio_edge_t edge;
+} deferred_edge_t;
+
+#ifndef ALP_TESTING_GPIO_MAX_DEFERRED
+#define ALP_TESTING_GPIO_MAX_DEFERRED 8
+#endif
+
+static deferred_edge_t g_deferred[ALP_TESTING_GPIO_MAX_DEFERRED];
+
+/* Reset hook (issue #610 review): alp_testing_clock_reset() drops
+ * pending clock events WITHOUT firing them, so a deferred edge
+ * scheduled-but-never-advanced-past would otherwise hold its
+ * g_deferred slot `used` forever across alp_testing_reset_all() calls
+ * -- after ALP_TESTING_GPIO_MAX_DEFERRED such leaks, every further
+ * edge_at() fails ALP_ERR_NOMEM even though nothing is really
+ * pending. Registered once via alp_testing_register_reset_hook() from
+ * table()'s lazy init, so alp_testing_reset_all() clears this pool
+ * exactly like it clears the instance table -- no double-specific
+ * edit to alp_testing_reset_all() needed. */
+static void reset_deferred_edges(void)
+{
+	for (size_t i = 0; i < ALP_TESTING_GPIO_MAX_DEFERRED; ++i) {
+		g_deferred[i].used = false;
+	}
+}
+
 static alp_testing_instance_table_t *table(void)
 {
 	if (!g_table_ready) {
 		alp_testing_instance_table_init(
 		    &g_table, g_slots, g_hdrs, sizeof(g_slots[0]), ALP_TESTING_GPIO_MAX_PINS, slot_reset);
+		alp_testing_register_reset_hook(reset_deferred_edges);
 		g_table_ready = true;
 	}
 	return &g_table;
@@ -125,21 +172,6 @@ alp_status_t alp_testing_gpio_edge(uint32_t pin_id, alp_gpio_edge_t edge)
 	fire_edge(slot, edge);
 	return ALP_OK;
 }
-
-/* Deferred-edge trampoline pool: alp_testing_clock_schedule() takes an
- * opaque ctx, so a pending edge_at() needs somewhere to park its
- * (pin_id, edge) pair between scheduling and firing. */
-typedef struct {
-	bool            used;
-	uint32_t        pin_id;
-	alp_gpio_edge_t edge;
-} deferred_edge_t;
-
-#ifndef ALP_TESTING_GPIO_MAX_DEFERRED
-#define ALP_TESTING_GPIO_MAX_DEFERRED 8
-#endif
-
-static deferred_edge_t g_deferred[ALP_TESTING_GPIO_MAX_DEFERRED];
 
 static void deferred_edge_fire(void *ctx)
 {

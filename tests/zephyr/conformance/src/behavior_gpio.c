@@ -58,7 +58,30 @@ static void gpio_behavior_before(void *fixture)
 	g_cb_last_user = NULL;
 }
 
-ZTEST_SUITE(alp_testing_gpio_behavior, NULL, NULL, gpio_behavior_before, NULL, NULL);
+/* After-each teardown (#610 review, Fix 4): alp_testing_reset_all()
+ * wipes every alp/testing double's own state, but it cannot reach the
+ * DISPATCHER's private static handle pool (CONFIG_ALP_SDK_MAX_GPIO_HANDLES
+ * slots, src/gpio_dispatch.c) -- that pool is portable-API state, not
+ * a testing double's.  A test in this file that leaks a handle (opens
+ * one and never closes it) would otherwise silently shrink the pool
+ * for every later test until it quietly runs out, surfacing as a
+ * confusing ALP_ERR_NOMEM far from the actual leak.  Round-tripping a
+ * fresh handle here, right after the test that may have leaked one,
+ * fails loudly and immediately instead. */
+static void gpio_behavior_after(void *fixture)
+{
+	ARG_UNUSED(fixture);
+	alp_testing_reset_all();
+
+	alp_gpio_t *h = alp_gpio_open(0);
+	zassert_not_null(h,
+	                 "pool-health check failed: alp_gpio_open(0) returned NULL right after "
+	                 "this test -- a prior test in this file leaked a handle out of the "
+	                 "dispatcher's fixed-size pool");
+	alp_gpio_close(h);
+}
+
+ZTEST_SUITE(alp_testing_gpio_behavior, NULL, NULL, gpio_behavior_before, gpio_behavior_after, NULL);
 
 /* Setup-fixture-shaped assertion (issue #610): a mis-selection (e.g. a
  * higher-priority real/proxy backend somehow beating the test double)
@@ -257,4 +280,114 @@ ZTEST(alp_testing_gpio_behavior, test_error_translation_is_in_enum)
 	alp_status_t s3 = alp_testing_gpio_edge(untouched_pin + 1, ALP_GPIO_EDGE_NONE);
 	zassert_equal(s3, ALP_ERR_INVAL, "edge(EDGE_NONE) must document ALP_ERR_INVAL");
 	zassert_true(status_in_enum(s3), "status %d outside alp_status_t", (int)s3);
+}
+
+/* #610 review, Fix 1 (MAJOR): reset_all() must free every deferred
+ * edge that was scheduled but never fired (advance_ms() never reached
+ * it) -- not just the clock's own event queue and the instance
+ * tables.  Without the reset-hook registry (src/testing/
+ * reset_registry.h) that clears g_deferred in testing_drv.c, this
+ * pool (capacity ALP_TESTING_GPIO_MAX_DEFERRED == 8) leaks one slot
+ * per unfired edge_at() across every alp_testing_reset_all(), and the
+ * 9th edge_at() ever scheduled in the whole test run -- regardless of
+ * which test schedules it -- fails ALP_ERR_NOMEM. */
+ZTEST(alp_testing_gpio_behavior, test_reset_all_frees_unfired_deferred_edges)
+{
+	const uint32_t pin_id = 20;
+
+	/* Fill the deferred-edge pool without ever advancing the clock, so
+	 * nothing fires and nothing frees itself the normal way. */
+	for (uint32_t i = 0; i < 8; ++i) {
+		zassert_equal(alp_testing_gpio_edge_at(pin_id, 100 + i, ALP_GPIO_EDGE_RISING),
+		              ALP_OK,
+		              "edge_at() #%u failed while filling the deferred pool",
+		              i);
+	}
+	/* Sanity: prove the pool really is exhausted before the reset --
+	 * otherwise the leak this test guards against could go unnoticed. */
+	zassert_equal(alp_testing_gpio_edge_at(pin_id, 200, ALP_GPIO_EDGE_RISING),
+	              ALP_ERR_NOMEM,
+	              "deferred-edge pool should already be full before reset_all()");
+
+	alp_testing_reset_all();
+
+	/* This is the fix under test: every slot must be free again, so
+	 * refilling the pool from scratch succeeds start to finish. */
+	for (uint32_t i = 0; i < 8; ++i) {
+		zassert_equal(alp_testing_gpio_edge_at(pin_id, 100 + i, ALP_GPIO_EDGE_RISING),
+		              ALP_OK,
+		              "edge_at() #%u failed after reset_all() -- deferred-edge pool leaked",
+		              i);
+	}
+}
+
+/* #610 review, Fix 5(a): the synchronous-fire contract
+ * (<alp/testing/gpio.h>'s alp_testing_gpio_edge_at doc) means a cb
+ * runs ON the injecting call's own thread/stack, so it must be safe
+ * for that cb to call back INTO the portable API on its own handle --
+ * this pins that a read from inside the cb observes the same edge
+ * that just fired it, with no reentrancy corruption. */
+static bool         g_cb_reentrant_read_level;
+static alp_status_t g_cb_reentrant_read_rc = ALP_ERR_INVAL;
+
+static void cb_reads_own_handle(alp_gpio_t *pin, void *user)
+{
+	ARG_UNUSED(user);
+	g_cb_count++;
+	g_cb_reentrant_read_rc = alp_gpio_read(pin, &g_cb_reentrant_read_level);
+}
+
+ZTEST(alp_testing_gpio_behavior, test_cb_reentrant_read_is_safe)
+{
+	const uint32_t pin_id = 21;
+
+	alp_gpio_t *h = alp_gpio_open(pin_id);
+	zassert_not_null(h, "gpio test double must open ANY instance");
+	zassert_equal(alp_gpio_irq_enable(h, ALP_GPIO_EDGE_RISING, cb_reads_own_handle, NULL),
+	              ALP_OK,
+	              "irq_enable(RISING) failed");
+
+	zassert_equal(
+	    alp_testing_gpio_edge(pin_id, ALP_GPIO_EDGE_RISING), ALP_OK, "edge injection failed");
+
+	zassert_equal(g_cb_count, 1, "cb did not fire");
+	zassert_equal(
+	    g_cb_reentrant_read_rc, ALP_OK, "alp_gpio_read() called from inside the cb failed");
+	zassert_true(g_cb_reentrant_read_level,
+	             "read() from inside the cb did not observe the edge that fired it");
+
+	alp_gpio_close(h);
+}
+
+/* #610 review, Fix 5(b): a cb that closes its OWN handle while still
+ * being invoked from inside the injection that fired it must not
+ * crash or use-after-free -- fire_edge() (testing_drv.c) makes no
+ * slot access after calling the cb, so this is safe by construction,
+ * but that invariant is exactly the kind of thing a future double
+ * copying this pattern could break silently.  Pin it here. */
+static void cb_closes_own_handle(alp_gpio_t *pin, void *user)
+{
+	ARG_UNUSED(user);
+	g_cb_count++;
+	alp_gpio_close(pin);
+}
+
+ZTEST(alp_testing_gpio_behavior, test_cb_reentrant_close_is_safe)
+{
+	const uint32_t pin_id = 22;
+
+	alp_gpio_t *h = alp_gpio_open(pin_id);
+	zassert_not_null(h, "gpio test double must open ANY instance");
+	zassert_equal(alp_gpio_irq_enable(h, ALP_GPIO_EDGE_RISING, cb_closes_own_handle, NULL),
+	              ALP_OK,
+	              "irq_enable(RISING) failed");
+
+	zassert_equal(alp_testing_gpio_edge(pin_id, ALP_GPIO_EDGE_RISING),
+	              ALP_OK,
+	              "edge injection must not itself fail because the cb closed its own handle");
+	zassert_equal(g_cb_count, 1, "cb did not fire");
+
+	/* h was already closed by the cb; a second close() must stay the
+	 * documented no-op (idempotent void close), not a double-free. */
+	alp_gpio_close(h);
 }

@@ -1207,7 +1207,8 @@ if(CONFIG_ALP_SDK_TESTING)
 
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/virtual_clock.c
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/instance_table.c)
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/instance_table.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/reset_registry.c)
 
     zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_GPIO
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/testing_drv.c)
