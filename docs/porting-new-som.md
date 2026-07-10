@@ -580,7 +580,8 @@ adds its own ref to that list.)
 > **Caveat (current state).**  Adding a new SoC ref means one row in
 > `metadata/registries/silicon-kconfig.json` (the versioned allowlist
 > consumed by `silicon_to_kconfig()` in `scripts/alp_project.py`) AND
-> a matching `config ALP_SOC_<NEW_REF>` stanza in `zephyr/Kconfig`.
+> a matching `config ALP_SOC_<NEW_REF>` stanza in the active SoC capability
+> choice (`zephyr/kconfig/core.kconfig`, sourced from `zephyr/Kconfig`).
 > `scripts/validate_metadata.py` gates that every allowlisted ref
 > resolves to an existing `metadata/socs/` spec.  Until the registry
 > row + the Kconfig stanza land, the loader emits a blank Kconfig

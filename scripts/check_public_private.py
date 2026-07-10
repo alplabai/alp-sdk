@@ -73,6 +73,7 @@ TEXT_SUFFIXES: frozenset[str] = frozenset({
     ".h",
     ".inc",
     ".json",
+    ".kconfig",
     ".md",
     ".overlay",
     ".ps1",

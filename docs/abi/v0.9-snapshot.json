@@ -457,114 +457,6 @@
           "hash": "3aa0ca931a9ed54c",
           "value": "EVK_PIN_CK_RST"
         },
-        "EVK_I2C_ADDR_BMI323": {
-          "hash": "b3ac50a48d2dabd8",
-          "value": ""
-        },
-        "EVK_I2C_ADDR_BMP581": {
-          "hash": "e1b07d9176a943fb",
-          "value": "0x47u"
-        },
-        "EVK_I2C_ADDR_ICM42670": {
-          "hash": "b13a0c0e775e3738",
-          "value": ""
-        },
-        "EVK_I2C_ADDR_INA236_1V8": {
-          "hash": "e6b1e66392071f8a",
-          "value": ""
-        },
-        "EVK_I2C_ADDR_INA236_3V3": {
-          "hash": "7e6ff493568cc3f9",
-          "value": ""
-        },
-        "EVK_I2C_ADDR_INA236_5V": {
-          "hash": "53d8aa3ca4c7e6e8",
-          "value": "0x4Au"
-        },
-        "EVK_I2C_ADDR_INA236_VCAM0": {
-          "hash": "3c5df8a6394ff06d",
-          "value": ""
-        },
-        "EVK_I2C_ADDR_INA236_VCAM1": {
-          "hash": "ed5d88596e2a024a",
-          "value": ""
-        },
-        "EVK_I2C_ADDR_INA236_VIO": {
-          "hash": "d493e064923f9a3d",
-          "value": ""
-        },
-        "EVK_I2C_ADDR_TAS2563_HIGH": {
-          "hash": "d6467eb35abd8dec",
-          "value": "0x4Eu"
-        },
-        "EVK_I2C_ADDR_TAS2563_LOW": {
-          "hash": "30f8c138329a7e74",
-          "value": "0x4Du"
-        },
-        "EVK_I2C_ADDR_TCA6408A_MAIN": {
-          "hash": "ff97f8a717d7b230",
-          "value": "0x20u"
-        },
-        "EVK_I2C_ADDR_TCAL9538": {
-          "hash": "5c453e3611f54eb9",
-          "value": "EVK_I2C_ADDR_TCAL9538_MAIN"
-        },
-        "EVK_I2C_ADDR_TCAL9538_MAIN": {
-          "hash": "71e59a7fa3f6d029",
-          "value": "0x72u"
-        },
-        "EVK_I2C_ADDR_TCAL9538_PCIE": {
-          "hash": "91c57f3a0b3df6c3",
-          "value": "0x71u"
-        },
-        "EVK_INA236_MAX_1V8_A": {
-          "hash": "73e60439b3300cff",
-          "value": "4.0f"
-        },
-        "EVK_INA236_MAX_3V3_A": {
-          "hash": "38e2786b7083f250",
-          "value": "4.0f"
-        },
-        "EVK_INA236_MAX_5V_A": {
-          "hash": "52b1be9e71e29f5f",
-          "value": "4.0f"
-        },
-        "EVK_INA236_MAX_VCAM0_A": {
-          "hash": "20c10fe4992ddfbd",
-          "value": "1.6f"
-        },
-        "EVK_INA236_MAX_VCAM1_A": {
-          "hash": "75fcdd0cd58bf0fa",
-          "value": "1.6f"
-        },
-        "EVK_INA236_MAX_VIO_A": {
-          "hash": "7f39ea596ce4fba0",
-          "value": "1.6f"
-        },
-        "EVK_INA236_SHUNT_1V8_OHMS": {
-          "hash": "3c3b977322879abf",
-          "value": "0.020f"
-        },
-        "EVK_INA236_SHUNT_3V3_OHMS": {
-          "hash": "d0a934d7f3b2ac03",
-          "value": "0.020f"
-        },
-        "EVK_INA236_SHUNT_5V_OHMS": {
-          "hash": "e1d9924afe7954d2",
-          "value": "0.020f"
-        },
-        "EVK_INA236_SHUNT_VCAM0_OHMS": {
-          "hash": "124d9f456842e238",
-          "value": "0.050f"
-        },
-        "EVK_INA236_SHUNT_VCAM1_OHMS": {
-          "hash": "8157a9e246326c01",
-          "value": "0.050f"
-        },
-        "EVK_INA236_SHUNT_VIO_OHMS": {
-          "hash": "5056760875a9897f",
-          "value": "0.050f"
-        },
         "EVK_MB_ANA": {
           "hash": "45f1ade8d681bd64",
           "value": "ALP_E1M_ADC0"
@@ -800,6 +692,66 @@
           "hash": "f2273018a03f0d20",
           "value": "ALP_E1M_ENC0"
         },
+        "EVK_I2C_ADDR_BMI323": {
+          "hash": "7905a85f0e62124c",
+          "value": "0x68u"
+        },
+        "EVK_I2C_ADDR_BMP581": {
+          "hash": "e1b07d9176a943fb",
+          "value": "0x47u"
+        },
+        "EVK_I2C_ADDR_ICM42670": {
+          "hash": "6b23f7f55f17ed2f",
+          "value": "0x69u"
+        },
+        "EVK_I2C_ADDR_INA236_1V8": {
+          "hash": "92cb12a4574fabb8",
+          "value": "0x41u"
+        },
+        "EVK_I2C_ADDR_INA236_3V3": {
+          "hash": "fdc63ffd002c7611",
+          "value": "0x40u"
+        },
+        "EVK_I2C_ADDR_INA236_5V": {
+          "hash": "53d8aa3ca4c7e6e8",
+          "value": "0x4Au"
+        },
+        "EVK_I2C_ADDR_INA236_VCAM0": {
+          "hash": "3db79c434e2f8e69",
+          "value": "0x4Bu"
+        },
+        "EVK_I2C_ADDR_INA236_VCAM1": {
+          "hash": "1e6e86ecacfbd01a",
+          "value": "0x49u"
+        },
+        "EVK_I2C_ADDR_INA236_VIO": {
+          "hash": "8c6392591910038c",
+          "value": "0x42u"
+        },
+        "EVK_I2C_ADDR_TAS2563_HIGH": {
+          "hash": "d6467eb35abd8dec",
+          "value": "0x4Eu"
+        },
+        "EVK_I2C_ADDR_TAS2563_LOW": {
+          "hash": "30f8c138329a7e74",
+          "value": "0x4Du"
+        },
+        "EVK_I2C_ADDR_TCA6408A_MAIN": {
+          "hash": "ff97f8a717d7b230",
+          "value": "0x20u"
+        },
+        "EVK_I2C_ADDR_TCAL9538": {
+          "hash": "5c453e3611f54eb9",
+          "value": "EVK_I2C_ADDR_TCAL9538_MAIN"
+        },
+        "EVK_I2C_ADDR_TCAL9538_MAIN": {
+          "hash": "71e59a7fa3f6d029",
+          "value": "0x72u"
+        },
+        "EVK_I2C_ADDR_TCAL9538_PCIE": {
+          "hash": "91c57f3a0b3df6c3",
+          "value": "0x71u"
+        },
         "EVK_I2C_BUS_ARDUINO": {
           "hash": "e89cddeee8e041ed",
           "value": "ALP_E1M_I3C0"
@@ -819,6 +771,54 @@
         "EVK_I2S_PDM_MIC": {
           "hash": "572c8fef11e65eb5",
           "value": "ALP_E1M_I2S1"
+        },
+        "EVK_INA236_MAX_1V8_A": {
+          "hash": "73e60439b3300cff",
+          "value": "4.0f"
+        },
+        "EVK_INA236_MAX_3V3_A": {
+          "hash": "38e2786b7083f250",
+          "value": "4.0f"
+        },
+        "EVK_INA236_MAX_5V_A": {
+          "hash": "52b1be9e71e29f5f",
+          "value": "4.0f"
+        },
+        "EVK_INA236_MAX_VCAM0_A": {
+          "hash": "20c10fe4992ddfbd",
+          "value": "1.6f"
+        },
+        "EVK_INA236_MAX_VCAM1_A": {
+          "hash": "75fcdd0cd58bf0fa",
+          "value": "1.6f"
+        },
+        "EVK_INA236_MAX_VIO_A": {
+          "hash": "7f39ea596ce4fba0",
+          "value": "1.6f"
+        },
+        "EVK_INA236_SHUNT_1V8_OHMS": {
+          "hash": "3c3b977322879abf",
+          "value": "0.020f"
+        },
+        "EVK_INA236_SHUNT_3V3_OHMS": {
+          "hash": "d0a934d7f3b2ac03",
+          "value": "0.020f"
+        },
+        "EVK_INA236_SHUNT_5V_OHMS": {
+          "hash": "e1d9924afe7954d2",
+          "value": "0.020f"
+        },
+        "EVK_INA236_SHUNT_VCAM0_OHMS": {
+          "hash": "124d9f456842e238",
+          "value": "0.050f"
+        },
+        "EVK_INA236_SHUNT_VCAM1_OHMS": {
+          "hash": "8157a9e246326c01",
+          "value": "0.050f"
+        },
+        "EVK_INA236_SHUNT_VIO_OHMS": {
+          "hash": "5056760875a9897f",
+          "value": "0.050f"
         },
         "EVK_MB_PWM": {
           "hash": "012e2c0c49c54269",
@@ -1382,6 +1382,10 @@
         }
       },
       "macros": {
+        "ALP_CAN_CONFIG_DEFAULT": {
+          "hash": "4a2ce1b68a43f910",
+          "value": "(id)"
+        },
         "ALP_CAN_MAX_DLC_CLASSIC": {
           "hash": "0bcbd63b336d2595",
           "value": "8"
@@ -5907,7 +5911,12 @@
           "signature": "alp_status_t alp_qenc_reset_position(alp_qenc_t *enc);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_COUNTER_CONFIG_DEFAULT": {
+          "hash": "a5bd1d5fdb13d5c8",
+          "value": "(id) ((alp_counter_config_t){ .counter_id = (id) })"
+        }
+      },
       "typedefs": {
         "alp_counter_alarm_cb_t": {
           "definition": "typedef void (*alp_counter_alarm_cb_t)(alp_counter_t *counter, uint32_t ticks, void *user);",
@@ -5954,7 +5963,12 @@
           "signature": "alp_status_t alp_dac_write_mv(alp_dac_t *dac, uint16_t mv);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_DAC_CONFIG_DEFAULT": {
+          "hash": "782b0565757eb05c",
+          "value": "(id) ((alp_dac_config_t){ .channel_id = (id), .initial_mv = 0u })"
+        }
+      },
       "typedefs": {
         "alp_dac_t": {
           "definition": "typedef struct alp_dac alp_dac_t;",
@@ -8248,9 +8262,21 @@
         }
       },
       "macros": {
+        "ALP_I2C_CONFIG_DEFAULT": {
+          "hash": "afc0dc303fdbf1a7",
+          "value": "(id) ((alp_i2c_config_t){ .bus_id = (id), .bitrate_hz = 100000u })"
+        },
+        "ALP_SPI_CONFIG_DEFAULT": {
+          "hash": "e9b7b641ff66df59",
+          "value": "(id)"
+        },
         "ALP_SPI_NO_CS": {
           "hash": "e4997898b273a23e",
           "value": "0xFFFFFFFFu"
+        },
+        "ALP_UART_CONFIG_DEFAULT": {
+          "hash": "8ebbc877dcba1a5c",
+          "value": "(id)"
         }
       },
       "typedefs": {
@@ -8654,6 +8680,10 @@
         "ALP_PWM_BREAK_NONE": {
           "hash": "de2c9b51e7bb06a6",
           "value": "0x00u"
+        },
+        "ALP_PWM_CONFIG_DEFAULT": {
+          "hash": "5fd5d79db3f46e49",
+          "value": "(id)"
         }
       },
       "typedefs": {
@@ -9589,7 +9619,12 @@
           "signature": "alp_wdt_t * alp_wdt_open(const alp_wdt_config_t *cfg);"
         }
       },
-      "macros": {},
+      "macros": {
+        "ALP_WDT_CONFIG_DEFAULT": {
+          "hash": "4821b5ad5459288b",
+          "value": "(id)"
+        }
+      },
       "typedefs": {
         "alp_wdt_action_t": {
           "definition": "typedef enum { ALP_WDT_RESET_SOC = 0, ALP_WDT_RESET_CPU = 1, ALP_WDT_INTERRUPT_ONLY = 2 } alp_wdt_action_t;",

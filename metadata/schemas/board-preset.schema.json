@@ -41,6 +41,11 @@
         "qenc":  { "$ref": "#/$defs/route_entry_list_qenc" }
       }
     },
+    "i2c_devices": {
+      "type": "array",
+      "description": "On-board I2C device instances (chip address / strap facts, optionally with power-monitor calibration).  scripts/gen_board_header.py reads this block and emits `#define <macro> 0x..u` (+ per-entry `alias` + `calibration` shunt/max-current macros) into include/alp/boards/alp_<name>_routes.h.  Single source of truth for chip-instance addresses that used to be hand-authored in the board header.",
+      "items": { "$ref": "#/$defs/i2c_device_entry" }
+    },
     "defaults": {
       "type": "object",
       "additionalProperties": true,
@@ -105,6 +110,32 @@
     "route_entry_list_dac":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_DAC[0-9]+$" } } }] } },
     "route_entry_list_i2s":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_I2S[0-9]+$" } } }] } },
     "route_entry_list_can":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_CAN[0-9]+$" } } }] } },
-    "route_entry_list_qenc":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_ENC[0-9]+$" } } }] } }
+    "route_entry_list_qenc":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_ENC[0-9]+$" } } }] } },
+    "i2c_device_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["macro", "address"],
+      "description": "One on-board I2C device instance: schematic strap-selected address (+ optional current-monitor calibration).",
+      "properties": {
+        "macro":       { "type": "string", "pattern": "^EVK_I2C_ADDR_[A-Z0-9_]+$", "description": "C macro name emitted as `#define <macro> <address>u`." },
+        "part":        { "type": "string", "description": "Chip-driver key (bmi323, icm42670, bmp581, tcal9538, tca6408a, tas2563, ina236, ...) -- not a vendor MPN." },
+        "designator":  { "type": "string", "pattern": "^U[0-9]+$", "description": "Schematic reference designator." },
+        "address":     { "type": "string", "pattern": "^0x[0-9A-Fa-f]{2}$", "description": "7-bit I2C address, hex string." },
+        "alias":       { "type": "string", "pattern": "^EVK_I2C_ADDR_[A-Z0-9_]+$", "description": "Extra macro name emitted as `#define <alias> <macro>` (e.g. a shorter convenience name for a device populated in only one variant)." },
+        "doc":         { "type": "string", "description": "One-line Doxygen @brief documenting the strap / collision / respin context." },
+        "calibration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["shunt_macro", "shunt_ohms", "max_macro", "max_current_a"],
+          "description": "INA236-style current-monitor calibration for this instance.",
+          "properties": {
+            "shunt_macro":   { "type": "string", "pattern": "^EVK_INA236_SHUNT_[A-Z0-9_]+_OHMS$" },
+            "shunt_ohms":    { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Shunt resistance in ohms, as a decimal string (preserves the exact digits emitted into the `f`-suffixed C float literal)." },
+            "max_macro":     { "type": "string", "pattern": "^EVK_INA236_MAX_[A-Z0-9_]+_A$" },
+            "max_current_a": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Rail max current in amps, as a decimal string (see `shunt_ohms`)." }
+          }
+        }
+      }
+    }
   }
 }
