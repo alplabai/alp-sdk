@@ -14,20 +14,20 @@ if ALP_SDK
 # grouping and is sourced in the same order the monolith previously
 # declared them in, so config ordering, choice/if/menu scoping, and every
 # symbol's defaults/deps/help stay byte-for-byte equivalent.
-rsource "kconfig/core.kconfig"
-rsource "kconfig/i2c-spi-handles.kconfig"
-rsource "kconfig/vendor-renesas-spi.kconfig"
-rsource "kconfig/vendor-alif-peripherals.kconfig"
-rsource "kconfig/peripherals-handles.kconfig"
-rsource "kconfig/v2n-supervisor.kconfig"
-rsource "kconfig/peripherals-wrappers.kconfig"
-rsource "kconfig/power-camera-display.kconfig"
-rsource "kconfig/gpu2d-update-log.kconfig"
-rsource "kconfig/iot-audio-inference.kconfig"
-rsource "kconfig/ble-security.kconfig"
-rsource "kconfig/mproc-rpc-usb.kconfig"
-rsource "kconfig/hw-info.kconfig"
-rsource "kconfig/chips.kconfig"
+rsource "kconfigs/core.kconfig"
+rsource "kconfigs/i2c-spi-handles.kconfig"
+rsource "kconfigs/vendor-renesas-spi.kconfig"
+rsource "kconfigs/vendor-alif-peripherals.kconfig"
+rsource "kconfigs/peripherals-handles.kconfig"
+rsource "kconfigs/v2n-supervisor.kconfig"
+rsource "kconfigs/peripherals-wrappers.kconfig"
+rsource "kconfigs/power-camera-display.kconfig"
+rsource "kconfigs/gpu2d-update-log.kconfig"
+rsource "kconfigs/iot-audio-inference.kconfig"
+rsource "kconfigs/ble-security.kconfig"
+rsource "kconfigs/mproc-rpc-usb.kconfig"
+rsource "kconfigs/hw-info.kconfig"
+rsource "kconfigs/chips.kconfig"
 
 # §D.lib.loader -- per-library HW-accelerator Kconfig knobs declared
 # in a sibling file so the chip-driver menu above stays focused on

@@ -288,7 +288,7 @@ fallback) and emits one `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
 line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
 `_U85=y` (the U55 pair alongside the U85); AEN301/501/701 emit only
 `_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
-Matching Kconfig entries live at `zephyr/kconfig/iot-audio-inference.kconfig`
+Matching Kconfig entries live at `zephyr/kconfigs/iot-audio-inference.kconfig`
 § *Per-variant Ethos-U silicon switches*; the TFLM driver source
 (`src/zephyr/inference_tflm.cpp`) reads the per-variant macros via
 `alp_inference_tflm_npu_variant_name()` and logs the active variant
@@ -308,7 +308,7 @@ one `CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y` per slice.
 Verified: M55_HP slices on every AEN SKU emit `_HELIUM=y`; A55 slices
 on V2N101 emit `_NEON=y`; the V2N M33_SM slice + NX9101 M33 slice
 both emit `_REF=y` (baseline ARMv8-M, no DSP / MVE).  Matching Kconfig
-entries live at `zephyr/kconfig/iot-audio-inference.kconfig` § *Per-CPU-class
+entries live at `zephyr/kconfigs/iot-audio-inference.kconfig` § *Per-CPU-class
 TFLM kernel selectors*; the TFLM driver source surfaces the choice via
 `alp_inference_tflm_cpu_kernel_variant()`.
 
