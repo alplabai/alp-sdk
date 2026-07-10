@@ -23,7 +23,7 @@
  * `libraries: [u8g2]` sets CONFIG_ALP_SDK_U8G2_VENDORED_CORE, the
  * selection-scoped Kconfig knob that gates compiling that vendored
  * subset into the build -- this example's own CMakeLists.txt only
- * lists its own src/*.c files.
+ * lists its own src/ C sources.
  *
  * What success looks like: an ASCII-art rectangle+box+string, then
  * `[u8g2-oled-draw] done`.
