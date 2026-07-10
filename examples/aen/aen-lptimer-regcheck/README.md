@@ -42,7 +42,7 @@ binds **channel 0** (IRQ 60); the count is surfaced to app code as an
 | free-run reload | `0xFFFFFFFF` | Alif DFP `lptimer.h` `lptimer_load_max_count` |
 | VBAT clock select | `TIMER_CLKSEL` @ `0x1A609004`, 2-bit field at `(ch << 2)` | Alif DFP `sys_ctrl_lptimer.h` `select_lptimer_clk`; `VBAT_BASE 0x1A609000` + `0x04` |
 | Driver IP | counter-class, `DT_DRV_COMPAT alif_lptimer` | clean-room `counter_alif_lptimer.c` |
-| Kconfig | `COUNTER_ALIF_LPTIMER`, `depends on DT_HAS_ALIF_LPTIMER_ENABLED` | `zephyr/kconfig/vendor-alif-peripherals.kconfig` |
+| Kconfig | `COUNTER_ALIF_LPTIMER`, `depends on DT_HAS_ALIF_LPTIMER_ENABLED` | `zephyr/kconfigs/vendor-alif-peripherals.kconfig` |
 
 The driver register model is **clean-room** -- every value transcribed
 (value-only, not copied) from the proprietary Alif DFP with an inline

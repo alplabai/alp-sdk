@@ -65,7 +65,7 @@ the LPRTC reached as an `alp_counter` / Zephyr counter device.
 | `CCVR` (counter value) offset | `+0x00` -> J-Link `mem32 0x42000000` | vendored header `counter_dw_rtc.h` `DW_RTC_REG_CCVR (0x00)` |
 | Driver IP | counter-class, `DT_DRV_COMPAT snps_dw_apb_rtc` | vendored `counter_dw_rtc.c` (fork commit `da4a9034`) |
 | Distinct from upstream | upstream `counter_dw_timer.c` is `snps_dw_timers` (DW APB **Timers**, a different IP) | `<zephyr>/drivers/counter/counter_dw_timer.c` |
-| Kconfig | `COUNTER_RTC_SNPS_DW`, `depends on DT_HAS_SNPS_DW_APB_RTC_ENABLED` | fork `drivers/counter/Kconfig.dw_rtc`; mirrored in `zephyr/kconfig/vendor-alif-peripherals.kconfig` |
+| Kconfig | `COUNTER_RTC_SNPS_DW`, `depends on DT_HAS_SNPS_DW_APB_RTC_ENABLED` | fork `drivers/counter/Kconfig.dw_rtc`; mirrored in `zephyr/kconfigs/vendor-alif-peripherals.kconfig` |
 
 The driver `.c`/`.h` register model is vendored **verbatim** from the
 fork (only the provenance header is alp-sdk-added) -- **no register

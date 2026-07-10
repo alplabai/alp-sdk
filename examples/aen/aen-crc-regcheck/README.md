@@ -45,7 +45,7 @@ driver. ADR 0017 **Tier-1.5** (in-tree-thin over the silicon).
 | interrupt | none -- polled engine | DFP `crc.c` / `Driver_CRC.c` use no IRQ |
 | Driver IP | CRC class, `DT_DRV_COMPAT alif_crc` | clean-room `crc_alif.c` (upstream `crc_begin/update/finish` API) |
 | Distinct from fork | fork `crc_compute()` / `struct crc_params` / `CONFIG_CRC_DRV` -- NOT upstream | `sdk-alif/samples/drivers/crc` |
-| Kconfig | `CRC_ALIF`, `depends on CRC_DRIVER` + `DT_HAS_ALIF_CRC_ENABLED` | `zephyr/kconfig/vendor-alif-peripherals.kconfig` |
+| Kconfig | `CRC_ALIF`, `depends on CRC_DRIVER` + `DT_HAS_ALIF_CRC_ENABLED` | `zephyr/kconfigs/vendor-alif-peripherals.kconfig` |
 | reference value | `0x684FC31C` = `zlib.crc32(fixed_buf)` | Python host precompute (see `src/main.c`) |
 
 **No register value is invented** -- each offset/bit is the DFP `#define`
