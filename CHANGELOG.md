@@ -7,6 +7,36 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Fixed — build-plan / emit path resolution (#596, #597, #598)
+
+- **`--emit build-plan` / `west alp-build` (#596):** relative `app:`
+  paths (Zephyr `west build` target, baremetal `cmake -S`) now resolve
+  against the project's `board.yaml` directory, never the calling
+  process's CWD.  Previously running the emit from a different
+  directory (or the repo root, where the app-dir's absence let the
+  root `CMakeLists.txt` satisfy a parent-directory fallback) could
+  silently point a slice's build command at the wrong tree.  The plan
+  is now byte-identical no matter where it's invoked from.
+- **Yocto app-only slices (#597):** `_slice_command` no longer hands
+  `app:` (a source-directory path) straight to `bitbake` -- an
+  app-only Yocto slice now requires a new `recipe:` field naming the
+  bitbake recipe that packages it; without one the slice is carried as
+  `command: null` plus a `yocto-recipe-missing` warning instead of an
+  invalid `bitbake <path>`.  Every slice's build-plan entry additionally
+  carries `appDir` (the resolved app source directory, independent of
+  `command`) -- an **additive** field per ADR 0014.  Two examples
+  (`lvgl-dashboard-x-evk`, `v2n-m1-ros-perception`) gained their
+  already-existing `recipe:` values; `v2n-power-monitor` has none yet
+  and now blocks explicitly rather than emitting a bogus command.
+- **`add_subdirectory()` consumers (#598):** `src/baremetal/CMakeLists.txt`
+  anchored its private include path + `vendors/` subdirectories on
+  `CMAKE_SOURCE_DIR` (the top-level project's root), which is the
+  *consumer's* root, not alp-sdk's, when alp-sdk is pulled in via
+  `add_subdirectory()` -- the documented embedded-consumer path. Fixed
+  to anchor on `CMAKE_CURRENT_SOURCE_DIR` instead. New
+  `tests/cmake-consumer/add-subdirectory-smoke` fixture + CI job prove
+  a real nested consumer configures, builds, and links.
+
 ## [v0.9.0] - 2026-07-06
 
 ### Added — native_sim board overlay emit

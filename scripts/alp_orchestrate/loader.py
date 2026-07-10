@@ -193,6 +193,7 @@ def _slice_from_resolved(
         os=str(entry.get("os") or _default_os_from_core_type(soc_core_type)),
         app=entry.get("app"),
         image=entry.get("image"),
+        recipe=entry.get("recipe"),
         machine=entry.get("machine"),
         board=entry.get("board"),
         toolchain=entry.get("toolchain"),

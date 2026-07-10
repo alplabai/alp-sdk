@@ -9,6 +9,7 @@
       "coreId": "a32_cluster",
       "backend": "yocto",
       "buildDir": "build/a32_cluster-yocto",
+      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-aen/linux",
       "configArtefacts": [
         {
           "path": "build/a32_cluster-yocto/local.conf",
@@ -30,6 +31,7 @@
       "coreId": "m55_he",
       "backend": "zephyr",
       "buildDir": "build/m55_he-zephyr",
+      "appDir": "<SDK_ROOT>/firmware/alp-stock-shim",
       "configArtefacts": [
         {
           "path": "build/m55_he-zephyr/alp.conf",
@@ -54,6 +56,7 @@
       "coreId": "m55_hp",
       "backend": "zephyr",
       "buildDir": "build/m55_hp-zephyr",
+      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-aen/m55_hp",
       "configArtefacts": [
         {
           "path": "build/m55_hp-zephyr/alp.conf",
@@ -66,7 +69,7 @@
           "build",
           "-b",
           "alp_e1m_aen801_m55_hp",
-          "<SDK_ROOT>"
+          "<SDK_ROOT>/examples/multicore/rpmsg-aen/m55_hp"
         ],
         "cwd": "build/m55_hp-zephyr"
       },

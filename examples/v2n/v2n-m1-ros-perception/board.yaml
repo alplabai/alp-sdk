@@ -18,6 +18,9 @@ preset: e1m-x-evk
 cores:
   a55_cluster:
     app: ./src                # the colcon workspace + ROS 2 recipes
+    recipe: alp-perception    # meta-alp-sdk/recipes-ros/alp-perception packages
+                                # `app:` above -- a source path is never a valid
+                                # bitbake target on its own (issue #597).
     # ROS 2 is brought in via the Yocto image's meta-ros layer, not
     # via libraries: -- the recipe pulls ros-rclcpp + ros-vision-msgs +
     # ros-sensor-msgs at image-build time.  The host SDK's libraries:

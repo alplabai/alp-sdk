@@ -15,6 +15,9 @@ preset: e1m-x-evk
 cores:
   a55_cluster:
     app: ./src               # Linux userspace app (DRM/KMS + evdev)
+    recipe: alp-lvgl-dashboard   # the recipe that packages `app:` above --
+                                  # `app:` alone is a source path, never a
+                                  # valid bitbake target (issue #597).
   m33_sm:
     os: "off"                # display is wholly A55-owned
 

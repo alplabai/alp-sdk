@@ -72,6 +72,11 @@ class Slice:
     os: str                              # zephyr | yocto | baremetal | off
     app: Optional[str] = None
     image: Optional[str] = None          # Yocto image recipe name
+    # Yocto bitbake recipe that packages this slice's `app:` source dir.
+    # Required for an app-only (`app:` set, no `image:`) Yocto slice --
+    # `app:` is a filesystem path, never a valid bitbake target itself
+    # (issue #597).
+    recipe: Optional[str] = None
     machine: Optional[str] = None        # Yocto MACHINE
     board: Optional[str] = None          # Zephyr board target
     toolchain: Optional[str] = None
@@ -122,6 +127,7 @@ class Slice:
             "os":               self.os,
             "app":              self.app,
             "image":            self.image,
+            "recipe":           self.recipe,
             "machine":          self.machine,
             "board":            self.board,
             "toolchain":        self.toolchain,
