@@ -212,8 +212,7 @@ static void z_close(alp_uart_backend_state_t *st)
 /* RX ring buffer (CONFIG_ALP_SDK_UART_RX_RINGBUF)                     */
 /* ================================================================== */
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
 

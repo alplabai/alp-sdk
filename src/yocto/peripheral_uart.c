@@ -267,6 +267,7 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 		return NULL;
 	}
 	h->fd = fd;
+	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
 

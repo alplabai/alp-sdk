@@ -155,6 +155,7 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
 	}
 	h->fd     = fd;
 	h->bus_id = cfg->bus_id;
+	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
 

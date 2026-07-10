@@ -158,10 +158,12 @@ struct alp_adc_stream {
 /* ------------------------------------------------------------------ */
 /* Last-error helpers — internal use only.                              */
 /* Stamps a precise alp_status_t before alp_*_open returns NULL.        */
+/* Prototypes come from the shared private contract header (one         */
+/* declaration site for every OS-agnostic dispatcher AND this Zephyr-    */
+/* only header — see alp_z_last_error.h, issue #627).                   */
 /* ------------------------------------------------------------------ */
 
-void alp_z_set_last_error(alp_status_t s);
-void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 /* ------------------------------------------------------------------ */
 /* Internal pool API — used only by the per-peripheral source files.   */

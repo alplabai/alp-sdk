@@ -165,6 +165,7 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 	h->cs_pin_id     = cfg->cs_pin_id;
 	h->freq_hz       = cfg->freq_hz;
 	h->bits_per_word = bits;
+	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
 

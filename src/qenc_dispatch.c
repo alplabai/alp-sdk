@@ -20,8 +20,7 @@
 
 ALP_BACKEND_DEFINE_CLASS(qenc);
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_QENC_HANDLES
 #define CONFIG_ALP_SDK_MAX_QENC_HANDLES 4

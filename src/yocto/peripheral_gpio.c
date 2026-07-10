@@ -174,6 +174,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	h->line_fd   = req.fd;
 	h->pin_id    = pin_id;
 	h->is_output = false;
+	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
 

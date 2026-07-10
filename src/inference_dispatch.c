@@ -46,8 +46,7 @@ ALP_BACKEND_DEFINE_CLASS(inference);
 /* Reuse the existing TLS-backed last-error mechanism from
  * src/zephyr/last_error.c.  Forward-declared here to avoid
  * pulling in the broader handles.h header. */
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES
 #define CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES 2
