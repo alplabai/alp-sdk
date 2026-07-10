@@ -210,6 +210,28 @@
           "e1m-evk",
           "e1m-x-evk"
         ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "libhelix-decode",
+        "path": "examples/audio/libhelix-decode",
+        "som": "E1M-AEN801",
+        "summary": "Demonstrates the [Helix](https://en.wikipedia.org/wiki/Helix_(codec)) fixed-point MP3 decoder workflow: MP3 frame synchronisation, header parsing, and (on ARM silicon) fixed-point PCM decode.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "minimp3-decode",
+        "path": "examples/audio/minimp3-decode",
+        "som": "E1M-AEN801",
+        "summary": "Decodes a canned MP3 byte array to 16-bit PCM with the vendored [minimp3](https://github.com/lieff/minimp3) single-header decoder and prints the sample count + RMS of the decoded audio. Pure compute -- no I2S/codec hardware required, so this builds and runs identically on `native_sim` and real silicon.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
       }
     ],
     "camera-vision": [
@@ -229,6 +251,13 @@
       }
     ],
     "connectivity": [
+      {
+        "board": "e1m-evk",
+        "name": "coap-client-get",
+        "path": "examples/connectivity/coap-client-get",
+        "som": "E1M-AEN801",
+        "summary": "`[UNTESTED]` -- native_sim build+run PASSED locally (see below), but this has not been verified on real silicon (no bench/HIL sweep)."
+      },
       {
         "board": "e1m-x-evk",
         "name": "iot-connected-camera",
@@ -251,6 +280,13 @@
         "summary": "Secure OTA firmware update with rollback. The production-readiness proof for \"how do we update 10 000 units in the field?\"."
       },
       {
+        "board": "e1m-evk",
+        "name": "jsmn-json-parse",
+        "path": "examples/connectivity/jsmn-json-parse",
+        "som": "E1M-AEN801",
+        "summary": "`[UNTESTED]` -- native_sim build+run PASSED locally (see below), but this has not been verified on real silicon (no bench/HIL sweep)."
+      },
+      {
         "board": "e1m-x-evk",
         "name": "modbus-server",
         "path": "examples/connectivity/modbus-server",
@@ -259,10 +295,50 @@
       },
       {
         "board": "e1m-evk",
+        "name": "mqtt-sn-publish",
+        "path": "examples/connectivity/mqtt-sn-publish",
+        "som": "E1M-AEN801",
+        "summary": "coreMQTT-SN teaching example. Encodes an MQTT-SN PUBLISH packet into a buffer, then parses it back out of the same buffer and asserts the topic id, message id, QoS, retain flag, and payload all survive the round trip. No socket, no gateway, no live transport -- this is the unit-test shape you'd run before wiring the encoder to a real UDP/ BLE/UART MQTT-SN link.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "nanopb-encode-decode",
+        "path": "examples/connectivity/nanopb-encode-decode",
+        "som": "E1M-AEN801",
+        "summary": "`[UNTESTED]` -- native_sim build+run PASSED locally (see below), but this has not been verified on real silicon (no bench/HIL sweep)."
+      },
+      {
+        "board": "e1m-evk",
         "name": "production-deployment",
         "path": "examples/connectivity/production-deployment",
         "som": "E1M-AEN801",
         "summary": "The v1.0 reference application for a field-deployable IoT product. Demonstrates the full manufactured -> deployed -> updated -> attested lifecycle on a single app, so customers see how the SDK's secure-boot, OTA, EEPROM-provisioning, and remote-attestation pieces fit together."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "tinygsm-modem-at",
+        "path": "examples/connectivity/tinygsm-modem-at",
+        "som": "E1M-AEN801",
+        "summary": "Runs the cellular-modem AT bring-up flow [TinyGSM](https://github.com/vshymanskyy/TinyGSM) drives -- an `AT` liveness probe, then `ATI` / `AT+CGMI` / `AT+GMM` for `getModemInfo()` -- against a mock AT-transcript `Stream`, and prints the assembled modem info. No real UART or cellular modem required.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "websocket-frame",
+        "path": "examples/connectivity/websocket-frame",
+        "som": "E1M-AEN801",
+        "summary": "libwebsockets teaching example. Masks and encodes a single unfragmented RFC 6455 TEXT frame into a buffer, then decodes (unmasks) it back out and asserts the payload survives the round trip. No socket, no TLS, no handshake -- this is the frame-layout byte accounting you'd want to get right before ever opening a real connection.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
       }
     ],
     "display": [
@@ -272,6 +348,17 @@
         "path": "examples/display/drone-hud",
         "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds on > `native_sim/native/64`; HiL silicon bring-up of the IMU + GPS + > battery + display chain lands in v0.6."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "gfx-compat-blit",
+        "path": "examples/display/gfx-compat-blit",
+        "som": "E1M-AEN801",
+        "summary": "**[UNTESTED]** -- `native_sim` build-and-run only; not yet run on a bench SoM.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
       },
       {
         "board": "e1m-evk",
@@ -300,6 +387,17 @@
         "path": "examples/display/lvgl-widgets-demo",
         "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_widgets()`** from LVGL's `demos/` tree -- the headline showcase of every standard LVGL widget (buttons, sliders, tabs, charts, meters, lists, animations)."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "u8g2-oled-draw",
+        "path": "examples/display/u8g2-oled-draw",
+        "som": "E1M-AEN801",
+        "summary": "**[UNTESTED]** -- `native_sim` build-and-run only; not yet run on a bench SoM.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
       }
     ],
     "multicore": [
@@ -382,6 +480,28 @@
         "path": "examples/peripheral-io/drone-autopilot",
         "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "etl-fixed-containers",
+        "path": "examples/peripheral-io/etl-fixed-containers",
+        "som": "E1M-AEN801",
+        "summary": "Builds an `etl::vector<int, 8>` and an `etl::map<const char *, int, 4>` -- two of the Embedded Template Library's fixed-capacity, STL-shaped containers -- and demonstrates their headline property for firmware: **no heap allocation, ever**. Storage for both containers is embedded inline at compile time, sized by the `MAX_SIZE` template parameter.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "fmt-formatting",
+        "path": "examples/peripheral-io/fmt-formatting",
+        "som": "E1M-AEN801",
+        "summary": "Formats an `int` + a `float` + a `const char *` into a fixed `char[64]` stack buffer using `fmt::format_to` -- {fmt} (https://github.com/fmtlib/fmt)'s API for writing formatted text through a caller-supplied output iterator instead of returning an owning `std::string`. No heap allocation, no `<iostream>`.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
       },
       {
         "board": "e1m-evk",
@@ -558,6 +678,17 @@
       },
       {
         "board": "e1m-evk",
+        "name": "littlefs-keyvalue",
+        "path": "examples/power-timing/littlefs-keyvalue",
+        "som": "E1M-AEN801",
+        "summary": "Mounts a littlefs partition, writes a single key/value pair to a file, reads it back, lists the mount-point directory, and asserts the read matches the write. Teaches the Zephyr `fs` subsystem's `fs_mount`/`fs_open`/`fs_write`/`fs_read`/`fs_readdir` API surface using the littlefs backend (`libraries: [littlefs]` in `board.yaml`).",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
         "name": "power-managed-sensor",
         "path": "examples/power-timing/power-managed-sensor",
         "som": "E1M-AEN301",
@@ -591,6 +722,30 @@
         "path": "examples/power-timing/wdt-feed",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/wdt.h>`. Installs a 5 second watchdog timeout and feeds it from a background loop.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      }
+    ],
+    "testing": [
+      {
+        "board": "e1m-evk",
+        "name": "catch2-selftest",
+        "path": "examples/testing/catch2-selftest",
+        "som": "E1M-AEN801",
+        "summary": "A minimal [Catch2](https://github.com/catchorg/Catch2) v3 unit-test binary, built from Catch2's own \"amalgamated\" single-TU distribution: 3 `TEST_CASE`s over a trivial `clamp()` helper.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "doctest-selftest",
+        "path": "examples/testing/doctest-selftest",
+        "som": "E1M-AEN801",
+        "summary": "A minimal [doctest](https://github.com/doctest/doctest) v2.4.11 unit-test binary: 3 `TEST_CASE`s over a trivial `clamp()` helper.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
