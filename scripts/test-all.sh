@@ -24,7 +24,10 @@
 #   7. Required scripts/check_*.py gates (the same list
 #      pr-metadata-validate.yml / pr-doc-drift.yml run as hard
 #      gates -- see REQUIRED_GATE_SCRIPTS below)
-#   8. Doxygen zero-warnings build (skipped if no Doxygen)
+#   8. Generated-files-in-sync (regenerate every single-sourced
+#      artifact + fail on drift -- the pr-generated-files.yml gate)
+#   9. Doxygen zero-warnings build (generates the pr-doxygen.yml
+#      Doxyfile inline; finds doxygen on PATH or in ~/doxybin)
 #
 # Each stage prints `[stage] PASS` or `[stage] FAIL`; the script
 # returns non-zero if any required stage failed.  A stage function
@@ -43,6 +46,15 @@
 # modules already listed there are preserved, not dropped.
 #
 # Flags:
+#   --target dev      FAST profile a dev PR is graded on: skip the slow
+#                     release-only full CMake builds + Doxygen.  Use before
+#                     opening a PR that targets `dev`.
+#   --target main     THOROUGH release-grade profile: every stage PLUS the
+#                     main-only strict ABI-snapshot diff (pr-abi-snapshot.yml,
+#                     which triggers on main + release/** only).  Use before a
+#                     PR that targets `main` / cutting a release.
+#                     (No --target = the historical "full" run: every stage
+#                     except the main-only ABI strict diff.)
 #   --quick           skip twister + Doxygen (the slow stages)
 #   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
@@ -71,6 +83,16 @@ QUICK=0
 YOCTO_ONLY=0
 ZEPHYR_ONLY=0
 NO_CLEAN=0
+# TARGET selects a CI profile matching the branch a PR targets:
+#   dev  -- the FAST set a dev PR is graded on (skip the slow release-only
+#           full CMake builds + Doxygen); for rapid integration iteration.
+#   main -- the THOROUGH release-grade set: everything dev runs PLUS the
+#           full yocto/baremetal builds, the Doxygen build, and the
+#           main-only strict ABI-snapshot diff (pr-abi-snapshot.yml, which
+#           triggers on `main` + `release/**` only).
+#   full -- (default, no flag) every stage except the main-only ABI strict
+#           diff -- the historical test-all.sh behavior, unchanged.
+TARGET=full
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -78,8 +100,12 @@ while [ $# -gt 0 ]; do
         --yocto-only)   YOCTO_ONLY=1 ;;
         --zephyr-only)  ZEPHYR_ONLY=1 ;;
         --no-clean)     NO_CLEAN=1 ;;
+        --target)       shift; TARGET="${1:-}" ;;
+        --target=*)     TARGET="${1#--target=}" ;;
+        --dev)          TARGET=dev ;;
+        --main)         TARGET=main ;;
         -h|--help)
-            sed -n '3,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '3,68p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -89,6 +115,14 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+
+case "${TARGET}" in
+    dev|main|full) ;;
+    *)
+        echo "test-all.sh: --target must be 'dev' or 'main' (got '${TARGET}')" >&2
+        exit 2
+        ;;
+esac
 
 # -------- Stage tracking ------------------------------------------------------
 
@@ -360,21 +394,103 @@ stage_hil_spec_validate() {
 }
 
 stage_doxygen() {
-    if ! command -v doxygen >/dev/null 2>&1; then
+    # Resolve a doxygen binary: PATH first, then the no-root tarball
+    # install at ~/doxybin (see running-local-ci).
+    local dox
+    dox=$(command -v doxygen 2>/dev/null || true)
+    if [ -z "${dox}" ] && [ -x "${HOME}/doxybin/doxygen" ]; then
+        dox="${HOME}/doxybin/doxygen"
+    fi
+    if [ -z "${dox}" ]; then
         return 99
     fi
-    if [ ! -f Doxyfile ]; then
-        return 99
-    fi
-    # Capture warnings + fail if any.
-    local warn_log
+    # The repo ships NO committed Doxyfile -- pr-doxygen.yml generates one
+    # inline.  Reproduce that Doxyfile FAITHFULLY here so the full
+    # WARN_AS_ERROR build (which alone catches bad @ref / dead md links --
+    # the coverage script does NOT) runs locally before the PR.  Keep
+    # INPUT / EXCLUDE_PATTERNS / WARN_AS_ERROR identical to
+    # .github/workflows/pr-doxygen.yml.
+    local cfg warn_log
+    cfg=$(mktemp)
     warn_log=$(mktemp)
-    if ! WARN_LOGFILE="${warn_log}" doxygen Doxyfile >/dev/null 2>&1; then
-        echo "doxygen exited non-zero"
-        return 1
-    fi
+    cat > "${cfg}" <<EOF
+PROJECT_NAME           = "Alp SDK"
+OUTPUT_DIRECTORY       = $(mktemp -d)
+INPUT                  = include/alp
+RECURSIVE              = YES
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = NO
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+QUIET                  = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+WARN_LOGFILE           = ${warn_log}
+OPTIMIZE_OUTPUT_FOR_C  = YES
+JAVADOC_AUTOBRIEF      = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+INPUT                 += README.md VERSIONS.md CONTRIBUTING.md TRADEMARKS.md docs \
+                         chips/README.md vendors/alif/README.md \
+                         vendors/deepx-dxm1/README.md \
+                         vendors/gd32_firmware_library/README.md \
+                         firmware/cc3501e/README.md keys/README.md \
+                         meta-alp-sdk/README.md \
+                         metadata/library-profiles/README.md \
+                         zephyr/sysbuild/aen/README.md
+EXCLUDE_PATTERNS       = */superpowers/*
+EOF
+    "${dox}" "${cfg}" >/dev/null 2>&1 || true
     if [ -s "${warn_log}" ]; then
         cat "${warn_log}"
+        return 1
+    fi
+}
+
+# Main-only strict ABI gate (pr-abi-snapshot.yml triggers on main +
+# release/** only): fail if the working headers drift from the committed
+# CURRENT snapshot (v0.9; older are frozen).  This is the release-grade
+# check the `--target main` profile adds on top of the dev set.
+stage_abi_strict() {
+    command -v python3 >/dev/null 2>&1 || return 99
+    [ -f scripts/abi_snapshot.py ] || return 99
+    local snap="docs/abi/v0.9-snapshot.json"
+    [ -f "${snap}" ] || return 99
+    if ! python3 scripts/abi_snapshot.py --diff "${snap}"; then
+        echo "ABI drift vs ${snap} -- regen + commit (bump snapshot after a release)"
+        return 1
+    fi
+}
+
+# Reproduce pr-generated-files.yml: regenerate every single-sourced
+# artifact, then fail if any committed copy drifted.  This is the
+# `check · generated files in sync` gate -- the one that reddens a PR
+# when a new macro/symbol/gate/example didn't get its generated file
+# regenerated + committed.  A nonzero exit means "run the regenerators
+# and commit the result" (the tree is left regenerated for you to add).
+stage_generated_files() {
+    command -v python3 >/dev/null 2>&1 || return 99
+    local gens=(gen_soc_caps gen_status_strings gen_board_header
+                gen_pinmux_capability gen_support_matrix
+                gen_portability_matrix gen_catalog gen_error_catalog)
+    local g
+    for g in "${gens[@]}"; do
+        [ -f "scripts/${g}.py" ] || continue
+        python3 "scripts/${g}.py" >/dev/null 2>&1 || { echo "scripts/${g}.py failed"; return 1; }
+    done
+    # ABI snapshot -- current working snapshot is v0.9 (older are frozen).
+    if [ -f scripts/abi_snapshot.py ]; then
+        python3 scripts/abi_snapshot.py --version v0.9 \
+            --output docs/abi/v0.9-snapshot.json >/dev/null 2>&1 || true
+    fi
+    # Ignore only the snapshot's "generated" date line, like the CI gate.
+    if ! git diff --quiet --ignore-matching-lines='"generated":' -- \
+            include/alp docs/abi src/cap.c src/status_strings.c \
+            metadata/catalog.json metadata/pinmux docs/portability-matrix.md \
+            docs/diagnostics 2>/dev/null; then
+        echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
+        git --no-pager diff --stat --ignore-matching-lines='"generated":' -- \
+            include/alp docs/abi src/cap.c src/status_strings.c \
+            metadata/catalog.json metadata/pinmux docs/portability-matrix.md \
+            docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi
 }
@@ -389,8 +505,15 @@ if [ "${ZEPHYR_ONLY}" -eq 1 ]; then
     # dance -- and no second, output-hiding invocation -- is needed.
     run_stage "twister" stage_twister
 else
-    run_stage "yocto-build-and-ctest" stage_yocto_build_and_ctest
-    run_stage "baremetal-build"       stage_baremetal_build
+    # The full plain-CMake builds are release-grade -- the fast `dev`
+    # profile skips them (dev PRs iterate on twister + the cheap gates).
+    if [ "${TARGET}" = "dev" ]; then
+        skip_stage "yocto-build-and-ctest" "--target dev (release-grade build)"
+        skip_stage "baremetal-build"       "--target dev (release-grade build)"
+    else
+        run_stage "yocto-build-and-ctest" stage_yocto_build_and_ctest
+        run_stage "baremetal-build"       stage_baremetal_build
+    fi
 
     if [ "${YOCTO_ONLY}" -eq 0 ]; then
         if [ "${QUICK}" -eq 1 ]; then
@@ -428,6 +551,19 @@ else
     # gates pr-metadata-validate.yml / pr-doc-drift.yml run in CI.
     run_stage "required-gate-scripts" stage_required_gate_scripts
 
+    # `check · generated files in sync` -- regenerate every single-sourced
+    # artifact + fail on drift.  Catches the class of red that bit #623 /
+    # #636 / #642 (new macro/symbol/gate without a committed regen).
+    run_stage "generated-files" stage_generated_files
+
+    # Main-only: the strict ABI-snapshot diff gate that pr-abi-snapshot.yml
+    # runs on `main` + `release/**` only.  The `--target main` release-grade
+    # profile adds it; dev/full skip it (generated-files already regenerates
+    # the snapshot, but the strict diff-vs-committed is a main-branch gate).
+    if [ "${TARGET}" = "main" ]; then
+        run_stage "abi-strict" stage_abi_strict
+    fi
+
     # Pytest -- subsumes metadata-validate's unittest coverage and adds
     # the linter + regression locks for a3cd4fd / e3a4c6b.
     if command -v python3 >/dev/null 2>&1 && [ -d tests/scripts ]; then
@@ -444,12 +580,17 @@ else
         skip_stage "hil-spec-validate" "tests/hil/run_smoke.py missing"
     fi
 
-    if [ "${QUICK}" -eq 0 ] && [ "${YOCTO_ONLY}" -eq 0 ]; then
-        if command -v doxygen >/dev/null 2>&1 && [ -f Doxyfile ]; then
+    if [ "${QUICK}" -eq 0 ] && [ "${YOCTO_ONLY}" -eq 0 ] && [ "${TARGET}" != "dev" ]; then
+        # stage_doxygen generates the CI Doxyfile itself + finds doxygen on
+        # PATH or in ~/doxybin, so no committed Doxyfile is needed.  The fast
+        # dev profile skips it (Doxygen is one of the slow stages).
+        if command -v doxygen >/dev/null 2>&1 || [ -x "${HOME}/doxybin/doxygen" ]; then
             run_stage "doxygen" stage_doxygen
         else
-            skip_stage "doxygen" "doxygen / Doxyfile missing"
+            skip_stage "doxygen" "doxygen not installed (PATH or ~/doxybin)"
         fi
+    elif [ "${TARGET}" = "dev" ]; then
+        skip_stage "doxygen" "--target dev (slow release-grade stage)"
     fi
 fi
 
