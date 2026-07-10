@@ -185,7 +185,25 @@ Three conclusive outcomes:
    console/`GET_DIAG_INFO` so armed/requested/refused are distinguishable, and
    investigate the FWU-service state that refused the reboot.
 
-**#493 criterion 1 is NOT yet closed.** Corrected-procedure run 2026-07-09: the
+**#493 CRITERION 1 — CLOSED (2026-07-10).** The full OTA cold-swap cycle is
+silicon-proven on E8: a FORWARD candidate (the plain radio-free bridge signed at
+GPE **v0.90.0.0**, above the primary) streamed → `state=2 written=37016/37016 B`
+**STAGED** → the CC35's own `psa_fwu_request_reboot()` swapped it (bridge dropped
+~2 s, then returned) → post-swap the CC35 runs the radio-free candidate
+(`WIFI_SCAN`/`GET_MAC`/`BLE` go NOT_READY where pre-swap found 5 APs — the proof)
+→ **self-accepted and PERSISTED across a true cold POR** (no rollback). The key
+was a candidate version ABOVE the primary: a downgrade (the old v0.0.4.0
+candidate) is refused at `psa_fwu` install (`state=3` ERROR), a forward one is
+accepted. Regenerate the forward candidate with `firmware/cc3501e/ti/build_ti.sh`
+(plain) → `build+sign vendor_image --version <above primary>` → bin2c (recipe in
+`cc3501e_ota_candidate.c`). **Known follow-up (non-blocking):** the FIRST OTA
+attempt after a failed/aborted OTA can return `-1` and wedge the bridge until a
+CC35 reset — the `OTA_BEGIN` clear does not cover every stuck slot state; the
+forward image stages reliably from a clean slot.
+
+--- history (how we got here) ---
+
+Corrected-procedure run 2026-07-09: the
 test was **blocked upstream** — a genuine STAGED image from a prior run is stuck
 pending in the CC35 secondary slot, and there is **no non-destructive way to
 clear or promote it over the bridge**:
