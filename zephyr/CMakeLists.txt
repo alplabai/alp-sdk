@@ -736,6 +736,13 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DISPLAY_ZEPHYR_DRV
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_drv.c)
 
+# <alp/gui.h> guard-clause implementation.  OS-agnostic (no Zephyr/
+# vendor headers), so compiled unconditionally like cap_helpers.c --
+# the real LVGL hand-off is still unimplemented (issue #23), but the
+# NULL/NOSUPPORT contract paths must link on every build.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gui_lvgl_stub.c)
+
 # 2D graphics accelerator surface (<alp/gpu2d.h>).  The class
 # dispatcher ships whenever the surface is enabled; the portable
 # software fallback (sw_fallback.c -- the priority-0 wildcard that

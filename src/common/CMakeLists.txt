@@ -5,6 +5,10 @@ if(NOT DEFINED ZEPHYR_BASE)
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/proto/alp_mproc_frame.c
         ${CMAKE_CURRENT_SOURCE_DIR}/version.c
+        # <alp/gui.h> guard-clause implementation -- OS-agnostic
+        # (no OS/vendor headers), so compiled unconditionally here
+        # like the other pure-C helpers above. See issue #23.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../gui_lvgl_stub.c
     )
     target_include_directories(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}

@@ -177,3 +177,39 @@ ZTEST(alp_pwm_registry, test_sw_fallback_round_trip)
 	ops->close(st);
 	ops->close(st);
 }
+
+/* ---------- (g) alp_pwm_set_period -- through the real public dispatcher -- */
+
+ZTEST(alp_pwm_registry, test_alp_pwm_set_period_public_dispatch)
+{
+	/* Unlike (f) above, this drives the actual public
+     * alp_pwm_set_period() dispatcher entry point (src/pwm_dispatch.c),
+     * not the raw backend op -- exercises the NOT_READY / INVAL guard
+     * clauses plus the real dispatch-to-backend call. */
+	const alp_pwm_ops_t *ops = _find_sw_fallback_ops();
+	zassert_not_null(ops);
+
+	zassert_equal(alp_pwm_set_period(NULL, 1000u), ALP_ERR_NOT_READY);
+
+	struct alp_pwm h;
+	memset(&h, 0, sizeof(h));
+	alp_capabilities_t caps = { 0 };
+	alp_pwm_config_t   cfg  = {
+		.channel_id = 0u,
+		.period_ns  = 1000000u,
+		.polarity   = ALP_PWM_POLARITY_NORMAL,
+	};
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+	h.state.ops = ops; /* alp_pwm_open() normally wires this before open() */
+	h.in_use    = true;
+
+	/* period_ns == 0 -> INVAL, before the backend is even consulted. */
+	zassert_equal(alp_pwm_set_period(&h, 0u), ALP_ERR_INVAL);
+
+	/* Valid period -> real dispatch to the sw_fallback op, which
+     * returns ALP_OK and the dispatcher mirrors it into h.period_ns. */
+	zassert_equal(alp_pwm_set_period(&h, 2000000u), ALP_OK);
+	zassert_equal(h.period_ns, 2000000u);
+
+	ops->close(&h.state);
+}

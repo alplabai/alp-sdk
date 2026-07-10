@@ -762,6 +762,14 @@ per this matrix before tagging.)
 
 - Public headers C99-compatible with Doxygen comments.
 - Every public function: at least one Unity / ztest test.
+  `scripts/check_test_coverage.py --fail-on-gaps` enforces this with a
+  two-tier policy (issue #453): **portable-core** functions (every
+  public header except `include/alp/chips/**`) must have zero gaps --
+  a hard ratchet, checked on every PR. **Chip-helper** functions
+  (`include/alp/chips/**` — the small per-IC accessors that come with
+  each new chip driver) are a bounded, explicitly-tracked backlog
+  (`CHIP_HELPER_GAP_BUDGET` in the script) that fails CI only if it
+  grows, not merely because it's non-zero.
 - CI matrix builds + tests every supported (OS × SoM) combination.
 - ABI snapshot diffed vs previous release; breaking change requires
   major bump after v1.0.

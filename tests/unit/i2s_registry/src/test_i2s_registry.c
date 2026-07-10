@@ -173,3 +173,47 @@ ZTEST(alp_i2s_registry, test_sw_fallback_round_trip)
 	ops->close(st);
 	ops->close(st);
 }
+
+/* ---------- (g) alp_i2s_read -- through the real public dispatcher -------- */
+
+ZTEST(alp_i2s_registry, test_alp_i2s_read_public_dispatch)
+{
+	/* Unlike (f) above, this drives the actual public alp_i2s_read()
+     * dispatcher entry point (src/i2s_dispatch.c), not the raw
+     * backend op -- exercises the NOT_READY / INVAL guard clauses
+     * plus the real dispatch-to-backend call. */
+	uint8_t rx[8] = { 0u };
+	size_t  got   = 0xFFu;
+	zassert_equal(alp_i2s_read(NULL, rx, sizeof(rx), &got, 10u), ALP_ERR_NOT_READY);
+
+	const alp_i2s_ops_t *ops = _find_sw_fallback_ops();
+	zassert_not_null(ops);
+
+	struct alp_i2s h;
+	memset(&h, 0, sizeof(h));
+	alp_capabilities_t caps = { 0 };
+	alp_i2s_config_t   cfg  = {
+		.bus_id         = 0u,
+		.sample_rate_hz = 48000u,
+		.word_bits      = 16u,
+		.channels       = 2u,
+		.format         = ALP_I2S_FMT_I2S,
+		.direction      = ALP_I2S_DIR_RX,
+		.block_frames   = 64u,
+	};
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+	h.state.ops = ops; /* alp_i2s_open() normally wires this before open() */
+	h.in_use    = true;
+
+	/* NULL block / zero bytes -> INVAL before the backend is consulted. */
+	zassert_equal(alp_i2s_read(&h, NULL, sizeof(rx), &got, 10u), ALP_ERR_INVAL);
+	zassert_equal(alp_i2s_read(&h, rx, 0u, &got, 10u), ALP_ERR_INVAL);
+
+	/* Valid args -> real dispatch to the sw_fallback op, which
+     * returns NOSUPPORT and clears *bytes_out. */
+	got = 0xFFu;
+	zassert_equal(alp_i2s_read(&h, rx, sizeof(rx), &got, 10u), ALP_ERR_NOSUPPORT);
+	zassert_equal(got, 0u);
+
+	ops->close(&h.state);
+}

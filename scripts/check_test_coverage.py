@@ -24,6 +24,33 @@ identifier appears anywhere in tests/.  Same heuristic the human
 reviewer uses; cheap; works.  False positives possible (a comment
 that mentions the function name without exercising it) -- the
 follow-up audit is to read the test file when in doubt.
+
+Portable-core vs chip-helper policy (issue #453)
+-------------------------------------------------
+
+Gaps split into two buckets by header path:
+
+  * **Portable-core** -- everything under `include/alp/` EXCEPT
+    `include/alp/chips/**` (the class surfaces apps call directly:
+    `<alp/pwm.h>`, `<alp/can.h>`, `<alp/blocks/*.h>`, ...).  This is
+    the SDK's headline API.  `--fail-on-gaps` HARD-fails on ANY
+    portable-core gap -- the ratchet value is 0 and it never grows.
+
+  * **Chip-helper** -- `include/alp/chips/**`.  These are the small
+    per-IC accessor functions (`_deinit`, `_read_id`, `_soft_reset`,
+    register read/write, ...) that come along for free with every new
+    chip driver; the SDK ships ~50 chip drivers so this bucket is
+    large by construction, not by neglect.  Treated as a bounded,
+    explicitly-tracked backlog: `--fail-on-gaps` fails only if the
+    count exceeds `CHIP_HELPER_GAP_BUDGET` below (i.e. the backlog
+    GREW).  Shrinking it (adding chip tests) does not require a code
+    change here -- the check simply reports the lower number; bump
+    the budget DOWN in the same PR that shrinks it, so the ratchet
+    tightens instead of leaving slack.
+
+Bumping `CHIP_HELPER_GAP_BUDGET` up requires a deliberate PR -- it is
+the one number in this file that represents "yes, we're accepting more
+untested chip-helper surface," so it should never silently drift.
 """
 
 from __future__ import annotations
@@ -35,10 +62,25 @@ import sys
 from typing import Optional
 
 
-ROOT          = pathlib.Path(__file__).resolve().parent.parent
-INCLUDE_ROOT  = ROOT / "include" / "alp"
-TEST_ROOT     = ROOT / "tests"
-EXAMPLE_ROOT  = ROOT / "examples"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+# Portable-core gaps must always be 0 -- see the module docstring.
+PORTABLE_GAP_RATCHET = 0
+
+# Chip-helper gaps (include/alp/chips/**) are a bounded, explicitly
+# tracked backlog rather than a 0-target: this is the count as of the
+# #453 slice that first drew this line.  CI fails if the live count
+# exceeds this budget (the backlog grew); it does NOT fail if the
+# live count is lower (the backlog shrank) -- ratchet the budget down
+# in the same PR when that happens.
+CHIP_HELPER_GAP_BUDGET = 210
+
+
+def _is_chip_helper(header: str) -> bool:
+    """True if `header` (relative path like 'alp/chips/bme280.h') is a
+    chip-helper header rather than a portable-core one."""
+    return header.startswith("alp/chips/")
+
 
 # Function-declaration regex: captures `<rettype> <name>(...);` lines
 # that begin a public declaration.  Skips static / inline definitions
@@ -61,10 +103,10 @@ _DENYLIST = {
 }
 
 
-def list_public_functions() -> dict[str, set[str]]:
+def list_public_functions(include_root: pathlib.Path) -> dict[str, set[str]]:
     """Return {relative_header_path: {function_names}}."""
     out: dict[str, set[str]] = {}
-    for header in sorted(INCLUDE_ROOT.rglob("*.h")):
+    for header in sorted(include_root.rglob("*.h")):
         text = header.read_text(encoding="utf-8", errors="replace")
         # Strip block comments cheaply -- the regex doesn't tolerate
         # multi-line /* ... */ wrapping a declaration.
@@ -86,15 +128,15 @@ def list_public_functions() -> dict[str, set[str]]:
                 continue
             names.add(name)
         if names:
-            rel = header.relative_to(INCLUDE_ROOT.parent).as_posix()
+            rel = header.relative_to(include_root.parent).as_posix()
             out[rel] = names
     return out
 
 
-def collect_test_mentions() -> set[str]:
+def collect_test_mentions(test_root: pathlib.Path) -> set[str]:
     """Return the set of identifiers mentioned in any tests/* file."""
     mentions: set[str] = set()
-    for path in TEST_ROOT.rglob("*"):
+    for path in test_root.rglob("*"):
         if path.is_file() and path.suffix in (".c", ".cpp", ".cc", ".h", ".py"):
             text = path.read_text(encoding="utf-8", errors="replace")
             # Identifier-shaped tokens.
@@ -103,13 +145,13 @@ def collect_test_mentions() -> set[str]:
     return mentions
 
 
-def collect_example_mentions() -> set[str]:
+def collect_example_mentions(example_root: pathlib.Path) -> set[str]:
     """Same as test mentions, but for examples/* (used as a
     soft-pass signal -- a public API exercised by a reference example
     but not by tests still counts as 'covered' for the v1.0 quality
     bar, but flagged as a secondary gap)."""
     mentions: set[str] = set()
-    for path in EXAMPLE_ROOT.rglob("*.c"):
+    for path in example_root.rglob("*.c"):
         text = path.read_text(encoding="utf-8", errors="replace")
         for token in re.findall(r"[a-zA-Z_][\w]+", text):
             mentions.add(token)
@@ -118,6 +160,13 @@ def collect_example_mentions() -> set[str]:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--root",
+        type=pathlib.Path,
+        default=ROOT,
+        help="repo root to scan (default: the real alp-sdk checkout; "
+             "override in tests with a fabricated tree)",
+    )
     parser.add_argument(
         "--fail-on-gaps",
         action="store_true",
@@ -130,9 +179,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    functions = list_public_functions()
-    tests     = collect_test_mentions()
-    examples  = collect_example_mentions()
+    include_root = args.root / "include" / "alp"
+    test_root    = args.root / "tests"
+    example_root = args.root / "examples"
+
+    functions = list_public_functions(include_root)
+    tests     = collect_test_mentions(test_root)
+    examples  = collect_example_mentions(example_root)
 
     total       = 0
     test_count  = 0
@@ -153,21 +206,49 @@ def main(argv: Optional[list[str]] = None) -> int:
             else:
                 gaps.append((header, name))
 
+    portable_gaps = [(h, n) for h, n in gaps if not _is_chip_helper(h)]
+    chip_gaps     = [(h, n) for h, n in gaps if _is_chip_helper(h)]
+
+    pct = (100 * test_count / total) if total else 0.0
+
     print()
     print("Public API coverage:")
     print(f"  Total public functions:    {total}")
-    print(f"  Covered by a ztest:        {test_count}  ({100*test_count/total:.1f}%)")
+    print(f"  Covered by a ztest:        {test_count}  ({pct:.1f}%)")
     print(f"  Exercised by example only: {ex_only}")
     print(f"  Uncovered gaps:            {len(gaps)}")
+    print(f"    - portable-core:         {len(portable_gaps)}  (ratchet: must be {PORTABLE_GAP_RATCHET})")
+    print(f"    - chip-helper backlog:   {len(chip_gaps)}  (budget: {CHIP_HELPER_GAP_BUDGET})")
 
-    if gaps:
+    if portable_gaps:
         print()
-        print("Gaps (no test or example mentions):")
-        for header, name in gaps:
+        print("Portable-core gaps (HARD FAIL under --fail-on-gaps):")
+        for header, name in portable_gaps:
             print(f"  {header}::{name}")
 
-    if args.fail_on_gaps and gaps:
-        return 1
+    if chip_gaps:
+        print()
+        print("Chip-helper backlog (bounded; only fails if it GROWS):")
+        for header, name in chip_gaps:
+            print(f"  {header}::{name}")
+
+    if args.fail_on_gaps:
+        failed = False
+        if len(portable_gaps) > PORTABLE_GAP_RATCHET:
+            print()
+            print(f"FAIL: {len(portable_gaps)} portable-core gap(s) > ratchet "
+                  f"({PORTABLE_GAP_RATCHET}).  Portable APIs must ship with a "
+                  f"real test or example reference -- see issue #453.")
+            failed = True
+        if len(chip_gaps) > CHIP_HELPER_GAP_BUDGET:
+            print()
+            print(f"FAIL: {len(chip_gaps)} chip-helper gap(s) > budget "
+                  f"({CHIP_HELPER_GAP_BUDGET}).  The chip-helper backlog grew -- "
+                  f"either add tests or raise CHIP_HELPER_GAP_BUDGET deliberately "
+                  f"in scripts/check_test_coverage.py.")
+            failed = True
+        if failed:
+            return 1
     return 0
 
 
