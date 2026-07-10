@@ -223,14 +223,17 @@ ZTEST(alp_peripheral, test_mbox_config_default)
 {
 	alp_mbox_config_t cfg = ALP_MBOX_CONFIG_DEFAULT(3u);
 	zassert_equal(cfg.channel, 3u, NULL);
-	zassert_equal(cfg.peer, ALP_CORE_SELF, "sentinel -- backend routes by channel; set peer to document topology");
+	zassert_equal(cfg.peer,
+	              ALP_CORE_SELF,
+	              "sentinel -- backend routes by channel; set peer to document topology");
 }
 
 ZTEST(alp_peripheral, test_shmem_config_default)
 {
 	alp_shmem_config_t cfg = ALP_SHMEM_CONFIG_DEFAULT("alp_shmem0");
 	zassert_str_equal(cfg.name, "alp_shmem0", NULL);
-	zassert_equal(cfg.size, 0u, "advisory -- backend derives extent from DT; set size to document intent");
+	zassert_equal(
+	    cfg.size, 0u, "advisory -- backend derives extent from DT; set size to document intent");
 	zassert_false(cfg.cacheable, "required for the simple core A/B pattern");
 }
 
