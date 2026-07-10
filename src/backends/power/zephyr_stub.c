@@ -5,6 +5,9 @@
  * picks up every silicon_ref the build targets so apps that
  * #include <alp/power.h> link cleanly on every supported SoC.
  *
+ * @par Tracking: github.com/alplabai/alp-sdk/issues/613 (Yocto/Linux
+ *      power backend; wildcard stub returns ALP_ERR_NOSUPPORT until it lands).
+ *
  * Behaviour differs from the Camera / Display / GPU2D stubs:
  * stub_open returns ALP_OK so the dispatcher hands the caller a
  * real handle, and stub_configure_wake_source accepts the bitmap
