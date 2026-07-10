@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/build-plan-v1.schema.json",
+  "title": "ALP Build Plan v1",
+  "description": "The machine-readable build plan `scripts/alp_orchestrate/buildplan.py::emit_build_plan` renders for a resolved board.yaml project (the `alp` CLI / alp-sdk-vscode 'Wave C' consumer contract, settled 2026-06-04). One entry per non-`off` core slice, each carrying its build command, config artefact contents, and app source dir, plus the shared (cross-slice) generated artefacts and any non-fatal planning warnings. Every artefact carries its full `contents` so the consumer's materialise step stays pure IO -- the plan and the Orchestrator's own on-disk materialise step are written from the same `_shared_artefacts`/`_slice_config_artefact` helpers and MUST agree byte-for-byte. camelCase keys (this is a CLI-consumer contract, not an in-repo YAML). Stability: schemaVersion 1 is locked with the alp-sdk-vscode consumer -- bump schemaVersion and record the change in the CHANGELOG before altering this shape; do not add breaking changes silently.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedBy", "boardYaml", "sku", "buildRoot", "slices", "sharedArtefacts", "warnings"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "Build-plan contract version. Independent of board.yaml's own schema_version."
+    },
+    "generatedBy": {
+      "type": "string",
+      "description": "Identifies the emitting tool (currently the literal 'scripts/alp_orchestrate.py'). Informational only -- not part of the locked consumer contract."
+    },
+    "boardYaml": {
+      "type": "string",
+      "description": "POSIX-style path to the board.yaml this plan was resolved from, as passed to emit_build_plan (issue #596: every relative path elsewhere in the plan is anchored on this file's own directory, never the emitting process's CWD)."
+    },
+    "sku": {
+      "type": "string",
+      "description": "The project's resolved SoM SKU (BoardProject.sku)."
+    },
+    "buildRoot": {
+      "type": "string",
+      "description": "POSIX-style path to the root build directory every slice's buildDir and the shared artefacts are nested under."
+    },
+    "slices": {
+      "type": "array",
+      "description": "One entry per core whose resolved os is not `off`, sorted by coreId. A core this emitter cannot yet produce a build command for (e.g. missing app/board/image, or an app-only Yocto slice with no recipe:) is still carried here with command: null plus a matching entry in `warnings` -- never silently dropped.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["coreId", "backend", "buildDir", "appDir", "configArtefacts", "command", "env"],
+        "properties": {
+          "coreId": {
+            "type": "string",
+            "description": "The core's key in board.yaml `cores:` (e.g. 'm33_sm', 'a55_cluster')."
+          },
+          "backend": {
+            "type": "string",
+            "enum": ["zephyr", "yocto", "baremetal"],
+            "description": "The slice's resolved os (Slice.os). `off` cores never reach the plan, so this enum excludes it."
+          },
+          "buildDir": {
+            "type": "string",
+            "description": "POSIX-style per-slice build directory: `<buildRoot>/<coreId>-<backend>`."
+          },
+          "appDir": {
+            "type": ["string", "null"],
+            "description": "Resolved absolute (POSIX-style) path to this slice's app source directory, independent of `command` -- lets tooling watch the app source without reverse-engineering it out of a yocto/zephyr/baremetal-shaped command (issue #597). null when the slice has no app source dir to report, e.g. a Yocto slice built from the `alp-image-edge` stock-image token rather than an `app:` path."
+          },
+          "configArtefacts": {
+            "type": "array",
+            "description": "This slice's own generated config artefact(s) (alp.conf / local.conf / cmake-args.txt), or an empty array when the slice's os has none. Byte-identical to what the Orchestrator's own materialise step writes to buildDir.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "contents"],
+              "properties": {
+                "path": { "type": "string", "description": "POSIX-style path (under buildDir) the consumer should write `contents` to." },
+                "contents": { "type": "string", "description": "Full file contents, ready to byte-write verbatim." }
+              }
+            }
+          },
+          "command": {
+            "description": "The build command to run for this slice, or null when this emitter has no valid command yet (see `slices` description; a matching `warnings` entry explains why).",
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["tool", "args", "cwd"],
+            "properties": {
+              "tool": { "type": "string", "description": "Executable to invoke (e.g. 'west', 'bitbake')." },
+              "args": { "type": "array", "items": { "type": "string" }, "description": "Positional/flag arguments to `tool`, in order." },
+              "cwd": { "type": "string", "description": "POSIX-style working directory to run `tool` from; always equal to this slice's buildDir." }
+            }
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ALP_SDK_ROOT"],
+            "description": "Environment variables the consumer must inject into the slice subprocess, native host-path form (handed to the subprocess environment verbatim).",
+            "properties": {
+              "ALP_SDK_ROOT": { "type": "string", "description": "Absolute host path to the alp-sdk checkout the plan was generated from." }
+            }
+          }
+        }
+      }
+    },
+    "sharedArtefacts": {
+      "type": "array",
+      "description": "Cross-slice generated artefacts (e.g. generated/alp/system_ipc.h, dts-reservations.dtsi, dts-partitions.dtsi, and -- only when the project declares them -- alp_sysbuild.conf / sysbuild/tfm/tfm.conf). Conditional artefacts follow absence-emits-nothing: they appear only when their emit is non-empty. Byte-identical to what the Orchestrator's own materialise step writes under buildRoot.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "contents"],
+        "properties": {
+          "path": { "type": "string", "description": "POSIX-style path (under buildRoot) the consumer should write `contents` to." },
+          "contents": { "type": "string", "description": "Full file contents, ready to byte-write verbatim." }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Non-fatal planning warnings, one per affected core, machine-readable (`code`) plus a human-readable `message` so the consumer can surface -- or filter -- them without string-matching prose.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "coreId", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable warning code. Known values as of schemaVersion 1: 'no-command' (missing app/board/image for the core's os), 'yocto-recipe-missing' (an app-only Yocto slice has app: but no recipe:, so there is no valid bitbake target). New codes may be added without a schemaVersion bump -- consumers must not treat this as a closed enum."
+          },
+          "coreId": {
+            "type": "string",
+            "description": "The core this warning applies to (matches a `slices[].coreId`)."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable explanation, safe to display verbatim."
+          }
+        }
+      }
+    }
+  }
+}
