@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# **[UNTESTED]**: this scenario does not currently build -- the
+# `libhelix` west module's pinned revision failed to check out in
+# this workspace (see README.md "Module status"). Kept in the
+# canonical per-example shape (matching every other example's
+# testcase.yaml) so the file exists as a correct template for when
+# the module fetch is fixed; do not add this to a CI run that expects
+# every scenario to pass until then.
+
+sample:
+  name: libhelix-decode
+  description: |
+    Decodes a canned MP3 frame to PCM with the Helix fixed-point MP3
+    decoder and prints the sample count. UNTESTED: the libhelix west
+    module's pinned revision failed to check out in this workspace,
+    so mp3dec.h does not resolve and this scenario does not build.
+
+tests:
+  alp_sdk.example.libhelix_decode:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - libhelix-decode
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[libhelix-decode\\] done"

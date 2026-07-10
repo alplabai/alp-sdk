@@ -1,0 +1,33 @@
+# board.yaml -- per-app project configuration for the
+# libhelix-decode example.
+#
+# **[UNTESTED]**: the `libhelix` west module's pinned revision failed
+# to check out in this workspace (`modules/lib/libhelix` is an empty
+# git repo -- see the example's README "Module status" section), so
+# this board.yaml cannot actually be built here.  It is still wired
+# the same way a working library would be so the example is a correct
+# template for when the fetch is fixed: per-core `libraries:
+# [libhelix]` resolves against
+# metadata/library-profiles/libhelix/hw-backends.yaml (pure-C SW
+# fallback is the floor; FPU/I2S-DMA backends select automatically by
+# SoM capability).
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    # Pure compute -- no peripheral wiring needed to decode a canned
+    # in-memory frame.  A real player would add `i2s` here and stream
+    # the decoded PCM to BOARD_I2S_AUDIO (see examples/audio/i2s-tone).
+    peripherals: []
+    libraries:
+      - libhelix
+
+diagnostics:
+  log_level: info
