@@ -47,6 +47,7 @@
 #include <alp/peripheral.h>
 
 #include "counter_ops.h"
+#include "common/alp_errno.h"
 
 /* Count index within a Counter device.  The alp contract surfaces a
  * single counter per handle, so we bind to Count 0 (count0/) of the
@@ -63,35 +64,14 @@ typedef struct {
 	unsigned count_idx; /* Count index within the device */
 } y_counter_data_t;
 
-/** @brief Map a (positive) errno value to the closest alp_status_t. */
-static alp_status_t _errno_to_alp(int err)
-{
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case EINVAL:
-		return ALP_ERR_INVAL;
-	case EBUSY:
-		return ALP_ERR_BUSY;
-	case ENOENT:
-	case ENODEV:
-		return ALP_ERR_NOT_READY;
-	case ENOTTY:
-	case ENOSYS:
-	case EOPNOTSUPP:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
-}
-
 /**
  * @brief Write a NUL-terminated string to a Counter sysfs attribute.
  *
  * @param dir   Device directory (.../counter<N>).
  * @param attr  Attribute path relative to @p dir (e.g. "count0/enable").
  * @param val   Value string to write.
- * @return ALP_OK or an errno-mapped status.
+ * @return ALP_OK or an errno-mapped status (@ref alp_status_from_posix_errno,
+ *         #630; no Counter-specific override needed).
  */
 static alp_status_t _sysfs_write(const char *dir, const char *attr, const char *val)
 {
@@ -100,13 +80,13 @@ static alp_status_t _sysfs_write(const char *dir, const char *attr, const char *
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
 	int fd = open(path, O_WRONLY | O_CLOEXEC);
-	if (fd < 0) return _errno_to_alp(errno);
+	if (fd < 0) return alp_status_from_posix_errno(errno);
 
 	size_t  len = strlen(val);
 	ssize_t w   = write(fd, val, len);
 	int     e   = errno;
 	close(fd);
-	if (w < 0) return _errno_to_alp(e);
+	if (w < 0) return alp_status_from_posix_errno(e);
 	if ((size_t)w != len) return ALP_ERR_IO;
 	return ALP_OK;
 }
@@ -126,13 +106,13 @@ static alp_status_t _sysfs_read_u32(const char *dir, const char *attr, uint32_t 
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
 
 	int fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (fd < 0) return _errno_to_alp(errno);
+	if (fd < 0) return alp_status_from_posix_errno(errno);
 
 	char    buf[32];
 	ssize_t r = read(fd, buf, sizeof(buf) - 1);
 	int     e = errno;
 	close(fd);
-	if (r < 0) return _errno_to_alp(e);
+	if (r < 0) return alp_status_from_posix_errno(e);
 
 	buf[r]            = '\0';
 	char         *end = NULL;
@@ -178,7 +158,7 @@ static alp_status_t y_open(const alp_counter_config_t  *cfg,
 	if (access(probe, F_OK) != 0) {
 		int e = errno;
 		free(d);
-		return _errno_to_alp(e);
+		return alp_status_from_posix_errno(e);
 	}
 
 	st->dev         = NULL;

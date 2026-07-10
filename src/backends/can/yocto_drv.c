@@ -68,6 +68,7 @@
 #include <alp/can.h>
 
 #include "can_ops.h"
+#include "common/alp_errno.h"
 
 #define ALP_Y_CAN_MAX_FILTERS 16
 
@@ -90,31 +91,31 @@ typedef struct {
 	y_can_filter_t  filters[ALP_Y_CAN_MAX_FILTERS];
 } y_can_data_t;
 
-/** @brief Map a (positive) errno value to the closest alp_status_t. */
+/*
+ * CAN-specific overrides on top of the shared @ref
+ * alp_status_from_posix_errno baseline (#630):
+ *
+ *   - EAGAIN -> ALP_ERR_TIMEOUT, not the baseline's ALP_ERR_BUSY.  This
+ *     backend's socket()/ioctl()/setsockopt() calls are synchronous
+ *     control-plane requests, not queue-full producer/consumer ops, so
+ *     an EAGAIN here means the kernel couldn't complete the request in
+ *     the current call and the caller should treat it like a deadline
+ *     rather than an immediate bus-busy signal -- matching the existing
+ *     ENOBUFS ("TX queue full") -> ALP_ERR_TIMEOUT special case a few
+ *     lines below in y_send().
+ *   - ENOPROTOOPT -> ALP_ERR_NOSUPPORT: a SocketCAN-only errno (rejected
+ *     setsockopt level/option, e.g. CAN_RAW_FD_FRAMES on a kernel/iface
+ *     without CAN-FD) with no equivalent in the shared baseline.
+ */
+static const alp_errno_override_t _can_errno_overrides[] = {
+	{ EAGAIN, ALP_ERR_TIMEOUT },
+	{ ENOPROTOOPT, ALP_ERR_NOSUPPORT },
+};
+
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case EINVAL:
-		return ALP_ERR_INVAL;
-	case EBUSY:
-		return ALP_ERR_BUSY;
-	case EAGAIN:
-	case ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case ENODEV:
-	case ENXIO:
-		return ALP_ERR_NOT_READY;
-	case ENOMEM:
-		return ALP_ERR_NOMEM;
-	case EOPNOTSUPP:
-	case ENOPROTOOPT:
-	case ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	return alp_status_from_posix_errno_ex(
+	    err, _can_errno_overrides, sizeof(_can_errno_overrides) / sizeof(_can_errno_overrides[0]));
 }
 
 /* Reinstall the union of all active kernel filters on the socket.
