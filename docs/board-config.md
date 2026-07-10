@@ -959,7 +959,7 @@ the canonical math lives at
 
 ```
 metadata/
-├── sdk_version.yaml                            # SDK release version (currently "version: 0.6.0")
+├── sdk_version.yaml                            # SDK release version (the single source of truth)
 ├── e1m_modules/
 │   ├── aen/hw-revisions.yaml                   # family-level revs (AEN family
 │   │                                            #  shares one PCB; SKUs differ

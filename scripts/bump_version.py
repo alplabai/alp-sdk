@@ -39,9 +39,6 @@ What this touches:
     metadata/sdk_version.yaml       -- the declared version.
     CHANGELOG.md                    -- slice [Unreleased] into the new version section.
     docs/abi/v<MAJOR.MINOR>-snapshot.json  -- regenerated.
-    README.md                       -- the current-state version labels (e.g.
-                                       "Partially silicon-verified (`vX.Y`)", "vX.Y ramp");
-                                       enforced by scripts/check_version_doc_sync.py.
     include/alp/version.h           -- ALP_VERSION_MAJOR/MINOR/PATCH +
                                        ALP_VERSION_STRING macros;
                                        enforced by scripts/check_version_doc_sync.py.
@@ -69,7 +66,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
 CHANGELOG = REPO / "CHANGELOG.md"
-README = REPO / "README.md"
 VERSION_H = REPO / "include" / "alp" / "version.h"
 PYPROJECT = REPO / "pyproject.toml"
 ABI_DIR = REPO / "docs" / "abi"
@@ -129,36 +125,6 @@ def _next_candidate(version: str) -> str:
     """Suggested next-version label for the new [Unreleased] section."""
     major, minor, patch, _pre = parse_version(version)
     return f"{major}.{minor + 1}.0"
-
-
-def update_readme_version_labels(current: str, new_version: str, dry_run: bool) -> None:
-    """Bump the README's current-state version labels to the new MAJOR.MINOR.
-
-    Touches ONLY the anchored current-state labels (the same ones
-    scripts/check_version_doc_sync.py enforces) -- the historical "landed in
-    vX" / "from vX onward" references are correct and left untouched.  Keep
-    these substitutions in lockstep with that check's _ANCHORS.
-    """
-    old_mm = ".".join(current.split(".")[:2])
-    new_mm = ".".join(new_version.split(".")[:2])
-    if old_mm == new_mm:
-        return
-    text = README.read_text(encoding="utf-8")
-    subs = [
-        (rf"(Partially silicon-verified \(`v){re.escape(old_mm)}(`\))", rf"\g<1>{new_mm}\g<2>"),
-        (rf"(\*\*v){re.escape(old_mm)}( ramp — paper-correct)", rf"\g<1>{new_mm}\g<2>"),
-    ]
-    total = 0
-    for pat, repl in subs:
-        text, n = re.subn(pat, repl, text)
-        total += n
-    if total == 0:
-        print(f"  skipped {README.relative_to(REPO)}: no current-state v{old_mm} labels found")
-        return
-    if not dry_run:
-        README.write_text(text, encoding="utf-8")
-    print(f"  updated {README.relative_to(REPO)}: {total} current-state label(s) "
-          f"v{old_mm} -> v{new_mm}")
 
 
 def update_version_h(new_version: str, dry_run: bool) -> None:
@@ -237,7 +203,6 @@ def main() -> int:
     print()
     update_sdk_version_yaml(args.to, args.dry_run)
     slice_changelog(args.to, args.dry_run)
-    update_readme_version_labels(current, args.to, args.dry_run)
     update_version_h(args.to, args.dry_run)
     update_pyproject(args.to, args.dry_run)
     regenerate_abi_snapshot(args.to, args.dry_run)
