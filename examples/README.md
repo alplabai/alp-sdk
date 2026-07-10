@@ -147,6 +147,40 @@ Each needs a display panel wired per its `board.yaml`.
 | `wdt-feed`                 | Watchdog open + feed cadence; demonstrates reset-on-stall.                  |
 | `power-managed-sensor`     | Low-power BME280 + IMU node -- the v0.6 `cores.<id>.power:` sleep + multi-source-wakeup reference. **(AEN)** |
 
+### Third-party libraries
+
+How to enable and use each optional third-party library the SDK
+integrates (via `board.yaml`'s `cores.<id>.libraries:` array + the
+per-library profile under
+[`metadata/library-profiles/`](../metadata/library-profiles/)). One
+focused example per library; every one builds and runs on
+`native_sim/native/64`. A few decode/parse in a CPU/RAM-backed way on
+the host and document the hardware-backed path as a `board.yaml` swap
+in their README.
+
+| Directory                              | Library | What it shows                                                       |
+|----------------------------------------|---------|---------------------------------------------------------------------|
+| `connectivity/jsmn-json-parse`         | jsmn    | Tokenize an embedded JSON config into a typed struct.               |
+| `connectivity/nanopb-encode-decode`    | nanopb  | Protobuf message encode → buffer → decode round-trip.               |
+| `connectivity/coap-client-get`         | libcoap | Build a CoAP GET PDU + parse a response PDU with the real API.      |
+| `connectivity/mqtt-sn-publish`         | coremqtt_sn | Serialize + parse an MQTT-SN PUBLISH (buffer round-trip).       |
+| `connectivity/websocket-frame`         | libwebsockets | RFC 6455 masked text-frame encode/decode round-trip.         |
+| `connectivity/tinygsm-modem-at`        | tinygsm | Cellular-modem AT bring-up flow over a mock transcript Stream.      |
+| `audio/minimp3-decode`                 | minimp3 | Decode an embedded MP3 blob → PCM; print sample count + RMS.        |
+| `audio/libhelix-decode`                | libhelix | MP3 frame sync + header parse (real ARM PCM decode documented).    |
+| `display/u8g2-oled-draw`               | u8g2    | Render text/frame/box to a RAM framebuffer; ASCII-dump it.         |
+| `display/gfx-compat-blit`              | gfx_compat | Fill + blit an RGB565 buffer through the SW-fallback shim.       |
+| `power-timing/littlefs-keyvalue`       | littlefs | Mount a RAM-backed LFS; write / read / list a key-value file.      |
+| `peripheral-io/etl-fixed-containers`   | etl     | `etl::vector` / `etl::map` -- fixed-capacity, no heap, no STL.      |
+| `peripheral-io/fmt-formatting`         | fmt     | `fmt::format_to` a fixed buffer -- no allocation, no iostream.      |
+| `testing/catch2-selftest`              | Catch2  | Host unit-test binary -- `TEST_CASE`s over a pure helper.          |
+| `testing/doctest-selftest`             | doctest | Header-only host unit-test binary.                                  |
+
+Most are portable; a few reference restrictively-licensed or
+Arduino-core upstreams whose full build is gated to a supported target
+-- each such example's README states exactly what it does on
+`native_sim` versus on silicon.
+
 ## Browse by topology / platform
 
 The remaining examples group by **how they are built** rather than

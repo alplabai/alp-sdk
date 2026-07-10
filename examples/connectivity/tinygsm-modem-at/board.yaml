@@ -1,0 +1,30 @@
+# board.yaml -- per-app project configuration for the
+# tinygsm-modem-at example.
+#
+# **[UNTESTED]**: builds and runs on native_sim (mock transcript),
+# not bench-run against a real modem.  The example drives the modem AT
+# exchange directly over a mock Stream rather than linking libtinygsm,
+# whose AT engine needs Arduino's full `String` class (`WString.h`) --
+# see the example's README "Why the real library isn't linked" and
+# src/main.cpp's banner for the real `TinyGsm modem(stream)` sequence.
+# Per-core `libraries: [tinygsm]` resolves against
+# metadata/library-profiles/tinygsm/hw-backends.yaml (pure
+# synchronous-UART is the floor; UART-DMA selects automatically by
+# SoM capability).
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    # A real modem integration needs a UART -- this example replays a
+    # canned AT transcript through a mock Stream instead, so no
+    # peripheral is opened. See README.md "Swapping in a real UART".
+    peripherals: []
+    libraries:
+      - tinygsm
+
+diagnostics:
+  log_level: info

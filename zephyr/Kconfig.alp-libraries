@@ -96,19 +96,27 @@ config ALP_U8G2_SW_BLIT
 	bool "u8g2 pure-C SW blit (fallback)"
 	default y
 
+config ALP_SDK_U8G2_VENDORED_CORE
+	bool "Compile the vendored u8g2 core draw pipeline (vendors/u8g2/)"
+	help
+	  Set (not `default y`, unlike ALP_U8G2_SW_BLIT above -- that one
+	  is a fallback-capability marker true for every build; this one
+	  gates real compiled sources) only when a slice actually selects
+	  `libraries: [u8g2]` -- see the CONFIG_ALP_SDK_U8G2_VENDORED_CORE=y
+	  line in `_LIBRARY_KCONFIG["u8g2"]` (scripts/alp_project_emit.py).
+	  zephyr/CMakeLists.txt compiles vendors/u8g2/csrc/ into the build
+	  only when this is set, so a u8g2-less app pays no C build cost
+	  and (importantly) no C++-toolchain requirement from the sibling
+	  Catch2 vendor knob below.
+
 # ----------------------------------------------------------------------
-# gfx_compat (maintainer-written thin shim)
+# gfx_compat (maintainer-written thin shim) -- Kconfig lives at
+# src/lib/gfx_compat/Kconfig (rsourced below), alongside the shim's
+# CMakeLists.txt + sources, since this library has no upstream/west
+# pin of its own to keep separate from.
 # ----------------------------------------------------------------------
 
-config ALP_GFX_COMPAT_GPU2D
-	bool "gfx_compat -> Alif GPU2D backend"
-config ALP_GFX_COMPAT_DMA2D
-	bool "gfx_compat -> generic DMA2D backend"
-config ALP_GFX_COMPAT_SPI_DMA
-	bool "gfx_compat SPI push via DMA"
-config ALP_GFX_COMPAT_SW
-	bool "gfx_compat pure-C SW blit (fallback)"
-	default y
+rsource "../src/lib/gfx_compat/Kconfig"
 
 # ----------------------------------------------------------------------
 # madgwick_ahrs + pid + modbus
@@ -238,6 +246,20 @@ config ALP_LIBHELIX_PURE_C
 config ALP_CATCH2_SW
 	bool "Catch2 (always pure-SW)"
 	default y
+
+config ALP_SDK_CATCH2_VENDORED
+	bool "Compile the vendored Catch2 amalgamated distribution (vendors/catch2/)"
+	help
+	  Set (not `default y`, unlike ALP_CATCH2_SW above -- that one is a
+	  fallback-capability marker true for every build; this one gates
+	  a real C++ compiled source + `operator new`/`operator delete`
+	  requirement) only when a slice actually selects
+	  `libraries: [catch2]` -- see the CONFIG_ALP_SDK_CATCH2_VENDORED=y
+	  line in `_LIBRARY_KCONFIG["catch2"]` (scripts/alp_project_emit.py).
+	  zephyr/CMakeLists.txt compiles vendors/catch2/src/catch_amalgamated.cpp
+	  into the build only when this is set -- a C-only app that never
+	  asked for Catch2 must not pick up a C++ TU it has no libstdc++
+	  linked for.
 
 # ----------------------------------------------------------------------
 # Baseline libraries (v0.2-era) -- HW-backend knobs added in §D.lib's

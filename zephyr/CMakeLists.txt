@@ -132,6 +132,22 @@ endif()
 if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_LITTLEFS)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_littlefs.c)
+    # zephyr_littlefs.c includes <zephyr/fs/littlefs.h>, which itself
+    # includes <lfs.h> from the upstream littlefs module -- but that
+    # header lives outside ZEPHYR_BASE, so the compiler can't find it
+    # without this module's include dir on the path. Zephyr's own
+    # subsys/fs/littlefs_fs.c gets this for free via the `LITTLEFS`
+    # INTERFACE target (zephyr/modules/littlefs/CMakeLists.txt); our
+    # alp-sdk zephyr module is a separate CMake library, so it needs
+    # its own copy of the include path. ZEPHYR_LITTLEFS_MODULE_DIR is
+    # set by Zephyr's module-resolution pass whenever modules/fs/littlefs
+    # is present (default-enabled `fs` group in Zephyr's own west.yml,
+    # so both an alp-sdk-topdir workspace and CI's `west init -m zephyr`
+    # workspace pick it up) -- guard on it being defined rather than
+    # assuming presence.
+    if(DEFINED ZEPHYR_LITTLEFS_MODULE_DIR)
+        zephyr_library_include_directories(${ZEPHYR_LITTLEFS_MODULE_DIR})
+    endif()
 endif()
 
 # Renesas RZ SPI_B (RSPI) controller driver -- carried here (not upstream
@@ -764,6 +780,17 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/alif_dave2d.c)
 
+# gfx_compat -- maintainer-written in-tree shim (west.yml documents it
+# ships at src/lib/gfx_compat/, no west pin).  A native library apps
+# call directly (`#include "gfx_compat.h"`), NOT an <alp/gpu2d.h>
+# backend -- unrelated to the class dispatcher above.  Compiled
+# whenever CONFIG_ALP_GFX_COMPAT_SW is on (see
+# src/lib/gfx_compat/Kconfig, default y); the include dir is
+# published unconditionally so the header always resolves even if a
+# future HW-backend Kconfig replaces the SW default.
+add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/src/lib/gfx_compat
+    ${CMAKE_CURRENT_BINARY_DIR}/alp_sdk_gfx_compat)
+
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
@@ -1024,6 +1051,87 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/proto/alp_mproc_frame.c
 )
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/nanopb/include)
+
+# Header-only 3p libraries vendored in-tree (Task 0 of the
+# 3p-library-examples batch) because the west topdir workspace this
+# SDK builds against cannot fetch a worktree-only west.yml pin (see
+# vendors/{etl,fmt,doctest,jsmn,minimp3}/README.md).  Each profile
+# header directory is also added so `#include "etl_profile.h"` /
+# `#include "fmt_config.h"` / `#include "doctest_config.h"` resolve
+# ahead of any app-local default (metadata/library-profiles/README.md's
+# "profile wins over upstream defaults" contract).  jsmn + minimp3
+# already carry an `extras-tier1` west pin (unfetched in this
+# workspace) -- vendored the same way since both are genuinely
+# single-header libraries; no profile header exists for either (their
+# `libraries:` Kconfig entry is pure-SW, no tunable defines).
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/etl/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profiles/etl)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/fmt/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profiles/fmt)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/doctest/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profiles/doctest)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/jsmn/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/minimp3/include)
+
+# u8g2's minimal core draw-pipeline subset (vendors/u8g2/README.md --
+# no zephyr/module.yml upstream, same "genuinely single-header-free but
+# small" case as the header-only libs above, except this one needs
+# compiled sources). Gated on CONFIG_ALP_SDK_U8G2_VENDORED_CORE, NOT
+# CONFIG_ALP_U8G2_SW_BLIT -- the latter `default y`s for EVERY build
+# (a fallback-capability marker, true whether or not an app selected
+# u8g2), so gating real compiled sources on it broke every other
+# example's link (undefined `u8x8_*`/`u8g2_*` symbols never called, but
+# worse: it also silently pulled Catch2's C++ TU into C-only apps
+# before this was caught -- see the Kconfig symbol's help text). Only
+# a slice with `libraries: [u8g2]` sets CONFIG_ALP_SDK_U8G2_VENDORED_CORE
+# (scripts/alp_project_emit.py's `_LIBRARY_KCONFIG["u8g2"]`);
+# examples/display/u8g2-oled-draw is the first (and so far only)
+# consumer.
+zephyr_include_directories_ifdef(CONFIG_ALP_SDK_U8G2_VENDORED_CORE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc
+)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_U8G2_VENDORED_CORE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8x8_setup.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8x8_display.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8x8_8x8.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_setup.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_buffer.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_hvline.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_ll_hvline.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_box.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_font.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_kerning.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_intersection.c
+)
+
+# Catch2's amalgamated single-TU distribution (vendors/catch2/README.md
+# -- no zephyr/module.yml upstream, same case as u8g2 above). Gated on
+# CONFIG_ALP_SDK_CATCH2_VENDORED, NOT CONFIG_ALP_CATCH2_SW (see the
+# u8g2 comment above -- same `default y`-for-every-build trap, except
+# for Catch2 it's worse: a C-only app unconditionally picking up a C++
+# TU needing `operator new`/`operator delete` fails EVERY plain-C
+# example's link, not just this one). Only a slice with
+# `libraries: [catch2]` sets CONFIG_ALP_SDK_CATCH2_VENDORED
+# (scripts/alp_project_emit.py's `_LIBRARY_KCONFIG["catch2"]`);
+# examples/testing/catch2-selftest is the first (and so far only)
+# consumer.
+zephyr_include_directories_ifdef(CONFIG_ALP_SDK_CATCH2_VENDORED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/catch2/include
+)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CATCH2_VENDORED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/catch2/src/catch_amalgamated.cpp
+)
+# Mirrors examples/testing/catch2-selftest/CMakeLists.txt's
+# target_compile_definitions(app ...) -- both catch_amalgamated.cpp
+# (compiled here, into the alp-sdk module library) and the app's own
+# main.cpp (which #includes catch_amalgamated.hpp) must see the SAME
+# macro state, or the two TUs parse the shared header differently
+# (ODR risk). See that CMakeLists.txt's comment for what each macro
+# does.
+zephyr_library_compile_definitions_ifdef(CONFIG_ALP_SDK_CATCH2_VENDORED
+    CATCH_AMALGAMATED_CUSTOM_MAIN
+    CATCH_CONFIG_NO_POSIX_SIGNALS
+)
 
 # Instance-capability helpers (<alp/cap_instance.h>).  Hand-written
 # runtime logic that does not depend on per-SoC metadata; always

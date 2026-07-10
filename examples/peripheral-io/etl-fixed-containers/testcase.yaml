@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: etl-fixed-containers
+  description: |
+    Builds an etl::vector<int, 8> and an etl::map<const char *, int, 4>
+    -- the Embedded Template Library's fixed-capacity, no-heap
+    STL-like containers. push_back/insert + lookup, printing size and
+    a looked-up value, demonstrating ETL's compile-time-capacity /
+    no-allocation property.
+
+tests:
+  alp_sdk.example.etl_fixed_containers.e1m_x_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - etl-fixed-containers
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[etl-fixed-containers\\] done"
+  alp_sdk.example.etl_fixed_containers.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - etl-fixed-containers
+      - aen
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[etl-fixed-containers\\] done"

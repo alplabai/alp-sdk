@@ -13,7 +13,20 @@
  * no-heap-on-hot-path / Cortex-M-or-A class targets:
  *
  *   - ETL_NO_STL           : we don't pull in libstdc++ on M-class
- *                            builds; ETL operates standalone.
+ *                            builds; ETL operates standalone. Left
+ *                            OFF when the build has opted into a
+ *                            real C++ STL (native_sim's host build,
+ *                            or a future Yocto/A-class target) --
+ *                            see the CONFIG_*_LIBCPP guard below.
+ *                            Defining it there is actively wrong:
+ *                            ETL then re-declares std::initializer_list
+ *                            itself (etl/initializer_list.h) and
+ *                            collides with the real
+ *                            <initializer_list> the moment any
+ *                            other header (e.g. fmt/core.h) pulls
+ *                            the real one in (3p-library-examples
+ *                            Task 0 gap: `redefinition of class
+ *                            std::initializer_list<T>`).
  *   - ETL_THROW_EXCEPTIONS : disabled.  Failures call etl_error_handler
  *                            (the SDK's default handler logs +
  *                            triggers a fault).
@@ -36,8 +49,18 @@
 /* ----------------------------------------------------------------- */
 
 /* The SDK builds against newlib-nano / picolibc on M-class targets
- * without the full STL.  ETL's STL-aware paths are off. */
+ * without the full STL.  ETL's STL-aware paths are off there --
+ * but NOT when Zephyr's Kconfig says a real C++ STL is on the
+ * include path (CONFIG_EXTERNAL_LIBCPP on native_sim's host
+ * toolchain, or CONFIG_GLIBCXX_LIBCPP / CONFIG_LIBCXX_LIBCPP on a
+ * newlib/picolibc target that opted into the full library).  None
+ * of these three are defined on a plain baremetal/Yocto build (no
+ * Kconfig at all) or on Zephyr's default CONFIG_MINIMAL_LIBCPP, so
+ * ETL_NO_STL still applies there exactly as before. */
+#if !defined(CONFIG_EXTERNAL_LIBCPP) && !defined(CONFIG_GLIBCXX_LIBCPP) &&                         \
+    !defined(CONFIG_LIBCXX_LIBCPP)
 #define ETL_NO_STL
+#endif
 
 /* Exceptions are off across the SDK's hot-path code.  ETL routes
  * failures through etl_error_handler instead of throwing. */

@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: mqtt-sn-publish
+  description: |
+    coreMQTT-SN teaching example. Encodes an MQTT-SN PUBLISH packet
+    into a buffer and parses it back out, asserting the topic id +
+    payload survive the round trip. No socket, no gateway. The pinned
+    coreMQTT-SN module checkout is empty on this machine (see README
+    "Integration reality"), so this hand-rolls the OASIS MQTT-SN v1.2
+    PUBLISH wire format instead of calling the real library.
+
+tests:
+  alp_sdk.examples.mqtt_sn_publish.native_sim:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - mqtt-sn-publish
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[mqtt-sn-publish\\] done"

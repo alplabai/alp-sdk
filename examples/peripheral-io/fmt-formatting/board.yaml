@@ -1,0 +1,31 @@
+# board.yaml -- per-app project configuration for the
+# fmt-formatting example.
+#
+# Customer workflow: copy this directory, change `som.sku` to
+# your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
+# and `west build`.  CMakeLists.txt invokes
+# scripts/alp_project.py at configure time + layers the
+# generated alp.conf over prj.conf via OVERLAY_CONFIG.
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []
+    # Pulls vendors/fmt/include (the vendored fmt 11.0.2 headers,
+    # Task 0 of the 3p-library-examples batch) and
+    # metadata/library-profiles/fmt/fmt_config.h onto the include
+    # path. fmt is header-only in this profile (FMT_HEADER_ONLY=1) --
+    # no Kconfig knob of its own; the loader emits a
+    # documentation-only comment line in alp.conf for this entry
+    # (see _LIBRARY_KCONFIG in scripts/alp_project.py).
+    libraries:
+      - fmt
+
+diagnostics:
+  log_level: info
