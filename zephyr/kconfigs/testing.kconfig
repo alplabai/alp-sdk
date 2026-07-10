@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# <alp/testing/*> virtual-backend test doubles (epic #610).  These are
+# ordinary registry backends at reserved priority 255 (silicon_ref="*")
+# that outrank every real/proxy/fallback backend so a ztest can drive
+# the portable <alp/*> API deterministically -- a virtual clock +
+# per-class instance tables the test injects into directly.
+#
+# Gated behind CONFIG_ZTEST so a production build can never silently
+# link a wildcard backend that would hijack real hardware selection;
+# the CMakeLists FATAL_ERRORs if this is somehow enabled without ZTEST.
+
+config ALP_SDK_TESTING
+	bool "Alp SDK test doubles (<alp/testing/*>) -- ZTEST builds only"
+	depends on ALP_SDK
+	depends on ZTEST
+	default n
+	help
+	  Compile the <alp/testing/*> virtual-clock + instance-table
+	  core and enable the per-class CONFIG_ALP_SDK_TESTING_<CLASS>
+	  test-double backends below.  Each enabled class registers a
+	  priority-255 silicon_ref="*" backend that outranks every other
+	  registered backend (sw_fallback=0, zephyr_drv=100, proxies=200),
+	  so a test build must NEVER enable this on a real board's default
+	  config -- the wildcard would hijack that board's peripheral
+	  selection.  See tests/zephyr/conformance/testcase.yaml
+	  (alp_sdk.conformance.test_doubles), which restricts this to
+	  native_sim only.
+
+config ALP_SDK_TESTING_GPIO
+	bool "GPIO test double (<alp/testing/gpio.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 GPIO test-double backend
+	  (src/backends/gpio/testing_drv.c).  Lets a ztest drive
+	  alp_gpio_* through injected input levels / edges / output
+	  read-back without any real or emulated GPIO controller.

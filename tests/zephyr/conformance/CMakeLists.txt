@@ -8,6 +8,23 @@ project(alp_sdk_conformance_test LANGUAGES C)
 # Single-file suite by design: the per-class conf_class_t table plus
 # the generic contract runners all live in src/main.c so the "add
 # vendor N+1 = add one table row" property stays visible in one place.
-target_sources(app PRIVATE
-    src/main.c
-)
+#
+# main.c's data-driven rows assume the REAL/emulated backend per class
+# (e.g. gpio's Case B expects alp_gpio_open(99) to fail -- true for
+# zephyr_drv, never true for a test double that must open ANY
+# instance).  CONFIG_ALP_SDK_TESTING's priority-255 wildcard backends
+# are therefore built as a SEPARATE app image (the
+# alp_sdk.conformance.test_doubles scenario) that swaps main.c out for
+# src/behavior_gpio.c instead of adding to the same binary -- the two
+# suites test different, mutually-incompatible backend selections for
+# the same class and must never run in one process.  main.c itself is
+# untouched; only this file's source list is scenario-conditional.
+if(CONFIG_ALP_SDK_TESTING)
+    target_sources(app PRIVATE
+        src/behavior_gpio.c
+    )
+else()
+    target_sources(app PRIVATE
+        src/main.c
+    )
+endif()

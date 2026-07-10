@@ -28,6 +28,7 @@ rsource "kconfigs/ble-security.kconfig"
 rsource "kconfigs/mproc-rpc-usb.kconfig"
 rsource "kconfigs/hw-info.kconfig"
 rsource "kconfigs/chips.kconfig"
+rsource "kconfigs/testing.kconfig"
 
 # §D.lib.loader -- per-library HW-accelerator Kconfig knobs declared
 # in a sibling file so the chip-driver menu above stays focused on

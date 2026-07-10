@@ -37,6 +37,15 @@ extern "C" {
  *             participates in the same priority-first selector as exact
  *             rows.  A higher-priority wildcard can beat a lower-priority
  *             exact row; at equal priority, the exact row wins.
+ *
+ * @par Priority 255 is RESERVED for `alp/testing` doubles:
+ *      each test double (e.g. src/backends/gpio/testing_drv.c) is an
+ *      ordinary backend registered with `silicon_ref="*"` at
+ *      priority 255 so it outranks every real backend for its class
+ *      (proxies=200, zephyr_drv=100, sw_fallback=0).  Gated behind
+ *      `CONFIG_ALP_SDK_TESTING` (itself gated on `CONFIG_ZTEST`) so a
+ *      production build can never silently pick one up -- do not
+ *      register a non-test backend at 255.
  */
 typedef struct alp_backend {
 	const char *silicon_ref;
