@@ -53,6 +53,8 @@ static const struct device *const _devs[] = {
 typedef struct {
 	alp_can_rx_cb_t cb;
 	void           *user;
+	int             filter_id; /* Zephyr's opaque can_add_rx_filter() id;
+	                             * only meaningful while cb != NULL. */
 } cb_ctx_t;
 
 /* Per-handle Zephyr sidecar.  Holds the MAX_FILTERS-sized cb_table so
@@ -260,20 +262,29 @@ static alp_status_t z_add_filter(alp_can_backend_state_t *st,
 		s->cb_table[slot] = (cb_ctx_t){ 0 };
 		return _errno_to_alp(fid);
 	}
+	s->cb_table[slot].filter_id = fid;
 	if (filter_id_out != NULL) *filter_id_out = fid;
 	return ALP_OK;
 }
 
 static alp_status_t z_remove_filter(alp_can_backend_state_t *st, int32_t filter_id)
 {
+	alp_z_can_side_t    *s   = (alp_z_can_side_t *)st->be_data;
 	const struct device *dev = (const struct device *)st->dev;
-	if (dev == NULL) return ALP_ERR_NOT_READY;
-	can_remove_rx_filter(dev, filter_id);
-	/* The slot lookup-by-fid is best-effort; when zephyr's filter
-     * id is opaque the matching cb_table entry stays -- leak is
-     * bounded by MAX_FILTERS and the v0.3 OpenAMP-friendly rewrite
-     * gives this a proper id->slot map. */
-	return ALP_OK;
+	if (s == NULL || dev == NULL) return ALP_ERR_NOT_READY;
+
+	/* Zephyr's filter id is opaque/non-contiguous, so recover the
+     * cb_table slot it was issued from by value rather than treating
+     * it as an index -- this is what lets us actually free the slot
+     * instead of leaking it (#599). */
+	for (int i = 0; i < MAX_FILTERS; ++i) {
+		if (s->cb_table[i].cb != NULL && s->cb_table[i].filter_id == filter_id) {
+			can_remove_rx_filter(dev, filter_id);
+			s->cb_table[i] = (cb_ctx_t){ 0 };
+			return ALP_OK;
+		}
+	}
+	return ALP_ERR_INVAL;
 }
 
 static void z_close(alp_can_backend_state_t *st)
@@ -281,6 +292,19 @@ static void z_close(alp_can_backend_state_t *st)
 	alp_z_can_side_t    *s   = (alp_z_can_side_t *)st->be_data;
 	const struct device *dev = (const struct device *)st->dev;
 	struct alp_can      *h   = CONTAINER_OF(st, struct alp_can, state);
+
+	/* Unregister every filter still installed on the controller before
+     * the sidecar is freed -- otherwise the reused sidecar (or slot)
+     * could dispatch a stale trampoline through a future handle
+     * (#599). */
+	if (s != NULL && dev != NULL) {
+		for (int i = 0; i < MAX_FILTERS; ++i) {
+			if (s->cb_table[i].cb != NULL) {
+				can_remove_rx_filter(dev, s->cb_table[i].filter_id);
+				s->cb_table[i] = (cb_ctx_t){ 0 };
+			}
+		}
+	}
 
 	/* If the dispatcher latched started=true without a matching stop,
      * issue can_stop before releasing the sidecar so the controller

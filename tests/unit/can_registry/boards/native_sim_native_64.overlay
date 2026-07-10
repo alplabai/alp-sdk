@@ -1,0 +1,17 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim already instantiates an enabled `can_loopback0` node
+ * (boards/native/native_sim/native_sim.dts, "zephyr,can-loopback") --
+ * point the alp_can0 alias at it so the zephyr_drv backend's z_open()
+ * resolves a real (emulated) CAN device instead of the NULL it gets on
+ * an unaliased build.  This lets tests exercise add_filter/remove_filter
+ * lifecycle (#599) and the started-handle contract (#601) against the
+ * real backend, not just the sw_fallback stub.
+ */
+/ {
+	aliases {
+		alp-can0 = &can_loopback0;
+	};
+};
