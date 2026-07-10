@@ -1,0 +1,23 @@
+# board.yaml -- libcoap PDU build/parse teaching example (no socket).
+#
+# `cores.m55_hp.libraries: [libcoap]` makes alp_project.py emit
+# CONFIG_ALP_COAP_NO_TLS=y (this example's crypto-off SW-fallback marker
+# from metadata/library-profiles/libcoap/hw-backends.yaml). It does NOT
+# by itself enable the upstream module's own CONFIG_LIBCOAP -- that
+# Kconfig symbol lives in the fetched module's own zephyr/Kconfig, so
+# prj.conf carries it explicitly. See README.md.
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    libraries:
+      - libcoap
+    # PDU construction/parsing only -- no socket opened, no peripheral.
+    peripherals: []
+
+diagnostics:
+  log_level: info

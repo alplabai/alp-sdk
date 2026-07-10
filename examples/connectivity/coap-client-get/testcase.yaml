@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: coap-client-get
+  description: |
+    libcoap teaching example. Builds a CoAP GET request PDU offline and
+    parses a canned CoAP response PDU -- no socket. Builds and runs on
+    native_sim against the upstream libcoap module (client-only,
+    DTLS/TCP/OSCORE disabled).
+
+tests:
+  alp_sdk.examples.coap_client_get.native_sim:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - coap-client-get
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[coap-client-get\\] done"
