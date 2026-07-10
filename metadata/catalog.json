@@ -752,6 +752,10 @@
       "script": "scripts/check_doxygen_coverage.py"
     },
     {
+      "purpose": "Validate the vendored e1m-spec pinout snapshot and cross-check it against the per-SoM pin-mux tables -- fully **offline** (no network).",
+      "script": "scripts/check_e1m_pinout.py"
+    },
+    {
       "purpose": "E1M board-route <-> SoM capability-table end-to-end gate.",
       "script": "scripts/check_e1m_route_capability.py"
     },
