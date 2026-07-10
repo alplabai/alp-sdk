@@ -27,8 +27,12 @@ framework with no hardware surface.
   case), is vendored in-tree at `vendors/catch2/` instead -- see
   that directory's README.md. The alp-sdk Zephyr module
   (`zephyr/CMakeLists.txt`) compiles it automatically whenever
-  `CONFIG_ALP_CATCH2_SW` is set (`board.yaml`'s `libraries: [catch2]`),
-  so this example needs no manual `ZEPHYR_MODULES` search.
+  `CONFIG_ALP_SDK_CATCH2_VENDORED` is set (`board.yaml`'s
+  `libraries: [catch2]`), so this example needs no manual
+  `ZEPHYR_MODULES` search. (`CONFIG_ALP_CATCH2_SW` is a separate
+  `default y` fallback-capability marker, true for every build
+  regardless of this slice -- it does NOT gate the compiled Catch2
+  TU; see `zephyr/CMakeLists.txt` for why.)
 * A custom `main()` (`CATCH_AMALGAMATED_CUSTOM_MAIN`, not the
   amalgamated file's built-in default `main()`) so the example can
   print the SDK's uniform `[catch2-selftest] done` marker only after

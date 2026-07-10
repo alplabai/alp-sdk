@@ -39,10 +39,14 @@ a "no real panel" example.
 hand-picked core draw pipeline (setup, buffer, hvline, box, font,
 kerning, intersection -- plus the u8x8 glue those lean on), compiled
 into the build by the alp-sdk Zephyr module (`zephyr/CMakeLists.txt`)
-whenever `CONFIG_ALP_U8G2_SW_BLIT` is set (`board.yaml`'s
-`libraries: [u8g2]` -- see `zephyr/Kconfig.alp-libraries`) -- the same
-auto-wire every other library gets; this example needs **no** manual
-CMake beyond its own `src/*.c` list. This directory supplies its own
+whenever `CONFIG_ALP_SDK_U8G2_VENDORED_CORE` is set (`board.yaml`'s
+`libraries: [u8g2]` -- see `scripts/alp_project_emit.py`'s
+`_LIBRARY_KCONFIG["u8g2"]`) -- the same auto-wire every other library
+gets; this example needs **no** manual CMake beyond its own `src/*.c`
+list. (`CONFIG_ALP_U8G2_SW_BLIT` is a separate `default y`
+fallback-capability marker, true for every build regardless of this
+slice -- it does NOT gate the compiled sources; see
+`zephyr/CMakeLists.txt` for why.) This directory supplies its own
 null device (`src/u8g2_ram_null.c`) and a single extracted font glyph
 table (`src/u8g2_font_6x10_tr.c`, copied verbatim out of
 `u8g2_fonts.c` -- see that file's header comment). If a future example

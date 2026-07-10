@@ -17,11 +17,13 @@
  * instead of pushed over I2C/SPI.
  *
  * u8g2 ships no zephyr/module.yml, so unlike most `libraries:` entries
- * in this SDK, this example's CMakeLists.txt hand-picks + compiles a
- * minimal subset of u8g2's csrc/ tree itself (see the comment block
- * there for which files and why). board.yaml's `libraries: [u8g2]`
- * still buys the CONFIG_ALP_U8G2_SW_BLIT Kconfig knob, documenting the
- * SW-blit backend selection the same way every other library does.
+ * in this SDK, a hand-picked minimal subset of u8g2's csrc/ tree is
+ * vendored in-tree instead of west-fetched (see zephyr/CMakeLists.txt's
+ * comment block for which files and why). board.yaml's
+ * `libraries: [u8g2]` sets CONFIG_ALP_SDK_U8G2_VENDORED_CORE, the
+ * selection-scoped Kconfig knob that gates compiling that vendored
+ * subset into the build -- this example's own CMakeLists.txt only
+ * lists its own src/*.c files.
  *
  * What success looks like: an ASCII-art rectangle+box+string, then
  * `[u8g2-oled-draw] done`.
