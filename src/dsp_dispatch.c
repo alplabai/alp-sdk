@@ -31,6 +31,7 @@
  * SoC-specific backend with refined caps lands.
  */
 
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -43,6 +44,20 @@
 #include <alp/soc_caps.h>
 
 #include "backends/dsp/dsp_ops.h"
+
+/*
+ * alp_dsp_stats_f32 uses CMSIS-DSP arm_*_f32 statistics kernels when
+ * the cmsis-dsp module is linked (ALP_HAS_CMSIS_DSP=1, wired from
+ * CONFIG_CMSIS_DSP in the Zephyr build / the option() in plain CMake);
+ * otherwise a single portable-C pass.  Same gate the sw_fallback DSP
+ * backend uses, so the whole DSP surface picks one implementation.
+ */
+#if defined(ALP_HAS_CMSIS_DSP) && (ALP_HAS_CMSIS_DSP == 1)
+#include <arm_math.h>
+#define ALP_DSP_STATS_USE_CMSIS 1
+#else
+#define ALP_DSP_STATS_USE_CMSIS 0
+#endif
 
 ALP_BACKEND_DEFINE_CLASS(dsp);
 ALP_BACKEND_ANCHOR(dsp);
@@ -151,4 +166,59 @@ void alp_dsp_chain_close(alp_dsp_chain_t *chain)
 const alp_capabilities_t *alp_dsp_chain_capabilities(const alp_dsp_chain_t *chain)
 {
 	return (chain != NULL) ? &chain->cached_caps : NULL;
+}
+
+alp_status_t alp_dsp_stats_f32(const float *x, size_t n, alp_dsp_stats_t *out)
+{
+	if (x == NULL || out == NULL || n == 0u) {
+		return ALP_ERR_INVAL;
+	}
+
+#if ALP_DSP_STATS_USE_CMSIS
+	/* CMSIS-DSP statistics kernels (Helium-vectorised on M-class cores). */
+	uint32_t idx;
+	arm_mean_f32(x, (uint32_t)n, &out->mean);
+	arm_rms_f32(x, (uint32_t)n, &out->rms);
+	arm_min_f32(x, (uint32_t)n, &out->min, &idx);
+	arm_max_f32(x, (uint32_t)n, &out->max, &idx);
+	arm_absmax_f32(x, (uint32_t)n, &out->abs_max, &out->abs_max_index);
+#else
+	/* Single portable-C pass (native_sim, or any target without CMSIS-DSP). */
+	float    mean = 0.0f, sumsq = 0.0f, mn = x[0], mx = x[0], amax = 0.0f;
+	uint32_t amax_i = 0u;
+	for (size_t i = 0; i < n; i++) {
+		float v = x[i];
+		mean += v;
+		sumsq += v * v;
+		if (v < mn) {
+			mn = v;
+		}
+		if (v > mx) {
+			mx = v;
+		}
+		float a = fabsf(v);
+		if (a > amax) {
+			amax   = a;
+			amax_i = (uint32_t)i;
+		}
+	}
+	out->mean          = mean / (float)n;
+	out->rms           = sqrtf(sumsq / (float)n);
+	out->min           = mn;
+	out->max           = mx;
+	out->abs_max       = amax;
+	out->abs_max_index = amax_i;
+#endif
+	/*
+	 * Population variance E[x^2] - E[x]^2 (== rms^2 - mean^2), derived
+	 * the same way on both paths so callers get ONE definition (CMSIS
+	 * arm_var_f32 would give the sample variance / (n-1) instead).  A
+	 * tiny negative from FP rounding on a near-constant signal is
+	 * clamped to zero.
+	 */
+	out->variance = out->rms * out->rms - out->mean * out->mean;
+	if (out->variance < 0.0f) {
+		out->variance = 0.0f;
+	}
+	return ALP_OK;
 }

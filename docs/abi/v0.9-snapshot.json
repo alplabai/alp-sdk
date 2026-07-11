@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-10",
+  "generated": "2026-07-11",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -8076,6 +8076,10 @@
         "alp_dsp_chain_open": {
           "hash": "56e4a0992d1e4126",
           "signature": "alp_dsp_chain_t * alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stages);"
+        },
+        "alp_dsp_stats_f32": {
+          "hash": "ef09b3feb852e674",
+          "signature": "alp_status_t alp_dsp_stats_f32(const float *x, size_t n, alp_dsp_stats_t *out);"
         }
       },
       "macros": {
@@ -8171,6 +8175,20 @@
             "union { alp_dsp_fir_params_t fir; alp_dsp_iir_params_t iir; alp_dsp_window_params_t window; alp_dsp_fft_params_t fft; } u"
           ],
           "hash": "5d7c0697deb338dd",
+          "kind": "struct"
+        },
+        "alp_dsp_stats_t": {
+          "definition": "typedef struct { float mean; float rms; float variance; float min; float max; float abs_max; uint32_t abs_max_index; } alp_dsp_stats_t;",
+          "fields": [
+            "float mean",
+            "float rms",
+            "float variance",
+            "float min",
+            "float max",
+            "float abs_max",
+            "uint32_t abs_max_index"
+          ],
+          "hash": "a125fb881dff37d4",
           "kind": "struct"
         },
         "alp_dsp_window_kind_t": {

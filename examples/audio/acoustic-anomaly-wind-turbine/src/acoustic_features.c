@@ -10,37 +10,28 @@
 #include <string.h>
 
 /*
- * SPECTRAL + STATISTICAL MATH -- library-backed, not hand-rolled.
+ * SPECTRAL + STATISTICAL MATH -- via <alp/dsp.h>, not hand-rolled.
  * ---------------------------------------------------------------
- * This example deliberately does NOT re-derive an FFT or the time-domain
- * moment statistics by hand.  Two library surfaces do the numeric work,
- * and the SAME source builds for native_sim and the Cortex-M55 alike:
+ * This example does NOT re-derive an FFT or the time-domain moment
+ * statistics by hand, and it does NOT call CMSIS-DSP arm_* directly.
+ * Both go through the portable <alp/dsp.h> surface, so the SAME source
+ * builds for native_sim and the Cortex-M55 alike and the SDK -- not the
+ * app -- owns the CMSIS-vs-portable choice:
  *
- *   1. The FFT goes through the portable <alp/dsp.h> chain API.  Its
- *      backend runs ARM CMSIS-DSP (arm_rfft_fast_f32, Helium-vectorised)
- *      on the M55, a hardware DSP block where the SoM has one, and a
- *      portable-C radix-2 fallback under native_sim -- selected by the
- *      backend registry, not an #ifdef here.  We call the alp wrapper
- *      (not arm_rfft_* directly) because alp-sdk SHIPS a portable FFT
- *      surface: keeping the example on it lets the identical source run
- *      on the V2N (A55 + DRP-AI) and NXP paths, which have no CMSIS-M.
+ *   1. FFT -> alp_dsp_chain (ALP_DSP_STAGE_FFT).  The backend runs
+ *      CMSIS-DSP arm_rfft_fast_f32 (Helium-vectorised) on the M55, a
+ *      hardware DSP block where the SoM has one, and a portable-C radix-2
+ *      fallback under native_sim -- selected by the backend registry.
  *
- *   2. The scalar window statistics (mean, RMS, abs-peak) call ARM
- *      CMSIS-DSP arm_*_f32 kernels DIRECTLY -- alp-sdk has no portable
- *      scalar-stats surface to wrap, and these kernels are the idiomatic
- *      accelerated path on Cortex-M.  They are guarded by __has_include
- *      with a portable-C fallback so the native_sim gate still builds.
+ *   2. Scalar window statistics (mean, RMS, abs-peak) -> alp_dsp_stats_f32,
+ *      which the SDK backs with CMSIS-DSP arm_mean/rms/absmax_f32 on
+ *      Cortex-M and a portable-C pass elsewhere.  Keeping both on
+ *      <alp/dsp> lets the identical source run on the V2N (A55 + DRP-AI)
+ *      and NXP paths, which have no CMSIS-M.
+ *
+ * Only kurtosis stays a hand-written loop -- it is a 4th standardised
+ * moment with no CMSIS (or alp_dsp) kernel.
  */
-#if defined(__has_include)
-#if __has_include("arm_math.h")
-#include "arm_math.h"
-#define ACO_HAS_CMSIS_DSP 1
-#endif
-#endif
-#ifndef ACO_HAS_CMSIS_DSP
-#define ACO_HAS_CMSIS_DSP 0
-#endif
-
 #include <alp/dsp.h>
 
 /* ---------------------------------------------------------------------------
@@ -114,58 +105,40 @@ void aco_feat_extract(const struct aco_frame_state *st, float sr_hz, struct aco_
 	/*
 	 * xc[] holds the DC-removed window shared by the time-domain stats AND
 	 * the FFT below; the tail [n, ACO_FRAME_N) is zero-padded so a short
-	 * frame can still feed the fixed-size FFT.  peak (largest |xc[i]|) is
-	 * kept for scaling the int16 feed to the <alp/dsp.h> chain further
-	 * down.  static: aco_feat_extract is not re-entrant (single codec
-	 * path), keeps a 1 kB buffer off the stack.
+	 * frame can still feed the fixed-size FFT.  static: aco_feat_extract is
+	 * not re-entrant (single codec path), keeps a 1 kB buffer off the stack.
+	 *
+	 * One alp_dsp_stats_f32 pass over the raw window yields the mean
+	 * (Step A1); a second over the mean-centred buffer yields the AC RMS
+	 * and abs-peak (Step A2, plus the peak used to scale the FFT feed
+	 * below) with the DC bias removed in one shot.  The SDK backs these
+	 * with CMSIS-DSP arm_mean/rms/absmax_f32 on the M55 and a portable-C
+	 * pass under native_sim -- no arm_* here.
 	 */
 	static float xc[ACO_FRAME_N];
-	float        peak;
 
-#if ACO_HAS_CMSIS_DSP
-	/*
-	 * CMSIS-DSP path (Cortex-M55: Helium-vectorised kernels).
-	 * arm_mean_f32 / arm_offset_f32 / arm_rms_f32 / arm_absmax_f32 are the
-	 * idiomatic accelerated primitives; alp-sdk has no portable
-	 * scalar-stats surface to wrap, so we call them directly.
-	 */
-	float mean;
-	arm_mean_f32(st->samples, (uint32_t)n, &mean);
-	arm_offset_f32(st->samples, -mean, xc, (uint32_t)n);
+	alp_dsp_stats_t raw;
+	alp_dsp_stats_f32(st->samples, (size_t)n, &raw);
+	const float mean = raw.mean;
 
-	uint32_t peak_idx;
-	arm_rms_f32(xc, (uint32_t)n, &out->total_rms); /* rms = sqrt(mean(xc^2)) */
-	arm_absmax_f32(xc, (uint32_t)n, &peak, &peak_idx);
-	float var = out->total_rms * out->total_rms; /* mean(xc)=0 => var = rms^2 */
-#else
-	/* Portable-C fallback (native_sim, or any target without CMSIS-DSP). */
-	float mean = 0.0f;
 	for (int i = 0; i < n; i++) {
-		mean += st->samples[i];
+		xc[i] = st->samples[i] - mean;
 	}
-	mean /= (float)n;
-
-	float sum2 = 0.0f;
-	peak       = 0.0f;
-	for (int i = 0; i < n; i++) {
-		xc[i]    = st->samples[i] - mean;
-		float ax = fabsf(xc[i]);
-		sum2 += xc[i] * xc[i];
-		if (ax > peak) {
-			peak = ax;
-		}
-	}
-	float var      = sum2 / (float)n;
-	out->total_rms = sqrtf(var);
-#endif
 	for (int i = n; i < ACO_FRAME_N; i++) {
 		xc[i] = 0.0f; /* zero-pad the FFT tail on a short frame */
 	}
 
+	alp_dsp_stats_t ac;
+	alp_dsp_stats_f32(xc, (size_t)n, &ac);
+	float peak     = ac.abs_max;  /* peak |xc|                       */
+	float var      = ac.variance; /* == mean(xc^2) since mean(xc)~=0 */
+	out->total_rms = ac.rms;      /* AC RMS = sqrt(mean(xc^2))       */
+
 	/*
 	 * Kurtosis (4th standardised central moment): CMSIS-DSP ships no
 	 * 4th-moment kernel, so the sum-of-4th-powers stays a portable loop
-	 * over xc, mirroring the CMSIS/fallback split above.
+	 * over xc -- alp_dsp_stats_f32 covers mean/RMS/abs-peak/variance above,
+	 * not this.
 	 *   kurtosis = E[(x-mu)^4] / (E[(x-mu)^2])^2 = (sum4/n) / var^2
 	 *   Gaussian noise gives kurtosis ~= 3; impulsive fault signatures
 	 *   such as rolling-element bearing spall impacts push it above 10.

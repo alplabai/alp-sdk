@@ -33,29 +33,26 @@
  *       v
  *   model inference  OR  mot_activity_fallback()  (when no model is loaded)
  *
- * SPECTRAL + STATISTICAL MATH -- library-backed, not hand-rolled.
+ * SPECTRAL + STATISTICAL MATH -- via <alp/dsp.h>, not hand-rolled.
  * ---------------------------------------------------------------
- * This example deliberately does NOT re-derive an FFT or the RMS/mean
- * statistics by hand.  Two library surfaces do the numeric work, and the
- * SAME source builds for native_sim and the Cortex-M55 alike:
+ * This example does NOT re-derive an FFT or the mean/RMS/peak statistics
+ * by hand, and it does NOT call CMSIS-DSP arm_* directly.  Both go through
+ * the portable <alp/dsp.h> surface, so the SAME source builds for
+ * native_sim and the Cortex-M55 alike and the SDK -- not the app --
+ * owns the CMSIS-vs-portable choice:
  *
- *   1. The FFT goes through the portable <alp/dsp.h> chain API.  Its
- *      backend runs ARM CMSIS-DSP (arm_rfft_fast_f32, Helium-vectorised)
- *      on the M55, a hardware DSP block where the SoM has one, and a
- *      portable-C radix-2 fallback under native_sim -- selected by the
- *      backend registry, not an #ifdef here.  We call the alp wrapper
- *      (not arm_rfft_* directly) because alp-sdk SHIPS a portable FFT
- *      surface: keeping the example on it lets the identical source run
- *      on the V2N (A55 + DRP-AI) and NXP paths, which have no CMSIS-M.
+ *   1. FFT -> alp_dsp_chain (ALP_DSP_STAGE_FFT).  The backend runs
+ *      CMSIS-DSP arm_rfft_fast_f32 (Helium-vectorised) on the M55, a
+ *      hardware DSP block where the SoM has one, and a portable-C radix-2
+ *      fallback under native_sim -- selected by the backend registry.
  *
- *   2. The |a| / |gyro| magnitude-series statistics (mean, AC RMS) and the
- *      jerk RMS call ARM CMSIS-DSP arm_*_f32 kernels DIRECTLY -- alp-sdk
- *      has no portable scalar-stats surface to wrap, and these kernels are
- *      the idiomatic accelerated path on Cortex-M.  They are guarded by
- *      __has_include with a portable-C fallback so the native_sim gate
- *      still builds.  The per-axis accel/gyro AC RMS stays a portable loop
- *      (see the comment at its call site) because the IMU sample buffer is
- *      array-of-structs, not a layout CMSIS kernels can consume directly.
+ *   2. The |a| / |gyro| magnitude-series statistics (mean, AC RMS,
+ *      abs-peak) and the jerk RMS -> alp_dsp_stats_f32, which the SDK
+ *      backs with CMSIS-DSP arm_mean/rms/absmax_f32 on Cortex-M and a
+ *      portable-C pass elsewhere.  The per-axis accel/gyro AC RMS and the
+ *      SMA stay portable loops (see the comments at their call sites)
+ *      because the IMU sample buffer is array-of-structs, not a
+ *      stride-1 layout a stats call can consume directly.
  */
 #include "motion_features.h"
 
@@ -64,16 +61,6 @@
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
-#endif
-
-#if defined(__has_include)
-#if __has_include("arm_math.h")
-#include "arm_math.h"
-#define MOT_HAS_CMSIS_DSP 1
-#endif
-#endif
-#ifndef MOT_HAS_CMSIS_DSP
-#define MOT_HAS_CMSIS_DSP 0
 #endif
 
 #include <alp/dsp.h>
@@ -160,10 +147,9 @@ bool mot_window_full(const struct mot_window_state *st)
  *
  *   jerk_rms = sqrt( (1/(N-1)) * sum_{i=1}^{N-1} jerk[i]^2 )
  *
- * amag[] is a contiguous time series, so this is a natural CMSIS-DSP fit:
- * arm_sub_f32(amag+1, amag, ..., N-1) computes every backward difference in
- * one vectorised call (pDst[k] = amag[k+1] - amag[k]), then arm_scale_f32
- * converts to g/s and arm_rms_f32 finishes the RMS in a single pass.
+ * amag[] is a contiguous time series, so the backward difference is a
+ * plain portable loop (alp_dsp.h has no offset/sub/scale kernel to wrap),
+ * and the RMS of the resulting jerk[] array goes through alp_dsp_stats_f32.
  * Scaling by sr_hz converts from "g per sample" to "g per second", making
  * the value sample-rate-independent so models trained at one sr_hz transfer
  * to another.  High jerk_rms indicates sharp, impulsive motion:
@@ -274,69 +260,50 @@ void mot_feat_extract(const struct mot_window_state *st, float sr_hz, struct mot
 	}
 
 	/*
-	 * |a| / |gyro| magnitude-series stats + jerk RMS -- CMSIS-DSP path.
-	 * ------------------------------------------------------------------
+	 * |a| / |gyro| magnitude-series stats + jerk RMS -- via alp_dsp_stats_f32.
+	 * ------------------------------------------------------------------------
 	 * amag[]/gmag[] are contiguous, stride-1 float arrays (built in pass A
-	 * above), so mean + AC RMS map directly onto arm_mean_f32 /
-	 * arm_offset_f32 / arm_rms_f32, and the jerk backward-difference onto
-	 * arm_sub_f32 + arm_scale_f32 + arm_rms_f32.  amag_ac[] doubles as the
-	 * mean-centred series fed to the FFT below (zero-padded past n).
+	 * above).  One alp_dsp_stats_f32 pass over each raw buffer yields the
+	 * mean; mean-centring is a plain portable loop (alp_dsp.h has no
+	 * offset kernel to wrap); a second alp_dsp_stats_f32 pass over the
+	 * centred buffers yields the AC (vibration) RMS and, for amag_ac,
+	 * the abs-peak used to scale the FFT input below.  The SDK backs
+	 * alp_dsp_stats_f32 with CMSIS-DSP arm_mean/rms/absmax_f32 on the M55
+	 * and a portable-C pass under native_sim -- no arm_* here.
+	 * amag_ac[] doubles as the mean-centred series fed to the FFT below
+	 * (zero-padded past n).
 	 */
 	static float amag_ac[MOT_WINDOW_N];
 	static float gmag_ac[MOT_WINDOW_N];
 	static float jerk[MOT_WINDOW_N];
-	float        mean_amag, mean_gmag, peak;
 
-#if MOT_HAS_CMSIS_DSP
-	uint32_t peak_idx;
-	arm_mean_f32(amag, (uint32_t)n, &mean_amag);
-	arm_mean_f32(gmag, (uint32_t)n, &mean_gmag);
-	arm_offset_f32(amag, -mean_amag, amag_ac, (uint32_t)n);
-	arm_offset_f32(gmag, -mean_gmag, gmag_ac, (uint32_t)n);
-	arm_rms_f32(amag_ac, (uint32_t)n, &out->amag_rms);
-	arm_rms_f32(gmag_ac, (uint32_t)n, &out->gmag_rms);
-	arm_absmax_f32(amag_ac, (uint32_t)n, &peak, &peak_idx);
+	alp_dsp_stats_t raw_amag, raw_gmag;
+	alp_dsp_stats_f32(amag, (size_t)n, &raw_amag);
+	alp_dsp_stats_f32(gmag, (size_t)n, &raw_gmag);
+	for (int i = 0; i < n; i++) {
+		amag_ac[i] = amag[i] - raw_amag.mean;
+		gmag_ac[i] = gmag[i] - raw_gmag.mean;
+	}
+
+	alp_dsp_stats_t ac_amag, ac_gmag;
+	alp_dsp_stats_f32(amag_ac, (size_t)n, &ac_amag);
+	alp_dsp_stats_f32(gmag_ac, (size_t)n, &ac_gmag);
+	out->amag_rms = ac_amag.rms;
+	out->gmag_rms = ac_gmag.rms;
+	float peak    = ac_amag.abs_max; /* peak |amag_ac|; scales the FFT input below */
+
 	if (n > 1) {
-		/* jerk[k] = amag[k+1] - amag[k], all N-1 differences in one call. */
-		arm_sub_f32(&amag[1], &amag[0], jerk, (uint32_t)(n - 1));
-		arm_scale_f32(jerk, sr_hz, jerk, (uint32_t)(n - 1));
-		arm_rms_f32(jerk, (uint32_t)(n - 1), &out->jerk_rms);
+		/* jerk[k] = (amag[k+1] - amag[k]) * sr_hz -- backward difference,
+		 * converted from "g per sample" to "g per second". */
+		for (int i = 1; i < n; i++) {
+			jerk[i - 1] = (amag[i] - amag[i - 1]) * sr_hz;
+		}
+		alp_dsp_stats_t jerk_stats;
+		alp_dsp_stats_f32(jerk, (size_t)(n - 1), &jerk_stats);
+		out->jerk_rms = jerk_stats.rms;
 	} else {
 		out->jerk_rms = 0.0f;
 	}
-#else
-	/* Portable-C fallback (native_sim, or any target without CMSIS-DSP). */
-	mean_amag = 0.0f;
-	mean_gmag = 0.0f;
-	for (int i = 0; i < n; i++) {
-		mean_amag += amag[i];
-		mean_gmag += gmag[i];
-	}
-	mean_amag /= (float)n;
-	mean_gmag /= (float)n;
-
-	float s_amag = 0.0f, s_gmag = 0.0f;
-	peak = 0.0f;
-	for (int i = 0; i < n; i++) {
-		amag_ac[i] = amag[i] - mean_amag;
-		gmag_ac[i] = gmag[i] - mean_gmag;
-		s_amag += amag_ac[i] * amag_ac[i];
-		s_gmag += gmag_ac[i] * gmag_ac[i];
-		float ampk = fabsf(amag_ac[i]);
-		if (ampk > peak) {
-			peak = ampk;
-		}
-	}
-	out->amag_rms = sqrtf(s_amag / (float)n);
-	out->gmag_rms = sqrtf(s_gmag / (float)n);
-
-	float s_jerk = 0.0f;
-	for (int i = 1; i < n; i++) {
-		jerk[i - 1] = (amag[i] - amag[i - 1]) * sr_hz; /* per-second jerk */
-		s_jerk += jerk[i - 1] * jerk[i - 1];
-	}
-	out->jerk_rms = (n > 1) ? sqrtf(s_jerk / (float)(n - 1)) : 0.0f;
-#endif
 	for (int i = n; i < MOT_WINDOW_N; i++) {
 		amag_ac[i] = 0.0f; /* zero-pad the FFT tail on a short window */
 	}

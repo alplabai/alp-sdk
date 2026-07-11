@@ -1104,7 +1104,8 @@
         "alp_dsp_chain_apply_samples",
         "alp_dsp_chain_capabilities",
         "alp_dsp_chain_close",
-        "alp_dsp_chain_open"
+        "alp_dsp_chain_open",
+        "alp_dsp_stats_f32"
       ],
       "header": "include/alp/dsp.h"
     },

@@ -42,43 +42,35 @@
 #include <string.h>
 
 /*
- * SPECTRAL + STATISTICAL MATH -- library-backed, not hand-rolled.
+ * SPECTRAL + STATISTICAL MATH -- via <alp/dsp.h>, not hand-rolled.
  * ---------------------------------------------------------------
- * This example deliberately does NOT re-derive an FFT or the window
- * statistics by hand.  Two library surfaces do the numeric work, and the
- * SAME source builds for native_sim and the Cortex-M55 alike:
+ * This example does NOT re-derive an FFT or the window statistics by
+ * hand, and it does NOT call CMSIS-DSP arm_* directly.  Both go through
+ * the portable <alp/dsp.h> surface, so the SAME source builds for
+ * native_sim and the Cortex-M55 alike and the SDK -- not the app --
+ * owns the CMSIS-vs-portable choice:
  *
- *   1. The dominant-ripple FFT goes through the portable <alp/dsp.h> chain
- *      API.  Its backend runs ARM CMSIS-DSP (arm_rfft_fast_f32, Helium-
- *      vectorised) on the M55 and a portable-C radix-2 fallback under
- *      native_sim -- selected by the backend registry, not an #ifdef here.
- *      We call the alp wrapper (not arm_rfft_* directly) because alp-sdk
- *      SHIPS a portable FFT surface: keeping the example on it lets the
- *      identical source run on the V2N (A55 + DRP-AI) path too.
+ *   1. The dominant-ripple FFT goes through alp_dsp_chain
+ *      (ALP_DSP_STAGE_FFT).  The backend runs CMSIS-DSP arm_rfft_fast_f32
+ *      (Helium-vectorised) on the M55 and a portable-C radix-2 fallback
+ *      under native_sim -- selected by the backend registry, not an
+ *      #ifdef here.  Keeping the example on it lets the identical source
+ *      run on the V2N (A55 + DRP-AI) path too.
  *
- *   2. The scalar window statistics (per-channel mean, RMS, abs-peak) call
- *      ARM CMSIS-DSP arm_*_f32 kernels DIRECTLY -- alp-sdk has no portable
- *      scalar-stats surface to wrap, and these kernels are the idiomatic
- *      accelerated path on Cortex-M.  They are guarded by __has_include
- *      with a portable-C fallback so the native_sim gate still builds.
+ *   2. The scalar window statistics (per-channel mean, RMS, abs-peak) go
+ *      through alp_dsp_stats_f32, which the SDK backs with CMSIS-DSP
+ *      arm_mean/rms/absmax_f32 on Cortex-M and a portable-C pass
+ *      elsewhere -- no arm_* here.
  *
- * CMSIS kernels operate on a single contiguous float array.  The INA236
- * sample stream is an array-of-structs (current_a/bus_v/power_w
+ * alp_dsp_stats_f32 operates on a single contiguous float array.  The
+ * INA236 sample stream is an array-of-structs (current_a/bus_v/power_w
  * interleaved per sample), so each channel is de-interleaved into its own
- * contiguous buffer once per window before the kernels run -- see the
+ * contiguous buffer once per window before the stats run -- see the
  * de-interleave loop in curr_feat_extract, which stays a plain portable
- * loop (there is no CMSIS "strided gather" kernel to replace it with).
+ * loop (there is no "strided gather" kernel to replace it with).  The
+ * first/last-quarter inrush-slope means and the mean-centring subtraction
+ * also stay plain loops -- both are trivial and not worth wrapping.
  */
-#if defined(__has_include)
-#if __has_include("arm_math.h")
-#include "arm_math.h"
-#define CURR_HAS_CMSIS_DSP 1
-#endif
-#endif
-#ifndef CURR_HAS_CMSIS_DSP
-#define CURR_HAS_CMSIS_DSP 0
-#endif
-
 #include <alp/dsp.h>
 
 /* ---------------------------------------------------------------------------
@@ -132,13 +124,12 @@ void curr_feat_extract(const struct curr_window_state *st, float sr_hz, struct c
 
 	/* De-interleave the AoS sample stream into three contiguous per-channel
 	 * buffers.  This pass is NOT a "stat" itself -- it is unavoidable data
-	 * staging: every CMSIS-DSP kernel below (arm_mean_f32, arm_offset_f32,
-	 * arm_rms_f32, arm_absmax_f32) requires a plain contiguous float array,
-	 * and the INA236 sample struct interleaves current/bus/power per
-	 * sample.  One combined pass here is cheaper than three separate
-	 * per-channel copy passes.  cur_buf is reused below for the AC-ripple
-	 * stats and the FFT input; it is static to keep the 3 * 256 * 4 = 3 KB
-	 * of buffers off the stack. */
+	 * staging: alp_dsp_stats_f32 (called below for each channel) requires
+	 * a plain contiguous float array, and the INA236 sample struct
+	 * interleaves current/bus/power per sample.  One combined pass here
+	 * is cheaper than three separate per-channel copy passes.  cur_buf is
+	 * reused below for the AC-ripple stats and the FFT input; it is
+	 * static to keep the 3 * 256 * 4 = 3 KB of buffers off the stack. */
 	static float cur_buf[CURR_WINDOW_N];
 	static float pwr_buf[CURR_WINDOW_N];
 	static float bus_buf[CURR_WINDOW_N];
@@ -152,24 +143,17 @@ void curr_feat_extract(const struct curr_window_state *st, float sr_hz, struct c
 	 * The means serve as the DC operating-point features.  mean_current_a
 	 * is the primary classifier threshold (OFF / OVERLOAD boundary).
 	 * mean_bus_v lets the caller detect load-induced voltage sag
-	 * independently of the current level. */
-#if CURR_HAS_CMSIS_DSP
-	arm_mean_f32(cur_buf, (uint32_t)n, &out->mean_current_a);
-	arm_mean_f32(pwr_buf, (uint32_t)n, &out->mean_power_w);
-	arm_mean_f32(bus_buf, (uint32_t)n, &out->mean_bus_v);
-#else
-	/* Portable-C fallback (native_sim, or any target without CMSIS-DSP);
-	 * reproduces the same sum-then-divide arithmetic as arm_mean_f32. */
-	float sum_i = 0.0f, sum_p = 0.0f, sum_v = 0.0f;
-	for (int i = 0; i < n; i++) {
-		sum_i += cur_buf[i];
-		sum_p += pwr_buf[i];
-		sum_v += bus_buf[i];
-	}
-	out->mean_current_a = sum_i / (float)n;
-	out->mean_power_w   = sum_p / (float)n;
-	out->mean_bus_v     = sum_v / (float)n;
-#endif
+	 * independently of the current level.  One alp_dsp_stats_f32 pass per
+	 * channel yields the mean; the SDK backs this with CMSIS-DSP
+	 * arm_mean_f32 on the M55 and a portable-C pass under native_sim --
+	 * no arm_* here. */
+	alp_dsp_stats_t st_cur, st_pwr, st_bus;
+	alp_dsp_stats_f32(cur_buf, (size_t)n, &st_cur);
+	alp_dsp_stats_f32(pwr_buf, (size_t)n, &st_pwr);
+	alp_dsp_stats_f32(bus_buf, (size_t)n, &st_bus);
+	out->mean_current_a = st_cur.mean;
+	out->mean_power_w   = st_pwr.mean;
+	out->mean_bus_v     = st_bus.mean;
 
 	/* --- AC ripple features: rms_ac_a and crest factor ---
 	 * Removing the DC mean before squaring is the software equivalent of AC
@@ -187,28 +171,19 @@ void curr_feat_extract(const struct curr_window_state *st, float sr_hz, struct c
 	 * periodic ripple.  Guard against divide-by-zero with the 1e-6 A floor.
 	 *
 	 * xc[] (the mean-centred current) is reused below as the FFT input, so
-	 * it is computed here once via arm_offset_f32 rather than recomputed
-	 * per stage. */
+	 * it is computed here once with a plain loop (trivial, not worth
+	 * wrapping) rather than recomputed per stage.  A second
+	 * alp_dsp_stats_f32 pass over xc then yields rms_ac_a and the abs-peak
+	 * -- the SDK backs this with CMSIS-DSP arm_rms/absmax_f32 on the M55
+	 * and a portable-C pass under native_sim -- no arm_* here. */
 	static float xc[CURR_WINDOW_N];
-	float        peak;
-#if CURR_HAS_CMSIS_DSP
-	uint32_t peak_idx;
-	arm_offset_f32(cur_buf, -out->mean_current_a, xc, (uint32_t)n);
-	arm_rms_f32(xc, (uint32_t)n, &out->rms_ac_a); /* rms = sqrt(mean(xc^2)) */
-	arm_absmax_f32(xc, (uint32_t)n, &peak, &peak_idx);
-#else
-	float sum2 = 0.0f;
-	peak       = 0.0f;
 	for (int i = 0; i < n; i++) {
-		xc[i]    = cur_buf[i] - out->mean_current_a;
-		float ax = fabsf(xc[i]);
-		sum2 += xc[i] * xc[i];
-		if (ax > peak) {
-			peak = ax;
-		}
+		xc[i] = cur_buf[i] - out->mean_current_a;
 	}
-	out->rms_ac_a = sqrtf(sum2 / (float)n);
-#endif
+	alp_dsp_stats_t st_ac;
+	alp_dsp_stats_f32(xc, (size_t)n, &st_ac);
+	float peak    = st_ac.abs_max; /* peak |xc| */
+	out->rms_ac_a = st_ac.rms;     /* AC RMS = sqrt(mean(xc^2)) */
 	/* Crest factor is undefined when there is no ripple (e.g. motor OFF or
 	 * perfectly smooth supply).  Return 0 rather than +Inf in that case;
 	 * the classifier treats 0 and a genuine low crest value identically
@@ -232,22 +207,13 @@ void curr_feat_extract(const struct curr_window_state *st, float sr_hz, struct c
 	if (q < 1) {
 		q = 1;
 	}
-#if CURR_HAS_CMSIS_DSP
-	/* mean-of-first-q and mean-of-last-q via arm_mean_f32 over a sub-range
-	 * of cur_buf; algebraically identical to (last_sum - first_sum) / q. */
-	float first_mean, last_mean;
-	arm_mean_f32(cur_buf, (uint32_t)q, &first_mean);
-	arm_mean_f32(&cur_buf[n - q], (uint32_t)q, &last_mean);
-	out->slope_a = last_mean - first_mean;
-#else
-	float first = 0.0f, last = 0.0f;
-	for (int i = 0; i < q; i++) {
-		first += cur_buf[i];
-		last += cur_buf[n - 1 - i];
-	}
-	/* slope_a is (mean of last quarter) − (mean of first quarter). */
-	out->slope_a = (last - first) / (float)q;
-#endif
+	/* mean-of-first-q and mean-of-last-q via two alp_dsp_stats_f32 passes
+	 * over sub-ranges of cur_buf -- algebraically identical to
+	 * (last_sum - first_sum) / q, and again no arm_* here. */
+	alp_dsp_stats_t st_first, st_last;
+	alp_dsp_stats_f32(cur_buf, (size_t)q, &st_first);
+	alp_dsp_stats_f32(&cur_buf[n - q], (size_t)q, &st_last);
+	out->slope_a = st_last.mean - st_first.mean;
 
 	/*
 	 * SPECTRUM via the portable <alp/dsp.h> chain (NOT a hand-rolled FFT).

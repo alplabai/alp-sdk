@@ -325,6 +325,54 @@ void alp_dsp_chain_close(alp_dsp_chain_t *chain);
  */
 const alp_capabilities_t *alp_dsp_chain_capabilities(const alp_dsp_chain_t *chain);
 
+/* ================================================================== */
+/* Summary statistics                                                  */
+/* ================================================================== */
+
+/**
+ * @brief One-pass summary statistics over a real float buffer.
+ *
+ * Populated by @ref alp_dsp_stats_f32.  All fields describe the buffer
+ * passed to that call verbatim -- if the caller wants AC statistics
+ * (DC/mean removed), it must mean-centre the buffer first and pass the
+ * centred data.
+ */
+typedef struct {
+	float    mean;          /**< Arithmetic mean, `(1/n) * sum(x[i])`.        */
+	float    rms;           /**< Root-mean-square, `sqrt((1/n) * sum(x[i]^2))`. */
+	float    variance;      /**< Population variance, `E[x^2] - E[x]^2` (>= 0). */
+	float    min;           /**< Minimum sample value.                         */
+	float    max;           /**< Maximum sample value.                         */
+	float    abs_max;       /**< Maximum magnitude, `max(|x[i]|)` (peak).      */
+	uint32_t abs_max_index; /**< Index of the @c abs_max sample.               */
+} alp_dsp_stats_t;
+
+/**
+ * @brief Compute summary statistics over a real float buffer in one call.
+ *
+ * Fills @p out with the mean, RMS, population variance, min/max, and the
+ * peak magnitude (+ its index) of @p x.  This is the portable
+ * scalar-stats counterpart to the FFT chain: the backend runs CMSIS-DSP
+ * `arm_mean_f32` / `arm_rms_f32` / `arm_min_f32` / `arm_max_f32` /
+ * `arm_absmax_f32` on Cortex-M (when the cmsis-dsp module is linked) and
+ * a single portable-C pass otherwise, so application code never calls
+ * `arm_*` directly and the same source builds on every target.
+ *
+ * @param[in]  x    Sample buffer; must be non-NULL and hold @p n floats.
+ * @param[in]  n    Sample count; must be > 0.
+ * @param[out] out  Destination stats struct; must be non-NULL.
+ *
+ * @return @ref ALP_OK on success, or @ref ALP_ERR_INVAL when @p x or
+ *         @p out is NULL or @p n is 0 (in which case @p out is
+ *         left untouched).
+ *
+ * @note @ref alp_dsp_stats_t::variance is the POPULATION variance
+ *       (divides by @p n), not the sample variance (@p n - 1) that
+ *       CMSIS-DSP's `arm_var_f32` returns -- the value is the same on
+ *       both the CMSIS and portable paths.
+ */
+alp_status_t alp_dsp_stats_f32(const float *x, size_t n, alp_dsp_stats_t *out);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

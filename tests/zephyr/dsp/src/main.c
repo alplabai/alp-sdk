@@ -583,9 +583,63 @@ ZTEST(alp_adc_spectrum, test_read_null_got_returns_inval)
 	zassert_equal(s, ALP_ERR_INVAL, NULL);
 }
 
+/* ---- alp_dsp_stats_f32 (portable scalar-stats surface) ------------ */
+
+ZTEST(alp_dsp_stats, test_null_args_return_inval)
+{
+	float           x[3] = { 1.0f, 2.0f, 3.0f };
+	alp_dsp_stats_t s;
+	zassert_equal(alp_dsp_stats_f32(NULL, 3u, &s), ALP_ERR_INVAL, NULL);
+	zassert_equal(alp_dsp_stats_f32(x, 3u, NULL), ALP_ERR_INVAL, NULL);
+	zassert_equal(alp_dsp_stats_f32(x, 0u, &s), ALP_ERR_INVAL, NULL);
+}
+
+ZTEST(alp_dsp_stats, test_ramp_stats)
+{
+	/* x = 1..5: mean 3, rms sqrt(11), var 2, peak |5| at index 4. */
+	float           x[5] = { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f };
+	alp_dsp_stats_t s;
+	zassert_equal(alp_dsp_stats_f32(x, 5u, &s), ALP_OK, NULL);
+	zassert_within(s.mean, 3.0f, 1e-4f, NULL);
+	zassert_within(s.rms, sqrtf(11.0f), 1e-4f, NULL);
+	zassert_within(s.variance, 2.0f, 1e-3f, NULL);
+	zassert_within(s.min, 1.0f, 1e-4f, NULL);
+	zassert_within(s.max, 5.0f, 1e-4f, NULL);
+	zassert_within(s.abs_max, 5.0f, 1e-4f, NULL);
+	zassert_equal(s.abs_max_index, 4u, NULL);
+}
+
+ZTEST(alp_dsp_stats, test_signed_peak_and_variance)
+{
+	/* x = {-4,1,-6,2}: mean -1.75, peak |−6| at index 2, min −6, max 2. */
+	float           x[4] = { -4.0f, 1.0f, -6.0f, 2.0f };
+	alp_dsp_stats_t s;
+	zassert_equal(alp_dsp_stats_f32(x, 4u, &s), ALP_OK, NULL);
+	zassert_within(s.mean, -1.75f, 1e-4f, NULL);
+	zassert_within(s.min, -6.0f, 1e-4f, NULL);
+	zassert_within(s.max, 2.0f, 1e-4f, NULL);
+	zassert_within(s.abs_max, 6.0f, 1e-4f, NULL);
+	zassert_equal(s.abs_max_index, 2u, NULL);
+	zassert_within(s.variance, 11.1875f, 1e-3f, NULL);
+	zassert_true(s.variance >= 0.0f, NULL);
+}
+
+ZTEST(alp_dsp_stats, test_constant_signal_zero_variance)
+{
+	/* A constant signal: variance must clamp to exactly >= 0 (no FP -eps). */
+	float           x[6] = { 2.5f, 2.5f, 2.5f, 2.5f, 2.5f, 2.5f };
+	alp_dsp_stats_t s;
+	zassert_equal(alp_dsp_stats_f32(x, 6u, &s), ALP_OK, NULL);
+	zassert_within(s.mean, 2.5f, 1e-4f, NULL);
+	zassert_within(s.rms, 2.5f, 1e-4f, NULL);
+	zassert_true(s.variance >= 0.0f, NULL);
+	zassert_within(s.variance, 0.0f, 1e-3f, NULL);
+}
+
 /* Test suites are auto-collected via ztest_register macros below.   */
 ZTEST_SUITE(alp_dsp_chain_open, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(alp_dsp_chain_apply_samples, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(alp_dsp_chain_apply_bins, NULL, NULL, NULL, NULL, NULL);
+ZTEST_SUITE(alp_dsp_stats, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(alp_adc_filter, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(alp_adc_spectrum, NULL, NULL, NULL, NULL, NULL);

@@ -14,37 +14,29 @@
 #endif
 
 /*
- * SPECTRAL + STATISTICAL MATH -- library-backed, not hand-rolled.
+ * SPECTRAL + STATISTICAL MATH -- via <alp/dsp.h>, not hand-rolled.
  * ---------------------------------------------------------------
- * This file deliberately does NOT re-derive an FFT by hand.  Two library
- * surfaces do the numeric work, and the SAME source builds for native_sim
- * and the Cortex-M55 alike:
+ * This file does NOT re-derive an FFT or the window statistics by hand,
+ * and it does NOT call CMSIS-DSP arm_* directly.  Both go through the
+ * portable <alp/dsp.h> surface, so the SAME source builds for native_sim
+ * and the Cortex-M55 alike and the SDK -- not this file -- owns the
+ * CMSIS-vs-portable choice:
  *
- *   1. The FFT goes through the portable <alp/dsp.h> chain API.  Its
- *      backend runs ARM CMSIS-DSP (arm_rfft_fast_f32, Helium-vectorised)
- *      on the M55, a hardware DSP block where the SoM has one, and a
- *      portable-C radix-2 fallback under native_sim -- selected by the
- *      backend registry, not an #ifdef here.  We call the alp wrapper
- *      (not arm_rfft_* directly) because alp-sdk SHIPS a portable FFT
- *      surface: keeping this file on it lets the identical source run
- *      on the V2N (A55 + DRP-AI) and NXP paths, which have no CMSIS-M.
+ *   1. FFT -> alp_dsp_chain (ALP_DSP_STAGE_FFT).  The backend runs
+ *      CMSIS-DSP arm_rfft_fast_f32 (Helium-vectorised) on the M55, a
+ *      hardware DSP block where the SoM has one, and a portable-C radix-2
+ *      fallback under native_sim -- selected by the backend registry.
+ *      Keeping this on <alp/dsp> lets the identical source run on the
+ *      V2N (A55 + DRP-AI) and NXP paths, which have no CMSIS-M.
  *
- *   2. The time-domain window statistics (mean, RMS, abs-peak) call ARM
- *      CMSIS-DSP arm_*_f32 kernels DIRECTLY -- alp-sdk has no portable
- *      scalar-stats surface to wrap, and these kernels are the idiomatic
- *      accelerated path on Cortex-M.  They are guarded by __has_include
- *      with a portable-C fallback so the native_sim gate still builds.
+ *   2. Time-domain window statistics (mean, RMS, abs-peak) ->
+ *      alp_dsp_stats_f32, which the SDK backs with CMSIS-DSP
+ *      arm_mean/rms/absmax_f32 on Cortex-M and a portable-C pass
+ *      elsewhere.
+ *
+ * Only the zero-crossing rate stays a hand-written loop -- it has no
+ * CMSIS (or alp_dsp) kernel.
  */
-#if defined(__has_include)
-#if __has_include("arm_math.h")
-#include "arm_math.h"
-#define ASE_HAS_CMSIS_DSP 1
-#endif
-#endif
-#ifndef ASE_HAS_CMSIS_DSP
-#define ASE_HAS_CMSIS_DSP 0
-#endif
-
 #include <alp/dsp.h>
 
 /* Reset the accumulator so the next push starts at index 0. */
@@ -112,47 +104,30 @@ void ase_feat_extract(const struct ase_frame_state *st, float sr_hz, struct ase_
 	 * interpolates the spectrum to finer bin spacing.  xc is static
 	 * (single audio thread, no re-entrancy) to keep a 2 kB buffer off
 	 * the stack.
+	 *
+	 * One alp_dsp_stats_f32 pass over the raw frame yields the mean; a
+	 * second over the mean-centred xc yields the RMS and abs-peak with
+	 * the DC bias already removed.  The SDK backs these with CMSIS-DSP
+	 * arm_mean/rms/absmax_f32 on the M55 and a portable-C pass under
+	 * native_sim -- no arm_* here.
 	 */
 	static float xc[ASE_FRAME_N];
-	float        peak;
 
-#if ASE_HAS_CMSIS_DSP
-	/*
-	 * CMSIS-DSP path (Cortex-M55: Helium-vectorised kernels).
-	 * arm_mean_f32 / arm_offset_f32 / arm_rms_f32 / arm_absmax_f32 are
-	 * the idiomatic accelerated primitives; alp-sdk has no portable
-	 * scalar-stats surface to wrap, so we call them directly.
-	 */
-	float mean;
-	arm_mean_f32(st->samples, (uint32_t)n, &mean);
-	arm_offset_f32(st->samples, -mean, xc, (uint32_t)n);
+	alp_dsp_stats_t raw;
+	alp_dsp_stats_f32(st->samples, (size_t)n, &raw);
+	const float mean = raw.mean;
 
-	uint32_t peak_idx;
-	arm_rms_f32(xc, (uint32_t)n, &out->rms); /* rms = sqrt(mean(xc^2)) */
-	arm_absmax_f32(xc, (uint32_t)n, &peak, &peak_idx);
-#else
-	/* Portable-C fallback (native_sim, or any target without CMSIS-DSP). */
-	float mean = 0.0f;
 	for (int i = 0; i < n; i++) {
-		mean += st->samples[i];
+		xc[i] = st->samples[i] - mean;
 	}
-	mean /= (float)n;
-
-	float sum2 = 0.0f;
-	peak       = 0.0f;
-	for (int i = 0; i < n; i++) {
-		xc[i]    = st->samples[i] - mean;
-		float ax = fabsf(xc[i]);
-		sum2 += xc[i] * xc[i];
-		if (ax > peak) {
-			peak = ax;
-		}
-	}
-	out->rms = sqrtf(sum2 / (float)n);
-#endif
 	for (int i = n; i < ASE_FRAME_N; i++) {
 		xc[i] = 0.0f; /* zero-pad the FFT tail on a short frame */
 	}
+
+	alp_dsp_stats_t ac;
+	alp_dsp_stats_f32(xc, (size_t)n, &ac);
+	const float peak = ac.abs_max; /* peak |xc|              */
+	out->rms         = ac.rms;     /* RMS = sqrt(mean(xc^2)) */
 
 	/*
 	 * CREST FACTOR: peak / RMS, from the DC-free window computed above.
@@ -164,8 +139,8 @@ void ase_feat_extract(const struct ase_frame_state *st, float sr_hz, struct ase_
 
 	/*
 	 * ZERO-CROSSING RATE -- a cheap pitch / high-frequency proxy.
-	 * CMSIS-DSP ships no zero-crossing kernel, so this stays a portable
-	 * loop over xc regardless of ASE_HAS_CMSIS_DSP.
+	 * CMSIS-DSP (and alp_dsp) ship no zero-crossing kernel, so this
+	 * stays a portable loop over xc.
 	 *
 	 *   ZCR = (number of sign changes) / N   in [0, 1]
 	 *     A 4 kHz tone at 16 kHz SR crosses zero ~0.5 times per sample ->

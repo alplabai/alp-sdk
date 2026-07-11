@@ -7,6 +7,31 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — portable DSP scalar-stats surface (`alp_dsp_stats_f32`)
+
+- `<alp/dsp.h>` gains `alp_dsp_stats_f32(const float *x, size_t n,
+  alp_dsp_stats_t *out)` — a one-pass summary (mean, RMS, population
+  variance, min/max, abs-peak + index) that the SDK backs with CMSIS-DSP
+  `arm_mean/rms/min/max/absmax_f32` on Cortex-M and a portable-C pass
+  elsewhere, so application code never calls `arm_*` directly.  Marked
+  `[ABI-EXPERIMENTAL]` alongside the existing chain API.  The Zephyr
+  build now also defines `ALP_HAS_CMSIS_DSP=1` when `CONFIG_CMSIS_DSP=y`
+  (previously plain-CMake-only), so the `<alp/dsp>` FFT chain + stats
+  actually link CMSIS-DSP on the M55 instead of silently using the
+  portable-C fallback.
+
+### Changed — DSP examples use `<alp/dsp>` instead of hand-rolled FFT/stats
+
+- The five vibration/audio examples (rail-predictive-maintenance,
+  motor-current-signature, wearable-activity-fall,
+  acoustic-anomaly-wind-turbine, acoustic-safety-events) previously each
+  re-derived a radix-2 FFT and hand-rolled their moment statistics; they
+  now route the FFT through the `<alp/dsp>` chain and the reductions
+  through `alp_dsp_stats_f32`, dropping ~230 lines of duplicated DSP
+  math.  A single-bin Goertzel (wind-turbine) is intentionally retained
+  (right tool for one bin; no CMSIS kernel).  Teaching-comment density
+  was also raised on ~20 thin example `main.c` files.
+
 ### Added — `--emit zephyr-board` generator (#523)
 
 - `scripts/alp_project.py --input <board.yaml> --core <core_id> --emit

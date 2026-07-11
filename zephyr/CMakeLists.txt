@@ -720,6 +720,17 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dsp/sw_fallback.c)
 
+# The DSP body + stats surface call CMSIS-DSP kernels (arm_rfft_fast_f32,
+# arm_mean/rms/min/max/absmax_f32) when the cmsis-dsp module is linked,
+# else the portable-C fallbacks.  The plain-CMake build sets this via
+# option(ALP_HAS_CMSIS_DSP); mirror it under Zephyr keyed off
+# CONFIG_CMSIS_DSP, otherwise the M55 build silently used portable-C even
+# with cmsis-dsp present.  board.yaml `libraries: [cmsis_dsp]` enables the
+# full component matrix, so TRANSFORM (arm_rfft_*) + STATISTICS (arm_*_f32)
+# link cleanly.  (The macro is only consumed inside the CONFIG_ALP_SDK_DSP
+# sources above, so enabling cmsis-dsp without the DSP class is inert.)
+zephyr_compile_definitions_ifdef(CONFIG_CMSIS_DSP ALP_HAS_CMSIS_DSP=1)
+
 # System-power-mode surface (<alp/power.h>).  Wired behind
 # CONFIG_ALP_SDK_POWER so customers can opt out on builds that
 # don't need sleep transitions.  Class dispatcher + wildcard stub
