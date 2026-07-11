@@ -352,7 +352,7 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
                        "# gfx_compat: maintainer-shipped thin shim; no external dep",),
 
     # §D.lib.industrial
-    "madgwick_ahrs":  ("CONFIG_ALP_MADGWICK_LIBM=y",),
+    "madgwick_ahrs":  ("CONFIG_ALP_SDK_AHRS=y", "CONFIG_ALP_MADGWICK_LIBM=y"),
     "pid":            ("CONFIG_ALP_PID_INT_MATH=y",),
     "modbus":         ("CONFIG_ALP_MODBUS_SYNC_IO=y",),
 
