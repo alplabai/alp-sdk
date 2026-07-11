@@ -165,7 +165,12 @@ alp_aead_t *alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len
  * @param[in]  plain_len   Plaintext length.
  * @param[out] cipher_out  Ciphertext destination.  Same size as plaintext.
  * @param[out] tag_out     Authentication tag destination.
- * @param[in]  tag_len     Tag length, typically 16 B.  Must be ≥ 16.
+ * @param[in]  tag_len     Tag length.  Must be exactly 16 B -- the only
+ *                         length every backend round-trips for the
+ *                         algorithms above (AES-128/256-GCM,
+ *                         ChaCha20-Poly1305); any other value is
+ *                         rejected with @c ALP_ERR_INVAL before any
+ *                         crypto runs.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
  */
 alp_status_t alp_aead_encrypt(alp_aead_t    *a,
@@ -190,8 +195,18 @@ alp_status_t alp_aead_encrypt(alp_aead_t    *a,
  * @param[in]  cipher      Ciphertext input.
  * @param[in]  cipher_len  Ciphertext length.
  * @param[in]  tag         Authentication tag from encryption.
- * @param[in]  tag_len     Tag length.
+ * @param[in]  tag_len     Tag length.  Must be exactly 16 B -- see
+ *                         @ref alp_aead_encrypt.
  * @param[out] plain_out   Plaintext destination.  Same size as ciphertext.
+ *                         NOTE: during the call, @p plain_out transiently
+ *                         holds plaintext that has not yet been verified
+ *                         against @p tag (the backend streams it in before
+ *                         the tag check completes) -- treat any bytes
+ *                         observed there before this function returns as
+ *                         unauthenticated, which matters for AMP shared-
+ *                         memory buffers another core could poll.  On any
+ *                         non-@c ALP_OK return the whole buffer is wiped
+ *                         per the discard contract below.
  * @return ALP_OK on success;
  *         ALP_ERR_IO on tag-mismatch (the message has been tampered
  *         with — @p plain_out content is undefined and MUST be discarded);

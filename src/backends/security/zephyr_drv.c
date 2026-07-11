@@ -369,34 +369,84 @@ static alp_status_t z_aead_encrypt(alp_aead_backend_state_t *state,
 	struct aead_be *be = (struct aead_be *)state->be_data;
 	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
 
+	/* tag_len must be exactly 16 B -- the only length every backend
+     * (this one, yocto_drv.c, se_cryptocell.c) round-trips.  Check
+     * before any PSA setup so a bad caller never burns a live
+     * psa_aead_operation_t. */
+	if (tag_len != 16u) return ALP_ERR_INVAL;
+
 	psa_algorithm_t psa_alg;
 	psa_key_type_t  kt;
 	size_t          kb;
 	(void)aead_alg_meta(state->alg, &psa_alg, &kt, &kb);
 
-	/* PSA's aead_encrypt produces ciphertext || tag in one buffer.  We
-     * copy the tag tail out into the caller's tag buffer to match the
-     * public API's tag-out separation.  Stack scratch bounded at
-     * 4096 + 16 -- larger blobs land in a heap-fallback follow-on. */
-	if (plain_len > 4096) return ALP_ERR_NOSUPPORT;
-	uint8_t      scratch[4096 + 16];
-	size_t       produced = 0;
-	psa_status_t st       = psa_aead_encrypt(be->key_id,
-	                                         psa_alg,
-	                                         iv,
-	                                         iv_len,
-	                                         aad,
-	                                         aad_len,
-	                                         plain,
-	                                         plain_len,
-	                                         scratch,
-	                                         sizeof(scratch),
-	                                         &produced);
-	if (st != PSA_SUCCESS) return psa_to_alp(st);
+	/* GHSA-7xh2-9pcg-r824: this used to buffer the whole ciphertext||tag
+     * in a 4,112-byte automatic array, which overflows a 4 KiB caller
+     * thread (a common CONFIG_MAIN_STACK_SIZE).  PSA's multipart AEAD
+     * streams ciphertext straight into the caller's cipher_out buffer
+     * instead.  The only stack state is the fixed-size `op` context
+     * (independent of plain_len) -- no scratch buffer at all.
+     *
+     * PSA multipart conformance (adversarial-review defect #1): a
+     * driver backing this PSA implementation (e.g. Alif SE / Renesas
+     * RSIP, once routed through the mbedtls driver layer) is allowed
+     * to hold back a partial block in psa_aead_update() and emit it
+     * from psa_aead_finish() instead -- software mbedtls happens to
+     * always emit the whole input in update(), but that is NOT a PSA
+     * guarantee.  So: track a running offset into cipher_out, hand
+     * psa_aead_update() the REMAINING capacity (== plain_len - off,
+     * which for this single one-shot call is plain_len -- the PSA-
+     * required per-update ceiling PSA_AEAD_UPDATE_OUTPUT_SIZE() can
+     * never exceed the input length on a first/only update call, since
+     * there is no prior held-back data to combine with), then let
+     * psa_aead_finish() write its tail directly after the update's
+     * output.  Total ciphertext length equals plaintext length for
+     * these AEADs, so `off == plain_len` on success replaces the old
+     * per-call `produced == len` / `final_len == 0` equality that a
+     * holdback driver would spuriously fail. */
+	psa_aead_operation_t op = psa_aead_operation_init();
+	psa_status_t         st = psa_aead_encrypt_setup(&op, be->key_id, psa_alg);
+	if (st != PSA_SUCCESS) {
+		(void)psa_aead_abort(&op);
+		return psa_to_alp(st);
+	}
 
-	if (produced < tag_len || produced - tag_len != plain_len) return ALP_ERR_IO;
-	memcpy(cipher_out, scratch, plain_len);
-	memcpy(tag_out, scratch + plain_len, tag_len);
+	st = psa_aead_set_nonce(&op, iv, iv_len);
+	if (st != PSA_SUCCESS) {
+		(void)psa_aead_abort(&op);
+		return psa_to_alp(st);
+	}
+
+	if (aad_len > 0) {
+		st = psa_aead_update_ad(&op, aad, aad_len);
+		if (st != PSA_SUCCESS) {
+			(void)psa_aead_abort(&op);
+			return psa_to_alp(st);
+		}
+	}
+
+	size_t off = 0;
+
+	if (plain_len > 0) {
+		size_t produced = 0;
+		st = psa_aead_update(&op, plain, plain_len, cipher_out + off, plain_len - off, &produced);
+		if (st != PSA_SUCCESS) {
+			(void)psa_aead_abort(&op);
+			return psa_to_alp(st);
+		}
+		off += produced;
+	}
+
+	size_t final_len        = 0;
+	size_t produced_tag_len = 0;
+	st                      = psa_aead_finish(
+	    &op, cipher_out + off, plain_len - off, &final_len, tag_out, tag_len, &produced_tag_len);
+	if (st != PSA_SUCCESS) {
+		(void)psa_aead_abort(&op);
+		return psa_to_alp(st);
+	}
+	off += final_len;
+	if (off != plain_len || produced_tag_len != tag_len) return ALP_ERR_IO;
 	return ALP_OK;
 #else
 	(void)state;
@@ -428,30 +478,85 @@ static alp_status_t z_aead_decrypt(alp_aead_backend_state_t *state,
 	struct aead_be *be = (struct aead_be *)state->be_data;
 	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
 
+	/* tag_len must be exactly 16 B -- see z_aead_encrypt. */
+	if (tag_len != 16u) return ALP_ERR_INVAL;
+
 	psa_algorithm_t psa_alg;
 	psa_key_type_t  kt;
 	size_t          kb;
 	(void)aead_alg_meta(state->alg, &psa_alg, &kt, &kb);
 
-	if (cipher_len > 4096) return ALP_ERR_NOSUPPORT;
-	uint8_t scratch[4096 + 16];
-	if (cipher_len + tag_len > sizeof(scratch)) return ALP_ERR_NOSUPPORT;
-	memcpy(scratch, cipher, cipher_len);
-	memcpy(scratch + cipher_len, tag, tag_len);
+	/* GHSA-7xh2-9pcg-r824: see z_aead_encrypt -- multipart AEAD streams
+     * ciphertext straight from the caller's `cipher` into `plain_out`,
+     * no combined ciphertext||tag scratch and no payload-size ceiling.
+     *
+     * PSA multipart conformance (adversarial-review defect #1): same
+     * running-offset / remaining-capacity handling as z_aead_encrypt,
+     * so a holdback-capable driver's psa_aead_verify() tail is not
+     * mistaken for a spurious mismatch.  `off == cipher_len` on
+     * success replaces the old `produced == len` / `verify_len == 0`
+     * equality.
+     *
+     * Unverified-plaintext window: psa_aead_verify() writes its tail
+     * bytes directly into plain_out + off *before* it has confirmed
+     * the tag -- see <alp/security.h> alp_aead_decrypt() docs.  Every
+     * failure path below (update failure, verify failure, and the
+     * short-total defensive check) memsets the FULL cipher_len region
+     * of plain_out, not just the bytes psa_aead_update() wrote, so
+     * that transient tail is never left readable on a rejected
+     * message. */
+	psa_aead_operation_t op = psa_aead_operation_init();
+	psa_status_t         st = psa_aead_decrypt_setup(&op, be->key_id, psa_alg);
+	if (st != PSA_SUCCESS) {
+		(void)psa_aead_abort(&op);
+		return psa_to_alp(st);
+	}
 
-	size_t       produced = 0;
-	psa_status_t st       = psa_aead_decrypt(be->key_id,
-	                                         psa_alg,
-	                                         iv,
-	                                         iv_len,
-	                                         aad,
-	                                         aad_len,
-	                                         scratch,
-	                                         cipher_len + tag_len,
-	                                         plain_out,
-	                                         cipher_len,
-	                                         &produced);
-	return psa_to_alp(st);
+	st = psa_aead_set_nonce(&op, iv, iv_len);
+	if (st != PSA_SUCCESS) {
+		(void)psa_aead_abort(&op);
+		return psa_to_alp(st);
+	}
+
+	if (aad_len > 0) {
+		st = psa_aead_update_ad(&op, aad, aad_len);
+		if (st != PSA_SUCCESS) {
+			(void)psa_aead_abort(&op);
+			return psa_to_alp(st);
+		}
+	}
+
+	size_t off = 0;
+
+	if (cipher_len > 0) {
+		size_t produced = 0;
+		st = psa_aead_update(&op, cipher, cipher_len, plain_out + off, cipher_len - off, &produced);
+		if (st != PSA_SUCCESS) {
+			(void)psa_aead_abort(&op);
+			memset(plain_out, 0, cipher_len);
+			return psa_to_alp(st);
+		}
+		off += produced;
+	}
+
+	size_t verify_len = 0;
+	st = psa_aead_verify(&op, plain_out + off, cipher_len - off, &verify_len, tag, tag_len);
+	if (st != PSA_SUCCESS) {
+		/* Tampered tag (PSA_ERROR_INVALID_SIGNATURE) or any other
+         * failure: wipe the full plain_out region -- update() already
+         * wrote up to `off` bytes and verify() may have just written
+         * its (unverified) tail past it -- so a tag mismatch never
+         * leaves plaintext sitting in plain_out. */
+		(void)psa_aead_abort(&op);
+		memset(plain_out, 0, cipher_len);
+		return psa_to_alp(st);
+	}
+	off += verify_len;
+	if (off != cipher_len) {
+		memset(plain_out, 0, cipher_len);
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
 #else
 	(void)state;
 	(void)iv;

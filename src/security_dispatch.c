@@ -357,6 +357,11 @@ alp_status_t alp_aead_encrypt(alp_aead_t    *a,
      * so no backend ever dereferences or translates a NULL aad
      * (issue #245). */
 	if (aad == NULL && aad_len > 0) return ALP_ERR_INVAL;
+	/* NULL plaintext with a non-zero length would forward straight into
+	 * the backend's psa_aead_update()/EVP_EncryptUpdate() and NULL-deref
+	 * -- reject here so every backend benefits (issue: adversarial
+	 * review of GHSA-7xh2-9pcg-r824, defect #3). */
+	if (plain == NULL && plain_len > 0) return ALP_ERR_INVAL;
 	if (!alp_handle_op_enter(&a->lifecycle, &a->active_ops)) return ALP_ERR_NOT_READY;
 	alp_status_t rc;
 	if (a->state.ops == NULL || a->state.ops->aead_encrypt == NULL) {
@@ -381,11 +386,16 @@ alp_status_t alp_aead_decrypt(alp_aead_t    *a,
                               uint8_t       *plain_out)
 {
 	if (a == NULL) return ALP_ERR_NOT_READY;
-	if (iv == NULL || cipher == NULL || tag == NULL || plain_out == NULL) {
+	if (iv == NULL || tag == NULL || plain_out == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	/* Same no-AAD contract as alp_aead_encrypt (issue #245). */
+	/* Same no-AAD contract as alp_aead_encrypt (issue #245).  cipher may
+	 * legitimately be NULL when cipher_len == 0 (AAD-only integrity
+	 * check, no ciphertext) -- mirror the plain/plain_len guard above
+	 * rather than requiring cipher unconditionally (adversarial review
+	 * of GHSA-7xh2-9pcg-r824, defect #3). */
 	if (aad == NULL && aad_len > 0) return ALP_ERR_INVAL;
+	if (cipher == NULL && cipher_len > 0) return ALP_ERR_INVAL;
 	if (!alp_handle_op_enter(&a->lifecycle, &a->active_ops)) return ALP_ERR_NOT_READY;
 	alp_status_t rc;
 	if (a->state.ops == NULL || a->state.ops->aead_decrypt == NULL) {
