@@ -105,11 +105,16 @@ jobs:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
         run: |
           set -euo pipefail
+          # Register alp-sdk as a Zephyr module so its board_root/dts_root
+          # (zephyr/module.yml) expose the generated M33-SM board -- raw
+          # `west build` doesn't auto-discover the manifest repo the way
+          # `west alp-build` does.
           west build -p always \
               -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 \
               "${ZEPHYR_BASE}/samples/hello_world" \
               -d /tmp/v2n-m33-build \
-              -- -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/v2n_m33_ramconsole.conf"
+              -- -DEXTRA_ZEPHYR_MODULES="${GITHUB_WORKSPACE}/alp-sdk" \
+                 -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/v2n_m33_ramconsole.conf"
           test -f /tmp/v2n-m33-build/zephyr/zephyr.elf
 
       - name: west alp-renode --sim-mode end-to-end (real V2N M33 firmware)
