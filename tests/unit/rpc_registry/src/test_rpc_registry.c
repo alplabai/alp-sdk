@@ -32,6 +32,7 @@
 #include <alp/rpc.h>
 
 #include "../../../../src/backends/rpc/rpc_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_rpc_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -163,7 +164,12 @@ static struct alp_rpc_channel _make_fake_channel(void)
 {
 	struct alp_rpc_channel ch;
 	memset(&ch, 0, sizeof(ch));
-	ch.in_use    = true;
+	ch.in_use = true;
+	/* alp_rpc_open() also stamps this after a successful backend open
+     * (GHSA-xhm8-7f87-93q5 defect 2 / issue #629's op-vs-close guard,
+     * src/common/alp_slot_claim.h) -- alp_rpc_call() gates on this, not
+     * `in_use`. */
+	ch.lifecycle = ALP_HANDLE_LC_OPEN;
 	ch.state.ops = &_fake_ops;
 	return ch;
 }

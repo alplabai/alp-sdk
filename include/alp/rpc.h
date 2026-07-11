@@ -239,6 +239,19 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg);
  * @ref alp_rpc_call invocations on the channel return
  * @ref ALP_ERR_NOT_READY before unblocking.
  *
+ * @par Concurrent-close contract (GHSA-xhm8-7f87-93q5)
+ * Calling this concurrently from two threads on the SAME still-open
+ * @p ch -- including a subscriber callback (see @ref alp_rpc_method_cb_t)
+ * closing its own channel from inside the callback while another thread
+ * closes it too -- is supported and race-free: exactly one caller
+ * performs the teardown, the other is a safe no-op, and neither
+ * blocks/crashes/double-frees.  What is NOT supported: calling this a
+ * second time on a handle that has already completed a full close (and
+ * whose slot may since have been reused by an unrelated
+ * @ref alp_rpc_open) -- @p ch is a raw pointer with no generation the
+ * caller carries across calls, so that is a use-after-close by the
+ * caller, the same class of bug as any other use of a stale handle.
+ *
  * @param[in] ch  Handle from @ref alp_rpc_open, or NULL (no-op).
  */
 void alp_rpc_close(alp_rpc_channel_t *ch);

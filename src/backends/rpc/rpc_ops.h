@@ -78,7 +78,33 @@ struct alp_rpc_channel {
 	alp_rpc_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
-	bool                    in_use;
+	/* lifecycle/active_ops build on the generic open/op/close primitives
+     * in src/common/alp_slot_claim.h (alp_lifecycle_cas/
+     * alp_handle_op_enter/leave -- issue #629's pattern, applied here
+     * for GHSA-xhm8-7f87-93q5 defect 2): every op in src/rpc_dispatch.c
+     * gates on `lifecycle`, not `in_use`. `in_use` is touched only by
+     * the atomic pool-slot claim/release in _alloc_rpc()/_free_rpc().
+     * NOTE: alp_rpc_close() does NOT call the ready-made
+     * alp_handle_begin_close() helper -- that helper drains
+     * `active_ops` to zero BEFORE running the caller's close body,
+     * which assumes every gated op is short; alp_rpc_call() is not (it
+     * can block up to its `timeout_ms`, unblocked only by the
+     * backend's own close). alp_rpc_close() instead does CAS ->
+     * ops->close() -> drain, so see its own doc comment for the full
+     * ordering argument. Order matters: _free_rpc() (alp_slot_release)
+     * runs strictly AFTER ops->close() has returned AND `active_ops`
+     * has drained to 0 AND `lifecycle` has been reset to
+     * ALP_HANDLE_LC_UNOPENED, so a concurrent alp_rpc_open() can never
+     * recycle this slot -- and hand a DIFFERENT, freshly-opened channel
+     * out through the very pointer a still-in-flight op is
+     * dereferencing -- while that op or close is still running. `in_use`
+     * is last (as in every other *_dispatch.c using this pattern) so a
+     * fresh claim's memset(..., offsetof(..., in_use)) zeroes
+     * `lifecycle`/`active_ops` back to ALP_HANDLE_LC_UNOPENED / 0
+     * without clobbering the flag the CAS just flipped. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 /* ------------------------------------------------------------------ */

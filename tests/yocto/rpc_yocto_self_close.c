@@ -25,7 +25,15 @@
  * libmetal/open-amp user-space symbol -- so no OpenAMP library needs
  * to be installed to exercise it here.
  *
- * Three scenarios:
+ * A followup review found the self-join/UAF fix above incomplete: an
+ * application thread can be inside y_call()/y_send() (or
+ * y_subscribe()/y_unsubscribe()) when a close runs, which used to race
+ * rpc_be_teardown()'s mutex/cond destroy + free() the same way (POSIX
+ * UB + heap use-after-free) -- scenarios 4 and 5 below reproduce that
+ * (defect 1); see rpc_be_op_enter()/rpc_be_drain_inflight() in
+ * src/backends/rpc/yocto_drv.c for the fix.
+ *
+ * Five scenarios:
  *   1. test_self_close_no_uaf_no_selfjoin -- the CVE reproduction: a
  *      subscriber callback closes its own channel.  Must not hang
  *      (would indicate a real self-join) and must not crash (would
@@ -39,6 +47,13 @@
  *      (via a callback) must be single-shot: exactly one of the two
  *      tears the channel down, the other is a safe no-op, and neither
  *      hangs nor double-frees, across many iterations.
+ *   4. test_call_vs_close_no_uaf -- a thread blocked inside y_call()
+ *      (holding tx_mutex, waiting on call_cond) races an external
+ *      y_close() on the same channel; must not hang and must not
+ *      use-after-free call_mutex/call_cond/`ch` (defect 1).
+ *   5. test_send_vs_close_no_uaf -- a thread spinning on y_send()
+ *      races an external y_close() on the same channel, across many
+ *      iterations; must not use-after-free tx_mutex/`ch` (defect 1).
  *
  * Build + run (needs a Linux host; no OpenAMP/libmetal install
  * required):
@@ -48,6 +63,9 @@
  *
  * Under ASan/TSan (recommended -- this is what actually proves no
  * use-after-free / no data race, as opposed to "didn't crash today"):
+ * wired as the alp_test_rpc_asan_ubsan / alp_test_rpc_tsan CTest
+ * targets (GHSA-xhm8-7f87-93q5 defect 3, see run_sanitized_rpc_tests.sh)
+ * in this directory's CMakeLists.txt, or manually:
  *   cmake -B build-asan -DALP_OS=yocto -DALP_BUILD_TESTS=ON \
  *         -DCMAKE_C_FLAGS="-fsanitize=address,undefined -g -O1"
  *   cmake --build build-asan --target alp_test_rpc_yocto_self_close
@@ -57,11 +75,15 @@
  *         -DCMAKE_C_FLAGS="-fsanitize=thread -g -O1"
  *   cmake --build build-tsan --target alp_test_rpc_yocto_self_close
  *   ./build-tsan/tests/yocto/alp_test_rpc_yocto_self_close
+ *   (some sandboxed/containerised hosts need ASLR disabled for TSan's
+ *   fixed shadow-memory mapping: `setarch $(uname -m) -R ./…` -- see
+ *   the CTest wiring's own comment.)
  */
 
 #define ALP_SDK_HAVE_OPENAMP_USERLAND 1
 #include "../../src/backends/rpc/yocto_drv.c"
 
+#include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -94,6 +116,18 @@ static struct rpc_be *make_test_channel(int ept_fd)
 	ALP_ASSERT_TRUE(ch != NULL);
 	if (ch == NULL) {
 		return NULL;
+	}
+
+	/* Match y_open()'s real O_NONBLOCK ept_fd (see y_open() above):
+     * scenarios 4/5 write() into this fd via y_call()/y_send() with
+     * nobody draining the peer end, so a BLOCKING socketpair fd here
+     * would wedge write() forever once its buffer fills -- a test-
+     * harness deadlock, not a production bug (the real chardev is
+     * always opened non-blocking).  Tests 1-3 never call y_send()/
+     * y_call() so this is a no-op for them. */
+	int fl = fcntl(ept_fd, F_GETFL, 0);
+	if (fl >= 0) {
+		(void)fcntl(ept_fd, F_SETFL, fl | O_NONBLOCK);
 	}
 
 	strncpy(ch->name, "selfclose", sizeof(ch->name) - 1);
@@ -360,11 +394,172 @@ static void test_concurrent_external_vs_self_close_is_single_shot(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* 4. y_call() in flight, racing an external y_close() (defect 1).      */
+/* ------------------------------------------------------------------ */
+
+#define CALL_CLOSE_RACE_ITERATIONS 20
+
+static alp_rpc_backend_state_t *g_call_race_state;
+static atomic_int               g_call_race_done;
+static alp_status_t             g_call_race_result;
+
+static void *call_race_thread(void *arg)
+{
+	(void)arg;
+	uint8_t resp[8];
+	size_t  resp_len = sizeof resp;
+	/* Bounded so a regression that fails to cancel this call (instead
+     * of hanging forever) still turns into a clean test failure rather
+     * than a wedged CI job -- the actual bug under test is a
+     * crash/use-after-free/data race under ASan/TSan, not this timeout
+     * firing. */
+	g_call_race_result =
+	    y_call(g_call_race_state, "no_such_method", NULL, 0, resp, &resp_len, TEST_TIMEOUT_MS);
+	atomic_store(&g_call_race_done, 1);
+	return NULL;
+}
+
+static void test_call_vs_close_no_uaf(void)
+{
+	for (int i = 0; i < CALL_CLOSE_RACE_ITERATIONS; ++i) {
+		int sv[2];
+		ALP_ASSERT_EQ_INT(socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+
+		struct rpc_be          *ch = make_test_channel(sv[0]);
+		alp_rpc_backend_state_t st = { .be_data = ch, .ops = &_ops };
+		g_call_race_state          = &st;
+
+		atomic_int worker_done;
+		ALP_ASSERT_EQ_INT(spawn_rx_thread(ch, &worker_done), 0);
+
+		atomic_store(&g_call_race_done, 0);
+		pthread_t caller;
+		ALP_ASSERT_EQ_INT(pthread_create(&caller, NULL, call_race_thread, NULL), 0);
+
+		/* Let y_call() get well into its staged wait (tx_mutex held,
+         * call_pending = true, blocked in pthread_cond_timedwait)
+         * before racing the close against it -- this is the exact
+         * in-flight-op-vs-teardown window GHSA-xhm8-7f87-93q5 defect 1
+         * is about: without rpc_be_op_enter()/rpc_be_drain_inflight(),
+         * y_close() -> rpc_be_teardown() would destroy call_mutex/
+         * call_cond and free `ch` while this thread is still inside
+         * pthread_cond_timedwait() on them. */
+		sleep_ms(20);
+
+		/* External close: joins the RX thread, then (rpc_be_teardown())
+         * drains inflight_ops -- this in-flight call counted itself via
+         * rpc_be_op_enter() -- before touching any mutex/cond or
+         * freeing `ch`. */
+		y_close(&st);
+
+		ALP_ASSERT_TRUE(wait_until(&g_call_race_done, TEST_TIMEOUT_MS));
+		ALP_ASSERT_EQ_INT(pthread_join(caller, NULL), 0);
+
+		/* Cancelled by the close's pending-call cancel (the expected,
+         * common outcome), or -- in the unlikely case the call hadn't
+         * staged `call_pending` yet when that one-shot cancel ran --
+         * caught by rpc_be_drain_inflight()'s own repeated re-cancel
+         * and still resolved to NOT_READY; either is a correct,
+         * non-crashing outcome. ASan/TSan (not this assertion) is what
+         * actually proves no use-after-free / data race happened, per
+         * this file's header comment. */
+		ALP_ASSERT_TRUE(g_call_race_result == ALP_ERR_NOT_READY);
+
+		ALP_ASSERT_TRUE(wait_until(&worker_done, TEST_TIMEOUT_MS));
+		close(sv[1]);
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* 5. y_send() loop racing an external y_close() (defect 1).           */
+/* ------------------------------------------------------------------ */
+
+#define SEND_CLOSE_RACE_ITERATIONS 50
+
+static alp_rpc_backend_state_t *g_send_race_state;
+static atomic_int               g_send_race_stop;
+static atomic_int               g_send_race_bad_rc;
+
+static void *send_race_thread(void *arg)
+{
+	(void)arg;
+	uint8_t payload = 0x42u;
+	while (!atomic_load(&g_send_race_stop)) {
+		/* ALP_OK (raced ahead of the close), ALP_ERR_NOT_READY (the
+         * close already unpublished the channel before this call
+         * entered), ALP_ERR_BUSY (nobody drains the socketpair peer
+         * end in this test double, so the non-blocking send buffer
+         * fills up -- EAGAIN, same as a real backpressured RPMsg
+         * queue), or ALP_ERR_IO (the peer fd got closed mid-write, a
+         * benign ordering artefact of the socketpair test double) are
+         * all correct outcomes here -- ASan/TSan is what actually
+         * proves no use-after-free / data race happened while this
+         * raced y_close() below, not this return value.
+         *
+         * Deliberately NOT an ALP_ASSERT_* call here: test_assert.h's
+         * counters are plain, unsynchronised globals (this test suite
+         * predates any multi-threaded ASSERT caller), so asserting
+         * from this background thread would itself race the main
+         * thread's own ALP_ASSERT_* calls (e.g. the pthread_create()
+         * check right after spawning this thread) on those counters --
+         * a TEST-HARNESS data race ThreadSanitizer flagged in an
+         * earlier version of this file, distinct from anything this
+         * test is actually trying to prove about the RPC backend.
+         * Record the outcome instead and let the JOINING thread
+         * (guaranteed ordered-after this thread's exit by
+         * pthread_join()) do the one ALP_ASSERT_TRUE below. */
+		alp_status_t rc = y_send(g_send_race_state, "noop", &payload, sizeof payload);
+		if (!(rc == ALP_OK || rc == ALP_ERR_NOT_READY || rc == ALP_ERR_BUSY || rc == ALP_ERR_IO)) {
+			atomic_store(&g_send_race_bad_rc, 1);
+		}
+	}
+	return NULL;
+}
+
+static void test_send_vs_close_no_uaf(void)
+{
+	for (int i = 0; i < SEND_CLOSE_RACE_ITERATIONS; ++i) {
+		int sv[2];
+		ALP_ASSERT_EQ_INT(socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+
+		struct rpc_be          *ch = make_test_channel(sv[0]);
+		alp_rpc_backend_state_t st = { .be_data = ch, .ops = &_ops };
+		g_send_race_state          = &st;
+
+		atomic_int worker_done;
+		ALP_ASSERT_EQ_INT(spawn_rx_thread(ch, &worker_done), 0);
+
+		atomic_store(&g_send_race_stop, 0);
+		atomic_store(&g_send_race_bad_rc, 0);
+		pthread_t sender;
+		ALP_ASSERT_EQ_INT(pthread_create(&sender, NULL, send_race_thread, NULL), 0);
+
+		/* Only a minimal delay (unlike the other scenarios): the whole
+         * point is to race y_close() against y_send() as tightly as
+         * the scheduler allows, on every iteration -- just enough for
+         * the new thread to actually start running first. */
+		sleep_ms(1);
+		y_close(&st);
+		atomic_store(&g_send_race_stop, 1);
+		ALP_ASSERT_EQ_INT(pthread_join(sender, NULL), 0);
+		/* Ordered-after every write send_race_thread made (the join
+         * above) -- see that function's doc comment for why the
+         * ALP_ASSERT_* call lives here instead of inside it. */
+		ALP_ASSERT_TRUE(atomic_load(&g_send_race_bad_rc) == 0);
+
+		ALP_ASSERT_TRUE(wait_until(&worker_done, TEST_TIMEOUT_MS));
+		close(sv[1]);
+	}
+}
+
+/* ------------------------------------------------------------------ */
 
 int main(void)
 {
 	test_self_close_no_uaf_no_selfjoin();
 	test_external_close_without_callback_is_synchronous();
 	test_concurrent_external_vs_self_close_is_single_shot();
+	test_call_vs_close_no_uaf();
+	test_send_vs_close_no_uaf();
 	ALP_TEST_SUMMARY();
 }

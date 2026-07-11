@@ -30,6 +30,7 @@
 #include <alp/rpc.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/rpc/rpc_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(rpc);
@@ -47,9 +48,13 @@ static struct alp_rpc_channel _rpc_pool[CONFIG_ALP_SDK_MAX_RPC_HANDLES];
 static struct alp_rpc_channel *_alloc_rpc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_RPC_HANDLES; ++i) {
-		if (!_rpc_pool[i].in_use) {
-			memset(&_rpc_pool[i], 0, sizeof(_rpc_pool[i]));
-			_rpc_pool[i].in_use = true;
+		/* Atomic claim (GHSA-xhm8-7f87-93q5 defect 2 / issue #629
+         * pattern): CAS FREE -> OPEN on `in_use` so two concurrent
+         * alp_rpc_open() calls can never both win the same slot.  Only
+         * the winner may touch the slot's other fields -- in_use is
+         * the struct's last member, so zero everything before it. */
+		if (alp_slot_try_claim(&_rpc_pool[i].in_use)) {
+			memset(&_rpc_pool[i], 0, offsetof(struct alp_rpc_channel, in_use));
 			return &_rpc_pool[i];
 		}
 	}
@@ -58,7 +63,7 @@ static struct alp_rpc_channel *_alloc_rpc(void)
 
 static void _free_rpc(struct alp_rpc_channel *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 /* ================================================================== */
@@ -98,15 +103,80 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	/* Only now, after a successful backend open(), does this handle
+     * become visible to alp_rpc_close()/subscribe/send/call's
+     * alp_handle_op_enter() gate -- see struct alp_rpc_channel's doc
+     * comment. */
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 void alp_rpc_close(alp_rpc_channel_t *ch)
 {
-	if (ch == NULL || !ch->in_use) return;
+	if (ch == NULL) return;
+
+	/* CAS OPEN -> CLOSING (GHSA-xhm8-7f87-93q5 defect 2 / issue #629's
+     * state-machine pattern, but NOT via alp_handle_begin_close(): that
+     * helper drains active_ops to zero BEFORE running the caller's
+     * close body, which assumes every gated op is short (see its own
+     * doc comment in src/common/alp_slot_claim.h) -- alp_rpc_call() is
+     * explicitly NOT short (it can block up to `timeout_ms`, including
+     * UINT32_MAX == forever), and the thing that unblocks a pending
+     * call is the BACKEND's own close (y_close() in
+     * src/backends/rpc/yocto_drv.c cancels + broadcasts any pending
+     * call slot).  Draining first would deadlock: this function would
+     * spin forever waiting for a call that can only be unblocked by the
+     * ops->close() call this function hasn't reached yet.
+     *
+     * So the ordering here is deliberately CAS -> ops->close() ->
+     * THEN drain -- ops->close() unblocks whatever is in flight FIRST,
+     * so the post-close drain below is short by the time it runs.
+     *
+     * The CAS itself still gives single-shot close-vs-close: the loser
+     * (a concurrent EXTERNAL alp_rpc_close() racing this channel's own
+     * self-close callback -- the scenario this advisory is about, or
+     * any other racing closer) sees `lifecycle` already CLOSING (or
+     * UNOPENED) and returns immediately without ever dereferencing
+     * `state.ops`.  And because the slot stays CLOSING (never
+     * UNOPENED, never released back to `_alloc_rpc()`) for the *entire*
+     * span from this CAS through the drain below, no concurrent
+     * alp_rpc_open() can recycle this array slot -- and repurpose the
+     * very `state.ops`/`state.be_data` an in-flight subscribe/send/call
+     * is still dereferencing -- until every such op has left.  That is
+     * the recycle-hijack TOCTOU this advisory's followup review flagged
+     * in the plain `!ch->in_use` version of this function.
+     *
+     * Residual, NOT defended: `alp_rpc_channel_t` is a raw pointer with
+     * no generation the caller carries across calls.  A caller that
+     * calls alp_rpc_close() a SECOND time on a handle that has already
+     * completed a full close (and whose slot has since been recycled
+     * by an unrelated alp_rpc_open()) will legitimately win this same
+     * CAS against the NEW occupant and tear IT down -- indistinguishable,
+     * from the dispatcher's point of view, from a correct close of a
+     * live handle. That is a use-after-close by the caller (the same
+     * class of bug as any other double-free/use-after-free of a raw
+     * handle) and is out of scope for a fix that keeps
+     * `alp_rpc_channel_t` an opaque pointer per include/alp/rpc.h's
+     * [ABI-STABLE] contract; see alp_rpc_close()'s doc comment there.
+     * What IS fully defended -- the contract include/alp/rpc.h actually
+     * makes -- is exactly the concurrent-close-of-a-still-live-handle
+     * case above: two racing closers of the SAME open channel are
+     * single-shot and UAF-free, whichever one is the CAS winner. */
+	if (!alp_lifecycle_cas(&ch->lifecycle, ALP_HANDLE_LC_OPEN, ALP_HANDLE_LC_CLOSING)) return;
+
 	if (ch->state.ops != NULL && ch->state.ops->close != NULL) {
 		ch->state.ops->close(&ch->state);
 	}
+
+	/* Drain whatever was already inside alp_rpc_subscribe/unsubscribe/
+     * send/call when the CAS above flipped to CLOSING -- ops->close()
+     * just unblocked anything the backend could unblock, so this is
+     * expected to clear in a handful of iterations, not a real wait. */
+	while (__atomic_load_n(&ch->active_ops, __ATOMIC_ACQUIRE) != 0u) {
+		/* Bounded spin -- see the ordering note above. */
+	}
+
+	alp_lifecycle_set(&ch->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free_rpc(ch);
 }
 
@@ -117,22 +187,39 @@ void alp_rpc_close(alp_rpc_channel_t *ch)
 alp_status_t
 alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
-	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
-	if (ch->state.ops == NULL || ch->state.ops->subscribe == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	/* Gate on `lifecycle` (acquire-loaded inside alp_handle_op_enter()),
+     * not a plain `in_use` bool read -- see struct alp_rpc_channel's
+     * doc comment (GHSA-xhm8-7f87-93q5 defect 2). */
+	if (ch == NULL || !alp_handle_op_enter(&ch->lifecycle, &ch->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return ch->state.ops->subscribe(&ch->state, method, cb, user);
+	alp_status_t rc;
+	if (method == NULL || method[0] == '\0') {
+		rc = ALP_ERR_INVAL;
+	} else if (ch->state.ops == NULL || ch->state.ops->subscribe == NULL) {
+		rc = ALP_ERR_NOT_IMPLEMENTED;
+	} else {
+		rc = ch->state.ops->subscribe(&ch->state, method, cb, user);
+	}
+	alp_handle_op_leave(&ch->active_ops);
+	return rc;
 }
 
 alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
 {
-	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
-	if (ch->state.ops == NULL || ch->state.ops->unsubscribe == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	if (ch == NULL || !alp_handle_op_enter(&ch->lifecycle, &ch->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return ch->state.ops->unsubscribe(&ch->state, method);
+	alp_status_t rc;
+	if (method == NULL || method[0] == '\0') {
+		rc = ALP_ERR_INVAL;
+	} else if (ch->state.ops == NULL || ch->state.ops->unsubscribe == NULL) {
+		rc = ALP_ERR_NOT_IMPLEMENTED;
+	} else {
+		rc = ch->state.ops->unsubscribe(&ch->state, method);
+	}
+	alp_handle_op_leave(&ch->active_ops);
+	return rc;
 }
 
 /* ================================================================== */
@@ -142,13 +229,21 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
 alp_status_t
 alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len)
 {
-	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
-	if (payload == NULL && len > 0) return ALP_ERR_INVAL;
-	if (ch->state.ops == NULL || ch->state.ops->send == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	if (ch == NULL || !alp_handle_op_enter(&ch->lifecycle, &ch->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return ch->state.ops->send(&ch->state, method, payload, len);
+	alp_status_t rc;
+	if (method == NULL || method[0] == '\0') {
+		rc = ALP_ERR_INVAL;
+	} else if (payload == NULL && len > 0) {
+		rc = ALP_ERR_INVAL;
+	} else if (ch->state.ops == NULL || ch->state.ops->send == NULL) {
+		rc = ALP_ERR_NOT_IMPLEMENTED;
+	} else {
+		rc = ch->state.ops->send(&ch->state, method, payload, len);
+	}
+	alp_handle_op_leave(&ch->active_ops);
+	return rc;
 }
 
 alp_status_t alp_rpc_call(alp_rpc_channel_t *ch,
@@ -159,14 +254,23 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch,
                           size_t            *resp_len,
                           uint32_t           timeout_ms)
 {
-	if (ch == NULL || !ch->in_use) return ALP_ERR_NOT_READY;
-	if (method == NULL || method[0] == '\0') return ALP_ERR_INVAL;
-	if (req == NULL && req_len > 0) return ALP_ERR_INVAL;
-	if (resp != NULL && resp_len == NULL) return ALP_ERR_INVAL;
-	if (ch->state.ops == NULL || ch->state.ops->call == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	if (ch == NULL || !alp_handle_op_enter(&ch->lifecycle, &ch->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return ch->state.ops->call(&ch->state, method, req, req_len, resp, resp_len, timeout_ms);
+	alp_status_t rc;
+	if (method == NULL || method[0] == '\0') {
+		rc = ALP_ERR_INVAL;
+	} else if (req == NULL && req_len > 0) {
+		rc = ALP_ERR_INVAL;
+	} else if (resp != NULL && resp_len == NULL) {
+		rc = ALP_ERR_INVAL;
+	} else if (ch->state.ops == NULL || ch->state.ops->call == NULL) {
+		rc = ALP_ERR_NOT_IMPLEMENTED;
+	} else {
+		rc = ch->state.ops->call(&ch->state, method, req, req_len, resp, resp_len, timeout_ms);
+	}
+	alp_handle_op_leave(&ch->active_ops);
+	return rc;
 }
 
 /* ================================================================== */

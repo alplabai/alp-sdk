@@ -62,6 +62,25 @@
  *   teardown; external close keeps the original join-based path. See
  *   y_close()'s doc comment for the full design.
  *
+ * In-flight op vs. teardown (GHSA-xhm8-7f87-93q5, defect 1).
+ *   A followup review found the above incomplete: another application
+ *   thread can be inside y_call()/y_send()/y_subscribe()/
+ *   y_unsubscribe() -- e.g. blocked in y_call()'s
+ *   pthread_cond_timedwait() while holding tx_mutex, or simply
+ *   preempted between loading `ch` and locking one of its mutexes --
+ *   while a close (either path above) runs rpc_be_teardown(), which
+ *   destroys tx_mutex/sub_mutex/call_mutex/call_cond and free()s `ch`.
+ *   That is POSIX UB (destroying a locked mutex / a cond a thread is
+ *   still waiting on) plus a heap use-after-free once that thread
+ *   resumes.  Every op now enters/leaves through
+ *   rpc_be_op_enter()/rpc_be_op_leave(), an in-flight-op counter on
+ *   `ch` (see struct rpc_be::inflight_ops); rpc_be_teardown() spins
+ *   until it drains to 0 (rpc_be_drain_inflight()) before touching any
+ *   sync primitive or freeing `ch`.  See rpc_be_op_enter()'s and
+ *   rpc_be_drain_inflight()'s doc comments for why this must run
+ *   AFTER, not before, ops->close() (y_call()'s wait is not bounded by
+ *   a "short op" contract the way the other ops' are).
+ *
  * Linking: src/yocto/CMakeLists.txt gates this file behind
  * find_package(Threads) + pkg_check_modules(libmetal librpmsg) and
  * the ALP_SDK_HAVE_OPENAMP_USERLAND define.  When the host doesn't
@@ -164,6 +183,19 @@ struct rpc_be {
      * joined-and-freed synchronously inside y_close().  See y_close()
      * and rpc_rx_main() for the two teardown paths this selects between. */
 	bool close_from_worker;
+
+	/* In-flight synchronous-op count (GHSA-xhm8-7f87-93q5 defect 1):
+     * every y_subscribe/y_unsubscribe/y_send/y_call in progress holds
+     * one count here, taken via rpc_be_op_enter() and released via
+     * rpc_be_op_leave().  rpc_be_teardown() spins until this reaches 0
+     * (rpc_be_drain_inflight()) before destroying tx_mutex/sub_mutex/
+     * call_mutex/call_cond and freeing `ch` -- otherwise a thread
+     * already inside y_call() (blocked in pthread_cond_timedwait,
+     * holding tx_mutex) or y_send()/y_subscribe()/y_unsubscribe()
+     * (preempted between loading `ch` and locking its mutex) races a
+     * concurrent close's mutex-destroy + free: POSIX UB (destroying a
+     * locked/waited-on mutex/cond) plus a heap use-after-free. */
+	uint32_t inflight_ops;
 };
 
 /* Single-owner gate for y_close() (GHSA-xhm8-7f87-93q5): a subscriber
@@ -204,6 +236,54 @@ static inline struct rpc_be *rpc_be_data_load(alp_rpc_backend_state_t *st)
 static inline void rpc_be_data_store(alp_rpc_backend_state_t *st, struct rpc_be *ch)
 {
 	__atomic_store_n(&st->be_data, (void *)ch, __ATOMIC_RELEASE);
+}
+
+/* GHSA-xhm8-7f87-93q5 defect 1: y_subscribe/y_unsubscribe/y_send/y_call
+ * all used to do a bare `ch = rpc_be_data_load(st); if (ch == NULL)
+ * return ...;` and then go straight on to dereference `ch` (lock a
+ * mutex inside it, read/write its fields) with NO guarantee that a
+ * concurrent y_close() wasn't in the middle of destroying those same
+ * mutexes and freeing `ch` out from under them -- `st->be_data` going
+ * non-NULL -> NULL is necessary but not sufficient: an op can load a
+ * non-NULL `ch` a moment before y_close() claims ownership, unpublishes
+ * it, and (once every OTHER in-flight op has left) frees it, and there
+ * is nothing stopping that op from dereferencing `ch` after the free.
+ * rpc_be_op_enter()/rpc_be_op_leave() close that window by making
+ * "observe `ch` published, count this op" one atomic step under
+ * g_rpc_close_lock -- the SAME lock y_close() already uses to
+ * "unpublish `ch`" as one atomic step (see y_close()).  Two mutually
+ * exclusive outcomes are possible for any op, never a mix:
+ *   - it observes `ch` still published and its increment lands BEFORE
+ *     y_close()'s unpublish -- y_close() (and rpc_be_teardown()'s
+ *     drain, see rpc_be_drain_inflight()) is then guaranteed to see
+ *     the incremented count and wait for this op to call
+ *     rpc_be_op_leave() before any mutex is destroyed or `ch` is freed; or
+ *   - it observes `st->be_data` already NULL (y_close() already claimed
+ *     ownership) and returns NULL WITHOUT ever touching a `ch` that
+ *     could be concurrently torn down.
+ * There is no third case where an op's count is missed by the drain:
+ * both the increment and y_close()'s later read of the count happen
+ * under the same mutex, and mutex critical sections cannot interleave. */
+static inline struct rpc_be *rpc_be_op_enter(alp_rpc_backend_state_t *st)
+{
+	pthread_mutex_lock(&g_rpc_close_lock);
+	struct rpc_be *ch = rpc_be_data_load(st);
+	if (ch != NULL) {
+		ch->inflight_ops++;
+	}
+	pthread_mutex_unlock(&g_rpc_close_lock);
+	return ch;
+}
+
+/* Leave an op entered via rpc_be_op_enter().  `ch` is guaranteed to
+ * still be valid, allocated memory here: rpc_be_drain_inflight() (see
+ * rpc_be_teardown()) will not let the physical teardown proceed past
+ * its spin until every op counted here has called this. */
+static inline void rpc_be_op_leave(struct rpc_be *ch)
+{
+	pthread_mutex_lock(&g_rpc_close_lock);
+	ch->inflight_ops--;
+	pthread_mutex_unlock(&g_rpc_close_lock);
 }
 
 /* ch->close_from_worker (set once by whichever caller wins y_close()'s
@@ -292,18 +372,68 @@ frame_parse(const void *data, size_t len, const void **payload_out, size_t *payl
 	return bytes;
 }
 
-/* Physical teardown of a channel: close descriptors, destroy the
- * synchronisation primitives, and free the block.  Runs EXACTLY ONCE
- * per channel, from exactly one of two call sites (never both):
+/* Drain rpc_be_op_enter()'s in-flight-op counter to 0 before
+ * rpc_be_teardown() destroys any synchronisation primitive or frees
+ * `ch` (GHSA-xhm8-7f87-93q5 defect 1).  Called AFTER y_close() has
+ * already unpublished `st->be_data` (so no NEW op can enter -- see
+ * rpc_be_op_enter()) and, for a pending y_call(), already cancelled it
+ * with ALP_ERR_NOT_READY + broadcast (see y_close()) -- so an op
+ * counted here is expected to leave within a handful of scheduler
+ * ticks, not to actually wait out a `timeout_ms`.
+ *
+ * One residual corner the one-shot cancel in y_close() cannot close: a
+ * y_call() that won rpc_be_op_enter() (so it is counted) a moment
+ * BEFORE y_close() claimed ownership, but had not yet reached
+ * `call_pending = true` when y_close()'s one-shot cancel ran, would
+ * otherwise wait out its own timeout_ms (or forever, for
+ * ALP_ERR_TIMEOUT's UINT32_MAX) with nobody left to signal it once the
+ * RX thread has unwound.  So this loop re-runs the same
+ * cancel-and-broadcast on every spin: safe to repeat (call_mutex/
+ * call_cond are not destroyed until this loop exits), and it catches
+ * that call the next time it stages itself, still bounding this to a
+ * few iterations. */
+static void rpc_be_drain_inflight(struct rpc_be *ch)
+{
+	for (;;) {
+		pthread_mutex_lock(&g_rpc_close_lock);
+		uint32_t n = ch->inflight_ops;
+		pthread_mutex_unlock(&g_rpc_close_lock);
+		if (n == 0u) {
+			break;
+		}
+		pthread_mutex_lock(&ch->call_mutex);
+		if (ch->call_pending) {
+			ch->call_result   = ALP_ERR_NOT_READY;
+			ch->call_resp_len = 0;
+			ch->call_pending  = false;
+			pthread_cond_broadcast(&ch->call_cond);
+		}
+		pthread_mutex_unlock(&ch->call_mutex);
+		/* Bounded spin -- see the doc comment above. */
+	}
+}
+
+/* Physical teardown of a channel: drain in-flight ops, close
+ * descriptors, destroy the synchronisation primitives, and free the
+ * block.  Runs EXACTLY ONCE per channel, from exactly one of two call
+ * sites (never both):
  *   - y_close(), synchronously, for an external (non-self) close; or
  *   - rpc_rx_main()'s epilogue, for a channel that closed itself from
  *     inside one of its own subscriber callbacks (GHSA-xhm8-7f87-93q5).
  * Both call sites reach this only after y_close() has already won
- * g_rpc_close_lock's single-owner decision (see y_close()) -- no other
- * thread can still be holding a reference to `ch` at that point, so
- * nothing else can be touching `ch` here. */
+ * g_rpc_close_lock's single-owner decision (see y_close()) -- so no
+ * OTHER call to y_close() on this same channel can still be running.
+ * That does NOT mean nothing else can be touching `ch`: an application
+ * thread already inside y_call()/y_send()/y_subscribe()/y_unsubscribe()
+ * when ownership was claimed is still live and still holds a reference
+ * (GHSA-xhm8-7f87-93q5 defect 1 -- an earlier version of this comment
+ * claimed otherwise, which was false).  rpc_be_drain_inflight() is what
+ * actually makes it safe to destroy `ch`'s mutexes/cond and free it
+ * below: it blocks until every such op has called rpc_be_op_leave(). */
 static void rpc_be_teardown(struct rpc_be *ch)
 {
+	rpc_be_drain_inflight(ch);
+
 	if (ch->rx_wake_pipe[0] >= 0) close(ch->rx_wake_pipe[0]);
 	if (ch->rx_wake_pipe[1] >= 0) close(ch->rx_wake_pipe[1]);
 	if (ch->ept_fd >= 0) close(ch->ept_fd);
@@ -587,14 +717,20 @@ static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 static alp_status_t
 y_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
-	struct rpc_be *ch = rpc_be_data_load(st);
-	if (ch == NULL) return ALP_ERR_NOT_READY;
 	if (!method_valid(method)) return ALP_ERR_INVAL;
 	/* NULL cb == unsubscribe -- matches the documented behaviour and the
-     * original direct-impl, which delegated to alp_rpc_unsubscribe. */
+     * original direct-impl, which delegated to alp_rpc_unsubscribe.
+     * Delegate BEFORE entering (below): y_unsubscribe() does its own
+     * rpc_be_op_enter()/leave() pair, so this must not double-count. */
 	if (cb == NULL) {
 		return y_unsubscribe(st, method);
 	}
+
+	/* GHSA-xhm8-7f87-93q5 defect 1: see rpc_be_op_enter()'s doc comment
+     * for why this replaces a bare rpc_be_data_load(). */
+	struct rpc_be *ch = rpc_be_op_enter(st);
+	if (ch == NULL) return ALP_ERR_NOT_READY;
+
 	uint32_t h = fnv1a_32(method);
 
 	pthread_mutex_lock(&ch->sub_mutex);
@@ -628,6 +764,7 @@ y_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
 		rc         = ALP_OK;
 	}
 	pthread_mutex_unlock(&ch->sub_mutex);
+	rpc_be_op_leave(ch);
 	return rc;
 }
 
@@ -638,9 +775,10 @@ y_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
  */
 static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *method)
 {
-	struct rpc_be *ch = rpc_be_data_load(st);
-	if (ch == NULL) return ALP_ERR_NOT_READY;
 	if (!method_valid(method)) return ALP_ERR_INVAL;
+
+	struct rpc_be *ch = rpc_be_op_enter(st);
+	if (ch == NULL) return ALP_ERR_NOT_READY;
 
 	uint32_t h = fnv1a_32(method);
 	pthread_mutex_lock(&ch->sub_mutex);
@@ -658,6 +796,7 @@ static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 		}
 	}
 	pthread_mutex_unlock(&ch->sub_mutex);
+	rpc_be_op_leave(ch);
 	return rc;
 }
 
@@ -671,10 +810,12 @@ static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 static alp_status_t
 y_send(alp_rpc_backend_state_t *st, const char *method, const void *payload, size_t len)
 {
-	struct rpc_be *ch = rpc_be_data_load(st);
-	if (ch == NULL) return ALP_ERR_NOT_READY;
 	if (!method_valid(method)) return ALP_ERR_INVAL;
 	if (payload == NULL && len > 0) return ALP_ERR_INVAL;
+
+	/* GHSA-xhm8-7f87-93q5 defect 1: see rpc_be_op_enter()'s doc comment. */
+	struct rpc_be *ch = rpc_be_op_enter(st);
+	if (ch == NULL) return ALP_ERR_NOT_READY;
 
 	pthread_mutex_lock(&ch->tx_mutex);
 	int          built = frame_build(ch->tx_scratch, sizeof ch->tx_scratch, method, payload, len);
@@ -692,6 +833,7 @@ y_send(alp_rpc_backend_state_t *st, const char *method, const void *payload, siz
 		}
 	}
 	pthread_mutex_unlock(&ch->tx_mutex);
+	rpc_be_op_leave(ch);
 	return rc;
 }
 
@@ -711,11 +853,19 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
                            size_t                  *resp_len,
                            uint32_t                 timeout_ms)
 {
-	struct rpc_be *ch = rpc_be_data_load(st);
-	if (ch == NULL) return ALP_ERR_NOT_READY;
 	if (!method_valid(method)) return ALP_ERR_INVAL;
 	if (req == NULL && req_len > 0) return ALP_ERR_INVAL;
 	if (resp != NULL && resp_len == NULL) return ALP_ERR_INVAL;
+
+	/* GHSA-xhm8-7f87-93q5 defect 1: see rpc_be_op_enter()'s doc comment.
+     * `ch` stays counted (rpc_be_op_leave() below) for this ENTIRE
+     * call, including the blocking wait further down -- that is exactly
+     * why rpc_be_teardown()'s drain runs AFTER ops->close() has already
+     * cancelled any pending call (see rpc_be_drain_inflight()), not
+     * before: waiting for this count to reach 0 before y_close() were
+     * even allowed to run would deadlock. */
+	struct rpc_be *ch = rpc_be_op_enter(st);
+	if (ch == NULL) return ALP_ERR_NOT_READY;
 
 	/* Serialise calls on this channel (matches the Zephyr backend's
      * tx_mutex + single call-slot model).  Customers needing
@@ -756,6 +906,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 		ch->call_pending = false;
 		pthread_mutex_unlock(&ch->call_mutex);
 		pthread_mutex_unlock(&ch->tx_mutex);
+		rpc_be_op_leave(ch);
 		return s;
 	}
 
@@ -774,6 +925,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 			ch->call_pending = false;
 			pthread_mutex_unlock(&ch->call_mutex);
 			pthread_mutex_unlock(&ch->tx_mutex);
+			rpc_be_op_leave(ch);
 			return ALP_ERR_IO;
 		}
 		while (ch->call_pending) {
@@ -797,6 +949,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 	pthread_mutex_unlock(&ch->call_mutex);
 
 	pthread_mutex_unlock(&ch->tx_mutex);
+	rpc_be_op_leave(ch);
 	return s;
 }
 
