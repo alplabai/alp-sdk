@@ -7,6 +7,71 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — `<alp/dsp>` float I/O, one-sided FFT, biquad designer
+
+- **Float-native chain I/O:** `alp_dsp_chain_apply_samples_f32` /
+  `alp_dsp_chain_apply_bins_f32` consume and produce `float` directly, so
+  float DSP pipelines no longer round-trip through int16 (the int16
+  `_mv` variants stay as the ADC-domain flavour that composes with
+  `<alp/adc.h>`).
+- **One-sided real-FFT magnitude:** `ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED`
+  emits `n_points/2 + 1` positive-frequency bins (DC..Nyquist) instead of
+  the redundant two-sided spectrum.
+- **Biquad designer:** `alp_dsp_biquad_design(kind, f0, fs, q, coeffs)`
+  computes RBJ-cookbook low-pass / high-pass / band-pass / notch section
+  coefficients so apps stop hand-deriving filter math (the
+  `butterworth-lowpass` example now uses it). Scope is deliberately bounded
+  to the cookbook biquads — higher-order/Chebyshev/elliptic stay out.
+- All `[ABI-EXPERIMENTAL]`; ABI snapshot regenerated.
+
+### Fixed — `<alp/dsp>` sw_fallback correctness
+
+- **CMSIS FIR state:** the FIR stage re-init'd its CMSIS instance on every
+  `apply` (zeroing the delay line -> periodic glitches, and an undersized
+  state buffer for `arm_fir_f32`'s `n_taps + block - 1` requirement). Now a
+  persistent instance streamed in bounded blocks; state carries correctly
+  and matches the portable path.
+- **FFT scratch off the stack:** the CMSIS rfft's 4 KB scratch moved from a
+  stack array into the backend struct (stack-overflow risk on a default
+  thread).
+- **Q31-on-IIR rejected:** Q31 maps full-scale to +/-1.0 but a biquad's a1
+  ranges to +/-2, so Q31 IIR coefficients silently wrapped; `alp_dsp_chain_open`
+  now returns `ALP_ERR_NOSUPPORT` for Q31 IIR (Q31 stays valid for FIR).
+
+### Added — portable DSP scalar-stats surface (`alp_dsp_stats_f32`)
+
+- `<alp/dsp.h>` gains `alp_dsp_stats_f32(const float *x, size_t n,
+  alp_dsp_stats_t *out)` — a one-pass summary (mean, RMS, population
+  variance, min/max, abs-peak + index) that the SDK backs with CMSIS-DSP
+  `arm_mean/rms/min/max/absmax_f32` on Cortex-M and a portable-C pass
+  elsewhere, so application code never calls `arm_*` directly.  Marked
+  `[ABI-EXPERIMENTAL]` alongside the existing chain API.  The Zephyr
+  build now also defines `ALP_HAS_CMSIS_DSP=1` when `CONFIG_CMSIS_DSP=y`
+  (previously plain-CMake-only), so the `<alp/dsp>` FFT chain + stats
+  actually link CMSIS-DSP on the M55 instead of silently using the
+  portable-C fallback.
+
+### Changed — DSP examples use `<alp/dsp>` instead of hand-rolled FFT/stats
+
+- The five vibration/audio examples (rail-predictive-maintenance,
+  motor-current-signature, wearable-activity-fall,
+  acoustic-anomaly-wind-turbine, acoustic-safety-events) previously each
+  re-derived a radix-2 FFT and hand-rolled their moment statistics; they
+  now route the FFT through the `<alp/dsp>` chain and the reductions
+  through `alp_dsp_stats_f32`, dropping ~230 lines of duplicated DSP
+  math.  A single-bin Goertzel (wind-turbine) is intentionally retained
+  (right tool for one bin; no CMSIS kernel).  Teaching-comment density
+  was also raised on ~20 thin example `main.c` files.
+
+### Added — `butterworth-lowpass` example (`<alp/dsp>` IIR filter path)
+
+- New `examples/audio/butterworth-lowpass`: designs a 2nd-order
+  Butterworth low-pass biquad and runs passband + stopband tones through
+  the `<alp/dsp>` chain's `ALP_DSP_STAGE_IIR` stage (CMSIS-DSP
+  `arm_biquad_cascade_df1_f32` on the M55, portable-C under native_sim),
+  reporting per-tone gain via `alp_dsp_stats_f32`.  The chain's FIR/IIR
+  filter stages previously had no example (only the FFT path did).
+
 ### Added — `--emit zephyr-board` generator (#523)
 
 - `scripts/alp_project.py --input <board.yaml> --core <core_id> --emit

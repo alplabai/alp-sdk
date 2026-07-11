@@ -58,12 +58,24 @@ struct alp_dsp_ops {
 	                              int16_t                 *out_mv,
 	                              size_t                   out_cap,
 	                              size_t                  *got);
+	alp_status_t (*apply_samples_f32)(alp_dsp_backend_state_t *state,
+	                                  const float             *in,
+	                                  size_t                   in_n,
+	                                  float                   *out,
+	                                  size_t                   out_cap,
+	                                  size_t                  *got);
 	alp_status_t (*apply_bins)(alp_dsp_backend_state_t *state,
 	                           const int16_t           *in_mv,
 	                           size_t                   in_n,
 	                           float                   *out_bins,
 	                           size_t                   out_cap,
 	                           size_t                  *got);
+	alp_status_t (*apply_bins_f32)(alp_dsp_backend_state_t *state,
+	                               const float             *in,
+	                               size_t                   in_n,
+	                               float                   *out_bins,
+	                               size_t                   out_cap,
+	                               size_t                  *got);
 	void (*close)(alp_dsp_backend_state_t *state);
 };
 

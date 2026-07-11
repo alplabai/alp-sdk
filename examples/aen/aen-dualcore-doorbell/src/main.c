@@ -63,6 +63,12 @@ int main(void)
 {
 	printk("\n=== aen-dualcore-doorbell (%s) ===\n", ROLE);
 
+	/* Beacons are an SWD-readable witness (SRAM0 is globally addressable),
+	 * so an engineer can confirm both cores are alive and the doorbell is
+	 * propagating by halting either core over J-Link and reading the
+	 * OTHER core's beacon region -- no cross-core UART/console needed.
+	 * SELF_BEACON[0]=magic (which build), [1]=free-running heartbeat;
+	 * DB_BEACON[0]=this core's own doorbell counter (sent or received). */
 	SELF_BEACON[0] = SELF_MAGIC;
 	SELF_BEACON[1] = 0U;
 	DB_BEACON[0]   = 0U;
@@ -87,7 +93,11 @@ int main(void)
 		busy_delay();
 	}
 #else
-	/* HE sender: wake the MHU-1 link, then ring HP repeatedly. */
+	/* HE sender: wake the MHU-1 link, then ring HP repeatedly.
+	 * MHUv2 power-gates its channel windows: a sender must assert
+	 * ACCESS_REQUEST and wait for the receiver side to ack with
+	 * ACCESS_READY before CH0_SET is guaranteed to latch -- writing
+	 * CH0_SET before the link is ready can be silently dropped. */
 	sys_write32(1U, SND_ACC_REQ);
 	while (sys_read32(SND_ACC_RDY) == 0U) {
 		/* wait for the link to come ready */

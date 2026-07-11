@@ -40,6 +40,10 @@ int main(void)
 	    .bitrate_hz = 400000u,
 	});
 	if (bus == NULL) {
+		/* NOT_READY vs anything else matters here: NOT_READY means "the LPI2C0
+		 * backend isn't wired up on this build/board" -- an environment gap,
+		 * not a driver bug -- so it's a SKIP. Any other code means the open
+		 * itself is broken and should fail the run. */
 		const alp_status_t last = alp_last_error();
 		if (last == ALP_ERR_NOT_READY) {
 			printk("[se] RESULT SKIP: alp_i2c_open failed: %d "
@@ -52,10 +56,16 @@ int main(void)
 		return 0;
 	}
 
-	/* Init probes I2C_STATE.  It does not issue OPEN_APPLICATION. */
+	/* Init probes I2C_STATE only -- it does not issue OPEN_APPLICATION, so it
+	 * never touches the Trust M's application/security state. This makes the
+	 * probe safe to run against a part that's already provisioned in the
+	 * field: it can only observe that something ACKs at 0x30. */
 	optiga_trust_m_t se;
 	alp_status_t     s = optiga_trust_m_init(&se, bus, OPTIGA_TRUST_M_I2C_ADDR);
 	if (s != ALP_OK) {
+		/* Same SKIP/FAIL split as above, one level down: NOT_READY here means
+		 * the bus opened but nothing ACKed at 0x30 -- expected on the current
+		 * AEN bench batch, which is OPTIGA-DNI (not populated), not a defect. */
 		if (s == ALP_ERR_NOT_READY) {
 			printk("[se] RESULT SKIP: optiga_trust_m_init -> %d "
 			       "(Trust M not ACKing; current AEN bench assemblies may be OPTIGA-DNI)\n",
@@ -70,6 +80,11 @@ int main(void)
 
 	printk("[se] I2C_STATE probe -> ALP_OK\n");
 
+	/* GET_DATA_OBJECT needs the full Infineon APDU transport, which isn't
+	 * integrated yet -- the driver validates args then returns NOSUPPORT
+	 * rather than fabricating a response. NOSUPPORT is therefore the PASS
+	 * value here: this asserts the stub's contract hasn't silently drifted
+	 * (e.g. started returning stale/zeroed info instead of refusing). */
 	optiga_trust_m_product_info_t info;
 	s = optiga_trust_m_read_product_info(&se, &info);
 	printk("[se] read_product_info -> %d (expected NOSUPPORT)\n", (int)s);
@@ -81,6 +96,11 @@ int main(void)
 		return 0;
 	}
 
+	/* Same contract check for the raw-APDU path: this APDU (SET DATA OBJECT,
+	 * tag 0x11) is a stand-in -- it never reaches the wire, since the driver
+	 * rejects it at argument validation before any I2C transaction. resp_len
+	 * is pre-poisoned (123) so the check below proves the driver zeroes it
+	 * on the NOSUPPORT path rather than leaving stale data. */
 	uint8_t apdu[4]  = { 0x31u, 0x11u, 0x00u, 0x00u };
 	uint8_t resp[8]  = { 0 };
 	size_t  resp_len = 123u;

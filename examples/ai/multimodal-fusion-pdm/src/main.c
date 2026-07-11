@@ -77,6 +77,7 @@
  * -DALP_BOARD_E1M_EVK / -DALP_BOARD_E1M_X_EVK define; see testcase.yaml.
  * On native_sim the overlay aliases alp-i2c0 to the emulated controller. */
 #include "alp/board.h"
+#include "alp/dsp.h"
 #include "alp/inference.h"
 #include "alp/peripheral.h"
 #include "alp/chips/icm42670.h"
@@ -224,7 +225,7 @@ static void read_sensors(icm42670_t          *imu,
 	 * zero to both mean and sum-of-squares without corrupting the result.
 	 */
 	if (imu_ok) {
-		float peak = 0.0f, sum2 = 0.0f, mean = 0.0f, mag[32] = { 0 };
+		float mag[32] = { 0 };
 		for (int i = 0; i < 32; i++) {
 			icm42670_axes_t a;
 			if (icm42670_read_accel(imu, &a) != ALP_OK) {
@@ -232,19 +233,20 @@ static void read_sensors(icm42670_t          *imu,
 			}
 			/* Convert raw int16 triaxial counts to scalar magnitude in g. */
 			mag[i] = sqrtf((float)a.x * a.x + (float)a.y * a.y + (float)a.z * a.z) / 2048.0f;
-			mean += mag[i];
 		}
-		mean /= 32.0f; /* mean of the burst (DC component) */
+		/* Mean (DC), then AC RMS + abs-peak via alp_dsp_stats_f32 -- one
+		 * library call each (CMSIS-DSP arm_mean/rms/absmax on the M55,
+		 * portable-C under native_sim), no hand-rolled reduction. */
+		alp_dsp_stats_t raw;
+		alp_dsp_stats_f32(mag, 32u, &raw);
+		float ac[32];
 		for (int i = 0; i < 32; i++) {
-			float ac = mag[i] - mean; /* AC component (subtract DC) */
-			sum2 += ac * ac;
-			if (fabsf(ac) > peak) {
-				peak = fabsf(ac); /* track peak AC deviation */
-			}
+			ac[i] = mag[i] - raw.mean; /* AC component (subtract DC) */
 		}
-		/* RMS of the AC component; crest = peak / RMS (dimensionless). */
-		in->vib_rms   = sqrtf(sum2 / 32.0f);
-		in->vib_crest = (in->vib_rms > 1e-6f) ? (peak / in->vib_rms) : 0.0f;
+		alp_dsp_stats_t acs;
+		alp_dsp_stats_f32(ac, 32u, &acs);
+		in->vib_rms   = acs.rms; /* RMS of the AC (vibration) component */
+		in->vib_crest = (acs.rms > 1e-6f) ? (acs.abs_max / acs.rms) : 0.0f;
 	}
 
 	/*
@@ -253,22 +255,25 @@ static void read_sensors(icm42670_t          *imu,
 	 * Zero-initialise samp[] for the same reason as mag[] above.
 	 */
 	if (mon_ok) {
-		float mean = 0.0f, sum2 = 0.0f, samp[16] = { 0 };
+		float samp[16] = { 0 };
 		for (int i = 0; i < 16; i++) {
 			int32_t ua = 0;
 			if (ina236_read_current_ua(mon, &ua) != ALP_OK) {
 				break; /* register read failed; rest stay zero */
 			}
 			samp[i] = (float)ua / 1e6f; /* uA -> A */
-			mean += samp[i];
 		}
-		mean /= 16.0f;
+		/* Mean current + AC ripple RMS via alp_dsp_stats_f32. */
+		alp_dsp_stats_t raw;
+		alp_dsp_stats_f32(samp, 16u, &raw);
+		float ac[16];
 		for (int i = 0; i < 16; i++) {
-			float ac = samp[i] - mean; /* AC component */
-			sum2 += ac * ac;
+			ac[i] = samp[i] - raw.mean; /* AC component */
 		}
-		in->current_a      = mean;
-		in->current_ripple = sqrtf(sum2 / 16.0f);
+		alp_dsp_stats_t acs;
+		alp_dsp_stats_f32(ac, 16u, &acs);
+		in->current_a      = raw.mean;
+		in->current_ripple = acs.rms;
 	}
 
 	/*

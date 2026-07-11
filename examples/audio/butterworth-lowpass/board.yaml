@@ -1,0 +1,28 @@
+# board.yaml -- butterworth-lowpass
+#
+# A self-contained DSP teaching demo: design a 2nd-order Butterworth
+# low-pass biquad and run synthetic tones through the <alp/dsp.h> IIR
+# chain stage (CMSIS-DSP arm_biquad on the M55, portable-C under
+# native_sim).  Pure compute -- no peripherals or chips -- so the same
+# source builds on any SoM; the E1M-AEN801 M55 is the reference target.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    app: ./src
+    libraries:
+      - cmsis_dsp             # arm_biquad_cascade_df1_f32 behind the
+                              # <alp/dsp.h> IIR stage + arm_rms_f32
+                              # behind alp_dsp_stats_f32.
+
+diagnostics:
+  log_level: info

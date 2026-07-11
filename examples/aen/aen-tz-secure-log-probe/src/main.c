@@ -45,11 +45,11 @@
 /* --- beacon (global SRAM0, AP-readable over SWD) --- */
 #define BEACON          ((volatile uint32_t *)0x02001100U)
 #define TZ_MAGIC        0x545A4C50U /* "TZLP" */
-#define TZ_START        1U
-#define TZ_SEC_OK       2U
-#define TZ_ENTER_NS     3U
-#define TZ_PASS_FAULT   4U /* NS write to log window faulted -> enforcement works */
-#define TZ_FAIL_NOFAULT 5U /* NS write returned without faulting -> NOT enforced */
+#define TZ_START        1U          /* beacon[1]: probe entered, before any SAU/TGU setup */
+#define TZ_SEC_OK       2U          /* beacon[1]: Secure store to scratch round-tripped ok */
+#define TZ_ENTER_NS     3U          /* beacon[1]: about to BLXNS into the NS stub */
+#define TZ_PASS_FAULT   4U          /* NS write to log window faulted -> enforcement works */
+#define TZ_FAIL_NOFAULT 5U          /* NS write returned without faulting -> NOT enforced */
 
 static volatile uint32_t g_stage;
 

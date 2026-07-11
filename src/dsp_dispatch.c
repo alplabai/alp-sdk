@@ -31,6 +31,7 @@
  * SoC-specific backend with refined caps lands.
  */
 
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -43,6 +44,24 @@
 #include <alp/soc_caps.h>
 
 #include "backends/dsp/dsp_ops.h"
+
+/*
+ * alp_dsp_stats_f32 uses CMSIS-DSP arm_*_f32 statistics kernels when
+ * the cmsis-dsp module is linked (ALP_HAS_CMSIS_DSP=1, wired from
+ * CONFIG_CMSIS_DSP in the Zephyr build / the option() in plain CMake);
+ * otherwise a single portable-C pass.  Same gate the sw_fallback DSP
+ * backend uses, so the whole DSP surface picks one implementation.
+ */
+#if defined(ALP_HAS_CMSIS_DSP) && (ALP_HAS_CMSIS_DSP == 1)
+#include <arm_math.h>
+#define ALP_DSP_STATS_USE_CMSIS 1
+#else
+#define ALP_DSP_STATS_USE_CMSIS 0
+#endif
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 ALP_BACKEND_DEFINE_CLASS(dsp);
 ALP_BACKEND_ANCHOR(dsp);
@@ -139,6 +158,38 @@ alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
 	return chain->state.ops->apply_bins(&chain->state, in_mv, in_n, out_bins, out_cap, got);
 }
 
+alp_status_t alp_dsp_chain_apply_samples_f32(alp_dsp_chain_t *chain,
+                                             const float     *in,
+                                             size_t           in_n,
+                                             float           *out,
+                                             size_t           out_cap,
+                                             size_t          *got)
+{
+	if (chain == NULL || !chain->in_use || got == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (chain->state.ops == NULL || chain->state.ops->apply_samples_f32 == NULL) {
+		return ALP_ERR_NOT_IMPLEMENTED;
+	}
+	return chain->state.ops->apply_samples_f32(&chain->state, in, in_n, out, out_cap, got);
+}
+
+alp_status_t alp_dsp_chain_apply_bins_f32(alp_dsp_chain_t *chain,
+                                          const float     *in,
+                                          size_t           in_n,
+                                          float           *out_bins,
+                                          size_t           out_cap,
+                                          size_t          *got)
+{
+	if (chain == NULL || !chain->in_use || got == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (chain->state.ops == NULL || chain->state.ops->apply_bins_f32 == NULL) {
+		return ALP_ERR_NOT_IMPLEMENTED;
+	}
+	return chain->state.ops->apply_bins_f32(&chain->state, in, in_n, out_bins, out_cap, got);
+}
+
 void alp_dsp_chain_close(alp_dsp_chain_t *chain)
 {
 	if (chain == NULL || !chain->in_use) return;
@@ -151,4 +202,120 @@ void alp_dsp_chain_close(alp_dsp_chain_t *chain)
 const alp_capabilities_t *alp_dsp_chain_capabilities(const alp_dsp_chain_t *chain)
 {
 	return (chain != NULL) ? &chain->cached_caps : NULL;
+}
+
+alp_status_t alp_dsp_stats_f32(const float *x, size_t n, alp_dsp_stats_t *out)
+{
+	if (x == NULL || out == NULL || n == 0u) {
+		return ALP_ERR_INVAL;
+	}
+
+#if ALP_DSP_STATS_USE_CMSIS
+	/* CMSIS-DSP statistics kernels (Helium-vectorised on M-class cores). */
+	uint32_t idx;
+	arm_mean_f32(x, (uint32_t)n, &out->mean);
+	arm_rms_f32(x, (uint32_t)n, &out->rms);
+	arm_min_f32(x, (uint32_t)n, &out->min, &idx);
+	arm_max_f32(x, (uint32_t)n, &out->max, &idx);
+	arm_absmax_f32(x, (uint32_t)n, &out->abs_max, &out->abs_max_index);
+#else
+	/* Single portable-C pass (native_sim, or any target without CMSIS-DSP). */
+	float    mean = 0.0f, sumsq = 0.0f, mn = x[0], mx = x[0], amax = 0.0f;
+	uint32_t amax_i = 0u;
+	for (size_t i = 0; i < n; i++) {
+		float v = x[i];
+		mean += v;
+		sumsq += v * v;
+		if (v < mn) {
+			mn = v;
+		}
+		if (v > mx) {
+			mx = v;
+		}
+		float a = fabsf(v);
+		if (a > amax) {
+			amax   = a;
+			amax_i = (uint32_t)i;
+		}
+	}
+	out->mean          = mean / (float)n;
+	out->rms           = sqrtf(sumsq / (float)n);
+	out->min           = mn;
+	out->max           = mx;
+	out->abs_max       = amax;
+	out->abs_max_index = amax_i;
+#endif
+	/*
+	 * Population variance E[x^2] - E[x]^2 (== rms^2 - mean^2), derived
+	 * the same way on both paths so callers get ONE definition (CMSIS
+	 * arm_var_f32 would give the sample variance / (n-1) instead).  A
+	 * tiny negative from FP rounding on a near-constant signal is
+	 * clamped to zero.
+	 */
+	out->variance = out->rms * out->rms - out->mean * out->mean;
+	if (out->variance < 0.0f) {
+		out->variance = 0.0f;
+	}
+	return ALP_OK;
+}
+
+alp_status_t alp_dsp_biquad_design(alp_dsp_biquad_kind_t kind,
+                                   float                 f0_hz,
+                                   float                 fs_hz,
+                                   float                 q,
+                                   float                 coeffs_out[5])
+{
+	/* Reject nonsensical designs up front: f0 must sit strictly inside
+	 * (0, Nyquist), and Q / fs must be positive. */
+	if (coeffs_out == NULL || fs_hz <= 0.0f || q <= 0.0f || f0_hz <= 0.0f ||
+	    f0_hz >= 0.5f * fs_hz) {
+		return ALP_ERR_INVAL;
+	}
+
+	/* RBJ audio-EQ cookbook, single 2nd-order section.  w0 is the
+	 * normalised centre/cutoff, alpha sets the bandwidth from Q. */
+	const float w0    = 2.0f * (float)M_PI * f0_hz / fs_hz;
+	const float cosw  = cosf(w0);
+	const float sinw  = sinf(w0);
+	const float alpha = sinw / (2.0f * q);
+
+	/* Denominator is shared by all four responses. */
+	const float a0 = 1.0f + alpha;
+	const float a1 = -2.0f * cosw;
+	const float a2 = 1.0f - alpha;
+
+	float b0, b1, b2;
+	switch (kind) {
+	case ALP_DSP_BIQUAD_LOWPASS:
+		b0 = (1.0f - cosw) * 0.5f;
+		b1 = 1.0f - cosw;
+		b2 = b0;
+		break;
+	case ALP_DSP_BIQUAD_HIGHPASS:
+		b0 = (1.0f + cosw) * 0.5f;
+		b1 = -(1.0f + cosw);
+		b2 = b0;
+		break;
+	case ALP_DSP_BIQUAD_BANDPASS: /* constant 0 dB peak gain */
+		b0 = alpha;
+		b1 = 0.0f;
+		b2 = -alpha;
+		break;
+	case ALP_DSP_BIQUAD_NOTCH:
+		b0 = 1.0f;
+		b1 = -2.0f * cosw;
+		b2 = 1.0f;
+		break;
+	default:
+		return ALP_ERR_INVAL;
+	}
+
+	/* Normalise by a0 into the { b0, b1, b2, a1, a2 } order the IIR stage
+	 * consumes (its difference equation subtracts a1,a2 directly). */
+	coeffs_out[0] = b0 / a0;
+	coeffs_out[1] = b1 / a0;
+	coeffs_out[2] = b2 / a0;
+	coeffs_out[3] = a1 / a0;
+	coeffs_out[4] = a2 / a0;
+	return ALP_OK;
 }

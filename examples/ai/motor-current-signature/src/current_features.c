@@ -41,9 +41,37 @@
 #include <math.h>
 #include <string.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
+/*
+ * SPECTRAL + STATISTICAL MATH -- via <alp/dsp.h>, not hand-rolled.
+ * ---------------------------------------------------------------
+ * This example does NOT re-derive an FFT or the window statistics by
+ * hand, and it does NOT call CMSIS-DSP arm_* directly.  Both go through
+ * the portable <alp/dsp.h> surface, so the SAME source builds for
+ * native_sim and the Cortex-M55 alike and the SDK -- not the app --
+ * owns the CMSIS-vs-portable choice:
+ *
+ *   1. The dominant-ripple FFT goes through alp_dsp_chain
+ *      (ALP_DSP_STAGE_FFT).  The backend runs CMSIS-DSP arm_rfft_fast_f32
+ *      (Helium-vectorised) on the M55 and a portable-C radix-2 fallback
+ *      under native_sim -- selected by the backend registry, not an
+ *      #ifdef here.  Keeping the example on it lets the identical source
+ *      run on the V2N (A55 + DRP-AI) path too.
+ *
+ *   2. The scalar window statistics (per-channel mean, RMS, abs-peak) go
+ *      through alp_dsp_stats_f32, which the SDK backs with CMSIS-DSP
+ *      arm_mean/rms/absmax_f32 on Cortex-M and a portable-C pass
+ *      elsewhere -- no arm_* here.
+ *
+ * alp_dsp_stats_f32 operates on a single contiguous float array.  The
+ * INA236 sample stream is an array-of-structs (current_a/bus_v/power_w
+ * interleaved per sample), so each channel is de-interleaved into its own
+ * contiguous buffer once per window before the stats run -- see the
+ * de-interleave loop in curr_feat_extract, which stays a plain portable
+ * loop (there is no "strided gather" kernel to replace it with).  The
+ * first/last-quarter inrush-slope means and the mean-centring subtraction
+ * also stay plain loops -- both are trivial and not worth wrapping.
+ */
+#include <alp/dsp.h>
 
 /* ---------------------------------------------------------------------------
  * Window management
@@ -77,106 +105,6 @@ bool curr_window_full(const struct curr_window_state *st)
 }
 
 /* ---------------------------------------------------------------------------
- * Radix-2 Cooley-Tukey DIT FFT  (in-place, iterative)
- *
- * Algorithm outline
- * -----------------
- * The Cooley-Tukey DIT (decimation-in-time) FFT recursively splits an
- * N-point DFT into two N/2-point DFTs of the even- and odd-indexed inputs,
- * then combines them with "butterfly" operations.  The iterative form avoids
- * stack-costly recursion by working bottom-up over log2(N) stages:
- *
- *   Stage 1 (len=2):  N/2 independent 2-point DFTs.
- *   Stage 2 (len=4):  N/4 independent 4-point DFTs assembled from stage-1.
- *   ...
- *   Stage log2(N):    one N-point DFT assembled from the previous stage.
- *
- * Two preparatory steps:
- *
- *   1. Bit-reversal permutation
- *      -------------------------
- *      The DIT split places even-indexed elements first, which is equivalent
- *      to reading the index in bit-reversed order.  For N=8: index 3 (binary
- *      011) maps to position 110 = 6.  The loop computes successive
- *      bit-reversed indices using a carry-propagation trick (the inner
- *      j-update block), achieving O(1) amortised work per element without a
- *      separate reversal table.  Elements are swapped only when i < j to
- *      avoid double-swapping.
- *
- *   2. Twiddle-factor recurrence
- *      --------------------------
- *      The butterfly for bin k in a stage of length len multiplies the odd
- *      sub-DFT by the twiddle factor W_N^k = exp(−2πi·k/len).  Rather than
- *      calling cosf/sinf inside the innermost loop, the stage root
- *        W_len = cos(−2π/len) + i·sin(−2π/len)
- *      is pre-computed once per stage, then each successive twiddle is
- *      obtained by complex multiplication (the "nwr / wi" update):
- *        W^(k+1) = W^k · W_len
- *      This keeps the hot path free of transcendentals at the cost of small
- *      floating-point drift -- negligible for N = 256.
- *
- * Butterfly formula (combining even element a and twiddle-rotated odd element b):
- *      t        = W^k · X[b]       (complex multiply)
- *      X[b]_new = X[a] − t
- *      X[a]_new = X[a] + t
- *
- * Complexity: O(N log₂ N) -- 2048 butterflies for N=256 vs. 65536 for DFT.
- * N must be a power of 2; CURR_WINDOW_N = 256 satisfies this.
- * -------------------------------------------------------------------------*/
-static void fft_radix2(float *re, float *im, int n)
-{
-	/* --- Phase 1: bit-reversal permutation ---
-	 * j is the bit-reversed counterpart of loop index i.  The inner loop
-	 * propagates a borrow from the MSB down through j: flip the topmost set
-	 * bit (j ^= bit) while it was already set (j & bit), shifting bit right
-	 * each time.  Then set the next-lower bit (j ^= bit after the loop).
-	 * Only swap when i < j to visit each pair exactly once. */
-	for (int i = 1, j = 0; i < n; i++) {
-		int bit = n >> 1;
-		for (; j & bit; bit >>= 1) {
-			j ^= bit;
-		}
-		j ^= bit;
-		if (i < j) {
-			float tr = re[i];
-			re[i]    = re[j];
-			re[j]    = tr;
-			float ti = im[i];
-			im[i]    = im[j];
-			im[j]    = ti;
-		}
-	}
-
-	/* --- Phase 2: butterfly passes, one per stage ---
-	 * len doubles each stage (2, 4, 8, …, n).  Each stage merges pairs of
-	 * (len/2)-point sub-DFTs that are len/2 apart in the array. */
-	for (int len = 2; len <= n; len <<= 1) {
-		/* Stage twiddle root W_len = exp(−2πi / len). */
-		float ang = -2.0f * (float)M_PI / (float)len;
-		float wlr = cosf(ang);
-		float wli = sinf(ang);
-		for (int i = 0; i < n; i += len) {
-			float wr = 1.0f, wi = 0.0f; /* W^0 = 1 + 0i */
-			for (int k = 0; k < len / 2; k++) {
-				/* Butterfly: a is the even element, b the odd element. */
-				int   a  = i + k;
-				int   b  = i + k + len / 2;
-				float tr = wr * re[b] - wi * im[b]; /* Re(W^k · X[b]) */
-				float ti = wr * im[b] + wi * re[b]; /* Im(W^k · X[b]) */
-				re[b]    = re[a] - tr;
-				im[b]    = im[a] - ti;
-				re[a] += tr;
-				im[a] += ti;
-				/* Advance twiddle one step: W^(k+1) = W^k · W_len. */
-				float nwr = wr * wlr - wi * wli;
-				wi        = wr * wli + wi * wlr;
-				wr        = nwr;
-			}
-		}
-	}
-}
-
-/* ---------------------------------------------------------------------------
  * Feature extraction
  * -------------------------------------------------------------------------*/
 
@@ -194,20 +122,38 @@ void curr_feat_extract(const struct curr_window_state *st, float sr_hz, struct c
 		return;
 	}
 
-	/* --- DC features: mean current, power, bus voltage ---
-	 * A single pass accumulates all three sums.  The means serve as the
-	 * DC operating-point features.  mean_current_a is the primary classifier
-	 * threshold (OFF / OVERLOAD boundary).  mean_bus_v lets the caller
-	 * detect load-induced voltage sag independently of the current level. */
-	float sum_i = 0.0f, sum_p = 0.0f, sum_v = 0.0f;
+	/* De-interleave the AoS sample stream into three contiguous per-channel
+	 * buffers.  This pass is NOT a "stat" itself -- it is unavoidable data
+	 * staging: alp_dsp_stats_f32 (called below for each channel) requires
+	 * a plain contiguous float array, and the INA236 sample struct
+	 * interleaves current/bus/power per sample.  One combined pass here
+	 * is cheaper than three separate per-channel copy passes.  cur_buf is
+	 * reused below for the AC-ripple stats and the FFT input; it is
+	 * static to keep the 3 * 256 * 4 = 3 KB of buffers off the stack. */
+	static float cur_buf[CURR_WINDOW_N];
+	static float pwr_buf[CURR_WINDOW_N];
+	static float bus_buf[CURR_WINDOW_N];
 	for (int i = 0; i < n; i++) {
-		sum_i += st->s[i].current_a;
-		sum_p += st->s[i].power_w;
-		sum_v += st->s[i].bus_v;
+		cur_buf[i] = st->s[i].current_a;
+		pwr_buf[i] = st->s[i].power_w;
+		bus_buf[i] = st->s[i].bus_v;
 	}
-	out->mean_current_a = sum_i / (float)n;
-	out->mean_power_w   = sum_p / (float)n;
-	out->mean_bus_v     = sum_v / (float)n;
+
+	/* --- DC features: mean current, power, bus voltage ---
+	 * The means serve as the DC operating-point features.  mean_current_a
+	 * is the primary classifier threshold (OFF / OVERLOAD boundary).
+	 * mean_bus_v lets the caller detect load-induced voltage sag
+	 * independently of the current level.  One alp_dsp_stats_f32 pass per
+	 * channel yields the mean; the SDK backs this with CMSIS-DSP
+	 * arm_mean_f32 on the M55 and a portable-C pass under native_sim --
+	 * no arm_* here. */
+	alp_dsp_stats_t st_cur, st_pwr, st_bus;
+	alp_dsp_stats_f32(cur_buf, (size_t)n, &st_cur);
+	alp_dsp_stats_f32(pwr_buf, (size_t)n, &st_pwr);
+	alp_dsp_stats_f32(bus_buf, (size_t)n, &st_bus);
+	out->mean_current_a = st_cur.mean;
+	out->mean_power_w   = st_pwr.mean;
+	out->mean_bus_v     = st_bus.mean;
 
 	/* --- AC ripple features: rms_ac_a and crest factor ---
 	 * Removing the DC mean before squaring is the software equivalent of AC
@@ -222,21 +168,30 @@ void curr_feat_extract(const struct curr_window_state *st, float sr_hz, struct c
 	 *
 	 * Crest factor = peak_ac / rms_ac.  A high value (>3) indicates that one
 	 * or a few large spikes dominate the window rather than a sustained
-	 * periodic ripple.  Guard against divide-by-zero with the 1e-6 A floor. */
-	float sum2 = 0.0f, peak = 0.0f;
+	 * periodic ripple.  Guard against divide-by-zero with the 1e-6 A floor.
+	 *
+	 * xc[] (the mean-centred current) is reused below as the FFT input, so
+	 * it is computed here once with a plain loop (trivial, not worth
+	 * wrapping) rather than recomputed per stage.  A second
+	 * alp_dsp_stats_f32 pass over xc then yields rms_ac_a and the abs-peak
+	 * -- the SDK backs this with CMSIS-DSP arm_rms/absmax_f32 on the M55
+	 * and a portable-C pass under native_sim -- no arm_* here. */
+	static float xc[CURR_WINDOW_N];
 	for (int i = 0; i < n; i++) {
-		float ac = st->s[i].current_a - out->mean_current_a;
-		sum2 += ac * ac;
-		if (fabsf(ac) > peak) {
-			peak = fabsf(ac);
-		}
+		xc[i] = cur_buf[i] - out->mean_current_a;
 	}
-	out->rms_ac_a = sqrtf(sum2 / (float)n);
+	alp_dsp_stats_t st_ac;
+	alp_dsp_stats_f32(xc, (size_t)n, &st_ac);
+	float peak    = st_ac.abs_max; /* peak |xc| */
+	out->rms_ac_a = st_ac.rms;     /* AC RMS = sqrt(mean(xc^2)) */
 	/* Crest factor is undefined when there is no ripple (e.g. motor OFF or
 	 * perfectly smooth supply).  Return 0 rather than +Inf in that case;
 	 * the classifier treats 0 and a genuine low crest value identically
 	 * because both indicate an absence of peaky transients. */
 	out->crest = (out->rms_ac_a > 1e-6f) ? (peak / out->rms_ac_a) : 0.0f;
+	for (int i = n; i < CURR_WINDOW_N; i++) {
+		xc[i] = 0.0f; /* zero-pad the FFT tail on a short window */
+	}
 
 	/* --- Inrush slope (last-quarter mean − first-quarter mean) ---
 	 * During motor start-up, current spikes and then decays as back-EMF
@@ -252,46 +207,59 @@ void curr_feat_extract(const struct curr_window_state *st, float sr_hz, struct c
 	if (q < 1) {
 		q = 1;
 	}
-	float first = 0.0f, last = 0.0f;
-	for (int i = 0; i < q; i++) {
-		first += st->s[i].current_a;
-		last += st->s[n - 1 - i].current_a;
-	}
-	/* slope_a is (mean of last quarter) − (mean of first quarter). */
-	out->slope_a = (last - first) / (float)q;
+	/* mean-of-first-q and mean-of-last-q via two alp_dsp_stats_f32 passes
+	 * over sub-ranges of cur_buf -- algebraically identical to
+	 * (last_sum - first_sum) / q, and again no arm_* here. */
+	alp_dsp_stats_t st_first, st_last;
+	alp_dsp_stats_f32(cur_buf, (size_t)q, &st_first);
+	alp_dsp_stats_f32(&cur_buf[n - q], (size_t)q, &st_last);
+	out->slope_a = st_last.mean - st_first.mean;
 
-	/* --- Dominant ripple frequency via radix-2 FFT ---
-	 * Zero-pad the mean-removed current to exactly CURR_WINDOW_N = 256
-	 * points (a power of 2) and run the in-place FFT.
+	/*
+	 * SPECTRUM via the portable <alp/dsp.h> chain (NOT a hand-rolled FFT).
+	 * ------------------------------------------------------------------
+	 * A single ALP_DSP_STAGE_FFT (rectangular, no window) transforms the
+	 * mean-centred current xc[] to magnitude bins.  The backend runs
+	 * CMSIS-DSP arm_rfft_fast_f32 on the M55 and a portable-C radix-2 FFT
+	 * under native_sim -- the example source is identical either way.
 	 *
-	 * Frequency resolution: Δf = sr_hz / CURR_WINDOW_N = 200/256 ≈ 0.78 Hz.
-	 * Usable range: bins 1 to N/2−1 (bin 0 = DC, already removed by mean-
-	 * subtraction; bins N/2 and above are aliases).
-	 *
-	 * We track |X[k]|² (magnitude squared) rather than |X[k]| to avoid a
-	 * sqrtf per bin.  Relative ordering is identical so the argmax is the
-	 * same.  dom_val starts at −1 so the first bin (k=1) always wins the
-	 * first comparison.
-	 *
-	 * ripple_freq_hz = dom_bin × sr_hz / CURR_WINDOW_N
-	 *
-	 * The static buffers avoid stack allocation of 2×256×4 = 2 KB on a
-	 * constrained Cortex-M55 stack. */
-	static float re[CURR_WINDOW_N];
-	static float im[CURR_WINDOW_N];
+	 * The chain consumes int16 samples (the wire format used elsewhere in
+	 * alp-sdk for ADC-derived streams).  We scale the float window to fill
+	 * the int16 range before feeding it: the absolute scale is irrelevant
+	 * here because the dominant bin is an argmax over magnitude-squared,
+	 * which is scale-invariant.
+	 */
+	static int16_t samp_q15[CURR_WINDOW_N];
+	float          scale = (peak > 1e-9f) ? (30000.0f / peak) : 0.0f;
 	for (int i = 0; i < CURR_WINDOW_N; i++) {
-		re[i] = (i < n) ? (st->s[i].current_a - out->mean_current_a) : 0.0f;
-		im[i] = 0.0f;
+		samp_q15[i] = (int16_t)lrintf(xc[i] * scale);
 	}
-	fft_radix2(re, im, CURR_WINDOW_N);
+
+	static float    mag[CURR_WINDOW_N];
+	alp_dsp_stage_t stages[] = {
+		{ .kind  = ALP_DSP_STAGE_FFT,
+		  .u.fft = { .n_points = CURR_WINDOW_N, .output_format = ALP_DSP_FFT_OUTPUT_MAGNITUDE } },
+	};
+	alp_dsp_chain_t *chain = alp_dsp_chain_open(stages, 1u);
+	size_t           got   = 0;
+	memset(mag, 0, sizeof(mag));
+	if (chain != NULL) {
+		(void)alp_dsp_chain_apply_bins(chain, samp_q15, CURR_WINDOW_N, mag, CURR_WINDOW_N, &got);
+		alp_dsp_chain_close(chain);
+	}
+
 	/* Search only the positive-frequency half-spectrum (bins 1 to N/2−1).
 	 * Bin 0 (DC) is excluded because the input was already mean-removed.
-	 * Bins N/2 and above are mirror images (Nyquist aliases) of bins below. */
+	 * Bins N/2 and above are mirror images (Nyquist aliases) of bins below.
+	 * We track |X[k]|² (magnitude squared, from the chain's magnitude
+	 * output) rather than |X[k]| to preserve the original argmax ordering.
+	 * dom_val starts at −1 so the first bin (k=1) always wins the first
+	 * comparison. */
 	const int half    = CURR_WINDOW_N / 2;
 	int       dom_bin = 1;
 	float     dom_val = -1.0f;
 	for (int k = 1; k < half; k++) {
-		float m2 = re[k] * re[k] + im[k] * im[k]; /* |X[k]|² */
+		float m2 = mag[k] * mag[k]; /* |X[k]|² */
 		if (m2 > dom_val) {
 			dom_val = m2;
 			dom_bin = k;

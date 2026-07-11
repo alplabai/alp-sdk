@@ -82,6 +82,13 @@ static float synth_sample(int window, int i)
 	}
 }
 
+/*
+ * All cross-window state for one survey run lives here so main() can pass a
+ * single pointer around instead of threading five separate locals through
+ * classify()/emit_record().  imu_ok/gps_uart track whether the real sensors
+ * answered at boot -- once false, the run stays on synthetic data / the
+ * canned NMEA track for its whole lifetime (no per-window re-probe).
+ */
 struct rail_ctx {
 	icm42670_t       imu;
 	bool             imu_ok;
@@ -96,12 +103,18 @@ struct rail_ctx {
 	struct rail_features worst_feat;
 };
 
+/* Leading '#' marks this as a comment line to CSV consumers (most CSV
+ * readers and MQTT/GIS ingest scripts skip '#'-prefixed lines by
+ * convention), so the field-name header can live in the same stream as
+ * the data records below without a separate schema file. */
 static void emit_header(void)
 {
 	printk("# RAIL,chainage_m,lat,lon,speed_mps,class,severity,dom_freq_hz,"
 	       "rail_wavelength_m,fix\n");
 }
 
+/* Field order here must track emit_header() above -- there is no named-field
+ * encoding, so a reordered printk here silently desyncs the CSV schema. */
 static void emit_record(const struct rail_ctx *c, double lat, double lon, float speed, bool fix)
 {
 	printk("RAIL,%.1f,%.6f,%.6f,%.1f,%s,%.2f,%.1f,%.4f,%d\n",
@@ -116,7 +129,18 @@ static void emit_record(const struct rail_ctx *c, double lat, double lon, float 
 	       fix ? 1 : 0);
 }
 
-/* Classify a feature vector via the AI model, else the deterministic fallback. */
+/*
+ * Classify a feature vector via the AI model, else the deterministic fallback.
+ *
+ * c->inf is non-NULL whenever alp_inference_open() accepted s_model, which
+ * happens even for the 1-byte stub (open only checks the container, not that
+ * the payload is a real graph).  So the dtype/size_bytes checks below are the
+ * real gate: they catch a stub or mismatched model at RUN time and drop to
+ * rail_classify_fallback() instead of reading/writing past a tensor that
+ * does not exist.  On native_sim with the stub model every one of these
+ * checks fails and every window takes the fallback path -- that is the
+ * expected, exercised behaviour, not an error.
+ */
 static struct rail_verdict classify(struct rail_ctx *c, const struct rail_features *f)
 {
 	if (c->inf != NULL) {
@@ -132,6 +156,11 @@ static struct rail_verdict classify(struct rail_ctx *c, const struct rail_featur
 				if (alp_inference_get_output(c->inf, 0, &out) == ALP_OK &&
 				    out.dtype == ALP_INFERENCE_DTYPE_F32 && out.data != NULL &&
 				    out.size_bytes >= RAIL_CLASS_COUNT * sizeof(float)) {
+					/* argmax over the per-class scores selects the predicted
+					 * class; severity is derived from 1 - P(HEALTHY) rather
+					 * than the winning score, so a confident non-healthy
+					 * call and a low-margin one still rank by how far the
+					 * model is from calling it healthy. */
 					const float *scores = (const float *)out.data;
 					int          best   = 0;
 					float        bestv  = scores[0];
@@ -142,6 +171,9 @@ static struct rail_verdict classify(struct rail_ctx *c, const struct rail_featur
 						}
 					}
 					struct rail_verdict v = { (rail_class_t)best, 1.0f - scores[RAIL_HEALTHY] };
+					/* Clamp: scores are not guaranteed to be a normalised
+					 * softmax (a raw-logit model would violate [0,1]), and
+					 * downstream severity display/thresholds assume [0,1]. */
 					if (v.severity < 0.0f) {
 						v.severity = 0.0f;
 					}
@@ -169,10 +201,16 @@ int main(void)
 
 	memset(&c, 0, sizeof(c));
 	rail_feat_state_reset(&st);
+	/* 25 m along-track segment length: matches the README's contract of one
+	 * CSV record per 25 m of track, independent of survey speed. */
 	rail_pos_init(&c.pos, 25.0f);
 	seg_reset(&c);
 
 	/* --- I2C accelerometer (tolerate a missing chip on native_sim). --- */
+	/* BOARD_I2C_SENSORS is the board-level alias for the sensor I2C bus
+	 * (see board.yaml pins:) -- using it instead of a raw bus index keeps
+	 * this source portable across the E1M-EVK and E1M-X-EVK carriers, which
+	 * wire the ICM-42670 to different underlying I2C controllers. */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
 	    .bus_id     = BOARD_I2C_SENSORS,
 	    .bitrate_hz = 400000,
@@ -181,6 +219,9 @@ int main(void)
 	    icm42670_set_accel(&c.imu, ICM42670_ODR_800_HZ, ICM42670_ACCEL_FS_2G) == ALP_OK) {
 		c.imu_ok = true;
 	} else {
+		/* Open or config failure is expected on native_sim (no real I2C
+		 * device answers) -- the demo keeps running on synth_sample()
+		 * rather than treating this as fatal. */
 		LOG_WRN("ICM-42670 unavailable; using synthetic vibration");
 	}
 
@@ -192,10 +233,17 @@ int main(void)
 	if (c.gps_uart != NULL) {
 		(void)ublox_neo_m9n_init(&c.gps, c.gps_uart);
 	} else {
+		/* No UART backend -> every window below falls through to
+		 * s_canned_track so the pipeline still exercises chainage/segment
+		 * binning end-to-end without live GNSS. */
 		LOG_WRN("GNSS UART unavailable; replaying canned NMEA track");
 	}
 
 	/* --- AI model: stub backend; fallback classifier runs on native_sim. --- */
+	/* s_model is a 1-byte placeholder, not a trained graph: it exists only
+	 * so alp_inference_open's non-NULL model_data contract is satisfied.
+	 * classify() detects the resulting unusable tensor and calls
+	 * rail_classify_fallback() every time -- see classify() above. */
 	c.inf = alp_inference_open(&(alp_inference_config_t){
 	    .backend    = ALP_INFERENCE_BACKEND_AUTO,
 	    .format     = ALP_INFERENCE_MODEL_TFLITE,
@@ -211,6 +259,10 @@ int main(void)
 	uint8_t nmea[128];
 	size_t  track_i = 0;
 
+	/* Each outer iteration is one 256-sample IMU window (320 ms of vibration
+	 * at 800 Hz), paired with one GNSS sentence -- the demo treats "one
+	 * window" and "one GNSS read" as roughly synchronous, which is close
+	 * enough at survey speed since GNSS updates far slower than the IMU. */
 	for (int w = 0; w < RAIL_DEMO_WINDOWS; w++) {
 		/* Fill one window. */
 		rail_feat_state_reset(&st);
@@ -219,6 +271,10 @@ int main(void)
 			if (c.imu_ok) {
 				icm42670_axes_t ax;
 				if (icm42670_read_accel(&c.imu, &ax) == ALP_OK) {
+					/* Vector magnitude of all three axes, not a single axis:
+					 * the ICM-42670's mount orientation on the bogie is not
+					 * fixed by this example, so |a| stays valid regardless
+					 * of which axis actually faces the rail. */
 					float g = sqrtf((float)ax.x * ax.x + (float)ax.y * ax.y + (float)ax.z * ax.z) /
 					          ICM_LSB_PER_G;
 					sample  = g;
@@ -238,6 +294,9 @@ int main(void)
 		    ublox_neo_m9n_read_nmea_line(&c.gps, nmea, sizeof(nmea), &len, 5) == ALP_OK) {
 			line = (const char *)nmea;
 		} else {
+			/* No live sentence this window (uart absent, or the read timed
+			 * out/returned nothing) -- replay the canned track so the demo
+			 * still advances chainage deterministically on native_sim. */
 			line = s_canned_track[track_i % ARRAY_SIZE(s_canned_track)];
 			track_i++;
 		}
@@ -245,6 +304,10 @@ int main(void)
 		float  pspd = speed;
 		bool   pfix = false;
 		if (rail_pos_parse_rmc(line, &plat, &plon, &pspd, &pfix) && pfix) {
+			/* Only commit a fresh fix: an unfixed sentence (pfix == false)
+			 * leaves lat/lon/speed at their last known values rather than
+			 * resetting to 0, since this demo does not dead-reckon between
+			 * fixes. */
 			lat   = plat;
 			lon   = plon;
 			speed = pspd;
@@ -256,20 +319,29 @@ int main(void)
 		rail_feat_extract(&st, RAIL_ODR_HZ, speed, &f);
 		struct rail_verdict v = classify(&c, &f);
 
-		/* Track the worst verdict in the current segment. */
+		/* Track the worst verdict in the current segment: a segment is
+		 * reported once (on segment change, below), so multiple windows
+		 * within the same 25 m stretch must be reduced to the single worst
+		 * finding rather than emitting one record per window. */
 		if (v.severity > c.worst_sev) {
 			c.worst_sev  = v.severity;
 			c.worst_cls  = v.cls;
 			c.worst_feat = f;
 		}
 
-		/* Advance position; emit a record on segment change. */
+		/* Advance position; emit a record on segment change. rail_pos_update
+		 * returns true exactly when the chainage crosses into a new 25 m
+		 * segment, which is the trigger to flush the worst verdict
+		 * accumulated for the segment just completed. */
 		if (rail_pos_update(&c.pos, lat, lon, fix)) {
 			emit_record(&c, lat, lon, speed, fix);
 			seg_reset(&c);
 		}
 	}
 
+	/* Teardown mirrors the open order above; guard each close on the
+	 * corresponding _ok/handle so a partially-initialised run (e.g. IMU
+	 * absent) does not deinit a chip that was never inited. */
 	alp_inference_close(c.inf);
 	if (c.imu_ok) {
 		icm42670_deinit(&c.imu);
