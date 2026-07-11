@@ -3,16 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * White-box native_sim/ztest coverage for GHSA-xhm8-7f87-93q5 defects
- * 1 and 3 in src/backends/rpc/zephyr_drv.c (defect 2's `closing` +
- * `cb_active` entry/exit gate is exercised as a side effect of both
- * scenarios below, via the shared rpc_recv_enter()/rpc_recv_leave()
- * helpers the fix introduced).
+ * 1, 2, and 3 in src/backends/rpc/zephyr_drv.c. Defect 2's `closing` +
+ * `cb_active` entry/exit gate is exercised as a side effect of every
+ * scenario below (via the shared rpc_recv_enter()/rpc_recv_leave()
+ * helpers the fix introduced) AND has its own dedicated race test
+ * (scenario 4) that drives a genuinely in-flight recv against a
+ * concurrent external shutdown -- see that scenario's own header
+ * comment for what native_sim's single-core scheduling model does and
+ * does not let this drive, and how that was confirmed by hand.
  *
  * This file #includes src/backends/rpc/zephyr_drv.c directly (the
  * same technique tests/yocto/rpc_yocto_self_close.c uses for the
  * Linux backend -- see that file's header comment) so it can reach
  * the exact file-local surface under test: `struct rpc_be`,
- * `rpc_ept_recv()`, `z_shutdown()`, `frame_build()`, `fnv1a_32()`.
+ * `rpc_ept_recv()`, `rpc_recv_enter()`, `z_shutdown()`,
+ * `frame_build()`, `fnv1a_32()`.
  * Real ipc_service (an actual /dev-equivalent RPMsg transport) is
  * bench-only on Zephyr -- there is no way to fake a working
  * ipc_service instance under native_sim without real shared-memory +
@@ -30,7 +35,7 @@
  * a minimal test-local double below tracks how many times, and with
  * which owner, it was actually invoked.
  *
- * Three scenarios:
+ * Four scenarios:
  *
  *   1. test_defect1_recv_vs_timed_out_call_race -- uses
  *      zephyr_drv.c's g_rpc_recv_test_sync_hook (a test-only seam
@@ -82,6 +87,26 @@
  *      genuine self-close), and A's own rpc_ept_recv() epilogue must
  *      complete A's deferred teardown -- alp_rpc_close_finalize()
  *      firing exactly once, with owner == &g_chan_a_state.
+ *
+ *   4. test_defect2_shutdown_waits_for_inflight_recv -- GHSA-xhm8
+ *      follow-up (defect 2's `cb_active` drain loop, previously
+ *      untested: the prior review found it ran ZERO iterations in
+ *      every existing test). A subscriber callback blocks mid-recv
+ *      (holding `cb_active` == 1, `recv_active` == true, for an
+ *      arbitrarily long, test-controlled window) while a HIGHER-
+ *      priority thread concurrently calls z_shutdown() on the SAME
+ *      channel from a DIFFERENT thread (a genuine external close).
+ *      Asserts z_shutdown() does NOT return before the recv releases
+ *      (no premature DONE -- the real dispatcher would destroy/free
+ *      the slot on DONE, so premature DONE here would be a UAF in
+ *      production), that its drain loop actually iterates at least
+ *      once (a new test-only hook counts iterations -- see this
+ *      scenario's own header comment for why a counter, not just
+ *      timing, is used), and that it returns DONE only once the recv
+ *      has genuinely finished. See this scenario's own header comment
+ *      for what was, and was not, possible to drive on native_sim for
+ *      the narrower check-and-count instruction-level race, confirmed
+ *      by hand.
  */
 
 /* Faked purely at the preprocessor level -- no real Kconfig ALP_SDK_RPC
@@ -444,4 +469,241 @@ ZTEST(alp_rpc_zephyr_backend, test_defect3_cross_channel_close_takes_external_pa
 	 * `closing` sticky flag IS still set by z_shutdown(B) itself,
 	 * matching a REAL external close's contract). */
 	zassert_true(g_chan_b.closing, "external z_shutdown(B) must still set the sticky closing flag");
+}
+
+/* ------------------------------------------------------------------ */
+/* 3. GHSA-xhm8-7f87-93q5 defect 2: cb_active drain vs in-flight recv.  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A subscriber callback blocks INSIDE rpc_ept_recv() (between
+ * rpc_recv_enter() and rpc_recv_leave(), holding `cb_active` == 1,
+ * `recv_active` == true) for an arbitrarily long, test-controlled
+ * window, while a HIGHER-priority thread concurrently calls
+ * z_shutdown() on the SAME channel from a DIFFERENT thread -- a
+ * genuine external close racing a genuinely in-flight recv, exactly
+ * the scenario the prior review found untested (the cb_active drain
+ * loop ran ZERO iterations in every existing test). Decisive
+ * assertions: z_shutdown() must NOT return before the recv releases
+ * (the real dispatcher destroys/frees the slot on DONE, so an early
+ * DONE here would be a UAF in production); its drain loop must
+ * genuinely iterate at least once (g_rpc_shutdown_drain_test_hook, a
+ * new test-only hook mirroring g_rpc_recv_test_sync_hook's pattern,
+ * counts iterations); and it must return DONE only once the recv has
+ * actually finished (checked via a join, bounded, so a regression here
+ * fails loudly rather than hanging).
+ *
+ * What this does NOT (and structurally cannot, on this platform)
+ * drive: the microscopic instruction-level race BETWEEN
+ * rpc_recv_enter()'s `closing` check and its `cb_active` increment --
+ * i.e. proving the *coupling* of those two steps into one critical
+ * section, specifically, is load-bearing (as opposed to merely proving
+ * cb_active correctly gates the drain once it IS incremented, which
+ * this test does prove). An earlier version of this test tried to
+ * force that exact window by waking a higher-priority thread via
+ * k_sem_give() from INSIDE rpc_recv_enter()'s spinlock section (mirrors
+ * test_defect1_recv_vs_timed_out_call_race's technique) and asserting
+ * it could never observe cb_active == 0. It failed even against the
+ * CURRENT, correctly-coupled code: native_sim's non-SMP scheduler does
+ * not preempt on a plain k_spin_unlock() the way `arch_irq_lock()`
+ * being held might suggest -- Zephyr's z_reschedule() defers the
+ * higher-priority thread's actual run until the NEXT explicit
+ * blocking/yield point (or this thread's exit), not "as soon as
+ * interrupts are unlocked" -- so the woken thread only ever actually
+ * ran AFTER the (very short, subscriber-less) recv had already fully
+ * completed and decremented cb_active back to 0 legitimately. That is
+ * a property of native_sim's scheduler, not a defect: reproducing the
+ * real defect-2 window needs an explicit yield point placed INSIDE the
+ * vulnerable gap, which only exists in the historical, un-coupled
+ * shape of rpc_recv_enter() -- the current, coupled code has no such
+ * gap to inject one into.
+ *
+ * CONFIRMED BY HAND (not left as an automated test, since it requires
+ * editing the function under test, not just a runtime toggle):
+ * temporarily reshaping rpc_recv_enter() to the historical, uncoupled
+ * form --
+ *
+ *     k_spinlock_key_t key = k_spin_lock(&be->lock);
+ *     if (be->closing) { k_spin_unlock(&be->lock, key); return false; }
+ *     k_spin_unlock(&be->lock, key);        // unlock moved up
+ *     k_yield();                            // force the window open
+ *     be->recv_thread = k_current_get();
+ *     be->recv_active = true;
+ *     atomic_inc(&be->cb_active);           // now unguarded
+ *     return true;
+ *
+ * and driving it with the same higher-priority-shutdown-thread
+ * technique above reproduces the defect exactly: the shutdown thread
+ * runs inside the now-real (and now-forced-open, via k_yield())
+ * window, observes cb_active == 0 for a recv that already passed the
+ * closing check, and z_shutdown()'s drain loop returns DONE with ZERO
+ * iterations while the (still-runnable, yielded) recv thread is about
+ * to go on and stamp `recv_thread`/`recv_active`/`cb_active` into what
+ * a real dispatcher would, by then, have already destroyed/freed --
+ * the exact UAF defect 2 closes. Restoring the coupling (removing the
+ * early unlock and the forced k_yield()) makes the reproduction
+ * impossible again. This confirms the coupling is the load-bearing
+ * fix, even though no automated regression test below can force that
+ * exact instruction-level interleaving without also editing the
+ * production function under test.
+ */
+
+static struct k_sem g_defect2_hold_arrived;
+static struct k_sem g_defect2_hold_release;
+static atomic_t     g_defect2_hold_entered;
+
+static struct k_sem              g_defect2_shutdown_done;
+static atomic_t                  g_defect2_drain_iters;
+static alp_rpc_shutdown_result_t g_defect2_result;
+static struct rpc_be            *g_defect2_be;
+static alp_rpc_backend_state_t   g_defect2_state;
+
+/* Subscriber callback for the "hold" method: signals the main thread
+ * that recv is now genuinely in-flight (cb_active == 1, recv_active
+ * == true), then blocks -- holding that state open for as long as the
+ * test needs -- until the main thread releases it. */
+static void defect2_hold_cb(const void *payload, size_t len, void *user)
+{
+	ARG_UNUSED(payload);
+	ARG_UNUSED(len);
+	ARG_UNUSED(user);
+
+	atomic_set(&g_defect2_hold_entered, 1);
+	k_sem_give(&g_defect2_hold_arrived);
+	k_sem_take(&g_defect2_hold_release, K_FOREVER);
+}
+
+/* g_rpc_shutdown_drain_test_hook (declared in zephyr_drv.c, inside
+ * z_shutdown()'s external-close cb_active drain loop): counts
+ * iterations so the test can assert the loop genuinely observed the
+ * in-flight recv rather than draining in zero iterations. */
+static void defect2_drain_hook(void)
+{
+	atomic_inc(&g_defect2_drain_iters);
+}
+
+static void defect2_shutdown_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	g_defect2_state.be_data = g_defect2_be;
+	g_defect2_result        = z_shutdown(&g_defect2_state);
+	k_sem_give(&g_defect2_shutdown_done);
+}
+
+static void defect2_recv_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	uint8_t frame[64];
+	int     built = frame_build(frame, sizeof(frame), "hold", NULL, 0);
+	zassert_true(built > 0, "frame_build failed");
+
+	rpc_ept_recv(frame, (size_t)built, g_defect2_be);
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_defect2_shutdown_waits_for_inflight_recv)
+{
+	static K_THREAD_STACK_DEFINE(shutdown_stack, RACE_STACK_SIZE);
+	static struct k_thread shutdown_thread_h;
+	static K_THREAD_STACK_DEFINE(recv2_stack, RACE_STACK_SIZE);
+	static struct k_thread recv2_thread_h;
+
+	struct rpc_be be;
+
+	init_test_channel(&be, "defect2");
+	g_defect2_be = &be;
+	memset(&g_defect2_state, 0, sizeof(g_defect2_state));
+
+	be.subs[0].method_hash = fnv1a_32("hold");
+	strncpy(be.subs[0].method, "hold", sizeof(be.subs[0].method) - 1);
+	be.subs[0].cb   = defect2_hold_cb;
+	be.subs[0].user = NULL;
+
+	k_sem_init(&g_defect2_hold_arrived, 0, 1);
+	k_sem_init(&g_defect2_hold_release, 0, 1);
+	k_sem_init(&g_defect2_shutdown_done, 0, 1);
+	atomic_clear(&g_defect2_hold_entered);
+	atomic_clear(&g_defect2_drain_iters);
+	g_defect2_result = (alp_rpc_shutdown_result_t)-1;
+
+	/* Start the recv: it will enter defect2_hold_cb() and block there,
+	 * genuinely in-flight (cb_active == 1). */
+	k_tid_t recv_tid = k_thread_create(&recv2_thread_h,
+	                                   recv2_stack,
+	                                   K_THREAD_STACK_SIZEOF(recv2_stack),
+	                                   defect2_recv_entry,
+	                                   NULL,
+	                                   NULL,
+	                                   NULL,
+	                                   K_PRIO_PREEMPT(5),
+	                                   0,
+	                                   K_NO_WAIT);
+
+	zassert_equal(k_sem_take(&g_defect2_hold_arrived, K_MSEC(RACE_BOUND_MS)),
+	              0,
+	              "recv never reached the hold callback");
+	zassert_true(atomic_get(&g_defect2_hold_entered));
+	zassert_equal(atomic_get(&be.cb_active), 1, "cb_active must be 1 while recv is in-flight");
+	zassert_true(be.recv_active, "recv_active must be true while recv is in-flight");
+	zassert_true(be.in_use, "the slot must not have been recycled while recv is in-flight");
+
+	/* Concurrently, a HIGHER-priority thread closes the SAME channel
+	 * from the OUTSIDE (a genuine external close: different thread,
+	 * `recv_thread`/`recv_active` will show a different identity). */
+	g_rpc_shutdown_drain_test_hook = defect2_drain_hook;
+	k_thread_create(&shutdown_thread_h,
+	                shutdown_stack,
+	                K_THREAD_STACK_SIZEOF(shutdown_stack),
+	                defect2_shutdown_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(4),
+	                0,
+	                K_NO_WAIT);
+
+	/* Bounded wait for the drain loop to actually start spinning --
+	 * proves z_shutdown() is genuinely blocked on the in-flight recv,
+	 * not merely "hasn't run yet". */
+	int waited_ms = 0;
+	while (atomic_get(&g_defect2_drain_iters) == 0 && waited_ms < RACE_BOUND_MS) {
+		k_sleep(K_MSEC(1));
+		waited_ms += 1;
+	}
+	zassert_true(atomic_get(&g_defect2_drain_iters) >= 1,
+	             "z_shutdown()'s cb_active drain loop never spun -- it never observed the "
+	             "in-flight recv");
+
+	/* Decisive (b): z_shutdown() must NOT have returned yet -- the recv
+	 * is still genuinely in-flight (we haven't released it), so a real
+	 * dispatcher must not yet be allowed to destroy/free this slot. */
+	zassert_equal(k_sem_take(&g_defect2_shutdown_done, K_NO_WAIT),
+	              -EBUSY,
+	              "z_shutdown() returned DONE while the recv it should be waiting on is still "
+	              "in-flight -- premature destroy/free would UAF it");
+	zassert_true(be.in_use, "the slot must still be live -- no premature free");
+	zassert_true(be.recv_active, "recv must still show in-flight while shutdown is draining");
+
+	/* Let the recv finish: hold_cb returns, rpc_ept_recv()'s epilogue
+	 * runs rpc_recv_leave() (cb_active -> 0, recv_active -> false). */
+	k_sem_give(&g_defect2_hold_release);
+
+	zassert_equal(k_thread_join(recv_tid, K_MSEC(RACE_BOUND_MS)), 0, "recv thread never finished");
+	zassert_equal(k_sem_take(&g_defect2_shutdown_done, K_MSEC(RACE_BOUND_MS)),
+	              0,
+	              "z_shutdown() never returned after the in-flight recv finished -- hung");
+
+	g_rpc_shutdown_drain_test_hook = NULL;
+
+	/* (a)/(c): DONE only now, drain genuinely spun, no hang, no crash. */
+	zassert_equal(g_defect2_result, ALP_RPC_SHUTDOWN_DONE);
+	zassert_true(atomic_get(&g_defect2_drain_iters) >= 1);
+	zassert_false(be.recv_active,
+	              "recv must have cleared recv_active before z_shutdown() returned DONE");
+	zassert_equal(atomic_get(&be.cb_active), 0);
 }
