@@ -186,3 +186,147 @@ ZTEST(alp_security_mbedtls_aead, test_tamper_tag_rejected_no_plaintext_exposed)
 
 	alp_aead_close(a);
 }
+
+/*
+ * Adversarial-review defect #2 (tag_len divergence): all three security
+ * backends must agree that tag_len must be exactly 16 B -- reject any
+ * other value with ALP_ERR_INVAL, on both encrypt and decrypt, before any
+ * PSA setup runs (i.e. even a bogus tag_len must not leave cipher_out
+ * touched).
+ */
+ZTEST(alp_security_mbedtls_aead, test_encrypt_rejects_non_16_tag_len)
+{
+	uint8_t key[16];
+
+	fill_pattern(key, sizeof(key), 0x12u);
+	alp_aead_t *a = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
+
+	zassert_not_null(a);
+
+	uint8_t iv[12];
+	uint8_t plain[32];
+	uint8_t cipher[32] = { 0 };
+	uint8_t tag[24]    = { 0 }; /* oversized -- only 16 round-trips */
+
+	fill_pattern(iv, sizeof(iv), 0x13u);
+	fill_pattern(plain, sizeof(plain), 0x14u);
+
+	zassert_equal(
+	    alp_aead_encrypt(a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain), cipher, tag, 24),
+	    ALP_ERR_INVAL,
+	    "tag_len != 16 must be rejected on encrypt");
+	zassert_equal(
+	    alp_aead_encrypt(a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain), cipher, tag, 8),
+	    ALP_ERR_INVAL,
+	    "short tag_len must be rejected on encrypt");
+
+	alp_aead_close(a);
+}
+
+ZTEST(alp_security_mbedtls_aead, test_decrypt_rejects_non_16_tag_len)
+{
+	uint8_t key[16];
+
+	fill_pattern(key, sizeof(key), 0x15u);
+	alp_aead_t *a = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
+
+	zassert_not_null(a);
+
+	uint8_t iv[12];
+	uint8_t plain[32];
+	uint8_t cipher[32]  = { 0 };
+	uint8_t decoded[32] = { 0 };
+	uint8_t tag[24]     = { 0 };
+
+	fill_pattern(iv, sizeof(iv), 0x16u);
+	fill_pattern(plain, sizeof(plain), 0x17u);
+
+	zassert_equal(alp_aead_encrypt(
+	                  a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain), cipher, tag, sizeof(tag)),
+	              ALP_ERR_INVAL,
+	              "setup: tag_len 24 already rejected on encrypt");
+
+	/* Encrypt with a real 16 B tag so decrypt has a valid tag buffer to
+	 * probe the tag_len argument against. */
+	zassert_equal(
+	    alp_aead_encrypt(a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain), cipher, tag, 16),
+	    ALP_OK);
+
+	zassert_equal(
+	    alp_aead_decrypt(a, iv, sizeof(iv), NULL, 0, cipher, sizeof(cipher), tag, 24, decoded),
+	    ALP_ERR_INVAL,
+	    "tag_len != 16 must be rejected on decrypt");
+	zassert_equal(
+	    alp_aead_decrypt(a, iv, sizeof(iv), NULL, 0, cipher, sizeof(cipher), tag, 8, decoded),
+	    ALP_ERR_INVAL,
+	    "short tag_len must be rejected on decrypt");
+
+	alp_aead_close(a);
+}
+
+/*
+ * Adversarial-review defect #3 (NULL buffer guard): NULL plain/cipher with
+ * a non-zero length must be rejected at the dispatcher, before it can ever
+ * reach a backend's psa_aead_update() / EVP_*Update() and NULL-deref.
+ */
+ZTEST(alp_security_mbedtls_aead, test_encrypt_rejects_null_plain_with_nonzero_len)
+{
+	uint8_t key[16];
+
+	fill_pattern(key, sizeof(key), 0x18u);
+	alp_aead_t *a = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
+
+	zassert_not_null(a);
+
+	uint8_t iv[12];
+	uint8_t cipher[32] = { 0 };
+	uint8_t tag[16]    = { 0 };
+
+	fill_pattern(iv, sizeof(iv), 0x19u);
+
+	zassert_equal(alp_aead_encrypt(a, iv, sizeof(iv), NULL, 0, NULL, 32, cipher, tag, sizeof(tag)),
+	              ALP_ERR_INVAL,
+	              "NULL plain with plain_len > 0 must be rejected");
+
+	/* NULL plain with plain_len == 0 stays legitimate (empty payload). */
+	zassert_equal(alp_aead_encrypt(a, iv, sizeof(iv), NULL, 0, NULL, 0, cipher, tag, sizeof(tag)),
+	              ALP_OK,
+	              "NULL plain with plain_len == 0 must still succeed");
+
+	alp_aead_close(a);
+}
+
+ZTEST(alp_security_mbedtls_aead, test_decrypt_rejects_null_cipher_with_nonzero_len)
+{
+	uint8_t key[16];
+
+	fill_pattern(key, sizeof(key), 0x1Au);
+	alp_aead_t *a = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
+
+	zassert_not_null(a);
+
+	uint8_t iv[12];
+	uint8_t tag[16]     = { 0 };
+	uint8_t cipher_dump = 0; /* cipher_out is still mandatory on encrypt */
+	uint8_t decoded[32] = { 0 };
+
+	fill_pattern(iv, sizeof(iv), 0x1Bu);
+
+	zassert_equal(alp_aead_decrypt(a, iv, sizeof(iv), NULL, 0, NULL, 32, tag, sizeof(tag), decoded),
+	              ALP_ERR_INVAL,
+	              "NULL cipher with cipher_len > 0 must be rejected");
+
+	/* NULL cipher with cipher_len == 0 is the legitimate AAD-only case;
+	 * exercise it with a real AAD-only tag from an empty-payload encrypt.
+	 * cipher_out itself is still a mandatory (non-optional) buffer on
+	 * encrypt -- only the ciphertext INPUT to decrypt is optional when
+	 * cipher_len == 0. */
+	zassert_equal(
+	    alp_aead_encrypt(a, iv, sizeof(iv), NULL, 0, NULL, 0, &cipher_dump, tag, sizeof(tag)),
+	    ALP_OK);
+	zassert_equal(alp_aead_decrypt(a, iv, sizeof(iv), NULL, 0, NULL, 0, tag, sizeof(tag), decoded),
+	              ALP_OK,
+	              "NULL cipher with cipher_len == 0 must still succeed");
+
+	alp_aead_close(a);
+}
