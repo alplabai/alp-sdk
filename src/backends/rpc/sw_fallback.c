@@ -18,7 +18,11 @@
  *   - call               -> ALP_ERR_TIMEOUT (no reply ever comes;
  *                          mirrors the documented header contract
  *                          for a peer that fails to respond)
- *   - close              -> no-op
+ *   - shutdown           -> ALP_RPC_SHUTDOWN_DONE (no rx/worker
+ *                          thread exists, so a self-close is
+ *                          structurally impossible here -- see
+ *                          alp_rpc_shutdown_result_t)
+ *   - destroy            -> no-op (no per-channel resources)
  *
  * Matches the design spec Section 5 sw_fallback contract.
  *
@@ -103,7 +107,15 @@ static alp_status_t sw_call(alp_rpc_backend_state_t *st,
 	return ALP_ERR_TIMEOUT;
 }
 
-static void sw_close(alp_rpc_backend_state_t *st)
+/* GHSA-xhm8-7f87-93q5: no rx/worker thread exists in this stub, so a
+ * self-close is structurally impossible -- always DONE. */
+static alp_rpc_shutdown_result_t sw_shutdown(alp_rpc_backend_state_t *st)
+{
+	(void)st;
+	return ALP_RPC_SHUTDOWN_DONE;
+}
+
+static void sw_destroy(alp_rpc_backend_state_t *st)
 {
 	(void)st;
 }
@@ -116,7 +128,8 @@ static const alp_rpc_ops_t _ops = {
 	.unsubscribe = sw_unsubscribe,
 	.send        = sw_send,
 	.call        = sw_call,
-	.close       = sw_close,
+	.shutdown    = sw_shutdown,
+	.destroy     = sw_destroy,
 };
 
 /* Export the rpc static-archive anchor the dispatcher references (#368). */

@@ -31,6 +31,32 @@
  * NOSUPPORT but the registry entry still links so the dispatcher
  * picks it ahead of sw_fallback on real silicon builds with the
  * ipc_service / rpmsg backend present.
+ *
+ * @par Close protocol (GHSA-xhm8-7f87-93q5) -- authoritative redesign
+ * Mirrors src/backends/rpc/yocto_drv.c's half of the contract (see
+ * that file's header comment for the full two-round history): the
+ * dispatcher (src/rpc_dispatch.c) owns single-owner election and the
+ * active-op drain; this backend's z_shutdown()/z_destroy() pair
+ * (replacing the old single z_close()) implement:
+ *
+ *   - z_shutdown(): a sticky `closing` flag guarded by a k_spinlock
+ *     (ipc_service's `received` callback may run close to interrupt
+ *     priority, so this can't be a blocking mutex) that z_call()
+ *     rechecks both before staging and is woken from, replacing a
+ *     one-shot cancel.  Self-close detection compares the CURRENT
+ *     thread against the thread recorded the last time
+ *     rpc_ept_recv() ran (BENCH-UNVERIFIED assumption: exactly one
+ *     ipc_service worker thread ever invokes a given endpoint's
+ *     `received` callback, never concurrently, never from ISR context
+ *     -- see rpc_ept_recv()'s own comment).  External close
+ *     deregisters the endpoint and waits for `cb_active` (a counter
+ *     around rpc_ept_recv()'s body) to reach 0 before returning DONE,
+ *     because ipc_service_deregister_endpoint()'s return does not, by
+ *     itself, clearly guarantee no recv is still in flight (also
+ *     BENCH-UNVERIFIED).
+ *   - z_destroy(): trivial for this backend (a static pool slot, no
+ *     heap, no fds) -- just releases the pool slot.  Called exactly
+ *     once by the dispatcher, strictly after its own active-op drain.
  */
 
 #include <errno.h>
@@ -45,6 +71,7 @@
 #include <alp/peripheral.h>
 #include <alp/rpc.h>
 
+#include "alp_slot_claim.h"
 #include "rpc_ops.h"
 
 #if defined(CONFIG_ALP_SDK_RPC)
@@ -86,8 +113,6 @@ struct rpc_sub {
 };
 
 struct rpc_be {
-	bool in_use;
-
 #if defined(CONFIG_ALP_SDK_RPC)
 	/* Cached config (name copied locally so the customer's literal
      * doesn't have to outlive open()). */
@@ -112,7 +137,15 @@ struct rpc_be {
 	uint8_t        tx_scratch[CONFIG_ALP_SDK_RPC_TX_FRAME_MAX];
 
 	/* Synchronous-call slot.  Single-element because the channel
-     * serialises calls via tx_mutex anyway. */
+     * serialises calls via tx_mutex anyway.
+     *
+     * `closing` (GHSA-xhm8-7f87-93q5 redesign) is the sticky cancel
+     * predicate: guarded by `lock` below (a spinlock, not a mutex --
+     * rpc_ept_recv()/z_shutdown() may run close to interrupt priority
+     * under ipc_service), set exactly once by z_shutdown() and never
+     * cleared.  z_call() rechecks it both before staging and after
+     * waking, replacing a one-shot cancel -- see z_call()'s doc
+     * comment for why that matters (the late-staging gap). */
 	struct k_sem call_sem;
 	char         call_method[ALP_RPC_METHOD_MAX_LEN];
 	void        *call_resp_buf;
@@ -120,7 +153,43 @@ struct rpc_be {
 	size_t       call_resp_len;
 	alp_status_t call_result;
 	bool         call_pending;
+
+	/* GHSA-xhm8-7f87-93q5 redesign: guards `closing` + `recv_thread`
+     * below. */
+	struct k_spinlock lock;
+	bool              closing;
+
+	/* Last thread observed running rpc_ept_recv() (see that function).
+     * z_shutdown() compares this against the CURRENT thread to detect
+     * a self-close (a subscriber callback closing its own channel).
+     * BENCH-UNVERIFIED assumption (see this file's header comment):
+     * exactly one ipc_service worker thread ever invokes a given
+     * endpoint's `received` callback. */
+	k_tid_t recv_thread;
+
+	/* Reentrancy counter around rpc_ept_recv()'s body.  An external
+     * z_shutdown() deregisters the endpoint then waits for this to
+     * reach 0 before returning DONE -- BENCH-UNVERIFIED: ipc_service's
+     * deregister does not, by itself, clearly guarantee no recv is
+     * still in flight. */
+	atomic_t cb_active;
+
+	/* Set once by z_shutdown() on the self-close (DEFERRED) path;
+     * read once by rpc_ept_recv()'s epilogue -- see that function. */
+	bool close_from_worker;
+
+	/* Dispatcher-owned back-pointer (alp_rpc_backend_state_t::owner,
+     * cached at z_open() time) -- see rpc_ops.h.  Used ONLY by
+     * rpc_ept_recv()'s epilogue to call alp_rpc_close_finalize(owner)
+     * exactly once on the self-close (DEFERRED) path. */
+	void *owner;
 #endif
+
+	/* Pool-slot claim flag (GHSA-xhm8-7f87-93q5 / issue #629 pattern):
+     * stays LAST so a fresh claim's memset(..., offsetof(..., in_use))
+     * zeroes every field above without clobbering the flag the claim
+     * itself just flipped -- see _be_alloc() below. */
+	bool in_use;
 };
 
 #if defined(CONFIG_ALP_SDK_RPC)
@@ -130,9 +199,15 @@ static struct rpc_be _be_pool[CONFIG_ALP_SDK_RPC_MAX_CHANNELS];
 static struct rpc_be *_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_be_pool); ++i) {
-		if (!_be_pool[i].in_use) {
-			memset(&_be_pool[i], 0, sizeof(_be_pool[i]));
-			_be_pool[i].in_use = true;
+		/* Atomic claim (GHSA-xhm8-7f87-93q5 / issue #629 pattern,
+         * matching the dispatcher pool's own _alloc_rpc() and every
+         * other backend using this idiom): CAS FREE -> OPEN on
+         * `in_use` so two concurrent z_open() calls can never both
+         * win the same slot -- replacing the pre-redesign non-atomic
+         * `if (!_be_pool[i].in_use) { ...; in_use = true; }`
+         * check-then-set. */
+		if (alp_slot_try_claim(&_be_pool[i].in_use)) {
+			memset(&_be_pool[i], 0, offsetof(struct rpc_be, in_use));
 			return &_be_pool[i];
 		}
 	}
@@ -142,7 +217,7 @@ static struct rpc_be *_be_alloc(void)
 static void _be_free(struct rpc_be *be)
 {
 	if (be == NULL) return;
-	be->in_use = false;
+	alp_slot_release(&be->in_use);
 }
 
 #endif /* CONFIG_ALP_SDK_RPC */
@@ -287,6 +362,29 @@ static void rpc_ept_bound(void *priv)
 	}
 }
 
+/**
+ * @brief ipc_service `received` callback: parse + dispatch one frame.
+ *
+ * @par Close protocol (GHSA-xhm8-7f87-93q5)
+ * Records the current thread (`recv_thread`, under `lock`) so
+ * z_shutdown() can detect a self-close, and holds `cb_active` for the
+ * entire body -- external z_shutdown() waits for this to reach 0
+ * after deregistering the endpoint, guaranteeing no recv is still
+ * touching `be` once it returns DONE (see this file's header
+ * comment).
+ *
+ * The subscriber callback invoked below (see @ref alp_rpc_method_cb_t)
+ * MAY call @ref alp_rpc_close on its OWN channel -- z_shutdown()
+ * detects that (this same thread, mid-callback) and returns
+ * ALP_RPC_SHUTDOWN_DEFERRED without deregistering/draining itself;
+ * the epilogue at the bottom of this function completes that deferred
+ * teardown, exactly once, right here, once the callback (if any) has
+ * returned -- mirroring src/backends/rpc/yocto_drv.c's rpc_rx_main()
+ * epilogue.  BENCH-UNVERIFIED: this assumes ipc_service never invokes
+ * `received` from ISR context and never re-enters it concurrently
+ * from a second thread for the same endpoint -- see this file's header
+ * comment.
+ */
 static void rpc_ept_recv(const void *data, size_t len, void *priv)
 {
 	struct rpc_be *be = (struct rpc_be *)priv;
@@ -294,12 +392,17 @@ static void rpc_ept_recv(const void *data, size_t len, void *priv)
 		return;
 	}
 
+	k_spinlock_key_t key = k_spin_lock(&be->lock);
+	be->recv_thread      = k_current_get();
+	k_spin_unlock(&be->lock, key);
+	atomic_inc(&be->cb_active);
+
 	const void *payload     = NULL;
 	size_t      payload_len = 0;
 	const char *method      = frame_parse(data, len, &payload, &payload_len);
 	if (method == NULL) {
 		LOG_WRN("rpc: malformed frame on %s (len=%zu)", be->name, len);
-		return;
+		goto epilogue;
 	}
 
 	/* Synchronous-call path: a pending alp_rpc_call wakes the caller
@@ -320,15 +423,36 @@ static void rpc_ept_recv(const void *data, size_t len, void *priv)
 		}
 		be->call_pending = false;
 		k_sem_give(&be->call_sem);
-		return;
+		goto epilogue;
 	}
 
-	/* Async dispatch via the per-method subscribe table. */
-	uint32_t        h   = fnv1a_32(method);
-	struct rpc_sub *sub = sub_find(be, method, h);
-	if (sub != NULL && sub->cb != NULL) {
-		sub->cb(payload, payload_len, sub->user);
+	{
+		/* Async dispatch via the per-method subscribe table. */
+		uint32_t        h   = fnv1a_32(method);
+		struct rpc_sub *sub = sub_find(be, method, h);
+		if (sub != NULL && sub->cb != NULL) {
+			/* GHSA-xhm8-7f87-93q5: cb() may call alp_rpc_close() on
+             * THIS channel (self-close) -- see this function's doc
+             * comment and z_shutdown()'s from_worker detection. */
+			sub->cb(payload, payload_len, sub->user);
+		}
 	}
+
+epilogue:
+	/* GHSA-xhm8-7f87-93q5 DEFERRED epilogue: if the callback above (if
+     * any) closed its own channel, z_shutdown() set close_from_worker
+     * on THIS same thread/call-stack -- finish the deferred teardown
+     * here, exactly once, now that the callback has returned.
+     * Deregistering here (rather than in z_shutdown()) avoids calling
+     * ipc_service_deregister_endpoint() reentrantly from within its
+     * own `received` callback. */
+	if (be->close_from_worker) {
+		(void)ipc_service_deregister_endpoint(&be->ept);
+		atomic_dec(&be->cb_active);
+		alp_rpc_close_finalize(be->owner);
+		return;
+	}
+	atomic_dec(&be->cb_active);
 }
 
 #endif /* CONFIG_ALP_SDK_RPC */
@@ -362,6 +486,9 @@ z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 
 	k_mutex_init(&be->tx_mutex);
 	k_sem_init(&be->call_sem, 0, 1);
+	be->closing           = false;
+	be->close_from_worker = false;
+	be->owner             = st->owner;
 
 	/* The Zephyr DT overlay's chosen { zephyr,ipc = ... } picks the
      * default ipc backend.  When the chosen alias isn't set we surface
@@ -519,6 +646,22 @@ z_send(alp_rpc_backend_state_t *st, const char *method, const void *payload, siz
 #endif
 }
 
+/**
+ * @brief Synchronous request/response.
+ *
+ * @par Sticky cancel (GHSA-xhm8-7f87-93q5 redesign)
+ * `be->closing` is checked under `be->lock` (a spinlock -- see struct
+ * rpc_be's doc comment) in the SAME critical section as staging the
+ * call slot, so a call that stages itself AFTER z_shutdown() already
+ * ran observes `closing` already true and bails immediately instead
+ * of blocking on a k_sem_take() nobody is left to k_sem_give() --
+ * closing the "late-staging" gap a one-shot cancel alone would miss.
+ * z_shutdown() already leaves `call_result`/`call_pending` correctly
+ * set to ALP_ERR_NOT_READY/false for a call that was ALREADY staged
+ * when it ran, so no extra post-wait `closing` check is needed here
+ * (unlike the yocto backend's belt-and-suspenders version -- see
+ * y_call()'s doc comment in yocto_drv.c for why both are correct).
+ */
 static alp_status_t z_call(alp_rpc_backend_state_t *st,
                            const char              *method,
                            const void              *req,
@@ -542,7 +685,13 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
      * single-element by design (see the public-API note in rpc.h). */
 	k_mutex_lock(&be->tx_mutex, K_FOREVER);
 
-	/* Stage the call slot. */
+	/* Check-then-stage as ONE spinlock critical section. */
+	k_spinlock_key_t key = k_spin_lock(&be->lock);
+	if (be->closing) {
+		k_spin_unlock(&be->lock, key);
+		k_mutex_unlock(&be->tx_mutex);
+		return ALP_ERR_NOT_READY;
+	}
 	strncpy(be->call_method, method, sizeof(be->call_method) - 1);
 	be->call_method[sizeof(be->call_method) - 1] = '\0';
 	be->call_resp_buf                            = resp;
@@ -551,6 +700,7 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
 	be->call_result   = ALP_ERR_TIMEOUT;
 	be->call_pending  = true;
 	k_sem_reset(&be->call_sem);
+	k_spin_unlock(&be->lock, key);
 
 	/* Frame + send. */
 	int          built = frame_build(be->tx_scratch, sizeof(be->tx_scratch), method, req, req_len);
@@ -565,7 +715,9 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
 	}
 
 	if (s != ALP_OK) {
+		key              = k_spin_lock(&be->lock);
 		be->call_pending = false;
+		k_spin_unlock(&be->lock, key);
 		k_mutex_unlock(&be->tx_mutex);
 		return s;
 	}
@@ -574,8 +726,10 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
 	k_timeout_t to = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
 	int         rc = k_sem_take(&be->call_sem, to);
 	if (rc == -EAGAIN) {
+		key              = k_spin_lock(&be->lock);
 		be->call_pending = false;
-		s                = ALP_ERR_TIMEOUT;
+		k_spin_unlock(&be->lock, key);
+		s = ALP_ERR_TIMEOUT;
 	} else {
 		s = be->call_result;
 		if (s == ALP_OK && resp_len != NULL) {
@@ -596,23 +750,94 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
 #endif
 }
 
-static void z_close(alp_rpc_backend_state_t *st)
+/**
+ * @brief Make every blocking wait on this channel terminate promptly,
+ *        and report whether THIS call itself arrived from the
+ *        channel's own ipc_service recv thread.
+ *
+ * See this file's header comment for the full protocol.  Sets the
+ * sticky `closing` flag + cancels any pending call under `be->lock`,
+ * wakes it via k_sem_give(), then either (external) deregisters the
+ * endpoint and waits for `cb_active` to drain to 0 before returning
+ * DONE, or (self-close) returns DEFERRED immediately -- deregistering
+ * here would call ipc_service_deregister_endpoint() reentrantly from
+ * within its own `received` callback, and waiting on `cb_active` would
+ * deadlock (this very call holds it) -- rpc_ept_recv()'s epilogue
+ * completes the deferred teardown once the callback that triggered it
+ * returns.
+ */
+static alp_rpc_shutdown_result_t z_shutdown(alp_rpc_backend_state_t *st)
 {
 #if defined(CONFIG_ALP_SDK_RPC)
 	struct rpc_be *be = (struct rpc_be *)st->be_data;
 	if (be == NULL || !be->in_use) {
-		return;
+		return ALP_RPC_SHUTDOWN_DONE;
 	}
-	/* Wake any pending alp_rpc_call so the caller unblocks. */
+
+	/* Self-detection assumes ipc_service invokes `received` from
+     * ordinary thread context, never from ISR -- see this file's
+     * header comment (BENCH-UNVERIFIED). */
+	__ASSERT(!k_is_in_isr(), "alp_rpc: shutdown must not run from ISR context");
+
+	k_spinlock_key_t key         = k_spin_lock(&be->lock);
+	bool             from_worker = (k_current_get() == be->recv_thread);
+	be->closing                  = true;
 	if (be->call_pending) {
 		be->call_result  = ALP_ERR_NOT_READY;
 		be->call_pending = false;
-		k_sem_give(&be->call_sem);
 	}
+	if (from_worker) {
+		be->close_from_worker = true;
+	}
+	k_spin_unlock(&be->lock, key);
+
+	k_sem_give(&be->call_sem);
+
+	if (from_worker) {
+		/* DEFERRED: rpc_ept_recv()'s epilogue (this SAME thread, once
+         * the callback returns) deregisters the endpoint, drains
+         * cb_active, and calls alp_rpc_close_finalize(be->owner)
+         * exactly once. */
+		return ALP_RPC_SHUTDOWN_DEFERRED;
+	}
+
+	/* External close: deregister so no NEW recv is dispatched, then
+     * wait for any recv ALREADY in flight to finish touching `be`
+     * before returning DONE -- see this file's header comment for why
+     * ipc_service_deregister_endpoint()'s return alone isn't trusted
+     * as that barrier (BENCH-UNVERIFIED). */
 	(void)ipc_service_deregister_endpoint(&be->ept);
 	be->ept_bound = false;
-	_be_free(be);
+	while (atomic_get(&be->cb_active) != 0) {
+		/* Sleep, never spin -- see src/rpc_dispatch.c's _rpc_drain()
+         * doc comment for the single-core priority-inversion trap a
+         * busy spin (or k_yield(), which only cedes to equal
+         * priority) would reintroduce here. */
+		k_sleep(K_TICKS(1));
+	}
+	return ALP_RPC_SHUTDOWN_DONE;
+#else
+	(void)st;
+	return ALP_RPC_SHUTDOWN_DONE;
+#endif
+}
+
+/**
+ * @brief Release the pool slot.  Called exactly once by the
+ *        dispatcher, strictly after z_shutdown() has run and every op
+ *        counted before the close won has left.  Trivial for this
+ *        backend (a static pool slot, no heap, no fds) -- does not
+ *        block.
+ */
+static void z_destroy(alp_rpc_backend_state_t *st)
+{
+#if defined(CONFIG_ALP_SDK_RPC)
+	struct rpc_be *be = (struct rpc_be *)st->be_data;
+	if (be == NULL) {
+		return;
+	}
 	st->be_data = NULL;
+	_be_free(be);
 #else
 	(void)st;
 #endif
@@ -628,7 +853,8 @@ static const alp_rpc_ops_t _ops = {
 	.unsubscribe = z_unsubscribe,
 	.send        = z_send,
 	.call        = z_call,
-	.close       = z_close,
+	.shutdown    = z_shutdown,
+	.destroy     = z_destroy,
 };
 
 ALP_BACKEND_REGISTER(rpc,
