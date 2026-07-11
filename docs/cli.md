@@ -340,17 +340,34 @@ implementation that owns it (never a fork):
 ### `alp validate` -- check a board.yaml
 
 ```bash
-alp validate                   # ./board.yaml
+alp validate                             # ./board.yaml, human output
 alp validate path/to/board.yaml
+alp validate --format json path/to/board.yaml    # IDE/LSP/CI-facing
+alp validate --format sarif path/to/board.yaml   # SARIF 2.1.0 (code scanning)
 ```
 
 Runs the rich diagnostic validator (JSON-Schema pass, SoM/preset
 cross-references, peripheral-vs-SoC capability check), then the
-same orchestrator consistency pass used by build preflight.  It
-renders every diagnostic finding as a Rust-style block with an
-`ALP-Bxxx` code -- decode any code with `alp explain ALP-B001`.
+same orchestrator consistency pass used by build preflight.
 Exit code 0 means no hard errors; warnings such as ALP-B010 still
 return 0.  Hard schema/xref/consistency errors return 1.
+
+`--format` selects the rendering:
+
+- `human` (default) -- the Rust-style block with an `ALP-Bxxx` code
+  -- decode any code with `alp explain ALP-B001`.
+- `json` -- the versioned machine document
+  (`metadata/schemas/diagnostic-v1.schema.json`): `schemaVersion` is
+  a version/capability handshake a consumer must check before
+  parsing further, and every range is **zero-based** (LSP
+  `Position`/`Range` convention).
+- `sarif` -- a SARIF 2.1.0 log (`runs[].results[]`); SARIF regions
+  are **one-based** by spec, the opposite of the `json` format's
+  ranges -- the two exporters intentionally do not share range
+  values.
+
+`json`/`sarif` print only the structured document to stdout, no
+interleaved human prose.
 
 `scripts/validate_board_yaml.py` is a compatibility wrapper around
 the same rich validator plus consistency pass, so `alp validate`,
