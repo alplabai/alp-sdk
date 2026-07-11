@@ -189,6 +189,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dac/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dsp/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pid.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../soc_info_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/soc_info/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../tmu_dispatch.c
