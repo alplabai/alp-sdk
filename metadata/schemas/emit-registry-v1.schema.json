@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/emit-registry-v1.schema.json",
+  "title": "ALP Emit Registry v1",
+  "description": "Validates metadata/emit-registry-v1.json -- the single source of truth for every `--emit` mode the SDK exposes across scripts/alp_project.py and scripts/alp_orchestrate/ (and re-exposed by scripts/alp_cli/emit.py / `west alp-emit`). scripts/check_emit_registry.py validates the registry against this schema AND asserts the registry's mode set exactly equals the real `--emit` choices parsed out of the two CLIs, so a mode can never drift between the code and this contract. Stability: schemaVersion 1 is additive-only (new optional per-mode fields only); a breaking change ships as schemaVersion 2.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "description", "modes"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "description": { "type": "string" },
+    "modes": {
+      "type": "array",
+      "description": "One entry per `--emit` mode, sorted for readability (not machine-enforced).",
+      "items": { "$ref": "#/$defs/mode" },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "owner", "scope", "options", "compatible", "output"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "The literal `--emit <mode>` value."
+        },
+        "owner": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cli", "module", "function"],
+          "properties": {
+            "cli": {
+              "type": "string",
+              "enum": ["alp_project", "alp_orchestrate"],
+              "description": "Which CLI's argparse `--emit choices=[...]` this mode is a member of (the front door / drift-gate anchor). scripts/alp_project.py routes some of its choices through scripts/alp_orchestrate/ internally; `cli` names the front door, not necessarily the renderer's home module."
+            },
+            "module": {
+              "type": "string",
+              "pattern": "^scripts/",
+              "description": "Repo-relative path to the module that actually renders this mode's output."
+            },
+            "function": {
+              "type": "string",
+              "description": "The renderer function/entry point within `module`."
+            }
+          }
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["project", "core", "system"],
+          "description": "core: one artefact per per-core slice (zephyr-conf/yocto-conf/cmake-args/zephyr-board). project: one artefact for the whole SoM+board project, optionally scoped by --core. system: a v2 whole-system (multi-slice) orchestrator artefact (carve-outs, IPC, boot order, build plan)."
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["input", "output", "core", "build_root"],
+          "properties": {
+            "input": {
+              "type": "string",
+              "enum": ["optional"],
+              "description": "--input board.yaml path; always accepted, defaults to ./board.yaml."
+            },
+            "output": {
+              "type": "string",
+              "enum": ["optional", "required", "stdout-only"],
+              "description": "optional: --output <path> accepted, defaults to stdout. required: the mode refuses to run without --output (zephyr-board writes a directory, not a stream). stdout-only: the owning CLI (alp_orchestrate) has no --output flag at all for --emit; it always writes stdout."
+            },
+            "core": {
+              "type": "string",
+              "enum": ["required", "optional", "ignored"],
+              "description": "required: --core <id> must be supplied. optional: --core scopes/selects a slice; omitted means sum/union across cores. ignored: --core is accepted by the parser but not consumed by this mode (project-wide/system-wide emit)."
+            },
+            "build_root": {
+              "type": "boolean",
+              "description": "Whether --build-root affects this mode's output (true only for build-plan)."
+            }
+          }
+        },
+        "compatible": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["os"],
+          "properties": {
+            "os": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "enum": ["any", "zephyr", "yocto", "baremetal"]
+              },
+              "description": "Runtime(s) this mode is valid for. [\"any\"] means no os restriction; a core naming an incompatible os is a hard error (see #605)."
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["media", "schema_id", "path", "consumer_hint"],
+          "properties": {
+            "media": {
+              "type": "string",
+              "enum": ["dts", "kconfig-conf", "bitbake-conf", "cmake-args",
+                       "json", "yaml", "c-header", "c-source", "directory"],
+              "description": "The rendered artefact's language/format."
+            },
+            "schema_id": {
+              "type": ["string", "null"],
+              "pattern": "^[a-z][a-z0-9-]*-v[0-9]+$",
+              "description": "metadata/schemas/<schema_id>.schema.json when this mode's output is governed by a JSON Schema contract; null otherwise."
+            },
+            "path": {
+              "type": ["string", "null"],
+              "description": "Deterministic default output path (relative to a project's build root) when one exists in the real build/materialise flow; null when the mode has no fixed default location (pure stdout / caller-chosen --output)."
+            },
+            "consumer_hint": {
+              "type": "string",
+              "description": "Who consumes this artefact (build system / IDE / Studio / tool)."
+            }
+          }
+        }
+      }
+    }
+  }
+}

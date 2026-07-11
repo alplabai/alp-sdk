@@ -1,0 +1,402 @@
+{
+  "schemaVersion": 1,
+  "description": "Single source of truth for every `--emit` mode the SDK exposes across scripts/alp_project.py and scripts/alp_orchestrate/ (and re-exposed by scripts/alp_cli/emit.py's `alp emit` front door / `west alp-emit`). Frontends (alp-sdk-vscode, Alp Studio, IDE tooling) read THIS instead of hand-mirroring the argparse `choices=` lists in each CLI. A drift gate (scripts/check_emit_registry.py) asserts this file's mode set exactly matches the real `--emit` choices parsed out of alp_project.py and alp_orchestrate/cli.py, so a mode added to the code with no registry entry (or a phantom registry entry with no code) fails CI. Stability: additive-only per mode; a breaking change to an existing mode's shape ships as a new schemaVersion.",
+  "modes": [
+    {
+      "mode": "zephyr-conf",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/kconfig.py",
+        "function": "_slice_alp_conf"
+      },
+      "scope": "core",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "optional",
+        "build_root": false
+      },
+      "compatible": { "os": ["zephyr"] },
+      "output": {
+        "media": "kconfig-conf",
+        "schema_id": null,
+        "path": "build/<core_id>-zephyr/alp.conf",
+        "consumer_hint": "zephyr build -- Kconfig fragment appended to prj.conf"
+      }
+    },
+    {
+      "mode": "cmake-args",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/kconfig.py",
+        "function": "_slice_cmake_args"
+      },
+      "scope": "core",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "optional",
+        "build_root": false
+      },
+      "compatible": { "os": ["baremetal", "zephyr"] },
+      "output": {
+        "media": "cmake-args",
+        "schema_id": null,
+        "path": "build/<core_id>-<os>/cmake-args.txt",
+        "consumer_hint": "plain-CMake configure -- sequence of -D args"
+      }
+    },
+    {
+      "mode": "yocto-conf",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/kconfig.py",
+        "function": "_slice_local_conf"
+      },
+      "scope": "core",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "optional",
+        "build_root": false
+      },
+      "compatible": { "os": ["yocto"] },
+      "output": {
+        "media": "bitbake-conf",
+        "schema_id": null,
+        "path": "build/<core_id>-yocto/local.conf",
+        "consumer_hint": "Yocto/BitBake -- local.conf snippet"
+      }
+    },
+    {
+      "mode": "dts-overlay",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_project_emit.py",
+        "function": "_emit_dts_overlay"
+      },
+      "scope": "project",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "optional",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "dts",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "zephyr build -- devicetree overlay (board wiring)"
+      }
+    },
+    {
+      "mode": "native-sim-overlay",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_project_emit.py",
+        "function": "_emit_native_sim_overlay"
+      },
+      "scope": "project",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "dts",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "zephyr build (native_sim) -- gpio-emul overlay for twister/native_sim runs"
+      }
+    },
+    {
+      "mode": "hw-info-h",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_project_emit.py",
+        "function": "_emit_hw_info_h"
+      },
+      "scope": "project",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "optional",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "c-header",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "C build -- #include <alp_hw_info_build.h> (build-time identifier companion to <alp/hw_info.h>)"
+      }
+    },
+    {
+      "mode": "west-libraries",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_project_emit.py",
+        "function": "_emit_west_libraries"
+      },
+      "scope": "project",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "optional",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "yaml",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "west manifest import -- west.yml fragment pinning board.yaml `libraries:`"
+      }
+    },
+    {
+      "mode": "zephyr-board",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/gen_zephyr_board.py",
+        "function": "emit_zephyr_board"
+      },
+      "scope": "core",
+      "options": {
+        "input": "optional",
+        "output": "required",
+        "core": "required",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "directory",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "west build --board-root <dir> -- generated Zephyr board tree (one core's board.yml/dts/defconfig/Kconfig set)"
+      }
+    },
+    {
+      "mode": "composed-route-table",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_project_emit.py",
+        "function": "_emit_composed_route_table"
+      },
+      "scope": "project",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "json",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "IDE / tooling -- fully-composed (board x SoM) pad route table"
+      }
+    },
+    {
+      "mode": "carrier-netlist",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_project_emit.py",
+        "function": "_emit_carrier_netlist"
+      },
+      "scope": "project",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "json",
+        "schema_id": "carrier-netlist-v1",
+        "path": null,
+        "consumer_hint": "Alp Studio -- carrier netlist + BOM handoff (not a PCB/Gerber/KiCad artefact)"
+      }
+    },
+    {
+      "mode": "system-manifest",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/manifest.py",
+        "function": "emit_system_manifest"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "yaml",
+        "schema_id": "system-manifest-v1",
+        "path": "build/system-manifest.yaml",
+        "consumer_hint": "IDE (alp-sdk-vscode) / CI / flashers -- per-slice build+flash wiring"
+      }
+    },
+    {
+      "mode": "ipc-contract-h",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/headers.py",
+        "function": "emit_ipc_contract_h"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "c-header",
+        "schema_id": null,
+        "path": "build/generated/alp/system_ipc.h",
+        "consumer_hint": "C build -- #include <alp/system_ipc.h> inter-core IPC contract"
+      }
+    },
+    {
+      "mode": "dts-reservations",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/headers.py",
+        "function": "emit_dts_reservations"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "dts",
+        "schema_id": null,
+        "path": "build/generated/dts-reservations.dtsi",
+        "consumer_hint": "Zephyr/kernel DT -- #include for cross-core shared-memory reserved-memory nodes"
+      }
+    },
+    {
+      "mode": "os-topology",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/topology.py",
+        "function": "emit_os_topology"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "json",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "IDE / tooling -- per-core natural-vs-effective OS facts"
+      }
+    },
+    {
+      "mode": "dts-partitions",
+      "owner": {
+        "cli": "alp_orchestrate",
+        "module": "scripts/alp_orchestrate/headers.py",
+        "function": "emit_dts_partitions"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "stdout-only",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "dts",
+        "schema_id": null,
+        "path": "build/generated/dts-partitions.dtsi",
+        "consumer_hint": "Zephyr devicetree -- #include for fixed-partitions flash/storage layout"
+      }
+    },
+    {
+      "mode": "storage-mounts-c",
+      "owner": {
+        "cli": "alp_orchestrate",
+        "module": "scripts/alp_orchestrate/headers.py",
+        "function": "emit_storage_mounts_c"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "stdout-only",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "c-source",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "C build -- optional fs_mount_t[] table + alp_storage_mount_all(), included by apps that opt in"
+      }
+    },
+    {
+      "mode": "tfm-sysbuild-conf",
+      "owner": {
+        "cli": "alp_orchestrate",
+        "module": "scripts/alp_orchestrate/secure.py",
+        "function": "emit_tfm_sysbuild_conf"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "stdout-only",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "kconfig-conf",
+        "schema_id": null,
+        "path": "build/sysbuild/tfm/tfm.conf",
+        "consumer_hint": "TF-M sysbuild child image (west build --sysbuild --sysbuild-config), present only when security.psa.tfm is set"
+      }
+    },
+    {
+      "mode": "build-plan",
+      "owner": {
+        "cli": "alp_orchestrate",
+        "module": "scripts/alp_orchestrate/buildplan.py",
+        "function": "emit_build_plan"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "stdout-only",
+        "core": "ignored",
+        "build_root": true
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "json",
+        "schema_id": "build-plan-v1",
+        "path": null,
+        "consumer_hint": "alp CLI / alp-sdk-vscode -- machine-readable build plan (Wave C consumer contract)"
+      }
+    }
+  ]
+}

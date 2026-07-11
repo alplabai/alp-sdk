@@ -883,6 +883,10 @@
       "script": "scripts/check_e1m_route_capability.py"
     },
     {
+      "purpose": "Validate metadata/emit-registry-v1.json against the public IDE/tool contract (metadata/schemas/emit-registry-v1.schema.json) AND assert its mode set is exactly the real `--emit` surface the SDK exposes.",
+      "script": "scripts/check_emit_registry.py"
+    },
+    {
       "purpose": "Byte-for-byte `--emit` snapshot regression gate.",
       "script": "scripts/check_emit_snapshots.py"
     },
@@ -933,6 +937,10 @@
     {
       "purpose": "Validate a system manifest against the public IDE/tool contract (metadata/schemas/system-manifest-v1.schema.json).",
       "script": "scripts/check_system_manifest.py"
+    },
+    {
+      "purpose": "Validate metadata/templates/catalog-v1.json against the public template contract (metadata/schemas/template-catalog-v1.schema.json) AND drift-check every record against the real tree.",
+      "script": "scripts/check_template_catalog.py"
     },
     {
       "purpose": "Test-coverage audit: walk every public header in include/alp/, list the declared functions, and check that at least one test file under tests/ mentions each one.",

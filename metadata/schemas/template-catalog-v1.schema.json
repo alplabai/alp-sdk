@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/template-catalog-v1.schema.json",
+  "title": "ALP Template Catalog v1",
+  "description": "Validates metadata/templates/catalog-v1.json -- the declarative catalog of project templates (app archetypes) a frontend (alp-sdk-vscode, Alp Studio, `alp new`) reads to discover 'what starter projects exist + what each needs' instead of ad-hoc example copying. Each record maps to a CANONICAL existing example under examples/ (never a copy -- the example IS the template's rendered form) and declares its support matrix, required portable-API/library/chip surface, user-owned vs SDK-generated files, tunable parameters, and test wiring. scripts/check_template_catalog.py validates the catalog against this schema AND drift-checks that every referenced example/testcase.yaml/library/chip is real, so a template can never point at a path or dependency that doesn't exist. This is the catalog + schema + drift-validation FOUNDATION (epic #610 SS3); the deterministic render/preview API (materialising a template into a fresh directory and running its test) is a separate, deliberately-scoped follow-up -- NOT part of this contract. Stability: schemaVersion 1 is additive-only (new optional fields only); a breaking change to the shape ships as schemaVersion 2.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "description", "templates"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "description": { "type": "string" },
+    "templates": {
+      "type": "array",
+      "description": "One entry per archetype, sorted by id for readability (not machine-enforced).",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/template" }
+    }
+  },
+  "$defs": {
+    "template": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "title", "archetype", "example", "description",
+        "supported", "requires", "files", "parameters", "test", "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Stable catalog key a frontend selects a template by (e.g. `alp new --template <id>`, once the render follow-up exists)."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-facing short title."
+        },
+        "archetype": {
+          "type": "string",
+          "enum": ["minimal", "peripheral", "sensor", "multicore-rpmsg", "gateway", "edge-ai"],
+          "description": "The app-shape class this template represents. One template per archetype in v1."
+        },
+        "example": {
+          "type": "string",
+          "pattern": "^examples/[a-z0-9_-]+/[a-z0-9_-]+$",
+          "description": "Repo-relative path to the canonical example under examples/ this template projects. The template does NOT copy/fork this example -- it IS this example; the drift gate asserts the path exists and contains a board.yaml."
+        },
+        "description": {
+          "type": "string",
+          "description": "Customer-facing summary of what the template teaches/does, grounded in the source example's own README/board.yaml."
+        },
+        "supported": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["families", "som_skus", "core_classes", "runtimes"],
+          "properties": {
+            "families": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": ["alif-ensemble", "nxp-imx9", "renesas-rzv2n", "renesas-rzv2n-deepx"]
+              },
+              "description": "SoM silicon families the example builds on (derived from the SoM SKU(s) behind its `supported_boards`/`preset`, per metadata/e1m_modules/<sku>.yaml `family:`)."
+            },
+            "som_skus": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^E1M-[A-Z0-9]+$" },
+              "description": "E1M SoM SKU(s) the example is proven against -- the board.yaml `som.sku` default plus any additional SKU implied by `supported_boards`."
+            },
+            "core_classes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "enum": ["m", "a"] },
+              "description": "Cortex core classes the template's cores run on (`m` = Cortex-M/Zephyr, `a` = Cortex-A/Yocto), matching metadata/schemas/library-v1.schema.json's `requires.core_class` vocabulary."
+            },
+            "runtimes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "enum": ["zephyr", "yocto", "baremetal"] },
+              "description": "Operating systems exercised across the template's cores."
+            }
+          }
+        },
+        "requires": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["portable_apis", "libraries", "chips", "routes", "generated_artifacts", "test_backend"],
+          "properties": {
+            "portable_apis": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^include/alp/" },
+              "description": "Portable <alp/*.h> headers the app source `#include`s (never a chip/vendor header directly). Drift-checked to exist under include/alp/."
+            },
+            "libraries": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "description": "Curated library tokens the board.yaml `libraries:`/`cores.<id>.libraries:` selects (ADR 0018 vocabulary -- scripts/alp_project_emit.py's _LIBRARY_KCONFIG union metadata/libraries/*.yaml). Drift-checked against that real vocabulary."
+            },
+            "chips": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" },
+              "description": "Chip driver tokens the board.yaml top-level `chips:` declares. Drift-checked against metadata/chips/<name>.yaml + chips/<name>/."
+            },
+            "routes": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["e1m", "macro"],
+                "properties": {
+                  "e1m": { "type": "string", "description": "E1M pad token from board.yaml `pins:` (e.g. E1M_I2C0)." },
+                  "macro": { "type": "string", "description": "Board-level macro the app opens the pad by (e.g. EVK_I2C_BUS_SENSORS)." },
+                  "doc": { "type": "string", "description": "Board.yaml's inline doc string for this route, verbatim." }
+                }
+              },
+              "description": "E1M pad routes the example claims, transcribed verbatim from its board.yaml `pins:` block."
+            },
+            "generated_artifacts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "emit_mode", "consumer_hint"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "emit_mode": {
+                    "type": "string",
+                    "description": "The metadata/emit-registry-v1.json `mode` this artefact is rendered by."
+                  },
+                  "consumer_hint": { "type": "string" }
+                }
+              },
+              "description": "Build-time artefacts scripts/alp_project.py (or the orchestrator) materialises for this template; never committed to the example directory."
+            },
+            "test_backend": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "enum": ["native_sim", "cross_compile", "yocto_host"] },
+              "description": "Which harness(es) actually exercise this template today. `yocto_host` names a Linux-side slice that exists but is not covered by the Zephyr twister gate (see the record's optional `note`)."
+            }
+          }
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["user_owned", "generated"],
+          "properties": {
+            "user_owned": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string" },
+              "description": "Paths (relative to the example dir) a customer forking this template edits."
+            },
+            "generated": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "note"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "note": { "type": "string" }
+                }
+              },
+              "description": "Paths the SDK generates at configure/build time; a customer never edits these directly."
+            }
+          }
+        },
+        "parameters": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/parameter" },
+          "description": "The template's tunable knobs. Deliberately minimal -- only knobs the source example's board.yaml/prj.conf genuinely exposes today, never an invented one. May be empty (e.g. the minimal archetype has none)."
+        },
+        "test": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["testcase_yaml", "native_sim_scenarios", "cross_compile_matrix"],
+          "properties": {
+            "testcase_yaml": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string" },
+              "description": "Repo-relative path(s) to the example's twister testcase.yaml/sample.yaml (a multi-slice project may carry more than one, one per Zephyr slice). Drift-checked to exist."
+            },
+            "native_sim_scenarios": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string" },
+              "description": "Twister scenario IDs (the `tests.<id>` keys) that run/build on native_sim, transcribed from testcase_yaml."
+            },
+            "cross_compile_matrix": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["platform", "build_only"],
+                "properties": {
+                  "platform": { "type": "string", "description": "A real (non-native_sim) `platform_allow` board target." },
+                  "build_only": { "type": "boolean" }
+                }
+              },
+              "description": "Real hardware board targets from testcase_yaml `platform_allow`, if any. Empty when the example is only twister-verified on native_sim -- never invented."
+            }
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["stable", "preview"],
+          "description": "stable: the source example carries no known content-quality gap (cross-checked against the tracked issue set in scripts/check_template_catalog.py, currently grounded in #448 and #520) and its native_sim scenario passes. preview: the example has a tracked gap, or is otherwise early; `note` is then required."
+        },
+        "note": {
+          "type": "string",
+          "description": "Required when status is preview: cites the tracking issue/gap. Optional free-text context otherwise (e.g. explaining a partial test_backend)."
+        }
+      },
+      "if": { "properties": { "status": { "const": "preview" } } },
+      "then": { "required": ["note"] }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "description", "default"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "type": { "type": "string", "enum": ["string", "integer", "boolean", "enum"] },
+        "description": { "type": "string" },
+        "default": {
+          "description": "The value the source example ships today. Type matches `type` (string/integer/boolean value, or a string when type is enum)."
+        },
+        "constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Validation bounds for the render follow-up. Optional; only the bounds that genuinely apply to this knob.",
+          "properties": {
+            "minimum": { "type": "integer" },
+            "maximum": { "type": "integer" },
+            "enum": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
