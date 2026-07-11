@@ -473,6 +473,15 @@ def elf_symbol(elf_path: Path, name: str) -> Optional[tuple[int, int]]:
     data = Path(elf_path).read_bytes()
     if data[:4] != b"\x7fELF":
         raise AlpRenodeError(f"{elf_path} is not an ELF.")
+    try:
+        return _elf_symbol(data, name)
+    except (struct.error, IndexError) as e:
+        raise AlpRenodeError(
+            f"{elf_path} is a truncated/corrupt ELF: {e}") from e
+
+
+def _elf_symbol(data: bytes, name: str) -> Optional[tuple[int, int]]:
+    import struct
     is64 = data[4] == 2
     end = "<" if data[5] == 1 else ">"
     if is64:
@@ -827,11 +836,17 @@ class RamConsoleStreamer:
             return
         new = buf[self._emitted:frontier]
         self._emitted = frontier
+        # Snapshot clients under the lock, but do the (possibly blocking)
+        # sends OUTSIDE it -- a slow client must not stall add/remove or
+        # the poll cadence.
         with self._lock:
             self._backlog += new
-            dead = [c for c in self._clients if not _try_send(c, new)]
-            for c in dead:
-                self._clients.discard(c)
+            clients = list(self._clients)
+        dead = [c for c in clients if not _try_send(c, new)]
+        if dead:
+            with self._lock:
+                for c in dead:
+                    self._clients.discard(c)
 
     def run(self, stop: threading.Event) -> None:
         while not stop.is_set():

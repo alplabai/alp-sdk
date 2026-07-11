@@ -287,6 +287,22 @@ def test_console_frontier_stops_at_trailing_nuls():
     assert console_frontier(b"full") == 4
 
 
+def test_elf_symbol_not_elf_raises(tmp_path):
+    p = tmp_path / "x"
+    p.write_bytes(b"not an elf")
+    with pytest.raises(AlpRenodeError, match="not an ELF"):
+        elf_symbol(p, "ram_console_buf")
+
+
+def test_elf_symbol_truncated_raises(tmp_path):
+    # Valid magic, truncated header -> clean AlpRenodeError, not a raw
+    # struct.error/IndexError escaping run_sim.
+    p = tmp_path / "trunc.elf"
+    p.write_bytes(b"\x7fELF\x01\x01" + b"\x00" * 6)
+    with pytest.raises(AlpRenodeError, match="truncated/corrupt"):
+        elf_symbol(p, "ram_console_buf")
+
+
 def test_elf_symbol_finds_ram_console_when_e2e_elf_set():
     elf = os.environ.get("ALP_SIM_E2E_ELF")
     if not elf:

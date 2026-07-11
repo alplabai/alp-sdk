@@ -16,6 +16,11 @@
 # `ram_console_buf` RAM ring.  `west alp-renode --sim-mode` generates its
 # OWN boot .resc and streams that RAM console to a TCP socket (see
 # build_sim_resc_text + RamConsoleStreamer); this file just boots.
+#
+# NOTE: because this core is headless, the plain (non --sim-mode)
+# `west alp-renode` path produces NO console output on V2N -- its --log
+# will be empty and `--expect`/log-grep won't match.  Use --sim-mode to
+# observe the ram_console.
 # ---------------------------------------------------------------------
 $repl ?= @metadata/renode/renesas_rzv2n.repl
 $elf  ?= @examples/peripheral-io/hello-world/build/m33_sm-zephyr/zephyr/zephyr.elf
