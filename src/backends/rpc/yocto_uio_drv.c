@@ -808,8 +808,26 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	}
 
 	strncpy(ch->name, cfg->name, sizeof(ch->name) - 1);
-	ch->src_ept = cfg->src_ept != 0u ? cfg->src_ept : (0x400u | (fnv1a_32(cfg->name) & 0x0FFu));
-	ch->dst_ept = cfg->dst_ept != 0u ? cfg->dst_ept : ch->src_ept + 1u;
+	/* Local endpoint src: default to RPMSG_ADDR_ANY so OpenAMP auto-allocates
+	 * a valid dynamic address in [1024,1151].  The previous fnv1a-derived
+	 * value (0x400 | hash & 0xFF) could land in [1152,1279], which
+	 * rpmsg_create_ept() rejects with RPMSG_ERR_PARAM -- the OpenAMP address
+	 * bitmap is only 128 wide above the 1024 reserved base, so any src >= 1152
+	 * is unconditionally refused, breaking attach for ~half of all service
+	 * names.  Silicon-root-caused on e1mx-v2n-m1-01 (#683/#697 bench cycle 2,
+	 * 2026-07-11).  The M33 endpoint (src=1024, dst=ANY, NS-announce) learns
+	 * our src from the first frame, so ANY binds cleanly. */
+	ch->src_ept = cfg->src_ept != 0u ? cfg->src_ept : RPMSG_ADDR_ANY;
+	/* dst MUST be the M33's known service address.  This backend passes
+	 * ns_bind_cb = NULL (no name-service path to LEARN dst), and under the
+	 * RPMSG_ADDR_ANY src default an unset dst would poison to 0 (was src+1).
+	 * Require the caller to name the destination explicitly. */
+	if (cfg->dst_ept == 0u) {
+		free(ch);
+		atomic_store(&g_chan_claimed, 0);
+		return ALP_ERR_INVAL;
+	}
+	ch->dst_ept = cfg->dst_ept;
 	ch->mhu_irq = -1;
 
 	pthread_mutex_init(&ch->tx_mutex, NULL);
