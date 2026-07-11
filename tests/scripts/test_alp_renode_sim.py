@@ -272,6 +272,20 @@ def test_build_sim_resc_boots_headless(tmp_path):
     assert "i @" not in text
 
 
+def test_build_sim_resc_seeds_secure_vtor():
+    # On ARMv8-M + TrustZone (Renode >= 1.16) the Secure VTOR must be
+    # seeded or exceptions fetch from 0 and HardFault-storm; the boot
+    # script writes SCB->VTOR (0xE000ED08) to the vector-table address,
+    # after LoadELF and before start.
+    text = build_sim_resc_text(Path("p.repl"), Path("fw.elf"),
+                               vtor=0x08003000)
+    assert "sysbus WriteDoubleWord 0xE000ED08 0x8003000" in text
+    assert text.index("LoadELF") < text.index("0xE000ED08") \
+        < text.rindex("start")
+    # No vtor -> no write (e.g. an image whose _vector_table isn't found).
+    assert "0xE000ED08" not in build_sim_resc_text(Path("p"), Path("f"))
+
+
 # ---------------------------------------------------------------------
 # ram_console streaming helpers
 # ---------------------------------------------------------------------

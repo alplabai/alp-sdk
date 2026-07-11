@@ -95,11 +95,11 @@ jobs:
           "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
           echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
 
-      # Same v1.15.3 pin as the other Renode gates.
+      # Same v1.16.1 pin as the other Renode gates.
       - name: Install Renode
         run: |
           set -euo pipefail
-          curl -fsSL https://github.com/renode/renode/releases/download/v1.15.3/renode-1.15.3.linux-portable-dotnet.tar.gz \
+          curl -fsSL https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.linux-portable-dotnet.tar.gz \
               -o /tmp/renode.tar.gz
           mkdir -p "$HOME/renode"
           tar -xzf /tmp/renode.tar.gz -C "$HOME/renode" --strip-components=1

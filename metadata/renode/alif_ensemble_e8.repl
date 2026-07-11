@@ -31,11 +31,13 @@
 //
 // e8.json cores[id=m55_hp].type = "cortex-m55".
 //
-// NOTE: "cortex-m55" CPU support depends on the Renode build.  If the
-// pinned Renode (v1.15.3) does not recognise "cortex-m55", fall back to
-// "cortex-m33" (same Armv8-M baseline; Helium/MVE is not exercised by
-// hello-world) -- documented as a TODO in the PR, to be confirmed on the
-// CI runner.
+// NOTE: "cortex-m55" (+ Helium/MVE) is supported since Renode v1.16.1,
+// which is the pinned version; the earlier v1.15.3 lacked it and needed
+// a cortex-m33 fallback.  NB: like the RZ/V2N M33, an ARMv8-M image on
+// v1.16.x needs its Secure VTOR (SCB->VTOR @ 0xE000ED08) seeded to the
+// vector table or exceptions fetch from 0 and HardFault-storm -- the
+// --sim-mode boot script does this (build_sim_resc_text); the non-sim
+// smoke .resc does not yet, so it stays advisory on AEN.
 cpu: CPU.CortexM @ sysbus
     cpuType: "cortex-m55"
     nvic: nvic
