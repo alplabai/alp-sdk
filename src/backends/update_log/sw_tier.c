@@ -24,6 +24,21 @@
  * detect mutation/truncation/rollback/reorder, but code with write access
  * to the partition can rebuild both store and counter consistently.
  * App-immutability is the HW_ENFORCED tier's job (issue #111).
+ *
+ * AEN M55 CLIENT GUARD (the GHSA-r236 double-mount hazard): on an image
+ * built with CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT and without
+ * CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER, this image is the HE side of a
+ * dual-M55 pair -- the HP owner (see aen_m55_owner.c) is the sole writer of
+ * `alp_ulog_partition`, reached only by MHU proxy. This tier's engine lock
+ * is per-IMAGE, so it cannot serialize against the owner's own store
+ * instance over that same MRAM region. If the client backend's aen_ready()
+ * ever declines (SE firewall NOSUPPORT, MHU timeout), the dispatcher must
+ * NOT fall through to this tier mounting NVS on the shared partition -- two
+ * unsynchronized NVS instances would race one flash region with no
+ * cross-image lock. ready() below reports NOSUPPORT in that configuration
+ * so alp_update_log_open() surfaces a clean error instead of silently
+ * double-mounting. A genuinely standalone image (no CLIENT role) still
+ * gets this tier normally.
  */
 #include <string.h>
 
@@ -452,8 +467,24 @@ static alp_status_t sw_get_e(uint64_t seq, alp_update_log_entry_t *o)
 	return ulog_engine_get(&g_store, seq, o);
 }
 
+/* Decline on an AEN HE-client image (see the AEN M55 CLIENT GUARD comment
+ * above): this tier must never engage as a silent local fallback for a
+ * partition the HP owner is the sole writer of. Standalone images (no
+ * CLIENT role) and the owner image itself (which also compiles this tier
+ * for its own local store) are unaffected. */
+static alp_status_t sw_ready(void)
+{
+#if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT) && \
+    !defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
+	return ALP_ERR_NOSUPPORT;
+#else
+	return ALP_OK;
+#endif
+}
+
 static const alp_update_log_ops_t _sw_ops = {
 	.assurance = ALP_UPDATE_LOG_SW_TAMPER_EVIDENT,
+	.ready     = sw_ready,
 	.append    = sw_append,
 	.verify    = sw_verify,
 	.count     = sw_count,

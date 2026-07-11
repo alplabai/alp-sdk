@@ -174,16 +174,21 @@ config ALP_SDK_UPDATE_LOG_AEN_M55_OWNER
 	  static -- it cannot, and does not try to, serialize this owner
 	  image against the HE application image. There must be exactly ONE
 	  image that ever opens a local store instance over a given
-	  `alp_ulog_partition` MRAM region: this owner. The HE image's
-	  devicetree must NOT also carve out `alp_ulog_partition` over that
-	  same region as a client-side fallback -- if it does, and
-	  ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT's aen_ready() ever declines (SE
-	  firewall NOSUPPORT, MHU timeout) so the dispatcher falls through to
-	  a local sw_tier on HE, that HE-side NVS mount and this owner's NVS
-	  mount would race the same flash region with no cross-image lock to
-	  stop them. Give the HE image either no `alp_ulog_partition` mapping
-	  at all (so its SW-tier fallback, if reachable, can only ever use the
-	  RAM store) or a genuinely separate partition it is allowed to own.
+	  `alp_ulog_partition` MRAM region: this owner. This is enforced in
+	  code, not just by convention: src/backends/update_log/sw_tier.c's
+	  ready() probe refuses to engage at all whenever
+	  ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT is set without this OWNER option,
+	  so on a pure HE-client image the local sw_tier never mounts NVS --
+	  even if ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT's aen_ready() declines (SE
+	  firewall NOSUPPORT, MHU timeout) and the dispatcher would otherwise
+	  fall through to it. alp_update_log_open() then returns NULL with
+	  ALP_ERR_NOSUPPORT instead of racing this owner's NVS mount over the
+	  same flash region. The HE image's devicetree carving out
+	  `alp_ulog_partition` (e.g. so a firewall-probe profile can attempt a
+	  direct raw flash_write() as a negative proof) is therefore safe on
+	  its own -- it is the update-log backend selection, not the
+	  partition's mere existence in the devicetree, that this guard
+	  gates.
 
 config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN
 	bool "Assert that the Alif MRAM log partition is firewall-protected"

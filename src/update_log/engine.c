@@ -271,11 +271,13 @@ static void kbuf(char *out, size_t cap, uint64_t seq)
  * local store instance over the same MRAM region the HP (secure owner)
  * image writes; HE only ever reaches the log through the HP owner's MHU
  * mailbox (src/backends/update_log/aen_m55_owner.c). If aen_ready() ever
- * declines (SE/device firewall NOSUPPORT, MHU timeout) and the
- * dispatcher (src/update_log_dispatch.c) falls through to a LOCAL sw_tier
- * on the HE image, that fallback is safe ONLY if HE's devicetree does
- * NOT also carve out `alp_ulog_partition` over the HP owner's MRAM region
- * -- two unsynchronized NVS mounts over the same flash region would race
+ * declines (SE/device firewall NOSUPPORT, MHU timeout), the dispatcher
+ * (src/update_log_dispatch.c) must NOT fall through to a LOCAL sw_tier on
+ * the HE image: src/backends/update_log/sw_tier.c's ready() probe refuses
+ * to engage at all when CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT is set
+ * without CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER, so open() returns NULL
+ * / ALP_ERR_NOSUPPORT instead of mounting a second, unsynchronized NVS
+ * instance over the HP owner's MRAM region -- two such mounts would race
  * regardless of anything g_engine_lock does, since it has no visibility
  * across images. See CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER's Kconfig
  * help for the same requirement stated at the board-porting seam.
