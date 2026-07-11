@@ -353,7 +353,7 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
 
     # §D.lib.industrial
     "madgwick_ahrs":  ("CONFIG_ALP_MADGWICK_LIBM=y",),
-    "pid":            ("CONFIG_ALP_PID_INT_MATH=y",),
+    "pid":            ("CONFIG_ALP_SDK_PID=y", "CONFIG_ALP_PID_INT_MATH=y"),
     "modbus":         ("CONFIG_ALP_MODBUS_SYNC_IO=y",),
 
     # §D.lib.iot

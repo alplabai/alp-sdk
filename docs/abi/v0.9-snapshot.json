@@ -10984,6 +10984,52 @@
       },
       "variables": {}
     },
+    "alp/pid.h": {
+      "functions": {
+        "alp_pid_init": {
+          "hash": "5add4806c3622fe6",
+          "signature": "alp_status_t alp_pid_init(alp_pid_t *pid, const alp_pid_config_t *cfg);"
+        },
+        "alp_pid_reset": {
+          "hash": "d85bf7baaedca0ab",
+          "signature": "void alp_pid_reset(alp_pid_t *pid);"
+        },
+        "alp_pid_step": {
+          "hash": "274f5a4195b79919",
+          "signature": "float alp_pid_step(alp_pid_t *pid, float setpoint, float measurement, float dt_s);"
+        }
+      },
+      "macros": {},
+      "typedefs": {
+        "alp_pid_config_t": {
+          "definition": "typedef struct { float kp; float ki; float kd; float out_min; float out_max; float integ_limit; bool deriv_on_measurement; } alp_pid_config_t;",
+          "fields": [
+            "float kp",
+            "float ki",
+            "float kd",
+            "float out_min",
+            "float out_max",
+            "float integ_limit",
+            "bool deriv_on_measurement"
+          ],
+          "hash": "0cf904d9179cd493",
+          "kind": "struct"
+        },
+        "alp_pid_t": {
+          "definition": "typedef struct { alp_pid_config_t cfg; float integ; float prev_meas; float prev_err; bool primed; } alp_pid_t;",
+          "fields": [
+            "alp_pid_config_t cfg",
+            "float integ",
+            "float prev_meas",
+            "float prev_err",
+            "bool primed"
+          ],
+          "hash": "a8d0a1fd7ef60f14",
+          "kind": "struct"
+        }
+      },
+      "variables": {}
+    },
     "alp/power.h": {
       "functions": {
         "alp_power_capabilities": {
