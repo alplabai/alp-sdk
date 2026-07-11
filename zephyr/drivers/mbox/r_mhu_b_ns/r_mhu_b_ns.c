@@ -59,7 +59,7 @@
  **********************************************************************************************************************/
 
 /** "MHUB" in ASCII (distinct from plain r_mhu_ns.c's "MHU"), used to determine if channel is open. */
-#define MHU_B_NS_OPEN                (0x42554844ULL)
+#define MHU_B_NS_OPEN                (0x4D485542ULL)
 
 #define MHU_B_NS_SHMEM_CH_SIZE       (0x8)
 #define MHU_B_NS_RSP_TXD_OFFSET      (0x0)
@@ -237,8 +237,6 @@ fsp_err_t R_MHU_B_NS_Open (mhu_ctrl_t * const p_ctrl, mhu_cfg_t const * const p_
     /* Power on the MHU-B channel. */
     R_BSP_MODULE_START(FSP_IP_MHU, channel);
 
-    R_BSP_IrqCfgEnable(p_cfg->rx_irq, p_cfg->rx_ipl, p_instance_ctrl);
-
     /* Set callback and context pointers */
 
 #if BSP_TZ_SECURE_BUILD
@@ -253,6 +251,14 @@ fsp_err_t R_MHU_B_NS_Open (mhu_ctrl_t * const p_ctrl, mhu_cfg_t const * const p_
     p_instance_ctrl->p_cfg   = p_cfg;
     p_instance_ctrl->channel = channel;
     p_instance_ctrl->open    = MHU_B_NS_OPEN;
+
+    /* Enable the RX IRQ LAST, only after the control block is fully
+     * initialised.  If the peer (e.g. an already-booted A55) has already
+     * armed the doorbell, the ISR can fire the instant the NVIC line is
+     * enabled -- enabling it before p_callback/channel are set would run the
+     * ISR against a NULL callback and channel 0, silently dropping the first
+     * message. */
+    R_BSP_IrqCfgEnable(p_cfg->rx_irq, p_cfg->rx_ipl, p_instance_ctrl);
 
     /* All done.  */
     return FSP_SUCCESS;
