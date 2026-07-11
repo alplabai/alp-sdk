@@ -289,6 +289,11 @@ static struct rpc_be *make_test_channel(void)
 	ch->ept.priv      = ch;
 
 	ALP_ASSERT_TRUE(remoteproc_init(&ch->rproc, &g_rproc_ops, ch) == &ch->rproc);
+	/* Mirrors y_open() -- rpc_be_teardown() now gates its
+	 * remoteproc_shutdown()/remoteproc_remove() calls on this flag
+	 * (alp-sdk #683 bench fix, see struct rpc_be's doc comment), so
+	 * this test double must set it too or lose that teardown coverage. */
+	ch->rproc_ready = true;
 	return ch;
 }
 

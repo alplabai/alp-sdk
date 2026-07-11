@@ -416,7 +416,22 @@ struct rpc_be {
 	struct rpmsg_endpoint        ept;
 	bool                         ept_created;
 	bool                         vdev_created;
-	int                          mhu_irq; /* fd cast from dev[UIO_MHU]->irq_info */
+	/* Set the instant remoteproc_init() returns successfully -- gates
+	 * rpc_be_teardown()'s remoteproc_shutdown()/remoteproc_remove()
+	 * calls (alp-sdk #683 bench fix): both dereference `rproc->ops`
+	 * unconditionally once `rproc->state == RPROC_OFFLINE` (true for a
+	 * calloc()'d, never-initialised struct remoteproc too, since
+	 * RPROC_OFFLINE == 0 -- confirmed against
+	 * lib/remoteproc/remoteproc.c's remoteproc_remove()), so calling
+	 * them on a `ch->rproc` that never went through remoteproc_init()
+	 * (y_open() failing at the metal_init()/metal_device_open() steps
+	 * above it, before remoteproc_init() ever runs) is a NULL-pointer
+	 * dereference through `rproc->ops->remove`, not a graceful no-op --
+	 * reproduced live by tests/yocto/rpc_uio_bench_main.c under
+	 * qemu-aarch64 (no real UIO devices -> metal_init() fails -> this
+	 * exact early-`goto err` path). */
+	bool rproc_ready;
+	int  mhu_irq; /* fd cast from dev[UIO_MHU]->irq_info */
 
 	pthread_mutex_t    tx_mutex;
 	pthread_mutex_t    sub_mutex;
@@ -743,8 +758,10 @@ static void rpc_be_teardown(struct rpc_be *ch)
 		rpmsg_deinit_vdev(&ch->rvdev);
 		remoteproc_remove_virtio(&ch->rproc, vdev);
 	}
-	(void)remoteproc_shutdown(&ch->rproc);
-	(void)remoteproc_remove(&ch->rproc);
+	if (ch->rproc_ready) {
+		(void)remoteproc_shutdown(&ch->rproc);
+		(void)remoteproc_remove(&ch->rproc);
+	}
 
 	for (int i = 0; i < UIO_REGION_COUNT; ++i) {
 		if (ch->dev[i] != NULL) {
@@ -823,6 +840,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		fprintf(stderr, "alp_rpc: remoteproc_init() failed\n");
 		goto err;
 	}
+	ch->rproc_ready = true;
 
 	/* Pre-register every da/pa-addressable region so
 	 * remoteproc_create_virtio()'s internal remoteproc_mmap() calls
