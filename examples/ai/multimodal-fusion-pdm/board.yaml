@@ -25,6 +25,7 @@ cores:
       default_arena_kib: 64
     libraries:
       - tflite_micro
+      - cmsis_dsp             # arm_mean/rms/absmax_f32 behind alp_dsp_stats_f32.
     peripherals:
       - i2c                   # all three sensors.
 
