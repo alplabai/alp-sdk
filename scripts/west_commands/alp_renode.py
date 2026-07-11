@@ -239,7 +239,8 @@ def resolve_renode_binary(
             "`renode` binary not found on PATH.  Install Renode "
             "(https://renode.io) -- the advisory CI gate "
             ".github/workflows/pr-renode-aen-smoke.yml installs the "
-            "pinned v1.15.3 .deb.  `west alp-renode` does not silently "
+            "pinned v1.16.1 portable build.  `west alp-renode` does not "
+            "silently "
             "pass when Renode is missing.")
     return exe
 
@@ -446,7 +447,7 @@ def build_sim_descriptor(profile: dict, control_port: int,
     }
 
 
-def build_sim_resc_text(repl: Path, elf: Path,
+def build_sim_resc_text(repl: Path, elf: Path, vtor: Optional[int] = None,
                         machine: str = "v2n_sim") -> str:
     """Generate the headless sim boot script: load the platform, load the
     ELF, and start.  The M33-SM is headless -- there is NO hardware UART
@@ -454,11 +455,21 @@ def build_sim_resc_text(repl: Path, elf: Path,
     (``ram_console_buf``) that the command streams to the UART socket by
     polling memory (see RamConsoleStreamer), so nothing UART-specific
     belongs in the boot script.  Renode stays up (``--console`` keeps its
-    monitor on stdin) reading the bridge's commands."""
+    monitor on stdin) reading the bridge's commands.
+
+    ``vtor`` (the image's ``_vector_table`` address) is written to the
+    Secure ``SCB->VTOR`` (0xE000ED08) after LoadELF.  On ARMv8-M with
+    TrustZone (Renode >= 1.16) LoadELF does NOT seed the Secure VTOR, so
+    every exception fetches its handler from address 0 and the core
+    HardFault-storms; on real silicon the boot ROM / secure world sets
+    it.  Harmless on pre-TrustZone Renode (0xE000ED08 is just VTOR)."""
+    vtor_line = (f"sysbus WriteDoubleWord 0xE000ED08 {hex(vtor)}\n"
+                 if vtor is not None else "")
     return (
         f'mach create "{machine}"\n'
         f"machine LoadPlatformDescription @{repl}\n"
         f"sysbus LoadELF @{elf}\n"
+        f"{vtor_line}"
         f"start\n"
     )
 
@@ -660,7 +671,9 @@ class RenodeMonitor:
             sentinel = f"__ALP_SIM_DONE_{self._seq}__"
             try:
                 self._proc.stdin.write(f"{cmd}\n")
-                self._proc.stdin.write(f"echo {sentinel}\n")
+                # Quote the marker: Renode >=1.16 treats a bare `echo TOKEN`
+                # as an element lookup ("No such emulation element").
+                self._proc.stdin.write(f'echo "{sentinel}"\n')
                 self._proc.stdin.flush()
             except (OSError, ValueError) as e:
                 self._broken = True
@@ -942,6 +955,8 @@ def run_sim(args, sdk_root: Path) -> int:            # type: ignore[no-untyped-d
     # be streamed out of SRAM; absent = a truly silent core (uart socket
     # just stays quiet), which is not an error.
     ram_console = elf_symbol(elf, "ram_console_buf")
+    vt = elf_symbol(elf, "_vector_table")
+    vtor = vt[0] if vt else None
 
     control_port, uart_port = pick_free_ports(2)
 
@@ -963,7 +978,8 @@ def run_sim(args, sdk_root: Path) -> int:            # type: ignore[no-untyped-d
         json.dumps(descriptor, indent=2) + "\n", encoding="utf-8")
 
     resc_path = bundle_dir / ".sim-boot.resc"
-    resc_path.write_text(build_sim_resc_text(repl, elf), encoding="utf-8")
+    resc_path.write_text(
+        build_sim_resc_text(repl, elf, vtor=vtor), encoding="utf-8")
 
     log_path = (Path(args.log).resolve()
                 if args.log else bundle_dir / "renode-sim.log")
