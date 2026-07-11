@@ -43,8 +43,11 @@ from alp_renode import (  # noqa: E402
     build_sim_descriptor,
     build_sim_renode_argv,
     build_sim_resc_text,
+    console_frontier,
+    elf_symbol,
     normalize_readbytes_output,
     pick_free_ports,
+    readbytes_to_bytes,
     resolve_bundle_elf,
     sim_profile_for_sku,
     translate_control_command,
@@ -63,9 +66,21 @@ def test_sim_profile_v2n101_has_tmp112_sensor():
     assert periph["id"] == "tmp112"
     assert periph["kind"] == "sensor"
     # inject.cmd must use the FULL monitor path -- the bare node name does
-    # not resolve in the Renode monitor (proven on-target).
+    # not resolve in the Renode monitor (proven on-target).  iic8 = the
+    # RZ/V2N RIIC/BRD_I2C bus the tmp112 sits on.
     assert periph["inject"]["cmd"] == \
-        "sysbus.iic0.i2c_tmp112 Temperature {value}"
+        "sysbus.iic8.i2c_tmp112 Temperature {value}"
+
+
+def test_repl_is_headless_no_uart():
+    """The M33-SM is headless -- the descriptor must NOT model a UART
+    (the console is streamed from ram_console, not a wire)."""
+    repl = (REPO / "metadata" / "renode" / "renesas_rzv2n.repl").read_text()
+    assert "iic8" in repl and "i2c_tmp112" in repl
+    # No UART peripheral node instantiated (a node reads `<name>: UART.<T>`);
+    # comments may still mention the word.
+    assert ": UART." not in repl
+    assert "sci0:" not in repl
 
 
 def test_sim_profile_unmapped_board_raises():
@@ -242,15 +257,42 @@ def test_translate_inject_is_verbatim_plain():
 # ---------------------------------------------------------------------
 
 
-def test_build_sim_resc_wires_socket_uart_and_elf(tmp_path):
+def test_build_sim_resc_boots_headless(tmp_path):
+    # Headless boot: load platform, load ELF, start.  No UART socket
+    # terminal (the console comes from ram_console over memory), and no
+    # C# model include.
     repl = tmp_path / "p.repl"
     elf = tmp_path / "fw.elf"
-    text = build_sim_resc_text(repl, elf, uart_port=45000)
-    assert 'CreateServerSocketTerminal 45000 "uart_sock" false' in text
-    assert "connector Connect sysbus.sci0 uart_sock" in text
-    assert f"sysbus LoadELF @{elf}" in text
+    text = build_sim_resc_text(repl, elf)
     assert f"machine LoadPlatformDescription @{repl}" in text
+    assert f"sysbus LoadELF @{elf}" in text
     assert text.rstrip().endswith("start")
+    assert "CreateServerSocketTerminal" not in text
+    assert "connector Connect" not in text
+    assert "i @" not in text
+
+
+# ---------------------------------------------------------------------
+# ram_console streaming helpers
+# ---------------------------------------------------------------------
+
+
+def test_readbytes_to_bytes_parses_bracketed():
+    assert readbytes_to_bytes("[\n0x48, 0x69, 0x00, \n]") == b"Hi\x00"
+
+
+def test_console_frontier_stops_at_trailing_nuls():
+    assert console_frontier(b"boot\n\x00\x00\x00") == 5
+    assert console_frontier(b"\x00\x00\x00") == 0
+    assert console_frontier(b"full") == 4
+
+
+def test_elf_symbol_finds_ram_console_when_e2e_elf_set():
+    elf = os.environ.get("ALP_SIM_E2E_ELF")
+    if not elf:
+        pytest.skip("set ALP_SIM_E2E_ELF to a ram_console-enabled M33 elf")
+    sym = elf_symbol(Path(elf), "ram_console_buf")
+    assert sym is not None and sym[1] >= 256  # (addr, size)
 
 
 def test_build_sim_renode_argv_headless(tmp_path):
@@ -268,27 +310,27 @@ def test_build_sim_renode_argv_headless(tmp_path):
 
 
 @pytest.mark.skipif(
-    os.environ.get("ALP_SIM_E2E") != "1" or shutil.which("renode") is None,
-    reason="set ALP_SIM_E2E=1 with `renode` on PATH to run the live smoke")
+    os.environ.get("ALP_SIM_E2E") != "1" or shutil.which("renode") is None
+    or not os.environ.get("ALP_SIM_E2E_ELF"),
+    reason="set ALP_SIM_E2E=1, ALP_SIM_E2E_ELF=<V2N M33 console zephyr.elf>, "
+           "with `renode` on PATH, to run the live smoke")
 def test_sim_mode_end_to_end(tmp_path):
-    """Boot a Cortex-M33 ELF in Renode via --sim-mode and drive both
-    sockets: UART streams firmware serial; control does WriteBytes ->
-    ReadBytes round-trip and a tmp112 inject that reads back."""
+    """Boot the REAL V2N M33 firmware (ALP_SIM_E2E_ELF -- a console-enabled
+    RZ/V2N M33 zephyr.elf) in Renode via --sim-mode on the faithful
+    renesas_rzv2n model, and drive both sockets: the UART socket must
+    stream the firmware's console banner, and the control socket must
+    round-trip WriteBytes -> ReadBytes (in M33 SRAM) and apply the tmp112
+    inject on iic8 (read back the set temperature)."""
     import json
+    import shutil as _shutil
     import signal
     import subprocess
     import time
-    import urllib.request
 
-    url = ("https://dl.antmicro.com/projects/renode/renesas_ra6m5--sci_uart"
-           ".elf-s_413420-158250896f48de6bf28e409c99cdda0b2b21e43e")
     bundle = tmp_path / "bundle"
     bundle.mkdir()
-    elf = bundle / "fw.elf"
-    try:
-        urllib.request.urlretrieve(url, elf)
-    except Exception as e:  # pragma: no cover - network flake
-        pytest.skip(f"could not fetch the CM33 test ELF: {e}")
+    elf = bundle / "zephyr.elf"
+    _shutil.copy(os.environ["ALP_SIM_E2E_ELF"], elf)
 
     env = dict(os.environ)
     env["ALP_SDK_ROOT"] = str(REPO)
@@ -330,7 +372,8 @@ def test_sim_mode_end_to_end(tmp_path):
             except socket.timeout:
                 break
         u.close()
-        assert data, "UART socket streamed no firmware serial"
+        assert b"Booting Zephyr" in data or b"Hello World" in data, \
+            f"UART socket did not stream the firmware console: {data!r}"
 
         c = socket.create_connection(("127.0.0.1", cp), timeout=5)
         c.settimeout(8)
@@ -340,10 +383,11 @@ def test_sim_mode_end_to_end(tmp_path):
             f.write((line + "\n").encode())
             return f.readline().decode().strip()
 
-        assert cmd("sysbus WriteBytes 0x20000000 0xde 0xad 0xbe 0xef") == "ok"
-        assert cmd("sysbus ReadBytes 0x20000000 4") == "0xde 0xad 0xbe 0xef"
-        assert cmd("sysbus.iic0.i2c_tmp112 Temperature 85") == "ok"
-        assert "85" in cmd("sysbus.iic0.i2c_tmp112 Temperature")
+        # 0x08010000 is inside the M33-SM SRAM bank (0x08003000 + 1 MiB).
+        assert cmd("sysbus WriteBytes 0x08010000 0xde 0xad 0xbe 0xef") == "ok"
+        assert cmd("sysbus ReadBytes 0x08010000 4") == "0xde 0xad 0xbe 0xef"
+        assert cmd("sysbus.iic8.i2c_tmp112 Temperature 85") == "ok"
+        assert "85" in cmd("sysbus.iic8.i2c_tmp112 Temperature")
         c.close()
     finally:
         try:
