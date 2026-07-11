@@ -302,6 +302,16 @@ truly silent firmware just leaves the UART socket quiet.  The faithful
 `0x08003000`, a coarse CPG stub for the FSP clock/reset handshakes, and
 `iic8`/tmp112); no custom hardware-UART model is involved.
 
+Also supported: **E1M-AEN801** (Alif Ensemble E8, Cortex-M55-HP) — which
+*does* have a wired **UART5 console**, so its board profile streams that
+real UART over a Renode socket terminal (not `ram_console`). Two AEN
+specifics: it needs Renode **≥ 1.16.1** (Cortex-M55 + Helium support), and
+the sim image must be **ITCM-linked** (`chosen zephyr,flash = &itcm`, see
+`tests/renode/aen_m55_itcm_run.overlay`) so its vector table sits at the
+low ITCM address `0x0` — Renode 1.16.1 mis-executes a vector table placed
+at the high MRAM base `0x80000000`. The `alif_ensemble_e8` model maps ITCM
+at `0x0` and stubs the Alif CGU/EXPMST clock registers.
+
 | Option | Meaning |
 |---|---|
 | `APP_PATH` (argument, optional) | App directory (default: walk up from cwd) |

@@ -59,10 +59,28 @@ nvic: IRQControllers.NVIC @ sysbus 0xE000E000
 itcm: Memory.MappedMemory @ sysbus 0x50000000
     size: 0x40000
 
+// ITCM *local* alias @ 0x0.  The M55 sees its ITCM at both the global
+// window (0x50000000) and the CPU-local 0x0.  `west alp-renode
+// --sim-mode` boots an ITCM-linked image (chosen zephyr,flash = &itcm)
+// whose vector table + code link at the local 0x0 -- a low, bit31-clear
+// Code-region address.  This is deliberate: Renode v1.16.1's Cortex-M55
+// mis-executes a vector table placed at a high address like the MRAM
+// base 0x80000000 (it jumps to VTOR instead of [VTOR+4]); linking into
+// ITCM@0x0 sidesteps that entirely (VTOR=0, the reset default).
+itcm_local: Memory.MappedMemory @ sysbus 0x0
+    size: 0x40000
+
 // DTCM @ 0x50800000, 1024 KiB (e8.json SRAM3_M55_HP_DTCM = 1024;
 //                              board .dts dtcm global_base = 0x50800000)
 dtcm: Memory.MappedMemory @ sysbus 0x50800000
     size: 0x100000
+
+// --- SRAM0 (global on-chip SRAM) --------------------------------------
+// The Ensemble on-chip SRAM window the M55 image uses for .data/.bss +
+// the ram_console ring (ram_console_buf ~0x20000251).  Sized to cover
+// the used range.
+sram0: Memory.MappedMemory @ sysbus 0x20000000
+    size: 0x800000
 
 // --- On-die MRAM (non-volatile "flash") -------------------------------
 //
@@ -84,3 +102,22 @@ mram: Memory.MappedMemory @ sysbus 0x80000000
 uart5: UART.NS16550 @ sysbus 0x4901d000
     wideRegisters: true
     -> nvic@129
+
+// --- Alif clock / system stubs (sim-only) -----------------------------
+//
+// The Ensemble M55 boot polls the CGU (Clock Generation Unit) + the
+// EXPMST expansion-master control before the console comes up; stock
+// Renode models neither, so unmapped accesses would storm the core at
+// __enable_irq.  These coarse Python stubs return 0 for the whole
+// window -- enough for the FSP/Zephyr clock bring-up to complete and
+// the app to reach main() (same technique as renesas_rzv2n's CPG stub).
+// Not a faithful CGU; the minimum to let a real M55 image boot headless.
+alif_cgu: Python.PythonPeripheral @ sysbus 0x1A600000
+    size: 0x100000
+    initable: true
+    script: "request.Value = 0x0"
+
+alif_expmst: Python.PythonPeripheral @ sysbus 0x49020000
+    size: 0x10000
+    initable: true
+    script: "request.Value = 0x0"

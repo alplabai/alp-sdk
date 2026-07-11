@@ -85,7 +85,23 @@ def test_repl_is_headless_no_uart():
 
 def test_sim_profile_unmapped_board_raises():
     with pytest.raises(AlpRenodeError, match="no --sim-mode profile"):
-        sim_profile_for_sku("E1M-AEN801")
+        sim_profile_for_sku("E1M-NX9101")
+
+
+def test_sim_profile_aen801_uart_console():
+    # The AEN M55 has a wired UART5 console (not headless) -- its profile
+    # selects the socket-terminal path, not ram_console.
+    profile = sim_profile_for_sku("E1M-AEN801")
+    assert profile["console"] == {"kind": "uart", "node": "sysbus.uart5"}
+
+
+def test_build_sim_resc_uart_console_wires_socket_terminal(tmp_path):
+    text = build_sim_resc_text(tmp_path / "p.repl", tmp_path / "fw.elf",
+                               uart_node="sysbus.uart5", uart_port=44000)
+    assert 'CreateServerSocketTerminal 44000 "uart_sock" false' in text
+    assert "connector Connect sysbus.uart5 uart_sock" in text
+    # the terminal must be wired before the ELF loads/boots
+    assert text.index("CreateServerSocketTerminal") < text.index("LoadELF")
 
 
 # ---------------------------------------------------------------------
@@ -418,6 +434,97 @@ def test_sim_mode_end_to_end(tmp_path):
         assert cmd("sysbus ReadBytes 0x08010000 4") == "0xde 0xad 0xbe 0xef"
         assert cmd("sysbus.iic8.i2c_tmp112 Temperature 85") == "ok"
         assert "85" in cmd("sysbus.iic8.i2c_tmp112 Temperature")
+        c.close()
+    finally:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
+        logf.close()
+
+
+@pytest.mark.skipif(
+    os.environ.get("ALP_SIM_E2E") != "1" or shutil.which("renode") is None
+    or not os.environ.get("ALP_SIM_E2E_AEN_ELF"),
+    reason="set ALP_SIM_E2E=1, ALP_SIM_E2E_AEN_ELF=<AEN M55 ITCM-run elf>, "
+           "with renode>=1.16.1 on PATH, to run the live AEN smoke")
+def test_sim_mode_aen_end_to_end(tmp_path):
+    """Boot the REAL AEN M55 firmware (ALP_SIM_E2E_AEN_ELF -- an ITCM-run
+    image, chosen zephyr,flash=&itcm) via --sim-mode --board E1M-AEN801 on
+    Renode >=1.16.1.  Unlike V2N (headless/ram_console), the AEN M55 has a
+    wired UART5 console: the UART socket is Renode's own socket terminal,
+    which must stream the firmware banner.  The control socket reads the
+    vector table (at ITCM 0x0) back."""
+    import json
+    import shutil as _shutil
+    import signal
+    import subprocess
+    import time
+
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    elf = bundle / "zephyr.elf"
+    _shutil.copy(os.environ["ALP_SIM_E2E_AEN_ELF"], elf)
+
+    env = dict(os.environ)
+    env["ALP_SDK_ROOT"] = str(REPO)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(REPO / "scripts"), str(REPO / "scripts" / "west_commands")])
+    sim_log = tmp_path / "sim.out"
+    logf = sim_log.open("w")
+    proc = subprocess.Popen(
+        [sys.executable, str(REPO / "scripts" / "west_commands"
+                             / "alp_renode.py"),
+         "--sim-mode", "--board", "E1M-AEN801",
+         "--image-bundle", str(bundle), "--timeout", "60"],
+        env=env, stdout=logf, stderr=subprocess.STDOUT, start_new_session=True)
+    desc_path = bundle / "sim-descriptor.json"
+    try:
+        cp = up = None
+        for _ in range(160):
+            if desc_path.exists() and "ready (timeout" in sim_log.read_text():
+                d = json.loads(desc_path.read_text())
+                cp = int(d["control_socket"].rsplit(":", 1)[1])
+                up = int(d["uart_socket"].rsplit(":", 1)[1])
+                break
+            if proc.poll() is not None:
+                break
+            time.sleep(0.5)
+        assert cp and up, f"sim never became ready:\n{sim_log.read_text()}"
+
+        # The UART socket is Renode's terminal -- opens shortly after boot;
+        # retry the connect through the small window.
+        data = b""
+        for _ in range(20):
+            try:
+                u = socket.create_connection(("127.0.0.1", up), timeout=1)
+            except OSError:
+                time.sleep(0.5)
+                continue
+            u.settimeout(5)
+            t = time.time()
+            while time.time() - t < 5:
+                try:
+                    data += u.recv(1024)
+                except socket.timeout:
+                    break
+            u.close()
+            break
+        assert b"Booting Zephyr" in data or b"Hello World" in data, \
+            f"UART socket did not stream the AEN console: {data!r}"
+
+        c = socket.create_connection(("127.0.0.1", cp), timeout=5)
+        c.settimeout(8)
+        f = c.makefile("rwb", buffering=0)
+
+        def cmd(line):
+            f.write((line + "\n").encode())
+            return f.readline().decode().strip()
+
+        # ITCM-linked at 0x0: word 0 of the vector table is the initial SP.
+        sp = cmd("sysbus ReadBytes 0x0 4")
+        assert len(sp.split()) == 4, f"vector-table read failed: {sp!r}"
         c.close()
     finally:
         try:

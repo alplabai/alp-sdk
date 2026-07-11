@@ -30,6 +30,9 @@ on:
       - 'scripts/west_commands/alp_renode.py'
       - 'tests/scripts/test_alp_renode_sim.py'
       - 'tests/renode/v2n_m33_ramconsole.conf'
+      - 'tests/renode/aen_m55_itcm_run.overlay'
+      - 'tests/renode/aen_m55_sim.conf'
+      - 'metadata/renode/alif_ensemble_e8.*'
       - '.github/workflows/pr-renode-sim-mode.yml'
   workflow_dispatch:
 
@@ -126,14 +129,34 @@ jobs:
                  -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/v2n_m33_ramconsole.conf"
           test -f /tmp/v2n-m33-build/zephyr/zephyr.elf
 
-      - name: west alp-renode --sim-mode end-to-end (real V2N M33 firmware)
+      # Build a real AEN M55-HP image, ITCM-linked (chosen zephyr,flash =
+      # &itcm) so it runs from the CPU-local 0x0 -- dodging Renode 1.16.1's
+      # high-VTOR Cortex-M55 bug.  The M55 has a wired UART5 console (#687).
+      - name: Build AEN M55 ITCM-run image
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+        run: |
+          set -euo pipefail
+          west build -p always \
+              -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+              "${ZEPHYR_BASE}/samples/hello_world" \
+              -d /tmp/aen-m55-build \
+              -- -DEXTRA_ZEPHYR_MODULES="${GITHUB_WORKSPACE}/alp-sdk" \
+                 -DEXTRA_DTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_itcm_run.overlay" \
+                 -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_sim.conf"
+          test -f /tmp/aen-m55-build/zephyr/zephyr.elf
+
+      - name: west alp-renode --sim-mode end-to-end (real firmware, V2N + AEN)
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ALP_SIM_E2E: '1'
           ALP_SIM_E2E_ELF: /tmp/v2n-m33-build/zephyr/zephyr.elf
+          ALP_SIM_E2E_AEN_ELF: /tmp/aen-m55-build/zephyr/zephyr.elf
           ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
         run: |
           set -euo pipefail
           python3 -m pytest -q \
               tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end \
+              tests/scripts/test_alp_renode_sim.py::test_sim_mode_aen_end_to_end \
               tests/scripts/test_alp_renode_sim.py::test_elf_symbol_finds_ram_console_when_e2e_elf_set
