@@ -483,8 +483,11 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 	    (alp_se_crypto_send_request(&pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_SHA) == 0)
 	        ? se_rc_to_alp((int)pkt.resp_error_code)
 	        : ALP_ERR_IO;
-	if (s == ALP_OK && digest_len != NULL) {
-		*digest_len = dlen;
+	if (digest_len != NULL) {
+		/* Parity with the yocto backend: report the digest length on
+		 * success, or 0 on the terminal-IO-failure path (this is not
+		 * the short-buffer path -- that already returned above). */
+		*digest_len = (s == ALP_OK) ? dlen : 0u;
 	}
 	/* Wipe the buffered plaintext before releasing the slot, on both
 	 * the ALP_OK and the ALP_ERR_IO paths -- either way the dispatcher
