@@ -857,7 +857,19 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 			goto err;
 		}
 		metal_phys_addr_t pa = (metal_phys_addr_t)g_uio_regions[id].pa;
-		metal_phys_addr_t da = pa + ALP_V2N_A55_TO_M33_NS_OFFSET;
+		/* Register the device-address EQUAL to the A55 physical address.
+		 * remoteproc_create_virtio() resolves each vring by looking its
+		 * resource-table `da` up in these registered regions, and the M33
+		 * resource table publishes vring DAs in A55-physical space
+		 * (VRING_*_ADDR_A55 = 0x4f8xxxxx, resource_table.c).  The
+		 * ALP_V2N_A55_TO_M33_NS_OFFSET (+0x50000000) is the CM33-NS<->A55
+		 * view translation for the M33's OWN addressing (resource_table.h,
+		 * m33_sm/main.c) -- it must NOT be applied to the master-side DA
+		 * registration, or the vring lookup (da=0x4f8xxxxx) matches no
+		 * region (all at 0x9f8xxxxx) -> remoteproc_create_virtio() returns
+		 * NULL -> ALP_ERR_NOT_READY.  Silicon-root-caused on e1mx-v2n-m1-01
+		 * (#683/#697 bench, 2026-07-11). */
+		metal_phys_addr_t da = pa;
 		remoteproc_init_mem(
 		    &ch->mem[id], g_uio_regions[id].dt_name, pa, da, g_uio_regions[id].size, io);
 		remoteproc_add_mem(&ch->rproc, &ch->mem[id]);

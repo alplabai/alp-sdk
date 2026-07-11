@@ -182,7 +182,14 @@
 	};
 
 	chosen {
-		zephyr,ipc_shm = &vring_shm0;
+		/* The A55 master (DRIVER role) allocates every rpmsg buffer from
+		 * vring_shm1 (0x4fc00000 A55 / 0x9fc00000 CM33-NS) -- the
+		 * "mst-alloc = vring-shm1" contract in the backend REFERENCE.  The
+		 * M33's descriptor-translation window MUST cover that pool, so it
+		 * points at vring_shm1, not vring_shm0 (whose window ends exactly at
+		 * 0x9fc00000, leaving every buffer outside it).  Silicon-root-caused
+		 * alongside the vring-DA fix (#683/#697 bench, 2026-07-11). */
+		zephyr,ipc_shm = &vring_shm1;
 		zephyr,ipc = &mbox_consumer;
 	};
 
@@ -215,9 +222,10 @@
 		reg = <0x9f900000 0x300000>;
 	};
 
-	/* Not yet consumed by this app (only vring_shm0 is, via `chosen
-	 * { zephyr,ipc_shm = ...; }`) -- reserved so the region layout is a
-	 * complete, exact match with the A55 kernel overlay's 6 nodes. */
+	/* The rpmsg buffer pool: the A55 master allocates from here, so this is
+	 * the M33's zephyr,ipc_shm window (see the chosen node above).
+	 * vring_shm0 is kept reserved so the region layout still matches the A55
+	 * kernel overlay's 6 nodes 1:1. */
 	vring_shm1: memory@9fc00000 {
 		compatible = "mmio-sram";
 		reg = <0x9fc00000 0x300000>;
