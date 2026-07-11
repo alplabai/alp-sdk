@@ -342,6 +342,19 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # owns the public alp_rpc_* symbols (stub_backend.c is muted via
         # ALP_VENDOR_OVERRIDES_RPC in the unconditional block above).
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_drv.c
+        # RZ/V2N Path B (#683): backends/rpc/yocto_uio_drv.c is the SAME
+        # <alp/rpc.h> surface over userspace open-amp/libmetal UIO ATTACH
+        # (no /dev/rpmsg* on this BSP) -- see that file's own header
+        # comment for the full attach-flow design.  Registers at
+        # priority 150 with an EXACT silicon_ref ("renesas:rzv2n:n44"),
+        # so it only overrides yocto_drv.c above on a V2N-targeted
+        # build; every other Linux target keeps using the /dev/rpmsg*
+        # backend unchanged.  Shares the SAME ALP_SDK_HAVE_OPENAMP_USERLAND
+        # gate + open-amp/libmetal pkg-config find below -- no separate
+        # wiring needed; unconditionally listed here (like yocto_drv.c)
+        # so a non-V2N Linux build still compile-tests its NOSUPPORT
+        # fallback branch.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_uio_drv.c
     )
     # Only the I2C/SPI/UART/GPIO wrappers are Linux-gated here; the
     # can/pwm/adc/i2s/counter/rtc/wdt overrides moved to the unconditional
