@@ -384,14 +384,33 @@ _SIM_BOARD_PROFILES: dict[str, dict] = {
             # Camera -> the aen-sim-vision app's frame buffer (SIM_FRAME).
             # memcpy: studio writes a frame to `base`, then fires `trigger`
             # (rings the app's doorbell); the app runs TFLM inference on it
-            # and renders to the ssd1306 framebuffer above.
+            # and renders to the ssd1306 framebuffer above.  `frame` advertises
+            # the expected input format/dims (#687 addendum) so studio resizes
+            # + encodes the user's image before the memcpy -- GRAY8 32x32 is
+            # 1024 B, matching the app's SIM_FRAME_LEN.
             {
                 "id": "camera",
                 "kind": "camera",
+                "frame": {"format": "GRAY8", "w": 32, "h": 32},
                 "inject": {
                     "memcpy": {
                         "base": "0x20041000",
                         "trigger": "sysbus WriteDoubleWord 0x20042000 1",
+                    },
+                },
+            },
+            # Mic -> the app's audio clip buffer (SIM_AUDIO).  Same memcpy
+            # contract as the camera: studio writes a clip to `base`, fires
+            # `trigger` (rings the audio doorbell); the app scores it and logs
+            # a `wakeword:` line.  `frame` advertises the clip encoding.
+            {
+                "id": "mic",
+                "kind": "microphone",
+                "frame": {"format": "PCM_U8", "rate": 16000, "samples": 1024},
+                "inject": {
+                    "memcpy": {
+                        "base": "0x20043000",
+                        "trigger": "sysbus WriteDoubleWord 0x20044000 1",
                     },
                 },
             },
