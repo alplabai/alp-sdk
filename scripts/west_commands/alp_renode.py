@@ -381,6 +381,20 @@ _SIM_BOARD_PROFILES: dict[str, dict] = {
              "format": "MONO", "w": 128, "h": 64},
         ],
         "peripherals": [
+            # Camera -> the aen-sim-vision app's frame buffer (SIM_FRAME).
+            # memcpy: studio writes a frame to `base`, then fires `trigger`
+            # (rings the app's doorbell); the app runs TFLM inference on it
+            # and renders to the ssd1306 framebuffer above.
+            {
+                "id": "camera",
+                "kind": "camera",
+                "inject": {
+                    "memcpy": {
+                        "base": "0x20041000",
+                        "trigger": "sysbus WriteDoubleWord 0x20042000 1",
+                    },
+                },
+            },
             {
                 "id": "lsm6dso",
                 "kind": "sensor",
