@@ -169,6 +169,22 @@ config ALP_SDK_UPDATE_LOG_AEN_M55_OWNER
 	  SE/device firewall lets this owner write the MRAM log partition and
 	  denies the application core.
 
+	  SINGLE-WRITER-IMAGE REQUIREMENT: the update-log engine's internal
+	  lock (g_engine_lock in src/update_log/engine.c) is a per-IMAGE
+	  static -- it cannot, and does not try to, serialize this owner
+	  image against the HE application image. There must be exactly ONE
+	  image that ever opens a local store instance over a given
+	  `alp_ulog_partition` MRAM region: this owner. The HE image's
+	  devicetree must NOT also carve out `alp_ulog_partition` over that
+	  same region as a client-side fallback -- if it does, and
+	  ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT's aen_ready() ever declines (SE
+	  firewall NOSUPPORT, MHU timeout) so the dispatcher falls through to
+	  a local sw_tier on HE, that HE-side NVS mount and this owner's NVS
+	  mount would race the same flash region with no cross-image lock to
+	  stop them. Give the HE image either no `alp_ulog_partition` mapping
+	  at all (so its SW-tier fallback, if reachable, can only ever use the
+	  RAM store) or a genuinely separate partition it is allowed to own.
+
 config ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN
 	bool "Assert that the Alif MRAM log partition is firewall-protected"
 	default n

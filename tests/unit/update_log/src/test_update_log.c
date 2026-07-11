@@ -147,6 +147,32 @@ static void td_ifaces(struct td_store *t, alp_secure_store_if *s, alp_monotonic_
 	ctr->ctx       = t;
 }
 
+/* WRITE_ONCE store double for DEFECT 1 (GHSA-r236-29pg-w694): a plain RAM
+ * double silently overwrites a re-put key, which would hide the PSA-tier
+ * wedge instead of reproducing it. This wraps td_put() to reject an
+ * overwrite of an already-created "ulog.<seq>" entry key exactly the way
+ * src/update_log/tfm_psa_secure_owner.c's ps_put() creates every entry
+ * asset with PSA_STORAGE_FLAG_WRITE_ONCE -- a second psa_ps_set() on that
+ * UID returns PSA_ERROR_NOT_PERMITTED, which psa_to_alp() maps to
+ * ALP_ERR_IO. "ulog.meta" stays freely rewritable (mutable metadata, same
+ * as the real PSA owner). */
+static alp_status_t td_put_write_once(void *c, const char *key, const uint8_t *b, size_t n)
+{
+	struct td_store *t        = td(c);
+	bool             is_entry = strncmp(key, "ulog.", 5) == 0 && strcmp(key, "ulog.meta") != 0;
+	if (is_entry && td_find(t, key) >= 0) {
+		return ALP_ERR_IO; /* mirrors PSA_ERROR_NOT_PERMITTED on a WRITE_ONCE asset */
+	}
+	return td_put(c, key, b, n);
+}
+
+static void
+td_ifaces_write_once(struct td_store *t, alp_secure_store_if *s, alp_monotonic_counter_if *ctr)
+{
+	td_ifaces(t, s, ctr);
+	s->put = td_put_write_once;
+}
+
 static alp_update_log_entry_t mk_entry(uint64_t ts, const char *ver, alp_update_status_t st)
 {
 	alp_update_log_entry_t e = { 0 };
@@ -488,10 +514,16 @@ ZTEST(alp_update_log, test_recover_meta_ahead_of_counter_after_crash)
  * from whatever meta.head_hash was at that moment -- see the block
  * comment above ulog_recover()). Recovery must not mistake it for a
  * completed append and must not adopt it into the chain: the counter
- * stays put, and the already-committed range verify() walks (entries
- * 0..hw-1) is untouched and still reports OK -- recovery never discards
- * or rewrites the frontier slot's contents (a write-once tier could not
- * anyway), it simply declines to count it. */
+ * stays put, and recovery never discards or rewrites the frontier
+ * slot's contents (a write-once tier could not anyway) -- it simply
+ * declines to count it.
+ *
+ * DEFECT 1 (GHSA-r236-29pg-w694): ulog_engine_verify()'s chain walk used
+ * to cover only [0, hw), never looking at slot hw itself, so this exact
+ * state used to report VERIFY_OK -- a silent lie on any tier where
+ * append()'s subsequent store->put() to that same occupied key then
+ * keeps failing (permanently, on a WRITE_ONCE tier). It must now report
+ * CHAIN_BROKEN with bad_seq_out == hw. */
 ZTEST(alp_update_log, test_recover_does_not_adopt_non_chaining_frontier_entry)
 {
 	struct td_store          t;
@@ -508,14 +540,119 @@ ZTEST(alp_update_log, test_recover_does_not_adopt_non_chaining_frontier_entry)
 	alp_update_log_verdict_t v;
 	uint64_t                 bad = 999;
 	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
-	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK,
-	             "the committed range (seq 0..1) is untouched and still verifies clean");
-	zassert_equal(t.counter, 2,
-	             "recovery must not adopt/count non-chaining data at the frontier slot");
+	zassert_equal(v,
+	              ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN,
+	              "verify() must not report OK while a non-chaining entry squats the frontier");
+	zassert_equal(bad, 2, "bad_seq_out must point at the squatted frontier slot");
+	zassert_equal(
+	    t.counter, 2, "recovery must not adopt/count non-chaining data at the frontier slot");
 
 	uint64_t n = 0;
 	zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK);
 	zassert_equal(n, 2, "the un-adopted frontier entry must not be counted");
+
+	/* This store is mutable (RAM-like, not write-once), so append() can
+	 * still make progress: it overwrites the squatted key and the log
+	 * self-heals -- the SW-NVS-tier half of DEFECT 1's fix. Contrast with
+	 * the write-once double below, where the same shape wedges instead. */
+	alp_update_log_entry_t healed = mk_entry(999, "self-heal", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &healed),
+	              ALP_OK,
+	              "a mutable tier must be able to overwrite a corrupt frontier slot");
+	zassert_equal(t.counter, 3);
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK, "the chain is clean again once the frontier heals");
+}
+
+/* DEFECT 1 (GHSA-r236-29pg-w694), write-once tier: the exact same
+ * non-chaining-frontier shape as above, but against a store double that
+ * mimics PSA Protected Storage's WRITE_ONCE entry assets. Here append()
+ * cannot self-heal -- the frontier slot can never be overwritten -- so it
+ * must fail loudly and permanently (ALP_ERR_IO) instead of silently
+ * wedging behind a verify() that still (incorrectly) said OK. */
+ZTEST(alp_update_log, test_recover_frontier_corruption_wedges_write_once_tier)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces_write_once(&t, &s, &c);
+
+	for (int i = 0; i < 2; i++) {
+		alp_update_log_entry_t ent =
+		    mk_entry((uint64_t)(i + 1) * 10, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+		zassert_equal(ulog_engine_append(&s, &c, &ent), ALP_OK);
+	}
+	zassert_equal(t.counter, 2);
+
+	uint8_t bogus_prev[32];
+	memset(bogus_prev, 0x77, sizeof(bogus_prev)); /* deliberately wrong */
+	uint8_t discard[32];
+	raw_write_entry(&t, 2, bogus_prev, discard); /* direct write: bypasses the write-once gate */
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v,
+	              ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN,
+	              "verify() must surface the squatted frontier instead of lying with OK");
+	zassert_equal(bad, 2);
+
+	/* append() cannot clear a WRITE_ONCE slot: it must return a clear
+	 * terminal error, never retry with a forced overwrite, and never
+	 * advance the counter over the still-corrupt frontier. */
+	alp_update_log_entry_t next = mk_entry(999, "wedge", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &next),
+	              ALP_ERR_IO,
+	              "append must return a terminal error against a write-once frontier conflict");
+	zassert_equal(t.counter, 2, "a wedged append must not advance the counter");
+
+	/* The wedge is durable: verify() keeps reporting it, not a one-shot
+	 * fluke, and the log never lies with OK afterwards either. */
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN);
+	zassert_equal(bad, 2);
+}
+
+/* DEFECT 3 (GHSA-r236-29pg-w694): with a functioning monotonic counter, at
+ * most ONE validly-chained orphan can ever sit above it (ulog_recover()
+ * always runs before append() writes a new entry, so it never lets a
+ * second one accumulate). Seeing TWO validly-chained entries above the
+ * counter is proof the counter itself regressed -- ulog_recover() must
+ * adopt at most one of them (never loop-adopt), and ulog_engine_verify()
+ * must report ROLLED_BACK for the one it deliberately leaves behind,
+ * not a laundered VERIFY_OK. */
+ZTEST(alp_update_log, test_recover_adopts_at_most_one_orphan_reports_rolled_back)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 2); /* entries 0,1 committed; counter == meta.count == 2 */
+
+	uint8_t metabuf[ULOG_META_WIRE_LEN];
+	size_t  mlen = 0;
+	zassert_equal(td_get(&t, "ulog.meta", metabuf, sizeof(metabuf), &mlen), ALP_OK);
+	struct ulog_meta m;
+	zassert_equal(ulog_meta_decode(metabuf, mlen, &m), ALP_OK);
+
+	/* Plant two entries chained back-to-back above the counter -- the
+	 * shape an honest crash can never produce by itself. */
+	uint8_t hash2[32];
+	raw_write_entry(&t, 2, m.head_hash, hash2);
+	uint8_t hash3[32];
+	raw_write_entry(&t, 3, hash2, hash3);
+	zassert_equal(t.counter, 2, "counter untouched until recovery runs");
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(
+	    v,
+	    ALP_UPDATE_LOG_VERIFY_ROLLED_BACK,
+	    "a second orphan above the counter is proof of rollback, not a second torn append");
+	zassert_equal(
+	    t.counter,
+	    3,
+	    "recovery adopts AT MOST ONE orphan per call -- it must not loop-adopt the second");
 }
 
 /* Counter/sequence overflow guard: refuse rather than risk a truncated
