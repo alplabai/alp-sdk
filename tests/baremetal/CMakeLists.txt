@@ -18,7 +18,7 @@ add_test(NAME alp_test_baremetal_registry_static_link
          COMMAND alp_test_baremetal_registry_static_link)
 
 # Delay fallback regression (#594) -- shared with tests/yocto/ since both
-# link src/common/stub_backend.c's alp_delay_us/alp_delay_ms.
+# link src/common/stub/stub_core.c's alp_delay_us/alp_delay_ms.
 add_executable(alp_test_baremetal_delay
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/delay.c
 )

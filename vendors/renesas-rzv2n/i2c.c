@@ -10,8 +10,9 @@
  * to the board and the rest stay SoC-internal.
  *
  * Body gated on ALP_HAS_RENESAS_FSP -- absent the FSP pack, this
- * file is an empty translation unit and stub_backend.c provides
- * the NOSUPPORT defaults.  v0.4 flips ALP_HAS_RENESAS_FSP=ON in
+ * file is an empty translation unit and the split stub backend
+ * (src/common/stub/stub_i2c.c) provides the NOSUPPORT defaults.
+ * v0.4 flips ALP_HAS_RENESAS_FSP=ON in
  * CI alongside the FSP pack pull.
  */
 

@@ -9,10 +9,11 @@
 # alp_i2c_* / alp_spi_* / alp_gpio_* / alp_uart_* on top of the
 # Ensemble CMSIS-Driver layer (`Driver_I2C0`, `Driver_SPI0`, ...).
 # When ALP_HAS_ALIF_HAL=ON the wrappers compile their real bodies
-# and define ALP_VENDOR_OVERRIDES_PERIPHERAL so stub_backend.c's
-# corresponding fall-back stubs are excluded from the link --
-# avoiding duplicate symbols.  When OFF the wrappers compile to
-# empty translation units; stub_backend.c keeps providing the
+# and define ALP_VENDOR_OVERRIDES_PERIPHERAL so the split stub
+# backend's (src/common/stub/*.c) corresponding fall-back stubs are
+# excluded from the link -- avoiding duplicate symbols.  When OFF the
+# wrappers compile to empty translation units; the split stub backend
+# keeps providing the
 # ALP_ERR_NOSUPPORT defaults, and the directory's presence in
 # the build proves the wiring works.
 #

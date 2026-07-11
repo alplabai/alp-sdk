@@ -17,7 +17,7 @@
  *     single-thread / build-warning fallback otherwise).
  *   - src/yocto/dispatch_last_error_shim.c on the Yocto plain-CMake
  *     build, forwarding onto alp_internal_set_last_error() -- the one
- *     ALP_LAST_ERROR_TLS-qualified slot in src/common/stub_backend.c
+ *     ALP_LAST_ERROR_TLS-qualified slot in src/common/stub/stub_core.c
  *     (see src/common/alp_internal.h).
  *
  * Every caller includes this header instead of hand-writing its own

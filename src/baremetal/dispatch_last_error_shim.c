@@ -6,7 +6,7 @@
  *
  * Registry dispatchers share the Zephyr-shaped alp_z_* last-error hooks.
  * Baremetal builds route them onto the one common last-error slot
- * (ALP_LAST_ERROR_TLS-qualified in src/common/stub_backend.c) without
+ * (ALP_LAST_ERROR_TLS-qualified in src/common/stub/stub_core.c) without
  * pulling in Zephyr.
  */
 
