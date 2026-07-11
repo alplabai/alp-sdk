@@ -33,6 +33,7 @@ on:
       - 'tests/renode/aen_m55_itcm_run.overlay'
       - 'tests/renode/aen_m55_sim.conf'
       - 'metadata/renode/alif_ensemble_e8.*'
+      - 'examples/aen/aen-sim-vision/**'
       - '.github/workflows/pr-renode-sim-mode.yml'
   workflow_dispatch:
 
@@ -147,7 +148,33 @@ jobs:
                  -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_sim.conf"
           test -f /tmp/aen-m55-build/zephyr/zephyr.elf
 
-      # Run the two live e2es as SEPARATE steps: each spawns its own Renode
+      # tflite-micro is an OPTIONAL Zephyr module (not fetched by default);
+      # clone it at the manifest-pinned revision for the vision demo.
+      - name: Fetch tflite-micro (optional module)
+        run: |
+          set -euo pipefail
+          TFLM_REV=fcc760af130f3a595b5802cdebcc77461e54f382
+          git clone --quiet https://github.com/zephyrproject-rtos/tflite-micro \
+              "${GITHUB_WORKSPACE}/tflite-micro"
+          git -C "${GITHUB_WORKSPACE}/tflite-micro" checkout --quiet "${TFLM_REV}"
+          test -f "${GITHUB_WORKSPACE}/tflite-micro/zephyr/module.yml"
+
+      # Build the aen-sim-vision demo (real TFLM inference on the M55).
+      - name: Build aen-sim-vision (TFLM) ITCM-run image
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+        run: |
+          set -euo pipefail
+          west build -p always \
+              -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+              examples/aen/aen-sim-vision \
+              -d /tmp/aen-vision-build \
+              -- -DEXTRA_ZEPHYR_MODULES="${GITHUB_WORKSPACE}/alp-sdk;${GITHUB_WORKSPACE}/tflite-micro" \
+                 -DEXTRA_DTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_itcm_run.overlay"
+          test -f /tmp/aen-vision-build/zephyr/zephyr.elf
+
+      # Run the live e2es as SEPARATE steps: each spawns its own Renode
       # process, and isolating them keeps one heavy boot from starving the
       # other's monitor on a loaded runner.
       - name: --sim-mode e2e (real V2N M33 firmware, ram_console)
@@ -172,3 +199,14 @@ jobs:
           set -euo pipefail
           python3 -m pytest -q \
               tests/scripts/test_alp_renode_sim.py::test_sim_mode_aen_end_to_end
+
+      - name: --sim-mode e2e (aen-sim-vision, real TFLM inference)
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ALP_SIM_E2E: '1'
+          ALP_SIM_E2E_VISION_ELF: /tmp/aen-vision-build/zephyr/zephyr.elf
+          ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q \
+              tests/scripts/test_alp_renode_sim.py::test_sim_mode_aen_vision_pipeline
