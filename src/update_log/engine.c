@@ -1,26 +1,26 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Pure update-log engine. No vendor/PSA includes -- builds on host. The only
- * OS-conditional piece is the lock's yield hook right below (Zephyr/POSIX/
- * bare-metal), selected purely off predefined compiler macros -- no vendor
- * HAL, no PSA, still links standalone in the fuzz/unit-test host build. */
+ * OS-conditional piece is the lock right below (Zephyr/POSIX/bare-metal),
+ * selected purely off predefined compiler macros -- no vendor HAL, no PSA,
+ * still links standalone in the fuzz/unit-test host build. */
 #include <string.h>
 
 #include "update_log/engine.h"
 #include "update_log/sha256.h"
 
-/* Yield the current thread/core so a runnable lock holder can actually run --
- * see the g_engine_lock block comment below for why a pure spin is wrong
- * here. Selected by the same build-tier macros already used elsewhere in the
- * tree (src/common/alp_internal.h, src/common/stub_backend.c): __ZEPHYR__ for
- * the RTOS build (this also covers native_sim, which defines __ZEPHYR__),
+/* Build-tier selection, same macros already used elsewhere in the tree
+ * (src/common/alp_internal.h, src/common/stub_backend.c): __ZEPHYR__ for the
+ * RTOS build (this also covers native_sim, which defines __ZEPHYR__),
  * __linux__ for the yocto/A-class and plain-CMake-on-host builds, and a
- * no-op for a genuine bare-metal target with no scheduler beneath this layer
- * (a busy-wait cannot livelock there the way it can under a preemptive
- * scheduler -- the "lock holder never gets scheduled" failure mode requires
- * an OS to begin with). */
+ * no-op for a genuine bare-metal target with no scheduler beneath this layer.
+ * __ZEPHYR__ gets its own lock primitive below (see the g_engine_lock block
+ * comment for why a spin+yield is wrong there); the other two tiers share a
+ * plain atomic CAS spin with a yield between attempts, which IS correct for
+ * them: __linux__'s CFS scheduler is fair across priorities (nothing to
+ * invert), and bare-metal has no scheduler beneath this layer at all (a
+ * busy-wait cannot livelock without one). */
 #if defined(__ZEPHYR__)
 #include <zephyr/kernel.h>
-#define ULOG_ENGINE_LOCK_YIELD() k_yield()
 #elif defined(__linux__)
 #include <sched.h>
 #define ULOG_ENGINE_LOCK_YIELD() ((void)sched_yield())
@@ -235,22 +235,33 @@ static void kbuf(char *out, size_t cap, uint64_t seq)
  * g_engine_lock serializes every call below across append/verify/count
  * (and, without needing counter access, get()) so two concurrent callers
  * can never interleave the three mutations, and a reader can never
- * observe a state midway through an append. Compiler-builtin atomics
- * (GCC/Clang __atomic_*), not an OS mutex, keep this file dependency-free
- * across host/baremetal/Zephyr/yocto builds. Unlike
+ * observe a state midway through an append. Unlike
  * alp_handle_begin_close() in src/common/alp_slot_claim.h -- whose
  * critical section really is a handful of short, synchronous in-RAM
  * calls -- the critical section guarded here can include the SW-NVS
  * tier's nvs_write()/nvs_calc_free_space(), which can trigger NVS garbage
  * collection (a sector erase: milliseconds of flash I/O). On a
  * single-core target (each AEN M55 is single-core Zephyr) a pure busy
- * spin is therefore not safe: a low-priority thread can be holding the
- * lock mid-GC while a higher-priority thread spins on
- * ulog_engine_lock(), and on a single core that higher-priority spinner
- * never yields the CPU back to the (runnable, not blocked) lock holder --
- * livelock, not just a slow path. ulog_engine_lock() therefore yields
- * (ULOG_ENGINE_LOCK_YIELD(), defined above) between CAS attempts so a
- * runnable holder can actually be scheduled to finish and release.
+ * spin is therefore not safe regardless of what it yields with: a
+ * low-priority thread can be holding the lock mid-GC while a
+ * higher-priority thread contends for ulog_engine_lock(), and k_yield()
+ * only cedes the CPU to threads at the SAME OR HIGHER priority as the
+ * caller -- it cannot get a lower-priority holder scheduled, so a
+ * spin+k_yield() loop here would still livelock the exact cross-priority
+ * case it exists to fix (the higher-priority spinner remains the highest
+ * ready thread and is simply handed the CPU straight back). g_engine_lock
+ * is therefore a real struct k_mutex on __ZEPHYR__, not an atomic-CAS
+ * spin: k_mutex_lock() applies priority inheritance, temporarily boosting
+ * the holder's priority above any waiter's, so the low-priority holder
+ * actually runs to completion and releases regardless of who else is
+ * waiting. The __linux__ and bare-metal tiers keep the compiler-builtin
+ * atomic (__atomic_*) CAS spin with a yield between attempts (defined
+ * above) -- dependency-free and correct there because __linux__'s CFS
+ * scheduler is fair across priorities and bare-metal has no scheduler
+ * beneath this layer to invert against in the first place. Every entry
+ * point below runs from thread context only (append/verify/count/get);
+ * k_mutex_lock() is illegal from ISR context and this engine must never
+ * be entered from one.
  *
  * Cross-image scope: g_engine_lock is a per-IMAGE static. It does not,
  * and cannot, serialize two separate cores/images that both end up
@@ -270,6 +281,21 @@ static void kbuf(char *out, size_t cap, uint64_t seq)
  * help for the same requirement stated at the board-porting seam.
  * ---------------------------------------------------------------------
  */
+#if defined(__ZEPHYR__)
+/* Statically defined -- no first-use init race. See the block comment
+ * above for why a real mutex, not a CAS spin, is required on this tier. */
+K_MUTEX_DEFINE(g_engine_lock);
+
+static void ulog_engine_lock(void)
+{
+	k_mutex_lock(&g_engine_lock, K_FOREVER);
+}
+
+static void ulog_engine_unlock(void)
+{
+	k_mutex_unlock(&g_engine_lock);
+}
+#else
 static uint8_t g_engine_lock; /* 0 = free, 1 = held. */
 
 static void ulog_engine_lock(void)
@@ -291,6 +317,7 @@ static void ulog_engine_unlock(void)
 {
 	__atomic_store_n(&g_engine_lock, 0, __ATOMIC_RELEASE);
 }
+#endif
 
 /* Re-derive meta + the counter from the newest committed entry,
  * forward-committing AT MOST ONE interrupted append (never loops -- see

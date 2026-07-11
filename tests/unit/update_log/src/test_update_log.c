@@ -769,6 +769,132 @@ ZTEST(alp_update_log, test_concurrent_append_serializes_to_one_valid_chain)
 	}
 }
 
+/* Cross-priority concurrency case (GHSA-r236-29pg-w694 follow-up): the
+ * equal-priority test above passes even with a spin+k_yield() lock,
+ * because k_yield() only cedes the CPU to threads at the SAME OR HIGHER
+ * priority as the caller -- a same-priority contender is exactly the one
+ * case it handles. It says nothing about a LOWER-priority holder.
+ *
+ * Here a low-priority thread holds g_engine_lock across a simulated
+ * flash-GC stall (td_put_slow_gc()'s k_sleep(), standing in for
+ * nvs_write()'s occasional sector erase), while a HIGHER-priority thread
+ * contends for the same lock. Under a spin+k_yield() lock this livelocks
+ * forever on a single core: the higher-priority spinner is always the
+ * highest-priority ready thread, so k_yield() hands the CPU straight back
+ * to it instead of the (runnable, not blocked) low-priority holder, which
+ * never gets to finish its k_sleep()/put() and release. Under the k_mutex
+ * fix, k_mutex_lock()'s priority inheritance boosts the holder above the
+ * waiter so it actually runs to completion. Both threads must complete
+ * within a bounded k_thread_join() timeout -- a hang here means the
+ * livelock is back -- and the resulting chain must still validate. */
+
+K_SEM_DEFINE(g_gc_holder_entered, 0, 1);
+
+/* Wraps td_put() to stand in for an NVS write that triggers garbage
+ * collection: signals g_gc_holder_entered (so the contender only starts
+ * racing once the holder is provably inside the critical section, not on
+ * a lucky scheduling guess) and then sleeps for a stretch, all while
+ * g_engine_lock is held by the caller (ulog_engine_append()). */
+static alp_status_t td_put_slow_gc(void *c, const char *key, const uint8_t *b, size_t n)
+{
+	bool is_entry = strncmp(key, "ulog.", 5) == 0 && strcmp(key, "ulog.meta") != 0;
+	if (is_entry) {
+		k_sem_give(&g_gc_holder_entered);
+		k_sleep(K_MSEC(50));
+	}
+	return td_put(c, key, b, n);
+}
+
+struct prio_worker_ctx {
+	alp_secure_store_if      *s;
+	alp_monotonic_counter_if *c;
+	alp_status_t              result;
+};
+
+K_THREAD_STACK_DEFINE(g_prio_stack_lo, CONC_STACK_SIZE);
+K_THREAD_STACK_DEFINE(g_prio_stack_hi, CONC_STACK_SIZE);
+
+static void low_prio_gc_holder(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	struct prio_worker_ctx *ctx = (struct prio_worker_ctx *)p1;
+	alp_update_log_entry_t  e   = mk_entry(1, "gc-holder", ALP_UPDATE_STATUS_CONFIRMED);
+	ctx->result                 = ulog_engine_append(ctx->s, ctx->c, &e);
+}
+
+static void high_prio_contender(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	struct prio_worker_ctx *ctx = (struct prio_worker_ctx *)p1;
+	/* Only contend once the low-priority thread is provably mid-GC inside
+	 * ulog_engine_lock() -- makes this a genuine cross-priority
+	 * contention, not a race that might get lucky either way. */
+	k_sem_take(&g_gc_holder_entered, K_FOREVER);
+	alp_update_log_entry_t e = mk_entry(2, "contender", ALP_UPDATE_STATUS_CONFIRMED);
+	ctx->result              = ulog_engine_append(ctx->s, ctx->c, &e);
+}
+
+ZTEST(alp_update_log, test_concurrent_append_unequal_priority_no_livelock)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces(&t, &s, &c);
+	s.put = td_put_slow_gc;
+
+	struct prio_worker_ctx ctx_lo = { &s, &c, ALP_ERR_INVAL };
+	struct prio_worker_ctx ctx_hi = { &s, &c, ALP_ERR_INVAL };
+
+	struct k_thread th_lo, th_hi;
+	/* Numerically higher K_PRIO_PREEMPT() argument == LOWER priority. */
+	k_thread_create(&th_lo,
+	                g_prio_stack_lo,
+	                CONC_STACK_SIZE,
+	                low_prio_gc_holder,
+	                &ctx_lo,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(7),
+	                0,
+	                K_NO_WAIT);
+	k_thread_create(&th_hi,
+	                g_prio_stack_hi,
+	                CONC_STACK_SIZE,
+	                high_prio_contender,
+	                &ctx_hi,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(1),
+	                0,
+	                K_NO_WAIT);
+
+	/* Bounded, not K_FOREVER: a livelocked cross-priority lock would hang
+	 * this join forever instead of failing fast. */
+	zassert_equal(k_thread_join(&th_hi, K_MSEC(2000)),
+	              0,
+	              "higher-priority contender must complete -- a hang here is the "
+	              "cross-priority livelock the fix closes");
+	zassert_equal(k_thread_join(&th_lo, K_MSEC(2000)),
+	              0,
+	              "low-priority GC holder must complete and release the lock");
+
+	zassert_equal(ctx_lo.result, ALP_OK);
+	zassert_equal(ctx_hi.result, ALP_OK);
+
+	uint64_t n = 0;
+	zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK);
+	zassert_equal(n, 2u);
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 0;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v,
+	              ALP_UPDATE_LOG_VERIFY_OK,
+	              "unequal-priority contention must still produce one valid chain");
+}
+
 /* --- Tier selection + degrade (issues #111, #239) ---------------------
  *
  * The real HW_ENFORCED TF-M tier only registers under BUILD_WITH_TFM, which
