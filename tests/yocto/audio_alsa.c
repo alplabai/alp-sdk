@@ -511,6 +511,140 @@ static void test_write_core_one_deadline_shared_across_chunks_not_reset_per_chun
 	ALP_ASSERT_TRUE(g_wait_ms_seen[1] > 0 && g_wait_ms_seen[1] <= 160);
 }
 
+/* ---------- GHSA-p9jj-6w2g-pc4g: overflow-checked frame count ---------- */
+
+/*
+ * Before the fix, `y_out_write` sized its scratch malloc() from
+ * `frames * channels * sample_bytes` independently of the volume
+ * scaler's own `frames * channels` -- a wrapped `size_t` product let
+ * the two disagree (small allocation, large write).  These tests drive
+ * `alp_yocto_alsa_out_write_core` (the shared seam both the scaled and
+ * unity-volume paths funnel through) with frame counts at and past the
+ * multiplication-overflow boundary, on BOTH paths, and assert the call
+ * is rejected before any ALSA activity -- no wait_fn/writei_fn call, no
+ * allocation, no scaling.
+ */
+
+static void test_write_core_overflowing_frames_rejected_before_alsa_scaled_path(void)
+{
+	reset_fakes();
+
+	/* volume != 255 && scratch != NULL -> the scaled/chunked path that
+	 * used to own the vulnerable malloc() sizing. */
+	uint8_t      scratch[4 * 2 * 2];
+	size_t       out_frames = 99;
+	alp_status_t s =
+	    alp_yocto_alsa_out_write_core(FAKE_PCM,
+	                                  ALP_AUDIO_FMT_S16_LE,
+	                                  2 /* channels */,
+	                                  2 /* sample_bytes */,
+	                                  128 /* not full volume -- scaling path */,
+	                                  scratch,
+	                                  4 /* scratch_frames */,
+	                                  (const void *)(uintptr_t)0x1000,
+	                                  SIZE_MAX /* wraps frames * channels * sample_bytes */,
+	                                  &out_frames,
+	                                  100u,
+	                                  fake_wait,
+	                                  fake_writei);
+
+	ALP_ASSERT_EQ_INT(s, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(out_frames, 0);
+	ALP_ASSERT_EQ_INT(g_wait_calls, 0);   /* rejected before waiting on ALSA */
+	ALP_ASSERT_EQ_INT(g_writei_calls, 0); /* rejected before any write */
+}
+
+static void test_write_core_overflowing_frames_rejected_before_alsa_unity_path(void)
+{
+	reset_fakes();
+
+	/* Required Fix: "The unity-volume fast path performs the same size
+	 * validation" -- volume == 255, no scratch, zero-copy path. */
+	size_t       out_frames = 99;
+	alp_status_t s          = alp_yocto_alsa_out_write_core(FAKE_PCM,
+	                                                        ALP_AUDIO_FMT_S16_LE,
+	                                                        2,
+	                                                        2,
+	                                                        255 /* unity volume */,
+	                                                        NULL,
+	                                                        0,
+	                                                        (const void *)(uintptr_t)0x1000,
+	                                                        SIZE_MAX,
+	                                                        &out_frames,
+	                                                        100u,
+	                                                        fake_wait,
+	                                                        fake_writei);
+
+	ALP_ASSERT_EQ_INT(s, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(out_frames, 0);
+	ALP_ASSERT_EQ_INT(g_wait_calls, 0);
+	ALP_ASSERT_EQ_INT(g_writei_calls, 0);
+}
+
+static void test_write_core_frames_overflow_boundary_mono_s16(void)
+{
+	reset_fakes();
+
+	/* Mono S16: stride = 1 * 2 = 2. Largest representable frame count is
+	 * SIZE_MAX / 2; one past it must wrap the multiplication and must be
+	 * rejected. */
+	size_t       stride     = 1u * 2u;
+	size_t       just_over  = SIZE_MAX / stride + 1u;
+	size_t       out_frames = 99;
+	alp_status_t s          = alp_yocto_alsa_out_write_core(FAKE_PCM,
+	                                                        ALP_AUDIO_FMT_S16_LE,
+	                                                        1 /* mono */,
+	                                                        2,
+	                                                        200 /* scaled path */,
+	                                                        (uint8_t[8]){ 0 },
+	                                                        4,
+	                                                        (const void *)(uintptr_t)0x1000,
+	                                                        just_over,
+	                                                        &out_frames,
+	                                                        100u,
+	                                                        fake_wait,
+	                                                        fake_writei);
+
+	ALP_ASSERT_EQ_INT(s, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(out_frames, 0);
+	ALP_ASSERT_EQ_INT(g_wait_calls, 0);
+	ALP_ASSERT_EQ_INT(g_writei_calls, 0);
+}
+
+static void test_write_core_largest_valid_frame_count_unity_volume_succeeds(void)
+{
+	reset_fakes();
+
+	/* Stereo S16: stride = 2 * 2 = 4.  Exactly SIZE_MAX / stride is the
+	 * largest frame count y_checked_total_bytes must still ACCEPT -- the
+	 * unity-volume path never touches the scratch buffer or memcpy's
+	 * anything for this size, so driving it through the mocked
+	 * wait_fn/writei_fn seam is safe under ASan/UBSan even though the
+	 * logical size is far larger than any real buffer. */
+	size_t stride     = 2u * 2u;
+	size_t max_frames = SIZE_MAX / stride;
+
+	size_t       out_frames = 0;
+	alp_status_t s = alp_yocto_alsa_out_write_core(FAKE_PCM,
+	                                               ALP_AUDIO_FMT_S16_LE,
+	                                               2,
+	                                               2,
+	                                               255 /* unity -- zero-copy, no scratch use */,
+	                                               NULL,
+	                                               0,
+	                                               (const void *)(uintptr_t)0x1000,
+	                                               max_frames,
+	                                               &out_frames,
+	                                               100u,
+	                                               fake_wait,
+	                                               fake_writei);
+
+	ALP_ASSERT_EQ_INT(s, ALP_OK);
+	ALP_ASSERT_TRUE(out_frames == max_frames);
+	ALP_ASSERT_EQ_INT(g_writei_calls, 1);
+	ALP_ASSERT_TRUE(g_writei_frames_seen[0] == max_frames);
+}
+
 int main(void)
 {
 	test_in_null_cfg_returns_null();
@@ -538,6 +672,11 @@ int main(void)
 	test_write_core_uint32_max_timeout_waits_forever_arg();
 	test_write_core_wait_error_propagates();
 	test_write_core_one_deadline_shared_across_chunks_not_reset_per_chunk();
+
+	test_write_core_overflowing_frames_rejected_before_alsa_scaled_path();
+	test_write_core_overflowing_frames_rejected_before_alsa_unity_path();
+	test_write_core_frames_overflow_boundary_mono_s16();
+	test_write_core_largest_valid_frame_count_unity_volume_succeeds();
 
 	ALP_TEST_SUMMARY();
 }

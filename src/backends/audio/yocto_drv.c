@@ -209,6 +209,44 @@ static snd_pcm_format_t to_alsa_format(alp_audio_format_t f)
 	}
 }
 
+/**
+ * @brief Overflow-checked (frames, channels, sample_bytes) -> total PCM
+ *        byte count.
+ *
+ * GHSA-p9jj-6w2g-pc4g: `y_out_open`'s scratch `malloc()` and the
+ * volume-scaling write path previously derived their sizing from two
+ * INDEPENDENT `frames * channels * sample_bytes` multiplications; a
+ * wrapped `size_t` product let one compute a small allocation while the
+ * other assumed a large one, an integer-overflow-to-heap-OOB-write
+ * (CWE-190 -> CWE-122). Every caller that sizes an allocation, a
+ * copy/scale bound, or an ALSA frame-count argument off a caller-supplied
+ * `frames` MUST go through this one helper and use its single validated
+ * result -- there is no second, independently-recomputed byte count
+ * anywhere downstream of it.
+ *
+ * Also rejects a `frames` that would not survive the handoff to ALSA's
+ * `snd_pcm_uframes_t` (narrower than `size_t` on some 32-bit targets), so
+ * the same check protects the `snd_pcm_readi`/`snd_pcm_writei` frame-count
+ * argument, not just the byte count.
+ *
+ * @return true and set *out_bytes on success; false (leaving *out_bytes
+ *         unspecified) when the geometry can't be represented safely --
+ *         callers must reject the request without allocating, copying,
+ *         scaling, or touching ALSA.
+ */
+static bool
+y_checked_total_bytes(size_t frames, uint8_t channels, uint8_t sample_bytes, size_t *out_bytes)
+{
+	if (channels == 0 || sample_bytes == 0) return false;
+	if (frames > (size_t)(snd_pcm_uframes_t)-1) return false;
+
+	size_t stride = (size_t)channels * (size_t)sample_bytes; /* <= 8 * 4: never overflows */
+	if (frames != 0 && stride > SIZE_MAX / frames) return false;
+
+	*out_bytes = frames * stride;
+	return true;
+}
+
 /* Resolve a peripheral_id into the canonical ALSA device name.
  * Writes into the caller-supplied `out` buffer (capacity at least
  * 32 bytes is plenty for "hw:<N>,0"). */
@@ -358,6 +396,13 @@ static alp_status_t y_in_read(alp_audio_in_backend_state_t *state,
 	if (buf == NULL && frames > 0) return ALP_ERR_INVAL;
 	if (frames == 0) return ALP_OK;
 
+	/* GHSA-p9jj-6w2g-pc4g: reject an unrepresentable frame count before
+     * waiting on ALSA or touching the driver -- see y_checked_total_bytes. */
+	size_t total_bytes;
+	if (!y_checked_total_bytes(frames, d->channels, d->sample_bytes, &total_bytes)) {
+		return ALP_ERR_INVAL;
+	}
+
 	/* snd_pcm_wait returns 1 when frames are available, 0 on timeout,
      * negative on error.  timeout_ms == 0 means "don't wait" -- pass
      * 0 through; ALSA treats 0 as immediate return.  UINT32_MAX means
@@ -440,9 +485,20 @@ static alp_status_t y_out_open(const alp_audio_config_t      *cfg,
      * here, sized to one period, reused by every out_write call.
      * Scaled writes larger than one period are processed in that many
      * chunks (see alp_yocto_alsa_out_write_core) instead of growing
-     * this buffer or bouncing through a fresh malloc per write. */
-	size_t scratch_bytes = (size_t)cfg->frames_per_block * cfg->channels * d->sample_bytes;
-	d->scratch           = (uint8_t *)malloc(scratch_bytes);
+     * this buffer or bouncing through a fresh malloc per write.
+     *
+     * GHSA-p9jj-6w2g-pc4g: sized through the SAME checked helper every
+     * other path in this file uses, rather than an inline multiplication,
+     * so the allocation can never disagree with the copy/scale bound
+     * derived from it. */
+	size_t scratch_bytes;
+	if (!y_checked_total_bytes(
+	        cfg->frames_per_block, d->channels, d->sample_bytes, &scratch_bytes)) {
+		(void)snd_pcm_close(d->pcm);
+		free(d);
+		return ALP_ERR_INVAL;
+	}
+	d->scratch = (uint8_t *)malloc(scratch_bytes);
 	if (d->scratch == NULL) {
 		(void)snd_pcm_close(d->pcm);
 		free(d);
@@ -552,6 +608,13 @@ alp_status_t alp_yocto_alsa_out_write_core(snd_pcm_t         *pcm,
  * Not declared in any public header -- internal seam so hermetic
  * tests (tests/yocto/audio_alsa.c) can drive the whole algorithm
  * against a fake ALSA layer without a real PCM device.
+ *
+ * GHSA-p9jj-6w2g-pc4g: @p frames is rejected via @ref y_checked_total_bytes
+ * BEFORE this function waits on ALSA, allocates, copies, or scales -- on
+ * BOTH the scaled and the unity-volume (@p scale == false) fast path, so a
+ * `frames` that cannot be represented safely never reaches @p writei_fn.
+ * `frames_done` and `chunk` are bounded by the already-validated @p frames,
+ * so `frames_done * stride` / `chunk * stride` below can't overflow either.
  */
 alp_status_t alp_yocto_alsa_out_write_core(snd_pcm_t         *pcm,
                                            alp_audio_format_t format,
@@ -570,6 +633,14 @@ alp_status_t alp_yocto_alsa_out_write_core(snd_pcm_t         *pcm,
 	if (out_frames != NULL) *out_frames = 0;
 	if (buf == NULL && frames > 0) return ALP_ERR_INVAL;
 	if (frames == 0) return ALP_OK;
+
+	/* GHSA-p9jj-6w2g-pc4g: reject an unrepresentable frame count up
+     * front, on EVERY path (scaled and unity-volume alike) -- before any
+     * ALSA wait, allocation, copy, or scaling happens below. */
+	size_t total_bytes;
+	if (!y_checked_total_bytes(frames, channels, sample_bytes, &total_bytes)) {
+		return ALP_ERR_INVAL;
+	}
 
 	bool scale =
 	    (volume != 255u && format == ALP_AUDIO_FMT_S16_LE && scratch != NULL && scratch_frames > 0);
