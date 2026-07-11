@@ -74,6 +74,14 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         run: bash scripts/bootstrap.sh
 
+      # Zephyr's build scripts (gen_kobject_list.py etc.) need pyelftools +
+      # friends; install the pinned Zephyr build requirements now that the
+      # workspace exists.
+      - name: Install Zephyr build requirements
+        run: |
+          set -euo pipefail
+          pip3 install -r "${GITHUB_WORKSPACE}/zephyrproject/zephyr/scripts/requirements-base.txt"
+
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
         run: |
