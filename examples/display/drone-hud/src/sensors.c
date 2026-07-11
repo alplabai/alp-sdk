@@ -21,6 +21,7 @@
 #include <math.h>
 
 #include "alp/peripheral.h"
+#include "alp/ahrs.h"
 #include "alp/e1m_pinout.h"
 #include "alp/chips/lsm6dso.h"
 #include "alp/chips/ublox_neo_m9n.h"
@@ -37,11 +38,15 @@ static alp_uart_t     *s_gps_uart;
 static lsm6dso_t       s_imu;
 static ublox_neo_m9n_t s_gps;
 static ina236_t        s_batt;
+static alp_ahrs_t      s_ahrs; /* Madgwick orientation filter. */
 
 int drone_sensors_init(drone_telemetry_t *telem)
 {
 	memset(telem, 0, sizeof(*telem));
 	telem->mode = DRONE_MODE_STABILISED;
+
+	/* Default-gain Madgwick IMU fusion for the attitude estimate. */
+	alp_ahrs_init(&s_ahrs, NULL);
 
 	/* I²C bus shared by IMU + battery monitor.  400 kHz fast-mode
      * is comfortable for both chips. */
@@ -91,53 +96,30 @@ int drone_sensors_init(drone_telemetry_t *telem)
 	return rc;
 }
 
-/* Tiny Madgwick step -- enough to demonstrate the data flow.  The
- * real library lives at metadata/library-profiles/madgwick_ahrs/;
- * this is a placeholder inline that integrates gyro into Euler
- * angles so the HUD has something to animate even on the demo
- * board without the upstream lib fetched. */
-static void
-update_attitude(drone_telemetry_t *t, float gx_dps, float gy_dps, float gz_dps, float dt_s)
-{
-	t->roll_deg += gx_dps * dt_s;
-	t->pitch_deg += gy_dps * dt_s;
-	t->yaw_deg += gz_dps * dt_s;
-	/* Clamp to [-180, +180] for HUD readability. */
-	if (t->roll_deg > 180.f) t->roll_deg -= 360.f;
-	if (t->roll_deg < -180.f) t->roll_deg += 360.f;
-	if (t->pitch_deg > 90.f) t->pitch_deg = 90.f;
-	if (t->pitch_deg < -90.f) t->pitch_deg = -90.f;
-	if (t->yaw_deg > 360.f) t->yaw_deg -= 360.f;
-	if (t->yaw_deg < 0.f) t->yaw_deg += 360.f;
-}
-
-/* Default-FS LSB-to-physical conversion factors for the LSM6DSO.
- * Accel default FS = ±2 g, sensitivity 16384 LSB/g.
- * Gyro  default FS = ±250 dps, sensitivity 114.286 LSB/dps. */
-#define LSM6DSO_ACCEL_LSB_PER_G  16384.f
+/* Default-FS gyro sensitivity for the LSM6DSO: ±250 dps -> 114.286
+ * LSB/dps.  The accel scale cancels -- alp_ahrs normalises the accel
+ * vector -- so raw counts feed the fusion directly. */
 #define LSM6DSO_GYRO_LSB_PER_DPS 114.286f
 
 void drone_sensors_run_imu_loop(drone_telemetry_t *telem)
 {
-	/* 100 Hz target -- 10 ms slice. */
+	const float dt_s    = 0.01f; /* 100 Hz target -- 10 ms slice. */
+	const float deg2rad = 3.14159265f / 180.f;
 	while (1) {
 		lsm6dso_axes_t a = { 0 };
 		lsm6dso_axes_t g = { 0 };
 		if (lsm6dso_read_accel(&s_imu, &a) == ALP_OK && lsm6dso_read_gyro(&s_imu, &g) == ALP_OK) {
-			/* Convert raw int16 counts to dps using the gyro's
-             * default ±250 dps full-scale sensitivity.  The driver
-             * leaves FS at reset defaults; the demo doesn't call
-             * lsm6dso_set_gyro() to override. */
-			const float gx = (float)g.x / LSM6DSO_GYRO_LSB_PER_DPS;
-			const float gy = (float)g.y / LSM6DSO_GYRO_LSB_PER_DPS;
-			const float gz = (float)g.z / LSM6DSO_GYRO_LSB_PER_DPS;
-			/* Accel reading is unused by the placeholder Madgwick
-             * step here, but keep the sensitivity constant referenced
-             * so the table compiles + documents the math the v0.6
-             * full-fusion port will plug in. */
-			(void)LSM6DSO_ACCEL_LSB_PER_G;
-			(void)a;
-			update_attitude(telem, gx, gy, gz, 0.01f);
+			/* Gyro raw counts -> rad/s (Madgwick expects rad/s).  The
+             * accel raw counts feed the fusion directly; unlike the old
+             * gyro-only integrator, fusing the accelerometer pins
+             * roll/pitch against gravity so the HUD attitude no longer
+             * drifts.  alp_ahrs owns the quaternion state + Euler
+             * conversion -- no hand-rolled fusion in the app. */
+			const float gx = (float)g.x / LSM6DSO_GYRO_LSB_PER_DPS * deg2rad;
+			const float gy = (float)g.y / LSM6DSO_GYRO_LSB_PER_DPS * deg2rad;
+			const float gz = (float)g.z / LSM6DSO_GYRO_LSB_PER_DPS * deg2rad;
+			alp_ahrs_update_imu(&s_ahrs, gx, gy, gz, (float)a.x, (float)a.y, (float)a.z, dt_s);
+			alp_ahrs_euler(&s_ahrs, &telem->roll_deg, &telem->pitch_deg, &telem->yaw_deg);
 		}
 		alp_delay_ms(10);
 	}
