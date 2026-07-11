@@ -316,6 +316,19 @@ z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilit
 		return ALP_ERR_INVAL;
 	}
 
+#if !defined(CONFIG_MQTT_LIB_TLS)
+	if (tls) {
+		/* Caller asked for `mqtts://` but CONFIG_MQTT_LIB_TLS is off --
+		 * fail closed (GHSA-gqjv-932h-c5gm).  A secure scheme must
+		 * never be reinterpreted as plaintext; reject here, before
+		 * resolving the broker address or copying any credentials
+		 * into backend state, so nothing is transmitted. */
+		mqtt_be_release(be);
+		caps_out->flags = 0u;
+		return ALP_ERR_NOSUPPORT;
+	}
+#endif
+
 	err = resolve_broker_addr(host, port, &be->broker_addr);
 	if (err != 0) {
 		mqtt_be_release(be);
@@ -352,8 +365,8 @@ z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilit
 #if defined(CONFIG_MQTT_LIB_TLS)
 	be->client.transport.type = tls ? MQTT_TRANSPORT_SECURE : MQTT_TRANSPORT_NON_SECURE;
 #else
-	/* TLS Kconfig disabled at build time -- silently downgrade. */
-	(void)tls;
+	/* tls is always false here -- the check above already rejected
+	 * an `mqtts://` request when CONFIG_MQTT_LIB_TLS is off. */
 	be->client.transport.type = MQTT_TRANSPORT_NON_SECURE;
 #endif
 	be->client.rx_buf        = be->rx_buf;

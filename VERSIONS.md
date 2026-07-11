@@ -65,6 +65,8 @@ versions cleanly.
 | Chips       | full      | `lsm6dso_*`, `ssd1306_*`, `button_led_*` (no `alp_` prefix on chip drivers) |
 | Display     | minimal   | `alp_display_init/clear/print` routes through Zephyr `display_*`         |
 | Math / DSP  | purpose-built | ALP does not provide a general `arm_math.h` re-export; for ad-hoc math app code uses CMSIS-DSP directly. But ALP DOES ship purpose-built *portable* DSP surfaces that wrap it where cross-silicon portability (Alif M55 / Renesas A55+DRP-AI / NXP) matters: the `<alp/dsp.h>` chain (FIR/IIR/WINDOW/FFT, float or int16 I/O, one-sided or two-sided FFT), `alp_dsp_stats_f32` (mean/RMS/variance/min/max/abs-peak), and `alp_dsp_biquad_design` (RBJ cookbook LP/HP/BP/notch). All select CMSIS-DSP (`ALP_HAS_CMSIS_DSP`) on Cortex-M and a portable-C fallback elsewhere. |
+| Control     | portable  | `<alp/pid.h>` caller-owned PID (`alp_pid_init`/`alp_pid_step`/`alp_pid_reset`) with output clamp + anti-windup + derivative-on-measurement; pure C on all OS targets, opt-in via `libraries: [pid]`. |
+| Sensor fusion | portable | `<alp/ahrs.h>` caller-owned Madgwick IMU filter (`alp_ahrs_init`/`alp_ahrs_update_imu`/`alp_ahrs_euler`/`alp_ahrs_reset`) fusing gyro+accel into a drift-corrected quaternion; pure C on all OS targets, opt-in via `libraries: [madgwick_ahrs]`. |
 | Camera      | header    | `<alp/camera.h>` API frozen; impl returns `ALP_ERR_NOSUPPORT`            |
 | GUI/LVGL    | header    | `<alp/gui.h>` includes upstream LVGL with Alp defaults; no widgets       |
 | IoT         | header    | `<alp/iot.h>` API frozen; impl stubbed                                   |

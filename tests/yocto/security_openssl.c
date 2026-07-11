@@ -72,16 +72,66 @@ static void test_sha512_length(void)
 
 static void test_hash_short_digest_buffer_refused(void)
 {
+	/* GHSA-92c3-v48m-m5gg: only ALP_OK implicitly closes the handle.
+	 * A too-small digest_out reports the REQUIRED length and leaves
+	 * both the public handle and this backend's blob open -- alp_hash_
+	 * close() below is a real teardown, not a double-release no-op. */
 	alp_hash_t *h = alp_hash_open(ALP_HASH_SHA256);
 	ALP_ASSERT_TRUE(h != NULL);
 	uint8_t short_buf[16]; /* SHA-256 needs 32. */
 	size_t  glen = 99;
 	ALP_ASSERT_EQ_INT(alp_hash_finish(h, short_buf, sizeof(short_buf), &glen), ALP_ERR_INVAL);
-	ALP_ASSERT_EQ_INT(glen, 0);
-	/* Since the #33 dispatcher migration, finish() releases the handle
-	 * on failure too -- this close is a safe no-op, kept to prove
-	 * double-release safety. */
+	ALP_ASSERT_EQ_INT(glen, 32);
 	alp_hash_close(h);
+}
+
+static void test_hash_short_digest_buffer_then_sized_retry_succeeds(void)
+{
+	/* Acceptance criterion: short-buffer finish followed by a
+	 * correctly sized retry returns the expected digest -- the
+	 * backend blob must survive the ALP_ERR_INVAL untouched. */
+	static const uint8_t expected[32] = {
+		0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40,
+		0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17,
+		0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+	};
+	alp_hash_t *h = alp_hash_open(ALP_HASH_SHA256);
+	ALP_ASSERT_TRUE(h != NULL);
+	ALP_ASSERT_EQ_INT(alp_hash_update(h, (const uint8_t *)"abc", 3), ALP_OK);
+
+	uint8_t short_buf[16];
+	size_t  glen = 0;
+	ALP_ASSERT_EQ_INT(alp_hash_finish(h, short_buf, sizeof(short_buf), &glen), ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(glen, 32);
+
+	uint8_t got[32];
+	glen = 0;
+	ALP_ASSERT_EQ_INT(alp_hash_finish(h, got, sizeof(got), &glen), ALP_OK);
+	ALP_ASSERT_EQ_INT(glen, 32);
+	ALP_ASSERT_TRUE(memcmp(got, expected, 32) == 0);
+}
+
+static void test_hash_repeated_short_buffer_failures_do_not_exhaust_pool(void)
+{
+	/* Regression for GHSA-92c3-v48m-m5gg: the dispatcher's default
+	 * hash-handle pool is small (CONFIG_ALP_SDK_MAX_HASH_HANDLES == 2).
+	 * Looping well past that count with a too-short digest buffer,
+	 * always followed by an explicit close, must never fail to open a
+	 * fresh handle -- if either the public dispatcher slot or this
+	 * backend's EVP_MD_CTX blob got stranded on the ALP_ERR_INVAL path,
+	 * some iteration here would see alp_hash_open() return NULL. */
+	for (int i = 0; i < 32; ++i) {
+		alp_hash_t *h = alp_hash_open(ALP_HASH_SHA256);
+		ALP_ASSERT_TRUE(h != NULL);
+		ALP_ASSERT_EQ_INT(alp_hash_update(h, (const uint8_t *)"abc", 3), ALP_OK);
+
+		uint8_t short_buf[4];
+		size_t  glen = 0;
+		ALP_ASSERT_EQ_INT(alp_hash_finish(h, short_buf, sizeof(short_buf), &glen), ALP_ERR_INVAL);
+		ALP_ASSERT_EQ_INT(glen, 32);
+
+		alp_hash_close(h);
+	}
 }
 
 static void test_hash_invalid_alg_returns_null(void)
@@ -273,6 +323,8 @@ int main(void)
 	test_sha384_length();
 	test_sha512_length();
 	test_hash_short_digest_buffer_refused();
+	test_hash_short_digest_buffer_then_sized_retry_succeeds();
+	test_hash_repeated_short_buffer_failures_do_not_exhaust_pool();
 	test_hash_invalid_alg_returns_null();
 	test_hash_update_on_null_returns_not_ready();
 
