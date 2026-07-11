@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include <string.h>
+#include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 
 #include <alp/peripheral.h>
@@ -58,8 +59,10 @@ ZTEST(alp_update_log, test_decode_bad_version)
 	zassert_equal(ulog_entry_decode(wire, sizeof(wire), &got, p), ALP_ERR_VERSION);
 }
 
-/* Minimal RAM store double: fixed slots of (key,blob). */
-#define TD_SLOTS 16
+/* Minimal RAM store double: fixed slots of (key,blob). Sized to cover the
+ * concurrent-append fault-injection test below (2 threads x CONC_ITERS
+ * entries + 1 meta record). */
+#define TD_SLOTS 48
 #define TD_BLOB  128
 struct td_store {
 	struct {
@@ -142,6 +145,32 @@ static void td_ifaces(struct td_store *t, alp_secure_store_if *s, alp_monotonic_
 	ctr->read      = td_cread;
 	ctr->increment = td_cinc;
 	ctr->ctx       = t;
+}
+
+/* WRITE_ONCE store double for DEFECT 1 (GHSA-r236-29pg-w694): a plain RAM
+ * double silently overwrites a re-put key, which would hide the PSA-tier
+ * wedge instead of reproducing it. This wraps td_put() to reject an
+ * overwrite of an already-created "ulog.<seq>" entry key exactly the way
+ * src/update_log/tfm_psa_secure_owner.c's ps_put() creates every entry
+ * asset with PSA_STORAGE_FLAG_WRITE_ONCE -- a second psa_ps_set() on that
+ * UID returns PSA_ERROR_NOT_PERMITTED, which psa_to_alp() maps to
+ * ALP_ERR_IO. "ulog.meta" stays freely rewritable (mutable metadata, same
+ * as the real PSA owner). */
+static alp_status_t td_put_write_once(void *c, const char *key, const uint8_t *b, size_t n)
+{
+	struct td_store *t        = td(c);
+	bool             is_entry = strncmp(key, "ulog.", 5) == 0 && strcmp(key, "ulog.meta") != 0;
+	if (is_entry && td_find(t, key) >= 0) {
+		return ALP_ERR_IO; /* mirrors PSA_ERROR_NOT_PERMITTED on a WRITE_ONCE asset */
+	}
+	return td_put(c, key, b, n);
+}
+
+static void
+td_ifaces_write_once(struct td_store *t, alp_secure_store_if *s, alp_monotonic_counter_if *ctr)
+{
+	td_ifaces(t, s, ctr);
+	s->put = td_put_write_once;
 }
 
 static alp_update_log_entry_t mk_entry(uint64_t ts, const char *ver, alp_update_status_t st)
@@ -326,6 +355,544 @@ ZTEST(alp_update_log, test_count_and_get)
 	zassert_mem_equal(e.image_hash, want, 32);
 
 	zassert_equal(ulog_engine_get(&s, 9, &e), ALP_ERR_NOT_FOUND);
+}
+
+/* --- Crash- and concurrency-safety fault injection (GHSA-r236-29pg-w694)
+ *
+ * ulog_engine_append() durably mutates the entry blob, then the meta
+ * cache, then the counter -- three separate calls a power loss can land
+ * between. The tests below write directly against the td_store to land
+ * it in exactly the torn state each crash point would leave (bypassing
+ * ulog_engine_append entirely, since a real crash mid-call cannot be
+ * expressed by calling the function that is supposed to be atomic), then
+ * prove the engine recovers deterministically: no orphan wedge, no false
+ * rollback, no re-chained duplicate sequence, and real corruption still
+ * gets reported rather than silently "fixed".
+ */
+
+/* Mirrors engine.c's internal kbuf() key format ("ulog.<decimal>") for
+ * small seq values, so this file doesn't need engine.c's static helper
+ * (nor libc snprintf) just to poke a key directly into the store double. */
+static void test_key(char *out, size_t cap, uint64_t seq)
+{
+	char tmp[24];
+	int  n = 0;
+	do {
+		tmp[n++] = (char)('0' + (seq % 10u));
+		seq /= 10u;
+	} while (seq && n < 20);
+	size_t      pos = 0;
+	const char *pfx = "ulog.";
+	while (*pfx && pos < cap - 1)
+		out[pos++] = *pfx++;
+	while (n > 0 && pos < cap - 1)
+		out[pos++] = tmp[--n];
+	out[pos] = 0;
+}
+
+/* Durably write entry `seq` directly against the store, as if
+ * ulog_engine_append() had completed only its entry-write phase (the
+ * transaction's sole durable commit point) and then crashed before
+ * touching meta or the counter. Returns the entry's wire hash so the
+ * caller can drive meta into whichever torn state it wants next. */
+static void
+raw_write_entry(struct td_store *t, uint64_t seq, const uint8_t prev[32], uint8_t hash_out[32])
+{
+	alp_update_log_entry_t e = mk_entry((seq + 1) * 10, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+	e.seq                    = seq;
+	uint8_t wire[ULOG_ENTRY_WIRE_LEN];
+	zassert_equal(ulog_entry_encode(&e, prev, wire), ALP_OK);
+	char key[24];
+	test_key(key, sizeof(key), seq);
+	zassert_equal(td_put(t, key, wire, sizeof(wire)), ALP_OK);
+	ulog_sha256(wire, sizeof(wire), hash_out);
+}
+
+static void raw_write_meta(struct td_store *t, uint64_t count, const uint8_t head_hash[32])
+{
+	struct ulog_meta m;
+	m.count = count;
+	memcpy(m.head_hash, head_hash, 32);
+	uint8_t metabuf[ULOG_META_WIRE_LEN];
+	zassert_equal(ulog_meta_encode(&m, metabuf), ALP_OK);
+	zassert_equal(td_put(t, "ulog.meta", metabuf, sizeof(metabuf)), ALP_OK);
+}
+
+/* Crash case 1: power loss after the entry write, before meta or the
+ * counter. In the PSA secure owner this is the shape that used to
+ * permanently wedge the log (the write-once entry could never be
+ * rewritten by a later append); here it must self-heal instead. */
+ZTEST(alp_update_log, test_recover_orphan_entry_after_entry_write_crash)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 2); /* entries 0,1 committed; counter == meta.count == 2 */
+
+	uint8_t metabuf[ULOG_META_WIRE_LEN];
+	size_t  mlen = 0;
+	zassert_equal(td_get(&t, "ulog.meta", metabuf, sizeof(metabuf), &mlen), ALP_OK);
+	struct ulog_meta m;
+	zassert_equal(ulog_meta_decode(metabuf, mlen, &m), ALP_OK);
+
+	uint8_t hash2[32];
+	raw_write_entry(&t, 2, m.head_hash, hash2); /* entry 2 landed... */
+	zassert_equal(t.counter, 2);                /* ...meta/counter never caught up */
+
+	/* Even before any repair, the orphan is already readable: a
+	 * write-once entry that landed on disk is never a wedge by itself,
+	 * only the stale bookkeeping around it needs fixing. */
+	alp_update_log_entry_t got;
+	zassert_equal(ulog_engine_get(&s, 2, &got), ALP_OK);
+
+	/* verify() must self-heal and see one valid 3-entry chain -- not a
+	 * truncation, not a chain break, not a rollback. */
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+	zassert_equal(t.counter, 3, "recovery must advance the counter past the orphan");
+
+	zassert_equal(td_get(&t, "ulog.meta", metabuf, sizeof(metabuf), &mlen), ALP_OK);
+	zassert_equal(ulog_meta_decode(metabuf, mlen, &m), ALP_OK);
+	zassert_equal(m.count, 3);
+	zassert_mem_equal(m.head_hash, hash2, 32);
+
+	/* The next append must continue at seq 3, never re-chain against 2. */
+	alp_update_log_entry_t ent3 = mk_entry(999, "next", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &ent3), ALP_OK);
+	zassert_equal(t.counter, 4);
+	alp_update_log_entry_t got3;
+	zassert_equal(ulog_engine_get(&s, 3, &got3), ALP_OK);
+	zassert_equal(got3.seq, 3);
+}
+
+/* Crash case 2: power loss after meta but before the counter increment --
+ * "meta ahead of counter". Trusting meta as a second independent
+ * authority (the pre-fix design) reports ROLLED_BACK here on an entirely
+ * honest log, and a naive retry would re-chain a repeated sequence
+ * against the wrong head. */
+ZTEST(alp_update_log, test_recover_meta_ahead_of_counter_after_crash)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 2);
+
+	uint8_t metabuf[ULOG_META_WIRE_LEN];
+	size_t  mlen = 0;
+	zassert_equal(td_get(&t, "ulog.meta", metabuf, sizeof(metabuf), &mlen), ALP_OK);
+	struct ulog_meta m;
+	zassert_equal(ulog_meta_decode(metabuf, mlen, &m), ALP_OK);
+
+	uint8_t hash2[32];
+	raw_write_entry(&t, 2, m.head_hash, hash2);
+	raw_write_meta(&t, 3, hash2); /* meta already advanced... */
+	zassert_equal(t.counter, 2);  /* ...but the counter increment never landed. */
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(
+	    v, ALP_UPDATE_LOG_VERIFY_OK, "meta-ahead-of-counter must not be reported as a rollback");
+	zassert_equal(t.counter, 3, "recovery must advance the counter to match the committed meta");
+
+	/* A subsequent append must continue at seq 3, not re-use 2. */
+	alp_update_log_entry_t ent3 = mk_entry(999, "next", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &ent3), ALP_OK);
+	alp_update_log_entry_t got3;
+	zassert_equal(ulog_engine_get(&s, 3, &got3), ALP_OK);
+	zassert_equal(got3.seq, 3);
+	uint64_t n = 0;
+	zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK);
+	zassert_equal(n, 4);
+}
+
+/* Data sitting at "ulog.<hw>" that does NOT chain from the true
+ * preceding entry is not the torn-append shape (a real crash can only
+ * ever land the exact wire ulog_engine_append() itself encoded, chained
+ * from whatever meta.head_hash was at that moment -- see the block
+ * comment above ulog_recover()). Recovery must not mistake it for a
+ * completed append and must not adopt it into the chain: the counter
+ * stays put, and recovery never discards or rewrites the frontier
+ * slot's contents (a write-once tier could not anyway) -- it simply
+ * declines to count it.
+ *
+ * DEFECT 1 (GHSA-r236-29pg-w694): ulog_engine_verify()'s chain walk used
+ * to cover only [0, hw), never looking at slot hw itself, so this exact
+ * state used to report VERIFY_OK -- a silent lie on any tier where
+ * append()'s subsequent store->put() to that same occupied key then
+ * keeps failing (permanently, on a WRITE_ONCE tier). It must now report
+ * CHAIN_BROKEN with bad_seq_out == hw. */
+ZTEST(alp_update_log, test_recover_does_not_adopt_non_chaining_frontier_entry)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 2);
+
+	uint8_t bogus_prev[32];
+	memset(bogus_prev, 0x77, sizeof(bogus_prev)); /* deliberately wrong */
+	uint8_t discard[32];
+	raw_write_entry(&t, 2, bogus_prev, discard);
+	zassert_equal(t.counter, 2);
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v,
+	              ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN,
+	              "verify() must not report OK while a non-chaining entry squats the frontier");
+	zassert_equal(bad, 2, "bad_seq_out must point at the squatted frontier slot");
+	zassert_equal(
+	    t.counter, 2, "recovery must not adopt/count non-chaining data at the frontier slot");
+
+	uint64_t n = 0;
+	zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK);
+	zassert_equal(n, 2, "the un-adopted frontier entry must not be counted");
+
+	/* This store is mutable (RAM-like, not write-once), so append() can
+	 * still make progress: it overwrites the squatted key and the log
+	 * self-heals -- the SW-NVS-tier half of DEFECT 1's fix. Contrast with
+	 * the write-once double below, where the same shape wedges instead. */
+	alp_update_log_entry_t healed = mk_entry(999, "self-heal", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &healed),
+	              ALP_OK,
+	              "a mutable tier must be able to overwrite a corrupt frontier slot");
+	zassert_equal(t.counter, 3);
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK, "the chain is clean again once the frontier heals");
+}
+
+/* DEFECT 1 (GHSA-r236-29pg-w694), write-once tier: the exact same
+ * non-chaining-frontier shape as above, but against a store double that
+ * mimics PSA Protected Storage's WRITE_ONCE entry assets. Here append()
+ * cannot self-heal -- the frontier slot can never be overwritten -- so it
+ * must fail loudly and permanently (ALP_ERR_IO) instead of silently
+ * wedging behind a verify() that still (incorrectly) said OK. */
+ZTEST(alp_update_log, test_recover_frontier_corruption_wedges_write_once_tier)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces_write_once(&t, &s, &c);
+
+	for (int i = 0; i < 2; i++) {
+		alp_update_log_entry_t ent =
+		    mk_entry((uint64_t)(i + 1) * 10, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+		zassert_equal(ulog_engine_append(&s, &c, &ent), ALP_OK);
+	}
+	zassert_equal(t.counter, 2);
+
+	uint8_t bogus_prev[32];
+	memset(bogus_prev, 0x77, sizeof(bogus_prev)); /* deliberately wrong */
+	uint8_t discard[32];
+	raw_write_entry(&t, 2, bogus_prev, discard); /* direct write: bypasses the write-once gate */
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v,
+	              ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN,
+	              "verify() must surface the squatted frontier instead of lying with OK");
+	zassert_equal(bad, 2);
+
+	/* append() cannot clear a WRITE_ONCE slot: it must return a clear
+	 * terminal error, never retry with a forced overwrite, and never
+	 * advance the counter over the still-corrupt frontier. */
+	alp_update_log_entry_t next = mk_entry(999, "wedge", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &next),
+	              ALP_ERR_IO,
+	              "append must return a terminal error against a write-once frontier conflict");
+	zassert_equal(t.counter, 2, "a wedged append must not advance the counter");
+
+	/* The wedge is durable: verify() keeps reporting it, not a one-shot
+	 * fluke, and the log never lies with OK afterwards either. */
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN);
+	zassert_equal(bad, 2);
+}
+
+/* DEFECT 3 (GHSA-r236-29pg-w694): with a functioning monotonic counter, at
+ * most ONE validly-chained orphan can ever sit above it (ulog_recover()
+ * always runs before append() writes a new entry, so it never lets a
+ * second one accumulate). Seeing TWO validly-chained entries above the
+ * counter is proof the counter itself regressed -- ulog_recover() must
+ * adopt at most one of them (never loop-adopt), and ulog_engine_verify()
+ * must report ROLLED_BACK for the one it deliberately leaves behind,
+ * not a laundered VERIFY_OK. */
+ZTEST(alp_update_log, test_recover_adopts_at_most_one_orphan_reports_rolled_back)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 2); /* entries 0,1 committed; counter == meta.count == 2 */
+
+	uint8_t metabuf[ULOG_META_WIRE_LEN];
+	size_t  mlen = 0;
+	zassert_equal(td_get(&t, "ulog.meta", metabuf, sizeof(metabuf), &mlen), ALP_OK);
+	struct ulog_meta m;
+	zassert_equal(ulog_meta_decode(metabuf, mlen, &m), ALP_OK);
+
+	/* Plant two entries chained back-to-back above the counter -- the
+	 * shape an honest crash can never produce by itself. */
+	uint8_t hash2[32];
+	raw_write_entry(&t, 2, m.head_hash, hash2);
+	uint8_t hash3[32];
+	raw_write_entry(&t, 3, hash2, hash3);
+	zassert_equal(t.counter, 2, "counter untouched until recovery runs");
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(
+	    v,
+	    ALP_UPDATE_LOG_VERIFY_ROLLED_BACK,
+	    "a second orphan above the counter is proof of rollback, not a second torn append");
+	zassert_equal(
+	    t.counter,
+	    3,
+	    "recovery adopts AT MOST ONE orphan per call -- it must not loop-adopt the second");
+}
+
+/* Counter/sequence overflow guard: refuse rather than risk a truncated
+ * "ulog.<seq>" key (kbuf()'s 24-byte buffer) or an eventual counter wrap. */
+ZTEST(alp_update_log, test_append_guards_sequence_overflow)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces(&t, &s, &c);
+	t.counter = ULOG_SEQ_MAX + 1u;
+
+	alp_update_log_entry_t e = mk_entry(1, "overflow", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &e), ALP_ERR_NOMEM);
+	zassert_equal(t.counter, ULOG_SEQ_MAX + 1u, "a refused append must not touch the counter");
+	for (int i = 0; i < TD_SLOTS; i++) {
+		zassert_false(t.s[i].used, "a refused append must not have written anything");
+	}
+}
+
+/* Concurrency case: two threads call ulog_engine_append() against the
+ * SAME store/counter with no external synchronization. Before the fix,
+ * both could read the same counter value, each write "ulog.<N>", and the
+ * counter would end up claiming N+2 entries while ulog.(N+1) never
+ * existed. The engine's internal lock must serialize them into one
+ * valid, contiguous chain. */
+
+#define CONC_ITERS      16
+#define CONC_STACK_SIZE 2048
+
+K_THREAD_STACK_DEFINE(g_conc_stack_a, CONC_STACK_SIZE);
+K_THREAD_STACK_DEFINE(g_conc_stack_b, CONC_STACK_SIZE);
+
+struct conc_worker_ctx {
+	alp_secure_store_if      *s;
+	alp_monotonic_counter_if *c;
+	int                       ok_count;
+};
+
+static void conc_worker(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	struct conc_worker_ctx *ctx = (struct conc_worker_ctx *)p1;
+	for (int i = 0; i < CONC_ITERS; i++) {
+		alp_update_log_entry_t e = mk_entry((uint64_t)i, "race", ALP_UPDATE_STATUS_CONFIRMED);
+		if (ulog_engine_append(ctx->s, ctx->c, &e) == ALP_OK) {
+			ctx->ok_count++;
+		}
+		k_yield();
+	}
+}
+
+ZTEST(alp_update_log, test_concurrent_append_serializes_to_one_valid_chain)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces(&t, &s, &c);
+
+	struct conc_worker_ctx ctx_a = { &s, &c, 0 };
+	struct conc_worker_ctx ctx_b = { &s, &c, 0 };
+
+	struct k_thread th_a, th_b;
+	k_thread_create(&th_a,
+	                g_conc_stack_a,
+	                CONC_STACK_SIZE,
+	                conc_worker,
+	                &ctx_a,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(5),
+	                0,
+	                K_NO_WAIT);
+	k_thread_create(&th_b,
+	                g_conc_stack_b,
+	                CONC_STACK_SIZE,
+	                conc_worker,
+	                &ctx_b,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(5),
+	                0,
+	                K_NO_WAIT);
+	k_thread_join(&th_a, K_FOREVER);
+	k_thread_join(&th_b, K_FOREVER);
+
+	int total_ok = ctx_a.ok_count + ctx_b.ok_count;
+	zassert_equal(total_ok, 2 * CONC_ITERS, "every append must succeed against a RAM store");
+	zassert_equal(t.counter,
+	              (uint64_t)total_ok,
+	              "the counter must equal the successful-append count exactly -- no lost "
+	              "and no double-counted sequence number");
+
+	uint64_t n = 0;
+	zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK);
+	zassert_equal(n, (uint64_t)total_ok);
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 0;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v,
+	              ALP_UPDATE_LOG_VERIFY_OK,
+	              "concurrent appenders must still produce one valid, unbroken chain");
+
+	/* Every sequence 0..total_ok-1 exists exactly once: td_put() would
+	 * silently overwrite a duplicate key, so a successful get() for every
+	 * index proves uniqueness+contiguity, not merely that the counter
+	 * looks right. */
+	for (uint64_t i = 0; i < (uint64_t)total_ok; i++) {
+		alp_update_log_entry_t got;
+		zassert_equal(ulog_engine_get(&s, i, &got), ALP_OK);
+		zassert_equal(got.seq, i);
+	}
+}
+
+/* Cross-priority concurrency case (GHSA-r236-29pg-w694 follow-up): the
+ * equal-priority test above passes even with a spin+k_yield() lock,
+ * because k_yield() only cedes the CPU to threads at the SAME OR HIGHER
+ * priority as the caller -- a same-priority contender is exactly the one
+ * case it handles. It says nothing about a LOWER-priority holder.
+ *
+ * Here a low-priority thread holds g_engine_lock across a simulated
+ * flash-GC stall (td_put_slow_gc()'s k_sleep(), standing in for
+ * nvs_write()'s occasional sector erase), while a HIGHER-priority thread
+ * contends for the same lock. Under a spin+k_yield() lock this livelocks
+ * forever on a single core: the higher-priority spinner is always the
+ * highest-priority ready thread, so k_yield() hands the CPU straight back
+ * to it instead of the (runnable, not blocked) low-priority holder, which
+ * never gets to finish its k_sleep()/put() and release. Under the k_mutex
+ * fix, k_mutex_lock()'s priority inheritance boosts the holder above the
+ * waiter so it actually runs to completion. Both threads must complete
+ * within a bounded k_thread_join() timeout -- a hang here means the
+ * livelock is back -- and the resulting chain must still validate. */
+
+K_SEM_DEFINE(g_gc_holder_entered, 0, 1);
+
+/* Wraps td_put() to stand in for an NVS write that triggers garbage
+ * collection: signals g_gc_holder_entered (so the contender only starts
+ * racing once the holder is provably inside the critical section, not on
+ * a lucky scheduling guess) and then sleeps for a stretch, all while
+ * g_engine_lock is held by the caller (ulog_engine_append()). */
+static alp_status_t td_put_slow_gc(void *c, const char *key, const uint8_t *b, size_t n)
+{
+	bool is_entry = strncmp(key, "ulog.", 5) == 0 && strcmp(key, "ulog.meta") != 0;
+	if (is_entry) {
+		k_sem_give(&g_gc_holder_entered);
+		k_sleep(K_MSEC(50));
+	}
+	return td_put(c, key, b, n);
+}
+
+struct prio_worker_ctx {
+	alp_secure_store_if      *s;
+	alp_monotonic_counter_if *c;
+	alp_status_t              result;
+};
+
+K_THREAD_STACK_DEFINE(g_prio_stack_lo, CONC_STACK_SIZE);
+K_THREAD_STACK_DEFINE(g_prio_stack_hi, CONC_STACK_SIZE);
+
+static void low_prio_gc_holder(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	struct prio_worker_ctx *ctx = (struct prio_worker_ctx *)p1;
+	alp_update_log_entry_t  e   = mk_entry(1, "gc-holder", ALP_UPDATE_STATUS_CONFIRMED);
+	ctx->result                 = ulog_engine_append(ctx->s, ctx->c, &e);
+}
+
+static void high_prio_contender(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	struct prio_worker_ctx *ctx = (struct prio_worker_ctx *)p1;
+	/* Only contend once the low-priority thread is provably mid-GC inside
+	 * ulog_engine_lock() -- makes this a genuine cross-priority
+	 * contention, not a race that might get lucky either way. */
+	k_sem_take(&g_gc_holder_entered, K_FOREVER);
+	alp_update_log_entry_t e = mk_entry(2, "contender", ALP_UPDATE_STATUS_CONFIRMED);
+	ctx->result              = ulog_engine_append(ctx->s, ctx->c, &e);
+}
+
+ZTEST(alp_update_log, test_concurrent_append_unequal_priority_no_livelock)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces(&t, &s, &c);
+	s.put = td_put_slow_gc;
+
+	struct prio_worker_ctx ctx_lo = { &s, &c, ALP_ERR_INVAL };
+	struct prio_worker_ctx ctx_hi = { &s, &c, ALP_ERR_INVAL };
+
+	struct k_thread th_lo, th_hi;
+	/* Numerically higher K_PRIO_PREEMPT() argument == LOWER priority. */
+	k_thread_create(&th_lo,
+	                g_prio_stack_lo,
+	                CONC_STACK_SIZE,
+	                low_prio_gc_holder,
+	                &ctx_lo,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(7),
+	                0,
+	                K_NO_WAIT);
+	k_thread_create(&th_hi,
+	                g_prio_stack_hi,
+	                CONC_STACK_SIZE,
+	                high_prio_contender,
+	                &ctx_hi,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(1),
+	                0,
+	                K_NO_WAIT);
+
+	/* Bounded, not K_FOREVER: a livelocked cross-priority lock would hang
+	 * this join forever instead of failing fast. */
+	zassert_equal(k_thread_join(&th_hi, K_MSEC(2000)),
+	              0,
+	              "higher-priority contender must complete -- a hang here is the "
+	              "cross-priority livelock the fix closes");
+	zassert_equal(k_thread_join(&th_lo, K_MSEC(2000)),
+	              0,
+	              "low-priority GC holder must complete and release the lock");
+
+	zassert_equal(ctx_lo.result, ALP_OK);
+	zassert_equal(ctx_hi.result, ALP_OK);
+
+	uint64_t n = 0;
+	zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK);
+	zassert_equal(n, 2u);
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 0;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v,
+	              ALP_UPDATE_LOG_VERIFY_OK,
+	              "unequal-priority contention must still produce one valid chain");
 }
 
 /* --- Tier selection + degrade (issues #111, #239) ---------------------

@@ -34,7 +34,7 @@ west-commands:
     commands:
       - name: alp-renode
         class: AlpRenode
-        help: Boot the system manifest in Renode (Phase 3 stub)
+        help: Boot the system manifest in Renode (headless smoke; --sim-mode for studio)
   # Read-only inspector for the orchestrator's --emit seam (no build).
   - file: scripts/west_commands/alp_emit.py
     commands:

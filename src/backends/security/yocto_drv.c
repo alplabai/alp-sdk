@@ -257,7 +257,9 @@ static alp_status_t y_aead_encrypt(alp_aead_backend_state_t *state,
 	if (iv == NULL || iv_len == 0) return ALP_ERR_INVAL;
 	if (aad == NULL && aad_len > 0) return ALP_ERR_INVAL;
 	if (plain == NULL && plain_len > 0) return ALP_ERR_INVAL;
-	if (tag_out == NULL || tag_len < 16) return ALP_ERR_INVAL;
+	/* tag_len must be exactly 16 B -- the only length every backend
+	 * (this one, zephyr_drv.c, se_cryptocell.c) round-trips. */
+	if (tag_out == NULL || tag_len != 16) return ALP_ERR_INVAL;
 
 	const EVP_CIPHER *c = aead_cipher(state->alg, NULL);
 	if (c == NULL) return ALP_ERR_NOSUPPORT;
@@ -307,7 +309,8 @@ static alp_status_t y_aead_decrypt(alp_aead_backend_state_t *state,
 	if (aad == NULL && aad_len > 0) return ALP_ERR_INVAL;
 	if (cipher == NULL && cipher_len > 0) return ALP_ERR_INVAL;
 	if (plain_out == NULL && cipher_len > 0) return ALP_ERR_INVAL;
-	if (tag == NULL || tag_len < 16) return ALP_ERR_INVAL;
+	/* tag_len must be exactly 16 B -- see y_aead_encrypt. */
+	if (tag == NULL || tag_len != 16) return ALP_ERR_INVAL;
 
 	const EVP_CIPHER *c = aead_cipher(state->alg, NULL);
 	if (c == NULL) return ALP_ERR_NOSUPPORT;
