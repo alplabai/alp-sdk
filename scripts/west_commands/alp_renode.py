@@ -351,8 +351,14 @@ def _run_renode(
 # (e.g. `sysbus.iic8.i2c_tmp112` in renesas_rzv2n.repl -- the bare node
 # name does NOT resolve in the Renode monitor).  Adding a board is a
 # one-entry change here (mirrors studio's kind-map, spec §6).
+# Each profile's `console` selects how the firmware console reaches the
+# UART socket: `{"kind": "ram_console"}` polls the ram_console_buf RAM ring
+# out of SRAM (headless cores, e.g. V2N M33-SM); `{"kind": "uart", "node":
+# "sysbus.<uart>"}` connects a real hardware UART to a Renode socket
+# terminal (cores with a wired console, e.g. the AEN M55's UART5).
 _SIM_BOARD_PROFILES: dict[str, dict] = {
     "E1M-V2N101": {
+        "console": {"kind": "ram_console"},
         "framebuffers": [],
         "peripherals": [
             {
@@ -362,6 +368,32 @@ _SIM_BOARD_PROFILES: dict[str, dict] = {
                     "cmd": "sysbus.iic8.i2c_tmp112 Temperature {value}",
                 },
             },
+        ],
+    },
+    "E1M-AEN801": {
+        "console": {"kind": "uart", "node": "sysbus.uart5"},
+        # ssd1306 MONO 128x64 OLED -- an I2C panel, so its 1 bpp (1024 B)
+        # frame buffer lives in firmware SRAM; studio reads it back by
+        # address.  0x20040000 is inside sram0 (a placeholder base until a
+        # demo image publishes its real display-buffer symbol).
+        "framebuffers": [
+            {"id": "ssd1306", "base": "0x20040000", "size": 1024,
+             "format": "MONO", "w": 128, "h": 64},
+        ],
+        "peripherals": [
+            {
+                "id": "lsm6dso",
+                "kind": "sensor",
+                "inject": {
+                    "cmd": "sysbus.sim_i2c.i2c_lsm6dso AccelerationX {value}",
+                },
+            },
+            {
+                "id": "button",
+                "kind": "button",
+                "inject": {"cmd": "sysbus.sim_gpio.gpio_button PressAndRelease"},
+            },
+            {"id": "ssd1306", "kind": "display", "inject": {"cmd": "version"}},
         ],
     },
 }
@@ -448,14 +480,18 @@ def build_sim_descriptor(profile: dict, control_port: int,
 
 
 def build_sim_resc_text(repl: Path, elf: Path, vtor: Optional[int] = None,
+                        uart_node: Optional[str] = None,
+                        uart_port: Optional[int] = None,
                         machine: str = "v2n_sim") -> str:
-    """Generate the headless sim boot script: load the platform, load the
-    ELF, and start.  The M33-SM is headless -- there is NO hardware UART
-    to route to a socket; the firmware console is a RAM ring
-    (``ram_console_buf``) that the command streams to the UART socket by
-    polling memory (see RamConsoleStreamer), so nothing UART-specific
-    belongs in the boot script.  Renode stays up (``--console`` keeps its
-    monitor on stdin) reading the bridge's commands.
+    """Generate the sim boot script: load the platform, load the ELF, and
+    start.  Two console paths:
+
+      * headless cores (``uart_node`` is None) -- the firmware console is
+        a ram_console RAM ring the command streams by polling memory
+        (RamConsoleStreamer); nothing UART-specific goes in the script.
+      * cores with a wired UART (``uart_node``/``uart_port`` set, e.g. the
+        AEN M55's UART5) -- the real UART is connected to a Renode socket
+        terminal on ``uart_port``, so the studio gateway streams it raw.
 
     ``vtor`` (the image's ``_vector_table`` address) is written to the
     Secure ``SCB->VTOR`` (0xE000ED08) after LoadELF.  On ARMv8-M with
@@ -465,9 +501,16 @@ def build_sim_resc_text(repl: Path, elf: Path, vtor: Optional[int] = None,
     it.  Harmless on pre-TrustZone Renode (0xE000ED08 is just VTOR)."""
     vtor_line = (f"sysbus WriteDoubleWord 0xE000ED08 {hex(vtor)}\n"
                  if vtor is not None else "")
+    uart_lines = ""
+    if uart_node and uart_port is not None:
+        uart_lines = (
+            f'emulation CreateServerSocketTerminal {uart_port} '
+            f'"uart_sock" false\n'
+            f"connector Connect {uart_node} uart_sock\n")
     return (
         f'mach create "{machine}"\n'
         f"machine LoadPlatformDescription @{repl}\n"
+        f"{uart_lines}"
         f"sysbus LoadELF @{elf}\n"
         f"{vtor_line}"
         f"start\n"
@@ -729,10 +772,23 @@ class RenodeMonitor:
                     continue
                 out.append(line)
 
-    def drain_boot(self, timeout_s: float = 60.0) -> None:
+    def drain_boot(self, timeout_s: float = 90.0, attempts: int = 3) -> None:
         """Swallow the boot-time monitor output so the first real command
-        gets a clean reply."""
-        self.command("version", timeout_s=timeout_s)
+        gets a clean reply.  Retries a few times: on a loaded CI runner the
+        pinned dotnet Renode's monitor can be slow to first respond, and a
+        single lost sync would strand the whole session -- a fresh `version`
+        (with its own echo sentinel) re-syncs.  Each retry resets `_broken`
+        since the earlier timeout latched it."""
+        per = max(10.0, timeout_s / attempts)
+        last = None
+        for _ in range(attempts):
+            self._broken = False
+            try:
+                self.command("version", timeout_s=per)
+                return
+            except AlpRenodeError as e:
+                last = e
+        raise last if last else AlpRenodeError("drain_boot failed")
 
 
 def _dispatch_control_line(monitor: RenodeMonitor, line: str) -> str:
@@ -951,23 +1007,29 @@ def run_sim(args, sdk_root: Path) -> int:            # type: ignore[no-untyped-d
         log.die(str(e))
         return 1
 
-    # Locate the firmware's ram_console ring so its (headless) console can
-    # be streamed out of SRAM; absent = a truly silent core (uart socket
-    # just stays quiet), which is not an error.
-    ram_console = elf_symbol(elf, "ram_console_buf")
+    console = profile.get("console") or {"kind": "ram_console"}
+    console_kind = console.get("kind", "ram_console")
+
+    # Locate the firmware's ram_console ring (headless cores) so its
+    # console can be streamed out of SRAM; absent = a truly silent core.
+    ram_console = (elf_symbol(elf, "ram_console_buf")
+                   if console_kind == "ram_console" else None)
     vt = elf_symbol(elf, "_vector_table")
     vtor = vt[0] if vt else None
 
     control_port, uart_port = pick_free_ports(2)
 
-    # Bind BOTH listeners BEFORE advertising them in the descriptor.  Once
-    # bound+listening, the kernel accepts (and backlogs) client
-    # connections even before the accept loops start, so a studio client
-    # that reads sim-descriptor.json and connects never hits ECONNREFUSED
-    # -- and holding the ports closes the pick/bind TOCTOU.
+    # The control socket is always ours (the translating bridge).  The
+    # UART port is ours for the ram_console path (we bind + stream it);
+    # for a wired UART it belongs to Renode's socket terminal, so we do
+    # NOT bind it here (Renode would fail to bind an already-held port).
+    # Binding ours up front means a studio client never races into an
+    # ECONNREFUSED (kernel backlogs pre-accept); the Renode-served UART
+    # has a small connect window until the terminal opens (studio retries).
     try:
         ctrl_srv = _bind_listener(control_port)
-        uart_srv = _bind_listener(uart_port)
+        uart_srv = (_bind_listener(uart_port)
+                    if console_kind == "ram_console" else None)
     except OSError as e:
         log.die(f"could not bind a sim socket: {e}")
         return 1
@@ -978,8 +1040,13 @@ def run_sim(args, sdk_root: Path) -> int:            # type: ignore[no-untyped-d
         json.dumps(descriptor, indent=2) + "\n", encoding="utf-8")
 
     resc_path = bundle_dir / ".sim-boot.resc"
-    resc_path.write_text(
-        build_sim_resc_text(repl, elf, vtor=vtor), encoding="utf-8")
+    if console_kind == "uart":
+        resc_text = build_sim_resc_text(
+            repl, elf, vtor=vtor, uart_node=console["node"],
+            uart_port=uart_port)
+    else:
+        resc_text = build_sim_resc_text(repl, elf, vtor=vtor)
+    resc_path.write_text(resc_text, encoding="utf-8")
 
     log_path = (Path(args.log).resolve()
                 if args.log else bundle_dir / "renode-sim.log")
@@ -988,8 +1055,7 @@ def run_sim(args, sdk_root: Path) -> int:            # type: ignore[no-untyped-d
     log.inf(f"alp-renode --sim-mode: {sku} booting {elf.name}")
     log.inf(f"  descriptor : {descriptor_path}")
     log.inf(f"  control    : tcp://127.0.0.1:{control_port}")
-    log.inf(f"  uart       : tcp://127.0.0.1:{uart_port} "
-            f"({'ram_console' if ram_console else 'headless/silent'})")
+    log.inf(f"  uart       : tcp://127.0.0.1:{uart_port} ({console_kind})")
 
     argv = build_sim_renode_argv(renode_bin, resc_path)
     stop = threading.Event()
@@ -1005,14 +1071,19 @@ def run_sim(args, sdk_root: Path) -> int:            # type: ignore[no-untyped-d
         # clients -- so no client command races the boot drain for the
         # monitor lock and captures boot text as its reply.
         monitor.drain_boot()
-        streamer = None
-        if ram_console is not None:
-            streamer = RamConsoleStreamer(monitor, ram_console[0],
-                                          ram_console[1])
-            threading.Thread(target=streamer.run, args=(stop,),
-                             daemon=True).start()
-        threading.Thread(target=_serve_uart_socket,
-                         args=(streamer, uart_srv, stop), daemon=True).start()
+        # ram_console path: we poll the ring + serve the UART socket.  The
+        # uart path has Renode's socket terminal serving uart_port already,
+        # so no UART server of ours (uart_srv is None there).
+        if uart_srv is not None:
+            streamer = None
+            if ram_console is not None:
+                streamer = RamConsoleStreamer(monitor, ram_console[0],
+                                              ram_console[1])
+                threading.Thread(target=streamer.run, args=(stop,),
+                                 daemon=True).start()
+            threading.Thread(
+                target=_serve_uart_socket,
+                args=(streamer, uart_srv, stop), daemon=True).start()
         threading.Thread(target=_serve_control_socket,
                          args=(monitor, ctrl_srv, stop), daemon=True).start()
         log.inf(f"alp-renode --sim-mode: ready (timeout {args.timeout}s).")
@@ -1033,7 +1104,8 @@ def run_sim(args, sdk_root: Path) -> int:            # type: ignore[no-untyped-d
     finally:
         stop.set()
         ctrl_srv.close()
-        uart_srv.close()
+        if uart_srv is not None:
+            uart_srv.close()
         if proc is not None:
             try:
                 if proc.stdin is not None:
