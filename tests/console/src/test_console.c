@@ -120,4 +120,85 @@ ZTEST(alp_console, test_clk_dump_runs)
 	zassert_is_null(strstr(out, "Unknown command"), "clk cmd not registered: %s", out);
 }
 
+/*
+ * `alp companion` command-group registration (#673 Phase 2 split):
+ * alp_console_companion.c (core) plus the _wifi/_ble/_diag/_ota/_sock
+ * sibling TUs each register their group onto the (alp, companion)
+ * dynamic subcommand set from their own file -- these assert every group
+ * survived the split and is reachable by name.  No companion is bound
+ * (alp_console_companion_set() is never called), so each command exits
+ * early via its "companion not registered" guard; the point here is that
+ * the shell resolves the command at all, not the CC3501E transaction
+ * behind it (that's chips/cc3501e/cc3501e.c's own coverage, see
+ * tests/zephyr/cc3501e_host_driver). */
+ZTEST(alp_console, test_companion_ver_registered)
+{
+	const char *out = run("alp companion ver");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion ver not registered: %s", out);
+}
+
+ZTEST(alp_console, test_companion_ping_registered)
+{
+	const char *out = run("alp companion ping");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion ping not registered: %s", out);
+}
+
+ZTEST(alp_console, test_companion_reset_registered)
+{
+	const char *out = run("alp companion reset");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion reset not registered: %s", out);
+}
+
+ZTEST(alp_console, test_companion_bench_registered)
+{
+	const char *out = run("alp companion bench");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion bench not registered: %s", out);
+}
+
+ZTEST(alp_console, test_companion_wifi_group_registered)
+{
+	const char *out = run("alp companion wifi scan");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion wifi not registered: %s", out);
+}
+
+ZTEST(alp_console, test_companion_ble_group_registered)
+{
+	const char *out = run("alp companion ble enable");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion ble not registered: %s", out);
+}
+
+ZTEST(alp_console, test_companion_ble_gatt_subgroup_registered)
+{
+	const char *out = run("alp companion ble gatt read 0");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion ble gatt not registered: %s", out);
+}
+
+ZTEST(alp_console, test_companion_diag_group_registered)
+{
+	const char *out = run("alp companion diag info");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion diag not registered: %s", out);
+}
+
+ZTEST(alp_console, test_companion_ota_group_registered)
+{
+	const char *out = run("alp companion ota status");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion ota not registered: %s", out);
+}
+
+ZTEST(alp_console, test_companion_sock_group_registered)
+{
+	const char *out = run("alp companion sock tcp-get 127.0.0.1 80 /");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion sock not registered: %s", out);
+}
+
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);
