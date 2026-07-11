@@ -736,6 +736,11 @@ zephyr_compile_definitions_ifdef(CONFIG_CMSIS_DSP ALP_HAS_CMSIS_DSP=1)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_AHRS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/ahrs.c)
 
+# Portable PID control surface (<alp/pid.h>).  Pure C, no vendor deps;
+# opt-in via `libraries: [pid]` (emits CONFIG_ALP_SDK_PID).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PID
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/pid.c)
+
 # System-power-mode surface (<alp/power.h>).  Wired behind
 # CONFIG_ALP_SDK_POWER so customers can opt out on builds that
 # don't need sleep transitions.  Class dispatcher + wildcard stub

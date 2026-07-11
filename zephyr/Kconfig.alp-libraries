@@ -140,6 +140,16 @@ config ALP_MADGWICK_LIBM
 	bool "Madgwick AHRS via libm (SW fallback)"
 	default y
 
+config ALP_SDK_PID
+	bool "Enable <alp/pid.h> portable PID controller"
+	default n
+	help
+	  Compile src/pid.c, the portable caller-owned PID control loop
+	  (alp_pid_init / alp_pid_step / alp_pid_reset) with output
+	  clamping, integrator anti-windup, and derivative-on-measurement.
+	  Emitted by `libraries: [pid]` in board.yaml.  The ALP_PID_FPU /
+	  ALP_PID_TIMER knobs below bind HW-accelerated paths where a SoM
+	  exposes one; ALP_PID_INT_MATH is the always-available SW floor.
 config ALP_PID_FPU
 	bool "PID via FPU"
 config ALP_PID_TIMER

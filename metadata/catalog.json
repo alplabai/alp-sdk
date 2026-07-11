@@ -1296,6 +1296,14 @@
     },
     {
       "functions": [
+        "alp_pid_init",
+        "alp_pid_reset",
+        "alp_pid_step"
+      ],
+      "header": "include/alp/pid.h"
+    },
+    {
+      "functions": [
         "alp_power_capabilities",
         "alp_power_close",
         "alp_power_configure_wake_source",
