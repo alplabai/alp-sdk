@@ -43,17 +43,35 @@
  *     (ipc_service's `received` callback may run close to interrupt
  *     priority, so this can't be a blocking mutex) that z_call()
  *     rechecks both before staging and is woken from, replacing a
- *     one-shot cancel.  Self-close detection compares the CURRENT
- *     thread against the thread recorded the last time
- *     rpc_ept_recv() ran (BENCH-UNVERIFIED assumption: exactly one
- *     ipc_service worker thread ever invokes a given endpoint's
- *     `received` callback, never concurrently, never from ISR context
- *     -- see rpc_ept_recv()'s own comment).  External close
- *     deregisters the endpoint and waits for `cb_active` (a counter
- *     around rpc_ept_recv()'s body) to reach 0 before returning DONE,
- *     because ipc_service_deregister_endpoint()'s return does not, by
- *     itself, clearly guarantee no recv is still in flight (also
- *     BENCH-UNVERIFIED).
+ *     one-shot cancel.  Self-close detection ANDs two things, both
+ *     read under the same spinlock: `recv_active` (true only while
+ *     THIS channel's OWN rpc_ept_recv() is genuinely on some thread's
+ *     call stack right now -- set/cleared by rpc_ept_recv() itself)
+ *     AND the CURRENT thread matching `recv_thread` (the thread
+ *     presently running that recv).  Checking `recv_active` is what
+ *     closes the defect-3 hole a bare thread-identity compare had:
+ *     `recv_thread` is never cleared, and every channel shares the
+ *     SAME single ipc_service worker thread (BENCH-UNVERIFIED
+ *     assumption: exactly one such thread ever invokes a given
+ *     endpoint's `received` callback, never concurrently, never from
+ *     ISR context -- see rpc_ept_recv()'s own comment), so a bare
+ *     `k_current_get() == recv_thread` misfired for a CROSS-channel
+ *     close (channel A's callback closing channel B) -- it saw B's
+ *     STALE `recv_thread` (set the last time B ever received
+ *     anything, however long ago) match the worker thread executing
+ *     A's callback right now, deferred a teardown nothing is left to
+ *     run, and permanently wedged B's slot.  `recv_active` also keeps
+ *     the OTHER direction correct: an external close racing a
+ *     genuinely in-flight recv on the SAME channel, from a different
+ *     thread, still correctly takes the external DONE path (thread
+ *     identity alone still differs).  External close deregisters the
+ *     endpoint and waits for `cb_active` (a counter around
+ *     rpc_ept_recv()'s body, incremented/decremented in the SAME
+ *     spinlock section that reads/sets `closing` and `recv_active` --
+ *     see rpc_ept_recv()'s own comment) to reach 0 before returning
+ *     DONE, because ipc_service_deregister_endpoint()'s return does
+ *     not, by itself, clearly guarantee no recv is still in flight
+ *     (also BENCH-UNVERIFIED).
  *   - z_destroy(): trivial for this backend (a static pool slot, no
  *     heap, no fds) -- just releases the pool slot.  Called exactly
  *     once by the dispatcher, strictly after its own active-op drain.
@@ -154,20 +172,41 @@ struct rpc_be {
 	alp_status_t call_result;
 	bool         call_pending;
 
-	/* GHSA-xhm8-7f87-93q5 redesign: guards `closing` + `recv_thread`
-     * below. */
+	/* GHSA-xhm8-7f87-93q5 redesign: guards `closing`, `recv_thread` +
+     * `recv_active` below, and the check-and-count entry/exit of
+     * rpc_ept_recv() (see that function). */
 	struct k_spinlock lock;
 	bool              closing;
 
-	/* Last thread observed running rpc_ept_recv() (see that function).
-     * z_shutdown() compares this against the CURRENT thread to detect
-     * a self-close (a subscriber callback closing its own channel).
-     * BENCH-UNVERIFIED assumption (see this file's header comment):
-     * exactly one ipc_service worker thread ever invokes a given
-     * endpoint's `received` callback. */
+	/* Thread currently (or most recently) running rpc_ept_recv() for
+     * THIS channel, paired with `recv_active` below -- both written
+     * under `lock` by rpc_ept_recv() itself.  z_shutdown() ANDs a
+     * thread-identity compare against this with `recv_active` to
+     * detect a self-close (a subscriber callback closing its own
+     * channel).  `recv_thread` alone is NOT enough: it is never
+     * cleared, and every channel shares the SAME single ipc_service
+     * worker thread (BENCH-UNVERIFIED assumption, see this file's
+     * header comment), so a stale `recv_thread` from some earlier,
+     * unrelated frame would match the worker thread executing a
+     * DIFFERENT channel's callback right now -- `recv_active` gates
+     * that: it is true only while THIS channel's own rpc_ept_recv()
+     * genuinely has this thread on its call stack. */
 	k_tid_t recv_thread;
 
-	/* Reentrancy counter around rpc_ept_recv()'s body.  An external
+	/* True only while THIS channel's own rpc_ept_recv() is on
+     * `recv_thread`'s call stack right now -- set true (with
+     * `recv_thread` stamped) at recv entry, set false at recv exit,
+     * both under `lock`, in the SAME critical section that checks
+     * `closing` and increments/decrements `cb_active` below.  See
+     * `recv_thread`'s doc comment for why z_shutdown() needs this
+     * ANDed in rather than relying on thread identity alone. */
+	bool recv_active;
+
+	/* Reentrancy counter around rpc_ept_recv()'s body.  Incremented
+     * only in the SAME spinlock critical section that checks
+     * `closing` at recv entry (GHSA-xhm8-7f87-93q5 defect 2 -- a recv
+     * that loses that race never touches `be` at all), decremented in
+     * the matching critical section at recv exit.  An external
      * z_shutdown() deregisters the endpoint then waits for this to
      * reach 0 before returning DONE -- BENCH-UNVERIFIED: ipc_service's
      * deregister does not, by itself, clearly guarantee no recv is
@@ -363,39 +402,117 @@ static void rpc_ept_bound(void *priv)
 }
 
 /**
+ * @brief Enter rpc_ept_recv(): check `closing` and count this recv in
+ *        ONE spinlock critical section (GHSA-xhm8-7f87-93q5 defect 2).
+ *
+ * A recv that observes `closing` already true bails immediately
+ * without ever incrementing `cb_active` or touching any other backend
+ * state -- deregistration is already in progress (or done), so no NEW
+ * recv may be dispatched.  Otherwise stamps `recv_thread` +
+ * `recv_active` (defect 3 -- see struct rpc_be's doc comment) and
+ * increments `cb_active` before releasing the lock, so a concurrent
+ * z_shutdown() can never observe "not closing yet" and "not counted
+ * yet" at the same time: either this recv is already reflected in
+ * `cb_active` by the time z_shutdown() reads `closing`, or `closing`
+ * is already true by the time this recv reads it.
+ *
+ * @return true if the recv may proceed; false if the channel is
+ *         already closing.
+ */
+static bool rpc_recv_enter(struct rpc_be *be)
+{
+	k_spinlock_key_t key = k_spin_lock(&be->lock);
+	if (be->closing) {
+		k_spin_unlock(&be->lock, key);
+		return false;
+	}
+	be->recv_thread = k_current_get();
+	be->recv_active = true;
+	atomic_inc(&be->cb_active);
+	k_spin_unlock(&be->lock, key);
+	return true;
+}
+
+/**
+ * @brief Leave rpc_ept_recv(): clear `recv_active` and decrement
+ *        `cb_active`, mirroring rpc_recv_enter() above.
+ *
+ * `recv_active` is cleared under `lock` (z_shutdown() reads it under
+ * the same lock -- see struct rpc_be's doc comment); `cb_active`'s
+ * decrement only needs to be atomic, not lock-guarded (z_shutdown()'s
+ * drain loop only ever atomic_get()s it).
+ */
+static void rpc_recv_leave(struct rpc_be *be)
+{
+	k_spinlock_key_t key = k_spin_lock(&be->lock);
+	be->recv_active      = false;
+	k_spin_unlock(&be->lock, key);
+	atomic_dec(&be->cb_active);
+}
+
+/**
  * @brief ipc_service `received` callback: parse + dispatch one frame.
  *
  * @par Close protocol (GHSA-xhm8-7f87-93q5)
- * Records the current thread (`recv_thread`, under `lock`) so
- * z_shutdown() can detect a self-close, and holds `cb_active` for the
- * entire body -- external z_shutdown() waits for this to reach 0
- * after deregistering the endpoint, guaranteeing no recv is still
- * touching `be` once it returns DONE (see this file's header
- * comment).
+ * rpc_recv_enter()/rpc_recv_leave() (above) bracket the whole body,
+ * holding `cb_active` for the entire duration -- external
+ * z_shutdown() waits for this to reach 0 after deregistering the
+ * endpoint, guaranteeing no recv is still touching `be` once it
+ * returns DONE (see this file's header comment).
  *
  * The subscriber callback invoked below (see @ref alp_rpc_method_cb_t)
  * MAY call @ref alp_rpc_close on its OWN channel -- z_shutdown()
- * detects that (this same thread, mid-callback) and returns
- * ALP_RPC_SHUTDOWN_DEFERRED without deregistering/draining itself;
- * the epilogue at the bottom of this function completes that deferred
- * teardown, exactly once, right here, once the callback (if any) has
- * returned -- mirroring src/backends/rpc/yocto_drv.c's rpc_rx_main()
- * epilogue.  BENCH-UNVERIFIED: this assumes ipc_service never invokes
- * `received` from ISR context and never re-enters it concurrently
- * from a second thread for the same endpoint -- see this file's header
- * comment.
+ * detects that (this same thread, `recv_active` still true, mid-
+ * callback) and returns ALP_RPC_SHUTDOWN_DEFERRED without
+ * deregistering/draining itself; the epilogue at the bottom of this
+ * function completes that deferred teardown, exactly once, right
+ * here, once the callback (if any) has returned -- mirroring
+ * src/backends/rpc/yocto_drv.c's rpc_rx_main() epilogue.
+ * BENCH-UNVERIFIED: this assumes ipc_service never invokes `received`
+ * from ISR context and never re-enters it concurrently from a second
+ * thread for the same endpoint -- see this file's header comment.
+ *
+ * @par Synchronous-call routing (GHSA-xhm8-7f87-93q5 defect 1)
+ * Reading `call_pending`/`call_method` and writing
+ * `call_resp_buf`/`call_result`/`call_pending` happens in ONE
+ * spinlock critical section -- the same `lock` z_call() stages and
+ * cancels the call slot under (see z_call()'s doc comment) -- so a
+ * z_call() that times out, cancels `call_pending`, and returns
+ * (its stack-owned `resp` buffer then going out of scope) can never
+ * race a recv that is mid-way through writing into that same buffer.
+ * The critical section is bounded (a strncmp + a bounded memcpy sized
+ * by CONFIG_ALP_SDK_RPC_TX_FRAME_MAX + a non-blocking k_sem_give) --
+ * mirrors src/backends/rpc/yocto_drv.c's rpc_rx_main() taking
+ * call_mutex around the identical section.
  */
+
+/* Test-only synchronisation hook (default no-op; a single NULL-check
+ * branch in production) -- mirrors
+ * src/backends/rpc/yocto_drv.c's g_y_call_test_late_staging_hook.  A
+ * test that #includes this .c file directly (see
+ * tests/unit/rpc_zephyr_backend/) can point this at a function that
+ * signals (non-blocking -- e.g. k_sem_give(), never a wait) a
+ * concurrent "z_call() timed out and cancelled" step to attempt
+ * running RIGHT NOW, at the exact instant this recv has just decided
+ * `call_pending` was true and is about to write the response.  Called
+ * from INSIDE the SAME critical section the fixed code holds `lock`
+ * across (GHSA-xhm8-7f87-93q5 defect 1) -- so it MUST NOT itself
+ * block (a blocking call here, under a real k_spinlock, would be a
+ * bug in the harness, not a test of one): the point is that the
+ * competing cancel needs that SAME lock to proceed, so it can only
+ * ever actually run once this recv has released it -- proving mutual
+ * exclusion is real, not incidental scheduling luck. */
+static void (*g_rpc_recv_test_sync_hook)(void) = NULL;
+
 static void rpc_ept_recv(const void *data, size_t len, void *priv)
 {
 	struct rpc_be *be = (struct rpc_be *)priv;
 	if (be == NULL || !be->in_use) {
 		return;
 	}
-
-	k_spinlock_key_t key = k_spin_lock(&be->lock);
-	be->recv_thread      = k_current_get();
-	k_spin_unlock(&be->lock, key);
-	atomic_inc(&be->cb_active);
+	if (!rpc_recv_enter(be)) {
+		return;
+	}
 
 	const void *payload     = NULL;
 	size_t      payload_len = 0;
@@ -405,25 +522,38 @@ static void rpc_ept_recv(const void *data, size_t len, void *priv)
 		goto epilogue;
 	}
 
-	/* Synchronous-call path: a pending alp_rpc_call wakes the caller
-     * only when the response method matches. */
-	if (be->call_pending && strncmp(method, be->call_method, ALP_RPC_METHOD_MAX_LEN) == 0) {
-		if (be->call_resp_buf != NULL) {
-			if (payload_len > be->call_resp_cap) {
-				be->call_result   = ALP_ERR_NOMEM;
-				be->call_resp_len = 0;
+	{
+		/* Synchronous-call path (defect 1): a pending alp_rpc_call
+         * wakes the caller only when the response method matches --
+         * see this function's doc comment for why this whole check
+         * lives under `lock`. */
+		k_spinlock_key_t key              = k_spin_lock(&be->lock);
+		bool             consumed_by_call = false;
+		if (be->call_pending && strncmp(method, be->call_method, ALP_RPC_METHOD_MAX_LEN) == 0) {
+			if (g_rpc_recv_test_sync_hook != NULL) {
+				g_rpc_recv_test_sync_hook();
+			}
+			if (be->call_resp_buf != NULL) {
+				if (payload_len > be->call_resp_cap) {
+					be->call_result   = ALP_ERR_NOMEM;
+					be->call_resp_len = 0;
+				} else {
+					memcpy(be->call_resp_buf, payload, payload_len);
+					be->call_resp_len = payload_len;
+					be->call_result   = ALP_OK;
+				}
 			} else {
-				memcpy(be->call_resp_buf, payload, payload_len);
 				be->call_resp_len = payload_len;
 				be->call_result   = ALP_OK;
 			}
-		} else {
-			be->call_resp_len = payload_len;
-			be->call_result   = ALP_OK;
+			be->call_pending = false;
+			k_sem_give(&be->call_sem);
+			consumed_by_call = true;
 		}
-		be->call_pending = false;
-		k_sem_give(&be->call_sem);
-		goto epilogue;
+		k_spin_unlock(&be->lock, key);
+		if (consumed_by_call) {
+			goto epilogue;
+		}
 	}
 
 	{
@@ -446,13 +576,11 @@ epilogue:
      * Deregistering here (rather than in z_shutdown()) avoids calling
      * ipc_service_deregister_endpoint() reentrantly from within its
      * own `received` callback. */
+	rpc_recv_leave(be);
 	if (be->close_from_worker) {
 		(void)ipc_service_deregister_endpoint(&be->ept);
-		atomic_dec(&be->cb_active);
 		alp_rpc_close_finalize(be->owner);
-		return;
 	}
-	atomic_dec(&be->cb_active);
 }
 
 #endif /* CONFIG_ALP_SDK_RPC */
@@ -752,8 +880,8 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
 
 /**
  * @brief Make every blocking wait on this channel terminate promptly,
- *        and report whether THIS call itself arrived from the
- *        channel's own ipc_service recv thread.
+ *        and report whether THIS call itself arrived from THIS
+ *        channel's own, currently-active ipc_service recv callback.
  *
  * See this file's header comment for the full protocol.  Sets the
  * sticky `closing` flag + cancels any pending call under `be->lock`,
@@ -765,6 +893,20 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
  * deadlock (this very call holds it) -- rpc_ept_recv()'s epilogue
  * completes the deferred teardown once the callback that triggered it
  * returns.
+ *
+ * @par Self-close detection (GHSA-xhm8-7f87-93q5 defect 3)
+ * `from_worker` ANDs `recv_active` (true only while THIS channel's own
+ * rpc_ept_recv() genuinely has some thread on its call stack right
+ * now) with a thread-identity compare against `recv_thread` -- NOT
+ * thread identity alone.  A bare `k_current_get() == recv_thread`
+ * compare misfires cross-channel: every channel shares the SAME
+ * single ipc_service worker thread, and `recv_thread` is never
+ * cleared, so channel B's `recv_thread` (stamped the last time B ever
+ * received anything, however long ago) matches the worker thread
+ * executing channel A's callback right now even though B is not on
+ * the call stack at all -- that used to defer a teardown nothing was
+ * left to run, permanently wedging B's slot.  `recv_active` closes
+ * that hole; see struct rpc_be's doc comment.
  */
 static alp_rpc_shutdown_result_t z_shutdown(alp_rpc_backend_state_t *st)
 {
@@ -780,7 +922,7 @@ static alp_rpc_shutdown_result_t z_shutdown(alp_rpc_backend_state_t *st)
 	__ASSERT(!k_is_in_isr(), "alp_rpc: shutdown must not run from ISR context");
 
 	k_spinlock_key_t key         = k_spin_lock(&be->lock);
-	bool             from_worker = (k_current_get() == be->recv_thread);
+	bool             from_worker = be->recv_active && (k_current_get() == be->recv_thread);
 	be->closing                  = true;
 	if (be->call_pending) {
 		be->call_result  = ALP_ERR_NOT_READY;
