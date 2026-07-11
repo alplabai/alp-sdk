@@ -98,13 +98,23 @@ def test_sim_profile_aen801_uart_console():
 def test_sim_profile_aen801_peripherals():
     profile = sim_profile_for_sku("E1M-AEN801")
     kinds = {p["id"]: p["kind"] for p in profile["peripherals"]}
-    assert kinds == {"camera": "camera", "lsm6dso": "sensor",
-                     "button": "button", "ssd1306": "display"}
+    assert kinds == {"camera": "camera", "mic": "microphone",
+                     "lsm6dso": "sensor", "button": "button",
+                     "ssd1306": "display"}
     # The camera drives the aen-sim-vision app: memcpy a frame to the app's
-    # SIM_FRAME, then the trigger rings its doorbell.
+    # SIM_FRAME, then the trigger rings its doorbell.  `frame` advertises the
+    # input encoding (#687 addendum) -- GRAY8 32x32 == SIM_FRAME_LEN (1024 B).
     cam = next(p for p in profile["peripherals"] if p["id"] == "camera")
     assert cam["inject"]["memcpy"]["base"] == "0x20041000"
     assert "0x20042000" in cam["inject"]["memcpy"]["trigger"]
+    assert cam["frame"] == {"format": "GRAY8", "w": 32, "h": 32}
+    assert cam["frame"]["w"] * cam["frame"]["h"] == 1024
+    # The mic drives the wake-word path: memcpy an audio clip to SIM_AUDIO,
+    # then the trigger rings the audio doorbell.
+    mic = next(p for p in profile["peripherals"] if p["id"] == "mic")
+    assert mic["inject"]["memcpy"]["base"] == "0x20043000"
+    assert "0x20044000" in mic["inject"]["memcpy"]["trigger"]
+    assert mic["frame"]["format"] == "PCM_U8" and mic["frame"]["samples"] == 1024
     # ssd1306 MONO framebuffer for studio's DisplayWidget.
     (fb,) = profile["framebuffers"]
     assert fb["id"] == "ssd1306" and fb["format"] == "MONO"
@@ -562,11 +572,13 @@ def test_sim_mode_aen_end_to_end(tmp_path):
     reason="set ALP_SIM_E2E=1, ALP_SIM_E2E_VISION_ELF=<aen-sim-vision ITCM elf>, "
            "renode>=1.16.1 on PATH, to run the live vision-pipeline smoke")
 def test_sim_mode_aen_vision_pipeline(tmp_path):
-    """The full studio vision loop on the AEN M55 (#687): inject a camera
-    frame via the descriptor's camera memcpy, fire its trigger, and the
-    aen-sim-vision firmware runs REAL TFLite-Micro inference on the M55 and
-    renders to the ssd1306 frame buffer -- observed on the console
-    (`inference:`) and by reading the frame buffer back."""
+    """The full studio vision + wake-word loops on the AEN M55 (#687): inject
+    a camera frame via the descriptor's camera memcpy, fire its trigger, and
+    the aen-sim-vision firmware runs REAL TFLite-Micro inference on the M55
+    and renders to the ssd1306 frame buffer -- observed on the console
+    (`inference:`) and by reading the frame buffer back; then inject an audio
+    clip via the mic memcpy, fire its trigger, and observe the `wakeword:`
+    event on the console."""
     import json
     import shutil as _shutil
     import signal
@@ -592,18 +604,19 @@ def test_sim_mode_aen_vision_pipeline(tmp_path):
         env=env, stdout=logf, stderr=subprocess.STDOUT, start_new_session=True)
     desc_path = bundle / "sim-descriptor.json"
     try:
-        cp = up = cam = None
+        cp = up = cam = mic = None
         for _ in range(160):
             if desc_path.exists() and "ready (timeout" in sim_log.read_text():
                 d = json.loads(desc_path.read_text())
                 cp = int(d["control_socket"].rsplit(":", 1)[1])
                 up = int(d["uart_socket"].rsplit(":", 1)[1])
                 cam = next(p for p in d["peripherals"] if p["id"] == "camera")
+                mic = next(p for p in d["peripherals"] if p["id"] == "mic")
                 break
             if proc.poll() is not None:
                 break
             time.sleep(0.5)
-        assert cp and cam, f"sim never ready:\n{sim_log.read_text()}"
+        assert cp and cam and mic, f"sim never ready:\n{sim_log.read_text()}"
 
         u = None
         for _ in range(20):
@@ -645,6 +658,19 @@ def test_sim_mode_aen_vision_pipeline(tmp_path):
         fb = cmd("sysbus ReadBytes 0x20040000 8")
         assert any(t not in ("0x00", "") for t in fb.split()), \
             f"frame buffer not rendered: {fb!r}"
+
+        # Wake-word path: memcpy a loud clip to the mic buffer, fire its
+        # trigger, and the app scores it + logs `wakeword:`.  256 loud (0xff)
+        # samples keep energy >= threshold whether the SRAM tail is 0x00 or
+        # 0x80 (194 suffices), so `detected` is deterministic.
+        abase = mic["inject"]["memcpy"]["base"]
+        atrigger = mic["inject"]["memcpy"]["trigger"]
+        assert cmd(f"sysbus WriteBytes {abase} " +
+                   " ".join(["0xff"] * 256)) == "ok"
+        assert cmd(atrigger) == "ok"
+        time.sleep(1.0)
+        assert b"wakeword: detected" in drain(), \
+            "no wake-word event after mic trigger"
         c.close()
         u.close()
     finally:
