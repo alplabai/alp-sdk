@@ -575,11 +575,36 @@ epilogue:
      * here, exactly once, now that the callback has returned.
      * Deregistering here (rather than in z_shutdown()) avoids calling
      * ipc_service_deregister_endpoint() reentrantly from within its
-     * own `received` callback. */
-	rpc_recv_leave(be);
-	if (be->close_from_worker) {
-		(void)ipc_service_deregister_endpoint(&be->ept);
-		alp_rpc_close_finalize(be->owner);
+     * own `received` callback.
+     *
+     * Read `close_from_worker` into a local BEFORE rpc_recv_leave()
+     * decrements `cb_active` -- i.e. while this recv is still counted
+     * (GHSA-xhm8-7f87-93q5 follow-up). Reading the field AFTER the
+     * decrement is a formal C11 data race: once `cb_active` hits 0 an
+     * external z_shutdown() elsewhere is free to finish its drain,
+     * return DONE, and let the dispatcher call z_destroy()/_be_free()
+     * -- and a subsequent z_open() reusing the freed pool slot would
+     * memset() straight over this same field while this thread is
+     * still reading it. Value-benign under the single-worker
+     * ipc_service model this backend assumes (see this file's header
+     * comment) -- the pending epilogue IS the only recv-dispatching
+     * thread, so no NEW recv on this same channel can race it -- but
+     * not provably race-free in the C11 sense, unlike yocto_drv.c's
+     * atomic close_from_worker. Capturing the value while `cb_active`
+     * still protects `be` closes the gap without needing atomics: the
+     * value cannot change between this read and rpc_recv_leave() (it
+     * is set, at most once, earlier on this SAME thread's call stack,
+     * by the self-close z_shutdown() nested inside the callback
+     * above), so this is a pure reorder, not a behaviour change --
+     * DONE vs DEFERRED and the exactly-once finalize() call are
+     * unaffected. */
+	{
+		bool close_from_worker = be->close_from_worker;
+		rpc_recv_leave(be);
+		if (close_from_worker) {
+			(void)ipc_service_deregister_endpoint(&be->ept);
+			alp_rpc_close_finalize(be->owner);
+		}
 	}
 }
 
@@ -908,6 +933,17 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
  * left to run, permanently wedging B's slot.  `recv_active` closes
  * that hole; see struct rpc_be's doc comment.
  */
+
+#if defined(CONFIG_ALP_SDK_RPC)
+/* Test-only observability hook (default no-op) -- called once per
+ * iteration of the external-close `cb_active` drain loop below, so a
+ * test that #includes this .c file directly can assert the loop
+ * actually observed an in-flight recv (i.e. spun at least once)
+ * rather than draining in zero iterations (GHSA-xhm8-7f87-93q5 defect
+ * 2 coverage). */
+static void (*g_rpc_shutdown_drain_test_hook)(void) = NULL;
+#endif /* CONFIG_ALP_SDK_RPC */
+
 static alp_rpc_shutdown_result_t z_shutdown(alp_rpc_backend_state_t *st)
 {
 #if defined(CONFIG_ALP_SDK_RPC)
@@ -951,6 +987,9 @@ static alp_rpc_shutdown_result_t z_shutdown(alp_rpc_backend_state_t *st)
 	(void)ipc_service_deregister_endpoint(&be->ept);
 	be->ept_bound = false;
 	while (atomic_get(&be->cb_active) != 0) {
+		if (g_rpc_shutdown_drain_test_hook != NULL) {
+			g_rpc_shutdown_drain_test_hook();
+		}
 		/* Sleep, never spin -- see src/rpc_dispatch.c's _rpc_drain()
          * doc comment for the single-core priority-inversion trap a
          * busy spin (or k_yield(), which only cedes to equal
