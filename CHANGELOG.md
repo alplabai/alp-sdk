@@ -32,6 +32,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   (right tool for one bin; no CMSIS kernel).  Teaching-comment density
   was also raised on ~20 thin example `main.c` files.
 
+### Added — `butterworth-lowpass` example (`<alp/dsp>` IIR filter path)
+
+- New `examples/audio/butterworth-lowpass`: designs a 2nd-order
+  Butterworth low-pass biquad and runs passband + stopband tones through
+  the `<alp/dsp>` chain's `ALP_DSP_STAGE_IIR` stage (CMSIS-DSP
+  `arm_biquad_cascade_df1_f32` on the M55, portable-C under native_sim),
+  reporting per-tone gain via `alp_dsp_stats_f32`.  The chain's FIR/IIR
+  filter stages previously had no example (only the FFT path did).
+
 ### Added — `--emit zephyr-board` generator (#523)
 
 - `scripts/alp_project.py --input <board.yaml> --core <core_id> --emit

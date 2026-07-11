@@ -202,6 +202,17 @@
       },
       {
         "board": "e1m-evk",
+        "name": "butterworth-lowpass",
+        "path": "examples/audio/butterworth-lowpass",
+        "som": "E1M-AEN801",
+        "summary": "butterworth-lowpass -- design a 2nd-order Butterworth low-pass filter and run it through the portable <alp/dsp.h> IIR chain stage. =====================================================================",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
         "name": "i2s-tone",
         "path": "examples/audio/i2s-tone",
         "som": "E1M-AEN801",
