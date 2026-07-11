@@ -98,14 +98,20 @@ def test_sim_profile_aen801_uart_console():
 def test_sim_profile_aen801_peripherals():
     profile = sim_profile_for_sku("E1M-AEN801")
     kinds = {p["id"]: p["kind"] for p in profile["peripherals"]}
-    assert kinds == {"lsm6dso": "sensor", "button": "button",
-                     "ssd1306": "display"}
+    assert kinds == {"camera": "camera", "lsm6dso": "sensor",
+                     "button": "button", "ssd1306": "display"}
+    # The camera drives the aen-sim-vision app: memcpy a frame to the app's
+    # SIM_FRAME, then the trigger rings its doorbell.
+    cam = next(p for p in profile["peripherals"] if p["id"] == "camera")
+    assert cam["inject"]["memcpy"]["base"] == "0x20041000"
+    assert "0x20042000" in cam["inject"]["memcpy"]["trigger"]
     # ssd1306 MONO framebuffer for studio's DisplayWidget.
     (fb,) = profile["framebuffers"]
     assert fb["id"] == "ssd1306" and fb["format"] == "MONO"
     assert fb["w"] == 128 and fb["h"] == 64
-    # inject cmds must name real monitor paths the repl exposes.
-    inj = {p["id"]: p["inject"]["cmd"] for p in profile["peripherals"]}
+    # inject.cmd peripherals must name real monitor paths the repl exposes.
+    inj = {p["id"]: p["inject"]["cmd"]
+           for p in profile["peripherals"] if "cmd" in p["inject"]}
     assert inj["lsm6dso"].startswith("sysbus.sim_i2c.i2c_lsm6dso ")
     assert inj["button"].startswith("sysbus.sim_gpio.gpio_button ")
 
@@ -541,6 +547,106 @@ def test_sim_mode_aen_end_to_end(tmp_path):
         sp = cmd("sysbus ReadBytes 0x0 4")
         assert len(sp.split()) == 4, f"vector-table read failed: {sp!r}"
         c.close()
+    finally:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
+        logf.close()
+
+
+@pytest.mark.skipif(
+    os.environ.get("ALP_SIM_E2E") != "1" or shutil.which("renode") is None
+    or not os.environ.get("ALP_SIM_E2E_VISION_ELF"),
+    reason="set ALP_SIM_E2E=1, ALP_SIM_E2E_VISION_ELF=<aen-sim-vision ITCM elf>, "
+           "renode>=1.16.1 on PATH, to run the live vision-pipeline smoke")
+def test_sim_mode_aen_vision_pipeline(tmp_path):
+    """The full studio vision loop on the AEN M55 (#687): inject a camera
+    frame via the descriptor's camera memcpy, fire its trigger, and the
+    aen-sim-vision firmware runs REAL TFLite-Micro inference on the M55 and
+    renders to the ssd1306 frame buffer -- observed on the console
+    (`inference:`) and by reading the frame buffer back."""
+    import json
+    import shutil as _shutil
+    import signal
+    import subprocess
+    import time
+
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    elf = bundle / "zephyr.elf"
+    _shutil.copy(os.environ["ALP_SIM_E2E_VISION_ELF"], elf)
+
+    env = dict(os.environ)
+    env["ALP_SDK_ROOT"] = str(REPO)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(REPO / "scripts"), str(REPO / "scripts" / "west_commands")])
+    sim_log = tmp_path / "sim.out"
+    logf = sim_log.open("w")
+    proc = subprocess.Popen(
+        [sys.executable, str(REPO / "scripts" / "west_commands"
+                             / "alp_renode.py"),
+         "--sim-mode", "--board", "E1M-AEN801",
+         "--image-bundle", str(bundle), "--timeout", "60"],
+        env=env, stdout=logf, stderr=subprocess.STDOUT, start_new_session=True)
+    desc_path = bundle / "sim-descriptor.json"
+    try:
+        cp = up = cam = None
+        for _ in range(160):
+            if desc_path.exists() and "ready (timeout" in sim_log.read_text():
+                d = json.loads(desc_path.read_text())
+                cp = int(d["control_socket"].rsplit(":", 1)[1])
+                up = int(d["uart_socket"].rsplit(":", 1)[1])
+                cam = next(p for p in d["peripherals"] if p["id"] == "camera")
+                break
+            if proc.poll() is not None:
+                break
+            time.sleep(0.5)
+        assert cp and cam, f"sim never ready:\n{sim_log.read_text()}"
+
+        u = None
+        for _ in range(20):
+            try:
+                u = socket.create_connection(("127.0.0.1", up), timeout=1)
+                u.settimeout(1)
+                break
+            except OSError:
+                time.sleep(0.5)
+        assert u is not None, "UART socket never opened"
+
+        def drain():
+            data = b""
+            t = time.time()
+            while time.time() - t < 2:
+                try:
+                    data += u.recv(2048)
+                except socket.timeout:
+                    break
+            return data
+
+        assert b"aen-sim-vision: ready" in drain(), "vision app did not boot"
+
+        c = socket.create_connection(("127.0.0.1", cp), timeout=5)
+        c.settimeout(8)
+        f = c.makefile("rwb", buffering=0)
+
+        def cmd(line):
+            f.write((line + "\n").encode())
+            return f.readline().decode().strip()
+
+        base = cam["inject"]["memcpy"]["base"]
+        trigger = cam["inject"]["memcpy"]["trigger"]
+        assert cmd(f"sysbus WriteBytes {base} " + " ".join(["0xc8"] * 16)) == "ok"
+        assert cmd(trigger) == "ok"
+        time.sleep(1.0)
+        assert b"inference:" in drain(), "no inference after camera trigger"
+        # the ssd1306 frame buffer was rendered (non-zero somewhere).
+        fb = cmd("sysbus ReadBytes 0x20040000 8")
+        assert any(t not in ("0x00", "") for t in fb.split()), \
+            f"frame buffer not rendered: {fb!r}"
+        c.close()
+        u.close()
     finally:
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
