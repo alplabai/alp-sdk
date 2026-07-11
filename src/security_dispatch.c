@@ -254,13 +254,18 @@ alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap, size_t *d
 		rc = h->state.ops->hash_finish(&h->state, digest_out, digest_cap, digest_len);
 	}
 	alp_handle_op_leave(&h->active_ops);
-	/* Legacy contract: finish implicitly closes the handle (releasing
-     * only the slot, not the backend -- finish() itself already tore
-     * down whatever hash_close would) on success.  Match that here so
-     * callers don't leak a slot -- routed through the same
-     * begin_close() guard as alp_hash_close() so a racing explicit
-     * close() and this implicit one can't both release the slot
-     * (issue #629). */
+	/* <alp/security.h> contract (GHSA-92c3-v48m-m5gg): only ALP_OK
+     * implicitly closes the handle (releasing only the slot, not the
+     * backend -- finish() itself already tore down whatever
+     * hash_close would).  Every other result -- including
+     * ALP_ERR_INVAL from a too-small digest buffer -- leaves the
+     * handle open: backends report the required digest length on
+     * that path and keep their own state valid for a correctly sized
+     * retry or an explicit alp_hash_close().  Match that here so a
+     * successful finish doesn't leak a slot -- routed through the
+     * same begin_close() guard as alp_hash_close() so a racing
+     * explicit close() and this implicit one can't both release the
+     * slot (issue #629). */
 	if (rc == ALP_OK && alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
 		alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 		alp_slot_release(&h->in_use);

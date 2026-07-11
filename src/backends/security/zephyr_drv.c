@@ -134,6 +134,24 @@ static psa_algorithm_t to_psa_hash(alp_hash_alg_t a)
 	}
 }
 
+/* Digest byte length per alg -- mirrors the SE/yocto backends' own copies
+ * (se_cryptocell.c::alp_hash_digest_len, yocto_drv.c::hash_alg_md) so the
+ * short-buffer pre-check below can report the required length without a
+ * doomed psa_hash_finish() call first. */
+static size_t alp_hash_digest_len(alp_hash_alg_t a)
+{
+	switch (a) {
+	case ALP_HASH_SHA256:
+		return 32u;
+	case ALP_HASH_SHA384:
+		return 48u;
+	case ALP_HASH_SHA512:
+		return 64u;
+	default:
+		return 0u;
+	}
+}
+
 static alp_status_t psa_to_alp(psa_status_t st)
 {
 	switch (st) {
@@ -244,6 +262,21 @@ static alp_status_t z_hash_finish(alp_hash_backend_state_t *state,
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct hash_be *be = (struct hash_be *)state->be_data;
 	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
+
+	const size_t required = alp_hash_digest_len(state->alg);
+	if (digest_out == NULL || digest_cap < required) {
+		/* GHSA-92c3-v48m-m5gg: report the required length but do NOT
+		 * touch `be` / `state->be_data` here -- calling psa_hash_finish()
+		 * on a too-small buffer would both destroy the PSA operation
+		 * object AND return PSA_ERROR_BUFFER_TOO_SMALL (which psa_to_alp
+		 * maps to ALP_ERR_IO, not the documented ALP_ERR_INVAL).
+		 * <alp/security.h> only lets ALP_OK implicitly close the handle,
+		 * so leave be->op intact and the slot claimed for either a
+		 * correctly sized retry or an explicit alp_hash_close(). */
+		if (digest_len != NULL) *digest_len = required;
+		return ALP_ERR_INVAL;
+	}
+
 	size_t       got = 0;
 	psa_status_t st  = psa_hash_finish(&be->op, digest_out, digest_cap, &got);
 	if (digest_len != NULL) *digest_len = got;
