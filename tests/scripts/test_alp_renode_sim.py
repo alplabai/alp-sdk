@@ -95,6 +95,21 @@ def test_sim_profile_aen801_uart_console():
     assert profile["console"] == {"kind": "uart", "node": "sysbus.uart5"}
 
 
+def test_sim_profile_aen801_peripherals():
+    profile = sim_profile_for_sku("E1M-AEN801")
+    kinds = {p["id"]: p["kind"] for p in profile["peripherals"]}
+    assert kinds == {"lsm6dso": "sensor", "button": "button",
+                     "ssd1306": "display"}
+    # ssd1306 MONO framebuffer for studio's DisplayWidget.
+    (fb,) = profile["framebuffers"]
+    assert fb["id"] == "ssd1306" and fb["format"] == "MONO"
+    assert fb["w"] == 128 and fb["h"] == 64
+    # inject cmds must name real monitor paths the repl exposes.
+    inj = {p["id"]: p["inject"]["cmd"] for p in profile["peripherals"]}
+    assert inj["lsm6dso"].startswith("sysbus.sim_i2c.i2c_lsm6dso ")
+    assert inj["button"].startswith("sysbus.sim_gpio.gpio_button ")
+
+
 def test_build_sim_resc_uart_console_wires_socket_terminal(tmp_path):
     text = build_sim_resc_text(tmp_path / "p.repl", tmp_path / "fw.elf",
                                uart_node="sysbus.uart5", uart_port=44000)

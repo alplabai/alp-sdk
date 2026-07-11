@@ -372,8 +372,29 @@ _SIM_BOARD_PROFILES: dict[str, dict] = {
     },
     "E1M-AEN801": {
         "console": {"kind": "uart", "node": "sysbus.uart5"},
-        "framebuffers": [],
-        "peripherals": [],
+        # ssd1306 MONO 128x64 OLED -- an I2C panel, so its 1 bpp (1024 B)
+        # frame buffer lives in firmware SRAM; studio reads it back by
+        # address.  0x20040000 is inside sram0 (a placeholder base until a
+        # demo image publishes its real display-buffer symbol).
+        "framebuffers": [
+            {"id": "ssd1306", "base": "0x20040000", "size": 1024,
+             "format": "MONO", "w": 128, "h": 64},
+        ],
+        "peripherals": [
+            {
+                "id": "lsm6dso",
+                "kind": "sensor",
+                "inject": {
+                    "cmd": "sysbus.sim_i2c.i2c_lsm6dso AccelerationX {value}",
+                },
+            },
+            {
+                "id": "button",
+                "kind": "button",
+                "inject": {"cmd": "sysbus.sim_gpio.gpio_button PressAndRelease"},
+            },
+            {"id": "ssd1306", "kind": "display", "inject": {"cmd": "version"}},
+        ],
     },
 }
 

@@ -121,3 +121,24 @@ alif_expmst: Python.PythonPeripheral @ sysbus 0x49020000
     size: 0x10000
     initable: true
     script: "request.Value = 0x0"
+
+// --- Sim descriptor peripherals (studio hardware simulator, #687) ------
+//
+// The EVK demo's I2C0-header devices + button/LED + the ssd1306 display
+// buffer, exposed so the studio sim descriptor's inject commands resolve.
+// These are stand-in models (like renesas_rzv2n's tmp112): the inject
+// path sets/reads them directly over the monitor; a demo firmware that
+// actually drives them over the real Alif I2C/GPIO is future work (needs
+// the vision image + faithful Alif I2C/GPIO models).
+sim_i2c: I2C.OpenCoresI2C @ sysbus 0x49010000
+
+// lsm6dso 6-axis IMU (EVK I2C0 @ 0x6A).  Renode has no LSM6DSO; the
+// LSM9DS1 IMU stands in -- inject drives its Acceleration* properties.
+i2c_lsm6dso: Sensors.LSM9DS1_IMU @ sim_i2c 0x6a
+
+sim_gpio: GPIOPort.ARM_AHB_GPIO @ sysbus 0x49011000
+
+// Encoder-switch trigger button (EVK_PIN_ENCODER_SW), active-low.
+gpio_button: Miscellaneous.Button @ sim_gpio 0
+    -> sim_gpio@0
+
