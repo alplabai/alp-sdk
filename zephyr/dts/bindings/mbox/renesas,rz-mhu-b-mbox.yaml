@@ -1,0 +1,81 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# vendor-ext (alp-sdk #683); BENCH-UNVERIFIED.
+#
+# Renesas RZ MHU-B mailbox controller, as found on RZ/V2N (R9A09G056).  MHU-B is
+# NOT the plain linear MHU the upstream `renesas,rz-mhu-mbox` binding + driver
+# (zephyr/drivers/mbox/mbox_renesas_rz_mhu.c, FSP r_mhu_ns) implement: it is a
+# 42-slot register crossbar (hal_renesas
+# drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_mhu_b.h) where only channels
+# {5, 11, 17, 23} are valid on this core and the send/receive directions of a
+# channel live in DIFFERENT physical register blocks.  A distinct compatible is
+# used (NOT `renesas,rz-mhu-mbox`) so this binding never collides with a real
+# plain-MHU node; the driver is
+# zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c, backed by the vendored FSP port
+# zephyr/drivers/mbox/r_mhu_b_ns/r_mhu_b_ns.c (see that file's header for the
+# register-semantic notes and the one send_type derivation this port infers).
+#
+# `channel` is the FSP/hardware MHU-B channel (5, 11, 17 or 23), NOT the MBOX
+# API channel_id `tx-mask`/`rx-mask`/`#mbox-cells` address (that pair of
+# software channel IDs rides on top of this single hardware channel's
+# MSG/RSP halves, exactly like the plain-MHU binding).
+
+description: Renesas RZ MHU-B mailbox (RZ/V2N and later "B"-generation MHU)
+
+compatible: "renesas,rz-mhu-b-mbox"
+
+include: [base.yaml, mailbox-controller.yaml]
+
+properties:
+  channel:
+    type: int
+    required: true
+    description: |
+      FSP/hardware MHU-B channel number for the underlying MHU-B unit used for
+      MBOX.  Must be one of {5, 11, 17, 23} on rzv2n
+      (BSP_FEATURE_MHU_B_NS_VALID_CHANNEL_MASK); any other value is rejected by
+      R_MHU_B_NS_Open().
+
+  reg:
+    required: true
+    description: |
+      Base address of this channel's SEND register block (the pair-body's
+      send slot -- see bsp_mhu_b.h R_BSP_MHU_B_NS_REG_PAIR_BODY).  The
+      driver does not read this property at runtime: it resolves BOTH the
+      send and the (possibly different) receive register block itself from
+      the pair-body table by `channel` number.  Kept here for documentation
+      and because the binding schema requires it.
+
+  interrupts:
+    required: true
+    description: |
+      The receive-side interrupt for this channel's role (bsp_irq_id.h
+      MHU_MSGn_NS_IRQn or MHU_RSPn_NS_IRQn).  The driver derives send_type
+      (MSG-role vs RSP-role) by matching this against bsp_mhu_b.h's
+      per-channel SEND_TYPE_MSG_BODY / SEND_TYPE_RSP_BODY IRQ tables.
+
+  tx-mask:
+    type: int
+    required: true
+    description: TX supported channels mask
+
+  rx-mask:
+    type: int
+    required: true
+    description: RX supported channels mask
+
+  channels-count:
+    type: int
+    required: true
+    description: number of channels supported for a MBOX instance.
+
+  shared-memory:
+    type: phandle
+    description: |
+      Reference to the shared memory region that is going
+      to be used for the buffer communication between
+      MHU units. No data will be transmitted if not set.
+
+mbox-cells:
+  - channel

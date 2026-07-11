@@ -133,16 +133,25 @@
  * per the "board .dts stays hand-authored for the v2n family"
  * (scripts/gen_zephyr_board.py) rather than editing the vendored SoC dtsi.
  *
- * KNOWN GAP (see alp-sdk#683 build report): RZ/V2N's MHU hardware is the
- * newer "MHU-B" variant (see hal_renesas's
- * drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_mhu_b.h) with only channels
- * {5, 11, 17, 23} valid (BSP_FEATURE_MHU_B_NS_VALID_CHANNEL_MASK) and a
- * non-linear per-channel register/IRQ pairing -- NOT the plain linear MHU
- * that Zephyr's mbox_renesas_rz_mhu.c + its FSP r_mhu_ns.c backend (shared
- * verbatim across the whole "rzv" SoC family in hal_renesas) implement.
- * `channel = <5>` below is the lowest MHU-B-valid channel (best-effort
- * pick, unverified pairing); this does not resolve the FSP gap -- open a
- * vendor HAL ticket for a real r_mhu_b_ns.c before trusting this link.
+ * RESOLVED (alp-sdk #683 Phase 2): RZ/V2N's MHU hardware is the newer "MHU-B"
+ * variant (hal_renesas drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_mhu_b.h) with
+ * only channels {5, 11, 17, 23} valid (BSP_FEATURE_MHU_B_NS_VALID_CHANNEL_MASK)
+ * and a non-linear per-channel register/IRQ pairing -- NOT the plain linear MHU
+ * that Zephyr's mbox_renesas_rz_mhu.c + FSP r_mhu_ns.c implement (that pair does
+ * not compile for rzv2n). This node now uses the vendored MHU-B port instead
+ * (compatible `renesas,rz-mhu-b-mbox`, driver
+ * zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c, FSP module
+ * zephyr/drivers/mbox/r_mhu_b_ns/r_mhu_b_ns.c -- see that file's header for the
+ * register-semantic notes and BENCH-UNVERIFIED caveat).
+ * `channel = <5>` is the lowest MHU-B-valid channel.  Per bsp_mhu_b.h's
+ * R_BSP_MHU_B_NS_REG_PAIR_BODY, channel 5 sends via R_MHU_NS36 (base
+ * 0x50480480) and receives via R_MHU_NS8 (base 0x50480100) -- `reg` below
+ * documents the send register only (the driver resolves both from the
+ * pair-body table by channel number, not from this property; the binding
+ * schema requires `reg` regardless).  `interrupts = <293 2>` is
+ * MHU_MSG5_NS_IRQn (bsp_irq_id.h), which r_mhu_b_ns.c matches against
+ * bsp_mhu_b.h's R_BSP_MHU_B_NS_SEND_TYPE_RSP_BODY to derive send_type = RSP
+ * for this instance.
  */
 / {
 	reserved-memory {
@@ -199,15 +208,15 @@
 	};
 
 	soc {
-		/* CA55_0 <-> CM33 -- see the KNOWN GAP note above. */
-		mbox1: mhu@40400020 {
-			compatible = "renesas,rz-mhu-mbox";
+		/* CA55_0 <-> CM33 -- see the MHU-B note above. */
+		mbox1: mhu@50480480 {
+			compatible = "renesas,rz-mhu-b-mbox";
 			channel = <5>;
-			reg = <0x40400020 0x20>;
+			reg = <0x50480480 0x20>; /* R_MHU_NS36 (send reg) -- see the MHU-B note above */
 			tx-mask = <0x00000002>; /* Channel 1 is for TX */
 			rx-mask = <0x00000001>; /* Channel 0 is for RX */
 			channels-count = <2>;
-			interrupts = <293 2>; /* MHU_MSG5_NS_IRQn, bsp_irq_id.h -- unverified pairing */
+			interrupts = <293 2>; /* MHU_MSG5_NS_IRQn, bsp_irq_id.h -- verified against the vendor header */
 			interrupt-names = "mhuns";
 			#mbox-cells = <1>;
 			shared-memory = <&mhu1_shm>;

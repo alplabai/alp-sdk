@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Renesas RZ/V2N MHU-B inter-core mailbox -- vendor+adapted FSP driver.
+
+# Renesas RZ MHU-B mailbox driver -- vendor-ext, BENCH-UNVERIFIED (alp-sdk #683).
+# RZ/V2N's MHU is the newer "MHU-B" IP: a non-linear 42-slot register crossbar
+# (hal_renesas drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_mhu_b.h) with only
+# channels {5, 11, 17, 23} valid, NOT the plain linear MHU upstream Zephyr's
+# mbox_renesas_rz_mhu.c + FSP r_mhu_ns.c implement (that pair does not compile
+# for rzv2n: it references BSP_FEATURE_MHU_NS_VALID_CHANNEL_MASK /
+# _SEND_TYPE_RSP_VALID_CHANNEL_MASK, macros that exist only for the plain-MHU
+# SoCs). A DISTINCT compatible `renesas,rz-mhu-b-mbox` (NOT `renesas,rz-mhu-mbox`)
+# is used so this never collides with a real plain-MHU node.  Backs the M33-SM
+# <-> A55/Linux OpenAMP rpmsg link (examples/multicore/rpmsg-v2n).  Driver:
+# zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c; binding:
+# zephyr/dts/bindings/mbox/renesas,rz-mhu-b-mbox.yaml.
+config MBOX_RENESAS_RZ_MHU_B
+	bool "Renesas RZ MHU-B mailbox (vendor-ext, BENCH-UNVERIFIED)"
+	default y
+	depends on MBOX
+	depends on DT_HAS_RENESAS_RZ_MHU_B_MBOX_ENABLED
+	select USE_RZ_FSP_MHU_B
+	help
+	  Enable the Renesas RZ/V2N MHU-B mailbox driver. vendor-ext,
+	  BENCH-UNVERIFIED -- structurally adapted from the FSP plain-MHU
+	  r_mhu_ns module against the MHU-B register crossbar (bsp_mhu_b.h);
+	  Renesas has not shipped an r_mhu_b_ns FSP module for any part as of
+	  this port. Not yet validated against real MHU-B traffic on silicon.
+
+config USE_RZ_FSP_MHU_B
+	bool
+	help
+	  Compile the vendored FSP r_mhu_b_ns module
+	  (zephyr/drivers/mbox/r_mhu_b_ns/r_mhu_b_ns.c), selected by
+	  MBOX_RENESAS_RZ_MHU_B.  This is NOT a hal_renesas symbol (unlike
+	  USE_RZ_FSP_MHU, which gates the hal_renesas plain-MHU r_mhu_ns.c) --
+	  the module lives entirely inside this SDK, so alp-sdk's own
+	  zephyr/CMakeLists.txt gates on it directly.
