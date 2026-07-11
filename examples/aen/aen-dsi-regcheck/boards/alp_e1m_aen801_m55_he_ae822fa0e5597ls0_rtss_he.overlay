@@ -11,9 +11,9 @@
  *
  * The dphy node is already defined in zephyr/dts/alif/ensemble_e8_peripherals.dtsi
  * (it is shared with the camera/CSI path); this overlay only flips it okay.  The
- * cdc200 + mipi_dsi nodes are added HERE because the display-class drivers are
- * not yet authored -- once they are, these two nodes move into the shared dtsi
- * (the snippet in the deliverable) and this overlay shrinks to just status flips.
+ * cdc200 + mipi_dsi nodes are added HERE because this bind-only app does not
+ * enable the live display-class drivers.  Use aen-dsi-display for the panel +
+ * driver path.
  *
  * reg / IRQ are transcribed from the Alif CMSIS DFP (CDC_BASE 0x49031000 /
  * DSI_BASE 0x49032000, soc.h) and the fork e1.dtsi (cdc200 IRQs 333..342,
@@ -21,14 +21,13 @@
  * module 0 / en_mask 0 -> alif_clock_control_on() no-ops) -- the fork drives
  * these with ALIF_DPI_CLK / ALIF_DSI_CLK / ALIF_CDC200_PIX_SYST_ACLK /
  * ALIF_MIPI_TXDPHY_CLK in the fork 7-arg encoding, which MUST NOT be copied onto
- * the upstream clockctrl (wrong register block) -- so the real IDs are deferred
- * to the driver-port + bench bring-up.
+ * the upstream clockctrl (wrong register block).  The live driver path
+ * re-authors the clock IDs in alif-ensemble-clocks-ext.h and is exercised by
+ * aen-dsi-display.
  *
- * SCOPE: this proves the chain BINDS (DT_HAS_*_ENABLED + phandle wiring).  LIVE
- * display is HW-blocked: no display-class driver yet, and the AEN801 panel part
- * is TBD (the fork default focuslcds,mw405 is the Alif AppKit panel, NOT
- * confirmed for AEN801) -- so no panel child + no panel reset/backlight GPIOs are
- * asserted here (omitted, not invented).
+ * SCOPE: this proves the chain BINDS (DT_HAS_*_ENABLED + phandle wiring).  It
+ * deliberately omits panel children and reset/backlight GPIOs; live output is
+ * covered by the separate aen-dsi-display bench app.
  */
 
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
@@ -50,10 +49,9 @@
 };
 
 /*
- * C2-MIPI-DSI display chain.  These two nodes are added by the overlay until the
- * display-class drivers are authored, after which they move into the shared
- * ensemble_e8_peripherals.dtsi (see the deliverable snippet).  Placed under the
- * SoC peripheral bus.
+ * C2-MIPI-DSI display chain.  These two nodes stay local to this bind-only
+ * overlay; the live display app carries the panel and driver-specific settings.
+ * Placed under the SoC peripheral bus.
  */
 &{/soc/} {
 	cdc200: cdc200@49031000 {
@@ -67,11 +65,11 @@
 				  "bus_error_0", "bus_error_1",
 				  "reg_reload_0", "reg_reload_1";
 
-		/* FREQUENCY-ONLY DUMMY clocks -- see header. */
+		/* Clock IDs are real upstream-encoded values; this app does not enable drivers. */
 		clocks = <&clockctrl ALIF_DPI_CLK>, <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>;
 		clock-names = "dpi-clk-en", "pixel-clk";
 
-		/* Panel timing -- placeholder (AEN801 panel part TBD). */
+		/* Placeholder timing for bind-only validation. */
 		width = <800>;
 		height = <480>;
 		hfront-porch = <210>;
@@ -110,7 +108,7 @@
 		cdc-if = <&cdc200>;
 		phy-if = <&dphy 1>;
 
-		/* FREQUENCY-ONLY DUMMY clocks -- see header. */
+		/* Clock IDs are real upstream-encoded values; this app does not enable drivers. */
 		clocks = <&clockctrl ALIF_DSI_CLK>,
 			 <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>,
 			 <&clockctrl ALIF_MIPI_TXDPHY_CLK>;
@@ -123,13 +121,7 @@
 		crc-recv-en;
 		frame-ack-en;
 
-		/*
-		 * NO panel child node.  The AEN801 panel part is TBD: the fork
-		 * default is focuslcds,mw405 (the Alif AppKit panel), unconfirmed
-		 * for the AEN801 SoM, and its reset/backlight GPIOs are
-		 * bench-unknown.  A board that wires a panel adds the child +
-		 * data-lanes/video-mode/pixel-format here.
-		 */
+		/* No panel child here; aen-dsi-display carries the live panel path. */
 		status = "okay";
 	};
 };

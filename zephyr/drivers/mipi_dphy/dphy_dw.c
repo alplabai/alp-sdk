@@ -226,12 +226,16 @@ static int dphy_dw_config_pll(const struct device *dev, struct dphy_dsi_settings
 	uint8_t tmp = 0;
 
 	/*
-	 * PLL configuration mechanism:
-	 *	0 - through SoC registers.
-	 *	1 - through Test Control interface.
+	 * PLL configuration mechanism (DPHY_PLL_CTRL0 SHADOW_CONTROL):
+	 *	0 - through the SoC PLL shadow registers (DPHY_PLL_CTRL1/2).
+	 *	1 - through the DesignWare test-control interface.
+	 *
+	 * The Alif D-PHY locks via the SoC shadow-register path: write m/n/VCO
+	 * into DPHY_PLL_CTRL1/2, then pulse SHADOW_CLEAR and UPDATE_PLL.  Using
+	 * only the test interface leaves the shadow registers at zero and the PLL
+	 * never locks.
 	 */
-	/* Enable PLL shadow cntrl bit:config through test cntrl interface. */
-	sys_set_bits(regs + DPHY_PLL_CTRL0, DPHY_PLL_CTRL0_SHADOW_CONTROL);
+	sys_clear_bits(regs + DPHY_PLL_CTRL0, DPHY_PLL_CTRL0_SHADOW_CONTROL);
 
 	/*
 	 * PLL clksel[1:0]:
@@ -244,6 +248,36 @@ static int dphy_dw_config_pll(const struct device *dev, struct dphy_dsi_settings
 	 */
 	reg_write_part(regs + DPHY_PLL_CTRL0, 1, DPHY_PLL_CTRL0_CLKSEL_MASK,
 		       DPHY_PLL_CTRL0_CLKSEL_SHIFT);
+
+	/* Flush stale shadow contents before loading the new PLL config. */
+	sys_set_bits(regs + DPHY_PLL_CTRL0, DPHY_PLL_CTRL0_SHADOW_CLR);
+	k_busy_wait(1);
+	sys_clear_bits(regs + DPHY_PLL_CTRL0, DPHY_PLL_CTRL0_SHADOW_CLR);
+
+	/*
+	 * Program the SoC PLL shadow registers: feedback multiplier (m), input
+	 * divider (n, encoded N-1), VCO range, charge-pump and loop-filter fields.
+	 */
+	reg_write_part(regs + DPHY_PLL_CTRL1, phy->pll_m, DPHY_PLL_CTRL1_PLL_M_MASK,
+		       DPHY_PLL_CTRL1_PLL_M_SHIFT);
+	reg_write_part(regs + DPHY_PLL_CTRL1, phy->pll_n - 1, DPHY_PLL_CTRL1_PLL_N_MASK,
+		       DPHY_PLL_CTRL1_PLL_N_SHIFT);
+	reg_write_part(regs + DPHY_PLL_CTRL2, phy->vco_cntrl, DPHY_PLL_CTRL2_VCO_CTRL_MASK,
+		       DPHY_PLL_CTRL2_VCO_CTRL_SHIFT);
+	reg_write_part(regs + DPHY_PLL_CTRL2, DPHY_PROP_CNTRL, DPHY_PLL_CTRL2_PROP_CTRL_MASK,
+		       DPHY_PLL_CTRL2_PROP_CTRL_SHIFT);
+	reg_write_part(regs + DPHY_PLL_CTRL2, DPHY_INT_CNTRL, DPHY_PLL_CTRL2_INT_CTRL_MASK,
+		       DPHY_PLL_CTRL2_INT_CTRL_SHIFT);
+	reg_write_part(regs + DPHY_PLL_CTRL2, DPHY_CPBIAS_CNTRL,
+		       DPHY_PLL_CTRL2_CPBIAS_CTRL_MASK, DPHY_PLL_CTRL2_CPBIAS_CTRL_SHIFT);
+	reg_write_part(regs + DPHY_PLL_CTRL0, DPHY_GMP_CNTRL, DPHY_PLL_CTRL0_GMP_CTRL_MASK,
+		       DPHY_PLL_CTRL0_GMP_CTRL_SHIFT);
+
+	/* Latch the shadow config into the PLL. */
+	k_busy_wait(1);
+	sys_set_bits(regs + DPHY_PLL_CTRL0, DPHY_PLL_CTRL0_UPDATE_PLL);
+	k_busy_wait(1);
+	sys_clear_bits(regs + DPHY_PLL_CTRL0, DPHY_PLL_CTRL0_UPDATE_PLL);
 
 	/* Set PLL m[9:0] to regs - 0x179, 0x17a */
 	mipi_dphy_mask_write_register(test_ctrl0, test_ctrl1, dphy4txtester_DIG_RDWR_TX_PLL_28,

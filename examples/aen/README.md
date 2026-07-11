@@ -61,6 +61,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-camera-regcheck`](aen-camera-regcheck/)      | **staging** -- camera-capture stack (`alif,cam` / DesignWare CSI-2 + D-PHY / ON Semi ARX3A0) binds; sensor not wired this batch. |
 | [`aen-isp-regcheck`](aen-isp-regcheck/)            | **staging** -- VeriSilicon ISP Pico (`vsi,isp-pico`) bind-only staging check. |
 | [`aen-dsi-regcheck`](aen-dsi-regcheck/)            | **staging** -- Alif C2-MIPI-DSI display stack bind-only check (the TX twin of the CSI camera path). |
+| [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY. |
 | [`aen-i2s-amp-alif`](aen-i2s-amp-alif/)            | Drive a tone out of the E8 audio I2S (`i2s3`) over the vendored DesignWare I2S driver (Zephyr I2S API). |
 | [`aen-pdm-mic-alif`](aen-pdm-mic-alif/)            | Capture PCM from the EVK's PDM mics (MP34DT05) through the HP PDM block + the vendored `alif,alif-pdm` DMIC driver (Zephyr DMIC API). |
 

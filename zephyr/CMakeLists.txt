@@ -448,6 +448,32 @@ zephyr_library_sources_ifdef(CONFIG_MIPI_DPHY_DW
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/isp_pico.c)
 
+# Alif Ensemble DISPLAY path -- TES CDC-2.1 (CDC200) DPI/RGB display controller
+# (compatible "tes,cdc-2.1"), vendored from the Apache-2.0 zephyr_alif fork
+# (drivers/display/display_cdc200.c) + PORTED to the v4.4 display API by Alp Lab
+# AB.  Upstream Zephyr v4.4 + hal_alif ship no tes,cdc-2.1 or DPI display
+# driver, so the source is carried in-tree to survive a `west update`.  The TU
+# uses hal_alif's <soc_memory_map.h> only under CONFIG_FB_USES_DTCM_REGION; the
+# default SRAM0 framebuffer path needs neither it nor the hal_alif common include
+# dir.  ADR 0017 Tier-2 (INTERIM).
+if(CONFIG_DISPLAY_CDC200 AND CONFIG_FB_USES_DTCM_REGION)
+    zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+endif()
+zephyr_library_sources_ifdef(CONFIG_DISPLAY_CDC200
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/display_cdc200.c)
+
+# Synopsys DesignWare MIPI-DSI host controller (compatible "snps,designware-dsi"),
+# the DSI-TX bridge from the CDC200 DPI source to the shared DesignWare MIPI
+# D-PHY (TX role) on the Alif Ensemble E8.  Vendored from the Apache-2.0
+# zephyr_alif fork (drivers/mipi_dsi/dsi_dw.c) + PORTED to the v4.4 MIPI-DSI host
+# API by Alp Lab AB.  Upstream Zephyr v4.4 has the mipi_dsi bus class but no
+# snps,designware-dsi host driver.  ADR 0017 Tier-2 (INTERIM, task #21).
+if(CONFIG_MIPI_DSI_DW)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+endif()
+zephyr_library_sources_ifdef(CONFIG_MIPI_DSI_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dsi/dsi_dw.c)
+
 # Alif Ensemble CAN-FD controller (CAST CAN-CTRL IP, compatible "cast,can",
 # CANFD0 base 0x49036000), vendored VERBATIM from the Apache-2.0 zephyr_alif
 # fork (drivers/can/can_cast.c + can_cast.h).  Upstream Zephyr v4.4 ships only
