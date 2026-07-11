@@ -147,16 +147,28 @@ jobs:
                  -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_sim.conf"
           test -f /tmp/aen-m55-build/zephyr/zephyr.elf
 
-      - name: west alp-renode --sim-mode end-to-end (real firmware, V2N + AEN)
+      # Run the two live e2es as SEPARATE steps: each spawns its own Renode
+      # process, and isolating them keeps one heavy boot from starving the
+      # other's monitor on a loaded runner.
+      - name: --sim-mode e2e (real V2N M33 firmware, ram_console)
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ALP_SIM_E2E: '1'
           ALP_SIM_E2E_ELF: /tmp/v2n-m33-build/zephyr/zephyr.elf
-          ALP_SIM_E2E_AEN_ELF: /tmp/aen-m55-build/zephyr/zephyr.elf
           ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
         run: |
           set -euo pipefail
           python3 -m pytest -q \
               tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end \
-              tests/scripts/test_alp_renode_sim.py::test_sim_mode_aen_end_to_end \
               tests/scripts/test_alp_renode_sim.py::test_elf_symbol_finds_ram_console_when_e2e_elf_set
+
+      - name: --sim-mode e2e (real AEN M55 firmware, UART5 console)
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ALP_SIM_E2E: '1'
+          ALP_SIM_E2E_AEN_ELF: /tmp/aen-m55-build/zephyr/zephyr.elf
+          ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q \
+              tests/scripts/test_alp_renode_sim.py::test_sim_mode_aen_end_to_end

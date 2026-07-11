@@ -772,10 +772,23 @@ class RenodeMonitor:
                     continue
                 out.append(line)
 
-    def drain_boot(self, timeout_s: float = 60.0) -> None:
+    def drain_boot(self, timeout_s: float = 90.0, attempts: int = 3) -> None:
         """Swallow the boot-time monitor output so the first real command
-        gets a clean reply."""
-        self.command("version", timeout_s=timeout_s)
+        gets a clean reply.  Retries a few times: on a loaded CI runner the
+        pinned dotnet Renode's monitor can be slow to first respond, and a
+        single lost sync would strand the whole session -- a fresh `version`
+        (with its own echo sentinel) re-syncs.  Each retry resets `_broken`
+        since the earlier timeout latched it."""
+        per = max(10.0, timeout_s / attempts)
+        last = None
+        for _ in range(attempts):
+            self._broken = False
+            try:
+                self.command("version", timeout_s=per)
+                return
+            except AlpRenodeError as e:
+                last = e
+        raise last if last else AlpRenodeError("drain_boot failed")
 
 
 def _dispatch_control_line(monitor: RenodeMonitor, line: str) -> str:
