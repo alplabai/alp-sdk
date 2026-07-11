@@ -7,6 +7,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — portable AHRS sensor-fusion surface (`<alp/ahrs.h>`)
+
+- New `alp_ahrs_init` / `alp_ahrs_update_imu` / `alp_ahrs_euler` /
+  `alp_ahrs_reset` over a caller-owned `alp_ahrs_t` — a Madgwick IMU
+  orientation filter fusing gyro + accelerometer into a drift-corrected
+  quaternion (Euler read-out).  Pure C (libm), builds on all three OS
+  targets, opt-in via `libraries: [madgwick_ahrs]` (emits the new
+  `CONFIG_ALP_SDK_AHRS`).  Makes the previously metadata-only
+  `madgwick_ahrs` profile consumable; `drone-hud` drops its gyro-only
+  integrator (which drifted) and now fuses the accelerometer.  Includes a
+  guard against the stock Madgwick's `1/sqrt(0)` NaN when perfectly level.
+  `[ABI-EXPERIMENTAL]`; ABI snapshot regenerated.
+
 ### Added — portable PID control surface (`<alp/pid.h>`)
 
 - New `alp_pid_init` / `alp_pid_step` / `alp_pid_reset` over a

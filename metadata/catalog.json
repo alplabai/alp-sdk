@@ -992,6 +992,15 @@
     },
     {
       "functions": [
+        "alp_ahrs_euler",
+        "alp_ahrs_init",
+        "alp_ahrs_reset",
+        "alp_ahrs_update_imu"
+      ],
+      "header": "include/alp/ahrs.h"
+    },
+    {
+      "functions": [
         "alp_audio_in_capabilities",
         "alp_audio_in_close",
         "alp_audio_in_open",
