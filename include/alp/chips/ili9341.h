@@ -15,7 +15,7 @@
  *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
- * @par Driver status: [stub-impl] — init + set-window + write-pixels.
+ * @par Driver status: [partial-impl] — init + set-window + write-pixels.
  *
  * Datasheet: Ilitek ILI9341 v1.11 (Jun 2011).
  */

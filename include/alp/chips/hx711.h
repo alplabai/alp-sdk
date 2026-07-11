@@ -17,9 +17,9 @@
  *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
  *   sequencing as paper-correct only until the v1.0 verification
  *   sweep lands.
- * @par Driver status: [stub-impl] — read API present; DOUT-pin
- *   ready-wait is timing-only at v0.5 (no IRQ wake); fully fleshed
- *   out alongside the v0.6 cooperative timer surface.
+ * @par Driver status: [complete-impl] — init + bit-banged read +
+ *   gain selection + ready-wait.  The ready-wait is timing-based at
+ *   v0.5 (no IRQ wake); an IRQ path is a v0.6 follow-up.
  *
  * Datasheet: Avia Semi HX711 v2.1 (Apr 2017).
  */
