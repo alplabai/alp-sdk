@@ -14,6 +14,16 @@
 #define ULOG_META_WIRE_LEN  46u
 #define ULOG_META_MAGIC     0x554C4F47u /* 'ULOG' */
 
+/* Highest sequence number the engine will ever assign (18 nines). kbuf()
+ * renders "ulog.<seq>" into a 24-byte key buffer ("ulog." + up to 18 digits
+ * + NUL); bounding seq here keeps every rendered key inside that buffer
+ * instead of silently truncating once seq grows past ~10^18. Also leaves
+ * headroom below UINT64_MAX so the monotonic counter can never wrap.
+ * ulog_engine_append() reports ALP_ERR_NOMEM once the log reaches this
+ * bound -- the log stops accepting new entries, but never wraps or
+ * truncates a key. */
+#define ULOG_SEQ_MAX ((uint64_t)999999999999999999ull)
+
 /* Wire (de)serialisation. prev_hash is the chaining link, kept out of the
  * public entry struct. */
 alp_status_t ulog_entry_encode(const alp_update_log_entry_t *e,

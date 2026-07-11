@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include <string.h>
+#include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 
 #include <alp/peripheral.h>
@@ -58,8 +59,10 @@ ZTEST(alp_update_log, test_decode_bad_version)
 	zassert_equal(ulog_entry_decode(wire, sizeof(wire), &got, p), ALP_ERR_VERSION);
 }
 
-/* Minimal RAM store double: fixed slots of (key,blob). */
-#define TD_SLOTS 16
+/* Minimal RAM store double: fixed slots of (key,blob). Sized to cover the
+ * concurrent-append fault-injection test below (2 threads x CONC_ITERS
+ * entries + 1 meta record). */
+#define TD_SLOTS 48
 #define TD_BLOB  128
 struct td_store {
 	struct {
@@ -326,6 +329,307 @@ ZTEST(alp_update_log, test_count_and_get)
 	zassert_mem_equal(e.image_hash, want, 32);
 
 	zassert_equal(ulog_engine_get(&s, 9, &e), ALP_ERR_NOT_FOUND);
+}
+
+/* --- Crash- and concurrency-safety fault injection (GHSA-r236-29pg-w694)
+ *
+ * ulog_engine_append() durably mutates the entry blob, then the meta
+ * cache, then the counter -- three separate calls a power loss can land
+ * between. The tests below write directly against the td_store to land
+ * it in exactly the torn state each crash point would leave (bypassing
+ * ulog_engine_append entirely, since a real crash mid-call cannot be
+ * expressed by calling the function that is supposed to be atomic), then
+ * prove the engine recovers deterministically: no orphan wedge, no false
+ * rollback, no re-chained duplicate sequence, and real corruption still
+ * gets reported rather than silently "fixed".
+ */
+
+/* Mirrors engine.c's internal kbuf() key format ("ulog.<decimal>") for
+ * small seq values, so this file doesn't need engine.c's static helper
+ * (nor libc snprintf) just to poke a key directly into the store double. */
+static void test_key(char *out, size_t cap, uint64_t seq)
+{
+	char tmp[24];
+	int  n = 0;
+	do {
+		tmp[n++] = (char)('0' + (seq % 10u));
+		seq /= 10u;
+	} while (seq && n < 20);
+	size_t      pos = 0;
+	const char *pfx = "ulog.";
+	while (*pfx && pos < cap - 1)
+		out[pos++] = *pfx++;
+	while (n > 0 && pos < cap - 1)
+		out[pos++] = tmp[--n];
+	out[pos] = 0;
+}
+
+/* Durably write entry `seq` directly against the store, as if
+ * ulog_engine_append() had completed only its entry-write phase (the
+ * transaction's sole durable commit point) and then crashed before
+ * touching meta or the counter. Returns the entry's wire hash so the
+ * caller can drive meta into whichever torn state it wants next. */
+static void
+raw_write_entry(struct td_store *t, uint64_t seq, const uint8_t prev[32], uint8_t hash_out[32])
+{
+	alp_update_log_entry_t e = mk_entry((seq + 1) * 10, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+	e.seq                    = seq;
+	uint8_t wire[ULOG_ENTRY_WIRE_LEN];
+	zassert_equal(ulog_entry_encode(&e, prev, wire), ALP_OK);
+	char key[24];
+	test_key(key, sizeof(key), seq);
+	zassert_equal(td_put(t, key, wire, sizeof(wire)), ALP_OK);
+	ulog_sha256(wire, sizeof(wire), hash_out);
+}
+
+static void raw_write_meta(struct td_store *t, uint64_t count, const uint8_t head_hash[32])
+{
+	struct ulog_meta m;
+	m.count = count;
+	memcpy(m.head_hash, head_hash, 32);
+	uint8_t metabuf[ULOG_META_WIRE_LEN];
+	zassert_equal(ulog_meta_encode(&m, metabuf), ALP_OK);
+	zassert_equal(td_put(t, "ulog.meta", metabuf, sizeof(metabuf)), ALP_OK);
+}
+
+/* Crash case 1: power loss after the entry write, before meta or the
+ * counter. In the PSA secure owner this is the shape that used to
+ * permanently wedge the log (the write-once entry could never be
+ * rewritten by a later append); here it must self-heal instead. */
+ZTEST(alp_update_log, test_recover_orphan_entry_after_entry_write_crash)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 2); /* entries 0,1 committed; counter == meta.count == 2 */
+
+	uint8_t metabuf[ULOG_META_WIRE_LEN];
+	size_t  mlen = 0;
+	zassert_equal(td_get(&t, "ulog.meta", metabuf, sizeof(metabuf), &mlen), ALP_OK);
+	struct ulog_meta m;
+	zassert_equal(ulog_meta_decode(metabuf, mlen, &m), ALP_OK);
+
+	uint8_t hash2[32];
+	raw_write_entry(&t, 2, m.head_hash, hash2); /* entry 2 landed... */
+	zassert_equal(t.counter, 2);                /* ...meta/counter never caught up */
+
+	/* Even before any repair, the orphan is already readable: a
+	 * write-once entry that landed on disk is never a wedge by itself,
+	 * only the stale bookkeeping around it needs fixing. */
+	alp_update_log_entry_t got;
+	zassert_equal(ulog_engine_get(&s, 2, &got), ALP_OK);
+
+	/* verify() must self-heal and see one valid 3-entry chain -- not a
+	 * truncation, not a chain break, not a rollback. */
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK);
+	zassert_equal(t.counter, 3, "recovery must advance the counter past the orphan");
+
+	zassert_equal(td_get(&t, "ulog.meta", metabuf, sizeof(metabuf), &mlen), ALP_OK);
+	zassert_equal(ulog_meta_decode(metabuf, mlen, &m), ALP_OK);
+	zassert_equal(m.count, 3);
+	zassert_mem_equal(m.head_hash, hash2, 32);
+
+	/* The next append must continue at seq 3, never re-chain against 2. */
+	alp_update_log_entry_t ent3 = mk_entry(999, "next", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &ent3), ALP_OK);
+	zassert_equal(t.counter, 4);
+	alp_update_log_entry_t got3;
+	zassert_equal(ulog_engine_get(&s, 3, &got3), ALP_OK);
+	zassert_equal(got3.seq, 3);
+}
+
+/* Crash case 2: power loss after meta but before the counter increment --
+ * "meta ahead of counter". Trusting meta as a second independent
+ * authority (the pre-fix design) reports ROLLED_BACK here on an entirely
+ * honest log, and a naive retry would re-chain a repeated sequence
+ * against the wrong head. */
+ZTEST(alp_update_log, test_recover_meta_ahead_of_counter_after_crash)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 2);
+
+	uint8_t metabuf[ULOG_META_WIRE_LEN];
+	size_t  mlen = 0;
+	zassert_equal(td_get(&t, "ulog.meta", metabuf, sizeof(metabuf), &mlen), ALP_OK);
+	struct ulog_meta m;
+	zassert_equal(ulog_meta_decode(metabuf, mlen, &m), ALP_OK);
+
+	uint8_t hash2[32];
+	raw_write_entry(&t, 2, m.head_hash, hash2);
+	raw_write_meta(&t, 3, hash2); /* meta already advanced... */
+	zassert_equal(t.counter, 2);  /* ...but the counter increment never landed. */
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(
+	    v, ALP_UPDATE_LOG_VERIFY_OK, "meta-ahead-of-counter must not be reported as a rollback");
+	zassert_equal(t.counter, 3, "recovery must advance the counter to match the committed meta");
+
+	/* A subsequent append must continue at seq 3, not re-use 2. */
+	alp_update_log_entry_t ent3 = mk_entry(999, "next", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &ent3), ALP_OK);
+	alp_update_log_entry_t got3;
+	zassert_equal(ulog_engine_get(&s, 3, &got3), ALP_OK);
+	zassert_equal(got3.seq, 3);
+	uint64_t n = 0;
+	zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK);
+	zassert_equal(n, 4);
+}
+
+/* Data sitting at "ulog.<hw>" that does NOT chain from the true
+ * preceding entry is not the torn-append shape (a real crash can only
+ * ever land the exact wire ulog_engine_append() itself encoded, chained
+ * from whatever meta.head_hash was at that moment -- see the block
+ * comment above ulog_recover()). Recovery must not mistake it for a
+ * completed append and must not adopt it into the chain: the counter
+ * stays put, and the already-committed range verify() walks (entries
+ * 0..hw-1) is untouched and still reports OK -- recovery never discards
+ * or rewrites the frontier slot's contents (a write-once tier could not
+ * anyway), it simply declines to count it. */
+ZTEST(alp_update_log, test_recover_does_not_adopt_non_chaining_frontier_entry)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 2);
+
+	uint8_t bogus_prev[32];
+	memset(bogus_prev, 0x77, sizeof(bogus_prev)); /* deliberately wrong */
+	uint8_t discard[32];
+	raw_write_entry(&t, 2, bogus_prev, discard);
+	zassert_equal(t.counter, 2);
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_OK,
+	             "the committed range (seq 0..1) is untouched and still verifies clean");
+	zassert_equal(t.counter, 2,
+	             "recovery must not adopt/count non-chaining data at the frontier slot");
+
+	uint64_t n = 0;
+	zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK);
+	zassert_equal(n, 2, "the un-adopted frontier entry must not be counted");
+}
+
+/* Counter/sequence overflow guard: refuse rather than risk a truncated
+ * "ulog.<seq>" key (kbuf()'s 24-byte buffer) or an eventual counter wrap. */
+ZTEST(alp_update_log, test_append_guards_sequence_overflow)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces(&t, &s, &c);
+	t.counter = ULOG_SEQ_MAX + 1u;
+
+	alp_update_log_entry_t e = mk_entry(1, "overflow", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &e), ALP_ERR_NOMEM);
+	zassert_equal(t.counter, ULOG_SEQ_MAX + 1u, "a refused append must not touch the counter");
+	for (int i = 0; i < TD_SLOTS; i++) {
+		zassert_false(t.s[i].used, "a refused append must not have written anything");
+	}
+}
+
+/* Concurrency case: two threads call ulog_engine_append() against the
+ * SAME store/counter with no external synchronization. Before the fix,
+ * both could read the same counter value, each write "ulog.<N>", and the
+ * counter would end up claiming N+2 entries while ulog.(N+1) never
+ * existed. The engine's internal lock must serialize them into one
+ * valid, contiguous chain. */
+
+#define CONC_ITERS      16
+#define CONC_STACK_SIZE 2048
+
+K_THREAD_STACK_DEFINE(g_conc_stack_a, CONC_STACK_SIZE);
+K_THREAD_STACK_DEFINE(g_conc_stack_b, CONC_STACK_SIZE);
+
+struct conc_worker_ctx {
+	alp_secure_store_if      *s;
+	alp_monotonic_counter_if *c;
+	int                       ok_count;
+};
+
+static void conc_worker(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	struct conc_worker_ctx *ctx = (struct conc_worker_ctx *)p1;
+	for (int i = 0; i < CONC_ITERS; i++) {
+		alp_update_log_entry_t e = mk_entry((uint64_t)i, "race", ALP_UPDATE_STATUS_CONFIRMED);
+		if (ulog_engine_append(ctx->s, ctx->c, &e) == ALP_OK) {
+			ctx->ok_count++;
+		}
+		k_yield();
+	}
+}
+
+ZTEST(alp_update_log, test_concurrent_append_serializes_to_one_valid_chain)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces(&t, &s, &c);
+
+	struct conc_worker_ctx ctx_a = { &s, &c, 0 };
+	struct conc_worker_ctx ctx_b = { &s, &c, 0 };
+
+	struct k_thread th_a, th_b;
+	k_thread_create(&th_a,
+	                g_conc_stack_a,
+	                CONC_STACK_SIZE,
+	                conc_worker,
+	                &ctx_a,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(5),
+	                0,
+	                K_NO_WAIT);
+	k_thread_create(&th_b,
+	                g_conc_stack_b,
+	                CONC_STACK_SIZE,
+	                conc_worker,
+	                &ctx_b,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(5),
+	                0,
+	                K_NO_WAIT);
+	k_thread_join(&th_a, K_FOREVER);
+	k_thread_join(&th_b, K_FOREVER);
+
+	int total_ok = ctx_a.ok_count + ctx_b.ok_count;
+	zassert_equal(total_ok, 2 * CONC_ITERS, "every append must succeed against a RAM store");
+	zassert_equal(t.counter,
+	              (uint64_t)total_ok,
+	              "the counter must equal the successful-append count exactly -- no lost "
+	              "and no double-counted sequence number");
+
+	uint64_t n = 0;
+	zassert_equal(ulog_engine_count(&s, &c, &n), ALP_OK);
+	zassert_equal(n, (uint64_t)total_ok);
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 0;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v,
+	              ALP_UPDATE_LOG_VERIFY_OK,
+	              "concurrent appenders must still produce one valid, unbroken chain");
+
+	/* Every sequence 0..total_ok-1 exists exactly once: td_put() would
+	 * silently overwrite a duplicate key, so a successful get() for every
+	 * index proves uniqueness+contiguity, not merely that the counter
+	 * looks right. */
+	for (uint64_t i = 0; i < (uint64_t)total_ok; i++) {
+		alp_update_log_entry_t got;
+		zassert_equal(ulog_engine_get(&s, i, &got), ALP_OK);
+		zassert_equal(got.seq, i);
+	}
 }
 
 /* --- Tier selection + degrade (issues #111, #239) ---------------------
