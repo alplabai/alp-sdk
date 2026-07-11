@@ -65,6 +65,42 @@
               }
             }
           },
+          "toolchain": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["target_triple", "compiler", "sysroot", "id"],
+            "description": "This slice's compiler identity (#610 §4 per-slice tooling index), grounded in the SoM preset's `topology.<core>.toolchain` -- never invented. A field genuinely not derivable for this slice's runtime is null rather than guessed (e.g. a Yocto slice's exact GCC triple depends on the Yocto build's own TUNE_FEATURES/TCLIBC, outside board.yaml/SoM metadata).",
+            "properties": {
+              "target_triple": { "type": ["string", "null"], "description": "GCC target triple for this slice's compiler (e.g. `arm-zephyr-eabi` for a Zephyr Cortex-M slice, which is both the Zephyr SDK toolchain directory name and its real GCC triple). null when not derivable (e.g. Yocto -- the triple depends on the Yocto build's own TCLIBC/TUNE_FEATURES)." },
+              "compiler": { "type": ["string", "null"], "description": "Compiler executable name for this slice (e.g. `arm-zephyr-eabi-gcc`). null when not derivable." },
+              "sysroot": { "type": ["string", "null"], "description": "Cross-compile sysroot path for this slice, when the runtime has one. Always null today -- Zephyr bundles its own libc per architecture inside the Zephyr SDK (no conventional sysroot), and Yocto's sysroot lives inside the Yocto build tree, not in board.yaml/SoM metadata." },
+              "id": { "type": ["string", "null"], "description": "Stable toolchain identifier, taken verbatim from the SoM preset's `topology.<core>.toolchain` (e.g. `arm-zephyr-eabi`, `poky-glibc`) -- the same field `system-manifest.yaml`'s `slices[].toolchain` already surfaces. null when the SoM preset doesn't declare one for this core." }
+            }
+          },
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["elf", "map", "bin", "size_report", "symbols", "compile_commands"],
+            "description": "Deterministic OUTPUT paths under `buildDir` for this slice (#610 §4) -- the WHERE, not a promise the files exist yet (they don't until the slice is actually built). Zephyr's own CMake layout fixes these paths (cmake/modules/kernel.cmake + the top-level CMakeLists.txt); a Yocto slice's real output lands under the Yocto build tree's own deploy dir (outside this slice's buildDir), and a baremetal slice's executable name is the app's own CMakeLists.txt to pick -- both stay null rather than guess a path this emitter can't predict.",
+            "properties": {
+              "elf": { "type": ["string", "null"], "description": "POSIX-style path to the slice's ELF output (Zephyr: `<buildDir>/zephyr/zephyr.elf`). null when this runtime has no single predictable ELF output (yocto, baremetal)." },
+              "map": { "type": ["string", "null"], "description": "POSIX-style path to the linker map file (Zephyr: `<buildDir>/zephyr/zephyr.map`). null when not derivable." },
+              "bin": { "type": ["string", "null"], "description": "POSIX-style path to the flat binary image (Zephyr: `<buildDir>/zephyr/zephyr.bin`). null when not derivable." },
+              "size_report": { "type": ["string", "null"], "description": "POSIX-style path to the readelf-headers size/stat report (Zephyr: `<buildDir>/zephyr/zephyr.stat`, written only when `CONFIG_OUTPUT_STAT=y` -- same 'doesn't exist until built/enabled' caveat as every other artifact path here). null when not derivable." },
+              "symbols": { "type": ["string", "null"], "description": "POSIX-style path to the symbol-table dump (Zephyr: `<buildDir>/zephyr/zephyr.symbols`, written only when `CONFIG_OUTPUT_SYMBOLS=y`). null when not derivable." },
+              "compile_commands": { "type": ["string", "null"], "description": "POSIX-style path to `compile_commands.json` (Zephyr: `<buildDir>/compile_commands.json` -- the top-level Zephyr CMakeLists.txt forces `CMAKE_EXPORT_COMPILE_COMMANDS` unconditionally). null when the slice's runtime doesn't produce one at a predictable path." }
+            }
+          },
+          "debug": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["console", "probe"],
+            "description": "Headless monitor/debug selectors for this slice (#610 §4): the console device selector + debug-probe selector a headless consumer needs, derived from board.yaml `diagnostics.console:` and the same flash-recipe fact `system-manifest.yaml`'s `slices[].flash_method`/`flash_args` already carry. null when unknown.",
+            "properties": {
+              "console": { "type": ["string", "null"], "description": "Resolved console backend selector: `uart` (Zephyr UART console), `ram` (Zephyr RAM console, read over SWD), or `linux` (Yocto/Ubuntu stdio/tty console). null when the slice inherits an unspecified board default (`diagnostics.console: none`/unset with no OS-derived default, e.g. a baremetal slice)." },
+              "probe": { "type": ["string", "null"], "description": "Debug-probe runner selector for this slice (currently `openocd` for a Zephyr slice's `zephyr_west_flash` recipe). null when this slice's runtime/flash recipe doesn't identify a live debug probe (Yocto image-flash, baremetal cmake-flash)." }
+            }
+          },
           "command": {
             "description": "The build command to run for this slice, or null when this emitter has no valid command yet (see `slices` description; a matching `warnings` entry explains why).",
             "type": ["object", "null"],
