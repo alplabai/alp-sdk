@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Real MbedTLS-PSA backend coverage for <alp/security.h> AEAD --
+# GHSA-7xh2-9pcg-r824 regression test (a real opened AEAD handle,
+# round-tripped from a 4 KiB CONFIG_MAIN_STACK_SIZE thread).
+
+tests:
+  alp_sdk.security.mbedtls_aead:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - security
