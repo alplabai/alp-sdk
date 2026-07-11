@@ -48,6 +48,20 @@
  *   buffer (truncated) and report the actual response size in *resp_len
  *   along with ALP_ERR_NOMEM.  Matches the alp/rpc.h documentation.
  *
+ * Callback reentrancy / close semantics (GHSA-xhm8-7f87-93q5).
+ *   A subscriber callback runs ON the channel's own rx thread and MAY
+ *   close its own channel from inside that callback.  y_close()
+ *   detects this via pthread_equal(pthread_self(), ch->rx_thread) and,
+ *   in that case, never self-joins and never frees the channel out
+ *   from under the still-running callback/RX-loop -- it defers the fd/
+ *   mutex/free teardown to rpc_rx_main()'s epilogue, which runs on that
+ *   same thread once the callback returns and the poll loop unwinds.
+ *   A single file-scope mutex (g_rpc_close_lock) makes this race-free
+ *   against a concurrent EXTERNAL alp_rpc_close on the same handle:
+ *   whichever caller claims ownership first performs the exactly-once
+ *   teardown; external close keeps the original join-based path. See
+ *   y_close()'s doc comment for the full design.
+ *
  * Linking: src/yocto/CMakeLists.txt gates this file behind
  * find_package(Threads) + pkg_check_modules(libmetal librpmsg) and
  * the ALP_SDK_HAVE_OPENAMP_USERLAND define.  When the host doesn't
@@ -140,7 +154,79 @@ struct rpc_be {
 	size_t          call_resp_len; /* actual response size on the wire */
 	alp_status_t    call_result;
 	bool            call_pending;
+
+	/* Close-side race protection (GHSA-xhm8-7f87-93q5): records whether
+     * the winning y_close() call (see g_rpc_close_lock below) was this
+     * channel's own rx_thread closing itself from inside a callback, in
+     * which case the physical teardown (fds/mutexes/free) is deferred
+     * to rpc_rx_main()'s epilogue -- which runs on that same thread once
+     * the callback returns and the poll loop unwinds -- instead of being
+     * joined-and-freed synchronously inside y_close().  See y_close()
+     * and rpc_rx_main() for the two teardown paths this selects between. */
+	bool close_from_worker;
 };
+
+/* Single-owner gate for y_close() (GHSA-xhm8-7f87-93q5): a subscriber
+ * callback that closes its OWN channel (running on rx_thread) races an
+ * external alp_rpc_close on the same handle.  A per-channel mutex
+ * doesn't work here -- the mutex itself lives inside `ch`, so locking
+ * it is only safe if `ch` hasn't already been freed, which is exactly
+ * the property we need to establish.  This one file-scope mutex is
+ * never freed, so serialising "read st->be_data, decide who owns the
+ * close, and (if won) null st->be_data out" as a single critical
+ * section under it is always safe: whichever caller gets the lock
+ * first is the owner and unpublishes the channel before releasing it;
+ * anyone else (racing in concurrently, or arriving afterwards) that
+ * takes the lock next is guaranteed to see st->be_data already NULL. A
+ * quick, lock-free pre-check lets every OTHER op (subscribe/send/call)
+ * and a plain non-racing close skip the lock entirely. Held only
+ * across that tiny decision -- never across the wake/join/teardown
+ * work below -- so it cannot deadlock or serialise the rare close path
+ * against anything long-running. */
+static pthread_mutex_t g_rpc_close_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* alp_rpc_backend_state_t::be_data (rpc_ops.h, dispatcher-owned) is
+ * read from every op in this file (y_open/y_subscribe/y_unsubscribe/
+ * y_send/y_call/y_close) and can race a close arriving on another
+ * thread -- an external alp_rpc_close versus this channel's own rx
+ * thread closing itself from inside a callback (GHSA-xhm8-7f87-93q5).
+ * Every access here goes through this load/store pair so the "close
+ * nulls it out" / "every op reads it" relationship is a real
+ * synchronizes-with edge (a plain, unsynchronised `void *` read/write
+ * pair racing a concurrent close is technically undefined behaviour
+ * even though it happens to be benign on every architecture this SDK
+ * targets today -- ThreadSanitizer flags it as a data race). */
+static inline struct rpc_be *rpc_be_data_load(alp_rpc_backend_state_t *st)
+{
+	return (struct rpc_be *)__atomic_load_n(&st->be_data, __ATOMIC_ACQUIRE);
+}
+
+static inline void rpc_be_data_store(alp_rpc_backend_state_t *st, struct rpc_be *ch)
+{
+	__atomic_store_n(&st->be_data, (void *)ch, __ATOMIC_RELEASE);
+}
+
+/* ch->close_from_worker (set once by whichever caller wins y_close()'s
+ * single-owner race, read once by rpc_rx_main()'s epilogue) needs the
+ * same treatment: the epilogue's read must happen-after the owner's
+ * write even when the owner is a DIFFERENT thread (an external close).
+ * The rx loop's wake-pipe path breaks out directly on `poll()` seeing
+ * POLLIN on the notification fd WITHOUT looping back to re-evaluate
+ * `atomic_load(&ch->rx_run)` (see rpc_rx_main()), so that atomic does
+ * NOT reliably stand in as the synchronizing edge here -- a plain bool
+ * read/write pair left this a genuine (if narrow-window and
+ * architecture-benign) data race under ThreadSanitizer.  A real
+ * release/acquire pair on this one flag is simpler and cheaper than
+ * restructuring the wake-pipe path. */
+static inline void rpc_be_close_from_worker_store(struct rpc_be *ch, bool from_worker)
+{
+	__atomic_store_n(&ch->close_from_worker, from_worker, __ATOMIC_RELEASE);
+}
+
+static inline bool rpc_be_close_from_worker_load(struct rpc_be *ch)
+{
+	return __atomic_load_n(&ch->close_from_worker, __ATOMIC_ACQUIRE);
+}
 
 /* ------------------------------------------------------------------ */
 /* Helpers (intentionally mirrors src/backends/rpc/zephyr_drv.c)       */
@@ -204,6 +290,30 @@ frame_parse(const void *data, size_t len, const void **payload_out, size_t *payl
 	*payload_out     = (const void *)(bytes + method_len + 1u);
 	*payload_len_out = len - method_len - 1u;
 	return bytes;
+}
+
+/* Physical teardown of a channel: close descriptors, destroy the
+ * synchronisation primitives, and free the block.  Runs EXACTLY ONCE
+ * per channel, from exactly one of two call sites (never both):
+ *   - y_close(), synchronously, for an external (non-self) close; or
+ *   - rpc_rx_main()'s epilogue, for a channel that closed itself from
+ *     inside one of its own subscriber callbacks (GHSA-xhm8-7f87-93q5).
+ * Both call sites reach this only after y_close() has already won
+ * g_rpc_close_lock's single-owner decision (see y_close()) -- no other
+ * thread can still be holding a reference to `ch` at that point, so
+ * nothing else can be touching `ch` here. */
+static void rpc_be_teardown(struct rpc_be *ch)
+{
+	if (ch->rx_wake_pipe[0] >= 0) close(ch->rx_wake_pipe[0]);
+	if (ch->rx_wake_pipe[1] >= 0) close(ch->rx_wake_pipe[1]);
+	if (ch->ept_fd >= 0) close(ch->ept_fd);
+	if (ch->ctrl_fd >= 0) close(ch->ctrl_fd);
+
+	pthread_mutex_destroy(&ch->tx_mutex);
+	pthread_mutex_destroy(&ch->sub_mutex);
+	pthread_cond_destroy(&ch->call_cond);
+	pthread_mutex_destroy(&ch->call_mutex);
+	free(ch);
 }
 
 /* RX worker: poll() the endpoint fd; on inbound frame, parse + dispatch. */
@@ -289,8 +399,30 @@ static void *rpc_rx_main(void *arg)
 		void               *user = match ? match->user : NULL;
 		pthread_mutex_unlock(&ch->sub_mutex);
 		if (cb != NULL) {
+			/* GHSA-xhm8-7f87-93q5: cb() may call alp_rpc_close on
+             * THIS channel (self-close).  y_close() detects that via
+             * pthread_equal(pthread_self(), ch->rx_thread), wins single
+             * ownership under g_rpc_close_lock, flips rx_run to 0, and
+             * returns WITHOUT joining/freeing `ch` -- it defers the
+             * physical teardown to the epilogue below, which runs right
+             * here once cb() returns and the loop unwinds.  `ch` stays
+             * alive for the complete duration of this call. */
 			cb(payload, payload_len, user);
 		}
+	}
+
+	/* If this channel closed itself from inside a callback above,
+     * y_close() deferred the physical teardown to here rather than
+     * freeing `ch` out from under this very call stack (the original
+     * bug).  Finish it now that the poll loop has unwound: no self-join
+     * needed -- we ARE the thread that would have been joined -- so
+     * detach first (y_close()'s g_rpc_close_lock-guarded single-owner
+     * decision guarantees no external caller is racing us for
+     * ownership, so nobody will ever try to join this thread) and only
+     * then run the shared teardown. */
+	if (rpc_be_close_from_worker_load(ch)) {
+		pthread_detach(pthread_self());
+		rpc_be_teardown(ch);
 	}
 	return NULL;
 }
@@ -373,11 +505,12 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	pthread_mutex_init(&ch->sub_mutex, NULL);
 	pthread_mutex_init(&ch->call_mutex, NULL);
 	pthread_cond_init(&ch->call_cond, NULL);
-	ch->call_pending    = false;
-	ch->ept_fd          = -1;
-	ch->ctrl_fd         = -1;
-	ch->rx_wake_pipe[0] = -1;
-	ch->rx_wake_pipe[1] = -1;
+	ch->call_pending      = false;
+	ch->close_from_worker = false;
+	ch->ept_fd            = -1;
+	ch->ctrl_fd           = -1;
+	ch->rx_wake_pipe[0]   = -1;
+	ch->rx_wake_pipe[1]   = -1;
 
 	/* Open the control device + create our endpoint via ioctl. */
 	ch->ctrl_fd = open(rpmsg_ctrl_path(), O_RDWR);
@@ -438,7 +571,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		return ALP_ERR_IO;
 	}
 
-	st->be_data = ch;
+	rpc_be_data_store(st, ch);
 	return ALP_OK;
 }
 
@@ -454,7 +587,7 @@ static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 static alp_status_t
 y_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t cb, void *user)
 {
-	struct rpc_be *ch = (struct rpc_be *)st->be_data;
+	struct rpc_be *ch = rpc_be_data_load(st);
 	if (ch == NULL) return ALP_ERR_NOT_READY;
 	if (!method_valid(method)) return ALP_ERR_INVAL;
 	/* NULL cb == unsubscribe -- matches the documented behaviour and the
@@ -505,7 +638,7 @@ y_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
  */
 static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *method)
 {
-	struct rpc_be *ch = (struct rpc_be *)st->be_data;
+	struct rpc_be *ch = rpc_be_data_load(st);
 	if (ch == NULL) return ALP_ERR_NOT_READY;
 	if (!method_valid(method)) return ALP_ERR_INVAL;
 
@@ -538,7 +671,7 @@ static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 static alp_status_t
 y_send(alp_rpc_backend_state_t *st, const char *method, const void *payload, size_t len)
 {
-	struct rpc_be *ch = (struct rpc_be *)st->be_data;
+	struct rpc_be *ch = rpc_be_data_load(st);
 	if (ch == NULL) return ALP_ERR_NOT_READY;
 	if (!method_valid(method)) return ALP_ERR_INVAL;
 	if (payload == NULL && len > 0) return ALP_ERR_INVAL;
@@ -578,7 +711,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
                            size_t                  *resp_len,
                            uint32_t                 timeout_ms)
 {
-	struct rpc_be *ch = (struct rpc_be *)st->be_data;
+	struct rpc_be *ch = rpc_be_data_load(st);
 	if (ch == NULL) return ALP_ERR_NOT_READY;
 	if (!method_valid(method)) return ALP_ERR_INVAL;
 	if (req == NULL && req_len > 0) return ALP_ERR_INVAL;
@@ -671,15 +804,81 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
  * @brief Tear down the RX worker + chardev fds and free the channel box.
  *
  * Wakes any pending alp_rpc_call with ALP_ERR_NOT_READY, signals the RX
- * worker via the wake pipe, joins it, then closes the fds and destroys
- * the synchronisation primitives.
+ * worker via the wake pipe, then either joins it synchronously (the
+ * normal, external-caller path) or -- when @b this call itself arrived
+ * from a subscriber callback running on the channel's OWN rx thread --
+ * defers the descriptor/mutex/free teardown to that thread's own
+ * `rpc_rx_main()` epilogue instead.
+ *
+ * @par Callback reentrancy, unsubscribe, and close semantics
+ * A subscriber callback (see @ref alp_rpc_method_cb_t) runs ON this
+ * channel's rx thread.  It MAY call @ref alp_rpc_unsubscribe /
+ * @ref alp_rpc_subscribe on its own channel (sub_mutex already excludes
+ * the RX dispatch loop while a callback runs) and it MAY call
+ * @ref alp_rpc_close on its own channel -- this is the scenario
+ * GHSA-xhm8-7f87-93q5 fixes.  Previously that self-close called
+ * `pthread_join()` on its own thread (guaranteed `EDEADLK`, silently
+ * ignored), then freed `ch` anyway while `rpc_rx_main()` kept
+ * dereferencing it after the callback returned -- a deterministic
+ * heap use-after-free.
+ *
+ * The fix: `pthread_equal(pthread_self(), ch->rx_thread)` detects the
+ * self-close.  An external close racing a callback self-close (or two
+ * racing calls of any kind) is made single-shot by g_rpc_close_lock (a
+ * file-scope mutex, declared next to `struct rpc_be` -- see its own
+ * comment for why it can't live inside the per-channel struct): every
+ * caller re-reads `st->be_data` while HOLDING that lock and, if it is
+ * still non-NULL, claims ownership and nulls it out before releasing
+ * the lock, all as one indivisible step.  This is what makes it safe
+ * for a caller to dereference `ch` (e.g. `ch->rx_thread` below) at
+ * all: an earlier, per-channel-mutex-only version of this fix let a
+ * racing "loser" read `ch` fields with no guarantee `ch` hadn't
+ * already been freed by a faster winner -- a per-channel mutex can't
+ * fix that (locking a mutex that lives INSIDE the block you're
+ * checking is only safe if that block is still allocated); a lock
+ * that outlives every channel can. ThreadSanitizer caught the gap as a
+ * real (if narrow-window) use-after-free. A lock-free pre-check lets
+ * an uncontested close (and every other op) skip the lock entirely.
+ * The self-close owner never joins or frees -- it returns immediately,
+ * leaving `ch` fully alive for the remainder of the callback invocation
+ * and the loop unwind; `rpc_rx_main()`'s epilogue (this SAME thread,
+ * once the callback returns and the poll loop exits) detaches itself
+ * (nothing else may join it -- the single-owner gate guarantees no
+ * external caller raced it for ownership) and completes the teardown.
+ * An external-owner close is unchanged: wake, signal, `pthread_join()`,
+ * then close fds / destroy sync objects / free, all synchronously
+ * inside this call.
  */
 static void y_close(alp_rpc_backend_state_t *st)
 {
-	struct rpc_be *ch = (struct rpc_be *)st->be_data;
-	if (ch == NULL) {
+	/* Lock-free fast path: a channel that is already fully closed (or
+     * was never opened) needs no synchronisation at all to observe
+     * NULL here -- rpc_be_data_load()/store() are a real
+     * release/acquire pair (see their own comment). */
+	if (rpc_be_data_load(st) == NULL) {
 		return;
 	}
+
+	/* Re-read st->be_data and decide ownership as ONE step under
+     * g_rpc_close_lock (see its declaration for why this must be a
+     * lock that outlives every channel, not one stored in `ch`).
+     * Whichever caller gets the lock first is the single owner: it
+     * claims `ch`, records from_worker, and nulls st->be_data out
+     * before releasing the lock -- so a second caller that takes the
+     * lock next is guaranteed to see st->be_data already NULL and
+     * never touches `ch` again. */
+	pthread_mutex_lock(&g_rpc_close_lock);
+	struct rpc_be *ch = rpc_be_data_load(st);
+	if (ch == NULL) {
+		pthread_mutex_unlock(&g_rpc_close_lock);
+		return; /* a racing caller already claimed + unpublished it */
+	}
+	bool from_worker = pthread_equal(pthread_self(), ch->rx_thread);
+	rpc_be_close_from_worker_store(ch, from_worker);
+	rpc_be_data_store(st, NULL);
+	pthread_mutex_unlock(&g_rpc_close_lock);
+
+	/* We are the single owner from here on. */
 
 	/* Wake any pending alp_rpc_call so the caller unblocks with a
      * clear NOT_READY rather than waiting for its timeout to expire.
@@ -700,19 +899,36 @@ static void y_close(alp_rpc_backend_state_t *st)
 		char b = 1;
 		(void)write(ch->rx_wake_pipe[1], &b, 1);
 	}
-	pthread_join(ch->rx_thread, NULL);
 
-	if (ch->rx_wake_pipe[0] >= 0) close(ch->rx_wake_pipe[0]);
-	if (ch->rx_wake_pipe[1] >= 0) close(ch->rx_wake_pipe[1]);
-	if (ch->ept_fd >= 0) close(ch->ept_fd);
-	if (ch->ctrl_fd >= 0) close(ch->ctrl_fd);
+	if (from_worker) {
+		/* GHSA-xhm8-7f87-93q5: this call arrived from a subscriber
+         * callback running on ch->rx_thread -- the channel is closing
+         * itself.  Do NOT join (would deadlock: EDEADLK) and do NOT
+         * free `ch` here -- the callback that called us is still
+         * running on top of this exact memory and `rpc_rx_main()` will
+         * keep touching `ch` (the loop-condition check) until it
+         * unwinds.  Leave everything alive and return; the epilogue in
+         * rpc_rx_main() completes the teardown once the loop exits. */
+		return;
+	}
 
-	pthread_mutex_destroy(&ch->tx_mutex);
-	pthread_mutex_destroy(&ch->sub_mutex);
-	pthread_cond_destroy(&ch->call_cond);
-	pthread_mutex_destroy(&ch->call_mutex);
-	free(ch);
-	st->be_data = NULL;
+	/* External close: preserve the original join-based teardown. */
+	int jrc = pthread_join(ch->rx_thread, NULL);
+	if (jrc == EDEADLK) {
+		/* Structurally unreachable -- `from_worker` above already
+         * returned early whenever pthread_self() is ch->rx_thread.  If
+         * this ever fires, the thread-identity check misidentified the
+         * caller; do NOT repeat the original bug by freeing `ch` out
+         * from under a thread that may still be running.  Surface the
+         * condition loudly and leak the channel rather than risk a
+         * use-after-free. */
+		fprintf(stderr,
+		        "alp_rpc: BUG: y_close() self-join (EDEADLK) despite the "
+		        "from_worker guard; leaking channel %p to avoid a UAF\n",
+		        (void *)ch);
+		return;
+	}
+	rpc_be_teardown(ch);
 }
 
 #else /* !ALP_SDK_HAVE_OPENAMP_USERLAND */

@@ -155,6 +155,45 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
              COMMAND alp_test_last_error_threading)
 endif()
 
+# GHSA-xhm8-7f87-93q5 regression: a subscriber callback that closes its
+# OWN channel from inside src/backends/rpc/yocto_drv.c's rx thread must
+# not self-join (EDEADLK) or free the channel out from under the still-
+# unwinding callback/rx loop, and must stay race-free against a
+# concurrent EXTERNAL alp_rpc_close() on the same handle.
+# rpc_yocto_self_close.c #includes the real backend .c file directly to
+# reach its file-local struct rpc_be / y_close() / rpc_rx_main() (see
+# the test's own header comment) and drives the rx worker over a
+# socketpair standing in for /dev/rpmsg* -- no OpenAMP/libmetal
+# user-space library needed (the real code only calls POSIX + the
+# kernel's <linux/rpmsg.h> uapi header), only pthreads, so this is
+# gated the same minimal way as alp_test_last_error_threading above.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+
+    add_executable(alp_test_rpc_yocto_self_close
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc_yocto_self_close.c
+    )
+    # Deliberately NOT linked against alp::sdk: the #include-the-.c-file
+    # technique above pulls in everything this test needs from
+    # yocto_drv.c as file-local statics, and linking the full library on
+    # top would risk an ODR clash with its own (separately compiled)
+    # copy of the same TU.
+    target_link_libraries(alp_test_rpc_yocto_self_close PRIVATE Threads::Threads)
+    target_include_directories(alp_test_rpc_yocto_self_close PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/rpc
+    )
+    target_compile_definitions(alp_test_rpc_yocto_self_close PRIVATE
+        ALP_SDK_HAVE_OPENAMP_USERLAND=1
+    )
+    target_compile_features(alp_test_rpc_yocto_self_close PRIVATE c_std_99)
+
+    add_test(NAME alp_test_rpc_yocto_self_close
+             COMMAND alp_test_rpc_yocto_self_close)
+endif()
+
 # v0.4: Yocto I2C wrapper failure-path coverage.  Real-adapter HIL
 # coverage is parked under docs/ci/HW-IN-LOOP.md until the self-hosted
 # `hil-yocto` runner lands.  Linux-only -- the underlying source
