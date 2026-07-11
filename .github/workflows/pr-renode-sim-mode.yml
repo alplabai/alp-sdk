@@ -1,30 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Renode --sim-mode smoke: the studio hardware-simulator contract
-# (github.com/alplabai/alp-sdk#674).
+# (github.com/alplabai/alp-sdk#674), on the FAITHFUL RZ/V2N M33 model.
 #
-# Boots a Cortex-M33 ELF in Renode via `west alp-renode --sim-mode
-# --board E1M-V2N101`, then drives the published sockets exactly the way
-# alp-studio's RealRenodeAdapter will:
-#   - the UART socket must stream the firmware's serial output, and
-#   - the control socket must round-trip WriteBytes -> ReadBytes and
-#     apply the tmp112 inject (read back the set temperature).
+# Builds a headless V2N M33 Zephyr image (samples/hello_world +
+# tests/renode/v2n_m33_ramconsole.conf -- the ram_console backend, since
+# the M33-SM has no UART console), boots it in Renode via
+# `west alp-renode --sim-mode --board E1M-V2N101`, and drives the
+# published sockets exactly the way alp-studio's RealRenodeAdapter will:
+#   - the UART socket must stream the firmware console (polled out of the
+#     ram_console_buf RAM ring), and
+#   - the control socket must round-trip WriteBytes -> ReadBytes (in M33
+#     SRAM) and apply the tmp112 inject on iic8 (read back the value).
 # This is tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end
-# with ALP_SIM_E2E=1; it fetches its own CM33 ELF, so it needs neither a
-# V2N build nor the Zephyr SDK.
+# with ALP_SIM_E2E=1 + ALP_SIM_E2E_ELF pointing at the built image.
 #
-# !! ADVISORY (continue-on-error) until this runs green on a
-#    Renode-equipped runner, mirroring pr-renode-aen-smoke.yml.  The
-#    renesas_rzv2n.repl is a documented RA6M5-derived CM33 stand-in
-#    pending the faithful RZ/V2N M33 SoC map; promote to a required
-#    context once the socket contract is proven here and the faithful
-#    .repl lands.
-#
-# What is ALREADY validated by the required pytest gate (not this job):
-# every deterministic sim-mode helper -- profile table, bundle-ELF
-# resolution, descriptor assembly, boot-script/argv construction, and the
-# control-socket translation + ReadBytes normalisation (the unit tests in
-# test_alp_renode_sim.py, which always run).
+# The renesas_rzv2n model boots the REAL V2N M33 firmware (faithful
+# SRAM@0x08003000 map + a coarse CPG stub for the FSP clock/reset
+# handshakes + iic8/tmp112).  This gate is the end-to-end proof; the
+# deterministic sim-mode helpers are covered by the always-on pytest gate.
 
 name: pr-renode-sim-mode
 
@@ -35,6 +29,7 @@ on:
       - 'metadata/renode/renesas_rzv2n.*'
       - 'scripts/west_commands/alp_renode.py'
       - 'tests/scripts/test_alp_renode_sim.py'
+      - 'tests/renode/v2n_m33_ramconsole.conf'
       - '.github/workflows/pr-renode-sim-mode.yml'
   workflow_dispatch:
 
@@ -46,24 +41,61 @@ jobs:
   renode-sim-mode:
     name: renode · V2N101 --sim-mode socket contract
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
+
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
 
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
         with:
+          path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version-file: .python-version
+          python-version-file: alp-sdk/.python-version
 
-      - name: Install Python deps
-        run: pip3 install pytest pyyaml
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              ninja-build gperf ccache dfu-util device-tree-compiler \
+              python3-dev python3-pip python3-setuptools python3-wheel \
+              libffi-dev libssl-dev xz-utils file make gcc \
+              ca-certificates curl gnupg
 
-      # Same v1.15.3 pin as pr-renode-aen-smoke.yml / pr-renode-dual-os.yml
-      # so every Renode gate exercises identical emulator behaviour.
+      - name: Install west + Python deps
+        run: pip3 install west jsonschema pyyaml pytest
+
+      - name: Bootstrap Zephyr workspace
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: bash scripts/bootstrap.sh
+
+      # Zephyr's build scripts (gen_kobject_list.py etc.) need pyelftools +
+      # friends; install the pinned Zephyr build requirements now that the
+      # workspace exists.
+      - name: Install Zephyr build requirements
+        run: |
+          set -euo pipefail
+          pip3 install -r "${GITHUB_WORKSPACE}/zephyrproject/zephyr/scripts/requirements-base.txt"
+
+      - name: Install Zephyr SDK (arm-zephyr-eabi)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Pinned Zephyr v4.4.0 requires Zephyr SDK 1.0.1 (zephyr/SDK_VERSION).
+          SDK_VER=1.0.1
+          curl -fsSL -o /tmp/zephyr-sdk.tar.xz \
+            "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${SDK_VER}/zephyr-sdk-${SDK_VER}_linux-x86_64_minimal.tar.xz"
+          mkdir -p "$HOME/zephyr-sdk"
+          tar -xJf /tmp/zephyr-sdk.tar.xz -C "$HOME/zephyr-sdk" --strip-components=1
+          "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
+          echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
+
+      # Same v1.15.3 pin as the other Renode gates.
       - name: Install Renode
         run: |
           set -euo pipefail
@@ -74,15 +106,34 @@ jobs:
           echo "$HOME/renode" >> "$GITHUB_PATH"
           "$HOME/renode/renode" --version
 
-      # ---- Advisory verification (continue-on-error) ----------------
+      # Build a headless V2N M33 image whose console lands in ram_console.
+      - name: Build headless V2N M33 ram_console image
+        id: build_fw
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+        run: |
+          set -euo pipefail
+          # Register alp-sdk as a Zephyr module so its board_root/dts_root
+          # (zephyr/module.yml) expose the generated M33-SM board -- raw
+          # `west build` doesn't auto-discover the manifest repo the way
+          # `west alp-build` does.
+          west build -p always \
+              -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 \
+              "${ZEPHYR_BASE}/samples/hello_world" \
+              -d /tmp/v2n-m33-build \
+              -- -DEXTRA_ZEPHYR_MODULES="${GITHUB_WORKSPACE}/alp-sdk" \
+                 -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/v2n_m33_ramconsole.conf"
+          test -f /tmp/v2n-m33-build/zephyr/zephyr.elf
 
-      - name: west alp-renode --sim-mode end-to-end (V2N101, CM33 ELF)
-        id: sim_e2e
-        continue-on-error: true
+      - name: west alp-renode --sim-mode end-to-end (real V2N M33 firmware)
+        working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ALP_SIM_E2E: '1'
-          ALP_SDK_ROOT: ${{ github.workspace }}
+          ALP_SIM_E2E_ELF: /tmp/v2n-m33-build/zephyr/zephyr.elf
+          ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
         run: |
           set -euo pipefail
           python3 -m pytest -q \
-              tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end
+              tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end \
+              tests/scripts/test_alp_renode_sim.py::test_elf_symbol_finds_ram_console_when_e2e_elf_set

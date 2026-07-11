@@ -1,31 +1,32 @@
 :name: E1M-X V2N (Renesas RZ/V2N) M33-SM smoke
-:description: Boot a single Cortex-M33 (M33-SM) Zephyr slice headless, no hardware.
+:description: Boot a single headless Cortex-M33 (M33-SM) Zephyr slice, no hardware.
 
 # ---------------------------------------------------------------------
-# Non-sim headless smoke, mirroring alif_ensemble_e8.resc.  The
-# `west alp-renode` wrapper (scripts/west_commands/alp_renode.py ->
-# build_renode_argv) injects `$elf` (the resolved zephyr.elf) and
-# `$repl` (this platform descriptor) via `renode -e "$elf=@..."` BEFORE
-# this script runs; the `?=` defaults only apply when still unset, so
-# the wrapper's values win and the script also runs by hand:
+# Non-sim headless boot.  The `west alp-renode` wrapper
+# (scripts/west_commands/alp_renode.py -> build_renode_argv) injects
+# `$elf` (the resolved zephyr.elf) and `$repl` (this platform
+# descriptor) via `renode -e "$elf=@..."` BEFORE this script runs; the
+# `?=` defaults only apply when still unset, so the wrapper's values win
+# and the script also runs by hand from the SDK root:
 #
 #     renode metadata/renode/renesas_rzv2n.resc
 #
-# NOTE: `west alp-renode --sim-mode` does NOT use this script -- it
-# generates its own boot .resc that routes the UART to a TCP socket
-# (see build_sim_resc_text).  This file is the plain UART-to-stdout
-# smoke used by the non-sim path + the advisory Renode CI gate.
+# The M33-SM is HEADLESS -- no UART console (see the .repl header), so
+# there is no `showAnalyzer` here; the firmware's console lives in the
+# `ram_console_buf` RAM ring.  `west alp-renode --sim-mode` generates its
+# OWN boot .resc and streams that RAM console to a TCP socket (see
+# build_sim_resc_text + RamConsoleStreamer); this file just boots.
+#
+# NOTE: because this core is headless, the plain (non --sim-mode)
+# `west alp-renode` path produces NO console output on V2N -- its --log
+# will be empty and `--expect`/log-grep won't match.  Use --sim-mode to
+# observe the ram_console.
 # ---------------------------------------------------------------------
 $repl ?= @metadata/renode/renesas_rzv2n.repl
 $elf  ?= @examples/peripheral-io/hello-world/build/m33_sm-zephyr/zephyr/zephyr.elf
 
 mach create "v2n101"
 machine LoadPlatformDescription $repl
-
-# Surface the SCI0 console.  Headless (the wrapper passes
-# `--console --disable-xwt`), so Renode routes the analyzer to stdout,
-# which the wrapper tees to --log for the CI smoke to grep.
-showAnalyzer sci0
 
 sysbus LoadELF $elf
 

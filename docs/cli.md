@@ -286,10 +286,21 @@ silent pass.  Identical to `west alp-renode`.
 of the smoke boot, boots the `--image-bundle` firmware and exposes it to
 alp-studio's sim gateway.  It writes `<bundle>/sim-descriptor.json` (an
 `@alp/sim-protocol` `SimDescriptorSchema` document), streams the firmware
-UART over a TCP socket, and serves a line-oriented control socket
+console over a TCP socket, and serves a line-oriented control socket
 (`sysbus ReadBytes`/`WriteBytes` + the descriptor's peripheral inject
 templates) until `--timeout`.  First target: **E1M-V2N101** (RZ/V2N
 M33-SM, tmp112 over I2C).
+
+The M33-SM is a **headless** core — no hardware UART console (the board
+sets `CONFIG_CONSOLE=n`; the console is the A55's).  So `--sim-mode`
+observes its console the way alp-sdk does on the bench: it polls the
+firmware's Zephyr `ram_console_buf` RAM ring out of SRAM and streams it to
+the UART socket.  Build a headless image with the `ram_console` backend
+(see `tests/renode/v2n_m33_ramconsole.conf`) for a console to stream; a
+truly silent firmware just leaves the UART socket quiet.  The faithful
+`renesas_rzv2n` Renode model boots the real V2N M33 image (SRAM at
+`0x08003000`, a coarse CPG stub for the FSP clock/reset handshakes, and
+`iic8`/tmp112); no custom hardware-UART model is involved.
 
 | Option | Meaning |
 |---|---|
