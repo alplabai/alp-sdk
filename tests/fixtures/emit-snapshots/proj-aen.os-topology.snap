@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "sku": "E1M-AEN801",
+  "cores": [
+    {
+      "core_id": "a32_cluster",
+      "core_type": "cortex-a32",
+      "runtime_class": "linux",
+      "default_os": "yocto",
+      "effective_os": "off",
+      "enabled": false,
+      "overridden": true,
+      "allowed_os": [
+        "yocto",
+        "baremetal",
+        "off"
+      ]
+    },
+    {
+      "core_id": "m55_he",
+      "core_type": "cortex-m55",
+      "runtime_class": "rtos",
+      "default_os": "zephyr",
+      "effective_os": "zephyr",
+      "enabled": true,
+      "overridden": false,
+      "allowed_os": [
+        "zephyr",
+        "baremetal",
+        "off"
+      ]
+    },
+    {
+      "core_id": "m55_hp",
+      "core_type": "cortex-m55",
+      "runtime_class": "rtos",
+      "default_os": "zephyr",
+      "effective_os": "zephyr",
+      "enabled": true,
+      "overridden": false,
+      "allowed_os": [
+        "zephyr",
+        "baremetal",
+        "off"
+      ]
+    }
+  ]
+}
