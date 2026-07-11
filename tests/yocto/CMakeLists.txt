@@ -155,6 +155,93 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
              COMMAND alp_test_last_error_threading)
 endif()
 
+# GHSA-xhm8-7f87-93q5 regression: a subscriber callback that closes its
+# OWN channel from inside src/backends/rpc/yocto_drv.c's rx thread must
+# not self-join (EDEADLK) or free the channel out from under the still-
+# unwinding callback/rx loop, and must stay race-free against a
+# concurrent EXTERNAL alp_rpc_close() on the same handle.
+# rpc_yocto_self_close.c #includes the real backend .c file directly to
+# reach its file-local struct rpc_be / y_close() / rpc_rx_main() (see
+# the test's own header comment) and drives the rx worker over a
+# socketpair standing in for /dev/rpmsg* -- no OpenAMP/libmetal
+# user-space library needed (the real code only calls POSIX + the
+# kernel's <linux/rpmsg.h> uapi header), only pthreads, so this is
+# gated the same minimal way as alp_test_last_error_threading above.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Threads REQUIRED)
+
+    add_executable(alp_test_rpc_yocto_self_close
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc_yocto_self_close.c
+    )
+    # Deliberately NOT linked against alp::sdk: the #include-the-.c-file
+    # technique above pulls in everything this test needs from
+    # yocto_drv.c as file-local statics, and linking the full library on
+    # top would risk an ODR clash with its own (separately compiled)
+    # copy of the same TU.
+    target_link_libraries(alp_test_rpc_yocto_self_close PRIVATE Threads::Threads)
+    target_include_directories(alp_test_rpc_yocto_self_close PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/rpc
+    )
+    target_compile_definitions(alp_test_rpc_yocto_self_close PRIVATE
+        ALP_SDK_HAVE_OPENAMP_USERLAND=1
+    )
+    target_compile_features(alp_test_rpc_yocto_self_close PRIVATE c_std_99)
+
+    add_test(NAME alp_test_rpc_yocto_self_close
+             COMMAND alp_test_rpc_yocto_self_close)
+
+    # GHSA-xhm8-7f87-93q5 defect 2: the dispatcher-level counterpart of
+    # the test above.  rpc_yocto_self_close.c drives the BACKEND's
+    # file-local struct rpc_be / y_close() / rpc_rx_main() directly;
+    # this test instead drives the REAL public alp_rpc_open() /
+    # alp_rpc_close() / alp_rpc_send() surface (src/rpc_dispatch.c),
+    # linked normally against alp::sdk, so a regression to the plain
+    # `!ch->in_use` TOCTOU in the dispatcher's own close path is caught
+    # even on a host with no OpenAMP/libmetal installed (the registry
+    # falls back to src/backends/rpc/sw_fallback.c here -- see the
+    # test's own header comment for why that is sufficient: defect 2
+    # lives entirely above the ops vtable).
+    add_executable(alp_test_rpc_dispatch_close_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc_dispatch_close_race.c
+    )
+    target_link_libraries(alp_test_rpc_dispatch_close_race PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_rpc_dispatch_close_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_rpc_dispatch_close_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_rpc_dispatch_close_race
+             COMMAND alp_test_rpc_dispatch_close_race)
+
+    # GHSA-xhm8-7f87-93q5 defect 3: prove the no-double-free / no-
+    # use-after-free / no-data-race claim for the two RPC close-path
+    # regression tests above in CI, rather than by hand -- see
+    # run_sanitized_rpc_tests.sh's own comment for why this configures
+    # + builds a completely separate, fully-instrumented scratch copy
+    # of the tree (needed so alp_sdk itself, not just the test
+    # binaries, is instrumented for alp_test_rpc_dispatch_close_race).
+    add_test(NAME alp_test_rpc_asan_ubsan
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_sanitized_rpc_tests.sh
+                     ${CMAKE_SOURCE_DIR}
+                     ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-rpc-asan
+                     "-fsanitize=address,undefined"
+                     alp_test_rpc_yocto_self_close
+                     alp_test_rpc_dispatch_close_race)
+    set_tests_properties(alp_test_rpc_asan_ubsan PROPERTIES TIMEOUT 600)
+
+    add_test(NAME alp_test_rpc_tsan
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_sanitized_rpc_tests.sh
+                     ${CMAKE_SOURCE_DIR}
+                     ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-rpc-tsan
+                     "-fsanitize=thread"
+                     alp_test_rpc_yocto_self_close
+                     alp_test_rpc_dispatch_close_race)
+    set_tests_properties(alp_test_rpc_tsan PROPERTIES TIMEOUT 600)
+endif()
+
 # v0.4: Yocto I2C wrapper failure-path coverage.  Real-adapter HIL
 # coverage is parked under docs/ci/HW-IN-LOOP.md until the self-hosted
 # `hil-yocto` runner lands.  Linux-only -- the underlying source

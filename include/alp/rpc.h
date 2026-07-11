@@ -239,6 +239,37 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg);
  * @ref alp_rpc_call invocations on the channel return
  * @ref ALP_ERR_NOT_READY before unblocking.
  *
+ * @par Concurrent-close contract (GHSA-xhm8-7f87-93q5)
+ * Calling this concurrently from two threads on the SAME still-open
+ * @p ch -- including a subscriber callback (see @ref alp_rpc_method_cb_t)
+ * closing its own channel from inside the callback while another thread
+ * closes it too -- is supported and race-free: exactly one caller
+ * performs the teardown, the other is a safe no-op, and neither
+ * blocks/crashes/double-frees.
+ *
+ * @par The general rule (like POSIX close(2) vs read(2))
+ * What is NOT supported, in either direction, is racing this against a
+ * @ref alp_rpc_subscribe / @ref alp_rpc_unsubscribe / @ref alp_rpc_send /
+ * @ref alp_rpc_call that has not yet STARTED when this function is
+ * first called on @p ch: once any @ref alp_rpc_close on a handle has
+ * COMPLETED (returned, for the calling thread's own view of "complete"),
+ * no thread may still be INITIATING a new op on that same handle -- the
+ * caller owns that ordering, exactly as POSIX's close(2) requires the
+ * caller to ensure no thread starts a fresh read(2)/write(2) on an fd
+ * that another thread has already closed.  Every op already in flight
+ * WHEN a close call begins is still handled correctly (it either
+ * completes or unblocks with @ref ALP_ERR_NOT_READY, per each op's own
+ * documented contract above) -- it is only a fresh op racing to START
+ * after a close has already finished that is unsupported.  Calling this
+ * function a second time on a handle that has already completed a full
+ * close (and whose slot may since have been reused by an unrelated
+ * @ref alp_rpc_open) falls under the same rule and is a use-after-close
+ * by the caller -- @p ch is a raw pointer with no generation the caller
+ * carries across calls, the same class of bug as any other use of a
+ * stale handle.  (A generation counter would close that residual
+ * pointer-reuse window but needs a fatter handle -- an ABI break -- and
+ * is out of scope here.)
+ *
  * @param[in] ch  Handle from @ref alp_rpc_open, or NULL (no-op).
  */
 void alp_rpc_close(alp_rpc_channel_t *ch);
