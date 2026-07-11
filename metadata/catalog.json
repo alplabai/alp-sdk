@@ -867,6 +867,10 @@
       "script": "scripts/check_cross_platform.py"
     },
     {
+      "purpose": "Validate the versioned machine diagnostics contract (metadata/schemas/diagnostic-v1.schema.json) two ways:",
+      "script": "scripts/check_diagnostic_schema.py"
+    },
+    {
       "purpose": "Doc-drift gate -- fails (exit 1) when customer-facing documentation references SDK identifiers that no longer exist, when a top-level doc isn't linked from the docs index, or when CC3501E docs/examples describe the current bridge as the obsolete CS-less design.",
       "script": "scripts/check_doc_drift.py"
     },

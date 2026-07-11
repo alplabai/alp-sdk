@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/diagnostic-v1.schema.json",
+  "title": "ALP Diagnostic Document v1",
+  "description": "Validates the versioned machine diagnostics document produced by `alp validate --format json` (scripts/alp_cli/diagnostic_format.py:to_machine_json) -- the IDE/LSP/CI-facing contract for a validation run, replacing terminal-prose parsing. `render()` in scripts/alp_cli/diagnostic.py (the Rust-style human renderer, --format human) is UNCHANGED by this contract; this schema governs only the machine document. Ranges are zero-based (LSP `Position`/`Range` convention: line 0 is the first line, character 0 is the first column) -- the SDK's internal `Diagnostic.line`/`.col` are 1-based (Rust-style) and are converted on export, never mutated in place. SARIF 2.1.0 export (to_sarif) is a SEPARATE artefact governed by the OASIS SARIF schema, not this one -- SARIF `region` is 1-based by spec, the opposite convention, so the two exporters must not share range values. Stability: schemaVersion 1 is additive-only (new optional fields only); a breaking change ships as schemaVersion 2. Consumers MUST check `schemaVersion` (the version/capability handshake) and reject documents whose value they do not understand before parsing further.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "tool", "diagnostics"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Version/capability handshake. A consumer that only understands schemaVersion 1 MUST reject (not best-effort-parse) any document with a different value."
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "description": "Emitting tool identifier, e.g. \"alp\"." },
+        "version": { "type": "string", "description": "The emitting tool's own version (scripts/alp_cli.__version__), NOT the schemaVersion." }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    }
+  },
+  "$defs": {
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "character"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 0, "description": "Zero-based line number (LSP convention)." },
+        "character": { "type": "integer", "minimum": 0, "description": "Zero-based UTF-16-ish column offset (LSP convention)." }
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "$ref": "#/$defs/position" },
+        "end": { "$ref": "#/$defs/position" }
+      }
+    },
+    "relatedLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "range", "message"],
+      "properties": {
+        "uri": { "type": "string" },
+        "range": { "$ref": "#/$defs/range" },
+        "message": { "type": "string" }
+      }
+    },
+    "edit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["range", "newText"],
+      "properties": {
+        "range": { "$ref": "#/$defs/range" },
+        "newText": { "type": "string" }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "range", "severity", "code", "message"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "description": "The file the diagnostic applies to (a path or file:// URI)."
+        },
+        "range": { "$ref": "#/$defs/range" },
+        "severity": {
+          "type": "string",
+          "enum": ["error", "warning", "note"],
+          "description": "LSP DiagnosticSeverity mapping for IDE/LSP consumers: error=1 (Error), warning=2 (Warning), note=3 (Information). There is no LSP 4 (Hint) equivalent emitted by this tool today. SARIF `level` mapping (to_sarif, separate artefact): error->\"error\", warning->\"warning\", note->\"note\" (direct 1:1, SARIF has a native \"note\" level)."
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "description": "The stable diagnostic code, e.g. ALP-B005 (see metadata/error-catalog.json)."
+        },
+        "message": { "type": "string" },
+        "hint": { "type": "string" },
+        "documentationUri": {
+          "type": "string",
+          "description": "Link to the code's landing page (docs/diagnostics/<code>.md), mirroring Diagnostic.doc_url."
+        },
+        "relatedLocations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relatedLocation" }
+        },
+        "edits": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/edit" }
+        }
+      }
+    }
+  }
+}
