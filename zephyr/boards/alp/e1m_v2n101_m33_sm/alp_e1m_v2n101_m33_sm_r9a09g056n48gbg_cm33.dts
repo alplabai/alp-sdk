@@ -19,6 +19,7 @@
 
 #include <zephyr/dt-bindings/i2c/i2c.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
 #include <arm/renesas/rz/rzv/r9a09g056.dtsi>
 #include "alp_e1m_v2n101_m33_sm-pinctrl.dtsi"
 
@@ -115,4 +116,102 @@
 	pinctrl-names = "default";
 	clock-frequency = <I2C_BITRATE_FAST>;
 	status = "okay";
+};
+
+/*
+ * OpenAMP / RPMsg carve-out for the M33-SM <-> A55-Linux link (alp-sdk #683,
+ * Path B Phase 1).  Addresses are the Renesas RZ/V Multi-OS Package memory
+ * map, NOT the paper `ipc:` carve-out in this project's board.yaml (still
+ * ocram_low pending a follow-up that reconciles the two -- see #683).  A55
+ * physical address = this CM33 non-secure physical address - 0x20000000
+ * (HW manual Table 5.2); the rsctbl/vring/shm regions below are all quoted
+ * in the CM33 view, matching upstream's openamp_linux_zephyr sample.
+ *
+ * mbox1 is hand-authored: unlike the RZ/V2L SoC dtsi (r9a07g054.dtsi, which
+ * ships mbox1/mbox3/mbox4/mbox5), the upstream RZ/V2N SoC dtsi
+ * (r9a09g056.dtsi) has no MHU node at all yet -- added here at board level
+ * per the "board .dts stays hand-authored for the v2n family"
+ * (scripts/gen_zephyr_board.py) rather than editing the vendored SoC dtsi.
+ *
+ * KNOWN GAP (see alp-sdk#683 build report): RZ/V2N's MHU hardware is the
+ * newer "MHU-B" variant (see hal_renesas's
+ * drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_mhu_b.h) with only channels
+ * {5, 11, 17, 23} valid (BSP_FEATURE_MHU_B_NS_VALID_CHANNEL_MASK) and a
+ * non-linear per-channel register/IRQ pairing -- NOT the plain linear MHU
+ * that Zephyr's mbox_renesas_rz_mhu.c + its FSP r_mhu_ns.c backend (shared
+ * verbatim across the whole "rzv" SoC family in hal_renesas) implement.
+ * `channel = <5>` below is the lowest MHU-B-valid channel (best-effort
+ * pick, unverified pairing); this does not resolve the FSP gap -- open a
+ * vendor HAL ticket for a real r_mhu_b_ns.c before trusting this link.
+ */
+/ {
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* Whole OpenAMP region as one reservation to save MPU entries
+		 * (matches the vendor sample's rationale). */
+		openamp_shm: memory@62f00000 {
+			compatible = "zephyr,memory-region";
+			reg = <0x62f00000 0x900000>;
+			zephyr,memory-region = "openamp_memory";
+			zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_IO)>;
+		};
+	};
+
+	chosen {
+		zephyr,ipc_shm = &vring_shm0;
+		zephyr,ipc = &mbox_consumer;
+	};
+
+	vring_ctrl0: memory@63000000 {
+		compatible = "mmio-sram";
+		reg = <0x63000000 0x50000>;
+	};
+
+	/* Condensed vs. the full A55<->CM33 map (vring-ctl1 @ 0x63100000) to
+	 * match the vendor openamp_linux_zephyr sample's layout verbatim. */
+	vring_ctrl1: memory@63050000 {
+		compatible = "mmio-sram";
+		reg = <0x63050000 0x50000>;
+	};
+
+	vring_shm0: memory@63200000 {
+		compatible = "mmio-sram";
+		reg = <0x63200000 0x300000>;
+	};
+
+	rsctbl: memory@62f00000 {
+		compatible = "mmio-sram";
+		reg = <0x62f00000 0x1000>;
+	};
+
+	mhu1_shm: memory@62f01008 {
+		compatible = "mmio-sram";
+		reg = <0x62f01008 0x8>;
+	};
+
+	mbox_consumer: mbox-consumer {
+		compatible = "vnd,mbox-consumer";
+		mboxes = <&mbox1 1>, <&mbox1 0>;
+		mbox-names = "tx", "rx";
+	};
+
+	soc {
+		/* CA55_0 <-> CM33 -- see the KNOWN GAP note above. */
+		mbox1: mhu@40400020 {
+			compatible = "renesas,rz-mhu-mbox";
+			channel = <5>;
+			reg = <0x40400020 0x20>;
+			tx-mask = <0x00000002>; /* Channel 1 is for TX */
+			rx-mask = <0x00000001>; /* Channel 0 is for RX */
+			channels-count = <2>;
+			interrupts = <293 2>; /* MHU_MSG5_NS_IRQn, bsp_irq_id.h -- unverified pairing */
+			interrupt-names = "mhuns";
+			#mbox-cells = <1>;
+			shared-memory = <&mhu1_shm>;
+			status = "okay";
+		};
+	};
 };
