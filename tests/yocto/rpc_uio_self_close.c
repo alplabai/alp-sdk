@@ -106,8 +106,12 @@
 
 static struct rpmsg_device g_fake_rdev;
 
-static int fake_send_offchannel_raw(
-    struct rpmsg_device *rdev, uint32_t src, uint32_t dst, const void *data, int len, int wait)
+static int fake_send_offchannel_raw(struct rpmsg_device *rdev,
+                                    uint32_t             src,
+                                    uint32_t             dst,
+                                    const void          *data,
+                                    int                  len,
+                                    int                  wait)
 {
 	(void)rdev;
 	(void)src;
@@ -277,7 +281,7 @@ static struct rpc_be *make_test_channel(void)
 	pthread_mutex_init(&ch->sub_mutex, NULL);
 	pthread_mutex_init(&ch->call_mutex, NULL);
 	pthread_cond_init(&ch->call_cond, NULL);
-	ch->mbox_irq = -1;
+	ch->mhu_irq = -1;
 
 	ch->ept.rdev      = &g_fake_rdev;
 	ch->ept.addr      = 0x401u;

@@ -122,10 +122,22 @@
  * OpenAMP / RPMsg carve-out for the M33-SM <-> A55-Linux link (alp-sdk #683,
  * Path B Phase 1).  Addresses are the Renesas RZ/V Multi-OS Package memory
  * map, NOT the paper `ipc:` carve-out in this project's board.yaml (still
- * ocram_low pending a follow-up that reconciles the two -- see #683).  A55
- * physical address = this CM33 non-secure physical address - 0x20000000
- * (HW manual Table 5.2); the rsctbl/vring/shm regions below are all quoted
- * in the CM33 view, matching upstream's openamp_linux_zephyr sample.
+ * ocram_low pending a follow-up that reconciles the two -- see #683).
+ *
+ * CORRECTED (alp-sdk #683, address root-cause fix): this region used to be
+ * quoted at the RZ/V2L CM33-NS offset (0x62f00000, i.e. A55 - 0x20000000),
+ * which is the V2N xSPI-NOR secure window on THIS SoC -- writes there never
+ * reach DRAM.  The authoritative V2N map (Renesas FSP
+ * drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_slave_address.h, confirmed by
+ * this board's upstream ddr node) is CM33-secure 0x80000000 / CM33-NS
+ * 0x90000000 / A55 0x40000000, a 256 MiB window, i.e. A55 phys = CM33-NS -
+ * 0x50000000.  Of that window only A55 0x48000000..0x4FFFFFFF is real,
+ * populated NS RAM (0x40000000..0x47FFFFFF reads back 0xFF) -- the base
+ * below is chosen so the whole carve-out (0x4F700000..0x4FFFFFFF) sits
+ * entirely inside that populated range, right up against its top.  The
+ * rsctbl/vring/shm regions below are all quoted in the CM33 view, matching
+ * upstream's openamp_linux_zephyr sample; see resource_table.h for the
+ * CM33->A55 translation macro this same fix corrected.
  *
  * mbox1 is hand-authored: unlike the RZ/V2L SoC dtsi (r9a07g054.dtsi, which
  * ships mbox1/mbox3/mbox4/mbox5), the upstream RZ/V2N SoC dtsi
@@ -161,9 +173,9 @@
 
 		/* Whole OpenAMP region as one reservation to save MPU entries
 		 * (matches the vendor sample's rationale). */
-		openamp_shm: memory@62f00000 {
+		openamp_shm: memory@9f700000 {
 			compatible = "zephyr,memory-region";
-			reg = <0x62f00000 0x900000>;
+			reg = <0x9f700000 0x900000>;
 			zephyr,memory-region = "openamp_memory";
 			zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_IO)>;
 		};
@@ -174,31 +186,41 @@
 		zephyr,ipc = &mbox_consumer;
 	};
 
-	vring_ctrl0: memory@63000000 {
+	rsctbl: memory@9f700000 {
 		compatible = "mmio-sram";
-		reg = <0x63000000 0x50000>;
+		reg = <0x9f700000 0x1000>;
 	};
 
-	/* Condensed vs. the full A55<->CM33 map (vring-ctl1 @ 0x63100000) to
-	 * match the vendor openamp_linux_zephyr sample's layout verbatim. */
-	vring_ctrl1: memory@63050000 {
+	/* Widened from the RZ/V2L layout's 8-byte mhu1_shm (@ +0x1008) to a
+	 * full 4 KiB region immediately after rsctbl, so it lines up with the
+	 * A55/kernel-overlay side's 4f701000.mhu-shm node 1:1 (alp-sdk #683
+	 * address fix). */
+	mhu1_shm: memory@9f701000 {
 		compatible = "mmio-sram";
-		reg = <0x63050000 0x50000>;
+		reg = <0x9f701000 0x1000>;
 	};
 
-	vring_shm0: memory@63200000 {
+	vring_ctrl0: memory@9f800000 {
 		compatible = "mmio-sram";
-		reg = <0x63200000 0x300000>;
+		reg = <0x9f800000 0x50000>;
 	};
 
-	rsctbl: memory@62f00000 {
+	vring_ctrl1: memory@9f850000 {
 		compatible = "mmio-sram";
-		reg = <0x62f00000 0x1000>;
+		reg = <0x9f850000 0x50000>;
 	};
 
-	mhu1_shm: memory@62f01008 {
+	vring_shm0: memory@9f900000 {
 		compatible = "mmio-sram";
-		reg = <0x62f01008 0x8>;
+		reg = <0x9f900000 0x300000>;
+	};
+
+	/* Not yet consumed by this app (only vring_shm0 is, via `chosen
+	 * { zephyr,ipc_shm = ...; }`) -- reserved so the region layout is a
+	 * complete, exact match with the A55 kernel overlay's 6 nodes. */
+	vring_shm1: memory@9fc00000 {
+		compatible = "mmio-sram";
+		reg = <0x9fc00000 0x300000>;
 	};
 
 	mbox_consumer: mbox-consumer {

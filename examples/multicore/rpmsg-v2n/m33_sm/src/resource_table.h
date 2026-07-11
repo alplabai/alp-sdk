@@ -45,16 +45,22 @@ extern "C" {
 #define VRING_RX_ADDR_CM33 DT_REG_ADDR(R_VRING_RX)
 
 /*
- * CM33 <-> A55 address-space translation (HW manual Table 5.2): CM33
- * addresses in the non-secure alias window read/write the same physical
- * memory as the A55 sees at (addr - 0x20000000); the secure alias is
- * (addr - 0x30000000).  Only the non-secure helper is used here -- this
+ * CM33 <-> A55 address-space translation, corrected against the
+ * AUTHORITATIVE V2N slave-address map (Renesas FSP
+ * drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_slave_address.h): the DDR
+ * window is CM33-secure 0x80000000 / CM33-non-secure 0x90000000 /
+ * A55 0x40000000, 256 MiB.  So the non-secure alias reads/writes the
+ * same physical memory as the A55 sees at (addr - 0x50000000), and the
+ * secure alias is (addr - 0x40000000) -- NOT the RZ/V2L offsets
+ * (0x20000000 / 0x30000000) this file was ported from, which put every
+ * CM33-NS OpenAMP address below the A55 DRAM base (0x48000000) on V2N,
+ * i.e. unbacked memory.  Only the non-secure helper is used here -- this
  * link runs entirely in the non-secure world on both cores.
  */
 #ifndef _ASMLANGUAGE
 
-#define CM33_ADDRESS_OFFSET_SECURE    (0x30000000)
-#define CM33_ADDRESS_OFFSET_NONSECURE (0x20000000)
+#define CM33_ADDRESS_OFFSET_SECURE    (0x40000000)
+#define CM33_ADDRESS_OFFSET_NONSECURE (0x50000000)
 #define CM33_TO_A55_ADDR_S(x)         ((x) - CM33_ADDRESS_OFFSET_SECURE)
 #define CM33_TO_A55_ADDR_NS(x)        ((x) - CM33_ADDRESS_OFFSET_NONSECURE)
 

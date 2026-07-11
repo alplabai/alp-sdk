@@ -33,7 +33,9 @@
  *      and `metal_device_open("platform", <uio-name>, &dev)` for each
  *      of the seven regions REFERENCE.md names (env-overridable, see
  *      `uio_dev_name()`): rsctbl, mhu-shm, vring-ctl0/1, vring-shm0/1,
- *      mbox-uio (the MHU IPI, carrying the notification IRQ).
+ *      mhu-uio (the MHU-B register block, carrying the notification IRQ
+ *      -- CORRECTED alp-sdk #683 from the prior "mbox-uio" ICU-page
+ *      mapping, which had no SET register to actually kick with).
  *   2. `remoteproc_init(&ch->rproc, &_rproc_ops, ch)` -- the ONLY
  *      mandatory op this backend implements is `.notify` (the MHU
  *      doorbell kick, see `uio_rproc_notify()` below); every other
@@ -46,9 +48,10 @@
  *      `ops->mmap`/`ops->get_mem` -- confirmed by reading that source
  *      directly rather than assuming the callback is required.
  *   3. `remoteproc_add_mem()` for rsctbl / vring-ctl0 / vring-ctl1 /
- *      vring-shm0 / vring-shm1, each with `da = pa + 0x20000000` (the
- *      A55-non-secure-window translation REFERENCE.md states at the
- *      top of its memory map) and the metal-mapped `io` region.
+ *      vring-shm0 / vring-shm1, each with `da = pa + 0x50000000`
+ *      (`ALP_V2N_A55_TO_M33_NS_OFFSET` -- CORRECTED alp-sdk #683 from
+ *      0x20000000, the RZ/V2L offset this file was ported from; see
+ *      that macro's doc comment) and the metal-mapped `io` region.
  *   4. `remoteproc_set_rsc_table()` pointed at the rsctbl UIO mapping
  *      (the M33 already wrote it there; this call PARSES, never
  *      writes, matching "attach, no load").
@@ -104,7 +107,7 @@
  * (lib/system/linux/irq.c, vendored on-host as a Zephyr module) already
  * runs ONE process-wide poll()+read() thread that dispatches every
  * `metal_irq_register()`-ed UIO IRQ.  `uio_rproc_notify_isr()` below is
- * registered against the mbox-uio device's IRQ (`metal_irq_register`,
+ * registered against the mhu-uio device's IRQ (`metal_irq_register`,
  * confirmed lock-free/reentrant-safe by reading that source: the
  * `linux_irq_cntr` controller's `irq_register` slot is NULL, so
  * registration/unregistration is a single plain array write, safely
@@ -166,19 +169,23 @@
  * `y_open()` with ALP_ERR_BUSY rather than pretending to support
  * multiple simultaneous UIO/OpenAMP links this hardware doesn't have.
  *
- * @par MHU doorbell register offsets -- TBD, pending the real register map
+ * @par MHU doorbell -- register offsets fixed, SWINT unit pairing still TBD
  * `uio_rproc_notify()`/`uio_mhu_ack()` below poke the MHU channel-1
- * scratch (`mhu-shm`) + control (`mbox-uio`) regions using the FIELD
- * NAMES confirmed from the vendored FSP source
- * (drivers/rz/fsp/src/rzv/r_mhu_ns/r_mhu_ns.c: `MSG_INT_SETn` /
- * `MSG_INT_STSn` / `MSG_INT_CLRn`), but this on-host snapshot does not
- * carry the RZ/V2N CMSIS `iodefine.h` with the real byte OFFSETS of
- * those fields inside the MHU channel register block -- the offsets
- * below are a documented placeholder (channel-1 base only, no confirmed
- * intra-channel layout) and MUST be corrected against the RZ/V2N
- * Hardware User's Manual MHU chapter before this backend is
- * bench-validated.  Mirrors this repo's established TBD pattern for an
- * unavailable vendor register map (see
+ * scratch (`mhu-shm`) + the MHU-B SWINT unit registers inside `mhu-uio`.
+ * CORRECTED (alp-sdk #683 doorbell fix): the previous revision aimed at
+ * ICU page 0x10400000, which only ROUTES software interrupts and has no
+ * SET register of its own -- writes there never actually raised
+ * anything.  `mhu-uio` now maps the real MHU-B register block
+ * (A55 0x10480000; see the `ALP_MHU_SWINT_*` macros above, confirmed
+ * against the vendored `mhu_iodefine.h` byte layout), and the STS/SET/CLR
+ * offsets are therefore confirmed, not a placeholder, PER UNIT.  What is
+ * still TBD -- because this on-host snapshot has no bench access to
+ * confirm it -- is WHICH SWINT unit number is wired kick-vs-recv for this
+ * specific A55<->CM33 link; `ALP_UIO_MHU_KICK_UNIT`/`ALP_UIO_MHU_RECV_UNIT`
+ * make that env-overridable so a bench SWINT-walk can correct the unit
+ * numbers (units 2/0 are only the best on-host-derived guess) without a
+ * recompile.  Mirrors this repo's established TBD pattern for an
+ * unconfirmed vendor register pairing (see
  * src/backends/camera/v2n_n44_isp.c's ISP register TBD).
  *
  * @par What is NOT vendored here
@@ -251,11 +258,18 @@
 /* REFERENCE.md Sec. 1 memory map: UIO region table                    */
 /* ------------------------------------------------------------------ */
 
-/* A55-side physical base of each named region; `da` (the M33 NS
+/* A55-side physical base of each named region; `da` (the M33 non-secure
  * device address the resource table / vring descriptors reference) is
- * always `pa + ALP_V2N_A55_TO_M33_NS_OFFSET` -- REFERENCE.md's stated
- * translation rule. */
-#define ALP_V2N_A55_TO_M33_NS_OFFSET 0x20000000u
+ * always `pa + ALP_V2N_A55_TO_M33_NS_OFFSET`.
+ *
+ * CORRECTED (alp-sdk #683, address root-cause fix): this used to be
+ * 0x20000000 (the RZ/V2L offset), which put every region below the A55
+ * DRAM base (0x48000000) -- unbacked memory on V2N. The authoritative
+ * V2N map (Renesas FSP
+ * drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_slave_address.h) is CM33-secure
+ * 0x80000000 / CM33-non-secure 0x90000000 / A55 0x40000000, so
+ * da = pa + 0x50000000. */
+#define ALP_V2N_A55_TO_M33_NS_OFFSET 0x50000000u
 
 enum uio_region_id {
 	UIO_RSCTBL = 0,
@@ -264,25 +278,31 @@ enum uio_region_id {
 	UIO_VRING_CTL1,
 	UIO_VRING_SHM0,
 	UIO_VRING_SHM1,
-	UIO_MBOX, /* MHU IPI -- carries the notification IRQ */
+	UIO_MHU, /* MHU-B register block -- carries the notification IRQ */
 	UIO_REGION_COUNT
 };
 
 struct uio_region_def {
 	const char *dt_name; /* default sysfs "platform" device name */
 	const char *env_var; /* ALP_UIO_* override */
-	uintptr_t   pa;      /* A55 physical base (0 = n/a, e.g. mbox) */
+	uintptr_t   pa;      /* A55 physical base */
 	size_t      size;
 };
 
+/* Addresses corrected (alp-sdk #683, address root-cause fix) to the
+ * authoritative V2N map -- see ALP_V2N_A55_TO_M33_NS_OFFSET's comment
+ * above and the board overlay's matching CM33-side nodes
+ * (zephyr/boards/alp/e1m_v2n101_m33_sm/...cm33.dts). UIO_MHU also
+ * changed WHICH register block it maps -- see this file's header
+ * comment's doorbell-fix note. */
 static const struct uio_region_def g_uio_regions[UIO_REGION_COUNT] = {
-	[UIO_RSCTBL]     = { "42f00000.rsctbl", "ALP_UIO_RSCTBL", 0x42F00000u, 0x1000u },
-	[UIO_MHU_SHM]    = { "42f01000.mhu-shm", "ALP_UIO_MHU_SHM", 0x42F01000u, 0x1000u },
-	[UIO_VRING_CTL0] = { "43000000.vring-ctl0", "ALP_UIO_VRING_CTL0", 0x43000000u, 0x50000u },
-	[UIO_VRING_CTL1] = { "43100000.vring-ctl1", "ALP_UIO_VRING_CTL1", 0x43100000u, 0x50000u },
-	[UIO_VRING_SHM0] = { "43200000.vring-shm0", "ALP_UIO_VRING_SHM0", 0x43200000u, 0x300000u },
-	[UIO_VRING_SHM1] = { "43500000.vring-shm1", "ALP_UIO_VRING_SHM1", 0x43500000u, 0x300000u },
-	[UIO_MBOX]       = { "10400000.mbox-uio", "ALP_UIO_MBOX", 0x10400000u, 0x1000u },
+	[UIO_RSCTBL]     = { "4f700000.rsctbl", "ALP_UIO_RSCTBL", 0x4F700000u, 0x1000u },
+	[UIO_MHU_SHM]    = { "4f701000.mhu-shm", "ALP_UIO_MHU_SHM", 0x4F701000u, 0x1000u },
+	[UIO_VRING_CTL0] = { "4f800000.vring-ctl0", "ALP_UIO_VRING_CTL0", 0x4F800000u, 0x50000u },
+	[UIO_VRING_CTL1] = { "4f850000.vring-ctl1", "ALP_UIO_VRING_CTL1", 0x4F850000u, 0x50000u },
+	[UIO_VRING_SHM0] = { "4f900000.vring-shm0", "ALP_UIO_VRING_SHM0", 0x4F900000u, 0x300000u },
+	[UIO_VRING_SHM1] = { "4fc00000.vring-shm1", "ALP_UIO_VRING_SHM1", 0x4FC00000u, 0x300000u },
+	[UIO_MHU]        = { "10480000.mhu-uio", "ALP_UIO_MHU", 0x10480000u, 0x1000u },
 };
 
 /* "platform" is libmetal's Linux bus name for generic-uio (uio_pdrv_genirq)
@@ -303,7 +323,7 @@ static const char *uio_dev_name(enum uio_region_id id)
 }
 
 /* ------------------------------------------------------------------ */
-/* MHU doorbell -- TBD register offsets, see this file's header comment */
+/* MHU doorbell (alp-sdk #683, doorbell fix)                            */
 /* ------------------------------------------------------------------ */
 
 /* Placeholder channel-1 scratch layout inside mhu-shm (REFERENCE.md:
@@ -314,13 +334,61 @@ static const char *uio_dev_name(enum uio_region_id id)
 #define ALP_MHU_SHM_RSP_TXD    0x00u
 #define ALP_MHU_SHM_MSG_TXD    0x04u
 
-/* Placeholder mbox-uio control-register offsets (field names confirmed
- * from drivers/rz/fsp/src/rzv/r_mhu_ns/r_mhu_ns.c's R_MHU_NS_MsgSend /
- * R_MHU_NS_IsrSub; byte offsets NOT confirmed -- see the file-scope TBD
- * comment). */
-#define ALP_MHU_REG_MSG_INT_STSn 0x00u
-#define ALP_MHU_REG_MSG_INT_CLRn 0x04u
-#define ALP_MHU_REG_MSG_INT_SETn 0x08u
+/*
+ * SWINT (software-interrupt) unit registers inside the MHU-B block that
+ * UIO_MHU now maps (A55 0x10480000, see g_uio_regions above).  Per
+ * mhu_iodefine.h: SWINT units live at block-offset 0x800 + n*0x10, each
+ * with STS/SET/CLR at +0x00/+0x04/+0x08 -- CORRECTED (alp-sdk #683) from
+ * the previous revision's generic-ICU MSG_INT_STSn/CLRn/SETn offsets,
+ * which lived on a page (0x10400000) that only ROUTES software
+ * interrupts and has no SET register of its own to write.
+ *
+ * The unit NUMBERS below are the doorbell fix's one remaining unknown:
+ * which physical SWINT unit is wired to "kick the CM33" vs. "CM33 kicked
+ * us" is NOT confirmed on this host (no bench access) -- unit 2
+ * (A55 0x10480824, this block's SET reg) is the best on-host-derived
+ * guess for the kick direction, unit 0 (0x10480804) for the receive
+ * direction, but BOTH are overridable by env so a bench SWINT-walk can
+ * correct them without a recompile. */
+#define ALP_MHU_SWINT_BLOCK_OFFSET 0x800u
+#define ALP_MHU_SWINT_UNIT_STRIDE  0x10u
+#define ALP_MHU_SWINT_STS_OFFSET   0x00u
+#define ALP_MHU_SWINT_SET_OFFSET   0x04u
+#define ALP_MHU_SWINT_CLR_OFFSET   0x08u
+
+#define ALP_MHU_SWINT_KICK_UNIT_DEFAULT 2u /* A55->CM33 kick, unconfirmed -- see above */
+#define ALP_MHU_SWINT_RECV_UNIT_DEFAULT 0u /* CM33->A55 recv, unconfirmed -- see above */
+
+static unsigned int mhu_swint_unit_env(const char *env_var, unsigned int fallback)
+{
+	const char *env = getenv(env_var);
+	if (env == NULL || env[0] == '\0') {
+		return fallback;
+	}
+	char *end = NULL;
+	long  v   = strtol(env, &end, 0);
+	if (end == env || *end != '\0' || v < 0) {
+		return fallback;
+	}
+	return (unsigned int)v;
+}
+
+static unsigned int mhu_swint_kick_unit(void)
+{
+	return mhu_swint_unit_env("ALP_UIO_MHU_KICK_UNIT", ALP_MHU_SWINT_KICK_UNIT_DEFAULT);
+}
+
+static unsigned int mhu_swint_recv_unit(void)
+{
+	return mhu_swint_unit_env("ALP_UIO_MHU_RECV_UNIT", ALP_MHU_SWINT_RECV_UNIT_DEFAULT);
+}
+
+static volatile uint32_t *
+mhu_swint_reg(struct metal_io_region *mhu, unsigned int unit, uint32_t reg_offset)
+{
+	uintptr_t block = ALP_MHU_SWINT_BLOCK_OFFSET + (uintptr_t)unit * ALP_MHU_SWINT_UNIT_STRIDE;
+	return (volatile uint32_t *)((uint8_t *)mhu->virt + block + reg_offset);
+}
 
 /* ------------------------------------------------------------------ */
 /* Backend-owned per-channel state (reached via state->be_data)        */
@@ -348,7 +416,7 @@ struct rpc_be {
 	struct rpmsg_endpoint        ept;
 	bool                         ept_created;
 	bool                         vdev_created;
-	int                          mbox_irq; /* fd cast from dev[UIO_MBOX]->irq_info */
+	int                          mhu_irq; /* fd cast from dev[UIO_MHU]->irq_info */
 
 	pthread_mutex_t    tx_mutex;
 	pthread_mutex_t    sub_mutex;
@@ -461,26 +529,26 @@ frame_parse(const void *data, size_t len, const void **payload_out, size_t *payl
 static int uio_rproc_notify(struct remoteproc *rproc, uint32_t id)
 {
 	struct rpc_be *ch = (struct rpc_be *)rproc->priv;
-	if (ch == NULL || ch->dev[UIO_MHU_SHM] == NULL || ch->dev[UIO_MBOX] == NULL) {
+	if (ch == NULL || ch->dev[UIO_MHU_SHM] == NULL || ch->dev[UIO_MHU] == NULL) {
 		return -1;
 	}
 
-	struct metal_io_region *shm  = metal_device_io_region(ch->dev[UIO_MHU_SHM], 0);
-	struct metal_io_region *mbox = metal_device_io_region(ch->dev[UIO_MBOX], 0);
-	if (shm == NULL || mbox == NULL) {
+	struct metal_io_region *shm = metal_device_io_region(ch->dev[UIO_MHU_SHM], 0);
+	struct metal_io_region *mhu = metal_device_io_region(ch->dev[UIO_MHU], 0);
+	if (shm == NULL || mhu == NULL) {
 		return -1;
 	}
 
 	/* Write the vring notify id into the ch1 scratch word, then assert
-	 * the MHU doorbell -- REFERENCE.md: "Sender writes word + asserts
-	 * MSG_INT". Offsets are the documented TBD placeholder (see this
-	 * file's header comment). */
+	 * the A55->CM33 SWINT kick (alp-sdk #683 doorbell fix -- see this
+	 * file's header comment for why this is a SWINT SET, not the old
+	 * generic-ICU MSG_INT_SETn). */
 	volatile uint32_t *scratch =
 	    (volatile uint32_t *)((uint8_t *)shm->virt + ALP_MHU_SHM_CH1_OFFSET + ALP_MHU_SHM_MSG_TXD);
 	*scratch = id;
 
 	volatile uint32_t *set_reg =
-	    (volatile uint32_t *)((uint8_t *)mbox->virt + ALP_MHU_REG_MSG_INT_SETn);
+	    mhu_swint_reg(mhu, mhu_swint_kick_unit(), ALP_MHU_SWINT_SET_OFFSET);
 	*set_reg = 1u;
 	return 0;
 }
@@ -493,16 +561,16 @@ static const struct remoteproc_ops g_rproc_ops = {
 /* Notification worker -- runs on libmetal's SHARED linux IRQ thread    */
 /* ------------------------------------------------------------------ */
 
-/* Ack the MHU IRQ (clear MSG_INT_STSn) -- REFERENCE.md: "RX MSG_INT_STSn
- * IRQ, clear status". Offsets are the documented TBD placeholder. */
+/* Ack the CM33->A55 SWINT (clear its STS via CLR) -- alp-sdk #683
+ * doorbell fix, see this file's header comment. */
 static void uio_mhu_ack(struct rpc_be *ch)
 {
-	struct metal_io_region *mbox = metal_device_io_region(ch->dev[UIO_MBOX], 0);
-	if (mbox == NULL) {
+	struct metal_io_region *mhu = metal_device_io_region(ch->dev[UIO_MHU], 0);
+	if (mhu == NULL) {
 		return;
 	}
 	volatile uint32_t *clr_reg =
-	    (volatile uint32_t *)((uint8_t *)mbox->virt + ALP_MHU_REG_MSG_INT_CLRn);
+	    mhu_swint_reg(mhu, mhu_swint_recv_unit(), ALP_MHU_SWINT_CLR_OFFSET);
 	*clr_reg = 1u;
 }
 
@@ -621,7 +689,7 @@ epilogue:
 	return RPMSG_SUCCESS;
 }
 
-/* Registered via metal_irq_register() against the mbox-uio device's IRQ;
+/* Registered via metal_irq_register() against the mhu-uio device's IRQ;
  * invoked by libmetal's shared Linux IRQ thread (lib/system/linux/irq.c)
  * every time the MHU doorbell fires. */
 static int uio_rproc_notify_isr(int irq, void *arg)
@@ -650,7 +718,7 @@ static int uio_rproc_notify_isr(int irq, void *arg)
 	bool close_from_worker = ch->close_from_worker;
 	pthread_mutex_unlock(&ch->call_mutex);
 	if (close_from_worker) {
-		metal_irq_unregister(ch->mbox_irq);
+		metal_irq_unregister(ch->mhu_irq);
 		alp_rpc_close_finalize(ch->owner);
 	}
 	return METAL_IRQ_HANDLED;
@@ -723,9 +791,9 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	}
 
 	strncpy(ch->name, cfg->name, sizeof(ch->name) - 1);
-	ch->src_ept  = cfg->src_ept != 0u ? cfg->src_ept : (0x400u | (fnv1a_32(cfg->name) & 0x0FFu));
-	ch->dst_ept  = cfg->dst_ept != 0u ? cfg->dst_ept : ch->src_ept + 1u;
-	ch->mbox_irq = -1;
+	ch->src_ept = cfg->src_ept != 0u ? cfg->src_ept : (0x400u | (fnv1a_32(cfg->name) & 0x0FFu));
+	ch->dst_ept = cfg->dst_ept != 0u ? cfg->dst_ept : ch->src_ept + 1u;
+	ch->mhu_irq = -1;
 
 	pthread_mutex_init(&ch->tx_mutex, NULL);
 	pthread_mutex_init(&ch->sub_mutex, NULL);
@@ -831,17 +899,17 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	}
 
 	{
-		struct metal_io_region *mbox_io = metal_device_io_region(ch->dev[UIO_MBOX], 0);
-		if (mbox_io == NULL || ch->dev[UIO_MBOX]->irq_num == 0) {
-			fprintf(stderr, "alp_rpc: mbox-uio has no IRQ\n");
+		struct metal_io_region *mhu_io = metal_device_io_region(ch->dev[UIO_MHU], 0);
+		if (mhu_io == NULL || ch->dev[UIO_MHU]->irq_num == 0) {
+			fprintf(stderr, "alp_rpc: mhu-uio has no IRQ\n");
 			goto err;
 		}
-		ch->mbox_irq = (int)(intptr_t)ch->dev[UIO_MBOX]->irq_info;
-		if (metal_irq_register(ch->mbox_irq, uio_rproc_notify_isr, ch) != 0) {
+		ch->mhu_irq = (int)(intptr_t)ch->dev[UIO_MHU]->irq_info;
+		if (metal_irq_register(ch->mhu_irq, uio_rproc_notify_isr, ch) != 0) {
 			fprintf(stderr, "alp_rpc: metal_irq_register() failed\n");
 			goto err;
 		}
-		metal_irq_enable((unsigned int)ch->mbox_irq);
+		metal_irq_enable((unsigned int)ch->mhu_irq);
 	}
 
 	rpc_be_data_store(st, ch);
@@ -1101,8 +1169,8 @@ static alp_rpc_shutdown_result_t y_shutdown(alp_rpc_backend_state_t *st)
 	 * comment on metal_irq_register()'s lock-free implementation), then
 	 * wait for any recv ALREADY in flight to finish before returning
 	 * DONE. */
-	if (ch->mbox_irq >= 0) {
-		metal_irq_unregister(ch->mbox_irq);
+	if (ch->mhu_irq >= 0) {
+		metal_irq_unregister(ch->mhu_irq);
 	}
 	while (atomic_load(&ch->cb_active) != 0) {
 		/* Sleep, never spin -- see src/rpc_dispatch.c's _rpc_drain() doc

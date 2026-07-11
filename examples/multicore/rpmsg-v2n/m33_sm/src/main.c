@@ -46,6 +46,7 @@
 #include <zephyr/drivers/mbox.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/barrier.h>
 
 #include <metal/device.h>
 #include <openamp/open_amp.h>
@@ -74,6 +75,24 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
 #define SHM_SIZE       DT_REG_SIZE(SHM_NODE)
 
 #define RSC_TABLE_ADDR DT_REG_ADDR(DT_NODELABEL(rsctbl))
+
+/*
+ * Liveness beacon (alp-sdk #683, address root-cause fix): the resource
+ * table itself gets memcpy'd into RSC_TABLE_ADDR by platform_init() below,
+ * so it owns the low end of the `rsctbl` region -- the beacon lives at the
+ * TOP of the region instead, out of the resource table's way.  A Linux-side
+ * `devmem 0x4F700FF0` (rsctbl's A55 alias) read after this app boots proves,
+ * in one shot, that the M33 is alive, the DDR window is backed, and the
+ * CM33<->A55 address translation in resource_table.h is correct -- and the
+ * heartbeat word lets a re-read tell "alive" apart from "wrote once, then
+ * faulted".
+ */
+#define RSCTBL_BEACON_MAGIC_OFFSET     (0xFF0)
+#define RSCTBL_BEACON_VERSION_OFFSET   (0xFF4)
+#define RSCTBL_BEACON_HEARTBEAT_OFFSET (0xFF8)
+
+#define RSCTBL_BEACON_MAGIC   (0xA10D0683U) /* "Alp Lab, #683" -- arbitrary, just distinctive */
+#define RSCTBL_BEACON_VERSION (1U)
 
 #define APP_TASK_STACK_SIZE (1024)
 
@@ -220,7 +239,12 @@ int platform_init(void)
 
 	/* Region 1: our resource table -- copied into place at RSC_TABLE_ADDR
 	 * (the `rsctbl` DT node) so the A55's remoteproc attach can read it
-	 * back over the matching UIO device. */
+	 * back over the matching UIO device.  This copy is deliberate, not
+	 * link-placement: BL22 loads only this app's SRAM raw-bin, so a
+	 * `.resource_table` section linked AT the DDR rsctbl address (0x9F7xxxxx)
+	 * would simply never be loaded.  Keeping the const table in the SRAM
+	 * image (resource_table.c's `.resource_table` section) and memcpy'ing it
+	 * here is what actually gets it into DDR (alp-sdk #683 address fix). */
 	rsc_table_get(&rsc_tab_addr, &rsc_size);
 	memcpy((void *)RSC_TABLE_ADDR, rsc_tab_addr, rsc_size);
 	rsc_table = (struct fw_resource_table *)RSC_TABLE_ADDR;
@@ -398,9 +422,46 @@ task_end:
 	LOG_INF("rpmsg-v2n/m33_sm: demo ended");
 }
 
+/* Writes the one-shot magic+version half of the beacon -- see the
+ * RSCTBL_BEACON_* macros' header comment. */
+static void rsctbl_beacon_publish(void)
+{
+	volatile uint32_t *magic = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_MAGIC_OFFSET);
+	volatile uint32_t *version =
+	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_VERSION_OFFSET);
+
+	*magic   = RSCTBL_BEACON_MAGIC;
+	*version = RSCTBL_BEACON_VERSION;
+	/* Make the writes visible to the A55 side before anything else runs. */
+	barrier_dsync_fence_full();
+}
+
+/* ~1 Hz heartbeat -- see the RSCTBL_BEACON_* macros' header comment. */
+static uint32_t rsctbl_heartbeat_count;
+
+static void rsctbl_heartbeat_expiry(struct k_timer *timer)
+{
+	volatile uint32_t *heartbeat =
+	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_HEARTBEAT_OFFSET);
+
+	ARG_UNUSED(timer);
+	rsctbl_heartbeat_count++;
+	*heartbeat = rsctbl_heartbeat_count;
+	barrier_dsync_fence_full();
+}
+
+K_TIMER_DEFINE(rsctbl_heartbeat_timer, rsctbl_heartbeat_expiry, NULL);
+
 int main(void)
 {
 	LOG_INF("rpmsg-v2n/m33_sm: starting (alp-sdk #683, Path B Phase 1)");
+
+	/* CRITICAL: the liveness beacon is the VERY FIRST action, ahead of
+	 * OpenAMP/libmetal/driver init below -- so a bench `devmem` read that
+	 * catches this firmware mid-fault still sees "alive, once" rather than
+	 * nothing at all. */
+	rsctbl_beacon_publish();
+	k_timer_start(&rsctbl_heartbeat_timer, K_SECONDS(1), K_SECONDS(1));
 
 	if (platform_init() != 0) {
 		LOG_ERR("platform_init failed");
