@@ -176,10 +176,9 @@ def test_platform_files_paths(tmp_path):
     assert resc == tmp_path / "metadata" / "renode" / "alif_ensemble_e8.resc"
 
 
-def test_platform_stem_unmapped_family_raises():
-    # V2N family maps to renesas_rzv2n, which has no descriptor yet.
-    with pytest.raises(AlpRenodeError, match="no Renode platform descriptor"):
-        platform_stem_for_sku("E1M-V2N101")
+def test_platform_stem_v2n_resolves_to_renesas_rzv2n():
+    # V2N family -> renesas_rzv2n, wired for the --sim-mode contract (#674).
+    assert platform_stem_for_sku("E1M-V2N101") == "renesas_rzv2n"
 
 
 def test_platform_stem_bad_sku_raises():
@@ -190,6 +189,13 @@ def test_platform_stem_bad_sku_raises():
 def test_real_descriptors_exist_for_aen():
     """The .repl/.resc this PR ships must actually be on disk for AEN."""
     repl, resc = platform_files_for_sku("E1M-AEN801", REPO)
+    assert repl.is_file(), f"{repl} should exist"
+    assert resc.is_file(), f"{resc} should exist"
+
+
+def test_real_descriptors_exist_for_v2n():
+    """The renesas_rzv2n .repl/.resc shipped for --sim-mode must be on disk."""
+    repl, resc = platform_files_for_sku("E1M-V2N101", REPO)
     assert repl.is_file(), f"{repl} should exist"
     assert resc.is_file(), f"{resc} should exist"
 

@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Renode --sim-mode smoke: the studio hardware-simulator contract
+# (github.com/alplabai/alp-sdk#674).
+#
+# Boots a Cortex-M33 ELF in Renode via `west alp-renode --sim-mode
+# --board E1M-V2N101`, then drives the published sockets exactly the way
+# alp-studio's RealRenodeAdapter will:
+#   - the UART socket must stream the firmware's serial output, and
+#   - the control socket must round-trip WriteBytes -> ReadBytes and
+#     apply the tmp112 inject (read back the set temperature).
+# This is tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end
+# with ALP_SIM_E2E=1; it fetches its own CM33 ELF, so it needs neither a
+# V2N build nor the Zephyr SDK.
+#
+# !! ADVISORY (continue-on-error) until this runs green on a
+#    Renode-equipped runner, mirroring pr-renode-aen-smoke.yml.  The
+#    renesas_rzv2n.repl is a documented RA6M5-derived CM33 stand-in
+#    pending the faithful RZ/V2N M33 SoC map; promote to a required
+#    context once the socket contract is proven here and the faithful
+#    .repl lands.
+#
+# What is ALREADY validated by the required pytest gate (not this job):
+# every deterministic sim-mode helper -- profile table, bundle-ELF
+# resolution, descriptor assembly, boot-script/argv construction, and the
+# control-socket translation + ReadBytes normalisation (the unit tests in
+# test_alp_renode_sim.py, which always run).
+
+name: pr-renode-sim-mode
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'metadata/renode/renesas_rzv2n.*'
+      - 'scripts/west_commands/alp_renode.py'
+      - 'tests/scripts/test_alp_renode_sim.py'
+      - '.github/workflows/pr-renode-sim-mode.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  renode-sim-mode:
+    name: renode · V2N101 --sim-mode socket contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+
+      - name: Install Python deps
+        run: pip3 install pytest pyyaml
+
+      # Same v1.15.3 pin as pr-renode-aen-smoke.yml / pr-renode-dual-os.yml
+      # so every Renode gate exercises identical emulator behaviour.
+      - name: Install Renode
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/renode/renode/releases/download/v1.15.3/renode-1.15.3.linux-portable-dotnet.tar.gz \
+              -o /tmp/renode.tar.gz
+          mkdir -p "$HOME/renode"
+          tar -xzf /tmp/renode.tar.gz -C "$HOME/renode" --strip-components=1
+          echo "$HOME/renode" >> "$GITHUB_PATH"
+          "$HOME/renode/renode" --version
+
+      # ---- Advisory verification (continue-on-error) ----------------
+
+      - name: west alp-renode --sim-mode end-to-end (V2N101, CM33 ELF)
+        id: sim_e2e
+        continue-on-error: true
+        env:
+          ALP_SIM_E2E: '1'
+          ALP_SDK_ROOT: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q \
+              tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end

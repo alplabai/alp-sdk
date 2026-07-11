@@ -270,6 +270,8 @@ so no Zephyr/Yocto-specific cleaners are needed.  Identical to
 alp build && alp renode                      # headless smoke boot
 alp renode --expect "[hello] done"           # exit 0 when seen, 1 if not
 alp renode --log out.log --timeout 60
+alp renode --sim-mode --board E1M-V2N101 \   # studio hardware simulator
+    --image-bundle ./bundle                  #   (issue #674)
 ```
 
 Boots the built system manifest's Zephyr slice in the
@@ -280,6 +282,15 @@ to `--log` (default `build/renode.log`).  Requires the `renode` binary
 on PATH -- exits non-zero with install guidance when absent, never a
 silent pass.  Identical to `west alp-renode`.
 
+**`--sim-mode`** (studio hardware-simulator contract, issue #674): instead
+of the smoke boot, boots the `--image-bundle` firmware and exposes it to
+alp-studio's sim gateway.  It writes `<bundle>/sim-descriptor.json` (an
+`@alp/sim-protocol` `SimDescriptorSchema` document), streams the firmware
+UART over a TCP socket, and serves a line-oriented control socket
+(`sysbus ReadBytes`/`WriteBytes` + the descriptor's peripheral inject
+templates) until `--timeout`.  First target: **E1M-V2N101** (RZ/V2N
+M33-SM, tmp112 over I2C).
+
 | Option | Meaning |
 |---|---|
 | `APP_PATH` (argument, optional) | App directory (default: walk up from cwd) |
@@ -288,6 +299,8 @@ silent pass.  Identical to `west alp-renode`.
 | `--log` | Tee the console output to this file |
 | `--timeout` | Wall-clock cap in seconds (default 120) |
 | `--expect` | Stop early (exit 0) when this substring appears; exit 1 if it never does |
+| `--image-bundle` | Directory of pre-built artefacts; the firmware ELF source for `--sim-mode` |
+| `--sim-mode` | Studio hardware-simulator mode: emit `sim-descriptor.json` + serve the UART/control sockets |
 
 ### `alp emit` -- print one generated artefact (no build)
 
