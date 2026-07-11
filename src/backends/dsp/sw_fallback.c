@@ -50,6 +50,13 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+/* Block size for the CMSIS-DSP streaming FIR.  arm_fir_f32 needs a
+ * persistent state buffer of (n_taps + block - 1) floats and carries the
+ * delay line across calls; we process the input in blocks of this size so
+ * the state buffer stays bounded (vs. sizing for the whole 1024-sample
+ * chunk).  Small enough to bound RAM, large enough to amortise the call. */
+#define FIR_CMSIS_BLOCK 32u
+
 /* ================================================================== */
 /* Internal stage + backend representation                             */
 /* ================================================================== */
@@ -61,8 +68,16 @@ typedef struct {
 			uint16_t n_taps;
 			/* Taps stored f32 regardless of caller-supplied format. */
 			float taps[ALP_DSP_MAX_FIR_TAPS];
-			/* Delay line: state[k] = x[n-1-k] for k=0..n_taps-1. */
-			float state[ALP_DSP_MAX_FIR_TAPS];
+			/* Portable path: delay line state[k] = x[n-1-k].  CMSIS path:
+			 * arm_fir_f32's state ring, sized n_taps + FIR_CMSIS_BLOCK - 1.
+			 * One buffer covers both (the larger CMSIS requirement). */
+			float state[ALP_DSP_MAX_FIR_TAPS + FIR_CMSIS_BLOCK];
+#if ALP_DSP_USE_CMSIS
+			/* Persistent CMSIS instance: init ONCE at open so the delay
+			 * line carries across apply calls (arm_fir_init zeroes state,
+			 * so re-initing per call would glitch the filter). */
+			arm_fir_instance_f32 inst;
+#endif
 		} fir;
 		struct {
 			uint16_t n_sections;
@@ -94,6 +109,9 @@ struct dsp_be {
      * loop straightforward).  Sized for the largest possible FFT. */
 	float fft_re[ALP_DSP_MAX_FFT_POINTS];
 	float fft_im[ALP_DSP_MAX_FFT_POINTS];
+	/* CMSIS rfft output scratch -- kept here, NOT on the stack (a
+	 * 1024-float / 4 KB stack array would overflow a default thread). */
+	float fft_scratch[ALP_DSP_MAX_FFT_POINTS];
 };
 
 /* Static backend-data pool.  Same shape + size as the legacy
@@ -174,13 +192,17 @@ static void compute_window_samples(alp_dsp_window_kind_t shape, uint16_t n_point
 static void fir_apply(dsp_stage_t *stage, const float *in, size_t in_n, float *out)
 {
 #if ALP_DSP_USE_CMSIS
-	/* CMSIS-DSP arm_fir_f32 needs an arm_fir_instance_f32; we do
-     * one-shot init here to avoid keeping CMSIS state across calls
-     * when we already keep our own state in stage->fir.state. */
-	arm_fir_instance_f32 inst;
-	arm_fir_init_f32(
-	    &inst, stage->u.fir.n_taps, stage->u.fir.taps, stage->u.fir.state, (uint32_t)in_n);
-	arm_fir_f32(&inst, (float *)in, out, (uint32_t)in_n);
+	/* Stream through the persistent instance (init'd once at open) in
+	 * FIR_CMSIS_BLOCK-sized blocks so the state ring stays bounded and
+	 * the delay line carries correctly across calls -- NOT re-init'd
+	 * per call, which would zero the state and glitch the filter. */
+	size_t off = 0u;
+	while (off < in_n) {
+		const uint32_t blk =
+		    ((in_n - off) < FIR_CMSIS_BLOCK) ? (uint32_t)(in_n - off) : FIR_CMSIS_BLOCK;
+		arm_fir_f32(&stage->u.fir.inst, (float *)in + off, out + off, blk);
+		off += blk;
+	}
 #else
 	const uint16_t M = stage->u.fir.n_taps;
 	for (size_t n = 0u; n < in_n; n++) {
@@ -301,10 +323,17 @@ static alp_status_t copy_fir_taps(const alp_dsp_fir_params_t *src, dsp_stage_t *
 	} else {
 		return ALP_ERR_INVAL;
 	}
-	/* Zero the state. */
-	for (uint16_t i = 0u; i < ALP_DSP_MAX_FIR_TAPS; i++) {
+	/* Zero the (enlarged) state buffer. */
+	for (uint16_t i = 0u; i < (ALP_DSP_MAX_FIR_TAPS + FIR_CMSIS_BLOCK); i++) {
 		dst->u.fir.state[i] = 0.0f;
 	}
+#if ALP_DSP_USE_CMSIS
+	/* Init the persistent CMSIS instance ONCE (state carries across
+	 * apply calls thereafter).  State buffer holds n_taps + block - 1
+	 * floats, which fits the enlarged state[] above. */
+	arm_fir_init_f32(
+	    &dst->u.fir.inst, dst->u.fir.n_taps, dst->u.fir.taps, dst->u.fir.state, FIR_CMSIS_BLOCK);
+#endif
 	return ALP_OK;
 }
 
@@ -325,12 +354,13 @@ static alp_status_t copy_iir_coeffs(const alp_dsp_iir_params_t *src, dsp_stage_t
 			}
 		}
 	} else if (src->coeff_format == ALP_DSP_COEFF_FORMAT_Q31) {
-		const int32_t *p = (const int32_t *)src->coeffs;
-		for (uint16_t s = 0u; s < src->n_sections; s++) {
-			for (uint8_t c = 0u; c < 5u; c++) {
-				dst->u.iir.coeffs[s][c] = q31_to_f32(p[s * 5u + c]);
-			}
-		}
+		/* Q31 maps full-scale to +/-1.0, but a biquad's a1 coefficient
+		 * ranges to +/-2, so a direct Q31->f32 map silently wraps every
+		 * real IIR coefficient set into the wrong filter.  Rather than
+		 * ship a subtly-wrong filter, reject Q31 on IIR: callers pass F32
+		 * coefficients (or design them with alp_dsp_biquad_*).  Q31 stays
+		 * valid for FIR, whose taps are bounded to +/-1. */
+		return ALP_ERR_NOSUPPORT;
 	} else {
 		return ALP_ERR_INVAL;
 	}
@@ -351,7 +381,8 @@ static alp_status_t validate_fft(const alp_dsp_fft_params_t *src, dsp_stage_t *d
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 	if (src->output_format != ALP_DSP_FFT_OUTPUT_COMPLEX &&
-	    src->output_format != ALP_DSP_FFT_OUTPUT_MAGNITUDE) {
+	    src->output_format != ALP_DSP_FFT_OUTPUT_MAGNITUDE &&
+	    src->output_format != ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED) {
 		return ALP_ERR_INVAL;
 	}
 	dst->u.fft.n_points = src->n_points;
@@ -519,42 +550,94 @@ static alp_status_t sw_apply_samples(alp_dsp_backend_state_t *state,
 	return ALP_OK;
 }
 
-static alp_status_t sw_apply_bins(alp_dsp_backend_state_t *state,
-                                  const int16_t           *in_mv,
-                                  size_t                   in_n,
-                                  float                   *out_bins,
-                                  size_t                   out_cap,
-                                  size_t                  *got)
+/* Float-native twin of sw_apply_samples: identical stage processing, no
+ * int16 quantisation on the way in or out (the backend is float end to
+ * end; int16 is purely edge glue for the ADC-domain variant). */
+static alp_status_t sw_apply_samples_f32(alp_dsp_backend_state_t *state,
+                                         const float             *in,
+                                         size_t                   in_n,
+                                         float                   *out,
+                                         size_t                   out_cap,
+                                         size_t                  *got)
 {
 	struct dsp_be *be = (struct dsp_be *)state->be_data;
 	if (be == NULL || !be->in_use) {
 		return ALP_ERR_INVAL;
 	}
-	if (!be->terminal_fft) {
+	if (be->terminal_fft) {
 		return ALP_ERR_NOSUPPORT;
 	}
-	if (in_mv == NULL || out_bins == NULL) {
+	if ((in == NULL && in_n > 0u) || (out == NULL && out_cap > 0u)) {
 		return ALP_ERR_INVAL;
 	}
+	const size_t n = (in_n < out_cap) ? in_n : out_cap;
+	*got           = 0u;
+	if (n == 0u) return ALP_OK;
 
-	const dsp_stage_t *fft = &be->stages[be->n_stages - 1u];
-	const uint16_t     n   = fft->u.fft.n_points;
-	if (in_n < (size_t)n) {
-		return ALP_ERR_OUT_OF_RANGE;
+	const size_t chunk_max = ALP_DSP_MAX_FFT_POINTS;
+	size_t       produced  = 0u;
+	while (produced < n) {
+		const size_t this_chunk = ((n - produced) < chunk_max) ? (n - produced) : chunk_max;
+		for (size_t i = 0u; i < this_chunk; i++) {
+			be->fft_re[i] = in[produced + i];
+		}
+		float *buf = be->fft_re;
+		for (uint8_t st = 0u; st < be->n_stages; st++) {
+			dsp_stage_t *s = &be->stages[st];
+			switch (s->kind) {
+			case ALP_DSP_STAGE_FIR:
+				fir_apply(s, buf, this_chunk, buf);
+				break;
+			case ALP_DSP_STAGE_IIR:
+				iir_apply(s, buf, this_chunk, buf);
+				break;
+			default:
+				break;
+			}
+		}
+		for (size_t i = 0u; i < this_chunk; i++) {
+			out[produced + i] = buf[i];
+		}
+		produced += this_chunk;
 	}
-	const size_t required =
-	    (fft->u.fft.output == ALP_DSP_FFT_OUTPUT_COMPLEX) ? (size_t)(2u * n) : (size_t)n;
+	*got = produced;
+	return ALP_OK;
+}
+
+/* Shared FFT core: assumes be->fft_re[0..n) already holds the real input
+ * samples.  Runs the pre-FFT stages, the FFT, and writes the selected
+ * output format to out_bins.  Used by both the int16 and f32 apply_bins
+ * wrappers (which differ only in how they load fft_re). */
+static alp_status_t fft_apply_core(struct dsp_be *be, float *out_bins, size_t out_cap, size_t *got)
+{
+	const dsp_stage_t *fft   = &be->stages[be->n_stages - 1u];
+	const uint16_t     n     = fft->u.fft.n_points;
+	const uint16_t     half1 = (uint16_t)(n / 2u + 1u); /* one-sided bin count */
+
+	size_t required;
+	switch (fft->u.fft.output) {
+	case ALP_DSP_FFT_OUTPUT_COMPLEX:
+		required = (size_t)(2u * n);
+		break;
+	case ALP_DSP_FFT_OUTPUT_MAGNITUDE:
+		required = (size_t)n;
+		break;
+	case ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED:
+		required = (size_t)half1;
+		break;
+	default:
+		return ALP_ERR_INVAL;
+	}
 	if (out_cap < required) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 
-	/* Stage 0: load samples (mV -> float). */
+	/* Real input: clear the imaginary half. */
 	for (uint16_t i = 0u; i < n; i++) {
-		be->fft_re[i] = (float)in_mv[i];
 		be->fft_im[i] = 0.0f;
 	}
 
-	/* Run pre-FFT non-WINDOW stages over fft_re (in-place). */
+	/* Run pre-FFT non-terminal stages over fft_re (in-place). */
 	for (uint8_t st = 0u; st < (be->n_stages - 1u); st++) {
 		dsp_stage_t *s = &be->stages[st];
 		switch (s->kind) {
@@ -581,22 +664,20 @@ static alp_status_t sw_apply_bins(alp_dsp_backend_state_t *state,
 	{
 		/* CMSIS-DSP real FFT: arm_rfft_fast_f32 produces N/2+1 complex
          * bins packed into N floats with DC and Nyquist real-valued
-         * in slots 0 and 1.  Unpack into our full N-bin layout for
-         * symmetric output. */
+         * in slots 0 and 1.  Unpack into our full N-bin layout. */
 		arm_rfft_fast_instance_f32 inst;
 		if (arm_rfft_fast_init_f32(&inst, n) != ARM_MATH_SUCCESS) {
 			return ALP_ERR_IO;
 		}
-		float scratch[ALP_DSP_MAX_FFT_POINTS];
-		arm_rfft_fast_f32(&inst, be->fft_re, scratch, 0u);
+		arm_rfft_fast_f32(&inst, be->fft_re, be->fft_scratch, 0u);
 		/* Re-spread CMSIS's packed layout into our (re, im) arrays. */
-		be->fft_re[0]      = scratch[0]; /* DC re   */
-		be->fft_im[0]      = 0.0f;       /* DC im=0 */
-		be->fft_re[n / 2u] = scratch[1]; /* Nyquist */
+		be->fft_re[0]      = be->fft_scratch[0]; /* DC re   */
+		be->fft_im[0]      = 0.0f;               /* DC im=0 */
+		be->fft_re[n / 2u] = be->fft_scratch[1]; /* Nyquist */
 		be->fft_im[n / 2u] = 0.0f;
 		for (uint16_t k = 1u; k < n / 2u; k++) {
-			be->fft_re[k] = scratch[2u * k];
-			be->fft_im[k] = scratch[2u * k + 1u];
+			be->fft_re[k] = be->fft_scratch[2u * k];
+			be->fft_im[k] = be->fft_scratch[2u * k + 1u];
 			/* Mirror conjugate for k = n - bin. */
 			be->fft_re[n - k] = be->fft_re[k];
 			be->fft_im[n - k] = -be->fft_im[k];
@@ -606,21 +687,84 @@ static alp_status_t sw_apply_bins(alp_dsp_backend_state_t *state,
 	fft_radix2_inplace(be->fft_re, be->fft_im, n);
 #endif
 
-	if (fft->u.fft.output == ALP_DSP_FFT_OUTPUT_COMPLEX) {
+	switch (fft->u.fft.output) {
+	case ALP_DSP_FFT_OUTPUT_COMPLEX:
 		for (uint16_t k = 0u; k < n; k++) {
 			out_bins[2u * k]      = be->fft_re[k];
 			out_bins[2u * k + 1u] = be->fft_im[k];
 		}
 		*got = (size_t)(2u * n);
-	} else {
+		break;
+	case ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED:
+		/* Positive-frequency half only: bins 0..N/2 (N/2+1 values). */
+		for (uint16_t k = 0u; k < half1; k++) {
+			out_bins[k] = sqrtf(be->fft_re[k] * be->fft_re[k] + be->fft_im[k] * be->fft_im[k]);
+		}
+		*got = (size_t)half1;
+		break;
+	default: /* ALP_DSP_FFT_OUTPUT_MAGNITUDE -- full two-sided */
 		for (uint16_t k = 0u; k < n; k++) {
-			const float re = be->fft_re[k];
-			const float im = be->fft_im[k];
-			out_bins[k]    = sqrtf(re * re + im * im);
+			out_bins[k] = sqrtf(be->fft_re[k] * be->fft_re[k] + be->fft_im[k] * be->fft_im[k]);
 		}
 		*got = (size_t)n;
+		break;
 	}
 	return ALP_OK;
+}
+
+static alp_status_t sw_apply_bins(alp_dsp_backend_state_t *state,
+                                  const int16_t           *in_mv,
+                                  size_t                   in_n,
+                                  float                   *out_bins,
+                                  size_t                   out_cap,
+                                  size_t                  *got)
+{
+	struct dsp_be *be = (struct dsp_be *)state->be_data;
+	if (be == NULL || !be->in_use) {
+		return ALP_ERR_INVAL;
+	}
+	if (!be->terminal_fft) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	if (in_mv == NULL || out_bins == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	const uint16_t n = be->stages[be->n_stages - 1u].u.fft.n_points;
+	if (in_n < (size_t)n) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+	for (uint16_t i = 0u; i < n; i++) {
+		be->fft_re[i] = (float)in_mv[i]; /* ADC mV -> float */
+	}
+	return fft_apply_core(be, out_bins, out_cap, got);
+}
+
+/* Float-native twin of sw_apply_bins (no int16 quantisation on input). */
+static alp_status_t sw_apply_bins_f32(alp_dsp_backend_state_t *state,
+                                      const float             *in,
+                                      size_t                   in_n,
+                                      float                   *out_bins,
+                                      size_t                   out_cap,
+                                      size_t                  *got)
+{
+	struct dsp_be *be = (struct dsp_be *)state->be_data;
+	if (be == NULL || !be->in_use) {
+		return ALP_ERR_INVAL;
+	}
+	if (!be->terminal_fft) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	if (in == NULL || out_bins == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	const uint16_t n = be->stages[be->n_stages - 1u].u.fft.n_points;
+	if (in_n < (size_t)n) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+	for (uint16_t i = 0u; i < n; i++) {
+		be->fft_re[i] = in[i];
+	}
+	return fft_apply_core(be, out_bins, out_cap, got);
 }
 
 static void sw_close(alp_dsp_backend_state_t *state)
@@ -637,10 +781,12 @@ static void sw_close(alp_dsp_backend_state_t *state)
 /* ---------- Registration ---------- */
 
 static const alp_dsp_ops_t _ops = {
-	.open          = sw_open,
-	.apply_samples = sw_apply_samples,
-	.apply_bins    = sw_apply_bins,
-	.close         = sw_close,
+	.open              = sw_open,
+	.apply_samples     = sw_apply_samples,
+	.apply_samples_f32 = sw_apply_samples_f32,
+	.apply_bins        = sw_apply_bins,
+	.apply_bins_f32    = sw_apply_bins_f32,
+	.close             = sw_close,
 };
 
 ALP_BACKEND_ANCHOR_DEFINE(dsp);

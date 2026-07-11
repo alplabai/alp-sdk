@@ -16,9 +16,11 @@
  * `arm_*`; it just designs the coefficients and hands them to the chain.
  *
  * The demo:
- *   1. Designs a 2nd-order Butterworth low-pass biquad (cutoff FC, rate
- *      FS) from the textbook bilinear-transform formula.
- *   2. Pushes TWO test tones through the same filter: one in the
+ *   1. Designs a 2nd-order Butterworth low-pass biquad with the SDK's
+ *      alp_dsp_biquad_design() (cookbook low-pass at Q = 1/sqrt(2)) --
+ *      no hand-derived filter math in the app.
+ *   2. Pushes TWO float test tones through the same filter with
+ *      alp_dsp_chain_apply_samples_f32 (no int16 round-trip): one in the
  *      passband (well below FC) and one in the stopband (well above FC).
  *   3. Measures each tone's RMS before and after with alp_dsp_stats_f32
  *      and reports the gain -- the passband tone passes (~unity), the
@@ -45,15 +47,14 @@
 /*
  * Signal parameters.  FS is the sample rate; FC the filter's -3 dB
  * cutoff.  N samples give the filter time to settle and leave a long
- * steady-state stretch to measure.  Amplitude AMP fills a comfortable
- * fraction of the int16 range the chain consumes (headroom for the
- * filter's transient overshoot without clipping).
+ * steady-state stretch to measure.  Amplitude AMP is unit-scale -- the
+ * float chain has no fixed-point range to fill.
  */
 #define FS_HZ    1000.0f
 #define FC_HZ    50.0f
 #define N_SAMPLE 1024u
 #define SETTLE   128u /* skip the biquad's start-up transient before RMS */
-#define AMP      10000.0f
+#define AMP      1.0f /* unit amplitude; the float chain has no int16 range */
 
 /* Two probe tones: one an octave-plus below FC (passband), one well
  * above (stopband).  250 Hz is 5x FC -> ~2.3 octaves -> a 2nd-order
@@ -61,69 +62,28 @@
 #define TONE_PASS_HZ 10.0f
 #define TONE_STOP_HZ 250.0f
 
-/*
- * design_butterworth_lpf -- 2nd-order Butterworth low-pass biquad.
- *
- * The Butterworth response is the maximally-flat-passband case of the
- * standard "RBJ cookbook" low-pass biquad, which is fixed by a quality
- * factor Q = 1/sqrt(2).  For a cutoff w0 = 2*pi*FC/FS:
- *
- *     alpha = sin(w0) / (2*Q)
- *     b0 = (1 - cos w0)/2,  b1 = 1 - cos w0,  b2 = (1 - cos w0)/2
- *     a0 = 1 + alpha,       a1 = -2 cos w0,   a2 = 1 - alpha
- *
- * Dividing through by a0 normalises the difference equation to
- *
- *     y[n] = b0 x[n] + b1 x[n-1] + b2 x[n-2] - a1 y[n-1] - a2 y[n-2]
- *
- * which is EXACTLY the convention <alp/dsp.h> documents for an IIR
- * section, so the five normalised coefficients are handed to the chain
- * verbatim in the order {b0, b1, b2, a1, a2}.
- */
-static void design_butterworth_lpf(float fc, float fs, float coeffs[5])
-{
-	const float w0    = 2.0f * (float)M_PI * fc / fs;
-	const float cosw  = cosf(w0);
-	const float sinw  = sinf(w0);
-	const float q     = 0.70710678f; /* 1/sqrt(2) -- Butterworth */
-	const float alpha = sinw / (2.0f * q);
-
-	const float a0 = 1.0f + alpha;
-	coeffs[0]      = ((1.0f - cosw) * 0.5f) / a0; /* b0 */
-	coeffs[1]      = (1.0f - cosw) / a0;          /* b1 */
-	coeffs[2]      = coeffs[0];                   /* b2 == b0 */
-	coeffs[3]      = (-2.0f * cosw) / a0;         /* a1 */
-	coeffs[4]      = (1.0f - alpha) / a0;         /* a2 */
-}
-
-/* Fill buf with a full-scale int16 sine of frequency freq_hz. */
-static void synth_tone(float freq_hz, int16_t *buf, size_t n)
+/* Fill buf with a unit-amplitude float sine of frequency freq_hz. */
+static void synth_tone(float freq_hz, float *buf, size_t n)
 {
 	for (size_t i = 0; i < n; i++) {
 		float t = (float)i / FS_HZ;
-		buf[i]  = (int16_t)lrintf(AMP * sinf(2.0f * (float)M_PI * freq_hz * t));
+		buf[i]  = AMP * sinf(2.0f * (float)M_PI * freq_hz * t);
 	}
 }
 
 /*
- * rms_steady -- RMS of the int16 buffer over its steady-state region.
+ * rms_steady -- RMS of the buffer over its steady-state region.
  *
  * The first SETTLE samples are dropped: a freshly-opened biquad starts
  * from zero state, so its output ramps up over the first few time
  * constants.  Measuring only [SETTLE, n) reports the filter's true
- * steady-state gain.  The reduction to a float RMS is exactly what the
- * portable alp_dsp_stats_f32 surface exists for -- CMSIS arm_rms_f32 on
- * the M55, portable-C otherwise.
+ * steady-state gain.  One alp_dsp_stats_f32 call does the reduction --
+ * CMSIS arm_rms_f32 on the M55, portable-C otherwise.
  */
-static float rms_steady(const int16_t *buf, size_t n)
+static float rms_steady(const float *buf, size_t n)
 {
-	static float f[N_SAMPLE];
-	const size_t m = n - SETTLE;
-	for (size_t i = 0; i < m; i++) {
-		f[i] = (float)buf[SETTLE + i];
-	}
 	alp_dsp_stats_t s;
-	if (alp_dsp_stats_f32(f, m, &s) != ALP_OK) {
+	if (alp_dsp_stats_f32(buf + SETTLE, n - SETTLE, &s) != ALP_OK) {
 		return 0.0f;
 	}
 	return s.rms;
@@ -132,15 +92,16 @@ static float rms_steady(const int16_t *buf, size_t n)
 /*
  * run_tone -- filter one probe tone and report its passband/stopband gain.
  *
- * Opens a one-section IIR chain from the shared Butterworth coefficients,
- * pushes the tone through it (int16 in -> int16 out, the chain's native
- * sample format), and returns the output/input RMS ratio -- the filter's
- * gain at that frequency.  ~1.0 means "passed", << 1.0 means "rejected".
+ * Opens a one-section IIR chain from the shared biquad coefficients and
+ * pushes the float tone through it with alp_dsp_chain_apply_samples_f32
+ * (float in -> float out, no int16 round-trip).  Returns the output/input
+ * steady-state RMS ratio -- the filter's gain at that frequency: ~1.0
+ * means "passed", << 1.0 means "rejected".
  */
 static float run_tone(const float coeffs[5], float freq_hz)
 {
-	static int16_t in[N_SAMPLE];
-	static int16_t out[N_SAMPLE];
+	static float in[N_SAMPLE];
+	static float out[N_SAMPLE];
 	synth_tone(freq_hz, in, N_SAMPLE);
 
 	alp_dsp_stage_t stages[] = {
@@ -156,7 +117,7 @@ static float run_tone(const float coeffs[5], float freq_hz)
 	}
 
 	size_t       got = 0;
-	alp_status_t st  = alp_dsp_chain_apply_samples(chain, in, N_SAMPLE, out, N_SAMPLE, &got);
+	alp_status_t st  = alp_dsp_chain_apply_samples_f32(chain, in, N_SAMPLE, out, N_SAMPLE, &got);
 	alp_dsp_chain_close(chain);
 	if (st != ALP_OK || got < N_SAMPLE) {
 		printf("[bwlp] filter apply failed (st=%d got=%zu)\n", (int)st, got);
@@ -165,7 +126,7 @@ static float run_tone(const float coeffs[5], float freq_hz)
 
 	float in_rms  = rms_steady(in, N_SAMPLE);
 	float out_rms = rms_steady(out, N_SAMPLE);
-	return (in_rms > 1.0f) ? (out_rms / in_rms) : 0.0f;
+	return (in_rms > 1e-6f) ? (out_rms / in_rms) : 0.0f;
 }
 
 int main(void)
@@ -173,9 +134,16 @@ int main(void)
 	printf("[bwlp] 2nd-order Butterworth low-pass via <alp/dsp> IIR chain\n");
 	printf("[bwlp] fs=%.0f Hz  fc=%.0f Hz\n", (double)FS_HZ, (double)FC_HZ);
 
-	/* Design once; both probe tones share the same filter. */
-	float coeffs[5];
-	design_butterworth_lpf(FC_HZ, FS_HZ, coeffs);
+	/* Design once with the SDK's biquad designer -- a 2nd-order
+	 * Butterworth low-pass is a cookbook low-pass at Q = 1/sqrt(2).  No
+	 * hand-derived filter math in the app; both probe tones share it. */
+	float        coeffs[5];
+	alp_status_t ds =
+	    alp_dsp_biquad_design(ALP_DSP_BIQUAD_LOWPASS, FC_HZ, FS_HZ, 0.70710678f, coeffs);
+	if (ds != ALP_OK) {
+		printf("[bwlp] biquad design failed (st=%d)\n", (int)ds);
+		return 0;
+	}
 	printf("[bwlp] biquad {b0,b1,b2,a1,a2} = {%.4f, %.4f, %.4f, %.4f, %.4f}\n",
 	       (double)coeffs[0],
 	       (double)coeffs[1],

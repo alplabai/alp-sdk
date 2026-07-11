@@ -1119,8 +1119,11 @@
     },
     {
       "functions": [
+        "alp_dsp_biquad_design",
         "alp_dsp_chain_apply_bins",
+        "alp_dsp_chain_apply_bins_f32",
         "alp_dsp_chain_apply_samples",
+        "alp_dsp_chain_apply_samples_f32",
         "alp_dsp_chain_capabilities",
         "alp_dsp_chain_close",
         "alp_dsp_chain_open",

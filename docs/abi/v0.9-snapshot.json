@@ -8057,13 +8057,25 @@
     },
     "alp/dsp.h": {
       "functions": {
+        "alp_dsp_biquad_design": {
+          "hash": "3f8793259667be35",
+          "signature": "alp_status_t alp_dsp_biquad_design(alp_dsp_biquad_kind_t kind, float f0_hz, float fs_hz, float q, float coeffs_out[5]);"
+        },
         "alp_dsp_chain_apply_bins": {
           "hash": "87c32d7ab486511b",
           "signature": "alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n, float *out_bins, size_t out_cap, size_t *got);"
         },
+        "alp_dsp_chain_apply_bins_f32": {
+          "hash": "5f617503324d62c2",
+          "signature": "alp_status_t alp_dsp_chain_apply_bins_f32(alp_dsp_chain_t *chain, const float *in, size_t in_n, float *out_bins, size_t out_cap, size_t *got);"
+        },
         "alp_dsp_chain_apply_samples": {
           "hash": "0cf56ad70c03aad2",
           "signature": "alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain, const int16_t *in_mv, size_t in_n, int16_t *out_mv, size_t out_cap, size_t *got);"
+        },
+        "alp_dsp_chain_apply_samples_f32": {
+          "hash": "2572df23be143a04",
+          "signature": "alp_status_t alp_dsp_chain_apply_samples_f32(alp_dsp_chain_t *chain, const float *in, size_t in_n, float *out, size_t out_cap, size_t *got);"
         },
         "alp_dsp_chain_capabilities": {
           "hash": "48b0fe36389f6123",
@@ -8105,6 +8117,17 @@
         }
       },
       "typedefs": {
+        "alp_dsp_biquad_kind_t": {
+          "definition": "typedef enum { ALP_DSP_BIQUAD_LOWPASS = 0, ALP_DSP_BIQUAD_HIGHPASS = 1, ALP_DSP_BIQUAD_BANDPASS = 2, ALP_DSP_BIQUAD_NOTCH = 3, } alp_dsp_biquad_kind_t;",
+          "enumerators": [
+            "ALP_DSP_BIQUAD_LOWPASS = 0",
+            "ALP_DSP_BIQUAD_HIGHPASS = 1",
+            "ALP_DSP_BIQUAD_BANDPASS = 2",
+            "ALP_DSP_BIQUAD_NOTCH = 3"
+          ],
+          "hash": "16fcfa44f809ee29",
+          "kind": "enum"
+        },
         "alp_dsp_chain_t": {
           "definition": "typedef struct alp_dsp_chain alp_dsp_chain_t;",
           "hash": "ae05edcd36e139af",
@@ -8120,12 +8143,13 @@
           "kind": "enum"
         },
         "alp_dsp_fft_output_t": {
-          "definition": "typedef enum { ALP_DSP_FFT_OUTPUT_COMPLEX = 0, ALP_DSP_FFT_OUTPUT_MAGNITUDE = 1, } alp_dsp_fft_output_t;",
+          "definition": "typedef enum { ALP_DSP_FFT_OUTPUT_COMPLEX = 0, ALP_DSP_FFT_OUTPUT_MAGNITUDE = 1, ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED = 2, } alp_dsp_fft_output_t;",
           "enumerators": [
             "ALP_DSP_FFT_OUTPUT_COMPLEX = 0",
-            "ALP_DSP_FFT_OUTPUT_MAGNITUDE = 1"
+            "ALP_DSP_FFT_OUTPUT_MAGNITUDE = 1",
+            "ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED = 2"
           ],
-          "hash": "331f2c3a66ca3bcf",
+          "hash": "7d2ad27d7090160a",
           "kind": "enum"
         },
         "alp_dsp_fft_params_t": {

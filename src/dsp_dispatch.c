@@ -59,6 +59,10 @@
 #define ALP_DSP_STATS_USE_CMSIS 0
 #endif
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 ALP_BACKEND_DEFINE_CLASS(dsp);
 ALP_BACKEND_ANCHOR(dsp);
 
@@ -154,6 +158,38 @@ alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
 	return chain->state.ops->apply_bins(&chain->state, in_mv, in_n, out_bins, out_cap, got);
 }
 
+alp_status_t alp_dsp_chain_apply_samples_f32(alp_dsp_chain_t *chain,
+                                             const float     *in,
+                                             size_t           in_n,
+                                             float           *out,
+                                             size_t           out_cap,
+                                             size_t          *got)
+{
+	if (chain == NULL || !chain->in_use || got == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (chain->state.ops == NULL || chain->state.ops->apply_samples_f32 == NULL) {
+		return ALP_ERR_NOT_IMPLEMENTED;
+	}
+	return chain->state.ops->apply_samples_f32(&chain->state, in, in_n, out, out_cap, got);
+}
+
+alp_status_t alp_dsp_chain_apply_bins_f32(alp_dsp_chain_t *chain,
+                                          const float     *in,
+                                          size_t           in_n,
+                                          float           *out_bins,
+                                          size_t           out_cap,
+                                          size_t          *got)
+{
+	if (chain == NULL || !chain->in_use || got == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (chain->state.ops == NULL || chain->state.ops->apply_bins_f32 == NULL) {
+		return ALP_ERR_NOT_IMPLEMENTED;
+	}
+	return chain->state.ops->apply_bins_f32(&chain->state, in, in_n, out_bins, out_cap, got);
+}
+
 void alp_dsp_chain_close(alp_dsp_chain_t *chain)
 {
 	if (chain == NULL || !chain->in_use) return;
@@ -220,5 +256,66 @@ alp_status_t alp_dsp_stats_f32(const float *x, size_t n, alp_dsp_stats_t *out)
 	if (out->variance < 0.0f) {
 		out->variance = 0.0f;
 	}
+	return ALP_OK;
+}
+
+alp_status_t alp_dsp_biquad_design(alp_dsp_biquad_kind_t kind,
+                                   float                 f0_hz,
+                                   float                 fs_hz,
+                                   float                 q,
+                                   float                 coeffs_out[5])
+{
+	/* Reject nonsensical designs up front: f0 must sit strictly inside
+	 * (0, Nyquist), and Q / fs must be positive. */
+	if (coeffs_out == NULL || fs_hz <= 0.0f || q <= 0.0f || f0_hz <= 0.0f ||
+	    f0_hz >= 0.5f * fs_hz) {
+		return ALP_ERR_INVAL;
+	}
+
+	/* RBJ audio-EQ cookbook, single 2nd-order section.  w0 is the
+	 * normalised centre/cutoff, alpha sets the bandwidth from Q. */
+	const float w0    = 2.0f * (float)M_PI * f0_hz / fs_hz;
+	const float cosw  = cosf(w0);
+	const float sinw  = sinf(w0);
+	const float alpha = sinw / (2.0f * q);
+
+	/* Denominator is shared by all four responses. */
+	const float a0 = 1.0f + alpha;
+	const float a1 = -2.0f * cosw;
+	const float a2 = 1.0f - alpha;
+
+	float b0, b1, b2;
+	switch (kind) {
+	case ALP_DSP_BIQUAD_LOWPASS:
+		b0 = (1.0f - cosw) * 0.5f;
+		b1 = 1.0f - cosw;
+		b2 = b0;
+		break;
+	case ALP_DSP_BIQUAD_HIGHPASS:
+		b0 = (1.0f + cosw) * 0.5f;
+		b1 = -(1.0f + cosw);
+		b2 = b0;
+		break;
+	case ALP_DSP_BIQUAD_BANDPASS: /* constant 0 dB peak gain */
+		b0 = alpha;
+		b1 = 0.0f;
+		b2 = -alpha;
+		break;
+	case ALP_DSP_BIQUAD_NOTCH:
+		b0 = 1.0f;
+		b1 = -2.0f * cosw;
+		b2 = 1.0f;
+		break;
+	default:
+		return ALP_ERR_INVAL;
+	}
+
+	/* Normalise by a0 into the { b0, b1, b2, a1, a2 } order the IIR stage
+	 * consumes (its difference equation subtracts a1,a2 directly). */
+	coeffs_out[0] = b0 / a0;
+	coeffs_out[1] = b1 / a0;
+	coeffs_out[2] = b2 / a0;
+	coeffs_out[3] = a1 / a0;
+	coeffs_out[4] = a2 / a0;
 	return ALP_OK;
 }

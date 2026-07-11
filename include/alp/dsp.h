@@ -135,9 +135,15 @@ typedef enum {
 	/** Interleaved (re, im) f32 pairs.  Output element count =
      *  2 * @c n_points.  Bins are not normalised. */
 	ALP_DSP_FFT_OUTPUT_COMPLEX = 0,
-	/** Magnitude `sqrt(re*re + im*im)` per bin.  Output element count
-     *  = @c n_points.  Wire-friendly: half the bandwidth of COMPLEX. */
+	/** Magnitude `sqrt(re*re + im*im)` per bin, full two-sided spectrum.
+     *  Output element count = @c n_points. */
 	ALP_DSP_FFT_OUTPUT_MAGNITUDE = 1,
+	/** Magnitude of the positive-frequency half only: bins 0..N/2, i.e.
+     *  `n_points/2 + 1` values (DC through Nyquist).  This is the natural
+     *  output of a real FFT -- the two-sided MAGNITUDE spectrum is just
+     *  this mirrored -- so prefer it for real-input spectra to halve the
+     *  output buffer and skip the redundant negative-frequency bins. */
+	ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED = 2,
 } alp_dsp_fft_output_t;
 
 /** Coefficient format for FIR/IIR stages. */
@@ -263,6 +269,32 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
                                          size_t          *got);
 
 /**
+ * @brief Float-native twin of @ref alp_dsp_chain_apply_samples.
+ *
+ * Identical to @ref alp_dsp_chain_apply_samples but consumes and
+ * produces `float` samples directly -- no int16 quantisation on either
+ * edge.  Prefer this for float DSP pipelines; the int16 variant is the
+ * ADC-domain (millivolt) flavour that composes with `<alp/adc.h>`.
+ *
+ * @param[in]  chain    Handle from @ref alp_dsp_chain_open.
+ * @param[in]  in       Input samples (float).
+ * @param[in]  in_n     Input sample count.
+ * @param[out] out      Output buffer (float; in-place if @c out == in).
+ * @param[in]  out_cap  Capacity of @p out (samples).
+ * @param[out] got      Number of output samples written
+ *                      (`<= min(in_n, out_cap)`).
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT (chain ends with
+ *         FFT -- use @ref alp_dsp_chain_apply_bins_f32 instead).
+ */
+alp_status_t alp_dsp_chain_apply_samples_f32(alp_dsp_chain_t *chain,
+                                             const float     *in,
+                                             size_t           in_n,
+                                             float           *out,
+                                             size_t           out_cap,
+                                             size_t          *got);
+
+/**
  * @brief Apply an FFT-terminated chain to an in-RAM sample buffer.
  *
  * Valid only when the chain ends with an FFT stage.  Pre-FFT stages
@@ -274,7 +306,16 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
  *   - @ref ALP_DSP_FFT_OUTPUT_COMPLEX -- 2 * @c n_points
  *     (interleaved re/im pairs).
  *   - @ref ALP_DSP_FFT_OUTPUT_MAGNITUDE -- @c n_points
- *     (per-bin magnitudes).
+ *     (full two-sided per-bin magnitudes).
+ *   - @ref ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED -- @c n_points/2 + 1
+ *     (positive-frequency half; the natural real-FFT output).
+ *
+ * @par Streaming semantics: pre-FFT FIR / IIR stages carry their filter
+ *      state ACROSS calls (a sliding filter), while the FFT itself
+ *      consumes exactly @c n_points samples from @c in each call.
+ *      Feeding successive (optionally overlapping) windows therefore
+ *      yields an STFT-style stream; @ref alp_dsp_chain_close resets all
+ *      filter state.
  *
  * @param[in]  chain     Handle from @ref alp_dsp_chain_open.
  * @param[in]  in_mv     Input samples (mV, int16_t).  Must provide
@@ -298,6 +339,29 @@ alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
                                       float           *out_bins,
                                       size_t           out_cap,
                                       size_t          *got);
+
+/**
+ * @brief Float-native twin of @ref alp_dsp_chain_apply_bins.
+ *
+ * Identical to @ref alp_dsp_chain_apply_bins (same output formats,
+ * counts, and streaming semantics) but consumes `float` input samples
+ * directly instead of int16 millivolts.  Prefer this for float pipelines.
+ *
+ * @param[in]  chain     Handle from @ref alp_dsp_chain_open.
+ * @param[in]  in        Input samples (float); >= @c n_points provided.
+ * @param[in]  in_n      Input sample count.
+ * @param[out] out_bins  Output buffer (float).
+ * @param[in]  out_cap   Capacity of @p out_bins (elements).
+ * @param[out] got       Number of output elements written.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT / ALP_ERR_OUT_OF_RANGE.
+ */
+alp_status_t alp_dsp_chain_apply_bins_f32(alp_dsp_chain_t *chain,
+                                          const float     *in,
+                                          size_t           in_n,
+                                          float           *out_bins,
+                                          size_t           out_cap,
+                                          size_t          *got);
 
 /**
  * @brief Release a DSP chain back to the pool.
@@ -372,6 +436,58 @@ typedef struct {
  *       both the CMSIS and portable paths.
  */
 alp_status_t alp_dsp_stats_f32(const float *x, size_t n, alp_dsp_stats_t *out);
+
+/* ================================================================== */
+/* Biquad filter design                                                */
+/* ================================================================== */
+
+/**
+ * @brief Response type for @ref alp_dsp_biquad_design.
+ *
+ * These are the four RBJ audio-EQ-cookbook second-order responses.
+ * @note SCOPE BOUNDARY (deliberate, for maintenance): this surface
+ *       covers ONLY the closed-form cookbook biquads below.  It is NOT
+ *       a general filter-design toolbox -- higher-order Butterworth
+ *       cascades, Chebyshev / elliptic / Bessel families, and
+ *       arbitrary pole placement (Parks-McClellan etc.) are out of
+ *       scope on purpose and belong in application code or an external
+ *       design tool feeding F32 coefficients to @ref ALP_DSP_STAGE_IIR.
+ */
+typedef enum {
+	ALP_DSP_BIQUAD_LOWPASS  = 0, /**< 2nd-order low-pass.             */
+	ALP_DSP_BIQUAD_HIGHPASS = 1, /**< 2nd-order high-pass.            */
+	ALP_DSP_BIQUAD_BANDPASS = 2, /**< Band-pass, constant 0 dB peak.  */
+	ALP_DSP_BIQUAD_NOTCH    = 3, /**< Band-reject (notch).            */
+} alp_dsp_biquad_kind_t;
+
+/**
+ * @brief Design one second-order biquad section (RBJ cookbook).
+ *
+ * Computes the five normalised coefficients for a single
+ * @ref ALP_DSP_STAGE_IIR section from a centre/cutoff frequency and Q,
+ * so callers do not hand-derive filter math.  A 2nd-order Butterworth
+ * low-pass, for example, is @ref ALP_DSP_BIQUAD_LOWPASS with
+ * @p q = 0.70710678 (`1/sqrt(2)`).
+ *
+ * @param[in]  kind       Response type (@ref alp_dsp_biquad_kind_t).
+ * @param[in]  f0_hz      Cutoff (LP/HP) or centre (BP/notch) frequency;
+ *                        must satisfy `0 < f0_hz < fs_hz/2`.
+ * @param[in]  fs_hz      Sample rate in Hz; must be > 0.
+ * @param[in]  q          Quality factor; must be > 0 (Butterworth LP/HP
+ *                        uses `1/sqrt(2)`; higher Q = narrower/peakier).
+ * @param[out] coeffs_out Receives `{ b0, b1, b2, a1, a2 }` normalised
+ *                        (a0 = 1), ready to pass as an IIR stage's
+ *                        @c coeffs with @c n_sections = 1 and
+ *                        @ref ALP_DSP_COEFF_FORMAT_F32.
+ *
+ * @return @ref ALP_OK, or @ref ALP_ERR_INVAL on a NULL pointer, a bad
+ *         @p kind, or a frequency/Q outside the valid ranges above.
+ */
+alp_status_t alp_dsp_biquad_design(alp_dsp_biquad_kind_t kind,
+                                   float                 f0_hz,
+                                   float                 fs_hz,
+                                   float                 q,
+                                   float                 coeffs_out[5]);
 
 #ifdef __cplusplus
 } /* extern "C" */
