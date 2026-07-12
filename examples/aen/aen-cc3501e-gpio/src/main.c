@@ -120,6 +120,32 @@
 #define DEMO_OP_TIMEOUT_MS 100u
 
 /*
+ * ==== WHY THIS EXAMPLE NEEDS A LIVENESS GATE (read before touching #708) ==
+ *
+ * cc3501e_bridge_bringup() -> cc3501e_reset() only does a BLIND boot-settle
+ * delay (see chips/cc3501e/cc3501e_core.c) -- it never exchanges a byte with
+ * the module, so it returns as soon as its own timer expires, NOT when the
+ * firmware is actually answering.  The --wifi --ble image is slow to arm its
+ * SPI slave: lwIP's tcpip_init() and the crypto/Board_init sequence run
+ * BEFORE transport_spi_init(), and the Puya cold-boot flash bug (see
+ * cc3501e_hard_reset()'s comment) sometimes needs a SECOND hard reset before
+ * the module answers at all.  Meanwhile each of the 8 gpio/cam ops below has
+ * only a DEMO_OP_TIMEOUT_MS (100 ms) budget -- ~0.9 s total for all 8 -- so
+ * without a gate they race the boot and ALL eight TIMEOUT before the slave
+ * is armed, even though the link comes up fine a second or two later.  (The
+ * bringup soak already has this "hard-reset again if one re-boot is not
+ * enough" retry -- cc3501e_core.c:119-121 -- this gate is the same idea
+ * applied here, mirroring aen-cc3501e-companion-tour's tour_ping().)
+ *
+ * The fix is NOT a bigger DEMO_OP_TIMEOUT_MS (that just slows down every
+ * op, including the ones that are genuinely broken) -- it is to not START
+ * the ops until a cheap, zero-payload PING actually round-trips.
+ */
+#define GPIO_PING_RETRIES 25u  /* poll-by-repeat budget per attempt, mirrors tour_ping() */
+#define GPIO_PING_GAP_MS  200u /* gap between PING attempts (5 s worst case per attempt) */
+#define GPIO_LINK_REBOOTS 3u   /* extra cc3501e_hard_reset() attempts if PING never lands */
+
+/*
  * Emit one bench-contract line and fold the result into the running
  * tally.  `ok` is the boolean a step computed from its alp_status_t; we
  * print the exact "GPIO_TEST: <step> PASS|FAIL" the bench script greps and
@@ -133,6 +159,46 @@ static void report(const char *step, bool ok, unsigned *pass, unsigned *fail)
 	} else {
 		(*fail)++;
 	}
+}
+
+/*
+ * Liveness gate -- see the "WHY" block above DEMO_OP_TIMEOUT_MS.  Spins a
+ * zero-payload PING up to GPIO_PING_RETRIES times (GPIO_PING_GAP_MS apart);
+ * PING is cheap (no worker, no radio) so this is a fast poll, not a slow
+ * one.  If a whole PING attempt never lands, cc3501e_hard_reset() gives the
+ * module a second boot (the Puya cold-boot workaround -- the first boot can
+ * simply fail to launch the vendor image) and the PING loop runs again, up
+ * to GPIO_LINK_REBOOTS times.  Returns true once a PING succeeds.
+ */
+static bool gpio_wait_for_link(cc3501e_t *fw)
+{
+	for (unsigned reboot = 0u; reboot <= GPIO_LINK_REBOOTS; ++reboot) {
+		for (unsigned i = 0u; i < GPIO_PING_RETRIES; ++i) {
+			if (cc3501e_ping(fw) == ALP_OK) {
+				printf("[cc3501e-gpio] link up (PING ok after %u) -- running gpio ops\n", i + 1u);
+				return true;
+			}
+			alp_delay_ms(GPIO_PING_GAP_MS);
+		}
+		/* A full PING budget elapsed with no reply -- the module may have
+		 * hit the Puya cold-boot bug (first boot never launches the vendor
+		 * image).  Give it one more re-boot with the rails kept up and try
+		 * again, unless we are already on the last allowed attempt. */
+		if (reboot < GPIO_LINK_REBOOTS) {
+			printf("[cc3501e-gpio] PING never answered after %u attempts -- issuing "
+			       "hard reset %u/%u and retrying\n",
+			       GPIO_PING_RETRIES,
+			       reboot + 1u,
+			       GPIO_LINK_REBOOTS);
+			(void)cc3501e_hard_reset(fw);
+		}
+	}
+	printf("[cc3501e-gpio] CC3501E never answered PING after %u hard reset(s) -- the gpio "
+	       "ops below will still run (and report FAIL) so the bench SUMMARY stays complete; "
+	       "check WIFI_EN power, the SPI1 pinmux, and that the --wifi --ble firmware is "
+	       "actually flashed\n",
+	       GPIO_LINK_REBOOTS);
+	return false;
 }
 
 int main(void)
@@ -165,6 +231,19 @@ int main(void)
 	printf("[cc3501e-gpio] cc3501e bridge bring-up -> %d%s\n",
 	       (int)s,
 	       (s == ALP_ERR_NOSUPPORT) ? " (control pins not bound?)" : "");
+
+	/*
+	 * Liveness gate -- see #708.  cc3501e_bridge_bringup() only waits out a
+	 * BLIND boot-settle timer (no wire exchange), so it can return before
+	 * the --wifi --ble firmware has actually armed its SPI slave.  Do not
+	 * skip straight to the 8 gpio/cam ops (each has only a 100 ms budget):
+	 * confirm the link is live with a cheap PING first, retrying through
+	 * extra hard resets if needed.  We deliberately do NOT early-return on
+	 * total failure -- the bench script's grep contract requires all 8 step
+	 * lines plus the SUMMARY, so the ops still run below (and will FAIL,
+	 * correctly reporting a dead link instead of going silent).
+	 */
+	(void)gpio_wait_for_link(&fw);
 
 	/*
 	 * Step 1 -- configure the proxied pad as a push-pull OUTPUT with no
