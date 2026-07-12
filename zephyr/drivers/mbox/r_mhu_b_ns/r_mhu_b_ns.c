@@ -187,6 +187,24 @@ fsp_err_t R_MHU_B_NS_Open (mhu_ctrl_t * const p_ctrl, mhu_cfg_t const * const p_
     p_instance_ctrl->p_regs    = g_mhu_b_ns_reg_pairs[channel].p_send;
     p_instance_ctrl->p_regs_rx = g_mhu_b_ns_reg_pairs[channel].p_recv;
 
+    /* alp-sdk #697 cycle 5 BENCH-PROVEN override.  On e1mx-v2n-m1-01 the register
+     * whose MSG_INT is actually routed to MHU_MSG5_NS_IRQn(293) is R_MHU_NS5 --
+     * the slot that MATCHES the channel number -- NOT the crossbar table's
+     * {send=R_MHU_NS36, recv=R_MHU_NS8} pairing above.  An A55 kick to NS8 or
+     * NS36 latched their STS but never fired IRQ 293; a kick to R_MHU_NS5 stormed
+     * this ISR.  Channel 5 is ONE register block, MSG half = A55->M33 (this
+     * core's RX), RSP half = M33->A55 (this core's TX), so bind BOTH pointers to
+     * R_MHU_NS5 -- otherwise the ISR checks/clears the wrong register (STS never
+     * matches -> no service; or the source never clears -> interrupt storm).
+     * The crossbar table's non-linear pairing is flagged INFERRED in this file's
+     * header; this override is the bench that corrects it for the one NS channel
+     * this A55<->CM33 link uses. */
+    if (5U == channel)
+    {
+        p_instance_ctrl->p_regs    = R_MHU_NS5;
+        p_instance_ctrl->p_regs_rx = R_MHU_NS5;
+    }
+
     /* Derive send_type from the caller's declared rx_irq (see this file's header -- FLAG FOR REVIEW). */
     mhu_send_type_t send_type;
     fsp_err_t       send_type_err = r_mhu_b_ns_send_type_get(channel, p_cfg->rx_irq, &send_type);

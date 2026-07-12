@@ -341,25 +341,24 @@ static const char *uio_dev_name(enum uio_region_id id)
  * 0x20 bytes: MSG_INT_STS/SET/CLR @ +0x00/04/08, RSP_INT_STS/SET/CLR @
  * +0x0C/10/14.
  *
- * The M33 fw runs its CA55<->CM33 link on logical channel 5, which the
- * MHU-B crossbar maps NON-linearly (bsp_mhu_b.h R_BSP_MHU_B_NS_REG_PAIR_BODY
- * entry {36, R_MHU_NS36, 8, R_MHU_NS8}): the M33 SENDS via R_MHU_NS36 (slot
- * offset 0x480) and RECEIVES via R_MHU_NS8 (slot offset 0x100), with
- * send_type = RSP -- derived from its declared rx_irq MHU_MSG5_NS_IRQn(293),
- * which bsp_mhu_b.h lists in the RSP send-type table.  So on this A55 peer
- * (the mirror, send_type = MSG):
- *   - KICK the M33 (raise its MHU_MSG5_NS_IRQn) by asserting MSG_INT_SET on
- *     R_MHU_NS8            -> A55 0x10480104.
- *   - RECEIVE/ack the M33's send (RSP_INT on R_MHU_NS36, MHU_RSP5_NS_IRQn=
- *     299) by clearing RSP_INT_CLR on R_MHU_NS36 -> A55 0x10480494.
- * CORRECTED (alp-sdk #683/#697 bench cycle 2): the previous revision wrote a
- * SWINT unit SET (block +0x800) -- a DIFFERENT MHU-B sub-block whose IRQ is
- * not MHU_MSG5_NS, so the kick never raised the M33's channel-5 IRQ.  These
- * register offsets are silicon-authoritative from the FSP headers; the one
- * remaining bench/overlay-gated unknown is the A55 GIC SPI the mhu-uio DT
- * node must carry for the RECEIVE direction (rsp_ch5_ns), which lives in the
- * license-gated Renesas meta-rz-multi-os overlay -- see the openamp UIO
- * dtsi's mhu-uio node. */
+ * The M33 fw runs its CA55<->CM33 link on logical channel 5.  BENCH-PROVEN
+ * (alp-sdk #697 cycle 5, on e1mx-v2n-m1-01): the register whose MSG_INT is
+ * routed to the M33's MHU_MSG5_NS_IRQn(293) is R_MHU_NS5 -- the slot that
+ * MATCHES the channel number (0x50480000 + 5*0x20 = 0x504800A0; A55 alias
+ * 0x104800A0), NOT the bsp_mhu_b.h R_BSP_MHU_B_NS_REG_PAIR_BODY {36,NS36,8,NS8}
+ * pairing the vendored port inferred.  Kicking NS8(0x100) or NS36(0x480)
+ * latched their STS but never fired IRQ 293 (mbox ISR count stayed 0); kicking
+ * R_MHU_NS5(0xA0) stormed the M33 ISR.  Channel 5 is one register block with
+ * the two INT halves as the two directions:
+ *   - KICK the M33 (raise MHU_MSG5_NS_IRQn=293) = MSG_INT_SET on R_MHU_NS5
+ *                                                 -> A55 0x104800A4.
+ *   - RECEIVE/ack the M33's send (its RSP half, MHU_RSP5_NS_IRQn=299, dtb
+ *     mhu-uio GIC_SPI 267) = RSP_INT_CLR on R_MHU_NS5 -> A55 0x104800B4.
+ * The M33 side must correspondingly bind its ch5 RX/TX to R_MHU_NS5 (see the
+ * r_mhu_b_ns.c port's channel-5 override) -- otherwise its ISR clears the
+ * wrong register and the interrupt storms.  Earlier revisions aimed at a SWINT
+ * unit (block +0x800, cycle 2) then NS8/NS36 (cycle 3-4); this is the
+ * bench-confirmed target. */
 #define ALP_MHU_NS_SLOT_MSG_INT_STS 0x00u
 #define ALP_MHU_NS_SLOT_MSG_INT_SET 0x04u
 #define ALP_MHU_NS_SLOT_MSG_INT_CLR 0x08u
@@ -367,9 +366,11 @@ static const char *uio_dev_name(enum uio_region_id id)
 #define ALP_MHU_NS_SLOT_RSP_INT_SET 0x10u
 #define ALP_MHU_NS_SLOT_RSP_INT_CLR 0x14u
 
-/* Channel-5 crossbar slot offsets within the A55-mapped MHU-B block. */
-#define ALP_MHU_NS_CH5_KICK_SLOT 0x100u /* R_MHU_NS8  -- M33 RX; the A55 kick target */
-#define ALP_MHU_NS_CH5_RECV_SLOT 0x480u /* R_MHU_NS36 -- M33 TX; the A55 recv source */
+/* Channel-5 register slot within the A55-mapped MHU-B block: R_MHU_NS5, the
+ * channel-numbered slot (bench-proven, #697 cycle 5).  Both directions share
+ * it -- MSG half = A55->M33 kick, RSP half = M33->A55. */
+#define ALP_MHU_NS_CH5_KICK_SLOT 0xA0u /* R_MHU_NS5.MSG -- A55->M33 kick (fires IRQ 293) */
+#define ALP_MHU_NS_CH5_RECV_SLOT 0xA0u /* R_MHU_NS5.RSP -- M33->A55 recv/ack source */
 
 static volatile uint32_t *
 mhu_ns_reg(struct metal_io_region *mhu, uint32_t slot_offset, uint32_t reg_offset)
@@ -377,13 +378,10 @@ mhu_ns_reg(struct metal_io_region *mhu, uint32_t slot_offset, uint32_t reg_offse
 	return (volatile uint32_t *)((uint8_t *)mhu->virt + slot_offset + reg_offset);
 }
 
-/* #683/#697 bench cycle 4 proved the M33's own R_MHU_NS8.MSG_INT_STS latches
- * under the kick (same physical register) but IRQ 293 never fires -- i.e.
- * R_MHU_NS8.MSG is not wired to msg_ch5_ns.  The leading hypothesis is that
- * channel 5 is really the R_MHU_NS36 block with MSG=A55->M33 / RSP=M33->A55
- * (the RSP=M33->A55 half is already proven on silicon).  Make the kick slot
- * offset bench-overridable (ALP_UIO_MHU_KICK_SLOT, hex) so a cycle can A/B the
- * NS8 (0x100) vs NS36 (0x480) slot without a recompile; default stays 0x100. */
+/* Kick slot offset is bench-overridable (ALP_UIO_MHU_KICK_SLOT, hex); the
+ * default is now the bench-proven R_MHU_NS5 (0xA0, #697 cycle 5).  The override
+ * is retained so a future SoM/channel change can be walked without a recompile
+ * (cycle 5 used it to A/B 0x100/0x480/0xA0). */
 static uint32_t mhu_kick_slot(void)
 {
 	const char *env = getenv("ALP_UIO_MHU_KICK_SLOT");
@@ -564,8 +562,8 @@ static int uio_rproc_notify(struct remoteproc *rproc, uint32_t id)
 
 	/* Write the vring notify id into the ch1 scratch word, then raise the
 	 * A55->CM33 doorbell by asserting MSG_INT_SET on the M33's channel-5
-	 * receive register R_MHU_NS8 (alp-sdk #683/#697 doorbell fix -- see the
-	 * MHU-B NS register comment above). */
+	 * register R_MHU_NS5 (alp-sdk #683/#697 doorbell fix, bench-proven cycle 5
+	 * -- see the MHU-B NS register comment above). */
 	volatile uint32_t *scratch =
 	    (volatile uint32_t *)((uint8_t *)shm->virt + ALP_MHU_SHM_CH1_OFFSET + ALP_MHU_SHM_MSG_TXD);
 	*scratch = id;
