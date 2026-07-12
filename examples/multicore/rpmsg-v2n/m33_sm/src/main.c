@@ -400,6 +400,16 @@ static void app_rpmsg_client_sample(void *arg1, void *arg2, void *arg3)
 
 	while (!finish) {
 		k_sem_take(&data_sc_sem, K_FOREVER);
+		/* #697 self-close-race harness: the A55 GHSA-xhm8 self-close test needs
+		 * its blocked UINT32_MAX call to stay in-flight while a *fast* "close_me"
+		 * echo fires the self-close, so the two actually race.  Delay echoing any
+		 * method whose name starts with "slow" (the frame is <method>\0<payload>,
+		 * include/alp/rpc.h) -- the test uses a "slow_..." method for the blocked
+		 * call and a plain "close_me" for the trigger.  Normal echoes (echo_test)
+		 * are unaffected. */
+		if (sc_msg.len >= 4 && memcmp(sc_msg.data, "slow", 4) == 0) {
+			k_sleep(K_MSEC(150));
+		}
 		rpmsg_send(&sc_ept, sc_msg.data, sc_msg.len);
 	}
 

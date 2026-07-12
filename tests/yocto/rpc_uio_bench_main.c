@@ -503,7 +503,12 @@ static bool run_self_close_scenario(void)
 		}
 
 		atomic_store(&g_selfclose_fired, false);
-		struct call_arg carg = { .ch = ch, .method = "race_method_selfclose", .done = false };
+		/* "slow_" prefix: the M33 echo firmware deliberately delays echoing
+		 * methods starting with "slow" (see m33_sm/src/main.c), so this blocked
+		 * UINT32_MAX call stays in-flight while the fast "close_me" trigger below
+		 * fires the self-close -- opening the GHSA-xhm8 self-close race that a
+		 * plain fast-echo method closes before the window opens (#697). */
+		struct call_arg carg = { .ch = ch, .method = "slow_selfclose", .done = false };
 
 		/* Ordering is load-bearing -- see this file's header comment:
 		 * send the trigger (fast, non-blocking) BEFORE spawning the
