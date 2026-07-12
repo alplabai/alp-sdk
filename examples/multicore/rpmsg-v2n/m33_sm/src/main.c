@@ -94,7 +94,10 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
 #define RSCTBL_BEACON_MAGIC   (0xA10D0683U) /* "Alp Lab, #683" -- arbitrary, just distinctive */
 #define RSCTBL_BEACON_VERSION (1U)
 
-#define APP_TASK_STACK_SIZE (1024)
+/* 2048 not 1024: the RX callback + echo thread now hold a struct sc_frame (~520 B)
+ * on the stack for the queued-echo path (#707); the deep OpenAMP rx call chain
+ * needs the extra headroom. */
+#define APP_TASK_STACK_SIZE (2048)
 
 K_THREAD_STACK_DEFINE(thread_mng_stack, APP_TASK_STACK_SIZE);
 K_THREAD_STACK_DEFINE(thread_rp_client_stack, APP_TASK_STACK_SIZE);
@@ -127,11 +130,6 @@ struct metal_device shm_device = {
 	.irq_num = 0,
 };
 
-struct rpmsg_rcv_msg {
-	void  *data;
-	size_t len;
-};
-
 static struct metal_io_region      *shm_io;
 static struct rpmsg_virtio_shm_pool shpool;
 
@@ -141,11 +139,23 @@ static struct rpmsg_virtio_device rvdev;
 static void                *rsc_table;
 static struct rpmsg_device *rpdev;
 
-static char                  rx_sc_msg[512];
 static struct rpmsg_endpoint sc_ept;
-static struct rpmsg_rcv_msg  sc_msg = { .data = rx_sc_msg };
+
+/* #707: echo RX frames via a QUEUE, not a single buffer + binary sem.  The old
+ * single sc_msg buffer + K_SEM(...,1) dropped the second of two rapid frames --
+ * the RX callback overwrote sc_msg before the echo thread ran -- so the A55
+ * GHSA-xhm8 self-close test (a fast "close_me" trigger + a "slow_..." blocked
+ * call, back to back) never opened its race window on silicon (#697 cycle 13).
+ * The queue echoes both, in order. */
+struct sc_frame {
+	size_t len;
+	char   data[512];
+};
+K_MSGQ_DEFINE(sc_frame_q, sizeof(struct sc_frame), 8, 4);
 
 static K_SEM_DEFINE(data_sem, 0, 1);
+/* data_sc_sem now only signals the one-shot "rpdev ready, create your ept" handoff
+ * to the responder thread; per-frame delivery goes through sc_frame_q above. */
 static K_SEM_DEFINE(data_sc_sem, 0, 1);
 
 static volatile int finish;
@@ -171,9 +181,12 @@ rpmsg_recv_cs_callback(struct rpmsg_endpoint *ept, void *data, size_t len, uint3
 	ARG_UNUSED(ept);
 	ARG_UNUSED(src);
 	ARG_UNUSED(priv);
-	memcpy(sc_msg.data, data, len);
-	sc_msg.len = len;
-	k_sem_give(&data_sc_sem);
+	struct sc_frame f;
+	f.len = len < sizeof(f.data) ? len : sizeof(f.data);
+	memcpy(f.data, data, f.len);
+	/* Drop (don't block the OpenAMP RX path) if the echo queue is full -- it is
+	 * bounded and the A55 side never has more than a couple frames in flight. */
+	(void)k_msgq_put(&sc_frame_q, &f, K_NO_WAIT);
 	return RPMSG_SUCCESS;
 }
 
@@ -399,22 +412,23 @@ static void app_rpmsg_client_sample(void *arg1, void *arg2, void *arg3)
 	                 NULL);
 
 	while (!finish) {
-		k_sem_take(&data_sc_sem, K_FOREVER);
-		/* #697 self-close-race harness: the A55 GHSA-xhm8 self-close test needs
-		 * its blocked UINT32_MAX call to stay in-flight while a *fast* "close_me"
-		 * echo fires the self-close, so the two actually race.  Delay echoing any
-		 * method whose name starts with "slow" (the frame is <method>\0<payload>,
-		 * include/alp/rpc.h) -- the test uses a "slow_..." method for the blocked
-		 * call and a plain "close_me" for the trigger.  Normal echoes (echo_test)
-		 * are unaffected. */
-		if (sc_msg.len >= 4 && memcmp(sc_msg.data, "slow", 4) == 0) {
+		struct sc_frame f;
+		if (k_msgq_get(&sc_frame_q, &f, K_FOREVER) != 0) {
+			continue;
+		}
+		/* #697/#707 self-close-race harness: delay echoing any "slow"-prefixed
+		 * method so the A55's blocked UINT32_MAX call stays in-flight while the
+		 * fast "close_me" echo fires the self-close, so the two actually race.
+		 * Both frames are QUEUED (sc_frame_q) so neither is lost -- the fix for
+		 * why #697 cycle 13 never opened the window.  Frame is <method>\0<payload>
+		 * (include/alp/rpc.h); normal echoes (echo_test) are unaffected. */
+		if (f.len >= 4 && memcmp(f.data, "slow", 4) == 0) {
 			k_sleep(K_MSEC(150));
 		}
-		rpmsg_send(&sc_ept, sc_msg.data, sc_msg.len);
+		rpmsg_send(&sc_ept, f.data, f.len);
 	}
 
 	rpmsg_destroy_ept(&sc_ept);
-	k_sem_reset(&data_sc_sem);
 	LOG_INF("rpmsg-v2n/m33_sm: Linux responder ended");
 }
 
