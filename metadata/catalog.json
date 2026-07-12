@@ -870,7 +870,7 @@
       "script": "scripts/check_chip_manifest_parity.py"
     },
     {
-      "purpose": "Plain-CMake chip-list parity gate -- fails (exit 1) when the root `CMakeLists.txt` `ALP_SDK_CHIP_LIST` (the plain-CMake / Yocto `libalp_chips.a` archive, gated by `ALP_BUILD_CHIPS_ONLY`) drifts from the drivers that actually exist under `chips/<id>/<id>.c`.",
+      "purpose": "Plain-CMake chip-list parity gate -- fails (exit 1) when the root `CMakeLists.txt` `ALP_SDK_CHIP_LIST` (the plain-CMake / Yocto `libalp_chips.a` archive, gated by `ALP_BUILD_CHIPS_ONLY`) drifts from the drivers that actually exist under `chips/<id>/`.",
       "script": "scripts/check_cmake_chip_list_parity.py"
     },
     {

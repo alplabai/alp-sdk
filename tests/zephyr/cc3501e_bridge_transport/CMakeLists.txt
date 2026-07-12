@@ -12,6 +12,15 @@ target_sources(app PRIVATE
     ${BRIDGE_DIR}/src/transport_spi.c
     ${BRIDGE_DIR}/src/transport_sdio.c
     ${BRIDGE_DIR}/src/protocol.c
+    ${BRIDGE_DIR}/src/protocol_meta.c
+    ${BRIDGE_DIR}/src/protocol_gpio.c
+    ${BRIDGE_DIR}/src/protocol_camera.c
+    ${BRIDGE_DIR}/src/protocol_wifi.c
+    ${BRIDGE_DIR}/src/protocol_sockets.c
+    ${BRIDGE_DIR}/src/protocol_ble.c
+    ${BRIDGE_DIR}/src/protocol_power.c
+    ${BRIDGE_DIR}/src/protocol_diag.c
+    ${BRIDGE_DIR}/src/protocol_ota.c
     ${BRIDGE_DIR}/src/worker.c
     ${BRIDGE_DIR}/src/event_ring.c
     ${BRIDGE_DIR}/hal/cc3501e_hw_stub.c

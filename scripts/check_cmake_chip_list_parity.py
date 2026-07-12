@@ -5,7 +5,7 @@
 Plain-CMake chip-list parity gate -- fails (exit 1) when the root
 `CMakeLists.txt` `ALP_SDK_CHIP_LIST` (the plain-CMake / Yocto
 `libalp_chips.a` archive, gated by `ALP_BUILD_CHIPS_ONLY`) drifts from
-the drivers that actually exist under `chips/<id>/<id>.c`.
+the drivers that actually exist under `chips/<id>/`.
 
 Root cause (issue #476): `ALP_SDK_CHIP_LIST` was a 17-entry hand-curated
 subset while `chips/` shipped ~79 drivers -- a plain-CMake or Yocto
@@ -16,8 +16,14 @@ archive.  Required/current SoM drivers (PMIC `da9292`, clock
 `gd32g553`/`gd32_swd`, ...) were among the silently-dropped set.
 
 Correspondence rule (single-source-of-truth convention):
-    chips/<id>/<id>.c   <-->   ALP_SDK_CHIP_LIST entry `<id>`
+    chips/<id>/<id>.c        <-->   ALP_SDK_CHIP_LIST entry `<id>`
+    chips/<id>/<id>_*.c (>=1) <-->  ALP_SDK_CHIP_LIST entry `<id>`
         (unless `<id>` is in CHIP_LIST_EXCLUDED_WITH_REASON below)
+
+Most drivers are one `chips/<id>/<id>.c` file; a driver split by
+subsystem into `chips/<id>/<id>_<subsystem>.c` modules (e.g. `cc3501e`
+-- issue #461) still counts as present, and the root `CMakeLists.txt`
+globs `chips/<id>/<id>*.c` so both shapes build the same way.
 
 This mirrors check_chip_manifest_parity.py's driver<->manifest gate.
 The exclusion allowlist is a RATCHET the same way: a driver in
@@ -35,8 +41,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 # Drivers deliberately withheld from the plain-CMake / Yocto
-# libalp_chips.a build, with the reason a chips/<id>/<id>.c core can't
-# (or shouldn't) be built there.  EMPTY today: every chips/<id>/<id>.c
+# libalp_chips.a build, with the reason a chips/<id>/ core can't
+# (or shouldn't) be built there.  EMPTY today: every chips/<id>/ driver
 # on disk is OS-agnostic (calls back into <alp/peripheral.h> only, no
 # Zephyr or vendor-SDK header) and compiles against alp_sdk_headers
 # alone.  A new entry here must be either genuinely Zephyr-only /
@@ -49,11 +55,18 @@ def _drivers(root: Path) -> set[str]:
     chips_dir = root / "chips"
     if not chips_dir.is_dir():
         return set()
-    return {
-        d.name
-        for d in chips_dir.iterdir()
-        if d.is_dir() and (d / f"{d.name}.c").is_file()
-    }
+    found: set[str] = set()
+    for d in chips_dir.iterdir():
+        if not d.is_dir():
+            continue
+        # Single-file driver: chips/<id>/<id>.c
+        if (d / f"{d.name}.c").is_file():
+            found.add(d.name)
+            continue
+        # Subsystem-split driver: chips/<id>/<id>_<subsystem>.c (>=1 file).
+        if any(d.glob(f"{d.name}_*.c")):
+            found.add(d.name)
+    return found
 
 
 def _cmake_chip_list(root: Path) -> set[str]:
