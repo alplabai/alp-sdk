@@ -860,7 +860,16 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMI323
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMP581
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/bmp581/bmp581.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CC3501E
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_core.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_diag.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_wifi.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_sockets.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_ble.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_gpio.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_camera.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_power.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_ota.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_events.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TMP112
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tmp112/tmp112.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RV3028C7

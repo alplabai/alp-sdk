@@ -218,8 +218,13 @@ if(ALP_BUILD_CHIPS_ONLY)
     foreach(_chip IN LISTS ALP_SDK_CHIP_LIST)
         string(TOUPPER "${_chip}" _chip_uc)
         if(ALP_SDK_CHIP_${_chip_uc})
-            target_sources(alp_chips PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/chips/${_chip}/${_chip}.c)
+            # Glob rather than hardcode a single ${_chip}.c: most drivers are
+            # one file, but a driver split into cc3501e_<subsystem>.c-style
+            # modules (still all under chips/${_chip}/, all named ${_chip}*.c)
+            # is picked up the same way with no per-chip special-casing.
+            file(GLOB _chip_sources CONFIGURE_DEPENDS
+                ${CMAKE_CURRENT_SOURCE_DIR}/chips/${_chip}/${_chip}*.c)
+            target_sources(alp_chips PRIVATE ${_chip_sources})
             list(APPEND _alp_chips_enabled ${_chip})
         endif()
     endforeach()
