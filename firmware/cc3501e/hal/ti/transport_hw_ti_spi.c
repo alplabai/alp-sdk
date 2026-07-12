@@ -104,6 +104,18 @@ static uint16_t cur_payload_len;
  * so the host can distinguish "parked at a clean boundary" from "mid-payload". */
 static uint8_t sync_idle[ALP_CC3501E_HEADER_BYTES];
 
+/* Zero-filled dummy TX buffer for the request-PAYLOAD phase (see arm_transfer's
+ * PH_REQ_HEADER caller below).  That phase is RX-only (the host is clocking ITS
+ * payload bytes into us) so the driver logically doesn't care what goes out on
+ * MISO, and a literal NULL txBuf documents "don't care" -- but SPIWFF3DMA's
+ * transfer-arm path treats a NULL txBuf as "no TX descriptor to program", which
+ * on this backend can make SPI_transfer() reject the arm outright rather than
+ * silently substitute a fill byte.  A real (non-NULL), zeroed buffer keeps the
+ * exact same 0x00-on-MISO wire behaviour while always giving SPIWFF3DMA a valid
+ * descriptor to program.  Static + BSS-zeroed, sized to the largest payload the
+ * protocol allows so every plen in [1, ALP_CC3501E_MAX_PAYLOAD] fits. */
+static uint8_t dummy_tx_zero[ALP_CC3501E_MAX_PAYLOAD];
+
 /* P0-2 desync/probe re-arm counter (KEPT -- route through DIAG_GET_STATS for
  * link-health observability).  Counts header-phase re-arms triggered by a
  * reserved-range / all-0xFF header (a host sync-probe, or byte-misalignment). */
@@ -125,7 +137,20 @@ static void arm_transfer(void *rx, const void *tx, size_t count)
 	t.txBuf = (void *)tx;
 	t.rxBuf = rx;
 	t.arg   = NULL;
-	(void)SPI_transfer(spi, &t);
+	if (!SPI_transfer(spi, &t)) {
+		/* SPI_transfer() itself failed to queue the DMA descriptor (e.g. a
+		 * transfer already in flight, or SPIWFF3DMA rejected the arm) -- the
+		 * slave is NOT actually armed for the next clock, even though the
+		 * caller thinks it is.  Previously this return value was discarded
+		 * and READY was raised unconditionally, which is a LIE: the host
+		 * would see READY, assert CSN, and clock into a slave that never
+		 * latches -- a silent byte-misalignment recoverable only via the
+		 * host's desync walk (cc3501e_sync()).  Leaving READY LOW here
+		 * instead gives the host a real, visible stall (its READY-gate wait
+		 * times out) that its poll-by-repeat retries against, rather than a
+		 * silently corrupted frame. */
+		return;
+	}
 	/* Slave is now armed -> raise READY so the host may clock THIS transfer.  Paired
 	 * with the CSN-deassert re-arm + on_transfer's busy() drop, this gives the host an
 	 * exact "armed" edge to gate on, so it never asserts CSN + clocks into a not-yet-
@@ -176,6 +201,22 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 	 * double-advancing.  Advancing here also re-raises READY (via arm_transfer), so the
 	 * host's per-request READY gate sees the slave armed for the next phase. */
 	if (t == NULL || t->status != SPI_TRANSFER_COMPLETED) {
+		/* SPI_TRANSFER_CANCELED is the ONE non-COMPLETED status this backend
+		 * expects: it is exactly what bridge_transport_spi_hw_suspend() drives
+		 * via SPI_transferCancel() right before SPI_close(), i.e. the slave is
+		 * being torn down ON PURPOSE -- leave it alone (spi_open_and_arm()
+		 * re-arms fresh on the paired reinit).  Any OTHER non-COMPLETED status
+		 * (SPI_TRANSFER_FAILED, or an unexpected mid-phase status this
+		 * hardware-SS0, RETURN_PARTIAL-disabled framing should not otherwise
+		 * deliver) is an UNPLANNED transfer failure.  Previously this fell
+		 * through the same early return with no recovery: no callback is ever
+		 * pending on a dead transfer, so the slave stayed un-armed (and READY
+		 * low) FOREVER -- a permanent wedge only a hard reset could clear.
+		 * Re-arm the request-header phase instead, so the host's next PING /
+		 * poll-retry can resynchronise on this rev, not just on a reboot. */
+		if (t != NULL && t->status != SPI_TRANSFER_CANCELED) {
+			arm_request_header();
+		}
 		return;
 	}
 
@@ -211,9 +252,10 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 			arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
 		} else {
 			phase = PH_REQ_PAYLOAD;
-			/* NULL tx -> 0x00 on MISO during payload (0xA5 marks the header
-			 * boundary only). */
-			arm_transfer(&frame_buf[ALP_CC3501E_HEADER_BYTES], NULL, plen);
+			/* dummy_tx_zero (all-0x00) on MISO during payload (0xA5 marks the
+			 * header boundary only) -- see dummy_tx_zero's comment: SPIWFF3DMA
+			 * needs a real txBuf to arm, a literal NULL is not safe here. */
+			arm_transfer(&frame_buf[ALP_CC3501E_HEADER_BYTES], dummy_tx_zero, plen);
 		}
 		break;
 	}

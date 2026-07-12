@@ -41,7 +41,14 @@
 	 */
 	pinctrl_spi1: pinctrl_spi1 {
 		group0 {
-			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>;
+			/* Hardware SS0 chip-select (P14_7 = SPI1_SS0_C) -- dwc-ssi master
+			 * drives SS0 per transfer to frame the CC3501E slave.  The slave's
+			 * SPIWFF3DMA only shifts bytes while its CS is asserted, so WITHOUT
+			 * this pad muxed the bridge is dead (PING never round-trips) -- this
+			 * example's overlay had drifted to the pre-r2 CS-less 3-wire wiring
+			 * (missing SS0) while its own comment claimed SS0 was muxed; #708. */
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
 		};
 		group1 {
 			pinmux = <PIN_P14_4__SPI1_MISO_C>;
@@ -87,7 +94,7 @@
 		 * use it directly and skip the failing clock-control path. SYST_HCLK =
 		 * AHB = 400 MHz (E8 HWRM); BAUDR = 400M/freq_hz (=50 for an 8 MHz SCLK).
 		 */
-		clock-frequency = <400000000>;
+		clock-frequency = <200000000>; /* real SSI functional clock (was mis-set 400M -- halves the requested SCLK; proven via BAUDR scaling, parity with the bringup/tour overlays) */
 		dwc-ssi;
 		fifo-depth = <16>;
 		pinctrl-0 = <&pinctrl_spi1>;
