@@ -94,50 +94,6 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
 #define RSCTBL_BEACON_MAGIC   (0xA10D0683U) /* "Alp Lab, #683" -- arbitrary, just distinctive */
 #define RSCTBL_BEACON_VERSION (1U)
 
-/*
- * alp-sdk #683/#697 forward-doorbell diagnostics.  Bench cycle 3 got the OpenAMP
- * transport to ATTACH, but the A55->M33 doorbell kick (MSG_INT_SET on R_MHU_NS8,
- * A55 alias 0x10480104) latches STS=1 while the M33 never services it -- and that
- * question (wrong MHU instance/alias vs. NVIC-not-firing vs. ISR-not-clearing) is
- * CM33-internal, invisible from the A55/Linux side.  Rather than require a CM33
- * JTAG session, the M33 publishes the answer into the rsctbl region (just below
- * the beacon, still clear of the resource table at the low end) every heartbeat,
- * so an A55-only bench reads it via devmem / the bench diag dump:
- *   - NS8_MSG_STS: the M33's OWN read of R_MHU_NS8.MSG_INT_STS.  If this tracks
- *     the A55's kick (goes 1 when the A55 sets its 0x10480104 alias), the two
- *     views ARE the same physical register -> the fault is NVIC/ISR, not aliasing.
- *     If it stays 0 while the A55 alias reads 1, the A55 is hitting a DIFFERENT
- *     MHU instance -> the mhu-uio base/instance is wrong.
- *   - ISR_COUNT: mbox RX ISR fire count (g_alp_mbox_isr_count).  0 = the CM33
- *     NVIC never took MHU_MSG5_NS_IRQn(293).
- *   - NVIC293: is IRQ 293 enabled in the CM33 NVIC (ISER[9] bit 5)?
- */
-#define RSCTBL_DIAG_MAGIC_OFFSET     (0xFD0)
-#define RSCTBL_DIAG_NS8_MSG_STS_OFF  (0xFD4)
-#define RSCTBL_DIAG_ISR_COUNT_OFF    (0xFD8)
-#define RSCTBL_DIAG_NVIC293_OFF      (0xFDC)
-#define RSCTBL_DIAG_NS36_MSG_STS_OFF (0xFE0)
-#define RSCTBL_DIAG_CB_COUNT_OFF     (0xFE4) /* platform_mbox_callback fire count */
-#define RSCTBL_DIAG_NOTIFIED_OFF     (0xFE8) /* rproc_virtio_notified call count */
-#define RSCTBL_DIAG_VRING1_AVAIL_OFF (0xFEC) /* M33's own read of vring1 avail.idx */
-
-#define RSCTBL_DIAG_MAGIC \
-	(0xD1A90683U) /* "DIAG #683" -- A55 checks this before trusting the words */
-
-#define ALP_M33_R_MHU_NS8_MSG_INT_STS (0x50480100U) /* CM33 view of the M33's ch5 RX register */
-/* #697 cycle 4 follow-up: also watch R_MHU_NS36.MSG_INT_STS -- the hypothesis is
- * that channel 5 is the NS36 block (MSG=A55->M33), so a kick with
- * ALP_UIO_MHU_KICK_SLOT=0x480 should latch THIS instead of NS8. */
-#define ALP_M33_R_MHU_NS36_MSG_INT_STS (0x50480480U)
-/* vring1 (A55->M33 RX) avail.idx, CM33 view: split-ring layout with num=512 desc
- * (512*16 = 0x2000), avail flags @+0x2000, avail.idx @+0x2002. */
-#define ALP_M33_VRING1_AVAIL_IDX_ADDR (VRING_RX_ADDR_CM33 + 0x2002U)
-#define ALP_MHU_MSG5_NS_IRQN          (293U)
-/* NVIC->ISER[9] covers IRQs 288..319; bit (293 % 32) = 5 is MHU_MSG5_NS_IRQn. */
-#define ALP_NVIC_ISER9 (*(volatile uint32_t *)0xE000E124U)
-
-extern volatile uint32_t g_alp_mbox_isr_count;
-
 #define APP_TASK_STACK_SIZE (1024)
 
 K_THREAD_STACK_DEFINE(thread_mng_stack, APP_TASK_STACK_SIZE);
@@ -194,22 +150,6 @@ static K_SEM_DEFINE(data_sc_sem, 0, 1);
 
 static volatile int finish;
 
-/* #697 cycle 6 follow-up RX-path diagnostics: cycle 6 confirmed the doorbell ISR
- * fires 1:1, and a devmem probe confirmed the M33 completes OpenAMP setup
- * (DRIVER_OK seen, vring0 used.flags bit0 set), yet neither vring advances.  These
- * counters localize the break in the mbox-ISR -> callback -> notify -> vring chain,
- * published into the rsctbl diag block for an A55-only read:
- *   - g_mbox_cb_count: bumped in platform_mbox_callback -- proves the mbox callback
- *     fires (past the raw ISR), i.e. the FSP callback reached the Zephyr cb.
- *   - g_notified_count: bumped after rproc_virtio_notified() in receive_message --
- *     proves the manager thread woke and ran the notify.
- * Paired with the M33's own read of vring1 avail.idx (published in the heartbeat):
- * if that idx tracks the A55's posts but used.idx stays 0, the notify path is the
- * bug; if the M33 reads a STALE avail.idx, it is memory-visibility (vring not
- * device-mapped). */
-static volatile uint32_t g_mbox_cb_count;
-static volatile uint32_t g_notified_count;
-
 /* Doorbell RX: the A55 side kicked our mailbox after touching a vring --
  * just wake the manager thread, which figures out which vring via
  * rproc_virtio_notified() below. */
@@ -222,7 +162,6 @@ static void platform_mbox_callback(const struct device *dev,
 	ARG_UNUSED(channel_id);
 	ARG_UNUSED(user_data);
 	ARG_UNUSED(data);
-	g_mbox_cb_count++;
 	k_sem_give(&data_sem);
 }
 
@@ -242,7 +181,6 @@ static void receive_message(void)
 {
 	if (k_sem_take(&data_sem, K_FOREVER) == 0) {
 		rproc_virtio_notified(rvdev.vdev, VRING1_ID);
-		g_notified_count++;
 	}
 }
 
@@ -519,31 +457,6 @@ static void rsctbl_heartbeat_expiry(struct k_timer *timer)
 	ARG_UNUSED(timer);
 	rsctbl_heartbeat_count++;
 	*heartbeat = rsctbl_heartbeat_count;
-
-	/* Publish the forward-doorbell diagnostics (see the RSCTBL_DIAG_* header
-	 * comment) alongside each heartbeat, so the A55 bench reads a fresh, live
-	 * snapshot without a CM33 JTAG session. */
-	volatile uint32_t *d_magic = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_MAGIC_OFFSET);
-	volatile uint32_t *d_sts  = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_NS8_MSG_STS_OFF);
-	volatile uint32_t *d_isr  = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_ISR_COUNT_OFF);
-	volatile uint32_t *d_nvic = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_NVIC293_OFF);
-
-	volatile uint32_t *d_ns36 =
-	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_NS36_MSG_STS_OFF);
-
-	volatile uint32_t *d_cb    = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_CB_COUNT_OFF);
-	volatile uint32_t *d_notif = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_NOTIFIED_OFF);
-	volatile uint32_t *d_avail =
-	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_VRING1_AVAIL_OFF);
-
-	*d_magic = RSCTBL_DIAG_MAGIC;
-	*d_sts   = *(volatile uint32_t *)ALP_M33_R_MHU_NS8_MSG_INT_STS;
-	*d_isr   = g_alp_mbox_isr_count;
-	*d_nvic  = (ALP_NVIC_ISER9 >> (ALP_MHU_MSG5_NS_IRQN % 32U)) & 1U;
-	*d_ns36  = *(volatile uint32_t *)ALP_M33_R_MHU_NS36_MSG_INT_STS;
-	*d_cb    = g_mbox_cb_count;
-	*d_notif = g_notified_count;
-	*d_avail = (uint32_t)(*(volatile uint16_t *)ALP_M33_VRING1_AVAIL_IDX_ADDR);
 	barrier_dsync_fence_full();
 }
 
