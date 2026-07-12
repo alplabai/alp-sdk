@@ -152,7 +152,7 @@ $sources = @(
     "$fw\src\protocol_meta.c", "$fw\src\protocol_gpio.c", "$fw\src\protocol_camera.c",
     "$fw\src\protocol_wifi.c", "$fw\src\protocol_sockets.c", "$fw\src\protocol_ble.c",
     "$fw\src\protocol_power.c", "$fw\src\protocol_diag.c", "$fw\src\protocol_ota.c",
-    "$fw\src\worker.c", "$fw\src\transport_spi.c", "$fw\src\transport_sdio.c",
+    "$fw\src\worker.c", "$fw\src\event_ring.c", "$fw\src\transport_spi.c", "$fw\src\transport_sdio.c",
     "$fw\hal\ti\cc3501e_hw_ti.c",
     "$fw\hal\ti\cc3501e_hw_ti_wifi.c", "$fw\hal\ti\cc3501e_hw_ti_ble.c", "$fw\hal\ti\cc3501e_hw_ti_sock.c",
     "$fw\hal\ti\cc3501e_hw_ti_gpio.c", "$fw\hal\ti\cc3501e_hw_ti_power.c", "$fw\hal\ti\cc3501e_hw_ti_ota.c",
