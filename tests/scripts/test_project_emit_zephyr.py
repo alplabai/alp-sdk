@@ -158,6 +158,95 @@ class TestZephyrEmit(unittest.TestCase):
                                   rv.stdout)
 
 
+class TestSimConsole(unittest.TestCase):
+    """`diagnostics.sim_console: true` (issue #686) upgrades the
+    auto-resolved console of a HEADLESS core (a SoM-topology
+    `hw_console: false` core, e.g. the RZ/V2N M33 system-manager) to the
+    Zephyr RAM console so the studio simulator's `uart_socket` isn't
+    silent.  A UART-consoled core and the flag-off path are untouched.
+
+    Tests are named so `-k sim_console` selects the whole class.
+    """
+
+    _RAM = [
+        "CONFIG_CONSOLE=y",
+        "CONFIG_RAM_CONSOLE=y",
+        "CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048",
+        "CONFIG_UART_CONSOLE=n",
+    ]
+
+    def _v2n_m33(self, tmp: Path, *, sim_console: bool | None,
+                 console: str | None = None) -> str:
+        """Emit the m33_sm (headless) alp.conf for an E1M-V2N101 project,
+        optionally setting `diagnostics.sim_console` / `.console`."""
+        body = "som:\n  sku: E1M-V2N101\n"
+        diag = []
+        if sim_console is not None:
+            diag.append(f"  sim_console: {str(sim_console).lower()}\n")
+        if console is not None:
+            diag.append(f"  console: {console}\n")
+        if diag:
+            body += "diagnostics:\n" + "".join(diag)
+        body += "cores:\n  m33_sm:\n    app: ./m33_sm\n"
+        path = _write_board(tmp, body)
+        rv = _run_loader(input_path=path, core="m33_sm")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        return rv.stdout
+
+    def test_sim_console_headless_core_gets_ram_console(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = self._v2n_m33(Path(td), sim_console=True)
+        for kc in self._RAM:
+            self.assertIn(kc, out)
+        # The UART console block is suppressed (replaced, not appended).
+        self.assertNotIn("CONFIG_UART_CONSOLE=y", out)
+        self.assertNotIn("CONFIG_SERIAL=y", out)
+        # Comment names the sim_console trigger, not the SWD bench flow.
+        self.assertIn("diagnostics.sim_console: true", out)
+        self.assertNotIn("read `ram_console_buf` over SWD", out)
+
+    def test_sim_console_absent_leaves_uart_console(self) -> None:
+        """Flag off (absent) -> current behaviour byte-for-byte: the
+        headless core still auto-resolves to the UART console block."""
+        with tempfile.TemporaryDirectory() as td:
+            out = self._v2n_m33(Path(td), sim_console=None)
+        self.assertIn("CONFIG_UART_CONSOLE=y", out)
+        self.assertNotIn("CONFIG_RAM_CONSOLE=y", out)
+
+    def test_sim_console_false_is_a_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = self._v2n_m33(Path(td), sim_console=False)
+        self.assertIn("CONFIG_UART_CONSOLE=y", out)
+        self.assertNotIn("CONFIG_RAM_CONSOLE=y", out)
+
+    def test_sim_console_ignores_uart_consoled_core(self) -> None:
+        """An AEN M55 core has a HW console (`hw_console` defaults true);
+        sim_console must NOT force a RAM console on it."""
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                som:
+                  sku: E1M-AEN801
+                diagnostics:
+                  sim_console: true
+                cores:
+                  m55_hp:
+                    os: zephyr
+                    app: ./src
+            """)
+            rv = _run_loader(input_path=path, core="m55_hp")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertIn("CONFIG_UART_CONSOLE=y", rv.stdout)
+        self.assertNotIn("CONFIG_RAM_CONSOLE=y", rv.stdout)
+
+    def test_explicit_console_wins_over_sim_console(self) -> None:
+        """Precedence: an explicit `diagnostics.console:` beats
+        sim_console -- the flag only upgrades the AUTO-resolved console."""
+        with tempfile.TemporaryDirectory() as td:
+            out = self._v2n_m33(Path(td), sim_console=True, console="uart")
+        self.assertIn("CONFIG_UART_CONSOLE=y", out)
+        self.assertNotIn("CONFIG_RAM_CONSOLE=y", out)
+
+
 class TestAlpBoardDefineEmit(unittest.TestCase):
     """ALP_BOARD_<SLUG> compile define is emitted automatically from
     the board preset name -- the build-system hook that makes
