@@ -107,7 +107,13 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_periph.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_sys.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_wifi.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_ble.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_diag.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_ota.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_sock.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_gpio.c)
 
 
 
