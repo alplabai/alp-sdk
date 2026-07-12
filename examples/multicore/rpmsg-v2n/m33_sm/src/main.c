@@ -154,8 +154,9 @@ struct sc_frame {
 K_MSGQ_DEFINE(sc_frame_q, sizeof(struct sc_frame), 8, 4);
 
 static K_SEM_DEFINE(data_sem, 0, 1);
-/* data_sc_sem now only signals the one-shot "rpdev ready, create your ept" handoff
- * to the responder thread; per-frame delivery goes through sc_frame_q above. */
+/* data_sc_sem: one-shot "sc_ept is up, start echoing" handoff from the manager
+ * thread (which now creates sc_ept itself, before its receive loop) to the
+ * responder thread; per-frame delivery goes through sc_frame_q above. */
 static K_SEM_DEFINE(data_sc_sem, 0, 1);
 
 static volatile int finish;
@@ -400,16 +401,11 @@ static void app_rpmsg_client_sample(void *arg1, void *arg2, void *arg3)
 	ARG_UNUSED(arg2);
 	ARG_UNUSED(arg3);
 
+	/* Wait until the manager thread has created sc_ept (it does so inline, before
+	 * its receive loop, to avoid dropping the A55's first frame -- see
+	 * rpmsg_mng_task).  Then just drain the echo queue. */
 	k_sem_take(&data_sc_sem, K_FOREVER);
 	LOG_INF("rpmsg-v2n/m33_sm: Linux responder started");
-
-	rpmsg_create_ept(&sc_ept,
-	                 rpdev,
-	                 "rpmsg-service-0",
-	                 APP_EPT_ADDR,
-	                 RPMSG_ADDR_ANY,
-	                 rpmsg_recv_cs_callback,
-	                 NULL);
 
 	while (!finish) {
 		struct sc_frame f;
@@ -446,6 +442,26 @@ static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 		goto task_end;
 	}
 
+	/* Create the responder endpoint HERE -- before the receive_message() loop --
+	 * not in the responder thread.  The A55's first request sits on the RX vring
+	 * until receive_message() processes it below; if sc_ept doesn't exist yet the
+	 * rpmsg RX path drops that frame for want of a matching endpoint, and the A55's
+	 * first alp_rpc_call() times out (#697: echo[1-byte] on a cold attach).  The
+	 * old code created sc_ept in app_rpmsg_client_sample() via data_sc_sem, which
+	 * raced this loop and lost.  Creating it inline, before the loop starts,
+	 * guarantees the endpoint is live for the very first frame. */
+	if (rpmsg_create_ept(&sc_ept,
+	                     rpdev,
+	                     "rpmsg-service-0",
+	                     APP_EPT_ADDR,
+	                     RPMSG_ADDR_ANY,
+	                     rpmsg_recv_cs_callback,
+	                     NULL) != 0) {
+		LOG_ERR("failed to create responder endpoint");
+		goto task_end;
+	}
+
+	/* Release the responder thread's echo loop now that sc_ept exists. */
 	k_sem_give(&data_sc_sem);
 	while (!finish) {
 		receive_message();
