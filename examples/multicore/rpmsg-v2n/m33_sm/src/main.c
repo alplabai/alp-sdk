@@ -4,16 +4,16 @@
  *
  * rpmsg-v2n / m33_sm -- Cortex-M33 OpenAMP rpmsg SLAVE endpoint.
  *
- * alp-sdk #683 "Path B, Phase 1": this is a from-scratch firmware,
- * NOT the native_sim placeholder this file used to be.  Its one job is to
- * prove the RAW OpenAMP transport -- resource table, vrings, mailbox
- * doorbell, rpmsg endpoint -- builds and links against REAL RZ/V2N
- * devicetree + the Renesas MHU mailbox driver, so the A55/Linux side (which
- * runs the Renesas Multi-OS Package's `rpmsg_sample_client` over UIO) has a
- * live peer to attach to.  Phase 4 (bench, a later slice) flashes this and
- * proves the attach + echo round-trip on real silicon; this phase is
- * build-and-link only -- see testcase.yaml for why native_sim no longer
- * applies to this file.
+ * alp-sdk #683 "Path B": this is a from-scratch firmware, NOT the native_sim
+ * placeholder this file used to be.  It proves the RAW OpenAMP transport --
+ * resource table, vrings, mailbox doorbell, rpmsg endpoint -- against REAL
+ * RZ/V2N devicetree + the Renesas MHU mailbox driver, so the A55/Linux side
+ * (an OpenAMP `rpmsg_sample_client` over UIO) has a live peer to attach to.
+ * BENCH-PROVEN on E1M-X V2N-M1 silicon (#697): attach + echo round-trip
+ * (1/4/16/64 B) + the GHSA-xhm8 external concurrent-close all pass end-to-end.
+ * The doorbell is asymmetric -- forward A55->M33 via R_MHU_NS5.MSG (M33 NVIC
+ * IRQ 293), reverse M33->A55 via a CA55-routed MHU-B SWINT unit (12 -> GIC_SPI
+ * 404); see mailbox_notify() below and yocto_uio_drv.c for the register map.
  *
  * Adapted near-verbatim from Renesas's own sample --
  * zephyr/samples/boards/renesas/openamp_linux_zephyr/src/main_remote.c --

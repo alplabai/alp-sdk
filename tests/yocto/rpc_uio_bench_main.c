@@ -87,16 +87,15 @@
  * use-after-free, clean reopen -- is checked on every iteration
  * regardless of whether the harder race was actually hit.
  *
- * @par What this binary does NOT try to prove
- * `y_open()`'s UIO device names / MHU SWINT unit pairing are still
- * flagged BENCH-TBD in src/backends/rpc/yocto_uio_drv.c's own header
- * comment (`ALP_UIO_MHU_KICK_UNIT` / `ALP_UIO_MHU_RECV_UNIT` default
- * to the on-host-derived guess, unit 2 / unit 0).  This binary reads
- * the SAME two env vars (so a bench SWINT-walk can override them
- * without a recompile) but does not itself walk SWINT units -- if
- * ATTACH or ECHO fails, the verbose diagnostics below are meant to
- * show exactly how far the attach got so the bench operator can
- * decide whether to retry with different unit numbers.
+ * @par Doorbell wiring (bench-proven, #697)
+ * The A55<->M33 MHU doorbell is ASYMMETRIC and was resolved on silicon:
+ * forward A55->M33 is R_MHU_NS5.MSG_INT_SET -> the M33's own NVIC IRQ 293;
+ * reverse M33->A55 is a CA55-routed MHU-B SWINT unit (12 -> GIC_SPI 404),
+ * because the NS-channel RSP interrupt reaches no A55 GIC line.  See
+ * src/backends/rpc/yocto_uio_drv.c's MHU register comment for the full map.
+ * The forward kick slot stays env-overridable (ALP_UIO_MHU_KICK_SLOT, default
+ * 0xA0 = R_MHU_NS5) for future SoM/channel variants; if ATTACH or ECHO
+ * regresses, the verbose diagnostics below show how far the attach got.
  *
  * Build (STATIC aarch64 cross -- see the recipe in
  * tests/yocto/build_rpc_uio_bench_aarch64.sh, which documents the
@@ -662,10 +661,10 @@ int main(void)
 	 * block buffer's worth of output. */
 	setvbuf(stdout, NULL, _IOLBF, 0);
 
-	printf("=== alp-sdk #683 Path B stage 5: RZ/V2N A55<->M33 rpmsg bench ===\n");
-	printf("ALP_UIO_MHU_KICK_UNIT=%s  ALP_UIO_MHU_RECV_UNIT=%s\n",
-	       getenv("ALP_UIO_MHU_KICK_UNIT") ? getenv("ALP_UIO_MHU_KICK_UNIT") : "(default 2)",
-	       getenv("ALP_UIO_MHU_RECV_UNIT") ? getenv("ALP_UIO_MHU_RECV_UNIT") : "(default 0)");
+	printf("=== alp-sdk #683 Path B: RZ/V2N A55<->M33 rpmsg bench ===\n");
+	printf("ALP_UIO_MHU_KICK_SLOT=%s\n",
+	       getenv("ALP_UIO_MHU_KICK_SLOT") ? getenv("ALP_UIO_MHU_KICK_SLOT")
+	                                       : "(default 0xA0 = R_MHU_NS5)");
 
 	diag_uio_precheck();
 
