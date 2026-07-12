@@ -265,6 +265,15 @@ static const char *diag_uio_name(size_t i)
 #define DIAG_BEACON_HEARTBEAT_OFFSET 0xFF8u
 #define DIAG_BEACON_MAGIC_EXPECT     0xA10D0683u
 
+/* Forward-doorbell diagnostics the M33 publishes just below the beacon (see
+ * m33_sm/src/main.c's RSCTBL_DIAG_* macros) -- lets this A55-only bench
+ * root-cause "M33 never services the kick" without a CM33 JTAG session. */
+#define DIAG_FWD_MAGIC_OFFSET       0xFD0u
+#define DIAG_FWD_NS8_MSG_STS_OFFSET 0xFD4u
+#define DIAG_FWD_ISR_COUNT_OFFSET   0xFD8u
+#define DIAG_FWD_NVIC293_OFFSET     0xFDCu
+#define DIAG_FWD_MAGIC_EXPECT       0xD1A90683u
+
 static uint32_t diag_read_u32(const void *base, uint32_t off)
 {
 	const volatile uint32_t *p = (const volatile uint32_t *)((const uint8_t *)base + off);
@@ -320,6 +329,29 @@ static void diag_dump_rsctbl(const void *base)
 		       hb1,
 		       (int)(hb1 - hb0),
 		       (hb1 != hb0) ? "M33 alive/ticking" : "NO CHANGE -- M33 may be stalled/faulted");
+	}
+
+	/* Forward-doorbell diagnostics (#683/#697): the M33's own view of the kick
+	 * path.  Present only on fw that publishes them (magic guard). */
+	uint32_t fwd_magic = diag_read_u32(base, DIAG_FWD_MAGIC_OFFSET);
+	if (fwd_magic == DIAG_FWD_MAGIC_EXPECT) {
+		uint32_t ns8_sts = diag_read_u32(base, DIAG_FWD_NS8_MSG_STS_OFFSET);
+		uint32_t isr_cnt = diag_read_u32(base, DIAG_FWD_ISR_COUNT_OFFSET);
+		uint32_t nvic293 = diag_read_u32(base, DIAG_FWD_NVIC293_OFFSET);
+		printf("    fwd-doorbell diag (M33 view): R_MHU_NS8.MSG_INT_STS=%u  "
+		       "mbox_isr_count=%u  NVIC_MSG5_NS(293)_enabled=%u\n",
+		       ns8_sts,
+		       isr_cnt,
+		       nvic293);
+		printf("      => %s\n",
+		       (ns8_sts == 0u) ? "M33 does NOT see the kick on its own R_MHU_NS8 -> A55 hits a "
+		                         "DIFFERENT MHU instance (mhu-uio base/instance wrong)"
+		       : (isr_cnt == 0u && nvic293 == 0u)
+		           ? "kick visible to M33 but NVIC 293 DISABLED -> enable the RX IRQ"
+		       : (isr_cnt == 0u) ? "kick visible + NVIC enabled but ISR never fires -> MSG_INT of "
+		                           "R_MHU_NS8 not routed to IRQ 293 (routing/instance)"
+		                         : "ISR fired but STS still set -> ISR services the wrong register "
+		                           "(clear-path bug)");
 	}
 }
 

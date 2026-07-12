@@ -94,6 +94,39 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
 #define RSCTBL_BEACON_MAGIC   (0xA10D0683U) /* "Alp Lab, #683" -- arbitrary, just distinctive */
 #define RSCTBL_BEACON_VERSION (1U)
 
+/*
+ * alp-sdk #683/#697 forward-doorbell diagnostics.  Bench cycle 3 got the OpenAMP
+ * transport to ATTACH, but the A55->M33 doorbell kick (MSG_INT_SET on R_MHU_NS8,
+ * A55 alias 0x10480104) latches STS=1 while the M33 never services it -- and that
+ * question (wrong MHU instance/alias vs. NVIC-not-firing vs. ISR-not-clearing) is
+ * CM33-internal, invisible from the A55/Linux side.  Rather than require a CM33
+ * JTAG session, the M33 publishes the answer into the rsctbl region (just below
+ * the beacon, still clear of the resource table at the low end) every heartbeat,
+ * so an A55-only bench reads it via devmem / the bench diag dump:
+ *   - NS8_MSG_STS: the M33's OWN read of R_MHU_NS8.MSG_INT_STS.  If this tracks
+ *     the A55's kick (goes 1 when the A55 sets its 0x10480104 alias), the two
+ *     views ARE the same physical register -> the fault is NVIC/ISR, not aliasing.
+ *     If it stays 0 while the A55 alias reads 1, the A55 is hitting a DIFFERENT
+ *     MHU instance -> the mhu-uio base/instance is wrong.
+ *   - ISR_COUNT: mbox RX ISR fire count (g_alp_mbox_isr_count).  0 = the CM33
+ *     NVIC never took MHU_MSG5_NS_IRQn(293).
+ *   - NVIC293: is IRQ 293 enabled in the CM33 NVIC (ISER[9] bit 5)?
+ */
+#define RSCTBL_DIAG_MAGIC_OFFSET    (0xFD0)
+#define RSCTBL_DIAG_NS8_MSG_STS_OFF (0xFD4)
+#define RSCTBL_DIAG_ISR_COUNT_OFF   (0xFD8)
+#define RSCTBL_DIAG_NVIC293_OFF     (0xFDC)
+
+#define RSCTBL_DIAG_MAGIC \
+	(0xD1A90683U) /* "DIAG #683" -- A55 checks this before trusting the words */
+
+#define ALP_M33_R_MHU_NS8_MSG_INT_STS (0x50480100U) /* CM33 view of the M33's ch5 RX register */
+#define ALP_MHU_MSG5_NS_IRQN          (293U)
+/* NVIC->ISER[9] covers IRQs 288..319; bit (293 % 32) = 5 is MHU_MSG5_NS_IRQn. */
+#define ALP_NVIC_ISER9 (*(volatile uint32_t *)0xE000E124U)
+
+extern volatile uint32_t g_alp_mbox_isr_count;
+
 #define APP_TASK_STACK_SIZE (1024)
 
 K_THREAD_STACK_DEFINE(thread_mng_stack, APP_TASK_STACK_SIZE);
@@ -447,6 +480,19 @@ static void rsctbl_heartbeat_expiry(struct k_timer *timer)
 	ARG_UNUSED(timer);
 	rsctbl_heartbeat_count++;
 	*heartbeat = rsctbl_heartbeat_count;
+
+	/* Publish the forward-doorbell diagnostics (see the RSCTBL_DIAG_* header
+	 * comment) alongside each heartbeat, so the A55 bench reads a fresh, live
+	 * snapshot without a CM33 JTAG session. */
+	volatile uint32_t *d_magic = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_MAGIC_OFFSET);
+	volatile uint32_t *d_sts  = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_NS8_MSG_STS_OFF);
+	volatile uint32_t *d_isr  = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_ISR_COUNT_OFF);
+	volatile uint32_t *d_nvic = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_NVIC293_OFF);
+
+	*d_magic = RSCTBL_DIAG_MAGIC;
+	*d_sts   = *(volatile uint32_t *)ALP_M33_R_MHU_NS8_MSG_INT_STS;
+	*d_isr   = g_alp_mbox_isr_count;
+	*d_nvic  = (ALP_NVIC_ISER9 >> (ALP_MHU_MSG5_NS_IRQN % 32U)) & 1U;
 	barrier_dsync_fence_full();
 }
 

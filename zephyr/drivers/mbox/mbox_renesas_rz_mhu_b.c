@@ -82,6 +82,14 @@ static inline bool is_tx_channel_valid(const struct device *dev, uint32_t ch)
 	return ((ch < config->num_channels) && (config->tx_mask & BIT(ch)));
 }
 
+/* alp-sdk #683/#697 forward-doorbell diagnostic: incremented at the very top of
+ * the mbox RX ISR, before any FSP processing, so an A55-side bench (which reads
+ * this via the rsctbl diag block, see m33_sm/src/main.c) can tell "the CM33
+ * never took the interrupt" (count stays 0) apart from "took it but did not
+ * service/clear it" (count climbs, doorbell STS stays set) -- WITHOUT a CM33
+ * JTAG session. */
+volatile uint32_t g_alp_mbox_isr_count;
+
 /**
  * Interrupt handler
  */
@@ -90,6 +98,7 @@ static void mbox_rz_mhu_b_isr(const struct device *dev)
 	struct mbox_rz_mhu_b_data *data = dev->data;
 	struct mbox_msg msg;
 
+	g_alp_mbox_isr_count++;
 	mhu_b_ns_int_isr();
 	if (data->cb && data->fsp_cfg->p_shared_memory) {
 		uint32_t local_msg = callback_msg;
