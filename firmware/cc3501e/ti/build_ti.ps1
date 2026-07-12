@@ -188,7 +188,12 @@ $inc += @("-I$SdkDir\source\ti\drivers\net\wifi\wifi_host_driver\inc_adapt",
 # blob (the streamed OTA path is driven over the bridge instead; this is the
 # embedded-blob self-test that validates the swap mechanism without a host).
 if ($OtaSelftest) {
-    $sources += "$fw\hal\ti\cc3501e_ota_candidate.c"
+    # cc3501e_ota_candidate.c is a signed firmware binary (bin2c C-array) -- an
+    # internal-only artifact (alp-sdk #590); NOT committed to the public repo.
+    # Stage it from alp-sdk-internal before an -OtaSelftest build.
+    $cand = "$fw\hal\ti\cc3501e_ota_candidate.c"
+    if (-not (Test-Path $cand)) { throw "-OtaSelftest needs $cand -- stage it from alp-sdk-internal\firmware\cc3501e\hal\ti\ (see $fw\hal\ti\cc3501e_ota_candidate.README.md)" }
+    $sources += $cand
 }
 
 # Wi-Fi host integration (P0-5): the OSI/glue/app sources the wifi libs reference but
