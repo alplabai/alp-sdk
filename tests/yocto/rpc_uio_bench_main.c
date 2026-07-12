@@ -273,6 +273,9 @@ static const char *diag_uio_name(size_t i)
 #define DIAG_FWD_ISR_COUNT_OFFSET    0xFD8u
 #define DIAG_FWD_NVIC293_OFFSET      0xFDCu
 #define DIAG_FWD_NS36_MSG_STS_OFFSET 0xFE0u
+#define DIAG_FWD_CB_COUNT_OFFSET     0xFE4u
+#define DIAG_FWD_NOTIFIED_OFFSET     0xFE8u
+#define DIAG_FWD_VRING1_AVAIL_OFFSET 0xFECu
 #define DIAG_FWD_MAGIC_EXPECT        0xD1A90683u
 
 static uint32_t diag_read_u32(const void *base, uint32_t off)
@@ -356,6 +359,27 @@ static void diag_dump_rsctbl(const void *base)
 		                           "R_MHU_NS8 not routed to IRQ 293 (routing/instance)"
 		                         : "ISR fired but STS still set -> ISR services the wrong register "
 		                           "(clear-path bug)");
+
+		/* RX-path localization (#697 cycle 6 follow-up): where the mbox-ISR ->
+		 * callback -> notify -> vring chain breaks after the doorbell fires. */
+		uint32_t cb_cnt    = diag_read_u32(base, DIAG_FWD_CB_COUNT_OFFSET);
+		uint32_t notif_cnt = diag_read_u32(base, DIAG_FWD_NOTIFIED_OFFSET);
+		uint32_t m33_avail = diag_read_u32(base, DIAG_FWD_VRING1_AVAIL_OFFSET);
+		printf("    rx-path diag (M33 view): mbox_cb_count=%u  notified_count=%u  "
+		       "m33_vring1_avail_idx=%u\n",
+		       cb_cnt,
+		       notif_cnt,
+		       m33_avail);
+		printf("      => %s\n",
+		       (isr_cnt != 0u && cb_cnt == 0u)
+		           ? "ISR fires but mbox callback never runs -> FSP->Zephyr cb gate "
+		             "(data->cb / p_shared_memory) blocks it"
+		       : (cb_cnt != 0u && notif_cnt == 0u)
+		           ? "callback fires but rproc_virtio_notified never runs -> manager "
+		             "thread not consuming data_sem"
+		           : "callback + notify run: compare m33_vring1_avail_idx vs the A55 "
+		             "avail.idx -- stale M33 idx => vring memory-visibility; matching "
+		             "idx but used.idx=0 => notify/vq processing");
 	}
 }
 
