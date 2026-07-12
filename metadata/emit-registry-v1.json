@@ -72,7 +72,7 @@
       "mode": "dts-overlay",
       "owner": {
         "cli": "alp_project",
-        "module": "scripts/alp_project_emit.py",
+        "module": "scripts/alp_project_emit/dts.py",
         "function": "_emit_dts_overlay"
       },
       "scope": "project",
@@ -94,7 +94,7 @@
       "mode": "native-sim-overlay",
       "owner": {
         "cli": "alp_project",
-        "module": "scripts/alp_project_emit.py",
+        "module": "scripts/alp_project_emit/native_sim.py",
         "function": "_emit_native_sim_overlay"
       },
       "scope": "project",
@@ -116,7 +116,7 @@
       "mode": "hw-info-h",
       "owner": {
         "cli": "alp_project",
-        "module": "scripts/alp_project_emit.py",
+        "module": "scripts/alp_project_emit/hw_info.py",
         "function": "_emit_hw_info_h"
       },
       "scope": "project",
@@ -138,7 +138,7 @@
       "mode": "west-libraries",
       "owner": {
         "cli": "alp_project",
-        "module": "scripts/alp_project_emit.py",
+        "module": "scripts/alp_project_emit/west_libs.py",
         "function": "_emit_west_libraries"
       },
       "scope": "project",
@@ -182,7 +182,7 @@
       "mode": "composed-route-table",
       "owner": {
         "cli": "alp_project",
-        "module": "scripts/alp_project_emit.py",
+        "module": "scripts/alp_project_emit/bom_netlist.py",
         "function": "_emit_composed_route_table"
       },
       "scope": "project",
@@ -204,7 +204,7 @@
       "mode": "carrier-netlist",
       "owner": {
         "cli": "alp_project",
-        "module": "scripts/alp_project_emit.py",
+        "module": "scripts/alp_project_emit/bom_netlist.py",
         "function": "_emit_carrier_netlist"
       },
       "scope": "project",
