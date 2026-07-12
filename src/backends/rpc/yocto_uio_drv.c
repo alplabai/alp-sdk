@@ -359,12 +359,16 @@ static const char *uio_dev_name(enum uio_region_id id)
  * wrong register and the interrupt storms.  Earlier revisions aimed at a SWINT
  * unit (block +0x800, cycle 2) then NS8/NS36 (cycle 3-4); this is the
  * bench-confirmed target. */
+/* R_MHU0_Type layout (hal_renesas mhu_iodefine.h): MSG_INT STS/SET/CLR at
+ * +0x00/04/08, then a RESERVED[4] word at +0x0C, then RSP_INT STS/SET/CLR at
+ * +0x10/14/18.  The RESERVED gap was silicon-confirmed on the #697 cycle-9
+ * bench (writing +0x18 cleared the M33's reply STS at +0x10; +0x0C read 0). */
 #define ALP_MHU_NS_SLOT_MSG_INT_STS 0x00u
 #define ALP_MHU_NS_SLOT_MSG_INT_SET 0x04u
 #define ALP_MHU_NS_SLOT_MSG_INT_CLR 0x08u
-#define ALP_MHU_NS_SLOT_RSP_INT_STS 0x0Cu
-#define ALP_MHU_NS_SLOT_RSP_INT_SET 0x10u
-#define ALP_MHU_NS_SLOT_RSP_INT_CLR 0x14u
+#define ALP_MHU_NS_SLOT_RSP_INT_STS 0x10u
+#define ALP_MHU_NS_SLOT_RSP_INT_SET 0x14u
+#define ALP_MHU_NS_SLOT_RSP_INT_CLR 0x18u
 
 /* Channel-5 register slot within the A55-mapped MHU-B block: R_MHU_NS5, the
  * channel-numbered slot (bench-proven, #697 cycle 5).  Both directions share
