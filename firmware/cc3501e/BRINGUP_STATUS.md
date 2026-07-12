@@ -118,6 +118,36 @@ a signed `query` action request (`flash-images-builder build action_request
 --type query` → sign → `programmer … query`); the 30 historical device reads are
 already consistent at `1`.
 
+### Verifying a CC35 flash ACTUALLY committed (hard-won, 2026-07-12)
+
+**`primary_vendor_image_validate_pass` / `*_done` in `programming_report.txt` are
+NOT a commit signal — they read `0` even on the known-good REF_SET.** Do not trust
+them (they cost multiple bench sessions of false "it worked" / "it failed"). The
+**only ground truth is the XDS110 `query` image table**: `programmer -i XDS110
+-param1 <SN> query --query_action_req_path <signed query_action_request>`. A
+non-empty table with valid flash magic = an image is committed; an **empty table
+(or a `…020002…`/`ff0f…` no-magic raw read) = nothing committed**, regardless of a
+clean exit-0 program that streamed the full ~1.09 MB. A secondary, cheaper guard
+for the WARM path (`deploy_validate.sh`) is the streamed byte count — the
+stale/image-coupled no-op streams only ~1.3 KB vs the full vendor image — but that
+only catches a *skipped* write, not a *non-committing* SE (below); the `query` is
+authoritative.
+
+### CC35 Secure-Enclave over-cycling — do NOT over-reflash
+
+Many signed reflash + cold-cycle rounds tangle the CC35 Secure Enclave so it
+**accepts programming (exit 0, full stream) but never commits** — the `query`
+table stays empty. This is **beyond software recovery**: a verified true cold POR
++ `full_flash_erase` + a byte-faithful full-set reprogram, back-to-back in one
+session, does **not** clear it (the `e1m-aen-evk-01` bench CC35 reached this state
+2026-07-12 and needs a physical/operator recovery or a fresh part). **Batch CC35
+changes, reflash rarely, and after every program run the `query` check** — never
+infer "dead link = hardware" from boot behavior; a dead bridge is almost always
+*no committed image* or an SE tangle, not a physical fault. (A true whole-carrier
+cold POR on the alplab bench is a DPS-150 `power off/on` — verified: E8 J-Link
+VTref drops 1.786 V → 0.000 V → 1.786 V. The earlier "the DPS cycle doesn't
+cold-boot" note was a stale-telemetry-agent artifact and is wrong.)
+
 ### Re-activating a fresh / mis-activated unit (only if needed)
 
 Not needed for the current bench unit (already activated). For a genuinely
