@@ -82,4 +82,32 @@ progargs+=(programming --tool_settings "$TOOL_SETTINGS")
   echo "program returned nonzero -- retry once (intermittent -1141 SECAP reject, per BRINGUP_STATUS)"
   "$TOOLBOX" "${progargs[@]}"
 }
-echo "== CC3501E warm-flashed. =="
+
+# The programmer returns 0 even when it SKIPS the vendor image: if the staged
+# tool_settings' programming_instructions/action_request are stale or image-coupled
+# to a different build, the vendor-image write is silently no-op'd (every *_done bit
+# in programming_report.txt stays 0) while the OLD resident image survives.  A nonzero
+# exit is therefore NOT sufficient -- verify the report, or a dead flash reads as
+# success (this is issue #712, which cost a full bench session on #708).
+report=""
+for r in "$(dirname "$TOOL_SETTINGS")/programming_report.txt" "$PKG/programming_report.txt" "${PROGRAMMING_REPORT:-}"; do
+  [ -n "$r" ] && [ -f "$r" ] && { report="$r"; break; }
+done
+if [ -n "$report" ]; then
+  if grep -qE 'primary_vendor_image_done[[:space:]]*[=:][[:space:]]*1' "$report"; then
+    echo "== CC3501E warm-flashed + vendor image VERIFIED written (primary_vendor_image_done=1): $report =="
+  else
+    echo "ERROR: programmer exited 0 but primary_vendor_image_done != 1 in $report" >&2
+    echo "       -> the vendor image was NOT written (stale / image-coupled programming manifest, #712)." >&2
+    echo "       deploy_validate.sh only re-signs the vendor_image half; programming_instructions +" >&2
+    echo "       action_request are image-coupled and are NOT regenerated here.  To deliver a fresh" >&2
+    echo "       image on an already-activated part, use the matched-full-set pipeline instead:" >&2
+    echo "         firmware/cc3501e/ti/regen_flashset.sh" >&2
+    exit 5
+  fi
+else
+  echo "WARNING: programming_report.txt not found -- CANNOT verify the vendor image was written." >&2
+  echo "         A silent done-bits=0 no-op is possible (#712): if the flashed firmware does not run," >&2
+  echo "         reflash via firmware/cc3501e/ti/regen_flashset.sh (matched full flash-set) instead." >&2
+  echo "         Set PROGRAMMING_REPORT=<path to programming_report.txt> to enable the done-bit check." >&2
+fi
