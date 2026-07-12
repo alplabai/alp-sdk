@@ -204,6 +204,9 @@ def _slice_from_resolved(
         iot=dict(entry.get("iot") or {}),
         memory=dict(entry.get("memory") or {}),
         power=dict(entry.get("power") or {}),
+        # Absent -> True (the core has a HW console); only a SoM preset's
+        # `topology.<id>.hw_console: false` marks a headless core.
+        hw_console=bool(entry.get("hw_console", True)),
     )
 
 

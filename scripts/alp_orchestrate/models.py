@@ -92,6 +92,13 @@ class Slice:
     iot: dict[str, Any] = field(default_factory=dict)
     memory: dict[str, Any] = field(default_factory=dict)   # stack_kib, heap_kib, isr_stack_kib
     power: dict[str, Any] = field(default_factory=dict)    # sleep_mode, wakeup_sources
+    # False when this core has no hardware UART console (headless -- e.g.
+    # the RZ/V2N M33 system-manager, whose debug UART the A55 owns).  A
+    # SoM-topology fact (`topology.<id>.hw_console:` in the SoM preset),
+    # NOT customer-overridable; defaults True so every other core keeps
+    # its console.  Consumed by the console emitter for `diagnostics.
+    # sim_console:` (issue #686).
+    hw_console: bool = True
 
     # Populated by Orchestrator.fan_out:
     build_dir: Optional[Path] = None

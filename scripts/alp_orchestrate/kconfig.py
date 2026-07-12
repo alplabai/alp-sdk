@@ -206,8 +206,15 @@ def _resolve_console(value: Optional[str], os_: str) -> str:
     return _CONSOLE_ALIASES.get(v, "none")
 
 
-def _emit_zephyr_console(console: str) -> list[str]:
-    """Kconfig lines for a Zephyr slice's resolved console backend."""
+def _emit_zephyr_console(console: str, sim_console: bool = False) -> list[str]:
+    """Kconfig lines for a Zephyr slice's resolved console backend.
+
+    ``sim_console`` distinguishes a RAM console selected explicitly via
+    ``diagnostics.console: ram`` (bench SWD flow) from one auto-selected
+    for a headless core by ``diagnostics.sim_console: true`` (studio sim
+    streams the ring over ``uart_socket``); the emitted Kconfig is
+    identical, only the teaching comment differs.
+    """
     if console == "uart":
         return [
             "# Console: Alp UART console (auto-selected for os: zephyr).",
@@ -222,9 +229,22 @@ def _emit_zephyr_console(console: str) -> list[str]:
             "",
         ]
     if console == "ram":
-        return [
-            "# Console: RAM console (board.yaml `diagnostics.console: ram`).",
-            "# No serial line on this bench -- read `ram_console_buf` over SWD.",
+        header = (
+            [
+                "# Console: RAM console (board.yaml `diagnostics.sim_console: "
+                "true`).",
+                "# This core has no hardware UART console -- the studio",
+                "# simulator streams `ram_console_buf` over its `uart_socket`.",
+            ]
+            if sim_console
+            else [
+                "# Console: RAM console (board.yaml `diagnostics.console: "
+                "ram`).",
+                "# No serial line on this bench -- read `ram_console_buf` "
+                "over SWD.",
+            ]
+        )
+        return header + [
             "# LOG is routed to printk so the RAM backend still captures it.",
             "CONFIG_CONSOLE=y",
             "CONFIG_RAM_CONSOLE=y",
@@ -433,14 +453,27 @@ def _emit_baseline(slice_: Slice, diagnostics: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _emit_console(diagnostics: dict[str, Any], os_: str) -> list[str]:
+def _emit_console(diagnostics: dict[str, Any], slice_: Slice) -> list[str]:
     """Console backend, auto-selected from the slice OS (overridable via
     board.yaml `diagnostics.console:`).  A Zephyr slice defaults to the
     Alp UART console so `west build && attach a terminal` just works;
     a customer on a serial-less bench flips to `ram`.
+
+    `diagnostics.sim_console: true` (issue #686) upgrades the AUTO-resolved
+    console of a HEADLESS core (`hw_console: false` -- no HW UART, e.g. the
+    RZ/V2N M33 system-manager) to the RAM console, so the studio simulator's
+    `uart_socket` isn't silent.  Precedence: an explicit `diagnostics.
+    console:` always wins; a core that has a UART console is simulated
+    through its real UART node and needs no Kconfig change.
     """
-    console = _resolve_console(diagnostics.get("console"), os_)
-    return _emit_zephyr_console(console)
+    raw = diagnostics.get("console")
+    console = _resolve_console(raw, slice_.os)
+    auto = (raw or "auto").strip().lower() == "auto"
+    sim = bool(diagnostics.get("sim_console")) and auto \
+        and not slice_.hw_console and console == "uart"
+    if sim:
+        console = "ram"
+    return _emit_zephyr_console(console, sim_console=sim)
 
 
 def _emit_som_caps(
@@ -1068,7 +1101,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
 
     lines: list[str] = []
     lines.extend(_emit_baseline(slice_, diagnostics))
-    lines.extend(_emit_console(diagnostics, slice_.os))
+    lines.extend(_emit_console(diagnostics, slice_))
     lines.extend(_emit_som_caps(project, silicon, kconfig))
 
     chip_lines, chip_subsystems = _emit_chips(project, _CHIP_SUBSYSTEMS)

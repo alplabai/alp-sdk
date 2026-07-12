@@ -163,6 +163,11 @@
           "default": "auto",
           "description": "Console backend the loader wires per slice.  `auto` (default) selects by the slice OS: a Zephyr slice gets the Alp UART console (`alp`/`uart` -- printf lands on the module console UART, e.g. E1M edge UART0), a Yocto slice gets the Linux console.  `ram` forces the Zephyr RAM console for serial-less bench boards (read `ram_console_buf` over SWD).  `none` emits no console Kconfig and inherits the board default.  The board layer owns the physical console UART (`zephyr,console` DT chosen); this knob only picks the backend."
         },
+        "sim_console": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in (issue #686): when true, emit CONFIG_RAM_CONSOLE=y for every HEADLESS core (a core the SoM topology marks `hw_console: false`, e.g. the RZ/V2N M33 system-manager) so the studio hardware simulator's `uart_socket` streams that core's boot/console output.  Cores that already have a UART console are unchanged, and absent/false emits nothing (no RAM cost on production images).  Studio sets this when producing a bundle destined for `RENODE_MODE=real` (alp-studio#74)."
+        },
         "modules": {
           "type": "object",
           "additionalProperties": {

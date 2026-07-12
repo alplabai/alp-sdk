@@ -85,6 +85,8 @@ topology:
     # the M33 + SPI/I2C).
     board: alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33
     toolchain: arm-zephyr-eabi
+    # Headless M33 system-manager (A55 owns the debug UART); see #686.
+    hw_console: false
     zephyr_full_name: "E1M-V2M101 (RZ/V2N + DEEPX DX-M1) Cortex-M33 system manager"
     zephyr_twister_name: "E1M-V2M101 Cortex-M33 system manager"
 
