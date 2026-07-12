@@ -5,7 +5,23 @@ cmake_minimum_required(VERSION 3.20)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(alp_sdk_chips_test LANGUAGES C)
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE
+    src/main.c
+    src/test_accelerators.c
+    src/test_audio.c
+    src/test_blocks.c
+    src/test_cameras.c
+    src/test_cc3501e.c
+    src/test_connectivity.c
+    src/test_core_surfaces.c
+    src/test_displays.c
+    src/test_gd32_bridge.c
+    src/test_industrial.c
+    src/test_platform_ics.c
+    src/test_power.c
+    src/test_security.c
+    src/test_sensors.c
+)
 
 # Fake i2c-emul fixtures (fake_lsm6dso / fake_ssd1306 / fake_bme280)
 # are temporarily disabled -- the EMUL_DT_INST_DEFINE pattern they

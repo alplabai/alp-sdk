@@ -40,7 +40,7 @@ Out of scope (intentionally):
   the SDK's metadata regression suite.
 
 - We do NOT verify the loader emits each accelerator line for a
-  given SoM.  That's covered by ``test_alp_project.py`` (which
+  given SoM.  That's covered by ``test_project_backends.py`` (which
   feeds real SoM ``capabilities:`` blocks through
   ``_emit_library_hw_backends`` and asserts the cross-product).
 
