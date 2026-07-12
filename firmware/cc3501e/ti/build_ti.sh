@@ -179,7 +179,14 @@ inc+=("-I$SDK_DIR/source/ti/drivers/net/wifi/wifi_host_driver/inc_adapt"
       "-I$SDK_DIR/source/ti/drivers/net/wifi/wifi_host_driver/inc_common"
       "-I$SDK_DIR/source/ti/drivers/net/wifi/wifi_platform/cc35xx/inc_common"
       "-I$SDK_DIR/source/ti/drivers/xmem/flash")
-[ "$OTA_SELFTEST" = 1 ] && sources+=("$fw/hal/ti/cc3501e_ota_candidate.c")
+if [ "$OTA_SELFTEST" = 1 ]; then
+  # cc3501e_ota_candidate.c is a signed firmware binary (bin2c C-array) -- an
+  # internal-only artifact (alp-sdk #590); NOT committed to the public repo.
+  # Stage it from alp-sdk-internal before an --ota-selftest build.
+  cand="$fw/hal/ti/cc3501e_ota_candidate.c"
+  [ -f "$cand" ] || { echo "ERROR: --ota-selftest needs $cand -- stage it from alp-sdk-internal/firmware/cc3501e/hal/ti/ (see $fw/hal/ti/cc3501e_ota_candidate.README.md)"; exit 3; }
+  sources+=("$cand")
+fi
 
 # Wi-Fi host integration sources (source-only OSI/glue) -- see .ps1 186-210.
 if [ "$WIFI_HOST_DRIVER" = 1 ]; then
