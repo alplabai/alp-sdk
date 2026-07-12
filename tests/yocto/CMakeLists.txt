@@ -91,6 +91,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_gpu2d_slot_race
              COMMAND alp_test_gpu2d_slot_race)
 
+    # Mechanism-level barrier stress on the shared handle-pool primitive
+    # (src/common/alp_slot_claim.h) every dispatcher now shares (#629):
+    # open-race, capacity, op-vs-close drain, double-close.  Needs the
+    # private src/common header on the include path (not an installed API).
+    add_executable(alp_test_slot_claim_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/slot_claim_race.c
+    )
+    target_link_libraries(alp_test_slot_claim_race PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_slot_claim_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_slot_claim_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_slot_claim_race
+             COMMAND alp_test_slot_claim_race)
+
     # Stateless dispatcher ops-cache race regression (#628): concurrent
     # cold first calls into TMU / SoC-info / security.  Recompiles the
     # security sw_fallback TU straight into the executable -- same

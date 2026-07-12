@@ -57,9 +57,16 @@ struct alp_i2s {
 	alp_i2s_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
-	bool                    in_use;
 	alp_i2s_config_t        cfg; /* snapshot of caller's config */
 	bool                    started;
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close, issue #629) -- placed before in_use so the atomic-
+	 * claim zeroing in the dispatcher (memset up to
+	 * offsetof(..., in_use)) resets both on every fresh claim. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 #endif /* ALP_BACKENDS_I2S_OPS_H */

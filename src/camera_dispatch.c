@@ -21,6 +21,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/camera/camera_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(camera);
@@ -42,9 +43,12 @@ static struct alp_camera _pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
 static struct alp_camera *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_CAMERA_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch the
+		 * slot's other fields (in_use is the struct's last member, so
+		 * zero everything before it -- incl. lifecycle/active_ops,
+		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_camera, in_use));
 			return &_pool[i];
 		}
 	}
@@ -53,7 +57,7 @@ static struct alp_camera *_alloc(void)
 
 static void _free(struct alp_camera *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg)
@@ -88,28 +92,42 @@ alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN); /* #629 */
 	return h;
 }
 
 alp_status_t alp_camera_start(alp_camera_t *h)
 {
-	if (h == NULL || !h->in_use) {
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc/_free, so mixing it with a
+	 * plain read here is a data race, and a racing close could free the
+	 * slot mid-op. op_enter counts this op in; begin_close drains it. #629 */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return h->state.ops->start(&h->state);
+	alp_status_t rc = h->state.ops->start(&h->state);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_camera_stop(alp_camera_t *h)
 {
-	if (h == NULL || !h->in_use) {
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return h->state.ops->stop(&h->state);
+	alp_status_t rc = h->state.ops->stop(&h->state);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_camera_capture(alp_camera_t *h, alp_camera_frame_t *out, uint32_t timeout_ms)
 {
-	if (h == NULL || !h->in_use) {
+	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted via
+	 * op_enter -- counting it would make alp_camera_close()'s begin_close
+	 * busy-spin until a frame arrives/times out (single-core deadlock when
+	 * the closer has >= priority). Same as the ble/wifi/mqtt blocking ops;
+	 * residual close-vs-in-flight-capture UAF tracked in the #629 follow-up. */
+	if (h == NULL || alp_lifecycle_get(&h->lifecycle) != ALP_HANDLE_LC_OPEN) {
 		return ALP_ERR_NOT_READY;
 	}
 	if (out == NULL) {
@@ -120,13 +138,16 @@ alp_status_t alp_camera_capture(alp_camera_t *h, alp_camera_frame_t *out, uint32
 
 alp_status_t alp_camera_release(alp_camera_t *h, alp_camera_frame_t *frame)
 {
-	if (h == NULL || !h->in_use) {
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
 	if (frame == NULL) {
+		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
-	return h->state.ops->release(&h->state, frame);
+	alp_status_t rc = h->state.ops->release(&h->state, frame);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_camera_configure_isp(alp_camera_t *h, const alp_camera_isp_config_t *isp)
@@ -134,20 +155,29 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *h, const alp_camera_isp_conf
 	if (isp == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	if (h == NULL || !h->in_use) {
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return h->state.ops->configure_isp(&h->state, isp);
+	alp_status_t rc = h->state.ops->configure_isp(&h->state, isp);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 void alp_camera_close(alp_camera_t *h)
 {
-	if (h == NULL || !h->in_use) {
+	if (h == NULL) {
+		return;
+	}
+	/* begin_close CAS OPEN->CLOSING then spins until every op that
+	 * entered before the CAS has left -- so teardown never races an
+	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
+	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(h);
 }
 

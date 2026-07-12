@@ -29,7 +29,14 @@ typedef struct alp_update_log_ops {
 struct alp_update_log {
 	const alp_update_log_ops_t *ops;
 	alp_update_log_assurance_t  assurance;
-	bool                        in_use;
+	/* lifecycle/active_ops drive the race-safe one-time init + op/close
+	 * guard in src/update_log_dispatch.c (issue #629). Unlike the pooled
+	 * classes this is a singleton with an idempotent open(), so the
+	 * lifecycle byte also carries a dispatcher-local OPENING state that
+	 * elects exactly one initializer among racing first-opens. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 #ifdef CONFIG_ZTEST
