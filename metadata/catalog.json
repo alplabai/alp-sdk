@@ -946,6 +946,10 @@
       "script": "scripts/check_stub_issues.py"
     },
     {
+      "purpose": "Compile/link symbol-matrix gate for the shared stub backend.",
+      "script": "scripts/check_stub_symbol_matrix.py"
+    },
+    {
       "purpose": "CI gate: every src/backends/**/sw_fallback.c carries both @par Cost: and @par Performance: tags near the top of the file.",
       "script": "scripts/check_sw_fallback_tags.py"
     },

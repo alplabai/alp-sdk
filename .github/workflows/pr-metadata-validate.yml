@@ -23,6 +23,9 @@ on:
       - 'scripts/alp_project.py'
       - 'scripts/alp_orchestrate/**'
       - 'scripts/check_emit_snapshots.py'
+      - 'scripts/check_stub_symbol_matrix.py'
+      - 'src/common/stub_backend.c'
+      - 'src/common/stub/**'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
@@ -31,6 +34,7 @@ on:
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'tests/fixtures/emit-snapshots/**'
+      - 'tests/fixtures/stub-symbol-matrix/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
@@ -44,6 +48,9 @@ on:
       - 'include/alp/chips/**'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
+      - 'scripts/check_stub_symbol_matrix.py'
+      - 'src/common/stub_backend.c'
+      - 'src/common/stub/**'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
@@ -51,6 +58,7 @@ on:
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
+      - 'tests/fixtures/stub-symbol-matrix/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
@@ -242,6 +250,15 @@ jobs:
       # moves code but alters a byte fails here.
       - name: Check --emit snapshots are byte-identical
         run: python3 scripts/check_emit_snapshots.py
+
+      # Compile the shared stub backend under every ALP_VENDOR_OVERRIDES_*
+      # combination and assert no public alp_* symbol is defined twice or
+      # dropped.  This is the link-completeness guard the #673 split of
+      # stub_backend.c into per-class TUs lands against: a mis-set gate that
+      # would surface only as a downstream duplicate/undefined-symbol link
+      # error fails here at PR time instead.
+      - name: Check stub backend symbol matrix (compile/link)
+        run: python3 scripts/check_stub_symbol_matrix.py
 
       # Cross-validate: every `id:` in every metadata/socs/.../*.json
       # cores[] block must have a matching key in every consuming

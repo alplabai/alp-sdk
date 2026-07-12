@@ -364,6 +364,7 @@ REQUIRED_GATE_SCRIPTS=(
     check_inference_backend_parity.py
     check_e1m_route_capability.py
     check_emit_snapshots.py
+    check_stub_symbol_matrix.py
     check_stub_issues.py
     check_vendor_ext_tags.py
     check_public_header_purity.py

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "sku": "E1M-V2N101",
+  "cores": [
+    {
+      "core_id": "a55_cluster",
+      "core_type": "cortex-a55",
+      "runtime_class": "linux",
+      "default_os": "yocto",
+      "effective_os": "yocto",
+      "enabled": true,
+      "overridden": false,
+      "allowed_os": [
+        "yocto",
+        "baremetal",
+        "off"
+      ]
+    },
+    {
+      "core_id": "m33_sm",
+      "core_type": "cortex-m33",
+      "runtime_class": "rtos",
+      "default_os": "zephyr",
+      "effective_os": "zephyr",
+      "enabled": true,
+      "overridden": false,
+      "allowed_os": [
+        "zephyr",
+        "baremetal",
+        "off"
+      ]
+    }
+  ]
+}
