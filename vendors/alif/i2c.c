@@ -64,8 +64,9 @@ static alp_status_t alif_to_alp(int32_t st)
 
 /* Last-error stamping goes through alp_internal_set_last_error (the
  * one canonical, thread-local slot -- see src/common/alp_internal.h)
- * rather than a vendor-local static: stub_backend.c's alp_last_error
- * reader is now unconditional, so a second static + a duplicate
+ * rather than a vendor-local static: the split stub backend's
+ * (src/common/stub/stub_core.c) alp_last_error reader is now
+ * unconditional, so a second static + a duplicate
  * accessor here would just be an unreachable, stale copy. */
 
 alp_i2c_t          *alp_i2c_open(const alp_i2c_config_t *cfg)

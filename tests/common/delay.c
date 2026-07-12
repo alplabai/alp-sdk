@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Regression test for issue #594: the non-Zephyr `alp_delay_us` /
- * `alp_delay_ms` fallback in src/common/stub_backend.c used to return
- * far earlier than requested (an under-calibrated busy-loop measured
- * ~0.6 ms for a requested 100 ms).  Exercises both the ALP_OS=yocto
- * and ALP_OS=baremetal plain-CMake builds -- both link
- * src/common/stub_backend.c's delay fallback (neither has a real
+ * `alp_delay_ms` fallback (then in src/common/stub_backend.c, now
+ * split out into src/common/stub/stub_core.c -- see #673) used to
+ * return far earlier than requested (an under-calibrated busy-loop
+ * measured ~0.6 ms for a requested 100 ms).  Exercises both the
+ * ALP_OS=yocto and ALP_OS=baremetal plain-CMake builds -- both link
+ * src/common/stub/stub_core.c's delay fallback (neither has a real
  * vendor HAL delay override today), and on a Linux CI host (the only
  * host these plain-CMake builds run on) that fallback is the same
  * clock_nanosleep(CLOCK_MONOTONIC) path in both configurations.

@@ -2,15 +2,18 @@
 # Bare-metal backend for the Alp SDK.
 #
 # Source layout:
-#   - src/common/stub_backend.c provides every public alp_* symbol
-#     as ALP_ERR_NOSUPPORT.  Used as the link-complete fall-back
-#     so a bare-metal app builds even with ALP_SOM=none.
+#   - src/common/stub/*.c provides every public alp_* symbol as
+#     ALP_ERR_NOSUPPORT, one translation unit per API class plus a
+#     shared stub_core.c (last-error slot + delay primitives) --
+#     split from the former single stub_backend.c monolith (#673).
+#     Used as the link-complete fall-back so a bare-metal app builds
+#     even with ALP_SOM=none.
 #   - vendors/<som>/ pulls in vendor-specific real impls (Alif HAL
 #     for ALP_SOM=aen, Renesas FSP for v2n, NXP MCUXpresso for
 #     imx93) when ALP_HAS_<VENDOR>_HAL is also ON.
 #
 # When a vendor wrapper provides an alp_* symbol the corresponding
-# stub in stub_backend.c is excluded via the
+# stub in src/common/stub/ is excluded via the
 # ALP_VENDOR_OVERRIDES_PERIPHERAL compile definition the vendor
 # CMakeLists sets -- avoids duplicate-symbol link errors.
 #
@@ -22,7 +25,35 @@ if(DEFINED ZEPHYR_BASE)
 endif()
 
 target_sources(alp_sdk PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub_backend.c
+    # Split stub backend (#673) -- one TU per API class plus the
+    # shared stub_core.c (last-error slot + delay primitives).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_core.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_i2c.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_spi.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_gpio.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_uart.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_pwm.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_adc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_counter.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_i2s.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_can.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rtc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wifi.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_mqtt.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_audio.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_ble.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_security.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_mproc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_inference.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_storage.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_usb.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_power.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_gpu2d.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rpc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_model.c
     # Backend registry core plus portable fallback classes used by
     # plain-CMake baremetal builds.  Keeping these classes on the same
     # dispatcher path as Zephyr/Yocto prevents static-archive drift.

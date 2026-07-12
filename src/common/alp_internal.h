@@ -7,7 +7,7 @@
  * headers instead.
  *
  * Lives in src/common/ so every backend (baremetal, yocto, and any
- * non-Zephyr build that picks up stub_backend.c) shares one
+ * non-Zephyr build that picks up src/common/stub/*.c) shares one
  * canonical implementation.  Zephyr has its own thread-local
  * last-error in src/zephyr/last_error.c; this header is irrelevant
  * to Zephyr builds.
@@ -24,7 +24,7 @@ extern "C" {
 
 /**
  * @brief Thread-local storage qualifier for the plain-CMake
- *        last-error slot (`src/common/stub_backend.c`'s
+ *        last-error slot (`src/common/stub/stub_core.c`'s
  *        `z_last_error`).
  *
  * `alp_last_error()`'s public contract (<alp/peripheral.h>) is
@@ -32,7 +32,7 @@ extern "C" {
  * back -- or clobbered -- by another.  On a hosted Linux target
  * (the Yocto backend, and the plain-CMake "baremetal" build that,
  * absent a vendor cross-toolchain file, also compiles and runs
- * natively on the CI host -- see `stub_backend.c`'s `__linux__`-gated
+ * natively on the CI host -- see `stub_core.c`'s `__linux__`-gated
  * delay primitives for the same split) glibc's C11 `_Thread_local`
  * gives every pthread its own slot.  A genuine non-Linux bare-metal
  * target has no threading model beneath this layer at all (one
@@ -55,7 +55,7 @@ extern "C" {
  * Use from any backend source file that needs to convey a precise
  * failure reason before returning NULL or a non-OK status.  The
  * setter writes to the same `ALP_LAST_ERROR_TLS`-qualified static
- * that `src/common/stub_backend.c`'s peripheral stubs write to, so
+ * that `src/common/stub/*.c`'s peripheral stubs write to, so
  * a caller invoking `alp_last_error()` after a failure sees the
  * latest write regardless of which layer stamped it -- including
  * `ALP_VENDOR_OVERRIDES_PERIPHERAL=1` builds (vendor wrappers such
