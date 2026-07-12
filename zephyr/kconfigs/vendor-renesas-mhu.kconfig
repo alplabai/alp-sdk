@@ -27,6 +27,25 @@ config MBOX_RENESAS_RZ_MHU_B
 	  Renesas has not shipped an r_mhu_b_ns FSP module for any part as of
 	  this port. Not yet validated against real MHU-B traffic on silicon.
 
+config MBOX_BUSY_WAIT_TIMEOUT_US
+	int "MHU-B send busy-wait timeout (us) before returning -EBUSY"
+	default 1000
+	depends on MBOX_RENESAS_RZ_MHU_B
+	help
+	  Bounds the mailbox send.  The vendored FSP r_mhu_b_ns set_send_data()
+	  busy-spins UNBOUNDED on the send register's INT_STS until the remote
+	  acks (r_mhu_b_ns.c: `do {} while (0 != p_regs->RSP_INT_STSn)`).  The
+	  Zephyr glue (mbox_renesas_rz_mhu_b.c) has a pre-check that returns
+	  -EBUSY instead, but it is compiled only when this symbol is > 0 --
+	  and upstream defines it solely under MBOX_RENESAS_RZ_MHU (the plain
+	  driver), so for the MHU-B build it was undefined => the guard was
+	  compiled OUT and the send live-locked when the peer never acked
+	  (alp-sdk #683/#697 bench cycle 8: the M33 echo thread spun forever on
+	  R_MHU_NS5.RSP_INT_STS, wedging the whole rpmsg stack).  Define it here
+	  so the bounded path compiles; a stuck STS then degrades to a dropped
+	  doorbell (STS latched already means the peer was signaled) rather than
+	  a hang.  The real handshake fix is the A55 side acking NS5's RSP.
+
 config USE_RZ_FSP_MHU_B
 	bool
 	help
