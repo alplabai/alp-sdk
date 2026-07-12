@@ -6,21 +6,23 @@
 *
 * ====== alp-sdk #683: MHU-B port -- register-semantics notes (READ BEFORE TRUSTING THIS ON SILICON) ======
 *
-* RZ/V2N's MHU is the "MHU-B" IP: unlike the plain MHU r_mhu_ns.c implements
-* (one register block per channel, computed linearly from R_MHU_NS0_BASE),
-* MHU-B is a 42-slot register crossbar (mhu_iodefine.h: R_MHU_NS0..R_MHU_NS41,
-* each the SAME R_MHU0_Type layout the plain IP uses -- MSG_INT_{STSn,SETn,
-* CLRn} + RSP_INT_{STSn,SETn,CLRn}) where only 4 *logical* channels are valid
-* on this core (BSP_FEATURE_MHU_B_NS_VALID_CHANNEL_MASK = 0x00820820 ->
-* channels {5, 11, 17, 23}), and bsp_mhu_b.h's R_BSP_MHU_B_NS_REG_PAIR_BODY
-* maps each logical channel to a DIFFERENT physical register for the send
-* and receive directions (e.g. logical channel 5 sends via R_MHU_NS36 and
-* receives via R_MHU_NS8; only channel 23 happens to be self-paired,
-* {39, R_MHU_NS39, 39, R_MHU_NS39}).  So the ctrl block below carries TWO
-* register pointers (p_regs = send, p_regs_rx = receive) instead of the
-* plain driver's one, and R_BSP_MHU_B_NS_REG_PAIR_BODY is consumed directly
-* as the array initialiser it is clearly shaped to be (g_mhu_b_ns_reg_pairs
-* below), rather than recomputed.
+* RZ/V2N's MHU is the "MHU-B" IP.  Like the plain MHU r_mhu_ns.c implements, it
+* maps each channel to ONE register block computed LINEARLY from R_MHU_NS0_BASE
+* (mhu_iodefine.h: R_MHU_NS0..R_MHU_NS41 at 0x20 stride, each the SAME R_MHU0_Type
+* layout -- MSG_INT_{STSn,SETn,CLRn} + RESERVED + RSP_INT_{STSn,SETn,CLRn}); only
+* 4 channels are valid on this core (BSP_FEATURE_MHU_B_NS_VALID_CHANNEL_MASK =
+* 0x00820820 -> {5, 11, 17, 23}, enforced by param-checking).  Channel N uses
+* R_MHU_NSN with the two INT halves as the two directions (MSG = this core's RX,
+* RSP = this core's TX).
+*
+* Earlier revisions of this port modelled MHU-B as a 42-slot register CROSSBAR
+* (bsp_mhu_b.h's R_BSP_MHU_B_NS_REG_PAIR_BODY, which pairs logical channel 5 to
+* {send=R_MHU_NS36, recv=R_MHU_NS8}) and carried two register pointers.  That
+* model was WRONG: #697's on-silicon bench (kicking R_MHU_NS5 -- the
+* channel-numbered slot -- fired the M33's MHU_MSG5_NS_IRQn(293), while NS8/NS36
+* did not) plus the canonical FSP rzv/r_mhu_ns.c:99 both confirm the linear
+* mapping.  p_regs_rx is kept == p_regs so the ISR code is unchanged; a channel's
+* RX and TX are the two INT halves of the one R_MHU_NSN block.
 *
 * FLAG FOR REVIEW -- the one piece of this port that is INFERRED, not read
 * directly off a vendor rzv2n source (none ships): how send_type (MSG-role
@@ -77,15 +79,6 @@ typedef void (BSP_CMSE_NONSECURE_CALL * mhu_b_ns_prv_ns_callback)(mhu_callback_a
 typedef BSP_CMSE_NONSECURE_CALL void (*volatile mhu_b_ns_prv_ns_callback)(mhu_callback_args_t * p_args);
 #endif
 
-/** One R_BSP_MHU_B_NS_REG_PAIR_BODY entry: send/receive register pair for one crossbar slot. */
-typedef struct st_mhu_b_ns_reg_pair
-{
-    uint8_t       send_idx;
-    R_MHU0_Type * p_send;
-    uint8_t       recv_idx;
-    R_MHU0_Type * p_recv;
-} mhu_b_ns_reg_pair_t;
-
 /***********************************************************************************************************************
  * Private function prototypes
  **********************************************************************************************************************/
@@ -111,15 +104,6 @@ void mhu_b_ns_int_isr(void);
 extern uint32_t __mhu_shmem_start;
 
 static const uint32_t g_shmem_base = (uint32_t) &__mhu_shmem_start;
-
-/** The MHU-B crossbar table, indexed directly by logical/hardware channel number (0..41).  Only
- * indices {5, 11, 17, 23} are populated with real registers on the NS side of this core; every
- * other slot is the vendor's own {0, NULL, 0, NULL} placeholder and is unreachable because
- * r_mhu_b_ns_open_param_checking() rejects any channel outside BSP_FEATURE_MHU_B_NS_VALID_CHANNEL_MASK. */
-static const mhu_b_ns_reg_pair_t g_mhu_b_ns_reg_pairs[] =
-{
-    R_BSP_MHU_B_NS_REG_PAIR_BODY
-};
 
 /** The valid MHU-B channels, in the same order bsp_mhu_b.h's SEND_TYPE_*_BODY tables list them. */
 static const uint32_t g_mhu_b_ns_valid_channels[MHU_B_NS_VALID_CHANNEL_COUNT] = { 5U, 11U, 17U, 23U };
@@ -182,28 +166,19 @@ fsp_err_t R_MHU_B_NS_Open (mhu_ctrl_t * const p_ctrl, mhu_cfg_t const * const p_
 
     uint32_t channel = p_cfg->channel;
 
-    /* Resolve the send/receive register pair from the MHU-B crossbar table -- NOT a linear
-     * formula (see this file's header). */
-    p_instance_ctrl->p_regs    = g_mhu_b_ns_reg_pairs[channel].p_send;
-    p_instance_ctrl->p_regs_rx = g_mhu_b_ns_reg_pairs[channel].p_recv;
-
-    /* alp-sdk #697 cycle 5 BENCH-PROVEN override.  On e1mx-v2n-m1-01 the register
-     * whose MSG_INT is actually routed to MHU_MSG5_NS_IRQn(293) is R_MHU_NS5 --
-     * the slot that MATCHES the channel number -- NOT the crossbar table's
-     * {send=R_MHU_NS36, recv=R_MHU_NS8} pairing above.  An A55 kick to NS8 or
-     * NS36 latched their STS but never fired IRQ 293; a kick to R_MHU_NS5 stormed
-     * this ISR.  Channel 5 is ONE register block, MSG half = A55->M33 (this
-     * core's RX), RSP half = M33->A55 (this core's TX), so bind BOTH pointers to
-     * R_MHU_NS5 -- otherwise the ISR checks/clears the wrong register (STS never
-     * matches -> no service; or the source never clears -> interrupt storm).
-     * The crossbar table's non-linear pairing is flagged INFERRED in this file's
-     * header; this override is the bench that corrects it for the one NS channel
-     * this A55<->CM33 link uses. */
-    if (5U == channel)
-    {
-        p_instance_ctrl->p_regs    = R_MHU_NS5;
-        p_instance_ctrl->p_regs_rx = R_MHU_NS5;
-    }
+    /* Resolve the channel's register block by the LINEAR formula the canonical FSP
+     * driver uses (hal_renesas rzv/r_mhu_ns/r_mhu_ns.c:99): each R_MHU_NSn slot is
+     * one channel, `R_MHU_NS1_BASE - R_MHU_NS0_BASE` (0x20) apart.  For MHU-B only
+     * channels {5,11,17,23} are valid (rejected otherwise by param-checking), and
+     * each is ONE register block with the two INT halves as the two directions
+     * (MSG = A55->M33 / this core's RX, RSP = M33->A55 / this core's TX) -- NOT the
+     * separate send/recv slots the older crossbar model invented.  Bench-proven on
+     * e1mx-v2n-m1-01: channel 5 -> R_MHU_NS5 (0x504800A0), whose MSG_INT is the one
+     * routed to MHU_MSG5_NS_IRQn(293) (#697). */
+    p_instance_ctrl->p_regs =
+        (R_MHU0_Type *) (R_MHU_NS0_BASE +
+                         (channel * ((intptr_t) R_MHU_NS1_BASE - (intptr_t) R_MHU_NS0_BASE)));
+    p_instance_ctrl->p_regs_rx = p_instance_ctrl->p_regs;
 
     /* Derive send_type from the caller's declared rx_irq (see this file's header -- FLAG FOR REVIEW). */
     mhu_send_type_t send_type;
