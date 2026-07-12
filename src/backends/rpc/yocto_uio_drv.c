@@ -374,7 +374,17 @@ static const char *uio_dev_name(enum uio_region_id id)
  * channel-numbered slot (bench-proven, #697 cycle 5).  Both directions share
  * it -- MSG half = A55->M33 kick, RSP half = M33->A55. */
 #define ALP_MHU_NS_CH5_KICK_SLOT 0xA0u /* R_MHU_NS5.MSG -- A55->M33 kick (fires IRQ 293) */
-#define ALP_MHU_NS_CH5_RECV_SLOT 0xA0u /* R_MHU_NS5.RSP -- M33->A55 recv/ack source */
+
+/* M33->A55 REVERSE doorbell is ASYMMETRIC to the forward one.  #697 cycle 10
+ * (GIC-measured): the NS-channel RSP interrupt does NOT reach the A55 GIC on any
+ * SPI -- only the MHU-B CA55-routed SWINT units 12-15 do (SWINT unit N SET ->
+ * INTID 436+(N-12) = GIC_SPI 404+(N-12); units 0-11 don't reach CA55).  So the
+ * M33 rings the A55 by asserting SWINT unit 12 (m33_sm/main.c mailbox_notify),
+ * the A55 mhu-uio DT interrupt MUST be GIC_SPI 404, and the receive ack clears
+ * SWINT unit 12's CLR.  SWINT block @ MHU +0x800, 0x10 stride, STS/SET/CLR @
+ * +0x00/04/08. */
+#define ALP_MHU_SWINT_RECV_UNIT    12u
+#define ALP_MHU_SWINT_RECV_CLR_OFF (0x800u + ALP_MHU_SWINT_RECV_UNIT * 0x10u + 0x08u)
 
 static volatile uint32_t *
 mhu_ns_reg(struct metal_io_region *mhu, uint32_t slot_offset, uint32_t reg_offset)
@@ -585,9 +595,9 @@ static const struct remoteproc_ops g_rproc_ops = {
 /* Notification worker -- runs on libmetal's SHARED linux IRQ thread    */
 /* ------------------------------------------------------------------ */
 
-/* Ack the CM33->A55 doorbell by clearing RSP_INT on the M33's channel-5 send
- * register R_MHU_NS36 -- alp-sdk #683/#697 doorbell fix, see the MHU-B NS
- * register comment above. */
+/* Ack the M33->A55 doorbell by clearing SWINT unit 12's CLR -- the CA55-routed
+ * reverse doorbell (GIC_SPI 404).  See the ALP_MHU_SWINT_RECV_* comment above
+ * for why the reverse path uses a SWINT unit, not the NS-channel RSP register. */
 static void uio_mhu_ack(struct rpc_be *ch)
 {
 	struct metal_io_region *mhu = metal_device_io_region(ch->dev[UIO_MHU], 0);
@@ -595,7 +605,7 @@ static void uio_mhu_ack(struct rpc_be *ch)
 		return;
 	}
 	volatile uint32_t *clr_reg =
-	    mhu_ns_reg(mhu, ALP_MHU_NS_CH5_RECV_SLOT, ALP_MHU_NS_SLOT_RSP_INT_CLR);
+	    (volatile uint32_t *)((uint8_t *)mhu->virt + ALP_MHU_SWINT_RECV_CLR_OFF);
 	*clr_reg = 1u;
 }
 

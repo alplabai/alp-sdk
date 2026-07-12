@@ -257,11 +257,21 @@ static void new_service_cb(struct rpmsg_device *rdev, const char *name, uint32_t
  * link that means "ring the MHU doorbell" (the actual payload is already
  * in shared memory -- the mailbox only ever carries a wakeup, never
  * data). */
+/* #697 cycle 10 (GIC-measured): the A55 GIC only receives the MHU-B CA55-routed
+ * SWINT units 12-15 (-> INTID 436-439 = GIC_SPI 404-407); the NS-channel RSP
+ * interrupt the FSP/mbox send raises (R_MHU_NS5.RSP) routes to NO A55 GIC line,
+ * so a reply sent that way is never delivered.  Ring the A55 by asserting SWINT
+ * unit 12's SET directly instead.  (Forward A55->M33 is unaffected: it uses
+ * R_MHU_NS5.MSG -> the M33's own NVIC IRQ 293.)  SWINT units live in the MHU-B
+ * block at +0x800, 0x10 stride, STS/SET/CLR @ +0x00/04/08; unit 12 SET =
+ * CM33 0x50480000 + 0x800 + 12*0x10 + 0x04. */
+#define ALP_M33_MHU_SWINT12_SET (0x504808C4U)
+
 int mailbox_notify(void *priv, uint32_t id)
 {
 	ARG_UNUSED(priv);
 	ARG_UNUSED(id);
-	mbox_send_dt(&tx_channel, NULL);
+	*(volatile uint32_t *)ALP_M33_MHU_SWINT12_SET = 1U;
 	return 0;
 }
 
