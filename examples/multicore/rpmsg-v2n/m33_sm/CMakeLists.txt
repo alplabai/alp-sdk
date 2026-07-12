@@ -79,8 +79,19 @@ endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(rpmsg_v2n_m33_sm LANGUAGES C)
 
-# Expose the orchestrator's generated/ directory so the
-# `#include <alp/system_ipc.h>` in src/main.c resolves.
+# Expose the orchestrator's generated/ directory (still emitted above for
+# the other slices' tooling; src/main.c itself no longer includes
+# <alp/system_ipc.h> -- see its file header, alp-sdk #683 Phase 1).
 zephyr_include_directories(${CMAKE_BINARY_DIR}/generated)
 
-target_sources(app PRIVATE src/main.c)
+# METAL_MAX_DEVICE_REGIONS -- number of memory regions shared between
+# cores.  Default is 1 (the vrings/rpmsg buffers); this app's
+# platform_init() registers a SECOND region for the resource table, so it
+# must be redefined here (matches upstream's openamp_linux_zephyr sample).
+zephyr_compile_definitions(METAL_MAX_DEVICE_REGIONS=2)
+
+target_include_directories(app PRIVATE ${LIBMETAL_INCLUDE_DIR} ${OPENAMP_INCLUDE_DIR}
+                            ${PLATFORM_DIR})
+target_include_directories(app PRIVATE src)
+
+target_sources(app PRIVATE src/main.c src/resource_table.c)

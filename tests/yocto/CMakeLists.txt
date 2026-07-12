@@ -240,6 +240,53 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                      alp_test_rpc_yocto_self_close
                      alp_test_rpc_dispatch_close_race)
     set_tests_properties(alp_test_rpc_tsan PROPERTIES TIMEOUT 600)
+
+    # GHSA-xhm8-7f87-93q5 coverage for the RZ/V2N UIO/OpenAMP rpc
+    # backend (#683 Path B, src/backends/rpc/yocto_uio_drv.c).  Unlike
+    # alp_test_rpc_yocto_self_close above, this test's transport doubles
+    # (see rpc_uio_self_close.c's own header comment) call REAL
+    # open-amp/libmetal API (remoteproc_init(), uio_ept_cb() via the
+    # real rpmsg_endpoint/rpmsg_device layout) rather than standing in
+    # with raw POSIX, so it needs the same open-amp/libmetal pkg-config
+    # find as the library's own OpenAMP gate
+    # (src/yocto/CMakeLists.txt) -- re-checked here because
+    # pkg_check_modules's cache doesn't propagate across the
+    # add_subdirectory() boundary between the two CMakeLists.txt files.
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(OPENAMP_USER_TEST QUIET IMPORTED_TARGET open-amp libmetal)
+    endif()
+    if(OPENAMP_USER_TEST_FOUND)
+        add_executable(alp_test_rpc_uio_self_close
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc_uio_self_close.c
+        )
+        # Deliberately NOT linked against alp::sdk -- same ODR
+        # rationale as alp_test_rpc_yocto_self_close above: the
+        # #include-the-.c-file technique pulls in yocto_uio_drv.c's
+        # file-local statics directly.
+        target_link_libraries(alp_test_rpc_uio_self_close PRIVATE
+            Threads::Threads PkgConfig::OPENAMP_USER_TEST)
+        target_include_directories(alp_test_rpc_uio_self_close PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/rpc
+        )
+        target_compile_definitions(alp_test_rpc_uio_self_close PRIVATE
+            ALP_SDK_HAVE_OPENAMP_USERLAND=1
+        )
+        target_compile_features(alp_test_rpc_uio_self_close PRIVATE c_std_99)
+
+        add_test(NAME alp_test_rpc_uio_self_close
+                 COMMAND alp_test_rpc_uio_self_close)
+    else()
+        message(STATUS
+            "alp-sdk yocto: open-amp/libmetal not found via pkg-config; "
+            "alp_test_rpc_uio_self_close skipped.  Cross-compiling for "
+            "V2N (this backend's whole point) needs a sysroot/prefix "
+            "that carries them -- see src/backends/rpc/yocto_uio_drv.c's "
+            "own STATUS note.")
+    endif()
 endif()
 
 # v0.4: Yocto I2C wrapper failure-path coverage.  Real-adapter HIL

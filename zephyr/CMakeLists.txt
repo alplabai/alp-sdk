@@ -198,6 +198,28 @@ if(CONFIG_USE_RZ_FSP_SCI_B_SPI)
         ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/inc/instances/rzv)
 endif()
 
+# Renesas RZ/V2N MHU-B inter-core mailbox -- vendor+adapted FSP module (alp-sdk
+# #683).  RZ/V2N's MHU is the "MHU-B" IP (a non-linear 42-slot register
+# crossbar, hal_renesas's bsp_mhu_b.h), NOT the plain linear MHU the upstream
+# Zephyr mbox_renesas_rz_mhu.c + FSP r_mhu_ns.c pair implements -- that pair
+# does not compile for rzv2n (BSP_FEATURE_MHU_NS_VALID_CHANNEL_MASK /
+# _SEND_TYPE_RSP_VALID_CHANNEL_MASK are undefined for this SoC).  Renesas ships
+# no r_mhu_b_ns FSP module for any part, so it is carried here as a from-scratch
+# adaptation (structurally mirroring r_mhu_ns.c/.h) under
+# zephyr/drivers/mbox/r_mhu_b_ns/, gated by USE_RZ_FSP_MHU_B; the Zephyr glue
+# (distinct compatible `renesas,rz-mhu-b-mbox`, NOT a patch of
+# mbox_renesas_rz_mhu.c) is zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c, gated
+# by MBOX_RENESAS_RZ_MHU_B.  vendor-ext, BENCH-UNVERIFIED -- see
+# r_mhu_b_ns.c's file header for the register-semantic notes.
+zephyr_library_sources_ifdef(CONFIG_MBOX_RENESAS_RZ_MHU_B
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c)
+if(CONFIG_USE_RZ_FSP_MHU_B)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns/r_mhu_b_ns.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns)
+endif()
+
 # Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
 # BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
 # `west update`.  Standard Zephyr MBOX-class driver (DT_DRV_COMPAT
