@@ -169,24 +169,24 @@
  * `y_open()` with ALP_ERR_BUSY rather than pretending to support
  * multiple simultaneous UIO/OpenAMP links this hardware doesn't have.
  *
- * @par MHU doorbell -- register offsets fixed, SWINT unit pairing still TBD
+ * @par MHU doorbell -- registers resolved; A55 receive GIC SPI overlay-gated
  * `uio_rproc_notify()`/`uio_mhu_ack()` below poke the MHU channel-1
- * scratch (`mhu-shm`) + the MHU-B SWINT unit registers inside `mhu-uio`.
- * CORRECTED (alp-sdk #683 doorbell fix): the previous revision aimed at
- * ICU page 0x10400000, which only ROUTES software interrupts and has no
- * SET register of its own -- writes there never actually raised
- * anything.  `mhu-uio` now maps the real MHU-B register block
- * (A55 0x10480000; see the `ALP_MHU_SWINT_*` macros above, confirmed
- * against the vendored `mhu_iodefine.h` byte layout), and the STS/SET/CLR
- * offsets are therefore confirmed, not a placeholder, PER UNIT.  What is
- * still TBD -- because this on-host snapshot has no bench access to
- * confirm it -- is WHICH SWINT unit number is wired kick-vs-recv for this
- * specific A55<->CM33 link; `ALP_UIO_MHU_KICK_UNIT`/`ALP_UIO_MHU_RECV_UNIT`
- * make that env-overridable so a bench SWINT-walk can correct the unit
- * numbers (units 2/0 are only the best on-host-derived guess) without a
- * recompile.  Mirrors this repo's established TBD pattern for an
- * unconfirmed vendor register pairing (see
- * src/backends/camera/v2n_n44_isp.c's ISP register TBD).
+ * scratch (`mhu-shm`) + the MHU-B NS message registers inside `mhu-uio`.
+ * CORRECTED (alp-sdk #683/#697 bench cycle 2): earlier revisions aimed first
+ * at ICU page 0x10400000 (routes-only, no SET reg), then at a SWINT unit
+ * SET (block +0x800) -- a DIFFERENT MHU-B sub-block whose IRQ is not the
+ * M33's channel-5 line, so the kick never landed.  `mhu-uio` maps the real
+ * MHU-B block (A55 0x10480000); the kick/ack now target the crossbar slots
+ * the M33 fw's channel 5 actually uses (see the MHU-B NS register comment
+ * above): KICK = MSG_INT_SET on R_MHU_NS8 (0x10480104), ACK = RSP_INT_CLR on
+ * R_MHU_NS36 (0x10480494).  These offsets are silicon-authoritative from the
+ * FSP headers (bsp_mhu_b.h + mhu_iodefine.h).  The one remaining TBD --
+ * because meta-rz-multi-os is license-gated and not on this host -- is the
+ * A55 GIC SPI the `mhu-uio` DT node must carry for the RECEIVE direction:
+ * the M33 sends on its RSP interrupt (MHU_RSP5_NS_IRQn = 293+6 = 299), so
+ * the A55 must be wired to rsp_ch5_ns, NOT the msg_ch5_ns line the openamp
+ * UIO dtsi currently declares (that is the M33's OWN receive line).  Confirm
+ * the A55 rsp_ch5 SPI against the vendor overlay or a bench IRQ-walk.
  *
  * @par What is NOT vendored here
  * The Renesas Multi-OS Package's `meta-rz-multi-os` layer (the Linux
@@ -335,59 +335,46 @@ static const char *uio_dev_name(enum uio_region_id id)
 #define ALP_MHU_SHM_MSG_TXD    0x04u
 
 /*
- * SWINT (software-interrupt) unit registers inside the MHU-B block that
- * UIO_MHU now maps (A55 0x10480000, see g_uio_regions above).  Per
- * mhu_iodefine.h: SWINT units live at block-offset 0x800 + n*0x10, each
- * with STS/SET/CLR at +0x00/+0x04/+0x08 -- CORRECTED (alp-sdk #683) from
- * the previous revision's generic-ICU MSG_INT_STSn/CLRn/SETn offsets,
- * which lived on a page (0x10400000) that only ROUTES software
- * interrupts and has no SET register of its own to write.
+ * MHU-B NS message registers inside the MHU-B block that UIO_MHU maps
+ * (A55 0x10480000; M33-view 0x50480000, view offset 0x40000000).  Per
+ * hal_renesas mhu_iodefine.h's R_MHU0_Type, each R_MHU_NSn crossbar slot is
+ * 0x20 bytes: MSG_INT_STS/SET/CLR @ +0x00/04/08, RSP_INT_STS/SET/CLR @
+ * +0x0C/10/14.
  *
- * The unit NUMBERS below are the doorbell fix's one remaining unknown:
- * which physical SWINT unit is wired to "kick the CM33" vs. "CM33 kicked
- * us" is NOT confirmed on this host (no bench access) -- unit 2
- * (A55 0x10480824, this block's SET reg) is the best on-host-derived
- * guess for the kick direction, unit 0 (0x10480804) for the receive
- * direction, but BOTH are overridable by env so a bench SWINT-walk can
- * correct them without a recompile. */
-#define ALP_MHU_SWINT_BLOCK_OFFSET 0x800u
-#define ALP_MHU_SWINT_UNIT_STRIDE  0x10u
-#define ALP_MHU_SWINT_STS_OFFSET   0x00u
-#define ALP_MHU_SWINT_SET_OFFSET   0x04u
-#define ALP_MHU_SWINT_CLR_OFFSET   0x08u
+ * The M33 fw runs its CA55<->CM33 link on logical channel 5, which the
+ * MHU-B crossbar maps NON-linearly (bsp_mhu_b.h R_BSP_MHU_B_NS_REG_PAIR_BODY
+ * entry {36, R_MHU_NS36, 8, R_MHU_NS8}): the M33 SENDS via R_MHU_NS36 (slot
+ * offset 0x480) and RECEIVES via R_MHU_NS8 (slot offset 0x100), with
+ * send_type = RSP -- derived from its declared rx_irq MHU_MSG5_NS_IRQn(293),
+ * which bsp_mhu_b.h lists in the RSP send-type table.  So on this A55 peer
+ * (the mirror, send_type = MSG):
+ *   - KICK the M33 (raise its MHU_MSG5_NS_IRQn) by asserting MSG_INT_SET on
+ *     R_MHU_NS8            -> A55 0x10480104.
+ *   - RECEIVE/ack the M33's send (RSP_INT on R_MHU_NS36, MHU_RSP5_NS_IRQn=
+ *     299) by clearing RSP_INT_CLR on R_MHU_NS36 -> A55 0x10480494.
+ * CORRECTED (alp-sdk #683/#697 bench cycle 2): the previous revision wrote a
+ * SWINT unit SET (block +0x800) -- a DIFFERENT MHU-B sub-block whose IRQ is
+ * not MHU_MSG5_NS, so the kick never raised the M33's channel-5 IRQ.  These
+ * register offsets are silicon-authoritative from the FSP headers; the one
+ * remaining bench/overlay-gated unknown is the A55 GIC SPI the mhu-uio DT
+ * node must carry for the RECEIVE direction (rsp_ch5_ns), which lives in the
+ * license-gated Renesas meta-rz-multi-os overlay -- see the openamp UIO
+ * dtsi's mhu-uio node. */
+#define ALP_MHU_NS_SLOT_MSG_INT_STS 0x00u
+#define ALP_MHU_NS_SLOT_MSG_INT_SET 0x04u
+#define ALP_MHU_NS_SLOT_MSG_INT_CLR 0x08u
+#define ALP_MHU_NS_SLOT_RSP_INT_STS 0x0Cu
+#define ALP_MHU_NS_SLOT_RSP_INT_SET 0x10u
+#define ALP_MHU_NS_SLOT_RSP_INT_CLR 0x14u
 
-#define ALP_MHU_SWINT_KICK_UNIT_DEFAULT 2u /* A55->CM33 kick, unconfirmed -- see above */
-#define ALP_MHU_SWINT_RECV_UNIT_DEFAULT 0u /* CM33->A55 recv, unconfirmed -- see above */
-
-static unsigned int mhu_swint_unit_env(const char *env_var, unsigned int fallback)
-{
-	const char *env = getenv(env_var);
-	if (env == NULL || env[0] == '\0') {
-		return fallback;
-	}
-	char *end = NULL;
-	long  v   = strtol(env, &end, 0);
-	if (end == env || *end != '\0' || v < 0) {
-		return fallback;
-	}
-	return (unsigned int)v;
-}
-
-static unsigned int mhu_swint_kick_unit(void)
-{
-	return mhu_swint_unit_env("ALP_UIO_MHU_KICK_UNIT", ALP_MHU_SWINT_KICK_UNIT_DEFAULT);
-}
-
-static unsigned int mhu_swint_recv_unit(void)
-{
-	return mhu_swint_unit_env("ALP_UIO_MHU_RECV_UNIT", ALP_MHU_SWINT_RECV_UNIT_DEFAULT);
-}
+/* Channel-5 crossbar slot offsets within the A55-mapped MHU-B block. */
+#define ALP_MHU_NS_CH5_KICK_SLOT 0x100u /* R_MHU_NS8  -- M33 RX; the A55 kick target */
+#define ALP_MHU_NS_CH5_RECV_SLOT 0x480u /* R_MHU_NS36 -- M33 TX; the A55 recv source */
 
 static volatile uint32_t *
-mhu_swint_reg(struct metal_io_region *mhu, unsigned int unit, uint32_t reg_offset)
+mhu_ns_reg(struct metal_io_region *mhu, uint32_t slot_offset, uint32_t reg_offset)
 {
-	uintptr_t block = ALP_MHU_SWINT_BLOCK_OFFSET + (uintptr_t)unit * ALP_MHU_SWINT_UNIT_STRIDE;
-	return (volatile uint32_t *)((uint8_t *)mhu->virt + block + reg_offset);
+	return (volatile uint32_t *)((uint8_t *)mhu->virt + slot_offset + reg_offset);
 }
 
 /* ------------------------------------------------------------------ */
@@ -554,16 +541,16 @@ static int uio_rproc_notify(struct remoteproc *rproc, uint32_t id)
 		return -1;
 	}
 
-	/* Write the vring notify id into the ch1 scratch word, then assert
-	 * the A55->CM33 SWINT kick (alp-sdk #683 doorbell fix -- see this
-	 * file's header comment for why this is a SWINT SET, not the old
-	 * generic-ICU MSG_INT_SETn). */
+	/* Write the vring notify id into the ch1 scratch word, then raise the
+	 * A55->CM33 doorbell by asserting MSG_INT_SET on the M33's channel-5
+	 * receive register R_MHU_NS8 (alp-sdk #683/#697 doorbell fix -- see the
+	 * MHU-B NS register comment above). */
 	volatile uint32_t *scratch =
 	    (volatile uint32_t *)((uint8_t *)shm->virt + ALP_MHU_SHM_CH1_OFFSET + ALP_MHU_SHM_MSG_TXD);
 	*scratch = id;
 
 	volatile uint32_t *set_reg =
-	    mhu_swint_reg(mhu, mhu_swint_kick_unit(), ALP_MHU_SWINT_SET_OFFSET);
+	    mhu_ns_reg(mhu, ALP_MHU_NS_CH5_KICK_SLOT, ALP_MHU_NS_SLOT_MSG_INT_SET);
 	*set_reg = 1u;
 	return 0;
 }
@@ -576,8 +563,9 @@ static const struct remoteproc_ops g_rproc_ops = {
 /* Notification worker -- runs on libmetal's SHARED linux IRQ thread    */
 /* ------------------------------------------------------------------ */
 
-/* Ack the CM33->A55 SWINT (clear its STS via CLR) -- alp-sdk #683
- * doorbell fix, see this file's header comment. */
+/* Ack the CM33->A55 doorbell by clearing RSP_INT on the M33's channel-5 send
+ * register R_MHU_NS36 -- alp-sdk #683/#697 doorbell fix, see the MHU-B NS
+ * register comment above. */
 static void uio_mhu_ack(struct rpc_be *ch)
 {
 	struct metal_io_region *mhu = metal_device_io_region(ch->dev[UIO_MHU], 0);
@@ -585,7 +573,7 @@ static void uio_mhu_ack(struct rpc_be *ch)
 		return;
 	}
 	volatile uint32_t *clr_reg =
-	    mhu_swint_reg(mhu, mhu_swint_recv_unit(), ALP_MHU_SWINT_CLR_OFFSET);
+	    mhu_ns_reg(mhu, ALP_MHU_NS_CH5_RECV_SLOT, ALP_MHU_NS_SLOT_RSP_INT_CLR);
 	*clr_reg = 1u;
 }
 
