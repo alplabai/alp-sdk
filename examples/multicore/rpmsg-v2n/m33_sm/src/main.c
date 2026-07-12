@@ -112,16 +112,21 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
  *     NVIC never took MHU_MSG5_NS_IRQn(293).
  *   - NVIC293: is IRQ 293 enabled in the CM33 NVIC (ISER[9] bit 5)?
  */
-#define RSCTBL_DIAG_MAGIC_OFFSET    (0xFD0)
-#define RSCTBL_DIAG_NS8_MSG_STS_OFF (0xFD4)
-#define RSCTBL_DIAG_ISR_COUNT_OFF   (0xFD8)
-#define RSCTBL_DIAG_NVIC293_OFF     (0xFDC)
+#define RSCTBL_DIAG_MAGIC_OFFSET     (0xFD0)
+#define RSCTBL_DIAG_NS8_MSG_STS_OFF  (0xFD4)
+#define RSCTBL_DIAG_ISR_COUNT_OFF    (0xFD8)
+#define RSCTBL_DIAG_NVIC293_OFF      (0xFDC)
+#define RSCTBL_DIAG_NS36_MSG_STS_OFF (0xFE0)
 
 #define RSCTBL_DIAG_MAGIC \
 	(0xD1A90683U) /* "DIAG #683" -- A55 checks this before trusting the words */
 
 #define ALP_M33_R_MHU_NS8_MSG_INT_STS (0x50480100U) /* CM33 view of the M33's ch5 RX register */
-#define ALP_MHU_MSG5_NS_IRQN          (293U)
+/* #697 cycle 4 follow-up: also watch R_MHU_NS36.MSG_INT_STS -- the hypothesis is
+ * that channel 5 is the NS36 block (MSG=A55->M33), so a kick with
+ * ALP_UIO_MHU_KICK_SLOT=0x480 should latch THIS instead of NS8. */
+#define ALP_M33_R_MHU_NS36_MSG_INT_STS (0x50480480U)
+#define ALP_MHU_MSG5_NS_IRQN           (293U)
 /* NVIC->ISER[9] covers IRQs 288..319; bit (293 % 32) = 5 is MHU_MSG5_NS_IRQn. */
 #define ALP_NVIC_ISER9 (*(volatile uint32_t *)0xE000E124U)
 
@@ -489,10 +494,14 @@ static void rsctbl_heartbeat_expiry(struct k_timer *timer)
 	volatile uint32_t *d_isr  = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_ISR_COUNT_OFF);
 	volatile uint32_t *d_nvic = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_NVIC293_OFF);
 
+	volatile uint32_t *d_ns36 =
+	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_DIAG_NS36_MSG_STS_OFF);
+
 	*d_magic = RSCTBL_DIAG_MAGIC;
 	*d_sts   = *(volatile uint32_t *)ALP_M33_R_MHU_NS8_MSG_INT_STS;
 	*d_isr   = g_alp_mbox_isr_count;
 	*d_nvic  = (ALP_NVIC_ISER9 >> (ALP_MHU_MSG5_NS_IRQN % 32U)) & 1U;
+	*d_ns36  = *(volatile uint32_t *)ALP_M33_R_MHU_NS36_MSG_INT_STS;
 	barrier_dsync_fence_full();
 }
 

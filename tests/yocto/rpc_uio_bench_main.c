@@ -268,11 +268,12 @@ static const char *diag_uio_name(size_t i)
 /* Forward-doorbell diagnostics the M33 publishes just below the beacon (see
  * m33_sm/src/main.c's RSCTBL_DIAG_* macros) -- lets this A55-only bench
  * root-cause "M33 never services the kick" without a CM33 JTAG session. */
-#define DIAG_FWD_MAGIC_OFFSET       0xFD0u
-#define DIAG_FWD_NS8_MSG_STS_OFFSET 0xFD4u
-#define DIAG_FWD_ISR_COUNT_OFFSET   0xFD8u
-#define DIAG_FWD_NVIC293_OFFSET     0xFDCu
-#define DIAG_FWD_MAGIC_EXPECT       0xD1A90683u
+#define DIAG_FWD_MAGIC_OFFSET        0xFD0u
+#define DIAG_FWD_NS8_MSG_STS_OFFSET  0xFD4u
+#define DIAG_FWD_ISR_COUNT_OFFSET    0xFD8u
+#define DIAG_FWD_NVIC293_OFFSET      0xFDCu
+#define DIAG_FWD_NS36_MSG_STS_OFFSET 0xFE0u
+#define DIAG_FWD_MAGIC_EXPECT        0xD1A90683u
 
 static uint32_t diag_read_u32(const void *base, uint32_t off)
 {
@@ -335,12 +336,15 @@ static void diag_dump_rsctbl(const void *base)
 	 * path.  Present only on fw that publishes them (magic guard). */
 	uint32_t fwd_magic = diag_read_u32(base, DIAG_FWD_MAGIC_OFFSET);
 	if (fwd_magic == DIAG_FWD_MAGIC_EXPECT) {
-		uint32_t ns8_sts = diag_read_u32(base, DIAG_FWD_NS8_MSG_STS_OFFSET);
-		uint32_t isr_cnt = diag_read_u32(base, DIAG_FWD_ISR_COUNT_OFFSET);
-		uint32_t nvic293 = diag_read_u32(base, DIAG_FWD_NVIC293_OFFSET);
+		uint32_t ns8_sts  = diag_read_u32(base, DIAG_FWD_NS8_MSG_STS_OFFSET);
+		uint32_t isr_cnt  = diag_read_u32(base, DIAG_FWD_ISR_COUNT_OFFSET);
+		uint32_t nvic293  = diag_read_u32(base, DIAG_FWD_NVIC293_OFFSET);
+		uint32_t ns36_sts = diag_read_u32(base, DIAG_FWD_NS36_MSG_STS_OFFSET);
 		printf("    fwd-doorbell diag (M33 view): R_MHU_NS8.MSG_INT_STS=%u  "
-		       "mbox_isr_count=%u  NVIC_MSG5_NS(293)_enabled=%u\n",
+		       "R_MHU_NS36.MSG_INT_STS=%u  mbox_isr_count=%u  "
+		       "NVIC_MSG5_NS(293)_enabled=%u\n",
 		       ns8_sts,
+		       ns36_sts,
 		       isr_cnt,
 		       nvic293);
 		printf("      => %s\n",

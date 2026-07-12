@@ -377,6 +377,27 @@ mhu_ns_reg(struct metal_io_region *mhu, uint32_t slot_offset, uint32_t reg_offse
 	return (volatile uint32_t *)((uint8_t *)mhu->virt + slot_offset + reg_offset);
 }
 
+/* #683/#697 bench cycle 4 proved the M33's own R_MHU_NS8.MSG_INT_STS latches
+ * under the kick (same physical register) but IRQ 293 never fires -- i.e.
+ * R_MHU_NS8.MSG is not wired to msg_ch5_ns.  The leading hypothesis is that
+ * channel 5 is really the R_MHU_NS36 block with MSG=A55->M33 / RSP=M33->A55
+ * (the RSP=M33->A55 half is already proven on silicon).  Make the kick slot
+ * offset bench-overridable (ALP_UIO_MHU_KICK_SLOT, hex) so a cycle can A/B the
+ * NS8 (0x100) vs NS36 (0x480) slot without a recompile; default stays 0x100. */
+static uint32_t mhu_kick_slot(void)
+{
+	const char *env = getenv("ALP_UIO_MHU_KICK_SLOT");
+	if (env == NULL || env[0] == '\0') {
+		return ALP_MHU_NS_CH5_KICK_SLOT;
+	}
+	char         *end = NULL;
+	unsigned long v   = strtoul(env, &end, 0);
+	if (end == env || *end != '\0') {
+		return ALP_MHU_NS_CH5_KICK_SLOT;
+	}
+	return (uint32_t)v;
+}
+
 /* ------------------------------------------------------------------ */
 /* Backend-owned per-channel state (reached via state->be_data)        */
 /* ------------------------------------------------------------------ */
@@ -549,9 +570,8 @@ static int uio_rproc_notify(struct remoteproc *rproc, uint32_t id)
 	    (volatile uint32_t *)((uint8_t *)shm->virt + ALP_MHU_SHM_CH1_OFFSET + ALP_MHU_SHM_MSG_TXD);
 	*scratch = id;
 
-	volatile uint32_t *set_reg =
-	    mhu_ns_reg(mhu, ALP_MHU_NS_CH5_KICK_SLOT, ALP_MHU_NS_SLOT_MSG_INT_SET);
-	*set_reg = 1u;
+	volatile uint32_t *set_reg = mhu_ns_reg(mhu, mhu_kick_slot(), ALP_MHU_NS_SLOT_MSG_INT_SET);
+	*set_reg                   = 1u;
 	return 0;
 }
 
