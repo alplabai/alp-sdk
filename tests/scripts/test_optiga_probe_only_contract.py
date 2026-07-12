@@ -23,7 +23,7 @@ def test_optiga_manifest_and_header_are_probe_only():
 
 def test_optiga_driver_validates_then_returns_nosupport():
     driver = _text("chips/optiga_trust_m/optiga_trust_m.c")
-    tests = _text("tests/zephyr/chips/src/main.c")
+    tests = _text("tests/zephyr/chips/src/test_security.c")
 
     assert "Argument validation for the future product-info and raw-APDU" in driver
     assert "return ALP_ERR_NOSUPPORT;" in driver

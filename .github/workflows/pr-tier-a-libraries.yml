@@ -29,7 +29,7 @@ on:
       - 'scripts/validate_metadata.py'
       - 'scripts/gen_tier_a_ci_matrix.py'
       - 'tests/scripts/test_library_layer.py'
-      - 'tests/scripts/test_alp_project.py'
+      - 'tests/scripts/test_project_*.py'
       - 'tests/scripts/test_gen_tier_a_ci_matrix.py'
       - 'tests/zephyr/library_knobs/**'
       - 'west.yml'
@@ -46,7 +46,7 @@ on:
       - 'scripts/validate_metadata.py'
       - 'scripts/gen_tier_a_ci_matrix.py'
       - 'tests/scripts/test_library_layer.py'
-      - 'tests/scripts/test_alp_project.py'
+      - 'tests/scripts/test_project_*.py'
       - 'tests/scripts/test_gen_tier_a_ci_matrix.py'
       - 'tests/zephyr/library_knobs/**'
       - 'west.yml'
@@ -227,4 +227,4 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         run: |
           python3 scripts/validate_metadata.py
-          python3 -m pytest tests/scripts/test_library_layer.py tests/scripts/test_alp_project.py -q
+          python3 -m pytest tests/scripts/test_library_layer.py tests/scripts/test_project_*.py -q

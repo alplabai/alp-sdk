@@ -158,7 +158,7 @@ jobs:
           # SoM is E1M-AEN801) -- their aliases emit only for peripherals the
           # core explicitly DECLARES, and the template declares none.  So
           # alp-i2c0 / alp-adc0 are correctly ABSENT here; that contract is
-          # covered by test_alp_project.py::test_overlay_aen_family_does_not_
+          # covered by test_project_overlay.py::test_overlay_aen_family_does_not_
           # emit_generic_i2c_adc_aliases.  Do NOT re-add an `alp-i2c0` grep --
           # it contradicts the catalog-owned design (was stale from before
           # the template switched to an aen SoM).
@@ -309,7 +309,7 @@ jobs:
       # regressions the smoke tests above can't reach.
       - name: Unit tests for the loader
         run: |
-          python3 -m unittest tests.scripts.test_alp_project -v
+          python3 -m unittest discover -s tests/scripts -p 'test_project_*.py' -v
 
       # Lint board.yaml fragments embedded in markdown documentation
       # against the v2 schema.  Catches doc drift -- e.g. a README
