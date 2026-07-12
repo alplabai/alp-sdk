@@ -651,6 +651,20 @@ static int uio_ept_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32
 		return RPMSG_SUCCESS;
 	}
 
+	/* The rpmsg buffer `data` lives in the UIO-mapped vring-shm, which is
+	 * Device/uncached memory -- an unaligned multi-byte load (as
+	 * __memcpy_generic issues) faults with SIGBUS on ARMv8.  Bench cycle 11
+	 * crashed exactly here on the 4-byte echo payload (the 1-byte round-trip
+	 * worked).  Copy the frame out BYTE-WISE into an aligned local buffer
+	 * first, then parse + dispatch from normal cached memory. */
+	unsigned char local_frame[ALP_RPC_TX_FRAME_MAX];
+	size_t        frame_len = len < sizeof(local_frame) ? len : sizeof(local_frame);
+	for (size_t i = 0; i < frame_len; ++i) {
+		local_frame[i] = ((const volatile unsigned char *)data)[i];
+	}
+	data = local_frame;
+	len  = frame_len;
+
 	const void *payload     = NULL;
 	size_t      payload_len = 0;
 	const char *method      = frame_parse(data, len, &payload, &payload_len);
