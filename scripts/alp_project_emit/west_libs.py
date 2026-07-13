@@ -127,12 +127,20 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
             return False
 
     alias = _library_alias_table()
+    # Canonical -> legacy token, so the annotation comment names the library
+    # by its declared token regardless of whether the caller passed the legacy
+    # spelling (schemaVersion 1 per-core lists) or the canonical name (the
+    # schemaVersion 2 unified `libraries:` list resolves to canonical).  The
+    # annotation is cosmetic; keeping it stable makes the v1->v2 migration a
+    # byte-identical emit (WS6-c #610 §6).
+    to_token = {canon: legacy for legacy, canon in alias.items()}
 
     for lib in libs:
         # Resolve the legacy per-core token to its canonical manifest and
         # read the folded integration.zephyr.hw_backends block (WS6-c #610
         # §6 -- replaces the retired metadata/library-profiles/ tree).
         canonical = alias.get(lib, lib)
+        label = to_token.get(lib, lib)
         manifest_path = repo_root / "metadata" / "libraries" / f"{canonical}.yaml"
         if not manifest_path.exists():
             continue
@@ -168,7 +176,7 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
                     continue
                 if cap is not None and not _cap_truthy(str(cap)):
                     continue
-                out.append(f"{kcv}  # {lib} / {current_class}")
+                out.append(f"{kcv}  # {label} / {current_class}")
                 break  # per-class first-match
 
     return out

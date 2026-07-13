@@ -28,8 +28,8 @@ from .migrations import STEPS
 
 # The current board.yaml schema version. Bump this in lockstep with adding a
 # registry STEP whose TO is higher. Defined explicitly (not derived from
-# STEPS) so it stays 1 while the registry is empty.
-LATEST: int = 1
+# STEPS). v2 (WS6-c #610 §6) is the unified `libraries:` declaration.
+LATEST: int = 2
 
 # A migration step's text transform: mutate `lines` (a keepends splitlines
 # list) in place and append a human note to `report.steps`.

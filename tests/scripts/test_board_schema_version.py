@@ -26,12 +26,13 @@ sys.path.insert(0, str(REPO / "scripts"))
 import check_board_schema_version as gate  # noqa: E402
 
 
-def test_gate_clean_on_unstamped(tmp_path):
-    # Lazy floor: an unstamped board.yaml IS v1 == LATEST, so it is NOT drift.
+def test_gate_flags_unstamped_below_latest(tmp_path):
+    # With the real v1->v2 migration registered, LATEST is 2, so an unstamped
+    # (== v1) board.yaml is below LATEST and IS drift (needs migration).
     b = tmp_path / "examples" / "x"
     b.mkdir(parents=True)
     (b / "board.yaml").write_text("som:\n  sku: X\ncores:\n  m55_hp:\n    app: ./src\n")
-    assert gate.find_drift(tmp_path) == []
+    assert gate.find_drift(tmp_path) == [b / "board.yaml"]
 
 
 def test_gate_clean_on_explicit_latest(tmp_path):

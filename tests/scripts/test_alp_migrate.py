@@ -12,6 +12,13 @@ import alp_migrate  # noqa: E402
 REAL_BOARD = REPO / "examples/peripheral-io/uart-hello-world/board.yaml"
 
 
+def _as_v1(text: str) -> str:
+    """Drop the `schemaVersion:` stamp so a (now-migrated) repo board.yaml reads
+    back as a v1 file for the machinery tests."""
+    return "".join(l for l in text.splitlines(keepends=True)
+                   if not l.lstrip().startswith("schemaVersion:"))
+
+
 # ── version reads ───────────────────────────────────────────────────────────
 
 def test_current_version_absent_is_one():
@@ -26,9 +33,9 @@ def test_current_version_explicit():
 
 # ── planning ────────────────────────────────────────────────────────────────
 
-def test_plan_empty_when_absent_equals_latest():
-    doc = alp_migrate.load("som:\n  sku: X\n")
-    assert alp_migrate.plan(doc) == []  # absent == v1 == LATEST
+def test_plan_absent_migrates_to_latest():
+    doc = alp_migrate.load("som:\n  sku: X\n")  # absent == v1
+    assert alp_migrate.plan(doc) == [(1, alp_migrate.LATEST)]
 
 
 def test_plan_empty_when_explicit_latest():
@@ -42,12 +49,12 @@ def test_plan_downgrade_refused():
         alp_migrate.plan(doc)
 
 
-# ── empty registry: apply is a no-op on real files ──────────────────────────
+# ── apply at LATEST is a no-op ──────────────────────────────────────────────
 
-def test_apply_text_noop_with_empty_registry():
-    text = REAL_BOARD.read_text(encoding="utf-8")
+def test_apply_text_noop_at_latest():
+    text = REAL_BOARD.read_text(encoding="utf-8")  # migrated to LATEST
     new_text, report = alp_migrate.apply_text(text)
-    assert new_text == text          # nothing stamped
+    assert new_text == text          # already current: nothing to do
     assert report.steps == []
 
 
@@ -65,7 +72,7 @@ def test_set_schema_version_updates_existing():
     assert "".join(lines) == "schemaVersion: 4\nsom:\n  sku: X\n"
 
 
-# ── machinery proof via a synthetic v1->v2 migration ────────────────────────
+# ── engine machinery via a synthetic v1->v2 step ────────────────────────────
 
 def _bump_to_v2(lines, report):
     alp_migrate.set_schema_version(lines, 2)
@@ -75,7 +82,7 @@ def _bump_to_v2(lines, report):
 @pytest.fixture
 def synthetic_v2(monkeypatch):
     """Register a fake v1->v2 step so the engine's chaining + byte-faithful
-    apply can be exercised without a real schema change existing yet."""
+    apply can be exercised in isolation from the real migration content."""
     monkeypatch.setattr(alp_migrate, "STEPS", [(1, 2, _bump_to_v2)])
     monkeypatch.setattr(alp_migrate, "LATEST", 2)
 
@@ -86,7 +93,7 @@ def test_synthetic_plan_chains_v1_to_v2(synthetic_v2):
 
 
 def test_synthetic_apply_is_byte_faithful_on_real_board(synthetic_v2):
-    text = REAL_BOARD.read_text(encoding="utf-8")
+    text = _as_v1(REAL_BOARD.read_text(encoding="utf-8"))
     new_text, report = alp_migrate.apply_text(text)
     old_lines, new_lines = text.splitlines(), new_text.splitlines()
     added = [l for l in new_lines if l not in old_lines]
@@ -97,9 +104,73 @@ def test_synthetic_apply_is_byte_faithful_on_real_board(synthetic_v2):
 
 
 def test_synthetic_apply_is_idempotent(synthetic_v2):
-    text = REAL_BOARD.read_text(encoding="utf-8")
+    text = _as_v1(REAL_BOARD.read_text(encoding="utf-8"))
     once, _ = alp_migrate.apply_text(text)
     twice, report = alp_migrate.apply_text(once)   # now at v2 == LATEST
+    assert twice == once
+    assert report.steps == []
+
+
+# ── real m001_to_v2 migration ───────────────────────────────────────────────
+
+def test_m001_migrates_per_core_libraries_to_unified_v2():
+    text = (
+        "# banner\n"
+        "som:\n  sku: E1M-AEN801\n\n"
+        "cores:\n"
+        "  m55_hp:\n"
+        "    app: ./src\n"
+        "    libraries:\n"
+        "      - cmsis_dsp\n"
+        "      - nanopb\n"
+        "    peripherals: []\n"
+    )
+    new_text, report = alp_migrate.apply_text(text)
+    doc = alp_migrate.load(new_text)
+    assert doc["schemaVersion"] == 2
+    # tokens canonicalised via the alias table, scoped to the declaring core.
+    assert doc["libraries"] == [
+        {"name": "cmsis-dsp", "cores": ["m55_hp"]},
+        {"name": "nanopb", "cores": ["m55_hp"]},
+    ]
+    assert "libraries" not in doc["cores"]["m55_hp"]  # moved out of the core
+    assert report.steps
+
+
+def test_m001_migrates_project_wide_libraries_without_cores():
+    text = ("som:\n  sku: E1M-AEN801\n\n"
+            "libraries:\n  - coap\n\n"
+            "cores:\n  m55_hp:\n    app: ./src\n")
+    new_text, _ = alp_migrate.apply_text(text)
+    doc = alp_migrate.load(new_text)
+    assert doc["schemaVersion"] == 2
+    assert doc["libraries"] == [{"name": "coap"}]  # cores omitted == project-wide
+
+
+def test_m001_is_byte_faithful_outside_libraries():
+    text = ("# keep me\nsom:\n  sku: X\n\n"
+            "cores:\n  m55_hp:\n    app: ./src\n"
+            "    libraries:\n      - nanopb\n    peripherals: []\n")
+    new_text, _ = alp_migrate.apply_text(text)
+    survivors = new_text.splitlines()
+    for line in ["# keep me", "  sku: X", "    app: ./src", "    peripherals: []"]:
+        assert line in survivors
+    assert "      - nanopb" not in survivors  # the per-core block is removed
+
+
+def test_m001_no_libraries_only_stamps_version():
+    text = "som:\n  sku: X\ncores:\n  m55_hp:\n    app: ./src\n"
+    new_text, _ = alp_migrate.apply_text(text)
+    doc = alp_migrate.load(new_text)
+    assert doc["schemaVersion"] == 2
+    assert "libraries" not in doc
+
+
+def test_m001_is_idempotent():
+    text = ("som:\n  sku: X\ncores:\n  m55_hp:\n    app: ./src\n"
+            "    libraries:\n      - nanopb\n")
+    once, _ = alp_migrate.apply_text(text)
+    twice, report = alp_migrate.apply_text(once)   # already v2 == LATEST
     assert twice == once
     assert report.steps == []
 
@@ -140,16 +211,17 @@ def test_cli_requires_a_mode(tmp_path):
 def test_cli_check_clean_when_current(tmp_path):
     cli = _load_cli()
     b = tmp_path / "board.yaml"
-    b.write_text("som:\n  sku: X\n")           # absent == v1 == LATEST
+    b.write_text(f"schemaVersion: {alp_migrate.LATEST}\nsom:\n  sku: X\n")
     assert cli.main(["--check", "--board", str(b)]) == 0
 
 
 def test_cli_apply_is_noop_when_current(tmp_path):
     cli = _load_cli()
     b = tmp_path / "board.yaml"
-    b.write_text("# banner\nsom:\n  sku: X\n")
+    stamped = f"# banner\nschemaVersion: {alp_migrate.LATEST}\nsom:\n  sku: X\n"
+    b.write_text(stamped)
     assert cli.main(["--apply", "--board", str(b), "--no-verify"]) == 0
-    assert b.read_text() == "# banner\nsom:\n  sku: X\n"   # empty registry: no change
+    assert b.read_text() == stamped   # already current: no change
 
 
 def test_cli_migrate_error_is_clean(tmp_path, capsys):

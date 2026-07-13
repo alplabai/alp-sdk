@@ -6,12 +6,14 @@ schema version FROM to TO, ordered by TO ascending. `apply_text_fn(lines,
 report)` edits the file's lines in place (byte-faithful) and writes its own
 `schemaVersion: TO` bump via `alp_migrate.set_schema_version`.
 
-Empty until the first real schema change: with lazy versioning a board.yaml
-with no `schemaVersion` already IS v1, so no adoption/stamp step exists. Add a
-v1->v2 as a new `m001_to_v2.py` module here + one line below, and bump
-`alp_migrate.LATEST` to 2 in the same change.
+The first real schema change is v1->v2 (WS6-c #610 §6): `m001_to_v2` unifies the
+`libraries:` declaration.  `alp_migrate.LATEST` is bumped to 2 in lockstep.
 """
 from __future__ import annotations
 
+from . import m001_to_v2
+
 # (FROM, TO, apply_text_fn), ordered by TO ascending.
-STEPS: list = []
+STEPS: list = [
+    (1, 2, m001_to_v2.apply),
+]
