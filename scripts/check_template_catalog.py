@@ -17,8 +17,8 @@ nothing here may silently drift from it. This gate fails when:
   - a record's `test.testcase_yaml` path(s) don't exist;
   - a record's `requires.libraries` names a library the SDK doesn't
     actually recognise (cross-checked against
-    scripts/alp_project_emit.py's _LIBRARY_KCONFIG, the real per-core
-    `libraries:` vocabulary board.yaml accepts);
+    metadata/library-aliases-v1.json, the curated `libraries:` vocabulary --
+    legacy tokens and canonical manifest names alike);
   - a record's `requires.chips` names a chip with no
     metadata/chips/<name>.yaml manifest;
   - a record's `requires.portable_apis` names a header that doesn't exist
@@ -94,11 +94,14 @@ def _validate_schema(doc: dict, validator: jsonschema.Draft202012Validator) -> l
 
 
 def _real_library_names() -> set[str]:
-    """The real `libraries:` vocabulary board.yaml accepts -- read from
-    scripts/alp_project_emit.py's _LIBRARY_KCONFIG so this can't drift from
-    the loader it describes."""
-    import alp_project_emit
-    return set(alp_project_emit._LIBRARY_KCONFIG.keys())
+    """The real curated `libraries:` vocabulary board.yaml accepts -- read from
+    metadata/library-aliases-v1.json so this can't drift from the manifests it
+    maps to.  Accepts both the legacy per-core token (alias key) and the
+    canonical manifest name (alias value)."""
+    doc = json.loads(
+        (REPO / "metadata" / "library-aliases-v1.json").read_text(encoding="utf-8"))
+    aliases = doc.get("aliases") or {}
+    return set(aliases.keys()) | set(aliases.values())
 
 
 def _check_record_drift(rec: dict, real_libraries: set[str]) -> list[str]:
@@ -124,7 +127,7 @@ def _check_record_drift(rec: dict, real_libraries: set[str]) -> list[str]:
         if lib not in real_libraries:
             problems.append(
                 f"{rid}: requires.libraries {lib!r} is not a real library "
-                f"(scripts/alp_project_emit.py._LIBRARY_KCONFIG has no such key)")
+                f"(not in metadata/library-aliases-v1.json)")
 
     for chip in rec["requires"]["chips"]:
         if not (CHIPS_METADATA / f"{chip}.yaml").is_file():

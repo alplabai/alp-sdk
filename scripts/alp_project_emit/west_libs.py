@@ -193,13 +193,17 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
 # they import via a self-referencing `import:` block.
 
 
-# Library name -> Zephyr module name the workspace's west.yml must
-# import.  Mirrors zephyr/modules.git's published modules; LittleFS
-# ships as `fs/littlefs` while the rest match their library names 1:1.
+# Canonical library name -> Zephyr module name the workspace's west.yml must
+# import.  Keyed by the CANONICAL manifest name (metadata/libraries/<name>.yaml)
+# because the v2 `libraries:` resolution feeds canonical names here; the
+# conservative allowlist stays four upstream Zephyr modules (the vendored /
+# header-only libraries deliberately do NOT get a west entry -- `west update`
+# would reject a name it can't resolve).  Mirrors zephyr/modules.git; LittleFS
+# ships as `fs/littlefs` while the rest match their names 1:1.
 _LIBRARY_WEST_MODULES: dict[str, str] = {
     "lvgl":          "lvgl",
     "mbedtls":       "mbedtls",
-    "cmsis_dsp":     "cmsis-dsp",
+    "cmsis-dsp":     "cmsis-dsp",
     "littlefs":      "fs/littlefs",
     # The four header-only C++ libraries (etl / fmt / nlohmann_json /
     # doctest) are not Zephyr modules today -- they land in v0.4 via
@@ -274,8 +278,12 @@ def _emit_west_libraries(
             west_projects.append((lib, west))
             seen_projects.add(name)
 
+    # Normalise legacy per-core tokens (schemaVersion 1) to their canonical
+    # manifest name so the west-module lookup resolves regardless of which
+    # spelling the caller passed (v2 resolution already yields canonical).
+    alias = _library_alias_table()
     for lib in libs:
-        mod = _LIBRARY_WEST_MODULES.get(lib)
+        mod = _LIBRARY_WEST_MODULES.get(alias.get(lib, lib))
         if mod is None:
             unsupported.append(lib)
         else:

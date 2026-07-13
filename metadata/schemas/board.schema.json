@@ -643,7 +643,7 @@
         "libraries": {
           "type": "array",
           "uniqueItems": true,
-          "description": "Libraries available to this slice's app code.  The SDK adds the library's include path + the matching compile-time profile.",
+          "description": "schemaVersion 1 per-core library list (legacy tokens).  Retained so v1 board.yaml still validates and the resolver can read the per-core form; schemaVersion 2 folds these into the unified top-level `libraries:` list.  New board.yaml should use the v2 form.",
           "items": {
             "type": "string",
             "enum": [

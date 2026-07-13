@@ -174,8 +174,8 @@ class TestHwBackendsLoader(unittest.TestCase):
 
     def test_sw_fallback_always_emitted(self) -> None:
         """Each library's SW-fallback CONFIG_*=y is emitted
-        unconditionally via _LIBRARY_KCONFIG (separate from the
-        hw-backends loader).  Both new §D.lib libraries and the 4
+        unconditionally from its manifest's sw_fallback knob (separate
+        from the hw-backends loader).  Both new §D.lib libraries and the 4
         baseline ones (lvgl / mbedtls / cmsis_dsp / littlefs) emit
         their fallback knob alongside the upstream library knob."""
         out = self._emit("E1M-AEN401")
