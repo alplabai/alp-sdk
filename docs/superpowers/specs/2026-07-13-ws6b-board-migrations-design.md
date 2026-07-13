@@ -1,6 +1,19 @@
 # WS6-b — `alp-migrate` board.yaml migration engine (epic #610, Workstream 6)
 
-**Status:** design approved 2026-07-13
+**Status:** design approved 2026-07-13; **revised 2026-07-13 → lazy versioning
+(see note).**
+
+> **Revision — lazy versioning (supersedes the "stamp all 98" decision below).**
+> `schemaVersion` stays an explicit board.yaml key, but is **lazy**: an absent
+> key IS version 1 (the floor), permanently. There is **no** adoption/stamp
+> migration (#001 removed) and the repo's board.yaml are **not** mass-stamped —
+> the field only appears once a real v1→v2 migration bumps a file. The engine,
+> `west alp-migrate` CLI, and `check_board_schema_version.py` gate all still
+> ship (the gate is a clean no-op until a v2 lands). The engine's byte-faithful
+> apply is proven by a synthetic v1→v2 migration in the tests. Sections below
+> that describe stamping all 98 files / migration #001 are retained for history
+> but superseded by this note.
+
 **Scope:** the *versioned, one-shot migration engine* for `board.yaml` +
 `board.yaml` **schema versioning**, plus its first real migration
 (**#001 unversioned → v1**). Builds directly on WS6-a (#729), which named this

@@ -1,29 +1,42 @@
 # SPDX-License-Identifier: Apache-2.0
 """Pure board.yaml migration engine (epic #610 WS6-b).
 
-Comment/order-preserving via ruamel round-trip. No IO beyond the caller's;
-`load`/`dump` are string<->doc, everything else operates on the ruamel doc.
+Lazy versioning: a board.yaml with no `schemaVersion` key IS version 1 (the
+floor) -- handwritten and external projects keep loading unchanged and are
+never "drift". The key only ever appears in a file once a migration has
+actually bumped it to v2+. There is no adoption/stamp step; `LATEST` is 1 and
+the migration registry is empty until the first real schema change lands.
 
-Read-path leniency (absent schemaVersion == v1) lives in the resolver, NOT
-here: the engine must tell "absent" from "explicit 1" to know a file still
-needs the adoption stamp.
+Migrations are byte-faithful text transforms (comments, flow style, and
+indentation are preserved because the file body is never re-serialized). Each
+registry step is `(FROM, TO, apply_text_fn)` where `apply_text_fn(lines,
+report)` mutates the file's lines in place -- including writing its own
+`schemaVersion: TO` bump (use the `set_schema_version` helper). Parsing and
+planning go through a ruamel round-trip doc; only reads happen there.
 """
 from __future__ import annotations
 
 import difflib
 import io
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from ruamel.yaml import YAML
 
 from .migrations import STEPS
 
-LATEST: int = max(to for _from, to, _fn in STEPS)
+# The current board.yaml schema version. Bump this in lockstep with adding a
+# registry STEP whose TO is higher. Defined explicitly (not derived from
+# STEPS) so it stays 1 while the registry is empty.
+LATEST: int = 1
+
+# A migration step's text transform: mutate `lines` (a keepends splitlines
+# list) in place and append a human note to `report.steps`.
+TextStep = Callable[[list, "Report"], None]
 
 
 class MigrateError(Exception):
-    """Un-migratable input (unknown/newer version, malformed doc)."""
+    """Un-migratable input (a schemaVersion newer than this SDK's LATEST)."""
 
 
 @dataclass
@@ -50,49 +63,36 @@ def dump(doc: Any) -> str:
     return buf.getvalue()
 
 
-def current_version(doc: Any) -> int | None:
-    """Explicit schemaVersion, or None when absent."""
+def current_version(doc: Any) -> int:
+    """The board.yaml's schema version. Absent `schemaVersion` == 1 (floor)."""
     v = doc.get("schemaVersion") if hasattr(doc, "get") else None
-    return int(v) if v is not None else None
+    return int(v) if v is not None else 1
 
 
-def plan(doc: Any) -> list[tuple[int | None, int]]:
-    """Ordered (from, to) steps to reach canonical LATEST; [] when canonical.
+def plan(doc: Any) -> list[tuple[int, int]]:
+    """Ordered (from, to) steps to reach LATEST; [] when already current.
 
-    Chains from the doc's current version through each registry step:
-    None -> adoption (1), then each k -> k+1. `running` tracks the version
-    after the steps selected so far, so a brand-new unstamped file collects
-    the whole chain (None->1->2->...) in one pass.
+    Chains from the doc's current version through the registry: each k -> k+1.
+    `running` tracks the version after the steps selected so far.
     """
     cur = current_version(doc)
-    if cur is not None and cur > LATEST:
+    if cur > LATEST:
         raise MigrateError(
             f"board.yaml schemaVersion {cur} is newer than this SDK's "
             f"latest ({LATEST}); refusing to downgrade")
-    running = cur  # None or int; STEPS is ordered by `to` ascending
-    out: list[tuple[int | None, int]] = []
-    for frm, to, _fn in STEPS:
-        if frm == running:  # None == None (adoption) or int == int (bump)
+    running = cur
+    out: list[tuple[int, int]] = []
+    for frm, to, _fn in STEPS:  # STEPS ordered by `to` ascending
+        if frm == running:
             out.append((frm, to))
             running = to
     return out
 
 
-def apply(doc: Any) -> tuple[Any, Report]:
-    """Run every planned step in order; return the mutated doc + Report."""
-    report = Report()
-    wanted = set(plan(doc))
-    for frm, to, fn in STEPS:
-        if (frm, to) in wanted:
-            fn(doc, report)
-    return doc, report
-
-
 def _leading_comment_end(lines: list[str]) -> int:
     """Index of the first line that is neither blank nor a whole-line comment
     -- i.e. where the top-level mapping starts. A file-banner comment block
-    therefore stays on top; schemaVersion is inserted as the first real key
-    below it."""
+    therefore stays on top; an inserted key lands as the first real key."""
     for i, ln in enumerate(lines):
         s = ln.strip()
         if s and not s.startswith("#"):
@@ -100,28 +100,36 @@ def _leading_comment_end(lines: list[str]) -> int:
     return len(lines)
 
 
-def apply_text(text: str) -> tuple[str, Report]:
-    """Byte-faithful migration: returns text with only the migration's line
-    edits applied, everything else (comments, flow style, indentation)
-    preserved exactly. Parsing/planning still go through the round-trip doc.
+def set_schema_version(lines: list[str], version: int) -> None:
+    """Insert or update the top-level `schemaVersion:` line in place.
 
-    Only the additive adoption step (#001) exists in this slice; a future
-    structural step must extend this with its own text strategy or an
-    explicit round-trip fallback.
+    Migration text-transforms call this to record their target version. If a
+    `schemaVersion:` line already exists it is rewritten; otherwise the key is
+    inserted as the first real key (below any leading banner comment)."""
+    for i, ln in enumerate(lines):
+        if ln.lstrip().startswith("schemaVersion:") and not ln.lstrip().startswith("#"):
+            eol = "\n" if ln.endswith("\n") else ""
+            lines[i] = f"schemaVersion: {version}{eol}"
+            return
+    idx = _leading_comment_end(lines)
+    lines.insert(idx, f"schemaVersion: {version}\n")
+
+
+def apply_text(text: str) -> tuple[str, Report]:
+    """Apply every planned migration step to `text`, byte-faithfully.
+
+    Returns the migrated text + a Report. With an empty registry (no schema
+    change has landed yet) this is always a no-op that returns `text`
+    unchanged -- nothing gets stamped until a real migration exists.
     """
-    doc = load(text)
     report = Report()
-    steps = plan(doc)  # raises MigrateError on downgrade
-    if not steps:
+    planned = set(plan(load(text)))  # raises MigrateError on a newer version
+    if not planned:
         return text, report
     lines = text.splitlines(keepends=True)
-    for frm, to in steps:
-        if frm is None and to == 1:
-            idx = _leading_comment_end(lines)
-            lines.insert(idx, f"schemaVersion: {to}\n")
-            report.steps.append("m000_to_v1: stamped schemaVersion: 1")
-        else:
-            raise MigrateError(f"no text writer for migration step {frm}->{to}")
+    for frm, to, fn in STEPS:
+        if (frm, to) in planned:
+            fn(lines, report)
     return "".join(lines), report
 
 

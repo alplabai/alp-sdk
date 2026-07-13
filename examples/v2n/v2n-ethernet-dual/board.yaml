@@ -1,5 +1,4 @@
 # board.yaml -- per-app project configuration for v2n-ethernet-dual.
-schemaVersion: 1
 som:
   sku: E1M-V2N101
 

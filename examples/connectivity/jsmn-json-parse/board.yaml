@@ -7,7 +7,6 @@
 # (vendors/jsmn/include/jsmn.h) rather than a west-fetched Zephyr
 # module -- see vendors/jsmn/README.md for why -- so this example's
 # CMakeLists.txt adds that include directory directly.
-schemaVersion: 1
 som:
   sku: E1M-AEN801
 

@@ -18,7 +18,6 @@
 # powered nodes can run for months on a single charge because the
 # heavy compute lives behind the NPU's clock-gated path.
 
-schemaVersion: 1
 som:
   sku: E1M-AEN801           # E8 keeps the AEN always-on Ethos-U path
                              # and adds U85 headroom for transformer-style

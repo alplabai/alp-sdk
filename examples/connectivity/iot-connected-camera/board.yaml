@@ -7,7 +7,6 @@
 # at configure time and layers the generated alp.conf over
 # prj.conf via OVERLAY_CONFIG.
 
-schemaVersion: 1
 som:
   sku: E1M-V2N101          # Renesas RZ/V2N -- DRP-AI3 on-die NPU
                             # plus Murata Wi-Fi 6 / BLE radio.

@@ -5,7 +5,6 @@
 # falls with a rule-based 3-phase detector.  Same source targets the V2N DEEPX
 # path when som.sku is flipped.
 
-schemaVersion: 1
 som:
   sku: E1M-AEN801
 

@@ -22,7 +22,6 @@
 # preset supplies the mailbox controller, so the orchestrator can
 # allocate the RPMsg carve-out without app-specific SoC knowledge.
 
-schemaVersion: 1
 som:
   sku: E1M-AEN801
   hw_rev: r2

@@ -1,5 +1,4 @@
 # board.yaml -- per-app project configuration for v2n-gd32-bridge-ping.
-schemaVersion: 1
 som:
   sku: E1M-V2M101
 

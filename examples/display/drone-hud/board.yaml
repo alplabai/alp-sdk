@@ -11,7 +11,6 @@
 # through the portable <alp/*> surfaces, and the LVGL UI composes
 # them on a single screen.  No vendor-specific code in the app.
 
-schemaVersion: 1
 som:
   sku: E1M-AEN801           # E8 -- SRAM headroom for LVGL + AHRS state.
 

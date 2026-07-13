@@ -6,7 +6,6 @@
 # OVERLAY_CONFIG.  The console rides the board's existing
 # `chosen { zephyr,shell-uart }` / console UART -- no custom pins needed.
 
-schemaVersion: 1
 som:
   sku: E1M-AEN801          # Alif Ensemble E8 (the lead AEN part, bench-verified).
                             # On V2N boards the CC3501E block compiles out and

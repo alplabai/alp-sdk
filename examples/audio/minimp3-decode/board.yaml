@@ -11,7 +11,6 @@
 # (pure-C SW fallback is the floor; DSP/SIMD backends are selected
 # automatically when the SoM capability is present -- irrelevant here
 # since we never touch a real I2S peripheral).
-schemaVersion: 1
 som:
   sku: E1M-AEN801
 

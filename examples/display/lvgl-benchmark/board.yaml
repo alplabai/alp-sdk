@@ -5,7 +5,6 @@
 #   - GPU2D / DAVE2D HW acceleration (E4 / E6 / E8) vs pure-C blit (E3 / E5)
 #   - DMA2D framebuffer push vs sync SPI push
 #   - Native_sim baseline (CPU-only) vs SoM hardware path
-schemaVersion: 1
 som:
   sku: E1M-AEN801           # E8 has GPU2D + DAVE2D + DMA2D populated.
 

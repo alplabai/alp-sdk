@@ -5,7 +5,6 @@
 # reconstruction error = defect).  Same source targets the V2N accelerator path
 # when som.sku is flipped.
 
-schemaVersion: 1
 som:
   sku: E1M-AEN801
 

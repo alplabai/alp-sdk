@@ -13,7 +13,6 @@
 # user's authoritative HW writeup; until those land, `west alp-build`
 # will fail at carve-out resolution with a clear message.  This
 # example's structural files are correct in shape today.
-schemaVersion: 1
 som:
   sku: E1M-NX9101
   hw_rev: r1

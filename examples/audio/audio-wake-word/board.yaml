@@ -10,7 +10,6 @@
 #
 # E1M-V2N has no equivalent always-on AI complex, so this demo
 # is the AEN family's headline differentiator.
-schemaVersion: 1
 som:
   sku: E1M-AEN801            # E8 -- Cortex-M55 HE runs the low-power
                               # duty-cycle math, with a core-local Ethos-U55

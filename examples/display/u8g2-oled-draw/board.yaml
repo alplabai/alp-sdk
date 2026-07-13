@@ -8,7 +8,6 @@
 # carries NO panel peripheral: no i2c/spi, no chips entry. Swapping
 # in a real OLED means adding `peripherals: [i2c]` (or `spi`) here
 # and a `chips: [ssd1306]` entry -- see README.md "HW swap".
-schemaVersion: 1
 som:
   sku: E1M-AEN801
 

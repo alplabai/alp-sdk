@@ -1,5 +1,4 @@
 # board.yaml -- per-app project configuration for v2n-board-id-readout.
-schemaVersion: 1
 som:
   sku: E1M-V2N101
 

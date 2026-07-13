@@ -824,24 +824,25 @@ implementation is verified each release against the matrix.
 
 ## 7. Keeping `board.yaml` current — `west alp-migrate`
 
-Portability across SoMs also depends on `board.yaml` itself staying in a
-canonical, machine-checkable shape.  `board.yaml` carries an optional
-top-level `schemaVersion` field (declared in
+Portability across SoMs also depends on `board.yaml` staying in a
+machine-checkable shape as the schema evolves.  `board.yaml` may carry an
+optional top-level `schemaVersion` field (declared in
 [`metadata/schemas/board.schema.json`](../metadata/schemas/board.schema.json)).
-**Absent reads as `1`** — hand-written and external-project `board.yaml`
-files that predate this field keep resolving with no edits required; the
-leniency lives in the read path, not the engine, so a stamp is never a
-breaking requirement for a standalone project. The canonical, in-repo form
-carries the field explicitly, and `scripts/check_board_schema_version.py`
-gates that every tracked `board.yaml` is stamped at the current version.
+Versioning is **lazy**: an **absent `schemaVersion` IS version 1** (the
+floor). Hand-written and external-project `board.yaml` files never need the
+field and are never treated as out-of-date — the key only ever appears in a
+file once a migration has actually bumped it to v2 or later. There is no
+stamp step and no churn until a real schema change exists.
 
 `west alp-migrate` versions and migrates a `board.yaml` in place,
-comment- and order-preserving (a ruamel round-trip — inline comments,
-blank lines, and key order all survive an `--apply`). Three modes:
+byte-faithfully (inline comments, flow style, blank lines, and key order all
+survive an `--apply` — the file body is never re-serialized). Three modes:
 
 - `west alp-migrate --check` — reports each target's outstanding
   `(from, to)` migration steps, if any; nonzero exit on drift, so it is
-  safe to wire into CI.
+  safe to wire into CI (via `scripts/check_board_schema_version.py`). While
+  the registry is empty this is a clean no-op; it gains teeth the moment a
+  v2 migration lands.
 - `west alp-migrate --preview` — prints a unified diff plus a
   `diagnostic-v1` JSON report; makes no writes. Use this to see exactly
   what an `--apply` would change before committing to it.
@@ -852,11 +853,11 @@ blank lines, and key order all survive an `--apply`). Three modes:
 Adding a future schema bump (v1 → v2, say) does not touch the engine: it
 is a new module under
 [`scripts/alp_migrate/migrations/`](../scripts/alp_migrate/migrations/)
-(mirroring `m000_to_v1.py` — a `FROM`/`TO` pair plus a
-`transform(doc, report)` function) and one line registering it in that
-package's `STEPS` list. `plan()` / `apply()` in
-`scripts/alp_migrate/__init__.py` walk the registry in order, so no other
-code changes when a new step is added.
+(a `(FROM, TO, apply_text_fn)` step whose function edits the file's lines in
+place and writes its own `schemaVersion: TO` bump via `set_schema_version`),
+one line registering it in that package's `STEPS` list, and bumping
+`LATEST` in `scripts/alp_migrate/__init__.py`. `plan()` / `apply_text()`
+walk the registry in order, so no other code changes when a step is added.
 
 ---
 

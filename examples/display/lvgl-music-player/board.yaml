@@ -7,7 +7,6 @@
 # play any audio, and main.c makes no alp_i2s_* / codec calls.  A
 # real audio output path (a WM8960 / TLV320 codec over I²S plus an
 # MP3 decoder) is intentionally out of scope here.
-schemaVersion: 1
 som:
   sku: E1M-AEN801
 

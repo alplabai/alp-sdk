@@ -11,7 +11,6 @@
 # over PCIe.  The same C++ source builds against V2N (no DEEPX --
 # falls through to DRP-AI) and V2N-M1 (DEEPX) by swapping
 # `som.sku`.
-schemaVersion: 1
 som:
   sku: E1M-V2M101            # V2N-M1: V2N + DEEPX DX-M1.
 

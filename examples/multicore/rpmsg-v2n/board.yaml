@@ -17,7 +17,6 @@
 # both slices `#include`.
 #
 # See docs/heterogeneous-builds.md for the full walk-through.
-schemaVersion: 1
 som:
   sku: E1M-V2N101            # V2N -- A55 cluster + M33-SM + DRP-AI3.
   hw_rev: r1
