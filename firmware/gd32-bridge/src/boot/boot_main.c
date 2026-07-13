@@ -74,7 +74,14 @@ static bool active_slot_valid(const ota_meta_record_t *m)
 	if (len == 0u || len > OTA_SLOT_SIZE) {
 		return false;
 	}
-	return ota_crc32(0u, (const uint8_t *)base, len) == m->img_crc32[slot];
+	if (ota_crc32(0u, (const uint8_t *)base, len) != m->img_crc32[slot]) {
+		return false;
+	}
+	/* CRC integrity is necessary but not sufficient: a CRC-valid but
+	 * truncated / vector-less image would boot into garbage MSP/reset
+	 * words (#755).  Require a bootable vector head before jumping.
+	 * Flash is memory-mapped, so the base doubles as the read pointer. */
+	return ota_image_bootable(base, (const uint8_t *)base, len);
 }
 
 static void jump_to_slot(uint32_t slot_base)

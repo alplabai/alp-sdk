@@ -339,6 +339,16 @@ static gd32_bridge_status_t h_commit(void)
 	if (s_state != OTA_ST_VERIFIED) {
 		return STATUS_NOT_READY;
 	}
+	/* A verified (CRC-matching) image can still be unbootable -- a
+	 * one-byte or truncated image with a matching host CRC (#755).
+	 * Refuse to activate metadata that would brick the part on reboot. */
+	if (!ota_image_bootable(ota_inactive_base(),
+	                        (const uint8_t *)ota_fmc_flash_ptr(ota_inactive_base()),
+	                        s_img_len)) {
+		s_state = OTA_ST_ERROR;
+		s_err   = 6u;
+		return STATUS_INVAL;
+	}
 	if (!meta_commit(
 	        s_inactive, true, s_fw_version /* 0 = legacy BEGIN, unknown */, s_img_len, s_img_crc)) {
 		s_state = OTA_ST_ERROR;

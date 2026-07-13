@@ -215,3 +215,43 @@ ZTEST(gd32_bridge_ota, test_slot_base_checked_validates_slot)
 	zassert_false(ota_slot_base_checked(0xFFu, &base));
 	zassert_equal(base, 0xDEADBEEFu, "base must be untouched on reject");
 }
+
+/* #755: ota_image_bootable rejects CRC-valid-but-unbootable images. */
+static void put32(uint8_t *p, uint32_t v)
+{
+	p[0] = (uint8_t)v;
+	p[1] = (uint8_t)(v >> 8);
+	p[2] = (uint8_t)(v >> 16);
+	p[3] = (uint8_t)(v >> 24);
+}
+
+ZTEST(gd32_bridge_ota, test_image_bootable_validates_vector_head)
+{
+	const uint32_t base    = OTA_SLOT_A_BASE;
+	const uint32_t len     = 0x200u;
+	uint8_t        img[16] = { 0 };
+
+	/* Valid: MSP in SRAM + word-aligned, reset inside image + Thumb. */
+	put32(&img[0], 0x20010000u);          /* MSP  */
+	put32(&img[4], (base + 0x100u) | 1u); /* reset, Thumb */
+	zassert_true(ota_image_bootable(base, img, len), "valid vector head must pass");
+
+	/* One-byte / truncated image (below the MSP+reset head). */
+	zassert_false(ota_image_bootable(base, img, 1u), "one-byte image must reject (#755)");
+	zassert_false(ota_image_bootable(base, img, 7u), "truncated vector head must reject");
+
+	/* MSP not word-aligned / outside SRAM. */
+	put32(&img[0], 0x20010001u);
+	zassert_false(ota_image_bootable(base, img, len), "unaligned MSP must reject");
+	put32(&img[0], 0x08000000u);
+	zassert_false(ota_image_bootable(base, img, len), "MSP outside SRAM must reject");
+	put32(&img[0], 0x20010000u); /* restore */
+
+	/* Reset vector without the Thumb bit, or outside the image. */
+	put32(&img[4], base + 0x100u); /* even -> no Thumb */
+	zassert_false(ota_image_bootable(base, img, len), "reset without Thumb bit must reject");
+	put32(&img[4], (base + len) | 1u); /* past end */
+	zassert_false(ota_image_bootable(base, img, len), "reset past image end must reject");
+	put32(&img[4], (base - 4u) | 1u); /* before base */
+	zassert_false(ota_image_bootable(base, img, len), "reset before image base must reject");
+}
