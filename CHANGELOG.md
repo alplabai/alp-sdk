@@ -7,6 +7,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — quality-task registry (`metadata/quality-tasks-v1.json`, #610 §5)
+
+- Single source of truth for the SDK's `check_*.py` quality gates: which exist,
+  whether each is a hard CI gate or informational, and which profiles run it.
+  `scripts/check_quality_registry.py` keeps it == `scripts/check_*.py` on disk;
+  `scripts/test-all.sh` now derives its `REQUIRED_GATE_SCRIPTS` from the
+  registry (via `quality_tasks.py --gate-scripts`) instead of a hand-maintained
+  bash array — closing the local-vs-CI gate drift #608 flagged. `alp quality`
+  profile runner + JSON/SARIF emission land in later §5 slices.
+
 ### Added — `west alp-migrate` board.yaml migration engine (#610 WS6-b)
 
 - `board.yaml` may carry an optional top-level `schemaVersion`. Versioning is

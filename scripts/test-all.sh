@@ -349,34 +349,27 @@ stage_pytest_scripts() {
     python3 -m pytest tests/scripts/ -q || return 1
 }
 
-# Registry of the scripts/check_*.py (+ a couple of validate_*.py)
-# gates that pr-metadata-validate.yml / pr-doc-drift.yml run as hard,
-# non-informational CI gates -- i.e. every gate below is a required
-# check today, not the "informational" ones (check_test_coverage.py,
-# check_cross_platform.py) CI itself doesn't fail on.  Kept as one
-# list so this wrapper and CI can't silently drift apart: wiring a
-# script into a workflow as a hard gate and NOT adding it here is the
-# defect #608 flagged (check_stub_issues.py failed on review while
-# this wrapper never ran it).
-REQUIRED_GATE_SCRIPTS=(
-    check_pin_conflicts.py
-    check_e1m_pinout.py
-    check_inference_backend_parity.py
-    check_e1m_route_capability.py
-    check_emit_snapshots.py
-    check_stub_symbol_matrix.py
-    check_stub_issues.py
-    check_vendor_ext_tags.py
-    check_public_header_purity.py
-    check_local_paths.py
-    check_sw_fallback_tags.py
-    check_som_bundle.py
-    check_chip_manifest_parity.py
-    check_chip_header_status.py
-    check_example_portability.py
-    check_doc_drift.py
-    check_version_doc_sync.py
-)
+# The hard-gate scripts/check_*.py list is the registry's gate set, read at
+# runtime from metadata/quality-tasks-v1.json (single source of truth, drift-
+# gated by check_quality_registry.py) so this wrapper and CI can't diverge --
+# the defect #608 flagged. Each entry here is a bare script name (the loop
+# below prefixes scripts/); quality_tasks.py prints full paths, so strip the
+# scripts/ prefix as we read.
+REQUIRED_GATE_SCRIPTS=()
+if command -v python3 >/dev/null 2>&1; then
+    if ! _qgate_out="$(python3 "${REPO_ROOT}/scripts/quality_tasks.py" --gate-scripts 2>&1)"; then
+        echo "FATAL: quality_tasks.py --gate-scripts failed (registry broken?):" >&2
+        echo "${_qgate_out}" >&2
+        exit 1
+    fi
+    while IFS= read -r _qpath; do
+        [ -n "${_qpath}" ] && REQUIRED_GATE_SCRIPTS+=("${_qpath#scripts/}")
+    done <<< "${_qgate_out}"
+    if [ "${#REQUIRED_GATE_SCRIPTS[@]}" -eq 0 ]; then
+        echo "FATAL: quality-tasks-v1.json yielded zero gate scripts" >&2
+        exit 1
+    fi
+fi
 
 stage_required_gate_scripts() {
     if ! command -v python3 >/dev/null 2>&1; then

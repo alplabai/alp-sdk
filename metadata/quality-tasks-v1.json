@@ -1,0 +1,306 @@
+{
+  "schemaVersion": 1,
+  "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk. Additive-only within schemaVersion 1.",
+  "tasks": [
+    {
+      "id": "board-schema-version",
+      "description": "Fail if any repo board.yaml has an outstanding schema migration.",
+      "runner": "check-script",
+      "script": "scripts/check_board_schema_version.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": null
+    },
+    {
+      "id": "build-plan",
+      "description": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract.",
+      "runner": "check-script",
+      "script": "scripts/check_build_plan.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": null
+    },
+    {
+      "id": "chip-header-status",
+      "description": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
+      "runner": "check-script",
+      "script": "scripts/check_chip_header_status.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "chip-manifest-parity",
+      "description": "Chip driver <-> manifest parity gate -- fails when a chip driver ships without its manifest, or vice versa.",
+      "runner": "check-script",
+      "script": "scripts/check_chip_manifest_parity.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "cmake-chip-list-parity",
+      "description": "Plain-CMake chip-list parity gate -- fails when ALP_SDK_CHIP_LIST drifts from the drivers under chips/<id>/.",
+      "runner": "check-script",
+      "script": "scripts/check_cmake_chip_list_parity.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": null
+    },
+    {
+      "id": "cross-platform",
+      "description": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
+      "runner": "check-script",
+      "script": "scripts/check_cross_platform.py",
+      "gate": false,
+      "profiles": ["full"],
+      "output": "none",
+      "ci": "cross-platform-zephyr.yml:python-smoke"
+    },
+    {
+      "id": "diagnostic-schema",
+      "description": "Validate the versioned machine diagnostics contract, including a real document produced by the actual emitter.",
+      "runner": "check-script",
+      "script": "scripts/check_diagnostic_schema.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": null
+    },
+    {
+      "id": "doc-drift",
+      "description": "Doc-drift gate -- fails when customer-facing documentation drifts from the code it documents.",
+      "runner": "check-script",
+      "script": "scripts/check_doc_drift.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "doxygen-coverage",
+      "description": "Doxygen-coverage audit -- walks include/alp/*.h and flags every undocumented public symbol.",
+      "runner": "check-script",
+      "script": "scripts/check_doxygen_coverage.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-doxygen.yml:doxygen"
+    },
+    {
+      "id": "e1m-pinout",
+      "description": "Validate the vendored e1m-spec pinout snapshot and cross-check it against SoM pin-mux tables.",
+      "runner": "check-script",
+      "script": "scripts/check_e1m_pinout.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "e1m-route-capability",
+      "description": "E1M board-route <-> SoM capability-table end-to-end gate.",
+      "runner": "check-script",
+      "script": "scripts/check_e1m_route_capability.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "emit-registry",
+      "description": "Validate metadata/emit-registry-v1.json against the public IDE/tool contract and the real --emit surface.",
+      "runner": "check-script",
+      "script": "scripts/check_emit_registry.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": null
+    },
+    {
+      "id": "emit-snapshots",
+      "description": "Byte-for-byte `--emit` snapshot regression gate.",
+      "runner": "check-script",
+      "script": "scripts/check_emit_snapshots.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "example-portability",
+      "description": "Cross-family portability lint for examples/*/{board.yaml,testcase.yaml}.",
+      "runner": "check-script",
+      "script": "scripts/check_example_portability.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "example-storage-claims",
+      "description": "Reject examples that claim Alp storage coverage while using Zephyr storage APIs.",
+      "runner": "check-script",
+      "script": "scripts/check_example_storage_claims.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": null
+    },
+    {
+      "id": "inference-backend-parity",
+      "description": "Inference backend/format <-> dispatcher canonicalisation gate.",
+      "runner": "check-script",
+      "script": "scripts/check_inference_backend_parity.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "local-paths",
+      "description": "CI gate: no hard-coded home-directory paths in executable / build files.",
+      "runner": "check-script",
+      "script": "scripts/check_local_paths.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "pin-conflicts",
+      "description": "Validate that every silicon pad referenced in the SoM peripheral maps is unique.",
+      "runner": "check-script",
+      "script": "scripts/check_pin_conflicts.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "plain-cmake-link-complete",
+      "description": "Plain-CMake link-completeness gate (issue #593).",
+      "runner": "check-script",
+      "script": "scripts/check_plain_cmake_link_complete.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-plain-cmake.yml:link-complete"
+    },
+    {
+      "id": "public-header-purity",
+      "description": "CI gate: root public headers stay chip-neutral.",
+      "runner": "check-script",
+      "script": "scripts/check_public_header_purity.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "public-private",
+      "description": "Public/private classifier gate for the public alp-sdk repository.",
+      "runner": "check-script",
+      "script": "scripts/check_public_private.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "cross-platform-zephyr.yml:python-smoke"
+    },
+    {
+      "id": "som-bundle",
+      "description": "Validate SoM-release bundle manifests against the public som-release-bundle-v1 schema contract.",
+      "runner": "check-script",
+      "script": "scripts/check_som_bundle.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "stub-issues",
+      "description": "CI gate: every src/backends/**/*_stub.c file must reference an open GitHub issue.",
+      "runner": "check-script",
+      "script": "scripts/check_stub_issues.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "stub-symbol-matrix",
+      "description": "Compile/link symbol-matrix gate for the shared stub backend.",
+      "runner": "check-script",
+      "script": "scripts/check_stub_symbol_matrix.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "sw-fallback-tags",
+      "description": "CI gate: every src/backends/**/sw_fallback.c carries both Cost and Performance tags.",
+      "runner": "check-script",
+      "script": "scripts/check_sw_fallback_tags.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "system-manifest",
+      "description": "Validate a system manifest against the public IDE/tool contract.",
+      "runner": "check-script",
+      "script": "scripts/check_system_manifest.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": null
+    },
+    {
+      "id": "template-catalog",
+      "description": "Validate metadata/templates/catalog-v1.json against the public template contract and drift-check every record against the real tree.",
+      "runner": "check-script",
+      "script": "scripts/check_template_catalog.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": null
+    },
+    {
+      "id": "test-coverage",
+      "description": "Test-coverage audit: walk every public header in include/alp/ and check each declared function is mentioned by a test.",
+      "runner": "check-script",
+      "script": "scripts/check_test_coverage.py",
+      "gate": false,
+      "profiles": ["full"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "vendor-ext-tags",
+      "description": "CI gate: every function declaration under include/alp/ext/**/*.h carries a Supported-silicon tag.",
+      "runner": "check-script",
+      "script": "scripts/check_vendor_ext_tags.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "version-doc-sync",
+      "description": "Fail if any version copy drifts from the declared SDK version.",
+      "runner": "check-script",
+      "script": "scripts/check_version_doc_sync.py",
+      "gate": true,
+      "profiles": ["pr", "full", "release"],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    }
+  ]
+}
