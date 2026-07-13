@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Fail if any repo board.yaml is not at the canonical schema version.
+"""Fail if any repo board.yaml has an outstanding schema migration.
 
-Every board.yaml tracked in the repo must carry an explicit, current
-`schemaVersion` (epic #610 WS6-b). Absent or older ones are drift -- run
-`west alp-migrate --apply` to bring them up. Fast, filesystem-only.
+Lazy versioning (epic #610 WS6-b): an absent `schemaVersion` IS version 1
+(the floor), so absent and at-`LATEST` files are clean -- not drift. A file
+is drift only when a registered migration would advance it (`plan()`
+non-empty). While the migration registry is empty this gate is a no-op; it
+gains teeth automatically once a v1->v2 migration lands. A file whose
+`schemaVersion` is NEWER than this SDK's `LATEST` is also reported (it cannot
+be migrated down). Run `west alp-migrate --apply` to resolve real drift.
+Fast, filesystem-only.
 """
 from __future__ import annotations
 
@@ -25,7 +30,15 @@ def find_drift(root: Path) -> list[Path]:
             doc = alp_migrate.load(path.read_text(encoding="utf-8"))
         except Exception:
             continue  # not our concern; other gates validate board.yaml shape
-        if doc is not None and alp_migrate.plan(doc):
+        if doc is None:
+            continue
+        try:
+            if alp_migrate.plan(doc):
+                drifted.append(path)
+        except alp_migrate.MigrateError as e:
+            # schemaVersion newer than LATEST -- a real problem, but report it
+            # cleanly like the CLI does instead of tracebacking the gate.
+            print(f"board-schema-version: {path}: {e}", file=sys.stderr)
             drifted.append(path)
     return drifted
 

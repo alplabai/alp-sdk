@@ -1,5 +1,14 @@
 # WS6-b `alp-migrate` board.yaml Migration Engine Implementation Plan
 
+> **SUPERSEDED IN PART (2026-07-13): lazy versioning.** After Task 6 the design
+> pivoted from "stamp all 98 board.yaml / migration #001 (unversioned→v1)" to
+> **lazy** versioning: absent `schemaVersion` IS v1 (floor), no adoption step,
+> empty registry, no mass-stamp. Tasks 1–4 stand; Task 5's stamp was reverted;
+> the engine drops the doc-level `apply()`/`m000_to_v1` in favour of a
+> `(FROM,TO,apply_text_fn)` text-transform contract proven by a synthetic
+> migration in the tests. See the design spec's revision note and commit
+> `b26156c5`. The task text below is retained for history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship a versioned, comment-preserving one-shot migration engine for `board.yaml` (`west alp-migrate`), its schema-version field, and the first migration (#001 unversioned → v1) applied across all 98 repo board.yamls.
