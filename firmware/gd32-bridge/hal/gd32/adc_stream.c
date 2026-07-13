@@ -387,6 +387,23 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
  * before any bytes hit the per-stage buffer. */
 #define BRIDGE_DSP_KIND_MAX 3u
 
+/* Per-kind parameter bounds -- mirror the ALP_DSP_MAX_* macros in
+ * `<alp/dsp.h>` so the firmware's assembled-blob validation agrees
+ * with the host's construction limits.  See the reassembled blob
+ * layout in `<alp/chips/gd32g553.h>` (gd32g553_adc_dsp_stage_push):
+ *   FIR    : format:u8 n_taps:u8    rsvd:u16  taps[n_taps*4]  (Q31/F32)
+ *   IIR    : format:u8 n_sections:u8 rsvd:u16 coeffs[n_sec*5*4]
+ *   WINDOW : shape:u8  rsvd[3]                                  (4 B)
+ *   FFT    : n_points:u16 out_fmt:u8 rsvd:u8                    (4 B) */
+#define BRIDGE_DSP_MAX_FIR_TAPS      64u
+#define BRIDGE_DSP_MAX_IIR_SECTIONS  8u
+#define BRIDGE_DSP_MIN_FFT_POINTS    32u
+#define BRIDGE_DSP_MAX_FFT_POINTS    1024u
+#define BRIDGE_DSP_COEFF_FMT_MAX     1u  /* 0 F32, 1 Q31 */
+#define BRIDGE_DSP_WINDOW_SHAPE_MAX  3u  /* rect/hann/hamming/blackman */
+#define BRIDGE_DSP_FFT_OUT_FMT_MAX   2u  /* complex/magnitude/magnitude-onesided */
+#define BRIDGE_DSP_STAGE_HDR_BYTES   4u  /* every kind's fixed 4-byte header */
+
 typedef struct {
 	uint8_t  kind;           /* alp_dsp_stage_kind_t (valid when total_size > 0) */
 	uint16_t total_size;     /* declared in first chunk; locks for the stage    */
@@ -414,6 +431,54 @@ static void adc_dsp_chain_release(uint8_t chain_id)
 	if (chain_id >= BRIDGE_DSP_MAX_CHAINS) return;
 	adc_dsp_chains[chain_id].bound  = false;
 	adc_dsp_chains[chain_id].in_use = false;
+}
+
+/* Validate one completed stage's reassembled blob against its declared
+ * `kind`.  stage_push only bounds the byte COUNT (<= total_size) and
+ * the kind range; it never looks at the payload.  This runs at bind --
+ * the last point before the chain goes live -- so a filter with a bad
+ * tap count, an out-of-range FFT size, or a header/length mismatch is
+ * rejected here rather than mis-programming the FAC/FFT block later.
+ * The 4-byte header is present for every kind (guaranteed because bind
+ * only inspects populated stages, and total_size >= 1 for those --
+ * but we re-check to keep the field reads in-bounds). */
+static bool adc_dsp_stage_blob_valid(const adc_dsp_stage_t *st)
+{
+	if (st->total_size < BRIDGE_DSP_STAGE_HDR_BYTES) return false;
+	const uint8_t *d = st->data;
+
+	switch (st->kind) {
+	case 0u: { /* FIR: format:u8 n_taps:u8 rsvd:u16 taps[n_taps*4] */
+		const uint8_t fmt    = d[0];
+		const uint8_t n_taps = d[1];
+		if (fmt > BRIDGE_DSP_COEFF_FMT_MAX) return false;
+		if (n_taps == 0u || n_taps > BRIDGE_DSP_MAX_FIR_TAPS) return false;
+		return st->total_size ==
+		       (uint16_t)(BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)n_taps * 4u);
+	}
+	case 1u: { /* IIR: format:u8 n_sections:u8 rsvd:u16 coeffs[n_sec*5*4] */
+		const uint8_t fmt  = d[0];
+		const uint8_t n_sec = d[1];
+		if (fmt > BRIDGE_DSP_COEFF_FMT_MAX) return false;
+		if (n_sec == 0u || n_sec > BRIDGE_DSP_MAX_IIR_SECTIONS) return false;
+		return st->total_size ==
+		       (uint16_t)(BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)n_sec * 5u * 4u);
+	}
+	case 2u: /* WINDOW: shape:u8 rsvd[3] */
+		if (d[0] > BRIDGE_DSP_WINDOW_SHAPE_MAX) return false;
+		return st->total_size == BRIDGE_DSP_STAGE_HDR_BYTES;
+	case 3u: { /* FFT: n_points:u16 out_fmt:u8 rsvd:u8 */
+		const uint16_t n_points = (uint16_t)(d[0] | ((uint16_t)d[1] << 8));
+		const uint8_t  out_fmt  = d[2];
+		if (out_fmt > BRIDGE_DSP_FFT_OUT_FMT_MAX) return false;
+		if (n_points < BRIDGE_DSP_MIN_FFT_POINTS ||
+		    n_points > BRIDGE_DSP_MAX_FFT_POINTS) return false;
+		if ((n_points & (uint16_t)(n_points - 1u)) != 0u) return false; /* pow2 */
+		return st->total_size == BRIDGE_DSP_STAGE_HDR_BYTES;
+	}
+	default:
+		return false;
+	}
 }
 
 int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
@@ -525,6 +590,10 @@ int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)
 		adc_dsp_stage_t *st = &chain->stages[i];
 		if (st->total_size == 0u) continue;
 		if (!st->complete) return BRIDGE_HW_ERR_INVAL; /* mid-upload */
+		/* Payload well-formed for its kind?  stage_push checked only the
+         * byte count + kind range; this is where a malformed FIR/IIR/
+         * WINDOW/FFT blob is caught, before it can mis-program the HW. */
+		if (!adc_dsp_stage_blob_valid(st)) return BRIDGE_HW_ERR_INVAL;
 		if (last_populated_index != BRIDGE_DSP_MAX_STAGES &&
 		    (uint8_t)(i - last_populated_index) != 1u) {
 			return BRIDGE_HW_ERR_INVAL; /* gap in stage list */
