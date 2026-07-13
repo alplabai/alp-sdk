@@ -102,6 +102,12 @@ extern "C" {
  *  back-to-back reads don't lose samples. */
 #define GD32G553_BRIDGE_ADC_STREAM_READ_MAX 32u
 
+/** Maximum FFT bins per @ref gd32g553_adc_spectrum_read chunk.  Bins are
+ *  float32 (4 B); with the 7-byte reply header this keeps the reply
+ *  inside the STREAM_READ wire envelope.  Must match the firmware's
+ *  @c GD32_BRIDGE_ADC_SPECTRUM_READ_MAX. */
+#define GD32G553_BRIDGE_ADC_SPECTRUM_READ_MAX 14u
+
 /** Number of concurrent DMA-backed ADC streams the firmware supports.
  *  Bounded by the GD32G553's two DMA controllers (DMA0 + DMA1, 7
  *  channels each per the datasheet); the firmware binds stream 0 to
@@ -248,6 +254,7 @@ typedef enum {
 	GD32G553_CMD_ADC_DSP_CHAIN_OPEN = 0x37,
 	GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38,
 	GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39,
+	GD32G553_CMD_ADC_SPECTRUM_READ  = 0x3A,
 	/* v0.5 (§2B.2): advanced timer extras.  PWM_CAPTURE turns a PWM
      * channel's pin into an input-capture source for frequency / pulse-
      * width measurement; PWM_SINGLE_PULSE drives a one-shot pulse of
@@ -963,6 +970,38 @@ alp_status_t gd32g553_adc_dsp_stage_push(gd32g553_t    *ctx,
  *         error.
  */
 alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint8_t stream_id);
+
+/**
+ * @brief Read one chunk of the latest FFT frame for an FFT-terminal chain.
+ *
+ * When an FFT-terminal DSP chain is bound to a stream, the firmware
+ * transforms each full N-point window into a spectrum; a plain
+ * @ref gd32g553_adc_stream_read then answers @ref ALP_ERR_NOSUPPORT.
+ * This pulls the latest frame's bins (float magnitude, or interleaved
+ * complex, per the chain's FFT output_format), chunked by
+ * @p bin_offset / @p max_bins.  @p seq_out is the frame counter so the
+ * caller can detect a frame roll across a multi-chunk fetch.
+ *
+ * @param[in]  ctx             Initialised driver context.
+ * @param[in]  stream_id       FFT-bound stream (`0..COUNT-1`).
+ * @param[in]  bin_offset      First bin to read.
+ * @param[in]  max_bins        Bins to read (`1..SPECTRUM_READ_MAX`).
+ * @param[out] seq_out         Frame sequence number.
+ * @param[out] total_bins_out  Total bins in the current frame.
+ * @param[out] got_bins        Bins actually written to @p bins.
+ * @param[out] bins            Destination for up to @p max_bins floats.
+ *
+ * @return @ref ALP_OK; @ref ALP_ERR_NOSUPPORT (not FFT-bound),
+ *         @ref ALP_ERR_BUSY (no frame ready yet), or a transport error.
+ */
+alp_status_t gd32g553_adc_spectrum_read(gd32g553_t *ctx,
+                                        uint8_t     stream_id,
+                                        uint16_t    bin_offset,
+                                        uint8_t     max_bins,
+                                        uint32_t   *seq_out,
+                                        uint16_t   *total_bins_out,
+                                        uint8_t    *got_bins,
+                                        float      *bins);
 
 /* ------------------------------------------------------------------ */
 /* OTA -- in-system upgrade of the bridge firmware                    */

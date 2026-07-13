@@ -859,6 +859,54 @@ alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id)
 	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_STREAM_END, &stream_id, 1u, NULL, 0u);
 }
 
+alp_status_t gd32g553_adc_spectrum_read(gd32g553_t *ctx,
+                                        uint8_t     stream_id,
+                                        uint16_t    bin_offset,
+                                        uint8_t     max_bins,
+                                        uint32_t   *seq_out,
+                                        uint16_t   *total_bins_out,
+                                        uint8_t    *got_bins,
+                                        float      *bins)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (seq_out == NULL || total_bins_out == NULL || got_bins == NULL || bins == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
+	if (max_bins == 0u) return ALP_ERR_INVAL;
+	if (max_bins > GD32G553_BRIDGE_ADC_SPECTRUM_READ_MAX) {
+		max_bins = GD32G553_BRIDGE_ADC_SPECTRUM_READ_MAX;
+	}
+
+	/* Fixed reply envelope like stream_read: seq(4) total(2) got(1) +
+	 * max_bins float32, zero-padded past `got`. */
+	uint8_t      reply[7u + (GD32G553_BRIDGE_ADC_SPECTRUM_READ_MAX * 4u)];
+	const size_t reply_len = 7u + ((size_t)max_bins * 4u);
+	const uint8_t req[4]   = { stream_id,
+	                           (uint8_t)(bin_offset & 0xFFu),
+	                           (uint8_t)((bin_offset >> 8) & 0xFFu),
+	                           max_bins };
+	alp_status_t s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_SPECTRUM_READ,
+	                          req, sizeof(req), reply, reply_len);
+	if (s != ALP_OK) {
+		*got_bins = 0u;
+		return s;
+	}
+	*seq_out = (uint32_t)reply[0] | ((uint32_t)reply[1] << 8) |
+	           ((uint32_t)reply[2] << 16) | ((uint32_t)reply[3] << 24);
+	*total_bins_out = (uint16_t)reply[4] | ((uint16_t)reply[5] << 8);
+	const uint8_t got = reply[6];
+	if (got > max_bins) return ALP_ERR_IO; /* firmware contract violation */
+	*got_bins = got;
+	for (uint8_t i = 0u; i < got; ++i) {
+		uint32_t w = (uint32_t)reply[7u + i * 4u] | ((uint32_t)reply[7u + i * 4u + 1u] << 8) |
+		             ((uint32_t)reply[7u + i * 4u + 2u] << 16) |
+		             ((uint32_t)reply[7u + i * 4u + 3u] << 24);
+		memcpy(&bins[i], &w, sizeof(float));
+	}
+	return ALP_OK;
+}
+
 alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
