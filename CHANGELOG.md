@@ -14,6 +14,12 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   a byte-reproducible source tarball (`gzip -n`) and attaches the SBOM. Closes
   the §7 "reproducible release artifacts" criterion (build-receipt schema landed
   in slice 1).
+### Added — `west alp-quality` profile runner (#610 §5 slice 2)
+
+- Runs `metadata/quality-tasks-v1.json` for a named profile (quick/pr/full/
+  release) and emits a human summary + JSON + JUnit + SARIF. The `pr` profile
+  selects exactly the gates CI runs (one source of truth). Completes the §5
+  "one quality definition drives local + CI, emits machine artifacts" criterion.
 
 ### Added — quality-task registry (`metadata/quality-tasks-v1.json`, #610 §5)
 
