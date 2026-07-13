@@ -459,6 +459,16 @@ Zephyr's module organisation.  The Alif vendor-licensed pieces
 distinct from the Apache-2.0 `hal_alif` -- they're only
 fetched when a customer opts in to the `vendor-sdks` group.
 
+## Reproducing a build with alp.lock
+
+`west alp-lock` writes `alp.lock` — a deterministic, public-safe record of the
+workspace's SDK revision, west project pins, curated library versions, Python
+requirements, and metadata digests. Commit it. `west alp-lock --check` (run in
+CI) fails with a field-level diagnostic when any locked input drifts, so an old
+release can be rebuilt against its exact declared inputs. It contains no local
+paths or credentials. It does not yet pin resolved commit SHAs or toolchain
+container identities (tracked follow-ups).
+
 ## 9. SoC capability validation
 
 The SoC choice flows from `board.yaml`'s `som.sku` field
