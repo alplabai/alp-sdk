@@ -347,7 +347,9 @@ void bridge_hw_init(void)
 	(void)adc_periph_init(ADC2);
 	(void)adc_periph_init(ADC3);
 	for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
-		adc_sample_cycles_cache[i] = ADC_DEFAULT_SAMPLE_CYCLES;
+		adc_sample_cycles_cache[i]    = ADC_DEFAULT_SAMPLE_CYCLES;
+		adc_resolution_bits_cache[i]  = ADC_RES_BITS_DEFAULT;
+		adc_oversample_ratio_cache[i] = 1u; /* no oversampling */
 	}
 
 	/* Quadrature encoder bring-up: TIMER1..4 host the four E1M

@@ -51,12 +51,117 @@ const gd32_adc_ch_t adc_channels_map[] = {
 _Static_assert(sizeof(adc_channels_map) / sizeof(adc_channels_map[0]) == ADC_CHANNEL_MAP_COUNT,
                "adc_channels_map size must match ADC_CHANNEL_MAP_COUNT");
 
-/* Per-channel sticky sample-cycle override applied by
- * bridge_hw_adc_configure.  Defaults to ADC_DEFAULT_SAMPLE_CYCLES;
- * caller's tighter values (e.g. 24 cycles for low-impedance sources)
- * override on the next bridge_hw_adc_read.  Resolution + oversample
- * are still gated to defaults at v0.3 and live in a follow-up. */
+/* Per-channel sticky conversion-format overrides applied by
+ * bridge_hw_adc_configure.  All three are pure caches: configure
+ * validates + stores, and the read / stream-begin paths program them
+ * into the converter (inside the ADCON==0 window DRES/OVSAMPCTL
+ * require).  Defaults: 240 sample cycles, 12-bit resolution, no
+ * oversampling.  Zero-initialised at boot, so bridge_hw_init's ADC
+ * bring-up loop (init.c) seeds the non-zero defaults. */
 uint16_t adc_sample_cycles_cache[8];
+uint8_t  adc_resolution_bits_cache[8];
+uint16_t adc_oversample_ratio_cache[8];
+
+/* Resolution bits (12/10/8/6) -> ADC_RESOLUTION_* register value.
+ * Returns false for any other width so bridge_hw_adc_configure can
+ * reject it as NOSUPPORT rather than silently clamping. */
+static bool adc_resolution_reg(uint8_t bits, uint32_t *reg_out)
+{
+	switch (bits) {
+	case 12u:
+		*reg_out = ADC_RESOLUTION_12B;
+		return true;
+	case 10u:
+		*reg_out = ADC_RESOLUTION_10B;
+		return true;
+	case 8u:
+		*reg_out = ADC_RESOLUTION_8B;
+		return true;
+	case 6u:
+		*reg_out = ADC_RESOLUTION_6B;
+		return true;
+	default:
+		return false;
+	}
+}
+
+/* Right-aligned code range for a resolution: (1<<bits)-1.  Used by
+ * both read paths to scale a code to millivolts.  Unknown widths fall
+ * back to the 12-bit range (they never reach here -- configure gates
+ * them -- but the mv math must not divide by a bogus value). */
+uint16_t adc_full_scale_for_bits(uint8_t bits)
+{
+	switch (bits) {
+	case 10u:
+		return 1023u;
+	case 8u:
+		return 255u;
+	case 6u:
+		return 63u;
+	default:
+		return ADC_FULL_SCALE; /* 12-bit */
+	}
+}
+
+/* Oversample ratio -> (OVSR register value, OVSS shift enum).  The
+ * wire contract (docs/gd32-bridge-protocol.md §3.9) rounds a caller's
+ * ratio DOWN to the nearest power of two in 1..256: 0 or 1 means "no
+ * oversampling", and any value >1 is floored to 2^n.  The GD32 OVSR
+ * field is the conversion count minus one, and a matching right-shift
+ * of log2(ratio) normalises the accumulator back to the selected
+ * resolution's full-scale (sum of `ratio` codes each <= full_scale,
+ * shifted right by log2(ratio), is again <= full_scale) -- so the mv
+ * math divides by the resolution's full-scale regardless of ratio.
+ * enable_out == false tells the caller to disable the mode rather than
+ * program a 1x accumulator. */
+static void
+adc_oversample_params(uint16_t ratio, bool *enable_out, uint16_t *ovsr_out, uint32_t *shift_out)
+{
+	if (ratio <= 1u) {
+		*enable_out = false;
+		return;
+	}
+	if (ratio > ADC_OVERSAMPLE_RATIO_MAX) ratio = ADC_OVERSAMPLE_RATIO_MAX;
+	/* Largest power of two <= ratio, with its exponent. */
+	uint32_t log2 = 0u;
+	uint16_t pow2 = 1u;
+	while ((uint16_t)(pow2 << 1) <= ratio) {
+		pow2 <<= 1;
+		++log2;
+	}
+	*enable_out = true;
+	*ovsr_out   = (uint16_t)(pow2 - 1u);
+	*shift_out  = OVSCR_OVSS(log2); /* ADC_OVERSAMPLING_SHIFT_<log2>B */
+}
+
+/* Program a channel's cached resolution + oversample into its ADC.
+ * The caller MUST have the converter disabled (DRES lives in CTL0 and
+ * OVSAMPCTL only latches with ADCON==0 -- the vendor's own
+ * ADC3_resolution_oversample example brackets every change with
+ * adc_disable/adc_enable).  Shared by the single-shot read (which
+ * wraps it in a disable/enable/tSTAB) and stream_begin (already inside
+ * its own disable..enable window). */
+void adc_apply_conv_format(uint32_t periph, uint8_t channel)
+{
+	uint32_t res_reg;
+	if (adc_resolution_reg(adc_resolution_bits_cache[channel], &res_reg)) {
+		adc_resolution_config(periph, res_reg);
+	}
+
+	bool     ovs_en;
+	uint16_t ovsr;
+	uint32_t shift;
+	adc_oversample_params(adc_oversample_ratio_cache[channel], &ovs_en, &ovsr, &shift);
+	if (ovs_en) {
+		/* ALL_CONVERT: one trigger runs all `ratio` conversions and
+		 * raises a single EOC with the shifted average -- the read
+		 * loop's per-sample software trigger is unchanged. */
+		adc_oversample_mode_config(periph, ADC_OVERSAMPLING_ALL_CONVERT, shift, ovsr);
+		adc_oversample_mode_enable(periph);
+	} else {
+		adc_oversample_mode_disable(periph);
+	}
+}
 
 /* Bounded reimplementation of the vendor's adc_calibration_enable().
  * The SPL body spins `while (RSTCLB)` then `while (CLB)` with NO
@@ -141,8 +246,23 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
      * prior bridge_hw_adc_read on a different bridge channel may have
      * pointed the routine slot elsewhere).  Sample-cycle count comes
      * from the per-channel cache so bridge_hw_adc_configure's choice
-     * survives across reads. */
+     * survives across reads.
+     *
+     * Resolution + oversample (also cached) must be programmed with
+     * the converter DISABLED -- DRES/OVSAMPCTL only latch while
+     * ADCON==0 -- so bracket the format apply in a disable/enable with
+     * the same tSTAB dwell adc_periph_init uses.  Two bridge channels
+     * share each converter and may hold different formats, so this
+     * re-applies every read; the sibling-stream case already returned
+     * BUSY above, so no live stream owns the converter here.  The
+     * ADCON toggle preserves the boot calibration. */
+	adc_disable(ch->periph);
+	adc_apply_conv_format(ch->periph, channel);
 	adc_routine_channel_config(ch->periph, 0u, ch->channel, adc_sample_cycles_cache[channel]);
+	adc_enable(ch->periph);
+	for (volatile uint32_t stab = 0u; stab < 4096u; ++stab) {
+		/* tSTAB dwell after ADCON */
+	}
 
 	/* A stale EOC (e.g. the in-flight conversion that completes after
      * a stream END drops continuous mode) would satisfy the first poll
@@ -157,14 +277,25 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
      * cycle the next read's EOC never came; the handler never returned,
      * the SPI RX DMA was never re-armed -- captured live with CH3
      * frozen disabled at CNT=66 -- and every subsequent command on
-     * every surface failed).  A healthy conversion is ~6.3 us; the
-     * ~100k-iteration bound is the abort latch, and on timeout the
-     * peripheral is re-initialised (deinit + reconfig + recalibrate)
-     * so the NEXT read starts from a clean converter -- same
-     * self-healing shape as the TRNG fault path. */
+     * every surface failed).  The ~100k-iteration bound is the abort
+     * latch; on timeout the peripheral is re-initialised (deinit +
+     * reconfig + recalibrate) so the NEXT read starts from a clean
+     * converter -- same self-healing shape as the TRNG fault path.
+     *
+     * SCALE the bound by the oversample ratio: with oversampling ON,
+     * ONE triggered "conversion" is `ratio` back-to-back samples (up to
+     * 256), so a healthy oversampled conversion legitimately takes up to
+     * ~ratio x longer than the ~6.3 us un-oversampled case.  A fixed
+     * 100k bound would false-timeout every legal high-ratio read and
+     * needlessly recalibrate.  The floored-to-pow2 ratio is what the
+     * hardware actually runs; clamp the raw cache to [1,256] to match. */
+	uint32_t ovs_ratio = adc_oversample_ratio_cache[channel];
+	if (ovs_ratio < 1u) ovs_ratio = 1u;
+	if (ovs_ratio > ADC_OVERSAMPLE_RATIO_MAX) ovs_ratio = ADC_OVERSAMPLE_RATIO_MAX;
+	const uint32_t eoc_bound = 100000u * ovs_ratio;
 	for (uint8_t i = 0; i < samples; ++i) {
 		adc_software_trigger_enable(ch->periph, ADC_ROUTINE_CHANNEL);
-		uint32_t to = 100000u;
+		uint32_t to = eoc_bound;
 		while (!adc_flag_get(ch->periph, ADC_FLAG_EOC) && --to) {
 			/* spin, bounded */
 		}
@@ -178,8 +309,12 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
 		}
 		adc_flag_clear(ch->periph, ADC_FLAG_EOC);
 		uint32_t code = adc_routine_data_read(ch->periph);
-		if (code > ADC_FULL_SCALE) code = ADC_FULL_SCALE;
-		mv[i] = (uint16_t)((code * ADC_VREF_MV) / ADC_FULL_SCALE);
+		/* Scale by the channel's cached resolution, not a fixed 4095:
+		 * a 10/8/6-bit conversion (or an oversampled result, which the
+		 * shift normalises back to the same range) tops out below 4095. */
+		const uint16_t fs = adc_full_scale_for_bits(adc_resolution_bits_cache[channel]);
+		if (code > fs) code = fs;
+		mv[i] = (uint16_t)((code * ADC_VREF_MV) / fs);
 	}
 	return BRIDGE_HW_OK;
 }
@@ -191,24 +326,49 @@ int bridge_hw_adc_configure(uint8_t  channel,
 {
 	if (channel >= ADC_CHANNEL_MAP_COUNT) return BRIDGE_HW_ERR_RANGE;
 
-	/* v0.3 partial: only sample_cycles is sticky.  The oversample +
-     * resolution paths are still gated to their defaults (1, 12).
-     * Non-default values return NOSUPPORT so the host gets a clear
-     * "this commit doesn't support that yet" rather than silently
-     * accepting and ignoring.  A follow-up commit will land the
-     * resolution + oversample apply path. */
-	if (oversample_ratio != 1u) return BRIDGE_HW_ERR_NOTIMPL;
-	if (resolution_bits != 12u) return BRIDGE_HW_ERR_NOTIMPL;
+	/* Validate resolution BEFORE mutating any cache so a rejected field
+	 * leaves the channel's format untouched.  All three fields are
+	 * pure-cache here (like sample_cycles): the read / stream_begin
+	 * paths program them into the converter inside their ADCON==0
+	 * windows.  Deferring the register write also keeps configure from
+	 * disturbing a converter that a sibling channel may be streaming
+	 * on -- the new format takes effect on this channel's next read or
+	 * stream_begin.
+	 *
+	 * Field semantics follow the wire contract (docs/gd32-bridge-
+	 * protocol.md §3.9):
+	 *   resolution_bits: 0 -> default (12).  6/8/10/12 map to the
+	 *     hardware DRES field.  14/16 are effective-resolution modes
+	 *     that the GD32 can only reach by under-shifting an oversampled
+	 *     accumulator (DRES tops out at 12 bit); that extension is not
+	 *     implemented yet -> NOSUPPORT.  Any other width is invalid ->
+	 *     INVAL.
+	 *   oversample_ratio: 0/1 -> off; anything larger is floored to the
+	 *     nearest power of two in 2..256 (adc_oversample_params, never
+	 *     rejects -- matches the doc's "rounds down" wording).
+	 * The stored resolution is normalised to 12 when 0 so the read
+	 * path's full-scale lookup and register apply see a concrete
+	 * width. */
+	uint8_t  res_bits = (resolution_bits == 0u) ? ADC_RES_BITS_DEFAULT : resolution_bits;
+	uint32_t res_reg;
+	if (!adc_resolution_reg(res_bits, &res_reg)) {
+		if (res_bits == 14u || res_bits == 16u) return BRIDGE_HW_ERR_NOTIMPL;
+		return BRIDGE_HW_ERR_INVAL;
+	}
 
-	/* Sample cycles: clamp to the vendor's accepted 2..638 cycle
-     * range (per `adc_routine_channel_config`'s sample_time
-     * parameter).  Round caller-supplied values into this range
-     * rather than rejecting -- matches the contract's "firmware
-     * rounds down" wording. */
-	uint16_t sc = sample_cycles;
+	/* Sample cycles: 0 means "firmware default" (per the wire contract),
+     * NOT the fastest window -- collapsing 240 -> 2 cycles on the
+     * high-impedance divider inputs the default exists to serve would
+     * leave the S/H cap unsettled and read systematically low (worse
+     * still under oversampling).  Any non-zero value is a direct cycle
+     * count clamped into the vendor's accepted 2..638 range (per
+     * `adc_routine_channel_config`'s sample_time parameter). */
+	uint16_t sc = (sample_cycles == 0u) ? ADC_DEFAULT_SAMPLE_CYCLES : sample_cycles;
 	if (sc < 2u) sc = 2u;
 	if (sc > 638u) sc = 638u;
 
-	adc_sample_cycles_cache[channel] = sc;
+	adc_sample_cycles_cache[channel]    = sc;
+	adc_resolution_bits_cache[channel]  = res_bits;         /* 0 normalised to 12 above */
+	adc_oversample_ratio_cache[channel] = oversample_ratio; /* apply-time floors to pow2 */
 	return BRIDGE_HW_OK;
 }
