@@ -36,7 +36,7 @@
  * firmware-version.txt, surfaced via GET_BUILD_ID ("<ver>+<sha>").  The
  * two axes move independently. */
 #define PROTOCOL_VERSION_MAJOR 0u
-#define PROTOCOL_VERSION_MINOR 8u
+#define PROTOCOL_VERSION_MINOR 9u
 #define PROTOCOL_VERSION_PATCH 0u
 
 /* v0.7: opt-in link features negotiated via CMD_LINK_FEATURES.
@@ -75,6 +75,11 @@
  * Bounded by the wire's MAX_PAYLOAD_BYTES; tuned to keep the SPI
  * read transaction under ~1 ms at 10 MHz. */
 #define GD32_BRIDGE_ADC_STREAM_READ_MAX 32u
+
+/* Max FFT magnitude/complex bins per CMD_ADC_SPECTRUM_READ chunk.  Bins
+ * are float32 (4 B); with the 7-byte reply header (seq+total+got) this
+ * keeps the reply (7 + 14*4 = 63 B) inside the STREAM_READ envelope. */
+#define GD32_BRIDGE_ADC_SPECTRUM_READ_MAX 14u
 
 /* Maximum wire payload either direction.  Driven by the larger of
  * CMD_ADC_READ (1 + N*2 bytes) and CMD_ADC_STREAM_READ (1 + N*2
@@ -190,6 +195,14 @@ typedef enum {
 	CMD_ADC_DSP_CHAIN_OPEN = 0x37,
 	CMD_ADC_DSP_STAGE_PUSH = 0x38,
 	CMD_ADC_DSP_CHAIN_BIND = 0x39,
+	/* Read one chunk of the latest FFT frame for an FFT-terminal
+	 * chain bound to a stream (#496).  Request: stream_id:u8
+	 * bin_offset:u16(LE) max_bins:u8.  Reply: seq:u32(LE)
+	 * total_bins:u16(LE) got:u8 bins[max_bins*4] (float32 LE,
+	 * zero-padded past `got`).  seq lets the host detect a frame
+	 * roll mid-fetch.  STREAM_READ on an FFT-bound stream answers
+	 * NOSUPPORT; a filter (FIR/IIR) chain uses STREAM_READ instead. */
+	CMD_ADC_SPECTRUM_READ = 0x3A,
 	/* v0.5 (§2B.2): advanced timer extras.  PWM_CAPTURE turns a
      * PWM channel's pin into an input-capture source for frequency
      * / pulse-width measurement; PWM_SINGLE_PULSE drives a one-shot
