@@ -163,7 +163,10 @@ class TestSimConsole(unittest.TestCase):
     auto-resolved console of a HEADLESS core (a SoM-topology
     `hw_console: false` core, e.g. the RZ/V2N M33 system-manager) to the
     Zephyr RAM console so the studio simulator's `uart_socket` isn't
-    silent.  A UART-consoled core and the flag-off path are untouched.
+    silent.  A UART-consoled core is untouched.  A headless core with the
+    flag off resolves to `none` (emit nothing) -- NOT the UART console:
+    that core's board has no serial driver, so `CONFIG_UART_CONSOLE=y`
+    would be a fatal Kconfig error (issue #717).
 
     Tests are named so `-k sim_console` selects the whole class.
     """
@@ -205,19 +208,25 @@ class TestSimConsole(unittest.TestCase):
         self.assertIn("diagnostics.sim_console: true", out)
         self.assertNotIn("read `ram_console_buf` over SWD", out)
 
-    def test_sim_console_absent_leaves_uart_console(self) -> None:
-        """Flag off (absent) -> current behaviour byte-for-byte: the
-        headless core still auto-resolves to the UART console block."""
+    def test_sim_console_absent_headless_core_emits_no_console(self) -> None:
+        """Flag off (absent) on a HEADLESS core -> console `none`: emit no
+        console Kconfig at all (issue #717).  The core's board has no serial
+        driver, so a `CONFIG_UART_CONSOLE=y` would be a fatal 'assigned y but
+        got n' Kconfig error; inherit the board default instead."""
         with tempfile.TemporaryDirectory() as td:
             out = self._v2n_m33(Path(td), sim_console=None)
-        self.assertIn("CONFIG_UART_CONSOLE=y", out)
+        self.assertNotIn("CONFIG_UART_CONSOLE=y", out)
         self.assertNotIn("CONFIG_RAM_CONSOLE=y", out)
+        self.assertNotIn("CONFIG_SERIAL=y", out)
 
-    def test_sim_console_false_is_a_noop(self) -> None:
+    def test_sim_console_false_headless_core_emits_no_console(self) -> None:
+        """`sim_console: false` is not an upgrade trigger, so a headless
+        core still resolves to `none` -- no UART, no RAM console (#717)."""
         with tempfile.TemporaryDirectory() as td:
             out = self._v2n_m33(Path(td), sim_console=False)
-        self.assertIn("CONFIG_UART_CONSOLE=y", out)
+        self.assertNotIn("CONFIG_UART_CONSOLE=y", out)
         self.assertNotIn("CONFIG_RAM_CONSOLE=y", out)
+        self.assertNotIn("CONFIG_SERIAL=y", out)
 
     def test_sim_console_ignores_uart_consoled_core(self) -> None:
         """An AEN M55 core has a HW console (`hw_console` defaults true);

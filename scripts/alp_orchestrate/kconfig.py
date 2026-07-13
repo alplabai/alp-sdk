@@ -189,17 +189,26 @@ _CONSOLE_ALIASES = {
 }
 
 
-def _resolve_console(value: Optional[str], os_: str) -> str:
+def _resolve_console(value: Optional[str], os_: str,
+                     hw_console: bool = True) -> str:
     """Resolve the effective console backend for a slice.
 
     ``value`` is the raw ``diagnostics.console:`` knob (or ``None`` /
     ``"auto"`` for the OS-derived default); ``os_`` is the slice OS.
-    Returns one of ``"uart"``, ``"ram"``, ``"linux"``, ``"none"``.
+    ``hw_console`` is the SoM-topology fact (``topology.<id>.hw_console``):
+    a headless core (``False``) has no hardware UART console, so the
+    AUTO-resolved Zephyr default must be ``"none"`` (inherit the board
+    default) instead of ``"uart"`` -- emitting ``CONFIG_UART_CONSOLE=y``
+    on a core whose board has no serial driver is an "assigned y but got n"
+    Kconfig error, fatal to the Zephyr build (issue #717).  An explicit
+    ``diagnostics.console:`` still wins for a headless core (the caller may
+    upgrade a headless AUTO to ``"ram"`` via ``diagnostics.sim_console``,
+    #686).  Returns one of ``"uart"``, ``"ram"``, ``"linux"``, ``"none"``.
     """
     v = (value or "auto").strip().lower()
     if v == "auto":
         if os_ == "zephyr":
-            return "uart"
+            return "uart" if hw_console else "none"
         if os_ in ("yocto", "ubuntu"):
             return "linux"
         return "none"
@@ -467,10 +476,14 @@ def _emit_console(diagnostics: dict[str, Any], slice_: Slice) -> list[str]:
     through its real UART node and needs no Kconfig change.
     """
     raw = diagnostics.get("console")
-    console = _resolve_console(raw, slice_.os)
+    console = _resolve_console(raw, slice_.os, slice_.hw_console)
     auto = (raw or "auto").strip().lower() == "auto"
+    # A headless AUTO core resolves to "none" (above); `sim_console: true`
+    # upgrades it to the RAM console so the studio simulator's uart_socket
+    # isn't silent (#686).  Precedence: an explicit `diagnostics.console:`
+    # (auto == False) always wins and is never upgraded.
     sim = bool(diagnostics.get("sim_console")) and auto \
-        and not slice_.hw_console and console == "uart"
+        and not slice_.hw_console and console == "none"
     if sim:
         console = "ram"
     return _emit_zephyr_console(console, sim_console=sim)

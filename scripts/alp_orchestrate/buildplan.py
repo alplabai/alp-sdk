@@ -186,7 +186,7 @@ def _slice_debug(
     debug probe, so `probe` stays null there.
     """
     console_sel = _resolve_console(
-        project.diagnostics.get("console"), slice_.os)
+        project.diagnostics.get("console"), slice_.os, slice_.hw_console)
     console = None if console_sel == "none" else console_sel
     probe: Optional[str] = None
     if flash_method == "zephyr_west_flash":
