@@ -12,6 +12,7 @@
 # control cascade, motor mixer, AND the failsafe at deterministic
 # kHz cadences -- all in portable C with no vendor symbols.
 
+schemaVersion: 1
 som:
   sku: E1M-AEN801           # E8's M55 HP core handles the 1 kHz
                              # rate loop comfortably; Helium MVE

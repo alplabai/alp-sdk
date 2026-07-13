@@ -9,6 +9,7 @@
 # libalp_chips.a) -- see README.md.  The INA236 monitors are an
 # EVK-only instrumentation feature, so this app targets the
 # e1m-x-evk board only.
+schemaVersion: 1
 som:
   sku: E1M-V2N101
 

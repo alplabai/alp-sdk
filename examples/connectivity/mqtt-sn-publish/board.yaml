@@ -9,6 +9,7 @@
 # is empty, so `src/main.c` does not `#include` any coreMQTT-SN
 # header.  It instead implements the identical OASIS MQTT-SN v1.2
 # PUBLISH wire format by hand so the round-trip still builds and runs.
+schemaVersion: 1
 som:
   sku: E1M-AEN801
 

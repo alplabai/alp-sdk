@@ -6,6 +6,7 @@
 # subsystem at subsys/net/lib/coap/ (west module `zephyr` itself carries it,
 # no separate west pin to fetch). prj.conf keeps only the app-specific stack
 # size. See README.md.
+schemaVersion: 1
 som:
   sku: E1M-AEN801
 

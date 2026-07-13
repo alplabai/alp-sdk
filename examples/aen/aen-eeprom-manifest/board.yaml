@@ -7,6 +7,7 @@
 # (boards/alp_e1m_aen801_m55_he.overlay) enables i2c2 + pinctrl + the alp-i2c0
 # alias.
 
+schemaVersion: 1
 som:
   sku: E1M-AEN801
 

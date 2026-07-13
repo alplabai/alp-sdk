@@ -65,7 +65,12 @@ def test_report_to_diagnostics_shape():
 
 def test_apply_text_adds_exactly_one_line_on_real_board():
     path = REPO / "examples/peripheral-io/uart-hello-world/board.yaml"
-    text = path.read_text(encoding="utf-8")
+    stamped = path.read_text(encoding="utf-8")
+    # The tracked file is itself canonical (schemaVersion: 1) post-migration
+    # (#610 WS6-b migration #001 applied repo-wide). Strip the stamp so this
+    # test still exercises apply_text against real comments/structure as if
+    # unmigrated, and assert it round-trips back to the canonical file.
+    text = stamped.replace("schemaVersion: 1\n", "", 1)
     new_text, report = alp_migrate.apply_text(text)
     old_lines = text.splitlines()
     new_lines = new_text.splitlines()
@@ -74,6 +79,7 @@ def test_apply_text_adds_exactly_one_line_on_real_board():
     assert added == ["schemaVersion: 1"]
     assert removed == []          # nothing reformatted
     assert "schemaVersion: 1" in report.steps[0]
+    assert new_text == stamped
 
 
 def test_apply_text_idempotent_real_board():

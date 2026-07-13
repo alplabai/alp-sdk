@@ -11,6 +11,7 @@
 # metadata/library-profiles/tinygsm/hw-backends.yaml (pure
 # synchronous-UART is the floor; UART-DMA selects automatically by
 # SoM capability).
+schemaVersion: 1
 som:
   sku: E1M-AEN801
 

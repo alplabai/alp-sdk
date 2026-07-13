@@ -12,6 +12,7 @@
 # CMake configure step -- out of scope for a small teaching example.
 # `src/main.c` therefore hand-rolls the RFC 6455 frame this example
 # demonstrates instead of calling into the library.
+schemaVersion: 1
 som:
   sku: E1M-AEN801
 

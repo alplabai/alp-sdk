@@ -6,6 +6,7 @@
 # anomalies.  Same source targets the V2N DEEPX path when som.sku is
 # flipped.
 
+schemaVersion: 1
 som:
   sku: E1M-AEN801
 

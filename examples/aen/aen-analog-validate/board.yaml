@@ -13,6 +13,7 @@
 # (boards/alp_e1m_aen801_m55_he.overlay) enables dac0 + adc12_0 and declares the
 # alp-dac0 / alp-adc0 aliases the portable backends resolve.
 
+schemaVersion: 1
 som:
   sku: E1M-AEN801
 

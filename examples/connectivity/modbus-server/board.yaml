@@ -4,6 +4,7 @@
 # metadata/libraries/modbus.yaml and emits CONFIG_MODBUS=y into the generated
 # alp.conf fragment.  prj.conf keeps only the app-specific backend choice
 # (RAW_ADU) so native_sim can build and run without a UART or RS-485 wiring.
+schemaVersion: 1
 som:
   sku: E1M-V2N101
 

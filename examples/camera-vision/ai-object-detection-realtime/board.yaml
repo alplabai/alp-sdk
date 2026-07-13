@@ -17,6 +17,7 @@
 # don't touch source to retarget AEN -> V2N -> V2N-M1 -- the
 # board.yaml picks the right NPU shim.
 
+schemaVersion: 1
 som:
   # E1M-V2M101 == V2N-M1 (Renesas RZ/V2N host + DEEPX DX-M1 NPU
   # on-module via PCIe).  V2M101's `capabilities:` block declares

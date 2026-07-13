@@ -10,6 +10,7 @@
 # metadata/library-profiles/libhelix/hw-backends.yaml (pure-C SW
 # fallback is the floor; FPU/I2S-DMA backends select automatically by
 # SoM capability).
+schemaVersion: 1
 som:
   sku: E1M-AEN801
 
