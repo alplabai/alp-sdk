@@ -49,6 +49,11 @@
     }
   ],
   "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "board.yaml schema version. Absent is read as 1 (back-compat for handwritten/external projects); the canonical, migrated form carries it explicitly. Bump only via a scripts/alp_migrate migration step."
+    },
     "name": {
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
