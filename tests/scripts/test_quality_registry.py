@@ -74,3 +74,23 @@ def test_scripts_for_profile_subset_of_check_scripts():
     pr = set(quality_tasks.scripts_for_profile("pr"))
     assert pr <= set(quality_tasks.check_scripts())
     assert "scripts/check_doc_drift.py" in pr
+
+
+import check_quality_registry as qgate  # noqa: E402
+
+
+def test_gate_passes_on_committed_tree():
+    assert qgate.find_problems(REPO) == []
+
+
+def test_gate_flags_orphan(tmp_path, monkeypatch):
+    # a check_*.py on disk missing from the registry -> problem
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "metadata" / "schemas").mkdir(parents=True)
+    (tmp_path / "scripts" / "check_foo.py").write_text("# x")
+    (tmp_path / "metadata" / "quality-tasks-v1.json").write_text(
+        '{"schemaVersion":1,"description":"x","tasks":[]}')
+    (tmp_path / "metadata" / "schemas" / "quality-tasks-v1.schema.json").write_text(
+        (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text())
+    probs = qgate.find_problems(tmp_path)
+    assert any("check_foo.py" in p for p in probs)
