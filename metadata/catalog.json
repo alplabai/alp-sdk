@@ -866,6 +866,10 @@
       "script": "scripts/check_build_plan.py"
     },
     {
+      "purpose": "Validate the build-receipt-v1 schema is well-formed (#610 §7).",
+      "script": "scripts/check_build_receipt.py"
+    },
+    {
       "purpose": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
       "script": "scripts/check_chip_header_status.py"
     },

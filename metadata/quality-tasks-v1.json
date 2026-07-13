@@ -8,7 +8,11 @@
       "runner": "check-script",
       "script": "scripts/check_board_schema_version.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": null
     },
@@ -18,9 +22,27 @@
       "runner": "check-script",
       "script": "scripts/check_build_plan.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": null
+    },
+    {
+      "id": "build-receipt-schema",
+      "description": "Validate the build-receipt-v1 schema is a well-formed closed Draft-2020-12 schema.",
+      "runner": "check-script",
+      "script": "scripts/check_build_receipt.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "chip-header-status",
@@ -28,7 +50,11 @@
       "runner": "check-script",
       "script": "scripts/check_chip_header_status.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -38,7 +64,11 @@
       "runner": "check-script",
       "script": "scripts/check_chip_manifest_parity.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -48,7 +78,11 @@
       "runner": "check-script",
       "script": "scripts/check_cmake_chip_list_parity.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": null
     },
@@ -58,7 +92,9 @@
       "runner": "check-script",
       "script": "scripts/check_cross_platform.py",
       "gate": false,
-      "profiles": ["full"],
+      "profiles": [
+        "full"
+      ],
       "output": "none",
       "ci": "cross-platform-zephyr.yml:python-smoke"
     },
@@ -68,7 +104,11 @@
       "runner": "check-script",
       "script": "scripts/check_diagnostic_schema.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": null
     },
@@ -78,7 +118,11 @@
       "runner": "check-script",
       "script": "scripts/check_doc_drift.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-doc-drift.yml:doc-drift"
     },
@@ -88,7 +132,11 @@
       "runner": "check-script",
       "script": "scripts/check_doxygen_coverage.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-doxygen.yml:doxygen"
     },
@@ -98,7 +146,11 @@
       "runner": "check-script",
       "script": "scripts/check_e1m_pinout.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -108,7 +160,11 @@
       "runner": "check-script",
       "script": "scripts/check_e1m_route_capability.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -118,7 +174,11 @@
       "runner": "check-script",
       "script": "scripts/check_emit_registry.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": null
     },
@@ -128,7 +188,11 @@
       "runner": "check-script",
       "script": "scripts/check_emit_snapshots.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -138,7 +202,11 @@
       "runner": "check-script",
       "script": "scripts/check_example_portability.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -148,7 +216,11 @@
       "runner": "check-script",
       "script": "scripts/check_example_storage_claims.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": null
     },
@@ -158,7 +230,11 @@
       "runner": "check-script",
       "script": "scripts/check_inference_backend_parity.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -168,7 +244,11 @@
       "runner": "check-script",
       "script": "scripts/check_local_paths.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -178,7 +258,11 @@
       "runner": "check-script",
       "script": "scripts/check_pin_conflicts.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -188,7 +272,11 @@
       "runner": "check-script",
       "script": "scripts/check_plain_cmake_link_complete.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-plain-cmake.yml:link-complete"
     },
@@ -198,7 +286,11 @@
       "runner": "check-script",
       "script": "scripts/check_public_header_purity.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -208,7 +300,11 @@
       "runner": "check-script",
       "script": "scripts/check_public_private.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "cross-platform-zephyr.yml:python-smoke"
     },
@@ -218,7 +314,11 @@
       "runner": "check-script",
       "script": "scripts/check_som_bundle.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -228,7 +328,11 @@
       "runner": "check-script",
       "script": "scripts/check_stub_issues.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -238,7 +342,11 @@
       "runner": "check-script",
       "script": "scripts/check_stub_symbol_matrix.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -248,7 +356,11 @@
       "runner": "check-script",
       "script": "scripts/check_sw_fallback_tags.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -258,7 +370,11 @@
       "runner": "check-script",
       "script": "scripts/check_system_manifest.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": null
     },
@@ -268,7 +384,11 @@
       "runner": "check-script",
       "script": "scripts/check_template_catalog.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": null
     },
@@ -278,7 +398,9 @@
       "runner": "check-script",
       "script": "scripts/check_test_coverage.py",
       "gate": false,
-      "profiles": ["full"],
+      "profiles": [
+        "full"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -288,7 +410,11 @@
       "runner": "check-script",
       "script": "scripts/check_vendor_ext_tags.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
     },
@@ -298,7 +424,11 @@
       "runner": "check-script",
       "script": "scripts/check_version_doc_sync.py",
       "gate": true,
-      "profiles": ["pr", "full", "release"],
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
       "output": "none",
       "ci": "pr-doc-drift.yml:doc-drift"
     }

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/build-receipt-v1.schema.json",
+  "title": "ALP Build Receipt v1",
+  "description": "A deterministic, machine-readable receipt for one release build: SDK source revision, board.yaml + lock + build-plan digests, toolchain identity, and per-image hashes -- so a consumer can verify a bundle corresponds to its source, config, and tools. Composed from existing SDK inputs (scripts/build_receipt.py); carries no wall-clock field so identical inputs yield an identical receipt. Additive within schemaVersion 1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "source", "config", "toolchain", "images", "provenance"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "description": { "type": "string" },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sdkRevision", "sdkDirty"],
+      "properties": {
+        "sdkRevision": { "type": ["string", "null"] },
+        "sdkDirty": { "type": "boolean" },
+        "appRevision": { "type": ["string", "null"] },
+        "appDirty": { "type": "boolean" }
+      }
+    },
+    "config": {
+      "type": "object", "additionalProperties": false,
+      "required": ["boardYaml", "boardYamlDigest", "sku", "buildPlanDigest"],
+      "properties": {
+        "boardYaml": { "type": "string" },
+        "boardYamlDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "sku": { "type": ["string", "null"] },
+        "lockDigest": { "type": ["string", "null"] },
+        "buildPlanDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "toolchain": {
+      "type": "object", "additionalProperties": false,
+      "required": ["identity"],
+      "properties": {
+        "identity": { "type": ["string", "null"] },
+        "compiler": { "type": ["string", "null"] },
+        "flags": { "type": ["string", "null"] }
+      }
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["core", "path", "sha256", "sizeBytes"],
+        "properties": {
+          "core": { "type": "string" },
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "sizeBytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sbomRef", "attestationRef"],
+      "properties": {
+        "sbomRef": { "type": ["string", "null"] },
+        "attestationRef": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

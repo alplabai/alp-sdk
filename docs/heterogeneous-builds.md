@@ -348,6 +348,32 @@ enforces for the manifest above.  Validate a real plan with:
 python3 scripts/check_build_plan.py --plan build-plan.json
 ```
 
+### Build receipts (`build-receipt-v1`)
+
+A **build receipt** is deterministic provenance for a release build: given
+the same board.yaml, build-plan, and produced images, `scripts/build_receipt.py`
+composes the same receipt byte-for-byte — no wall-clock timestamp, and every
+path is stored repo-relative so the receipt doesn't change just because it
+was built from a different checkout location. It's a pure composer over
+inputs that already exist (the build-plan, `board.yaml`, and each core's
+output image), not a new build step.
+
+The top-level fields:
+
+- `source` — the SDK's git revision and whether the tree was dirty.
+- `config` — the resolved `boardYaml` path + its digest, the `sku`, and the
+  build-plan's digest (plus the lockfile digest, if supplied).
+- `toolchain` — the toolchain identity recorded by the build-plan.
+- `images` — one entry per core: its build path, sha256, and size in bytes.
+- `provenance` — placeholders (`sbomRef`, `attestationRef`) for later slices.
+
+Its shape is pinned by
+[`metadata/schemas/build-receipt-v1.schema.json`](../metadata/schemas/build-receipt-v1.schema.json);
+`scripts/check_build_receipt.py` validates that schema stays closed and
+well-formed. Wiring a receipt into `release.yml` and populating the SBOM /
+attestation refs are later #610 §7 slices — this slice only pins the shape
+and the composer.
+
 ### Iterating on one slice
 
 The Yocto cold build takes hours; the Zephyr build takes seconds.
