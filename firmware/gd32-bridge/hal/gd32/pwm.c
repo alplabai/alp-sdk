@@ -107,6 +107,24 @@ void pwm_channel_init(const gd32_pwm_ch_t *ch)
 	timer_channel_output_shadow_config(ch->periph, ch->channel, TIMER_OC_SHADOW_DISABLE);
 }
 
+/* Sticky per-TIMER counter-alignment mode set by bridge_hw_pwm_configure.
+ * Index 0 = TIMER0 (PWM0..3), index 1 = TIMER7 (PWM4..7); value is the
+ * wire align_mode (0 edge / 1 center-up / 2 center-down / 3 center-both,
+ * matching alp_pwm_align_t).  CAM is a timer-wide field shared by every
+ * channel on the timer, so this is per-timer, not per-channel:
+ * last-write-wins across sibling channels (documented in the protocol
+ * spec).  bridge_hw_pwm_set / _get read it to convert between commanded
+ * period/duty and the ARR/compare ticks, because a center-aligned
+ * counter runs 0->ARR->0 (period == 2*ARR ticks) where an edge-aligned
+ * counter runs 0->ARR (period == ARR+1 ticks). */
+static uint8_t pwm_align_mode[2];
+
+/* TIMER base -> pwm_align_mode index. */
+static uint8_t pwm_timer_index(uint32_t periph)
+{
+	return (periph == TIMER0) ? 0u : 1u;
+}
+
 int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns)
 {
 	if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
@@ -118,23 +136,42 @@ int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns)
      * to continuous output. */
 	timer_single_pulse_mode_config(pwm_channels[channel].periph, TIMER_SP_MODE_REPETITIVE);
 
-	/* Round period + duty to whole microseconds (the timer tick).
-     * `period_us` must fit in 16 bits (ARR) -- caller is responsible
-     * for staying under ~65 ms; we clamp on over-range so the timer
-     * doesn't get an invalid value. */
+	/* Round period + duty to whole microseconds (the timer tick). */
 	uint32_t period_us = period_ns / PWM_TIMER_TICK_NS;
 	uint32_t duty_us   = duty_ns / PWM_TIMER_TICK_NS;
 	if (period_us == 0u) return BRIDGE_HW_ERR_RANGE;
-	if (period_us > PWM_TIMER_ARR_MAX + 1u) period_us = PWM_TIMER_ARR_MAX + 1u;
-	if (duty_us > period_us) duty_us = period_us;
 
 	const gd32_pwm_ch_t *ch = &pwm_channels[channel];
 
-	/* ARR is "period_us - 1" because the up-counter counts 0..ARR
-     * inclusive (period_us ticks total).  Updates ALL channels of
-     * the same timer -- the contract documents this constraint. */
-	timer_autoreload_value_config(ch->periph, (uint32_t)(period_us - 1u));
-	timer_channel_output_pulse_value_config(ch->periph, ch->channel, duty_us);
+	/* Convert commanded period/duty to ARR + compare, honouring the
+	 * timer's configured alignment (bridge_hw_pwm_configure).  The
+	 * up-counter (edge) counts 0..ARR inclusive -> period == ARR+1
+	 * ticks and high-time == compare ticks.  A center-aligned counter
+	 * runs 0->ARR->0 -> period == 2*ARR ticks and high-time ==
+	 * 2*compare ticks (compare on the up-ramp + compare on the
+	 * down-ramp), so both ARR and compare are the commanded value
+	 * halved.  ARR must fit in 16 bits either way; clamp on over-range
+	 * so the timer never gets an invalid reload. */
+	uint32_t arr, cmp;
+	if (pwm_align_mode[pwm_timer_index(ch->periph)] == 0u) {
+		if (period_us > PWM_TIMER_ARR_MAX + 1u) period_us = PWM_TIMER_ARR_MAX + 1u;
+		if (duty_us > period_us) duty_us = period_us;
+		arr = period_us - 1u;
+		cmp = duty_us;
+	} else {
+		uint32_t half_period = period_us / 2u;
+		uint32_t half_duty   = duty_us / 2u;
+		if (half_period == 0u) return BRIDGE_HW_ERR_RANGE; /* period < 2 us */
+		if (half_period > PWM_TIMER_ARR_MAX) half_period = PWM_TIMER_ARR_MAX;
+		if (half_duty > half_period) half_duty = half_period;
+		arr = half_period;
+		cmp = half_duty;
+	}
+
+	/* Updates ALL channels of the same timer -- the contract documents
+	 * this shared-ARR constraint. */
+	timer_autoreload_value_config(ch->periph, arr);
+	timer_channel_output_pulse_value_config(ch->periph, ch->channel, cmp);
 	return BRIDGE_HW_OK;
 }
 
@@ -154,12 +191,24 @@ int bridge_hw_pwm_get(uint8_t channel, uint32_t *period_ns, uint32_t *duty_ns)
      * reported period too) and the boot default (65.536 ms period,
      * 0 duty) before the first PWM_SET.  CHxCV can legitimately read
      * ARR + 1 (single-pulse programs compare past the period for a
-     * full-width pulse); clamp so duty never reports > period. */
+     * full-width pulse); clamp so duty never reports > period.
+     *
+     * The tick->ns conversion mirrors bridge_hw_pwm_set's alignment
+     * math: edge-aligned period is CAR+1 ticks, center-aligned is
+     * 2*CAR ticks (and duty 2*CV), so a channel configured
+     * center-aligned reads back the same period/duty it was
+     * commanded. */
 	const uint32_t car = TIMER_CAR(ch->periph) & PWM_TIMER_ARR_MAX;
 	uint32_t       cv  = timer_channel_capture_value_register_read(ch->periph, ch->channel);
 	if (cv > car + 1u) cv = car + 1u;
-	*period_ns = (car + 1u) * PWM_TIMER_TICK_NS;
-	*duty_ns   = cv * PWM_TIMER_TICK_NS;
+	if (pwm_align_mode[pwm_timer_index(ch->periph)] == 0u) {
+		*period_ns = (car + 1u) * PWM_TIMER_TICK_NS;
+		*duty_ns   = cv * PWM_TIMER_TICK_NS;
+	} else {
+		*period_ns = 2u * car * PWM_TIMER_TICK_NS;
+		*duty_ns   = 2u * cv * PWM_TIMER_TICK_NS;
+		if (*duty_ns > *period_ns) *duty_ns = *period_ns;
+	}
 	return BRIDGE_HW_OK;
 }
 
@@ -170,16 +219,59 @@ int bridge_hw_pwm_configure(uint8_t  channel,
 {
 	if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
 
-	/* v0.3 partial: accept the default settings that bridge_hw_init's
-     * pwm_timer_init() programs (edge-aligned counter, no dead-time,
-     * no break input) so the host's idempotent "set to defaults"
-     * config calls succeed.  Non-defaults need timer-wide reconfigs
-     * (CAM field via re-init, timer_break_config struct) that share
-     * across all channels on the same timer; defer to a follow-up
-     * with a per-timer apply path + last-write-wins semantics. */
-	if (align_mode != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+	/* align_mode 0..3 map to CTL0.CAM (0 edge, 1 center-up, 2
+	 * center-down, 3 center-both -- alp_pwm_align_t).  Reject out of
+	 * range before touching hardware so a bad value leaves the timer
+	 * untouched. */
+	if (align_mode > 3u) return BRIDGE_HW_ERR_INVAL;
+
+	/* dead_time_ns and break_cfg are advanced-timer features the GD32
+	 * TIMER0/7 silicon HAS, but that the V2N E1M routing does not
+	 * physically expose, so honouring them would be an unverifiable
+	 * register write (exactly the "cache echo verified PWM while the
+	 * pads were idle" trap this file warns about above):
+	 *   - Dead-time is the guard gap between a channel's main (CHx) and
+	 *     complementary (CHxN) outputs, but only the CHxN pad sits on
+	 *     the E1M PWM connector (see the channel-map comment) -- there
+	 *     is no complementary PAIR on the wire for a dead-time to act
+	 *     on, so any DTCFG value is physically inert.
+	 *   - The break input needs a BRK pad, and the V2N gd32-io-mcu-map
+	 *     routes none -- the break logic could be armed but nothing
+	 *     could ever trigger it.
+	 * Both therefore return NOSUPPORT on this board (a hardware-routing
+	 * limit, not an unimplemented feature); a future carrier that
+	 * routes the complementary pair / a BRK pad would lift this.
+	 * align_mode == 0 with both zero is still the idempotent
+	 * "set-to-defaults" call and succeeds. */
 	if (dead_time_ns != 0u) return BRIDGE_HW_ERR_NOTIMPL;
 	if (break_cfg != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+
+	const gd32_pwm_ch_t *ch  = &pwm_channels[channel];
+	const uint8_t        idx = pwm_timer_index(ch->periph);
+	if (pwm_align_mode[idx] == align_mode) return BRIDGE_HW_OK; /* no change */
+
+	/* CAM is a shared timer-wide field and the GD32 (like most STM32-
+	 * lineage advanced timers) latches it only while the counter is
+	 * stopped, so bracket the change in disable/enable.  This briefly
+	 * halts every channel on the timer -- acceptable at config time,
+	 * and last-write-wins across the sibling channels is the documented
+	 * contract.  The counter value + ARR/compare survive the toggle, so
+	 * a running duty resumes with the new alignment on the next
+	 * update. */
+	static const uint32_t cam_map[4] = {
+		TIMER_COUNTER_EDGE,        /* 0: edge          */
+		TIMER_COUNTER_CENTER_UP,   /* 1: center-up     */
+		TIMER_COUNTER_CENTER_DOWN, /* 2: center-down   */
+		TIMER_COUNTER_CENTER_BOTH, /* 3: center-both   */
+	};
+	timer_disable(ch->periph);
+	uint32_t ctl0 = TIMER_CTL0(ch->periph);
+	ctl0 &= ~(uint32_t)TIMER_CTL0_CAM;
+	ctl0 |= cam_map[align_mode];
+	TIMER_CTL0(ch->periph) = ctl0;
+	timer_enable(ch->periph);
+
+	pwm_align_mode[idx] = align_mode;
 	return BRIDGE_HW_OK;
 }
 

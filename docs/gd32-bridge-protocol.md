@@ -62,8 +62,8 @@ byte; their numeric encoding is:
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
 | `0x61` | `QENC_RESET`          | `encoder:u8`                                       | _empty_                                            |
 | `0x70` | `COUNTER_READ`        | `counter:u8`                                       | `ticks:u32`                                        |
-| `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_ (defaults only -- see §3.8; non-default `align`/`dead_time_ns`/`break_cfg` return `STATUS_NOSUPPORT`, tracked #495) |
-| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (`sample_cycles` sticky -- see §3.9; non-default `oversample`/`resolution` return `STATUS_NOSUPPORT`, tracked #494) |
+| `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_ (see §3.8; `align` applied, `dead_time_ns`/`break_cfg` return `STATUS_NOSUPPORT` -- V2N routes only single-ended outputs / no BRK pad) |
+| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (see §3.9; `sample_cycles`/`oversample`/6-12b `resolution` sticky; 14/16b return `STATUS_NOSUPPORT`) |
 | `0x33` | `ADC_STREAM_BEGIN`    | `stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32` | _empty_                                      |
 | `0x34` | `ADC_STREAM_READ`     | `stream_id:u8 max_samples:u8`                      | `got:u8 mv[max_samples]:u16` (zero-padded)         |
 | `0x35` | `ADC_STREAM_END`      | `stream_id:u8`                                     | _empty_                                            |
@@ -432,14 +432,24 @@ the first `PWM_SET` a channel reports the boot default (65.536 ms
 period, 0 duty).  Callers that need exact frequency confirmation
 should read back rather than recompute.
 
-**Current GD32 HAL status:** only the default configuration is
-applied.  `bridge_hw_pwm_configure()` accepts `align_mode == 0`,
-`dead_time_ns == 0`, and `break_cfg == 0` (the reset defaults
-`pwm_timer_init()` already programs); any non-default value
-returns `STATUS_NOSUPPORT`.  Center-aligned modes, dead-time, and
-break-input configuration need a per-timer apply path (these
-fields are shared across the sibling channels of a `TIMER0`/
-`TIMER7` timer) that has not landed yet (tracked #495).
+**Current GD32 HAL status (#495: alignment landed):**
+`bridge_hw_pwm_configure()` applies `align_mode` (`0` edge, `1`
+center-up, `2` center-down, `3` center-both) to the channel's timer.
+`CAM` is timer-wide, so the mode is shared by the four sibling channels
+of a `TIMER0`/`TIMER7` (last write wins) and `PWM_SET`/`PWM_GET` convert
+period/duty accordingly (a center-aligned counter runs `0->ARR->0`, so
+period is `2*ARR` ticks).  An out-of-range `align_mode` returns
+`STATUS_INVAL`.
+
+`dead_time_ns` and `break_cfg` still return `STATUS_NOSUPPORT` -- but on
+V2N this is a **hardware-routing** limit, not an unimplemented feature.
+The E1M PWM connector exposes only each channel's *complementary* output
+(`CHxN`); the main `CHx` is not routed, so there is no complementary
+pair for a dead-time gap to act on.  Likewise the V2N
+`gd32-io-mcu-map.tsv` routes no `BRK` pad, so break-input logic could be
+armed but never triggered.  Both knobs are therefore physically inert on
+this board; a future carrier that routes the complementary pair / a
+`BRK` pad would lift the restriction.
 
 ### 3.9 ADC configure (`v0.3+`)
 
@@ -466,11 +476,24 @@ The GD32 returns ADC readings as 16-bit millivolts (`ADC_READ` /
 oversampling improves the effective-resolution / SNR of the
 returned values but doesn't widen the on-wire word.
 
-**Current GD32 HAL status:** only `sample_cycles` is sticky.
-`bridge_hw_adc_configure()` accepts `oversample_ratio == 1` and
-`resolution_bits == 12` (the defaults); any other value returns
-`STATUS_NOSUPPORT`.  The oversampling-apply and alternate-
-resolution paths have not landed yet (tracked #494).
+**Current GD32 HAL status (#494 landed):** `sample_cycles`,
+`oversample_ratio`, and `resolution_bits` are all sticky.
+`bridge_hw_adc_configure()` programs the channel's cached format into
+the converter on the next `ADC_READ` / `ADC_STREAM_BEGIN` (inside the
+`ADCON == 0` window `DRES`/`OVSAMPCTL` require):
+
+* `oversample_ratio` `0`/`1` disables oversampling; any larger value is
+  floored to the nearest power of two in `2..256` and applied with a
+  matching `OVSS` right-shift so the result stays at the resolution's
+  full-scale (the on-wire mV word is unchanged; oversampling improves
+  SNR).
+* `resolution_bits` `0` means default (12); `6`/`8`/`10`/`12` map to the
+  hardware `DRES` field and the mV conversion divides by that width's
+  full-scale (`4095`/`1023`/`255`/`63`).  `14`/`16` are
+  effective-resolution modes reachable only by under-shifting an
+  oversampled accumulator (the `DRES` field tops out at 12-bit); that
+  extension has not landed, so they still return `STATUS_NOSUPPORT`.
+  Any other width returns `STATUS_INVAL`.
 
 ### 3.10 ADC streaming (`v0.3+`)
 

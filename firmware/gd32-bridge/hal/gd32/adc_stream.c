@@ -148,6 +148,12 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
      * boot calibration from adc_periph_init, and recalibrating would
      * be an unbounded vendor spin inside the CS-EXTI handler. */
 	adc_disable(ch->periph);
+	/* Apply the channel's cached resolution + oversample while the
+	 * converter is disabled (DRES/OVSAMPCTL only latch with ADCON==0).
+	 * In oversampling mode each pacing-timer trigger runs all `ratio`
+	 * conversions before one DMA beat lands, so an over-asked rate
+	 * degrades exactly as the un-oversampled path documents. */
+	adc_apply_conv_format(ch->periph, channel);
 	adc_routine_channel_config(ch->periph, 0u, ch->channel, adc_sample_cycles_cache[channel]);
 
 	/* Each pacing-timer TRGO edge starts exactly ONE routine
@@ -217,8 +223,13 @@ int bridge_hw_adc_stream_begin(uint8_t stream_id, uint8_t channel, uint32_t samp
 	timer_master_output0_trigger_source_select(s->pace_timer, TIMER_TRI_OUT0_SRC_UPDATE);
 	timer_enable(s->pace_timer);
 
-	s->in_use       = true;
-	s->channel      = channel;
+	s->in_use  = true;
+	s->channel = channel;
+	/* Snapshot the full-scale for the mv math so a mid-stream
+	 * bridge_hw_adc_configure (which only rewrites the cache) can't
+	 * change the divisor under a running stream -- the converter keeps
+	 * the format this begin applied until stream_end. */
+	s->full_scale   = adc_full_scale_for_bits(adc_resolution_bits_cache[channel]);
 	s->read_idx     = 0u;
 	s->total_read   = 0u; /* lap_count zeroed above, pre-arm */
 	s->dsp_chain_id = 0u;
@@ -280,8 +291,8 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
 	uint16_t to_emit = (avail < max_samples) ? avail : max_samples;
 	for (uint16_t i = 0u; i < to_emit; ++i) {
 		uint32_t code = s->ring[s->read_idx];
-		if (code > ADC_FULL_SCALE) code = ADC_FULL_SCALE;
-		mv[i]       = (uint16_t)((code * ADC_VREF_MV) / ADC_FULL_SCALE);
+		if (code > s->full_scale) code = s->full_scale;
+		mv[i]       = (uint16_t)((code * ADC_VREF_MV) / s->full_scale);
 		s->read_idx = (uint16_t)((s->read_idx + 1u) % BRIDGE_ADC_STREAM_RING_SAMPLES);
 	}
 	s->total_read += to_emit;
