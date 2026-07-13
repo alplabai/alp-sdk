@@ -1,0 +1,58 @@
+# pid -- Alp SDK portable PID controller (WS6-c Phase-1 canonical
+# manifest for the legacy per-core token `pid`).
+#
+# Grounding (this checkout):
+#   * scripts/alp_project_emit/__init__.py:248 (_LIBRARY_KCONFIG) --
+#     verbatim: `CONFIG_ALP_SDK_PID=y`, `CONFIG_ALP_PID_INT_MATH=y`.
+#   * include/alp/pid.h, src/pid.c -- "Copyright 2026 Alp Lab AB,
+#     SPDX-License-Identifier: Apache-2.0"; header docs it as "pure C
+#     (no vendor dependency)", gated by CONFIG_ALP_SDK_PID.
+#   * metadata/library-profiles/pid/hw-backends.yaml -- `upstream_source:
+#     "maintainer-written thin C library"`; accelerators: fpu
+#     (CONFIG_ALP_PID_FPU=y, class simd) and timer_tick
+#     (CONFIG_ALP_PID_TIMER=y, class timing), sw_fallback
+#     CONFIG_ALP_PID_INT_MATH=y.
+#   * tests/zephyr/pid/testcase.yaml -- built on native_sim.
+#
+# CONCERN (see ws6c-batchA-report.md): unlike the other 6 tokens in this
+# batch, `pid` is Alp Lab's own maintainer-authored in-tree code (`src/
+# pid.c` / `include/alp/pid.h`), not a pinned third-party upstream --
+# there is no external release to version-pin per ADR 0017. `version`
+# below tracks the alp-sdk release this manifest was authored against
+# (scripts/alp_cli/__init__.py `__version__ = "0.9.0"` at authoring
+# time) as the least-dishonest choice the schema's required `version`
+# string admits; it will drift out of sync with alp-sdk releases unless
+# a maintainer process bumps it alongside scripts/bump_version.py, which
+# does not currently touch this file. A real per-file "in-tree, no
+# separate version" convention for maintainer-authored (as opposed to
+# third-party-pinned) manifests is a naming question for a human to
+# settle, not invented here.
+#
+# HW-backends: see metadata/library-profiles/pid/ (folded in WS6-c Phase 3,
+# including the fpu/timer_tick accelerator bindings above)
+#
+# `module: null` -- in-tree alp-sdk source, no separate west module
+# (the SDK's own src/pid.c + include/alp/pid.h, not a fetched project).
+# `kconfig:` is transcribed verbatim from _LIBRARY_KCONFIG.
+#
+# No `requires:` -- pure C, portable across every core class; the
+# fpu/timer_tick HW bindings above are opportunistic fast paths behind
+# an always-available pure-integer sw_fallback, not hard requirements.
+#
+# `tier: B` for this Phase-1 pass: pid has Zephyr test coverage
+# (tests/zephyr/pid) but no teaching example under examples/, and Tier A
+# would additionally require an entry in
+# metadata/registries/tier-a-library-ci.json -- out of scope here.
+schema_version: 1
+name: pid
+description: "Alp SDK portable PID controller -- caller-owned proportional-integral-derivative control loop with anti-windup and derivative-on-measurement."
+tier: B
+version: "0.9.0"
+license: Apache-2.0
+
+integration:
+  zephyr:
+    module: null
+    kconfig:
+      - CONFIG_ALP_SDK_PID=y
+      - CONFIG_ALP_PID_INT_MATH=y

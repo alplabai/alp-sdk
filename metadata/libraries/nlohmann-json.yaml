@@ -1,0 +1,54 @@
+# nlohmann-json -- JSON for Modern C++ (WS6-c Phase-1 canonical manifest
+# for the legacy per-core token `nlohmann_json`; canonical name is the
+# token with its one underscore turned into a hyphen).
+#
+# Grounding (this checkout):
+#   * scripts/alp_project_emit/__init__.py:188 (_LIBRARY_KCONFIG) --
+#     "nlohmann_json: include path + json_config.h via the v0.4 loader
+#     hook" -- header-only, no real Zephyr Kconfig symbol.
+#   * metadata/library-profiles/nlohmann_json/json_config.h -- the
+#     SDK's config header (JSON_NOEXCEPTION=1, JSON_USE_IMPLICIT_
+#     CONVERSIONS=0); confirms upstream is nlohmann/json
+#     (https://github.com/nlohmann/json), MIT licensed (well-known,
+#     unchanged across releases).
+#   * docs/recommended-libraries.md:90-116 documents the enable path
+#     (`libraries: [nlohmann_json]`) and usage.
+#
+# CONCERN (see ws6c-batchA-report.md): unlike its four C++ header-only
+# siblings (etl/fmt/doctest/catch2 -- each has a west.yml pin + a
+# vendors/<lib>/ checked-in copy), this checkout has **no** west.yml
+# entry and **no** vendors/nlohmann_json/ directory for the Zephyr side,
+# and the only real usages in-tree (examples/multicore/{rpmsg-aen,
+# rpmsg-v2n,rpmsg-imx93,heterogeneous-offload}/board.yaml) select it on
+# the `a32_cluster` (Yocto) core, not a Zephyr core -- and no meta-alp-sdk
+# OE recipe exists either.  `version: "3.11.3"` below is the latest
+# upstream release as a documented best-effort placeholder (matches the
+# JSON_NOEXCEPTION/JSON_USE_IMPLICIT_CONVERSIONS macros the SDK's config
+# header sets) -- it is NOT grounded in a west.yml/vendors pin the way
+# ADR 0017 expects, and should be replaced with a real pin (Zephyr
+# west-module or Yocto recipe) in a follow-up before this manifest is
+# relied on for a reproducible build.
+#
+# HW-backends: see metadata/library-profiles/nlohmann_json/ (folded in WS6-c Phase 3)
+#
+# No `kconfig:` -- header-only, wired via the v0.4 CMake include-path
+# loader hook (json_config.h), not a CONFIG_ symbol.  `module: null` --
+# no west module exists for this library in this checkout (see CONCERN
+# above), unlike etl/fmt/doctest which each have one.
+#
+# No `requires:` -- pure portable C++11, no capability/core-class/RAM
+# floor of note.
+#
+# `tier: B` -- no teaching example and no CI build lane exist for this
+# library in this checkout; Tier A would additionally require an entry
+# in metadata/registries/tier-a-library-ci.json, out of scope here.
+schema_version: 1
+name: nlohmann-json
+description: "JSON for Modern C++ -- header-only JSON parse/serialise for <alp/iot.h> MQTT payloads and studio codegen output."
+tier: B
+version: "3.11.3"
+license: MIT
+
+integration:
+  zephyr:
+    module: null

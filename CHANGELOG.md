@@ -25,6 +25,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   no wall-clock field so identical inputs yield an identical receipt.
   `check_build_receipt.py` guards the schema. Wiring into `release.yml`,
   deterministic packaging, and SBOM generation land in later §7 slices.
+### Removed — `tinygsm` + `libhelix` dropped from the curated library set (#610 WS6-c)
+
+- Maintainer legal-review decision: `tinygsm` (LGPL-3.0) and `libhelix`
+  (RPSL-1.0) are copyleft/source-available licences unwanted in a SoM
+  manufacturer's firmware distribution, and are removed entirely — the
+  `west.yml` pins + remotes, the `cores.<id>.libraries` schema enum tokens,
+  the `metadata/libraries/{tinygsm,libhelix}.yaml` manifests +
+  `metadata/library-profiles/{tinygsm,libhelix}/` HW-backend profiles, the
+  `examples/connectivity/tinygsm-modem-at` and `examples/audio/libhelix-decode`
+  teaching examples, and every Kconfig / loader / test reference. No ABI
+  shim or compat alias survives (per #610 §6, curated tokens carry no
+  back-compat once retired).
+- `catch2` (BSL-1.0, Boost) and `minimp3` (CC0-1.0, public-domain-equivalent)
+  are permissive and stay; `metadata/schemas/library-v1.schema.json`'s
+  `license` enum grows `BSL-1.0` + `CC0-1.0` to accommodate them. LGPL-3.0
+  and RPSL-1.0 are deliberately NOT added to the allowlist.
 
 ### Added — `west alp-migrate` board.yaml migration engine (#610 WS6-b)
 

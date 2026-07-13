@@ -1,0 +1,45 @@
+# Opus -- general-purpose speech/audio codec (ADR 0018 library manifest).
+#
+# WS6-c Phase-1 canonical manifest for legacy per-core token `opus`
+# (docs/superpowers/specs/2026-07-13-610-ws6c-library-consolidation-design.md
+# Phase 1 item 1). Token has no underscores, so the canonical name is
+# unchanged: `opus`.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * west module `opus` (west.yml `extras-tier1` group, remote xiph,
+#     repo-path opus), path modules/lib/opus -- NOT in Zephyr's own west
+#     manifest; disabled by default, consumers flip via
+#     `west update --group-filter +extras-tier1`.
+#   * upstream version v1.5.2 (west.yml pin, "Apr 2024 stable").
+#   * licence BSD-3-Clause -- Xiph.Org's libopus is released under the
+#     3-clause BSD licence (COPYING in the upstream tree).
+#   * enable symbol CONFIG_ALP_OPUS_PURE_C -- the SW-fallback (pure-C, no
+#     SIMD/DMA) wiring transcribed verbatim from
+#     `_LIBRARY_KCONFIG["opus"]`
+#     (scripts/alp_project_emit/__init__.py:262).
+#
+# HW-backends: see metadata/library-profiles/opus/ (folded WS6-c Phase 3).
+# Declares capability-keyed SIMD (helium_mve/neon/fpu) and an always-on
+# I2S-DMA accelerator class on top of this pure-C floor; `verification:`
+# there is `hil_silicon: untested`, `smoke_tests: build_only`.
+#
+# Tier B (recipe-only): behind the disabled-by-default `extras-tier1` west
+# group, exercised only by the nightly `nightly-extras-tier1-pins.yml`
+# workflow -- matches the §D.lib.audio grouping; no dedicated opus
+# teaching example exists yet (see `examples/audio/minimp3-decode` for
+# a sibling that does).
+#
+# No `requires:` -- plain west module, no `depends on CPU_CORTEX_M`-style
+# Kconfig constraint and no yocto integration exists yet.
+schema_version: 1
+name: opus
+description: "Opus -- general-purpose, low-latency speech/audio codec."
+tier: B
+version: "v1.5.2"
+license: BSD-3-Clause
+
+integration:
+  zephyr:
+    module: opus
+    kconfig:
+      - CONFIG_ALP_OPUS_PURE_C=y

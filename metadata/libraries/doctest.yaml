@@ -1,0 +1,42 @@
+# doctest -- single-header C++ test framework (WS6-c Phase-1 canonical
+# manifest for the legacy per-core token `doctest`).
+#
+# Grounding (this checkout):
+#   * scripts/alp_project_emit/__init__.py:189 (_LIBRARY_KCONFIG) --
+#     "doctest: include path + doctest_config.h via the v0.4 loader
+#     hook" -- header-only, no real Zephyr Kconfig symbol.
+#   * west.yml:443-448 -- `name: doctest`, remote doctest-org, revision
+#     `v2.4.11`, path modules/lib/doctest, group `extras-cpp` (disabled
+#     by default; the build resolves against the vendored copy -- see
+#     vendors/doctest/README.md).
+#   * vendors/doctest/README.md -- MIT licence (LICENSE.txt upstream
+#     text unmodified); upstream https://github.com/doctest/doctest.
+#   * metadata/library-profiles/doctest/hw-backends.yaml -- pure-SW,
+#     no accelerator binding.
+#   * examples/testing/doctest-selftest/testcase.yaml -- built + run
+#     green on native_sim/native_sim/native/64.
+#
+# HW-backends: see metadata/library-profiles/doctest/ (folded in WS6-c Phase 3)
+#
+# No `kconfig:` -- header-only, wired via the v0.4 CMake include-path
+# loader hook (doctest_config.h), not a CONFIG_ symbol; `module: doctest`
+# documents the real (disabled-by-default) west pin above.
+#
+# No `requires:` -- pure portable C++11, no capability/core-class/RAM
+# floor of note (doctest_config.h disables POSIX signals/multithreading
+# so it builds clean on Cortex-M too).
+#
+# `tier: B` for this Phase-1 pass: doctest has a real teaching example
+# built green on native_sim, but Tier A additionally requires an entry
+# in metadata/registries/tier-a-library-ci.json -- out of scope here;
+# promotion is a named follow-up.
+schema_version: 1
+name: doctest
+description: "doctest -- lightweight single-header C++ unit-test framework."
+tier: B
+version: "2.4.11"
+license: MIT
+
+integration:
+  zephyr:
+    module: doctest

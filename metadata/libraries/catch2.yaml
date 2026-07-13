@@ -1,0 +1,54 @@
+# catch2 -- Catch2 v3 amalgamated single-TU C++ test framework (WS6-c
+# Phase-1 canonical manifest for the legacy per-core token `catch2`).
+#
+# Grounding (this checkout):
+#   * scripts/alp_project_emit/__init__.py:266-274 (_LIBRARY_KCONFIG) --
+#     verbatim kconfig tuple: `CONFIG_ALP_CATCH2_SW=y` (fallback-
+#     capability marker) + `CONFIG_ALP_SDK_CATCH2_VENDORED=y` (gates
+#     compiling vendors/catch2/src/catch_amalgamated.cpp into the build,
+#     selection-scoped so a C-only app never pulls in a C++ TU).
+#   * west.yml:380-386 -- `name: Catch2`, remote catchorg, revision
+#     `v3.7.1`, path modules/lib/catch2, group `extras-tier1` (disabled
+#     by default; the build resolves against the vendored amalgamated
+#     copy -- see vendors/catch2/README.md).
+#   * vendors/catch2/README.md -- **Boost Software License 1.0**
+#     (LICENSE.txt upstream text unmodified); upstream
+#     https://github.com/catchorg/Catch2.
+#   * metadata/library-profiles/catch2/hw-backends.yaml -- pure-SW,
+#     no accelerator binding (testing class).
+#   * examples/testing/catch2-selftest/testcase.yaml -- built + run
+#     green on native_sim/native_sim/native/64.
+#
+# HW-backends: see metadata/library-profiles/catch2/ (folded in WS6-c Phase 3)
+#
+# `module: Catch2` matches the real (disabled-by-default) west project
+# name above; `kconfig:` is transcribed verbatim from _LIBRARY_KCONFIG.
+#
+# No `requires:` -- the vendored amalgamated distribution is portable
+# C++14 with no capability/core-class/RAM floor of note; per-consumer
+# choices (custom main, POSIX-signal handling) are example-level
+# target_compile_definitions, not an SDK-wide constraint.
+#
+# `tier: B` for this Phase-1 pass: catch2 has a real teaching example
+# built green on native_sim, but Tier A additionally requires an entry
+# in metadata/registries/tier-a-library-ci.json -- out of scope here;
+# promotion is a named follow-up.
+#
+# Licence BSL-1.0 (Boost Software License 1.0) -- verified in
+# vendors/catch2/README.md and LICENSE.txt. Added to this schema's
+# permissive `license` allowlist alongside CC0-1.0 (minimp3) per the
+# #610 WS6-c maintainer legal-review decision; see
+# library-v1.schema.json's `license` description.
+schema_version: 1
+name: catch2
+description: "Catch2 v3 -- amalgamated single-TU C++ unit-test framework."
+tier: B
+version: "3.7.1"
+license: BSL-1.0
+
+integration:
+  zephyr:
+    module: Catch2
+    kconfig:
+      - CONFIG_ALP_CATCH2_SW=y
+      - CONFIG_ALP_SDK_CATCH2_VENDORED=y
