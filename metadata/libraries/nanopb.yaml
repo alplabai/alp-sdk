@@ -29,10 +29,11 @@ integration:
     # Intentionally does NOT emit CONFIG_NANOPB=y: enabling Zephyr's upstream
     # nanopb module pulls in its module.yml cmake-ext/kconfig-ext .proto-codegen
     # glue, which alp-sdk does not wire centrally -- turning it on link-fails the
-    # example (duplicate/mis-wired pb_encode/pb_decode). The library ships via
-    # the ALP SW path (CONFIG_ALP_NANOPB_SW=y, sw_fallback below) instead. This
-    # matches the pre-consolidation per-core resolution exactly.
-    kconfig: []
+    # example (mis-wired pb_encode/pb_decode). The library ships via the ALP SW
+    # path (CONFIG_ALP_NANOPB_SW=y) instead, matching the pre-consolidation
+    # per-core resolution exactly (dedup-idempotent with the sw_fallback below).
+    kconfig:
+      - CONFIG_ALP_NANOPB_SW=y
     hw_backends:
       class: serialization
       upstream_source: "nanopb-0.4.9 (in Zephyr west.yml already)"
