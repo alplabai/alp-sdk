@@ -52,6 +52,10 @@ CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
+# Generated Zephyr board trees (one dir per <board>; each carries a twister
+# .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
+# triple `west build -b` resolves).  Ground truth for the board-target check.
+ZEPHYR_ALP_BOARDS = REPO / "zephyr" / "boards" / "alp"
 
 
 def _capability_vocabulary() -> set[str]:
@@ -563,6 +567,110 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     return failures
 
 
+def _board_tree_identifiers() -> dict[str, set[str]]:
+    """Map a bare Zephyr board name -> the set of fully-qualified twister
+    identifiers its generated board tree exposes.
+
+    Scans zephyr/boards/alp/<dir>/*.yaml for `identifier:` strings (the
+    `<board>/<soc>/<cpucluster>` triple gen_zephyr_board emits).  The bare
+    name is the identifier's first `/`-segment.  Returns {} when the board
+    tree is absent (e.g. a metadata-only test root), which makes the
+    board-target check a no-op rather than a false failure.
+    """
+    trees: dict[str, set[str]] = {}
+    if not ZEPHYR_ALP_BOARDS.is_dir():
+        return trees
+    for path in sorted(ZEPHYR_ALP_BOARDS.glob("*/*.yaml")):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        ident = doc.get("identifier")
+        if isinstance(ident, str) and "/" in ident:
+            trees.setdefault(ident.split("/", 1)[0], set()).add(ident)
+    return trees
+
+
+def _check_board_targets(som_files) -> list:
+    """Cross-check every SoM preset `topology.<core>.board` against the
+    generated Zephyr board trees (issue #720).
+
+    The board string is passed verbatim to `west build -b`, so it must name
+    a board Zephyr can resolve.  A multi-cluster SoC (Ensemble RTSS-HE/HP,
+    RZ/V2N A55+M33) makes the *bare* board name ambiguous -- Zephyr 4.4
+    needs the `<board>/<soc>/<cpucluster>` triple.  The generated board
+    tree's twister `identifier:` is the ground truth for that triple.
+
+    Invariant enforced (both drift directions):
+      * a board whose tree EXISTS must be spelled as that tree's identifier
+        (a bare name where the tree is qualified is the #720 bug; a wrong
+        qualifier is drift); and
+      * a `/`-qualified board must point at a tree that actually exists
+        (guards against qualifying a SKU -- e.g. V2N102/V2M102 -- before its
+        board tree is generated).
+
+    A bare board with no generated tree is left alone: it is either a
+    single-cluster target Zephyr resolves as-is, or a not-yet-generated
+    board that cannot build regardless.  Returns a failure list shaped like
+    _check_files().
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    trees = _board_tree_identifiers()
+    if not trees:
+        return failures  # no board tree in this root -> nothing to cross-check
+    for path in som_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # schema pass already reported the parse failure
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+        checked = 0
+        topology = doc.get("topology") or {}
+        for core_id, entry in topology.items():
+            if not isinstance(entry, dict):
+                continue
+            board = entry.get("board")
+            if not isinstance(board, str) or not board:
+                continue  # yocto slice / no Zephyr board on this core
+            checked += 1
+            bare = board.split("/", 1)[0]
+            if bare in trees:
+                # A tree exists -> the board must be its qualified identifier.
+                if board not in trees[bare]:
+                    want = sorted(trees[bare])
+                    want_str = want[0] if len(want) == 1 else ", ".join(want)
+                    msgs.append(
+                        f"topology/{core_id}/board: `{board}` does not match the "
+                        f"generated board tree for `{bare}` -- `west build -b` "
+                        f"needs the fully-qualified `{want_str}` "
+                        f"(zephyr/boards/alp/; #720)")
+            elif "/" in board:
+                # Qualified, but no tree with that bare name exists.
+                msgs.append(
+                    f"topology/{core_id}/board: `{board}` is qualified but no "
+                    f"generated board tree named `{bare}` exists under "
+                    f"zephyr/boards/alp/ -- qualify a board only once its tree "
+                    f"is generated (#720)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (board targets: {checked} Zephyr slice(s) resolve)")
+    return failures
+
+
 def main() -> int:
     # SoC files (JSON) against soc-spec v1.
     soc_schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
@@ -676,6 +784,12 @@ def main() -> int:
             )
             library_semantic_failures = _check_library_semantics(library_files)
 
+    # SoM `topology.<core>.board` <-> generated Zephyr board tree cross-check.
+    board_target_failures: list = []
+    if som_files:
+        print()
+        board_target_failures = _check_board_targets(som_files)
+
     # SoM `silicon_capabilities.unpopulated` <-> SoC capability cross-check.
     restriction_failures: list = []
     if som_files:
@@ -696,6 +810,7 @@ def main() -> int:
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
                       + len(block_failures)
                       + len(library_failures) + len(library_semantic_failures)
+                      + len(board_target_failures)
                       + len(restriction_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
