@@ -300,6 +300,11 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
 	return BRIDGE_HW_OK;
 }
 
+/* Return a chain slot to the pool (defined with the DSP-chain pool
+ * below).  Forward-declared here because stream_end -- which lives
+ * above the pool definition -- is the sole runtime releaser. */
+static void adc_dsp_chain_release(uint8_t chain_id);
+
 int bridge_hw_adc_stream_end(uint8_t stream_id)
 {
 	if (stream_id >= BRIDGE_ADC_STREAM_COUNT) return BRIDGE_HW_ERR_RANGE;
@@ -347,6 +352,14 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
      * knows the converter came back in an unproven state. */
 	const bool restored = adc_periph_init(ch->periph);
 
+	/* Release the DSP chain bound to this stream back to the pool.
+     * chain_open is the ONLY allocator (sets in_use=true) and nothing
+     * else clears it, so without this the 4-slot pool leaks one chain
+     * per bind->end cycle -- after BRIDGE_DSP_MAX_CHAINS cycles
+     * chain_open returns NOSUPPORT forever until a reboot (#496).
+     * dsp_chain_id is only meaningful while dsp_bound, so gate on it. */
+	if (s->dsp_bound) adc_dsp_chain_release(s->dsp_chain_id);
+
 	s->in_use    = false;
 	s->dsp_bound = false;
 	return restored ? BRIDGE_HW_OK : BRIDGE_HW_ERR_IO;
@@ -391,6 +404,17 @@ typedef struct {
 /* 4 chains x 4 stages x 260 B = 4160 bytes of stage-data RAM + ~80
  * bytes of metadata; well inside the GD32G553's 128 KB SRAM. */
 static adc_dsp_chain_t adc_dsp_chains[BRIDGE_DSP_MAX_CHAINS];
+
+/* Return a chain slot to the pool.  The counterpart to chain_open's
+ * first-fit allocation: there is no host-facing close opcode, so a
+ * chain's lifetime is tied to the stream it binds -- stream_end calls
+ * this on the bound chain.  Idempotent-safe for an out-of-range id. */
+static void adc_dsp_chain_release(uint8_t chain_id)
+{
+	if (chain_id >= BRIDGE_DSP_MAX_CHAINS) return;
+	adc_dsp_chains[chain_id].bound  = false;
+	adc_dsp_chains[chain_id].in_use = false;
+}
 
 int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
 {
