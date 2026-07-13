@@ -76,6 +76,22 @@ def test_verify_lock_detects_drift(tmp_path):
                and d.locked == "abc123" and d.actual == "9999999" for d in drifts)
 
 
+def test_verify_lock_ignores_sdk_revision(tmp_path):
+    """sdk.revision is provenance, not a frozen input: a moved HEAD alone is
+    not drift (else the SDK's own committed alp.lock would fail --check on
+    every subsequent commit). Real input drift still fails."""
+    import alp_lock
+    ws = _fixture_ws(tmp_path)
+    locked = alp_lock.build_lock(ws, rev_resolver=lambda r: "old_head")
+    # Only the SDK HEAD moved -> no drift.
+    assert alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "new_head") == []
+    # HEAD moved AND a real input drifted -> only the real input is reported.
+    (ws / "west.yml").write_text(
+        (ws / "west.yml").read_text().replace("abc123", "9999999"))
+    drifts = alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "new_head")
+    assert [d.path for d in drifts] == ["west.projects[hal_alif].revision"]
+
+
 import subprocess as _sp
 
 def _run_cli(ws, *args):

@@ -466,8 +466,12 @@ workspace's SDK revision, west project pins, curated library versions, Python
 requirements, and metadata digests. Commit it. `west alp-lock --check` (run in
 CI) fails with a field-level diagnostic when any locked input drifts, so an old
 release can be rebuilt against its exact declared inputs. It contains no local
-paths or credentials. It does not yet pin resolved commit SHAs or toolchain
-container identities (tracked follow-ups).
+paths or credentials. The recorded `sdk.revision` is **provenance** (which SDK
+commit generated the lock) and is not frozen-verified — committing the lock
+advances the repo's own HEAD past it, so `--check` reports it but never fails on
+it; `sdk.version` and the west pins lock the SDK identity you build against. It
+does not yet pin resolved commit SHAs or toolchain container identities (tracked
+follow-ups).
 
 ## 9. SoC capability validation
 

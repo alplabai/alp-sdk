@@ -80,6 +80,13 @@ diagnostic line. `build_lock` composes deterministic sub-collectors:
 `verify_lock` recomputes `build_lock` and returns the field-level drift list
 (empty == match). It never writes.
 
+**`sdk.revision` is provenance, not a frozen input.** When the lock lives in the
+repo whose HEAD it records, committing the lock advances HEAD past the baked-in
+revision, so a frozen check would fail on every later commit. `verify_lock`
+therefore records `sdk.revision` (which SDK commit generated the lock) but
+excludes it from the drift set (`_PROVENANCE_KEYS`). `sdk.version` plus the west
+project pins still lock the SDK identity a consumer builds against.
+
 ### 3. `scripts/west_commands/alp_lock.py` — `west alp-lock`
 Thin `WestCommand` (mirrors `alp_build` / `alp_renode`): resolves the workspace
 root (west topdir, or `--workspace`), optional `--board <board.yaml>`, then:

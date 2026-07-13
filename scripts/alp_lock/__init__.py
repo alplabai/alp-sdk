@@ -167,17 +167,30 @@ def _flatten(prefix: str, node: Any, out: dict) -> None:
         out[prefix] = node
 
 
+# Keys recorded for provenance/reproduction but NOT frozen-verified: a moved
+# value is not dependency drift.  `sdk.revision` is self-referential when the
+# lock lives in the repo whose HEAD it records -- committing the lock advances
+# HEAD past the value baked into it, so a frozen check would fail on every
+# subsequent commit.  It is kept in the lock (which SDK commit generated it)
+# but excluded from the drift set.  `sdk.version` + the west pins still lock the
+# SDK identity a consumer actually builds against.
+_PROVENANCE_KEYS = frozenset({"sdk.revision"})
+
+
 def verify_lock(committed: dict, workspace_root: Path,
                 board_yaml: Optional[Path] = None, *,
                 rev_resolver: Callable[[Path], Optional[str]] = _default_rev) -> list["Drift"]:
     """Recompute the lock from the live workspace and return field-level drift
-    (empty == match).  Never writes."""
+    (empty == match).  Provenance-only keys (`_PROVENANCE_KEYS`, e.g.
+    `sdk.revision`) are recorded but never reported as drift.  Never writes."""
     actual = build_lock(workspace_root, board_yaml, rev_resolver=rev_resolver)
     a, b = {}, {}
     _flatten("", committed, a)
     _flatten("", actual, b)
     drifts: list[Drift] = []
     for key in sorted(set(a) | set(b)):
+        if key in _PROVENANCE_KEYS:
+            continue
         if a.get(key) != b.get(key):
             drifts.append(Drift(key, a.get(key), b.get(key)))
     return drifts
