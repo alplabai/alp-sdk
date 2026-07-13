@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 import jsonschema
@@ -73,3 +74,29 @@ def test_verify_lock_detects_drift(tmp_path):
     drifts = alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "v1")
     assert any(d.path == "west.projects[hal_alif].revision"
                and d.locked == "abc123" and d.actual == "9999999" for d in drifts)
+
+
+import subprocess as _sp
+
+def _run_cli(ws, *args):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join([str(REPO / "scripts")])
+    return _sp.run([sys.executable, str(REPO / "scripts/west_commands/alp_lock.py"),
+                    "--workspace", str(ws), *args],
+                   capture_output=True, text=True, env=env)
+
+def test_cli_writes_then_check_passes(tmp_path):
+    ws = _fixture_ws(tmp_path)
+    r = _run_cli(ws)
+    assert r.returncode == 0, r.stderr
+    assert (ws / "alp.lock").is_file()
+    r2 = _run_cli(ws, "--check")
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+
+def test_cli_check_fails_on_drift(tmp_path):
+    ws = _fixture_ws(tmp_path)
+    assert _run_cli(ws).returncode == 0
+    (ws / "west.yml").write_text((ws / "west.yml").read_text().replace("abc123", "9999999"))
+    r = _run_cli(ws, "--check")
+    assert r.returncode == 1
+    assert "west.projects[hal_alif].revision" in (r.stdout + r.stderr)
