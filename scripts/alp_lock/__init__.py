@@ -141,3 +141,43 @@ def build_lock(workspace_root: Path, board_yaml: Optional[Path] = None, *,
         "digests": _digests(root),
         "resolution": {"board": board, "groupsEnabled": sorted(groups_enabled)},
     }
+
+
+from dataclasses import dataclass
+
+
+@dataclass
+class Drift:
+    path: str
+    locked: Any
+    actual: Any
+
+
+def _flatten(prefix: str, node: Any, out: dict) -> None:
+    """Flatten a lock dict to {json-ish path: leaf}, keying list items that
+    have a `name` by that name so drift paths are stable + human-readable."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            _flatten(f"{prefix}.{k}" if prefix else k, v, out)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            key = v["name"] if isinstance(v, dict) and "name" in v else str(i)
+            _flatten(f"{prefix}[{key}]", v, out)
+    else:
+        out[prefix] = node
+
+
+def verify_lock(committed: dict, workspace_root: Path,
+                board_yaml: Optional[Path] = None, *,
+                rev_resolver: Callable[[Path], Optional[str]] = _default_rev) -> list["Drift"]:
+    """Recompute the lock from the live workspace and return field-level drift
+    (empty == match).  Never writes."""
+    actual = build_lock(workspace_root, board_yaml, rev_resolver=rev_resolver)
+    a, b = {}, {}
+    _flatten("", committed, a)
+    _flatten("", actual, b)
+    drifts: list[Drift] = []
+    for key in sorted(set(a) | set(b)):
+        if a.get(key) != b.get(key):
+            drifts.append(Drift(key, a.get(key), b.get(key)))
+    return drifts

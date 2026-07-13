@@ -60,3 +60,16 @@ def test_reject_local_guard(tmp_path):
         alp_lock._reject_local("/home/user/secret")
     assert alp_lock._reject_local("v3.1.5") == "v3.1.5"
     assert alp_lock._reject_local("https://github.com/a/b.git") == "https://github.com/a/b.git"
+
+
+def test_verify_lock_detects_drift(tmp_path):
+    import alp_lock
+    ws = _fixture_ws(tmp_path)
+    locked = alp_lock.build_lock(ws, rev_resolver=lambda r: "v1")
+    assert alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "v1") == []
+    # mutate a west revision on disk
+    (ws / "west.yml").write_text(
+        (ws / "west.yml").read_text().replace("abc123", "9999999"))
+    drifts = alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "v1")
+    assert any(d.path == "west.projects[hal_alif].revision"
+               and d.locked == "abc123" and d.actual == "9999999" for d in drifts)
