@@ -53,9 +53,9 @@ def _emit_extra_library_profile(
     """Walk an extra_libraries `profile:` file and emit the per-class
     first-match Kconfig lines for the active SoM.
 
-    Mirrors the curated `metadata/library-profiles/<lib>/hw-backends.yaml`
-    matcher in `alp_project._emit_library_hw_backends`: each accelerator
-    class declares a `priority:` list whose entries carry
+    Mirrors the curated-library `integration.zephyr.hw_backends` matcher
+    (folded into each `metadata/libraries/<lib>.yaml` manifest): each
+    accelerator class declares a `priority:` list whose entries carry
     `silicon:` / `soc_family:` / `requires_cap:` matchers plus a
     `kconfig:` directive.  Entries marked `status: planned` or
     `status: stub` are metadata only and are not emitted as active
