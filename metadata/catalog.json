@@ -950,6 +950,10 @@
       "script": "scripts/check_quality_registry.py"
     },
     {
+      "purpose": "CI gate: gen_sbom.py produces a valid, deterministic CycloneDX SBOM (#610 §7).",
+      "script": "scripts/check_sbom.py"
+    },
+    {
       "purpose": "Validate SoM-release bundle manifests against the public metadata/schemas/som-release-bundle-v1.schema.json contract.",
       "script": "scripts/check_som_bundle.py"
     },

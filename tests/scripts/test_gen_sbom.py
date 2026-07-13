@@ -32,3 +32,8 @@ def test_licenses_carried():
     b = gen_sbom.build_sbom(_LOCK)
     nanopb = next(c for c in b["components"] if c["name"] == "nanopb")
     assert nanopb["licenses"][0]["license"]["id"] == "Zlib"
+
+
+def test_check_sbom_gate_passes_on_real_lock():
+    import check_sbom  # noqa: E402
+    assert check_sbom.main() == 0

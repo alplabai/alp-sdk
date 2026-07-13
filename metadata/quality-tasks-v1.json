@@ -309,6 +309,20 @@
       "ci": "cross-platform-zephyr.yml:python-smoke"
     },
     {
+      "id": "sbom",
+      "description": "Validate gen_sbom.py produces a valid, deterministic CycloneDX SBOM from alp.lock.",
+      "runner": "check-script",
+      "script": "scripts/check_sbom.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "som-bundle",
       "description": "Validate SoM-release bundle manifests against the public som-release-bundle-v1 schema contract.",
       "runner": "check-script",
