@@ -50,3 +50,27 @@ def test_informational_scripts_not_gated():
                  if t["runner"] == "check-script"}
     assert by_script["check_test_coverage.py"]["gate"] is False
     assert by_script["check_cross_platform.py"]["gate"] is False
+
+
+import sys
+sys.path.insert(0, str(REPO / "scripts"))
+import quality_tasks  # noqa: E402
+
+
+def test_gate_scripts_are_gated_check_scripts():
+    gs = quality_tasks.gate_scripts()
+    assert "scripts/check_doc_drift.py" in gs
+    assert "scripts/check_test_coverage.py" not in gs  # informational
+    assert gs == sorted(gs)
+
+
+def test_cli_gate_scripts_prints_one_per_line(capsys):
+    quality_tasks.main(["--gate-scripts"])
+    out = capsys.readouterr().out.strip().splitlines()
+    assert "scripts/check_doc_drift.py" in out
+
+
+def test_scripts_for_profile_subset_of_check_scripts():
+    pr = set(quality_tasks.scripts_for_profile("pr"))
+    assert pr <= set(quality_tasks.check_scripts())
+    assert "scripts/check_doc_drift.py" in pr
