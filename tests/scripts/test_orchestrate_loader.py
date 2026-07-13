@@ -92,7 +92,7 @@ def test_load_board_yaml_v2n_happy(tmp_path: Path) -> None:
     assert m33.board == "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"      # inherited
     assert m33.toolchain == "arm-zephyr-eabi"
     assert m33.peripherals == ["adc", "pwm", "i2c", "gpio"]
-    assert m33.libraries == ["cmsis_dsp"]
+    assert m33.libraries == ["cmsis-dsp"]
 
     assert len(project.ipc) == 1
     assert project.ipc[0].name == "alp_default_rpmsg"

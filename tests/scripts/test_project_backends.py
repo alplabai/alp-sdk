@@ -59,17 +59,24 @@ class TestHwBackendsLoader(unittest.TestCase):
     def _emit(cls, sku: str) -> str:
         """Run the full loader for `sku` + every library, return stdout."""
         core = cls._core_for_sku(sku)
-        libs_yaml = "".join(f"              - {lib}\n" for lib in cls.LIBS)
+        # Unified top-level `libraries:` scoped to this core; canonical
+        # (hyphenated) manifest names -- the schema `name:` pattern rejects
+        # the legacy underscore tokens.
+        libs_yaml = "".join(
+            f'  - name: {lib.replace("_", "-")}\n'
+            f"    cores: [{core}]\n"
+            for lib in cls.LIBS
+        )
         body = (
 
             "som:\n"
             f"  sku: {sku}\n"
+            "libraries:\n"
+            f"{libs_yaml}"
             "cores:\n"
             f"  {core}:\n"
             "    os: zephyr\n"
             "    app: ./src\n"
-            "    libraries:\n"
-            f"{libs_yaml}"
         )
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "board.yaml"
