@@ -77,12 +77,17 @@ topology:
     toolchain: poky-glibc
   m55_hp:
     app: alp-stock-shim
-    board: alp_e1m_aen801_m55_hp        # Zephyr board target
+    # Qualified Zephyr board target: the Ensemble E8 die is multi-cluster
+    # (RTSS-HE + RTSS-HP), so `west build -b` needs the <soc>/<cpucluster>
+    # qualifiers -- the bare name is ambiguous and fails to resolve under
+    # Zephyr 4.4 (#720).  Must match the generated board tree's twister
+    # identifier (zephyr/boards/alp/e1m_aen801_m55_hp/...).
+    board: alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
     toolchain: arm-zephyr-eabi
     zephyr_full_name: "E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HP carrier"
   m55_he:
     app: alp-stock-shim
-    board: alp_e1m_aen801_m55_he        # Zephyr board target
+    board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
     toolchain: arm-zephyr-eabi
     zephyr_full_name: "E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HE carrier"
 
