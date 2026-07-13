@@ -144,11 +144,15 @@ som:
   sku: E1M-V2N101
 
 preset: e1m-x-evk
+
+libraries:
+  - name: mbedtls
+    cores: [a55_cluster]
+
 cores:
   a55_cluster:
     app: ./linux                  # os: omitted -- A-cores default to yocto per topology
     image: alp-image-edge
-    libraries: [mbedtls]
     iot:
       wifi: true
       mqtt: true

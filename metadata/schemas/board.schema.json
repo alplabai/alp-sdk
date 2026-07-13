@@ -379,13 +379,13 @@
           {
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]*$",
-            "description": "schemaVersion 1 form: a bare canonical manifest name (metadata/libraries/<name>.yaml) applied project-wide."
+            "description": "Shorthand for a project-wide `{name}` entry: a bare canonical manifest name (metadata/libraries/<name>.yaml)."
           },
           {
             "type": "object",
             "additionalProperties": false,
             "required": ["name"],
-            "description": "schemaVersion 2 form: a unified library entry.  Omit `cores:` for a project-wide selection; list core ids to scope the library to just those cores (folds in what v1 spelled as `cores.<id>.libraries:`).",
+            "description": "A unified library entry.  Omit `cores:` for a project-wide selection; list core ids to scope the library to just those cores.",
             "properties": {
               "name": {
                 "type": "string",
@@ -403,7 +403,7 @@
           }
         ]
       },
-      "description": "Curated third-party libraries to pull into the project (ADR 0018).  Each entry names a manifest under metadata/libraries/<name>.yaml; the orchestrator emits its per-OS wiring (Zephyr Kconfig / Yocto IMAGE_INSTALL / baremetal CMake) through the --emit contract and rejects a selection incompatible with the target SoM/core.  schemaVersion 1 accepts bare project-wide names; schemaVersion 2 (see `scripts/alp_migrate`) unifies project-wide and per-core selections here as {name, cores?} objects, retiring the separate `cores.<id>.libraries:` token list."
+      "description": "Curated third-party libraries to pull into the project (ADR 0018).  The single place libraries are declared: each entry is a `{name, cores?}` object (or a bare name as shorthand for a project-wide `{name}`).  `name` is a manifest under metadata/libraries/<name>.yaml; omit `cores:` for a project-wide selection or list core ids to scope it.  The orchestrator emits the per-OS wiring (Zephyr Kconfig / Yocto IMAGE_INSTALL / baremetal CMake) through the --emit contract and rejects a selection incompatible with the target SoM/core."
     },
 
     "features": {
@@ -637,22 +637,6 @@
               "adc", "can", "counter", "emmc", "ethernet", "flash",
               "gpio", "i2c", "i2s", "pwm", "rtc", "sensor", "spi",
               "uart", "usb", "watchdog"
-            ]
-          }
-        },
-        "libraries": {
-          "type": "array",
-          "uniqueItems": true,
-          "description": "schemaVersion 1 per-core library list (legacy tokens).  Retained so v1 board.yaml still validates and the resolver can read the per-core form; schemaVersion 2 folds these into the unified top-level `libraries:` list.  New board.yaml should use the v2 form.",
-          "items": {
-            "type": "string",
-            "enum": [
-              "etl", "fmt", "nlohmann_json", "doctest", "lvgl",
-              "mbedtls", "cmsis_dsp", "littlefs", "tflite_micro",
-              "u8g2", "gfx_compat", "madgwick_ahrs", "pid", "modbus",
-              "coremqtt_sn", "libcoap", "nanopb",
-              "libwebsockets", "jsmn", "bearssl", "minimp3", "opus",
-              "catch2"
             ]
           }
         },
