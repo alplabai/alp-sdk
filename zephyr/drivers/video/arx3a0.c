@@ -10,7 +10,7 @@
  * compatible "onnn,arx3a0").  Upstream Zephyr v4.4 ships NO ARX3A0 sensor
  * driver, so this is a genuine fork-driver copy carried in-tree so it survives
  * a `west update`.  Retire onto the opt-in sdk-alif fork compatible once the
- * sensor node is repointed AND bench-verified (task #21).
+ * sensor node is repointed AND bench-verified.
  * ==================================================================
  *
  * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by

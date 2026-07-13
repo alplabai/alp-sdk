@@ -13,16 +13,25 @@ sample:
   description: |
     Heterogeneous-compute flagship: Yocto Linux on the V2N's
     Cortex-A55 cluster + Zephyr on the same SoC's Cortex-M33-SM,
-    communicating via <alp/rpc.h> over RPMsg.  This testcase
-    covers ONLY the Zephyr/M33-SM half (build_only under
-    native_sim) -- twister stays the Zephyr-only fast lane per
-    spec §4.4.  The A55/Yocto consumer is tested separately by
-    the bitbake CI lane.
+    communicating over a raw OpenAMP/RPMsg link (alp-sdk #683 "Path
+    B, Phase 1" -- see src/main.c's file header for why this phase
+    bypasses <alp/rpc.h>).  The A55/Yocto consumer is tested
+    separately by the bitbake CI lane.
+
+    native_sim dropped (alp-sdk #683): this firmware is no longer a
+    portable placeholder -- it requires real RZ/V2N devicetree
+    (rsctbl/vring/mhu nodes, see the board overlay) and the Renesas
+    MHU mailbox + FSP + OpenAMP/libmetal modules, none of which
+    native_sim provides.  build_only against the real board is this
+    phase's proof; bench attach/echo verification is a later phase.
+    Requires hal_renesas + open-amp + libmetal as west modules (see
+    west.yml) -- a CI runner without those groups fetched cannot
+    build this test.
 
 tests:
-  alp_sdk.examples.rpmsg_v2n.native_sim:
+  alp_sdk.examples.rpmsg_v2n.m33_sm:
     platform_allow:
-      - native_sim/native/64
+      - alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33
     tags:
       - alp-sdk
       - example
@@ -30,12 +39,5 @@ tests:
       - yocto
       - heterogeneous
       - rpmsg
+      - v2n
     build_only: true
-    # CONFIG_ALP_SDK_RPC=y -- enables <alp/rpc.h> which the producer
-    # uses to publish samples; matches the comment in m33_sm/prj.conf.
-    extra_args: CONFIG_ALP_SDK_RPC=y
-    harness: console
-    harness_config:
-      type: one_line
-      regex:
-        - "\\[rpmsg-v2n\\] done"

@@ -1,0 +1,1425 @@
+{
+  "schema_version": 1,
+  "kind": "alp.carrier_netlist",
+  "generated_by": "scripts/alp_project.py --emit carrier-netlist",
+  "board": "E1M-EVK",
+  "som": "E1M-AEN801",
+  "hw_rev": "r2",
+  "silicon_variant": "AE822FA0E5597LS0",
+  "nets": [
+    {
+      "net_id": "EVK_PIN_CAM_MUX_SEL",
+      "e1m": "E1M_GPIO_IO2",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_CAM_MUX_SEL",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO2"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_CAM_MUX_SEL"
+        }
+      ],
+      "board_doc": "PI3WVR626 SEL pin; see `evk_cam_select_*` enum + chips/cam_mux_pi3wvr626."
+    },
+    {
+      "net_id": "EVK_PIN_ENCODER_SW",
+      "e1m": "E1M_GPIO_IO4",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_ENCODER_SW",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO4"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_ENCODER_SW"
+        }
+      ],
+      "board_doc": "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce.",
+      "active_low": true
+    },
+    {
+      "net_id": "EVK_PIN_CAM_RST",
+      "e1m": "E1M_GPIO_IO5",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_CAM_RST",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO5"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_CAM_RST"
+        }
+      ],
+      "board_doc": "Camera reset (active-low).",
+      "active_low": true
+    },
+    {
+      "net_id": "EVK_PIN_PCIE_IOEXP_INT",
+      "e1m": "E1M_GPIO_IO7",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_PCIE_IOEXP_INT",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO7"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_PCIE_IOEXP_INT"
+        }
+      ],
+      "board_doc": "INT input from the PCIe IO expander."
+    },
+    {
+      "net_id": "EVK_PIN_I2S_MUX_EN",
+      "e1m": "E1M_GPIO_IO8",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_I2S_MUX_EN",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO8"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_I2S_MUX_EN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 30
+        }
+      ],
+      "board_doc": "I2S0 74LVC157 /E (Alif side P7.1); drive low to enable mux.",
+      "active_low": true,
+      "dispatch_pin": 30,
+      "som_doc": "CC3501E GPIO_30 (board 2626-R2; GPIO30 moved here from IO21)."
+    },
+    {
+      "net_id": "EVK_PIN_PCIE_IOEXP_RST",
+      "e1m": "E1M_GPIO_IO9",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_PCIE_IOEXP_RST",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO9"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_PCIE_IOEXP_RST"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 12
+        }
+      ],
+      "board_doc": "Reset output to the PCIe IO expander.",
+      "dispatch_pin": 12,
+      "som_doc": "CC3501E GPIO_12."
+    },
+    {
+      "net_id": "EVK_PIN_PCIE0_I2C_EN",
+      "e1m": "E1M_GPIO_IO10",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_PCIE0_I2C_EN",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO10"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_PCIE0_I2C_EN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 35
+        }
+      ],
+      "board_doc": "Drive high to enable I2C mux to the PCIe slot.",
+      "dispatch_pin": 35,
+      "som_doc": "CC3501E GPIO_35 (board 2626-R2)."
+    },
+    {
+      "net_id": "EVK_PIN_USB2_MUX_SEL",
+      "e1m": "E1M_GPIO_IO11",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_USB2_MUX_SEL",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO11"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_USB2_MUX_SEL"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 2
+        }
+      ],
+      "board_doc": "USB2 TMUXHS221 select: 0 = USB connector, 1 = M.2 E-key USB.",
+      "dispatch_pin": 2,
+      "som_doc": "CC3501E GPIO_2."
+    },
+    {
+      "net_id": "EVK_PIN_I2S_MUX_SEL",
+      "e1m": "E1M_GPIO_IO13",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_I2S_MUX_SEL",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO13"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_I2S_MUX_SEL"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 13
+        }
+      ],
+      "board_doc": "I2S0 74LVC157 S; 0 = TAS2563 amps, 1 = M.2 E-key I2S.",
+      "dispatch_pin": 13,
+      "som_doc": "CC3501E GPIO_13."
+    },
+    {
+      "net_id": "EVK_PIN_BMI323_INT1",
+      "e1m": "E1M_GPIO_IO15",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_BMI323_INT1",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO15"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_BMI323_INT1"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 14
+        }
+      ],
+      "board_doc": "BMI323 INT1 (data-ready / motion / FIFO); CC3501E GPIO14.",
+      "dispatch_pin": 14,
+      "som_doc": "CC3501E GPIO_14."
+    },
+    {
+      "net_id": "EVK_PIN_W_DISABLE2",
+      "e1m": "E1M_GPIO_IO16",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_W_DISABLE2",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO16"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_W_DISABLE2"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 17
+        }
+      ],
+      "board_doc": "Bluetooth disable (open-drain, active-low) on M.2 E-key.",
+      "active_low": true,
+      "dispatch_pin": 17,
+      "som_doc": "CC3501E GPIO_17 (bridge READY/host-IRQ on current firmware)."
+    },
+    {
+      "net_id": "EVK_PIN_W_DISABLE1",
+      "e1m": "E1M_GPIO_IO17",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_W_DISABLE1",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO17"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_W_DISABLE1"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 16
+        }
+      ],
+      "board_doc": "Wi-Fi disable (open-drain, active-low) on M.2 E-key.",
+      "active_low": true,
+      "dispatch_pin": 16,
+      "som_doc": "CC3501E GPIO_16 (bridge SPI0 CS on current firmware)."
+    },
+    {
+      "net_id": "EVK_PIN_M2E_SDIO_WAKE",
+      "e1m": "E1M_GPIO_IO18",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_M2E_SDIO_WAKE",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO18"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_M2E_SDIO_WAKE"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 18
+        }
+      ],
+      "board_doc": "M.2 E-key SDIO-path wake (active-low).",
+      "active_low": true,
+      "dispatch_pin": 18,
+      "som_doc": "CC3501E GPIO_18."
+    },
+    {
+      "net_id": "EVK_PIN_M2E_UART_WAKE",
+      "e1m": "E1M_GPIO_IO19",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_M2E_UART_WAKE",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO19"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_M2E_UART_WAKE"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 19
+        }
+      ],
+      "board_doc": "M.2 E-key UART-path wake (active-low).",
+      "active_low": true,
+      "dispatch_pin": 19,
+      "som_doc": "CC3501E GPIO_19."
+    },
+    {
+      "net_id": "EVK_PIN_SDIO_MUX_EN",
+      "e1m": "E1M_GPIO_IO20",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_SDIO_MUX_EN",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO20"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_SDIO_MUX_EN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e",
+          "pin": 26
+        }
+      ],
+      "board_doc": "SDIO 74LVC157 /E; drive low to enable mux.",
+      "active_low": true,
+      "dispatch_pin": 26,
+      "som_doc": "CC3501E GPIO_26."
+    },
+    {
+      "net_id": "EVK_PIN_SDIO_MUX_SEL",
+      "e1m": "E1M_GPIO_IO21",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_SDIO_MUX_SEL",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO21"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_SDIO_MUX_SEL"
+        }
+      ],
+      "board_doc": "SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot."
+    },
+    {
+      "net_id": "EVK_PIN_PCIE_MUX_PD",
+      "e1m": "E1M_GPIO_IO22",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_PCIE_MUX_PD",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO22"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_PCIE_MUX_PD"
+        }
+      ],
+      "board_doc": "Drive HIGH to power down all four PCIe lane muxes."
+    },
+    {
+      "net_id": "EVK_PIN_PCIE_MUX_SEL",
+      "e1m": "E1M_GPIO_IO23",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_PCIE_MUX_SEL",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_IO23"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_PCIE_MUX_SEL"
+        }
+      ],
+      "board_doc": "Selects M-key vs E-key routing on the PCIe lane muxes."
+    },
+    {
+      "net_id": "EVK_PIN_LED_RED",
+      "e1m": "E1M_GPIO_PWM3",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_LED_RED",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_PWM3"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_LED_RED"
+        }
+      ],
+      "board_doc": "RGB LED red -- the PWM3 pad driven as a digital GPIO."
+    },
+    {
+      "net_id": "EVK_PIN_LED_GREEN",
+      "e1m": "E1M_GPIO_PWM0",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_LED_GREEN",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_PWM0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_LED_GREEN"
+        }
+      ],
+      "board_doc": "RGB LED green -- the PWM0 pad driven as a digital GPIO."
+    },
+    {
+      "net_id": "EVK_PIN_LED_BLUE",
+      "e1m": "E1M_GPIO_PWM1",
+      "board_category": "gpio",
+      "board_macro": "EVK_PIN_LED_BLUE",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_GPIO_PWM1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PIN_LED_BLUE"
+        }
+      ],
+      "board_doc": "RGB LED blue -- the PWM1 pad driven as a digital GPIO."
+    },
+    {
+      "net_id": "EVK_I2C_BUS_SENSORS",
+      "e1m": "E1M_I2C0",
+      "board_category": "buses",
+      "board_macro": "EVK_I2C_BUS_SENSORS",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_I2C0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_I2C_BUS_SENSORS"
+        }
+      ],
+      "board_doc": "Shared sensor + IO-expander + INA236 bus."
+    },
+    {
+      "net_id": "EVK_I2C_BUS_DSI_CSI",
+      "e1m": "E1M_I2C1",
+      "board_category": "buses",
+      "board_macro": "EVK_I2C_BUS_DSI_CSI",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_I2C1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_I2C_BUS_DSI_CSI"
+        }
+      ],
+      "board_doc": "Display + camera control I2C (touch panel, camera-side I2C config)."
+    },
+    {
+      "net_id": "EVK_I2C_BUS_ARDUINO",
+      "e1m": "E1M_I3C0",
+      "board_category": "buses",
+      "board_macro": "EVK_I2C_BUS_ARDUINO",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_I3C0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_I2C_BUS_ARDUINO"
+        }
+      ],
+      "board_doc": "Arduino UNO header I2C ride on I3C0 (I3C is backwards-compatible with classic I2C)."
+    },
+    {
+      "net_id": "EVK_SPI_BUS_ARDUINO",
+      "e1m": "E1M_SPI1",
+      "board_category": "buses",
+      "board_macro": "EVK_SPI_BUS_ARDUINO",
+      "board_role": null,
+      "dispatch": "cc3501e",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_SPI1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_SPI_BUS_ARDUINO"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "cc3501e"
+        }
+      ],
+      "board_doc": "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC.",
+      "som_doc": "Inter-chip SPI1 fast path; CC3501E acts as SPI peripheral."
+    },
+    {
+      "net_id": "EVK_UART_PORT_DEBUG",
+      "e1m": "E1M_UART0",
+      "board_category": "buses",
+      "board_macro": "EVK_UART_PORT_DEBUG",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_UART0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_UART_PORT_DEBUG"
+        }
+      ],
+      "board_doc": "Console UART exposed on the JTAG/SWD-side debug header."
+    },
+    {
+      "net_id": "EVK_UART_PORT_ARDUINO",
+      "e1m": "E1M_UART1",
+      "board_category": "buses",
+      "board_macro": "EVK_UART_PORT_ARDUINO",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_UART1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_UART_PORT_ARDUINO"
+        }
+      ],
+      "board_doc": "Arduino UNO header UART (D0/D1); CK_RXD = UART1_TX, CK_TXD = UART1_RX."
+    },
+    {
+      "net_id": "EVK_PWM_LED_GREEN",
+      "e1m": "E1M_PWM0",
+      "board_category": "pwm",
+      "board_macro": "EVK_PWM_LED_GREEN",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_PWM0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PWM_LED_GREEN"
+        }
+      ],
+      "board_doc": "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)."
+    },
+    {
+      "net_id": "EVK_PWM_LED_BLUE",
+      "e1m": "E1M_PWM1",
+      "board_category": "pwm",
+      "board_macro": "EVK_PWM_LED_BLUE",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_PWM1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PWM_LED_BLUE"
+        }
+      ],
+      "board_doc": "RGB LED blue channel."
+    },
+    {
+      "net_id": "EVK_ARD_PWM1",
+      "e1m": "E1M_PWM1",
+      "board_category": "pwm",
+      "board_macro": "EVK_ARD_PWM1",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_PWM1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ARD_PWM1"
+        }
+      ],
+      "board_doc": "Arduino header CK_PWM1; shares E1M_PWM1 with LED_BLUE."
+    },
+    {
+      "net_id": "EVK_ARD_PWM4",
+      "e1m": "E1M_PWM2",
+      "board_category": "pwm",
+      "board_macro": "EVK_ARD_PWM4",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_PWM2"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ARD_PWM4"
+        }
+      ],
+      "board_doc": "Arduino header CK_PWM4 = E1M_PWM2."
+    },
+    {
+      "net_id": "EVK_PWM_LED_RED",
+      "e1m": "E1M_PWM3",
+      "board_category": "pwm",
+      "board_macro": "EVK_PWM_LED_RED",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_PWM3"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_PWM_LED_RED"
+        }
+      ],
+      "board_doc": "RGB LED red channel."
+    },
+    {
+      "net_id": "EVK_ARD_PWM2",
+      "e1m": "E1M_PWM4",
+      "board_category": "pwm",
+      "board_macro": "EVK_ARD_PWM2",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_PWM4"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ARD_PWM2"
+        }
+      ],
+      "board_doc": "Arduino header CK_PWM2 = E1M_PWM4."
+    },
+    {
+      "net_id": "EVK_ARD_PWM3",
+      "e1m": "E1M_PWM5",
+      "board_category": "pwm",
+      "board_macro": "EVK_ARD_PWM3",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_PWM5"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ARD_PWM3"
+        }
+      ],
+      "board_doc": "Arduino header CK_PWM3 = E1M_PWM5."
+    },
+    {
+      "net_id": "EVK_MB_PWM",
+      "e1m": "E1M_PWM6",
+      "board_category": "pwm",
+      "board_macro": "EVK_MB_PWM",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_PWM6"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_MB_PWM"
+        }
+      ],
+      "board_doc": "mikroBUS PWM pin."
+    },
+    {
+      "net_id": "EVK_ADC_BOARD_ID",
+      "e1m": "E1M_ADC0",
+      "board_category": "adc",
+      "board_macro": "EVK_ADC_BOARD_ID",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_ADC0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ADC_BOARD_ID"
+        }
+      ],
+      "board_doc": "Carrier-side BOARD_ID resistor divider (see docs/board-id.md)."
+    },
+    {
+      "net_id": "EVK_ADC_ARDUINO_A1",
+      "e1m": "E1M_ADC1",
+      "board_category": "adc",
+      "board_macro": "EVK_ADC_ARDUINO_A1",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_ADC1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ADC_ARDUINO_A1"
+        }
+      ],
+      "board_doc": "Arduino UNO header A1 analog input."
+    },
+    {
+      "net_id": "EVK_ADC_ARDUINO_A2",
+      "e1m": "E1M_ADC2",
+      "board_category": "adc",
+      "board_macro": "EVK_ADC_ARDUINO_A2",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_ADC2"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ADC_ARDUINO_A2"
+        }
+      ],
+      "board_doc": "Arduino UNO header A2 analog input."
+    },
+    {
+      "net_id": "EVK_ADC_ARDUINO_A3",
+      "e1m": "E1M_ADC3",
+      "board_category": "adc",
+      "board_macro": "EVK_ADC_ARDUINO_A3",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_ADC3"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ADC_ARDUINO_A3"
+        }
+      ],
+      "board_doc": "Arduino UNO header A3 analog input."
+    },
+    {
+      "net_id": "EVK_ADC_ARDUINO_A4",
+      "e1m": "E1M_ADC4",
+      "board_category": "adc",
+      "board_macro": "EVK_ADC_ARDUINO_A4",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_ADC4"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ADC_ARDUINO_A4"
+        }
+      ],
+      "board_doc": "Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards)."
+    },
+    {
+      "net_id": "EVK_ADC_ARDUINO_A5",
+      "e1m": "E1M_ADC5",
+      "board_category": "adc",
+      "board_macro": "EVK_ADC_ARDUINO_A5",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_ADC5"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ADC_ARDUINO_A5"
+        }
+      ],
+      "board_doc": "Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards)."
+    },
+    {
+      "net_id": "EVK_ADC_MB_AN",
+      "e1m": "E1M_ADC6",
+      "board_category": "adc",
+      "board_macro": "EVK_ADC_MB_AN",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_ADC6"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ADC_MB_AN"
+        }
+      ],
+      "board_doc": "mikroBUS click AN pin."
+    },
+    {
+      "net_id": "EVK_ADC_VBAT_SENSE",
+      "e1m": "E1M_ADC7",
+      "board_category": "adc",
+      "board_macro": "EVK_ADC_VBAT_SENSE",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_ADC7"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ADC_VBAT_SENSE"
+        }
+      ],
+      "board_doc": "Battery voltage divider (4:1 resistor scale) for power-monitor demos."
+    },
+    {
+      "net_id": "EVK_DAC_ARDUINO_DAC0",
+      "e1m": "E1M_DAC0",
+      "board_category": "dac",
+      "board_macro": "EVK_DAC_ARDUINO_DAC0",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_DAC0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_DAC_ARDUINO_DAC0"
+        }
+      ],
+      "board_doc": "Arduino-shield-style DAC0 output exposed on header J3."
+    },
+    {
+      "net_id": "EVK_DAC_AUDIO_LINE_OUT",
+      "e1m": "E1M_DAC1",
+      "board_category": "dac",
+      "board_macro": "EVK_DAC_AUDIO_LINE_OUT",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_DAC1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_DAC_AUDIO_LINE_OUT"
+        }
+      ],
+      "board_doc": "Auxiliary line-level audio output (analog, sums with TAS2563 mix)."
+    },
+    {
+      "net_id": "EVK_I2S_AUDIO_CODEC",
+      "e1m": "E1M_I2S0",
+      "board_category": "i2s",
+      "board_macro": "EVK_I2S_AUDIO_CODEC",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_I2S0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_I2S_AUDIO_CODEC"
+        }
+      ],
+      "board_doc": "Routed through the 74LVC157 mux to either the TAS2563 amps (default) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL."
+    },
+    {
+      "net_id": "EVK_I2S_PDM_MIC",
+      "e1m": "E1M_I2S1",
+      "board_category": "i2s",
+      "board_macro": "EVK_I2S_PDM_MIC",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_I2S1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_I2S_PDM_MIC"
+        }
+      ],
+      "board_doc": "PDM mic capture (4x MP34DT05 mics)."
+    },
+    {
+      "net_id": "EVK_CAN_VEHICLE_BUS",
+      "e1m": "E1M_CAN0",
+      "board_category": "can",
+      "board_macro": "EVK_CAN_VEHICLE_BUS",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_CAN0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_CAN_VEHICLE_BUS"
+        }
+      ],
+      "board_doc": "TCAN1044A transceiver on header J9; termination via jumpers JP1-JP4."
+    },
+    {
+      "net_id": "EVK_ENC_ROTARY",
+      "e1m": "E1M_ENC0",
+      "board_category": "qenc",
+      "board_macro": "EVK_ENC_ROTARY",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_ENC0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "EVK_ENC_ROTARY"
+        }
+      ],
+      "board_doc": "PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4)."
+    }
+  ],
+  "bom": {
+    "carrier": [
+      {
+        "item_id": "bmi323",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/bmi323.yaml",
+        "display_name": "Bosch BMI323 6-axis IMU",
+        "vendor": "bosch",
+        "mpn_population": [
+          "BMI323"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "LGA-14",
+          "footprint": "lga_14_2p5x3p0mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDDIO",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "bmp581",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/bmp581.yaml",
+        "display_name": "Bosch BMP581 ultra-low-power barometric pressure sensor",
+        "vendor": "bosch",
+        "mpn_population": [
+          "BMP581"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "LGA-10",
+          "footprint": "lga_10_2p0x2p0mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDDIO",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "button_led",
+        "kind": "block",
+        "scope": "carrier",
+        "source": "metadata/blocks/button_led.yaml",
+        "display_name": "Generic momentary button + indicator LED",
+        "quantity": null,
+        "realization": {
+          "id": "discrete_generic",
+          "physical_form": "discrete",
+          "visibility": "internal"
+        },
+        "parts": [],
+        "passives": [
+          {
+            "role": "series",
+            "value": "330R",
+            "net": "LED",
+            "refdes_prefix": "R"
+          }
+        ],
+        "caveats": [
+          "physical_detail_internal",
+          "no_concrete_parts"
+        ]
+      },
+      {
+        "item_id": "cam_mux_pi3wvr626",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/cam_mux_pi3wvr626.yaml",
+        "display_name": "Diodes/Pericom PI3WVR626 2:1 MIPI CSI 2-data-lane mux",
+        "vendor": "diodes-incorporated",
+        "mpn_population": [
+          "PI3WVR626",
+          "PI3WVR626XEBEX"
+        ],
+        "bus": "none",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "QFN-24",
+          "footprint": "x1qfn_24_2p5x2p5mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [],
+        "caveats": [
+          "mpn_population_candidates"
+        ]
+      },
+      {
+        "item_id": "icm42670",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/icm42670.yaml",
+        "display_name": "TDK InvenSense ICM-42670-P 6-axis IMU",
+        "vendor": "invensense",
+        "mpn_population": [
+          "ICM-42670-P"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "LGA-14",
+          "footprint": "lga_14_2p5x3p0mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "2u2",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "10nF",
+            "net": "VDDIO",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "ina236",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/ina236.yaml",
+        "display_name": "TI INA236 16-bit precision current + voltage monitor",
+        "vendor": "ti",
+        "mpn_population": [
+          "INA236AIDDFR"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "SOT-23-8",
+          "footprint": "sot23_8_1p6x2p9mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VS",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "ALERT",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "pdm_mic",
+        "kind": "block",
+        "scope": "carrier",
+        "source": "metadata/blocks/pdm_mic.yaml",
+        "display_name": "Generic PDM microphone surface",
+        "quantity": null,
+        "realization": {
+          "id": "discrete_generic",
+          "physical_form": "discrete",
+          "visibility": "internal"
+        },
+        "parts": [],
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          }
+        ],
+        "caveats": [
+          "physical_detail_internal",
+          "no_concrete_parts"
+        ]
+      },
+      {
+        "item_id": "tas2563",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/tas2563.yaml",
+        "display_name": "TI TAS2563 mono digital-input Class-D smart amp (I2C ctrl + I2S data, I/V sense)",
+        "vendor": "ti",
+        "mpn_population": [
+          "TAS2563RPP"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "VQFN-32",
+          "footprint": "vqfn_32_4p5x4p0mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VBAT",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "1uF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "IOVDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "10uF",
+            "net": "PVDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "IRQ_N",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "tcal9538",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/tcal9538.yaml",
+        "display_name": "TI TCAL9538 8-bit I2C-bus, SMBus I/O expander",
+        "vendor": "ti",
+        "mpn_population": [
+          "TCAL9538",
+          "TCAL9538PWR",
+          "TCAL9538RSVR",
+          "TCAL9538DTUR"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "TSSOP-16",
+          "footprint": "tssop_16_5x6p4mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VCC",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "INT",
+            "refdes_prefix": "R"
+          }
+        ],
+        "caveats": [
+          "mpn_population_candidates"
+        ]
+      }
+    ]
+  },
+  "caveats": [
+    "carrier_handoff_not_pcb_layout",
+    "no_kicad_or_gerber_output",
+    "som_internals_excluded",
+    "quantity_null_when_board_populated_has_no_count"
+  ]
+}

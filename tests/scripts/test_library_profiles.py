@@ -40,7 +40,7 @@ Out of scope (intentionally):
   the SDK's metadata regression suite.
 
 - We do NOT verify the loader emits each accelerator line for a
-  given SoM.  That's covered by ``test_alp_project.py`` (which
+  given SoM.  That's covered by ``test_project_backends.py`` (which
   feeds real SoM ``capabilities:`` blocks through
   ``_emit_library_hw_backends`` and asserts the cross-product).
 
@@ -154,6 +154,8 @@ def _load_profile(libdir: str) -> dict[str, Any]:
 _KCONFIG_RE = re.compile(
     r"^CONFIG_[A-Z][A-Z0-9_]*=(?:y|n|m|\"[^\"]*\"|0x[0-9A-Fa-f]+|-?\d+)$"
 )
+
+_STATUS_VALUES = {"implemented", "planned", "stub"}
 
 
 def _is_real_kconfig(line: str) -> bool:
@@ -363,4 +365,31 @@ def test_kconfig_lines_well_formed(libdir: str) -> None:
         + "\nExpected CONFIG_<NAME>=<value> (where value is y / n / m / "
         '"string" / integer / 0xhex) or a "# ..." comment for '
         "header-only libraries."
+    )
+
+
+@pytest.mark.parametrize("libdir", _profile_dirs(), ids=lambda d: d)
+def test_accelerator_status_values_well_formed(libdir: str) -> None:
+    """Optional accelerator ``status:`` values are part of the
+    loader contract.  Missing means ``implemented``; planned/stub
+    entries document intended bindings but must not emit active
+    Kconfig claims."""
+    doc = _load_profile(libdir)
+
+    bad: list[str] = []
+    for idx, entry in enumerate(doc.get("accelerators") or []):
+        if not isinstance(entry, dict):
+            continue
+        for jdx, prio in enumerate(entry.get("priority") or []):
+            if not isinstance(prio, dict):
+                continue
+            status = str(prio.get("status", "implemented")).strip().lower()
+            if status not in _STATUS_VALUES:
+                bad.append(
+                    f"accelerators[{idx}].priority[{jdx}] status={status!r}"
+                )
+
+    assert not bad, (
+        f"{libdir}/hw-backends.yaml has unsupported accelerator status "
+        f"value(s): {bad}. Expected one of {sorted(_STATUS_VALUES)}."
     )

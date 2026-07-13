@@ -34,10 +34,12 @@
  * with that for v0.4 since the embedded UARTs we target speak
  * standard rates.  Unknown rates return ALP_ERR_INVAL.
  *
- * Reads honour the timeout_ms argument via VMIN=0, VTIME =
- * ceil(timeout_ms / 100) (termios's deciseconds quantum); writes
- * are blocking but the kernel-side tty layer never holds them
- * indefinitely for a hardware UART.
+ * Reads honour the timeout_ms argument via an absolute-deadline
+ * poll()/read() loop (see alp_uart_read below), NOT termios VTIME --
+ * VTIME is an inter-byte timer that only starts once the first byte
+ * has arrived, so VMIN=1/VTIME=t combinations can block forever when
+ * no byte ever shows up.  Writes are blocking but the kernel-side tty
+ * layer never holds them indefinitely for a hardware UART.
  *
  * Compiled only on Linux hosts/targets.
  */
@@ -48,6 +50,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <poll.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -55,11 +59,20 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
-#include "yocto_errno.h"
+#include "common/alp_errno.h"
+
+/* Private test seam (issue #595 / #634): the bounded poll()+read() loop
+ * alp_uart_read() runs, split out so tests/yocto/peripheral_uart.c can
+ * drive it directly against a hermetic socketpair() fd.  Not part of any
+ * public include/alp header -- this forward declaration exists only so the
+ * definition below has a prototype in this TU (-Wmissing-prototypes);
+ * the test file carries its own matching `extern` declaration. */
+alp_status_t alp_uart_read_fd_bounded(int fd, uint8_t *data, size_t len, uint32_t timeout_ms);
 
 #ifndef ALP_SDK_YOCTO_MAX_UART_HANDLES
 #define ALP_SDK_YOCTO_MAX_UART_HANDLES 4
@@ -171,13 +184,13 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 
 	int fd = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC);
 	if (fd < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		return NULL;
 	}
 
 	struct termios tio;
 	if (tcgetattr(fd, &tio) < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		(void)close(fd);
 		return NULL;
 	}
@@ -232,19 +245,22 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 	/* Enable receiver, ignore modem control lines. */
 	tio.c_cflag |= CREAD | CLOCAL;
 
-	/* Default to non-blocking reads with no timeout; alp_uart_read
-     * applies VTIME per-call so successive reads can use different
-     * timeouts on the same handle. */
+	/* VMIN=0, VTIME=0: read() always returns immediately with
+     * whatever bytes (zero or more) are already in the input queue,
+     * never blocking on the tty layer itself.  alp_uart_read layers
+     * its own poll()-based, absolute-deadline wait on top so the
+     * documented timeout_ms bounds the WHOLE call, not just the gap
+     * between two already-arrived bytes. */
 	tio.c_cc[VMIN]  = 0;
 	tio.c_cc[VTIME] = 0;
 
 	if (cfsetispeed(&tio, speed) < 0 || cfsetospeed(&tio, speed) < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		(void)close(fd);
 		return NULL;
 	}
 	if (tcsetattr(fd, TCSANOW, &tio) < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		(void)close(fd);
 		return NULL;
 	}
@@ -259,6 +275,7 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 		return NULL;
 	}
 	h->fd = fd;
+	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
 
@@ -274,9 +291,100 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len)
 			if (errno == EINTR) {
 				continue;
 			}
-			return alp_yocto_errno_to_alp(errno);
+			return alp_status_from_posix_errno(errno);
 		}
 		written += (size_t)n;
+	}
+	return ALP_OK;
+}
+
+/* Milliseconds remaining until @p deadline, clamped to
+ * [0, INT_MAX] for direct use as poll()'s timeout argument.
+ * CLOCK_MONOTONIC is immune to wall-clock adjustments, so this
+ * never over- or under-shoots the caller's budget mid-call. */
+static int ms_until(const struct timespec *deadline)
+{
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	int64_t remain_ms = ((int64_t)deadline->tv_sec - (int64_t)now.tv_sec) * 1000 +
+	                    ((int64_t)deadline->tv_nsec - (int64_t)now.tv_nsec) / 1000000;
+	if (remain_ms < 0) {
+		return 0;
+	}
+	return (remain_ms > INT_MAX) ? INT_MAX : (int)remain_ms;
+}
+
+/* Bounded poll()+read() loop against a raw fd -- the actual fix for
+ * #595, split out of alp_uart_read() (non-static, but NOT part of the
+ * public alp/ headers) so tests/yocto/peripheral_uart.c can drive
+ * it directly against a hermetic socketpair()/pty fd.  alp_uart_open's
+ * port_id only resolves to /dev/ttyS<N>-style paths, so there is no
+ * route to a live, CI-controllable external port through the public
+ * API alone -- this seam is what makes the timeout logic testable
+ * without real hardware. */
+alp_status_t alp_uart_read_fd_bounded(int fd, uint8_t *data, size_t len, uint32_t timeout_ms)
+{
+	if (len == 0) {
+		return ALP_OK;
+	}
+
+	/* Absolute deadline for the WHOLE call.  Bounding each poll() by
+     * the time remaining (rather than re-arming a fixed per-byte
+     * timer, as the old VMIN=1/VTIME=t scheme did) is what makes the
+     * total wait honour timeout_ms even across inter-byte gaps, and
+     * what makes a no-data call return instead of blocking forever. */
+	struct timespec deadline;
+	clock_gettime(CLOCK_MONOTONIC, &deadline);
+	deadline.tv_sec += (time_t)(timeout_ms / 1000u);
+	deadline.tv_nsec += (long)(timeout_ms % 1000u) * 1000000L;
+	if (deadline.tv_nsec >= 1000000000L) {
+		deadline.tv_sec += 1;
+		deadline.tv_nsec -= 1000000000L;
+	}
+
+	size_t got = 0;
+	while (got < len) {
+		struct pollfd pfd = {
+			.fd     = fd,
+			.events = POLLIN,
+		};
+		/* timeout_ms == 0 yields ms_until() == 0 on the first pass --
+         * a single non-blocking poll, i.e. an honest zero-wait poll
+         * instead of the old code's accidental "block forever". */
+		int pr = poll(&pfd, 1, ms_until(&deadline));
+		if (pr < 0) {
+			if (errno == EINTR) {
+				continue; /* re-check the deadline on the next loop */
+			}
+			return alp_status_from_posix_errno(errno);
+		}
+		if (pr == 0) {
+			/* Deadline reached with no more data available. */
+			return (got > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+		}
+		if (pfd.revents & (POLLERR | POLLNVAL)) {
+			return ALP_ERR_IO;
+		}
+
+		ssize_t n = read(fd, data + got, len - got);
+		if (n < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+				continue; /* spurious wake -- re-poll against the deadline */
+			}
+			return alp_status_from_posix_errno(errno);
+		}
+		if (n == 0) {
+			/* Peer hung up (POLLHUP) with nothing left buffered.
+             * Otherwise a race between poll() reporting readiness
+             * and the byte being consumed elsewhere -- go around
+             * and re-poll rather than spin or fail spuriously. */
+			if (pfd.revents & POLLHUP) {
+				return (got > 0) ? ALP_OK : ALP_ERR_IO;
+			}
+			continue;
+		}
+		got += (size_t)n;
 	}
 	return ALP_OK;
 }
@@ -286,49 +394,7 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t
 	if (port == NULL || !port->in_use || (data == NULL && len > 0)) {
 		return ALP_ERR_INVAL;
 	}
-	if (len == 0) {
-		return ALP_OK;
-	}
-
-	/* Apply the per-call timeout via VTIME (deciseconds quantum,
-     * ceiling-rounded so a 50 ms ask yields 100 ms in practice).
-     * VMIN=1 + VTIME=t means "return when at least 1 byte is
-     * available OR t deciseconds elapse since the last byte". */
-	struct termios tio;
-	if (tcgetattr(port->fd, &tio) < 0) {
-		return alp_yocto_errno_to_alp(errno);
-	}
-	cc_t vtime;
-	if (timeout_ms == 0) {
-		vtime = 0;
-	} else {
-		uint32_t ds = (timeout_ms + 99u) / 100u;
-		vtime       = (cc_t)((ds > 255u) ? 255u : ds);
-	}
-	tio.c_cc[VMIN]  = 1;
-	tio.c_cc[VTIME] = vtime;
-	if (tcsetattr(port->fd, TCSANOW, &tio) < 0) {
-		return alp_yocto_errno_to_alp(errno);
-	}
-
-	size_t got = 0;
-	while (got < len) {
-		ssize_t n = read(port->fd, data + got, len - got);
-		if (n < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-			return alp_yocto_errno_to_alp(errno);
-		}
-		if (n == 0) {
-			/* VTIME elapsed with no data -- return what we have so
-             * far through ALP_ERR_TIMEOUT.  Caller can decide
-             * whether the partial read is useful. */
-			return (got > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
-		}
-		got += (size_t)n;
-	}
-	return ALP_OK;
+	return alp_uart_read_fd_bounded(port->fd, data, len, timeout_ms);
 }
 
 void alp_uart_close(alp_uart_t *port)

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # scripts/bench/aen/read-update-log-proof.sh
 #
+# Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
+# drives JLinkExe over the labgrid-held AEN bench, and SETOOLS only when
+# decoding the firewall probe's MRAM proof window). Runs under WSL2 on
+# Windows. See docs/aen-bench-bringup.md.
+#
 # Non-destructive readback for the AEN firmware-update-log proof beacons.
 # Hold the labgrid reservation for the target board before running this script.
 set -e

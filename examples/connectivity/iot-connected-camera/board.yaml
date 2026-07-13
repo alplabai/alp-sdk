@@ -34,10 +34,9 @@ cores:
     app: ./src
     # IoT block stays OFF in the base config so the native_sim CI
     # build picks up the v0.1 NULL-with-NOSUPPORT contract.  Opt in to
-    # the real Wi-Fi/MQTT path by enabling these under cores.m33_sm.iot
-    # here AND building with --extra-conf-file overlay-aen.conf (which
-    # pulls in the Zephyr networking stack).  v0.3 finalizes the
-    # on-target path.
+    # the real Wi-Fi/MQTT path on a slice whose OS owns the provider:
+    # AEN Zephyr resolves to the CC3501E bridge; V2N resolves the
+    # Murata/CYW provider on the A55 Yocto slice.
     #
     # iot:
     #   wifi: true

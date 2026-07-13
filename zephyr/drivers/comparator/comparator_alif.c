@@ -49,8 +49,8 @@
  *
  * vendor-ext, BENCH-UNVERIFIED.  Builds + links on the E8 he target; the
  * threshold/edge behaviour is a bench follow-up.  ADR 0017 Tier-2 INTERIM:
- * retire onto the fork comparator driver once it is repointed AND bench-verified
- * (task #21).  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * retire onto the fork comparator driver once it is repointed AND bench-verified.
+ * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==============================================================================
  */
 

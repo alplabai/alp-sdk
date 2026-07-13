@@ -84,6 +84,10 @@
 #define FMC_SR_BSY          (1u << 16)
 #define FMC_SR_PROGERR_MASK 0x000000F8u /* PROGERR | WRPERR | PGAERR | SIZERR | PGSERR */
 
+/* GD32G553MEY7TR carries 512 KiB flash.  Keep this local to the flash
+ * helper implementation; the public API only needs base + sector size. */
+#define GD32_SWD_FMC_FLASH_BYTES (512u * 1024u)
+
 /* ------------------------------------------------------------------ */
 /* Pacing                                                              */
 /* ------------------------------------------------------------------ */
@@ -520,21 +524,33 @@ static alp_status_t fmc_lock(gd32_swd_t *ctx)
 	return swd_mem_write32(ctx, FMC_REG_CR, cr | FMC_CR_LOCK);
 }
 
+static alp_status_t flash_range_validate(uint32_t addr, size_t len)
+{
+	if (len == 0u) return ALP_ERR_INVAL;
+	if (addr < GD32_SWD_FMC_FLASH_BASE) return ALP_ERR_INVAL;
+
+	const uint32_t offset = addr - GD32_SWD_FMC_FLASH_BASE;
+	if (offset >= GD32_SWD_FMC_FLASH_BYTES) return ALP_ERR_INVAL;
+	if (len > (size_t)(GD32_SWD_FMC_FLASH_BYTES - offset)) return ALP_ERR_INVAL;
+
+	return ALP_OK;
+}
+
 alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (!ctx->connected) return ALP_ERR_NOT_READY;
-	if (size == 0u) return ALP_ERR_INVAL;
-	if (addr < GD32_SWD_FMC_FLASH_BASE) return ALP_ERR_INVAL;
+	alp_status_t s = flash_range_validate(addr, size);
+	if (s != ALP_OK) return s;
 
 	/* Round the start down + the end up to sector boundaries. */
-	const uint32_t start_sector  = (addr - GD32_SWD_FMC_FLASH_BASE) / GD32_SWD_FMC_SECTOR_BYTES;
-	const uint32_t end_byte_excl = addr + size;
+	const uint32_t start_offset    = addr - GD32_SWD_FMC_FLASH_BASE;
+	const uint32_t end_offset_excl = start_offset + size;
+	const uint32_t start_sector    = start_offset / GD32_SWD_FMC_SECTOR_BYTES;
 	const uint32_t end_sector_excl =
-	    (end_byte_excl - GD32_SWD_FMC_FLASH_BASE + GD32_SWD_FMC_SECTOR_BYTES - 1u) /
-	    GD32_SWD_FMC_SECTOR_BYTES;
+	    (end_offset_excl + GD32_SWD_FMC_SECTOR_BYTES - 1u) / GD32_SWD_FMC_SECTOR_BYTES;
 
-	alp_status_t s = fmc_unlock(ctx);
+	s = fmc_unlock(ctx);
 	if (s != ALP_OK) return s;
 
 	for (uint32_t sec = start_sector; sec < end_sector_excl; ++sec) {
@@ -570,9 +586,10 @@ alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx, uint32_t addr, const uint8_t 
 	if (!ctx->connected) return ALP_ERR_NOT_READY;
 	if (data == NULL || len == 0u) return ALP_ERR_INVAL;
 	if ((addr & 0x7u) != 0u) return ALP_ERR_INVAL; /* doubleword-aligned */
-	if (addr < GD32_SWD_FMC_FLASH_BASE) return ALP_ERR_INVAL;
+	alp_status_t s = flash_range_validate(addr, len);
+	if (s != ALP_OK) return s;
 
-	alp_status_t s = fmc_unlock(ctx);
+	s = fmc_unlock(ctx);
 	if (s != ALP_OK) return s;
 	s = swd_mem_write32(ctx, FMC_REG_CR, FMC_CR_PG);
 	if (s != ALP_OK) {
@@ -622,11 +639,13 @@ alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx, uint32_t addr, const uint8_t
 	if (!ctx->connected) return ALP_ERR_NOT_READY;
 	if (data == NULL || len == 0u) return ALP_ERR_INVAL;
 	if ((addr & 0x3u) != 0u) return ALP_ERR_INVAL; /* word-aligned */
+	alp_status_t s = flash_range_validate(addr, len);
+	if (s != ALP_OK) return s;
 
 	size_t offset = 0u;
 	while (offset < len) {
-		uint32_t     word = 0u;
-		alp_status_t s    = swd_mem_read32(ctx, addr + (uint32_t)offset, &word);
+		uint32_t word = 0u;
+		s             = swd_mem_read32(ctx, addr + (uint32_t)offset, &word);
 		if (s != ALP_OK) return s;
 		const size_t take = (len - offset) > 4u ? 4u : (len - offset);
 		for (size_t i = 0u; i < take; ++i) {

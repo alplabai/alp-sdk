@@ -1,0 +1,45 @@
+# Modbus -- industrial register protocol (ADR 0018 library manifest).
+#
+# Tier-A industrial connectivity entry: Zephyr's in-tree Modbus subsystem
+# exposes the classic coil / discrete-input / input-register /
+# holding-register model used by PLCs, drives, meters, and gateways.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * IN-TREE Zephyr subsystem -- NOT a separate west module.  It lives in the
+#     zephyr repo itself at subsys/modbus/ (west module `zephyr`, west.yml
+#     revision v4.4.0), so `integration.zephyr.module` is null.
+#   * enable symbol CONFIG_MODBUS
+#     ($ZEPHYR_BASE/subsys/modbus/Kconfig:4 `menuconfig MODBUS`).  It
+#     `select CRC`, so the manifest transcribes only the real master switch.
+#   * upstream version 4.4.0 -- the pinned Zephyr release the subsystem ships
+#     with ($ZEPHYR_BASE/VERSION: VERSION_MAJOR/MINOR = 4/4, PATCHLEVEL 0).
+#   * licence Apache-2.0
+#     ($ZEPHYR_BASE/subsys/modbus/Kconfig:2 "SPDX-License-Identifier:
+#     Apache-2.0"; the whole zephyr repo is Apache-2.0, $ZEPHYR_BASE/LICENSE).
+#
+# Backend note: host/native_sim builds use the transport-agnostic RAW_ADU
+# backend (`CONFIG_MODBUS_RAW_ADU`).  A real serial Modbus RTU/ASCII deployment
+# instead needs a UART plus an enabled devicetree node with compatible
+# `zephyr,modbus-serial`; the serial Kconfig depends on
+# `DT_HAS_ZEPHYR_MODBUS_SERIAL_ENABLED`.
+schema_version: 1
+name: modbus
+description: "Modbus -- industrial register protocol over RTU/ASCII or raw ADU."
+tier: A
+version: "4.4.0"
+license: Apache-2.0
+
+requires:
+  # In alp-sdk's topology Zephyr runs on M-class cores; Modbus is curated here
+  # as a Zephyr subsystem for Cortex-M firmware.  Serial CAN/RS485 transceiver
+  # facts are board wiring, not SoC capability keys, so no capability is named.
+  os: [zephyr]
+  core_class: m
+
+integration:
+  zephyr:
+    # In-tree Zephyr subsystem: no separate west module to pin (the `zephyr`
+    # project itself carries it).  null per the schema's header-only/in-tree case.
+    module: null
+    kconfig:
+      - CONFIG_MODBUS=y

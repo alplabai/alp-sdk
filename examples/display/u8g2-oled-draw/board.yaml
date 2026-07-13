@@ -1,0 +1,32 @@
+# board.yaml -- per-app project configuration for the
+# u8g2-oled-draw example.
+#
+# u8g2 draws through an abstract "device" callback (u8x8_msg_cb) --
+# the same u8g2_t + draw calls run whether that callback pushes
+# tiles over I2C/SPI to a real SSD1306, or (as here) does nothing at
+# all and leaves the drawing in RAM. This board.yaml therefore
+# carries NO panel peripheral: no i2c/spi, no chips entry. Swapping
+# in a real OLED means adding `peripherals: [i2c]` (or `spi`) here
+# and a `chips: [ssd1306]` entry -- see README.md "HW swap".
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+cores:
+  m55_hp:
+    app: ./src
+    # u8g2 has no zephyr/module.yml upstream, so `libraries: [u8g2]`
+    # sets the CONFIG_ALP_SDK_U8G2_VENDORED_CORE Kconfig knob (see
+    # scripts/alp_project_emit.py's `_LIBRARY_KCONFIG["u8g2"]`) -- the
+    # alp-sdk Zephyr module then compiles the vendored core draw
+    # pipeline (vendors/u8g2/csrc/, gated on that same Kconfig symbol)
+    # automatically. See README.md. (CONFIG_ALP_U8G2_SW_BLIT is a
+    # separate `default y` fallback-capability marker, true for every
+    # build regardless of this slice -- it does NOT gate compiled
+    # sources; see zephyr/CMakeLists.txt for why.)
+    libraries:
+      - u8g2
+    peripherals: []
+
+diagnostics:
+  log_level: info

@@ -29,7 +29,7 @@ the old plan to this one:
 | v0.1.0  | in-progress | AEN bring-up (Zephyr peripherals + multi-proc BSP foundation) |
 | v0.2.0  | **surface complete; impl in progress** | 12 wrapped peripheral classes + capability validation + E1M portability bound + per-peripheral examples + v0.2/v0.3 stub headers + ADRs all shipped early.  Bare-metal AEN real, V2N intro, EdgeAI app real are the remaining v0.2 deliverables. |
 | v0.3.0  | **surface complete; impl in progress** | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro.  **Plus: `board.yaml` project config + loader (`scripts/alp_project.py`), DEEPX DX-M1 + Ethos-U65/i.MX 93 inference-backend dispatchers, bench + fuzz scaffolding, Coverity workflow stub, Renesas V2N AI SDK platform 7.1 / BSP v6.30 wire-up in meta-alp.** |
-| v0.4.0  | **in-progress (prep code merged, untested)** | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr.  **Prep merged on main:** Yocto core-4 peripheral wrappers (I²C / SPI / UART / GPIO + IRQ dispatcher), MQTT via libmosquitto, per-class override gates, `lwrb` + `nanopb` pinned behind `extras-v04` group.  Failure-path ctest green; **HW roundtrip still pending** — every row in [`docs/test-plan.md`](docs/test-plan.md)'s v0.4 section gates the tag. |
+| v0.4.0  | **in-progress (prep code merged, untested)** | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr.  **Prep merged on main:** Yocto core-4 peripheral wrappers (I²C / SPI / UART / GPIO + IRQ dispatcher), MQTT via libmosquitto, per-class override gates, `lwrb` + `nanopb` pinned behind `extras-lwrb-nanopb` group (interim/deferred as of v0.9 -- no committed release flips it on).  Failure-path ctest green; **HW roundtrip still pending** — every row in [`docs/test-plan.md`](docs/test-plan.md)'s v0.4 section gates the tag. |
 | v0.5.0  | **wave-2 surface complete; HAL bodies pending** | Wave-2 GD32-bridge DSP + advanced-timer + power-saving + AEN-audit top-five gap surfaces.  **Shipped on main** (per `memory/project_v05_autonomous_burst_2026_05_12.md`): PROTOCOL_VERSION_MINOR 4 -> 5 + seven new reserved opcodes (`0x23..0x28` + `0x36`).  `<alp/dsp.h>` standalone DSP-chain API (FIR / IIR / WINDOW / FFT) with CMSIS-DSP + portable-C fallback.  `alp_adc_filter_t` + `alp_adc_spectrum_t` in `<alp/adc.h>` composing stream + chain.  Advanced timer extras in `<alp/pwm.h>` (`alp_pwm_capture_t` + `alp_pwm_single_pulse`).  `<alp/power.h>` system-power-mode surface.  `<alp/gpu2d.h>` 2D-accelerator surface (AEN audit headline gap).  `<alp/camera.h>::alp_camera_configure_isp` for Mali-C55 ISP toggles.  `<alp/storage.h>::alp_storage_configure_inline_aes` for AEN SecAES on OSPI / HexSPI.  `alp_delay_us` + `alp_delay_ms` portable primitives.  CC3501E §2A.2-plan items §5.1..§5.5 + §5.7 (protocol docs hygiene, named GPIO enums, IRQ event structs, diag info, reset-timing fix, power policy).  v2n_supervisor `alp_z_v2n_supervisor_invalidate()` post-wake re-init hook.  Six `gd32g553_*` host helpers mirroring the new opcodes.  Tests for every new surface.  **HAL bodies pending** in the GD32 firmware tree (`firmware/gd32-bridge/hal/`) -- every wave-2 reserved opcode returns STATUS_NOSUPPORT until the firmware ships them.  CAU (DES / TDES / AES) deferred to v0.6 with PSA driver registration. |
 | v0.6.0  | **released 2026-06-06; pre-HiL** | Heterogeneous-OS orchestration.  `board.yaml` v2 introduces the per-core `cores:` block + cross-core `ipc:` carve-outs (v1 top-level `os:` / `peripherals:` / `libraries:` / `iot:` / `inference:` removed).  `scripts/alp_orchestrate.py` fans out one build slice per non-`off` core; `<alp/rpc.h>` + the generated `<alp/system_ipc.h>` give apps a framed RPC surface over OpenAMP RPMsg.  Reference: rpmsg-aen / rpmsg-v2n / rpmsg-imx93 / heterogeneous-offload examples.  Silicon-determined fields (`inference.backend`) removed from customer scope -- per-handle runtime selection via `alp_inference_open(.backend=...)`.  `alp_core_id_t` generalized to cover every SoM topology core_id.  HiL spec scaffolding for all 11 boards lands.  **2026-05-18 additions:** intra-family portability proven (matrix at [`docs/portability-matrix.md`](docs/portability-matrix.md), cookbook at [`docs/portability.md`](docs/portability.md), ADR 0011); 5 Phase B gap fixes landed (V2M102 namespace + V2M IO27..35 + per-variant Ethos-U U55/U65/U85 + per-CPU-class TFLM NEON/HELIUM/REF + cores key diagnostic); cross-platform Win/Mac/Linux developer host first-class (ADR 0012, [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md), `check_cross_platform.py` lint, CI matrix scaffolding); 8 vendor-SDK-style peripheral tutorial examples (hello-world, uart-hello-world, i2c-master, i2c-slave, spi-master, spi-slave, dac-waveform, timer-periodic-interrupt).  **Late-v0.6 additions (see CHANGELOG [v0.6.0]):** the GD32 supervisor-bridge silicon campaign (firmware v0.2.3 → v0.2.9, wire protocol v0.7 with the negotiated STATUS_SEQ stale-reply kill, A/B OTA Path-A, the hal/gd32 per-peripheral TU split, real-SHA build ids), EEPROM-authoritative SoM hardware revision (`ALP_ERR_NOT_PROVISIONED`; SoM-side ADC cross-check retired), Linux rz-dmac evicted from the CM33-owned DMAC0, `.alpmodel` unified AI-model pipeline Stage-1 + real-dxcom Stage-2 compile.  **Validation status at tag time:** V2N silicon-validated end-to-end on the bench (GD32 link functional suite 26/26, 20-row HIL soak 253/253, Tier-B loopback 5/6, OTA A/B e2e, protocol v0.7 negotiation) -- see [`docs/verification-status.md`](docs/verification-status.md); AEN / i.MX 93 surfaces remain pre-HiL. |
 | v0.7.0  | **released 2026-06-12** | meta-alp-sdk productization: `alp-image-prod` + the ALP distro identity and hardening recipes (SSH, watchdog policy, network defaults), U-Boot production boot + reproducible firmware banners, CA55 1.8 GHz OPP opt-in, kernel FIT-signing scaffolding (default off), V2N reboot-hang + Mali clock fixes.  Orchestrator: per-core OS topology + `build/system-manifest.yaml` pinned as the IDE/tool contract (`system-manifest-v1` schema, additive-only).  See CHANGELOG [v0.7.0]. |
@@ -64,7 +64,9 @@ versions cleanly.
 | Peripherals | full      | `alp_i2c_*`, `alp_spi_*`, `alp_gpio_*`, `alp_uart_*` (Zephyr backend, AEN) |
 | Chips       | full      | `lsm6dso_*`, `ssd1306_*`, `button_led_*` (no `alp_` prefix on chip drivers) |
 | Display     | minimal   | `alp_display_init/clear/print` routes through Zephyr `display_*`         |
-| Math / DSP  | _(removed)_ | App code includes `arm_math.h` directly; ALP does not re-export CMSIS-DSP. SDK internals may use it via `ALP_HAS_CMSIS_DSP`. |
+| Math / DSP  | purpose-built | ALP does not provide a general `arm_math.h` re-export; for ad-hoc math app code uses CMSIS-DSP directly. But ALP DOES ship purpose-built *portable* DSP surfaces that wrap it where cross-silicon portability (Alif M55 / Renesas A55+DRP-AI / NXP) matters: the `<alp/dsp.h>` chain (FIR/IIR/WINDOW/FFT, float or int16 I/O, one-sided or two-sided FFT), `alp_dsp_stats_f32` (mean/RMS/variance/min/max/abs-peak), and `alp_dsp_biquad_design` (RBJ cookbook LP/HP/BP/notch). All select CMSIS-DSP (`ALP_HAS_CMSIS_DSP`) on Cortex-M and a portable-C fallback elsewhere. |
+| Control     | portable  | `<alp/pid.h>` caller-owned PID (`alp_pid_init`/`alp_pid_step`/`alp_pid_reset`) with output clamp + anti-windup + derivative-on-measurement; pure C on all OS targets, opt-in via `libraries: [pid]`. |
+| Sensor fusion | portable | `<alp/ahrs.h>` caller-owned Madgwick IMU filter (`alp_ahrs_init`/`alp_ahrs_update_imu`/`alp_ahrs_euler`/`alp_ahrs_reset`) fusing gyro+accel into a drift-corrected quaternion; pure C on all OS targets, opt-in via `libraries: [madgwick_ahrs]`. |
 | Camera      | header    | `<alp/camera.h>` API frozen; impl returns `ALP_ERR_NOSUPPORT`            |
 | GUI/LVGL    | header    | `<alp/gui.h>` includes upstream LVGL with Alp defaults; no widgets       |
 | IoT         | header    | `<alp/iot.h>` API frozen; impl stubbed                                   |
@@ -376,12 +378,14 @@ target verification still parked behind the `hil-yocto` runner.
   ring; consumer drains via `_pop()` without polling.  Gated on
   `CONFIG_ALP_SDK_UART_RX_RINGBUF`.  First in-tree LwRB consumer;
   backed by an in-tree stub impl until upstream
-  `MaJerle/lwrb` flips on via the `extras-v04` group.
+  `MaJerle/lwrb` flips on via the `extras-lwrb-nanopb` group
+  (interim/deferred as of v0.9, no committed release date).
 - **nanopb mproc IPC framing.**  Placeholder 12-byte envelope
   (magic / sequence / length) wrapping `alp_mbox_send` payloads
   under `CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING`.  Replaced by the
   nanopb-generated codec against `metadata/protos/alp_mproc.proto`
-  when the `extras-v04` group lands upstream nanopb.
+  when the `extras-lwrb-nanopb` group lands upstream nanopb
+  (interim/deferred as of v0.9, no committed release date).
 
 **Build-system + override scaffolding:**
 
@@ -391,10 +395,11 @@ target verification still parked behind the `hil-yocto` runner.
   backend rolls out one class at a time.  Default stubs stamp
   `z_last_error = ALP_ERR_NOSUPPORT` for `alp_last_error()`
   diagnostics.
-- **west.yml pins for v0.4 SDK-internal libs** (`MaJerle/lwrb@v3.2.0`
+- **west.yml pins for SDK-internal libs** (`MaJerle/lwrb@v3.2.0`
   + `nanopb/nanopb@nanopb-0.4.9`) behind a default-disabled
-  `extras-v04` group, recorded for audit ahead of the real
-  consumers.
+  `extras-lwrb-nanopb` group, recorded for audit ahead of the real
+  upstream swap (interim/deferred as of v0.9, no committed release
+  date).
 
 **Secure boot + OTA scaffolding:**
 
@@ -759,6 +764,14 @@ per this matrix before tagging.)
 
 - Public headers C99-compatible with Doxygen comments.
 - Every public function: at least one Unity / ztest test.
+  `scripts/check_test_coverage.py --fail-on-gaps` enforces this with a
+  two-tier policy (issue #453): **portable-core** functions (every
+  public header except `include/alp/chips/**`) must have zero gaps --
+  a hard ratchet, checked on every PR. **Chip-helper** functions
+  (`include/alp/chips/**` — the small per-IC accessors that come with
+  each new chip driver) are a bounded, explicitly-tracked backlog
+  (`CHIP_HELPER_GAP_BUDGET` in the script) that fails CI only if it
+  grows, not merely because it's non-zero.
 - CI matrix builds + tests every supported (OS × SoM) combination.
 - ABI snapshot diffed vs previous release; breaking change requires
   major bump after v1.0.

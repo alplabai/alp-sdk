@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "alp/peripheral.h"
+#include "alp/pid.h"
 #include "alp/pwm.h"
 #include "alp/e1m_pinout.h"
 #include "alp/chips/lsm6dso.h"
@@ -48,64 +49,58 @@ static bmp390_t        s_baro;
 static ublox_neo_m9n_t s_gps;
 static ina236_t        s_batt;
 
-/* ───────── Tiny PID kernel ─────────
- *
- * Minimal PID with anti-windup + derivative-on-measurement.  Real
- * implementation is the `pid` library knob -- which on AEN binds
- * to the FPU SIMD path and on V2N to the TMU CORDIC.  We inline
- * here because the autopilot loop wants the absolute-minimum
- * cycle cost.
+/*
+ * Per-axis PID controllers via the portable <alp/pid.h> surface (output
+ * clamp + integrator anti-windup + derivative-on-measurement -- no
+ * hand-rolled control math in the app).  Gains are conservative starting
+ * points; real flight tuning lives in a sysbuild-time KConfig overlay so
+ * customers don't recompile to twiddle.  Tuned in autopilot_init().
  */
-typedef struct {
-	float kp, ki, kd;
-	float integ;
-	float prev_meas;
-	float out_min, out_max;
-} pid_t;
-
-static inline float pid_step(pid_t *p, float setp, float meas, float dt_s)
-{
-	const float err = setp - meas;
-	p->integ += err * dt_s;
-	/* Clamp the integrator to half the output range. */
-	const float i_max = (p->out_max - p->out_min) * 0.5f;
-	if (p->integ > i_max) p->integ = i_max;
-	if (p->integ < -i_max) p->integ = -i_max;
-	const float d = (meas - p->prev_meas) / dt_s;
-	p->prev_meas  = meas;
-	float out     = p->kp * err + p->ki * p->integ - p->kd * d;
-	if (out < p->out_min) out = p->out_min;
-	if (out > p->out_max) out = p->out_max;
-	return out;
-}
-
-/* Per-axis PID instances.  Gains here are conservative starting
- * points; real flight tuning lives in a sysbuild-time KConfig
- * overlay so customers don't have to recompile to twiddle. */
-static pid_t s_rate_p = {
-	.kp = 0.10f, .ki = 0.05f, .kd = 0.001f, .out_min = -1.0f, .out_max = 1.0f
-};
-static pid_t s_rate_q = {
-	.kp = 0.10f, .ki = 0.05f, .kd = 0.001f, .out_min = -1.0f, .out_max = 1.0f
-};
-static pid_t s_rate_r = { .kp = 0.08f, .ki = 0.02f, .kd = 0.0f, .out_min = -1.0f, .out_max = 1.0f };
-
-static pid_t s_atti_roll = {
-	.kp = 4.0f, .ki = 0.0f, .kd = 0.0f, .out_min = -250.f, .out_max = 250.f
-}; /* dps */
-static pid_t s_atti_pitch = {
-	.kp = 4.0f, .ki = 0.0f, .kd = 0.0f, .out_min = -250.f, .out_max = 250.f
-};
-
-static pid_t s_alt_pid = {
-	.kp = 1.5f, .ki = 0.15f, .kd = 0.5f, .out_min = -3.0f, .out_max = 3.0f
-}; /* m/s */
+static alp_pid_t s_rate_p, s_rate_q, s_rate_r; /* body-rate loops     */
+static alp_pid_t s_atti_roll, s_atti_pitch;    /* attitude loops (dps) */
+static alp_pid_t s_alt_pid;                    /* altitude-rate loop   */
 
 /* ───────── Bring-up ───────── */
 int autopilot_init(autopilot_state_t *s)
 {
 	memset(s, 0, sizeof(*s));
 	s->mode = AP_MODE_DISARMED;
+
+	/* Tune the control loops.  Rate loops use derivative-on-measurement
+	 * to avoid a D-term kick on setpoint steps; the P-only attitude loops
+	 * and the altitude-rate loop leave anti-windup on auto. */
+	alp_pid_init(&s_rate_p,
+	             &(alp_pid_config_t){ .kp                   = 0.10f,
+	                                  .ki                   = 0.05f,
+	                                  .kd                   = 0.001f,
+	                                  .out_min              = -1.0f,
+	                                  .out_max              = 1.0f,
+	                                  .deriv_on_measurement = true });
+	alp_pid_init(&s_rate_q,
+	             &(alp_pid_config_t){ .kp                   = 0.10f,
+	                                  .ki                   = 0.05f,
+	                                  .kd                   = 0.001f,
+	                                  .out_min              = -1.0f,
+	                                  .out_max              = 1.0f,
+	                                  .deriv_on_measurement = true });
+	alp_pid_init(&s_rate_r,
+	             &(alp_pid_config_t){ .kp                   = 0.08f,
+	                                  .ki                   = 0.02f,
+	                                  .kd                   = 0.0f,
+	                                  .out_min              = -1.0f,
+	                                  .out_max              = 1.0f,
+	                                  .deriv_on_measurement = true });
+	alp_pid_init(&s_atti_roll,
+	             &(alp_pid_config_t){ .kp = 4.0f, .out_min = -250.0f, .out_max = 250.0f });
+	alp_pid_init(&s_atti_pitch,
+	             &(alp_pid_config_t){ .kp = 4.0f, .out_min = -250.0f, .out_max = 250.0f });
+	alp_pid_init(&s_alt_pid,
+	             &(alp_pid_config_t){ .kp                   = 1.5f,
+	                                  .ki                   = 0.15f,
+	                                  .kd                   = 0.5f,
+	                                  .out_min              = -3.0f,
+	                                  .out_max              = 3.0f,
+	                                  .deriv_on_measurement = true });
 
 	s_i2c = alp_i2c_open(&(alp_i2c_config_t){
 	    .bus_id     = ALP_E1M_I2C0,
@@ -192,9 +187,9 @@ void autopilot_rate_loop(autopilot_state_t *s)
 		                         : s->setp_pitch * (3.14159265f / 180.f);
 		const float setp_r = s->stick_yaw * 250.f * (3.14159265f / 180.f);
 
-		const float tau_p = pid_step(&s_rate_p, setp_p, s->p, dt_s);
-		const float tau_q = pid_step(&s_rate_q, setp_q, s->q, dt_s);
-		const float tau_r = pid_step(&s_rate_r, setp_r, s->r, dt_s);
+		const float tau_p = alp_pid_step(&s_rate_p, setp_p, s->p, dt_s);
+		const float tau_q = alp_pid_step(&s_rate_q, setp_q, s->q, dt_s);
+		const float tau_r = alp_pid_step(&s_rate_r, setp_r, s->r, dt_s);
 
 		const float thr =
 		    (s->mode == AP_MODE_DISARMED || s->mode == AP_MODE_FAILSAFE) ? 0.0f : s->stick_throttle;
@@ -235,8 +230,8 @@ void autopilot_attitude_loop(autopilot_state_t *s)
 			    (s->mode == AP_MODE_STABILISE) ? s->stick_roll * 25.f : s->setp_roll;
 			const float pitch_sp =
 			    (s->mode == AP_MODE_STABILISE) ? s->stick_pitch * 25.f : s->setp_pitch;
-			s->setp_roll  = pid_step(&s_atti_roll, roll_sp, s->roll, dt_s);
-			s->setp_pitch = pid_step(&s_atti_pitch, pitch_sp, s->pitch, dt_s);
+			s->setp_roll  = alp_pid_step(&s_atti_roll, roll_sp, s->roll, dt_s);
+			s->setp_pitch = alp_pid_step(&s_atti_pitch, pitch_sp, s->pitch, dt_s);
 		}
 
 		alp_delay_ms(4);
@@ -286,9 +281,10 @@ void autopilot_nav_loop(autopilot_state_t *s)
 
 		/* Altitude PID feeds throttle in altitude-hold modes. */
 		if (s->mode == AP_MODE_GPS_HOLD || s->mode == AP_MODE_RTH || s->mode == AP_MODE_FAILSAFE) {
-			const float climb_sp       = (s->mode == AP_MODE_FAILSAFE) ? -1.0f : 0.f;
-			const float alt_correction = pid_step(&s_alt_pid, climb_sp, s->climb_rate_mps, dt_s);
-			s->stick_throttle          = 0.55f + alt_correction * 0.10f;
+			const float climb_sp = (s->mode == AP_MODE_FAILSAFE) ? -1.0f : 0.f;
+			const float alt_correction =
+			    alp_pid_step(&s_alt_pid, climb_sp, s->climb_rate_mps, dt_s);
+			s->stick_throttle = 0.55f + alt_correction * 0.10f;
 		}
 
 		alp_delay_ms(40);

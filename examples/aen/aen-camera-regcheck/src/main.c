@@ -83,9 +83,9 @@
  * runtime readiness is reported separately, since no sensor is wired).
  */
 #define CAM_BOUND (DT_NODE_HAS_STATUS(CAM_NODE, okay) && DT_NODE_HAS_COMPAT(CAM_NODE, alif_cam))
-#define CSI_BOUND                                                                                  \
+#define CSI_BOUND \
 	(DT_NODE_HAS_STATUS(CSI_NODE, okay) && DT_NODE_HAS_COMPAT(CSI_NODE, snps_designware_csi))
-#define DPHY_BOUND                                                                                 \
+#define DPHY_BOUND \
 	(DT_NODE_HAS_STATUS(DPHY_NODE, okay) && DT_NODE_HAS_COMPAT(DPHY_NODE, snps_designware_dphy))
 #define ARX_BOUND (DT_NODE_HAS_STATUS(ARX_NODE, okay) && DT_NODE_HAS_COMPAT(ARX_NODE, onnn_arx3a0))
 

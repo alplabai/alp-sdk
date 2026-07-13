@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: fmt-formatting
+  description: |
+    fmt::format_to() into a fixed char[64] buffer, no allocation, no
+    <iostream> -- formats an int + a float + a string in one call and
+    prints the resulting buffer. Teaches the header-only {fmt}
+    library's caller-owned-buffer formatting API.
+
+tests:
+  alp_sdk.example.fmt_formatting.e1m_x_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - fmt-formatting
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[fmt-formatting\\] done"
+  alp_sdk.example.fmt_formatting.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - fmt-formatting
+      - aen
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[fmt-formatting\\] done"

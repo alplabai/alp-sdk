@@ -25,6 +25,9 @@ cores:
       default_arena_kib: 64
     libraries:
       - tflite_micro
+      - cmsis_dsp             # arm_mean/arm_offset/arm_rms/arm_sub/arm_scale
+                              # kernels behind the direct scalar-stats path
+                              # + <alp/dsp.h>'s FFT backend.
     peripherals:
       - i2c                   # ICM-42670 link.
 

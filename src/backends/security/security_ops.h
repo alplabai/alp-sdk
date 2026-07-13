@@ -106,10 +106,17 @@ struct alp_security_ops {
 /* Public handle layouts -- owned by the dispatcher pools              */
 /* ------------------------------------------------------------------ */
 
+/* lifecycle/active_ops drive the generic open/op/close guard in
+ * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/begin_close,
+ * issue #629) -- placed before in_use so the atomic-claim zeroing in
+ * src/security_dispatch.c (memset up to offsetof(..., in_use)) resets
+ * both to ALP_HANDLE_LC_UNOPENED / 0 on every fresh claim. */
 struct alp_hash {
 	alp_hash_backend_state_t state;
 	const alp_backend_t     *backend;
 	alp_capabilities_t       cached_caps;
+	uint8_t                  lifecycle;
+	uint32_t                 active_ops;
 	bool                     in_use;
 };
 
@@ -117,6 +124,8 @@ struct alp_aead {
 	alp_aead_backend_state_t state;
 	const alp_backend_t     *backend;
 	alp_capabilities_t       cached_caps;
+	uint8_t                  lifecycle;
+	uint32_t                 active_ops;
 	bool                     in_use;
 };
 

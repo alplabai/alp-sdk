@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/e1m-spec/pinout/schema/loom-v1.schema.json",
+  "title": "Loom v1 — E1M pinout machine-readable form",
+  "description": "Schema for E1M-family pinout JSON documents. Validates pinout/v1.json (E1M) and pinout/x-v1.json (E1M-X) against the E1M Standard v1.0 (STANDARD.md).",
+  "type": "object",
+  "required": [
+    "loom_format_version",
+    "id",
+    "version",
+    "footprint_class",
+    "outline_mm",
+    "pads"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "loom_format_version": {
+      "const": 1,
+      "description": "Schema version. Always 1 for this revision."
+    },
+    "id": {
+      "enum": ["E1M", "E1M-X"],
+      "description": "Form-factor identifier."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$",
+      "description": "Form-factor revision, major.minor."
+    },
+    "footprint_class": {
+      "enum": ["FC_35x35", "FC_45x65"],
+      "description": "Outline class."
+    },
+    "outline_mm": {
+      "type": "object",
+      "required": ["w", "h"],
+      "additionalProperties": false,
+      "properties": {
+        "w": { "type": "integer", "minimum": 1 },
+        "h": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "pads": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Pad" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": { "id": { "const": "E1M" } },
+        "required": ["id"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "footprint_class": { "const": "FC_35x35" },
+          "outline_mm": {
+            "type": "object",
+            "properties": {
+              "w": { "const": 35 },
+              "h": { "const": 35 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": { "id": { "const": "E1M-X" } },
+        "required": ["id"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "footprint_class": { "const": "FC_45x65" },
+          "outline_mm": {
+            "type": "object",
+            "properties": {
+              "w": { "const": 45 },
+              "h": { "const": 65 }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "Pad": {
+      "type": "object",
+      "required": ["id", "default", "alt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Z]+\\d+$",
+          "description": "BGA-style coordinate, e.g. A1, K63, AQ15."
+        },
+        "silkscreen": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Pin name as printed in STANDARD.md §5.4."
+        },
+        "default": { "$ref": "#/$defs/SignalKind" },
+        "instance": { "$ref": "#/$defs/PeripheralInstance" },
+        "alt": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AltEntry" }
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "AltEntry": {
+      "type": "object",
+      "required": ["signal"],
+      "additionalProperties": false,
+      "properties": {
+        "signal": { "$ref": "#/$defs/SignalKind" },
+        "instance": { "$ref": "#/$defs/PeripheralInstance" }
+      }
+    },
+    "PeripheralInstance": {
+      "type": "string",
+      "pattern": "^(I2C|I3C|SPI|UART|I2S|CSI|DSI|LCD|PWM|ADC|DAC|USB|ETH|PCIE|CAN|SDIO|JTAG|PDM|ENC|PARCAM|BL|CAM|BOOT)\\d*$"
+    },
+    "SignalKind": {
+      "enum": [
+        "GPIO",
+        "I2C_SCL", "I2C_SDA",
+        "I3C_SCL", "I3C_SDA",
+        "SPI_SCK", "SPI_MOSI", "SPI_MISO", "SPI_CS0", "SPI_CS1",
+        "UART_TX", "UART_RX", "UART_RTS", "UART_CTS",
+        "DBG_TX", "DBG_RX",
+        "I2S_SCLK", "I2S_WS", "I2S_SDI", "I2S_SDO",
+        "MIPI_CSI2_CLK_N", "MIPI_CSI2_CLK_P",
+        "MIPI_CSI2_DATA0_N", "MIPI_CSI2_DATA0_P",
+        "MIPI_CSI2_DATA1_N", "MIPI_CSI2_DATA1_P",
+        "MIPI_CSI2_DATA2_N", "MIPI_CSI2_DATA2_P",
+        "MIPI_CSI2_DATA3_N", "MIPI_CSI2_DATA3_P",
+        "MIPI_DSI_CLK_N", "MIPI_DSI_CLK_P",
+        "MIPI_DSI_DATA0_N", "MIPI_DSI_DATA0_P",
+        "MIPI_DSI_DATA1_N", "MIPI_DSI_DATA1_P",
+        "MIPI_DSI_DATA2_N", "MIPI_DSI_DATA2_P",
+        "MIPI_DSI_DATA3_N", "MIPI_DSI_DATA3_P",
+        "USB_DM", "USB_DP",
+        "USB_RX_N", "USB_RX_P", "USB_TX_N", "USB_TX_P",
+        "USB_ID", "USB_VBUS", "USB_CC1", "USB_CC2",
+        "ETH_DA_N", "ETH_DA_P", "ETH_DB_N", "ETH_DB_P",
+        "ETH_DC_N", "ETH_DC_P", "ETH_DD_N", "ETH_DD_P",
+        "ETH_LED0", "ETH_LED1",
+        "PCIE_CLK_N", "PCIE_CLK_P",
+        "PCIE_RX0_N", "PCIE_RX0_P",
+        "PCIE_RX1_N", "PCIE_RX1_P",
+        "PCIE_RX2_N", "PCIE_RX2_P",
+        "PCIE_RX3_N", "PCIE_RX3_P",
+        "PCIE_TX0_N", "PCIE_TX0_P",
+        "PCIE_TX1_N", "PCIE_TX1_P",
+        "PCIE_TX2_N", "PCIE_TX2_P",
+        "PCIE_TX3_N", "PCIE_TX3_P",
+        "CAN_H", "CAN_L", "CAN_TX", "CAN_RX", "CAN_STBY",
+        "SD_CLK", "SD_CMD",
+        "SD_D0", "SD_D1", "SD_D2", "SD_D3",
+        "SD_DET", "SD_RST",
+        "JTAG_TCK", "JTAG_TMS", "JTAG_TDI", "JTAG_TDO", "JTAG_NRST",
+        "SWD_CLK", "SWD_IO",
+        "PDM_CLK", "PDM_DATA",
+        "PARCAM_D1", "PARCAM_D2", "PARCAM_D3", "PARCAM_D4",
+        "PARCAM_D5", "PARCAM_D6", "PARCAM_D7", "PARCAM_D8",
+        "PARCAM_D9", "PARCAM_D10", "PARCAM_D11", "PARCAM_D12",
+        "PARCAM_D13", "PARCAM_D14", "PARCAM_D15", "PARCAM_D16",
+        "PARCAM_HSYNC", "PARCAM_VSYNC", "PARCAM_PCLK", "PARCAM_XVCLK",
+        "LCD_B0", "LCD_B1", "LCD_B2", "LCD_B3",
+        "LCD_B4", "LCD_B5", "LCD_B6", "LCD_B7",
+        "LCD_B8", "LCD_B9", "LCD_B10", "LCD_B11",
+        "LCD_B12", "LCD_B13", "LCD_B14", "LCD_B15",
+        "LCD_B16", "LCD_B17", "LCD_B18", "LCD_B19",
+        "LCD_B20", "LCD_B21", "LCD_B22", "LCD_B23",
+        "LCD_HSYNC", "LCD_VSYNC",
+        "ADC", "DAC",
+        "ENC_X", "ENC_Y",
+        "PWM",
+        "BL_LED_A", "BL_LED_K", "BL_PWM",
+        "ANT_2_4GHZ", "ANT_5GHZ", "ANT_6GHZ",
+        "GND",
+        "POWER_5V0", "POWER_3V3", "POWER_1V8", "POWER_VBAT",
+        "POWER_VIO_OUT", "POWER_SUPER_CAP",
+        "POWER_CAM_LDO_OUT", "POWER_CAM_LDO_FB",
+        "POWER_SD_VDD_OUT",
+        "RESET", "BOOT", "MODULE_EN", "MODULE_STBY",
+        "RTC_CLKOUT", "AUDIO_CLK",
+        "RSVD", "NC"
+      ]
+    }
+  }
+}

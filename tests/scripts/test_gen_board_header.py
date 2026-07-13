@@ -8,13 +8,17 @@ Covers:
 - idempotency of the real `main()` against the committed
   `metadata/boards/e1m-evk.yaml`;
 - macro-coverage smoke check (the generated EVK header must define
-  every macro that hand-written firmware already uses).
+  every macro that hand-written firmware already uses);
+- issue #515: `i2c_devices:` (on-board I2C addresses + INA236
+  calibration) reproduces the previously hand-authored values
+  exactly, and the generator-level fixture proves the mechanism.
 """
 
 from __future__ import annotations
 
 import hashlib
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -155,9 +159,12 @@ def test_real_evk_header_covers_known_macros(gen_module):
 def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
     """The generated routes header MUST NOT also re-define macros
     that live in the surviving hand-authored sections of
-    `alp_e1m_evk.h` (overlay-pad indices, mux enums, I2C addresses,
-    INA236 tuning constants, on-board sensor addresses).  This
-    guards against accidental over-lift in future slices."""
+    `alp_e1m_evk.h` (overlay-pad indices, mux enums).  On-board I2C
+    device addresses + INA236 calibration constants were lifted into
+    the `i2c_devices:` metadata block (issue #515) and are generated
+    now -- see `test_real_evk_header_covers_i2c_device_macros` below.
+    This guards against accidental over-lift of what's still
+    hand-authored in future slices."""
     rc = gen_module.main()
     assert rc == 0
     out = EVK_OUT.read_text(encoding="utf-8")
@@ -170,14 +177,6 @@ def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
         "EVK_PIN_AMP_ENABLE",
         "EVK_PIN_CTP_INT",
         "EVK_PIN_MB_INT",
-        # On-board I2C addresses (slice deferred)
-        "EVK_I2C_ADDR_ICM42670",
-        "EVK_I2C_ADDR_BMI323",
-        "EVK_I2C_ADDR_BMP581",
-        "EVK_I2C_ADDR_TCAL9538",
-        # INA236 tuning constants (slice deferred)
-        "EVK_INA236_SHUNT_3V3_OHMS",
-        "EVK_INA236_MAX_3V3_A",
         # ADC spellings not generated (the shipped ADC routes are
         # EVK_ADC_ARDUINO_A1..A5 / EVK_ADC_MB_AN / EVK_ADC_VBAT_SENSE)
         "EVK_ARD_A0",
@@ -186,8 +185,93 @@ def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
     for macro in must_not_appear:
         assert macro not in out, (
             f"{macro} unexpectedly appears in generated header -- "
-            f"slice scope is gpio/buses/pwm only"
+            f"slice scope is gpio/buses/pwm/i2c_devices only"
         )
+
+
+def test_real_evk_header_covers_i2c_device_macros(gen_module):
+    """Issue #515: on-board I2C device addresses + INA236 calibration
+    are now single-sourced from `metadata/boards/e1m-evk.yaml`'s
+    `i2c_devices:` block and generated -- assert every macro
+    hand-written firmware relies on is still defined, with the
+    bench-confirmed values preserved verbatim."""
+    rc = gen_module.main()
+    assert rc == 0
+    out = EVK_OUT.read_text(encoding="utf-8")
+    must_define = {
+        "EVK_I2C_ADDR_ICM42670": "0x69u",
+        "EVK_I2C_ADDR_BMI323": "0x68u",
+        "EVK_I2C_ADDR_BMP581": "0x47u",
+        "EVK_I2C_ADDR_TCAL9538_MAIN": "0x72u",
+        "EVK_I2C_ADDR_TCAL9538_PCIE": "0x71u",
+        "EVK_I2C_ADDR_TCA6408A_MAIN": "0x20u",
+        "EVK_I2C_ADDR_TAS2563_LOW": "0x4Du",
+        "EVK_I2C_ADDR_TAS2563_HIGH": "0x4Eu",
+        "EVK_I2C_ADDR_INA236_3V3": "0x40u",
+        "EVK_I2C_ADDR_INA236_1V8": "0x41u",
+        "EVK_I2C_ADDR_INA236_VIO": "0x42u",
+        "EVK_I2C_ADDR_INA236_VCAM0": "0x4Bu",
+        "EVK_I2C_ADDR_INA236_VCAM1": "0x49u",
+        "EVK_I2C_ADDR_INA236_5V": "0x4Au",
+        # legacy convenience alias -- must resolve to the same instance
+        "EVK_I2C_ADDR_TCAL9538": "EVK_I2C_ADDR_TCAL9538_MAIN",
+        "EVK_INA236_SHUNT_3V3_OHMS": "0.020f",
+        "EVK_INA236_MAX_3V3_A": "4.0f",
+        "EVK_INA236_SHUNT_1V8_OHMS": "0.020f",
+        "EVK_INA236_MAX_1V8_A": "4.0f",
+        "EVK_INA236_SHUNT_VIO_OHMS": "0.050f",
+        "EVK_INA236_MAX_VIO_A": "1.6f",
+        "EVK_INA236_SHUNT_VCAM0_OHMS": "0.050f",
+        "EVK_INA236_MAX_VCAM0_A": "1.6f",
+        "EVK_INA236_SHUNT_VCAM1_OHMS": "0.050f",
+        "EVK_INA236_MAX_VCAM1_A": "1.6f",
+        "EVK_INA236_SHUNT_5V_OHMS": "0.020f",
+        "EVK_INA236_MAX_5V_A": "4.0f",
+    }
+    # `#define <macro>   <value>` -- allow the generator's column
+    # alignment (arbitrary run of spaces) between the two.
+    defined = dict(
+        re.findall(r"#define\s+(\S+)\s+(\S+)", out)
+    )
+    for macro, value in must_define.items():
+        assert macro in defined, f"{macro} missing from generated header"
+        assert defined[macro] == value, (
+            f"{macro} = {defined[macro]!r}, expected {value!r} -- value drifted "
+            f"from the hand-authored original"
+        )
+
+
+def test_i2c_devices_reproduce_metadata_values(gen_module):
+    """Generator unit test (issue #515): feed a hand-built YAML dict
+    with an `i2c_devices:` block (address + alias + calibration) and
+    assert the emitted macros carry exactly the metadata's values --
+    not just presence.  Complements the real-YAML coverage check
+    above with a minimal, generator-only fixture."""
+    doc = {
+        "name": "TEST-I2C",
+        "e1m_routes": {},
+        "i2c_devices": [
+            {
+                "macro": "EVK_I2C_ADDR_FOO",
+                "address": "0x42",
+                "alias": "EVK_I2C_ADDR_FOO_LEGACY",
+                "doc": "Test device.",
+                "calibration": {
+                    "shunt_macro": "EVK_INA236_SHUNT_FOO_OHMS",
+                    "shunt_ohms": "0.030",
+                    "max_macro": "EVK_INA236_MAX_FOO_A",
+                    "max_current_a": "2.5",
+                },
+            },
+        ],
+    }
+    out = gen_module.emit_board("TEST-I2C", doc)
+    assert out is not None
+    defined = dict(re.findall(r"#define\s+(\S+)\s+(\S+)", out))
+    assert defined["EVK_I2C_ADDR_FOO"] == "0x42u"
+    assert defined["EVK_I2C_ADDR_FOO_LEGACY"] == "EVK_I2C_ADDR_FOO"
+    assert defined["EVK_INA236_SHUNT_FOO_OHMS"] == "0.030f"
+    assert defined["EVK_INA236_MAX_FOO_A"] == "2.5f"
 
 
 def test_emit_board_selects_e1m_x_pinout_for_x_routes(gen_module):

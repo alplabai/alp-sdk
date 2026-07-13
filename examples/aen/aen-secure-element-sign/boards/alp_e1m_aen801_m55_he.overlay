@@ -1,0 +1,15 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-secure-element-sign overlay for the E1M-AEN801 (Ensemble E8,
+ * M55-HE) RAM-run.  Retarget ROM to ITCM so Flow C can load and run
+ * this image without writing MRAM.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

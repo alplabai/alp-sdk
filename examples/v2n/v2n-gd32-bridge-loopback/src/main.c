@@ -29,9 +29,8 @@
  * SAFETY (read before plugging anything in)
  * ====================================================================
  *   * Jumper A is a DIRECT tap of the raw DAC0 net: the carrier's
- *     buffered DAC output path is INOPERABLE on this carrier revision
- *     and a bench rework (2026-06-04, documented in the internal
- *     carrier errata) is required before the raw tap reads true.
+ *     buffered DAC output path is INOPERABLE on this carrier revision,
+ *     so configured bench carriers use the raw tap for this validation.
  *     DAC and ADC share the same 1.8 V analog rail, so a direct
  *     loopback physically cannot overdrive the ADC pad; the
  *     DAC_MAX_SAFE_MV bound below is a linearity choice (stay off the

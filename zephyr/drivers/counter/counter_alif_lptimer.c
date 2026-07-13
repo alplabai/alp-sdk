@@ -30,7 +30,7 @@
  * for it; the only upstream code is the proprietary DFP CMSIS driver, which is
  * not consumable).  Distinct always-on block from the LPRTC (counter_dw_rtc.c)
  * and the UTIMER (counter_alif_utimer.c).  BENCH-UNVERIFIED.  INTERIM until E8
- * bench, then revisit.  See docs/adr/0017 + task #21.
+ * bench, then revisit.  See docs/adr/0017.
  *
  * CLOCK-GATE NOTE (BENCH-UNVERIFIED).  The LPTIMER input clock is selected (and
  * thereby gated on) per channel via the VBAT-domain TIMER_CLKSEL register

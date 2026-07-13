@@ -35,7 +35,9 @@ cd <setools>/app-release-exec-linux
 #   app-cfg entry: { binary mcuboot.bin, cpu_id M55_HE, loadAddress 0x58000000,
 #                    flags [load,boot], signed true }
 ./app-gen-toc -f build/config/app-mcuboot-only.json
-./app-write-mram -c /dev/ttyUSB0 -p
+# <your-serial-device>: your OS's port name for the SE-UART adapter --
+# see docs/cross-platform-setup.md §7.7 for the per-OS naming convention.
+./app-write-mram -c <your-serial-device> -p
 ```
 
 **Status (bench, E8): full chain RESULT PASS** (commit `7e3b2c58`, PR #170).

@@ -8,7 +8,8 @@
 # Same shape as vendors/alif/ (see CMakeLists.txt + i2c.c there
 # for the pattern).  ALP_HAS_RENESAS_FSP gates the real bodies;
 # without it the wrapper sources compile to empty translation
-# units and stub_backend.c keeps the NOSUPPORT defaults.
+# units and the split stub backend (src/common/stub/*.c) keeps the
+# NOSUPPORT defaults.
 
 if(NOT TARGET alp_sdk)
     message(FATAL_ERROR

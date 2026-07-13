@@ -205,6 +205,13 @@ backend.  A `sw_fallback:` floor (always `required: true`) backs
 every library so a slice with no matching capability still builds
 and runs.
 
+Priority entries may carry `status: planned` or `status: stub`.
+Those rows remain in metadata as the intended binding, but the
+loaders skip them until the library actually consumes the emitted
+symbol.  This keeps generated `alp.conf` files from claiming
+hardware acceleration that would still run through the library's
+software path.
+
 **Coverage status (v0.6).**  All 25 libraries in the schema enum
 ship a per-library `hw-backends.yaml`:
 
@@ -264,8 +271,8 @@ it's parked.  v0.5 cycle revisits.
 | lwIP / Mongoose | Zephyr's net stack + `<alp/iot.h>` MQTT path.  Mongoose available for users wanting an embedded HTTP server. |
 | u8g2        | Monochrome OLED graphics — pairs with the `chips/ssd1306` driver.                            |
 | SSD1306 / SSD1331 | Already in `chips/` library.                                                          |
-| [LwRB](https://github.com/MaJerle/lwrb) | **v0.4-prep, first consumer landed.**  In-tree LwRB stub impl at `vendors/lwrb/src/lwrb_stub_impl.c` (~140 LoC, single-producer / single-consumer with canonical empty/full disambiguation) backs the new opt-in `alp_uart_rx_ringbuf_*` helper on AEN-Zephyr (`CONFIG_ALP_SDK_UART_RX_RINGBUF`).  Upstream `MaJerle/lwrb@v3.2.0` west.yml pin stays behind the `extras-v04` group (default-disabled) until v0.4-final flips the group on and the upstream sources win the include search. |
-| [nanoPB](https://github.com/nanopb/nanopb) | **v0.4-prep, first consumer landed.**  In-tree placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` backs the optional 12-byte envelope wrapping `alp_mbox_send` payloads under `CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING`.  Schema at `metadata/protos/alp_mproc.proto` is the source of truth; the nanopb-generated `.pb.{c,h}` codec replaces the placeholder when the `extras-v04` west group lands upstream nanopb at v0.4-final.  Stub `<pb.h>` + `<pb_encode.h>` + `<pb_decode.h>` headers remain in place so `#include <pb.h>` doesn't break builds pre-swap. |
+| [LwRB](https://github.com/MaJerle/lwrb) | **Interim / deferred as of v0.9, first consumer landed.**  In-tree LwRB stub impl at `vendors/lwrb/src/lwrb_stub_impl.c` (~140 LoC, single-producer / single-consumer with canonical empty/full disambiguation) backs the opt-in `alp_uart_rx_ringbuf_*` helper on AEN-Zephyr (`CONFIG_ALP_SDK_UART_RX_RINGBUF`) and is the real, shipping implementation today.  Upstream `MaJerle/lwrb@v3.2.0` west.yml pin stays behind the `extras-lwrb-nanopb` group (default-disabled); no committed release flips the group on and swaps the upstream sources into the include search. |
+| [nanoPB](https://github.com/nanopb/nanopb) | **Interim / deferred as of v0.9, first consumer landed.**  In-tree placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` backs the optional 12-byte envelope wrapping `alp_mbox_send` payloads under `CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING`, and is the real, shipping implementation today.  Schema at `metadata/protos/alp_mproc.proto` is the source of truth; the nanopb-generated `.pb.{c,h}` codec replaces the placeholder whenever the `extras-lwrb-nanopb` west group lands upstream nanopb -- no committed release date.  Stub `<pb.h>` + `<pb_encode.h>` + `<pb_decode.h>` headers remain in place so `#include <pb.h>` doesn't break builds pre-swap. |
 
 ## Tier 4 — alternative inference backends (considered, deferred)
 

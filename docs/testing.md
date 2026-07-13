@@ -114,7 +114,7 @@ It does **not** prove:
 | Chip drivers (`chips/*/`)         | `tests/zephyr/chips/` with fakes for `lsm6dso`, `bme280`, `ssd1306`                                                    | per-chip on `nightly-aen-hil`         |
 | `<alp/soc_caps.h>` generation     | `pr-generated-files.yml` (drift gate)                                                                                  | n/a (generator-deterministic)         |
 | ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.1-snapshot.json` (drift gate)                                                 | n/a                                   |
-| `board.yaml` schema + loader      | `pr-metadata-validate.yml` smoke + `tests/scripts/test_alp_project.py`                                                 | n/a                                   |
+| `board.yaml` schema + loader      | `pr-metadata-validate.yml` smoke + `tests/scripts/test_project_*.py`                                                   | n/a                                   |
 
 ---
 
@@ -170,16 +170,16 @@ twister --testsuite-root tests/zephyr -p native_sim/native/64 \
 ### Static analysis
 
 ```bash
-# One-time: pin local clang-format to v14 (the version CI uses).
+# One-time: pin local clang-format to v22 (the version CI uses).
 bash scripts/setup-clang-format.sh
 
 # Diff-only clang-format (matches CI's pr-static-analysis behaviour).
-git diff -U0 HEAD~1 -- '*.c' '*.h' | clang-format-diff -p1
+git diff -U0 HEAD~1 -- '*.c' '*.h' ':!zephyr/**' ':!vendors/**' | clang-format-diff.py -p1
 ```
 
 Skipping the pin step is the single most common cause of green-locally /
-red-in-CI on the `pr-static-analysis` job -- clang-format v18+ reflows a
-handful of constructs that v14 doesn't.  See
+red-in-CI on the `pr-static-analysis` job -- clang-format reflows a
+handful of constructs differently between major versions.  See
 [`docs/contribution.md`](contribution.md#formatting) for the divergence
 list.
 
@@ -196,6 +196,7 @@ Every CI workflow has a local counterpart that runs the same coverage:
 | `pr-static-analysis.yml`       | `bash scripts/test-all.sh` (clang-format-diff stage)      |
 | `pr-generated-files.yml`       | `python3 scripts/gen_soc_caps.py --check`                 |
 | `pr-metadata-validate.yml`     | `python3 scripts/validate_metadata.py` + alp_project.py   |
+| public/private classifier      | `python3 scripts/check_public_private.py`                 |
 | `pr-doxygen.yml`               | `doxygen Doxyfile` (zero-warnings)                        |
 | (extension CI lives in `alplabai/alp-sdk-vscode`) | `cd ../alp-sdk-vscode && npm test`                     |
 | `coverity.yml`                 | none (Coverity Scan only)                                 |

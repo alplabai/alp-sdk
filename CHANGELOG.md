@@ -7,7 +7,161 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — portable AHRS sensor-fusion surface (`<alp/ahrs.h>`)
+
+- New `alp_ahrs_init` / `alp_ahrs_update_imu` / `alp_ahrs_euler` /
+  `alp_ahrs_reset` over a caller-owned `alp_ahrs_t` — a Madgwick IMU
+  orientation filter fusing gyro + accelerometer into a drift-corrected
+  quaternion (Euler read-out).  Pure C (libm), builds on all three OS
+  targets, opt-in via `libraries: [madgwick_ahrs]` (emits the new
+  `CONFIG_ALP_SDK_AHRS`).  Makes the previously metadata-only
+  `madgwick_ahrs` profile consumable; `drone-hud` drops its gyro-only
+  integrator (which drifted) and now fuses the accelerometer.  Includes a
+  guard against the stock Madgwick's `1/sqrt(0)` NaN when perfectly level.
+  `[ABI-EXPERIMENTAL]`; ABI snapshot regenerated.
+
+### Added — portable PID control surface (`<alp/pid.h>`)
+
+- New `alp_pid_init` / `alp_pid_step` / `alp_pid_reset` over a
+  caller-owned `alp_pid_t` (no pool/handle) with output clamping,
+  integrator anti-windup, and derivative-on-measurement.  Pure C, builds
+  on all three OS targets, opt-in via `libraries: [pid]` (emits the new
+  `CONFIG_ALP_SDK_PID`).  Makes the previously metadata-only `pid`
+  library-profile consumable; `drone-autopilot` drops its inline PID and
+  uses it.  `[ABI-EXPERIMENTAL]`; ABI snapshot regenerated.
+
+### Added — `<alp/dsp>` float I/O, one-sided FFT, biquad designer
+
+- **Float-native chain I/O:** `alp_dsp_chain_apply_samples_f32` /
+  `alp_dsp_chain_apply_bins_f32` consume and produce `float` directly, so
+  float DSP pipelines no longer round-trip through int16 (the int16
+  `_mv` variants stay as the ADC-domain flavour that composes with
+  `<alp/adc.h>`).
+- **One-sided real-FFT magnitude:** `ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED`
+  emits `n_points/2 + 1` positive-frequency bins (DC..Nyquist) instead of
+  the redundant two-sided spectrum.
+- **Biquad designer:** `alp_dsp_biquad_design(kind, f0, fs, q, coeffs)`
+  computes RBJ-cookbook low-pass / high-pass / band-pass / notch section
+  coefficients so apps stop hand-deriving filter math (the
+  `butterworth-lowpass` example now uses it). Scope is deliberately bounded
+  to the cookbook biquads — higher-order/Chebyshev/elliptic stay out.
+- All `[ABI-EXPERIMENTAL]`; ABI snapshot regenerated.
+
+### Fixed — `<alp/dsp>` sw_fallback correctness
+
+- **CMSIS FIR state:** the FIR stage re-init'd its CMSIS instance on every
+  `apply` (zeroing the delay line -> periodic glitches, and an undersized
+  state buffer for `arm_fir_f32`'s `n_taps + block - 1` requirement). Now a
+  persistent instance streamed in bounded blocks; state carries correctly
+  and matches the portable path.
+- **FFT scratch off the stack:** the CMSIS rfft's 4 KB scratch moved from a
+  stack array into the backend struct (stack-overflow risk on a default
+  thread).
+- **Q31-on-IIR rejected:** Q31 maps full-scale to +/-1.0 but a biquad's a1
+  ranges to +/-2, so Q31 IIR coefficients silently wrapped; `alp_dsp_chain_open`
+  now returns `ALP_ERR_NOSUPPORT` for Q31 IIR (Q31 stays valid for FIR).
+
+### Added — portable DSP scalar-stats surface (`alp_dsp_stats_f32`)
+
+- `<alp/dsp.h>` gains `alp_dsp_stats_f32(const float *x, size_t n,
+  alp_dsp_stats_t *out)` — a one-pass summary (mean, RMS, population
+  variance, min/max, abs-peak + index) that the SDK backs with CMSIS-DSP
+  `arm_mean/rms/min/max/absmax_f32` on Cortex-M and a portable-C pass
+  elsewhere, so application code never calls `arm_*` directly.  Marked
+  `[ABI-EXPERIMENTAL]` alongside the existing chain API.  The Zephyr
+  build now also defines `ALP_HAS_CMSIS_DSP=1` when `CONFIG_CMSIS_DSP=y`
+  (previously plain-CMake-only), so the `<alp/dsp>` FFT chain + stats
+  actually link CMSIS-DSP on the M55 instead of silently using the
+  portable-C fallback.
+
+### Changed — DSP examples use `<alp/dsp>` instead of hand-rolled FFT/stats
+
+- The five vibration/audio examples (rail-predictive-maintenance,
+  motor-current-signature, wearable-activity-fall,
+  acoustic-anomaly-wind-turbine, acoustic-safety-events) previously each
+  re-derived a radix-2 FFT and hand-rolled their moment statistics; they
+  now route the FFT through the `<alp/dsp>` chain and the reductions
+  through `alp_dsp_stats_f32`, dropping ~230 lines of duplicated DSP
+  math.  A single-bin Goertzel (wind-turbine) is intentionally retained
+  (right tool for one bin; no CMSIS kernel).  Teaching-comment density
+  was also raised on ~20 thin example `main.c` files.
+
+### Added — `butterworth-lowpass` example (`<alp/dsp>` IIR filter path)
+
+- New `examples/audio/butterworth-lowpass`: designs a 2nd-order
+  Butterworth low-pass biquad and runs passband + stopband tones through
+  the `<alp/dsp>` chain's `ALP_DSP_STAGE_IIR` stage (CMSIS-DSP
+  `arm_biquad_cascade_df1_f32` on the M55, portable-C under native_sim),
+  reporting per-tone gain via `alp_dsp_stats_f32`.  The chain's FIR/IIR
+  filter stages previously had no example (only the FFT path did).
+
+### Added — `--emit zephyr-board` generator (#523)
+
+- `scripts/alp_project.py --input <board.yaml> --core <core_id> --emit
+  zephyr-board --output <dir>` (`scripts/gen_zephyr_board.py`) generates
+  the per-core Zephyr board tree from the SoM preset + SoC JSON instead
+  of hand-authoring it under `zephyr/boards/alp/<board>/`.  The Alif
+  Ensemble (`aen`) family is fully generated (every file except
+  `board.cmake`); the committed `e1m_aen801_m55_hp` / `e1m_aen801_m55_he`
+  trees were regenerated in place, byte-identical to their prior
+  hand-authored content plus a standard "auto-generated, do not edit"
+  banner (`tests/scripts/test_gen_zephyr_board.py` pins the match).  The
+  Renesas RZ/V2N family (`v2n` / `v2n-m1`) generates the family-agnostic
+  files only (`board.yml`, `Kconfig.alp_<board>`, the twister `.yaml`);
+  its `.dts` / pinctrl `.dtsi` / `_defconfig` stay hand-authored until the
+  on-module GD32G553 supervisor's Renesas-side pin wiring lands in
+  `metadata/pinmux/*.yaml`.  New SoC-JSON fields backing the generator:
+  `cores[].zephyr_cpucluster` / `itcm_global_base` / `dtcm_global_base`,
+  `variants[].zephyr_soc_variant`; new SoM-preset fields:
+  `topology.<core>.zephyr_full_name` / `zephyr_twister_name`.  Wired into
+  `alp emit zephyr-board` too.  See `docs/architecture.md`'s generators
+  inventory and `docs/porting-new-som.md` §10.
+
+### Fixed — build-plan / emit path resolution (#596, #597, #598)
+
+- **`--emit build-plan` / `west alp-build` (#596):** relative `app:`
+  paths (Zephyr `west build` target, baremetal `cmake -S`) now resolve
+  against the project's `board.yaml` directory, never the calling
+  process's CWD.  Previously running the emit from a different
+  directory (or the repo root, where the app-dir's absence let the
+  root `CMakeLists.txt` satisfy a parent-directory fallback) could
+  silently point a slice's build command at the wrong tree.  The plan
+  is now byte-identical no matter where it's invoked from.
+- **Yocto app-only slices (#597):** `_slice_command` no longer hands
+  `app:` (a source-directory path) straight to `bitbake` -- an
+  app-only Yocto slice now requires a new `recipe:` field naming the
+  bitbake recipe that packages it; without one the slice is carried as
+  `command: null` plus a `yocto-recipe-missing` warning instead of an
+  invalid `bitbake <path>`.  Every slice's build-plan entry additionally
+  carries `appDir` (the resolved app source directory, independent of
+  `command`) -- an **additive** field per ADR 0014.  Two examples
+  (`lvgl-dashboard-x-evk`, `v2n-m1-ros-perception`) gained their
+  already-existing `recipe:` values; `v2n-power-monitor` has none yet
+  and now blocks explicitly rather than emitting a bogus command.
+- **`add_subdirectory()` consumers (#598):** `src/baremetal/CMakeLists.txt`
+  anchored its private include path + `vendors/` subdirectories on
+  `CMAKE_SOURCE_DIR` (the top-level project's root), which is the
+  *consumer's* root, not alp-sdk's, when alp-sdk is pulled in via
+  `add_subdirectory()` -- the documented embedded-consumer path. Fixed
+  to anchor on `CMAKE_CURRENT_SOURCE_DIR` instead. New
+  `tests/cmake-consumer/add-subdirectory-smoke` fixture + CI job prove
+  a real nested consumer configures, builds, and links.
+
 ## [v0.9.0] - 2026-07-06
+
+### Added — native_sim board overlay emit
+
+`scripts/alp_project.py --emit native-sim-overlay` (and `alp emit
+native-sim-overlay`) emit a native_sim board overlay: the canonical
+52-entry `alp,pin-array` mapped onto `zephyr,gpio-emul` controllers so a
+GPIO app links and resolves on `native_sim/native/64` (host emulation,
+emulated CI) with no silicon.  Unlike `--emit dts-overlay` — which stubs
+every pin-array triplet at `<&gpio0 0>` pending the upstream SoM board
+file — `gpio-emul` is the backing controller under native_sim, so the
+overlay is complete and directly buildable (`gpio-emul` caps at 32 pins,
+so the 52 pads span two controllers).  The pad ABI stays sourced from one
+place (`_e1m_gpio_canonical()`); consumers (Alp Studio, `alp init`
+scaffolds) wrap the emit instead of hand-authoring the pin map.
 
 ### Added — Studio carrier-netlist handoff
 

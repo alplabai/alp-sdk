@@ -68,6 +68,7 @@
 #include <alp/can.h>
 
 #include "can_ops.h"
+#include "common/alp_errno.h"
 
 #define ALP_Y_CAN_MAX_FILTERS 16
 
@@ -90,31 +91,31 @@ typedef struct {
 	y_can_filter_t  filters[ALP_Y_CAN_MAX_FILTERS];
 } y_can_data_t;
 
-/** @brief Map a (positive) errno value to the closest alp_status_t. */
+/*
+ * CAN-specific overrides on top of the shared @ref
+ * alp_status_from_posix_errno baseline (#630):
+ *
+ *   - EAGAIN -> ALP_ERR_TIMEOUT, not the baseline's ALP_ERR_BUSY.  This
+ *     backend's socket()/ioctl()/setsockopt() calls are synchronous
+ *     control-plane requests, not queue-full producer/consumer ops, so
+ *     an EAGAIN here means the kernel couldn't complete the request in
+ *     the current call and the caller should treat it like a deadline
+ *     rather than an immediate bus-busy signal -- matching the existing
+ *     ENOBUFS ("TX queue full") -> ALP_ERR_TIMEOUT special case a few
+ *     lines below in y_send().
+ *   - ENOPROTOOPT -> ALP_ERR_NOSUPPORT: a SocketCAN-only errno (rejected
+ *     setsockopt level/option, e.g. CAN_RAW_FD_FRAMES on a kernel/iface
+ *     without CAN-FD) with no equivalent in the shared baseline.
+ */
+static const alp_errno_override_t _can_errno_overrides[] = {
+	{ EAGAIN, ALP_ERR_TIMEOUT },
+	{ ENOPROTOOPT, ALP_ERR_NOSUPPORT },
+};
+
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case EINVAL:
-		return ALP_ERR_INVAL;
-	case EBUSY:
-		return ALP_ERR_BUSY;
-	case EAGAIN:
-	case ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case ENODEV:
-	case ENXIO:
-		return ALP_ERR_NOT_READY;
-	case ENOMEM:
-		return ALP_ERR_NOMEM;
-	case EOPNOTSUPP:
-	case ENOPROTOOPT:
-	case ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	return alp_status_from_posix_errno_ex(
+	    err, _can_errno_overrides, sizeof(_can_errno_overrides) / sizeof(_can_errno_overrides[0]));
 }
 
 /* Reinstall the union of all active kernel filters on the socket.
@@ -152,9 +153,9 @@ static void _dispatch_rx(y_can_data_t *d, const void *buf, ssize_t nbytes)
 		out.rtr                      = false; /* canfd_frame has no RTR (FD forbids RTR) */
 		out.fd                       = true;
 		out.brs                      = (cf->flags & CANFD_BRS) != 0;
-		out.dlc                      = cf->len;
-		if (out.dlc > sizeof(out.data)) out.dlc = sizeof(out.data);
-		memcpy(out.data, cf->data, out.dlc);
+		out.payload_len              = cf->len;
+		if (out.payload_len > sizeof(out.data)) out.payload_len = sizeof(out.data);
+		memcpy(out.data, cf->data, out.payload_len);
 	} else if ((size_t)nbytes >= sizeof(struct can_frame)) {
 		const struct can_frame *cf = (const struct can_frame *)buf;
 		out.id                     = cf->can_id & CAN_EFF_MASK;
@@ -162,9 +163,10 @@ static void _dispatch_rx(y_can_data_t *d, const void *buf, ssize_t nbytes)
 		out.rtr                    = (cf->can_id & CAN_RTR_FLAG) != 0;
 		out.fd                     = false;
 		out.brs                    = false;
-		out.dlc                    = cf->can_dlc;
-		if (out.dlc > ALP_CAN_MAX_DLC_CLASSIC) out.dlc = ALP_CAN_MAX_DLC_CLASSIC;
-		memcpy(out.data, cf->data, out.dlc);
+		out.payload_len            = cf->can_dlc;
+		if (out.payload_len > ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC)
+			out.payload_len = ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC;
+		memcpy(out.data, cf->data, out.payload_len);
 	} else {
 		return; /* short / malformed read */
 	}
@@ -361,23 +363,23 @@ y_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame, uint32_t timeo
 	ssize_t wr;
 	if (frame->fd) {
 		if (!d->fd_frames) return ALP_ERR_NOSUPPORT;
-		if (frame->dlc > ALP_CAN_MAX_DLC_FD) return ALP_ERR_INVAL;
+		if (frame->payload_len > ALP_CAN_MAX_PAYLOAD_BYTES_FD) return ALP_ERR_INVAL;
 		struct canfd_frame cf;
 		memset(&cf, 0, sizeof(cf));
 		cf.can_id = can_id; /* FD frames never carry RTR */
-		cf.len    = frame->dlc;
+		cf.len    = frame->payload_len;
 		cf.flags  = (uint8_t)(frame->brs ? CANFD_BRS : 0);
-		memcpy(cf.data, frame->data, frame->dlc);
+		memcpy(cf.data, frame->data, frame->payload_len);
 		wr = write(d->fd, &cf, sizeof(cf));
 		if (wr == (ssize_t)sizeof(cf)) return ALP_OK;
 	} else {
-		if (frame->dlc > ALP_CAN_MAX_DLC_CLASSIC) return ALP_ERR_INVAL;
+		if (frame->payload_len > ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC) return ALP_ERR_INVAL;
 		if (frame->rtr) can_id |= CAN_RTR_FLAG;
 		struct can_frame cf;
 		memset(&cf, 0, sizeof(cf));
 		cf.can_id  = can_id;
-		cf.can_dlc = frame->dlc;
-		memcpy(cf.data, frame->data, frame->dlc);
+		cf.can_dlc = frame->payload_len;
+		memcpy(cf.data, frame->data, frame->payload_len);
 		wr = write(d->fd, &cf, sizeof(cf));
 		if (wr == (ssize_t)sizeof(cf)) return ALP_OK;
 	}

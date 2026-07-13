@@ -23,6 +23,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/adc/adc_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(adc);
@@ -33,7 +34,7 @@ ALP_BACKEND_ANCHOR(adc);
  * src/zephyr/last_error.c.  Declared in src/zephyr/handles.h but
  * we forward-declare here to avoid pulling in the broader handles
  * header (which carries unrelated peripheral declarations). */
-extern void alp_z_set_last_error(alp_status_t s);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_ADC_HANDLE_POOL
 #define CONFIG_ALP_SDK_ADC_HANDLE_POOL 8
@@ -44,9 +45,12 @@ static struct alp_adc _pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
 static struct alp_adc *_alloc_handle(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_ADC_HANDLE_POOL; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch
+		 * the slot's other fields (in_use is the struct's last
+		 * member, so zero everything before it -- including
+		 * lifecycle/active_ops, parking a fresh slot at UNOPENED). */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_adc, in_use));
 			return &_pool[i];
 		}
 	}
@@ -55,7 +59,7 @@ static struct alp_adc *_alloc_handle(void)
 
 static void _free_handle(struct alp_adc *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg)
@@ -66,13 +70,18 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg)
 	}
 	/* SoC capability gate: reject a resolution the active SoC can't
      * deliver before any backend dispatch.  ALP_SOC_ADC_MAX_RESOLUTION_BITS
-     * is UINT16_MAX under CONFIG_ALP_SOC_NONE, so this is a no-op there
-     * and a valid-but-unresolved channel surfaces NOT_READY from the
-     * backend open() instead. */
+     * is UINT16_MAX under CONFIG_ALP_SOC_NONE -- provably >= any uint8_t
+     * cfg->resolution_bits, so the check is a documented no-op there (a
+     * valid-but-unresolved channel surfaces NOT_READY from the backend
+     * open() instead) and the #if below compiles it out entirely instead
+     * of leaving a runtime comparison GCC's -Wtype-limits (correctly)
+     * flags as provably-always-false for that sentinel (issue #634). */
+#if ALP_SOC_ADC_MAX_RESOLUTION_BITS < UINT8_MAX
 	if ((uint32_t)cfg->resolution_bits > (uint32_t)ALP_SOC_ADC_MAX_RESOLUTION_BITS) {
 		alp_z_set_last_error(ALP_ERR_OUT_OF_RANGE);
 		return NULL;
 	}
+#endif
 	const alp_backend_t *be = alp_backend_select("adc", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
@@ -103,15 +112,28 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_adc_read_raw(alp_adc_t *h, int32_t *raw_out)
 {
+	/* Preserve the original contract: a NULL handle OR NULL out-param is
+	 * ALP_ERR_INVAL (not NOT_READY). Only a non-NULL but closed/closing
+	 * handle yields NOT_READY via the op-enter gate. */
 	if (h == NULL || raw_out == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	return h->state.ops->read_raw(&h->state, raw_out);
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc_handle/_free_handle, so
+	 * mixing it with a plain read here is a data race, and a racing
+	 * close could free the slot mid-op (issue #629). */
+	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = h->state.ops->read_raw(&h->state, raw_out);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_adc_read_uv(alp_adc_t *h, int32_t *uv_out)
@@ -119,16 +141,22 @@ alp_status_t alp_adc_read_uv(alp_adc_t *h, int32_t *uv_out)
 	if (h == NULL || uv_out == NULL) {
 		return ALP_ERR_INVAL;
 	}
+	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	int32_t      raw = 0;
 	alp_status_t rc  = h->state.ops->read_raw(&h->state, &raw);
 	if (rc != ALP_OK) {
+		alp_handle_op_leave(&h->active_ops);
 		return rc;
 	}
 	const int64_t fs = (int64_t)((1u << h->state.resolution_bits) - 1u);
 	if (fs == 0) {
+		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_NOT_READY;
 	}
 	*uv_out = (int32_t)((int64_t)raw * (int64_t)h->state.reference_uv / fs);
+	alp_handle_op_leave(&h->active_ops);
 	return ALP_OK;
 }
 
@@ -137,9 +165,18 @@ void alp_adc_close(alp_adc_t *h)
 	if (h == NULL) {
 		return;
 	}
+	/* Gate out new ops and drain any in-flight one before touching
+	 * state.ops -- makes "close races a blocked/in-flight op" a
+	 * bounded wait instead of a use-after-free (issue #629).  Losing
+	 * the CAS (already closed/closing/never-opened) makes this a
+	 * no-op, matching the existing void-close idempotency contract. */
+	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+		return;
+	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free_handle(h);
 }
 

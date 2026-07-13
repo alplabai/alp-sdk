@@ -362,7 +362,7 @@ def test_per_key_merge_app_overrides_topology(tmp_path: Path) -> None:
     assert slice_.libraries == ["cmsis_dsp"]
     # Topology-supplied:
     assert slice_.os == "zephyr"
-    assert slice_.board == "alp_e1m_v2n101_m33_sm"
+    assert slice_.board == "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
     assert slice_.toolchain == "arm-zephyr-eabi"
 
 

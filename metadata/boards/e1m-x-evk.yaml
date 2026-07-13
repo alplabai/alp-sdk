@@ -22,7 +22,7 @@
 
 name: E1M-X-EVK
 display_name: "E1M-X Development Board (45x65 board)"
-hosts_som_families: [renesas-rzv2n]
+hosts_som_families: [renesas-rzv2n, renesas-rzv2n-deepx]
 
 # Standard population -- parts confirmed present on the EVK BOM.
 # Each `true` becomes CONFIG_ALP_SDK_CHIP_<NAME>=y at build time;
@@ -217,9 +217,9 @@ e1m_routes:
         board_alias: BOARD_DAC0,
         doc: "DAC0 analog output.  Header J15.2 (DAC0_OUT) is the
               x2-buffered copy, but the buffered path is INOPERABLE on
-              this carrier revision (carrier erratum, fixed next rev;
-              rework details in the internal carrier errata).  Bench use
-              taps the raw 1.8 V-full-scale DAC0 net instead." }
+              this carrier revision (carrier erratum, fixed next rev).
+              Bench validation taps the raw 1.8 V-full-scale DAC0 net
+              instead." }
     - { e1m: E1M_X_DAC1, macro: XEVK_DAC1,
         board_alias: BOARD_DAC1,
         doc: "DAC1 analog output." }

@@ -10,7 +10,7 @@
  * (drivers/audio/alif_pdm.c, compatible "alif,alif_pdm").  hal_alif ships no PDM
  * / DMIC class driver, so this header is carried in-tree alongside the driver so
  * both survive a `west update`.  Retire onto the opt-in sdk-alif fork once the
- * pdm node is repointed AND bench-verified (task #21).  See
+ * pdm node is repointed AND bench-verified.  See
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  */

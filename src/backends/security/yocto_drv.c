@@ -48,9 +48,17 @@
  * Semantics parity with the zephyr_drv (PSA) backend:
  *   - tag mismatch on decrypt   -> ALP_ERR_IO (integrity failure)
  *   - bad alg / key length      -> ALP_ERR_INVAL at open
- *   - hash_finish releases the backend blob on BOTH success and
- *     failure (the dispatcher frees its handle slot after finish
- *     unconditionally, so holding the blob would leak it).
+ *   - hash_finish handle lifecycle (GHSA-92c3-v48m-m5gg): the
+ *     dispatcher only auto-closes the public handle on ALP_OK, so
+ *     this backend must match -- release the EVP_MD_CTX blob on
+ *     ALP_OK (success) and on any hard failure (e.g. EVP_DigestFinal_ex
+ *     erroring out), but NOT on a too-small @c digest_out: that path
+ *     reports the required length via @c digest_len and leaves the
+ *     blob alive so a correctly sized retry or an explicit
+ *     alp_hash_close() can still tear it down.  Freeing it there used
+ *     to strand the dispatcher's own handle-pool slot (the outer
+ *     handle stays open on failure, but state->be_data would already
+ *     be NULL) and could exhaust CONFIG_ALP_SDK_MAX_HASH_HANDLES.
  */
 
 #if defined(__linux__)
@@ -173,20 +181,29 @@ static alp_status_t y_hash_finish(alp_hash_backend_state_t *state,
                                   size_t                    digest_cap,
                                   size_t                   *digest_len)
 {
-	if (digest_len != NULL) *digest_len = 0;
 	struct hash_be *be = (struct hash_be *)state->be_data;
-	if (be == NULL || be->ctx == NULL) return ALP_ERR_NOT_READY;
+	if (be == NULL || be->ctx == NULL) {
+		if (digest_len != NULL) *digest_len = 0;
+		return ALP_ERR_NOT_READY;
+	}
 	if (digest_cap < be->digest_len) {
-		/* The dispatcher frees its handle slot after finish either
-		 * way -- release the blob here too so it doesn't leak. */
-		hash_be_free(state, be);
+		/* GHSA-92c3-v48m-m5gg: report the required length but leave
+		 * the blob (and state->be_data) alone -- the dispatcher does
+		 * not auto-close the public handle on this ALP_ERR_INVAL, so
+		 * freeing it here would leave that handle referencing a
+		 * dangling backend and could exhaust the hash handle pool
+		 * across repeated too-small-buffer calls. */
+		if (digest_len != NULL) *digest_len = be->digest_len;
 		return ALP_ERR_INVAL;
 	}
 
 	unsigned int n  = 0;
 	int          rc = EVP_DigestFinal_ex(be->ctx, digest_out, &n);
 	hash_be_free(state, be);
-	if (rc != 1) return ALP_ERR_IO;
+	if (rc != 1) {
+		if (digest_len != NULL) *digest_len = 0;
+		return ALP_ERR_IO;
+	}
 	if (digest_len != NULL) *digest_len = (size_t)n;
 	return ALP_OK;
 }
@@ -240,7 +257,9 @@ static alp_status_t y_aead_encrypt(alp_aead_backend_state_t *state,
 	if (iv == NULL || iv_len == 0) return ALP_ERR_INVAL;
 	if (aad == NULL && aad_len > 0) return ALP_ERR_INVAL;
 	if (plain == NULL && plain_len > 0) return ALP_ERR_INVAL;
-	if (tag_out == NULL || tag_len < 16) return ALP_ERR_INVAL;
+	/* tag_len must be exactly 16 B -- the only length every backend
+	 * (this one, zephyr_drv.c, se_cryptocell.c) round-trips. */
+	if (tag_out == NULL || tag_len != 16) return ALP_ERR_INVAL;
 
 	const EVP_CIPHER *c = aead_cipher(state->alg, NULL);
 	if (c == NULL) return ALP_ERR_NOSUPPORT;
@@ -290,7 +309,8 @@ static alp_status_t y_aead_decrypt(alp_aead_backend_state_t *state,
 	if (aad == NULL && aad_len > 0) return ALP_ERR_INVAL;
 	if (cipher == NULL && cipher_len > 0) return ALP_ERR_INVAL;
 	if (plain_out == NULL && cipher_len > 0) return ALP_ERR_INVAL;
-	if (tag == NULL || tag_len < 16) return ALP_ERR_INVAL;
+	/* tag_len must be exactly 16 B -- see y_aead_encrypt. */
+	if (tag == NULL || tag_len != 16) return ALP_ERR_INVAL;
 
 	const EVP_CIPHER *c = aead_cipher(state->alg, NULL);
 	if (c == NULL) return ALP_ERR_NOSUPPORT;

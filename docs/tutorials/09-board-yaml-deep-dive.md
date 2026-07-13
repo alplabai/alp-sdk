@@ -290,11 +290,15 @@ cores:
 ```
 
 Toggles the connectivity subsystems for this slice.  Each
-`true` pulls in the matching backend (Wi-Fi stack, MQTT client,
-mbedTLS / OpenSSL, BLE host).  Per-core under v2 -- a
-heterogeneous build typically lights up `wifi/mqtt/tls` on the
-A-class slice and leaves the M-class slice quiet.  TLS pinning
-lives in application code -- see Tutorial [11: MQTT-TLS publish](11-mqtt-tls-publish.md).
+`true` emits the matching build config for that slice.  Zephyr
+resolves the SoM's wireless provider first: AEN emits the exact
+CC3501E Wi-Fi/BLE bridge backends, unknown native-radio providers
+emit Zephyr `wifi_mgmt` / BT-host gates, and Linux-owned Murata/CYW
+providers stay on the Yocto slice.  Yocto emits the Linux userland
+and runtime hand-off (`wpa-supplicant`, BlueZ, MQTT/security
+`PACKAGECONFIG`) while the BSP/machine layer owns provider-specific
+kernel modules and firmware.  TLS pinning lives in application code
+-- see Tutorial [11: MQTT-TLS publish](11-mqtt-tls-publish.md).
 
 ### `cores.<id>.libraries`
 
@@ -515,9 +519,9 @@ diagnostics:
 ```
 
 Run `python3 scripts/validate_board_yaml.py --input board.yaml`
-to lint before building.  Exit 0 = ok; exit 1 = schema error
-(JSON-pointer location in the message); exit 2 = missing
-preset; exit 3 = hw_rev incompatible with SDK version.
+to lint before building.  Exit 0 = no hard errors (warnings such
+as ALP-B010 may still print); exit 1 = schema, cross-reference, or
+orchestrator consistency error.
 
 ## What you can't put in `board.yaml`
 

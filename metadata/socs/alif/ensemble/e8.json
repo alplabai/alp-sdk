@@ -85,7 +85,10 @@
       "isa": "Armv8.1-M",
       "trustzone": true,
       "vector_extension": "Helium",
-      "fpu": "double-precision"
+      "fpu": "double-precision",
+      "zephyr_cpucluster": "rtss_hp",
+      "itcm_global_base": 1342177280,
+      "dtcm_global_base": 1350565888
     },
     {
       "id": "m55_he",
@@ -97,7 +100,10 @@
       "isa": "Armv8.1-M",
       "trustzone": true,
       "vector_extension": "Helium",
-      "fpu": "double-precision"
+      "fpu": "double-precision",
+      "zephyr_cpucluster": "rtss_he",
+      "itcm_global_base": 1476395008,
+      "dtcm_global_base": 1484783616
     }
   ],
   "npus": [

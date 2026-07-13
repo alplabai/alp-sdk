@@ -31,11 +31,13 @@
 //
 // e8.json cores[id=m55_hp].type = "cortex-m55".
 //
-// NOTE: "cortex-m55" CPU support depends on the Renode build.  If the
-// pinned Renode (v1.15.3) does not recognise "cortex-m55", fall back to
-// "cortex-m33" (same Armv8-M baseline; Helium/MVE is not exercised by
-// hello-world) -- documented as a TODO in the PR, to be confirmed on the
-// CI runner.
+// NOTE: "cortex-m55" (+ Helium/MVE) is supported since Renode v1.16.1,
+// which is the pinned version; the earlier v1.15.3 lacked it and needed
+// a cortex-m33 fallback.  NB: like the RZ/V2N M33, an ARMv8-M image on
+// v1.16.x needs its Secure VTOR (SCB->VTOR @ 0xE000ED08) seeded to the
+// vector table or exceptions fetch from 0 and HardFault-storm -- the
+// --sim-mode boot script does this (build_sim_resc_text); the non-sim
+// smoke .resc does not yet, so it stays advisory on AEN.
 cpu: CPU.CortexM @ sysbus
     cpuType: "cortex-m55"
     nvic: nvic
@@ -57,10 +59,28 @@ nvic: IRQControllers.NVIC @ sysbus 0xE000E000
 itcm: Memory.MappedMemory @ sysbus 0x50000000
     size: 0x40000
 
+// ITCM *local* alias @ 0x0.  The M55 sees its ITCM at both the global
+// window (0x50000000) and the CPU-local 0x0.  `west alp-renode
+// --sim-mode` boots an ITCM-linked image (chosen zephyr,flash = &itcm)
+// whose vector table + code link at the local 0x0 -- a low, bit31-clear
+// Code-region address.  This is deliberate: Renode v1.16.1's Cortex-M55
+// mis-executes a vector table placed at a high address like the MRAM
+// base 0x80000000 (it jumps to VTOR instead of [VTOR+4]); linking into
+// ITCM@0x0 sidesteps that entirely (VTOR=0, the reset default).
+itcm_local: Memory.MappedMemory @ sysbus 0x0
+    size: 0x40000
+
 // DTCM @ 0x50800000, 1024 KiB (e8.json SRAM3_M55_HP_DTCM = 1024;
 //                              board .dts dtcm global_base = 0x50800000)
 dtcm: Memory.MappedMemory @ sysbus 0x50800000
     size: 0x100000
+
+// --- SRAM0 (global on-chip SRAM) --------------------------------------
+// The Ensemble on-chip SRAM window the M55 image uses for .data/.bss +
+// the ram_console ring (ram_console_buf ~0x20000251).  Sized to cover
+// the used range.
+sram0: Memory.MappedMemory @ sysbus 0x20000000
+    size: 0x800000
 
 // --- On-die MRAM (non-volatile "flash") -------------------------------
 //
@@ -82,3 +102,43 @@ mram: Memory.MappedMemory @ sysbus 0x80000000
 uart5: UART.NS16550 @ sysbus 0x4901d000
     wideRegisters: true
     -> nvic@129
+
+// --- Alif clock / system stubs (sim-only) -----------------------------
+//
+// The Ensemble M55 boot polls the CGU (Clock Generation Unit) + the
+// EXPMST expansion-master control before the console comes up; stock
+// Renode models neither, so unmapped accesses would storm the core at
+// __enable_irq.  These coarse Python stubs return 0 for the whole
+// window -- enough for the FSP/Zephyr clock bring-up to complete and
+// the app to reach main() (same technique as renesas_rzv2n's CPG stub).
+// Not a faithful CGU; the minimum to let a real M55 image boot headless.
+alif_cgu: Python.PythonPeripheral @ sysbus 0x1A600000
+    size: 0x100000
+    initable: true
+    script: "request.Value = 0x0"
+
+alif_expmst: Python.PythonPeripheral @ sysbus 0x49020000
+    size: 0x10000
+    initable: true
+    script: "request.Value = 0x0"
+
+// --- Sim descriptor peripherals (studio hardware simulator, #687) ------
+//
+// The EVK demo's I2C0-header devices + button/LED + the ssd1306 display
+// buffer, exposed so the studio sim descriptor's inject commands resolve.
+// These are stand-in models (like renesas_rzv2n's tmp112): the inject
+// path sets/reads them directly over the monitor; a demo firmware that
+// actually drives them over the real Alif I2C/GPIO is future work (needs
+// the vision image + faithful Alif I2C/GPIO models).
+sim_i2c: I2C.OpenCoresI2C @ sysbus 0x49010000
+
+// lsm6dso 6-axis IMU (EVK I2C0 @ 0x6A).  Renode has no LSM6DSO; the
+// LSM9DS1 IMU stands in -- inject drives its Acceleration* properties.
+i2c_lsm6dso: Sensors.LSM9DS1_IMU @ sim_i2c 0x6a
+
+sim_gpio: GPIOPort.ARM_AHB_GPIO @ sysbus 0x49011000
+
+// Encoder-switch trigger button (EVK_PIN_ENCODER_SW), active-low.
+gpio_button: Miscellaneous.Button @ sim_gpio 0
+    -> sim_gpio@0
+

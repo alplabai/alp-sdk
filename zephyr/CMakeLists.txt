@@ -28,7 +28,7 @@ endif()
 # slot0/slot1; this fork copy sets FLASH_HAS_DRIVER_ENABLED.  Pure CMSIS
 # register/memory access: no private upstream header and no hal_alif library,
 # so no extra include path.  Binding under zephyr/dts/bindings/flash_controller/;
-# node in the board overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# node in the board overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_sources_ifdef(CONFIG_MRAM_FLASH_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_mram_alif.c)
 
@@ -64,6 +64,11 @@ zephyr_library_named(alp_sdk)
 zephyr_library_sources(
     # Runtime capability table -- always compiled; pure .rodata, no Kconfig guard.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/cap.c
+    # alp_status_name() / alp_status_description() -- generated from the
+    # alp_status_t enum (scripts/gen_status_strings.py).  The name table is
+    # always compiled (pure .rodata); the description table gates on
+    # CONFIG_ALP_STATUS_DESCRIPTIONS internally so this TU compiles either way.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/status_strings.c
     # SDK lifecycle (alp_init / alp_deinit) -- OS-agnostic, always compiled.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/init.c
     # Runtime SDK-version accessor -- always compiled; pure .rodata.
@@ -102,7 +107,13 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_periph.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_sys.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_wifi.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_ble.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_diag.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_ota.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_sock.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_gpio.c)
 
 
 
@@ -127,6 +138,22 @@ endif()
 if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_LITTLEFS)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_littlefs.c)
+    # zephyr_littlefs.c includes <zephyr/fs/littlefs.h>, which itself
+    # includes <lfs.h> from the upstream littlefs module -- but that
+    # header lives outside ZEPHYR_BASE, so the compiler can't find it
+    # without this module's include dir on the path. Zephyr's own
+    # subsys/fs/littlefs_fs.c gets this for free via the `LITTLEFS`
+    # INTERFACE target (zephyr/modules/littlefs/CMakeLists.txt); our
+    # alp-sdk zephyr module is a separate CMake library, so it needs
+    # its own copy of the include path. ZEPHYR_LITTLEFS_MODULE_DIR is
+    # set by Zephyr's module-resolution pass whenever modules/fs/littlefs
+    # is present (default-enabled `fs` group in Zephyr's own west.yml,
+    # so both an alp-sdk-topdir workspace and CI's `west init -m zephyr`
+    # workspace pick it up) -- guard on it being defined rather than
+    # assuming presence.
+    if(DEFINED ZEPHYR_LITTLEFS_MODULE_DIR)
+        zephyr_library_include_directories(${ZEPHYR_LITTLEFS_MODULE_DIR})
+    endif()
 endif()
 
 # Renesas RZ SPI_B (RSPI) controller driver -- carried here (not upstream
@@ -171,6 +198,28 @@ if(CONFIG_USE_RZ_FSP_SCI_B_SPI)
         ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/inc/instances/rzv)
 endif()
 
+# Renesas RZ/V2N MHU-B inter-core mailbox -- vendor+adapted FSP module (alp-sdk
+# #683).  RZ/V2N's MHU is the "MHU-B" IP (a non-linear 42-slot register
+# crossbar, hal_renesas's bsp_mhu_b.h), NOT the plain linear MHU the upstream
+# Zephyr mbox_renesas_rz_mhu.c + FSP r_mhu_ns.c pair implements -- that pair
+# does not compile for rzv2n (BSP_FEATURE_MHU_NS_VALID_CHANNEL_MASK /
+# _SEND_TYPE_RSP_VALID_CHANNEL_MASK are undefined for this SoC).  Renesas ships
+# no r_mhu_b_ns FSP module for any part, so it is carried here as a from-scratch
+# adaptation (structurally mirroring r_mhu_ns.c/.h) under
+# zephyr/drivers/mbox/r_mhu_b_ns/, gated by USE_RZ_FSP_MHU_B; the Zephyr glue
+# (distinct compatible `renesas,rz-mhu-b-mbox`, NOT a patch of
+# mbox_renesas_rz_mhu.c) is zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c, gated
+# by MBOX_RENESAS_RZ_MHU_B.  vendor-ext, BENCH-UNVERIFIED -- see
+# r_mhu_b_ns.c's file header for the register-semantic notes.
+zephyr_library_sources_ifdef(CONFIG_MBOX_RENESAS_RZ_MHU_B
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c)
+if(CONFIG_USE_RZ_FSP_MHU_B)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns/r_mhu_b_ns.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns)
+endif()
+
 # Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
 # BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
 # `west update`.  Standard Zephyr MBOX-class driver (DT_DRV_COMPAT
@@ -195,7 +244,7 @@ if(CONFIG_HWSEM_ALIF)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/misc/alif_hwsem)
 endif()
 
-# (Retired, task #21 / ADR 0017) No Alif LPI2C driver: LPI2C0 is slave-only
+# (Retired per ADR 0017) No Alif LPI2C driver: LPI2C0 is slave-only
 # (TRM §3.17.4), so a master driver is a dead end; the housekeeping trio is
 # Tier-3 (Alif SE services), edge I2C is Tier-1 upstream i2c_dw.
 
@@ -282,7 +331,7 @@ zephyr_library_sources_ifdef(CONFIG_COUNTER_ALIF_LPTIMER
 # USE_ALIF_HAL_ANALOG to pull that in.  The driver reuses upstream's private
 # adc_context.h, so put drivers/adc on the include path (the spi_context.h
 # precedent above).  Bindings under zephyr/dts/bindings/adc/; nodes in the E8
-# SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# SoC overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_ADC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/adc/adc_alif.c)
 if(CONFIG_ADC_ALIF)
@@ -295,7 +344,7 @@ endif()
 # USE_ALIF_HAL_ANALOG to pull that in (shared with ADC_ALIF).  Unlike the ADC, the
 # DAC driver pulls in no private upstream context header, so no extra include dir
 # is needed.  Bindings under zephyr/dts/bindings/dac/; nodes in the E8 SoC
-# overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_DAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dac/dac_alif.c)
 
@@ -321,7 +370,7 @@ zephyr_library_sources_ifdef(CONFIG_CRC_ALIF
 # that in (shared with ADC_ALIF / DAC_ALIF).  No private upstream context header,
 # so no extra include dir is needed.  Binding under
 # zephyr/dts/bindings/comparator/; nodes in the E8 SoC overlay.  ADR 0017 Tier-2
-# (INTERIM, task #21).
+# (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_CMP_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/comparator/comparator_alif.c)
 
@@ -331,7 +380,7 @@ zephyr_library_sources_ifdef(CONFIG_CMP_ALIF
 # clock_control/pinctrl (no hal_alif library, like flash_mram_alif); implements the
 # Zephyr DMIC API.  Binding zephyr/dts/bindings/audio/alif,alif-pdm.yaml + the
 # private header zephyr/include/zephyr/drivers/pdm/pdm_alif.h; node in the E8 SoC
-# overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_ALIF_PDM
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/audio/alif_pdm.c)
 if(CONFIG_ALIF_PDM)
@@ -348,7 +397,7 @@ endif()
 # DesignWare I2S driver.  Implements the standard Zephyr I2S API; FIFO/interrupt
 # driven (no DMA subsystem dependency -- see CONFIG_I2S_DW).  Binding
 # zephyr/dts/bindings/i2s/snps,designware-i2s.yaml; node in the app overlay.
-# ADR 0017 Tier-2 (INTERIM, task #21).
+# ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_I2S_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/i2s/i2s_dw.c)
 if(CONFIG_I2S_DW)
@@ -427,6 +476,32 @@ zephyr_library_sources_ifdef(CONFIG_MIPI_DPHY_DW
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/isp_pico.c)
 
+# Alif Ensemble DISPLAY path -- TES CDC-2.1 (CDC200) DPI/RGB display controller
+# (compatible "tes,cdc-2.1"), vendored from the Apache-2.0 zephyr_alif fork
+# (drivers/display/display_cdc200.c) + PORTED to the v4.4 display API by Alp Lab
+# AB.  Upstream Zephyr v4.4 + hal_alif ship no tes,cdc-2.1 or DPI display
+# driver, so the source is carried in-tree to survive a `west update`.  The TU
+# uses hal_alif's <soc_memory_map.h> only under CONFIG_FB_USES_DTCM_REGION; the
+# default SRAM0 framebuffer path needs neither it nor the hal_alif common include
+# dir.  ADR 0017 Tier-2 (INTERIM).
+if(CONFIG_DISPLAY_CDC200 AND CONFIG_FB_USES_DTCM_REGION)
+    zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
+endif()
+zephyr_library_sources_ifdef(CONFIG_DISPLAY_CDC200
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/display_cdc200.c)
+
+# Synopsys DesignWare MIPI-DSI host controller (compatible "snps,designware-dsi"),
+# the DSI-TX bridge from the CDC200 DPI source to the shared DesignWare MIPI
+# D-PHY (TX role) on the Alif Ensemble E8.  Vendored from the Apache-2.0
+# zephyr_alif fork (drivers/mipi_dsi/dsi_dw.c) + PORTED to the v4.4 MIPI-DSI host
+# API by Alp Lab AB.  Upstream Zephyr v4.4 has the mipi_dsi bus class but no
+# snps,designware-dsi host driver.  ADR 0017 Tier-2 (INTERIM, task #21).
+if(CONFIG_MIPI_DSI_DW)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+endif()
+zephyr_library_sources_ifdef(CONFIG_MIPI_DSI_DW
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dsi/dsi_dw.c)
+
 # Alif Ensemble CAN-FD controller (CAST CAN-CTRL IP, compatible "cast,can",
 # CANFD0 base 0x49036000), vendored VERBATIM from the Apache-2.0 zephyr_alif
 # fork (drivers/can/can_cast.c + can_cast.h).  Upstream Zephyr v4.4 ships only
@@ -438,32 +513,40 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 # Zephyr clock_control / pinctrl / can.h class APIs; it needs only the
 # soc_common.h supplied by our Ensemble soc-bridge above (no hal_alif lib, no
 # extra include path).  Binding under zephyr/dts/bindings/can/cast,can.yaml;
-# node in the E8 SoC overlay.  ADR 0017 Tier-2 (INTERIM, task #21).
+# node in the E8 SoC overlay.  ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_CAN_ALIF_CAST
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/can/can_cast.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/sw_fallback.c)
 # USB registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/usb_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/zephyr_drv.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/sw_fallback.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/usb/sw_fallback.c)
 # BLE registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/ble_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/zephyr_drv.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BLE_CC3501E
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/cc3501e.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/sw_fallback.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ble/sw_fallback.c)
 # Wi-Fi registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/wifi_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/zephyr_drv.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_WIFI_CC3501E
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/cc3501e.c)
 
-zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/sw_fallback.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/wifi/sw_fallback.c)
 # MQTT registry sources.  Dispatcher + portable Zephyr backend ship
 # unconditionally; sw_fallback gated on the native_sim opt-in.
 zephyr_library_sources(
@@ -691,6 +774,27 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DSP
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/dsp_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dsp/sw_fallback.c)
 
+# The DSP body + stats surface call CMSIS-DSP kernels (arm_rfft_fast_f32,
+# arm_mean/rms/min/max/absmax_f32) when the cmsis-dsp module is linked,
+# else the portable-C fallbacks.  The plain-CMake build sets this via
+# option(ALP_HAS_CMSIS_DSP); mirror it under Zephyr keyed off
+# CONFIG_CMSIS_DSP, otherwise the M55 build silently used portable-C even
+# with cmsis-dsp present.  board.yaml `libraries: [cmsis_dsp]` enables the
+# full component matrix, so TRANSFORM (arm_rfft_*) + STATISTICS (arm_*_f32)
+# link cleanly.  (The macro is only consumed inside the CONFIG_ALP_SDK_DSP
+# sources above, so enabling cmsis-dsp without the DSP class is inert.)
+zephyr_compile_definitions_ifdef(CONFIG_CMSIS_DSP ALP_HAS_CMSIS_DSP=1)
+
+# Portable Madgwick AHRS (<alp/ahrs.h>).  Pure C (libm); opt-in via
+# `libraries: [madgwick_ahrs]` (emits CONFIG_ALP_SDK_AHRS).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_AHRS
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/ahrs.c)
+
+# Portable PID control surface (<alp/pid.h>).  Pure C, no vendor deps;
+# opt-in via `libraries: [pid]` (emits CONFIG_ALP_SDK_PID).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_PID
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/pid.c)
+
 # System-power-mode surface (<alp/power.h>).  Wired behind
 # CONFIG_ALP_SDK_POWER so customers can opt out on builds that
 # don't need sleep transitions.  Class dispatcher + wildcard stub
@@ -728,6 +832,13 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DISPLAY_ZEPHYR_DRV
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_drv.c)
 
+# <alp/gui.h> guard-clause implementation.  OS-agnostic (no Zephyr/
+# vendor headers), so compiled unconditionally like cap_helpers.c --
+# the real LVGL hand-off is still unimplemented (issue #23), but the
+# NULL/NOSUPPORT contract paths must link on every build.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gui_lvgl_stub.c)
+
 # 2D graphics accelerator surface (<alp/gpu2d.h>).  The class
 # dispatcher ships whenever the surface is enabled; the portable
 # software fallback (sw_fallback.c -- the priority-0 wildcard that
@@ -743,6 +854,17 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/sw_fallback.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpu2d/alif_dave2d.c)
+
+# gfx_compat -- maintainer-written in-tree shim (west.yml documents it
+# ships at src/lib/gfx_compat/, no west pin).  A native library apps
+# call directly (`#include "gfx_compat.h"`), NOT an <alp/gpu2d.h>
+# backend -- unrelated to the class dispatcher above.  Compiled
+# whenever CONFIG_ALP_GFX_COMPAT_SW is on (see
+# src/lib/gfx_compat/Kconfig, default y); the include dir is
+# published unconditionally so the header always resolves even if a
+# future HW-backend Kconfig replaces the SW default.
+add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/src/lib/gfx_compat
+    ${CMAKE_CURRENT_BINARY_DIR}/alp_sdk_gfx_compat)
 
 # Runtime hardware-info reader (EEPROM manifest + BOARD_ID ADC).
 # v0.3 stub returns NOSUPPORT; v0.3.x fills in the real impl.
@@ -786,7 +908,16 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMI323
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_BMP581
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/bmp581/bmp581.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CC3501E
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_core.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_diag.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_wifi.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_sockets.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_ble.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_gpio.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_camera.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_power.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_ota.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_events.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TMP112
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tmp112/tmp112.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RV3028C7
@@ -807,6 +938,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ACT8760
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/act8760/act8760.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DA9292
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/da9292/da9292.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PCA9451A
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pca9451a/pca9451a.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TPS628640
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tps628640/tps628640.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PI3DBS12212
@@ -953,11 +1086,12 @@ zephyr_library_sources(
 # LwRB: publish the vendor stub headers on the include path so SDK
 # code compiles against <lwrb/lwrb.h> regardless of whether the
 # upstream MaJerle/lwrb module is on the workspace.  When the
-# `extras-v04` west group is enabled the upstream sources end up at
+# `extras-lwrb-nanopb` group is enabled the upstream sources end up at
 # modules/lib/lwrb/src/include/ and (once registered as a Zephyr
 # module via EXTRA_ZEPHYR_MODULES) win the include search ahead of
 # our stub; the ABI is identical so the SDK source is unchanged
-# across the swap.
+# across the swap.  Interim/deferred as of v0.9 -- no committed
+# release date for the swap.
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/lwrb/include)
 
 # Compile our in-tree LwRB stub impl whenever the upstream module is
@@ -992,20 +1126,111 @@ zephyr_library_include_directories(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference
 )
 
-# nanopb placeholder framing for <alp/mproc.h> (v0.4 prep).  Always
-# compiled so the failure-path tests link; only invoked at runtime
-# when CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y.  Replaced by the
-# nanopb-generated codec when the `extras-v04` west group lands.
+# nanopb placeholder framing for <alp/mproc.h>.  Always compiled so
+# the failure-path tests link; only invoked at runtime when
+# CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y.  Replaced by the
+# nanopb-generated codec when the `extras-lwrb-nanopb` west group
+# lands -- interim/deferred as of v0.9, no committed release date.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/proto/alp_mproc_frame.c
 )
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/nanopb/include)
+
+# Header-only 3p libraries vendored in-tree (Task 0 of the
+# 3p-library-examples batch) because the west topdir workspace this
+# SDK builds against cannot fetch a worktree-only west.yml pin (see
+# vendors/{etl,fmt,doctest,jsmn,minimp3}/README.md).  Each profile
+# header directory is also added so `#include "etl_profile.h"` /
+# `#include "fmt_config.h"` / `#include "doctest_config.h"` resolve
+# ahead of any app-local default (metadata/library-profiles/README.md's
+# "profile wins over upstream defaults" contract).  jsmn + minimp3
+# already carry an `extras-tier1` west pin (unfetched in this
+# workspace) -- vendored the same way since both are genuinely
+# single-header libraries; no profile header exists for either (their
+# `libraries:` Kconfig entry is pure-SW, no tunable defines).
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/etl/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profiles/etl)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/fmt/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profiles/fmt)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/doctest/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/metadata/library-profiles/doctest)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/jsmn/include)
+zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/vendors/minimp3/include)
+
+# u8g2's minimal core draw-pipeline subset (vendors/u8g2/README.md --
+# no zephyr/module.yml upstream, same "genuinely single-header-free but
+# small" case as the header-only libs above, except this one needs
+# compiled sources). Gated on CONFIG_ALP_SDK_U8G2_VENDORED_CORE, NOT
+# CONFIG_ALP_U8G2_SW_BLIT -- the latter `default y`s for EVERY build
+# (a fallback-capability marker, true whether or not an app selected
+# u8g2), so gating real compiled sources on it broke every other
+# example's link (undefined `u8x8_*`/`u8g2_*` symbols never called, but
+# worse: it also silently pulled Catch2's C++ TU into C-only apps
+# before this was caught -- see the Kconfig symbol's help text). Only
+# a slice with `libraries: [u8g2]` sets CONFIG_ALP_SDK_U8G2_VENDORED_CORE
+# (scripts/alp_project_emit.py's `_LIBRARY_KCONFIG["u8g2"]`);
+# examples/display/u8g2-oled-draw is the first (and so far only)
+# consumer.
+zephyr_include_directories_ifdef(CONFIG_ALP_SDK_U8G2_VENDORED_CORE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc
+)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_U8G2_VENDORED_CORE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8x8_setup.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8x8_display.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8x8_8x8.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_setup.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_buffer.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_hvline.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_ll_hvline.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_box.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_font.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_kerning.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/u8g2/csrc/u8g2_intersection.c
+)
+
+# Catch2's amalgamated single-TU distribution (vendors/catch2/README.md
+# -- no zephyr/module.yml upstream, same case as u8g2 above). Gated on
+# CONFIG_ALP_SDK_CATCH2_VENDORED, NOT CONFIG_ALP_CATCH2_SW (see the
+# u8g2 comment above -- same `default y`-for-every-build trap, except
+# for Catch2 it's worse: a C-only app unconditionally picking up a C++
+# TU needing `operator new`/`operator delete` fails EVERY plain-C
+# example's link, not just this one). Only a slice with
+# `libraries: [catch2]` sets CONFIG_ALP_SDK_CATCH2_VENDORED
+# (scripts/alp_project_emit.py's `_LIBRARY_KCONFIG["catch2"]`);
+# examples/testing/catch2-selftest is the first (and so far only)
+# consumer.
+zephyr_include_directories_ifdef(CONFIG_ALP_SDK_CATCH2_VENDORED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/catch2/include
+)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CATCH2_VENDORED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/vendors/catch2/src/catch_amalgamated.cpp
+)
+# Mirrors examples/testing/catch2-selftest/CMakeLists.txt's
+# target_compile_definitions(app ...) -- both catch_amalgamated.cpp
+# (compiled here, into the alp-sdk module library) and the app's own
+# main.cpp (which #includes catch_amalgamated.hpp) must see the SAME
+# macro state, or the two TUs parse the shared header differently
+# (ODR risk). See that CMakeLists.txt's comment for what each macro
+# does.
+zephyr_library_compile_definitions_ifdef(CONFIG_ALP_SDK_CATCH2_VENDORED
+    CATCH_AMALGAMATED_CUSTOM_MAIN
+    CATCH_CONFIG_NO_POSIX_SIGNALS
+)
 
 # Instance-capability helpers (<alp/cap_instance.h>).  Hand-written
 # runtime logic that does not depend on per-SoC metadata; always
 # compiled so any subsystem can call alp_capabilities_has().
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/cap_helpers.c
+)
+
+# Sleep-poll close for blocking-op handle pools (issue #629). Out-of-line
+# body for alp_slot_claim.h's alp_handle_begin_close_blocking() -- ships
+# unconditionally alongside the header so any dispatcher below that
+# #includes alp_slot_claim.h (ble/mqtt/wifi/camera/mproc/usb today) can
+# call it.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_slot_claim.c
 )
 
 # .alpmodel package reader (<alp/model.h>).  OS-agnostic read-side
@@ -1157,4 +1382,129 @@ zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/usb/uhc/xhci_core.c)
 if(CONFIG_UHC_XHCI_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
+endif()
+
+# <alp/testing/*> virtual-backend test doubles (epic #610).  Hard-gated
+# on CONFIG_ZTEST at the Kconfig layer (zephyr/kconfigs/testing.kconfig);
+# FATAL_ERROR here too so a workspace that somehow forces
+# CONFIG_ALP_SDK_TESTING=y without ZTEST fails the build loudly instead
+# of silently shipping a priority-255 wildcard backend that would
+# hijack every real board's peripheral selection.
+if(CONFIG_ALP_SDK_TESTING)
+    if(NOT CONFIG_ZTEST)
+        message(FATAL_ERROR
+            "CONFIG_ALP_SDK_TESTING requires CONFIG_ZTEST -- the "
+            "<alp/testing/*> doubles register priority-255 wildcard "
+            "backends that must never ship in a non-test image.")
+    endif()
+
+    # include-testing/ is a SEPARATE include root from the public SDK
+    # (${ZEPHYR_CURRENT_MODULE_DIR}/include, added unconditionally
+    # above) -- only test builds see <alp/testing/*>.
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/include-testing)
+
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing)
+
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/virtual_clock.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/instance_table.c
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/testing/reset_registry.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_GPIO
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/testing_drv.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_UART
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/uart/testing_drv.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_I2C
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i2c/testing_drv.c)
+
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_SPI
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/spi/testing_drv.c)
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_ADC
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/adc/testing_drv.c)
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_CAN
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/can/testing_drv.c)
+    zephyr_library_sources_ifdef(CONFIG_ALP_SDK_TESTING_STORAGE
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/testing_drv.c)
+endif()
+
+# ---------------------------------------------------------------------------
+# Alp-maintainer strict-warning profile (issue #634).
+#
+# Applied PER-SOURCE-FILE, not with a blanket zephyr_library_compile_options()
+# -- the alp_sdk zephyr_library above also carries the Alp-authored driver
+# glue under zephyr/drivers/** and the zephyr/soc-bridge/** vendor bridge
+# copy (both ADR 0017 Tier-1.5/Tier-2, deliberately kept in their upstream
+# Zephyr driver style, never this SDK's own house style -- see
+# applying-the-alp-sdk-c-house-style).  A target-wide
+# zephyr_library_compile_options() would strict-warn (and, with
+# CONFIG_ALP_SDK_WERROR, hard-error) that vendor-shaped code too, which
+# breaks the "vendored/upstream code never gets -Werror" rule this profile
+# exists to uphold.  Restricting COMPILE_OPTIONS to every source under this
+# module's own src/ tree keeps the profile first-party-only.  Must run
+# after every zephyr_library_sources()/_ifdef() call above so
+# target_property(... SOURCES) sees the complete list.
+#
+# The flag SET is deliberately a reduced "core" subset of the plain-CMake
+# alp_sdk_warnings profile (cmake/alp-sdk-warnings.cmake), not the full
+# 12-flag list -- confirmed empirically (issue #634) against a spread of
+# first-party TUs (src/zephyr/delay_zephyr.c, last_error.c,
+# console/alp_console_gpio.c): every one of the flags below is fine, but
+# these four are NOT, because they fire on code physically inside
+# Zephyr's OWN headers (Zephyr's top-level include dir is a plain -I,
+# not -isystem, so GCC does not suppress diagnostics attributed there):
+#   -Wpedantic          empty structs / zero-arg variadic macros in
+#                        zephyr/include/zephyr/{sys/sflist.h,
+#                        sys/__assert.h,device.h}
+#   -Wconversion /
+#   -Wsign-conversion    narrowing/sign conversions in
+#                        zephyr/include/zephyr/sys/{util.h,atomic.h},
+#                        arch/common/*.h
+#   -Wcast-align         Zephyr's OWN CONTAINER_OF macro
+#                        (zephyr/include/zephyr/sys/util.h)
+#   -Wundef              CONFIG_* Kconfig symbols Zephyr's own headers
+#                        test with plain `#if CONFIG_FOO` (never
+#                        `#if defined(...)`) and which autoconf.h simply
+#                        omits when unset -- zephyr/include/zephyr/
+#                        {rtio/sqe.h,logging/log.h} et al
+#   -Wstrict-prototypes  a non-prototype function declaration in
+#                        zephyr/include/zephyr/sys/cbprintf.h
+# All of the above is upstream Zephyr's own code, never ours to fix
+# (ADR 0017), so the required Zephyr-side profile omits them; per the
+# issue's own roadmap ("Establish a required core profile first, then
+# evaluate higher-noise checks such as conversion and cast alignment
+# separately"), plain-CMake -- which never includes Zephyr headers --
+# keeps the full 12-flag set unmodified.
+if(CONFIG_ALP_SDK_STRICT_WARNINGS)
+    set(_alp_sdk_warn_flags "")
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
+        list(APPEND _alp_sdk_warn_flags
+            -Wall -Wextra -Wformat=2 -Wshadow
+            -Wmissing-prototypes -Wdouble-promotion)
+    else()
+        message(WARNING
+            "alp-sdk: CONFIG_ALP_SDK_STRICT_WARNINGS has no flag mapping for "
+            "CMAKE_C_COMPILER_ID='${CMAKE_C_COMPILER_ID}' -- building without "
+            "the strict profile.")
+    endif()
+    if(_alp_sdk_warn_flags AND CONFIG_ALP_SDK_WERROR)
+        list(APPEND _alp_sdk_warn_flags -Werror)
+    endif()
+
+    if(_alp_sdk_warn_flags)
+        get_target_property(_alp_sdk_all_sources alp_sdk SOURCES)
+        foreach(_alp_sdk_src IN LISTS _alp_sdk_all_sources)
+            string(FIND "${_alp_sdk_src}" "${ZEPHYR_CURRENT_MODULE_DIR}/src/" _alp_sdk_pos)
+            if(_alp_sdk_pos EQUAL 0)
+                set_source_files_properties(${_alp_sdk_src} PROPERTIES
+                    COMPILE_OPTIONS "${_alp_sdk_warn_flags}")
+            endif()
+        endforeach()
+        unset(_alp_sdk_all_sources)
+        unset(_alp_sdk_src)
+        unset(_alp_sdk_pos)
+    endif()
+    unset(_alp_sdk_warn_flags)
 endif()

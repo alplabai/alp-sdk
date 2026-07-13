@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Production image -- hardened, customer-facing. Same hardware enablement as
-# alp-image-edge (both pull alp-image-common) but with a production posture:
+# Production image -- hardened, customer-facing. Builds on the headless
+# alp-image-base (alp-image-common) and enables the vision-appliance feature
+# groups (camera + display) but NOT ros -- a shipped unit shouldn't carry the
+# ROS 2 + DDS stack unless the customer's app needs it (add alp-ros then).
+# Production posture vs the edge image:
 #   - NO debug-tweaks: root is not passwordless and console root login is
 #     locked (no empty-password autologin).
 #   - SSH is key-only (alp-ssh-hardening): PermitRootLogin prohibit-password +
@@ -16,6 +19,10 @@
 SUMMARY = "Alp SDK production image (hardened: key-only SSH, no debug tooling)"
 
 require alp-image-common.inc
+
+# Vision appliance: camera + display, but NOT ros (opt in with alp-ros if the
+# product's app is a ROS node). debug-tweaks is never enabled here.
+IMAGE_FEATURES += "alp-camera alp-display"
 
 # Strip developer features even when the vendor build template's
 # EXTRA_IMAGE_FEATURES (local.conf) injects them image-wide:

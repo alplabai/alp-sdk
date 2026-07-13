@@ -53,9 +53,9 @@
 #define CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT 2
 #endif
 
-#define ALP_CAM_DEV_OR_NULL(idx)                                                                   \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_camera, idx))),                                \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))),                               \
+#define ALP_CAM_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_camera, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {

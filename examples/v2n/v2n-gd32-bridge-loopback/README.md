@@ -35,7 +35,7 @@ forever. Every stimulus is parked at 0 on the way out of its test.
 
 | Jumper | From (header.pin) | To (header.pin) | Signal path |
 | ------ | ----------------- | --------------- | ----------- |
-| **A** | **raw `DAC0` net** (E1M-X pin A19 -- requires the bench rework from the internal carrier errata; see safety note 1) | `P7.1` (CK_ANA) | **Direct 1:1** analog loopback -> raw passthrough to E1M-X pin **A17 = ANA_S0 = bridge ADC channel 0** (GD32 `PD9`, ADC3_CH12). The carrier's buffered J15.2 `DAC0_OUT` path is NOT usable on this carrier rev (erratum, fixed next rev). |
+| **A** | **raw `DAC0` net** (E1M-X pin A19; see safety note 1) | `P7.1` (CK_ANA) | **Direct 1:1** analog loopback -> raw passthrough to E1M-X pin **A17 = ANA_S0 = bridge ADC channel 0** (GD32 `PD9`, ADC3_CH12). The carrier's buffered J15.2 `DAC0_OUT` path is NOT usable on this carrier rev (erratum, fixed next rev). |
 | **B** | `J26.14` (CK_PWM1) | `J18.7` (ENC1_X) | Bidirectional level translation on both sides (transparent to the signal). PWM bridge **ch1** (`PB1`, TIMER0_MCH2) -> encoder **index 1** X input (`PC6`, TIMER2 CH0). Y (`PC7`) floats with firmware pull-up = static **HIGH**. |
 | **C** | `J26.10` (CK_PWM2) | `J26.8` (CK_PWM3) | Both pins ride the same bidirectional level translator -- no contention. PWM bridge **ch2** (`PB14`, TIMER0_MCH1) output -> PWM bridge **ch3** (`PC5`, TIMER0_MCH3) rebound as input capture. |
 
@@ -45,11 +45,10 @@ forever. Every stimulus is parked at 0 on the way out of its test.
 
 1. **The carrier's buffered DAC output path (J15.2) is inoperable on
    this carrier revision** (carrier erratum, fixed next rev), and the
-   raw DAC0 net only reads true after a small bench rework -- the
-   erratum + rework procedure are documented in the **internal carrier
-   errata** (2026-06-04), not here. With the rework in place the
-   loopback is same-rail 1.8 V -> 1.8 V and physically cannot overdrive
-   the ADC pad; `DAC_MAX_SAFE_MV` (1500 mV) in `src/main.c` is a
+   raw DAC0 net is the only usable DAC0 source for this validation path
+   on configured bench carriers. The loopback is same-rail 1.8 V -> 1.8 V
+   and physically cannot overdrive the ADC pad; `DAC_MAX_SAFE_MV`
+   (1500 mV) in `src/main.c` is a
    linearity bound (stay off the rail-clip region), not an electrical
    cap. If a future carrier rev restores the buffered J15.2 path, its
    x2 gain makes everything above ~850 mV an over-rail hazard --

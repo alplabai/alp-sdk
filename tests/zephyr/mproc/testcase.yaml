@@ -11,7 +11,8 @@ tests:
       - alp-sdk
       - mproc
 
-  # v0.4-prep: flips CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y to
+  # Interim placeholder framing (real nanopb wire deferred, no
+  # committed version): flips CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y to
   # compile-verify the framing-on-send + unframing-on-receive paths
   # in mproc_zephyr.c.  The IPC envelope encode/decode helpers are
   # still exercised by the same ZTESTs (they don't need a real mbox

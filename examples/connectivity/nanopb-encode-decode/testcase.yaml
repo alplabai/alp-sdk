@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: nanopb-encode-decode
+  description: |
+    nanopb teaching example. Encodes a small DeviceStatus struct (int32 +
+    bounded string) to a protobuf wire blob with pb_encode, decodes it
+    back with pb_decode, and asserts the round trip. Builds and runs on
+    native_sim; the runtime .c files are compiled directly from the
+    upstream nanopb module path (see CMakeLists.txt / README.md).
+
+tests:
+  alp_sdk.examples.nanopb_encode_decode.native_sim:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - nanopb-encode-decode
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[nanopb-encode-decode\\] done"

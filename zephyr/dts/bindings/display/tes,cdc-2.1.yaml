@@ -173,11 +173,16 @@ properties:
     type: int
     description: Layer 1 constant alpha (0..255).
 
+  # The L2 window/blend props are read unconditionally by display_cdc200.c even
+  # when enable-l2 is left at its default 0, so nodes that only use L1 still need
+  # defaults here.
   win-x0-l2:
     type: int
+    default: 0
     description: Layer 2 window horizontal start.
   win-y0-l2:
     type: int
+    default: 0
     description: Layer 2 window vertical start.
   win-x1-l2:
     type: int
@@ -187,10 +192,13 @@ properties:
     description: Layer 2 window vertical stop.
   blend-factor1-l2:
     type: int
+    default: 6
     description: Layer 2 blend factor F1.
   blend-factor2-l2:
     type: int
+    default: 7
     description: Layer 2 blend factor F2.
   const-alpha-l2:
     type: int
+    default: 0xff
     description: Layer 2 constant alpha (0..255).

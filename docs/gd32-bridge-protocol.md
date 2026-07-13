@@ -62,20 +62,20 @@ byte; their numeric encoding is:
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
 | `0x61` | `QENC_RESET`          | `encoder:u8`                                       | _empty_                                            |
 | `0x70` | `COUNTER_READ`        | `counter:u8`                                       | `ticks:u32`                                        |
-| `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_                                           |
-| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_                       |
+| `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_ (defaults only -- see §3.8; non-default `align`/`dead_time_ns`/`break_cfg` return `STATUS_NOSUPPORT`, tracked #495) |
+| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (`sample_cycles` sticky -- see §3.9; non-default `oversample`/`resolution` return `STATUS_NOSUPPORT`, tracked #494) |
 | `0x33` | `ADC_STREAM_BEGIN`    | `stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32` | _empty_                                      |
 | `0x34` | `ADC_STREAM_READ`     | `stream_id:u8 max_samples:u8`                      | `got:u8 mv[max_samples]:u16` (zero-padded)         |
 | `0x35` | `ADC_STREAM_END`      | `stream_id:u8`                                     | _empty_                                            |
 | `0x80` | `TRNG_READ`           | `len:u8` (1..32)                                   | `random_bytes[len]`                                |
 | `0x90` | `TMU_COMPUTE`         | `function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32` | `result:u32`                                  |
-| `0x36` | `ADC_STREAM_CONFIGURE_DSP` | _(reserved -- payload format TBD)_                  | _(empty; returns STATUS_NOSUPPORT today)_         |
-| `0x23` | `PWM_CAPTURE_BEGIN`   | `channel:u8 edge:u8`                                  | _(empty; returns STATUS_NOSUPPORT today)_         |
-| `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (firmware-side TBD)  |
-| `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _(empty; returns STATUS_NOSUPPORT today)_         |
-| `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _(empty; returns STATUS_NOSUPPORT today)_         |
-| `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _(empty; returns STATUS_NOSUPPORT today)_         |
-| `0x28` | `POWER_MODE_SET`      | `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32` | _(empty; returns STATUS_NOSUPPORT today)_       |
+| `0x36` | `ADC_STREAM_CONFIGURE_DSP` | _(reserved tombstone -- see §3.x)_             | _(empty; returns `STATUS_NOSUPPORT` permanently -- use `CMD_ADC_DSP_CHAIN_*` instead)_ |
+| `0x23` | `PWM_CAPTURE_BEGIN`   | `channel:u8 edge:u8`                                  | _empty_ (see §3.y -- reconfigures the pad as input-capture) |
+| `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOSUPPORT` ("ring empty") until an edge lands; no edges land on this V2N HW rev pending a pad-routing rework) |
+| `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _empty_                                            |
+| `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _empty_                                            |
+| `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _empty_                                            |
+| `0x28` | `POWER_MODE_SET`      | `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32` | _empty_ (see §3.z -- `wake_bitmap` bits `UART_RX`/`USB`/`ETH_LINK` return `STATUS_NOSUPPORT`; no HW path on GD32G5) |
 | `0x81` | `LINK_FEATURES` (v0.7) | `features:u8` (wanted; bit0 = `STATUS_SEQ`)          | `features:u8` (granted + armed; see §3.14 / §4.1.1) |
 
 Opcodes `0x82..0xEF` are **reserved** for future Alp-defined
@@ -85,7 +85,7 @@ replies with **`ALP_ERR_NOSUPPORT`** (see §6) for any opcode it
 does not implement at build time, so a host that speaks a newer
 command set than the firmware degrades gracefully.
 
-### 3.z System power-mode set (v0.5+, reserved)
+### 3.z System power-mode set (v0.5+)
 
 `CMD_POWER_MODE_SET` (opcode `0x28`) is the host-to-supervisor
 sleep-transition request.  The portable surface lives in
@@ -96,45 +96,65 @@ the Renesas SoC on the configured wake source(s), then re-runs
 its own GD32 handshake so the bridge stays usable across deep-
 sleep cycles.
 
-The firmware-side dispatcher returns `STATUS_NOSUPPORT` today;
-the HAL body lands once the GD32-side wake handler + the
-v2n_supervisor singleton's re-init state-machine extension
-both land.  The portable surface in `<alp/power.h>` honours
-INVAL pre-checks (e.g. RUN mode, no wake sources + zero
-wake_after_ms) before falling through to NOSUPPORT, so
-customers can write portable sleep code today that gracefully
-degrades on builds without the HAL.
+The firmware-side dispatcher implements all four modes: `0` (run)
+and `1` (sleep) are accepted no-ops (the bridge's main loop already
+parks in `__WFI()` between transport interrupts), `2` (deep-sleep)
+calls `pmu_to_deepsleepmode()`, and `3` (standby) calls
+`pmu_to_standbymode()`.  Of the `wake_bitmap` bits, `RTC` and
+`TIMER` arm the RTC wakeup timer (IRC32K / DIV16, 0.5 ms LSB, up to
+~32.7 s; `wake_after_ms` also arms this same timer regardless of
+the bitmap, per the `<alp/power.h>` contract), and `GPIO` enables
+`PMU_WAKEUP_PIN0..4`.  `UART_RX` / `USB` / `ETH_LINK` return
+`STATUS_NOSUPPORT` -- the GD32G5 baseline has no LPUART wake, USB
+OTG, or MAC, so there is no hardware path for these bits on this
+SoC.  The portable surface in `<alp/power.h>` honours INVAL
+pre-checks (e.g. RUN mode, no wake sources + zero wake_after_ms)
+before falling through to the firmware.  HIL verification of the
+sleep transitions on real V2N silicon is still ahead (see
+`docs/v1.0-readiness.md` §1a).
 
-### 3.y Advanced timer extras (v0.5+, reserved)
+### 3.y Advanced timer extras (v0.5+)
 
-The wave-2 §2B.2 advanced-timer extras add five reserved opcodes
-within the existing PWM range (`0x23..0x27`) and the timer-sync
-group:
+The wave-2 §2B.2 advanced-timer extras add five opcodes within the
+existing PWM range (`0x23..0x27`) and the timer-sync group. All
+five dispatch to real `bridge_hw_*` bodies today (not the
+default-case `STATUS_NOSUPPORT` branch); HIL verification on real
+V2N silicon is still ahead for all three groups below (see
+`docs/v1.0-readiness.md` §1a):
 
 * `CMD_PWM_CAPTURE_BEGIN / READ / END` (opcodes `0x23..0x25`)
   reconfigure a PWM channel's pin as an input-capture source so
   the firmware can latch the timer counter on each edge of the
   caller's chosen polarity (`RISING / FALLING / BOTH`).  The
   host-side surface is `alp_pwm_capture_open / read / close` in
-  [`<alp/pwm.h>`](../include/alp/pwm.h).
+  [`<alp/pwm.h>`](../include/alp/pwm.h).  The firmware body is
+  landed (polled drain + wrap-aware delta + ns conversion), but
+  every E1M PWM pad on V2N binds the timer's COMPLEMENTARY
+  (`CHxN`) output, while the classic input-capture stage samples
+  the MAIN `CHx` pad -- a different physical pin.  `BEGIN`
+  correctly switches the channel to input-capture mode, but no
+  edges land on this hardware revision until a follow-up hardware
+  bring-up commit reworks the pad routing; `READ` reports
+  `STATUS_NOSUPPORT` ("ring empty") in the meantime.
 * `CMD_PWM_SINGLE_PULSE` (opcode `0x26`) drives a one-shot pulse
   of caller-specified width on a PWM channel then stops.  The
   host-side surface is `alp_pwm_single_pulse(pwm, pulse_ns)` in
-  [`<alp/pwm.h>`](../include/alp/pwm.h).
-* `CMD_TIMER_SYNC` (opcode `0x27`) links the GD32G5's TIMER0 /
-  TIMER7 / TIMER19 in master-slave configuration for
-  synchronised multi-channel output.  The portable surface lands
-  in a follow-up commit once the firmware HAL exposes the
-  master-slave wiring.
+  [`<alp/pwm.h>`](../include/alp/pwm.h).  Implemented via the
+  timer's one-pulse mode (OPM); the whole timer's SP bit flips, so
+  sibling channels on the same `TIMER0`/`TIMER7` also run
+  single-pulse until a subsequent `PWM_SET` restores repetitive
+  mode.
+* `CMD_TIMER_SYNC` (opcode `0x27`) links the GD32G5's `TIMER0` /
+  `TIMER7` / `TIMER19` (wire ids `0`/`1`/`2`) in master-slave
+  configuration for synchronised multi-channel output.
+  Implemented: the master emits `TRGO0` on update and the slave
+  listens on `ITI0`, with the wire `mode` byte translated to the
+  vendor's `TIMER_SLAVE_MODE_*` / `TIMER_QUAD_DECODER_MODE*`
+  encoding.  The `SYSCFG` trigger router is left at its chip
+  default; a non-default (master, slave) pair needing a different
+  route is a follow-up.
 
-The firmware-side dispatcher returns `STATUS_NOSUPPORT` for all
-five opcodes today via the default-case branch; the corresponding
-`bridge_hw_*` HAL bodies land in a follow-up GD32 firmware drop.
-The portable surfaces in `<alp/pwm.h>` honour INVAL pre-checks
-even before the backend wires the real path, so misconfigured
-calls return precise diagnostics.
-
-### 3.x ADC-stream DSP pipeline (v0.5+, reserved)
+### 3.x ADC-stream DSP pipeline (v0.5+)
 
 The wave-2 ADC-stream DSP pipeline attaches a chain of
 FIR / IIR / WINDOW / FFT stages to a streaming ADC source so raw
@@ -145,14 +165,19 @@ surface lives in [`<alp/adc.h>`](../include/alp/adc.h)
 (`alp_adc_filter_t` / `alp_adc_spectrum_t`) plus the standalone
 in-RAM chain primitives in [`<alp/dsp.h>`](../include/alp/dsp.h).
 
-Three opcodes own the upload path.  Each is **reserved** at v0.5
--- firmware default-case dispatch returns `STATUS_NOSUPPORT` until
-the `bridge_hw_adc_dsp_*` HAL bodies land in the GD32 firmware
-tree.  The host-side standalone API in `<alp/dsp.h>` ships
-working in v0.5.0 (runs the chain locally with CMSIS-DSP or the
-portable C fallback over in-RAM buffers), so application code can
-test against the same chain primitives today and pick up the
-bridge-offloaded path once the HAL bodies ship.
+Three opcodes own the upload path, and all three are implemented
+today: `chain_open` / `stage_push` / `chain_bind` allocate, upload,
+validate, and bind a chain (see the per-opcode subsections below).
+What has NOT landed yet is the runtime side -- a bound chain's
+stages are not applied to the stream's samples.
+`CMD_ADC_STREAM_READ` still emits raw mV values from the DMA ring
+regardless of any bound chain (tracked #496).  The host-side
+standalone API in `<alp/dsp.h>` ships working in v0.5.0 (runs the
+chain locally with CMSIS-DSP or the portable C fallback over
+in-RAM buffers), so application code can test against the same
+chain primitives today and pick up the bridge-offloaded runtime
+path once the FFT/FAC dispatch lands inside
+`bridge_hw_adc_stream_read()`.
 
 #### `CMD_ADC_DSP_CHAIN_OPEN` (`0x37`)
 
@@ -226,10 +251,14 @@ eventually completes every staged kind before binding.
 
 Attaches a fully-populated chain to a streaming ADC source that
 was previously opened with `CMD_ADC_STREAM_BEGIN` (opcode
-`0x33`).  From the bind onward, the stream's samples flow through
-the chain instead of being delivered raw to
-`CMD_ADC_STREAM_READ`; the read reply's payload format becomes
-mode-dependent on the chain's terminal stage:
+`0x33`).  The firmware validates the chain and stores the binding
+on both sides (see the failure conditions below), but does not yet
+change what `CMD_ADC_STREAM_READ` returns -- the runtime dispatch
+that would route the stream's samples through the bound chain
+(instead of the raw mV values the DMA ring already emits) has not
+landed (tracked #496).  Once it does, the read reply's payload
+format is expected to become mode-dependent on the chain's
+terminal stage:
 
 * No FFT terminal: filter samples (`i16` for Q31 coefficients,
   `i16` shape-equivalent for F32 -- bridge-mapped to mV
@@ -403,6 +432,15 @@ the first `PWM_SET` a channel reports the boot default (65.536 ms
 period, 0 duty).  Callers that need exact frequency confirmation
 should read back rather than recompute.
 
+**Current GD32 HAL status:** only the default configuration is
+applied.  `bridge_hw_pwm_configure()` accepts `align_mode == 0`,
+`dead_time_ns == 0`, and `break_cfg == 0` (the reset defaults
+`pwm_timer_init()` already programs); any non-default value
+returns `STATUS_NOSUPPORT`.  Center-aligned modes, dead-time, and
+break-input configuration need a per-timer apply path (these
+fields are shared across the sibling channels of a `TIMER0`/
+`TIMER7` timer) that has not landed yet (tracked #495).
+
 ### 3.9 ADC configure (`v0.3+`)
 
 `ADC_CONFIGURE` programs sticky per-channel oversampling +
@@ -427,6 +465,12 @@ The GD32 returns ADC readings as 16-bit millivolts (`ADC_READ` /
 `ADC_STREAM_READ` reply payload format unchanged); higher
 oversampling improves the effective-resolution / SNR of the
 returned values but doesn't widen the on-wire word.
+
+**Current GD32 HAL status:** only `sample_cycles` is sticky.
+`bridge_hw_adc_configure()` accepts `oversample_ratio == 1` and
+`resolution_bits == 12` (the defaults); any other value returns
+`STATUS_NOSUPPORT`.  The oversampling-apply and alternate-
+resolution paths have not landed yet (tracked #494).
 
 ### 3.10 ADC streaming (`v0.3+`)
 

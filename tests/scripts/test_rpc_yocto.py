@@ -148,7 +148,12 @@ class TestRpcPublicSurface:
         assert "alp_backend_select" in dispatch_source, (
             "dispatcher should select a backend via the registry"
         )
-        for op in ["open", "subscribe", "unsubscribe", "send", "call", "close"]:
+        # GHSA-xhm8-7f87-93q5 close-protocol redesign: the single
+        # ops->close() slot split into ops->shutdown() (single-owner
+        # election result: DONE/DEFERRED) + ops->destroy() (called
+        # once the dispatcher's own active-op drain completes) -- see
+        # src/backends/rpc/rpc_ops.h.
+        for op in ["open", "subscribe", "unsubscribe", "send", "call", "shutdown", "destroy"]:
             assert re.search(rf"ops->{op}\b", dispatch_source) is not None, (
                 f"dispatcher must delegate to ops->{op}"
             )
@@ -167,7 +172,8 @@ class TestRpcYoctoStructure:
         "op",
         [
             "y_open",
-            "y_close",
+            "y_shutdown",
+            "y_destroy",
             "y_subscribe",
             "y_unsubscribe",
             "y_send",
@@ -175,8 +181,16 @@ class TestRpcYoctoStructure:
         ],
     )
     def test_backend_ops_defined(self, rpc_source: str, op: str) -> None:
-        """Every alp_rpc_ops_t slot is backed by a static y_* op."""
-        pattern = rf"\bstatic\s+(?:alp_status_t|void)\s+{re.escape(op)}\s*\("
+        """Every alp_rpc_ops_t slot is backed by a static y_* op.
+
+        GHSA-xhm8-7f87-93q5 close-protocol redesign: the single
+        ``close()`` slot split into ``shutdown()`` (returns
+        ``alp_rpc_shutdown_result_t``) + ``destroy()`` -- see
+        src/backends/rpc/rpc_ops.h."""
+        pattern = (
+            rf"\bstatic\s+(?:alp_status_t|void|alp_rpc_shutdown_result_t)\s+"
+            rf"{re.escape(op)}\s*\("
+        )
         assert re.search(pattern, rpc_source) is not None, (
             f"{op} not found as a static op definition in yocto_drv.c"
         )
@@ -189,7 +203,8 @@ class TestRpcYoctoStructure:
             (".unsubscribe", "y_unsubscribe"),
             (".send", "y_send"),
             (".call", "y_call"),
-            (".close", "y_close"),
+            (".shutdown", "y_shutdown"),
+            (".destroy", "y_destroy"),
         ],
     )
     def test_ops_table_wires_every_slot(
@@ -430,25 +445,26 @@ class TestRpcYoctoStructure:
         )
 
     def test_close_wakes_pending_callers(self, rpc_source: str) -> None:
-        """y_close must wake any pending y_call with ALP_ERR_NOT_READY
-        so close-during-call doesn't leak the caller until its timeout
-        expires."""
+        """y_shutdown (the GHSA-xhm8-7f87-93q5 redesign's replacement
+        for the old y_close) must wake any pending y_call with
+        ALP_ERR_NOT_READY so close-during-call doesn't leak the caller
+        until its timeout expires."""
         m = re.search(
-            r"static\s+void\s+y_close\s*\([^)]*\)\s*\{(.*?)\n\}\s*\n",
+            r"static\s+alp_rpc_shutdown_result_t\s+y_shutdown\s*\([^)]*\)\s*\{(.*?)\n\}\s*\n",
             rpc_source,
             flags=re.DOTALL,
         )
-        assert m is not None, "y_close body not found"
+        assert m is not None, "y_shutdown body not found"
         body = m.group(1)
         assert "call_pending" in body, (
-            "y_close must inspect call_pending"
+            "y_shutdown must inspect call_pending"
         )
         assert "ALP_ERR_NOT_READY" in body, (
-            "y_close must set the pending caller's result to NOT_READY"
+            "y_shutdown must set the pending caller's result to NOT_READY"
         )
         assert (
             "pthread_cond_broadcast" in body or "pthread_cond_signal" in body
-        ), "y_close must wake the pending caller's cond wait"
+        ), "y_shutdown must wake the pending caller's cond wait"
 
     def test_buffer_too_small_returns_nomem(self, rpc_source: str) -> None:
         """When the peer's response exceeds the caller's resp buffer

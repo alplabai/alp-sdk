@@ -292,6 +292,7 @@ CC3501E and registers the handle with the console **once**:
 
 ```c
 #include <alp/console.h>
+#include <alp/ext/cc3501e/console.h>
 #include <alp/chips/cc3501e.h>
 #include "cc3501e_bridge.h"   /* cc3501e_bridge_bringup() */
 
@@ -313,7 +314,8 @@ static void bind_companion(void)
 into your application or reference the alp-console example which bundles
 it at `examples/peripheral-io/alp-console/src/cc3501e_bridge.{c,h}`.
 
-`alp_console_companion_set()` is declared in `<alp/console.h>`.  Call it
+`alp_console_companion_set()` is declared in `<alp/ext/cc3501e/console.h>`
+(the root `<alp/console.h>` stays chip-neutral).  Call it
 at most once; pass `NULL` to unbind.  The `companion` object **must**
 outlive the console (file-static or global storage only — never a local
 variable in a function that returns).

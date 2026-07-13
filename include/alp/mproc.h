@@ -191,6 +191,26 @@ typedef struct {
 } alp_shmem_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_shmem_config_t for region @p id.
+ *
+ * Identity from @p id (the region @c name).  @c size defaults to 0:
+ * on current SoMs the backend derives the region extent from the
+ * devicetree node, so @c size is advisory / backend-authoritative and
+ * open() neither consults nor rejects it -- set it to document the
+ * bytes both cores agreed to share (and for a future size-checking
+ * backend), not because open() requires it. @c cacheable defaults to
+ * false, the documented choice "required for the simple core A writes,
+ * core B reads pattern."
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_SHMEM_CONFIG_DEFAULT(id) \
+	((alp_shmem_config_t){ .name = (id), .size = 0u, .cacheable = false })
+
+/**
  * @brief Acquire access to a named shared-memory region.
  *
  * Both cores opening the same @c name see the same physical bytes;
@@ -257,6 +277,24 @@ typedef struct {
 	uint32_t      channel; /**< MHU/Mailbox channel index per the SoC manifest. */
 	alp_core_id_t peer;    /**< Counterpart core. */
 } alp_mbox_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_mbox_config_t for channel @p id.
+ *
+ * Identity from @p id; @c peer has no universally-correct default --
+ * which peer core exists depends on the active SoM's topology -- so
+ * it defaults to @ref ALP_CORE_SELF, a sentinel that does not name a
+ * real counterpart. Current backends route by @c channel alone and do
+ * not consult @c peer, so open() accepts the sentinel; set @c peer to
+ * the actual counterpart core to document the intended topology (and
+ * for a future topology-checking backend).
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_MBOX_CONFIG_DEFAULT(id) ((alp_mbox_config_t){ .channel = (id), .peer = ALP_CORE_SELF })
 
 /**
  * @brief Acquire a mailbox-channel handle.

@@ -64,9 +64,16 @@ int main(void)
 	 * but future backends rely on it (see <alp/peripheral.h>). */
 	(void)alp_init();
 
+	/* Tallied across every device probed below; the final RESULT line
+	 * reports answered/attempted instead of failing hard on the first
+	 * absent or DNP part. */
 	int attempted = 0;
 	int answered  = 0;
 
+	/* 100 kHz standard-mode: the one rate every device on this shared bus
+	 * is guaranteed to support, even though most of them can also run
+	 * fast-mode (400 kHz). One alp_i2c_open() call serves all seven chip
+	 * drivers below, so we pick the slowest common denominator. */
 	printf("[devhub] open BOARD_I2C_SENSORS @ 100 kHz\n");
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
 	    .bus_id     = BOARD_I2C_SENSORS,

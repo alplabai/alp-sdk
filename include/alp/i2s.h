@@ -72,6 +72,32 @@ typedef struct {
 } alp_i2s_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_i2s_config_t for bus @p id.
+ *
+ * Identity from @p id; canonical defaults: @c sample_rate_hz = 48000
+ * (the common professional/CD-audio I²S rate), @c word_bits = 16 and
+ * @c channels = 2 (16-bit stereo, the usual codec-facing shape),
+ * @c format = @ref ALP_I2S_FMT_I2S ("most modern codecs accept" this
+ * per the file header), @c direction = @ref ALP_I2S_DIR_RX (the
+ * passive, listen-only default -- matches the enum-zero convention
+ * used by every other ALP_*_CONFIG_DEFAULT), @c block_frames = 256
+ * (matching the DMA/ring block size used elsewhere in the SDK).
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_I2S_CONFIG_DEFAULT(id) \
+	((alp_i2s_config_t){ .bus_id         = (id), \
+	                     .sample_rate_hz = 48000u, \
+	                     .word_bits      = 16u, \
+	                     .channels       = 2u, \
+	                     .format         = ALP_I2S_FMT_I2S, \
+	                     .direction      = ALP_I2S_DIR_RX, \
+	                     .block_frames   = 256u })
+
+/**
  * @brief Configure an I²S bus and allocate its DMA buffer slab.
  *
  * Does not start the clock — call @ref alp_i2s_start when ready to

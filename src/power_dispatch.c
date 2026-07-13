@@ -33,6 +33,8 @@
 #include <alp/power.h>
 #include <alp/soc_caps.h>
 
+#include "alp_dispatch_cache.h"
+#include "alp_slot_claim.h"
 #include "backends/power/power_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(power);
@@ -42,8 +44,7 @@ ALP_BACKEND_ANCHOR(power);
  * src/zephyr/last_error.c.  Forward-declared here to avoid pulling
  * in the broader handles.h header (which carries unrelated
  * peripheral pool declarations the dispatcher does not touch). */
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_POWER_HANDLES
 #define CONFIG_ALP_SDK_MAX_POWER_HANDLES 1
@@ -54,9 +55,12 @@ static struct alp_power _pool[CONFIG_ALP_SDK_MAX_POWER_HANDLES];
 static struct alp_power *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_POWER_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch
+		 * the slot's other fields (in_use is the struct's last
+		 * member, so zero everything before it -- including
+		 * lifecycle/active_ops, parking a fresh slot at UNOPENED). */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_power, in_use));
 			return &_pool[i];
 		}
 	}
@@ -65,7 +69,7 @@ static struct alp_power *_alloc(void)
 
 static void _free(struct alp_power *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_power_t *alp_power_open(void)
@@ -96,16 +100,21 @@ alp_power_t *alp_power_open(void)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_power_configure_wake_source(alp_power_t *h, uint32_t wake_bitmap)
 {
-	if (h == NULL || !h->in_use) {
+	/* Gate on the lifecycle byte, not a plain in_use read -- see
+	 * alp_slot_claim.h's op_enter/leave doc comment (issue #629). */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
 	h->state.wake_bitmap = wake_bitmap;
-	return h->state.ops->configure_wake_source(&h->state, wake_bitmap);
+	alp_status_t rc      = h->state.ops->configure_wake_source(&h->state, wake_bitmap);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_power_request_sleep(alp_power_t           *h,
@@ -113,34 +122,46 @@ alp_status_t alp_power_request_sleep(alp_power_t           *h,
                                      uint32_t               wake_after_ms,
                                      alp_power_wake_info_t *info)
 {
-	if (h == NULL || !h->in_use) {
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
 	/* RUN is never a valid sleep target -- the caller is asking to
      * stay awake, which is a no-op (and likely an API misuse). */
 	if (mode == ALP_POWER_MODE_RUN) {
+		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
 	if (mode != ALP_POWER_MODE_SLEEP && mode != ALP_POWER_MODE_DEEP_SLEEP &&
 	    mode != ALP_POWER_MODE_STANDBY) {
+		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
 	/* No wake source AND no timer means the SoC would never wake.
      * Reject as INVAL so callers see the mistake. */
 	if (h->state.wake_bitmap == 0u && wake_after_ms == 0u) {
+		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
-	return h->state.ops->request_sleep(&h->state, mode, wake_after_ms, info);
+	alp_status_t rc = h->state.ops->request_sleep(&h->state, mode, wake_after_ms, info);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 void alp_power_close(alp_power_t *h)
 {
-	if (h == NULL || !h->in_use) {
+	if (h == NULL) {
+		return;
+	}
+	/* begin_close CAS OPEN->CLOSING then spins until every op that
+	 * entered before the CAS has left -- see alp_slot_claim.h (#629).
+	 * Idempotent: a second/never-opened close no-ops. */
+	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(h);
 }
 
@@ -162,19 +183,25 @@ const alp_capabilities_t *alp_power_capabilities(const alp_power_t *h)
 ALP_BACKEND_DEFINE_CLASS(power_profile);
 ALP_BACKEND_ANCHOR(power_profile);
 
+/* Published through alp_dispatch_cache_{load,store}() -- see
+ * src/tmu_dispatch.c's header comment; same TMU-pattern race fix
+ * (issue #628). */
 static const alp_power_profile_ops_t *_cached_profile_ops = NULL;
 
 static const alp_power_profile_ops_t *_get_profile_ops(void)
 {
-	if (_cached_profile_ops != NULL) {
-		return _cached_profile_ops;
+	const alp_power_profile_ops_t *ops = (const alp_power_profile_ops_t *)alp_dispatch_cache_load(
+	    (const void *const *)&_cached_profile_ops);
+	if (ops != NULL) {
+		return ops;
 	}
 	const alp_backend_t *be = alp_backend_select("power_profile", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		return NULL;
 	}
-	_cached_profile_ops = (const alp_power_profile_ops_t *)be->ops;
-	return _cached_profile_ops;
+	ops = (const alp_power_profile_ops_t *)be->ops;
+	alp_dispatch_cache_store((const void **)&_cached_profile_ops, (const void *)ops);
+	return ops;
 }
 
 static bool _profile_id_valid(alp_power_profile_id_t which)

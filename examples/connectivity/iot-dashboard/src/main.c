@@ -17,11 +17,11 @@
  *   │  E1M-AEN801 SoM  │ ──────▶ │ BME280  │ (T / H / P)
  *   │ + Cortex-M55 HP  │         └─────────┘
  *   └────────┬─────────┘
- *            │  SDIO  ┌─────────────────────────┐
- *            ├──────▶ │ Murata LBEE5HY2FY WiFi  │ ── TLS ─▶ broker.example
+ *            │ bridge ┌─────────────────────────┐
+ *            ├──────▶ │ TI CC3501E Wi-Fi/BLE    │ ── TLS ─▶ broker.example
  *            │        └─────────────────────────┘
  *            │  I²C0  ┌─────────────────────────┐
- *            ├──────▶ │ OPTIGA Trust M          │  handshake offload
+ *            ├──────▶ │ OPTIGA Trust M          │  planned trust anchor
  *            │        └─────────────────────────┘
  *            │  SPI1  ┌─────────────────────────┐
  *            └──────▶ │ ST7789 240×320 TFT      │ ── LVGL dashboard
@@ -32,7 +32,7 @@
  *
  * Today the path is paper-correct; HiL flips it to verified when:
  *   1. WiFi associates with a real AP.
- *   2. TLS handshake completes through OPTIGA in < 1 s.
+ *   2. TLS handshake offload through OPTIGA is wired and completes in < 1 s.
  *   3. The dashboard refreshes within 250 ms of a BME280 sample.
  *   4. The publish/connect cycle survives a 24h soak.
  * That's the v0.6 AEN HiL story.

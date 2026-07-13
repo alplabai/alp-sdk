@@ -20,7 +20,7 @@
  * RTC: it has no battery-backed date/time registers, so it does NOT satisfy the
  * alp_rtc_* calendar surface as-is (see the C source header + the regcheck
  * example README for the counter->calendar shim that is still TBD).  INTERIM
- * until E8 bench, then revisit.  See docs/adr/0017 + task #21.
+ * until E8 bench, then revisit.  See docs/adr/0017.
  * ====================================================================
  */
 

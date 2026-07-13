@@ -12,13 +12,11 @@
  * AEN-family SoMs; every other SoM is served by a portable software
  * fallback that does the same fill / blit / blend on the CPU.
  *
- * Surface rationale: the Alif Ensemble audit
- * (internal AEN feature audit, top-five NEEDS-PORTABLE-
- * SURFACE gap) flagged GPU2D as the highest-demand block missing a
- * Zephyr driver class.  Customers migrating from V2N to AEN
- * silently lose the 2D acceleration if the SDK does not expose a
- * portable surface.  This header declares the API so customer code
- * compiles against every SoM.
+ * Surface rationale: AEN-family SoMs expose a hardware 2D accelerator,
+ * while Zephyr has no portable 2D accelerator driver class.  Customers
+ * migrating from V2N to AEN silently lose the acceleration if the SDK
+ * does not expose a portable surface.  This header declares the API so
+ * customer code compiles against every SoM.
  *
  * Backends:
  *   - AEN-family : D/AVE 2D hardware block (SDK backend; no vendor

@@ -28,4 +28,10 @@ bool ota_fmc_erase_range(uint32_t base, uint32_t len);
  * device's program granularity (handled inside). Returns false on error. */
 bool ota_fmc_program(uint32_t addr, const uint8_t *data, size_t len);
 
+/* Resolve a flash address to a readable pointer.  Default (target) is a
+ * plain cast; the seam exists so hardware-less unit tests can redirect the
+ * metadata/slot read paths into a host buffer instead of dereferencing a
+ * raw 32-bit flash address on a 64-bit host. */
+const void *ota_fmc_flash_ptr(uint32_t addr);
+
 #endif /* GD32_BRIDGE_FMC_OTA_H */

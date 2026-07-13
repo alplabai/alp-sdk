@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: u8g2-oled-draw
+  description: |
+    Draws a string + frame + filled box with u8g2 against an in-RAM
+    null device (no real panel), then dumps the tile buffer as ASCII
+    art. [UNTESTED] -- native_sim only, no bench run.
+
+tests:
+  alp_sdk.example.u8g2_oled_draw:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - u8g2-oled-draw
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[u8g2-oled-draw\\] done"

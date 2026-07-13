@@ -71,6 +71,45 @@ typedef enum {
 } alp_status_t;
 
 /**
+ * @brief Return the stable symbolic name of a status code (e.g. "ALP_OK",
+ *        "ALP_ERR_INVAL").
+ *
+ * Generated from the @ref alp_status_t enum by
+ * scripts/gen_status_strings.py (src/status_strings.c) -- the enum is the
+ * single source of truth, so every member (except the
+ * @ref ALP_STATUS_ENUM_FLOOR sentinel) has a matching name here.  Cheap
+ * (pure `.rodata` table lookup) and always compiled, unlike @ref
+ * alp_status_description.
+ *
+ * @param status  Any @ref alp_status_t value.
+ * @return Pointer to a static string.  A value outside the declared
+ *         `ALP_STATUS_ENUM_FLOOR..ALP_OK` range returns the documented
+ *         fallback `"ALP_STATUS_UNKNOWN"` -- never NULL.
+ */
+const char *alp_status_name(alp_status_t status);
+
+/**
+ * @brief Return a short human-readable description of a status code.
+ *
+ * Generated from each @ref alp_status_t member's inline doc comment
+ * (first sentence) by scripts/gen_status_strings.py.  Intended for logs
+ * and diagnostics, not for programmatic branching -- switch on the
+ * @ref alp_status_t value itself for that.
+ *
+ * The description table is compiled in only when
+ * `CONFIG_ALP_STATUS_DESCRIPTIONS` is enabled (default y); a
+ * footprint-sensitive build can turn it off to drop the string table
+ * while @ref alp_status_name stays available.  When compiled out, this
+ * function still returns a documented fallback string instead of NULL.
+ *
+ * @param status  Any @ref alp_status_t value.
+ * @return Pointer to a static string.  Never NULL: an out-of-range value
+ *         returns a documented fallback, and a build with the
+ *         description table disabled returns a string saying so.
+ */
+const char *alp_status_description(alp_status_t status);
+
+/**
  * @brief Read the most recent error encountered on this thread.
  *
  * `alp_*_open` functions return NULL on failure for the v0.1 ABI
@@ -87,7 +126,9 @@ typedef enum {
  *
  * The value is **thread-local** — concurrent open() calls on
  * different threads don't clobber each other's diagnostic.  A
- * successful open() on a thread clears its slot.
+ * successful open() on a thread clears its slot.  Every thread's
+ * initial state (before that thread has called any `alp_*_open`) is
+ * @ref ALP_OK.
  *
  * @return The thread's last error code, or @ref ALP_OK if no error
  *         has been recorded since the last successful open().
@@ -299,6 +340,25 @@ typedef struct {
 } alp_i2c_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_i2c_config_t for bus @p id.
+ *
+ * Fills the identity field from @p id and every other field with its
+ * canonical default: @c bitrate_hz = 100 kHz (I2C standard-mode, the
+ * universally-safe rate). Override any field after expansion:
+ * @code
+ * alp_i2c_config_t cfg = ALP_I2C_CONFIG_DEFAULT(ALP_E1M_I2C0);
+ * cfg.bitrate_hz = 400000u; // fast-mode
+ * alp_i2c_t *bus = alp_i2c_open(&cfg);
+ * @endcode
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_I2C_CONFIG_DEFAULT(id) ((alp_i2c_config_t){ .bus_id = (id), .bitrate_hz = 100000u })
+
+/**
  * @brief Acquire an I2C bus handle.
  *
  * @param[in] cfg  Bus configuration.  Must be non-NULL.
@@ -351,8 +411,12 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_i2c_write_read(
-    alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen);
+alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
+                                uint8_t        addr,
+                                const uint8_t *wdata,
+                                size_t         wlen,
+                                uint8_t       *rdata,
+                                size_t         rlen);
 
 /**
  * @brief Release the I2C bus handle.  Idempotent on NULL.
@@ -440,6 +504,32 @@ typedef struct {
 } alp_i2c_target_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_i2c_target_config_t for bus @p id.
+ *
+ * Identity from @p id.  @c own_addr_7bit, @c on_write, and @c on_read
+ * are all mandatory -- @ref alp_i2c_target_open rejects a reserved
+ * address (0x00-0x07 / 0x78-0x7F) or a NULL callback with
+ * @ref ALP_ERR_INVAL -- so they default to 0 / NULL / NULL, a
+ * deliberate "you must set this" sentinel: 0x00 falls in the reserved
+ * range, so a caller who forgets to set @c own_addr_7bit fails loudly
+ * at open() rather than silently claiming an unintended address.
+ * @c on_stop and @c user default to NULL (both documented optional).
+ * Set @c own_addr_7bit / @c on_write / @c on_read before calling open().
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_I2C_TARGET_CONFIG_DEFAULT(id) \
+	((alp_i2c_target_config_t){ .bus_id        = (id), \
+	                            .own_addr_7bit = 0u, \
+	                            .on_write      = NULL, \
+	                            .on_read       = NULL, \
+	                            .on_stop       = NULL, \
+	                            .user          = NULL })
+
+/**
  * @brief Register this MCU as an I2C target (slave) on @p cfg->bus_id.
  *
  * The callbacks start firing as soon as this returns; prime any state
@@ -498,6 +588,27 @@ typedef struct {
 	uint32_t       cs_pin_id;     /**< Studio-resolved chip-select pin, or
                                    *   @ref ALP_SPI_NO_CS for none. */
 } alp_spi_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_spi_config_t for bus @p id.
+ *
+ * Identity from @p id; canonical defaults: @c freq_hz = 1 MHz,
+ * @c mode = @ref ALP_SPI_MODE_0 (CPOL=0/CPHA=0), @c bits_per_word = 8,
+ * @c cs_pin_id = @ref ALP_SPI_NO_CS (no controller-driven chip-select).
+ * Set @c cs_pin_id / @c mode / @c freq_hz for the target device after
+ * expansion.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_SPI_CONFIG_DEFAULT(id) \
+	((alp_spi_config_t){ .bus_id        = (id), \
+	                     .freq_hz       = 1000000u, \
+	                     .mode          = ALP_SPI_MODE_0, \
+	                     .bits_per_word = 8u, \
+	                     .cs_pin_id     = ALP_SPI_NO_CS })
 
 /**
  * @brief Acquire an SPI bus handle.
@@ -595,6 +706,23 @@ typedef struct {
 	uint8_t        bits_per_word; /**< Usually 8 (0 defaults to 8; max 32) -- must
 	                               *   match the external controller. */
 } alp_spi_target_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_spi_target_config_t for bus @p id.
+ *
+ * Identity from @p id; canonical defaults: @c mode = @ref
+ * ALP_SPI_MODE_0 (CPOL=0/CPHA=0, matching the controller-mode default),
+ * @c bits_per_word = 0 (documented as defaulting to 8). Both @c mode
+ * and @c bits_per_word MUST still match whatever the external
+ * controller drives.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_SPI_TARGET_CONFIG_DEFAULT(id) \
+	((alp_spi_target_config_t){ .bus_id = (id), .mode = ALP_SPI_MODE_0, .bits_per_word = 0u })
 
 /**
  * @brief Claim @p cfg->bus_id in target (slave) mode.
@@ -707,6 +835,25 @@ typedef struct {
 } alp_uart_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_uart_config_t for port @p id.
+ *
+ * Identity from @p id; canonical defaults = 115200 8N1:
+ * @c baudrate = 115200, @c data_bits = 8, @c stop_bits = 1,
+ * @c parity = @ref ALP_UART_PARITY_NONE.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_UART_CONFIG_DEFAULT(id) \
+	((alp_uart_config_t){ .port_id   = (id), \
+	                      .baudrate  = 115200u, \
+	                      .data_bits = 8u, \
+	                      .stop_bits = 1u, \
+	                      .parity    = ALP_UART_PARITY_NONE })
+
+/**
  * @brief Acquire a UART port handle.
  *
  * @param[in] cfg  Port configuration.  Must be non-NULL.
@@ -732,10 +879,22 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
 /**
  * @brief Blocking UART read with millisecond timeout.
  *
+ * @p timeout_ms bounds the ENTIRE call, not just the gap between two
+ * already-arrived bytes.  If the deadline is reached with zero bytes
+ * collected, the call returns @ref ALP_ERR_TIMEOUT.  If at least one
+ * byte arrived before the deadline but fewer than @p len, the call
+ * returns @ref ALP_OK with the partial bytes in @p data -- the
+ * caller has no count of how many, so read in smaller chunks (or
+ * pair with @ref alp_uart_rx_ringbuf_attach) when a partial-fill
+ * count matters.  @c timeout_ms == 0 is a single non-blocking poll:
+ * return immediately with @ref ALP_ERR_TIMEOUT if no byte is already
+ * available.
+ *
  * @param[in]  port        Handle from @ref alp_uart_open.
  * @param[out] data        Destination buffer.
  * @param[in]  len         Byte count to read.
- * @param[in]  timeout_ms  Max wait.
+ * @param[in]  timeout_ms  Max wait for the whole call; 0 = poll once,
+ *                         don't block.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
@@ -744,6 +903,11 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t
 
 /**
  * @brief Release the UART port handle.  Idempotent on NULL.
+ *
+ * If a ring buffer is attached via @ref alp_uart_rx_ringbuf_attach, it
+ * is detached (RX IRQs disabled, pool slot released) before the port
+ * handle itself is released -- callers do not need to detach manually
+ * before closing.
  *
  * @param[in] port  Handle from @ref alp_uart_open, or NULL.
  */
@@ -781,6 +945,19 @@ typedef struct alp_uart_rx_ringbuf alp_uart_rx_ringbuf_t;
 /**
  * @brief Attach a byte-granular RX ring buffer to an open UART port.
  *
+ * Exclusive ownership: at most one ring buffer may be attached to a
+ * port at a time (the underlying driver exposes a single IRQ callback
+ * slot per UART device).  Attaching a second buffer while the first
+ * is still attached is refused with @ref ALP_ERR_BUSY -- detach the
+ * first (or close the port) before attaching a replacement.
+ *
+ * Lifetime: @ref alp_uart_close() on the parent port automatically
+ * detaches an attached ring buffer (disabling RX IRQs and releasing
+ * the pool slot) before the port handle is released, so the buffer
+ * can never outlive its parent.  Calling @ref alp_uart_rx_ringbuf_detach
+ * explicitly first (e.g. to attach a replacement without closing the
+ * port) is also fine -- detach is idempotent.
+ *
  * @param port           UART handle from alp_uart_open().
  * @param backing        Caller-owned buffer; must outlive the returned
  *                       handle.  Should be >= 64 bytes to absorb the
@@ -791,7 +968,8 @@ typedef struct alp_uart_rx_ringbuf alp_uart_rx_ringbuf_t;
  *
  * @return Handle on success; NULL with alp_last_error() set on failure.
  *         Returns NULL + ALP_ERR_NOSUPPORT on builds without
- *         CONFIG_ALP_SDK_UART_RX_RINGBUF.
+ *         CONFIG_ALP_SDK_UART_RX_RINGBUF; NULL + ALP_ERR_BUSY when a
+ *         ring buffer is already attached to @p port.
  */
 alp_uart_rx_ringbuf_t *
 alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_size);

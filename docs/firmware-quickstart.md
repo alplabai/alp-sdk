@@ -125,7 +125,9 @@ west flash                     # real silicon
 
 ```c
 alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-    .bus_id     = 0u,           // ALP_E1M_I2C0 from <alp/e1m_pinout.h>
+    // From <alp/board.h>; resolves to ALP_E1M_I2C0 on E1M EVKs
+    // and ALP_E1M_X_I2C0 on E1M-X EVKs.
+    .bus_id     = BOARD_I2C_SENSORS,
     .bitrate_hz = 400000u,
 });
 if (bus == NULL) {
@@ -303,7 +305,7 @@ hardware-free environment triage.  Verb reference:
 | Secure boot                                      | [`docs/secure-boot.md`](secure-boot.md)           |
 | OTA (Mender device contract)                     | [`docs/ota.md`](ota.md), [`docs/ota-device-contract.md`](ota-device-contract.md) |
 | Verification + release matrix                    | [`docs/test-plan.md`](test-plan.md)               |
-| HiL rig design                                   | maintained in `alplabai/alp-sdk-internal` (internal) |
+| HiL runner contract                              | [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md)          |
 | Porting to a new SoM                             | [`docs/porting-new-som.md`](porting-new-som.md)   |
 
 ## 9. Getting help

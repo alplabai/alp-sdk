@@ -89,7 +89,7 @@ static uint8_t dst_buf[XFER_LEN] __attribute__((section("SRAM0")));
  * Compile-time staging fact: the node exists, is enabled, and binds to the
  * upstream PL330 compatible.
  */
-#define DMA_BOUND                                                                                  \
+#define DMA_BOUND \
 	(DT_NODE_HAS_STATUS(DMA_NODE, okay) && DT_NODE_HAS_COMPAT(DMA_NODE, arm_dma_pl330))
 
 /* The alp_dma0 alias must resolve to the SAME node the PL330 driver binds. */
@@ -142,7 +142,7 @@ int main(void)
 	 * pulsing SW_RST in (5) re-boots the manager into the secure domain so the
 	 * secure DMAGO is honoured and the channel executes the generated microcode.
 	 *
-	 * TODO(#21): fold this into the Tier-1.5 clockctrl so the device is clocked
+	 * TODO: fold this into the Tier-1.5 clockctrl so the device is clocked
 	 * and boot-configured by its DT `clocks` phandle instead of an app-level poke.
 	 */
 #define M55HE_CFG_DMA_CTRL    0x43007000U /* M55_CFG_Common.DMA_CTRL   (+0x00) */

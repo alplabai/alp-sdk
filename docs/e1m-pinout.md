@@ -1,20 +1,28 @@
 # E1M pinout — and how the SDK consumes it
 
-The Alp SDK **does not duplicate** the E1M pinout.  The standard
-lives in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
-and the SDK only sees opaque integers (`bus_id`, `pin_id`,
-`port_id`) that have already been resolved through a chain of
-inputs (the spec + this repo's per-SoM metadata).  This file
-explains the chain and how each layer sees the pinout, so
-contributors don't try to import pad data into this repo's source
-tree.
+The Alp SDK's **public API never duplicates** the E1M pinout: it sees
+only opaque integers (`bus_id`, `pin_id`, `port_id`) that have already
+been resolved through a chain of inputs (the standard + this repo's
+per-SoM metadata).  The standard itself is owned by
+[`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec).  This file
+explains the chain and how each layer sees the pinout.
 
 **The per-SoM pad → silicon-pin layer also lives in this repo** (the
 SoM preset's `pad_routes:` block under
-[`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/)); only
-the spec itself stays external.  (This is a 2026-05-18 reversal of an
-earlier design that placed the routes in `alp-studio`; see the box
-below.)
+[`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/)).  (This
+is a 2026-05-18 reversal of an earlier design that placed the routes in
+`alp-studio`; see the box below.)
+
+**The standard's machine-readable pinout is vendored as a verbatim
+snapshot** under [`metadata/e1m/`](../metadata/e1m/)
+(`pinout-v1.json`, `pinout-x-v1.json`) — a byte-for-byte copy of
+e1m-spec pinned by `metadata/e1m/e1m-spec.lock`, refreshed only by
+`scripts/sync_e1m_spec.py`, **never hand-edited**.  It is build-input
+metadata (not a public header, not hand-transcribed): it gives the
+pin-mux configurator the footprint in-repo and lets
+`scripts/check_e1m_pinout.py` cross-check every per-SoM pad/function
+against the standard offline.  See
+[ADR 0019](adr/0019-vendor-e1m-spec-pinout-snapshot.md).
 
 ## The chain
 

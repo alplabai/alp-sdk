@@ -13,6 +13,32 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+/*
+ * SPECTRAL + STATISTICAL MATH -- via <alp/dsp.h>, not hand-rolled.
+ * ---------------------------------------------------------------
+ * This file does NOT re-derive an FFT or the window statistics by hand,
+ * and it does NOT call CMSIS-DSP arm_* directly.  Both go through the
+ * portable <alp/dsp.h> surface, so the SAME source builds for native_sim
+ * and the Cortex-M55 alike and the SDK -- not this file -- owns the
+ * CMSIS-vs-portable choice:
+ *
+ *   1. FFT -> alp_dsp_chain (ALP_DSP_STAGE_FFT).  The backend runs
+ *      CMSIS-DSP arm_rfft_fast_f32 (Helium-vectorised) on the M55, a
+ *      hardware DSP block where the SoM has one, and a portable-C radix-2
+ *      fallback under native_sim -- selected by the backend registry.
+ *      Keeping this on <alp/dsp> lets the identical source run on the
+ *      V2N (A55 + DRP-AI) and NXP paths, which have no CMSIS-M.
+ *
+ *   2. Time-domain window statistics (mean, RMS, abs-peak) ->
+ *      alp_dsp_stats_f32, which the SDK backs with CMSIS-DSP
+ *      arm_mean/rms/absmax_f32 on Cortex-M and a portable-C pass
+ *      elsewhere.
+ *
+ * Only the zero-crossing rate stays a hand-written loop -- it has no
+ * CMSIS (or alp_dsp) kernel.
+ */
+#include <alp/dsp.h>
+
 /* Reset the accumulator so the next push starts at index 0. */
 void ase_frame_reset(struct ase_frame_state *st)
 {
@@ -34,98 +60,6 @@ bool ase_frame_full(const struct ase_frame_state *st)
 }
 
 /*
- * fft_radix2 -- in-place iterative Cooley-Tukey radix-2 DIT FFT.
- *
- * ALGORITHM OVERVIEW
- * ------------------
- * The N-point Discrete Fourier Transform is:
- *
- *   X[k] = Σ_{n=0}^{N-1}  x[n] · e^{-j2πkn/N}        k = 0 … N-1
- *
- * Naïve evaluation costs O(N²) multiply-adds.  The Cooley-Tukey DIT
- * (decimation-in-time) factorisation recursively splits the input into
- * even- and odd-indexed subsequences, reducing the cost to O(N log₂ N).
- *
- * BIT-REVERSAL PERMUTATION
- * ------------------------
- * The DIT recursion reorders inputs so that x[0], x[N/2], x[N/4], x[3N/4],
- * … arrive in bit-reversed index order before the first butterfly stage.
- * Rather than recurse, the loop below computes the permutation iteratively
- * using a carry-ripple trick: j tracks the bit-reversed position of i, and
- * is updated each step by toggling the top-most bit not yet carried, which
- * is equivalent to adding 1 in bit-reversed order.
- *
- * BUTTERFLY / TWIDDLE RECURRENCE
- * --------------------------------
- * After permutation, log₂(N) passes merge adjacent pairs ("butterflies").
- * At the stage with group length L (half-group L/2), two bins a and b satisfy:
- *
- *   X_new[a] = X[a] + W^k · X[b]
- *   X_new[b] = X[a] - W^k · X[b]
- *
- * where W^k = e^{-j2πk/L} is the twiddle factor for butterfly position k
- * within the group.  W^k is accumulated by complex multiplication from the
- * stage root W^1 = e^{-j2π/L}, avoiding cosf/sinf calls inside the inner
- * loop (only one pair of trig calls per stage, not per butterfly).
- */
-static void fft_radix2(float *re, float *im, int n)
-{
-	/* --- Bit-reversal permutation --- */
-	/* j is the bit-reversed index of i; swap (re,im)[i] with (re,im)[j]
-	 * whenever i < j to avoid double-swapping. */
-	for (int i = 1, j = 0; i < n; i++) {
-		int bit = n >> 1; /* start from the most-significant bit position */
-		/* Carry-ripple: clear all trailing 1-bits in j until a 0 is found. */
-		for (; j & bit; bit >>= 1) {
-			j ^= bit;
-		}
-		j ^= bit; /* set that 0-bit, completing the bit-reversed increment */
-		if (i < j) {
-			float tr = re[i];
-			re[i]    = re[j];
-			re[j]    = tr;
-			float ti = im[i];
-			im[i]    = im[j];
-			im[j]    = ti;
-		}
-	}
-
-	/* --- Butterfly stages --- */
-	/* len doubles each stage: 2, 4, 8, … N  (log₂ N stages total). */
-	for (int len = 2; len <= n; len <<= 1) {
-		/* Primitive twiddle root for this stage: W^1 = e^{-j2π/len}. */
-		float ang = -2.0f * (float)M_PI / (float)len;
-		float wlr = cosf(ang); /* real part of the stage's unit twiddle root */
-		float wli = sinf(ang); /* imag part */
-
-		/* Iterate over each group of 'len' bins in the array. */
-		for (int i = 0; i < n; i += len) {
-			/* Twiddle accumulator W^k, initialised to W^0 = 1 + 0j. */
-			float wr = 1.0f, wi = 0.0f;
-
-			/* Each k processes one butterfly within the group. */
-			for (int k = 0; k < len / 2; k++) {
-				/* Upper bin a and lower bin b = a + L/2 of this butterfly. */
-				int a = i + k;
-				int b = i + k + len / 2;
-				/* Complex multiply: t = W^k · X[b]. */
-				float tr = wr * re[b] - wi * im[b];
-				float ti = wr * im[b] + wi * re[b];
-				/* In-place DIT butterfly: X[b] = X[a] - t, X[a] = X[a] + t. */
-				re[b] = re[a] - tr;
-				im[b] = im[a] - ti;
-				re[a] += tr;
-				im[a] += ti;
-				/* Advance twiddle: W^{k+1} = W^k · W^1 (complex multiply). */
-				float nwr = wr * wlr - wi * wli;
-				wi        = wr * wli + wi * wlr;
-				wr        = nwr;
-			}
-		}
-	}
-}
-
-/*
  * ase_feat_extract -- compute the full feature vector from one audio frame.
  *
  * Processing pipeline executed in order:
@@ -138,9 +72,9 @@ static void fft_radix2(float *re, float *im, int n)
  *      These are derived directly from the DC-free time signal -- no FFT
  *      is needed -- and capture impulsiveness and HF content cheaply.
  *
- *   3. Radix-2 FFT on the zero-padded DC-free frame → complex spectrum X[k].
- *      Only the single-sided spectrum (bins 1 … N/2-1) is used; the second
- *      half is the conjugate mirror for real input.
+ *   3. <alp/dsp.h> FFT chain on the zero-padded DC-free frame -> magnitude
+ *      spectrum.  Only the single-sided spectrum (bins 1 ... N/2-1) is used;
+ *      the second half is the conjugate mirror for real input.
  *
  *   4. Single pass over the single-sided spectrum to collect:
  *      spectral centroid, spectral flatness, and the band-energy accumulator.
@@ -160,103 +94,133 @@ void ase_feat_extract(const struct ase_frame_state *st, float sr_hz, struct ase_
 		return;
 	}
 
-	/* --- Step 1: DC removal --- */
 	/*
-	 * Compute the per-frame mean and subtract it from every sample.
-	 * A non-zero mean (microphone bias, low-frequency hum) would otherwise
-	 * deposit large energy in bin 0 (DC) and bias the centroid toward zero.
-	 * All subsequent calculations operate on the DC-free signal x[i] = s[i] - mean.
+	 * DC-REMOVED WINDOW (shared by the time-domain stats AND the FFT).
+	 *
+	 * xc[i] = sample[i] - mean is the AC (acoustic) component with the
+	 * DC bias (mic offset, low-frequency rumble) removed.  The tail
+	 * [n, ASE_FRAME_N) is zero-padded so the fixed-size FFT can run on a
+	 * short frame; zero-padding adds no spectral energy, it only
+	 * interpolates the spectrum to finer bin spacing.  xc is static
+	 * (single audio thread, no re-entrancy) to keep a 2 kB buffer off
+	 * the stack.
+	 *
+	 * One alp_dsp_stats_f32 pass over the raw frame yields the mean; a
+	 * second over the mean-centred xc yields the RMS and abs-peak with
+	 * the DC bias already removed.  The SDK backs these with CMSIS-DSP
+	 * arm_mean/rms/absmax_f32 on the M55 and a portable-C pass under
+	 * native_sim -- no arm_* here.
 	 */
-	float mean = 0.0f;
-	for (int i = 0; i < n; i++) {
-		mean += st->samples[i];
-	}
-	mean /= (float)n;
+	static float xc[ASE_FRAME_N];
 
-	/* --- Step 2: time-domain features (RMS, crest, ZCR) --- */
-	/*
-	 * Single pass to accumulate the squared-sum (for RMS), the peak magnitude
-	 * (for crest factor), and the zero-crossing count (for ZCR):
-	 *
-	 *   RMS  = sqrt( (1/N) Σ x[i]² )
-	 *        Measures average signal power; proportional to perceived loudness.
-	 *        Quiet ambient noise is typically RMS < 0.02 (normalised to ±1).
-	 *
-	 *   crest factor = peak / RMS
-	 *        Measures impulsiveness.  A pure 1 kHz sine has crest = √2 ≈ 1.41.
-	 *        A transient event (glass break, gunshot, clap) has crest >> 4
-	 *        because a brief spike dominates the peak while the RMS stays low.
-	 *
-	 *   ZCR  = (number of sign changes) / N   ∈ [0, 1]
-	 *        A cheap pitch / high-frequency proxy.  A 4 kHz tone at 16 kHz SR
-	 *        crosses zero ~0.5 times per sample → ZCR ≈ 0.5.  Voiced speech
-	 *        sits at 0.05–0.15; broadband noise near 0.5; near-silence < 0.05.
-	 */
-	float sum2 = 0.0f, peak = 0.0f;
-	int   zc   = 0;
-	float prev = st->samples[0] - mean;
+	alp_dsp_stats_t raw;
+	alp_dsp_stats_f32(st->samples, (size_t)n, &raw);
+	const float mean = raw.mean;
+
 	for (int i = 0; i < n; i++) {
-		float x = st->samples[i] - mean;
-		sum2 += x * x;
-		if (fabsf(x) > peak) {
-			peak = fabsf(x);
-		}
-		if (i > 0 && ((x < 0.0f) != (prev < 0.0f))) {
+		xc[i] = st->samples[i] - mean;
+	}
+	for (int i = n; i < ASE_FRAME_N; i++) {
+		xc[i] = 0.0f; /* zero-pad the FFT tail on a short frame */
+	}
+
+	alp_dsp_stats_t ac;
+	alp_dsp_stats_f32(xc, (size_t)n, &ac);
+	const float peak = ac.abs_max; /* peak |xc|              */
+	out->rms         = ac.rms;     /* RMS = sqrt(mean(xc^2)) */
+
+	/*
+	 * CREST FACTOR: peak / RMS, from the DC-free window computed above.
+	 * A pure sine has crest = sqrt(2) ~= 1.41; a transient event (glass
+	 * break, gunshot, clap) has crest >> 4 because a brief spike
+	 * dominates the peak while the RMS stays low.
+	 */
+	out->crest = (out->rms > 1e-6f) ? (peak / out->rms) : 0.0f;
+
+	/*
+	 * ZERO-CROSSING RATE -- a cheap pitch / high-frequency proxy.
+	 * CMSIS-DSP (and alp_dsp) ship no zero-crossing kernel, so this
+	 * stays a portable loop over xc.
+	 *
+	 *   ZCR = (number of sign changes) / N   in [0, 1]
+	 *     A 4 kHz tone at 16 kHz SR crosses zero ~0.5 times per sample ->
+	 *     ZCR ~= 0.5.  Voiced speech sits at 0.05-0.15; broadband noise
+	 *     near 0.5; near-silence < 0.05.
+	 */
+	int   zc   = 0;
+	float prev = xc[0];
+	for (int i = 1; i < n; i++) {
+		if ((xc[i] < 0.0f) != (prev < 0.0f)) {
 			zc++;
 		}
-		prev = x;
+		prev = xc[i];
 	}
-	out->rms   = sqrtf(sum2 / (float)n);
-	out->crest = (out->rms > 1e-6f) ? (peak / out->rms) : 0.0f;
-	out->zcr   = (float)zc / (float)n;
+	out->zcr = (float)zc / (float)n;
 
-	/* --- Step 3: FFT --- */
 	/*
-	 * Copy the DC-free time signal into the real part of the FFT buffer and
-	 * zero-pad the remaining samples.  The imaginary part is zero for real input.
-	 * After fft_radix2(), re[k]+j*im[k] = X[k] for k = 0 … ASE_FRAME_N-1.
+	 * SPECTRUM via the portable <alp/dsp.h> chain (NOT a hand-rolled FFT).
+	 * ------------------------------------------------------------------
+	 * A single ALP_DSP_STAGE_FFT (rectangular, no window) transforms the
+	 * DC-free frame to magnitude bins.  The backend runs CMSIS-DSP
+	 * arm_rfft_fast_f32 on the M55 and a portable-C radix-2 FFT under
+	 * native_sim -- this file's source is identical either way.
 	 *
-	 * We use static buffers here (single-threaded use); the frame owns n ≤ ASE_FRAME_N
-	 * real samples.  Bins beyond n are zero-padded, which avoids spectral leakage
-	 * from a truncated frame but does not change the frequency resolution.
+	 * The chain consumes int16 samples (the microphone's native PCM
+	 * format).  We scale the float frame to fill the int16 range before
+	 * feeding it: the absolute scale is irrelevant here because every
+	 * downstream spectral feature -- centroid (a ratio), flatness (a
+	 * ratio), rolloff and the normalised band energies -- is
+	 * scale-invariant.
 	 */
-	static float re[ASE_FRAME_N];
-	static float im[ASE_FRAME_N];
+	static int16_t samp_q15[ASE_FRAME_N];
+	float          scale = (peak > 1e-9f) ? (30000.0f / peak) : 0.0f;
 	for (int i = 0; i < ASE_FRAME_N; i++) {
-		re[i] = (i < n) ? (st->samples[i] - mean) : 0.0f;
-		im[i] = 0.0f;
+		samp_q15[i] = (int16_t)lrintf(xc[i] * scale);
 	}
-	fft_radix2(re, im, ASE_FRAME_N);
 
-	/* --- Step 4: single-sided spectrum → centroid, flatness, band energy --- */
+	static float    mag[ASE_FRAME_N];
+	alp_dsp_stage_t stages[] = {
+		{ .kind  = ALP_DSP_STAGE_FFT,
+		  .u.fft = { .n_points = ASE_FRAME_N, .output_format = ALP_DSP_FFT_OUTPUT_MAGNITUDE } },
+	};
+	alp_dsp_chain_t *chain = alp_dsp_chain_open(stages, 1u);
+	size_t           got   = 0;
+	memset(mag, 0, sizeof(mag));
+	if (chain != NULL) {
+		(void)alp_dsp_chain_apply_bins(chain, samp_q15, ASE_FRAME_N, mag, ASE_FRAME_N, &got);
+		alp_dsp_chain_close(chain);
+	}
+
 	/*
-	 * Only bins 1 … N/2-1 carry unique information for real input:
+	 * SINGLE-SIDED SPECTRUM -> centroid, flatness, band energy.
+	 * -----------------------------------------------------------
+	 * Only bins 1 ... N/2-1 carry unique information for real input:
 	 *   bin 0 is DC (already removed from the time signal);
-	 *   bin N/2 is the real-valued Nyquist bin (treated as an edge case, skipped);
-	 *   bins N/2+1 … N-1 are conjugate mirrors of bins N/2-1 … 1.
+	 *   bin N/2 is the real-valued Nyquist bin (treated as an edge case,
+	 *   skipped);
+	 *   bins N/2+1 ... N-1 are conjugate mirrors of bins N/2-1 ... 1.
 	 *
-	 * Magnitude: |X[k]| = sqrt(re[k]² + im[k]²).  We skip the sqrt for the
-	 * rolloff pass (uses |X|²) but keep the magnitude for centroid and flatness.
-	 *
-	 * Spectral centroid = Σ(f[k] · |X[k]|) / Σ|X[k]|
-	 *   The magnitude-weighted mean frequency, often called "spectral brightness".
-	 *   High centroid (> 4 kHz) → sibilants, breaking glass, broadband hiss.
-	 *   Low centroid (< 1 kHz)  → bass, rumble, voiced speech fundamentals.
+	 * Spectral centroid = Sum(f[k] * |X[k]|) / Sum|X[k]|
+	 *   The magnitude-weighted mean frequency, often called "spectral
+	 *   brightness".  High centroid (> 4 kHz) -> sibilants, breaking
+	 *   glass, broadband hiss.  Low centroid (< 1 kHz) -> bass, rumble,
+	 *   voiced speech fundamentals.  A ratio of magnitudes, so the
+	 *   uncalibrated int16 scale of the chain's output cancels out.
 	 *
 	 * Spectral flatness = geometric_mean(|X|) / arithmetic_mean(|X|)
 	 *   Ranges from 0 (perfectly tonal: energy in a single sinusoid) to 1
 	 *   (white noise: all bins equally excited).
-	 *   Computed as exp(mean(log|X|)) / mean(|X|) to avoid underflow; a tiny
-	 *   floor (1e-9) is added before the log to handle near-zero bins.
-	 *   A 3150 Hz smoke-detector beep gives flatness ≈ 0.05; rain gives > 0.8.
+	 *   Computed as exp(mean(log|X|)) / mean(|X|) to avoid underflow; a
+	 *   tiny floor (1e-9) is added before the log to handle near-zero
+	 *   bins -- negligible next to the chain's int16-scale magnitudes.
+	 *   A 3150 Hz smoke-detector beep gives flatness ~= 0.05; rain gives
+	 *   > 0.8.
 	 */
-	const int half = ASE_FRAME_N / 2;
-	float     mag[ASE_FRAME_N / 2];
+	const int half      = ASE_FRAME_N / 2;
 	float     mag_total = 0.0f, centroid_num = 0.0f, log_sum = 0.0f, lin_sum = 0.0f;
 	int       active = 0;
 	for (int k = 1; k < half; k++) {
-		float m  = sqrtf(re[k] * re[k] + im[k] * im[k]);
-		mag[k]   = m;
+		float m  = mag[k];
 		float fr = (float)k * sr_hz / (float)ASE_FRAME_N; /* bin centre Hz */
 		mag_total += m;
 		centroid_num += fr * m; /* accumulate numerator of centroid formula */
@@ -271,18 +235,23 @@ void ase_feat_extract(const struct ase_frame_state *st, float sr_hz, struct ase_
 	                       ? (expf(log_sum / (float)active) / (lin_sum / (float)active))
 	                       : 0.0f;
 
-	/* --- Step 5: spectral rolloff --- */
 	/*
+	 * SPECTRAL ROLLOFF
+	 * ----------------
 	 * Spectral rolloff f_R: the lowest frequency at which the cumulative
-	 * spectral energy (using |X|² = power, not magnitude) reaches 85% of total:
+	 * spectral energy (using |X|^2 = power, not magnitude) reaches 85% of
+	 * total:
 	 *
-	 *   f_R = min{ f[k] : Σ_{i=1}^{k} |X[i]|² ≥ 0.85 · Σ_{i=1}^{N/2-1} |X[i]|² }
+	 *   f_R = min{ f[k] : Sum_{i=1}^{k} |X[i]|^2 >= 0.85 * Sum_{i=1}^{N/2-1} |X[i]|^2 }
 	 *
-	 * Using power (|X|²) rather than magnitude here gives a more stable estimate
-	 * because it is quadratic in amplitude and less sensitive to a single loud bin.
-	 * High rolloff (> 6 kHz) → energy concentrated in HF → glass break or noise.
-	 * Low rolloff (< 2 kHz)  → energy concentrated in LF → speech fundamentals.
-	 * The 85% threshold is conventional in Music Information Retrieval (MIR).
+	 * Using power (|X|^2) rather than magnitude here gives a more stable
+	 * estimate because it is quadratic in amplitude and less sensitive to
+	 * a single loud bin -- and, like centroid/flatness above, the ratio
+	 * against the total is invariant to the chain's absolute int16 scale.
+	 * High rolloff (> 6 kHz) -> energy concentrated in HF -> glass break
+	 * or noise.  Low rolloff (< 2 kHz) -> energy concentrated in LF ->
+	 * speech fundamentals.  The 85% threshold is conventional in Music
+	 * Information Retrieval (MIR).
 	 */
 	float total2 = 0.0f;
 	for (int k = 1; k < half; k++) {
@@ -298,24 +267,26 @@ void ase_feat_extract(const struct ase_frame_state *st, float sr_hz, struct ase_
 		}
 	}
 
-	/* --- Step 6: log-spaced band energies --- */
 	/*
-	 * Map FFT bins to ASE_N_BANDS bands whose boundaries are logarithmically
-	 * spaced over bins 1 … N/2-1.  Mapping formula:
+	 * LOG-SPACED BAND ENERGIES
+	 * -------------------------
+	 * Map FFT bins to ASE_N_BANDS bands whose boundaries are
+	 * logarithmically spaced over bins 1 ... N/2-1.  Mapping formula:
 	 *
-	 *   b = floor( log(k) / log(N/2) · ASE_N_BANDS )   clamped to [0, N_BANDS-1]
+	 *   b = floor( log(k) / log(N/2) * ASE_N_BANDS )   clamped to [0, N_BANDS-1]
 	 *
-	 * Why logarithmic spacing?  Human hearing resolves frequency on a roughly
-	 * logarithmic scale (the mel / bark / ERB scales all share this property).
-	 * Equal-width linear bands would give most bins — and most resolution — to
-	 * the high-frequency region, where there is often little perceptually useful
-	 * content.  Log spacing gives each octave roughly equal representation.
+	 * Why logarithmic spacing?  Human hearing resolves frequency on a
+	 * roughly logarithmic scale (the mel / bark / ERB scales all share
+	 * this property).  Equal-width linear bands would give most bins --
+	 * and most resolution -- to the high-frequency region, where there is
+	 * often little perceptually useful content.  Log spacing gives each
+	 * octave roughly equal representation.
 	 *
 	 * Band boundaries follow k = 2^b for band b (b = floor(log(k)/log(256)*8)),
-	 * where bin→Hz = k * 31.25 (= 16000/512).  Approximate band centres:
-	 *   band 0: ~31–62 Hz   (sub-bass, room modes, HVAC hum)
-	 *   band 3: ~250–500 Hz (upper bass, low-speech fundamentals)
-	 *   band 7: ~4–8 kHz    (sibilance, HF transients, glass break signature)
+	 * where bin->Hz = k * 31.25 (= 16000/512).  Approximate band centres:
+	 *   band 0: ~31-62 Hz   (sub-bass, room modes, HVAC hum)
+	 *   band 3: ~250-500 Hz (upper bass, low-speech fundamentals)
+	 *   band 7: ~4-8 kHz    (sibilance, HF transients, glass break signature)
 	 *
 	 * Normalisation: each band energy is divided by total2 (total spectral
 	 * power) so the 8-element vector sums to 1.  This makes the features

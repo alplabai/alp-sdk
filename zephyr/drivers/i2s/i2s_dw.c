@@ -10,7 +10,7 @@
  * "snps,designware-i2s").  Upstream Zephyr v4.4 + hal_alif ship NO DesignWare
  * I2S class driver, so this is a genuine fork-driver copy carried in-tree so it
  * survives a `west update`.  Retire onto the opt-in sdk-alif fork compatible
- * once the i2s nodes are repointed AND bench-verified (task #21).  See
+ * once the i2s nodes are repointed AND bench-verified.  See
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *

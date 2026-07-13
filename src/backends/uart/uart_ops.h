@@ -26,6 +26,12 @@ typedef struct alp_uart_backend_state {
 	uint32_t              port_id;
 	void                 *be_data;
 	const alp_uart_ops_t *ops;
+	/* Opaque back-ref (struct alp_uart_rx_ringbuf *) set while an RX
+     * ring buffer is attached to this port; NULL otherwise.  Enforces
+     * single-owner attach and lets the backend's close() detach it
+     * before the handle is released.  Zephyr-only today -- other
+     * backends never set this field. */
+	void *rx_ringbuf;
 } alp_uart_backend_state_t;
 
 struct alp_uart_ops {
@@ -44,7 +50,14 @@ struct alp_uart {
 	alp_uart_backend_state_t state;
 	const alp_backend_t     *backend;
 	alp_capabilities_t       cached_caps;
-	bool                     in_use;
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close, issue #629) -- placed before in_use so the atomic-
+	 * claim zeroing in src/uart_dispatch.c (memset up to
+	 * offsetof(..., in_use)) resets both on every fresh claim. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 #endif /* ALP_BACKENDS_UART_OPS_H */

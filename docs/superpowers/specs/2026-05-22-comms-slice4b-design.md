@@ -18,7 +18,10 @@ Net: **four class dispatchers** in this slice.
 ## Non-goals
 
 - Vendor extensions. None of USB / BLE / WiFi / MQTT pass the §3 audit — every per-SoC feature is reachable through Zephyr's portable USB device class / BT host / Net / MQTT subsystems.
-- CC3501E proxy as a vendor extension. The CC3501E (V2N's combo WiFi+BT module on Sterling-LWB5+/E1M-X V2N-M1) routes inside the Zephyr WiFi/BLE backends via existing chip-driver helpers — **NOT** through a vendor-ext header. Per the handoff lesson.
+- CC3501E proxy as a vendor extension. Superseded by issue #478: the CC3501E
+  is the AEN Wi-Fi/BLE coprocessor, not the V2N module. AEN now routes portable
+  Wi-Fi/BLE through exact `ti-cc3501e` registry backends, still **not** through
+  a vendor-extension header.
 - Yocto backends. Yocto-side BlueZ / IPv6 / WiFi userland is out of scope. Stays on stub or the existing `src/yocto/*` (BLE/USB don't have Yocto stubs today).
 - New `<alp/wifi.h>` / `<alp/mqtt.h>` headers. Both surfaces stay in `<alp/iot.h>`. Two dispatchers, one header.
 
@@ -60,7 +63,10 @@ Files **deleted**:
 
 All four follow the Slice 4a pattern: a portable Zephyr backend at `silicon_ref = "*"` priority 100 that wraps the respective Zephyr subsystem, and a wildcard sw_fallback at priority 0 for native_sim builds.
 
-**No vendor-specific backends.** The CC3501E on V2N is a Zephyr-driver-resolvable WiFi/BT module (via the `tilab,cc3501-wifi` / `tilab,cc3501-bluetooth` DT bindings); routing happens inside Zephyr's BT host / Net mgmt subsystems, not in a separate alp-side backend.
+**Historical note:** this draft originally planned no vendor-specific Wi-Fi/BLE
+backend. Issue #478 supersedes that for AEN: the CC3501E is an exact-silicon
+registry backend for `alif:ensemble:e3` through `alif:ensemble:e8`. Other
+targets still use the wildcard Zephyr BT / Wi-Fi backends.
 
 ---
 

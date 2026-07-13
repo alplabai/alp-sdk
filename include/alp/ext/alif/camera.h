@@ -2,13 +2,11 @@
  * @file ext/alif/camera.h
  * @brief Alif Ensemble VeriSilicon ISP Pico (vsi,isp-pico) vendor-specific surface.
  *
- * Non-portable.  Include only when you've committed to Alif
- * Ensemble silicon (E4 / E6 / E8 -- the variants that ship the
- * hardened VeriSilicon ISP Pico (vsi,isp-pico) ISP fabric per the
- * v0.5 AEN feature audit, see docs/aen-feature-audit-2026-05.md §4.3).
- * Every function
- * in this header verifies the handle's backend is Alif before
- * touching hardware; calls on a non-Alif handle return
+ * Non-portable.  Include only when you've committed to the Alif
+ * Ensemble E8 / E1M-AEN801 ISP-Pico backend currently registered in
+ * alp-sdk.  Every function in this header verifies the handle's
+ * backend is Alif before touching hardware; calls on a non-Alif
+ * handle return
  * @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC.
  *
  * Covers the finer-grained ISP knobs the ISP Pico exposes
@@ -30,9 +28,9 @@
  * surface; the vendor-handle gate keeps each call routed to the
  * matching hardware.
  *
- * @par Supported silicon: alif:ensemble:e4, alif:ensemble:e6, alif:ensemble:e8
- *      (E3 / E5 / E7 do not expose the ISP Pico fabric; vendor
- *      packs may extend this list in a follow-up release.)
+ * @par Supported silicon: alif:ensemble:e8 (E1M-AEN801)
+ *      E4 / E6 ISP-Pico support needs explicit backend registrations
+ *      and board validation before this contract is widened.
  *
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
@@ -91,13 +89,13 @@ typedef struct {
 /**
  * @brief Place a 3A statistics window inside the active frame.
  *
- * @par Supported silicon: alif:ensemble:e4, alif:ensemble:e6, alif:ensemble:e8
+ * @par Supported silicon: alif:ensemble:e8 (E1M-AEN801)
  *
  * Mirrors the Renesas knob's contract.  ISP Pico weights the
  * matching 1024-cell statistics grid by the inclusive rectangle.
  *
  * @param camera  Handle from @ref alp_camera_open opened against
- *                an Alif E4 / E6 / E8 SoC.
+ *                an Alif E8 SoC.
  * @param region  Which 3A loop the rectangle targets.
  * @param rect    Pixel-coordinate rectangle.  Non-NULL; rejects
  *                w == 0 or h == 0 with @ref ALP_ERR_INVAL.
@@ -116,7 +114,7 @@ alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *cam
 /**
  * @brief Load a per-channel gain LUT into the ISP Pico.
  *
- * @par Supported silicon: alif:ensemble:e4, alif:ensemble:e6, alif:ensemble:e8
+ * @par Supported silicon: alif:ensemble:e8 (E1M-AEN801)
  *
  * Each entry is a Q4.12 gain value applied to the matching
  * colour channel before AWB integration.  Reference-not-copy
@@ -140,7 +138,7 @@ alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t             *camer
 /**
  * @brief Load the lens-shading-correction LUT (ISP Pico "MESH").
  *
- * @par Supported silicon: alif:ensemble:e4, alif:ensemble:e6, alif:ensemble:e8
+ * @par Supported silicon: alif:ensemble:e8 (E1M-AEN801)
  *
  * The ISP Pico applies a 2D vignetting-correction surface stored
  * as a flattened uint16_t grid; each entry is a Q4.12 gain

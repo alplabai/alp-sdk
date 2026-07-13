@@ -58,11 +58,10 @@
  * ----------------------
  * The /sys/power/state-write Yocto path is intentionally not
  * implemented here -- per the standing "src/yocto/ off-limits"
- * guardrail it lands in a separate slice (#33).  Customers on a
- * Linux backend should expect alp_power_request_sleep to surface
- * NOSUPPORT until that lands.  See the matching comment in
- * src/backends/power/zephyr_stub.c which carries the same
- * deferral note.
+ * guardrail it lands in a dedicated slice when scheduled.  Customers
+ * on a Linux backend should expect alp_power_request_sleep to
+ * surface NOSUPPORT until that lands.  See the matching comment in
+ * src/backends/power/zephyr_stub.c which carries the same note.
  */
 
 #include <stdbool.h>

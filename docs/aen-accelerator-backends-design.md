@@ -48,6 +48,10 @@ part:
 | ISP Pico (`vsi,isp-pico`) | E4 / E6 / E8 only | **No** — no `isp` key in `e7.json` |
 | OSPI SecAES (vendor)   | E4 / E6 / E8 only   | **No** SecAES fabric (see note below) |
 
+This table is hardware metadata, not a current backend-support matrix:
+the in-repo ISP-Pico backend registration is E8-only until E4 / E6
+have explicit backend rows and board validation.
+
 > **E7 inline-AES nuance.**  `e7.json` carries `inline_aes: true` and
 > the OctalSPI interface lists `"AES inline"` — that is the *base*
 > OSPI on-the-fly AES path the portable
@@ -61,9 +65,9 @@ part:
 
 The practical consequence for the EdgeAI vision example
 (`examples/aen/edgeai-vision-aen/`, an **E8 target** — `som.sku:
-E1M-AEN801`): the E8 *does* carry the ISP Pico (it populates on E4 /
-E6 / E8), so the example may eventually offload debayer /
-format-convert / 3A to it. But that offload is **HAL-pack gated**
+E1M-AEN801`): the in-repo ISP-Pico backend is scoped to E8 today, so
+the example may eventually offload debayer / format-convert / 3A to
+it. But that offload is **HAL-pack gated**
 (the `vsi,isp-pico` backend is a NOSUPPORT stub until the pack lands),
 so today the example must **not** rely on the ISP: it configures the
 camera sensor to emit the model's pixel format directly and does crop
@@ -158,7 +162,9 @@ neighbouring lines another context may own.
 **Stub it replaces:** `src/backends/ext/alif/camera.c` (vendor-handle
 gating today; bodies return `ALP_ERR_NOSUPPORT`).
 **Real backend:** `alif_isp_pico` camera backend, priority 100,
-registered against `alif:ensemble:e4` / `e6` / `e8` — **never E7**.
+registered against `alif:ensemble:e8` only.  E4 / E6 metadata exposes
+ISP-capable silicon, but alp-sdk has no E4 / E6 backend registration
+or board validation yet.
 
 These are the finer-grained ISP knobs that do not fit the portable
 `alp_camera_isp_config_t` (`alp_camera_configure_isp`): pixel-coordinate
@@ -170,8 +176,8 @@ the Alif-handle gate.
 ### Dispatch path
 
 1. App opens the camera via the portable `alp_camera_open`; the
-   dispatcher binds the `alif_isp_pico` backend when the
-   silicon_ref is E4 / E6 / E8 and the Alif HAL pack is present.
+   dispatcher binds the `alif_isp_pico` backend when the silicon_ref
+   is `alif:ensemble:e8` and the Alif HAL pack is present.
 2. App includes `<alp/ext/alif/camera.h>` and calls the vendor knob.
    Each call re-checks the handle's backend vendor is `"alif"`
    (`_is_alif_backend`); a non-Alif handle returns

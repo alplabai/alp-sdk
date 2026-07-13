@@ -7,10 +7,12 @@
  * @file pwm.h
  * @brief Alp SDK pulse-width-modulation abstraction.
  *
- * The E1M standard reserves eight PWM channels (`PWM0..PWM7` in
- * `<alp/e1m_pinout.h>`).  Every E1M-conformant SoM routes them; the
- * studio's pin allocator binds them to the SoC's underlying timer/
- * compare blocks.  Apps see a uniform `alp_pwm_*` surface.
+ * The E1M and E1M-X standards each reserve eight PWM channels.  E1M
+ * firmware uses `ALP_E1M_PWM0..7` from `<alp/e1m_pinout.h>`; E1M-X
+ * firmware uses `ALP_E1M_X_PWM0..7` from `<alp/e1m_x_pinout.h>`.
+ * The studio's pin allocator binds the selected form-factor ID to the
+ * SoC's underlying timer/compare blocks.  Apps see a uniform
+ * `alp_pwm_*` surface.
  *
  * Backends:
  *   - Zephyr   : `pwm_*` driver class.
@@ -20,7 +22,7 @@
  * Typical usage:
  * @code
  *     alp_pwm_t *led = alp_pwm_open(&(alp_pwm_config_t){
- *         .channel_id = ALP_E1M_PWM0,
+ *         .channel_id = ALP_E1M_PWM0,     // E1M; use ALP_E1M_X_PWM0 on E1M-X
  *         .period_ns  = 1000000,               // 1 kHz
  *         .polarity   = ALP_PWM_POLARITY_NORMAL,
  *     });
@@ -77,10 +79,26 @@ typedef struct alp_pwm alp_pwm_t;
 
 /** Configuration passed to @ref alp_pwm_open. */
 typedef struct {
-	uint32_t           channel_id; /**< Studio-resolved PWM channel index (ALP_E1M_PWM0..PWM7). */
-	uint32_t           period_ns;  /**< PWM period in nanoseconds. 0 = use DT default. */
+	uint32_t channel_id; /**< Form-factor PWM instance ID: ALP_E1M_PWM0..7 or ALP_E1M_X_PWM0..7. */
+	uint32_t period_ns;  /**< PWM period in nanoseconds. 0 = use DT default. */
 	alp_pwm_polarity_t polarity;
 } alp_pwm_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_pwm_config_t for channel @p id.
+ *
+ * Identity from @p id; canonical defaults: @c period_ns = 0 (use the
+ * devicetree default period), @c polarity = @ref ALP_PWM_POLARITY_NORMAL
+ * (high during the active portion). Set @c period_ns for an explicit
+ * frequency after expansion.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_PWM_CONFIG_DEFAULT(id) \
+	((alp_pwm_config_t){ .channel_id = (id), .period_ns = 0u, .polarity = ALP_PWM_POLARITY_NORMAL })
 
 /**
  * @brief Acquire and start a PWM channel at 0 % duty.
@@ -91,8 +109,9 @@ typedef struct {
  * the caller sets a non-zero duty via @ref alp_pwm_set_duty.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL; @c channel_id must
- *                 be < @ref ALP_E1M_PWM_COUNT (ALP_E1M_PWM0..PWM7) and
- *                 resolvable to a ready Zephyr pwm device.
+ *                 be less than the selected form factor's PWM count
+ *                 (@ref ALP_E1M_PWM_COUNT or @ref ALP_E1M_X_PWM_COUNT)
+ *                 and resolvable to a ready Zephyr pwm device.
  * @return Open handle on success, or NULL on any of:
  *         - @p cfg is NULL
  *         - @c channel_id out of range or alias unset
@@ -232,6 +251,21 @@ typedef struct {
 	uint32_t               channel_id; /**< PWM channel index (ALP_E1M_PWM0..PWM7) used as input. */
 	alp_pwm_capture_edge_t edge;       /**< Edge polarity selector. */
 } alp_pwm_capture_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_pwm_capture_config_t for channel @p id.
+ *
+ * Identity from @p id; canonical default: @c edge = @ref
+ * ALP_PWM_CAPTURE_EDGE_RISING (the enum's zero value, and the simplest
+ * measurement mode -- period-only, no pulse-width decode).
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_PWM_CAPTURE_CONFIG_DEFAULT(id) \
+	((alp_pwm_capture_config_t){ .channel_id = (id), .edge = ALP_PWM_CAPTURE_EDGE_RISING })
 
 /**
  * @brief Reconfigure a PWM channel as an input-capture source.

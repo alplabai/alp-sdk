@@ -85,6 +85,10 @@ static void on_fft(const void *payload, size_t len, void *user)
 	printf("[m33_sm] processing 1024-sample frame\n");
 	run_fft();
 
+	/* alp_rpc_call() on the A55 side matches the reply by method name, not
+	 * a separate reply channel -- the SDK doesn't impose a "method.reply"
+	 * convention, so sending back under the same "fft" name is what
+	 * unblocks the caller's alp_rpc_call(). */
 	if (alp_rpc_send(g_ch, "fft", g_mags, sizeof g_mags) != ALP_OK) {
 		printf("[m33_sm]   alp_rpc_send rv=%d\n", (int)alp_last_error());
 	}
@@ -94,6 +98,9 @@ int main(void)
 {
 	printf("[m33_sm] heterogeneous-offload worker coming up\n");
 
+	/* This side owns SRC/DST as declared; the A55 caller mirrors them
+	 * (its src is our dst and vice versa) so both ends land on the same
+	 * pair of RPMsg endpoint ids from the one generated header. */
 	const alp_rpc_config_t cfg = {
 		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
 		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,

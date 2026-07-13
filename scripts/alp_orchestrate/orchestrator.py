@@ -25,9 +25,87 @@ from typing import Any, Optional
 from .buildplan import _shared_artefacts, _slice_build_dir, _slice_config_artefact
 from .carveout import resolve_carve_outs
 from .manifest import _helper_mcus, emit_system_manifest
-from .models import BoardProject, Slice, SystemManifest
+from .models import BoardProject, OrchestratorError, Slice, SystemManifest
 from .paths import REPO
 from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
+
+
+# metadata/sdk_version.yaml is the single source of the SDK's own
+# declared version (see scripts/check_version_doc_sync.py) -- reading it
+# raw (no YAML parse needed) gives the cache a token that changes on
+# every version/status bump, so an SDK upgrade invalidates every slice's
+# cache even when board.yaml itself is untouched (issue #591).
+_SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
+
+# Directory names never worth walking when content-hashing an app's
+# source tree -- VCS metadata and prior build output the app itself
+# doesn't ship.
+_SOURCE_HASH_SKIP_DIRS = frozenset({".git", "build", "__pycache__"})
+
+
+def _sdk_version_token() -> str:
+    """Raw contents of `metadata/sdk_version.yaml` as an opaque cache
+    token. Deliberately not parsed -- any byte change (version bump,
+    status flip, or even a comment edit) is a legitimate reason to
+    distrust a prior build, so the whole file is the input.  Falls back
+    to a fixed sentinel if the file is ever unreadable so a broken
+    checkout fails open (always rebuild) rather than silently caching
+    forever."""
+    try:
+        return _SDK_VERSION_YAML.read_text(encoding="utf-8")
+    except OSError:
+        return "sdk-version-unreadable"
+
+
+def _hash_app_sources(slice_: Slice, base_dir: Path) -> str:
+    """Content-hash of every file under this slice's resolved `app:`
+    directory, so editing e.g. `src/main.c` invalidates the slice's
+    cache entry even though no `Slice` field changed (issue #591).
+
+    Resolves the directory the same way `_slice_command` resolves it
+    (`_zephyr_app_dir` / `_resolve_app_path`), so the hash always
+    covers exactly what will actually be built.
+
+    Hashes file *contents*, not mtimes: mtimes are not preserved by
+    `git clone`/`checkout`, so hashing them would spuriously invalidate
+    on a fresh checkout with zero real content change -- content
+    hashing is both deterministic (no wall-clock/random input) and
+    accurate.
+
+    Yocto slices built purely from `image:` (no `app:`) have no
+    filesystem app dir to hash -- their inputs are the bitbake layers,
+    already tracked by Yocto's own dependency graph, not this cache.
+    """
+    if not slice_.app:
+        return "no-app-dir"
+    if slice_.os == "zephyr":
+        app_dir = _zephyr_app_dir(slice_.app, base_dir)
+    elif slice_.os == "baremetal":
+        app_dir = _resolve_app_path(slice_.app, base_dir)
+    elif slice_.os == "yocto" and slice_.app != STOCK_IMAGE_APP:
+        app_dir = _resolve_app_path(slice_.app, base_dir)
+    else:
+        return "no-app-dir"
+
+    if not app_dir.is_dir():
+        # Missing app dir is itself a distinct, deterministic state --
+        # never silently collapses onto a real prior hash.
+        return f"missing-app-dir:{app_dir.as_posix()}"
+
+    import hashlib
+    m = hashlib.sha256()
+    for path in sorted(
+        p for p in app_dir.rglob("*")
+        if p.is_file()
+        and not _SOURCE_HASH_SKIP_DIRS.intersection(
+            p.relative_to(app_dir).parts)
+    ):
+        m.update(path.relative_to(app_dir).as_posix().encode("utf-8"))
+        try:
+            m.update(path.read_bytes())
+        except OSError:
+            m.update(b"<unreadable>")
+    return m.hexdigest()
 
 
 # Tool table used to decide whether a slice can actually be built on
@@ -53,9 +131,18 @@ class Orchestrator:
         self,
         project: BoardProject,
         build_root: Path,
+        board_yaml: Optional[Path] = None,
     ) -> None:
         self.project = project
         self.build_root = Path(build_root)
+        # `board_yaml` anchors every slice's relative `app:` path (issue
+        # #596) -- pass the project's actual board.yaml so build commands
+        # resolve identically regardless of the caller's CWD.  Callers that
+        # omit it (legacy in-repo call sites, tests that don't care about
+        # app-path resolution) fall back to CWD, matching the historical
+        # behaviour.
+        self.base_dir = (Path(board_yaml).resolve().parent
+                          if board_yaml is not None else Path.cwd())
         self.state_path = self.build_root / ".alp-build-state.json"
         self._state: dict[str, Any] = self._load_state()
 
@@ -80,26 +167,81 @@ class Orchestrator:
                   f"{self.state_path}: {e}", file=sys.stderr)
 
     def _slice_hash(self, slice_: Slice) -> str:
-        """Hash the inputs that determine a slice's output."""
+        """Hash every input that determines a slice's build output.
+
+        Issue #591: the previous hash covered only a handful of
+        resolved `board.yaml` fields, so it stayed unchanged after an
+        application source edit, an SDK upgrade, or a generated-config
+        change -- the slice reported `cache-hit` and the builder never
+        ran, leaving a stale artefact in place.  This hash now covers,
+        in addition to the resolved slice fields:
+
+          * the slice's application source tree content (`app:` dir,
+            resolved exactly as `_slice_command` resolves it) --
+            catches `src/main.c` edits;
+          * the SDK's own declared version -- catches an SDK upgrade
+            landing under an otherwise-unchanged board.yaml;
+          * the materialised per-slice config artefact (`alp.conf` /
+            `local.conf` / `cmake-args.txt`) and every shared generated
+            artefact (IPC header, dts reservations/partitions, sysbuild
+            overlays) -- catches a config-only change that resolves
+            differently without touching any `Slice` field directly.
+
+        Deliberately excludes orchestrator-populated bookkeeping
+        (`build_dir`, `status`, `duration_s`, ...) and does NOT walk the
+        whole SDK tree or the process environment -- only the inputs
+        that actually reach this slice's build command.
+        """
+        import dataclasses
         import hashlib
         m = hashlib.sha256()
+
+        # 1. Resolved slice fields -- everything the loader assigned to
+        #    this slice (board, peripherals, libraries, memory/power
+        #    tuning, extra_libraries, toolchain, recipe, ...), minus the
+        #    fields the orchestrator itself populates during/after a run.
+        slice_fields = dataclasses.asdict(slice_)
+        for bookkeeping in ("build_dir", "output_artefact", "status",
+                            "reason", "log_path", "duration_s"):
+            slice_fields.pop(bookkeeping, None)
+        m.update(json.dumps(slice_fields, sort_keys=True, default=str)
+                 .encode("utf-8"))
+
+        # 2. Project-level fields every slice's generated header/config
+        #    is derived from.
         m.update(self.project.sku.encode("utf-8"))
-        m.update(slice_.os.encode("utf-8"))
-        m.update((slice_.app or "").encode("utf-8"))
-        m.update((slice_.image or "").encode("utf-8"))
-        m.update((slice_.board or "").encode("utf-8"))
-        m.update((slice_.machine or "").encode("utf-8"))
-        m.update(",".join(sorted(slice_.peripherals)).encode("utf-8"))
-        m.update(",".join(sorted(slice_.libraries)).encode("utf-8"))
-        m.update(json.dumps(slice_.inference, sort_keys=True)
-                 .encode("utf-8"))
-        m.update(json.dumps(slice_.iot, sort_keys=True)
-                 .encode("utf-8"))
         for entry in sorted(self.project.ipc, key=lambda e: e.name):
             m.update(entry.name.encode("utf-8"))
             m.update(entry.kind.encode("utf-8"))
             m.update(",".join(sorted(entry.endpoints)).encode("utf-8"))
             m.update(str(entry.carve_out_kb).encode("utf-8"))
+
+        # 3. The materialised per-slice config artefact -- pure/
+        #    deterministic, same source `_materialise_slice_config` writes.
+        artefact = _slice_config_artefact(self.project, slice_)
+        if artefact is not None:
+            name, contents = artefact
+            m.update(name.encode("utf-8"))
+            m.update(contents.encode("utf-8"))
+
+        # 4. Shared generated artefacts -- every slice builds against
+        #    these (e.g. the IPC header), so a project-level config
+        #    change (boot/security/diagnostics) that only shows up here
+        #    must still invalidate every slice, not just the one whose
+        #    own fields changed.
+        for path, contents in _shared_artefacts(self.project, self.build_root):
+            m.update(path.relative_to(self.build_root).as_posix()
+                     .encode("utf-8"))
+            m.update(contents.encode("utf-8"))
+
+        # 5. Application source tree -- the actual files the build
+        #    command compiles.
+        m.update(_hash_app_sources(slice_, self.base_dir).encode("utf-8"))
+
+        # 6. SDK revision -- an SDK upgrade must invalidate every
+        #    slice's cache even when board.yaml is untouched.
+        m.update(_sdk_version_token().encode("utf-8"))
+
         return m.hexdigest()[:16]
 
     # ---- materialisation ----
@@ -160,7 +302,7 @@ class Orchestrator:
                              f"on non-{slice_.os} dev hosts")
             return slice_
 
-        cmd = _slice_command(self.project, slice_)
+        cmd = _slice_command(self.project, slice_, base_dir=self.base_dir)
         if cmd is None:
             slice_.status = "skipped"
             slice_.reason = ("no command resolver implemented yet for "
@@ -202,6 +344,17 @@ class Orchestrator:
         parallel: bool = True,
     ) -> SystemManifest:
         """Run every non-off slice, write the manifest, return it."""
+        # #603: an explicit `--core` that doesn't name a real core of this
+        # project used to silently skip every slice (each iteration's
+        # `cid != only_core` check tripped for every core), write an
+        # all-skipped manifest, and exit 0 -- a typo'd `--core` looked
+        # exactly like a successful, deliberately-scoped build.  Fail
+        # fast instead, before any artefact is written.
+        if only_core is not None and only_core not in self.project.cores:
+            raise OrchestratorError(
+                f"--core {only_core!r} is not a core of this project. "
+                f"Known core IDs: {sorted(self.project.cores)}")
+
         self.build_root.mkdir(parents=True, exist_ok=True)
         # 1. Shared artefacts.
         self._materialise_shared()
@@ -221,14 +374,24 @@ class Orchestrator:
             targets.append(slice_)
 
         # 3. Caching: skip slices whose inputs hash matches the last
-        #    successful run AND whose build dir still exists.
+        #    successful run AND whose build actually produced evidence
+        #    of running (its build.log).  `slice_.build_dir` is created
+        #    unconditionally by `_materialise_slice_config` just above
+        #    for every target -- including ones that have never been
+        #    built -- so `build_dir.is_dir()` alone is never a useful
+        #    gate (issue #591: it was always true here and so never
+        #    actually blocked a cache-hit). `log_path` is written only
+        #    by a real `_dispatch_slice` run, so its presence is real
+        #    evidence a build happened; its absence (output missing)
+        #    can never produce a cache-hit even if the hash matches.
         skip_targets: set[str] = set()
         for slice_ in targets:
             h = self._slice_hash(slice_)
             cached = self._state.get(slice_.core_id) or {}
+            log_path = slice_.log_path
             if (cached.get("hash") == h
                     and cached.get("status") == "ok"
-                    and slice_.build_dir and slice_.build_dir.is_dir()):
+                    and log_path is not None and log_path.is_file()):
                 slice_.status = "ok"
                 slice_.reason = "cache-hit (inputs unchanged since last successful build)"
                 slice_.output_artefact = cached.get("output_artefact")
@@ -329,21 +492,39 @@ def _slice_flash_recipe(
 STOCK_SHIM_APP = "alp-stock-shim"
 STOCK_SHIM_DIR = REPO / "firmware" / "alp-stock-shim"
 
+# A-core "stock image" app token (Yocto side).  Every shipped SoM preset's
+# topology.<a-core-id> defaults `app:` to this value (see
+# metadata/e1m_modules/*.yaml) -- unlike a customer's own `app:` (a
+# filesystem path to their app source), this token IS already the real
+# bitbake recipe name for the stock alp-image-edge image, so it is exempt
+# from the `recipe:` requirement `_slice_command` enforces for a
+# project-supplied app-only Yocto slice (issue #597).
+STOCK_IMAGE_APP = "alp-image-edge"
+
 
 def _slice_command(
     project: BoardProject,
     slice_: Slice,
+    base_dir: Path,
 ) -> Optional[list[str]]:
     """Resolve the build command for a slice.  Returns None when there is no
     buildable command yet -- the caller carries the slice as `skipped` /
-    `no-command`, never dropped."""
+    `no-command`, never dropped.
+
+    `base_dir` anchors every relative `app:` path -- the directory holding
+    the project's `board.yaml` (or an equivalent explicit root), NEVER the
+    caller's process CWD.  A relative `app:` means "relative to the project
+    file that named it", so the same board.yaml must resolve identically no
+    matter where `west` / `alp-orchestrate` happens to be invoked from
+    (issue #596).
+    """
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
             return None
         cmd = [
             "west", "build",
             "-b", slice_.board,
-            str(_zephyr_app_dir(slice_.app)),
+            str(_zephyr_app_dir(slice_.app, base_dir)),
         ]
         # ADR 0014 Phase-3 conf->build: wire the generated sysbuild
         # overlays into the build command itself.  `_shared_artefacts`
@@ -362,31 +543,49 @@ def _slice_command(
                 cmd += ["--sysbuild-config", "../alp_sysbuild.conf"]
         return cmd
     if slice_.os == "yocto":
-        target = slice_.image or slice_.app
-        if not target:
-            return None
-        return ["bitbake", str(target)]
+        # `image:` always names a real recipe (e.g. `alp-image-edge`) --
+        # safe to hand straight to bitbake.  `app:` is a filesystem path to
+        # the app's source directory (mirrors the zephyr/baremetal `app:`
+        # convention), NOT a recipe name -- `bitbake <path>` is never a
+        # valid target (issue #597), so an app-only slice needs an explicit
+        # `recipe:` naming the bitbake recipe that packages that source.
+        if slice_.image:
+            return ["bitbake", str(slice_.image)]
+        if slice_.app == STOCK_IMAGE_APP:
+            return ["bitbake", slice_.app]
+        if slice_.app:
+            if not slice_.recipe:
+                return None
+            return ["bitbake", str(slice_.recipe)]
+        return None
     if slice_.os == "baremetal":
         if not slice_.app:
             return None
-        return ["cmake", "-S", str(_resolve_app_path(slice_.app)),
+        return ["cmake", "-S", str(_resolve_app_path(slice_.app, base_dir)),
                 "-B", str(slice_.build_dir)]
     return None
 
 
-def _resolve_app_path(app: str) -> Path:
-    """Resolve `./linux` or absolute paths from a slice.app."""
+def _resolve_app_path(app: str, base_dir: Path) -> Path:
+    """Resolve `./linux` or absolute paths from a slice.app.
+
+    Relative paths resolve against `base_dir` (the project's board.yaml
+    directory) -- never the process's current working directory, so the
+    result is identical regardless of the caller's CWD (issue #596).
+    """
     if app == STOCK_SHIM_APP:
         return STOCK_SHIM_DIR
     p = Path(app)
     if p.is_absolute():
         return p
-    return (Path.cwd() / p).resolve()
+    return (Path(base_dir) / p).resolve()
 
 
-def _zephyr_app_dir(app: str) -> Path:
+def _zephyr_app_dir(app: str, base_dir: Path) -> Path:
     """Resolve a Zephyr slice's `app:` to the directory holding the
     application `CMakeLists.txt` (what `west build` needs).
+
+    `base_dir` anchors relative paths -- see `_resolve_app_path`.
 
     Two example conventions are supported:
 
@@ -399,7 +598,7 @@ def _zephyr_app_dir(app: str) -> Path:
         no CMakeLists.txt of its own, so fall back to its parent (the
         example root) which does.
     """
-    p = _resolve_app_path(app)
+    p = _resolve_app_path(app, base_dir)
     if (p / "CMakeLists.txt").is_file():
         return p
     if (p.parent / "CMakeLists.txt").is_file():

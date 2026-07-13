@@ -40,7 +40,7 @@ LOG_MODULE_REGISTER(wact, LOG_LEVEL_INF);
 #define ICM_ACCEL_LSB_PER_G  2048.0f /* +/-16 g full-scale. */
 #define ICM_GYRO_LSB_PER_DPS 16.4f   /* +/-2000 dps full-scale. */
 #define IMU_I2C_ADDR         ICM42670_I2C_ADDR_HIGH
-#define N_WINDOWS            8
+#define N_WINDOWS            8 /* bounded demo run: 8 * 2.56 s of activity/fall data */
 
 /* 1-byte stub so alp_inference_open's non-NULL contract is met; an unusable
  * tensor forces the deterministic fallback.  See models/README.md. */
@@ -73,7 +73,12 @@ static struct mot_sample synth_sample(int window, int i)
 	return s;
 }
 
-/* Overlay a free-fall -> impact -> stillness sequence on window 5's |a|. */
+/* Overlay a free-fall -> impact -> stillness sequence on window 5's |a|.
+ * fall_detect.h's thresholds are in g and require >= ~80 ms below
+ * FALL_FREEFALL_G (0.5 g) then an impact above FALL_IMPACT_G (2.5 g) --
+ * 15 samples at 100 Hz = 150 ms comfortably clears the free-fall minimum,
+ * and 5.0 g clears the impact threshold, so this track reliably fires
+ * fall_push() without depending on real IMU timing. */
 static float synth_fall_amag(int i)
 {
 	if (i < 20) {
@@ -86,6 +91,10 @@ static float synth_fall_amag(int i)
 	return 1.0f; /* stillness */
 }
 
+/* AI activity classifier, else the deterministic fallback.  Unlike
+ * fall_push() (called unconditionally, every sample, below), this only
+ * runs once per completed window -- activity classification does not need
+ * per-sample latency the way fall detection does. */
 static struct mot_verdict classify(alp_inference_t *inf, const struct mot_features *f)
 {
 	if (inf != NULL) {
@@ -100,6 +109,11 @@ static struct mot_verdict classify(alp_inference_t *inf, const struct mot_featur
 				if (alp_inference_get_output(inf, 0, &out) == ALP_OK &&
 				    out.dtype == ALP_INFERENCE_DTYPE_F32 && out.data != NULL &&
 				    out.size_bytes >= ACT_CLASS_COUNT * sizeof(float)) {
+					/* argmax over the ACT_CLASS_COUNT per-class scores;
+					 * the winning score itself is reported as confidence,
+					 * unlike rail/current's severity-from-1-minus-healthy
+					 * pattern -- here "how sure the model is" is exactly
+					 * what the WACT record's confidence column means. */
 					const float *sc   = (const float *)out.data;
 					int          best = 0;
 					float        bv   = sc[0];
@@ -133,6 +147,10 @@ int main(void)
 	    .bus_id     = BOARD_I2C_SENSORS,
 	    .bitrate_hz = 400000,
 	});
+	/* +/-16 g full-scale (not a tighter range) so a hard fall impact -- which
+	 * can spike to several g -- registers as a real reading instead of
+	 * clipping at the ADC rail; +/-2000 dps similarly covers the fast
+	 * rotation of a stumble or a stairs-related tilt. */
 	if (bus != NULL && icm42670_init(&imu, bus, IMU_I2C_ADDR) == ALP_OK &&
 	    icm42670_set_accel(&imu, ICM42670_ODR_100_HZ, ICM42670_ACCEL_FS_16G) == ALP_OK &&
 	    icm42670_set_gyro(&imu, ICM42670_ODR_100_HZ, ICM42670_GYRO_FS_2000_DPS) == ALP_OK) {
@@ -141,6 +159,10 @@ int main(void)
 		LOG_WRN("ICM-42670 unavailable; using synthetic motion");
 	}
 
+	/* s_model is a 1-byte placeholder, not a trained activity classifier --
+	 * it only satisfies alp_inference_open's non-NULL model_data contract.
+	 * classify() detects the resulting unusable tensor and falls back to
+	 * mot_activity_fallback() on every call below. */
 	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
 	    .backend    = ALP_INFERENCE_BACKEND_AUTO,
 	    .format     = ALP_INFERENCE_MODEL_TFLITE,
@@ -152,6 +174,10 @@ int main(void)
 
 	for (int w = 0; w < N_WINDOWS; w++) {
 		mot_window_reset(&win);
+		/* Per-window latch: once fall_push() confirms a fall anywhere in
+		 * this window, keep reporting it (and its peak impact) even though
+		 * the sample loop continues and fall_detect self-resets to
+		 * FALL_PHASE_NORMAL afterwards. */
 		bool  fall_fired = false;
 		float impact_g   = 0.0f;
 
@@ -182,11 +208,19 @@ int main(void)
 				s.ax = 0.0f;
 				s.ay = 0.0f;
 			} else {
+				/* Real/general-case path: |a| magnitude, not per-axis,
+				 * because the wearable's mount orientation on the body is
+				 * not fixed -- a fall must be detectable regardless of
+				 * which axis happens to face down. */
 				amag = sqrtf(s.ax * s.ax + s.ay * s.ay + s.az * s.az);
 			}
 
 			mot_window_push(&win, s);
 
+			/* fall_push() runs every sample (not once per window): the
+			 * free-fall -> impact -> stillness sequence it detects spans
+			 * only ~1 s and must be caught at full 100 Hz resolution, far
+			 * finer than the 2.56 s activity-classification window below. */
 			float ig = 0.0f;
 			if (fall_push(&fall, amag, MOT_SR_HZ, &ig)) {
 				fall_fired = true;
@@ -194,6 +228,9 @@ int main(void)
 			}
 		}
 
+		/* Activity classification runs once per completed window, in
+		 * parallel with (not gated by) the fall detector above -- a fall
+		 * and an activity label can both be reported for the same window. */
 		struct mot_features f;
 		mot_feat_extract(&win, MOT_SR_HZ, &f);
 		struct mot_verdict v = classify(inf, &f);
@@ -206,6 +243,9 @@ int main(void)
 		       (double)impact_g);
 	}
 
+	/* Teardown mirrors the open order; each close is guarded so a
+	 * partially-initialised run (e.g. IMU absent on native_sim) does not
+	 * deinit hardware that was never brought up. */
 	if (inf != NULL) {
 		alp_inference_close(inf);
 	}

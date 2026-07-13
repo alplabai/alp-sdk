@@ -44,11 +44,15 @@ from alp_cli.build import resolve_app
               type=click.Path(path_type=Path),
               help="Directory of pre-built per-slice artefacts (dual-OS "
                    "boot); accepted for parity, unused by the "
-                   "single-Zephyr-slice smoke.")
+                   "single-Zephyr-slice smoke.  Required by --sim-mode.")
+@click.option("--sim-mode", is_flag=True, default=False,
+              help="Studio hardware-simulator mode (issue #674): boot the "
+                   "--image-bundle firmware, write sim-descriptor.json, and "
+                   "serve the UART + control sockets until --timeout.")
 def renode_cmd(app_path: str | None, build_root: Path | None,
                board: str | None, log_path: Path | None,
                timeout: int | None, expect: str | None,
-               image_bundle: Path | None) -> None:
+               image_bundle: Path | None, sim_mode: bool) -> None:
     project = resolve_app(app_path, prog="alp renode")
     root = sdk_root()
     if root is None:
@@ -74,6 +78,8 @@ def renode_cmd(app_path: str | None, build_root: Path | None,
         cmd += ["--expect", expect]
     if image_bundle:
         cmd += ["--image-bundle", str(image_bundle)]
+    if sim_mode:
+        cmd += ["--sim-mode"]
 
     rc = subprocess.run(cmd, env=subprocess_env(root)).returncode
     if rc != 0:

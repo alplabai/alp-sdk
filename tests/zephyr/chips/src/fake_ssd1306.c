@@ -81,9 +81,9 @@ static int fake_ssd1306_init(const struct emul *target, const struct device *par
 	return 0;
 }
 
-#define FAKE_SSD1306_DEFINE(n)                                                                     \
-	static struct fake_ssd1306_data fake_ssd1306_data_##n;                                         \
-	EMUL_DT_INST_DEFINE(                                                                           \
+#define FAKE_SSD1306_DEFINE(n) \
+	static struct fake_ssd1306_data fake_ssd1306_data_##n; \
+	EMUL_DT_INST_DEFINE( \
 	    n, fake_ssd1306_init, &fake_ssd1306_data_##n, NULL, &fake_ssd1306_api, NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(FAKE_SSD1306_DEFINE)

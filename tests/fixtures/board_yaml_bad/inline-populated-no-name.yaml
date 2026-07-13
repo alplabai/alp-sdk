@@ -1,0 +1,7 @@
+som:
+  sku: E1M-AEN801
+populated:
+  bmi323: true
+cores:
+  m55_hp:
+    app: ./src

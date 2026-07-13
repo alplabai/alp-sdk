@@ -94,7 +94,7 @@ Each library:
 - For libraries NOT in Zephyr (u8g2, jsmn, etc.): pin them
   in our `west.yml` as new top-level projects under a new
   `extras-tier1` group (parallel to the existing
-  `extras-v04` group), default-on.
+  `extras-lwrb-nanopb` group), default-on.
 
 **Phase 2b — Cross-library HW-backend loader hook**
 

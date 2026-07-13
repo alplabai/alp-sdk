@@ -11,15 +11,14 @@
  * docs/abi-markers.md for [BACKEND-STUB] surfaces.
  *
  * Real backends (Alif MIPI CSI-2 wrapper for AEN E4/E6/E8, V2N
- * camera input via DRP-AI) land per the tracking issues below
- * with their own silicon-specific entries in
- * src/backends/camera/ at higher priority than this wildcard.
- * ISP-specific knobs (configure_isp) follow issue #21 separately
- * since the AEN VeriSilicon ISP Pico (vsi,isp-pico) fabric isn't
- * wired by Zephyr's portable video driver class yet.
+ * camera input via DRP-AI) now exist with their own silicon-specific
+ * entries in src/backends/camera/ at higher priority than this
+ * wildcard; this stub only remains live for SoCs/instances neither
+ * covers.  ISP-specific knobs (configure_isp) for the AEN VeriSilicon
+ * ISP Pico (vsi,isp-pico) fabric are latched but not yet wired to the
+ * hal_alif libisp wrapper -- see issue #223.
  *
- * @par Tracking: github.com/alplabai/alp-sdk/issues/20
- * @par Tracking: github.com/alplabai/alp-sdk/issues/21
+ * @par Tracking: github.com/alplabai/alp-sdk/issues/223
  */
 
 #include <stdint.h>

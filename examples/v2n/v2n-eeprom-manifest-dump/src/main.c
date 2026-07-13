@@ -69,9 +69,11 @@ int main(void)
 {
 	printf("[manifest] v2n-eeprom-manifest-dump\n");
 
-	/* On V2N the on-module 24C128 EEPROM lives on ALP_E1M_I2C0 at
-     * 7-bit address 0x50.  Customise the bus_id below for your
-     * board overlay. */
+	/* On V2N the on-module 24C128 EEPROM lives on ALP_E1M_I2C0 --
+     * BRD_I2C, the same SoC-mastered management bus shared with the
+     * PMICs, RTC, and the GD32 bridge (see v2n-brd-i2c-bringup for the
+     * full device table) -- at 7-bit address 0x50.  Customise the
+     * bus_id below for your board overlay. */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
 	    .bus_id     = 0u,
 	    .bitrate_hz = 400000u,

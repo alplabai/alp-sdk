@@ -146,8 +146,13 @@ REPO = Path(__file__).resolve().parent.parent
 # is agent worktrees; firmware/gd32-bridge/ and meta-alp-sdk/ are
 # intentionally Linux-side helpers per the ADR 0012 §8 carve-out;
 # docs/superpowers/specs/ carries pre-cleanup design docs that
-# intentionally show the "before" state (parallels the
-# lint_doc_yaml_fragments.py default exclude).
+# intentionally show the "before" state; docs/superpowers/plans/
+# carries dated bench-session planning notes that record the exact
+# (often personal, e.g. /home/alplab/..., /Users/caner/...) paths
+# typed during a real investigation -- they are archival working
+# notes, not customer-facing tutorials, so rewriting them to
+# placeholders would falsify the record.  Both parallel the
+# lint_doc_yaml_fragments.py default exclude (same two dirs).
 DEFAULT_EXCLUDES: tuple[str, ...] = (
     ".claude",
     ".git",
@@ -155,6 +160,7 @@ DEFAULT_EXCLUDES: tuple[str, ...] = (
     "node_modules",
     "vendors",
     "docs/superpowers/specs",
+    "docs/superpowers/plans",
     "firmware/gd32-bridge",
     "meta-alp-sdk",
 )
@@ -193,7 +199,10 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "scripts/bench/aen/flash-jlink-mramxip.sh",
     "scripts/bench/aen/flash-jlink-hp.sh",
     "scripts/bench/aen/flash-run.sh",
+    "scripts/bench/aen/flash-update-log-dual.sh",
+    "scripts/bench/aen/flash-update-log-firewall-probe.sh",
     "scripts/bench/aen/ram-run.sh",
+    "scripts/bench/aen/read-update-log-proof.sh",
     "scripts/bench/aen/reread.sh",
     "scripts/bench/aen/flash-all-flowd.sh",
 })
@@ -256,6 +265,7 @@ class Pattern:
     regex: re.Pattern[str]
     suggestion: str        # one-liner advice for the contributor
     applies_to: tuple[str, ...]  # file extensions ("*.md", "*.sh"), "*" for all
+    code_fence_only: bool = False  # restrict matches to ```-fenced code blocks
 
 
 # /dev/ttyUSB0, /dev/ttyACM0, /dev/serial/by-id/...  -- explicit
@@ -349,6 +359,13 @@ PATTERNS: tuple[Pattern, ...] = (
             "not on PATH on default Windows installs"
         ),
         applies_to=("*.md",),
+        # Prose regularly starts a reflowed line with "make the ..." /
+        # "make sure ..." (verb, not the build tool) -- e.g. "...
+        # CONFIG_DCACHE=n\nmake the shared sram_ipc0 vrings coherent".
+        # Restricting to fenced code blocks is what actually
+        # distinguishes a runnable `make` invocation from prose that
+        # happens to start a markdown line with the word "make".
+        code_fence_only=True,
     ),
     Pattern(
         category="LINUX-ONLY-IDIOM",
@@ -509,6 +526,30 @@ def _compute_skip_lines(text: str) -> set[int]:
     return skip
 
 
+_FENCE_RE = re.compile(r"^\s{0,3}(```|~~~)")
+
+
+def _compute_fence_lines(text: str) -> set[int]:
+    """Return the set of 1-based line numbers inside ``` / ~~~ fenced
+    code blocks (the opening and closing fence lines themselves are
+    NOT included -- only the content between them).
+
+    Used to scope patterns (e.g. the `make` invocation check) to
+    actual runnable command blocks, so prose that merely starts a
+    reflowed markdown line with the matched word (e.g. "make the
+    shared ... coherent") isn't mistaken for a shell command.
+    """
+    fence_lines: set[int] = set()
+    in_fence = False
+    for idx, line in enumerate(text.splitlines(), start=1):
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            fence_lines.add(idx)
+    return fence_lines
+
+
 @dataclass(frozen=True)
 class AllowlistSummary:
     """Informational entry for an allowlisted markdown file.
@@ -565,6 +606,9 @@ def scan_file(
     # Compute marker-driven skip lines once per file.  Cheap; the
     # marker scan is O(lines) and reused across every pattern.
     skip_lines = _compute_skip_lines(text) if path.name.endswith(".md") else set()
+    # Fenced-code-block lines, computed lazily below (only patterns
+    # with code_fence_only=True need it -- avoid the walk otherwise).
+    fence_lines: set[int] | None = None
 
     on_allowlist = rel_posix in INTENTIONALLY_DISCUSSES_OS_PATHS
 
@@ -572,11 +616,19 @@ def scan_file(
     for pat in PATTERNS:
         if not _applies(path, pat.applies_to):
             continue
+        if pat.code_fence_only and fence_lines is None:
+            fence_lines = _compute_fence_lines(text)
         for m in pat.regex.finditer(text):
             line, col = _line_and_col(text, m.start())
 
             # Inline skip-marker block suppresses findings.
             if line in skip_lines:
+                continue
+
+            # Fence-scoped patterns (e.g. `make`) only fire inside a
+            # ``` / ~~~ fenced code block -- prose that starts a
+            # reflowed line with the matched word is not a command.
+            if pat.code_fence_only and line not in (fence_lines or set()):
                 continue
 
             # Bash-shebang has special-case whitelist semantics.

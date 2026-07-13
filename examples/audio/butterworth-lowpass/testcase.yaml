@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: butterworth-lowpass
+  description: |
+    Design a 2nd-order Butterworth low-pass biquad and run passband +
+    stopband tones through the <alp/dsp.h> IIR chain stage (CMSIS-DSP
+    arm_biquad on the M55, portable-C under native_sim); report the
+    per-tone gain.  Pure compute -- native_sim runs it end-to-end.
+common:
+  tags: dsp filter iir cmsis example
+tests:
+  # native_sim runs the full pipeline to completion (console-matched).
+  # The example is board-agnostic compute, but both EVK variants build
+  # so the SoM-swap path stays covered.
+  alp_sdk.example.butterworth_lowpass.e1m_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - dsp
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[bwlp\\] done"
+
+  alp_sdk.example.butterworth_lowpass.e1m_x_evk:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - dsp
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[bwlp\\] done"
+
+  # AEN silicon cross-build is build-only (CI is the AEN gate).
+  alp_sdk.example.butterworth_lowpass.aen_build:
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    platform_allow:
+      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+    build_only: true
+    tags:
+      - alp-sdk
+      - example
+      - dsp
+      - aen

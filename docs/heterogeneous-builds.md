@@ -329,12 +329,24 @@ instead of re-deriving it:
 PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit build-plan
 ```
 
-The JSON carries one entry per non-`off` core (build dir, the exact
-tool command, env) plus every generated artefact **with its contents**,
-so a consumer materialises files and runs commands without any planner
-logic of its own.  It is deterministic, write-free, and versioned by
+The JSON carries one entry per non-`off` core (build dir, the resolved
+app source dir, the exact tool command, env) plus every generated
+artefact **with its contents**, so a consumer materialises files and
+runs commands without any planner logic of its own.  Every relative
+path resolves against the input `board.yaml`'s own directory, never the
+CLI's CWD, so the plan is deterministic, write-free, and versioned by
 its own `schemaVersion` — see
 [ADR 0014](adr/0014-build-plan-emit-cli-contract.md) for the contract.
+
+Its shape is pinned by
+[`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json);
+`scripts/check_build_plan.py` validates the emitter's output against it,
+the same emitter-and-contract lockstep `check_system_manifest.py`
+enforces for the manifest above.  Validate a real plan with:
+
+```bash
+python3 scripts/check_build_plan.py --plan build-plan.json
+```
 
 ### Iterating on one slice
 

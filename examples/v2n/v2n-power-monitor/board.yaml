@@ -13,8 +13,6 @@ som:
   sku: E1M-V2N101
 
 preset: e1m-x-evk
-supported_boards:
-  - e1m-x-evk
 
 # E1M-X pads this app uses (subset of the EVK preset's e1m_routes:).
 pins:
@@ -26,6 +24,11 @@ cores:
     app: ./src
     # Linux/Yocto user-space C app; links libalp_chips.a (INA236
     # driver) ahead of libalp_sdk.so (alp_i2c backend).
+    #
+    # No meta-alp-sdk recipe packages this app yet, so `--emit
+    # build-plan` / `west alp-build` block this slice with a
+    # `yocto-recipe-missing` warning rather than guess a bitbake
+    # target -- add `recipe: <name>` here once one exists.
     peripherals:
       - i2c
 

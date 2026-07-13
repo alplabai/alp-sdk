@@ -85,13 +85,27 @@ alp_status_t alp_hash_update(alp_hash_t *h, const uint8_t *data, size_t len);
 /**
  * @brief Finalise the digest and write it to @p digest_out.
  *
- * Implicitly closes @p h on success.  Output length depends on alg:
- * SHA-256 = 32 B, SHA-384 = 48 B, SHA-512 = 64 B.
+ * Handle lifecycle contract (GHSA-92c3-v48m-m5gg): **only @c ALP_OK
+ * implicitly closes @p h.**  Output length depends on alg: SHA-256 =
+ * 32 B, SHA-384 = 48 B, SHA-512 = 64 B.
+ *
+ *   - @c ALP_OK: the digest is written and @p h is closed for you --
+ *     do not call @ref alp_hash_close on it afterwards.
+ *   - @c ALP_ERR_INVAL because @p digest_cap is smaller than the
+ *     algorithm's digest length: @p digest_len (if non-NULL) is set
+ *     to the required length and @p h is left open and unchanged --
+ *     call again with a large-enough buffer, or call
+ *     @ref alp_hash_close explicitly.
+ *   - Any other failure: @p h is left safely closeable -- always
+ *     follow up with @ref alp_hash_close (a redundant close is a
+ *     harmless no-op).
  *
  * @param[in]  h           Open context.
  * @param[out] digest_out  Destination buffer.
  * @param[in]  digest_cap  Capacity of @p digest_out.
- * @param[out] digest_len  Receives the bytes written.  May be NULL.
+ * @param[out] digest_len  Receives the bytes written on success, or the
+ *                         required digest length on a too-small-buffer
+ *                         failure.  May be NULL.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
  */
 alp_status_t
@@ -151,7 +165,12 @@ alp_aead_t *alp_aead_open(alp_aead_alg_t alg, const uint8_t *key, size_t key_len
  * @param[in]  plain_len   Plaintext length.
  * @param[out] cipher_out  Ciphertext destination.  Same size as plaintext.
  * @param[out] tag_out     Authentication tag destination.
- * @param[in]  tag_len     Tag length, typically 16 B.  Must be ≥ 16.
+ * @param[in]  tag_len     Tag length.  Must be exactly 16 B -- the only
+ *                         length every backend round-trips for the
+ *                         algorithms above (AES-128/256-GCM,
+ *                         ChaCha20-Poly1305); any other value is
+ *                         rejected with @c ALP_ERR_INVAL before any
+ *                         crypto runs.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
  */
 alp_status_t alp_aead_encrypt(alp_aead_t    *a,
@@ -176,8 +195,18 @@ alp_status_t alp_aead_encrypt(alp_aead_t    *a,
  * @param[in]  cipher      Ciphertext input.
  * @param[in]  cipher_len  Ciphertext length.
  * @param[in]  tag         Authentication tag from encryption.
- * @param[in]  tag_len     Tag length.
+ * @param[in]  tag_len     Tag length.  Must be exactly 16 B -- see
+ *                         @ref alp_aead_encrypt.
  * @param[out] plain_out   Plaintext destination.  Same size as ciphertext.
+ *                         NOTE: during the call, @p plain_out transiently
+ *                         holds plaintext that has not yet been verified
+ *                         against @p tag (the backend streams it in before
+ *                         the tag check completes) -- treat any bytes
+ *                         observed there before this function returns as
+ *                         unauthenticated, which matters for AMP shared-
+ *                         memory buffers another core could poll.  On any
+ *                         non-@c ALP_OK return the whole buffer is wiped
+ *                         per the discard contract below.
  * @return ALP_OK on success;
  *         ALP_ERR_IO on tag-mismatch (the message has been tampered
  *         with — @p plain_out content is undefined and MUST be discarded);

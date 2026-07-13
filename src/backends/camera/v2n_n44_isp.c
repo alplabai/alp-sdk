@@ -38,8 +38,9 @@
  *     routes through this backend's latched state today and grows
  *     real MMIO writes when the N44 port lands.
  *
- * @par Tracking: github.com/alplabai/alp-sdk/issues/20 (sensor path)
- * @par Tracking: github.com/alplabai/alp-sdk/issues/21 (ISP path)
+ * Sensor and ISP register-map work here is blocked on the Renesas RZ/V2N
+ * ISP register map (see the "actual register poke" TBD above); no open
+ * tracking issue exists yet for that follow-up.
  */
 
 #include <errno.h>
@@ -67,9 +68,9 @@
 #define CONFIG_ALP_SDK_MAX_CAMERA_HANDLES 2
 #endif
 
-#define ALP_V2N_CAM_DEV_OR_NULL(idx)                                                               \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_camera, idx))),                                \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))),                               \
+#define ALP_V2N_CAM_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_camera, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {

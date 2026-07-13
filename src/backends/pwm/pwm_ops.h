@@ -67,10 +67,17 @@ struct alp_pwm {
 	alp_pwm_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
-	bool                    in_use;
 	uint32_t                channel;   /* hardware channel within state->dev */
 	uint32_t                period_ns; /* current configured period */
 	uint32_t                flags;     /* backend-private polarity / DT flags */
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close, issue #629) -- placed before in_use so the atomic-
+	 * claim zeroing in the dispatcher (memset up to
+	 * offsetof(..., in_use)) resets both on every fresh claim. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 /*
@@ -83,7 +90,14 @@ struct alp_pwm_capture {
 	alp_pwm_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
-	bool                    in_use;
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close, issue #629) -- placed before in_use so the atomic-
+	 * claim zeroing in the dispatcher (memset up to
+	 * offsetof(..., in_use)) resets both on every fresh claim. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 #endif /* ALP_BACKENDS_PWM_OPS_H */

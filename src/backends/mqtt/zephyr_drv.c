@@ -9,10 +9,10 @@
  * Section 2 backend matrix (zephyr_drv wins on every SoC unless a
  * more specific backend registers).
  *
- * V2N CC3501E note: the CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on
- * the AEN SoM provides the underlying socket stack; the Zephyr mqtt
- * client runs above and is SoM-agnostic, so no separate registry
- * entry is needed for V2N.
+ * AEN CC3501E note: Wi-Fi/BLE radio operations route through the exact
+ * CC3501E backends, not this MQTT backend.  MQTT remains a protocol client
+ * above a socket provider; the chip-level cc3501e_sock_* helpers stay under
+ * <alp/chips/cc3501e.h> for bridge diagnostics.
  *
  * Gated on CONFIG_ALP_SDK_IOT_MQTT -- when OFF the I/O ops return
  * NOSUPPORT but the registry entry still links so the dispatcher
@@ -33,6 +33,7 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +46,7 @@
 #include <alp/iot.h>
 #include <alp/peripheral.h>
 
+#include "alp_slot_claim.h"
 #include "mqtt_ops.h"
 
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
@@ -74,7 +76,6 @@
 
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
 struct mqtt_be {
-	bool                    in_use;
 	alp_mqtt_msg_cb_t       msg_cb;
 	void                   *msg_user;
 	struct mqtt_client      client;
@@ -89,6 +90,12 @@ struct mqtt_be {
 	struct mqtt_utf8        username_utf8;
 	struct mqtt_utf8        password_utf8;
 	uint16_t                next_msg_id; /* monotonic, wraps past 0xFFFF */
+	/* Moved to the last member (was first) so the atomic-claim zeroing
+	 * below (memset up to offsetof(..., in_use)) still resets every
+	 * other field, matching the pre-fix full-struct memset -- issue
+	 * #629: the claim now flips this flag with a single compare-
+	 * exchange instead of an unlocked check-then-set. */
+	bool in_use;
 };
 
 static struct mqtt_be g_mqtt_be_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
@@ -96,9 +103,8 @@ static struct mqtt_be g_mqtt_be_pool[CONFIG_ALP_SDK_MAX_MQTT_HANDLES];
 static struct mqtt_be *mqtt_be_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_mqtt_be_pool); ++i) {
-		if (!g_mqtt_be_pool[i].in_use) {
-			memset(&g_mqtt_be_pool[i], 0, sizeof(g_mqtt_be_pool[i]));
-			g_mqtt_be_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_mqtt_be_pool[i].in_use)) {
+			memset(&g_mqtt_be_pool[i], 0, offsetof(struct mqtt_be, in_use));
 			return &g_mqtt_be_pool[i];
 		}
 	}
@@ -107,7 +113,7 @@ static struct mqtt_be *mqtt_be_acquire(void)
 
 static void mqtt_be_release(struct mqtt_be *be)
 {
-	if (be != NULL) be->in_use = false;
+	if (be != NULL) alp_slot_release(&be->in_use);
 }
 
 static alp_status_t errno_to_alp(int err)
@@ -137,8 +143,11 @@ static alp_status_t errno_to_alp(int err)
 /* Parse "mqtt(s)?://host[:port]" into host/port/tls.  Returns 0 on
  * success.  No URI-encoding handling -- broker addresses in v0.2 are
  * expected to be plain hostnames or IPs. */
-static int parse_broker_uri(
-    const char *uri, char *host_buf, size_t host_buf_len, uint16_t *port_out, bool *tls_out)
+static int parse_broker_uri(const char *uri,
+                            char       *host_buf,
+                            size_t      host_buf_len,
+                            uint16_t   *port_out,
+                            bool       *tls_out)
 {
 	if (uri == NULL) return -EINVAL;
 
@@ -307,6 +316,19 @@ z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilit
 		return ALP_ERR_INVAL;
 	}
 
+#if !defined(CONFIG_MQTT_LIB_TLS)
+	if (tls) {
+		/* Caller asked for `mqtts://` but CONFIG_MQTT_LIB_TLS is off --
+		 * fail closed (GHSA-gqjv-932h-c5gm).  A secure scheme must
+		 * never be reinterpreted as plaintext; reject here, before
+		 * resolving the broker address or copying any credentials
+		 * into backend state, so nothing is transmitted. */
+		mqtt_be_release(be);
+		caps_out->flags = 0u;
+		return ALP_ERR_NOSUPPORT;
+	}
+#endif
+
 	err = resolve_broker_addr(host, port, &be->broker_addr);
 	if (err != 0) {
 		mqtt_be_release(be);
@@ -343,8 +365,8 @@ z_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *st, alp_capabilit
 #if defined(CONFIG_MQTT_LIB_TLS)
 	be->client.transport.type = tls ? MQTT_TRANSPORT_SECURE : MQTT_TRANSPORT_NON_SECURE;
 #else
-	/* TLS Kconfig disabled at build time -- silently downgrade. */
-	(void)tls;
+	/* tls is always false here -- the check above already rejected
+	 * an `mqtts://` request when CONFIG_MQTT_LIB_TLS is off. */
 	be->client.transport.type = MQTT_TRANSPORT_NON_SECURE;
 #endif
 	be->client.rx_buf        = be->rx_buf;

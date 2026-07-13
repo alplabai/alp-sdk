@@ -29,7 +29,7 @@
  *   which is what runs once the scheduler is up -- e.g. the LCS read from
  *   main() -- needs no patch.
  *
- * ADR 0017 Tier-2 (INTERIM, task #21).  BENCH-UNVERIFIED.
+ * ADR 0017 Tier-2 (INTERIM).  BENCH-UNVERIFIED.
  */
 #include <errno.h>
 #include "ipm_arm_mhuv2.h"

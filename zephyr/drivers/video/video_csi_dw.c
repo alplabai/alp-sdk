@@ -11,7 +11,7 @@
  * Zephyr v4.4 + hal_alif ship NO DesignWare-CSI video driver, so this is a
  * genuine fork-driver copy carried in-tree so it survives a `west update`.
  * Retire onto the opt-in sdk-alif fork compatible once the csi nodes are
- * repointed AND bench-verified (task #21).
+ * repointed AND bench-verified.
  * ==================================================================
  *
  * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by

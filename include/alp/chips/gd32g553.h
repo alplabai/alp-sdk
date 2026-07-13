@@ -629,8 +629,11 @@ alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx,
  *          ALP_ERR_BUSY (firmware ring overran since last poll;
  *          host should poll faster).
  */
-alp_status_t gd32g553_adc_stream_read(
-    gd32g553_t *ctx, uint8_t stream_id, uint8_t max_samples, uint8_t *got_samples, uint16_t *mv);
+alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx,
+                                      uint8_t     stream_id,
+                                      uint8_t     max_samples,
+                                      uint8_t    *got_samples,
+                                      uint16_t   *mv);
 
 /** Stop the named stream, free its DMA channel, flush the ring. */
 alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id);

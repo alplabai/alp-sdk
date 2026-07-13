@@ -11,9 +11,15 @@
   },
   "allOf": [
     {
-      "description": "`preset:` is mutually exclusive with inline `populated:` / `e1m_routes:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
+      "description": "`preset:` is mutually exclusive with inline `name:` / `populated:` / `e1m_routes:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
       "not": {
         "anyOf": [
+          {
+            "allOf": [
+              { "required": ["preset"] },
+              { "required": ["name"] }
+            ]
+          },
           {
             "allOf": [
               { "required": ["preset"] },
@@ -27,6 +33,18 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "description": "Inline board declarations with board-side population or E1M routes need a stable `name:` for generated route headers and diagnostics.",
+      "if": {
+        "anyOf": [
+          { "required": ["populated"] },
+          { "required": ["e1m_routes"] }
+        ]
+      },
+      "then": {
+        "required": ["name"]
       }
     }
   ],
@@ -144,6 +162,11 @@
           "enum": ["auto", "alp", "uart", "ram", "linux", "none"],
           "default": "auto",
           "description": "Console backend the loader wires per slice.  `auto` (default) selects by the slice OS: a Zephyr slice gets the Alp UART console (`alp`/`uart` -- printf lands on the module console UART, e.g. E1M edge UART0), a Yocto slice gets the Linux console.  `ram` forces the Zephyr RAM console for serial-less bench boards (read `ram_console_buf` over SWD).  `none` emits no console Kconfig and inherits the board default.  The board layer owns the physical console UART (`zephyr,console` DT chosen); this knob only picks the backend."
+        },
+        "sim_console": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in (issue #686): when true, emit CONFIG_RAM_CONSOLE=y for every HEADLESS core (a core the SoM topology marks `hw_console: false`, e.g. the RZ/V2N M33 system-manager) so the studio hardware simulator's `uart_socket` streams that core's boot/console output.  Cores that already have a UART console are unchanged, and absent/false emits nothing (no RAM cost on production images).  Studio sets this when producing a bundle destined for `RENODE_MODE=real` (alp-studio#74)."
         },
         "modules": {
           "type": "object",
@@ -352,8 +375,44 @@
 
     "features": {
       "type": "object",
-      "additionalProperties": true,
-      "description": "App-specific feature configuration that doesn't map cleanly onto the strict-typed blocks above.  Free-form map; the loader passes structured entries through to the right backend."
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Typed feature configuration with explicit loader/emitter support.  Unsupported feature keys are rejected so board.yaml cannot silently accept a block no backend consumes.",
+      "properties": {
+        "hw_info": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "Runtime hardware-info reader configuration emitted into the system manifest and per-slice build config.",
+          "properties": {
+            "eeprom": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["bus", "addr_7bit", "offset"],
+              "description": "EEPROM location of the 128-byte alp_hw_info_eeprom_t manifest.",
+              "properties": {
+                "bus": {
+                  "type": "string",
+                  "pattern": "^e1m(_x)?_i2c[0-9]+$",
+                  "description": "Portable E1M I2C bus slug (for example, e1m_i2c0).  The emitter resolves the trailing index to CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID."
+                },
+                "addr_7bit": {
+                  "type": "integer",
+                  "minimum": 80,
+                  "maximum": 87,
+                  "description": "7-bit address strap for a 24C128-family EEPROM (0x50..0x57)."
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535,
+                  "description": "Byte offset of the alp_hw_info_eeprom_t manifest inside the EEPROM."
+                }
+              }
+            }
+          }
+        }
+      }
     },
 
     "models": {
@@ -525,11 +584,15 @@
         },
         "app": {
           "type": "string",
-          "description": "Path to the app source directory for this core.  Required for `os: zephyr` (must contain prj.conf or CMakeLists.txt), `os: baremetal` (must contain CMakeLists.txt).  For `os: yocto` either `app:` (custom CMake project recipe) or `image:` (override the stock recipe)."
+          "description": "Path to the app source directory for this core.  Required for `os: zephyr` (must contain prj.conf or CMakeLists.txt), `os: baremetal` (must contain CMakeLists.txt).  For `os: yocto`, `app:` is a project-root-relative *source directory*, not a bitbake target -- pair it with `recipe:` naming the bitbake recipe that packages it (or set `image:` instead to build a stock image, ignoring any `app:`)."
         },
         "image": {
           "type": "string",
-          "description": "Yocto image recipe name (e.g. `alp-image-edge`).  Used when `os: yocto` and no custom `app:` is supplied."
+          "description": "Yocto image recipe name (e.g. `alp-image-edge`).  Used when `os: yocto`; takes priority over `app:`/`recipe:` when both are set (the app source dir is retained for tooling but not built directly)."
+        },
+        "recipe": {
+          "type": "string",
+          "description": "Yocto bitbake recipe name that packages this core's `app:` source directory (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice (`app:` set, no `image:`) -- without it the slice has no valid bitbake target and the emitted plan carries `command: null` plus a `yocto-recipe-missing` warning rather than an invalid `bitbake <path>` command."
         },
         "peripherals": {
           "type": "array",
@@ -632,7 +695,7 @@
         "iot": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Connectivity feature toggles for this slice.",
+          "description": "Connectivity feature toggles for this slice.  Zephyr emits the provider-aware Wi-Fi/BLE backend gates plus MQTT/TLS Kconfig; Yocto emits the Linux userland/runtime package hand-off while the BSP owns provider kernel/firmware packages.",
           "properties": {
             "wifi": { "type": "boolean", "default": false },
             "mqtt": { "type": "boolean", "default": false },

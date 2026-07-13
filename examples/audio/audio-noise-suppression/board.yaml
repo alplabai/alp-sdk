@@ -20,19 +20,17 @@ som:
   sku: E1M-V2N101            # RZ/V2N supervisor; same source builds
                               # against V2H-class SKUs via SKU flip.
 
-preset: e1m-evk             # EVK preset routes I2S0 to the TAS2563
-                            # codec (mic-in over the codec's PDM port
-                            # + line/speaker out on the same chip)
+preset: e1m-x-evk           # X-EVK preset routes I2S0 to the TAS2563
+                            # smart amps (mic-in over the PDM mics +
+                            # speaker out on the same audio path)
                             # and populates tas2563 by default.
 supported_boards:
-  - e1m-evk
   - e1m-x-evk
 
-# E1M pads this app uses (resolved via BOARD_I2S_AUDIO at build time).
-# E1M EVK:   E1M_I2S0  (74LVC157 mux → TAS2563 amps)
+# E1M-X pads this app uses (resolved via BOARD_I2S_AUDIO at build time).
 # E1M-X EVK: E1M_X_I2S0 (TAS2563 smart-amp I2S)
 pins:
-  - { e1m: E1M_I2S0, macro: EVK_I2S_AUDIO_CODEC, doc: "I2S0 to the TAS2563 codec; the codec bridges mic-in (PDM) + speaker-out on one link" }
+  - { e1m: E1M_X_I2S0, macro: XEVK_I2S_AUDIO, doc: "I2S0 to the TAS2563 smart amps; PDM mics + speaker-out share the audio path" }
 
 # This demo stays on the M33-SM for deterministic audio cadence.
 # V2N's A55 cluster could host the Linux audio plumbing on top,

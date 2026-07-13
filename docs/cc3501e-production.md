@@ -93,11 +93,16 @@ runs the same cold chain via BL2, cannot complete). See
 ## OTA
 
 OTA-over-the-bridge (host streams a signed vendor image → `psa_fwu` → MCUboot swap) is
-implemented and silicon-validated through **install/STAGED** (`chips/cc3501e/cc3501e.c`,
+implemented and **silicon-validated end-to-end** (`chips/cc3501e/cc3501e.c`,
 `firmware/cc3501e/hal/ti/cc3501e_hw_ti.c`). Each OTA payload is itself a signed vendor
-image (same FIB+sign recipe) whose version must exceed the running primary. The final
-cold **swap-boot** depends on the unit being cold-bootable (above), so it completes on
-correctly-activated production units; it does not on the mis-activated bench unit.
+image (same FIB+sign recipe) whose version must **exceed** the running primary — monotonic
+anti-rollback: a downgrade is refused at `psa_fwu` install (`OTA_STATUS state=3` ERROR), a
+forward image is accepted (`state=2` STAGED). The swap is completed by the CC35's OWN
+`psa_fwu_request_reboot()` after FINISH (NOT a host cold POR). **Proven 2026-07-10 on the
+E1M-AEN801 EVK:** a forward candidate streamed → `state=2` STAGED → self-reboot swap (bridge
+dropped ~2 s then returned) → the swapped image self-accepted and **persisted across a true
+cold POR** (no rollback). The `OTA_STATUS reserved[0]` byte surfaces the swap-reboot rc
+(0 = success, non-zero = refused).
 
 ## Status / open items (2026-06-24)
 
@@ -124,8 +129,12 @@ correctly-activated production units; it does not on the mis-activated bench uni
   event over the shared HIF) + the NWP needs Always-Active power mode.
 - ✅ OTA receive → stage → install (STAGED) silicon-validated; bridge transport reliable.
 - ⏳ **Production signing**: HSM step (key not on the bench).
-- ⏳ **OTA cold swap-boot**: requires a correctly-activated (`vendor_sbl_container_enable=0`)
-  production unit; gated on the bench unit only.
+- ✅ **OTA cold swap-boot — validated end-to-end on the EVK (2026-07-10).** A FORWARD
+  candidate (version above the primary) → `state=2` STAGED → the CC35's own
+  `psa_fwu_request_reboot()` swap (bridge drop+return) → the swapped image ran and
+  **persisted across a true cold POR**. A first OTA after a failed one recovers cleanly
+  (no bridge wedge, no CC35 reset — `ota_do_begin` stuck-slot recovery, #611). See
+  `firmware/cc3501e/BRINGUP_STATUS.md` §5.
 - ✅ **Wi-Fi + BLE CONCURRENT — validated on silicon (2026-06-24, E1M-AEN801 EVK).**
   `wifi scan`, `ble enable` (NimBLE host up), and `wifi connect` (WPA3, async) all
   **succeed together**, and the HW-CS bridge survives the combined radio load (a `ver`

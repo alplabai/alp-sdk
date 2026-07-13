@@ -18,7 +18,7 @@ name: pr-plain-cmake
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'include/**'
       - 'src/**'
@@ -26,7 +26,7 @@ on:
       - 'cmake/**'
       - '.github/workflows/pr-plain-cmake.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'include/**'
       - 'src/**'
@@ -82,6 +82,29 @@ jobs:
       - name: Build
         run: cmake --build build/baremetal-v2n --parallel
 
+  consumer-add-subdirectory:
+    # Issue #598: the README documents add_subdirectory() as a first-class
+    # consumption mode, but nothing built alp-sdk as a NESTED project until
+    # this job -- every job above builds alp-sdk as the top-level project,
+    # which can't catch a CMAKE_SOURCE_DIR-vs-CMAKE_CURRENT_SOURCE_DIR path
+    # bug (they're identical at the top level).  This job configures/builds
+    # tests/cmake-consumer/add-subdirectory-smoke, a separate top-level
+    # CMake project that add_subdirectory()s alp-sdk the documented way.
+    name: plain-cmake · add_subdirectory() consumer (#598)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        som: ["none", "aen"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure
+        run: >
+          cmake -B build/consumer-${{ matrix.som }}
+          -S tests/cmake-consumer/add-subdirectory-smoke
+          -DALP_OS=baremetal -DALP_SOM=${{ matrix.som }}
+      - name: Build
+        run: cmake --build build/consumer-${{ matrix.som }} --parallel
+
   yocto:
     name: plain-cmake · yocto backend + tests
     runs-on: ubuntu-latest
@@ -107,3 +130,105 @@ jobs:
       # HIL coverage is parked behind docs/ci/HW-IN-LOOP.md.
       - name: Test
         run: ctest --test-dir build/yocto --output-on-failure
+
+  strict-warnings:
+    # Issue #634: first-party alp-sdk C (dispatchers + src/backends/**,
+    # NEVER vendors/**) must compile warning-free under the Alp-maintainer
+    # strict profile (cmake/alp-sdk-warnings.cmake).  -Werror turns that
+    # into a hard gate.  Runs both plain-CMake backends -- baremetal (+
+    # AEN/V2N vendor-scaffolding variants, to prove those sources stay
+    # excluded) and yocto with every optional real backend (mosquitto/
+    # ALSA/OpenSSL) wired in, so the strict profile actually sees them.
+    name: plain-cmake · strict-warnings (#634)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: baremetal
+            args: -DALP_OS=baremetal -DALP_BUILD_TESTS=ON
+          - name: baremetal-aen
+            args: -DALP_OS=baremetal -DALP_SOM=aen
+          - name: baremetal-v2n
+            args: -DALP_OS=baremetal -DALP_SOM=v2n
+          - name: yocto
+            args: -DALP_OS=yocto -DALP_BUILD_TESTS=ON
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Yocto-side runtime deps
+        if: matrix.name == 'yocto'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libmosquitto-dev libasound2-dev libssl-dev pkg-config
+      - name: Configure
+        run: >
+          cmake -B build/strict-${{ matrix.name }} -S . ${{ matrix.args }}
+          -DALP_SDK_STRICT_WARNINGS=ON -DALP_SDK_WERROR=ON
+      # -Werror already fails the build on any first-party warning; the
+      # grep below is a belt-and-braces check that the log is actually
+      # clean (e.g. a warning emitted by a build step other than the
+      # compiler proper wouldn't trip -Werror).
+      - name: Build (warning-free)
+        run: |
+          cmake --build build/strict-${{ matrix.name }} --parallel 2>&1 | tee build.log
+          ! grep -q "warning:" build.log
+
+  link-complete:
+    # Issue #593: every public <alp/*.h> function must be a real symbol
+    # in BOTH the baremetal and yocto plain-CMake libalp_sdk.a archives
+    # (a dispatcher, a real backend, or an explicit stub_backend.c
+    # NOSUPPORT stub) -- never silently absent, or a portable app that
+    # links clean on Zephyr fails at final link switching to baremetal
+    # or Yocto.  Cross-checks `nm`'s defined-symbol list for each
+    # archive against metadata/catalog.json's portable_api inventory
+    # (the same list the doc-drift / ABI-snapshot gates already treat
+    # as the source of truth for the portable surface).
+    name: plain-cmake · link-completeness (#593)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check
+        run: python3 scripts/check_plain_cmake_link_complete.py
+
+  find-package-consumer:
+    # Issue #607: an INSTALLED alp-sdk (ALP_SDK_BUILD_SHARED=ON) must be
+    # a real CMake package -- `find_package(alp-sdk 0.9 REQUIRED)`
+    # resolves, `alp::sdk` links, and the reported version matches the
+    # authoritative include/alp/version.h (not a stale hardcoded 0.1.0).
+    # Installs to a throwaway prefix, then configures/builds
+    # tests/cmake-consumer/find-package-smoke as a SEPARATE top-level
+    # CMake project against that prefix (the same external-consumer
+    # shape as consumer-add-subdirectory, but for the find_package()
+    # path instead of add_subdirectory()).
+    name: plain-cmake · find_package() consumer (#607)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Yocto-side runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              libmosquitto-dev libasound2-dev libssl-dev pkg-config
+      - name: Configure + build + install alp-sdk
+        run: |
+          cmake -B build/install-review -S . -DALP_OS=yocto \
+              -DALP_SDK_BUILD_SHARED=ON \
+              -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/alp-prefix"
+          cmake --build build/install-review --parallel
+          cmake --install build/install-review
+      - name: Configure + build the find_package() consumer
+        run: |
+          cmake -B build/consumer-findpkg \
+              -S tests/cmake-consumer/find-package-smoke \
+              -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/alp-prefix"
+          cmake --build build/consumer-findpkg --parallel
+      - name: Run + verify the reported version
+        run: |
+          out="$(LD_LIBRARY_PATH="$RUNNER_TEMP/alp-prefix/lib" \
+              ./build/consumer-findpkg/find_package_smoke)"
+          echo "$out"
+          echo "$out" | grep -qx "alp-sdk version: 0.9.0"

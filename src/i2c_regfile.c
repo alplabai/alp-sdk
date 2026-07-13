@@ -25,6 +25,8 @@
 #include <alp/i2c_regfile.h>
 #include <alp/peripheral.h>
 
+#include "alp_slot_claim.h"
+
 /* Helper handles are 1:1 over target handles, so bound the pool by the
  * same knob the I2C dispatcher uses for its target pool (Kconfig on
  * Zephyr; the dispatcher's fallback default of 2 elsewhere). */
@@ -51,7 +53,14 @@ struct alp_i2c_regfile {
 	volatile uint32_t writes_seen;
 	volatile uint32_t reads_seen;
 
-	bool in_use;
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (issue #629) -- placed before in_use
+	 * so the atomic-claim zeroing (memset up to offsetof(..., in_use))
+	 * resets both on every fresh claim. Non-volatile: the guard uses
+	 * __atomic_* on them directly. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 static struct alp_i2c_regfile _pool[CONFIG_ALP_SDK_MAX_I2C_TARGET_HANDLES];
@@ -59,9 +68,11 @@ static struct alp_i2c_regfile _pool[CONFIG_ALP_SDK_MAX_I2C_TARGET_HANDLES];
 static struct alp_i2c_regfile *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_I2C_TARGET_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset((void *)&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the flag-flip winner touches the slot.
+		 * in_use is the struct's last member, so zero everything before
+		 * it (incl. lifecycle/active_ops -> LC_UNOPENED). Issue #629. */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset((void *)&_pool[i], 0, offsetof(struct alp_i2c_regfile, in_use));
 			return &_pool[i];
 		}
 	}
@@ -150,47 +161,69 @@ alp_status_t alp_i2c_regfile_open(uint32_t            bus_id,
 	if (rf->tgt == NULL) {
 		/* Propagate the wrapped open's failure code (NOSUPPORT /
 		 * NOT_READY / NOMEM ...) so the helper degrades exactly
-		 * like the raw target API. */
+		 * like the raw target API. Slot never reached OPEN, so just
+		 * release the claim (no begin_close needed). */
 		alp_status_t rc = alp_last_error();
-		rf->in_use      = false;
+		alp_slot_release(&rf->in_use);
 		return (rc == ALP_OK) ? ALP_ERR_IO : rc;
 	}
+	/* Publish OPEN only after the wrapped target is live and callbacks are
+	 * armed, so an op/close racing this open sees a fully-initialised slot. */
+	alp_lifecycle_set(&rf->lifecycle, ALP_HANDLE_LC_OPEN);
 	*out = rf;
 	return ALP_OK;
 }
 
 alp_status_t alp_i2c_regfile_set_write_window(alp_i2c_regfile_t *rf, size_t first, size_t count)
 {
-	if (rf == NULL || !rf->in_use) {
+	if (rf == NULL || !alp_handle_op_enter(&rf->lifecycle, &rf->active_ops)) {
 		return ALP_ERR_INVAL;
 	}
 	/* Window must fit the file: first may equal len only when the
 	 * window is empty (count == 0 -> fully read-only). */
+	alp_status_t rc = ALP_OK;
 	if (first > rf->len || count > rf->len - first) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+	} else {
+		rf->wr_first = first;
+		rf->wr_count = count;
 	}
-	rf->wr_first = first;
-	rf->wr_count = count;
-	return ALP_OK;
+	alp_handle_op_leave(&rf->active_ops);
+	return rc;
 }
 
 alp_status_t alp_i2c_regfile_stats(const alp_i2c_regfile_t *rf, alp_i2c_regfile_stats_t *out)
 {
-	if (rf == NULL || !rf->in_use || out == NULL) {
+	if (out == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	/* Cast away const on the lifecycle/active_ops guard fields: the op is
+	 * logically read-only on the register file, but op_enter/leave must
+	 * still count it so a racing close cannot recycle the slot mid-read. */
+	struct alp_i2c_regfile *m = (struct alp_i2c_regfile *)rf;
+	if (m == NULL || !alp_handle_op_enter(&m->lifecycle, &m->active_ops)) {
 		return ALP_ERR_INVAL;
 	}
 	out->writes_seen = rf->writes_seen;
 	out->reads_seen  = rf->reads_seen;
+	alp_handle_op_leave(&m->active_ops);
 	return ALP_OK;
 }
 
 void alp_i2c_regfile_close(alp_i2c_regfile_t *rf)
 {
-	if (rf == NULL || !rf->in_use) {
+	if (rf == NULL) {
+		return;
+	}
+	/* Drain in-flight ops, then stop the wrapped target (guarantees no
+	 * callback fires afterward) before releasing the slot -- so neither a
+	 * synchronous op nor an ISR callback touches a recycled slot. #629 */
+	if (!alp_handle_begin_close(&rf->lifecycle, &rf->active_ops)) {
 		return;
 	}
 	alp_i2c_target_close(rf->tgt); /* no callback fires after this */
-	rf->tgt    = NULL;
-	rf->regs   = NULL;
-	rf->in_use = false;
+	rf->tgt  = NULL;
+	rf->regs = NULL;
+	alp_lifecycle_set(&rf->lifecycle, ALP_HANDLE_LC_UNOPENED);
+	alp_slot_release(&rf->in_use);
 }

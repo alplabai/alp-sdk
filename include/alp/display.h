@@ -47,6 +47,20 @@ typedef struct {
 	uint32_t display_id; /**< Studio-resolved display instance. */
 } alp_display_config_t;
 
+/**
+ * @brief Default-initialize an @ref alp_display_config_t for display @p id.
+ *
+ * The display config has no tunable fields beyond its identity, so the
+ * default simply names the instance: @code alp_display_config_t cfg =
+ * ALP_DISPLAY_CONFIG_DEFAULT(0); @endcode
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_DISPLAY_CONFIG_DEFAULT(id) ((alp_display_config_t){ .display_id = (id) })
+
 typedef struct {
 	uint16_t     width;
 	uint16_t     height;
@@ -89,8 +103,12 @@ alp_status_t alp_display_get_caps(alp_display_t *d, alp_display_caps_t *out);
  *         (rect outside display caps) / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_display_blit(
-    alp_display_t *d, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *pixels);
+alp_status_t alp_display_blit(alp_display_t *d,
+                              uint16_t       x,
+                              uint16_t       y,
+                              uint16_t       w,
+                              uint16_t       h,
+                              const void    *pixels);
 
 /**
  * @brief Clear the framebuffer to the background colour.

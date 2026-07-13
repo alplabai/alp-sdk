@@ -69,8 +69,10 @@ vision-AEN app converge on it.
 
 ### 4. Network (v0.3)
 
-The on-module Murata LBEE5HY2FY combo (Infineon CYW55513) provides
-Wi-Fi 6 (2.4 + 5 + 6 GHz) and BLE 5.4.  The provisioning flow:
+The V2N on-module Murata LBEE5HY2FY combo (Infineon CYW55513)
+provides Wi-Fi 6 (2.4 + 5 + 6 GHz) and BLE 5.4 through the Linux
+A55 slice.  AEN builds route the same portable surface through the
+CC3501E bridge.  The provisioning flow:
 
 1. First boot: the device enters SoftAP mode, broadcasting
    `alp-prov-<serial>`.  A phone connects, hits a captive-portal

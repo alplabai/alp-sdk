@@ -12,15 +12,18 @@
  * sequence, as living documentation of the hand-written-firmware path:
  *
  *     init  ->  ping  ->  diag info
+ *           ->  portable Wi-Fi open  ->  portable BLE open + scan
  *           ->  Wi-Fi scan  ->  Wi-Fi connect  ->  get IP
  *           ->  TCP socket: open -> connect -> send -> recv -> close
  *           ->  Wi-Fi disconnect
  *           ->  BLE enable  ->  BLE scan  ->  BLE disable
  *           ->  proxied-GPIO read
  *
- * All of it goes through the portable companion driver in
- * <alp/chips/cc3501e.h> (chips/cc3501e/cc3501e.c) over the inter-chip SPI1
- * bridge; the app never touches the raw wire protocol.
+ * The first radio checkpoint goes through the application-level portable APIs
+ * in <alp/iot.h> and <alp/ble.h>.  The longer tour that follows stays on
+ * <alp/chips/cc3501e.h> so developers still have a diagnostic surface for
+ * firmware-version, scan-record, socket, and bridge-level bring-up work.  The
+ * app never touches the raw wire protocol.
  *
  * WHY IT IS A DEMO, NOT A GATE.  Every step is guarded and NON-FATAL: a step
  * that fails prints the status and the tour continues to the next.  On a bench
@@ -39,11 +42,14 @@
  */
 
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 
-#include "alp/peripheral.h"
+#include "alp/ble.h"
 #include "alp/chips/cc3501e.h"
 #include "alp/e1m_pinout.h" /* ALP_E1M_GPIO_IOxx -- portable E1M pin ids (proxied via the bridge) */
+#include "alp/iot.h"
+#include "alp/peripheral.h"
 
 #include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up helper */
 
@@ -97,6 +103,10 @@
  */
 static const uint8_t TOUR_TCP_IP[4] = { 93, 184, 216, 34 };
 #define TOUR_TCP_PORT 80u
+
+typedef struct {
+	unsigned count;
+} portable_ble_scan_ctx_t;
 
 /* ------------------------------------------------------------------ */
 /* Tour steps.  Each is self-contained + non-fatal: it logs its own      */
@@ -157,6 +167,64 @@ static void tour_diag(cc3501e_t *fw)
 	} else {
 		printf("[tour] GET_DIAG_INFO -> %d\n", (int)s);
 	}
+}
+
+static void portable_ble_scan_cb(const alp_ble_scan_result_t *r, void *user)
+{
+	portable_ble_scan_ctx_t *ctx = (portable_ble_scan_ctx_t *)user;
+	if (ctx != NULL) {
+		ctx->count++;
+		if (ctx->count <= 3u) {
+			printf("PORTABLE_WIRELESS: ble_adv #%u rssi=%d len=%u\n",
+			       ctx->count,
+			       (int)r->rssi_dbm,
+			       (unsigned)r->adv_len);
+		}
+	}
+}
+
+/*
+ * Step: prove the application-level portable wireless dispatchers bind to the
+ * same live CC3501E bridge.  cc3501e_bridge_bringup() attached @p fw to the
+ * portable Wi-Fi and BLE backends; this checkpoint verifies the public handles
+ * open and that BLE can run a real scan through <alp/ble.h>.
+ */
+static void tour_portable_wireless_checkpoint(void)
+{
+	unsigned pass = 0u;
+	unsigned fail = 0u;
+
+	alp_wifi_t *wifi = alp_wifi_open();
+	if (wifi == NULL) {
+		printf("PORTABLE_WIRELESS: wifi_open FAIL err=%d\n", (int)alp_last_error());
+		fail++;
+	} else {
+		printf("PORTABLE_WIRELESS: wifi_open PASS\n");
+		pass++;
+		alp_wifi_close(wifi);
+	}
+
+	alp_ble_t *ble = alp_ble_open();
+	if (ble == NULL) {
+		printf("PORTABLE_WIRELESS: ble_open FAIL err=%d\n", (int)alp_last_error());
+		fail++;
+	} else {
+		printf("PORTABLE_WIRELESS: ble_open PASS\n");
+		pass++;
+
+		portable_ble_scan_ctx_t scan = { 0 };
+		alp_status_t            s    = alp_ble_scan_start(ble, false, portable_ble_scan_cb, &scan);
+		if (s == ALP_OK) {
+			printf("PORTABLE_WIRELESS: ble_scan PASS count=%u\n", scan.count);
+			pass++;
+		} else {
+			printf("PORTABLE_WIRELESS: ble_scan FAIL err=%d\n", (int)s);
+			fail++;
+		}
+		alp_ble_close(ble);
+	}
+
+	printf("PORTABLE_WIRELESS: SUMMARY pass=%u fail=%u\n", pass, fail);
 }
 
 /* Step: run a Wi-Fi scan and print the discovered APs.  SCAN_START is
@@ -383,17 +451,20 @@ int main(void)
 	/* Step 3 -- version + diagnostics. */
 	tour_diag(&fw);
 
-	/* Step 4 -- Wi-Fi scan (poll-by-repeat worker seam). */
+	/* Step 4 -- portable Wi-Fi/BLE dispatch checkpoint. */
+	tour_portable_wireless_checkpoint();
+
+	/* Step 5 -- Wi-Fi scan (poll-by-repeat worker seam). */
 	tour_wifi_scan(&fw);
 
-	/* Step 5 -- Wi-Fi connect + a TCP socket round-trip + disconnect
+	/* Step 6 -- Wi-Fi connect + a TCP socket round-trip + disconnect
 	 * (skipped when no credentials are built in). */
 	tour_wifi_connect_and_socket(&fw);
 
-	/* Step 6 -- BLE enable -> scan -> disable. */
+	/* Step 7 -- BLE enable -> scan -> disable. */
 	tour_ble(&fw);
 
-	/* Step 7 -- a proxied-GPIO read over the bridge. */
+	/* Step 8 -- a proxied-GPIO read over the bridge. */
 	tour_gpio_proxy();
 
 	printf("[tour] full-surface tour complete\n");

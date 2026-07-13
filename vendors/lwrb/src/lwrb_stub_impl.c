@@ -9,11 +9,13 @@
  * full).
  *
  * Replaced wholesale by the upstream `MaJerle/lwrb` sources at
- * `modules/lib/lwrb/src/` once the `extras-v04` group is enabled
- * (`west update --group-filter +extras-v04`) and the Zephyr build
- * picks up the upstream module via EXTRA_ZEPHYR_MODULES.  Both
- * impls share the lwrb_t ABI and the function signatures here, so
- * SDK consumers do not change.
+ * `modules/lib/lwrb/src/` once the `extras-lwrb-nanopb` group is
+ * enabled (`west update --group-filter +extras-lwrb-nanopb`) and
+ * the Zephyr build picks up the upstream module via
+ * EXTRA_ZEPHYR_MODULES.  Interim/deferred as of v0.9 -- no
+ * committed release date for the swap.  Both impls share the
+ * lwrb_t ABI and the function signatures here, so SDK consumers do
+ * not change.
  *
  * Concurrency contract:
  *   - lwrb_write / lwrb_advance / lwrb_get_free MAY be called from

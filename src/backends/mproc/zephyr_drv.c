@@ -225,12 +225,12 @@ struct alp_shmem_region {
 /* Build a const lookup table from DT_ALIAS(alp_shmemN).  IF_ENABLED
  * skips the entry when the alias isn't defined.  Up to 4 regions
  * supported -- raise the upper bound here if a SoM needs more. */
-#define ALP_SHMEM_REGION_ENTRY_IF(idx)                                                             \
-	IF_ENABLED(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_shmem, idx))),                                  \
-	           ({                                                                                  \
-	                .name = "alp_shmem" #idx,                                                      \
-	                .base = (void *)DT_REG_ADDR(DT_ALIAS(_CONCAT(alp_shmem, idx))),                \
-	                .size = (size_t)DT_REG_SIZE(DT_ALIAS(_CONCAT(alp_shmem, idx))),                \
+#define ALP_SHMEM_REGION_ENTRY_IF(idx) \
+	IF_ENABLED(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_shmem, idx))), \
+	           ({ \
+	                .name = "alp_shmem" #idx, \
+	                .base = (void *)DT_REG_ADDR(DT_ALIAS(_CONCAT(alp_shmem, idx))), \
+	                .size = (size_t)DT_REG_SIZE(DT_ALIAS(_CONCAT(alp_shmem, idx))), \
 	            }, ))
 
 static const struct alp_shmem_region alp_shmem_regions[] = { ALP_SHMEM_REGION_ENTRY_IF(
@@ -302,9 +302,9 @@ static void z_shmem_close(alp_shmem_backend_state_t *state)
 
 #if defined(CONFIG_ALP_SDK_MPROC)
 
-#define ALP_MBOX_DEV_OR_NULL(idx)                                                                  \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_mbox, idx))),                                  \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_mbox, idx)))),                                 \
+#define ALP_MBOX_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_mbox, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_mbox, idx)))), \
 	            (NULL))
 
 static const struct device *const alp_mbox_devs[] = {
@@ -331,8 +331,9 @@ static void mbox_rx_cb(const struct device *dev,
      * mismatch, declared length overflow) are dropped silently --
      * the peer is expected to retry on Sequence-gap detection at
      * the application layer.  Dropping silently here matches the
-     * v0.4-final nanopb behaviour: a decoder failure surfaces as
-     * "no message arrived" rather than a corrupted payload. */
+     * intended eventual nanopb behaviour (deferred, no committed
+     * version): a decoder failure surfaces as "no message arrived"
+     * rather than a corrupted payload. */
 	const uint8_t *payload     = NULL;
 	size_t         payload_len = 0;
 	if (cb_data != NULL) {

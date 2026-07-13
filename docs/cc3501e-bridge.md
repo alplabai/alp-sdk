@@ -17,6 +17,28 @@ that terminates on the CC3501E (see
 must be reached via the CC3501E firmware over the inter-chip
 SPI bus (Alif **SPI1** master ↔ CC3501E **SPI0** slave).
 
+## Portable APIs vs diagnostics
+
+Application code should normally stay on the portable surfaces:
+
+- [`<alp/iot.h>`](../include/alp/iot.h) for Wi-Fi station handles
+  (`alp_wifi_open`, `alp_wifi_connect`, `alp_wifi_disconnect`).
+- [`<alp/ble.h>`](../include/alp/ble.h) for BLE central/peripheral handles
+  (`alp_ble_open`, scan, advertise, connect, and GATT).
+- [`<alp/peripheral.h>`](../include/alp/peripheral.h) for E1M GPIOs, including
+  pins proxied through the CC3501E route table.
+
+On E1M-AEN builds, the bridge helper initialises the CC3501E once, attaches the
+live `cc3501e_t` handle, and the Wi-Fi/BLE dispatchers choose the
+`ti-cc3501e` backend for `alif:ensemble:e3` through `alif:ensemble:e8`.
+
+[`<alp/chips/cc3501e.h>`](../include/alp/chips/cc3501e.h) and the
+[`alp companion`](cc3501e-companion-commands.md) console are intentionally
+lower-level. Use them for diagnostics, firmware-version checks, raw Wi-Fi/BLE
+scan records, socket bring-up, OTA, and bridge health; do not build portable
+application logic around the chip-specific names unless you need that
+diagnostic detail.
+
 ## Inter-chip wiring
 
 Per [`metadata/e1m_modules/aen/inter-chip.tsv`](../metadata/e1m_modules/aen/inter-chip.tsv):
@@ -293,10 +315,14 @@ modes to "just work" through `ALP_CC3501E_CMD_GPIO_CONFIGURE` +
 
 ### Open-drain output
 
-Required for M.2 E-key `W_DISABLE1` (CC3501E `GPIO_17` ↔ E1M
-`IO17`, Wi-Fi disable) and `W_DISABLE2` (CC3501E `GPIO_16` ↔
-E1M `IO16`, Bluetooth disable).  Per the M.2 spec these are
-open-drain active-low: write 0 to assert, write 1 (or
+Required for M.2 E-key `W_DISABLE1` (CC3501E `GPIO_16` ↔ E1M
+`IO17`, Wi-Fi disable) and `W_DISABLE2` (CC3501E `GPIO_17` ↔
+E1M `IO16`, Bluetooth disable).  The current firmware also uses
+these raw CC3501E pins for the bridge (`GPIO16` as SPI0 CS and
+`GPIO17` as READY/host-IRQ), so the SoM metadata records the
+physical wiring while example-local proxy tables omit IO17.  Per
+the M.2 spec the W_DISABLE lines are open-drain active-low: write 0
+to assert, write 1 (or
 Hi-Z / release) to deassert.  Firmware must:
 
 - Accept `ALP_CC3501E_GPIO_DIR_OPEN_DRAIN` in the configure
@@ -358,24 +384,40 @@ device installs + swap-boots it.  The wire contract lives in
 | `0x42` | `ALP_CC3501E_CMD_OTA_FINISH` | none — install + deferred swap reboot |
 | `0x43` | `ALP_CC3501E_CMD_OTA_ABORT`  | none — cancel the session |
 | `0x44` | `ALP_CC3501E_CMD_OTA_STATUS` | reply `alp_cc3501e_ota_status_t` (state / bytes_written / total_len) |
+| `0x46` | `ALP_CC3501E_CMD_OTA_PROMOTE` | none — request the swap-reboot for an already-committed pending image (`0x45` is `STREAM_WRITE`) |
 
 The flow is strictly sequential — `BEGIN(total_len)` →
 `WRITE(offset, bytes)`* → `FINISH` — and each `WRITE`'s `offset` must
 equal the device's running write cursor (out-of-order writes are
 rejected; a host that missed a reply re-syncs to the real cursor via
-`OTA_STATUS`).  On `FINISH` the device installs the staged image and
-arms a deferred reboot: the bridge link **drops** while the cold
-BL2/MCUboot swaps the slot to primary (TRIAL boot), and the swapped
-image accepts itself on its first housekeeping tick.  Host-side
+`OTA_STATUS`).  On `FINISH` the device installs the staged image
+(`OTA_STATUS state` → 2/STAGED) and arms a deferred reboot: the CC35's
+OWN `psa_fwu_request_reboot()` fires once the FINISH ack has drained, the
+bridge link **drops** while BL2/MCUboot swaps the slot to primary (TRIAL
+boot), and the swapped image accepts itself on its first housekeeping
+tick.  The payload's signed version must **exceed** the running primary —
+a downgrade is refused at install (`state` → 3/ERROR), a forward image is
+accepted.  `OTA_STATUS reserved[0]` carries the last swap-reboot rc
+(0 = success, non-zero = the swap was refused, e.g. anti-rollback).
+Host-side
+
+`OTA_PROMOTE` (proto v4) exists for one recovery case: a bare reset
+(e.g. the Puya cold-boot host-reset workaround) can leave an image
+committed to STAGED but **un-promoted**, and — because a slot is now
+occupied — a fresh `BEGIN`/`FINISH` short-circuits and can never re-arm
+the swap request.  `OTA_PROMOTE` arms the same deferred swap-reboot
+`FINISH` would, promoting the pending image without a new session.  If
+nothing is pending the reboot is a clean no-op.
 helpers: `cc3501e_ota_update()` (whole-image convenience) plus the
 granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` in
 [`include/alp/chips/cc3501e.h`](../include/alp/chips/cc3501e.h).
 
 Each OTA payload is itself a signed vendor image whose version must
 exceed the running primary (monotonic anti-rollback).  Build, signing,
-and the silicon-validated status (staged/install proven; the final cold
-swap-boot needs a correctly-activated, cold-bootable unit) are covered
-in [`docs/cc3501e-production.md`](cc3501e-production.md) § "OTA".  The
+and the silicon-validated status (the full cycle — stream → STAGE →
+self-reboot swap → cold-POR persist — is proven end-to-end on the
+E1M-AEN801 EVK, 2026-07-10) are covered in
+[`docs/cc3501e-production.md`](cc3501e-production.md) § "OTA".  The
 host obtains the image via the device-side Mender contract
 ([`docs/ota-device-contract.md`](ota-device-contract.md)); the OTA
 server is a separate repo.
@@ -386,7 +428,7 @@ server is a separate repo.
 |--------------------------------------------------|-----------------------------------------|
 | Wire protocol v1 frozen                          | `include/alp/protocol/cc3501e.h` ✅ |
 | Alif-side SPI client (`chips/cc3501e/`)          | ✅ landed in alp-sdk              |
-| `<alp/iot.h>` / `<alp/ble.h>` route via CC3501E  | Follow-up: dispatcher branch in iot_zephyr.c / ble_zephyr.c |
+| `<alp/iot.h>` / `<alp/ble.h>` route via CC3501E  | ✅ landed: exact AEN backend selects the CC3501E route; bench-validated open/scan on E1M-AEN801 |
 | Firmware tree (embedded)                         | `firmware/cc3501e/` ✅ (per [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)) |
 | Bring-up firmware (PING + GET_VERSION + GET_MAC + RESET) | `firmware/cc3501e/` v0.1 ✅ **silicon-validated** (E1M-AEN801 EVK bench) |
 | Wi-Fi station mode                               | `firmware/cc3501e/` v0.2 ✅ shipped (scan / STA connect / AP / RSSI / IP); scan + async STA connect **silicon-validated** |
@@ -394,7 +436,7 @@ server is a separate repo.
 | GPIO proxy + camera-enable                       | `firmware/cc3501e/` v0.4 ✅ shipped + **silicon-validated** (`examples/aen/aen-cc3501e-gpio`, warm-boot harness pass=8 fail=0) |
 | OTA over the bridge (§ "OTA" above)              | `firmware/cc3501e/` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
 | Full feature parity with `<alp/iot.h>` /
-  `<alp/ble.h>`                                    | `firmware/cc3501e/` v1.0            |
+  `<alp/ble.h>`                                    | Remaining v1.0 work: HOST_IRQ async-event delivery and full runtime GATT/event parity |
 
 ## See also
 

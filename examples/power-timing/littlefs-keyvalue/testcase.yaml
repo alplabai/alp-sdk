@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: littlefs-keyvalue
+  description: |
+    Mounts a RAM-backed littlefs partition (native_sim's
+    `zephyr,sim-flash` storage_partition), writes a key/value pair to
+    a file, reads it back, lists the mount-point directory, and
+    asserts the read matches the write.  Teaches the Zephyr fs
+    subsystem's fs_mount/fs_open/fs_read/fs_write/fs_readdir API.
+
+tests:
+  alp_sdk.example.littlefs_keyvalue.e1m_x_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - littlefs-keyvalue
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[littlefs-keyvalue\\] done"
+  alp_sdk.example.littlefs_keyvalue.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - littlefs-keyvalue
+      - aen
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[littlefs-keyvalue\\] done"

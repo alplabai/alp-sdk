@@ -35,6 +35,7 @@ PROJECT_EMIT_MODES = [
     "cmake-args",
     "yocto-conf",
     "dts-overlay",
+    "native-sim-overlay",
     "hw-info-h",
     "west-libraries",
     "system-manifest",
@@ -43,6 +44,7 @@ PROJECT_EMIT_MODES = [
     "os-topology",
     "composed-route-table",
     "carrier-netlist",
+    "zephyr-board",
 ]
 
 # Mirror the orchestrator's --emit choices (alp_orchestrate.cli) == the

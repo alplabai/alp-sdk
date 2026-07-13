@@ -96,24 +96,42 @@ config ALP_U8G2_SW_BLIT
 	bool "u8g2 pure-C SW blit (fallback)"
 	default y
 
+config ALP_SDK_U8G2_VENDORED_CORE
+	bool "Compile the vendored u8g2 core draw pipeline (vendors/u8g2/)"
+	help
+	  Set (not `default y`, unlike ALP_U8G2_SW_BLIT above -- that one
+	  is a fallback-capability marker true for every build; this one
+	  gates real compiled sources) only when a slice actually selects
+	  `libraries: [u8g2]` -- see the CONFIG_ALP_SDK_U8G2_VENDORED_CORE=y
+	  line in `_LIBRARY_KCONFIG["u8g2"]` (scripts/alp_project_emit.py).
+	  zephyr/CMakeLists.txt compiles vendors/u8g2/csrc/ into the build
+	  only when this is set, so a u8g2-less app pays no C build cost
+	  and (importantly) no C++-toolchain requirement from the sibling
+	  Catch2 vendor knob below.
+
 # ----------------------------------------------------------------------
-# gfx_compat (maintainer-written thin shim)
+# gfx_compat (maintainer-written thin shim) -- Kconfig lives at
+# src/lib/gfx_compat/Kconfig (rsourced below), alongside the shim's
+# CMakeLists.txt + sources, since this library has no upstream/west
+# pin of its own to keep separate from.
 # ----------------------------------------------------------------------
 
-config ALP_GFX_COMPAT_GPU2D
-	bool "gfx_compat -> Alif GPU2D backend"
-config ALP_GFX_COMPAT_DMA2D
-	bool "gfx_compat -> generic DMA2D backend"
-config ALP_GFX_COMPAT_SPI_DMA
-	bool "gfx_compat SPI push via DMA"
-config ALP_GFX_COMPAT_SW
-	bool "gfx_compat pure-C SW blit (fallback)"
-	default y
+rsource "../src/lib/gfx_compat/Kconfig"
 
 # ----------------------------------------------------------------------
 # madgwick_ahrs + pid + modbus
 # ----------------------------------------------------------------------
 
+config ALP_SDK_AHRS
+	bool "Enable <alp/ahrs.h> portable Madgwick AHRS"
+	default n
+	help
+	  Compile src/ahrs.c, the portable caller-owned Madgwick IMU
+	  orientation filter (alp_ahrs_init / alp_ahrs_update_imu /
+	  alp_ahrs_euler / alp_ahrs_reset).  Emitted by
+	  `libraries: [madgwick_ahrs]` in board.yaml.  ALP_MADGWICK_FPU /
+	  ALP_MADGWICK_TMU bind HW-accelerated paths where a SoM exposes
+	  one; ALP_MADGWICK_LIBM is the always-available SW floor.
 config ALP_MADGWICK_FPU
 	bool "Madgwick AHRS via FPU"
 config ALP_MADGWICK_TMU
@@ -122,6 +140,16 @@ config ALP_MADGWICK_LIBM
 	bool "Madgwick AHRS via libm (SW fallback)"
 	default y
 
+config ALP_SDK_PID
+	bool "Enable <alp/pid.h> portable PID controller"
+	default n
+	help
+	  Compile src/pid.c, the portable caller-owned PID control loop
+	  (alp_pid_init / alp_pid_step / alp_pid_reset) with output
+	  clamping, integrator anti-windup, and derivative-on-measurement.
+	  Emitted by `libraries: [pid]` in board.yaml.  The ALP_PID_FPU /
+	  ALP_PID_TIMER knobs below bind HW-accelerated paths where a SoM
+	  exposes one; ALP_PID_INT_MATH is the always-available SW floor.
 config ALP_PID_FPU
 	bool "PID via FPU"
 config ALP_PID_TIMER
@@ -184,13 +212,13 @@ config ALP_JSMN_SW
 	default y
 
 config ALP_BEARSSL_CAU
-	bool "BearSSL backed by GD32 CAU"
+	bool "BearSSL backed by GD32 CAU (planned)"
 config ALP_BEARSSL_CRYPTOCELL
-	bool "BearSSL backed by Alif CryptoCell"
+	bool "BearSSL backed by Alif CryptoCell (planned)"
 config ALP_BEARSSL_INLINE_AES
-	bool "BearSSL backed by Alif inline-AES instruction"
+	bool "BearSSL backed by Alif inline-AES instruction (planned)"
 config ALP_BEARSSL_OPTIGA
-	bool "BearSSL TLS handshake via OPTIGA Trust M"
+	bool "BearSSL TLS handshake via OPTIGA Trust M (planned)"
 config ALP_BEARSSL_PURE_C
 	bool "BearSSL pure-C (SW fallback)"
 	default y
@@ -239,6 +267,20 @@ config ALP_CATCH2_SW
 	bool "Catch2 (always pure-SW)"
 	default y
 
+config ALP_SDK_CATCH2_VENDORED
+	bool "Compile the vendored Catch2 amalgamated distribution (vendors/catch2/)"
+	help
+	  Set (not `default y`, unlike ALP_CATCH2_SW above -- that one is a
+	  fallback-capability marker true for every build; this one gates
+	  a real C++ compiled source + `operator new`/`operator delete`
+	  requirement) only when a slice actually selects
+	  `libraries: [catch2]` -- see the CONFIG_ALP_SDK_CATCH2_VENDORED=y
+	  line in `_LIBRARY_KCONFIG["catch2"]` (scripts/alp_project_emit.py).
+	  zephyr/CMakeLists.txt compiles vendors/catch2/src/catch_amalgamated.cpp
+	  into the build only when this is set -- a C-only app that never
+	  asked for Catch2 must not pick up a C++ TU it has no libstdc++
+	  linked for.
+
 # ----------------------------------------------------------------------
 # Baseline libraries (v0.2-era) -- HW-backend knobs added in §D.lib's
 # follow-up audit so the existing 4 libraries with HW bindings now
@@ -265,19 +307,19 @@ config ALP_LVGL_SW_BLIT
 	default y
 
 config ALP_MBEDTLS_CRYPTOCELL
-	bool "mbedTLS AES/RSA/ECDSA via Alif CryptoCell"
+	bool "mbedTLS AES/RSA/ECDSA via Alif CryptoCell (planned)"
 	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
 config ALP_MBEDTLS_INLINE_AES
-	bool "mbedTLS AES via Alif M55 inline-AES instruction"
+	bool "mbedTLS AES via Alif M55 inline-AES instruction (planned)"
 	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E5 || ALP_SOC_ALIF_ENSEMBLE_E6 || \
 	           ALP_SOC_ALIF_ENSEMBLE_E7 || ALP_SOC_ALIF_ENSEMBLE_E8
 config ALP_MBEDTLS_CAU
-	bool "mbedTLS AES via GD32 bridge CAU"
+	bool "mbedTLS AES via GD32 bridge CAU (planned)"
 config ALP_MBEDTLS_OPTIGA
-	bool "mbedTLS TLS handshake via OPTIGA Trust M"
+	bool "mbedTLS TLS handshake via OPTIGA Trust M (planned)"
 config ALP_MBEDTLS_PURE_C
 	bool "mbedTLS pure-C (SW fallback)"
 	default y

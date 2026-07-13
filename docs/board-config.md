@@ -194,13 +194,27 @@ the SoM preset's `topology.<id>` when omitted):
 
 | Field          | Notes                                                                                  |
 |----------------|----------------------------------------------------------------------------------------|
-| `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.                          |
-| `image`        | Yocto image recipe name (e.g. `alp-image-edge`).                                       |
+| `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.  For `os: yocto` an app-only slice, pair with `recipe:` -- `app:` is a source path, never a bitbake target. |
+| `image`        | Yocto image recipe name (e.g. `alp-image-edge`).  Takes priority over `app:`/`recipe:` when both are set. |
+| `recipe`       | Yocto bitbake recipe packaging this slice's `app:` (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice -- otherwise the plan blocks the slice (`yocto-recipe-missing`) instead of emitting an invalid `bitbake <path>`. |
 | `os`           | NOT an OS picker — the runtime is class-derived (M→Zephyr, A→Yocto). Only `off` (skip slice) or `baremetal` (rare) are settable; a cross-class OS is rejected. |
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
 | `libraries`    | Library opt-in list for this slice.                                                    |
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
-| `iot`          | Wi-Fi / MQTT / BLE / TLS toggles.                                                      |
+| `iot`          | Wi-Fi / MQTT / BLE / TLS toggles; emitted per OS and wireless provider.                |
+
+`cores.<id>.iot` is an emitted build surface, not a comment-only
+declaration.  On Zephyr, `wifi` / `ble` first resolve
+`metadata/e1m_modules/<SKU>.yaml` `on_module.wifi_ble`: AEN emits
+the exact CC3501E bridge backends, unknown native-radio providers
+emit generic Zephyr `wifi_mgmt` / BT-host gates, and Linux-owned
+Murata/CYW providers stay off Zephyr.  `mqtt` emits Zephyr's
+`mqtt_client` stack and `tls` emits the credential/TLS gates.  On
+Yocto, `wifi` / `ble` emit stable userland packages such as
+`wpa-supplicant`, `iw`, `wireless-regdb`, and `bluez5`; the
+BSP/machine layer remains responsible for provider-specific kernel
+modules and firmware.  `mqtt` / `tls` add the matching `alp-sdk`
+recipe `PACKAGECONFIG` tokens plus CA certificates.
 
 ### OS inference from core type
 
@@ -737,7 +751,25 @@ hidden:
 
 `scripts/alp_project.py` reads `board.yaml`, validates against the
 schema, resolves the SoM SKU + board presets, applies overrides,
-and emits one of three formats.  Common workflows below.
+and emits the requested build artifacts.  Common workflows below.
+
+### West extension -- validate, generate, and build
+
+The SDK ships first-class west extension commands via
+[`scripts/west-commands.yml`](../scripts/west-commands.yml).  The
+usual application build entry point is:
+
+```bash
+west alp-build -b <board> <app-dir>
+```
+
+`west alp-build` validates `<app-dir>/board.yaml`, emits the generated
+per-slice configuration and system manifest, then dispatches the
+underlying Zephyr / Yocto / baremetal build steps for the enabled
+cores.  Companion commands (`west alp-image`, `west alp-flash`,
+`west alp-clean`, `west alp-emit`, `west alp-size`, and
+`west alp-renode`) consume the same build state for bundle, flash,
+inspection, sizing, and simulation workflows.
 
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`
 
@@ -920,16 +952,13 @@ follow-up once the upstream SoM board files lock the gpio bank/index
 columns.  Encoders, cameras, and other non-bus device classes follow
 the same rule.
 
-### What the loader does NOT yet do (v0.4 follow-ups)
+### What the loader does NOT yet do
 
 - **Cross-validation against `metadata/socs/*.json`** -- the loader
   trusts the SKU preset's `silicon:` field; it doesn't yet
   validate that requested features (e.g. 16-bit ADC) match the
   SoC's documented caps.  The `<alp/soc_caps.h>` runtime check
   catches mismatches at `_open` time today.
-- **First-class `west` integration** -- planned as a custom
-  `west alp-build` command that wraps the configure + generate +
-  build sequence.
 
 ## Hardware revision tracking
 
@@ -970,7 +999,7 @@ the canonical math lives at
 
 ```
 metadata/
-├── sdk_version.yaml                            # SDK release version (currently "version: 0.6.0")
+├── sdk_version.yaml                            # SDK release version (currently "version: 0.9.0")
 ├── e1m_modules/
 │   ├── aen/hw-revisions.yaml                   # family-level revs (AEN family
 │   │                                            #  shares one PCB; SKUs differ
@@ -1075,6 +1104,27 @@ hand-edit in `prj.conf` / `local.conf` / sysbuild.conf,
 `board.yaml` carries a small set of structured blocks.  All
 optional; sensible defaults from the SoM family / SDK baseline
 apply when omitted.
+
+### Hardware-info EEPROM (`features.hw_info.eeprom:`)
+
+```yaml
+features:
+  hw_info:
+    eeprom:
+      bus: e1m_i2c0        # -> CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0
+      addr_7bit: 0x50      # CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT
+      offset: 0            # CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET
+```
+
+Project-wide.  This declares where the 128-byte
+`alp_hw_info_eeprom_t` manifest lives when an app needs to pin the
+EEPROM bus/address/offset explicitly.  The orchestrator emits the
+values into Zephyr `alp.conf` and projects them into
+`system-manifest.yaml` under `hw_info.eeprom`.
+
+`features:` is not a free-form pass-through.  Only typed feature
+blocks with emitter support are accepted; unsupported keys are schema
+errors so configuration cannot be silently ignored.
 
 ### Per-slice memory (`cores.<id>.memory:`)
 

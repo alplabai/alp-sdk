@@ -51,18 +51,17 @@
  *
  * ==== THE r2 HOST-IRQ CAVEAT (READ BEFORE USING INTERRUPTS) ========
  *
- * This HW rev wires the bridge as a CS-less 3-wire SPI link: SCLK + MOSI +
- * MISO, with NO chip-select and -- crucially -- NO host-IRQ line.  The
- * Alif is always the SPI master; the CC3501E is always the slave.  A slave
- * with no attention line CANNOT spontaneously tell the master "an edge
- * happened on a GPIO".  So:
+ * This HW rev uses hardware SS0 for SPI framing and a READY input for per-phase
+ * gating, but it still does not expose GPIO edge events as portable application
+ * callbacks.  The Alif is always the SPI master; the CC3501E is always the
+ * slave.  Without a dedicated async event delivery path, the slave cannot
+ * spontaneously tell the master "an edge happened on a GPIO".  So:
  *
  *   - cc3501e_gpio_set_interrupt() ARMS the edge on the CC3501E's own GPIO
  *     controller -- that part is real, it latches edges in the coprocessor.
- *   - but the async ALP_CC3501E_EVT_GPIO_INTERRUPT frame it would emit has
- *     no path back to the host until the r2 board adds a slave->master IRQ
- *     line.  Until then the host MUST POLL cc3501e_gpio_read() to observe a
- *     level change; the armed interrupt does not call you back.
+ *   - but the async ALP_CC3501E_EVT_GPIO_INTERRUPT frame is not a portable
+ *     callback path in this example.  The host must poll cc3501e_gpio_read() to
+ *     observe a level change; the armed interrupt does not call you back.
  *
  * The step below therefore only proves the ARM round-trips; do not build a
  * design that depends on EVT_GPIO_INTERRUPT delivery on this rev.
@@ -121,6 +120,32 @@
 #define DEMO_OP_TIMEOUT_MS 100u
 
 /*
+ * ==== WHY THIS EXAMPLE NEEDS A LIVENESS GATE (read before touching #708) ==
+ *
+ * cc3501e_bridge_bringup() -> cc3501e_reset() only does a BLIND boot-settle
+ * delay (see chips/cc3501e/cc3501e_core.c) -- it never exchanges a byte with
+ * the module, so it returns as soon as its own timer expires, NOT when the
+ * firmware is actually answering.  The --wifi --ble image is slow to arm its
+ * SPI slave: lwIP's tcpip_init() and the crypto/Board_init sequence run
+ * BEFORE transport_spi_init(), and the Puya cold-boot flash bug (see
+ * cc3501e_hard_reset()'s comment) sometimes needs a SECOND hard reset before
+ * the module answers at all.  Meanwhile each of the 8 gpio/cam ops below has
+ * only a DEMO_OP_TIMEOUT_MS (100 ms) budget -- ~0.9 s total for all 8 -- so
+ * without a gate they race the boot and ALL eight TIMEOUT before the slave
+ * is armed, even though the link comes up fine a second or two later.  (The
+ * bringup soak already has this "hard-reset again if one re-boot is not
+ * enough" retry -- cc3501e_core.c:119-121 -- this gate is the same idea
+ * applied here, mirroring aen-cc3501e-companion-tour's tour_ping().)
+ *
+ * The fix is NOT a bigger DEMO_OP_TIMEOUT_MS (that just slows down every
+ * op, including the ones that are genuinely broken) -- it is to not START
+ * the ops until a cheap, zero-payload PING actually round-trips.
+ */
+#define GPIO_PING_RETRIES 25u  /* poll-by-repeat budget per attempt, mirrors tour_ping() */
+#define GPIO_PING_GAP_MS  200u /* gap between PING attempts (5 s worst case per attempt) */
+#define GPIO_LINK_REBOOTS 3u   /* extra cc3501e_hard_reset() attempts if PING never lands */
+
+/*
  * Emit one bench-contract line and fold the result into the running
  * tally.  `ok` is the boolean a step computed from its alp_status_t; we
  * print the exact "GPIO_TEST: <step> PASS|FAIL" the bench script greps and
@@ -134,6 +159,46 @@ static void report(const char *step, bool ok, unsigned *pass, unsigned *fail)
 	} else {
 		(*fail)++;
 	}
+}
+
+/*
+ * Liveness gate -- see the "WHY" block above DEMO_OP_TIMEOUT_MS.  Spins a
+ * zero-payload PING up to GPIO_PING_RETRIES times (GPIO_PING_GAP_MS apart);
+ * PING is cheap (no worker, no radio) so this is a fast poll, not a slow
+ * one.  If a whole PING attempt never lands, cc3501e_hard_reset() gives the
+ * module a second boot (the Puya cold-boot workaround -- the first boot can
+ * simply fail to launch the vendor image) and the PING loop runs again, up
+ * to GPIO_LINK_REBOOTS times.  Returns true once a PING succeeds.
+ */
+static bool gpio_wait_for_link(cc3501e_t *fw)
+{
+	for (unsigned reboot = 0u; reboot <= GPIO_LINK_REBOOTS; ++reboot) {
+		for (unsigned i = 0u; i < GPIO_PING_RETRIES; ++i) {
+			if (cc3501e_ping(fw) == ALP_OK) {
+				printf("[cc3501e-gpio] link up (PING ok after %u) -- running gpio ops\n", i + 1u);
+				return true;
+			}
+			alp_delay_ms(GPIO_PING_GAP_MS);
+		}
+		/* A full PING budget elapsed with no reply -- the module may have
+		 * hit the Puya cold-boot bug (first boot never launches the vendor
+		 * image).  Give it one more re-boot with the rails kept up and try
+		 * again, unless we are already on the last allowed attempt. */
+		if (reboot < GPIO_LINK_REBOOTS) {
+			printf("[cc3501e-gpio] PING never answered after %u attempts -- issuing "
+			       "hard reset %u/%u and retrying\n",
+			       GPIO_PING_RETRIES,
+			       reboot + 1u,
+			       GPIO_LINK_REBOOTS);
+			(void)cc3501e_hard_reset(fw);
+		}
+	}
+	printf("[cc3501e-gpio] CC3501E never answered PING after %u hard reset(s) -- the gpio "
+	       "ops below will still run (and report FAIL) so the bench SUMMARY stays complete; "
+	       "check WIFI_EN power, the SPI1 pinmux, and that the --wifi --ble firmware is "
+	       "actually flashed\n",
+	       GPIO_LINK_REBOOTS);
+	return false;
 }
 
 int main(void)
@@ -168,11 +233,24 @@ int main(void)
 	       (s == ALP_ERR_NOSUPPORT) ? " (control pins not bound?)" : "");
 
 	/*
+	 * Liveness gate -- see #708.  cc3501e_bridge_bringup() only waits out a
+	 * BLIND boot-settle timer (no wire exchange), so it can return before
+	 * the --wifi --ble firmware has actually armed its SPI slave.  Do not
+	 * skip straight to the 8 gpio/cam ops (each has only a 100 ms budget):
+	 * confirm the link is live with a cheap PING first, retrying through
+	 * extra hard resets if needed.  We deliberately do NOT early-return on
+	 * total failure -- the bench script's grep contract requires all 8 step
+	 * lines plus the SUMMARY, so the ops still run below (and will FAIL,
+	 * correctly reporting a dead link instead of going silent).
+	 */
+	(void)gpio_wait_for_link(&fw);
+
+	/*
 	 * Step 1 -- configure the proxied pad as a push-pull OUTPUT with no
 	 * internal pull.  This is GPIO_CONFIGURE (0x50) over the bridge: the
 	 * host hands the CC3501E the pad index + direction + pull and the
-	 * firmware programs its own GPIO controller.  ALP_OK = the firmware
-	 * accepted the config and answered in lockstep.
+		 * firmware programs its own GPIO controller.  ALP_OK = the firmware
+		 * accepted the config and answered over the hardware-framed bridge.
 	 */
 	s = cc3501e_gpio_configure(
 	    &fw, DEMO_PAD, ALP_CC3501E_GPIO_DIR_OUTPUT, ALP_CC3501E_GPIO_PULL_NONE, DEMO_OP_TIMEOUT_MS);
@@ -237,15 +315,13 @@ int main(void)
 	 * Step 8 -- ARM a RISING-edge interrupt on the proxied pad.
 	 * GPIO_SET_INTERRUPT (0x53), edge=RISING, enabled=true.
 	 *
-	 * IMPORTANT (see the r2 caveat at the top): this ONLY arms the edge on
-	 * the CC3501E's GPIO controller.  On this CS-less, no-host-IRQ rev the
-	 * coprocessor has no way to notify the Alif when the edge fires -- the
-	 * async EVT_GPIO_INTERRUPT frame has no slave->master attention line.
-	 * So a PASS here means "the firmware accepted the arm request", NOT
-	 * "you will get an interrupt callback".  To observe the edge today you
-	 * must POLL cc3501e_gpio_read() in a loop; spontaneous delivery waits
-	 * for the r2 host-IRQ line.  (EDGE_BOTH is unsupported on the CC35xx
-	 * controller -- arm RISING or FALLING, never both.)
+	 * IMPORTANT (see the caveat at the top): this ONLY arms the edge on
+	 * the CC3501E's GPIO controller.  The async EVT_GPIO_INTERRUPT frame is
+	 * not a portable callback path in this example.  A PASS here means "the
+	 * firmware accepted the arm request", NOT "you will get an interrupt
+	 * callback".  To observe the edge today you must POLL cc3501e_gpio_read()
+	 * in a loop.  (EDGE_BOTH is unsupported on the CC35xx controller -- arm
+	 * RISING or FALLING, never both.)
 	 */
 	s = cc3501e_gpio_set_interrupt(
 	    &fw, DEMO_PAD, ALP_CC3501E_GPIO_EDGE_RISING, true, DEMO_OP_TIMEOUT_MS);

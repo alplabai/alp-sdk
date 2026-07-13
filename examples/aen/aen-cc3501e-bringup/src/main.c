@@ -29,12 +29,14 @@
  *   SPI1.SCK     P14_6          out         GPIO_27  (CC35 SPI0 slave)
  *   SPI1.MOSI    P14_5          out         GPIO_28
  *   SPI1.MISO    P14_4          in          GPIO_29
+ *   SPI1.SS0     P14_7          out         CC35 SPI0 CSN
+ *   READY        P2_6           in          GPIO_17
  *
- * The current E1M-AEN rev wires only SCLK/MOSI/MISO -- NO chip-select and
- * NO host-IRQ line (both arrive next rev).  The link is therefore clocked
- * as a sequence of deterministic, fixed-count transfers in lockstep; the
- * framing lives in the host driver (chips/cc3501e/cc3501e.c) and its
- * mirror on the firmware side (firmware/cc3501e/hal/ti/transport_hw_ti_spi.c).
+ * The current E1M-AEN rev uses the dwc-ssi hardware SS0 chip-select on
+ * P14_7 and a READY input on P2_6.  Each protocol phase is framed by SS0;
+ * READY tells the host when the slave has re-armed for the next phase.  The
+ * framing lives in the host driver (chips/cc3501e/cc3501e.c) and its mirror
+ * on the firmware side (firmware/cc3501e/hal/ti/transport_hw_ti_spi.c).
  * This app just opens the bus and calls the driver.
  *
  * This file is ~50 % comment by design: examples are documentation for
@@ -75,12 +77,12 @@
 
 /*
  * 8 MHz for first bring-up.  A slave cannot pace SCK, so the safe move is
- * to start slow and raise the clock only once the lockstep is proven on
- * silicon.  (The host driver's settle gap before each reply read is sized
- * for the v0.1 instant-dispatch META path; slow Wi-Fi/BLE replies need the
- * next-rev host-IRQ line, not a faster clock.)
+ * to start slow and raise the clock only once the hardware-SS0 phase
+ * framing is proven on silicon.  READY gates reply phases; slow Wi-Fi/BLE
+ * commands still use the worker/poll model until HOST_IRQ async delivery
+ * lands.
  */
-#define CC3501E_SPI_FREQ_HZ                                                                        \
+#define CC3501E_SPI_FREQ_HZ \
 	1000000u /* 1 MHz: SILICON-VALIDATED cold-boot value.  At 8 MHz with the
                                       * Alif SSI rx_delay=0 the master sampled MISO before the CC35's bit
                                       * propagated back over the long on-SoM traces + the crossed-data
@@ -190,7 +192,8 @@ volatile cc3501e_witness_t g_cc3501e_witness __attribute__((used));
 
 /* PING (META opcode 0x00) uses the public cc3501e_ping() from <alp/chips/cc3501e.h>
  * -- a bare liveness probe: ALP_OK means the coprocessor parsed the frame and
- * answered in lockstep. (This example previously carried a local copy; it now
+ * answered over the hardware-framed bridge. (This example previously carried
+ * a local copy; it now
  * uses the SDK's.) */
 
 /* Pretty-print the extended diagnostics block (META opcode 0x04).
@@ -341,55 +344,135 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
  *
  * WHAT A REAL DEPLOYMENT PASSES: `image` must be a genuine SIGNED GPE vendor
  * image (manifest + body) built for the CC3501E -- the same artefact
- * firmware/cc3501e/ produces.  The blob below is a small INERT pattern: it
- * exercises the host encode/stream/framing path end-to-end but is NOT a
- * valid image, so on real silicon the firmware's psa_fwu_start rejects it at
- * FINISH (an expected, safe failure -- nothing gets staged).  Swap in a real
- * signed image on the bench to stage a genuine update.
+ * firmware/cc3501e/ produces.  This demo has TWO payload modes:
  *
- * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md): the receive ->
- * RAM-stage -> psa_fwu install-to-STAGED pipeline is silicon-validated, but
- * the final COLD swap-boot is gated by the vendor-SBL cold-boot issue on the
- * current mis-activated bench units.  So this demo proves the streaming +
- * framing + state machine; it does not (yet) prove a live A/B swap on those
- * units.  Opt in with -DEXTRA_CFLAGS=-DCC3501E_OTA_DEMO; left OFF by default
- * so a normal bring-up run never kicks a (disruptive) flash cycle.
+ *   default            -- a small INERT pattern.  It exercises the host
+ *                         encode/stream/framing path end-to-end but is NOT a
+ *                         valid image, so on real silicon the firmware's
+ *                         psa_fwu_start rejects it at FINISH (an expected, safe
+ *                         failure -- nothing gets staged).  Proves the wire
+ *                         path only.
+ *   -DCC3501E_OTA_REAL -- streams the genuine `cc3501e_ota_candidate[]` (a
+ *                         signed GPE vendor image built for the CC3501E, at a
+ *                         GPE version ABOVE the running primary so it is a
+ *                         FORWARD update).  psa_fwu_start ACCEPTS it, FINISH
+ *                         reaches STAGED (`state`=2), and the CC35's own
+ *                         `psa_fwu_request_reboot()` swaps it in.  (A DOWNGRADE
+ *                         candidate is refused at install, `state`=3/ERROR --
+ *                         monotonic anti-rollback.)  Requires the CMake side to
+ *                         compile the candidate source -- see CMakeLists.txt.
+ *
+ * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md §5): the FULL cycle is
+ * silicon-proven on the E1M-AEN801 EVK (2026-07-10) -- stream -> STAGED -> the
+ * firmware's own swap-reboot (the bridge drops, then returns) -> the swapped
+ * image self-accepts and PERSISTS across a true cold POR.  The swap is driven
+ * by the CC35's `psa_fwu_request_reboot()` after FINISH, NOT a host cold POR.
+ * `OTA_STATUS reserved[0]` (printed below as `reboot_rc`) surfaces the swap
+ * result: 0 = success, non-zero = refused (e.g. a downgrade).  Opt in at build
+ * time with `-DCC3501E_OTA_DEMO=ON` (inert blob) or `-DCC3501E_OTA_REAL=ON`
+ * (genuine forward candidate); left OFF by default so a normal bring-up run
+ * never kicks a (disruptive) flash cycle.
  */
 #ifdef CC3501E_OTA_DEMO
 #define CC3501E_OTA_DEMO_TIMEOUT_MS 20000u
+#ifdef CC3501E_OTA_PROMOTE
+/*
+ * Promote (unjam) an already-committed pending image.  The over-bridge install
+ * leaves the image STAGED and relies on the CC35's OWN `psa_fwu_request_reboot()`
+ * (armed at FINISH) to swap it.  An image left pending by a bare reset (which
+ * carries no swap request) jams the slot: a fresh `cc3501e_ota_update`
+ * short-circuits on the occupied slot and can never re-arm the reboot.
+ * `cc3501e_ota_promote()` requests the swap-reboot for that committed image.
+ * Build with -DCC3501E_OTA_PROMOTE=ON to swap-boot an image a prior
+ * -DCC3501E_OTA_REAL run left STAGED-but-unpromoted.
+ */
+static void cc3501e_demo_ota_promote(cc3501e_t *fw)
+{
+	printf("[cc3501e-bringup] OTA: promoting the pending image (cc3501e_ota_promote)...\n");
+	alp_status_t s = cc3501e_ota_promote(fw, CC3501E_OTA_DEMO_TIMEOUT_MS);
+	if (s == ALP_OK) {
+		printf("[cc3501e-bringup] OTA promote acked -- the CC35 swaps+boots the pending "
+		       "slot; the bridge drops during its reboot, then GET_VERSION should report "
+		       "the new image\n");
+	} else if (s == ALP_ERR_NOT_READY) {
+		printf("[cc3501e-bringup] OTA promote -> NOT_READY (no PSA-FWU in this build)\n");
+	} else {
+		printf("[cc3501e-bringup] OTA promote -> %d\n", (int)s);
+	}
+}
+#endif /* CC3501E_OTA_PROMOTE */
+
 static void cc3501e_demo_ota(cc3501e_t *fw)
 {
+#ifdef CC3501E_OTA_PROMOTE
+	/* Unjam/promote mode: do NOT stream -- request the swap for an image a prior
+	 * run left STAGED-but-unpromoted (a fresh stream would short-circuit). */
+	cc3501e_demo_ota_promote(fw);
+	return;
+#endif
+#ifdef CC3501E_OTA_REAL
+	/* Genuine signed GPE vendor image -- the plain radio-free bridge signed at a
+	 * version HIGHER than the flashed primary (a FORWARD update), so psa_fwu
+	 * accepts it (a downgrade is refused at install).  FINISH reaches a true
+	 * STAGED and the CC35's own psa_fwu_request_reboot() swaps it in. */
+	extern const unsigned char cc3501e_ota_candidate[];
+	extern const unsigned int  cc3501e_ota_candidate_len;
+	const uint8_t             *image      = cc3501e_ota_candidate;
+	const size_t               image_len  = (size_t)cc3501e_ota_candidate_len;
+	const bool                 real_image = true;
+#else
 	/* Illustrative inert blob (NOT a signed image -- see the note above). */
-	static uint8_t image[1024];
-	for (size_t i = 0; i < sizeof(image); ++i) {
-		image[i] = (uint8_t)(i * 31u + 7u);
+	static uint8_t inert[1024];
+	for (size_t i = 0; i < sizeof(inert); ++i) {
+		inert[i] = (uint8_t)(i * 31u + 7u);
 	}
+	const uint8_t *image      = inert;
+	const size_t   image_len  = sizeof(inert);
+	const bool     real_image = false;
+#endif
 
-	printf("[cc3501e-bringup] OTA: streaming a %u B demo blob via cc3501e_ota_update...\n",
-	       (unsigned)sizeof(image));
+	printf("[cc3501e-bringup] OTA: streaming a %u B %s image via cc3501e_ota_update...\n",
+	       (unsigned)image_len,
+	       real_image ? "SIGNED candidate" : "inert demo");
 
-	alp_status_t s = cc3501e_ota_update(fw, image, sizeof(image), CC3501E_OTA_DEMO_TIMEOUT_MS);
+	alp_status_t s = cc3501e_ota_update(fw, image, image_len, CC3501E_OTA_DEMO_TIMEOUT_MS);
 
 	/* Read back the session state regardless of the update result -- this is
 	 * the field-diagnostic call (`alp companion ota status` uses the same). */
 	alp_cc3501e_ota_status_t st = { 0 };
 	if (cc3501e_ota_status(fw, &st, CC3501E_OTA_DEMO_TIMEOUT_MS) == ALP_OK) {
-		printf("[cc3501e-bringup] OTA status: state=%u written=%u/%u B\n",
+		/* state: 1=WRITING, 2=STAGED (FINISH ok), 3=ERROR (FINISH rejected the
+		 * image -- e.g. anti-rollback on a downgrade).  reserved[0] = the last
+		 * swap-reboot rc: 0 = success/none, non-zero = the swap was REFUSED. */
+		printf("[cc3501e-bringup] OTA status: state=%u written=%u/%u B reboot_rc=%d\n",
 		       (unsigned)st.state,
 		       (unsigned)st.bytes_written,
-		       (unsigned)st.total_len);
+		       (unsigned)st.total_len,
+		       (int)(int8_t)st.reserved[0]);
 	}
 
 	if (s == ALP_OK) {
-		printf("[cc3501e-bringup] OTA -> STAGED; the CC35 will swap+boot the new "
-		       "slot on its next reboot (production path)\n");
+		printf("[cc3501e-bringup] OTA -> STAGED (image accepted by psa_fwu); the CC35's "
+		       "own psa_fwu_request_reboot() swaps it in -- the bridge drops, then "
+		       "reboots into the new image (a forward image; a radio-free candidate "
+		       "makes WIFI_SCAN go NOT_READY, proving the swap)\n");
 	} else if (s == ALP_ERR_NOT_READY) {
 		printf("[cc3501e-bringup] OTA -> NOT_READY (no PSA-FWU in this CC3501E image) "
 		       "-- expected on a non-OTA firmware build\n");
+	} else if (real_image) {
+		/* A genuine FORWARD image should reach STAGED; a non-OK here is a real fault.
+		 * state=3 (ERROR) with a downgrade image means anti-rollback refused it at
+		 * install -- use a candidate version above the primary.  Reset the session. */
+		printf("[cc3501e-bringup] OTA -> %d (signed image did NOT stage; state=%u -- if "
+		       "ERROR(3), the candidate is likely a downgrade the SBL refused); "
+		       "aborting the session\n",
+		       (int)s,
+		       (unsigned)st.state);
+		(void)cc3501e_ota_abort(fw, CC3501E_OTA_DEMO_TIMEOUT_MS);
 	} else {
 		/* An inert blob fails at FINISH (image validation) -- the host stream +
-		 * framing still round-tripped, which is what this demo proves.  Reset the
-		 * half-open session so the slot is clean for a real image. */
+		 * framing still round-tripped, which is what the default mode proves.  Reset
+		 * the half-open session so the slot is clean for a real image. */
 		printf("[cc3501e-bringup] OTA -> %d (inert blob rejected at FINISH as expected); "
 		       "aborting the session\n",
 		       (int)s);
@@ -434,7 +517,8 @@ int main(void)
 	 * reset() already waited out the boot budget, so the first PING
 	 * usually lands; the retry loop just absorbs any residual ramp/boot
 	 * jitter.  A serviced PING proves the firmware parsed a frame and
-	 * staged its reply in lockstep -- the core thing this bring-up checks.
+	 * staged its reply over the hardware-framed bridge -- the core thing this
+	 * bring-up checks.
 	 */
 	g_cc3501e_witness.phase = CC3501E_PHASE_PING;
 	bool up                 = false;
@@ -490,11 +574,10 @@ int main(void)
 	 * if the link never came up (the helpers just time out and record it).
 	 */
 	/* DEFERRED: do NOT read the radio (GET_MAC -> Wlan_Start) here -- that fires
-	 * the radio bring-up before the PING link is established, and Wlan_Start
-	 * disrupts the CS-less link before it has settled (cold first-contact never
-	 * recovers).  The soak below reads the MAC only AFTER the link is solidly up
-	 * (ping_ok >= threshold) -- "wait until ready to read".  Kept the function for
-	 * the scan/connect path, gated the same way later. */
+	 * the radio bring-up before the bridge is proven alive.  The soak below reads
+	 * the MAC only AFTER the link is solidly up (ping_ok >= threshold) -- "wait
+	 * until ready to read".  Kept the function for the scan/connect path, gated
+	 * the same way later. */
 	(void)cc3501e_wifi_probe;
 
 	/*
@@ -557,8 +640,8 @@ int main(void)
 
 #ifdef CC3501E_OTA_DEMO
 		/* One-shot OTA demo, run only once the link is solidly up (same
-		 * ping_ok discipline as the DMA bench): OTA's FINISH does a flash burst
-		 * that disrupts the CS-less link, so gate it behind a stable link. */
+		 * ping_ok discipline as the DMA bench): OTA's FINISH does a flash burst,
+		 * so gate it behind a stable bridge. */
 		if (!ota_done && g_cc3501e_witness.ping_ok >= 20u) {
 			ota_done = true;
 			cc3501e_demo_ota(&fw);
@@ -574,10 +657,9 @@ int main(void)
 		}
 		printf("[cc3501e-bringup] soak PING #%u -> %d\n", i, (int)s);
 
-		/* Once the link is aligned (PING ok), keep retrying GET_MAC until it
-		 * lands -- the boot-time probe can run during the CS-less cold
-		 * first-contact misalignment window; retrying here lands the
-		 * worker-routed Wi-Fi identity read end-to-end on the stable link. */
+		/* Once the link is alive (PING ok), keep retrying GET_MAC until it
+		 * lands -- retrying here lands the worker-routed Wi-Fi identity read
+		 * end-to-end on the stable link. */
 		if (g_cc3501e_witness.mac_ok == 0u && s == ALP_OK && g_cc3501e_witness.ping_ok >= 20u) {
 			uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
 			alp_status_t ms              = cc3501e_wifi_get_mac(&fw, mac, CC3501E_MAC_TIMEOUT_MS);

@@ -135,3 +135,4 @@ meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpd
 # drops next to an example from ever being committed to the public repo.
 ensemble_vela.ini
 **/ensemble_vela.ini
+firmware/cc3501e/hal/ti/cc3501e_ota_candidate.c

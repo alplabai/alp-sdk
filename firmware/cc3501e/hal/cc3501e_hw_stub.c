@@ -129,8 +129,11 @@ int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_wifi_connect_sta(
-    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
+int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
+                                uint8_t        ssid_len,
+                                const uint8_t *psk,
+                                uint8_t        psk_len,
+                                uint8_t        security)
 {
 	(void)ssid;
 	(void)ssid_len;
@@ -145,8 +148,11 @@ int cc3501e_hw_wifi_disconnect(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_wifi_ap_start(
-    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security)
+int cc3501e_hw_wifi_ap_start(const uint8_t *ssid,
+                             uint8_t        ssid_len,
+                             const uint8_t *psk,
+                             uint8_t        psk_len,
+                             uint8_t        security)
 {
 	(void)ssid;
 	(void)ssid_len;
@@ -209,8 +215,11 @@ int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, cons
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_sock_send(
-    uint16_t handle, uint8_t flags, const uint8_t *data, uint16_t data_len, uint16_t *sent_out)
+int cc3501e_hw_sock_send(uint16_t       handle,
+                         uint8_t        flags,
+                         const uint8_t *data,
+                         uint16_t       data_len,
+                         uint16_t      *sent_out)
 {
 	(void)handle;
 	(void)flags;
@@ -372,6 +381,16 @@ int cc3501e_hw_ota_finish(void)
 int cc3501e_hw_ota_abort(void)
 {
 	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int cc3501e_hw_ota_promote(void)
+{
+	return CC3501E_HW_ERR_NOTIMPL;
+}
+
+int8_t cc3501e_hw_ota_reboot_rc(void)
+{
+	return 0;
 }
 
 int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)

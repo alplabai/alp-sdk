@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  alp.status_strings.runtime:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - status
+      - unit
+
+  alp.status_strings.no_descriptions:
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_no_descriptions.conf"
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - status
+      - unit

@@ -200,7 +200,7 @@ The `feedback_portable_peripheral_api` memory tightens: app code MUST go through
 
 ### Mechanism
 
-Pure-software backends register at `priority = 0` (lowest) with `silicon_ref = "*"` (wildcard). The selector treats `"*"` as fall-through: considered only when no exact-match backend exists.
+Pure-software backends register at `priority = 0` (lowest) with `silicon_ref = "*"` (wildcard). The implemented selector does not reserve `"*"` for a last-resort pass: exact and wildcard rows both enter the same priority-first ranking. A wildcard therefore acts as fallback only because its priority is lower than the exact rows; at equal priority, an exact `silicon_ref` match wins over `"*"`.
 
 ### File layout
 

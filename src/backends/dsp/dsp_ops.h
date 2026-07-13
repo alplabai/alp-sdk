@@ -58,12 +58,24 @@ struct alp_dsp_ops {
 	                              int16_t                 *out_mv,
 	                              size_t                   out_cap,
 	                              size_t                  *got);
+	alp_status_t (*apply_samples_f32)(alp_dsp_backend_state_t *state,
+	                                  const float             *in,
+	                                  size_t                   in_n,
+	                                  float                   *out,
+	                                  size_t                   out_cap,
+	                                  size_t                  *got);
 	alp_status_t (*apply_bins)(alp_dsp_backend_state_t *state,
 	                           const int16_t           *in_mv,
 	                           size_t                   in_n,
 	                           float                   *out_bins,
 	                           size_t                   out_cap,
 	                           size_t                  *got);
+	alp_status_t (*apply_bins_f32)(alp_dsp_backend_state_t *state,
+	                               const float             *in,
+	                               size_t                   in_n,
+	                               float                   *out_bins,
+	                               size_t                   out_cap,
+	                               size_t                  *got);
 	void (*close)(alp_dsp_backend_state_t *state);
 };
 
@@ -75,7 +87,14 @@ struct alp_dsp_chain {
 	alp_dsp_backend_state_t state;
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
-	bool                    in_use;
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close, issue #629) -- placed before in_use so the atomic-
+	 * claim zeroing in the dispatcher (memset up to
+	 * offsetof(..., in_use)) resets both on every fresh claim. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 #endif /* ALP_BACKENDS_DSP_OPS_H */

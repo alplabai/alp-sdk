@@ -32,16 +32,25 @@
 ALP_BACKEND_DEFINE_CLASS(update_log);
 ALP_BACKEND_ANCHOR(update_log);
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_slot_claim.h"
+#include "alp_z_last_error.h"
 
 static struct alp_update_log g_log;
 
-alp_update_log_t *alp_update_log_open(void)
-{
-	alp_z_clear_last_error();
-	if (g_log.in_use) return &g_log;
+/* Dispatcher-local intermediate lifecycle state (issue #629). The generic
+ * guard in alp_slot_claim.h models UNOPENED/OPEN/CLOSING; the update_log
+ * singleton adds OPENING to serialize concurrent FIRST opens -- exactly one
+ * caller CASes UNOPENED->OPENING and runs the ranked backend walk, while
+ * racing opens spin until it resolves to OPEN (return the singleton) or back
+ * to UNOPENED (initializer failed -> a spinner retries as the initializer).
+ * The value is distinct from LC_UNOPENED(0)/OPEN(1)/CLOSING(2). */
+#define UL_LC_OPENING 3u
 
+/* Run the ranked backend walk and publish the chosen ops into g_log. Caller
+ * must hold the OPENING election. Returns ALP_OK on success (g_log populated),
+ * else the failure status. */
+static alp_status_t _elect_backend(void)
+{
 	/* Ranked walk with open-time fall-through (issues #111, #239): try the
 	 * top backend, and if it declines this boot with ALP_ERR_NOSUPPORT
 	 * (e.g. the HW_ENFORCED TF-M tier before it is provisioned) drop to the
@@ -63,22 +72,55 @@ alp_update_log_t *alp_update_log_open(void)
 #endif
 				g_log.ops       = ops;
 				g_log.assurance = ops->assurance;
-				g_log.in_use    = true;
-				return &g_log;
+				return ALP_OK;
 			}
 			if (rc != ALP_ERR_NOSUPPORT) break;
 		}
 		be = alp_backend_select_next("update_log", ALP_SOC_REF_STR, be);
 	}
-	alp_z_set_last_error(rc);
-	return NULL;
+	return rc;
+}
+
+alp_update_log_t *alp_update_log_open(void)
+{
+	alp_z_clear_last_error();
+
+	/* Idempotent singleton open, made race-safe (issue #629): the pre-fix
+	 * `if (g_log.in_use) ...; g_log.in_use = true;` let two racing first-
+	 * opens both run the backend walk and double-init g_log. Now exactly
+	 * one caller wins the UNOPENED->OPENING election; the rest observe the
+	 * outcome. */
+	for (;;) {
+		uint8_t s = alp_lifecycle_get(&g_log.lifecycle);
+		if (s == ALP_HANDLE_LC_OPEN) {
+			return &g_log; /* already initialised */
+		}
+		if (s == ALP_HANDLE_LC_UNOPENED) {
+			if (!alp_lifecycle_cas(&g_log.lifecycle, ALP_HANDLE_LC_UNOPENED, UL_LC_OPENING)) {
+				continue; /* lost the election; re-observe */
+			}
+			/* Elected initializer. */
+			alp_status_t rc = _elect_backend();
+			if (rc == ALP_OK) {
+				alp_lifecycle_set(&g_log.lifecycle, ALP_HANDLE_LC_OPEN);
+				return &g_log;
+			}
+			alp_z_set_last_error(rc);
+			alp_lifecycle_set(&g_log.lifecycle, ALP_HANDLE_LC_UNOPENED);
+			return NULL;
+		}
+		/* OPENING or CLOSING in flight: spin until it resolves, then loop. */
+	}
 }
 
 alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_entry_t *entry)
 {
-	if (log == NULL || !log->in_use || entry == NULL) return ALP_ERR_INVAL;
-	if (log->ops->append == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-	return log->ops->append(entry);
+	if (log == NULL || entry == NULL) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
+	alp_status_t rc =
+	    (log->ops->append == NULL) ? ALP_ERR_NOT_IMPLEMENTED : log->ops->append(entry);
+	alp_handle_op_leave(&log->active_ops);
+	return rc;
 }
 
 alp_status_t alp_update_log_entry_from_boot_metadata(alp_update_log_entry_t *entry_out,
@@ -98,38 +140,54 @@ alp_status_t alp_update_log_entry_from_boot_metadata(alp_update_log_entry_t *ent
 
 alp_status_t alp_update_log_append_boot(alp_update_log_t *log, uint64_t timestamp)
 {
-	if (log == NULL || !log->in_use) return ALP_ERR_INVAL;
-	if (log->ops->append == NULL) return ALP_ERR_NOT_IMPLEMENTED;
+	if (log == NULL) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
 
-	alp_update_log_entry_t entry = { 0 };
-	alp_status_t           rc    = alp_update_log_entry_from_boot_metadata(&entry, timestamp);
-	if (rc != ALP_OK) return rc;
-
-	return log->ops->append(&entry);
+	alp_status_t rc;
+	if (log->ops->append == NULL) {
+		rc = ALP_ERR_NOT_IMPLEMENTED;
+	} else {
+		alp_update_log_entry_t entry = { 0 };
+		rc                           = alp_update_log_entry_from_boot_metadata(&entry, timestamp);
+		if (rc == ALP_OK) {
+			rc = log->ops->append(&entry);
+		}
+	}
+	alp_handle_op_leave(&log->active_ops);
+	return rc;
 }
 
 alp_status_t alp_update_log_verify(alp_update_log_t         *log,
                                    alp_update_log_verdict_t *verdict_out,
                                    uint64_t                 *bad_seq_out)
 {
-	if (log == NULL || !log->in_use || verdict_out == NULL) return ALP_ERR_INVAL;
-	if (log->ops->verify == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-	return log->ops->verify(verdict_out, bad_seq_out);
+	if (log == NULL || verdict_out == NULL) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
+	alp_status_t rc = (log->ops->verify == NULL) ? ALP_ERR_NOT_IMPLEMENTED
+	                                             : log->ops->verify(verdict_out, bad_seq_out);
+	alp_handle_op_leave(&log->active_ops);
+	return rc;
 }
 
 alp_status_t alp_update_log_count(alp_update_log_t *log, uint64_t *count_out)
 {
-	if (log == NULL || !log->in_use || count_out == NULL) return ALP_ERR_INVAL;
-	if (log->ops->count == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-	return log->ops->count(count_out);
+	if (log == NULL || count_out == NULL) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
+	alp_status_t rc =
+	    (log->ops->count == NULL) ? ALP_ERR_NOT_IMPLEMENTED : log->ops->count(count_out);
+	alp_handle_op_leave(&log->active_ops);
+	return rc;
 }
 
 alp_status_t
 alp_update_log_get(alp_update_log_t *log, uint64_t seq, alp_update_log_entry_t *entry_out)
 {
-	if (log == NULL || !log->in_use || entry_out == NULL) return ALP_ERR_INVAL;
-	if (log->ops->get == NULL) return ALP_ERR_NOT_IMPLEMENTED;
-	return log->ops->get(seq, entry_out);
+	if (log == NULL || entry_out == NULL) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
+	alp_status_t rc =
+	    (log->ops->get == NULL) ? ALP_ERR_NOT_IMPLEMENTED : log->ops->get(seq, entry_out);
+	alp_handle_op_leave(&log->active_ops);
+	return rc;
 }
 
 alp_update_log_assurance_t alp_update_log_assurance(const alp_update_log_t *log)
@@ -139,5 +197,11 @@ alp_update_log_assurance_t alp_update_log_assurance(const alp_update_log_t *log)
 
 void alp_update_log_close(alp_update_log_t *log)
 {
-	if (log != NULL) log->in_use = false;
+	if (log == NULL) return;
+	/* Drain in-flight ops before dropping the singleton back to UNOPENED so
+	 * a fresh open() re-elects a backend (issue #629). Idempotent: a second
+	 * close, or a close racing an in-flight open, no-ops. */
+	if (!alp_handle_begin_close(&log->lifecycle, &log->active_ops)) return;
+	log->ops = NULL;
+	alp_lifecycle_set(&log->lifecycle, ALP_HANDLE_LC_UNOPENED);
 }

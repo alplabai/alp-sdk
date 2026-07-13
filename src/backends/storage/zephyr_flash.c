@@ -100,7 +100,7 @@ static alp_status_t z_read(alp_storage_backend_state_t *st, uint64_t offset, voi
 {
 	const struct flash_area *fa = (const struct flash_area *)st->dev;
 	if (fa == NULL) return ALP_ERR_NOT_READY;
-	if (offset + len > fa->fa_size) return ALP_ERR_OUT_OF_RANGE;
+	if (!alp_storage_range_in_capacity(offset, len, fa->fa_size)) return ALP_ERR_OUT_OF_RANGE;
 	int err = flash_area_read(fa, (off_t)offset, data, len);
 	return _errno_to_alp(err);
 }
@@ -110,7 +110,7 @@ z_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data, size
 {
 	const struct flash_area *fa = (const struct flash_area *)st->dev;
 	if (fa == NULL) return ALP_ERR_NOT_READY;
-	if (offset + len > fa->fa_size) return ALP_ERR_OUT_OF_RANGE;
+	if (!alp_storage_range_in_capacity(offset, len, fa->fa_size)) return ALP_ERR_OUT_OF_RANGE;
 	int err = flash_area_write(fa, (off_t)offset, data, len);
 	return _errno_to_alp(err);
 }
@@ -119,7 +119,7 @@ static alp_status_t z_erase(alp_storage_backend_state_t *st, uint64_t offset, ui
 {
 	const struct flash_area *fa = (const struct flash_area *)st->dev;
 	if (fa == NULL) return ALP_ERR_NOT_READY;
-	if (offset + len > fa->fa_size) return ALP_ERR_OUT_OF_RANGE;
+	if (!alp_storage_range_in_capacity(offset, len, fa->fa_size)) return ALP_ERR_OUT_OF_RANGE;
 	int err = flash_area_erase(fa, (off_t)offset, (size_t)len);
 	return _errno_to_alp(err);
 }

@@ -270,6 +270,8 @@ so no Zephyr/Yocto-specific cleaners are needed.  Identical to
 alp build && alp renode                      # headless smoke boot
 alp renode --expect "[hello] done"           # exit 0 when seen, 1 if not
 alp renode --log out.log --timeout 60
+alp renode --sim-mode --board E1M-V2N101 \   # studio hardware simulator
+    --image-bundle ./bundle                  #   (issue #674)
 ```
 
 Boots the built system manifest's Zephyr slice in the
@@ -280,6 +282,36 @@ to `--log` (default `build/renode.log`).  Requires the `renode` binary
 on PATH -- exits non-zero with install guidance when absent, never a
 silent pass.  Identical to `west alp-renode`.
 
+**`--sim-mode`** (studio hardware-simulator contract, issue #674): instead
+of the smoke boot, boots the `--image-bundle` firmware and exposes it to
+alp-studio's sim gateway.  It writes `<bundle>/sim-descriptor.json` (an
+`@alp/sim-protocol` `SimDescriptorSchema` document), streams the firmware
+console over a TCP socket, and serves a line-oriented control socket
+(`sysbus ReadBytes`/`WriteBytes` + the descriptor's peripheral inject
+templates) until `--timeout`.  First target: **E1M-V2N101** (RZ/V2N
+M33-SM, tmp112 over I2C).
+
+The M33-SM is a **headless** core — no hardware UART console (the board
+sets `CONFIG_CONSOLE=n`; the console is the A55's).  So `--sim-mode`
+observes its console the way alp-sdk does on the bench: it polls the
+firmware's Zephyr `ram_console_buf` RAM ring out of SRAM and streams it to
+the UART socket.  Build a headless image with the `ram_console` backend
+(see `tests/renode/v2n_m33_ramconsole.conf`) for a console to stream; a
+truly silent firmware just leaves the UART socket quiet.  The faithful
+`renesas_rzv2n` Renode model boots the real V2N M33 image (SRAM at
+`0x08003000`, a coarse CPG stub for the FSP clock/reset handshakes, and
+`iic8`/tmp112); no custom hardware-UART model is involved.
+
+Also supported: **E1M-AEN801** (Alif Ensemble E8, Cortex-M55-HP) — which
+*does* have a wired **UART5 console**, so its board profile streams that
+real UART over a Renode socket terminal (not `ram_console`). Two AEN
+specifics: it needs Renode **≥ 1.16.1** (Cortex-M55 + Helium support), and
+the sim image must be **ITCM-linked** (`chosen zephyr,flash = &itcm`, see
+`tests/renode/aen_m55_itcm_run.overlay`) so its vector table sits at the
+low ITCM address `0x0` — Renode 1.16.1 mis-executes a vector table placed
+at the high MRAM base `0x80000000`. The `alif_ensemble_e8` model maps ITCM
+at `0x0` and stubs the Alif CGU/EXPMST clock registers.
+
 | Option | Meaning |
 |---|---|
 | `APP_PATH` (argument, optional) | App directory (default: walk up from cwd) |
@@ -288,6 +320,8 @@ silent pass.  Identical to `west alp-renode`.
 | `--log` | Tee the console output to this file |
 | `--timeout` | Wall-clock cap in seconds (default 120) |
 | `--expect` | Stop early (exit 0) when this substring appears; exit 1 if it never does |
+| `--image-bundle` | Directory of pre-built artefacts; the firmware ELF source for `--sim-mode` |
+| `--sim-mode` | Studio hardware-simulator mode: emit `sim-descriptor.json` + serve the UART/control sockets |
 
 ### `alp emit` -- print one generated artefact (no build)
 
@@ -311,6 +345,7 @@ implementation that owns it (never a fork):
 | `cmake-args` | Per-core `-D` CMake argument list | `alp_project.py` |
 | `yocto-conf` | Per-core `local.conf` fragment | `alp_project.py` |
 | `dts-overlay` | Board DTS overlay (bus aliases + pin array) | `alp_project.py` |
+| `native-sim-overlay` | native_sim overlay: `alp,pin-array` on `zephyr,gpio-emul` | `alp_project.py` |
 | `hw-info-h` | Build-time `hw_info.h` macro header | `alp_project.py` |
 | `west-libraries` | `west.yml` fragment for `libraries:` deps | `alp_project.py` |
 | `system-manifest` | Full-system manifest (slices, boot order) | orchestrator |
@@ -339,20 +374,39 @@ implementation that owns it (never a fork):
 ### `alp validate` -- check a board.yaml
 
 ```bash
-alp validate                   # ./board.yaml
+alp validate                             # ./board.yaml, human output
 alp validate path/to/board.yaml
+alp validate --format json path/to/board.yaml    # IDE/LSP/CI-facing
+alp validate --format sarif path/to/board.yaml   # SARIF 2.1.0 (code scanning)
 ```
 
 Runs the rich diagnostic validator (JSON-Schema pass, SoM/preset
-cross-references, peripheral-vs-SoC capability check) and renders
-every finding as a Rust-style diagnostic block with an `ALP-Bxxx`
-code -- decode any code with `alp explain ALP-B001`.  Exit code 0
-when clean, 1 on errors.
+cross-references, peripheral-vs-SoC capability check), then the
+same orchestrator consistency pass used by build preflight.
+Exit code 0 means no hard errors; warnings such as ALP-B010 still
+return 0.  Hard schema/xref/consistency errors return 1.
 
-The schema pass is the SAME shared implementation used by
-`scripts/validate_board_yaml.py` (the `west alp-build` pre-flight)
-and the orchestrator's loader, so all front doors report identical
-violations.
+`--format` selects the rendering:
+
+- `human` (default) -- the Rust-style block with an `ALP-Bxxx` code
+  -- decode any code with `alp explain ALP-B001`.
+- `json` -- the versioned machine document
+  (`metadata/schemas/diagnostic-v1.schema.json`): `schemaVersion` is
+  a version/capability handshake a consumer must check before
+  parsing further, and every range is **zero-based** (LSP
+  `Position`/`Range` convention).
+- `sarif` -- a SARIF 2.1.0 log (`runs[].results[]`); SARIF regions
+  are **one-based** by spec, the opposite of the `json` format's
+  ranges -- the two exporters intentionally do not share range
+  values.
+
+`json`/`sarif` print only the structured document to stdout, no
+interleaved human prose.
+
+`scripts/validate_board_yaml.py` is a compatibility wrapper around
+the same rich validator plus consistency pass, so `alp validate`,
+the script entry point, and build preflight reject the same
+board.yaml contracts.
 
 ### `alp model` -- compile + package AI models
 
@@ -384,11 +438,14 @@ misbehaves.
 
 ### `alp monitor` -- serial console
 
+<!-- cross-platform-lint:ignore -->
 ```bash
-alp monitor --port COM7                # Windows
-alp monitor --port /dev/ttyUSB0       # Linux
-alp monitor                            # lists available ports if none given
+alp monitor --port COM7                       # Windows
+alp monitor --port /dev/ttyUSB0               # Linux
+alp monitor --port /dev/cu.usbserial-1420     # macOS
+alp monitor                                    # lists available ports if none given
 ```
+<!-- cross-platform-lint:resume -->
 
 Opens pyserial's miniterm (Ctrl+] to quit).  Baud defaults to 115200
 (`--baud` to override).  When no port is given or the requested one

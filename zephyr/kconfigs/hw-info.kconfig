@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# <alp/gui.h> LVGL enable and the <alp/hw_info.h> runtime hardware-info reader
+# (on-module EEPROM + BOARD_ID ADC).
+
+config ALP_SDK_HAS_LVGL
+	bool "Build <alp/gui.h> against LVGL"
+	default y if LVGL
+	default n
+	help
+	  Pulls upstream LVGL into the alp_gui_lvgl_attach() path.
+	  Requires CONFIG_LVGL=y.
+
+# Note: LwRB + nanopb were previously gated by CONFIG_ALP_SDK_USE_*
+# flags here.  Removed in the v0.3 cleanup -- both are SDK-internal
+# libraries (LwRB for audio DMA staging, nanopb for mproc IPC frame
+# serialisation) and consumers don't need to enable them.  When the
+# v0.4 audio + mproc paths land, the SDK code uses them
+# unconditionally; the west.yml pins go in alongside.  See
+# vendors/lwrb/ and vendors/nanopb/ for the runtime contract.
+
+config ALP_SDK_HW_INFO
+	bool "Runtime hardware-info reader (EEPROM + BOARD_ID ADC)"
+	default y
+	help
+	  Compile src/zephyr/hw_info_zephyr.c.  Provides the
+	  alp_hw_info_read() + alp_hw_info_assert_matches_build()
+	  surface backed by the SoM on-module 24C128 EEPROM and the
+	  per-board BOARD_ID ADC + resistor divider.  The EEPROM-side
+	  half is wired when CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
+	  is set to a non-negative bus id; the BOARD_ID ADC cross-check
+	  remains TODO pending the per-family generated header.
+
+config ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
+	int "I2C bus id for the on-module EEPROM (< 0 = disabled)"
+	default -1
+	depends on ALP_SDK_HW_INFO && I2C && ALP_SDK_CHIP_EEPROM_24C128
+	help
+	  Per-board: the bus id (matches alp_i2c_open's bus_id field)
+	  carrying the SoM's on-module 24C128 EEPROM.  On V2N this is
+	  the E1M I2C0 bus (Renesas RIIC0 on P31/P30); on AEN it's SoC
+	  I2C2 (DesignWare master, upstream i2c_dw -- the EEPROM is
+	  bridge/DNP-selected onto I2C2, NOT the slave-only LPI2C0).
+	  Set to -1 to disable the EEPROM read path -- alp_hw_info_read()
+	  returns ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT
+	hex "7-bit I2C address of the on-module EEPROM"
+	default 0x50
+	range 0x50 0x57
+	depends on ALP_SDK_HW_INFO && ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0
+	help
+	  EEPROM I2C address strap (24C128 family supports 0x50..0x57).
+
+config ALP_SDK_HW_INFO_EEPROM_OFFSET
+	int "Manifest offset within the EEPROM (bytes)"
+	default 0
+	depends on ALP_SDK_HW_INFO && ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0
+	help
+	  Byte offset of the alp_hw_info_eeprom_t struct in EEPROM
+	  storage.  Default 0 -- production-test flow places the
+	  manifest at offset 0 per the design note in
+	  metadata/e1m_modules/<family>/hw-revisions.yaml.
+
+config ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ
+	int "I2C bitrate for the EEPROM read (Hz)"
+	default 400000
+	depends on ALP_SDK_HW_INFO && ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0
+	help
+	  Standard-mode 100 kHz, fast-mode 400 kHz, or fast-mode+ 1 MHz
+	  -- choose the highest the on-bus devices all support.

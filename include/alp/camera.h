@@ -38,6 +38,29 @@ typedef struct {
 	alp_pixfmt_t format;
 } alp_camera_config_t;
 
+/**
+ * @brief Default-initialize an @ref alp_camera_config_t for camera @p id.
+ *
+ * Identity from @p id.  There is no universally-common sensor
+ * resolution, so @c width / @c height default to 0 as an explicit
+ * "you must choose" sentinel -- @ref alp_camera_open rejects an
+ * out-of-range configuration, so a caller who forgets to set them
+ * fails loudly rather than opening at an unintended size.  @c fps
+ * defaults to 30 (the common video frame rate) and @c format defaults
+ * to @ref ALP_PIXFMT_RGB565 (the widely-supported embedded-camera
+ * default -- @ref ALP_PIXFMT_MONO_VLSB, the enum's zero value, is a
+ * narrow SSD1306-specific format and would be a misleading default
+ * here). Set @c width / @c height before calling open().
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_CAMERA_CONFIG_DEFAULT(id) \
+	((alp_camera_config_t){ \
+	    .camera_id = (id), .width = 0u, .height = 0u, .fps = 30u, .format = ALP_PIXFMT_RGB565 })
+
 typedef struct {
 	void    *data;
 	size_t   size;
@@ -138,8 +161,7 @@ const alp_capabilities_t *alp_camera_capabilities(const alp_camera_t *c);
 /* ================================================================== */
 /* ISP (Image Signal Processor) configuration                          */
 /*                                                                     */
-/* Wave-2 audit (internal AEN feature audit, §4.3) NEEDS-       */
-/* PORTABLE-SURFACE: AEN-family E4 / E6 / E8 ship a dedicated ISP     */
+/* AEN-family E4 / E6 / E8 ship a dedicated ISP                       */
 /* (Alif's hardened VeriSilicon ISP Pico (vsi,isp-pico) path) that    */
 /* Zephyr's portable                                                  */
 /* drivers/video/ class doesn't expose at the on-chip-ISP level --     */

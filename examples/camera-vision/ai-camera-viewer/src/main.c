@@ -45,7 +45,7 @@
  *      (Ethos-U65) is a one-line board.yaml change.
  *
  *
- * ── What's stubbed in v0.5 ─────────────────────────────────────
+ * ── What's still a placeholder ──────────────────────────────────
  *
  * - The actual `person_detect.tflite` model isn't checked in --
  *   customers drop their own Vela-compiled .tflite into
@@ -54,9 +54,10 @@
  *   native_sim (no real OV5640 connected), and the UI shows a
  *   solid-colour placeholder + the inference latency for the
  *   built-in dummy bytes.
- * - Real bounding-box decode is paper-correct -- v0.6 AEN HiL
- *   fills in the post-process kernel that turns the model output
- *   tensor into a `viewer_box_t[]` array.
+ * - Real bounding-box decode is paper-correct only -- the
+ *   post-process kernel that turns the model output tensor into
+ *   a `viewer_box_t[]` array is still TODO, pending the real
+ *   compiled model + AEN HiL bench validation.
  */
 
 #include <zephyr/kernel.h>

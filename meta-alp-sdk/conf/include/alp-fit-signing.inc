@@ -10,8 +10,7 @@
 # CONFIG_FIT_SIGNATURE + the production public key embedded in the FIP's
 # U-Boot control dtb + bootcmd -> `bootm`) is the deferred, brick-class
 # phase 2, and the production key custody / TF-A-trusted-boot chaining are
-# owner decisions. See the design:
-#   alp-sdk-internal/docs/v2n-kernel-fit-signing-design.md
+# owner decisions tracked outside the public build scaffold.
 #
 # OPT-IN (default OFF -- a normal build is byte-for-byte unchanged). In
 # conf/local.conf:

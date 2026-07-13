@@ -13,22 +13,27 @@
 #
 # Usage:
 #   ./build_ti.sh                                  # default SPI bridge, no WiFi/BLE
-#   SDK_DIR=/home/caner/ti/simplelink_wifi_sdk_10_10_01_08 ./build_ti.sh --wifi
+#   SDK_DIR=<ti-sdk>/simplelink_wifi_sdk_10_10_01_08 ./build_ti.sh --wifi
 #   ./build_ti.sh --wifi --ble                     # + WiFi host driver + NimBLE
 #   ./build_ti.sh --transport sdio --ota-selftest
+#
+# The TI SDK / toolchain / SysConfig / toolbox locations are NOT bundled;
+# point at your staged copies via the env vars (or flags) below.
 #
 # Output: <repo>/firmware/cc3501e/build/ti/cc3501e-bridge.{out,hex,bin}
 set -euo pipefail
 
 # --- config (override via env or flags) --------------------------------------
-SDK_DIR="${SDK_DIR:-/home/caner/ti/simplelink_wifi_sdk_10_10_01_08}"
-TICLANG_ROOT="${TICLANG_ROOT:-/home/caner/ti/ti-cgt-armllvm_5.1.1.LTS}"
-SYSCONFIG_CLI="${SYSCONFIG_CLI:-/home/caner/ti/sysconfig-1.28.0/sysconfig_cli.sh}"
+# No defaults: these point at externally-staged TI tooling and are validated
+# below so the script fails with a clear message on any workstation/CI checkout.
+SDK_DIR="${SDK_DIR:-}"
+TICLANG_ROOT="${TICLANG_ROOT:-}"
+SYSCONFIG_CLI="${SYSCONFIG_CLI:-}"
 # SimpleLink Wi-Fi Toolbox -- provides the SysConfig MemoryConfigurator module
 # (/ti/memoryconfig/MemoryConfigurator) that the main SDK product does NOT ship.
 # Passed as a SECOND --product to generate the flash-map (see the demo makefile's
 # SIMPLELINK_WIFI_TOOLBOX_INSTALL_DIR). TOOLBOX = the dir holding .metadata/product.json.
-TOOLBOX="${TOOLBOX:-/home/caner/ti/simplelink_wifi_toolbox_4_2_4/simplelink_wifi_toolbox_lin_4_2_4}"
+TOOLBOX="${TOOLBOX:-}"
 TRANSPORT="spi"          # spi | sdio
 OTA_SELFTEST=0
 WIFI_HOST_DRIVER=0
@@ -56,6 +61,12 @@ fw="$(cd "$HERE/.." && pwd)"                 # firmware/cc3501e
 repo="$(cd "$fw/../.." && pwd)"              # repo root
 out="$fw/build/ti"
 tc="$TICLANG_ROOT/bin/tiarmclang"
+# Require the externally-staged TI tooling before touching it, so an
+# unset/empty var fails with a clear message instead of a confusing MISSING
+# path (e.g. "/.metadata/product.json").
+for v in SDK_DIR TICLANG_ROOT SYSCONFIG_CLI TOOLBOX; do
+  [ -n "${!v}" ] || { echo "set $v (env var or the matching --flag) to your staged TI SDK/toolchain/SysConfig/toolbox -- see build_ti.ps1 for the reference layout"; exit 3; }
+done
 for p in "$SDK_DIR/.metadata/product.json" "$tc" "$SYSCONFIG_CLI" "$TOOLBOX/.metadata/product.json"; do
   [ -e "$p" ] || { echo "MISSING: $p (stage the TI SDK/toolchain/toolbox -- see docs)"; exit 3; }
 done
@@ -155,8 +166,9 @@ fi
 
 # App + silicon-free layer + ti HAL + SysConfig unity aggregates (see .ps1 149-165).
 sources=(
-  "$fw/src/main.c" "$fw/src/protocol.c" "$fw/src/worker.c" "$fw/src/event_ring.c" "$fw/src/transport_spi.c" "$fw/src/transport_sdio.c"
-  "$fw/hal/ti/cc3501e_hw_ti.c" "$fw/hal/ti/transport_hw_ti_spi.c" "$fw/hal/ti/transport_hw_ti_sdio.c"
+  "$fw/src/main.c" "$fw/src/protocol.c" "$fw"/src/protocol_*.c "$fw/src/worker.c" "$fw/src/event_ring.c" "$fw/src/transport_spi.c" "$fw/src/transport_sdio.c"
+  "$fw/hal/ti/cc3501e_hw_ti.c" "$fw"/hal/ti/cc3501e_hw_ti_*.c
+  "$fw/hal/ti/transport_hw_ti_spi.c" "$fw/hal/ti/transport_hw_ti_sdio.c"
   "$out/ti_drivers_config.c" "$out/ti_freertos_config.c" "$out/ti_freertos_portable_config.c"
   "$out/memcfg/ti_flash_map_config.c"
 )
@@ -167,7 +179,14 @@ inc+=("-I$SDK_DIR/source/ti/drivers/net/wifi/wifi_host_driver/inc_adapt"
       "-I$SDK_DIR/source/ti/drivers/net/wifi/wifi_host_driver/inc_common"
       "-I$SDK_DIR/source/ti/drivers/net/wifi/wifi_platform/cc35xx/inc_common"
       "-I$SDK_DIR/source/ti/drivers/xmem/flash")
-[ "$OTA_SELFTEST" = 1 ] && sources+=("$fw/hal/ti/cc3501e_ota_candidate.c")
+if [ "$OTA_SELFTEST" = 1 ]; then
+  # cc3501e_ota_candidate.c is a signed firmware binary (bin2c C-array) -- an
+  # internal-only artifact (alp-sdk #590); NOT committed to the public repo.
+  # Stage it from alp-sdk-internal before an --ota-selftest build.
+  cand="$fw/hal/ti/cc3501e_ota_candidate.c"
+  [ -f "$cand" ] || { echo "ERROR: --ota-selftest needs $cand -- stage it from alp-sdk-internal/firmware/cc3501e/hal/ti/ (see $fw/hal/ti/cc3501e_ota_candidate.README.md)"; exit 3; }
+  sources+=("$cand")
+fi
 
 # Wi-Fi host integration sources (source-only OSI/glue) -- see .ps1 186-210.
 if [ "$WIFI_HOST_DRIVER" = 1 ]; then

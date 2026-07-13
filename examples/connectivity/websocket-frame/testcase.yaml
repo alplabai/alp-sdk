@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: websocket-frame
+  description: |
+    libwebsockets teaching example. Masks + encodes a single RFC 6455
+    TEXT frame into a buffer and decodes it back out, asserting the
+    payload survives the round trip. No socket, no TLS. The real
+    libwebsockets library isn't linked (see README "Integration
+    reality"): its public header needs a CMake-generated
+    lws_config.h, and its lws_write() framing path needs a live
+    lws_context/wsi -- both out of scope for this offline teaching
+    example, so this hand-rolls the RFC 6455 frame layout instead.
+
+tests:
+  alp_sdk.examples.websocket_frame.native_sim:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - websocket-frame
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[websocket-frame\\] done"

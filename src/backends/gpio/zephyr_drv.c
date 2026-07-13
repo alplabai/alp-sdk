@@ -16,6 +16,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
@@ -26,7 +27,9 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "gpio_ops.h"
+#include "gpio_resolve.h"
 
 #define DT_DRV_COMPAT alp_pin_array
 
@@ -82,9 +85,15 @@ static alp_z_gpio_side_t _sides[CONFIG_ALP_SDK_MAX_GPIO_HANDLES];
 static alp_z_gpio_side_t *_alloc_side(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_sides); ++i) {
-		if (!_sides[i].in_use) {
-			_sides[i]        = (alp_z_gpio_side_t){ 0 };
-			_sides[i].in_use = true;
+		/* Atomic claim (issue #629): the portable dispatcher
+		 * (src/gpio_dispatch.c) already atomically claims its own
+		 * pool slot before calling this backend's open(), but two
+		 * concurrent opens on DIFFERENT dispatcher handles still
+		 * raced this sidecar's plain check-then-set independently --
+		 * in_use is the struct's last member, so zero everything
+		 * before it. */
+		if (alp_slot_try_claim(&_sides[i].in_use)) {
+			memset(&_sides[i], 0, offsetof(alp_z_gpio_side_t, in_use));
 			return &_sides[i];
 		}
 	}
@@ -93,7 +102,7 @@ static alp_z_gpio_side_t *_alloc_side(void)
 
 static void _free_side(alp_z_gpio_side_t *s)
 {
-	if (s != NULL) s->in_use = false;
+	if (s != NULL) alp_slot_release(&s->in_use);
 }
 
 static gpio_flags_t _to_gpio_flags(alp_gpio_dir_t dir, alp_gpio_pull_t pull)

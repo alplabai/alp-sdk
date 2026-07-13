@@ -27,7 +27,7 @@ name: pr-bitbake
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'scripts/**'
@@ -36,7 +36,7 @@ on:
       - 'meta-alp-sdk/**'
       - '.github/workflows/pr-bitbake.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'scripts/**'

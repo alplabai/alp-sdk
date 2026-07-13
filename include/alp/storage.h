@@ -59,6 +59,25 @@ typedef struct {
 	bool               read_only;   /**< Refuses writes / erases. */
 } alp_storage_config_t;
 
+/**
+ * @brief Default-initialize an @ref alp_storage_config_t for storage
+ *        class @p id.
+ *
+ * Identity from @p id (the @c kind -- there is no universally-safe
+ * kind to default to across INTERNAL_FLASH / QSPI / OSPI / SD_MMC, so
+ * the caller must always name one); canonical defaults for the rest:
+ * @c instance_id = 0 (documented as "the primary device"), @c freq_hz
+ * = 0 (documented as "backend default"), @c read_only = false (the
+ * common writable case).
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_STORAGE_CONFIG_DEFAULT(id) \
+	((alp_storage_config_t){ .kind = (id), .instance_id = 0u, .freq_hz = 0u, .read_only = false })
+
 /** Block geometry, populated by @ref alp_storage_get_info. */
 typedef struct {
 	uint64_t total_bytes;
@@ -178,9 +197,7 @@ const alp_capabilities_t *alp_storage_capabilities(const alp_storage_t *storage)
 /* ================================================================== */
 /* Inline AES (on-the-fly XIP encryption / decryption)                 */
 /*                                                                     */
-/* Wave-2 audit (internal AEN feature audit, §4.3) flagged       */
-/* on-the-fly inline AES for external flash as a NEEDS-PORTABLE-       */
-/* SURFACE gap.  AEN-family OSPI / HexSPI controllers can transparently */
+/* AEN-family OSPI / HexSPI controllers can transparently */
 /* encrypt + decrypt data between the host bus and the external chip   */
 /* (XIP code stays AES-protected; the host sees plaintext, the flash   */
 /* sees ciphertext).  Customers migrating from V2N to AEN otherwise    */

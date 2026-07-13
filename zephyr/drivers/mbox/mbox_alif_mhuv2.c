@@ -12,16 +12,16 @@
  * NO upstream Zephyr driver, no sdk-alif fork driver, and no hal_alif library to
  * consume -- so it does not fit Tier-1/1.5/2/3. Authored from spec as a last
  * resort per ADR 0017 (docs/adr/0017-alp-sdk-over-the-vendor-sdk.md).
- * vendor-ext, BENCH-UNVERIFIED.
+ * vendor-ext, bench-validated on E1M-AEN801 for the dual-M55 RPMsg path.
  *
  * This driver was authored from the ARM MHUv2 register map (ARM DDI 0515,
  * corroborated by Linux drivers/mailbox/arm_mhuv2.c #defines and the original
  * LKML patch) and the node addresses/IRQs in the alifsemi/zephyr_alif fork's
- * dts/arm/alif/ensemble/common/ensemble_rtss_he.dtsi. It has NOT been run on
- * real silicon. Every register offset below is transcribed verbatim from that
- * spec; no offset has been invented. Where a feature is version-dependent
- * (v2.0 vs v2.1) and not relied upon, it is called out in a comment rather
- * than guessed at.
+ * dts/arm/alif/ensemble/common/e1.dtsi. The E1M-AEN801 bench validated this
+ * driver with a dual-M55 OpenAMP RPMsg ping/pong on 2026-06-19 (#225). Every
+ * register offset below is transcribed verbatim from that spec; no offset has
+ * been invented. Where a feature is version-dependent (v2.0 vs v2.1) and not
+ * relied upon, it is called out in a comment rather than guessed at.
  * ====================================================================
  *
  * Compatible: `alif,mhuv2-mbox` (deliberately NOT `arm,mhuv2`, to stay

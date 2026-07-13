@@ -39,7 +39,7 @@
  * is MMU-gated and the Cortex-M55 has an MPU, not an MMU; hal_alif ships no
  * GMAC library) -- so retiring this glue would be an UNCONDITIONAL silent
  * Ethernet loss on the upstream-only AEN build. This is the legitimate
- * Tier-1.5 case, not a fork-driver copy. See docs/adr/0017 + task #21.
+ * Tier-1.5 case, not a fork-driver copy. See docs/adr/0017.
  *
  * Ported from alifsemi/zephyr_alif's drivers/ethernet/eth_dwmac_alif_ensemble.c
  * (Apache-2.0) and adapted to the glue interface of the DWMAC core shipped in

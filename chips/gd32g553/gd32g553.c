@@ -97,10 +97,10 @@ static alp_status_t status_from_wire(uint8_t s)
 #define GD32G553_MAX_PAYLOAD_BYTES (1u + (GD32G553_BRIDGE_ADC_STREAM_READ_MAX * 2u))
 
 /* SOF/CMD + payload + CRC for SPI; CMD + payload + CRC for I2C. */
-#define GD32G553_MAX_SPI_FRAME_BYTES                                                               \
+#define GD32G553_MAX_SPI_FRAME_BYTES \
 	(1u /* SOF */ + 1u /* CMD or STATUS */ + GD32G553_MAX_PAYLOAD_BYTES + 2u /* CRC */)
 
-#define GD32G553_MAX_I2C_WRITE_BYTES                                                               \
+#define GD32G553_MAX_I2C_WRITE_BYTES \
 	(1u /* reg=0x00 */ + 1u /* CMD */ + GD32G553_MAX_PAYLOAD_BYTES + 2u /* CRC */)
 
 #define GD32G553_MAX_I2C_READ_BYTES (1u /* STATUS */ + GD32G553_MAX_PAYLOAD_BYTES + 2u /* CRC */)
@@ -138,7 +138,7 @@ static alp_status_t status_from_wire(uint8_t s)
  *    wait at ~3.2 ms. */
 #define GD32G553_REPLY_STAGING_GAP_US 35u
 static const uint16_t gd32g553_reply_retry_us[] = { 25u, 50u, 100u, 200u, 400u, 800u, 1600u };
-#define GD32G553_REPLY_READ_TRIES                                                                  \
+#define GD32G553_REPLY_READ_TRIES \
 	(1u + (sizeof(gd32g553_reply_retry_us) / sizeof(gd32g553_reply_retry_us[0])))
 
 /* Staging gap for one command.  ADC conversions run inside the request's
@@ -808,8 +808,11 @@ alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx,
 	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_STREAM_BEGIN, req, sizeof(req), NULL, 0u);
 }
 
-alp_status_t gd32g553_adc_stream_read(
-    gd32g553_t *ctx, uint8_t stream_id, uint8_t max_samples, uint8_t *got_samples, uint16_t *mv)
+alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx,
+                                      uint8_t     stream_id,
+                                      uint8_t     max_samples,
+                                      uint8_t    *got_samples,
+                                      uint16_t   *mv)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (got_samples == NULL || mv == NULL) return ALP_ERR_INVAL;

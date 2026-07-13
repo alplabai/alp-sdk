@@ -40,12 +40,28 @@ What this touches:
     CHANGELOG.md                    -- slice [Unreleased] into the new version section.
     docs/abi/v<MAJOR.MINOR>-snapshot.json  -- regenerated.
     README.md                       -- the current-state version labels (e.g.
-                                       "Partially silicon-verified (`vX.Y`)", "vX.Y ramp");
+                                       "Partially silicon-verified (`vX.Y`)", "vX.Y ramp",
+                                       "Dev Tooling (vX.Y)", "heterogeneous slice, vX.Y flow");
+                                       enforced by scripts/check_version_doc_sync.py.
+    docs/verification-status.md     -- the "Where vX.Y actually sits" heading;
                                        enforced by scripts/check_version_doc_sync.py.
     include/alp/version.h           -- ALP_VERSION_MAJOR/MINOR/PATCH +
                                        ALP_VERSION_STRING macros;
                                        enforced by scripts/check_version_doc_sync.py.
     pyproject.toml                  -- the alp-sdk-cli [project] version;
+                                       enforced by scripts/check_version_doc_sync.py.
+    scripts/alp_cli/__init__.py     -- the CLI package __version__ (what
+                                       `alp --version` reports);
+                                       enforced by scripts/check_version_doc_sync.py.
+    src/zephyr/alp_banner.c         -- the sample banner line in the
+                                       file's doc-comment (the code always
+                                       prints the live ALP_VERSION_STRING);
+                                       enforced by scripts/check_version_doc_sync.py.
+    README.md, docs/architecture.md -- the "pin to a release tag -- vX.Y.Z
+                                       is the latest" west-manifest snippet;
+                                       enforced by scripts/check_version_doc_sync.py.
+    docs/board-config.md            -- the sdk_version.yaml tree comment
+                                       ("currently `version: X.Y.Z`");
                                        enforced by scripts/check_version_doc_sync.py.
 
 What it does NOT touch:
@@ -72,6 +88,11 @@ CHANGELOG = REPO / "CHANGELOG.md"
 README = REPO / "README.md"
 VERSION_H = REPO / "include" / "alp" / "version.h"
 PYPROJECT = REPO / "pyproject.toml"
+CLI_INIT = REPO / "scripts" / "alp_cli" / "__init__.py"
+BANNER_C = REPO / "src" / "zephyr" / "alp_banner.c"
+ARCHITECTURE_MD = REPO / "docs" / "architecture.md"
+BOARD_CONFIG_MD = REPO / "docs" / "board-config.md"
+VERIFICATION_STATUS_MD = REPO / "docs" / "verification-status.md"
 ABI_DIR = REPO / "docs" / "abi"
 ABI_SNAPSHOT_TOOL = REPO / "scripts" / "abi_snapshot.py"
 
@@ -147,6 +168,9 @@ def update_readme_version_labels(current: str, new_version: str, dry_run: bool) 
     subs = [
         (rf"(Partially silicon-verified \(`v){re.escape(old_mm)}(`\))", rf"\g<1>{new_mm}\g<2>"),
         (rf"(\*\*v){re.escape(old_mm)}( ramp — paper-correct)", rf"\g<1>{new_mm}\g<2>"),
+        (rf"(A v){re.escape(old_mm)}( project is \*\*one declarative file\*\*)", rf"\g<1>{new_mm}\g<2>"),
+        (rf"(Dev Tooling[^\n]*\n[^\n]*\()v{re.escape(old_mm)}(\))", rf"\g<1>v{new_mm}\g<2>"),
+        (rf"(heterogeneous slice, v){re.escape(old_mm)}( flow)", rf"\g<1>{new_mm}\g<2>"),
     ]
     total = 0
     for pat, repl in subs:
@@ -158,6 +182,28 @@ def update_readme_version_labels(current: str, new_version: str, dry_run: bool) 
     if not dry_run:
         README.write_text(text, encoding="utf-8")
     print(f"  updated {README.relative_to(REPO)}: {total} current-state label(s) "
+          f"v{old_mm} -> v{new_mm}")
+
+
+def update_verification_status_doc(current: str, new_version: str, dry_run: bool) -> None:
+    """Bump docs/verification-status.md's "Where vX.Y actually sits" heading
+    to the new MAJOR.MINOR.  Keep in lockstep with
+    scripts/check_version_doc_sync.py's _MINOR_ANCHORS.
+    """
+    old_mm = ".".join(current.split(".")[:2])
+    new_mm = ".".join(new_version.split(".")[:2])
+    if old_mm == new_mm:
+        return
+    text = VERIFICATION_STATUS_MD.read_text(encoding="utf-8")
+    new_text, n = re.subn(rf"(Where v){re.escape(old_mm)}( actually sits)",
+                          rf"\g<1>{new_mm}\g<2>", text)
+    if n == 0:
+        print(f"  skipped {VERIFICATION_STATUS_MD.relative_to(REPO)}: "
+              f"no current-state v{old_mm} heading found")
+        return
+    if not dry_run:
+        VERIFICATION_STATUS_MD.write_text(new_text, encoding="utf-8")
+    print(f"  updated {VERIFICATION_STATUS_MD.relative_to(REPO)}: heading "
           f"v{old_mm} -> v{new_mm}")
 
 
@@ -188,6 +234,82 @@ def update_version_h(new_version: str, dry_run: bool) -> None:
     if not dry_run:
         VERSION_H.write_text(text, encoding="utf-8")
     print(f"  updated {VERSION_H.relative_to(REPO)}: ALP_VERSION_* -> {new_version}")
+
+
+def update_cli_init(new_version: str, dry_run: bool) -> None:
+    """Rewrite scripts/alp_cli/__init__.py's __version__ (full triple).
+
+    This is what `alp --version` actually reports -- keep in lockstep with
+    scripts/check_version_doc_sync.py's check_cli_init().
+    """
+    text = CLI_INIT.read_text(encoding="utf-8")
+    new_text, n = re.subn(r'^__version__\s*=\s*"[^"]*"', f'__version__ = "{new_version}"',
+                          text, count=1, flags=re.MULTILINE)
+    if n != 1:
+        raise SystemExit(f"bump_version: no '__version__ = \"...\"' line in "
+                         f"{CLI_INIT.relative_to(REPO)}")
+    if new_text == text:
+        print(f"  unchanged {CLI_INIT.relative_to(REPO)} (already at {new_version})")
+        return
+    if not dry_run:
+        CLI_INIT.write_text(new_text, encoding="utf-8")
+    print(f"  updated {CLI_INIT.relative_to(REPO)}: __version__ -> \"{new_version}\"")
+
+
+def update_banner_c(new_version: str, dry_run: bool) -> None:
+    """Rewrite the sample banner line in src/zephyr/alp_banner.c's doc-comment.
+
+    The banner *code* always prints the live ALP_VERSION_STRING at runtime;
+    only this illustrative comment line can drift.  Keep in lockstep with
+    scripts/check_version_doc_sync.py's check_banner_c().
+    """
+    text = BANNER_C.read_text(encoding="utf-8")
+    new_text, n = re.subn(r"Alp SDK \d+\.\d+\.\d+", f"Alp SDK {new_version}", text, count=1)
+    if n != 1:
+        raise SystemExit(f"bump_version: no 'Alp SDK X.Y.Z' sample banner line in "
+                         f"{BANNER_C.relative_to(REPO)}")
+    if new_text == text:
+        print(f"  unchanged {BANNER_C.relative_to(REPO)} (already at {new_version})")
+        return
+    if not dry_run:
+        BANNER_C.write_text(new_text, encoding="utf-8")
+    print(f"  updated {BANNER_C.relative_to(REPO)}: sample banner -> \"Alp SDK {new_version}\"")
+
+
+def update_release_tag_pins(new_version: str, dry_run: bool) -> None:
+    """Rewrite the "pin to a release tag -- vX.Y.Z is the latest" west-manifest
+    snippet in README.md and docs/architecture.md (full triple).  Keep in
+    lockstep with scripts/check_version_doc_sync.py's
+    check_full_triple_doc_anchors().
+    """
+    pattern = re.compile(r"(pin to a release tag — v)\d+\.\d+\.\d+( is the latest)")
+    for path in (README, ARCHITECTURE_MD):
+        text = path.read_text(encoding="utf-8")
+        new_text, n = pattern.subn(rf"\g<1>{new_version}\g<2>", text)
+        if n == 0:
+            print(f"  skipped {path.relative_to(REPO)}: no release-tag-pin anchor found")
+            continue
+        if not dry_run:
+            path.write_text(new_text, encoding="utf-8")
+        print(f"  updated {path.relative_to(REPO)}: release-tag pin -> v{new_version}")
+
+
+def update_board_config_doc(new_version: str, dry_run: bool) -> None:
+    """Rewrite the sdk_version.yaml tree comment in docs/board-config.md
+    ("currently `version: X.Y.Z`").  Keep in lockstep with
+    scripts/check_version_doc_sync.py's check_full_triple_doc_anchors().
+    """
+    text = BOARD_CONFIG_MD.read_text(encoding="utf-8")
+    new_text, n = re.subn(
+        r'(sdk_version\.yaml[^\n]*currently "version: )\d+\.\d+\.\d+(")',
+        rf"\g<1>{new_version}\g<2>", text, count=1)
+    if n == 0:
+        print(f"  skipped {BOARD_CONFIG_MD.relative_to(REPO)}: no sdk_version.yaml anchor found")
+        return
+    if not dry_run:
+        BOARD_CONFIG_MD.write_text(new_text, encoding="utf-8")
+    print(f"  updated {BOARD_CONFIG_MD.relative_to(REPO)}: sdk_version.yaml comment -> "
+          f"v{new_version}")
 
 
 def update_pyproject(new_version: str, dry_run: bool) -> None:
@@ -238,8 +360,13 @@ def main() -> int:
     update_sdk_version_yaml(args.to, args.dry_run)
     slice_changelog(args.to, args.dry_run)
     update_readme_version_labels(current, args.to, args.dry_run)
+    update_verification_status_doc(current, args.to, args.dry_run)
     update_version_h(args.to, args.dry_run)
     update_pyproject(args.to, args.dry_run)
+    update_cli_init(args.to, args.dry_run)
+    update_banner_c(args.to, args.dry_run)
+    update_release_tag_pins(args.to, args.dry_run)
+    update_board_config_doc(args.to, args.dry_run)
     regenerate_abi_snapshot(args.to, args.dry_run)
     print()
     print("Next steps:")

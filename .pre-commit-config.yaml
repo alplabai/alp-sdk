@@ -4,12 +4,13 @@
 # Enable once per clone (opt-in; not required — CI still enforces on PRs to main):
 #   pip install pre-commit && pre-commit install
 #
-# Pinned to clang-format 14.0.6 to match the CI gate exactly (Cpp11BracedListStyle
-# in .clang-format keeps output identical across v14<->v18).  Vendored upstream
+# Pinned to clang-format 22.1.5 to match the CI gate exactly (clang-format output
+# is not stable across major versions, so a stale local pin here would rewrite
+# committed code right before the CI check rejected it).  Vendored upstream
 # trees keep their own style and are excluded, same as the CI gate.
 repos:
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v14.0.6
+    rev: v22.1.5
     hooks:
       - id: clang-format
         types_or: [c, c++]

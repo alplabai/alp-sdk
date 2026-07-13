@@ -61,6 +61,7 @@
 #include <alp/pwm.h>
 
 #include "pwm_ops.h"
+#include "common/alp_errno.h"
 
 /* sysfs pwmchip the class binds to.  Override at build time
  * (-DALP_YOCTO_PWM_CHIP=N) to pin a non-zero chip. */
@@ -71,9 +72,18 @@
 /* Recover the enclosing portable handle from its embedded state slot.
  * The dispatcher reads h->period_ns to bounds-check pulse_ns before
  * forwarding here, so open() must populate it.  <zephyr/sys/util.h>'s
- * CONTAINER_OF is unavailable on Linux, so define the offset locally. */
-#define ALP_PWM_HANDLE_OF(st_ptr)                                                                  \
-	((struct alp_pwm *)((char *)(st_ptr) - offsetof(struct alp_pwm, state)))
+ * CONTAINER_OF is unavailable on Linux, so define the offset locally.
+ *
+ * The intermediate (void *) cast (rather than a direct char*->type* cast)
+ * is deliberate: `st_ptr` is always the `state` member embedded inside a
+ * real `struct alp_pwm` (every caller here hands this macro &h->state), so
+ * the recovered pointer's alignment is correct by construction -- but a
+ * direct cast still trips -Wcast-align=strict because the compiler can't
+ * see that invariant.  Routing through void* (alignment-agnostic by
+ * definition) is the standard container_of idiom for this, matching how
+ * Zephyr's own CONTAINER_OF avoids the same diagnostic (issue #634). */
+#define ALP_PWM_HANDLE_OF(st_ptr) \
+	((struct alp_pwm *)(void *)((char *)(st_ptr) - offsetof(struct alp_pwm, state)))
 
 /* Per-handle backend data: the channel's sysfs directory and channel
  * index, boxed onto the heap so the void* be_data slot owns it. */
@@ -83,51 +93,26 @@ typedef struct {
 	int  channel; /* sysfs channel index */
 } y_pwm_data_t;
 
-/** @brief Map a (positive) errno value to the closest alp_status_t. */
-static alp_status_t _errno_to_alp(int err)
-{
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case EINVAL:
-		return ALP_ERR_INVAL;
-	case EBUSY:
-	case EAGAIN:
-		return ALP_ERR_BUSY;
-	case ENODEV:
-	case ENOENT:
-		return ALP_ERR_NOT_READY;
-	case ENOTTY:
-	case ENOSYS:
-	case ENOTSUP:
-#if defined(EOPNOTSUPP) && EOPNOTSUPP != ENOTSUP
-	case EOPNOTSUPP:
-#endif
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
-}
-
 /**
  * @brief Write @p val (a NUL-terminated string) to a sysfs attribute.
  *
  * Opens @p path write-only, writes the whole string, and closes.  A
- * short write or an open failure maps errno -> alp via @ref
- * _errno_to_alp.  Used for export / unexport / enable / polarity and
- * the decimal-formatted period / duty_cycle writes.
+ * short write or an open failure maps errno -> alp via the shared
+ * @ref alp_status_from_posix_errno baseline (#630; no PWM-specific
+ * override needed).  Used for export / unexport / enable / polarity
+ * and the decimal-formatted period / duty_cycle writes.
  */
 static alp_status_t _sysfs_write(const char *path, const char *val)
 {
 	int fd = open(path, O_WRONLY | O_CLOEXEC);
-	if (fd < 0) return _errno_to_alp(errno);
+	if (fd < 0) return alp_status_from_posix_errno(errno);
 
 	size_t  len = strlen(val);
 	ssize_t n   = write(fd, val, len);
 	int     e   = errno;
 	close(fd);
 
-	if (n < 0) return _errno_to_alp(e);
+	if (n < 0) return alp_status_from_posix_errno(e);
 	if ((size_t)n != len) return ALP_ERR_IO;
 	return ALP_OK;
 }

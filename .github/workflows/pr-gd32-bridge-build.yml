@@ -26,13 +26,13 @@ name: pr-gd32-bridge-build
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'firmware/gd32-bridge/**'
       - 'vendors/gd32_firmware_library/**'
       - '.github/workflows/pr-gd32-bridge-build.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'firmware/gd32-bridge/**'
       - 'vendors/gd32_firmware_library/**'

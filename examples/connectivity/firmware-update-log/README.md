@@ -185,11 +185,16 @@ enabled, so the HE board prints:
 [update-log] HW_ENFORCED required, but no secure owner/firewall-backed backend is active
 ```
 
-If `CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED` is temporarily disabled only
-to inspect the software MRAM tier, the storage line reports:
+HE is a CLIENT and never opens a local persistent store: `alp_ulog_partition`
+is the HP owner's MRAM region, reached only by proxying over MHU. Even with
+`CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED` disabled, the software tier's
+`ready()` probe declines unconditionally on the AEN M55 client role
+(`src/backends/update_log/sw_tier.c`), so `alp_update_log_open()` still returns
+`NULL` rather than mounting a second, unsynchronized NVS instance over the
+same partition the owner writes:
 
 ```
-[update-log] storage: MRAM NVS (alp_ulog_partition)
+[update-log] no backend present
 ```
 
 The HP owner build prints:

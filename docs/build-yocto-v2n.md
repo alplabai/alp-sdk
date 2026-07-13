@@ -157,10 +157,16 @@ The bitbake kernel banner is branded automatically. A **manual** kernel
 build does **not** source the recipe, so export the same identity to
 avoid leaking your own `user@host` into the banner:
 
+<!-- cross-platform-lint:ignore -->
+The Linux kernel's own build system is GNU `make` (there is no
+`west`/`cmake` substitute for it) and this whole page's Prerequisites
+(§1) already scope the entire Yocto/kernel-build flow to a Linux host
+or WSL2 Ubuntu -- this is not a Windows-native tutorial to begin with.
 ```bash
 export KBUILD_BUILD_USER=alp KBUILD_BUILD_HOST=alp-sdk
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= -j"$(nproc)" Image
 ```
+<!-- cross-platform-lint:resume -->
 
 ## CA55 CPU frequency cap (1.7 GHz default, 1.8 GHz opt-in)
 

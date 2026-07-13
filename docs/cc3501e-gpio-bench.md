@@ -28,10 +28,11 @@ this unit.
 
 ## Scope: synchronous write / read / cam only
 
-The current E1M-AEN board rev wires **no host-IRQ line**, so the asynchronous GPIO
+The current E1M-AEN board rev wires **no HOST_IRQ line**, so the asynchronous GPIO
 interrupt path (`CMD_GPIO_SET_INTERRUPT` → `EVT_GPIO_INTERRUPT`, an async push from
 the coprocessor to the host) **cannot be delivered to the host**. Async GPIO-IRQ is
-therefore an **r2 (next board rev) limitation**.
+therefore future HOST_IRQ work. Command/reply traffic still uses the current
+hardware-SS0 + READY bridge.
 
 The example still *arms* an IRQ (the `gpio_irq_arm` step) to prove the configure
 command round-trips and is accepted, but it does **not** assert an edge or wait for
@@ -135,7 +136,7 @@ Step meanings:
 | `gpio_read`       | Read GPIO13 back over the proxy.                                     |
 | `cam_enable`      | Enable `CAM_EN_LDO0` (cam id 0).                                     |
 | `cam_disable`     | Disable `CAM_EN_LDO0` (cam id 0).                                    |
-| `gpio_irq_arm`    | Arm an edge IRQ on GPIO13 — proves the configure command round-trips; **no async edge is delivered on this rev** (r2 limitation). |
+| `gpio_irq_arm`    | Arm an edge IRQ on GPIO13 — proves the configure command round-trips; **no async edge is delivered on this rev** (HOST_IRQ limitation). |
 
 ## Pass criteria
 
@@ -150,7 +151,7 @@ the r2 host-IRQ line).
 ## Validation record
 
 **PASS — silicon-validated 2026-06-20 on E1M-AEN801 (Alif E8, M55-HE).** All eight
-proxy ops round-tripped over the 3-wire SPI bridge to the CC3501E:
+proxy ops round-tripped over the hardware-SS0 SPI bridge to the CC3501E:
 
 ```
 [cc3501e-gpio] cc3501e bridge bring-up -> 0
@@ -166,14 +167,14 @@ This also validates the SPI1 data path (P14_4/5/6 pinctrl + the `spi@48104000` b
 used: the example is MRAM-slot0-linked (`CONFIG_FLASH_LOAD_OFFSET=0x10000`, reset
 vector `0x8001xxxx`), so it is flashed with the **two-blob** `flash-jlink-mramxip.sh`
 (app → `0x80010000` + signed ATOC), **not** the single-blob ITCM `flash-jlink.sh`.
-`bring-up -> 0` confirms the CC3501E launched and answered in lockstep. (`gpio_read`
+`bring-up -> 0` confirms the CC3501E launched and answered over the hardware-framed bridge. (`gpio_read`
 sensing HIGH is the configured internal pull-up; no external loopback is wired.)
 
-## Known limitation: async GPIO-IRQ (r2)
+## Known limitation: async GPIO-IRQ (HOST_IRQ)
 
 The asynchronous GPIO interrupt push (`EVT_GPIO_INTERRUPT`) is not validated here and
 cannot work on the current board rev — there is **no host-IRQ line** for the
-coprocessor to signal the host out of band. The next board rev adds a CS line and a
-host-IRQ line, which removes the CS-less framing fragility and enables async events
-(BLE / Wi-Fi / GPIO-IRQ push). Until then, the GPIO proxy is synchronous request →
-reply only, and this procedure covers exactly that surface.
+coprocessor to signal the host out of band. Hardware SS0 already frames synchronous
+command/reply traffic; HOST_IRQ remains the missing line for async BLE / Wi-Fi /
+GPIO-IRQ push. Until then, the GPIO proxy is synchronous request → reply only, and
+this procedure covers exactly that surface.

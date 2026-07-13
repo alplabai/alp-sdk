@@ -21,6 +21,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/camera/camera_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(camera);
@@ -31,8 +32,7 @@ ALP_BACKEND_ANCHOR(camera);
  * pulling in the broader handles.h header (which carries
  * unrelated peripheral pool declarations the dispatcher does
  * not touch). */
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_CAMERA_HANDLES
 #define CONFIG_ALP_SDK_MAX_CAMERA_HANDLES 2
@@ -43,9 +43,12 @@ static struct alp_camera _pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
 static struct alp_camera *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_CAMERA_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch the
+		 * slot's other fields (in_use is the struct's last member, so
+		 * zero everything before it -- incl. lifecycle/active_ops,
+		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_camera, in_use));
 			return &_pool[i];
 		}
 	}
@@ -54,7 +57,7 @@ static struct alp_camera *_alloc(void)
 
 static void _free(struct alp_camera *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg)
@@ -89,45 +92,69 @@ alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN); /* #629 */
 	return h;
 }
 
 alp_status_t alp_camera_start(alp_camera_t *h)
 {
-	if (h == NULL || !h->in_use) {
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc/_free, so mixing it with a
+	 * plain read here is a data race, and a racing close could free the
+	 * slot mid-op. op_enter counts this op in; begin_close drains it. #629 */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return h->state.ops->start(&h->state);
+	alp_status_t rc = h->state.ops->start(&h->state);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_camera_stop(alp_camera_t *h)
 {
-	if (h == NULL || !h->in_use) {
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return h->state.ops->stop(&h->state);
+	alp_status_t rc = h->state.ops->stop(&h->state);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_camera_capture(alp_camera_t *h, alp_camera_frame_t *out, uint32_t timeout_ms)
 {
-	if (h == NULL || !h->in_use) {
+	/* Counted via alp_handle_op_enter/leave (issue #629): capture() can
+	 * block up to timeout_ms waiting for a frame, so alp_camera_close()
+	 * drains this op with the sleep-poll
+	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
+	 * instead of the busy-spin alp_handle_begin_close() -- generalised
+	 * from rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/
+	 * _rpc_drain() (GHSA-xhm8). A close() racing an in-flight capture()
+	 * can no longer tear down state underneath it. */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc;
 	if (out == NULL) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+	} else {
+		rc = h->state.ops->capture(&h->state, out, timeout_ms);
 	}
-	return h->state.ops->capture(&h->state, out, timeout_ms);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_camera_release(alp_camera_t *h, alp_camera_frame_t *frame)
 {
-	if (h == NULL || !h->in_use) {
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
 	if (frame == NULL) {
+		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
-	return h->state.ops->release(&h->state, frame);
+	alp_status_t rc = h->state.ops->release(&h->state, frame);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_camera_configure_isp(alp_camera_t *h, const alp_camera_isp_config_t *isp)
@@ -135,20 +162,31 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *h, const alp_camera_isp_conf
 	if (isp == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	if (h == NULL || !h->in_use) {
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return h->state.ops->configure_isp(&h->state, isp);
+	alp_status_t rc = h->state.ops->configure_isp(&h->state, isp);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 void alp_camera_close(alp_camera_t *h)
 {
-	if (h == NULL || !h->in_use) {
+	if (h == NULL) {
+		return;
+	}
+	/* Sleep-poll drain (issue #629): this pool counts alp_camera_capture(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning (same rationale as rpc_dispatch.c's _rpc_drain(),
+	 * GHSA-xhm8). Idempotent: a second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(h);
 }
 

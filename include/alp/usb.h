@@ -67,6 +67,35 @@ typedef struct {
 } alp_usb_device_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_usb_device_config_t for device
+ *        class @p id.
+ *
+ * Identity from @p id (the @c device_class -- there is no
+ * universally-safe class to default to across CDC-ACM / MSC / HID, so
+ * the caller must always name one); @c vendor_id / @c product_id
+ * default to 0x0000 as an explicit "you must set this" placeholder
+ * (0x0000 is not a registered VID -- real enumeration needs a
+ * genuine VID/PID pair, so override both before shipping), @c
+ * bcd_device defaults to 0x0100 (the conventional "v1.00" encoding),
+ * and the descriptor strings @c manufacturer / @c product / @c serial
+ * default to NULL (valid per the USB spec -- omits that string
+ * descriptor).
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_USB_DEVICE_CONFIG_DEFAULT(id) \
+	((alp_usb_device_config_t){ .device_class = (id), \
+	                            .vendor_id    = 0x0000u, \
+	                            .product_id   = 0x0000u, \
+	                            .bcd_device   = 0x0100u, \
+	                            .manufacturer = NULL, \
+	                            .product      = NULL, \
+	                            .serial       = NULL })
+
+/**
  * @brief Acquire a USB device-role handle and present @p cfg's
  *        descriptor to the host on enumerate.
  *
@@ -124,8 +153,11 @@ alp_usb_device_write(alp_usb_dev_t *dev, const uint8_t *data, size_t len, uint32
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
-alp_status_t alp_usb_device_read(
-    alp_usb_dev_t *dev, uint8_t *data, size_t len, size_t *out_len, uint32_t timeout_ms);
+alp_status_t alp_usb_device_read(alp_usb_dev_t *dev,
+                                 uint8_t       *data,
+                                 size_t         len,
+                                 size_t        *out_len,
+                                 uint32_t       timeout_ms);
 
 /**
  * @brief Release the USB device handle.  Idempotent on NULL.

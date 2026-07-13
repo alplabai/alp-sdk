@@ -52,7 +52,17 @@ struct alp_mqtt {
 	alp_mqtt_backend_state_t state;
 	const alp_backend_t     *backend;
 	alp_capabilities_t       cached_caps;
-	bool                     in_use;
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close, issue #629) -- placed before in_use so the atomic-
+	 * claim zeroing in the dispatcher (memset up to
+	 * offsetof(..., in_use)) resets both on every fresh claim.  NOTE:
+	 * alp_mqtt_connect()/alp_mqtt_loop() are NOT counted via
+	 * active_ops -- see the dispatcher's file comment -- so
+	 * active_ops only tracks alp_mqtt_publish()/alp_mqtt_subscribe(). */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 #endif /* ALP_BACKENDS_MQTT_OPS_H */

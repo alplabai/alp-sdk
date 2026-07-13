@@ -164,10 +164,12 @@ rationale.
 ### 2.1 Standalone (this walkthrough)
 
 You write Zephyr / Yocto / bare-metal app code directly against
-`<alp/...>` headers.  Pick instance IDs by hand from
-`<alp/e1m_pinout.h>` (`ALP_E1M_I2C0`, `ALP_E1M_PWM3`, …).  Your
-app stays portable across every E1M-conformant SoM.  The rest
-of this document covers this path.
+`<alp/...>` headers.  Pick instance IDs from the pinout namespace
+for your form factor: `<alp/e1m_pinout.h>` exposes E1M IDs such as
+`ALP_E1M_I2C0` / `ALP_E1M_PWM3`; `<alp/e1m_x_pinout.h>` exposes
+the parallel E1M-X IDs such as `ALP_E1M_X_I2C0` /
+`ALP_E1M_X_PWM3`.  Your app stays portable within that form factor
+and SoM family.  The rest of this document covers this path.
 
 ### 2.2 alp-studio codegen (optional, on top of alp-sdk)
 

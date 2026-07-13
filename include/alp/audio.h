@@ -70,6 +70,28 @@ typedef struct {
 	uint16_t           frames_per_block; /**< Block size for DMA / ring queueing. */
 } alp_audio_config_t;
 
+/**
+ * @brief Default-initialize an @ref alp_audio_config_t for peripheral @p id.
+ *
+ * Identity from @p id; canonical defaults (matching the mic capture
+ * example above): @c sample_rate_hz = 16000 (16 kHz -- the common
+ * voice-band rate), @c channels = 1 (mono), @c format = @ref
+ * ALP_AUDIO_FMT_S16_LE (the most portable PCM format), @c
+ * frames_per_block = 256 (a common DMA/ring block size). Shared by
+ * both @ref alp_audio_in_open and @ref alp_audio_out_open.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_AUDIO_CONFIG_DEFAULT(id) \
+	((alp_audio_config_t){ .peripheral_id    = (id), \
+	                       .sample_rate_hz   = 16000u, \
+	                       .channels         = 1u, \
+	                       .format           = ALP_AUDIO_FMT_S16_LE, \
+	                       .frames_per_block = 256u })
+
 /* ------------------------------------------------------------------ */
 /* Audio input (PDM mic, line-in)                                      */
 /* ------------------------------------------------------------------ */
@@ -121,8 +143,11 @@ alp_status_t alp_audio_in_stop(alp_audio_in_t *in);
  * @param[in]  timeout_ms   Max wait for available frames.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
  */
-alp_status_t alp_audio_in_read(
-    alp_audio_in_t *in, void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms);
+alp_status_t alp_audio_in_read(alp_audio_in_t *in,
+                               void           *buf,
+                               size_t          frames,
+                               size_t         *out_frames,
+                               uint32_t        timeout_ms);
 
 /**
  * @brief Stop, free buffers, release handle.  NULL is a no-op.
@@ -189,8 +214,11 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  * @param[in]  timeout_ms   Max wait for driver readiness.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
  */
-alp_status_t alp_audio_out_write(
-    alp_audio_out_t *out, const void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms);
+alp_status_t alp_audio_out_write(alp_audio_out_t *out,
+                                 const void      *buf,
+                                 size_t           frames,
+                                 size_t          *out_frames,
+                                 uint32_t         timeout_ms);
 
 /**
  * @brief Adjust output volume.

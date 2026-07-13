@@ -34,7 +34,8 @@
       "freq_mhz": 200,
       "isa": "Armv8-M",
       "trustzone": true,
-      "fpu": "single-precision"
+      "fpu": "single-precision",
+      "zephyr_cpucluster": "cm33"
     }
   ],
   "npus": [
@@ -140,7 +141,9 @@
       "temperature_grade": "industrial",
       "optional_features": { "gpu_mali_g31": true,  "isp_mali_c55": true,  "security_crypto": false },
       "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"],
-      "alp_module_skus": ["E1M-V2N101", "E1M-V2N102", "E1M-V2M101", "E1M-V2M102"]
+      "alp_module_skus": ["E1M-V2N101", "E1M-V2N102", "E1M-V2M101", "E1M-V2M102"],
+      "zephyr_soc_variant": "r9a09g056n48gbg",
+      "notes": "Zephyr upstream only models the n48gbg die (no n44gbg SOC_* Kconfig symbol); the n44/n48 delta is GPU/ISP/crypto fusing only, devicetree-identical for the M33 + SPI/I2C peripherals this SDK targets.  zephyr_soc_variant names the Kconfig/devicetree symbol Zephyr board artefacts reference in place of order_code."
     },
     {
       "order_code": "R9A09G056N45GBG",

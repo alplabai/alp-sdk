@@ -7,7 +7,8 @@
       "lvgl",
       "cmsis-dsp",
       "nanopb",
-      "zcbor"
+      "zcbor",
+      "modbus"
     ],
     "excludedLibraries": {
       "cmsis-nn": "Zephyr's CMSIS-NN Kconfig depends on CPU_CORTEX_M, so native_sim cannot build it; metadata and emission are covered by Python tests until a real Cortex-M board build lane is available."

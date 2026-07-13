@@ -91,6 +91,8 @@ manifest:
       url-base: https://github.com/lieff
     - name: xiph               # opus
       url-base: https://github.com/xiph
+    - name: ultraembedded      # libhelix-mp3 (real Helix fixed-point MP3
+      url-base: https://github.com/ultraembedded   # decoder; xiph has no libhelix)
     - name: catchorg           # Catch2
       url-base: https://github.com/catchorg
     - name: stephane           # libmodbus
@@ -104,6 +106,19 @@ manifest:
                               # tarball-only; mirror tracks main branch).
     - name: micro-ROS
       url-base: https://github.com/micro-ROS
+    # extras-cpp remotes (Task 0 3p-library-examples batch): three
+    # header-only C++ libraries with no Zephyr module.yml, so they
+    # can't ride the extras-tier1 mechanism.  Pins here are the
+    # audit trail / version source-of-truth; the actual build
+    # resolves against the vendored copies under vendors/<lib>/
+    # (see vendors/{etl,fmt,doctest}/README.md) because `west
+    # update` cannot run against an out-of-workspace worktree.
+    - name: etlcpp
+      url-base: https://github.com/ETLCPP
+    - name: fmtlib
+      url-base: https://github.com/fmtlib
+    - name: doctest-org
+      url-base: https://github.com/doctest
 
   # Groups disabled by default.  Entries pinned below for audit
   # in source control, but `west update` on a v0.3 workspace does
@@ -111,9 +126,11 @@ manifest:
   # Flip via `west update --group-filter +<group>` (or by editing
   # this filter line) when the consuming work lands.
   #
-  # `extras-v04`     - lwrb + nanopb pins for v0.4 wave-2 consumers.
-  #                    See vendors/lwrb/README.md +
-  #                    vendors/nanopb/README.md.
+  # `extras-lwrb-nanopb` - lwrb + nanopb pins for the SDK-internal
+  #                    consumers (UART RX ring buffer, mproc IPC
+  #                    framing).  Deferred / interim as of v0.9 --
+  #                    no committed release swaps this group on; see
+  #                    vendors/lwrb/README.md + vendors/nanopb/README.md.
   # `extras-tier1`   - upstream pins for the 14 Tier 1 §D.lib batch
   #                    libraries that aren't in Zephyr's modules
   #                    tree (u8g2, libcoap, tinygsm, libwebsockets,
@@ -134,9 +151,20 @@ manifest:
   #                    docs/getting-started.md §8 and
   #                    docs/vendor-partnerships.md for the licence
   #                    story before enabling on a customer build.
+  # `extras-cpp`     - etl / fmt / doctest.  Header-only C++ libs
+  #                    with no Zephyr module.yml.  Disabled by
+  #                    default like extras-tier1; unlike
+  #                    extras-tier1 the SDK does NOT wait for this
+  #                    group to build against them -- the vendored
+  #                    copies under vendors/{etl,fmt,doctest}/
+  #                    always satisfy the #include regardless of
+  #                    this group's state.  Pinned here purely as
+  #                    the audit trail / version source-of-truth;
+  #                    see vendors/{etl,fmt,doctest}/README.md.
   group-filter:
-    - -extras-v04
+    - -extras-lwrb-nanopb
     - -extras-tier1
+    - -extras-cpp
     - -vendor-sdks
 
   projects:
@@ -169,6 +197,22 @@ manifest:
           # hal_nxp covers i.MX 93 (E1M-NX9101).
           - hal_renesas
           - hal_nxp
+          # Upstream littlefs C library (modules/fs/littlefs, group
+          # "fs" in Zephyr's own west.yml).  Backs
+          # CONFIG_FILE_SYSTEM_LITTLEFS (config FILE_SYSTEM_LITTLEFS
+          # `depends on ZEPHYR_LITTLEFS_MODULE`, auto-set by Zephyr's
+          # module-resolution pass once this module is present) --
+          # was missing from the allowlist, so `libraries: [littlefs]`
+          # emitted the right CONFIG_* lines (see _LIBRARY_KCONFIG in
+          # scripts/alp_project.py) but `west update` never actually
+          # fetched the module a real Kconfig solve needs (#3p-lib-examples
+          # Task 0). NOTE: as of this fix, any <zephyr-workspace> topdir
+          # this SDK is verified against that was set up before this
+          # allowlist entry landed predates it -- a `west update` in
+          # that workspace's own topdir manifest is required before
+          # littlefs-keyvalue
+          # actually builds; see the Task 0 completion report.
+          - littlefs
           - cmsis
           # cmsis_6 provides cmsis_core.h for Cortex-M targets on Zephyr
           # v4.4 (the legacy `cmsis` module now serves Cortex-A/R only).
@@ -204,27 +248,45 @@ manifest:
           # backend's MbedTLS-PSA fallthrough, examples/aen/aen-se-crypto)
           # resolves on `west update` without the bench-side symlink.
           - tf-psa-crypto
-          # nanopb is also pulled in by Zephyr's tree when ALP_NANOPB
-          # is enabled.  Our SDK uses it via the upstream Zephyr
-          # module (no extras-tier1 pin needed for v0.5).
+          # NOTE: nanopb is intentionally NOT allowlisted here. It backs
+          # `libraries: [nanopb]` (metadata/libraries/nanopb.yaml,
+          # CONFIG_NANOPB) and examples/connectivity/nanopb-encode-decode,
+          # and Zephyr's own west.yml carries an unconditioned
+          # `modules/lib/nanopb` project -- but alp-sdk's own manifest
+          # ALSO defines a project named `nanopb` at that same path
+          # (below, under the disabled-by-default `extras-lwrb-nanopb`
+          # group, SDK-internal mproc IPC framing). West's import
+          # resolution lets a same-named top-level project shadow an
+          # imported one regardless of the name-allowlist, so adding
+          # `nanopb` here has no effect either way: the disabled group
+          # always wins and the import entry is dead weight. CI
+          # (pr-twister.yml) doesn't go through this manifest at all --
+          # it inits its topdir straight from Zephyr's own west.yml
+          # (`west init -m zephyr`), so nanopb already resolves there
+          # via Zephyr's unconditioned project, independent of this
+          # file. See littlefs's allowlist entry above for the pattern
+          # that DOES work (no colliding top-level project of the same
+          # name to shadow it).
 
-    # SDK-internal dependencies pinned ahead of their v0.4 consumers.
-    # Behind the `extras-v04` group (disabled above) so v0.3
-    # workspaces never see them on `west update`.  The vendor stub
-    # headers under `vendors/{lwrb,nanopb}/include/` keep SDK source
-    # link-clean until v0.4 swaps the real upstream in.
+    # SDK-internal dependencies pinned ahead of their consumers landing
+    # for real.  Behind the `extras-lwrb-nanopb` group (disabled above)
+    # so a default workspace never sees them on `west update`.  The
+    # vendor stub headers under `vendors/{lwrb,nanopb}/include/` keep
+    # SDK source link-clean until the group is flipped on and the real
+    # upstream sources swap in -- interim/deferred as of v0.9, no
+    # committed release date.
     - name: lwrb
       remote: majerle
       revision: v3.2.0
       path: modules/lib/lwrb
       groups:
-        - extras-v04
+        - extras-lwrb-nanopb
     - name: nanopb
       remote: nanopb
       revision: nanopb-0.4.9
       path: modules/lib/nanopb
       groups:
-        - extras-v04
+        - extras-lwrb-nanopb
 
     # micro-ROS Zephyr module for the ADR 0018 Zephyr+ROS 2 flagship.
     # Pinned to the Humble branch revision verified on 2026-07-05; the
@@ -299,9 +361,19 @@ manifest:
       groups:
         - extras-tier1
     - name: libhelix
-      remote: xiph
-      repo-path: libhelix         # TBD: confirm canonical upstream + tag.
-      revision: main
+      remote: ultraembedded
+      repo-path: libhelix-mp3     # Real Helix fixed-point MP3 decoder. The
+                                  # old `xiph/libhelix` pin was an empty repo;
+                                  # ultraembedded/libhelix-mp3 is the canonical
+                                  # community source (RealNetworks RCSL/RPSL
+                                  # licence -- source-available, NOT Apache; a
+                                  # west *reference* only, never vendored into
+                                  # this tree).  It ships ARM/x86 fixed-point
+                                  # kernels via real/assembly.h and #errors on
+                                  # generic hosts, so it builds on ARM targets,
+                                  # not native_sim -- see
+                                  # examples/audio/libhelix-decode/README.md.
+      revision: 0a0e0673f82bc6804e5a3ddb15fb6efdcde747cd
       path: modules/lib/libhelix
       groups:
         - extras-tier1
@@ -344,6 +416,37 @@ manifest:
         - extras-tier1
     # gfx_compat is maintainer-written and ships in-tree under
     # src/lib/gfx_compat/ -- no west pin needed.
+
+    # ---------------------------------------------------------------
+    # extras-cpp -- 3 header-only C++ libraries with no Zephyr
+    # module.yml (so they can't ride extras-tier1's west-project
+    # mechanism the way u8g2/libcoap/etc. do).  Disabled by default;
+    # pinned here as the audit trail / version source-of-truth for
+    # the vendored copies under vendors/{etl,fmt,doctest}/ -- see
+    # those READMEs for why the build does not depend on this group
+    # actually being fetched.
+    # ---------------------------------------------------------------
+    - name: etl
+      remote: etlcpp
+      repo-path: etl
+      revision: 20.39.4           # matches vendors/etl/ + metadata/library-profiles/etl/.
+      path: modules/lib/etl
+      groups:
+        - extras-cpp
+    - name: fmt
+      remote: fmtlib
+      repo-path: fmt
+      revision: 11.0.2            # matches vendors/fmt/ + metadata/library-profiles/fmt/.
+      path: modules/lib/fmt
+      groups:
+        - extras-cpp
+    - name: doctest
+      remote: doctest-org
+      repo-path: doctest
+      revision: v2.4.11           # matches vendors/doctest/ + metadata/library-profiles/doctest/.
+      path: modules/lib/doctest
+      groups:
+        - extras-cpp
 
     # Optional vendor-source pins behind the `vendor-sdks` group.
     # Pinned to the maintainer-verified tags (per §C.33/34/35

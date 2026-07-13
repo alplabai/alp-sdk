@@ -45,7 +45,10 @@ static void synth_sine(float freq_hz)
 	}
 }
 
-/* Find the (non-DC) bin with the largest magnitude. */
+/* Find the (non-DC) bin with the largest magnitude.  Bin 0 is DC (the
+ * signal's average level), which for a pure sine input is near zero but
+ * can dominate on real audio -- start the search at bin 1 so a DC offset
+ * never masquerades as the tone we're actually looking for. */
 static uint32_t dominant_bin(void)
 {
 	uint32_t best = 1u;
@@ -86,6 +89,9 @@ int main(void)
 {
 	printf("[a55] heterogeneous-offload requester coming up\n");
 
+	/* Endpoints are mirrored relative to the M33-SM worker's config: this
+	 * side's src is the worker's dst and vice versa, so both ends land on
+	 * the same pair of RPMsg endpoint ids from the one generated header. */
 	const alp_rpc_config_t cfg = {
 		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
 		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,

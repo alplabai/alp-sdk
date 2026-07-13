@@ -55,7 +55,10 @@ attempting to deploy firmware to it.
 
 The example's `board.yaml` declares the EEPROM at the V2N default
 bus (ALP_E1M_I2C0) + address (`0x50`).  Change those values if your
-board wires the EEPROM elsewhere.
+board wires the EEPROM elsewhere.  The `features.hw_info.eeprom`
+block emits the corresponding `CONFIG_ALP_SDK_HW_INFO_EEPROM_*`
+values and records the resolved bus/address/offset in
+`system-manifest.yaml`.
 
 ## See also
 

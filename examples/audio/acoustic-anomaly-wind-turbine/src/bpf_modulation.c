@@ -46,6 +46,19 @@ void bpf_env_push(struct bpf_env_state *st, float frame_energy)
 /* ---------------------------------------------------------------------------
  * goertzel_power -- |X(f)|^2 at an arbitrary target frequency via Goertzel.
  *
+ * WHY THIS STAYS HAND-ROLLED (not swapped for an FFT / CMSIS-DSP call):
+ *   acoustic_features.c moved its full-spectrum FFT onto the portable
+ *   <alp/dsp.h> chain (CMSIS-DSP arm_rfft_fast_f32 backend) because it
+ *   needs every bin.  This file needs exactly ONE bin -- the live
+ *   blade-pass harmonic k*bpf_hz, which shifts every call with the
+ *   current RPM estimate and therefore never lands on a fixed FFT bin
+ *   boundary.  An N-point FFT computes O(N log N) work to produce N
+ *   bins and then discards all but one; the O(N) single-bin Goertzel
+ *   recurrence below computes only the bin actually needed, at an
+ *   arbitrary (non-bin-aligned) frequency.  CMSIS-DSP ships no Goertzel
+ *   kernel to call instead, so this stays a portable loop -- it is the
+ *   textbook-correct, cheaper tool for this job, not a gap.
+ *
  * The Goertzel algorithm evaluates a single DFT bin without computing the full
  * FFT.  For a sequence x[0..n-1] and a target frequency target_hz at sample
  * rate fs, the normalised digital frequency is:

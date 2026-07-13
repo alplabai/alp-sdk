@@ -34,15 +34,22 @@ bridge image, factory first-flash, dev-board bring-up).
 
 ## Pin model + board dependency
 
-The SWD pin assignments on V2N are **TBD** in the schematic
-(per `metadata/chips/gd32_swd.yaml`).  The example uses
-studio-resolved pin ids — `alp_gpio_open` returns NULL if the
-board preset hasn't routed the lines yet, and the example exits
-cleanly with a log message rather than wedging the host.
+The SWD pin assignments on V2N are **resolved**: SWDIO -> Renesas
+`P70`, SWCLK -> Renesas `P71`, NRST -> Renesas `P74` (open-drain,
+shared with the primary PMIC reset-out) — see
+`metadata/chips/gd32_swd.yaml`.  `src/main.c` opens these via the
+board preset's pin ids (`V2N_GD32_SWDIO_PIN_ID` /
+`V2N_GD32_SWCLK_PIN_ID` / `V2N_GD32_NRST_PIN_ID`); `alp_gpio_open`
+returns NULL if an older board preset hasn't picked up the routing
+yet, and the example exits cleanly with a log message rather than
+wedging the host.
 
 If your board wires the SWD lines to non-default pads, override
 the three `pin_id` constants at the top of `src/main.c` (or extend
 `board.yaml` with the studio routing for your custom pad mapping).
+Bench validation of the resolved routing against real V2N silicon
+is still ahead — see `docs/v1.0-readiness.md` §1a and
+`docs/test-plan.md`.
 
 ## Safety
 

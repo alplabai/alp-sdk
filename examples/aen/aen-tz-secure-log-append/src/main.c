@@ -27,15 +27,25 @@
 #define MBOX_OFF  0x100U /* request mailbox offset inside the NS chunk */
 #define APP_VALUE 0xC0DE1234U
 
+/* SAU regs (SCS_BASE 0xE000E000 + 0xDD0): same registers the sibling
+ * aen-tz-secure-log-probe uses to carve the NS chunk -- see that file for the
+ * per-register breakdown. Here they gate only the mailbox/stub area, not the
+ * log store, so the log stays Secure-only for the whole run. */
 #define SAU_CTRL (*(volatile uint32_t *)0xE000EDD0U)
 #define SAU_RNR  (*(volatile uint32_t *)0xE000EDD8U)
 #define SAU_RBAR (*(volatile uint32_t *)0xE000EDDCU)
 #define SAU_RLAR (*(volatile uint32_t *)0xE000EDE0U)
 
+/* Alif TGU: the DTCM-block-granular sibling of the SAU (which only expresses
+ * a small number of coarse regions). Both must agree an address is NS or the
+ * access still faults. */
 #define DTGU_BASE   0xE001E600U
 #define DTGU_CFG    (*(volatile uint32_t *)(DTGU_BASE + 0x4U))
 #define DTGU_LUT(n) (*(volatile uint32_t *)(DTGU_BASE + 0x10U + 4U * (n)))
 
+/* SecureFault enable + status/address (ARMv8-M SCB) -- read in the fatal
+ * handler to tell "the illegal store faulted as expected" apart from any
+ * other reason we ended up there. */
 #define SCB_SHCSR            (*(volatile uint32_t *)0xE000ED24U)
 #define SHCSR_SECUREFAULTENA (1U << 19)
 #define SCB_SFSR             (*(volatile uint32_t *)0xE000EDE4U)
@@ -43,10 +53,12 @@
 
 #define BEACON   ((volatile uint32_t *)0x02001100U)
 #define TZ_MAGIC 0x545A4C41U /* "TZLA" */
-#define RES_PASS 4U
-#define RES_FAIL 5U
+#define RES_PASS 4U          /* beacon[3]: attack store faulted with AUVIOL, as required */
+#define RES_FAIL 5U          /* beacon[3]: attack store did NOT fault -> log not enforced */
 
 static volatile uint32_t g_stage;
+/* Which NS call is in flight; the fatal handler reads this to decide whether
+ * a fault was the *expected* one (ST_ATTACK) or an unrelated crash (ST_REQ). */
 enum { ST_REQ = 1, ST_ATTACK = 3 };
 
 /* Secure log store (owner-only). Default-Secure. */
@@ -61,9 +73,17 @@ static const uint16_t ns_request_stub[] = { 0x6001, 0x4770 };
 /* NS "attack" stub: str r0,[r0] ; b .     -> illegal direct store to the Secure log. */
 static const uint16_t ns_attack_stub[] = { 0x6000, 0xE7FE };
 
+/* cmse_nonsecure_call makes the compiler emit BLXNS + clear the callee
+ * pointer's LSB, and treat the call as a security-state transition (args are
+ * sanitised the way a real S->NS boundary would be). Both stubs are called
+ * this way even though they're only two Thumb instructions each. */
 typedef void (*ns_req_t)(uint32_t mbox, uint32_t val) __attribute__((cmse_nonsecure_call));
 typedef void (*ns_atk_t)(uint32_t log) __attribute__((cmse_nonsecure_call));
 
+/* The illegal store in Phase 2 never returns -- the AttributionUnit
+ * Violation escalates to a Secure HardFault, which Zephyr routes here. This
+ * IS the pass path, not an error path: we inspect SFSR/g_stage to confirm
+ * the fault happened exactly where expected, then report and halt. */
 void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 {
 	ARG_UNUSED(esf);
@@ -109,6 +129,9 @@ int main(void)
 	*(volatile uint32_t *)(ns_base + MBOX_OFF) = 0U;
 	__DSB();
 	__ISB();
+	/* An NS call needs its own NS stack -- MSP_NS is a banked register the
+	 * Secure world must seed before the first BLXNS, or the NS code faults
+	 * immediately on entry instead of running the intended scenario. */
 	__TZ_set_MSP_NS((ns_base + sizeof(ns_area)) & ~0x7U);
 
 	/* Phase 1 (app): write an append request into the NS mailbox, then return. */

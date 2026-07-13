@@ -9,12 +9,14 @@
 
 #include "../backends/inference/alp_model_select.h"
 
-/* TLS last-error setters (same ones the dispatchers use). */
+/* Thread-local last-error setters (same ones the dispatchers use);
+ * consumed via the private contract headers rather than hand-written
+ * externs (issue #627). */
 #if defined(__ZEPHYR__)
-extern void alp_z_set_last_error(alp_status_t s);
+#include "alp_z_last_error.h"
 #define SET_ERR(s) alp_z_set_last_error(s)
 #else
-extern void alp_internal_set_last_error(alp_status_t s);
+#include "alp_internal.h"
 #define SET_ERR(s) alp_internal_set_last_error(s)
 #endif
 
@@ -75,7 +77,7 @@ alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 	 * the on-SoC NPU from this core (Ethos-U on M-class).  A V2N
 	 * M33 build passes NULL here so DRP-AI targets are never
 	 * offered to a core that cannot run them (issue #58). */
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) ||                                       \
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) || \
     defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
 		.soc_ref = ALP_SOC_REF_STR,
 #else

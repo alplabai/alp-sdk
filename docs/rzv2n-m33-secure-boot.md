@@ -48,6 +48,12 @@ head -c 12288 /dev/zero > pad.bin && cat pad.bin zephyr.bin > m33_fw.bin
 Board mtd: `mtd0="bl2"`@0x0, `mtd1="fip"`@0x60000. The M33 slot `0x200000` =
 **mtd1 offset `0x1a0000`** (past the ~1.1 MB FIP).
 
+<!-- cross-platform-lint:ignore -->
+These commands run in a shell **on the board itself** (over the serial
+console after the transfer step), not on the developer host -- the
+target always runs embedded Linux regardless of the host OS you're
+developing from, so `/root/...` and the MTD utilities below are correct
+as written on every host.
 ```sh
 # (transfer m33_fw.bin + the new bl2_bp_spi.bin to the board, e.g. via socat)
 mtd_debug read /dev/mtd0 0 0x60000 /root/mtd0_backup.bin   # back up current BL2
@@ -55,6 +61,7 @@ flash_erase /dev/mtd1 0x1a0000 17 && mtd_debug write /dev/mtd1 0x1a0000 67224 m3
 flashcp -v bl2_bp_spi.bin /dev/mtd0
 reboot
 ```
+<!-- cross-platform-lint:resume -->
 Recovery if a bad BL2 won't boot: SCIF Flash Writer + a known-good `bl2_bp_spi*.srec`.
 
 ## Verify from the GD32 side (J-Link, no CM33 console needed)

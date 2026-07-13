@@ -52,7 +52,7 @@ into the `alif-tiny-image`.
 | [`aen-se-service-info`](aen-se-service-info/)      | **staging** -- SE SERVICE transport binds + a single LCS read over the bench RAM-run flow (deliberately vendor-specific bring-up regcheck; customer code uses the portable wrappers instead). |
 | [`aen-se-service-query`](aen-se-service-query/)    | **bench** -- READ-ONLY dump of the portable SE-backed surfaces: SoC identity (`<alp/hw_info.h>`), RUN/STANDBY profiles (`<alp/power.h>`), TRNG (`<alp/security.h>`). |
 | [`aen-se-crypto`](aen-se-crypto/)                  | SHA-256 known-answer + AES-128-GCM round-trip + TRNG through `<alp/security.h>`, backed by the SE CryptoCell (else MbedTLS-PSA fallback). |
-| [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M sanity + ECDSA-P256 sign over BRD_I2C (LPI2C0, M55-HE) via the portable `<alp/...>` API; the §5.2 bench OPTIGA check. |
+| [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M I2C_STATE probe over BRD_I2C (LPI2C0, M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT` until host-library integration. |
 
 ### NPU + AI accelerators
 
@@ -72,6 +72,7 @@ into the `alif-tiny-image`.
 | [`aen-camera-regcheck`](aen-camera-regcheck/)      | **staging** -- camera-capture stack (`alif,cam` / DesignWare CSI-2 + D-PHY / ON Semi ARX3A0) binds; sensor not wired this batch. |
 | [`aen-isp-regcheck`](aen-isp-regcheck/)            | **staging** -- VeriSilicon ISP Pico (`vsi,isp-pico`) bind-only staging check. |
 | [`aen-dsi-regcheck`](aen-dsi-regcheck/)            | **staging** -- Alif C2-MIPI-DSI display stack bind-only check (the TX twin of the CSI camera path). |
+| [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY. |
 | [`aen-i2s-amp-alif`](aen-i2s-amp-alif/)            | Drive a tone out of the E8 audio I2S (`i2s3`) over the vendored DesignWare I2S driver (Zephyr I2S API). |
 | [`aen-pdm-mic-alif`](aen-pdm-mic-alif/)            | Capture PCM from the EVK's PDM mics (MP34DT05) through the HP PDM block + the vendored `alif,alif-pdm` DMIC driver (Zephyr DMIC API). |
 
@@ -139,6 +140,6 @@ i2c, pwm, ...) stay at the top level of `examples/`.
   one-pager + supported peripherals.
 - [`docs/getting-started.md`](../../docs/getting-started.md) --
   EVK bring-up flow that lands you ready to run these examples.
-- AEN feature coverage matrix -- maintained in the
-  internal `alp-sdk-internal` repo as `AEN-FEATURE-AUDIT-2026-05.md`
-  (what the SDK exposes vs the silicon's full surface).
+- [`docs/os-support-matrix.md`](../../docs/os-support-matrix.md) --
+  what the SDK exposes with real AEN backends versus fallback/stub
+  coverage.

@@ -26,7 +26,7 @@ void viewer_ui_build(void)
 	lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
 
 	/* Preview pane.  Real capture path fills this with the
-     * camera frame; v0.5 fallback paints it a colour as a
+     * camera frame; the fallback paints it a colour as a
      * visible "no frame" placeholder. */
 	s_preview = lv_obj_create(scr);
 	lv_obj_set_size(s_preview, 240, 240);

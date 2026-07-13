@@ -25,13 +25,13 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_orchestrate import load_board_yaml  # noqa: E402
 from alp_orchestrate.kconfig import _slice_alp_conf, _slice_local_conf  # noqa: E402
-from alp_orchestrate.models import OrchestratorError  # noqa: E402
+from alp_orchestrate.models import BoardProject, OrchestratorError, Slice  # noqa: E402
 from alp_orchestrate import libraries as liblayer  # noqa: E402
 
 LIBRARY_SCHEMA = REPO / "metadata" / "schemas" / "library-v1.schema.json"
 LIBRARIES_DIR = REPO / "metadata" / "libraries"
 
-EXPECTED_LIBS = {"lvgl", "cmsis-dsp", "cmsis-nn", "nanopb", "zcbor"}
+EXPECTED_LIBS = {"lvgl", "cmsis-dsp", "cmsis-nn", "nanopb", "zcbor", "modbus"}
 
 
 def _write_board(tmp: Path, body: str) -> Path:
@@ -579,3 +579,125 @@ def test_lwm2m_on_non_zephyr_target_errors(tmp_path: Path) -> None:
         liblayer.resolve_selection(project)
     msg = str(exc.value)
     assert "lwm2m" in msg and "zephyr" in msg
+
+
+# ---------------------------------------------------------------------
+# ADR 0018 industrial connectivity + scripting additions
+#
+# Grounding (2026-07-07):
+#   * CONFIG_MODBUS       $ZEPHYR_BASE/subsys/modbus/Kconfig `menuconfig MODBUS`
+#   * CONFIG_CANOPENNODE  $ZEPHYR_BASE/modules/canopennode/Kconfig
+#                         `config CANOPENNODE`
+#   * canopennode west pin from $ZEPHYR_BASE/submanifests/optional.yaml
+#   * micropython is not in the pinned workspace; exact source pin lives in
+#     integration.zephyr.west and no CONFIG is invented.
+# ---------------------------------------------------------------------
+
+INDUSTRIAL_SCRIPTING_LIBS = {"modbus", "canopennode", "micropython"}
+
+
+def test_industrial_scripting_manifests_present() -> None:
+    on_disk = {p.stem for p in LIBRARIES_DIR.glob("*.yaml")}
+    assert INDUSTRIAL_SCRIPTING_LIBS <= on_disk, (
+        f"missing manifests: {INDUSTRIAL_SCRIPTING_LIBS - on_disk}")
+
+
+def test_modbus_manifest_is_tier_a_in_tree() -> None:
+    doc = yaml.safe_load((LIBRARIES_DIR / "modbus.yaml").read_text(encoding="utf-8"))
+    assert doc["tier"] == "A"
+    assert doc["version"] == "4.4.0"
+    assert doc["license"] == "Apache-2.0"
+    zephyr = doc["integration"]["zephyr"]
+    assert zephyr.get("module") is None
+    assert zephyr.get("kconfig") == ["CONFIG_MODBUS=y"]
+
+
+def test_canopennode_manifest_records_optional_west_pin() -> None:
+    doc = yaml.safe_load((LIBRARIES_DIR / "canopennode.yaml").read_text(encoding="utf-8"))
+    assert doc["tier"] == "B"
+    assert doc["license"] == "Apache-2.0"
+    assert doc["version"] == "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd"
+    zephyr = doc["integration"]["zephyr"]
+    assert zephyr.get("module") == "canopennode"
+    assert zephyr.get("kconfig") == ["CONFIG_CANOPENNODE=y"]
+    assert zephyr["west"]["name"] == "canopennode"
+    assert zephyr["west"]["revision"] == "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd"
+    assert zephyr["west"]["path"] == "modules/lib/canopennode"
+
+
+def test_micropython_manifest_is_module_only_source_pin() -> None:
+    doc = yaml.safe_load((LIBRARIES_DIR / "micropython.yaml").read_text(encoding="utf-8"))
+    assert doc["tier"] == "B"
+    assert doc["version"] == "v1.24.1"
+    assert doc["license"] == "MIT"
+    zephyr = doc["integration"]["zephyr"]
+    assert zephyr.get("module") == "micropython"
+    assert zephyr["west"]["revision"] == "v1.24.1"
+    assert zephyr["west"]["path"] == "modules/lib/micropython"
+    assert "kconfig" not in zephyr, "no MicroPython Kconfig may be invented"
+
+
+_V2N_MODBUS_CANOPEN = """
+som:
+  sku: E1M-V2N101
+libraries: [modbus, canopennode]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
+
+def test_emit_modbus_canopennode_zephyr_kconfig(tmp_path: Path) -> None:
+    """The industrial libraries emit their grounded upstream enable symbols."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_MODBUS_CANOPEN))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "CONFIG_MODBUS=y" in out
+    assert "CONFIG_CANOPENNODE=y" in out
+    assert "modbus v4.4.0" in out
+    assert "canopennode vdec12fa3f0d790cafa8414a4c2930ea71ab72ffd" in out
+
+
+_V2N_MICROPYTHON = """
+som:
+  sku: E1M-V2N101
+libraries: [micropython]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
+
+def test_emit_micropython_module_only_no_kconfig(tmp_path: Path) -> None:
+    """MicroPython emits a selection tag and no fabricated CONFIG line."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_MICROPYTHON))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "ADR 0018" in out
+    assert "micropython v1.24.1" in out
+    assert "west module `micropython`" in out
+    assert "CONFIG_MICROPYTHON" not in out
+
+
+def test_new_m_class_libraries_reject_a_only_soc() -> None:
+    """The new Zephyr/Cortex-M entries name core_class on an A-only target."""
+    project = BoardProject(
+        sku="E1M-TST-AONLY",
+        hw_rev=None,
+        board_name=None,
+        board_hw_rev=None,
+        cores={"a0": Slice(core_id="a0", os="zephyr")},
+        ipc=[],
+        soc_spec={
+            "cores": [{"id": "a0", "type": "cortex-a55"}],
+            "soc_ram_kb": 4096,
+        },
+        som_preset={},
+        board_preset=None,
+    )
+    for name in sorted(INDUSTRIAL_SCRIPTING_LIBS):
+        manifest = yaml.safe_load((LIBRARIES_DIR / f"{name}.yaml").read_text(encoding="utf-8"))
+        with pytest.raises(OrchestratorError) as exc:
+            liblayer._check_requires(name, manifest, project, liblayer.METADATA_ROOT)
+        assert name in str(exc.value)
+        assert "core_class" in str(exc.value)

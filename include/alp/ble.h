@@ -105,6 +105,28 @@ typedef struct {
 } alp_ble_adv_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_ble_adv_config_t with local name @p id.
+ *
+ * Identity from @p id (the advertised local name); canonical defaults
+ * (matching the peripheral-role example above): @c services = NULL /
+ * @c num_services = 0 (no service UUIDs advertised -- add them after
+ * expansion), @c interval_min_ms = 100 / @c interval_max_ms = 200 (a
+ * common, moderate advertising cadence), @c connectable = true.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_BLE_ADV_CONFIG_DEFAULT(id) \
+	((alp_ble_adv_config_t){ .name            = (id), \
+	                         .services        = NULL, \
+	                         .num_services    = 0u, \
+	                         .interval_min_ms = 100u, \
+	                         .interval_max_ms = 200u, \
+	                         .connectable     = true })
+
+/**
  * @brief Begin advertising with the given parameters.
  *
  * @param[in] ble  Host handle from @ref alp_ble_open.
