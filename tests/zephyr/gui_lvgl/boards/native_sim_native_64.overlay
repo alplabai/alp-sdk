@@ -1,0 +1,29 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim board overlay -- LVGL's own Zephyr glue (modules/lvgl/
+ * lvgl.c) requires a "zephyr,display" chosen node (or a zephyr,displays
+ * compatible node) to compile at all, even though this suite's
+ * alp_gui_lvgl_attach() bridge never touches it: the bridge creates its
+ * OWN independent lv_display_t bound to the priority-255 test-double
+ * display backend registered in src/main.c (see that file's header --
+ * the "don't point an alp-displayN alias at the panel LVGL owns"
+ * caution in src/backends/display/zephyr_drv.c does not apply here,
+ * because this dummy_dc is deliberately NOT aliased to any alp-displayN
+ * slot). Wiring the dummy display driver here just satisfies LVGL's
+ * compile-time requirement cheaply -- same choice lvgl-benchmark /
+ * lvgl-widgets-demo make for the same reason.
+ */
+
+/ {
+	chosen {
+		zephyr,display = &dummy_dc;
+	};
+
+	dummy_dc: dummy_dc {
+		compatible = "zephyr,dummy-dc";
+		height = <16>;
+		width = <32>;
+	};
+};

@@ -5,11 +5,30 @@
 
 config ALP_SDK_HAS_LVGL
 	bool "Build <alp/gui.h> against LVGL"
+	depends on LVGL
 	default y if LVGL
 	default n
 	help
-	  Pulls upstream LVGL into the alp_gui_lvgl_attach() path.
-	  Requires CONFIG_LVGL=y.
+	  Pulls upstream LVGL into the alp_gui_lvgl_attach() path: mirrored
+	  into the ALP_HAS_LVGL compile define (zephyr/CMakeLists.txt) that
+	  both <alp/gui.h> (the <lvgl.h> re-export) and src/gui_lvgl.c (the
+	  real flush-callback bridge, issue #23) branch on.  `depends on
+	  LVGL` keeps this from ever being set without the LVGL module
+	  actually being linked -- ALP_HAS_LVGL with no <lvgl.h> on the
+	  include path would fail the build, not degrade gracefully.
+
+config ALP_GUI_LVGL_BUF_LINES
+	int "LVGL partial-refresh draw-buffer height (display lines)"
+	depends on ALP_SDK_HAS_LVGL
+	default 16
+	help
+	  Height, in display lines, of the persistent draw buffer
+	  alp_gui_lvgl_attach() allocates for LV_DISPLAY_RENDER_MODE_PARTIAL
+	  (src/gui_lvgl.c). Buffer size = panel width * this value *
+	  bytes-per-pixel-for-format, clamped to the panel's actual height.
+	  Bigger amortises LVGL's per-flush overhead at the cost of heap;
+	  16 is a conservative default (<=10 KB for a 320px-wide RGB565
+	  panel).
 
 # Note: LwRB + nanopb were previously gated by CONFIG_ALP_SDK_USE_*
 # flags here.  Removed in the v0.3 cleanup -- both are SDK-internal

@@ -832,12 +832,19 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_DISPLAY_ZEPHYR_DRV
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/display/zephyr_drv.c)
 
-# <alp/gui.h> guard-clause implementation.  OS-agnostic (no Zephyr/
-# vendor headers), so compiled unconditionally like cap_helpers.c --
-# the real LVGL hand-off is still unimplemented (issue #23), but the
-# NULL/NOSUPPORT contract paths must link on every build.
+# <alp/gui.h> LVGL bridge.  OS-agnostic (no Zephyr/vendor headers), so
+# compiled unconditionally like cap_helpers.c; the TU itself picks
+# between the real LVGL v9 hand-off and the guard-clause degrade on
+# ALP_HAS_LVGL (see src/gui_lvgl.c's header), so the symbol always
+# links.  CONFIG_ALP_SDK_HAS_LVGL (zephyr/kconfigs/hw-info.kconfig,
+# default y when CONFIG_LVGL=y) is the Kconfig source of truth; mirror
+# it into the ALP_HAS_LVGL compile define app-wide (not just this
+# library) via zephyr_compile_definitions_ifdef, so <alp/gui.h> itself
+# -- included directly by application code, not just this TU -- also
+# sees ALP_HAS_LVGL and pulls in <lvgl.h>.
+zephyr_compile_definitions_ifdef(CONFIG_ALP_SDK_HAS_LVGL ALP_HAS_LVGL=1)
 zephyr_library_sources(
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gui_lvgl_stub.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/gui_lvgl.c)
 
 # 2D graphics accelerator surface (<alp/gpu2d.h>).  The class
 # dispatcher ships whenever the surface is enabled; the portable

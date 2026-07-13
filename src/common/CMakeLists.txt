@@ -12,10 +12,11 @@ if(NOT DEFINED ZEPHYR_BASE)
         # so any dispatcher that #includes alp_slot_claim.h (ble/mqtt/
         # wifi/camera today, in the baremetal/yocto trees) can call it.
         ${CMAKE_CURRENT_SOURCE_DIR}/alp_slot_claim.c
-        # <alp/gui.h> guard-clause implementation -- OS-agnostic
-        # (no OS/vendor headers), so compiled unconditionally here
-        # like the other pure-C helpers above. See issue #23.
-        ${CMAKE_CURRENT_SOURCE_DIR}/../gui_lvgl_stub.c
+        # <alp/gui.h> LVGL bridge -- OS-agnostic (no OS/vendor headers),
+        # so compiled unconditionally here like the other pure-C helpers
+        # above.  Dual-path on ALP_HAS_LVGL (real hand-off vs guard-clause
+        # degrade); see src/gui_lvgl.c's header. See issue #23.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../gui_lvgl.c
         # <alp/cap.h> auto-generated SoC capability table
         # (alp_has / alp_cap_name).  Pure C reading soc_caps.h; falls
         # back to the permissive "unknown SoC" branch when no
