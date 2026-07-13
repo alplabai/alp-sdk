@@ -91,6 +91,12 @@ static void begin_session(uint32_t img_len)
 	size_t  rlen = 0u;
 	zassert_equal(ota_dispatch(CMD_OTA_BEGIN, req, sizeof(req), reply, sizeof(reply), &rlen),
 	              STATUS_OK);
+	/* BEGIN now arms a BACKGROUND erase and acks immediately (#770): the
+	 * slot is not erased inline, so pump ota_erase_tick() the way the main
+	 * loop would until the erase drains and the state reaches READY. */
+	for (unsigned i = 0u; i < (OTA_SLOT_SIZE / OTA_PAGE_SIZE) + 4u; ++i) {
+		ota_erase_tick();
+	}
 }
 
 static gd32_bridge_status_t
@@ -254,4 +260,52 @@ ZTEST(gd32_bridge_ota, test_image_bootable_validates_vector_head)
 	zassert_false(ota_image_bootable(base, img, len), "reset past image end must reject");
 	put32(&img[4], (base - 4u) | 1u); /* before base */
 	zassert_false(ota_image_bootable(base, img, len), "reset before image base must reject");
+}
+
+/* ---- #770: BEGIN arms a background erase, acks immediately ---------- */
+
+static uint8_t ota_state_now(void)
+{
+	uint8_t reply[8] = { 0 };
+	size_t  rlen     = 0u;
+	zassert_equal(ota_dispatch(CMD_OTA_GET_STATE, NULL, 0u, reply, sizeof(reply), &rlen),
+	              STATUS_OK);
+	return reply[0]; /* state:u8 */
+}
+
+/* BEGIN must NOT erase the slot inline (that stalled the SPI reply ~1 s and
+ * hung the host's ota_begin -- #770).  It acks at once with state BUSY;
+ * ota_erase_tick() drains the erase to READY; chunks are rejected until
+ * then. */
+ZTEST(gd32_bridge_ota, test_begin_arms_background_erase)
+{
+	reset_model();
+
+	uint8_t req[8];
+	wr_u32(&req[0], 64u); /* img_len */
+	wr_u32(&req[4], 0u);  /* crc */
+	uint8_t reply[8];
+	size_t  rlen = 0u;
+	/* BEGIN acks immediately -- no inline whole-slot erase. */
+	zassert_equal(ota_dispatch(CMD_OTA_BEGIN, req, sizeof(req), reply, sizeof(reply), &rlen),
+	              STATUS_OK);
+	zassert_equal(ota_state_now(), 2u /* OTA_ST_BUSY */, "BEGIN must leave state BUSY (erasing)");
+
+	/* A chunk before the erase finishes is refused (state not READY). */
+	const uint8_t data[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	uint8_t       wr[8];
+	size_t        wrl = 0u;
+	zassert_equal(write_chunk(0u, data, sizeof(data), wr, &wrl),
+	              STATUS_NOT_READY,
+	              "chunk before erase completes must be rejected");
+
+	/* Pump the erase the way bridge_hw_tick would; state flips to READY. */
+	for (unsigned i = 0u; i < (OTA_SLOT_SIZE / OTA_PAGE_SIZE) + 4u; ++i) {
+		ota_erase_tick();
+	}
+	zassert_equal(ota_state_now(), 1u /* OTA_ST_READY */, "erase drain must reach READY");
+
+	/* Now a chunk is accepted. */
+	zassert_equal(
+	    write_chunk(0u, data, sizeof(data), wr, &wrl), STATUS_OK, "chunk after READY must program");
 }

@@ -74,6 +74,17 @@ static uint32_t s_fw_version;   /* from OTA_BEGIN v0.7 form (packed
                                  * sent the legacy 8-byte form = unknown */
 static uint8_t  s_err;
 
+/* Background slot-erase progress (#770).  BEGIN must NOT erase the whole
+ * 236 KB slot inline: that is a ~1 s RAMFUNC loop with the SPI slave
+ * unserviced, so the BEGIN reply is lost and the host's ota_begin() hangs.
+ * Instead BEGIN arms the erase (state=BUSY) and acks immediately; the main
+ * loop's ota_erase_tick() erases ONE OTA_PAGE_SIZE region per tick (~8 ms
+ * of blackout, which the host's reply re-read absorbs) and flips to READY
+ * when done.  The host already polls GET_STATE for READY before streaming. */
+static bool     s_erasing;   /* an erase is armed + in progress */
+static uint32_t s_erase_at;  /* next flash address to erase */
+static uint32_t s_erase_end; /* one past the last address to erase */
+
 static uint32_t rd_u32(const uint8_t *p)
 {
 	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
@@ -215,14 +226,16 @@ h_begin(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
 		return STATUS_OUT_OF_RANGE;
 	}
 	s_inactive = (active_slot_now() == OTA_SLOT_A) ? OTA_SLOT_B : OTA_SLOT_A;
-	s_state    = OTA_ST_BUSY;
-	if (!ota_fmc_erase_range(ota_inactive_base(), OTA_SLOT_SIZE)) {
-		s_state = OTA_ST_ERROR;
-		s_err   = 2u;
-		return STATUS_IO;
-	}
 	s_last_off = 0u;
-	s_state    = OTA_ST_READY;
+	/* Arm the background erase and ack NOW -- do NOT erase inline (#770).
+     * ota_erase_tick() walks the slot a page-region per main-loop tick;
+     * state stays BUSY until it finishes, then flips to READY.  The host
+     * gets this reply immediately and polls GET_STATE for READY before it
+     * streams the first chunk (h_write rejects anything but READY). */
+	s_erasing   = true;
+	s_erase_at  = ota_inactive_base();
+	s_erase_end = ota_inactive_base() + OTA_SLOT_SIZE;
+	s_state     = OTA_ST_BUSY;
 	/* Host OTA_BEGIN reply: chunk_max:u16 (LE), target_slot:u8.
      * chunk_max accounts for the offset:u32 + len:u8 header (v0.6). */
 	if (cap >= 3u) {
@@ -407,6 +420,30 @@ static gd32_bridge_status_t h_get_state(uint8_t *reply, size_t cap, size_t *rlen
 	return STATUS_OK;
 }
 
+/* Background erase pump (#770): erase ONE OTA_PAGE_SIZE region per call
+ * from the main loop (bridge_hw_tick).  Each call is a bounded ~8 ms
+ * blackout the host's reply re-read absorbs -- unlike the old inline
+ * whole-slot erase that stalled BEGIN's reply for ~1 s.  Flips the OTA
+ * state machine to READY once the slot is fully erased, or ERROR on a
+ * failed page.  No-op unless an erase is armed. */
+void ota_erase_tick(void)
+{
+	if (!s_erasing) {
+		return;
+	}
+	if (!ota_fmc_erase_range(s_erase_at, OTA_PAGE_SIZE)) {
+		s_erasing = false;
+		s_state   = OTA_ST_ERROR;
+		s_err     = 2u;
+		return;
+	}
+	s_erase_at += OTA_PAGE_SIZE;
+	if (s_erase_at >= s_erase_end) {
+		s_erasing = false;
+		s_state   = OTA_ST_READY;
+	}
+}
+
 gd32_bridge_status_t ota_dispatch(uint8_t        cmd,
                                   const uint8_t *req_payload,
                                   size_t         req_payload_len,
@@ -434,8 +471,9 @@ gd32_bridge_status_t ota_dispatch(uint8_t        cmd,
 	case CMD_OTA_GET_STATE:
 		return h_get_state(reply_payload, reply_payload_cap, reply_payload_len);
 	case CMD_OTA_ABORT:
-		s_state = OTA_ST_IDLE;
-		s_err   = 0u;
+		s_erasing = false; /* cancel any in-flight background erase (#770) */
+		s_state   = OTA_ST_IDLE;
+		s_err     = 0u;
 		return STATUS_OK;
 	default:
 		return STATUS_NOSUPPORT;
@@ -458,6 +496,11 @@ gd32_bridge_status_t ota_dispatch(uint8_t        cmd,
 	(void)reply_payload_cap;
 	*reply_payload_len = 0u;
 	return STATUS_NOSUPPORT;
+}
+
+/* OTA inert: no background erase to pump. */
+void ota_erase_tick(void)
+{
 }
 
 #endif /* BRIDGE_OTA_PARTITIONED */
