@@ -94,3 +94,17 @@ def test_gate_flags_orphan(tmp_path, monkeypatch):
         (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text())
     probs = qgate.find_problems(tmp_path)
     assert any("check_foo.py" in p for p in probs)
+
+
+def test_gate_flags_phantom(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "metadata" / "schemas").mkdir(parents=True)
+    (tmp_path / "metadata" / "schemas" / "quality-tasks-v1.schema.json").write_text(
+        (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text())
+    (tmp_path / "metadata" / "quality-tasks-v1.json").write_text(
+        '{"schemaVersion":1,"description":"x","tasks":['
+        '{"id":"phantom","description":"x","runner":"check-script",'
+        '"script":"scripts/check_nonexistent.py","gate":true,'
+        '"profiles":["pr"],"output":"none","ci":null}]}')
+    probs = qgate.find_problems(tmp_path)
+    assert any("check_nonexistent.py" in p for p in probs)

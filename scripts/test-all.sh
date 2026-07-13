@@ -357,9 +357,18 @@ stage_pytest_scripts() {
 # scripts/ prefix as we read.
 REQUIRED_GATE_SCRIPTS=()
 if command -v python3 >/dev/null 2>&1; then
+    if ! _qgate_out="$(python3 "${REPO_ROOT}/scripts/quality_tasks.py" --gate-scripts 2>&1)"; then
+        echo "FATAL: quality_tasks.py --gate-scripts failed (registry broken?):" >&2
+        echo "${_qgate_out}" >&2
+        exit 1
+    fi
     while IFS= read -r _qpath; do
-        REQUIRED_GATE_SCRIPTS+=("${_qpath#scripts/}")
-    done < <(python3 "${REPO_ROOT}/scripts/quality_tasks.py" --gate-scripts 2>/dev/null)
+        [ -n "${_qpath}" ] && REQUIRED_GATE_SCRIPTS+=("${_qpath#scripts/}")
+    done <<< "${_qgate_out}"
+    if [ "${#REQUIRED_GATE_SCRIPTS[@]}" -eq 0 ]; then
+        echo "FATAL: quality-tasks-v1.json yielded zero gate scripts" >&2
+        exit 1
+    fi
 fi
 
 stage_required_gate_scripts() {

@@ -41,6 +41,10 @@ def find_problems(root: Path) -> list[str]:
         problems.append(f"{phantom}: in registry but no such scripts/ file")
     if len(listed) != len(listed_set):
         problems.append("duplicate check-script entries in registry")
+    ids = [t["id"] for t in reg["tasks"]]
+    dup_ids = sorted({i for i in ids if ids.count(i) > 1})
+    for d in dup_ids:
+        problems.append(f"duplicate task id: {d}")
     return problems
 
 

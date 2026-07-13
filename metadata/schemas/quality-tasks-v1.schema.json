@@ -33,7 +33,11 @@
         },
         "output": { "enum": ["none", "junit", "sarif", "json"] },
         "ci": { "type": ["string", "null"] }
-      }
+      },
+      "allOf": [
+        { "if": { "properties": { "runner": { "const": "check-script" } }, "required": ["runner"] },
+          "then": { "required": ["script"] } }
+      ]
     }
   }
 }

@@ -45,6 +45,8 @@ def main(argv=None) -> int:
                    help="print each hard-gate check-script path, one per line")
     g.add_argument("--profile", help="print each check-script in the profile")
     args = ap.parse_args(argv)
+    if args.profile and args.profile not in {"quick", "pr", "full", "release"}:
+        ap.error(f"unknown profile {args.profile!r} (quick|pr|full|release)")
     paths = gate_scripts() if args.gate_scripts else scripts_for_profile(args.profile)
     for p in paths:
         print(p)
