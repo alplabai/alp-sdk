@@ -5,6 +5,13 @@
 # verdict via cross-modal corroboration.  Same source targets the V2N
 # accelerator path when som.sku is flipped.
 
+schemaVersion: 2
+libraries:
+  - name: tflite-micro
+    cores: [m55_hp]
+  - name: cmsis-dsp
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -23,9 +30,6 @@ cores:
     app: ./src
     inference:
       default_arena_kib: 64
-    libraries:
-      - tflite_micro
-      - cmsis_dsp             # arm_mean/rms/absmax_f32 behind alp_dsp_stats_f32.
     peripherals:
       - i2c                   # all three sensors.
 

@@ -24,6 +24,11 @@
 # Real customer shipping variants fork this for V2N or i.MX 93
 # boards; the SDK's declarative surface stays identical across
 # SoMs.
+schemaVersion: 2
+libraries:
+  - name: mbedtls
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801              # security-target SoM (OPTIGA + TF-M)
 
@@ -46,8 +51,6 @@ cores:
     # handshake offload remains a planned library-profile binding.
     # Required by v0.6 cross-field validator (P2.3 rule 3) whenever
     # `iot.tls: true`.
-    libraries:
-      - mbedtls
     # Memory tuning -- production stance keeps headroom for the
     # mender-mcu-client + mbedTLS handshake buffers + the TF-M
     # NS-callable trampoline.

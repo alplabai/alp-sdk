@@ -1,4 +1,5 @@
 # board.yaml -- per-app project configuration for v2n-gd32-bridge-hil-soak.
+schemaVersion: 2
 som:
   sku: E1M-V2M101
 

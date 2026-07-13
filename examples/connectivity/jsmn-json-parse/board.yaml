@@ -7,6 +7,11 @@
 # (vendors/jsmn/include/jsmn.h) rather than a west-fetched Zephyr
 # module -- see vendors/jsmn/README.md for why -- so this example's
 # CMakeLists.txt adds that include directory directly.
+schemaVersion: 2
+libraries:
+  - name: jsmn
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -15,8 +20,6 @@ preset: e1m-evk
 cores:
   m55_hp:
     app: ./src
-    libraries:
-      - jsmn
     # No board wiring: jsmn parses an in-RAM string, no peripheral
     # needed. This is a pure-logic example -- the whole point is
     # showing the library works before you point it at a real

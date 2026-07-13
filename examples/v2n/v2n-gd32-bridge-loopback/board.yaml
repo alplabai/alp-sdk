@@ -7,6 +7,7 @@
 # run it on an unwired board -- every test will simply fail its value
 # assertion.  Same SoM/board declarations as the sibling functional
 # example by design (one PCB, variant-populated V2N family).
+schemaVersion: 2
 som:
   sku: E1M-V2M101
 

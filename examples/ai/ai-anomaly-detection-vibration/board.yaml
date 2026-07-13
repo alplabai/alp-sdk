@@ -18,6 +18,13 @@
 # powered nodes can run for months on a single charge because the
 # heavy compute lives behind the NPU's clock-gated path.
 
+schemaVersion: 2
+libraries:
+  - name: tflite-micro
+    cores: [m55_hp]
+  - name: cmsis-dsp
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801           # E8 keeps the AEN always-on Ethos-U path
                              # and adds U85 headroom for transformer-style
@@ -50,9 +57,6 @@ cores:
     # per-model arena.
     inference:
       default_arena_kib: 128
-    libraries:
-      - tflite_micro
-      - cmsis_dsp            # arm_rms/arm_absmax_f32 behind alp_dsp_stats_f32.
     peripherals:
       - i2c                  # ICM-42670 link.
 

@@ -7,6 +7,7 @@
 # Zephyr `libraries:` loader.  Customer workflow: copy this dir,
 # build the alp-image-edge image (the alp-lvgl-dashboard recipe
 # packages this app), boot, run `alp-lvgl-dashboard`.
+schemaVersion: 2
 som:
   sku: E1M-V2N101            # any V2x SKU works -- same PCB, same panel path
 

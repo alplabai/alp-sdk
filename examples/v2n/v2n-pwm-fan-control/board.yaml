@@ -3,6 +3,7 @@
 # E1M-X family once the target board routes the same fan-control
 # output; use <alp/board.h> aliases for cross-EVK portability.
 
+schemaVersion: 2
 som:
   sku: E1M-V2N101
 

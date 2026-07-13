@@ -6,6 +6,11 @@
 # point `som.sku` at your AEN MPN, attach a 240x320 ST7789 TFT to
 # the E1M-EVK SPI0 + GPIO IO0 (D/C) + GPIO IO1 (reset) pads, and
 # `west build`.
+schemaVersion: 2
+libraries:
+  - name: lvgl
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801           # E8 has the Cortex-A32 + SRAM headroom that
                              # LVGL widgets needs comfortably.
@@ -23,8 +28,6 @@ cores:
     # LVGL pulls in via the standard Tier 1 library knob.  The
     # §D.lib.loader cross-references AEN's `capabilities:` block and
     # emits CONFIG_ALP_LVGL_DMA2D=y on E*-series.
-    libraries:
-      - lvgl
     # SPI for the display + GPIO for the D/C# + reset pins.  The
     # board devicetree binds these to Zephyr's MIPI DBI Type C
     # controller and the ST7789 display driver; the app stays on LVGL.

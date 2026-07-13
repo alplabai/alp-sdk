@@ -9,6 +9,7 @@
 #   - CONFIG_USB_HOST_STACK=y + CONFIG_UHC_XHCI_ALIF=y (in prj.conf)
 #   - xHCI register bring-up is TODO(aen401-bench) inside uhc_xhci_alif.c
 #   - The zephyr_uhc0 node in the board DTS carries the DFP-grounded 0x48200000 / IRQ 101
+schemaVersion: 2
 som:
   sku: E1M-AEN401
 

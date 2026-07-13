@@ -10,6 +10,11 @@
 #
 # E1M-V2N has no equivalent always-on AI complex, so this demo
 # is the AEN family's headline differentiator.
+schemaVersion: 2
+libraries:
+  - name: tflite-micro
+    cores: [m55_he]
+
 som:
   sku: E1M-AEN801            # E8 -- Cortex-M55 HE runs the low-power
                               # duty-cycle math, with a core-local Ethos-U55
@@ -26,8 +31,6 @@ cores:
     # via CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y +
     # CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y -- no board.yaml
     # selection needed.
-    libraries:
-      - tflite_micro
     inference:
       default_arena_kib: 64   # ~30k-param CNN -- 64 KiB is generous.
 

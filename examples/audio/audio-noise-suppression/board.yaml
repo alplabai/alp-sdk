@@ -16,6 +16,13 @@
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via OVERLAY_CONFIG.
 
+schemaVersion: 2
+libraries:
+  - name: tflite-micro
+    cores: [m33_sm]
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 som:
   sku: E1M-V2N101            # RZ/V2N supervisor; same source builds
                               # against V2H-class SKUs via SKU flip.
@@ -51,9 +58,6 @@ cores:
     # the CPU fallback kernels; cmsis_dsp covers the on-host
     # preprocess (FFT/notch/window) when the GD32 bridge isn't
     # available (native_sim, or V2H once it gets a similar bridge).
-    libraries:
-      - tflite_micro
-      - cmsis_dsp
     # I2S is the audio data bus for the TAS2563 codec on the EVK.
     # The codec handles both mic-in (its on-chip PDM-to-I2S receiver)
     # and speaker-out on the same I2S link, so we only need the one
