@@ -625,6 +625,28 @@ config MIPI_DPHY_INIT_PRIORITY
 	help
 	  MIPI-DPHY host-controller init priority (ahead of the CSI bridge at 41).
 
+config MIPI_DSI_DW
+	bool "DesignWare MIPI-DSI host controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on MIPI_DSI
+	depends on DT_HAS_SNPS_DESIGNWARE_DSI_ENABLED
+	select MIPI_DPHY
+	help
+	  Synopsys DesignWare MIPI-DSI host controller, the DSI-TX bridge from the
+	  CDC200 DPI source to the shared DesignWare MIPI D-PHY (TX role) on the Alif
+	  Ensemble E8.  Vendored from the Apache-2.0 zephyr_alif fork
+	  (drivers/mipi_dsi/dsi_dw.c, compatible "snps,designware-dsi") and PORTED to
+	  the v4.4 MIPI-DSI host API by Alp Lab AB.  Upstream Zephyr v4.4 has the
+	  mipi_dsi bus class but ships no snps,designware-dsi host driver, and
+	  hal_alif ships no DSI driver.
+
+	  Hard-depends on the in-tree DesignWare D-PHY driver (MIPI_DPHY_DW,
+	  dphy_dw_master_setup, TX role) -- selects MIPI_DPHY for it.
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Retires onto the opt-in
+	  sdk-alif fork once the dsi node is repointed AND bench-verified.  Task #21.
+	  Driver: zephyr/drivers/mipi_dsi/dsi_dw.c.
+
 config VIDEO_MIPI_CSI2_DW
 	bool "DesignWare MIPI CSI-2 host bridge for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
 	default y

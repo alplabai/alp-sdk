@@ -154,6 +154,19 @@
 		status = "disabled";
 	};
 
+	/* Port 10 (P10_x); IRQs 259..266 per the AE822 DFP soc_vectors.h
+	 * (GPIO10_IRQ0..7). */
+	gpio10: gpio@4900a000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900a000 0x1000>;
+		ngpios = <8>;
+		interrupts = <259 3>, <260 3>, <261 3>, <262 3>,
+			     <263 3>, <264 3>, <265 3>, <266 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
 	lpgpio: gpio@42002000 {
 		compatible = "snps,designware-gpio";
 		reg = <0x42002000 0x1000>;
