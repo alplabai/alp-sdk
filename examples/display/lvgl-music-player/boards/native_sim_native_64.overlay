@@ -6,11 +6,21 @@
  * driver so the LVGL demo links without a real display chip.
  * Real-silicon builds (alif / v2n) bring up the actual panel
  * (ST7789 / ILI9488 / DSI etc.) via the SoM board overlay.
+ *
+ * Two references to the same dummy_dc node -- see
+ * lvgl-widgets-demo/boards/native_sim_native_64.overlay for why
+ * `chosen { zephyr,display }` and `aliases { alp-display0 }` both
+ * point at it (one satisfies the lvgl module's compile-time
+ * requirement, the other is what src/main.c actually opens).
  */
 
 / {
 	chosen {
 		zephyr,display = &dummy_dc;
+	};
+
+	aliases {
+		alp-display0 = &dummy_dc;
 	};
 
 	dummy_dc: dummy_dc {

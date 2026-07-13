@@ -6,11 +6,31 @@
  * driver so the LVGL demo links without a real display chip.
  * Real-silicon builds (alif / v2n) bring up the actual panel
  * (ST7789 / ILI9488 / DSI etc.) via the SoM board overlay.
+ *
+ * Two references to the same dummy_dc node, for two different
+ * consumers:
+ *   - `chosen { zephyr,display }` -- Zephyr's lvgl module
+ *     (modules/lvgl/lvgl.c) needs at least one `zephyr,display` node
+ *     to COMPILE (it walks DT_ZEPHYR_DISPLAYS_COUNT unconditionally),
+ *     even though CONFIG_LV_Z_AUTO_INIT=n (prj.conf) means it never
+ *     actually opens/binds it at runtime.
+ *   - `aliases { alp-display0 }` -- what src/main.c actually opens,
+ *     via alp_display_open() / the zephyr_drv backend
+ *     (src/backends/display/zephyr_drv.c resolves DT_ALIAS(alp_display0)).
+ * Pointing both at the same node is safe here specifically because
+ * AUTO_INIT=n: no second lv_display_t ever gets created against it,
+ * so there is only one real writer (see the mipi_dbi_type_c_st7789
+ * fixture in tests/zephyr/display/overlays/ for the same pattern on
+ * real panel hardware).
  */
 
 / {
 	chosen {
 		zephyr,display = &dummy_dc;
+	};
+
+	aliases {
+		alp-display0 = &dummy_dc;
 	};
 
 	dummy_dc: dummy_dc {

@@ -543,6 +543,20 @@ expected to stay on the portable `<alp/peripheral.h>` + `BOARD_*`
 surface with no chip-driver include. See `examples/README.md` for the
 customer-facing version of this contract.
 
+The same script also rejects a direct `#include <zephyr/drivers/...>`
+in any example that has a `board.yaml` (issue #520) -- that's the
+vendor driver-class layer the portable `<alp/*.h>` surfaces exist to
+hide. Display/LVGL apps route through `<alp/display.h>` +
+`alp_gui_lvgl_attach()` (`<alp/gui.h>`) instead of
+`<zephyr/drivers/display.h>` + Zephyr's own `lvgl` module auto-init.
+A short, explicit allowlist in `check_example_portability.py`
+(`_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`) covers the handful of examples
+that genuinely have no portable surface to route through yet (raw AMP
+mailbox transport, MDIO PHY diagnostics, flash) -- each entry names
+the include and why. Zephyr-specific register/bench tools with no
+`board.yaml` (e.g. `examples/aen/*-regcheck/`) are outside this
+check's scope by construction.
+
 ---
 
 ## 5. Capability validation — runtime, not `#ifdef`
