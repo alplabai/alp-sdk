@@ -16,7 +16,7 @@
  * "init", operated under alp_handle_op_enter/leave, and torn down under
  * alp_handle_begin_close.
  *
- * Three scenarios, each the deterministic form of an acceptance-criteria
+ * Four scenarios, each the deterministic form of an acceptance-criteria
  * bullet:
  *   1. concurrent open never duplicates a slot (1-slot pool) and honours
  *      capacity (N-slot pool: exactly N winners, the rest get NULL).
@@ -24,6 +24,15 @@
  *      while entered, always observes live "backend state", never the
  *      poison a racing close writes after begin_close drains.
  *   3. concurrent double-close tears the handle down exactly once.
+ *   4. the sleep-poll alp_handle_begin_close_blocking() (issue #629's
+ *      generalisation of rpc_dispatch.c's _rpc_drain(), GHSA-xhm8) never
+ *      recycles a slot beneath a COUNTED op that genuinely blocks (mirrors
+ *      ble/mqtt/wifi/camera/mproc/usb's connect()/publish()/capture()/
+ *      send()/lock()/read()/write() timeout_ms ops) -- the case a
+ *      lifecycle-byte-only check (the pre-generalisation fallback those
+ *      dispatchers used) would have missed, since a racing close would
+ *      have read active_ops == 0 (the op was never counted there) and
+ *      won its CAS while the op was still in flight.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto -DALP_BUILD_TESTS=ON
@@ -39,6 +48,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "alp_slot_claim.h"
 
@@ -375,11 +385,132 @@ static void test_double_close_tears_down_exactly_once(void)
 	ALP_ASSERT_EQ_INT(ctx.won_a + ctx.won_b, RACE_ITERATIONS);
 }
 
+/* ------------------------------------------------------------------ */
+/* Part 4: sleep-poll close never recycles a slot beneath a counted    */
+/* BLOCKING op (issue #629 blocking-op generalisation).                */
+/* ------------------------------------------------------------------ */
+
+/* Fewer, longer rounds than the short-sync races above: each round
+ * genuinely sleeps to stand in for a caller's timeout_ms round-trip
+ * (a real link-layer/broker/transfer wait in the production
+ * dispatchers), so this stays a bounded, fast test rather than
+ * RACE_ITERATIONS iterations of a multi-ms sleep. */
+#define BLOCKING_RACE_ITERATIONS 200
+
+/* Same shape as fake_op() above, but the op is held open across a
+ * short real sleep -- standing in for the caller-supplied timeout_ms a
+ * genuinely blocking call (alp_ble_connect/alp_mqtt_connect/
+ * alp_camera_capture/alp_mbox_send/alp_hwsem_lock/
+ * alp_usb_device_read|write) can take. Counted via
+ * alp_handle_op_enter/leave, exactly like those dispatchers convert to
+ * for issue #629, so alp_handle_begin_close_blocking()'s drain must
+ * wait for it -- a lifecycle-byte-only check would not have counted
+ * it at all, letting a racing close's CAS win immediately. */
+static bool fake_blocking_op(struct fake_handle *h, bool *saw_poison)
+{
+	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return false;
+	}
+	struct timespec ts = { .tv_sec = 0, .tv_nsec = 2000000L }; /* 2 ms "round-trip" */
+	nanosleep(&ts, NULL);
+	if (h->backend_state != BACKEND_MAGIC) {
+		*saw_poison = true;
+	}
+	alp_handle_op_leave(&h->active_ops);
+	return true;
+}
+
+/* Sleep-poll close (issue #629 generalisation of rpc_dispatch.c's
+ * _rpc_begin_close()/_rpc_drain(), GHSA-xhm8): CAS OPEN->CLOSING, then
+ * drain active_ops via alp_handle_begin_close_blocking() (sleeps
+ * between polls -- see src/common/alp_slot_claim.c) instead of the
+ * busy-spin alp_handle_begin_close(). */
+static bool fake_close_blocking(struct fake_handle *h)
+{
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
+		return false;
+	}
+	h->backend_state = 0u; /* poison: any op still reading this is a UAF */
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
+	alp_slot_release(&h->in_use);
+	return true;
+}
+
+struct blocking_close_race_ctx {
+	pthread_barrier_t   barrier;
+	struct fake_handle *pool;
+	struct fake_handle *h;
+	bool                op_ran[BLOCKING_RACE_ITERATIONS];
+	bool                reopen_ok[BLOCKING_RACE_ITERATIONS];
+	bool                saw_poison; /* must stay false: the UAF signal */
+};
+
+static void *blocking_close_race_op_thread(void *arg)
+{
+	struct blocking_close_race_ctx *ctx = arg;
+	for (int i = 0; i < BLOCKING_RACE_ITERATIONS; i++) {
+		pthread_barrier_wait(&ctx->barrier);
+		ctx->op_ran[i] = fake_blocking_op(ctx->h, &ctx->saw_poison);
+		pthread_barrier_wait(&ctx->barrier);
+	}
+	return NULL;
+}
+
+static void *blocking_close_race_close_thread(void *arg)
+{
+	struct blocking_close_race_ctx *ctx = arg;
+	for (int i = 0; i < BLOCKING_RACE_ITERATIONS; i++) {
+		pthread_barrier_wait(&ctx->barrier);
+		/* Fires right after the op thread's op_enter (both released by
+		 * the same barrier), so this races the CAS against the
+		 * in-flight, still-sleeping blocking op. */
+		fake_close_blocking(ctx->h);
+		pthread_barrier_wait(&ctx->barrier);
+		/* Re-open for the next round (op thread parked at the barrier). */
+		ctx->h            = fake_open(ctx->pool, 1);
+		ctx->reopen_ok[i] = (ctx->h != NULL);
+	}
+	return NULL;
+}
+
+static void test_blocking_close_never_recycles_under_counted_blocking_op(void)
+{
+	struct fake_handle              pool[1] = { 0 };
+	struct blocking_close_race_ctx *ctx     = calloc(1, sizeof(*ctx));
+	pthread_t                       t_op, t_close;
+
+	ALP_ASSERT_TRUE(ctx != NULL);
+	ctx->pool = pool;
+	ctx->h    = fake_open(pool, 1);
+	ALP_ASSERT_TRUE(ctx->h != NULL);
+
+	ALP_ASSERT_EQ_INT(pthread_barrier_init(&ctx->barrier, NULL, 2), 0);
+	ALP_ASSERT_EQ_INT(pthread_create(&t_op, NULL, blocking_close_race_op_thread, ctx), 0);
+	ALP_ASSERT_EQ_INT(pthread_create(&t_close, NULL, blocking_close_race_close_thread, ctx), 0);
+	ALP_ASSERT_EQ_INT(pthread_join(t_op, NULL), 0);
+	ALP_ASSERT_EQ_INT(pthread_join(t_close, NULL), 0);
+	pthread_barrier_destroy(&ctx->barrier);
+
+	/* The counted blocking op entered before close's CAS is drained by
+	 * begin_close_blocking's sleep-poll, so it always saw live backend
+	 * state; the op that lost to the CAS backed out before touching
+	 * state. Either way, never the poison -- the property a
+	 * lifecycle-byte-only fallback (uncounted) would NOT have held,
+	 * since close's CAS would win immediately against active_ops == 0
+	 * while the op was still mid-sleep. */
+	ALP_ASSERT_TRUE(!ctx->saw_poison);
+	for (int i = 0; i < BLOCKING_RACE_ITERATIONS; i++) {
+		ALP_ASSERT_TRUE(ctx->reopen_ok[i]);
+	}
+	free(ctx);
+}
+
 int main(void)
 {
 	test_concurrent_open_never_duplicates_one_slot();
 	test_capacity_is_never_oversubscribed();
 	test_close_never_recycles_under_active_op();
 	test_double_close_tears_down_exactly_once();
+	test_blocking_close_never_recycles_under_counted_blocking_op();
 	ALP_TEST_SUMMARY();
 }

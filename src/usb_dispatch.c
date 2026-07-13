@@ -142,17 +142,21 @@ alp_status_t
 alp_usb_device_write(alp_usb_dev_t *h, const uint8_t *data, size_t len, uint32_t timeout_ms)
 {
 	if (data == NULL && len > 0) return ALP_ERR_INVAL; /* param check before gate */
-	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted via
-	 * op_enter -- counting it would make alp_usb_device_close()'s begin_close
-	 * busy-spin until the transfer drains/times out (single-core deadlock
-	 * when the closer has >= priority). Same as ble/wifi/mqtt blocking ops;
-	 * residual close-vs-in-flight-transfer UAF tracked in the #629 follow-up. */
-	if (h == NULL || alp_lifecycle_get(&h->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	/* Counted via alp_handle_op_enter/leave (issue #629): write() can
+	 * block up to timeout_ms draining the transfer, so
+	 * alp_usb_device_close() drains this op with the sleep-poll
+	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
+	 * instead of the busy-spin alp_handle_begin_close() -- generalised
+	 * from rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/
+	 * _rpc_drain() (GHSA-xhm8). */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return (h->state.ops == NULL || h->state.ops->dev_write == NULL)
-	           ? ALP_ERR_NOT_IMPLEMENTED
-	           : h->state.ops->dev_write(&h->state, data, len, timeout_ms);
+	alp_status_t rc = (h->state.ops == NULL || h->state.ops->dev_write == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : h->state.ops->dev_write(&h->state, data, len, timeout_ms);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_usb_device_read(alp_usb_dev_t *h,
@@ -163,23 +167,28 @@ alp_status_t alp_usb_device_read(alp_usb_dev_t *h,
 {
 	if (out_len != NULL) *out_len = 0;
 	if (data == NULL && len > 0) return ALP_ERR_INVAL; /* param check before gate */
-	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted --
-	 * see alp_usb_device_write() above for the begin_close deadlock rationale. */
-	if (h == NULL || alp_lifecycle_get(&h->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	/* Counted via alp_handle_op_enter/leave (issue #629) -- see
+	 * alp_usb_device_write() above for the same rationale. */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return (h->state.ops == NULL || h->state.ops->dev_read == NULL)
-	           ? ALP_ERR_NOT_IMPLEMENTED
-	           : h->state.ops->dev_read(&h->state, data, len, out_len, timeout_ms);
+	alp_status_t rc = (h->state.ops == NULL || h->state.ops->dev_read == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : h->state.ops->dev_read(&h->state, data, len, out_len, timeout_ms);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 void alp_usb_device_close(alp_usb_dev_t *h)
 {
 	if (h == NULL) return;
-	/* begin_close CAS OPEN->CLOSING then spins until every op that
-	 * entered before the CAS has left -- see alp_slot_claim.h (#629).
-	 * Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) return;
+	/* Sleep-poll drain (issue #629): this pool counts
+	 * alp_usb_device_read()/alp_usb_device_write(), each of which can
+	 * block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) return;
 	if (h->state.ops != NULL && h->state.ops->dev_close != NULL) {
 		h->state.ops->dev_close(&h->state);
 	}

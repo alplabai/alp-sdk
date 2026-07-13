@@ -122,18 +122,25 @@ alp_status_t alp_camera_stop(alp_camera_t *h)
 
 alp_status_t alp_camera_capture(alp_camera_t *h, alp_camera_frame_t *out, uint32_t timeout_ms)
 {
-	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted via
-	 * op_enter -- counting it would make alp_camera_close()'s begin_close
-	 * busy-spin until a frame arrives/times out (single-core deadlock when
-	 * the closer has >= priority). Same as the ble/wifi/mqtt blocking ops;
-	 * residual close-vs-in-flight-capture UAF tracked in the #629 follow-up. */
-	if (h == NULL || alp_lifecycle_get(&h->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	/* Counted via alp_handle_op_enter/leave (issue #629): capture() can
+	 * block up to timeout_ms waiting for a frame, so alp_camera_close()
+	 * drains this op with the sleep-poll
+	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
+	 * instead of the busy-spin alp_handle_begin_close() -- generalised
+	 * from rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/
+	 * _rpc_drain() (GHSA-xhm8). A close() racing an in-flight capture()
+	 * can no longer tear down state underneath it. */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc;
 	if (out == NULL) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+	} else {
+		rc = h->state.ops->capture(&h->state, out, timeout_ms);
 	}
-	return h->state.ops->capture(&h->state, out, timeout_ms);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_camera_release(alp_camera_t *h, alp_camera_frame_t *frame)
@@ -168,10 +175,12 @@ void alp_camera_close(alp_camera_t *h)
 	if (h == NULL) {
 		return;
 	}
-	/* begin_close CAS OPEN->CLOSING then spins until every op that
-	 * entered before the CAS has left -- so teardown never races an
-	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+	/* Sleep-poll drain (issue #629): this pool counts alp_camera_capture(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning (same rationale as rpc_dispatch.c's _rpc_drain(),
+	 * GHSA-xhm8). Idempotent: a second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {

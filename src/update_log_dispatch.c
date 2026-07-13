@@ -72,7 +72,6 @@ static alp_status_t _elect_backend(void)
 #endif
 				g_log.ops       = ops;
 				g_log.assurance = ops->assurance;
-				g_log.in_use    = true;
 				return ALP_OK;
 			}
 			if (rc != ALP_ERR_NOSUPPORT) break;
@@ -203,7 +202,6 @@ void alp_update_log_close(alp_update_log_t *log)
 	 * a fresh open() re-elects a backend (issue #629). Idempotent: a second
 	 * close, or a close racing an in-flight open, no-ops. */
 	if (!alp_handle_begin_close(&log->lifecycle, &log->active_ops)) return;
-	log->in_use = false;
-	log->ops    = NULL;
+	log->ops = NULL;
 	alp_lifecycle_set(&log->lifecycle, ALP_HANDLE_LC_UNOPENED);
 }

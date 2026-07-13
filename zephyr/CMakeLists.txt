@@ -1198,6 +1198,15 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/cap_helpers.c
 )
 
+# Sleep-poll close for blocking-op handle pools (issue #629). Out-of-line
+# body for alp_slot_claim.h's alp_handle_begin_close_blocking() -- ships
+# unconditionally alongside the header so any dispatcher below that
+# #includes alp_slot_claim.h (ble/mqtt/wifi/camera/mproc/usb today) can
+# call it.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_slot_claim.c
+)
+
 # .alpmodel package reader (<alp/model.h>).  OS-agnostic read-side
 # parser (24-byte header + zcbor manifest decode + blob table).
 # Gated on CONFIG_ALP_SDK_MODEL_READER, which selects ZCBOR.

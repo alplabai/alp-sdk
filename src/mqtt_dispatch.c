@@ -15,26 +15,21 @@
  * E1M SoM that ships a TCP stack; no SoC-specific second tier is
  * needed.
  *
- * @par Issue #629 -- partial conversion, flagged for orchestrator review
- * alp_mqtt_publish()/alp_mqtt_subscribe() are bracketed with the
- * standard alp_handle_op_enter()/alp_handle_op_leave() guard from
- * src/common/alp_slot_claim.h, and alp_mqtt_close() uses that header's
- * alp_handle_begin_close() to drain them.  alp_mqtt_connect() and
- * alp_mqtt_loop() are deliberately NOT counted in that same guard:
- * both take a timeout_ms that can block for a genuinely long time (a
- * real broker round-trip / keepalive wait), and alp_handle_begin_close()
- * is a documented busy-spin whose precondition is "every counted op is
- * a short, synchronous backend call" -- counting a multi-second (or
- * timeout_ms == forever) op there would turn alp_mqtt_close() into an
- * unbounded spin instead of a bounded drain.  They fall back to a
- * lifecycle-byte-only check (alp_lifecycle_get()) -- strictly better
- * than the old unlocked `in_use` read, but it does NOT stop a racing
- * close() from tearing down state while connect()/loop() is in
- * flight.  Closing this gap for real needs rpc_dispatch.c's dedicated
- * counted lifecycle word + sleep-poll drain (see that file's
- * _rpc_op_enter/_rpc_begin_close/_rpc_drain, added for GHSA-xhm8),
- * not this shared spin-based helper -- left as a follow-up rather than
- * forcing a mismatched fix here.
+ * @par Issue #629 -- blocking ops counted + sleep-poll drained
+ * alp_mqtt_publish()/alp_mqtt_subscribe()/alp_mqtt_connect()/
+ * alp_mqtt_loop() are ALL bracketed with the standard
+ * alp_handle_op_enter()/alp_handle_op_leave() guard from
+ * src/common/alp_slot_claim.h, INCLUDING alp_mqtt_connect()/
+ * alp_mqtt_loop(), each of which takes a timeout_ms that can block for
+ * a genuinely long time (a real broker round-trip / keepalive wait).
+ * alp_mqtt_close() drains the pool with
+ * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
+ * instead of the busy-spin alp_handle_begin_close(): a sleep-poll
+ * drain, generalised from rpc_dispatch.c's _rpc_op_enter()/
+ * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8), safe to wait on a
+ * multi-second (or timeout_ms == forever) op instead of spinning the
+ * closer thread.  A racing close() can no longer tear down state while
+ * connect()/loop() is in flight.
  */
 
 #include <stdbool.h>
@@ -126,21 +121,19 @@ alp_mqtt_t *alp_mqtt_open(const alp_mqtt_config_t *cfg)
 
 alp_status_t alp_mqtt_connect(alp_mqtt_t *h, uint32_t timeout_ms)
 {
-	/* NOT bracketed with alp_handle_op_enter/leave -- see this file's
-	 * "Issue #629" header comment: connect() can block up to
-	 * timeout_ms on a real broker handshake, and alp_handle_begin_close()
-	 * is documented as a busy-spin valid only for short, synchronous
-	 * ops.  Lifecycle-byte-only check: an improvement over the old
-	 * unlocked in_use read, but a racing close() is not blocked from
-	 * tearing down state underneath an in-flight connect(). Flagged
-	 * for orchestrator review. */
-	if (h == NULL || alp_lifecycle_get(&h->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	/* Counted via alp_handle_op_enter/leave -- see this file's "Issue
+	 * #629" header comment: connect() can block up to timeout_ms on a
+	 * real broker handshake; alp_mqtt_close() now drains this op with
+	 * the sleep-poll alp_handle_begin_close_blocking() instead of the
+	 * busy-spin alp_handle_begin_close(). */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (h->state.ops == NULL || h->state.ops->connect == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
-	}
-	return h->state.ops->connect(&h->state, timeout_ms);
+	alp_status_t rc = (h->state.ops == NULL || h->state.ops->connect == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : h->state.ops->connect(&h->state, timeout_ms);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_mqtt_publish(alp_mqtt_t    *h,
@@ -195,27 +188,29 @@ alp_status_t alp_mqtt_subscribe(alp_mqtt_t       *h,
 
 alp_status_t alp_mqtt_loop(alp_mqtt_t *h, uint32_t timeout_ms)
 {
-	/* NOT bracketed -- same rationale as alp_mqtt_connect() above: loop()
-	 * blocks up to timeout_ms polling the broker. Flagged for
-	 * orchestrator review. */
-	if (h == NULL || alp_lifecycle_get(&h->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	/* Counted via alp_handle_op_enter/leave -- same rationale as
+	 * alp_mqtt_connect() above: loop() blocks up to timeout_ms polling
+	 * the broker. */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (h->state.ops == NULL || h->state.ops->loop == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
-	}
-	return h->state.ops->loop(&h->state, timeout_ms);
+	alp_status_t rc = (h->state.ops == NULL || h->state.ops->loop == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : h->state.ops->loop(&h->state, timeout_ms);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 void alp_mqtt_close(alp_mqtt_t *h)
 {
 	if (h == NULL) return;
-	/* begin_close CAS OPEN->CLOSING then spins until every op that
-	 * entered before the CAS has left (publish/subscribe only -- see
-	 * this file's header comment for why connect/loop are not counted)
-	 * -- so teardown never races an in-flight publish/subscribe.
-	 * Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) return;
+	/* Sleep-poll drain (issue #629): this pool now counts
+	 * alp_mqtt_connect()/alp_mqtt_loop(), each of which can block for a
+	 * genuinely long time (a real broker round-trip / keepalive wait),
+	 * so alp_handle_begin_close_blocking() sleeps between polls instead
+	 * of busy-spinning (same rationale as rpc_dispatch.c's _rpc_drain(),
+	 * GHSA-xhm8). Idempotent: a second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) return;
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}

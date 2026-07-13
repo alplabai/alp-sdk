@@ -5,6 +5,13 @@ if(NOT DEFINED ZEPHYR_BASE)
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/proto/alp_mproc_frame.c
         ${CMAKE_CURRENT_SOURCE_DIR}/version.c
+        # Sleep-poll close for blocking-op handle pools (issue #629).
+        # Out-of-line body for alp_slot_claim.h's
+        # alp_handle_begin_close_blocking() -- ships unconditionally
+        # alongside the header (same as on Zephyr, zephyr/CMakeLists.txt)
+        # so any dispatcher that #includes alp_slot_claim.h (ble/mqtt/
+        # wifi/camera today, in the baremetal/yocto trees) can call it.
+        ${CMAKE_CURRENT_SOURCE_DIR}/alp_slot_claim.c
         # <alp/gui.h> guard-clause implementation -- OS-agnostic
         # (no OS/vendor headers), so compiled unconditionally here
         # like the other pure-C helpers above. See issue #23.

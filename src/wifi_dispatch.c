@@ -102,28 +102,27 @@ alp_wifi_t *alp_wifi_open(void)
 alp_status_t
 alp_wifi_connect(alp_wifi_t *h, const alp_wifi_credentials_t *creds, uint32_t timeout_ms)
 {
-	/* NOT bracketed with alp_handle_op_enter/leave: association can
-	 * block up to timeout_ms (a real SoM's SSID scan+auth handshake),
-	 * and alp_handle_begin_close()'s drain is a documented busy-spin
-	 * valid only for short, synchronous backend calls (see
-	 * alp_slot_claim.h's block comment) -- counting this op would make
-	 * a racing alp_wifi_close() spin for the whole association instead
-	 * of draining in a handful of instructions.  This checks the
-	 * lifecycle byte only (an improvement over the old unlocked in_use
-	 * read, but NOT a full fix): a close() racing an in-flight connect()
-	 * is not blocked from tearing down state underneath it.  Same class
-	 * of gap flagged for alp_mqtt_connect()/alp_mqtt_loop() in
-	 * mqtt_dispatch.c; fixing it needs rpc_dispatch.c's dedicated
-	 * counted-word + sleep-drain, not this shared spin-based helper.
-	 * Flagged for orchestrator review, issue #629. */
-	if (h == NULL || alp_lifecycle_get(&h->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	/* Counted via alp_handle_op_enter/leave (issue #629): association can
+	 * block up to timeout_ms (a real SoM's SSID scan+auth handshake), so
+	 * alp_wifi_close() drains this op with the sleep-poll
+	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
+	 * instead of the busy-spin alp_handle_begin_close() -- generalised
+	 * from rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/
+	 * _rpc_drain() (GHSA-xhm8). A close() racing an in-flight connect()
+	 * can no longer tear down state underneath it. */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (creds == NULL || creds->ssid == NULL) return ALP_ERR_INVAL;
-	if (h->state.ops == NULL || h->state.ops->connect == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	alp_status_t rc;
+	if (creds == NULL || creds->ssid == NULL) {
+		rc = ALP_ERR_INVAL;
+	} else if (h->state.ops == NULL || h->state.ops->connect == NULL) {
+		rc = ALP_ERR_NOT_IMPLEMENTED;
+	} else {
+		rc = h->state.ops->connect(&h->state, creds, timeout_ms);
 	}
-	return h->state.ops->connect(&h->state, creds, timeout_ms);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_wifi_disconnect(alp_wifi_t *h)
@@ -149,10 +148,12 @@ alp_status_t alp_wifi_disconnect(alp_wifi_t *h)
 void alp_wifi_close(alp_wifi_t *h)
 {
 	if (h == NULL) return;
-	/* begin_close CAS OPEN->CLOSING then spins until every op that
-	 * entered before the CAS has left -- so teardown never races an
-	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) return;
+	/* Sleep-poll drain (issue #629): this pool counts alp_wifi_connect(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning (same rationale as rpc_dispatch.c's _rpc_drain(),
+	 * GHSA-xhm8). Idempotent: a second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) return;
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}

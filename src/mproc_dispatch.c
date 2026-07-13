@@ -216,17 +216,20 @@ alp_mbox_t *alp_mbox_open(const alp_mbox_config_t *cfg)
 alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_t timeout_ms)
 {
 	if (data == NULL && len > 0) return ALP_ERR_INVAL; /* param check before gate */
-	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted via
-	 * op_enter -- counting it would make alp_mbox_close()'s begin_close busy-
-	 * spin until the send drains/times out (single-core deadlock when the
-	 * closer has >= priority). Same as ble/wifi/mqtt blocking ops; residual
-	 * close-vs-in-flight-send UAF tracked in the #629 blocking-op follow-up. */
-	if (mb == NULL || alp_lifecycle_get(&mb->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	/* Counted via alp_handle_op_enter/leave (issue #629): send() can block
+	 * up to timeout_ms draining to the peer core, so alp_mbox_close()
+	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c) instead of the busy-spin
+	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
+	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
+	if (mb == NULL || !alp_handle_op_enter(&mb->lifecycle, &mb->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return (mb->state.ops == NULL || mb->state.ops->mbox_send == NULL)
-	           ? ALP_ERR_NOT_IMPLEMENTED
-	           : mb->state.ops->mbox_send(&mb->state, data, len, timeout_ms);
+	alp_status_t rc = (mb->state.ops == NULL || mb->state.ops->mbox_send == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : mb->state.ops->mbox_send(&mb->state, data, len, timeout_ms);
+	alp_handle_op_leave(&mb->active_ops);
+	return rc;
 }
 
 alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *user)
@@ -244,10 +247,12 @@ alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *u
 void alp_mbox_close(alp_mbox_t *mb)
 {
 	if (mb == NULL) return;
-	/* begin_close CAS OPEN->CLOSING then spins until every op that
-	 * entered before the CAS has left -- see alp_slot_claim.h (#629).
-	 * Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close(&mb->lifecycle, &mb->active_ops)) return;
+	/* Sleep-poll drain (issue #629): this pool counts alp_mbox_send(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&mb->lifecycle, &mb->active_ops)) return;
 	if (mb->state.ops != NULL && mb->state.ops->mbox_close != NULL) {
 		mb->state.ops->mbox_close(&mb->state);
 	}
@@ -307,15 +312,21 @@ alp_status_t alp_hwsem_try_lock(alp_hwsem_t *sem)
 
 alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms)
 {
-	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted --
-	 * see alp_mbox_send() above for the begin_close deadlock rationale.
-	 * hwsem_try_lock/unlock stay counted (short, synchronous). */
-	if (sem == NULL || alp_lifecycle_get(&sem->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	/* Counted via alp_handle_op_enter/leave (issue #629): lock() can
+	 * block up to timeout_ms waiting on the peer core, so
+	 * alp_hwsem_close() drains this op with the sleep-poll
+	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
+	 * instead of the busy-spin alp_handle_begin_close() -- see
+	 * alp_mbox_send() above for the same rationale.
+	 * hwsem_try_lock/unlock stay short, synchronous ops. */
+	if (sem == NULL || !alp_handle_op_enter(&sem->lifecycle, &sem->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	return (sem->state.ops == NULL || sem->state.ops->hwsem_lock == NULL)
-	           ? ALP_ERR_NOT_IMPLEMENTED
-	           : sem->state.ops->hwsem_lock(&sem->state, timeout_ms);
+	alp_status_t rc = (sem->state.ops == NULL || sem->state.ops->hwsem_lock == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : sem->state.ops->hwsem_lock(&sem->state, timeout_ms);
+	alp_handle_op_leave(&sem->active_ops);
+	return rc;
 }
 
 alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem)
@@ -333,10 +344,12 @@ alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem)
 void alp_hwsem_close(alp_hwsem_t *sem)
 {
 	if (sem == NULL) return;
-	/* begin_close CAS OPEN->CLOSING then spins until every op that
-	 * entered before the CAS has left -- see alp_slot_claim.h (#629).
-	 * Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close(&sem->lifecycle, &sem->active_ops)) return;
+	/* Sleep-poll drain (issue #629): this pool counts alp_hwsem_lock(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&sem->lifecycle, &sem->active_ops)) return;
 	if (sem->state.ops != NULL && sem->state.ops->hwsem_close != NULL) {
 		sem->state.ops->hwsem_close(&sem->state);
 	}

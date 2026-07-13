@@ -36,7 +36,6 @@ struct alp_update_log {
 	 * elects exactly one initializer among racing first-opens. */
 	uint8_t  lifecycle;
 	uint32_t active_ops;
-	bool     in_use;
 };
 
 #ifdef CONFIG_ZTEST
