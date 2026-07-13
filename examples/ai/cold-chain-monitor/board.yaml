@@ -5,7 +5,6 @@
 # dewpoint, excursion time), and classifies the integrity state.  Same source
 # targets the V2N DEEPX path when som.sku is flipped.
 
-schemaVersion: 2
 libraries:
   - name: tflite-micro
     cores: [m55_hp]

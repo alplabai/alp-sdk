@@ -11,7 +11,6 @@
 # over PCIe.  The same C++ source builds against V2N (no DEEPX --
 # falls through to DRP-AI) and V2N-M1 (DEEPX) by swapping
 # `som.sku`.
-schemaVersion: 2
 libraries:
   - name: tflite-micro
     cores: [a55_cluster]

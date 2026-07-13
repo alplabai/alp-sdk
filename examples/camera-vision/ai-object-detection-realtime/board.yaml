@@ -17,7 +17,6 @@
 # don't touch source to retarget AEN -> V2N -> V2N-M1 -- the
 # board.yaml picks the right NPU shim.
 
-schemaVersion: 2
 libraries:
   - name: tflite-micro
     cores: [m33_sm]

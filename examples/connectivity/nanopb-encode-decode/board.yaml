@@ -10,7 +10,6 @@
 # this example's CMakeLists.txt compiles the runtime sources directly
 # via the ${ZEPHYR_NANOPB_MODULE_DIR} Zephyr sets for every discovered
 # module. See README.md for the full west-pin story.
-schemaVersion: 2
 libraries:
   - name: nanopb
     cores: [m55_hp]

@@ -18,7 +18,6 @@
 # powered nodes can run for months on a single charge because the
 # heavy compute lives behind the NPU's clock-gated path.
 
-schemaVersion: 2
 libraries:
   - name: tflite-micro
     cores: [m55_hp]

@@ -24,7 +24,6 @@
 # `name:` is your board's name.  Used in the generated
 # `include/alp/boards/alp_<name>_routes.h` filename + as the board
 # identity in build artefacts.
-schemaVersion: 2
 name: my-board                # change to your board name
 description: "..."            # optional, free-form
 

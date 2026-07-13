@@ -1,7 +1,6 @@
 # Functional read-out of every populated device on the EVK sensor/power
 # I2C bus, each through its real chip driver.  Targets the AEN801 (E8) SoM;
 # the e1m-evk preset's `populated:` set compiles the chip drivers in.
-schemaVersion: 2
 som:
   sku: E1M-AEN801
 preset: e1m-evk

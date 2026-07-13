@@ -25,7 +25,6 @@
 #
 # Targets the same SoM as rpmsg-v2n -- E1M-V2N101 -- so the build
 # inherits ocram_low's hard memory_map values; no TBD addresses.
-schemaVersion: 2
 libraries:
   - name: mbedtls
     cores: [a55_cluster]

@@ -22,7 +22,6 @@
 # preset supplies the mailbox controller, so the orchestrator can
 # allocate the RPMsg carve-out without app-specific SoC knowledge.
 
-schemaVersion: 2
 libraries:
   - name: mbedtls
     cores: [a32_cluster]

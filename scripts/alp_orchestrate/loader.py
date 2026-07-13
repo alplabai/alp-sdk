@@ -593,27 +593,24 @@ def _library_alias_table(metadata_root: Path) -> dict[str, str]:
     return dict(aliases) if isinstance(aliases, dict) else {}
 
 
-def _normalize_v2_libraries(project: dict[str, Any],
-                            metadata_root: Path) -> None:
-    """Fold a schemaVersion-2 unified `libraries:` list back into the internal
-    channels the emitters consume (WS6-c #610 §6).
+def _normalize_libraries(project: dict[str, Any],
+                         metadata_root: Path) -> None:
+    """Fold the unified top-level `libraries:` list into the internal channels
+    the emitters consume (WS6-c #610 §6).
 
-    v2 declares every curated library once, at the top level, as a
+    board.yaml declares every curated library once, at the top level, as a
     `{name, cores?}` object: project-wide when `cores:` is omitted, core-scoped
-    otherwise.  This rewrites the parsed dict so the rest of the loader is
-    version-agnostic: project-wide names land in `project['libraries']` (the
-    same list v1 read directly) and core-scoped names are injected into each
-    `cores[<id>]['libraries']` (the same key v1's per-core token list used).
+    otherwise (a bare string is accepted as shorthand for a project-wide
+    `{name}`).  This rewrites the parsed dict so the rest of the loader stays
+    library-shape-agnostic: project-wide names land in `project['libraries']`
+    and core-scoped names are injected into each `cores[<id>]['libraries']`.
 
-    v1 files (absent `schemaVersion` or `< 2`) are left untouched -- their bare
-    project-wide names and per-core legacy tokens already read directly, and the
-    per-core Kconfig reader resolves either spelling through the alias table.
+    This is the ONLY library read path -- there is no separate per-core
+    `cores.<id>.libraries:` list to read.
     """
-    sv = project.get("schemaVersion")
-    if sv is None or int(sv) < 2:
-        return
     unified = project.get("libraries") or []
     alias = _library_alias_table(metadata_root)
+    cores_map = project.get("cores") or {}
     project_wide: list[str] = []
     per_core: dict[str, list[str]] = {}
     for entry in unified:
@@ -633,7 +630,6 @@ def _normalize_v2_libraries(project: dict[str, Any],
         else:
             project_wide.append(canonical)
     project["libraries"] = project_wide
-    cores_map = project.get("cores") or {}
     for cid, names in per_core.items():
         centry = cores_map.get(cid)
         if not isinstance(centry, dict):
@@ -662,10 +658,10 @@ def load_board_yaml(path: Path, *,
     """
     project = _load_and_validate_yaml(path, metadata_root)
 
-    # schemaVersion 2: fold the unified top-level `libraries:` list into the
-    # per-core / project-wide channels the downstream resolution expects, so
-    # topology + slice building stay version-agnostic.
-    _normalize_v2_libraries(project, metadata_root)
+    # Fold the unified top-level `libraries:` list into the per-core /
+    # project-wide channels the downstream resolution expects, so topology +
+    # slice building stay library-shape-agnostic.
+    _normalize_libraries(project, metadata_root)
 
     (sku, hw_rev, som_preset, silicon, soc_spec, board_preset,
      board_name, board_hw_rev) = _resolve_board(project, metadata_root)

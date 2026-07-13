@@ -13,7 +13,6 @@
 # user's authoritative HW writeup; until those land, `west alp-build`
 # will fail at carve-out resolution with a clear message.  This
 # example's structural files are correct in shape today.
-schemaVersion: 2
 libraries:
   - name: mbedtls
     cores: [a55_cluster]

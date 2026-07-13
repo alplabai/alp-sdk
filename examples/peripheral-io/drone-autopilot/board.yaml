@@ -12,7 +12,6 @@
 # control cascade, motor mixer, AND the failsafe at deterministic
 # kHz cadences -- all in portable C with no vendor symbols.
 
-schemaVersion: 2
 libraries:
   - name: madgwick-ahrs
     cores: [m55_hp]

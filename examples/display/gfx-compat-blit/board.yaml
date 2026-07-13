@@ -6,7 +6,6 @@
 # see zephyr/Kconfig.alp-libraries's CONFIG_ALP_GFX_COMPAT_SW). It has
 # no target hardware dependency, so this example needs no peripherals
 # or chips: just RAM buffers.
-schemaVersion: 2
 libraries:
   - name: gfx-compat
     cores: [m55_hp]

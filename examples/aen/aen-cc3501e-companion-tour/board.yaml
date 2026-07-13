@@ -12,7 +12,6 @@
 # per-board overlay under boards/, since these are SoM-internal control
 # nets rather than E1M edge pads.
 
-schemaVersion: 2
 som:
   sku: E1M-AEN801
 

@@ -13,7 +13,6 @@
 # This board.yaml describes the device side only -- the
 # customer-buildable half of the contract.  The Mender server
 # side is owned externally (separate repo, Hakan).
-schemaVersion: 2
 libraries:
   - name: mbedtls
     cores: [m55_hp]

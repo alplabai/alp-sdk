@@ -6,7 +6,6 @@
 # CMakeLists.txt invokes scripts/alp_project.py at configure time and
 # layers the generated alp.conf over prj.conf via OVERLAY_CONFIG.
 
-schemaVersion: 2
 som:
   sku: E1M-AEN801          # Alif Ensemble E8 -- ships the <alp/ext/alif/adc.h>
                             # vendor extension this demo layers in Way 3.

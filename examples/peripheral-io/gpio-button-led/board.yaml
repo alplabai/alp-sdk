@@ -23,7 +23,6 @@
 # Validated against metadata/schemas/board.schema.json; documented
 # in docs/board-config.md.
 
-schemaVersion: 2
 som:
   sku: E1M-AEN801          # Alif Ensemble E8 SoM
 

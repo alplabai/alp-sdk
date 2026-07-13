@@ -11,7 +11,6 @@
 # and `west build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via OVERLAY_CONFIG.
-schemaVersion: 2
 som:
   sku: E1M-AEN801
 

@@ -16,7 +16,6 @@
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via OVERLAY_CONFIG.
 
-schemaVersion: 2
 libraries:
   - name: tflite-micro
     cores: [m33_sm]

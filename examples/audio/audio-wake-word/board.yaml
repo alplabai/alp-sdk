@@ -10,7 +10,6 @@
 #
 # E1M-V2N has no equivalent always-on AI complex, so this demo
 # is the AEN family's headline differentiator.
-schemaVersion: 2
 libraries:
   - name: tflite-micro
     cores: [m55_he]

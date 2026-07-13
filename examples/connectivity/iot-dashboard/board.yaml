@@ -6,7 +6,6 @@
 # on a 240x320 ST7789.  The Wi-Fi connection comes up through
 # the E1M-AEN module's on-module CC3501E bridge backend.
 
-schemaVersion: 2
 libraries:
   - name: lvgl
     cores: [m55_hp]

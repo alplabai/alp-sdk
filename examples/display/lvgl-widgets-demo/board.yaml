@@ -6,7 +6,6 @@
 # point `som.sku` at your AEN MPN, attach a 240x320 ST7789 TFT to
 # the E1M-EVK SPI0 + GPIO IO0 (D/C) + GPIO IO1 (reset) pads, and
 # `west build`.
-schemaVersion: 2
 libraries:
   - name: lvgl
     cores: [m55_hp]

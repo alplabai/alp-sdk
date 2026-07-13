@@ -24,7 +24,6 @@
 # Real customer shipping variants fork this for V2N or i.MX 93
 # boards; the SDK's declarative surface stays identical across
 # SoMs.
-schemaVersion: 2
 libraries:
   - name: mbedtls
     cores: [m55_hp]

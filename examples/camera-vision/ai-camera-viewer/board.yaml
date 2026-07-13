@@ -7,7 +7,6 @@
 # The headline marketing demo: shows the full edge-AI stack end
 # to end on a single SoM, with the right NPU resolved by the
 # §D.lib.loader from the SKU's `capabilities:` block.
-schemaVersion: 2
 libraries:
   - name: lvgl
     cores: [m55_hp]

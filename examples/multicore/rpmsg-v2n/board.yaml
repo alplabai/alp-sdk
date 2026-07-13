@@ -17,7 +17,6 @@
 # both slices `#include`.
 #
 # See docs/heterogeneous-builds.md for the full walk-through.
-schemaVersion: 2
 libraries:
   - name: mbedtls
     cores: [a55_cluster]

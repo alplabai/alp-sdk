@@ -5,7 +5,6 @@
 # Real silicon required to run the inference path; native_sim
 # exercises the framing only (every call returns NOSUPPORT or
 # NOT_READY but the structure is verified).
-schemaVersion: 2
 som:
   sku: E1M-V2M101  # V2N-M1 variant with DEEPX DX-M1 NPU
 

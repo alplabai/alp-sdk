@@ -8,7 +8,6 @@
 # hello-world purely so scripts/alp_project.py has a SoM to derive
 # the baseline SoC config from; doctest itself never touches
 # hardware and this example never runs on real silicon.
-schemaVersion: 2
 libraries:
   - name: doctest
     cores: [m55_hp]

@@ -23,7 +23,6 @@
 # This example is the reference for the v0.6 `cores.<id>.power:`
 # declarative block.  See docs/board-config.md
 # "Per-slice power-management profile".
-schemaVersion: 2
 som:
   sku: E1M-AEN301              # small AEN, lower-power profile
 
