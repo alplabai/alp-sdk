@@ -606,7 +606,9 @@ def _normalize_libraries(project: dict[str, Any],
     and core-scoped names are injected into each `cores[<id>]['libraries']`.
 
     This is the ONLY library read path -- there is no separate per-core
-    `cores.<id>.libraries:` list to read.
+    `cores.<id>.libraries:` list to read.  A `cores:` entry scoping a library
+    to a core the topology doesn't declare is a hard error: silently dropping
+    it would emit nothing for a library the app author explicitly asked for.
     """
     unified = project.get("libraries") or []
     alias = _library_alias_table(metadata_root)
@@ -626,6 +628,10 @@ def _normalize_libraries(project: dict[str, Any],
         cores = entry.get("cores")
         if cores:
             for cid in cores:
+                if str(cid) not in cores_map:
+                    raise OrchestratorError(
+                        f"libraries: entry '{canonical}' is scoped to core "
+                        f"'{cid}', which is not declared under `cores:`")
                 per_core.setdefault(str(cid), []).append(canonical)
         else:
             project_wide.append(canonical)
