@@ -17,6 +17,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   bash array — closing the local-vs-CI gate drift #608 flagged. `alp quality`
   profile runner + JSON/SARIF emission land in later §5 slices.
 
+### Added — build-receipt-v1 (`metadata/schemas/build-receipt-v1.schema.json`, #610 §7)
+
+- A deterministic, machine-readable receipt for a release build — SDK source
+  revision, board.yaml/lock/build-plan digests, toolchain identity, per-image
+  hashes — composed from existing inputs (`scripts/build_receipt.py`), carrying
+  no wall-clock field so identical inputs yield an identical receipt.
+  `check_build_receipt.py` guards the schema. Wiring into `release.yml`,
+  deterministic packaging, and SBOM generation land in later §7 slices.
+
 ### Added — `west alp-migrate` board.yaml migration engine (#610 WS6-b)
 
 - `board.yaml` may carry an optional top-level `schemaVersion`. Versioning is

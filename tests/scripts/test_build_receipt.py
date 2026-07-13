@@ -61,3 +61,10 @@ def test_dirty_flag(tmp_path):
     r = build_receipt.build_receipt(tmp_path, bp, [("m55_hp", img)], board,
                                     rev_resolver=lambda root: ("x", True))
     assert r["source"]["sdkDirty"] is True
+
+
+import check_build_receipt as rgate  # noqa: E402
+
+
+def test_gate_passes_on_valid_schema():
+    assert rgate.main() == 0
