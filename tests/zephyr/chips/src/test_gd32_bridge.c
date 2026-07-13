@@ -269,8 +269,9 @@ ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
 	uint16_t sp_total;
 	uint8_t  sp_got;
 	float    sp_bins[4];
-	zassert_equal(gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 1u, &sp_seq, &sp_total, &sp_got, sp_bins),
-	              ALP_ERR_NOT_READY);
+	zassert_equal(
+	    gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 1u, &sp_seq, &sp_total, &sp_got, sp_bins),
+	    ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
@@ -341,8 +342,8 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
 		              ALP_ERR_INVAL);
 		zassert_equal(gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 0u, &seq, &total, &got, bins),
 		              ALP_ERR_INVAL);
-		zassert_equal(gd32g553_adc_spectrum_read(&ctx, GD32G553_BRIDGE_ADC_STREAM_COUNT, 0u, 1u,
-		                                         &seq, &total, &got, bins),
+		zassert_equal(gd32g553_adc_spectrum_read(
+		                  &ctx, GD32G553_BRIDGE_ADC_STREAM_COUNT, 0u, 1u, &seq, &total, &got, bins),
 		              ALP_ERR_INVAL);
 	}
 }

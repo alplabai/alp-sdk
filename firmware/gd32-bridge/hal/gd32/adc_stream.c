@@ -267,8 +267,8 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
 			s->proc_read = pw; /* pump lapped the reader -> resync, report loss */
 			return BRIDGE_HW_ERR_BUSY;
 		}
-		const uint16_t pavail   = (uint16_t)pbacklog;
-		const uint16_t emit     = (pavail < max_samples) ? pavail : max_samples;
+		const uint16_t pavail = (uint16_t)pbacklog;
+		const uint16_t emit   = (pavail < max_samples) ? pavail : max_samples;
 		for (uint16_t i = 0u; i < emit; ++i) {
 			uint32_t code = s->proc_ring[s->proc_read % BRIDGE_ADC_STREAM_RING_SAMPLES];
 			if (code > s->full_scale) code = s->full_scale;
@@ -336,9 +336,9 @@ static void adc_dsp_chain_release(uint8_t chain_id);
 
 /* DSP dispatch helpers, defined in the #496 pump section at end of file
  * but referenced earlier by chain_bind / stream_end. */
-bool adc_dsp_filter_stream_busy(uint8_t except_stream);
-void adc_dsp_fac_release(uint8_t stream_id);
-void adc_dsp_fft_release(uint8_t stream_id);
+bool        adc_dsp_filter_stream_busy(uint8_t except_stream);
+void        adc_dsp_fac_release(uint8_t stream_id);
+void        adc_dsp_fft_release(uint8_t stream_id);
 static void adc_dsp_pump_fft(uint8_t sid);
 
 int bridge_hw_adc_stream_end(uint8_t stream_id)
@@ -435,14 +435,14 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
  *   IIR    : format:u8 n_sections:u8 rsvd:u16 coeffs[n_sec*5*4]
  *   WINDOW : shape:u8  rsvd[3]                                  (4 B)
  *   FFT    : n_points:u16 out_fmt:u8 rsvd:u8                    (4 B) */
-#define BRIDGE_DSP_MAX_FIR_TAPS      64u
-#define BRIDGE_DSP_MAX_IIR_SECTIONS  8u
-#define BRIDGE_DSP_MIN_FFT_POINTS    32u
-#define BRIDGE_DSP_MAX_FFT_POINTS    1024u
-#define BRIDGE_DSP_COEFF_FMT_MAX     1u  /* 0 F32, 1 Q31 */
-#define BRIDGE_DSP_WINDOW_SHAPE_MAX  3u  /* rect/hann/hamming/blackman */
-#define BRIDGE_DSP_FFT_OUT_FMT_MAX   2u  /* complex/magnitude/magnitude-onesided */
-#define BRIDGE_DSP_STAGE_HDR_BYTES   4u  /* every kind's fixed 4-byte header */
+#define BRIDGE_DSP_MAX_FIR_TAPS     64u
+#define BRIDGE_DSP_MAX_IIR_SECTIONS 8u
+#define BRIDGE_DSP_MIN_FFT_POINTS   32u
+#define BRIDGE_DSP_MAX_FFT_POINTS   1024u
+#define BRIDGE_DSP_COEFF_FMT_MAX    1u /* 0 F32, 1 Q31 */
+#define BRIDGE_DSP_WINDOW_SHAPE_MAX 3u /* rect/hann/hamming/blackman */
+#define BRIDGE_DSP_FFT_OUT_FMT_MAX  2u /* complex/magnitude/magnitude-onesided */
+#define BRIDGE_DSP_STAGE_HDR_BYTES  4u /* every kind's fixed 4-byte header */
 
 typedef struct {
 	uint8_t  kind;           /* alp_dsp_stage_kind_t (valid when total_size > 0) */
@@ -493,16 +493,14 @@ static bool adc_dsp_stage_blob_valid(const adc_dsp_stage_t *st)
 		const uint8_t n_taps = d[1];
 		if (fmt > BRIDGE_DSP_COEFF_FMT_MAX) return false;
 		if (n_taps == 0u || n_taps > BRIDGE_DSP_MAX_FIR_TAPS) return false;
-		return st->total_size ==
-		       (uint16_t)(BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)n_taps * 4u);
+		return st->total_size == (uint16_t)(BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)n_taps * 4u);
 	}
 	case 1u: { /* IIR: format:u8 n_sections:u8 rsvd:u16 coeffs[n_sec*5*4] */
-		const uint8_t fmt  = d[0];
+		const uint8_t fmt   = d[0];
 		const uint8_t n_sec = d[1];
 		if (fmt > BRIDGE_DSP_COEFF_FMT_MAX) return false;
 		if (n_sec == 0u || n_sec > BRIDGE_DSP_MAX_IIR_SECTIONS) return false;
-		return st->total_size ==
-		       (uint16_t)(BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)n_sec * 5u * 4u);
+		return st->total_size == (uint16_t)(BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)n_sec * 5u * 4u);
 	}
 	case 2u: /* WINDOW: shape:u8 rsvd[3] */
 		if (d[0] > BRIDGE_DSP_WINDOW_SHAPE_MAX) return false;
@@ -511,8 +509,8 @@ static bool adc_dsp_stage_blob_valid(const adc_dsp_stage_t *st)
 		const uint16_t n_points = (uint16_t)(d[0] | ((uint16_t)d[1] << 8));
 		const uint8_t  out_fmt  = d[2];
 		if (out_fmt > BRIDGE_DSP_FFT_OUT_FMT_MAX) return false;
-		if (n_points < BRIDGE_DSP_MIN_FFT_POINTS ||
-		    n_points > BRIDGE_DSP_MAX_FFT_POINTS) return false;
+		if (n_points < BRIDGE_DSP_MIN_FFT_POINTS || n_points > BRIDGE_DSP_MAX_FFT_POINTS)
+			return false;
 		if ((n_points & (uint16_t)(n_points - 1u)) != 0u) return false; /* pow2 */
 		return st->total_size == BRIDGE_DSP_STAGE_HDR_BYTES;
 	}
@@ -682,13 +680,13 @@ int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)
      * ring and stream_read serves filtered mV; FFT -> stream_read
      * answers NOSUPPORT (spectrum is read via CMD_ADC_SPECTRUM_READ).
      * Reset the processed-ring cursors so the pump starts clean. */
-	s->dsp_terminal   = chain->stages[last_populated_index].kind;
-	s->proc_write     = 0u;
-	s->proc_read      = 0u;
-	s->pump_raw_read  = s->total_read; /* pump picks up where the raw reader is */
-	s->dsp_chain_id   = chain_id;
-	s->dsp_bound      = true;
-	chain->bound      = true;
+	s->dsp_terminal  = chain->stages[last_populated_index].kind;
+	s->proc_write    = 0u;
+	s->proc_read     = 0u;
+	s->pump_raw_read = s->total_read; /* pump picks up where the raw reader is */
+	s->dsp_chain_id  = chain_id;
+	s->dsp_bound     = true;
+	chain->bound     = true;
 	return BRIDGE_HW_OK;
 }
 
@@ -737,8 +735,8 @@ void adc_dsp_fac_release(uint8_t stream_id)
  * [-1, +1) and scale by 2^15. */
 static int16_t adc_dsp_coeff_q15(uint8_t fmt, const uint8_t *p)
 {
-	uint32_t w = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-	             ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+	uint32_t w =
+	    (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 	if (fmt == 1u) { /* Q31 */
 		return (int16_t)((int32_t)w >> 16);
 	}
@@ -746,7 +744,7 @@ static int16_t adc_dsp_coeff_q15(uint8_t fmt, const uint8_t *p)
 	float f;
 	__builtin_memcpy(&f, &w, sizeof(f));
 	if (f >= 0.999969f) f = 0.999969f;
-	if (f <= -1.0f)     f = -1.0f;
+	if (f <= -1.0f) f = -1.0f;
 	return (int16_t)(f * 32768.0f);
 }
 
@@ -761,10 +759,13 @@ static bool adc_dsp_fac_config(const adc_stream_state_t *s)
 	const adc_dsp_chain_t *chain = &adc_dsp_chains[s->dsp_chain_id];
 
 	/* P1 handles exactly one populated non-FFT stage. */
-	const adc_dsp_stage_t *st = 0;
-	uint8_t populated = 0u;
+	const adc_dsp_stage_t *st        = 0;
+	uint8_t                populated = 0u;
 	for (uint8_t i = 0u; i < BRIDGE_DSP_MAX_STAGES; ++i) {
-		if (chain->stages[i].total_size != 0u) { st = &chain->stages[i]; ++populated; }
+		if (chain->stages[i].total_size != 0u) {
+			st = &chain->stages[i];
+			++populated;
+		}
 	}
 	if (st == 0 || populated != 1u) return false;
 
@@ -778,12 +779,15 @@ static bool adc_dsp_fac_config(const adc_stream_state_t *s)
 	if (st->kind == 0u) { /* FIR: format:u8 n_taps:u8 rsvd:u16 taps[] */
 		const uint8_t fmt = st->data[0];
 		const uint8_t nt  = st->data[1];
-		int16_t taps[BRIDGE_DSP_MAX_FIR_TAPS];
+		int16_t       taps[BRIDGE_DSP_MAX_FIR_TAPS];
 		for (uint8_t k = 0u; k < nt; ++k) {
-			taps[k] = adc_dsp_coeff_q15(fmt, &st->data[BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)k * 4u]);
+			taps[k] =
+			    adc_dsp_coeff_q15(fmt, &st->data[BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)k * 4u]);
 		}
-		p.coeff_addr       = 0u;             p.coeff_size  = nt;
-		p.input_addr       = nt;             p.input_size  = (uint8_t)(nt + depth);
+		p.coeff_addr       = 0u;
+		p.coeff_size       = nt;
+		p.input_addr       = nt;
+		p.input_size       = (uint8_t)(nt + depth);
 		p.output_addr      = (uint8_t)(nt + nt + depth);
 		p.output_size      = depth;
 		p.input_threshold  = FAC_THRESHOLD_1;
@@ -793,13 +797,20 @@ static bool adc_dsp_fac_config(const adc_stream_state_t *s)
 
 		fac_fixed_data_preload_struct pl;
 		fac_fixed_data_preload_init(&pl);
-		pl.coeffb_ctx = taps; pl.coeffb_size = nt;
-		pl.coeffa_ctx = 0;    pl.coeffa_size = 0u;
-		pl.input_ctx  = 0;    pl.input_size  = 0u;
-		pl.output_ctx = 0;    pl.output_size = 0u;
+		pl.coeffb_ctx  = taps;
+		pl.coeffb_size = nt;
+		pl.coeffa_ctx  = 0;
+		pl.coeffa_size = 0u;
+		pl.input_ctx   = 0;
+		pl.input_size  = 0u;
+		pl.output_ctx  = 0;
+		pl.output_size = 0u;
 		fac_fixed_buffer_preload(&pl);
 
-		p.func = FUNC_CONVO_FIR; p.ipp = nt; p.ipq = 0u; p.ipr = 0u;
+		p.func = FUNC_CONVO_FIR;
+		p.ipp  = nt;
+		p.ipq  = 0u;
+		p.ipr  = 0u;
 		fac_function_config(&p);
 		fac_start();
 		return true;
@@ -811,12 +822,16 @@ static bool adc_dsp_fac_config(const adc_stream_state_t *s)
 		if (n_sec != 1u) return false; /* cascaded sections: later */
 		/* section = b0,b1,b2,a1,a2 (5 coeffs).  FAC coeffb = feed-
 		 * forward B (b0,b1,b2), coeffa = feedback A (a1,a2). */
-		int16_t b[3], a[2];
+		int16_t        b[3], a[2];
 		const uint8_t *c = &st->data[BRIDGE_DSP_STAGE_HDR_BYTES];
-		for (uint8_t k = 0u; k < 3u; ++k) b[k] = adc_dsp_coeff_q15(fmt, &c[k * 4u]);
-		for (uint8_t k = 0u; k < 2u; ++k) a[k] = adc_dsp_coeff_q15(fmt, &c[(3u + k) * 4u]);
-		p.coeff_addr       = 0u;             p.coeff_size  = 5u; /* b0..b2,a1,a2 */
-		p.input_addr       = 5u;             p.input_size  = (uint8_t)(3u + depth);
+		for (uint8_t k = 0u; k < 3u; ++k)
+			b[k] = adc_dsp_coeff_q15(fmt, &c[k * 4u]);
+		for (uint8_t k = 0u; k < 2u; ++k)
+			a[k] = adc_dsp_coeff_q15(fmt, &c[(3u + k) * 4u]);
+		p.coeff_addr       = 0u;
+		p.coeff_size       = 5u; /* b0..b2,a1,a2 */
+		p.input_addr       = 5u;
+		p.input_size       = (uint8_t)(3u + depth);
 		p.output_addr      = (uint8_t)(5u + 3u + depth);
 		p.output_size      = depth;
 		p.input_threshold  = FAC_THRESHOLD_1;
@@ -826,14 +841,21 @@ static bool adc_dsp_fac_config(const adc_stream_state_t *s)
 
 		fac_fixed_data_preload_struct pl;
 		fac_fixed_data_preload_init(&pl);
-		pl.coeffb_ctx = b; pl.coeffb_size = 3u;
-		pl.coeffa_ctx = a; pl.coeffa_size = 2u;
-		pl.input_ctx  = 0; pl.input_size  = 0u;
-		pl.output_ctx = 0; pl.output_size = 0u;
+		pl.coeffb_ctx  = b;
+		pl.coeffb_size = 3u;
+		pl.coeffa_ctx  = a;
+		pl.coeffa_size = 2u;
+		pl.input_ctx   = 0;
+		pl.input_size  = 0u;
+		pl.output_ctx  = 0;
+		pl.output_size = 0u;
 		fac_fixed_buffer_preload(&pl);
 
 		/* IPP = feed-forward count (3), IPQ = feedback count (2). */
-		p.func = FUNC_IIR_DIRECT_FORM_1; p.ipp = 3u; p.ipq = 2u; p.ipr = 0u;
+		p.func = FUNC_IIR_DIRECT_FORM_1;
+		p.ipp  = 3u;
+		p.ipq  = 2u;
+		p.ipr  = 0u;
 		fac_function_config(&p);
 		fac_start();
 		return true;
@@ -882,7 +904,7 @@ static void adc_dsp_pump_stream(uint8_t sid)
 
 		if (fac_flag_get(FAC_FLAG_YBEF) == RESET) {
 			int32_t c = (int32_t)fac_fixed_data_read() >> 3;
-			if (c < 0)    c = 0;
+			if (c < 0) c = 0;
 			if (c > 4095) c = 4095;
 			s->proc_ring[s->proc_write % BRIDGE_ADC_STREAM_RING_SAMPLES] = (uint16_t)c;
 			s->proc_write++;
@@ -898,8 +920,10 @@ void bridge_hw_dsp_pump(void)
 	for (uint8_t sid = 0u; sid < BRIDGE_ADC_STREAM_COUNT; ++sid) {
 		const adc_stream_state_t *s = &adc_streams[sid];
 		if (!s->in_use || !s->dsp_bound) continue;
-		if (s->dsp_terminal == 3u) adc_dsp_pump_fft(sid); /* spectrum path */
-		else                       adc_dsp_pump_stream(sid); /* FIR/IIR path */
+		if (s->dsp_terminal == 3u)
+			adc_dsp_pump_fft(sid); /* spectrum path */
+		else
+			adc_dsp_pump_stream(sid); /* FIR/IIR path */
 	}
 }
 
@@ -916,12 +940,12 @@ void bridge_hw_dsp_pump(void)
  * ===================================================================== */
 #define ADC_DSP_FFT_MAX_POINTS 1024u
 
-static int8_t            adc_dsp_fft_owner  = -1;
+static int8_t            adc_dsp_fft_owner = -1;
 static uint16_t          adc_dsp_fft_points;
-static uint8_t           adc_dsp_fft_outfmt;   /* 0 complex / 1 mag / 2 mag-onesided */
+static uint8_t           adc_dsp_fft_outfmt; /* 0 complex / 1 mag / 2 mag-onesided */
 static uint16_t          adc_dsp_fft_fill;
-static volatile uint32_t adc_dsp_fft_seq;      /* completed-frame counter */
-static uint16_t          adc_dsp_fft_nbins;    /* bins in the current frame */
+static volatile uint32_t adc_dsp_fft_seq;   /* completed-frame counter */
+static uint16_t          adc_dsp_fft_nbins; /* bins in the current frame */
 static float             adc_dsp_fft_real[ADC_DSP_FFT_MAX_POINTS];
 static float             adc_dsp_fft_out[ADC_DSP_FFT_MAX_POINTS * 2u]; /* re,im */
 static float             adc_dsp_fft_wcoef[ADC_DSP_FFT_MAX_POINTS];
@@ -930,14 +954,19 @@ static float             adc_dsp_fft_bins[ADC_DSP_FFT_MAX_POINTS * 2u]; /* publi
 static uint8_t adc_dsp_fft_point_enum(uint16_t n)
 {
 	switch (n) {
-	case 32u:   return FFT_POINT_32;
-	case 64u:   return FFT_POINT_64;
-	case 128u:  return FFT_POINT_128;
-	case 256u:  return FFT_POINT_256;
-	default:    break;
+	case 32u:
+		return FFT_POINT_32;
+	case 64u:
+		return FFT_POINT_64;
+	case 128u:
+		return FFT_POINT_128;
+	case 256u:
+		return FFT_POINT_256;
+	default:
+		break;
 	}
 	/* 512 / 1024 continue the enum (see gd32g5x3_fft.h). */
-	if (n == 512u)  return (uint8_t)(FFT_POINT_256 + 1u);
+	if (n == 512u) return (uint8_t)(FFT_POINT_256 + 1u);
 	return (uint8_t)(FFT_POINT_256 + 2u); /* 1024 */
 }
 
@@ -948,13 +977,20 @@ static void adc_dsp_fft_make_window(uint8_t shape, uint16_t n)
 	const float twopi = 6.28318530718f;
 	for (uint16_t i = 0u; i < n; ++i) {
 		const float t = (float)i / (float)(n - 1u);
-		float w;
+		float       w;
 		switch (shape) {
-		case 1u: w = 0.5f - 0.5f * __builtin_cosf(twopi * t); break;              /* Hann    */
-		case 2u: w = 0.54f - 0.46f * __builtin_cosf(twopi * t); break;            /* Hamming */
-		case 3u: w = 0.42f - 0.5f * __builtin_cosf(twopi * t)
-		             + 0.08f * __builtin_cosf(2.0f * twopi * t); break;            /* Blackman*/
-		default: w = 1.0f; break;                                                 /* rect    */
+		case 1u:
+			w = 0.5f - 0.5f * __builtin_cosf(twopi * t);
+			break; /* Hann    */
+		case 2u:
+			w = 0.54f - 0.46f * __builtin_cosf(twopi * t);
+			break; /* Hamming */
+		case 3u:
+			w = 0.42f - 0.5f * __builtin_cosf(twopi * t) + 0.08f * __builtin_cosf(2.0f * twopi * t);
+			break; /* Blackman*/
+		default:
+			w = 1.0f;
+			break; /* rect    */
 		}
 		adc_dsp_fft_wcoef[i] = w;
 	}
@@ -969,9 +1005,12 @@ static bool adc_dsp_fft_config(const adc_stream_state_t *s)
 	const adc_dsp_stage_t *fft_st = 0, *win_st = 0;
 	for (uint8_t i = 0u; i < BRIDGE_DSP_MAX_STAGES; ++i) {
 		if (chain->stages[i].total_size == 0u) continue;
-		if (chain->stages[i].kind == 3u)      fft_st = &chain->stages[i];
-		else if (chain->stages[i].kind == 2u) win_st = &chain->stages[i];
-		else return false; /* FIR/IIR before an FFT: not a P1 spectrum chain */
+		if (chain->stages[i].kind == 3u)
+			fft_st = &chain->stages[i];
+		else if (chain->stages[i].kind == 2u)
+			win_st = &chain->stages[i];
+		else
+			return false; /* FIR/IIR before an FFT: not a P1 spectrum chain */
 	}
 	if (fft_st == 0) return false;
 
@@ -990,13 +1029,13 @@ static bool adc_dsp_fft_config(const adc_stream_state_t *s)
 	rcu_periph_clock_enable(RCU_FFT);
 	fft_parameter_struct f;
 	fft_struct_para_init(&f);
-	f.mode_sel      = FFT_MODE;
-	f.point_num     = adc_dsp_fft_point_enum(n);
-	f.downsamp_sel  = FFT_DOWNSAMPLE_1;
-	f.image_source  = FFT_IM_ZERO;
-	f.real_addr     = (uint32_t)(uintptr_t)adc_dsp_fft_real;
-	f.image_addr    = 0u;
-	f.output_addr   = (uint32_t)(uintptr_t)adc_dsp_fft_out;
+	f.mode_sel     = FFT_MODE;
+	f.point_num    = adc_dsp_fft_point_enum(n);
+	f.downsamp_sel = FFT_DOWNSAMPLE_1;
+	f.image_source = FFT_IM_ZERO;
+	f.real_addr    = (uint32_t)(uintptr_t)adc_dsp_fft_real;
+	f.image_addr   = 0u;
+	f.output_addr  = (uint32_t)(uintptr_t)adc_dsp_fft_out;
 	if (win_st != 0 || shape != 0u) {
 		adc_dsp_fft_make_window(shape, n);
 		f.window_enable = FFT_WINDOW_ENABLE;
@@ -1015,13 +1054,14 @@ static void adc_dsp_fft_publish(void)
 {
 	const uint16_t n = adc_dsp_fft_points;
 	if (adc_dsp_fft_outfmt == 0u) { /* COMPLEX: re,im interleaved, 2N */
-		for (uint16_t i = 0u; i < n * 2u; ++i) adc_dsp_fft_bins[i] = adc_dsp_fft_out[i];
+		for (uint16_t i = 0u; i < n * 2u; ++i)
+			adc_dsp_fft_bins[i] = adc_dsp_fft_out[i];
 		adc_dsp_fft_nbins = (uint16_t)(n * 2u);
 	} else { /* MAGNITUDE (N) or MAGNITUDE_ONESIDED (N/2+1) */
 		const uint16_t nb = (adc_dsp_fft_outfmt == 2u) ? (uint16_t)(n / 2u + 1u) : n;
 		for (uint16_t i = 0u; i < nb; ++i) {
-			const float re = adc_dsp_fft_out[i * 2u];
-			const float im = adc_dsp_fft_out[i * 2u + 1u];
+			const float re      = adc_dsp_fft_out[i * 2u];
+			const float im      = adc_dsp_fft_out[i * 2u + 1u];
 			adc_dsp_fft_bins[i] = __builtin_sqrtf(re * re + im * im);
 		}
 		adc_dsp_fft_nbins = nb;
@@ -1061,7 +1101,8 @@ static void adc_dsp_pump_fft(uint8_t sid)
 		if (adc_dsp_fft_fill >= adc_dsp_fft_points) {
 			fft_calculation_start();
 			uint32_t g = 0u;
-			while (fft_flag_get(FFT_FLAG_CCF) == RESET && ++g < 1000000u) { }
+			while (fft_flag_get(FFT_FLAG_CCF) == RESET && ++g < 1000000u) {
+			}
 			if (fft_flag_get(FFT_FLAG_CCF) != RESET) adc_dsp_fft_publish();
 			adc_dsp_fft_fill = 0u;
 		}
@@ -1107,7 +1148,8 @@ int bridge_hw_adc_spectrum_read(uint8_t   stream_id,
 
 	uint16_t remain = (uint16_t)(adc_dsp_fft_nbins - bin_offset);
 	uint8_t  emit   = (remain < max_bins) ? (uint8_t)remain : max_bins;
-	for (uint8_t i = 0u; i < emit; ++i) bins_out[i] = adc_dsp_fft_bins[bin_offset + i];
+	for (uint8_t i = 0u; i < emit; ++i)
+		bins_out[i] = adc_dsp_fft_bins[bin_offset + i];
 	*got_bins_out = emit;
 	return BRIDGE_HW_OK;
 }

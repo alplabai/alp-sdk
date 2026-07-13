@@ -536,12 +536,12 @@ static gd32_bridge_status_t handle_adc_spectrum_read(const uint8_t *req,
 	if (max_bins == 0u) return STATUS_INVAL;
 	if (max_bins > GD32_BRIDGE_ADC_SPECTRUM_READ_MAX) return STATUS_OUT_OF_RANGE;
 
-	float    bins[GD32_BRIDGE_ADC_SPECTRUM_READ_MAX];
-	uint32_t seq = 0u;
-	uint16_t total = 0u;
-	uint8_t  got = 0u;
-	const int rv = bridge_hw_adc_spectrum_read(stream_id, bin_offset, max_bins,
-	                                           &seq, &total, &got, bins);
+	float     bins[GD32_BRIDGE_ADC_SPECTRUM_READ_MAX];
+	uint32_t  seq   = 0u;
+	uint16_t  total = 0u;
+	uint8_t   got   = 0u;
+	const int rv =
+	    bridge_hw_adc_spectrum_read(stream_id, bin_offset, max_bins, &seq, &total, &got, bins);
 	if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT; /* not FFT-bound */
 	if (rv == BRIDGE_HW_ERR_IO) return STATUS_BUSY;           /* no frame yet -> poll */
 	if (rv < 0) return STATUS_IO;
