@@ -32,7 +32,13 @@
  *      lifecycle-byte-only check (the pre-generalisation fallback those
  *      dispatchers used) would have missed, since a racing close would
  *      have read active_ops == 0 (the op was never counted there) and
- *      won its CAS while the op was still in flight.
+ *      won its CAS while the op was still in flight. A second
+ *      barrier (`entered`, see fake_blocking_op()) forces the op to
+ *      have already been counted before close's CAS runs each round,
+ *      so this deterministically exercises the drain-wait path
+ *      instead of racing the two threads' entry/CAS off one shared
+ *      start barrier (which let a mutated, uncounted op miss the bug
+ *      most rounds).
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto -DALP_BUILD_TESTS=ON
@@ -405,10 +411,30 @@ static void test_double_close_tears_down_exactly_once(void)
  * alp_handle_op_enter/leave, exactly like those dispatchers convert to
  * for issue #629, so alp_handle_begin_close_blocking()'s drain must
  * wait for it -- a lifecycle-byte-only check would not have counted
- * it at all, letting a racing close's CAS win immediately. */
-static bool fake_blocking_op(struct fake_handle *h, bool *saw_poison)
+ * it at all, letting a racing close's CAS win immediately.
+ *
+ * `entered` is a SECOND barrier (distinct from the round's start/sync
+ * barrier) that this function releases right after the entry gate
+ * succeeds and BEFORE the sleep: without it, the op and close threads
+ * are both simply released off the same start barrier and race
+ * freely, so close's single CAS routinely wins before this op's gate
+ * even runs -- the op then reads CLOSING and backs out without ever
+ * being counted, and the drain-wait path never gets exercised
+ * (measured: the bug this scenario exists to catch was missed 4/5
+ * runs). Waiting for `entered` on the close side (see
+ * blocking_close_race_close_thread() below) instead makes the
+ * ordering deterministic: the op is always counted-and-mid-sleep
+ * before close's CAS runs, every round. */
+static bool fake_blocking_op(struct fake_handle *h, bool *saw_poison, pthread_barrier_t *entered)
 {
-	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+	bool counted = alp_handle_op_enter(&h->lifecycle, &h->active_ops);
+	/* Release the close thread now regardless of `counted`: in this
+	 * test's protocol the handle is always freshly OPEN at round start
+	 * (close waits for this signal before touching it), so entry always
+	 * succeeds in practice -- but never leave the close thread parked on
+	 * `entered` forever if that ever changes. */
+	pthread_barrier_wait(entered);
+	if (!counted) {
 		return false;
 	}
 	struct timespec ts = { .tv_sec = 0, .tv_nsec = 2000000L }; /* 2 ms "round-trip" */
@@ -438,6 +464,7 @@ static bool fake_close_blocking(struct fake_handle *h)
 
 struct blocking_close_race_ctx {
 	pthread_barrier_t   barrier;
+	pthread_barrier_t   entered; /* op-counted-and-about-to-sleep signal */
 	struct fake_handle *pool;
 	struct fake_handle *h;
 	bool                op_ran[BLOCKING_RACE_ITERATIONS];
@@ -450,7 +477,7 @@ static void *blocking_close_race_op_thread(void *arg)
 	struct blocking_close_race_ctx *ctx = arg;
 	for (int i = 0; i < BLOCKING_RACE_ITERATIONS; i++) {
 		pthread_barrier_wait(&ctx->barrier);
-		ctx->op_ran[i] = fake_blocking_op(ctx->h, &ctx->saw_poison);
+		ctx->op_ran[i] = fake_blocking_op(ctx->h, &ctx->saw_poison, &ctx->entered);
 		pthread_barrier_wait(&ctx->barrier);
 	}
 	return NULL;
@@ -461,9 +488,14 @@ static void *blocking_close_race_close_thread(void *arg)
 	struct blocking_close_race_ctx *ctx = arg;
 	for (int i = 0; i < BLOCKING_RACE_ITERATIONS; i++) {
 		pthread_barrier_wait(&ctx->barrier);
-		/* Fires right after the op thread's op_enter (both released by
-		 * the same barrier), so this races the CAS against the
-		 * in-flight, still-sleeping blocking op. */
+		/* Wait for the op thread to have run its entry gate (and, when
+		 * counted, be sitting in its sleep with active_ops already
+		 * incremented) before issuing the CAS -- see fake_blocking_op()'s
+		 * doc comment: without this second barrier, this thread's CAS
+		 * routinely wins the race off the shared start barrier before
+		 * the op's gate even runs, and this scenario never exercises the
+		 * drain-wait path it exists to prove. */
+		pthread_barrier_wait(&ctx->entered);
 		fake_close_blocking(ctx->h);
 		pthread_barrier_wait(&ctx->barrier);
 		/* Re-open for the next round (op thread parked at the barrier). */
@@ -485,19 +517,23 @@ static void test_blocking_close_never_recycles_under_counted_blocking_op(void)
 	ALP_ASSERT_TRUE(ctx->h != NULL);
 
 	ALP_ASSERT_EQ_INT(pthread_barrier_init(&ctx->barrier, NULL, 2), 0);
+	ALP_ASSERT_EQ_INT(pthread_barrier_init(&ctx->entered, NULL, 2), 0);
 	ALP_ASSERT_EQ_INT(pthread_create(&t_op, NULL, blocking_close_race_op_thread, ctx), 0);
 	ALP_ASSERT_EQ_INT(pthread_create(&t_close, NULL, blocking_close_race_close_thread, ctx), 0);
 	ALP_ASSERT_EQ_INT(pthread_join(t_op, NULL), 0);
 	ALP_ASSERT_EQ_INT(pthread_join(t_close, NULL), 0);
 	pthread_barrier_destroy(&ctx->barrier);
+	pthread_barrier_destroy(&ctx->entered);
 
-	/* The counted blocking op entered before close's CAS is drained by
-	 * begin_close_blocking's sleep-poll, so it always saw live backend
-	 * state; the op that lost to the CAS backed out before touching
-	 * state. Either way, never the poison -- the property a
-	 * lifecycle-byte-only fallback (uncounted) would NOT have held,
-	 * since close's CAS would win immediately against active_ops == 0
-	 * while the op was still mid-sleep. */
+	/* The `entered` barrier guarantees the op is always counted (its
+	 * alp_handle_op_enter() has already run) and mid-sleep by the time
+	 * close's CAS fires, so begin_close_blocking() is deterministically
+	 * forced onto its sleep-poll drain-wait path every round -- it must
+	 * wait for the op's alp_handle_op_leave() before it may poison
+	 * backend_state. Never the poison -- the property a lifecycle-byte-
+	 * only fallback (uncounted) would NOT have held, since close's CAS
+	 * would win immediately against active_ops == 0 while the op was
+	 * still mid-sleep, poisoning state out from underneath it. */
 	ALP_ASSERT_TRUE(!ctx->saw_poison);
 	for (int i = 0; i < BLOCKING_RACE_ITERATIONS; i++) {
 		ALP_ASSERT_TRUE(ctx->reopen_ok[i]);
