@@ -61,7 +61,10 @@ static bool meta_current(ota_meta_record_t *out)
 static bool active_slot_valid(const ota_meta_record_t *m)
 {
 	const uint8_t slot = m->active_slot;
-	if (slot > OTA_SLOT_B) { /* defensive: slot indexes [2] arrays */
+	uint32_t      base;
+	/* A corrupt active_slot must NOT resolve to a valid flash base
+	 * (#741): reject it here, before the slot indexes the [2] arrays. */
+	if (!ota_slot_base_checked(slot, &base)) {
 		return false;
 	}
 	const uint32_t len = m->img_len[slot];
@@ -71,7 +74,6 @@ static bool active_slot_valid(const ota_meta_record_t *m)
 	if (len == 0u || len > OTA_SLOT_SIZE) {
 		return false;
 	}
-	const uint32_t base = ota_slot_base(slot);
 	return ota_crc32(0u, (const uint8_t *)base, len) == m->img_crc32[slot];
 }
 
@@ -90,8 +92,9 @@ static void jump_to_slot(uint32_t slot_base)
 int main(void)
 {
 	ota_meta_record_t m;
-	if (meta_current(&m) && active_slot_valid(&m)) {
-		jump_to_slot(ota_slot_base(m.active_slot));
+	uint32_t          base;
+	if (meta_current(&m) && active_slot_valid(&m) && ota_slot_base_checked(m.active_slot, &base)) {
+		jump_to_slot(base);
 	}
 	/* No valid image: recovery. A later build exposes the OTA opcodes here
      * to accept a reflash over the bridge; today, idle so a bench SWD probe

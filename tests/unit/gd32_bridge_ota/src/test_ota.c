@@ -196,3 +196,22 @@ ZTEST(gd32_bridge_ota, test_replay_is_idempotent)
 	zassert_equal(write_chunk(0u, data, sizeof(data), reply, &rlen), STATUS_OK);
 	zassert_equal(g_program_calls, 0u, "replayed chunk must not re-program");
 }
+
+/* #741: ota_slot_base_checked validates the slot instead of silently
+ * mapping every non-B value to slot A. */
+ZTEST(gd32_bridge_ota, test_slot_base_checked_validates_slot)
+{
+	uint32_t base = 0xDEADBEEFu;
+
+	zassert_true(ota_slot_base_checked(OTA_SLOT_A, &base));
+	zassert_equal(base, OTA_SLOT_A_BASE);
+	zassert_true(ota_slot_base_checked(OTA_SLOT_B, &base));
+	zassert_equal(base, OTA_SLOT_B_BASE);
+
+	/* Representative invalid slots must be REJECTED, not resolved to a
+	 * valid flash address -- the #741 defect. */
+	base = 0xDEADBEEFu;
+	zassert_false(ota_slot_base_checked(2u, &base), "slot 2 must reject, not map to A");
+	zassert_false(ota_slot_base_checked(0xFFu, &base));
+	zassert_equal(base, 0xDEADBEEFu, "base must be untouched on reject");
+}

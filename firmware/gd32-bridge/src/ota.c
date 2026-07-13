@@ -177,6 +177,18 @@ static uint8_t active_slot_now(void)
 	return meta_current(&cur, &which) ? cur.active_slot : OTA_SLOT_A;
 }
 
+/* Flash base of the in-flight (inactive) slot.  s_inactive is set to
+ * OTA_SLOT_A/B at BEGIN (the trusted internal boundary), so the checked
+ * derivation (#741) never fails here; validate anyway for defence. */
+static uint32_t ota_inactive_base(void)
+{
+	uint32_t base = 0u;
+	if (!ota_slot_base_checked(s_inactive, &base)) {
+		base = OTA_SLOT_A_BASE; /* unreachable: s_inactive is always A/B */
+	}
+	return base;
+}
+
 /* ---- opcode handlers ------------------------------------------------ */
 static gd32_bridge_status_t
 h_begin(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen)
@@ -204,7 +216,7 @@ h_begin(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
 	}
 	s_inactive = (active_slot_now() == OTA_SLOT_A) ? OTA_SLOT_B : OTA_SLOT_A;
 	s_state    = OTA_ST_BUSY;
-	if (!ota_fmc_erase_range(ota_slot_base(s_inactive), OTA_SLOT_SIZE)) {
+	if (!ota_fmc_erase_range(ota_inactive_base(), OTA_SLOT_SIZE)) {
 		s_state = OTA_ST_ERROR;
 		s_err   = 2u;
 		return STATUS_IO;
@@ -267,7 +279,7 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
      * PARTIAL overlap still falls through to the program path (and
      * PGERRs) -- fixed-size streaming never produces one. */
 	if (off + (uint32_t)dlen <= s_last_off) {
-		const uint8_t *flash = (const uint8_t *)ota_fmc_flash_ptr(ota_slot_base(s_inactive) + off);
+		const uint8_t *flash = (const uint8_t *)ota_fmc_flash_ptr(ota_inactive_base() + off);
 		if (memcmp(flash, &req[5], dlen) == 0) {
 			s_state = OTA_ST_READY;
 			if (cap >= 4u) {
@@ -281,7 +293,7 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
 		return STATUS_IO;
 	}
 	s_state = OTA_ST_BUSY;
-	if (!ota_fmc_program(ota_slot_base(s_inactive) + off, &req[5], dlen)) {
+	if (!ota_fmc_program(ota_inactive_base() + off, &req[5], dlen)) {
 		s_state = OTA_ST_ERROR;
 		s_err   = 4u;
 		return STATUS_IO;
@@ -308,8 +320,7 @@ static gd32_bridge_status_t h_verify(uint8_t *reply, size_t cap, size_t *rlen)
          * protocol-misuse brick.  Refuse instead. */
 		return STATUS_NOT_READY;
 	}
-	s_img_crc =
-	    ota_crc32(0u, (const uint8_t *)ota_fmc_flash_ptr(ota_slot_base(s_inactive)), s_img_len);
+	s_img_crc = ota_crc32(0u, (const uint8_t *)ota_fmc_flash_ptr(ota_inactive_base()), s_img_len);
 	const bool ok = (s_img_crc == s_expected_crc);
 	s_state       = ok ? OTA_ST_VERIFIED : OTA_ST_ERROR;
 	if (!ok) {

@@ -28,6 +28,7 @@
 #ifndef GD32_BRIDGE_OTA_LAYOUT_H
 #define GD32_BRIDGE_OTA_LAYOUT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define OTA_PAGE_SIZE 0x00000800u /* 2 KB single-bank page */
@@ -89,9 +90,23 @@ typedef struct {
 	uint32_t rec_crc32;     /* CRC-32 over this record excluding this field */
 } ota_meta_record_t;
 
-static inline uint32_t ota_slot_base(uint8_t slot)
+/* Derive a slot's flash base with EXPLICIT validation.  The old
+ * `ota_slot_base` silently mapped every non-B value (incl. a corrupt
+ * active_slot from persisted metadata) to slot A, so callers could not
+ * tell a rejected slot from slot A and might erase / program / verify /
+ * boot the wrong region (#741).  This returns false for any slot that
+ * is not OTA_SLOT_A/B; callers MUST check before using *base_out. */
+static inline bool ota_slot_base_checked(uint8_t slot, uint32_t *base_out)
 {
-	return (slot == OTA_SLOT_B) ? OTA_SLOT_B_BASE : OTA_SLOT_A_BASE;
+	if (slot == OTA_SLOT_A) {
+		*base_out = OTA_SLOT_A_BASE;
+		return true;
+	}
+	if (slot == OTA_SLOT_B) {
+		*base_out = OTA_SLOT_B_BASE;
+		return true;
+	}
+	return false;
 }
 
 #endif /* GD32_BRIDGE_OTA_LAYOUT_H */
