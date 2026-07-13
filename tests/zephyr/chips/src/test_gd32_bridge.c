@@ -264,6 +264,13 @@ ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
 	zassert_equal(gd32g553_adc_dsp_chain_open(&ctx, &chain_id), ALP_ERR_NOT_READY);
 	zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 0u, NULL, 0u), ALP_ERR_NOT_READY);
 	zassert_equal(gd32g553_adc_dsp_chain_bind(&ctx, 0u, 0u), ALP_ERR_NOT_READY);
+	/* spectrum_read (#496) honours the same NOT_READY short-circuit. */
+	uint32_t sp_seq;
+	uint16_t sp_total;
+	uint8_t  sp_got;
+	float    sp_bins[4];
+	zassert_equal(gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 1u, &sp_seq, &sp_total, &sp_got, sp_bins),
+	              ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
@@ -320,4 +327,22 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
 	zassert_equal(gd32g553_adc_dsp_chain_bind(&ctx, 0u, GD32G553_BRIDGE_ADC_STREAM_COUNT),
 	              ALP_ERR_INVAL);
 	zassert_equal(gd32g553_adc_dsp_chain_bind(&ctx, 0u, 99u), ALP_ERR_INVAL);
+
+	/* spectrum_read (#496) rejects NULL out-params, max_bins == 0, and
+	 * an out-of-range stream_id before it serialises a wire request. */
+	{
+		uint32_t seq;
+		uint16_t total;
+		uint8_t  got;
+		float    bins[4];
+		zassert_equal(gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 1u, NULL, &total, &got, bins),
+		              ALP_ERR_INVAL);
+		zassert_equal(gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 1u, &seq, &total, &got, NULL),
+		              ALP_ERR_INVAL);
+		zassert_equal(gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 0u, &seq, &total, &got, bins),
+		              ALP_ERR_INVAL);
+		zassert_equal(gd32g553_adc_spectrum_read(&ctx, GD32G553_BRIDGE_ADC_STREAM_COUNT, 0u, 1u,
+		                                         &seq, &total, &got, bins),
+		              ALP_ERR_INVAL);
+	}
 }

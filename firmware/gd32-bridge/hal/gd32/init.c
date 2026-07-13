@@ -107,8 +107,14 @@
  *                               validates completeness + ordering
  *                               rules (FFT terminal, WINDOW preceding
  *                               FFT) and stores the binding on both
- *                               sides; runtime FFT/FAC dispatch inside
- *                               stream_read follows in a later commit.
+ *                               sides.  Runtime dispatch (#496) now
+ *                               LANDED: a base-level pump routes bound
+ *                               FIR/IIR chains through the FAC (filtered
+ *                               STREAM_READ) and FFT chains through the
+ *                               FFT block (CMD_ADC_SPECTRUM_READ; a plain
+ *                               STREAM_READ answers NOSUPPORT).  One FAC
+ *                               + one FFT block -> one filter + one FFT
+ *                               stream at a time.
  *
  * Each follow-up commit replaces ONE hook's stub body with a real
  * implementation and updates this header comment + the CHANGELOG.
