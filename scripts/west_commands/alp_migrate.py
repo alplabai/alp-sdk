@@ -4,7 +4,7 @@
 
     west alp-migrate --check      # report versions; nonzero on drift
     west alp-migrate --preview    # unified diff + diagnostic-v1 JSON, no writes
-    west alp-migrate --apply      # rewrite in place, regen, run pr profile
+    west alp-migrate --apply      # rewrite in place + regen derived files
 """
 from __future__ import annotations
 
@@ -43,8 +43,12 @@ def run(args) -> int:
             print(f"alp-migrate: {path} not found", file=sys.stderr)
             return 1
         text = path.read_text(encoding="utf-8")
-        doc = alp_migrate.load(text)
-        steps = alp_migrate.plan(doc)
+        try:
+            doc = alp_migrate.load(text)
+            steps = alp_migrate.plan(doc)
+        except alp_migrate.MigrateError as e:
+            print(f"alp-migrate: {path}: {e}", file=sys.stderr)
+            return 1
         if args.check:
             if steps:
                 drift = 1
@@ -53,45 +57,55 @@ def run(args) -> int:
             continue
         if not steps:
             continue
-        new_text, report = alp_migrate.apply_text(text)  # byte-faithful writer
+        try:
+            new_text, report = alp_migrate.apply_text(text)
+        except alp_migrate.MigrateError as e:
+            print(f"alp-migrate: {path}: {e}", file=sys.stderr)
+            return 1
         if args.preview:
             sys.stdout.write(alp_migrate.diff(text, new_text, str(path)))
-            json.dump(alp_migrate.report_to_diagnostics(
-                report, path.as_uri()), sys.stdout, indent=2)
+            json.dump(alp_migrate.report_to_diagnostics(report, path.as_uri()),
+                      sys.stdout, indent=2)
             sys.stdout.write("\n")
             continue
-        # --apply
-        path.write_text(new_text, encoding="utf-8")
-        print(f"alp-migrate: migrated {path}")
+        if args.apply:
+            path.write_text(new_text, encoding="utf-8")
+            print(f"alp-migrate: migrated {path}")
     if args.check:
         if drift:
             return 1
         print(f"alp-migrate: all board.yaml at v{alp_migrate.LATEST}.")
         return 0
-    if getattr(args, "apply", False) and not args.no_verify:
+    if args.apply and not args.no_verify:
         return _verify()
     return 0
 
 
 def _verify() -> int:
-    """Regen derived files after an apply; report but don't fail the migrate
-    if regen tooling is unavailable in this environment."""
+    """Regen derived files after an apply. Propagate a regen failure instead
+    of reporting a false success."""
     catalog = REPO / "scripts" / "gen_catalog.py"
     if catalog.is_file():
-        subprocess.run([sys.executable, str(catalog)], cwd=REPO, check=False)
+        cp = subprocess.run([sys.executable, str(catalog)], cwd=REPO, check=False)
+        if cp.returncode != 0:
+            print(f"alp-migrate: post-apply regen (gen_catalog.py) failed "
+                  f"(exit {cp.returncode})", file=sys.stderr)
+            return cp.returncode
     return 0
 
 
 def _add_args(parser) -> None:
-    parser.add_argument("--check", action="store_true",
-                        help="report versions; nonzero on drift")
-    parser.add_argument("--preview", action="store_true",
-                        help="unified diff + diagnostic-v1 JSON, no writes")
-    parser.add_argument("--apply", action="store_true",
-                        help="rewrite board.yaml in place")
-    parser.add_argument("--all", action="store_true",
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true",
+                      help="report versions; nonzero on drift")
+    mode.add_argument("--preview", action="store_true",
+                      help="unified diff + diagnostic-v1 JSON, no writes")
+    mode.add_argument("--apply", action="store_true",
+                      help="rewrite board.yaml in place")
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--all", action="store_true",
                         help="every board.yaml under the repo")
-    parser.add_argument("--board", help="a single board.yaml path")
+    target.add_argument("--board", help="a single board.yaml path")
     parser.add_argument("--no-verify", action="store_true",
                         help="skip the post-apply regen step")
 

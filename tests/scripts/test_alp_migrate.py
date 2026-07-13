@@ -115,3 +115,23 @@ def test_cli_check_nonzero_on_drift(tmp_path):
     b = tmp_path / "board.yaml"
     b.write_text("som:\n  sku: X\n")
     assert cli.main(["--check", "--board", str(b)]) == 1
+
+
+def test_cli_requires_a_mode(tmp_path):
+    cli = _load_cli()
+    b = tmp_path / "board.yaml"
+    b.write_text("som:\n  sku: X\n")
+    with pytest.raises(SystemExit):        # argparse: a mode flag is required
+        cli.main(["--board", str(b)])
+    assert b.read_text() == "som:\n  sku: X\n"   # bare invocation never writes
+
+
+def test_cli_migrate_error_is_clean(tmp_path, capsys):
+    cli = _load_cli()
+    b = tmp_path / "board.yaml"
+    b.write_text("schemaVersion: 999\nsom:\n  sku: X\n")
+    rc = cli.main(["--check", "--board", str(b)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "alp-migrate:" in err            # clean message, not a traceback
+    assert "Traceback" not in err
