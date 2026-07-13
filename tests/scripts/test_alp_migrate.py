@@ -82,3 +82,36 @@ def test_apply_text_idempotent_real_board():
     twice, report = alp_migrate.apply_text(once)
     assert twice == once
     assert report.steps == []
+
+
+import importlib.util
+
+
+def _load_cli():
+    spec = importlib.util.spec_from_file_location(
+        "alp_migrate_cli", REPO / "scripts/west_commands/alp_migrate.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_cli_apply_stamps_file(tmp_path):
+    cli = _load_cli()
+    b = tmp_path / "board.yaml"
+    b.write_text("# hi\nsom:\n  sku: X\n")
+    rc = cli.main(["--apply", "--board", str(b), "--no-verify"])
+    assert rc == 0
+    out = b.read_text()
+    # apply_text (Task 2's byte-faithful writer) preserves a leading whole-line
+    # comment above the stamp, so schemaVersion lands right after it, not at
+    # byte 0 -- this matches its comment-preserving contract (verified by
+    # test_apply_text_adds_exactly_one_line_on_real_board above).
+    assert "schemaVersion: 1" in out
+    assert "# hi" in out
+
+
+def test_cli_check_nonzero_on_drift(tmp_path):
+    cli = _load_cli()
+    b = tmp_path / "board.yaml"
+    b.write_text("som:\n  sku: X\n")
+    assert cli.main(["--check", "--board", str(b)]) == 1
