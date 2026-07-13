@@ -45,6 +45,7 @@
 
 #include "alp_slot_claim.h"
 #include "backends/dsp/dsp_ops.h"
+#include "dsp_range.h"
 
 /*
  * alp_dsp_stats_f32 uses CMSIS-DSP arm_*_f32 statistics kernels when
@@ -259,13 +260,21 @@ alp_status_t alp_dsp_stats_f32(const float *x, size_t n, alp_dsp_stats_t *out)
 	}
 
 #if ALP_DSP_STATS_USE_CMSIS
-	/* CMSIS-DSP statistics kernels (Helium-vectorised on M-class cores). */
+	/* CMSIS-DSP statistics kernels (Helium-vectorised on M-class cores).
+	 * Their block size is uint32_t; a size_t wider than that would be
+	 * SILENTLY TRUNCATED, so CMSIS would process only a prefix while we
+	 * returned success (#734).  Reject the out-of-range length up front and
+	 * narrow ONCE for reuse across the kernels. */
+	uint32_t block;
+	if (!alp_dsp_cmsis_block_len(n, &block)) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 	uint32_t idx;
-	arm_mean_f32(x, (uint32_t)n, &out->mean);
-	arm_rms_f32(x, (uint32_t)n, &out->rms);
-	arm_min_f32(x, (uint32_t)n, &out->min, &idx);
-	arm_max_f32(x, (uint32_t)n, &out->max, &idx);
-	arm_absmax_f32(x, (uint32_t)n, &out->abs_max, &out->abs_max_index);
+	arm_mean_f32(x, block, &out->mean);
+	arm_rms_f32(x, block, &out->rms);
+	arm_min_f32(x, block, &out->min, &idx);
+	arm_max_f32(x, block, &out->max, &idx);
+	arm_absmax_f32(x, block, &out->abs_max, &out->abs_max_index);
 #else
 	/* Single portable-C pass (native_sim, or any target without CMSIS-DSP). */
 	float    mean = 0.0f, sumsq = 0.0f, mn = x[0], mx = x[0], amax = 0.0f;
