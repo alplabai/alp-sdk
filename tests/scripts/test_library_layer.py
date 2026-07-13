@@ -211,6 +211,28 @@ def test_emit_unknown_library_lists_available(tmp_path: Path) -> None:
     assert "lvgl" in msg and "cmsis-dsp" in msg
 
 
+def test_library_scoped_to_undeclared_core_is_rejected(tmp_path: Path) -> None:
+    """A `libraries:` entry whose `cores:` names a core the topology doesn't
+    declare is a hard error -- silently dropping it would emit nothing for a
+    library the app author explicitly asked for."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: lvgl
+        cores: [ghost_core]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+    """
+    with pytest.raises(OrchestratorError) as exc:
+        load_board_yaml(_write_board(tmp_path, body))
+    msg = str(exc.value)
+    assert "ghost_core" in msg
+    assert "lvgl" in msg
+
+
 # ---------------------------------------------------------------------
 # Emit: compatibility errors name the failing constraint
 # ---------------------------------------------------------------------

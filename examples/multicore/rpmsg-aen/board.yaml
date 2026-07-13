@@ -22,6 +22,14 @@
 # preset supplies the mailbox controller, so the orchestrator can
 # allocate the RPMsg carve-out without app-specific SoC knowledge.
 
+libraries:
+  - name: mbedtls
+    cores: [a32_cluster]
+  - name: nlohmann-json
+    cores: [a32_cluster]
+  - name: cmsis-dsp
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
   hw_rev: r2
@@ -36,11 +44,9 @@ cores:
   a32_cluster:
     app: ./linux
     image: alp-image-edge
-    libraries: [mbedtls, nlohmann_json]
   m55_hp:
     app: ./m55_hp
     peripherals: [i2c]
-    libraries: [cmsis_dsp]
 
 # Cross-core RPMsg carve-out.  The orchestrator allocates from
 # E1M-AEN801's `memory_map:` -- once the user supplies authoritative

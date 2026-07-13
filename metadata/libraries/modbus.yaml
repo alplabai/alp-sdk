@@ -43,3 +43,18 @@ integration:
     module: null
     kconfig:
       - CONFIG_MODBUS=y
+    hw_backends:
+      class: industrial bus
+      upstream_source: "libmodbus"
+      accelerators:
+        - class: dma
+          priority:
+            - { backend: uart_dma, kconfig: CONFIG_ALP_MODBUS_UART_DMA=y }
+            - { backend: ethernet_dma, kconfig: CONFIG_ALP_MODBUS_ETH_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_MODBUS_SYNC_IO=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

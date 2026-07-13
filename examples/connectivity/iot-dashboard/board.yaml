@@ -6,6 +6,12 @@
 # on a 240x320 ST7789.  The Wi-Fi connection comes up through
 # the E1M-AEN module's on-module CC3501E bridge backend.
 
+libraries:
+  - name: lvgl
+    cores: [m55_hp]
+  - name: mbedtls
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -26,12 +32,6 @@ cores:
     os: "off"
   m55_hp:
     app: ./src
-    libraries:
-      - lvgl
-      - mbedtls          # v0.6 cross-field validator (P2.3 rule 3)
-                         # requires a TLS provider whenever
-                         # `iot.tls: true`.  MQTT library integration
-                         # re-enables alongside the PSA wiring work item.
     iot:
       wifi:    true
       mqtt:    true

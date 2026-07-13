@@ -340,11 +340,14 @@ def test_consistency_tls_satisfied_by_curated_mbedtls(tmp_path: Path) -> None:
 som:
   sku: E1M-V2N101
 
+libraries:
+  - name: mbedtls
+    cores: [m33_sm]
+
 cores:
   m33_sm:
     os: zephyr
     app: ./m33
-    libraries: [mbedtls]
     iot: { tls: true }
 """
     path = _write_board(tmp_path, body)
@@ -360,11 +363,14 @@ def test_consistency_tls_satisfied_by_curated_bearssl(tmp_path: Path) -> None:
 som:
   sku: E1M-V2N101
 
+libraries:
+  - name: bearssl
+    cores: [m33_sm]
+
 cores:
   m33_sm:
     os: zephyr
     app: ./m33
-    libraries: [bearssl]
     iot: { tls: true }
 """
     path = _write_board(tmp_path, body)

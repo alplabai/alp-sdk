@@ -8,6 +8,10 @@
 # hello-world purely so scripts/alp_project.py has a SoM to derive
 # the baseline SoC config from; doctest itself never touches
 # hardware and this example never runs on real silicon.
+libraries:
+  - name: doctest
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -22,7 +26,6 @@ cores:
     # include path -- see zephyr/CMakeLists.txt. doctest has no
     # Kconfig knob of its own (it's header-only); the loader emits
     # a documentation-only comment line in alp.conf for this entry.
-    libraries: [doctest]
 
 diagnostics:
   log_level: info

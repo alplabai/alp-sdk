@@ -8,6 +8,10 @@
 # hello-world purely so scripts/alp_project.py has a SoM to derive
 # the baseline SoC config from; Catch2 itself never touches hardware
 # and this example never runs on real silicon.
+libraries:
+  - name: catch2
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -26,7 +30,6 @@ cores:
     # separate `default y` fallback-capability marker, true for every
     # build regardless of this slice -- it does NOT gate compiled
     # sources; see zephyr/CMakeLists.txt for why.
-    libraries: [catch2]
 
 diagnostics:
   log_level: info

@@ -239,6 +239,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "library-registry",
+      "description": "Assert the library alias table covers every curated token and resolves to real manifests (WS6-c).",
+      "runner": "check-script",
+      "script": "scripts/check_library_registry.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "local-paths",
       "description": "CI gate: no hard-coded home-directory paths in executable / build files.",
       "runner": "check-script",

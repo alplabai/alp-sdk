@@ -1,0 +1,102 @@
+# tflite-micro -- TensorFlow Lite for Microcontrollers (ADR 0018 library
+# manifest; WS6-c Phase-1 canonical manifest for the legacy per-core token
+# `tflite_micro`).
+#
+# Grounding (this checkout):
+#   * scripts/alp_project_emit/__init__.py:234-235 (_LIBRARY_KCONFIG) --
+#     tflite_micro emits only "CONFIG_ALP_TFLM_REF_KERNELS=y" (the always-on
+#     SW-fallback kernel set) today; the second tuple element is a Python
+#     comment string ("tflite_micro: include path + tflm_config.h via v0.4
+#     loader hook"), NOT a real CONFIG_ line -- the schema's kconfig items
+#     must match `^CONFIG_...=...$`, so that note lives here as prose
+#     instead of an invented CONFIG_ line.
+#   * west.yml:225-229 -- "tflite-micro powers <alp/inference.h>'s TFLM
+#     backend... pulled in unconditionally"; resolved through Zephyr's own
+#     v4.4.0 west manifest via the `modules.name-allowlist` passthrough
+#     (west.yml:229 `- tflite-micro`), not a separate top-level project
+#     stanza in this repo's own west.yml.
+#   * module glue $ZEPHYR_BASE/modules/tflite-micro/{Kconfig,CMakeLists.txt}
+#     -- real enable symbol `config TENSORFLOW_LITE_MICRO` (not currently
+#     emitted by _LIBRARY_KCONFIG; see the concern note below).
+#   * upstream revision fcc760af130f3a595b5802cdebcc77461e54f382 -- from a
+#     local reference checkout (~/tflite-micro) tracking
+#     github.com/zephyrproject-rtos/tflite-micro's `zephyr-v4.4.0` branch;
+#     this workspace's zephyrproject checkout does not have the module's
+#     own project tree fetched, so treat this SHA as best-effort pending
+#     confirmation against the live upstream Zephyr v4.4.0 manifest text.
+#   * licence Apache-2.0 (~/tflite-micro/LICENSE: Apache License 2.0 header).
+#
+# HW-backends: metadata/library-profiles/tflite_micro/hw-backends.yaml
+# carries per-accelerator priority binding (Ethos-U85/U65/U55, DRP-AI,
+# Helium/NEON, DMA); folded in WS6-c Phase 3 (needs library-v1 schema
+# extension).
+#
+# CONCERN: _LIBRARY_KCONFIG does not currently emit the base upstream enable
+# symbol CONFIG_TENSORFLOW_LITE_MICRO=y for a `libraries: [tflite_micro]`
+# selection -- only the ALP-side CONFIG_ALP_TFLM_REF_KERNELS=y fallback
+# marker. This manifest transcribes exactly what the emitter sets today (per
+# the Phase-1 "copy exact kconfig, never invent" rule); wiring the real
+# enable symbol is a Phase 3 emitter concern, not a Phase 1 manifest one.
+#
+# No `requires:` -- SW-fallback-capable: CONFIG_ALP_TFLM_REF_KERNELS=y (the
+# reference kernel set) is the always-available floor on every core/OS this
+# manifest's `integration.zephyr` section supports; HW-NPU acceleration
+# (Ethos-U/DRP-AI/Helium/NEON) is opportunistic, resolved per-SoM by the
+# hw-backends.yaml cross-reference above, never a hard requirement.
+#
+# `tier: B` for this Phase-1 pass: tflite_micro is NOT listed in
+# metadata/registries/tier-a-library-ci.json's hostBuild.libraries or
+# excludedLibraries, even though it already has real teaching examples
+# (examples/ai/*, examples/audio/*, examples/camera-vision/*,
+# docs/tutorials/16-inference-mobilenet.md). Promotion to Tier A is a named
+# follow-up (add the CI-contract entry).
+schema_version: 1
+name: tflite-micro
+description: "TensorFlow Lite for Microcontrollers -- on-device ML inference runtime."
+tier: B
+version: "fcc760af130f3a595b5802cdebcc77461e54f382"
+license: Apache-2.0
+
+integration:
+  zephyr:
+    module: tflite-micro
+    kconfig:
+      - CONFIG_ALP_TFLM_REF_KERNELS=y
+    hw_backends:
+      class: ML inference
+      upstream_source: "TensorFlow upstream (in Zephyr west.yml already)"
+      accelerators:
+        - class: ml_npu_primary
+          priority:
+            # U85 is the headline NPU on every SKU that has one (E4/E6/E8).
+            - { requires_cap: ethos_u85_count, backend: ethos_u85, kconfig: CONFIG_ALP_TFLM_ETHOS_U85=y }
+            # U65 on NXP i.MX 93 / E1M-NX9101.
+            - { requires_cap: ethos_u65_count, backend: ethos_u65, kconfig: CONFIG_ALP_TFLM_ETHOS_U65=y }
+            # U55 is the family-wide primary on E3/E5/E7 (no U85).
+            - { requires_cap: ethos_u55_count, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+            # DRP-AI on V2N + V2M; DEEPX has its own non-TFLM runtime so we
+            # don't list it here.
+            - { requires_cap: drp_ai,          backend: drp_ai,    kconfig: CONFIG_ALP_TFLM_DRP_AI=y }
+        - class: ml_npu_secondary
+          priority:
+            # On U85 SKUs, ALSO link the U55 driver shim -- the chip carries
+            # two U55s alongside the one U85 and U55-compiled models still
+            # need to run.  Restricted via silicon: so it only fires on
+            # SKUs where ml_npu_primary picked U85.
+            - { silicon: alif:ensemble:e4, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+            - { silicon: alif:ensemble:e6, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+            - { silicon: alif:ensemble:e8, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+        - class: simd
+          priority:
+            - { requires_cap: helium_mve, backend: helium_mve, kconfig: CONFIG_ALP_TFLM_HELIUM=y }
+            - { requires_cap: neon,       backend: neon,       kconfig: CONFIG_ALP_TFLM_NEON=y }
+        - class: dma
+          priority:
+            - { backend: tensor_dma_copy, kconfig: CONFIG_ALP_TFLM_DMA_COPY=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_TFLM_REF_KERNELS=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

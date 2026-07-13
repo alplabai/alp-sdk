@@ -17,6 +17,14 @@
 # both slices `#include`.
 #
 # See docs/heterogeneous-builds.md for the full walk-through.
+libraries:
+  - name: mbedtls
+    cores: [a55_cluster]
+  - name: nlohmann-json
+    cores: [a55_cluster]
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 som:
   sku: E1M-V2N101            # V2N -- A55 cluster + M33-SM + DRP-AI3.
   hw_rev: r1
@@ -27,7 +35,6 @@ cores:
     app: ./linux
     image: alp-image-edge    # stock alp-sdk reference rootfs.
     peripherals: [ethernet, usb, emmc]
-    libraries: [mbedtls, nlohmann_json]
     iot:
       wifi: true
       mqtt: true
@@ -35,7 +42,6 @@ cores:
   m33_sm:
     app: ./m33_sm
     peripherals: [adc, pwm, i2c, gpio]
-    libraries: [cmsis_dsp]
 
 # Cross-core RPMsg carve-out.  The orchestrator allocates from
 # E1M-V2N101's `memory_map:` -- ocram_low for the default

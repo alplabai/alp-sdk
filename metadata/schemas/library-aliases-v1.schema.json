@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/library-aliases-v1.schema.json",
+  "title": "ALP Library Alias Table v1",
+  "description": "Validates metadata/library-aliases-v1.json -- the legacy-token -> canonical-manifest-name map used by WS6-c (#610 §6) to consolidate the per-core `libraries:` enum onto the manifest model. check_library_registry.py additionally asserts every value names an existing metadata/libraries/<name>.yaml. A transitional artifact retired once no board.yaml uses the legacy tokens.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "description", "aliases"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "description": { "type": "string" },
+    "aliases": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    }
+  }
+}

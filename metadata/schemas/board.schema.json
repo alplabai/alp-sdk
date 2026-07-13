@@ -374,8 +374,36 @@
     "libraries": {
       "type": "array",
       "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-      "description": "Curated third-party libraries to pull into the project (ADR 0018).  Each entry names a manifest under metadata/libraries/<name>.yaml; the orchestrator emits its per-OS wiring (Zephyr Kconfig / Yocto IMAGE_INSTALL / baremetal CMake) through the --emit contract and rejects a selection incompatible with the target SoM/core.  Project-wide: applied to every core whose OS the manifest supports.  Distinct from the per-core `cores.<id>.libraries:` curated-token list."
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "description": "Shorthand for a project-wide `{name}` entry: a bare canonical manifest name (metadata/libraries/<name>.yaml)."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "description": "A unified library entry.  Omit `cores:` for a project-wide selection; list core ids to scope the library to just those cores.",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "Canonical manifest name (metadata/libraries/<name>.yaml)."
+              },
+              "cores": {
+                "type": "array",
+                "uniqueItems": true,
+                "minItems": 1,
+                "items": { "type": "string" },
+                "description": "Core ids this library is scoped to.  Omitted = project-wide (every core whose OS the manifest supports)."
+              }
+            }
+          }
+        ]
+      },
+      "description": "Curated third-party libraries to pull into the project (ADR 0018).  The single place libraries are declared: each entry is a `{name, cores?}` object (or a bare name as shorthand for a project-wide `{name}`).  `name` is a manifest under metadata/libraries/<name>.yaml; omit `cores:` for a project-wide selection or list core ids to scope it.  The orchestrator emits the per-OS wiring (Zephyr Kconfig / Yocto IMAGE_INSTALL / baremetal CMake) through the --emit contract and rejects a selection incompatible with the target SoM/core."
     },
 
     "features": {
@@ -609,22 +637,6 @@
               "adc", "can", "counter", "emmc", "ethernet", "flash",
               "gpio", "i2c", "i2s", "pwm", "rtc", "sensor", "spi",
               "uart", "usb", "watchdog"
-            ]
-          }
-        },
-        "libraries": {
-          "type": "array",
-          "uniqueItems": true,
-          "description": "Libraries available to this slice's app code.  The SDK adds the library's include path + the matching compile-time profile.",
-          "items": {
-            "type": "string",
-            "enum": [
-              "etl", "fmt", "nlohmann_json", "doctest", "lvgl",
-              "mbedtls", "cmsis_dsp", "littlefs", "tflite_micro",
-              "u8g2", "gfx_compat", "madgwick_ahrs", "pid", "modbus",
-              "coremqtt_sn", "libcoap", "tinygsm", "nanopb",
-              "libwebsockets", "jsmn", "bearssl", "minimp3", "opus",
-              "libhelix", "catch2"
             ]
           }
         },

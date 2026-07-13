@@ -13,6 +13,14 @@
 # user's authoritative HW writeup; until those land, `west alp-build`
 # will fail at carve-out resolution with a clear message.  This
 # example's structural files are correct in shape today.
+libraries:
+  - name: mbedtls
+    cores: [a55_cluster]
+  - name: nlohmann-json
+    cores: [a55_cluster]
+  - name: cmsis-dsp
+    cores: [m33]
+
 som:
   sku: E1M-NX9101
   hw_rev: r1
@@ -27,11 +35,9 @@ cores:
   a55_cluster:
     app: ./linux
     image: alp-image-edge
-    libraries: [mbedtls, nlohmann_json]
   m33:
     app: ./m33
     peripherals: [adc, pwm, i2c, gpio]
-    libraries: [cmsis_dsp]
 
 # Cross-core RPMsg carve-out.  Once the SoM preset carries hard
 # memory_map values, the orchestrator allocates from the region whose

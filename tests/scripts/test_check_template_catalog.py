@@ -79,8 +79,8 @@ def test_every_portable_api_header_exists():
 
 
 def test_every_library_is_real():
-    import alp_project_emit
-    real = set(alp_project_emit._LIBRARY_KCONFIG.keys())
+    import check_template_catalog
+    real = check_template_catalog._real_library_names()
     for t in _catalog()["templates"]:
         for lib in t["requires"]["libraries"]:
             assert lib in real, (t["id"], lib)

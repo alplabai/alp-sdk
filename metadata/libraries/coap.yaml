@@ -51,3 +51,18 @@ integration:
       # CONFIG_COAP=y doesn't silently drop it for an unmet dependency.
       - CONFIG_NETWORKING=y
       - CONFIG_COAP=y
+    hw_backends:
+      class: IoT
+      upstream_source: "obgm/libcoap"
+      accelerators:
+        - class: crypto
+          priority:
+            - { backend: mbedtls, kconfig: CONFIG_ALP_COAP_MBEDTLS=y }
+            - { backend: oscore, kconfig: CONFIG_ALP_COAP_OSCORE=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_COAP_NO_TLS=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

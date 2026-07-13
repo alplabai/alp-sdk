@@ -33,9 +33,9 @@ _CURATED_LIBRARIES: frozenset[str] = frozenset({
     "etl", "fmt", "nlohmann_json", "doctest", "lvgl",
     "mbedtls", "cmsis_dsp", "littlefs", "tflite_micro",
     "u8g2", "gfx_compat", "madgwick_ahrs", "pid", "modbus",
-    "coremqtt_sn", "libcoap", "tinygsm", "nanopb",
+    "coremqtt_sn", "libcoap", "nanopb",
     "libwebsockets", "jsmn", "bearssl", "minimp3", "opus",
-    "libhelix", "catch2",
+    "catch2",
 })
 
 

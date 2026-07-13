@@ -1,0 +1,63 @@
+# coreMQTT-SN -- MQTT-SN for constrained/sensor-network transports
+# (ADR 0018 library manifest).
+#
+# WS6-c Phase-1 canonical manifest for legacy per-core token `coremqtt_sn`
+# (docs/superpowers/specs/2026-07-13-610-ws6c-library-consolidation-design.md
+# Phase 1 item 1). Canonical name underscores->hyphens per the WS6-c alias
+# table: `coremqtt_sn` -> `coremqtt-sn`.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * west module `coreMQTT-SN` (west.yml `extras-tier1` group, remote
+#     freertos-org, repo-path coreMQTT-SN), path modules/lib/coremqtt_sn --
+#     NOT in Zephyr's own west manifest; disabled by default, consumers flip
+#     via `west update --group-filter +extras-tier1`.
+#   * upstream version v1.0.1 (west.yml pin, "Aug 2024").
+#   * licence MIT (FreeRTOS coreMQTT-SN, like the other AWS-authored
+#     `core*` libraries, ships under the MIT licence).
+#   * enable symbol CONFIG_ALP_MQTTSN_NO_TLS -- the SW-fallback (no-TLS)
+#     wiring transcribed verbatim from `_LIBRARY_KCONFIG["coremqtt_sn"]`
+#     (scripts/alp_project_emit/__init__.py:252).
+#
+# HW-backends: see metadata/library-profiles/coremqtt_sn/ (folded WS6-c
+# Phase 3). Today it declares an optional TLS crypto accelerator class
+# (mbedtls / bearssl priority) on top of this always-available no-TLS floor;
+# `verification:` there is `hil_silicon: untested`, `smoke_tests: build_only`.
+#
+# Tier B (recipe-only): behind the disabled-by-default `extras-tier1` west
+# group, exercised only by the nightly `nightly-extras-tier1-pins.yml`
+# workflow (not a per-PR release-blocking build) -- same grouping the
+# existing cloud/connectivity manifests (`coap`, `lwm2m`) use, and matches
+# `docs/superpowers/specs/2026-05-14-chip-and-library-ecosystem-design.md`'s
+# §D.lib.iot classification.
+#
+# No `requires:` -- coreMQTT-SN is a plain west module with no
+# `depends on CPU_CORTEX_M`-style Kconfig constraint and no yocto
+# integration exists yet to gate against; inventing an os/core-class
+# constraint here would not be grounded in anything upstream declares.
+schema_version: 1
+name: coremqtt-sn
+description: "coreMQTT-SN -- MQTT-SN client for constrained sensor-network transports."
+tier: B
+version: "v1.0.1"
+license: MIT
+
+integration:
+  zephyr:
+    module: coreMQTT-SN
+    kconfig:
+      - CONFIG_ALP_MQTTSN_NO_TLS=y
+    hw_backends:
+      class: IoT
+      upstream_source: "FreeRTOS coreMQTT-SN"
+      accelerators:
+        - class: crypto
+          priority:
+            - { backend: mbedtls, kconfig: CONFIG_ALP_MQTTSN_MBEDTLS=y }
+            - { backend: bearssl, kconfig: CONFIG_ALP_MQTTSN_BEARSSL=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_MQTTSN_NO_TLS=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

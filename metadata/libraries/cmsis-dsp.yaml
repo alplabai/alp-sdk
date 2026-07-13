@@ -44,3 +44,27 @@ integration:
       - CONFIG_CMSIS_DSP_STATISTICS=y
       - CONFIG_CMSIS_DSP_SUPPORT=y
       - CONFIG_CMSIS_DSP_TRANSFORM=y
+    hw_backends:
+      class: DSP / math
+      upstream_source: "github.com/ARM-software/CMSIS-DSP (in Zephyr west.yml already)"
+      accelerators:
+        - class: simd
+          priority:
+            - { requires_cap: helium_mve, backend: helium_mve, kconfig: CONFIG_ALP_CMSIS_DSP_HELIUM=y }
+            - { requires_cap: neon,       backend: neon,       kconfig: CONFIG_ALP_CMSIS_DSP_NEON=y }
+        - class: cordic
+          priority:
+            - { requires_cap: tmu_cordic, backend: tmu_cordic, kconfig: CONFIG_ALP_CMSIS_DSP_TMU_CORDIC=y }
+        - class: fft
+          priority:
+            - { requires_cap: tmu_fft,    backend: tmu_fft,    kconfig: CONFIG_ALP_CMSIS_DSP_TMU_FFT=y }
+        - class: dma
+          priority:
+            - { backend: adc_stream_dma, kconfig: CONFIG_ALP_CMSIS_DSP_ADC_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_CMSIS_DSP_SCALAR=y
+
+      verification:
+        hil_silicon: untested
+        smoke_tests: build_only

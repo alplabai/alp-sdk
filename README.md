@@ -146,17 +146,23 @@ som:
 
 preset: e1m-x-evk      # or write your board out inline -- see docs/board-config.md
 
+libraries:                         # one top-level list, each {name, cores?}
+  - name: mbedtls
+    cores: [a55_cluster]
+  - name: nlohmann-json
+    cores: [a55_cluster]
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 cores:
   a55_cluster:
     app: ./linux                   # os: omitted -- A-cores default to yocto per topology
     image: alp-image-edge
     peripherals: [ethernet, usb, emmc]
-    libraries:   [mbedtls, nlohmann_json]
     iot:         { wifi: true, mqtt: true }
   m33_sm:
     app: ./m33                     # os: omitted -- M-cores default to zephyr per topology
     peripherals: [adc, pwm, i2c, gpio]
-    libraries:   [cmsis_dsp]
 
 ipc:
   - kind: rpmsg

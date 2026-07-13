@@ -224,8 +224,8 @@ ship a per-library `hw-backends.yaml`:
 | Graphics              | `lvgl`, `u8g2`, `gfx_compat`                                         |
 | Sensor fusion / control | `madgwick_ahrs`, `pid`                                             |
 | Industrial bus        | `modbus`                                                             |
-| IoT / networking      | `coremqtt_sn`, `libcoap`, `tinygsm`, `libwebsockets`, `nanopb`, `jsmn` |
-| Audio codecs          | `minimp3`, `opus`, `libhelix`                                        |
+| IoT / networking      | `coremqtt_sn`, `libcoap`, `libwebsockets`, `nanopb`, `jsmn`          |
+| Audio codecs          | `minimp3`, `opus`                                                    |
 | Header-only utility   | `etl`, `fmt`, `nlohmann_json`, `doctest`                             |
 | Test framework        | `catch2`                                                             |
 
