@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alplab.ai/schemas/alp-lock-v1.schema.json",
+  "title": "alp-lock-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["lockVersion", "generatedBy", "sdk", "west", "libraries", "python", "digests", "resolution"],
+  "properties": {
+    "lockVersion": { "const": 1 },
+    "generatedBy": { "const": "west alp-lock" },
+    "sdk": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "revision"],
+      "properties": {
+        "version": { "type": "string" },
+        "revision": { "type": ["string", "null"] }
+      }
+    },
+    "west": {
+      "type": "object", "additionalProperties": false,
+      "required": ["projects", "groupFilter"],
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name", "revision", "groups"],
+            "properties": {
+              "name": { "type": "string" },
+              "revision": { "type": ["string", "null"] },
+              "groups": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "groupFilter": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "libraries": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "version", "license", "revision"],
+        "properties": {
+          "name": { "type": "string" },
+          "version": { "type": ["string", "null"] },
+          "license": { "type": ["string", "null"] },
+          "revision": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "python": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requirements"],
+      "properties": {
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name", "version", "hash"],
+            "properties": {
+              "name": { "type": "string" },
+              "version": { "type": ["string", "null"] },
+              "hash": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "digests": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemas", "metadata"],
+      "properties": {
+        "schemas": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "metadata": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "resolution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["board", "groupsEnabled"],
+      "properties": {
+        "board": { "type": ["string", "null"] },
+        "groupsEnabled": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "description": "Reserved for a follow-up (Zephyr SDK / container / Yocto layer identities). Unpopulated in v1."
+    }
+  }
+}
