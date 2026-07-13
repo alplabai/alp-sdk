@@ -592,8 +592,7 @@ def run(args) -> int:
             continue
         if not steps:
             continue
-        new_doc, report = alp_migrate.apply(doc)
-        new_text = alp_migrate.dump(new_doc)
+        new_text, report = alp_migrate.apply_text(text)  # byte-faithful writer
         if args.preview:
             sys.stdout.write(alp_migrate.diff(text, new_text, str(path)))
             json.dump(alp_migrate.report_to_diagnostics(
