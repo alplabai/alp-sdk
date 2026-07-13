@@ -63,6 +63,15 @@ def test_dirty_flag(tmp_path):
     assert r["source"]["sdkDirty"] is True
 
 
+def test_paths_are_repo_relative(tmp_path):
+    bp, img, board = _fixture(tmp_path)
+    r = build_receipt.build_receipt(tmp_path, bp, [("m55_hp", img)], board,
+                                    rev_resolver=lambda root: ("x", False))
+    assert not r["config"]["boardYaml"].startswith("/")
+    assert not r["images"][0]["path"].startswith("/")
+    assert r["images"][0]["path"] == "app.bin"
+
+
 import check_build_receipt as rgate  # noqa: E402
 
 
