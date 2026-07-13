@@ -44,8 +44,12 @@ def _default_rev(root: Path) -> Optional[str]:
 def _sdk_identity(root: Path, rev_resolver: Callable[[Path], Optional[str]]) -> dict:
     txt = (root / "scripts" / "alp_cli" / "__init__.py").read_text(encoding="utf-8")
     m = re.search(r'^__version__\s*=\s*"([^"]*)"', txt, re.M)
-    version = m.group(1) if m else "0.0.0"
-    return {"version": version, "revision": rev_resolver(root)}
+    if not m:
+        # Silently baking a wrong version would only surface later as
+        # spurious --check drift -- fail loudly at generation instead.
+        raise LockError("could not parse __version__ from "
+                        "scripts/alp_cli/__init__.py")
+    return {"version": _reject_local(m.group(1)), "revision": rev_resolver(root)}
 
 
 def _west_projects(root: Path) -> dict:
@@ -59,10 +63,10 @@ def _west_projects(root: Path) -> dict:
         projects.append({
             "name": _reject_local(str(p["name"])),
             "revision": _reject_local(str(rev)) if rev is not None else None,
-            "groups": sorted(str(g) for g in (p.get("groups") or [])),
+            "groups": sorted(_reject_local(str(g)) for g in (p.get("groups") or [])),
         })
     projects.sort(key=lambda e: e["name"])
-    gf = [str(g) for g in (man.get("group-filter") or [])]
+    gf = [_reject_local(str(g)) for g in (man.get("group-filter") or [])]
     return {"projects": projects, "groupFilter": gf}
 
 
@@ -78,7 +82,7 @@ def _libraries(root: Path) -> list:
         out.append({
             "name": _reject_local(str(doc["name"])),
             "version": (_reject_local(str(doc["version"])) if doc.get("version") is not None else None),
-            "license": (str(doc["license"]) if doc.get("license") is not None else None),
+            "license": (_reject_local(str(doc["license"])) if doc.get("license") is not None else None),
             "revision": (_reject_local(str(rev)) if rev is not None else None),
         })
     out.sort(key=lambda e: e["name"])
@@ -95,9 +99,11 @@ def _python_hashes(root: Path) -> dict:
         name = re.split(r"[<>=!~ \[]", line, 1)[0].strip()
         if not name:
             continue
+        # version/hash come from constrained regexes (can't hold a path);
+        # `name` is free text (e.g. a `-e ./pkg` egg name) -> guard it.
         vm = re.search(r"==\s*([0-9A-Za-z.\-]+)", line)
         hm = re.search(r"--hash=(sha256:[0-9a-f]{64})", line)
-        reqs.append({"name": name, "version": vm.group(1) if vm else None,
+        reqs.append({"name": _reject_local(name), "version": vm.group(1) if vm else None,
                      "hash": hm.group(1) if hm else None})
     reqs.sort(key=lambda e: e["name"])
     return {"requirements": reqs}
@@ -126,11 +132,16 @@ def build_lock(workspace_root: Path, board_yaml: Optional[Path] = None, *,
     """Collect the workspace's reproducible inputs into an alp-lock-v1 dict."""
     root = Path(workspace_root)
     board = None
+    # `resolution.groupsEnabled` is RESERVED in v1: no board-driven group
+    # resolution is wired yet, so it is always emitted empty (like the
+    # reserved `toolchain` object).  Populate from a real source when group
+    # resolution lands; readers must not treat empty as "no groups".
     groups_enabled: list[str] = []
     if board_yaml is not None and Path(board_yaml).is_file():
         bdoc = yaml.safe_load(Path(board_yaml).read_text(encoding="utf-8")) or {}
         som = (bdoc.get("som") or {})
-        board = som.get("sku") if isinstance(som, dict) else None
+        raw_board = som.get("sku") if isinstance(som, dict) else None
+        board = _reject_local(str(raw_board)) if raw_board is not None else None
     return {
         "lockVersion": 1,
         "generatedBy": "west alp-lock",
@@ -155,13 +166,20 @@ class Drift:
 
 def _flatten(prefix: str, node: Any, out: dict) -> None:
     """Flatten a lock dict to {json-ish path: leaf}, keying list items that
-    have a `name` by that name so drift paths are stable + human-readable."""
+    have a `name` by that name so drift paths are stable + human-readable.
+
+    Name-keying is used ONLY when every item has a distinct `name`; on any
+    duplicate or missing name the list falls back to index keys, so two
+    same-named items can't collide into one path (which would silently mask
+    drift on the shadowed item)."""
     if isinstance(node, dict):
         for k, v in node.items():
             _flatten(f"{prefix}.{k}" if prefix else k, v, out)
     elif isinstance(node, list):
+        names = [v.get("name") if isinstance(v, dict) else None for v in node]
+        by_name = all(n is not None for n in names) and len(set(names)) == len(names)
         for i, v in enumerate(node):
-            key = v["name"] if isinstance(v, dict) and "name" in v else str(i)
+            key = str(names[i]) if by_name else str(i)
             _flatten(f"{prefix}[{key}]", v, out)
     else:
         out[prefix] = node

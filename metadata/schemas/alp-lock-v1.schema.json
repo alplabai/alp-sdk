@@ -79,7 +79,10 @@
       "required": ["board", "groupsEnabled"],
       "properties": {
         "board": { "type": ["string", "null"] },
-        "groupsEnabled": { "type": "array", "items": { "type": "string" } }
+        "groupsEnabled": {
+          "description": "RESERVED in v1: always emitted empty (no board-driven group resolution is wired yet). Do not treat empty as 'no groups'.",
+          "type": "array", "items": { "type": "string" }
+        }
       }
     },
     "toolchain": {

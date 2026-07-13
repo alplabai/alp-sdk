@@ -26,7 +26,10 @@ except ImportError:  # standalone / CI without west
 def _workspace_root(explicit: str | None) -> Path:
     if explicit:
         return Path(explicit).resolve()
-    # west topdir when under west; else the repo containing this file.
+    # Default: the alp-sdk repo root (scripts/west_commands/ -> repo). alp-sdk
+    # is its own west manifest repo, so its root IS the workspace topdir here.
+    # If alp-sdk were ever a sub-project of a larger workspace, pass --workspace
+    # (or resolve the real `west topdir`) instead.
     return _HERE.parent.parent.parent
 
 

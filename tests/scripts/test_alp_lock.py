@@ -63,6 +63,39 @@ def test_reject_local_guard(tmp_path):
     assert alp_lock._reject_local("https://github.com/a/b.git") == "https://github.com/a/b.git"
 
 
+def test_collectors_route_leaves_through_guard(tmp_path):
+    """The guard must actually fire on collector leaves, not just in isolation:
+    a local path leaking into a library license / a python name / a board sku /
+    a west group must raise LockError (spec: every leaf routed through the guard)."""
+    import pytest
+    import alp_lock
+    ws = _fixture_ws(tmp_path)
+    # poison the library license with a local path
+    (ws / "metadata" / "libraries" / "aws-iot.yaml").write_text(
+        "schema_version: 1\nname: aws-iot\nversion: v3.1.5\nlicense: /etc/secret\n")
+    with pytest.raises(alp_lock.LockError):
+        alp_lock.build_lock(ws, rev_resolver=lambda r: "x")
+    # poison a west group
+    ws2 = _fixture_ws(tmp_path / "b")
+    (ws2 / "west.yml").write_text(
+        "manifest:\n  projects:\n    - name: p\n      revision: r\n      groups: [/abs]\n")
+    with pytest.raises(alp_lock.LockError):
+        alp_lock.build_lock(ws2, rev_resolver=lambda r: "x")
+
+
+def test_flatten_duplicate_names_do_not_mask_drift(tmp_path):
+    """Two list items sharing a name must not collide into one drift path
+    (which would silently hide drift on the shadowed item)."""
+    import alp_lock
+    committed = {"libraries": [{"name": "dup", "version": "1"},
+                               {"name": "dup", "version": "2"}]}
+    out = {}
+    alp_lock._flatten("", committed, out)
+    # both items are represented (index-keyed on the name collision)
+    vals = sorted(v for k, v in out.items() if k.endswith(".version"))
+    assert vals == ["1", "2"]
+
+
 def test_verify_lock_detects_drift(tmp_path):
     import alp_lock
     ws = _fixture_ws(tmp_path)
