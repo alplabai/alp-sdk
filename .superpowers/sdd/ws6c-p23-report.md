@@ -152,3 +152,51 @@ they are load-bearing beyond the consolidation and need a dedicated pass.**
   (`west update` would reject them). The old 4-entry table was deliberately
   conservative. Cleanly retiring it needs a manifest field distinguishing
   upstream Zephyr modules — a maintainer decision (nanopb-style).
+
+## RESUMED SESSION 2 — de-versioning + all review fixes landed (STATUS: COMPLETE)
+
+Maintainer directive: drop schema versioning entirely (no active customers, no
+legacy compat). The unified `libraries:[{name,cores?}]` is now THE board.yaml
+library model directly — not a "v2" reached by migration. This session cleared
+every item the prior section marked deferred.
+
+### New commits (branch feat/610-ws6c-phase23)
+
+- `869535b8` — refactor(migrate): de-version board.yaml — `alp_migrate.LATEST`
+  back to 1; deleted `migrations/m001_to_v2.py` + registry entry + its test
+  (registry empty, LATEST=1); stripped `schemaVersion: 2` from all board.yaml
+  (unified `libraries:` kept, no schemaVersion carried — WS6-b lazy floor
+  absent==1). `check_board_schema_version.py` → all at schemaVersion 1.
+- `07ee74f8` — fix(orchestrate): `_normalize_v2_libraries` now RAISES
+  `OrchestratorError` naming the bad core when a `libraries:` entry's `cores:`
+  names an undeclared core (previously silently dropped). (review fix, major)
+- `b9971784` — test(orchestrate): migrated the per-core `cores.<id>.libraries:
+  [tok]` fixtures under `tests/` to `libraries:[{name:<canonical>,cores:[<id>]}]`
+  via `metadata/library-aliases-v1.json`. Added
+  `test_library_scoped_to_undeclared_core_is_rejected`.
+- `702fc603` — refactor(libraries): deleted the dead
+  `metadata/library-profiles/*/hw-backends.yaml` files (folded into manifests);
+  KEPT the config-header files (`lv_conf.h`, `etl_profile.h`, `fmt_config.h`,
+  `doctest_config.h`, `mbedtls_config.h`, `json_config.h`) that
+  `zephyr/CMakeLists.txt` includes — confirmed they still resolve. (review fix)
+- `0534b5ef` — refactor(schema): deleted the legacy per-core
+  `cores.<id>.libraries` enum from `board.schema.json`; the unified top-level
+  `libraries:[{name,cores?}]` is the ONLY form. Resolver simplified to read only
+  the unified form (dual-read removed). (steps 2 + 4)
+- `9afb395c` — chore(lock): regen alp.lock digests for the de-versioning.
+- `06209d8e` — docs(board-config): document the unified `libraries:[{name,cores?}]`
+  form; removed the old per-core `cores.<id>.libraries` docs; dropped
+  retired-migration language. (review fix, docs)
+
+### Final gates (all green, verified this session)
+
+- `python3 scripts/ws6c_emit_parity.py --check` → **OK: 40/40** (golden NOT edited)
+- `python3 scripts/check_board_schema_version.py` → OK (all board.yaml at v1)
+- `python3 scripts/check_library_registry.py` → OK
+- `python3 scripts/validate_metadata.py` → 0 failures
+- `python3 scripts/check_emit_snapshots.py` → OK (29 surfaces byte-identical)
+- `python3 -m pytest tests/scripts/ -q` → 1438 passed, 21 skipped, 47 subtests
+- `alp_migrate.LATEST == 1`, migrations registry empty
+- `metadata/catalog.json` regen → no diff; `alp-lock --check` → matches workspace
+
+All 7 directive items complete. Nothing deferred.
