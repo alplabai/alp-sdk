@@ -38,6 +38,27 @@ integration:
     module: lvgl
     kconfig:
       - CONFIG_LVGL=y
+    hw_backends:
+      class: graphics
+      upstream_source: "github.com/lvgl/lvgl (in Zephyr west.yml already)"
+      accelerators:
+        - class: gpu_2d
+          priority:
+            - { requires_cap: gpu2d,  backend: gpu2d,  kconfig: CONFIG_ALP_LVGL_GPU2D=y }
+            - { requires_cap: dave2d, backend: dave2d, kconfig: CONFIG_ALP_LVGL_DAVE2D=y }
+            # TMU rotate/scale on V2N via the GD32 bridge.  Same TMU
+            # block also serves cmsis_dsp's CORDIC + FFT classes.
+            - { requires_cap: tmu_fac, backend: tmu,   kconfig: CONFIG_ALP_LVGL_TMU=y }
+        - class: dma
+          priority:
+            - { requires_cap: dma2d, backend: dma2d, kconfig: CONFIG_ALP_LVGL_DMA2D=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_LVGL_SW_BLIT=y
+
+      verification:
+        hil_silicon: untested
+        smoke_tests: build_only
   yocto:
     # Standard OpenEmbedded recipe, reachable via meta-alp-sdk's
     # openembedded-layer dependency.

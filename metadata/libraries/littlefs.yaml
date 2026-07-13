@@ -56,3 +56,20 @@ integration:
       - CONFIG_FILE_SYSTEM_LITTLEFS=y
       - CONFIG_FILE_SYSTEM=y
       - CONFIG_ALP_LITTLEFS_SYNC_IO=y
+    hw_backends:
+      class: filesystem
+      upstream_source: "github.com/littlefs-project/littlefs (in Zephyr west.yml already)"
+      accelerators:
+        - class: dma
+          priority:
+            - { requires_cap: xspi_dma,    backend: xspi_dma,    kconfig: CONFIG_ALP_LITTLEFS_XSPI_DMA=y }
+            - { requires_cap: hexspi_dma,  backend: hexspi_dma,  kconfig: CONFIG_ALP_LITTLEFS_XSPI_DMA=y }
+            - { requires_cap: emmc_dma,    backend: emmc_dma,    kconfig: CONFIG_ALP_LITTLEFS_EMMC_DMA=y }
+            - { requires_cap: quadspi_dma, backend: quadspi_dma, kconfig: CONFIG_ALP_LITTLEFS_QSPI_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_LITTLEFS_SYNC_IO=y
+
+      verification:
+        hil_silicon: untested
+        smoke_tests: build_only

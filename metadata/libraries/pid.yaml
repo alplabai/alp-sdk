@@ -56,3 +56,20 @@ integration:
     kconfig:
       - CONFIG_ALP_SDK_PID=y
       - CONFIG_ALP_PID_INT_MATH=y
+    hw_backends:
+      class: control
+      upstream_source: "maintainer-written thin C library"
+      accelerators:
+        - class: simd
+          priority:
+            - { backend: fpu, kconfig: CONFIG_ALP_PID_FPU=y }
+        - class: timing
+          priority:
+            - { backend: timer_tick, kconfig: CONFIG_ALP_PID_TIMER=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_PID_INT_MATH=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

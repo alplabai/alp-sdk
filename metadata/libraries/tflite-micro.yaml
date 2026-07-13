@@ -62,3 +62,41 @@ integration:
     module: tflite-micro
     kconfig:
       - CONFIG_ALP_TFLM_REF_KERNELS=y
+    hw_backends:
+      class: ML inference
+      upstream_source: "TensorFlow upstream (in Zephyr west.yml already)"
+      accelerators:
+        - class: ml_npu_primary
+          priority:
+            # U85 is the headline NPU on every SKU that has one (E4/E6/E8).
+            - { requires_cap: ethos_u85_count, backend: ethos_u85, kconfig: CONFIG_ALP_TFLM_ETHOS_U85=y }
+            # U65 on NXP i.MX 93 / E1M-NX9101.
+            - { requires_cap: ethos_u65_count, backend: ethos_u65, kconfig: CONFIG_ALP_TFLM_ETHOS_U65=y }
+            # U55 is the family-wide primary on E3/E5/E7 (no U85).
+            - { requires_cap: ethos_u55_count, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+            # DRP-AI on V2N + V2M; DEEPX has its own non-TFLM runtime so we
+            # don't list it here.
+            - { requires_cap: drp_ai,          backend: drp_ai,    kconfig: CONFIG_ALP_TFLM_DRP_AI=y }
+        - class: ml_npu_secondary
+          priority:
+            # On U85 SKUs, ALSO link the U55 driver shim -- the chip carries
+            # two U55s alongside the one U85 and U55-compiled models still
+            # need to run.  Restricted via silicon: so it only fires on
+            # SKUs where ml_npu_primary picked U85.
+            - { silicon: alif:ensemble:e4, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+            - { silicon: alif:ensemble:e6, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+            - { silicon: alif:ensemble:e8, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
+        - class: simd
+          priority:
+            - { requires_cap: helium_mve, backend: helium_mve, kconfig: CONFIG_ALP_TFLM_HELIUM=y }
+            - { requires_cap: neon,       backend: neon,       kconfig: CONFIG_ALP_TFLM_NEON=y }
+        - class: dma
+          priority:
+            - { backend: tensor_dma_copy, kconfig: CONFIG_ALP_TFLM_DMA_COPY=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_TFLM_REF_KERNELS=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

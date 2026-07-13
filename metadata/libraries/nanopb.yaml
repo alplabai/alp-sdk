@@ -28,3 +28,15 @@ integration:
     module: nanopb
     kconfig:
       - CONFIG_NANOPB=y
+    hw_backends:
+      class: serialization
+      upstream_source: "nanopb-0.4.9 (in Zephyr west.yml already)"
+      accelerators:
+        []   # no HW accelerator binding; pure-SW only.
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_NANOPB_SW=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

@@ -43,3 +43,21 @@ integration:
     kconfig:
       - CONFIG_ALP_U8G2_SW_BLIT=y
       - CONFIG_ALP_SDK_U8G2_VENDORED_CORE=y
+    hw_backends:
+      class: graphics
+      upstream_source: "github.com/olikraus/u8g2"
+      accelerators:
+        - class: gpu_2d
+          priority:
+            - { requires_cap: dma2d,   backend: dma2d, kconfig: CONFIG_ALP_U8G2_DMA2D=y }
+            - { requires_cap: tmu_fac, backend: tmu,   kconfig: CONFIG_ALP_U8G2_TMU=y }
+        - class: dma
+          priority:
+            - { backend: spi_i2c_dma_push, kconfig: CONFIG_ALP_U8G2_BUS_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_U8G2_SW_BLIT=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

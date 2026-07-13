@@ -40,3 +40,15 @@ integration:
     module: jsmn
     kconfig:
       - CONFIG_ALP_JSMN_SW=y
+    hw_backends:
+      class: parsing
+      upstream_source: "zserge/jsmn"
+      accelerators:
+        []   # no HW accelerator binding; pure-SW only.
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_JSMN_SW=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

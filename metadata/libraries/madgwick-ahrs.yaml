@@ -54,3 +54,20 @@ integration:
     kconfig:
       - CONFIG_ALP_SDK_AHRS=y
       - CONFIG_ALP_MADGWICK_LIBM=y
+    hw_backends:
+      class: sensor fusion
+      upstream_source: "xioTechnologies"
+      accelerators:
+        - class: simd
+          priority:
+            - { backend: fpu, kconfig: CONFIG_ALP_MADGWICK_FPU=y }
+        - class: cordic
+          priority:
+            - { requires_cap: tmu_cordic, backend: tmu_cordic, kconfig: CONFIG_ALP_MADGWICK_TMU=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_MADGWICK_LIBM=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

@@ -46,3 +46,18 @@ integration:
     module: coreMQTT-SN
     kconfig:
       - CONFIG_ALP_MQTTSN_NO_TLS=y
+    hw_backends:
+      class: IoT
+      upstream_source: "FreeRTOS coreMQTT-SN"
+      accelerators:
+        - class: crypto
+          priority:
+            - { backend: mbedtls, kconfig: CONFIG_ALP_MQTTSN_MBEDTLS=y }
+            - { backend: bearssl, kconfig: CONFIG_ALP_MQTTSN_BEARSSL=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_MQTTSN_NO_TLS=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

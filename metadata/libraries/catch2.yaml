@@ -52,3 +52,15 @@ integration:
     kconfig:
       - CONFIG_ALP_CATCH2_SW=y
       - CONFIG_ALP_SDK_CATCH2_VENDORED=y
+    hw_backends:
+      class: testing
+      upstream_source: "catchorg/Catch2"
+      accelerators:
+        []   # no HW accelerator binding; pure-SW only.
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_CATCH2_SW=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

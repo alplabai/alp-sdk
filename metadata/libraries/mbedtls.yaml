@@ -55,3 +55,25 @@ integration:
       - CONFIG_MBEDTLS=y
       - CONFIG_MBEDTLS_BUILTIN=y
       - CONFIG_ALP_MBEDTLS_PURE_C=y
+    hw_backends:
+      class: crypto/TLS
+      upstream_source: "github.com/Mbed-TLS/mbedtls (in Zephyr west.yml already)"
+      accelerators:
+        - class: crypto
+          priority:
+            # CryptoCell first on Alif (full AES + RSA + ECDSA hardware).
+            - { requires_cap: cryptocell,     backend: cryptocell,               status: planned, kconfig: CONFIG_ALP_MBEDTLS_CRYPTOCELL=y }
+            # Inline-AES is the M55-instruction-level fast path.
+            - { requires_cap: inline_aes,     backend: inline_aes,               status: planned, kconfig: CONFIG_ALP_MBEDTLS_INLINE_AES=y }
+            # CAU on V2N + V2N-M1 via the GD32 bridge.
+            - { requires_cap: cau,            backend: cau,                      status: planned, kconfig: CONFIG_ALP_MBEDTLS_CAU=y }
+            # OPTIGA Trust M is the planned handshake offload on any
+            # module that populates it (AEN + V2N + NX9101).
+            - { requires_cap: optiga_trust_m, backend: optiga_trust_m_handshake, status: planned, kconfig: CONFIG_ALP_MBEDTLS_OPTIGA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_MBEDTLS_PURE_C=y
+
+      verification:
+        hil_silicon: untested
+        smoke_tests: build_only

@@ -40,3 +40,14 @@ license: MIT
 integration:
   zephyr:
     module: doctest
+    hw_backends:
+      class: testing
+      upstream_source: "header-only; pulled in via the v0.4 include-path hook"
+      accelerators: []
+      sw_fallback:
+        required: true
+        kconfig: "# doctest: header-only, no Kconfig knob needed"
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

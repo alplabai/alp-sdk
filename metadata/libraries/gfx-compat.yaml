@@ -46,3 +46,21 @@ integration:
     module: null
     kconfig:
       - CONFIG_ALP_GFX_COMPAT_SW=y
+    hw_backends:
+      class: graphics
+      upstream_source: "maintainer-written thin shim"
+      accelerators:
+        - class: gpu_2d
+          priority:
+            - { requires_cap: gpu2d, backend: gpu2d, kconfig: CONFIG_ALP_GFX_COMPAT_GPU2D=y }
+            - { requires_cap: dma2d, backend: dma2d, kconfig: CONFIG_ALP_GFX_COMPAT_DMA2D=y }
+        - class: dma
+          priority:
+            - { backend: spi_dma, kconfig: CONFIG_ALP_GFX_COMPAT_SPI_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_GFX_COMPAT_SW=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only
