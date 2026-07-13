@@ -7,6 +7,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — reproducible release: SBOM + deterministic tarball (#610 §7 slice 2)
+
+- `scripts/gen_sbom.py` emits a deterministic CycloneDX 1.5 SBOM from `alp.lock`
+  (stable, lock-derived serial number, no wall-clock). `release.yml` now builds
+  a byte-reproducible source tarball (`gzip -n`) and attaches the SBOM. Closes
+  the §7 "reproducible release artifacts" criterion (build-receipt schema landed
+  in slice 1).
+
 ### Added — quality-task registry (`metadata/quality-tasks-v1.json`, #610 §5)
 
 - Single source of truth for the SDK's `check_*.py` quality gates: which exist,
