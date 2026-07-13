@@ -490,7 +490,7 @@ git commit -m "feat(ci): check_board_schema_version drift gate (#610 WS6-b)"
 - Test: append CLI-run test to `tests/scripts/test_alp_migrate.py`
 
 **Interfaces:**
-- Consumes: `alp_migrate.load/dump/plan/apply/diff/report_to_diagnostics` (Task 2), `check_board_schema_version.find_drift` (Task 3).
+- Consumes: `alp_migrate.load/plan/apply_text/diff/report_to_diagnostics` + `MigrateError` (Task 2). (Shares the `plan()` drift primitive with Task 3's gate rather than importing `find_drift` — the CLI is per-target, the gate is repo-wide.)
 - Produces: `run(args) -> int` for `--check` / `--preview` / `--apply` (+ `--all`, `--board`).
 
 - [ ] **Step 1: Write the failing test**
