@@ -277,14 +277,25 @@ int bridge_hw_adc_read(uint8_t channel, uint8_t samples, uint16_t *mv)
      * cycle the next read's EOC never came; the handler never returned,
      * the SPI RX DMA was never re-armed -- captured live with CH3
      * frozen disabled at CNT=66 -- and every subsequent command on
-     * every surface failed).  A healthy conversion is ~6.3 us; the
-     * ~100k-iteration bound is the abort latch, and on timeout the
-     * peripheral is re-initialised (deinit + reconfig + recalibrate)
-     * so the NEXT read starts from a clean converter -- same
-     * self-healing shape as the TRNG fault path. */
+     * every surface failed).  The ~100k-iteration bound is the abort
+     * latch; on timeout the peripheral is re-initialised (deinit +
+     * reconfig + recalibrate) so the NEXT read starts from a clean
+     * converter -- same self-healing shape as the TRNG fault path.
+     *
+     * SCALE the bound by the oversample ratio: with oversampling ON,
+     * ONE triggered "conversion" is `ratio` back-to-back samples (up to
+     * 256), so a healthy oversampled conversion legitimately takes up to
+     * ~ratio x longer than the ~6.3 us un-oversampled case.  A fixed
+     * 100k bound would false-timeout every legal high-ratio read and
+     * needlessly recalibrate.  The floored-to-pow2 ratio is what the
+     * hardware actually runs; clamp the raw cache to [1,256] to match. */
+	uint32_t ovs_ratio = adc_oversample_ratio_cache[channel];
+	if (ovs_ratio < 1u) ovs_ratio = 1u;
+	if (ovs_ratio > ADC_OVERSAMPLE_RATIO_MAX) ovs_ratio = ADC_OVERSAMPLE_RATIO_MAX;
+	const uint32_t eoc_bound = 100000u * ovs_ratio;
 	for (uint8_t i = 0; i < samples; ++i) {
 		adc_software_trigger_enable(ch->periph, ADC_ROUTINE_CHANNEL);
-		uint32_t to = 100000u;
+		uint32_t to = eoc_bound;
 		while (!adc_flag_get(ch->periph, ADC_FLAG_EOC) && --to) {
 			/* spin, bounded */
 		}
@@ -345,12 +356,14 @@ int bridge_hw_adc_configure(uint8_t  channel,
 		return BRIDGE_HW_ERR_INVAL;
 	}
 
-	/* Sample cycles: clamp to the vendor's accepted 2..638 cycle
-     * range (per `adc_routine_channel_config`'s sample_time
-     * parameter).  Round caller-supplied values into this range
-     * rather than rejecting -- matches the contract's "firmware
-     * rounds down" wording. */
-	uint16_t sc = sample_cycles;
+	/* Sample cycles: 0 means "firmware default" (per the wire contract),
+     * NOT the fastest window -- collapsing 240 -> 2 cycles on the
+     * high-impedance divider inputs the default exists to serve would
+     * leave the S/H cap unsettled and read systematically low (worse
+     * still under oversampling).  Any non-zero value is a direct cycle
+     * count clamped into the vendor's accepted 2..638 range (per
+     * `adc_routine_channel_config`'s sample_time parameter). */
+	uint16_t sc = (sample_cycles == 0u) ? ADC_DEFAULT_SAMPLE_CYCLES : sample_cycles;
 	if (sc < 2u) sc = 2u;
 	if (sc > 638u) sc = 638u;
 

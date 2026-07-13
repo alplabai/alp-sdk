@@ -257,19 +257,28 @@ int bridge_hw_pwm_configure(uint8_t  channel,
 	 * and last-write-wins across the sibling channels is the documented
 	 * contract.  The counter value + ARR/compare survive the toggle, so
 	 * a running duty resumes with the new alignment on the next
-	 * update. */
+	 * update.
+	 *
+	 * PRESERVE the run state: a prior bridge_hw_pwm_single_pulse on a
+	 * sibling channel leaves the timer HALTED (hardware clears CEN at
+	 * the one-shot's update event) with SP=SINGLE and a pulse-shaped
+	 * ARR/compare still latched.  Unconditionally re-enabling here would
+	 * re-arm that one-shot and fire a SECOND, uncommanded pulse on the
+	 * sibling pad -- an actuation with no host command.  So only
+	 * re-enable if the timer was actually running when we entered. */
 	static const uint32_t cam_map[4] = {
 		TIMER_COUNTER_EDGE,        /* 0: edge          */
 		TIMER_COUNTER_CENTER_UP,   /* 1: center-up     */
 		TIMER_COUNTER_CENTER_DOWN, /* 2: center-down   */
 		TIMER_COUNTER_CENTER_BOTH, /* 3: center-both   */
 	};
+	const bool was_running = (TIMER_CTL0(ch->periph) & (uint32_t)TIMER_CTL0_CEN) != 0u;
 	timer_disable(ch->periph);
 	uint32_t ctl0 = TIMER_CTL0(ch->periph);
 	ctl0 &= ~(uint32_t)TIMER_CTL0_CAM;
 	ctl0 |= cam_map[align_mode];
 	TIMER_CTL0(ch->periph) = ctl0;
-	timer_enable(ch->periph);
+	if (was_running) timer_enable(ch->periph);
 
 	pwm_align_mode[idx] = align_mode;
 	return BRIDGE_HW_OK;
@@ -279,11 +288,21 @@ int bridge_hw_pwm_single_pulse(uint8_t channel, uint32_t pulse_ns)
 {
 	if (channel >= PWM_CHANNEL_COUNT) return BRIDGE_HW_ERR_RANGE;
 
+	const gd32_pwm_ch_t *ch = &pwm_channels[channel];
+
+	/* One-pulse mode is edge-aligned only.  The ARR math below assumes
+	 * an up-counter (period == ARR+1 ticks); on a center-aligned timer
+	 * (bridge_hw_pwm_configure) the counter runs 0->ARR->0 with an
+	 * update event at BOTH crest and trough, so OPM would halt at the
+	 * wrong point and the emitted pulse width would be neither
+	 * `pulse_us` nor even deterministic (and the output can freeze
+	 * HIGH at the halt).  Refuse rather than fire a wrong-width pulse;
+	 * the host must set align_mode back to edge (0) first. */
+	if (pwm_align_mode[pwm_timer_index(ch->periph)] != 0u) return BRIDGE_HW_ERR_NOTIMPL;
+
 	uint32_t pulse_us = pulse_ns / PWM_TIMER_TICK_NS;
 	if (pulse_us == 0u) return BRIDGE_HW_ERR_RANGE;
 	if (pulse_us > PWM_TIMER_ARR_MAX + 1u) pulse_us = PWM_TIMER_ARR_MAX + 1u;
-
-	const gd32_pwm_ch_t *ch = &pwm_channels[channel];
 
 	/* Reset the timer counter so the pulse starts from t=0 then
      * program ARR = pulse_us (counts up; the channel output stays

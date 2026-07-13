@@ -439,7 +439,15 @@ center-up, `2` center-down, `3` center-both) to the channel's timer.
 of a `TIMER0`/`TIMER7` (last write wins) and `PWM_SET`/`PWM_GET` convert
 period/duty accordingly (a center-aligned counter runs `0->ARR->0`, so
 period is `2*ARR` ticks).  An out-of-range `align_mode` returns
-`STATUS_INVAL`.
+`STATUS_INVAL`.  Two consequences of the shared, doubled counter worth
+noting: switching a timer to a center-aligned mode **re-times any
+sibling channel already running** (its physical period doubles until
+the host re-issues `PWM_SET`), and center-aligned period/duty quantise
+to `2 us` (the `ARR`/compare are the commanded microseconds halved), so
+the minimum non-zero duty is `2 us` and odd values round down.
+`PWM_SINGLE_PULSE` (`0x26`) is edge-aligned only and returns
+`STATUS_NOSUPPORT` while its timer is center-aligned -- set `align_mode`
+back to `0` first.
 
 `dead_time_ns` and `break_cfg` still return `STATUS_NOSUPPORT` -- but on
 V2N this is a **hardware-routing** limit, not an unimplemented feature.
@@ -463,13 +471,19 @@ reply is empty.
 * `oversample_ratio` is one of 1/2/4/8/16/32/64/128/256.  0 means
   "firmware default" (per-channel-configured at build time).  The
   firmware rounds down to the nearest power-of-two.
-* `sample_cycles` is one of the eight datasheet-defined sample-time
-  steps (2/6/12/24/47/92/247/640 cycles per GD32G553 RM §16.4.6);
-  0 means "firmware default".  Rounds down.
-* `resolution_bits` is 0 (default) / 6 / 8 / 10 / 12 / 14 / 16.
-  14- and 16-bit modes require `oversample_ratio >= 4` and `>= 16`
-  respectively per the datasheet's effective-resolution table; the
-  firmware enforces.  Unsupported widths reply with `STATUS_INVAL`.
+* `sample_cycles` is a direct sample-and-hold cycle count written to
+  the routine-sequence `SMP` field (GD32G5x3 accepts `2..638` ADCCK);
+  the firmware clamps into that range.  `0` means "firmware default"
+  (240 cycles) -- a `0` here is NOT the fastest window, so an
+  oversample-only reconfigure keeps the settling time its high-Z
+  inputs need.
+* `resolution_bits` is 0 (default = 12) / 6 / 8 / 10 / 12 (hardware
+  `DRES`) / 14 / 16.  The mV conversion divides by the width's
+  full-scale (`4095`/`1023`/`255`/`63` for 12/10/8/6).  `14`/`16` are
+  effective-resolution modes reachable only by under-shifting an
+  oversampled accumulator (the `DRES` field tops out at 12-bit); that
+  extension has not landed, so they reply `STATUS_NOSUPPORT`.  Any
+  other width replies `STATUS_INVAL`.
 
 The GD32 returns ADC readings as 16-bit millivolts (`ADC_READ` /
 `ADC_STREAM_READ` reply payload format unchanged); higher
