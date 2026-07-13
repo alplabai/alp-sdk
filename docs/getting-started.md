@@ -459,6 +459,25 @@ Zephyr's module organisation.  The Alif vendor-licensed pieces
 distinct from the Apache-2.0 `hal_alif` -- they're only
 fetched when a customer opts in to the `vendor-sdks` group.
 
+## Reproducing a build with alp.lock
+
+`west alp-lock` writes `alp.lock` — a deterministic, public-safe record of the
+workspace's SDK revision, west project pins, curated library versions, Python
+requirements, and metadata digests. Commit it. `west alp-lock --check` (run in
+CI) fails with a field-level diagnostic when any locked input drifts, so an old
+release can be rebuilt against its exact declared inputs. It contains no local
+paths or credentials. The recorded `sdk.revision` is **provenance** (which SDK
+commit generated the lock) and is not frozen-verified — committing the lock
+advances the repo's own HEAD past it, so `--check` reports it but never fails on
+it; `sdk.version` and the west pins lock the SDK identity you build against. It
+does not yet pin resolved commit SHAs or toolchain container identities (tracked
+follow-ups).
+
+Because `alp.lock` hashes `metadata/**` and pins the west/library/Python inputs,
+**re-run `west alp-lock` and commit the updated `alp.lock` in the same PR**
+whenever you touch `west.yml`, `metadata/**`, `scripts/requirements.txt`, or
+`scripts/alp_cli/__init__.py` — otherwise the `alp.lock in sync` CI check reds.
+
 ## 9. SoC capability validation
 
 The SoC choice flows from `board.yaml`'s `som.sku` field

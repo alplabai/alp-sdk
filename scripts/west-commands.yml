@@ -30,6 +30,11 @@ west-commands:
       - name: alp-clean
         class: AlpClean
         help: Remove the per-project build dir + orchestrator cache
+  - file: scripts/west_commands/alp_lock.py
+    commands:
+      - name: alp-lock
+        class: AlpLock
+        help: Write or verify the project's alp.lock dependency lock
   - file: scripts/west_commands/alp_renode.py
     commands:
       - name: alp-renode
