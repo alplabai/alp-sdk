@@ -371,9 +371,14 @@ void bridge_hw_init(void)
  * PMIC.  When a future HW rev mirrors the fault nets onto GD32
  * inputs, this hook samples them and updates the byte returned by
  * bridge_hw_da9292_status_cached(). */
+/* Base-level DSP pump (#496): drains each bound FIR/IIR stream's raw
+ * samples through the FAC into its processed ring.  Runs here, off the
+ * main WFI loop -- never in the CS-EXTI stream_read path. */
+extern void bridge_hw_dsp_pump(void);
+
 void bridge_hw_tick(void)
 {
-	/* No-op on this HW rev (nothing to sample). */
+	bridge_hw_dsp_pump();
 }
 
 /* ----------------------------------------------------------------- */

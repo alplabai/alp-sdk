@@ -115,6 +115,22 @@ typedef struct {
 	uint32_t          total_read;
 	uint8_t           dsp_chain_id;
 	bool              dsp_bound;
+
+	/* --- #496 DSP runtime dispatch: filtered data plane --- */
+	/* When a FIR/IIR chain is bound, the base-level pump
+	 * (bridge_hw_tick) drains raw ring samples through the FAC HW into
+	 * this processed ring; stream_read drains the PROCESSED ring instead
+	 * of the raw one.  SPSC: the pump is the sole producer (proc_write,
+	 * base level) and the sole consumer of the raw ring for this stream
+	 * (pump_raw_read); stream_read (CS-EXTI) is the sole consumer
+	 * (proc_read).  Monotonic counts (not indices) so backlog math is
+	 * the same exact-difference form the raw path uses.  proc_write is
+	 * volatile: written at base level, read in the CS-EXTI handler. */
+	uint16_t          proc_ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
+	volatile uint32_t proc_write;    /* pump-produced sample count      */
+	uint32_t          proc_read;     /* stream_read-consumed count      */
+	uint32_t          pump_raw_read; /* pump's raw-ring consumer count  */
+	uint8_t           dsp_terminal;  /* terminal stage kind (0 FIR/1 IIR/3 FFT) */
 } adc_stream_state_t;
 
 /* ----------------------------------------------------------------- */

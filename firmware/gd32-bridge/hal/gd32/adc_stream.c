@@ -250,6 +250,35 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
 	adc_stream_state_t *s = &adc_streams[stream_id];
 	if (!s->in_use) return BRIDGE_HW_ERR_INVAL;
 
+	/* DSP data plane (#496): a bound FIR/IIR chain means the host reads
+	 * FILTERED samples the base-level pump produced in proc_ring -- NOT
+	 * the raw DMA ring.  A bound FFT chain has no stream data plane;
+	 * the spectrum is pulled via CMD_ADC_SPECTRUM_READ, so a plain
+	 * STREAM_READ answers NOSUPPORT (never silently raw).  proc_write
+	 * is produced at base level (volatile); snapshot once and use the
+	 * same exact-difference backlog accounting as the raw path. */
+	if (s->dsp_bound) {
+		if (s->dsp_terminal == 3u) return BRIDGE_HW_ERR_NOTIMPL; /* FFT */
+
+		const uint32_t pw       = s->proc_write;
+		const int32_t  pbacklog = (int32_t)(pw - s->proc_read);
+		if (pbacklog <= 0) return BRIDGE_HW_OK; /* pump hasn't produced yet */
+		if ((uint32_t)pbacklog >= BRIDGE_ADC_STREAM_RING_SAMPLES) {
+			s->proc_read = pw; /* pump lapped the reader -> resync, report loss */
+			return BRIDGE_HW_ERR_BUSY;
+		}
+		const uint16_t pavail   = (uint16_t)pbacklog;
+		const uint16_t emit     = (pavail < max_samples) ? pavail : max_samples;
+		for (uint16_t i = 0u; i < emit; ++i) {
+			uint32_t code = s->proc_ring[s->proc_read % BRIDGE_ADC_STREAM_RING_SAMPLES];
+			if (code > s->full_scale) code = s->full_scale;
+			mv[i] = (uint16_t)((code * ADC_VREF_MV) / s->full_scale);
+			s->proc_read++;
+		}
+		*got_samples = (uint8_t)emit;
+		return BRIDGE_HW_OK;
+	}
+
 	/* Drain as many fresh samples as the host asked for, capped by
      * what the DMA has actually deposited since the last read.
      * Overrun accounting is EXACT total-written-vs-read: the writer's
@@ -305,6 +334,11 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
  * above the pool definition -- is the sole runtime releaser. */
 static void adc_dsp_chain_release(uint8_t chain_id);
 
+/* DSP dispatch helpers, defined in the #496 pump section at end of file
+ * but referenced earlier by chain_bind / stream_end. */
+bool adc_dsp_filter_stream_busy(uint8_t except_stream);
+void adc_dsp_fac_release(uint8_t stream_id);
+
 int bridge_hw_adc_stream_end(uint8_t stream_id)
 {
 	if (stream_id >= BRIDGE_ADC_STREAM_COUNT) return BRIDGE_HW_ERR_RANGE;
@@ -358,7 +392,10 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
      * per bind->end cycle -- after BRIDGE_DSP_MAX_CHAINS cycles
      * chain_open returns NOSUPPORT forever until a reboot (#496).
      * dsp_chain_id is only meaningful while dsp_bound, so gate on it. */
-	if (s->dsp_bound) adc_dsp_chain_release(s->dsp_chain_id);
+	if (s->dsp_bound) {
+		adc_dsp_fac_release(stream_id); /* free the FAC if this stream owned it */
+		adc_dsp_chain_release(s->dsp_chain_id);
+	}
 
 	s->in_use    = false;
 	s->dsp_bound = false;
@@ -629,13 +666,236 @@ int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)
 	if (!s->in_use) return BRIDGE_HW_ERR_INVAL;   /* stream not running */
 	if (s->dsp_bound) return BRIDGE_HW_ERR_INVAL; /* stream already has a chain */
 
-	/* Attachment is a state flip on both halves.  Runtime DSP
-     * application happens inside stream_read once the wave-2 FFT/FAC
-     * dispatch lands; for now the bound chain simply rides alongside
-     * the raw stream and the host sees raw mV values until the
-     * dispatcher hook ships. */
-	s->dsp_chain_id = chain_id;
-	s->dsp_bound    = true;
-	chain->bound    = true;
+	/* One FAC block -> one filter (FIR/IIR) stream at a time.  A FFT
+	 * terminal uses the separate FFT block, so it's exempt. */
+	const uint8_t terminal_kind = chain->stages[last_populated_index].kind;
+	if (terminal_kind != 3u /* not FFT */ && adc_dsp_filter_stream_busy(stream_id)) {
+		return BRIDGE_HW_ERR_NOTIMPL; /* FAC already serving another stream */
+	}
+
+	/* Attachment is a state flip on both halves.  The terminal stage
+     * kind decides the data plane: FIR/IIR -> the base-level pump
+     * filters raw samples through the FAC into this stream's processed
+     * ring and stream_read serves filtered mV; FFT -> stream_read
+     * answers NOSUPPORT (spectrum is read via CMD_ADC_SPECTRUM_READ).
+     * Reset the processed-ring cursors so the pump starts clean. */
+	s->dsp_terminal   = chain->stages[last_populated_index].kind;
+	s->proc_write     = 0u;
+	s->proc_read      = 0u;
+	s->pump_raw_read  = s->total_read; /* pump picks up where the raw reader is */
+	s->dsp_chain_id   = chain_id;
+	s->dsp_bound      = true;
+	chain->bound      = true;
 	return BRIDGE_HW_OK;
+}
+
+/* =====================================================================
+ * #496 FAC FIR/IIR runtime dispatch -- the filtered data plane.
+ *
+ * A bound FIR/IIR chain routes the raw ADC stream through the GD32 FAC
+ * hardware filter (first-lit 2026-07-13: coeffs in X1, DEEP X0 input
+ * buffer, clip-enabled, batch or streaming).  The FILTER runs in the
+ * base-level pump (bridge_hw_dsp_pump, from the main WFI loop) -- NEVER
+ * in stream_read (the CS-EXTI transport handler, prio 1) where even a
+ * modest FIR would add link latency (the 2026-06-04 link-rot mode).
+ *
+ * There is ONE FAC block, so ONE filter stream may be bound at a time;
+ * chain_bind rejects a second filter chain with NOSUPPORT (below).
+ * ===================================================================== */
+
+/* stream_id currently loaded into the FAC, or -1 when the FAC is idle. */
+static int8_t adc_dsp_fac_owner = -1;
+
+/* Is a FIR/IIR (filter, not FFT) chain already bound to some OTHER
+ * stream?  The single FAC can serve only one at a time. */
+bool adc_dsp_filter_stream_busy(uint8_t except_stream)
+{
+	for (uint8_t i = 0u; i < BRIDGE_ADC_STREAM_COUNT; ++i) {
+		if (i == except_stream) continue;
+		if (adc_streams[i].in_use && adc_streams[i].dsp_bound &&
+		    adc_streams[i].dsp_terminal != 3u /* not FFT */) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Release the FAC if this stream owned it (called from stream_end). */
+void adc_dsp_fac_release(uint8_t stream_id)
+{
+	if (adc_dsp_fac_owner == (int8_t)stream_id) {
+		fac_stop();
+		adc_dsp_fac_owner = -1;
+	}
+}
+
+/* Decode one wire coefficient (4 bytes little-endian, Q31 or F32) into
+ * the FAC's Q15 fixed-point.  Q31 -> arithmetic >>16; F32 -> clamp to
+ * [-1, +1) and scale by 2^15. */
+static int16_t adc_dsp_coeff_q15(uint8_t fmt, const uint8_t *p)
+{
+	uint32_t w = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+	             ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+	if (fmt == 1u) { /* Q31 */
+		return (int16_t)((int32_t)w >> 16);
+	}
+	/* F32 */
+	float f;
+	__builtin_memcpy(&f, &w, sizeof(f));
+	if (f >= 0.999969f) f = 0.999969f;
+	if (f <= -1.0f)     f = -1.0f;
+	return (int16_t)(f * 32768.0f);
+}
+
+/* Configure the FAC for stream s's bound chain (single FIR or single-
+ * section IIR).  Streaming mode: coeffs preloaded into X1, no input
+ * preload -- the pump feeds X0 one sample at a time.  Returns false for
+ * a shape the FAC path doesn't handle in P1 (multi-stage, multi-section
+ * IIR), leaving the stream unfiltered (stream_read then answers BUSY so
+ * the host doesn't mistake raw data for filtered). */
+static bool adc_dsp_fac_config(const adc_stream_state_t *s)
+{
+	const adc_dsp_chain_t *chain = &adc_dsp_chains[s->dsp_chain_id];
+
+	/* P1 handles exactly one populated non-FFT stage. */
+	const adc_dsp_stage_t *st = 0;
+	uint8_t populated = 0u;
+	for (uint8_t i = 0u; i < BRIDGE_DSP_MAX_STAGES; ++i) {
+		if (chain->stages[i].total_size != 0u) { st = &chain->stages[i]; ++populated; }
+	}
+	if (st == 0 || populated != 1u) return false;
+
+	fac_deinit();
+	rcu_periph_clock_enable(RCU_FAC);
+
+	fac_parameter_struct p;
+	fac_struct_para_init(&p);
+	const uint8_t depth = 32u; /* X0 working depth beyond the tap window */
+
+	if (st->kind == 0u) { /* FIR: format:u8 n_taps:u8 rsvd:u16 taps[] */
+		const uint8_t fmt = st->data[0];
+		const uint8_t nt  = st->data[1];
+		int16_t taps[BRIDGE_DSP_MAX_FIR_TAPS];
+		for (uint8_t k = 0u; k < nt; ++k) {
+			taps[k] = adc_dsp_coeff_q15(fmt, &st->data[BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)k * 4u]);
+		}
+		p.coeff_addr       = 0u;             p.coeff_size  = nt;
+		p.input_addr       = nt;             p.input_size  = (uint8_t)(nt + depth);
+		p.output_addr      = (uint8_t)(nt + nt + depth);
+		p.output_size      = depth;
+		p.input_threshold  = FAC_THRESHOLD_1;
+		p.output_threshold = FAC_THRESHOLD_1;
+		p.clip             = FAC_CP_ENABLE;
+		fac_init(&p);
+
+		fac_fixed_data_preload_struct pl;
+		fac_fixed_data_preload_init(&pl);
+		pl.coeffb_ctx = taps; pl.coeffb_size = nt;
+		pl.coeffa_ctx = 0;    pl.coeffa_size = 0u;
+		pl.input_ctx  = 0;    pl.input_size  = 0u;
+		pl.output_ctx = 0;    pl.output_size = 0u;
+		fac_fixed_buffer_preload(&pl);
+
+		p.func = FUNC_CONVO_FIR; p.ipp = nt; p.ipq = 0u; p.ipr = 0u;
+		fac_function_config(&p);
+		fac_start();
+		return true;
+	}
+
+	if (st->kind == 1u) { /* IIR direct-form-1, SINGLE biquad in P1 */
+		const uint8_t fmt   = st->data[0];
+		const uint8_t n_sec = st->data[1];
+		if (n_sec != 1u) return false; /* cascaded sections: later */
+		/* section = b0,b1,b2,a1,a2 (5 coeffs).  FAC coeffb = feed-
+		 * forward B (b0,b1,b2), coeffa = feedback A (a1,a2). */
+		int16_t b[3], a[2];
+		const uint8_t *c = &st->data[BRIDGE_DSP_STAGE_HDR_BYTES];
+		for (uint8_t k = 0u; k < 3u; ++k) b[k] = adc_dsp_coeff_q15(fmt, &c[k * 4u]);
+		for (uint8_t k = 0u; k < 2u; ++k) a[k] = adc_dsp_coeff_q15(fmt, &c[(3u + k) * 4u]);
+		p.coeff_addr       = 0u;             p.coeff_size  = 5u; /* b0..b2,a1,a2 */
+		p.input_addr       = 5u;             p.input_size  = (uint8_t)(3u + depth);
+		p.output_addr      = (uint8_t)(5u + 3u + depth);
+		p.output_size      = depth;
+		p.input_threshold  = FAC_THRESHOLD_1;
+		p.output_threshold = FAC_THRESHOLD_1;
+		p.clip             = FAC_CP_ENABLE;
+		fac_init(&p);
+
+		fac_fixed_data_preload_struct pl;
+		fac_fixed_data_preload_init(&pl);
+		pl.coeffb_ctx = b; pl.coeffb_size = 3u;
+		pl.coeffa_ctx = a; pl.coeffa_size = 2u;
+		pl.input_ctx  = 0; pl.input_size  = 0u;
+		pl.output_ctx = 0; pl.output_size = 0u;
+		fac_fixed_buffer_preload(&pl);
+
+		/* IPP = feed-forward count (3), IPQ = feedback count (2). */
+		p.func = FUNC_IIR_DIRECT_FORM_1; p.ipp = 3u; p.ipq = 2u; p.ipr = 0u;
+		fac_function_config(&p);
+		fac_start();
+		return true;
+	}
+
+	return false; /* WINDOW/FFT are not filter terminals */
+}
+
+/* Drain stream sid's new raw samples through the FAC into its processed
+ * ring.  Base-level producer of proc_ring + sole consumer of the raw
+ * ring for this stream; mirrors stream_read's exact lap+write-index
+ * backlog accounting so a mid-pump DMA reload can only UNDER-count. */
+static void adc_dsp_pump_stream(uint8_t sid)
+{
+	adc_stream_state_t *s = &adc_streams[sid];
+
+	if (adc_dsp_fac_owner != (int8_t)sid) {
+		if (!adc_dsp_fac_config(s)) return; /* unsupported chain -> stay idle */
+		adc_dsp_fac_owner = (int8_t)sid;
+	}
+
+	const uint32_t laps          = s->lap_count;
+	const uint16_t w             = adc_stream_write_index(s);
+	const uint32_t total_written = laps * BRIDGE_ADC_STREAM_RING_SAMPLES + (uint32_t)w;
+	int32_t        avail         = (int32_t)(total_written - s->pump_raw_read);
+	if (avail <= 0) return;
+	if ((uint32_t)avail >= BRIDGE_ADC_STREAM_RING_SAMPLES) {
+		/* The pump fell a full ring behind the DMA -- drop the corrupt
+		 * backlog and resync so the next batch is gap-free (the host
+		 * sees this as a proc-ring gap, same as a raw overrun). */
+		s->pump_raw_read = total_written;
+		return;
+	}
+
+	while (avail-- > 0) {
+		const uint16_t ridx = (uint16_t)(s->pump_raw_read % BRIDGE_ADC_STREAM_RING_SAMPLES);
+		const uint16_t code = (uint16_t)(s->ring[ridx] & 0x0FFFu); /* 12-bit */
+		s->pump_raw_read++;
+
+		/* Unipolar ADC code (0..4095) -> Q15 positive (0..~1.0): <<3.
+		 * A unity-DC-gain filter (sum(taps) ~ 1.0) preserves the offset;
+		 * the reverse (>>3) returns a code the existing mv math scales. */
+		const int16_t x = (int16_t)(code << 3);
+		if (fac_flag_get(FAC_FLAG_X0BFF) == SET) break; /* FAC input saturated */
+		fac_fixed_data_write(x);
+
+		if (fac_flag_get(FAC_FLAG_YBEF) == RESET) {
+			int32_t c = (int32_t)fac_fixed_data_read() >> 3;
+			if (c < 0)    c = 0;
+			if (c > 4095) c = 4095;
+			s->proc_ring[s->proc_write % BRIDGE_ADC_STREAM_RING_SAMPLES] = (uint16_t)c;
+			s->proc_write++;
+		}
+	}
+}
+
+/* Base-level DSP pump -- called every main-loop tick (bridge_hw_tick).
+ * Services every bound FIR/IIR stream; FFT-bound streams have no filter
+ * data plane (spectrum is pulled separately). */
+void bridge_hw_dsp_pump(void)
+{
+	for (uint8_t sid = 0u; sid < BRIDGE_ADC_STREAM_COUNT; ++sid) {
+		const adc_stream_state_t *s = &adc_streams[sid];
+		if (!s->in_use || !s->dsp_bound) continue;
+		if (s->dsp_terminal == 3u) continue; /* FFT: not a filter */
+		adc_dsp_pump_stream(sid);
+	}
 }
