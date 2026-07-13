@@ -38,7 +38,7 @@ class TestHwBackendsLoader(unittest.TestCase):
     LIBS = [
         "tflite_micro", "lvgl", "mbedtls", "cmsis_dsp",
         "littlefs", "bearssl", "madgwick_ahrs", "u8g2",
-        "gfx_compat", "minimp3", "opus", "libhelix",
+        "gfx_compat", "minimp3", "opus",
     ]
 
     _SKU_CORE: dict[str, str] = {
@@ -185,7 +185,6 @@ class TestHwBackendsLoader(unittest.TestCase):
             "CONFIG_ALP_BEARSSL_PURE_C=y",
             "CONFIG_ALP_OPUS_PURE_C=y",
             "CONFIG_ALP_MINIMP3_PURE_C=y",
-            "CONFIG_ALP_LIBHELIX_PURE_C=y",
             "CONFIG_ALP_MADGWICK_LIBM=y",
             "CONFIG_ALP_U8G2_SW_BLIT=y",
             "CONFIG_ALP_GFX_COMPAT_SW=y",

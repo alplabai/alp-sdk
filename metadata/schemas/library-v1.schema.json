@@ -32,8 +32,8 @@
     },
     "license": {
       "type": "string",
-      "enum": ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "Zlib", "MIT-0"],
-      "description": "SPDX licence identifier of the upstream library.  Validated against this permissive allowlist; a GPL-family or proprietary licence is rejected so a copyleft surprise cannot ride in through a `libraries:` selection (ADR 0018 non-goal).  Extending this allowlist is a deliberate human decision (legal review), not a metadata edit -- add the id here AND in metadata/libraries/README.md's allowlist rationale in the same change."
+      "enum": ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "Zlib", "MIT-0", "BSL-1.0", "CC0-1.0"],
+      "description": "SPDX licence identifier of the upstream library.  Validated against this permissive allowlist; a GPL-family or proprietary licence is rejected so a copyleft surprise cannot ride in through a `libraries:` selection (ADR 0018 non-goal).  Extending this allowlist is a deliberate human decision (legal review), not a metadata edit -- add the id here AND in metadata/libraries/README.md's allowlist rationale in the same change.  BSL-1.0 (Boost licence) and CC0-1.0 (public-domain-equivalent) were added by the #610 WS6-c maintainer legal-review decision, which covers two permissive curated-library manifests; that same review dropped two other curated tokens for carrying non-permissive copyleft/source-available licences instead of admitting those into this allowlist."
     },
     "requires": {
       "type": "object",

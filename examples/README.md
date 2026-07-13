@@ -165,9 +165,7 @@ in their README.
 | `connectivity/coap-client-get`         | libcoap | Build a CoAP GET PDU + parse a response PDU with the real API.      |
 | `connectivity/mqtt-sn-publish`         | coremqtt_sn | Serialize + parse an MQTT-SN PUBLISH (buffer round-trip).       |
 | `connectivity/websocket-frame`         | libwebsockets | RFC 6455 masked text-frame encode/decode round-trip.         |
-| `connectivity/tinygsm-modem-at`        | tinygsm | Cellular-modem AT bring-up flow over a mock transcript Stream.      |
 | `audio/minimp3-decode`                 | minimp3 | Decode an embedded MP3 blob → PCM; print sample count + RMS.        |
-| `audio/libhelix-decode`                | libhelix | MP3 frame sync + header parse (real ARM PCM decode documented).    |
 | `display/u8g2-oled-draw`               | u8g2    | Render text/frame/box to a RAM framebuffer; ASCII-dump it.         |
 | `display/gfx-compat-blit`              | gfx_compat | Fill + blit an RGB565 buffer through the SW-fallback shim.       |
 | `power-timing/littlefs-keyvalue`       | littlefs | Mount a RAM-backed LFS; write / read / list a key-value file.      |

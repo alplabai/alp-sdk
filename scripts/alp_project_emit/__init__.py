@@ -251,7 +251,6 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
     # §D.lib.iot
     "coremqtt_sn":    ("CONFIG_ALP_MQTTSN_NO_TLS=y",),
     "libcoap":        ("CONFIG_ALP_COAP_NO_TLS=y",),
-    "tinygsm":        ("CONFIG_ALP_TINYGSM_SYNC_IO=y",),
     "nanopb":         ("CONFIG_ALP_NANOPB_SW=y",),
     "libwebsockets":  ("CONFIG_ALP_LWS_NO_TLS=y",),
     "jsmn":           ("CONFIG_ALP_JSMN_SW=y",),
@@ -260,7 +259,6 @@ _LIBRARY_KCONFIG: dict[str, tuple[str, ...]] = {
     # §D.lib.audio
     "minimp3":        ("CONFIG_ALP_MINIMP3_PURE_C=y",),
     "opus":           ("CONFIG_ALP_OPUS_PURE_C=y",),
-    "libhelix":       ("CONFIG_ALP_LIBHELIX_PURE_C=y",),
 
     # §D.lib.test
     "catch2":         ("CONFIG_ALP_CATCH2_SW=y",

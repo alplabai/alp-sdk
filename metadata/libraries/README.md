@@ -180,14 +180,18 @@ copyleft or proprietary surprise cannot ride in through a `libraries:`
 selection:
 
 ```
-Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0
+Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0, BSL-1.0, CC0-1.0
 ```
 
 **Extending this allowlist is a deliberate human decision, not a metadata
 edit.** Add the SPDX id in BOTH `schemas/library-v1.schema.json`
 (`license.enum`) and this list, in the same change, with the legal rationale
 in the commit body. GPL-family and proprietary licences are rejected by
-design.
+design. `BSL-1.0` (Boost, `catch2`) and `CC0-1.0` (public-domain-equivalent,
+`minimp3`) were added per the #610 WS6-c maintainer legal-review decision;
+the same decision dropped `tinygsm` (LGPL-3.0) and `libhelix` (RPSL-1.0)
+from the curated set rather than admit their copyleft/non-permissive
+licences into this allowlist.
 
 ## Adding a library
 

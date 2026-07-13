@@ -11,8 +11,8 @@
  * controlled over UART using the standard 3GPP AT command set.
  * This driver covers the line-layer AT-command shell only:
  * `init` + `send_cmd` + `read_response` + `deinit`.  The TCP /
- * MQTT / FTP / HTTP profiles built on top of AT live in the
- * `tinygsm` library (Phase 2 §D.lib.iot).
+ * MQTT / FTP / HTTP profiles built on top of AT are app-level
+ * code, layered on this driver's AT-command shell.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  * @par Verification status: [UNTESTED] — driver compiles + passes NULL-arg smokes;
