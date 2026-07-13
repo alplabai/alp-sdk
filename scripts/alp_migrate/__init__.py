@@ -11,17 +11,18 @@ Migrations are byte-faithful text transforms (comments, flow style, and
 indentation are preserved because the file body is never re-serialized). Each
 registry step is `(FROM, TO, apply_text_fn)` where `apply_text_fn(lines,
 report)` mutates the file's lines in place -- including writing its own
-`schemaVersion: TO` bump (use the `set_schema_version` helper). Parsing and
-planning go through a ruamel round-trip doc; only reads happen there.
+`schemaVersion: TO` bump (use the `set_schema_version` helper). Parsing (for
+version reads + planning) is a plain PyYAML load; the write path never
+re-serializes the body, so no round-trip/comment-preserving loader -- and no
+extra dependency -- is needed.
 """
 from __future__ import annotations
 
 import difflib
-import io
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from ruamel.yaml import YAML
+import yaml  # PyYAML -- already a repo dep; only used to READ schemaVersion
 
 from .migrations import STEPS
 
@@ -45,22 +46,14 @@ class Report:
     needs_manual: list[tuple[str, str]] = field(default_factory=list)
 
 
-def _yaml() -> YAML:
-    y = YAML()
-    y.preserve_quotes = True
-    y.width = 4096  # don't rewrap long lines (e.g. pins: [...] flow entries)
-    y.indent(mapping=2, sequence=4, offset=2)  # match repo board.yaml style
-    return y
-
-
 def load(text: str) -> Any:
-    return _yaml().load(text)
+    """Parse board.yaml text to a dict for version reads only.
 
-
-def dump(doc: Any) -> str:
-    buf = io.StringIO()
-    _yaml().dump(doc, buf)
-    return buf.getvalue()
+    The migration WRITE path is text-based (`apply_text`) and never
+    re-serializes the body, so a plain PyYAML parse is enough here -- no
+    round-trip / comment-preserving loader (and no extra dependency) is needed
+    just to read `schemaVersion` and plan steps."""
+    return yaml.safe_load(text)
 
 
 def current_version(doc: Any) -> int:
