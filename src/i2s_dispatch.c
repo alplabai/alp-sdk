@@ -129,49 +129,48 @@ alp_status_t alp_i2s_stop(alp_i2s_t *i2s)
 
 alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint32_t timeout_ms)
 {
-	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted via
-	 * op_enter -- counting it would make alp_i2s_close()'s begin_close busy-
-	 * spin until this transfer drains/times out (single-core deadlock when
-	 * the closer has >= priority). Same as ble/wifi/mqtt blocking ops; the
-	 * residual close-vs-in-flight-transfer UAF is tracked in the #629
-	 * blocking-op-drain follow-up. start/stop stay counted (short, synchronous). */
-	if (i2s == NULL || alp_lifecycle_get(&i2s->lifecycle) != ALP_HANDLE_LC_OPEN)
+	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL; /* param check before gate */
+	/* Counted via alp_handle_op_enter/leave (issue #629): write() can
+	 * block up to timeout_ms draining the transfer, so alp_i2s_close()
+	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c) instead of the busy-spin
+	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
+	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8).
+	 * start/stop stay on the short, synchronous op_enter/leave path. */
+	if (i2s == NULL || !alp_handle_op_enter(&i2s->lifecycle, &i2s->active_ops))
 		return ALP_ERR_NOT_READY;
-	if (block == NULL || bytes == 0u) {
-		return ALP_ERR_INVAL;
-	}
-	if (i2s->state.ops->write == NULL) {
-		return ALP_ERR_NOSUPPORT;
-	}
-	return i2s->state.ops->write(&i2s->state, block, bytes, timeout_ms);
+	alp_status_t rc = (i2s->state.ops->write == NULL)
+	                      ? ALP_ERR_NOSUPPORT
+	                      : i2s->state.ops->write(&i2s->state, block, bytes, timeout_ms);
+	alp_handle_op_leave(&i2s->active_ops);
+	return rc;
 }
 
 alp_status_t
 alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
 {
-	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted --
-	 * see alp_i2s_write() above for the begin_close deadlock rationale. */
-	if (i2s == NULL || alp_lifecycle_get(&i2s->lifecycle) != ALP_HANDLE_LC_OPEN)
-		return ALP_ERR_NOT_READY;
-	if (block == NULL || bytes == 0u) {
-		return ALP_ERR_INVAL;
-	}
 	if (bytes_out != NULL) *bytes_out = 0u;
-	if (i2s->state.ops->read == NULL) {
-		return ALP_ERR_NOSUPPORT;
-	}
-	return i2s->state.ops->read(&i2s->state, block, bytes, bytes_out, timeout_ms);
+	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL; /* param check before gate */
+	/* Counted via alp_handle_op_enter/leave (issue #629) -- see
+	 * alp_i2s_write() above for the same rationale. */
+	if (i2s == NULL || !alp_handle_op_enter(&i2s->lifecycle, &i2s->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc = (i2s->state.ops->read == NULL)
+	                      ? ALP_ERR_NOSUPPORT
+	                      : i2s->state.ops->read(&i2s->state, block, bytes, bytes_out, timeout_ms);
+	alp_handle_op_leave(&i2s->active_ops);
+	return rc;
 }
 
 void alp_i2s_close(alp_i2s_t *i2s)
 {
 	if (i2s == NULL) return;
-	/* Gate out new ops and drain any in-flight one before touching
-	 * state.ops -- makes "close races a blocked/in-flight op" a
-	 * bounded wait instead of a use-after-free (issue #629).  Losing
-	 * the CAS (already closed/closing/never-opened) makes this a
-	 * no-op, matching the existing void-close idempotency contract. */
-	if (!alp_handle_begin_close(&i2s->lifecycle, &i2s->active_ops)) return;
+	/* Sleep-poll drain (issue #629): this pool counts alp_i2s_write()/
+	 * alp_i2s_read(), each of which can block up to its caller's
+	 * timeout_ms, so alp_handle_begin_close_blocking() sleeps between
+	 * polls instead of busy-spinning -- see src/common/alp_slot_claim.c/.h.
+	 * Idempotent: a second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&i2s->lifecycle, &i2s->active_ops)) return;
 	if (i2s->state.ops != NULL && i2s->state.ops->close != NULL) {
 		i2s->state.ops->close(&i2s->state);
 	}

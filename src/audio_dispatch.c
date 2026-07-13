@@ -181,22 +181,21 @@ alp_status_t alp_audio_in_read(alp_audio_in_t *in,
                                uint32_t        timeout_ms)
 {
 	if (out_frames != NULL) *out_frames = 0;
-	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted via
-	 * op_enter -- counting it would make alp_audio_in_close()'s begin_close
-	 * busy-spin until this read drains/times out (a single-core deadlock when
-	 * the closer runs at >= this thread's priority). Same treatment as the
-	 * ble/wifi/mqtt blocking ops; the residual close-vs-in-flight-read UAF is
-	 * tracked in the #629 blocking-op-drain follow-up. */
-	if (in == NULL || alp_lifecycle_get(&in->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	if (buf == NULL || frames == 0) return ALP_ERR_INVAL; /* param check before gate */
+	/* Counted via alp_handle_op_enter/leave (issue #629): read() can
+	 * block up to timeout_ms waiting on frames, so alp_audio_in_close()
+	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c) instead of the busy-spin
+	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
+	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
+	if (in == NULL || !alp_handle_op_enter(&in->lifecycle, &in->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (buf == NULL || frames == 0) {
-		return ALP_ERR_INVAL;
-	}
-	if (in->state.ops == NULL || in->state.ops->in_read == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
-	}
-	return in->state.ops->in_read(&in->state, buf, frames, out_frames, timeout_ms);
+	alp_status_t rc = (in->state.ops == NULL || in->state.ops->in_read == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : in->state.ops->in_read(&in->state, buf, frames, out_frames, timeout_ms);
+	alp_handle_op_leave(&in->active_ops);
+	return rc;
 }
 
 void alp_audio_in_close(alp_audio_in_t *in)
@@ -204,10 +203,12 @@ void alp_audio_in_close(alp_audio_in_t *in)
 	if (in == NULL) {
 		return;
 	}
-	/* begin_close CAS OPEN->CLOSING then spins until every op that
-	 * entered before the CAS has left -- so teardown never races an
-	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&in->lifecycle, &in->active_ops)) {
+	/* Sleep-poll drain (issue #629): this pool counts alp_audio_in_read(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&in->lifecycle, &in->active_ops)) {
 		return;
 	}
 	if (in->state.ops != NULL && in->state.ops->in_close != NULL) {
@@ -294,19 +295,18 @@ alp_status_t alp_audio_out_write(alp_audio_out_t *out,
                                  uint32_t         timeout_ms)
 {
 	if (out_frames != NULL) *out_frames = 0;
-	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted --
-	 * see alp_audio_in_read() above for the begin_close deadlock rationale.
-	 * Residual close-vs-in-flight-write UAF tracked in the #629 follow-up. */
-	if (out == NULL || alp_lifecycle_get(&out->lifecycle) != ALP_HANDLE_LC_OPEN) {
+	if (buf == NULL || frames == 0) return ALP_ERR_INVAL; /* param check before gate */
+	/* Counted via alp_handle_op_enter/leave (issue #629) -- see
+	 * alp_audio_in_read() above for the same rationale. */
+	if (out == NULL || !alp_handle_op_enter(&out->lifecycle, &out->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (buf == NULL || frames == 0) {
-		return ALP_ERR_INVAL;
-	}
-	if (out->state.ops == NULL || out->state.ops->out_write == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
-	}
-	return out->state.ops->out_write(&out->state, buf, frames, out_frames, timeout_ms);
+	alp_status_t rc =
+	    (out->state.ops == NULL || out->state.ops->out_write == NULL)
+	        ? ALP_ERR_NOT_IMPLEMENTED
+	        : out->state.ops->out_write(&out->state, buf, frames, out_frames, timeout_ms);
+	alp_handle_op_leave(&out->active_ops);
+	return rc;
 }
 
 alp_status_t alp_audio_out_set_volume(alp_audio_out_t *out, uint8_t vol)
@@ -331,10 +331,12 @@ void alp_audio_out_close(alp_audio_out_t *out)
 	if (out == NULL) {
 		return;
 	}
-	/* begin_close CAS OPEN->CLOSING then spins until every op that
-	 * entered before the CAS has left -- so teardown never races an
-	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&out->lifecycle, &out->active_ops)) {
+	/* Sleep-poll drain (issue #629): this pool counts alp_audio_out_write(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&out->lifecycle, &out->active_ops)) {
 		return;
 	}
 	if (out->state.ops != NULL && out->state.ops->out_close != NULL) {

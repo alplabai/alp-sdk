@@ -16,7 +16,7 @@
  * "init", operated under alp_handle_op_enter/leave, and torn down under
  * alp_handle_begin_close.
  *
- * Four scenarios, each the deterministic form of an acceptance-criteria
+ * Five scenarios, each the deterministic form of an acceptance-criteria
  * bullet:
  *   1. concurrent open never duplicates a slot (1-slot pool) and honours
  *      capacity (N-slot pool: exactly N winners, the rest get NULL).
@@ -38,7 +38,23 @@
  *      so this deterministically exercises the drain-wait path
  *      instead of racing the two threads' entry/CAS off one shared
  *      start barrier (which let a mutated, uncounted op miss the bug
- *      most rounds).
+ *      most rounds). This scenario's property also covers
+ *      src/uart_dispatch.c's alp_uart_read() and src/can_dispatch.c's
+ *      alp_can_send(): both were already COUNTED (so memory-safe) but
+ *      their close()s were still wired to the busy-spin
+ *      alp_handle_begin_close(), a liveness bug (not a UAF) this
+ *      scenario's "sleep-poll close drains a genuinely-blocking counted
+ *      op" property equally proves is fixed now that they use
+ *      alp_handle_begin_close_blocking() too.
+ *   5. the same drain-wait property, proven again against the specific
+ *      call shape src/audio_dispatch.c's alp_audio_in_read()/
+ *      alp_audio_out_write() and src/i2s_dispatch.c's alp_i2s_write()/
+ *      alp_i2s_read() use: a pure NULL/len==0 param-check bail AHEAD of
+ *      the counted gate (fake_audio_style_op()) -- these four were the
+ *      blocking ops issue #629's first pass missed (they kept the
+ *      lifecycle-byte-only fallback #4 replaced everywhere else), so
+ *      this is their dedicated regression. A companion non-racy check
+ *      confirms the param-check bail itself never touches active_ops.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto -DALP_BUILD_TESTS=ON
@@ -541,6 +557,144 @@ static void test_blocking_close_never_recycles_under_counted_blocking_op(void)
 	free(ctx);
 }
 
+/* ------------------------------------------------------------------ */
+/* Part 5: audio/i2s-style op -- a pure param-check bail AHEAD of the  */
+/* counted blocking gate -- vs the sleep-poll close (issue #629        */
+/* follow-up: src/audio_dispatch.c's alp_audio_in_read()/              */
+/* alp_audio_out_write() and src/i2s_dispatch.c's alp_i2s_write()/     */
+/* alp_i2s_read() were the 4 blocking ops the first #629 pass missed   */
+/* -- they gated on alp_lifecycle_get() != OPEN only, UNcounted, so    */
+/* their close()s used the busy-spin alp_handle_begin_close() and      */
+/* never waited for one of these to drain).                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Mirrors the exact shape those four ops now use: `len == 0` stands in
+ * for their `buf == NULL || frames == 0` (i2s: `block == NULL || bytes
+ * == 0u`) pre-gate param check, which must bail WITHOUT touching the
+ * handle at all -- no lifecycle read, no active_ops increment -- ahead
+ * of the counted alp_handle_op_enter()/alp_handle_op_leave() gate that
+ * lets alp_handle_begin_close_blocking() drain a genuinely blocking
+ * transfer instead of racing it (see fake_blocking_op() above for the
+ * `entered`-barrier rationale, reused here unchanged).
+ *
+ * Mutation-tested (issue #629 follow-up): temporarily replacing the
+ * `alp_handle_op_enter(...)` call below with the pre-fix
+ * `alp_lifecycle_get(&h->lifecycle) == ALP_HANDLE_LC_OPEN` gate (i.e.
+ * skipping the counter entirely, exactly what audio_dispatch.c/
+ * i2s_dispatch.c did before this follow-up) makes
+ * test_close_never_recycles_under_counted_audio_style_op() below fail
+ * every run (saw_poison trips) since the sleep-poll close's drain has
+ * nothing to wait on; restoring the counted gate makes it pass every
+ * run.
+ */
+static bool
+fake_audio_style_op(struct fake_handle *h, size_t len, bool *saw_poison, pthread_barrier_t *entered)
+{
+	if (len == 0) {
+		return false; /* pure param check before the gate: no h deref at all */
+	}
+	bool counted = alp_handle_op_enter(&h->lifecycle, &h->active_ops);
+	pthread_barrier_wait(entered);
+	if (!counted) {
+		return false;
+	}
+	struct timespec ts = { .tv_sec = 0, .tv_nsec = 2000000L }; /* 2 ms "transfer" */
+	nanosleep(&ts, NULL);
+	if (h->backend_state != BACKEND_MAGIC) {
+		*saw_poison = true;
+	}
+	alp_handle_op_leave(&h->active_ops);
+	return true;
+}
+
+struct audio_style_race_ctx {
+	pthread_barrier_t   barrier;
+	pthread_barrier_t   entered;
+	struct fake_handle *pool;
+	struct fake_handle *h;
+	bool                op_ran[BLOCKING_RACE_ITERATIONS];
+	bool                reopen_ok[BLOCKING_RACE_ITERATIONS];
+	bool                saw_poison;
+};
+
+static void *audio_style_race_op_thread(void *arg)
+{
+	struct audio_style_race_ctx *ctx = arg;
+	for (int i = 0; i < BLOCKING_RACE_ITERATIONS; i++) {
+		pthread_barrier_wait(&ctx->barrier);
+		ctx->op_ran[i] = fake_audio_style_op(
+		    ctx->h, 1u /* nonzero: always proceeds */, &ctx->saw_poison, &ctx->entered);
+		pthread_barrier_wait(&ctx->barrier);
+	}
+	return NULL;
+}
+
+static void *audio_style_race_close_thread(void *arg)
+{
+	struct audio_style_race_ctx *ctx = arg;
+	for (int i = 0; i < BLOCKING_RACE_ITERATIONS; i++) {
+		pthread_barrier_wait(&ctx->barrier);
+		/* See blocking_close_race_close_thread() above: wait for the op
+		 * to be counted-and-mid-sleep before issuing the CAS, or this
+		 * thread's CAS routinely wins off the shared start barrier
+		 * before the op's gate even runs. */
+		pthread_barrier_wait(&ctx->entered);
+		fake_close_blocking(ctx->h);
+		pthread_barrier_wait(&ctx->barrier);
+		ctx->h            = fake_open(ctx->pool, 1);
+		ctx->reopen_ok[i] = (ctx->h != NULL);
+	}
+	return NULL;
+}
+
+static void test_close_never_recycles_under_counted_audio_style_op(void)
+{
+	struct fake_handle           pool[1] = { 0 };
+	struct audio_style_race_ctx *ctx     = calloc(1, sizeof(*ctx));
+	pthread_t                    t_op, t_close;
+
+	ALP_ASSERT_TRUE(ctx != NULL);
+	ctx->pool = pool;
+	ctx->h    = fake_open(pool, 1);
+	ALP_ASSERT_TRUE(ctx->h != NULL);
+
+	ALP_ASSERT_EQ_INT(pthread_barrier_init(&ctx->barrier, NULL, 2), 0);
+	ALP_ASSERT_EQ_INT(pthread_barrier_init(&ctx->entered, NULL, 2), 0);
+	ALP_ASSERT_EQ_INT(pthread_create(&t_op, NULL, audio_style_race_op_thread, ctx), 0);
+	ALP_ASSERT_EQ_INT(pthread_create(&t_close, NULL, audio_style_race_close_thread, ctx), 0);
+	ALP_ASSERT_EQ_INT(pthread_join(t_op, NULL), 0);
+	ALP_ASSERT_EQ_INT(pthread_join(t_close, NULL), 0);
+	pthread_barrier_destroy(&ctx->barrier);
+	pthread_barrier_destroy(&ctx->entered);
+
+	/* Same property as Part 4, proven again against the audio/i2s call
+	 * shape specifically: never the poison. */
+	ALP_ASSERT_TRUE(!ctx->saw_poison);
+	for (int i = 0; i < BLOCKING_RACE_ITERATIONS; i++) {
+		ALP_ASSERT_TRUE(ctx->reopen_ok[i]);
+	}
+	free(ctx);
+}
+
+/* Non-racy companion check: the param-check bail (len == 0) must never
+ * touch the handle -- active_ops stays 0 and the lifecycle byte stays
+ * whatever it already was, so a close() racing a rejected call never
+ * has anything to drain for it. */
+static void test_audio_style_op_param_bail_never_touches_handle(void)
+{
+	struct fake_handle h = { 0 };
+	pthread_barrier_t  unused_entered;
+	bool               saw_poison = false;
+
+	ALP_ASSERT_EQ_INT(pthread_barrier_init(&unused_entered, NULL, 1), 0);
+	alp_lifecycle_set(&h.lifecycle, ALP_HANDLE_LC_OPEN);
+	ALP_ASSERT_TRUE(!fake_audio_style_op(&h, 0u, &saw_poison, &unused_entered));
+	ALP_ASSERT_EQ_INT((int)h.active_ops, 0);
+	ALP_ASSERT_TRUE(!saw_poison);
+	pthread_barrier_destroy(&unused_entered);
+}
+
 int main(void)
 {
 	test_concurrent_open_never_duplicates_one_slot();
@@ -548,5 +702,7 @@ int main(void)
 	test_close_never_recycles_under_active_op();
 	test_double_close_tears_down_exactly_once();
 	test_blocking_close_never_recycles_under_counted_blocking_op();
+	test_close_never_recycles_under_counted_audio_style_op();
+	test_audio_style_op_param_bail_never_touches_handle();
 	ALP_TEST_SUMMARY();
 }

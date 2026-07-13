@@ -133,12 +133,14 @@ alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t
 void alp_uart_close(alp_uart_t *port)
 {
 	if (port == NULL) return;
-	/* Gate out new ops and drain any in-flight one before touching
-	 * state.ops (issue #629): a racing close can't free a slot an
-	 * op is using. Losing the CAS (already closed/closing/never-
-	 * opened) makes this a no-op, matching the existing void-close
-	 * idempotency contract. */
-	if (!alp_handle_begin_close(&port->lifecycle, &port->active_ops)) return;
+	/* Sleep-poll drain (issue #629 follow-up): this pool counts
+	 * alp_uart_read(), which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- the busy-spin alp_handle_begin_close() would peg
+	 * a core (or hang outright at timeout_ms == UINT32_MAX) for the
+	 * whole read. See src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&port->lifecycle, &port->active_ops)) return;
 	if (port->state.ops != NULL && port->state.ops->close != NULL) {
 		port->state.ops->close(&port->state);
 	}
