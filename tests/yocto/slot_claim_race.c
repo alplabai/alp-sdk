@@ -38,7 +38,14 @@
  *      so this deterministically exercises the drain-wait path
  *      instead of racing the two threads' entry/CAS off one shared
  *      start barrier (which let a mutated, uncounted op miss the bug
- *      most rounds).
+ *      most rounds). This scenario's property also covers
+ *      src/uart_dispatch.c's alp_uart_read() and src/can_dispatch.c's
+ *      alp_can_send(): both were already COUNTED (so memory-safe) but
+ *      their close()s were still wired to the busy-spin
+ *      alp_handle_begin_close(), a liveness bug (not a UAF) this
+ *      scenario's "sleep-poll close drains a genuinely-blocking counted
+ *      op" property equally proves is fixed now that they use
+ *      alp_handle_begin_close_blocking() too.
  *   5. the same drain-wait property, proven again against the specific
  *      call shape src/audio_dispatch.c's alp_audio_in_read()/
  *      alp_audio_out_write() and src/i2s_dispatch.c's alp_i2s_write()/

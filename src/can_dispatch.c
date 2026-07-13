@@ -188,11 +188,14 @@ alp_status_t alp_can_remove_filter(alp_can_t *can, int32_t filter_id)
 void alp_can_close(alp_can_t *can)
 {
 	if (can == NULL) return;
-	/* Gate out new ops and drain any in-flight one before touching
-	 * state.ops (issue #629). Losing the CAS (already closed/closing/
-	 * never-opened) makes this a no-op, matching the existing
-	 * void-close idempotency contract. */
-	if (!alp_handle_begin_close(&can->lifecycle, &can->active_ops)) return;
+	/* Sleep-poll drain (issue #629 follow-up): this pool counts
+	 * alp_can_send(), which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- the busy-spin alp_handle_begin_close() would peg
+	 * a core (or hang outright at timeout_ms == UINT32_MAX) for the
+	 * whole send. See src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&can->lifecycle, &can->active_ops)) return;
 	if (can->state.ops != NULL && can->state.ops->close != NULL) {
 		can->state.ops->close(&can->state);
 	}
