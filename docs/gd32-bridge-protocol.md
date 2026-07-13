@@ -70,6 +70,7 @@ byte; their numeric encoding is:
 | `0x80` | `TRNG_READ`           | `len:u8` (1..32)                                   | `random_bytes[len]`                                |
 | `0x90` | `TMU_COMPUTE`         | `function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32` | `result:u32`                                  |
 | `0x36` | `ADC_STREAM_CONFIGURE_DSP` | _(reserved tombstone -- see §3.x)_             | _(empty; returns `STATUS_NOSUPPORT` permanently -- use `CMD_ADC_DSP_CHAIN_*` instead)_ |
+| `0x3A` | `ADC_SPECTRUM_READ`   | `stream_id:u8 bin_offset:u16 max_bins:u8`          | `seq:u32 total_bins:u16 got:u8 bins[max_bins]:f32` (see §3.x -- FFT-terminal chains; `STATUS_NOSUPPORT` if not FFT-bound, `STATUS_BUSY` before first frame) |
 | `0x23` | `PWM_CAPTURE_BEGIN`   | `channel:u8 edge:u8`                                  | _empty_ (see §3.y -- reconfigures the pad as input-capture) |
 | `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOSUPPORT` ("ring empty") until an edge lands; no edges land on this V2N HW rev pending a pad-routing rework) |
 | `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _empty_                                            |
@@ -165,13 +166,22 @@ surface lives in [`<alp/adc.h>`](../include/alp/adc.h)
 (`alp_adc_filter_t` / `alp_adc_spectrum_t`) plus the standalone
 in-RAM chain primitives in [`<alp/dsp.h>`](../include/alp/dsp.h).
 
-Three opcodes own the upload path, and all three are implemented
-today: `chain_open` / `stage_push` / `chain_bind` allocate, upload,
-validate, and bind a chain (see the per-opcode subsections below).
-What has NOT landed yet is the runtime side -- a bound chain's
-stages are not applied to the stream's samples.
-`CMD_ADC_STREAM_READ` still emits raw mV values from the DMA ring
-regardless of any bound chain (tracked #496).  The host-side
+Three opcodes own the upload path -- `chain_open` / `stage_push` /
+`chain_bind` allocate, upload, validate, and bind a chain (see the
+per-opcode subsections below) -- and the **runtime side is now
+implemented (#496)**: a bound chain's stages transform the stream's
+samples through the GD32 FAC (FIR/IIR) or FFT hardware block in a
+base-level pump.  What a bound chain does to the reads:
+
+* **FIR/IIR terminal:** `CMD_ADC_STREAM_READ` returns FILTERED mV
+  (same wire format as the raw read) drained from the pump's
+  processed ring.
+* **FFT terminal:** `CMD_ADC_STREAM_READ` returns `STATUS_NOSUPPORT`;
+  the spectrum is pulled with `CMD_ADC_SPECTRUM_READ` (`0x3A`).
+
+One FAC and one FFT block exist, so at most one filter stream and one
+FFT stream may be bound at a time; a second `chain_bind` of the same
+class returns `STATUS_NOSUPPORT`.  The host-side
 standalone API in `<alp/dsp.h>` ships working in v0.5.0 (runs the
 chain locally with CMSIS-DSP or the portable C fallback over
 in-RAM buffers), so application code can test against the same
@@ -251,22 +261,19 @@ eventually completes every staged kind before binding.
 
 Attaches a fully-populated chain to a streaming ADC source that
 was previously opened with `CMD_ADC_STREAM_BEGIN` (opcode
-`0x33`).  The firmware validates the chain and stores the binding
-on both sides (see the failure conditions below), but does not yet
-change what `CMD_ADC_STREAM_READ` returns -- the runtime dispatch
-that would route the stream's samples through the bound chain
-(instead of the raw mV values the DMA ring already emits) has not
-landed (tracked #496).  Once it does, the read reply's payload
-format is expected to become mode-dependent on the chain's
-terminal stage:
+`0x33`).  The firmware validates the chain, stores the binding on
+both sides, and **routes the stream's samples through the bound
+chain at runtime (#496)**.  What the reads return then depends on
+the chain's terminal stage:
 
-* No FFT terminal: filter samples (`i16` for Q31 coefficients,
-  `i16` shape-equivalent for F32 -- bridge-mapped to mV
-  semantics for compatibility with the legacy raw read path).
-* FFT terminal with `output_format == COMPLEX`:  interleaved
-  `(re, im)` f32 pairs.
-* FFT terminal with `output_format == MAGNITUDE`:  per-bin f32
-  magnitudes (half the wire bandwidth of COMPLEX).
+* **FIR/IIR terminal:** `CMD_ADC_STREAM_READ` returns FILTERED mV
+  (same `i16`/mV wire format as the raw read).  Wire Q31/F32
+  coefficients are mapped to the FAC's Q15 at bind.
+* **FFT terminal:** `CMD_ADC_STREAM_READ` returns `STATUS_NOSUPPORT`;
+  the spectrum is read with `CMD_ADC_SPECTRUM_READ` (`0x3A`),
+  formatted per the FFT stage's `output_format` (COMPLEX =
+  interleaved `(re,im)` f32; MAGNITUDE / MAGNITUDE_ONESIDED =
+  per-bin f32 magnitudes).
 
 `CHAIN_BIND` fails (`STATUS_INVAL`) if:
 
@@ -276,6 +283,26 @@ terminal stage:
   range was not covered),
 * the chain violates the ordering rules from `<alp/dsp.h>` (FFT
   must be terminal; WINDOW must immediately precede FFT).
+
+It returns `STATUS_NOSUPPORT` when the single FAC (FIR/IIR) or FFT
+hardware block is already serving another bound stream.
+
+#### `CMD_ADC_SPECTRUM_READ` (`0x3A`)
+
+| Direction | Layout                                                              |
+|-----------|--------------------------------------------------------------------|
+| Request   | `stream_id:u8 bin_offset:u16 max_bins:u8`                           |
+| Reply     | `seq:u32 total_bins:u16 got:u8 bins[max_bins]:f32` (zero-padded)    |
+
+Reads one chunk of the latest completed FFT frame for a stream bound
+to an FFT-terminal chain.  The firmware runs the HW FFT on each full
+N-point window and publishes the reduced bins (`total_bins` =
+`N` complex-pairs*2 / `N` magnitude / `N/2+1` magnitude-onesided);
+`seq` increments per frame so a host fetching a spectrum across
+several chunks can detect a frame roll.  `max_bins` is capped at
+`GD32G553_BRIDGE_ADC_SPECTRUM_READ_MAX` (14) to keep the fixed reply
+inside the wire envelope.  Returns `STATUS_NOSUPPORT` if the stream
+isn't FFT-bound, `STATUS_BUSY` before the first frame completes.
 
 #### Tombstone: `CMD_ADC_STREAM_CONFIGURE_DSP` (`0x36`)
 

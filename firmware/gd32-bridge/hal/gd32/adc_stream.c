@@ -250,6 +250,35 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
 	adc_stream_state_t *s = &adc_streams[stream_id];
 	if (!s->in_use) return BRIDGE_HW_ERR_INVAL;
 
+	/* DSP data plane (#496): a bound FIR/IIR chain means the host reads
+	 * FILTERED samples the base-level pump produced in proc_ring -- NOT
+	 * the raw DMA ring.  A bound FFT chain has no stream data plane;
+	 * the spectrum is pulled via CMD_ADC_SPECTRUM_READ, so a plain
+	 * STREAM_READ answers NOSUPPORT (never silently raw).  proc_write
+	 * is produced at base level (volatile); snapshot once and use the
+	 * same exact-difference backlog accounting as the raw path. */
+	if (s->dsp_bound) {
+		if (s->dsp_terminal == 3u) return BRIDGE_HW_ERR_NOTIMPL; /* FFT */
+
+		const uint32_t pw       = s->proc_write;
+		const int32_t  pbacklog = (int32_t)(pw - s->proc_read);
+		if (pbacklog <= 0) return BRIDGE_HW_OK; /* pump hasn't produced yet */
+		if ((uint32_t)pbacklog >= BRIDGE_ADC_STREAM_RING_SAMPLES) {
+			s->proc_read = pw; /* pump lapped the reader -> resync, report loss */
+			return BRIDGE_HW_ERR_BUSY;
+		}
+		const uint16_t pavail = (uint16_t)pbacklog;
+		const uint16_t emit   = (pavail < max_samples) ? pavail : max_samples;
+		for (uint16_t i = 0u; i < emit; ++i) {
+			uint32_t code = s->proc_ring[s->proc_read % BRIDGE_ADC_STREAM_RING_SAMPLES];
+			if (code > s->full_scale) code = s->full_scale;
+			mv[i] = (uint16_t)((code * ADC_VREF_MV) / s->full_scale);
+			s->proc_read++;
+		}
+		*got_samples = (uint8_t)emit;
+		return BRIDGE_HW_OK;
+	}
+
 	/* Drain as many fresh samples as the host asked for, capped by
      * what the DMA has actually deposited since the last read.
      * Overrun accounting is EXACT total-written-vs-read: the writer's
@@ -300,6 +329,18 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
 	return BRIDGE_HW_OK;
 }
 
+/* Return a chain slot to the pool (defined with the DSP-chain pool
+ * below).  Forward-declared here because stream_end -- which lives
+ * above the pool definition -- is the sole runtime releaser. */
+static void adc_dsp_chain_release(uint8_t chain_id);
+
+/* DSP dispatch helpers, defined in the #496 pump section at end of file
+ * but referenced earlier by chain_bind / stream_end. */
+bool        adc_dsp_filter_stream_busy(uint8_t except_stream);
+void        adc_dsp_fac_release(uint8_t stream_id);
+void        adc_dsp_fft_release(uint8_t stream_id);
+static void adc_dsp_pump_fft(uint8_t sid);
+
 int bridge_hw_adc_stream_end(uint8_t stream_id)
 {
 	if (stream_id >= BRIDGE_ADC_STREAM_COUNT) return BRIDGE_HW_ERR_RANGE;
@@ -347,6 +388,18 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
      * knows the converter came back in an unproven state. */
 	const bool restored = adc_periph_init(ch->periph);
 
+	/* Release the DSP chain bound to this stream back to the pool.
+     * chain_open is the ONLY allocator (sets in_use=true) and nothing
+     * else clears it, so without this the 4-slot pool leaks one chain
+     * per bind->end cycle -- after BRIDGE_DSP_MAX_CHAINS cycles
+     * chain_open returns NOSUPPORT forever until a reboot (#496).
+     * dsp_chain_id is only meaningful while dsp_bound, so gate on it. */
+	if (s->dsp_bound) {
+		adc_dsp_fac_release(stream_id); /* free the FAC if this stream owned it */
+		adc_dsp_fft_release(stream_id); /* free the FFT if this stream owned it */
+		adc_dsp_chain_release(s->dsp_chain_id);
+	}
+
 	s->in_use    = false;
 	s->dsp_bound = false;
 	return restored ? BRIDGE_HW_OK : BRIDGE_HW_ERR_IO;
@@ -374,6 +427,23 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
  * before any bytes hit the per-stage buffer. */
 #define BRIDGE_DSP_KIND_MAX 3u
 
+/* Per-kind parameter bounds -- mirror the ALP_DSP_MAX_* macros in
+ * `<alp/dsp.h>` so the firmware's assembled-blob validation agrees
+ * with the host's construction limits.  See the reassembled blob
+ * layout in `<alp/chips/gd32g553.h>` (gd32g553_adc_dsp_stage_push):
+ *   FIR    : format:u8 n_taps:u8    rsvd:u16  taps[n_taps*4]  (Q31/F32)
+ *   IIR    : format:u8 n_sections:u8 rsvd:u16 coeffs[n_sec*5*4]
+ *   WINDOW : shape:u8  rsvd[3]                                  (4 B)
+ *   FFT    : n_points:u16 out_fmt:u8 rsvd:u8                    (4 B) */
+#define BRIDGE_DSP_MAX_FIR_TAPS     64u
+#define BRIDGE_DSP_MAX_IIR_SECTIONS 8u
+#define BRIDGE_DSP_MIN_FFT_POINTS   32u
+#define BRIDGE_DSP_MAX_FFT_POINTS   1024u
+#define BRIDGE_DSP_COEFF_FMT_MAX    1u /* 0 F32, 1 Q31 */
+#define BRIDGE_DSP_WINDOW_SHAPE_MAX 3u /* rect/hann/hamming/blackman */
+#define BRIDGE_DSP_FFT_OUT_FMT_MAX  2u /* complex/magnitude/magnitude-onesided */
+#define BRIDGE_DSP_STAGE_HDR_BYTES  4u /* every kind's fixed 4-byte header */
+
 typedef struct {
 	uint8_t  kind;           /* alp_dsp_stage_kind_t (valid when total_size > 0) */
 	uint16_t total_size;     /* declared in first chunk; locks for the stage    */
@@ -391,6 +461,63 @@ typedef struct {
 /* 4 chains x 4 stages x 260 B = 4160 bytes of stage-data RAM + ~80
  * bytes of metadata; well inside the GD32G553's 128 KB SRAM. */
 static adc_dsp_chain_t adc_dsp_chains[BRIDGE_DSP_MAX_CHAINS];
+
+/* Return a chain slot to the pool.  The counterpart to chain_open's
+ * first-fit allocation: there is no host-facing close opcode, so a
+ * chain's lifetime is tied to the stream it binds -- stream_end calls
+ * this on the bound chain.  Idempotent-safe for an out-of-range id. */
+static void adc_dsp_chain_release(uint8_t chain_id)
+{
+	if (chain_id >= BRIDGE_DSP_MAX_CHAINS) return;
+	adc_dsp_chains[chain_id].bound  = false;
+	adc_dsp_chains[chain_id].in_use = false;
+}
+
+/* Validate one completed stage's reassembled blob against its declared
+ * `kind`.  stage_push only bounds the byte COUNT (<= total_size) and
+ * the kind range; it never looks at the payload.  This runs at bind --
+ * the last point before the chain goes live -- so a filter with a bad
+ * tap count, an out-of-range FFT size, or a header/length mismatch is
+ * rejected here rather than mis-programming the FAC/FFT block later.
+ * The 4-byte header is present for every kind (guaranteed because bind
+ * only inspects populated stages, and total_size >= 1 for those --
+ * but we re-check to keep the field reads in-bounds). */
+static bool adc_dsp_stage_blob_valid(const adc_dsp_stage_t *st)
+{
+	if (st->total_size < BRIDGE_DSP_STAGE_HDR_BYTES) return false;
+	const uint8_t *d = st->data;
+
+	switch (st->kind) {
+	case 0u: { /* FIR: format:u8 n_taps:u8 rsvd:u16 taps[n_taps*4] */
+		const uint8_t fmt    = d[0];
+		const uint8_t n_taps = d[1];
+		if (fmt > BRIDGE_DSP_COEFF_FMT_MAX) return false;
+		if (n_taps == 0u || n_taps > BRIDGE_DSP_MAX_FIR_TAPS) return false;
+		return st->total_size == (uint16_t)(BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)n_taps * 4u);
+	}
+	case 1u: { /* IIR: format:u8 n_sections:u8 rsvd:u16 coeffs[n_sec*5*4] */
+		const uint8_t fmt   = d[0];
+		const uint8_t n_sec = d[1];
+		if (fmt > BRIDGE_DSP_COEFF_FMT_MAX) return false;
+		if (n_sec == 0u || n_sec > BRIDGE_DSP_MAX_IIR_SECTIONS) return false;
+		return st->total_size == (uint16_t)(BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)n_sec * 5u * 4u);
+	}
+	case 2u: /* WINDOW: shape:u8 rsvd[3] */
+		if (d[0] > BRIDGE_DSP_WINDOW_SHAPE_MAX) return false;
+		return st->total_size == BRIDGE_DSP_STAGE_HDR_BYTES;
+	case 3u: { /* FFT: n_points:u16 out_fmt:u8 rsvd:u8 */
+		const uint16_t n_points = (uint16_t)(d[0] | ((uint16_t)d[1] << 8));
+		const uint8_t  out_fmt  = d[2];
+		if (out_fmt > BRIDGE_DSP_FFT_OUT_FMT_MAX) return false;
+		if (n_points < BRIDGE_DSP_MIN_FFT_POINTS || n_points > BRIDGE_DSP_MAX_FFT_POINTS)
+			return false;
+		if ((n_points & (uint16_t)(n_points - 1u)) != 0u) return false; /* pow2 */
+		return st->total_size == BRIDGE_DSP_STAGE_HDR_BYTES;
+	}
+	default:
+		return false;
+	}
+}
 
 int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
 {
@@ -501,6 +628,10 @@ int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)
 		adc_dsp_stage_t *st = &chain->stages[i];
 		if (st->total_size == 0u) continue;
 		if (!st->complete) return BRIDGE_HW_ERR_INVAL; /* mid-upload */
+		/* Payload well-formed for its kind?  stage_push checked only the
+         * byte count + kind range; this is where a malformed FIR/IIR/
+         * WINDOW/FFT blob is caught, before it can mis-program the HW. */
+		if (!adc_dsp_stage_blob_valid(st)) return BRIDGE_HW_ERR_INVAL;
 		if (last_populated_index != BRIDGE_DSP_MAX_STAGES &&
 		    (uint8_t)(i - last_populated_index) != 1u) {
 			return BRIDGE_HW_ERR_INVAL; /* gap in stage list */
@@ -536,13 +667,489 @@ int bridge_hw_adc_dsp_chain_bind(uint8_t chain_id, uint8_t stream_id)
 	if (!s->in_use) return BRIDGE_HW_ERR_INVAL;   /* stream not running */
 	if (s->dsp_bound) return BRIDGE_HW_ERR_INVAL; /* stream already has a chain */
 
-	/* Attachment is a state flip on both halves.  Runtime DSP
-     * application happens inside stream_read once the wave-2 FFT/FAC
-     * dispatch lands; for now the bound chain simply rides alongside
-     * the raw stream and the host sees raw mV values until the
-     * dispatcher hook ships. */
-	s->dsp_chain_id = chain_id;
-	s->dsp_bound    = true;
-	chain->bound    = true;
+	/* One FAC block -> one filter (FIR/IIR) stream at a time.  A FFT
+	 * terminal uses the separate FFT block, so it's exempt. */
+	const uint8_t terminal_kind = chain->stages[last_populated_index].kind;
+	if (terminal_kind != 3u /* not FFT */ && adc_dsp_filter_stream_busy(stream_id)) {
+		return BRIDGE_HW_ERR_NOTIMPL; /* FAC already serving another stream */
+	}
+
+	/* Attachment is a state flip on both halves.  The terminal stage
+     * kind decides the data plane: FIR/IIR -> the base-level pump
+     * filters raw samples through the FAC into this stream's processed
+     * ring and stream_read serves filtered mV; FFT -> stream_read
+     * answers NOSUPPORT (spectrum is read via CMD_ADC_SPECTRUM_READ).
+     * Reset the processed-ring cursors so the pump starts clean. */
+	s->dsp_terminal  = chain->stages[last_populated_index].kind;
+	s->proc_write    = 0u;
+	s->proc_read     = 0u;
+	s->pump_raw_read = s->total_read; /* pump picks up where the raw reader is */
+	s->dsp_chain_id  = chain_id;
+	s->dsp_bound     = true;
+	chain->bound     = true;
+	return BRIDGE_HW_OK;
+}
+
+/* =====================================================================
+ * #496 FAC FIR/IIR runtime dispatch -- the filtered data plane.
+ *
+ * A bound FIR/IIR chain routes the raw ADC stream through the GD32 FAC
+ * hardware filter (first-lit 2026-07-13: coeffs in X1, DEEP X0 input
+ * buffer, clip-enabled, batch or streaming).  The FILTER runs in the
+ * base-level pump (bridge_hw_dsp_pump, from the main WFI loop) -- NEVER
+ * in stream_read (the CS-EXTI transport handler, prio 1) where even a
+ * modest FIR would add link latency (the 2026-06-04 link-rot mode).
+ *
+ * There is ONE FAC block, so ONE filter stream may be bound at a time;
+ * chain_bind rejects a second filter chain with NOSUPPORT (below).
+ * ===================================================================== */
+
+/* stream_id currently loaded into the FAC, or -1 when the FAC is idle. */
+static int8_t adc_dsp_fac_owner = -1;
+
+/* Is a FIR/IIR (filter, not FFT) chain already bound to some OTHER
+ * stream?  The single FAC can serve only one at a time. */
+bool adc_dsp_filter_stream_busy(uint8_t except_stream)
+{
+	for (uint8_t i = 0u; i < BRIDGE_ADC_STREAM_COUNT; ++i) {
+		if (i == except_stream) continue;
+		if (adc_streams[i].in_use && adc_streams[i].dsp_bound &&
+		    adc_streams[i].dsp_terminal != 3u /* not FFT */) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Release the FAC if this stream owned it (called from stream_end). */
+void adc_dsp_fac_release(uint8_t stream_id)
+{
+	if (adc_dsp_fac_owner == (int8_t)stream_id) {
+		fac_stop();
+		adc_dsp_fac_owner = -1;
+	}
+}
+
+/* Decode one wire coefficient (4 bytes little-endian, Q31 or F32) into
+ * the FAC's Q15 fixed-point.  Q31 -> arithmetic >>16; F32 -> clamp to
+ * [-1, +1) and scale by 2^15. */
+static int16_t adc_dsp_coeff_q15(uint8_t fmt, const uint8_t *p)
+{
+	uint32_t w =
+	    (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+	if (fmt == 1u) { /* Q31 */
+		return (int16_t)((int32_t)w >> 16);
+	}
+	/* F32 */
+	float f;
+	__builtin_memcpy(&f, &w, sizeof(f));
+	if (f >= 0.999969f) f = 0.999969f;
+	if (f <= -1.0f) f = -1.0f;
+	return (int16_t)(f * 32768.0f);
+}
+
+/* Configure the FAC for stream s's bound chain (single FIR or single-
+ * section IIR).  Streaming mode: coeffs preloaded into X1, no input
+ * preload -- the pump feeds X0 one sample at a time.  Returns false for
+ * a shape the FAC path doesn't handle in P1 (multi-stage, multi-section
+ * IIR), leaving the stream unfiltered (stream_read then answers BUSY so
+ * the host doesn't mistake raw data for filtered). */
+static bool adc_dsp_fac_config(const adc_stream_state_t *s)
+{
+	const adc_dsp_chain_t *chain = &adc_dsp_chains[s->dsp_chain_id];
+
+	/* P1 handles exactly one populated non-FFT stage. */
+	const adc_dsp_stage_t *st        = 0;
+	uint8_t                populated = 0u;
+	for (uint8_t i = 0u; i < BRIDGE_DSP_MAX_STAGES; ++i) {
+		if (chain->stages[i].total_size != 0u) {
+			st = &chain->stages[i];
+			++populated;
+		}
+	}
+	if (st == 0 || populated != 1u) return false;
+
+	fac_deinit();
+	rcu_periph_clock_enable(RCU_FAC);
+
+	fac_parameter_struct p;
+	fac_struct_para_init(&p);
+	const uint8_t depth = 32u; /* X0 working depth beyond the tap window */
+
+	if (st->kind == 0u) { /* FIR: format:u8 n_taps:u8 rsvd:u16 taps[] */
+		const uint8_t fmt = st->data[0];
+		const uint8_t nt  = st->data[1];
+		int16_t       taps[BRIDGE_DSP_MAX_FIR_TAPS];
+		for (uint8_t k = 0u; k < nt; ++k) {
+			taps[k] =
+			    adc_dsp_coeff_q15(fmt, &st->data[BRIDGE_DSP_STAGE_HDR_BYTES + (uint16_t)k * 4u]);
+		}
+		p.coeff_addr       = 0u;
+		p.coeff_size       = nt;
+		p.input_addr       = nt;
+		p.input_size       = (uint8_t)(nt + depth);
+		p.output_addr      = (uint8_t)(nt + nt + depth);
+		p.output_size      = depth;
+		p.input_threshold  = FAC_THRESHOLD_1;
+		p.output_threshold = FAC_THRESHOLD_1;
+		p.clip             = FAC_CP_ENABLE;
+		fac_init(&p);
+
+		fac_fixed_data_preload_struct pl;
+		fac_fixed_data_preload_init(&pl);
+		pl.coeffb_ctx  = taps;
+		pl.coeffb_size = nt;
+		pl.coeffa_ctx  = 0;
+		pl.coeffa_size = 0u;
+		pl.input_ctx   = 0;
+		pl.input_size  = 0u;
+		pl.output_ctx  = 0;
+		pl.output_size = 0u;
+		fac_fixed_buffer_preload(&pl);
+
+		p.func = FUNC_CONVO_FIR;
+		p.ipp  = nt;
+		p.ipq  = 0u;
+		p.ipr  = 0u;
+		fac_function_config(&p);
+		fac_start();
+		return true;
+	}
+
+	if (st->kind == 1u) { /* IIR direct-form-1, SINGLE biquad in P1 */
+		const uint8_t fmt   = st->data[0];
+		const uint8_t n_sec = st->data[1];
+		if (n_sec != 1u) return false; /* cascaded sections: later */
+		/* section = b0,b1,b2,a1,a2 (5 coeffs).  FAC coeffb = feed-
+		 * forward B (b0,b1,b2), coeffa = feedback A (a1,a2). */
+		int16_t        b[3], a[2];
+		const uint8_t *c = &st->data[BRIDGE_DSP_STAGE_HDR_BYTES];
+		for (uint8_t k = 0u; k < 3u; ++k)
+			b[k] = adc_dsp_coeff_q15(fmt, &c[k * 4u]);
+		for (uint8_t k = 0u; k < 2u; ++k)
+			a[k] = adc_dsp_coeff_q15(fmt, &c[(3u + k) * 4u]);
+		p.coeff_addr       = 0u;
+		p.coeff_size       = 5u; /* b0..b2,a1,a2 */
+		p.input_addr       = 5u;
+		p.input_size       = (uint8_t)(3u + depth);
+		p.output_addr      = (uint8_t)(5u + 3u + depth);
+		p.output_size      = depth;
+		p.input_threshold  = FAC_THRESHOLD_1;
+		p.output_threshold = FAC_THRESHOLD_1;
+		p.clip             = FAC_CP_ENABLE;
+		fac_init(&p);
+
+		fac_fixed_data_preload_struct pl;
+		fac_fixed_data_preload_init(&pl);
+		pl.coeffb_ctx  = b;
+		pl.coeffb_size = 3u;
+		pl.coeffa_ctx  = a;
+		pl.coeffa_size = 2u;
+		pl.input_ctx   = 0;
+		pl.input_size  = 0u;
+		pl.output_ctx  = 0;
+		pl.output_size = 0u;
+		fac_fixed_buffer_preload(&pl);
+
+		/* IPP = feed-forward count (3), IPQ = feedback count (2). */
+		p.func = FUNC_IIR_DIRECT_FORM_1;
+		p.ipp  = 3u;
+		p.ipq  = 2u;
+		p.ipr  = 0u;
+		fac_function_config(&p);
+		fac_start();
+		return true;
+	}
+
+	return false; /* WINDOW/FFT are not filter terminals */
+}
+
+/* Drain stream sid's new raw samples through the FAC into its processed
+ * ring.  Base-level producer of proc_ring + sole consumer of the raw
+ * ring for this stream; mirrors stream_read's exact lap+write-index
+ * backlog accounting so a mid-pump DMA reload can only UNDER-count. */
+static void adc_dsp_pump_stream(uint8_t sid)
+{
+	adc_stream_state_t *s = &adc_streams[sid];
+
+	if (adc_dsp_fac_owner != (int8_t)sid) {
+		if (!adc_dsp_fac_config(s)) return; /* unsupported chain -> stay idle */
+		adc_dsp_fac_owner = (int8_t)sid;
+	}
+
+	const uint32_t laps          = s->lap_count;
+	const uint16_t w             = adc_stream_write_index(s);
+	const uint32_t total_written = laps * BRIDGE_ADC_STREAM_RING_SAMPLES + (uint32_t)w;
+	int32_t        avail         = (int32_t)(total_written - s->pump_raw_read);
+	if (avail <= 0) return;
+	if ((uint32_t)avail >= BRIDGE_ADC_STREAM_RING_SAMPLES) {
+		/* The pump fell a full ring behind the DMA -- drop the corrupt
+		 * backlog and resync so the next batch is gap-free (the host
+		 * sees this as a proc-ring gap, same as a raw overrun). */
+		s->pump_raw_read = total_written;
+		return;
+	}
+
+	while (avail-- > 0) {
+		const uint16_t ridx = (uint16_t)(s->pump_raw_read % BRIDGE_ADC_STREAM_RING_SAMPLES);
+		const uint16_t code = (uint16_t)(s->ring[ridx] & 0x0FFFu); /* 12-bit */
+		s->pump_raw_read++;
+
+		/* Unipolar ADC code (0..4095) -> Q15 positive (0..~1.0): <<3.
+		 * A unity-DC-gain filter (sum(taps) ~ 1.0) preserves the offset;
+		 * the reverse (>>3) returns a code the existing mv math scales. */
+		const int16_t x = (int16_t)(code << 3);
+		if (fac_flag_get(FAC_FLAG_X0BFF) == SET) break; /* FAC input saturated */
+		fac_fixed_data_write(x);
+
+		if (fac_flag_get(FAC_FLAG_YBEF) == RESET) {
+			int32_t c = (int32_t)fac_fixed_data_read() >> 3;
+			if (c < 0) c = 0;
+			if (c > 4095) c = 4095;
+			s->proc_ring[s->proc_write % BRIDGE_ADC_STREAM_RING_SAMPLES] = (uint16_t)c;
+			s->proc_write++;
+		}
+	}
+}
+
+/* Base-level DSP pump -- called every main-loop tick (bridge_hw_tick).
+ * Services every bound FIR/IIR stream; FFT-bound streams have no filter
+ * data plane (spectrum is pulled separately). */
+void bridge_hw_dsp_pump(void)
+{
+	for (uint8_t sid = 0u; sid < BRIDGE_ADC_STREAM_COUNT; ++sid) {
+		const adc_stream_state_t *s = &adc_streams[sid];
+		if (!s->in_use || !s->dsp_bound) continue;
+		if (s->dsp_terminal == 3u)
+			adc_dsp_pump_fft(sid); /* spectrum path */
+		else
+			adc_dsp_pump_stream(sid); /* FIR/IIR path */
+	}
+}
+
+/* =====================================================================
+ * #496 FFT spectrum path -- WINDOW+FFT terminal chains.
+ *
+ * The GD32 FFT block (first-lit 2026-07-13; FLOAT real-in / complex-out)
+ * transforms a full N-sample window of the ADC stream into a spectrum.
+ * Like the FAC there is ONE block, so ONE FFT stream at a time.  The
+ * base-level pump accumulates raw samples into a float window; when the
+ * window fills it runs the HW FFT (HW-windowed if the chain has a WINDOW
+ * stage), reduces to the requested output format, bumps a frame seq, and
+ * refills.  The host pulls the latest frame with CMD_ADC_SPECTRUM_READ.
+ * ===================================================================== */
+#define ADC_DSP_FFT_MAX_POINTS 1024u
+
+static int8_t            adc_dsp_fft_owner = -1;
+static uint16_t          adc_dsp_fft_points;
+static uint8_t           adc_dsp_fft_outfmt; /* 0 complex / 1 mag / 2 mag-onesided */
+static uint16_t          adc_dsp_fft_fill;
+static volatile uint32_t adc_dsp_fft_seq;   /* completed-frame counter */
+static uint16_t          adc_dsp_fft_nbins; /* bins in the current frame */
+static float             adc_dsp_fft_real[ADC_DSP_FFT_MAX_POINTS];
+static float             adc_dsp_fft_out[ADC_DSP_FFT_MAX_POINTS * 2u]; /* re,im */
+static float             adc_dsp_fft_wcoef[ADC_DSP_FFT_MAX_POINTS];
+static float             adc_dsp_fft_bins[ADC_DSP_FFT_MAX_POINTS * 2u]; /* published */
+
+static uint8_t adc_dsp_fft_point_enum(uint16_t n)
+{
+	switch (n) {
+	case 32u:
+		return FFT_POINT_32;
+	case 64u:
+		return FFT_POINT_64;
+	case 128u:
+		return FFT_POINT_128;
+	case 256u:
+		return FFT_POINT_256;
+	default:
+		break;
+	}
+	/* 512 / 1024 continue the enum (see gd32g5x3_fft.h). */
+	if (n == 512u) return (uint8_t)(FFT_POINT_256 + 1u);
+	return (uint8_t)(FFT_POINT_256 + 2u); /* 1024 */
+}
+
+/* Fill the HW window coefficient buffer for a shape (0 rect => flat 1.0,
+ * 1 Hann, 2 Hamming, 3 Blackman).  Symmetric window over N points. */
+static void adc_dsp_fft_make_window(uint8_t shape, uint16_t n)
+{
+	const float twopi = 6.28318530718f;
+	for (uint16_t i = 0u; i < n; ++i) {
+		const float t = (float)i / (float)(n - 1u);
+		float       w;
+		switch (shape) {
+		case 1u:
+			w = 0.5f - 0.5f * __builtin_cosf(twopi * t);
+			break; /* Hann    */
+		case 2u:
+			w = 0.54f - 0.46f * __builtin_cosf(twopi * t);
+			break; /* Hamming */
+		case 3u:
+			w = 0.42f - 0.5f * __builtin_cosf(twopi * t) + 0.08f * __builtin_cosf(2.0f * twopi * t);
+			break; /* Blackman*/
+		default:
+			w = 1.0f;
+			break; /* rect    */
+		}
+		adc_dsp_fft_wcoef[i] = w;
+	}
+}
+
+/* Configure the FFT block + window for stream s's bound FFT chain.
+ * Returns false for an unsupported shape (multi-stage beyond WINDOW+FFT). */
+static bool adc_dsp_fft_config(const adc_stream_state_t *s)
+{
+	const adc_dsp_chain_t *chain = &adc_dsp_chains[s->dsp_chain_id];
+
+	const adc_dsp_stage_t *fft_st = 0, *win_st = 0;
+	for (uint8_t i = 0u; i < BRIDGE_DSP_MAX_STAGES; ++i) {
+		if (chain->stages[i].total_size == 0u) continue;
+		if (chain->stages[i].kind == 3u)
+			fft_st = &chain->stages[i];
+		else if (chain->stages[i].kind == 2u)
+			win_st = &chain->stages[i];
+		else
+			return false; /* FIR/IIR before an FFT: not a P1 spectrum chain */
+	}
+	if (fft_st == 0) return false;
+
+	const uint16_t n   = (uint16_t)(fft_st->data[0] | ((uint16_t)fft_st->data[1] << 8));
+	const uint8_t  ofm = fft_st->data[2];
+	if (n < 32u || n > ADC_DSP_FFT_MAX_POINTS) return false;
+
+	adc_dsp_fft_points = n;
+	adc_dsp_fft_outfmt = ofm;
+	adc_dsp_fft_fill   = 0u;
+	adc_dsp_fft_nbins  = 0u;
+
+	const uint8_t shape = (win_st != 0) ? win_st->data[0] : 0u;
+
+	fft_deinit();
+	rcu_periph_clock_enable(RCU_FFT);
+	fft_parameter_struct f;
+	fft_struct_para_init(&f);
+	f.mode_sel     = FFT_MODE;
+	f.point_num    = adc_dsp_fft_point_enum(n);
+	f.downsamp_sel = FFT_DOWNSAMPLE_1;
+	f.image_source = FFT_IM_ZERO;
+	f.real_addr    = (uint32_t)(uintptr_t)adc_dsp_fft_real;
+	f.image_addr   = 0u;
+	f.output_addr  = (uint32_t)(uintptr_t)adc_dsp_fft_out;
+	if (win_st != 0 || shape != 0u) {
+		adc_dsp_fft_make_window(shape, n);
+		f.window_enable = FFT_WINDOW_ENABLE;
+		f.window_addr   = (uint32_t)(uintptr_t)adc_dsp_fft_wcoef;
+	} else {
+		f.window_enable = FFT_WINDOW_DISABLE;
+		f.window_addr   = 0u;
+	}
+	fft_init(&f);
+	return true;
+}
+
+/* Reduce the FFT block's complex output to the published bins, per the
+ * chain's output format, and bump the frame seq. */
+static void adc_dsp_fft_publish(void)
+{
+	const uint16_t n = adc_dsp_fft_points;
+	if (adc_dsp_fft_outfmt == 0u) { /* COMPLEX: re,im interleaved, 2N */
+		for (uint16_t i = 0u; i < n * 2u; ++i)
+			adc_dsp_fft_bins[i] = adc_dsp_fft_out[i];
+		adc_dsp_fft_nbins = (uint16_t)(n * 2u);
+	} else { /* MAGNITUDE (N) or MAGNITUDE_ONESIDED (N/2+1) */
+		const uint16_t nb = (adc_dsp_fft_outfmt == 2u) ? (uint16_t)(n / 2u + 1u) : n;
+		for (uint16_t i = 0u; i < nb; ++i) {
+			const float re      = adc_dsp_fft_out[i * 2u];
+			const float im      = adc_dsp_fft_out[i * 2u + 1u];
+			adc_dsp_fft_bins[i] = __builtin_sqrtf(re * re + im * im);
+		}
+		adc_dsp_fft_nbins = nb;
+	}
+	adc_dsp_fft_seq++;
+}
+
+/* Pump the FFT path for stream sid: accumulate new raw samples into the
+ * float window; on a full window run the HW FFT and publish. */
+static void adc_dsp_pump_fft(uint8_t sid)
+{
+	adc_stream_state_t *s = &adc_streams[sid];
+
+	if (adc_dsp_fft_owner != (int8_t)sid) {
+		if (!adc_dsp_fft_config(s)) return;
+		adc_dsp_fft_owner = (int8_t)sid;
+		s->pump_raw_read  = s->total_read; /* start the window at the live point */
+	}
+
+	const uint32_t laps          = s->lap_count;
+	const uint16_t w             = adc_stream_write_index(s);
+	const uint32_t total_written = laps * BRIDGE_ADC_STREAM_RING_SAMPLES + (uint32_t)w;
+	int32_t        avail         = (int32_t)(total_written - s->pump_raw_read);
+	if (avail <= 0) return;
+	if ((uint32_t)avail >= BRIDGE_ADC_STREAM_RING_SAMPLES) {
+		s->pump_raw_read = total_written; /* fell behind -> resync, drop partial window */
+		adc_dsp_fft_fill = 0u;
+		return;
+	}
+
+	while (avail-- > 0) {
+		const uint16_t ridx = (uint16_t)(s->pump_raw_read % BRIDGE_ADC_STREAM_RING_SAMPLES);
+		const uint16_t code = (uint16_t)(s->ring[ridx] & 0x0FFFu);
+		s->pump_raw_read++;
+		/* code (0..4095) -> float 0..~1.0 */
+		adc_dsp_fft_real[adc_dsp_fft_fill++] = (float)code / 4096.0f;
+		if (adc_dsp_fft_fill >= adc_dsp_fft_points) {
+			fft_calculation_start();
+			uint32_t g = 0u;
+			while (fft_flag_get(FFT_FLAG_CCF) == RESET && ++g < 1000000u) {
+			}
+			if (fft_flag_get(FFT_FLAG_CCF) != RESET) adc_dsp_fft_publish();
+			adc_dsp_fft_fill = 0u;
+		}
+	}
+}
+
+/* Release the FFT block if this stream owned it (stream_end). */
+void adc_dsp_fft_release(uint8_t stream_id)
+{
+	if (adc_dsp_fft_owner == (int8_t)stream_id) {
+		adc_dsp_fft_owner = -1;
+		adc_dsp_fft_fill  = 0u;
+		adc_dsp_fft_nbins = 0u;
+	}
+}
+
+/* HAL: read spectrum bins (float32 LE) for a bound FFT stream.  Chunked:
+ * the host asks for [bin_offset, bin_offset+max_bins); the reply carries
+ * the frame seq so the host detects a frame roll mid-fetch.  Returns
+ * NOSUPPORT if the stream isn't FFT-bound, IO before the first frame. */
+int bridge_hw_adc_spectrum_read(uint8_t   stream_id,
+                                uint16_t  bin_offset,
+                                uint8_t   max_bins,
+                                uint32_t *seq_out,
+                                uint16_t *total_bins_out,
+                                uint8_t  *got_bins_out,
+                                float    *bins_out)
+{
+	if (seq_out == 0 || total_bins_out == 0 || got_bins_out == 0 || bins_out == 0) {
+		return BRIDGE_HW_ERR_INVAL;
+	}
+	*got_bins_out = 0u;
+	if (stream_id >= BRIDGE_ADC_STREAM_COUNT) return BRIDGE_HW_ERR_RANGE;
+	adc_stream_state_t *s = &adc_streams[stream_id];
+	if (!s->in_use || !s->dsp_bound || s->dsp_terminal != 3u) return BRIDGE_HW_ERR_NOTIMPL;
+	if (adc_dsp_fft_owner != (int8_t)stream_id || adc_dsp_fft_seq == 0u) {
+		return BRIDGE_HW_ERR_IO; /* no frame yet */
+	}
+
+	*seq_out        = adc_dsp_fft_seq;
+	*total_bins_out = adc_dsp_fft_nbins;
+	if (bin_offset >= adc_dsp_fft_nbins) return BRIDGE_HW_OK; /* past the end */
+
+	uint16_t remain = (uint16_t)(adc_dsp_fft_nbins - bin_offset);
+	uint8_t  emit   = (remain < max_bins) ? (uint8_t)remain : max_bins;
+	for (uint8_t i = 0u; i < emit; ++i)
+		bins_out[i] = adc_dsp_fft_bins[bin_offset + i];
+	*got_bins_out = emit;
 	return BRIDGE_HW_OK;
 }
