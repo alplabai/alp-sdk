@@ -61,3 +61,24 @@ def test_report_to_diagnostics_shape():
     assert d["schemaVersion"] == 1
     assert d["tool"] == "alp-migrate"
     assert d["diagnostics"][0]["code"].startswith("alp.migrate.")
+
+
+def test_apply_text_adds_exactly_one_line_on_real_board():
+    path = REPO / "examples/peripheral-io/uart-hello-world/board.yaml"
+    text = path.read_text(encoding="utf-8")
+    new_text, report = alp_migrate.apply_text(text)
+    old_lines = text.splitlines()
+    new_lines = new_text.splitlines()
+    added = [l for l in new_lines if l not in old_lines]
+    removed = [l for l in old_lines if l not in new_lines]
+    assert added == ["schemaVersion: 1"]
+    assert removed == []          # nothing reformatted
+    assert "schemaVersion: 1" in report.steps[0]
+
+
+def test_apply_text_idempotent_real_board():
+    path = REPO / "examples/peripheral-io/uart-hello-world/board.yaml"
+    once, _ = alp_migrate.apply_text(path.read_text(encoding="utf-8"))
+    twice, report = alp_migrate.apply_text(once)
+    assert twice == once
+    assert report.steps == []

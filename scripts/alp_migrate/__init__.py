@@ -36,6 +36,7 @@ def _yaml() -> YAML:
     y = YAML()
     y.preserve_quotes = True
     y.width = 4096  # don't rewrap long lines (e.g. pins: [...] flow entries)
+    y.indent(mapping=2, sequence=4, offset=2)  # match repo board.yaml style
     return y
 
 
@@ -85,6 +86,43 @@ def apply(doc: Any) -> tuple[Any, Report]:
         if (frm, to) in wanted:
             fn(doc, report)
     return doc, report
+
+
+def _leading_comment_end(lines: list[str]) -> int:
+    """Index of the first line that is neither blank nor a whole-line comment
+    -- i.e. where the top-level mapping starts. A file-banner comment block
+    therefore stays on top; schemaVersion is inserted as the first real key
+    below it."""
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if s and not s.startswith("#"):
+            return i
+    return len(lines)
+
+
+def apply_text(text: str) -> tuple[str, Report]:
+    """Byte-faithful migration: returns text with only the migration's line
+    edits applied, everything else (comments, flow style, indentation)
+    preserved exactly. Parsing/planning still go through the round-trip doc.
+
+    Only the additive adoption step (#001) exists in this slice; a future
+    structural step must extend this with its own text strategy or an
+    explicit round-trip fallback.
+    """
+    doc = load(text)
+    report = Report()
+    steps = plan(doc)  # raises MigrateError on downgrade
+    if not steps:
+        return text, report
+    lines = text.splitlines(keepends=True)
+    for frm, to in steps:
+        if frm is None and to == 1:
+            idx = _leading_comment_end(lines)
+            lines.insert(idx, f"schemaVersion: {to}\n")
+            report.steps.append("m000_to_v1: stamped schemaVersion: 1")
+        else:
+            raise MigrateError(f"no text writer for migration step {frm}->{to}")
+    return "".join(lines), report
 
 
 def diff(old_text: str, new_text: str, path: str) -> str:
