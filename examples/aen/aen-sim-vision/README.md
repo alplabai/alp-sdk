@@ -32,6 +32,32 @@ the classifier score.
 
 Studio reads the frame buffer + console back over the sim sockets.
 
+## Why the sim runs the software path, not the Ethos-U NPU
+
+The inference here runs on the M55-HP (TFLM, Helium-accelerated) **by design**,
+not on the Ethos-U NPU — because there is nothing to dispatch the NPU *to* in
+simulation:
+
+- **Renode ships no functional Ethos-U model.** There is no Ethos-U55/U85
+  peripheral in the Renode device library (v1.15.3 / 1.16.1) that executes the
+  Vela command stream and produces real output tensors.
+- **A stub NPU would be worse than none.** Modelling only the registers + the
+  "operation complete" IRQ (without computing) makes the firmware read back
+  *uncomputed* output memory — the sim would display a **wrong** inference
+  result, defeating the whole point of a functional simulator.
+- **There is nothing to build a real model against.** Arm's Ethos-U RTL and the
+  Vela command-stream binary format are licensed/closed, so neither a
+  Verilator co-simulation nor a faithful re-implementation is possible; and
+  `metadata/socs/alif/ensemble/e8.json` `npus[]` is a capability descriptor
+  (MAC/GOPS/supports), not a register map.
+
+What a sim *should* validate is the pipeline and the **result** — frame in →
+inference → display/wake-word out — which the software path reproduces exactly.
+The real Ethos-U dispatch (the `alp_inference` NPU backend, Vela-compiled
+model) is a **bench/HIL concern** and is validated on real E8 silicon, not in
+Renode. Swapping `src/model.cpp` for a real vision/KWS net keeps this true: the
+sim still runs it in software; hardware still runs it on the NPU.
+
 ## Build + run
 Build **ITCM-linked** (Renode 1.16.1's Cortex-M55 mis-executes a high-MRAM
 vector table; ITCM@0x0 sidesteps it):
