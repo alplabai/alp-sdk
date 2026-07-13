@@ -38,24 +38,31 @@ static bool meta_read(uint32_t addr, ota_meta_record_t *r)
 	return true;
 }
 
-static bool meta_current(ota_meta_record_t *out)
+/* Order the two CRC-valid metadata records newest-first into cands[]
+ * and return how many are present (0..2).  The bootloader then tries
+ * each in order (#754): a newer record that fails SEMANTIC validation
+ * must not suppress an older bootable one, or the part drops into
+ * permanent recovery with a perfectly good slot sitting unused. */
+static int
+meta_candidates(ota_meta_record_t *a, ota_meta_record_t *b, const ota_meta_record_t *cands[2])
 {
-	ota_meta_record_t a, b;
-	const bool        va = meta_read(OTA_META_REC0, &a);
-	const bool        vb = meta_read(OTA_META_REC1, &b);
+	const bool va = meta_read(OTA_META_REC0, a);
+	const bool vb = meta_read(OTA_META_REC1, b);
+	int        n  = 0;
 	if (va && vb) {
-		*out = (a.counter >= b.counter) ? a : b;
-		return true;
+		if (a->counter >= b->counter) {
+			cands[n++] = a;
+			cands[n++] = b;
+		} else {
+			cands[n++] = b;
+			cands[n++] = a;
+		}
+	} else if (va) {
+		cands[n++] = a;
+	} else if (vb) {
+		cands[n++] = b;
 	}
-	if (va) {
-		*out = a;
-		return true;
-	}
-	if (vb) {
-		*out = b;
-		return true;
-	}
-	return false;
+	return n;
 }
 
 static bool active_slot_valid(const ota_meta_record_t *m)
@@ -98,10 +105,16 @@ static void jump_to_slot(uint32_t slot_base)
 
 int main(void)
 {
-	ota_meta_record_t m;
-	uint32_t          base;
-	if (meta_current(&m) && active_slot_valid(&m) && ota_slot_base_checked(m.active_slot, &base)) {
-		jump_to_slot(base);
+	ota_meta_record_t        a, b;
+	const ota_meta_record_t *cands[2];
+	const int                n = meta_candidates(&a, &b, cands);
+	/* Newest-first with fallback (#754): the first record whose active
+	 * slot passes full semantic + image validation wins. */
+	for (int i = 0; i < n; ++i) {
+		uint32_t base;
+		if (active_slot_valid(cands[i]) && ota_slot_base_checked(cands[i]->active_slot, &base)) {
+			jump_to_slot(base);
+		}
 	}
 	/* No valid image: recovery. A later build exposes the OTA opcodes here
      * to accept a reflash over the bridge; today, idle so a bench SWD probe
