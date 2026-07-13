@@ -7,6 +7,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — `west alp-migrate` board.yaml migration engine (#610 WS6-b)
+
+- `board.yaml` now carries a `schemaVersion` (absent reads as 1 for
+  back-compat). `west alp-migrate --check/--preview/--apply` versions and
+  migrates it, comment-preserving (ruamel round-trip), with a `diagnostic-v1`
+  JSON report. Migration #001 (unversioned → v1) is applied to all in-repo
+  board.yaml. New gate `check_board_schema_version.py` keeps them canonical.
+
 ### Added — real `alp_gui_lvgl_attach()` LVGL v9 bridge (`<alp/gui.h>`, issue #23)
 
 - `src/gui_lvgl.c` (renamed from `gui_lvgl_stub.c`) now compiles a real LVGL
