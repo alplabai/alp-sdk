@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+
+tests:
+  # Real bridge scenario: CONFIG_LVGL=y, so alp_gui_lvgl_attach() takes
+  # the real LVGL v9 hand-off (src/gui_lvgl.c). A local priority-255
+  # test-double display backend (src/main.c) proves the flush_cb path
+  # reaches alp_display_blit() when LVGL renders a frame, and that the
+  # unsupported-pixel-format (MONO_VLSB) rejection holds.
+  alp_sdk.gui.lvgl_attach:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - gui
+      - lvgl
+
+  # NOSUPPORT scenario: CONFIG_LVGL=n, so no build wires LVGL in and
+  # alp_gui_lvgl_attach() takes the guard-clause degrade.
+  alp_sdk.gui.lvgl_attach_nosupport:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_no_lvgl.conf"
+    tags:
+      - alp-sdk
+      - gui
+      - lvgl

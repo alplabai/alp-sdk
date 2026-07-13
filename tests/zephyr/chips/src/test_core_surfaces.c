@@ -49,10 +49,11 @@ ZTEST(alp_chips, test_public_headers_co_compile)
 /* ------------------------------------------------------------------ */
 /* <alp/gui.h> -- alp_gui_lvgl_attach() guard-clause contract           */
 /*                                                                      */
-/* The real LVGL hand-off (issue #23) isn't implemented on any backend  */
-/* yet; src/gui_lvgl_stub.c ships only the two paths that ARE fully     */
-/* specified today: NULL display -> INVAL, every current build ->      */
-/* NOSUPPORT (this native_sim test build never sets ALP_HAS_LVGL).      */
+/* The real LVGL v9 hand-off (issue #23) lives in src/gui_lvgl.c under  */
+/* #ifdef ALP_HAS_LVGL -- see tests/zephyr/gui_lvgl/ for that path.     */
+/* This native_sim test build never sets CONFIG_LVGL / ALP_HAS_LVGL, so */
+/* it exercises the #else guard clause: NULL display -> INVAL, every    */
+/* other build without the LVGL bridge wired in -> NOSUPPORT.           */
 /* ------------------------------------------------------------------ */
 
 ZTEST(alp_chips, test_gui_lvgl_attach_null_display_is_inval)

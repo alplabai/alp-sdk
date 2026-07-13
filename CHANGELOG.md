@@ -7,6 +7,33 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — real `alp_gui_lvgl_attach()` LVGL v9 bridge (`<alp/gui.h>`, issue #23)
+
+- `src/gui_lvgl.c` (renamed from `gui_lvgl_stub.c`) now compiles a real LVGL
+  v9 hand-off under `ALP_HAS_LVGL`: creates an `lv_display_t` sized to the
+  `alp_display_t`'s reported geometry, maps `alp_pixfmt_t` to
+  `lv_color_format_t` (RGB565 / RGB888 / ARGB8888; `MONO_VLSB` has no LVGL v9
+  equivalent and returns `ALP_ERR_NOSUPPORT`), allocates a persistent
+  partial-refresh draw buffer (`CONFIG_ALP_GUI_LVGL_BUF_LINES` on Zephyr,
+  default 16 lines), and wires LVGL's flush callback straight to
+  `alp_display_blit()`. The non-LVGL guard clause (NULL → `ALP_ERR_INVAL`,
+  else → `ALP_ERR_NOSUPPORT`) is unchanged and still compiles when no build
+  wires LVGL in.  The public signature and `[ABI-STABLE]` marker are
+  unchanged.
+- Zephyr wiring: `CONFIG_ALP_SDK_HAS_LVGL` (now `depends on LVGL`, still
+  `default y if LVGL`) mirrors into the `ALP_HAS_LVGL` compile define
+  app-wide via `zephyr_compile_definitions_ifdef`, so any Zephyr app with
+  `CONFIG_LVGL=y` gets the real bridge automatically — no per-app wiring
+  needed. Plain-CMake / Yocto builds keep the existing `-DALP_HAS_LVGL=ON`
+  option path (caller supplies the LVGL include path).
+- New hermetic native_sim twister suite `tests/zephyr/gui_lvgl/`: a
+  priority-255 test-double display backend proves a forced LVGL refresh
+  reaches `alp_display_blit()`, plus NULL / unsupported-pixel-format /
+  no-LVGL-build degrade coverage.
+- `docs/os-support-matrix.md` gains a "GUI/LVGL bridge" row (code-complete,
+  native_sim-tested; real-panel bench run still pending) — issue #23's
+  display-side bench legs (V2N DSI/parallel-RGB, Alif LCD-IF) remain open.
+
 ### Added — portable AHRS sensor-fusion surface (`<alp/ahrs.h>`)
 
 - New `alp_ahrs_init` / `alp_ahrs_update_imu` / `alp_ahrs_euler` /

@@ -13,11 +13,12 @@
  * panel with an upstream Zephyr display driver resolves via the
  * `alp-display0..3` devicetree aliases.  Elsewhere the priority-0
  * NOT_IMPLEMENTED stub (zephyr_stub.c) keeps the surface linkable.
- * Still tracked by issue #23:
+ * alp_gui_lvgl_attach() (<alp/gui.h>) binds any alp_display_t opened
+ * through this surface to an LVGL v9 lv_display_t -- code-complete,
+ * native_sim-tested (tests/zephyr/gui_lvgl/); real-panel bench run
+ * still pending.  Still tracked by issue #23:
  *   - the V2N DSI / parallel-RGB framebuffer path,
- *   - the Alif LCD-IF path,
- *   - alp_gui_lvgl_attach() for LVGL flush integration
- *     (<alp/gui.h>).
+ *   - the Alif LCD-IF path.
  *
 
  * @par ABI status: [ABI-EXPERIMENTAL]
