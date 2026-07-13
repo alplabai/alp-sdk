@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "WS6-c (#610 §6) library-name alias table: maps each legacy per-core `cores.<id>.libraries:` enum token to its canonical `metadata/libraries/<name>.yaml` manifest name. Drives the board.yaml v1->v2 alp-migrate migration (m001_to_v2) and a temporary read-compat in the loader. check_library_registry.py asserts every curated token resolves to exactly one existing manifest. Once the migration + resolution rewrite land and no board.yaml uses the legacy tokens, this table is retired (no compatibility aliases survive per epic #610 §6).",
+  "description": "WS6-c (#610 §6) library-name alias table: maps each legacy library token (the underscore spellings that predated the unified `libraries:[{name,cores?}]` model) to its canonical `metadata/libraries/<name>.yaml` manifest name. The orchestrator loader canonicalises every `libraries:` entry's `name` through this table; check_library_registry.py asserts every curated token resolves to exactly one existing manifest.",
   "aliases": {
     "bearssl": "bearssl",
     "catch2": "catch2",
