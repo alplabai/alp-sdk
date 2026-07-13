@@ -58,7 +58,7 @@ def test_build_lock_validates_and_is_deterministic(tmp_path):
 def test_reject_local_guard(tmp_path):
     import alp_lock
     with __import__("pytest").raises(alp_lock.LockError):
-        alp_lock._reject_local("/home/user/secret")
+        alp_lock._reject_local("/etc/secret")  # non-home abs path (the no-home-paths gate bans /home/)
     assert alp_lock._reject_local("v3.1.5") == "v3.1.5"
     assert alp_lock._reject_local("https://github.com/a/b.git") == "https://github.com/a/b.git"
 
