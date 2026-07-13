@@ -35,6 +35,11 @@ west-commands:
       - name: alp-lock
         class: AlpLock
         help: Write or verify the project's alp.lock dependency lock
+  - file: scripts/west_commands/alp_migrate.py
+    commands:
+      - name: alp-migrate
+        class: AlpMigrate
+        help: Version and migrate a project's board.yaml
   - file: scripts/west_commands/alp_renode.py
     commands:
       - name: alp-renode

@@ -858,6 +858,10 @@
   },
   "gates": [
     {
+      "purpose": "Fail if any repo board.yaml has an outstanding schema migration.",
+      "script": "scripts/check_board_schema_version.py"
+    },
+    {
       "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json).",
       "script": "scripts/check_build_plan.py"
     },

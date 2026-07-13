@@ -49,6 +49,11 @@
     }
   ],
   "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "board.yaml schema version. Lazy: an absent value means version 1 permanently -- handwritten/external projects never need the key and are never out-of-date. The key only appears in a file once a migration bumps it to v2+. Bump only via a scripts/alp_migrate migration step."
+    },
     "name": {
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",

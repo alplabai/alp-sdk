@@ -7,6 +7,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — `west alp-migrate` board.yaml migration engine (#610 WS6-b)
+
+- `board.yaml` may carry an optional top-level `schemaVersion`. Versioning is
+  **lazy**: an absent key IS version 1 (the floor), so hand-written and
+  external projects keep loading unchanged and are never "drift" — the key
+  only appears in a file once a migration has bumped it to v2+. `west
+  alp-migrate --check/--preview/--apply` versions and migrates a `board.yaml`
+  byte-faithfully (comments, flow style, indentation preserved) with a
+  `diagnostic-v1` JSON report. The migration registry
+  (`scripts/alp_migrate/migrations/`) is empty until the first real schema
+  change; `check_board_schema_version.py` is the gate that will enforce
+  migration once one lands.
+
 ### Added — real `alp_gui_lvgl_attach()` LVGL v9 bridge (`<alp/gui.h>`, issue #23)
 
 - `src/gui_lvgl.c` (renamed from `gui_lvgl_stub.c`) now compiles a real LVGL
