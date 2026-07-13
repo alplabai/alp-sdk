@@ -15,6 +15,7 @@
 #include <alp/i2s.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/i2s/i2s_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(i2s);
@@ -32,9 +33,12 @@ static struct alp_i2s _pool[CONFIG_ALP_SDK_MAX_I2S_HANDLES];
 static struct alp_i2s *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_I2S_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch
+		 * the slot's other fields (in_use is the struct's last
+		 * member, so zero everything before it -- including
+		 * lifecycle/active_ops, parking a fresh slot at UNOPENED). */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_i2s, in_use));
 			return &_pool[i];
 		}
 	}
@@ -43,7 +47,7 @@ static struct alp_i2s *_alloc(void)
 
 static void _free(struct alp_i2s *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg)
@@ -89,51 +93,89 @@ alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_i2s_start(alp_i2s_t *i2s)
 {
-	if (i2s == NULL || !i2s->in_use) return ALP_ERR_NOT_READY;
-	if (i2s->state.ops->start == NULL) return ALP_ERR_NOSUPPORT;
-	alp_status_t rc = i2s->state.ops->start(&i2s->state);
-	if (rc == ALP_OK) i2s->started = true;
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc/_free, so mixing it with a
+	 * plain read here is a data race, and a racing close could free
+	 * the slot mid-op (issue #629). */
+	if (i2s == NULL || !alp_handle_op_enter(&i2s->lifecycle, &i2s->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc = ALP_ERR_NOSUPPORT;
+	if (i2s->state.ops->start != NULL) {
+		rc = i2s->state.ops->start(&i2s->state);
+		if (rc == ALP_OK) i2s->started = true;
+	}
+	alp_handle_op_leave(&i2s->active_ops);
 	return rc;
 }
 
 alp_status_t alp_i2s_stop(alp_i2s_t *i2s)
 {
-	if (i2s == NULL || !i2s->in_use) return ALP_ERR_NOT_READY;
-	if (i2s->state.ops->stop == NULL) return ALP_ERR_NOSUPPORT;
-	alp_status_t rc = i2s->state.ops->stop(&i2s->state);
-	if (rc == ALP_OK) i2s->started = false;
+	if (i2s == NULL || !alp_handle_op_enter(&i2s->lifecycle, &i2s->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc = ALP_ERR_NOSUPPORT;
+	if (i2s->state.ops->stop != NULL) {
+		rc = i2s->state.ops->stop(&i2s->state);
+		if (rc == ALP_OK) i2s->started = false;
+	}
+	alp_handle_op_leave(&i2s->active_ops);
 	return rc;
 }
 
 alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint32_t timeout_ms)
 {
-	if (i2s == NULL || !i2s->in_use) return ALP_ERR_NOT_READY;
-	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL;
-	if (i2s->state.ops->write == NULL) return ALP_ERR_NOSUPPORT;
+	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted via
+	 * op_enter -- counting it would make alp_i2s_close()'s begin_close busy-
+	 * spin until this transfer drains/times out (single-core deadlock when
+	 * the closer has >= priority). Same as ble/wifi/mqtt blocking ops; the
+	 * residual close-vs-in-flight-transfer UAF is tracked in the #629
+	 * blocking-op-drain follow-up. start/stop stay counted (short, synchronous). */
+	if (i2s == NULL || alp_lifecycle_get(&i2s->lifecycle) != ALP_HANDLE_LC_OPEN)
+		return ALP_ERR_NOT_READY;
+	if (block == NULL || bytes == 0u) {
+		return ALP_ERR_INVAL;
+	}
+	if (i2s->state.ops->write == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	return i2s->state.ops->write(&i2s->state, block, bytes, timeout_ms);
 }
 
 alp_status_t
 alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
 {
-	if (i2s == NULL || !i2s->in_use) return ALP_ERR_NOT_READY;
-	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL;
+	/* Blocking op (caller timeout_ms): lifecycle-only gate, NOT counted --
+	 * see alp_i2s_write() above for the begin_close deadlock rationale. */
+	if (i2s == NULL || alp_lifecycle_get(&i2s->lifecycle) != ALP_HANDLE_LC_OPEN)
+		return ALP_ERR_NOT_READY;
+	if (block == NULL || bytes == 0u) {
+		return ALP_ERR_INVAL;
+	}
 	if (bytes_out != NULL) *bytes_out = 0u;
-	if (i2s->state.ops->read == NULL) return ALP_ERR_NOSUPPORT;
+	if (i2s->state.ops->read == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	return i2s->state.ops->read(&i2s->state, block, bytes, bytes_out, timeout_ms);
 }
 
 void alp_i2s_close(alp_i2s_t *i2s)
 {
-	if (i2s == NULL || !i2s->in_use) return;
+	if (i2s == NULL) return;
+	/* Gate out new ops and drain any in-flight one before touching
+	 * state.ops -- makes "close races a blocked/in-flight op" a
+	 * bounded wait instead of a use-after-free (issue #629).  Losing
+	 * the CAS (already closed/closing/never-opened) makes this a
+	 * no-op, matching the existing void-close idempotency contract. */
+	if (!alp_handle_begin_close(&i2s->lifecycle, &i2s->active_ops)) return;
 	if (i2s->state.ops != NULL && i2s->state.ops->close != NULL) {
 		i2s->state.ops->close(&i2s->state);
 	}
+	alp_lifecycle_set(&i2s->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(i2s);
 }
 

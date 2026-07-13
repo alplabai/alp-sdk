@@ -188,4 +188,35 @@ static inline bool alp_handle_begin_close(uint8_t *lifecycle, uint32_t *active_o
 	return true;
 }
 
+/**
+ * @brief Begin closing a handle that also hosts blocking ops (issue #629).
+ *
+ * Same CAS-then-drain contract as alp_handle_begin_close() above --
+ * OPEN -> CLOSING, then wait for every op counted before the CAS to
+ * leave -- but the drain SLEEPS between polls instead of busy-spinning,
+ * so it is safe to use on a handle that counts an op taking a caller
+ * `timeout_ms` (a real link-layer/broker/transfer round-trip that can
+ * run far longer than "a handful of instructions").  This is the
+ * generalisation of rpc_dispatch.c's _rpc_begin_close()/_rpc_drain()
+ * (GHSA-xhm8-7f87-93q5) to the shared handle-pool helpers: same
+ * sleep-poll-never-spin rationale, same portable sleep-tick primitive
+ * (see src/common/alp_slot_claim.c). Defined out-of-line in
+ * src/common/alp_slot_claim.c (not inline here) because the sleep
+ * primitive needs an OS header (k_sleep / nanosleep) this header
+ * deliberately does not pull in -- see the file comment at the top of
+ * this header.
+ *
+ * A handle whose pool mixes short-sync ops with a blocking one (e.g.
+ * BLE's advertise/gatt-notify alongside connect()) can use this
+ * sleep-poll close uniformly: it drains the short ops just as
+ * correctly, just via a sleep-poll loop instead of a spin.
+ *
+ * @param[in,out] lifecycle   Handle lifecycle byte (ALP_HANDLE_LC_*).
+ * @param[in,out] active_ops  Handle's in-flight-op counter.
+ * @return true if this caller won the OPEN -> CLOSING transition and
+ *         may now tear the handle down; false if it was already
+ *         closed/closing/never-opened (caller's close() is a no-op).
+ */
+bool alp_handle_begin_close_blocking(uint8_t *lifecycle, uint32_t *active_ops);
+
 #endif /* ALP_COMMON_SLOT_CLAIM_H */

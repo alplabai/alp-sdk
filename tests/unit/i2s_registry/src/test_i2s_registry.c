@@ -31,6 +31,7 @@
 #include <alp/i2s.h>
 
 #include "../../../../src/backends/i2s/i2s_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_i2s_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -204,6 +205,7 @@ ZTEST(alp_i2s_registry, test_alp_i2s_read_public_dispatch)
 	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
 	h.state.ops = ops; /* alp_i2s_open() normally wires this before open() */
 	h.in_use    = true;
+	h.lifecycle = ALP_HANDLE_LC_OPEN; /* open() now marks the handle OPEN (#629) */
 
 	/* NULL block / zero bytes -> INVAL before the backend is consulted. */
 	zassert_equal(alp_i2s_read(&h, NULL, sizeof(rx), &got, 10u), ALP_ERR_INVAL);

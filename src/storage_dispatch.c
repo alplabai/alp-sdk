@@ -26,6 +26,7 @@
 #include <alp/soc_caps.h>
 #include <alp/storage.h>
 
+#include "alp_slot_claim.h"
 #include "backends/storage/storage_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(storage);
@@ -41,9 +42,12 @@ static struct alp_storage _pool[CONFIG_ALP_SDK_MAX_STORAGE_HANDLES];
 static struct alp_storage *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_STORAGE_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch the
+		 * slot's other fields (in_use is the struct's last member, so
+		 * zero everything before it -- incl. lifecycle/active_ops,
+		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_storage, in_use));
 			return &_pool[i];
 		}
 	}
@@ -52,7 +56,7 @@ static struct alp_storage *_alloc(void)
 
 static void _free(struct alp_storage *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
@@ -96,6 +100,7 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
@@ -103,52 +108,104 @@ alp_status_t alp_storage_get_info(alp_storage_t *storage, alp_storage_info_t *in
 {
 	if (info == NULL) return ALP_ERR_INVAL;
 	*info = (alp_storage_info_t){ 0 };
-	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
-	if (storage->state.ops->get_info == NULL) return ALP_ERR_NOSUPPORT;
-	return storage->state.ops->get_info(&storage->state, info);
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc/_free, so mixing it with a
+	 * plain read here is a data race, and a racing close could free the
+	 * slot mid-op. op_enter counts this op in; begin_close drains it. #629 */
+	if (storage == NULL || !alp_handle_op_enter(&storage->lifecycle, &storage->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (storage->state.ops->get_info == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = storage->state.ops->get_info(&storage->state, info);
+	}
+	alp_handle_op_leave(&storage->active_ops);
+	return rc;
 }
 
 alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t off, void *data, size_t len)
 {
-	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
-	if (len == 0u) return ALP_OK;
-	if (data == NULL) return ALP_ERR_INVAL;
-	if (storage->state.ops->read == NULL) return ALP_ERR_NOSUPPORT;
-	return storage->state.ops->read(&storage->state, off, data, len);
+	if (storage == NULL || !alp_handle_op_enter(&storage->lifecycle, &storage->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (len == 0u) {
+		rc = ALP_OK;
+	} else if (data == NULL) {
+		rc = ALP_ERR_INVAL;
+	} else if (storage->state.ops->read == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = storage->state.ops->read(&storage->state, off, data, len);
+	}
+	alp_handle_op_leave(&storage->active_ops);
+	return rc;
 }
 
 alp_status_t alp_storage_write(alp_storage_t *storage, uint64_t off, const void *data, size_t len)
 {
-	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
-	if (storage->state.read_only) return ALP_ERR_NOT_READY;
-	if (len == 0u) return ALP_OK;
-	if (data == NULL) return ALP_ERR_INVAL;
-	if (storage->state.ops->write == NULL) return ALP_ERR_NOSUPPORT;
-	return storage->state.ops->write(&storage->state, off, data, len);
+	if (storage == NULL || !alp_handle_op_enter(&storage->lifecycle, &storage->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (storage->state.read_only) {
+		rc = ALP_ERR_NOT_READY;
+	} else if (len == 0u) {
+		rc = ALP_OK;
+	} else if (data == NULL) {
+		rc = ALP_ERR_INVAL;
+	} else if (storage->state.ops->write == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = storage->state.ops->write(&storage->state, off, data, len);
+	}
+	alp_handle_op_leave(&storage->active_ops);
+	return rc;
 }
 
 alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t off, uint64_t len)
 {
-	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
-	if (storage->state.read_only) return ALP_ERR_INVAL;
-	if (len == 0u) return ALP_OK;
-	if (storage->state.ops->erase == NULL) return ALP_ERR_NOSUPPORT;
-	return storage->state.ops->erase(&storage->state, off, len);
+	if (storage == NULL || !alp_handle_op_enter(&storage->lifecycle, &storage->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (storage->state.read_only) {
+		rc = ALP_ERR_INVAL;
+	} else if (len == 0u) {
+		rc = ALP_OK;
+	} else if (storage->state.ops->erase == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = storage->state.ops->erase(&storage->state, off, len);
+	}
+	alp_handle_op_leave(&storage->active_ops);
+	return rc;
 }
 
 alp_status_t alp_storage_sync(alp_storage_t *storage)
 {
-	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
-	if (storage->state.ops->sync == NULL) return ALP_OK; /* nothing to flush */
-	return storage->state.ops->sync(&storage->state);
+	if (storage == NULL || !alp_handle_op_enter(&storage->lifecycle, &storage->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc =
+	    (storage->state.ops->sync == NULL) ? ALP_OK : storage->state.ops->sync(&storage->state);
+	alp_handle_op_leave(&storage->active_ops);
+	return rc;
 }
 
 void alp_storage_close(alp_storage_t *storage)
 {
-	if (storage == NULL || !storage->in_use) return;
+	if (storage == NULL) return;
+	/* begin_close CAS OPEN->CLOSING then spins until every op that
+	 * entered before the CAS has left -- so teardown never races an
+	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
+	if (!alp_handle_begin_close(&storage->lifecycle, &storage->active_ops)) return;
 	if (storage->state.ops != NULL && storage->state.ops->close != NULL) {
 		storage->state.ops->close(&storage->state);
 	}
+	alp_lifecycle_set(&storage->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(storage);
 }
 
@@ -175,7 +232,15 @@ alp_status_t alp_storage_configure_inline_aes(alp_storage_t                  *st
 			return ALP_ERR_INVAL;
 		}
 	}
-	if (storage == NULL || !storage->in_use) return ALP_ERR_NOT_READY;
-	if (storage->state.ops->configure_inline_aes == NULL) return ALP_ERR_NOSUPPORT;
-	return storage->state.ops->configure_inline_aes(&storage->state, cfg);
+	if (storage == NULL || !alp_handle_op_enter(&storage->lifecycle, &storage->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (storage->state.ops->configure_inline_aes == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = storage->state.ops->configure_inline_aes(&storage->state, cfg);
+	}
+	alp_handle_op_leave(&storage->active_ops);
+	return rc;
 }

@@ -16,6 +16,7 @@
 #include <alp/pwm.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/pwm/pwm_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(pwm);
@@ -34,9 +35,12 @@ static struct alp_pwm_capture _cap_pool[CONFIG_ALP_SDK_MAX_PWM_HANDLES];
 static struct alp_pwm *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_PWM_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch
+		 * the slot's other fields (in_use is the struct's last
+		 * member, so zero everything before it -- including
+		 * lifecycle/active_ops, parking a fresh slot at UNOPENED). */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_pwm, in_use));
 			return &_pool[i];
 		}
 	}
@@ -45,15 +49,14 @@ static struct alp_pwm *_alloc(void)
 
 static void _free(struct alp_pwm *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 static struct alp_pwm_capture *_alloc_cap(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_PWM_HANDLES; ++i) {
-		if (!_cap_pool[i].in_use) {
-			memset(&_cap_pool[i], 0, sizeof(_cap_pool[i]));
-			_cap_pool[i].in_use = true;
+		if (alp_slot_try_claim(&_cap_pool[i].in_use)) {
+			memset(&_cap_pool[i], 0, offsetof(struct alp_pwm_capture, in_use));
 			return &_cap_pool[i];
 		}
 	}
@@ -62,7 +65,7 @@ static struct alp_pwm_capture *_alloc_cap(void)
 
 static void _free_cap(struct alp_pwm_capture *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_pwm_t *alp_pwm_open(const alp_pwm_config_t *cfg)
@@ -102,24 +105,44 @@ alp_pwm_t *alp_pwm_open(const alp_pwm_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_pwm_set_duty(alp_pwm_t *pwm, uint32_t pulse_ns)
 {
-	if (pwm == NULL || !pwm->in_use) return ALP_ERR_NOT_READY;
-	if (pulse_ns > pwm->period_ns) return ALP_ERR_INVAL;
-	if (pwm->state.ops->set_duty == NULL) return ALP_ERR_NOSUPPORT;
-	return pwm->state.ops->set_duty(&pwm->state, pulse_ns);
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc/_free, so mixing it with a
+	 * plain read here is a data race, and a racing close could free
+	 * the slot mid-op (issue #629). */
+	if (pwm == NULL || !alp_handle_op_enter(&pwm->lifecycle, &pwm->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc;
+	if (pulse_ns > pwm->period_ns) {
+		rc = ALP_ERR_INVAL;
+	} else if (pwm->state.ops->set_duty == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = pwm->state.ops->set_duty(&pwm->state, pulse_ns);
+	}
+	alp_handle_op_leave(&pwm->active_ops);
+	return rc;
 }
 
 alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns)
 {
-	if (pwm == NULL || !pwm->in_use) return ALP_ERR_NOT_READY;
-	if (period_ns == 0u) return ALP_ERR_INVAL;
-	if (pwm->state.ops->set_period == NULL) return ALP_ERR_NOSUPPORT;
-	alp_status_t rc = pwm->state.ops->set_period(&pwm->state, period_ns);
-	if (rc == ALP_OK) pwm->period_ns = period_ns;
+	if (pwm == NULL || !alp_handle_op_enter(&pwm->lifecycle, &pwm->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc;
+	if (period_ns == 0u) {
+		rc = ALP_ERR_INVAL;
+	} else if (pwm->state.ops->set_period == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = pwm->state.ops->set_period(&pwm->state, period_ns);
+		if (rc == ALP_OK) pwm->period_ns = period_ns;
+	}
+	alp_handle_op_leave(&pwm->active_ops);
 	return rc;
 }
 
@@ -128,28 +151,49 @@ alp_status_t alp_pwm_configure(alp_pwm_t      *pwm,
                                uint32_t        dead_time_ns,
                                uint8_t         break_cfg)
 {
-	if (pwm == NULL || !pwm->in_use) return ALP_ERR_NOT_READY;
+	if (pwm == NULL || !alp_handle_op_enter(&pwm->lifecycle, &pwm->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc;
 	if ((unsigned)align_mode > (unsigned)ALP_PWM_ALIGN_CENTER_BOTH) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+	} else if (pwm->state.ops->configure == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = pwm->state.ops->configure(&pwm->state, align_mode, dead_time_ns, break_cfg);
 	}
-	if (pwm->state.ops->configure == NULL) return ALP_ERR_NOSUPPORT;
-	return pwm->state.ops->configure(&pwm->state, align_mode, dead_time_ns, break_cfg);
+	alp_handle_op_leave(&pwm->active_ops);
+	return rc;
 }
 
 alp_status_t alp_pwm_single_pulse(alp_pwm_t *pwm, uint32_t pulse_ns)
 {
-	if (pwm == NULL || !pwm->in_use) return ALP_ERR_NOT_READY;
-	if (pulse_ns == 0u) return ALP_ERR_INVAL;
-	if (pwm->state.ops->single_pulse == NULL) return ALP_ERR_NOSUPPORT;
-	return pwm->state.ops->single_pulse(&pwm->state, pulse_ns);
+	if (pwm == NULL || !alp_handle_op_enter(&pwm->lifecycle, &pwm->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc;
+	if (pulse_ns == 0u) {
+		rc = ALP_ERR_INVAL;
+	} else if (pwm->state.ops->single_pulse == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = pwm->state.ops->single_pulse(&pwm->state, pulse_ns);
+	}
+	alp_handle_op_leave(&pwm->active_ops);
+	return rc;
 }
 
 void alp_pwm_close(alp_pwm_t *pwm)
 {
-	if (pwm == NULL || !pwm->in_use) return;
+	if (pwm == NULL) return;
+	/* Gate out new ops and drain any in-flight one before touching
+	 * state.ops -- makes "close races a blocked/in-flight op" a
+	 * bounded wait instead of a use-after-free (issue #629).  Losing
+	 * the CAS (already closed/closing/never-opened) makes this a
+	 * no-op, matching the existing void-close idempotency contract. */
+	if (!alp_handle_begin_close(&pwm->lifecycle, &pwm->active_ops)) return;
 	if (pwm->state.ops != NULL && pwm->state.ops->close != NULL) {
 		pwm->state.ops->close(&pwm->state);
 	}
+	alp_lifecycle_set(&pwm->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(pwm);
 }
 
@@ -207,6 +251,7 @@ alp_pwm_capture_t *alp_pwm_capture_open(const alp_pwm_capture_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
@@ -219,16 +264,34 @@ alp_pwm_capture_read(alp_pwm_capture_t *cap, uint32_t *period_ns_out, uint32_t *
 	 * when a test passes a not-ready/garbage handle (reading cap->in_use
 	 * first is otherwise order-dependent on the handle's memory). */
 	if (period_ns_out == NULL && pulse_ns_out == NULL) return ALP_ERR_INVAL;
-	if (cap == NULL || !cap->in_use) return ALP_ERR_NOT_READY;
-	if (cap->state.ops->capture_read == NULL) return ALP_ERR_NOSUPPORT;
-	return cap->state.ops->capture_read(&cap->state, period_ns_out, pulse_ns_out);
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc_cap/_free_cap, so mixing it
+	 * with a plain read here is a data race, and a racing close could
+	 * free the slot mid-op (issue #629). */
+	if (cap == NULL || !alp_handle_op_enter(&cap->lifecycle, &cap->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc;
+	if (cap->state.ops->capture_read == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = cap->state.ops->capture_read(&cap->state, period_ns_out, pulse_ns_out);
+	}
+	alp_handle_op_leave(&cap->active_ops);
+	return rc;
 }
 
 void alp_pwm_capture_close(alp_pwm_capture_t *cap)
 {
-	if (cap == NULL || !cap->in_use) return;
+	if (cap == NULL) return;
+	/* Gate out new ops and drain any in-flight one before touching
+	 * state.ops -- makes "close races a blocked/in-flight op" a
+	 * bounded wait instead of a use-after-free (issue #629).  Losing
+	 * the CAS (already closed/closing/never-opened) makes this a
+	 * no-op, matching the existing void-close idempotency contract. */
+	if (!alp_handle_begin_close(&cap->lifecycle, &cap->active_ops)) return;
 	if (cap->state.ops != NULL && cap->state.ops->capture_close != NULL) {
 		cap->state.ops->capture_close(&cap->state);
 	}
+	alp_lifecycle_set(&cap->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free_cap(cap);
 }

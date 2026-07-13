@@ -21,6 +21,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/dac/dac_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(dac);
@@ -37,9 +38,12 @@ static struct alp_dac _pool[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
 static struct alp_dac *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_DAC_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch
+		 * the slot's other fields (in_use is the struct's last
+		 * member, so zero everything before it -- including
+		 * lifecycle/active_ops, parking a fresh slot at UNOPENED). */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_dac, in_use));
 			return &_pool[i];
 		}
 	}
@@ -48,7 +52,7 @@ static struct alp_dac *_alloc(void)
 
 static void _free(struct alp_dac *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg)
@@ -100,28 +104,44 @@ alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_dac_write_mv(alp_dac_t *h, uint16_t mv)
 {
-	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
-	return h->state.ops->write_mv(&h->state, mv);
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc/_free, so mixing it with a
+	 * plain read here is a data race, and a racing close could free
+	 * the slot mid-op (issue #629). */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) return ALP_ERR_NOT_READY;
+	alp_status_t rc = h->state.ops->write_mv(&h->state, mv);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_dac_read_mv(alp_dac_t *h, uint16_t *mv_out)
 {
 	if (mv_out == NULL) return ALP_ERR_INVAL;
-	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
-	return h->state.ops->read_mv(&h->state, mv_out);
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) return ALP_ERR_NOT_READY;
+	alp_status_t rc = h->state.ops->read_mv(&h->state, mv_out);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 void alp_dac_close(alp_dac_t *h)
 {
-	if (h == NULL || !h->in_use) return;
+	if (h == NULL) return;
+	/* Gate out new ops and drain any in-flight one before touching
+	 * state.ops -- makes "close races a blocked/in-flight op" a
+	 * bounded wait instead of a use-after-free (issue #629).  Losing
+	 * the CAS (already closed/closing/never-opened) makes this a
+	 * no-op, matching the existing void-close idempotency contract. */
+	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) return;
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(h);
 }
 

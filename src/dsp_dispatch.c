@@ -43,6 +43,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/dsp/dsp_ops.h"
 
 /*
@@ -77,9 +78,12 @@ static struct alp_dsp_chain _pool[CONFIG_ALP_SDK_MAX_DSP_HANDLES];
 static struct alp_dsp_chain *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_DSP_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch the
+		 * slot's other fields (in_use is the struct's last member, so
+		 * zero everything before it -- incl. lifecycle/active_ops,
+		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_dsp_chain, in_use));
 			return &_pool[i];
 		}
 	}
@@ -88,7 +92,7 @@ static struct alp_dsp_chain *_alloc(void)
 
 static void _free(struct alp_dsp_chain *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stages)
@@ -123,6 +127,7 @@ alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stag
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN); /* #629 */
 	return h;
 }
 
@@ -133,13 +138,26 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
                                          size_t           out_cap,
                                          size_t          *got)
 {
-	if (chain == NULL || !chain->in_use || got == NULL) {
+	if (got == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc/_free, so mixing it with a
+	 * plain read here is a data race, and a racing close could free the
+	 * slot mid-op. op_enter counts this op in; begin_close drains it.
+	 * ALP_ERR_INVAL preserved here (not NOT_READY) to match this op's
+	 * pre-#629 null/not-in-use contract. #629 */
+	if (chain == NULL || !alp_handle_op_enter(&chain->lifecycle, &chain->active_ops)) {
 		return ALP_ERR_INVAL;
 	}
 	if (chain->state.ops == NULL || chain->state.ops->apply_samples == NULL) {
+		alp_handle_op_leave(&chain->active_ops);
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return chain->state.ops->apply_samples(&chain->state, in_mv, in_n, out_mv, out_cap, got);
+	alp_status_t rc =
+	    chain->state.ops->apply_samples(&chain->state, in_mv, in_n, out_mv, out_cap, got);
+	alp_handle_op_leave(&chain->active_ops);
+	return rc;
 }
 
 alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
@@ -149,13 +167,20 @@ alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
                                       size_t           out_cap,
                                       size_t          *got)
 {
-	if (chain == NULL || !chain->in_use || got == NULL) {
+	if (got == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (chain == NULL || !alp_handle_op_enter(&chain->lifecycle, &chain->active_ops)) {
 		return ALP_ERR_INVAL;
 	}
 	if (chain->state.ops == NULL || chain->state.ops->apply_bins == NULL) {
+		alp_handle_op_leave(&chain->active_ops);
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return chain->state.ops->apply_bins(&chain->state, in_mv, in_n, out_bins, out_cap, got);
+	alp_status_t rc =
+	    chain->state.ops->apply_bins(&chain->state, in_mv, in_n, out_bins, out_cap, got);
+	alp_handle_op_leave(&chain->active_ops);
+	return rc;
 }
 
 alp_status_t alp_dsp_chain_apply_samples_f32(alp_dsp_chain_t *chain,
@@ -165,13 +190,20 @@ alp_status_t alp_dsp_chain_apply_samples_f32(alp_dsp_chain_t *chain,
                                              size_t           out_cap,
                                              size_t          *got)
 {
-	if (chain == NULL || !chain->in_use || got == NULL) {
+	if (got == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (chain == NULL || !alp_handle_op_enter(&chain->lifecycle, &chain->active_ops)) {
 		return ALP_ERR_INVAL;
 	}
 	if (chain->state.ops == NULL || chain->state.ops->apply_samples_f32 == NULL) {
+		alp_handle_op_leave(&chain->active_ops);
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return chain->state.ops->apply_samples_f32(&chain->state, in, in_n, out, out_cap, got);
+	alp_status_t rc =
+	    chain->state.ops->apply_samples_f32(&chain->state, in, in_n, out, out_cap, got);
+	alp_handle_op_leave(&chain->active_ops);
+	return rc;
 }
 
 alp_status_t alp_dsp_chain_apply_bins_f32(alp_dsp_chain_t *chain,
@@ -181,21 +213,37 @@ alp_status_t alp_dsp_chain_apply_bins_f32(alp_dsp_chain_t *chain,
                                           size_t           out_cap,
                                           size_t          *got)
 {
-	if (chain == NULL || !chain->in_use || got == NULL) {
+	if (got == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (chain == NULL || !alp_handle_op_enter(&chain->lifecycle, &chain->active_ops)) {
 		return ALP_ERR_INVAL;
 	}
 	if (chain->state.ops == NULL || chain->state.ops->apply_bins_f32 == NULL) {
+		alp_handle_op_leave(&chain->active_ops);
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return chain->state.ops->apply_bins_f32(&chain->state, in, in_n, out_bins, out_cap, got);
+	alp_status_t rc =
+	    chain->state.ops->apply_bins_f32(&chain->state, in, in_n, out_bins, out_cap, got);
+	alp_handle_op_leave(&chain->active_ops);
+	return rc;
 }
 
 void alp_dsp_chain_close(alp_dsp_chain_t *chain)
 {
-	if (chain == NULL || !chain->in_use) return;
+	if (chain == NULL) {
+		return;
+	}
+	/* begin_close CAS OPEN->CLOSING then spins until every op that
+	 * entered before the CAS has left -- so teardown never races an
+	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
+	if (!alp_handle_begin_close(&chain->lifecycle, &chain->active_ops)) {
+		return;
+	}
 	if (chain->state.ops != NULL && chain->state.ops->close != NULL) {
 		chain->state.ops->close(&chain->state);
 	}
+	alp_lifecycle_set(&chain->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(chain);
 }
 

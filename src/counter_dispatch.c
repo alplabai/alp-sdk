@@ -16,6 +16,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/counter/counter_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(counter);
@@ -33,9 +34,12 @@ static struct alp_counter _pool[CONFIG_ALP_SDK_MAX_COUNTER_HANDLES];
 static struct alp_counter *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_COUNTER_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch the
+		 * slot's other fields (in_use is the struct's last member, so
+		 * zero everything before it -- incl. lifecycle/active_ops,
+		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_counter, in_use));
 			return &_pool[i];
 		}
 	}
@@ -44,7 +48,7 @@ static struct alp_counter *_alloc(void)
 
 static void _free(struct alp_counter *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg)
@@ -84,33 +88,54 @@ alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_counter_start(alp_counter_t *h)
 {
-	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
-	return h->state.ops->start(&h->state);
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc/_free, so mixing it with a
+	 * plain read here is a data race, and a racing close could free the
+	 * slot mid-op. op_enter counts this op in; begin_close drains it. #629 */
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = h->state.ops->start(&h->state);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_counter_stop(alp_counter_t *h)
 {
-	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
-	return h->state.ops->stop(&h->state);
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = h->state.ops->stop(&h->state);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_counter_get_value(alp_counter_t *h, uint32_t *ticks_out)
 {
 	if (ticks_out == NULL) return ALP_ERR_INVAL;
-	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
-	return h->state.ops->get_value(&h->state, ticks_out);
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = h->state.ops->get_value(&h->state, ticks_out);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_counter_us_to_ticks(alp_counter_t *h, uint32_t us, uint32_t *ticks_out)
 {
 	if (ticks_out == NULL) return ALP_ERR_INVAL;
-	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
-	return h->state.ops->us_to_ticks(&h->state, us, ticks_out);
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = h->state.ops->us_to_ticks(&h->state, us, ticks_out);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_counter_set_alarm(alp_counter_t         *h,
@@ -119,27 +144,43 @@ alp_status_t alp_counter_set_alarm(alp_counter_t         *h,
                                    void                  *user)
 {
 	if (cb == NULL) return ALP_ERR_INVAL;
-	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	h->state.alarm_cb   = cb;
 	h->state.alarm_user = user;
-	return h->state.ops->set_alarm(&h->state, ticks_from_now, h);
+	alp_status_t rc     = h->state.ops->set_alarm(&h->state, ticks_from_now, h);
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
 
 alp_status_t alp_counter_cancel_alarm(alp_counter_t *h)
 {
-	if (h == NULL || !h->in_use) return ALP_ERR_NOT_READY;
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	alp_status_t rc     = h->state.ops->cancel_alarm(&h->state);
 	h->state.alarm_cb   = NULL;
 	h->state.alarm_user = NULL;
+	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
 
 void alp_counter_close(alp_counter_t *h)
 {
-	if (h == NULL || !h->in_use) return;
+	if (h == NULL) {
+		return;
+	}
+	/* begin_close CAS OPEN->CLOSING then spins until every op that
+	 * entered before the CAS has left -- so teardown never races an
+	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
+	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+		return;
+	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(h);
 }
 

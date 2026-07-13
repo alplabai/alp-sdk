@@ -31,6 +31,7 @@
 #include <alp/pwm.h>
 
 #include "../../../../src/backends/pwm/pwm_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_pwm_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -202,6 +203,7 @@ ZTEST(alp_pwm_registry, test_alp_pwm_set_period_public_dispatch)
 	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
 	h.state.ops = ops; /* alp_pwm_open() normally wires this before open() */
 	h.in_use    = true;
+	h.lifecycle = ALP_HANDLE_LC_OPEN; /* open() now marks the handle OPEN (#629) */
 
 	/* period_ns == 0 -> INVAL, before the backend is even consulted. */
 	zassert_equal(alp_pwm_set_period(&h, 0u), ALP_ERR_INVAL);
