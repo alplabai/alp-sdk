@@ -3833,6 +3833,10 @@
           "hash": "65fc166bfce1cfcd",
           "signature": "alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx);"
         },
+        "gd32g553_ota_supported": {
+          "hash": "5d7878a6869ce6c4",
+          "signature": "bool gd32g553_ota_supported(const gd32g553_t *ctx);"
+        },
         "gd32g553_ota_verify": {
           "hash": "23ca3dcfc76dadc0",
           "signature": "alp_status_t gd32g553_ota_verify(gd32g553_t *ctx, bool *verified, uint32_t *computed_crc32);"
@@ -3986,6 +3990,10 @@
         "GD32G553_LINK_FEAT_STATUS_SEQ": {
           "hash": "21952b50a552699a",
           "value": "0x01u"
+        },
+        "GD32G553_OTA_MIN_PROTOCOL_MINOR": {
+          "hash": "3081a6e71ff41243",
+          "value": "6u"
         },
         "GD32G553_STATUS_CODE_MASK": {
           "hash": "5fac453e1d04fcbd",
