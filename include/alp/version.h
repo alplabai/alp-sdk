@@ -37,9 +37,9 @@ extern "C" {
  * SDK release version.  MAJOR/MINOR/PATCH follow SemVer per
  * docs/release-policy.md.  Rewritten by scripts/bump_version.py.
  */
-#define ALP_VERSION_MAJOR 0 /**< SDK major version (ABI-breaking changes). */
+#define ALP_VERSION_MAJOR 0  /**< SDK major version (ABI-breaking changes). */
 #define ALP_VERSION_MINOR 10 /**< SDK minor version (additive ABI changes). */
-#define ALP_VERSION_PATCH 1 /**< SDK patch version (fixes, no surface change). */
+#define ALP_VERSION_PATCH 1  /**< SDK patch version (fixes, no surface change). */
 
 /** SDK version as a string literal, e.g. "0.8.1". */
 #define ALP_VERSION_STRING "0.10.1"
