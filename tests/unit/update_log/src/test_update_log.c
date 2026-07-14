@@ -72,6 +72,11 @@ struct td_store {
 		bool    used;
 	} s[TD_SLOTS];
 	uint64_t counter;
+	/* Counts invocations of whichever function is actually wired up as
+	 * alp_secure_store_if::put (td_put() or td_put_write_once() below),
+	 * so a test can assert that append() never even reached store->put()
+	 * rather than merely observing that a write it made had no effect. */
+	int put_calls;
 };
 static struct td_store *td(void *ctx)
 {
@@ -85,7 +90,10 @@ static int td_find(struct td_store *t, const char *key)
 	}
 	return -1;
 }
-static alp_status_t td_put(void *c, const char *key, const uint8_t *b, size_t n)
+/* Does the actual slot write, with no call-counting of its own -- callers
+ * (the two functions below that get wired up as store->put) are the ones
+ * that count attempts, so this stays a plain internal helper. */
+static alp_status_t td_put_impl(void *c, const char *key, const uint8_t *b, size_t n)
 {
 	struct td_store *t = td(c);
 	if (n > TD_BLOB) return ALP_ERR_NOMEM;
@@ -102,6 +110,11 @@ static alp_status_t td_put(void *c, const char *key, const uint8_t *b, size_t n)
 	memcpy(t->s[i].buf, b, n);
 	t->s[i].len = n;
 	return ALP_OK;
+}
+static alp_status_t td_put(void *c, const char *key, const uint8_t *b, size_t n)
+{
+	td(c)->put_calls++;
+	return td_put_impl(c, key, b, n);
 }
 static alp_status_t td_get(void *c, const char *key, uint8_t *b, size_t cap, size_t *out)
 {
@@ -158,12 +171,13 @@ static void td_ifaces(struct td_store *t, alp_secure_store_if *s, alp_monotonic_
  * as the real PSA owner). */
 static alp_status_t td_put_write_once(void *c, const char *key, const uint8_t *b, size_t n)
 {
-	struct td_store *t        = td(c);
-	bool             is_entry = strncmp(key, "ulog.", 5) == 0 && strcmp(key, "ulog.meta") != 0;
+	struct td_store *t = td(c);
+	t->put_calls++;
+	bool is_entry = strncmp(key, "ulog.", 5) == 0 && strcmp(key, "ulog.meta") != 0;
 	if (is_entry && td_find(t, key) >= 0) {
 		return ALP_ERR_IO; /* mirrors PSA_ERROR_NOT_PERMITTED on a WRITE_ONCE asset */
 	}
-	return td_put(c, key, b, n);
+	return td_put_impl(c, key, b, n);
 }
 
 static void
@@ -766,10 +780,13 @@ ZTEST(alp_update_log, test_recover_leaves_partially_written_frontier_record_writ
  * a prior, unrelated bug or a bad recovery elsewhere), and ulog.meta is
  * independently stale. append()'s meta re-derivation/consistency check
  * (issue #759) must reject the append BEFORE it ever reaches
- * store->put() -- proving the engine does not even ATTEMPT the rewrite,
- * let alone rely on the store's write-once rejection to catch it after
- * the fact. The pre-existing (garbage) contents of "ulog.3" are left
- * completely undisturbed. */
+ * store->put() -- the test asserts this directly via td_store::put_calls
+ * (incremented on every call to whichever function is wired up as
+ * store->put), not merely inferred from the occupant being unchanged, so
+ * it distinguishes "never attempted the rewrite" from "attempted it and
+ * the store's own write-once rejection silently absorbed it". The
+ * pre-existing (garbage) contents of "ulog.3" are left completely
+ * undisturbed either way. */
 ZTEST(alp_update_log, test_append_refuses_before_attempting_rewrite_of_occupied_slot)
 {
 	struct td_store          t;
@@ -800,11 +817,20 @@ ZTEST(alp_update_log, test_append_refuses_before_attempting_rewrite_of_occupied_
 	memset(bogus_head, 0x77, sizeof(bogus_head));
 	raw_write_meta(&t, 3, bogus_head);
 
+	/* Baseline taken AFTER the out-of-band planting above (which itself
+	 * calls td_put() directly, bypassing store->put()) and BEFORE the
+	 * append under test, so the delta below counts only what append()
+	 * itself does through store->put(). */
+	int put_calls_before = t.put_calls;
+
 	alp_update_log_entry_t next = mk_entry(999, "rewrite-attempt", ALP_UPDATE_STATUS_CONFIRMED);
 	zassert_equal(ulog_engine_append(&s, &c, &next),
 	              ALP_ERR_IO,
 	              "append must refuse via the meta check before ever touching the occupied slot");
 	zassert_equal(t.counter, 3, "a refused append must not advance the counter");
+	zassert_equal(t.put_calls,
+	              put_calls_before,
+	              "append must never call store->put() at all when refusing via the meta check");
 
 	/* The pre-existing occupant of "ulog.3" is byte-for-byte untouched --
 	 * append() never called store->put() against it. */
