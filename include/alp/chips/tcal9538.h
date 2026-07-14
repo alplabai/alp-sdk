@@ -16,8 +16,16 @@
  * interrupt regs (0x40+) that this driver doesn't yet surface
  * (v0.3.x).  Eight I/O pins, individually configurable as
  * inputs or outputs, with optional polarity inversion.  7-bit
- * address strap A1A0 selects 0x70..0x73 (TCA9538) or
- * 0x70..0x73 (TCAL9538 same range).
+ * address strap A1A0 selects 0x70..0x73 (TCA9538/TCAL9538).
+ *
+ * This driver also drives the register-compatible TCA6408A/PCA9538
+ * family (single A0 strap -> 0x20..0x21) used as the E1M EVK's U35
+ * alt-population (TCA6408ARSVR, R112 fitted / R145 DNP).  0x20 is
+ * BENCH-CONFIRMED 2026-06-16 on the E1M EVK -- see
+ * `EVK_I2C_ADDR_TCA6408A_MAIN` in `<alp/boards/alp_e1m_evk_routes.h>`.
+ * `tcal9538_init()` therefore accepts both strap families; do not
+ * re-narrow the address check to the TCAL9538-only range (0x70..0x73)
+ * without first checking for TCA6408A-populated boards.
  *
  * On the E1M EVK the chip sits on ALP_E1M_I2C0 at 0x72 (A1=1, A0=0)
  * and fans out LCD / camera / capacitive-touch control lines plus
@@ -46,7 +54,9 @@
 extern "C" {
 #endif
 
-#define TCAL9538_I2C_ADDR_BASE 0x70u /**< A1=0, A0=0. */
+#define TCAL9538_I2C_ADDR_BASE 0x70u /**< A1=0, A0=0. Strap range: BASE..+3 (0x70..0x73). */
+#define TCAL9538_I2C_ADDR_ALT_BASE \
+	0x20u /**< TCA6408A/PCA9538 alt-part single-strap base (A0=0). Strap range: ALT_BASE..+1 (0x20..0x21). 0x20 BENCH-CONFIRMED 2026-06-16 on the E1M EVK -- see EVK_I2C_ADDR_TCA6408A_MAIN. */
 
 typedef enum {
 	TCAL9538_DIR_OUTPUT = 0, /**< Configuration bit = 0. */
@@ -69,8 +79,11 @@ typedef struct {
  *
  * @param[out] ctx       Driver context (output; populated on success).
  * @param[in]  bus       Open I2C bus handle the expander sits on.
- * @param[in]  addr_7bit 7-bit I2C address (0x70..0x73 by strap).
- *                       Use 0 to fall back to TCAL9538_I2C_ADDR_BASE.
+ * @param[in]  addr_7bit 7-bit I2C address, either a TCA9538/TCAL9538
+ *                       strap (0x70..0x73) or a register-compatible
+ *                       TCA6408A/PCA9538 strap (0x20..0x21 -- see
+ *                       TCAL9538_I2C_ADDR_ALT_BASE).  Use 0 to fall
+ *                       back to TCAL9538_I2C_ADDR_BASE.
  */
 alp_status_t tcal9538_init(tcal9538_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
 

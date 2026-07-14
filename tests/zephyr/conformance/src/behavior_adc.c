@@ -223,7 +223,18 @@ ZTEST(alp_testing_adc_behavior, test_raw_to_uv_conversion_through_dispatcher)
  * under CONFIG_ALP_SOC_NONE (this build) the open()-time SoC-cap gate
  * is compiled out (ALP_SOC_ADC_MAX_RESOLUTION_BITS == UINT16_MAX), so
  * nothing upstream of alp_adc_read_uv catches it either -- the test
- * double happily stores whatever resolution_bits the caller passed. */
+ * double happily stores whatever resolution_bits the caller passed.
+ *
+ * NON-DISCRIMINATING BOUNDARY CHECK, not a regression test: on the
+ * x86-64 host toolchain this suite actually builds with (plain
+ * twister, no UBSan), `1u << 32` lowers to a hardware SHL that masks
+ * the count mod 32, so the PRE-FIX code's `(1u << 32) - 1u` also
+ * evaluates to 0 and ALSO returns ALP_ERR_NOT_READY here -- by
+ * coincidence, not because the old code validated anything. This case
+ * is kept only to pin exactly the value #757 names; it does NOT prove
+ * the fix. See test_read_uv_rejects_resolution_bits_over_31_regression
+ * below for the case that actually discriminates old vs. new code
+ * under this same (non-UBSan) gate. */
 ZTEST(alp_testing_adc_behavior, test_read_uv_rejects_resolution_bits_32)
 {
 	const uint32_t channel_id = 17;
@@ -242,6 +253,42 @@ ZTEST(alp_testing_adc_behavior, test_read_uv_rejects_resolution_bits_32)
 	              ALP_ERR_NOT_READY,
 	              "resolution_bits=32 must be rejected before the width-unsafe shift, got %d",
 	              (int)s);
+	zassert_true(status_in_enum(s), "status %d outside alp_status_t", (int)s);
+
+	alp_adc_close(h);
+}
+
+/* Actual regression test for #757, provable under the plain (no
+ * UBSan) twister gate CI runs: resolution_bits=40 is >31 in both the
+ * pre-fix and post-fix code, but the pre-fix shift-mod-32 hardware
+ * behavior gives it a DIFFERENT (non-zero) full-scale than
+ * resolution_bits=32 does -- `(1u << 40) - 1u` lowers to `(1u << 8) -
+ * 1u` == 255 on this host toolchain, so the pre-fix code does NOT
+ * bail out: it silently computes a bogus converted voltage and
+ * returns ALP_OK. The post-fix explicit `> 31` guard rejects it
+ * regardless of the shift's hardware behavior. This is the case that
+ * fails (wrongly returns ALP_OK) if src/adc_dispatch.c's `> 31` guard
+ * is removed -- see the mutation-proof transcript in the PR/commit
+ * description. */
+ZTEST(alp_testing_adc_behavior, test_read_uv_rejects_resolution_bits_over_31_regression)
+{
+	const uint32_t channel_id = 19;
+	const int32_t  raw_val    = 1;
+
+	zassert_equal(alp_testing_adc_queue_raw(channel_id, &raw_val, 1), ALP_OK, "queue_raw failed");
+
+	alp_adc_config_t cfg = ALP_ADC_CONFIG_DEFAULT(channel_id);
+	cfg.resolution_bits  = 40u;
+	alp_adc_t *h         = alp_adc_open(&cfg);
+	zassert_not_null(h, "adc test double must open ANY instance regardless of resolution_bits");
+
+	int32_t      uv = -1;
+	alp_status_t s  = alp_adc_read_uv(h, &uv);
+	zassert_equal(s,
+	              ALP_ERR_NOT_READY,
+	              "resolution_bits=40 must be rejected (>31), got %d (uv=%d)",
+	              (int)s,
+	              uv);
 	zassert_true(status_in_enum(s), "status %d outside alp_status_t", (int)s);
 
 	alp_adc_close(h);

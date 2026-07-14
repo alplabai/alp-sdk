@@ -13,6 +13,8 @@
 
 #include "alp/chips/da9292.h"
 
+#include "da9292_internal.h"
+
 /* Register map (datasheet Table 12, page 34). */
 #define DA9292_REG_PMC_STATUS_00   0x00u
 #define DA9292_REG_PMC_STATUS_01   0x01u
@@ -105,6 +107,13 @@ static alp_status_t reg_write(da9292_t *ctx, uint8_t reg, uint8_t val)
 {
 	uint8_t buf[2] = { reg, val };
 	return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
+}
+
+bool da9292_poll_budget_step(uint32_t *remaining_us, uint32_t poll_us)
+{
+	if (*remaining_us < poll_us) return false;
+	*remaining_us -= poll_us;
+	return true;
 }
 
 alp_status_t da9292_init(da9292_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
@@ -357,7 +366,9 @@ alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us)
      * budget DOWN by a fixed poll_us each pass is bounded by
      * construction -- it strictly decreases every iteration and
      * exits via the < poll_us guard before it could underflow,
-     * regardless of how large timeout_us is. */
+     * regardless of how large timeout_us is.  The decision itself is
+     * factored into da9292_poll_budget_step() (da9292_internal.h) so
+     * it is directly unit-testable -- see #757 in test_power.c. */
 	const uint32_t poll_us      = 100u;
 	uint32_t       remaining_us = timeout_us;
 	for (;;) {
@@ -365,12 +376,11 @@ alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us)
 		s                  = da9292_get_status(ctx, &st);
 		if (s != ALP_OK) return s;
 		if (st.ch2_pg) return ALP_OK;
-		if (remaining_us < poll_us) return ALP_ERR_TIMEOUT;
 		/* Caller-supplied delay isn't available without dragging in
          * an OS dependency; the loop simply re-reads STATUS until
          * either timeout or PG.  On a real RTOS this should be
          * replaced by an interrupt-driven wait on the INT_N line. */
-		remaining_us -= poll_us;
+		if (!da9292_poll_budget_step(&remaining_us, poll_us)) return ALP_ERR_TIMEOUT;
 	}
 }
 
