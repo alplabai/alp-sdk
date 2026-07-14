@@ -228,6 +228,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_rpc_yocto_self_close
              COMMAND alp_test_rpc_yocto_self_close)
 
+    # #747 regression: y_open()'s failed-open paths must destroy exactly
+    # the pthread mutexes/cond they already initialized (reverse init
+    # order), never more and never less.  Same #include-the-.c-file /
+    # no-alp::sdk-link technique as alp_test_rpc_yocto_self_close above
+    # -- see rpc_yocto_open_fail.c's own header comment.
+    add_executable(alp_test_rpc_yocto_open_fail
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc_yocto_open_fail.c
+    )
+    target_link_libraries(alp_test_rpc_yocto_open_fail PRIVATE Threads::Threads)
+    target_include_directories(alp_test_rpc_yocto_open_fail PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/rpc
+    )
+    target_compile_definitions(alp_test_rpc_yocto_open_fail PRIVATE
+        ALP_SDK_HAVE_OPENAMP_USERLAND=1
+    )
+    target_compile_features(alp_test_rpc_yocto_open_fail PRIVATE c_std_99)
+
+    add_test(NAME alp_test_rpc_yocto_open_fail
+             COMMAND alp_test_rpc_yocto_open_fail)
+
     # GHSA-xhm8-7f87-93q5 defect 2: the dispatcher-level counterpart of
     # the test above.  rpc_yocto_self_close.c drives the BACKEND's
     # file-local struct rpc_be / y_close() / rpc_rx_main() directly;
@@ -264,6 +287,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                      ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-rpc-asan
                      "-fsanitize=address,undefined"
                      alp_test_rpc_yocto_self_close
+                     alp_test_rpc_yocto_open_fail
                      alp_test_rpc_dispatch_close_race)
     set_tests_properties(alp_test_rpc_asan_ubsan PROPERTIES TIMEOUT 600)
 
@@ -273,6 +297,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                      ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-rpc-tsan
                      "-fsanitize=thread"
                      alp_test_rpc_yocto_self_close
+                     alp_test_rpc_yocto_open_fail
                      alp_test_rpc_dispatch_close_race)
     set_tests_properties(alp_test_rpc_tsan PROPERTIES TIMEOUT 600)
 
