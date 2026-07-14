@@ -265,6 +265,49 @@ ZTEST(cc3501e_host_events, test_poll_event_with_payload)
 	zassert_mem_equal(cap[0].payload, gpio_evt, sizeof(gpio_evt), "payload bytes preserved");
 }
 
+/* #740: the callback is handed pointers INTO ctx->evt_buf, valid only for
+ * that one call.  If the callback re-enters cc3501e_poll_events() on the
+ * SAME ctx (the concrete reentrancy risk the issue calls out), the inner
+ * call must be rejected with ALP_ERR_BUSY instead of racing/overwriting the
+ * buffer the outer walk is still reading from. */
+static alp_status_t reentrant_poll_rc = ALP_OK;
+static size_t       reentrant_poll_calls;
+
+static void reentrant_cb(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
+{
+	(void)payload;
+	(void)len;
+	(void)user;
+	capture_cb(opcode, payload, len, user);
+	reentrant_poll_calls++;
+	/* Re-enter from inside the callback -- must not alias evt_buf. */
+	reentrant_poll_rc = cc3501e_poll_events(&fw);
+}
+
+ZTEST(cc3501e_host_events, test_poll_reentrant_from_callback_is_rejected_740)
+{
+	zassert_equal(cc3501e_set_event_callback(&fw, reentrant_cb, NULL), ALP_OK, "set cb");
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_DISCONNECTED, NULL, 0u);
+	reentrant_poll_calls = 0;
+	reentrant_poll_rc    = ALP_OK;
+
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "outer poll -> OK");
+	zassert_equal(reentrant_poll_calls, 2u, "callback fired for both queued events");
+	zassert_equal(reentrant_poll_rc, ALP_ERR_BUSY, "reentrant inner poll rejected -> BUSY");
+	zassert_equal(cap_count, 2u, "both events still delivered correctly by the OUTER poll");
+	zassert_equal(cap[0].opcode, ALP_CC3501E_EVT_WIFI_CONNECTED, "first = connected");
+	zassert_equal(cap[1].opcode, ALP_CC3501E_EVT_WIFI_DISCONNECTED, "second = disconnected");
+
+	/* Guard cleared after the outer call returns -- a later, non-reentrant
+	 * poll works normally again. */
+	zassert_false(fw.evt_busy, "evt_busy cleared once the outer poll returns");
+	zassert_equal(cc3501e_set_event_callback(&fw, capture_cb, NULL), ALP_OK, "restore plain cb");
+	cap_count = 0;
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll after reentrancy -> OK");
+	zassert_equal(cap_count, 0u, "ring was already drained");
+}
+
 /* A second poll after a drain sees an empty ring (delivered exactly once). */
 ZTEST(cc3501e_host_events, test_events_delivered_exactly_once)
 {

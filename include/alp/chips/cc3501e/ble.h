@@ -82,6 +82,9 @@ typedef struct {
  * @param timeout_ms  Upper bound on the poll-by-repeat budget (floored to the
  *                    firmware scan window so a slow scan is not misread as IO).
  * @return ALP_OK once the scan completed (even with zero records);
+ *         @ref ALP_ERR_BUSY if a scan is already decoding on this SAME
+ *         @p ctx (reentrant/concurrent call -- issue #740; a different
+ *         @p ctx is unaffected and may scan concurrently);
  *         ALP_ERR_NOT_READY if BLE is not enabled / not built; mapped error otherwise.
  */
 alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,

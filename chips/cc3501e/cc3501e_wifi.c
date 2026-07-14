@@ -98,23 +98,35 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
                                size_t                *count,
                                uint32_t               timeout_ms)
 {
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (out_records == NULL && cap > 0u) return ALP_ERR_INVAL;
 	if (count != NULL) *count = 0;
 
-	/* The scan records can fill the reply payload; receive into the driver's
-	 * own scratch-sized buffer (a local mirror keeps cc3501e_request's scratch
-	 * free for the framing). */
-	static uint8_t scan_buf[ALP_CC3501E_MAX_PAYLOAD];
-	size_t         got = 0;
-	alp_status_t   s   = poll_by_repeat(ctx,
-	                                    ALP_CC3501E_CMD_WIFI_SCAN_START,
-	                                    NULL,
-	                                    0,
-	                                    scan_buf,
-	                                    sizeof(scan_buf),
-	                                    &got,
-	                                    timeout_ms);
-	if (s != ALP_OK) return s;
+	/* Serialize same-context reentrancy explicitly (issue #740): a caller
+	 * (or a caller re-entering from another thread/ISR) that starts a second
+	 * scan on THIS ctx while one is already decoding here would otherwise
+	 * race on wifi_scan_buf below.  Report BUSY rather than alias. */
+	if (ctx->wifi_scan_busy) return ALP_ERR_BUSY;
+	ctx->wifi_scan_busy = true;
+
+	/* The scan records can fill the reply payload; receive into the
+	 * context's own scratch buffer (per-instance -- see cc3501e_t's
+	 * wifi_scan_buf comment; keeps cc3501e_request's rx_scratch free for
+	 * the framing, and no longer aliases across cc3501e_t instances). */
+	uint8_t     *scan_buf = ctx->wifi_scan_buf;
+	size_t       got      = 0;
+	alp_status_t s        = poll_by_repeat(ctx,
+	                                       ALP_CC3501E_CMD_WIFI_SCAN_START,
+	                                       NULL,
+	                                       0,
+	                                       scan_buf,
+	                                       sizeof(ctx->wifi_scan_buf),
+	                                       &got,
+	                                       timeout_ms);
+	if (s != ALP_OK) {
+		ctx->wifi_scan_busy = false;
+		return s;
+	}
 
 	/* Walk the packed records: each is a 10-byte fixed header immediately
 	 * followed by ssid_len inline SSID bytes (no padding). */
@@ -141,6 +153,7 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 		n++;
 	}
 	if (count != NULL) *count = n;
+	ctx->wifi_scan_busy = false;
 	return ALP_OK;
 }
 

@@ -46,11 +46,24 @@ alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, v
  * (CONFIG_ALP_SDK_CC3501E_EVENT_IRQ) the P2_6 edge ISR schedules this call from
  * a workqueue instead of / alongside the timer poll.
  *
+ * @warning Payload lifetime: the @c payload pointer the callback receives
+ *          points into @p ctx's OWN internal decode buffer and is valid ONLY
+ *          for the duration of that one callback invocation -- copy anything
+ *          you need to keep before returning. This call is NOT reentrant on
+ *          the SAME @p ctx: calling it again on this ctx from inside the
+ *          callback (or concurrently from another thread/ISR) returns
+ *          @ref ALP_ERR_BUSY immediately rather than racing/aliasing the
+ *          buffer the outer call is still walking (issue #740). Two
+ *          DIFFERENT @p ctx instances never share storage and may be polled
+ *          concurrently.
+ *
  * @param ctx  Initialised driver context.
  * @return ALP_OK once the queue was drained + dispatched (even with zero
- *         events); ALP_ERR_NOT_READY if @p ctx is not initialised; the mapped
- *         firmware/link error (e.g. ALP_ERR_IO if the bridge was briefly down)
- *         otherwise -- the caller simply retries on the next poll.
+ *         events); ALP_ERR_NOT_READY if @p ctx is not initialised;
+ *         @ref ALP_ERR_BUSY if this ctx is already draining (reentrant call);
+ *         the mapped firmware/link error (e.g. ALP_ERR_IO if the bridge was
+ *         briefly down) otherwise -- the caller simply retries on the next
+ *         poll.
  */
 alp_status_t cc3501e_poll_events(cc3501e_t *ctx);
 

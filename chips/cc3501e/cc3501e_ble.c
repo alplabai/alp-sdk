@@ -51,16 +51,34 @@ alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
                               size_t                    *count,
                               uint32_t                   timeout_ms)
 {
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (out_records == NULL && cap > 0u) return ALP_ERR_INVAL;
 	if (count != NULL) *count = 0;
 
+	/* Serialize same-context reentrancy explicitly (issue #740), mirroring
+	 * cc3501e_wifi_scan: report BUSY rather than let a second in-flight scan
+	 * on THIS ctx race the decode below. */
+	if (ctx->ble_scan_busy) return ALP_ERR_BUSY;
+	ctx->ble_scan_busy = true;
+
 	/* Mirror of cc3501e_wifi_scan: the firmware returns the advertising
-	 * reports it collected as the BLE_SCAN_START reply payload. */
-	static uint8_t scan_buf[ALP_CC3501E_MAX_PAYLOAD];
-	size_t         got = 0;
-	alp_status_t   s   = poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_BLE_SCAN_START, NULL, 0, scan_buf, sizeof(scan_buf), &got, timeout_ms);
-	if (s != ALP_OK) return s;
+	 * reports it collected as the BLE_SCAN_START reply payload, decoded into
+	 * the context's own per-instance scratch buffer (see cc3501e_t's
+	 * ble_scan_buf comment -- no longer aliases across cc3501e_t instances). */
+	uint8_t     *scan_buf = ctx->ble_scan_buf;
+	size_t       got      = 0;
+	alp_status_t s        = poll_by_repeat(ctx,
+	                                       ALP_CC3501E_CMD_BLE_SCAN_START,
+	                                       NULL,
+	                                       0,
+	                                       scan_buf,
+	                                       sizeof(ctx->ble_scan_buf),
+	                                       &got,
+	                                       timeout_ms);
+	if (s != ALP_OK) {
+		ctx->ble_scan_busy = false;
+		return s;
+	}
 
 	size_t off = 0;
 	size_t n   = 0;
@@ -82,6 +100,7 @@ alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
 		n++;
 	}
 	if (count != NULL) *count = n;
+	ctx->ble_scan_busy = false;
 	return ALP_OK;
 }
 

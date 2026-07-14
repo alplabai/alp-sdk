@@ -50,6 +50,22 @@ struct cc3501e {
 	void              *event_user;
 	uint8_t            rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	uint8_t            tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
+	/* Per-context decode scratch for the scan/event helpers (issue #740).
+	 * Each of these used to be a function-local `static` buffer in
+	 * cc3501e_wifi.c / cc3501e_ble.c / cc3501e_events.c -- process-global
+	 * storage shared by EVERY cc3501e_t instance, so two contexts (or a
+	 * caller re-entering the same context, e.g. from inside the event
+	 * callback) could alias and corrupt each other's in-flight decode.
+	 * Moving the storage in here makes it per-instance, matching
+	 * rx_scratch/tx_scratch above; the *_busy flags make same-instance
+	 * reentrancy an explicit ALP_ERR_BUSY instead of silent aliasing (see
+	 * cc3501e_wifi_scan / cc3501e_ble_scan / cc3501e_poll_events). */
+	uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD];
+	uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD];
+	uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD];
+	bool    wifi_scan_busy;
+	bool    ble_scan_busy;
+	bool    evt_busy;
 };
 
 /**

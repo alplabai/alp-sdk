@@ -507,6 +507,57 @@ ZTEST(cc3501e_host_driver, test_wifi_scan_walks_records)
 	zassert_equal(cc3501e_wifi_sec_kind(recs[1].security_info), CC3501E_WIFI_SEC_OPEN, "rec1 open");
 }
 
+/* #740: cc3501e_wifi_scan's decode buffer moved from a function-local `static`
+ * (shared by every cc3501e_t, process-wide) into per-context storage
+ * (ctx->wifi_scan_buf). A second, independent context must not be able to
+ * disturb a first context's already-decoded scratch. */
+ZTEST(cc3501e_host_driver, test_wifi_scan_buf_is_per_context_740)
+{
+	cc3501e_scan_record_t recs[8];
+	size_t                n = 0u;
+	zassert_equal(cc3501e_wifi_scan(&fw, recs, 8u, &n, 100u), ALP_OK, "SCAN ctx A -> OK");
+	zassert_equal(n, 2u, "two records parsed on ctx A");
+
+	uint8_t snapshot[ALP_CC3501E_MAX_PAYLOAD];
+	memcpy(snapshot, fw.wifi_scan_buf, sizeof(snapshot));
+
+	/* Independent second context, own bus handle -- poison ITS scan scratch
+	 * directly (no bus traffic needed) and confirm ctx A's is untouched.
+	 * Before #740 this would have been the SAME process-global static array. */
+	cc3501e_t ctx_b;
+	zassert_equal(cc3501e_init(&ctx_b, fake_bus), ALP_OK, "init ctx B");
+	memset(ctx_b.wifi_scan_buf, 0xAA, sizeof(ctx_b.wifi_scan_buf));
+
+	zassert_mem_equal(fw.wifi_scan_buf,
+	                  snapshot,
+	                  sizeof(snapshot),
+	                  "ctx A's scan buffer must be unaffected by ctx B's storage (#740)");
+}
+
+/* #740: same-context reentrancy is now an explicit ALP_ERR_BUSY instead of
+ * silently racing the shared decode buffer. */
+ZTEST(cc3501e_host_driver, test_wifi_scan_busy_rejects_reentrant_same_ctx_740)
+{
+	cc3501e_scan_record_t recs[8];
+	size_t                n = 123u;
+
+	fw.wifi_scan_busy = true; /* simulate an in-flight scan on this ctx */
+	zassert_equal(cc3501e_wifi_scan(&fw, recs, 8u, &n, 100u), ALP_ERR_BUSY, "reentrant -> BUSY");
+	zassert_equal(slave.cmd, 0u, "no transfer clocked while busy");
+	zassert_equal(n, 0u, "count still reset to 0 before the busy check");
+
+	fw.wifi_scan_busy = false;
+	zassert_equal(cc3501e_wifi_scan(&fw, recs, 8u, &n, 100u), ALP_OK, "cleared -> scan proceeds");
+	zassert_equal(n, 2u, "normal scan after the busy flag clears");
+}
+
+ZTEST(cc3501e_host_driver, test_wifi_scan_null_ctx_not_ready)
+{
+	cc3501e_scan_record_t recs[8];
+	zassert_equal(
+	    cc3501e_wifi_scan(NULL, recs, 8u, NULL, 100u), ALP_ERR_NOT_READY, "NULL ctx -> NOT_READY");
+}
+
 /* The scan-security decoder is a pure host function over the raw TI SecurityInfo. */
 ZTEST(cc3501e_host_driver, test_wifi_sec_kind_and_name)
 {
@@ -674,6 +725,51 @@ ZTEST(cc3501e_host_driver, test_ble_scan_walks_records)
 	zassert_equal(recs[1].rssi_dbm, -88, "rec1 rssi");
 	zassert_equal(recs[1].name_len, 0u, "rec1 nameless");
 	zassert_str_equal(recs[1].name, "", "rec1 name empty");
+}
+
+/* #740: same non-aliasing + explicit-BUSY guarantees as
+ * test_wifi_scan_buf_is_per_context_740 / test_wifi_scan_busy_rejects_reentrant_same_ctx_740,
+ * for the BLE scan decode buffer (ctx->ble_scan_buf). */
+ZTEST(cc3501e_host_driver, test_ble_scan_buf_is_per_context_740)
+{
+	cc3501e_ble_scan_record_t recs[8];
+	size_t                    n = 0u;
+	zassert_equal(cc3501e_ble_scan(&fw, recs, 8u, &n, 100u), ALP_OK, "BLE_SCAN ctx A -> OK");
+	zassert_equal(n, 2u, "two advertisers parsed on ctx A");
+
+	uint8_t snapshot[ALP_CC3501E_MAX_PAYLOAD];
+	memcpy(snapshot, fw.ble_scan_buf, sizeof(snapshot));
+
+	cc3501e_t ctx_b;
+	zassert_equal(cc3501e_init(&ctx_b, fake_bus), ALP_OK, "init ctx B");
+	memset(ctx_b.ble_scan_buf, 0xAA, sizeof(ctx_b.ble_scan_buf));
+
+	zassert_mem_equal(fw.ble_scan_buf,
+	                  snapshot,
+	                  sizeof(snapshot),
+	                  "ctx A's BLE scan buffer must be unaffected by ctx B's storage (#740)");
+}
+
+ZTEST(cc3501e_host_driver, test_ble_scan_busy_rejects_reentrant_same_ctx_740)
+{
+	cc3501e_ble_scan_record_t recs[8];
+	size_t                    n = 123u;
+
+	fw.ble_scan_busy = true;
+	zassert_equal(cc3501e_ble_scan(&fw, recs, 8u, &n, 100u), ALP_ERR_BUSY, "reentrant -> BUSY");
+	zassert_equal(slave.cmd, 0u, "no transfer clocked while busy");
+	zassert_equal(n, 0u, "count still reset to 0 before the busy check");
+
+	fw.ble_scan_busy = false;
+	zassert_equal(cc3501e_ble_scan(&fw, recs, 8u, &n, 100u), ALP_OK, "cleared -> scan proceeds");
+	zassert_equal(n, 2u, "normal scan after the busy flag clears");
+}
+
+ZTEST(cc3501e_host_driver, test_ble_scan_null_ctx_not_ready)
+{
+	cc3501e_ble_scan_record_t recs[8];
+	zassert_equal(
+	    cc3501e_ble_scan(NULL, recs, 8u, NULL, 100u), ALP_ERR_NOT_READY, "NULL ctx -> NOT_READY");
 }
 
 /* ADV_START hand-packs the 7-byte header (the doc struct's 8th pad byte is
