@@ -73,6 +73,12 @@ alp_status_t lsm6dso_read_id(lsm6dso_t *dev, uint8_t *id_out)
 alp_status_t lsm6dso_set_accel(lsm6dso_t *dev, lsm6dso_odr_t odr, lsm6dso_accel_fs_t fs)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	/* The ODR field is 4 bits but lsm6dso_odr_t only declares 0x0..0xA;
+     * masking alone would write a reserved encoding and still report
+     * success.  FS_XL is exactly 2 bits wide, so fs needs no check. */
+	if ((int)odr < (int)LSM6DSO_ODR_OFF || (int)odr > (int)LSM6DSO_ODR_6660_HZ) {
+		return ALP_ERR_INVAL;
+	}
 	/* CTRL1_XL: ODR_XL[7:4] | FS_XL[3:2] | LPF2_XL_EN[1] | reserved[0] */
 	uint8_t      v = (uint8_t)(((uint8_t)odr & 0x0Fu) << 4) | (uint8_t)(((uint8_t)fs & 0x03u) << 2);
 	alp_status_t s = reg_write(dev, REG_CTRL1_XL, v);
@@ -83,6 +89,10 @@ alp_status_t lsm6dso_set_accel(lsm6dso_t *dev, lsm6dso_odr_t odr, lsm6dso_accel_
 alp_status_t lsm6dso_set_gyro(lsm6dso_t *dev, lsm6dso_odr_t odr, lsm6dso_gyro_fs_t fs)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	/* Same reserved-encoding trap as lsm6dso_set_accel. */
+	if ((int)odr < (int)LSM6DSO_ODR_OFF || (int)odr > (int)LSM6DSO_ODR_6660_HZ) {
+		return ALP_ERR_INVAL;
+	}
 	/* CTRL2_G: ODR_G[7:4] | FS_G[3:2] | FS_125[1] | reserved[0] */
 	uint8_t      v = (uint8_t)(((uint8_t)odr & 0x0Fu) << 4) | (uint8_t)(((uint8_t)fs & 0x03u) << 2);
 	alp_status_t s = reg_write(dev, REG_CTRL2_G, v);

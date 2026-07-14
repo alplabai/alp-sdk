@@ -84,9 +84,35 @@ alp_status_t icm42670_read_id(icm42670_t *dev, uint8_t *id_out)
 	return reg_read(dev, REG_WHO_AM_I, id_out, 1);
 }
 
+/* icm42670_odr_t is sparse: it declares 0x0, 0x4..0x8 and 0xA..0xF.
+ * 0x1/0x2/0x3/0x9 sit inside the 4-bit ODR field but are reserved
+ * encodings, so no range check can reject them -- only an explicit
+ * member test does. */
+static bool odr_is_declared(icm42670_odr_t odr)
+{
+	switch (odr) {
+	case ICM42670_ODR_OFF:
+	case ICM42670_ODR_1_5625_HZ:
+	case ICM42670_ODR_3_125_HZ:
+	case ICM42670_ODR_6_25_HZ:
+	case ICM42670_ODR_12_5_HZ:
+	case ICM42670_ODR_25_HZ:
+	case ICM42670_ODR_50_HZ:
+	case ICM42670_ODR_100_HZ:
+	case ICM42670_ODR_200_HZ:
+	case ICM42670_ODR_400_HZ:
+	case ICM42670_ODR_800_HZ:
+	case ICM42670_ODR_1600_HZ:
+		return true;
+	default:
+		return false;
+	}
+}
+
 alp_status_t icm42670_set_accel(icm42670_t *dev, icm42670_odr_t odr, icm42670_accel_fs_t fs)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	if (!odr_is_declared(odr)) return ALP_ERR_INVAL;
 	/* ACCEL_CONFIG0: ACCEL_UI_FS_SEL[6:5] | ACCEL_ODR[3:0]. */
 	uint8_t      v = (uint8_t)((((uint8_t)fs & 0x03u) << 5) | ((uint8_t)odr & 0x0Fu));
 	alp_status_t s = reg_write(dev, REG_ACCEL_CONFIG0, v);
@@ -97,6 +123,7 @@ alp_status_t icm42670_set_accel(icm42670_t *dev, icm42670_odr_t odr, icm42670_ac
 alp_status_t icm42670_set_gyro(icm42670_t *dev, icm42670_odr_t odr, icm42670_gyro_fs_t fs)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	if (!odr_is_declared(odr)) return ALP_ERR_INVAL;
 	/* GYRO_CONFIG0: GYRO_UI_FS_SEL[6:5] | GYRO_ODR[3:0]. */
 	uint8_t      v = (uint8_t)((((uint8_t)fs & 0x03u) << 5) | ((uint8_t)odr & 0x0Fu));
 	alp_status_t s = reg_write(dev, REG_GYRO_CONFIG0, v);

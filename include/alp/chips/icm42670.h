@@ -108,10 +108,19 @@ alp_status_t icm42670_init(icm42670_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 /** Read WHO_AM_I for liveness checks. */
 alp_status_t icm42670_read_id(icm42670_t *dev, uint8_t *id_out);
 
-/** Configure accelerometer ODR + full-scale range. */
+/**
+ * @brief Configure accelerometer ODR + full-scale range.
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
+ *   (`odr` is not a declared enum member -- note icm42670_odr_t is
+ *   sparse, so the reserved encodings inside its range are rejected).
+ */
 alp_status_t icm42670_set_accel(icm42670_t *dev, icm42670_odr_t odr, icm42670_accel_fs_t fs);
 
-/** Configure gyroscope ODR + full-scale range. */
+/**
+ * @brief Configure gyroscope ODR + full-scale range.
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
+ *   (`odr` is not a declared enum member).
+ */
 alp_status_t icm42670_set_gyro(icm42670_t *dev, icm42670_odr_t odr, icm42670_gyro_fs_t fs);
 
 /** Read the current accelerometer sample (raw int16 counts). */

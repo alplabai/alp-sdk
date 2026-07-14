@@ -71,6 +71,14 @@ lis2dw12_set_accel(lis2dw12_t *dev, lis2dw12_odr_t odr, lis2dw12_fs_t fs, lis2dw
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 
+	/* The ODR field is 4 bits but lis2dw12_odr_t only declares 0x0..0x9;
+     * masking alone would write a reserved encoding and still report
+     * success.  `mode` is validated by the switch below, and FS is
+     * exactly 2 bits wide, so neither needs a check here. */
+	if ((int)odr < (int)LIS2DW12_ODR_OFF || (int)odr > (int)LIS2DW12_ODR_1600_HZ) {
+		return ALP_ERR_INVAL;
+	}
+
 	/* CTRL1: ODR[7:4] | MODE[3:2] | LP_MODE[1:0].  We split the four
      * lis2dw12_mode_t presets into the two-field encoding the chip
      * uses internally. */
