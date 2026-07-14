@@ -17,5 +17,5 @@
 #
 # Bump in the same PR that lands the matching CHANGELOG.md entry.
 
-version: 0.10.0
+version: 0.10.1
 status:  released        # released | development | preview

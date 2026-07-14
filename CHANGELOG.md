@@ -7,6 +7,27 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+## [v0.10.1] - 2026-07-14
+
+### Fixed — `west alp-build` unknown after bootstrap (#769)
+
+- `scripts/bootstrap.sh` created the workspace with the plain upstream Zephyr
+  manifest, so alp-sdk was never a manifest project and west never discovered
+  its `self.west-commands` — `west alp-build` (+ `alp-flash`/`alp-image`/
+  `alp-clean`/`alp-renode`) were "unknown command". Bootstrap now inits from
+  alp-sdk's own `west.yml` (`west init -l <alp-sdk>`): alp-sdk becomes the
+  manifest repo (topdir = its parent), and its extension commands register in
+  the workspace. Adds a reuse-guard (only reuse a workspace whose manifest is
+  alp-sdk's) and a post-init legibility guard. `alp doctor` + the getting-
+  started/contribution/testing docs move to the topdir-is-parent layout.
+
+### Changed — single-source the SDK version; de-version README/docs (#445)
+
+- The version lives in `metadata/sdk_version.yaml` alone; `alp_cli.__version__`
+  reads it, and README/docs no longer hard-code a version label (they derive
+  it). `scripts/bump_version.py` + `scripts/check_version_doc_sync.py`
+  simplified to that single source.
+
 ## [v0.10.0] - 2026-07-14
 
 ### Changed — Display/LVGL examples migrated off direct Zephyr `display_*` APIs (issue #520)
