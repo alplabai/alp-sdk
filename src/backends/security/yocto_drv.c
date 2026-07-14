@@ -361,9 +361,10 @@ out:
 		 * earlier EVP_* failure never leaves it caller-visible.  The
 		 * dispatcher (security_dispatch.c) enforces this centrally too;
 		 * this is defence-in-depth so the backend behaves correctly even
-		 * if called some other way. */
-		memset(plain_out, 0, cipher_len);
-		__asm__ volatile("" ::: "memory");
+		 * if called some other way.  OPENSSL_cleanse() matches this
+		 * file's own idiom for wiping sensitive buffers -- see the
+		 * key-material wipe in y_aead_close() below. */
+		OPENSSL_cleanse(plain_out, cipher_len);
 	}
 	return status;
 }

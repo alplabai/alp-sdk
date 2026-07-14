@@ -773,17 +773,7 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 		memset(se_ctx, 0, sizeof(se_ctx));
 		__asm__ volatile("" ::: "memory");
 
-		const alp_status_t status = (rc == 0) ? se_rc_to_alp((int)pkt.resp_error_code) : ALP_ERR_IO;
-		/* Discard contract (<alp/security.h> alp_aead_decrypt(), issue
-		 * #750): the SE writes plain_out directly via send_output_addr
-		 * regardless of whether the tag ends up verifying -- wipe it on
-		 * every non-OK status.  The dispatcher (security_dispatch.c)
-		 * enforces this centrally too; this is defence-in-depth. */
-		if (status != ALP_OK && cipher_len > 0) {
-			memset(plain_out, 0, cipher_len);
-			__asm__ volatile("" ::: "memory");
-		}
-		return status;
+		return (rc == 0) ? se_rc_to_alp((int)pkt.resp_error_code) : ALP_ERR_IO;
 	}
 
 	/* AES-GCM auth-decrypt: MBEDTLS_GCM_AUTH_DECRYPT (6, services_lib_api.h).
@@ -804,16 +794,9 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 	pkt.send_output_addr      = local_to_global(plain_out);
 	pkt.send_tag_addr         = local_to_global(tag);
 	pkt.send_tag_length       = (uint32_t)tag_len;
-	const alp_status_t status =
-	    (alp_se_crypto_send_request(&pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CCM_GCM) == 0)
-	        ? se_rc_to_alp((int)pkt.resp_error_code)
-	        : ALP_ERR_IO;
-	/* Discard contract -- see the ChaCha20-Poly1305 branch above. */
-	if (status != ALP_OK && cipher_len > 0) {
-		memset(plain_out, 0, cipher_len);
-		__asm__ volatile("" ::: "memory");
-	}
-	return status;
+	return (alp_se_crypto_send_request(&pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_CCM_GCM) == 0)
+	           ? se_rc_to_alp((int)pkt.resp_error_code)
+	           : ALP_ERR_IO;
 #else
 	/* Unreachable by construction (see se_aead_encrypt / issue #239). */
 	(void)iv;

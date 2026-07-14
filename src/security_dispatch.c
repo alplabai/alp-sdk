@@ -84,9 +84,11 @@ static struct alp_aead _aead_pool[CONFIG_ALP_SDK_MAX_AEAD_HANDLES];
  * backend gets it -- including a future one that forgets -- rather than
  * relying on backend-local discipline as the only line of defence.
  *
- * No shared secure-zeroize helper exists elsewhere in the tree (grepped
- * for `zeroize`/`secure_zero`/`explicit_bzero`/`memset_s` -- none), so
- * this follows the one idiom the codebase already uses for exactly this
+ * No secure-zeroize helper is available to this file: OpenSSL's
+ * OPENSSL_cleanse() (used by yocto_drv.c for its own key-material wipe)
+ * is OpenSSL-specific, and this dispatcher is OS/backend-agnostic and
+ * must build for every backend, including ones without OpenSSL.  So this
+ * follows the portable idiom the codebase already uses for exactly this
  * problem (src/backends/security/se_cryptocell.c's key-material wipes):
  * memset() immediately followed by an empty `asm volatile("" ::: "memory")`
  * compiler barrier.  The barrier is what keeps an optimizer that can prove
