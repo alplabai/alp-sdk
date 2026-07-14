@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Regression coverage for issue #744: the Yocto PWM sysfs backend
- * (src/backends/pwm/yocto_drv.c) must not unexport a channel it did
- * not itself export.  EBUSY from the sysfs `export` write means
- * another process already owns the channel, and every rollback/close
- * path must leave that channel's export intact.
+ * (src/backends/pwm/yocto_drv.c) must not unexport, disable, or
+ * reconfigure a channel it did not itself export.  EBUSY from the
+ * sysfs `export` write means another process already owns the
+ * channel, and every open/rollback/close path must leave that
+ * channel's export -- and its polarity/period/duty_cycle/enable
+ * configuration -- intact.
  *
  * This file #includes the real backend .c file directly (same
  * technique as tests/yocto/rpc_yocto_self_close.c) so it can drive
@@ -75,6 +77,20 @@ static bool saw_disable(void)
 		if (strstr(g_call_paths[i], "/enable") != NULL && strcmp(g_call_vals[i], "0") == 0) {
 			return true;
 		}
+	}
+	return false;
+}
+
+/* True if any per-channel configuration attribute (polarity, period,
+ * duty_cycle or enable) was written -- i.e. the channel was set up or
+ * touched beyond the bare export/unexport request. */
+static bool saw_configure_write(void)
+{
+	for (int i = 0; i < g_call_count; ++i) {
+		if (strstr(g_call_paths[i], "/polarity") != NULL) return true;
+		if (strstr(g_call_paths[i], "/period") != NULL) return true;
+		if (strstr(g_call_paths[i], "/duty_cycle") != NULL) return true;
+		if (strstr(g_call_paths[i], "/enable") != NULL) return true;
 	}
 	return false;
 }
@@ -171,7 +187,19 @@ static void test_post_export_failure_new_export_unexports(void)
 	ALP_ASSERT_TRUE(saw_unexport());
 }
 
-static void test_post_export_failure_already_exported_does_not_unexport(void)
+/* Regression for the round-3 finding: y_open() must leave a reused
+ * (EBUSY) channel's polarity/period/duty_cycle/enable completely
+ * untouched, not just skip the unexport.  Without the ownership gate
+ * added around those writes, open() would zero the duty, rewrite the
+ * period, and force-enable a channel another process already
+ * configured -- which is precisely the "left ... exactly as that other
+ * owner set it up" state y_close()'s doc comment claims.  This test is
+ * what makes that claim true on the open side (y_close's own tests
+ * above cover the close side).  g_fail_period stays set so a mutation
+ * that drops the gate (making open() attempt the period write again)
+ * is also caught here: the forced IO failure would surface as
+ * rc != ALP_OK, which this test rejects too. */
+static void test_already_exported_open_does_not_configure(void)
 {
 	reset_fixture();
 	g_export_result = ALP_ERR_BUSY;
@@ -180,8 +208,10 @@ static void test_post_export_failure_already_exported_does_not_unexport(void)
 	struct alp_pwm           h;
 	alp_pwm_backend_state_t *st;
 	alp_status_t             rc = open_handle(&h, &st);
-	ALP_ASSERT_TRUE(rc != ALP_OK);
-	ALP_ASSERT_TRUE(!saw_unexport());
+	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+	ALP_ASSERT_TRUE(!saw_configure_write());
+
+	y_close(st);
 }
 
 int main(void)
@@ -190,7 +220,7 @@ int main(void)
 	test_already_exported_does_not_own_and_close_leaves_export();
 	test_already_exported_close_does_not_disable();
 	test_post_export_failure_new_export_unexports();
-	test_post_export_failure_already_exported_does_not_unexport();
+	test_already_exported_open_does_not_configure();
 
 	ALP_TEST_SUMMARY();
 }

@@ -189,22 +189,30 @@ static void _unexport_if_owned(const y_pwm_data_t *d)
 }
 
 /**
- * @brief Export the channel, set period + polarity, prime 0 % duty, enable.
+ * @brief Claim (or reuse) the channel; only an owning handle configures it.
  *
  * Writes the channel index to pwmchip<chip>/export (EBUSY is tolerated:
- * an already-exported channel is reusable), then programs period,
- * polarity and a 0 ns duty_cycle before enabling.  The sysfs ABI has no
- * queryable capability surface, so caps stay 0.
+ * an already-exported channel is reusable).  If -- and only if -- this
+ * call is the one that actually claimed the export (rc == ALP_OK, not
+ * EBUSY), it goes on to program polarity, period, a 0 ns duty_cycle and
+ * enable.  A reused channel (EBUSY) is left completely alone: no
+ * polarity / period / duty_cycle / enable write is issued, so whatever
+ * the other owner configured survives this open() untouched (#744) --
+ * see y_close()'s matching gate, which is what makes that guarantee
+ * hold end-to-end.  The sysfs ABI has no queryable capability surface,
+ * so caps stay 0 either way.
  *
  * Note the ABI ordering constraint: duty_cycle must be <= period, so
- * period is written first and duty_cycle is left at 0 here.
+ * period is written first and duty_cycle is left at 0 here (owning
+ * path only).
  *
  * @par Ownership (#744)
  *      `d->owns_export` records whether THIS call is the one that
  *      claimed the channel (export returned ALP_OK) versus reused an
  *      already-exported one (EBUSY).  Every rollback / close path below
  *      routes through @ref _unexport_if_owned so a handle that merely
- *      reused someone else's export never disables or releases it.
+ *      reused someone else's export never disables or releases it --
+ *      and, per the gate below, never reconfigures it either.
  */
 static alp_status_t
 y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
@@ -258,45 +266,51 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	h->period_ns      = (cfg->period_ns != 0u) ? cfg->period_ns : 1000000u; /* 1 kHz */
 	h->flags          = (uint32_t)cfg->polarity;
 
-	/* polarity is write-rejected by some drivers while enabled, so set
-     * it before enabling.  EINVAL/ENOTSUP here is non-fatal: not every
-     * driver allows polarity inversion. */
-	const char *pol = (cfg->polarity == ALP_PWM_POLARITY_INVERTED) ? "inversed" : "normal";
-	char        pol_path[96];
-	n = snprintf(pol_path, sizeof(pol_path), "%s/polarity", d->dir);
-	if (n > 0 && (size_t)n < sizeof(pol_path)) {
-		(void)_sysfs_write(pol_path, pol); /* best-effort */
-	}
+	/* Only the handle that actually claimed the export gets to configure
+     * the channel (#744).  A reused (EBUSY) channel is left completely
+     * alone here -- no polarity / period / duty_cycle / enable write --
+     * so the other owner's setup survives this open() untouched; see
+     * y_close()'s matching gate for the other half of that guarantee. */
+	if (d->owns_export) {
+		/* polarity is write-rejected by some drivers while enabled, so set
+	     * it before enabling.  EINVAL/ENOTSUP here is non-fatal: not every
+	     * driver allows polarity inversion. */
+		const char *pol = (cfg->polarity == ALP_PWM_POLARITY_INVERTED) ? "inversed" : "normal";
+		char        pol_path[96];
+		n = snprintf(pol_path, sizeof(pol_path), "%s/polarity", d->dir);
+		if (n > 0 && (size_t)n < sizeof(pol_path)) {
+			(void)_sysfs_write(pol_path, pol); /* best-effort */
+		}
 
-	/* period before duty_cycle (ABI: duty_cycle <= period).  On any
-     * post-export failure, unexport the channel (best-effort, and only
-     * if this handle owns the export -- #744) before returning so a
-     * later retry does not inherit a half-configured channel (period
-     * set but never enabled, or stale duty); see _unexport_if_owned() /
-     * y_close()'s unexport. */
-	rc = _write_ns(d, "period", h->period_ns);
-	if (rc != ALP_OK) {
-		_unexport_if_owned(d);
-		free(d);
-		return rc;
-	}
-	rc = _write_ns(d, "duty_cycle", 0u);
-	if (rc != ALP_OK) {
-		_unexport_if_owned(d);
-		free(d);
-		return rc;
-	}
-
-	/* Enable so subsequent set_duty takes effect immediately; output
-     * stays low at 0 % duty until the caller arms it. */
-	char en_path[96];
-	n = snprintf(en_path, sizeof(en_path), "%s/enable", d->dir);
-	if (n > 0 && (size_t)n < sizeof(en_path)) {
-		rc = _sysfs_write(en_path, "1");
+		/* period before duty_cycle (ABI: duty_cycle <= period).  On any
+	     * post-export failure, unexport the channel (best-effort) before
+	     * returning so a later retry does not inherit a half-configured
+	     * channel (period set but never enabled, or stale duty); see
+	     * _unexport_if_owned() / y_close()'s unexport. */
+		rc = _write_ns(d, "period", h->period_ns);
 		if (rc != ALP_OK) {
 			_unexport_if_owned(d);
 			free(d);
 			return rc;
+		}
+		rc = _write_ns(d, "duty_cycle", 0u);
+		if (rc != ALP_OK) {
+			_unexport_if_owned(d);
+			free(d);
+			return rc;
+		}
+
+		/* Enable so subsequent set_duty takes effect immediately; output
+	     * stays low at 0 % duty until the caller arms it. */
+		char en_path[96];
+		n = snprintf(en_path, sizeof(en_path), "%s/enable", d->dir);
+		if (n > 0 && (size_t)n < sizeof(en_path)) {
+			rc = _sysfs_write(en_path, "1");
+			if (rc != ALP_OK) {
+				_unexport_if_owned(d);
+				free(d);
+				return rc;
+			}
 		}
 	}
 
@@ -410,10 +424,14 @@ static void y_capture_close(alp_pwm_backend_state_t *st)
  * Best-effort, and both the "0" write to enable and the unexport are
  * gated on @c d->owns_export (#744): only a handle that actually claimed
  * the channel (export returned ALP_OK, not EBUSY) may stop or release
- * it.  A channel this handle merely reused (already exported by another
- * process) is left running and exported exactly as that other owner set
- * it up -- closing must not steal, disable, or release a channel this
- * handle never claimed.  Errors are swallowed -- close has no return.
+ * it.  This function alone cannot guarantee a reused channel is left as
+ * the other owner set it up -- that guarantee only holds because
+ * y_open() *also* gates its polarity/period/duty_cycle/enable writes on
+ * the same @c owns_export flag (a reused channel is never configured in
+ * the first place).  Together the two gates mean closing a handle that
+ * merely reused another process's export neither steals, reconfigures,
+ * disables, nor releases that channel.  Errors are swallowed -- close
+ * has no return.
  */
 static void y_close(alp_pwm_backend_state_t *st)
 {
