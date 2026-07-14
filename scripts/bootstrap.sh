@@ -17,15 +17,15 @@
 #
 # Idempotent -- re-running skips work that's already done.
 #
-# Expected directory layout after a successful run:
+# Expected directory layout after a successful run (the alp-sdk checkout's
+# PARENT is the west topdir; alp-sdk is the manifest repo -- `west init -l`, #769):
 #
-#     <parent>/
-#     ├── alp-sdk/                  (this repo)
-#     └── zephyrproject/
-#         ├── .west/
-#         ├── .venv/                (hermetic west + Zephyr/SDK Python deps)
-#         ├── zephyr/               (v4.4.0 pin -- keep in sync with west.yml)
-#         └── modules/
+#     <parent>/                     (west topdir)
+#     ├── alp-sdk/                  (this repo -- the workspace manifest)
+#     ├── .west/
+#     ├── .venv/                    (hermetic west + Zephyr/SDK Python deps)
+#     ├── zephyr/                   (v4.4.0 pin -- keep in sync with west.yml)
+#     └── modules/                  (HALs + extras)
 #
 # Usage:
 #
@@ -36,7 +36,7 @@
 #
 # After it runs:
 #
-#     export ZEPHYR_BASE=$PWD/../zephyrproject/zephyr
+#     export ZEPHYR_BASE=$PWD/../zephyr
 #     bash scripts/test-all.sh
 
 set -uo pipefail

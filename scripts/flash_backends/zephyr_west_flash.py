@@ -52,7 +52,7 @@ class ZephyrWestFlash:
                 ok=False,
                 elapsed_s=time.monotonic() - start,
                 message=("zephyr_west_flash: `west` is not on PATH; "
-                         "activate the Zephyr venv (`. zephyrproject/.venv/"
+                         "activate the Zephyr venv (`. ../.venv/"
                          "bin/activate`) or `pip install west`."),
             )
 

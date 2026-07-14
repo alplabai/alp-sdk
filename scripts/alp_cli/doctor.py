@@ -3,7 +3,7 @@
 Runs a battery of host / filesystem / `--version` checks and prints one
 `[PASS]`/`[WARN]`/`[FAIL]` line each with a remediation hint, mirroring the
 truth encoded in `scripts/bootstrap.sh` (workspace venv at
-`../zephyrproject/.venv`, the Zephyr pin read live from west.yml,
+`<topdir>/.venv` beside alp-sdk, the Zephyr pin read live from west.yml,
 `.west`/`VERSION` probing).
 
 It is strictly HW-free: no build, no board, no flash -- pure environment,
@@ -97,8 +97,10 @@ def _repo_root() -> Path:
 
 
 def _workspace_dir() -> Path:
-    """The Zephyr workspace bootstrap.sh creates beside the alp-sdk checkout."""
-    return _repo_root().parent / "zephyrproject"
+    """The west workspace topdir bootstrap.sh creates: the alp-sdk checkout's
+    parent (bootstrap does `west init -l <alp-sdk>`, so alp-sdk is the manifest
+    repo and its parent is the topdir; #769)."""
+    return _repo_root().parent
 
 
 def _zephyr_pin() -> str:
@@ -411,7 +413,8 @@ def _check_west_workspace() -> CheckResult:
 
 def _check_workspace_venv() -> CheckResult:
     # Prefer the venv beside the active ZEPHYR_BASE workspace; fall back to the
-    # canonical ../zephyrproject/.venv that bootstrap.sh creates.
+    # canonical <topdir>/.venv that bootstrap.sh creates (topdir = alp-sdk's
+    # parent, #769).
     candidates: list[Path] = []
     base = _zephyr_base()
     if base is not None:
@@ -421,7 +424,7 @@ def _check_workspace_venv() -> CheckResult:
     venv = next((c for c in candidates if c.is_dir()), None)
     if venv is None:
         return CheckResult(
-            "workspace-venv", WARN, "workspace venv (../zephyrproject/.venv) not found",
+            "workspace-venv", WARN, "workspace venv (<topdir>/.venv beside alp-sdk) not found",
             "Create it with scripts/bootstrap.sh.",
         )
     # Active if the running interpreter lives inside the venv.

@@ -27,7 +27,7 @@ bash scripts/bootstrap.sh
 # Make Zephyr reachable for builds.  For native_sim/native/64 the
 # host gcc is used; the Zephyr SDK is only needed for cross-compiled
 # real-silicon scenarios (E1M-AEN / V2N-M33 / iMX93-M33 boards).
-export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+export ZEPHYR_BASE="$PWD/../zephyr"
 export ZEPHYR_TOOLCHAIN_VARIANT=host   # use `zephyr` only when ZEPHYR_SDK_INSTALL_DIR is set
                                         # for the *.aen / *.v2n-m33 / *.imx93-m33 scenarios
 
@@ -138,7 +138,7 @@ sudo apt-get install -y libmosquitto-dev libasound2-dev libssl-dev pkg-config
 ### Zephyr / twister only
 
 ```bash
-export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+export ZEPHYR_BASE="$PWD/../zephyr"
 python3 "$ZEPHYR_BASE/scripts/twister" \
     --testsuite-root tests/zephyr \
     --testsuite-root examples \
