@@ -29,12 +29,13 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_dispatch_cache.h"
+#include "alp_slot_claim.h"
 #include "backends/mproc/mproc_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(mproc);
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_SHMEM_HANDLES
 #define CONFIG_ALP_SDK_MAX_SHMEM_HANDLES 2
@@ -53,9 +54,12 @@ static struct alp_hwsem _hwsem_pool[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
 static struct alp_shmem *_alloc_shmem(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_SHMEM_HANDLES; ++i) {
-		if (!_shmem_pool[i].in_use) {
-			memset(&_shmem_pool[i], 0, sizeof(_shmem_pool[i]));
-			_shmem_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch
+		 * the slot's other fields (in_use is the struct's last
+		 * member, so zero everything before it -- including
+		 * lifecycle/active_ops, parking a fresh slot at UNOPENED). */
+		if (alp_slot_try_claim(&_shmem_pool[i].in_use)) {
+			memset(&_shmem_pool[i], 0, offsetof(struct alp_shmem, in_use));
 			return &_shmem_pool[i];
 		}
 	}
@@ -64,15 +68,14 @@ static struct alp_shmem *_alloc_shmem(void)
 
 static void _free_shmem(struct alp_shmem *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 static struct alp_mbox *_alloc_mbox(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_MBOX_HANDLES; ++i) {
-		if (!_mbox_pool[i].in_use) {
-			memset(&_mbox_pool[i], 0, sizeof(_mbox_pool[i]));
-			_mbox_pool[i].in_use = true;
+		if (alp_slot_try_claim(&_mbox_pool[i].in_use)) {
+			memset(&_mbox_pool[i], 0, offsetof(struct alp_mbox, in_use));
 			return &_mbox_pool[i];
 		}
 	}
@@ -81,15 +84,14 @@ static struct alp_mbox *_alloc_mbox(void)
 
 static void _free_mbox(struct alp_mbox *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 static struct alp_hwsem *_alloc_hwsem(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_HWSEM_HANDLES; ++i) {
-		if (!_hwsem_pool[i].in_use) {
-			memset(&_hwsem_pool[i], 0, sizeof(_hwsem_pool[i]));
-			_hwsem_pool[i].in_use = true;
+		if (alp_slot_try_claim(&_hwsem_pool[i].in_use)) {
+			memset(&_hwsem_pool[i], 0, offsetof(struct alp_hwsem, in_use));
 			return &_hwsem_pool[i];
 		}
 	}
@@ -98,7 +100,7 @@ static struct alp_hwsem *_alloc_hwsem(void)
 
 static void _free_hwsem(struct alp_hwsem *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 /* ================================================================== */
@@ -137,6 +139,7 @@ alp_shmem_t *alp_shmem_open(const alp_shmem_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
@@ -144,19 +147,29 @@ alp_status_t alp_shmem_view(alp_shmem_t *s, void **base_out, size_t *size_out)
 {
 	if (base_out != NULL) *base_out = NULL;
 	if (size_out != NULL) *size_out = 0;
-	if (s == NULL || !s->in_use) return ALP_ERR_NOT_READY;
-	if (s->state.ops == NULL || s->state.ops->shmem_view == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	/* Gate on the lifecycle byte, not a plain in_use read -- see
+	 * alp_slot_claim.h's op_enter/leave doc comment (issue #629). */
+	if (s == NULL || !alp_handle_op_enter(&s->lifecycle, &s->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return s->state.ops->shmem_view(&s->state, base_out, size_out);
+	alp_status_t rc = (s->state.ops == NULL || s->state.ops->shmem_view == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : s->state.ops->shmem_view(&s->state, base_out, size_out);
+	alp_handle_op_leave(&s->active_ops);
+	return rc;
 }
 
 void alp_shmem_close(alp_shmem_t *s)
 {
-	if (s == NULL || !s->in_use) return;
+	if (s == NULL) return;
+	/* begin_close CAS OPEN->CLOSING then spins until every op that
+	 * entered before the CAS has left -- see alp_slot_claim.h (#629).
+	 * Idempotent: a second/never-opened close no-ops. */
+	if (!alp_handle_begin_close(&s->lifecycle, &s->active_ops)) return;
 	if (s->state.ops != NULL && s->state.ops->shmem_close != NULL) {
 		s->state.ops->shmem_close(&s->state);
 	}
+	alp_lifecycle_set(&s->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free_shmem(s);
 }
 
@@ -196,34 +209,54 @@ alp_mbox_t *alp_mbox_open(const alp_mbox_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_t timeout_ms)
 {
-	if (mb == NULL || !mb->in_use) return ALP_ERR_NOT_READY;
-	if (data == NULL && len > 0) return ALP_ERR_INVAL;
-	if (mb->state.ops == NULL || mb->state.ops->mbox_send == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	if (data == NULL && len > 0) return ALP_ERR_INVAL; /* param check before gate */
+	/* Counted via alp_handle_op_enter/leave (issue #629): send() can block
+	 * up to timeout_ms draining to the peer core, so alp_mbox_close()
+	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c) instead of the busy-spin
+	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
+	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
+	if (mb == NULL || !alp_handle_op_enter(&mb->lifecycle, &mb->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return mb->state.ops->mbox_send(&mb->state, data, len, timeout_ms);
+	alp_status_t rc = (mb->state.ops == NULL || mb->state.ops->mbox_send == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : mb->state.ops->mbox_send(&mb->state, data, len, timeout_ms);
+	alp_handle_op_leave(&mb->active_ops);
+	return rc;
 }
 
 alp_status_t alp_mbox_set_callback(alp_mbox_t *mb, alp_mbox_msg_cb_t cb, void *user)
 {
-	if (mb == NULL || !mb->in_use) return ALP_ERR_NOT_READY;
-	if (mb->state.ops == NULL || mb->state.ops->mbox_set_callback == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	if (mb == NULL || !alp_handle_op_enter(&mb->lifecycle, &mb->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return mb->state.ops->mbox_set_callback(&mb->state, cb, user);
+	alp_status_t rc = (mb->state.ops == NULL || mb->state.ops->mbox_set_callback == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : mb->state.ops->mbox_set_callback(&mb->state, cb, user);
+	alp_handle_op_leave(&mb->active_ops);
+	return rc;
 }
 
 void alp_mbox_close(alp_mbox_t *mb)
 {
-	if (mb == NULL || !mb->in_use) return;
+	if (mb == NULL) return;
+	/* Sleep-poll drain (issue #629): this pool counts alp_mbox_send(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&mb->lifecycle, &mb->active_ops)) return;
 	if (mb->state.ops != NULL && mb->state.ops->mbox_close != NULL) {
 		mb->state.ops->mbox_close(&mb->state);
 	}
+	alp_lifecycle_set(&mb->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free_mbox(mb);
 }
 
@@ -259,42 +292,68 @@ alp_hwsem_t *alp_hwsem_open(uint32_t hwsem_id)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_hwsem_try_lock(alp_hwsem_t *sem)
 {
-	if (sem == NULL || !sem->in_use) return ALP_ERR_NOT_READY;
-	if (sem->state.ops == NULL || sem->state.ops->hwsem_try_lock == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	/* Gate on the lifecycle byte, not a plain in_use read -- see
+	 * alp_slot_claim.h's op_enter/leave doc comment (issue #629). */
+	if (sem == NULL || !alp_handle_op_enter(&sem->lifecycle, &sem->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return sem->state.ops->hwsem_try_lock(&sem->state);
+	alp_status_t rc = (sem->state.ops == NULL || sem->state.ops->hwsem_try_lock == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : sem->state.ops->hwsem_try_lock(&sem->state);
+	alp_handle_op_leave(&sem->active_ops);
+	return rc;
 }
 
 alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms)
 {
-	if (sem == NULL || !sem->in_use) return ALP_ERR_NOT_READY;
-	if (sem->state.ops == NULL || sem->state.ops->hwsem_lock == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	/* Counted via alp_handle_op_enter/leave (issue #629): lock() can
+	 * block up to timeout_ms waiting on the peer core, so
+	 * alp_hwsem_close() drains this op with the sleep-poll
+	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
+	 * instead of the busy-spin alp_handle_begin_close() -- see
+	 * alp_mbox_send() above for the same rationale.
+	 * hwsem_try_lock/unlock stay short, synchronous ops. */
+	if (sem == NULL || !alp_handle_op_enter(&sem->lifecycle, &sem->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return sem->state.ops->hwsem_lock(&sem->state, timeout_ms);
+	alp_status_t rc = (sem->state.ops == NULL || sem->state.ops->hwsem_lock == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : sem->state.ops->hwsem_lock(&sem->state, timeout_ms);
+	alp_handle_op_leave(&sem->active_ops);
+	return rc;
 }
 
 alp_status_t alp_hwsem_unlock(alp_hwsem_t *sem)
 {
-	if (sem == NULL || !sem->in_use) return ALP_ERR_NOT_READY;
-	if (sem->state.ops == NULL || sem->state.ops->hwsem_unlock == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	if (sem == NULL || !alp_handle_op_enter(&sem->lifecycle, &sem->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return sem->state.ops->hwsem_unlock(&sem->state);
+	alp_status_t rc = (sem->state.ops == NULL || sem->state.ops->hwsem_unlock == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : sem->state.ops->hwsem_unlock(&sem->state);
+	alp_handle_op_leave(&sem->active_ops);
+	return rc;
 }
 
 void alp_hwsem_close(alp_hwsem_t *sem)
 {
-	if (sem == NULL || !sem->in_use) return;
+	if (sem == NULL) return;
+	/* Sleep-poll drain (issue #629): this pool counts alp_hwsem_lock(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&sem->lifecycle, &sem->active_ops)) return;
 	if (sem->state.ops != NULL && sem->state.ops->hwsem_close != NULL) {
 		sem->state.ops->hwsem_close(&sem->state);
 	}
+	alp_lifecycle_set(&sem->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free_hwsem(sem);
 }
 
@@ -329,19 +388,25 @@ const alp_capabilities_t *alp_hwsem_capabilities(const alp_hwsem_t *sem)
 
 ALP_BACKEND_DEFINE_CLASS(mproc_boot);
 
+/* Published through alp_dispatch_cache_{load,store}() -- see
+ * src/tmu_dispatch.c's header comment; same TMU-pattern race fix
+ * (issue #628). */
 static const alp_mproc_boot_ops_t *_cached_boot_ops = NULL;
 
 static const alp_mproc_boot_ops_t *_get_boot_ops(void)
 {
-	if (_cached_boot_ops != NULL) {
-		return _cached_boot_ops;
+	const alp_mproc_boot_ops_t *ops = (const alp_mproc_boot_ops_t *)alp_dispatch_cache_load(
+	    (const void *const *)&_cached_boot_ops);
+	if (ops != NULL) {
+		return ops;
 	}
 	const alp_backend_t *be = alp_backend_select("mproc_boot", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		return NULL;
 	}
-	_cached_boot_ops = (const alp_mproc_boot_ops_t *)be->ops;
-	return _cached_boot_ops;
+	ops = (const alp_mproc_boot_ops_t *)be->ops;
+	alp_dispatch_cache_store((const void **)&_cached_boot_ops, (const void *)ops);
+	return ops;
 }
 
 alp_status_t alp_mproc_boot_core(alp_core_id_t core, uintptr_t entry_addr)

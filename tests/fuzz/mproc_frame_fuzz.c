@@ -5,8 +5,9 @@
  * libFuzzer harness for the SDK's mproc IPC envelope framing
  * (src/common/proto/alp_mproc_frame.{h,c}).
  *
- * The placeholder framing is the v0.3/v0.4-prep wire format used
- * when CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y: a fixed 12-byte
+ * The placeholder framing is the interim wire format used (real
+ * nanopb wire deferred, no committed version) when
+ * CONFIG_ALP_SDK_MPROC_NANOPB_FRAMING=y: a fixed 12-byte
  * header (magic / sequence / length) followed by the caller's
  * payload bytes.  The decoder is the load-bearing failure point
  * here -- a malicious peer M55 could send any 12 bytes and we

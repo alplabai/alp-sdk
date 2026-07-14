@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# <alp/testing/*> virtual-backend test doubles (epic #610).  These are
+# ordinary registry backends at reserved priority 255 (silicon_ref="*")
+# that outrank every real/proxy/fallback backend so a ztest can drive
+# the portable <alp/*> API deterministically -- a virtual clock +
+# per-class instance tables the test injects into directly.
+#
+# Gated behind CONFIG_ZTEST so a production build can never silently
+# link a wildcard backend that would hijack real hardware selection;
+# the CMakeLists FATAL_ERRORs if this is somehow enabled without ZTEST.
+
+config ALP_SDK_TESTING
+	bool "Alp SDK test doubles (<alp/testing/*>) -- ZTEST builds only"
+	depends on ALP_SDK
+	depends on ZTEST
+	default n
+	help
+	  Compile the <alp/testing/*> virtual-clock + instance-table
+	  core and enable the per-class CONFIG_ALP_SDK_TESTING_<CLASS>
+	  test-double backends below.  Each enabled class registers a
+	  priority-255 silicon_ref="*" backend that outranks every other
+	  registered backend (sw_fallback=0, zephyr_drv=100, proxies=200),
+	  so a test build must NEVER enable this on a real board's default
+	  config -- the wildcard would hijack that board's peripheral
+	  selection.  See tests/zephyr/conformance/testcase.yaml
+	  (alp_sdk.conformance.test_doubles), which restricts this to
+	  native_sim only.
+
+config ALP_SDK_TESTING_GPIO
+	bool "GPIO test double (<alp/testing/gpio.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 GPIO test-double backend
+	  (src/backends/gpio/testing_drv.c).  Lets a ztest drive
+	  alp_gpio_* through injected input levels / edges / output
+	  read-back without any real or emulated GPIO controller.
+
+config ALP_SDK_TESTING_UART
+	bool "UART test double (<alp/testing/uart.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 UART test-double backend
+	  (src/backends/uart/testing_drv.c).  Lets a ztest drive
+	  alp_uart_* through injected RX bytes/errors (immediate or
+	  deferred against the virtual clock) and TX read-back, without
+	  any real or emulated UART controller.  The first
+	  <alp/testing/*> double whose read() path resolves a timeout
+	  against the virtual clock instead of ever blocking.
+
+config ALP_SDK_TESTING_I2C
+	bool "I2C test double (<alp/testing/i2c.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 I2C test-double backend
+	  (src/backends/i2c/testing_drv.c).  Lets a ztest drive
+	  alp_i2c_* (controller mode) against simulated per-address
+	  devices: canned read responses, write read-back, and one-shot
+	  NACK/short/timeout bus faults (<alp/testing/common.h>), without
+	  any real or emulated I2C controller.
+
+config ALP_SDK_TESTING_SPI
+	bool "SPI test double (<alp/testing/spi.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 SPI test-double backend
+	  (src/backends/spi/testing_drv.c).  Lets a ztest drive
+	  alp_spi_* (controller mode) against a simulated device: canned
+	  MISO bytes, MOSI read-back, and one-shot NACK/short/timeout bus
+	  faults (<alp/testing/common.h>), without any real or emulated
+	  SPI controller.
+config ALP_SDK_TESTING_ADC
+	bool "ADC test double (<alp/testing/adc.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 ADC test-double backend
+	  (src/backends/adc/testing_drv.c).  Lets a ztest drive
+	  alp_adc_* through a queued FIFO of raw conversion codes
+	  (latching the last value once the FIFO drains) and injected
+	  read faults, without any real or emulated ADC controller.
+	  Sets reference_uv / resolution_bits from the open() config (or
+	  a sane 3.3V/12-bit default) so alp_adc_read_uv()'s raw -> uV
+	  conversion in src/adc_dispatch.c is exercised correctly.
+config ALP_SDK_TESTING_CAN
+	bool "CAN test double (<alp/testing/can.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 CAN test-double backend
+	  (src/backends/can/testing_drv.c).  Lets a ztest drive
+	  alp_can_* through installed rx filters dispatched
+	  synchronously off an injected frame (immediate or deferred
+	  against the virtual clock, mirroring the GPIO double's
+	  edge_at), an injectable controller bus-error state
+	  (error-active/error-passive/bus-off), and TX read-back,
+	  without any real or emulated CAN controller.
+
+config ALP_SDK_TESTING_STORAGE
+	bool "Storage test double (<alp/testing/storage.h>)"
+	depends on ALP_SDK_TESTING
+	default y
+	help
+	  Register the priority-255 Storage test-double backend
+	  (src/backends/storage/testing_drv.c).  Lets a ztest drive
+	  alp_storage_* against a small fixed-capacity RAM-backed
+	  device: an injectable logical capacity, per-byte corruption
+	  marks, one-shot read/write/erase/sync faults, and a
+	  power-loss-mid-write model that leaves a provably torn write
+	  (partial data persisted) for journaling/recovery tests,
+	  without any real Zephyr flash_area or littlefs backend.

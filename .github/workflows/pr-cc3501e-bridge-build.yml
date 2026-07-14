@@ -20,12 +20,12 @@ name: pr-cc3501e-bridge-build
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'firmware/cc3501e/**'
       - '.github/workflows/pr-cc3501e-bridge-build.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'firmware/cc3501e/**'
   workflow_dispatch:

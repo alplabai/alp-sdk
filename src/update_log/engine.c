@@ -1,9 +1,32 @@
 /* SPDX-License-Identifier: Apache-2.0
- * Pure update-log engine. No Zephyr/PSA includes -- builds on host. */
+ * Pure update-log engine. No vendor/PSA includes -- builds on host. The only
+ * OS-conditional piece is the lock right below (Zephyr/POSIX/bare-metal),
+ * selected purely off predefined compiler macros -- no vendor HAL, no PSA,
+ * still links standalone in the fuzz/unit-test host build. */
 #include <string.h>
 
 #include "update_log/engine.h"
 #include "update_log/sha256.h"
+
+/* Build-tier selection, same macros already used elsewhere in the tree
+ * (src/common/alp_internal.h, src/common/stub_backend.c): __ZEPHYR__ for the
+ * RTOS build (this also covers native_sim, which defines __ZEPHYR__),
+ * __linux__ for the yocto/A-class and plain-CMake-on-host builds, and a
+ * no-op for a genuine bare-metal target with no scheduler beneath this layer.
+ * __ZEPHYR__ gets its own lock primitive below (see the g_engine_lock block
+ * comment for why a spin+yield is wrong there); the other two tiers share a
+ * plain atomic CAS spin with a yield between attempts, which IS correct for
+ * them: __linux__'s CFS scheduler is fair across priorities (nothing to
+ * invert), and bare-metal has no scheduler beneath this layer at all (a
+ * busy-wait cannot livelock without one). */
+#if defined(__ZEPHYR__)
+#include <zephyr/kernel.h>
+#elif defined(__linux__)
+#include <sched.h>
+#define ULOG_ENGINE_LOCK_YIELD() ((void)sched_yield())
+#else
+#define ULOG_ENGINE_LOCK_YIELD() ((void)0)
+#endif
 
 static void put_u16(uint8_t *p, uint16_t v)
 {
@@ -129,43 +152,232 @@ static void kbuf(char *out, size_t cap, uint64_t seq)
 	out[pos] = 0;
 }
 
-alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
-                                const alp_monotonic_counter_if *ctr,
-                                const alp_update_log_entry_t   *entry)
-{
-	if (store == NULL || ctr == NULL || entry == NULL) return ALP_ERR_INVAL;
+/*
+ * ---------------------------------------------------------------------
+ * Crash- and concurrency-safe append (GHSA-r236-29pg-w694).
+ *
+ * ulog_engine_append() durably mutates three things: the entry blob
+ * ("ulog.<seq>"), the metadata cache ("ulog.meta"), and the monotonic
+ * counter. Only the FIRST of these is a real commit point:
+ *
+ *   - The entry write is the transaction's sole durable commit. A single
+ *     store->put()/counter->increment() call is assumed atomic against
+ *     power loss (both the NVS record layer and PSA Protected Storage
+ *     guarantee this for one asset) -- what is NOT atomic is the
+ *     SEQUENCE of three separate calls.
+ *   - meta and the counter are DERIVED caches of the committed entries,
+ *     never a second independent authority. Recovery re-derives them by
+ *     hashing the actual previous entry in the store -- never by
+ *     trusting a possibly-stale copy of meta -- so "meta says N" can
+ *     never outrank "entry N-1 hashes to X" as the source of truth.
+ *
+ * ulog_recover() runs at the start of every engine entry point that
+ * takes the counter seam (append/verify/count) and repairs exactly one
+ * class of anomaly: an entry already durably written at the counter's
+ * current value (seq == hw) with a chain that validates against the
+ * PRECEDING entry. That shape can only arise from a crash between the
+ * entry write and the meta/counter catching up, so recovery always
+ * COMMITS it forward (re-derives meta, advances the counter) -- it
+ * never discards, because a write-once entry cannot be un-written
+ * anyway, and treating the mutable (NVS/RAM) and write-once (secure)
+ * tiers identically keeps one tested invariant for both. Any entry that
+ * exists but does NOT chain validly is left untouched: that is real
+ * corruption/tamper, not a torn append, and ulog_engine_verify() must
+ * still surface it as CHAIN_BROKEN rather than have recovery paper over
+ * it.
+ *
+ *   - Crash after the entry write, before meta: recovery finds entry hw
+ *     already present, re-derives meta + advances the counter. No wedge
+ *     -- the entry is never rewritten, only the (mutable) cache around
+ *     it is repaired.
+ *   - Crash after meta, before the counter increment ("meta ahead of
+ *     counter"): recovery does not trust the stale-vs-fresh meta content
+ *     at all; it independently re-hashes entry hw-1, confirms entry hw
+ *     chains from it, and advances the counter to match. verify() no
+ *     longer reports a false ROLLED_BACK, and the next append correctly
+ *     continues at hw+1 instead of re-chaining against seq hw.
+ *
+ * ulog_recover() adopts AT MOST ONE orphan per call and never loops. A
+ * functioning monotonic counter can produce at most one torn-append shape
+ * between a crash and the next recovery (append always runs recovery
+ * before reading the counter, so it never writes a second entry above an
+ * already-orphaned one). If a SECOND validly-chained entry is still
+ * sitting above the counter after that single adoption, the counter
+ * itself regressed -- that is proof of rollback, not a second torn
+ * append, and must not be silently adopted too (it would rewrite meta
+ * and the counter forward, turning a state the pre-fix code correctly
+ * called ROLLED_BACK into a false VERIFY_OK). ulog_engine_verify()'s
+ * frontier check (below the main chain-walk loop) is what surfaces that
+ * left-behind second entry, not ulog_recover().
+ *
+ * Similarly, an entry sitting at the counter's value that does NOT chain
+ * validly (bad seq, or a prev_hash that does not match the actual
+ * preceding entry) is real corruption/tamper, not a torn append:
+ * ulog_recover() leaves it untouched -- it never discards or overwrites
+ * it (a write-once tier could not anyway) -- and ulog_engine_verify()'s
+ * frontier check reports that as CHAIN_BROKEN rather than VERIFY_OK. The
+ * invariant that check protects: verify() == OK must imply append() can
+ * make progress. Before this check existed, verify()'s chain walk only
+ * covered slots [0, hw) and never looked at slot hw itself, so a
+ * non-chaining entry squatting on the frontier slot was invisible to
+ * verify() while append()'s subsequent store->put() to that same
+ * already-occupied key would keep failing -- on a PSA Protected Storage
+ * WRITE_ONCE asset (src/update_log/tfm_psa_secure_owner.c) that failure
+ * is permanent: the log silently stops accepting new entries forever
+ * even though its own verify() said OK. append() does not attempt to
+ * force an overwrite of that slot; it surfaces the store's error (a
+ * write-once conflict maps to ALP_ERR_IO) as a clear terminal failure. A
+ * mutable tier (SW-NVS/RAM) instead accepts the overwrite and the next
+ * append after that self-heals the frontier -- that behavioural split is
+ * inherent to what the underlying tier allows, not something the engine
+ * can paper over.
+ *
+ * g_engine_lock serializes every call below across append/verify/count
+ * (and, without needing counter access, get()) so two concurrent callers
+ * can never interleave the three mutations, and a reader can never
+ * observe a state midway through an append. Unlike
+ * alp_handle_begin_close() in src/common/alp_slot_claim.h -- whose
+ * critical section really is a handful of short, synchronous in-RAM
+ * calls -- the critical section guarded here can include the SW-NVS
+ * tier's nvs_write()/nvs_calc_free_space(), which can trigger NVS garbage
+ * collection (a sector erase: milliseconds of flash I/O). On a
+ * single-core target (each AEN M55 is single-core Zephyr) a pure busy
+ * spin is therefore not safe regardless of what it yields with: a
+ * low-priority thread can be holding the lock mid-GC while a
+ * higher-priority thread contends for ulog_engine_lock(), and k_yield()
+ * only cedes the CPU to threads at the SAME OR HIGHER priority as the
+ * caller -- it cannot get a lower-priority holder scheduled, so a
+ * spin+k_yield() loop here would still livelock the exact cross-priority
+ * case it exists to fix (the higher-priority spinner remains the highest
+ * ready thread and is simply handed the CPU straight back). g_engine_lock
+ * is therefore a real struct k_mutex on __ZEPHYR__, not an atomic-CAS
+ * spin: k_mutex_lock() applies priority inheritance, temporarily boosting
+ * the holder's priority above any waiter's, so the low-priority holder
+ * actually runs to completion and releases regardless of who else is
+ * waiting. The __linux__ and bare-metal tiers keep the compiler-builtin
+ * atomic (__atomic_*) CAS spin with a yield between attempts (defined
+ * above) -- dependency-free and correct there because __linux__'s CFS
+ * scheduler is fair across priorities and bare-metal has no scheduler
+ * beneath this layer to invert against in the first place. Every entry
+ * point below runs from thread context only (append/verify/count/get);
+ * k_mutex_lock() is illegal from ISR context and this engine must never
+ * be entered from one.
+ *
+ * Cross-image scope: g_engine_lock is a per-IMAGE static. It does not,
+ * and cannot, serialize two separate cores/images that both end up
+ * touching the same secure store -- there is exactly one correct writer
+ * image per store instance, by construction, not by locking across
+ * images. On AEN, the HE (application) image must never itself open a
+ * local store instance over the same MRAM region the HP (secure owner)
+ * image writes; HE only ever reaches the log through the HP owner's MHU
+ * mailbox (src/backends/update_log/aen_m55_owner.c). If aen_ready() ever
+ * declines (SE/device firewall NOSUPPORT, MHU timeout), the dispatcher
+ * (src/update_log_dispatch.c) must NOT fall through to a LOCAL sw_tier on
+ * the HE image: src/backends/update_log/sw_tier.c's ready() probe refuses
+ * to engage at all when CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT is set
+ * without CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER, so open() returns NULL
+ * / ALP_ERR_NOSUPPORT instead of mounting a second, unsynchronized NVS
+ * instance over the HP owner's MRAM region -- two such mounts would race
+ * regardless of anything g_engine_lock does, since it has no visibility
+ * across images. See CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER's Kconfig
+ * help for the same requirement stated at the board-porting seam.
+ * ---------------------------------------------------------------------
+ */
+#if defined(__ZEPHYR__)
+/* Statically defined -- no first-use init race. See the block comment
+ * above for why a real mutex, not a CAS spin, is required on this tier. */
+K_MUTEX_DEFINE(g_engine_lock);
 
+static void ulog_engine_lock(void)
+{
+	k_mutex_lock(&g_engine_lock, K_FOREVER);
+}
+
+static void ulog_engine_unlock(void)
+{
+	k_mutex_unlock(&g_engine_lock);
+}
+#else
+static uint8_t g_engine_lock; /* 0 = free, 1 = held. */
+
+static void ulog_engine_lock(void)
+{
+	for (;;) {
+		uint8_t expected = 0;
+		if (__atomic_compare_exchange_n(
+		        &g_engine_lock, &expected, 1, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+			return;
+		}
+		/* Not "a handful of short store calls" here -- see the block
+		 * comment above. Yield so a runnable holder mid-flash-GC gets
+		 * scheduled instead of losing the core to this spinner. */
+		ULOG_ENGINE_LOCK_YIELD();
+	}
+}
+
+static void ulog_engine_unlock(void)
+{
+	__atomic_store_n(&g_engine_lock, 0, __ATOMIC_RELEASE);
+}
+#endif
+
+/* Re-derive meta + the counter from the newest committed entry,
+ * forward-committing AT MOST ONE interrupted append (never loops -- see
+ * the block comment above for why a second orphan must be left for
+ * ulog_engine_verify() to report as ROLLED_BACK instead of adopted here).
+ * Idempotent: a no-op once meta/counter already agree with the store.
+ * Must be called with g_engine_lock held. */
+static alp_status_t ulog_recover(const alp_secure_store_if      *store,
+                                 const alp_monotonic_counter_if *ctr)
+{
 	uint64_t     hw = 0;
 	alp_status_t rc = ctr->read(ctr->ctx, 0, &hw);
 	if (rc != ALP_OK) return rc;
-
-	uint8_t prev[32];
-	memset(prev, 0, sizeof(prev));
-	if (hw > 0) {
-		uint8_t metabuf[ULOG_META_WIRE_LEN];
-		size_t  mlen = 0;
-		rc           = store->get(store->ctx, "ulog.meta", metabuf, sizeof(metabuf), &mlen);
-		if (rc != ALP_OK) return rc;
-		struct ulog_meta m;
-		rc = ulog_meta_decode(metabuf, mlen, &m);
-		if (rc != ALP_OK) return rc;
-		memcpy(prev, m.head_hash, 32);
-	}
-
-	alp_update_log_entry_t e = *entry;
-	e.seq                    = hw;
-	uint8_t wire[ULOG_ENTRY_WIRE_LEN];
-	rc = ulog_entry_encode(&e, prev, wire);
-	if (rc != ALP_OK) return rc;
+	if (hw == UINT64_MAX) return ALP_ERR_NOMEM; /* never let the counter wrap */
 
 	char key[24];
 	kbuf(key, sizeof(key), hw);
-	rc = store->put(store->ctx, key, wire, sizeof(wire));
+	uint8_t wire[ULOG_ENTRY_WIRE_LEN];
+	size_t  n = 0;
+	rc        = store->get(store->ctx, key, wire, sizeof(wire), &n);
+	if (rc == ALP_ERR_NOT_FOUND) return ALP_OK; /* nothing to recover */
 	if (rc != ALP_OK) return rc;
+
+	/* An entry already exists at the counter's value: a prior append
+	 * committed it but crashed before meta and/or the counter caught
+	 * up. Validate the chain independently of meta before committing
+	 * forward -- hash the actual preceding entry, don't trust a
+	 * possibly-stale meta blob. */
+	alp_update_log_entry_t e;
+	uint8_t                got_prev[32];
+	if (ulog_entry_decode(wire, n, &e, got_prev) != ALP_OK || e.seq != hw) {
+		/* Not the torn-append shape: real corruption. Leave it for
+		 * ulog_engine_verify()'s frontier check to report as
+		 * CHAIN_BROKEN. */
+		return ALP_OK;
+	}
+
+	uint8_t expect_prev[32];
+	memset(expect_prev, 0, sizeof(expect_prev));
+	if (hw > 0) {
+		char    pkey[24];
+		uint8_t pwire[ULOG_ENTRY_WIRE_LEN];
+		size_t  pn = 0;
+		kbuf(pkey, sizeof(pkey), hw - 1);
+		rc = store->get(store->ctx, pkey, pwire, sizeof(pwire), &pn);
+		if (rc == ALP_ERR_NOT_FOUND) return ALP_OK; /* truncated tail: not our case */
+		if (rc != ALP_OK) return rc;
+		ulog_sha256(pwire, pn, expect_prev);
+	}
+	if (memcmp(got_prev, expect_prev, 32) != 0) {
+		/* Doesn't chain from the actual preceding entry either: real
+		 * corruption, not a torn append. Leave for verify(). */
+		return ALP_OK;
+	}
 
 	struct ulog_meta nm;
 	nm.count = hw + 1u;
-	ulog_sha256(wire, sizeof(wire), nm.head_hash);
+	ulog_sha256(wire, n, nm.head_hash);
 	uint8_t metaout[ULOG_META_WIRE_LEN];
 	(void)ulog_meta_encode(&nm, metaout);
 	rc = store->put(store->ctx, "ulog.meta", metaout, sizeof(metaout));
@@ -173,6 +385,110 @@ alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
 
 	uint64_t newhw = 0;
 	return ctr->increment(ctr->ctx, 0, &newhw);
+	/* Deliberately do not loop: adopting a second entry here would hide
+	 * a counter rollback as a clean VERIFY_OK. See the block comment. */
+}
+
+alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
+                                const alp_monotonic_counter_if *ctr,
+                                const alp_update_log_entry_t   *entry)
+{
+	if (store == NULL || ctr == NULL || entry == NULL) return ALP_ERR_INVAL;
+
+	ulog_engine_lock();
+
+	alp_status_t rc = ulog_recover(store, ctr);
+	if (rc != ALP_OK) {
+		ulog_engine_unlock();
+		return rc;
+	}
+
+	uint64_t hw = 0;
+	rc          = ctr->read(ctr->ctx, 0, &hw);
+	if (rc != ALP_OK) {
+		ulog_engine_unlock();
+		return rc;
+	}
+	if (hw > ULOG_SEQ_MAX) {
+		/* Sequence space exhausted: refuse rather than risk a truncated
+		 * "ulog.<seq>" key or an eventual counter wrap. The existing
+		 * chain stays intact and verifiable, same contract as a full
+		 * store. */
+		ulog_engine_unlock();
+		return ALP_ERR_NOMEM;
+	}
+
+	uint8_t prev[32];
+	memset(prev, 0, sizeof(prev));
+	if (hw > 0) {
+		/* Recovery above guarantees meta already agrees with hw, so this
+		 * cached head hash is trustworthy here. */
+		uint8_t metabuf[ULOG_META_WIRE_LEN];
+		size_t  mlen = 0;
+		rc           = store->get(store->ctx, "ulog.meta", metabuf, sizeof(metabuf), &mlen);
+		if (rc != ALP_OK) {
+			ulog_engine_unlock();
+			return rc;
+		}
+		struct ulog_meta m;
+		rc = ulog_meta_decode(metabuf, mlen, &m);
+		if (rc != ALP_OK) {
+			ulog_engine_unlock();
+			return rc;
+		}
+		memcpy(prev, m.head_hash, 32);
+	}
+
+	alp_update_log_entry_t e = *entry;
+	e.seq                    = hw;
+	uint8_t wire[ULOG_ENTRY_WIRE_LEN];
+	rc = ulog_entry_encode(&e, prev, wire);
+	if (rc != ALP_OK) {
+		ulog_engine_unlock();
+		return rc;
+	}
+
+	/* The durable commit point. If the process crashes right after this
+	 * put() succeeds, the entry is safely written (write-once tiers never
+	 * need to rewrite it) and ulog_recover() will catch meta/the counter
+	 * up on the next call.
+	 *
+	 * If ulog_recover() above declined to adopt a non-chaining entry
+	 * already squatting on key(hw) (real corruption/tamper at the
+	 * frontier, not a torn append -- see the block comment above
+	 * ulog_recover()), this put() targets an already-occupied key. A
+	 * mutable tier (SW-NVS/RAM) accepts the overwrite and self-heals; a
+	 * write-once tier (PSA Protected Storage WRITE_ONCE) rejects it and
+	 * this returns that failure as a terminal error to the caller --
+	 * intentionally not force-overwritten. ulog_engine_verify() already
+	 * reports CHAIN_BROKEN for that same state, so the caller is never
+	 * told OK while append() cannot make progress. */
+	char key[24];
+	kbuf(key, sizeof(key), hw);
+	rc = store->put(store->ctx, key, wire, sizeof(wire));
+	if (rc != ALP_OK) {
+		ulog_engine_unlock();
+		return rc;
+	}
+
+	struct ulog_meta nm;
+	nm.count = hw + 1u;
+	ulog_sha256(wire, sizeof(wire), nm.head_hash);
+	uint8_t metaout[ULOG_META_WIRE_LEN];
+	(void)ulog_meta_encode(&nm, metaout);
+	rc = store->put(store->ctx, "ulog.meta", metaout, sizeof(metaout));
+	if (rc != ALP_OK) {
+		/* meta didn't catch up -- not fatal to the chain. ulog_recover()
+		 * re-derives it (and the counter) from the entry itself next time
+		 * around, never from this stale attempt. */
+		ulog_engine_unlock();
+		return rc;
+	}
+
+	uint64_t newhw = 0;
+	rc             = ctr->increment(ctr->ctx, 0, &newhw);
+	ulog_engine_unlock();
+	return rc;
 }
 
 alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
@@ -183,9 +499,20 @@ alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
 	if (store == NULL || ctr == NULL || verdict_out == NULL) return ALP_ERR_INVAL;
 	if (bad_seq_out) *bad_seq_out = 0;
 
-	uint64_t     hw = 0;
-	alp_status_t rc = ctr->read(ctr->ctx, 0, &hw);
-	if (rc != ALP_OK) return ALP_ERR_IO;
+	ulog_engine_lock();
+
+	alp_status_t rc = ulog_recover(store, ctr);
+	if (rc != ALP_OK) {
+		ulog_engine_unlock();
+		return rc;
+	}
+
+	uint64_t hw = 0;
+	rc          = ctr->read(ctr->ctx, 0, &hw);
+	if (rc != ALP_OK) {
+		ulog_engine_unlock();
+		return ALP_ERR_IO;
+	}
 
 	struct ulog_meta m;
 	m.count = 0;
@@ -196,15 +523,23 @@ alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
 		rc           = store->get(store->ctx, "ulog.meta", metabuf, sizeof(metabuf), &mlen);
 		if (rc == ALP_ERR_NOT_FOUND) {
 			*verdict_out = ALP_UPDATE_LOG_VERIFY_ROLLED_BACK;
-			return ALP_OK;
+			rc           = ALP_OK;
+			goto out;
 		}
-		if (rc != ALP_OK) return ALP_ERR_IO;
-		if (ulog_meta_decode(metabuf, mlen, &m) != ALP_OK) return ALP_ERR_IO;
+		if (rc != ALP_OK) {
+			rc = ALP_ERR_IO;
+			goto out;
+		}
+		if (ulog_meta_decode(metabuf, mlen, &m) != ALP_OK) {
+			rc = ALP_ERR_IO;
+			goto out;
+		}
 		/* The counter is the trusted anchor. If the stored meta disagrees, the
          * store (or the counter) was rolled back. */
 		if (m.count != hw) {
 			*verdict_out = ALP_UPDATE_LOG_VERIFY_ROLLED_BACK;
-			return ALP_OK;
+			rc           = ALP_OK;
+			goto out;
 		}
 	}
 
@@ -221,21 +556,27 @@ alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
 		if (rc == ALP_ERR_NOT_FOUND) {
 			*verdict_out = ALP_UPDATE_LOG_VERIFY_TRUNCATED;
 			if (bad_seq_out) *bad_seq_out = i;
-			return ALP_OK;
+			rc = ALP_OK;
+			goto out;
 		}
-		if (rc != ALP_OK) return ALP_ERR_IO;
+		if (rc != ALP_OK) {
+			rc = ALP_ERR_IO;
+			goto out;
+		}
 
 		alp_update_log_entry_t e;
 		uint8_t                got_prev[32];
 		if (ulog_entry_decode(wire, n, &e, got_prev) != ALP_OK) {
 			*verdict_out = ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN;
 			if (bad_seq_out) *bad_seq_out = i;
-			return ALP_OK;
+			rc = ALP_OK;
+			goto out;
 		}
 		if (e.seq != i || memcmp(got_prev, prev, 32) != 0) {
 			*verdict_out = ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN;
 			if (bad_seq_out) *bad_seq_out = i;
-			return ALP_OK;
+			rc = ALP_OK;
+			goto out;
 		}
 		ulog_sha256(wire, n, cur_hash);
 		memcpy(prev, cur_hash, 32);
@@ -244,32 +585,97 @@ alp_status_t ulog_engine_verify(const alp_secure_store_if      *store,
 	if (hw > 0 && memcmp(cur_hash, m.head_hash, 32) != 0) {
 		*verdict_out = ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN;
 		if (bad_seq_out) *bad_seq_out = hw - 1;
-		return ALP_OK;
+		rc = ALP_OK;
+		goto out;
+	}
+
+	/* ulog_recover() adopts at most one orphan per call and never loops
+	 * (see its block comment), so the chain walk above -- which only
+	 * covers [0, hw) -- never inspects slot hw itself. Whatever
+	 * ulog_recover() deliberately left sitting there needs an explicit
+	 * look: verify()==OK must imply append() can make progress, and
+	 * silently ignoring the frontier slot broke that on a write-once
+	 * tier (GHSA-r236-29pg-w694, DEFECT 1). */
+	char    frontier_key[24];
+	uint8_t frontier_wire[ULOG_ENTRY_WIRE_LEN];
+	size_t  frontier_n = 0;
+	kbuf(frontier_key, sizeof(frontier_key), hw);
+	rc = store->get(store->ctx, frontier_key, frontier_wire, sizeof(frontier_wire), &frontier_n);
+	if (rc != ALP_OK && rc != ALP_ERR_NOT_FOUND) {
+		rc = ALP_ERR_IO;
+		goto out;
+	}
+	if (rc == ALP_OK) {
+		alp_update_log_entry_t frontier_e;
+		uint8_t                frontier_prev[32];
+		alp_status_t drc = ulog_entry_decode(frontier_wire, frontier_n, &frontier_e, frontier_prev);
+		if (drc == ALP_OK && frontier_e.seq == hw && memcmp(frontier_prev, cur_hash, 32) == 0) {
+			/* Validly chains from the recognized head: a second orphan
+			 * that ulog_recover() deliberately left un-adopted (it
+			 * adopts at most one per call -- a functioning counter can
+			 * never produce two). Proof the counter itself regressed,
+			 * not a second torn append (DEFECT 3). */
+			*verdict_out = ALP_UPDATE_LOG_VERIFY_ROLLED_BACK;
+		} else {
+			/* Present but does not chain: real corruption/tamper
+			 * squatting on the frontier slot, not a torn append. On a
+			 * write-once tier append()'s subsequent store->put() to
+			 * this same key can never succeed -- surface that now
+			 * instead of a false OK. */
+			*verdict_out = ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN;
+			if (bad_seq_out) *bad_seq_out = hw;
+		}
+		rc = ALP_OK;
+		goto out;
 	}
 
 	*verdict_out = ALP_UPDATE_LOG_VERIFY_OK;
-	return ALP_OK;
+	rc           = ALP_OK;
+out:
+	ulog_engine_unlock();
+	return rc;
 }
 
 alp_status_t ulog_engine_count(const alp_secure_store_if      *store,
                                const alp_monotonic_counter_if *ctr,
                                uint64_t                       *count_out)
 {
-	(void)store;
-	if (ctr == NULL || count_out == NULL) return ALP_ERR_INVAL;
-	return ctr->read(ctr->ctx, 0, count_out);
+	if (store == NULL || ctr == NULL || count_out == NULL) return ALP_ERR_INVAL;
+
+	ulog_engine_lock();
+
+	alp_status_t rc = ulog_recover(store, ctr);
+	if (rc == ALP_OK) {
+		rc = ctr->read(ctr->ctx, 0, count_out);
+	}
+
+	ulog_engine_unlock();
+	return rc;
 }
 
 alp_status_t
 ulog_engine_get(const alp_secure_store_if *store, uint64_t seq, alp_update_log_entry_t *e_out)
 {
 	if (store == NULL || e_out == NULL) return ALP_ERR_INVAL;
+
+	/* No counter seam here, so this cannot run ulog_recover() -- but a
+	 * raw keyed lookup does not depend on meta/counter consistency at
+	 * all: any entry that is durably present (including one still
+	 * awaiting recovery's meta/counter catch-up) is already valid to
+	 * return. Still take the engine lock so a read here can never
+	 * interleave with another caller's in-flight 3-phase append. */
+	ulog_engine_lock();
+
 	char key[24];
 	kbuf(key, sizeof(key), seq);
 	uint8_t      wire[ULOG_ENTRY_WIRE_LEN];
 	size_t       n  = 0;
 	alp_status_t rc = store->get(store->ctx, key, wire, sizeof(wire), &n);
-	if (rc != ALP_OK) return rc; /* ALP_ERR_NOT_FOUND propagates */
-	uint8_t prev[32];
-	return ulog_entry_decode(wire, n, e_out, prev);
+	if (rc == ALP_OK) {
+		uint8_t prev[32];
+		rc = ulog_entry_decode(wire, n, e_out, prev);
+	}
+
+	ulog_engine_unlock();
+	return rc; /* ALP_ERR_NOT_FOUND propagates */
 }

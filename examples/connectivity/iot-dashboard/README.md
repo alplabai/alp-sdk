@@ -12,16 +12,20 @@ LVGL dashboard on a 240×320 ST7789.
 ## What it shows
 
 - **BME280** environment sensor on I²C0.
-- **Murata LBEE5HY2FY** WiFi 6 + BLE 5.4 module for the network
-  link (SDIO from the AEN host).
-- **OPTIGA Trust M** off-loads the TLS handshake for the MQTT-
-  over-TLS publish path.
-- **`mbedtls` + `coremqtt_sn`** Tier 1 library knobs supply the
-  TLS + MQTT-SN client.  The §D.lib.loader picks
-  `CONFIG_ALP_MBEDTLS_CRYPTOCELL=y` on AEN (CryptoCell-accelerated
-  AES) and `CONFIG_ALP_MBEDTLS_OPTIGA=y` (handshake offload).
+- **TI CC3501E** Wi-Fi 6 + BLE 5.4 coprocessor for the network
+  link through the AEN bridge backend.
+- **OPTIGA Trust M** is the planned trust-anchor / TLS-handshake
+  offload path; the current driver is probe-only, so this example
+  still runs the TLS library through its software path.
+- **`mbedtls`** supplies the TLS stack; MQTT currently enters through
+  the portable `<alp/iot.h>` surface.  Hardware TLS backend entries remain
+  `status: planned` in the library profile until a real mbedTLS
+  consumer lands, so generated config emits the pure-C fallback
+  instead of claiming CryptoCell / OPTIGA acceleration.
 - **LVGL** composes the dashboard layout with sparkline chart +
-  status strip.
+  status strip, bound to the panel via `<alp/display.h>` +
+  `alp_gui_lvgl_attach()` (`<alp/gui.h>`) -- no direct
+  `<zephyr/drivers/display.h>` calls in app code.
 
 ## Build
 

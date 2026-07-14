@@ -23,7 +23,10 @@ on-board sensor chips.
   `CONFIG_ALP_MADGWICK_FPU=y` on AEN / the `tmu_cordic` path on V2N)
   is the v0.6 work.
 - **LVGL** composes the attitude indicator, GPS readout, battery
-  telemetry, and flight mode into a coherent HUD layout.
+  telemetry, and flight mode into a coherent HUD layout, bound to
+  the panel via `<alp/display.h>` + `alp_gui_lvgl_attach()`
+  (`<alp/gui.h>`) -- no direct `<zephyr/drivers/display.h>` calls
+  in app code.
 - **Three threads**: render (main, 30 fps), IMU sample (100 Hz),
   slow telemetry (5 Hz).  Each `drone_telemetry_t` field is
   single-writer/single-reader and main renders from a once-per-frame
@@ -33,7 +36,7 @@ on-board sensor chips.
 
 ## Hardware needed
 
-- E1M-AEN family SoM (E7 recommended for SRAM headroom).
+- E1M-AEN family SoM (E8 recommended for SRAM headroom).
 - E1M-EVK board with:
   - LSM6DSO IMU breakout on I²C0 (already on the EVK).
   - uBlox NEO-M9N GNSS on UART0 (or any UART; edit `board.yaml`).

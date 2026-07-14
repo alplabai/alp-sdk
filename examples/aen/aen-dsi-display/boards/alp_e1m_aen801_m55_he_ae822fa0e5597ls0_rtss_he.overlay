@@ -1,0 +1,237 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-dsi-display overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Wires the FULL C2-MIPI-DSI DISPLAY chain to the RK055HDMIPI4MA0 panel
+ * (Rocktech 720x1280, Himax HX8394 controller, MIPI-DSI, 2 data lanes on DSI0):
+ *
+ *   cdc200   (tes,cdc-2.1            @ 0x49031000) -- DPI/RGB pixel pump (CDC200)
+ *       |  DPI
+ *   mipi_dsi (snps,designware-dsi    @ 0x49032000) -- the MIPI-DSI host (DSI-TX)
+ *       |  phy-if <&dphy 1>
+ *   dphy     (snps,designware-dphy   @ 0x49033000) -- the shared D-PHY (TX role)
+ *       |  2 data lanes
+ *   panel@0  (himax,hx8394)                        -- the HX8394 panel controller
+ *
+ * Panel reset is gated by a small I2C GPIO expander on I2C2.  The expander's
+ * own reset is released by the SYS_INIT in src/main.c before the panel driver
+ * consumes reset-gpios during POST_KERNEL init.
+ *
+ * reg / IRQ are transcribed from the Alif CMSIS DFP (CDC_BASE 0x49031000 /
+ * DSI_BASE 0x49032000) and the in-tree dtsi.  The panel timings (720x1280, the
+ * porches, 62.346 MHz pixel clock) are transcribed from the upstream NXP shield
+ * boards/shields/rk055hdmipi4ma0/rk055hdmipi4ma0.overlay.
+ *
+ * NOT INVENTED / TBD (see src/main.c header for the full list):
+ *   - cdc200/mipi_dsi CLOCKS use the real re-authored ALIF_*_CLK ids now in
+ *     alif-ensemble-clocks-ext.h (NOT the fork's 7-arg packed values).  The
+ *     dsi_dw driver reads only the "pixel-clk" + "dsi-clk-en" cells (it gets the
+ *     D-PHY via phy-if), so only those two are supplied to mipi_dsi.
+ *   - The exact 62.346 MHz DPI pixel clock is NOT reachable from the Alif
+ *     400/480 MHz tree -- nearest is ~66.67/60 MHz.  clock-frequency is left at
+ *     the panel-native value; the achieved rate is a bench-tunable.
+ */
+
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+#include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).  The 720x1280 RGB565
+ * framebuffer does NOT live here -- it is pinned in SRAM0 @0x02000000 by the
+ * cdc200 driver's fixed-address path (-DNO_RELOCATE_SRAM0, see CMakeLists.txt).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+		zephyr,display = &cdc200;
+	};
+
+	lcd_pwr_en: regulator-lcd-pwr-en {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd-pwr-en";
+		enable-gpios = <&lcd_exp 0 GPIO_ACTIVE_HIGH>;
+		regulator-boot-on;
+		regulator-always-on;
+		status = "okay";
+	};
+};
+
+/*
+ * The shared D-PHY (TX role for DSI).  Override its clocks: the shared dtsi
+ * wires ALL four to the DUMMY ALIF_CSI_DPHY_CLK (frequency-only placeholder),
+ * so dphy_dw_master_setup() enables a non-clock and then stalls the AXI on the
+ * unclocked D-PHY config registers -> a HARD core hang.  Set tx-dphy-clk to the
+ * REAL ALIF_MIPI_TXDPHY_CLK (MIPI_CKEN bit0 -- the D-PHY configure-clock gate,
+ * authored from the AE822 DFP) so the config register block is actually clocked.
+ *
+ * BENCH-TBD: pllref-clk / pllbypass-clk / rx-dphy-clk stay dummy -- the CSI/DPHY
+ * PLL-reference clock IDs are not yet authored for the upstream clockctrl
+ * (task #21).  Without a real pllref the D-PHY PLL will not lock, so the bring-up
+ * fails GRACEFULLY at the (bounded) PLL-lock wait instead of hanging the core --
+ * which is the next thing to chase (author pllref-clk from the DFP).
+ */
+&dphy {
+	status = "okay";
+	clocks = <&clockctrl ALIF_MIPI_PLLREF_CLK>, /* pllref-clk  : REAL (bit8)  */
+		 <&clockctrl ALIF_MIPI_BYPASS_CLK>, /* pllbypass   : REAL (bit12) */
+		 <&clockctrl ALIF_MIPI_TXDPHY_CLK>, /* tx-dphy-clk : REAL (bit0)  */
+		 <&clockctrl ALIF_CSI_DPHY_CLK>;    /* rx-dphy-clk : dummy (RX/camera only) */
+	clock-names = "pllref-clk", "pllbypass-clk", "tx-dphy-clk", "rx-dphy-clk";
+};
+
+/*
+ * I2C2 (DesignWare master) carries the panel-control expander and the SoM
+ * identity EEPROM used by the boot banner.  Keep it at standard mode for this
+ * bench path.
+ */
+&pinctrl {
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_7__I2C2_SDA_C>,
+				 <PIN_P5_6__I2C2_SCL_C>;
+			/*
+			 * BENCH-VALIDATED i2c2 pad config (aen-i2c2-eeprom-regcheck,
+			 * 2026-06-15): input-enable = pad REN so i2c_dw can SENSE
+			 * SDA/SCL (else every address NACKs). bias-pull-down encodes
+			 * the Alif pad DSC=2 that I2C needs -- bias-pull-up (DSC=1)
+			 * gives a DEAD BUS.  Do NOT "correct" pull-down to pull-up.
+			 */
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+/* gpio10.2 drives the panel-control expander reset. */
+&gpio10 {
+	status = "okay";
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+
+	/* Panel-control expander: P0 enables the panel path, P1 resets HX8394. */
+	lcd_exp: gpio@20 {
+		compatible = "nxp,pca6408";
+		reg = <0x20>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		status = "okay";
+	};
+};
+
+/ {
+	aliases {
+		alp-i2c0 = &i2c2;
+	};
+};
+
+/*
+ * C2-MIPI-DSI display chain.  cdc200 + mipi_dsi are added by the overlay (the
+ * display-class drivers are now authored + turned on by prj.conf); they move
+ * into the shared dtsi once bench-verified.  Placed under the SoC peripheral bus.
+ */
+&{/soc/} {
+	cdc200: cdc200@49031000 {
+		compatible = "tes,cdc-2.1";
+		reg = <0x49031000 0x1000>;
+		interrupts = <333 0>, <334 0>, <335 0>, <336 0>, <337 0>,
+			     <338 0>, <339 0>, <340 0>, <341 0>, <342 0>;
+		interrupt-names = "scanline_0", "scanline_1",
+				  "fifo_warning_0", "fifo_warning_1",
+				  "fifo_underrun_0", "fifo_underrun_1",
+				  "bus_error_0", "bus_error_1",
+				  "reg_reload_0", "reg_reload_1";
+
+		/*
+		 * Real re-authored clock ids (ALIF_DPI_CLK / ALIF_CDC200_PIX_SYST_ACLK)
+		 * from alif-ensemble-clocks-ext.h -- NOT the fork's 7-arg packed values.
+		 */
+		clocks = <&clockctrl ALIF_DPI_CLK>, <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>;
+		clock-names = "dpi-clk-en", "pixel-clk";
+
+		/* Panel timing -- transcribed from the NXP rk055hdmipi4ma0 shield. */
+		width = <720>;
+		height = <1280>;
+		hsync-len = <6>;
+		hfront-porch = <12>;
+		hback-porch = <24>;
+		vsync-len = <2>;
+		vfront-porch = <16>;
+		vback-porch = <14>;
+		hsync-active = <0>;
+		vsync-active = <0>;
+		de-active = <1>;
+		pixelclk-active = <0>;
+		/* Panel-native 62.346 MHz -- not exactly reachable, bench-tunable. */
+		clock-frequency = <62346240>;
+		bg-color = <0x000000>;
+
+		/* L1 only: a single full-screen RGB565 layer (FB pinned in SRAM0). */
+		enable-l1 = <1>;
+		pixel-fmt-l1 = "rgb-565";
+		win-x0-l1 = <0>;
+		win-y0-l1 = <0>;
+		win-x1-l1 = <720>;
+		win-y1-l1 = <1280>;
+		blend-factor1-l1 = <4>;
+		blend-factor2-l1 = <5>;
+		const-alpha-l1 = <0xff>;
+
+		status = "okay";
+	};
+
+	mipi_dsi: mipi-dsi@49032000 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "snps,designware-dsi";
+		reg = <0x49032000 0x1000>;
+		interrupts = <343 0>;
+		cdc-if = <&cdc200>;
+		phy-if = <&dphy 1>;
+
+		/*
+		 * The dsi_dw driver reads only "pixel-clk" + "dsi-clk-en" (it gets
+		 * the D-PHY through phy-if, NOT a "tx-dphy-clk" cell -- confirmed in
+		 * dsi_dw.c's DSI_GET_CLK macro).  Real re-authored ids.
+		 */
+		clocks = <&clockctrl ALIF_DSI_CLK>, <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>;
+		clock-names = "dsi-clk-en", "pixel-clk";
+
+		dpi-shutdn-active = <1>;
+		dpi-colorm-active = <1>;
+		vid-pkt-size = <720>;
+		ecc-recv-en;
+		crc-recv-en;
+		frame-ack-en;
+
+		status = "okay";
+
+		/*
+		 * The RK055HDMIPI4MA0 panel: Himax HX8394 controller, 2 DSI data
+		 * lanes, RGB565.  The upstream hx8394 driver pulses reset as logical
+		 * 0 -> 1; this flag maps that sequence onto the EVK reset path.
+		 */
+		lcd_panel: panel@0 {
+			compatible = "himax,hx8394";
+			reg = <0>;
+			reset-gpios = <&lcd_exp 1 GPIO_ACTIVE_HIGH>;
+			data-lanes = <2>;
+			width = <720>;
+			height = <1280>;
+			pixel-format = <MIPI_DSI_PIXFMT_RGB565>;
+			status = "okay";
+		};
+	};
+};

@@ -1,0 +1,29 @@
+# board.yaml -- nanopb encode/decode round-trip teaching example.
+#
+# `cores.m55_hp.libraries: [nanopb]` makes alp_project.py emit
+# CONFIG_ALP_NANOPB_SW=y (nanopb has no HW-accelerator class -- see
+# metadata/library-profiles/nanopb/hw-backends.yaml, pure-SW only).
+# The upstream nanopb runtime (pb_encode.c/pb_decode.c/pb_common.c) is
+# NOT wired through Zephyr's module-CMake extension automatically --
+# nanopb's zephyr/module.yml declares `cmake-ext`/`kconfig-ext`
+# (an external-glue hook alp-sdk does not wire centrally today), so
+# this example's CMakeLists.txt compiles the runtime sources directly
+# via the ${ZEPHYR_NANOPB_MODULE_DIR} Zephyr sets for every discovered
+# module. See README.md for the full west-pin story.
+libraries:
+  - name: nanopb
+    cores: [m55_hp]
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    # Pure in-RAM encode/decode round trip -- no peripheral needed.
+    peripherals: []
+
+diagnostics:
+  log_level: info

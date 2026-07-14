@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Renode platform descriptor: E1M-X V2N (Renesas RZ/V2N, r9a09g056),
+// the Cortex-M33 "system-manager" (M33-SM) subsystem, for the
+// `west alp-renode --sim-mode` studio hardware-simulator contract
+// (github.com/alplabai/alp-sdk#674).
+//
+// FAITHFUL to the real M33-SM address map -- it boots the actual
+// V2N M33 Zephyr image (SRAM-linked at 0x08003000) headless.
+//
+// The M33-SM is a HEADLESS core: its board defconfig sets
+// CONFIG_CONSOLE=n and sci0 is NOT wired as a CM33 console ("the only
+// console is the A55's").  So there is deliberately no UART model here.
+// Its console is observed the same way alp-sdk observes it on the bench
+// -- Zephyr's `ram_console` backend writes to a RAM ring buffer
+// (`ram_console_buf`), which `west alp-renode --sim-mode` polls out of
+// SRAM and streams to the studio UART socket (see RamConsoleStreamer).
+//
+// The one bit of RZ/V2N IP that stock Renode v1.16.1 lacks and that the
+// firmware needs to BOOT is the clock/reset + interrupt-monitor window
+// (CPG/ICU at 0x4040_0000) -- a coarse Python stub whose CLKMON reads
+// report "clock on" and whose RSTMON reads report "out of reset", so the
+// FSP R_BSP_MODULE_START clock/reset handshakes complete.  It is not a
+// cycle-faithful CPG; it is the minimum to let real firmware boot.
+//
+// Address provenance (all public):
+//   - SRAM base/size: the M33-SM board devicetree
+//     zephyr/boards/alp/e1m_v2n101_m33_sm/..._cm33.dts  (memory@8003000,
+//     reg <0x08003000 0xfbfff>).
+//   - iic8 (RIIC / BRD_I2C) base: r9a09g056.dtsi  i2c@41c01000,
+//     compatible "renesas,rz-riic".  tmp112 sits on it at 0x48.
+//   - CPG/ICU window base 0x40400000: r9a09g056.dtsi (rz-intc-v2 reg +
+//     the CPG module-monitor registers the FSP BSP polls).
+
+nvic: IRQControllers.NVIC @ sysbus 0xE000E000
+    priorityMask: 0xF0
+    systickFrequency: 200000000
+    IRQ -> cpu@0
+
+cpu: CPU.CortexM @ sysbus
+    cpuType: "cortex-m33"
+    nvic: nvic
+
+// M33-SM SRAM.  The real bank is 0x08003000 + ~1 MiB (board dts:
+// reg <0x08003000 0xfbfff>); rounded up to a page-aligned 1 MiB here.
+// The firmware's ram_console_buf lives in this bank.
+sram: Memory.MappedMemory @ sysbus 0x08003000
+    size: 0x100000
+
+// Coarse RZ/V2N clock/reset + interrupt-monitor stub (see header).
+// CLKMON registers (local offset 0x800..0x9FF) read all-ones = "clock
+// supplied"; everything else (incl. RSTMON at 0xA10) reads 0 =
+// "out of reset" -- both are what R_BSP_MODULE_START polls for.
+syscon: Python.PythonPeripheral @ sysbus 0x40400000
+    size: 0x100000
+    initable: true
+    script: "request.Value = (0xFFFFFFFF if (0x800 <= (request.Offset & 0xFFFF) < 0xA00) else 0x0)"
+
+// RIIC / BRD_I2C bus host + the tmp112 the studio descriptor drives.
+// Named `i2c_tmp112`; reachable in the monitor as
+// `sysbus.iic8.i2c_tmp112`.  TMP103 is a settable-`Temperature` I2C
+// temperature-sensor model shipped with Renode, standing in for the
+// TMP112 on the V2N X-EVK bus (0x48 = TMP112 ADD0=GND).
+iic8: I2C.RenesasRA_IIC @ sysbus 0x41c01000
+
+i2c_tmp112: Sensors.TMP103 @ iic8 0x48

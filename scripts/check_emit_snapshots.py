@@ -37,11 +37,38 @@ SNAP_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
 # PYTHONPATH so the package + its `alp_project` sibling import both resolve
 # (replaces the old file-path call to scripts/alp_orchestrate.py).
 ORCH = [sys.executable, "-m", "alp_orchestrate"]
-PROJ = REPO / "scripts" / "alp_project.py"
+PROJ = [sys.executable, str(REPO / "scripts" / "alp_project.py")]
 
 # (snapshot id, tool, board.yaml, emit mode).  Deterministic, write-free
 # emits across the three vendor families -- the contract surfaces a refactor
 # must preserve.  build-plan carries the SDK-root abs path (normalised below).
+#
+# Two families of cases:
+#   * ORCH (`-m alp_orchestrate`) -- the multicore system-manifest / build-plan
+#     surfaces.  build-plan embeds each slice's rendered `alp.conf`, so it also
+#     pins `kconfig.py::_slice_alp_conf` byte-for-byte.
+#   * PROJ (`alp_project.py`) -- the single-core `--emit` surfaces rendered by
+#     `alp_project_emit.py` (dts overlay, native-sim overlay, hw-info header,
+#     west libraries, carrier route/netlist) plus `zephyr-conf` (alp.conf for a
+#     single core) and `os-topology` (the `loader.py::load_board_yaml`
+#     resolution).  These are the seams the #673 alp_project_emit / kconfig /
+#     loader splits move; pinning them here is the Phase-0 characterization net
+#     those extractions land against.
+_PROJ_BOARDS = [
+    # (short id, board.yaml).  One AEN E8 SKU, one V2N SKU, one native_sim.
+    ("aen", "examples/aen/aen-analog-validate/board.yaml"),
+    ("v2n", "examples/v2n/v2n-power-monitor/board.yaml"),
+    ("nsim", "examples/peripheral-io/spi-slave/board.yaml"),
+]
+# Project-wide emit modes valid for every board above (zephyr-targeted).
+_PROJ_MODES = [
+    "zephyr-conf", "dts-overlay", "native-sim-overlay",
+    "hw-info-h", "west-libraries",
+]
+# Carrier routing / topology emits -- meaningful only for the SoM boards with a
+# resolved carrier (the native_sim board has none), so kept off `nsim`.
+_PROJ_CARRIER_MODES = ["os-topology", "composed-route-table", "carrier-netlist"]
+
 CASES = [
     ("rpmsg-aen.system-manifest",   ORCH, "examples/multicore/rpmsg-aen/board.yaml",            "system-manifest"),
     ("rpmsg-aen.build-plan",        ORCH, "examples/multicore/rpmsg-aen/board.yaml",            "build-plan"),
@@ -52,6 +79,33 @@ CASES = [
     ("hetero-offload.system-manifest", ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "system-manifest"),
     ("hetero-offload.build-plan",      ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "build-plan"),
 ]
+for _bid, _board in _PROJ_BOARDS:
+    for _mode in _PROJ_MODES:
+        CASES.append((f"proj-{_bid}.{_mode}", PROJ, _board, _mode))
+    if _bid != "nsim":
+        for _mode in _PROJ_CARRIER_MODES:
+            CASES.append((f"proj-{_bid}.{_mode}", PROJ, _board, _mode))
+
+
+def _normalize_root(text: str, repo: str) -> str:
+    """Replace every rendering of the SDK checkout root with ``<SDK_ROOT>``.
+
+    ``build-plan`` output is JSON, so a Windows checkout root
+    (``C:\\Users\\...\\alp-sdk``) appears with its backslashes doubled inside
+    JSON strings.  Normalising only the raw ``repo`` string leaves those
+    JSON-escaped absolute paths in the emitted snapshot, which breaks the
+    byte-for-byte gate on Windows even though the committed goldens use
+    ``<SDK_ROOT>``.  Cover the JSON-escaped form and the forward-slash form as
+    well as the raw path.  On POSIX all three variants collapse to ``repo``,
+    so the Linux output is unchanged.
+    """
+    for variant in (
+        repo.replace("\\", "\\\\"),  # JSON-escaped Windows path (do first)
+        repo,                        # raw path (POSIX, or unescaped Windows)
+        repo.replace("\\", "/"),     # forward-slash Windows path
+    ):
+        text = text.replace(variant, "<SDK_ROOT>")
+    return text
 
 
 def _emit(tool: Path, board: str, mode: str) -> str:
@@ -68,7 +122,7 @@ def _emit(tool: Path, board: str, mode: str) -> str:
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
                          f"--emit {mode} (rc={rv.returncode}):\n{rv.stderr}")
-    return rv.stdout.replace(str(REPO), "<SDK_ROOT>")
+    return _normalize_root(rv.stdout, str(REPO))
 
 
 def main() -> int:

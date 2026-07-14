@@ -12,7 +12,7 @@
  * stays default n): that TU links the hal_alif libisp wrapper, and the locally
  * vendored 2025 wrapper is API-incompatible with the 2026 isp_pico.c (no
  * <zephyr/drivers/video/isp-vsi.h>; 2-arg vs 3-arg isp_vsi_bottom_half) -- a
- * known EXTERNAL hal_alif blocker (task #21).  LIVE ISP processing also stays
+ * known EXTERNAL hal_alif blocker.  LIVE ISP processing also stays
  * HW-blocked on this batch (no camera sensor wired): the ISP only does useful
  * work inside a camera->csi->isp->memory media-controller graph, which this
  * regcheck deliberately does not stand up.

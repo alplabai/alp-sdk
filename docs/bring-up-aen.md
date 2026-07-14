@@ -115,7 +115,7 @@ Cross-reference against
 * Bytes 0..3:   magic `ALPH` (`0x41 0x4C 0x50 0x48`)
 * Byte 4:       `schema_v1` = `0x01`
 * Bytes 5..8:   family ASCII = `AEN_`
-* Bytes 9..24:  SKU ASCII (`E1M-AEN701` zero-padded)
+* Bytes 9..24:  SKU ASCII (`E1M-AEN801` zero-padded)
 * Bytes 25..32: hw_rev ASCII (`r1` zero-padded)
 * Bytes 33..48: serial number ASCII
 * Bytes 49..56: mfg_date BCD (`YYYYMMDD`)
@@ -223,11 +223,12 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-se
 west flash
 ```
 
-Expect a successful OPTIGA read/sign on the console.  An
-all-zeros / all-FFs device ID or a probe failure means the
-OPTIGA wasn't bonded out correctly on this assembly.  (Running on
-hardware needs BRD_I2C / LPI2C0 wired to portable bus 0 -- the
-alp-sdk Alif LPI2C bring-up.)
+Expect an I2C_STATE probe result on the console.  On an OPTIGA-populated
+SoM the current driver then reports `ALP_ERR_NOSUPPORT` for product-info
+and raw-APDU calls; a future Infineon host-library integration owns the
+read/sign path.  On the current bench batch the example reports
+`RESULT SKIP` if BRD_I2C/LPI2C0 is not ready yet, or if BRD_I2C opens
+but the OPTIGA is DNI and the probe returns `ALP_ERR_NOT_READY`.
 
 ### 5.3 Ethernet PHY link
 
@@ -379,24 +380,16 @@ top of the per-subsystem checks.
    ([`zephyr/drivers/mbox/mbox_alif_mhuv2.c`](../zephyr/drivers/mbox/mbox_alif_mhuv2.c),
    binding
    [`zephyr/dts/bindings/mbox/alif,mhuv2-mbox.yaml`](../zephyr/dts/bindings/mbox/alif,mhuv2-mbox.yaml)).
-   The lead-part preset
-   ([`.../E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml))
-   now sets `mailbox.controller: alif_mhuv2`, and the AEN801 M55-HE/HP
-   overlays wire ipc0's `mboxes` to the APSS<->RTSS-HE MHU0 sender/
-   receiver pair.
+   The AEN presets now set `mailbox.controller: alif_mhuv2`, and the M55-HE/HP
+   overlays wire ipc0's `mboxes` to the non-secure MHU-1 sender/receiver pair
+   used by the dual-M55 RPMsg path (`0x400B0000` TX, `0x400A0000` RX, IRQ 43).
 
-   > **vendor-ext, BENCH-UNVERIFIED.**  The driver, the MHUv2 register
-   > map, and the node addresses/IRQs come from the ARM MHUv2 spec
-   > (DDI 0515) + the fork DTS and have **not** yet been run on real
-   > silicon.  The RTSS-HP MHU base in particular is unverified (the
-   > fork's HP dtsi reused the HE addresses) -- see the "bench-confirm
-   > HP MHU base" note in the HP overlay.  AEN801 is the lead part;
-   > the rollout of this wiring to AEN301..701 follows after AEN801
-   > bench-passes.
+   > **Bench status:** the E1M-AEN801 bench validated this MBOX driver with a
+   > dual-M55 OpenAMP RPMsg ping/pong on 2026-06-19 (#225): HP bound and received
+   > 16/16 pongs; HE bound and received 16/16 pings.  A32<->M55 Linux remoteproc
+   > overlays are a separate endpoint-specific path.
 
-   On bench day, validate the doorbell round-trip with the multicore
-   example (the step is now "make the real driver work", not "confirm
-   the name"):
+   To revalidate the doorbell round-trip with the multicore example:
 
    This round-trip spans **HE↔HP**, so build both core images: the
    HE side here, and the peer HP image against
@@ -409,10 +402,9 @@ top of the per-subsystem checks.
    ```
 
    The HE↔HP round-trip on MBOX channel 0 must echo a 32-byte
-   message.  If it fails, cross-check the MHUv2 frame base addresses
-   and IRQ numbers in the overlay against the **Alif hand-written
-   HW-config doc** and the generated board DTS before assuming a
-   driver bug -- those values are the unverified part.
+   message.  If it fails, cross-check the MHUv2 frame base addresses and IRQ
+   numbers in the overlay against the Alif Ensemble DTS before assuming a driver
+   bug.
 
 7. **Ethos-U sanity.**  Confirm the NPU is visible to the runtime
    before loading any model.  On the M55 side the Ethos-U55 is
@@ -426,7 +418,7 @@ top of the per-subsystem checks.
    ```
 
    Expect the console to report the Ethos-U variant the SKU
-   preset declares (`u55` on AEN701; `u85` primary + dual `u55`
+   preset declares (`u85` primary + dual `u55`
    on AEN801 -- see the `inference.npu_population` block).  A
    variant mismatch means the board DTS NPU node disagrees with
    the SoC JSON `npus[]`.
@@ -502,6 +494,5 @@ anything not covered here.
 - [`docs/getting-started.md`](getting-started.md) -- first-build
   walkthrough (the `gpio-button-led` example is what this
   bring-up flashes in §4).
-- Internal AEN feature audit (private repo) -- which AEN silicon
-  blocks the SDK does + doesn't expose; reference for "is X
-  on the AEN supported" questions.
+- [`docs/os-support-matrix.md`](os-support-matrix.md) -- which SDK
+  surfaces have real AEN backends versus fallback/stub coverage.

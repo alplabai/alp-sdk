@@ -6,8 +6,14 @@
 # off-taxonomy faults.  Same source targets the V2N DEEPX path when som.sku is
 # flipped.
 
+libraries:
+  - name: tflite-micro
+    cores: [m55_hp]
+  - name: cmsis-dsp
+    cores: [m55_hp]
+
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 supported_boards:
@@ -24,8 +30,6 @@ cores:
     app: ./src
     inference:
       default_arena_kib: 64
-    libraries:
-      - tflite_micro
     peripherals:
       - i2c                   # INA236 link.
 

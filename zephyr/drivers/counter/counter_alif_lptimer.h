@@ -23,7 +23,7 @@
  * exposes no Zephyr device for it, so there is no Tier-2 fork path to consume
  * or retire onto; the only upstream code is the proprietary DFP CMSIS driver,
  * which is not consumable).  BENCH-UNVERIFIED.  INTERIM until E8 bench, then
- * revisit.  See docs/adr/0017 + task #21.
+ * revisit.  See docs/adr/0017.
  * ====================================================================
  */
 

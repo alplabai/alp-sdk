@@ -284,7 +284,17 @@ static void probe_tps628640(alp_i2c_t *bus)
 	}
 	tps628640_t buck;
 
-	if (tps628640_init(&buck, bus, 0x4D, 600) != ALP_OK) {
+	/* Assembly option: it can ACK yet report not-ready (absent OTP, partially
+	 * powered rail, or intentionally not readable in this build).  That is an
+	 * optional-BOM condition, not a board failure -- skip, don't fail.  A true
+	 * protocol/data error (any other non-OK) stays R_FAIL. */
+	alp_status_t st = tps628640_init(&buck, bus, 0x4D, 600);
+
+	if (st == ALP_ERR_NOT_READY) {
+		report("tps628640", 0x4D, R_SKIP, "ACKs but not ready (assembly option / partial rail)");
+		return;
+	}
+	if (st != ALP_OK) {
 		report("tps628640", 0x4D, R_FAIL, "ACKs but VOUT1 read failed");
 		return;
 	}

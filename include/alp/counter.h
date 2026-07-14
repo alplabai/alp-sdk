@@ -55,6 +55,20 @@ typedef struct {
 } alp_counter_config_t;
 
 /**
+ * @brief Default-initialize an @ref alp_counter_config_t for counter @p id.
+ *
+ * The counter has no tunable fields beyond its identity, so the default
+ * simply names the instance: @code alp_counter_config_t cfg =
+ * ALP_COUNTER_CONFIG_DEFAULT(0); @endcode
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_COUNTER_CONFIG_DEFAULT(id) ((alp_counter_config_t){ .counter_id = (id) })
+
+/**
  * @brief Alarm callback fired when a previously-scheduled deadline
  *        ticks elapse.
  *
@@ -186,6 +200,23 @@ typedef struct {
 	uint32_t encoder_id;     /**< ENC0..ENC3 per `<alp/e1m_pinout.h>` (0..3). */
 	uint16_t pulses_per_rev; /**< Mechanical resolution (informational). */
 } alp_qenc_config_t;
+
+/**
+ * @brief Default-initialize an @ref alp_qenc_config_t for encoder @p id.
+ *
+ * Identity from @p id; canonical default: @c pulses_per_rev = 0 --
+ * the field is informational only (the hardware decoder counts
+ * quadrature edges regardless), so 0 ("unknown / not specified") is
+ * a safe default rather than inventing a mechanical resolution
+ * specific to some encoder model.
+ *
+ * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
+ *       SDK's toolchains; standard through C23).  Usable as an initializer
+ *       or an expression.  On a compiler that rejects compound literals in
+ *       C++ (e.g. MSVC), initialize the config's fields individually.
+ */
+#define ALP_QENC_CONFIG_DEFAULT(id) \
+	((alp_qenc_config_t){ .encoder_id = (id), .pulses_per_rev = 0u })
 
 /**
  * @brief Acquire a quadrature-decoder handle.

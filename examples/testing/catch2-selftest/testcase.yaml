@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: catch2-selftest
+  description: |
+    Minimal Catch2 v3 unit-test binary (amalgamated single-TU
+    distribution) -- 3 TEST_CASEs over a trivial clamp() helper.
+    HOST unit-test example: Catch2's own "All tests passed" summary
+    IS the app output; the SDK's uniform `[catch2-selftest] done`
+    marker is printed only after Catch2 reports zero failures.
+    Builds against the vendored Catch2 amalgamated distribution
+    (vendors/catch2/) -- see README.md.
+
+tests:
+  alp_sdk.example.catch2_selftest:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[catch2-selftest\\] done"
+    tags:
+      - alp-sdk
+      - example
+      - testing
+      - catch2-selftest

@@ -22,7 +22,7 @@ for the catalogue):
 
 ```yaml
 som:
-  sku: E1M-V2N101    # or E1M-AEN701, E1M-V2M101, E1M-NX9101, etc.
+  sku: E1M-V2N101    # or E1M-AEN801, E1M-V2M101, E1M-NX9101, etc.
 ```
 
 ### `alp_project: schema violation at <loc>: ...`

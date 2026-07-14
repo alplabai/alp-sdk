@@ -13,3 +13,6 @@ afa7e7e273b2f799ef503b0a364f2ca088cf90fc
 
 # style(cc3501e): clang-format-14 the cc3501e sources to the house style
 45a3d4fd8f59757e1f02ed1e24b92258c83bb8ba
+
+# style(format): apply clang-format-22 readable-wrapping pass to first-party C
+016dba8e

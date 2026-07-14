@@ -79,7 +79,8 @@ the PR for experimental symbols.
 | `tmu.h`               | `[ABI-EXPERIMENTAL]` | Wave-1 GD32 CORDIC TMU helpers; surface limited and may be folded into `<alp/dsp.h>` for v1.0. |
 | `update_log.h`        | `[ABI-EXPERIMENTAL]` | v0.7 new; experimental until the hardware-enforced backend is silicon-proven. |
 | `i2c_regfile.h`       | `[ABI-EXPERIMENTAL]` | v0.9 new -- register-file target (slave) helper layered over the `[ABI-EXPERIMENTAL]` `alp_i2c_target_*` surface in `peripheral.h`; ships the "register-pointer + auto-increment file" state machine once.  Tracks the wrapped surface's tier exactly. |
-| `console.h`           | `[ABI-EXPERIMENTAL]` | v0.9 new -- app-facing companion-console binder (`alp_console_companion_set`) for the `alp companion` CLI verb.  No-op where the companion is a singleton (V2N auto-binds the GD32 supervisor); Alif apps register their CC3501E handle.  Experimental with the CC3501E companion surface it depends on. |
+| `console.h`           | (portable, no ABI symbols) | v0.9 chip-neutral console header; the portable `alp` shell command group self-registers. Companion binding moved to the chip-specific `ext/cc3501e/console.h`. |
+| `ext/cc3501e/console.h` | `[ABI-EXPERIMENTAL]` | v0.9 new -- app-facing companion-console binder (`alp_console_companion_set`) for the `alp companion` CLI verb.  No-op where the companion is a singleton (V2N auto-binds the GD32 supervisor); Alif apps register their CC3501E handle.  Experimental with the CC3501E companion surface it depends on. |
 
 ### Chip-driver headers (`include/alp/chips/*.h`)
 

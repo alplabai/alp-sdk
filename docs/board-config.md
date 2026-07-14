@@ -19,7 +19,7 @@ the SDK's per-MPN preset:
 
 ```yaml
 som:
-  sku: E1M-AEN701        # your MPN -- the SDK ships a preset
+  sku: E1M-AEN801        # your MPN -- the SDK ships a preset
                           # at metadata/e1m_modules/<MPN>.yaml
 
 preset: e1m-evk          # or write your custom board out inline -- see below
@@ -30,7 +30,7 @@ cores:
     app: ./src           # path (relative to board.yaml) of the Zephyr app
 ```
 
-That's the whole config for a vanilla "E1M-AEN701 on the EVK,
+That's the whole config for a vanilla "E1M-AEN801 on the EVK,
 M55-HP core running Zephyr" build.  Optional per-core blocks
 (`peripherals`, `libraries`, `inference`, `iot`, `diagnostics`)
 add capability on top — omit them to get the defaults from the
@@ -182,7 +182,7 @@ Top-level fields:
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
 | `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
-| `libraries`      | no       | Project-wide curated third-party libraries (ADR 0018), e.g. `[lvgl, cmsis-dsp]`.  Each names a manifest under `metadata/libraries/<name>.yaml`; the orchestrator emits its per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (project-wide, ADR 0018)](#libraries-project-wide-adr-0018) below.  Distinct from the per-core `cores.<id>.libraries:` token list. |
+| `libraries`      | no       | Curated third-party libraries (ADR 0018).  One top-level list, each entry a `{name, cores?}` object (or a bare name as shorthand for a project-wide `{name}`), e.g. `[{name: lvgl}, {name: cmsis-dsp, cores: [m33_sm]}]`.  `name` resolves to a manifest under `metadata/libraries/<name>.yaml`; omit `cores:` for a project-wide selection or list core ids to scope it.  The orchestrator emits the per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (ADR 0018)](#libraries-project-wide-adr-0018) below. |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
 *Either `preset:` (preset mode) or inline `name:` + `populated:` +
@@ -194,13 +194,26 @@ the SoM preset's `topology.<id>` when omitted):
 
 | Field          | Notes                                                                                  |
 |----------------|----------------------------------------------------------------------------------------|
-| `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.                          |
-| `image`        | Yocto image recipe name (e.g. `alp-image-edge`).                                       |
+| `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.  For `os: yocto` an app-only slice, pair with `recipe:` -- `app:` is a source path, never a bitbake target. |
+| `image`        | Yocto image recipe name (e.g. `alp-image-edge`).  Takes priority over `app:`/`recipe:` when both are set. |
+| `recipe`       | Yocto bitbake recipe packaging this slice's `app:` (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice -- otherwise the plan blocks the slice (`yocto-recipe-missing`) instead of emitting an invalid `bitbake <path>`. |
 | `os`           | NOT an OS picker — the runtime is class-derived (M→Zephyr, A→Yocto). Only `off` (skip slice) or `baremetal` (rare) are settable; a cross-class OS is rejected. |
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
-| `libraries`    | Library opt-in list for this slice.                                                    |
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
-| `iot`          | Wi-Fi / MQTT / BLE / TLS toggles.                                                      |
+| `iot`          | Wi-Fi / MQTT / BLE / TLS toggles; emitted per OS and wireless provider.                |
+
+`cores.<id>.iot` is an emitted build surface, not a comment-only
+declaration.  On Zephyr, `wifi` / `ble` first resolve
+`metadata/e1m_modules/<SKU>.yaml` `on_module.wifi_ble`: AEN emits
+the exact CC3501E bridge backends, unknown native-radio providers
+emit generic Zephyr `wifi_mgmt` / BT-host gates, and Linux-owned
+Murata/CYW providers stay off Zephyr.  `mqtt` emits Zephyr's
+`mqtt_client` stack and `tls` emits the credential/TLS gates.  On
+Yocto, `wifi` / `ble` emit stable userland packages such as
+`wpa-supplicant`, `iw`, `wireless-regdb`, and `bluez5`; the
+BSP/machine layer remains responsible for provider-specific kernel
+modules and firmware.  `mqtt` / `tls` add the matching `alp-sdk`
+recipe `PACKAGECONFIG` tokens plus CA certificates.
 
 ### OS inference from core type
 
@@ -296,7 +309,7 @@ to create those files.
 
 ```yaml
 som:
-  sku: E1M-AEN701          # required
+  sku: E1M-AEN801          # required
 
   hw_rev: r1               # optional -- defaults to the SKU preset's
                             # `default_hw_rev`.  Validated at build
@@ -504,8 +517,8 @@ metadata/
 │   ├── E1M-AEN401.yaml      # partial_hw_config: true
 │   ├── E1M-AEN501.yaml      # partial_hw_config: true
 │   ├── E1M-AEN601.yaml      # partial_hw_config: true
-│   ├── E1M-AEN701.yaml      # v0.3 fully-populated worked example
-│   ├── E1M-AEN801.yaml      # partial_hw_config: true
+│   ├── E1M-AEN701.yaml      # lower-priority E7 preset
+│   ├── E1M-AEN801.yaml      # lead AEN E8 preset
 │   ├── E1M-V2N101.yaml      # v0.3 fully-populated worked example
 │   ├── E1M-V2N102.yaml      # partial_hw_config: true
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
@@ -520,8 +533,8 @@ metadata/
 v0.3 ships the schema + ten production SoM presets, the
 placeholder N93 bring-up preset (`E1M-NX9101`), the two stock
 boards, and a copy-friendly custom-example template.  Two SKUs
-(`E1M-AEN701`, `E1M-V2N101`) have their hardware configuration
-fully populated; the others carry `partial_hw_config: true` so
+(`E1M-AEN801`, `E1M-V2N101`) are the primary worked presets; lower-priority
+or not-yet-final SKUs carry `partial_hw_config: true` so
 the loader knows to expect SKU-specific overrides from the
 consumer's `board.yaml`.  Per the project memory note, values
 not in the silicon datasheet stay `TBD` (e.g.
@@ -587,19 +600,21 @@ for the full design + per-library notes.
 
 ### `extra_libraries` -- open-set escape hatch (v0.6)
 
-`libraries:` is closed -- the schema's enum lists the 25 libraries
-the SDK curates.  For one-off vendor SDKs, research-only deps, or
-libraries on their way into the curated set, `extra_libraries:`
-provides an open-set escape hatch.  Each entry declares either an
-inline Kconfig fragment OR a `profile:` path (mutually exclusive,
-enforced by the loader):
+The curated `libraries:` set is closed -- it's the set of manifests
+under `metadata/libraries/`.  For one-off vendor SDKs, research-only
+deps, or libraries on their way into the curated set, the per-core
+`extra_libraries:` provides an open-set escape hatch.  Each entry
+declares either an inline Kconfig fragment OR a `profile:` path
+(mutually exclusive, enforced by the loader):
 
 ```yaml
+libraries:
+  - name: mbedtls         # curated -- resolves to a manifest
+    cores: [m55_hp]
+
 cores:
   m55_hp:
     app: ./src
-    libraries:
-      - mbedtls           # curated -- closed enum
     extra_libraries:
       - name: zforce      # one-off vendor SDK, inline Kconfig path
         include_path: third_party/zforce/include
@@ -617,13 +632,13 @@ The two shapes:
 | `kconfig:` | Fast path for one-off libraries.  Lines emit verbatim into the slice's `alp.conf`.                       |
 | `profile:` | Library wants per-silicon backend selection consistent with the curated `libraries:`.  See below.        |
 
-The `profile:` file follows the same shape as
-`metadata/library-profiles/<lib>/hw-backends.yaml`: an
-`accelerators:` block of priority entries (each with optional
-`silicon:` / `soc_family:` / `requires_cap:` matchers + a
-`kconfig:` directive) and an optional `sw_fallback:` block whose
-`kconfig:` always emits.  First match per `class:` wins; see the
-[`mbedtls` profile](../metadata/library-profiles/mbedtls/hw-backends.yaml)
+The `profile:` file follows the same shape as a curated library's
+folded `integration.zephyr.hw_backends` block: an `accelerators:`
+list of priority entries (each with optional `silicon:` /
+`soc_family:` / `requires_cap:` matchers + a `kconfig:` directive)
+and an optional `sw_fallback:` block whose `kconfig:` always emits.
+First match per `class:` wins; see any
+[`metadata/libraries/<name>.yaml`](../metadata/libraries/) manifest
 for a worked example.
 
 Loader rules (enforced by `_validate_consistency()` in
@@ -632,21 +647,27 @@ Loader rules (enforced by `_validate_consistency()` in
 - Each entry MUST declare exactly one of `kconfig:` / `profile:`.
 - `name:` is globally unique across every core's
   `extra_libraries:`.
-- `name:` must NOT collide with the curated `libraries:` enum --
+- `name:` must NOT collide with a curated `libraries:` name --
   use the curated path for curated entries.
 - `profile:` must resolve to a file (repo-relative).
 
-### `libraries` (project-wide, ADR 0018) {#libraries-project-wide-adr-0018}
+### `libraries` (ADR 0018) {#libraries-project-wide-adr-0018}
 
 The **top-level** `libraries:` key (a sibling of `som:` / `cores:`,
-not nested under a core) selects *curated third-party libraries* the
-SDK integrates across the whole project — GUI, DSP/NN, serialization,
-and so on:
+not nested under a core) is the single place curated third-party
+libraries are declared — GUI, DSP/NN, serialization, and so on.  Each
+entry is a `{name, cores?}` object: omit `cores:` for a project-wide
+selection, or list core ids to scope the library to specific slices.
+A bare name is shorthand for a project-wide `{name}`:
 
 ```yaml
 som:
-  sku: E1M-AEN701
-libraries: [lvgl, cmsis-dsp, nanopb]   # <-- project-wide
+  sku: E1M-AEN801
+libraries:
+  - name: lvgl                 # project-wide (every core the manifest supports)
+  - name: nanopb
+  - name: cmsis-dsp
+    cores: [m55_hp]            # scoped to one core
 cores:
   m55_hp:
     app: ./src
@@ -676,12 +697,14 @@ Two curation tiers bound CI cost (ADR 0018):
 (tier + licence + compatibility), reading the same manifests, so the
 CLI and alp-studio's library picker never disagree.
 
-**This is a different mechanism from the per-core `cores.<id>.libraries:`
-token list above.** The per-core list is a closed enum wired through
-`metadata/library-profiles/` (compile-time config headers + HW-backend
-bindings); the top-level `libraries:` is the manifest-driven ADR 0018
-selection. Use the top-level key for the curated third-party libraries
-that ship a `metadata/libraries/<name>.yaml` manifest.
+Scoping a library to specific cores (`cores: [<id>]`) folds in what
+earlier schema drafts spelled as a separate per-core
+`cores.<id>.libraries:` token list — there is now one library
+declaration, manifest-driven, and the per-core list is gone.  The
+compile-time config headers under `metadata/library-profiles/<lib>/`
+(e.g. `etl_profile.h`, `lv_conf.h`) still tune each library for the
+SDK's invariants; the HW-backend accelerator model is folded into each
+`metadata/libraries/<name>.yaml` manifest.
 
 See [`metadata/libraries/README.md`](../metadata/libraries/)
 for the manifest shape, the full library list, and how to add one.
@@ -737,7 +760,25 @@ hidden:
 
 `scripts/alp_project.py` reads `board.yaml`, validates against the
 schema, resolves the SoM SKU + board presets, applies overrides,
-and emits one of three formats.  Common workflows below.
+and emits the requested build artifacts.  Common workflows below.
+
+### West extension -- validate, generate, and build
+
+The SDK ships first-class west extension commands via
+[`scripts/west-commands.yml`](../scripts/west-commands.yml).  The
+usual application build entry point is:
+
+```bash
+west alp-build -b <board> <app-dir>
+```
+
+`west alp-build` validates `<app-dir>/board.yaml`, emits the generated
+per-slice configuration and system manifest, then dispatches the
+underlying Zephyr / Yocto / baremetal build steps for the enabled
+cores.  Companion commands (`west alp-image`, `west alp-flash`,
+`west alp-clean`, `west alp-emit`, `west alp-size`, and
+`west alp-renode`) consume the same build state for bundle, flash,
+inspection, sizing, and simulation workflows.
 
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`
 
@@ -905,20 +946,28 @@ python3 $ALP_SDK/scripts/alp_project.py \
     --output build/generated/alp.overlay
 ```
 
-Encoders, cameras, displays, and other non-bus device classes land
-in the dts-overlay emitter in v0.4 once the upstream SoM board
-files lock the gpio bank/index columns.
+The dts-overlay emitter still synthesizes only the bus aliases and
+GPIO pin array above.  Display devices are supported through the
+Zephyr devicetree path today, but the board preset or app overlay
+must provide the concrete display node.  For SPI TFTs, use Zephyr's
+MIPI DBI Type C binding (`compatible = "zephyr,mipi-dbi-spi"`) with
+the panel driver child (for example `sitronix,st7789v`), then expose
+that child as `zephyr,display` for LVGL and/or `alp-display0` for
+`<alp/display.h>`.  Application code stays on LVGL or the portable
+display API; it does not initialise the panel driver directly.
 
-### What the loader does NOT yet do (v0.4 follow-ups)
+First-class display synthesis in the dts-overlay emitter remains a
+follow-up once the upstream SoM board files lock the gpio bank/index
+columns.  Encoders, cameras, and other non-bus device classes follow
+the same rule.
+
+### What the loader does NOT yet do
 
 - **Cross-validation against `metadata/socs/*.json`** -- the loader
   trusts the SKU preset's `silicon:` field; it doesn't yet
   validate that requested features (e.g. 16-bit ADC) match the
   SoC's documented caps.  The `<alp/soc_caps.h>` runtime check
   catches mismatches at `_open` time today.
-- **First-class `west` integration** -- planned as a custom
-  `west alp-build` command that wraps the configure + generate +
-  build sequence.
 
 ## Hardware revision tracking
 
@@ -959,7 +1008,7 @@ the canonical math lives at
 
 ```
 metadata/
-├── sdk_version.yaml                            # SDK release version (the single source of truth)
+├── sdk_version.yaml                            # SDK release version (currently "version: 0.9.0")
 ├── e1m_modules/
 │   ├── aen/hw-revisions.yaml                   # family-level revs (AEN family
 │   │                                            #  shares one PCB; SKUs differ
@@ -967,7 +1016,7 @@ metadata/
 │   ├── v2n/hw-revisions.yaml                   # V2N family revs (board_id.adc_channel TBD)
 │   ├── v2n-m1/hw-revisions.yaml                # V2N-M1 family revs (mirrors V2N + DEEPX)
 │   ├── imx93/hw-revisions.yaml                 # i.MX 93 family revs (adc_channel TBD)
-│   └── E1M-AEN701.yaml                     # MPN preset; `default_hw_rev: r1`
+│   └── E1M-AEN801.yaml                     # MPN preset; `default_hw_rev: r2`
 │                                                #  points into the family table.
 └── boards/
     ├── e1m-evk.yaml                            # board preset; carries its own
@@ -1064,6 +1113,27 @@ hand-edit in `prj.conf` / `local.conf` / sysbuild.conf,
 `board.yaml` carries a small set of structured blocks.  All
 optional; sensible defaults from the SoM family / SDK baseline
 apply when omitted.
+
+### Hardware-info EEPROM (`features.hw_info.eeprom:`)
+
+```yaml
+features:
+  hw_info:
+    eeprom:
+      bus: e1m_i2c0        # -> CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0
+      addr_7bit: 0x50      # CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT
+      offset: 0            # CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET
+```
+
+Project-wide.  This declares where the 128-byte
+`alp_hw_info_eeprom_t` manifest lives when an app needs to pin the
+EEPROM bus/address/offset explicitly.  The orchestrator emits the
+values into Zephyr `alp.conf` and projects them into
+`system-manifest.yaml` under `hw_info.eeprom`.
+
+`features:` is not a free-form pass-through.  Only typed feature
+blocks with emitter support are accepted; unsupported keys are schema
+errors so configuration cannot be silently ignored.
 
 ### Per-slice memory (`cores.<id>.memory:`)
 

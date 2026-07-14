@@ -1,0 +1,22 @@
+# board.yaml -- Modbus RAW_ADU teaching example.
+#
+# `libraries: [modbus]` is the ADR 0018 part: alp_project.py reads
+# metadata/libraries/modbus.yaml and emits CONFIG_MODBUS=y into the generated
+# alp.conf fragment.  prj.conf keeps only the app-specific backend choice
+# (RAW_ADU) so native_sim can build and run without a UART or RS-485 wiring.
+libraries:
+  - name: modbus
+
+som:
+  sku: E1M-V2N101
+
+preset: e1m-x-evk
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./src
+    peripherals: []
+
+diagnostics:
+  log_level: info

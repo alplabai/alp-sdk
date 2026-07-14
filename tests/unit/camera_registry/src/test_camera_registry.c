@@ -288,7 +288,7 @@ ZTEST(alp_camera_registry, test_renesas_vendor_ext_validates_input_ranges)
  * returns NOSUPPORT at the tail rather than ALP_OK -- but the
  * gating shape is identical). */
 static const alp_backend_t _fake_alif_be = {
-	.silicon_ref = "alif:ensemble:e4",
+	.silicon_ref = "alif:ensemble:e8",
 	.vendor      = "alif",
 	.base_caps   = 0u,
 	.priority    = 100,

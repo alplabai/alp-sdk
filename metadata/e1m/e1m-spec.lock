@@ -1,0 +1,32 @@
+# e1m-spec vendored-snapshot lock -- DO NOT EDIT BY HAND.
+#
+# The E1M physical footprint (pad geometry + default function assignment +
+# mechanical envelope) is the E1M standard, owned by the external
+# `alplabai/e1m-spec` repo.  alp-sdk vendors a *verbatim* snapshot of the
+# machine-readable pinout under metadata/e1m/ so contributors editing the
+# per-SoM pinout TSVs have the authoritative pad numbers in-repo, and so
+# CI can cross-check them offline (scripts/check_e1m_pinout.py).  The
+# snapshot is never hand-edited -- it is regenerated:
+#
+#     python3 scripts/sync_e1m_spec.py            # bump to e1m-spec@main
+#     python3 scripts/sync_e1m_spec.py --ref <sha|tag>
+#
+# See docs/adr/0019-vendor-e1m-spec-pinout-snapshot.md for the rationale
+# and docs/e1m-pinout.md for how each layer consumes the pinout.
+source:
+  repo: alplabai/e1m-spec
+  ref: main
+  sha: 731245f95ca255b2a00f0a2ddd8a7b8914eee95d
+files:
+  - snapshot: metadata/e1m/pinout-v1.json
+    upstream: pinout/v1.json
+    id: E1M
+    version: "1.0"
+    pad_count: 312
+  - snapshot: metadata/e1m/pinout-x-v1.json
+    upstream: pinout/x-v1.json
+    id: E1M-X
+    version: "1.0"
+    pad_count: 496
+  - snapshot: metadata/schemas/loom-v1.schema.json
+    upstream: pinout/schema/loom-v1.schema.json

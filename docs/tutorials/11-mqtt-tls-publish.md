@@ -144,11 +144,15 @@ som:
   sku: E1M-V2N101
 
 preset: e1m-x-evk
+
+libraries:
+  - name: mbedtls
+    cores: [a55_cluster]
+
 cores:
   a55_cluster:
     app: ./linux                  # os: omitted -- A-cores default to yocto per topology
     image: alp-image-edge
-    libraries: [mbedtls]
     iot:
       wifi: true
       mqtt: true
@@ -160,9 +164,13 @@ diagnostics:
   log_level: info
 ```
 
-The `iot.mqtt.tls: true` flag makes the loader emit
-`PACKAGECONFIG:append:pn-libmosquitto = " ssl"` to the Yocto
-build, ensuring libmosquitto links OpenSSL.
+The `iot: { wifi: true, mqtt: true, tls: true }` block makes the
+loader emit the Yocto hand-off for this slice: Wi-Fi userland
+packages (`wpa-supplicant`, `iw`, `wireless-regdb`), CA
+certificates, and `PACKAGECONFIG:append:pn-alp-sdk = " mqtt security"`
+so the SDK's Linux MQTT/security backends build against
+libmosquitto and OpenSSL.  Provider-specific Wi-Fi kernel modules
+and firmware stay in the BSP/machine layer.
 
 ## 5. Build + flash + run
 

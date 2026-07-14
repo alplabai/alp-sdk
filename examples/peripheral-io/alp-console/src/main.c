@@ -38,7 +38,7 @@
  *
  * cc3501e_bridge_bringup() is the one-call SoM bring-up helper from the
  * aen-cc3501e-bringup example (cc3501e_bridge.{c,h}).  It:
- *   - opens the inter-chip SPI bus (bus_id 1, 1 MHz, no chip-select)
+ *   - opens the inter-chip SPI bus (bus_id 1, 1 MHz, hardware SS0)
  *   - opens the WIFI_EN + nRESET Alif LP-GPIO control pins
  *   - binds them to the cc3501e_t handle
  *   - attaches the GPIO proxy (when CONFIG_ALP_SDK_GPIO_CC3501E_PROXY=y)
@@ -53,6 +53,7 @@
  */
 #if defined(CONFIG_ALP_SDK_CHIP_CC3501E)
 #include <alp/console.h>
+#include <alp/ext/cc3501e/console.h>
 #include <alp/chips/cc3501e.h>
 
 /*
@@ -79,8 +80,8 @@ static void bind_companion(void)
 	/*
 	 * cc3501e_bridge_bringup() is silicon-validated on the E1M-AEN801
 	 * (see memory/reference-v2n-mali-kbase-rebuild.md and the
-	 * aen-cc3501e-bringup bench log).  It opens the inter-chip SPI
-	 * (no-CS lockstep, mode 0, 1 MHz) + the WIFI_EN / nRESET LP-GPIO
+		 * aen-cc3501e-bringup bench log).  It opens the inter-chip SPI
+		 * (hardware-SS0, mode 0, 1 MHz) + the WIFI_EN / nRESET LP-GPIO
 	 * pads, then runs the Puya cold-boot hard-reset + TI SWRU626
 	 * power sequence.  The bus_id, pin indices, and SPI frequency are
 	 * the E1M-AEN SoM defaults from cc3501e_bridge.h -- override them

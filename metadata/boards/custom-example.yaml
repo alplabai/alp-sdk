@@ -1,6 +1,6 @@
 # Worked example: a custom board derived from the E1M-EVK reference.
 #
-# Imagine a production product based on E1M-AEN701 that ships a
+# Imagine a production product based on E1M-AEN801 that ships a
 # slim sensor-only board -- it keeps the EVK's IMU + barometer for
 # motion + altitude, drops the multimedia / debug parts (OLEDs,
 # camera, speaker amps, current monitors, I/O expander).

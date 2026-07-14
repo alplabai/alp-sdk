@@ -21,8 +21,11 @@ alp_pdm_mic_t *alp_pdm_mic_open(const alp_pdm_mic_config_t *cfg)
 	return NULL;
 }
 
-alp_status_t alp_pdm_mic_read(
-    alp_pdm_mic_t *mic, int16_t *out, size_t frames, size_t *out_frames, uint32_t timeout_ms)
+alp_status_t alp_pdm_mic_read(alp_pdm_mic_t *mic,
+                              int16_t       *out,
+                              size_t         frames,
+                              size_t        *out_frames,
+                              uint32_t       timeout_ms)
 {
 	(void)mic;
 	(void)out;

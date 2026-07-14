@@ -14,7 +14,7 @@ description: |
   driver, only the analog_ctrl VREF helper library reached via
   CONFIG_USE_ALIF_HAL_ANALOG): INTERIM.  Retires onto the opt-in sdk-alif fork
   compatible once the dac nodes are repointed AND bench-verified.  See
-  docs/adr/0017 + task #21.  BENCH-UNVERIFIED.
+  docs/adr/0017.  BENCH-UNVERIFIED.
 
   The driver maps the reg blocks via DEVICE_MMIO_NAMED_MAP, so reg-names is
   REQUIRED.  The driver expects (in this order, by name -- the order is

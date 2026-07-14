@@ -47,7 +47,7 @@
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
-#include "yocto_errno.h"
+#include "common/alp_errno.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_SPI_HANDLES
 #define ALP_SDK_YOCTO_MAX_SPI_HANDLES 4
@@ -109,6 +109,21 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 		alp_internal_set_last_error(ALP_ERR_INVAL);
 		return NULL;
 	}
+	/* ALP_SPI_NO_CS (0xFFFFFFFF) has no spidev mapping: the kernel's
+     * spidev minor is a DT-assigned chip-select index, not a "there is
+     * no CS" sentinel, so formatting it in verbatim used to probe
+     * "/dev/spidev<bus>.4294967295" and fail with a confusing ENOENT.
+     * There is no portable Linux convention today for "controller must
+     * not drive CS" independent of a specific DT-registered spidev
+     * node, so refuse before opening a nonsensical path rather than
+     * misrepresent the request.  Boards that manage CS externally
+     * should bind the kernel-registered spidev node for that bus at
+     * its real (board-assigned) minor and drive CS themselves via
+     * alp_gpio_*, exactly like the CMSIS/Zephyr backends do. */
+	if (cfg->cs_pin_id == ALP_SPI_NO_CS) {
+		alp_internal_set_last_error(ALP_ERR_NOSUPPORT);
+		return NULL;
+	}
 
 	char path[40];
 	int  n = snprintf(path, sizeof(path), "/dev/spidev%u.%u", cfg->bus_id, cfg->cs_pin_id);
@@ -119,21 +134,21 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 
 	int fd = open(path, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		return NULL;
 	}
 
 	uint8_t mode_byte = (uint8_t)cfg->mode;
 	if (ioctl(fd, SPI_IOC_WR_MODE, &mode_byte) < 0 ||
 	    ioctl(fd, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		(void)close(fd);
 		return NULL;
 	}
 	if (cfg->freq_hz != 0) {
 		uint32_t freq = cfg->freq_hz;
 		if (ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &freq) < 0) {
-			alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+			alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 			(void)close(fd);
 			return NULL;
 		}
@@ -150,6 +165,7 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 	h->cs_pin_id     = cfg->cs_pin_id;
 	h->freq_hz       = cfg->freq_hz;
 	h->bits_per_word = bits;
+	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
 
@@ -175,7 +191,7 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		.bits_per_word = bus->bits_per_word,
 	};
 	if (ioctl(bus->fd, SPI_IOC_MESSAGE(1), &xfer) < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	return ALP_OK;
 }
@@ -190,7 +206,7 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 	}
 	ssize_t n = write(bus->fd, tx, len);
 	if (n < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	if ((size_t)n != len) {
 		return ALP_ERR_IO;
@@ -208,7 +224,7 @@ alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
 	}
 	ssize_t n = read(bus->fd, rx, len);
 	if (n < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	if ((size_t)n != len) {
 		return ALP_ERR_IO;

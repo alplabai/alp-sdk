@@ -137,11 +137,17 @@ int cc3501e_hw_wifi_scan_stop(void);
  * CC3501E_HW_OK on success; the stub / silicon-free build reports
  * CC3501E_HW_ERR_NOTIMPL with *out_len = 0. */
 int cc3501e_hw_wifi_scan(uint8_t *buf, size_t cap, size_t *out_len);
-int cc3501e_hw_wifi_connect_sta(
-    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security);
+int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
+                                uint8_t        ssid_len,
+                                const uint8_t *psk,
+                                uint8_t        psk_len,
+                                uint8_t        security);
 int cc3501e_hw_wifi_disconnect(void);
-int cc3501e_hw_wifi_ap_start(
-    const uint8_t *ssid, uint8_t ssid_len, const uint8_t *psk, uint8_t psk_len, uint8_t security);
+int cc3501e_hw_wifi_ap_start(const uint8_t *ssid,
+                             uint8_t        ssid_len,
+                             const uint8_t *psk,
+                             uint8_t        psk_len,
+                             uint8_t        security);
 int cc3501e_hw_wifi_ap_stop(void);
 int cc3501e_hw_wifi_get_rssi(int8_t *rssi_dbm_out);
 int cc3501e_hw_wifi_get_ip(uint8_t ip_out[4]);
@@ -191,8 +197,11 @@ int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, cons
 
 /* Queue @p data_len bytes on the socket; @p sent_out receives the byte count the
  * stack accepted.  @p flags mirrors alp_cc3501e_sock_send_t::flags (bit 0 = MORE). */
-int cc3501e_hw_sock_send(
-    uint16_t handle, uint8_t flags, const uint8_t *data, uint16_t data_len, uint16_t *sent_out);
+int cc3501e_hw_sock_send(uint16_t       handle,
+                         uint8_t        flags,
+                         const uint8_t *data,
+                         uint16_t       data_len,
+                         uint16_t      *sent_out);
 
 /* Receive up to min(@p max_len, @p cap) bytes into @p buf; @p recv_len_out gets
  * the byte count (0 = nothing available within the socket's receive timeout, or
@@ -270,6 +279,21 @@ int cc3501e_hw_ota_finish(void);
 
 /* Cancel an in-flight session (psa_fwu_cancel) and return to IDLE. */
 int cc3501e_hw_ota_abort(void);
+
+/* Promote an ALREADY-committed pending image: arm the same deferred swap-reboot
+ * that FINISH uses, without needing a fresh session.  A STAGED image survives a
+ * bare nRESET (which carries no swap request) while the RAM session state resets
+ * to IDLE -- so once a slot is occupied, FINISH short-circuits and the swap can
+ * never be requested.  This is the unjam/promote path: cc3501e_hw_tick performs
+ * the reboot once the reply has clocked back.  Not gated on ota.state (that is
+ * IDLE after the reset that jammed the slot). */
+int cc3501e_hw_ota_promote(void);
+
+/* Result of the last psa_fwu_request_reboot() (0 if none requested).  Since
+ * request_reboot only RETURNS on refusal (success reboots), a non-zero value
+ * means the swap was REFUSED (e.g. BL2 anti-rollback on a downgrade) -- lets the
+ * host distinguish "refused" from "never fired".  Surfaced in OTA_STATUS. */
+int8_t cc3501e_hw_ota_reboot_rc(void);
 
 /* Report session progress: @p state = alp_cc3501e_ota_state_t, @p
  * bytes_written = bytes accepted so far, @p total_len = the BEGIN value.

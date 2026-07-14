@@ -4,8 +4,8 @@ sample:
   name: v2n-xspi-flash-readwrite
   description: |
     Read + write + erase against the V2N's on-module xSPI NOR
-    flash via `<alp/storage.h>`.  Validates the storage surface
-    against the V2N's flash backend.
+    flash via Zephyr's flash API.  Validates low-level V2N flash
+    bring-up, not coverage for the portable SDK storage facade.
 
 tests:
   alp_sdk.examples.v2n.xspi_flash_readwrite.native_sim:

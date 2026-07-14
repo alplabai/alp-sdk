@@ -50,8 +50,8 @@ the SoM preset's `topology:` block.
 
 ```yaml
 som:
-  sku: E1M-AEN701          # required
-  hw_rev: r1               # optional; defaults to default_hw_rev in the family
+  sku: E1M-AEN801          # required
+  hw_rev: r2               # optional; defaults to default_hw_rev in the family
 ```
 
 `sku` resolves to a preset at
@@ -290,26 +290,36 @@ cores:
 ```
 
 Toggles the connectivity subsystems for this slice.  Each
-`true` pulls in the matching backend (Wi-Fi stack, MQTT client,
-mbedTLS / OpenSSL, BLE host).  Per-core under v2 -- a
-heterogeneous build typically lights up `wifi/mqtt/tls` on the
-A-class slice and leaves the M-class slice quiet.  TLS pinning
-lives in application code -- see Tutorial [11: MQTT-TLS publish](11-mqtt-tls-publish.md).
+`true` emits the matching build config for that slice.  Zephyr
+resolves the SoM's wireless provider first: AEN emits the exact
+CC3501E Wi-Fi/BLE bridge backends, unknown native-radio providers
+emit Zephyr `wifi_mgmt` / BT-host gates, and Linux-owned Murata/CYW
+providers stay on the Yocto slice.  Yocto emits the Linux userland
+and runtime hand-off (`wpa-supplicant`, BlueZ, MQTT/security
+`PACKAGECONFIG`) while the BSP/machine layer owns provider-specific
+kernel modules and firmware.  TLS pinning lives in application code
+-- see Tutorial [11: MQTT-TLS publish](11-mqtt-tls-publish.md).
 
-### `cores.<id>.libraries`
+### `libraries` (top-level, `{name, cores?}`)
 
 ```yaml
+libraries:
+  - name: etl                 # project-wide (no cores: -> every core)
+  - name: fmt
+    cores: [m55_hp]           # scoped to one core
+  - name: lvgl
+    cores: [m55_hp]
+
 cores:
   m55_hp:
     app: ./src
-    libraries:
-      - etl
-      - fmt
-      - lvgl
 ```
 
-Per-core under v2 -- different slices can pull in different
-library sets (lvgl on the UI core, cmsis_dsp on the DSP core).
+Curated libraries are declared once, at the top level, as a single
+list of `{name, cores?}` objects: omit `cores:` for a project-wide
+selection, or list core ids to scope a library to specific slices
+(lvgl on the UI core, cmsis-dsp on the DSP core).  A bare name is
+shorthand for a project-wide `{name}`.
 User-facing libraries the SDK threads through to the build.
 Apps use these through their **native API** -- no
 `<alp/...>` wrapping.  Allowed values (with their natural
@@ -393,7 +403,7 @@ The orchestrator merges `metadata/socs/<silicon>.json`'s
 `capabilities:` with the SoM preset's overrides at config time.
 Examples:
 
-- `ethos_u55_count: 2` is a silicon-determined fact on AEN701;
+- `ethos_u55_count: 2` plus `ethos_u85_count: 1` are silicon-determined facts on AEN801;
   the SoM preset doesn't have to repeat it.
 - `drp_ai: true` is silicon-determined on every V2N; not in the
   SoM YAML.
@@ -485,8 +495,8 @@ BLE + MQTT-TLS + LVGL display:
 name: my-iot-board       # inline board: required when no `preset:`
 
 som:
-  sku:    E1M-AEN701
-  hw_rev: r1
+  sku:    E1M-AEN801
+  hw_rev: r2
 
 populated:
   bme280:     true
@@ -496,11 +506,16 @@ populated:
 # + devicetree overlays; see the `### board` section above
 # for the contract.  board.yaml itself stays declarative.
 
+libraries:
+  - name: lvgl
+    cores: [m55_hp]
+  - name: mbedtls
+    cores: [m55_hp]
+
 cores:
   m55_hp:
     app: ./src        # os: omitted -- M-cores default to zephyr per topology
     peripherals: [i2c, spi, gpio]
-    libraries:   [lvgl, mbedtls]
     inference:   { default_arena_kib: 256 }   # arena tuning only
     iot:
       wifi: true
@@ -515,9 +530,9 @@ diagnostics:
 ```
 
 Run `python3 scripts/validate_board_yaml.py --input board.yaml`
-to lint before building.  Exit 0 = ok; exit 1 = schema error
-(JSON-pointer location in the message); exit 2 = missing
-preset; exit 3 = hw_rev incompatible with SDK version.
+to lint before building.  Exit 0 = no hard errors (warnings such
+as ALP-B010 may still print); exit 1 = schema, cross-reference, or
+orchestrator consistency error.
 
 ## What you can't put in `board.yaml`
 

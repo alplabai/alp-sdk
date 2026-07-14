@@ -111,4 +111,4 @@ The overlay is named for the fully-qualified board
 
 **BENCH-VALIDATION app -- not a customer teaching example.**
 ADR 0017: the shim is **pure SDK C** above the Tier-2 `counter_dw_rtc`
-driver; no driver rewritten. Task #21.
+driver; no driver rewritten.

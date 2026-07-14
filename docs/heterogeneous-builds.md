@@ -8,7 +8,7 @@ You'll declare both halves in a single `board.yaml`, let
 flashable bundle that covers Linux + Zephyr + the on-module GD32
 helper MCU.
 
-The same pattern generalises to **E1M-AEN701** (A32 + M55-HP + M55-HE),
+The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE),
 **E1M-NX9101** (A55 + M33), and any future heterogeneous SoM.
 
 > If you're targeting a single-OS SoM (e.g. AEN E3/E4 with M55 cores
@@ -87,7 +87,7 @@ split is opt-in per project.
 
 ## 4. The `cores:` block, walked through
 
-Here's a complete V2N `board.yaml` v2:
+Here's a complete V2N `board.yaml`:
 
 ```yaml
 som:
@@ -95,17 +95,24 @@ som:
   hw_rev: r1
 
 preset: e1m-x-evk
+
+libraries:
+  - name: mbedtls
+    cores: [a55_cluster]
+  - name: nlohmann-json
+    cores: [a55_cluster]
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 cores:
   a55_cluster:
     app: ./linux         # os: omitted -- A-cores default to yocto per SoM topology
     image: alp-image-edge
     peripherals: [ethernet, usb, emmc]
-    libraries:   [mbedtls, nlohmann_json]
     iot:         { wifi: true, mqtt: true }
   m33_sm:
     app: ./m33_sm        # os: omitted -- M-cores default to zephyr per SoM topology
     peripherals: [adc, pwm, i2c, gpio]
-    libraries:   [cmsis_dsp]
     inference:   { default_arena_kib: 64 }
 
 ipc:
@@ -329,12 +336,50 @@ instead of re-deriving it:
 PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit build-plan
 ```
 
-The JSON carries one entry per non-`off` core (build dir, the exact
-tool command, env) plus every generated artefact **with its contents**,
-so a consumer materialises files and runs commands without any planner
-logic of its own.  It is deterministic, write-free, and versioned by
+The JSON carries one entry per non-`off` core (build dir, the resolved
+app source dir, the exact tool command, env) plus every generated
+artefact **with its contents**, so a consumer materialises files and
+runs commands without any planner logic of its own.  Every relative
+path resolves against the input `board.yaml`'s own directory, never the
+CLI's CWD, so the plan is deterministic, write-free, and versioned by
 its own `schemaVersion` — see
 [ADR 0014](adr/0014-build-plan-emit-cli-contract.md) for the contract.
+
+Its shape is pinned by
+[`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json);
+`scripts/check_build_plan.py` validates the emitter's output against it,
+the same emitter-and-contract lockstep `check_system_manifest.py`
+enforces for the manifest above.  Validate a real plan with:
+
+```bash
+python3 scripts/check_build_plan.py --plan build-plan.json
+```
+
+### Build receipts (`build-receipt-v1`)
+
+A **build receipt** is deterministic provenance for a release build: given
+the same board.yaml, build-plan, and produced images, `scripts/build_receipt.py`
+composes the same receipt byte-for-byte — no wall-clock timestamp, and every
+path is stored repo-relative so the receipt doesn't change just because it
+was built from a different checkout location. It's a pure composer over
+inputs that already exist (the build-plan, `board.yaml`, and each core's
+output image), not a new build step.
+
+The top-level fields:
+
+- `source` — the SDK's git revision and whether the tree was dirty.
+- `config` — the resolved `boardYaml` path + its digest, the `sku`, and the
+  build-plan's digest (plus the lockfile digest, if supplied).
+- `toolchain` — the toolchain identity recorded by the build-plan.
+- `images` — one entry per core: its build path, sha256, and size in bytes.
+- `provenance` — placeholders (`sbomRef`, `attestationRef`) for later slices.
+
+Its shape is pinned by
+[`metadata/schemas/build-receipt-v1.schema.json`](../metadata/schemas/build-receipt-v1.schema.json);
+`scripts/check_build_receipt.py` validates that schema stays closed and
+well-formed. Wiring a receipt into `release.yml` and populating the SBOM /
+attestation refs are later #610 §7 slices — this slice only pins the shape
+and the composer.
 
 ### Iterating on one slice
 

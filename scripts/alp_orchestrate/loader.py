@@ -122,6 +122,24 @@ def _available_presets(metadata_root: Path) -> list[str]:
     return [p.stem for p in boards_dir.glob("*.yaml")]
 
 
+def _check_board_hosts_som_family(
+    sku: str,
+    som_preset: dict[str, Any],
+    preset: str,
+    board_preset: dict[str, Any],
+) -> None:
+    family = som_preset.get("family")
+    allowed_raw = board_preset.get("hosts_som_families")
+    if not isinstance(family, str) or not isinstance(allowed_raw, list):
+        return
+    allowed = [str(item) for item in allowed_raw]
+    if family in allowed:
+        return
+    raise OrchestratorError(
+        f"board preset '{preset}' hosts SoM families {allowed}, "
+        f"but {sku} is family '{family}'")
+
+
 def _synthesize_inline_board(project: dict[str, Any]) -> dict[str, Any]:
     """Build a board-shaped dict from a project's inline top-level fields.
 
@@ -175,6 +193,7 @@ def _slice_from_resolved(
         os=str(entry.get("os") or _default_os_from_core_type(soc_core_type)),
         app=entry.get("app"),
         image=entry.get("image"),
+        recipe=entry.get("recipe"),
         machine=entry.get("machine"),
         board=entry.get("board"),
         toolchain=entry.get("toolchain"),
@@ -185,27 +204,42 @@ def _slice_from_resolved(
         iot=dict(entry.get("iot") or {}),
         memory=dict(entry.get("memory") or {}),
         power=dict(entry.get("power") or {}),
+        # Absent -> True (the core has a HW console); only a SoM preset's
+        # `topology.<id>.hw_console: false` marks a headless core.
+        hw_console=bool(entry.get("hw_console", True)),
     )
 
 
-def load_board_yaml(path: Path, *,
-                    metadata_root: Path = METADATA_ROOT) -> BoardProject:
-    """Load + validate a board.yaml.
+def _load_and_validate_yaml(path: Path,
+                            metadata_root: Path) -> dict[str, Any]:
+    """Stage 1 of the #673 Phase-1 `load_board_yaml` split: read
+    board.yaml and run schema validation.
 
-    Raises OrchestratorError on any schema / preset / topology error.
+    Pass metadata_root so test stubs using non-production SKU patterns
+    (E1M-TST001 etc.) validate against their own copy of the schema
+    rather than the repo's strict pattern.
     """
     path = Path(path)
     project = _load_yaml(path)
-
-    # 1. Schema validation.  Pass metadata_root so test stubs using
-    # non-production SKU patterns (E1M-TST001 etc.) validate against
-    # their own copy of the schema rather than the repo's strict pattern.
     _validate_board(project, metadata_root=metadata_root)
+    return project
 
+
+def _resolve_board(
+    project: dict[str, Any],
+    metadata_root: Path,
+) -> tuple[str, Optional[str], dict[str, Any], str, dict[str, Any],
+           dict[str, Any], Optional[str], Optional[str]]:
+    """Stage 2 of the #673 Phase-1 `load_board_yaml` split: SoM SKU
+    preset, SoC spec, and board (preset or inline) resolution.
+
+    Returns (sku, hw_rev, som_preset, silicon, soc_spec, board_preset,
+    board_name, board_hw_rev).
+    """
     sku = project["som"]["sku"]
     hw_rev = project["som"].get("hw_rev")
 
-    # 2. Resolve SKU preset.
+    # Resolve SKU preset.
     sku_preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if not sku_preset_path.is_file():
         raise OrchestratorError(
@@ -213,7 +247,7 @@ def load_board_yaml(path: Path, *,
             f"{sku_preset_path.relative_to(REPO) if sku_preset_path.is_relative_to(REPO) else sku_preset_path}")
     som_preset = _load_yaml(sku_preset_path)
 
-    # 3. Resolve SoC spec via the preset's `silicon:` ref.
+    # Resolve SoC spec via the preset's `silicon:` ref.
     silicon = som_preset.get("silicon")
     if not silicon:
         raise OrchestratorError(
@@ -224,22 +258,43 @@ def load_board_yaml(path: Path, *,
             f"no SoC spec at {soc_path.relative_to(REPO) if soc_path.is_relative_to(REPO) else soc_path} for ref '{silicon}'")
     soc_spec = _load_json(soc_path)
 
-    # 4. Board definition.  Two mutually-exclusive sources (the
+    # Board definition.  Two mutually-exclusive sources (the
     # schema's `oneOf` rule enforces this):
     #   - `preset: <name>`  -> load metadata/boards/<name>.yaml
     #   - inline `name:` + `populated:` + `e1m_routes:` at top level
     # Either way the rest of the loader sees a single board_preset
     # dict with `name`, `populated`, `e1m_routes`.
     if "preset" in project:
-        board_preset = _resolve_board_preset(
-            project["preset"], metadata_root)
+        board_preset = _resolve_board_preset(project["preset"], metadata_root)
+        _check_board_hosts_som_family(
+            sku, som_preset, project["preset"], board_preset)
     else:
         board_preset = _synthesize_inline_board(project)
     board_name = board_preset.get("name")
     board_hw_rev = (project.get("hw_rev")
                       or board_preset.get("default_hw_rev"))
 
-    # 5. Compute per-core effective mapping.
+    return (sku, hw_rev, som_preset, silicon, soc_spec, board_preset,
+            board_name, board_hw_rev)
+
+
+def _validate_topology_cores(
+    project: dict[str, Any],
+    som_preset: dict[str, Any],
+    soc_spec: dict[str, Any],
+    sku: str,
+    silicon: str,
+    board_preset: dict[str, Any],
+    board_name: Optional[str],
+) -> tuple[dict[str, Slice], list[IpcEntry]]:
+    """Stage 3 of the #673 Phase-1 `load_board_yaml` split: per-core
+    topology resolution + OS/class enforcement, IPC endpoint
+    cross-checks, and the optional top-level `pins:` cross-check
+    against the resolved board's `e1m_routes:`.
+
+    Returns (cores, ipc_entries).
+    """
+    # Compute per-core effective mapping.
     project_cores = project.get("cores") or {}
     som_topology = som_preset.get("topology") or {}
     soc_core_ids = [c["id"] for c in (soc_spec.get("cores") or []) if "id" in c]
@@ -253,38 +308,35 @@ def load_board_yaml(path: Path, *,
             f"{bad_topology} that aren't in SoC {silicon}'s "
             f"cores[] (known: {soc_core_ids})")
 
-    # Phase B gap fix G-4: catch the cross-class `som.sku:` swap where
-    # `cores.<key>` doesn't match this SoM preset's `topology:`.
-    # Example: customer has `cores.m55_hp:` and swaps som.sku from
-    # E1M-AEN701 (topology: m55_hp + m55_he + a32_cluster) to
-    # E1M-NX9101 (topology: m33 + a55_cluster).  Pre-fix the slice-
+    # Phase B gap fix G-4 (hardened by #603): catch the cross-class
+    # `som.sku:` swap where `cores.<key>` doesn't match this SoM preset's
+    # `topology:`.  Example: customer has `cores.m55_hp:` and swaps
+    # som.sku from E1M-AEN801 (topology: m55_hp + m55_he + a32_cluster)
+    # to E1M-NX9101 (topology: m33 + a55_cluster).  Pre-fix the slice-
     # build loop iterated topology keys, NOT project_cores keys, so
     # `cores.m55_hp:` was silently dropped and the customer got an
-    # empty slice with no diagnostic.  Hard-fail when NO project key
-    # matches topology; soft-warn for unmatched keys when SOME match
-    # (the customer likely forgot to rename one of several cores).
-    # The SoC-level mismatch check (topology is a subset of SoC core
-    # IDs per the bad_topology guard above) is subsumed by this
-    # topology-level check: anything not in topology is wrong from
-    # the customer's POV, whether it's SoC-absent or merely SoM-
-    # preset-absent.
+    # empty slice with no diagnostic.
+    #
+    # #603: EVERY unmatched key under `cores:` is a hard error, not just
+    # the all-unmatched case -- a `cores:` mapping with one valid core
+    # and one typo used to only warn-and-drop the typo, so a misspelled
+    # core silently vanished from the build while the file still
+    # validated "clean".  There is no compatibility policy that
+    # tolerates an unknown core key, so this is unconditional.  The
+    # SoC-level mismatch check (topology is a subset of SoC core IDs
+    # per the bad_topology guard above) is subsumed by this topology-
+    # level check: anything not in topology is wrong from the
+    # customer's POV, whether it's SoC-absent or merely SoM-preset-
+    # absent.
     topology_keys = set(som_topology.keys())
     project_keys = set(project_cores.keys())
     unmatched = sorted(project_keys - topology_keys)
-    matched = project_keys & topology_keys
-    if unmatched and project_keys:
+    if unmatched:
         sku_topology = sorted(topology_keys)
-        if not matched:
-            raise OrchestratorError(
-                f"board.yaml `cores:` declares {unmatched} but the "
-                f"SoM SKU {sku}'s `topology:` exposes no such core. "
-                f"Did you mean one of: {sku_topology}?")
-        for key in unmatched:
-            print(
-                f"alp_orchestrate: WARN: board.yaml `cores.{key}:` "
-                f"has no match in SoM SKU {sku}'s `topology:` "
-                f"(exposes: {sku_topology}); slice will be dropped.",
-                file=sys.stderr)
+        raise OrchestratorError(
+            f"board.yaml `cores:` declares unknown core id(s) {unmatched} "
+            f"that {sku}'s `topology:` does not expose. "
+            f"Did you mean one of: {sku_topology}?")
 
     # Index SoC cores[] by id so we can look up `type` for the OS
     # default inference (Finding A: pre-2026-05-18 every SoM YAML's
@@ -318,7 +370,7 @@ def load_board_yaml(path: Path, *,
             slice_, soc_core_type_by_id.get(core_id, ""))
         cores[core_id] = slice_
 
-    # 6. IPC entries.
+    # IPC entries.
     ipc_raw = project.get("ipc") or []
     ipc_entries: list[IpcEntry] = []
     for entry in ipc_raw:
@@ -331,7 +383,7 @@ def load_board_yaml(path: Path, *,
             address=entry.get("address"),
         ))
 
-    # 7. Loader rule §4.5.6: every ipc endpoint must be a core with
+    # Loader rule §4.5.6: every ipc endpoint must be a core with
     # os != off.
     for e in ipc_entries:
         for ep in e.endpoints:
@@ -344,7 +396,7 @@ def load_board_yaml(path: Path, *,
                     f"ipc entry '{e.name}' references core '{ep}' "
                     f"which is os: off")
 
-    # 8. Optional top-level `pins:` cross-check.  When the project
+    # Optional top-level `pins:` cross-check.  When the project
     # lists which E1M pads it actively uses, every entry must exist
     # in the resolved board's `e1m_routes:` block; entries that
     # supply a `macro:` must also match the board's macro for that
@@ -385,13 +437,22 @@ def load_board_yaml(path: Path, *,
                     f"match the resolved board '{board_label}'s macros for "
                     f"pad {e1m_pad}: {sorted(macros_by_pad[e1m_pad])}")
 
-    # 9. Storage partitions (board.yaml `storage:` block).  Parse into
-    # StorageEntry dataclasses + cross-field check: every `flash_device:`
-    # must resolve to either a memory_map region name or an
-    # `on_module.ospi_memories:` key.  Resolution of base addresses /
-    # overlap detection happens in `resolve_storage_partitions()`; the
-    # loader catches typos eagerly because they are cheap to surface
-    # before the build kicks off.
+    return cores, ipc_entries
+
+
+def _resolve_storage(
+    project: dict[str, Any],
+    som_preset: dict[str, Any],
+    sku: str,
+) -> list[StorageEntry]:
+    """Stage 4 of the #673 Phase-1 `load_board_yaml` split: storage
+    partitions (board.yaml `storage:` block).  Parse into StorageEntry
+    dataclasses + cross-field check: every `flash_device:` must resolve
+    to either a memory_map region name or an `on_module.ospi_memories:`
+    key.  Resolution of base addresses / overlap detection happens in
+    `resolve_storage_partitions()`; the loader catches typos eagerly
+    because they are cheap to surface before the build kicks off.
+    """
     storage_raw = project.get("storage") or []
     storage_entries: list[StorageEntry] = []
     for idx, item in enumerate(storage_raw):
@@ -434,14 +495,27 @@ def load_board_yaml(path: Path, *,
                     f"unique within the project")
             names_seen.add(entry.name)
 
-    # 10. `security.psa:` cross-field validation.  The schema is
-    # authoritative on field types; this block enforces the references:
-    # ITS/PS storage names must resolve to a `storage[].name`, a SoM
-    # memory_map region name, OR an `on_module.ospi_memories:` key
-    # (PS-class storage often lives on an on-module OSPI part rather
-    # than in MRAM); `attestation_root: optiga_trust_m` requires the
-    # SoM to physically ship OPTIGA Trust M.  Errors point at the
-    # offending board.yaml path so the customer can fix it.
+    return storage_entries
+
+
+def _validate_cross_fields(
+    project: dict[str, Any],
+    som_preset: dict[str, Any],
+    sku: str,
+    storage_entries: list[StorageEntry],
+) -> dict[str, Any]:
+    """Stage 5 of the #673 Phase-1 `load_board_yaml` split:
+    `security.psa:` cross-field validation.  The schema is
+    authoritative on field types; this block enforces the references:
+    ITS/PS storage names must resolve to a `storage[].name`, a SoM
+    memory_map region name, OR an `on_module.ospi_memories:` key
+    (PS-class storage often lives on an on-module OSPI part rather
+    than in MRAM); `attestation_root: optiga_trust_m` requires the
+    SoM to physically ship OPTIGA Trust M.  Errors point at the
+    offending board.yaml path so the customer can fix it.
+
+    Returns the raw `security:` block for BoardProject assembly.
+    """
     security_block = dict(project.get("security") or {})
     psa = dict(security_block.get("psa") or {})
     if psa:
@@ -505,6 +579,108 @@ def load_board_yaml(path: Path, *,
                     f"`none`, or switch to a SoM that carries OPTIGA "
                     f"(AEN family).")
 
+    return security_block
+
+
+def _library_alias_table(metadata_root: Path) -> dict[str, str]:
+    """Legacy per-core `libraries:` token -> canonical manifest name
+    (metadata/library-aliases-v1.json).  Empty dict if the table is absent."""
+    path = metadata_root / "library-aliases-v1.json"
+    if not path.is_file():
+        return {}
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    aliases = doc.get("aliases")
+    return dict(aliases) if isinstance(aliases, dict) else {}
+
+
+def _normalize_libraries(project: dict[str, Any],
+                         metadata_root: Path) -> None:
+    """Fold the unified top-level `libraries:` list into the internal channels
+    the emitters consume (WS6-c #610 §6).
+
+    board.yaml declares every curated library once, at the top level, as a
+    `{name, cores?}` object: project-wide when `cores:` is omitted, core-scoped
+    otherwise (a bare string is accepted as shorthand for a project-wide
+    `{name}`).  This rewrites the parsed dict so the rest of the loader stays
+    library-shape-agnostic: project-wide names land in `project['libraries']`
+    and core-scoped names are injected into each `cores[<id>]['libraries']`.
+
+    This is the ONLY library read path -- there is no separate per-core
+    `cores.<id>.libraries:` list to read.  A `cores:` entry scoping a library
+    to a core the topology doesn't declare is a hard error: silently dropping
+    it would emit nothing for a library the app author explicitly asked for.
+    """
+    unified = project.get("libraries") or []
+    alias = _library_alias_table(metadata_root)
+    cores_map = project.get("cores") or {}
+    project_wide: list[str] = []
+    per_core: dict[str, list[str]] = {}
+    for entry in unified:
+        if isinstance(entry, str):
+            project_wide.append(alias.get(entry, entry))
+            continue
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not name:
+            continue
+        canonical = alias.get(name, name)
+        cores = entry.get("cores")
+        if cores:
+            for cid in cores:
+                if str(cid) not in cores_map:
+                    raise OrchestratorError(
+                        f"libraries: entry '{canonical}' is scoped to core "
+                        f"'{cid}', which is not declared under `cores:`")
+                per_core.setdefault(str(cid), []).append(canonical)
+        else:
+            project_wide.append(canonical)
+    project["libraries"] = project_wide
+    for cid, names in per_core.items():
+        centry = cores_map.get(cid)
+        if not isinstance(centry, dict):
+            continue
+        existing = list(centry.get("libraries") or [])
+        for n in names:
+            if n not in existing:
+                existing.append(n)
+        centry["libraries"] = existing
+
+
+def load_board_yaml(path: Path, *,
+                    metadata_root: Path = METADATA_ROOT) -> BoardProject:
+    """Load + validate a board.yaml.
+
+    Raises OrchestratorError on any schema / preset / topology error.
+
+    #673 Phase 1: staged into a resolve pipeline.  YAML/schema load,
+    board/SKU resolution, topology/core validation, storage resolution,
+    and final cross-field validation each run as their own private
+    helper (`_load_and_validate_yaml`, `_resolve_board`,
+    `_validate_topology_cores`, `_resolve_storage`,
+    `_validate_cross_fields`), invoked in the exact same order as the
+    original monolithic function so error precedence and messages are
+    unchanged.
+    """
+    project = _load_and_validate_yaml(path, metadata_root)
+
+    # Fold the unified top-level `libraries:` list into the per-core /
+    # project-wide channels the downstream resolution expects, so topology +
+    # slice building stay library-shape-agnostic.
+    _normalize_libraries(project, metadata_root)
+
+    (sku, hw_rev, som_preset, silicon, soc_spec, board_preset,
+     board_name, board_hw_rev) = _resolve_board(project, metadata_root)
+
+    cores, ipc_entries = _validate_topology_cores(
+        project, som_preset, soc_spec, sku, silicon, board_preset,
+        board_name)
+
+    storage_entries = _resolve_storage(project, som_preset, sku)
+
+    security_block = _validate_cross_fields(
+        project, som_preset, sku, storage_entries)
+
     out = BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
@@ -526,8 +702,8 @@ def load_board_yaml(path: Path, *,
         raw=project,
     )
 
-    # 11. Cross-field consistency pass (v0.6 P2.3).  Runs last so it
-    # can inspect the fully-assembled project + every per-core
+    # Cross-field consistency pass (v0.6 P2.3).  Runs last so it can
+    # inspect the fully-assembled project + every per-core
     # extra_libraries: entry the schema couldn't validate cleanly.
     _validate_consistency(out)
 

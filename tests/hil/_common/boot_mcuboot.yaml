@@ -20,7 +20,7 @@
 # `boot:` block; its src/ slice is the test app.
 #
 # Hardware fixtures expected:
-#   - Standard E1M EVK + AEN701 SoM (the OPTIGA Trust M slot type
+#   - Standard E1M EVK + AEN801 SoM (the OPTIGA Trust M slot type
 #     dictates the signature algorithm the bootloader can verify).
 #   - Signed image flashed via `west flash`; sysbuild builds MCUboot
 #     + the signed app image automatically.

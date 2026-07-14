@@ -1,6 +1,14 @@
 # Stock preset for E1M-AEN801 (the SoM, NOT the EVK board).
-# See E1M-AEN701.yaml header for the file's role + the
-# project memory note governing what stays TBD.
+#
+# Customer board.yaml files reference this preset by setting:
+#   som:
+#     sku: E1M-AEN801
+#
+# This file lists ONLY components physically populated on the
+# E1M-AEN module PCB. Board-side parts live in metadata/boards/<name>.yaml.
+#
+# Per the project memory note, any SKU-specific hardware value not
+# supplied authoritatively stays TBD rather than being inferred.
 
 schema_version: 1
 
@@ -12,7 +20,7 @@ silicon_variant: AE822FA0E5597LS0        # see metadata/socs/alif/ensemble/e8.js
 display_name: "E1M-AEN801 (Alif Ensemble E8 -- 2x A32 + 2x M55 + 3x Ethos-U, preliminary)"
 
 on_module:
-  silicon:              alif:ensemble:e8       # 2x A32, dual-NPU 204 GOPS, includes Ethos-U85
+  silicon:              alif:ensemble:e8       # 2x A32, 2x Cortex-M55, 2x U55 + 1x U85
   wifi_ble:             cc3501e
   secure_element:       optiga_trust_m
   rtc_external:         rv3028c7
@@ -69,12 +77,19 @@ topology:
     toolchain: poky-glibc
   m55_hp:
     app: alp-stock-shim
-    board: alp_e1m_aen801_m55_hp        # Zephyr board target
+    # Qualified Zephyr board target: the Ensemble E8 die is multi-cluster
+    # (RTSS-HE + RTSS-HP), so `west build -b` needs the <soc>/<cpucluster>
+    # qualifiers -- the bare name is ambiguous and fails to resolve under
+    # Zephyr 4.4 (#720).  Must match the generated board tree's twister
+    # identifier (zephyr/boards/alp/e1m_aen801_m55_hp/...).
+    board: alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
     toolchain: arm-zephyr-eabi
+    zephyr_full_name: "E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HP carrier"
   m55_he:
     app: alp-stock-shim
-    board: alp_e1m_aen801_m55_he        # Zephyr board target
+    board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
     toolchain: arm-zephyr-eabi
+    zephyr_full_name: "E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HE carrier"
 
 # Memory layout (SRAM banks + MRAM) is derived from the SoC variant
 # resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
@@ -83,24 +98,18 @@ topology:
 # need one).
 
 # Inter-core mailbox IP: ARM MHUv2.  Confirmed via the alifsemi/zephyr_alif
-# fork DTS (dts/arm/alif/ensemble/common/ensemble_rtss_he.dtsi), corroborated
-# by the Alif Linux BSP (meta-alif-ensemble + linux_alif: apss-mhu ->
-# mhuv2.cfg).  The earlier `alif_mhu` candidate / MHUv2-vs-mhuv3 uncertainty is
-# RESOLVED: it is MHUv2.  alp-sdk now ships a Zephyr MBOX-class driver for it
-# under the DISTINCT compatible `alif,mhuv2-mbox`
-# (zephyr/drivers/mbox/mbox_alif_mhuv2.c) -- distinct from `arm,mhuv2` to stay
-# collision-free against the opt-in zephyr_alif fork's binding.
+# fork DTS (dts/arm/alif/ensemble/common/e1.dtsi plus ensemble_rtss_{hp,he}.dtsi),
+# corroborated by the Alif Linux BSP (meta-alif-ensemble + linux_alif:
+# apss-mhu -> mhuv2.cfg).  The earlier `alif_mhu` candidate /
+# MHUv2-vs-mhuv3 uncertainty is RESOLVED: it is MHUv2.
 #
-# `controller: alif_mhuv2` is the node/driver-family token (matches the
-# `alif,mhuv2-mbox` compatible).  AEN801 is the lead part; rollout of this
-# wiring to AEN301..701 follows after AEN801 bench-passes.
-#
-# Still BENCH-UNVERIFIED on real silicon: the driver, the register map, and the
-# node addresses/IRQs come from the ARM MHUv2 spec + fork DTS and have not yet
-# been run on hardware.  See the bench step in docs/bring-up-aen.md
-# "§6 mailbox controller".
+# `controller: alif_mhuv2` is the node/driver-family token (matches alp-sdk's
+# distinct `alif,mhuv2-mbox` compatible).  The E1M-AEN801 bench validated the
+# MHUv2 MBOX driver with a dual-M55 OpenAMP RPMsg ping/pong on 2026-06-19
+# (#225); endpoint-specific overlays still choose the appropriate MHU pair
+# (A32<->M55 or M55-HP<->M55-HE).
 mailbox:
-  controller: alif_mhuv2                    # ARM MHUv2 (compatible alif,mhuv2-mbox); BENCH-UNVERIFIED on silicon
+  controller: alif_mhuv2                    # ARM MHUv2 (compatible alif,mhuv2-mbox)
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }
     - { id: 1, reserved_for: app }
@@ -114,8 +123,8 @@ mailbox:
 # role (e.g. EVK_PIN_BMI323_INT1) stays SoM-agnostic.
 #
 # Source of truth:
-#   - metadata/e1m_modules/aen/from-cc3501e.tsv  (SPI1 bus)
-#   - AEN family hardware design (IO11/13/15..21 termination)
+#   - metadata/e1m_modules/aen/from-cc3501e.tsv
+#   - AEN family hardware design (CC3501E-owned GPIO pads)
 pad_routes:
   # SPI1 inter-chip bus -- CC3501E hosts the SPI peripheral.
   - { e1m: E1M_SPI1,      dispatch: cc3501e,
@@ -124,6 +133,8 @@ pad_routes:
   # GPIO pads that physically terminate on CC3501E (not on Alif silicon).
   - { e1m: E1M_GPIO_IO8,  dispatch: cc3501e, dispatch_pin: 30,
       doc: "CC3501E GPIO_30 (board 2626-R2; GPIO30 moved here from IO21)." }
+  - { e1m: E1M_GPIO_IO9,  dispatch: cc3501e, dispatch_pin: 12,
+      doc: "CC3501E GPIO_12." }
   - { e1m: E1M_GPIO_IO10, dispatch: cc3501e, dispatch_pin: 35,
       doc: "CC3501E GPIO_35 (board 2626-R2)." }
   - { e1m: E1M_GPIO_IO11, dispatch: cc3501e, dispatch_pin: 2,
@@ -132,10 +143,10 @@ pad_routes:
       doc: "CC3501E GPIO_13." }
   - { e1m: E1M_GPIO_IO15, dispatch: cc3501e, dispatch_pin: 14,
       doc: "CC3501E GPIO_14." }
-  - { e1m: E1M_GPIO_IO16, dispatch: cc3501e, dispatch_pin: 16,
-      doc: "CC3501E GPIO_16." }
-  - { e1m: E1M_GPIO_IO17, dispatch: cc3501e, dispatch_pin: 17,
-      doc: "CC3501E GPIO_17." }
+  - { e1m: E1M_GPIO_IO16, dispatch: cc3501e, dispatch_pin: 17,
+      doc: "CC3501E GPIO_17 (bridge READY/host-IRQ on current firmware)." }
+  - { e1m: E1M_GPIO_IO17, dispatch: cc3501e, dispatch_pin: 16,
+      doc: "CC3501E GPIO_16 (bridge SPI0 CS on current firmware)." }
   - { e1m: E1M_GPIO_IO18, dispatch: cc3501e, dispatch_pin: 18,
       doc: "CC3501E GPIO_18." }
   - { e1m: E1M_GPIO_IO19, dispatch: cc3501e, dispatch_pin: 19,
@@ -153,9 +164,12 @@ pad_routes:
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: TBD                       # populated when firmware/cc3501e/ cuts its first bench binary
-    flash_method:  TBD                       # cc3501e_usb_bootloader or alif_spi_relay; see firmware/cc3501e/flash.py
-    flash_args:    TBD                       # follows flash_method once that lands
+    firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
+    flash_method:  cc3501e_usb_bootloader     # west alp-flash helper backend; scripts/flash_backends/cc3501e_usb_bootloader.py
+    flash_args:                                # device (host bootloader port) + mode are bench/host-specific; the public cc3501e-flasher CLI is not yet shipped
+      speed:  921600                           # bootloader UART speed (backend default)
+      device: TBD                              # host bootloader COM/tty port -- provided at flash time
+      mode:   TBD                              # bootloader entry mode -- pending the public cc3501e-flasher CLI
 
 default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 

@@ -62,7 +62,7 @@
  *      the model runs entirely on the on-die NPU; only the score
  *      leaves the device.
  *   2. "Is it cheap enough to deploy on every machine?" -- yes,
- *      the Ethos-U + M55 HP combo on AEN701 drops to a single
+ *      the Ethos-U + M55 HP combo on AEN801 drops to a single
  *      microamp average when the inference path is clock-gated
  *      between windows.  Battery-powered nodes run for months.
  *   3. "Does the same source target V2N for the AI-PLC story?"
@@ -106,6 +106,7 @@
  * Include via <alp/board.h>; ALP_BOARD_* is emitted by the build
  * system from the board.yaml preset. */
 #include "alp/board.h"
+#include "alp/dsp.h"
 #include "alp/inference.h"
 #include "alp/chips/icm42670.h"
 
@@ -300,17 +301,15 @@ static float read_anomaly_score(alp_inference_t *inf)
 static float heuristic_anomaly_score(const float *win, size_t n)
 {
 	if (n == 0) return 0.0f;
-	float sumsq = 0.0f;
-	float peak  = 0.0f;
-	for (size_t i = 0; i < n; i++) {
-		float a = fabsf(win[i]);
-		sumsq += win[i] * win[i];
-		if (a > peak) peak = a;
+	/* RMS + abs-peak in one library call: alp_dsp_stats_f32 runs
+	 * CMSIS-DSP arm_rms_f32 / arm_absmax_f32 on the M55 and a portable-C
+	 * pass under native_sim -- no hand-rolled reduction, no arm_* here. */
+	alp_dsp_stats_t st;
+	if (alp_dsp_stats_f32(win, n, &st) != ALP_OK || st.rms <= 0.0f) {
+		return 0.0f;
 	}
-	float rms = sqrtf(sumsq / (float)n);
-	if (rms <= 0.0f) return 0.0f;
-	float crest = peak / rms;    /* ~1.41 for a pure sinusoid. */
-	float score = crest - 1.41f; /* clean window -> ~0. */
+	float crest = st.abs_max / st.rms; /* ~1.41 for a pure sinusoid. */
+	float score = crest - 1.41f;       /* clean window -> ~0. */
 	return score < 0.0f ? 0.0f : score;
 }
 

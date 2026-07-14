@@ -32,6 +32,16 @@ BreakBeforeBraces: Linux
 # so long public-API signatures + designated initialisers read clearly.
 BinPackParameters: false
 BinPackArguments: false
+# LLVM's AllowAllParametersOfDeclarationOnNextLine defaults to true, which lets
+# clang-format put every parameter of a wrapped declaration on a single
+# continuation line despite BinPackParameters: false above.  That silently
+# undoes the one-per-line intent for declarations (arguments at call sites are
+# unaffected -- AllowAllArgumentsOnNextLine stays true; disabling it produced
+# awkward call-site wrapping).  Set explicit false so a wrapped declaration
+# always reads one aligned parameter per line, and adding a parameter later
+# doesn't reshape an already-wrapped signature.
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllArgumentsOnNextLine: true
 KeepEmptyLinesAtTheStartOfBlocks: false
 PointerAlignment: Right
 SortIncludes: Never
@@ -40,6 +50,11 @@ SpacesInParentheses: false
 SpacesInSquareBrackets: false
 IncludeBlocks: Preserve
 ReflowComments: false
+# LLVM's default (Right) pads multi-line macro continuations with spaces up to
+# ColumnLimit so every trailing `\` lines up in one column.  That inserts a lot
+# of unrelated whitespace churn whenever a continuation line's length changes.
+# DontAlign puts the `\` directly after the line's content instead.
+AlignEscapedNewlines: DontAlign
 
 # Pin behaviour across clang-format versions.  CI pins clang-format-22 (via the
 # pip wheel -- see .github/workflows/pr-static-analysis.yml + scripts/setup-clang-format.sh),

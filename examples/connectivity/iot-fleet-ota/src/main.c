@@ -63,10 +63,9 @@
  * What runs on AEN HiL
  * ====================
  * Real polling against a staged Mender server; real ECDSA-P256
- * verification via mbedtls (which routes through the OPTIGA's
- * PSA driver once it lands in v0.3.x for HW acceleration); real
- * slot-B write through <alp/storage.h>; real k_reboot() into
- * MCUboot's swap path.
+ * verification via mbedtls today, with OPTIGA-backed PSA hardware
+ * acceleration planned once that driver lands; real slot-B write
+ * through <alp/storage.h>; real k_reboot() into MCUboot's swap path.
  */
 
 #include <stdio.h>
@@ -181,11 +180,11 @@ static bool fleet_poll_for_update(uint8_t *manifest_out, size_t manifest_cap, si
  * @brief Verify the artefact signature against the OPTIGA-locked
  *        public key.
  *
- * On AEN-Zephyr this routes through mbedtls's PSA Crypto API,
- * which the OPTIGA Trust M PSA driver (v0.3.x) accelerates in
- * hardware.  The verifying key is the public half of the
- * OPTIGA's slot 0xE0F0 -- compiled into the MCUboot bootloader
- * at production provisioning time.
+ * On AEN-Zephyr this routes through mbedtls's PSA Crypto API today.
+ * OPTIGA Trust M acceleration is the planned PSA backend; the
+ * verifying key is the public half of the OPTIGA's slot 0xE0F0,
+ * compiled into the MCUboot bootloader at production provisioning
+ * time.
  *
  * On native_sim the function returns true (framing only); on
  * HiL a tampered artefact returns false and the OTA is aborted

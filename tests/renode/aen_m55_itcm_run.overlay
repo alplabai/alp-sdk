@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// DTS overlay: link the AEN M55-HP image into ITCM (chosen zephyr,flash
+// = &itcm) so its vector table + code sit at the CPU-local 0x0 -- a low,
+// bit31-clear address.  Renode v1.16.1's Cortex-M55 mis-executes a vector
+// table at a high base like MRAM 0x80000000 (jumps to VTOR, not [VTOR+4]);
+// ITCM@0x0 sidesteps it (VTOR=0).  Mirrors the AEN bench first-light
+// ITCM RAM-run overlay (examples/aen/aen-hp-core-smoke) -- see #687.
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

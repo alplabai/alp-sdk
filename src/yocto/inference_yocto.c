@@ -149,10 +149,11 @@ static alp_inference_backend_t resolve_auto(void)
 /*                                                                     */
 /* The dispatcher calls alp_internal_set_last_error (declared in       */
 /* src/common/alp_internal.h) so failures here are visible through the */
-/* public alp_last_error() reader -- the same slot the peripheral      */
-/* stubs in stub_backend.c write to.  Cross-TU correlation works in    */
-/* non-vendor-override builds (the yocto path doesn't set              */
-/* ALP_VENDOR_OVERRIDES_PERIPHERAL, so this just works).               */
+/* public alp_last_error() reader -- the same thread-local slot the    */
+/* peripheral stubs in stub_backend.c write to, regardless of vendor   */
+/* overrides (that slot has exactly one owner now -- see               */
+/* alp_internal.h).  A successful open() clears it so a later caller   */
+/* on this thread doesn't see a stale earlier failure.                 */
 /* ------------------------------------------------------------------ */
 
 /* ================================================================== */
@@ -207,6 +208,7 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 		pool_release(h);
 		return NULL;
 	}
+	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
 
@@ -250,6 +252,11 @@ alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor
 	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;
 	*out = (alp_inference_tensor_t){ 0 };
+#if !defined(ALP_SDK_USE_DEEPX_DXM1) && !defined(ALP_SDK_USE_DRPAI_V2N)
+	/* No real inference backend compiled in -- every case below drops out,
+	 * leaving `index` unused (issue #634). */
+	(void)index;
+#endif
 	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
@@ -270,6 +277,11 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
 	if (inf == NULL || !inf->in_use) return ALP_ERR_NOT_READY;
 	if (out == NULL) return ALP_ERR_INVAL;
 	*out = (alp_inference_tensor_t){ 0 };
+#if !defined(ALP_SDK_USE_DEEPX_DXM1) && !defined(ALP_SDK_USE_DRPAI_V2N)
+	/* No real inference backend compiled in -- every case below drops out,
+	 * leaving `index` unused (issue #634). */
+	(void)index;
+#endif
 	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:

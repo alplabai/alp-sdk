@@ -18,13 +18,13 @@ name: pr-doxygen
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'include/**'
       - 'docs/doxygen/**'
       - '.github/workflows/pr-doxygen.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'include/**'
   workflow_dispatch:

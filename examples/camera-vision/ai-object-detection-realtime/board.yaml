@@ -2,7 +2,7 @@
 #
 # Camera -> NPU inference -> bounding-box overlay on display +
 # live FPS counter.  Targets the V2N-M1 (DEEPX DX-M1, 29 TOPS)
-# E1M SoM out of the box; swap `som.sku` to E1M-V2M201 for the
+# E1M-X SoM out of the box; swap `som.sku` to E1M-V2M201 for the
 # V2H-M1 (DEEPX DX-M2, 113 TOPS) variant when it lands -- the
 # app source is portable and doesn't change.
 #
@@ -17,6 +17,12 @@
 # don't touch source to retarget AEN -> V2N -> V2N-M1 -- the
 # board.yaml picks the right NPU shim.
 
+libraries:
+  - name: tflite-micro
+    cores: [m33_sm]
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 som:
   # E1M-V2M101 == V2N-M1 (Renesas RZ/V2N host + DEEPX DX-M1 NPU
   # on-module via PCIe).  V2M101's `capabilities:` block declares
@@ -25,15 +31,15 @@ som:
   # alp_inference_open(.backend = DEEPX_DXM1 or DRPAI).
   sku: E1M-V2M101
 
-preset: e1m-evk
+preset: e1m-x-evk
 
-# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+# E1M-X pads this app uses (subset of the X-EVK preset's `e1m_routes:`).
 pins:
-  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
-  - { e1m: E1M_SPI1, macro: EVK_SPI_BUS_ARDUINO, doc: "Arduino UNO header SPI; terminates on the on-module CC3501E, not the main SoC" }
+  - { e1m: E1M_X_I2C0, macro: XEVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
+  - { e1m: E1M_X_SPI1, macro: XEVK_SPI_BUS_ARDUINO, doc: "Arduino UNO header SPI on the X-EVK expansion header" }
 
-# OV5640 + ST7789 plug into the EVK headers for this demo (not part
-# of the EVK's default `populated:` table).  Listing them in the
+# OV5640 + ST7789 plug into the X-EVK headers for this demo (not part
+# of the X-EVK's default `populated:` table).  Listing them in the
 # project's `chips:` array flips on the matching chip drivers without
 # needing a per-project board fork.
 chips:
@@ -57,18 +63,17 @@ cores:
     # DXNN backend shim from hw-backends.yaml when the SKU's
     # preferred_backend is `deepx_dxm1`.  CMSIS-DSP handles the
     # pre-/post-process (resize, NMS) on the host CPU.
-    libraries:
-      - tflite_micro
-      - cmsis_dsp
     peripherals:
       - i2c                   # OV5640 SCCB + display init.
       - spi                   # ST7789 framebuffer push.
       - gpio                  # Camera RST/PWDN + display D/C#.
-# NOTE: dedicated CSI / display subsystem entries land in v0.6
-# alongside the V2N MIPI receiver work; today the OV5640 + ST7789
-# chip drivers in the project `chips:` array already pull in I2C /
-# SPI / GPIO, and the portable <alp/camera.h> + <alp/display.h>
-# APIs route through those drivers under the hood.
+# NOTE: there's no dedicated `csi` / `display` peripheral kind in
+# board.yaml -- that's not a version gap, it's how every camera/
+# display example expresses this (see
+# examples/ai/visual-defect-detection, examples/display/lvgl-widgets-
+# demo): the OV5640 + ST7789 chip drivers in the project `chips:`
+# array pull in I2C / SPI / GPIO, and the portable <alp/camera.h> +
+# <alp/display.h> APIs route through those drivers under the hood.
 
 diagnostics:
   log_level: info

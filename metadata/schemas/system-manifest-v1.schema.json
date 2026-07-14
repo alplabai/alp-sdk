@@ -18,7 +18,19 @@
         "som_hw_rev": { "type": ["string", "null"] },
         "board_name": { "type": ["string", "null"] },
         "board_hw_rev": { "type": ["string", "null"] },
-        "silicon": { "type": ["string", "null"] }
+        "silicon": { "type": ["string", "null"] },
+        "eeprom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bus", "bus_id", "addr_7bit", "offset"],
+          "description": "Resolved features.hw_info.eeprom manifest location, when declared in board.yaml.",
+          "properties": {
+            "bus": { "type": "string" },
+            "bus_id": { "type": "integer", "minimum": 0 },
+            "addr_7bit": { "type": "integer", "minimum": 80, "maximum": 87 },
+            "offset": { "type": "integer", "minimum": 0 }
+          }
+        }
       }
     },
     "slices": {
@@ -33,6 +45,7 @@
           "os": { "type": "string", "description": "Resolved runtime (zephyr | yocto | baremetal | off); the value-set is owned by metadata/schemas/board.schema.json cores.<core>.os." },
           "app": { "type": "string", "description": "Relative path to this image's app source dir (binds the core to its sub-folder)." },
           "image": { "type": "string", "description": "Yocto image recipe (A-core stock images)." },
+          "recipe": { "type": "string", "description": "Yocto bitbake recipe packaging this slice's `app:` source dir (required for an app-only Yocto slice; `app:` is a path, not a recipe name)." },
           "machine": { "type": "string", "description": "Yocto MACHINE." },
           "board": { "type": "string", "description": "Zephyr board target." },
           "toolchain": { "type": "string" },

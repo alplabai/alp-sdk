@@ -1,9 +1,9 @@
 # Alp SDK chip manifest: Infineon OPTIGA Trust M secure element.
 schema_version:   1
 chip_id:          optiga_trust_m
-driver_status:    partial          # OPEN_APPLICATION + product-info + raw APDU send.
-                                   # Full APDU command set (CalcSign, GenKeyPair, ECDH) lands
-                                   # when Infineon's host library is vendored.
+driver_status:    partial          # I2C_STATE probe only; product-info/raw APDU return NOSUPPORT.
+                                   # Full APDU transport (CalcSign, GenKeyPair, ECDH) lands
+                                   # when Infineon's host library is integrated.
 display_name:     "Infineon OPTIGA Trust M secure element (ECC / RSA / AES / SHA / TRNG)"
 vendor:           infineon
 mpn_population:
@@ -45,8 +45,8 @@ families:
   - v2n-m1
 
 verification:
-  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
-  smoke_tests:    null_arg_guard
+  hil_silicon:    untested        # APDU/product-info blocked until host-library transport.
+  smoke_tests:    null_arg_guard + nosupport_contract
 
 physical:
   # pins per Infineon OPTIGA Trust M datasheet, Revision 3.70 (2024-10-09),

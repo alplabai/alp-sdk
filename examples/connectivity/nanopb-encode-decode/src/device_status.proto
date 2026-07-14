@@ -1,0 +1,14 @@
+// device_status.proto -- tiny IPC/telemetry envelope for the nanopb
+// teaching example.  Two fields only, on purpose: this example is about
+// the nanopb pb_encode()/pb_decode() call pattern, not proto schema design.
+syntax = "proto3";
+
+import "nanopb.proto";
+
+message DeviceStatus {
+    int32 uptime_s = 1;
+    // Fixed max_size -> nanopb emits a plain `char[17]` field (16 chars +
+    // NUL), not a pb_callback_t.  No heap, no callback plumbing -- the
+    // struct is fully static, which is what you want on an M-class target.
+    string device_id = 2 [(nanopb).max_size = 17];
+}

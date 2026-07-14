@@ -256,3 +256,30 @@ ZTEST(alp_storage_registry, test_otfad_window_alignment_validation)
 	/* Aligned + ordered -> NOSUPPORT (vendor pack not landed). */
 	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 0u, 1024u), ALP_ERR_NOSUPPORT);
 }
+
+/* ---------- (i) overflow-safe range helper for fixed-capacity backends -- */
+
+ZTEST(alp_storage_registry, test_range_in_capacity_accepts_valid)
+{
+	zassert_true(alp_storage_range_in_capacity(0u, 4u, 4096u));
+	zassert_true(alp_storage_range_in_capacity(4092u, 4u, 4096u)); /* exact end */
+	zassert_true(alp_storage_range_in_capacity(4096u, 0u, 4096u)); /* zero len at end */
+}
+
+ZTEST(alp_storage_registry, test_range_in_capacity_rejects_out_of_range)
+{
+	zassert_false(alp_storage_range_in_capacity(4093u, 4u, 4096u)); /* runs 1 past end */
+	zassert_false(alp_storage_range_in_capacity(5000u, 0u, 4096u)); /* offset past end */
+}
+
+ZTEST(alp_storage_registry, test_range_in_capacity_rejects_wrapped_and_uint64_max)
+{
+	/* offset + len wraps uint64 -- must be rejected, not accepted. */
+	zassert_false(alp_storage_range_in_capacity(4000u, UINT64_MAX, 4096u));
+	/* UINT64_MAX offset -- narrowing to off_t would alias to a small
+     * in-bounds address without this guard. */
+	zassert_false(alp_storage_range_in_capacity(UINT64_MAX, 4u, 4096u));
+	zassert_false(alp_storage_range_in_capacity(UINT64_MAX, 0u, 4096u));
+	/* Oversized erase length just past capacity boundary. */
+	zassert_false(alp_storage_range_in_capacity(0u, UINT64_MAX, 4096u));
+}

@@ -21,7 +21,7 @@ The SDK targets two distinct product lines:
 Customers reasonably expect the SDK to deliver on "swap the SoM, no
 code changes" — but that promise has two very different meanings:
 
-1. **Intra-family** — swap from E1M-AEN701 to E1M-AEN801, or from
+1. **Intra-family** — swap from E1M-AEN601 to E1M-AEN801, or from
    V2N101 to V2M102, with `som.sku:` as the only change.  Same form
    factor, same E1M-spec reservations, same power envelope class,
    compatible board.
@@ -41,7 +41,7 @@ portability story.
 
 **Load-bearing portability promise: intra-family only.**
 
-- `E1M-AEN701` → `E1M-AEN801` is a `som.sku:` edit.  No source
+- `E1M-AEN601` → `E1M-AEN801` is a `som.sku:` edit.  No source
   change.  Same `<alp/e1m_pinout.h>` symbols, same
   `<alp/inference.h>` / `<alp/peripheral.h>` portable surfaces.
 - `V2N101` → `V2M102` is a `som.sku:` edit.  No source change.

@@ -12,6 +12,7 @@ from alp_cli.emit import emit_cmd
 from alp_cli.explain import explain_cmd
 from alp_cli.faultdecode import faultdecode_cmd
 from alp_cli.flash import flash_cmd
+from alp_cli.generate import generate_cmd
 from alp_cli.image import image_cmd
 from alp_cli.init import init_cmd
 from alp_cli.model import model_group
@@ -36,6 +37,7 @@ cli.add_command(emit_cmd)
 cli.add_command(explain_cmd)
 cli.add_command(faultdecode_cmd)
 cli.add_command(flash_cmd)
+cli.add_command(generate_cmd)
 cli.add_command(image_cmd)
 cli.add_command(init_cmd)
 cli.add_command(model_group)

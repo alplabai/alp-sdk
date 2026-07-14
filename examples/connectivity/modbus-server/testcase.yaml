@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: modbus-server
+  description: |
+    ADR 0018 Modbus teaching example.  Uses Zephyr's RAW_ADU backend so
+    native_sim can run an in-process client/server register round trip.
+
+tests:
+  alp_sdk.examples.modbus_server.native_sim:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - modbus
+      - connectivity
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[modbus\\] done"

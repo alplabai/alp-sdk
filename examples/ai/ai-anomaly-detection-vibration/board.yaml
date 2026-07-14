@@ -18,11 +18,16 @@
 # powered nodes can run for months on a single charge because the
 # heavy compute lives behind the NPU's clock-gated path.
 
+libraries:
+  - name: tflite-micro
+    cores: [m55_hp]
+  - name: cmsis-dsp
+    cores: [m55_hp]
+
 som:
-  sku: E1M-AEN701           # E7's two Ethos-U55s give an always-on
-                             # inference path; AEN401/AEN601/AEN801
-                             # add U85 for transformer-style anomaly
-                             # models on the same source.
+  sku: E1M-AEN801           # E8 keeps the AEN always-on Ethos-U path
+                             # and adds U85 headroom for transformer-style
+                             # anomaly models on the same source.
 
 preset: e1m-evk             # EVK preset populates the ICM-42670 at
                             # I2C0 by default.
@@ -51,8 +56,6 @@ cores:
     # per-model arena.
     inference:
       default_arena_kib: 128
-    libraries:
-      - tflite_micro
     peripherals:
       - i2c                  # ICM-42670 link.
 

@@ -435,6 +435,18 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 
 	const size_t dlen = alp_hash_digest_len(state->alg); /* 32 for SHA-256 */
 	if (digest_out == NULL || digest_cap < dlen) {
+		/* GHSA-92c3-v48m-m5gg: report the required length but do NOT
+		 * touch `be` / `state->be_data` here.  <alp/security.h> only
+		 * lets ALP_OK implicitly close the handle -- a short output
+		 * buffer must leave the SE slot valid so the dispatcher's
+		 * outer handle stays open for either a correctly sized retry
+		 * (same buffered bytes, re-issue finish) or an explicit
+		 * alp_hash_close().  Stranding be->in_use here (or freeing it
+		 * while the dispatcher keeps the outer handle alive) is
+		 * exactly the leak this backend used to have. */
+		if (digest_len != NULL) {
+			*digest_len = dlen;
+		}
 		return ALP_ERR_INVAL;
 	}
 
@@ -442,8 +454,11 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 		/* Over-ceiling input was migrated to PSA; let it finish. */
 		alp_status_t s =
 		    be->psa_ops->hash_finish(&be->psa_state, digest_out, digest_cap, digest_len);
-		be->delegated  = false;
-		be->in_use     = false;
+		/* Wipe the whole backend slot (buffered bytes, delegated PSA
+		 * copy) before release rather than leaving it to the next
+		 * se_hash_acquire() -- sensitive material shouldn't linger in
+		 * a "free" slot any longer than necessary. */
+		memset(be, 0, sizeof(*be));
 		state->be_data = NULL;
 		return s;
 	}
@@ -468,17 +483,25 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 	    (alp_se_crypto_send_request(&pkt, sizeof(pkt), SERVICE_CRYPTOCELL_MBEDTLS_SHA) == 0)
 	        ? se_rc_to_alp((int)pkt.resp_error_code)
 	        : ALP_ERR_IO;
-	be->in_use     = false;
-	state->be_data = NULL;
-	if (s == ALP_OK && digest_len != NULL) {
-		*digest_len = dlen;
+	if (digest_len != NULL) {
+		/* Parity with the yocto backend: report the digest length on
+		 * success, or 0 on the terminal-IO-failure path (this is not
+		 * the short-buffer path -- that already returned above). */
+		*digest_len = (s == ALP_OK) ? dlen : 0u;
 	}
+	/* Wipe the buffered plaintext before releasing the slot, on both
+	 * the ALP_OK and the ALP_ERR_IO paths -- either way the dispatcher
+	 * has already run/will run its own close-or-not decision on the
+	 * PUBLIC handle; this backend's own resource is done with either
+	 * outcome and must not hold sensitive bytes past this point. */
+	memset(be, 0, sizeof(*be));
+	state->be_data = NULL;
 	return s;
 #else
 	/* Unreachable by construction: with the send seam off, se_hash_open
 	 * declines at open (issue #239) and no SE hash handle exists.  Keep
 	 * the defensive decline so the vtable entry still compiles. */
-	be->in_use     = false;
+	memset(be, 0, sizeof(*be));
 	state->be_data = NULL;
 	if (digest_len != NULL) {
 		*digest_len = 0u;

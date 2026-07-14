@@ -1,0 +1,79 @@
+# mbedtls -- Mbed TLS cryptography / TLS library (ADR 0018 library
+# manifest; WS6-c Phase-1 canonical manifest for the legacy per-core token
+# `mbedtls`; name is already canonical).
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * scripts/alp_project_emit/__init__.py:200-201 (_LIBRARY_KCONFIG) --
+#     "CONFIG_MBEDTLS=y", "CONFIG_MBEDTLS_BUILTIN=y",
+#     "CONFIG_ALP_MBEDTLS_PURE_C=y" -- all three real CONFIG_ lines,
+#     copied verbatim (base enable + Zephyr-in-tree-build choice + ALP-side
+#     always-on SW-fallback marker).
+#   * west module `mbedtls`, path modules/crypto/mbedtls -- resolved
+#     through Zephyr's own v4.4.0 west manifest via the
+#     `modules.name-allowlist` passthrough (west.yml:223 `- mbedtls`), not
+#     a separate top-level project stanza in this repo's own west.yml.
+#   * enable symbol CONFIG_MBEDTLS
+#     ($ZEPHYR_BASE/modules/mbedtls/Kconfig: `menuconfig MBEDTLS`).
+#   * upstream version 4.1.0 (modules/crypto/mbedtls/include/mbedtls/
+#     build_info.h: `#define MBEDTLS_VERSION_STRING "4.1.0"`); pinned
+#     revision a3e190fe44c78d1ba67f55979e1257328cc7d0d8.
+#   * licence: Mbed TLS ships dual Apache-2.0 OR GPL-2.0-or-later
+#     (modules/crypto/mbedtls/LICENSE); this manifest records the
+#     permissive Apache-2.0 option per the schema's copyleft-free
+#     allowlist (ADR 0018 non-goal).
+#
+# HW-backends: metadata/library-profiles/mbedtls/hw-backends.yaml carries
+# per-accelerator priority binding (CryptoCell, inline-AES, CAU via the
+# GD32 bridge, OPTIGA Trust M handshake offload -- all currently
+# `status: planned`); folded in WS6-c Phase 3 (needs library-v1 schema
+# extension).
+#
+# No `requires:` -- CONFIG_ALP_MBEDTLS_PURE_C=y is the always-available
+# floor on every target this manifest's `integration.zephyr` section
+# supports; the HW crypto accelerators named in hw-backends.yaml above are
+# all still `status: planned`, so none is a real, satisfiable hard
+# requirement yet.
+#
+# `tier: B` for this Phase-1 pass: mbedtls is NOT listed in
+# metadata/registries/tier-a-library-ci.json's hostBuild.libraries or
+# excludedLibraries, even though it already has real teaching examples
+# (examples/connectivity/iot-dashboard, examples/connectivity/
+# iot-fleet-ota, examples/connectivity/production-deployment,
+# examples/multicore/*). Promotion to Tier A is a named follow-up (add the
+# CI-contract entry).
+schema_version: 1
+name: mbedtls
+description: "Mbed TLS -- TLS/crypto library backing <alp/security.h>'s PSA Crypto path."
+tier: B
+version: "4.1.0"
+license: Apache-2.0
+
+integration:
+  zephyr:
+    module: mbedtls
+    kconfig:
+      - CONFIG_MBEDTLS=y
+      - CONFIG_MBEDTLS_BUILTIN=y
+      - CONFIG_ALP_MBEDTLS_PURE_C=y
+    hw_backends:
+      class: crypto/TLS
+      upstream_source: "github.com/Mbed-TLS/mbedtls (in Zephyr west.yml already)"
+      accelerators:
+        - class: crypto
+          priority:
+            # CryptoCell first on Alif (full AES + RSA + ECDSA hardware).
+            - { requires_cap: cryptocell,     backend: cryptocell,               status: planned, kconfig: CONFIG_ALP_MBEDTLS_CRYPTOCELL=y }
+            # Inline-AES is the M55-instruction-level fast path.
+            - { requires_cap: inline_aes,     backend: inline_aes,               status: planned, kconfig: CONFIG_ALP_MBEDTLS_INLINE_AES=y }
+            # CAU on V2N + V2N-M1 via the GD32 bridge.
+            - { requires_cap: cau,            backend: cau,                      status: planned, kconfig: CONFIG_ALP_MBEDTLS_CAU=y }
+            # OPTIGA Trust M is the planned handshake offload on any
+            # module that populates it (AEN + V2N + NX9101).
+            - { requires_cap: optiga_trust_m, backend: optiga_trust_m_handshake, status: planned, kconfig: CONFIG_ALP_MBEDTLS_OPTIGA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_MBEDTLS_PURE_C=y
+
+      verification:
+        hil_silicon: untested
+        smoke_tests: build_only

@@ -18,8 +18,9 @@
  * Wlan_Start (or a short Wlan_Get) runs, the bridge SPI's DMA transfer
  * stops completing and MISO goes silent -- bench-proven, and it happens
  * REGARDLESS of which DMA channel the bridge is pinned to (we tried ch11,
- * ch8/6, and the FREE ch12/13; all die the same way).  There is no
- * host-IRQ on this rev for the CC35 to signal busy/ready, so the bridge
+ * ch8/6, and the FREE ch12/13; all die the same way).  READY gates
+ * command/reply phases once the slave is re-armed, but there is not yet a
+ * HOST_IRQ async-event line for the CC35 to initiate traffic, so the bridge
  * simply cannot be serviced WHILE a radio op runs.
  *
  * The architecture that works WITH this constraint (submit -> radio-op
@@ -42,23 +43,21 @@
  * radio op (when the slave is already dead), so SPI_close does not race a
  * live callback.
  *
- * ===================== 3-WIRE FRAMING (this rev) =====================
- * The current E1M-AEN rev wires ONLY SCLK/MOSI/MISO -- no CS, no host
- * IRQ/READY line (CS + IRQ are planned for the next board rev).  With no
- * CS edge to delimit transactions, framing is purely by FIXED CLOCK COUNT
- * in deterministic lockstep -- each side derives the next transfer's
- * length from a header it already exchanged:
+ * ============== HARDWARE-SS0 PHASE FRAMING (this rev) ================
+ * The current E1M-AEN rev wires SCLK/MOSI/MISO plus hardware SS0 and
+ * READY.  The Alif dwc-ssi master asserts/deasserts SS0 around each
+ * protocol phase; the CC3501E slave advances on SPI_TRANSFER_COMPLETED
+ * and raises READY after it has armed the next phase:
  *
  *   1. master clocks 4    -> request header   (slave reads payload_len)
  *   2. master clocks N    -> request payload   (N = that payload_len)
  *   3. master clocks 4    -> reply header      (master reads reply len)
  *   4. master clocks M    -> reply payload      (M = that reply len)
  *
- * No CS means the CC3501E's SS pad must be tied to its asserted level on
- * the SoM so the slave is permanently selected.  No IRQ means the host
- * POLLS for the reply (it adds a settle gap then reads the reply header).
  * The completed request frame is replayed through the byte seams, so
  * framing/dispatch (and the host test) are identical to the stub path.
+ * HOST_IRQ / async-event push delivery remains future work; solicited
+ * command traffic uses the hardware-SS0 + READY path here.
  *
  * CONFIG_SPI_0 is the SysConfig anchor for the inter-chip SPI instance,
  * resolved at bench-build time from the E1M-AEN board file.
@@ -79,7 +78,7 @@
 
 #include "../cc3501e_hw.h" /* cc3501e_hw_notify_reply_sent -- arm the deferred reset/OTA-swap reboot */
 
-/* Deterministic lockstep phases (see file header). */
+/* SS0-framed protocol phases (see file header). */
 enum spi_phase {
 	PH_REQ_HEADER = 0, /* clocking the 4-byte request header   */
 	PH_REQ_PAYLOAD,    /* clocking payload_len request bytes   */
@@ -98,12 +97,24 @@ static uint16_t cur_payload_len;
 
 /* Header-idle SYNC marker (ALP_CC3501E_SYNC_IDLE = 0xA5) driven on MISO while
  * the slave is parked at a frame boundary (clocking a request header).
- * CONTRACT-DEFINED, not bench diagnostics: with no CS on this rev the host keys
- * its byte-alignment sync + desync recovery off a run of 0xA5 (see
+ * CONTRACT-DEFINED, not bench diagnostics: at a clean frame boundary the host
+ * keys its byte-alignment sync + desync recovery off a run of 0xA5 (see
  * chips/cc3501e/cc3501e.c cc3501e_sync()).  During the request PAYLOAD phase the
  * slave drives NULL (0x00) instead -- 0xA5 marks ONLY the header-phase boundary,
  * so the host can distinguish "parked at a clean boundary" from "mid-payload". */
 static uint8_t sync_idle[ALP_CC3501E_HEADER_BYTES];
+
+/* Zero-filled dummy TX buffer for the request-PAYLOAD phase (see arm_transfer's
+ * PH_REQ_HEADER caller below).  That phase is RX-only (the host is clocking ITS
+ * payload bytes into us) so the driver logically doesn't care what goes out on
+ * MISO, and a literal NULL txBuf documents "don't care" -- but SPIWFF3DMA's
+ * transfer-arm path treats a NULL txBuf as "no TX descriptor to program", which
+ * on this backend can make SPI_transfer() reject the arm outright rather than
+ * silently substitute a fill byte.  A real (non-NULL), zeroed buffer keeps the
+ * exact same 0x00-on-MISO wire behaviour while always giving SPIWFF3DMA a valid
+ * descriptor to program.  Static + BSS-zeroed, sized to the largest payload the
+ * protocol allows so every plen in [1, ALP_CC3501E_MAX_PAYLOAD] fits. */
+static uint8_t dummy_tx_zero[ALP_CC3501E_MAX_PAYLOAD];
 
 /* P0-2 desync/probe re-arm counter (KEPT -- route through DIAG_GET_STATS for
  * link-health observability).  Counts header-phase re-arms triggered by a
@@ -114,7 +125,7 @@ volatile uint32_t g_resync_count;
  * recovery (bridge_transport_spi_hw_reinit).  Observable for link-health. */
 volatile uint32_t g_spi_reopen_count;
 
-/* Arm a fixed-count slave transfer.  For RX, tx is the 0xA5 marker (header) or
+/* Arm one SS0-framed phase transfer.  For RX, tx is the 0xA5 marker (header) or
  * NULL (payload -> 0x00 default fill on MISO); for TX, rx is NULL (the host's
  * MOSI dummies are discarded).  Non-blocking in SPI_MODE_CALLBACK: the DMA
  * (RX=ch12, TX=ch13) drains/fills the FIFO and the driver invokes on_transfer
@@ -126,7 +137,20 @@ static void arm_transfer(void *rx, const void *tx, size_t count)
 	t.txBuf = (void *)tx;
 	t.rxBuf = rx;
 	t.arg   = NULL;
-	(void)SPI_transfer(spi, &t);
+	if (!SPI_transfer(spi, &t)) {
+		/* SPI_transfer() itself failed to queue the DMA descriptor (e.g. a
+		 * transfer already in flight, or SPIWFF3DMA rejected the arm) -- the
+		 * slave is NOT actually armed for the next clock, even though the
+		 * caller thinks it is.  Previously this return value was discarded
+		 * and READY was raised unconditionally, which is a LIE: the host
+		 * would see READY, assert CSN, and clock into a slave that never
+		 * latches -- a silent byte-misalignment recoverable only via the
+		 * host's desync walk (cc3501e_sync()).  Leaving READY LOW here
+		 * instead gives the host a real, visible stall (its READY-gate wait
+		 * times out) that its poll-by-repeat retries against, rather than a
+		 * silently corrupted frame. */
+		return;
+	}
 	/* Slave is now armed -> raise READY so the host may clock THIS transfer.  Paired
 	 * with the CSN-deassert re-arm + on_transfer's busy() drop, this gives the host an
 	 * exact "armed" edge to gate on, so it never asserts CSN + clocks into a not-yet-
@@ -160,7 +184,7 @@ static void dispatch_frame(size_t frame_len)
 }
 
 /* SPI transfer-complete callback (driver SWI/HWI context).  Advances the
- * request-header -> request-payload -> reply-header -> reply-payload lockstep. */
+ * request-header -> request-payload -> reply-header -> reply-payload phases. */
 static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 {
 	(void)h;
@@ -177,15 +201,31 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 	 * double-advancing.  Advancing here also re-raises READY (via arm_transfer), so the
 	 * host's per-request READY gate sees the slave armed for the next phase. */
 	if (t == NULL || t->status != SPI_TRANSFER_COMPLETED) {
+		/* SPI_TRANSFER_CANCELED is the ONE non-COMPLETED status this backend
+		 * expects: it is exactly what bridge_transport_spi_hw_suspend() drives
+		 * via SPI_transferCancel() right before SPI_close(), i.e. the slave is
+		 * being torn down ON PURPOSE -- leave it alone (spi_open_and_arm()
+		 * re-arms fresh on the paired reinit).  Any OTHER non-COMPLETED status
+		 * (SPI_TRANSFER_FAILED, or an unexpected mid-phase status this
+		 * hardware-SS0, RETURN_PARTIAL-disabled framing should not otherwise
+		 * deliver) is an UNPLANNED transfer failure.  Previously this fell
+		 * through the same early return with no recovery: no callback is ever
+		 * pending on a dead transfer, so the slave stayed un-armed (and READY
+		 * low) FOREVER -- a permanent wedge only a hard reset could clear.
+		 * Re-arm the request-header phase instead, so the host's next PING /
+		 * poll-retry can resynchronise on this rev, not just on a reboot. */
+		if (t != NULL && t->status != SPI_TRANSFER_CANCELED) {
+			arm_request_header();
+		}
 		return;
 	}
 
 	switch (phase) {
 	case PH_REQ_HEADER: {
-		/* No-CS desync/probe guard (P0-2): a header whose cmd byte is in the
-		 * reserved range (>= 0x80, which includes an all-0xFF idle/probe header)
-		 * is NOT a valid v1 request.  It means the host is probing/re-syncing or
-		 * byte alignment drifted -- do NOT dispatch; just re-arm the header phase
+		/* Desync/probe guard (P0-2): a header whose cmd byte is in the reserved
+		 * range (>= 0x80, which includes an all-0xFF idle/probe header) is NOT a
+		 * valid v1 request.  It means the host is probing/re-syncing or byte
+		 * alignment drifted -- do NOT dispatch; just re-arm the header phase
 		 * (keep driving 0xA5) so the host's byte-walk lands on a clean boundary.
 		 * Makes the sync handshake non-destructive. */
 		if (frame_buf[0] >= ALP_CC3501E_CMD_RESERVED_VENDOR_BASE) {
@@ -212,9 +252,10 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 			arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
 		} else {
 			phase = PH_REQ_PAYLOAD;
-			/* NULL tx -> 0x00 on MISO during payload (0xA5 marks the header
-			 * boundary only). */
-			arm_transfer(&frame_buf[ALP_CC3501E_HEADER_BYTES], NULL, plen);
+			/* dummy_tx_zero (all-0x00) on MISO during payload (0xA5 marks the
+			 * header boundary only) -- see dummy_tx_zero's comment: SPIWFF3DMA
+			 * needs a real txBuf to arm, a literal NULL is not safe here. */
+			arm_transfer(&frame_buf[ALP_CC3501E_HEADER_BYTES], dummy_tx_zero, plen);
 		}
 		break;
 	}
@@ -322,7 +363,7 @@ void bridge_transport_spi_hw_reinit(void)
 void bridge_transport_spi_hw_suspend(void)
 {
 	if (spi != NULL) {
-		SPI_transferCancel(spi); /* cancel the in-flight lockstep transfer + its DMA */
+		SPI_transferCancel(spi); /* cancel the in-flight phase transfer + its DMA */
 		SPI_close(spi);
 		spi = NULL;
 	}

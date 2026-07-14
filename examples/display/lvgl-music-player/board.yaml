@@ -7,8 +7,12 @@
 # play any audio, and main.c makes no alp_i2s_* / codec calls.  A
 # real audio output path (a WM8960 / TLV320 codec over I²S plus an
 # MP3 decoder) is intentionally out of scope here.
+libraries:
+  - name: lvgl
+    cores: [m55_hp]
+
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 
@@ -20,8 +24,6 @@ cores:
     os: "off"
   m55_hp:
     app: ./src
-    libraries:
-      - lvgl
     peripherals:
       - spi
       - gpio                 # ST7789 panel: SPI data + control GPIOs.

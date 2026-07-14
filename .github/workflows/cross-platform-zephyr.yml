@@ -6,7 +6,7 @@
 # the Zephyr-on-M-class developer workflow is first-class on
 # Win + Mac + Linux.  This workflow is the mechanical CI proof
 # of that claim: every PR runs the metadata validator, the
-# cross-platform lint, and a single-board native_sim build on
+# cross-platform lint, public/private classifier, and a single-board native_sim build on
 # Ubuntu + macOS + Windows runners.
 #
 # Linux remains the canonical baseline (the shipped pr-twister.yml
@@ -49,11 +49,15 @@ name: cross-platform-zephyr
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'scripts/**'
       - 'examples/**'
+      - 'include/**'
+      - 'firmware/**'
+      - 'zephyr/**'
+      - 'meta-alp-sdk/**'
       - 'tests/scripts/**'
       - 'docs/**/*.md'
       - 'README.md'
@@ -64,6 +68,10 @@ on:
       - 'metadata/**'
       - 'scripts/**'
       - 'examples/**'
+      - 'include/**'
+      - 'firmware/**'
+      - 'zephyr/**'
+      - 'meta-alp-sdk/**'
       - 'tests/scripts/**'
       - 'docs/**/*.md'
       - 'README.md'
@@ -79,7 +87,8 @@ concurrency:
 jobs:
   # ---------------------------------------------------------------
   # Pure-Python smoke: metadata validation + cross-platform lint +
-  # pytest sweep.  Runs identically on every host OS.
+  # public/private classifier + pytest sweep.  Runs identically on
+  # every host OS.
   # ---------------------------------------------------------------
   python-smoke:
     name: python-smoke
@@ -135,6 +144,9 @@ jobs:
       # ---------------------------------------------------------
       - name: check_cross_platform lint (soft-warn)
         run: python scripts/check_cross_platform.py
+
+      - name: check public/private classifier
+        run: python scripts/check_public_private.py
 
       # ---------------------------------------------------------
       # 3. Test sweep -- the same pytest battery the Linux PR

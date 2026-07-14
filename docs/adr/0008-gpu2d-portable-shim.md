@@ -151,7 +151,7 @@ fallback.  Do not re-introduce a "Vivante on i.MX 93" backend.
   — the portable software 2D fallback (priority 0).
 - [`src/backends/gpu2d/alif_dave2d.c`](../../src/backends/gpu2d/alif_dave2d.c)
   — the AEN D/AVE 2D real backend (priority 100, bench-unverified).
-- Internal AEN feature audit (private repo) — the report that
-  flagged GPU2D as the headline gap.
+- [`docs/soms/aen.md`](../soms/aen.md) — AEN-family SoM support
+  overview for SDK-visible accelerator blocks.
 - [`docs/abi-markers.md`](../abi-markers.md) — explains why
   `<alp/gpu2d.h>` carries `[ABI-EXPERIMENTAL]` for v1.0.

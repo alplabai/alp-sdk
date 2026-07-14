@@ -36,6 +36,11 @@ static const uint8_t mic_channels[NUM_CHANNELS] = { 0, 1, 4, 5 };
 #define BLOCK_SIZE  (2u * (SAMPLE_RATE_HZ / 10u) * NUM_CHANNELS)
 #define BLOCK_COUNT 4
 
+/* The DMIC API is zero-copy: dmic_read() hands back a pointer into one of
+ * these slab blocks and the caller must k_mem_slab_free() it once done, so
+ * the driver can DMA/PIO the next PDM frame straight into a free block
+ * without an extra memcpy. BLOCK_COUNT=4 gives the driver headroom to keep
+ * filling blocks while this app is still consuming the previous one. */
 K_MEM_SLAB_DEFINE_STATIC(pdm_slab, BLOCK_SIZE, BLOCK_COUNT, 4);
 
 /*
@@ -98,6 +103,10 @@ int main(void)
 	uint32_t chan_map =
 	    PDM_MASK_CHANNEL_0 | PDM_MASK_CHANNEL_1 | PDM_MASK_CHANNEL_4 | PDM_MASK_CHANNEL_5;
 	struct dmic_cfg cfg = {
+		/* Acceptable range for the PDM bit clock the driver derives from the
+		 * 76.8 MHz audio source: wide enough to admit whatever divide the
+		 * alif_pdm driver picks for STANDARD_VOICE_512, with a conservative
+		 * mid-range duty-cycle window (40-60%). */
 		.io =
 		    {
 		        .min_pdm_clk_freq = 1024000,
@@ -156,6 +165,10 @@ int main(void)
 		size_t         n     = size / sizeof(int16_t);
 		int16_t        first = (n > 0) ? s[0] : 0;
 		int            nz    = 0;
+		/* nz alone can't prove live audio: a stuck channel can read back a
+		 * non-zero DC value every sample. Tracking whether any sample
+		 * differs from the first (varying) is what actually distinguishes
+		 * real acoustic energy from a frozen/constant register value. */
 		for (size_t i = 0; i < n; i++) {
 			if (s[i] != 0) nz++;
 			if (s[i] != first) varying = true;

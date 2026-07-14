@@ -1,7 +1,7 @@
 # Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 #
-# vendor-ext, BENCH-UNVERIFIED.
+# vendor-ext; bench-validated on E1M-AEN801 for the dual-M55 RPMsg path.
 #
 # Binding for the ARM MHUv2 (Message Handling Unit, v2) as integrated in the
 # Alif Ensemble (E1/E3/E5/E7/E8) family for inter-core doorbell signalling
@@ -23,34 +23,34 @@
 # 2-cell `arm,mhuv2` form (Linux encodes <channel-window doorbell>); Zephyr's
 # MBOX API addresses a single uint32_t channel id, which here maps to the bit.
 #
-# Register offsets and the E8 node addresses/IRQs were transcribed from the ARM
-# MHUv2 spec (DDI 0515) and the alifsemi/zephyr_alif fork's
-# dts/arm/alif/ensemble/common/ensemble_rtss_he.dtsi. They have NOT been
-# validated on real silicon.
+# Register offsets and the AEN dual-M55 node addresses/IRQs were transcribed
+# from the ARM MHUv2 spec (DDI 0515) and the alifsemi/zephyr_alif fork's
+# dts/arm/alif/ensemble/common/e1.dtsi. The E1M-AEN801 bench validated the
+# driver with OpenAMP RPMsg on 2026-06-19 (#225).
 
 description: |
   ARM MHUv2 inter-core mailbox frame as integrated in Alif Ensemble.
-  vendor-ext, BENCH-UNVERIFIED -- authored from the ARM MHUv2 register spec and
-  the alifsemi/zephyr_alif fork DTS; not yet run on silicon.
+  vendor-ext -- authored from the ARM MHUv2 register spec and the
+  alifsemi/zephyr_alif fork DTS; bench-validated on E1M-AEN801 for the
+  dual-M55 RPMsg path.
 
   One node = one MHUv2 frame (sender OR receiver). #mbox-cells = <1>, the cell
   being the doorbell bit index (0..31) in channel-window 0.
 
   Example:
 
-    mhu_seh_rx: mhu@40000000 {
+    mhu_he_rx: mhu@400a0000 {
         compatible = "alif,mhuv2-mbox";
-        reg = <0x40000000 0x1000>;
-        interrupts = <33 3>;
+        reg = <0x400A0000 0x1000>;
+        interrupts = <43 3>;
         alif,direction = "rx";
         #mbox-cells = <1>;
         status = "okay";
     };
 
-    mhu_seh_tx: mhu@40010000 {
+    mhu_he_tx: mhu@400b0000 {
         compatible = "alif,mhuv2-mbox";
-        reg = <0x40010000 0x1000>;
-        interrupts = <34 3>;
+        reg = <0x400B0000 0x1000>;
         alif,direction = "tx";
         #mbox-cells = <1>;
         status = "okay";

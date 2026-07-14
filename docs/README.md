@@ -25,9 +25,10 @@ into the topic-specific docs.
 - [portability.md](portability.md) — **cookbook**.  How to swap
   SoMs within a family with no source change.  Worked examples,
   capability validation, the dual-namespace decision.
-- [portability-matrix.md](portability-matrix.md) — the empirical
-  guarantee: 21/21 E1M + 12/12 E1M-X cells green, all Phase B
-  gaps resolved.
+- [portability-matrix.md](portability-matrix.md) — the generated
+  swap-test matrix for the pinned E1M and E1M-X examples, including
+  any cells that fail because an example does not claim a compatible
+  board/pinout path.
 - [peripheral-support-matrix.md](peripheral-support-matrix.md) —
   auto-generated SoM × peripheral-class presence matrix, projected
   from the single-source SoC metadata (presence only; driver

@@ -4,10 +4,10 @@ sample:
   name: iot-dashboard
   description: |
     BME280 environment sensor + OPTIGA Trust M + ST7789 TFT.
-    mbedtls + coremqtt_sn library knobs supply TLS + MQTT
-    publish.  WiFi via the portable <alp/iot.h> surface so the
-    same source builds on AEN (external WiFi) or V2N (on-module
-    Murata).  native_sim stubs WiFi + MQTT.
+    mbedtls supplies TLS while MQTT publish enters through the
+    portable <alp/iot.h> surface.  The same source builds on AEN
+    (on-module CC3501E bridge) or V2N (Linux-owned Murata/CYW).
+    native_sim stubs Wi-Fi + MQTT.
 common:
   tags: lvgl iot mqtt tls demo example
 tests:

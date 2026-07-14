@@ -19,16 +19,17 @@
  * ── Hardware wiring (E1M-EVK reference) ────────────────────────
  *
  *   ┌──────────────────┐   SPI      ┌────────────────────┐
- *   │  E1M-AEN701 SoM  │ ─────────▶ │ ST7789 240×320 TFT │
+ *   │  E1M-AEN801 SoM  │ ─────────▶ │ ST7789 240×320 TFT │
  *   │ + Cortex-M55 HP  │   GPIO     │  (display)         │
  *   └──────────────────┘            └────────────────────┘
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/drivers/display.h>
 
-#include <lvgl.h>
+#include <alp/display.h>
+#include <alp/gui.h>
+
 #include <lv_demo_music.h>
 
 LOG_MODULE_REGISTER(lvgl_music_player, LOG_LEVEL_INF);
@@ -37,26 +38,37 @@ int main(void)
 {
 	LOG_INF("LVGL music-player demo starting");
 
-	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-	if (!device_is_ready(display)) {
-		LOG_ERR("display %s not ready", display->name);
+	/* Open the panel through the portable display surface, then
+     * bind LVGL to it via <alp/gui.h> -- see
+     * lvgl-widgets-demo/src/main.c for the full rationale on this
+     * open -> lv_init -> tick -> attach sequence, and why
+     * CONFIG_LV_Z_AUTO_INIT=n (prj.conf) is required alongside it. */
+	alp_display_config_t display_cfg = ALP_DISPLAY_CONFIG_DEFAULT(0);
+	alp_display_t       *display     = alp_display_open(&display_cfg);
+	if (display == NULL) {
+		LOG_ERR("display open failed (err=%d)", (int)alp_last_error());
 		return 1;
 	}
 
 	lv_init();
+	lv_tick_set_cb(k_uptime_get_32);
+
+	alp_status_t attach_status = alp_gui_lvgl_attach(display);
+	if (attach_status != ALP_OK) {
+		LOG_ERR("alp_gui_lvgl_attach failed (err=%d)", (int)attach_status);
+		return 1;
+	}
 
 	/* Kick off the demo UI.  lv_demo_music() builds the full music-
      * player scene + spawns the periodic animation timer that
      * advances the progress bar + equaliser bands. */
 	lv_demo_music();
 
-	display_blanking_off(display);
-
 	/* lv_demo_music() owns its own animation timer; from here on
-     * main just pumps the LVGL task handler.  No audio path -- this
+     * main just pumps the LVGL timer handler.  No audio path -- this
      * is a UI-only demo (see the file header). */
 	while (1) {
-		const uint32_t sleep_ms = lv_task_handler();
+		const uint32_t sleep_ms = lv_timer_handler();
 		k_msleep(MIN(sleep_ms, 10u));
 	}
 

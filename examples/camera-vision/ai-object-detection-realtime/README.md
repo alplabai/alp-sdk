@@ -1,9 +1,12 @@
 # ai-object-detection-realtime
 
-> **`[UNTESTED]` -- v0.5 paper-correct skeleton.** Builds clean on
-> `native_sim/native/64` + the AEN fallback target; real DEEPX DX-M1
-> dispatch + DXNN-compiled YOLOv8-tiny + V2N MIPI camera capture land
-> in v0.6 alongside the V2N-M1 HiL bring-up.
+> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on
+> `native_sim/native/64` + the AEN fallback target against the full
+> `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces,
+> which all ship today -- DEEPX DX-M1 dispatch runs through
+> `alp_inference_open(...)` same as any other backend.  What's still
+> missing is a real Vela-/DXNN-compiled YOLOv8-tiny model (see "Adding
+> the model" below) and V2N-M1 HiL bench validation.
 
 Realtime YOLOv8-tiny object detection on a DEEPX NPU.  Camera
 frames flow through `<alp/camera.h>`, the model runs on the
@@ -24,8 +27,9 @@ OV5640 --> <alp/camera.h> --> <alp/inference.h> --> <alp/display.h>
   backend=ALP_INFERENCE_BACKEND_AUTO)`.  The SoM's preferred NPU
   comes from `metadata/e1m_modules/<SKU>.yaml`:
   - **V2M101 (V2N-M1)** -> DEEPX DX-M1 (29 TOPS)
-  - **V2M201 (V2H-M1)** -> DEEPX DX-M2 (113 TOPS) -- ships v0.6
-  - AEN701 -> Ethos-U55 (fallback target for this skeleton)
+  - **V2M201 (V2H-M1)** -> DEEPX DX-M2 (113 TOPS) -- planned SKU,
+    not yet in `metadata/e1m_modules/`
+  - AEN801 -> Ethos-U85 (lead target for this skeleton)
 - **Display** bounding-box overlay + FPS counter via portable
   framebuffer blits.
 

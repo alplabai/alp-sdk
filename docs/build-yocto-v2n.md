@@ -89,6 +89,19 @@ not the distro.
 > integrator because the perception example documents a multi-host robot
 > graph, so a forced loopback default would silently break it.
 
+> **Kernel version pin:** the VLP-v5 `local.conf` template defaults to
+> `PREFERRED_VERSION_linux-renesas = "6.12%"` — you **must** override this
+> to `"6.1%"` (linux-renesas 6.1.141-cip43) for BSP v6.30.  Leaving it at
+> the template default causes a recipe mismatch and build failure.
+
+> **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
+> fragments from `meta-alp-sdk/recipes-kernel/linux/`.  For V2N with the
+> display and audio features enabled, the active fragment list includes
+> `display.cfg` + `tas2563-audio.cfg`.  To build a minimal image without
+> Weston/display, remove the `alp-lvgl-dashboard`, `weston`, and
+> `weston-init` packages from `IMAGE_INSTALL` in your `local.conf` and
+> drop the `display.cfg` fragment from the `SRC_URI` override.
+
 ## 4. Deploy the rootfs
 
 The bootloader's `bootcmd` (rzv2n-dev config + the Alp 0002 patch)
@@ -144,10 +157,16 @@ The bitbake kernel banner is branded automatically. A **manual** kernel
 build does **not** source the recipe, so export the same identity to
 avoid leaking your own `user@host` into the banner:
 
+<!-- cross-platform-lint:ignore -->
+The Linux kernel's own build system is GNU `make` (there is no
+`west`/`cmake` substitute for it) and this whole page's Prerequisites
+(§1) already scope the entire Yocto/kernel-build flow to a Linux host
+or WSL2 Ubuntu -- this is not a Windows-native tutorial to begin with.
 ```bash
 export KBUILD_BUILD_USER=alp KBUILD_BUILD_HOST=alp-sdk
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION= -j"$(nproc)" Image
 ```
+<!-- cross-platform-lint:resume -->
 
 ## CA55 CPU frequency cap (1.7 GHz default, 1.8 GHz opt-in)
 

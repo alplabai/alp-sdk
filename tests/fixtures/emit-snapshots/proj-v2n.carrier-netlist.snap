@@ -1,0 +1,1824 @@
+{
+  "schema_version": 1,
+  "kind": "alp.carrier_netlist",
+  "generated_by": "scripts/alp_project.py --emit carrier-netlist",
+  "board": "E1M-X-EVK",
+  "som": "E1M-V2N101",
+  "hw_rev": "r1",
+  "silicon_variant": "R9A09G056N44GBG",
+  "nets": [
+    {
+      "net_id": "XEVK_PIN_PCIE_MUX_PD",
+      "e1m": "E1M_X_GPIO_IO0",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_PCIE_MUX_PD",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_PCIE_MUX_PD"
+        }
+      ],
+      "board_doc": "Drive HIGH to power down the PCIe lane mux."
+    },
+    {
+      "net_id": "XEVK_PIN_PCIE_MUX_SEL",
+      "e1m": "E1M_X_GPIO_IO1",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_PCIE_MUX_SEL",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_PCIE_MUX_SEL"
+        }
+      ],
+      "board_doc": "PCIe lane-mux routing select."
+    },
+    {
+      "net_id": "XEVK_PIN_PCIE0_I2C_EN",
+      "e1m": "E1M_X_GPIO_IO2",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_PCIE0_I2C_EN",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO2"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_PCIE0_I2C_EN"
+        }
+      ],
+      "board_doc": "Drive high to enable the I2C mux to the PCIe slot."
+    },
+    {
+      "net_id": "XEVK_PIN_I2S_MUX_EN",
+      "e1m": "E1M_X_GPIO_IO4",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_I2S_MUX_EN",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO4"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_I2S_MUX_EN"
+        }
+      ],
+      "board_doc": "I2S path-mux (TMUX1574 U46) enable -- active-low; drive LOW to enable.",
+      "active_low": true
+    },
+    {
+      "net_id": "XEVK_PIN_I2S_MUX_SEL",
+      "e1m": "E1M_X_GPIO_IO5",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_I2S_MUX_SEL",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO5"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_I2S_MUX_SEL"
+        }
+      ],
+      "board_doc": "I2S path-mux (TMUX1574 U46) select: LOW = TAS2563 amps (A side), HIGH = M.2 E-key I2S (B side)."
+    },
+    {
+      "net_id": "XEVK_PIN_M2E_UART_WAKE",
+      "e1m": "E1M_X_GPIO_IO6",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_M2E_UART_WAKE",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO6"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_M2E_UART_WAKE"
+        }
+      ],
+      "board_doc": "M.2 E-key UART-path wake (active-low).",
+      "active_low": true
+    },
+    {
+      "net_id": "XEVK_PIN_CTP1_INT",
+      "e1m": "E1M_X_GPIO_IO9",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_CTP1_INT",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO9"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_CTP1_INT"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PA7"
+        }
+      ],
+      "board_doc": "Capacitive touch panel 1 interrupt (display 1).",
+      "dispatch_pin": "PA7"
+    },
+    {
+      "net_id": "XEVK_PIN_CTP1_RST",
+      "e1m": "E1M_X_GPIO_IO11",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_CTP1_RST",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO11"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_CTP1_RST"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB0"
+        }
+      ],
+      "board_doc": "Capacitive touch panel 1 reset (active-low).",
+      "active_low": true,
+      "dispatch_pin": "PB0"
+    },
+    {
+      "net_id": "XEVK_PIN_CTP2_INT",
+      "e1m": "E1M_X_GPIO_IO17",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_CTP2_INT",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO17"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_CTP2_INT"
+        }
+      ],
+      "board_doc": "Capacitive touch panel 2 interrupt (display 2)."
+    },
+    {
+      "net_id": "XEVK_PIN_CTP2_RST",
+      "e1m": "E1M_X_GPIO_IO19",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_CTP2_RST",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO19"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_CTP2_RST"
+        }
+      ],
+      "board_doc": "Capacitive touch panel 2 reset (active-low).",
+      "active_low": true
+    },
+    {
+      "net_id": "XEVK_PIN_LCD1_RST",
+      "e1m": "E1M_X_GPIO_IO13",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_LCD1_RST",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO13"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_LCD1_RST"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PF1"
+        }
+      ],
+      "board_doc": "DSI display panel 1 reset (active-low).",
+      "active_low": true,
+      "dispatch_pin": "PF1"
+    },
+    {
+      "net_id": "XEVK_PIN_LCD1_PWR_EN",
+      "e1m": "E1M_X_GPIO_IO15",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_LCD1_PWR_EN",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO15"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_LCD1_PWR_EN"
+        }
+      ],
+      "board_doc": "DSI display panel 1 power enable."
+    },
+    {
+      "net_id": "XEVK_PIN_LCD2_RST",
+      "e1m": "E1M_X_GPIO_IO21",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_LCD2_RST",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO21"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_LCD2_RST"
+        }
+      ],
+      "board_doc": "DSI display panel 2 reset (active-low).",
+      "active_low": true
+    },
+    {
+      "net_id": "XEVK_PIN_LCD2_PWR_EN",
+      "e1m": "E1M_X_GPIO_IO22",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_LCD2_PWR_EN",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO22"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_LCD2_PWR_EN"
+        }
+      ],
+      "board_doc": "DSI display panel 2 power enable."
+    },
+    {
+      "net_id": "XEVK_PIN_CAM0_MUX_SEL",
+      "e1m": "E1M_X_GPIO_IO16",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_CAM0_MUX_SEL",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO16"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_CAM0_MUX_SEL"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC0"
+        }
+      ],
+      "board_doc": "Camera-0 source/lane mux select.",
+      "dispatch_pin": "PC0"
+    },
+    {
+      "net_id": "XEVK_PIN_CAM0_EN",
+      "e1m": "E1M_X_GPIO_IO18",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_CAM0_EN",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO18"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_CAM0_EN"
+        }
+      ],
+      "board_doc": "Camera-0 power enable."
+    },
+    {
+      "net_id": "XEVK_PIN_CAM0_RST",
+      "e1m": "E1M_X_GPIO_IO20",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_CAM0_RST",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO20"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_CAM0_RST"
+        }
+      ],
+      "board_doc": "Camera-0 reset (active-low).",
+      "active_low": true
+    },
+    {
+      "net_id": "XEVK_PIN_USB_MUX_SEL",
+      "e1m": "E1M_X_GPIO_IO24",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_USB_MUX_SEL",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO24"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_USB_MUX_SEL"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC14"
+        }
+      ],
+      "board_doc": "USB path-mux select.",
+      "dispatch_pin": "PC14"
+    },
+    {
+      "net_id": "XEVK_PIN_SDIO_MUX_SEL",
+      "e1m": "E1M_X_GPIO_IO27",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_SDIO_MUX_SEL",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO27"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_SDIO_MUX_SEL"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB11"
+        }
+      ],
+      "board_doc": "SDIO path-mux select.",
+      "dispatch_pin": "PB11"
+    },
+    {
+      "net_id": "XEVK_PIN_SDIO_MUX_EN",
+      "e1m": "E1M_X_GPIO_IO29",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_SDIO_MUX_EN",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO29"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_SDIO_MUX_EN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PD11"
+        }
+      ],
+      "board_doc": "SDIO path-mux enable.",
+      "dispatch_pin": "PD11"
+    },
+    {
+      "net_id": "XEVK_PIN_ENCODER_SW",
+      "e1m": "E1M_X_GPIO_IO28",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_ENCODER_SW",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO28"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_ENCODER_SW"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC2"
+        }
+      ],
+      "board_doc": "Rotary encoder (PEC12R-4222F) push switch; pull-up + RC debounce.",
+      "active_low": true,
+      "dispatch_pin": "PC2"
+    },
+    {
+      "net_id": "XEVK_PIN_BMI323_INT1",
+      "e1m": "E1M_X_GPIO_IO32",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_BMI323_INT1",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO32"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_BMI323_INT1"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PD2"
+        }
+      ],
+      "board_doc": "BMI323 INT1 (data-ready / motion / FIFO).",
+      "dispatch_pin": "PD2"
+    },
+    {
+      "net_id": "XEVK_PIN_LED_RED",
+      "e1m": "E1M_X_GPIO_PWM5",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_LED_RED",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_PWM5"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_LED_RED"
+        }
+      ],
+      "board_doc": "RGB LED red -- the PWM5 pad driven as a digital GPIO."
+    },
+    {
+      "net_id": "XEVK_PIN_LED_GREEN",
+      "e1m": "E1M_X_GPIO_PWM7",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_LED_GREEN",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_PWM7"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_LED_GREEN"
+        }
+      ],
+      "board_doc": "RGB LED green -- the PWM7 pad driven as a digital GPIO."
+    },
+    {
+      "net_id": "XEVK_PIN_LED_BLUE",
+      "e1m": "E1M_X_GPIO_PWM6",
+      "board_category": "gpio",
+      "board_macro": "XEVK_PIN_LED_BLUE",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_PWM6"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PIN_LED_BLUE"
+        }
+      ],
+      "board_doc": "RGB LED blue -- the PWM6 pad driven as a digital GPIO."
+    },
+    {
+      "net_id": "XEVK_I2C_BUS_SENSORS",
+      "e1m": "E1M_X_I2C0",
+      "board_category": "buses",
+      "board_macro": "XEVK_I2C_BUS_SENSORS",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_I2C0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_I2C_BUS_SENSORS"
+        }
+      ],
+      "board_doc": "On-board sensor + IO-expander + INA236 bus (ICM-42670, BMI323, BMP581, TCAL9538, INA236)."
+    },
+    {
+      "net_id": "XEVK_I2C_BUS_DSI_CSI0",
+      "e1m": "E1M_X_I2C2",
+      "board_category": "buses",
+      "board_macro": "XEVK_I2C_BUS_DSI_CSI0",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_I2C2"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_I2C_BUS_DSI_CSI0"
+        }
+      ],
+      "board_doc": "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config)."
+    },
+    {
+      "net_id": "XEVK_I2C_BUS_DSI_CSI1",
+      "e1m": "E1M_X_I2C3",
+      "board_category": "buses",
+      "board_macro": "XEVK_I2C_BUS_DSI_CSI1",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_I2C3"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_I2C_BUS_DSI_CSI1"
+        }
+      ],
+      "board_doc": "Display/camera control I2C bank 1."
+    },
+    {
+      "net_id": "XEVK_SPI_BUS_ARDUINO",
+      "e1m": "E1M_X_SPI1",
+      "board_category": "buses",
+      "board_macro": "XEVK_SPI_BUS_ARDUINO",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_SPI1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_SPI_BUS_ARDUINO"
+        }
+      ],
+      "board_doc": "Arduino UNO header SPI (level-shifted)."
+    },
+    {
+      "net_id": "XEVK_UART_PORT_DEBUG",
+      "e1m": "E1M_X_UART0",
+      "board_category": "buses",
+      "board_macro": "XEVK_UART_PORT_DEBUG",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_UART0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_UART_PORT_DEBUG"
+        }
+      ],
+      "board_doc": "Console / debug UART."
+    },
+    {
+      "net_id": "XEVK_UART_PORT_ARDUINO",
+      "e1m": "E1M_X_UART1",
+      "board_category": "buses",
+      "board_macro": "XEVK_UART_PORT_ARDUINO",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_UART1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_UART_PORT_ARDUINO"
+        }
+      ],
+      "board_doc": "Arduino UNO header UART (D0/D1, level-shifted)."
+    },
+    {
+      "net_id": "XEVK_ARD_PWM0",
+      "e1m": "E1M_X_PWM0",
+      "board_category": "pwm",
+      "board_macro": "XEVK_ARD_PWM0",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_PWM0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_ARD_PWM0"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PA11"
+        }
+      ],
+      "board_doc": "Arduino UNO header PWM0 (level-shifted).",
+      "dispatch_pin": "PA11"
+    },
+    {
+      "net_id": "XEVK_ARD_PWM1",
+      "e1m": "E1M_X_PWM1",
+      "board_category": "pwm",
+      "board_macro": "XEVK_ARD_PWM1",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_PWM1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_ARD_PWM1"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB1"
+        }
+      ],
+      "board_doc": "Arduino UNO header PWM1.",
+      "dispatch_pin": "PB1"
+    },
+    {
+      "net_id": "XEVK_ARD_PWM2",
+      "e1m": "E1M_X_PWM2",
+      "board_category": "pwm",
+      "board_macro": "XEVK_ARD_PWM2",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_PWM2"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_ARD_PWM2"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB14"
+        }
+      ],
+      "board_doc": "Arduino UNO header PWM2.",
+      "dispatch_pin": "PB14"
+    },
+    {
+      "net_id": "XEVK_ARD_PWM3",
+      "e1m": "E1M_X_PWM3",
+      "board_category": "pwm",
+      "board_macro": "XEVK_ARD_PWM3",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_PWM3"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_ARD_PWM3"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC5"
+        }
+      ],
+      "board_doc": "Arduino UNO header PWM3.",
+      "dispatch_pin": "PC5"
+    },
+    {
+      "net_id": "XEVK_PWM_DISP2_BL",
+      "e1m": "E1M_X_PWM4",
+      "board_category": "pwm",
+      "board_macro": "XEVK_PWM_DISP2_BL",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_PWM4"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PWM_DISP2_BL"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC10"
+        }
+      ],
+      "board_doc": "Display-2 backlight PWM (DISP2_BL_PWM).",
+      "dispatch_pin": "PC10"
+    },
+    {
+      "net_id": "XEVK_PWM_LED_RED",
+      "e1m": "E1M_X_PWM5",
+      "board_category": "pwm",
+      "board_macro": "XEVK_PWM_LED_RED",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_PWM5"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PWM_LED_RED"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC11"
+        }
+      ],
+      "board_doc": "RGB LED red channel (GPIO-secondary = XEVK_PIN_LED_RED).",
+      "dispatch_pin": "PC11"
+    },
+    {
+      "net_id": "XEVK_PWM_LED_BLUE",
+      "e1m": "E1M_X_PWM6",
+      "board_category": "pwm",
+      "board_macro": "XEVK_PWM_LED_BLUE",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_PWM6"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PWM_LED_BLUE"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC12"
+        }
+      ],
+      "board_doc": "RGB LED blue channel (GPIO-secondary = XEVK_PIN_LED_BLUE).",
+      "dispatch_pin": "PC12"
+    },
+    {
+      "net_id": "XEVK_PWM_LED_GREEN",
+      "e1m": "E1M_X_PWM7",
+      "board_category": "pwm",
+      "board_macro": "XEVK_PWM_LED_GREEN",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_PWM7"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_PWM_LED_GREEN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PD0"
+        }
+      ],
+      "board_doc": "RGB LED green channel (GPIO-secondary = XEVK_PIN_LED_GREEN).",
+      "dispatch_pin": "PD0"
+    },
+    {
+      "net_id": "XEVK_ADC_MIKROBUS_AN",
+      "e1m": "E1M_X_ADC0",
+      "board_category": "adc",
+      "board_macro": "XEVK_ADC_MIKROBUS_AN",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ADC0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_ADC_MIKROBUS_AN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PD9"
+        }
+      ],
+      "board_doc": "mikroBUS Click socket AN analog input (net CK_ANA, also on breakout header P7.1; raw passthrough, no divider).  The V2 carrier netlist routes ONLY the mikroBUS AN to ANA_S0; the earlier 'Arduino A0' doc here did not match the netlist.",
+      "dispatch_pin": "PD9"
+    },
+    {
+      "net_id": "XEVK_DAC0",
+      "e1m": "E1M_X_DAC0",
+      "board_category": "dac",
+      "board_macro": "XEVK_DAC0",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_DAC0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_DAC0"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PA4"
+        }
+      ],
+      "board_doc": "DAC0 analog output.  Header J15.2 (DAC0_OUT) is the x2-buffered copy, but the buffered path is INOPERABLE on this carrier revision (carrier erratum, fixed next rev). Bench validation taps the raw 1.8 V-full-scale DAC0 net instead.",
+      "dispatch_pin": "PA4"
+    },
+    {
+      "net_id": "XEVK_DAC1",
+      "e1m": "E1M_X_DAC1",
+      "board_category": "dac",
+      "board_macro": "XEVK_DAC1",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_DAC1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_DAC1"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PA6"
+        }
+      ],
+      "board_doc": "DAC1 analog output.",
+      "dispatch_pin": "PA6"
+    },
+    {
+      "net_id": "XEVK_I2S_AUDIO",
+      "e1m": "E1M_X_I2S0",
+      "board_category": "i2s",
+      "board_macro": "XEVK_I2S_AUDIO",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_I2S0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_I2S_AUDIO"
+        }
+      ],
+      "board_doc": "TAS2563 smart-amp I2S (SCLK / WS / SDI / SDO)."
+    },
+    {
+      "net_id": "XEVK_CAN_BUS0",
+      "e1m": "E1M_X_CAN0",
+      "board_category": "can",
+      "board_macro": "XEVK_CAN_BUS0",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_CAN0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_CAN_BUS0"
+        }
+      ],
+      "board_doc": "CAN0 via TCAN1044 transceiver (U51)."
+    },
+    {
+      "net_id": "XEVK_CAN_BUS1",
+      "e1m": "E1M_X_CAN1",
+      "board_category": "can",
+      "board_macro": "XEVK_CAN_BUS1",
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_CAN1"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_CAN_BUS1"
+        }
+      ],
+      "board_doc": "CAN1 via TCAN1044 transceiver (U52)."
+    },
+    {
+      "net_id": "XEVK_ENC_ROTARY",
+      "e1m": "E1M_X_ENC0",
+      "board_category": "qenc",
+      "board_macro": "XEVK_ENC_ROTARY",
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ENC0"
+        },
+        {
+          "kind": "board-macro",
+          "ref": "XEVK_ENC_ROTARY"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PA0/PB3"
+        }
+      ],
+      "board_doc": "PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated.",
+      "dispatch_pin": "PA0/PB3"
+    },
+    {
+      "net_id": "E1M_X_ADC1",
+      "e1m": "E1M_X_ADC1",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ADC1"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB12"
+        }
+      ],
+      "dispatch_pin": "PB12",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_ADC2",
+      "e1m": "E1M_X_ADC2",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ADC2"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PE13"
+        }
+      ],
+      "dispatch_pin": "PE13",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_ADC3",
+      "e1m": "E1M_X_ADC3",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ADC3"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PE11"
+        }
+      ],
+      "dispatch_pin": "PE11",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_ADC4",
+      "e1m": "E1M_X_ADC4",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ADC4"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC4"
+        }
+      ],
+      "dispatch_pin": "PC4",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_ADC5",
+      "e1m": "E1M_X_ADC5",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ADC5"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PA5"
+        }
+      ],
+      "dispatch_pin": "PA5",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_ADC6",
+      "e1m": "E1M_X_ADC6",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ADC6"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PA2"
+        }
+      ],
+      "dispatch_pin": "PA2",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_ADC7",
+      "e1m": "E1M_X_ADC7",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ADC7"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PA3"
+        }
+      ],
+      "dispatch_pin": "PA3",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_ENC1",
+      "e1m": "E1M_X_ENC1",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ENC1"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC6/PC7"
+        }
+      ],
+      "dispatch_pin": "PC6/PC7",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_ENC2",
+      "e1m": "E1M_X_ENC2",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ENC2"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB6/PB7"
+        }
+      ],
+      "dispatch_pin": "PB6/PB7",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_ENC3",
+      "e1m": "E1M_X_ENC3",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_ENC3"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB2/PA1"
+        }
+      ],
+      "dispatch_pin": "PB2/PA1",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO10",
+      "e1m": "E1M_X_GPIO_IO10",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO10"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PA12"
+        }
+      ],
+      "dispatch_pin": "PA12",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO12",
+      "e1m": "E1M_X_GPIO_IO12",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO12"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC1"
+        }
+      ],
+      "dispatch_pin": "PC1",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO14",
+      "e1m": "E1M_X_GPIO_IO14",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO14"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB5"
+        }
+      ],
+      "dispatch_pin": "PB5",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO25",
+      "e1m": "E1M_X_GPIO_IO25",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO25"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC15"
+        }
+      ],
+      "dispatch_pin": "PC15",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO30",
+      "e1m": "E1M_X_GPIO_IO30",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO30"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PD10"
+        }
+      ],
+      "dispatch_pin": "PD10",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO31",
+      "e1m": "E1M_X_GPIO_IO31",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO31"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PE12"
+        }
+      ],
+      "dispatch_pin": "PE12",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO34",
+      "e1m": "E1M_X_GPIO_IO34",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO34"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PD8"
+        }
+      ],
+      "dispatch_pin": "PD8",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO35",
+      "e1m": "E1M_X_GPIO_IO35",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO35"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PD1"
+        }
+      ],
+      "dispatch_pin": "PD1",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO8",
+      "e1m": "E1M_X_GPIO_IO8",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO8"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB10"
+        }
+      ],
+      "dispatch_pin": "PB10",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    }
+  ],
+  "bom": {
+    "carrier": [
+      {
+        "item_id": "bmi323",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/bmi323.yaml",
+        "display_name": "Bosch BMI323 6-axis IMU",
+        "vendor": "bosch",
+        "mpn_population": [
+          "BMI323"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "LGA-14",
+          "footprint": "lga_14_2p5x3p0mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDDIO",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "bmp581",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/bmp581.yaml",
+        "display_name": "Bosch BMP581 ultra-low-power barometric pressure sensor",
+        "vendor": "bosch",
+        "mpn_population": [
+          "BMP581"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "LGA-10",
+          "footprint": "lga_10_2p0x2p0mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDDIO",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "button_led",
+        "kind": "block",
+        "scope": "carrier",
+        "source": "metadata/blocks/button_led.yaml",
+        "display_name": "Generic momentary button + indicator LED",
+        "quantity": null,
+        "realization": {
+          "id": "discrete_generic",
+          "physical_form": "discrete",
+          "visibility": "internal"
+        },
+        "parts": [],
+        "passives": [
+          {
+            "role": "series",
+            "value": "330R",
+            "net": "LED",
+            "refdes_prefix": "R"
+          }
+        ],
+        "caveats": [
+          "physical_detail_internal",
+          "no_concrete_parts"
+        ]
+      },
+      {
+        "item_id": "icm42670",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/icm42670.yaml",
+        "display_name": "TDK InvenSense ICM-42670-P 6-axis IMU",
+        "vendor": "invensense",
+        "mpn_population": [
+          "ICM-42670-P"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "LGA-14",
+          "footprint": "lga_14_2p5x3p0mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "2u2",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "10nF",
+            "net": "VDDIO",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "ina236",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/ina236.yaml",
+        "display_name": "TI INA236 16-bit precision current + voltage monitor",
+        "vendor": "ti",
+        "mpn_population": [
+          "INA236AIDDFR"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "SOT-23-8",
+          "footprint": "sot23_8_1p6x2p9mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VS",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "ALERT",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "pdm_mic",
+        "kind": "block",
+        "scope": "carrier",
+        "source": "metadata/blocks/pdm_mic.yaml",
+        "display_name": "Generic PDM microphone surface",
+        "quantity": null,
+        "realization": {
+          "id": "discrete_generic",
+          "physical_form": "discrete",
+          "visibility": "internal"
+        },
+        "parts": [],
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          }
+        ],
+        "caveats": [
+          "physical_detail_internal",
+          "no_concrete_parts"
+        ]
+      },
+      {
+        "item_id": "tas2563",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/tas2563.yaml",
+        "display_name": "TI TAS2563 mono digital-input Class-D smart amp (I2C ctrl + I2S data, I/V sense)",
+        "vendor": "ti",
+        "mpn_population": [
+          "TAS2563RPP"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "VQFN-32",
+          "footprint": "vqfn_32_4p5x4p0mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VBAT",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "1uF",
+            "net": "VDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "IOVDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "decouple",
+            "value": "10uF",
+            "net": "PVDD",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "IRQ_N",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "tcal9538",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/tcal9538.yaml",
+        "display_name": "TI TCAL9538 8-bit I2C-bus, SMBus I/O expander",
+        "vendor": "ti",
+        "mpn_population": [
+          "TCAL9538",
+          "TCAL9538PWR",
+          "TCAL9538RSVR",
+          "TCAL9538DTUR"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "TSSOP-16",
+          "footprint": "tssop_16_5x6p4mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VCC",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "10k",
+            "net": "INT",
+            "refdes_prefix": "R"
+          }
+        ],
+        "caveats": [
+          "mpn_population_candidates"
+        ]
+      }
+    ]
+  },
+  "caveats": [
+    "carrier_handoff_not_pcb_layout",
+    "no_kicad_or_gerber_output",
+    "som_internals_excluded",
+    "quantity_null_when_board_populated_has_no_count"
+  ]
+}

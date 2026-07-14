@@ -57,9 +57,11 @@
 #include "alp/e1m_pinout.h"
 
 /* GENERATED board route bindings (EVK_PIN_*, EVK_*_BUS_*,
- * EVK_UART_PORT_*, EVK_PWM_*, EVK_ARD_PWM*, EVK_MB_PWM).
- * Source of truth: metadata/boards/E1M-EVK/board.yaml
- * `e1m_routes:` block. Regenerate via:
+ * EVK_UART_PORT_*, EVK_PWM_*, EVK_ARD_PWM*, EVK_MB_PWM) and
+ * GENERATED on-board I2C device facts (EVK_I2C_ADDR_*,
+ * EVK_INA236_SHUNT_*_OHMS, EVK_INA236_MAX_*_A).
+ * Source of truth: metadata/boards/e1m-evk.yaml
+ * `e1m_routes:` and `i2c_devices:` blocks. Regenerate via:
  *     python scripts/gen_board_header.py
  * The prose blocks below describe the hardware those macros bind
  * to; the macro values themselves come from the included header. */
@@ -563,10 +565,14 @@ typedef enum {
  * the user to mount only one of the two physical headers. */
 
 /* ================================================================== */
-/* On-board sensor 7-bit I2C addresses                                */
+/* On-board sensor 7-bit I2C addresses -- GENERATED, see              */
+/* alp_e1m_evk_routes.h                                                */
 /*                                                                    */
 /* All on ALP_E1M_I2C0 (the sensor bus).  Strap values per the EVK        */
-/* schematic UG-E1M-001 + user-supplied confirmation:                 */
+/* schematic UG-E1M-001 + user-supplied confirmation; single source   */
+/* of truth is the `i2c_devices:` block in                            */
+/* metadata/boards/e1m-evk.yaml -- do not hand-edit the generated      */
+/* macros below:                                                       */
 /*   - ICM-42670-P  (U12) AD0 -> VIO   -> 0x69  *** COLLISION, see note ***  */
 /*   - BMI323       (U13) SDO -> VIO   -> 0x69  *** COLLISION, see note ***  */
 /*   - BMP581       (U14) SDO -> VIO   -> 0x47  (SDO must not float)    */
@@ -578,14 +584,12 @@ typedef enum {
  * -- each ACKs with a different read framing (ICM 8-bit direct vs BMI323 2-dummy-byte),
  * so a read returns wired-AND garbage (seen: 0x0001) and neither IMU is individually
  * addressable. Nothing answers at 0x68. The next batch must re-strap ONE of them -- e.g.
- * tie the BMI323 SDO pin to GND -> 0x68 (its datasheet default). The macros below carry
+ * tie the BMI323 SDO pin to GND -> 0x68 (its datasheet default). The macros carry
  * that de-conflicted target so firmware is correct post-respin; on the pre-respin batch
- * the IMUs cannot be read (HW conflict, not a driver bug). */
-#define EVK_I2C_ADDR_ICM42670                                                                      \
-	0x69u /**< U12 IMU (AD0->VIO).  Collides with U13 @0x69 until the respin. */
-#define EVK_I2C_ADDR_BMI323                                                                        \
-	0x68u /**< U13 IMU; respin target (SDO->GND = datasheet default).  Pre-respin batch mis-straps it to 0x69 (collides w/ U12). */
-#define EVK_I2C_ADDR_BMP581 0x47u /**< U14 barometer (SDO->VIO; 0x46 if SDO->GND). */
+ * the IMUs cannot be read (HW conflict, not a driver bug).
+ *
+ * EVK_I2C_ADDR_ICM42670, EVK_I2C_ADDR_BMI323 and EVK_I2C_ADDR_BMP581 are
+ * defined in the generated routes header. */
 
 /* BMI323 INT1 (data-ready / motion / FIFO interrupt) routes to
  * E1M IO15, NOT through the main TCAL9538 expander (the expander's
@@ -608,17 +612,20 @@ typedef enum {
  *     evk_ioexp_pin_t).  Strap A1=1, A0=0 -> 0x72.
  *   - The "PCIe" expander handles the I2C-mux SEL + PCIe slot
  *     RST/WAKE/CLKREQ signals + M2E_ALERT (see
- *     evk_pcie_ioexp_pin_t above).  Strap A0=1, A1=0 -> 0x71. */
-#define EVK_I2C_ADDR_TCAL9538_MAIN 0x72u /**< U35 main I/O expander. */
-#define EVK_I2C_ADDR_TCAL9538_PCIE 0x71u /**< U37 PCIe I/O expander. */
+ *     evk_pcie_ioexp_pin_t above).  Strap A0=1, A1=0 -> 0x71.
+ *
+ * EVK_I2C_ADDR_TCAL9538_MAIN and EVK_I2C_ADDR_TCAL9538_PCIE are defined
+ * in the generated routes header. */
+
 /* BENCH-CONFIRMED (2026-06-16): U35 can be assembled with the TCA6408ARSVR
  * alternative (R112 fitted, R145 DNP) instead of the TCAL9538, which moves it to
  * 0x20. It is PCA9538-register-compatible (0x00 input / 0x01 output / 0x02 polarity
  * / 0x03 config), so the chips/tcal9538 driver drives it unchanged at 0x20 -- read
- * back config=0xFF + a live input port on the bench. */
-#define EVK_I2C_ADDR_TCA6408A_MAIN 0x20u /**< U35 main I/O expander, TCA6408A variant. */
-/** Backward-compat alias -- legacy name for the main expander. */
-#define EVK_I2C_ADDR_TCAL9538 EVK_I2C_ADDR_TCAL9538_MAIN
+ * back config=0xFF + a live input port on the bench.
+ *
+ * EVK_I2C_ADDR_TCA6408A_MAIN (the TCA6408A-populated variant) and
+ * EVK_I2C_ADDR_TCAL9538 (convenience alias for EVK_I2C_ADDR_TCAL9538_MAIN)
+ * are defined in the generated routes header. */
 
 /* Two TAS2563RPP smart-amp ICs share the same I2C0 bus.  AD0
  * strap selects address per TAS2563 datasheet table 7-3:
@@ -628,9 +635,10 @@ typedef enum {
  * but the address it would normally use (0x48) is occupied on this
  * EVK by U32 INA236B (+V_CAM0 rail).  Firmware that wants to write
  * both amps simultaneously must issue two targeted unit-address
- * writes back-to-back rather than relying on a 0x48 broadcast. */
-#define EVK_I2C_ADDR_TAS2563_LOW  0x4Du /**< U27 (AD0 = LOW). */
-#define EVK_I2C_ADDR_TAS2563_HIGH 0x4Eu /**< U28 (AD0 = HIGH). */
+ * writes back-to-back rather than relying on a 0x48 broadcast.
+ *
+ * EVK_I2C_ADDR_TAS2563_LOW and EVK_I2C_ADDR_TAS2563_HIGH are defined
+ * in the generated routes header. */
 
 /* Six INA236 high-side current-shunt monitors -- one per power
  * rail -- on I2C0.  TI's INA236A variant occupies 0x40..0x43 and
@@ -641,33 +649,23 @@ typedef enum {
  *   U21  INA236A  3V3 rail     A0 = GND  -> 0x40
  *   U31  INA236A  1V8 rail     A0 = V+   -> 0x41
  *   U33  INA236A  VIO rail     A0 = SDA  -> 0x42
- *   U32  INA236B  +V_CAM0      A0 = GND  -> 0x48  (CONFLICT: TAS2563 broadcast 0x48 --
- *                                                  re-strap A0=SCL -> 0x4B, or use an
- *                                                  A variant at 0x43, on the next respin)
+ *   U32  INA236B  +V_CAM0      A0 = SCL  -> 0x4B  (re-strapped from the pre-respin
+ *                                                  A0=GND -> 0x48, which collided
+ *                                                  with the TAS2563 broadcast address)
  *   U34  INA236B  +V_CAM1      A0 = V+   -> 0x49
  *   U30  INA236B  +5V  rail    A0 = SDA  -> 0x4A
- */
-/* INA236A variants occupy 0x40..0x43 (A0 strap = GND/VS/SDA/SCL);
+ *
+ * INA236A variants occupy 0x40..0x43 (A0 strap = GND/VS/SDA/SCL);
  * INA236B variants occupy 0x48..0x4B with the same A0 encoding.
  * Confirmed against the EVK schematic strap labels.  The B-bank
  * addresses 0x48..0x4A do NOT collide with TAS2563 unit addresses
  * (0x4D / 0x4E) -- they would collide with TAS2563's broadcast
  * address if and only if the TAS2563s are programmed for a
  * broadcast write at 0x48; firmware writers must avoid that
- * sequence on this EVK or use targeted unit-address writes. */
-#define EVK_I2C_ADDR_INA236_3V3                                                                    \
-	0x40u /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max).      */
-#define EVK_I2C_ADDR_INA236_1V8                                                                    \
-	0x41u /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max).      */
-#define EVK_I2C_ADDR_INA236_VIO                                                                    \
-	0x42u /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max).      */
-#define EVK_I2C_ADDR_INA236_VCAM0                                                                  \
-	0x4Bu /**< U32 INA236B, +V_CAM0 rail (50 mOhm shunt, 1.6 A max).  Re-strapped A0=SCL
-	       *   -> 0x4B from the next batch; PRE-RESPIN boards had it at 0x48, which collides
-	       *   with the TAS2563 broadcast address (unreadable there).                       */
-#define EVK_I2C_ADDR_INA236_VCAM1                                                                  \
-	0x49u                            /**< U34 INA236B, +V_CAM1 rail (50 mOhm shunt, 1.6 A max).   */
-#define EVK_I2C_ADDR_INA236_5V 0x4Au /**< U30 INA236B, +5V rail  (20 mOhm shunt, 4.0 A max).      */
+ * sequence on this EVK or use targeted unit-address writes.
+ *
+ * EVK_I2C_ADDR_INA236_3V3, _1V8, _VIO, _VCAM0, _VCAM1 and _5V are
+ * defined in the generated routes header. */
 
 /* Per-rail shunt + max-current values for ina236_init().  All six
  * EVK rails picked their shunt to put the rail's nominal max
@@ -678,19 +676,11 @@ typedef enum {
  *               EVK_I2C_ADDR_INA236_3V3,
  *               EVK_INA236_SHUNT_3V3_OHMS,
  *               EVK_INA236_MAX_3V3_A,
- *               INA236_ADCRANGE_81MV); */
-#define EVK_INA236_SHUNT_3V3_OHMS   0.020f
-#define EVK_INA236_MAX_3V3_A        4.0f
-#define EVK_INA236_SHUNT_1V8_OHMS   0.020f
-#define EVK_INA236_MAX_1V8_A        4.0f
-#define EVK_INA236_SHUNT_VIO_OHMS   0.050f
-#define EVK_INA236_MAX_VIO_A        1.6f
-#define EVK_INA236_SHUNT_VCAM0_OHMS 0.050f
-#define EVK_INA236_MAX_VCAM0_A      1.6f
-#define EVK_INA236_SHUNT_VCAM1_OHMS 0.050f
-#define EVK_INA236_MAX_VCAM1_A      1.6f
-#define EVK_INA236_SHUNT_5V_OHMS    0.020f
-#define EVK_INA236_MAX_5V_A         4.0f
+ *               INA236_ADCRANGE_81MV);
+ *
+ * EVK_INA236_SHUNT_<RAIL>_OHMS and EVK_INA236_MAX_<RAIL>_A (RAIL =
+ * 3V3, 1V8, VIO, VCAM0, VCAM1, 5V) are defined in the generated
+ * routes header. */
 
 /* ================================================================== */
 /* On-board audio I/O                                                 */

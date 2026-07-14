@@ -1,0 +1,32 @@
+# board.yaml -- per-app project configuration for the
+# littlefs-keyvalue example.
+#
+# Customer workflow: copy this directory, change `som.sku` to
+# your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
+# and `west build`.  CMakeLists.txt invokes
+# scripts/alp_project.py at configure time + layers the
+# generated alp.conf over prj.conf via OVERLAY_CONFIG.
+libraries:
+  - name: littlefs
+    cores: [m55_hp]
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+cores:
+  m55_hp:
+    app: ./src
+    # `libraries: [littlefs]` makes the loader emit
+    # CONFIG_FILE_SYSTEM_LITTLEFS=y + CONFIG_FILE_SYSTEM=y +
+    # CONFIG_ALP_LITTLEFS_SYNC_IO=y (see _LIBRARY_KCONFIG in
+    # scripts/alp_project.py).  The flash-backend Kconfig
+    # (CONFIG_FLASH / CONFIG_FLASH_MAP) is app-local, not
+    # library-selection, so it lives in this example's prj.conf.
+    peripherals: []
+
+diagnostics:
+  log_level: info

@@ -43,6 +43,19 @@ marks the ones locked to specific silicon:
 * **(iMX93)** -- NXP i.MX93.
 * **(E1M-X)** -- E1M-X form-factor pad / peripheral.
 
+"Portable" means the board/SoM is swappable across the tagged
+families -- it does not mean every example avoids naming a chip in
+source.  A chip bring-up demo or a single-sensor/single-display
+tutorial is expected to `#include <alp/chips/<chip>.h>` directly and
+declare that chip in its `board.yaml` `chips:` list; that is the
+accepted, intentional contract for this SDK (see
+[`docs/portability.md`](../docs/portability.md) Sec 4.4), not
+portability debt.  `scripts/check_example_portability.py` reports
+this as Ring 2 ("chip-bound") or Ring 3 ("SoM-bound") -- only the
+general, peripheral-agnostic Ring 1 examples are expected to stay on
+the portable `<alp/peripheral.h>` + `BOARD_*` surface with no
+chip-driver include.
+
 Many v0.5--v0.6 examples are still `[UNTESTED]` -- they build on
 `native_sim/native/64` and cross-compile, but await hardware-in-the-
 loop bring-up.  Each example's own `README.md` carries its status.
@@ -110,7 +123,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `iot-connected-camera`   | End-to-end IoT -- capture a frame, publish it to MQTT.                             |
 | `iot-dashboard`          | BME280 env samples → MQTT-over-TLS publish + a live LVGL dashboard. **(AEN)**      |
 | `iot-fleet-ota`          | Secure OTA firmware update with rollback; the v0.6 declarative `boot:` + `ota:` reference. |
-| `firmware-update-log`    | Portable tamper-evident update audit log -- one API, hardware-enforced on a secure backend, software tier on native_sim. |
+| `firmware-update-log`    | Portable update audit log -- software tamper-evident tier everywhere, TF-M secure-owner hardware tier where the secure backend is wired. |
 | `production-deployment`  | Field-product lifecycle flagship -- secure-boot + OTA + EEPROM provisioning + attestation in one `board.yaml`. |
 
 ### Display / GUI
@@ -134,6 +147,38 @@ Each needs a display panel wired per its `board.yaml`.
 | `wdt-feed`                 | Watchdog open + feed cadence; demonstrates reset-on-stall.                  |
 | `power-managed-sensor`     | Low-power BME280 + IMU node -- the v0.6 `cores.<id>.power:` sleep + multi-source-wakeup reference. **(AEN)** |
 
+### Third-party libraries
+
+How to enable and use each optional third-party library the SDK
+integrates (via `board.yaml`'s `cores.<id>.libraries:` array + the
+per-library profile under
+[`metadata/library-profiles/`](../metadata/library-profiles/)). One
+focused example per library; every one builds and runs on
+`native_sim/native/64`. A few decode/parse in a CPU/RAM-backed way on
+the host and document the hardware-backed path as a `board.yaml` swap
+in their README.
+
+| Directory                              | Library | What it shows                                                       |
+|----------------------------------------|---------|---------------------------------------------------------------------|
+| `connectivity/jsmn-json-parse`         | jsmn    | Tokenize an embedded JSON config into a typed struct.               |
+| `connectivity/nanopb-encode-decode`    | nanopb  | Protobuf message encode → buffer → decode round-trip.               |
+| `connectivity/coap-client-get`         | libcoap | Build a CoAP GET PDU + parse a response PDU with the real API.      |
+| `connectivity/mqtt-sn-publish`         | coremqtt_sn | Serialize + parse an MQTT-SN PUBLISH (buffer round-trip).       |
+| `connectivity/websocket-frame`         | libwebsockets | RFC 6455 masked text-frame encode/decode round-trip.         |
+| `audio/minimp3-decode`                 | minimp3 | Decode an embedded MP3 blob → PCM; print sample count + RMS.        |
+| `display/u8g2-oled-draw`               | u8g2    | Render text/frame/box to a RAM framebuffer; ASCII-dump it.         |
+| `display/gfx-compat-blit`              | gfx_compat | Fill + blit an RGB565 buffer through the SW-fallback shim.       |
+| `power-timing/littlefs-keyvalue`       | littlefs | Mount a RAM-backed LFS; write / read / list a key-value file.      |
+| `peripheral-io/etl-fixed-containers`   | etl     | `etl::vector` / `etl::map` -- fixed-capacity, no heap, no STL.      |
+| `peripheral-io/fmt-formatting`         | fmt     | `fmt::format_to` a fixed buffer -- no allocation, no iostream.      |
+| `testing/catch2-selftest`              | Catch2  | Host unit-test binary -- `TEST_CASE`s over a pure helper.          |
+| `testing/doctest-selftest`             | doctest | Header-only host unit-test binary.                                  |
+
+Most are portable; a few reference restrictively-licensed or
+Arduino-core upstreams whose full build is gated to a supported target
+-- each such example's README states exactly what it does on
+`native_sim` versus on silicon.
+
 ## Browse by topology / platform
 
 The remaining examples group by **how they are built** rather than
@@ -149,7 +194,7 @@ its `cores:` keys.
 | Directory                | What it shows                                                                                |
 |--------------------------|----------------------------------------------------------------------------------------------|
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
-| `rpmsg-aen`              | AEN E7 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
+| `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
 | `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; build pending iMX93 HW map). **(iMX93)** |
 | `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |
@@ -169,7 +214,7 @@ SoM EEPROM manifest).
 | `v2n/v2n-rtc-multi-alarm`       | Register per-source callbacks on the rv3028c7 multi-source dispatcher.   |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
 | `v2n/v2n-pwm-fan-control`       | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board). |
-| `v2n/v2n-secure-element-sign`   | OPTIGA Trust M init + product info + raw-APDU ECDSA-P256 sign.           |
+| `v2n/v2n-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe; product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
 | `v2n/v2n-xspi-flash-readwrite`  | Erase + write + read-back one page on the on-module xSPI NOR.            |
 | `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
@@ -182,7 +227,7 @@ Ensemble) family on the E1M-EVK board (lead part: E8).
 | Directory                       | What it shows                                                            |
 |---------------------------------|--------------------------------------------------------------------------|
 | `aen/edgeai-vision-aen`         | Flagship EdgeAI vision pipeline -- CSI camera -> VeriSilicon ISP Pico (vsi,isp-pico) -> Ethos-U55 -> OLED. |
-| `aen/aen-secure-element-sign`   | OPTIGA Trust M init + product info + raw-APDU ECDSA-P256 sign over BRD_I2C (M55-HE). |
+| `aen/aen-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe over BRD_I2C (M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
 
 ## Anatomy of a single-OS example
 

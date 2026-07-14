@@ -6,13 +6,22 @@
 + the resolved capabilities / chip-driver / library / peripheral enables;
 `_emit_extra_library_profile` renders an extra `libraries:` profile fragment.
 Extracted as the #285 kconfig emit seam. The slug / peripheral-Kconfig tables
-come from the slugs.py leaf; the `_CHIP_SUBSYSTEMS` / `_LIBRARY_KCONFIG` tables
-are lazy-imported from alp_project inside the function (the existing
-alp_project<->alp_orchestrate cycle-break), with the same in-body sys.path setup.
+come from the slugs.py leaf; the `_CHIP_SUBSYSTEMS` table is lazy-imported from
+alp_project inside the function (the existing alp_project<->alp_orchestrate
+cycle-break), with the same in-body sys.path setup. Per-core `libraries:`
+Kconfig is read from each library's manifest via `_per_core_library_kconfig`.
+
+`_slice_alp_conf` itself is a thin composer over a set of `_emit_*` section
+helpers (console / SoM capability / chip driver / subsystem / library /
+inference / memory / power / storage / OTA / diagnostics), each returning
+that section's `list[str]` fragment. Split out mechanically as the #673
+Phase-1 kconfig split -- behavior-preserving, byte-identical emit output;
+see `check_emit_snapshots.py`.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
 import yaml
@@ -44,11 +53,13 @@ def _emit_extra_library_profile(
     """Walk an extra_libraries `profile:` file and emit the per-class
     first-match Kconfig lines for the active SoM.
 
-    Mirrors the curated `metadata/library-profiles/<lib>/hw-backends.yaml`
-    matcher in `alp_project._emit_library_hw_backends`: each accelerator
-    class declares a `priority:` list whose entries carry
+    Mirrors the curated-library `integration.zephyr.hw_backends` matcher
+    (folded into each `metadata/libraries/<lib>.yaml` manifest): each
+    accelerator class declares a `priority:` list whose entries carry
     `silicon:` / `soc_family:` / `requires_cap:` matchers plus a
-    `kconfig:` directive.  First matching entry per class wins; an
+    `kconfig:` directive.  Entries marked `status: planned` or
+    `status: stub` are metadata only and are not emitted as active
+    build claims.  First matching implemented entry per class wins; an
     `sw_fallback:` block with `kconfig:` is always emitted at the end
     so the build has a SW floor when no HW backend matches.
 
@@ -103,6 +114,9 @@ def _emit_extra_library_profile(
             return False
 
     def _entry_matches(e: dict[str, Any]) -> bool:
+        status = str(e.get("status", "implemented")).strip().lower()
+        if status in {"planned", "stub"}:
+            return False
         sili = e.get("silicon")
         sf = e.get("soc_family")
         cap = e.get("requires_cap")
@@ -177,25 +191,41 @@ _CONSOLE_ALIASES = {
 }
 
 
-def _resolve_console(value: Optional[str], os_: str) -> str:
+def _resolve_console(value: Optional[str], os_: str,
+                     hw_console: bool = True) -> str:
     """Resolve the effective console backend for a slice.
 
     ``value`` is the raw ``diagnostics.console:`` knob (or ``None`` /
     ``"auto"`` for the OS-derived default); ``os_`` is the slice OS.
-    Returns one of ``"uart"``, ``"ram"``, ``"linux"``, ``"none"``.
+    ``hw_console`` is the SoM-topology fact (``topology.<id>.hw_console``):
+    a headless core (``False``) has no hardware UART console, so the
+    AUTO-resolved Zephyr default must be ``"none"`` (inherit the board
+    default) instead of ``"uart"`` -- emitting ``CONFIG_UART_CONSOLE=y``
+    on a core whose board has no serial driver is an "assigned y but got n"
+    Kconfig error, fatal to the Zephyr build (issue #717).  An explicit
+    ``diagnostics.console:`` still wins for a headless core (the caller may
+    upgrade a headless AUTO to ``"ram"`` via ``diagnostics.sim_console``,
+    #686).  Returns one of ``"uart"``, ``"ram"``, ``"linux"``, ``"none"``.
     """
     v = (value or "auto").strip().lower()
     if v == "auto":
         if os_ == "zephyr":
-            return "uart"
+            return "uart" if hw_console else "none"
         if os_ in ("yocto", "ubuntu"):
             return "linux"
         return "none"
     return _CONSOLE_ALIASES.get(v, "none")
 
 
-def _emit_zephyr_console(console: str) -> list[str]:
-    """Kconfig lines for a Zephyr slice's resolved console backend."""
+def _emit_zephyr_console(console: str, sim_console: bool = False) -> list[str]:
+    """Kconfig lines for a Zephyr slice's resolved console backend.
+
+    ``sim_console`` distinguishes a RAM console selected explicitly via
+    ``diagnostics.console: ram`` (bench SWD flow) from one auto-selected
+    for a headless core by ``diagnostics.sim_console: true`` (studio sim
+    streams the ring over ``uart_socket``); the emitted Kconfig is
+    identical, only the teaching comment differs.
+    """
     if console == "uart":
         return [
             "# Console: Alp UART console (auto-selected for os: zephyr).",
@@ -210,9 +240,22 @@ def _emit_zephyr_console(console: str) -> list[str]:
             "",
         ]
     if console == "ram":
-        return [
-            "# Console: RAM console (board.yaml `diagnostics.console: ram`).",
-            "# No serial line on this bench -- read `ram_console_buf` over SWD.",
+        header = (
+            [
+                "# Console: RAM console (board.yaml `diagnostics.sim_console: "
+                "true`).",
+                "# This core has no hardware UART console -- the studio",
+                "# simulator streams `ram_console_buf` over its `uart_socket`.",
+            ]
+            if sim_console
+            else [
+                "# Console: RAM console (board.yaml `diagnostics.console: "
+                "ram`).",
+                "# No serial line on this bench -- read `ram_console_buf` "
+                "over SWD.",
+            ]
+        )
+        return header + [
             "# LOG is routed to printk so the RAM backend still captures it.",
             "CONFIG_CONSOLE=y",
             "CONFIG_RAM_CONSOLE=y",
@@ -225,36 +268,180 @@ def _emit_zephyr_console(console: str) -> list[str]:
     return []
 
 
-def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
-    """Per-core Kconfig fragment for a Zephyr slice.
+_LINUX_WIRELESS_PROVIDER_PREFIXES = ("murata_", "cyw")
 
-    Emits the full Kconfig the slice needs: baseline + log + silicon +
-    per-core peripherals/libraries + SoM-intrinsic chip drivers (auto-
-    derived from ``on_module:`` + ``helper_firmware:`` in the SoM preset)
-    + board-populated chip drivers (from board.yaml ``board.populated:``
-    + the board preset) + the Zephyr subsystem enables those chip drivers
-    need (e.g. an enabled ``rv3028c7`` chip driver pulls in ``CONFIG_I2C=y``).
 
-    Swapping ``som.sku:`` in board.yaml automatically changes the SoM-
-    intrinsic chip set with no other board.yaml edits required.
+def _wireless_provider(project: BoardProject) -> Optional[str]:
+    """Return the SoM's on-module Wi-Fi/BLE provider slug, if known."""
+    om = project.som_preset.get("on_module") or {}
+    provider = om.get("wifi_ble")
+    if not isinstance(provider, str):
+        return None
+    provider = provider.strip()
+    if not provider or provider == "TBD":
+        return None
+    return provider
+
+
+def _is_linux_wireless_provider(provider: Optional[str]) -> bool:
+    """True when Wi-Fi/BLE data paths are owned by the Linux BSP stack."""
+    if provider is None:
+        return False
+    return provider.startswith(_LINUX_WIRELESS_PROVIDER_PREFIXES)
+
+
+def _zephyr_iot_kconfig(project: BoardProject, slice_: Slice) -> list[str]:
+    """Kconfig lines for ``cores.<id>.iot`` on a Zephyr slice."""
+    iot = slice_.iot or {}
+    if not any(iot.get(k) for k in ("wifi", "mqtt", "tls", "ble")):
+        return []
+
+    provider = _wireless_provider(project)
+    lines: list[str] = [
+        f"# IoT features declared on core `{slice_.core_id}` "
+        "(board.yaml `cores.*.iot`)",
+    ]
+    if provider:
+        lines.append(
+            f"# Wireless provider resolved from `{project.sku}` "
+            f"on_module.wifi_ble: {provider}.")
+    else:
+        lines.append("# Wireless provider is TBD/absent; using generic Zephyr stack gates.")
+
+    emitted: set[str] = set()
+
+    def add(line: str) -> None:
+        if line.startswith("CONFIG_"):
+            if line in emitted:
+                return
+            emitted.add(line)
+        lines.append(line)
+
+    def add_network_base() -> None:
+        add("CONFIG_NETWORKING=y")
+        add("CONFIG_NET_IPV4=y")
+        add("CONFIG_NET_SOCKETS=y")
+
+    linux_owned = _is_linux_wireless_provider(provider)
+
+    if iot.get("wifi"):
+        if provider == "cc3501e":
+            add("# Wi-Fi: AEN CC3501E bridge backend, not Zephyr wifi_mgmt.")
+            add("CONFIG_ALP_SDK_WIFI_CC3501E=y")
+        elif linux_owned:
+            add("# Wi-Fi: provider data path is Linux/BSP-owned on this SoM;")
+            add("# no Zephyr wifi_mgmt backend is emitted for this slice.")
+        else:
+            add("# Wi-Fi: generic Zephyr wifi_mgmt station path.")
+            add_network_base()
+            add("CONFIG_WIFI=y")
+            add("CONFIG_NET_MGMT=y")
+            add("CONFIG_NET_MGMT_EVENT=y")
+            add("CONFIG_NET_L2_WIFI_MGMT=y")
+            add("CONFIG_ALP_SDK_IOT_WIFI=y")
+
+    if iot.get("mqtt"):
+        add("# MQTT: Zephyr mqtt_client over the active socket provider.")
+        add_network_base()
+        add("CONFIG_NET_TCP=y")
+        add("CONFIG_MQTT_LIB=y")
+        add("CONFIG_ALP_SDK_IOT_MQTT=y")
+
+    if iot.get("tls"):
+        add("# TLS: credential store + TLS-capable protocol clients.")
+        add("CONFIG_TLS_CREDENTIALS=y")
+        if iot.get("mqtt"):
+            add("CONFIG_MQTT_LIB_TLS=y")
+
+    if iot.get("ble"):
+        if provider == "cc3501e":
+            add("# BLE: AEN CC3501E bridge backend, not Zephyr HCI.")
+            add("CONFIG_ALP_SDK_BLE_CC3501E=y")
+        elif linux_owned:
+            add("# BLE: provider data path is Linux/BSP-owned on this SoM;")
+            add("# no Zephyr BT-host backend is emitted for this slice.")
+        else:
+            add("# BLE: generic Zephyr BT host path.")
+            add("CONFIG_BT=y")
+            add("CONFIG_BT_PERIPHERAL=y")
+            add("CONFIG_BT_CENTRAL=y")
+            add("CONFIG_ALP_SDK_BLE=y")
+
+    lines.append("")
+    return lines
+
+
+def _yocto_iot_lines(project: BoardProject, slice_: Slice) -> list[str]:
+    """local.conf lines for ``cores.<id>.iot`` on a Yocto slice."""
+    iot = slice_.iot or {}
+    if not any(iot.get(k) for k in ("wifi", "mqtt", "tls", "ble")):
+        return []
+
+    provider = _wireless_provider(project)
+    lines: list[str] = [
+        "",
+        f"# IoT features declared on core `{slice_.core_id}` "
+        "(board.yaml `cores.*.iot`)",
+    ]
+    if provider:
+        lines.append(
+            f"# Wireless provider resolved from `{project.sku}` "
+            f"on_module.wifi_ble: {provider}.")
+    else:
+        lines.append("# Wireless provider is TBD/absent; emit generic Linux userland.")
+
+    image_pkgs: list[str] = []
+    packageconfig: list[str] = []
+
+    def add_unique(seq: list[str], value: str) -> None:
+        if value not in seq:
+            seq.append(value)
+
+    linux_owned = _is_linux_wireless_provider(provider)
+
+    if iot.get("wifi"):
+        if provider == "cc3501e":
+            lines.append("# Wi-Fi: CC3501E is controlled by the Zephyr/companion path.")
+        else:
+            if linux_owned:
+                lines.append(
+                    "# Wi-Fi: Linux owns this provider's SDIO/firmware path; "
+                    "BSP/machine recipes supply kernel/firmware packages.")
+            add_unique(image_pkgs, "wpa-supplicant")
+            add_unique(image_pkgs, "iw")
+            add_unique(image_pkgs, "wireless-regdb")
+
+    if iot.get("ble"):
+        if provider == "cc3501e":
+            lines.append("# BLE: CC3501E is controlled by the Zephyr/companion path.")
+        else:
+            if linux_owned:
+                lines.append(
+                    "# BLE: Linux owns this provider's HCI path; BSP/machine "
+                    "recipes supply controller firmware.")
+            add_unique(image_pkgs, "bluez5")
+
+    if iot.get("mqtt"):
+        add_unique(packageconfig, "mqtt")
+
+    if iot.get("tls"):
+        add_unique(packageconfig, "security")
+        add_unique(image_pkgs, "ca-certificates")
+
+    if image_pkgs:
+        lines.append(f'IMAGE_INSTALL:append = " {" ".join(image_pkgs)}"')
+    if packageconfig:
+        lines.append(
+            f'PACKAGECONFIG:append:pn-alp-sdk = " {" ".join(packageconfig)}"')
+
+    return lines
+
+
+def _emit_baseline(slice_: Slice, diagnostics: dict[str, Any]) -> list[str]:
+    """Baseline Kconfig lines: the fragment header comment + the core
+    log/print enables every Zephyr slice gets regardless of what it
+    declares in board.yaml.
     """
-    silicon = project.som_preset.get("silicon")
-    kconfig = silicon_to_kconfig(silicon)
-    diagnostics = project.diagnostics
-
-    # Lazy-import alp_project tables — alp_project imports us, so a
-    # top-level import would cycle.  Only paid when emitting Zephyr
-    # fragments.
-    import sys as _sys
-    from pathlib import Path as _Path
-    _scripts = _Path(__file__).resolve().parent.parent  # the scripts/ dir
-    if str(_scripts) not in _sys.path:
-        _sys.path.insert(0, str(_scripts))
-    from alp_project import (  # type: ignore
-        _CHIP_SUBSYSTEMS,
-        _LIBRARY_KCONFIG,
-    )
-
     lines: list[str] = []
     lines.append("# Auto-generated by scripts/alp_orchestrate.py "
                  "-- do not edit.")
@@ -274,26 +461,71 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         if log_level in log_level_kc:
             lines.append(f"CONFIG_LOG_DEFAULT_LEVEL={log_level_kc[log_level]}")
     lines.append("")
+    return lines
 
-    # Console backend, auto-selected from the slice OS (overridable via
-    # board.yaml `diagnostics.console:`).  A Zephyr slice defaults to the
-    # Alp UART console so `west build && attach a terminal` just works;
-    # a customer on a serial-less bench flips to `ram`.
-    console = _resolve_console(diagnostics.get("console"), slice_.os)
-    console_lines = _emit_zephyr_console(console)
-    if console_lines:
-        lines.extend(console_lines)
 
-    # On-module HW manifest EEPROM: when the SoM preset carries one
-    # (`on_module.eeprom`), point the hw_info reader -- and the improved
-    # console banner's boot-time manifest read -- at portable bus 0, the
-    # `alp-i2c0` alias every SoM routes its manifest EEPROM to (e.g. AEN's
-    # 24C128 @0x50 on SoC I2C2).  Harmless on examples without that bus
-    # wired: the read just returns NOT_READY and the banner says so.
-    if (project.som_preset.get("on_module") or {}).get("eeprom"):
-        lines.append("# On-module HW manifest EEPROM -> portable bus 0 (alp-i2c0);")
+def _emit_console(diagnostics: dict[str, Any], slice_: Slice) -> list[str]:
+    """Console backend, auto-selected from the slice OS (overridable via
+    board.yaml `diagnostics.console:`).  A Zephyr slice defaults to the
+    Alp UART console so `west build && attach a terminal` just works;
+    a customer on a serial-less bench flips to `ram`.
+
+    `diagnostics.sim_console: true` (issue #686) upgrades the AUTO-resolved
+    console of a HEADLESS core (`hw_console: false` -- no HW UART, e.g. the
+    RZ/V2N M33 system-manager) to the RAM console, so the studio simulator's
+    `uart_socket` isn't silent.  Precedence: an explicit `diagnostics.
+    console:` always wins; a core that has a UART console is simulated
+    through its real UART node and needs no Kconfig change.
+    """
+    raw = diagnostics.get("console")
+    console = _resolve_console(raw, slice_.os, slice_.hw_console)
+    auto = (raw or "auto").strip().lower() == "auto"
+    # A headless AUTO core resolves to "none" (above); `sim_console: true`
+    # upgrades it to the RAM console so the studio simulator's uart_socket
+    # isn't silent (#686).  Precedence: an explicit `diagnostics.console:`
+    # (auto == False) always wins and is never upgraded.
+    sim = bool(diagnostics.get("sim_console")) and auto \
+        and not slice_.hw_console and console == "none"
+    if sim:
+        console = "ram"
+    return _emit_zephyr_console(console, sim_console=sim)
+
+
+def _emit_som_caps(
+    project: "BoardProject",
+    silicon: Optional[str],
+    kconfig: Optional[str],
+) -> list[str]:
+    """SoM-capability Kconfig lines: HW-manifest EEPROM wiring, the
+    resolved SoM-silicon Kconfig symbol, and the cross-EVK board facade /
+    `<alp/soc_caps.h>` capability-restriction selector.
+    """
+    lines: list[str] = []
+
+    # HW manifest EEPROM: the SoM preset provides the default bus,
+    # while board.yaml `features.hw_info.eeprom` can pin the exact
+    # app/project address and manifest offset.  Harmless on examples
+    # without that bus wired: the read returns NOT_READY and the banner
+    # says so.
+    hw_info_eeprom = project.hw_info_eeprom_config()
+    if hw_info_eeprom is not None:
+        source = hw_info_eeprom.get("source")
+        if source == "features.hw_info.eeprom":
+            lines.append(
+                "# HW manifest EEPROM from board.yaml `features.hw_info.eeprom`;")
+        else:
+            lines.append("# On-module HW manifest EEPROM -> portable bus 0 (alp-i2c0);")
         lines.append("# enables alp_hw_info_read() + the console banner manifest line.")
-        lines.append("CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0")
+        lines.append(
+            "CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID="
+            f"{hw_info_eeprom['bus_id']}")
+        if source == "features.hw_info.eeprom":
+            lines.append(
+                "CONFIG_ALP_SDK_HW_INFO_EEPROM_ADDR_7BIT="
+                f"0x{hw_info_eeprom['addr_7bit']:02x}")
+            lines.append(
+                "CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET="
+                f"{hw_info_eeprom['offset']}")
         lines.append("")
 
     if kconfig:
@@ -340,11 +572,40 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append(f'CONFIG_COMPILER_OPT="{som_def}"')
         lines.append("")
 
+    return lines
+
+
+# Slugs that map to BLOCK_ Kconfig symbols rather than CHIP_.
+# These live under blocks/ + <alp/blocks/*.h> because they are
+# SDK-level *block* utilities (`alp_button_led_*`, `alp_pdm_mic_*`)
+# rather than third-party-IC chip drivers; see blocks/README.md.
+_BLOCK_SLUGS = frozenset({"button_led", "pdm_mic"})
+
+
+def _slug_kconfig(slug: str) -> str:
+    """Map a chip/block slug to its Kconfig symbol (CHIP_ or BLOCK_)."""
+    kind = "BLOCK" if slug in _BLOCK_SLUGS else "CHIP"
+    return f"CONFIG_ALP_SDK_{kind}_{slug.upper()}"
+
+
+def _emit_chips(
+    project: "BoardProject",
+    chip_subsystems_table: dict[str, tuple[str, ...]],
+) -> tuple[list[str], set[str]]:
+    """SoM-intrinsic + board-populated + project-declared chip drivers.
+
+    Returns the emitted Kconfig lines plus the accumulated set of Zephyr
+    subsystem names the enabled chip drivers require -- fed into
+    `_emit_subsystems` alongside the slice's `peripherals:` array.
+    """
+    lines: list[str] = []
+    chip_subsystems: set[str] = set()
+
     # ----------------------------------------------------------------
     # SoM-intrinsic chip drivers — derived from on_module: + helper_firmware:
     # in the SoM preset.  These are NOT declared by the customer; they
     # are determined by which SoM SKU the project targets.  Swapping
-    # `som.sku:` from E1M-V2N101 to E1M-AEN701 automatically swaps
+    # `som.sku:` from E1M-V2N101 to E1M-AEN801 automatically swaps
     # the on-module chip set without any board.yaml changes.
     # ----------------------------------------------------------------
     som_chips: set[str] = set()
@@ -356,24 +617,13 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     for slug in _slugs_from_helper_firmware(hf):
         som_chips.add(slug)
 
-    # Slugs that map to BLOCK_ Kconfig symbols rather than CHIP_.
-    # These live under blocks/ + <alp/blocks/*.h> because they are
-    # SDK-level *block* utilities (`alp_button_led_*`, `alp_pdm_mic_*`)
-    # rather than third-party-IC chip drivers; see blocks/README.md.
-    _BLOCK_SLUGS = frozenset({"button_led", "pdm_mic"})
-
-    def _slug_kconfig(slug: str) -> str:
-        kind = "BLOCK" if slug in _BLOCK_SLUGS else "CHIP"
-        return f"CONFIG_ALP_SDK_{kind}_{slug.upper()}"
-
-    chip_subsystems: set[str] = set()
     if som_chips:
         sku_str = project.sku
         lines.append(f"# SoM-intrinsic chip drivers (from `{sku_str}` "
                      f"on_module + helper_firmware)")
         for chip in sorted(som_chips):
             lines.append(f"{_slug_kconfig(chip)}=y")
-            for s in _CHIP_SUBSYSTEMS.get(chip, ()):
+            for s in chip_subsystems_table.get(chip, ()):
                 chip_subsystems.add(s)
         lines.append("")
 
@@ -407,7 +657,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
                 continue
             lines.append(f"{_slug_kconfig(chip)}={'y' if on else 'n'}")
             if on:
-                for s in _CHIP_SUBSYSTEMS.get(chip, ()):
+                for s in chip_subsystems_table.get(chip, ()):
                     chip_subsystems.add(s)
         lines.append("")
 
@@ -423,18 +673,22 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("# Project-declared chips (board.yaml `chips:` array)")
         for chip in sorted(set(project_chips)):
             lines.append(f"{_slug_kconfig(chip)}=y")
-            for s in _CHIP_SUBSYSTEMS.get(chip, ()):
+            for s in chip_subsystems_table.get(chip, ()):
                 chip_subsystems.add(s)
         lines.append("")
 
-    # Zephyr subsystems: union of (chip-driver-required subsystems for
-    # the first zephyr core's chip block) + (this core's `peripherals:`
-    # array, which adds to the union per spec §4.6).
+    return lines, chip_subsystems
+
+
+def _emit_subsystems(slice_: Slice, chip_subsystems: set[str]) -> list[str]:
+    """Zephyr subsystems required by the slice: union of (chip-driver-
+    required subsystems, from `_emit_chips`) and (this core's
+    `peripherals:` array, which adds to the union per spec §4.6).
+    """
+    lines: list[str] = []
     periph_subsystems: set[str] = set()
     for periph in slice_.peripherals or []:
-        kc = _PERIPHERAL_KCONFIG.get(periph)
-        if kc:
-            periph_subsystems.add(kc)
+        periph_subsystems.update(_PERIPHERAL_KCONFIG.get(periph, ()))
     all_subsystems = chip_subsystems | periph_subsystems
     if all_subsystems:
         lines.append(f"# Zephyr subsystems required on core "
@@ -442,18 +696,82 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         for s in sorted(all_subsystems):
             lines.append(f"CONFIG_{s}=y")
         lines.append("")
+    return lines
+
+
+def _library_alias_table() -> dict[str, str]:
+    """Legacy per-core `libraries:` token -> canonical manifest name
+    (metadata/library-aliases-v1.json).  Empty dict if the table is absent."""
+    path = METADATA_ROOT / "library-aliases-v1.json"
+    if not path.is_file():
+        return {}
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    aliases = doc.get("aliases")
+    return dict(aliases) if isinstance(aliases, dict) else {}
+
+
+def _per_core_library_kconfig(lib: str) -> Optional[list[str]]:
+    """Base-Kconfig lines for a per-core `libraries:` token, read from the
+    library's ADR 0018 manifest (metadata/libraries/<canonical>.yaml) rather
+    than a hand-maintained table (WS6-c #610 §6).
+
+    The token is resolved to its canonical manifest through the
+    metadata/library-aliases-v1.json alias table.  The emitted set is the union
+    of the manifest's `integration.zephyr.kconfig` (the upstream module-enable
+    line(s)) and its `integration.zephyr.hw_backends.sw_fallback.kconfig` (the
+    SDK SW floor), module-enable first and the SW-fallback marker last, deduped.
+    Header-only libraries whose SW floor is a doc comment surface that comment.
+
+    Returns None when no manifest resolves (caller emits the pending-wire TODO).
+    """
+    alias = _library_alias_table()
+    canonical = alias.get(lib, lib)
+    path = METADATA_ROOT / "libraries" / f"{canonical}.yaml"
+    if not path.is_file():
+        return None
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    zephyr = (doc.get("integration") or {}).get("zephyr") or {}
+    out: list[str] = []
+    for kc in (zephyr.get("kconfig") or []):
+        kc = str(kc)
+        if kc not in out:
+            out.append(kc)
+    swf = ((zephyr.get("hw_backends") or {}).get("sw_fallback") or {}).get("kconfig")
+    if swf:
+        swf = str(swf)
+        if swf.lstrip().startswith("#"):
+            # Header-only library: the SW floor is a documentation comment,
+            # not a real knob.  Surface it only when there is no module enable.
+            if not out:
+                out.append(swf)
+        elif swf not in out:
+            out.append(swf)
+    return out
+
+
+def _emit_libraries(
+    project: "BoardProject",
+    slice_: Slice,
+) -> list[str]:
+    """Per-core `libraries:`, curated third-party `libraries:` (ADR 0018),
+    and the open-set `extra_libraries:` escape hatch (v0.6 P2.1).
+
+    Per-core Kconfig is resolved from each library's manifest
+    (`_per_core_library_kconfig`), not a hand-maintained enable table.
+    """
+    lines: list[str] = []
 
     if slice_.libraries:
         lines.append(f"# Libraries declared on core "
                      f"`{slice_.core_id}`")
         for lib in sorted(slice_.libraries):
-            kcs = _LIBRARY_KCONFIG.get(lib)
-            if kcs:
-                for kc in kcs:
-                    lines.append(kc)
-            else:
+            kcs = _per_core_library_kconfig(lib)
+            if kcs is None:
                 lines.append(
                     f"# TODO: wire library '{lib}' once its v0.4 enable lands")
+            else:
+                for kc in kcs:
+                    lines.append(kc)
         lines.append("")
 
     # Project-wide curated third-party libraries (top-level `libraries:`,
@@ -501,32 +819,42 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
                         f"in {profile})")
         lines.append("")
 
-    # Inference dispatchers.  Driven entirely by the SoM preset's
-    # `capabilities:` matrix + SoC-JSON `cores[]` -- NOT by board.yaml.
-    # The customer never picks a backend at build time; the SDK compiles
-    # in every dispatcher the silicon supports, and apps choose
-    # per-handle at runtime via alp_inference_open(.backend=...).
-    # CPU/TFLM is the universal SW fallback and is always on.
-    #
-    # Two layers of variant detail are emitted alongside the umbrella
-    # switches so the SDK driver code + (upstream) kernel libraries
-    # compile against the right per-silicon variant:
-    #
-    #   - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y -- picked from
-    #     the SoM preset's `npu_population:` list (preferred) with a
-    #     capability-count fallback for SoMs that haven't declared the
-    #     fine-grained population block yet.  U85 carries Arm's larger
-    #     MAC array + TensorOptimized kernels; U55 carries the smaller
-    #     MAC + reference kernels; U65 is i.MX 93-only.
-    #
-    #   - CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y -- picked
-    #     from the SoC JSON's `cores[<slice.core_id>].vector_extension`
-    #     so the CPU-side TFLM kernel set matches the target core's SIMD
-    #     reality (NEON on A-cluster, Helium MVE on M55, scalar / REF
-    #     on baseline M33 / M4).  Per-core in case a single SoM hosts
-    #     multiple core classes (E7 = A32 + M55, all three Helium /
-    #     Neon flavours).
-    #
+    return lines
+
+
+def _emit_inference(
+    project: "BoardProject",
+    slice_: Slice,
+    silicon: Optional[str],
+) -> list[str]:
+    """Inference dispatcher enables, driven entirely by the SoM preset's
+    `capabilities:` matrix + SoC-JSON `cores[]` -- NOT by board.yaml.
+    The customer never picks a backend at build time; the SDK compiles
+    in every dispatcher the silicon supports, and apps choose
+    per-handle at runtime via alp_inference_open(.backend=...).
+    CPU/TFLM is the universal SW fallback and is always on.
+
+    Two layers of variant detail are emitted alongside the umbrella
+    switches so the SDK driver code + (upstream) kernel libraries
+    compile against the right per-silicon variant:
+
+      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y -- picked from
+        the SoM preset's `npu_population:` list (preferred) with a
+        capability-count fallback for SoMs that haven't declared the
+        fine-grained population block yet.  U85 carries Arm's larger
+        MAC array + TensorOptimized kernels; U55 carries the smaller
+        MAC + reference kernels; U65 is i.MX 93-only.
+
+      - CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y -- picked
+        from the SoC JSON's `cores[<slice.core_id>].vector_extension`
+        so the CPU-side TFLM kernel set matches the target core's SIMD
+        reality (NEON on A-cluster, Helium MVE on M55, scalar / REF
+        on baseline M33 / M4).  Per-core in case a single SoM hosts
+        multiple core classes (E7 = A32 + M55, all three Helium /
+        Neon flavours).
+    """
+    lines: list[str] = []
+
     # resolve_capabilities merges SoC-JSON defaults with SoM overrides
     # so silicon-determined caps (ethos_u55_count, drp_ai, ...) resolve
     # even when removed from the SoM YAML (capability unification, slice 3b).
@@ -558,7 +886,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # also names the role + paired-core); fall back to the capability
     # counts (ethos_u{55,65,85}_count) for SoMs that haven't yet
     # declared the per-instance block.  Both AEN401 / AEN601 / AEN801
-    # populate npu_population[]; AEN701 declares U55s there too; the
+    # populate npu_population[]; AEN801 declares U55s there too; the
     # i.MX 93 SoM relies on the capability-count fallback today.
     ethos_variants: set[str] = set()
     npu_pop = (project.som_preset.get("inference") or {}).get("npu_population") or []
@@ -595,10 +923,12 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
                  "customer does not pick)")
     lines.extend(inference_lines)
     lines.append("")
+    return lines
 
-    # ----------------------------------------------------------------
-    # Per-slice memory tuning (board.yaml `cores.<id>.memory:`).
-    # ----------------------------------------------------------------
+
+def _emit_memory(slice_: Slice) -> list[str]:
+    """Per-slice memory tuning (board.yaml `cores.<id>.memory:`)."""
+    lines: list[str] = []
     mem = slice_.memory or {}
     mem_lines: list[str] = []
     if mem.get("stack_kib"):
@@ -611,10 +941,12 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("# Per-slice memory tuning (board.yaml cores.<id>.memory:)")
         lines.extend(mem_lines)
         lines.append("")
+    return lines
 
-    # ----------------------------------------------------------------
-    # Per-slice power-management profile.
-    # ----------------------------------------------------------------
+
+def _emit_power(slice_: Slice) -> list[str]:
+    """Per-slice power-management profile (board.yaml `cores.<id>.power:`)."""
+    lines: list[str] = []
     pwr = slice_.power or {}
     pwr_lines: list[str] = []
     sleep_mode = (pwr.get("sleep_mode") or "disabled").lower()
@@ -644,18 +976,21 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("# Per-slice power-management profile (board.yaml cores.<id>.power:)")
         lines.extend(pwr_lines)
         lines.append("")
+    return lines
 
-    # ----------------------------------------------------------------
-    # Storage partitions (board.yaml `storage:` block).  Emits per-fs
-    # Kconfig for every resolved (non-blocked) partition.  Blocked
-    # partitions produce a hint comment so the slice build still
-    # compiles but the runtime mount fails loudly via the DTS overlay.
-    #
-    # Per-slice ownership of partitions is not modelled today: every
-    # Zephyr/baremetal slice gets the union.  Kconfig dedupes when
-    # multiple per-core fragments overlay onto the same base.  v0.7
-    # may add `core:` to storage entries for per-slice scoping.
-    # ----------------------------------------------------------------
+
+def _emit_storage(project: "BoardProject") -> list[str]:
+    """Storage partitions (board.yaml `storage:` block).  Emits per-fs
+    Kconfig for every resolved (non-blocked) partition.  Blocked
+    partitions produce a hint comment so the slice build still
+    compiles but the runtime mount fails loudly via the DTS overlay.
+
+    Per-slice ownership of partitions is not modelled today: every
+    Zephyr/baremetal slice gets the union.  Kconfig dedupes when
+    multiple per-core fragments overlay onto the same base.  v0.7
+    may add `core:` to storage entries for per-slice scoping.
+    """
+    lines: list[str] = []
     partitions = resolve_storage_partitions(project)
     ok_partitions = [p for p in partitions if p.status == "ok"]
     fs_seen: set[str] = set()
@@ -694,22 +1029,25 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             lines.append(f"# BLOCKED storage[{p.name}]: "
                          f"{p.reason or 'unknown reason'}")
         lines.append("")
+    return lines
 
-    # ----------------------------------------------------------------
-    # OTA Zephyr client (board.yaml `ota:` block, provider-driven dispatch).
-    #
-    # Resolved design Q on the Zephyr-side OTA client (ADR 0009 follow-up):
-    #   provider: mender   -> Mender-MCU-client (out-of-tree, BSD-3)
-    #   provider: hawkbit  -> Zephyr Hawkbit DDI client (upstream)
-    #   provider: mcumgr   -> Zephyr MCUmgr (upstream; transport is the app's call)
-    #
-    # Yocto slices keep the existing Mender server-mode dispatch in
-    # _slice_local_conf().  This block handles the Zephyr side: per-slice
-    # Kconfig that compiles the matching client in.  Settings (server URL,
-    # poll interval, tenant token) thread through Kconfig string values
-    # when declared in `ota:`; placeholders (${VAR}) pass through verbatim
-    # so the build system substitutes at link time.
-    # ----------------------------------------------------------------
+
+def _emit_ota(project: "BoardProject") -> list[str]:
+    """OTA Zephyr client (board.yaml `ota:` block, provider-driven dispatch).
+
+    Resolved design Q on the Zephyr-side OTA client (ADR 0009 follow-up):
+      provider: mender   -> Mender-MCU-client (out-of-tree, BSD-3)
+      provider: hawkbit  -> Zephyr Hawkbit DDI client (upstream)
+      provider: mcumgr   -> Zephyr MCUmgr (upstream; transport is the app's call)
+
+    Yocto slices keep the existing Mender server-mode dispatch in
+    `_slice_local_conf`.  This handles the Zephyr side: per-slice
+    Kconfig that compiles the matching client in.  Settings (server URL,
+    poll interval, tenant token) thread through Kconfig string values
+    when declared in `ota:`; placeholders (${VAR}) pass through verbatim
+    so the build system substitutes at link time.
+    """
+    lines: list[str] = []
     ota = project.ota or {}
     provider = (ota.get("provider") or "").lower() if isinstance(ota, dict) else ""
     if provider and provider in ("mender", "hawkbit", "mcumgr"):
@@ -755,19 +1093,22 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             lines.append("# MCUmgr transport (UART/BLE/UDP) is the app's call;")
             lines.append("# enable the matching CONFIG_MCUMGR_TRANSPORT_* in your prj.conf.")
         lines.append("")
+    return lines
 
-    # ----------------------------------------------------------------
-    # Per-module log levels (board.yaml `diagnostics.modules:`).
-    #
-    # Zephyr's per-module CONFIG_<MOD>_LOG_LEVEL symbol exists only when
-    # the matching module has called LOG_MODULE_REGISTER() at build time.
-    # ALP_* SDK-side modules have not registered any LOG modules yet, so
-    # emitting `CONFIG_ALP_<MOD>_LOG_LEVEL=N` trips the Zephyr build with
-    # `undefined symbol ALP_<MOD>_LOG_LEVEL`.  We restrict the active
-    # emit to modules whose Kconfig declaration is known to exist and
-    # downgrade ALP_* + unknown modules to a hint comment until their
-    # LOG_MODULE_REGISTER call lands.
-    # ----------------------------------------------------------------
+
+def _emit_diagnostics(project: "BoardProject") -> list[str]:
+    """Per-module log-level overrides (board.yaml `diagnostics.modules:`).
+
+    Zephyr's per-module CONFIG_<MOD>_LOG_LEVEL symbol exists only when
+    the matching module has called LOG_MODULE_REGISTER() at build time.
+    ALP_* SDK-side modules have not registered any LOG modules yet, so
+    emitting `CONFIG_ALP_<MOD>_LOG_LEVEL=N` trips the Zephyr build with
+    `undefined symbol ALP_<MOD>_LOG_LEVEL`.  We restrict the active
+    emit to modules whose Kconfig declaration is known to exist and
+    downgrade ALP_* + unknown modules to a hint comment until their
+    LOG_MODULE_REGISTER call lands.
+    """
+    lines: list[str] = []
     modules = (project.diagnostics or {}).get("modules") or {}
     if modules:
         level_to_n = {"off": 0, "error": 1, "warn": 2, "info": 3, "debug": 4, "trace": 4}
@@ -784,6 +1125,66 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
             else:
                 lines.append(f"CONFIG_{kc_stem}_LOG_LEVEL={n}")
         lines.append("")
+    return lines
+
+
+def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
+    """Per-core Kconfig fragment for a Zephyr slice.
+
+    Emits the full Kconfig the slice needs: baseline + log + silicon +
+    per-core peripherals/libraries + SoM-intrinsic chip drivers (auto-
+    derived from ``on_module:`` + ``helper_firmware:`` in the SoM preset)
+    + board-populated chip drivers (from board.yaml ``board.populated:``
+    + the board preset) + the Zephyr subsystem enables those chip drivers
+    need (e.g. an enabled ``rv3028c7`` chip driver pulls in ``CONFIG_I2C=y``).
+
+    Swapping ``som.sku:`` in board.yaml automatically changes the SoM-
+    intrinsic chip set with no other board.yaml edits required.
+
+    This is a thin composer: each section below is delegated to a
+    dedicated ``_emit_*`` helper (console / SoM capability / chip driver
+    / subsystem / library / inference / memory / power / storage / OTA /
+    diagnostics), called in the exact fixed order the fragment has
+    always used. Split out mechanically as the #673 Phase-1 kconfig
+    split -- behavior-preserving; emit output is byte-identical to the
+    pre-split monolith (see ``check_emit_snapshots.py``).
+    """
+    silicon = project.som_preset.get("silicon")
+    kconfig = silicon_to_kconfig(silicon)
+    diagnostics = project.diagnostics
+
+    # Lazy-import alp_project tables — alp_project imports us, so a
+    # top-level import would cycle.  Only paid when emitting Zephyr
+    # fragments.
+    import sys as _sys
+    from pathlib import Path as _Path
+    _scripts = _Path(__file__).resolve().parent.parent  # the scripts/ dir
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project import (  # type: ignore
+        _CHIP_SUBSYSTEMS,
+    )
+
+    lines: list[str] = []
+    lines.extend(_emit_baseline(slice_, diagnostics))
+    lines.extend(_emit_console(diagnostics, slice_))
+    lines.extend(_emit_som_caps(project, silicon, kconfig))
+
+    chip_lines, chip_subsystems = _emit_chips(project, _CHIP_SUBSYSTEMS)
+    lines.extend(chip_lines)
+    lines.extend(_emit_subsystems(slice_, chip_subsystems))
+
+    iot_lines = _zephyr_iot_kconfig(project, slice_)
+    if iot_lines:
+        lines.extend(iot_lines)
+
+    lines.extend(_emit_libraries(project, slice_))
+    lines.extend(_emit_inference(project, slice_, silicon))
+    lines.extend(_emit_memory(slice_))
+    lines.extend(_emit_power(slice_))
+    lines.extend(_emit_storage(project))
+    lines.extend(_emit_ota(project))
+    lines.extend(_emit_diagnostics(project))
 
     return "\n".join(lines) + "\n"
 
@@ -808,6 +1209,14 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         lines.append("# Console: Linux console (kernel `console=` cmdline "
                      "-> SoM debug UART; userspace -> stdout/tty).")
     lines.append(f'MACHINE = "{machine}"')
+    if slice_.peripherals:
+        joined = ", ".join(sorted(slice_.peripherals))
+        lines.append("# Peripherals declared for this Yocto slice are "
+                     f"BSP/kernel-owned ({joined}); no Zephyr Kconfig or "
+                     "local.conf package knob is emitted here.")
+    iot_lines = _yocto_iot_lines(project, slice_)
+    if iot_lines:
+        lines.extend(iot_lines)
     if slice_.libraries:
         imageinstall = " ".join(
             f"lib-{lib.replace('_', '-')}" for lib in slice_.libraries)

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "description": "WS6-c (#610 §6) library-name alias table: maps each legacy library token (the underscore spellings that predated the unified `libraries:[{name,cores?}]` model) to its canonical `metadata/libraries/<name>.yaml` manifest name. The orchestrator loader canonicalises every `libraries:` entry's `name` through this table; check_library_registry.py asserts every curated token resolves to exactly one existing manifest.",
+  "aliases": {
+    "bearssl": "bearssl",
+    "catch2": "catch2",
+    "cmsis_dsp": "cmsis-dsp",
+    "coremqtt_sn": "coremqtt-sn",
+    "doctest": "doctest",
+    "etl": "etl",
+    "fmt": "fmt",
+    "gfx_compat": "gfx-compat",
+    "jsmn": "jsmn",
+    "libcoap": "coap",
+    "libwebsockets": "libwebsockets",
+    "littlefs": "littlefs",
+    "lvgl": "lvgl",
+    "madgwick_ahrs": "madgwick-ahrs",
+    "mbedtls": "mbedtls",
+    "minimp3": "minimp3",
+    "modbus": "modbus",
+    "nanopb": "nanopb",
+    "nlohmann_json": "nlohmann-json",
+    "opus": "opus",
+    "pid": "pid",
+    "tflite_micro": "tflite-micro",
+    "u8g2": "u8g2"
+  }
+}

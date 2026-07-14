@@ -11,15 +11,16 @@ Compare the same demo across SoMs to see what the
 `capabilities:` block in `metadata/e1m_modules/E1M-*.yaml` is
 actually buying you at runtime:
 
-- **E1M-AEN701** has GPU2D + DAVE2D + DMA2D populated.  The
+- **E1M-AEN801** has GPU2D + DAVE2D + DMA2D populated.  The
   §D.lib.loader emits `CONFIG_ALP_LVGL_GPU2D=y` +
   `CONFIG_ALP_LVGL_DMA2D=y`, and LVGL hardware-accelerates the
   blits.
 - **E1M-AEN301** is E3 silicon -- no GPU2D.  Loader emits
   `CONFIG_ALP_LVGL_DMA2D=y` only; blits fall back to CPU.  FPS
   drop is the visible measure of "what does GPU2D buy me".
-- **native_sim/native/64** uses LVGL's SDL2 backend -- the CPU-
-  only baseline.
+- **native_sim/native/64** binds Zephyr's dummy display driver
+  through the portable `<alp/display.h>` + `<alp/gui.h>` surfaces
+  (no SDL2 window) -- the CPU-only baseline.
 
 ## Build + run
 

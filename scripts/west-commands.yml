@@ -30,11 +30,26 @@ west-commands:
       - name: alp-clean
         class: AlpClean
         help: Remove the per-project build dir + orchestrator cache
+  - file: scripts/west_commands/alp_lock.py
+    commands:
+      - name: alp-lock
+        class: AlpLock
+        help: Write or verify the project's alp.lock dependency lock
+  - file: scripts/west_commands/alp_migrate.py
+    commands:
+      - name: alp-migrate
+        class: AlpMigrate
+        help: Version and migrate a project's board.yaml
+  - file: scripts/west_commands/alp_quality.py
+    commands:
+      - name: alp-quality
+        class: AlpQuality
+        help: Run the quality-task registry for a profile (JSON/JUnit/SARIF)
   - file: scripts/west_commands/alp_renode.py
     commands:
       - name: alp-renode
         class: AlpRenode
-        help: Boot the system manifest in Renode (Phase 3 stub)
+        help: Boot the system manifest in Renode (headless smoke; --sim-mode for studio)
   # Read-only inspector for the orchestrator's --emit seam (no build).
   - file: scripts/west_commands/alp_emit.py
     commands:

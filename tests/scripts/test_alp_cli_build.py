@@ -19,7 +19,7 @@ def _project(tmp_path: Path) -> Path:
     proj = tmp_path / "proj"
     (proj / "src").mkdir(parents=True)
     (proj / "board.yaml").write_text(
-        "som:\n  sku: E1M-AEN701\npreset: e1m-evk\n", encoding="utf-8"
+        "som:\n  sku: E1M-AEN801\npreset: e1m-evk\n", encoding="utf-8"
     )
     return proj
 

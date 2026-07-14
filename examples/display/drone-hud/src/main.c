@@ -61,7 +61,9 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/drivers/display.h>
+
+#include <alp/display.h>
+#include <alp/gui.h>
 
 #include <lvgl.h>
 
@@ -113,15 +115,28 @@ int main(void)
 		LOG_WRN("drone_sensors_init returned non-zero; degraded mode");
 	}
 
-	/* Display + LVGL bring-up. */
-	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-	if (!device_is_ready(display)) {
-		LOG_ERR("display %s not ready", display->name);
+	/* Display + LVGL bring-up.  Open the panel through the portable
+     * <alp/display.h> surface, then bind LVGL to it via <alp/gui.h>
+     * -- see examples/display/lvgl-widgets-demo/src/main.c for the
+     * full rationale on this open -> lv_init -> tick -> attach
+     * sequence, and why CONFIG_LV_Z_AUTO_INIT=n (prj.conf) is
+     * required alongside it. */
+	alp_display_config_t display_cfg = ALP_DISPLAY_CONFIG_DEFAULT(0);
+	alp_display_t       *display     = alp_display_open(&display_cfg);
+	if (display == NULL) {
+		LOG_ERR("display open failed (err=%d)", (int)alp_last_error());
 		return 1;
 	}
 	lv_init();
+	lv_tick_set_cb(k_uptime_get_32);
+
+	alp_status_t attach_status = alp_gui_lvgl_attach(display);
+	if (attach_status != ALP_OK) {
+		LOG_ERR("alp_gui_lvgl_attach failed (err=%d)", (int)attach_status);
+		return 1;
+	}
+
 	hud_ui_build(); /* Construct the HUD layout once. */
-	display_blanking_off(display);
 
 	/* Spawn the sensor threads after the UI is built so the first
      * frame doesn't show garbage values. */
@@ -160,7 +175,7 @@ int main(void)
 		drone_telemetry_t snapshot = g_telem;
 		hud_ui_apply_telemetry(&snapshot);
 
-		const uint32_t sleep_ms = lv_task_handler();
+		const uint32_t sleep_ms = lv_timer_handler();
 		k_msleep(MIN(sleep_ms, 10u));
 	}
 

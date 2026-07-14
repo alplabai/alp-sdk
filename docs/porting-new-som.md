@@ -81,18 +81,18 @@ Ensemble SoM:
 | Field             | Value                                                 |
 |-------------------|-------------------------------------------------------|
 | SKU               | `E1M-AEN901`                                          |
-| Form factor       | E1M (same as E1M-AEN701)                              |
+| Form factor       | E1M (same as E1M-AEN801)                              |
 | Silicon ref       | `alif:ensemble:e9`                                    |
 | Silicon variant   | `AE921F80F55D5LS` (fictional order code)              |
 | Family            | `alif-ensemble`                                       |
-| On-module BOM     | Identical to AEN701 + one new chip (`cc3511e`, an     |
+| On-module BOM     | Identical to AEN801 + one new chip (`cc3511e`, an     |
 |                   | imagined CC3501E successor; replace with the real     |
 |                   | part when AEN9 silicon lands)                         |
 | Default board   | `E1M-EVK`                                             |
 
-We treat the E1M-AEN701 preset as our template — it is the closest
+We treat the E1M-AEN801 preset as our template — it is the closest
 existing SKU shape.  See
-[`metadata/e1m_modules/E1M-AEN701.yaml`](../metadata/e1m_modules/E1M-AEN701.yaml)
+[`metadata/e1m_modules/E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)
 and [`metadata/socs/alif/ensemble/e7.json`](../metadata/socs/alif/ensemble/e7.json)
 for the canonical structure.
 
@@ -251,7 +251,7 @@ where.
 
 ```yaml
 # Stock preset for E1M-AEN901 (the SoM, NOT the EVK board).
-# See E1M-AEN701.yaml for the file's role + the project memory note
+# See E1M-AEN801.yaml for the file's role + the project memory note
 # governing what stays TBD.
 
 schema_version: 1
@@ -342,14 +342,14 @@ mailbox:
 
 # E1M pads / instances that route through the on-module CC3511E
 # coprocessor instead of through the Alif Ensemble silicon.  Mirror
-# the AEN701 shape; revise pin numbers once the AEN9 HW design is
+# the AEN801 shape; revise pin numbers once the AEN9 HW design is
 # frozen.
 pad_routes:
   - { e1m: E1M_SPI1,      dispatch: cc3511e,
       doc: "Inter-chip SPI1 fast path; CC3511E acts as SPI peripheral." }
   - { e1m: E1M_GPIO_IO11, dispatch: cc3511e, dispatch_pin: TBD,
       doc: "CC3511E GPIO (pin number pending HW config)." }
-  # ... add remaining IO13/IO15..IO21 routes mirroring AEN701 once
+  # ... add remaining IO13/IO15..IO21 routes mirroring AEN801 once
   # the AEN9 schematic is frozen.
 
 helper_firmware:
@@ -532,7 +532,7 @@ later in this document).
 som:
   sku: E1M-AEN801          # in your port: E1M-AEN901 (the new SKU)
 
-preset: e1m-evk            # AEN901 ships on the same EVK as AEN701
+preset: e1m-evk            # AEN901 ships on the same EVK as AEN801
 
 cores:
   m55_hp:
@@ -580,7 +580,8 @@ adds its own ref to that list.)
 > **Caveat (current state).**  Adding a new SoC ref means one row in
 > `metadata/registries/silicon-kconfig.json` (the versioned allowlist
 > consumed by `silicon_to_kconfig()` in `scripts/alp_project.py`) AND
-> a matching `config ALP_SOC_<NEW_REF>` stanza in `zephyr/Kconfig`.
+> a matching `config ALP_SOC_<NEW_REF>` stanza in the active SoC capability
+> choice (`zephyr/kconfigs/core.kconfig`, sourced from `zephyr/Kconfig`).
 > `scripts/validate_metadata.py` gates that every allowlisted ref
 > resolves to an existing `metadata/socs/` spec.  Until the registry
 > row + the Kconfig stanza land, the loader emits a blank Kconfig
@@ -612,9 +613,10 @@ The merge happens in `resolve_capabilities()`:
 
 ## 10. Step 7 — Build a real binary (optional)
 
-Generating Zephyr board files (`<board>.dts`, `<board>.yaml`,
-`<board>_defconfig`, `<board>.cmake`, `Kconfig.board`,
-`Kconfig.defconfig`) is **planned to be a one-shot transcription**:
+`--emit zephyr-board` (`scripts/gen_zephyr_board.py`, issue #523) generates
+the Zephyr board tree (`<board>.dts`, `<board>.yaml`, `<board>_defconfig`,
+`Kconfig.<board>`, `Kconfig.defconfig`, the pinctrl `.dtsi`, `board.yml`)
+from the SoM preset + SoC JSON:
 
 ```bash
 python scripts/alp_project.py \
@@ -633,14 +635,23 @@ west build \
     examples/peripheral-io/i2c-scanner-aen901
 ```
 
-> **Future work flag.**  The `--emit zephyr-board` emitter is on the
-> roadmap (see [[zephyr-board-from-yaml]]) but not yet wired in
-> `scripts/alp_project.py` as of 2026-05-18.  Until the
-> emitter lands, customers either hand-author a minimal Zephyr
-> board file under `boards/arm/alp_e1m_aen901_m55_hp/` (mirroring
-> the existing AEN701 board files), or run the example under
-> `native_sim` for a non-silicon smoke build.  When the emitter
-> lands this section becomes a literal copy-paste.
+> **Current coverage (issue #523).**  The Alif Ensemble (`aen`) family
+> (e.g. E1M-AEN801, and by extension a new AEN SKU like AEN901 above) is
+> fully generated -- every file except `board.cmake`.  Adding a new AEN
+> SKU only requires: a `zephyr_cpucluster` / `itcm_global_base` /
+> `dtcm_global_base` entry per core in its SoC JSON (an existing E7/E8
+> SoC JSON already carries these), a `topology.<core>.zephyr_full_name`
+> string in the SoM preset, and the console pad's row in
+> `metadata/pinmux/aen.yaml`.  The Renesas RZ/V2N family (`v2n` /
+> `v2n-m1`) generates only the family-agnostic files (`board.yml`,
+> `Kconfig.alp_<board>`, the twister `.yaml`) -- its `.dts` / pinctrl
+> `.dtsi` / `_defconfig` stay hand-authored (mirror the nearest sibling,
+> e.g. E1M-V2N101) until the on-module GD32G553 supervisor's Renesas-side
+> pin assignments land in metadata.  `board.cmake` (flasher/debugger
+> runner args) stays hand-authored for every family -- see
+> `docs/architecture.md`'s generators-inventory entry for why.
+> `tests/scripts/test_gen_zephyr_board.py` pins the covered files
+> byte-identical to their committed board tree.
 
 Either way, the resulting `.elf` is a real binary that exercises
 the new SoM's BSP path.  Run it on hardware once silicon arrives,
@@ -785,7 +796,7 @@ comment at the top of that file.
   how E1M pads link the E1M open-standard spec, the per-SoM
   `pad_routes:` block, and the board's `e1m_routes:` block.
 - **Reference SoM presets** —
-  [`metadata/e1m_modules/E1M-AEN701.yaml`](../metadata/e1m_modules/E1M-AEN701.yaml)
+  [`metadata/e1m_modules/E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)
   (AEN reference) and
   [`metadata/e1m_modules/E1M-V2N101.yaml`](../metadata/e1m_modules/E1M-V2N101.yaml)
   (V2N reference with on-module GD32 bridge).

@@ -103,7 +103,7 @@ bool curr_window_full(const struct curr_window_state *st);
  * @brief Extract all features from a (possibly partial) window.
  *
  * Computes DC means, AC ripple RMS, crest factor, inrush slope, and the
- * dominant ripple frequency (via an in-place radix-2 FFT) and writes them
+ * dominant ripple frequency (via the <alp/dsp.h> FFT chain) and writes them
  * into @p out.  A partial window (count < CURR_WINDOW_N) is zero-padded for
  * the FFT.  If the window is empty all output fields are zero.
  *

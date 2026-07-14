@@ -15,7 +15,7 @@
 #      the host channel, return to deep sleep.
 #
 # AEN301 is the small AEN SKU (lower static power than the
-# AEN701 used by production-deployment).  The M55-HE
+# AEN801 used by production-deployment).  The M55-HE
 # (high-efficiency core) is the right home for the always-on
 # sensor task -- the M55-HP (high-performance core) stays parked
 # unless burst compute is needed.
@@ -28,11 +28,14 @@ som:
 
 preset: e1m-evk
 cores:
-  a32_cluster:
-    os: "off"                  # AEN family is M-class only.
   m55_hp:
     os: "off"                  # HP core parked; sensor work stays
-                               # on the high-efficiency core.
+                               # on the high-efficiency core.  (AEN301's
+                               # E3 silicon has no A-core at all, so
+                               # there is no `a32_cluster:` entry here --
+                               # unlike E1M-AEN801, this SKU is M-class
+                               # only; see topology: in
+                               # metadata/e1m_modules/E1M-AEN301.yaml.)
   m55_he:
     os: zephyr
     app: ./src

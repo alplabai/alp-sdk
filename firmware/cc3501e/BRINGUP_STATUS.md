@@ -5,250 +5,307 @@ Copyright 2026 Alp Lab AB
 
 # CC3501E bridge bring-up status
 
-Status of the Alif Ensemble E8 (M55-HE) ↔ CC3501E (CC35X1E) 3-wire SPI bridge
-on the E1M-AEN801 bench. Branch `bench/cc3501e-v01-bringup`. Updated 2026-06-18.
+Status of the Alif Ensemble E8 (M55-HE) <-> CC3501E (CC35X1E) SPI bridge on
+the E1M-AEN801 bench. Updated 2026-07-08.
 
-This is the single consolidated record for the **link / Wi-Fi / BLE** pillars so
-their state is not lost between sessions. It is the on-silicon counterpart to the
-design recipe in `firmware/cc3501e/ti/WIFI_BLE_INTEGRATION.md`.
+This is the consolidated on-silicon record for the **link / Wi-Fi / BLE**
+pillars. The authoritative topology is the hardware-framed SPI bridge described
+in [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md): Alif `SPI1_SS0_C`
+frames every protocol phase and READY gates reply phases. HOST_IRQ / async
+event delivery remains future work.
 
-## TL;DR — pillar status
+## TL;DR - pillar status
 
-| Pillar | State | Evidence / blocker |
+| Pillar | State | Evidence / remaining work |
 |---|---|---|
-| **Inter-chip link** (PING / GET_VERSION / GET_MAC / RESET) | ✅ **WORKS cold + warm** | `ping_ok` climbing, `reqhdr_rx=0xA5A5A5A5`, `reply_hdr=0x00010000`, `fail_step=0` |
-| **Wi-Fi GET_MAC** | ✅ **WORKS cold** through the bridge | `mac_ok=1`, MAC `44:3E:8A:10:AF:ED` |
-| **Wi-Fi scan / RSSI** | ✅ runs through the bridge (worker-routed) | scan completes; **finds 0 APs → RF/antenna follow-up**, not a bridge bug |
-| **Wi-Fi connect-STA / soft-AP / sockets** | 🚧 **untested (RAM now sufficient)** | bodies built under `#ifdef CC3501E_WIFI`; the ~264 KB SDK STA+sockets floor now fits the **512 KB** vendor DRAM (linker fix, §3) — bump the heap + bench-test |
-| **BLE** (enable / advertise) | ⛔ **HW-gated: external antenna (J1 u.FL)** | RAM solved (512K DRAM); SW sound (suspend fix, sequence matches TI). Netlist-confirmed: U4=BDE-BW35N routes RF to an external u.FL connector **J1** — open/untuned J1 → BLE-enable RF-cal stall (the 120s hang) + the WiFi 0-AP scan. Connect+tune the J1 antenna on-site, then re-test |
-| **CAM enables** | ✅ fixed mapping (netlist) | `which` 0→GPIO_1 (LDO0), 1→GPIO_0 (LDO1) — firmware was reversed; corrected from U4 pins 54/55 |
-| **GPIO proxy** + camera enables | 🚧 **in progress** | firmware HAL + host API done; portable backend / tests / example pending; pad map parked |
-| **Cold-boot** | ✅ host-workable | Puya 64 Mbit flash bug; host hard-reset after each power-cycle |
-| **OTA over SPI** | 🚧 **receive→stage validated; cold swap-boot HW-gated** | opcodes 0x40–0x44; over-bridge PSA-FWU cycle built. BEGIN→WRITE(RAM-stage)→FINISH(one flash burst→`psa_fwu_install`→STAGED) is silicon-validated; the final **cold swap-boot is gated by the vendor-SBL cold-boot issue** on the mis-activated bench units. Host wrappers + hermetic host OTA test green; `--ota-selftest` build fixed (`CC3501E_OTA_WRITE_CHUNK`) |
+| **Inter-chip link** (PING / GET_VERSION / GET_MAC / RESET) | PASS, cold + warm | Hardware SS0 + READY framing is bench-validated on E1M-AEN801; `ver` remains responsive after radio ops. |
+| **Wi-Fi GET_MAC / scan / RSSI** | PASS | Real scan records with security decode validated through the bridge. |
+| **Wi-Fi connect-STA / soft-AP / sockets** | PASS for async STA connect; socket APIs shipped | Async connect survives the bridge; keep credentialed socket soak in production validation. |
+| **BLE** (enable / advertise / scan / connect + GATT scaffolding) | PASS for enable + real scan | NimBLE enable and `ble_gap_disc` scan validated with real advertisers; full runtime GATT/event parity remains v1.0 work. |
+| **CAM enables** | PASS | `which` 0 -> GPIO_1 (LDO0), 1 -> GPIO_0 (LDO1); mapping fixed from U4 pins 54/55. |
+| **GPIO proxy** + camera enables | PASS | Firmware HAL, host API, portable proxy, ztests, and warm-boot GPIO example are validated. |
+| **Cold-boot** | Host-workable | Puya 64 Mbit flash workaround is host hard-reset after every power-cycle. Correctly activated production units still need cold swap-boot validation. |
+| **OTA over SPI** | Stage/install PASS; final cold swap-boot gated | BEGIN -> WRITE(RAM-stage) -> FINISH(one flash burst -> `psa_fwu_install` -> STAGED) is silicon-validated; final swap needs a correctly activated, cold-bootable unit. |
 
----
+## 1. Inter-chip link
 
-## 1. The inter-chip link (3-wire CS-less SPI)
+The current E1M-AEN bridge is not the early bring-up three-pin assumption. It
+uses:
 
-Fixed-clock-count lockstep framing, no chip-select, no host-IRQ. 4-byte header,
-≤512-byte payload, `0xA5` (`ALP_CC3501E_SYNC_IDLE`) sync marker at header
-boundaries, `cmd ≥ 0x80` desync guard.
+| Net | Alif side | CC3501E side | Role |
+|---|---|---|---|
+| SCLK | `P14_6` / `SPI1_SCLK_C` | `GPIO_27` | SPI clock from the Alif master |
+| MOSI | `P14_5` / `SPI1_MOSI_C` | `GPIO_29` | CC3501E SPI0 data in |
+| MISO | `P14_4` / `SPI1_MISO_C` | `GPIO_28` | CC3501E SPI0 data out |
+| SS0 | `P14_7` / `SPI1_SS0_C` | `GPIO_16` CSN resource | Hardware chip-select per protocol phase |
+| READY | `P2_6` | `GPIO_17` | Slave armed / reply phase ready |
 
-**Validated:** PING / GET_VERSION / GET_MAC / RESET all complete cold and warm
-(bench-confirmed via the SWD witness: aligned reply headers, no framing faults).
+The wire frame remains a 4-byte header plus payload. A command/reply exchange is
+split into four hardware-SS0-framed phases:
 
-**Root cause of the long cold-framing saga = MISO sample timing, NOT framing
-logic.** The Alif DW-SSI master had `rx_delay=0` (sample MISO at the SCLK edge);
-at 8 MHz over the on-SoM traces + the crossed-data bench bodge, the CC35's MISO
-bit had not propagated back by the sample edge → the Alif read `0xFFFFFFFF`
-(floating) and the CS-less link never framed. **Fix = drop the bridge SPI clock
-8 MHz → 1 MHz** (`CC3501E_SPI_FREQ_HZ` in the bring-up example): bit period 1 µs
-≫ the MISO round-trip → clean sampling → cold GET_MAC works end-to-end. To raise
-the clock later: set the `alif,dwc-ssi` `rx-delay` DT prop (in ssi_clk/400 MHz =
-2.5 ns units) on the cc3501e_spi node to cover the round-trip.
+| # | Master clocks | Direction | Length |
+|---|---|---|---|
+| 1 | request header | MOSI | 4 |
+| 2 | request payload | MOSI | `payload_len` from phase 1 |
+| 3 | reply header | MISO | 4 |
+| 4 | reply payload | MISO | reply `payload_len` from phase 3 |
 
-**Known limitation (CS-less, no host-IRQ):** the link can briefly desync on a
-first-contact gap; a desync self-heal (re-arm on a `0xA5` burst) is in place. The
-**next board rev's CS line + host-IRQ** is the clean fix (CS delimits frames; the
-CC35 signals busy/ready so the host defers). Until then the link works between
-radio ops; see §4.
-
-**Net-positive link hardening to KEEP:** `0xA5` idle marker (ship value), GET_MAC
-gated behind `ping_ok ≥ 20` (radio read waits for a stable link), desync
-self-heal, confirm-first ordering (psa_fwu_accept before radio).
+The host waits for READY before reply phases, and the CC3501E backend advances
+on `SPI_TRANSFER_COMPLETED`. `SPIWFF3DMA_CMD_RETURN_PARTIAL_ENABLE` stays
+disabled because hardware SS0 already frames each transfer and the extra CSN
+deassert callback double-advances the READY state machine.
 
 ## 2. Wi-Fi
 
-- **GET_MAC** = `Wlan_Get(WLAN_GET_MACADDRESS)`, needs only `Wlan_Start` (the HIF
-  bring-up; internally calls `InitHostDriver`). **Worker-routed** off the SPI ISR
-  (poll-by-repeat from the host: retry on BUSY + IO). **Validated cold** on
-  silicon: `mac_ok=1`, MAC `44:3E:8A:10:AF:ED`.
-- **Scan / RSSI** = worker-routed too; the host packs the AP list in the wire
-  format `bssid[6]|rssi|channel|security|ssid_len|ssid`. Runs through the bridge
-  without breaking the link. **scan_count=0** on the bench → RF/antenna/scan-config
-  follow-up (NOT the bridge). Gotcha proven: `Wlan_RoleUp(STA)` before
-  `Wlan_Scan` breaks the link (worker blocks ~10 s + bridge disrupted) — scan
-  needs only `Wlan_Start`, never RoleUp. RoleUp is for CONNECT only (bounded).
-- **connect-STA / soft-AP / sockets** = bodies implemented under `#ifdef
-  CC3501E_WIFI`; **untested**. The ~264 KB SDK STA-with-sockets floor was thought
-  to exceed DRAM, but that was the 193 KB linker-cap bug (see §3) — it fits the
-  real **512 KB** vendor DRAM. Bump the heap and bench-test; no PSRAM needed.
+- **GET_MAC** uses the SimpleLink host path and is validated cold through the
+  bridge.
+- **Scan / RSSI** is worker-routed. The bridge path returns real AP records and
+  security decode; an empty result should now be treated as an RF/environment
+  question, not as bridge evidence by itself.
+- **STA connect** is asynchronous and validated across the bridge: association
+  no longer wedges the link, and a `GET_VERSION`/`ver` check after connect still
+  responds.
+- **Socket APIs** are implemented; keep credentialed socket soak in production
+  validation because it depends on local network availability.
 
-## 3. BLE — RAM ceiling was a LINKER BUG (fixed); enable-hang root-caused + fixed
+## 3. BLE
 
-**The "needs PSRAM" verdict was wrong — it was a wrong linker cap, not silicon.** The
-build used the STOCK board cmd `cc35xx_freertos.cmd`, which caps app `DRAM` at 0x30000
-(192 KB, "static only"). TI's **connectivity vendor apps** (`network_terminal` AND
-`ble_wifi_provisioning`, same 0x14000000 vendor FLASH base, same DRAM bank) use
-`DRAM_NON_SECURE = 0x28000DB0..0x2807FFFF = 512 KB`. So the chip has 512 KB app DRAM;
-the 192 KB cap drove the entire dead-end.
+The 512 KB DRAM linker fix removed the old false "needs PSRAM" conclusion.
+Wi-Fi + BLE coexist in the CC3501E image, NimBLE enable is validated, and real
+BLE scan records are observed through the bridge.
 
-**Fix (`build_ti.ps1`):** switched the linker base to the `network_terminal` demo's
-`linker.cmd` (512 KB DRAM; stack already in TCM = the cold-boot fix; all else in DRAM).
-Dropped the earlier TCM `.ble_bss` split + the `.stack` patch (both obsolete). Result:
-`-Ble` links with the 136 KB heap + **all `.bss` (WiFi + NimBLE) in DRAM**, ~275 KB
-free. **On silicon, WiFi GET_MAC works in the combined WiFi+BLE image** (`mac_ok=1`,
-MAC 44:3E:8A:10:AF:ED) and the earlier `Wlan_Start` hang is **gone** (it was caused by
-the TCM `.ble_bss` placement, now removed). **No PSRAM needed** for coexistence — and
-full WiFi STA+sockets (264 KB SDK floor) now also fits 512 KB (untested; just bump the
-heap).
+Remaining BLE work is API completeness, not the bridge link: HOST_IRQ-backed
+async event delivery and full runtime GATT/event parity belong to the v1.0
+workstream.
 
-**BLE-enable hang — ROOT-CAUSED + FIXED at the link level (2026-06-18).** OpenOCD
-0.12.0 + gdb-multiarch are on the box, but the **M33 core is secure-debug-gated**:
-OpenOCD attaches to the XDS110 + CC35 DAP, yet the only APs are 3 TI-custom ones (no
-standard MEM-AP; CPUID unreadable), so vanilla OpenOCD can't halt/inspect the core
-without TI's proprietary CFGAP unlock. A research workflow's **source** analysis gave
-the answer instead: `BleIf_EnableBLE → cmd_Send → osi_SyncObjWait` is bounded at
-`CMD_SEND_TIMEOUT_MS=120 s` (not infinite) and the NWP never command-completes
-`BLE_ENABLE` because the **bridge SPI slave's live DMA (ch12/13) contends with the HIF
-handshake during the op** — and `ctrlCmdFw_LockHostDriver/Unlock` are **NO-OPs**, so
-nothing serializes them. (WiFi `Wlan_Start` survived because the worker re-arms the
-bridge *after*; BLE enable hangs *during*.) **Fix:** `bridge_transport_spi_hw_suspend()`
-(`SPI_transferCancel`+`SPI_close`, releasing DMA ch12/13) called in
-`cc3501e_hw_ble_enable` *before* `cc3501e_nimble_host_start`, paired with the existing
-reinit *after* — so the HIF is the sole DMA client during enable. **On silicon (v0.0.27)
-the hang is GONE: the link recovers cleanly** (`reqhdr=0xA5A5A5A5`, `ping_fail=0`,
-`mac_ok=1`, `scan_status=0` — was -4) where it previously stuck down for 120 s.
+## 4. Bridge / radio coexistence
 
-**Pending (final confirmation):** `ble_status` is still `-4` (`ble_enabled=0`) because
-the host `cc3501e_ble_enable` poll gave up at its 10 s budget before the now-working but
-slower (~10–15 s NWP BLE cold-init) enable published its result. Host-side fix applied
-(not yet flashed): bumped the floor 10 s→30 s (`CC3501E_BLE_ENABLE_WINDOW_MS`). Rebuild
-the Alif app (WSL `ninja -C ~/aenbuild_slot0` → `app-gen-toc` → J-Link flash) + cold-cycle
-→ expect `ble_enabled=1`. (CC35 core secure-debug-gate: future CC35-side debugging needs
-the TI CFGAP unlock — OpenOCD alone can't.)
+Radio operations can still temporarily disrupt the CC35 host-DMA client used by
+the SPI slave. The production model is:
 
-**`Wlan_Start`'s heap floor was pinned on silicon by bisection (2026-06-18):**
+1. Submit the radio operation from the Alif host.
+2. Run the slow SimpleLink body on the CC3501E worker, off the SPI callback.
+3. Re-open and re-arm the bridge SPI after the radio operation.
+4. Let the host poll/retry across `ALP_ERR_IO` / BUSY until the result is ready.
 
-| FreeRTOS heap | GET_MAC (`Wlan_Start`) result |
-|---|---|
-| 88 KB (`0x16000`) | ✗ starves — `ping_ok` stuck at the gate, `reqhdr_rx→0`, mac timeout |
-| 106 KB (`0x1A000`) | ✗ starves (same signature) |
-| 120 KB (`0x1E000`) | ✗ starves (same signature) |
-| **136 KB (`0x22000`)** | ✅ **works** — `ping_ok` climbs, `mac_ok=1` |
-
-⇒ `Wlan_Start` needs **~128–136 KB heap**. This is the HIF bring-up that **both**
-Wi-Fi GET_MAC **and** BLE must run. The heap floor is independent of total DRAM, so
-it still holds under the 512 KB linker; the ship config sets `0x22000` (136 KB).
-
-**Coexistence budget (against the corrected 512 KB DRAM):** ~136 KB heap + ~48 KB
-fixed Wi-Fi-stack `.bss` + ~8 KB stack `.bss` + NimBLE host/controller `.bss` all
-land in the 512 KB `DRAM_NON_SECURE` bank, with **~275 KB free** in the linked
-`-Ble` image (map-confirmed). **So Wi-Fi + BLE DO coexist in RAM** — the earlier
-"cannot coexist / needs PSRAM" verdict was a side-effect of the 192 KB linker cap
-and is **void**. BLE's remaining blockers are runtime, not RAM (see the enable
-section above + the antenna): confirm `ble_enabled=1` after the 30 s enable-budget
-reflash and the on-site J1/antenna tune. The BLE firmware
-(`cc3501e_nimble_host.{c,h}`, `cc3501e_hw_ble_enable`, the `-Ble` link in
-`build_ti.ps1`) is **code-complete and links**.
-
-## 4. Bridge ↔ radio coexistence
-
-On this no-host-IRQ rev the CC35 cannot service the inter-chip SPI slave WHILE it
-runs a radio op (`Wlan_Start` at boot, or a worker `Wlan_*` body): the link is
-DOWN during the op. The async submit/poll model handles it: host submits → (bridge
-down during the radio op) → the worker re-arms the SPI at a clean boundary after
-the op → host poll (bridge up) reads the cached result. The host retries on
-`ALP_ERR_IO` (not just BUSY) across a budget that covers the op (`Wlan_Start` ~s).
-This is why GET_MAC/BLE_ENABLE are worker-routed and the host floors their budget
-to a ~10 s "radio-down window".
+READY gates per-phase traffic once the SPI slave is armed. It is not a
+replacement for HOST_IRQ async-event push delivery.
 
 ## 5. Cold-boot
 
-Root cause = a TI-SDK bug supporting Puya 32/64 Mbit flash (ours is PY25Q64LB =
-Puya 64 Mbit); the first boot after power-on mis-reads the flash. **Workaround
-(host-side, validated):** after every power-cycle the host gives the CC35 a hard
-reset (WIFI_EN high, let the first boot settle, then drive nRESET low/high) — the
-second boot runs the vendor image. Implemented in `cc3501e_hard_reset` /
-`cc3501e_reset`. Provision FRESH units via the atomic CLI factory flow (not the
-GUI activation wizard) so the cold-launch binding is established in one session.
+Root cause remains a TI-SDK path around the Puya 64 Mbit flash on the bench
+unit. The validated host-side workaround is to hard-reset the CC3501E after each
+power-cycle: drive WIFI_EN, let the first boot settle, then pulse nRESET. This
+is implemented in `cc3501e_hard_reset` / `cc3501e_reset`.
 
-## 6. GPIO proxy (in progress)
+**Activation state — CORRECTED 2026-07-09 (`e1m-aen-evk-01`, XDS110 `L50015YR`):**
+the bench unit is **already activated**. The `boot_sector_programmed = 0`
+figure that an earlier read reported is from a **stale, pre-activation
+baseline** (`activation_report.txt`, dated 2026-07-03 17:32 — the
+factory/pre-provision snapshot), NOT a current device read. The authoritative
+current state is the device fuse read-backs: **30 `programming_report.txt`
+dumps across 2026-07-05 (05:26 → 21:48) all read `boot_sector_programmed = 1`,
+`non_recoverable_failure = 0`** — i.e. the boot sector was programmed sometime
+between Jul 3 and Jul 5 and has read as programmed ever since. The auth fuses
+are set and `permanently_lock_debug_enable = 0` (debug open). So the vendor SBL
+is armed; **cold swap-boot should be exercisable directly — no re-activation is
+needed on this unit.**
 
-Opcodes already in the protocol: `GPIO_CONFIGURE 0x50 / WRITE 0x51 / READ 0x52 /
-SET_INTERRUPT 0x53 / EVT 0x54`, `CAM_ENABLE 0x60 / CAM_DISABLE 0x61`. Synchronous
-in firmware (GPIO is µs, no worker).
+Caveat on re-confirming live: a fresh `get_fuse_data` today via the vendor-key
+path is blocked at the toolbox's "Action Required: Update Signing Module" RoT
+gate (a tooling limitation, not a fuse-0 signal). A clean live re-read would use
+a signed `query` action request (`flash-images-builder build action_request
+--type query` → sign → `programmer … query`); the 30 historical device reads are
+already consistent at `1`.
 
-- **Done + compiles** (default build, exit 0): firmware HAL (`cc3501e_hw_gpio_*` /
-  `cc3501e_hw_cam_enable` in `cc3501e_hw_ti.c`) — the CC35xx TI Drivers GPIO is
-  **pin-indexed** (`gpioPinConfigs[]` indexed by pad number), so the wire's **raw
-  `cc3501e_gpio` index drives the pad 1:1 — no firmware pad map needed**. A
-  reserved-pin guard refuses the bridge SPI (16/27/28/29), UART2 (5/6), and
-  unbonded pads (7/8/9) so a stray host command can't tear down the link. CAM
-  `which` 0/1 → GPIO0/GPIO1. Host API (`cc3501e_gpio_configure/write/read/
-  set_interrupt`, `cc3501e_cam_enable`) added in `chips/cc3501e/cc3501e.c` +
-  `include/alp/chips/cc3501e.h`.
-  - **GPIOWFF3 controller limits (discovered at compile):** no true open-drain
-    output (`GPIO_CFG_OUTPUT_OPEN_DRAIN_INTERNAL` = NOT_SUPPORTED) → `DIR_OPEN_DRAIN`
-    is emulated as a push-pull output idling HIGH (electrically equivalent on a
-    single-driver W_DISABLE line, unsafe on a shared line); no both-edges interrupt
-    (`GPIO_CFG_IN_INT_BOTH_EDGES` = NOT_SUPPORTED) → `EDGE_BOTH` returns INVAL (arm a
-    single edge). RISING/FALLING + push-pull/input + pulls are fine.
-- **Done (scaffold):** portable `<alp/gpio.h>` bridge backend
-  `src/backends/gpio/cc3501e_proxy.c` (`CONFIG_ALP_SDK_GPIO_CC3501E_PROXY`, default
-  n, AEN-only). One backend per gpio class, so it's a **delegating proxy**:
-  registers above the `*` platform backend, routes pin_ids in the board's
-  `cc3501e_gpio_routes[]` table through the bridge (`cc3501e_gpio_*`), delegates
-  everything else to `zephyr_drv` (via the new `alp_z_gpio_ops()` accessor) — so
-  the Alif's own pins are untouched. Ships a **weak EMPTY route table** + an
-  `alp_gpio_cc3501e_attach(ctx)` API; with no routes / no bridge it's a pure no-op
-  (every pin delegates). Bridge-pin IRQ returns NOSUPPORT (no slave→master line).
-- **Done:** firmware protocol ztests (configure→write→read round-trip, bad-length
-  → INVALID, CAM enable/disable) in `tests/zephyr/cc3501e_bridge_transport` against
-  the in-memory stub HAL — validate the wire structs + dispatch both layers share.
-- **Pending verification:** native_sim twister (compile + run) of the host API +
-  proxy + new ztests — deferred to the Land step (the host/proxy paths are
-  native_sim-bound; firmware HAL is already TI-build-verified). Example
-  self-loopback exercise.
-- **Parked (needs the user's pad map):** the logical IO11/IO13/IO15..IO21 → raw
-  CC35-GPIO-index route table (board metadata, fills `cc3501e_gpio_routes[]`) and
-  one **safe-to-toggle GPIO index** for the on-silicon write→read loopback. The
-  firmware/host/proxy code is validatable as soon as a safe pin + the map exist.
+### Verifying a CC35 flash ACTUALLY committed (hard-won, 2026-07-12)
 
-## 7. Build matrix (`firmware/cc3501e/ti/build_ti.ps1`)
+**`primary_vendor_image_validate_pass` / `*_done` in `programming_report.txt` are
+NOT a commit signal — they read `0` even on the known-good REF_SET.** Do not trust
+them (they cost multiple bench sessions of false "it worked" / "it failed"). The
+**only ground truth is the XDS110 `query` image table**: `programmer -i XDS110
+-param1 <SN> query --query_action_req_path <signed query_action_request>`. A
+non-empty table with valid flash magic = an image is committed + booted. **But an
+empty table does NOT necessarily mean "nothing written / dead SE"** — it can also be
+a **rollback-blocked image that streamed fine but the SBL refused to BOOT** (see
+below), so it never registered. The truly definitive commit check is: after
+programming, cold-POR and **boot the CC35, then read PING / GET_VERSION** — if the
+bridge answers, it committed. `validate_pass`/`*_done` remain red herrings either way.
+A cheap WARM-path guard (`deploy_validate.sh`) is the streamed byte count — the
+stale/image-coupled no-op streams only ~1.3 KB vs the full vendor image.
 
-| Build | Switch | Size | Notes |
-|---|---|---|---|
-| default (radio-free bridge) | *(none)* | ~25 KB | PING/IO/GPIO/OTA; native CI baseline |
-| Wi-Fi host | `-WifiHostDriver` | ~987 KB text | GET_MAC/scan/RSSI; heap `0x22000` (136 KB) |
-| Wi-Fi + BLE | `-Ble` (implies `-WifiHostDriver`) | ~1.05 MB | links + fits 512 KB DRAM (~275 KB free); runtime-gated only by the enable-budget reflash + antenna |
+### The #1 cause of "streams clean but dead link" = a VERSION ROLLBACK
 
-## 8. Bench validate recipe (roles, not paths)
+The CC35 SBL enforces GPE-version **monotonicity against the last-seen version** —
+even when all the rollback-protection **fuses read 0** (`get_fuse_data`). Program a
+vendor image at a version **lower** than anything ever flashed and it streams clean
+(exit 0, full ~1.09 MB) but the SBL **refuses to boot it** → dead link, and the
+XDS110 `query` image table stays **empty** (a never-booted image never registers).
+This is easy to misread as "the SE won't commit / beyond software recovery" — it is
+NOT. (Exactly that happened on `e1m-aen-evk-01` 2026-07-12: recovery sets at v0.83
+were rollbacks vs an earlier v0.99 → dead; **reprogramming a full set at v0.250.0.0
+(major=0, > anything ever flashed) with the validation key + a cold POR revived it**
+— PING ok, protocol v4, Wi-Fi 5 APs, persisted across the cold POR.)
 
-1. Build: `build_ti.ps1 -WifiHostDriver` → `cc3501e-bridge.out`.
-2. FIB: toolbox `flash-images-builder build vendor_image --version <v> --public_key
-   <validation pub> --vendor_out_file <out> --conf_bin_file <conf>` → produces
-   `vendor_image.unsign.bin`; then `flash-images-builder sign vendor_image
-   --unsign_image vendor_image.unsign.bin --activation_type vendor_key
-   --signing_module sign.py` → produces `vendor_image.sign.bin`. **Gotcha:** `sign`
-   names its output after the input base name, so **copy it to
-   `primary_vendor_image.sign.bin`** (the name `tool_settings.json` references).
-3. Program: toolbox `programmer -i XDS110 -param1 <SN> programming --tool_settings
-   <ts>` (retry on the intermittent `-1141` SECAP reject).
-4. Cold-cycle: PSU CH2 power-cycle (true cold POR) → the Alif app's
-   `cc3501e_reset` runs the Puya hard-reset workaround → soak loop.
-5. Read the SWD witness (`g_cc3501e_witness` @ a fixed RAM address) over the Alif
-   J-Link: `magic / reset_status / ping_ok / ping_fail / last_status / version /
-   mac_ok / mac_lo / mac_hi / scan_status / scan_count / ble_status / ble_enabled`.
-   (A reusable `deploy_validate.ps1` chains FIB → program → cold-cycle →
-   witness-read on the bench.) Sign of life: `ping_ok` climbing, `ping_fail` flat.
-   WiFi: `mac_ok=1`. (The raw-framing debug fields — `fail_step / reqhdr_rx /
-   reply_hdr` — were bench-only and are reverted; re-add locally if a future
-   framing regression needs them.)
+**Rules:** (1) VERSION must be monotonically ≥ anything ever flashed on the unit, and
+**major=0** (a GPE major ≥ 1 fails BL2 secure-boot AUTH). (2) The correct reflash flow
+is **WARM programming-only** — NO `activation` (activation on a DEPLOYED part is
+rejected `Life cycle DEPLOYED is not valid`; it was never the missing step). (3) Keys:
+the part's `rot` fuse = the **DER-SPKI sha256 of the validation public key**; confirm
+with `get_fuse_data --activation_type vendor_key`. (4) Still don't over-reflash need­lessly
+(each signed program+cold-cycle stresses the SE) — but a dead bridge is almost always a
+**version rollback or a never-booted image**, not a dead SE or a physical fault. (A true
+whole-carrier cold POR is a DPS-150 `power off/on` — verified: E8 J-Link VTref 1.786 →
+0.000 → 1.786 V; the old "DPS doesn't cold-boot" note was a stale-telemetry artifact.)
 
-## 9. Open items / next
+### Re-activating a fresh / mis-activated unit (only if needed)
 
-1. **GPIO proxy** — finish the portable backend + tests + example; bench-validate
-   once a safe GPIO index + pad map are provided.
-2. **BLE confirm** — reflash with the 30 s enable budget, tune the on-site
-   antenna (J1 u.FL / the A1 NN02-201 pi-match), expect `ble_enabled=1`. RAM is
-   no longer a blocker (512 KB linker fix).
-3. **Wi-Fi 0-AP** — RF/antenna + scan band/dwell/channel-set check (bridge path is
-   proven correct). Same antenna root cause as BLE.
-4. **Wi-Fi STA+sockets** — bench-test the `#ifdef CC3501E_WIFI` connect/soft-AP/
-   socket bodies now that they fit 512 KB (bump the heap). No PSRAM needed.
-5. **Next board rev** — CS line + host-IRQ removes the CS-less framing fragility
-   and enables async EVT (BLE/Wi-Fi/GPIO-IRQ push to the host).
-6. **Land** — revert the bench-only diagnostics (witness debug fields, host
-   `cc3501e_dbg_*`), keep the `0xA5` marker + OTA + radio + GPIO code, run
-   native_sim CI, then PR to dev (on the maintainer's go). ← DONE in this PR.
+Not needed for the current bench unit (already activated). For a genuinely
+fresh or mis-activated unit, programming the cold-launch boot sector re-arms the
+vendor SBL — a **one-time, hard-to-reverse** operation. Confirm
+`permanently_lock_debug_enable = 0` first, then use the full signed flash set
+(`programming_image` + `action_requests` + `vendor_image` + `boot_sector`, all
+signed with the VALIDATION key), programmed via `simplelink-wifi-toolbox
+programmer -i XDS110 -param1 L50015YR programming`. `deploy_validate.sh` alone is
+**insufficient** — it refreshes only `vendor_image`. NOTE: a ready-to-run
+full-set-regen script is **not** currently staged in the bench signing dir; the
+`gen-out-*/` trees are prior outputs, not a reproducible command. Confirm by
+re-reading the fuse: `boot_sector_programmed` `0 → 1`.
+
+### Cold swap-boot cycle — bench result 2026-07-09 (#493 criterion 1: STAGED proven, SWAP fails)
+
+Ran the real-image OTA cycle on `e1m-aen-evk-01` (E8 slot0 = the
+`-DCC3501E_OTA_REAL=ON` app, SE-UART `app-write-mram`). Result:
+
+- **Real-image STAGED: PROVEN.** The genuine signed candidate (31428 B,
+  v0.0.4.0 GPE) streamed over the bridge and `psa_fwu` accepted it:
+  `OTA status: state=2 written=31428/31428 B`, `OTA -> STAGED (genuine image
+  accepted by psa_fwu)`. This is the real-image confirmation the inert blob
+  never gave. The STAGED image **persisted across a verified true cold POR** (a
+  second `cc3501e_ota_update` after the POR returned `-1`/INVAL because a staged
+  image was already pending).
+- **Cold swap-boot: FAILED.** After a verified true cold POR (PSU power-cycle,
+  power drop + `Cortex-M55 identified` re-up both confirmed on the J-Link), the
+  CC3501E booted its PRIMARY slot **unchanged** — `GET_VERSION -> protocol v1`
+  (host expects v3), `fw_version=0x0001`, identical to before. The STAGED image
+  was **not promoted** to primary. No accept/rollback/trial observed (no swap
+  occurred).
+
+**ROOT CAUSE (root-cause pass): the bench procedure was wrong, not (yet) a
+silicon block.** The STAGED→primary swap is completed by the CC35 firmware's
+**own `psa_fwu_request_reboot()`** after FINISH (the deferred `ota_reboot_pending`
+latch: armed at the end of `ota_do_finish()`, fired in `cc3501e_hw_tick()`), NOT
+by a host PSU cold POR. A bare PSU cycle carries no swap request, so the SBL
+cold-boots straight into the unchanged primary and leaves STAGED inert. The
+SELFTEST path proves the pattern — `cc3501e_ota_install()` does `psa_fwu_install()`
+→ **immediately** `psa_fwu_request_reboot()`, never "install then wait for an
+external POR". "SBL not armed" is refuted by the 2026-06-17 cold-revert evidence
+in `cc3501e_hw_ti.c` (cold power-on actively reverted unconfirmed TRIAL images →
+the SBL demonstrably evaluates FWU state at cold POR). Caveat: the Puya
+host-hard-reset-after-power-cycle workaround + the warm/debug-launch trailer-check
+bypass make a bare PSU POR **doubly** invalid as the promotion trigger on this
+unit.
+
+**Corrected procedure — the discriminating test (one OTA cycle, no new tooling):**
+re-run `cc3501e_ota_update`; the moment the host prints STAGED, **do NOT touch the
+PSU** — loop PING/GET_VERSION for ~30–60 s and watch the READY line/console.
+Three conclusive outcomes:
+
+1. **Bridge drops and comes back at protocol v3** → the mechanism works; the swap
+   was procedural (PSU POR instead of the firmware self-reboot). Then confirm
+   permanence: the new image's first tick must `psa_fwu_accept()`, after which one
+   true cold POR should retain v3. **→ closes #493 criterion 1.**
+2. **Bridge drops, comes back still v1, STAGED still pending** → the requested
+   reboot fired but the SBL didn't honor it → escalate to activation: unblock the
+   toolbox RoT "Update Signing Module" gate for one live `get_fuse_data`, or repeat
+   on a second correctly-activated unit.
+3. **No self-reboot at all** → firmware defect: `psa_fwu_request_reboot()` returns
+   without effect and its rc is discarded (`cc3501e_hw_tick()`, + the sibling calls
+   in `cc3501e_ota_install()`/accept). Fix = check + surface those rcs via
+   console/`GET_DIAG_INFO` so armed/requested/refused are distinguishable, and
+   investigate the FWU-service state that refused the reboot.
+
+**#493 CRITERION 1 — CLOSED (2026-07-10).** The full OTA cold-swap cycle is
+silicon-proven on E8: a FORWARD candidate (the plain radio-free bridge signed at
+GPE **v0.90.0.0**, above the primary) streamed → `state=2 written=37016/37016 B`
+**STAGED** → the CC35's own `psa_fwu_request_reboot()` swapped it (bridge dropped
+~2 s, then returned) → post-swap the CC35 runs the radio-free candidate
+(`WIFI_SCAN`/`GET_MAC`/`BLE` go NOT_READY where pre-swap found 5 APs — the proof)
+→ **self-accepted and PERSISTED across a true cold POR** (no rollback). The key
+was a candidate version ABOVE the primary: a downgrade (the old v0.0.4.0
+candidate) is refused at `psa_fwu` install (`state=3` ERROR), a forward one is
+accepted. Regenerate the forward candidate with `firmware/cc3501e/ti/build_ti.sh`
+(plain) → `build+sign vendor_image --version <above primary>` → bin2c (recipe in
+`cc3501e_ota_candidate.c`). **Known follow-up (non-blocking):** the FIRST OTA
+attempt after a failed/aborted OTA can return `-1` and wedge the bridge until a
+CC35 reset — the `OTA_BEGIN` clear does not cover every stuck slot state; the
+forward image stages reliably from a clean slot.
+
+--- history (how we got here) ---
+
+Corrected-procedure run 2026-07-09: the
+test was **blocked upstream** — a genuine STAGED image from a prior run is stuck
+pending in the CC35 secondary slot, and there is **no non-destructive way to
+clear or promote it over the bridge**:
+
+- A fresh `cc3501e_ota_update` short-circuits to `-1` (INVAL, "slot already
+  pending") **before** `OTA_FINISH`, so `ota_reboot_pending` is never armed and
+  `psa_fwu_request_reboot()` is never issued — the test cannot reach any of the
+  three outcomes above.
+- `OTA_ABORT` (protocol.c) cancels only an **in-flight** session; it does not
+  clear a committed STAGED image. There is no OTA reject/erase opcode, and the
+  staged image survived a verified true cold POR — so nothing on the bench frees
+  the slot.
+- **Chicken-and-egg:** a fresh FINISH needs a free slot; the slot frees only via
+  a swap; the swap needs the request armed by a fresh FINISH.
+
+Corroboration (strengthens the root cause): across **two** bare-nRESET CC35
+reboots (the E8 `cc3501e_bridge_bringup` Puya WIFI_EN+nRESET workaround, one per
+E8 boot) the image stayed pending, un-promoted — confirming a bare reset carrying
+no `psa_fwu_request_reboot()` does NOT promote.
+
+**The unblock is now IMPLEMENTED (proto v4): `OTA_PROMOTE` (opcode 0x46).** It
+arms the same deferred swap-reboot `FINISH` uses, for an image already committed
+to STAGED — so the pending slot can be promoted without a fresh session (which is
+unreachable while the slot is occupied). Surface: host `cc3501e_ota_promote()`,
+firmware `cc3501e_hw_ota_promote()` (ti) / NOTIMPL (stub), example
+`-DCC3501E_OTA_PROMOTE=ON`. Native transport test covers the opcode
+(NOT_READY on stub, INVALID on bad payload).
+
+**Bench step to close crit-1** (needs a CC35 firmware rebuild + reflash, since the
+promote opcode must be present in the CC35's *running* firmware — the current
+primary v1 predates it): (1) `build_ti.sh` the CC35 firmware with this change +
+reflash it; (2) run the E8 app with `-DCC3501E_OTA_PROMOTE=ON` — it calls
+`cc3501e_ota_promote()`, the firmware arms `psa_fwu_request_reboot()`, the bridge
+drops as the CC35 self-reboots, and BL2/MCUboot swaps the pending image to
+primary; (3) confirm `GET_VERSION` reports the new image, then one true cold POR
+retains it. (The exact PSA "already pending" error mapped to host `-1` lives in
+the license/vendor FWU path, not this repo's `src/` — TBD.)
+
+## 6. GPIO proxy
+
+GPIO proxy and camera-enable opcodes are shipped. The firmware guards reserved
+bridge/UART/unbonded pads, the host exposes `cc3501e_gpio_*`, the portable
+backend delegates non-CC3501E pins to the platform backend, and the warm-boot
+GPIO example has bench coverage.
+
+## 7. OTA
+
+OTA over the bridge is RAM-staged by design: each WRITE copies into RAM, and
+FINISH performs one flash burst plus `psa_fwu_install`. This avoids repeatedly
+tearing down the bridge DMA during a long image stream. Stage/install is
+bench-validated; the final cold swap-boot remains gated on a correctly
+activated, cold-bootable unit.
+
+## 8. Open items / next
+
+1. **HOST_IRQ / async events** - add the board line and host event-drain path for
+   BLE/Wi-Fi/GPIO unsolicited events.
+2. **Full runtime GATT/event parity** - finish the v1.0 portable BLE event
+   surface once HOST_IRQ exists.
+3. **Credentialed socket soak** - run against a lab network during production
+   validation.
+4. **OTA cold swap-boot** - repeat final swap validation on a correctly
+   activated cold-bootable CC3501E unit.
+5. **`flash.py` real flashing** - replace manual SWD/J-Link when TI's
+   `cc3501e-flasher` CLI becomes public.

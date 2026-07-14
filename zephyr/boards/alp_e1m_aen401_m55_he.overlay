@@ -4,27 +4,6 @@
  *
  * Devicetree overlay for the M55-HE slice of an E1M-AEN401
  * (Alif Ensemble E4, no A-class) heterogeneous project.
- *
- * NOTE: AEN preset's `mailbox.controller` is still TBD.
  */
 
-#include "../../build/generated/dts-reservations.dtsi"
-
-/ {
-    chosen {
-        zephyr,ipc     = &ipc0;
-        zephyr,ipc-shm = &alp_default_rpmsg;
-    };
-
-    soc {
-        ipc0: ipc@0 {
-            compatible = "zephyr,ipc-openamp-static-vrings";
-            memory-region = <&alp_default_rpmsg>;
-            /* TBD: insert mailbox controller phandle when AEN HW
-             *      config supplies it. */
-            mbox-names = "tx", "rx";
-            role = "remote";
-            status = "okay";
-        };
-    };
-};
+#include "alp_e1m_aen_m55_he_mhuv2.overlay.inc"

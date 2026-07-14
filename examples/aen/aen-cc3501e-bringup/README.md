@@ -32,14 +32,14 @@ reply-arming framing (the one fix that can't be checked off-silicon).
 | `SPI1.MOSI`  | `P14_5`      | out | `GPIO_28`               |
 | `SPI1.MISO`  | `P14_4`      | in  | `GPIO_29`               |
 
-This HW rev wires **no chip-select and no host-IRQ** line. The host driver
-clocks the protocol as deterministic fixed-count lockstep transfers; see
-[`chips/cc3501e/cc3501e.c`](../../../chips/cc3501e/cc3501e.c).
+This HW rev uses the dwc-ssi **hardware SS0** chip-select on P14_7 and a READY
+input for per-phase gating. The application still passes `ALP_SPI_NO_CS` so no
+software GPIO CS is installed; the SPI driver drives SS0 from the controller.
 
 ## What it does
 
 1. Opens `WIFI_EN` + `E_WIFI.NRST` GPIOs (output).
-2. Opens SPI1 (`bus_id = 1`, mode 0, 8 MHz, no CS) — Alif is master.
+2. Opens SPI1 (`bus_id = 1`, mode 0, 8 MHz, hardware SS0) — Alif is master.
 3. `cc3501e_reset()` — sequences `WIFI_EN` + `nRESET` (TI SWRU626) and
    blocks ~905 ms for the boot budget.
 4. Retries `PING` until the coprocessor answers.

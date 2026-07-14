@@ -6,8 +6,14 @@
 # anomalies.  Same source targets the V2N DEEPX path when som.sku is
 # flipped.
 
+libraries:
+  - name: tflite-micro
+    cores: [m55_he]
+  - name: cmsis-dsp
+    cores: [m55_he]
+
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 cores:
@@ -15,8 +21,6 @@ cores:
     os: "off"
   m55_he:
     app: ./src
-    libraries:
-      - tflite_micro
     inference:
       default_arena_kib: 64
     peripherals:

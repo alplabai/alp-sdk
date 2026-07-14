@@ -164,10 +164,12 @@ rationale.
 ### 2.1 Standalone (this walkthrough)
 
 You write Zephyr / Yocto / bare-metal app code directly against
-`<alp/...>` headers.  Pick instance IDs by hand from
-`<alp/e1m_pinout.h>` (`ALP_E1M_I2C0`, `ALP_E1M_PWM3`, …).  Your
-app stays portable across every E1M-conformant SoM.  The rest
-of this document covers this path.
+`<alp/...>` headers.  Pick instance IDs from the pinout namespace
+for your form factor: `<alp/e1m_pinout.h>` exposes E1M IDs such as
+`ALP_E1M_I2C0` / `ALP_E1M_PWM3`; `<alp/e1m_x_pinout.h>` exposes
+the parallel E1M-X IDs such as `ALP_E1M_X_I2C0` /
+`ALP_E1M_X_PWM3`.  Your app stays portable within that form factor
+and SoM family.  The rest of this document covers this path.
 
 ### 2.2 alp-studio codegen (optional, on top of alp-sdk)
 
@@ -321,7 +323,7 @@ project's `board.yaml` — the top-level `libraries:` key (ADR 0018):
 
 ```yaml
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 libraries: [lvgl, cmsis-dsp]   # curated third-party libraries
 cores:
   m55_hp:
@@ -457,13 +459,32 @@ Zephyr's module organisation.  The Alif vendor-licensed pieces
 distinct from the Apache-2.0 `hal_alif` -- they're only
 fetched when a customer opts in to the `vendor-sdks` group.
 
+## Reproducing a build with alp.lock
+
+`west alp-lock` writes `alp.lock` — a deterministic, public-safe record of the
+workspace's SDK revision, west project pins, curated library versions, Python
+requirements, and metadata digests. Commit it. `west alp-lock --check` (run in
+CI) fails with a field-level diagnostic when any locked input drifts, so an old
+release can be rebuilt against its exact declared inputs. It contains no local
+paths or credentials. The recorded `sdk.revision` is **provenance** (which SDK
+commit generated the lock) and is not frozen-verified — committing the lock
+advances the repo's own HEAD past it, so `--check` reports it but never fails on
+it; `sdk.version` and the west pins lock the SDK identity you build against. It
+does not yet pin resolved commit SHAs or toolchain container identities (tracked
+follow-ups).
+
+Because `alp.lock` hashes `metadata/**` and pins the west/library/Python inputs,
+**re-run `west alp-lock` and commit the updated `alp.lock` in the same PR**
+whenever you touch `west.yml`, `metadata/**`, `scripts/requirements.txt`, or
+`scripts/alp_cli/__init__.py` — otherwise the `alp.lock in sync` CI check reds.
+
 ## 9. SoC capability validation
 
 The SoC choice flows from `board.yaml`'s `som.sku` field
 automatically (board.yaml, current since v0.6) — the loader
-resolves the MPN to the silicon ref (`alif:ensemble:e7` for
-`E1M-AEN701`) and emits the matching
-`CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7=y` line, so you never set it by
+resolves the MPN to the silicon ref (`alif:ensemble:e8` for
+`E1M-AEN801`) and emits the matching
+`CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y` line, so you never set it by
 hand.  The validator also cross-checks every entry in
 `peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`
 caps -- a board.yaml asking for `i2s` on a SoC that doesn't route

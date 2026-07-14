@@ -20,7 +20,7 @@
  * USE_ALIF_HAL_* helper library.
  *
  * Retire onto the opt-in sdk-alif fork compatible once the MRAM flash node is
- * repointed AND bench-verified (task #21).  See
+ * repointed AND bench-verified.  See
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *

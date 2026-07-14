@@ -55,9 +55,10 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	(void)alp_gpio_configure(nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 
-	/* 2. Inter-chip SPI (Alif = master).  No chip-select this HW rev -- the link is
-	 *    fixed-count lockstep (ALP_SPI_NO_CS); mode 0 matches the CC3501E vendor
-	 *    image frameFormat. */
+	/* 2. Inter-chip SPI (Alif = master).  CS is the dwc-ssi hardware SS0
+	 *    muxed on P14_7; the app passes ALP_SPI_NO_CS so no software GPIO CS
+	 *    is installed and the SPI controller drives SS0 per transfer.  Mode 0
+	 *    matches the CC3501E vendor image frameFormat. */
 	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
 	    .bus_id        = CC3501E_BRIDGE_SPI_BUS_ID,
 	    .freq_hz       = CC3501E_BRIDGE_SPI_FREQ_HZ,
@@ -71,14 +72,46 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 	}
 
+#if CC3501E_BRIDGE_RX_SAMPLE_DLY > 0
+	/* Raise the SCLK past 1 MHz: the DW SSI RX_SAMPLE_DLY register (0xf0) delays
+	 * the MISO capture point by N ssi_clk cycles to cover the on-SoM trace + crossed
+	 * data round-trip.  Zephyr spi_dw never writes it (leaves 0), so without this
+	 * >1 MHz mis-samples MISO (cold reqhdr_rx=0xFFFFFFFF).  Written with SSI disabled
+	 * (SSIENR=0); persists across the driver's per-transfer configure.  Value is
+	 * silicon-tuned -- sweep CC3501E_BRIDGE_RX_SAMPLE_DLY at the target SCLK. */
+	{
+		volatile uint32_t *ssienr =
+		    (volatile uint32_t *)(uintptr_t)(CC3501E_BRIDGE_SPI1_BASE + 0x08u);
+		volatile uint32_t *rsd = (volatile uint32_t *)(uintptr_t)(CC3501E_BRIDGE_SPI1_BASE + 0xf0u);
+		uint32_t           en  = *ssienr;
+		*ssienr                = 0u;
+		*rsd                   = (uint32_t)CC3501E_BRIDGE_RX_SAMPLE_DLY;
+		*ssienr                = en;
+	}
+#endif
+
 	/* 3. Bind the bus + control pins; attach the GPIO proxy (proxied E1M IOs then
 	 *    route over the bridge); run the power + reset sequence (TI SWRU626 + the
 	 *    Puya cold-boot hard-reset workaround).  Leaves WIFI_EN HIGH. */
 	(void)cc3501e_init(fw, spi);
 	fw->enable_pin = wifi_en;
 	fw->reset_pin  = nrst;
+	/* Optional host-IRQ/READY line (r2 SS0+IRQ bridge): CC35 GPIO17 -> Alif P2_6.
+	 * Open + configure as input; if the board doesn't wire it (alp_pins[2] absent),
+	 * alp_gpio_open returns NULL and the driver keeps the fixed-gap fallback. */
+	alp_gpio_t *ready = alp_gpio_open(CC3501E_BRIDGE_PIN_READY);
+	if (ready != NULL) {
+		(void)alp_gpio_configure(ready, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+		fw->ready_pin = ready;
+	}
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
 	(void)alp_gpio_cc3501e_attach(fw);
+#endif
+#ifdef CONFIG_ALP_SDK_WIFI_CC3501E
+	(void)alp_wifi_cc3501e_attach(fw);
+#endif
+#ifdef CONFIG_ALP_SDK_BLE_CC3501E
+	(void)alp_ble_cc3501e_attach(fw);
 #endif
 	return cc3501e_reset(fw);
 }

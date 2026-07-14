@@ -15,14 +15,14 @@
 #include <alp/i2s.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/i2s/i2s_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(i2s);
 /* Pull the i2s registry section into a static-archive link (#368). */
 ALP_BACKEND_ANCHOR(i2s);
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_I2S_HANDLES
 #define CONFIG_ALP_SDK_MAX_I2S_HANDLES 2
@@ -33,9 +33,12 @@ static struct alp_i2s _pool[CONFIG_ALP_SDK_MAX_I2S_HANDLES];
 static struct alp_i2s *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_I2S_HANDLES; ++i) {
-		if (!_pool[i].in_use) {
-			memset(&_pool[i], 0, sizeof(_pool[i]));
-			_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch
+		 * the slot's other fields (in_use is the struct's last
+		 * member, so zero everything before it -- including
+		 * lifecycle/active_ops, parking a fresh slot at UNOPENED). */
+		if (alp_slot_try_claim(&_pool[i].in_use)) {
+			memset(&_pool[i], 0, offsetof(struct alp_i2s, in_use));
 			return &_pool[i];
 		}
 	}
@@ -44,7 +47,7 @@ static struct alp_i2s *_alloc(void)
 
 static void _free(struct alp_i2s *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg)
@@ -90,51 +93,88 @@ alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 
 alp_status_t alp_i2s_start(alp_i2s_t *i2s)
 {
-	if (i2s == NULL || !i2s->in_use) return ALP_ERR_NOT_READY;
-	if (i2s->state.ops->start == NULL) return ALP_ERR_NOSUPPORT;
-	alp_status_t rc = i2s->state.ops->start(&i2s->state);
-	if (rc == ALP_OK) i2s->started = true;
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc/_free, so mixing it with a
+	 * plain read here is a data race, and a racing close could free
+	 * the slot mid-op (issue #629). */
+	if (i2s == NULL || !alp_handle_op_enter(&i2s->lifecycle, &i2s->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc = ALP_ERR_NOSUPPORT;
+	if (i2s->state.ops->start != NULL) {
+		rc = i2s->state.ops->start(&i2s->state);
+		if (rc == ALP_OK) i2s->started = true;
+	}
+	alp_handle_op_leave(&i2s->active_ops);
 	return rc;
 }
 
 alp_status_t alp_i2s_stop(alp_i2s_t *i2s)
 {
-	if (i2s == NULL || !i2s->in_use) return ALP_ERR_NOT_READY;
-	if (i2s->state.ops->stop == NULL) return ALP_ERR_NOSUPPORT;
-	alp_status_t rc = i2s->state.ops->stop(&i2s->state);
-	if (rc == ALP_OK) i2s->started = false;
+	if (i2s == NULL || !alp_handle_op_enter(&i2s->lifecycle, &i2s->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc = ALP_ERR_NOSUPPORT;
+	if (i2s->state.ops->stop != NULL) {
+		rc = i2s->state.ops->stop(&i2s->state);
+		if (rc == ALP_OK) i2s->started = false;
+	}
+	alp_handle_op_leave(&i2s->active_ops);
 	return rc;
 }
 
 alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint32_t timeout_ms)
 {
-	if (i2s == NULL || !i2s->in_use) return ALP_ERR_NOT_READY;
-	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL;
-	if (i2s->state.ops->write == NULL) return ALP_ERR_NOSUPPORT;
-	return i2s->state.ops->write(&i2s->state, block, bytes, timeout_ms);
+	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL; /* param check before gate */
+	/* Counted via alp_handle_op_enter/leave (issue #629): write() can
+	 * block up to timeout_ms draining the transfer, so alp_i2s_close()
+	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c) instead of the busy-spin
+	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
+	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8).
+	 * start/stop stay on the short, synchronous op_enter/leave path. */
+	if (i2s == NULL || !alp_handle_op_enter(&i2s->lifecycle, &i2s->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc = (i2s->state.ops->write == NULL)
+	                      ? ALP_ERR_NOSUPPORT
+	                      : i2s->state.ops->write(&i2s->state, block, bytes, timeout_ms);
+	alp_handle_op_leave(&i2s->active_ops);
+	return rc;
 }
 
 alp_status_t
 alp_i2s_read(alp_i2s_t *i2s, void *block, size_t bytes, size_t *bytes_out, uint32_t timeout_ms)
 {
-	if (i2s == NULL || !i2s->in_use) return ALP_ERR_NOT_READY;
-	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL;
 	if (bytes_out != NULL) *bytes_out = 0u;
-	if (i2s->state.ops->read == NULL) return ALP_ERR_NOSUPPORT;
-	return i2s->state.ops->read(&i2s->state, block, bytes, bytes_out, timeout_ms);
+	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL; /* param check before gate */
+	/* Counted via alp_handle_op_enter/leave (issue #629) -- see
+	 * alp_i2s_write() above for the same rationale. */
+	if (i2s == NULL || !alp_handle_op_enter(&i2s->lifecycle, &i2s->active_ops))
+		return ALP_ERR_NOT_READY;
+	alp_status_t rc = (i2s->state.ops->read == NULL)
+	                      ? ALP_ERR_NOSUPPORT
+	                      : i2s->state.ops->read(&i2s->state, block, bytes, bytes_out, timeout_ms);
+	alp_handle_op_leave(&i2s->active_ops);
+	return rc;
 }
 
 void alp_i2s_close(alp_i2s_t *i2s)
 {
-	if (i2s == NULL || !i2s->in_use) return;
+	if (i2s == NULL) return;
+	/* Sleep-poll drain (issue #629): this pool counts alp_i2s_write()/
+	 * alp_i2s_read(), each of which can block up to its caller's
+	 * timeout_ms, so alp_handle_begin_close_blocking() sleeps between
+	 * polls instead of busy-spinning -- see src/common/alp_slot_claim.c/.h.
+	 * Idempotent: a second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&i2s->lifecycle, &i2s->active_ops)) return;
 	if (i2s->state.ops != NULL && i2s->state.ops->close != NULL) {
 		i2s->state.ops->close(&i2s->state);
 	}
+	alp_lifecycle_set(&i2s->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(i2s);
 }
 

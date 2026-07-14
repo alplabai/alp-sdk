@@ -63,7 +63,7 @@ def _run_linter(*args: str) -> subprocess.CompletedProcess[str]:
 # tests mutate it to produce known-bad fragments.
 _VALID_BOARD = """
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 cores:
   m55_hp:
@@ -89,7 +89,7 @@ def test_extract_fragments_yaml_fence(tmp_path: Path) -> None:
 
         ```yaml
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
         cores:
           m55_hp:
             app: ./src
@@ -105,7 +105,7 @@ def test_extract_fragments_yml_alias(tmp_path: Path) -> None:
     """The ``` yml alias is also accepted."""
     p = _write_md(tmp_path, "doc.md", """
         ```yml
-        som: { sku: E1M-AEN701 }
+        som: { sku: E1M-AEN801 }
         ```
     """)
     fragments = linter.extract_fragments(p)
@@ -160,7 +160,7 @@ def test_parse_fragment_requires_cores(tmp_path: Path) -> None:
     p = _write_md(tmp_path, "doc.md", """
         ```yaml
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
         ```
     """)
     fragments = linter.extract_fragments(p)
@@ -188,7 +188,7 @@ def test_parse_fragment_invalid_yaml_skipped(tmp_path: Path) -> None:
     p = _write_md(tmp_path, "doc.md", """
         ```yaml
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
         [unclosed bracket
         ```
     """)
@@ -208,7 +208,7 @@ def test_parse_fragment_accepts_valid_board_yaml(tmp_path: Path) -> None:
     assert len(fragments) == 1
     parsed = linter.parse_fragment(fragments[0])
     assert isinstance(parsed, dict)
-    assert parsed.get("som", {}).get("sku") == "E1M-AEN701"
+    assert parsed.get("som", {}).get("sku") == "E1M-AEN801"
     assert "m55_hp" in parsed.get("cores", {})
 
 
@@ -235,7 +235,7 @@ def test_validate_fragment_rejects_inference_backend(tmp_path: Path) -> None:
     field.  A doc fragment with it must fail."""
     bad = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
         cores:
           m55_hp:
             app: ./src
@@ -258,7 +258,7 @@ def test_validate_fragment_rejects_top_level_os(tmp_path: Path) -> None:
     schema (`not: { required: [os] }`)."""
     bad = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
         os: zephyr
         cores:
           m55_hp:
@@ -278,7 +278,7 @@ def test_validate_fragment_rejects_unknown_peripheral(tmp_path: Path) -> None:
     """`peripherals:` is a fixed enum; `audio` (not in the enum) fails."""
     bad = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
         cores:
           m55_hp:
             app: ./src
@@ -351,7 +351,7 @@ def test_cli_exit_one_on_bad_fragment(tmp_path: Path) -> None:
     """A bad fragment causes exit code 1, surfaces the broken field."""
     bad = """
         som:
-          sku: E1M-AEN701
+          sku: E1M-AEN801
         cores:
           m55_hp:
             app: ./src

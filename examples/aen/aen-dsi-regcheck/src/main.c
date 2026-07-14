@@ -15,19 +15,15 @@
  *   dphy@49033000    (snps,designware-dphy) -- the shared DesignWare MIPI D-PHY
  *
  * The shared D-PHY is the SAME block the camera path uses for CSI-2 RX; for the
- * display path it runs in the TX role.  That TX role is ALREADY implemented in
- * the in-tree driver zephyr/drivers/mipi_dphy/dphy_dw.c (dphy_dw_master_setup(),
- * which programs the PHY via the node's "dsi_reg" 0x49032000 view) -- so the
- * D-PHY does NOT need a new driver for DSI.  What is missing is a display-class
- * driver for cdc200 (tes,cdc-2.1) and a mipi_dsi-class host driver for
- * mipi_dsi (snps,designware-dsi); neither upstream Zephyr v4.4 nor hal_alif
- * ships either.
+ * display path it runs in the TX role.  That TX role is implemented in
+ * zephyr/drivers/mipi_dphy/dphy_dw.c (dphy_dw_master_setup(), which programs the
+ * PHY via the node's "dsi_reg" 0x49032000 view).
  *
  * WHAT THIS APP VALIDATES (and what it deliberately does NOT):
  *
- *   This is a BIND/instantiation check, not a pixels-on-glass check.  No display
- *   driver is authored yet, so there is no device to render through; this app
- *   proves the DT plumbing is correct and ready for a driver:
+ *   This is a BIND/instantiation check, not a pixels-on-glass check.  This app
+ *   intentionally leaves the live cdc200 + mipi_dsi drivers off and proves the
+ *   DT plumbing is still correct:
  *     1. the cdc200 + mipi_dsi + dphy nodes exist and BIND to their expected
  *        compatibles (tes,cdc-2.1 / snps,designware-dsi / snps,designware-dphy),
  *     2. the reg base each node carries matches the Alif CMSIS DFP / fork e1.dtsi
@@ -36,18 +32,15 @@
  *        phy-if phandle resolves to the dphy node (the chain is wired),
  *     4. the dphy device (already a real in-tree driver) reports device_is_ready.
  *
- * WHAT IS RUNTIME-BLOCKED ON THIS BATCH: actual display output.  (a) No display-
- * class driver exists yet for cdc200/mipi_dsi (the port is assessed in the
- * deliverable -- the DFP register maps make it tractable).  (b) The AEN801 panel
- * part is TBD: the fork default is focuslcds,mw405 (the Alif AppKit panel), NOT
- * confirmed for the AEN801 SoM -- so no panel child node is asserted here, and
- * the panel reset/backlight GPIOs are bench-unknown (omitted, not invented).
+ * LIVE DISPLAY OUTPUT: use aen-dsi-display.  This regcheck deliberately omits
+ * panel child nodes and panel reset/backlight GPIOs so it remains a minimal
+ * binding smoke test.
  *
  * The PASS gate is BIND-based: the cdc200 -> mipi_dsi -> dphy chain binds to its
  * expected compatibles at its expected reg bases, with the DSI host's cdc-if and
  * phy-if phandles resolving to the right nodes.  device_is_ready is reported for
- * the dphy (the one node that already has a real driver); the cdc200/mipi_dsi
- * "ready" state is not gated (no driver instantiates them yet).
+ * the dphy; the cdc200/mipi_dsi "ready" state is not gated because this app does
+ * not enable those drivers.
  */
 
 #include <stdbool.h>
@@ -80,9 +73,9 @@
  * device_is_ready (no display driver instantiates cdc200/mipi_dsi yet).
  */
 #define CDC_BOUND (DT_NODE_HAS_STATUS(CDC_NODE, okay) && DT_NODE_HAS_COMPAT(CDC_NODE, tes_cdc_2_1))
-#define DSI_BOUND                                                                                  \
+#define DSI_BOUND \
 	(DT_NODE_HAS_STATUS(DSI_NODE, okay) && DT_NODE_HAS_COMPAT(DSI_NODE, snps_designware_dsi))
-#define DPHY_BOUND                                                                                 \
+#define DPHY_BOUND \
 	(DT_NODE_HAS_STATUS(DPHY_NODE, okay) && DT_NODE_HAS_COMPAT(DPHY_NODE, snps_designware_dphy))
 
 /*
@@ -141,17 +134,12 @@ int main(void)
 	       (int)DSI_PHY_IF_OK);
 
 	/*
-	 * Step 4: the dphy already has a real in-tree driver (its DSI-TX role is
-	 * dphy_dw_master_setup), so it has a real device -- probe device_is_ready.
-	 *
-	 * cdc200/mipi_dsi have NO display/mipi_dsi-class driver yet: no driver TU
-	 * builds a struct device for them, so DEVICE_DT_GET_OR_NULL would emit an
-	 * extern reference to a device object that is never defined (a link error).
-	 * We therefore do NOT call DEVICE_DT_GET on those two nodes -- their bind is
-	 * a pure DT fact (above), and "ready" is meaningless until a driver exists.
+	 * Step 4: dphy is enabled in this bind-only app, so it has a real device and
+	 * can report device_is_ready.  cdc200/mipi_dsi are intentionally not enabled
+	 * here; their bind is a pure DT fact above.
 	 */
-	printk("cdc200  device : <no driver yet> (display-class port pending -- DT-bind only)\n");
-	printk("mipidsi device : <no driver yet> (mipi_dsi-class port pending -- DT-bind only)\n");
+	printk("cdc200  device : <driver not enabled in this app -- DT-bind only>\n");
+	printk("mipidsi device : <driver not enabled in this app -- DT-bind only>\n");
 	report_ready("dphy", DEVICE_DT_GET_OR_NULL(DPHY_NODE));
 
 	bool nodes_ok = CDC_BOUND && (cdc_base == CDC_BASE_EXPECTED) && DSI_BOUND &&
@@ -162,8 +150,7 @@ int main(void)
 		printk("RESULT PASS: C2-MIPI-DSI display chain BINDS -- cdc200/mipi_dsi/dphy bind to "
 		       "tes,cdc-2.1/snps,designware-dsi/snps,designware-dphy at the DFP reg bases "
 		       "(CDC 0x49031000, DSI 0x49032000, D-PHY 0x49033000) with the dsi->cdc-if and "
-		       "dsi->phy-if phandles wired; display-class drivers for cdc200/mipi_dsi not yet "
-		       "authored, panel part TBD -- live display HW-blocked on this batch\n");
+		       "dsi->phy-if phandles wired; live display output is covered by aen-dsi-display\n");
 	} else {
 		printk("RESULT FAIL: C2-MIPI-DSI display chain NOT fully staged "
 		       "(cdc=%d dsi=%d dphy=%d cdc-if=%d phy-if=%d -- a node is missing, disabled, "

@@ -11,7 +11,7 @@
  * helper library (drivers/analog, pulled in via CONFIG_USE_ALIF_HAL_ANALOG) --
  * so this is a genuine fork-driver copy carried in-tree so it survives a
  * `west update`.  Retire onto the opt-in sdk-alif fork compatible once the adc
- * nodes are repointed AND bench-verified (task #21).  See
+ * nodes are repointed AND bench-verified.  See
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *

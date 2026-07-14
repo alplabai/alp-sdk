@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Generate include/alp/boards/alp_<board>_routes.h from each
-metadata/boards/<name>.yaml `e1m_routes:` block.
+metadata/boards/<name>.yaml `e1m_routes:` + `i2c_devices:` blocks.
 
 The generated header mirrors the YAML `e1m_routes:` block into plain
 `#define EVK_* ALP_E1M_*` lines so hand-written firmware can keep using
@@ -10,12 +10,15 @@ the established board macros (EVK_PIN_BMI323_INT1, EVK_I2C_BUS_SENSORS,
 EVK_PWM_LED_RED, ...) while the YAML stays the single editable source
 of truth.  The YAML carries the connector-namespace pad names
 (`E1M_...` / `E1M_X_...`); the generator prefixes `ALP_` when emitting
-the C token.  Idempotent: running twice produces byte-identical output.
+the C token.  The `i2c_devices:` block does the same for on-board I2C
+device addresses (EVK_I2C_ADDR_*) and INA236 shunt/max-current
+calibration (EVK_INA236_SHUNT_*_OHMS / EVK_INA236_MAX_*_A) -- these
+carry a literal hex/float value rather than an `ALP_E1M_*` token.
+Idempotent: running twice produces byte-identical output.
 
 The remaining sections of `include/alp/boards/alp_<board>.h`
-(mux enums, INA236 tuning constants, overlay-pad indices, on-board
-I2C addresses, prose comments) stay hand-authored until follow-up
-slices lift them too.
+(mux enums, overlay-pad indices, prose comments) stay hand-authored
+until follow-up slices lift them too.
 
 Run:
 
@@ -94,6 +97,65 @@ def _build_doc(entry: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
+    """Emit the on-board I2C device address block (+ any `alias`) and,
+    for entries carrying a `calibration:` block, the paired INA236
+    shunt/max-current macros.  Mirrors `_emit_section`'s column-aligned
+    style but the value is a literal hex/float, not an `ALP_E1M_*`
+    pinout token."""
+    if not devices:
+        return []
+
+    addr_lines: list[tuple[str, str, str]] = []  # (macro, value, doc)
+    for entry in devices:
+        macro = entry["macro"]
+        addr_lines.append((macro, f"{entry['address']}u", entry.get("doc", "")))
+        alias = entry.get("alias")
+        if alias:
+            addr_lines.append((alias, macro, f"Alias for {macro}."))
+
+    calib_lines: list[tuple[str, str, str]] = []
+    for entry in devices:
+        cal = entry.get("calibration")
+        if not cal:
+            continue
+        macro = entry["macro"]
+        calib_lines.append(
+            (cal["shunt_macro"], f"{cal['shunt_ohms']}f", f"Shunt for {macro}.")
+        )
+        calib_lines.append(
+            (cal["max_macro"], f"{cal['max_current_a']}f", f"Max current for {macro}.")
+        )
+
+    out: list[str] = [
+        "/* ------------------------------------------------------------------ */",
+        "/* On-board I2C device addresses (from `i2c_devices:`) */",
+        "/* ------------------------------------------------------------------ */",
+        "",
+    ]
+    widest = max(len(m) for m, _, _ in addr_lines)
+    for macro, value, doc in addr_lines:
+        if doc:
+            out.append(f"#define {macro:<{widest}} {value}  /**< {doc} */")
+        else:
+            out.append(f"#define {macro:<{widest}} {value}")
+    out.append("")
+
+    if calib_lines:
+        out.extend([
+            "/* ------------------------------------------------------------------ */",
+            "/* INA236 calibration constants (from `i2c_devices[].calibration`) */",
+            "/* ------------------------------------------------------------------ */",
+            "",
+        ])
+        widest = max(len(m) for m, _, _ in calib_lines)
+        for macro, value, doc in calib_lines:
+            out.append(f"#define {macro:<{widest}} {value}  /**< {doc} */")
+        out.append("")
+
+    return out
+
+
 def _emit_board_aliases(routes: dict[str, Any]) -> list[str]:
     """Emit portable BOARD_* aliases for every entry carrying a
     `board_alias:` (the e1m-spec §7.2 common roles).  Same BOARD_* name
@@ -148,11 +210,14 @@ def _emit_section(title: str, entries: list[dict[str, Any]]) -> list[str]:
 
 def emit_board(name: str, doc: dict[str, Any]) -> str | None:
     """Return the full text of the generated routes header for one board,
-    or `None` if the shared board YAML has no `e1m_routes:` block.
+    or `None` if the shared board YAML has neither an `e1m_routes:` nor
+    an `i2c_devices:` block.
     """
     routes = doc.get("e1m_routes")
-    if not routes:
+    i2c_devices = doc.get("i2c_devices")
+    if not routes and not i2c_devices:
         return None
+    routes = routes or {}
     slug = _board_slug(name)
     guard = f"ALP_BOARDS_{slug.upper()}_ROUTES_H"
     pinout = _pinout_include(routes)
@@ -196,6 +261,8 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
         entries = routes.get(section_key) or []
         if entries:
             lines.extend(_emit_section(section_title, entries))
+
+    lines.extend(_emit_i2c_devices(doc.get("i2c_devices") or []))
 
     lines.extend(_emit_board_aliases(routes))
 

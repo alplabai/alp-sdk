@@ -2,7 +2,7 @@
 # production-deployment flagship.
 #
 # v1.0 reference application for a field-deployable IoT product.
-# Designed against AEN701 (the security-target SoM: dual-Cortex-M55
+# Designed against AEN801 (the security-target SoM: dual-Cortex-M55
 # silicon with on-module OPTIGA Trust M + TF-M secure-boot fabric).
 # Demonstrates EVERY v0.6 declarative block applied at production
 # stance:
@@ -24,8 +24,12 @@
 # Real customer shipping variants fork this for V2N or i.MX 93
 # boards; the SDK's declarative surface stays identical across
 # SoMs.
+libraries:
+  - name: mbedtls
+    cores: [m55_hp]
+
 som:
-  sku: E1M-AEN701              # security-target SoM (OPTIGA + TF-M)
+  sku: E1M-AEN801              # security-target SoM (OPTIGA + TF-M)
 
 preset: e1m-evk
 cores:
@@ -35,18 +39,17 @@ cores:
                                # placeholder slot.
   m55_hp:
     app: ./src
-    # IoT features (WiFi + MQTT + TLS) ride the per-core `iot:` block;
-    # the orchestrator translates wifi/mqtt/tls into
-    # CONFIG_ALP_SDK_IOT_WIFI / _MQTT / _SECURITY.
+    # IoT features (Wi-Fi + MQTT + TLS) ride the per-core `iot:` block;
+    # the orchestrator resolves the SoM wireless provider, then emits
+    # the CC3501E bridge backend plus MQTT/TLS Kconfig for this AEN slice.
     iot:
       wifi: true
       mqtt: true
       tls: true
-    # mbedtls covers the TLS stack the MQTT pub/sub + OPTIGA-handshake
-    # paths use.  Required by v0.6 cross-field validator (P2.3 rule 3)
-    # whenever `iot.tls: true`.
-    libraries:
-      - mbedtls
+    # mbedtls covers the TLS stack used by MQTT pub/sub.  OPTIGA
+    # handshake offload remains a planned library-profile binding.
+    # Required by v0.6 cross-field validator (P2.3 rule 3) whenever
+    # `iot.tls: true`.
     # Memory tuning -- production stance keeps headroom for the
     # mender-mcu-client + mbedTLS handshake buffers + the TF-M
     # NS-callable trampoline.
@@ -136,7 +139,7 @@ ota:
 security:
   psa:
     persistent_slots: 32
-    its_storage:      mram_main     # AEN E7: 5.5 MiB MRAM (secure half)
+    its_storage:      mram_main     # AEN E8: 5.5 MiB MRAM (secure half)
     ps_storage:       ospi0         # on-module OSPI for app-tier creds
     tfm:              true
     attestation_root: optiga_trust_m
@@ -146,7 +149,7 @@ security:
 # ----------------------------------------------------------------
 # Explicit partition table backing the MCUboot slot layout + the
 # Zephyr settings subsystem + an app_data littlefs mount.  Sizes
-# add up to ~2.4 MiB out of the AEN E7's 5.5 MiB MRAM -- the
+# add up to ~2.4 MiB out of the AEN E8's 5.5 MiB MRAM -- the
 # remainder stays available for code + MCUboot itself + the
 # TF-M secure partition.
 storage:

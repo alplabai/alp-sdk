@@ -28,7 +28,9 @@
 #include "alp/hw_info.h"
 
 /* CRC-32 ISO-3309 (poly 0xEDB88320, init/xor-out 0xFFFFFFFF) -- matches
- * zlib.crc32, the algorithm scripts/program_eeprom.py uses. */
+ * zlib.crc32, the algorithm scripts/program_eeprom.py uses. Table-free
+ * bit-at-a-time form: the manifest is <128 bytes, so a lookup table would
+ * only add flash footprint without a measurable speed win here. */
 static uint32_t crc32_iso3309(const uint8_t *buf, size_t len)
 {
 	uint32_t crc = 0xFFFFFFFFu;
@@ -76,6 +78,10 @@ int main(void)
 	    .bus_id     = 0u,
 	    .bitrate_hz = 100000u,
 	});
+	/* Unlike the AEN Trust M probe (which SKIPs on ALP_ERR_NOT_READY because
+	 * BRD_I2C/LPI2C0 population varies by assembly), I2C2 backs the manifest
+	 * EEPROM that every E1M-AEN801 module ships with populated -- so any
+	 * open failure here is a real fault, not an expected-absent-part SKIP. */
 	if (bus == NULL) {
 		printf("[manifest] alp_i2c_open failed: err=%d\n", (int)alp_last_error());
 		return 0;
@@ -105,6 +111,10 @@ int main(void)
 	printf("[manifest] raw bytes:\n");
 	hex_dump(raw, sizeof(raw));
 
+	/* Reinterpret the raw bytes as the manifest struct rather than copying
+	 * field-by-field: alp_hw_info_eeprom_t is a fixed, packed on-wire layout
+	 * (the same one scripts/program_eeprom.py writes), so this is safe as
+	 * long as that layout and this decode stay in lock-step. */
 	const alp_hw_info_eeprom_t *m = (const alp_hw_info_eeprom_t *)raw;
 
 	printf("\n[manifest] magic         = 0x%08x", m->magic);
@@ -126,6 +136,11 @@ int main(void)
 	       (unsigned)m->mfg_month,
 	       (unsigned)m->mfg_day);
 
+	/* The CRC is stored as the manifest's last field and covers every byte
+	 * before it -- excluding the CRC field itself, since it can't cover its
+	 * own value. A mismatch here means either a partial/interrupted EEPROM
+	 * program or a bit-rot/corruption event, distinct from "never programmed"
+	 * (which the magic check above already catches). */
 	const size_t crc_covered_len = sizeof(*m) - sizeof(m->crc32);
 	uint32_t     calc            = crc32_iso3309(raw, crc_covered_len);
 	printf("[manifest] crc32         = 0x%08x (stored) vs 0x%08x (computed)", m->crc32, calc);

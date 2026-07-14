@@ -145,3 +145,41 @@ def test_aen801_reference_set_is_bom_complete():
         else:
             unresolved.append(f"{slug}: no chip or block manifest")
     assert not unresolved, "\n".join(unresolved)
+
+
+# --- issue #720: topology.board <-> generated Zephyr board tree cross-check ---
+
+def _load_vm(name):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    return vm
+
+def test_board_bare_when_tree_is_qualified_rejected(tmp_path):
+    """A board whose generated tree needs a qualifier but is spelled bare is
+    the #720 bug -- west build -b cannot resolve it."""
+    vm = _load_vm("vm_bt1"); import yaml
+    p = tmp_path / "E1M-AEN801.yaml"
+    p.write_text(yaml.safe_dump({"topology": {
+        "m55_he": {"board": "alp_e1m_aen801_m55_he"}}}))  # bare, tree is qualified
+    failures = vm._check_board_targets([p])
+    assert failures and any("fully-qualified" in m for _, msgs in failures for m in msgs)
+
+def test_board_qualified_without_tree_rejected(tmp_path):
+    """Qualifying a board before its tree is generated (V2N102-style drift)
+    must fail: the string points at a board Zephyr cannot find."""
+    vm = _load_vm("vm_bt2"); import yaml
+    p = tmp_path / "E1M-V2N102.yaml"
+    p.write_text(yaml.safe_dump({"topology": {
+        "m33_sm": {"board": "alp_e1m_v2n102_m33_sm/r9a09g056n48gbg/cm33"}}}))
+    failures = vm._check_board_targets([p])
+    assert failures and any("no generated board tree" in m for _, msgs in failures for m in msgs)
+
+def test_board_qualified_matching_tree_accepted(tmp_path):
+    """The correct qualified identifier matching the generated tree passes."""
+    vm = _load_vm("vm_bt3"); import yaml
+    p = tmp_path / "E1M-AEN801.yaml"
+    p.write_text(yaml.safe_dump({"topology": {
+        "m55_he": {"board": "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"},
+        "a32_cluster": {"machine": "e1m-aen801-a32"}}}))  # yocto slice: no board, skipped
+    assert vm._check_board_targets([p]) == []

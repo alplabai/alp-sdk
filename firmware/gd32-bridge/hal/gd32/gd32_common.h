@@ -97,6 +97,7 @@ typedef struct {
 typedef struct {
 	bool     in_use;
 	uint8_t  channel;     /* ADC channel index this stream watches */
+	uint16_t full_scale;  /* (1<<res_bits)-1 snapshot at begin, mv math */
 	uint32_t dma_periph;  /* DMA0 or DMA1                          */
 	uint8_t  dma_channel; /* dma_channel_enum value                */
 	uint32_t pace_timer;  /* TIMER5 (stream 0) or TIMER6 (stream 1) */
@@ -114,6 +115,22 @@ typedef struct {
 	uint32_t          total_read;
 	uint8_t           dsp_chain_id;
 	bool              dsp_bound;
+
+	/* --- #496 DSP runtime dispatch: filtered data plane --- */
+	/* When a FIR/IIR chain is bound, the base-level pump
+	 * (bridge_hw_tick) drains raw ring samples through the FAC HW into
+	 * this processed ring; stream_read drains the PROCESSED ring instead
+	 * of the raw one.  SPSC: the pump is the sole producer (proc_write,
+	 * base level) and the sole consumer of the raw ring for this stream
+	 * (pump_raw_read); stream_read (CS-EXTI) is the sole consumer
+	 * (proc_read).  Monotonic counts (not indices) so backlog math is
+	 * the same exact-difference form the raw path uses.  proc_write is
+	 * volatile: written at base level, read in the CS-EXTI handler. */
+	uint16_t          proc_ring[BRIDGE_ADC_STREAM_RING_SAMPLES];
+	volatile uint32_t proc_write;    /* pump-produced sample count      */
+	uint32_t          proc_read;     /* stream_read-consumed count      */
+	uint32_t          pump_raw_read; /* pump's raw-ring consumer count  */
+	uint8_t           dsp_terminal;  /* terminal stage kind (0 FIR/1 IIR/3 FFT) */
 } adc_stream_state_t;
 
 /* ----------------------------------------------------------------- */
@@ -131,11 +148,22 @@ typedef struct {
 /* Shared analog + timer constants.                                   */
 /* ----------------------------------------------------------------- */
 
-/* VREF for the ADC's 12-bit right-aligned code -> millivolt
- * conversion.  V2N's analog supply is 1.8 V (maintainer-confirmed
- * the same rail used by DAC_VREF_MV).  Full-scale is 4095 codes. */
+/* VREF for the ADC's right-aligned code -> millivolt conversion.
+ * V2N's analog supply is 1.8 V (maintainer-confirmed the same rail
+ * used by DAC_VREF_MV).  ADC_FULL_SCALE is the 12-bit default; when a
+ * channel is reconfigured to a lower resolution via
+ * bridge_hw_adc_configure the code range shrinks (10b -> 1023, 8b ->
+ * 255, 6b -> 63), so the read paths divide by adc_full_scale_for_bits()
+ * of the channel's cached resolution rather than this constant.
+ * Oversampling keeps the code range at the selected resolution's
+ * full-scale (see adc_oversample_params: shift == log2(ratio)
+ * normalises the accumulator), so full-scale tracks resolution alone. */
 #define ADC_VREF_MV    1800u
 #define ADC_FULL_SCALE 4095u
+
+/* Resolution + oversample bounds honoured by bridge_hw_adc_configure. */
+#define ADC_RES_BITS_DEFAULT     12u
+#define ADC_OVERSAMPLE_RATIO_MAX 256u /* power-of-two ratios 1..256 */
 
 /* Default sample time used for single-shot reads.  240 cycles is
  * the most conservative setting in the vendor's range -- gives the
@@ -171,6 +199,8 @@ extern const gd32_gpio_pad_t gpio_pad_map[GPIO_PAD_MAP_COUNT];        /* gpio.c 
 extern bool                  gpio_is_output[GPIO_PAD_MAP_COUNT];      /* gpio.c */
 extern const gd32_adc_ch_t   adc_channels_map[ADC_CHANNEL_MAP_COUNT]; /* adc.c */
 extern uint16_t              adc_sample_cycles_cache[8];              /* adc.c */
+extern uint8_t               adc_resolution_bits_cache[8];            /* adc.c */
+extern uint16_t              adc_oversample_ratio_cache[8];           /* adc.c */
 extern const gd32_qenc_t     qenc_map[QENC_CHANNEL_COUNT];            /* qenc.c */
 extern const gd32_pwm_ch_t   pwm_channels[PWM_CHANNEL_COUNT];         /* pwm.c */
 extern const gd32_dac_ch_t   dac_channels[DAC_CHANNEL_COUNT];         /* dac.c */
@@ -183,13 +213,21 @@ extern bool                  vref_ok;                                 /* vref.c 
 /* Shared helpers (defined in the TU named per line).                 */
 /* ----------------------------------------------------------------- */
 
-bool trng_start(void);                          /* trng.c */
-bool trng_poll_ready(void);                     /* trng.c */
-bool vref_ready_check(void);                    /* vref.c */
-bool adc_periph_init(uint32_t periph);          /* adc.c */
-void qenc_channel_init(const gd32_qenc_t *e);   /* qenc.c */
-void pwm_timer_init(uint32_t periph);           /* pwm.c */
-void pwm_channel_init(const gd32_pwm_ch_t *ch); /* pwm.c */
-void se_reset_init(void);                       /* se_reset.c */
+bool trng_start(void);                 /* trng.c */
+bool trng_poll_ready(void);            /* trng.c */
+bool vref_ready_check(void);           /* vref.c */
+bool adc_periph_init(uint32_t periph); /* adc.c */
+
+/* Resolution/oversample helpers (adc.c) shared with the stream path.
+ * adc_full_scale_for_bits maps a cached resolution to its code range;
+ * adc_apply_conv_format programs a channel's cached resolution +
+ * oversample into the ADC (caller MUST hold the converter disabled --
+ * DRES/OVSAMPCTL only latch with ADCON == 0). */
+uint16_t adc_full_scale_for_bits(uint8_t bits);                   /* adc.c */
+void     adc_apply_conv_format(uint32_t periph, uint8_t channel); /* adc.c */
+void     qenc_channel_init(const gd32_qenc_t *e);                 /* qenc.c */
+void     pwm_timer_init(uint32_t periph);                         /* pwm.c */
+void     pwm_channel_init(const gd32_pwm_ch_t *ch);               /* pwm.c */
+void     se_reset_init(void);                                     /* se_reset.c */
 
 #endif /* GD32_BRIDGE_HAL_GD32_COMMON_H */

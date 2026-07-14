@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 Alp Lab AB (provenance header).
- * Vendored VERBATIM from the Apache-2.0 zephyr_alif fork. ADR 0017 Tier-2 (INTERIM, task #21).
+ * Vendored VERBATIM from the Apache-2.0 zephyr_alif fork. ADR 0017 Tier-2 (INTERIM).
  */
 
 #ifndef _DPHY_DW_H_

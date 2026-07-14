@@ -11,7 +11,7 @@ name: pr-metadata-validate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
@@ -23,18 +23,29 @@ on:
       - 'scripts/alp_project.py'
       - 'scripts/alp_orchestrate/**'
       - 'scripts/check_emit_snapshots.py'
+      - 'scripts/check_stub_symbol_matrix.py'
+      - 'src/common/stub_backend.c'
+      - 'src/common/stub/**'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
+      - 'scripts/check_e1m_pinout.py'
+      - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'tests/fixtures/emit-snapshots/**'
+      - 'tests/fixtures/stub-symbol-matrix/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
+      - 'west.yml'
+      - 'metadata/libraries/**'
+      - 'scripts/requirements.txt'
+      - 'scripts/alp_cli/__init__.py'
+      - 'alp.lock'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
@@ -42,15 +53,26 @@ on:
       - 'include/alp/chips/**'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/alp_project.py'
+      - 'scripts/check_stub_symbol_matrix.py'
+      - 'src/common/stub_backend.c'
+      - 'src/common/stub/**'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
+      - 'scripts/check_e1m_pinout.py'
+      - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
+      - 'tests/fixtures/stub-symbol-matrix/**'
       - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
+      - 'west.yml'
+      - 'metadata/libraries/**'
+      - 'scripts/requirements.txt'
+      - 'scripts/alp_cli/__init__.py'
+      - 'alp.lock'
   workflow_dispatch:
 
 concurrency:
@@ -83,6 +105,13 @@ jobs:
       # accidentally claim the same silicon pad on a SoM pinout.
       - name: Check pin conflicts in every SoM peripheral map
         run: python3 scripts/check_pin_conflicts.py
+
+      # Cross-checks every non-TBD E1M pad/function claimed by a SoM
+      # pin-mux table against the vendored e1m-spec standard snapshot
+      # (metadata/e1m/pinout-*.json).  Catches a TSV naming a pad or
+      # function the E1M standard doesn't define, or a stale snapshot.
+      - name: Check E1M pinout snapshot <-> pin-mux tables
+        run: python3 scripts/check_e1m_pinout.py
 
       # Catches inference-backend / model-format naming drift: every
       # backend a preset selects must be a canonical string the device
@@ -132,14 +161,24 @@ jobs:
           test -s /tmp/alp.overlay
           echo "--- generated dts-overlay ---"
           cat /tmp/alp.overlay
-          # Sanity: every v0.3-scoped class produces at least one
-          # alias (E1M-EVK wires all five) and the pin-array block
-          # is present.
-          grep -q 'alp-i2c0' /tmp/alp.overlay
+          # Sanity: the header-derived bus classes each produce at least
+          # one alias, and the pin-array block is present.
+          #
+          # NOTE: i2c/adc are CATALOG-OWNED on the aen family (the template's
+          # SoM is E1M-AEN801) -- their aliases emit only for peripherals the
+          # core explicitly DECLARES, and the template declares none.  So
+          # alp-i2c0 / alp-adc0 are correctly ABSENT here; that contract is
+          # covered by test_project_overlay.py::test_overlay_aen_family_does_not_
+          # emit_generic_i2c_adc_aliases.  Do NOT re-add an `alp-i2c0` grep --
+          # it contradicts the catalog-owned design (was stale from before
+          # the template switched to an aen SoM).
           grep -q 'alp-spi1' /tmp/alp.overlay
           grep -q 'alp-uart0' /tmp/alp.overlay
           grep -q 'alp-pwm0' /tmp/alp.overlay
           grep -q 'alp,pin-array' /tmp/alp.overlay
+          # Lock the catalog-owned contract: no generic i2c/adc alias.
+          ! grep -q 'alp-i2c0' /tmp/alp.overlay
+          ! grep -q 'alp-adc0' /tmp/alp.overlay
 
       # The hw-info-h path bakes board.yaml identifiers into a C
       # header apps include alongside <alp/hw_info.h> to call
@@ -222,6 +261,15 @@ jobs:
       - name: Check --emit snapshots are byte-identical
         run: python3 scripts/check_emit_snapshots.py
 
+      # Compile the shared stub backend under every ALP_VENDOR_OVERRIDES_*
+      # combination and assert no public alp_* symbol is defined twice or
+      # dropped.  This is the link-completeness guard the #673 split of
+      # stub_backend.c into per-class TUs lands against: a mis-set gate that
+      # would surface only as a downstream duplicate/undefined-symbol link
+      # error fails here at PR time instead.
+      - name: Check stub backend symbol matrix (compile/link)
+        run: python3 scripts/check_stub_symbol_matrix.py
+
       # Cross-validate: every `id:` in every metadata/socs/.../*.json
       # cores[] block must have a matching key in every consuming
       # SoM preset's `topology:` block.  Catches the case where a
@@ -271,7 +319,7 @@ jobs:
       # regressions the smoke tests above can't reach.
       - name: Unit tests for the loader
         run: |
-          python3 -m unittest tests.scripts.test_alp_project -v
+          python3 -m unittest discover -s tests/scripts -p 'test_project_*.py' -v
 
       # Lint board.yaml fragments embedded in markdown documentation
       # against the v2 schema.  Catches doc drift -- e.g. a README
@@ -288,6 +336,11 @@ jobs:
       - name: Gate — vendor-ext headers carry @par Supported silicon tag
         run: python3 scripts/check_vendor_ext_tags.py
 
+      - name: Gate — root public headers stay chip-neutral
+        run: python3 scripts/check_public_header_purity.py
+      - name: Gate — no hard-coded home-directory paths in build/exec files
+        run: python3 scripts/check_local_paths.py
+
       - name: Gate — sw_fallback.c files carry Cost + Performance tags
         run: python3 scripts/check_sw_fallback_tags.py
 
@@ -299,6 +352,12 @@ jobs:
 
       - name: Gate — chip header driver-status labels match metadata
         run: python3 scripts/check_chip_header_status.py
+
+      - name: Gate — quality-task registry matches scripts/check_*.py on disk
+        run: python3 scripts/check_quality_registry.py
+
+      - name: alp.lock in sync
+        run: python3 scripts/west_commands/alp_lock.py --workspace . --check
 
       # Validate every HiL smoke spec under tests/hil/ parses against
       # its board's _runner.yaml.  Cheap host-side check (no hardware

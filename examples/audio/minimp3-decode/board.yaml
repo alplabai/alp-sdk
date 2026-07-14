@@ -1,0 +1,33 @@
+# board.yaml -- per-app project configuration for the
+# minimp3-decode example.
+#
+# Demonstrates the vendored minimp3 single-header decoder against a
+# canned MP3 byte array -- no I2S/codec HW required, so this builds
+# and runs identically on native_sim and real silicon.  Per-core
+# `libraries: [minimp3]` (the §D.lib batch mechanism -- distinct from
+# the top-level ADR-0018 `libraries:` key, which resolves against
+# metadata/libraries/*.yaml instead) pulls in the library's Kconfig
+# knobs from metadata/library-profiles/minimp3/hw-backends.yaml
+# (pure-C SW fallback is the floor; DSP/SIMD backends are selected
+# automatically when the SoM capability is present -- irrelevant here
+# since we never touch a real I2S peripheral).
+libraries:
+  - name: minimp3
+    cores: [m55_hp]
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    # Pure compute -- no peripheral wiring needed to decode a canned
+    # in-memory MP3 buffer.  A real player would add `i2s` here and
+    # stream mp3dec_decode_frame()'s PCM output to BOARD_I2S_AUDIO
+    # (see examples/audio/i2s-tone).
+    peripherals: []
+
+diagnostics:
+  log_level: info

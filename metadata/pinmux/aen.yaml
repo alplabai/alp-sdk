@@ -99,6 +99,7 @@ pads:
   - { e1m_pad: "AH8", e1m_function: "SPI1_CS1", owner: "cc3501e", silicon_peripheral: "SPI1.CS1", silicon_pad: "GPIO_15" }
   - { e1m_pad: "AH9", e1m_function: "SPI1_CS0", owner: "cc3501e", silicon_peripheral: "SPI1.CS0", silicon_pad: "GPIO_31" }
   - { e1m_pad: "AH33", e1m_function: "IO10", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO35" }
+  - { e1m_pad: "AH34", e1m_function: "IO9", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO12" }
   - { e1m_pad: "E3", e1m_function: "IO13", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO13" }
   - { e1m_pad: "F3", e1m_function: "IO15", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO14" }
   - { e1m_pad: "G3", e1m_function: "IO16", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO17" }

@@ -9,7 +9,7 @@
 # MHUv2 IP -- so the fork DT nodes bind unchanged.  Upstream Zephyr v4.4 ships
 # no MHUv2 IPM driver/binding; this is the alp-sdk vendor-ext that lets the
 # Secure-Enclave service client (hal_alif se_services/) reach the SE over the
-# RTSS<->SE mailboxes.  ADR 0017 Tier-2 (INTERIM, task #21).
+# RTSS<->SE mailboxes.  ADR 0017 Tier-2 (INTERIM).
 
 description: ARM MHUv2 (Message Handling Unit v2), exposed via the Zephyr IPM API
 

@@ -2,12 +2,31 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * cc3501e-bridge firmware: shared command-handler table.
+ * cc3501e-bridge firmware: top-level dispatch + transport-agnostic
+ * framing.
  *
  * Both the SPI transport (default) and the SDIO transport (optional,
  * customer-selectable) feed validated request frames into
  * protocol_dispatch() here -- one command set, one set of reply codes,
  * transport-agnostic (the gd32-bridge SPI + I2C model).
+ *
+ * The per-command-family handlers (META, stream-write, GPIO proxy,
+ * camera enables, Wi-Fi, sockets, BLE, power policy, diagnostics, OTA)
+ * live in the sibling protocol_<family>.c TUs (split out of this file,
+ * issue #461); this file keeps only:
+ *
+ *   - protocol_dispatch(): the single opcode -> handler switch (the
+ *     command-family "table" the header/README describe).
+ *   - protocol_build_reply(): the shared request/reply framing wrapper
+ *     every transport calls.
+ *   - the worker-routed state-machine helpers (handle_worker_routed and
+ *     friends) that several families' handlers call to move a blocking
+ *     HAL body off the SPI ISR -- declared in protocol_internal.h,
+ *     defined here as the one shared TU.
+ *   - the diagnostics frame counters (g_last_error / g_frames_ok /
+ *     g_frames_err) protocol_build_reply() updates centrally; the
+ *     GET_DIAG_INFO / DIAG_GET_STATS handlers in protocol_diag.c read
+ *     them via protocol_internal.h's extern declarations.
  *
  * v0.1 ("bring-up") scope: the META group only (PING, GET_VERSION,
  * GET_MAC, RESET).  Every other opcode -- Wi-Fi, BLE, GPIO proxy,
@@ -16,144 +35,21 @@
  * does not implement with ALP_CC3501E_RESP_ERR_INVALID").  Those land
  * in v0.2+ and route to TI's SimpleLink Wi-Fi / BLE APIs through the
  * HAL backend; see docs/cc3501e-bridge.md "v0.x roadmap".
- *
- * Handlers that touch hardware (MAC read, self-reset) call the
- * cc3501e_hw_* shims declared in ../hal/cc3501e_hw.h.  The stub backend
- * (hal/cc3501e_hw_stub.c) keeps the protocol path exercisable on the
- * host with no TI SDK; the real bodies live in hal/ti/ and link against
- * TI's SimpleLink CC33xx SDK on the bench build.
  */
 
-#include <string.h>
-
-#include "protocol.h"
-#include "worker.h"
-#include "event_ring.h"
-#include "../hal/cc3501e_hw.h"
-
-/* --------------------------------------------------------------- */
-/* Little-endian helpers (firmware side, parallel to the host).      */
-/* --------------------------------------------------------------- */
-
-static void put_le16(uint8_t *p, uint16_t v)
-{
-	p[0] = (uint8_t)(v & 0xFFu);
-	p[1] = (uint8_t)((v >> 8) & 0xFFu);
-}
-
-static void put_le32(uint8_t *p, uint32_t v)
-{
-	p[0] = (uint8_t)(v & 0xFFu);
-	p[1] = (uint8_t)((v >> 8) & 0xFFu);
-	p[2] = (uint8_t)((v >> 16) & 0xFFu);
-	p[3] = (uint8_t)((v >> 24) & 0xFFu);
-}
-
-/* Read a 32-bit little-endian field from the wire byte-by-byte (the request
- * buffer is not guaranteed 4-aligned, so don't cast through a u32 pointer). */
-static uint32_t get_le32(const uint8_t *p)
-{
-	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-/* Firmware *release* version reported by GET_DIAG_INFO.fw_version (u16).
- *
- * SINGLE SOURCE OF TRUTH = firmware-version.txt.  The build systems parse
- * that SemVer and pass the packed value in on the command line, so the
- * runtime marker can never drift from the release version:
- *   - CMake (stub build):  target_compile_definitions in CMakeLists.txt
- *   - ti build:            -DCC3501E_BRIDGE_FW_VERSION_U16 in ti/build_ti.sh
- *
- * Packing (pre-1.0 SemVer 0.MINOR.PATCH): high byte = MINOR, low byte =
- * PATCH, i.e. 0.2.0 -> 0x0200, 0.2.5 -> 0x0205.  MAJOR is 0 pre-1.0; fold
- * it into the encoding when the first 1.x ships.
- *
- * This is distinct from BOTH:
- *   - ALP_CC3501E_PROTOCOL_VERSION (GET_VERSION) -- the wire-compat gate.
- *   - the GPE flash/image version (ti/deploy_validate.sh) -- the vendor-RoT
- *     anti-rollback gate; monotonic + date-derived, NOT this app SemVer.
- *
- * The #ifndef fallback keeps a standalone compile (no -D) sane and MUST
- * track firmware-version.txt's current value. */
-#ifndef CC3501E_BRIDGE_FW_VERSION_U16
-#define CC3501E_BRIDGE_FW_VERSION_U16 0x0200u /* fallback = firmware-version.txt 0.2.0 */
-#endif
+#include "protocol_internal.h"
 
 /* Diagnostics state (firmware-side): last_error = the most recent non-OK
  * response emitted; the frame counters feed DIAG_GET_STATS.  All are
- * updated centrally in protocol_build_reply(). */
-static uint8_t  g_last_error = ALP_CC3501E_RESP_OK;
-static uint32_t g_frames_ok;
-static uint32_t g_frames_err;
-/* Running total of bytes sunk by CMD_STREAM_WRITE (proto v2 bulk stream). */
-static uint32_t g_stream_bytes;
+ * updated centrally here in protocol_build_reply(); protocol_diag.c only
+ * reads them (see the extern declarations in protocol_internal.h). */
+uint8_t  g_last_error = ALP_CC3501E_RESP_OK;
+uint32_t g_frames_ok;
+uint32_t g_frames_err;
 
 /* --------------------------------------------------------------- */
-/* META handlers (opcodes 0x00..0x0F)                                */
+/* Worker-routed state-machine helpers                               */
 /* --------------------------------------------------------------- */
-
-/* PING (0x00): liveness probe.  Empty request, empty reply data --
- * the bare RESP_OK status the transport prepends is the "firmware is
- * alive" signal the host's first post-boot handshake waits for. */
-static alp_cc3501e_resp_t handle_ping(const uint8_t *req,
-                                      size_t         req_len,
-                                      uint8_t       *reply_data,
-                                      size_t         reply_cap,
-                                      size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	*reply_data_len = 0u;
-	return ALP_CC3501E_RESP_OK;
-}
-
-/* GET_VERSION (0x01): wire-protocol compatibility gate.  Returns the
- * 16-bit ALP_CC3501E_PROTOCOL_VERSION (LE); the host refuses to talk
- * to a firmware whose value != its compile-time ALP_CC3501E_PROTOCOL_VERSION.
- *
- * This returns the PROTOCOL version, not the firmware RELEASE version
- * (firmware-version.txt), matching the host driver's compatibility
- * check `version != ALP_CC3501E_PROTOCOL_VERSION` and the chip-header
- * doc.  (The diag-struct comment in <alp/protocol/cc3501e.h> that says
- * GET_VERSION returns the release version is a documentation
- * discrepancy -- tracked in DESIGN.md; the release version is reported
- * separately via GET_DIAG_INFO.fw_version in v2 firmware.) */
-static alp_cc3501e_resp_t handle_get_version(const uint8_t *req,
-                                             size_t         req_len,
-                                             uint8_t       *reply_data,
-                                             size_t         reply_cap,
-                                             size_t        *reply_data_len)
-{
-	(void)req;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 2u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-	put_le16(reply_data, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION);
-	*reply_data_len = 2u;
-	return ALP_CC3501E_RESP_OK;
-}
-
-/* STREAM_WRITE (0x45, proto v2): bulk-data stream sink.  Accepts an opaque
- * payload (up to ALP_CC3501E_MAX_PAYLOAD-header bytes), counts + discards it,
- * and acks with empty reply data.  A back-to-back sequence is a FRAMED bulk
- * stream whose per-frame payload phase rides the host DMA path; because every
- * frame is acked the link never desyncs (unlike raw throwaway clocking).  The
- * running total is reported via GET_DIAG_INFO for throughput accounting.
- * Synchronous (no worker): a memory sink can't block. */
-static alp_cc3501e_resp_t handle_stream_write(const uint8_t *req,
-                                              size_t         req_len,
-                                              uint8_t       *reply_data,
-                                              size_t         reply_cap,
-                                              size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	g_stream_bytes += (uint32_t)req_len;
-	*reply_data_len = 0u;
-	return ALP_CC3501E_RESP_OK;
-}
 
 /* Generic worker-routed handler for an ARGUMENT-FREE command whose HAL body
  * may BLOCK for seconds (a radio op) and therefore must NOT run in the SPI
@@ -180,12 +76,12 @@ static alp_cc3501e_resp_t handle_stream_write(const uint8_t *req,
  * On the stub/native backend worker_submit() runs the job synchronously,
  * so the host needs exactly one extra poll (submit -> BUSY, re-issue ->
  * the cached NOT_READY/RESP_OK). */
-static alp_cc3501e_resp_t handle_worker_routed(alp_cc3501e_cmd_t cmd,
-                                               size_t            min_cap,
-                                               size_t            req_len,
-                                               uint8_t          *reply_data,
-                                               size_t            reply_cap,
-                                               size_t           *reply_data_len)
+alp_cc3501e_resp_t handle_worker_routed(alp_cc3501e_cmd_t cmd,
+                                        size_t            min_cap,
+                                        size_t            req_len,
+                                        uint8_t          *reply_data,
+                                        size_t            reply_cap,
+                                        size_t           *reply_data_len)
 {
 	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
 	if (reply_cap < min_cap) return ALP_CC3501E_RESP_ERR_NO_MEM;
@@ -218,10 +114,10 @@ static alp_cc3501e_resp_t handle_worker_routed(alp_cc3501e_cmd_t cmd,
  * @p req_len already; on the IDLE edge the payload is stashed via
  * worker_submit_payload so the drain runs the blocking association off the SPI
  * ISR.  These ops carry no reply payload (min_cap 0). */
-static alp_cc3501e_resp_t handle_worker_routed_payload(alp_cc3501e_cmd_t cmd,
-                                                       const uint8_t    *req,
-                                                       size_t            req_len,
-                                                       size_t           *reply_data_len)
+alp_cc3501e_resp_t handle_worker_routed_payload(alp_cc3501e_cmd_t cmd,
+                                                const uint8_t    *req,
+                                                size_t            req_len,
+                                                size_t           *reply_data_len)
 {
 	*reply_data_len = 0u;
 
@@ -263,13 +159,13 @@ static alp_cc3501e_resp_t handle_worker_routed_payload(alp_cc3501e_cmd_t cmd,
  * for the record-returning scans -- so a single job round-trips a value off the
  * SPI ISR.  Poll-by-repeat, @min_cap is the reply-data floor.  The caller must
  * have validated @p req / @p req_len already. */
-static alp_cc3501e_resp_t handle_worker_routed_payload_reply(alp_cc3501e_cmd_t cmd,
-                                                             const uint8_t    *req,
-                                                             size_t            req_len,
-                                                             size_t            min_cap,
-                                                             uint8_t          *reply_data,
-                                                             size_t            reply_cap,
-                                                             size_t           *reply_data_len)
+alp_cc3501e_resp_t handle_worker_routed_payload_reply(alp_cc3501e_cmd_t cmd,
+                                                      const uint8_t    *req,
+                                                      size_t            req_len,
+                                                      size_t            min_cap,
+                                                      uint8_t          *reply_data,
+                                                      size_t            reply_cap,
+                                                      size_t           *reply_data_len)
 {
 	*reply_data_len = 0u;
 	if (reply_cap < min_cap) return ALP_CC3501E_RESP_ERR_NO_MEM;
@@ -297,840 +193,6 @@ static alp_cc3501e_resp_t handle_worker_routed_payload_reply(alp_cc3501e_cmd_t c
 	}
 }
 
-/* GET_MAC (0x03): the CC3501E's factory MAC (6 bytes, big-endian wire
- * order as TI stores it).  Read from the radio subsystem via the HAL.
- *
- * Routed through the async worker (P0-4/P0-6): the real CC3501E_WIFI body
- * (Wlan_Get, preceded by a one-time Wi-Fi init) blocks for SECONDS, which
- * MUST NOT happen in the SPI ISR that runs this handler.  See
- * handle_worker_routed for the poll-by-repeat state machine. */
-static alp_cc3501e_resp_t handle_get_mac(const uint8_t *req,
-                                         size_t         req_len,
-                                         uint8_t       *reply_data,
-                                         size_t         reply_cap,
-                                         size_t        *reply_data_len)
-{
-	(void)req;
-	return handle_worker_routed(
-	    ALP_CC3501E_CMD_GET_MAC, 6u, req_len, reply_data, reply_cap, reply_data_len);
-}
-
-/* RESET (0x02): host-requested soft reset.  Reply OK now; the HAL
- * defers the actual reboot until after the reply has been clocked back
- * to the host (so the host sees the ack), then resets the chip -- which
- * the host detects as the firmware going quiet then re-PINGing alive.
- * On the stub backend the deferred reset is a no-op. */
-static alp_cc3501e_resp_t handle_reset(const uint8_t *req,
-                                       size_t         req_len,
-                                       uint8_t       *reply_data,
-                                       size_t         reply_cap,
-                                       size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	cc3501e_hw_request_reset();
-	*reply_data_len = 0u;
-	return ALP_CC3501E_RESP_OK;
-}
-
-/* --------------------------------------------------------------- */
-/* GPIO proxy (0x50..0x5F) + camera enables (0x60..0x61)             */
-/* --------------------------------------------------------------- */
-
-/* Map a HAL return code (CC3501E_HW_*) onto a wire response status.
- * NOTIMPL -> NOT_READY (the op is not wired on this backend yet);
- * INVAL -> INVALID; any other failure -> RADIO (generic HW/IO). */
-static alp_cc3501e_resp_t hw_to_resp(int rv)
-{
-	switch (rv) {
-	case CC3501E_HW_OK:
-		return ALP_CC3501E_RESP_OK;
-	case CC3501E_HW_BUSY:
-		return ALP_CC3501E_RESP_ERR_BUSY;
-	case CC3501E_HW_ERR_NOTIMPL:
-		return ALP_CC3501E_RESP_ERR_NOT_READY;
-	case CC3501E_HW_ERR_INVAL:
-		return ALP_CC3501E_RESP_ERR_INVALID;
-	default:
-		return ALP_CC3501E_RESP_ERR_RADIO;
-	}
-}
-
-/* GPIO_CONFIGURE (0x50): set direction + pull on a proxied CC3501E pad. */
-static alp_cc3501e_resp_t handle_gpio_configure(const uint8_t *req,
-                                                size_t         req_len,
-                                                uint8_t       *reply_data,
-                                                size_t         reply_cap,
-                                                size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != sizeof(alp_cc3501e_gpio_configure_t)) return ALP_CC3501E_RESP_ERR_INVALID;
-	const alp_cc3501e_gpio_configure_t *c = (const alp_cc3501e_gpio_configure_t *)req;
-	return hw_to_resp(cc3501e_hw_gpio_configure(c->cc3501e_gpio, c->direction, c->pull));
-}
-
-/* GPIO_WRITE (0x51): drive a proxied pad (open-drain semantics in the HAL). */
-static alp_cc3501e_resp_t handle_gpio_write(const uint8_t *req,
-                                            size_t         req_len,
-                                            uint8_t       *reply_data,
-                                            size_t         reply_cap,
-                                            size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != sizeof(alp_cc3501e_gpio_write_t)) return ALP_CC3501E_RESP_ERR_INVALID;
-	const alp_cc3501e_gpio_write_t *w = (const alp_cc3501e_gpio_write_t *)req;
-	return hw_to_resp(cc3501e_hw_gpio_write(w->cc3501e_gpio, w->level));
-}
-
-/* GPIO_READ (0x52): request payload = 1 byte (cc3501e_gpio); reply data =
- * the sampled level (1 byte). */
-static alp_cc3501e_resp_t handle_gpio_read(const uint8_t *req,
-                                           size_t         req_len,
-                                           uint8_t       *reply_data,
-                                           size_t         reply_cap,
-                                           size_t        *reply_data_len)
-{
-	*reply_data_len = 0u;
-	if (req_len != 1u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 1u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-	uint8_t            level = 0u;
-	alp_cc3501e_resp_t st    = hw_to_resp(cc3501e_hw_gpio_read(req[0], &level));
-	if (st == ALP_CC3501E_RESP_OK) {
-		reply_data[0]   = level;
-		*reply_data_len = 1u;
-	}
-	return st;
-}
-
-/* GPIO_SET_INTERRUPT (0x53): arm/disable an edge IRQ on a proxied pad.  The
- * async EVT_GPIO_INTERRUPT delivery needs the next-rev host-IRQ line; this
- * rev accepts the config (event delivery lands with r2 -- see DESIGN.md). */
-static alp_cc3501e_resp_t handle_gpio_set_interrupt(const uint8_t *req,
-                                                    size_t         req_len,
-                                                    uint8_t       *reply_data,
-                                                    size_t         reply_cap,
-                                                    size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != sizeof(alp_cc3501e_gpio_set_interrupt_t)) return ALP_CC3501E_RESP_ERR_INVALID;
-	const alp_cc3501e_gpio_set_interrupt_t *s = (const alp_cc3501e_gpio_set_interrupt_t *)req;
-	return hw_to_resp(cc3501e_hw_gpio_set_interrupt(s->cc3501e_gpio, s->edge, s->enabled));
-}
-
-/* CAM_ENABLE (0x60) / CAM_DISABLE (0x61): drive CAM_EN_LDO0/1.  Request
- * payload = 1 byte (which: 0 -> LDO0, 1 -> LDO1). */
-static alp_cc3501e_resp_t handle_cam_enable(const uint8_t *req,
-                                            size_t         req_len,
-                                            uint8_t       *reply_data,
-                                            size_t         reply_cap,
-                                            size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 1u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_cam_enable(req[0], 1u));
-}
-
-static alp_cc3501e_resp_t handle_cam_disable(const uint8_t *req,
-                                             size_t         req_len,
-                                             uint8_t       *reply_data,
-                                             size_t         reply_cap,
-                                             size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 1u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_cam_enable(req[0], 0u));
-}
-
-/* --------------------------------------------------------------- */
-/* Wi-Fi (0x10..0x1F)                                                */
-/* --------------------------------------------------------------- */
-
-/* WIFI_SCAN_START (0x10): reply data = the packed AP-record list (each
- * record = bssid[6] | rssi(1) | channel(1) | security(1) | ssid_len(1)
- * then ssid_len SSID bytes -- the cc3501e_wifi_scan host parser's wire
- * format).  Worker-routed: the real Wlan_Scan + event rendezvous blocks
- * for seconds and MUST run off the SPI ISR (see handle_worker_routed). */
-static alp_cc3501e_resp_t handle_wifi_scan_start(const uint8_t *req,
-                                                 size_t         req_len,
-                                                 uint8_t       *reply_data,
-                                                 size_t         reply_cap,
-                                                 size_t        *reply_data_len)
-{
-	(void)req;
-	return handle_worker_routed(
-	    ALP_CC3501E_CMD_WIFI_SCAN_START, 0u, req_len, reply_data, reply_cap, reply_data_len);
-}
-
-static alp_cc3501e_resp_t handle_wifi_scan_stop(const uint8_t *req,
-                                                size_t         req_len,
-                                                uint8_t       *reply_data,
-                                                size_t         reply_cap,
-                                                size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_wifi_scan_stop());
-}
-
-/* WIFI_CONNECT_STA (0x12) / WIFI_AP_START (0x14): payload is an
- * alp_cc3501e_wifi_connect_t header followed by the inline ssid[ssid_len]
- * then psk[psk_len].  Validates the cumulative length exactly. */
-/* Validate the connect/AP wire payload, then WORKER-ROUTE the association (it
- * blocks for seconds on the connect/IP event and so MUST NOT run in
- * protocol_dispatch's SPI-ISR context).  The raw req payload is forwarded to
- * the worker, which re-derives ssid/psk from the same struct in the drain. */
-static alp_cc3501e_resp_t
-wifi_join(const uint8_t *req, size_t req_len, int ap, size_t *reply_data_len)
-{
-	if (req_len < sizeof(alp_cc3501e_wifi_connect_t)) return ALP_CC3501E_RESP_ERR_INVALID;
-	const alp_cc3501e_wifi_connect_t *c = (const alp_cc3501e_wifi_connect_t *)req;
-	const size_t                      need =
-	    sizeof(alp_cc3501e_wifi_connect_t) + (size_t)c->ssid_len + (size_t)c->psk_len;
-	if (req_len != need) return ALP_CC3501E_RESP_ERR_INVALID;
-	const alp_cc3501e_cmd_t cmd =
-	    ap ? ALP_CC3501E_CMD_WIFI_AP_START : ALP_CC3501E_CMD_WIFI_CONNECT_STA;
-	return handle_worker_routed_payload(cmd, req, req_len, reply_data_len);
-}
-
-static alp_cc3501e_resp_t handle_wifi_connect_sta(const uint8_t *req,
-                                                  size_t         req_len,
-                                                  uint8_t       *reply_data,
-                                                  size_t         reply_cap,
-                                                  size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	return wifi_join(req, req_len, 0, reply_data_len);
-}
-
-static alp_cc3501e_resp_t handle_wifi_ap_start(const uint8_t *req,
-                                               size_t         req_len,
-                                               uint8_t       *reply_data,
-                                               size_t         reply_cap,
-                                               size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	return wifi_join(req, req_len, 1, reply_data_len);
-}
-
-static alp_cc3501e_resp_t handle_wifi_disconnect(const uint8_t *req,
-                                                 size_t         req_len,
-                                                 uint8_t       *reply_data,
-                                                 size_t         reply_cap,
-                                                 size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_wifi_disconnect());
-}
-
-static alp_cc3501e_resp_t handle_wifi_ap_stop(const uint8_t *req,
-                                              size_t         req_len,
-                                              uint8_t       *reply_data,
-                                              size_t         reply_cap,
-                                              size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_wifi_ap_stop());
-}
-
-/* WIFI_GET_RSSI (0x16): reply data = signed RSSI in dBm (1 byte).
- * Worker-routed: the real Wlan_Get(WLAN_GET_RSSI) lazy-starts the radio on
- * first use (seconds) and so MUST run off the SPI ISR (see
- * handle_worker_routed). */
-static alp_cc3501e_resp_t handle_wifi_get_rssi(const uint8_t *req,
-                                               size_t         req_len,
-                                               uint8_t       *reply_data,
-                                               size_t         reply_cap,
-                                               size_t        *reply_data_len)
-{
-	(void)req;
-	return handle_worker_routed(
-	    ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u, req_len, reply_data, reply_cap, reply_data_len);
-}
-
-/* WIFI_GET_IP (0x17): reply data = 4-byte IPv4 address. */
-static alp_cc3501e_resp_t handle_wifi_get_ip(const uint8_t *req,
-                                             size_t         req_len,
-                                             uint8_t       *reply_data,
-                                             size_t         reply_cap,
-                                             size_t        *reply_data_len)
-{
-	(void)req;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 4u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-	uint8_t            ip[4] = { 0 };
-	alp_cc3501e_resp_t st    = hw_to_resp(cc3501e_hw_wifi_get_ip(ip));
-	if (st == ALP_CC3501E_RESP_OK) {
-		memcpy(reply_data, ip, 4u);
-		*reply_data_len = 4u;
-	}
-	return st;
-}
-
-/* WIFI_STATUS (0x1B): reply data = alp_cc3501e_wifi_status_t
- * { state(1) | fail_reason(1) | rssi_dbm(int8) | reserved(1) }.  A NON-BLOCKING
- * read of the firmware connection-status latch (no radio op -- safe in the SPI
- * ISR), so the host can collect an async connect outcome without poll-by-repeat
- * on WIFI_CONNECT_STA (which clocked the bridge while the radio op held it down). */
-static alp_cc3501e_resp_t handle_wifi_status(const uint8_t *req,
-                                             size_t         req_len,
-                                             uint8_t       *reply_data,
-                                             size_t         reply_cap,
-                                             size_t        *reply_data_len)
-{
-	(void)req;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 4u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-	uint8_t state = 0u, fail_reason = 0u;
-	int8_t  rssi = 0;
-	(void)cc3501e_hw_wifi_conn_status(&state, &fail_reason, &rssi);
-	reply_data[0]   = state;
-	reply_data[1]   = fail_reason;
-	reply_data[2]   = (uint8_t)rssi;
-	reply_data[3]   = 0u;
-	*reply_data_len = 4u;
-	return ALP_CC3501E_RESP_OK;
-}
-
-/* --------------------------------------------------------------- */
-/* TCP/UDP sockets (0x20..0x24)                                      */
-/*                                                                   */
-/* All five WORKER-ROUTE their (blocking) lwIP body off the SPI ISR:  */
-/* every socket op is a tcpip_apimsg round-trip to the lwIP core      */
-/* thread (connect/recv also wait on the network).  OPEN/SEND/RECV    */
-/* return reply DATA (handle / byte-count / bytes) via the payload+   */
-/* reply seam; CONNECT/CLOSE carry a payload only.  Socket payloads   */
-/* are validated field-by-field here (the wire structs are naturally  */
-/* packed, but parse defensively -- the request buffer alignment is   */
-/* transport-defined).  The raw req is forwarded to the worker, which */
-/* re-parses the same struct in the drain.                            */
-/* --------------------------------------------------------------- */
-
-/* SOCK_OPEN (0x20): req = alp_cc3501e_sock_open_t { family | type | protocol |
- * reserved } = 4 B.  Reply DATA = alp_cc3501e_sock_handle_t (4 B). */
-static alp_cc3501e_resp_t handle_sock_open(const uint8_t *req,
-                                           size_t         req_len,
-                                           uint8_t       *reply_data,
-                                           size_t         reply_cap,
-                                           size_t        *reply_data_len)
-{
-	*reply_data_len = 0u;
-	if (req_len != sizeof(alp_cc3501e_sock_open_t)) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (req[0] != (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4) {
-		return ALP_CC3501E_RESP_ERR_INVALID; /* v1 IP stack is IPv4-only */
-	}
-	return handle_worker_routed_payload_reply(ALP_CC3501E_CMD_SOCK_OPEN,
-	                                          req,
-	                                          req_len,
-	                                          sizeof(alp_cc3501e_sock_handle_t),
-	                                          reply_data,
-	                                          reply_cap,
-	                                          reply_data_len);
-}
-
-/* SOCK_CONNECT (0x21): req = alp_cc3501e_sock_connect_t = 24 B.  No reply data. */
-static alp_cc3501e_resp_t handle_sock_connect(const uint8_t *req,
-                                              size_t         req_len,
-                                              uint8_t       *reply_data,
-                                              size_t         reply_cap,
-                                              size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	if (req_len != sizeof(alp_cc3501e_sock_connect_t)) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (req[4] != (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4) { /* peer.family */
-		return ALP_CC3501E_RESP_ERR_INVALID;
-	}
-	return handle_worker_routed_payload(ALP_CC3501E_CMD_SOCK_CONNECT, req, req_len, reply_data_len);
-}
-
-/* SOCK_SEND (0x22): req = alp_cc3501e_sock_send_t (8 B) + data_len inline bytes.
- * Reply DATA = uint16_t LE queued-byte count. */
-static alp_cc3501e_resp_t handle_sock_send(const uint8_t *req,
-                                           size_t         req_len,
-                                           uint8_t       *reply_data,
-                                           size_t         reply_cap,
-                                           size_t        *reply_data_len)
-{
-	*reply_data_len = 0u;
-	if (req_len < sizeof(alp_cc3501e_sock_send_t)) return ALP_CC3501E_RESP_ERR_INVALID;
-	const uint16_t data_len = (uint16_t)req[4] | ((uint16_t)req[5] << 8);
-	if (req_len != sizeof(alp_cc3501e_sock_send_t) + (size_t)data_len) {
-		return ALP_CC3501E_RESP_ERR_INVALID; /* declared length must match the frame */
-	}
-	return handle_worker_routed_payload_reply(
-	    ALP_CC3501E_CMD_SOCK_SEND, req, req_len, 2u, reply_data, reply_cap, reply_data_len);
-}
-
-/* SOCK_RECV (0x23): req = alp_cc3501e_sock_recv_t { handle | max_len } = 4 B.
- * Reply DATA = alp_cc3501e_sock_recv_resp_t (24 B) + received bytes inline. */
-static alp_cc3501e_resp_t handle_sock_recv(const uint8_t *req,
-                                           size_t         req_len,
-                                           uint8_t       *reply_data,
-                                           size_t         reply_cap,
-                                           size_t        *reply_data_len)
-{
-	*reply_data_len = 0u;
-	if (req_len != sizeof(alp_cc3501e_sock_recv_t)) return ALP_CC3501E_RESP_ERR_INVALID;
-	return handle_worker_routed_payload_reply(ALP_CC3501E_CMD_SOCK_RECV,
-	                                          req,
-	                                          req_len,
-	                                          sizeof(alp_cc3501e_sock_recv_resp_t),
-	                                          reply_data,
-	                                          reply_cap,
-	                                          reply_data_len);
-}
-
-/* SOCK_CLOSE (0x24): req = alp_cc3501e_sock_close_t { handle | reserved } = 4 B.
- * No reply data. */
-static alp_cc3501e_resp_t handle_sock_close(const uint8_t *req,
-                                            size_t         req_len,
-                                            uint8_t       *reply_data,
-                                            size_t         reply_cap,
-                                            size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	if (req_len != sizeof(alp_cc3501e_sock_close_t)) return ALP_CC3501E_RESP_ERR_INVALID;
-	return handle_worker_routed_payload(ALP_CC3501E_CMD_SOCK_CLOSE, req, req_len, reply_data_len);
-}
-
-/* --------------------------------------------------------------- */
-/* BLE 5.4 (0x30..0x3F)                                              */
-/*                                                                   */
-/* BLE payloads with multi-byte fields are parsed field-by-field from */
-/* the PACKED wire (LE), not by casting to the doc structs in         */
-/* <alp/protocol/cc3501e.h> -- those structs carry uint16 alignment   */
-/* padding that the wire format does not.                             */
-/* --------------------------------------------------------------- */
-
-/* BLE_ENABLE (0x30): bring up the BLE stack.  Worker-routed (P0-4 seam): the
- * real CC3501E_BLE body starts Wi-Fi first (shared HIF) then nimble_host_start,
- * which blocks for SECONDS -- MUST NOT run in the SPI ISR that dispatches this
- * handler.  Poll-by-repeat, identical to GET_MAC (see handle_worker_routed).
- * Argless reply (the OK carries no data; min_cap 0). */
-static alp_cc3501e_resp_t handle_ble_enable(const uint8_t *req,
-                                            size_t         req_len,
-                                            uint8_t       *reply_data,
-                                            size_t         reply_cap,
-                                            size_t        *reply_data_len)
-{
-	(void)req;
-	return handle_worker_routed(
-	    ALP_CC3501E_CMD_BLE_ENABLE, 0u, req_len, reply_data, reply_cap, reply_data_len);
-}
-
-/* BLE_DISABLE (0x31): tear down advertising + scanning.  Worker-routed
- * (argless), identical to BLE_ENABLE/SCAN: the real body issues HCI over the
- * shared HIF and re-syncs the bridge SPI, both of which block and so MUST NOT
- * run in the SPI ISR that dispatches this handler (see handle_worker_routed). */
-static alp_cc3501e_resp_t handle_ble_disable(const uint8_t *req,
-                                             size_t         req_len,
-                                             uint8_t       *reply_data,
-                                             size_t         reply_cap,
-                                             size_t        *reply_data_len)
-{
-	(void)req;
-	return handle_worker_routed(
-	    ALP_CC3501E_CMD_BLE_DISABLE, 0u, req_len, reply_data, reply_cap, reply_data_len);
-}
-
-/* BLE_ADV_START (0x32): packed wire = connectable(1) | reserved(1) |
- * interval_min_ms(LE16) | interval_max_ms(LE16) | adv_data_len(1) |
- * adv_data[adv_data_len].  (7-byte header; the doc struct is 8 with pad.)
- *
- * Length-validated HERE, then WORKER-ROUTED with its payload (like
- * WIFI_CONNECT_STA): the real cc3501e_hw_ble_adv_start issues ext-adv HCI and
- * blocks on the shared-HIF ack, which MUST NOT run in the SPI ISR that
- * dispatches this handler (that is the -4/adv-wedge root cause).  The raw req
- * bytes are stashed via worker_submit_payload; worker_execute re-derives the
- * 7-byte header + adv_data in the drain (see worker.c). */
-#define BLE_ADV_START_HDR 7u
-static alp_cc3501e_resp_t handle_ble_adv_start(const uint8_t *req,
-                                               size_t         req_len,
-                                               uint8_t       *reply_data,
-                                               size_t         reply_cap,
-                                               size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len < BLE_ADV_START_HDR) return ALP_CC3501E_RESP_ERR_INVALID;
-	const uint8_t adv_data_len = req[6];
-	if (req_len != (size_t)BLE_ADV_START_HDR + adv_data_len) return ALP_CC3501E_RESP_ERR_INVALID;
-	return handle_worker_routed_payload(
-	    ALP_CC3501E_CMD_BLE_ADV_START, req, req_len, reply_data_len);
-}
-
-/* BLE_ADV_STOP (0x33): stop the adv set.  Worker-routed (argless): the real
- * cc3501e_hw_ble_adv_stop issues HCI over the shared HIF + re-syncs the bridge
- * SPI, which block and so MUST NOT run in the SPI ISR (see handle_worker_routed). */
-static alp_cc3501e_resp_t handle_ble_adv_stop(const uint8_t *req,
-                                              size_t         req_len,
-                                              uint8_t       *reply_data,
-                                              size_t         reply_cap,
-                                              size_t        *reply_data_len)
-{
-	(void)req;
-	return handle_worker_routed(
-	    ALP_CC3501E_CMD_BLE_ADV_STOP, 0u, req_len, reply_data, reply_cap, reply_data_len);
-}
-
-/* BLE_SCAN_START (0x34): reply data = the packed advertiser list (each record
- * addr[6] | addr_type(1) | rssi(1) | name_len(1) then name_len name bytes --
- * the cc3501e_ble_scan host parser's wire format).  Worker-routed: the NimBLE
- * GAP discovery blocks for the scan window and MUST run off the SPI ISR (see
- * handle_worker_routed), exactly like WIFI_SCAN_START. */
-static alp_cc3501e_resp_t handle_ble_scan_start(const uint8_t *req,
-                                                size_t         req_len,
-                                                uint8_t       *reply_data,
-                                                size_t         reply_cap,
-                                                size_t        *reply_data_len)
-{
-	(void)req;
-	return handle_worker_routed(
-	    ALP_CC3501E_CMD_BLE_SCAN_START, 0u, req_len, reply_data, reply_cap, reply_data_len);
-}
-
-static alp_cc3501e_resp_t handle_ble_scan_stop(const uint8_t *req,
-                                               size_t         req_len,
-                                               uint8_t       *reply_data,
-                                               size_t         reply_cap,
-                                               size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_scan_stop());
-}
-
-/* BLE_CONNECT (0x36): packed wire = addr_type(1) | addr[6].  Length-validated
- * HERE, then WORKER-ROUTED with its payload (like WIFI_CONNECT_STA): the real
- * body issues a GAP connect that blocks on the connection-complete HCI event
- * over the shared HIF and so MUST NOT run in the SPI ISR that dispatches this
- * handler.  worker_execute re-derives addr_type/addr from job.req. */
-static alp_cc3501e_resp_t handle_ble_connect(const uint8_t *req,
-                                             size_t         req_len,
-                                             uint8_t       *reply_data,
-                                             size_t         reply_cap,
-                                             size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 7u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return handle_worker_routed_payload(ALP_CC3501E_CMD_BLE_CONNECT, req, req_len, reply_data_len);
-}
-
-static alp_cc3501e_resp_t handle_ble_disconnect(const uint8_t *req,
-                                                size_t         req_len,
-                                                uint8_t       *reply_data,
-                                                size_t         reply_cap,
-                                                size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ble_disconnect());
-}
-
-/* BLE_GATT_REGISTER (0x38): opaque attribute-table descriptor (>= 1 byte).
- * Length-validated HERE, then WORKER-ROUTED with its payload: the real body
- * registers services + issues HCI over the shared HIF (blocks), so it MUST NOT
- * run in the SPI ISR.  worker_execute forwards the whole payload as the desc. */
-static alp_cc3501e_resp_t handle_ble_gatt_register(const uint8_t *req,
-                                                   size_t         req_len,
-                                                   uint8_t       *reply_data,
-                                                   size_t         reply_cap,
-                                                   size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len < 1u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return handle_worker_routed_payload(
-	    ALP_CC3501E_CMD_BLE_GATT_REGISTER, req, req_len, reply_data_len);
-}
-
-/* BLE_GATT_NOTIFY (0x39) / WRITE (0x3B): packed wire = handle(LE16) | data.
- * Length-validated HERE, then WORKER-ROUTED with the payload (handle + data):
- * the real bodies push a notification / GATT write that blocks on HCI over the
- * shared HIF, so they MUST NOT run in the SPI ISR.  worker_execute re-derives
- * the handle + data span from job.req. */
-static alp_cc3501e_resp_t handle_ble_gatt_notify(const uint8_t *req,
-                                                 size_t         req_len,
-                                                 uint8_t       *reply_data,
-                                                 size_t         reply_cap,
-                                                 size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len < 2u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return handle_worker_routed_payload(
-	    ALP_CC3501E_CMD_BLE_GATT_NOTIFY, req, req_len, reply_data_len);
-}
-
-static alp_cc3501e_resp_t handle_ble_gatt_write(const uint8_t *req,
-                                                size_t         req_len,
-                                                uint8_t       *reply_data,
-                                                size_t         reply_cap,
-                                                size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len < 2u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return handle_worker_routed_payload(
-	    ALP_CC3501E_CMD_BLE_GATT_WRITE, req, req_len, reply_data_len);
-}
-
-/* BLE_GATT_READ (0x3A): packed wire = handle(LE16); reply data = attr value.
- * Length-validated HERE, then WORKER-ROUTED with payload AND reply: the real
- * body issues a GATT read that blocks on the read-response HCI over the shared
- * HIF, so it MUST NOT run in the SPI ISR.  Unlike the other GATT ops this one
- * returns data, so it uses the payload+reply worker path -- the worker copies
- * the attribute value into reply_data (see handle_worker_routed_payload_reply);
- * worker_execute re-derives the handle from job.req. */
-static alp_cc3501e_resp_t handle_ble_gatt_read(const uint8_t *req,
-                                               size_t         req_len,
-                                               uint8_t       *reply_data,
-                                               size_t         reply_cap,
-                                               size_t        *reply_data_len)
-{
-	*reply_data_len = 0u;
-	if (req_len != 2u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return handle_worker_routed_payload_reply(
-	    ALP_CC3501E_CMD_BLE_GATT_READ, req, req_len, 0u, reply_data, reply_cap, reply_data_len);
-}
-
-/* --------------------------------------------------------------- */
-/* Power policy + diagnostics (0x04, 0x62, 0x70, 0x71)               */
-/* --------------------------------------------------------------- */
-
-/* POWER_POLICY (0x62): packed wire = policy(1) | wake_events(1) |
- * reserved(2) | idle_ms_before_sleep(LE32) = 8 bytes. */
-static alp_cc3501e_resp_t handle_power_policy(const uint8_t *req,
-                                              size_t         req_len,
-                                              uint8_t       *reply_data,
-                                              size_t         reply_cap,
-                                              size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 8u) return ALP_CC3501E_RESP_ERR_INVALID;
-	const uint8_t  policy      = req[0];
-	const uint8_t  wake_events = req[1];
-	const uint32_t idle_ms = (uint32_t)req[4] | ((uint32_t)req[5] << 8) | ((uint32_t)req[6] << 16) |
-	                         ((uint32_t)req[7] << 24);
-	return hw_to_resp(cc3501e_hw_set_power_policy(policy, wake_events, idle_ms));
-}
-
-/* DIAG_LOG_LEVEL (0x71): packed wire = level(1). */
-static alp_cc3501e_resp_t handle_diag_log_level(const uint8_t *req,
-                                                size_t         req_len,
-                                                uint8_t       *reply_data,
-                                                size_t         reply_cap,
-                                                size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 1u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_set_log_level(req[0]));
-}
-
-/* DIAG_GET_STATS (0x70): reply data = frames_ok(LE32) | frames_err(LE32). */
-static alp_cc3501e_resp_t handle_diag_get_stats(const uint8_t *req,
-                                                size_t         req_len,
-                                                uint8_t       *reply_data,
-                                                size_t         reply_cap,
-                                                size_t        *reply_data_len)
-{
-	(void)req;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 8u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-	put_le32(&reply_data[0], g_frames_ok);
-	put_le32(&reply_data[4], g_frames_err);
-	*reply_data_len = 8u;
-	return ALP_CC3501E_RESP_OK;
-}
-
-/* GET_DIAG_INFO (0x04): reply data = the 16-byte packed diag struct:
- * fw_version(LE16) | reset_cause(1) | role(1) | uptime_ms(LE32) |
- * free_heap_bytes(LE32) | last_error(1) | reserved(3). */
-extern uint32_t           cc3501e_hw_wifi_last_event_id(void); /* DEBUG: last Wi-Fi event Id */
-static alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
-                                               size_t         req_len,
-                                               uint8_t       *reply_data,
-                                               size_t         reply_cap,
-                                               size_t        *reply_data_len)
-{
-	(void)req;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 16u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-	put_le16(&reply_data[0], (uint16_t)CC3501E_BRIDGE_FW_VERSION_U16);
-	reply_data[2] = cc3501e_hw_reset_cause();
-	reply_data[3] = (uint8_t)ALP_CC3501E_ROLE_OFF; /* v0.1: no radio role active */
-	put_le32(&reply_data[4], cc3501e_hw_uptime_ms());
-	put_le32(
-	    &reply_data[8],
-	    cc3501e_hw_wifi_last_event_id()); /* DEBUG: was free_heap; now the last Wi-Fi event Id */
-	reply_data[12]  = g_last_error;
-	reply_data[13]  = 0u;
-	reply_data[14]  = 0u;
-	reply_data[15]  = 0u;
-	*reply_data_len = 16u;
-	return ALP_CC3501E_RESP_OK;
-}
-
-/* GET_PENDING_EVENTS (0x05): drain the async-event ring into the reply.  Reply
- * data is a packed list of { evt_opcode(1) | len(1) | payload[len] } entries
- * (alp_cc3501e_event_entry_t); an empty ring yields zero data bytes (status
- * OK).  Fast + non-blocking -- just an IRQ-safe memcpy out of the ring -- so it
- * runs INLINE in the SPI-ISR dispatch (unlike the seconds-long radio getters,
- * which the worker routes off-ISR).  The producers (the Wi-Fi connect/disconnect
- * path, etc.) push into the ring from thread context. */
-static alp_cc3501e_resp_t handle_get_pending_events(const uint8_t *req,
-                                                    size_t         req_len,
-                                                    uint8_t       *reply_data,
-                                                    size_t         reply_cap,
-                                                    size_t        *reply_data_len)
-{
-	(void)req;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	*reply_data_len = event_ring_drain(reply_data, reply_cap);
-	return ALP_CC3501E_RESP_OK;
-}
-
-/* --------------------------------------------------------------- */
-/* OTA firmware update (over-the-bridge PSA-FWU streaming) -- v0.2    */
-/* --------------------------------------------------------------- */
-
-/* OTA_BEGIN (0x40): req = alp_cc3501e_ota_begin_t { total_len LE32 }.  Opens
- * the streaming session; the HAL picks the non-primary vendor slot. */
-static alp_cc3501e_resp_t handle_ota_begin(const uint8_t *req,
-                                           size_t         req_len,
-                                           uint8_t       *reply_data,
-                                           size_t         reply_cap,
-                                           size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 4u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ota_begin(get_le32(&req[0])));
-}
-
-/* OTA_WRITE (0x41): req = offset(LE32) followed by 1..OTA_MAX_CHUNK image
- * bytes.  Streams the chunk into the slot (sequential offsets enforced). */
-static alp_cc3501e_resp_t handle_ota_write(const uint8_t *req,
-                                           size_t         req_len,
-                                           uint8_t       *reply_data,
-                                           size_t         reply_cap,
-                                           size_t        *reply_data_len)
-{
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len < 5u || req_len > (size_t)(4u + ALP_CC3501E_OTA_MAX_CHUNK)) {
-		return ALP_CC3501E_RESP_ERR_INVALID;
-	}
-	const uint32_t offset = get_le32(&req[0]);
-	return hw_to_resp(cc3501e_hw_ota_write(offset, &req[4], (uint32_t)(req_len - 4u)));
-}
-
-/* OTA_FINISH (0x42): no payload.  Installs + arms the deferred swap reboot. */
-static alp_cc3501e_resp_t handle_ota_finish(const uint8_t *req,
-                                            size_t         req_len,
-                                            uint8_t       *reply_data,
-                                            size_t         reply_cap,
-                                            size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ota_finish());
-}
-
-/* OTA_ABORT (0x43): no payload.  Cancels the in-flight session. */
-static alp_cc3501e_resp_t handle_ota_abort(const uint8_t *req,
-                                           size_t         req_len,
-                                           uint8_t       *reply_data,
-                                           size_t         reply_cap,
-                                           size_t        *reply_data_len)
-{
-	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_ota_abort());
-}
-
-/* OTA_STATUS (0x44): reply = alp_cc3501e_ota_status_t
- * { state(1) | reserved(3) | bytes_written(LE32) | total_len(LE32) }. */
-static alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
-                                            size_t         req_len,
-                                            uint8_t       *reply_data,
-                                            size_t         reply_cap,
-                                            size_t        *reply_data_len)
-{
-	(void)req;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 12u) return ALP_CC3501E_RESP_ERR_NO_MEM;
-	uint8_t   state   = 0u;
-	uint32_t  written = 0u;
-	uint32_t  total   = 0u;
-	const int rv      = cc3501e_hw_ota_status(&state, &written, &total);
-	if (rv != CC3501E_HW_OK) return hw_to_resp(rv);
-	reply_data[0] = state;
-	reply_data[1] = 0u;
-	reply_data[2] = 0u;
-	reply_data[3] = 0u;
-	put_le32(&reply_data[4], written);
-	put_le32(&reply_data[8], total);
-	*reply_data_len = 12u;
-	return ALP_CC3501E_RESP_OK;
-}
-
 /* --------------------------------------------------------------- */
 /* Dispatch                                                          */
 /* --------------------------------------------------------------- */
@@ -1139,7 +201,8 @@ typedef alp_cc3501e_resp_t (*cmd_handler_t)(const uint8_t *, size_t, uint8_t *, 
 
 /* Sparse switch on opcode -- keeps the table small without losing the
  * single-handler-table property.  v0.2+ feature groups slot in here as
- * their HAL bodies land. */
+ * their HAL bodies land.  Each case routes to the owning family's
+ * protocol_<family>.c handler (declared in protocol_internal.h). */
 alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
                                      uint8_t        flags,
                                      const uint8_t *req,
@@ -1186,6 +249,9 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
 		break;
 	case ALP_CC3501E_CMD_OTA_STATUS:
 		h = handle_ota_status;
+		break;
+	case ALP_CC3501E_CMD_OTA_PROMOTE:
+		h = handle_ota_promote;
 		break;
 	case ALP_CC3501E_CMD_STREAM_WRITE:
 		h = handle_stream_write;

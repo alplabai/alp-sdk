@@ -64,7 +64,7 @@ extern "C" {
  * #endif
  * @endcode
  */
-#define ALP_VERSION_AT_LEAST(major, minor, patch)                                                  \
+#define ALP_VERSION_AT_LEAST(major, minor, patch) \
 	(ALP_VERSION >= ALP_VERSION_ENCODE((major), (minor), (patch)))
 
 /*

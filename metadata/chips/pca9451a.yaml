@@ -1,8 +1,24 @@
 # Alp SDK chip manifest: NXP PCA9451A multi-channel PMIC.
 schema_version:   1
 chip_id:          pca9451a
-driver_status:    stub             # manifest only; chip-driver headers + impl
-                                   # land alongside the NX9101 bring-up.
+driver_status:    partial          # probe (ACK-only, DEV_ID read) + raw
+                                   # register R/W + INT1 status decode +
+                                   # per-rail enable/voltage (mV) on all
+                                   # 6 bucks + 5 LDOs now land (issue #474).
+                                   # Register map verified against the
+                                   # NXP-authored upstream Linux kernel
+                                   # driver (drivers/regulator/pca9450-regulator.c
+                                   # + include/linux/regulator/pca9450.h,
+                                   # GPL-2.0), which explicitly lists
+                                   # PCA9451A as a supported chip type
+                                   # sharing the PCA9450 family register
+                                   # map (also this manifest's own
+                                   # `kconfig.yocto` note).  NOT yet
+                                   # exercised on E1M-NX9101 silicon --
+                                   # the board doesn't exist on the bench
+                                   # yet -- so this is paper-correct +
+                                   # host-unit-tested only until the NX9101
+                                   # HiL bring-up.
 display_name:     "NXP PCA9451A multi-channel power-management IC"
 vendor:           nxp
 mpn_population:
@@ -61,8 +77,9 @@ families:
   - imx93
 
 verification:
-  hil_silicon:    untested         # paper-correct stub; no driver bodies yet.
-  smoke_tests:    null_arg_guard
+  hil_silicon:    untested         # E1M-NX9101 doesn't exist on the bench yet;
+                                   # paper-correct + host-unit-tested only.
+  smoke_tests:    null_arg_guard + rail_table_bounds + int1_status_decode
 
 physical:
   # Pins per NXP PCA9451A datasheet Rev 2.1 (20 Aug 2025), section 6

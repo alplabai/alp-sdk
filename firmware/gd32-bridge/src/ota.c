@@ -2,8 +2,8 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * gd32-bridge OTA — Path A state machine.  See ota.h + ota_layout.h and
- * the design at alp-sdk-internal/docs/gd32-bridge-ota-path-a-design.md.
+ * gd32-bridge OTA — Path A state machine.  See ota.h + ota_layout.h for
+ * the public wire and flash-layout contract.
  *
  * Safe-by-default: without -DBRIDGE_OTA_PARTITIONED the dispatcher returns
  * STATUS_NOSUPPORT and touches no flash.  Even when partitioned, the real
@@ -47,6 +47,10 @@ __attribute__((weak)) bool ota_fmc_program(uint32_t addr, const uint8_t *data, s
 __attribute__((weak)) void ota_system_reset(void)
 {
 }
+__attribute__((weak)) const void *ota_fmc_flash_ptr(uint32_t addr)
+{
+	return (const void *)(uintptr_t)addr;
+}
 
 #if defined(BRIDGE_OTA_PARTITIONED)
 
@@ -70,6 +74,17 @@ static uint32_t s_fw_version;   /* from OTA_BEGIN v0.7 form (packed
                                  * sent the legacy 8-byte form = unknown */
 static uint8_t  s_err;
 
+/* Background slot-erase progress (#770).  BEGIN must NOT erase the whole
+ * 236 KB slot inline: that is a ~1 s RAMFUNC loop with the SPI slave
+ * unserviced, so the BEGIN reply is lost and the host's ota_begin() hangs.
+ * Instead BEGIN arms the erase (state=BUSY) and acks immediately; the main
+ * loop's ota_erase_tick() erases ONE OTA_PAGE_SIZE region per tick (~8 ms
+ * of blackout, which the host's reply re-read absorbs) and flips to READY
+ * when done.  The host already polls GET_STATE for READY before streaming. */
+static bool     s_erasing;   /* an erase is armed + in progress */
+static uint32_t s_erase_at;  /* next flash address to erase */
+static uint32_t s_erase_end; /* one past the last address to erase */
+
 static uint32_t rd_u32(const uint8_t *p)
 {
 	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
@@ -86,7 +101,7 @@ static void wr_u32(uint8_t *p, uint32_t v)
 /* ---- A/B metadata --------------------------------------------------- */
 static bool meta_read(uint32_t addr, ota_meta_record_t *r)
 {
-	const ota_meta_record_t *p = (const ota_meta_record_t *)addr;
+	const ota_meta_record_t *p = (const ota_meta_record_t *)ota_fmc_flash_ptr(addr);
 	if (p->magic != OTA_META_MAGIC || p->struct_version != OTA_META_STRUCT_VER) {
 		return false;
 	}
@@ -134,8 +149,11 @@ static bool meta_current(ota_meta_record_t *out, uint32_t *which_addr)
  * active slot's entry is rewritten (and only when `update_entry` -- a
  * ROLLBACK flips `active_slot` without touching the descriptors, so the
  * rolled-to slot keeps the len/CRC recorded when it was last written). */
-static bool meta_commit(
-    uint8_t active_slot, bool update_entry, uint32_t fw_ver, uint32_t img_len, uint32_t img_crc)
+static bool meta_commit(uint8_t  active_slot,
+                        bool     update_entry,
+                        uint32_t fw_ver,
+                        uint32_t img_len,
+                        uint32_t img_crc)
 {
 	ota_meta_record_t rec;
 	ota_meta_record_t cur;
@@ -170,6 +188,18 @@ static uint8_t active_slot_now(void)
 	return meta_current(&cur, &which) ? cur.active_slot : OTA_SLOT_A;
 }
 
+/* Flash base of the in-flight (inactive) slot.  s_inactive is set to
+ * OTA_SLOT_A/B at BEGIN (the trusted internal boundary), so the checked
+ * derivation (#741) never fails here; validate anyway for defence. */
+static uint32_t ota_inactive_base(void)
+{
+	uint32_t base = 0u;
+	if (!ota_slot_base_checked(s_inactive, &base)) {
+		base = OTA_SLOT_A_BASE; /* unreachable: s_inactive is always A/B */
+	}
+	return base;
+}
+
 /* ---- opcode handlers ------------------------------------------------ */
 static gd32_bridge_status_t
 h_begin(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen)
@@ -196,14 +226,16 @@ h_begin(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
 		return STATUS_OUT_OF_RANGE;
 	}
 	s_inactive = (active_slot_now() == OTA_SLOT_A) ? OTA_SLOT_B : OTA_SLOT_A;
-	s_state    = OTA_ST_BUSY;
-	if (!ota_fmc_erase_range(ota_slot_base(s_inactive), OTA_SLOT_SIZE)) {
-		s_state = OTA_ST_ERROR;
-		s_err   = 2u;
-		return STATUS_IO;
-	}
 	s_last_off = 0u;
-	s_state    = OTA_ST_READY;
+	/* Arm the background erase and ack NOW -- do NOT erase inline (#770).
+     * ota_erase_tick() walks the slot a page-region per main-loop tick;
+     * state stays BUSY until it finishes, then flips to READY.  The host
+     * gets this reply immediately and polls GET_STATE for READY before it
+     * streams the first chunk (h_write rejects anything but READY). */
+	s_erasing   = true;
+	s_erase_at  = ota_inactive_base();
+	s_erase_end = ota_inactive_base() + OTA_SLOT_SIZE;
+	s_state     = OTA_ST_BUSY;
 	/* Host OTA_BEGIN reply: chunk_max:u16 (LE), target_slot:u8.
      * chunk_max accounts for the offset:u32 + len:u8 header (v0.6). */
 	if (cap >= 3u) {
@@ -246,7 +278,7 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
 	if (dlen == 0u || dlen != len - 5u) {
 		return STATUS_INVAL; /* extended/truncated capture: drop */
 	}
-	if ((uint32_t)off + dlen > OTA_SLOT_SIZE) {
+	if (off > OTA_SLOT_SIZE || dlen > OTA_SLOT_SIZE - off) {
 		s_state = OTA_ST_ERROR;
 		s_err   = 3u;
 		return STATUS_OUT_OF_RANGE;
@@ -260,7 +292,7 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
      * PARTIAL overlap still falls through to the program path (and
      * PGERRs) -- fixed-size streaming never produces one. */
 	if (off + (uint32_t)dlen <= s_last_off) {
-		const uint8_t *flash = (const uint8_t *)(ota_slot_base(s_inactive) + off);
+		const uint8_t *flash = (const uint8_t *)ota_fmc_flash_ptr(ota_inactive_base() + off);
 		if (memcmp(flash, &req[5], dlen) == 0) {
 			s_state = OTA_ST_READY;
 			if (cap >= 4u) {
@@ -274,7 +306,7 @@ h_write(const uint8_t *req, size_t len, uint8_t *reply, size_t cap, size_t *rlen
 		return STATUS_IO;
 	}
 	s_state = OTA_ST_BUSY;
-	if (!ota_fmc_program(ota_slot_base(s_inactive) + off, &req[5], dlen)) {
+	if (!ota_fmc_program(ota_inactive_base() + off, &req[5], dlen)) {
 		s_state = OTA_ST_ERROR;
 		s_err   = 4u;
 		return STATUS_IO;
@@ -301,7 +333,7 @@ static gd32_bridge_status_t h_verify(uint8_t *reply, size_t cap, size_t *rlen)
          * protocol-misuse brick.  Refuse instead. */
 		return STATUS_NOT_READY;
 	}
-	s_img_crc     = ota_crc32(0u, (const uint8_t *)ota_slot_base(s_inactive), s_img_len);
+	s_img_crc = ota_crc32(0u, (const uint8_t *)ota_fmc_flash_ptr(ota_inactive_base()), s_img_len);
 	const bool ok = (s_img_crc == s_expected_crc);
 	s_state       = ok ? OTA_ST_VERIFIED : OTA_ST_ERROR;
 	if (!ok) {
@@ -319,6 +351,16 @@ static gd32_bridge_status_t h_commit(void)
 {
 	if (s_state != OTA_ST_VERIFIED) {
 		return STATUS_NOT_READY;
+	}
+	/* A verified (CRC-matching) image can still be unbootable -- a
+	 * one-byte or truncated image with a matching host CRC (#755).
+	 * Refuse to activate metadata that would brick the part on reboot. */
+	if (!ota_image_bootable(ota_inactive_base(),
+	                        (const uint8_t *)ota_fmc_flash_ptr(ota_inactive_base()),
+	                        s_img_len)) {
+		s_state = OTA_ST_ERROR;
+		s_err   = 6u;
+		return STATUS_INVAL;
 	}
 	if (!meta_commit(
 	        s_inactive, true, s_fw_version /* 0 = legacy BEGIN, unknown */, s_img_len, s_img_crc)) {
@@ -378,6 +420,30 @@ static gd32_bridge_status_t h_get_state(uint8_t *reply, size_t cap, size_t *rlen
 	return STATUS_OK;
 }
 
+/* Background erase pump (#770): erase ONE OTA_PAGE_SIZE region per call
+ * from the main loop (bridge_hw_tick).  Each call is a bounded ~8 ms
+ * blackout the host's reply re-read absorbs -- unlike the old inline
+ * whole-slot erase that stalled BEGIN's reply for ~1 s.  Flips the OTA
+ * state machine to READY once the slot is fully erased, or ERROR on a
+ * failed page.  No-op unless an erase is armed. */
+void ota_erase_tick(void)
+{
+	if (!s_erasing) {
+		return;
+	}
+	if (!ota_fmc_erase_range(s_erase_at, OTA_PAGE_SIZE)) {
+		s_erasing = false;
+		s_state   = OTA_ST_ERROR;
+		s_err     = 2u;
+		return;
+	}
+	s_erase_at += OTA_PAGE_SIZE;
+	if (s_erase_at >= s_erase_end) {
+		s_erasing = false;
+		s_state   = OTA_ST_READY;
+	}
+}
+
 gd32_bridge_status_t ota_dispatch(uint8_t        cmd,
                                   const uint8_t *req_payload,
                                   size_t         req_payload_len,
@@ -405,8 +471,9 @@ gd32_bridge_status_t ota_dispatch(uint8_t        cmd,
 	case CMD_OTA_GET_STATE:
 		return h_get_state(reply_payload, reply_payload_cap, reply_payload_len);
 	case CMD_OTA_ABORT:
-		s_state = OTA_ST_IDLE;
-		s_err   = 0u;
+		s_erasing = false; /* cancel any in-flight background erase (#770) */
+		s_state   = OTA_ST_IDLE;
+		s_err     = 0u;
 		return STATUS_OK;
 	default:
 		return STATUS_NOSUPPORT;
@@ -429,6 +496,11 @@ gd32_bridge_status_t ota_dispatch(uint8_t        cmd,
 	(void)reply_payload_cap;
 	*reply_payload_len = 0u;
 	return STATUS_NOSUPPORT;
+}
+
+/* OTA inert: no background erase to pump. */
+void ota_erase_tick(void)
+{
 }
 
 #endif /* BRIDGE_OTA_PARTITIONED */

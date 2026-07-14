@@ -1,0 +1,35 @@
+# board.yaml -- per-app project configuration for the
+# catch2-selftest example.
+#
+# This is a HOST unit-test example, not a firmware demo: the "app"
+# is a small Catch2 test binary that builds and runs on native_sim
+# and exits 0. No peripherals, no chips -- `libraries: [catch2]` is
+# the whole point. `som.sku`/`preset` are kept identical to
+# hello-world purely so scripts/alp_project.py has a SoM to derive
+# the baseline SoC config from; Catch2 itself never touches hardware
+# and this example never runs on real silicon.
+libraries:
+  - name: catch2
+    cores: [m55_hp]
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []
+    # Emits CONFIG_ALP_SDK_CATCH2_VENDORED=y (scripts/alp_project_emit.py's
+    # `_LIBRARY_KCONFIG["catch2"]`), which gates the alp-sdk Zephyr
+    # module compiling the vendored Catch2 amalgamated distribution
+    # (vendors/catch2/, no zephyr/module.yml upstream -- see that
+    # directory's README.md). CONFIG_ALP_CATCH2_SW (Kconfig.alp-libraries:
+    # "Catch2 (always pure-SW)", no HW-accelerator binding possible --
+    # see metadata/library-profiles/catch2/hw-backends.yaml) is a
+    # separate `default y` fallback-capability marker, true for every
+    # build regardless of this slice -- it does NOT gate compiled
+    # sources; see zephyr/CMakeLists.txt for why.
+
+diagnostics:
+  log_level: info

@@ -11,6 +11,7 @@ project(alp_sdk_peripheral_test LANGUAGES C)
 # *.c sibling here registers its ZTESTs against the same suite.
 target_sources(app PRIVATE
     src/main.c
+    src/config_defaults.c
     src/i2c.c
     src/i2c_target.c
     src/spi.c

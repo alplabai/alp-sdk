@@ -148,8 +148,16 @@ if ($Ble) {
 
 # App + the silicon-free layer + the ti HAL.
 $sources = @(
-    "$fw\src\main.c", "$fw\src\protocol.c", "$fw\src\worker.c", "$fw\src\transport_spi.c", "$fw\src\transport_sdio.c",
-    "$fw\hal\ti\cc3501e_hw_ti.c", "$fw\hal\ti\transport_hw_ti_spi.c", "$fw\hal\ti\transport_hw_ti_sdio.c",
+    "$fw\src\main.c", "$fw\src\protocol.c",
+    "$fw\src\protocol_meta.c", "$fw\src\protocol_gpio.c", "$fw\src\protocol_camera.c",
+    "$fw\src\protocol_wifi.c", "$fw\src\protocol_sockets.c", "$fw\src\protocol_ble.c",
+    "$fw\src\protocol_power.c", "$fw\src\protocol_diag.c", "$fw\src\protocol_ota.c",
+    "$fw\src\worker.c", "$fw\src\event_ring.c", "$fw\src\transport_spi.c", "$fw\src\transport_sdio.c",
+    "$fw\hal\ti\cc3501e_hw_ti.c",
+    "$fw\hal\ti\cc3501e_hw_ti_wifi.c", "$fw\hal\ti\cc3501e_hw_ti_ble.c", "$fw\hal\ti\cc3501e_hw_ti_sock.c",
+    "$fw\hal\ti\cc3501e_hw_ti_gpio.c", "$fw\hal\ti\cc3501e_hw_ti_power.c", "$fw\hal\ti\cc3501e_hw_ti_ota.c",
+    "$fw\hal\ti\cc3501e_hw_ti_log.c",
+    "$fw\hal\ti\transport_hw_ti_spi.c", "$fw\hal\ti\transport_hw_ti_sdio.c",
     # SysConfig unity aggregates (bundle the FreeRTOS kernel + dpl) + drivers config.
     # ti_freertos_config.c ALSO provides the device startup: it #includes
     # <startup/startup_cc35xx_ticlang.c> and defines THE vector table (resetVectors
@@ -165,7 +173,7 @@ $sources = @(
     "$out\memcfg\ti_flash_map_config.c")
 
 # OTFDE flash-decryption driver: the over-the-bridge OTA session (psa_fwu_start /
-# psa_fwu_write in cc3501e_hw_ti.c) pulls it in to write the encrypted vendor image
+# psa_fwu_write in cc3501e_hw_ti_ota.c) pulls it in to write the encrypted vendor image
 # into the alternate slot -- it provides otfdeDriver_Config, which FWU.a references.
 # Linked UNCONDITIONALLY now that OTA-over-bridge is a shipping bridge feature
 # (FlashSetOTFDE itself is in the already-linked drivers_cc35xx.a; otfde_driver.c
@@ -180,7 +188,12 @@ $inc += @("-I$SdkDir\source\ti\drivers\net\wifi\wifi_host_driver\inc_adapt",
 # blob (the streamed OTA path is driven over the bridge instead; this is the
 # embedded-blob self-test that validates the swap mechanism without a host).
 if ($OtaSelftest) {
-    $sources += "$fw\hal\ti\cc3501e_ota_candidate.c"
+    # cc3501e_ota_candidate.c is a signed firmware binary (bin2c C-array) -- an
+    # internal-only artifact (alp-sdk #590); NOT committed to the public repo.
+    # Stage it from alp-sdk-internal before an -OtaSelftest build.
+    $cand = "$fw\hal\ti\cc3501e_ota_candidate.c"
+    if (-not (Test-Path $cand)) { throw "-OtaSelftest needs $cand -- stage it from alp-sdk-internal\firmware\cc3501e\hal\ti\ (see $fw\hal\ti\cc3501e_ota_candidate.README.md)" }
+    $sources += $cand
 }
 
 # Wi-Fi host integration (P0-5): the OSI/glue/app sources the wifi libs reference but

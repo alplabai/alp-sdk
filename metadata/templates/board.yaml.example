@@ -4,12 +4,25 @@
 # valid document the loader can exercise end-to-end.
 
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
 preset: e1m-evk
 
-# Per-core runtime mapping.  The E7 silicon carries no Cortex-A
-# class core, so the only programmable peer-pair is M55-HP + M55-HE.
+# Curated libraries: one top-level list, each entry a {name, cores?}
+# object.  These are scoped to m55_hp (the only live core here).
+libraries:
+  - name: lvgl              # exercise the LVGL CONFIG_* path
+    cores: [m55_hp]
+  - name: mbedtls           # exercise the MbedTLS CONFIG_* path
+    cores: [m55_hp]
+  - name: cmsis-dsp         # exercise the CMSIS-DSP CONFIG_* path
+    cores: [m55_hp]
+  - name: etl               # exercise the user-facing C++ lib path
+    cores: [m55_hp]
+
+# Per-core runtime mapping.  The E8 silicon exposes the A32 cluster
+# plus the M55-HP + M55-HE pair; this minimal Zephyr example runs
+# only M55-HP and leaves the other topology defaults alone.
 # This example runs Zephyr on M55-HP only; M55-HE inherits the SoM
 # topology's default Zephyr shim (so the build covers both halves
 # by default).
@@ -18,11 +31,6 @@ cores:
     app: ./src
     inference:
       default_arena_kib: 128
-    libraries:
-      - lvgl              # exercise the LVGL CONFIG_* path
-      - mbedtls           # exercise the MbedTLS CONFIG_* path
-      - cmsis_dsp         # exercise the CMSIS-DSP CONFIG_* path
-      - etl               # exercise the user-facing C++ lib path
     iot:
       wifi: true
       mqtt: true

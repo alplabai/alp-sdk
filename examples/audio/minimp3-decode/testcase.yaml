@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: minimp3-decode
+  description: |
+    Decodes a canned MP3 byte array to PCM with the vendored
+    minimp3 single-header decoder (vendors/minimp3/) and prints the
+    sample count + RMS of the decoded audio.  Pure compute -- no
+    I2S/codec HW required.
+
+tests:
+  alp_sdk.example.minimp3_decode:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - minimp3-decode
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[minimp3-decode\\] done"

@@ -1,0 +1,31 @@
+# board.yaml -- coreMQTT-SN PUBLISH serialize/parse teaching example.
+#
+# `cores.m55_hp.libraries: [coremqtt_sn]` makes alp_project.py emit
+# CONFIG_ALP_MQTTSN_NO_TLS=y -- the SW-fallback default from
+# metadata/library-profiles/coremqtt_sn/hw-backends.yaml.  It does NOT
+# add the upstream module's include path: coreMQTT-SN ships no
+# zephyr/module.yml of its own, and (see README's "Integration
+# reality") this workspace's pinned `modules/lib/coremqtt_sn` checkout
+# is empty, so `src/main.c` does not `#include` any coreMQTT-SN
+# header.  It instead implements the identical OASIS MQTT-SN v1.2
+# PUBLISH wire format by hand so the round-trip still builds and runs.
+libraries:
+  - name: coremqtt-sn
+    cores: [m55_hp]
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    # No transport, no peripheral: this is a buffer-only serializer
+    # round trip, the same shape a customer would unit-test the real
+    # library's encoder/decoder with before wiring it to a UDP/BLE/
+    # UART MQTT-SN gateway link.
+    peripherals: []
+
+diagnostics:
+  log_level: info

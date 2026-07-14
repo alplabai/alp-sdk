@@ -12,8 +12,8 @@ typedef struct alp_update_log_ops {
 	 * dispatcher calls this once per alp_update_log_open() and, on
 	 * ALP_ERR_NOSUPPORT, falls through to the next-ranked backend
 	 * (issue #239 pattern). It lets a higher-priority tier that cannot
-	 * serve on this boot -- e.g. the HW_ENFORCED TF-M tier before its
-	 * secure store + monotonic counter are provisioned (issue #111) --
+	 * serve on this boot -- e.g. the HW_ENFORCED TF-M tier when its secure
+	 * owner is not present or not ready --
 	 * decline cleanly so the SW tamper-evident tier serves instead,
 	 * rather than binding a backend whose append() would just fail. Any
 	 * status other than ALP_OK / ALP_ERR_NOSUPPORT is a hard error and
@@ -29,7 +29,13 @@ typedef struct alp_update_log_ops {
 struct alp_update_log {
 	const alp_update_log_ops_t *ops;
 	alp_update_log_assurance_t  assurance;
-	bool                        in_use;
+	/* lifecycle/active_ops drive the race-safe one-time init + op/close
+	 * guard in src/update_log_dispatch.c (issue #629). Unlike the pooled
+	 * classes this is a singleton with an idempotent open(), so the
+	 * lifecycle byte also carries a dispatcher-local OPENING state that
+	 * elects exactly one initializer among racing first-opens. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
 };
 
 #ifdef CONFIG_ZTEST

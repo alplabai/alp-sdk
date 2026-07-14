@@ -110,8 +110,8 @@ extern "C" {
 /** Datasheet-defined CONTROL register default value (0b01101110).
  *  Driver initialises the shadow to this so the first call to a
  *  typed helper reflects the chip's actual reset state. */
-#define TPS628640_CTRL_DEFAULT                                                                     \
-	(TPS628640_CTRL_FPWM_DURING_VID_CHANGE | TPS628640_CTRL_SOFTWARE_ENABLE |                      \
+#define TPS628640_CTRL_DEFAULT \
+	(TPS628640_CTRL_FPWM_DURING_VID_CHANGE | TPS628640_CTRL_SOFTWARE_ENABLE | \
 	 TPS628640_CTRL_OUTPUT_DISCHARGE | TPS628640_CTRL_HICCUP | TPS628640_CTRL_RAMP_SPEED_MASK)
 
 /* STATUS bits ------------------------------------------------------ */

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
+import yaml
 
 from alp_cli.diagnostic import Diagnostic, DiagnosticCollector
 from alp_cli.yaml_pos import load_with_positions, node_position
@@ -60,8 +61,17 @@ def iter_schema_errors(
                   key=lambda e: [str(p) for p in e.absolute_path])
 
 
-def validate_board_yaml(path: Path) -> DiagnosticCollector:
-    """Validate a board.yaml file. Returns a DiagnosticCollector."""
+def validate_board_yaml(
+    path: Path, *, metadata_root: Path | None = None
+) -> DiagnosticCollector:
+    """Validate a board.yaml file. Returns a DiagnosticCollector.
+
+    *metadata_root* overrides the SoM / board-preset / SoC / schema search
+    root (default: the repo's own ``metadata/``) -- the same override every
+    other validation/build entry point (`alp_orchestrate.load_board_yaml`,
+    `alp_project.py --metadata-root`) honours, so a customer's out-of-tree
+    metadata copy validates identically everywhere.
+    """
     collector = DiagnosticCollector()
     text = path.read_text(encoding="utf-8")
     try:
@@ -81,19 +91,40 @@ def validate_board_yaml(path: Path) -> DiagnosticCollector:
         )
         return collector
 
-    _schema_pass(data, path, collector)
-    _xref_pass(data, path, collector)
-    _compat_pass(data, path, collector)
+    root = metadata_root or METADATA
+    som_dir = root / "e1m_modules"
+    preset_dir = root / "boards"
+    soc_dir = root / "socs"
+    schema_path = root / "schemas" / "board.schema.json"
+    if not schema_path.is_file():
+        # Synthetic/partial metadata roots (e.g. test fixtures) may not
+        # carry their own schema copy; fall back to the repo's.
+        schema_path = SCHEMA_PATH
+
+    _schema_pass(data, path, collector, schema_path=schema_path)
+    _xref_pass(data, path, collector, som_dir=som_dir, preset_dir=preset_dir)
+    _compat_pass(data, path, collector, som_dir=som_dir, soc_dir=soc_dir)
     return collector
 
 
 def _xref_pass(
-    data: dict[str, Any], path: Path, collector: DiagnosticCollector
+    data: dict[str, Any],
+    path: Path,
+    collector: DiagnosticCollector,
+    *,
+    som_dir: Path = SOM_DIR,
+    preset_dir: Path = PRESET_DIR,
 ) -> None:
-    som = data.get("som") or {}
+    som = data.get("som")
+    # #602: a schema-invalid `som:` (wrong type, e.g. a string/list instead
+    # of a mapping) is already reported by _schema_pass as ALP-B004 -- don't
+    # let this semantic pass crash on it, just skip SoM/preset xref work.
+    som = som if isinstance(som, dict) else {}
     sku = som.get("sku")
+    som_doc: dict[str, Any] | None = None
     if isinstance(sku, str):
-        if not _sku_resolves(sku):
+        sku_path = _sku_path(sku, som_dir=som_dir)
+        if sku_path is None:
             line, col = node_position(som, "sku", target="value")
             collector.add(
                 Diagnostic(
@@ -104,13 +135,17 @@ def _xref_pass(
                     span=len(sku),
                     code="ALP-B005",
                     message=f"SoM SKU '{sku}' does not resolve to a known module",
-                    hint=_sku_suggestion(sku),
+                    hint=_sku_suggestion(sku, som_dir=som_dir),
                 )
             )
+        else:
+            som_doc = _load_metadata_yaml(sku_path)
 
     preset = data.get("preset")
+    board_doc: dict[str, Any] | None = None
     if isinstance(preset, str):
-        if not (PRESET_DIR / f"{preset}.yaml").is_file():
+        preset_path = preset_dir / f"{preset}.yaml"
+        if not preset_path.is_file():
             line, col = node_position(data, "preset", target="value")
             collector.add(
                 Diagnostic(
@@ -121,36 +156,105 @@ def _xref_pass(
                     span=len(preset),
                     code="ALP-B006",
                     message=f"board preset '{preset}' does not exist",
-                    hint=_preset_suggestion(preset),
+                    hint=_preset_suggestion(preset, preset_dir=preset_dir),
                 )
             )
+        else:
+            board_doc = _load_metadata_yaml(preset_path)
+
+    if isinstance(preset, str) and isinstance(sku, str) and som_doc and board_doc:
+        _check_board_hosts_som_family(
+            data, path, collector, sku, som_doc, preset, board_doc,
+            preset_dir=preset_dir)
 
 
-def _sku_resolves(sku: str) -> bool:
-    for _candidate in SOM_DIR.rglob(f"{sku}.yaml"):
-        return True
-    return False
+def _load_metadata_yaml(path: Path) -> dict[str, Any] | None:
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return None
+    return doc if isinstance(doc, dict) else None
 
 
-def _all_skus() -> list[str]:
-    return sorted(p.stem for p in SOM_DIR.rglob("*.yaml") if p.stem.startswith("E1M-"))
+def _sku_path(sku: str, *, som_dir: Path = SOM_DIR) -> Path | None:
+    for candidate in som_dir.rglob(f"{sku}.yaml"):
+        return candidate
+    return None
 
 
-def _all_presets() -> list[str]:
-    return sorted(p.stem for p in PRESET_DIR.glob("*.yaml"))
+def _check_board_hosts_som_family(
+    data: dict[str, Any],
+    path: Path,
+    collector: DiagnosticCollector,
+    sku: str,
+    som_doc: dict[str, Any],
+    preset: str,
+    board_doc: dict[str, Any],
+    *,
+    preset_dir: Path = PRESET_DIR,
+) -> None:
+    family = som_doc.get("family")
+    allowed = board_doc.get("hosts_som_families") or []
+    if not isinstance(family, str) or not isinstance(allowed, list):
+        return
+    allowed = [str(item) for item in allowed]
+    if family in allowed:
+        return
+
+    line, col = node_position(data, "preset", target="value")
+    compatible = _compatible_presets(family, preset_dir=preset_dir)
+    hint = (
+        f"use a board preset whose hosts_som_families includes '{family}'"
+    )
+    if compatible:
+        hint += f" (for example: {', '.join(compatible)})"
+    hint += ", or define a compatible board inline"
+    collector.add(
+        Diagnostic(
+            severity="error",
+            path=path,
+            line=line,
+            col=col,
+            span=len(preset),
+            code="ALP-B007",
+            message=(
+                f"board preset '{preset}' hosts SoM families {allowed}, "
+                f"but {sku} is family '{family}'"
+            ),
+            hint=hint,
+        )
+    )
 
 
-def _sku_suggestion(sku: str) -> str | None:
+def _compatible_presets(family: str, *, preset_dir: Path = PRESET_DIR) -> list[str]:
+    out: list[str] = []
+    for board_path in sorted(preset_dir.glob("*.yaml")):
+        doc = _load_metadata_yaml(board_path) or {}
+        families = doc.get("hosts_som_families") or []
+        if isinstance(families, list) and family in [str(item) for item in families]:
+            out.append(board_path.stem)
+    return out
+
+
+def _all_skus(*, som_dir: Path = SOM_DIR) -> list[str]:
+    return sorted(p.stem for p in som_dir.rglob("*.yaml") if p.stem.startswith("E1M-"))
+
+
+def _all_presets(*, preset_dir: Path = PRESET_DIR) -> list[str]:
+    return sorted(p.stem for p in preset_dir.glob("*.yaml"))
+
+
+def _sku_suggestion(sku: str, *, som_dir: Path = SOM_DIR) -> str | None:
     from difflib import get_close_matches
 
-    match = get_close_matches(sku, _all_skus(), n=1)
+    match = get_close_matches(sku, _all_skus(som_dir=som_dir), n=1)
     return f"did you mean '{match[0]}'?" if match else None
 
 
-def _preset_suggestion(preset: str) -> str | None:
+def _preset_suggestion(preset: str, *, preset_dir: Path = PRESET_DIR) -> str | None:
     from difflib import get_close_matches
 
-    match = get_close_matches(preset, _all_presets(), n=1)
+    match = get_close_matches(preset, _all_presets(preset_dir=preset_dir), n=1)
     return f"did you mean '{match[0]}'?" if match else None
 
 
@@ -160,16 +264,28 @@ def _preset_suggestion(preset: str) -> str | None:
 
 
 def _compat_pass(
-    data: dict[str, Any], path: Path, collector: DiagnosticCollector
+    data: dict[str, Any],
+    path: Path,
+    collector: DiagnosticCollector,
+    *,
+    som_dir: Path = SOM_DIR,
+    soc_dir: Path = SOC_DIR,
 ) -> None:
-    silicon_ref = _silicon_ref_for_sku(data.get("som", {}).get("sku"))
+    som = data.get("som")
+    sku = som.get("sku") if isinstance(som, dict) else None
+    silicon_ref = _silicon_ref_for_sku(sku, som_dir=som_dir)
     if silicon_ref is None:
         return
-    soc_caps = _load_soc_caps(silicon_ref)
+    soc_caps = _load_soc_caps(silicon_ref, soc_dir=soc_dir)
     if soc_caps is None:
         return
 
-    for core_name, core in (data.get("cores") or {}).items():
+    # #602: `cores:` failing schema validation (wrong type, e.g. a string
+    # or list instead of a mapping) is already reported as ALP-B004 --
+    # guard here too instead of crashing on `.items()`.
+    cores = data.get("cores")
+    cores = cores if isinstance(cores, dict) else {}
+    for core_name, core in cores.items():
         if not isinstance(core, dict):
             continue
         peripherals = core.get("peripherals") or []
@@ -218,10 +334,10 @@ def _compat_pass(
             )
 
 
-def _silicon_ref_for_sku(sku: str | None) -> str | None:
+def _silicon_ref_for_sku(sku: str | None, *, som_dir: Path = SOM_DIR) -> str | None:
     if not sku:
         return None
-    for som_path in SOM_DIR.rglob(f"{sku}.yaml"):
+    for som_path in som_dir.rglob(f"{sku}.yaml"):
         import yaml as _yaml
 
         text = som_path.read_text(encoding="utf-8")
@@ -232,12 +348,12 @@ def _silicon_ref_for_sku(sku: str | None) -> str | None:
     return None
 
 
-def _load_soc_caps(silicon_ref: str) -> dict[str, int] | None:
+def _load_soc_caps(silicon_ref: str, *, soc_dir: Path = SOC_DIR) -> dict[str, int] | None:
     parts = silicon_ref.split(":")
     if len(parts) != 3:
         return None
     vendor, family, part = parts
-    fp = SOC_DIR / vendor / family / f"{part}.json"
+    fp = soc_dir / vendor / family / f"{part}.json"
     if not fp.is_file():
         return None
     doc = json.loads(fp.read_text(encoding="utf-8"))
@@ -308,10 +424,12 @@ def _schema_pass(
     data: dict[str, Any],
     path: Path,
     collector: DiagnosticCollector,
+    *,
+    schema_path: Path | None = None,
 ) -> None:
     # Strip __pos__ keys before handing to jsonschema (they're not in the schema).
     clean = _strip_pos(data)
-    for err in iter_schema_errors(clean):
+    for err in iter_schema_errors(clean, schema_path):
         diag = _schema_error_to_diagnostic(err, data, path)
         if diag is not None:
             collector.add(diag)

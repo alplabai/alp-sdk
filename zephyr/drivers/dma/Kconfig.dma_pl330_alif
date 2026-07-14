@@ -6,6 +6,7 @@ config DMA_PL330_ALIF
 	prompt "PL330 DMA driver (Alif peripheral-flow)"
 	default y
 	depends on DT_HAS_ALIF_DMA_PL330_ENABLED
+	select DMA
 	help
 	  This option enables support of pl330 DMA Controller.
 

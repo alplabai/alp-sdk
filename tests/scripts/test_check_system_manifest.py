@@ -84,3 +84,23 @@ def test_unknown_top_level_key_rejected(tmp_path):
     p.write_text(json.dumps(doc))
     proc = _run("--manifest", str(p))
     assert proc.returncode != 0
+
+
+def test_hw_info_eeprom_projection_allowed(tmp_path):
+    doc = {
+        "schema_version": 1, "generated_by": "test",
+        "hw_info": {
+            "sku": "E1M-V2N101", "som_hw_rev": "r1",
+            "board_name": "E1M-X-EVK", "board_hw_rev": None,
+            "silicon": "renesas:rzv2n:n44",
+            "eeprom": {
+                "bus": "e1m_i2c0", "bus_id": 0,
+                "addr_7bit": 0x54, "offset": 32,
+            },
+        },
+        "slices": [], "ipc": [], "helper_mcus": [], "boot_order": [],
+    }
+    p = tmp_path / "m.yaml"
+    p.write_text(json.dumps(doc))
+    proc = _run("--manifest", str(p))
+    assert proc.returncode == 0, proc.stdout + proc.stderr

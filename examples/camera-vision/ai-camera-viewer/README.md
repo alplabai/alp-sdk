@@ -1,8 +1,11 @@
 # ai-camera-viewer
 
-> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on
-> `native_sim/native/64`; real OV5640 + Ethos-U dispatch + Vela-
-> compiled model land in v0.6 AEN HiL.
+> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on
+> `native_sim/native/64` against the full `<alp/camera.h>` /
+> `<alp/inference.h>` surfaces (both ship today; Ethos-U dispatch
+> runs through `alp_inference_open(...)` same as any other backend).
+> What's still missing is a real Vela-compiled `person_detect.tflite`
+> model and AEN HiL bench validation.
 
 Headline edge-AI demo: an E1M-AEN module captures camera
 frames, runs a person-detect model on the on-die Ethos-U NPU,
@@ -23,13 +26,14 @@ OV5640 ──▶ <alp/camera.h> ──▶ <alp/inference.h> ──▶ post-proce
 - **TFLM + Ethos-U** dispatch via the `<alp/inference.h>`
   `ALP_INFERENCE_BACKEND_AUTO` path.  The §D.lib.loader resolves
   the right NPU shim from the SKU's `capabilities:` block:
-  - AEN701 → `CONFIG_ALP_TFLM_ETHOS_U55=y`
   - AEN401 / AEN601 / AEN801 → `CONFIG_ALP_TFLM_ETHOS_U85=y` +
     `_U55=y`
   - NX9101 → `CONFIG_ALP_TFLM_ETHOS_U65=y`
   - V2N → `CONFIG_ALP_TFLM_DRP_AI=y`
 - **LVGL** composes the preview, bounding-box overlay, and
-  latency / FPS strip.
+  latency / FPS strip, bound to the panel via `<alp/display.h>` +
+  `alp_gui_lvgl_attach()` (`<alp/gui.h>`) -- no direct
+  `<zephyr/drivers/display.h>` calls in app code.
 
 ## Why customers care
 
@@ -39,8 +43,8 @@ Three questions answered side-by-side:
    `alp_inference_open(...)` path dispatches to the NPU; no
    vendor-specific code in the app.
 2. **How fast?**  The on-screen latency strip prints per-invoke
-   microseconds.  Flip `som.sku` in `board.yaml` from `E1M-AEN701`
-   to `E1M-AEN801` to compare U55 vs U85.
+   microseconds.  Flip `som.sku` in `board.yaml` between E8, E6,
+   and E4 AEN SKUs to compare the preferred NPU path.
 3. **Does it run portably?**  Re-target to NX9101 (Ethos-U65) by
    changing one line in `board.yaml`.  Same model file; the
    loader emits the right Kconfig set and Vela's
@@ -48,7 +52,7 @@ Three questions answered side-by-side:
 
 ## Hardware needed
 
-- E1M-AEN family SoM (E7 recommended).
+- E1M-AEN family SoM (E8 recommended).
 - E1M-EVK board.
 - OV5640 camera on the EVK camera connector (MIPI / DVP).
 - ST7789 240×320 TFT on SPI1 + 2 GPIOs.
@@ -60,7 +64,7 @@ license question).  To run a real model:
 
 ```
 # Compile your .tflite for the target NPU with Arm's Vela compiler:
-vela --accelerator-config ethos-u55-256 \
+vela --accelerator-config ethos-u85-256 \
      --output-dir models/                \
      models/person_detect.tflite
 

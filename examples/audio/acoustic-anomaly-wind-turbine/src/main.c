@@ -88,6 +88,14 @@ static const float s_canned_rpm[N_REPORTS] = { 14.0f, 15.0f, 16.0f, 17.0f,
  * Customer replaces with a baseline learned at commissioning. */
 static struct aco_baseline s_baseline;
 
+/* Populate s_baseline once at startup.  inv_var (1/sigma^2) is the weight
+ * aco_anomaly_fallback() gives each feature when computing a Mahalanobis-
+ * style distance: leaving most entries at 1.0f (init to 1.0f by the loop
+ * below) is a placeholder equal-weighting, while the two explicit
+ * inv_var overrides down-weight centroid_hz and kurtosis specifically
+ * because their raw numeric ranges (hundreds to thousands of Hz; unbounded
+ * moment) would otherwise swamp the [0,1]-ish band-energy terms in the
+ * distance sum. */
 static void baseline_init(void)
 {
 	for (int i = 0; i < ACO_FEATURE_DIM; i++) {
@@ -125,12 +133,19 @@ static float synth_sample(int report, int frame, int i)
 	}
 }
 
+/* All per-run peripheral handles, bundled so main() can pass one pointer
+ * instead of three; NULL fields (mic/tacho absent) are the normal
+ * native_sim state, not an error condition -- each caller downstream
+ * checks the specific field it needs. */
 struct wtac_ctx {
 	alp_audio_in_t  *mic;
 	alp_gpio_t      *tacho;
 	alp_inference_t *inf;
 };
 
+/* Advisory subsystem label attached to the printk record; a heuristic hint
+ * for a technician, not a claim the AI/fallback score itself makes -- see
+ * the subsystem/flags block near the end of main() for how it is derived. */
 static const char *subsystem_name(int s)
 {
 	switch (s) {
@@ -186,11 +201,18 @@ int main(void)
 
 	int16_t pcm[ACO_FRAME_N];
 
+	/* Outer loop: one WTAC report per BPF_ENV_N-frame envelope window (~4 s
+	 * of audio at 62.5 fps) -- long enough to span several blade-pass
+	 * periods (a few rpm to tens of rpm) so bpf_modulation_extract() below
+	 * has a real modulation cycle to measure, not just a fraction of one. */
 	for (int r = 0; r < N_REPORTS; r++) {
 		bpf_env_reset(&envst);
 		float acc[ACO_FEATURE_DIM];
 		memset(acc, 0, sizeof(acc));
 
+		/* Inner loop: one 256-sample PDM frame (16 ms at 16 kHz) at a time;
+		 * acc accumulates the per-frame feature vectors so they can be
+		 * averaged into one representative vector per report below. */
 		for (int fidx = 0; fidx < FRAMES_PER_REPORT; fidx++) {
 			aco_frame_reset(&frame);
 			size_t got = 0;
@@ -198,6 +220,9 @@ int main(void)
 			    (c.mic != NULL && alp_audio_in_read(c.mic, pcm, ACO_FRAME_N, &got, 50) == ALP_OK &&
 			     got > 0);
 			for (int i = 0; i < ACO_FRAME_N; i++) {
+				/* have_pcm may return fewer than ACO_FRAME_N samples (got);
+				 * wrap with %got so the frame is still fully populated
+				 * rather than left zero-padded past what the mic returned. */
 				float s =
 				    have_pcm ? ((float)pcm[i % (int)got] / 32768.0f) : synth_sample(r, fidx, i);
 				aco_frame_push(&frame, s);
@@ -218,6 +243,9 @@ int main(void)
 			}
 		}
 
+		/* Mean feature vector over the report interval: smooths per-frame
+		 * noise and gives the AI/fallback path (below) one representative
+		 * vector instead of FRAMES_PER_REPORT separate ones. */
 		for (int i = 0; i < ACO_FEATURE_DIM; i++) {
 			acc[i] /= (float)FRAMES_PER_REPORT;
 		}
@@ -227,6 +255,12 @@ int main(void)
 		float       rpm = rotor_tacholess_rpm(envst.env, envst.count, ACO_FRAME_RATE_HZ, N_BLADES);
 		const char *rpm_src = "ESTIMATED";
 		if (!rotor_rpm_valid(rpm)) {
+			/* rotor_rpm_valid()'s 3..30 rpm plausibility gate catches both
+			 * a genuinely stopped/near-stopped rotor and an unreliable
+			 * autocorrelation estimate (see rotor_tacholess_rpm()'s
+			 * detectable-RPM-floor note in rotor_speed.h); either way, the
+			 * canned track keeps rpm_src visibly distinct in the log so a
+			 * downstream reader can tell an estimate from a substitution. */
 			rpm     = s_canned_rpm[r]; /* fall back to the canned track */
 			rpm_src = "CANNED";
 		}
@@ -284,7 +318,26 @@ int main(void)
 			score = 1.0f;
 		}
 
-		/* Heuristic subsystem + flags (advisory; AI gives the score). */
+		/*
+		 * Heuristic subsystem + flags (advisory; AI/fallback gives the
+		 * score above -- this block only labels WHERE a problem likely is,
+		 * checked in priority order so the first, most specific match wins:
+		 *
+		 *  1. BLADE_BPF/IMBALANCE  -- strong once-per-revolution amplitude
+		 *     modulation (fundamental blade-order energy > 0.2 of AC energy
+		 *     AND overall modulation_depth > 0.3) is the fingerprint of an
+		 *     unbalanced or damaged blade beating the hum at 1x BPF.
+		 *  2. DRIVETRAIN_TONAL/GEARMESH -- checked only if (1) did not match;
+		 *     energy concentrated in GEARMESH_BAND (the log-band the
+		 *     synthetic ~600 Hz gear-mesh tone lands in) flags a tonal
+		 *     component from the gearbox rather than the blades.
+		 *  3. BLADE_BPF/TE_WHISTLE -- low spectral flatness (tonal, not
+		 *     broadband) with neither of the above is the fallback guess
+		 *     for a trailing-edge whistle; still labelled BLADE_BPF since
+		 *     TE erosion is a blade-surface defect.
+		 *  4. BROADBAND/NONE (the initial subsystem/flags values) -- no
+		 *     narrowband signature found; broadband aero noise/erosion.
+		 */
 		int   subsystem = 2; /* BROADBAND */
 		char  flags[32] = "NONE";
 		float gearmesh  = acc[GEARMESH_BAND];

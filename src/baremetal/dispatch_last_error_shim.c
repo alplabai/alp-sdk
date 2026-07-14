@@ -5,12 +5,14 @@
  * Plain-CMake baremetal dispatcher shim.
  *
  * Registry dispatchers share the Zephyr-shaped alp_z_* last-error hooks.
- * Baremetal builds use the SDK-global last-error slot from peripheral.h,
- * so route the dispatcher hooks there without pulling Zephyr.
+ * Baremetal builds route them onto the one common last-error slot
+ * (ALP_LAST_ERROR_TLS-qualified in src/common/stub/stub_core.c) without
+ * pulling in Zephyr.
  */
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
+#include "alp_z_last_error.h"
 
 void alp_z_set_last_error(alp_status_t s)
 {

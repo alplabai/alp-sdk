@@ -1,0 +1,29 @@
+# board.yaml -- jsmn JSON-token-parse teaching example.
+#
+# `cores.m55_hp.libraries: [jsmn]` makes alp_project.py emit
+# CONFIG_ALP_JSMN_SW=y (jsmn is pure-SW only -- see
+# metadata/library-profiles/jsmn/hw-backends.yaml, no accelerator
+# class). jsmn itself is a vendored single header
+# (vendors/jsmn/include/jsmn.h) rather than a west-fetched Zephyr
+# module -- see vendors/jsmn/README.md for why -- so this example's
+# CMakeLists.txt adds that include directory directly.
+libraries:
+  - name: jsmn
+    cores: [m55_hp]
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    # No board wiring: jsmn parses an in-RAM string, no peripheral
+    # needed. This is a pure-logic example -- the whole point is
+    # showing the library works before you point it at a real
+    # payload (sensor-config blob, cloud response, etc.).
+    peripherals: []
+
+diagnostics:
+  log_level: info

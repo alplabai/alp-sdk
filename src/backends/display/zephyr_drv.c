@@ -30,8 +30,12 @@
  * <alp/display.h>: two writers on one panel produce interleaved
  * garbage.  Use this backend for panels the app drives directly
  * (framebuffer pushes via alp_display_blit); use lv_* for
- * LVGL-composed UIs.  The planned alp_gui_lvgl_attach() bridge
- * (<alp/gui.h>) will make the hand-off explicit.
+ * LVGL-composed UIs.  alp_gui_lvgl_attach() (<alp/gui.h>, src/gui_lvgl.c)
+ * makes that hand-off explicit: it creates its OWN lv_display_t bound
+ * to the alp_display_t the app passes in (a DIFFERENT alias from the
+ * zephyr,display chosen node LVGL's own auto-init may claim), wiring
+ * LVGL's flush_cb straight to alp_display_blit() instead of going
+ * through Zephyr's own lvgl_display.c glue.
  *
  * Pixel-format contract: open() keeps the driver's active format
  * when it is representable in alp_pixfmt_t, otherwise it walks the
@@ -58,9 +62,9 @@
 
 #include "display_ops.h"
 
-#define ALP_DISPLAY_DEV_OR_NULL(idx)                                                               \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_display, idx))),                               \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_display, idx)))),                              \
+#define ALP_DISPLAY_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_display, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_display, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {

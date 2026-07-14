@@ -40,6 +40,10 @@
 #define NUM_CHANNELS   2 /* stereo: L/R interleaved */
 #define BLOCK_FRAMES   256u
 #define BLOCK_BYTES    (BLOCK_FRAMES * NUM_CHANNELS * (WORD_BITS / 8u))
+/* BLOCK_COUNT sizes the slab bigger than what's actually queued
+ * (BLOCKS_TO_SEND) so the driver always has a free block on hand even while
+ * the app is still allocating/filling the next one -- avoids an alloc stall
+ * mid-fill. */
 #define BLOCK_COUNT    8u
 #define BLOCKS_TO_SEND 4u
 #define TX_TIMEOUT_MS  1000
@@ -81,9 +85,14 @@ int main(void)
 	}
 
 	struct i2s_config cfg = {
-		.word_size      = WORD_BITS,
-		.channels       = NUM_CHANNELS,
-		.format         = I2S_FMT_DATA_FORMAT_I2S,
+		.word_size = WORD_BITS,
+		.channels  = NUM_CHANNELS,
+		.format    = I2S_FMT_DATA_FORMAT_I2S,
+		/* Both MASTER flags: the i2s3 controller itself generates WS
+		 * (frame clock) and SCLK (bit clock) from the 76.8 MHz audio
+		 * source, rather than expecting an external codec to drive them --
+		 * matches the EVK wiring, where i2s3 is the only clock source on
+		 * the SCLK/WS/SDO net. */
 		.options        = I2S_OPT_FRAME_CLK_MASTER | I2S_OPT_BIT_CLK_MASTER,
 		.frame_clk_freq = SAMPLE_RATE_HZ,
 		.mem_slab       = &i2s_slab,

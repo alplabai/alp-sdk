@@ -245,6 +245,63 @@ def test_detect_make_invocation_in_tutorial(tmp_path: Path) -> None:
     assert len(make_findings) >= 1
 
 
+def test_make_prose_outside_fence_not_flagged(tmp_path: Path) -> None:
+    """Regression for issue #451: prose that reflows onto a new
+    markdown line starting with the verb "make" (not the build tool)
+    must NOT be flagged.  Real example that shipped in
+    examples/aen/aen-rpc-pingpong/README.md:52 before the fix:
+    a paragraph wraps as `...RESET=y`\\n`make the shared ... coherent`.
+    """
+    p = _write(tmp_path, "doc.md", """
+        # Transport notes
+
+        `CONFIG_DCACHE=n` + `CONFIG_IPC_SERVICE_BACKEND_RPMSG_SHMEM_RESET=y`
+        make the shared `sram_ipc0` vrings coherent + zeroed.
+
+        Sentence that says you should make sure everything works before
+        you make the change.
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    make_findings = [f for f in findings if "make" in f.matched_text]
+    assert make_findings == [], (
+        f"prose starting with 'make the'/'make sure' outside a fenced "
+        f"code block must not be flagged as a make invocation: "
+        f"{make_findings}"
+    )
+
+
+def test_make_invocation_still_flagged_inside_fence_after_prose(
+    tmp_path: Path,
+) -> None:
+    """The fence-scoping fix must not blind the linter to a REAL
+    `make` invocation that happens to share a file with make-prose."""
+    p = _write(tmp_path, "doc.md", """
+        Prose: make the change carefully.
+
+        ```bash
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image
+        ```
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    make_findings = [f for f in findings if "make" in f.matched_text]
+    assert len(make_findings) == 1
+    assert "ARCH=arm64" in make_findings[0].matched_text
+
+
+def test_compute_fence_lines_helper() -> None:
+    """`_compute_fence_lines` returns only the CONTENT lines between
+    a ``` open/close pair, not the fence markers themselves."""
+    text = (
+        "prose line 1\n"        # line 1
+        "```bash\n"             # line 2 -- fence open
+        "make foo\n"            # line 3 -- inside
+        "echo hi\n"             # line 4 -- inside
+        "```\n"                 # line 5 -- fence close
+        "prose line 2\n"        # line 6
+    )
+    assert linter._compute_fence_lines(text) == {3, 4}
+
+
 # ---------------------------------------------------------------------
 # 5. Pattern: forward-slash absolute paths in markdown
 # ---------------------------------------------------------------------
@@ -284,6 +341,28 @@ def test_exclude_prefix_skips_subtree(tmp_path: Path) -> None:
     paths = {f.relative_to(tmp_path).as_posix() for f in files}
     assert "docs/good.md" in paths
     assert "vendors/bad.md" not in paths
+
+
+def test_default_excludes_include_superpowers_plans(tmp_path: Path) -> None:
+    """Regression for issue #451: docs/superpowers/plans/ carries dated
+    bench-session planning notes with real, personal paths (e.g.
+    /home/alplab/..., /Users/caner/...) -- archival working notes, not
+    customer tutorials.  Excluded by default, parallel to the existing
+    docs/superpowers/specs/ carve-out and to
+    lint_doc_yaml_fragments.py's default excludes."""
+    assert "docs/superpowers/plans" in linter.DEFAULT_EXCLUDES
+    _write(
+        tmp_path,
+        "docs/superpowers/plans/2026-01-01-example.md",
+        "workspace: /home/alplab/zephyrproject\n",
+    )
+    _write(tmp_path, "docs/good.md", "Clean content.\n")
+    files = linter.discover_files(
+        [tmp_path], excludes=linter.DEFAULT_EXCLUDES, base=tmp_path,
+    )
+    paths = {f.relative_to(tmp_path).as_posix() for f in files}
+    assert "docs/good.md" in paths
+    assert "docs/superpowers/plans/2026-01-01-example.md" not in paths
 
 
 def test_exclude_path_components_not_substrings(tmp_path: Path) -> None:

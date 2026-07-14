@@ -1,0 +1,237 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Renode --sim-mode smoke: the studio hardware-simulator contract
+# (github.com/alplabai/alp-sdk#674), on the FAITHFUL RZ/V2N M33 model.
+#
+# Builds a headless V2N M33 Zephyr image (samples/hello_world +
+# tests/renode/v2n_m33_ramconsole.conf -- the ram_console backend, since
+# the M33-SM has no UART console), boots it in Renode via
+# `west alp-renode --sim-mode --board E1M-V2N101`, and drives the
+# published sockets exactly the way alp-studio's RealRenodeAdapter will:
+#   - the UART socket must stream the firmware console (polled out of the
+#     ram_console_buf RAM ring), and
+#   - the control socket must round-trip WriteBytes -> ReadBytes (in M33
+#     SRAM) and apply the tmp112 inject on iic8 (read back the value).
+# This is tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end
+# with ALP_SIM_E2E=1 + ALP_SIM_E2E_ELF pointing at the built image.
+#
+# The renesas_rzv2n model boots the REAL V2N M33 firmware (faithful
+# SRAM@0x08003000 map + a coarse CPG stub for the FSP clock/reset
+# handshakes + iic8/tmp112).  This gate is the end-to-end proof; the
+# deterministic sim-mode helpers are covered by the always-on pytest gate.
+
+name: pr-renode-sim-mode
+
+# The trigger is INTENTIONALLY unfiltered on paths.  This gate is a REQUIRED
+# status check on dev/main, and a path-filtered `pull_request` trigger leaves
+# the required check permanently in the "expected" state on any PR that doesn't
+# touch a renode path -- GitHub then BLOCKS the PR forever (a never-posted
+# required check can't be cleared, not even by --admin).  Instead we always run
+# a cheap `detect` job and let the heavy `renode-sim-mode` job SKIP when no
+# renode-relevant path changed: GitHub counts a skipped required check as
+# passing, so the contract still posts on every PR without a 40-min boot.
+on:
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap path detector -- NOT a required context itself.  Always succeeds fast;
+  # its output gates the heavy boot below.
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      renode: ${{ steps.filter.outputs.renode }}
+    steps:
+      - name: Detect renode-relevant changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            renode:
+              - 'metadata/renode/renesas_rzv2n.*'
+              - 'scripts/west_commands/alp_renode.py'
+              - 'tests/scripts/test_alp_renode_sim.py'
+              - 'tests/renode/v2n_m33_ramconsole.conf'
+              - 'tests/renode/aen_m55_itcm_run.overlay'
+              - 'tests/renode/aen_m55_sim.conf'
+              - 'metadata/renode/alif_ensemble_e8.*'
+              - 'examples/aen/aen-sim-vision/**'
+              - '.github/workflows/pr-renode-sim-mode.yml'
+
+  renode-sim-mode:
+    name: renode · V2N101 --sim-mode socket contract
+    needs: detect
+    # Skipped (== passing, for branch protection) unless a renode path changed
+    # or the run was dispatched by hand.
+    if: needs.detect.outputs.renode == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: alp-sdk/.python-version
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              ninja-build gperf ccache dfu-util device-tree-compiler \
+              python3-dev python3-pip python3-setuptools python3-wheel \
+              libffi-dev libssl-dev xz-utils file make gcc \
+              ca-certificates curl gnupg
+
+      - name: Install west + Python deps
+        run: pip3 install west jsonschema pyyaml pytest
+
+      - name: Bootstrap Zephyr workspace
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: bash scripts/bootstrap.sh
+
+      # Zephyr's build scripts (gen_kobject_list.py etc.) need pyelftools +
+      # friends; install the pinned Zephyr build requirements now that the
+      # workspace exists.
+      - name: Install Zephyr build requirements
+        run: |
+          set -euo pipefail
+          pip3 install -r "${GITHUB_WORKSPACE}/zephyrproject/zephyr/scripts/requirements-base.txt"
+
+      - name: Install Zephyr SDK (arm-zephyr-eabi)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Pinned Zephyr v4.4.0 requires Zephyr SDK 1.0.1 (zephyr/SDK_VERSION).
+          SDK_VER=1.0.1
+          curl -fsSL -o /tmp/zephyr-sdk.tar.xz \
+            "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${SDK_VER}/zephyr-sdk-${SDK_VER}_linux-x86_64_minimal.tar.xz"
+          mkdir -p "$HOME/zephyr-sdk"
+          tar -xJf /tmp/zephyr-sdk.tar.xz -C "$HOME/zephyr-sdk" --strip-components=1
+          "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
+          echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
+
+      # Same v1.16.1 pin as the other Renode gates.
+      - name: Install Renode
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.linux-portable-dotnet.tar.gz \
+              -o /tmp/renode.tar.gz
+          mkdir -p "$HOME/renode"
+          tar -xzf /tmp/renode.tar.gz -C "$HOME/renode" --strip-components=1
+          echo "$HOME/renode" >> "$GITHUB_PATH"
+          "$HOME/renode/renode" --version
+
+      # Build a headless V2N M33 image whose console lands in ram_console.
+      - name: Build headless V2N M33 ram_console image
+        id: build_fw
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+        run: |
+          set -euo pipefail
+          # Register alp-sdk as a Zephyr module so its board_root/dts_root
+          # (zephyr/module.yml) expose the generated M33-SM board -- raw
+          # `west build` doesn't auto-discover the manifest repo the way
+          # `west alp-build` does.
+          west build -p always \
+              -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 \
+              "${ZEPHYR_BASE}/samples/hello_world" \
+              -d /tmp/v2n-m33-build \
+              -- -DEXTRA_ZEPHYR_MODULES="${GITHUB_WORKSPACE}/alp-sdk" \
+                 -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/v2n_m33_ramconsole.conf"
+          test -f /tmp/v2n-m33-build/zephyr/zephyr.elf
+
+      # Build a real AEN M55-HP image, ITCM-linked (chosen zephyr,flash =
+      # &itcm) so it runs from the CPU-local 0x0 -- dodging Renode 1.16.1's
+      # high-VTOR Cortex-M55 bug.  The M55 has a wired UART5 console (#687).
+      - name: Build AEN M55 ITCM-run image
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+        run: |
+          set -euo pipefail
+          west build -p always \
+              -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+              "${ZEPHYR_BASE}/samples/hello_world" \
+              -d /tmp/aen-m55-build \
+              -- -DEXTRA_ZEPHYR_MODULES="${GITHUB_WORKSPACE}/alp-sdk" \
+                 -DEXTRA_DTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_itcm_run.overlay" \
+                 -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_sim.conf"
+          test -f /tmp/aen-m55-build/zephyr/zephyr.elf
+
+      # tflite-micro is an OPTIONAL Zephyr module (not fetched by default);
+      # clone it at the manifest-pinned revision for the vision demo.
+      - name: Fetch tflite-micro (optional module)
+        run: |
+          set -euo pipefail
+          TFLM_REV=fcc760af130f3a595b5802cdebcc77461e54f382
+          git clone --quiet https://github.com/zephyrproject-rtos/tflite-micro \
+              "${GITHUB_WORKSPACE}/tflite-micro"
+          git -C "${GITHUB_WORKSPACE}/tflite-micro" checkout --quiet "${TFLM_REV}"
+          test -f "${GITHUB_WORKSPACE}/tflite-micro/zephyr/module.yml"
+
+      # Build the aen-sim-vision demo (real TFLM inference on the M55).
+      - name: Build aen-sim-vision (TFLM) ITCM-run image
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+        run: |
+          set -euo pipefail
+          west build -p always \
+              -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+              examples/aen/aen-sim-vision \
+              -d /tmp/aen-vision-build \
+              -- -DEXTRA_ZEPHYR_MODULES="${GITHUB_WORKSPACE}/alp-sdk;${GITHUB_WORKSPACE}/tflite-micro" \
+                 -DEXTRA_DTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_itcm_run.overlay"
+          test -f /tmp/aen-vision-build/zephyr/zephyr.elf
+
+      # Run the live e2es as SEPARATE steps: each spawns its own Renode
+      # process, and isolating them keeps one heavy boot from starving the
+      # other's monitor on a loaded runner.
+      - name: --sim-mode e2e (real V2N M33 firmware, ram_console)
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ALP_SIM_E2E: '1'
+          ALP_SIM_E2E_ELF: /tmp/v2n-m33-build/zephyr/zephyr.elf
+          ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q \
+              tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end \
+              tests/scripts/test_alp_renode_sim.py::test_elf_symbol_finds_ram_console_when_e2e_elf_set
+
+      - name: --sim-mode e2e (real AEN M55 firmware, UART5 console)
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ALP_SIM_E2E: '1'
+          ALP_SIM_E2E_AEN_ELF: /tmp/aen-m55-build/zephyr/zephyr.elf
+          ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q \
+              tests/scripts/test_alp_renode_sim.py::test_sim_mode_aen_end_to_end
+
+      - name: --sim-mode e2e (aen-sim-vision, real TFLM inference)
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ALP_SIM_E2E: '1'
+          ALP_SIM_E2E_VISION_ELF: /tmp/aen-vision-build/zephyr/zephyr.elf
+          ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q \
+              tests/scripts/test_alp_renode_sim.py::test_sim_mode_aen_vision_pipeline

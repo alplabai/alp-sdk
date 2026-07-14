@@ -19,7 +19,7 @@
 #include <zephyr/kernel.h>
 
 #include "alp/peripheral.h"
-#include "alp/e1m_pinout.h"
+#include "alp/board.h"
 #include "alp/chips/ssd1306.h"
 #include "alp/blocks/button_led.h"
 #include "alp/camera.h"
@@ -38,7 +38,7 @@ static int stage_peripherals_init(void)
 	printf("[iotcam] stage 1: peripherals\n");
 
 	g_sensor_bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = ALP_E1M_I2C0,
+	    .bus_id     = BOARD_I2C_SENSORS,
 	    .bitrate_hz = 400000,
 	});
 	if (g_sensor_bus == NULL) {
@@ -51,14 +51,13 @@ static int stage_peripherals_init(void)
 	printf("[iotcam]   ssd1306_init                  %s\n",
 	       (s == ALP_OK) ? "ok" : "skip (no panel)");
 
-	/* User trigger + status LED via the button_led block.  The EVK
-     * has no plain GPIO LED, so the LED is the RGB-red pad (PWM3)
-     * claimed as a digital GPIO (ALP_E1M_GPIO_PWM3, the E1M "GPIO
-     * secondary"); the button is the encoder push switch (IO4). */
+	/* User trigger + status LED via the button_led block.  Board aliases
+     * keep the EVK pad choices in generated route metadata instead of
+     * hard-coding the E1M/E1M-X namespace in application source. */
 	s = alp_button_led_init(&g_trigger,
 	                        &(alp_button_led_config_t){
-	                            .button_pin_id     = ALP_E1M_GPIO_IO4,
-	                            .led_pin_id        = ALP_E1M_GPIO_PWM3,
+	                            .button_pin_id     = BOARD_PIN_ENCODER_SW,
+	                            .led_pin_id        = BOARD_PIN_LED_RED,
 	                            .active_low_button = true,
 	                        });
 	printf("[iotcam]   alp_button_led_init           %s\n",
@@ -120,13 +119,14 @@ static alp_wifi_t *g_wifi;
 static int stage_network_connect(void)
 {
 	printf("[iotcam] stage 4: network\n");
-	/* TODO(v0.3): on a real V2N + Zephyr build, the on-module
-     * Murata LBEE5HY2FY (Infineon CYW55513) provides Wi-Fi 6 +
-     * BLE 5.4.  Provisioning via SoftAP + alp_iot_wifi_provision()
-     * (lands v0.3.x); for the skeleton we just open the handle.
-     *
-     * v0.1 stub returns NULL — alp_iot_* is documented header-only
-     * surface in v0.1. */
+	/* TODO(v0.3): on V2N, the on-module Murata LBEE5HY2FY
+	 * (Infineon CYW55513) Wi-Fi/BLE data paths are Linux-owned on
+	 * the A55 Yocto slice.  On AEN Zephyr, the same portable surface
+	 * resolves to the CC3501E bridge backend.  For this skeleton we
+	 * just open the handle.
+	 *
+	 * v0.1 stub returns NULL — alp_iot_* is documented header-only
+	 * surface in v0.1. */
 	g_wifi = alp_wifi_open();
 	if (g_wifi == NULL) {
 		printf("[iotcam]   alp_wifi_open                 skip (v0.3 deliverable)\n");

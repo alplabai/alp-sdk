@@ -54,7 +54,7 @@
 
 #include "alp/peripheral.h"
 #include "alp_internal.h"
-#include "yocto_errno.h"
+#include "common/alp_errno.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_I2C_HANDLES
 #define ALP_SDK_YOCTO_MAX_I2C_HANDLES 4
@@ -105,7 +105,7 @@ static alp_status_t ensure_slave(struct alp_i2c *h, uint8_t addr)
 		return ALP_OK;
 	}
 	if (ioctl(h->fd, I2C_SLAVE, (unsigned long)addr) < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	h->cached_addr = addr;
 	h->addr_cached = true;
@@ -128,7 +128,7 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
 
 	int fd = open(path, O_RDWR | O_CLOEXEC);
 	if (fd < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		return NULL;
 	}
 
@@ -137,7 +137,7 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
      * adapters report I2C_FUNC_SMBUS_* without I2C_FUNC_I2C). */
 	unsigned long funcs = 0;
 	if (ioctl(fd, I2C_FUNCS, &funcs) < 0) {
-		alp_internal_set_last_error(alp_yocto_errno_to_alp(errno));
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
 		(void)close(fd);
 		return NULL;
 	}
@@ -155,6 +155,7 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
 	}
 	h->fd     = fd;
 	h->bus_id = cfg->bus_id;
+	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
 
@@ -169,7 +170,7 @@ alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, si
 	}
 	ssize_t n = write(bus->fd, data, len);
 	if (n < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	if ((size_t)n != len) {
 		return ALP_ERR_IO;
@@ -188,7 +189,7 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
 	}
 	ssize_t n = read(bus->fd, data, len);
 	if (n < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	if ((size_t)n != len) {
 		return ALP_ERR_IO;
@@ -196,8 +197,12 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
 	return ALP_OK;
 }
 
-alp_status_t alp_i2c_write_read(
-    alp_i2c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen)
+alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
+                                uint8_t        addr,
+                                const uint8_t *wdata,
+                                size_t         wlen,
+                                uint8_t       *rdata,
+                                size_t         rlen)
 {
 	if (bus == NULL || !bus->in_use) {
 		return ALP_ERR_INVAL;
@@ -238,7 +243,7 @@ alp_status_t alp_i2c_write_read(
 		.nmsgs = (uint32_t)nmsgs,
 	};
 	if (ioctl(bus->fd, I2C_RDWR, &req) < 0) {
-		return alp_yocto_errno_to_alp(errno);
+		return alp_status_from_posix_errno(errno);
 	}
 	/* I2C_RDWR invalidates the cached I2C_SLAVE address on some
      * kernels -- forget the cache so the next write/read re-sets it. */

@@ -79,13 +79,24 @@ struct alp_ble {
 	alp_ble_radio_state_t state;
 	const alp_backend_t  *backend;
 	alp_capabilities_t    cached_caps;
-	bool                  in_use;
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close, issue #629) -- placed before in_use so the atomic-
+	 * claim zeroing in the dispatcher (memset up to
+	 * offsetof(..., in_use)) resets both on every fresh claim. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 struct alp_ble_conn {
 	alp_ble_conn_state_t state;
 	const alp_backend_t *backend;
-	bool                 in_use;
+	/* Same lifecycle/active_ops contract as struct alp_ble above; this
+	 * pool's teardown is alp_ble_disconnect() (issue #629). */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 #endif /* ALP_BACKENDS_BLE_OPS_H */

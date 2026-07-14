@@ -152,6 +152,38 @@ def test_generator_emitted_symbol_is_known(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
+def test_e1m_only_pinout_guidance_in_general_docs_fails(tmp_path):
+    _scaffold(
+        tmp_path,
+        header_syms="ALP_E1M_I2C0 ALP_E1M_X_I2C0",
+        docs={
+            "getting-started.md": (
+                "Standalone firmware should pick instance IDs from "
+                "`<alp/e1m_pinout.h>` such as `ALP_E1M_I2C0`.\n"
+            )
+        },
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "E1M-only pinout guidance" in proc.stderr
+
+
+def test_dual_namespace_pinout_guidance_passes(tmp_path):
+    _scaffold(
+        tmp_path,
+        header_syms="ALP_E1M_I2C0 ALP_E1M_X_I2C0",
+        docs={
+            "getting-started.md": (
+                "Standalone firmware should pick instance IDs from "
+                "`<alp/e1m_pinout.h>` (`ALP_E1M_I2C0`) or "
+                "`<alp/e1m_x_pinout.h>` (`ALP_E1M_X_I2C0`).\n"
+            )
+        },
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_forward_looking_plan_doc_excluded(tmp_path):
     # cc3501e-integration-plan.md documents a proposed API by intent;
     # a "dead" symbol there must NOT fail the scan.  (It is still index-linked.)

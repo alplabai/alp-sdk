@@ -3,16 +3,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Doc-drift gate -- fails (exit 1) when customer-facing documentation
-references SDK identifiers that no longer exist, or when a top-level
-doc isn't linked from the docs index.
+references SDK identifiers that no longer exist, when a top-level
+doc isn't linked from the docs index, or when CC3501E docs/examples
+describe the current bridge as the obsolete CS-less design.
 
-Two independent checks:
+Three independent checks:
 
   (a) Dead-symbol references.  Every `ALP_[A-Z0-9_]+` and
       `alp_[a-z0-9_]+` token mentioned in a customer doc must exist as
       a token in one of the SDK's authoritative sources of truth:
         * C-API public headers    include/**/*.h
-        * Kconfig config symbols   zephyr/Kconfig[.alp-libraries]
+        * Kconfig config symbols   zephyr/Kconfig[.alp-libraries],
+                                 zephyr/kconfigs/*.kconfig
         * generated identifiers    scripts/alp_project.py + scripts/gen_*.py
           (board target names like alp_e1m_evk_*, the alp_hw_info_build
            CMake helper, ALP_HW_BUILD_* / ALP_SOC_* macros)
@@ -37,12 +39,25 @@ Two independent checks:
       the check the updating-docs skill documents in prose; here it is
       mechanised so CI enforces it.
 
+  (c) CC3501E bridge-current wording.  Customer docs, the CC3501E firmware
+      wrapper comments, and the AEN CC3501E examples must not describe the
+      current bridge as the older CS-less / fixed-count design.  Explicitly
+      historical "earlier r1" notes are allowed; current-rev guidance must say
+      hardware SS0 + READY, with HOST_IRQ / async events as the remaining
+      future work.
+
+  (d) E1M-X pinout namespace guidance.  Standalone/general docs that teach
+      developers to pick pinout instance IDs must present the E1M and E1M-X
+      namespaces together (`<alp/e1m_pinout.h>` + `<alp/e1m_x_pinout.h>`).
+      E1M-only guidance in those docs is drift because the form factors are
+      intentionally separate product lines.
+
 Run from the repo root:
 
     python3 scripts/check_doc_drift.py                  # both checks
     python3 scripts/check_doc_drift.py --allow ALP_FOO  # extend allowlist
 
-Exits non-zero if either check finds a problem.
+Exits non-zero if any check finds a problem.
 """
 
 from __future__ import annotations
@@ -100,6 +115,65 @@ _SCAN_EXCLUDE_DOCS = {
     "v0.6-tbd-and-assumptions.md",   # in-flight v0.6 TBDs / assumptions
 }
 
+_CC3501E_BRIDGE_SCAN_SUFFIXES = {
+    ".c",
+    ".h",
+    ".md",
+    ".overlay",
+    ".ps1",
+    ".sh",
+    ".syscfg",
+    ".yaml",
+    ".yml",
+}
+
+_CC3501E_BRIDGE_SCAN_GLOBS = (
+    "docs/cc3501e*.md",
+    "firmware/cc3501e/**/*",
+    "examples/aen/aen-cc3501e-*/**/*",
+    "examples/aen/aen-usb-firstlight/**/*",
+    "examples/peripheral-io/alp-console/**/*",
+)
+
+_CC3501E_STALE_BRIDGE_RE = re.compile(
+    r"(?:\b(?:current|this)\b.*\b(?:CS-less|no\s+CS|no\s+chip-select|"
+    r"fixed-count|fixed-clock-count)\b)"
+    r"|(?:\b(?:CS-less|no-CS)\s+lockstep\b)"
+    r"|(?:\bfixed-(?:count|clock-count)\b)"
+    r"|(?:\b3-wire\s+(?:CS-less|deterministic|SPI bridge)\b)"
+    r"|(?:\bwires only SCLK/MOSI/MISO\b)"
+    r"|(?:\bSS tied asserted\b)"
+    r"|(?:\bnext board rev\b.*\bCS\b)"
+    r"|(?:\bCS line \+ host-IRQ\b)"
+    r"|(?:\bCS-less framing fragility\b)",
+    re.IGNORECASE,
+)
+
+_CC3501E_STALE_ALLOWED_RE = re.compile(
+    r"\b(?:earlier|old|obsolete|prior|previous|previously|r1|resolved)\b"
+    r"|(?:\bnot\b.{0,40}\b(?:CS-less|fixed-count|fixed-clock-count|lockstep)\b)"
+    r"|(?:\bdo not revert\b.{0,40}\bThree Pin\b)",
+    re.IGNORECASE,
+)
+
+_PINOUT_GUIDANCE_DOCS = (
+    "README.md",
+    "docs/getting-started.md",
+    "docs/firmware-quickstart.md",
+    "docs/architecture.md",
+)
+
+_E1M_PINOUT_GUIDANCE_RE = re.compile(
+    r"(?:<alp/e1m_pinout\.h>|`?ALP_E1M_(?:I2C|SPI|UART|I2S|PWM|ADC|DAC|WDT|GPIO)[A-Z0-9_]*`?)"
+)
+_E1M_X_PINOUT_GUIDANCE_RE = re.compile(
+    r"(?:<alp/e1m_x_pinout\.h>|`?ALP_E1M_X_[A-Z0-9_]*`?)"
+)
+_PINOUT_TEACHING_RE = re.compile(
+    r"\b(?:standalone|hand-written|portable|portability|form factor|instance IDs?|pinout)\b",
+    re.IGNORECASE,
+)
+
 
 def collect_known_symbols(root: pathlib.Path) -> set[str]:
     """Return every ALP_*/alp_* token that appears in ANY of the SDK's
@@ -110,7 +184,8 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
     Source layers harvested (each bounded to a specific directory -- never
     a whole-tree walk, so this stays fast and skips build artefacts):
       * C-API headers           include/**/*.h, src/**/*.h
-      * Kconfig config symbols   zephyr/Kconfig[.alp-libraries]
+      * Kconfig config symbols   zephyr/Kconfig[.alp-libraries],
+                                 zephyr/kconfigs/*.kconfig
       * CMake options / helpers  CMakeLists.txt, src/**/CMakeLists.txt,
                                  cmake/**/*.cmake  (ALP_OS, ALP_SDK*,
                                  alp_hw_info_build, ...)
@@ -136,9 +211,12 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
     # C-API: public + internal headers.
     harvest_tree(root / "include", "*.h")
     harvest_tree(root / "src", "*.h")
-    # Kconfig config namespace (ALP_SDK_*).
+    # Kconfig config namespace (ALP_SDK_*).  zephyr/Kconfig only sources the
+    # per-subsystem fragments under zephyr/kconfigs/ (issue #458 split) plus a
+    # couple of driver-tree Kconfig files, so harvest those directly too.
     for kconfig in ("zephyr/Kconfig", "zephyr/Kconfig.alp-libraries"):
         harvest(root / kconfig)
+    harvest_tree(root / "zephyr" / "kconfigs", "*.kconfig")
     # CMake options / helper functions (ALP_OS, ALP_SDK*, alp_hw_info_build).
     harvest(root / "CMakeLists.txt")
     harvest_tree(root / "src", "CMakeLists.txt")
@@ -225,6 +303,59 @@ def find_index_gaps(root: pathlib.Path) -> list[str]:
     return gaps
 
 
+def cc3501e_bridge_current_files(root: pathlib.Path) -> list[pathlib.Path]:
+    """Files whose CC3501E bridge-current wording should stay in sync."""
+    seen: set[pathlib.Path] = set()
+    out: list[pathlib.Path] = []
+    for pattern in _CC3501E_BRIDGE_SCAN_GLOBS:
+        for path in root.glob(pattern):
+            if not path.is_file():
+                continue
+            if path.suffix not in _CC3501E_BRIDGE_SCAN_SUFFIXES:
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            out.append(path)
+    return sorted(out)
+
+
+def find_cc3501e_bridge_stale_claims(root: pathlib.Path) -> list[tuple[str, int, str]]:
+    """Return stale current-rev CC3501E bridge wording references."""
+    stale: list[tuple[str, int, str]] = []
+    for path in cc3501e_bridge_current_files(root):
+        rel = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            if not _CC3501E_STALE_BRIDGE_RE.search(line):
+                continue
+            if _CC3501E_STALE_ALLOWED_RE.search(line):
+                continue
+            stale.append((rel, line_no, line.strip()))
+    return stale
+
+
+def find_e1m_x_pinout_guidance_gaps(root: pathlib.Path) -> list[tuple[str, int, str]]:
+    """Return E1M-only pinout guidance in standalone/general docs."""
+    gaps: list[tuple[str, int, str]] = []
+    for rel in _PINOUT_GUIDANCE_DOCS:
+        path = root / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        line_no = 1
+        for para in re.split(r"\n\s*\n", text):
+            if (
+                _E1M_PINOUT_GUIDANCE_RE.search(para)
+                and _PINOUT_TEACHING_RE.search(para)
+                and not _E1M_X_PINOUT_GUIDANCE_RE.search(para)
+            ):
+                first = next((ln.strip() for ln in para.splitlines() if ln.strip()), "")
+                gaps.append((rel, line_no, first))
+            line_no += para.count("\n") + 2
+    return gaps
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -242,6 +373,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     known = collect_known_symbols(root)
     dead = find_dead_symbols(root, known, allow)
     gaps = find_index_gaps(root)
+    stale_cc3501e = find_cc3501e_bridge_stale_claims(root)
+    e1m_x_pinout_gaps = find_e1m_x_pinout_guidance_gaps(root)
 
     if dead:
         print("Dead SDK-symbol references "
@@ -254,13 +387,28 @@ def main(argv: Optional[list[str]] = None) -> int:
               file=sys.stderr)
         for name in gaps:
             print(f"  docs/{name}", file=sys.stderr)
+    if stale_cc3501e:
+        print("Stale CC3501E bridge-current wording "
+              "(current rev is hardware SS0 + READY; HOST_IRQ is future):",
+              file=sys.stderr)
+        for rel, line_no, line in stale_cc3501e:
+            print(f"  {rel}:{line_no}  {line}", file=sys.stderr)
+    if e1m_x_pinout_gaps:
+        print("E1M-only pinout guidance in standalone/general docs "
+              "(also mention <alp/e1m_x_pinout.h> / ALP_E1M_X_*):",
+              file=sys.stderr)
+        for rel, line_no, line in e1m_x_pinout_gaps:
+            print(f"  {rel}:{line_no}  {line}", file=sys.stderr)
 
-    if dead or gaps:
+    if dead or gaps or stale_cc3501e or e1m_x_pinout_gaps:
         print(f"\ndoc-drift: {len(dead)} dead ref(s), {len(gaps)} index "
-              f"gap(s) -- failing.", file=sys.stderr)
+              f"gap(s), {len(stale_cc3501e)} stale CC3501E bridge "
+              f"claim(s), {len(e1m_x_pinout_gaps)} E1M-X pinout "
+              f"guidance gap(s) -- failing.", file=sys.stderr)
         return 1
 
-    print("doc-drift: OK (no dead symbol refs, docs index complete).")
+    print("doc-drift: OK (no dead symbol refs, docs index complete, "
+          "CC3501E bridge wording current, E1M-X pinout guidance current).")
     return 0
 
 

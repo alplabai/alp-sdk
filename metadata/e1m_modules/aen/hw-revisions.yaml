@@ -35,10 +35,7 @@ hw_revisions:
     summary: |
       Production AEN board -- Altium board rev `R2`, the default build
       going forward (on-module Alif<->CC3501E link defaults to SPI, not
-      SDIO).  The schematic netlist of record (export `2626-R2`, where
-      `2626` is the YYWW date code = 2026 week 26) is held privately under
-      `metadata/e1m_modules/aen/netlists/E1M-AEN-2626-R2_*.csv`; the public
-      curated pinout TSVs track this revision.
+      SDIO).  The public curated pinout TSVs track this revision.
     changes:
       - "CC3501E GPIO re-route vs r1: IO8 -> WIFI_GPIO30 and IO10 -> WIFI_GPIO35 (both now CC3501E); IO21 unrouted (was CC3501E GPIO30)."
       - "On-module Alif<->CC3501E link defaults to SPI (not SDIO)."

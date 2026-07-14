@@ -27,9 +27,9 @@
 
 #include "uart_ops.h"
 
-#define ALP_UART_DEV_OR_NULL(idx)                                                                  \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_uart, idx))),                                  \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_uart, idx)))),                                 \
+#define ALP_UART_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_uart, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_uart, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {
@@ -134,34 +134,54 @@ static alp_status_t
 z_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeout_ms)
 {
 	const struct device *dev = (const struct device *)st->dev;
-	const int64_t deadline   = (timeout_ms == 0) ? INT64_MAX : k_uptime_get() + (int64_t)timeout_ms;
+	/* One absolute deadline for the WHOLE call (not one budget per
+     * byte), so timeout_ms bounds inter-byte gaps too.  timeout_ms == 0
+     * yields deadline == now: the "deadline already reached" check
+     * below is what turns that into a single non-blocking poll,
+     * matching the portable contract -- see alp_uart_read() in
+     * <alp/peripheral.h> and its Yocto twin in src/yocto/peripheral_uart.c
+     * (#595/#621).  The old (timeout_ms == 0) ? INT64_MAX : ... form
+     * made a zero timeout mean "wait forever" instead. */
+	const int64_t deadline = k_uptime_get() + (int64_t)timeout_ms;
 
-	for (size_t i = 0; i < len; i++) {
-		int err;
-		do {
-			err = uart_poll_in(dev, &data[i]);
-			if (err == -1 && k_uptime_get() >= deadline) {
-				return ALP_ERR_TIMEOUT;
-			}
-			if (err == -1) {
-				/* k_msleep(1) instead of k_yield() so the system
-                 * tick actually advances on native_sim (k_yield
-                 * with no other ready thread is a no-op there,
-                 * making the timeout deadline unreachable). */
-				k_msleep(1);
-			}
-		} while (err == -1);
+	size_t got = 0;
+	while (got < len) {
+		int err = uart_poll_in(dev, &data[got]);
+		if (err == 0) {
+			got++;
+			continue;
+		}
+		if (err != -1) {
+			/* Genuine driver error -- map and report directly. */
+			return _errno_to_alp(err);
+		}
 
-		if (err != 0) return _errno_to_alp(err);
+		/* err == -1: no byte ready yet.  Deadline expiry with at
+         * least one byte already collected is a partial read, per
+         * the documented contract -- only an empty read times out. */
+		if (k_uptime_get() >= deadline) {
+			return (got > 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+		}
+		/* k_msleep(1) instead of k_yield() so the system
+         * tick actually advances on native_sim (k_yield
+         * with no other ready thread is a no-op there,
+         * making the timeout deadline unreachable). */
+		k_msleep(1);
 	}
 	return ALP_OK;
 }
+
+/* Detach any RX ring buffer still attached when the parent UART handle
+ * closes -- see alp_uart_rx_ringbuf_attach()/_detach() below.  Declared
+ * here (ahead of its definition) so it can sit in the ops table next to
+ * open/write/read; defined after the ringbuf bodies further down. */
+static void z_close(alp_uart_backend_state_t *st);
 
 static const alp_uart_ops_t _ops = {
 	.open  = z_open,
 	.write = z_write,
 	.read  = z_read,
-	.close = NULL, /* no teardown needed for uart_configure */
+	.close = z_close,
 };
 
 ALP_BACKEND_REGISTER(uart,
@@ -175,12 +195,24 @@ ALP_BACKEND_REGISTER(uart,
                          .probe       = NULL,
                      });
 
+/* Runs on every alp_uart_close(), whether or not a ring buffer was ever
+ * attached.  alp_uart_rx_ringbuf_detach() is defined further down (real
+ * teardown when CONFIG_ALP_SDK_UART_RX_RINGBUF=y, a no-op stub otherwise),
+ * so this stays a single definition for both configs -- the prototype is
+ * already visible via <alp/peripheral.h> included above. */
+static void z_close(alp_uart_backend_state_t *st)
+{
+	if (st->rx_ringbuf != NULL) {
+		alp_uart_rx_ringbuf_detach((alp_uart_rx_ringbuf_t *)st->rx_ringbuf);
+		st->rx_ringbuf = NULL;
+	}
+}
+
 /* ================================================================== */
 /* RX ring buffer (CONFIG_ALP_SDK_UART_RX_RINGBUF)                     */
 /* ================================================================== */
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #if defined(CONFIG_ALP_SDK_UART_RX_RINGBUF)
 
@@ -221,6 +253,14 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
 		alp_z_set_last_error(ALP_ERR_NOSUPPORT);
 		return NULL;
 	}
+	/* Exclusive ownership: only one ring buffer may be attached to a
+     * port at a time (Zephyr exposes a single IRQ callback slot per
+     * UART device).  A second attach would silently steal the device
+     * callback out from under the first handle -- reject it instead. */
+	if (port->state.rx_ringbuf != NULL) {
+		alp_z_set_last_error(ALP_ERR_BUSY);
+		return NULL;
+	}
 	struct alp_uart_rx_ringbuf *s = alp_z_uart_rx_ringbuf_pool_acquire();
 	if (s == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOMEM);
@@ -241,6 +281,7 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
 		return NULL;
 	}
 	uart_irq_rx_enable(dev);
+	port->state.rx_ringbuf = s;
 	return s;
 }
 
@@ -268,6 +309,14 @@ void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb)
 	if (rb->dev != NULL) {
 		uart_irq_rx_disable(rb->dev);
 		(void)uart_irq_callback_user_data_set(rb->dev, NULL, NULL);
+	}
+	/* Clear the parent port's back-ref so a fresh attach is accepted
+     * afterwards -- but only if it still points at this handle.  The
+     * UART handle pool is a static array: once a port closes, its slot
+     * can be handed to an unrelated alp_uart_open() before this detach
+     * runs, and we must not clobber that new owner's live back-ref. */
+	if (rb->port != NULL && rb->port->state.rx_ringbuf == rb) {
+		rb->port->state.rx_ringbuf = NULL;
 	}
 	lwrb_free(&rb->rb);
 	alp_z_uart_rx_ringbuf_pool_release(rb);

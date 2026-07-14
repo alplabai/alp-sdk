@@ -19,15 +19,20 @@ For each (SKU × example) cell:
 2. Set `som.sku:` to the target SKU and adjust `cores.<key>:` to match
    the SKU's `topology:` block (`m55_hp` for E1M-AEN, `m33` for
    E1M-NX9101, `m33_sm` for E1M-X V2N/V2M).
-3. Run `python scripts/alp_project.py --input <temp/board.yaml> --core <core_id> --emit zephyr-conf`.
-4. Capture `alp.conf`; diff across SKUs within each example.
+3. If the original `preset:` does not host the target SoM family, select a
+   compatible preset from the example's `supported_boards:` list and remap
+   `pins:` through matching `board_alias:` route roles.
+4. Run `python scripts/alp_project.py --input <temp/board.yaml> --core <core_id> --emit zephyr-conf`.
+5. Capture `alp.conf`; diff across SKUs within each example.
 
 `west build` is not the gate — the contract is that
 generated `alp.conf` is uniform within the family up to documented
 silicon-determined deltas.  Per-SoM Zephyr board files are emitted by
-`scripts/alp_project.py --emit zephyr-board` from the same YAML
-sources; once they exist for a given SoM, `west build` against that
-board is the customer's final step.
+`scripts/alp_project.py --emit zephyr-board` from the same YAML sources
+(full board-tree generation for the Alif Ensemble family; the
+family-agnostic subset for Renesas RZ/V2N — see `docs/architecture.md`
+and `docs/porting-new-som.md` §10); `west build` against that board is
+the customer's final step.
 
 The tables below are **auto-generated**: `scripts/gen_portability_matrix.py`
 re-runs steps 1–3 for every cell against the single-source SoM presets
@@ -67,12 +72,12 @@ prose and survives regeneration.
 
 | SKU \ Example | Silicon | adc-voltmeter | pwm-led-fade | v2n-pwm-fan-control | Notes (from metadata) |
 | --- | --- | :---: | :---: | :---: | --- |
-| E1M-V2M101 | `renesas:rzv2n:n44` | ✅ | ✅ | ✅ | 32 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
-| E1M-V2M102 | `renesas:rzv2n:n44` | ✅ | ✅ | ✅ | 64 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
-| E1M-V2N101 | `renesas:rzv2n:n44` | ✅ | ✅ | ✅ | 32 Gbit DRAM |
-| E1M-V2N102 | `renesas:rzv2n:n44` | ✅ | ✅ | ✅ | 64 Gbit DRAM |
+| E1M-V2M101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
+| E1M-V2M102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
+| E1M-V2N101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM |
+| E1M-V2N102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM |
 
-**12 / 12 cells generate cleanly.**
+**8 / 12 cells generate cleanly (4 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
 
 Legend: ✅ `--emit zephyr-conf` succeeds for every app-carrying core · ❌ it does not.
 <!-- END GENERATED: gen_portability_matrix -->
@@ -120,17 +125,38 @@ a build.
 | --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `master` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `lwm2m` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `master` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `modbus` | A | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `ros2` | B | `humble` | Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**75 / 77 (library × SKU) cells compatible (2 incompatible, 0 n/a).**
+**222 / 224 (library × SKU) cells compatible (2 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -138,17 +164,38 @@ a build.
 | --- | :---: | --- | --- | :---: | :---: | :---: | :---: |
 | `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `master` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `lwm2m` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `master` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ |
+| `modbus` | A | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ |
+| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
+| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `ros2` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 
-**44 / 44 (library × SKU) cells compatible.**
+**128 / 128 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->
@@ -279,8 +326,8 @@ fallback) and emits one `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
 line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
 `_U85=y` (the U55 pair alongside the U85); AEN301/501/701 emit only
 `_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
-Matching Kconfig entries live at `zephyr/Kconfig` § *Per-variant
-Ethos-U silicon switches*; the TFLM driver source
+Matching Kconfig entries live at `zephyr/kconfigs/iot-audio-inference.kconfig`
+§ *Per-variant Ethos-U silicon switches*; the TFLM driver source
 (`src/zephyr/inference_tflm.cpp`) reads the per-variant macros via
 `alp_inference_tflm_npu_variant_name()` and logs the active variant
 once per boot.
@@ -299,8 +346,8 @@ one `CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y` per slice.
 Verified: M55_HP slices on every AEN SKU emit `_HELIUM=y`; A55 slices
 on V2N101 emit `_NEON=y`; the V2N M33_SM slice + NX9101 M33 slice
 both emit `_REF=y` (baseline ARMv8-M, no DSP / MVE).  Matching Kconfig
-entries live at `zephyr/Kconfig` § *Per-CPU-class TFLM kernel
-selectors*; the TFLM driver source surfaces the choice via
+entries live at `zephyr/kconfigs/iot-audio-inference.kconfig` § *Per-CPU-class
+TFLM kernel selectors*; the TFLM driver source surfaces the choice via
 `alp_inference_tflm_cpu_kernel_variant()`.
 
 ### G-4 — `cores.<key>` rename diagnostic for cross-core-class swaps  *(RESOLVED 2026-05-18)*

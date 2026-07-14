@@ -7,7 +7,10 @@ ships without its machine-readable metadata manifest, or a manifest ships
 with no driver, unless the mismatch is on an explicit allowlist.
 
 Correspondence rule (single-source-of-truth convention):
-    chips/<id>/<id>.c   <-->   metadata/chips/<id>.yaml
+    chips/<id>/<id>.c         <-->   metadata/chips/<id>.yaml
+    chips/<id>/<id>_*.c (>=1) <-->   metadata/chips/<id>.yaml
+        (a driver split by subsystem into chips/<id>/<id>_<subsystem>.c
+        modules -- e.g. cc3501e, issue #461 -- still counts as present)
 
 This is the root-cause gate for the gap-review finding "9 drivers lack a
 manifest and pca9451a is a manifest with no driver": new drift fails CI
@@ -28,10 +31,7 @@ MANIFEST_DIR = REPO / "metadata" / "chips"
 # Drivers known to lack a manifest today. BACKLOG ONLY -- shrink this list by
 # authoring metadata/chips/<id>.yaml; do not add new entries (a new driver
 # without a manifest must fail the gate, not be allowlisted away).
-KNOWN_DRIVER_NO_MANIFEST = {
-    "lis2dw12",
-    "ssd1331",
-}
+KNOWN_DRIVER_NO_MANIFEST: set[str] = set()
 
 # Manifests intentionally without a driver (planned-but-unimplemented parts).
 KNOWN_MANIFEST_NO_DRIVER = {
@@ -41,16 +41,22 @@ KNOWN_MANIFEST_NO_DRIVER = {
     "murata_lbee5pl2dl",
     "murata_lbes0zz2ll",
     "murata_lbes5pl2el",
-    "pca9451a",  # PMIC: metadata declared; driver intentionally not yet built.
 }
 
 
 def _drivers() -> set[str]:
-    return {
-        d.name
-        for d in CHIPS_DIR.iterdir()
-        if d.is_dir() and (d / f"{d.name}.c").is_file()
-    }
+    found: set[str] = set()
+    for d in CHIPS_DIR.iterdir():
+        if not d.is_dir():
+            continue
+        # Single-file driver: chips/<id>/<id>.c
+        if (d / f"{d.name}.c").is_file():
+            found.add(d.name)
+            continue
+        # Subsystem-split driver: chips/<id>/<id>_<subsystem>.c (>=1 file).
+        if any(d.glob(f"{d.name}_*.c")):
+            found.add(d.name)
+    return found
 
 
 def _manifests() -> set[str]:

@@ -4,7 +4,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * ====== ADR 0017 Tier-2 (vendored fork-driver copy, INTERIM, task #21) ======
+ * ====== ADR 0017 Tier-2 (vendored fork-driver copy, INTERIM) ======
  * The Alif Ensemble ISP-Pico image-signal-processor is driven by a vendored
  * copy of the Apache-2.0 zephyr_alif fork driver (drivers/video/isp_pico.c,
  * compatible "vsi,isp-pico").  It is a true m2m video device (it has BOTH an
@@ -14,7 +14,7 @@
  * USE_ALIF_ISP_LIB / CONFIG_VIDEO_ISP_VSI.  Upstream Zephyr v4.4 ships no
  * ISP-Pico class driver, so this is a genuine fork-driver copy carried in-tree
  * so it survives a `west update`.  Retire onto the opt-in sdk-alif fork
- * compatible once the ISP node is repointed AND bench-verified (task #21).
+ * compatible once the ISP node is repointed AND bench-verified.
  * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==========================================================================
  *
@@ -46,7 +46,7 @@
  *     HAL_ALIF VERSION MISMATCH note below: those symbols do not exist in the
  *     locally vendored wrapper).
  *
- * !!! HAL_ALIF VERSION MISMATCH (FLAGGED, task #21) !!!
+ * !!! HAL_ALIF VERSION MISMATCH (FLAGGED) !!!
  * This 2026 isp_pico.c was authored against a NEWER hal_alif libisp wrapper than
  * the one vendored locally (modules/hal/alif/drivers/isp/isp_wrapper, 2025).
  * The local wrapper (isp_api_wrapper.c) exports

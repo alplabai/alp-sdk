@@ -11,8 +11,14 @@
 # through the portable <alp/*> surfaces, and the LVGL UI composes
 # them on a single screen.  No vendor-specific code in the app.
 
+libraries:
+  - name: lvgl
+    cores: [m55_hp]
+  - name: madgwick-ahrs
+    cores: [m55_hp]
+
 som:
-  sku: E1M-AEN701           # E7 -- SRAM headroom for LVGL + AHRS state.
+  sku: E1M-AEN801           # E8 -- SRAM headroom for LVGL + AHRS state.
 
 preset: e1m-evk             # External chips (GNSS, ST7789) plugged
                             # into the EVK's headers are listed in
@@ -36,10 +42,7 @@ cores:
     # Library set: LVGL for rendering, madgwick_ahrs for attitude
     # fusion from raw IMU samples.  Both pulled in via the §D.lib
     # loader; their HW-backend choices come from the active SoM's
-    # `capabilities:` block (E7 -> GPU2D for LVGL + FPU for Madgwick).
-    libraries:
-      - lvgl
-      - madgwick_ahrs
+    # `capabilities:` block (E8 -> GPU2D for LVGL + FPU for Madgwick).
     peripherals:
       - i2c                  # IMU + battery monitor.
       - uart                 # GNSS NMEA.

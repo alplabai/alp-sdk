@@ -42,7 +42,7 @@
  * vendor-ext, BENCH-UNVERIFIED.  Runtime capture HW-blocked on this batch
  * (no camera sensor wired).
  *
- * @par Tracking: github.com/alplabai/alp-sdk/issues/21
+ * @par Tracking: github.com/alplabai/alp-sdk/issues/223
  */
 
 #include <errno.h>
@@ -66,9 +66,9 @@
 #define CONFIG_ALP_SDK_MAX_CAMERA_HANDLES 2
 #endif
 
-#define ALP_ALIF_ISP_DEV_OR_NULL(idx)                                                              \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_camera, idx))),                                \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))),                               \
+#define ALP_ALIF_ISP_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_camera, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))), \
 	            (NULL))
 
 static const struct device *const _devs[] = {

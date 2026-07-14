@@ -26,10 +26,14 @@
  *
  * Thread safety: the per-call work does not need a mutex (the
  * inner GD32 bridge acquires the V2N supervisor itself; the libm
- * path is reentrant), so the cache here is lock-free.  The cached
- * pointer is written exactly once; in the worst case two threads
- * race the first call and both observe the same value
- * `alp_backend_select` computes deterministically.
+ * path is reentrant), so the cache here is lock-free -- but "no
+ * mutex" is not "no synchronization": the cache is published through
+ * alp_dispatch_cache_{load,store}() (acquire load / release store),
+ * not a plain pointer read/write.  alp_backend_select() is
+ * deterministic and the registry is immutable after link, so every
+ * racing first-caller resolves the identical backend; the atomics
+ * only remove the C-memory-model data race on the shared pointer
+ * itself, they do not add any invalidation logic (issue #628).
  */
 
 #include <stdbool.h>
@@ -40,6 +44,7 @@
 #include <alp/soc_caps.h>
 #include <alp/tmu.h>
 
+#include "alp_dispatch_cache.h"
 #include "backends/tmu/tmu_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(tmu);
@@ -49,15 +54,18 @@ static const alp_tmu_ops_t *_cached_ops = NULL;
 
 static const alp_tmu_ops_t *_get_ops(void)
 {
-	if (_cached_ops != NULL) {
-		return _cached_ops;
+	const alp_tmu_ops_t *ops =
+	    (const alp_tmu_ops_t *)alp_dispatch_cache_load((const void *const *)&_cached_ops);
+	if (ops != NULL) {
+		return ops;
 	}
 	const alp_backend_t *be = alp_backend_select("tmu", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		return NULL;
 	}
-	_cached_ops = (const alp_tmu_ops_t *)be->ops;
-	return _cached_ops;
+	ops = (const alp_tmu_ops_t *)be->ops;
+	alp_dispatch_cache_store((const void **)&_cached_ops, (const void *)ops);
+	return ops;
 }
 
 /* ================================================================== */

@@ -167,9 +167,9 @@ static size_t bytes_per_frame(const alp_audio_config_t *cfg)
 
 #if defined(CONFIG_ALP_SDK_AUDIO_IN)
 
-#define ALP_PDM_DEV_OR_NULL(idx)                                                                   \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_pdm, idx))),                                   \
-	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_pdm, idx)))),                                  \
+#define ALP_PDM_DEV_OR_NULL(idx) \
+	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_pdm, idx))), \
+	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_pdm, idx)))), \
 	            (NULL))
 
 static const struct device *const alp_pdm_devs[] = {

@@ -22,7 +22,7 @@ verified in the Alp SDK as of today".  It complements:
 - `docs/test-plan.md` -- the HiL ledger that flips rows to ✅ as
   evidence lands.
 
-## Where the SDK actually sits today
+## Where v0.9 actually sits
 
 | Layer | Status | What "passes" today |
 |---|---|---|
@@ -30,7 +30,7 @@ verified in the Alp SDK as of today".  It complements:
 | GD32 supervisor bridge (`firmware/gd32-bridge/` + `chips/gd32g553/`) | `[VERIFIED]` on V2N silicon | fw v0.2.9 / protocol v0.7: functional suite 26/26, 20-row HIL soak 253/253, A/B OTA e2e, Tier-B loopback 5/6 (qenc = carrier wiring, issue #85) |
 | CM33↔GD32 SCI7 SPI link (interrupt path) | `[VERIFIED]` on V2N silicon | Sustained bidirectional soak, zero CRC errors (DMA fast path stays default-off — issue #84) |
 | Chip drivers (`chips/<name>/`, all others) | `[UNTESTED]` | Build + NULL-arg-guard ZTEST on `native_sim/native/64` |
-| Library bindings (`metadata/library-profiles/<name>/`) | `[UNTESTED]` | Schema validated; emission unit-tested in `tests/scripts/test_alp_project.py`; build-time linkable for Zephyr-native libs |
+| Library bindings (`metadata/library-profiles/<name>/`) | `[UNTESTED]` | Schema validated; emission unit-tested in `tests/scripts/test_project_emit_zephyr.py`; build-time linkable for Zephyr-native libs |
 | Per-SoM `capabilities:` blocks | `[PARTIAL]` | Populated from datasheet readings; some fields marked `# TBD` for items pending datasheet verification |
 | Per-NPU TFLM driver gates (`CONFIG_ALP_TFLM_ETHOS_U85/U65/U55`) | `[UNTESTED]` | Kconfig-reachable; no Vela-compiled model has actually been dispatched yet |
 | Examples + reference apps | `[UNTESTED]` | Build clean on native_sim; HiL flash-and-run still TBD |
@@ -60,9 +60,13 @@ verified in the Alp SDK as of today".  It complements:
   on-silicon campaign brought up the peripheral matrix, NPU
   inference, dual-core RPC, and SE-crypto — all `RESULT PASS` (the
   per-row evidence lives in
-  [`docs/aen-bench-bringup.md`](aen-bench-bringup.md)).  The full
-  **customer** secure-boot / OTA production chain (MCUboot-slot0) is
-  still bench-pending, so validate that path on your own HiL before
+  [`docs/aen-bench-bringup.md`](aen-bench-bringup.md)).  The
+  **CC3501E companion OTA cold-swap cycle is silicon-proven** on the
+  E1M-AEN801 EVK (2026-07-10): stream → STAGE → the CC35's own
+  `psa_fwu_request_reboot()` swap → self-accept + persist across a true
+  cold POR (`docs/cc3501e-production.md` § OTA).  The E8's **own**
+  secure-boot / OTA production chain (MCUboot-slot0) is a separate path
+  and is still bench-pending, so validate that on your own HiL before
   shipping it.
 - **You should NOT ship production firmware against the remaining
   families (i.MX 93, V2M) unless you've done your own HiL.**
@@ -83,7 +87,7 @@ AEN-first order inverted:
    HS200, USB-OVC, CA55-cluster watchdog, branded/reproducible
    firmware banners, and the hardened `alp-image-prod` /
    `alp` distro) boots the bench board from eMMC.
-2. **next** -- E1M-AEN701 bring-up.  Verifies the AEN-family
+2. **next** -- E1M-AEN801 bring-up.  Verifies the AEN-family
    chip drivers (the on-module ones: act8760, da9292,
    clk_5l35023b, etc.) + a representative sample of the §D.AI
    chips (st7789, sh1106, the camera SCCB path).
@@ -108,7 +112,7 @@ The ZTEST suite (`tests/zephyr/`) catches:
   `ALP_ERR_INVAL` on a NULL handle).
 - Loader emission (the §D.lib `_emit_library_hw_backends()`
   picks the right per-SKU `CONFIG_*=y` set -- see
-  `tests/scripts/test_alp_project.py`'s `TestHwBackendsLoader`).
+  `tests/scripts/test_project_backends.py`'s `TestHwBackendsLoader`).
 - Kconfig reachability (the per-library SW-fallback knobs all
   resolve at parse time -- see
   `tests/zephyr/library_knobs/`).

@@ -68,14 +68,15 @@ void inference_loop_run(viewer_state_t *state)
 	if (!state->camera_ok) {
 		LOG_WRN("camera open failed; running with synthetic frame");
 	} else {
-		/* TODO(v0.6): inspect alp_camera_start() return -- v0.5
-         * tolerates NOSUPPORT silently so native_sim still runs. */
+		/* TODO: inspect alp_camera_start()'s returned
+         * alp_status_t -- today this tolerates NOSUPPORT
+         * silently so native_sim still runs. */
 		(void)alp_camera_start(cam);
 	}
 
 	/* Inference setup.  AUTO routes to the best available backend
-     * for the active SoM (ETHOS_U55 on AEN701, ETHOS_U85 on
-     * AEN401 / AEN601 / AEN801, U65 on NX9101, DRPAI on V2N,
+     * for the active SoM (ETHOS_U85 on AEN401 / AEN601 / AEN801,
+     * U65 on NX9101, DRPAI on V2N,
      * CPU on native_sim). */
 	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
 	    .backend     = ALP_INFERENCE_BACKEND_AUTO,
@@ -110,17 +111,20 @@ void inference_loop_run(viewer_state_t *state)
 		/* Invoke. */
 		uint32_t t0_us = k_cycle_get_32();
 		if (state->inference_ok) {
-			/* TODO(v0.6): copy s_frame into the model's input tensor
-             * via alp_inference_get_input(), then invoke.  v0.5 just
-             * times the empty invoke so the UI shows the latency floor. */
+			/* TODO: copy s_frame into the model's input tensor via
+             * alp_inference_get_input() -- available today, see
+             * include/alp/inference.h -- then invoke.  This
+             * skeleton just times the empty invoke so the UI
+             * shows the latency floor. */
 			(void)alp_inference_invoke(inf);
 		}
 		uint32_t t1_us        = k_cycle_get_32();
 		state->last_invoke_us = k_cyc_to_us_floor32(t1_us - t0_us);
 
-		/* Decode bounding boxes.  v0.5 emits a synthetic box so
-         * the UI renders one rectangle; v0.6 wires the real
-         * post-process. */
+		/* Decode bounding boxes.  This skeleton emits a
+         * synthetic box so the UI renders one rectangle; wiring
+         * the real post-process is still TODO, pending a real
+         * compiled model. */
 		state->n_boxes  = 1;
 		state->boxes[0] = (viewer_box_t){
 			.x        = 60,

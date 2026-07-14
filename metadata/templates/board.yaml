@@ -47,7 +47,7 @@ som:
   #
   # The SDK ships per-SKU presets at:
   #   metadata/e1m_modules/<MPN>.yaml
-  sku: E1M-AEN701
+  sku: E1M-AEN801
 
   # SoM hardware revision the firmware is built for.  Optional --
   # falls back to the SKU preset's `default_hw_rev`.  Validated

@@ -7,7 +7,308 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Changed — Display/LVGL examples migrated off direct Zephyr `display_*` APIs (issue #520)
+
+- `lvgl-widgets-demo`, `lvgl-benchmark`, `lvgl-music-player`,
+  `iot-dashboard`, `ai-camera-viewer`, and `drone-hud` now open their panel
+  through `<alp/display.h>`'s `alp_display_open()` and bind it to LVGL via
+  `<alp/gui.h>`'s `alp_gui_lvgl_attach()` (issue #23), instead of
+  `DEVICE_DT_GET(DT_CHOSEN(zephyr_display))` + `display_blanking_off()` +
+  Zephyr's own `lvgl` module auto-init. Each app now sets
+  `CONFIG_LV_Z_AUTO_INIT=n` (so Zephyr's `lvgl` module doesn't also create
+  a competing `lv_display_t`) and owns the full sequence itself: open the
+  panel, `lv_init()`, `lv_tick_set_cb(k_uptime_get_32)` (Zephyr's own tick
+  registration lives behind the same auto-init hook this turns off), then
+  `alp_gui_lvgl_attach()`. Each example's `boards/native_sim_native_64.overlay`
+  gains an `alp-display0` alias alongside the existing `zephyr,display`
+  chosen node (both point at the same dummy display device); each
+  `native_sim.conf` adds `CONFIG_SDL_DISPLAY=n` (native_sim's DTS also
+  carries a `zephyr,sdl-dc` node that `CONFIG_DISPLAY=y` pulls in by
+  default, and its GL/EGL init segfaults on a headless runner).
+- New portability lint: `scripts/check_example_portability.py` rejects a
+  direct `#include <zephyr/drivers/...>` in any example with a
+  `board.yaml`, with an explicit, reasoned allowlist
+  (`_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`) for the handful of examples that
+  have no portable `<alp/*.h>` surface to route through yet
+  (`multicore/rpmsg-v2n`'s AMP mailbox transport, `peripheral-io/alp-console`'s
+  status-LED PWM + the on-module bridge's own HAL, `v2n/v2n-ethernet-dual`'s
+  MDIO PHY diagnostics, `v2n/v2n-xspi-flash-readwrite`'s raw flash driver).
+  Zephyr-specific register/bench tools with no `board.yaml` (e.g.
+  `examples/aen/*-regcheck/`) are outside this check's scope by
+  construction. See `docs/portability.md` §4.4.
+
+
+### Fixed — GD32 bridge OTA Path-A hardening
+
+`ota_slot_base_checked()` rejects any slot that is not A/B instead of silently
+mapping it to slot A (#741); `ota_image_bootable()` rejects a CRC-valid but
+truncated/vector-less image at COMMIT and before the bootloader jump (#755);
+the bootloader now orders both metadata records newest-first and falls back to
+an older bootable record when the newest fails validation (#754); the host
+gates OTA on protocol minor >= 6 so a current host cannot corrupt a pre-v0.6
+bridge via the v0.6 chunk-length reframing (#751); and `OTA_BEGIN` no longer
+erases the 236 KB slot synchronously (which stalled the SPI reply and hung the
+host) — it arms a background erase pumped from `bridge_hw_tick` and acks
+immediately (#770). Boot-select, dual-bank erase, and the background-erase path
+are silicon-validated on the GD32.
+
+### Added — GD32 bridge ADC/PWM/DSP
+
+ADC oversample + resolution control (#494), PWM center-aligned mode (#495), and
+ADC DSP runtime dispatch — FAC FIR/IIR filtering plus a hardware FFT spectrum
+path (#496).
+
+### Fixed — portable DSP + protocol layout guards
+
+`alp_dsp_stats_f32`'s CMSIS path rejects `size_t` lengths beyond the uint32_t
+block size instead of silently truncating (#734); compile-time `_Static_assert`
+layout guards protect the memcpy-serialized CC3501E protocol payloads and the
+GD32 OTA on-flash structs against silent padding/offset drift (#733).
+
+### Added — reproducible release: SBOM + deterministic tarball (#610 §7 slice 2)
+
+- `scripts/gen_sbom.py` emits a deterministic CycloneDX 1.5 SBOM from `alp.lock`
+  (stable, lock-derived serial number, no wall-clock). `release.yml` now builds
+  a byte-reproducible source tarball (`gzip -n`) and attaches the SBOM. Closes
+  the §7 "reproducible release artifacts" criterion (build-receipt schema landed
+  in slice 1).
+### Added — `west alp-quality` profile runner (#610 §5 slice 2)
+
+- Runs `metadata/quality-tasks-v1.json` for a named profile (quick/pr/full/
+  release) and emits a human summary + JSON + JUnit + SARIF. The `pr` profile
+  selects exactly the gates CI runs (one source of truth). Completes the §5
+  "one quality definition drives local + CI, emits machine artifacts" criterion.
+
+### Added — quality-task registry (`metadata/quality-tasks-v1.json`, #610 §5)
+
+- Single source of truth for the SDK's `check_*.py` quality gates: which exist,
+  whether each is a hard CI gate or informational, and which profiles run it.
+  `scripts/check_quality_registry.py` keeps it == `scripts/check_*.py` on disk;
+  `scripts/test-all.sh` now derives its `REQUIRED_GATE_SCRIPTS` from the
+  registry (via `quality_tasks.py --gate-scripts`) instead of a hand-maintained
+  bash array — closing the local-vs-CI gate drift #608 flagged. `alp quality`
+  profile runner + JSON/SARIF emission land in later §5 slices.
+
+### Added — build-receipt-v1 (`metadata/schemas/build-receipt-v1.schema.json`, #610 §7)
+
+- A deterministic, machine-readable receipt for a release build — SDK source
+  revision, board.yaml/lock/build-plan digests, toolchain identity, per-image
+  hashes — composed from existing inputs (`scripts/build_receipt.py`), carrying
+  no wall-clock field so identical inputs yield an identical receipt.
+  `check_build_receipt.py` guards the schema. Wiring into `release.yml`,
+  deterministic packaging, and SBOM generation land in later §7 slices.
+### Removed — `tinygsm` + `libhelix` dropped from the curated library set (#610 WS6-c)
+
+- Maintainer legal-review decision: `tinygsm` (LGPL-3.0) and `libhelix`
+  (RPSL-1.0) are copyleft/source-available licences unwanted in a SoM
+  manufacturer's firmware distribution, and are removed entirely — the
+  `west.yml` pins + remotes, the `cores.<id>.libraries` schema enum tokens,
+  the `metadata/libraries/{tinygsm,libhelix}.yaml` manifests +
+  `metadata/library-profiles/{tinygsm,libhelix}/` HW-backend profiles, the
+  `examples/connectivity/tinygsm-modem-at` and `examples/audio/libhelix-decode`
+  teaching examples, and every Kconfig / loader / test reference. No ABI
+  shim or compat alias survives (per #610 §6, curated tokens carry no
+  back-compat once retired).
+- `catch2` (BSL-1.0, Boost) and `minimp3` (CC0-1.0, public-domain-equivalent)
+  are permissive and stay; `metadata/schemas/library-v1.schema.json`'s
+  `license` enum grows `BSL-1.0` + `CC0-1.0` to accommodate them. LGPL-3.0
+  and RPSL-1.0 are deliberately NOT added to the allowlist.
+
+### Added — `west alp-migrate` board.yaml migration engine (#610 WS6-b)
+
+- `board.yaml` may carry an optional top-level `schemaVersion`. Versioning is
+  **lazy**: an absent key IS version 1 (the floor), so hand-written and
+  external projects keep loading unchanged and are never "drift" — the key
+  only appears in a file once a migration has bumped it to v2+. `west
+  alp-migrate --check/--preview/--apply` versions and migrates a `board.yaml`
+  byte-faithfully (comments, flow style, indentation preserved) with a
+  `diagnostic-v1` JSON report. The migration registry
+  (`scripts/alp_migrate/migrations/`) is empty until the first real schema
+  change; `check_board_schema_version.py` is the gate that will enforce
+  migration once one lands.
+
+### Added — real `alp_gui_lvgl_attach()` LVGL v9 bridge (`<alp/gui.h>`, issue #23)
+
+- `src/gui_lvgl.c` (renamed from `gui_lvgl_stub.c`) now compiles a real LVGL
+  v9 hand-off under `ALP_HAS_LVGL`: creates an `lv_display_t` sized to the
+  `alp_display_t`'s reported geometry, maps `alp_pixfmt_t` to
+  `lv_color_format_t` (RGB565 / RGB888 / ARGB8888; `MONO_VLSB` has no LVGL v9
+  equivalent and returns `ALP_ERR_NOSUPPORT`), allocates a persistent
+  partial-refresh draw buffer (`CONFIG_ALP_GUI_LVGL_BUF_LINES` on Zephyr,
+  default 16 lines), and wires LVGL's flush callback straight to
+  `alp_display_blit()`. The non-LVGL guard clause (NULL → `ALP_ERR_INVAL`,
+  else → `ALP_ERR_NOSUPPORT`) is unchanged and still compiles when no build
+  wires LVGL in.  The public signature and `[ABI-STABLE]` marker are
+  unchanged.
+- Zephyr wiring: `CONFIG_ALP_SDK_HAS_LVGL` (now `depends on LVGL`, still
+  `default y if LVGL`) mirrors into the `ALP_HAS_LVGL` compile define
+  app-wide via `zephyr_compile_definitions_ifdef`, so any Zephyr app with
+  `CONFIG_LVGL=y` gets the real bridge automatically — no per-app wiring
+  needed. Plain-CMake / Yocto builds keep the existing `-DALP_HAS_LVGL=ON`
+  option path (caller supplies the LVGL include path).
+- New hermetic native_sim twister suite `tests/zephyr/gui_lvgl/`: a
+  priority-255 test-double display backend proves a forced LVGL refresh
+  reaches `alp_display_blit()`, plus NULL / unsupported-pixel-format /
+  no-LVGL-build degrade coverage.
+- `docs/os-support-matrix.md` gains a "GUI/LVGL bridge" row (code-complete,
+  native_sim-tested; real-panel bench run still pending) — issue #23's
+  display-side bench legs (V2N DSI/parallel-RGB, Alif LCD-IF) remain open.
+
+### Added — portable AHRS sensor-fusion surface (`<alp/ahrs.h>`)
+
+- New `alp_ahrs_init` / `alp_ahrs_update_imu` / `alp_ahrs_euler` /
+  `alp_ahrs_reset` over a caller-owned `alp_ahrs_t` — a Madgwick IMU
+  orientation filter fusing gyro + accelerometer into a drift-corrected
+  quaternion (Euler read-out).  Pure C (libm), builds on all three OS
+  targets, opt-in via `libraries: [madgwick_ahrs]` (emits the new
+  `CONFIG_ALP_SDK_AHRS`).  Makes the previously metadata-only
+  `madgwick_ahrs` profile consumable; `drone-hud` drops its gyro-only
+  integrator (which drifted) and now fuses the accelerometer.  Includes a
+  guard against the stock Madgwick's `1/sqrt(0)` NaN when perfectly level.
+  `[ABI-EXPERIMENTAL]`; ABI snapshot regenerated.
+
+### Added — portable PID control surface (`<alp/pid.h>`)
+
+- New `alp_pid_init` / `alp_pid_step` / `alp_pid_reset` over a
+  caller-owned `alp_pid_t` (no pool/handle) with output clamping,
+  integrator anti-windup, and derivative-on-measurement.  Pure C, builds
+  on all three OS targets, opt-in via `libraries: [pid]` (emits the new
+  `CONFIG_ALP_SDK_PID`).  Makes the previously metadata-only `pid`
+  library-profile consumable; `drone-autopilot` drops its inline PID and
+  uses it.  `[ABI-EXPERIMENTAL]`; ABI snapshot regenerated.
+
+### Added — `<alp/dsp>` float I/O, one-sided FFT, biquad designer
+
+- **Float-native chain I/O:** `alp_dsp_chain_apply_samples_f32` /
+  `alp_dsp_chain_apply_bins_f32` consume and produce `float` directly, so
+  float DSP pipelines no longer round-trip through int16 (the int16
+  `_mv` variants stay as the ADC-domain flavour that composes with
+  `<alp/adc.h>`).
+- **One-sided real-FFT magnitude:** `ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED`
+  emits `n_points/2 + 1` positive-frequency bins (DC..Nyquist) instead of
+  the redundant two-sided spectrum.
+- **Biquad designer:** `alp_dsp_biquad_design(kind, f0, fs, q, coeffs)`
+  computes RBJ-cookbook low-pass / high-pass / band-pass / notch section
+  coefficients so apps stop hand-deriving filter math (the
+  `butterworth-lowpass` example now uses it). Scope is deliberately bounded
+  to the cookbook biquads — higher-order/Chebyshev/elliptic stay out.
+- All `[ABI-EXPERIMENTAL]`; ABI snapshot regenerated.
+
+### Fixed — `<alp/dsp>` sw_fallback correctness
+
+- **CMSIS FIR state:** the FIR stage re-init'd its CMSIS instance on every
+  `apply` (zeroing the delay line -> periodic glitches, and an undersized
+  state buffer for `arm_fir_f32`'s `n_taps + block - 1` requirement). Now a
+  persistent instance streamed in bounded blocks; state carries correctly
+  and matches the portable path.
+- **FFT scratch off the stack:** the CMSIS rfft's 4 KB scratch moved from a
+  stack array into the backend struct (stack-overflow risk on a default
+  thread).
+- **Q31-on-IIR rejected:** Q31 maps full-scale to +/-1.0 but a biquad's a1
+  ranges to +/-2, so Q31 IIR coefficients silently wrapped; `alp_dsp_chain_open`
+  now returns `ALP_ERR_NOSUPPORT` for Q31 IIR (Q31 stays valid for FIR).
+
+### Added — portable DSP scalar-stats surface (`alp_dsp_stats_f32`)
+
+- `<alp/dsp.h>` gains `alp_dsp_stats_f32(const float *x, size_t n,
+  alp_dsp_stats_t *out)` — a one-pass summary (mean, RMS, population
+  variance, min/max, abs-peak + index) that the SDK backs with CMSIS-DSP
+  `arm_mean/rms/min/max/absmax_f32` on Cortex-M and a portable-C pass
+  elsewhere, so application code never calls `arm_*` directly.  Marked
+  `[ABI-EXPERIMENTAL]` alongside the existing chain API.  The Zephyr
+  build now also defines `ALP_HAS_CMSIS_DSP=1` when `CONFIG_CMSIS_DSP=y`
+  (previously plain-CMake-only), so the `<alp/dsp>` FFT chain + stats
+  actually link CMSIS-DSP on the M55 instead of silently using the
+  portable-C fallback.
+
+### Changed — DSP examples use `<alp/dsp>` instead of hand-rolled FFT/stats
+
+- The five vibration/audio examples (rail-predictive-maintenance,
+  motor-current-signature, wearable-activity-fall,
+  acoustic-anomaly-wind-turbine, acoustic-safety-events) previously each
+  re-derived a radix-2 FFT and hand-rolled their moment statistics; they
+  now route the FFT through the `<alp/dsp>` chain and the reductions
+  through `alp_dsp_stats_f32`, dropping ~230 lines of duplicated DSP
+  math.  A single-bin Goertzel (wind-turbine) is intentionally retained
+  (right tool for one bin; no CMSIS kernel).  Teaching-comment density
+  was also raised on ~20 thin example `main.c` files.
+
+### Added — `butterworth-lowpass` example (`<alp/dsp>` IIR filter path)
+
+- New `examples/audio/butterworth-lowpass`: designs a 2nd-order
+  Butterworth low-pass biquad and runs passband + stopband tones through
+  the `<alp/dsp>` chain's `ALP_DSP_STAGE_IIR` stage (CMSIS-DSP
+  `arm_biquad_cascade_df1_f32` on the M55, portable-C under native_sim),
+  reporting per-tone gain via `alp_dsp_stats_f32`.  The chain's FIR/IIR
+  filter stages previously had no example (only the FFT path did).
+
+### Added — `--emit zephyr-board` generator (#523)
+
+- `scripts/alp_project.py --input <board.yaml> --core <core_id> --emit
+  zephyr-board --output <dir>` (`scripts/gen_zephyr_board.py`) generates
+  the per-core Zephyr board tree from the SoM preset + SoC JSON instead
+  of hand-authoring it under `zephyr/boards/alp/<board>/`.  The Alif
+  Ensemble (`aen`) family is fully generated (every file except
+  `board.cmake`); the committed `e1m_aen801_m55_hp` / `e1m_aen801_m55_he`
+  trees were regenerated in place, byte-identical to their prior
+  hand-authored content plus a standard "auto-generated, do not edit"
+  banner (`tests/scripts/test_gen_zephyr_board.py` pins the match).  The
+  Renesas RZ/V2N family (`v2n` / `v2n-m1`) generates the family-agnostic
+  files only (`board.yml`, `Kconfig.alp_<board>`, the twister `.yaml`);
+  its `.dts` / pinctrl `.dtsi` / `_defconfig` stay hand-authored until the
+  on-module GD32G553 supervisor's Renesas-side pin wiring lands in
+  `metadata/pinmux/*.yaml`.  New SoC-JSON fields backing the generator:
+  `cores[].zephyr_cpucluster` / `itcm_global_base` / `dtcm_global_base`,
+  `variants[].zephyr_soc_variant`; new SoM-preset fields:
+  `topology.<core>.zephyr_full_name` / `zephyr_twister_name`.  Wired into
+  `alp emit zephyr-board` too.  See `docs/architecture.md`'s generators
+  inventory and `docs/porting-new-som.md` §10.
+
+### Fixed — build-plan / emit path resolution (#596, #597, #598)
+
+- **`--emit build-plan` / `west alp-build` (#596):** relative `app:`
+  paths (Zephyr `west build` target, baremetal `cmake -S`) now resolve
+  against the project's `board.yaml` directory, never the calling
+  process's CWD.  Previously running the emit from a different
+  directory (or the repo root, where the app-dir's absence let the
+  root `CMakeLists.txt` satisfy a parent-directory fallback) could
+  silently point a slice's build command at the wrong tree.  The plan
+  is now byte-identical no matter where it's invoked from.
+- **Yocto app-only slices (#597):** `_slice_command` no longer hands
+  `app:` (a source-directory path) straight to `bitbake` -- an
+  app-only Yocto slice now requires a new `recipe:` field naming the
+  bitbake recipe that packages it; without one the slice is carried as
+  `command: null` plus a `yocto-recipe-missing` warning instead of an
+  invalid `bitbake <path>`.  Every slice's build-plan entry additionally
+  carries `appDir` (the resolved app source directory, independent of
+  `command`) -- an **additive** field per ADR 0014.  Two examples
+  (`lvgl-dashboard-x-evk`, `v2n-m1-ros-perception`) gained their
+  already-existing `recipe:` values; `v2n-power-monitor` has none yet
+  and now blocks explicitly rather than emitting a bogus command.
+- **`add_subdirectory()` consumers (#598):** `src/baremetal/CMakeLists.txt`
+  anchored its private include path + `vendors/` subdirectories on
+  `CMAKE_SOURCE_DIR` (the top-level project's root), which is the
+  *consumer's* root, not alp-sdk's, when alp-sdk is pulled in via
+  `add_subdirectory()` -- the documented embedded-consumer path. Fixed
+  to anchor on `CMAKE_CURRENT_SOURCE_DIR` instead. New
+  `tests/cmake-consumer/add-subdirectory-smoke` fixture + CI job prove
+  a real nested consumer configures, builds, and links.
+
 ## [v0.9.0] - 2026-07-06
+
+### Added — native_sim board overlay emit
+
+`scripts/alp_project.py --emit native-sim-overlay` (and `alp emit
+native-sim-overlay`) emit a native_sim board overlay: the canonical
+52-entry `alp,pin-array` mapped onto `zephyr,gpio-emul` controllers so a
+GPIO app links and resolves on `native_sim/native/64` (host emulation,
+emulated CI) with no silicon.  Unlike `--emit dts-overlay` — which stubs
+every pin-array triplet at `<&gpio0 0>` pending the upstream SoM board
+file — `gpio-emul` is the backing controller under native_sim, so the
+overlay is complete and directly buildable (`gpio-emul` caps at 32 pins,
+so the 52 pads span two controllers).  The pad ABI stays sourced from one
+place (`_e1m_gpio_canonical()`); consumers (Alp Studio, `alp init`
+scaffolds) wrap the emit instead of hand-authoring the pin map.
 
 ### Added — Studio carrier-netlist handoff
 
@@ -1242,6 +1543,19 @@ silicon**, after the suite itself caught and drove the fixes below:
   noise bound; trng one retry per the documented fault-recover cycle.
   `adc_stream` stays quarantined (destructive failure mode — its own
   supervised pass is next).
+
+### Added — E1M-X Display 1 Linux bring-up (2026-06-04)
+
+E1M-X Display 1 (RK055HDMIPI4MA0, Himax HX8394-F, 5.5″ 720×1280):
+kernel hx8394 panel driver backport with `rocktech,rk055hdmipi4ma0`
+descriptor; `gpio-gd32-bridge` GPIO expander driver (LCD1_RST via the
+V2N-family bridge over BRD_I2C); GPT1 ch2 `pwm-backlight` node;
+weston + weston-init + libdrm + libdrm-tests + alp-lvgl-dashboard added
+to `alp-image-edge`; `examples/display/lvgl-dashboard-x-evk` LVGL
+dashboard example + BitBake recipe.  Goodix GT911 polled-mode fallback
+ships dormant — touch is gated on the bridge I2C-proxy follow-up (GT911
+I2C bus has no Linux master today on V2N-family SoMs).  HIL
+pending (bench ladder G0–G8).
 
 ### Changed — 25 MHz link: SCI-B FIFO burst engine + reply re-read made real (2026-06-04)
 

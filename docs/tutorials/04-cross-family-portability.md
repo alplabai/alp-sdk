@@ -8,7 +8,7 @@ The load-bearing customer promise of the Alp SDK:
 > SoM family**.
 
 This tutorial walks the promise (with a worked retarget from
-`E1M-AEN701` to `E1M-AEN801`), explains the deliberate boundary
+`E1M-AEN601` to `E1M-AEN801`), explains the deliberate boundary
 between the E1M and E1M-X form factors, and points at the
 empirical proof + the cookbook + the architectural ADR for
 deeper reading.
@@ -48,7 +48,7 @@ Swap one line:
 ```yaml
 # board.yaml -- swap the SKU, keep the source.
 som:
-  sku: E1M-AEN801    # was E1M-AEN701
+  sku: E1M-AEN801    # was E1M-AEN601
 ```
 
 The orchestrator (`scripts/alp_orchestrate/`) resolves the
@@ -120,6 +120,12 @@ family-bound (e.g. `v2n-gd32-bridge-ping` which talks to the
 on-V2N GD32 bridge directly) live under `examples/v2n/...` and
 declare a single SKU's family -- the prefix is a contract, not a
 docstring.
+
+For examples that declare multiple `supported_boards:` entries,
+the lint also checks `testcase.yaml`: each supported board must
+have a Twister variant that sets the matching `ALP_BOARD_<SLUG>`
+compiler define (for example `ALP_BOARD_E1M_X_EVK`).  This keeps
+the catalog claim tied to an actual CI build.
 
 ## Optional populations + the runtime check
 

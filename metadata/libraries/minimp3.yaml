@@ -1,0 +1,79 @@
+# minimp3 -- single-header MP3 decoder (ADR 0018 library manifest).
+#
+# WS6-c Phase-1 canonical manifest for legacy per-core token `minimp3`
+# (docs/superpowers/specs/2026-07-13-610-ws6c-library-consolidation-design.md
+# Phase 1 item 1). Token has no underscores, so the canonical name is
+# unchanged: `minimp3`.
+#
+# Grounding:
+#   * VENDORED in-tree at vendors/minimp3/include/minimp3.h (see
+#     vendors/minimp3/README.md) -- unlike the other §D.lib.audio/iot
+#     tokens in this batch, minimp3 is a single-file STB-style header
+#     copied verbatim into the tree rather than resolved solely through
+#     the west pin, because the west topdir workspace this SDK builds
+#     against has not fetched `modules/lib/minimp3/` and west cannot run
+#     against an out-of-workspace worktree. The `extras-tier1` west.yml
+#     pin (remote lieff, repo-path minimp3, path modules/lib/minimp3)
+#     remains the audit-trail / version source-of-truth per that README.
+#   * upstream version: `master` -- no tagged upstream release exists;
+#     vendored copy fetched 2026-07-10 (vendors/minimp3/README.md
+#     "What's here"). Tracked in
+#     `.github/workflows/nightly-extras-tier1-pins.yml` as a "TBD"
+#     library (WARN, not FAIL, on nightly fetch breakage).
+#   * licence CC0-1.0 -- confirmed verbatim from the vendored
+#     `vendors/minimp3/LICENSE` file (Creative Commons CC0 1.0 Universal
+#     public-domain dedication).
+#   * enable symbol CONFIG_ALP_MINIMP3_PURE_C -- the SW-fallback
+#     (pure-C, no SIMD/DMA) wiring transcribed verbatim from
+#     `_LIBRARY_KCONFIG["minimp3"]`
+#     (scripts/alp_project_emit/__init__.py:261).
+#
+# Licence CC0-1.0 -- public-domain-equivalent, added to this schema's
+# permissive `license` allowlist alongside BSL-1.0 (catch2) per the
+# #610 WS6-c maintainer legal-review decision; see
+# library-v1.schema.json's `license` description.
+#
+# HW-backends: see metadata/library-profiles/minimp3/ (folded WS6-c
+# Phase 3). Declares capability-keyed SIMD (helium_mve/neon/fpu) and an
+# always-on I2S-DMA accelerator class on top of this pure-C floor;
+# `verification:` there is `hil_silicon: untested`,
+# `smoke_tests: build_only`.
+#
+# Tier B (recipe-only): behind the disabled-by-default `extras-tier1` west
+# group (source vendored, but not built in per-PR release-blocking CI);
+# matches the §D.lib.audio grouping alongside `opus`.
+#
+# No `requires:` -- pure-C single-header decoder, no
+# `depends on CPU_CORTEX_M`-style constraint and no yocto integration
+# exists yet.
+schema_version: 1
+name: minimp3
+description: "minimp3 -- single-header, portable, pure-C MP3 decoder."
+tier: B
+version: "master"
+license: CC0-1.0
+
+integration:
+  zephyr:
+    module: minimp3
+    kconfig:
+      - CONFIG_ALP_MINIMP3_PURE_C=y
+    hw_backends:
+      class: audio
+      upstream_source: "lieff/minimp3"
+      accelerators:
+        - class: simd
+          priority:
+            - { requires_cap: helium_mve, backend: helium_mve, kconfig: CONFIG_ALP_MINIMP3_HELIUM=y }
+            - { requires_cap: neon,       backend: neon,       kconfig: CONFIG_ALP_MINIMP3_NEON=y }
+            - { backend: fpu,                                  kconfig: CONFIG_ALP_MINIMP3_FPU=y }
+        - class: dma
+          priority:
+            - { backend: i2s_dma, kconfig: CONFIG_ALP_MINIMP3_I2S_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_MINIMP3_PURE_C=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

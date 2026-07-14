@@ -144,6 +144,20 @@ int bridge_hw_adc_stream_read(uint8_t   stream_id,
                               uint16_t *mv);
 int bridge_hw_adc_stream_end(uint8_t stream_id);
 
+/* Read one chunk of the latest FFT frame for an FFT-terminal chain
+ * bound to @p stream_id (#496).  Fills up to @p max_bins float bins
+ * from @p bin_offset; *seq_out is the frame counter (host detects a
+ * mid-fetch roll), *total_bins_out the frame's bin count, *got_bins_out
+ * how many were written.  BRIDGE_HW_ERR_NOTIMPL if the stream isn't
+ * FFT-bound, BRIDGE_HW_ERR_IO before the first frame completes. */
+int bridge_hw_adc_spectrum_read(uint8_t   stream_id,
+                                uint16_t  bin_offset,
+                                uint8_t   max_bins,
+                                uint32_t *seq_out,
+                                uint16_t *total_bins_out,
+                                uint8_t  *got_bins_out,
+                                float    *bins_out);
+
 /* --------------------------------------------------------------- */
 /* TRNG -- true random number generator (NIST SP800-90B)             */
 /* --------------------------------------------------------------- */
@@ -169,8 +183,11 @@ int bridge_hw_trng_read(uint8_t *dest, size_t len);
  * scale on the caller's behalf.  Returns BRIDGE_HW_ERR_RANGE for
  * inputs outside the function's domain (e.g. sqrt(negative) in Q31)
  * and BRIDGE_HW_ERR_IO if the TMU flags a hardware fault. */
-int bridge_hw_tmu_compute(
-    uint8_t function, uint8_t format, uint32_t in_a, uint32_t in_b, uint32_t *result_out);
+int bridge_hw_tmu_compute(uint8_t   function,
+                          uint8_t   format,
+                          uint32_t  in_a,
+                          uint32_t  in_b,
+                          uint32_t *result_out);
 
 /* --------------------------------------------------------------- */
 /* DAC                                                              */

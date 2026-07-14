@@ -1,0 +1,72 @@
+# BearSSL -- small-footprint TLS/crypto library (ADR 0018 library
+# manifest).
+#
+# WS6-c Phase-1 canonical manifest for legacy per-core token `bearssl`
+# (docs/superpowers/specs/2026-07-13-610-ws6c-library-consolidation-design.md
+# Phase 1 item 1). Token has no underscores, so the canonical name is
+# unchanged: `bearssl`.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * west module `BearSSL` (west.yml `extras-tier1` group, remote
+#     bearssl-mirror -- upstream bearssl.org is tarball-only, so west
+#     pins the community git mirror), path modules/lib/bearssl -- NOT in
+#     Zephyr's own west manifest; disabled by default, consumers flip via
+#     `west update --group-filter +extras-tier1`.
+#   * upstream version: `master` -- west.yml pins the mirror's `master`
+#     branch with a "TBD: confirm + pin SHA" maintainer note (no tagged
+#     release exists to pin to instead); not a floating alp-sdk-owned
+#     `west:` project entry (that field is unused here -- this is a
+#     documentation-only `module:` reference to the west.yml pin, which
+#     the schema's `west.revision` no-`main`/`master` pattern does not
+#     apply to). Tracked in
+#     `.github/workflows/nightly-extras-tier1-pins.yml` as a "TBD" library
+#     (WARN, not FAIL, on nightly fetch breakage).
+#   * licence MIT -- bearssl.org's stated licence; source files carry the
+#     standard MIT permission-and-disclaimer text.
+#   * enable symbol CONFIG_ALP_BEARSSL_PURE_C -- the SW-fallback
+#     (pure-C, no HW crypto) wiring transcribed verbatim from
+#     `_LIBRARY_KCONFIG["bearssl"]`
+#     (scripts/alp_project_emit/__init__.py:258).
+#
+# HW-backends: see metadata/library-profiles/bearssl/ (folded WS6-c
+# Phase 3). Declares a capability-keyed crypto accelerator class
+# (cryptocell / inline_aes / cau / optiga_trust_m, all `status: planned`)
+# on top of this always-available pure-C floor; `verification:` there is
+# `hil_silicon: untested`, `smoke_tests: build_only`.
+#
+# Tier B (recipe-only): behind the disabled-by-default `extras-tier1` west
+# group, exercised only by the nightly `nightly-extras-tier1-pins.yml`
+# workflow -- matches the §D.lib.iot cloud/connectivity Tier-B grouping.
+#
+# No `requires:` -- plain west module, pure-C with no Kconfig
+# `depends on CPU_CORTEX_M`-style constraint and no yocto integration
+# exists yet.
+schema_version: 1
+name: bearssl
+description: "BearSSL -- small-footprint TLS/crypto library for embedded targets."
+tier: B
+version: "master"
+license: MIT
+
+integration:
+  zephyr:
+    module: BearSSL
+    kconfig:
+      - CONFIG_ALP_BEARSSL_PURE_C=y
+    hw_backends:
+      class: crypto/TLS
+      upstream_source: "bearssl.org"
+      accelerators:
+        - class: crypto
+          priority:
+            - { requires_cap: cryptocell,     backend: cryptocell,               status: planned, kconfig: CONFIG_ALP_BEARSSL_CRYPTOCELL=y }
+            - { requires_cap: inline_aes,     backend: inline_aes,               status: planned, kconfig: CONFIG_ALP_BEARSSL_INLINE_AES=y }
+            - { requires_cap: cau,            backend: cau,                      status: planned, kconfig: CONFIG_ALP_BEARSSL_CAU=y }
+            - { requires_cap: optiga_trust_m, backend: optiga_trust_m_handshake, status: planned, kconfig: CONFIG_ALP_BEARSSL_OPTIGA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_BEARSSL_PURE_C=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

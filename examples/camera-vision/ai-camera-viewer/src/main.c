@@ -8,16 +8,16 @@
  * Headline edge-AI demo on the E1M-AEN family.
  *
  *   ┌──────────────────┐                ┌──────────────────────┐
- *   │  E1M-AEN701 SoM  │  MIPI / DVP    │ OmniVision OV5640    │
+ *   │  E1M-AEN801 SoM  │  MIPI / DVP    │ OmniVision OV5640    │
  *   │ + Cortex-M55 HP  │ ◀──── frames ──│ camera (RGB565 / VGA)│
  *   └────────┬─────────┘                └──────────────────────┘
  *            │   <alp/camera.h> hands the frame to the inference
  *            │   pipeline:
  *            ▼
  *      ┌──────────────────────┐
- *      │ TFLM + Ethos-U55      │  ── person_detect.tflite
+ *      │ TFLM + Ethos-U85      │  ── person_detect.tflite
  *      │ (CONFIG_ALP_TFLM_     │     compiled with Vela for
- *      │  ETHOS_U55=y on E7)   │     ethos-u55-256.
+ *      │  ETHOS_U85=y on E8)   │     ethos-u85-256.
  *      └─────────┬─────────────┘
  *                │  ── bounding-box list + per-class score
  *                ▼
@@ -37,15 +37,15 @@
  *      `capabilities:` block, no app-source changes.
  *   2. "How fast?"  --  the per-frame latency strip prints the
  *      microseconds from `alp_inference_invoke()` entry to exit.
- *      Customers compare AEN701 (U55) vs AEN801 (U85) by
- *      flipping `som.sku` in `board.yaml`.
+ *      Customers compare E8 / E6 / E4 by flipping `som.sku`
+ *      in `board.yaml`.
  *   3. "Does it run portably?"  --  the app source uses zero
  *      vendor-specific symbols; the SoC-family routing is in the
  *      loader, not the source.  Re-targeting from AEN to NX9101
  *      (Ethos-U65) is a one-line board.yaml change.
  *
  *
- * ── What's stubbed in v0.5 ─────────────────────────────────────
+ * ── What's still a placeholder ──────────────────────────────────
  *
  * - The actual `person_detect.tflite` model isn't checked in --
  *   customers drop their own Vela-compiled .tflite into
@@ -54,20 +54,22 @@
  *   native_sim (no real OV5640 connected), and the UI shows a
  *   solid-colour placeholder + the inference latency for the
  *   built-in dummy bytes.
- * - Real bounding-box decode is paper-correct -- v0.6 AEN HiL
- *   fills in the post-process kernel that turns the model output
- *   tensor into a `viewer_box_t[]` array.
+ * - Real bounding-box decode is paper-correct only -- the
+ *   post-process kernel that turns the model output tensor into
+ *   a `viewer_box_t[]` array is still TODO, pending the real
+ *   compiled model + AEN HiL bench validation.
  */
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/drivers/display.h>
-
-#include <lvgl.h>
 
 #include "alp/peripheral.h"
 #include "alp/camera.h"
 #include "alp/inference.h"
+#include <alp/display.h>
+#include <alp/gui.h>
+
+#include <lvgl.h>
 
 #include "viewer_ui.h"
 #include "inference_loop.h"
@@ -97,15 +99,28 @@ int main(void)
      * via the thread arg slot (NULL above; the loop fetches it
      * from main's stack via g_state directly). */
 
-	/* Display + LVGL bring-up. */
-	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-	if (!device_is_ready(display)) {
-		LOG_ERR("display %s not ready", display->name);
+	/* Display + LVGL bring-up.  Open the panel through the portable
+     * <alp/display.h> surface, then bind LVGL to it via <alp/gui.h>
+     * -- see examples/display/lvgl-widgets-demo/src/main.c for the
+     * full rationale on this open -> lv_init -> tick -> attach
+     * sequence, and why CONFIG_LV_Z_AUTO_INIT=n (prj.conf) is
+     * required alongside it. */
+	alp_display_config_t display_cfg = ALP_DISPLAY_CONFIG_DEFAULT(0);
+	alp_display_t       *display     = alp_display_open(&display_cfg);
+	if (display == NULL) {
+		LOG_ERR("display open failed (err=%d)", (int)alp_last_error());
 		return 1;
 	}
 	lv_init();
+	lv_tick_set_cb(k_uptime_get_32);
+
+	alp_status_t attach_status = alp_gui_lvgl_attach(display);
+	if (attach_status != ALP_OK) {
+		LOG_ERR("alp_gui_lvgl_attach failed (err=%d)", (int)attach_status);
+		return 1;
+	}
+
 	viewer_ui_build();
-	display_blanking_off(display);
 
 	/* Spawn the inference thread.  Higher priority than main so
      * the model gets timely CPU even when LVGL is mid-blit. */
@@ -127,7 +142,7 @@ int main(void)
 		viewer_state_t snap = g_state;
 		viewer_ui_apply(&snap);
 
-		const uint32_t sleep_ms = lv_task_handler();
+		const uint32_t sleep_ms = lv_timer_handler();
 		k_msleep(MIN(sleep_ms, 10u));
 	}
 

@@ -72,7 +72,7 @@
         "name": "aen-secure-element-sign",
         "path": "examples/aen/aen-secure-element-sign",
         "som": "E1M-AEN801",
-        "summary": "Init the OPTIGA Trust M on the E1M-AEN's **BRD_I2C**, read its product info object as a sanity check, and issue an **ECDSA-P256 sign** APDU against a fixed SHA-256 message digest."
+        "summary": "Probe the OPTIGA Trust M on the E1M-AEN's **BRD_I2C** and confirm the current probe-only driver contract. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
       },
       {
         "board": "e1m-evk",
@@ -87,7 +87,7 @@
         "board": "e1m-evk",
         "name": "ai-anomaly-detection-vibration",
         "path": "examples/ai/ai-anomaly-detection-vibration",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to > `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`. HiL bring-up with a > real motor / pump and a customer-trained model is v0.6 work.",
         "supported_boards": [
           "e1m-evk",
@@ -98,7 +98,7 @@
         "board": "e1m-evk",
         "name": "cold-chain-monitor",
         "path": "examples/ai/cold-chain-monitor",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `cold_chain` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic environment data covering the states. HiL with a > real BME280 + a trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -109,7 +109,7 @@
         "board": "e1m-evk",
         "name": "motor-current-signature",
         "path": "examples/ai/motor-current-signature",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `current_features` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic current covering all five states. HiL > on a real motor + a trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -120,7 +120,7 @@
         "board": "e1m-evk",
         "name": "multimodal-fusion-pdm",
         "path": "examples/ai/multimodal-fusion-pdm",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `fusion_health` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic per-modality data covering every > scenario. HiL with the three real sensors + a trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -131,7 +131,7 @@
         "board": "e1m-evk",
         "name": "rail-predictive-maintenance",
         "path": "examples/ai/rail-predictive-maintenance",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The DSP cores > (`rail_features`, `rail_position`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > a canned NMEA track + synthetic vibration. HiL on a real bogie with a > customer-trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -142,7 +142,7 @@
         "board": "e1m-evk",
         "name": "visual-defect-detection",
         "path": "examples/ai/visual-defect-detection",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `defect_map` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic clean + defect frames. HiL with a real CSI camera + > a trained autoencoder is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -153,7 +153,7 @@
         "board": "e1m-evk",
         "name": "wearable-activity-fall",
         "path": "examples/ai/wearable-activity-fall",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The two cores > (`motion_features`, `fall_detect`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic motion (incl. an injected fall). HiL on a real wearable + a trained > model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
@@ -166,31 +166,30 @@
         "board": "e1m-evk",
         "name": "acoustic-anomaly-wind-turbine",
         "path": "examples/audio/acoustic-anomaly-wind-turbine",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The three DSP cores > (`acoustic_features`, `rotor_speed`, `bpf_modulation`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic acoustics + a canned RPM track. HiL on a real nacelle with a > customer-trained model is bench-gated."
       },
       {
         "board": "e1m-evk",
         "name": "acoustic-safety-events",
         "path": "examples/audio/acoustic-safety-events",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `acoustic_event` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic audio cycling the four event types. > HiL with a real mic + a trained model is bench-gated."
       },
       {
         "board": "e1m-evk",
         "name": "audio-loopback",
         "path": "examples/audio/audio-loopback",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/audio.h>`. Reads PCM blocks from the on-module PDM microphone, runs them through the ALP DSP chain (DC-block in v0.2), and pushes them straight back out over I²S. Demonstrates the full `audio_in` / `audio_out` lifecycle."
       },
       {
-        "board": "e1m-evk",
+        "board": "e1m-x-evk",
         "name": "audio-noise-suppression",
         "path": "examples/audio/audio-noise-suppression",
         "som": "E1M-V2N101",
         "summary": "Real-time noise suppression demo on the V2N (and V2H by SKU flip). Target market: USB-C headsets, true-wireless hearables, desktop conferencing rigs -- anywhere you want cloud-grade denoising at sub-perceptual latency without shipping audio off-device.",
         "supported_boards": [
-          "e1m-evk",
           "e1m-x-evk"
         ]
       },
@@ -198,19 +197,37 @@
         "board": "e1m-evk",
         "name": "audio-wake-word",
         "path": "examples/audio/audio-wake-word",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ![status: UNTESTED](https://img.shields.io/badge/status-%5BUNTESTED%5D-orange) > v0.5 paper-correct. Builds clean on `native_sim/native/64`; real > PDM mic capture + Ethos-U55 dispatch + Vela-compiled model land > in v0.6 AEN HiL."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "butterworth-lowpass",
+        "path": "examples/audio/butterworth-lowpass",
+        "som": "E1M-AEN801",
+        "summary": "butterworth-lowpass -- design a 2nd-order Butterworth low-pass filter and run it through the portable <alp/dsp.h> IIR chain stage. =====================================================================",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
       },
       {
         "board": "e1m-evk",
         "name": "i2s-tone",
         "path": "examples/audio/i2s-tone",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/i2s.h>`. Generates a 1 kHz sine wave and writes it as 16-bit stereo PCM to ALP_E1M_I2S0.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
         ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "minimp3-decode",
+        "path": "examples/audio/minimp3-decode",
+        "som": "E1M-AEN801",
+        "summary": "Decodes a canned MP3 byte array to 16-bit PCM with the vendored [minimp3](https://github.com/lieff/minimp3) single-header decoder and prints the sample count + RMS of the decoded audio. Pure compute -- no I2S/codec hardware required, so this builds and runs identically on `native_sim` and real silicon."
       }
     ],
     "camera-vision": [
@@ -218,18 +235,25 @@
         "board": "e1m-evk",
         "name": "ai-camera-viewer",
         "path": "examples/camera-vision/ai-camera-viewer",
-        "som": "E1M-AEN701",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on > `native_sim/native/64`; real OV5640 + Ethos-U dispatch + Vela- > compiled model land in v0.6 AEN HiL."
+        "som": "E1M-AEN801",
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` against the full `<alp/camera.h>` / > `<alp/inference.h>` surfaces (both ship today; Ethos-U dispatch > runs through `alp_inference_open(...)` same as any other backend). > What's still missing is a real Vela-compiled `person_detect.tflite` > model and AEN HiL bench validation."
       },
       {
-        "board": "e1m-evk",
+        "board": "e1m-x-evk",
         "name": "ai-object-detection-realtime",
         "path": "examples/camera-vision/ai-object-detection-realtime",
         "som": "E1M-V2M101",
-        "summary": "> **`[UNTESTED]` -- v0.5 paper-correct skeleton.** Builds clean on > `native_sim/native/64` + the AEN fallback target; real DEEPX DX-M1 > dispatch + DXNN-compiled YOLOv8-tiny + V2N MIPI camera capture land > in v0.6 alongside the V2N-M1 HiL bring-up."
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` + the AEN fallback target against the full > `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces, > which all ship today -- DEEPX DX-M1 dispatch runs through > `alp_inference_open(...)` same as any other backend. What's still > missing is a real Vela-/DXNN-compiled YOLOv8-tiny model (see \"Adding > the model\" below) and V2N-M1 HiL bench validation."
       }
     ],
     "connectivity": [
+      {
+        "board": "e1m-evk",
+        "name": "coap-client-get",
+        "path": "examples/connectivity/coap-client-get",
+        "som": "E1M-AEN801",
+        "summary": "`[UNTESTED]` -- native_sim build+run PASSED locally (see below), but this has not been verified on real silicon (no bench/HIL sweep)."
+      },
       {
         "board": "e1m-x-evk",
         "name": "iot-connected-camera",
@@ -241,22 +265,57 @@
         "board": "e1m-evk",
         "name": "iot-dashboard",
         "path": "examples/connectivity/iot-dashboard",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on > `native_sim/native/64`; real WiFi + MQTT + TLS bring-up gates on > v0.6 AEN HiL."
       },
       {
         "board": "e1m-evk",
         "name": "iot-fleet-ota",
         "path": "examples/connectivity/iot-fleet-ota",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Secure OTA firmware update with rollback. The production-readiness proof for \"how do we update 10 000 units in the field?\"."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "jsmn-json-parse",
+        "path": "examples/connectivity/jsmn-json-parse",
+        "som": "E1M-AEN801",
+        "summary": "`[UNTESTED]` -- native_sim build+run PASSED locally (see below), but this has not been verified on real silicon (no bench/HIL sweep)."
+      },
+      {
+        "board": "e1m-x-evk",
+        "name": "modbus-server",
+        "path": "examples/connectivity/modbus-server",
+        "som": "E1M-V2N101",
+        "summary": "Modbus teaching example for the ADR 0018 `libraries: [modbus]` manifest."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "mqtt-sn-publish",
+        "path": "examples/connectivity/mqtt-sn-publish",
+        "som": "E1M-AEN801",
+        "summary": "coreMQTT-SN teaching example. Encodes an MQTT-SN PUBLISH packet into a buffer, then parses it back out of the same buffer and asserts the topic id, message id, QoS, retain flag, and payload all survive the round trip. No socket, no gateway, no live transport -- this is the unit-test shape you'd run before wiring the encoder to a real UDP/ BLE/UART MQTT-SN link."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "nanopb-encode-decode",
+        "path": "examples/connectivity/nanopb-encode-decode",
+        "som": "E1M-AEN801",
+        "summary": "`[UNTESTED]` -- native_sim build+run PASSED locally (see below), but this has not been verified on real silicon (no bench/HIL sweep)."
       },
       {
         "board": "e1m-evk",
         "name": "production-deployment",
         "path": "examples/connectivity/production-deployment",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "The v1.0 reference application for a field-deployable IoT product. Demonstrates the full manufactured -> deployed -> updated -> attested lifecycle on a single app, so customers see how the SDK's secure-boot, OTA, EEPROM-provisioning, and remote-attestation pieces fit together."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "websocket-frame",
+        "path": "examples/connectivity/websocket-frame",
+        "som": "E1M-AEN801",
+        "summary": "libwebsockets teaching example. Masks and encodes a single unfragmented RFC 6455 TEXT frame into a buffer, then decodes (unmasks) it back out and asserts the payload survives the round trip. No socket, no TLS, no handshake -- this is the frame-layout byte accounting you'd want to get right before ever opening a real connection."
       }
     ],
     "display": [
@@ -264,29 +323,50 @@
         "board": "e1m-evk",
         "name": "drone-hud",
         "path": "examples/display/drone-hud",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds on > `native_sim/native/64`; HiL silicon bring-up of the IMU + GPS + > battery + display chain lands in v0.6."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "gfx-compat-blit",
+        "path": "examples/display/gfx-compat-blit",
+        "som": "E1M-AEN801",
+        "summary": "**[UNTESTED]** -- `native_sim` build-and-run only; not yet run on a bench SoM."
       },
       {
         "board": "e1m-evk",
         "name": "lvgl-benchmark",
         "path": "examples/display/lvgl-benchmark",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_benchmark()`** -- the canonical LVGL performance harness. Walks a fixed scene set (gradients, alpha blends, text rendering, image rotation, ...) and reports per-scene FPS at the end."
+      },
+      {
+        "board": "e1m-x-evk",
+        "name": "lvgl-dashboard-x-evk",
+        "path": "examples/display/lvgl-dashboard-x-evk",
+        "som": "E1M-V2N101",
+        "summary": "A minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel (RK055HDMIPI4MA0, 720 x 1280 @ 60 Hz)."
       },
       {
         "board": "e1m-evk",
         "name": "lvgl-music-player",
         "path": "examples/display/lvgl-music-player",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_music()`** -- album-art carousel, time slider, track list, equaliser visualiser. This is a **display-only** demo: it renders and animates the player UI but does not decode or play any audio."
       },
       {
         "board": "e1m-evk",
         "name": "lvgl-widgets-demo",
         "path": "examples/display/lvgl-widgets-demo",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_widgets()`** from LVGL's `demos/` tree -- the headline showcase of every standard LVGL widget (buttons, sliders, tabs, charts, meters, lists, animations)."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "u8g2-oled-draw",
+        "path": "examples/display/u8g2-oled-draw",
+        "som": "E1M-AEN801",
+        "summary": "**[UNTESTED]** -- `native_sim` build-and-run only; not yet run on a bench SoM."
       }
     ],
     "multicore": [
@@ -301,15 +381,15 @@
         "board": "e1m-evk",
         "name": "mproc-mailbox",
         "path": "examples/multicore/mproc-mailbox",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/mproc.h>`. Demonstrates the M55-HP side of a Cortex-M55-HP ↔ Cortex-M55-HE mailbox roundtrip on AEN: stage a payload in shared SRAM, signal the peer via the hardware mailbox, wait for a reply, read the result back."
       },
       {
         "board": "e1m-evk",
         "name": "rpmsg-aen",
         "path": "examples/multicore/rpmsg-aen",
-        "som": "E1M-AEN701",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct, but the build will fail at carve-out resolution > until the user supplies authoritative AEN memory-map values in > `metadata/e1m_modules/E1M-AEN701.yaml`."
+        "som": "E1M-AEN801",
+        "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct, but the end-to-end RPMsg path still needs AEN801 > bench validation."
       },
       {
         "board": "e1m-evk",
@@ -345,7 +425,7 @@
         "board": "e1m-evk",
         "name": "can-loopback",
         "path": "examples/peripheral-io/can-loopback",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/can.h>`. Brings up CAN0 in loopback mode, sends a frame, demonstrates the receive-callback contract.",
         "supported_boards": [
           "e1m-evk",
@@ -367,14 +447,36 @@
         "board": "e1m-evk",
         "name": "drone-autopilot",
         "path": "examples/peripheral-io/drone-autopilot",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "etl-fixed-containers",
+        "path": "examples/peripheral-io/etl-fixed-containers",
+        "som": "E1M-AEN801",
+        "summary": "Builds an `etl::vector<int, 8>` and an `etl::map<const char *, int, 4>` -- two of the Embedded Template Library's fixed-capacity, STL-shaped containers -- and demonstrates their headline property for firmware: **no heap allocation, ever**. Storage for both containers is embedded inline at compile time, sized by the `MAX_SIZE` template parameter.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "fmt-formatting",
+        "path": "examples/peripheral-io/fmt-formatting",
+        "som": "E1M-AEN801",
+        "summary": "Formats an `int` + a `float` + a `const char *` into a fixed `char[64]` stack buffer using `fmt::format_to` -- {fmt} (https://github.com/fmtlib/fmt)'s API for writing formatted text through a caller-supplied output iterator instead of returning an owning `std::string`. No heap allocation, no `<iostream>`.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
       },
       {
         "board": "e1m-evk",
         "name": "gpio-button-led",
         "path": "examples/peripheral-io/gpio-button-led",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Read a button and toggle an LED -- both as plain GPIO, through the `<alp/blocks/button_led.h>` block helper.",
         "supported_boards": [
           "e1m-evk",
@@ -385,7 +487,7 @@
         "board": "e1m-evk",
         "name": "hello-world",
         "path": "examples/peripheral-io/hello-world",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "The canonical \"first program\" for the Alp SDK. No peripherals, no chips, no board-specific wiring -- just a periodic `printf` loop so you can confirm the toolchain, flash flow, and log console are wired correctly before chasing harder bugs.",
         "supported_boards": [
           "e1m-evk",
@@ -403,7 +505,7 @@
         "board": "e1m-evk",
         "name": "i2c-master",
         "path": "examples/peripheral-io/i2c-master",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Discrete I2C master that reads a known device at a known address. Pattern: open the bus, init the chip driver, loop reading the sensor every second, close cleanly.",
         "supported_boards": [
           "e1m-evk",
@@ -414,7 +516,7 @@
         "board": "e1m-evk",
         "name": "i2c-scanner",
         "path": "examples/peripheral-io/i2c-scanner",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/peripheral.h>` I²C. Walks every 7-bit address on `ALP_E1M_I2C0` and reports which respond.",
         "supported_boards": [
           "e1m-evk",
@@ -425,7 +527,7 @@
         "board": "e1m-evk",
         "name": "i2c-slave",
         "path": "examples/peripheral-io/i2c-slave",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the register-file helper from `<alp/i2c_regfile.h>` (v0.9, `[ABI-EXPERIMENTAL]`), a pure layer over the portable `alp_i2c_target_*` surface in `<alp/peripheral.h>`.",
         "supported_boards": [
           "e1m-evk",
@@ -436,7 +538,7 @@
         "board": "e1m-evk",
         "name": "pwm-led-fade",
         "path": "examples/peripheral-io/pwm-led-fade",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/pwm.h>`. Fades an LED on PWM channel `ALP_E1M_PWM0` from 0 % to 100 % and back, demonstrating the canonical open / set-duty / close pattern.",
         "supported_boards": [
           "e1m-evk",
@@ -447,7 +549,7 @@
         "board": "e1m-evk",
         "name": "qenc-readout",
         "path": "examples/peripheral-io/qenc-readout",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for the quadrature-decoder side of `<alp/counter.h>`. Reads `ALP_E1M_ENC0`'s position once per 100 ms for ~1 second.",
         "supported_boards": [
           "e1m-evk",
@@ -458,7 +560,7 @@
         "board": "e1m-evk",
         "name": "spi-loopback",
         "path": "examples/peripheral-io/spi-loopback",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/peripheral.h>` SPI. Demonstrates the canonical transceive pattern.",
         "supported_boards": [
           "e1m-evk",
@@ -469,7 +571,7 @@
         "board": "e1m-evk",
         "name": "spi-master",
         "path": "examples/peripheral-io/spi-master",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Discrete SPI master. Send a known byte pattern out MOSI, log whatever clocks back on MISO.",
         "supported_boards": [
           "e1m-evk",
@@ -480,7 +582,7 @@
         "board": "e1m-evk",
         "name": "spi-slave",
         "path": "examples/peripheral-io/spi-slave",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Claim the bus in target (slave) mode using the portable `alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`) and answer an external SPI controller.",
         "supported_boards": [
           "e1m-evk",
@@ -491,7 +593,7 @@
         "board": "e1m-evk",
         "name": "uart-echo",
         "path": "examples/peripheral-io/uart-echo",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/peripheral.h>` UART. Reads single bytes from the UART and writes them back.",
         "supported_boards": [
           "e1m-evk",
@@ -502,14 +604,14 @@
         "board": "e1m-evk",
         "name": "uart-hello-world",
         "path": "examples/peripheral-io/uart-hello-world",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "The canonical \"printf via UART\" walkthrough. Opens a UART port with `alp_uart_open()`, sends a greeting + a monotonically- increasing counter every second, demonstrates error handling."
       },
       {
         "board": "e1m-evk",
         "name": "uart-rx-ringbuf",
         "path": "examples/peripheral-io/uart-rx-ringbuf",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-feature example for `<alp/peripheral.h>`'s opt-in interrupt-driven RX ring buffer (`CONFIG_ALP_SDK_UART_RX_RINGBUF`).",
         "supported_boards": [
           "e1m-evk",
@@ -527,7 +629,7 @@
         "board": "e1m-evk",
         "name": "vendor-ext-composability",
         "path": "examples/peripheral-io/vendor-ext-composability",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "One pad, three ways -- a proof that the Alp SDK's vendor-extension layer (`<alp/ext/<vendor>/...>`) is **additive, never exclusive**."
       }
     ],
@@ -536,8 +638,19 @@
         "board": "e1m-evk",
         "name": "counter-alarm",
         "path": "examples/power-timing/counter-alarm",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/counter.h>`. Schedules a one-shot alarm 100 ms in the future and prints from the callback.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
+        "name": "littlefs-keyvalue",
+        "path": "examples/power-timing/littlefs-keyvalue",
+        "som": "E1M-AEN801",
+        "summary": "Mounts a littlefs partition, writes a single key/value pair to a file, reads it back, lists the mount-point directory, and asserts the read matches the write. Teaches the Zephyr `fs` subsystem's `fs_mount`/`fs_open`/`fs_write`/`fs_read`/`fs_readdir` API surface using the littlefs backend (`libraries: [littlefs]` in `board.yaml`).",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -554,7 +667,7 @@
         "board": "e1m-evk",
         "name": "rtc-clock",
         "path": "examples/power-timing/rtc-clock",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/rtc.h>`. Sets the wall-clock to a fixed instant, sleeps a few hundred ms, then reads it back to verify the RTC ticked.",
         "supported_boards": [
           "e1m-evk",
@@ -565,7 +678,7 @@
         "board": "e1m-evk",
         "name": "timer-periodic-interrupt",
         "path": "examples/power-timing/timer-periodic-interrupt",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "The canonical \"periodic ISR plus main-thread coordination\" example.",
         "supported_boards": [
           "e1m-evk",
@@ -576,12 +689,28 @@
         "board": "e1m-evk",
         "name": "wdt-feed",
         "path": "examples/power-timing/wdt-feed",
-        "som": "E1M-AEN701",
+        "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/wdt.h>`. Installs a 5 second watchdog timeout and feeds it from a background loop.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
         ]
+      }
+    ],
+    "testing": [
+      {
+        "board": "e1m-evk",
+        "name": "catch2-selftest",
+        "path": "examples/testing/catch2-selftest",
+        "som": "E1M-AEN801",
+        "summary": "A minimal [Catch2](https://github.com/catchorg/Catch2) v3 unit-test binary, built from Catch2's own \"amalgamated\" single-TU distribution: 3 `TEST_CASE`s over a trivial `clamp()` helper."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "doctest-selftest",
+        "path": "examples/testing/doctest-selftest",
+        "som": "E1M-AEN801",
+        "summary": "A minimal [doctest](https://github.com/doctest/doctest) v2.4.11 unit-test binary: 3 `TEST_CASE`s over a trivial `clamp()` helper."
       }
     ],
     "v2n": [
@@ -674,10 +803,7 @@
         "name": "v2n-power-monitor",
         "path": "examples/v2n/v2n-power-monitor",
         "som": "E1M-V2N101",
-        "summary": "Live per-rail power table from the **E1M-X EVK**'s on-board INA236 current/voltage monitors, read from a Linux/Yocto user-space app on the V2N Cortex-A55.",
-        "supported_boards": [
-          "e1m-x-evk"
-        ]
+        "summary": "Live per-rail power table from the **E1M-X EVK**'s on-board INA236 current/voltage monitors, read from a Linux/Yocto user-space app on the V2N Cortex-A55."
       },
       {
         "board": "e1m-x-evk",
@@ -698,7 +824,7 @@
         "name": "v2n-secure-element-sign",
         "path": "examples/v2n/v2n-secure-element-sign",
         "som": "E1M-V2N101",
-        "summary": "Init the OPTIGA Trust M on V2N's BRD_I2C, read its product info object as a sanity check, and issue an **ECDSA-P256 sign** APDU against a fixed SHA-256 message digest."
+        "summary": "Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current probe-only driver contract. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
       },
       {
         "board": "e1m-x-evk",
@@ -718,6 +844,18 @@
   },
   "gates": [
     {
+      "purpose": "Fail if any repo board.yaml has an outstanding schema migration.",
+      "script": "scripts/check_board_schema_version.py"
+    },
+    {
+      "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json).",
+      "script": "scripts/check_build_plan.py"
+    },
+    {
+      "purpose": "Validate the build-receipt-v1 schema is well-formed (#610 §7).",
+      "script": "scripts/check_build_receipt.py"
+    },
+    {
       "purpose": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
       "script": "scripts/check_chip_header_status.py"
     },
@@ -726,11 +864,19 @@
       "script": "scripts/check_chip_manifest_parity.py"
     },
     {
+      "purpose": "Plain-CMake chip-list parity gate -- fails (exit 1) when the root `CMakeLists.txt` `ALP_SDK_CHIP_LIST` (the plain-CMake / Yocto `libalp_chips.a` archive, gated by `ALP_BUILD_CHIPS_ONLY`) drifts from the drivers that actually exist under `chips/<id>/`.",
+      "script": "scripts/check_cmake_chip_list_parity.py"
+    },
+    {
       "purpose": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
       "script": "scripts/check_cross_platform.py"
     },
     {
-      "purpose": "Doc-drift gate -- fails (exit 1) when customer-facing documentation references SDK identifiers that no longer exist, or when a top-level doc isn't linked from the docs index.",
+      "purpose": "Validate the versioned machine diagnostics contract (metadata/schemas/diagnostic-v1.schema.json) two ways:",
+      "script": "scripts/check_diagnostic_schema.py"
+    },
+    {
+      "purpose": "Doc-drift gate -- fails (exit 1) when customer-facing documentation references SDK identifiers that no longer exist, when a top-level doc isn't linked from the docs index, or when CC3501E docs/examples describe the current bridge as the obsolete CS-less design.",
       "script": "scripts/check_doc_drift.py"
     },
     {
@@ -738,24 +884,64 @@
       "script": "scripts/check_doxygen_coverage.py"
     },
     {
+      "purpose": "Validate the vendored e1m-spec pinout snapshot and cross-check it against the per-SoM pin-mux tables -- fully **offline** (no network).",
+      "script": "scripts/check_e1m_pinout.py"
+    },
+    {
       "purpose": "E1M board-route <-> SoM capability-table end-to-end gate.",
       "script": "scripts/check_e1m_route_capability.py"
+    },
+    {
+      "purpose": "Validate metadata/emit-registry-v1.json against the public IDE/tool contract (metadata/schemas/emit-registry-v1.schema.json) AND assert its mode set is exactly the real `--emit` surface the SDK exposes.",
+      "script": "scripts/check_emit_registry.py"
     },
     {
       "purpose": "Byte-for-byte `--emit` snapshot regression gate.",
       "script": "scripts/check_emit_snapshots.py"
     },
     {
-      "purpose": "Cross-family portability lint for examples/*/board.yaml.",
+      "purpose": "Cross-family portability lint for examples/*/{board.yaml,testcase.yaml}.",
       "script": "scripts/check_example_portability.py"
+    },
+    {
+      "purpose": "Reject examples that claim Alp storage coverage while using Zephyr storage APIs.",
+      "script": "scripts/check_example_storage_claims.py"
     },
     {
       "purpose": "Inference backend/format <-> dispatcher canonicalisation gate.",
       "script": "scripts/check_inference_backend_parity.py"
     },
     {
+      "purpose": "Assert the library alias table covers every curated token and resolves to real manifests (WS6-c #610 §6).",
+      "script": "scripts/check_library_registry.py"
+    },
+    {
+      "purpose": "CI gate: no hard-coded home-directory paths in executable / build files.",
+      "script": "scripts/check_local_paths.py"
+    },
+    {
       "purpose": "Validate that every silicon pad referenced in the SoM peripheral maps is claimed by **exactly one** peripheral.",
       "script": "scripts/check_pin_conflicts.py"
+    },
+    {
+      "purpose": "Plain-CMake link-completeness gate (issue #593).",
+      "script": "scripts/check_plain_cmake_link_complete.py"
+    },
+    {
+      "purpose": "CI gate: root public headers stay chip-neutral.",
+      "script": "scripts/check_public_header_purity.py"
+    },
+    {
+      "purpose": "Public/private classifier gate for the public alp-sdk repository.",
+      "script": "scripts/check_public_private.py"
+    },
+    {
+      "purpose": "Keep metadata/quality-tasks-v1.json == the SDK's real quality gates.",
+      "script": "scripts/check_quality_registry.py"
+    },
+    {
+      "purpose": "CI gate: gen_sbom.py produces a valid, deterministic CycloneDX SBOM (#610 §7).",
+      "script": "scripts/check_sbom.py"
     },
     {
       "purpose": "Validate SoM-release bundle manifests against the public metadata/schemas/som-release-bundle-v1.schema.json contract.",
@@ -766,12 +952,20 @@
       "script": "scripts/check_stub_issues.py"
     },
     {
+      "purpose": "Compile/link symbol-matrix gate for the shared stub backend.",
+      "script": "scripts/check_stub_symbol_matrix.py"
+    },
+    {
       "purpose": "CI gate: every src/backends/**/sw_fallback.c carries both @par Cost: and @par Performance: tags near the top of the file.",
       "script": "scripts/check_sw_fallback_tags.py"
     },
     {
       "purpose": "Validate a system manifest against the public IDE/tool contract (metadata/schemas/system-manifest-v1.schema.json).",
       "script": "scripts/check_system_manifest.py"
+    },
+    {
+      "purpose": "Validate metadata/templates/catalog-v1.json against the public template contract (metadata/schemas/template-catalog-v1.schema.json) AND drift-check every record against the real tree.",
+      "script": "scripts/check_template_catalog.py"
     },
     {
       "purpose": "Test-coverage audit: walk every public header in include/alp/, list the declared functions, and check that at least one test file under tests/ mentions each one.",
@@ -805,6 +999,15 @@
         "alp_adc_stream_read_mv"
       ],
       "header": "include/alp/adc.h"
+    },
+    {
+      "functions": [
+        "alp_ahrs_euler",
+        "alp_ahrs_init",
+        "alp_ahrs_reset",
+        "alp_ahrs_update_imu"
+      ],
+      "header": "include/alp/ahrs.h"
     },
     {
       "functions": [
@@ -894,9 +1097,7 @@
       "header": "include/alp/cap_instance.h"
     },
     {
-      "functions": [
-        "alp_console_companion_set"
-      ],
+      "functions": [],
       "header": "include/alp/console.h"
     },
     {
@@ -941,11 +1142,15 @@
     },
     {
       "functions": [
+        "alp_dsp_biquad_design",
         "alp_dsp_chain_apply_bins",
+        "alp_dsp_chain_apply_bins_f32",
         "alp_dsp_chain_apply_samples",
+        "alp_dsp_chain_apply_samples_f32",
         "alp_dsp_chain_capabilities",
         "alp_dsp_chain_close",
-        "alp_dsp_chain_open"
+        "alp_dsp_chain_open",
+        "alp_dsp_stats_f32"
       ],
       "header": "include/alp/dsp.h"
     },
@@ -1094,6 +1299,8 @@
         "alp_spi_target_transceive",
         "alp_spi_transceive",
         "alp_spi_write",
+        "alp_status_description",
+        "alp_status_name",
         "alp_uart_capabilities",
         "alp_uart_close",
         "alp_uart_open",
@@ -1105,6 +1312,14 @@
         "alp_uart_write"
       ],
       "header": "include/alp/peripheral.h"
+    },
+    {
+      "functions": [
+        "alp_pid_init",
+        "alp_pid_reset",
+        "alp_pid_step"
+      ],
+      "header": "include/alp/pid.h"
     },
     {
       "functions": [
@@ -1352,7 +1567,7 @@
         },
         "m55_hp": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen401_m55_hp",
+          "board": "alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }
@@ -1471,7 +1686,7 @@
         },
         "m55_hp": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen601_m55_hp",
+          "board": "alp_e1m_aen601_m55_hp/ae612fa0e5597ls0/rtss_hp",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }
@@ -1587,13 +1802,13 @@
         },
         "m55_he": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen801_m55_he",
+          "board": "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         },
         "m55_hp": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen801_m55_hp",
+          "board": "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }
@@ -1785,7 +2000,7 @@
         },
         "m33_sm": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_v2n101_m33_sm",
+          "board": "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }

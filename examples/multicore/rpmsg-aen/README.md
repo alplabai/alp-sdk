@@ -1,11 +1,10 @@
 # rpmsg-aen
 
 > `[UNTESTED]` -- v0.6 structural draft.  Board.yaml + sources are
-> shape-correct, but the build will fail at carve-out resolution
-> until the user supplies authoritative AEN memory-map values in
-> `metadata/e1m_modules/E1M-AEN701.yaml`.
+> shape-correct, but the end-to-end RPMsg path still needs AEN801
+> bench validation.
 
-Heterogeneous compute on **E1M-AEN701** (Alif Ensemble E7):
+Heterogeneous compute on **E1M-AEN801** (Alif Ensemble E8):
 
 - The 2-core **Cortex-A32 cluster** boots Yocto Linux from MRAM and
   runs the consumer under `linux/`.
@@ -30,30 +29,18 @@ examples/multicore/rpmsg-aen/
     └── src/main.c      (producer reading sensors + publishing)
 ```
 
-## Memory map
+## Memory Map
 
-The AEN's memory_map currently carries `TBD` placeholders pending
-the authoritative HW-config writeup.  Once filled in, the
-`alp_default_rpmsg` carve-out lands in `mram_main` (cacheable,
-accessible from all three cores).  Spec §6.8 dictates AEN defaults
-to cacheable carve-outs because the M55 cores have caches enabled.
+The AEN801 preset resolves the mailbox controller and derives the
+memory envelope from the E8 SoC variant.  The `alp_default_rpmsg`
+carve-out lands in `mram_main` (cacheable, accessible from all three
+cores). Spec §6.8 dictates AEN defaults to cacheable carve-outs
+because the M55 cores have caches enabled.
 
 | Range                     | Owner                  | Notes                                                |
 |---------------------------|------------------------|------------------------------------------------------|
-| `mram_main` (TBD base)    | All cores              | On-die MRAM, cacheable.  Holds the RPMsg carve-out.  |
-| `sram_main` (TBD base)    | All cores              | On-die SRAM, non-cacheable scratch.                  |
-
-Until the SoM preset carries hard addresses, `west alp-build`
-exits with:
-
-```
-OrchestratorError: ipc 'alp_default_rpmsg': memory_map.base is TBD
-for region 'mram_main' (E1M-AEN701).  Update
-metadata/e1m_modules/E1M-AEN701.yaml with hard values.
-```
-
-The structural files (this directory) are correct -- only the
-metadata is TBD.
+| `mram_main`              | All cores              | On-die MRAM, cacheable. Holds the RPMsg carve-out.   |
+| `sram_main`              | All cores              | On-die SRAM, non-cacheable scratch.                  |
 
 ## Boot order
 
@@ -82,8 +69,8 @@ west alp-build alp-sdk/examples/multicore/rpmsg-aen
 
 The orchestrator fans out:
 
-- `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen701-a32`).
-- `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen701_m55_hp`).
+- `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen801-a32`).
+- `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`).
 
 Iterate on the M-side only:
 

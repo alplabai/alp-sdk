@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# gfx_compat -- maintainer-written in-tree shim (src/lib/gfx_compat/).
+# Moved out of zephyr/Kconfig.alp-libraries into this per-library
+# Kconfig (rsourced from there) so the shim's Kconfig + CMakeLists.txt
+# + sources live together, matching the "CMakeLists.txt + Kconfig"
+# shape every other in-tree library integration point in this repo
+# documents in its comments (see Kconfig.alp-libraries's own header
+# comment). Every other §D.lib knob stays centralized in
+# Kconfig.alp-libraries -- gfx_compat is the one exception because,
+# unlike the other 24 libraries, it has no upstream and no west
+# pin: this directory *is* the upstream.
+
+config ALP_GFX_COMPAT_GPU2D
+	bool "gfx_compat -> Alif GPU2D backend"
+config ALP_GFX_COMPAT_DMA2D
+	bool "gfx_compat -> generic DMA2D backend"
+config ALP_GFX_COMPAT_SPI_DMA
+	bool "gfx_compat SPI push via DMA"
+config ALP_GFX_COMPAT_SW
+	bool "gfx_compat pure-C SW blit (fallback)"
+	default y

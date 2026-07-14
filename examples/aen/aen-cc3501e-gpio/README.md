@@ -73,18 +73,19 @@ The two camera-enable LDOs are `which=0` → CAM_EN_LDO0 (CC35 GPIO_1) and
 
 ## The r2 host-IRQ caveat (read before using interrupts)
 
-This HW rev wires the bridge as a **CS-less 3-wire** SPI link (SCLK + MOSI
-+ MISO), with **no chip-select and no host-IRQ line**. The Alif is always
-master; the CC3501E is always slave. A slave with no attention line
-**cannot** spontaneously tell the master "an edge happened on a GPIO".
+This HW rev uses hardware SS0 for SPI framing and a READY input for per-phase
+gating, but it still does not expose GPIO edge events as portable application
+callbacks. The Alif is always master; the CC3501E is always slave. Without a
+dedicated async event delivery path, the slave cannot spontaneously tell the
+master "an edge happened on a GPIO".
 
 So `cc3501e_gpio_set_interrupt()`:
 
 - **arms** the edge on the CC3501E's own GPIO controller — real, it latches
   edges in the coprocessor;
-- but the async `ALP_CC3501E_EVT_GPIO_INTERRUPT` frame it would emit has
-  **no path back to the host** until the **r2** board adds a slave→master
-  IRQ line.
+- but the async `ALP_CC3501E_EVT_GPIO_INTERRUPT` frame is not a portable callback
+  path in this example. Poll `cc3501e_gpio_read()` when you need to observe the
+  level today.
 
 Until then the host **must poll** `cc3501e_gpio_read()` to observe a level
 change; the armed interrupt does not call you back. Do not build a design

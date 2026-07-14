@@ -41,14 +41,14 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_slot_claim.h"
 #include "backends/audio/audio_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(audio);
 /* Pull the audio registry section into a static-archive link (#368). */
 ALP_BACKEND_ANCHOR(audio);
 
-extern void alp_z_set_last_error(alp_status_t s);
-extern void alp_z_clear_last_error(void);
+#include "alp_z_last_error.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_AUDIO_IN_HANDLES
 #define CONFIG_ALP_SDK_MAX_AUDIO_IN_HANDLES 1
@@ -63,9 +63,12 @@ static struct alp_audio_out _out_pool[CONFIG_ALP_SDK_MAX_AUDIO_OUT_HANDLES];
 static struct alp_audio_in *_alloc_in(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_AUDIO_IN_HANDLES; ++i) {
-		if (!_in_pool[i].in_use) {
-			memset(&_in_pool[i], 0, sizeof(_in_pool[i]));
-			_in_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch the
+		 * slot's other fields (in_use is the struct's last member, so
+		 * zero everything before it -- incl. lifecycle/active_ops,
+		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+		if (alp_slot_try_claim(&_in_pool[i].in_use)) {
+			memset(&_in_pool[i], 0, offsetof(struct alp_audio_in, in_use));
 			return &_in_pool[i];
 		}
 	}
@@ -74,15 +77,18 @@ static struct alp_audio_in *_alloc_in(void)
 
 static void _free_in(struct alp_audio_in *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 static struct alp_audio_out *_alloc_out(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_AUDIO_OUT_HANDLES; ++i) {
-		if (!_out_pool[i].in_use) {
-			memset(&_out_pool[i], 0, sizeof(_out_pool[i]));
-			_out_pool[i].in_use = true;
+		/* Atomic claim: only the winner of the flag flip may touch the
+		 * slot's other fields (in_use is the struct's last member, so
+		 * zero everything before it -- incl. lifecycle/active_ops,
+		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+		if (alp_slot_try_claim(&_out_pool[i].in_use)) {
+			memset(&_out_pool[i], 0, offsetof(struct alp_audio_out, in_use));
 			return &_out_pool[i];
 		}
 	}
@@ -91,7 +97,7 @@ static struct alp_audio_out *_alloc_out(void)
 
 static void _free_out(struct alp_audio_out *h)
 {
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 /* ================================================================== */
@@ -131,45 +137,84 @@ alp_audio_in_t *alp_audio_in_open(const alp_audio_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN); /* #629 */
 	return h;
 }
 
 alp_status_t alp_audio_in_start(alp_audio_in_t *in)
 {
-	if (in == NULL || !in->in_use) return ALP_ERR_NOT_READY;
+	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
+	 * claimed/released atomically in _alloc_in/_free_in, so mixing it
+	 * with a plain read here is a data race, and a racing close could
+	 * free the slot mid-op. op_enter counts this op in; begin_close
+	 * drains it. #629 */
+	if (in == NULL || !alp_handle_op_enter(&in->lifecycle, &in->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	if (in->state.ops == NULL || in->state.ops->in_start == NULL) {
+		alp_handle_op_leave(&in->active_ops);
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return in->state.ops->in_start(&in->state);
+	alp_status_t rc = in->state.ops->in_start(&in->state);
+	alp_handle_op_leave(&in->active_ops);
+	return rc;
 }
 
 alp_status_t alp_audio_in_stop(alp_audio_in_t *in)
 {
-	if (in == NULL || !in->in_use) return ALP_ERR_NOT_READY;
+	if (in == NULL || !alp_handle_op_enter(&in->lifecycle, &in->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	if (in->state.ops == NULL || in->state.ops->in_stop == NULL) {
+		alp_handle_op_leave(&in->active_ops);
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return in->state.ops->in_stop(&in->state);
+	alp_status_t rc = in->state.ops->in_stop(&in->state);
+	alp_handle_op_leave(&in->active_ops);
+	return rc;
 }
 
-alp_status_t alp_audio_in_read(
-    alp_audio_in_t *in, void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms)
+alp_status_t alp_audio_in_read(alp_audio_in_t *in,
+                               void           *buf,
+                               size_t          frames,
+                               size_t         *out_frames,
+                               uint32_t        timeout_ms)
 {
 	if (out_frames != NULL) *out_frames = 0;
-	if (in == NULL || !in->in_use) return ALP_ERR_NOT_READY;
-	if (buf == NULL || frames == 0) return ALP_ERR_INVAL;
-	if (in->state.ops == NULL || in->state.ops->in_read == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	if (buf == NULL || frames == 0) return ALP_ERR_INVAL; /* param check before gate */
+	/* Counted via alp_handle_op_enter/leave (issue #629): read() can
+	 * block up to timeout_ms waiting on frames, so alp_audio_in_close()
+	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c) instead of the busy-spin
+	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
+	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
+	if (in == NULL || !alp_handle_op_enter(&in->lifecycle, &in->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return in->state.ops->in_read(&in->state, buf, frames, out_frames, timeout_ms);
+	alp_status_t rc = (in->state.ops == NULL || in->state.ops->in_read == NULL)
+	                      ? ALP_ERR_NOT_IMPLEMENTED
+	                      : in->state.ops->in_read(&in->state, buf, frames, out_frames, timeout_ms);
+	alp_handle_op_leave(&in->active_ops);
+	return rc;
 }
 
 void alp_audio_in_close(alp_audio_in_t *in)
 {
-	if (in == NULL || !in->in_use) return;
+	if (in == NULL) {
+		return;
+	}
+	/* Sleep-poll drain (issue #629): this pool counts alp_audio_in_read(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&in->lifecycle, &in->active_ops)) {
+		return;
+	}
 	if (in->state.ops != NULL && in->state.ops->in_close != NULL) {
 		in->state.ops->in_close(&in->state);
 	}
+	alp_lifecycle_set(&in->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free_in(in);
 }
 
@@ -211,56 +256,93 @@ alp_audio_out_t *alp_audio_out_open(const alp_audio_config_t *cfg)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN); /* #629 */
 	return h;
 }
 
 alp_status_t alp_audio_out_start(alp_audio_out_t *out)
 {
-	if (out == NULL || !out->in_use) return ALP_ERR_NOT_READY;
+	if (out == NULL || !alp_handle_op_enter(&out->lifecycle, &out->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	if (out->state.ops == NULL || out->state.ops->out_start == NULL) {
+		alp_handle_op_leave(&out->active_ops);
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return out->state.ops->out_start(&out->state);
+	alp_status_t rc = out->state.ops->out_start(&out->state);
+	alp_handle_op_leave(&out->active_ops);
+	return rc;
 }
 
 alp_status_t alp_audio_out_stop(alp_audio_out_t *out)
 {
-	if (out == NULL || !out->in_use) return ALP_ERR_NOT_READY;
+	if (out == NULL || !alp_handle_op_enter(&out->lifecycle, &out->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	if (out->state.ops == NULL || out->state.ops->out_stop == NULL) {
+		alp_handle_op_leave(&out->active_ops);
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
-	return out->state.ops->out_stop(&out->state);
+	alp_status_t rc = out->state.ops->out_stop(&out->state);
+	alp_handle_op_leave(&out->active_ops);
+	return rc;
 }
 
-alp_status_t alp_audio_out_write(
-    alp_audio_out_t *out, const void *buf, size_t frames, size_t *out_frames, uint32_t timeout_ms)
+alp_status_t alp_audio_out_write(alp_audio_out_t *out,
+                                 const void      *buf,
+                                 size_t           frames,
+                                 size_t          *out_frames,
+                                 uint32_t         timeout_ms)
 {
 	if (out_frames != NULL) *out_frames = 0;
-	if (out == NULL || !out->in_use) return ALP_ERR_NOT_READY;
-	if (buf == NULL || frames == 0) return ALP_ERR_INVAL;
-	if (out->state.ops == NULL || out->state.ops->out_write == NULL) {
-		return ALP_ERR_NOT_IMPLEMENTED;
+	if (buf == NULL || frames == 0) return ALP_ERR_INVAL; /* param check before gate */
+	/* Counted via alp_handle_op_enter/leave (issue #629) -- see
+	 * alp_audio_in_read() above for the same rationale. */
+	if (out == NULL || !alp_handle_op_enter(&out->lifecycle, &out->active_ops)) {
+		return ALP_ERR_NOT_READY;
 	}
-	return out->state.ops->out_write(&out->state, buf, frames, out_frames, timeout_ms);
+	alp_status_t rc =
+	    (out->state.ops == NULL || out->state.ops->out_write == NULL)
+	        ? ALP_ERR_NOT_IMPLEMENTED
+	        : out->state.ops->out_write(&out->state, buf, frames, out_frames, timeout_ms);
+	alp_handle_op_leave(&out->active_ops);
+	return rc;
 }
 
 alp_status_t alp_audio_out_set_volume(alp_audio_out_t *out, uint8_t vol)
 {
-	if (out == NULL || !out->in_use) return ALP_ERR_NOT_READY;
+	if (out == NULL || !alp_handle_op_enter(&out->lifecycle, &out->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	if (out->state.ops == NULL || out->state.ops->out_set_volume == NULL) {
+		alp_handle_op_leave(&out->active_ops);
 		return ALP_ERR_NOT_IMPLEMENTED;
 	}
 	alp_status_t rc = out->state.ops->out_set_volume(&out->state, vol);
-	if (rc == ALP_OK) out->state.volume = vol;
+	if (rc == ALP_OK) {
+		out->state.volume = vol;
+	}
+	alp_handle_op_leave(&out->active_ops);
 	return rc;
 }
 
 void alp_audio_out_close(alp_audio_out_t *out)
 {
-	if (out == NULL || !out->in_use) return;
+	if (out == NULL) {
+		return;
+	}
+	/* Sleep-poll drain (issue #629): this pool counts alp_audio_out_write(),
+	 * which can block up to its caller's timeout_ms, so
+	 * alp_handle_begin_close_blocking() sleeps between polls instead of
+	 * busy-spinning -- see src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * second/never-opened close no-ops. */
+	if (!alp_handle_begin_close_blocking(&out->lifecycle, &out->active_ops)) {
+		return;
+	}
 	if (out->state.ops != NULL && out->state.ops->out_close != NULL) {
 		out->state.ops->out_close(&out->state);
 	}
+	alp_lifecycle_set(&out->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free_out(out);
 }
 
