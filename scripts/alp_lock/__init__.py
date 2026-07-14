@@ -42,13 +42,16 @@ def _default_rev(root: Path) -> Optional[str]:
 
 
 def _sdk_identity(root: Path, rev_resolver: Callable[[Path], Optional[str]]) -> dict:
-    txt = (root / "scripts" / "alp_cli" / "__init__.py").read_text(encoding="utf-8")
-    m = re.search(r'^__version__\s*=\s*"([^"]*)"', txt, re.M)
+    # Single source of truth: metadata/sdk_version.yaml. (scripts/alp_cli's
+    # __version__ derives from this same file at import time -- reading it
+    # directly avoids importing/exec-ing the CLI package just to get a string.)
+    txt = (root / "metadata" / "sdk_version.yaml").read_text(encoding="utf-8")
+    m = re.search(r"^version:\s*(\d+\.\d+\.\d+(?:-[\w.]+)?)\s*$", txt, re.M)
     if not m:
         # Silently baking a wrong version would only surface later as
         # spurious --check drift -- fail loudly at generation instead.
-        raise LockError("could not parse __version__ from "
-                        "scripts/alp_cli/__init__.py")
+        raise LockError("could not parse 'version:' from "
+                        "metadata/sdk_version.yaml")
     return {"version": _reject_local(m.group(1)), "revision": rev_resolver(root)}
 
 
