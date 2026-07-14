@@ -91,10 +91,11 @@ alp_status_t bmp581_set_sampling(bmp581_t     *dev,
 	if ((unsigned)temp_osr > BMP581_OSR_X128) return ALP_ERR_INVAL;
 	if ((unsigned)mode > BMP581_MODE_CONTINUOUS) return ALP_ERR_INVAL;
 
-	/* ODR is sparse -- the 5-bit field's declared codes are not
-     * contiguous (0x00, 0x01, 0x07, 0x0E, 0x14, 0x17, 0x1C), so most of
-     * the field's range is reserved.  Switch-validate against the
-     * declared set instead of an upper-bound / mask check. */
+	/* ODR is sparse -- BST-BMP581-DS004 defines all 32 codes of the
+     * 5-bit field, but bmp581_odr_t only declares a curated subset
+     * (0x00, 0x01, 0x07, 0x0E, 0x14, 0x17, 0x1C).  An upper-bound / mask
+     * check would silently admit an undeclared-but-real ODR the API
+     * doesn't expose, so switch-validate against the declared set. */
 	switch (odr) {
 	case BMP581_ODR_240_HZ:
 	case BMP581_ODR_120_HZ:

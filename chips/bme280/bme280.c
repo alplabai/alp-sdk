@@ -158,9 +158,9 @@ alp_status_t bme280_set_sampling(bme280_t             *dev,
 	if ((unsigned)standby > BME280_STANDBY_20_MS) return ALP_ERR_INVAL;
 	if ((unsigned)filter > BME280_FILTER_16) return ALP_ERR_INVAL;
 
-	/* Mode is sparse -- 0x2 is a reserved CTRL_MEAS encoding between
-     * FORCED (0x1) and NORMAL (0x3) -- so an upper-bound check would
-     * wrongly admit it.  Switch-validate against the declared set. */
+	/* Mode is sparse -- 0x2 is not a declared BME280_MODE_* member (an
+     * upper-bound check would wrongly admit it alongside FORCED (0x1)
+     * and NORMAL (0x3)).  Switch-validate against the declared set. */
 	switch (mode) {
 	case BME280_MODE_SLEEP:
 	case BME280_MODE_FORCED:
@@ -249,19 +249,31 @@ alp_status_t bme280_compensate(bme280_t *dev, const bme280_raw_t *raw, bme280_co
 	}
 
 	/* --- Humidity (Q22.10 %RH) --- */
-	int32_t adc_H = (int32_t)raw->humidity_raw;
-	int32_t hv    = dev->t_fine - 76800;
-	/* H4 is a signed coefficient (see sign_extend12 above); replace the
-     * left-shift-of-possibly-negative-value with an equivalent multiply. */
-	hv = (((((adc_H << 14) - (int32_t)c->H4 * ((int32_t)1 << 20) - (((int32_t)c->H5) * hv)) +
-	        16384) >>
-	       15) *
-	      (((((((hv * ((int32_t)c->H6)) >> 10) * (((hv * ((int32_t)c->H3)) >> 11) + 32768)) >> 10) +
-	         2097152) *
-	            ((int32_t)c->H2) +
-	        8192) >>
-	       14));
-	hv = hv - (((((hv >> 15) * (hv >> 15)) >> 7) * ((int32_t)c->H1)) >> 4);
+	/* H4/H5 are signed 12-bit coefficients (range -2048..2047).  At the
+     * declared 12-bit minimum, `(adc_H << 14) - (H4 << 20)` alone can
+     * exceed the int32_t range (e.g. adc_H=0x6FF0, H4=-2048 yields
+     * 469499904 - (-2147483648), which does not fit in int32_t) --
+     * confirmed by UBSan on the previous shift-to-multiply-only fix.
+     * A per-line "swap the shift for a multiply" rewrite removes the
+     * left-shift UB but does not remove this add/sub overflow, so the
+     * whole leg is done in int64_t instead: every intermediate here is
+     * bounded by at most a handful of 2^20-magnitude terms multiplied
+     * together, which stays many orders of magnitude inside int64_t's
+     * range for every legal (dev->t_fine, H1..H6, adc_H) combination --
+     * see the datasheet re-derivation in test_sensors.c for the
+     * independent proof this changes no result for valid inputs. */
+	int64_t adc_H = (int64_t)raw->humidity_raw;
+	int64_t v     = (int64_t)dev->t_fine - 76800;
+
+	int64_t x1 =
+	    (((adc_H << 14) - (int64_t)c->H4 * ((int64_t)1 << 20) - ((int64_t)c->H5 * v)) + 16384) >>
+	    15;
+	int64_t x2 = (v * (int64_t)c->H6) >> 10;
+	x2         = (x2 * (((v * (int64_t)c->H3) >> 11) + 32768)) >> 10;
+	x2         = ((x2 + 2097152) * (int64_t)c->H2 + 8192) >> 14;
+
+	int64_t hv = x1 * x2;
+	hv         = hv - (((hv >> 15) * (hv >> 15) >> 7) * (int64_t)c->H1 >> 4);
 	if (hv < 0) hv = 0;
 	if (hv > 419430400) hv = 419430400;
 	out->humidity_milli_pct = (uint32_t)(hv >> 12);

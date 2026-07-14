@@ -131,8 +131,8 @@ ZTEST(alp_chips, test_bme280_set_sampling_rejects_reserved_mode)
 	bme280_t dev    = { 0 };
 	dev.initialised = true;
 
-	/* BME280_MODE_* declares 0x0, 0x1, 0x3 -- 0x2 is a reserved
-	 * CTRL_MEAS encoding and must not reach the hardware write. */
+	/* BME280_MODE_* declares 0x0, 0x1, 0x3 -- 0x2 is not a declared
+	 * member and must not reach the hardware write. */
 	zassert_equal(bme280_set_sampling(&dev,
 	                                  BME280_OVERSAMPLING_X1,
 	                                  BME280_OVERSAMPLING_X1,
@@ -141,7 +141,7 @@ ZTEST(alp_chips, test_bme280_set_sampling_rejects_reserved_mode)
 	                                  BME280_STANDBY_125_MS,
 	                                  BME280_FILTER_OFF),
 	              ALP_ERR_INVAL,
-	              "reserved mode 0x2 must be rejected, not masked");
+	              "undeclared mode 0x2 must be rejected, not masked");
 }
 
 ZTEST(alp_chips, test_bme280_set_sampling_rejects_out_of_range_oversampling)
@@ -169,6 +169,26 @@ ZTEST(alp_chips, test_bme280_set_sampling_rejects_out_of_range_oversampling)
 	                                  BME280_FILTER_OFF),
 	              ALP_ERR_INVAL,
 	              "p_os=7 (reserved) must be rejected");
+}
+
+ZTEST(alp_chips, test_bme280_set_sampling_rejects_out_of_range_standby)
+{
+	bme280_t dev    = { 0 };
+	dev.initialised = true;
+
+	/* Standby is a 3-bit field and BME280_STANDBY_* declares all 8
+	 * codes (0x0-0x7 = BME280_STANDBY_20_MS), so there is no reserved
+	 * gap inside the field width to reject -- only a value past the
+	 * 3-bit field itself is invalid. */
+	zassert_equal(bme280_set_sampling(&dev,
+	                                  BME280_OVERSAMPLING_X1,
+	                                  BME280_OVERSAMPLING_X1,
+	                                  BME280_OVERSAMPLING_X1,
+	                                  BME280_MODE_NORMAL,
+	                                  (bme280_standby_t)8,
+	                                  BME280_FILTER_OFF),
+	              ALP_ERR_INVAL,
+	              "standby=8 (past the 3-bit field) must be rejected");
 }
 
 ZTEST(alp_chips, test_bme280_set_sampling_rejects_reserved_filter)
@@ -221,19 +241,25 @@ ZTEST(alp_chips, test_bme280_set_sampling_accepts_every_declared_value)
 	const bme280_filter_t filter_values[] = {
 		BME280_FILTER_OFF, BME280_FILTER_2, BME280_FILTER_4, BME280_FILTER_8, BME280_FILTER_16,
 	};
+	const bme280_standby_t standby_values[] = {
+		BME280_STANDBY_0_5_MS, BME280_STANDBY_62_5_MS, BME280_STANDBY_125_MS, BME280_STANDBY_250_MS,
+		BME280_STANDBY_500_MS, BME280_STANDBY_1000_MS, BME280_STANDBY_10_MS,  BME280_STANDBY_20_MS,
+	};
 
 	for (size_t i = 0; i < ARRAY_SIZE(os_values); i++) {
 		for (size_t m = 0; m < ARRAY_SIZE(mode_values); m++) {
 			for (size_t f = 0; f < ARRAY_SIZE(filter_values); f++) {
-				zassert_not_equal(bme280_set_sampling(&dev,
-				                                      os_values[i],
-				                                      os_values[i],
-				                                      os_values[i],
-				                                      mode_values[m],
-				                                      BME280_STANDBY_125_MS,
-				                                      filter_values[f]),
-				                  ALP_ERR_INVAL,
-				                  "declared value wrongly rejected by the enum guard");
+				for (size_t sb = 0; sb < ARRAY_SIZE(standby_values); sb++) {
+					zassert_not_equal(bme280_set_sampling(&dev,
+					                                      os_values[i],
+					                                      os_values[i],
+					                                      os_values[i],
+					                                      mode_values[m],
+					                                      standby_values[sb],
+					                                      filter_values[f]),
+					                  ALP_ERR_INVAL,
+					                  "declared value wrongly rejected by the enum guard");
+				}
 			}
 		}
 	}
@@ -242,20 +268,49 @@ ZTEST(alp_chips, test_bme280_set_sampling_accepts_every_declared_value)
 }
 
 /* ------------------------------------------------------------------ */
-/* bme280 -- signed left-shift UB in calibration / compensation (#753) */
+/* bme280 -- signed overflow UB in calibration / compensation (#753)   */
 /* ------------------------------------------------------------------ */
 /* bme280_compensate reads only dev->calib + dev->t_fine and never
  * touches the bus, so these tests build calibration directly -- no
- * fake i2c target required.  Expected outputs pinned from a reference
- * run of the fixed driver under UBSan/ASan (clang/gcc -fsanitize=
- * undefined,address); each vector was also diffed bit-for-bit against
- * the pre-fix implementation to confirm the shift-to-multiply rewrite
- * changes no result for a valid input. */
+ * fake i2c target required.
+ *
+ * Expected outputs are NOT pinned from running this (or any) driver
+ * build and recording what it printed -- a golden derived that way
+ * cannot tell a merely-plausible number from a correct one, and the
+ * first-round version of these vectors was exactly that trap: it
+ * pinned a humidity value computed through the signed-overflow UB it
+ * was meant to prove absent.  Instead every T/P/H value below was
+ * independently re-derived from the BST-BME280-DS002 v1.6 S4.2.3
+ * integer compensation formulas, transcribed fresh in Python using
+ * arbitrary-precision integers (so the transcription itself can never
+ * overflow) with `>>` on a negative operand read as floor division --
+ * the same arithmetic-right-shift semantics every mainstream two's-
+ * complement C compiler emits for `int32_t/int64_t >> n`.  See the
+ * datasheet formula pseudocode in the doc comment above sign_extend12
+ * and bme280_compensate for the register/coefficient layout each
+ * vector below feeds it.
+ *
+ * Regression proof (not just "matches the formula"): the fixed
+ * bme280.c is confirmed UBSan-clean for every vector below
+ * (`west twister -p native_sim/native/64 --enable-ubsan`); reverting
+ * only the bme280.c production hunk this branch touches (keeping
+ * these tests) reproduces the exact overflow UBSan reported against
+ * the shipped fix -- `signed integer overflow: 469499904 -
+ * -2147483648 cannot be represented in type 'int'` at the old
+ * int32-only humidity line -- and twister names
+ * test_bme280_compensate_h4_h5_extrema_matches_reference as the
+ * failure.  On a plain (non-UBSan) build the numeric T/P/H outputs
+ * are unchanged either way (this specific compiler/opt-level's
+ * overflow behaviour happens to already match the well-defined-math
+ * answer) -- these vectors are therefore *value* sanity/boundary
+ * checks proven correct against an independent datasheet
+ * re-derivation, and the UB regression proof lives in the UBSan
+ * twister run, not in a plain-build numeric diff. */
 
 ZTEST(alp_chips, test_bme280_compensate_negative_coefficients_matches_reference)
 {
 	/* Sign-flipped datasheet coefficients: P4, P5, P7, H4, H5 all
-	 * negative -- exercises every left-shift site the fix touches. */
+	 * negative -- exercises every site the fix touches. */
 	bme280_t dev    = { 0 };
 	dev.calib.T1    = 27504u;
 	dev.calib.T2    = 26435;
@@ -291,9 +346,10 @@ ZTEST(alp_chips, test_bme280_compensate_negative_coefficients_matches_reference)
 
 ZTEST(alp_chips, test_bme280_compensate_h4_h5_extrema_matches_reference)
 {
-	/* H4/H5 at the 12-bit signed minimum (-2048) -- the exact value
-	 * the old `(int16_t)(int8_t)byte << 4` calibration decode could
-	 * not represent without invoking left-shift UB. */
+	/* H4/H5 at the 12-bit signed minimum (-2048) -- the exact
+	 * calibration extremum #753 names, and (see the block comment
+	 * above) the one that still overflowed int32_t after the
+	 * shift-to-multiply-only round of the fix. */
 	bme280_t dev    = { 0 };
 	dev.calib.T1    = 27504u;
 	dev.calib.T2    = 26435;
@@ -547,17 +603,20 @@ ZTEST(alp_chips, test_bmp581_set_sampling_rejects_reserved_odr)
 	bmp581_t dev    = { 0 };
 	dev.initialised = true;
 
-	/* bmp581_odr_t declares a sparse subset of the 5-bit ODR field
-	 * (0x00, 0x01, 0x07, 0x0E, 0x14, 0x17, 0x1C); everything else is
-	 * reserved and must not be masked into a live encoding. */
+	/* bmp581_odr_t declares a curated subset of the 5-bit ODR field
+	 * (0x00, 0x01, 0x07, 0x0E, 0x14, 0x17, 0x1C).  0x02 and 0x1F are
+	 * both real, datasheet-defined ODR codes the enum simply doesn't
+	 * expose -- not reserved encodings -- so an upper-bound/mask check
+	 * would silently admit them; the switch-validate guard must still
+	 * reject anything outside the declared set. */
 	zassert_equal(bmp581_set_sampling(
 	                  &dev, BMP581_OSR_X4, BMP581_OSR_X1, (bmp581_odr_t)0x02, BMP581_MODE_NORMAL),
 	              ALP_ERR_INVAL,
-	              "reserved ODR 0x02 must be rejected, not masked");
+	              "undeclared ODR 0x02 must be rejected, not masked");
 	zassert_equal(bmp581_set_sampling(
 	                  &dev, BMP581_OSR_X4, BMP581_OSR_X1, (bmp581_odr_t)0x1F, BMP581_MODE_NORMAL),
 	              ALP_ERR_INVAL,
-	              "reserved ODR 0x1F must be rejected, not masked");
+	              "undeclared ODR 0x1F (0.125 Hz) must be rejected, not masked");
 }
 
 ZTEST(alp_chips, test_bmp581_set_sampling_rejects_out_of_range_osr_and_mode)
