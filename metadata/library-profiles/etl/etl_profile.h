@@ -57,7 +57,7 @@
  * of these three are defined on a plain baremetal/Yocto build (no
  * Kconfig at all) or on Zephyr's default CONFIG_MINIMAL_LIBCPP, so
  * ETL_NO_STL still applies there exactly as before. */
-#if !defined(CONFIG_EXTERNAL_LIBCPP) && !defined(CONFIG_GLIBCXX_LIBCPP) &&                         \
+#if !defined(CONFIG_EXTERNAL_LIBCPP) && !defined(CONFIG_GLIBCXX_LIBCPP) && \
     !defined(CONFIG_LIBCXX_LIBCPP)
 #define ETL_NO_STL
 #endif
