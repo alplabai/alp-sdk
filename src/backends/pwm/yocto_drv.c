@@ -405,25 +405,27 @@ static void y_capture_close(alp_pwm_backend_state_t *st)
 }
 
 /**
- * @brief Disable the channel, unexport it if owned, and free the per-handle box.
+ * @brief Disable and unexport the channel if owned; always free the per-handle box.
  *
- * Best-effort: writes "0" to enable, then -- only if this handle owns
- * the export (#744) -- the channel index to pwmchip<chip>/unexport so
- * the channel can be re-acquired cleanly, then frees the heap box.  A
- * channel this handle merely reused (already exported by another
- * process) is left exported: closing must not steal/disable a channel
- * this handle never claimed.  Errors are swallowed -- close has no
- * return.
+ * Best-effort, and both the "0" write to enable and the unexport are
+ * gated on @c d->owns_export (#744): only a handle that actually claimed
+ * the channel (export returned ALP_OK, not EBUSY) may stop or release
+ * it.  A channel this handle merely reused (already exported by another
+ * process) is left running and exported exactly as that other owner set
+ * it up -- closing must not steal, disable, or release a channel this
+ * handle never claimed.  Errors are swallowed -- close has no return.
  */
 static void y_close(alp_pwm_backend_state_t *st)
 {
 	y_pwm_data_t *d = (y_pwm_data_t *)st->be_data;
 	if (d == NULL) return;
 
-	char path[96];
-	int  n = snprintf(path, sizeof(path), "%s/enable", d->dir);
-	if (n > 0 && (size_t)n < sizeof(path)) {
-		(void)_sysfs_write(path, "0");
+	if (d->owns_export) {
+		char path[96];
+		int  n = snprintf(path, sizeof(path), "%s/enable", d->dir);
+		if (n > 0 && (size_t)n < sizeof(path)) {
+			(void)_sysfs_write(path, "0");
+		}
 	}
 
 	_unexport_if_owned(d);

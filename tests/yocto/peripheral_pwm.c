@@ -39,15 +39,16 @@
 #define MAX_CALLS 16
 
 static char         g_call_paths[MAX_CALLS][128];
+static char         g_call_vals[MAX_CALLS][16];
 static int          g_call_count;
 static alp_status_t g_export_result; /* what the "export" write returns */
 static bool         g_fail_period;   /* force the "period" write to fail */
 
 static alp_status_t fake_sysfs_write(const char *path, const char *val)
 {
-	(void)val;
 	if (g_call_count < MAX_CALLS) {
 		(void)snprintf(g_call_paths[g_call_count], sizeof(g_call_paths[g_call_count]), "%s", path);
+		(void)snprintf(g_call_vals[g_call_count], sizeof(g_call_vals[g_call_count]), "%s", val);
 		++g_call_count;
 	}
 	bool is_unexport = strstr(path, "/unexport") != NULL;
@@ -62,6 +63,18 @@ static bool saw_unexport(void)
 {
 	for (int i = 0; i < g_call_count; ++i) {
 		if (strstr(g_call_paths[i], "/unexport") != NULL) return true;
+	}
+	return false;
+}
+
+/* True if a write of "0" landed on the per-channel enable attribute --
+ * i.e. the PWM output was disabled. */
+static bool saw_disable(void)
+{
+	for (int i = 0; i < g_call_count; ++i) {
+		if (strstr(g_call_paths[i], "/enable") != NULL && strcmp(g_call_vals[i], "0") == 0) {
+			return true;
+		}
 	}
 	return false;
 }
@@ -103,6 +116,7 @@ static void test_new_export_owns_and_close_unexports(void)
 	g_call_count = 0; /* isolate what close() itself does */
 	y_close(st);
 	ALP_ASSERT_TRUE(saw_unexport());
+	ALP_ASSERT_TRUE(saw_disable());
 }
 
 static void test_already_exported_does_not_own_and_close_leaves_export(void)
@@ -121,6 +135,28 @@ static void test_already_exported_does_not_own_and_close_leaves_export(void)
 	g_call_count = 0;
 	y_close(st);
 	ALP_ASSERT_TRUE(!saw_unexport());
+}
+
+/* Regression for the CHANGES_REQUIRED finding: y_close() must not write
+ * enable="0" for a handle that merely reused a foreign export (EBUSY at
+ * open) -- doing so disables another process's PWM output even though
+ * this handle never claimed the channel. */
+static void test_already_exported_close_does_not_disable(void)
+{
+	reset_fixture();
+	g_export_result = ALP_ERR_BUSY;
+
+	struct alp_pwm           h;
+	alp_pwm_backend_state_t *st;
+	alp_status_t             rc = open_handle(&h, &st);
+	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+
+	y_pwm_data_t *d = (y_pwm_data_t *)st->be_data;
+	ALP_ASSERT_TRUE(!d->owns_export);
+
+	g_call_count = 0; /* isolate what close() itself does */
+	y_close(st);
+	ALP_ASSERT_TRUE(!saw_disable());
 }
 
 static void test_post_export_failure_new_export_unexports(void)
@@ -152,6 +188,7 @@ int main(void)
 {
 	test_new_export_owns_and_close_unexports();
 	test_already_exported_does_not_own_and_close_leaves_export();
+	test_already_exported_close_does_not_disable();
 	test_post_export_failure_new_export_unexports();
 	test_post_export_failure_already_exported_does_not_unexport();
 
