@@ -24,6 +24,24 @@ target_compile_features(alp_test_delay PRIVATE c_std_99)
 add_test(NAME alp_test_delay
          COMMAND alp_test_delay)
 
+# EEPROM 24C128 offset/len range-check overflow regression (#738) -- shared
+# with tests/baremetal/ since the chip driver core (chips/eeprom_24c128/) is
+# OS-agnostic and the test needs no real I2C bus (see the test file's
+# header comment).
+add_executable(alp_test_eeprom_24c128_range
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/eeprom_24c128_range.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../chips/eeprom_24c128/eeprom_24c128.c
+)
+target_link_libraries(alp_test_eeprom_24c128_range PRIVATE alp::sdk)
+target_include_directories(alp_test_eeprom_24c128_range PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_eeprom_24c128_range PRIVATE c_std_99)
+
+add_test(NAME alp_test_eeprom_24c128_range
+         COMMAND alp_test_eeprom_24c128_range)
+
 # Shared errno -> alp_status_t baseline mapper (#630): the reviewed
 # baseline contract + the per-operation override mechanism (CAN's
 # EAGAIN-as-timeout worked example).  Pure POSIX <errno.h> + the header

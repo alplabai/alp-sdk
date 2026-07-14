@@ -11,6 +11,13 @@
 
 #include "alp/chips/eeprom_24c128.h"
 
+/* Overflow-safe offset/len range check (#743) -- see alp_size_range_valid()'s
+ * doc comment.  Was previously `(uint32_t)offset + len > EEPROM_24C128_BYTES`,
+ * which computes the sum before comparing: a large enough `len` wraps the
+ * addition and bypasses the check, letting an out-of-range offset/len pair
+ * reach the I2C transfer / memcpy below (#738). */
+#include "alp_checked_arith.h"
+
 /** Maximum poll-cycles to wait for a write to complete.  The 24Cxx internal
  *  write cycle is up to 5 ms (datasheet t_WR); we pace each poll by ~1 ms so the
  *  total budget (~20 ms) comfortably spans it.  Bench-found 2026-06-15: without
@@ -58,7 +65,9 @@ alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (out == NULL && len > 0) return ALP_ERR_INVAL;
-	if ((uint32_t)offset + len > EEPROM_24C128_BYTES) return ALP_ERR_OUT_OF_RANGE;
+	if (!alp_size_range_valid((size_t)offset, len, EEPROM_24C128_BYTES)) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 	if (len == 0) return ALP_OK;
 
 	uint8_t addr_buf[2] = { (uint8_t)(offset >> 8), (uint8_t)(offset & 0xFF) };
@@ -70,7 +79,9 @@ eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, 
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (data == NULL && len > 0) return ALP_ERR_INVAL;
-	if ((uint32_t)offset + len > EEPROM_24C128_BYTES) return ALP_ERR_OUT_OF_RANGE;
+	if (!alp_size_range_valid((size_t)offset, len, EEPROM_24C128_BYTES)) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 	if (len == 0) return ALP_OK;
 
 	/* Split at page boundaries.  Each chunk = (offset, payload),
