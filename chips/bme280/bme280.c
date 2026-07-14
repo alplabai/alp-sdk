@@ -52,6 +52,18 @@ static int16_t le16s(const uint8_t *p)
 	return (int16_t)le16u(p);
 }
 
+/* Sign-extend a 12-bit two's-complement field held in the low 12 bits of
+ * @p bits12 to int16_t.  Left-shifting a signed negative value is
+ * undefined behaviour in C, and right-shifting one is implementation-
+ * defined pre-C23 -- plain subtraction on an unsigned intermediate stays
+ * inside defined-behaviour territory for every input while producing the
+ * identical two's-complement result. */
+static int16_t sign_extend12(uint16_t bits12)
+{
+	bits12 &= 0x0FFFu;
+	return (int16_t)(bits12 >= 0x0800u ? (int32_t)bits12 - 0x1000 : (int32_t)bits12);
+}
+
 static alp_status_t load_calibration(bme280_t *dev)
 {
 	uint8_t      blk1[26] = { 0 };
@@ -82,10 +94,13 @@ static alp_status_t load_calibration(bme280_t *dev)
 	c->H1             = h1;
 	c->H2             = le16s(&blk2[0]);
 	c->H3             = blk2[2];
-	/* H4: [E4][7:0] << 4 | [E5][3:0]   — 12-bit signed. */
-	c->H4 = (int16_t)(((int16_t)(int8_t)blk2[3] << 4) | (blk2[4] & 0x0F));
+	/* H4: [E4][7:0] << 4 | [E5][3:0]   — 12-bit signed.  Assemble as an
+     * unsigned 12-bit field first (blk2[] bytes are unsigned, so the
+     * shift below never touches a negative operand), then explicitly
+     * sign-extend -- avoids left-shifting the signed byte directly. */
+	c->H4 = sign_extend12((uint16_t)(((uint16_t)blk2[3] << 4) | (blk2[4] & 0x0Fu)));
 	/* H5: [E6][7:0] << 4 | [E5][7:4]   — 12-bit signed. */
-	c->H5 = (int16_t)(((int16_t)(int8_t)blk2[5] << 4) | ((blk2[4] >> 4) & 0x0F));
+	c->H5 = sign_extend12((uint16_t)(((uint16_t)blk2[5] << 4) | ((blk2[4] >> 4) & 0x0Fu)));
 	c->H6 = (int8_t)blk2[6];
 	return ALP_OK;
 }
@@ -131,6 +146,29 @@ alp_status_t bme280_set_sampling(bme280_t             *dev,
                                  bme280_filter_t       filter)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+
+	/* Oversampling / standby / filter are contiguous encodings but each
+     * lives in a wider register field than the enum's declared range
+     * (e.g. oversampling is a 3-bit field with only 6 of 8 codes
+     * defined) -- reject anything past the last declared member instead
+     * of silently masking it into a reserved encoding. */
+	if ((unsigned)t_os > BME280_OVERSAMPLING_X16) return ALP_ERR_INVAL;
+	if ((unsigned)p_os > BME280_OVERSAMPLING_X16) return ALP_ERR_INVAL;
+	if ((unsigned)h_os > BME280_OVERSAMPLING_X16) return ALP_ERR_INVAL;
+	if ((unsigned)standby > BME280_STANDBY_20_MS) return ALP_ERR_INVAL;
+	if ((unsigned)filter > BME280_FILTER_16) return ALP_ERR_INVAL;
+
+	/* Mode is sparse -- 0x2 is a reserved CTRL_MEAS encoding between
+     * FORCED (0x1) and NORMAL (0x3) -- so an upper-bound check would
+     * wrongly admit it.  Switch-validate against the declared set. */
+	switch (mode) {
+	case BME280_MODE_SLEEP:
+	case BME280_MODE_FORCED:
+	case BME280_MODE_NORMAL:
+		break;
+	default:
+		return ALP_ERR_INVAL;
+	}
 
 	/* Per datasheet §5.4.3: CTRL_HUM must be written first; CTRL_MEAS
      * latches it on the next CTRL_MEAS write. */
@@ -189,11 +227,16 @@ alp_status_t bme280_compensate(bme280_t *dev, const bme280_raw_t *raw, bme280_co
 	/* --- Pressure (Pa) --- */
 	int32_t adc_P = raw->pressure_raw;
 	int64_t pv1   = ((int64_t)dev->t_fine) - 128000;
-	int64_t pv2   = pv1 * pv1 * (int64_t)c->P6;
-	pv2           = pv2 + ((pv1 * (int64_t)c->P5) << 17);
-	pv2           = pv2 + (((int64_t)c->P4) << 35);
-	pv1           = ((pv1 * pv1 * (int64_t)c->P3) >> 8) + ((pv1 * (int64_t)c->P2) << 12);
-	pv1           = ((((int64_t)1) << 47) + pv1) * ((int64_t)c->P1) >> 33;
+	/* P2, P4, P5, P7 are signed per-die coefficients and can be
+     * negative -- left-shifting a negative signed value is undefined
+     * behaviour, so each `<< n` below is replaced with an equivalent
+     * multiplication by the constant 2**n (itself built from a
+     * non-negative shift).  Bit-for-bit identical result, no UB. */
+	int64_t pv2 = pv1 * pv1 * (int64_t)c->P6;
+	pv2         = pv2 + (pv1 * (int64_t)c->P5) * ((int64_t)1 << 17);
+	pv2         = pv2 + (int64_t)c->P4 * ((int64_t)1 << 35);
+	pv1         = ((pv1 * pv1 * (int64_t)c->P3) >> 8) + (pv1 * (int64_t)c->P2) * ((int64_t)1 << 12);
+	pv1         = ((((int64_t)1) << 47) + pv1) * ((int64_t)c->P1) >> 33;
 	if (pv1 == 0) {
 		out->pressure_pa = 0; /* Avoid /0 — reset on next sample. */
 	} else {
@@ -201,14 +244,18 @@ alp_status_t bme280_compensate(bme280_t *dev, const bme280_raw_t *raw, bme280_co
 		p                = (((p << 31) - pv2) * 3125) / pv1;
 		pv1              = (((int64_t)c->P9) * (p >> 13) * (p >> 13)) >> 25;
 		pv2              = (((int64_t)c->P8) * p) >> 19;
-		p                = ((p + pv1 + pv2) >> 8) + (((int64_t)c->P7) << 4);
+		p                = ((p + pv1 + pv2) >> 8) + (int64_t)c->P7 * ((int64_t)1 << 4);
 		out->pressure_pa = (uint32_t)(p / 256);
 	}
 
 	/* --- Humidity (Q22.10 %RH) --- */
 	int32_t adc_H = (int32_t)raw->humidity_raw;
 	int32_t hv    = dev->t_fine - 76800;
-	hv = (((((adc_H << 14) - (((int32_t)c->H4) << 20) - (((int32_t)c->H5) * hv)) + 16384) >> 15) *
+	/* H4 is a signed coefficient (see sign_extend12 above); replace the
+     * left-shift-of-possibly-negative-value with an equivalent multiply. */
+	hv = (((((adc_H << 14) - (int32_t)c->H4 * ((int32_t)1 << 20) - (((int32_t)c->H5) * hv)) +
+	        16384) >>
+	       15) *
 	      (((((((hv * ((int32_t)c->H6)) >> 10) * (((hv * ((int32_t)c->H3)) >> 11) + 32768)) >> 10) +
 	         2097152) *
 	            ((int32_t)c->H2) +
