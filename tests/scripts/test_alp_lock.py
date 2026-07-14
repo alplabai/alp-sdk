@@ -20,7 +20,11 @@ def test_schema_is_draft2020_closed():
 def _fixture_ws(tmp_path):
     """Minimal Alp SDK-shaped workspace."""
     (tmp_path / "scripts" / "alp_cli").mkdir(parents=True)
+    # alp_cli derives __version__ from metadata/sdk_version.yaml (the single
+    # source alp_lock reads); the literal here mirrors real derivation only.
     (tmp_path / "scripts" / "alp_cli" / "__init__.py").write_text('__version__ = "9.9.9"\n')
+    (tmp_path / "metadata").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "metadata" / "sdk_version.yaml").write_text("version: 9.9.9\nstatus: released\n")
     (tmp_path / "scripts").joinpath("requirements.txt").write_text("cbor2\njsonschema==4.21.1\n")
     (tmp_path / "west.yml").write_text(
         "manifest:\n"
