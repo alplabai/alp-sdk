@@ -8,7 +8,7 @@
 [![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.0-blue)](docs/zephyr-version-policy.md)
 
 > [!WARNING]
-> **Partially silicon-verified (`v0.9`):** every chip driver, peripheral wrapper, and
+> **Partially silicon-verified (`v0.10`):** every chip driver, peripheral wrapper, and
 > example builds clean and passes its CI tests on `native_sim`. Two SoM
 > families now carry silicon evidence: the E1M-X V2N (GD32-bridge stack,
 > verified v0.6) and E1M-AEN801 (peripheral matrix, NPU inference, cc3501e
@@ -136,7 +136,7 @@ indexes the common ones with fixes.
 
 ## 30-second quick start
 
-A v0.9 project is **one declarative file** plus per-core app
+A v0.10 project is **one declarative file** plus per-core app
 directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
@@ -272,7 +272,7 @@ by upstream `bitbake` / OE-core constraint.  Codified in
 
 ## Status
 
-**v0.9 ramp — paper-correct, mostly pre-HIL; partial silicon-verified additions** — recorded in
+**v0.10 ramp — paper-correct, mostly pre-HIL; partial silicon-verified additions** — recorded in
 [`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
 landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in
@@ -399,7 +399,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate/        │
-  │ (v0.9)        │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
+  │ (v0.10)        │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
   │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
@@ -529,7 +529,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: main        # pin to a release tag — v0.9.0 is the latest; `main` tracks the next candidate
+      revision: main        # pin to a release tag — v0.10.0 is the latest; `main` tracks the next candidate
       path: modules/lib/alp-sdk
 ```
 
@@ -560,7 +560,7 @@ cmake -B build -DALP_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-# Zephyr (heterogeneous slice, v0.9 flow)
+# Zephyr (heterogeneous slice, v0.10 flow)
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
 west alp-build examples/multicore/rpmsg-v2n
