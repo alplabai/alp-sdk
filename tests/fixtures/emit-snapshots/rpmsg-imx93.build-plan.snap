@@ -80,7 +80,9 @@
           "build",
           "-b",
           "alp_e1m_nx9101_m33",
-          "<SDK_ROOT>/examples/multicore/rpmsg-imx93/m33"
+          "<SDK_ROOT>/examples/multicore/rpmsg-imx93/m33",
+          "--",
+          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>"
         ],
         "cwd": "build/m33-zephyr"
       },

@@ -80,7 +80,9 @@
           "build",
           "-b",
           "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33",
-          "<SDK_ROOT>/examples/multicore/heterogeneous-offload/m33_sm"
+          "<SDK_ROOT>/examples/multicore/heterogeneous-offload/m33_sm",
+          "--",
+          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>"
         ],
         "cwd": "build/m33_sm-zephyr"
       },
