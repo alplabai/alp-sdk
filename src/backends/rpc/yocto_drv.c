@@ -132,6 +132,8 @@
 
 #include <linux/rpmsg.h>
 
+#include "common/alp_errno.h"
+
 #ifndef ALP_RPC_SUBS_PER_CHANNEL
 #define ALP_RPC_SUBS_PER_CHANNEL 8
 #endif
@@ -545,9 +547,15 @@ static bool rpc_be_open_test_should_fail(enum rpc_be_open_stage stage)
  * real, deterministic success).  To drive the LATER stages (endpoint
  * open, pipe, worker create) through their own failure paths, a test
  * needs the ioctl stage to synthetically succeed rather than fail --
- * this flag is that one exception.  Default false: production never
- * sets it. */
+ * this flag is that one exception.  Unlike g_y_open_test_fail_at above
+ * (which only ever turns a real success into a failure), this one
+ * fabricates a success for a real ioctl that never ran -- so, unlike
+ * that hook, it does NOT default-compile into production/other-test
+ * builds at all: ALP_RPC_YOCTO_OPEN_TEST_HOOKS is defined ONLY by
+ * tests/yocto/rpc_yocto_open_fail.c, the one TU that needs it. */
+#ifdef ALP_RPC_YOCTO_OPEN_TEST_HOOKS
 static bool g_y_open_test_force_ept_create_ok = false;
+#endif
 
 /* Failure-path teardown for y_open(): unwind exactly the pthread
  * primitives recorded in `init_mask` (reverse init order: call_cond,
@@ -639,7 +647,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	if (rc != 0) {
 		fprintf(stderr, "alp_rpc: pthread_mutex_init(tx_mutex) failed: rc=%d\n", rc);
 		rpc_be_open_fail(ch, init_mask);
-		return ALP_ERR_NOMEM;
+		return alp_status_from_posix_errno(rc);
 	}
 	init_mask |= RPC_BE_INIT_TX_MUTEX;
 
@@ -649,7 +657,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	if (rc != 0) {
 		fprintf(stderr, "alp_rpc: pthread_mutex_init(sub_mutex) failed: rc=%d\n", rc);
 		rpc_be_open_fail(ch, init_mask);
-		return ALP_ERR_NOMEM;
+		return alp_status_from_posix_errno(rc);
 	}
 	init_mask |= RPC_BE_INIT_SUB_MUTEX;
 
@@ -659,7 +667,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	if (rc != 0) {
 		fprintf(stderr, "alp_rpc: pthread_mutex_init(call_mutex) failed: rc=%d\n", rc);
 		rpc_be_open_fail(ch, init_mask);
-		return ALP_ERR_NOMEM;
+		return alp_status_from_posix_errno(rc);
 	}
 	init_mask |= RPC_BE_INIT_CALL_MUTEX;
 
@@ -669,7 +677,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	if (rc != 0) {
 		fprintf(stderr, "alp_rpc: pthread_cond_init(call_cond) failed: rc=%d\n", rc);
 		rpc_be_open_fail(ch, init_mask);
-		return ALP_ERR_NOMEM;
+		return alp_status_from_posix_errno(rc);
 	}
 	init_mask |= RPC_BE_INIT_CALL_COND;
 
@@ -693,8 +701,10 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	if (rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_EPT_CREATE)) {
 		errno    = EIO;
 		ioctl_rc = -1;
+#ifdef ALP_RPC_YOCTO_OPEN_TEST_HOOKS
 	} else if (g_y_open_test_force_ept_create_ok) {
 		ioctl_rc = 0;
+#endif
 	} else {
 		ioctl_rc = ioctl(ch->ctrl_fd, RPMSG_CREATE_EPT_IOCTL, &eptinfo);
 	}

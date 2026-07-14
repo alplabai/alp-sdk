@@ -28,7 +28,11 @@
  *     /dev/null via the existing ALP_RPMSG_CTRL_DEV / ALP_RPMSG_EPT_DEV
  *     overrides for a real, deterministic success) -- this flag lets a
  *     scenario driving a LATER stage's failure treat the ioctl as having
- *     succeeded.
+ *     succeeded.  Only THIS file defines ALP_RPC_YOCTO_OPEN_TEST_HOOKS
+ *     (below, before the #include), which is what makes that flag exist
+ *     in the compiled TU at all -- see its own doc comment in
+ *     yocto_drv.c for why production and every OTHER test TU that
+ *     includes that file never compile it in.
  *
  * Each scenario below drives exactly one stage of y_open()'s sequence to
  * fail (every EARLIER stage runs for real, or via ALP_RPMSG_CTRL_DEV=
@@ -42,15 +46,100 @@
  *      (OPEN_FAIL_ITERATIONS times) per stage so a leak that is only
  *      one fd per call still shows up deterministically rather than
  *      needing a single lucky sample.
- * ASan/TSan (this file is wired into the same alp_test_rpc_asan_ubsan /
- * alp_test_rpc_tsan sanitizer targets as rpc_yocto_self_close.c --
- * see this directory's CMakeLists.txt) is what actually proves no
- * pthread-object leak / no use of an object destroyed-without-having-
- * been-initialized; the fd-count check here proves the fd side of the
- * same contract in an un-instrumented build too.
+ *   3. pthread_mutex_init/_destroy and pthread_cond_init/_destroy calls
+ *      made BY y_open()/rpc_be_open_fail() stay balanced (init count ==
+ *      destroy count) after every single iteration -- see the counting
+ *      interposition below.  This is the part of the contract fd-count
+ *      and the return-code checks above do NOT cover.
+ *
+ * On sanitizers NOT proving this: an earlier version of this file's
+ * comment claimed ASan/TSan (this file is wired into the
+ * alp_test_rpc_asan_ubsan / alp_test_rpc_tsan targets -- see this
+ * directory's CMakeLists.txt) "is what actually proves no pthread-
+ * object leak".  That claim was checked empirically and is FALSE: a
+ * standalone probe (3 mutexes + 1 cond initialized in a calloc'd
+ * struct, then the struct is freed WITHOUT ever calling
+ * pthread_mutex_destroy()/pthread_cond_destroy(), 50 iterations) built
+ * with `-fsanitize=address,undefined` and separately with
+ * `-fsanitize=thread` exits 0 silently under both -- glibc's pthread
+ * primitives embedded in a struct carry no sanitizer-visible identity
+ * once the backing memory is freed, so neither sanitizer flags an
+ * undestroyed-but-initialized mutex/cond this way.  Do not rely on
+ * ASan/TSan/UBSan for this contract; they were not observed to catch
+ * it.  What DOES catch it in this file is #3 above: pthread_mutex_init/
+ * pthread_cond_init/pthread_mutex_destroy/pthread_cond_destroy are
+ * redirected (via the object-like macros right before the
+ * yocto_drv.c #include below) to the counting wrappers defined in this
+ * TU, so the shipped call sites in y_open()/rpc_be_open_fail()/
+ * rpc_be_teardown() are the exact ones counted -- an init with no
+ * matching destroy (or vice versa) is a direct, deterministic assertion
+ * failure, not an inference from an absence of sanitizer output.
  */
 
+#include <pthread.h>
+
+/* Counting interposition for the #747 contract (see the header comment
+ * above): these wrappers call the REAL pthread_*_init/_destroy (their
+ * own bodies are compiled BEFORE the #define below takes effect, so the
+ * calls inside them are NOT self-redirected) and just tally successes.
+ * The #define block further down then redirects yocto_drv.c's own call
+ * sites -- the ones under test -- onto these wrappers for the rest of
+ * this translation unit. */
+static int g_mutex_init_count    = 0;
+static int g_mutex_destroy_count = 0;
+static int g_cond_init_count     = 0;
+static int g_cond_destroy_count  = 0;
+
+static int counting_pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *attr)
+{
+	int rc = pthread_mutex_init(m, attr);
+	if (rc == 0) {
+		++g_mutex_init_count;
+	}
+	return rc;
+}
+
+static int counting_pthread_mutex_destroy(pthread_mutex_t *m)
+{
+	int rc = pthread_mutex_destroy(m);
+	if (rc == 0) {
+		++g_mutex_destroy_count;
+	}
+	return rc;
+}
+
+static int counting_pthread_cond_init(pthread_cond_t *c, const pthread_condattr_t *attr)
+{
+	int rc = pthread_cond_init(c, attr);
+	if (rc == 0) {
+		++g_cond_init_count;
+	}
+	return rc;
+}
+
+static int counting_pthread_cond_destroy(pthread_cond_t *c)
+{
+	int rc = pthread_cond_destroy(c);
+	if (rc == 0) {
+		++g_cond_destroy_count;
+	}
+	return rc;
+}
+
+/* From here down, every pthread_mutex_init/_destroy and
+ * pthread_cond_init/_destroy call TEXT in the #include below (the
+ * shipped yocto_drv.c source, not a copy) resolves to the counting
+ * wrappers above instead of the real glibc symbols -- glibc's own
+ * <pthread.h> is already fully parsed by this point (the #include
+ * above), so its declarations are not affected, only the CALL SITES
+ * inside yocto_drv.c's y_open()/rpc_be_open_fail()/rpc_be_teardown(). */
+#define pthread_mutex_init    counting_pthread_mutex_init
+#define pthread_mutex_destroy counting_pthread_mutex_destroy
+#define pthread_cond_init     counting_pthread_cond_init
+#define pthread_cond_destroy  counting_pthread_cond_destroy
+
 #define ALP_SDK_HAVE_OPENAMP_USERLAND 1
+#define ALP_RPC_YOCTO_OPEN_TEST_HOOKS 1
 #include "../../src/backends/rpc/yocto_drv.c"
 
 #include <dirent.h>
@@ -114,11 +203,43 @@ static alp_rpc_config_t make_cfg(const char *name)
 	return cfg;
 }
 
+/* Asserts g_mutex_init_count == g_mutex_destroy_count and
+ * g_cond_init_count == g_cond_destroy_count -- the actual #747 contract:
+ * every pthread primitive y_open() successfully initializes on a given
+ * call is destroyed exactly once, by the time this is checked (either by
+ * rpc_be_open_fail()'s unwind on a failed call, or by a real
+ * y_destroy()/rpc_be_teardown() on a successful one).  Called after
+ * EVERY iteration below, not just once at the end, so a leak on any
+ * single call -- not just a cumulative one -- is caught precisely where
+ * it happened. */
+static void assert_pthread_primitives_balanced(const char *scenario_name, int iteration)
+{
+	if (g_mutex_init_count != g_mutex_destroy_count) {
+		ALP_TEST_FAIL("%s: iteration %d: mutex init/destroy count mismatch: init=%d destroy=%d",
+		              scenario_name,
+		              iteration,
+		              g_mutex_init_count,
+		              g_mutex_destroy_count);
+	} else {
+		ALP_TEST_PASS();
+	}
+	if (g_cond_init_count != g_cond_destroy_count) {
+		ALP_TEST_FAIL("%s: iteration %d: cond init/destroy count mismatch: init=%d destroy=%d",
+		              scenario_name,
+		              iteration,
+		              g_cond_init_count,
+		              g_cond_destroy_count);
+	} else {
+		ALP_TEST_PASS();
+	}
+}
+
 /* Every scenario below points this at a function selecting exactly one
  * stage, drives y_open() OPEN_FAIL_ITERATIONS times, and asserts (a) the
  * expected error code every time, (b) `st.be_data` never gets published,
- * and (c) the fd count is unchanged from before the run to after -- see
- * this file's header comment. */
+ * (c) the fd count is unchanged from before the run to after, and (d)
+ * every pthread mutex/cond y_open() initialized on that call was
+ * destroyed by the time it returns -- see this file's header comment. */
 static void run_stage_fail_scenario(const char *scenario_name,
                                     bool (*fail_hook)(enum rpc_be_open_stage),
                                     bool         force_ept_create_ok,
@@ -142,6 +263,7 @@ static void run_stage_fail_scenario(const char *scenario_name,
 			ALP_TEST_PASS();
 		}
 		ALP_ASSERT_NULL(rpc_be_data_load(&st));
+		assert_pthread_primitives_balanced(scenario_name, i);
 	}
 
 	int fds_after = count_open_fds();
@@ -272,13 +394,22 @@ static void test_fail_rx_thread(void)
 
 /* ------------------------------------------------------------------ */
 /* Happy-path sanity: proves the fault-injection scaffolding itself
- * doesn't mask a real success once every hook is cleared, and that
+ * doesn't mask a real success once the FAIL hook is cleared, and that
  * open()/subscribe show the channel is fully usable afterwards -- so
  * the scenarios above are proven to exercise a real failure branch,
- * not a permanently-broken open path.                                 */
+ * not a permanently-broken open path.
+ *
+ * g_y_open_test_force_ept_create_ok stays true here (name says so,
+ * unlike the earlier version of this test): this host has no real
+ * /dev/rpmsg_ctrl0 / OpenAMP remoteproc endpoint for
+ * RPMSG_CREATE_EPT_IOCTL to create for real, so that one stage is still
+ * synthetic even on this "success" path -- see g_y_open_test_fail_at's
+ * own doc comment in yocto_drv.c.  Every OTHER stage (the four pthread
+ * inits, both fd opens via ALP_RPMSG_CTRL_DEV/ALP_RPMSG_EPT_DEV=
+ * /dev/null, the pipe, and the rx thread) runs for real. */
 /* ------------------------------------------------------------------ */
 
-static void test_open_succeeds_once_hooks_cleared(void)
+static void test_open_succeeds_with_fail_hook_cleared(void)
 {
 	g_y_open_test_fail_at             = NULL;
 	g_y_open_test_force_ept_create_ok = true; /* still no real hardware on this host */
@@ -293,10 +424,13 @@ static void test_open_succeeds_once_hooks_cleared(void)
 	ALP_ASSERT_TRUE(rpc_be_data_load(&st) != NULL);
 
 	/* Tear back down through the normal shutdown/destroy path so this
-	 * doesn't leak the one real success this test deliberately drives. */
+	 * doesn't leak the one real success this test deliberately drives,
+	 * and confirm the REAL teardown path (rpc_be_teardown(), not
+	 * rpc_be_open_fail()) also leaves every primitive balanced. */
 	ALP_ASSERT_TRUE(y_shutdown(&st) == ALP_RPC_SHUTDOWN_DONE);
 	y_destroy(&st);
 	ALP_ASSERT_NULL(rpc_be_data_load(&st));
+	assert_pthread_primitives_balanced("open_succeeds", 0);
 
 	g_y_open_test_force_ept_create_ok = false;
 }
@@ -322,7 +456,7 @@ int main(void)
 	test_fail_ept_open();
 	test_fail_pipe();
 	test_fail_rx_thread();
-	test_open_succeeds_once_hooks_cleared();
+	test_open_succeeds_with_fail_hook_cleared();
 
 	ALP_TEST_SUMMARY();
 }
