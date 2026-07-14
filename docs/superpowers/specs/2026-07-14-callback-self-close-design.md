@@ -84,38 +84,110 @@ handoff; only the location of the epilogue differs.
 
 ### New shared unit
 
-`src/common/alp_deferred_close.{h,c}`, beside `alp_slot_claim.h` and reusing its
-`lifecycle` / `active_ops` primitives (`alp_handle_op_enter` at
+`src/common/alp_deferred_close.{h,c}`, beside `alp_slot_claim.h` and building on
+its `lifecycle` / `active_ops` representation (`alp_handle_op_enter` at
 `src/common/alp_slot_claim.h:149`, `alp_handle_begin_close_blocking` at
 `src/common/alp_slot_claim.c:55`).
 
 It owns exactly two things:
 
-- the `DONE | DEFERRED` outcome type and the close-side sequencing, and
-- the shared `finalize()` body: drain, destroy, set `UNOPENED`, release slot.
+- the `ALP_CLOSE_DONE | ALP_CLOSE_DEFERRED` outcome type, and
+- **split-phase close**: a CAS-only `begin` and a separate sleep-drain, so a
+  caller can CAS, run `ops->shutdown()`, and only then decide whether to drain
+  and finalize (external close) or return immediately (self-close).
+
+The split is the actual new primitive. Today `alp_handle_begin_close_blocking`
+**fuses** the CAS and the drain into one call, which is precisely why a deferred
+self-close cannot be expressed with it: by the time it returns, the caller has
+already waited for itself.
 
 It owns no threading. It is usable from Zephyr, Yocto and bare-metal unchanged.
+
+### Why RPC keeps `chan_word`
+
+**The SDK already decided this**, and the decision is recorded in-tree.
+`alp_slot_claim.h:200-201` documents `alp_handle_begin_close_blocking()` as
+
+> "the generalisation of rpc_dispatch.c's `_rpc_begin_close()`/`_rpc_drain()`
+> (GHSA-xhm8-7f87-93q5) to the shared handle-pool helpers"
+
+So `alp_slot_claim.h` **is** the generalisation of RPC's close protocol. RPC is
+its origin, not a duplicate of it to be eliminated. What that generalisation did
+not carry across is the *split phase*: `alp_handle_begin_close_blocking()` fuses
+the CAS and the drain into one call, which is exactly why a deferred self-close
+cannot be expressed with it today. This design finishes the existing
+generalisation rather than starting a new one.
+
+Representation footprint, measured (not estimated): `lifecycle` + `active_ops`
+is used by **32 translation units** under `src/`; the packed `chan_word` by
+exactly two (`src/rpc_dispatch.c`, `src/backends/rpc/rpc_ops.h`).
+
+RPC's divergence is also deliberate and documented: `src/rpc_dispatch.c:208-214`
+rejected `alp_handle_begin_close()` because that helper's precondition — every
+drained op is a short synchronous backend call — does not hold for
+`alp_rpc_call()`, which can block up to `UINT32_MAX` ms. (That specific
+objection is now largely obsolete: `alp_handle_begin_close_blocking()` sleeps
+rather than spins, and the split-phase helper addresses the rest.)
+
+Migrating RPC onto the shared representation is therefore **possible but not
+required**, and is out of scope here. It would rewrite the one
+adversarially-reviewed, working lock-free close protocol — the subject of
+advisory **GHSA-xhm8-7f87-93q5** — for uniformity rather than function. It is
+tracked as a follow-up (see *Follow-ups*), not carried by this work.
+
+RPC remains the reference for the protocol *shape* (`rpc_ops.h:22-66`) without
+sharing the *representation*.
+
+### Follow-ups (not in scope)
+
+- **Sleep-tick duplication.** The portable sleep-a-tick primitive exists
+  verbatim in both `src/rpc_dispatch.c:223-228` and `src/common/alp_slot_claim.c:45-53`
+  (the latter's comment admits it is "copied from rpc_dispatch.c"). Real
+  duplication, small and safe to fix, but orthogonal to the deadlocks.
+- **RPC `chan_word` migration.** Optional. If ever done, it must be gated on the
+  existing RPC close coverage — `tests/yocto/rpc_dispatch_close_race.c`,
+  `rpc_yocto_self_close.c`, `rpc_uio_self_close.c`, `tests/unit/rpc_zephyr_backend/`
+  — run under `run_sanitized_rpc_tests.sh` (ASan + TSan). That coverage exists
+  today, so the migration is defensible; it is simply not what fixes #756.
 
 ### Per-surface work
 
 | Surface | Shape | Self-detect | Finalize point |
 | --- | --- | --- | --- |
-| RPC | worker | already implemented | already implemented — migrate onto the helper |
-| MQTT | caller-driven | thread entering `ops->loop` | `alp_mqtt_loop` epilogue |
-| BLE | caller-driven | thread entering the scan op | `alp_ble_scan_start` epilogue |
+| RPC | worker | already implemented | unchanged — keeps `chan_word` (above) |
+| MQTT | caller-driven | thread holding the counted op | `alp_mqtt_loop` epilogue, after `alp_handle_op_leave` |
+| BLE | caller-driven | thread holding the counted op | `alp_ble_scan_start` epilogue, after `alp_handle_op_leave` |
 | CAN | worker | `pthread_equal(self, rx_thread)` | `_rx_loop` epilogue; **must not self-join** |
-| GPIO | worker | `pthread_equal(self, irq_thread)` | `irq_dispatcher` epilogue |
+| GPIO | worker | `pthread_equal(self, irq_thread)` | `irq_dispatcher` epilogue — **lock-scope fix, not lifecycle** |
 
-CAN and GPIO additionally require moving callback invocation **outside** the
-`d->lock` / `g_irq.mu` critical section while keeping the object alive across the
-call. Deferral alone does not fix them: a self-close still reacquires the mutex.
-Equally, moving the callback out of the lock alone does not fix them either —
-lifetime and CAN's self-join must be handled together. #756 calls this out
-explicitly, and it is why they are sequenced last.
+For MQTT and BLE the callback runs on the *application's* thread inside a counted
+op, so there is no backend worker to host the deferred finalize; the dispatcher's
+own op epilogue hosts it. Self-detect is "the closing thread is the one currently
+holding a counted op on this handle" — the handle records the op-owning thread
+around `ops->loop` / `ops->scan_start`.
+
+That form is safe here because `mosquitto_loop_start` is **not used** anywhere in
+`src/backends/mqtt/` — libmosquitto runs in synchronous mode, so no callback can
+fire from a library-internal thread. If threaded mode is ever adopted, this
+self-detect must become a thread-identity compare instead.
 
 MQTT has a single shared dispatch (`src/mqtt_dispatch.c`) over both backends via
 the `mqtt_ops.h` vtable, so one dispatch-side change covers Yocto and Zephyr;
 only the self-detect is per-backend.
+
+**CAN and GPIO are not primarily lifecycle fixes.** Both invoke callbacks while
+holding a mutex that close must reacquire, so deferral alone does not help; and
+moving the callback out of the lock alone does not help either, because lifetime
+and CAN's self-join remain. Both halves must land together — #756 says this
+explicitly.
+
+GPIO is the extreme case: `src/yocto/peripheral_gpio.c` **counts no ops at all**
+(zero `alp_handle_op_enter` call sites). Its deadlock is purely `g_irq.mu` held
+across `p->irq_cb` (`:329-347`) versus reacquisition at `:431` / `:457`. The fix
+is to drop the mutex across callback invocation (the dispatcher already
+re-validates slots at `:335`) and honour a callback-requested detach/release via
+a flag after the callback returns. Whether GPIO also adopts the shared helper is
+a marginal-cost judgement at implementation time — it is not forced.
 
 ## Testing
 
@@ -136,18 +208,20 @@ surfaces, mirroring `<alp/rpc.h>`.
 
 ## Sequencing
 
-Three branches, each independently landable and green:
+Two branches, each independently landable and green:
 
-1. **`fix/756-deferred-close-helper`** — extract
-   `src/common/alp_deferred_close.{h,c}`; migrate `rpc_dispatch.c` onto it.
-   Behaviour-neutral; the existing RPC self-close tests are the safety net.
-2. **`fix/756-mqtt-ble-self-close`** — the counted-op surfaces. Adds self-close
-   tests and the header contract wording.
-3. **`fix/756-can-gpio-self-close`** — the lock-held and self-join surfaces, plus
-   the TSan harness generalization.
+1. **`fix/756-mqtt-ble-self-close`** — add the split-phase helper
+   (`src/common/alp_deferred_close.{h,c}`) together with its first adopters, the
+   counted-op surfaces MQTT and BLE. Adds their self-close tests and the public
+   header contract wording.
+2. **`fix/756-can-gpio-self-close`** — the lock-held and self-join surfaces, plus
+   the TSan harness generalisation.
 
-Splitting this way keeps the risky refactor (1) isolated behind proven tests, and
-prevents the hardest surfaces (3) from blocking the straightforward ones (2).
+The helper ships with its first adopters rather than alone: with RPC not being
+migrated, a helper landed by itself would have no caller and nothing to prove it.
+
+This keeps the hardest surfaces (2) — where the real work is lock-scope and
+self-join, not lifecycle — from blocking the straightforward ones (1).
 
 ## Out of scope
 
