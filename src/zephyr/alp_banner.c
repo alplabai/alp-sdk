@@ -9,7 +9,7 @@
  * Prints the SDK + SoM + SoC identity and a system summary at APPLICATION
  * init:
  *
- *   Alp SDK 0.9.0  |  E1M-AEN801  |  Alif Ensemble E8  |  (c) Alp Lab AB
+ *   Alp SDK 0.10.0  |  E1M-AEN801  |  Alif Ensemble E8  |  (c) Alp Lab AB
  *     CPU: M55-HE @160MHz (active) + M55-HP @400MHz + 2x Cortex-A32 @800MHz
  *     NPU: Ethos-U85 + 2x Ethos-U55   |   SRAM 9984 KB | MRAM 5.5 MB
  *
