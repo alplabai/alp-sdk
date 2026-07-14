@@ -54,10 +54,16 @@ static struct {
 	uint8_t pin_level[64];
 } slave;
 
+/* Set by test_wifi_scan_buf_is_per_context_740 / test_ble_scan_buf_is_per_context_740
+ * to pick the second context's distinct staged reply from slave_dispatch(); cleared by
+ * slave_reset() so every other test keeps seeing the default fixtures. */
+static bool g_scan_stage_ctx_b;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
-	slave.phase = PH_REQ_HDR;
+	slave.phase        = PH_REQ_HDR;
+	g_scan_stage_ctx_b = false;
 }
 
 static void stage_status(uint8_t st)
@@ -110,6 +116,27 @@ static uint16_t build_wifi_scan(uint8_t *p)
 	return o;
 }
 
+/* A single, deliberately DIFFERENT-content Wi-Fi scan record ("Ctx2Net") used
+ * by test_wifi_scan_buf_is_per_context_740 to stage a second context's own
+ * scan reply -- so a byte-compare of ctx A's raw decode buffer after ctx B's
+ * scan is a meaningful "did B's bytes leak into A" check, not a comparison
+ * of two identical payloads that would pass even if they aliased. */
+static uint16_t build_wifi_scan_ctx_b(uint8_t *p)
+{
+	uint16_t      o     = 0u;
+	const uint8_t b0[6] = { 0x99, 0x88, 0x77, 0x66, 0x55, 0x44 };
+	memcpy(&p[o], b0, 6);
+	o += 6u;
+	p[o++] = (uint8_t)(-60);      /* rssi */
+	p[o++] = 1u;                  /* channel */
+	p[o++] = 0x00u;               /* security_info LE lo */
+	p[o++] = 0x00u;               /* security_info LE hi -> open */
+	p[o++] = 7u;                  /* ssid_len */
+	memcpy(&p[o], "Ctx2Net", 7u); /* ssid */
+	o += 7u;
+	return o;
+}
+
 /* Two BLE scan records: addr[6] | addr_type | rssi(int8) | name_len | name[]. */
 static uint16_t build_ble_scan(uint8_t *p)
 {
@@ -130,6 +157,22 @@ static uint16_t build_ble_scan(uint8_t *p)
 	p[o++] = 1u; /* addr_type random */
 	p[o++] = (uint8_t)(-88);
 	p[o++] = 0u; /* no name */
+	return o;
+}
+
+/* Single, deliberately DIFFERENT-content BLE record ("Ctx2Dev") -- BLE
+ * counterpart of build_wifi_scan_ctx_b(), see its comment. */
+static uint16_t build_ble_scan_ctx_b(uint8_t *p)
+{
+	uint16_t      o     = 0u;
+	const uint8_t a0[6] = { 0x60, 0x50, 0x40, 0x30, 0x20, 0x10 };
+	memcpy(&p[o], a0, 6);
+	o += 6u;
+	p[o++] = 1u; /* addr_type random */
+	p[o++] = (uint8_t)(-33);
+	p[o++] = 7u;
+	memcpy(&p[o], "Ctx2Dev", 7u);
+	o += 7u;
 	return o;
 }
 
@@ -225,13 +268,13 @@ static void slave_dispatch(void)
 	}
 	case ALP_CC3501E_CMD_WIFI_SCAN_START: {
 		uint8_t  recs[ALP_CC3501E_MAX_PAYLOAD];
-		uint16_t n = build_wifi_scan(recs);
+		uint16_t n = g_scan_stage_ctx_b ? build_wifi_scan_ctx_b(recs) : build_wifi_scan(recs);
 		stage_reply(ALP_CC3501E_RESP_OK, recs, n);
 		break;
 	}
 	case ALP_CC3501E_CMD_BLE_SCAN_START: {
 		uint8_t  recs[ALP_CC3501E_MAX_PAYLOAD];
-		uint16_t n = build_ble_scan(recs);
+		uint16_t n = g_scan_stage_ctx_b ? build_ble_scan_ctx_b(recs) : build_ble_scan(recs);
 		stage_reply(ALP_CC3501E_RESP_OK, recs, n);
 		break;
 	}
@@ -510,7 +553,21 @@ ZTEST(cc3501e_host_driver, test_wifi_scan_walks_records)
 /* #740: cc3501e_wifi_scan's decode buffer moved from a function-local `static`
  * (shared by every cc3501e_t, process-wide) into per-context storage
  * (ctx->wifi_scan_buf). A second, independent context must not be able to
- * disturb a first context's already-decoded scratch. */
+ * disturb a first context's already-decoded scratch.
+ *
+ * Regression-proof (not vacuous -- see the fix-round note): the FIRST
+ * zassert_mem_equal below compares ctx A's ctx->wifi_scan_buf against the
+ * exact raw wire bytes the mock slave staged, independently reconstructed
+ * via build_wifi_scan() -- it is not a self-referential snapshot-vs-itself
+ * check. That assertion FAILS against the pre-#740 cc3501e_wifi_scan (a
+ * function-local `static scan_buf`, reverted from origin/dev): that form
+ * never writes ctx->wifi_scan_buf at all, so the field stays all-zero and
+ * the byte-compare against the real staged reply mismatches immediately.
+ * ctx B then runs its OWN real cc3501e_wifi_scan() call (through the driver,
+ * not a direct memset) with a DIFFERENT staged reply (build_wifi_scan_ctx_b,
+ * a distinct BSSID/SSID/channel), and ctx A's buffer must still read back
+ * unchanged afterward -- the non-aliasing half of #740, made meaningful by
+ * using different content for A and B instead of two identical payloads. */
 ZTEST(cc3501e_host_driver, test_wifi_scan_buf_is_per_context_740)
 {
 	cc3501e_scan_record_t recs[8];
@@ -518,20 +575,32 @@ ZTEST(cc3501e_host_driver, test_wifi_scan_buf_is_per_context_740)
 	zassert_equal(cc3501e_wifi_scan(&fw, recs, 8u, &n, 100u), ALP_OK, "SCAN ctx A -> OK");
 	zassert_equal(n, 2u, "two records parsed on ctx A");
 
+	uint8_t  wire_a[ALP_CC3501E_MAX_PAYLOAD];
+	uint16_t wire_a_len = build_wifi_scan(wire_a);
+	zassert_mem_equal(fw.wifi_scan_buf,
+	                  wire_a,
+	                  wire_a_len,
+	                  "ctx A's cc3501e_wifi_scan must decode into ctx->wifi_scan_buf itself "
+	                  "(#740) -- fails against the pre-fix function-local `static` buffer, "
+	                  "which never touches this field");
+
 	uint8_t snapshot[ALP_CC3501E_MAX_PAYLOAD];
 	memcpy(snapshot, fw.wifi_scan_buf, sizeof(snapshot));
 
-	/* Independent second context, own bus handle -- poison ITS scan scratch
-	 * directly (no bus traffic needed) and confirm ctx A's is untouched.
-	 * Before #740 this would have been the SAME process-global static array. */
+	/* Independent second context runs its OWN real scan, through the same
+	 * driver entry point, staged with genuinely different content. */
 	cc3501e_t ctx_b;
 	zassert_equal(cc3501e_init(&ctx_b, fake_bus), ALP_OK, "init ctx B");
-	memset(ctx_b.wifi_scan_buf, 0xAA, sizeof(ctx_b.wifi_scan_buf));
+	slave_reset();
+	g_scan_stage_ctx_b = true;
+	zassert_equal(cc3501e_wifi_scan(&ctx_b, recs, 8u, &n, 100u), ALP_OK, "SCAN ctx B -> OK");
+	zassert_equal(n, 1u, "ctx B's distinct single-record reply parsed");
+	zassert_str_equal(recs[0].ssid, "Ctx2Net", "ctx B decoded ITS OWN staged SSID");
 
 	zassert_mem_equal(fw.wifi_scan_buf,
 	                  snapshot,
 	                  sizeof(snapshot),
-	                  "ctx A's scan buffer must be unaffected by ctx B's storage (#740)");
+	                  "ctx A's scan buffer must be unaffected by ctx B's OWN real scan (#740)");
 }
 
 /* #740: same-context reentrancy is now an explicit ALP_ERR_BUSY instead of
@@ -729,7 +798,11 @@ ZTEST(cc3501e_host_driver, test_ble_scan_walks_records)
 
 /* #740: same non-aliasing + explicit-BUSY guarantees as
  * test_wifi_scan_buf_is_per_context_740 / test_wifi_scan_busy_rejects_reentrant_same_ctx_740,
- * for the BLE scan decode buffer (ctx->ble_scan_buf). */
+ * for the BLE scan decode buffer (ctx->ble_scan_buf). See
+ * test_wifi_scan_buf_is_per_context_740's comment for why this form (raw
+ * wire-byte compare + a genuinely distinct ctx B reply) actually
+ * discriminates the pre-#740 function-local `static` buffer, unlike the
+ * original snapshot-vs-itself version of this test. */
 ZTEST(cc3501e_host_driver, test_ble_scan_buf_is_per_context_740)
 {
 	cc3501e_ble_scan_record_t recs[8];
@@ -737,17 +810,30 @@ ZTEST(cc3501e_host_driver, test_ble_scan_buf_is_per_context_740)
 	zassert_equal(cc3501e_ble_scan(&fw, recs, 8u, &n, 100u), ALP_OK, "BLE_SCAN ctx A -> OK");
 	zassert_equal(n, 2u, "two advertisers parsed on ctx A");
 
+	uint8_t  wire_a[ALP_CC3501E_MAX_PAYLOAD];
+	uint16_t wire_a_len = build_ble_scan(wire_a);
+	zassert_mem_equal(fw.ble_scan_buf,
+	                  wire_a,
+	                  wire_a_len,
+	                  "ctx A's cc3501e_ble_scan must decode into ctx->ble_scan_buf itself "
+	                  "(#740) -- fails against the pre-fix function-local `static` buffer, "
+	                  "which never touches this field");
+
 	uint8_t snapshot[ALP_CC3501E_MAX_PAYLOAD];
 	memcpy(snapshot, fw.ble_scan_buf, sizeof(snapshot));
 
 	cc3501e_t ctx_b;
 	zassert_equal(cc3501e_init(&ctx_b, fake_bus), ALP_OK, "init ctx B");
-	memset(ctx_b.ble_scan_buf, 0xAA, sizeof(ctx_b.ble_scan_buf));
+	slave_reset();
+	g_scan_stage_ctx_b = true;
+	zassert_equal(cc3501e_ble_scan(&ctx_b, recs, 8u, &n, 100u), ALP_OK, "BLE_SCAN ctx B -> OK");
+	zassert_equal(n, 1u, "ctx B's distinct single-record reply parsed");
+	zassert_str_equal(recs[0].name, "Ctx2Dev", "ctx B decoded ITS OWN staged name");
 
 	zassert_mem_equal(fw.ble_scan_buf,
 	                  snapshot,
 	                  sizeof(snapshot),
-	                  "ctx A's BLE scan buffer must be unaffected by ctx B's storage (#740)");
+	                  "ctx A's BLE scan buffer must be unaffected by ctx B's OWN real scan (#740)");
 }
 
 ZTEST(cc3501e_host_driver, test_ble_scan_busy_rejects_reentrant_same_ctx_740)

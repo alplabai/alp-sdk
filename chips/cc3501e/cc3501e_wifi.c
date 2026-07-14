@@ -103,9 +103,14 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 	if (count != NULL) *count = 0;
 
 	/* Serialize same-context reentrancy explicitly (issue #740): a caller
-	 * (or a caller re-entering from another thread/ISR) that starts a second
-	 * scan on THIS ctx while one is already decoding here would otherwise
-	 * race on wifi_scan_buf below.  Report BUSY rather than alias. */
+	 * that re-enters this same ctx (e.g. from inside a callback invoked
+	 * further down the same call stack) while a scan is already decoding
+	 * here would otherwise race on wifi_scan_buf below.  Report BUSY rather
+	 * than alias.  NOTE this is a plain test-then-set bool, not an
+	 * atomic/CAS: it catches same-call-stack reentrancy but does not by
+	 * itself serialize two truly concurrent callers on the SAME ctx from
+	 * separate threads/cores -- see the concurrency warning on
+	 * cc3501e_poll_events() in <alp/chips/cc3501e/events.h>. */
 	if (ctx->wifi_scan_busy) return ALP_ERR_BUSY;
 	ctx->wifi_scan_busy = true;
 

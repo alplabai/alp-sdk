@@ -122,6 +122,18 @@ target_include_directories(alp_sdk PRIVATE
 
 if(ALP_SOM STREQUAL "aen")
     add_subdirectory(${_alp_sdk_root}/vendors/alif vendors_alif)
+    # The CC3501E Wi-Fi backend (src/backends/wifi/cc3501e.c) is otherwise
+    # reachable ONLY through zephyr/CMakeLists.txt's
+    # CONFIG_ALP_SDK_WIFI_CC3501E-gated build, which the plain-CMake
+    # strict-warnings job (.github/workflows/pr-plain-cmake.yml) never
+    # compiles -- so a narrowing bug like issue #742 (an unsigned-to-uint8_t
+    # conversion) had no -Wconversion gate anywhere.  The CC3501E companion is
+    # AEN-only (E1M-AEN carries Wi-Fi off-SoC), so wire the file into the
+    # baremetal-aen plain-CMake target too: it needs only alp_sdk_headers
+    # (no Zephyr-specific includes), and this target is already exercised by
+    # the strict-warnings baremetal-aen matrix entry with -Wconversion +
+    # -Werror.
+    target_sources(alp_sdk PRIVATE ${_alp_sdk_root}/src/backends/wifi/cc3501e.c)
 elseif(ALP_SOM STREQUAL "v2n")
     add_subdirectory(${_alp_sdk_root}/vendors/renesas-rzv2n vendors_renesas_rzv2n)
 endif()

@@ -57,7 +57,10 @@ alp_status_t cc3501e_ble_scan(cc3501e_t                 *ctx,
 
 	/* Serialize same-context reentrancy explicitly (issue #740), mirroring
 	 * cc3501e_wifi_scan: report BUSY rather than let a second in-flight scan
-	 * on THIS ctx race the decode below. */
+	 * on THIS ctx race the decode below.  Same non-atomic caveat as
+	 * cc3501e_wifi_scan -- catches same-call-stack reentrancy, not
+	 * concurrent multi-thread callers on the same ctx (see
+	 * cc3501e_poll_events()'s concurrency warning). */
 	if (ctx->ble_scan_busy) return ALP_ERR_BUSY;
 	ctx->ble_scan_busy = true;
 

@@ -31,11 +31,17 @@ alp_status_t cc3501e_poll_events(cc3501e_t *ctx)
 	/* Explicit reentrancy guard (issue #740): the callback below is handed
 	 * pointers INTO ctx->evt_buf, valid only for the duration of that one
 	 * call (the callback must copy anything it needs to keep).  If the
-	 * callback -- or another thread/ISR -- calls cc3501e_poll_events() again
-	 * on THIS ctx before we return, a second drain would overwrite evt_buf
-	 * out from under the walk still in progress here.  Reject the reentrant
-	 * call instead of aliasing; the caller's next scheduled poll picks up
-	 * whatever landed on the ring meanwhile. */
+	 * callback calls cc3501e_poll_events() again on THIS ctx before we
+	 * return, a second drain would overwrite evt_buf out from under the walk
+	 * still in progress here.  Reject the reentrant call instead of
+	 * aliasing; the caller's next scheduled poll picks up whatever landed on
+	 * the ring meanwhile.
+	 *
+	 * NOTE this is a plain test-then-set bool, not an atomic/CAS -- it
+	 * reliably catches same-call-stack reentrancy (this callback, or an ISR
+	 * that runs to completion before its interrupted thread resumes) but
+	 * does NOT by itself serialize two truly concurrent callers on the SAME
+	 * ctx from separate threads/cores (see <alp/chips/cc3501e/events.h>). */
 	if (ctx->evt_busy) return ALP_ERR_BUSY;
 	ctx->evt_busy = true;
 

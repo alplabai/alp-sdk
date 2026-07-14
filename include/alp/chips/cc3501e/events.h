@@ -51,11 +51,24 @@ alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, v
  *          for the duration of that one callback invocation -- copy anything
  *          you need to keep before returning. This call is NOT reentrant on
  *          the SAME @p ctx: calling it again on this ctx from inside the
- *          callback (or concurrently from another thread/ISR) returns
- *          @ref ALP_ERR_BUSY immediately rather than racing/aliasing the
- *          buffer the outer call is still walking (issue #740). Two
- *          DIFFERENT @p ctx instances never share storage and may be polled
- *          concurrently.
+ *          callback returns @ref ALP_ERR_BUSY immediately rather than
+ *          racing/aliasing the buffer the outer call is still walking
+ *          (issue #740). Two DIFFERENT @p ctx instances never share storage
+ *          and may be polled concurrently with no coordination.
+ *
+ * @warning NOT a thread-safe mutex: @c evt_busy is a plain (non-atomic)
+ *          test-then-set @c bool, not a compare-and-swap or an
+ *          interrupt-masked critical section. It reliably rejects
+ *          same-call-stack reentrancy (the callback documented above, or an
+ *          ISR whose handler runs to completion before the interrupted
+ *          thread resumes -- the single-core-M55/single-core-A55 case this
+ *          driver targets). It does NOT provide mutual exclusion against a
+ *          genuinely preemptive second caller on a DIFFERENT thread/core
+ *          racing this same ctx: two callers can both observe
+ *          @c evt_busy==false before either sets it, and both proceed into
+ *          @c evt_buf. An application that polls the SAME @p ctx from more
+ *          than one thread must serialize those calls itself (e.g. a mutex
+ *          around cc3501e_poll_events()).
  *
  * @param ctx  Initialised driver context.
  * @return ALP_OK once the queue was drained + dispatched (even with zero

@@ -119,9 +119,13 @@ const char *cc3501e_wifi_sec_name(uint16_t security_info);
  * @param count       Receives the number of records parsed (may be NULL).
  * @param timeout_ms  Upper bound on the poll-by-repeat budget.
  * @return ALP_OK once the scan completed (even with zero records);
+ *         @ref ALP_ERR_NOT_READY if @p ctx is NULL or not initialised;
  *         @ref ALP_ERR_BUSY if a scan is already decoding on this SAME
- *         @p ctx (reentrant/concurrent call -- issue #740; a different
- *         @p ctx is unaffected and may scan concurrently);
+ *         @p ctx (issue #740) -- a plain, non-atomic same-call-stack
+ *         reentrancy guard (see @ref cc3501e_poll_events's concurrency
+ *         warning; a caller polling one @p ctx from multiple threads must
+ *         serialize its own calls). A different @p ctx has entirely
+ *         separate storage and may always scan concurrently;
  *         ALP_ERR_TIMEOUT if the firmware stayed busy; mapped error otherwise.
  *
  * @note WIRE: the protocol header defines @ref alp_cc3501e_scan_result_t but
