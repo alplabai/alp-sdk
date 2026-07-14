@@ -7,6 +7,33 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Fixed — GD32 bridge OTA Path-A hardening
+
+`ota_slot_base_checked()` rejects any slot that is not A/B instead of silently
+mapping it to slot A (#741); `ota_image_bootable()` rejects a CRC-valid but
+truncated/vector-less image at COMMIT and before the bootloader jump (#755);
+the bootloader now orders both metadata records newest-first and falls back to
+an older bootable record when the newest fails validation (#754); the host
+gates OTA on protocol minor >= 6 so a current host cannot corrupt a pre-v0.6
+bridge via the v0.6 chunk-length reframing (#751); and `OTA_BEGIN` no longer
+erases the 236 KB slot synchronously (which stalled the SPI reply and hung the
+host) — it arms a background erase pumped from `bridge_hw_tick` and acks
+immediately (#770). Boot-select, dual-bank erase, and the background-erase path
+are silicon-validated on the GD32.
+
+### Added — GD32 bridge ADC/PWM/DSP
+
+ADC oversample + resolution control (#494), PWM center-aligned mode (#495), and
+ADC DSP runtime dispatch — FAC FIR/IIR filtering plus a hardware FFT spectrum
+path (#496).
+
+### Fixed — portable DSP + protocol layout guards
+
+`alp_dsp_stats_f32`'s CMSIS path rejects `size_t` lengths beyond the uint32_t
+block size instead of silently truncating (#734); compile-time `_Static_assert`
+layout guards protect the memcpy-serialized CC3501E protocol payloads and the
+GD32 OTA on-flash structs against silent padding/offset drift (#733).
+
 ### Added — reproducible release: SBOM + deterministic tarball (#610 §7 slice 2)
 
 - `scripts/gen_sbom.py` emits a deterministic CycloneDX 1.5 SBOM from `alp.lock`
