@@ -353,6 +353,18 @@ static alp_status_t y_aead_decrypt(alp_aead_backend_state_t *state,
 
 out:
 	EVP_CIPHER_CTX_free(ctx);
+	if (status != ALP_OK && cipher_len > 0) {
+		/* Discard contract (<alp/security.h> alp_aead_decrypt(), issue
+		 * #750): EVP_DecryptUpdate() above already streamed unverified
+		 * plaintext into plain_out before EVP_DecryptFinal_ex() checked
+		 * the tag -- wipe it on every failure path so a tag mismatch or
+		 * earlier EVP_* failure never leaves it caller-visible.  The
+		 * dispatcher (security_dispatch.c) enforces this centrally too;
+		 * this is defence-in-depth so the backend behaves correctly even
+		 * if called some other way. */
+		memset(plain_out, 0, cipher_len);
+		__asm__ volatile("" ::: "memory");
+	}
 	return status;
 }
 

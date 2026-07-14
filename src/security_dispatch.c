@@ -73,6 +73,35 @@ ALP_BACKEND_ANCHOR(security);
 static struct alp_hash _hash_pool[CONFIG_ALP_SDK_MAX_HASH_HANDLES];
 static struct alp_aead _aead_pool[CONFIG_ALP_SDK_MAX_AEAD_HANDLES];
 
+/**
+ * @brief Enforce the <alp/security.h> alp_aead_decrypt() discard contract.
+ *
+ * "On any non-ALP_OK return the whole buffer is wiped per the discard
+ * contract" -- issue #750: this was left to each backend individually,
+ * and two of them (the Yocto/OpenSSL and SE-CryptoCell backends) never
+ * wiped @p plain_out on a tag mismatch or transport error, leaving
+ * unauthenticated plaintext caller-visible.  Doing it here means every
+ * backend gets it -- including a future one that forgets -- rather than
+ * relying on backend-local discipline as the only line of defence.
+ *
+ * No shared secure-zeroize helper exists elsewhere in the tree (grepped
+ * for `zeroize`/`secure_zero`/`explicit_bzero`/`memset_s` -- none), so
+ * this follows the one idiom the codebase already uses for exactly this
+ * problem (src/backends/security/se_cryptocell.c's key-material wipes):
+ * memset() immediately followed by an empty `asm volatile("" ::: "memory")`
+ * compiler barrier.  The barrier is what keeps an optimizer that can prove
+ * @p plain_out is dead past this point (routine right before a function
+ * return) from eliding the memset() as a dead store.
+ */
+static void _wipe_aead_output(uint8_t *plain_out, size_t len)
+{
+	if (plain_out == NULL || len == 0) {
+		return;
+	}
+	memset(plain_out, 0, len);
+	__asm__ volatile("" ::: "memory");
+}
+
 static struct alp_hash *_alloc_hash(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_HASH_HANDLES; ++i) {
@@ -405,6 +434,12 @@ alp_status_t alp_aead_decrypt(alp_aead_t    *a,
 		    &a->state, iv, iv_len, aad, aad_len, cipher, cipher_len, tag, tag_len, plain_out);
 	}
 	alp_handle_op_leave(&a->active_ops);
+	/* Discard-contract enforcement (issue #750) -- see _wipe_aead_output().
+	 * Unconditional on every non-OK return, regardless of which backend
+	 * ran or how far it got before failing. */
+	if (rc != ALP_OK) {
+		_wipe_aead_output(plain_out, cipher_len);
+	}
 	return rc;
 }
 

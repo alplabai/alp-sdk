@@ -253,6 +253,71 @@ static void test_aead_tag_mismatch_rejects(void)
 	alp_aead_close(a);
 }
 
+static void test_aead_tag_mismatch_wipes_output(void)
+{
+	/* Regression for issue #750: the Yocto/OpenSSL backend
+     * (y_aead_decrypt, src/backends/security/yocto_drv.c) streamed
+     * unverified plaintext into plain_out via EVP_DecryptUpdate()
+     * before EVP_DecryptFinal_ex() checked the tag, then returned
+     * ALP_ERR_IO on a mismatch WITHOUT wiping it -- unauthenticated
+     * plaintext stayed caller-visible.  <alp/security.h>
+     * alp_aead_decrypt() requires the whole output buffer wiped on
+     * any non-ALP_OK return; assert every byte is zero, not merely
+     * that the call failed. */
+	uint8_t       key[16] = { 0 };
+	uint8_t       iv[12]  = { 0 };
+	const uint8_t plain[] = "ABCDEFGHIJ";
+
+	alp_aead_t *a = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
+	ALP_ASSERT_TRUE(a != NULL);
+	uint8_t cipher[sizeof(plain)];
+	uint8_t tag[16];
+	ALP_ASSERT_EQ_INT(
+	    alp_aead_encrypt(
+	        a, iv, sizeof(iv), NULL, 0, plain, sizeof(plain) - 1, cipher, tag, sizeof(tag)),
+	    ALP_OK);
+	tag[0] ^= 0xFFu;
+
+	uint8_t recovered[sizeof(plain) - 1];
+	memset(recovered, 0xCCu, sizeof(recovered)); /* sentinel, not zero */
+	ALP_ASSERT_EQ_INT(
+	    alp_aead_decrypt(
+	        a, iv, sizeof(iv), NULL, 0, cipher, sizeof(plain) - 1, tag, sizeof(tag), recovered),
+	    ALP_ERR_IO);
+
+	uint8_t zero[sizeof(plain) - 1] = { 0 };
+	ALP_ASSERT_TRUE(memcmp(recovered, zero, sizeof(recovered)) == 0);
+
+	alp_aead_close(a);
+}
+
+static void test_aead_zero_length_decrypt_still_valid(void)
+{
+	/* Acceptance criterion: the wipe-on-failure fix must not regress
+     * the zero-length (AAD-only, no ciphertext) success path. */
+	uint8_t       key[16] = { 0 };
+	uint8_t       iv[12]  = { 0 };
+	const uint8_t aad[]   = "header-only";
+
+	alp_aead_t *a = alp_aead_open(ALP_AEAD_AES_128_GCM, key, sizeof(key));
+	ALP_ASSERT_TRUE(a != NULL);
+
+	uint8_t cipher_dummy = 0;
+	uint8_t plain_dummy  = 0;
+	uint8_t tag[16];
+	ALP_ASSERT_EQ_INT(
+	    alp_aead_encrypt(
+	        a, iv, sizeof(iv), aad, sizeof(aad) - 1, NULL, 0, &cipher_dummy, tag, sizeof(tag)),
+	    ALP_OK);
+
+	ALP_ASSERT_EQ_INT(
+	    alp_aead_decrypt(
+	        a, iv, sizeof(iv), aad, sizeof(aad) - 1, NULL, 0, tag, sizeof(tag), &plain_dummy),
+	    ALP_OK);
+
+	alp_aead_close(a);
+}
+
 static void test_aead_bad_key_length_refused(void)
 {
 	uint8_t     short_key[8]; /* AES-128 needs 16. */
@@ -331,6 +396,8 @@ int main(void)
 	test_aes_128_gcm_roundtrip();
 	test_chacha20_poly1305_roundtrip();
 	test_aead_tag_mismatch_rejects();
+	test_aead_tag_mismatch_wipes_output();
+	test_aead_zero_length_decrypt_still_valid();
 	test_aead_bad_key_length_refused();
 	test_aead_null_key_refused();
 	test_aead_unsupported_alg_refused();
