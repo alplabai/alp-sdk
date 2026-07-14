@@ -28,6 +28,8 @@
 #ifndef GD32_BRIDGE_OTA_LAYOUT_H
 #define GD32_BRIDGE_OTA_LAYOUT_H
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define OTA_PAGE_SIZE 0x00000800u /* 2 KB single-bank page */
@@ -89,9 +91,102 @@ typedef struct {
 	uint32_t rec_crc32;     /* CRC-32 over this record excluding this field */
 } ota_meta_record_t;
 
-static inline uint32_t ota_slot_base(uint8_t slot)
+/* On-flash layout guards (#733).  BOTH structs are serialized by raw byte
+ * access: the bootloader byte-copies a flash record and CRCs the raw
+ * bytes, and ota.c programs them to flash verbatim.  Their in-memory
+ * layout therefore IS the on-flash / CRC-covered format -- any compiler
+ * padding change or field reorder silently invalidates every stored
+ * record's CRC and can brick the boot path.  These are all naturally
+ * aligned (u32/u8 + explicit pad), so the layout is deterministic without
+ * packing (which would add unaligned-access hazards).  Assert the exact
+ * size + every field offset so a struct edit fails the build instead of
+ * the field on flash; rec_crc32's offset also anchors the CRC span the
+ * bootloader/app compute (offsetof(..., rec_crc32)). */
+_Static_assert(sizeof(ota_meta_record_t) == 44u, "ota_meta_record_t on-flash size drifted");
+_Static_assert(offsetof(ota_meta_record_t, magic) == 0u, "meta.magic offset");
+_Static_assert(offsetof(ota_meta_record_t, struct_version) == 4u, "meta.struct_version offset");
+_Static_assert(offsetof(ota_meta_record_t, counter) == 8u, "meta.counter offset");
+_Static_assert(offsetof(ota_meta_record_t, active_slot) == 12u, "meta.active_slot offset");
+_Static_assert(offsetof(ota_meta_record_t, slot_valid) == 13u, "meta.slot_valid offset");
+_Static_assert(offsetof(ota_meta_record_t, fw_version) == 16u, "meta.fw_version offset");
+_Static_assert(offsetof(ota_meta_record_t, img_len) == 24u, "meta.img_len offset");
+_Static_assert(offsetof(ota_meta_record_t, img_crc32) == 32u, "meta.img_crc32 offset");
+_Static_assert(offsetof(ota_meta_record_t, rec_crc32) == 40u, "meta.rec_crc32 offset");
+
+_Static_assert(sizeof(ota_img_header_t) == 84u, "ota_img_header_t on-flash size drifted");
+_Static_assert(offsetof(ota_img_header_t, magic) == 0u, "img.magic offset");
+_Static_assert(offsetof(ota_img_header_t, fmt_version) == 4u, "img.fmt_version offset");
+_Static_assert(offsetof(ota_img_header_t, img_len) == 8u, "img.img_len offset");
+_Static_assert(offsetof(ota_img_header_t, fw_version) == 12u, "img.fw_version offset");
+_Static_assert(offsetof(ota_img_header_t, body_crc32) == 16u, "img.body_crc32 offset");
+_Static_assert(offsetof(ota_img_header_t, signature) == 20u, "img.signature offset");
+
+/* Derive a slot's flash base with EXPLICIT validation.  The old
+ * `ota_slot_base` silently mapped every non-B value (incl. a corrupt
+ * active_slot from persisted metadata) to slot A, so callers could not
+ * tell a rejected slot from slot A and might erase / program / verify /
+ * boot the wrong region (#741).  This returns false for any slot that
+ * is not OTA_SLOT_A/B; callers MUST check before using *base_out. */
+static inline bool ota_slot_base_checked(uint8_t slot, uint32_t *base_out)
 {
-	return (slot == OTA_SLOT_B) ? OTA_SLOT_B_BASE : OTA_SLOT_A_BASE;
+	if (slot == OTA_SLOT_A) {
+		*base_out = OTA_SLOT_A_BASE;
+		return true;
+	}
+	if (slot == OTA_SLOT_B) {
+		*base_out = OTA_SLOT_B_BASE;
+		return true;
+	}
+	return false;
+}
+
+/* Minimum bootable image = at least the initial-MSP + reset-vector
+ * words at the slot base (the boot path jumps via those two). */
+#define OTA_IMG_MIN_LEN 8u
+
+/* GD32G553 SRAM window a plausible initial MSP must fall in.  Upper
+ * bound is generous (covers >128 KB parts) so a valid image is never
+ * rejected; the point is to reject a garbage MSP, not size RAM exactly. */
+#define OTA_SRAM_BASE 0x20000000u
+#define OTA_SRAM_END  0x20040000u
+
+/* Semantic bootability check for a slot's image, beyond the host CRC
+ * (#755).  A CRC-valid one-byte / truncated / vector-less image would
+ * otherwise pass COMMIT and boot -- the bootloader then reads incomplete
+ * MSP/reset words and branches to an invalid address, bricking the part.
+ * Require: length covers the MSP+reset head; the initial MSP points into
+ * SRAM and is word-aligned; the reset vector lands inside the image and
+ * has the Thumb bit set.
+ *
+ * @p base is the slot's ABSOLUTE flash base (for the reset-range check);
+ * @p img is a readable pointer to the image bytes (identical to base on
+ * memory-mapped silicon; a HAL-provided pointer under the OTA fake-flash
+ * unit tests); @p len is the metadata-recorded, CRC-checked length. */
+static inline bool ota_image_bootable(uint32_t base, const uint8_t *img, uint32_t len)
+{
+	if (len < OTA_IMG_MIN_LEN || img == 0) {
+		return false;
+	}
+	uint32_t msp, reset;
+	/* byte-wise load: img may be unaligned and const */
+	msp   = (uint32_t)img[0] | ((uint32_t)img[1] << 8) | ((uint32_t)img[2] << 16) |
+	        ((uint32_t)img[3] << 24);
+	reset = (uint32_t)img[4] | ((uint32_t)img[5] << 8) | ((uint32_t)img[6] << 16) |
+	        ((uint32_t)img[7] << 24);
+	if ((msp & 3u) != 0u) {
+		return false; /* MSP must be word-aligned */
+	}
+	if (msp < OTA_SRAM_BASE || msp > OTA_SRAM_END) {
+		return false; /* MSP must point into SRAM */
+	}
+	if ((reset & 1u) == 0u) {
+		return false; /* reset vector must have the Thumb bit set */
+	}
+	const uint32_t reset_addr = reset & ~1u;
+	if (reset_addr < base || reset_addr >= base + len) {
+		return false; /* reset must land inside the image */
+	}
+	return true;
 }
 
 #endif /* GD32_BRIDGE_OTA_LAYOUT_H */

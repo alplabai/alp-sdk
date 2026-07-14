@@ -62,14 +62,15 @@ byte; their numeric encoding is:
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
 | `0x61` | `QENC_RESET`          | `encoder:u8`                                       | _empty_                                            |
 | `0x70` | `COUNTER_READ`        | `counter:u8`                                       | `ticks:u32`                                        |
-| `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_ (defaults only -- see §3.8; non-default `align`/`dead_time_ns`/`break_cfg` return `STATUS_NOSUPPORT`, tracked #495) |
-| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (`sample_cycles` sticky -- see §3.9; non-default `oversample`/`resolution` return `STATUS_NOSUPPORT`, tracked #494) |
+| `0x22` | `PWM_CONFIGURE`       | `channel:u8 align:u8 dead_time_ns:u32 break_cfg:u8` | _empty_ (see §3.8; `align` applied, `dead_time_ns`/`break_cfg` return `STATUS_NOSUPPORT` -- V2N routes only single-ended outputs / no BRK pad) |
+| `0x32` | `ADC_CONFIGURE`       | `channel:u8 reserved:u8 oversample:u16 sample_cycles:u16 resolution:u8` | _empty_ (see §3.9; `sample_cycles`/`oversample`/6-12b `resolution` sticky; 14/16b return `STATUS_NOSUPPORT`) |
 | `0x33` | `ADC_STREAM_BEGIN`    | `stream_id:u8 channel:u8 reserved:u8 sample_rate_hz:u32` | _empty_                                      |
 | `0x34` | `ADC_STREAM_READ`     | `stream_id:u8 max_samples:u8`                      | `got:u8 mv[max_samples]:u16` (zero-padded)         |
 | `0x35` | `ADC_STREAM_END`      | `stream_id:u8`                                     | _empty_                                            |
 | `0x80` | `TRNG_READ`           | `len:u8` (1..32)                                   | `random_bytes[len]`                                |
 | `0x90` | `TMU_COMPUTE`         | `function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32` | `result:u32`                                  |
 | `0x36` | `ADC_STREAM_CONFIGURE_DSP` | _(reserved tombstone -- see §3.x)_             | _(empty; returns `STATUS_NOSUPPORT` permanently -- use `CMD_ADC_DSP_CHAIN_*` instead)_ |
+| `0x3A` | `ADC_SPECTRUM_READ`   | `stream_id:u8 bin_offset:u16 max_bins:u8`          | `seq:u32 total_bins:u16 got:u8 bins[max_bins]:f32` (see §3.x -- FFT-terminal chains; `STATUS_NOSUPPORT` if not FFT-bound, `STATUS_BUSY` before first frame) |
 | `0x23` | `PWM_CAPTURE_BEGIN`   | `channel:u8 edge:u8`                                  | _empty_ (see §3.y -- reconfigures the pad as input-capture) |
 | `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOSUPPORT` ("ring empty") until an edge lands; no edges land on this V2N HW rev pending a pad-routing rework) |
 | `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _empty_                                            |
@@ -165,13 +166,22 @@ surface lives in [`<alp/adc.h>`](../include/alp/adc.h)
 (`alp_adc_filter_t` / `alp_adc_spectrum_t`) plus the standalone
 in-RAM chain primitives in [`<alp/dsp.h>`](../include/alp/dsp.h).
 
-Three opcodes own the upload path, and all three are implemented
-today: `chain_open` / `stage_push` / `chain_bind` allocate, upload,
-validate, and bind a chain (see the per-opcode subsections below).
-What has NOT landed yet is the runtime side -- a bound chain's
-stages are not applied to the stream's samples.
-`CMD_ADC_STREAM_READ` still emits raw mV values from the DMA ring
-regardless of any bound chain (tracked #496).  The host-side
+Three opcodes own the upload path -- `chain_open` / `stage_push` /
+`chain_bind` allocate, upload, validate, and bind a chain (see the
+per-opcode subsections below) -- and the **runtime side is now
+implemented (#496)**: a bound chain's stages transform the stream's
+samples through the GD32 FAC (FIR/IIR) or FFT hardware block in a
+base-level pump.  What a bound chain does to the reads:
+
+* **FIR/IIR terminal:** `CMD_ADC_STREAM_READ` returns FILTERED mV
+  (same wire format as the raw read) drained from the pump's
+  processed ring.
+* **FFT terminal:** `CMD_ADC_STREAM_READ` returns `STATUS_NOSUPPORT`;
+  the spectrum is pulled with `CMD_ADC_SPECTRUM_READ` (`0x3A`).
+
+One FAC and one FFT block exist, so at most one filter stream and one
+FFT stream may be bound at a time; a second `chain_bind` of the same
+class returns `STATUS_NOSUPPORT`.  The host-side
 standalone API in `<alp/dsp.h>` ships working in v0.5.0 (runs the
 chain locally with CMSIS-DSP or the portable C fallback over
 in-RAM buffers), so application code can test against the same
@@ -251,22 +261,19 @@ eventually completes every staged kind before binding.
 
 Attaches a fully-populated chain to a streaming ADC source that
 was previously opened with `CMD_ADC_STREAM_BEGIN` (opcode
-`0x33`).  The firmware validates the chain and stores the binding
-on both sides (see the failure conditions below), but does not yet
-change what `CMD_ADC_STREAM_READ` returns -- the runtime dispatch
-that would route the stream's samples through the bound chain
-(instead of the raw mV values the DMA ring already emits) has not
-landed (tracked #496).  Once it does, the read reply's payload
-format is expected to become mode-dependent on the chain's
-terminal stage:
+`0x33`).  The firmware validates the chain, stores the binding on
+both sides, and **routes the stream's samples through the bound
+chain at runtime (#496)**.  What the reads return then depends on
+the chain's terminal stage:
 
-* No FFT terminal: filter samples (`i16` for Q31 coefficients,
-  `i16` shape-equivalent for F32 -- bridge-mapped to mV
-  semantics for compatibility with the legacy raw read path).
-* FFT terminal with `output_format == COMPLEX`:  interleaved
-  `(re, im)` f32 pairs.
-* FFT terminal with `output_format == MAGNITUDE`:  per-bin f32
-  magnitudes (half the wire bandwidth of COMPLEX).
+* **FIR/IIR terminal:** `CMD_ADC_STREAM_READ` returns FILTERED mV
+  (same `i16`/mV wire format as the raw read).  Wire Q31/F32
+  coefficients are mapped to the FAC's Q15 at bind.
+* **FFT terminal:** `CMD_ADC_STREAM_READ` returns `STATUS_NOSUPPORT`;
+  the spectrum is read with `CMD_ADC_SPECTRUM_READ` (`0x3A`),
+  formatted per the FFT stage's `output_format` (COMPLEX =
+  interleaved `(re,im)` f32; MAGNITUDE / MAGNITUDE_ONESIDED =
+  per-bin f32 magnitudes).
 
 `CHAIN_BIND` fails (`STATUS_INVAL`) if:
 
@@ -276,6 +283,26 @@ terminal stage:
   range was not covered),
 * the chain violates the ordering rules from `<alp/dsp.h>` (FFT
   must be terminal; WINDOW must immediately precede FFT).
+
+It returns `STATUS_NOSUPPORT` when the single FAC (FIR/IIR) or FFT
+hardware block is already serving another bound stream.
+
+#### `CMD_ADC_SPECTRUM_READ` (`0x3A`)
+
+| Direction | Layout                                                              |
+|-----------|--------------------------------------------------------------------|
+| Request   | `stream_id:u8 bin_offset:u16 max_bins:u8`                           |
+| Reply     | `seq:u32 total_bins:u16 got:u8 bins[max_bins]:f32` (zero-padded)    |
+
+Reads one chunk of the latest completed FFT frame for a stream bound
+to an FFT-terminal chain.  The firmware runs the HW FFT on each full
+N-point window and publishes the reduced bins (`total_bins` =
+`N` complex-pairs*2 / `N` magnitude / `N/2+1` magnitude-onesided);
+`seq` increments per frame so a host fetching a spectrum across
+several chunks can detect a frame roll.  `max_bins` is capped at
+`GD32G553_BRIDGE_ADC_SPECTRUM_READ_MAX` (14) to keep the fixed reply
+inside the wire envelope.  Returns `STATUS_NOSUPPORT` if the stream
+isn't FFT-bound, `STATUS_BUSY` before the first frame completes.
 
 #### Tombstone: `CMD_ADC_STREAM_CONFIGURE_DSP` (`0x36`)
 
@@ -432,14 +459,32 @@ the first `PWM_SET` a channel reports the boot default (65.536 ms
 period, 0 duty).  Callers that need exact frequency confirmation
 should read back rather than recompute.
 
-**Current GD32 HAL status:** only the default configuration is
-applied.  `bridge_hw_pwm_configure()` accepts `align_mode == 0`,
-`dead_time_ns == 0`, and `break_cfg == 0` (the reset defaults
-`pwm_timer_init()` already programs); any non-default value
-returns `STATUS_NOSUPPORT`.  Center-aligned modes, dead-time, and
-break-input configuration need a per-timer apply path (these
-fields are shared across the sibling channels of a `TIMER0`/
-`TIMER7` timer) that has not landed yet (tracked #495).
+**Current GD32 HAL status (#495: alignment landed):**
+`bridge_hw_pwm_configure()` applies `align_mode` (`0` edge, `1`
+center-up, `2` center-down, `3` center-both) to the channel's timer.
+`CAM` is timer-wide, so the mode is shared by the four sibling channels
+of a `TIMER0`/`TIMER7` (last write wins) and `PWM_SET`/`PWM_GET` convert
+period/duty accordingly (a center-aligned counter runs `0->ARR->0`, so
+period is `2*ARR` ticks).  An out-of-range `align_mode` returns
+`STATUS_INVAL`.  Two consequences of the shared, doubled counter worth
+noting: switching a timer to a center-aligned mode **re-times any
+sibling channel already running** (its physical period doubles until
+the host re-issues `PWM_SET`), and center-aligned period/duty quantise
+to `2 us` (the `ARR`/compare are the commanded microseconds halved), so
+the minimum non-zero duty is `2 us` and odd values round down.
+`PWM_SINGLE_PULSE` (`0x26`) is edge-aligned only and returns
+`STATUS_NOSUPPORT` while its timer is center-aligned -- set `align_mode`
+back to `0` first.
+
+`dead_time_ns` and `break_cfg` still return `STATUS_NOSUPPORT` -- but on
+V2N this is a **hardware-routing** limit, not an unimplemented feature.
+The E1M PWM connector exposes only each channel's *complementary* output
+(`CHxN`); the main `CHx` is not routed, so there is no complementary
+pair for a dead-time gap to act on.  Likewise the V2N
+`gd32-io-mcu-map.tsv` routes no `BRK` pad, so break-input logic could be
+armed but never triggered.  Both knobs are therefore physically inert on
+this board; a future carrier that routes the complementary pair / a
+`BRK` pad would lift the restriction.
 
 ### 3.9 ADC configure (`v0.3+`)
 
@@ -453,24 +498,43 @@ reply is empty.
 * `oversample_ratio` is one of 1/2/4/8/16/32/64/128/256.  0 means
   "firmware default" (per-channel-configured at build time).  The
   firmware rounds down to the nearest power-of-two.
-* `sample_cycles` is one of the eight datasheet-defined sample-time
-  steps (2/6/12/24/47/92/247/640 cycles per GD32G553 RM §16.4.6);
-  0 means "firmware default".  Rounds down.
-* `resolution_bits` is 0 (default) / 6 / 8 / 10 / 12 / 14 / 16.
-  14- and 16-bit modes require `oversample_ratio >= 4` and `>= 16`
-  respectively per the datasheet's effective-resolution table; the
-  firmware enforces.  Unsupported widths reply with `STATUS_INVAL`.
+* `sample_cycles` is a direct sample-and-hold cycle count written to
+  the routine-sequence `SMP` field (GD32G5x3 accepts `2..638` ADCCK);
+  the firmware clamps into that range.  `0` means "firmware default"
+  (240 cycles) -- a `0` here is NOT the fastest window, so an
+  oversample-only reconfigure keeps the settling time its high-Z
+  inputs need.
+* `resolution_bits` is 0 (default = 12) / 6 / 8 / 10 / 12 (hardware
+  `DRES`) / 14 / 16.  The mV conversion divides by the width's
+  full-scale (`4095`/`1023`/`255`/`63` for 12/10/8/6).  `14`/`16` are
+  effective-resolution modes reachable only by under-shifting an
+  oversampled accumulator (the `DRES` field tops out at 12-bit); that
+  extension has not landed, so they reply `STATUS_NOSUPPORT`.  Any
+  other width replies `STATUS_INVAL`.
 
 The GD32 returns ADC readings as 16-bit millivolts (`ADC_READ` /
 `ADC_STREAM_READ` reply payload format unchanged); higher
 oversampling improves the effective-resolution / SNR of the
 returned values but doesn't widen the on-wire word.
 
-**Current GD32 HAL status:** only `sample_cycles` is sticky.
-`bridge_hw_adc_configure()` accepts `oversample_ratio == 1` and
-`resolution_bits == 12` (the defaults); any other value returns
-`STATUS_NOSUPPORT`.  The oversampling-apply and alternate-
-resolution paths have not landed yet (tracked #494).
+**Current GD32 HAL status (#494 landed):** `sample_cycles`,
+`oversample_ratio`, and `resolution_bits` are all sticky.
+`bridge_hw_adc_configure()` programs the channel's cached format into
+the converter on the next `ADC_READ` / `ADC_STREAM_BEGIN` (inside the
+`ADCON == 0` window `DRES`/`OVSAMPCTL` require):
+
+* `oversample_ratio` `0`/`1` disables oversampling; any larger value is
+  floored to the nearest power of two in `2..256` and applied with a
+  matching `OVSS` right-shift so the result stays at the resolution's
+  full-scale (the on-wire mV word is unchanged; oversampling improves
+  SNR).
+* `resolution_bits` `0` means default (12); `6`/`8`/`10`/`12` map to the
+  hardware `DRES` field and the mV conversion divides by that width's
+  full-scale (`4095`/`1023`/`255`/`63`).  `14`/`16` are
+  effective-resolution modes reachable only by under-shifting an
+  oversampled accumulator (the `DRES` field tops out at 12-bit); that
+  extension has not landed, so they still return `STATUS_NOSUPPORT`.
+  Any other width returns `STATUS_INVAL`.
 
 ### 3.10 ADC streaming (`v0.3+`)
 
@@ -941,6 +1005,15 @@ including `minor`**: a pre-production minor may revise a
 pre-production opcode's payload (v0.6 did this to `OTA_WRITE_CHUNK`),
 and the major-only handshake cannot detect that — do not mix a v0.5
 host with v0.6 firmware or vice versa.
+
+Because that mismatch is undetectable by `major` alone yet corrupts a
+flashed image (v0.5 firmware reads the v0.6 chunk **length byte** as
+image data), the host driver **gates the OTA session on `minor`**: an
+OTA cannot start against a peer below `GD32G553_OTA_MIN_PROTOCOL_MINOR`
+(6). `gd32g553_ota_begin` / `gd32g553_ota_write_chunk` return
+`ALP_ERR_NOSUPPORT` **before any erase or program**, and
+`gd32g553_ota_supported()` lets a host check up front (#751). Other
+opcodes remain governed by the exact-lockstep rule above.
 
 Version history (pre-1.0): **v0.7** adds `LINK_FEATURES` (0x81) +
 the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the

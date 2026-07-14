@@ -167,7 +167,7 @@ config ALP_MODBUS_SYNC_IO
 	default y
 
 # ----------------------------------------------------------------------
-# IoT libs (coremqtt_sn / libcoap / tinygsm / nanopb / libwebsockets /
+# IoT libs (coremqtt_sn / libcoap / nanopb / libwebsockets /
 # jsmn / bearssl)
 # ----------------------------------------------------------------------
 
@@ -185,12 +185,6 @@ config ALP_COAP_OSCORE
 	bool "libcoap with OSCORE"
 config ALP_COAP_NO_TLS
 	bool "libcoap without TLS (SW fallback)"
-	default y
-
-config ALP_TINYGSM_UART_DMA
-	bool "TinyGSM UART traffic with DMA"
-config ALP_TINYGSM_SYNC_IO
-	bool "TinyGSM synchronous UART (SW fallback)"
 	default y
 
 config ALP_NANOPB_SW
@@ -224,7 +218,7 @@ config ALP_BEARSSL_PURE_C
 	default y
 
 # ----------------------------------------------------------------------
-# Audio libs (minimp3 / opus / libhelix)
+# Audio libs (minimp3 / opus)
 # ----------------------------------------------------------------------
 
 config ALP_MINIMP3_HELIUM
@@ -249,14 +243,6 @@ config ALP_OPUS_I2S_DMA
 	bool "Opus PCM out via I2S DMA"
 config ALP_OPUS_PURE_C
 	bool "Opus pure-C (SW fallback)"
-	default y
-
-config ALP_LIBHELIX_FPU
-	bool "libhelix with FPU"
-config ALP_LIBHELIX_I2S_DMA
-	bool "libhelix PCM out via I2S DMA"
-config ALP_LIBHELIX_PURE_C
-	bool "libhelix pure-C (SW fallback)"
 	default y
 
 # ----------------------------------------------------------------------

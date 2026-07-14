@@ -1,7 +1,7 @@
 {
   "digests": {
-    "metadata": "sha256:86aa85d730350351e8cf1935961eb6a233c0c7257984eb2b91d92432b25c4474",
-    "schemas": "sha256:cefc895d8e7bc5894f44a16bd0d3440c7074f4cad7b8df0a473ab930f776888c"
+    "metadata": "sha256:9afc3c6ed2b502af0f3b0687fa9f0041c51298d559aaeaca9ff494936b4b2b16",
+    "schemas": "sha256:cd8eb4313ed437d2d76aad751e194301c37461d486d260a933769c4cac500200"
   },
   "generatedBy": "west alp-lock",
   "libraries": [
@@ -18,10 +18,22 @@
       "version": "1.5.0"
     },
     {
+      "license": "MIT",
+      "name": "bearssl",
+      "revision": null,
+      "version": "master"
+    },
+    {
       "license": "Apache-2.0",
       "name": "canopennode",
       "revision": "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd",
       "version": "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd"
+    },
+    {
+      "license": "BSL-1.0",
+      "name": "catch2",
+      "revision": null,
+      "version": "3.7.1"
     },
     {
       "license": "Apache-2.0",
@@ -43,6 +55,54 @@
     },
     {
       "license": "MIT",
+      "name": "coremqtt-sn",
+      "revision": null,
+      "version": "v1.0.1"
+    },
+    {
+      "license": "MIT",
+      "name": "doctest",
+      "revision": null,
+      "version": "2.4.11"
+    },
+    {
+      "license": "MIT",
+      "name": "etl",
+      "revision": null,
+      "version": "20.39.4"
+    },
+    {
+      "license": "MIT",
+      "name": "fmt",
+      "revision": null,
+      "version": "11.0.2"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "gfx-compat",
+      "revision": null,
+      "version": "1a7b16034ec123e92c25e9ec13fb3508e7041a23"
+    },
+    {
+      "license": "MIT",
+      "name": "jsmn",
+      "revision": null,
+      "version": "1.1.0"
+    },
+    {
+      "license": "MIT",
+      "name": "libwebsockets",
+      "revision": null,
+      "version": "v4.3.4"
+    },
+    {
+      "license": "BSD-3-Clause",
+      "name": "littlefs",
+      "revision": null,
+      "version": "2.11"
+    },
+    {
+      "license": "MIT",
       "name": "lvgl",
       "revision": null,
       "version": "9.5.0"
@@ -52,6 +112,18 @@
       "name": "lwm2m",
       "revision": null,
       "version": "4.4.0"
+    },
+    {
+      "license": "MIT",
+      "name": "madgwick-ahrs",
+      "revision": null,
+      "version": "unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "mbedtls",
+      "revision": null,
+      "version": "4.1.0"
     },
     {
       "license": "Apache-2.0",
@@ -66,6 +138,12 @@
       "version": "v1.24.1"
     },
     {
+      "license": "CC0-1.0",
+      "name": "minimp3",
+      "revision": null,
+      "version": "master"
+    },
+    {
       "license": "Apache-2.0",
       "name": "modbus",
       "revision": null,
@@ -78,10 +156,40 @@
       "version": "0.4.9.1"
     },
     {
+      "license": "MIT",
+      "name": "nlohmann-json",
+      "revision": null,
+      "version": "3.11.3"
+    },
+    {
+      "license": "BSD-3-Clause",
+      "name": "opus",
+      "revision": null,
+      "version": "v1.5.2"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "pid",
+      "revision": null,
+      "version": "0.9.0"
+    },
+    {
       "license": "Apache-2.0",
       "name": "ros2",
       "revision": null,
       "version": "humble"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "tflite-micro",
+      "revision": null,
+      "version": "fcc760af130f3a595b5802cdebcc77461e54f382"
+    },
+    {
+      "license": "BSD-2-Clause",
+      "name": "u8g2",
+      "revision": null,
+      "version": "2.36.5"
     },
     {
       "license": "Apache-2.0",
@@ -105,7 +213,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "98aa82bd4f20503d20400e9edf8fd1a462a29fed",
+    "revision": "90b14adedb5280c5281d8c87d7ede2b186c2e095",
     "version": "0.9.0"
   },
   "west": {
@@ -129,13 +237,6 @@
         ],
         "name": "Catch2",
         "revision": "v3.7.1"
-      },
-      {
-        "groups": [
-          "extras-tier1"
-        ],
-        "name": "TinyGSM",
-        "revision": "v0.11.7"
       },
       {
         "groups": [
@@ -197,13 +298,6 @@
         ],
         "name": "libcoap",
         "revision": "v4.3.5"
-      },
-      {
-        "groups": [
-          "extras-tier1"
-        ],
-        "name": "libhelix",
-        "revision": "0a0e0673f82bc6804e5a3ddb15fb6efdcde747cd"
       },
       {
         "groups": [

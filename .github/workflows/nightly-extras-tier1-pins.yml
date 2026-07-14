@@ -2,7 +2,7 @@
 #
 # Nightly + on-demand fetch check for the `extras-tier1` west group.
 #
-# The §D.lib batch added 13 upstream library pins to `west.yml`
+# The §D.lib batch added upstream library pins to `west.yml`
 # behind the `extras-tier1` group (default off).  This workflow:
 #   1. Runs `west init -l . && west update --group-filter +extras-tier1`
 #      with `--narrow --depth 1` to grab just the pinned revisions.
@@ -10,10 +10,10 @@
 #      ends up populated.
 #
 # Status policy:
-#   - 9 "stable" libraries (u8g2, libcoap, tinygsm, libwebsockets,
+#   - 8 "stable" libraries (u8g2, libcoap, libwebsockets,
 #     jsmn, opus, Catch2, libmodbus, coreMQTT-SN) are pinned to
 #     tagged releases.  These FAIL the workflow if the pin breaks.
-#   - 4 "TBD" libraries (minimp3, libhelix, bearssl, madgwick_ahrs)
+#   - 3 "TBD" libraries (minimp3, bearssl, madgwick_ahrs)
 #     are pinned to `main` / `master` because upstream has no
 #     semver releases yet.  These WARN if the fetch fails (not
 #     fatal) until the maintainer locks specific SHAs.
@@ -71,8 +71,8 @@ jobs:
             --group-filter +extras-tier1 \
             --narrow \
             -o=--depth=1 \
-            zephyr u8g2 libcoap TinyGSM libwebsockets jsmn opus \
-            Catch2 libmodbus coreMQTT-SN minimp3 libhelix BearSSL \
+            zephyr u8g2 libcoap libwebsockets jsmn opus \
+            Catch2 libmodbus coreMQTT-SN minimp3 BearSSL \
             madgwick_ahrs || echo "west update returned non-zero"
         continue-on-error: true
 
@@ -86,7 +86,7 @@ jobs:
           set -euo pipefail
           status=0
           # Stable tagged releases -- fetch failure is a real bug.
-          for lib in u8g2 libcoap tinygsm libwebsockets jsmn opus \
+          for lib in u8g2 libcoap libwebsockets jsmn opus \
                     catch2 libmodbus coremqtt_sn; do
             if [ ! -d "modules/lib/${lib}" ]; then
               echo "::error::FAIL: modules/lib/${lib} missing after west update"
@@ -106,7 +106,7 @@ jobs:
         run: |
           set -eu
           # TBD pins -- track but don't gate merge until a SHA lands.
-          for lib in minimp3 libhelix bearssl madgwick_ahrs; do
+          for lib in minimp3 bearssl madgwick_ahrs; do
             if [ -d "modules/lib/${lib}" ] && \
                [ -n "$(ls -A "modules/lib/${lib}" 2>/dev/null || true)" ]; then
               echo "INFO: TBD-pinned ${lib} fetched successfully"

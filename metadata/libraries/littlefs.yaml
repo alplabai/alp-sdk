@@ -1,0 +1,75 @@
+# littlefs -- power-loss-resilient embedded flash filesystem (ADR 0018
+# library manifest; WS6-c Phase-1 canonical manifest for the legacy
+# per-core token `littlefs`; name is already canonical).
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * scripts/alp_project_emit/__init__.py:221-222 (_LIBRARY_KCONFIG) --
+#     "CONFIG_FILE_SYSTEM_LITTLEFS=y", "CONFIG_FILE_SYSTEM=y",
+#     "CONFIG_ALP_LITTLEFS_SYNC_IO=y" -- all three real CONFIG_ lines,
+#     copied verbatim (base enable + parent filesystem-subsystem switch +
+#     ALP-side always-on SW-fallback sync-I/O marker).
+#   * west module `littlefs`, path modules/fs/littlefs -- resolved through
+#     Zephyr's own v4.4.0 west manifest via the `modules.name-allowlist`
+#     passthrough (west.yml:200-215; the allowlist header comment notes
+#     this entry itself closed a real gap -- littlefs was previously
+#     missing from the allowlist so `west update` never actually fetched
+#     it despite `libraries: [littlefs]` emitting the right CONFIG_* lines).
+#   * enable symbol CONFIG_FILE_SYSTEM_LITTLEFS
+#     ($ZEPHYR_BASE/modules/littlefs/Kconfig +
+#     subsys/fs/Kconfig.littlefs -- "Configuration of LittleFS is found in
+#     subsys/fs/Kconfig.littlefs for historic reasons").
+#   * upstream version 2.11 (modules/fs/littlefs/lfs.h:
+#     `#define LFS_VERSION 0x0002000b` -> major 2, minor 11); pinned
+#     revision 8f5ca347843363882619d8f96c00d8dbd88a8e79.
+#   * licence BSD-3-Clause (modules/fs/littlefs/LICENSE.md: the three-clause
+#     BSD text, including the "neither the name of ARM nor the names of
+#     its contributors" clause).
+#
+# HW-backends: metadata/library-profiles/littlefs/hw-backends.yaml carries
+# per-accelerator priority binding (xSPI/HexSPI/eMMC/QuadSPI DMA flavours);
+# folded in WS6-c Phase 3 (needs library-v1 schema extension).
+#
+# No `requires:` -- CONFIG_ALP_LITTLEFS_SYNC_IO=y (synchronous I/O) is the
+# always-available floor on every target this manifest's
+# `integration.zephyr` section supports; the DMA flavours named in
+# hw-backends.yaml above are opportunistic per-SoM storage bus, never a
+# hard requirement (the underlying flash/eMMC device itself is board
+# wiring, not a SoC capability key).
+#
+# `tier: B` for this Phase-1 pass: littlefs is NOT listed in
+# metadata/registries/tier-a-library-ci.json's hostBuild.libraries or
+# excludedLibraries, even though it already has real teaching examples
+# (examples/power-timing/littlefs-keyvalue,
+# examples/connectivity/production-deployment). Promotion to Tier A is a
+# named follow-up (add the CI-contract entry).
+schema_version: 1
+name: littlefs
+description: "littlefs -- power-loss-resilient embedded flash filesystem."
+tier: B
+version: "2.11"
+license: BSD-3-Clause
+
+integration:
+  zephyr:
+    module: littlefs
+    kconfig:
+      - CONFIG_FILE_SYSTEM_LITTLEFS=y
+      - CONFIG_FILE_SYSTEM=y
+      - CONFIG_ALP_LITTLEFS_SYNC_IO=y
+    hw_backends:
+      class: filesystem
+      upstream_source: "github.com/littlefs-project/littlefs (in Zephyr west.yml already)"
+      accelerators:
+        - class: dma
+          priority:
+            - { requires_cap: xspi_dma,    backend: xspi_dma,    kconfig: CONFIG_ALP_LITTLEFS_XSPI_DMA=y }
+            - { requires_cap: hexspi_dma,  backend: hexspi_dma,  kconfig: CONFIG_ALP_LITTLEFS_XSPI_DMA=y }
+            - { requires_cap: emmc_dma,    backend: emmc_dma,    kconfig: CONFIG_ALP_LITTLEFS_EMMC_DMA=y }
+            - { requires_cap: quadspi_dma, backend: quadspi_dma, kconfig: CONFIG_ALP_LITTLEFS_QSPI_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_LITTLEFS_SYNC_IO=y
+
+      verification:
+        hil_silicon: untested
+        smoke_tests: build_only

@@ -37,6 +37,96 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `examples/aen/*-regcheck/`) are outside this check's scope by
   construction. See `docs/portability.md` §4.4.
 
+
+### Fixed — GD32 bridge OTA Path-A hardening
+
+`ota_slot_base_checked()` rejects any slot that is not A/B instead of silently
+mapping it to slot A (#741); `ota_image_bootable()` rejects a CRC-valid but
+truncated/vector-less image at COMMIT and before the bootloader jump (#755);
+the bootloader now orders both metadata records newest-first and falls back to
+an older bootable record when the newest fails validation (#754); the host
+gates OTA on protocol minor >= 6 so a current host cannot corrupt a pre-v0.6
+bridge via the v0.6 chunk-length reframing (#751); and `OTA_BEGIN` no longer
+erases the 236 KB slot synchronously (which stalled the SPI reply and hung the
+host) — it arms a background erase pumped from `bridge_hw_tick` and acks
+immediately (#770). Boot-select, dual-bank erase, and the background-erase path
+are silicon-validated on the GD32.
+
+### Added — GD32 bridge ADC/PWM/DSP
+
+ADC oversample + resolution control (#494), PWM center-aligned mode (#495), and
+ADC DSP runtime dispatch — FAC FIR/IIR filtering plus a hardware FFT spectrum
+path (#496).
+
+### Fixed — portable DSP + protocol layout guards
+
+`alp_dsp_stats_f32`'s CMSIS path rejects `size_t` lengths beyond the uint32_t
+block size instead of silently truncating (#734); compile-time `_Static_assert`
+layout guards protect the memcpy-serialized CC3501E protocol payloads and the
+GD32 OTA on-flash structs against silent padding/offset drift (#733).
+
+### Added — reproducible release: SBOM + deterministic tarball (#610 §7 slice 2)
+
+- `scripts/gen_sbom.py` emits a deterministic CycloneDX 1.5 SBOM from `alp.lock`
+  (stable, lock-derived serial number, no wall-clock). `release.yml` now builds
+  a byte-reproducible source tarball (`gzip -n`) and attaches the SBOM. Closes
+  the §7 "reproducible release artifacts" criterion (build-receipt schema landed
+  in slice 1).
+### Added — `west alp-quality` profile runner (#610 §5 slice 2)
+
+- Runs `metadata/quality-tasks-v1.json` for a named profile (quick/pr/full/
+  release) and emits a human summary + JSON + JUnit + SARIF. The `pr` profile
+  selects exactly the gates CI runs (one source of truth). Completes the §5
+  "one quality definition drives local + CI, emits machine artifacts" criterion.
+
+### Added — quality-task registry (`metadata/quality-tasks-v1.json`, #610 §5)
+
+- Single source of truth for the SDK's `check_*.py` quality gates: which exist,
+  whether each is a hard CI gate or informational, and which profiles run it.
+  `scripts/check_quality_registry.py` keeps it == `scripts/check_*.py` on disk;
+  `scripts/test-all.sh` now derives its `REQUIRED_GATE_SCRIPTS` from the
+  registry (via `quality_tasks.py --gate-scripts`) instead of a hand-maintained
+  bash array — closing the local-vs-CI gate drift #608 flagged. `alp quality`
+  profile runner + JSON/SARIF emission land in later §5 slices.
+
+### Added — build-receipt-v1 (`metadata/schemas/build-receipt-v1.schema.json`, #610 §7)
+
+- A deterministic, machine-readable receipt for a release build — SDK source
+  revision, board.yaml/lock/build-plan digests, toolchain identity, per-image
+  hashes — composed from existing inputs (`scripts/build_receipt.py`), carrying
+  no wall-clock field so identical inputs yield an identical receipt.
+  `check_build_receipt.py` guards the schema. Wiring into `release.yml`,
+  deterministic packaging, and SBOM generation land in later §7 slices.
+### Removed — `tinygsm` + `libhelix` dropped from the curated library set (#610 WS6-c)
+
+- Maintainer legal-review decision: `tinygsm` (LGPL-3.0) and `libhelix`
+  (RPSL-1.0) are copyleft/source-available licences unwanted in a SoM
+  manufacturer's firmware distribution, and are removed entirely — the
+  `west.yml` pins + remotes, the `cores.<id>.libraries` schema enum tokens,
+  the `metadata/libraries/{tinygsm,libhelix}.yaml` manifests +
+  `metadata/library-profiles/{tinygsm,libhelix}/` HW-backend profiles, the
+  `examples/connectivity/tinygsm-modem-at` and `examples/audio/libhelix-decode`
+  teaching examples, and every Kconfig / loader / test reference. No ABI
+  shim or compat alias survives (per #610 §6, curated tokens carry no
+  back-compat once retired).
+- `catch2` (BSL-1.0, Boost) and `minimp3` (CC0-1.0, public-domain-equivalent)
+  are permissive and stay; `metadata/schemas/library-v1.schema.json`'s
+  `license` enum grows `BSL-1.0` + `CC0-1.0` to accommodate them. LGPL-3.0
+  and RPSL-1.0 are deliberately NOT added to the allowlist.
+
+### Added — `west alp-migrate` board.yaml migration engine (#610 WS6-b)
+
+- `board.yaml` may carry an optional top-level `schemaVersion`. Versioning is
+  **lazy**: an absent key IS version 1 (the floor), so hand-written and
+  external projects keep loading unchanged and are never "drift" — the key
+  only appears in a file once a migration has bumped it to v2+. `west
+  alp-migrate --check/--preview/--apply` versions and migrates a `board.yaml`
+  byte-faithfully (comments, flow style, indentation preserved) with a
+  `diagnostic-v1` JSON report. The migration registry
+  (`scripts/alp_migrate/migrations/`) is empty until the first real schema
+  change; `check_board_schema_version.py` is the gate that will enforce
+  migration once one lands.
+
 ### Added — real `alp_gui_lvgl_attach()` LVGL v9 bridge (`<alp/gui.h>`, issue #23)
 
 - `src/gui_lvgl.c` (renamed from `gui_lvgl_stub.c`) now compiles a real LVGL

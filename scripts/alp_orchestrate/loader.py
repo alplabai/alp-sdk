@@ -582,6 +582,71 @@ def _validate_cross_fields(
     return security_block
 
 
+def _library_alias_table(metadata_root: Path) -> dict[str, str]:
+    """Legacy per-core `libraries:` token -> canonical manifest name
+    (metadata/library-aliases-v1.json).  Empty dict if the table is absent."""
+    path = metadata_root / "library-aliases-v1.json"
+    if not path.is_file():
+        return {}
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    aliases = doc.get("aliases")
+    return dict(aliases) if isinstance(aliases, dict) else {}
+
+
+def _normalize_libraries(project: dict[str, Any],
+                         metadata_root: Path) -> None:
+    """Fold the unified top-level `libraries:` list into the internal channels
+    the emitters consume (WS6-c #610 §6).
+
+    board.yaml declares every curated library once, at the top level, as a
+    `{name, cores?}` object: project-wide when `cores:` is omitted, core-scoped
+    otherwise (a bare string is accepted as shorthand for a project-wide
+    `{name}`).  This rewrites the parsed dict so the rest of the loader stays
+    library-shape-agnostic: project-wide names land in `project['libraries']`
+    and core-scoped names are injected into each `cores[<id>]['libraries']`.
+
+    This is the ONLY library read path -- there is no separate per-core
+    `cores.<id>.libraries:` list to read.  A `cores:` entry scoping a library
+    to a core the topology doesn't declare is a hard error: silently dropping
+    it would emit nothing for a library the app author explicitly asked for.
+    """
+    unified = project.get("libraries") or []
+    alias = _library_alias_table(metadata_root)
+    cores_map = project.get("cores") or {}
+    project_wide: list[str] = []
+    per_core: dict[str, list[str]] = {}
+    for entry in unified:
+        if isinstance(entry, str):
+            project_wide.append(alias.get(entry, entry))
+            continue
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not name:
+            continue
+        canonical = alias.get(name, name)
+        cores = entry.get("cores")
+        if cores:
+            for cid in cores:
+                if str(cid) not in cores_map:
+                    raise OrchestratorError(
+                        f"libraries: entry '{canonical}' is scoped to core "
+                        f"'{cid}', which is not declared under `cores:`")
+                per_core.setdefault(str(cid), []).append(canonical)
+        else:
+            project_wide.append(canonical)
+    project["libraries"] = project_wide
+    for cid, names in per_core.items():
+        centry = cores_map.get(cid)
+        if not isinstance(centry, dict):
+            continue
+        existing = list(centry.get("libraries") or [])
+        for n in names:
+            if n not in existing:
+                existing.append(n)
+        centry["libraries"] = existing
+
+
 def load_board_yaml(path: Path, *,
                     metadata_root: Path = METADATA_ROOT) -> BoardProject:
     """Load + validate a board.yaml.
@@ -598,6 +663,11 @@ def load_board_yaml(path: Path, *,
     unchanged.
     """
     project = _load_and_validate_yaml(path, metadata_root)
+
+    # Fold the unified top-level `libraries:` list into the per-core /
+    # project-wide channels the downstream resolution expects, so topology +
+    # slice building stay library-shape-agnostic.
+    _normalize_libraries(project, metadata_root)
 
     (sku, hw_rev, som_preset, silicon, soc_spec, board_preset,
      board_name, board_hw_rev) = _resolve_board(project, metadata_root)

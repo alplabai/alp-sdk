@@ -210,6 +210,11 @@ som:
   sku: E1M-V2M101          # was: E1M-V2N101
 
 preset: e1m-x-evk
+
+libraries:
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 cores:
   a55_cluster:
     app: ./linux
@@ -217,7 +222,6 @@ cores:
   m33_sm:
     app: ./m33_sm
     peripherals: [adc, pwm, i2c]
-    libraries: [cmsis_dsp]
     inference:
       default_arena_kib: 256
 
@@ -836,7 +840,46 @@ implementation is verified each release against the matrix.
 
 ---
 
-## 7. Where to next
+## 7. Keeping `board.yaml` current — `west alp-migrate`
+
+Portability across SoMs also depends on `board.yaml` staying in a
+machine-checkable shape as the schema evolves.  `board.yaml` may carry an
+optional top-level `schemaVersion` field (declared in
+[`metadata/schemas/board.schema.json`](../metadata/schemas/board.schema.json)).
+Versioning is **lazy**: an **absent `schemaVersion` IS version 1** (the
+floor). Hand-written and external-project `board.yaml` files never need the
+field and are never treated as out-of-date — the key only ever appears in a
+file once a migration has actually bumped it to v2 or later. There is no
+stamp step and no churn until a real schema change exists.
+
+`west alp-migrate` versions and migrates a `board.yaml` in place,
+byte-faithfully (inline comments, flow style, blank lines, and key order all
+survive an `--apply` — the file body is never re-serialized). Three modes:
+
+- `west alp-migrate --check` — reports each target's outstanding
+  `(from, to)` migration steps, if any; nonzero exit on drift, so it is
+  safe to wire into CI (via `scripts/check_board_schema_version.py`). While
+  the registry is empty this is a clean no-op; it gains teeth the moment a
+  v2 migration lands.
+- `west alp-migrate --preview` — prints a unified diff plus a
+  `diagnostic-v1` JSON report; makes no writes. Use this to see exactly
+  what an `--apply` would change before committing to it.
+- `west alp-migrate --apply` — rewrites the file(s) in place and reruns
+  catalog regen. Add `--all` to sweep every `board.yaml` under the repo,
+  or `--board <path>` to target a single file.
+
+Adding a future schema bump (v1 → v2, say) does not touch the engine: it
+is a new module under
+[`scripts/alp_migrate/migrations/`](../scripts/alp_migrate/migrations/)
+(a `(FROM, TO, apply_text_fn)` step whose function edits the file's lines in
+place and writes its own `schemaVersion: TO` bump via `set_schema_version`),
+one line registering it in that package's `STEPS` list, and bumping
+`LATEST` in `scripts/alp_migrate/__init__.py`. `plan()` / `apply_text()`
+walk the registry in order, so no other code changes when a step is added.
+
+---
+
+## 8. Where to next
 
 - [`docs/portability-matrix.md`](portability-matrix.md) — the
   empirical guarantee.

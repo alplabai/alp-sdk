@@ -1,0 +1,73 @@
+# madgwick-ahrs -- Madgwick/x-io AHRS sensor-fusion filter (ADR 0018 library
+# manifest; WS6-c Phase-1 canonical manifest for the legacy per-core token
+# `madgwick_ahrs`).
+#
+# Grounding (this checkout):
+#   * scripts/alp_project_emit/__init__.py:247 (_LIBRARY_KCONFIG) --
+#     "CONFIG_ALP_SDK_AHRS=y", "CONFIG_ALP_MADGWICK_LIBM=y" -- both real
+#     CONFIG_ lines, copied verbatim (no comment-string element for this
+#     token, unlike tflite_micro/gfx_compat).
+#   * west.yml:401-406 -- west module `madgwick_ahrs`, remote
+#     xio-technologies, repo-path Fusion ("the maintained successor lib --
+#     Madgwick reference + Fusion are bundled"), path
+#     modules/lib/madgwick_ahrs, group `extras-tier1` (disabled by
+#     default). revision: main -- "TBD: pin SHA after maintainer audit" is
+#     a FLOATING branch pin in west.yml today, not yet a reproducible
+#     commit; flagged as a concern below rather than silently treated as
+#     resolved.
+#   * licence: no local checkout of xioTechnologies/Fusion is available in
+#     this workspace to confirm from source; cited as MIT per the
+#     upstream project's published licence (best-effort -- flagged as a
+#     concern below, not independently re-verified from a LICENSE file).
+#
+# HW-backends: metadata/library-profiles/madgwick_ahrs/hw-backends.yaml
+# carries per-accelerator priority binding (FPU SIMD floor is universal --
+# every target carries an FPU -- plus an optional TMU CORDIC fast path);
+# folded in WS6-c Phase 3 (needs library-v1 schema extension).
+#
+# No `requires:` -- CONFIG_ALP_MADGWICK_LIBM=y (libm trig) is the
+# always-available floor; the FPU SIMD backend is universal across every
+# target this SDK supports (no capability key to name), and the CORDIC
+# fast path is opportunistic per-SoM (see hw-backends.yaml above).
+#
+# `tier: B` for this Phase-1 pass: madgwick_ahrs is NOT listed in
+# metadata/registries/tier-a-library-ci.json's hostBuild.libraries or
+# excludedLibraries, even though it already has real teaching examples
+# (examples/display/drone-hud, examples/peripheral-io/drone-autopilot).
+# Promotion to Tier A is a named follow-up (add the CI-contract entry).
+#
+# CONCERN: west.yml pins this project to the floating branch `main`
+# ("TBD: pin SHA after maintainer audit") rather than a tag/commit --
+# ADR 0017's "pin, don't float" rule is not yet satisfied upstream of this
+# manifest. `version:` below is left as a placeholder pending that pin;
+# do not treat it as a reproducible upstream revision.
+schema_version: 1
+name: madgwick-ahrs
+description: "Madgwick/x-io AHRS -- gyroscope + accelerometer (+ magnetometer) sensor-fusion orientation filter."
+tier: B
+version: "unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)"
+license: MIT
+
+integration:
+  zephyr:
+    module: madgwick_ahrs
+    kconfig:
+      - CONFIG_ALP_SDK_AHRS=y
+      - CONFIG_ALP_MADGWICK_LIBM=y
+    hw_backends:
+      class: sensor fusion
+      upstream_source: "xioTechnologies"
+      accelerators:
+        - class: simd
+          priority:
+            - { backend: fpu, kconfig: CONFIG_ALP_MADGWICK_FPU=y }
+        - class: cordic
+          priority:
+            - { requires_cap: tmu_cordic, backend: tmu_cordic, kconfig: CONFIG_ALP_MADGWICK_TMU=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_MADGWICK_LIBM=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

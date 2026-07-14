@@ -35,19 +35,25 @@ som:
   sku: E1M-V2N101
   hw_rev: r1
 
+libraries:
+  - name: mbedtls
+    cores: [a55_cluster]
+  - name: nlohmann-json
+    cores: [a55_cluster]
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 cores:
   a55_cluster:
     os: yocto
     app: ./linux
     image: alp-image-edge
     peripherals: [ethernet, usb]
-    libraries:   [mbedtls, nlohmann_json]
     iot:         { wifi: true, mqtt: true }
   m33_sm:
     os: zephyr
     app: ./m33
     peripherals: [adc, pwm, i2c, gpio]
-    libraries:   [cmsis_dsp]
     inference:   { default_arena_kib: 64 }
 
 ipc:

@@ -6,9 +6,10 @@
 + the resolved capabilities / chip-driver / library / peripheral enables;
 `_emit_extra_library_profile` renders an extra `libraries:` profile fragment.
 Extracted as the #285 kconfig emit seam. The slug / peripheral-Kconfig tables
-come from the slugs.py leaf; the `_CHIP_SUBSYSTEMS` / `_LIBRARY_KCONFIG` tables
-are lazy-imported from alp_project inside the function (the existing
-alp_project<->alp_orchestrate cycle-break), with the same in-body sys.path setup.
+come from the slugs.py leaf; the `_CHIP_SUBSYSTEMS` table is lazy-imported from
+alp_project inside the function (the existing alp_project<->alp_orchestrate
+cycle-break), with the same in-body sys.path setup. Per-core `libraries:`
+Kconfig is read from each library's manifest via `_per_core_library_kconfig`.
 
 `_slice_alp_conf` itself is a thin composer over a set of `_emit_*` section
 helpers (console / SoM capability / chip driver / subsystem / library /
@@ -20,6 +21,7 @@ see `check_emit_snapshots.py`.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
 import yaml
@@ -51,9 +53,9 @@ def _emit_extra_library_profile(
     """Walk an extra_libraries `profile:` file and emit the per-class
     first-match Kconfig lines for the active SoM.
 
-    Mirrors the curated `metadata/library-profiles/<lib>/hw-backends.yaml`
-    matcher in `alp_project._emit_library_hw_backends`: each accelerator
-    class declares a `priority:` list whose entries carry
+    Mirrors the curated-library `integration.zephyr.hw_backends` matcher
+    (folded into each `metadata/libraries/<lib>.yaml` manifest): each
+    accelerator class declares a `priority:` list whose entries carry
     `silicon:` / `soc_family:` / `requires_cap:` matchers plus a
     `kconfig:` directive.  Entries marked `status: planned` or
     `status: stub` are metadata only and are not emitted as active
@@ -697,13 +699,65 @@ def _emit_subsystems(slice_: Slice, chip_subsystems: set[str]) -> list[str]:
     return lines
 
 
+def _library_alias_table() -> dict[str, str]:
+    """Legacy per-core `libraries:` token -> canonical manifest name
+    (metadata/library-aliases-v1.json).  Empty dict if the table is absent."""
+    path = METADATA_ROOT / "library-aliases-v1.json"
+    if not path.is_file():
+        return {}
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    aliases = doc.get("aliases")
+    return dict(aliases) if isinstance(aliases, dict) else {}
+
+
+def _per_core_library_kconfig(lib: str) -> Optional[list[str]]:
+    """Base-Kconfig lines for a per-core `libraries:` token, read from the
+    library's ADR 0018 manifest (metadata/libraries/<canonical>.yaml) rather
+    than a hand-maintained table (WS6-c #610 §6).
+
+    The token is resolved to its canonical manifest through the
+    metadata/library-aliases-v1.json alias table.  The emitted set is the union
+    of the manifest's `integration.zephyr.kconfig` (the upstream module-enable
+    line(s)) and its `integration.zephyr.hw_backends.sw_fallback.kconfig` (the
+    SDK SW floor), module-enable first and the SW-fallback marker last, deduped.
+    Header-only libraries whose SW floor is a doc comment surface that comment.
+
+    Returns None when no manifest resolves (caller emits the pending-wire TODO).
+    """
+    alias = _library_alias_table()
+    canonical = alias.get(lib, lib)
+    path = METADATA_ROOT / "libraries" / f"{canonical}.yaml"
+    if not path.is_file():
+        return None
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    zephyr = (doc.get("integration") or {}).get("zephyr") or {}
+    out: list[str] = []
+    for kc in (zephyr.get("kconfig") or []):
+        kc = str(kc)
+        if kc not in out:
+            out.append(kc)
+    swf = ((zephyr.get("hw_backends") or {}).get("sw_fallback") or {}).get("kconfig")
+    if swf:
+        swf = str(swf)
+        if swf.lstrip().startswith("#"):
+            # Header-only library: the SW floor is a documentation comment,
+            # not a real knob.  Surface it only when there is no module enable.
+            if not out:
+                out.append(swf)
+        elif swf not in out:
+            out.append(swf)
+    return out
+
+
 def _emit_libraries(
     project: "BoardProject",
     slice_: Slice,
-    library_kconfig_table: dict[str, tuple[str, ...]],
 ) -> list[str]:
     """Per-core `libraries:`, curated third-party `libraries:` (ADR 0018),
     and the open-set `extra_libraries:` escape hatch (v0.6 P2.1).
+
+    Per-core Kconfig is resolved from each library's manifest
+    (`_per_core_library_kconfig`), not a hand-maintained enable table.
     """
     lines: list[str] = []
 
@@ -711,13 +765,13 @@ def _emit_libraries(
         lines.append(f"# Libraries declared on core "
                      f"`{slice_.core_id}`")
         for lib in sorted(slice_.libraries):
-            kcs = library_kconfig_table.get(lib)
-            if kcs:
-                for kc in kcs:
-                    lines.append(kc)
-            else:
+            kcs = _per_core_library_kconfig(lib)
+            if kcs is None:
                 lines.append(
                     f"# TODO: wire library '{lib}' once its v0.4 enable lands")
+            else:
+                for kc in kcs:
+                    lines.append(kc)
         lines.append("")
 
     # Project-wide curated third-party libraries (top-level `libraries:`,
@@ -1109,7 +1163,6 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         _sys.path.insert(0, str(_scripts))
     from alp_project import (  # type: ignore
         _CHIP_SUBSYSTEMS,
-        _LIBRARY_KCONFIG,
     )
 
     lines: list[str] = []
@@ -1125,7 +1178,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     if iot_lines:
         lines.extend(iot_lines)
 
-    lines.extend(_emit_libraries(project, slice_, _LIBRARY_KCONFIG))
+    lines.extend(_emit_libraries(project, slice_))
     lines.extend(_emit_inference(project, slice_, silicon))
     lines.extend(_emit_memory(slice_))
     lines.extend(_emit_power(slice_))

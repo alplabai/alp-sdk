@@ -859,6 +859,58 @@ alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id)
 	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_ADC_STREAM_END, &stream_id, 1u, NULL, 0u);
 }
 
+alp_status_t gd32g553_adc_spectrum_read(gd32g553_t *ctx,
+                                        uint8_t     stream_id,
+                                        uint16_t    bin_offset,
+                                        uint8_t     max_bins,
+                                        uint32_t   *seq_out,
+                                        uint16_t   *total_bins_out,
+                                        uint8_t    *got_bins,
+                                        float      *bins)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (seq_out == NULL || total_bins_out == NULL || got_bins == NULL || bins == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
+	if (max_bins == 0u) return ALP_ERR_INVAL;
+	if (max_bins > GD32G553_BRIDGE_ADC_SPECTRUM_READ_MAX) {
+		max_bins = GD32G553_BRIDGE_ADC_SPECTRUM_READ_MAX;
+	}
+
+	/* Fixed reply envelope like stream_read: seq(4) total(2) got(1) +
+	 * max_bins float32, zero-padded past `got`. */
+	uint8_t       reply[7u + (GD32G553_BRIDGE_ADC_SPECTRUM_READ_MAX * 4u)];
+	const size_t  reply_len = 7u + ((size_t)max_bins * 4u);
+	const uint8_t req[4]    = {
+		stream_id, (uint8_t)(bin_offset & 0xFFu), (uint8_t)((bin_offset >> 8) & 0xFFu), max_bins
+	};
+	alp_status_t s = cmd_send(ctx,
+	                          GD32G553_TRANSPORT_DEFAULT,
+	                          GD32G553_CMD_ADC_SPECTRUM_READ,
+	                          req,
+	                          sizeof(req),
+	                          reply,
+	                          reply_len);
+	if (s != ALP_OK) {
+		*got_bins = 0u;
+		return s;
+	}
+	*seq_out        = (uint32_t)reply[0] | ((uint32_t)reply[1] << 8) | ((uint32_t)reply[2] << 16) |
+	                  ((uint32_t)reply[3] << 24);
+	*total_bins_out = (uint16_t)reply[4] | ((uint16_t)reply[5] << 8);
+	const uint8_t got = reply[6];
+	if (got > max_bins) return ALP_ERR_IO; /* firmware contract violation */
+	*got_bins = got;
+	for (uint8_t i = 0u; i < got; ++i) {
+		uint32_t w = (uint32_t)reply[7u + i * 4u] | ((uint32_t)reply[7u + i * 4u + 1u] << 8) |
+		             ((uint32_t)reply[7u + i * 4u + 2u] << 16) |
+		             ((uint32_t)reply[7u + i * 4u + 3u] << 24);
+		memcpy(&bins[i], &w, sizeof(float));
+	}
+	return ALP_OK;
+}
+
 alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
@@ -1109,6 +1161,11 @@ alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint
 /* scaffold so customer telemetry already works.                      */
 /* ----------------------------------------------------------------- */
 
+bool gd32g553_ota_supported(const gd32g553_t *ctx)
+{
+	return ctx != NULL && ctx->initialised && ctx->version.minor >= GD32G553_OTA_MIN_PROTOCOL_MINOR;
+}
+
 alp_status_t gd32g553_ota_begin(gd32g553_t               *ctx,
                                 uint32_t                  size_bytes,
                                 uint32_t                  expected_crc32,
@@ -1119,6 +1176,9 @@ alp_status_t gd32g553_ota_begin(gd32g553_t               *ctx,
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (chunk_max_bytes == NULL || target_slot == NULL) return ALP_ERR_INVAL;
 	if (size_bytes == 0u) return ALP_ERR_INVAL;
+	/* Refuse a pre-v0.6 peer BEFORE the bridge erases the target slot: the
+	 * v0.6 chunk framing it would receive corrupts the image (#751). */
+	if (!gd32g553_ota_supported(ctx)) return ALP_ERR_NOSUPPORT;
 
 	/* v0.7 additive form: size:u32, crc:u32 [, maj:u8, min:u8, pat:u8].
      * The version triple lands in the bridge's A/B metadata record at
@@ -1159,6 +1219,9 @@ alp_status_t gd32g553_ota_write_chunk(gd32g553_t    *ctx,
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (data == NULL || data_len == 0u) return ALP_ERR_INVAL;
 	if (received_bytes == NULL) return ALP_ERR_INVAL;
+	/* Belt-and-suspenders: even if a caller skips BEGIN's gate, never
+	 * program the v0.6 chunk layout into a pre-v0.6 peer (#751). */
+	if (!gd32g553_ota_supported(ctx)) return ALP_ERR_NOSUPPORT;
 
 	/* Chunk size is bounded by the wire payload ceiling.  Bridges
      * that advertise a smaller chunk_max_bytes in BEGIN are honoured

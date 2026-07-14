@@ -182,7 +182,7 @@ Top-level fields:
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
 | `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
-| `libraries`      | no       | Project-wide curated third-party libraries (ADR 0018), e.g. `[lvgl, cmsis-dsp]`.  Each names a manifest under `metadata/libraries/<name>.yaml`; the orchestrator emits its per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (project-wide, ADR 0018)](#libraries-project-wide-adr-0018) below.  Distinct from the per-core `cores.<id>.libraries:` token list. |
+| `libraries`      | no       | Curated third-party libraries (ADR 0018).  One top-level list, each entry a `{name, cores?}` object (or a bare name as shorthand for a project-wide `{name}`), e.g. `[{name: lvgl}, {name: cmsis-dsp, cores: [m33_sm]}]`.  `name` resolves to a manifest under `metadata/libraries/<name>.yaml`; omit `cores:` for a project-wide selection or list core ids to scope it.  The orchestrator emits the per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (ADR 0018)](#libraries-project-wide-adr-0018) below. |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
 *Either `preset:` (preset mode) or inline `name:` + `populated:` +
@@ -199,7 +199,6 @@ the SoM preset's `topology.<id>` when omitted):
 | `recipe`       | Yocto bitbake recipe packaging this slice's `app:` (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice -- otherwise the plan blocks the slice (`yocto-recipe-missing`) instead of emitting an invalid `bitbake <path>`. |
 | `os`           | NOT an OS picker — the runtime is class-derived (M→Zephyr, A→Yocto). Only `off` (skip slice) or `baremetal` (rare) are settable; a cross-class OS is rejected. |
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
-| `libraries`    | Library opt-in list for this slice.                                                    |
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
 | `iot`          | Wi-Fi / MQTT / BLE / TLS toggles; emitted per OS and wireless provider.                |
 
@@ -601,19 +600,21 @@ for the full design + per-library notes.
 
 ### `extra_libraries` -- open-set escape hatch (v0.6)
 
-`libraries:` is closed -- the schema's enum lists the 25 libraries
-the SDK curates.  For one-off vendor SDKs, research-only deps, or
-libraries on their way into the curated set, `extra_libraries:`
-provides an open-set escape hatch.  Each entry declares either an
-inline Kconfig fragment OR a `profile:` path (mutually exclusive,
-enforced by the loader):
+The curated `libraries:` set is closed -- it's the set of manifests
+under `metadata/libraries/`.  For one-off vendor SDKs, research-only
+deps, or libraries on their way into the curated set, the per-core
+`extra_libraries:` provides an open-set escape hatch.  Each entry
+declares either an inline Kconfig fragment OR a `profile:` path
+(mutually exclusive, enforced by the loader):
 
 ```yaml
+libraries:
+  - name: mbedtls         # curated -- resolves to a manifest
+    cores: [m55_hp]
+
 cores:
   m55_hp:
     app: ./src
-    libraries:
-      - mbedtls           # curated -- closed enum
     extra_libraries:
       - name: zforce      # one-off vendor SDK, inline Kconfig path
         include_path: third_party/zforce/include
@@ -631,13 +632,13 @@ The two shapes:
 | `kconfig:` | Fast path for one-off libraries.  Lines emit verbatim into the slice's `alp.conf`.                       |
 | `profile:` | Library wants per-silicon backend selection consistent with the curated `libraries:`.  See below.        |
 
-The `profile:` file follows the same shape as
-`metadata/library-profiles/<lib>/hw-backends.yaml`: an
-`accelerators:` block of priority entries (each with optional
-`silicon:` / `soc_family:` / `requires_cap:` matchers + a
-`kconfig:` directive) and an optional `sw_fallback:` block whose
-`kconfig:` always emits.  First match per `class:` wins; see the
-[`mbedtls` profile](../metadata/library-profiles/mbedtls/hw-backends.yaml)
+The `profile:` file follows the same shape as a curated library's
+folded `integration.zephyr.hw_backends` block: an `accelerators:`
+list of priority entries (each with optional `silicon:` /
+`soc_family:` / `requires_cap:` matchers + a `kconfig:` directive)
+and an optional `sw_fallback:` block whose `kconfig:` always emits.
+First match per `class:` wins; see any
+[`metadata/libraries/<name>.yaml`](../metadata/libraries/) manifest
 for a worked example.
 
 Loader rules (enforced by `_validate_consistency()` in
@@ -646,21 +647,27 @@ Loader rules (enforced by `_validate_consistency()` in
 - Each entry MUST declare exactly one of `kconfig:` / `profile:`.
 - `name:` is globally unique across every core's
   `extra_libraries:`.
-- `name:` must NOT collide with the curated `libraries:` enum --
+- `name:` must NOT collide with a curated `libraries:` name --
   use the curated path for curated entries.
 - `profile:` must resolve to a file (repo-relative).
 
-### `libraries` (project-wide, ADR 0018) {#libraries-project-wide-adr-0018}
+### `libraries` (ADR 0018) {#libraries-project-wide-adr-0018}
 
 The **top-level** `libraries:` key (a sibling of `som:` / `cores:`,
-not nested under a core) selects *curated third-party libraries* the
-SDK integrates across the whole project — GUI, DSP/NN, serialization,
-and so on:
+not nested under a core) is the single place curated third-party
+libraries are declared — GUI, DSP/NN, serialization, and so on.  Each
+entry is a `{name, cores?}` object: omit `cores:` for a project-wide
+selection, or list core ids to scope the library to specific slices.
+A bare name is shorthand for a project-wide `{name}`:
 
 ```yaml
 som:
   sku: E1M-AEN801
-libraries: [lvgl, cmsis-dsp, nanopb]   # <-- project-wide
+libraries:
+  - name: lvgl                 # project-wide (every core the manifest supports)
+  - name: nanopb
+  - name: cmsis-dsp
+    cores: [m55_hp]            # scoped to one core
 cores:
   m55_hp:
     app: ./src
@@ -690,12 +697,14 @@ Two curation tiers bound CI cost (ADR 0018):
 (tier + licence + compatibility), reading the same manifests, so the
 CLI and alp-studio's library picker never disagree.
 
-**This is a different mechanism from the per-core `cores.<id>.libraries:`
-token list above.** The per-core list is a closed enum wired through
-`metadata/library-profiles/` (compile-time config headers + HW-backend
-bindings); the top-level `libraries:` is the manifest-driven ADR 0018
-selection. Use the top-level key for the curated third-party libraries
-that ship a `metadata/libraries/<name>.yaml` manifest.
+Scoping a library to specific cores (`cores: [<id>]`) folds in what
+earlier schema drafts spelled as a separate per-core
+`cores.<id>.libraries:` token list — there is now one library
+declaration, manifest-driven, and the per-core list is gone.  The
+compile-time config headers under `metadata/library-profiles/<lib>/`
+(e.g. `etl_profile.h`, `lv_conf.h`) still tune each library for the
+SDK's invariants; the HW-backend accelerator model is folded into each
+`metadata/libraries/<name>.yaml` manifest.
 
 See [`metadata/libraries/README.md`](../metadata/libraries/)
 for the manifest shape, the full library list, and how to add one.

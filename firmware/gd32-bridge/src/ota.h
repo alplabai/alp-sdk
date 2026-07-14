@@ -25,4 +25,11 @@ gd32_bridge_status_t ota_dispatch(uint8_t        cmd,
                                   size_t         reply_payload_cap,
                                   size_t        *reply_payload_len);
 
+/* Background OTA-erase pump (#770): call from the main loop
+ * (bridge_hw_tick).  BEGIN arms a slot erase and acks immediately instead
+ * of erasing inline (which stalled the SPI reply ~1 s); this advances the
+ * erase one page-region per call and flips OTA to READY when done.  No-op
+ * in the OTA-inert (non-partitioned) build. */
+void ota_erase_tick(void);
+
 #endif /* GD32_BRIDGE_OTA_H */
