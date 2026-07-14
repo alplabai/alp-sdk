@@ -12940,12 +12940,12 @@
           "value": "10"
         },
         "ALP_VERSION_PATCH": {
-          "hash": "d8ce20d0b42e56fe",
-          "value": "0"
+          "hash": "dfcbd06f473b6645",
+          "value": "1"
         },
         "ALP_VERSION_STRING": {
-          "hash": "701c69396d46ea8a",
-          "value": "\"0.10.0\""
+          "hash": "7f118f05924114e7",
+          "value": "\"0.10.1\""
         }
       },
       "typedefs": {},
