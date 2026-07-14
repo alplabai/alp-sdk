@@ -410,10 +410,14 @@ static void y_capture_close(alp_pwm_backend_state_t *st)
  * Best-effort, and both the "0" write to enable and the unexport are
  * gated on @c d->owns_export (#744): only a handle that actually claimed
  * the channel (export returned ALP_OK, not EBUSY) may stop or release
- * it.  A channel this handle merely reused (already exported by another
- * process) is left running and exported exactly as that other owner set
- * it up -- closing must not steal, disable, or release a channel this
- * handle never claimed.  Errors are swallowed -- close has no return.
+ * it -- closing does not unexport or disable a channel this handle did
+ * not itself export.  This is a release-side guarantee only: y_open()
+ * still programs polarity/period/duty_cycle/enable on a reused (EBUSY)
+ * channel per alp_pwm_open()'s documented contract (it primes the
+ * hardware with the requested period unconditionally), so a reused
+ * channel's configuration is NOT left as the other owner set it up --
+ * only its liveness (export + enable state) survives this handle's
+ * close().  Errors are swallowed -- close has no return.
  */
 static void y_close(alp_pwm_backend_state_t *st)
 {

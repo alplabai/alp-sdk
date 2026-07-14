@@ -3,10 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Regression coverage for issue #744: the Yocto PWM sysfs backend
- * (src/backends/pwm/yocto_drv.c) must not unexport a channel it did
- * not itself export.  EBUSY from the sysfs `export` write means
- * another process already owns the channel, and every rollback/close
- * path must leave that channel's export intact.
+ * (src/backends/pwm/yocto_drv.c) must not unexport or disable a
+ * channel it did not itself export.  EBUSY from the sysfs `export`
+ * write means another process already owns the channel, and every
+ * rollback/close path must leave that channel's export and enable
+ * state intact.  This is a release-side invariant only: y_open()
+ * still unconditionally configures (polarity/period/duty_cycle/
+ * enable) a reused channel per alp_pwm_open()'s documented contract,
+ * so a reused channel's configuration is NOT left untouched -- only
+ * its liveness survives this handle's close().
  *
  * This file #includes the real backend .c file directly (same
  * technique as tests/yocto/rpc_yocto_self_close.c) so it can drive
@@ -75,6 +80,20 @@ static bool saw_disable(void)
 		if (strstr(g_call_paths[i], "/enable") != NULL && strcmp(g_call_vals[i], "0") == 0) {
 			return true;
 		}
+	}
+	return false;
+}
+
+/* True if any per-channel configuration attribute (polarity, period,
+ * duty_cycle or enable) was written -- i.e. the channel was set up or
+ * touched beyond the bare export/unexport request. */
+static bool saw_configure_write(void)
+{
+	for (int i = 0; i < g_call_count; ++i) {
+		if (strstr(g_call_paths[i], "/polarity") != NULL) return true;
+		if (strstr(g_call_paths[i], "/period") != NULL) return true;
+		if (strstr(g_call_paths[i], "/duty_cycle") != NULL) return true;
+		if (strstr(g_call_paths[i], "/enable") != NULL) return true;
 	}
 	return false;
 }
@@ -159,6 +178,34 @@ static void test_already_exported_close_does_not_disable(void)
 	ALP_ASSERT_TRUE(!saw_disable());
 }
 
+/* Regression pinning the round-2 contract (#744): alp_pwm_open()'s
+ * documented behaviour ("primes the hardware with the requested
+ * period") applies unconditionally, so open() on an already-exported
+ * (EBUSY) channel still SUCCEEDS and still writes this handle's
+ * polarity/period/duty_cycle/enable -- it does NOT leave a reused
+ * channel's configuration untouched.  What #744 actually scopes to the
+ * reused path is release: close() must not unexport or disable a
+ * channel this handle never claimed.  This test proves both halves
+ * together so a future change cannot "fix" the open side by silently
+ * reintroducing the rejected owns_export configure-gate. */
+static void test_already_exported_open_configures_close_does_not_release(void)
+{
+	reset_fixture();
+	g_export_result = ALP_ERR_BUSY;
+
+	struct alp_pwm           h;
+	alp_pwm_backend_state_t *st;
+	alp_status_t             rc = open_handle(&h, &st);
+	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+	ALP_ASSERT_TRUE(saw_configure_write());
+	ALP_ASSERT_EQ_INT((int)h.period_ns, 1000000);
+
+	g_call_count = 0; /* isolate what close() itself does */
+	y_close(st);
+	ALP_ASSERT_TRUE(!saw_unexport());
+	ALP_ASSERT_TRUE(!saw_disable());
+}
+
 static void test_post_export_failure_new_export_unexports(void)
 {
 	reset_fixture();
@@ -189,6 +236,7 @@ int main(void)
 	test_new_export_owns_and_close_unexports();
 	test_already_exported_does_not_own_and_close_leaves_export();
 	test_already_exported_close_does_not_disable();
+	test_already_exported_open_configures_close_does_not_release();
 	test_post_export_failure_new_export_unexports();
 	test_post_export_failure_already_exported_does_not_unexport();
 
