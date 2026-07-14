@@ -246,6 +246,8 @@
 #include <metal/sys.h>
 #include <openamp/open_amp.h>
 
+#include "alp_checked_arith.h"
+
 #ifndef ALP_RPC_SUBS_PER_CHANNEL
 #define ALP_RPC_SUBS_PER_CHANNEL 8
 #endif
@@ -395,19 +397,52 @@ mhu_ns_reg(struct metal_io_region *mhu, uint32_t slot_offset, uint32_t reg_offse
 /* Kick slot offset is bench-overridable (ALP_UIO_MHU_KICK_SLOT, hex); the
  * default is now the bench-proven R_MHU_NS5 (0xA0, #697 cycle 5).  The override
  * is retained so a future SoM/channel change can be walked without a recompile
- * (cycle 5 used it to A/B 0x100/0x480/0xA0). */
-static uint32_t mhu_kick_slot(void)
+ * (cycle 5 used it to A/B 0x100/0x480/0xA0).
+ *
+ * alp-sdk #735: the raw override value is untrusted input (a bench operator
+ * env var) that ends up added to a register offset and used as an MMIO
+ * pointer into the UIO_MHU mapping, so every step is checked rather than
+ * trusted: an unparseable value (end-pointer check fails) falls back to the
+ * known-good default exactly like before -- an operator typo should not
+ * brick the link -- but a value that DOES parse keeps `strtoul()`'s
+ * errno/ERANGE outcome, narrows to `uint32_t` via `alp_size_to_u32()`
+ * (src/common/alp_checked_arith.h, #743) instead of a raw cast, and checks
+ * word alignment (every MHU-B NS-slot register this file addresses is a
+ * `uint32_t`) -- any of those failing is a deliberate-but-wrong override,
+ * rejected outright. The mapped-region bound is checked separately by the
+ * caller, which is the only place that holds the actual `metal_io_region`
+ * size. */
+static bool mhu_kick_slot(uint32_t *out)
 {
 	const char *env = getenv("ALP_UIO_MHU_KICK_SLOT");
 	if (env == NULL || env[0] == '\0') {
-		return ALP_MHU_NS_CH5_KICK_SLOT;
+		*out = ALP_MHU_NS_CH5_KICK_SLOT;
+		return true;
 	}
+
+	errno             = 0;
 	char         *end = NULL;
 	unsigned long v   = strtoul(env, &end, 0);
 	if (end == env || *end != '\0') {
-		return ALP_MHU_NS_CH5_KICK_SLOT;
+		/* Unparseable -- fall back to the known-good default, same as
+		 * pre-#735. */
+		*out = ALP_MHU_NS_CH5_KICK_SLOT;
+		return true;
 	}
-	return (uint32_t)v;
+	if (errno == ERANGE) {
+		return false;
+	}
+
+	uint32_t slot;
+	if (!alp_size_to_u32((size_t)v, &slot)) {
+		return false;
+	}
+	if ((slot % (uint32_t)sizeof(uint32_t)) != 0u) {
+		return false;
+	}
+
+	*out = slot;
+	return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -574,6 +609,26 @@ static int uio_rproc_notify(struct remoteproc *rproc, uint32_t id)
 		return -1;
 	}
 
+	/* alp-sdk #735: resolve + bounds-check the kick-slot register address
+	 * BEFORE touching any shared state -- an invalid ALP_UIO_MHU_KICK_SLOT
+	 * override must fail this notify(), not walk an out-of-range MMIO
+	 * pointer. `alp_u32_add_checked()` catches slot+offset wraparound;
+	 * `alp_size_range_valid()` proves the resulting register (4 bytes)
+	 * lies wholly inside the ACTUAL UIO_MHU mapping (`mhu->size`, the
+	 * libmetal-reported size of this open mapping) rather than trusting
+	 * the compile-time 0x1000 the region table happens to use today. */
+	uint32_t kick_slot;
+	if (!mhu_kick_slot(&kick_slot)) {
+		fprintf(stderr, "alp_rpc: invalid ALP_UIO_MHU_KICK_SLOT override\n");
+		return -1;
+	}
+	uint32_t set_reg_off;
+	if (!alp_u32_add_checked(kick_slot, ALP_MHU_NS_SLOT_MSG_INT_SET, &set_reg_off) ||
+	    !alp_size_range_valid((size_t)set_reg_off, sizeof(uint32_t), mhu->size)) {
+		fprintf(stderr, "alp_rpc: ALP_UIO_MHU_KICK_SLOT out of range\n");
+		return -1;
+	}
+
 	/* Write the vring notify id into the ch1 scratch word, then raise the
 	 * A55->CM33 doorbell by asserting MSG_INT_SET on the M33's channel-5
 	 * register R_MHU_NS5 (alp-sdk #683/#697 doorbell fix, bench-proven cycle 5
@@ -582,7 +637,18 @@ static int uio_rproc_notify(struct remoteproc *rproc, uint32_t id)
 	    (volatile uint32_t *)((uint8_t *)shm->virt + ALP_MHU_SHM_CH1_OFFSET + ALP_MHU_SHM_MSG_TXD);
 	*scratch = id;
 
-	volatile uint32_t *set_reg = mhu_ns_reg(mhu, mhu_kick_slot(), ALP_MHU_NS_SLOT_MSG_INT_SET);
+	/* alp-sdk #745: AArch64 is weakly ordered -- without an explicit
+	 * release fence here the CPU/compiler is free to hoist the MHU SET
+	 * write above, letting the M33 observe the doorbell before the
+	 * scratch word above (and any shared vring/descriptor state the
+	 * OpenAMP core already published before calling this ops->notify())
+	 * is globally visible. This fence makes every write program-order-
+	 * before it happen-before the doorbell write below -- required for
+	 * correctness on this silicon-proven link (#683/#697 doorbell fix);
+	 * do not remove or reorder relative to the writes above/below it. */
+	atomic_thread_fence(memory_order_release);
+
+	volatile uint32_t *set_reg = mhu_ns_reg(mhu, kick_slot, ALP_MHU_NS_SLOT_MSG_INT_SET);
 	*set_reg                   = 1u;
 	return 0;
 }

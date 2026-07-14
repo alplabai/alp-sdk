@@ -500,6 +500,133 @@ static void test_call_vs_close_no_uaf(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* 5. alp-sdk #735: ALP_UIO_MHU_KICK_SLOT override boundary checks.     */
+/* ------------------------------------------------------------------ */
+
+/* Mirrors the PRE-#735 mhu_kick_slot() body verbatim -- used only to
+ * PROVE the boundary tests below catch something real: the old code cast
+ * strtoul()'s result straight to a uint32_t with no errno/ERANGE check
+ * and no UINT32_MAX check, so a malformed override silently produced a
+ * wrong (and possibly huge) slot instead of being rejected. Kept as a
+ * local copy rather than re-including two versions of the real function
+ * so this test can assert on the OLD, buggy value inline instead of
+ * needing a second build tree. */
+static uint32_t pre_735_mhu_kick_slot(const char *env)
+{
+	if (env == NULL || env[0] == '\0') {
+		return ALP_MHU_NS_CH5_KICK_SLOT;
+	}
+	char         *end = NULL;
+	unsigned long v   = strtoul(env, &end, 0);
+	if (end == env || *end != '\0') {
+		return ALP_MHU_NS_CH5_KICK_SLOT;
+	}
+	return (uint32_t)v;
+}
+
+static void test_mhu_kick_slot_default(void)
+{
+	unsetenv("ALP_UIO_MHU_KICK_SLOT");
+	uint32_t out = 0;
+	ALP_ASSERT_TRUE(mhu_kick_slot(&out));
+	ALP_ASSERT_EQ_INT((int)out, (int)ALP_MHU_NS_CH5_KICK_SLOT);
+}
+
+static void test_mhu_kick_slot_valid_override(void)
+{
+	setenv("ALP_UIO_MHU_KICK_SLOT", "0x100", 1);
+	uint32_t out = 0;
+	ALP_ASSERT_TRUE(mhu_kick_slot(&out));
+	ALP_ASSERT_EQ_INT((int)out, 0x100);
+	unsetenv("ALP_UIO_MHU_KICK_SLOT");
+}
+
+static void test_mhu_kick_slot_rejects_unaligned(void)
+{
+	setenv("ALP_UIO_MHU_KICK_SLOT", "0x101", 1);
+	uint32_t out = 0xDEADBEEFu;
+	ALP_ASSERT_TRUE(!mhu_kick_slot(&out));
+	/* *out left UNCHANGED on rejection (alp_checked_arith.h's documented
+	 * contract, mirrored here by mhu_kick_slot()). */
+	ALP_ASSERT_EQ_INT((int)out, (int)0xDEADBEEFu);
+	unsetenv("ALP_UIO_MHU_KICK_SLOT");
+}
+
+static void test_mhu_kick_slot_rejects_u32_truncation(void)
+{
+	/* 0x100000000 (2^32) parses cleanly as an `unsigned long` on this
+	 * 64-bit host (no ERANGE) but does not fit a uint32_t. */
+	const char *env = "0x100000000";
+
+	ALP_ASSERT_EQ_INT((int)pre_735_mhu_kick_slot(env), 0); /* pre-fix: silently truncated to 0 */
+
+	setenv("ALP_UIO_MHU_KICK_SLOT", env, 1);
+	uint32_t out = 0xDEADBEEFu;
+	ALP_ASSERT_TRUE(!mhu_kick_slot(&out)); /* post-fix: rejected */
+	ALP_ASSERT_EQ_INT((int)out, (int)0xDEADBEEFu);
+	unsetenv("ALP_UIO_MHU_KICK_SLOT");
+}
+
+static void test_mhu_kick_slot_rejects_erange(void)
+{
+	/* Overflows `unsigned long` itself (ERANGE on this 64-bit host) --
+	 * the pre-fix code never checked errno, so strtoul()'s ULONG_MAX
+	 * saturation silently became (uint32_t)ULONG_MAX == 0xFFFFFFFF, a
+	 * huge slot offset the caller would then add a register offset to
+	 * and dereference (alp-sdk #735's "value greater than UINT32_MAX on
+	 * a 64-bit host" repro step). */
+	const char *env = "0x10000000000000000";
+
+	ALP_ASSERT_EQ_INT((int)pre_735_mhu_kick_slot(env),
+	                  (int)0xFFFFFFFFu); /* pre-fix: wraps to garbage */
+
+	setenv("ALP_UIO_MHU_KICK_SLOT", env, 1);
+	uint32_t out = 0xDEADBEEFu;
+	ALP_ASSERT_TRUE(!mhu_kick_slot(&out)); /* post-fix: rejected */
+	ALP_ASSERT_EQ_INT((int)out, (int)0xDEADBEEFu);
+	unsetenv("ALP_UIO_MHU_KICK_SLOT");
+}
+
+static void test_mhu_kick_slot_rejects_garbage(void)
+{
+	setenv("ALP_UIO_MHU_KICK_SLOT", "not-a-number", 1);
+	uint32_t out = 0;
+	ALP_ASSERT_TRUE(mhu_kick_slot(&out)); /* unparseable -> safe default, unchanged from pre-fix */
+	ALP_ASSERT_EQ_INT((int)out, (int)ALP_MHU_NS_CH5_KICK_SLOT);
+	unsetenv("ALP_UIO_MHU_KICK_SLOT");
+}
+
+/* alp-sdk #735: the call site (uio_rproc_notify()) must reject a kick
+ * slot that parses/narrows fine but still lands outside the mapped
+ * UIO_MHU region once the register offset is added -- exercises
+ * alp_u32_add_checked() + alp_size_range_valid() directly (no real UIO
+ * mapping needed: this is pure arithmetic on the same inputs
+ * uio_rproc_notify() feeds them). */
+static void test_notify_bounds_reject_out_of_mapping(void)
+{
+	uint32_t reg_off;
+
+	/* Bench-proven default slot (0xA0) + MSG_INT_SET (0x04) fits inside
+	 * the real 0x1000 UIO_MHU mapping. */
+	ALP_ASSERT_TRUE(
+	    alp_u32_add_checked(ALP_MHU_NS_CH5_KICK_SLOT, ALP_MHU_NS_SLOT_MSG_INT_SET, &reg_off));
+	ALP_ASSERT_TRUE(alp_size_range_valid((size_t)reg_off, sizeof(uint32_t), 0x1000u));
+
+	/* A slot right at the mapping's edge (register would start exactly
+	 * at the mapping boundary) must be rejected -- offset == capacity is
+	 * only valid for a zero-length request. */
+	ALP_ASSERT_TRUE(alp_u32_add_checked(
+	    0x1000u - ALP_MHU_NS_SLOT_MSG_INT_SET, ALP_MHU_NS_SLOT_MSG_INT_SET, &reg_off));
+	ALP_ASSERT_TRUE(!alp_size_range_valid((size_t)reg_off, sizeof(uint32_t), 0x1000u));
+
+	/* UINT32_MAX - 2 + MSG_INT_SET(0x04) overflows uint32_t addition --
+	 * must be rejected by alp_u32_add_checked() before any range check
+	 * runs (this is exactly the "addition overflow" case #735 calls
+	 * out; the old call site had no equivalent check at all). */
+	ALP_ASSERT_TRUE(!alp_u32_add_checked(UINT32_MAX - 2u, ALP_MHU_NS_SLOT_MSG_INT_SET, &reg_off));
+}
+
+/* ------------------------------------------------------------------ */
 
 int main(void)
 {
@@ -513,6 +640,14 @@ int main(void)
 	test_external_close_without_callback_is_synchronous();
 	test_concurrent_external_vs_self_close_is_single_shot();
 	test_call_vs_close_no_uaf();
+
+	test_mhu_kick_slot_default();
+	test_mhu_kick_slot_valid_override();
+	test_mhu_kick_slot_rejects_unaligned();
+	test_mhu_kick_slot_rejects_u32_truncation();
+	test_mhu_kick_slot_rejects_erange();
+	test_mhu_kick_slot_rejects_garbage();
+	test_notify_bounds_reject_out_of_mapping();
 
 	pthread_mutex_lock(&g_mailbox_lock);
 	atomic_store(&g_worker_stop, 1);

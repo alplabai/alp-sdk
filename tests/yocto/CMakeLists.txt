@@ -331,6 +331,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/../../include
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/rpc
+            # yocto_uio_drv.c now pulls in the shared checked-arithmetic
+            # helper (src/common/alp_checked_arith.h, alp-sdk #735/#743);
+            # the main alp_sdk target gets src/common on its include path
+            # via src/common/CMakeLists.txt, but this test compiles the
+            # backend .c file directly (see the ODR note above) and needs
+            # the same include dir added explicitly.
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
         )
         target_compile_definitions(alp_test_rpc_uio_self_close PRIVATE
             ALP_SDK_HAVE_OPENAMP_USERLAND=1
