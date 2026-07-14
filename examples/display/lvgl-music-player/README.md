@@ -7,6 +7,9 @@ does not decode or play any audio.
 
 ## What it shows
 
+- The panel opens through the portable `<alp/display.h>` surface
+  and binds to LVGL via `alp_gui_lvgl_attach()` (`<alp/gui.h>`) --
+  no direct `<zephyr/drivers/display.h>` calls in app code.
 - LVGL renders the player UI on a 240 x 320 ST7789 panel.
 - `lv_demo_music()` drives the progress bar + equaliser bands on
   its own animation timer -- no real track is decoded or played.

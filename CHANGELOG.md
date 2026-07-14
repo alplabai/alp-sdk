@@ -7,6 +7,37 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Changed — Display/LVGL examples migrated off direct Zephyr `display_*` APIs (issue #520)
+
+- `lvgl-widgets-demo`, `lvgl-benchmark`, `lvgl-music-player`,
+  `iot-dashboard`, `ai-camera-viewer`, and `drone-hud` now open their panel
+  through `<alp/display.h>`'s `alp_display_open()` and bind it to LVGL via
+  `<alp/gui.h>`'s `alp_gui_lvgl_attach()` (issue #23), instead of
+  `DEVICE_DT_GET(DT_CHOSEN(zephyr_display))` + `display_blanking_off()` +
+  Zephyr's own `lvgl` module auto-init. Each app now sets
+  `CONFIG_LV_Z_AUTO_INIT=n` (so Zephyr's `lvgl` module doesn't also create
+  a competing `lv_display_t`) and owns the full sequence itself: open the
+  panel, `lv_init()`, `lv_tick_set_cb(k_uptime_get_32)` (Zephyr's own tick
+  registration lives behind the same auto-init hook this turns off), then
+  `alp_gui_lvgl_attach()`. Each example's `boards/native_sim_native_64.overlay`
+  gains an `alp-display0` alias alongside the existing `zephyr,display`
+  chosen node (both point at the same dummy display device); each
+  `native_sim.conf` adds `CONFIG_SDL_DISPLAY=n` (native_sim's DTS also
+  carries a `zephyr,sdl-dc` node that `CONFIG_DISPLAY=y` pulls in by
+  default, and its GL/EGL init segfaults on a headless runner).
+- New portability lint: `scripts/check_example_portability.py` rejects a
+  direct `#include <zephyr/drivers/...>` in any example with a
+  `board.yaml`, with an explicit, reasoned allowlist
+  (`_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`) for the handful of examples that
+  have no portable `<alp/*.h>` surface to route through yet
+  (`multicore/rpmsg-v2n`'s AMP mailbox transport, `peripheral-io/alp-console`'s
+  status-LED PWM + the on-module bridge's own HAL, `v2n/v2n-ethernet-dual`'s
+  MDIO PHY diagnostics, `v2n/v2n-xspi-flash-readwrite`'s raw flash driver).
+  Zephyr-specific register/bench tools with no `board.yaml` (e.g.
+  `examples/aen/*-regcheck/`) are outside this check's scope by
+  construction. See `docs/portability.md` §4.4.
+
+
 ### Fixed — GD32 bridge OTA Path-A hardening
 
 `ota_slot_base_checked()` rejects any slot that is not A/B instead of silently

@@ -61,6 +61,19 @@ The lint enforces two invariants:
       <alp/e1m_x_pinout.h> / ALP_E1M_X_*.  Cross-EVK code should
       usually use <alp/board.h> BOARD_* aliases instead.
 
+  (e) HARD ERROR (issue #520): a customer-facing example must not
+      `#include <zephyr/drivers/...>` directly -- that's the vendor
+      driver-class layer the portable `<alp/*.h>` surfaces (and
+      `<alp/gui.h>`'s `alp_gui_lvgl_attach()` for LVGL) exist to hide.
+      A handful of pre-existing examples genuinely have no portable
+      surface to route through yet (raw AMP mailbox transport, MDIO
+      PHY diagnostics, ...) -- those are named in
+      `_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST` below with the reason, not
+      silently exempted.  Zephyr-specific board-bring-up / register
+      bench tools that carry no `board.yaml` (e.g.
+      `examples/aen/*-regcheck/`) are out of this check's scope
+      entirely -- see the example-enumeration walk in `main()`.
+
 Run from the alp-sdk repo root:
 
     python3 scripts/check_example_portability.py
@@ -124,6 +137,37 @@ _E1M_X_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/e1m_x_pinout\.h[>"]')
 _E1M_TOKEN_RE = re.compile(r"\bALP_E1M_(?!X_)[A-Z0-9_]+\b")
 _E1M_X_TOKEN_RE = re.compile(r"\bALP_E1M_X_[A-Z0-9_]+\b")
 _CHIP_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/chips/([A-Za-z0-9_]+)\.h[>"]')
+_ZEPHYR_DRIVER_INCLUDE_RE = re.compile(
+    r'^\s*#\s*include\s*[<"]zephyr/drivers/([A-Za-z0-9_./]+)\.h[>"]')
+
+# Pre-existing examples that #include <zephyr/drivers/...> directly with no
+# portable <alp/*.h> surface to route through today.  Keyed by the example's
+# path relative to examples/ (matches how check_example()/main() identify
+# examples).  Each entry names the include + WHY it's not a #520 migration
+# target -- add a new entry only with a real "no portable surface exists"
+# reason, not as a way to silence the gate.
+_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, str] = {
+    "multicore/rpmsg-v2n": (
+        "zephyr/drivers/mbox.h -- raw OpenAMP/MHU mailbox transport for "
+        "AMP core-to-core messaging; no portable <alp/*.h> IPC surface "
+        "exists yet."
+    ),
+    "peripheral-io/alp-console": (
+        "zephyr/drivers/pwm.h (RGB status LED) and gpio.h/pinctrl.h "
+        "(src/cc3501e_bridge.c, the on-module Wi-Fi/BLE bridge's own "
+        "control-transport HAL) -- pre-existing gap predating #520 and "
+        "out of its Display/LVGL scope; migrating the LED path to "
+        "<alp/pwm.h> is tracked as separate follow-up work."
+    ),
+    "v2n/v2n-ethernet-dual": (
+        "zephyr/drivers/mdio.h -- raw PHY register access for a link-"
+        "diagnostics demo; no portable <alp/*.h> MDIO surface exists."
+    ),
+    "v2n/v2n-xspi-flash-readwrite": (
+        "zephyr/drivers/flash.h -- no portable <alp/flash.h> surface "
+        "exists yet."
+    ),
+}
 
 
 def som_family_for_sku(sku: str) -> Optional[str]:
@@ -247,6 +291,42 @@ def check_chip_includes_declared(example_dir: pathlib.Path,
                 f"board.yaml has no matching chips: entry -- add '{chip}' "
                 "so the family-compatibility check and portability ring "
                 "can account for it"
+            )
+    return errors
+
+
+def check_no_zephyr_driver_includes(example_dir: pathlib.Path,
+                                    example_key: str) -> list[str]:
+    """Return hard errors for `#include <zephyr/drivers/...>` in a
+    customer-facing example (issue #520).
+
+    `example_key` is the example's path relative to `examples/` (e.g.
+    "display/lvgl-widgets-demo"), used to look it up in
+    `_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`.  Allowlisted examples are
+    skipped entirely -- their reason lives next to the allowlist entry,
+    not scattered as inline suppressions.
+    """
+    if example_key in _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST:
+        return []
+
+    errors: list[str] = []
+    for src in source_files(example_dir):
+        text = _strip_block_comments(
+            src.read_text(encoding="utf-8", errors="replace"))
+        rel = src.relative_to(example_dir).as_posix()
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            line_no_comment = re.sub(r"//.*", "", line)
+            match = _ZEPHYR_DRIVER_INCLUDE_RE.search(line_no_comment)
+            if not match:
+                continue
+            errors.append(
+                f"{rel}:{line_no}: includes <zephyr/drivers/{match.group(1)}.h> "
+                "directly -- customer-facing examples must go through the "
+                "portable <alp/*.h> surface (e.g. <alp/display.h> + "
+                "alp_gui_lvgl_attach() for LVGL) instead. If no portable "
+                f"surface exists yet, add '{example_key}' to "
+                "_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST in "
+                f"{pathlib.Path(__file__).name} with why."
             )
     return errors
 
@@ -508,6 +588,15 @@ def check_example(example_dir: pathlib.Path,
 
     errors.extend(check_pinout_namespace(example_dir, pinout_namespace))
     errors.extend(check_chip_includes_declared(example_dir, chips))
+    try:
+        example_key = example_dir.relative_to(ROOT / "examples").as_posix()
+    except ValueError:
+        # example_dir isn't under the real examples/ tree (e.g. a unit
+        # test fixture in a tmp dir) -- fall back to the leaf name so
+        # the allowlist lookup still degrades sensibly instead of
+        # raising.
+        example_key = example_dir.name
+    errors.extend(check_no_zephyr_driver_includes(example_dir, example_key))
 
     ring = classify(chip_families, chips, family,
                     doc.get("supported_boards"), board_host_families)

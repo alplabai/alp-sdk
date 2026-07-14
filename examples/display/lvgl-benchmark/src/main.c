@@ -41,9 +41,10 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/drivers/display.h>
 
-#include <lvgl.h>
+#include <alp/display.h>
+#include <alp/gui.h>
+
 #include <lv_demo_benchmark.h>
 
 LOG_MODULE_REGISTER(lvgl_benchmark, LOG_LEVEL_INF);
@@ -52,16 +53,30 @@ int main(void)
 {
 	LOG_INF("LVGL benchmark starting");
 
-	/* Resolve the display via devicetree -- whichever node has
-     * `zephyr,display` is the panel LVGL renders into. */
-	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
-	if (!device_is_ready(display)) {
-		LOG_ERR("display %s not ready", display->name);
+	/* Open the panel through the portable display surface -- see
+     * lvgl-widgets-demo/src/main.c for the full rationale on this
+     * open -> lv_init -> tick -> attach sequence, and why
+     * CONFIG_LV_Z_AUTO_INIT=n (prj.conf) is required alongside it. */
+	alp_display_config_t display_cfg = ALP_DISPLAY_CONFIG_DEFAULT(0);
+	alp_display_t       *display     = alp_display_open(&display_cfg);
+	if (display == NULL) {
+		LOG_ERR("display open failed (err=%d)", (int)alp_last_error());
 		return 1;
 	}
 
-	/* Initialise LVGL (allocates framebuffer + draw context). */
+	/* Initialise LVGL (allocates global state -- styles, timers, ...)
+     * and wire its millisecond tick source ourselves: with
+     * CONFIG_LV_Z_AUTO_INIT=n, Zephyr's lvgl module never runs the
+     * SYS_INIT hook that would otherwise do both. */
 	lv_init();
+	lv_tick_set_cb(k_uptime_get_32);
+
+	/* Bind LVGL's renderer to the panel (src/gui_lvgl.c). */
+	alp_status_t attach_status = alp_gui_lvgl_attach(display);
+	if (attach_status != ALP_OK) {
+		LOG_ERR("alp_gui_lvgl_attach failed (err=%d)", (int)attach_status);
+		return 1;
+	}
 
 	/* Kick off the benchmark.  The scene set is fixed and lives
      * upstream in LVGL's demos/benchmark/.  Results print to the
@@ -69,13 +84,11 @@ int main(void)
      * routes to printk via CONFIG_LOG_PRINTK=y. */
 	lv_demo_benchmark();
 
-	display_blanking_off(display);
-
-	/* Drain the LVGL task queue; the benchmark scene plays through
+	/* Drain the LVGL timer queue; the benchmark scene plays through
      * scene-by-scene and emits its summary when the last scene
      * completes.  Same 10 ms slice as the widgets demo. */
 	while (1) {
-		const uint32_t sleep_ms = lv_task_handler();
+		const uint32_t sleep_ms = lv_timer_handler();
 		k_msleep(MIN(sleep_ms, 10u));
 	}
 

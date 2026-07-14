@@ -31,7 +31,9 @@ OV5640 ──▶ <alp/camera.h> ──▶ <alp/inference.h> ──▶ post-proce
   - NX9101 → `CONFIG_ALP_TFLM_ETHOS_U65=y`
   - V2N → `CONFIG_ALP_TFLM_DRP_AI=y`
 - **LVGL** composes the preview, bounding-box overlay, and
-  latency / FPS strip.
+  latency / FPS strip, bound to the panel via `<alp/display.h>` +
+  `alp_gui_lvgl_attach()` (`<alp/gui.h>`) -- no direct
+  `<zephyr/drivers/display.h>` calls in app code.
 
 ## Why customers care
 
