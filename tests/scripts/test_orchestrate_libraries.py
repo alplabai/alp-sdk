@@ -77,14 +77,29 @@ def test_extra_libraries_profile_happy(tmp_path: Path) -> None:
     """An entry with `name:` + `profile:` resolves the profile file
     and emits its accelerators / sw_fallback Kconfig per the same
     silicon / soc_family / requires_cap matcher used by curated libs."""
-    # Profile file lives under metadata/library-profiles/ -- mbedtls
-    # ships with one out of the box, and it carries an `optiga_trust_m`
-    # priority entry plus an sw_fallback that always matches.  Reuse
-    # it as the test stub.
+    # The open-set `profile:` escape hatch takes an arbitrary, user-supplied
+    # hw-backends.yaml-style file.  Stand up a self-contained stub whose HW
+    # accelerator entries are `status: planned` (so the walker skips them) plus
+    # an sw_fallback that always matches.
+    profile = tmp_path / "mylib-hw-backends.yaml"
+    profile.write_text(
+        "schema_version: 1\n"
+        "library: mylib_profile\n"
+        "class: crypto\n"
+        "accelerators:\n"
+        "  - class: crypto\n"
+        "    priority:\n"
+        "      - { requires_cap: optiga_trust_m, backend: optiga, "
+        "kconfig: CONFIG_ALP_MBEDTLS_OPTIGA=y, status: planned }\n"
+        "      - { requires_cap: cau, backend: cau, "
+        "kconfig: CONFIG_ALP_MBEDTLS_CAU=y, status: planned }\n"
+        "sw_fallback:\n"
+        "  kconfig: CONFIG_ALP_MBEDTLS_PURE_C=y\n",
+        encoding="utf-8")
     body = _v2n_with_extra(
         "    extra_libraries:\n"
         "      - name: mylib_profile\n"
-        "        profile: metadata/library-profiles/mbedtls/hw-backends.yaml\n")
+        f"        profile: {profile}\n")
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
     slice_ = project.cores["m33_sm"]

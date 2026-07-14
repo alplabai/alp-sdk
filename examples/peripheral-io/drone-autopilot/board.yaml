@@ -12,6 +12,12 @@
 # control cascade, motor mixer, AND the failsafe at deterministic
 # kHz cadences -- all in portable C with no vendor symbols.
 
+libraries:
+  - name: madgwick-ahrs
+    cores: [m55_hp]
+  - name: pid
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801           # E8's M55 HP core handles the 1 kHz
                              # rate loop comfortably; Helium MVE
@@ -40,9 +46,6 @@ cores:
     # control cascade.  Both pulled in via §D.lib loader; their
     # HW-backend choice (FPU on AEN, TMU CORDIC on V2N) comes from
     # the SoM's capabilities: block.
-    libraries:
-      - madgwick_ahrs
-      - pid
     peripherals:
       - i2c                  # IMU + barometer.
       - uart                 # SBUS RC receiver + GNSS.

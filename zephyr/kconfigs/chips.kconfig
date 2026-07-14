@@ -634,7 +634,8 @@ config ALP_SDK_CHIP_QUECTEL_BG95
 	depends on SERIAL
 	help
 	  Compile chips/quectel_bg95/quectel_bg95.c.  AT-command shell
-	  + PWRKEY pulse.  TCP / MQTT / FTP profiles live in tinygsm.
+	  + PWRKEY pulse.  TCP / MQTT / FTP profiles are app-level, built
+	  atop this driver's AT shell.
 
 config ALP_SDK_CHIP_QUECTEL_BG77
 	bool "Quectel BG77 LTE-M / NB-IoT + integrated GNSS module"

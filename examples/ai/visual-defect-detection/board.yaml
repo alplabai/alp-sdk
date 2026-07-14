@@ -5,6 +5,10 @@
 # reconstruction error = defect).  Same source targets the V2N accelerator path
 # when som.sku is flipped.
 
+libraries:
+  - name: tflite-micro
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -20,8 +24,6 @@ cores:
     app: ./src
     inference:
       default_arena_kib: 256
-    libraries:
-      - tflite_micro
     peripherals:
       - i2c                  # Camera SCCB (OV5640 control bus).
       - gpio                 # Camera ancillaries (reset, power-down).

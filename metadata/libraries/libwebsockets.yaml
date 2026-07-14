@@ -1,0 +1,62 @@
+# libwebsockets -- lightweight C WebSocket client/server (ADR 0018
+# library manifest).
+#
+# WS6-c Phase-1 canonical manifest for legacy per-core token
+# `libwebsockets` (docs/superpowers/specs/
+# 2026-07-13-610-ws6c-library-consolidation-design.md Phase 1 item 1).
+# Token has no underscores, so the canonical name is unchanged:
+# `libwebsockets`.
+#
+# Grounding (pinned Zephyr v4.4.0 workspace):
+#   * west module `libwebsockets` (west.yml `extras-tier1` group, remote
+#     warmcat, repo-path libwebsockets), path modules/lib/libwebsockets --
+#     NOT in Zephyr's own west manifest; disabled by default, consumers
+#     flip via `west update --group-filter +extras-tier1`.
+#   * upstream version v4.3.4 (west.yml pin, "Mar 2024").
+#   * licence MIT -- libwebsockets relicensed from LGPL-2.1+static-linking-
+#     exception to MIT in 2017; the v4.3.4 pin postdates that relicense.
+#   * enable symbol CONFIG_ALP_LWS_NO_TLS -- the SW-fallback (no-TLS)
+#     wiring transcribed verbatim from `_LIBRARY_KCONFIG["libwebsockets"]`
+#     (scripts/alp_project_emit/__init__.py:256).
+#
+# HW-backends: see metadata/library-profiles/libwebsockets/ (folded WS6-c
+# Phase 3). Declares crypto (mbedtls/bearssl) and TCP-DMA accelerator
+# classes on top of this always-available no-TLS floor; `verification:`
+# there is `hil_silicon: untested`, `smoke_tests: build_only`.
+#
+# Tier B (recipe-only): behind the disabled-by-default `extras-tier1` west
+# group, exercised only by the nightly `nightly-extras-tier1-pins.yml`
+# workflow -- matches the §D.lib.iot cloud/connectivity Tier-B grouping.
+#
+# No `requires:` -- plain west module, no `depends on CPU_CORTEX_M`-style
+# Kconfig constraint and no yocto integration exists yet.
+schema_version: 1
+name: libwebsockets
+description: "libwebsockets -- lightweight C WebSocket client/server."
+tier: B
+version: "v4.3.4"
+license: MIT
+
+integration:
+  zephyr:
+    module: libwebsockets
+    kconfig:
+      - CONFIG_ALP_LWS_NO_TLS=y
+    hw_backends:
+      class: networking
+      upstream_source: "warmcat/libwebsockets"
+      accelerators:
+        - class: crypto
+          priority:
+            - { backend: mbedtls, kconfig: CONFIG_ALP_LWS_MBEDTLS=y }
+            - { backend: bearssl, kconfig: CONFIG_ALP_LWS_BEARSSL=y }
+        - class: dma
+          priority:
+            - { backend: tcp_dma, kconfig: CONFIG_ALP_LWS_TCP_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_LWS_NO_TLS=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

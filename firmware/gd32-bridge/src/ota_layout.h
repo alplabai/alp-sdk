@@ -29,6 +29,7 @@
 #define GD32_BRIDGE_OTA_LAYOUT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define OTA_PAGE_SIZE 0x00000800u /* 2 KB single-bank page */
@@ -89,6 +90,36 @@ typedef struct {
 	uint32_t img_crc32[2];  /* per-slot image CRC-32 (A, B) */
 	uint32_t rec_crc32;     /* CRC-32 over this record excluding this field */
 } ota_meta_record_t;
+
+/* On-flash layout guards (#733).  BOTH structs are serialized by raw byte
+ * access: the bootloader byte-copies a flash record and CRCs the raw
+ * bytes, and ota.c programs them to flash verbatim.  Their in-memory
+ * layout therefore IS the on-flash / CRC-covered format -- any compiler
+ * padding change or field reorder silently invalidates every stored
+ * record's CRC and can brick the boot path.  These are all naturally
+ * aligned (u32/u8 + explicit pad), so the layout is deterministic without
+ * packing (which would add unaligned-access hazards).  Assert the exact
+ * size + every field offset so a struct edit fails the build instead of
+ * the field on flash; rec_crc32's offset also anchors the CRC span the
+ * bootloader/app compute (offsetof(..., rec_crc32)). */
+_Static_assert(sizeof(ota_meta_record_t) == 44u, "ota_meta_record_t on-flash size drifted");
+_Static_assert(offsetof(ota_meta_record_t, magic) == 0u, "meta.magic offset");
+_Static_assert(offsetof(ota_meta_record_t, struct_version) == 4u, "meta.struct_version offset");
+_Static_assert(offsetof(ota_meta_record_t, counter) == 8u, "meta.counter offset");
+_Static_assert(offsetof(ota_meta_record_t, active_slot) == 12u, "meta.active_slot offset");
+_Static_assert(offsetof(ota_meta_record_t, slot_valid) == 13u, "meta.slot_valid offset");
+_Static_assert(offsetof(ota_meta_record_t, fw_version) == 16u, "meta.fw_version offset");
+_Static_assert(offsetof(ota_meta_record_t, img_len) == 24u, "meta.img_len offset");
+_Static_assert(offsetof(ota_meta_record_t, img_crc32) == 32u, "meta.img_crc32 offset");
+_Static_assert(offsetof(ota_meta_record_t, rec_crc32) == 40u, "meta.rec_crc32 offset");
+
+_Static_assert(sizeof(ota_img_header_t) == 84u, "ota_img_header_t on-flash size drifted");
+_Static_assert(offsetof(ota_img_header_t, magic) == 0u, "img.magic offset");
+_Static_assert(offsetof(ota_img_header_t, fmt_version) == 4u, "img.fmt_version offset");
+_Static_assert(offsetof(ota_img_header_t, img_len) == 8u, "img.img_len offset");
+_Static_assert(offsetof(ota_img_header_t, fw_version) == 12u, "img.fw_version offset");
+_Static_assert(offsetof(ota_img_header_t, body_crc32) == 16u, "img.body_crc32 offset");
+_Static_assert(offsetof(ota_img_header_t, signature) == 20u, "img.signature offset");
 
 /* Derive a slot's flash base with EXPLICIT validation.  The old
  * `ota_slot_base` silently mapped every non-B value (incl. a corrupt

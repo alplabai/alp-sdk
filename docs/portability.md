@@ -210,6 +210,11 @@ som:
   sku: E1M-V2M101          # was: E1M-V2N101
 
 preset: e1m-x-evk
+
+libraries:
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 cores:
   a55_cluster:
     app: ./linux
@@ -217,7 +222,6 @@ cores:
   m33_sm:
     app: ./m33_sm
     peripherals: [adc, pwm, i2c]
-    libraries: [cmsis_dsp]
     inference:
       default_arena_kib: 256
 

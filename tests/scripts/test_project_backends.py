@@ -38,7 +38,7 @@ class TestHwBackendsLoader(unittest.TestCase):
     LIBS = [
         "tflite_micro", "lvgl", "mbedtls", "cmsis_dsp",
         "littlefs", "bearssl", "madgwick_ahrs", "u8g2",
-        "gfx_compat", "minimp3", "opus", "libhelix",
+        "gfx_compat", "minimp3", "opus",
     ]
 
     _SKU_CORE: dict[str, str] = {
@@ -59,17 +59,24 @@ class TestHwBackendsLoader(unittest.TestCase):
     def _emit(cls, sku: str) -> str:
         """Run the full loader for `sku` + every library, return stdout."""
         core = cls._core_for_sku(sku)
-        libs_yaml = "".join(f"              - {lib}\n" for lib in cls.LIBS)
+        # Unified top-level `libraries:` scoped to this core; canonical
+        # (hyphenated) manifest names -- the schema `name:` pattern rejects
+        # the legacy underscore tokens.
+        libs_yaml = "".join(
+            f'  - name: {lib.replace("_", "-")}\n'
+            f"    cores: [{core}]\n"
+            for lib in cls.LIBS
+        )
         body = (
 
             "som:\n"
             f"  sku: {sku}\n"
+            "libraries:\n"
+            f"{libs_yaml}"
             "cores:\n"
             f"  {core}:\n"
             "    os: zephyr\n"
             "    app: ./src\n"
-            "    libraries:\n"
-            f"{libs_yaml}"
         )
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "board.yaml"
@@ -174,8 +181,8 @@ class TestHwBackendsLoader(unittest.TestCase):
 
     def test_sw_fallback_always_emitted(self) -> None:
         """Each library's SW-fallback CONFIG_*=y is emitted
-        unconditionally via _LIBRARY_KCONFIG (separate from the
-        hw-backends loader).  Both new §D.lib libraries and the 4
+        unconditionally from its manifest's sw_fallback knob (separate
+        from the hw-backends loader).  Both new §D.lib libraries and the 4
         baseline ones (lvgl / mbedtls / cmsis_dsp / littlefs) emit
         their fallback knob alongside the upstream library knob."""
         out = self._emit("E1M-AEN401")
@@ -185,7 +192,6 @@ class TestHwBackendsLoader(unittest.TestCase):
             "CONFIG_ALP_BEARSSL_PURE_C=y",
             "CONFIG_ALP_OPUS_PURE_C=y",
             "CONFIG_ALP_MINIMP3_PURE_C=y",
-            "CONFIG_ALP_LIBHELIX_PURE_C=y",
             "CONFIG_ALP_MADGWICK_LIBM=y",
             "CONFIG_ALP_U8G2_SW_BLIT=y",
             "CONFIG_ALP_GFX_COMPAT_SW=y",

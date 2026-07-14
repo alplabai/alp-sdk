@@ -309,3 +309,42 @@ ZTEST(gd32_bridge_ota, test_begin_arms_background_erase)
 	zassert_equal(
 	    write_chunk(0u, data, sizeof(data), wr, &wrl), STATUS_OK, "chunk after READY must program");
 }
+
+/* ---- #733: on-flash layout / byte-representation guard --------------- */
+
+/* The bootloader byte-copies a flash record and CRCs the raw bytes, so
+ * ota_meta_record_t's in-memory image IS the on-flash format.  The
+ * _Static_asserts in ota_layout.h pin size + offsets at compile time;
+ * this test documents the intended LITTLE-ENDIAN byte representation and
+ * proves the host toolchain lays it out the same way. */
+ZTEST(gd32_bridge_ota, test_meta_record_layout_bytes)
+{
+	zassert_equal(sizeof(ota_meta_record_t), 44u, "record must be 44 bytes on flash");
+
+	ota_meta_record_t m;
+	memset(&m, 0, sizeof(m));
+	m.magic          = 0x11223344u;
+	m.struct_version = OTA_META_STRUCT_VER;
+	m.counter        = 0xA1B2C3D4u;
+	m.active_slot    = OTA_SLOT_B;
+	m.slot_valid     = 0x03u;
+	m.fw_version[0]  = 0x00010203u;
+	m.img_len[1]     = 0x0000B000u;
+	m.img_crc32[0]   = 0xDEADBEEFu;
+	m.rec_crc32      = 0xFEEDFACEu;
+
+	const uint8_t *b = (const uint8_t *)&m;
+	zassert_equal(rd_u32(&b[0]), 0x11223344u, "magic @0");
+	zassert_equal(rd_u32(&b[4]), OTA_META_STRUCT_VER, "struct_version @4");
+	zassert_equal(rd_u32(&b[8]), 0xA1B2C3D4u, "counter @8");
+	zassert_equal(b[12], (uint8_t)OTA_SLOT_B, "active_slot @12");
+	zassert_equal(b[13], 0x03u, "slot_valid @13");
+	zassert_equal(rd_u32(&b[16]), 0x00010203u, "fw_version[0] @16");
+	zassert_equal(rd_u32(&b[28]), 0x0000B000u, "img_len[1] @28");
+	zassert_equal(rd_u32(&b[32]), 0xDEADBEEFu, "img_crc32[0] @32");
+	zassert_equal(rd_u32(&b[40]), 0xFEEDFACEu, "rec_crc32 @40");
+
+	/* The CRC span the bootloader/app compute is everything up to
+	 * rec_crc32; the offset is the documented span length. */
+	zassert_equal(offsetof(ota_meta_record_t, rec_crc32), 40u, "CRC span = 40 bytes");
+}

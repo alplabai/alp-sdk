@@ -1,0 +1,50 @@
+# fmt -- {fmt}, header-only C++ formatting (WS6-c Phase-1 canonical
+# manifest for the legacy per-core token `fmt`).
+#
+# Grounding (this checkout):
+#   * scripts/alp_project_emit/__init__.py:187 (_LIBRARY_KCONFIG) --
+#     "fmt: include path + fmt_config.h via the v0.4 loader hook" --
+#     header-only (FMT_HEADER_ONLY mode), no real Zephyr Kconfig symbol.
+#   * west.yml:436-442 -- `name: fmt`, remote fmtlib, revision `11.0.2`,
+#     path modules/lib/fmt, group `extras-cpp` (disabled by default; the
+#     build resolves against the vendored copy -- see vendors/fmt/README.md).
+#   * vendors/fmt/README.md -- MIT licence (LICENSE upstream text
+#     unmodified); upstream https://github.com/fmtlib/fmt.
+#   * metadata/library-profiles/fmt/hw-backends.yaml -- pure-SW,
+#     no accelerator binding.
+#
+# HW-backends: see metadata/library-profiles/fmt/ (folded in WS6-c Phase 3)
+#
+# No `kconfig:` -- header-only, wired via the v0.4 CMake include-path
+# loader hook (fmt_config.h), not a CONFIG_ symbol; `module: fmt`
+# documents the real (disabled-by-default) west pin above.
+#
+# No `requires:` -- pure portable C++11, no capability/core-class/RAM
+# floor of note.
+#
+# `tier: B` for this Phase-1 pass: fmt has a real teaching example built
+# green on native_sim (examples/peripheral-io/fmt-formatting), but Tier A
+# additionally requires an entry in
+# metadata/registries/tier-a-library-ci.json -- out of scope here;
+# promotion is a named follow-up.
+schema_version: 1
+name: fmt
+description: "{fmt} -- fast, header-only C++ text formatting into a caller-owned buffer, no <iostream>."
+tier: B
+version: "11.0.2"
+license: MIT
+
+integration:
+  zephyr:
+    module: fmt
+    hw_backends:
+      class: string formatting
+      upstream_source: "header-only; pulled in via the v0.4 include-path hook"
+      accelerators: []
+      sw_fallback:
+        required: true
+        kconfig: "# fmt: header-only, no Kconfig knob needed"
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

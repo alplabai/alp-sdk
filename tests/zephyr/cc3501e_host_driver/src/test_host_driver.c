@@ -820,4 +820,44 @@ ZTEST(cc3501e_host_driver, test_power_policy_null_invalid)
 	zassert_equal(slave.cmd, 0u, "no transfer clocked");
 }
 
+/* ------------------------------------------------------------------ */
+/* #733: layout of the directly-serialized (struct-punned) payloads.   */
+/*                                                                     */
+/* gpio_configure / gpio_write / gpio_set_interrupt / wifi_connect are */
+/* NOT hand-packed -- the host hands &struct straight to the SPI DMA   */
+/* and the firmware casts the wire buffer back to the struct type, so  */
+/* the struct's byte image IS the wire frame.  The _Static_asserts in  */
+/* protocol/cc3501e.h fail the build if padding ever creeps in; this   */
+/* test documents the intended byte representation at runtime and      */
+/* proves the host toolchain lays these out with no interior padding.  */
+ZTEST(cc3501e_host_driver, test_punned_payload_layout_733)
+{
+	zassert_equal(sizeof(alp_cc3501e_gpio_configure_t), 4u, "gpio_configure = 4 wire bytes");
+	zassert_equal(sizeof(alp_cc3501e_gpio_write_t), 4u, "gpio_write = 4 wire bytes");
+	zassert_equal(
+	    sizeof(alp_cc3501e_gpio_set_interrupt_t), 4u, "gpio_set_interrupt = 4 wire bytes");
+	zassert_equal(sizeof(alp_cc3501e_wifi_connect_t), 4u, "wifi_connect header = 4 wire bytes");
+
+	const alp_cc3501e_gpio_configure_t c = {
+		.cc3501e_gpio = 13u, .direction = 1u, .pull = 2u, .reserved = 0u
+	};
+	const uint8_t *cb = (const uint8_t *)&c;
+	zassert_equal(cb[0], 13u, "byte0 = cc3501e_gpio");
+	zassert_equal(cb[1], 1u, "byte1 = direction");
+	zassert_equal(cb[2], 2u, "byte2 = pull");
+
+	const alp_cc3501e_wifi_connect_t w = {
+		.ssid_len = 5u, .psk_len = 8u, .security = 1u, .reserved = 0u
+	};
+	const uint8_t *wb = (const uint8_t *)&w;
+	zassert_equal(wb[0], 5u, "byte0 = ssid_len");
+	zassert_equal(wb[1], 8u, "byte1 = psk_len");
+	zassert_equal(wb[2], 1u, "byte2 = security");
+
+	/* The issue's canonical trap: this struct's sizeof is 8, but the wire
+	 * header is 7 -- which is exactly why cc3501e_ble_adv_start hand-packs
+	 * it (see test_ble_adv_start_encodes_7byte_header) instead of memcpy. */
+	zassert_equal(sizeof(alp_cc3501e_ble_adv_start_t), 8u, "ble_adv_start struct = 8, wire = 7");
+}
+
 ZTEST_SUITE(cc3501e_host_driver, NULL, NULL, reset_before, NULL, NULL);

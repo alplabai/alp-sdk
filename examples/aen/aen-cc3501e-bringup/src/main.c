@@ -205,10 +205,13 @@ volatile cc3501e_witness_t g_cc3501e_witness __attribute__((used));
  * same call decodes the 16-byte alp_cc3501e_diag_info_t. */
 static void cc3501e_dump_diag(cc3501e_t *fw)
 {
-	uint8_t      raw[sizeof(alp_cc3501e_diag_info_t)] = { 0 };
-	size_t       got                                  = 0;
-	alp_status_t s =
-	    cc3501e_request(fw, ALP_CC3501E_CMD_GET_DIAG_INFO, NULL, 0, raw, sizeof(raw), &got, 100u);
+	/* Decode via the driver's field-by-field API rather than memcpy'ing
+	 * the wire bytes over the struct: alp_cc3501e_diag_info_t is a
+	 * wire-SCHEMA description (#733), and cc3501e_diag_info() is the codec
+	 * that reads each little-endian field explicitly -- no padding
+	 * assumptions, no short-reply foot-gun (it validates the length). */
+	alp_cc3501e_diag_info_t diag;
+	alp_status_t            s = cc3501e_diag_info(fw, &diag);
 
 	if (s == ALP_ERR_INVAL) {
 		printf("[cc3501e-bringup] GET_DIAG_INFO -> rejected (v0.1 firmware; "
@@ -219,15 +222,7 @@ static void cc3501e_dump_diag(cc3501e_t *fw)
 		printf("[cc3501e-bringup] GET_DIAG_INFO -> %d\n", (int)s);
 		return;
 	}
-	if (got < sizeof(alp_cc3501e_diag_info_t)) {
-		printf("[cc3501e-bringup] GET_DIAG_INFO -> short reply (%u B)\n", (unsigned)got);
-		return;
-	}
 
-	/* Both cores are little-endian ARM and the struct is naturally aligned
-	 * (matches the packed wire layout), so a straight copy is safe. */
-	alp_cc3501e_diag_info_t diag;
-	memcpy(&diag, raw, sizeof(diag));
 	printf("[cc3501e-bringup] diag: fw_version=0x%04x reset_cause=%u role=%u "
 	       "uptime=%u ms free_heap=%u B last_error=%u\n",
 	       diag.fw_version,

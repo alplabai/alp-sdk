@@ -12,6 +12,10 @@
 # CMake configure step -- out of scope for a small teaching example.
 # `src/main.c` therefore hand-rolls the RFC 6455 frame this example
 # demonstrates instead of calling into the library.
+libraries:
+  - name: libwebsockets
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -20,8 +24,6 @@ preset: e1m-evk
 cores:
   m55_hp:
     app: ./src
-    libraries:
-      - libwebsockets
     # No transport, no peripheral: this is an offline frame encode/
     # decode round trip, proving the byte layout before it ever
     # touches a TCP socket.

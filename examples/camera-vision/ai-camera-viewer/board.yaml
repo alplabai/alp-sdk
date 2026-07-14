@@ -7,6 +7,12 @@
 # The headline marketing demo: shows the full edge-AI stack end
 # to end on a single SoM, with the right NPU resolved by the
 # §D.lib.loader from the SKU's `capabilities:` block.
+libraries:
+  - name: lvgl
+    cores: [m55_hp]
+  - name: tflite-micro
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801           # E8 -- Ethos-U85 primary plus two Ethos-U55s;
                              # the SoM `npu_population:` block drives
@@ -25,9 +31,6 @@ cores:
     os: "off"
   m55_hp:
     app: ./src
-    libraries:
-      - lvgl
-      - tflite_micro
     # Inference backend set is driven by the SoM preset's
     # `capabilities:` block, not by board.yaml.  Per-SKU mappings:
     #   AEN401  -> _BACKEND_ETHOS_U_AEN + _ETHOS_U_VARIANT_{U55,U85}

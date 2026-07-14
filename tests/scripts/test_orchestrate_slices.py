@@ -557,11 +557,14 @@ def test_slice_alp_conf_iot_aen_uses_cc3501e_provider(tmp_path: Path) -> None:
 som:
   sku: E1M-AEN701
 
+libraries:
+  - name: mbedtls
+    cores: [m55_hp]
+
 cores:
   m55_hp:
     os: zephyr
     app: ./m55_hp
-    libraries: [mbedtls]
     iot: { wifi: true, mqtt: true, tls: true, ble: true }
 """
     path = _write_board(tmp_path, body)
@@ -593,11 +596,14 @@ def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
 som:
   sku: E1M-NX9101
 
+libraries:
+  - name: mbedtls
+    cores: [m33]
+
 cores:
   m33:
     os: zephyr
     app: ./m33
-    libraries: [mbedtls]
     iot: { wifi: true, mqtt: true, tls: true, ble: true }
 """
     path = _write_board(tmp_path, body)
@@ -636,12 +642,15 @@ def test_slice_local_conf_iot_v2n_murata_linux_handoff(tmp_path: Path) -> None:
 som:
   sku: E1M-V2N101
 
+libraries:
+  - name: mbedtls
+    cores: [a55_cluster]
+
 cores:
   a55_cluster:
     os: yocto
     app: ./linux
     image: alp-image-edge
-    libraries: [mbedtls]
     iot: { wifi: true, mqtt: true, tls: true, ble: true }
 """
     path = _write_board(tmp_path, body)

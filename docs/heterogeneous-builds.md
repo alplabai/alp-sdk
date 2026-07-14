@@ -87,7 +87,7 @@ split is opt-in per project.
 
 ## 4. The `cores:` block, walked through
 
-Here's a complete V2N `board.yaml` v2:
+Here's a complete V2N `board.yaml`:
 
 ```yaml
 som:
@@ -95,17 +95,24 @@ som:
   hw_rev: r1
 
 preset: e1m-x-evk
+
+libraries:
+  - name: mbedtls
+    cores: [a55_cluster]
+  - name: nlohmann-json
+    cores: [a55_cluster]
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 cores:
   a55_cluster:
     app: ./linux         # os: omitted -- A-cores default to yocto per SoM topology
     image: alp-image-edge
     peripherals: [ethernet, usb, emmc]
-    libraries:   [mbedtls, nlohmann_json]
     iot:         { wifi: true, mqtt: true }
   m33_sm:
     app: ./m33_sm        # os: omitted -- M-cores default to zephyr per SoM topology
     peripherals: [adc, pwm, i2c, gpio]
-    libraries:   [cmsis_dsp]
     inference:   { default_arena_kib: 64 }
 
 ipc:

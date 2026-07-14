@@ -7,6 +7,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.10.0 candidate
 
+### Added — reproducible release: SBOM + deterministic tarball (#610 §7 slice 2)
+
+- `scripts/gen_sbom.py` emits a deterministic CycloneDX 1.5 SBOM from `alp.lock`
+  (stable, lock-derived serial number, no wall-clock). `release.yml` now builds
+  a byte-reproducible source tarball (`gzip -n`) and attaches the SBOM. Closes
+  the §7 "reproducible release artifacts" criterion (build-receipt schema landed
+  in slice 1).
+### Added — `west alp-quality` profile runner (#610 §5 slice 2)
+
+- Runs `metadata/quality-tasks-v1.json` for a named profile (quick/pr/full/
+  release) and emits a human summary + JSON + JUnit + SARIF. The `pr` profile
+  selects exactly the gates CI runs (one source of truth). Completes the §5
+  "one quality definition drives local + CI, emits machine artifacts" criterion.
+
 ### Added — quality-task registry (`metadata/quality-tasks-v1.json`, #610 §5)
 
 - Single source of truth for the SDK's `check_*.py` quality gates: which exist,
@@ -25,6 +39,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   no wall-clock field so identical inputs yield an identical receipt.
   `check_build_receipt.py` guards the schema. Wiring into `release.yml`,
   deterministic packaging, and SBOM generation land in later §7 slices.
+### Removed — `tinygsm` + `libhelix` dropped from the curated library set (#610 WS6-c)
+
+- Maintainer legal-review decision: `tinygsm` (LGPL-3.0) and `libhelix`
+  (RPSL-1.0) are copyleft/source-available licences unwanted in a SoM
+  manufacturer's firmware distribution, and are removed entirely — the
+  `west.yml` pins + remotes, the `cores.<id>.libraries` schema enum tokens,
+  the `metadata/libraries/{tinygsm,libhelix}.yaml` manifests +
+  `metadata/library-profiles/{tinygsm,libhelix}/` HW-backend profiles, the
+  `examples/connectivity/tinygsm-modem-at` and `examples/audio/libhelix-decode`
+  teaching examples, and every Kconfig / loader / test reference. No ABI
+  shim or compat alias survives (per #610 §6, curated tokens carry no
+  back-compat once retired).
+- `catch2` (BSL-1.0, Boost) and `minimp3` (CC0-1.0, public-domain-equivalent)
+  are permissive and stay; `metadata/schemas/library-v1.schema.json`'s
+  `license` enum grows `BSL-1.0` + `CC0-1.0` to accommodate them. LGPL-3.0
+  and RPSL-1.0 are deliberately NOT added to the allowlist.
 
 ### Added — `west alp-migrate` board.yaml migration engine (#610 WS6-b)
 

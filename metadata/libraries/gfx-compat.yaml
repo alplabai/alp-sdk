@@ -1,0 +1,66 @@
+# gfx-compat -- Alp Lab in-tree 2D-blit compatibility shim (ADR 0018 library
+# manifest; WS6-c Phase-1 canonical manifest for the legacy per-core token
+# `gfx_compat`).
+#
+# Grounding (this checkout):
+#   * scripts/alp_project_emit/__init__.py:243-244 (_LIBRARY_KCONFIG) --
+#     "CONFIG_ALP_GFX_COMPAT_SW=y" (real, always-on SW-blit fallback
+#     CONFIG_ line, copied verbatim); the second tuple element is a Python
+#     comment string ("gfx_compat: maintainer-shipped thin shim; no
+#     external dep"), NOT a real CONFIG_ line -- the schema's kconfig items
+#     must match `^CONFIG_...=...$`, so that note lives here as prose.
+#   * west.yml:417-418 -- "gfx_compat is maintainer-written and ships
+#     in-tree under src/lib/gfx_compat/ -- no west pin needed." No west
+#     project entry exists; `module: null` per the schema's header-only/
+#     in-tree case (matches modbus.yaml's precedent for an in-tree
+#     component with no separate module).
+#   * src/lib/gfx_compat/{gfx_compat.c,Kconfig} -- SPDX-License-Identifier:
+#     Apache-2.0, "Copyright 2026 Alp Lab AB": this is Alp Lab's own
+#     maintainer-written source, not a pinned third-party upstream, so
+#     `version:` cites the git SHA that introduced it in this repo rather
+#     than an upstream release string (git log --follow --diff-filter=A
+#     -- src/lib/gfx_compat/gfx_compat.c: 1a7b16034ec123e92c25e9ec13fb3508e7041a23).
+#
+# HW-backends: metadata/library-profiles/gfx_compat/hw-backends.yaml
+# carries per-accelerator priority binding (GPU2D, DMA2D, SPI-DMA push);
+# folded in WS6-c Phase 3 (needs library-v1 schema extension).
+#
+# No `requires:` -- pure-C SW blit is the always-available floor
+# (CONFIG_ALP_GFX_COMPAT_SW=y); HW GPU2D/DMA2D offload is opportunistic
+# per-SoM (see hw-backends.yaml above), never a hard requirement.
+#
+# `tier: B` for this Phase-1 pass: gfx_compat is NOT listed in
+# metadata/registries/tier-a-library-ci.json's hostBuild.libraries or
+# excludedLibraries, even though it already has a real teaching example
+# (examples/display/gfx-compat-blit, native_sim green). Promotion to Tier A
+# is a named follow-up (add the CI-contract entry).
+schema_version: 1
+name: gfx-compat
+description: "gfx_compat -- Alp Lab's thin 2D-blit compatibility shim over the display backend abstraction."
+tier: B
+version: "1a7b16034ec123e92c25e9ec13fb3508e7041a23"
+license: Apache-2.0
+
+integration:
+  zephyr:
+    module: null
+    kconfig:
+      - CONFIG_ALP_GFX_COMPAT_SW=y
+    hw_backends:
+      class: graphics
+      upstream_source: "maintainer-written thin shim"
+      accelerators:
+        - class: gpu_2d
+          priority:
+            - { requires_cap: gpu2d, backend: gpu2d, kconfig: CONFIG_ALP_GFX_COMPAT_GPU2D=y }
+            - { requires_cap: dma2d, backend: dma2d, kconfig: CONFIG_ALP_GFX_COMPAT_DMA2D=y }
+        - class: dma
+          priority:
+            - { backend: spi_dma, kconfig: CONFIG_ALP_GFX_COMPAT_SPI_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_GFX_COMPAT_SW=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

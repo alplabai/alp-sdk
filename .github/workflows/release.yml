@@ -145,10 +145,15 @@ jobs:
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
           ARCHIVE="alp-sdk-${TAG}.tar.gz"
-          git archive --format=tar.gz --prefix="alp-sdk-${TAG}/" -o "$ARCHIVE" HEAD
+          git archive --format=tar --prefix="alp-sdk-${TAG}/" HEAD | gzip -n > "$ARCHIVE"
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
           sha512sum "$ARCHIVE" > "$ARCHIVE.sha512"
+
+      - name: Emit SBOM + build receipt
+        run: |
+          python3 scripts/gen_sbom.py --output "alp-sdk-${{ steps.tag.outputs.tag }}.cdx.json"
+          # (receipt for a source release: the tarball is the sole image)
 
       - name: Emit base64-encoded digests for the provenance job
         id: hash
@@ -174,6 +179,7 @@ jobs:
             alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz
             alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.sha256
             alp-sdk-${{ steps.tag.outputs.tag }}.tar.gz.sha512
+            alp-sdk-${{ steps.tag.outputs.tag }}.cdx.json
 
   # SLSA L3 provenance generator.  Runs as a separate reusable
   # workflow inside an isolated runner so a compromised `build` job

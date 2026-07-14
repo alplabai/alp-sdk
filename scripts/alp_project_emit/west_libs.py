@@ -20,6 +20,8 @@ try:
 except ImportError:
     sys.exit("alp_project: PyYAML is required.  Install via `pip install pyyaml`.")
 
+import json
+
 from alp_project_loader import (
     METADATA_ROOT,
     _load_yaml,
@@ -29,7 +31,7 @@ from alp_project_loader import (
 
 
 # §D.lib.loader: map _sku_family() return values to the soc_family
-# tokens used in metadata/library-profiles/<name>/hw-backends.yaml.
+# tokens used in the manifest's integration.zephyr.hw_backends model.
 _SOC_FAMILY_TOKEN: dict[str, str] = {
     "aen":    "alif_ensemble",
     "v2n":    "renesas_rzv2n",
@@ -38,13 +40,26 @@ _SOC_FAMILY_TOKEN: dict[str, str] = {
 }
 
 
+def _library_alias_table() -> dict[str, str]:
+    """Legacy per-core `libraries:` token -> canonical manifest name
+    (metadata/library-aliases-v1.json).  Empty dict if the table is
+    absent (keeps callers robust)."""
+    path = METADATA_ROOT / "library-aliases-v1.json"
+    if not path.is_file():
+        return {}
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    aliases = doc.get("aliases")
+    return dict(aliases) if isinstance(aliases, dict) else {}
+
+
 def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
     """Per-library HW-accelerator binding loader.
 
-    For each enabled library that ships a
-    `metadata/library-profiles/<name>/hw-backends.yaml`, pick the
-    highest-priority implemented matching backend per accelerator class
-    given the active SoM SKU and emit the matching `CONFIG_*=y` line.
+    For each enabled library whose canonical manifest (resolved via the
+    metadata/library-aliases-v1.json token table) carries an
+    `integration.zephyr.hw_backends` block, pick the highest-priority
+    implemented matching backend per accelerator class given the active
+    SoM SKU and emit the matching `CONFIG_*=y` line.
 
     Match rules (per priority entry; checked in order, all specified
     keys must match):
@@ -67,7 +82,6 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
         metadata for the roadmap but are not emitted as active build
         claims.
     """
-    import re
     from pathlib import Path
 
     family       = _sku_family(sku)
@@ -112,55 +126,58 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
         except ValueError:
             return False
 
+    alias = _library_alias_table()
+    # Canonical -> legacy token, so the annotation comment names the library
+    # by its declared token regardless of whether the caller passed the legacy
+    # spelling (schemaVersion 1 per-core lists) or the canonical name (the
+    # schemaVersion 2 unified `libraries:` list resolves to canonical).  The
+    # annotation is cosmetic; keeping it stable makes the v1->v2 migration a
+    # byte-identical emit (WS6-c #610 §6).
+    to_token = {canon: legacy for legacy, canon in alias.items()}
+
     for lib in libs:
-        prof = repo_root / "metadata" / "library-profiles" / lib / "hw-backends.yaml"
-        if not prof.exists():
+        # Resolve the legacy per-core token to its canonical manifest and
+        # read the folded integration.zephyr.hw_backends block (WS6-c #610
+        # §6 -- replaces the retired metadata/library-profiles/ tree).
+        canonical = alias.get(lib, lib)
+        label = to_token.get(lib, lib)
+        manifest_path = repo_root / "metadata" / "libraries" / f"{canonical}.yaml"
+        if not manifest_path.exists():
             continue
-        try:
-            text = prof.read_text(encoding="utf-8")
-        except OSError:
+        manifest = _load_yaml(manifest_path) or {}
+        hw = ((manifest.get("integration") or {}).get("zephyr") or {}).get("hw_backends")
+        if not isinstance(hw, dict):
             continue
 
-        # Cheap line-driven parse: every `      - { ... kconfig: CONFIG_X=y }`
-        # entry sits inside a `priority:` block; we walk top-down to keep
-        # the per-class first-match.  No yaml dependency on the loader.
-        per_class_emitted: set[str] = set()
-        current_class: str | None   = None
-        for raw in text.splitlines():
-            cls_match = re.match(r"^\s*-\s*class:\s*(\S+)", raw)
-            if cls_match:
-                current_class = cls_match.group(1)
+        # Per-class first-match, walking accelerator classes and their
+        # `priority:` lists in declaration order (identical to the retired
+        # hw-backends.yaml top-down walk).  `sw_fallback:` is NOT emitted
+        # here -- the SW floor rides the base library-enable line.
+        for cls in (hw.get("accelerators") or []):
+            if not isinstance(cls, dict):
                 continue
-            if current_class is None or current_class in per_class_emitted:
-                continue
-            entry = re.match(r"^\s*-\s*\{\s*(.+)\s*\}\s*$", raw)
-            if not entry:
-                continue
-            kv: dict[str, str] = {}
-            for tok in entry.group(1).split(","):
-                tok = tok.strip()
-                if not tok or ":" not in tok:
+            current_class = cls.get("class")
+            for entry in (cls.get("priority") or []):
+                if not isinstance(entry, dict):
                     continue
-                k, v = tok.split(":", 1)
-                kv[k.strip()] = v.strip()
-            sili = kv.get("silicon")
-            sf   = kv.get("soc_family")
-            cap  = kv.get("requires_cap")
-            kcv  = kv.get("kconfig")
-            status = kv.get("status", "implemented").strip().lower()
-            if not kcv:
-                continue
-            if status in {"planned", "stub"}:
-                continue
-            # All specified matchers must succeed.
-            if sili is not None and sili != silicon_ref:
-                continue
-            if sf is not None and sf != soc_token:
-                continue
-            if cap is not None and not _cap_truthy(cap):
-                continue
-            out.append(f"{kcv}  # {lib} / {current_class}")
-            per_class_emitted.add(current_class)
+                kcv = entry.get("kconfig")
+                if not kcv:
+                    continue
+                status = str(entry.get("status", "implemented")).strip().lower()
+                if status in {"planned", "stub"}:
+                    continue
+                sili = entry.get("silicon")
+                sf   = entry.get("soc_family")
+                cap  = entry.get("requires_cap")
+                # All specified matchers must succeed.
+                if sili is not None and sili != silicon_ref:
+                    continue
+                if sf is not None and sf != soc_token:
+                    continue
+                if cap is not None and not _cap_truthy(str(cap)):
+                    continue
+                out.append(f"{kcv}  # {label} / {current_class}")
+                break  # per-class first-match
 
     return out
 
@@ -176,13 +193,17 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
 # they import via a self-referencing `import:` block.
 
 
-# Library name -> Zephyr module name the workspace's west.yml must
-# import.  Mirrors zephyr/modules.git's published modules; LittleFS
-# ships as `fs/littlefs` while the rest match their library names 1:1.
+# Canonical library name -> Zephyr module name the workspace's west.yml must
+# import.  Keyed by the CANONICAL manifest name (metadata/libraries/<name>.yaml)
+# because the v2 `libraries:` resolution feeds canonical names here; the
+# conservative allowlist stays four upstream Zephyr modules (the vendored /
+# header-only libraries deliberately do NOT get a west entry -- `west update`
+# would reject a name it can't resolve).  Mirrors zephyr/modules.git; LittleFS
+# ships as `fs/littlefs` while the rest match their names 1:1.
 _LIBRARY_WEST_MODULES: dict[str, str] = {
     "lvgl":          "lvgl",
     "mbedtls":       "mbedtls",
-    "cmsis_dsp":     "cmsis-dsp",
+    "cmsis-dsp":     "cmsis-dsp",
     "littlefs":      "fs/littlefs",
     # The four header-only C++ libraries (etl / fmt / nlohmann_json /
     # doctest) are not Zephyr modules today -- they land in v0.4 via
@@ -257,8 +278,12 @@ def _emit_west_libraries(
             west_projects.append((lib, west))
             seen_projects.add(name)
 
+    # Normalise legacy per-core tokens (schemaVersion 1) to their canonical
+    # manifest name so the west-module lookup resolves regardless of which
+    # spelling the caller passed (v2 resolution already yields canonical).
+    alias = _library_alias_table()
     for lib in libs:
-        mod = _LIBRARY_WEST_MODULES.get(lib)
+        mod = _LIBRARY_WEST_MODULES.get(alias.get(lib, lib))
         if mod is None:
             unsupported.append(lib)
         else:

@@ -6,6 +6,10 @@
 # and `west build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via OVERLAY_CONFIG.
+libraries:
+  - name: littlefs
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -22,8 +26,6 @@ cores:
     # scripts/alp_project.py).  The flash-backend Kconfig
     # (CONFIG_FLASH / CONFIG_FLASH_MAP) is app-local, not
     # library-selection, so it lives in this example's prj.conf.
-    libraries:
-      - littlefs
     peripherals: []
 
 diagnostics:
