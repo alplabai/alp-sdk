@@ -87,14 +87,23 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 {
 	if (image == NULL || len == 0u) return ALP_ERR_INVAL;
 
-	/* OTA_BEGIN's total_len is a wire LE32 (<alp/protocol/cc3501e.h>), so
-	 * UINT32_MAX is the only device/slot maximum knowable in-tree -- the
-	 * CC3501E chip manifest (metadata/chips/cc3501e.yaml) publishes no
-	 * smaller vendor-slot capacity to enforce on top of it.  Reject
-	 * anything that would not round-trip BEFORE issuing BEGIN, converting
-	 * len to the wire width exactly ONCE (#732): every offset streamed by
-	 * the loop below is < len, so it is already proven to fit and the
-	 * per-chunk (uint32_t)off cast needs no re-validation. */
+	/* OTA_BEGIN's total_len is a wire LE32 (<alp/protocol/cc3501e.h>), so the
+	 * wire width is the only bound the HOST can know -- it is NOT the real
+	 * image maximum.  The device enforces a much smaller one of its own at
+	 * BEGIN (CC3501E_OTA_IMAGE_MAX, firmware/cc3501e/hal/ti/cc3501e_hw_ti_ota.c
+	 * -- 64 KiB in the TI HAL today, sized by the RAM buffer that stages the
+	 * whole image before FINISH), rejecting an oversize BEGIN with
+	 * ERR_INVAL before any image data is streamed.  That value is HAL-private
+	 * and unpublished on the wire, and a firmware rev that resizes the staging
+	 * buffer moves it, so the host deliberately does NOT duplicate it: a
+	 * hardcoded copy here would start falsely rejecting valid images the day
+	 * the buffer grows.  Enforce only what the wire itself constrains, and
+	 * leave the real limit to the device that owns it.
+	 *
+	 * Reject anything that would not round-trip BEFORE issuing BEGIN,
+	 * converting len to the wire width exactly ONCE (#732): every offset
+	 * streamed by the loop below is < len, so it is already proven to fit and
+	 * the per-chunk (uint32_t)off cast needs no re-validation. */
 	uint32_t total_len_u32;
 	if (!alp_size_to_u32(len, &total_len_u32)) {
 		return ALP_ERR_INVAL;
