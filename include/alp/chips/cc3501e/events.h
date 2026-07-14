@@ -68,7 +68,12 @@ alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, v
  *          @c evt_busy==false before either sets it, and both proceed into
  *          @c evt_buf. An application that polls the SAME @p ctx from more
  *          than one thread must serialize those calls itself (e.g. a mutex
- *          around cc3501e_poll_events()).
+ *          around cc3501e_poll_events()) -- this is exactly what the SDK's
+ *          own in-tree caller does: companion_drain_events() (src/zephyr/
+ *          console/alp_console_companion.c) wraps every cc3501e_poll_events()
+ *          call in @c k_mutex_lock(&companion_bus_lock, K_FOREVER), which is
+ *          what makes the CONFIG_ALP_SDK_CC3501E_EVENT_IRQ workqueue coexisting
+ *          with the timer-poll thread safe.
  *
  * @param ctx  Initialised driver context.
  * @return ALP_OK once the queue was drained + dispatched (even with zero

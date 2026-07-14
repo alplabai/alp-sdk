@@ -308,6 +308,65 @@ ZTEST(cc3501e_host_events, test_poll_reentrant_from_callback_is_rejected_740)
 	zassert_equal(cap_count, 0u, "ring was already drained");
 }
 
+/* #740: evt_buf's per-context storage move (mirrors wifi_scan_buf/ble_scan_buf)
+ * had no dedicated regression test of its own -- only the busy-guard test above
+ * exercised this file, so reverting JUST the storage move (ctx->evt_buf back to
+ * a function-local `static`) while keeping the busy guard would go completely
+ * uncaught. Byte-compare ctx A's raw decode buffer against the independently
+ * reconstructed wire bytes (fails on the pre-fix `static` buffer, which never
+ * writes ctx->evt_buf), then run an independent second context's OWN real poll
+ * with genuinely different staged content and confirm ctx A's buffer is
+ * unaffected -- same discriminating shape as test_wifi_scan_buf_is_per_context_740. */
+ZTEST(cc3501e_host_events, test_evt_buf_is_per_context_740)
+{
+	zassert_equal(cc3501e_set_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb ctx A");
+	const uint8_t gpio_evt[4] = { 0xDE, 0xAD, 0xBE, 0xEF };
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+	model_queue_evt(ALP_CC3501E_EVT_GPIO_INTERRUPT, gpio_evt, sizeof(gpio_evt));
+
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll ctx A -> OK");
+	zassert_equal(cap_count, 2u, "both events dispatched on ctx A");
+
+	uint8_t wire_a[ALP_CC3501E_MAX_PAYLOAD];
+	size_t  wire_a_off   = 0u;
+	wire_a[wire_a_off++] = ALP_CC3501E_EVT_WIFI_CONNECTED;
+	wire_a[wire_a_off++] = 0u;
+	wire_a[wire_a_off++] = ALP_CC3501E_EVT_GPIO_INTERRUPT;
+	wire_a[wire_a_off++] = (uint8_t)sizeof(gpio_evt);
+	memcpy(&wire_a[wire_a_off], gpio_evt, sizeof(gpio_evt));
+	wire_a_off += sizeof(gpio_evt);
+
+	zassert_mem_equal(fw.evt_buf,
+	                  wire_a,
+	                  wire_a_off,
+	                  "ctx A's cc3501e_poll_events must decode into ctx->evt_buf itself "
+	                  "(#740) -- fails against the pre-fix function-local `static` buffer, "
+	                  "which never touches this field");
+
+	uint8_t snapshot[ALP_CC3501E_MAX_PAYLOAD];
+	memcpy(snapshot, fw.evt_buf, sizeof(snapshot));
+
+	/* Independent second context runs its OWN real poll, through the same
+	 * driver entry point, staged with genuinely different content. */
+	cc3501e_t ctx_b;
+	zassert_equal(cc3501e_init(&ctx_b, fake_bus), ALP_OK, "init ctx B");
+	slave_reset();
+	memset(cap, 0, sizeof(cap));
+	cap_count = 0;
+	zassert_equal(cc3501e_set_event_callback(&ctx_b, capture_cb, NULL), ALP_OK, "set cb ctx B");
+	const uint8_t b_payload[2] = { 0x55, 0x66 };
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_DISCONNECTED, b_payload, sizeof(b_payload));
+	zassert_equal(cc3501e_poll_events(&ctx_b), ALP_OK, "poll ctx B -> OK");
+	zassert_equal(cap_count, 1u, "ctx B's distinct staged event delivered");
+	zassert_equal(
+	    cap[0].opcode, ALP_CC3501E_EVT_WIFI_DISCONNECTED, "ctx B decoded ITS OWN staged event");
+
+	zassert_mem_equal(fw.evt_buf,
+	                  snapshot,
+	                  sizeof(snapshot),
+	                  "ctx A's evt_buf must be unaffected by ctx B's OWN real poll (#740)");
+}
+
 /* A second poll after a drain sees an empty ring (delivered exactly once). */
 ZTEST(cc3501e_host_events, test_events_delivered_exactly_once)
 {
