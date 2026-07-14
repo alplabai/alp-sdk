@@ -309,11 +309,15 @@ ZTEST(alp_chips, test_bme280_set_sampling_accepts_every_declared_value)
  *
  * Regression proof, UBSan build: `west twister -p native_sim/native/64
  * --enable-ubsan` on the same reverted tree independently reports the
- * underlying UB directly -- `signed integer overflow: 469499904 -
- * -2147483648 cannot be represented in type 'int'` at the old
- * int32-only humidity line, naming the same test -- confirming the
- * plain-build divergence above is that overflow and not some
- * unrelated bug. This is corroborating evidence, not the only proof:
+ * underlying UB directly -- a `signed integer overflow ... cannot be
+ * represented in type 'int'` at the old int32-only humidity line,
+ * naming the same test -- confirming the plain-build divergence above
+ * is that overflow and not some unrelated bug.  (The exact operands
+ * are deliberately not quoted here: they are a function of the vector,
+ * and an earlier revision of this comment kept quoting the operands of
+ * a since-retired adc_H, i.e. a diagnostic this tree can no longer
+ * produce.  Run the command to see the live values.)
+ * This is corroborating evidence, not the only proof:
  * the plain build above already fails on its own under the gate CI
  * runs on every PR.
  *
