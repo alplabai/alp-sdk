@@ -7,8 +7,8 @@
  * headers instead.
  *
  * Lives in src/common/ so every backend (baremetal, yocto, and any
- * non-Zephyr build that picks up src/common/stub/*.c) shares one
- * canonical implementation.  Zephyr has its own thread-local
+ * non-Zephyr build that picks up the src/common/stub/ sources) shares
+ * one canonical implementation.  Zephyr has its own thread-local
  * last-error in src/zephyr/last_error.c; this header is irrelevant
  * to Zephyr builds.
  */
@@ -55,7 +55,7 @@ extern "C" {
  * Use from any backend source file that needs to convey a precise
  * failure reason before returning NULL or a non-OK status.  The
  * setter writes to the same `ALP_LAST_ERROR_TLS`-qualified static
- * that `src/common/stub/*.c`'s peripheral stubs write to, so
+ * that the `src/common/stub/` peripheral stubs write to, so
  * a caller invoking `alp_last_error()` after a failure sees the
  * latest write regardless of which layer stamped it -- including
  * `ALP_VENDOR_OVERRIDES_PERIPHERAL=1` builds (vendor wrappers such

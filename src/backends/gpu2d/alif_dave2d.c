@@ -13,7 +13,7 @@
  * whole translation unit is therefore gated behind
  * CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D, which the build only sets when
  * the pack is on the include path (mirrors the ALP_HAS_ALIF_HAL
- * model used by vendors/alif/*.c).
+ * model used by the vendors/alif/ sources).
  *
  * ============================ BENCH-UNVERIFIED ============================
  * This backend is STRUCTURAL.  It is authored against the documented
