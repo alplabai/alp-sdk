@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "cc3501e_internal.h"
+#include "../../src/common/alp_checked_arith.h"
 
 alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t timeout_ms)
 {
@@ -86,7 +87,20 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 {
 	if (image == NULL || len == 0u) return ALP_ERR_INVAL;
 
-	alp_status_t s = cc3501e_ota_begin(ctx, (uint32_t)len, timeout_ms);
+	/* OTA_BEGIN's total_len is a wire LE32 (<alp/protocol/cc3501e.h>), so
+	 * UINT32_MAX is the only device/slot maximum knowable in-tree -- the
+	 * CC3501E chip manifest (metadata/chips/cc3501e.yaml) publishes no
+	 * smaller vendor-slot capacity to enforce on top of it.  Reject
+	 * anything that would not round-trip BEFORE issuing BEGIN, converting
+	 * len to the wire width exactly ONCE (#732): every offset streamed by
+	 * the loop below is < len, so it is already proven to fit and the
+	 * per-chunk (uint32_t)off cast needs no re-validation. */
+	uint32_t total_len_u32;
+	if (!alp_size_to_u32(len, &total_len_u32)) {
+		return ALP_ERR_INVAL;
+	}
+
+	alp_status_t s = cc3501e_ota_begin(ctx, total_len_u32, timeout_ms);
 	if (s != ALP_OK) return s;
 
 	/* 256 B = the CC35 flash page / psa_fwu_write granularity (the validated
@@ -107,11 +121,16 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 			 * OTA_WRITE is NOT idempotent (a re-sent already-written offset is
 			 * rejected as out-of-order), so re-sync to the device's actual write
 			 * cursor before deciding: if it already advanced past this chunk the
-			 * write took -- continue; otherwise abort + report. */
+			 * write took -- continue; otherwise abort + report.  off and n are
+			 * both already proven <= total_len_u32 (the BEGIN bound above), so
+			 * the narrowing + addition below is done through the checked
+			 * helpers rather than a raw `(uint32_t)(off + n)` cast (#732). */
 			alp_cc3501e_ota_status_t st;
+			uint32_t                 off_u32, n_u32, expect_u32;
 			if (cc3501e_ota_status(ctx, &st, timeout_ms) == ALP_OK &&
-			    st.state == ALP_CC3501E_OTA_STATE_WRITING &&
-			    st.bytes_written == (uint32_t)(off + n)) {
+			    st.state == ALP_CC3501E_OTA_STATE_WRITING && alp_size_to_u32(off, &off_u32) &&
+			    alp_size_to_u32(n, &n_u32) && alp_u32_add_checked(off_u32, n_u32, &expect_u32) &&
+			    st.bytes_written == expect_u32) {
 				/* chunk landed; the reply was lost -- proceed. */
 			} else {
 				(void)cc3501e_ota_abort(ctx, timeout_ms);
