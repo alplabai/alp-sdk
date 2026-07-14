@@ -29,6 +29,13 @@ static alp_status_t reg_write(tcal9538_t *ctx, uint8_t reg, uint8_t val)
 alp_status_t tcal9538_init(tcal9538_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 {
 	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
+	/* addr_7bit == 0 is the documented "fall back to base strap"
+	 * sentinel; any other value must fall inside the A1A0 strap range
+	 * (0x70..0x73) before it reaches the bus. */
+	if (addr_7bit != 0 &&
+	    (addr_7bit < TCAL9538_I2C_ADDR_BASE || addr_7bit > TCAL9538_I2C_ADDR_BASE + 3u)) {
+		return ALP_ERR_INVAL;
+	}
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->bus  = bus;
 	ctx->addr = (addr_7bit == 0) ? TCAL9538_I2C_ADDR_BASE : addr_7bit;

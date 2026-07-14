@@ -217,6 +217,80 @@ ZTEST(alp_testing_adc_behavior, test_raw_to_uv_conversion_through_dispatcher)
 	alp_adc_close(h);
 }
 
+/* #757: alp_adc_read_uv must reject an out-of-range backend-resolved
+ * resolution_bits instead of shifting `1` by it -- resolution_bits=32
+ * on a 32-bit `1u` is undefined behavior (src/adc_dispatch.c), and
+ * under CONFIG_ALP_SOC_NONE (this build) the open()-time SoC-cap gate
+ * is compiled out (ALP_SOC_ADC_MAX_RESOLUTION_BITS == UINT16_MAX), so
+ * nothing upstream of alp_adc_read_uv catches it either -- the test
+ * double happily stores whatever resolution_bits the caller passed. */
+ZTEST(alp_testing_adc_behavior, test_read_uv_rejects_resolution_bits_32)
+{
+	const uint32_t channel_id = 17;
+	const int32_t  raw_val    = 1;
+
+	zassert_equal(alp_testing_adc_queue_raw(channel_id, &raw_val, 1), ALP_OK, "queue_raw failed");
+
+	alp_adc_config_t cfg = ALP_ADC_CONFIG_DEFAULT(channel_id);
+	cfg.resolution_bits  = 32u;
+	alp_adc_t *h         = alp_adc_open(&cfg);
+	zassert_not_null(h, "adc test double must open ANY instance regardless of resolution_bits");
+
+	int32_t      uv = -1;
+	alp_status_t s  = alp_adc_read_uv(h, &uv);
+	zassert_equal(s,
+	              ALP_ERR_NOT_READY,
+	              "resolution_bits=32 must be rejected before the width-unsafe shift, got %d",
+	              (int)s);
+	zassert_true(status_in_enum(s), "status %d outside alp_status_t", (int)s);
+
+	alp_adc_close(h);
+}
+
+/* The adjacent in-range boundary (31 bits) must still convert
+ * correctly -- pins the guard at exactly ">31", not an
+ * off-by-one that also rejects the last valid width. */
+ZTEST(alp_testing_adc_behavior, test_read_uv_accepts_resolution_bits_31)
+{
+	const uint32_t channel_id = 18;
+	const int32_t  raw_val    = 0;
+
+	zassert_equal(alp_testing_adc_queue_raw(channel_id, &raw_val, 1), ALP_OK, "queue_raw failed");
+
+	alp_adc_config_t cfg = ALP_ADC_CONFIG_DEFAULT(channel_id);
+	cfg.resolution_bits  = 31u;
+	alp_adc_t *h         = alp_adc_open(&cfg);
+	zassert_not_null(h);
+
+	int32_t      uv = -1;
+	alp_status_t s  = alp_adc_read_uv(h, &uv);
+	zassert_equal(s, ALP_OK, "resolution_bits=31 must be accepted, got %d", (int)s);
+	zassert_equal(uv, 0, "raw=0 must convert to 0 uV regardless of resolution width");
+
+	alp_adc_close(h);
+}
+
+/* #749: the alp_last_error() contract (<alp/peripheral.h>) says every
+ * successful alp_*_open clears the thread-local slot -- alp_adc_open
+ * was missing the alp_z_clear_last_error() call the sibling i2c/spi
+ * dispatchers make at open() entry, so a prior failure's error code
+ * kept reading back after a LATER successful open. */
+ZTEST(alp_testing_adc_behavior, test_open_success_clears_stale_last_error)
+{
+	/* Provoke a failure first so the thread-local slot holds a
+	 * non-OK value. */
+	zassert_is_null(alp_adc_open(NULL));
+	zassert_equal(alp_last_error(), ALP_ERR_INVAL, "setup: NULL cfg must set last-error");
+
+	alp_adc_t *h = open_channel(19);
+	zassert_not_null(h, "adc test double must open ANY instance");
+	zassert_equal(alp_last_error(),
+	              ALP_OK,
+	              "a successful open() must clear the stale error from the earlier failed call");
+
+	alp_adc_close(h);
+}
+
 /* fail_next(): the injected status surfaces verbatim, as a documented
  * alp_status_t (not a raw errno), and does not consume the sample it
  * pre-empted. */

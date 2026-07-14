@@ -64,6 +64,12 @@ static void _free_handle(struct alp_adc *h)
 
 alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg)
 {
+	/* Public contract (alp_last_error, <alp/peripheral.h>): every
+     * successful alp_*_open clears the thread-local last-error slot,
+     * matching the sibling i2c/spi dispatchers' alp_z_clear_last_error()
+     * at open() entry -- a stale failure from an earlier call must not
+     * still read back after THIS open succeeds. */
+	alp_z_clear_last_error();
 	if (cfg == NULL) {
 		alp_z_set_last_error(ALP_ERR_INVAL);
 		return NULL;
@@ -150,12 +156,20 @@ alp_status_t alp_adc_read_uv(alp_adc_t *h, int32_t *uv_out)
 		alp_handle_op_leave(&h->active_ops);
 		return rc;
 	}
-	const int64_t fs = (int64_t)((1u << h->state.resolution_bits) - 1u);
-	if (fs == 0) {
+	/* Width-safe full-scale: h->state.resolution_bits is
+     * backend-resolved (not gated by the SoC-cap check under
+     * CONFIG_ALP_SOC_NONE -- see the comment on that check above),
+     * so a misbehaving/test backend can hand back an out-of-range
+     * width.  raw is an int32_t, so no width beyond 31 bits is even
+     * representable; reject 0 (the prior "not configured" sentinel)
+     * and anything > 31 before shifting -- `1 << 31` on the int64_t
+     * literal below is then always well-defined. */
+	if (h->state.resolution_bits == 0 || h->state.resolution_bits > 31) {
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_NOT_READY;
 	}
-	*uv_out = (int32_t)((int64_t)raw * (int64_t)h->state.reference_uv / fs);
+	const int64_t fs = ((int64_t)1 << h->state.resolution_bits) - 1;
+	*uv_out          = (int32_t)((int64_t)raw * (int64_t)h->state.reference_uv / fs);
 	alp_handle_op_leave(&h->active_ops);
 	return ALP_OK;
 }
