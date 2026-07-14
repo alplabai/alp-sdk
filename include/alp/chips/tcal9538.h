@@ -55,8 +55,19 @@ extern "C" {
 #endif
 
 #define TCAL9538_I2C_ADDR_BASE 0x70u /**< A1=0, A0=0. Strap range: BASE..+3 (0x70..0x73). */
-#define TCAL9538_I2C_ADDR_ALT_BASE \
-	0x20u /**< TCA6408A/PCA9538 alt-part single-strap base (A0=0). Strap range: ALT_BASE..+1 (0x20..0x21). 0x20 BENCH-CONFIRMED 2026-06-16 on the E1M EVK -- see EVK_I2C_ADDR_TCA6408A_MAIN. */
+
+/**
+ * TCA6408A/PCA9538 alt-part single-strap base (A0=0).  Strap range:
+ * ALT_BASE..+1 (0x20..0x21).  0x20 is BENCH-CONFIRMED 2026-06-16 on the
+ * E1M EVK -- see EVK_I2C_ADDR_TCA6408A_MAIN in <alp/boards/alp_e1m_evk_routes.h>.
+ *
+ * Kept on ONE line deliberately: scripts/abi_snapshot.py only captures a
+ * macro's value when the `#define` is not line-continued, so a wrapped form
+ * records an empty value and the ABI gate can no longer see this address
+ * change.  Keep this doc block ABOVE the define -- a trailing doc comment
+ * pushes the line past the column limit and clang-format wraps it again.
+ */
+#define TCAL9538_I2C_ADDR_ALT_BASE 0x20u
 
 typedef enum {
 	TCAL9538_DIR_OUTPUT = 0, /**< Configuration bit = 0. */

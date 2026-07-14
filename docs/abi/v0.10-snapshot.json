@@ -7220,6 +7220,10 @@
         }
       },
       "macros": {
+        "TCAL9538_I2C_ADDR_ALT_BASE": {
+          "hash": "c6fab2ccae63eba0",
+          "value": "0x20u"
+        },
         "TCAL9538_I2C_ADDR_BASE": {
           "hash": "cd4562ddb3e3ff28",
           "value": "0x70u"
