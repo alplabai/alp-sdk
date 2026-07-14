@@ -104,6 +104,9 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
     assert m33["buildDir"] == "build/m33_sm-zephyr"
     assert m33["command"]["tool"] == "west"
     assert m33["command"]["args"][:2] == ["build", "-b"]
+    assert m33["command"]["args"][-2:] == [
+        "--", f"-DPython3_EXECUTABLE={sys.executable}",
+    ]
     assert m33["command"]["cwd"] == m33["buildDir"]
     assert m33["env"]["ALP_SDK_ROOT"]
     confs = {a["path"]: a["contents"] for a in m33["configArtefacts"]}
@@ -289,8 +292,9 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     """ADR 0014 Phase-3: a `boot:` block (-> build/alp_sysbuild.conf) makes
     the Zephyr slice command pass `--sysbuild --sysbuild-config
     ../alp_sysbuild.conf` (the overlay sits one dir up from the slice's
-    cwd=build/<core>-<os>); a project without one adds no flag and keeps
-    the bare `west build -b <board> <app>` shape."""
+    cwd=build/<core>-<os>); a project without one adds no sysbuild flag.
+    Both shapes pin CMake to the orchestrator's Python after west's `--`
+    separator so a stale cache cannot select a west-less interpreter."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 
@@ -304,6 +308,10 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     assert args[:2] == ["build", "-b"]
     assert "--sysbuild" in args
     assert args[args.index("--sysbuild-config") + 1] == "../alp_sysbuild.conf"
+    assert args[-2:] == [
+        "--", f"-DPython3_EXECUTABLE={sys.executable}",
+    ]
+    assert args.index("--sysbuild-config") < args.index("--")
 
     # Without boot: -> no sysbuild overlay -> no flag, bare command.
     path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
@@ -313,6 +321,9 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
               if s["backend"] == "zephyr" and s["command"])
     assert "--sysbuild" not in z2["command"]["args"]
     assert "--sysbuild-config" not in z2["command"]["args"]
+    assert z2["command"]["args"][-2:] == [
+        "--", f"-DPython3_EXECUTABLE={sys.executable}",
+    ]
 
 
 def test_cli_emit_build_plan(tmp_path: Path, capsys, monkeypatch) -> None:
@@ -371,7 +382,8 @@ def test_emit_build_plan_app_paths_independent_of_cwd(
     m33 = next(s for s in plan_other_dir["slices"] if s["coreId"] == "m33_sm")
     # Correctly anchored on the project dir -- NOT the unrelated CWD, and
     # NOT the repo root (the historical parent-CMakeLists.txt fallback trap).
-    assert m33["command"]["args"][-1] == str(project_dir / "m33")
+    args = m33["command"]["args"]
+    assert args[args.index("--") - 1] == str(project_dir / "m33")
     assert m33["appDir"] == (project_dir / "m33").as_posix()
 
 

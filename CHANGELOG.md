@@ -7,6 +7,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — orchestrated Zephyr builds pin the workspace Python (#787)
+
+- Zephyr slice commands now pass
+  `-DPython3_EXECUTABLE=<orchestrator interpreter>` through west's CMake
+  argument separator. This overrides a stale `Python3_EXECUTABLE` cache entry
+  that could otherwise select a macOS Framework Python without the `west`
+  package, despite `WEST_PYTHON` pointing at the correctly bootstrapped
+  workspace venv. The emitted `build-plan` command arguments carry the same
+  override for CLI and IDE consumers.
+
 ## [v0.10.1] - 2026-07-14
 
 ### Fixed — `west alp-build` unknown after bootstrap (#769)
