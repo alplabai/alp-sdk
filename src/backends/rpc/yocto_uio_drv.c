@@ -629,23 +629,54 @@ static int uio_rproc_notify(struct remoteproc *rproc, uint32_t id)
 		return -1;
 	}
 
+	/* alp-sdk #735 (NIT follow-up): the scratch-word offset is a
+	 * compile-time constant, not attacker-reachable input, but bound it
+	 * against the ACTUAL UIO_MHU_SHM mapping size for the same reason the
+	 * kick-slot register is bound above -- the region table's compile-time
+	 * 0x1000 (`g_uio_regions[UIO_MHU_SHM]`) describes what we ASK the
+	 * kernel to map, not a guarantee of what metal_device_open() actually
+	 * got. */
+	uint32_t scratch_off;
+	if (!alp_u32_add_checked(ALP_MHU_SHM_CH1_OFFSET, ALP_MHU_SHM_MSG_TXD, &scratch_off) ||
+	    !alp_size_range_valid((size_t)scratch_off, sizeof(uint32_t), shm->size)) {
+		fprintf(stderr, "alp_rpc: UIO_MHU_SHM mapping too small for notify scratch\n");
+		return -1;
+	}
+
 	/* Write the vring notify id into the ch1 scratch word, then raise the
 	 * A55->CM33 doorbell by asserting MSG_INT_SET on the M33's channel-5
 	 * register R_MHU_NS5 (alp-sdk #683/#697 doorbell fix, bench-proven cycle 5
 	 * -- see the MHU-B NS register comment above). */
-	volatile uint32_t *scratch =
-	    (volatile uint32_t *)((uint8_t *)shm->virt + ALP_MHU_SHM_CH1_OFFSET + ALP_MHU_SHM_MSG_TXD);
-	*scratch = id;
+	volatile uint32_t *scratch = (volatile uint32_t *)((uint8_t *)shm->virt + scratch_off);
+	*scratch                   = id;
 
-	/* alp-sdk #745: AArch64 is weakly ordered -- without an explicit
-	 * release fence here the CPU/compiler is free to hoist the MHU SET
-	 * write above, letting the M33 observe the doorbell before the
-	 * scratch word above (and any shared vring/descriptor state the
-	 * OpenAMP core already published before calling this ops->notify())
-	 * is globally visible. This fence makes every write program-order-
-	 * before it happen-before the doorbell write below -- required for
-	 * correctness on this silicon-proven link (#683/#697 doorbell fix);
-	 * do not remove or reorder relative to the writes above/below it. */
+	/* alp-sdk #745: AArch64 is weakly ordered, so without a barrier here
+	 * the CPU/compiler are free to let the M33 observe the doorbell
+	 * before the scratch word above (and any shared vring/descriptor
+	 * state the OpenAMP core already published before calling this
+	 * ops->notify()) is globally visible.
+	 *
+	 * Precisely what guarantees that ordering here is narrower than "a
+	 * release fence orders these writes": C11's
+	 * atomic_thread_fence(memory_order_release) is formally defined only
+	 * relative to OTHER atomic operations, and the scratch/doorbell
+	 * stores above and below are plain volatile MMIO stores, so the
+	 * standard alone does not order them. What this link actually relies
+	 * on is (1) the compiler lowering a release fence to a real `dmb`
+	 * barrier instruction on AArch64 regardless of what surrounds it, and
+	 * (2) both the `mhu-shm` and `mhu-uio` mappings being Device-nGnRnE
+	 * (UIO's default non-reordering, non-gathering, non-early-write-ack
+	 * mapping attribute), which is what makes a same-CPU barrier
+	 * sufficient to order two MMIO writes as observed by a non-coherent
+	 * peer like the M33. That mapping attribute is an ASSUMPTION this
+	 * diff does not verify -- the driver never reads back the DT
+	 * mhu-shm/mhu-uio node's memory attributes or sysfs's per-mapping UIO
+	 * attributes -- not a fact proven here; #745's "confirm mapping
+	 * attributes" acceptance criterion stays open. Do not remove or
+	 * reorder this fence relative to the writes above/below it: this
+	 * ordering is silicon-sensitive and is confirmed correct ONLY by the
+	 * #683/#697 bench cycles, not by this comment or by any host-side
+	 * test. */
 	atomic_thread_fence(memory_order_release);
 
 	volatile uint32_t *set_reg = mhu_ns_reg(mhu, kick_slot, ALP_MHU_NS_SLOT_MSG_INT_SET);

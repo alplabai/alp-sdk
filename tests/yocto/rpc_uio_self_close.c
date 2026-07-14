@@ -503,27 +503,6 @@ static void test_call_vs_close_no_uaf(void)
 /* 5. alp-sdk #735: ALP_UIO_MHU_KICK_SLOT override boundary checks.     */
 /* ------------------------------------------------------------------ */
 
-/* Mirrors the PRE-#735 mhu_kick_slot() body verbatim -- used only to
- * PROVE the boundary tests below catch something real: the old code cast
- * strtoul()'s result straight to a uint32_t with no errno/ERANGE check
- * and no UINT32_MAX check, so a malformed override silently produced a
- * wrong (and possibly huge) slot instead of being rejected. Kept as a
- * local copy rather than re-including two versions of the real function
- * so this test can assert on the OLD, buggy value inline instead of
- * needing a second build tree. */
-static uint32_t pre_735_mhu_kick_slot(const char *env)
-{
-	if (env == NULL || env[0] == '\0') {
-		return ALP_MHU_NS_CH5_KICK_SLOT;
-	}
-	char         *end = NULL;
-	unsigned long v   = strtoul(env, &end, 0);
-	if (end == env || *end != '\0') {
-		return ALP_MHU_NS_CH5_KICK_SLOT;
-	}
-	return (uint32_t)v;
-}
-
 static void test_mhu_kick_slot_default(void)
 {
 	unsetenv("ALP_UIO_MHU_KICK_SLOT");
@@ -555,34 +534,41 @@ static void test_mhu_kick_slot_rejects_unaligned(void)
 static void test_mhu_kick_slot_rejects_u32_truncation(void)
 {
 	/* 0x100000000 (2^32) parses cleanly as an `unsigned long` on this
-	 * 64-bit host (no ERANGE) but does not fit a uint32_t. */
+	 * 64-bit host (no ERANGE) but does not fit a uint32_t -- pre-#735 this
+	 * was cast straight to uint32_t and silently truncated to 0, a wrong
+	 * slot the caller would then dereference through instead of being
+	 * rejected. */
 	const char *env = "0x100000000";
-
-	ALP_ASSERT_EQ_INT((int)pre_735_mhu_kick_slot(env), 0); /* pre-fix: silently truncated to 0 */
 
 	setenv("ALP_UIO_MHU_KICK_SLOT", env, 1);
 	uint32_t out = 0xDEADBEEFu;
-	ALP_ASSERT_TRUE(!mhu_kick_slot(&out)); /* post-fix: rejected */
+	ALP_ASSERT_TRUE(!mhu_kick_slot(&out));
 	ALP_ASSERT_EQ_INT((int)out, (int)0xDEADBEEFu);
 	unsetenv("ALP_UIO_MHU_KICK_SLOT");
 }
 
-static void test_mhu_kick_slot_rejects_erange(void)
+/* NOTE (honesty, not a claim of ERANGE-specific coverage): on this 64-bit
+ * host `strtoul()` overflow ALWAYS saturates to ULONG_MAX (2^64-1, C11
+ * 7.22.1.4p8), and ULONG_MAX cast to size_t is always > UINT32_MAX, so this
+ * input is rejected identically whether it goes through mhu_kick_slot()'s
+ * `errno == ERANGE` check (yocto_uio_drv.c) or falls through to
+ * alp_size_to_u32()'s narrowing check -- the two branches are NOT
+ * distinguishable by any strtoul()-overflowing input on a host where
+ * `unsigned long` is 64 bits. This test proves overflow inputs are
+ * rejected end-to-end (a real regression: pre-#735 there was no errno
+ * check at all, so ULONG_MAX silently became (uint32_t)ULONG_MAX ==
+ * 0xFFFFFFFF, a huge slot the caller would dereference through); it does
+ * NOT prove the `errno == ERANGE` line specifically is what does the
+ * rejecting -- that line only matters on a host where `unsigned long` is
+ * 32 bits (e.g. LLP64), where ULONG_MAX IS u32-representable and would
+ * otherwise sail through alp_size_to_u32() unrejected. */
+static void test_mhu_kick_slot_rejects_ulong_overflow(void)
 {
-	/* Overflows `unsigned long` itself (ERANGE on this 64-bit host) --
-	 * the pre-fix code never checked errno, so strtoul()'s ULONG_MAX
-	 * saturation silently became (uint32_t)ULONG_MAX == 0xFFFFFFFF, a
-	 * huge slot offset the caller would then add a register offset to
-	 * and dereference (alp-sdk #735's "value greater than UINT32_MAX on
-	 * a 64-bit host" repro step). */
-	const char *env = "0x10000000000000000";
-
-	ALP_ASSERT_EQ_INT((int)pre_735_mhu_kick_slot(env),
-	                  (int)0xFFFFFFFFu); /* pre-fix: wraps to garbage */
+	const char *env = "0x10000000000000000"; /* overflows a 64-bit unsigned long */
 
 	setenv("ALP_UIO_MHU_KICK_SLOT", env, 1);
 	uint32_t out = 0xDEADBEEFu;
-	ALP_ASSERT_TRUE(!mhu_kick_slot(&out)); /* post-fix: rejected */
+	ALP_ASSERT_TRUE(!mhu_kick_slot(&out));
 	ALP_ASSERT_EQ_INT((int)out, (int)0xDEADBEEFu);
 	unsetenv("ALP_UIO_MHU_KICK_SLOT");
 }
@@ -596,34 +582,115 @@ static void test_mhu_kick_slot_rejects_garbage(void)
 	unsetenv("ALP_UIO_MHU_KICK_SLOT");
 }
 
-/* alp-sdk #735: the call site (uio_rproc_notify()) must reject a kick
- * slot that parses/narrows fine but still lands outside the mapped
- * UIO_MHU region once the register offset is added -- exercises
- * alp_u32_add_checked() + alp_size_range_valid() directly (no real UIO
- * mapping needed: this is pure arithmetic on the same inputs
- * uio_rproc_notify() feeds them). */
+/* alp-sdk #735: drive the SHIPPED call site (uio_rproc_notify()) itself,
+ * not just the shared alp_u32_add_checked()/alp_size_range_valid() helpers
+ * it calls underneath -- a prior version of this test called those helpers
+ * directly with the same inputs uio_rproc_notify() uses, which stayed green
+ * even with the entire bounds-check block deleted from the shipped
+ * function. A fake `struct metal_device`/`metal_io_region` pair stands in
+ * for the real UIO_MHU/UIO_MHU_SHM mappings (no metal_device_open() needed,
+ * mirroring make_test_channel()'s "double only what this host can't
+ * provide" rule from this file's header comment) so `uio_rproc_notify()`
+ * runs unmodified against them. Both fake regions use a REAL, fully-sized
+ * backing buffer -- only the reported `metal_io_region.size` is shrunk --
+ * so a reverted/broken bounds check can never walk off this test's own
+ * memory; the assertions below, not a crash, are what catch the
+ * regression. */
+
+static void fake_region_init(struct metal_device *dev, void *virt, size_t size)
+{
+	memset(dev, 0, sizeof(*dev));
+	dev->num_regions     = 1;
+	dev->regions[0].virt = virt;
+	dev->regions[0].size = size;
+}
+
 static void test_notify_bounds_reject_out_of_mapping(void)
 {
-	uint32_t reg_off;
+	unsetenv("ALP_UIO_MHU_KICK_SLOT");
 
-	/* Bench-proven default slot (0xA0) + MSG_INT_SET (0x04) fits inside
-	 * the real 0x1000 UIO_MHU mapping. */
-	ALP_ASSERT_TRUE(
-	    alp_u32_add_checked(ALP_MHU_NS_CH5_KICK_SLOT, ALP_MHU_NS_SLOT_MSG_INT_SET, &reg_off));
-	ALP_ASSERT_TRUE(alp_size_range_valid((size_t)reg_off, sizeof(uint32_t), 0x1000u));
+	uint8_t mhu_backing[0x1000];
+	uint8_t shm_backing[0x1000];
+	memset(mhu_backing, 0, sizeof mhu_backing);
+	memset(shm_backing, 0, sizeof shm_backing);
 
-	/* A slot right at the mapping's edge (register would start exactly
-	 * at the mapping boundary) must be rejected -- offset == capacity is
-	 * only valid for a zero-length request. */
-	ALP_ASSERT_TRUE(alp_u32_add_checked(
-	    0x1000u - ALP_MHU_NS_SLOT_MSG_INT_SET, ALP_MHU_NS_SLOT_MSG_INT_SET, &reg_off));
-	ALP_ASSERT_TRUE(!alp_size_range_valid((size_t)reg_off, sizeof(uint32_t), 0x1000u));
+	struct metal_device mhu_dev;
+	struct metal_device shm_dev;
+	/* Reported mapping stops exactly at the default kick slot (0xA0), so
+	 * MSG_INT_SET's register (0xA0+0x04) starts exactly at the (reported)
+	 * mapping boundary -- offset == capacity is only valid for a
+	 * zero-length request, #735's exact boundary case. */
+	fake_region_init(&mhu_dev, mhu_backing, ALP_MHU_NS_CH5_KICK_SLOT);
+	fake_region_init(&shm_dev, shm_backing, sizeof shm_backing);
 
-	/* UINT32_MAX - 2 + MSG_INT_SET(0x04) overflows uint32_t addition --
-	 * must be rejected by alp_u32_add_checked() before any range check
-	 * runs (this is exactly the "addition overflow" case #735 calls
-	 * out; the old call site had no equivalent check at all). */
-	ALP_ASSERT_TRUE(!alp_u32_add_checked(UINT32_MAX - 2u, ALP_MHU_NS_SLOT_MSG_INT_SET, &reg_off));
+	struct rpc_be ch;
+	memset(&ch, 0, sizeof ch);
+	ch.dev[UIO_MHU_SHM] = &shm_dev;
+	ch.dev[UIO_MHU]     = &mhu_dev;
+
+	struct remoteproc rproc;
+	memset(&rproc, 0, sizeof rproc);
+	rproc.priv = &ch;
+
+	ALP_ASSERT_EQ_INT(uio_rproc_notify(&rproc, 0x1234u), -1);
+
+	/* #735 requires the bounds check to run BEFORE any shared state is
+	 * touched -- neither the scratch word nor the doorbell register may
+	 * have been written. */
+	uint32_t scratch_word;
+	memcpy(&scratch_word,
+	       shm_backing + ALP_MHU_SHM_CH1_OFFSET + ALP_MHU_SHM_MSG_TXD,
+	       sizeof scratch_word);
+	ALP_ASSERT_EQ_INT((int)scratch_word, 0);
+
+	uint32_t doorbell_word;
+	memcpy(&doorbell_word,
+	       mhu_backing + ALP_MHU_NS_CH5_KICK_SLOT + ALP_MHU_NS_SLOT_MSG_INT_SET,
+	       sizeof doorbell_word);
+	ALP_ASSERT_EQ_INT((int)doorbell_word, 0);
+}
+
+/* Companion positive-path check: the SAME call site must still accept and
+ * fire the doorbell when the kick slot genuinely fits the mapping -- proves
+ * the bounds check added for #735 does not simply reject everything, and
+ * that (given no injected #745 fault) the scratch write lands before the
+ * doorbell write. */
+static void test_notify_bounds_accepts_in_mapping(void)
+{
+	unsetenv("ALP_UIO_MHU_KICK_SLOT");
+
+	uint8_t mhu_backing[0x1000];
+	uint8_t shm_backing[0x1000];
+	memset(mhu_backing, 0, sizeof mhu_backing);
+	memset(shm_backing, 0, sizeof shm_backing);
+
+	struct metal_device mhu_dev;
+	struct metal_device shm_dev;
+	fake_region_init(&mhu_dev, mhu_backing, sizeof mhu_backing);
+	fake_region_init(&shm_dev, shm_backing, sizeof shm_backing);
+
+	struct rpc_be ch;
+	memset(&ch, 0, sizeof ch);
+	ch.dev[UIO_MHU_SHM] = &shm_dev;
+	ch.dev[UIO_MHU]     = &mhu_dev;
+
+	struct remoteproc rproc;
+	memset(&rproc, 0, sizeof rproc);
+	rproc.priv = &ch;
+
+	ALP_ASSERT_EQ_INT(uio_rproc_notify(&rproc, 0xABCDu), 0);
+
+	uint32_t scratch_word;
+	memcpy(&scratch_word,
+	       shm_backing + ALP_MHU_SHM_CH1_OFFSET + ALP_MHU_SHM_MSG_TXD,
+	       sizeof scratch_word);
+	ALP_ASSERT_EQ_INT((int)scratch_word, (int)0xABCDu);
+
+	uint32_t doorbell_word;
+	memcpy(&doorbell_word,
+	       mhu_backing + ALP_MHU_NS_CH5_KICK_SLOT + ALP_MHU_NS_SLOT_MSG_INT_SET,
+	       sizeof doorbell_word);
+	ALP_ASSERT_EQ_INT((int)doorbell_word, 1);
 }
 
 /* ------------------------------------------------------------------ */
@@ -645,9 +712,10 @@ int main(void)
 	test_mhu_kick_slot_valid_override();
 	test_mhu_kick_slot_rejects_unaligned();
 	test_mhu_kick_slot_rejects_u32_truncation();
-	test_mhu_kick_slot_rejects_erange();
+	test_mhu_kick_slot_rejects_ulong_overflow();
 	test_mhu_kick_slot_rejects_garbage();
 	test_notify_bounds_reject_out_of_mapping();
+	test_notify_bounds_accepts_in_mapping();
 
 	pthread_mutex_lock(&g_mailbox_lock);
 	atomic_store(&g_worker_stop, 1);
