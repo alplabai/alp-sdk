@@ -613,6 +613,206 @@ ZTEST(alp_update_log, test_recover_frontier_corruption_wedges_write_once_tier)
 	zassert_equal(bad, 2);
 }
 
+/* --- Issue #759: append() must not trust stale/malformed ulog.meta ----
+ *
+ * ulog_recover() only ever repairs the single torn-append shape where an
+ * entry already sits at the frontier; when nothing is there -- the
+ * ordinary steady-state case on every append -- it returns ALP_OK without
+ * ever having examined ulog.meta. Before the fix, ulog_engine_append()
+ * then read ulog.meta and trusted its cached head_hash unconditionally to
+ * chain the NEW entry, without requiring meta.count == hw or verifying
+ * the hash against the actual preceding entry. The tests below drive
+ * ulog.meta into exactly the states recovery has no reason to touch
+ * (directly, since the engine itself never produces a self-inconsistent
+ * meta) and prove append() now refuses rather than durably writes against
+ * an unverified cache -- damage a write-once tier could never undo.
+ */
+
+ZTEST(alp_update_log, test_append_refuses_stale_meta_head_hash)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 3); /* entries 0,1,2 committed; counter == meta.count == 3 */
+
+	uint8_t bogus_head[32];
+	memset(bogus_head, 0x42, sizeof(bogus_head)); /* well-formed encoding, wrong content */
+	raw_write_meta(&t, 3, bogus_head);            /* count still agrees with hw == 3 */
+
+	alp_update_log_entry_t next = mk_entry(999, "next", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &next),
+	              ALP_ERR_IO,
+	              "append must refuse rather than chain from an unverified cached head hash");
+	zassert_equal(t.counter, 3, "a refused append must not advance the counter");
+	zassert_equal(td_find(&t, "ulog.3"), -1, "a refused append must not write the new entry");
+
+	/* verify() independently flags the same corruption (its own
+	 * head-hash-vs-computed check, unrelated to append()'s guard): the
+	 * real entries 0..2 chain cleanly among themselves, but the cached
+	 * head no longer matches their true hash. */
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN);
+	zassert_equal(bad, 2);
+}
+
+ZTEST(alp_update_log, test_append_refuses_stale_meta_count)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 3); /* entries 0,1,2 committed; counter == meta.count == 3 */
+
+	uint8_t metabuf[ULOG_META_WIRE_LEN];
+	size_t  mlen = 0;
+	zassert_equal(td_get(&t, "ulog.meta", metabuf, sizeof(metabuf), &mlen), ALP_OK);
+	struct ulog_meta m;
+	zassert_equal(ulog_meta_decode(metabuf, mlen, &m), ALP_OK);
+
+	/* Re-write meta with the CORRECT head hash but a stale count: a
+	 * hash match alone must not be enough to trust the cache. */
+	raw_write_meta(&t, 5, m.head_hash);
+
+	alp_update_log_entry_t next = mk_entry(999, "next", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &next),
+	              ALP_ERR_IO,
+	              "append must refuse on a meta.count that disagrees with the counter");
+	zassert_equal(t.counter, 3, "a refused append must not advance the counter");
+	zassert_equal(td_find(&t, "ulog.3"), -1, "a refused append must not write the new entry");
+
+	/* verify() has its own independent count-vs-counter check and reports
+	 * ROLLED_BACK for the same corrupted state. */
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v, ALP_UPDATE_LOG_VERIFY_ROLLED_BACK);
+}
+
+ZTEST(alp_update_log, test_append_refuses_missing_meta_with_existing_entries)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	seed(&t, &s, &c, 3); /* entries 0,1,2 committed; counter == 3 */
+
+	zassert_equal(td_erase(&t, "ulog.meta"), ALP_OK);
+
+	alp_update_log_entry_t next = mk_entry(999, "next", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &next),
+	              ALP_ERR_IO,
+	              "append must refuse rather than fabricate a prev_hash when meta is absent");
+	zassert_equal(t.counter, 3, "a refused append must not advance the counter");
+	zassert_equal(td_find(&t, "ulog.3"), -1, "a refused append must not write the new entry");
+}
+
+/* A partially-written record squatting on the frontier slot: shorter than
+ * a valid encoded entry, so ulog_entry_decode() rejects it outright
+ * (ALP_ERR_INVAL for a short buffer -- see test_decode_short_buffer).
+ * ulog_recover() must leave it untouched exactly like the non-chaining,
+ * full-length case above (DEFECT 1): it is not the torn-append shape (a
+ * real crash can only ever land the exact wire ulog_engine_append()
+ * itself encoded), so it must not be adopted, and on a WRITE_ONCE tier
+ * append() can never clear it -- it must fail loudly instead of wedging
+ * silently behind a verify() that still said OK. */
+ZTEST(alp_update_log, test_recover_leaves_partially_written_frontier_record_write_once)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces_write_once(&t, &s, &c);
+
+	for (int i = 0; i < 2; i++) {
+		alp_update_log_entry_t ent =
+		    mk_entry((uint64_t)(i + 1) * 10, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+		zassert_equal(ulog_engine_append(&s, &c, &ent), ALP_OK);
+	}
+	zassert_equal(t.counter, 2);
+
+	/* Land a truncated blob directly at "ulog.2" -- a torn write that
+	 * stopped short of a complete entry record. Bypasses the write-once
+	 * gate deliberately: the point is to reproduce the ON-DISK shape, not
+	 * to exercise td_put_write_once() here. */
+	uint8_t truncated[ULOG_ENTRY_WIRE_LEN / 2];
+	memset(truncated, 0xAB, sizeof(truncated));
+	char key[24];
+	test_key(key, sizeof(key), 2);
+	zassert_equal(td_put(&t, key, truncated, sizeof(truncated)), ALP_OK);
+
+	alp_update_log_verdict_t v;
+	uint64_t                 bad = 999;
+	zassert_equal(ulog_engine_verify(&s, &c, &v, &bad), ALP_OK);
+	zassert_equal(v,
+	              ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN,
+	              "verify() must surface a truncated frontier record instead of lying with OK");
+	zassert_equal(bad, 2);
+	zassert_equal(
+	    t.counter, 2, "recovery must not adopt/count a partially-written frontier record");
+
+	/* append() cannot clear a WRITE_ONCE slot: it must return a clear
+	 * terminal error, never retry with a forced overwrite, and never
+	 * advance the counter over the still-corrupt frontier. */
+	alp_update_log_entry_t next = mk_entry(999, "wedge", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(
+	    ulog_engine_append(&s, &c, &next),
+	    ALP_ERR_IO,
+	    "append must return a terminal error against a partially-written write-once frontier");
+	zassert_equal(t.counter, 2, "a wedged append must not advance the counter");
+}
+
+/* An already-written slot must never be silently rewritten. Here BOTH
+ * defenses that guard that invariant are in play at once: the frontier
+ * key "ulog.3" is already occupied by data planted out-of-band (as if by
+ * a prior, unrelated bug or a bad recovery elsewhere), and ulog.meta is
+ * independently stale. append()'s meta re-derivation/consistency check
+ * (issue #759) must reject the append BEFORE it ever reaches
+ * store->put() -- proving the engine does not even ATTEMPT the rewrite,
+ * let alone rely on the store's write-once rejection to catch it after
+ * the fact. The pre-existing (garbage) contents of "ulog.3" are left
+ * completely undisturbed. */
+ZTEST(alp_update_log, test_append_refuses_before_attempting_rewrite_of_occupied_slot)
+{
+	struct td_store          t;
+	alp_secure_store_if      s;
+	alp_monotonic_counter_if c;
+	td_ifaces_write_once(&t, &s, &c);
+
+	for (int i = 0; i < 3; i++) {
+		alp_update_log_entry_t ent =
+		    mk_entry((uint64_t)(i + 1) * 10, "1.0.0", ALP_UPDATE_STATUS_CONFIRMED);
+		zassert_equal(ulog_engine_append(&s, &c, &ent), ALP_OK);
+	}
+	zassert_equal(t.counter, 3);
+
+	/* Slot 3 already holds unrelated data (planted directly, bypassing
+	 * both the engine and the write-once gate). */
+	uint8_t bogus_prev[32];
+	memset(bogus_prev, 0x11, sizeof(bogus_prev));
+	uint8_t occupant_hash[32];
+	raw_write_entry(&t, 3, bogus_prev, occupant_hash);
+	uint8_t occupant_snapshot[TD_BLOB];
+	int     occupant_idx = td_find(&t, "ulog.3");
+	zassert_true(occupant_idx >= 0);
+	memcpy(occupant_snapshot, t.s[occupant_idx].buf, TD_BLOB);
+
+	/* meta is independently stale, unrelated to slot 3's occupant. */
+	uint8_t bogus_head[32];
+	memset(bogus_head, 0x77, sizeof(bogus_head));
+	raw_write_meta(&t, 3, bogus_head);
+
+	alp_update_log_entry_t next = mk_entry(999, "rewrite-attempt", ALP_UPDATE_STATUS_CONFIRMED);
+	zassert_equal(ulog_engine_append(&s, &c, &next),
+	              ALP_ERR_IO,
+	              "append must refuse via the meta check before ever touching the occupied slot");
+	zassert_equal(t.counter, 3, "a refused append must not advance the counter");
+
+	/* The pre-existing occupant of "ulog.3" is byte-for-byte untouched --
+	 * append() never called store->put() against it. */
+	occupant_idx = td_find(&t, "ulog.3");
+	zassert_true(occupant_idx >= 0);
+	zassert_mem_equal(t.s[occupant_idx].buf, occupant_snapshot, TD_BLOB);
+}
+
 /* DEFECT 3 (GHSA-r236-29pg-w694): with a functioning monotonic counter, at
  * most ONE validly-chained orphan can ever sit above it (ulog_recover()
  * always runs before append() writes a new entry, so it never lets a
