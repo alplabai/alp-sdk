@@ -406,20 +406,14 @@ static alp_status_t se_hash_update(alp_hash_backend_state_t *state, const uint8_
 		return be->psa_ops->hash_update(&be->psa_state, data, len);
 	}
 	if (!alp_size_range_valid(be->used, len, sizeof(be->buf))) {
-		/* Issue #737: alp_size_range_valid() never computes
-		 * `be->used + len` -- that size_t sum can wrap when `len` is
-		 * attacker/caller controlled and close to SIZE_MAX, which would
-		 * defeat a naive `be->used + len > sizeof(be->buf)` overflow
-		 * check and let the memcpy() below write past be->buf.  The
-		 * helper also rejects be->used already being past the end of
-		 * be->buf outright (offset > capacity), so a corrupted `used`
-		 * cannot slip through here either.  Either way (oversized input
-		 * or an invalid `used`), the input exceeds the single-shot SE
-		 * SHA buffer.  The SE public client exposes no streaming
-		 * starts/update/finish service, and the dispatcher already
-		 * bound this backend at hash_open, so migrate the handle to the
-		 * portable PSA backend in place (it replays the buffered bytes)
-		 * and feed this chunk through it. */
+		/* Issue #737: alp_size_range_valid() never computes `be->used +
+		 * len`, so unlike the naive `be->used + len > sizeof(be->buf)`
+		 * it replaced, a size_t wrap in that sum cannot defeat it (see
+		 * src/common/alp_checked_arith.h for the general argument).
+		 * Input exceeds the single-shot SE SHA buffer; migrate the
+		 * handle to the portable PSA backend in place (it replays the
+		 * buffered bytes) and feed this chunk through it -- unchanged
+		 * from before #737. */
 		alp_status_t s = se_hash_delegate(state, be);
 		if (s != ALP_OK) {
 			return s;
