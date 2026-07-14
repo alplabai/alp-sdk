@@ -290,22 +290,46 @@ ZTEST(alp_chips, test_bme280_set_sampling_accepts_every_declared_value)
  * and bme280_compensate for the register/coefficient layout each
  * vector below feeds it.
  *
- * Regression proof (not just "matches the formula"): the fixed
- * bme280.c is confirmed UBSan-clean for every vector below
- * (`west twister -p native_sim/native/64 --enable-ubsan`); reverting
- * only the bme280.c production hunk this branch touches (keeping
- * these tests) reproduces the exact overflow UBSan reported against
- * the shipped fix -- `signed integer overflow: 469499904 -
+ * Regression proof, plain build (this is the gate CI actually runs --
+ * no --enable-ubsan): reverting only the bme280.c production hunk
+ * this branch touches (keeping these tests) makes
+ * test_bme280_compensate_h4_h5_extrema_matches_reference FAIL under a
+ * bare `west twister -p native_sim/native/64`.  At that vector's
+ * H4 = H5 = -2048 (the 12-bit signed minimum) and adc_H = 0xA000, the
+ * reverted int32-only humidity leg overflows and -- on this
+ * toolchain/opt-level, where the overflow wraps instead of trapping
+ * -- lands on humidity_milli_pct == 0 (0 %RH), while the fixed int64
+ * leg correctly saturates to the clamp ceiling (102400, 100 %RH).
+ * That divergence is not a rare corner: sweeping all 65536 adc_H
+ * values at this H4/H5 pair shows the reverted and fixed code
+ * disagree on 31269 of them.  adc_H = 0x6FF0, used by an earlier
+ * version of this vector, happens to fall in the 34267 that agree
+ * (both give 102400) and did not discriminate -- 0xA000 was picked
+ * because it does.
+ *
+ * Regression proof, UBSan build: `west twister -p native_sim/native/64
+ * --enable-ubsan` on the same reverted tree independently reports the
+ * underlying UB directly -- `signed integer overflow: 469499904 -
  * -2147483648 cannot be represented in type 'int'` at the old
- * int32-only humidity line -- and twister names
- * test_bme280_compensate_h4_h5_extrema_matches_reference as the
- * failure.  On a plain (non-UBSan) build the numeric T/P/H outputs
- * are unchanged either way (this specific compiler/opt-level's
- * overflow behaviour happens to already match the well-defined-math
- * answer) -- these vectors are therefore *value* sanity/boundary
- * checks proven correct against an independent datasheet
- * re-derivation, and the UB regression proof lives in the UBSan
- * twister run, not in a plain-build numeric diff. */
+ * int32-only humidity line, naming the same test -- confirming the
+ * plain-build divergence above is that overflow and not some
+ * unrelated bug. This is corroborating evidence, not the only proof:
+ * the plain build above already fails on its own under the gate CI
+ * runs on every PR.
+ *
+ * Both the negative_coefficients vector below (H4 = -349) and the
+ * h4_h5_extrema vector further below (H4 = -2048) saturate to the
+ * clamp ceiling (419430400 >> 12 == 102400) for *every* legal adc_H,
+ * given this file's shared H1/H2/H3/H6 -- verified by exhaustively
+ * calling the real bme280_compensate() over all 65536 adc_H values at
+ * each H4/H5 pair below.  A sufficiently negative H4 dominates the x1
+ * term regardless of adc_H, so this is a genuine property of the
+ * datasheet formula for these coefficients, not a weak vector: it
+ * pins the clamp branch, which any correct implementation must also
+ * hit here.  The unsaturated, interior humidity value is pinned
+ * separately by test_bme280_compensate_p4_p7_int16_min_matches_
+ * reference's humidity_milli_pct == 35945 (H4 = +349, where the
+ * dominant term flips sign and the product no longer saturates). */
 
 ZTEST(alp_chips, test_bme280_compensate_negative_coefficients_matches_reference)
 {
@@ -349,7 +373,11 @@ ZTEST(alp_chips, test_bme280_compensate_h4_h5_extrema_matches_reference)
 	/* H4/H5 at the 12-bit signed minimum (-2048) -- the exact
 	 * calibration extremum #753 names, and (see the block comment
 	 * above) the one that still overflowed int32_t after the
-	 * shift-to-multiply-only round of the fix. */
+	 * shift-to-multiply-only round of the fix.  adc_H = 0xA000 (not
+	 * 0x6FF0) is deliberate: it is one of the 31269/65536 values at
+	 * this H4/H5 where the reverted int32 leg and the fixed int64 leg
+	 * disagree, so this assertion fails on a plain (non-UBSan) build
+	 * if the production fix regresses -- see the block comment. */
 	bme280_t dev    = { 0 };
 	dev.calib.T1    = 27504u;
 	dev.calib.T2    = 26435;
@@ -374,7 +402,7 @@ ZTEST(alp_chips, test_bme280_compensate_h4_h5_extrema_matches_reference)
 	bme280_raw_t raw = {
 		.pressure_raw    = 415148,
 		.temperature_raw = 519888,
-		.humidity_raw    = 0x6FF0,
+		.humidity_raw    = 0xA000,
 	};
 	bme280_compensated_t comp;
 	zassert_equal(bme280_compensate(&dev, &raw, &comp), ALP_OK);
