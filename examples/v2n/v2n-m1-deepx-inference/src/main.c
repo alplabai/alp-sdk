@@ -61,7 +61,14 @@
 #include "alp/inference.h"
 #include "alp/peripheral.h"
 
-#define M1_BOOT_US 5000u /* DEEPX-recommended boot-wait (see DX-M1 datasheet) */
+/* No boot-wait constant here: this example does not sequence the
+ * DEEPX itself -- the supervisor's SYS_INIT drives bring-up.  Code
+ * that does sequence it passes DEEPX_DXM1_DEFAULT_BOOT_US to
+ * deepx_dxm1_bring_up(); that is the single source for the delay.
+ * (A dead `M1_BOOT_US 5000u` used to sit here claiming a
+ * DX-M1-datasheet figure -- <alp/chips/deepx_dxm1.h> states the
+ * datasheet's POR-to-PCIe-link-up number has not been read out yet,
+ * so the claim was unfounded as well as unused.) */
 
 /* Placeholder model buffer -- on real hardware this is the
  * DXNN-compiled model byte stream.  Sized for the example only;

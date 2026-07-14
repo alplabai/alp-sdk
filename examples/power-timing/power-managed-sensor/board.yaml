@@ -1,8 +1,12 @@
 # board.yaml -- per-app project configuration for the
 # power-managed-sensor example.
 #
-# A low-power BME280 + IMU sensor node running on the AEN301's
-# M55-HE high-efficiency core.  The narrative the example proves:
+# The power: block for a low-power sensor node on the AEN301's
+# M55-HE high-efficiency core.  This file is the point of the
+# example: the app slice under ./src only narrates the duty cycle
+# below via printf -- it drives no sensor (note the absence of a
+# chips: block) and enters no sleep state.  The narrative the
+# declarations describe:
 #
 #   1. Sit in deep sleep between events (microamps, not
 #      milliamps -- the difference between weeks and years of
