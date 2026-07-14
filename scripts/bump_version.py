@@ -95,6 +95,7 @@ BOARD_CONFIG_MD = REPO / "docs" / "board-config.md"
 VERIFICATION_STATUS_MD = REPO / "docs" / "verification-status.md"
 ABI_DIR = REPO / "docs" / "abi"
 ABI_SNAPSHOT_TOOL = REPO / "scripts" / "abi_snapshot.py"
+ALP_LOCK_TOOL = REPO / "scripts" / "west_commands" / "alp_lock.py"
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?$")
 
@@ -346,6 +347,21 @@ def regenerate_abi_snapshot(new_version: str, dry_run: bool) -> None:
     print(f"  regenerated {snapshot_path.relative_to(REPO)}")
 
 
+def regenerate_alp_lock(dry_run: bool) -> None:
+    """Rewrite alp.lock so its `sdk.version` (and the metadata digest) track
+    the bump.  Without this the `alp.lock in sync` gate fails on the release
+    commit (the lock kept the old version).  Runs against a plain checkout --
+    `alp_lock.py --workspace` needs no `west init`."""
+    if not ALP_LOCK_TOOL.exists() or not (REPO / "alp.lock").exists():
+        return
+    cmd = [sys.executable, str(ALP_LOCK_TOOL), "--workspace", str(REPO)]
+    if dry_run:
+        print(f"  would run: {' '.join(cmd)}")
+        return
+    subprocess.check_call(cmd)
+    print("  regenerated alp.lock")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--to", required=True, help="Target version (SemVer, e.g. 1.0.0)")
@@ -368,6 +384,7 @@ def main() -> int:
     update_release_tag_pins(args.to, args.dry_run)
     update_board_config_doc(args.to, args.dry_run)
     regenerate_abi_snapshot(args.to, args.dry_run)
+    regenerate_alp_lock(args.dry_run)
     print()
     print("Next steps:")
     print("  git diff --stat")
