@@ -17,15 +17,15 @@
 #
 # Idempotent -- re-running skips work that's already done.
 #
-# Expected directory layout after a successful run:
+# Expected directory layout after a successful run (the alp-sdk checkout's
+# PARENT is the west topdir; alp-sdk is the manifest repo -- `west init -l`, #769):
 #
-#     <parent>/
-#     ├── alp-sdk/                  (this repo)
-#     └── zephyrproject/
-#         ├── .west/
-#         ├── .venv/                (hermetic west + Zephyr/SDK Python deps)
-#         ├── zephyr/               (v4.4.0 pin -- keep in sync with west.yml)
-#         └── modules/
+#     <parent>/                     (west topdir)
+#     ├── alp-sdk/                  (this repo -- the workspace manifest)
+#     ├── .west/
+#     ├── .venv/                    (hermetic west + Zephyr/SDK Python deps)
+#     ├── zephyr/                   (v4.4.0 pin -- keep in sync with west.yml)
+#     └── modules/                  (HALs + extras)
 #
 # Usage:
 #
@@ -36,7 +36,7 @@
 #
 # After it runs:
 #
-#     export ZEPHYR_BASE=$PWD/../zephyrproject/zephyr
+#     export ZEPHYR_BASE=$PWD/../zephyr
 #     bash scripts/test-all.sh
 
 set -uo pipefail
@@ -45,9 +45,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PARENT_DIR="$(cd "${REPO_ROOT}/.." && pwd)"
 
-# Zephyr workspace lives one level up from the alp-sdk checkout so
-# alp-sdk itself never gets relocated by `west init`.
-WORKSPACE_DIR="${PARENT_DIR}/zephyrproject"
+# The west workspace topdir is the alp-sdk checkout's PARENT: we init the
+# workspace from alp-sdk's OWN west.yml (`west init -l "${REPO_ROOT}"`), so
+# alp-sdk becomes the manifest repo and west discovers the `alp-build`/`alp-flash`
+# /... extension commands from its `self.west-commands` (issue #769). `west init
+# -l <repo>` always makes topdir = dirname(<repo>) = PARENT_DIR, and leaves
+# alp-sdk in place; Zephyr (pinned in that west.yml) + HALs + extras land as
+# siblings of alp-sdk under the topdir -- the canonical alp-sdk workspace layout.
+WORKSPACE_DIR="${PARENT_DIR}"
 # Keep in sync with the Zephyr `revision:` pin in the alp-sdk west.yml
 # (bumped v3.7.0 LTS -> v4.4.0 in v0.5).
 ZEPHYR_VERSION="v4.4.0"
@@ -135,10 +140,21 @@ if [ -n "${ZEPHYR_BASE:-}" ] && [ -f "${ZEPHYR_BASE}/VERSION" ]; then
         /^VERSION_MAJOR/{gsub(/[^0-9]/,"",$2); j=$2}
         /^VERSION_MINOR/{gsub(/[^0-9]/,"",$2); n=$2}
         END{print j"."n}' "${ZEPHYR_BASE}/VERSION" 2>/dev/null)"
-    if [ -n "${EXIST_TOP}" ] && [ -d "${EXIST_TOP}/.west" ] && [ "${EXIST_MM}" = "${PIN_MM}" ]; then
+    # Only reuse a pre-existing workspace whose active manifest IS alp-sdk's
+    # west.yml -- otherwise it does not register the `alp-*` extension commands
+    # and `west alp-build` stays unknown (issue #769). west/venv aren't set up
+    # yet here, so read .west/config directly for the manifest repo path.
+    EXIST_MANIFEST_REL="$(sed -n 's/^[[:space:]]*path[[:space:]]*=[[:space:]]*//p' "${EXIST_TOP}/.west/config" 2>/dev/null | head -1)"
+    EXIST_MANIFEST_DIR="$(cd "${EXIST_TOP}/${EXIST_MANIFEST_REL:-.}" 2>/dev/null && pwd || true)"
+    if [ -n "${EXIST_TOP}" ] && [ -d "${EXIST_TOP}/.west" ] && [ "${EXIST_MM}" = "${PIN_MM}" ] \
+       && [ "${EXIST_MANIFEST_DIR}" = "${REPO_ROOT}" ]; then
         REUSE_WS=1
         WORKSPACE_DIR="${EXIST_TOP}"
-        ok "Reusing compatible Zephyr workspace from \$ZEPHYR_BASE: ${WORKSPACE_DIR} (Zephyr ${EXIST_MM}.x)"
+        ok "Reusing compatible alp-sdk workspace from \$ZEPHYR_BASE: ${WORKSPACE_DIR} (Zephyr ${EXIST_MM}.x)"
+    elif [ -n "${EXIST_TOP}" ] && [ -d "${EXIST_TOP}/.west" ] && [ "${EXIST_MM}" = "${PIN_MM}" ]; then
+        warn "\$ZEPHYR_BASE workspace (${EXIST_TOP}) is a ${PIN_MM}.x tree but its manifest is not alp-sdk's west.yml"
+        warn "-- not reusing it (would leave 'west alp-build' unknown, #769); building an alp-sdk workspace at ${WORKSPACE_DIR}"
+        unset ZEPHYR_BASE
     else
         warn "\$ZEPHYR_BASE (${ZEPHYR_BASE}) is not a ${PIN_MM}.x west workspace -- ignoring it and building an isolated one"
         unset ZEPHYR_BASE
@@ -182,19 +198,29 @@ if [ "${DO_WEST}" -eq 1 ]; then
     if [ "${REUSE_WS}" -eq 1 ]; then
         ok "Existing workspace reused -- skipping 'west init' / 'west update' (left untouched)"
     elif [ ! -d "${WORKSPACE_DIR}/.west" ]; then
-        info "Creating Zephyr workspace at ${WORKSPACE_DIR} (this takes a few minutes)"
-        ( cd "${WORKSPACE_DIR}" && \
-          "${WEST}" init -m https://github.com/zephyrproject-rtos/zephyr \
-                    --mr "${ZEPHYR_VERSION}" . \
-        ) || die "west init failed"
+        info "Creating alp-sdk workspace at ${WORKSPACE_DIR} (alp-sdk's west.yml is the manifest; takes a few minutes)"
+        # -l makes alp-sdk (REPO_ROOT) the manifest repo; topdir = its parent =
+        # WORKSPACE_DIR. Zephyr (pinned in alp-sdk's west.yml) + HALs + extras are
+        # fetched by `west update`. alp-sdk's self.west-commands then exposes the
+        # alp-* extension commands in this workspace (#769).
+        ( cd "${WORKSPACE_DIR}" && "${WEST}" init -l "${REPO_ROOT}" ) || die "west init -l failed"
         info "Running 'west update' (shallow + narrow; ~30 MB on a cold cache)"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" update --narrow -o=--depth=1 ) || die "west update failed"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" zephyr-export ) || true
     else
-        ok "Zephyr workspace already initialised at ${WORKSPACE_DIR}"
+        ok "alp-sdk workspace already initialised at ${WORKSPACE_DIR}"
         info "Running 'west update' (shallow + narrow)"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" update --narrow -o=--depth=1 ) || die "west update failed"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" zephyr-export ) || true
+    fi
+
+    # Legibility guard (#769): fail at bootstrap time -- not at first `alp build`
+    # -- if the workspace manifest doesn't register the alp-* extension commands.
+    if [ "${REUSE_WS}" -eq 0 ]; then
+        if ! ( cd "${WORKSPACE_DIR}" && "${WEST}" help 2>/dev/null | grep -q 'alp-build' ); then
+            die "workspace at ${WORKSPACE_DIR} does not register 'west alp-build' -- its manifest is not alp-sdk's west.yml (#769). Check 'west -C ${WORKSPACE_DIR} config manifest.path'."
+        fi
+        ok "alp-* extension commands registered ('west alp-build' resolves in ${WORKSPACE_DIR})"
     fi
 
     # NOTE: this does NOT install the Zephyr SDK (the cross toolchains).

@@ -38,7 +38,7 @@ If you'd rather skim, the fastest path is:
 git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
-export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+export ZEPHYR_BASE="$PWD/../zephyr"
 west alp-build -b native_sim/native/64 examples/peripheral-io/gpio-button-led
 west build -d build -t run
 # expect: [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
