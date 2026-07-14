@@ -170,6 +170,16 @@ extern "C" {
  *  to operate (see docs/gd32-bridge-protocol.md §8). */
 #define GD32G553_HOST_PROTOCOL_MAJOR 0u
 
+/** Minimum protocol MINOR a peer must advertise before the host will run
+ *  an OTA session.  The OTA_WRITE_CHUNK payload gained an explicit length
+ *  byte after the u32 offset in v0.6 (offset:u32, len:u8, data); v0.5
+ *  firmware reads that byte as image data, so a v0.6 host driving a v0.5
+ *  bridge programs the length byte INTO the image and corrupts it.  A
+ *  major-only handshake cannot see this (both are major 0), so the OTA
+ *  entry points refuse a peer below this minor with @ref ALP_ERR_NOSUPPORT
+ *  BEFORE any erase/program (#751).  See docs/gd32-bridge-protocol.md §8. */
+#define GD32G553_OTA_MIN_PROTOCOL_MINOR 6u
+
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
  *  slave-side sequence stamp in bits [7:4] that advances per freshly
@@ -1022,6 +1032,22 @@ alp_status_t gd32g553_adc_spectrum_read(gd32g553_t *ctx,
 /* ALP_ERR_IO from those as "issued, confirm via GET_STATE" (or, for  */
 /* COMMIT/ROLLBACK, by re-initialising against the rebooted bridge).  */
 /* ------------------------------------------------------------------ */
+
+/**
+ * @brief Whether an OTA session may be started against the connected peer.
+ *
+ * True iff @p ctx is initialised and the bridge advertised a protocol
+ * minor >= @ref GD32G553_OTA_MIN_PROTOCOL_MINOR at init.  The chunk wire
+ * format changed incompatibly in v0.6 (a length byte after the offset)
+ * that a major-only handshake cannot detect, so @ref gd32g553_ota_begin
+ * and @ref gd32g553_ota_write_chunk refuse a pre-v0.6 peer with
+ * @ref ALP_ERR_NOSUPPORT before touching flash.  Call this first to fail
+ * fast (and surface a clear reason) instead of racing the erase (#751).
+ *
+ * @param ctx  Driver context (may be NULL / uninitialised -> false).
+ * @return true if OTA is protocol-compatible, false otherwise.
+ */
+bool gd32g553_ota_supported(const gd32g553_t *ctx);
 
 /** OTA state-machine snapshot returned by @ref gd32g553_ota_get_state.
  *  Values are the WIRE encoding from the firmware state machine

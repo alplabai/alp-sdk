@@ -1161,6 +1161,11 @@ alp_status_t gd32g553_adc_dsp_chain_bind(gd32g553_t *ctx, uint8_t chain_id, uint
 /* scaffold so customer telemetry already works.                      */
 /* ----------------------------------------------------------------- */
 
+bool gd32g553_ota_supported(const gd32g553_t *ctx)
+{
+	return ctx != NULL && ctx->initialised && ctx->version.minor >= GD32G553_OTA_MIN_PROTOCOL_MINOR;
+}
+
 alp_status_t gd32g553_ota_begin(gd32g553_t               *ctx,
                                 uint32_t                  size_bytes,
                                 uint32_t                  expected_crc32,
@@ -1171,6 +1176,9 @@ alp_status_t gd32g553_ota_begin(gd32g553_t               *ctx,
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (chunk_max_bytes == NULL || target_slot == NULL) return ALP_ERR_INVAL;
 	if (size_bytes == 0u) return ALP_ERR_INVAL;
+	/* Refuse a pre-v0.6 peer BEFORE the bridge erases the target slot: the
+	 * v0.6 chunk framing it would receive corrupts the image (#751). */
+	if (!gd32g553_ota_supported(ctx)) return ALP_ERR_NOSUPPORT;
 
 	/* v0.7 additive form: size:u32, crc:u32 [, maj:u8, min:u8, pat:u8].
      * The version triple lands in the bridge's A/B metadata record at
@@ -1211,6 +1219,9 @@ alp_status_t gd32g553_ota_write_chunk(gd32g553_t    *ctx,
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (data == NULL || data_len == 0u) return ALP_ERR_INVAL;
 	if (received_bytes == NULL) return ALP_ERR_INVAL;
+	/* Belt-and-suspenders: even if a caller skips BEGIN's gate, never
+	 * program the v0.6 chunk layout into a pre-v0.6 peer (#751). */
+	if (!gd32g553_ota_supported(ctx)) return ALP_ERR_NOSUPPORT;
 
 	/* Chunk size is bounded by the wire payload ceiling.  Bridges
      * that advertise a smaller chunk_max_bytes in BEGIN are honoured

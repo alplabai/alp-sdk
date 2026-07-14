@@ -381,10 +381,15 @@ void bridge_hw_init(void)
  * samples through the FAC into its processed ring.  Runs here, off the
  * main WFI loop -- never in the CS-EXTI stream_read path. */
 extern void bridge_hw_dsp_pump(void);
+/* Background OTA slot-erase pump (#770): advances a BEGIN-armed erase one
+ * page-region per tick so BEGIN never blocks the SPI reply inline.  No-op
+ * in the OTA-inert build. */
+extern void ota_erase_tick(void);
 
 void bridge_hw_tick(void)
 {
 	bridge_hw_dsp_pump();
+	ota_erase_tick();
 }
 
 /* ----------------------------------------------------------------- */

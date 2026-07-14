@@ -91,6 +91,12 @@ static void begin_session(uint32_t img_len)
 	size_t  rlen = 0u;
 	zassert_equal(ota_dispatch(CMD_OTA_BEGIN, req, sizeof(req), reply, sizeof(reply), &rlen),
 	              STATUS_OK);
+	/* BEGIN now arms a BACKGROUND erase and acks immediately (#770): the
+	 * slot is not erased inline, so pump ota_erase_tick() the way the main
+	 * loop would until the erase drains and the state reaches READY. */
+	for (unsigned i = 0u; i < (OTA_SLOT_SIZE / OTA_PAGE_SIZE) + 4u; ++i) {
+		ota_erase_tick();
+	}
 }
 
 static gd32_bridge_status_t
@@ -195,6 +201,113 @@ ZTEST(gd32_bridge_ota, test_replay_is_idempotent)
 	g_program_calls = 0u;
 	zassert_equal(write_chunk(0u, data, sizeof(data), reply, &rlen), STATUS_OK);
 	zassert_equal(g_program_calls, 0u, "replayed chunk must not re-program");
+}
+
+/* #741: ota_slot_base_checked validates the slot instead of silently
+ * mapping every non-B value to slot A. */
+ZTEST(gd32_bridge_ota, test_slot_base_checked_validates_slot)
+{
+	uint32_t base = 0xDEADBEEFu;
+
+	zassert_true(ota_slot_base_checked(OTA_SLOT_A, &base));
+	zassert_equal(base, OTA_SLOT_A_BASE);
+	zassert_true(ota_slot_base_checked(OTA_SLOT_B, &base));
+	zassert_equal(base, OTA_SLOT_B_BASE);
+
+	/* Representative invalid slots must be REJECTED, not resolved to a
+	 * valid flash address -- the #741 defect. */
+	base = 0xDEADBEEFu;
+	zassert_false(ota_slot_base_checked(2u, &base), "slot 2 must reject, not map to A");
+	zassert_false(ota_slot_base_checked(0xFFu, &base));
+	zassert_equal(base, 0xDEADBEEFu, "base must be untouched on reject");
+}
+
+/* #755: ota_image_bootable rejects CRC-valid-but-unbootable images. */
+static void put32(uint8_t *p, uint32_t v)
+{
+	p[0] = (uint8_t)v;
+	p[1] = (uint8_t)(v >> 8);
+	p[2] = (uint8_t)(v >> 16);
+	p[3] = (uint8_t)(v >> 24);
+}
+
+ZTEST(gd32_bridge_ota, test_image_bootable_validates_vector_head)
+{
+	const uint32_t base    = OTA_SLOT_A_BASE;
+	const uint32_t len     = 0x200u;
+	uint8_t        img[16] = { 0 };
+
+	/* Valid: MSP in SRAM + word-aligned, reset inside image + Thumb. */
+	put32(&img[0], 0x20010000u);          /* MSP  */
+	put32(&img[4], (base + 0x100u) | 1u); /* reset, Thumb */
+	zassert_true(ota_image_bootable(base, img, len), "valid vector head must pass");
+
+	/* One-byte / truncated image (below the MSP+reset head). */
+	zassert_false(ota_image_bootable(base, img, 1u), "one-byte image must reject (#755)");
+	zassert_false(ota_image_bootable(base, img, 7u), "truncated vector head must reject");
+
+	/* MSP not word-aligned / outside SRAM. */
+	put32(&img[0], 0x20010001u);
+	zassert_false(ota_image_bootable(base, img, len), "unaligned MSP must reject");
+	put32(&img[0], 0x08000000u);
+	zassert_false(ota_image_bootable(base, img, len), "MSP outside SRAM must reject");
+	put32(&img[0], 0x20010000u); /* restore */
+
+	/* Reset vector without the Thumb bit, or outside the image. */
+	put32(&img[4], base + 0x100u); /* even -> no Thumb */
+	zassert_false(ota_image_bootable(base, img, len), "reset without Thumb bit must reject");
+	put32(&img[4], (base + len) | 1u); /* past end */
+	zassert_false(ota_image_bootable(base, img, len), "reset past image end must reject");
+	put32(&img[4], (base - 4u) | 1u); /* before base */
+	zassert_false(ota_image_bootable(base, img, len), "reset before image base must reject");
+}
+
+/* ---- #770: BEGIN arms a background erase, acks immediately ---------- */
+
+static uint8_t ota_state_now(void)
+{
+	uint8_t reply[8] = { 0 };
+	size_t  rlen     = 0u;
+	zassert_equal(ota_dispatch(CMD_OTA_GET_STATE, NULL, 0u, reply, sizeof(reply), &rlen),
+	              STATUS_OK);
+	return reply[0]; /* state:u8 */
+}
+
+/* BEGIN must NOT erase the slot inline (that stalled the SPI reply ~1 s and
+ * hung the host's ota_begin -- #770).  It acks at once with state BUSY;
+ * ota_erase_tick() drains the erase to READY; chunks are rejected until
+ * then. */
+ZTEST(gd32_bridge_ota, test_begin_arms_background_erase)
+{
+	reset_model();
+
+	uint8_t req[8];
+	wr_u32(&req[0], 64u); /* img_len */
+	wr_u32(&req[4], 0u);  /* crc */
+	uint8_t reply[8];
+	size_t  rlen = 0u;
+	/* BEGIN acks immediately -- no inline whole-slot erase. */
+	zassert_equal(ota_dispatch(CMD_OTA_BEGIN, req, sizeof(req), reply, sizeof(reply), &rlen),
+	              STATUS_OK);
+	zassert_equal(ota_state_now(), 2u /* OTA_ST_BUSY */, "BEGIN must leave state BUSY (erasing)");
+
+	/* A chunk before the erase finishes is refused (state not READY). */
+	const uint8_t data[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	uint8_t       wr[8];
+	size_t        wrl = 0u;
+	zassert_equal(write_chunk(0u, data, sizeof(data), wr, &wrl),
+	              STATUS_NOT_READY,
+	              "chunk before erase completes must be rejected");
+
+	/* Pump the erase the way bridge_hw_tick would; state flips to READY. */
+	for (unsigned i = 0u; i < (OTA_SLOT_SIZE / OTA_PAGE_SIZE) + 4u; ++i) {
+		ota_erase_tick();
+	}
+	zassert_equal(ota_state_now(), 1u /* OTA_ST_READY */, "erase drain must reach READY");
+
+	/* Now a chunk is accepted. */
+	zassert_equal(
+	    write_chunk(0u, data, sizeof(data), wr, &wrl), STATUS_OK, "chunk after READY must program");
 }
 
 /* ---- #733: on-flash layout / byte-representation guard --------------- */

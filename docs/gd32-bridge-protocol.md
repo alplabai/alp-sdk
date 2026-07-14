@@ -1006,6 +1006,15 @@ pre-production opcode's payload (v0.6 did this to `OTA_WRITE_CHUNK`),
 and the major-only handshake cannot detect that — do not mix a v0.5
 host with v0.6 firmware or vice versa.
 
+Because that mismatch is undetectable by `major` alone yet corrupts a
+flashed image (v0.5 firmware reads the v0.6 chunk **length byte** as
+image data), the host driver **gates the OTA session on `minor`**: an
+OTA cannot start against a peer below `GD32G553_OTA_MIN_PROTOCOL_MINOR`
+(6). `gd32g553_ota_begin` / `gd32g553_ota_write_chunk` return
+`ALP_ERR_NOSUPPORT` **before any erase or program**, and
+`gd32g553_ota_supported()` lets a host check up front (#751). Other
+opcodes remain governed by the exact-lockstep rule above.
+
 Version history (pre-1.0): **v0.7** adds `LINK_FEATURES` (0x81) +
 the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
 additive `OTA_BEGIN` version triple (§10) — both backward-compatible

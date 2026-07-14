@@ -347,3 +347,52 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
 		              ALP_ERR_INVAL);
 	}
 }
+
+/* ------------------------------------------------------------------ */
+/* #751 -- OTA protocol-minor gate                                     */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_ota_supported_gate)
+{
+	/* NULL / uninitialised are never OTA-capable. */
+	zassert_false(gd32g553_ota_supported(NULL), "NULL ctx must not be OTA-capable");
+	gd32g553_t uninit = { 0 };
+	zassert_false(gd32g553_ota_supported(&uninit), "uninitialised ctx must not be OTA-capable");
+
+	/* v0.5 peer: the chunk wire format predates the length byte, so the
+	 * host refuses -- a v0.6 host driving v0.5 firmware would otherwise
+	 * program the length byte into the image (#751). */
+	gd32g553_t v05 = { .initialised = true, .version = { .major = 0u, .minor = 5u, .patch = 0u } };
+	zassert_false(gd32g553_ota_supported(&v05), "v0.5 peer must be rejected");
+
+	/* v0.6 peer: first minor that carries the explicit chunk length. */
+	gd32g553_t v06 = { .initialised = true, .version = { .major = 0u, .minor = 6u, .patch = 0u } };
+	zassert_true(gd32g553_ota_supported(&v06), "v0.6 peer must be accepted");
+
+	/* Current host minor (>= 6) is accepted too. */
+	gd32g553_t vcur = {
+		.initialised = true,
+		.version     = { .major = 0u, .minor = GD32G553_OTA_MIN_PROTOCOL_MINOR + 3u, .patch = 0u }
+	};
+	zassert_true(gd32g553_ota_supported(&vcur), "current-minor peer must be accepted");
+}
+
+ZTEST(alp_chips, test_gd32g553_ota_ops_reject_pre_v06_peer)
+{
+	/* An initialised-but-v0.5 ctx must have its flash-touching OTA ops
+	 * short-circuit with NOSUPPORT -- BEFORE any erase/program.  The gate
+	 * sits after arg validation, so pass otherwise-valid arguments. */
+	gd32g553_t v05 = { .initialised = true, .version = { .major = 0u, .minor = 5u, .patch = 0u } };
+
+	uint16_t            chunk_max = 0u;
+	gd32g553_ota_slot_t slot      = (gd32g553_ota_slot_t)0;
+	zassert_equal(gd32g553_ota_begin(&v05, 4096u, 0xdeadbeefu, NULL, &chunk_max, &slot),
+	              ALP_ERR_NOSUPPORT,
+	              "ota_begin must refuse a v0.5 peer");
+
+	const uint8_t data[4] = { 1u, 2u, 3u, 4u };
+	uint32_t      rx      = 0u;
+	zassert_equal(gd32g553_ota_write_chunk(&v05, 0u, data, sizeof(data), &rx),
+	              ALP_ERR_NOSUPPORT,
+	              "ota_write_chunk must refuse a v0.5 peer");
+}
