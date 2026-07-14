@@ -411,6 +411,90 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_gpio
              COMMAND alp_test_peripheral_gpio)
 
+    # Ownership-rollback regression for issue #744 (Yocto PWM sysfs
+    # backend): a channel this handle merely reused (already exported by
+    # another process, EBUSY) must never be unexported by this handle's
+    # error-rollback or close paths.  peripheral_pwm.c #includes the real
+    # src/backends/pwm/yocto_drv.c directly (see the test's own header
+    # comment) to drive y_open()/y_close() against
+    # g_pwm_test_sysfs_write_hook instead of a real pwmchip sysfs node.
+    # Deliberately NOT linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_pwm
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_pwm.c
+    )
+    target_include_directories(alp_test_peripheral_pwm PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/pwm
+    )
+    target_compile_features(alp_test_peripheral_pwm PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_pwm
+             COMMAND alp_test_peripheral_pwm)
+
+    # Edge-config rollback regression for issue #746 (Yocto GPIO chardev-v2
+    # backend): alp_gpio_irq_enable() must restore plain-input if the IRQ
+    # dispatcher fails to start (eventfd()/pthread_create() failure),
+    # instead of leaving the line edge-configured with irq_enabled false.
+    # peripheral_gpio_irq_rollback.c #includes the real
+    # src/yocto/peripheral_gpio.c directly (see the test's own header
+    # comment) to drive alp_gpio_irq_enable() against
+    # g_gpio_test_set_config_hook / g_gpio_test_fail_dispatcher_start
+    # instead of a real /dev/gpiochipN line.  Needs pthreads (the real
+    # dispatcher-start success path spins up a genuine thread in the
+    # third scenario) -- same gate as alp_test_last_error_threading above.
+    # Deliberately NOT linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    find_package(Threads REQUIRED)
+
+    add_executable(alp_test_peripheral_gpio_irq_rollback
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio_irq_rollback.c
+        # alp_gpio_open() (compiled in as part of the #include-the-.c-file
+        # technique, even though this test never calls it) references
+        # alp_internal_set_last_error(); pull in its one canonical
+        # definition so the link is self-contained without alp::sdk.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_link_libraries(alp_test_peripheral_gpio_irq_rollback PRIVATE Threads::Threads)
+    target_include_directories(alp_test_peripheral_gpio_irq_rollback PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_gpio_irq_rollback PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_gpio_irq_rollback
+             COMMAND alp_test_peripheral_gpio_irq_rollback)
+
+    # Post-open failure rollback + timeout-overflow regression for issue
+    # #760 (Yocto watchdog backend): every failure after open() must
+    # attempt a best-effort disarm (WDIOS_DISABLECARD / magic close)
+    # before releasing the fd, and the ms->s ceiling division must not
+    # overflow uint32_t for timeout_ms near UINT32_MAX.
+    # peripheral_wdt.c #includes the real src/backends/wdt/yocto_drv.c
+    # directly (see the test's own header comment) to drive y_open()/
+    # y_close() against g_wdt_test_open_hook / g_wdt_test_malloc_hook /
+    # g_wdt_test_settimeout_observed_hook / g_wdt_test_disarm_observed_hook
+    # instead of a real /dev/watchdogN (which would arm a genuine hardware
+    # watchdog).  Deliberately NOT linked against alp::sdk -- same ODR
+    # rationale as alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_wdt
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_wdt.c
+    )
+    target_include_directories(alp_test_peripheral_wdt PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/wdt
+    )
+    target_compile_features(alp_test_peripheral_wdt PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_wdt
+             COMMAND alp_test_peripheral_wdt)
+
     # MQTT test compiles only when libmosquitto is wired into
     # alp_sdk.  Re-check here because pkg_check_modules's results
     # don't propagate across add_subdirectory boundaries.  Without
