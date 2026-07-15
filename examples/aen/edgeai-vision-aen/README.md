@@ -22,10 +22,13 @@ RPi CSI │  (e.g. ARX3A0    │ →  │  (vsi,       │ →  │  inference  
 > **On-die VeriSilicon ISP Pico (vsi,isp-pico) on E8.**  Unlike E3 / E5 / E7,
 > the E1M-AEN801 (Ensemble E8) ships the **VeriSilicon ISP Pico
 > (`vsi,isp-pico`)** (E4 / E6 / E8 only) — so the v0.2 camera path can
-> offload debayer / format-convert / 3A to the ISP Pico once the Alif HAL
-> pack lands (the `<alp/ext/alif/camera.h>` vendor surface is a NOSUPPORT
-> stub today — see
-> [`docs/aen-accelerator-backends-design.md`](../../../docs/aen-accelerator-backends-design.md)).
+> eventually offload debayer / format-convert / 3A to it, though the
+> vendored `isp_wrapper` HAL pack landing was never the blocker:
+> debayer/format-convert hit a driver-link version mismatch and 3A/gain
+> hit gaps in the vendored archive (the `<alp/ext/alif/camera.h>` vendor
+> surface is a NOSUPPORT stub today — see
+> [`docs/aen-accelerator-backends-design.md`](../../../docs/aen-accelerator-backends-design.md)
+> §2 for the per-reason detail).
 > Until then the example configures the ARX3A0 to emit the model's pixel
 > format (RGB888) directly via `<alp/camera.h>` and does crop / resize /
 > normalisation on the M55-HP with CMSIS-DSP.  See

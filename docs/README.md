@@ -51,7 +51,9 @@ into the topic-specific docs.
 - [aen-accelerator-backends-design.md](aen-accelerator-backends-design.md)
   — integration design for the Alif Ensemble accelerator surfaces
   (GPU2D / VeriSilicon ISP Pico (vsi,isp-pico) / SecAES / aiPM), each
-  silicon + HAL-pack gated.
+  silicon-gated; GPU2D and SecAES are also HAL-pack gated, ISP Pico's
+  pack has already landed and is blocked by other reasons (see that
+  doc's §2).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
   index (17 ADRs).

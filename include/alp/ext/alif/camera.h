@@ -110,9 +110,13 @@ typedef struct {
  *         @ref ALP_ERR_INVAL on NULL handle / NULL rect /
  *           zero-sized rect;
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC on non-Alif backend;
- *         @ref ALP_ERR_NOSUPPORT today for every region -- AE, AF,
- *           and AWB each fail for a different reason; see the
- *           file-header ABI-status note above.
+ *         @ref ALP_ERR_NOSUPPORT today for every region, but not for
+ *           one shared reason: AE is declared-but-undefined in the
+ *           vendored archive, AF is absent from it outright, and AWB
+ *           is technically reachable (the archive defines the call)
+ *           but deliberately withheld so AE/AF can't silently stay
+ *           unset while AWB moves alone -- see the file-header
+ *           ABI-status note above.
  */
 alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *camera,
                                                alp_alif_camera_3a_region_t   region,

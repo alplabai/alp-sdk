@@ -314,8 +314,12 @@ ZTEST(alp_camera_registry, test_alif_vendor_ext_validates_input_ranges_then_nosu
 	              ALP_ERR_INVAL);
 	zassert_equal(alp_alif_camera_isp_lsc_lut_load(&fake, table, 32u), ALP_ERR_INVAL);
 
-	/* In-range arguments fall through to the NOSUPPORT tail
-     * (the Alif Mali-C55 HAL pack isn't in scope yet). */
+	/* In-range arguments fall through to the NOSUPPORT tail -- not
+     * because a HAL pack is missing (the vendored isp_wrapper archive
+     * is already in-tree) but because AE is declared-but-undefined in
+     * it, the gain-table contract can't be satisfied by the archive's
+     * struct, and LSC is absent from it outright; see the per-entry
+     * detail in src/backends/ext/alif/camera.c. */
 	alp_alif_camera_rect_t ok_rect = { .x = 10, .y = 10, .w = 100, .h = 100 };
 	zassert_equal(alp_alif_camera_isp_3a_window_set(&fake, ALP_ALIF_CAMERA_3A_AE, &ok_rect),
 	              ALP_ERR_NOSUPPORT);

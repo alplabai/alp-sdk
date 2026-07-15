@@ -70,20 +70,26 @@ The practical consequence for the EdgeAI vision example
 (`examples/aen/edgeai-vision-aen/`, an **E8 target** — `som.sku:
 E1M-AEN801`): the in-repo ISP-Pico backend is scoped to E8 today, so
 the example may eventually offload debayer / format-convert / 3A to
-it — but none of the three works yet, for two unrelated reasons.
-Debayer and format-convert are blocked at the Zephyr driver layer:
-`zephyr/drivers/video/isp_pico.c` (the same `vsi,isp-pico` node this
-backend targets) links against a newer `hal_alif` libisp wrapper than
-the one vendored locally, so it compiles but will not link (see that
-file's HAL_ALIF VERSION MISMATCH note) — even though the MPI calls
-debayer/format-convert need, `VSI_MPI_ISP_SetDmscAttr` and
-`VSI_MPI_ISP_SetScaleAttr`, are defined in the vendored archive. 3A is
-blocked for a different, independent reason: AE is declared in the
-vendored isp_wrapper headers but undefined in the archive; AF and LSC
-are absent from that archive outright (no header, no symbol); and,
-for an additional, independent reason, the per-channel gain path is
-**contract-absent** — see the per-entry detail in
-`src/backends/ext/alif/camera.c`. So today the example must **not**
+it — but none of the three works yet.  Debayer and format-convert are
+blocked at the Zephyr driver layer: `zephyr/drivers/video/isp_pico.c`
+(the same `vsi,isp-pico` node this backend targets) links against a
+newer `hal_alif` libisp wrapper than the one vendored locally, so it
+compiles but will not link (see that file's HAL_ALIF VERSION MISMATCH
+note) — even though the MPI calls debayer/format-convert need,
+`VSI_MPI_ISP_SetDmscAttr` and `VSI_MPI_ISP_SetScaleAttr`, are defined
+in the vendored archive.  3A (AE / AWB / AF) fails for two further,
+independent reasons of its own: AE is declared in the vendored
+isp_wrapper headers but undefined in the archive; AF is absent from
+that archive outright (no header, no symbol) — a different kind of
+gap than AE's.  AWB's window call is reachable in the archive but is
+deliberately withheld so AE/AF can't silently stay unset while AWB
+moves alone — a policy hold, not a failure.  The other two ISP Pico
+knobs the example might also want fail for their own reasons, and
+neither is part of 3A: LSC is absent from that archive outright, the
+same class of gap as AF; the per-channel gain path is
+**contract-absent** for yet another reason — a symbol exists but its
+struct can't carry this call's contract.  See the per-entry detail in
+`src/backends/ext/alif/camera.c`.  So today the example must **not**
 rely on the ISP: it configures the camera sensor to emit the model's
 pixel format directly and does crop / resize / normalisation on the
 M55-HP with CMSIS-DSP — exactly the data flow in that example's
@@ -340,20 +346,22 @@ here is what the backend must implement, not a stub.
 
 ---
 
-## Open items (TBD until the HAL packs land)
+## Open items
 
-- **D/AVE 2D batched submit.**  The v0.5 public API is submit-and-wait
-  per op; a batched display-list flush would need a new public entry
-  point.  Deferred until a real consumer (e.g. an LVGL/D/AVE 2D
-  integration) needs it.
-- **ISP Pico vs portable ISP overlap.**  How much of the portable
-  `alp_camera_configure_isp` the ISP Pico backend serves vs. the
-  vendor knobs is settled when the HAL pack lands; both surfaces are
-  `[ABI-EXPERIMENTAL]` precisely so that boundary can move.
-- **SecAES key-slot count + lifecycle.**  Number of slots, whether
-  re-provisioning replaces or allocates, and the wipe-on-tamper
-  contract are HAL-defined and recorded here when the pack is in
-  scope.
+- **D/AVE 2D batched submit** (gated on the D/AVE 2D vendor pack
+  landing).  The v0.5 public API is submit-and-wait per op; a batched
+  display-list flush would need a new public entry point.  Deferred
+  until a real consumer (e.g. an LVGL/D/AVE 2D integration) needs it.
+- **ISP Pico vs portable ISP overlap** (gated on the §2 blockers
+  clearing, not on the HAL pack — `isp_wrapper` is already vendored).
+  How much of the portable `alp_camera_configure_isp` the ISP Pico
+  backend serves vs. the vendor knobs is settled once AE / AF / LSC /
+  gain clear; both surfaces are `[ABI-EXPERIMENTAL]` precisely so that
+  boundary can move.
+- **SecAES key-slot count + lifecycle** (gated on the SecAES vendor
+  pack landing).  Number of slots, whether re-provisioning replaces or
+  allocates, and the wipe-on-tamper contract are HAL-defined and
+  recorded here when the pack is in scope.
 
 ---
 
