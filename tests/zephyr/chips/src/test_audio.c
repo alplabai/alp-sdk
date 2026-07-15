@@ -78,6 +78,50 @@ ZTEST(alp_chips, test_tas2563_calls_reject_uninitialised)
 	zassert_equal(tas2563_set_hw_enable(&ctx, true), ALP_ERR_NOT_READY);
 }
 
+/* #739: every documented strap address (Table 7-3) must be accepted;
+ * anything else -- including the two out-of-range/UB-adjacent boundary
+ * probes 0x80 and 0xFF -- must be rejected before any bus access. */
+ZTEST(alp_chips, test_tas2563_init_validates_address_strap_range)
+{
+	tas2563_t ctx;
+
+	zassert_equal(tas2563_init(&ctx, NULL, TAS2563_I2C_ADDR_GND_DIRECT, NULL),
+	              ALP_ERR_INVAL,
+	              "NULL bus is checked first regardless of address");
+
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	/* Every strap-documented address is accepted by the range check
+	 * (the driver may still fail NOT_READY past that point on
+	 * native_sim with no real amp on the bus -- only the validation
+	 * gate is under test here). */
+	const uint8_t valid[] = {
+		TAS2563_I2C_ADDR_GND_DIRECT, TAS2563_I2C_ADDR_GND_PULL,  TAS2563_I2C_ADDR_VDD_PULL,
+		TAS2563_I2C_ADDR_VDD_DIRECT, TAS2563_I2C_ADDR_BROADCAST,
+	};
+	for (size_t i = 0; i < ARRAY_SIZE(valid); ++i) {
+		alp_status_t s = tas2563_init(&ctx, bus, valid[i], NULL);
+		zassert_not_equal(
+		    s, ALP_ERR_INVAL, "addr 0x%02x must pass the strap-range check", valid[i]);
+	}
+
+	/* 0x00, the low neighbor 0x4B, the high neighbor 0x50, and the
+	 * 0x7F/0x80/0xFF domain boundaries are all outside the strap set. */
+	const uint8_t invalid[] = { 0x00u, 0x4Bu, 0x50u, 0x7Fu, 0x80u, 0xFFu };
+	for (size_t i = 0; i < ARRAY_SIZE(invalid); ++i) {
+		zassert_equal(tas2563_init(&ctx, bus, invalid[i], NULL),
+		              ALP_ERR_INVAL,
+		              "addr 0x%02x must be rejected",
+		              invalid[i]);
+	}
+
+	alp_i2c_close(bus);
+}
+
 /* ------------------------------------------------------------------ */
 /* v0.5 §D.audio batch -- NULL-arg guard smokes                       */
 /* ------------------------------------------------------------------ */

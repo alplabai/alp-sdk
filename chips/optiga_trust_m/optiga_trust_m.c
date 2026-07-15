@@ -39,6 +39,11 @@
 alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 {
 	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
+	/* addr_7bit == 0 is the documented "fall back to the default
+	 * provisioned address" sentinel; the address is otherwise
+	 * provisioning-defined (no fixed strap range this driver can
+	 * assert), so only the generic 7-bit domain bound applies here. */
+	if (addr_7bit > 0x7Fu) return ALP_ERR_INVAL;
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->bus  = bus;
 	ctx->addr = (addr_7bit != 0) ? addr_7bit : OPTIGA_TRUST_M_I2C_ADDR;

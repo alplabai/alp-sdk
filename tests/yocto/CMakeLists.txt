@@ -24,6 +24,24 @@ target_compile_features(alp_test_delay PRIVATE c_std_99)
 add_test(NAME alp_test_delay
          COMMAND alp_test_delay)
 
+# EEPROM 24C128 offset/len range-check overflow regression (#738) -- shared
+# with tests/baremetal/ since the chip driver core (chips/eeprom_24c128/) is
+# OS-agnostic and the test needs no real I2C bus (see the test file's
+# header comment).
+add_executable(alp_test_eeprom_24c128_range
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/eeprom_24c128_range.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../chips/eeprom_24c128/eeprom_24c128.c
+)
+target_link_libraries(alp_test_eeprom_24c128_range PRIVATE alp::sdk)
+target_include_directories(alp_test_eeprom_24c128_range PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_eeprom_24c128_range PRIVATE c_std_99)
+
+add_test(NAME alp_test_eeprom_24c128_range
+         COMMAND alp_test_eeprom_24c128_range)
+
 # Shared errno -> alp_status_t baseline mapper (#630): the reviewed
 # baseline contract + the per-operation override mechanism (CAN's
 # EAGAIN-as-timeout worked example).  Pure POSIX <errno.h> + the header
@@ -210,6 +228,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_rpc_yocto_self_close
              COMMAND alp_test_rpc_yocto_self_close)
 
+    # #747 regression: y_open()'s failed-open paths must destroy exactly
+    # the pthread mutexes/cond they already initialized (reverse init
+    # order), never more and never less.  Same #include-the-.c-file /
+    # no-alp::sdk-link technique as alp_test_rpc_yocto_self_close above
+    # -- see rpc_yocto_open_fail.c's own header comment.
+    add_executable(alp_test_rpc_yocto_open_fail
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc_yocto_open_fail.c
+    )
+    target_link_libraries(alp_test_rpc_yocto_open_fail PRIVATE Threads::Threads)
+    target_include_directories(alp_test_rpc_yocto_open_fail PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/rpc
+    )
+    target_compile_definitions(alp_test_rpc_yocto_open_fail PRIVATE
+        ALP_SDK_HAVE_OPENAMP_USERLAND=1
+    )
+    target_compile_features(alp_test_rpc_yocto_open_fail PRIVATE c_std_99)
+
+    add_test(NAME alp_test_rpc_yocto_open_fail
+             COMMAND alp_test_rpc_yocto_open_fail)
+
     # GHSA-xhm8-7f87-93q5 defect 2: the dispatcher-level counterpart of
     # the test above.  rpc_yocto_self_close.c drives the BACKEND's
     # file-local struct rpc_be / y_close() / rpc_rx_main() directly;
@@ -246,6 +287,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                      ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-rpc-asan
                      "-fsanitize=address,undefined"
                      alp_test_rpc_yocto_self_close
+                     alp_test_rpc_yocto_open_fail
                      alp_test_rpc_dispatch_close_race)
     set_tests_properties(alp_test_rpc_asan_ubsan PROPERTIES TIMEOUT 600)
 
@@ -255,6 +297,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                      ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-rpc-tsan
                      "-fsanitize=thread"
                      alp_test_rpc_yocto_self_close
+                     alp_test_rpc_yocto_open_fail
                      alp_test_rpc_dispatch_close_race)
     set_tests_properties(alp_test_rpc_tsan PROPERTIES TIMEOUT 600)
 
@@ -288,6 +331,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/../../include
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/rpc
+            # yocto_uio_drv.c now pulls in the shared checked-arithmetic
+            # helper (src/common/alp_checked_arith.h, alp-sdk #735/#743);
+            # the main alp_sdk target gets src/common on its include path
+            # via src/common/CMakeLists.txt, but this test compiles the
+            # backend .c file directly (see the ODR note above) and needs
+            # the same include dir added explicitly.
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
         )
         target_compile_definitions(alp_test_rpc_uio_self_close PRIVATE
             ALP_SDK_HAVE_OPENAMP_USERLAND=1
@@ -360,6 +410,90 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_peripheral_gpio
              COMMAND alp_test_peripheral_gpio)
+
+    # Ownership-rollback regression for issue #744 (Yocto PWM sysfs
+    # backend): a channel this handle merely reused (already exported by
+    # another process, EBUSY) must never be unexported by this handle's
+    # error-rollback or close paths.  peripheral_pwm.c #includes the real
+    # src/backends/pwm/yocto_drv.c directly (see the test's own header
+    # comment) to drive y_open()/y_close() against
+    # g_pwm_test_sysfs_write_hook instead of a real pwmchip sysfs node.
+    # Deliberately NOT linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_pwm
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_pwm.c
+    )
+    target_include_directories(alp_test_peripheral_pwm PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/pwm
+    )
+    target_compile_features(alp_test_peripheral_pwm PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_pwm
+             COMMAND alp_test_peripheral_pwm)
+
+    # Edge-config rollback regression for issue #746 (Yocto GPIO chardev-v2
+    # backend): alp_gpio_irq_enable() must restore plain-input if the IRQ
+    # dispatcher fails to start (eventfd()/pthread_create() failure),
+    # instead of leaving the line edge-configured with irq_enabled false.
+    # peripheral_gpio_irq_rollback.c #includes the real
+    # src/yocto/peripheral_gpio.c directly (see the test's own header
+    # comment) to drive alp_gpio_irq_enable() against
+    # g_gpio_test_set_config_hook / g_gpio_test_fail_dispatcher_start
+    # instead of a real /dev/gpiochipN line.  Needs pthreads (the real
+    # dispatcher-start success path spins up a genuine thread in the
+    # third scenario) -- same gate as alp_test_last_error_threading above.
+    # Deliberately NOT linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    find_package(Threads REQUIRED)
+
+    add_executable(alp_test_peripheral_gpio_irq_rollback
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio_irq_rollback.c
+        # alp_gpio_open() (compiled in as part of the #include-the-.c-file
+        # technique, even though this test never calls it) references
+        # alp_internal_set_last_error(); pull in its one canonical
+        # definition so the link is self-contained without alp::sdk.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_link_libraries(alp_test_peripheral_gpio_irq_rollback PRIVATE Threads::Threads)
+    target_include_directories(alp_test_peripheral_gpio_irq_rollback PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_gpio_irq_rollback PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_gpio_irq_rollback
+             COMMAND alp_test_peripheral_gpio_irq_rollback)
+
+    # Post-open failure rollback + timeout-overflow regression for issue
+    # #760 (Yocto watchdog backend): every failure after open() must
+    # attempt a best-effort disarm (WDIOS_DISABLECARD / magic close)
+    # before releasing the fd, and the ms->s ceiling division must not
+    # overflow uint32_t for timeout_ms near UINT32_MAX.
+    # peripheral_wdt.c #includes the real src/backends/wdt/yocto_drv.c
+    # directly (see the test's own header comment) to drive y_open()/
+    # y_close() against g_wdt_test_open_hook / g_wdt_test_malloc_hook /
+    # g_wdt_test_settimeout_observed_hook / g_wdt_test_disarm_observed_hook
+    # instead of a real /dev/watchdogN (which would arm a genuine hardware
+    # watchdog).  Deliberately NOT linked against alp::sdk -- same ODR
+    # rationale as alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_wdt
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_wdt.c
+    )
+    target_include_directories(alp_test_peripheral_wdt PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/wdt
+    )
+    target_compile_features(alp_test_peripheral_wdt PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_wdt
+             COMMAND alp_test_peripheral_wdt)
 
     # MQTT test compiles only when libmosquitto is wired into
     # alp_sdk.  Re-check here because pkg_check_modules's results

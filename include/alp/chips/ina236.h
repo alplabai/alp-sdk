@@ -98,15 +98,21 @@ typedef struct {
  *
  * @param[out] ctx            Driver context (output; populated on success).
  * @param[in]  bus            Open I2C bus handle the chip sits on.
- * @param[in]  addr_7bit      7-bit I2C address (0x40..0x47).  Use 0
- *                            to fall back to 0x40 (INA236A default).
+ * @param[in]  addr_7bit      7-bit I2C address: 0x40..0x43 (INA236A)
+ *                            or 0x48..0x4B (INA236B), per the strap
+ *                            table above.  Use 0 to fall back to
+ *                            0x40 (INA236A default).  Any other value
+ *                            (including the 0x80..0xFF band an
+ *                            8-bit-encoded address would land in)
+ *                            returns ALP_ERR_INVAL.
  * @param[in]  shunt_ohms     Shunt resistance in Ohms, e.g.
  *                            0.010 for a 10 mOhm sense resistor.
- *                            Must be > 0.
+ *                            Must be finite and > 0.
  * @param[in]  max_current_a  Maximum expected rail current in
  *                            Amps.  Used to compute CURRENT_LSB =
  *                            max_current / 32768.  Set generously
- *                            (10x typical) to avoid clipping.
+ *                            (10x typical) to avoid clipping.  Must
+ *                            be finite and > 0.
  * @param[in]  adcrange       ADC full-scale range; pick
  *                            INA236_ADCRANGE_20MV when the rail's
  *                            current rarely exceeds 25 % of max

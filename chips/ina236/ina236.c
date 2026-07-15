@@ -10,6 +10,7 @@
  * followed by a 2-byte read of [hi, lo].
  */
 
+#include <math.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -53,14 +54,27 @@ static alp_status_t reg_write16(ina236_t *ctx, uint8_t reg, uint16_t val)
 	return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
 }
 
+/* 7-bit I2C address strap range (header's "Address strap" table):
+ * INA236A A0-encoded 0x40..0x43, INA236B 0x48..0x4B.  Anything else --
+ * including the 0x80..0xFF band an 8-bit-encoded address would land
+ * in -- is rejected before it ever reaches the bus. */
+static bool addr_in_strap_range(uint8_t addr)
+{
+	return (addr >= 0x40u && addr <= 0x43u) || (addr >= 0x48u && addr <= 0x4Bu);
+}
+
 /* CALIBRATION = 0.00512 / (CURRENT_LSB * R_SHUNT)  per datasheet
  * eq. 1, where 0.00512 has units (V * A).  CURRENT_LSB is in
  * amps; we choose CURRENT_LSB = max_current / 32768. */
 static alp_status_t apply_calibration(ina236_t *ctx)
 {
-	if (ctx->shunt_ohms <= 0.0f || ctx->max_current_a <= 0.0f) return ALP_ERR_INVAL;
+	if (!isfinite(ctx->shunt_ohms) || ctx->shunt_ohms <= 0.0f) return ALP_ERR_INVAL;
+	if (!isfinite(ctx->max_current_a) || ctx->max_current_a <= 0.0f) return ALP_ERR_INVAL;
 	ctx->current_lsb_a = ctx->max_current_a / 32768.0f;
 	float cal_f        = 0.00512f / (ctx->current_lsb_a * ctx->shunt_ohms);
+	/* current_lsb_a and shunt_ohms are both finite and > 0 (checked
+	 * above), so cal_f is finite here too -- no NaN/Inf can reach the
+	 * uint16_t cast below; only the documented saturating clamp. */
 	if (cal_f > 65535.0f) cal_f = 65535.0f;
 	if (cal_f < 0.0f) cal_f = 0.0f;
 	uint16_t cal = (uint16_t)cal_f;
@@ -75,7 +89,12 @@ alp_status_t ina236_init(ina236_t         *ctx,
                          ina236_adcrange_t adcrange)
 {
 	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
-	if (shunt_ohms <= 0.0f || max_current_a <= 0.0f) return ALP_ERR_INVAL;
+	if (!isfinite(shunt_ohms) || shunt_ohms <= 0.0f) return ALP_ERR_INVAL;
+	if (!isfinite(max_current_a) || max_current_a <= 0.0f) return ALP_ERR_INVAL;
+	/* addr_7bit == 0 is the documented "fall back to INA236A default"
+	 * sentinel; any other value must fall inside the strap-encoded
+	 * address range before it reaches the bus. */
+	if (addr_7bit != 0 && !addr_in_strap_range(addr_7bit)) return ALP_ERR_INVAL;
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->bus           = bus;
 	ctx->addr          = (addr_7bit == 0) ? 0x40u : addr_7bit;

@@ -7,6 +7,46 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — pure-C review of `dev`: overflow, contract and rollback defects (#732 #735 #736 #737 #738 #739 #740 #742 #743 #744 #745 #746 #747 #748 #749 #750 #753 #757 #759 #760)
+
+- **Checked arithmetic.** New private `src/common/alp_checked_arith.h`
+  (`alp_size_range_valid` / `alp_size_to_u32` / `alp_u32_add_checked` + 64-bit
+  siblings): subtraction-based range checks that never evaluate `offset + len`
+  before proving it representable, and narrowing helpers that leave `*out`
+  untouched on rejection (#743). Storage and DSP range checks migrate to it;
+  the CryptoCell hash staging buffer (#737), EEPROM 24C128 range checks (#738),
+  CC3501E OTA length/offset narrowing (#732) and the Yocto UIO MHU kick-slot
+  MMIO arithmetic (#735) now use it instead of overflow-prone hand-rolled forms.
+- **Contract violations.** AEAD decrypt now wipes the plaintext output on
+  authentication failure, per `<alp/security.h>` (#750). SPI NULL-buffer
+  validation and ADC last-error behaviour align with their documented
+  contracts (#749). The update-log append path no longer trusts stale metadata,
+  which could durably break a write-once chain (#759).
+- **Undefined behaviour.** BME280 calibration/compensation no longer
+  left-shifts negative signed values (#753); ADC, INA236 and DA9292 numeric
+  edges are hardened against wrap and UB (#757). Chip configuration APIs reject
+  invalid enum values instead of masking them into reserved register encodings
+  (`bmp581`, `bme280` — #736; the remaining drivers are tracked in #790).
+- **Silicon-facing correctness.** The A55 OpenAMP notify path takes a release
+  barrier before the MHU doorbell (#745). xHCI DMA and the Alif PDM coefficient
+  bank fixes (#752, #758) are held on a separate branch pending bench time.
+- **I2C addressing.** Chip drivers validate 7-bit addresses (#739). The
+  TCAL9538 driver additionally accepts the register-compatible TCA6408A
+  alt-strap (0x20..0x21) it is documented to drive — a range check limited to
+  0x70..0x73 would have silently reported "IOEXP absent" on every
+  TCA6408A-populated EVK.
+- **Reentrancy.** CC3501E scan/event APIs use per-context payload buffers
+  instead of shared statics (#740); the Wi-Fi security selection is
+  conversion-clean and gated by a check-only target (#742).
+- **Yocto rollback paths.** PWM close no longer unexports or disables a channel
+  it did not itself export (#744); a failed GPIO IRQ setup no longer leaves the
+  line edge-configured (#746); watchdog failure rollback no longer leaves an
+  armed device, and timeout rounding no longer overflows (#760). RPMsg
+  failed-open paths destroy the pthread primitives they initialized (#747).
+- **Build.** Restored the strict-C warning gate: literal glob text inside block
+  comments tripped `-Wcomment`, breaking `ALP_SDK_WERROR=ON` on both the
+  bare-metal and Yocto profiles (#748).
+
 ### Fixed — orchestrated Zephyr builds pin the workspace Python (#787)
 
 - Zephyr slice commands now pass

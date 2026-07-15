@@ -132,6 +132,8 @@
 
 #include <linux/rpmsg.h>
 
+#include "common/alp_errno.h"
+
 #ifndef ALP_RPC_SUBS_PER_CHANNEL
 #define ALP_RPC_SUBS_PER_CHANNEL 8
 #endif
@@ -495,6 +497,89 @@ static int absolute_deadline(struct timespec *ts, uint32_t timeout_ms)
 /* Ops                                                                 */
 /* ================================================================== */
 
+/* Bits recording which pthread primitives y_open() has successfully
+ * initialized so far (#747: the failure paths below used to close fds
+ * and free `ch` directly, without ever destroying the mutexes/cond
+ * already initialized earlier in the sequence -- destroying an object
+ * that was never successfully initialized is itself undefined
+ * behaviour, so precise, per-stage tracking is required in both
+ * directions). */
+enum {
+	RPC_BE_INIT_TX_MUTEX   = 1u << 0,
+	RPC_BE_INIT_SUB_MUTEX  = 1u << 1,
+	RPC_BE_INIT_CALL_MUTEX = 1u << 2,
+	RPC_BE_INIT_CALL_COND  = 1u << 3,
+};
+
+/* Test-only fault injection for y_open()'s staged init/acquire
+ * sequence (default NULL: a single NULL-check per stage in production,
+ * matching g_y_call_test_late_staging_hook's existing idiom above).
+ * tests/yocto/rpc_yocto_open_fail.c points this at a function that
+ * returns true for exactly the stage under test, so each partial-
+ * teardown path below can be driven deterministically without needing
+ * real resource exhaustion (e.g. forcing pthread_mutex_init() to fail
+ * on a healthy host).  Firing BEFORE the real operation for that stage
+ * means the corresponding object is genuinely never initialized/opened
+ * when injected, so the unwind logic under test is exactly the same
+ * code a real failure would take. */
+enum rpc_be_open_stage {
+	RPC_BE_OPEN_STAGE_TX_MUTEX = 0,
+	RPC_BE_OPEN_STAGE_SUB_MUTEX,
+	RPC_BE_OPEN_STAGE_CALL_MUTEX,
+	RPC_BE_OPEN_STAGE_CALL_COND,
+	RPC_BE_OPEN_STAGE_CTRL_OPEN,
+	RPC_BE_OPEN_STAGE_EPT_CREATE,
+	RPC_BE_OPEN_STAGE_EPT_OPEN,
+	RPC_BE_OPEN_STAGE_PIPE,
+	RPC_BE_OPEN_STAGE_RX_THREAD,
+};
+static bool (*g_y_open_test_fail_at)(enum rpc_be_open_stage) = NULL;
+
+static bool rpc_be_open_test_should_fail(enum rpc_be_open_stage stage)
+{
+	return g_y_open_test_fail_at != NULL && g_y_open_test_fail_at(stage);
+}
+
+/* Test-only: RPMSG_CREATE_EPT_IOCTL has no real-device substitute
+ * reachable on a host without actual OpenAMP/remoteproc hardware
+ * (unlike the two fd opens around it, which accept /dev/null via the
+ * existing ALP_RPMSG_CTRL_DEV / ALP_RPMSG_EPT_DEV overrides for a
+ * real, deterministic success).  To drive the LATER stages (endpoint
+ * open, pipe, worker create) through their own failure paths, a test
+ * needs the ioctl stage to synthetically succeed rather than fail --
+ * this flag is that one exception.  Unlike g_y_open_test_fail_at above
+ * (which only ever turns a real success into a failure), this one
+ * fabricates a success for a real ioctl that never ran -- so, unlike
+ * that hook, it does NOT default-compile into production/other-test
+ * builds at all: ALP_RPC_YOCTO_OPEN_TEST_HOOKS is defined ONLY by
+ * tests/yocto/rpc_yocto_open_fail.c, the one TU that needs it. */
+#ifdef ALP_RPC_YOCTO_OPEN_TEST_HOOKS
+static bool g_y_open_test_force_ept_create_ok = false;
+#endif
+
+/* Failure-path teardown for y_open(): unwind exactly the pthread
+ * primitives recorded in `init_mask` (reverse init order: call_cond,
+ * call_mutex, sub_mutex, tx_mutex), close any fds/pipe ends that got
+ * opened, and free `ch`.  Every fd field is sentinel-initialized to -1
+ * before any acquisition is attempted (see y_open()), so a plain >= 0
+ * check here is correct regardless of which stage actually failed.
+ * Never called once rpc_be_data_store() has published `ch` -- from that
+ * point on only y_destroy()/rpc_be_teardown() may free it. */
+static void rpc_be_open_fail(struct rpc_be *ch, unsigned init_mask)
+{
+	if (ch->rx_wake_pipe[1] >= 0) close(ch->rx_wake_pipe[1]);
+	if (ch->rx_wake_pipe[0] >= 0) close(ch->rx_wake_pipe[0]);
+	if (ch->ept_fd >= 0) close(ch->ept_fd);
+	if (ch->ctrl_fd >= 0) close(ch->ctrl_fd);
+
+	if (init_mask & RPC_BE_INIT_CALL_COND) pthread_cond_destroy(&ch->call_cond);
+	if (init_mask & RPC_BE_INIT_CALL_MUTEX) pthread_mutex_destroy(&ch->call_mutex);
+	if (init_mask & RPC_BE_INIT_SUB_MUTEX) pthread_mutex_destroy(&ch->sub_mutex);
+	if (init_mask & RPC_BE_INIT_TX_MUTEX) pthread_mutex_destroy(&ch->tx_mutex);
+
+	free(ch);
+}
+
 /**
  * @brief Open the RPMsg control device, create the named endpoint, and
  *        spawn the per-channel RX worker.
@@ -505,6 +590,14 @@ static int absolute_deadline(struct timespec *ts, uint32_t timeout_ms)
  * The RPMsg chardev ABI exposes no queryable capability surface, so
  * caps stay 0.  The OpenAMP / RPMsg calls are preserved verbatim from
  * the original direct-impl.
+ *
+ * @par Failure-path cleanup (#747)
+ * Every stage below checks its init/open/create return value and, on
+ * failure, routes through @ref rpc_be_open_fail with the init_mask
+ * accumulated so far -- so a failure at any point destroys exactly the
+ * pthread primitives that are actually valid (in reverse init order)
+ * and closes exactly the fds/pipe ends that are actually open, never
+ * more and never less.
  */
 static alp_status_t
 y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
@@ -527,25 +620,74 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	ch->dst_ept   = cfg->dst_ept != 0u ? cfg->dst_ept : ch->src_ept + 1u;
 	ch->mbox_ch   = cfg->mbox_ch != 0u ? cfg->mbox_ch : ALP_RPC_DEFAULT_MBOX_CH;
 	ch->cacheable = cfg->cacheable;
-
-	pthread_mutex_init(&ch->tx_mutex, NULL);
-	pthread_mutex_init(&ch->sub_mutex, NULL);
-	pthread_mutex_init(&ch->call_mutex, NULL);
-	pthread_cond_init(&ch->call_cond, NULL);
 	ch->call_pending      = false;
 	ch->closing           = false;
 	ch->close_from_worker = false;
 	ch->owner             = st->owner;
-	ch->ept_fd            = -1;
-	ch->ctrl_fd           = -1;
-	ch->rx_wake_pipe[0]   = -1;
-	ch->rx_wake_pipe[1]   = -1;
+	/* Sentinel every fd/pipe field BEFORE any acquisition is attempted
+	 * so rpc_be_open_fail() can safely use a plain >= 0 check from any
+	 * failure point below, including one that fires before a given
+	 * fd's own open() call ever runs. */
+	ch->ept_fd          = -1;
+	ch->ctrl_fd         = -1;
+	ch->rx_wake_pipe[0] = -1;
+	ch->rx_wake_pipe[1] = -1;
+
+	/* Stage pthread primitive init one at a time, tracking exactly which
+	 * ones succeeded in `init_mask` -- pthread_mutex_destroy()/
+	 * pthread_cond_destroy() on an object that was never successfully
+	 * initialized is undefined behaviour, so a failure here must unwind
+	 * precisely, not unconditionally. */
+	unsigned init_mask = 0u;
+	int      rc;
+
+	rc = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_TX_MUTEX)
+	         ? ENOMEM
+	         : pthread_mutex_init(&ch->tx_mutex, NULL);
+	if (rc != 0) {
+		fprintf(stderr, "alp_rpc: pthread_mutex_init(tx_mutex) failed: rc=%d\n", rc);
+		rpc_be_open_fail(ch, init_mask);
+		return alp_status_from_posix_errno(rc);
+	}
+	init_mask |= RPC_BE_INIT_TX_MUTEX;
+
+	rc = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_SUB_MUTEX)
+	         ? ENOMEM
+	         : pthread_mutex_init(&ch->sub_mutex, NULL);
+	if (rc != 0) {
+		fprintf(stderr, "alp_rpc: pthread_mutex_init(sub_mutex) failed: rc=%d\n", rc);
+		rpc_be_open_fail(ch, init_mask);
+		return alp_status_from_posix_errno(rc);
+	}
+	init_mask |= RPC_BE_INIT_SUB_MUTEX;
+
+	rc = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_CALL_MUTEX)
+	         ? ENOMEM
+	         : pthread_mutex_init(&ch->call_mutex, NULL);
+	if (rc != 0) {
+		fprintf(stderr, "alp_rpc: pthread_mutex_init(call_mutex) failed: rc=%d\n", rc);
+		rpc_be_open_fail(ch, init_mask);
+		return alp_status_from_posix_errno(rc);
+	}
+	init_mask |= RPC_BE_INIT_CALL_MUTEX;
+
+	rc = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_CALL_COND)
+	         ? ENOMEM
+	         : pthread_cond_init(&ch->call_cond, NULL);
+	if (rc != 0) {
+		fprintf(stderr, "alp_rpc: pthread_cond_init(call_cond) failed: rc=%d\n", rc);
+		rpc_be_open_fail(ch, init_mask);
+		return alp_status_from_posix_errno(rc);
+	}
+	init_mask |= RPC_BE_INIT_CALL_COND;
 
 	/* Open the control device + create our endpoint via ioctl. */
-	ch->ctrl_fd = open(rpmsg_ctrl_path(), O_RDWR);
+	ch->ctrl_fd = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_CTRL_OPEN)
+	                  ? (errno = EIO, -1)
+	                  : open(rpmsg_ctrl_path(), O_RDWR);
 	if (ch->ctrl_fd < 0) {
 		fprintf(stderr, "alp_rpc: open(%s) failed: %s\n", rpmsg_ctrl_path(), strerror(errno));
-		free(ch);
+		rpc_be_open_fail(ch, init_mask);
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -555,11 +697,21 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	eptinfo.src = ch->src_ept;
 	eptinfo.dst = ch->dst_ept;
 
-	if (ioctl(ch->ctrl_fd, RPMSG_CREATE_EPT_IOCTL, &eptinfo) < 0) {
+	int ioctl_rc;
+	if (rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_EPT_CREATE)) {
+		errno    = EIO;
+		ioctl_rc = -1;
+#ifdef ALP_RPC_YOCTO_OPEN_TEST_HOOKS
+	} else if (g_y_open_test_force_ept_create_ok) {
+		ioctl_rc = 0;
+#endif
+	} else {
+		ioctl_rc = ioctl(ch->ctrl_fd, RPMSG_CREATE_EPT_IOCTL, &eptinfo);
+	}
+	if (ioctl_rc < 0) {
 		fprintf(
 		    stderr, "alp_rpc: RPMSG_CREATE_EPT_IOCTL(%s) failed: %s\n", ch->name, strerror(errno));
-		close(ch->ctrl_fd);
-		free(ch);
+		rpc_be_open_fail(ch, init_mask);
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -573,30 +725,30 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
      * ALP_RPMSG_EPT_DEV. */
 	const char *ept_path_env = getenv("ALP_RPMSG_EPT_DEV");
 	const char *ept_path     = ept_path_env ? ept_path_env : "/dev/rpmsg0";
-	ch->ept_fd               = open(ept_path, O_RDWR | O_NONBLOCK);
+	ch->ept_fd               = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_EPT_OPEN)
+	                               ? (errno = EIO, -1)
+	                               : open(ept_path, O_RDWR | O_NONBLOCK);
 	if (ch->ept_fd < 0) {
 		fprintf(stderr, "alp_rpc: open(%s) failed: %s\n", ept_path, strerror(errno));
-		close(ch->ctrl_fd);
-		free(ch);
+		rpc_be_open_fail(ch, init_mask);
 		return ALP_ERR_NOT_READY;
 	}
 
-	if (pipe(ch->rx_wake_pipe) < 0) {
+	int pipe_rc = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_PIPE) ? (errno = EMFILE, -1)
+	                                                                   : pipe(ch->rx_wake_pipe);
+	if (pipe_rc < 0) {
 		fprintf(stderr, "alp_rpc: pipe() failed: %s\n", strerror(errno));
-		close(ch->ept_fd);
-		close(ch->ctrl_fd);
-		free(ch);
+		rpc_be_open_fail(ch, init_mask);
 		return ALP_ERR_IO;
 	}
 
 	atomic_store(&ch->rx_run, 1);
-	if (pthread_create(&ch->rx_thread, NULL, rpc_rx_main, ch) != 0) {
-		fprintf(stderr, "alp_rpc: pthread_create failed\n");
-		close(ch->rx_wake_pipe[0]);
-		close(ch->rx_wake_pipe[1]);
-		close(ch->ept_fd);
-		close(ch->ctrl_fd);
-		free(ch);
+	int create_rc = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_RX_THREAD)
+	                    ? EAGAIN
+	                    : pthread_create(&ch->rx_thread, NULL, rpc_rx_main, ch);
+	if (create_rc != 0) {
+		fprintf(stderr, "alp_rpc: pthread_create failed: rc=%d\n", create_rc);
+		rpc_be_open_fail(ch, init_mask);
 		return ALP_ERR_IO;
 	}
 
