@@ -699,7 +699,8 @@ config VIDEO_ARX3A0
 # instead), so this driver FAILS TO COMPILE against the local hal_alif -- it
 # never reaches the linker.  Behind that: the 2025 wrapper also does NOT
 # export isp_vsi_set_param / isp_vsi_get_param, but those are no longer
-# referenced since the v4.4 port dropped their only callers -- not a blocker.
+# referenced since the v4.4 port dropped their only callers -- not a blocker
+# for this driver's compile.
 # The wrapper does ship a 2-arg isp_vsi_bottom_half() vs this driver's 3-arg
 # call, a further incompatibility that only matters once isp-vsi.h exists.
 # Hence default n -- the default build stays green regardless; turning it on
@@ -724,7 +725,8 @@ config VIDEO_ISP_VSI
 	  2025 one (missing isp-vsi.h; 2-arg vs 3-arg isp_vsi_bottom_half), so it
 	  FAILS TO COMPILE against the local wrapper -- it never reaches the
 	  linker.  (The wrapper also lacks isp_vsi_set_param / isp_vsi_get_param,
-	  but the v4.4 port dropped their only callers, so that is not a reason.)
+	  but the v4.4 port dropped their only callers, so that is not a reason
+	  the TU fails to compile.)
 	  Bump the hal_alif wrapper before enabling.
 	  Driver: zephyr/drivers/video/isp_pico.c.
 
