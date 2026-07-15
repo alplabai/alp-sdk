@@ -7,26 +7,71 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
-### Changed — CC3501E integration plan retired to a stub (#464)
+### Removed — CC3501E integration plan retired (#464)
 
-- `docs/cc3501e-integration-plan.md` was the May-2026 pre-implementation
-  plan for the CC3501E bridge; the bridge has since shipped (2026-07-05,
+- `docs/cc3501e-integration-plan.md` is **deleted**. It was the May-2026
+  pre-implementation plan for the CC3501E bridge, written before host or
+  firmware code existed; the bridge has since shipped (2026-07-05,
   silicon-proven) and in places shipped differently from the plan (e.g.
   `POWER_POLICY` landed at opcode `0x62`, not the proposed `0x04`; the
   handshake became hardware SS0 chip-select + per-phase READY, not a
-  polled `busy_pin` GPIO). The doc is now a short "superseded" stub
-  pointing at `docs/cc3501e-bridge.md`. The still-open items (errata
-  SWRZ167; CAN/I2S/PDM/SDMMC not evaluated) moved into a new "Open
-  questions" section in `docs/cc3501e-bridge.md`, alongside a new
-  "Peripherals not proxied today" section (DMA/UART/ADC/Timers/I2C).
+  polled `busy_pin` GPIO). It was research-only and never a released
+  surface, so it goes cleanly rather than living on as a redirect — git
+  history has the original if anyone needs it. Its still-relevant
+  survivors moved into `docs/cc3501e-bridge.md`: the open items (errata
+  SWRZ167; CAN/I2S/PDM/SDMMC not evaluated) as a new "Open questions"
+  section, plus a new "Peripherals not proxied today" section
+  (DMA/UART/ADC/Timers/I2C). Current CC3501E reference material is
+  `docs/cc3501e-bridge.md`, `-production.md`, `-companion-commands.md`
+  and `-gpio-bench.md`.
+- Bare "§N.N" cross-references into the retired plan are gone from the
+  live tree: `include/alp/protocol/cc3501e.h` (the `§5.4` and `§5.7`
+  comments on `CMD_GET_DIAG_INFO` / `CMD_POWER_POLICY` — the most-read
+  surface that carried them) and `tests/zephyr/peripheral/src/main.c`
+  (`§5.5`) now state the intent instead of a section number that no
+  longer resolves. Historical `CHANGELOG.md` / `VERSIONS.md` rows keep
+  theirs: they record what was true when written.
 - `scripts/flash_backends/cc3501e_usb_bootloader.py` and
   `docs/v0.6-tbd-and-assumptions.md` cited the plan's "§5.7" for the
   USB-bootloader `flash_args` contract — already wrong (§5.7 was the
   power-policy opcode section, not USB bootloader). Repointed to the
-  module's own docstring / `docs/bring-up-aen.md`.
+  module's own docstring, and the operator-facing "no tool on PATH"
+  message now names the bench warm-program recipe in
+  `docs/cc3501e-production.md` rather than a manual SWD path that does
+  not flash this part.
 - `scripts/check_doc_drift.py` — removed the now-stale
-  `cc3501e-integration-plan.md` dead-symbol-scan exemption; the stub is
-  scanned like any other doc.
+  `cc3501e-integration-plan.md` dead-symbol-scan exemption, which existed
+  to let that doc name a proposed API that was never implemented. Its
+  test moves onto `v0.6-tbd-and-assumptions.md`, the remaining
+  forward-looking doc the exemption is for.
+- `docs/cc3501e-bridge.md` gained a "Link speed" section documenting what
+  the link actually runs at, replacing the retired plan's open 8 MHz vs.
+  26 MHz question. The four AEN bridge examples request 14 MHz, just under
+  the ~15 MHz CC35 slave ceiling — so 26 MHz was never reachable by host
+  tuning, and the remaining question is a slave-side limit, not a host one.
+  Reaching that rate required `RX_SAMPLE_DLY = 6` on the master (`spi_dw`
+  defaults it to 0, and the MISO round-trip over the on-SoM traces
+  mis-samples at 8 MHz and above); that value is silicon-tuned, not
+  derived, and the link does not work at the higher clock without it.
+  Silicon-validated cold and warm on the E1M-AEN801 EVK, concurrently with
+  Wi-Fi/BLE traffic.
+- The actual SCLK is stated as ~14.3 MHz, derived from the driver's own
+  arithmetic (`SPI_DW_CLK_DIVIDER` truncates 200 MHz / 14 MHz to a divider
+  of 14, giving 200/14). The examples' `cc3501e_bridge.h` claims 14.8 MHz
+  "(BAUDR = 400 MHz AHB / 27)", which cannot be right on two counts: the
+  overlay records the real SSI functional clock as 200 MHz and marks the
+  400 MHz figure as mis-set and disproven, and 400/14 truncates to 28 in
+  any case, never 27. The doc now says the figure is derived rather than
+  measured — no captured SCLK exists in-tree. Correcting the example
+  headers is left to the follow-up that owns the stale-speed sites.
+- Known inconsistency, tracked separately: four sites still state 8 MHz or
+  1 MHz — the chip header's `@code` example, `max_clock_hz` in
+  `metadata/chips/cc3501e.yaml`, the bring-up example's README, and the
+  `alp-console` example's 1 MHz bridge header (plus its dead
+  `CC3501E_SPI_FREQ_HZ` macro in `main.c`). Until that lands,
+  `max_clock_hz` (the metadata single source of truth for that hardware
+  fact) contradicts this doc. They are deferred here because correcting
+  them touches metadata and a public header rather than docs.
 
 ### Fixed — pure-C review of `dev`: overflow, contract and rollback defects (#732 #735 #736 #737 #738 #739 #740 #742 #743 #744 #745 #746 #747 #748 #749 #750 #753 #757 #759 #760)
 

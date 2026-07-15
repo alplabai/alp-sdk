@@ -101,20 +101,30 @@ work (see "Bench-validated" below) with no settle-gap dependence.
 
 #### Link speed
 
-The link requests **14 MHz** and lands at **~14.8 MHz** actual SCLK — the
-BAUDR divider quantises it — which is at the **CC35 slave ceiling of
-~15 MHz**.  Silicon-validated cold + warm on the E1M-AEN801 EVK,
-concurrently with Wi-Fi/BLE traffic.
+The four AEN bridge examples request **14 MHz**, which is just under the
+**CC35 slave ceiling of ~15 MHz**.  Silicon-validated cold + warm on the
+E1M-AEN801 EVK, concurrently with Wi-Fi/BLE traffic.
 
-Getting there required tuning the master, not the slave: `spi_dw` leaves
-`RX_SAMPLE_DLY = 0`, and at 8 MHz and above the MISO round-trip over the
-on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY = 6` shifts the capture
-point past the round-trip, and the link then samples clean all the way to
-the slave ceiling — roughly 15× the throughput of the original 1 MHz
+The actual SCLK is the request quantised by the BAUDR divider, which
+`spi_dw` computes as an integer truncation of the SSI functional clock
+over the requested rate (`SPI_DW_CLK_DIVIDER`).  The overlay sets that
+functional clock to 200 MHz, so a 14 MHz request divides to 14 and the
+link runs at 200/14 ≈ **14.3 MHz** — slightly *above* the request, because
+truncating the divider rounds the clock up.  Treat that as derived from
+the driver's arithmetic, not as a scope measurement: no captured SCLK
+figure is recorded in-tree.
+
+Reaching that rate required tuning the master, not the slave: `spi_dw`
+leaves `RX_SAMPLE_DLY = 0`, and at 8 MHz and above the MISO round-trip
+over the on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY = 6` shifts
+the capture point past the round-trip, and the link then samples clean up
+to the slave ceiling — roughly 14× the throughput of the original 1 MHz
 bring-up setting.  The value is silicon-tuned, not derived; see
-`CC3501E_BRIDGE_SPI_FREQ_HZ` and the `RX_SAMPLE_DLY` note in each
-example's `cc3501e_bridge.h` (e.g.
+`CC3501E_BRIDGE_SPI_FREQ_HZ` and the `RX_SAMPLE_DLY` note in the AEN
+bridge examples' `cc3501e_bridge.h` (e.g.
 [`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h`](../examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h)).
+The `alp-console` example is not one of them — it still requests 1 MHz
+(see [`docs/console.md`](console.md)).
 
 Payload reliability additionally depends on the inter-phase settle
 (`CC3501E_PHASE_SETTLE_US`) applied in `cc3501e_request`.
@@ -404,8 +414,10 @@ one, add it under the reserved `0x80..0xFF` range.
   as a proxied peripheral. `M2E_UART_WAKE` (see "Firmware-side GPIO
   behaviour contract" above) is a GPIO wake signal, not a UART
   pass-through.
-- **ADC** — an 8-channel, 12-bit SAR ADC (4 internal + 8 external
-  channels). Not proxied: no E1M-AEN board variant routes an analog
+- **ADC** — a 12-bit SAR ADC with 12 channels: 8 external plus 4
+  internal. (SWRS343 markets it as "8-channel", counting only the
+  external ones; SWRU626 §24.1 gives the full 12.) Not proxied: no
+  E1M-AEN board variant routes an analog
   signal to a CC3501E ADC pin today (`from-cc3501e.tsv` routes those
   GPIOs to the SPI1 secondary mux instead).
 - **Timers / PWM** — 8 GPT/PWM channels. Not routed to any external pad
