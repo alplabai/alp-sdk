@@ -103,9 +103,6 @@ into the topic-specific docs.
   ADC/rising-path latency.
 - [cc3501e-bridge.md](cc3501e-bridge.md) — AEN's on-module Wi-Fi
   coprocessor.
-- [cc3501e-integration-plan.md](cc3501e-integration-plan.md) —
-  SWRU626 deep-dive informing the CC3501E host + firmware wire
-  protocol (research-only).
 - [cc3501e-production.md](cc3501e-production.md) — building,
   signing, and provisioning a shippable CC3501E coprocessor image.
 - [cc3501e-gpio-bench.md](cc3501e-gpio-bench.md) — warm-boot bench
