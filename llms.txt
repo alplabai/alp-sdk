@@ -2,7 +2,7 @@
 
 > A vendor-neutral SDK for heterogeneous E1M / E1M-X system-on-modules (Alif Ensemble, Renesas RZ/V2N, NXP i.MX 93). One declarative `board.yaml` fans out into per-core Zephyr (Cortex-M) and Yocto (Cortex-A) build slices; apps target one portable `<alp/*>` C API and stay source-compatible across a SoM family.
 
-For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent guide). Claude Code users additionally get `CLAUDE.md` (repo skills + the code-review-graph MCP); all other agents use AGENTS.md.
+For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent guide). Claude Code users at Alp Lab additionally get a local `CLAUDE.md` wiring up internal-only tooling (an internal workflow-skills plugin + a `code-review-graph` MCP server); none of it is required — every fact an agent needs is reachable from AGENTS.md and the docs it points to.
 
 ## Getting started
 
