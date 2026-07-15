@@ -37,11 +37,14 @@
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      Every function returns @ref ALP_ERR_NOSUPPORT today, but not
- *      for one reason: AE / AF / LSC are pack-blocked (the vendored
- *      hal_alif ISP wrapper is version-mismatched against the Zephyr
- *      driver -- see the HAL_ALIF VERSION MISMATCH note in
- *      `zephyr/drivers/video/isp_pico.c`); the gain-table load is
- *      contract-absent instead -- see the per-entry detail in
+ *      for one reason: AE is declared in the vendored isp_wrapper
+ *      archive, but the archive defines no Expm symbol for it; AF
+ *      and LSC are absent from that archive outright (no header, no
+ *      symbol); AWB is reachable in the archive but deliberately
+ *      withheld so AE/AF can't silently stay unset while AWB moves
+ *      alone.  The gain-table load fails for an additional,
+ *      independent reason -- a symbol exists but its struct can't
+ *      carry this call's contract -- see the per-entry detail in
  *      `src/backends/ext/alif/camera.c`.  Promotes to [ABI-STABLE]
  *      when three vendor families ship extensions.
  */
@@ -107,8 +110,9 @@ typedef struct {
  *         @ref ALP_ERR_INVAL on NULL handle / NULL rect /
  *           zero-sized rect;
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC on non-Alif backend;
- *         @ref ALP_ERR_NOSUPPORT until the Alif HAL ISP Pico
- *           integration lands.
+ *         @ref ALP_ERR_NOSUPPORT today for every region -- AE, AF,
+ *           and AWB each fail for a different reason; see the
+ *           file-header ABI-status note above.
  */
 alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *camera,
                                                alp_alif_camera_3a_region_t   region,

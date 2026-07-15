@@ -5,16 +5,22 @@
  * (vsi,isp-pico) vendor-extension surface for the E8 backend
  * currently registered in alp-sdk.
  *
- * Two independent blockers here -- do not collapse them into one story.
- * AE / AF / LSC are pack-blocked: the Zephyr driver
- * (zephyr/drivers/video/isp_pico.c) already flags a HAL_ALIF VERSION
- * MISMATCH -- the locally vendored wrapper (modules/hal/alif/drivers/
- * isp/isp_wrapper) is a 2025 subset the driver compiles against but
- * cannot link.  The per-channel gain path fails for a different
- * reason -- it is contract-absent (see the entry below) and stays
- * NOSUPPORT even once the wrapper version is fixed.  No sensor is
- * wired on this SoM batch (#226) either, so nothing here can be
- * bench-verified regardless of the above.  Every body returns
+ * Four independent reasons keep every body below at NOSUPPORT -- do
+ * not collapse them into one story:
+ *   - AE: declared-but-undefined in the vendored isp_wrapper archive
+ *     (see the per-entry detail below).
+ *   - AF: absent outright -- no header, no symbol, not even a
+ *     declaration.
+ *   - LSC: absent outright, same class as AF.
+ *   - gain-table load: a symbol IS defined, but its struct can't
+ *     carry this call's contract (see the per-entry detail below).
+ * SEPARATELY, at the Zephyr driver layer: zephyr/drivers/video/
+ * isp_pico.c carries its own HAL_ALIF VERSION MISMATCH note (a
+ * driver-link problem, not an archive-content problem) -- see that
+ * file for detail.  It does not explain any of the four reasons
+ * above; don't cite it as though it does.
+ * No sensor is wired on this SoM batch (#226) either, so nothing here
+ * can be bench-verified regardless of the above.  Every body returns
  * ALP_ERR_NOSUPPORT after the standard vendor-handle gating, per the
  * Slice 6 storage.c precedents.
  *
@@ -61,9 +67,10 @@ alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *cam
 	/* PARTIAL: of the three 3A regions, only AWB is reachable
 	 * (ISP_WBM_ATTR_S.measRect via SetWbmAttr).  AE and AF are both
 	 * dead, but for DIFFERENT reasons -- keep them distinct:
-	 *   - AE: declared-but-undefined.  mpi_isp_expm.h:103 declares
-	 *     Get/SetExpmAttr and mpi_isp_calib.h:47 inlines a call to it,
-	 *     but the archive defines no Expm symbol at all.
+	 *   - AE: declared-but-undefined.  mpi_isp_expm.h declares
+	 *     GetExpmAttr (:89) and SetExpmAttr (:103); mpi_isp_calib.h:47
+	 *     inlines a call to the latter, but the archive defines no
+	 *     Expm symbol at all.
 	 *   - AF: absent outright.  No header under isp_wrapper/inc and no
 	 *     symbol in the archive -- not even a declaration.
 	 * Alif shipping Expm would fix AE only; AF would still be dead.
@@ -90,13 +97,13 @@ alp_status_t alp_alif_camera_isp_gain_table_load(alp_camera_t             *camer
 	/* ABSENT: ISP_WB_ATTR_S.manualAttr.wbGain (opType = manual) via
 	 * SetWbAttr is defined in the archive, but ISP_WB_GAIN_S is four
 	 * by-value scalars (rGain/grGain/gbGain/bGain, range [256,1023]) --
-	 * wrong cardinality (4 vs this call's 16..1024-entry table), wrong
-	 * scale (not Q4.12), and wrong ownership (by-value vs the
-	 * DMA-fetched by-reference LUT this contract promises).  A symbol
-	 * existing is not the same as a symbol that can satisfy the
-	 * contract.  Stays NOSUPPORT until Alif exposes an actual
-	 * by-reference gain-table MPI call; the #226 sensor-wiring gap is
-	 * orthogonal and doesn't change this. */
+	 * wrong cardinality (4 vs this call's 16..1024-entry table), a
+	 * range inconsistent with this contract's Q4.12 unity of 4096, and
+	 * wrong ownership (by-value vs the by-reference LUT this contract
+	 * promises).  A symbol existing is not the same as a symbol that
+	 * can satisfy the contract.  Stays NOSUPPORT until Alif exposes an
+	 * actual by-reference gain-table MPI call; the #226 sensor-wiring
+	 * gap is orthogonal and doesn't change this. */
 	return ALP_ERR_NOSUPPORT;
 }
 
