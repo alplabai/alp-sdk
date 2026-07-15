@@ -105,11 +105,21 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 {
+	/* Half-duplex contract (public header): tx must be non-NULL when
+     * len > 0.  alp_spi_transceive's NULL semantics (NULL tx = "send
+     * 0xFF") are a full-duplex convenience this half-duplex wrapper
+     * must NOT inherit -- forwarding a NULL straight through would
+     * silently turn an invalid write call into a real bus transfer. */
+	if (len > 0 && tx == NULL) return ALP_ERR_INVAL;
 	return alp_spi_transceive(bus, tx, NULL, len);
 }
 
 alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
 {
+	/* Half-duplex contract (public header): rx must be non-NULL when
+     * len > 0 -- same reasoning as alp_spi_write above (NULL rx =
+     * "discard MISO" is a transceive-only convenience). */
+	if (len > 0 && rx == NULL) return ALP_ERR_INVAL;
 	return alp_spi_transceive(bus, NULL, rx, len);
 }
 

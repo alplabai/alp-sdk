@@ -46,11 +46,42 @@ alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, v
  * (CONFIG_ALP_SDK_CC3501E_EVENT_IRQ) the P2_6 edge ISR schedules this call from
  * a workqueue instead of / alongside the timer poll.
  *
+ * @warning Payload lifetime: the @c payload pointer the callback receives
+ *          points into @p ctx's OWN internal decode buffer and is valid ONLY
+ *          for the duration of that one callback invocation -- copy anything
+ *          you need to keep before returning. This call is NOT reentrant on
+ *          the SAME @p ctx: calling it again on this ctx from inside the
+ *          callback returns @ref ALP_ERR_BUSY immediately rather than
+ *          racing/aliasing the buffer the outer call is still walking
+ *          (issue #740). Two DIFFERENT @p ctx instances never share storage
+ *          and may be polled concurrently with no coordination.
+ *
+ * @warning NOT a thread-safe mutex: @c evt_busy is a plain (non-atomic)
+ *          test-then-set @c bool, not a compare-and-swap or an
+ *          interrupt-masked critical section. It reliably rejects
+ *          same-call-stack reentrancy (the callback documented above, or an
+ *          ISR whose handler runs to completion before the interrupted
+ *          thread resumes -- the single-core-M55/single-core-A55 case this
+ *          driver targets). It does NOT provide mutual exclusion against a
+ *          genuinely preemptive second caller on a DIFFERENT thread/core
+ *          racing this same ctx: two callers can both observe
+ *          @c evt_busy==false before either sets it, and both proceed into
+ *          @c evt_buf. An application that polls the SAME @p ctx from more
+ *          than one thread must serialize those calls itself (e.g. a mutex
+ *          around cc3501e_poll_events()) -- this is exactly what the SDK's
+ *          own in-tree caller does: companion_drain_events() (src/zephyr/
+ *          console/alp_console_companion.c) wraps every cc3501e_poll_events()
+ *          call in @c k_mutex_lock(&companion_bus_lock, K_FOREVER), which is
+ *          what makes the CONFIG_ALP_SDK_CC3501E_EVENT_IRQ workqueue coexisting
+ *          with the timer-poll thread safe.
+ *
  * @param ctx  Initialised driver context.
  * @return ALP_OK once the queue was drained + dispatched (even with zero
- *         events); ALP_ERR_NOT_READY if @p ctx is not initialised; the mapped
- *         firmware/link error (e.g. ALP_ERR_IO if the bridge was briefly down)
- *         otherwise -- the caller simply retries on the next poll.
+ *         events); ALP_ERR_NOT_READY if @p ctx is not initialised;
+ *         @ref ALP_ERR_BUSY if this ctx is already draining (reentrant call);
+ *         the mapped firmware/link error (e.g. ALP_ERR_IO if the bridge was
+ *         briefly down) otherwise -- the caller simply retries on the next
+ *         poll.
  */
 alp_status_t cc3501e_poll_events(cc3501e_t *ctx);
 

@@ -48,8 +48,49 @@ struct cc3501e {
 	                                *   instead of a fixed settle gap.  NULL = legacy fixed gap. */
 	cc3501e_event_cb_t event_cb;
 	void              *event_user;
-	uint8_t            rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
-	uint8_t            tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
+	/* Framing scratch for cc3501e_request() (#740 scope note): these were
+	 * ALREADY per-instance fields before this change (never the
+	 * function-local `static` pattern the scan/event buffers below used
+	 * to have) and their lifetime was already bounded to a single
+	 * cc3501e_request() call -- filled, consumed by the caller-supplied
+	 * rx_buf memcpy, and never read back across calls -- so they carry
+	 * none of the #740 aliasing risk and needed no change here. */
+	uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
+	uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
+	/* Per-context decode scratch for the scan/event helpers (issue #740).
+	 * Each of these used to be a function-local `static` buffer in
+	 * cc3501e_wifi.c / cc3501e_ble.c / cc3501e_events.c -- process-global
+	 * storage shared by EVERY cc3501e_t instance, so two contexts (or a
+	 * caller re-entering the same context, e.g. from inside the event
+	 * callback) could alias and corrupt each other's in-flight decode.
+	 * Moving the storage in here makes it per-instance, matching
+	 * rx_scratch/tx_scratch above; the *_busy flags make same-instance
+	 * reentrancy an explicit ALP_ERR_BUSY instead of silent aliasing (see
+	 * cc3501e_wifi_scan / cc3501e_ble_scan / cc3501e_poll_events).
+	 *
+	 * Three SEPARATE ALP_CC3501E_MAX_PAYLOAD (512 B) buffers -- not one
+	 * shared "radio scratch" reused across all three helpers -- because
+	 * cc3501e_poll_events() is meant to be polled from a low-rate app
+	 * thread (or the CONFIG_ALP_SDK_CC3501E_EVENT_IRQ workqueue)
+	 * regardless of whatever else the app is doing with the SAME ctx, so
+	 * an app that calls e.g. cc3501e_wifi_scan() and polls events from a
+	 * different call site must not have one invalidate the other's
+	 * decode; and collapsing wifi_scan_buf/ble_scan_buf into one shared
+	 * buffer would silently reintroduce the exact same-ctx aliasing this
+	 * struct exists to remove the moment an app pipelines a Wi-Fi scan
+	 * and a BLE scan close together.  This grows sizeof(cc3501e_t) from
+	 * 1088 to 2632 bytes (measured, GCC 13.3 host build) -- accepted
+	 * because the driver context is a small, fixed number of
+	 * long-lived, typically-static allocations per module (one CC3501E
+	 * per E1M-AEN board), not a per-connection/per-packet object; halving
+	 * the number of scratch buffers would only save ~1.5 KB while giving
+	 * up the correctness property #740 exists for. */
+	uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD];
+	uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD];
+	uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD];
+	bool    wifi_scan_busy;
+	bool    ble_scan_busy;
+	bool    evt_busy;
 };
 
 /**

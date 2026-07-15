@@ -13,6 +13,8 @@
 
 #include "alp/chips/da9292.h"
 
+#include "da9292_internal.h"
+
 /* Register map (datasheet Table 12, page 34). */
 #define DA9292_REG_PMC_STATUS_00   0x00u
 #define DA9292_REG_PMC_STATUS_01   0x01u
@@ -105,6 +107,13 @@ static alp_status_t reg_write(da9292_t *ctx, uint8_t reg, uint8_t val)
 {
 	uint8_t buf[2] = { reg, val };
 	return alp_i2c_write(ctx->bus, ctx->addr, buf, sizeof(buf));
+}
+
+bool da9292_poll_budget_step(uint32_t *remaining_us, uint32_t poll_us)
+{
+	if (*remaining_us < poll_us) return false;
+	*remaining_us -= poll_us;
+	return true;
 }
 
 alp_status_t da9292_init(da9292_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
@@ -260,8 +269,11 @@ alp_status_t da9292_set_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t 
 	if (ch != DA9292_CH1 && ch != DA9292_CH2) return ALP_ERR_INVAL;
 	if (mv < DA9292_VSET_LO_MIN_MV || mv > DA9292_VSET_LO_MAX_MV) return ALP_ERR_INVAL;
 
-	/* Round to 5 mV grid. */
-	uint16_t mv_q = mv - ((mv - DA9292_VSET_LO_MIN_MV) % DA9292_VSET_LO_STEP_MV);
+	/* Round to 5 mV grid.  Pre-existing -Wconversion narrowing (mv and
+     * the DA9292_VSET_LO_* constants promote to `unsigned int` before
+     * the subtraction) -- explicit cast back to uint16_t; the bounds
+     * check above already guarantees the result fits. */
+	uint16_t mv_q = (uint16_t)(mv - ((mv - DA9292_VSET_LO_MIN_MV) % DA9292_VSET_LO_STEP_MV));
 	uint8_t  byte = (uint8_t)(DA9292_VSET_LO_BASE_BYTE +
 	                          (mv_q - DA9292_VSET_LO_MIN_MV) / DA9292_VSET_LO_STEP_MV);
 	return reg_write(ctx, vout_reg_for(ch), byte);
@@ -346,9 +358,20 @@ alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us)
      * on caller-side delay to avoid pulling in a clock dependency
      * inside the chip driver -- caller can refine if they need
      * tighter polling granularity. */
-	const uint32_t poll_us = 100u;
-	uint32_t       waited  = 0;
-	while (waited <= timeout_us) {
+	/* Express the poll budget as a REMAINING count, decremented each
+     * pass, rather than an incrementing "waited" counter compared
+     * against timeout_us.  An incrementing counter wraps (or, at
+     * timeout_us == UINT32_MAX, can never exceed a uint32_t's own
+     * ceiling at all) and the loop never terminates; counting the
+     * budget DOWN by a fixed poll_us each pass is bounded by
+     * construction -- it strictly decreases every iteration and
+     * exits via the < poll_us guard before it could underflow,
+     * regardless of how large timeout_us is.  The decision itself is
+     * factored into da9292_poll_budget_step() (da9292_internal.h) so
+     * it is directly unit-testable -- see #757 in test_power.c. */
+	const uint32_t poll_us      = 100u;
+	uint32_t       remaining_us = timeout_us;
+	for (;;) {
 		da9292_status_t st = { 0 };
 		s                  = da9292_get_status(ctx, &st);
 		if (s != ALP_OK) return s;
@@ -357,9 +380,8 @@ alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us)
          * an OS dependency; the loop simply re-reads STATUS until
          * either timeout or PG.  On a real RTOS this should be
          * replaced by an interrupt-driven wait on the INT_N line. */
-		waited += poll_us;
+		if (!da9292_poll_budget_step(&remaining_us, poll_us)) return ALP_ERR_TIMEOUT;
 	}
-	return ALP_ERR_TIMEOUT;
 }
 
 void da9292_deinit(da9292_t *ctx)
