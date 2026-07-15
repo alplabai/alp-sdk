@@ -115,8 +115,9 @@ report.
 
 ## A note for Claude Code users
 
-This repo also carries `CLAUDE.md`, which adds Claude-Code-specific tooling: a
-set of `.claude/skills/` workflow procedures and a `code-review-graph` MCP
-server for structural code queries. Those are Claude-Code conveniences — every
-fact an agent needs is reachable from this file and the `docs/` it points to.
-Other agents should use **this** file; the two are complementary, not redundant.
+Claude Code checkouts also carry a local `CLAUDE.md`, which adds
+Claude-Code-specific tooling: the `alp-lab` plugin's workflow-procedure skills
+(invoked as `alp-lab:<name>`) and a `code-review-graph` MCP server for
+structural code queries. Those are Claude-Code conveniences — every fact an
+agent needs is reachable from this file and the `docs/` it points to. Other
+agents should use **this** file; the two are complementary, not redundant.
