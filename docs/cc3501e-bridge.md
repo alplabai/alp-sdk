@@ -99,6 +99,26 @@ The hardware CS edge re-frames every transaction, so the link cannot lose
 byte-alignment across a busy radio op — it survives long-running radio
 work (see "Bench-validated" below) with no settle-gap dependence.
 
+#### Link speed
+
+The link requests **14 MHz** and lands at **~14.8 MHz** actual SCLK — the
+BAUDR divider quantises it — which is at the **CC35 slave ceiling of
+~15 MHz**.  Silicon-validated cold + warm on the E1M-AEN801 EVK,
+concurrently with Wi-Fi/BLE traffic.
+
+Getting there required tuning the master, not the slave: `spi_dw` leaves
+`RX_SAMPLE_DLY = 0`, and at 8 MHz and above the MISO round-trip over the
+on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY = 6` shifts the capture
+point past the round-trip, and the link then samples clean all the way to
+the slave ceiling — roughly 15× the throughput of the original 1 MHz
+bring-up setting.  The value is silicon-tuned, not derived; see
+`CC3501E_BRIDGE_SPI_FREQ_HZ` and the `RX_SAMPLE_DLY` note in each
+example's `cc3501e_bridge.h` (e.g.
+[`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h`](../examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h)).
+
+Payload reliability additionally depends on the inter-phase settle
+(`CC3501E_PHASE_SETTLE_US`) applied in `cc3501e_request`.
+
 A host-IRQ line remains a useful future addition for async events
 (`EVT_WIFI_*`, `EVT_BLE_*`, `EVT_GPIO_INTERRUPT`) with the 5–10 ms latency
 budgets above: the Alif is SPI master, so the CC3501E cannot initiate, and
@@ -474,15 +494,10 @@ server is a separate repo.
   today. Recommendation: stay off the wire protocol unless a future
   E1M-AEN revision routes one of them; reserve a low-priority opcode
   range only if/when needed.
-- **Host SPI link speed: 8 MHz fixed, or a high-speed tier?** The link
-  runs at a fixed 8 MHz today (see the `.freq_hz` example in
-  [`include/alp/chips/cc3501e.h`](../include/alp/chips/cc3501e.h)) —
-  ample for the per-frame opcodes, tight for raw socket throughput. A
-  ~26 MHz tier would roughly double bus throughput but needs
-  signal-integrity validation, and the IO-ring ceiling for VIO1/VIO2 is
-  still unconfirmed pending the SWRZ167 errata review above. Move to the
-  high-speed tier only if socket throughput becomes a *measured*
-  bottleneck; deferred to v1.x.
+- **Link speed headroom above ~15 MHz** — the link already runs at the
+  CC35 slave ceiling (see "Link speed" above), so there is no host-side
+  tier left to unlock. Going faster needs a different slave-side limit,
+  not host tuning.
 
 ## See also
 
