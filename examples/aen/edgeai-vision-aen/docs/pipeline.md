@@ -47,10 +47,12 @@ on the same SoC.
   (`vsi,isp-pico`)**, so the v0.2 path can eventually offload debayer /
   format-convert / 3A to it — but the vendored `isp_wrapper` HAL pack
   landing was never the blocker: debayer/format-convert hit a driver-link
-  version mismatch and 3A/gain hit gaps in the vendored archive (the
-  `<alp/ext/alif/camera.h>` vendor surface is a NOSUPPORT stub today — see
+  version mismatch, and AE / AF and per-channel gain hit gaps in the
+  vendored archive (AWB is a deliberate hold, not a gap) — the
+  `<alp/ext/alif/camera.h>` vendor surface is a NOSUPPORT stub today —
+  see the *Silicon scope — which E-part has what* section of
   [`docs/aen-accelerator-backends-design.md`](../../../../docs/aen-accelerator-backends-design.md)
-  §2 for the per-reason detail).
+  for the per-reason detail).
   Until then the SDK configures the ARX3A0 to emit RGB888 directly via
   the `<alp/camera.h>` config and resizes on the M55.
 - API: `alp_camera_open` / `alp_camera_capture` / `alp_camera_release`.

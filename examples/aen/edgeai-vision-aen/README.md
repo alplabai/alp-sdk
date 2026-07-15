@@ -24,11 +24,13 @@ RPi CSI │  (e.g. ARX3A0    │ →  │  (vsi,       │ →  │  inference  
 > (`vsi,isp-pico`)** (E4 / E6 / E8 only) — so the v0.2 camera path can
 > eventually offload debayer / format-convert / 3A to it, though the
 > vendored `isp_wrapper` HAL pack landing was never the blocker:
-> debayer/format-convert hit a driver-link version mismatch and 3A/gain
-> hit gaps in the vendored archive (the `<alp/ext/alif/camera.h>` vendor
-> surface is a NOSUPPORT stub today — see
+> debayer/format-convert hit a driver-link version mismatch, and AE /
+> AF and per-channel gain hit gaps in the vendored archive (AWB is a
+> deliberate hold, not a gap) — the `<alp/ext/alif/camera.h>` vendor
+> surface is a NOSUPPORT stub today — see the *Silicon scope — which
+> E-part has what* section of
 > [`docs/aen-accelerator-backends-design.md`](../../../docs/aen-accelerator-backends-design.md)
-> §2 for the per-reason detail).
+> for the per-reason detail).
 > Until then the example configures the ARX3A0 to emit the model's pixel
 > format (RGB888) directly via `<alp/camera.h>` and does crop / resize /
 > normalisation on the M55-HP with CMSIS-DSP.  See

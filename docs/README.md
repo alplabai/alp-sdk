@@ -53,7 +53,7 @@ into the topic-specific docs.
   (GPU2D / VeriSilicon ISP Pico (vsi,isp-pico) / SecAES / aiPM), each
   silicon-gated; GPU2D and SecAES are also HAL-pack gated, ISP Pico's
   pack has already landed and is blocked by other reasons (see that
-  doc's §2).
+  doc's *Silicon scope — which E-part has what* section).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
   index (17 ADRs).

@@ -20,11 +20,14 @@ Surfaces 1–3 ship a header + a stub today; each stub returns
 validation.  For GPU2D and SecAES (§1, §3) the real body is silicon +
 Alif-HAL-pack gated — no SoM in scope ships the matching D/AVE 2D or
 SecAES pack yet.  ISP (§2) is different: its HAL pack (`isp_wrapper`)
-is already vendored, but the real body is blocked by four independent
-reasons plus a deliberate AWB hold — see §2 below.  This document
-captures the integration design (DMA / coherency / dispatch / keying)
-the real backends must honour when they land — it is ADR-adjacent
-reference, not an implementation.
+is already vendored, but the real body is blocked by five independent
+reasons — a Zephyr driver-layer version mismatch (debayer /
+format-convert) plus four vendor-ext archive gaps (AE / AF / LSC /
+gain) — plus a deliberate AWB hold; see the *Silicon scope — which
+E-part has what* section below.  This document captures the
+integration design (DMA / coherency / dispatch / keying) the real
+backends must honour when they land — it is ADR-adjacent reference,
+not an implementation.
 
 The aiPM power surface (§4) is the exception: it already has a working
 generic backend, so the design question there is *what the vendor
@@ -352,8 +355,9 @@ here is what the backend must implement, not a stub.
   landing).  The v0.5 public API is submit-and-wait per op; a batched
   display-list flush would need a new public entry point.  Deferred
   until a real consumer (e.g. an LVGL/D/AVE 2D integration) needs it.
-- **ISP Pico vs portable ISP overlap** (gated on the §2 blockers
-  clearing, not on the HAL pack — `isp_wrapper` is already vendored).
+- **ISP Pico vs portable ISP overlap** (gated on the blockers in the
+  *Silicon scope — which E-part has what* section clearing, not on
+  the HAL pack — `isp_wrapper` is already vendored).
   How much of the portable `alp_camera_configure_isp` the ISP Pico
   backend serves vs. the vendor knobs is settled once AE / AF / LSC /
   gain clear; both surfaces are `[ABI-EXPERIMENTAL]` precisely so that
@@ -369,7 +373,8 @@ here is what the backend must implement, not a stub.
 
 - [`docs/test-plan.md`](test-plan.md) — v0.5 verification rows for
   all three surfaces (all `⏳ untested`; GPU2D + SecAES HAL-pack-gated,
-  ISP blocked for the different reasons in §2 above).
+  ISP blocked for the different reasons in the *Silicon scope — which
+  E-part has what* section above).
 - [ADR 0008](adr/0008-gpu2d-portable-shim.md) — why GPU2D ships as a
   portable shim even on single-silicon.
 - [`include/alp/gpu2d.h`](../include/alp/gpu2d.h) /
