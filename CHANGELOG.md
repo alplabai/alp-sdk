@@ -7,6 +7,27 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Changed — CC3501E integration plan retired to a stub (#464)
+
+- `docs/cc3501e-integration-plan.md` was the May-2026 pre-implementation
+  plan for the CC3501E bridge; the bridge has since shipped (2026-07-05,
+  silicon-proven) and in places shipped differently from the plan (e.g.
+  `POWER_POLICY` landed at opcode `0x62`, not the proposed `0x04`; the
+  handshake became hardware SS0 chip-select + per-phase READY, not a
+  polled `busy_pin` GPIO). The doc is now a short "superseded" stub
+  pointing at `docs/cc3501e-bridge.md`. The still-open items (errata
+  SWRZ167; CAN/I2S/PDM/SDMMC not evaluated) moved into a new "Open
+  questions" section in `docs/cc3501e-bridge.md`, alongside a new
+  "Peripherals not proxied today" section (DMA/UART/ADC/Timers/I2C).
+- `scripts/flash_backends/cc3501e_usb_bootloader.py` and
+  `docs/v0.6-tbd-and-assumptions.md` cited the plan's "§5.7" for the
+  USB-bootloader `flash_args` contract — already wrong (§5.7 was the
+  power-policy opcode section, not USB bootloader). Repointed to the
+  module's own docstring / `docs/bring-up-aen.md`.
+- `scripts/check_doc_drift.py` — removed the now-stale
+  `cc3501e-integration-plan.md` dead-symbol-scan exemption; the stub is
+  scanned like any other doc.
+
 ### Fixed — pure-C review of `dev`: overflow, contract and rollback defects (#732 #735 #736 #737 #738 #739 #740 #742 #743 #744 #745 #746 #747 #748 #749 #750 #753 #757 #759 #760)
 
 - **Checked arithmetic.** New private `src/common/alp_checked_arith.h`

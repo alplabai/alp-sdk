@@ -368,6 +368,32 @@ that ISOLATE all the downstream buses:
 
 The Alif's bring-up code then sequences enables once it's ready.
 
+## Peripherals not proxied today
+
+Beyond the wire-protocol surfaces above (Wi-Fi, BLE, GPIO proxy, OTA), the
+CC3501E exposes several on-chip peripherals that are **not** reachable
+through `<alp/protocol/cc3501e.h>` and have no host-visible surface. None
+of these has an allocated opcode group; if a future board variant needs
+one, add it under the reserved `0x80..0xFF` range.
+
+- **DMA** — 14 independent host-DMA channels (2 promotable to
+  high-priority, remaining round-robin), job size up to 16 KB, 8/16/32-bit
+  words. 100% firmware-internal: the host driver never mentions DMA
+  channels and the wire protocol has no DMA opcode.
+- **UART** — 3 on-chip UARTs (up to 4 Mbps, LIN support). None is exposed
+  as a proxied peripheral. `M2E_UART_WAKE` (see "Firmware-side GPIO
+  behaviour contract" above) is a GPIO wake signal, not a UART
+  pass-through.
+- **ADC** — an 8-channel, 12-bit SAR ADC (4 internal + 8 external
+  channels). Not proxied: no E1M-AEN board variant routes an analog
+  signal to a CC3501E ADC pin today (`from-cc3501e.tsv` routes those
+  GPIOs to the SPI1 secondary mux instead).
+- **Timers / PWM** — 8 GPT/PWM channels. Not routed to any external pad
+  on E1M-AEN; the Alif has its own timer/PWM surface via `<alp/pwm.h>`.
+- **I2C** — 2 on-chip I2C controllers. Not proxied: the E1M-AEN module's
+  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112, EEPROM N24S128; see
+  `docs/soms/aen.md`) hang off the Alif's own LPI2C, not the CC3501E's.
+
 ## OTA
 
 The bridge carries the CC3501E's own firmware update: the Alif host
@@ -437,6 +463,26 @@ server is a separate repo.
 | OTA over the bridge (§ "OTA" above)              | `firmware/cc3501e/` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
 | Full feature parity with `<alp/iot.h>` /
   `<alp/ble.h>`                                    | Remaining v1.0 work: HOST_IRQ async-event delivery and full runtime GATT/event parity |
+
+## Open questions
+
+- **CC35xx errata SWRZ167** — not yet folded into the firmware or this
+  doc. When it is reviewed, update the firmware-side checklist and this
+  doc with any host-visible errata items.
+- **CAN, I2S, PDM, SDMMC** — the CC3501E has all four on-die per SWRS343,
+  but none is routed to an E1M pad or proxied through the wire protocol
+  today. Recommendation: stay off the wire protocol unless a future
+  E1M-AEN revision routes one of them; reserve a low-priority opcode
+  range only if/when needed.
+- **Host SPI link speed: 8 MHz fixed, or a high-speed tier?** The link
+  runs at a fixed 8 MHz today (see the `.freq_hz` example in
+  [`include/alp/chips/cc3501e.h`](../include/alp/chips/cc3501e.h)) —
+  ample for the per-frame opcodes, tight for raw socket throughput. A
+  ~26 MHz tier would roughly double bus throughput but needs
+  signal-integrity validation, and the IO-ring ceiling for VIO1/VIO2 is
+  still unconfirmed pending the SWRZ167 errata review above. Move to the
+  high-speed tier only if socket throughput becomes a *measured*
+  bottleneck; deferred to v1.x.
 
 ## See also
 
