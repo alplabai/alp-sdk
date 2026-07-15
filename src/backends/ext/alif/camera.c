@@ -22,9 +22,11 @@
  *     3a_window_set entry below).
  * SEPARATELY, at the Zephyr driver layer: zephyr/drivers/video/
  * isp_pico.c carries its own HAL_ALIF VERSION MISMATCH note (a
- * driver-link problem, not an archive-content problem) -- see that
- * file for detail.  It does not explain any of the five items
- * above; don't cite it as though it does.
+ * driver-COMPILE problem -- its header pulls in a missing
+ * isp-vsi.h, so the TU never reaches the linker -- not an
+ * archive-content problem) -- see that file for detail.  It does
+ * not explain any of the five items above; don't cite it as
+ * though it does.
  * No sensor is wired on this SoM batch (#226) either, so nothing here
  * can be bench-verified regardless of the above.  Every body returns
  * ALP_ERR_NOSUPPORT after the standard vendor-handle gating, per the

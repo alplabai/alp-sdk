@@ -121,8 +121,8 @@ config ALP_SDK_CAMERA_ALIF_ISP
 	  links the hal_alif libisp Vivante blob.  See the FLAGGED hal_alif
 	  version mismatch under VIDEO_ISP_VSI: the vendored 2026 isp_pico.c
 	  needs a newer hal_alif wrapper than the locally vendored 2025 one,
-	  so the ISP driver compiles but does NOT link against the local
-	  wrapper.  Bump the hal_alif wrapper before enabling.
+	  so the ISP driver FAILS TO COMPILE against the local wrapper -- it
+	  never reaches the linker.  Bump the hal_alif wrapper before enabling.
 
 config ALP_SDK_DISPLAY_ZEPHYR_DRV
 	bool "Compile the real Zephyr display driver-class backend"

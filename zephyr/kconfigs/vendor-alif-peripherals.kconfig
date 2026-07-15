@@ -694,14 +694,16 @@ config VIDEO_ARX3A0
 # blob), so it selects USE_ALIF_ISP_LIB.
 #
 # HAL_ALIF VERSION MISMATCH (FLAGGED): the vendored isp_pico.c is the
-# 2026 fork driver; the locally vendored hal_alif isp_wrapper is 2025 and does
-# NOT export isp_vsi_set_param / isp_vsi_get_param, ships a 2-arg
-# isp_vsi_bottom_half() vs this driver's 3-arg call, and ships no
-# <zephyr/drivers/video/isp-vsi.h> (only isp_conf.h / isp_param_conf.h).  So
-# this driver COMPILES against v4.4 but WILL NOT LINK against the local hal_alif
-# until the wrapper is bumped.  Hence default n -- the default build stays green
-# regardless; turning it on against the 2025 wrapper is a known link failure.
-# Do NOT fabricate the missing hal_alif API.  vendor-ext, BENCH-UNVERIFIED.
+# 2026 fork driver; it ships no <zephyr/drivers/video/isp-vsi.h> (the locally
+# vendored hal_alif isp_wrapper is 2025 and ships isp_conf.h / isp_param_conf.h
+# instead), so this driver FAILS TO COMPILE against the local hal_alif -- it
+# never reaches the linker.  Behind that: the 2025 wrapper also does NOT
+# export isp_vsi_set_param / isp_vsi_get_param and ships a 2-arg
+# isp_vsi_bottom_half() vs this driver's 3-arg call, a further incompatibility
+# that only matters once isp-vsi.h exists.  Hence default n -- the default
+# build stays green regardless; turning it on against the 2025 wrapper is a
+# known compile failure.  Do NOT fabricate the missing hal_alif API.
+# vendor-ext, BENCH-UNVERIFIED.
 # ---------------------------------------------------------------------------
 config VIDEO_ISP_VSI
 	bool "Alif Ensemble ISP-Pico (Verisilicon, ADR 0017 Tier-2 INTERIM, OPT-IN)"
@@ -717,9 +719,10 @@ config VIDEO_ISP_VSI
 
 	  OPT-IN, default n.  FLAGGED hal_alif version mismatch: the vendored 2026
 	  isp_pico.c needs a newer hal_alif libisp wrapper than the locally vendored
-	  2025 one (missing isp_vsi_set_param / isp_vsi_get_param / isp-vsi.h; 2-arg
-	  vs 3-arg isp_vsi_bottom_half), so it compiles but does NOT link against the
-	  local wrapper.  Bump the hal_alif wrapper before enabling.
+	  2025 one (missing isp-vsi.h; also missing isp_vsi_set_param /
+	  isp_vsi_get_param; 2-arg vs 3-arg isp_vsi_bottom_half), so it FAILS TO
+	  COMPILE against the local wrapper -- it never reaches the linker.  Bump
+	  the hal_alif wrapper before enabling.
 	  Driver: zephyr/drivers/video/isp_pico.c.
 
 config VIDEO_ISP_VSI_INIT_PRIORITY

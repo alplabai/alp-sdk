@@ -77,10 +77,12 @@ E1M-AEN801`): the in-repo ISP-Pico backend is scoped to E8 today, so
 the example may eventually offload debayer / format-convert / 3A to
 it — but none of the three works yet.  Debayer and format-convert are
 blocked at the Zephyr driver layer: `zephyr/drivers/video/isp_pico.c`
-(the same `vsi,isp-pico` node this backend targets) links against a
-newer `hal_alif` libisp wrapper than the one vendored locally, so it
-compiles but will not link (see that file's HAL_ALIF VERSION MISMATCH
-note) — even though the MPI calls debayer/format-convert need,
+(the same `vsi,isp-pico` node this backend targets) was authored
+against a newer `hal_alif` libisp wrapper than the one vendored
+locally, so it fails to COMPILE (its header pulls in
+`<zephyr/drivers/video/isp-vsi.h>`, which the local wrapper does not
+ship — see that file's HAL_ALIF VERSION MISMATCH note) — even though
+the MPI calls debayer/format-convert need,
 `VSI_MPI_ISP_SetDmscAttr` and `VSI_MPI_ISP_SetScaleAttr`, are defined
 in the vendored archive.  3A (AE / AWB / AF) fails for two further,
 independent reasons of its own: AE is declared in the vendored

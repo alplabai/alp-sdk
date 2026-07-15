@@ -46,7 +46,7 @@ on the same SoC.
   for YOLOv8-nano.  E8 ships the on-die **VeriSilicon ISP Pico
   (`vsi,isp-pico`)**, so the v0.2 path can eventually offload debayer /
   format-convert / 3A to it — but the vendored `isp_wrapper` HAL pack
-  landing was never the blocker: debayer/format-convert hit a driver-link
+  landing was never the blocker: debayer/format-convert hit a driver-compile
   version mismatch, and AE / AF / LSC and per-channel gain hit gaps in
   the vendored archive (AWB is a deliberate hold, not a gap) — the
   `<alp/ext/alif/camera.h>` vendor surface is a NOSUPPORT stub today —
