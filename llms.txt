@@ -13,7 +13,11 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 
 ## Board configuration (board.yaml + the --emit contract)
 
-- [docs/board-config.md](docs/board-config.md): authoritative `board.yaml` schema reference and every loader emit mode.
+- [docs/board-config.md](docs/board-config.md): `board.yaml` config landing page (quick start, single-source-of-truth model, versioning).
+- [docs/board-config-schema.md](docs/board-config-schema.md): authoritative `board.yaml` field-by-field schema reference.
+- [docs/board-config-emit.md](docs/board-config-emit.md): every loader emit mode (`zephyr-conf`, `cmake-args`, `yocto-conf`, `dts-overlay`, `hw-info-h`, `west-libraries`).
+- [docs/board-config-features.md](docs/board-config-features.md): build-system integration knobs -- `hw_info.eeprom`, per-slice memory/power, `diagnostics.modules`, `boot:`, `ota:`, `storage:`, `security.psa:`.
+- [docs/board-config-hardware.md](docs/board-config-hardware.md): hardware revision tracking (build-time + runtime checks) and modular SoM optional chip populations.
 - [metadata/schemas/board.schema.json](metadata/schemas/board.schema.json): the machine-readable `board.yaml` JSON Schema.
 - [metadata/templates/board.yaml](metadata/templates/board.yaml): copy-friendly commented `board.yaml` template.
 - [docs/adr/0014-build-plan-emit-cli-contract.md](docs/adr/0014-build-plan-emit-cli-contract.md): ADR 0014 — the `--emit` CLI as the tool-facing build-plan contract.

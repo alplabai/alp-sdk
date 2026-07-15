@@ -44,7 +44,18 @@ into the topic-specific docs.
 - [architecture.md](architecture.md) — SDK overview, repository
   layout, per-core slice fan-out, sparse capabilities flow,
   on_module: auto-enable, generators inventory.
-- [board-config.md](board-config.md) — `board.yaml` v2 reference.
+- [board-config.md](board-config.md) — `board.yaml` v2 reference
+  (landing page: quick start, single-source-of-truth model, file
+  location, cross-field validation, versioning).
+- [board-config-schema.md](board-config-schema.md) — `board.yaml`
+  field-by-field schema reference.
+- [board-config-emit.md](board-config-emit.md) — how the loader
+  compiles `board.yaml` into per-backend build artefacts.
+- [board-config-hardware.md](board-config-hardware.md) — hardware
+  revision tracking + modular SoM chip populations.
+- [board-config-features.md](board-config-features.md) —
+  `board.yaml` build-system integration knobs (`boot:`, `ota:`,
+  `storage:`, `security.psa:`, ...).
 - [e1m-pinout.md](e1m-pinout.md) — E1M form-factor pinout reference.
 - [board-id.md](board-id.md) — boot-time board identification:
   SoM EEPROM manifest + BOARD_ID ADC cross-check.

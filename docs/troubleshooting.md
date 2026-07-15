@@ -42,7 +42,7 @@ third entry).  Common slip-ups:
   `metadata/boards/<name>.yaml` OR carry an inline
   `board.populated:` block.
 
-Full schema reference: [`docs/board-config.md`](board-config.md).
+Full schema reference: [`docs/board-config-schema.md`](board-config-schema.md).
 
 ### `alp_project: SDK <V> is older than SoM hw_rev '<R>' minimum <M>`
 
