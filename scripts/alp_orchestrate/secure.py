@@ -18,8 +18,9 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     """Emit the sysbuild.conf overlay for the project's `boot:` block.
 
     Returns a SB_CONFIG_*-style snippet the build wires into
-    `build/alp_sysbuild.conf` (consumed via `west build --sysbuild
-    --sysbuild-config`).  Returns an empty string when the project
+    `build/alp_sysbuild.conf` (handed to the sysbuild image via
+    `west build --sysbuild -- -DSB_CONF_FILE=<abs>`; `west build` has
+    no `--sysbuild-config` flag).  Returns an empty string when the project
     does not declare a `boot:` block (the SDK's stock per-family
     defaults at zephyr/sysbuild/<family>/sysbuild.conf apply).
     """
@@ -82,8 +83,9 @@ def emit_tfm_sysbuild_conf(project: BoardProject) -> str:
     """Emit the TF-M sysbuild child-image overlay for `security.psa:`.
 
     Returns a `SB_CONFIG_*` + `CONFIG_PSA_CRYPTO_*` snippet the build
-    wires into `build/sysbuild/tfm/tfm.conf` (consumed via
-    `west build --sysbuild --sysbuild-config`).  Returns an empty
+    wires into `build/sysbuild/tfm/tfm.conf` (picked up automatically by
+    sysbuild's per-image config convention from its `sysbuild/tfm/`
+    path -- no command-line flag needed).  Returns an empty
     string when the project omits `security.psa:` or sets
     `tfm: false` -- PSA Crypto then runs entirely non-secure
     (mbedTLS-only) and no child image is built.

@@ -533,21 +533,38 @@ def _slice_command(
         # command runs with cwd=build_dir (build/<core>-<os>), so the
         # top-level overlay is one directory up.  Pass --sysbuild whenever
         # a sysbuild child image is configured (a `boot:` or `security.psa:`
-        # block), and --sysbuild-config only when the top-level overlay is
-        # non-empty (the TF-M overlay is picked up by sysbuild convention
-        # from its sysbuild/tfm/ path).  Absent both, the stock per-family
-        # sysbuild defaults apply and no flag is added.
+        # block), and hand the top-level overlay to the sysbuild image via
+        # SB_CONF_FILE when it is non-empty (the TF-M overlay is picked up by
+        # sysbuild convention from its sysbuild/tfm/ path).  Absent both, the
+        # stock per-family sysbuild defaults apply and no flag is added.
         if emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project):
             cmd.append("--sysbuild")
-            if emit_sysbuild_conf(project):
-                cmd += ["--sysbuild-config", "../alp_sysbuild.conf"]
-        # Zephyr normally derives Python3_EXECUTABLE from the interpreter
-        # that launched west (WEST_PYTHON). A pre-existing CMake cache can
-        # already define Python3_EXECUTABLE, however, which prevents that
-        # hand-off and can select a host Python without the west package.
-        # The orchestrator itself runs under the intended workspace Python,
-        # so pin it as an explicit CMake cache override (issue #787).
-        cmd += ["--", f"-DPython3_EXECUTABLE={sys.executable}"]
+        # Everything past west's `--` separator is forwarded to the
+        # (sysbuild) image's CMake.  Collect the CMake cache overrides here
+        # and emit exactly one `--` group.
+        #
+        # Python3_EXECUTABLE: Zephyr normally derives it from the interpreter
+        # that launched west (WEST_PYTHON), but a pre-existing CMake cache can
+        # already define it and select a host Python without the west package.
+        # The orchestrator runs under the intended workspace Python, so pin it
+        # as an explicit cache override (issue #787).
+        cmake_defines = [f"-DPython3_EXECUTABLE={sys.executable}"]
+        if emit_sysbuild_conf(project):
+            # `west build` has NO `--sysbuild-config` flag; it forwards the
+            # unknown arg to CMake, which fails ("Unknown argument
+            # --sysbuild-config").  The generated top-level overlay reaches the
+            # sysbuild image via SB_CONF_FILE instead -- honoured by every west
+            # (1.5.0 included).  Anchor it on an ABSOLUTE path: a relative
+            # SB_CONF_FILE resolves against the sysbuild app source dir, not
+            # the build cwd.  Use `base_dir` (the board.yaml directory) so the
+            # path is absolute yet independent of the emitting process CWD --
+            # the same basis `appDir` uses (issue #596); joining an
+            # already-absolute build_dir just yields that build_dir.
+            overlay = (base_dir / Path(slice_.build_dir).parent
+                       / "alp_sysbuild.conf"
+                       if slice_.build_dir else Path("../alp_sysbuild.conf"))
+            cmake_defines.append(f"-DSB_CONF_FILE={overlay.as_posix()}")
+        cmd += ["--", *cmake_defines]
         return cmd
     if slice_.os == "yocto":
         # `image:` always names a real recipe (e.g. `alp-image-edge`) --

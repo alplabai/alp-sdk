@@ -290,11 +290,13 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
 
 def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     """ADR 0014 Phase-3: a `boot:` block (-> build/alp_sysbuild.conf) makes
-    the Zephyr slice command pass `--sysbuild --sysbuild-config
-    ../alp_sysbuild.conf` (the overlay sits one dir up from the slice's
-    cwd=build/<core>-<os>); a project without one adds no sysbuild flag.
-    Both shapes pin CMake to the orchestrator's Python after west's `--`
-    separator so a stale cache cannot select a west-less interpreter."""
+    the Zephyr slice command pass `--sysbuild` and hand the top-level overlay
+    to the sysbuild image as an ABSOLUTE `-DSB_CONF_FILE=` CMake define after
+    west's `--` separator -- `west build` has no `--sysbuild-config` flag, and
+    a relative SB_CONF_FILE would anchor on the sysbuild app source dir, not
+    the build cwd (issue #805).  A project without a `boot:` block adds no
+    sysbuild flag.  Both shapes also pin CMake to the orchestrator's Python
+    after `--` so a stale cache cannot select a west-less interpreter."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 
@@ -307,11 +309,20 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     args = z["command"]["args"]
     assert args[:2] == ["build", "-b"]
     assert "--sysbuild" in args
-    assert args[args.index("--sysbuild-config") + 1] == "../alp_sysbuild.conf"
-    assert args[-2:] == [
-        "--", f"-DPython3_EXECUTABLE={sys.executable}",
-    ]
-    assert args.index("--sysbuild-config") < args.index("--")
+    # `--sysbuild-config` is NOT a west flag -- it must never be emitted.
+    assert "--sysbuild-config" not in args
+    # --sysbuild is a west flag (before `--`); the overlay is forwarded to the
+    # sysbuild image's CMake after `--`, as an absolute SB_CONF_FILE pointing
+    # at <build_root>/alp_sysbuild.conf.
+    sep = args.index("--")
+    assert args.index("--sysbuild") < sep
+    post = args[sep + 1:]
+    sb = next(a for a in post if a.startswith("-DSB_CONF_FILE="))
+    sb_path = sb.split("=", 1)[1]
+    assert Path(sb_path).is_absolute()
+    assert sb_path.endswith("/build/alp_sysbuild.conf")
+    # The Python3 pin still rides in the same `--` group.
+    assert f"-DPython3_EXECUTABLE={sys.executable}" in post
 
     # Without boot: -> no sysbuild overlay -> no flag, bare command.
     path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
