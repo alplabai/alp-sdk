@@ -78,11 +78,19 @@ ZTEST(checked_arith, test_size_range_valid_table)
 /* alp_size_range_valid() must never itself evaluate offset + len -- this
  * is exercised structurally above (every wrap-prone case above returns
  * the CORRECT answer, which is only possible if the implementation
- * never computes the wrapping sum), but pin the property with dedicated
- * cases at the exact overflow boundary of every unsigned width smaller
- * than size_t too, so a regression that starts computing offset + len
- * cannot slip through even where size_t doesn't wrap this file's own
- * SIZE_MAX cases as clearly. */
+ * never computes the wrapping sum).
+ *
+ * Every parameter here is a `size_t`, so the only addition-overflow
+ * boundary that can ever exist for this function is at SIZE_MAX itself
+ * -- there is no separate "uint8_t / uint16_t / uint32_t overflow
+ * boundary" to pin distinct from it: values at those magnitudes never
+ * wrap a size_t sum, and on a 32-bit size_t target UINT32_MAX literally
+ * *is* SIZE_MAX, so that boundary collapses into the same case anyway.
+ * The table above already exercises the SIZE_MAX boundary from several
+ * offset/len/capacity angles; this case adds the one it doesn't: an
+ * offset that is itself SIZE_MAX against a small, ordinary capacity,
+ * proving the `offset > capacity` short-circuit fires correctly for the
+ * most extreme possible offset without ever touching offset + len. */
 ZTEST(checked_arith, test_size_range_valid_never_wraps_addition)
 {
 	/* If the implementation computed `offset + len` here, the sum

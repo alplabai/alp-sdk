@@ -21,9 +21,15 @@
  * test_read_len_size_max_does_not_wrap() below.
  *
  * Build with:
- *   cmake -B build -DALP_OS=yocto     -DALP_BUILD_TESTS=ON   (or baremetal)
+ *   cmake -B build -DALP_OS=yocto     -DALP_BUILD_TESTS=ON
  *   cmake --build build --target alp_test_eeprom_24c128_range
  *   ctest --test-dir build -R alp_test_eeprom_24c128_range
+ *
+ * or, under -DALP_OS=baremetal, the target is instead
+ * alp_test_baremetal_eeprom_24c128_range:
+ *   cmake -B build -DALP_OS=baremetal -DALP_BUILD_TESTS=ON
+ *   cmake --build build --target alp_test_baremetal_eeprom_24c128_range
+ *   ctest --test-dir build -R alp_test_baremetal_eeprom_24c128_range
  */
 
 #include <stdint.h>
