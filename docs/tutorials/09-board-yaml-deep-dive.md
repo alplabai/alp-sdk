@@ -364,7 +364,7 @@ cores:
 Loader rules: exactly-one of `kconfig`/`profile`, names globally
 unique across every core's `extra_libraries:`, no collisions with
 the curated `libraries:` enum, and `profile:` paths must resolve
-to a real file.  See `docs/board-config.md` §`extra_libraries:`
+to a real file.  See `docs/board-config-schema.md` §`extra_libraries:`
 for the full reference + the cross-field validator pass.
 
 ### `chips` (top-level, opt-in chip drivers)
@@ -559,7 +559,7 @@ orchestrator consistency error.
 
 ## See also
 
-- [`docs/board-config.md`](../board-config.md) -- the schema
+- [`docs/board-config-schema.md`](../board-config-schema.md) -- the schema
   reference (this tutorial is the worked-example companion).
 - [`scripts/validate_board_yaml.py`](../../scripts/validate_board_yaml.py)
   -- the customer-side linter.

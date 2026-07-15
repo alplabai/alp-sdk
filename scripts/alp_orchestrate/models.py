@@ -85,7 +85,7 @@ class Slice:
     # Open-set escape hatch for libraries the SDK doesn't curate.  Each
     # entry is a dict with `name:` + (exclusively) `kconfig:` OR
     # `profile:`; loader's _validate_consistency() enforces the
-    # exactly-one and uniqueness rules.  See docs/board-config.md
+    # exactly-one and uniqueness rules.  See docs/board-config-schema.md
     # `extra_libraries:`.
     extra_libraries: list[dict[str, Any]] = field(default_factory=list)
     inference: dict[str, Any] = field(default_factory=dict)

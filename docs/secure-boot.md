@@ -65,7 +65,7 @@ boot:
   anti_rollback: false
 ```
 
-See [`docs/board-config.md` §Bootloader](board-config.md#bootloader-boot----mcuboot)
+See [`docs/board-config-features.md` §Bootloader](board-config-features.md#bootloader-boot----mcuboot)
 for the full field reference.  Omit the block to inherit the SDK's
 stock per-family defaults (AEN-Zephyr: MCUboot + ECDSA-P256 +
 swap-using-scratch + 480 KiB slots).

@@ -3,7 +3,7 @@
 # this file directly -- their own board.yaml either points at it
 # via `preset: e1m-evk` (for demo apps targeting the stock EVK) or
 # carries the same fields inline at the top level (for custom
-# boards).  See docs/board-config.md.
+# boards).  See docs/board-config-schema.md.
 #
 # Authoritative per-E1M-pad routing lives in this file's
 # `e1m_routes:` block below; on-board I2C device addresses +

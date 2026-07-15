@@ -57,7 +57,7 @@ alp-sdk/
 ├── LICENSE                          # Apache-2.0
 ├── docs/                            # Architecture, ADRs, board-config, bring-up guides
 │   ├── architecture.md              # this file
-│   ├── board-config.md              # board.yaml schema reference
+│   ├── board-config.md              # board.yaml config landing page
 │   ├── heterogeneous-builds.md      # per-core fan-out walkthrough
 │   ├── os-support-matrix.md         # OS × variant × library status
 │   ├── porting-new-som.md           # adding HAL/HW for a new E1M variant
@@ -163,7 +163,7 @@ the consumer's application directory; everything below the
 distinct mechanisms cooperate.
 
 Top-level blocks the schema accepts (full reference:
-[`docs/board-config.md`](board-config.md)):
+[`docs/board-config-schema.md`](board-config-schema.md)):
 
 | Block | Scope |
 |---|---|

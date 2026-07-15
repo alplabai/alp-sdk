@@ -274,5 +274,5 @@ To adapt to your own project:
 
 * [`docs/firmware-quickstart.md`](../docs/firmware-quickstart.md) -- single-OS patterns.
 * [`docs/heterogeneous-builds.md`](../docs/heterogeneous-builds.md) -- per-core walk-through.
-* [`docs/board-config.md`](../docs/board-config.md) -- `board.yaml` schema reference.
+* [`docs/board-config-schema.md`](../docs/board-config-schema.md) -- `board.yaml` schema reference.
 * [`docs/troubleshooting.md`](../docs/troubleshooting.md) -- common errors + fixes.

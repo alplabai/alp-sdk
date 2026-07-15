@@ -7,6 +7,36 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Changed — `board-config.md` split into a landing page + four references (#464)
+
+- `docs/board-config.md` had grown to ~1500 lines covering the quick
+  start, the whole field-by-field schema, every emit backend, hardware
+  revisions and all the feature blocks in one scroll. It is now a
+  249-line landing page (quick start, the single-source-of-truth model,
+  file location, cross-field validation, versioning) that links four
+  focused references:
+  - `docs/board-config-schema.md` — the `board.yaml` field reference:
+    the `som:` / board split, inline vs. `preset:` mode, `pins:`, pin
+    direction, the EVK-as-reference-design workflow, stock presets, and
+    the `libraries:` block (ADR 0018).
+  - `docs/board-config-emit.md` — how the loader compiles the file:
+    `west alp-build`, the Zephyr `alp.conf` overlay, plain CMake, Yocto
+    `local.conf`, `west.yml` auto-pin, `hw-info-h`, and the DTS overlay.
+  - `docs/board-config-hardware.md` — hardware revision tracking
+    (build-time + runtime) and modular SoM chip populations.
+  - `docs/board-config-features.md` — the build-system integration
+    knobs: `hw_info.eeprom`, per-slice memory/power, log levels,
+    `boot:`, `ota:`, `storage:`, and `security.psa:`.
+- Every in-repo reference that pointed at a section now living on one of
+  the four new pages was repointed to it — narrative docs, the tutorials,
+  `README.md`, `llms.txt`, the example `README.md`/`board.yaml` comments,
+  the board presets and template under `metadata/`, and the
+  `scripts/alp_orchestrate/models.py` docstring. The prose is a move, not a
+  rewrite: all 50 original sections survive and no field reference changed
+  meaning. The only deliberate edits are the intra-document "see below"
+  pointers, which became cross-page links now that the target sections live
+  on another page.
+
 ### Fixed — pure-C review of `dev`: overflow, contract and rollback defects (#732 #735 #736 #737 #738 #739 #740 #742 #743 #744 #745 #746 #747 #748 #749 #750 #753 #757 #759 #760)
 
 - **Checked arithmetic.** New private `src/common/alp_checked_arith.h`
