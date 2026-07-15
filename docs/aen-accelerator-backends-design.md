@@ -15,13 +15,16 @@ NEEDS-PORTABLE-SURFACE / vendor-ext gaps:
 4. **aiPM power management** — DVFS / run-profiles / PMIC sequencer
    across the A32 + M55 + NPU domains (**different status — see §4**).
 
-Surfaces 1–3 ship a header + a stub today; **every real body is
-silicon + Alif-HAL-pack gated.**  No SoM in scope ships the matching
-HAL pack yet, so each stub returns `ALP_ERR_NOSUPPORT` after the
-standard surface / vendor-handle validation.  This document captures
-the integration design (DMA / coherency / dispatch / keying) the
-real backends must honour when the HAL packs land — it is
-ADR-adjacent reference, not an implementation.
+Surfaces 1–3 ship a header + a stub today; each stub returns
+`ALP_ERR_NOSUPPORT` after the standard surface / vendor-handle
+validation.  For GPU2D and SecAES (§1, §3) the real body is silicon +
+Alif-HAL-pack gated — no SoM in scope ships the matching D/AVE 2D or
+SecAES pack yet.  ISP (§2) is different: its HAL pack (`isp_wrapper`)
+is already vendored, but the real body is blocked by four independent
+reasons plus a deliberate AWB hold — see §2 below.  This document
+captures the integration design (DMA / coherency / dispatch / keying)
+the real backends must honour when they land — it is ADR-adjacent
+reference, not an implementation.
 
 The aiPM power surface (§4) is the exception: it already has a working
 generic backend, so the design question there is *what the vendor
@@ -67,13 +70,20 @@ The practical consequence for the EdgeAI vision example
 (`examples/aen/edgeai-vision-aen/`, an **E8 target** — `som.sku:
 E1M-AEN801`): the in-repo ISP-Pico backend is scoped to E8 today, so
 the example may eventually offload debayer / format-convert / 3A to
-it. But that offload is blocked today, and not for a single reason:
-AE is declared in the vendored hal_alif `isp_wrapper` archive but the
-archive defines no Expm symbol for it; AF and LSC are absent from
-that archive outright (no header, no symbol); and, for an additional,
-independent reason, the per-channel gain path is **contract-absent**
-— see the per-entry detail in `src/backends/ext/alif/camera.c`. So
-today the example must **not**
+it — but none of the three works yet, for two unrelated reasons.
+Debayer and format-convert are blocked at the Zephyr driver layer:
+`zephyr/drivers/video/isp_pico.c` (the same `vsi,isp-pico` node this
+backend targets) links against a newer `hal_alif` libisp wrapper than
+the one vendored locally, so it compiles but will not link (see that
+file's HAL_ALIF VERSION MISMATCH note) — even though the MPI calls
+debayer/format-convert need, `VSI_MPI_ISP_SetDmscAttr` and
+`VSI_MPI_ISP_SetScaleAttr`, are defined in the vendored archive. 3A is
+blocked for a different, independent reason: AE is declared in the
+vendored isp_wrapper headers but undefined in the archive; AF and LSC
+are absent from that archive outright (no header, no symbol); and,
+for an additional, independent reason, the per-channel gain path is
+**contract-absent** — see the per-entry detail in
+`src/backends/ext/alif/camera.c`. So today the example must **not**
 rely on the ISP: it configures the camera sensor to emit the model's
 pixel format directly and does crop / resize / normalisation on the
 M55-HP with CMSIS-DSP — exactly the data flow in that example's
@@ -182,7 +192,7 @@ the Alif-handle gate.
 
 1. App opens the camera via the portable `alp_camera_open`; the
    dispatcher binds the `alif_isp_pico` backend when the silicon_ref
-   is `alif:ensemble:e8` and the Alif HAL pack is present.
+   is `alif:ensemble:e8`.
 2. App includes `<alp/ext/alif/camera.h>` and calls the vendor knob.
    Each call re-checks the handle's backend vendor is `"alif"`
    (`_is_alif_backend`); a non-Alif handle returns
@@ -350,7 +360,8 @@ here is what the backend must implement, not a stub.
 ## See also
 
 - [`docs/test-plan.md`](test-plan.md) — v0.5 verification rows for
-  all three surfaces (all `⏳ untested`, HAL-pack-gated).
+  all three surfaces (all `⏳ untested`; GPU2D + SecAES HAL-pack-gated,
+  ISP blocked for the different reasons in §2 above).
 - [ADR 0008](adr/0008-gpu2d-portable-shim.md) — why GPU2D ships as a
   portable shim even on single-silicon.
 - [`include/alp/gpu2d.h`](../include/alp/gpu2d.h) /

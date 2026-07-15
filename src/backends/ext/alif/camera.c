@@ -5,8 +5,10 @@
  * (vsi,isp-pico) vendor-extension surface for the E8 backend
  * currently registered in alp-sdk.
  *
- * Four independent reasons keep every body below at NOSUPPORT -- do
- * not collapse them into one story:
+ * Four independent reasons keep AE/AF/LSC/gain at NOSUPPORT below --
+ * do not collapse them into one story -- plus a fifth,
+ * different-class item (AWB) that is reachable but deliberately
+ * withheld:
  *   - AE: declared-but-undefined in the vendored isp_wrapper archive
  *     (see the per-entry detail below).
  *   - AF: absent outright -- no header, no symbol, not even a
@@ -14,22 +16,31 @@
  *   - LSC: absent outright, same class as AF.
  *   - gain-table load: a symbol IS defined, but its struct can't
  *     carry this call's contract (see the per-entry detail below).
+ *   - AWB: a POLICY HOLD, not an external blocker -- the window call
+ *     (SetWbmAttr) IS reachable, but is withheld so AE/AF can't
+ *     silently stay unset while AWB moves alone (see the
+ *     3a_window_set entry below).
  * SEPARATELY, at the Zephyr driver layer: zephyr/drivers/video/
  * isp_pico.c carries its own HAL_ALIF VERSION MISMATCH note (a
  * driver-link problem, not an archive-content problem) -- see that
- * file for detail.  It does not explain any of the four reasons
+ * file for detail.  It does not explain any of the five items
  * above; don't cite it as though it does.
  * No sensor is wired on this SoM batch (#226) either, so nothing here
  * can be bench-verified regardless of the above.  Every body returns
  * ALP_ERR_NOSUPPORT after the standard vendor-handle gating, per the
  * Slice 6 storage.c precedents.
  *
- * Trap for whoever wires these (#223): the archive is a SUBSET of
- * inc/lib -- a declaration does not imply a linkable call, and a
- * linkable call does not imply it can satisfy the public contract
- * (see the gain entry below).  Check `nm -g --defined-only
- * libisp_gcc.a` first.  Per-entry state below.  E4 / E6 need explicit
- * backend registrations plus board validation.
+ * Trap for whoever wires these (#223): the archive and inc/lib only
+ * partially overlap -- neither is a subset of the other.  inc/lib
+ * declares calls the archive never defines (Expm is the case that
+ * bit AE above); the archive defines calls inc/lib never declares
+ * (VSI_ISP_Core*, VSI_ISP_CcmV10*, VSI_ISP_WbmV10*, vsiAwbAlgo,
+ * ispCoreDevs, and VSI_MPI_ISP_MiIrqProcess / SetMiChnAttr /
+ * SetMiChnStream among them).  A declaration does not imply a
+ * linkable call, and a linkable call does not imply it can satisfy
+ * the public contract (see the gain entry below).  Check `nm -g
+ * --defined-only libisp_gcc.a` first.  Per-entry state below.  E4 /
+ * E6 need explicit backend registrations plus board validation.
  */
 
 #include <stdbool.h>

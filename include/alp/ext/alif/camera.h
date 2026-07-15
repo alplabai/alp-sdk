@@ -38,7 +38,7 @@
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      Every function returns @ref ALP_ERR_NOSUPPORT today, but not
  *      for one reason: AE is declared in the vendored isp_wrapper
- *      archive, but the archive defines no Expm symbol for it; AF
+ *      headers but undefined in its archive; AF
  *      and LSC are absent from that archive outright (no header, no
  *      symbol); AWB is reachable in the archive but deliberately
  *      withheld so AE/AF can't silently stay unset while AWB moves
