@@ -20,11 +20,13 @@ Surfaces 1–3 ship a header + a stub today; each stub returns
 validation.  For GPU2D and SecAES (§1, §3) the real body is silicon +
 Alif-HAL-pack gated — no SoM in scope ships the matching D/AVE 2D or
 SecAES pack yet.  ISP (§2) is different: its HAL pack (`isp_wrapper`)
-is already vendored, but the real body is blocked by five independent
-reasons — a Zephyr driver-layer version mismatch (debayer /
-format-convert) plus four vendor-ext archive gaps (AE / AF / LSC /
-gain) — plus a deliberate AWB hold; see the *Silicon scope — which
-E-part has what* section below.  This document captures the
+is already vendored, but the real body is blocked by four independent
+reasons — AE / AF / LSC / gain — plus a deliberate AWB hold; see the
+*Silicon scope — which E-part has what* section below.  (Separately,
+at the Zephyr driver layer, `zephyr/drivers/video/isp_pico.c` carries
+its own HAL_ALIF version-mismatch note that blocks the example's
+debayer / format-convert path -- a different surface; it is not one
+of the four.)  This document captures the
 integration design (DMA / coherency / dispatch / keying) the real
 backends must honour when they land — it is ADR-adjacent reference,
 not an implementation.
