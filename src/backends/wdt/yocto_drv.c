@@ -52,18 +52,27 @@ typedef struct {
 
 /* Test-only interception of the three syscalls y_open() drives before
  * it has a fully-populated backend handle (open() / malloc() / the
- * WDIOC_SETTIMEOUT ioctl's programmed value), plus an observation hook
- * for every best-effort disarm attempt _disarm_and_close() makes.
+ * WDIOC_SETTIMEOUT ioctl's programmed value), plus observation hooks
+ * for the two syscalls _disarm_and_close() uses to actually disarm.
  * Defaults are NULL/real -- production behaviour is unchanged.  Opening
  * a REAL /dev/watchdogN here would arm a genuine hardware watchdog on
  * whatever host runs the test (there usually isn't one, but on a board
  * that has one this must never be exercised for real), so
- * tests/yocto/wdt_yocto.c (which #includes this .c file directly)
- * drives these seams instead of a real device node (#760). */
-static int (*g_wdt_test_open_hook)(const char *path)                         = NULL;
-static void *(*g_wdt_test_malloc_hook)(size_t size)                          = NULL;
-static void (*g_wdt_test_settimeout_observed_hook)(int timeout_s)            = NULL;
-static void (*g_wdt_test_disarm_observed_hook)(int fd, bool magic_attempted) = NULL;
+ * tests/yocto/peripheral_wdt.c (which #includes this .c file directly)
+ * drives these seams instead of a real device node (#760).
+ *
+ * The disarm seams INTERCEPT their syscall rather than observing it
+ * from alongside, for the same reason _wdt_open()/_wdt_malloc() do: a
+ * hook that merely sits next to the call still fires when the call is
+ * deleted, so it can only ever prove "_disarm_and_close() ran", never
+ * "the watchdog was disarmed" -- which is the whole of #760.  Routing
+ * the syscall THROUGH the seam makes the two inseparable: delete the
+ * disarm and the hook goes with it, turning the test red. */
+static int (*g_wdt_test_open_hook)(const char *path)              = NULL;
+static void *(*g_wdt_test_malloc_hook)(size_t size)               = NULL;
+static void (*g_wdt_test_settimeout_observed_hook)(int timeout_s) = NULL;
+static int (*g_wdt_test_setoptions_hook)(int fd, int flags)       = NULL;
+static ssize_t (*g_wdt_test_magic_write_hook)(int fd)             = NULL;
 
 static int _wdt_open(const char *path)
 {
@@ -75,6 +84,22 @@ static void *_wdt_malloc(size_t size)
 {
 	if (g_wdt_test_malloc_hook != NULL) return g_wdt_test_malloc_hook(size);
 	return malloc(size);
+}
+
+/* Scoped to the disarm path on purpose: y_open()'s own SETTIMEOUT /
+ * GETSUPPORT ioctls must keep reaching the real kernel (or the pipe
+ * fd that stands in for it), so this seam does not wrap ioctl() in
+ * general -- only the WDIOS_DISABLECARD that #760 is about. */
+static int _wdt_disarm_setoptions(int fd, int flags)
+{
+	if (g_wdt_test_setoptions_hook != NULL) return g_wdt_test_setoptions_hook(fd, flags);
+	return ioctl(fd, WDIOC_SETOPTIONS, &flags);
+}
+
+static ssize_t _wdt_magic_write(int fd)
+{
+	if (g_wdt_test_magic_write_hook != NULL) return g_wdt_test_magic_write_hook(fd);
+	return write(fd, "V", 1);
 }
 
 /**
@@ -95,13 +120,9 @@ static void *_wdt_malloc(size_t size)
 static void _disarm_and_close(int fd, bool attempt_magic_close)
 {
 	if (fd < 0) return;
-	if (g_wdt_test_disarm_observed_hook != NULL) {
-		g_wdt_test_disarm_observed_hook(fd, attempt_magic_close);
-	}
-	int flags = WDIOS_DISABLECARD;
-	(void)ioctl(fd, WDIOC_SETOPTIONS, &flags);
+	(void)_wdt_disarm_setoptions(fd, WDIOS_DISABLECARD);
 	if (attempt_magic_close) {
-		(void)!write(fd, "V", 1);
+		(void)!_wdt_magic_write(fd);
 	}
 	close(fd);
 }

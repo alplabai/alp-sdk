@@ -14,8 +14,14 @@
  * (inject the allocation failure and hand back a test-controlled fd),
  * g_wdt_test_settimeout_observed_hook (observe the exact second value
  * y_open() programs, proving the overflow fix), and
- * g_wdt_test_disarm_observed_hook (prove WDIOS_DISABLECARD is
- * attempted on every failure path).  Opening a REAL /dev/watchdogN
+ * g_wdt_test_setoptions_hook / g_wdt_test_magic_write_hook (prove
+ * WDIOS_DISABLECARD -- and, where the driver advertises it, the magic
+ * 'V' close -- are attempted on every failure path).  Those two stand
+ * in for the syscalls rather than watching from beside them, so the
+ * assertions below cannot pass unless the disarm actually ran; a hook
+ * placed alongside the call would stay green if the call were deleted,
+ * which is the failure mode this suite exists to prevent.  Opening a
+ * REAL /dev/watchdogN
  * would arm a genuine hardware watchdog on whatever host runs the
  * test -- this file never does that; every "device fd" here is a
  * pipe end or a deliberately-already-closed descriptor.
@@ -26,6 +32,7 @@
  *   ctest --test-dir build -R alp_test_peripheral_wdt
  */
 
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
@@ -44,11 +51,28 @@ static int  g_disarm_call_count;
 static bool g_disarm_last_magic;
 static int  g_observed_timeout_s;
 
-static void observe_disarm(int fd, bool magic_attempted)
+/* Stands in for the WDIOS_DISABLECARD ioctl itself, so the count can
+ * only rise when the backend genuinely issued one -- delete the disarm
+ * and this is never reached.  Returns 0 (success) as a real driver
+ * would; the production caller discards it either way. */
+static int fake_setoptions(int fd, int flags)
 {
 	(void)fd;
-	++g_disarm_call_count;
-	g_disarm_last_magic = magic_attempted;
+	if (flags == WDIOS_DISABLECARD) {
+		++g_disarm_call_count;
+	}
+	return 0;
+}
+
+/* Stands in for the magic 'V' write.  Returns -1/EPIPE, matching what
+ * the real write would hit against these pre-closed pipe fds, to keep
+ * exercising the caller's discard-the-error path. */
+static ssize_t fake_magic_write(int fd)
+{
+	(void)fd;
+	g_disarm_last_magic = true;
+	errno               = EPIPE;
+	return -1;
 }
 
 static void observe_settimeout(int timeout_s)
@@ -59,10 +83,9 @@ static void observe_settimeout(int timeout_s)
 /* Hands back a real, open pipe write-end -- a valid fd the ioctl()s in
  * y_open() can operate on (SETTIMEOUT/GETSUPPORT fail ENOTTY on a
  * pipe, which the backend already tolerates as "no such capability").
- * The read end is closed immediately, so any write() the backend later
- * performs against the write end (the magic-close 'V') deterministically
- * fails EPIPE -- harmless with SIGPIPE ignored (see main()) and exercises
- * that write()'s error path too. */
+ * The read end is closed immediately so the fd is never left readable.
+ * The magic-close 'V' never reaches this fd for real -- fake_magic_write
+ * stands in for that write() and returns the EPIPE it would have hit. */
 static int open_hook_pipe_fd(const char *path)
 {
 	(void)path;
@@ -102,7 +125,8 @@ static void reset_fixture(void)
 	g_wdt_test_open_hook                = NULL;
 	g_wdt_test_malloc_hook              = NULL;
 	g_wdt_test_settimeout_observed_hook = observe_settimeout;
-	g_wdt_test_disarm_observed_hook     = observe_disarm;
+	g_wdt_test_setoptions_hook          = fake_setoptions;
+	g_wdt_test_magic_write_hook         = fake_magic_write;
 }
 
 static alp_wdt_config_t default_cfg(uint32_t timeout_ms)
@@ -194,11 +218,11 @@ static void test_close_attempts_magic_write_when_supported(void)
 
 int main(void)
 {
-	/* The read end of every fake "device" pipe is closed immediately
-     * (see open_hook_pipe_fd), so the magic-close write() in
-     * _disarm_and_close() deterministically hits EPIPE -- ignore
-     * SIGPIPE so that surfaces as a normal write() error instead of
-     * killing the test process. */
+	/* fake_magic_write intercepts the only write() the backend makes,
+     * so nothing here writes to a pipe whose read end is closed.  The
+     * SIGPIPE guard stays as a backstop: it keeps a future real-write
+     * seam (or a test that clears g_wdt_test_magic_write_hook) from
+     * killing the process instead of surfacing an EPIPE. */
 	(void)signal(SIGPIPE, SIG_IGN);
 
 	test_malloc_failure_disarms_and_closes_fd();
