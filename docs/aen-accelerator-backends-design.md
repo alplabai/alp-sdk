@@ -67,12 +67,17 @@ The practical consequence for the EdgeAI vision example
 (`examples/aen/edgeai-vision-aen/`, an **E8 target** — `som.sku:
 E1M-AEN801`): the in-repo ISP-Pico backend is scoped to E8 today, so
 the example may eventually offload debayer / format-convert / 3A to
-it. But that offload is **HAL-pack gated**
-(the `vsi,isp-pico` backend is a NOSUPPORT stub until the pack lands),
-so today the example must **not** rely on the ISP: it configures the
-camera sensor to emit the model's pixel format directly and does crop
-/ resize / normalisation on the M55-HP with CMSIS-DSP — exactly the
-data flow in that example's `docs/pipeline.md`.
+it. But that offload is blocked today for two distinct reasons, not
+a single "pack hasn't landed" story: AE / AF / LSC are **pack-blocked**
+— the vendored hal_alif `isp_wrapper` is version-mismatched against
+the Zephyr driver (see `zephyr/drivers/video/isp_pico.c`'s HAL_ALIF
+VERSION MISMATCH note); the per-channel gain path is
+**contract-absent** instead — see the per-entry detail in
+`src/backends/ext/alif/camera.c`. So today the example must **not**
+rely on the ISP: it configures the camera sensor to emit the model's
+pixel format directly and does crop / resize / normalisation on the
+M55-HP with CMSIS-DSP — exactly the data flow in that example's
+`docs/pipeline.md`.
 
 ---
 

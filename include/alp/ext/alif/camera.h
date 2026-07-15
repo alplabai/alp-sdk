@@ -36,11 +36,14 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      Header lands ahead of the vendor pack body; every function
- *      returns @ref ALP_ERR_NOSUPPORT until the Alif HAL ISP Pico
- *      integration lands (same pattern as the OSPI SecAES and
- *      FlexSPI OTFAD precedents from Slice 6).  Promotes to
- *      [ABI-STABLE] when three vendor families ship extensions.
+ *      Every function returns @ref ALP_ERR_NOSUPPORT today, but not
+ *      for one reason: AE / AF / LSC are pack-blocked (the vendored
+ *      hal_alif ISP wrapper is version-mismatched against the Zephyr
+ *      driver -- see the HAL_ALIF VERSION MISMATCH note in
+ *      `zephyr/drivers/video/isp_pico.c`); the gain-table load is
+ *      contract-absent instead -- see the per-entry detail in
+ *      `src/backends/ext/alif/camera.c`.  Promotes to [ABI-STABLE]
+ *      when three vendor families ship extensions.
  */
 
 #ifndef ALP_EXT_ALIF_CAMERA_H
