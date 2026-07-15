@@ -15,13 +15,21 @@ NEEDS-PORTABLE-SURFACE / vendor-ext gaps:
 4. **aiPM power management** — DVFS / run-profiles / PMIC sequencer
    across the A32 + M55 + NPU domains (**different status — see §4**).
 
-Surfaces 1–3 ship a header + a stub today; **every real body is
-silicon + Alif-HAL-pack gated.**  No SoM in scope ships the matching
-HAL pack yet, so each stub returns `ALP_ERR_NOSUPPORT` after the
-standard surface / vendor-handle validation.  This document captures
-the integration design (DMA / coherency / dispatch / keying) the
-real backends must honour when the HAL packs land — it is
-ADR-adjacent reference, not an implementation.
+Surfaces 1–3 ship a header + a stub today; each stub returns
+`ALP_ERR_NOSUPPORT` after the standard surface / vendor-handle
+validation.  For GPU2D and SecAES (§1, §3) the real body is silicon +
+Alif-HAL-pack gated — no SoM in scope ships the matching D/AVE 2D or
+SecAES pack yet.  ISP (§2) is different: its HAL pack (`isp_wrapper`)
+is already vendored, but the real body is blocked by four independent
+reasons — AE / AF / LSC / gain — plus a deliberate AWB hold; see the
+*Silicon scope — which E-part has what* section below.  (Separately,
+at the Zephyr driver layer, `zephyr/drivers/video/isp_pico.c` carries
+its own HAL_ALIF version-mismatch note that blocks the example's
+debayer / format-convert path -- a different surface; it is not one
+of the four.)  This document captures the
+integration design (DMA / coherency / dispatch / keying) the real
+backends must honour when they land — it is ADR-adjacent reference,
+not an implementation.
 
 The aiPM power surface (§4) is the exception: it already has a working
 generic backend, so the design question there is *what the vendor
@@ -67,12 +75,32 @@ The practical consequence for the EdgeAI vision example
 (`examples/aen/edgeai-vision-aen/`, an **E8 target** — `som.sku:
 E1M-AEN801`): the in-repo ISP-Pico backend is scoped to E8 today, so
 the example may eventually offload debayer / format-convert / 3A to
-it. But that offload is **HAL-pack gated**
-(the `vsi,isp-pico` backend is a NOSUPPORT stub until the pack lands),
-so today the example must **not** rely on the ISP: it configures the
-camera sensor to emit the model's pixel format directly and does crop
-/ resize / normalisation on the M55-HP with CMSIS-DSP — exactly the
-data flow in that example's `docs/pipeline.md`.
+it — but none of the three works yet.  Debayer and format-convert are
+blocked at the Zephyr driver layer: `zephyr/drivers/video/isp_pico.c`
+(the same `vsi,isp-pico` node this backend targets) was authored
+against a newer `hal_alif` libisp wrapper than the one vendored
+locally, so it fails to COMPILE (its header pulls in
+`<zephyr/drivers/video/isp-vsi.h>`, which the local wrapper does not
+ship — see that file's HAL_ALIF VERSION MISMATCH note) — even though
+the MPI calls debayer/format-convert need,
+`VSI_MPI_ISP_SetDmscAttr` and `VSI_MPI_ISP_SetScaleAttr`, are defined
+in the vendored archive.  3A (AE / AWB / AF) fails for two further,
+independent reasons of its own: AE is declared in the vendored
+isp_wrapper headers but undefined in the archive; AF is absent from
+that archive outright (no header, no symbol) — a different kind of
+gap than AE's.  AWB's window call is reachable in the archive but is
+deliberately withheld so AE/AF can't silently stay unset while AWB
+moves alone — a policy hold, not a failure.  The other two ISP Pico
+knobs the example might also want fail for their own reasons, and
+neither is part of 3A: LSC is absent from that archive outright, the
+same class of gap as AF; the per-channel gain path is
+**contract-absent** for yet another reason — a symbol exists but its
+struct can't carry this call's contract.  See the per-entry detail in
+`src/backends/ext/alif/camera.c`.  So today the example must **not**
+rely on the ISP: it configures the camera sensor to emit the model's
+pixel format directly and does crop / resize / normalisation on the
+M55-HP with CMSIS-DSP — exactly the data flow in that example's
+`docs/pipeline.md`.
 
 ---
 
@@ -177,7 +205,7 @@ the Alif-handle gate.
 
 1. App opens the camera via the portable `alp_camera_open`; the
    dispatcher binds the `alif_isp_pico` backend when the silicon_ref
-   is `alif:ensemble:e8` and the Alif HAL pack is present.
+   is `alif:ensemble:e8`.
 2. App includes `<alp/ext/alif/camera.h>` and calls the vendor knob.
    Each call re-checks the handle's backend vendor is `"alif"`
    (`_is_alif_backend`); a non-Alif handle returns
@@ -325,27 +353,32 @@ here is what the backend must implement, not a stub.
 
 ---
 
-## Open items (TBD until the HAL packs land)
+## Open items
 
-- **D/AVE 2D batched submit.**  The v0.5 public API is submit-and-wait
-  per op; a batched display-list flush would need a new public entry
-  point.  Deferred until a real consumer (e.g. an LVGL/D/AVE 2D
-  integration) needs it.
-- **ISP Pico vs portable ISP overlap.**  How much of the portable
-  `alp_camera_configure_isp` the ISP Pico backend serves vs. the
-  vendor knobs is settled when the HAL pack lands; both surfaces are
-  `[ABI-EXPERIMENTAL]` precisely so that boundary can move.
-- **SecAES key-slot count + lifecycle.**  Number of slots, whether
-  re-provisioning replaces or allocates, and the wipe-on-tamper
-  contract are HAL-defined and recorded here when the pack is in
-  scope.
+- **D/AVE 2D batched submit** (gated on the D/AVE 2D vendor pack
+  landing).  The v0.5 public API is submit-and-wait per op; a batched
+  display-list flush would need a new public entry point.  Deferred
+  until a real consumer (e.g. an LVGL/D/AVE 2D integration) needs it.
+- **ISP Pico vs portable ISP overlap** (gated on the blockers in the
+  *Silicon scope — which E-part has what* section clearing, not on
+  the HAL pack — `isp_wrapper` is already vendored).
+  How much of the portable `alp_camera_configure_isp` the ISP Pico
+  backend serves vs. the vendor knobs is settled once AE / AF / LSC /
+  gain clear; both surfaces are `[ABI-EXPERIMENTAL]` precisely so that
+  boundary can move.
+- **SecAES key-slot count + lifecycle** (gated on the SecAES vendor
+  pack landing).  Number of slots, whether re-provisioning replaces or
+  allocates, and the wipe-on-tamper contract are HAL-defined and
+  recorded here when the pack is in scope.
 
 ---
 
 ## See also
 
 - [`docs/test-plan.md`](test-plan.md) — v0.5 verification rows for
-  all three surfaces (all `⏳ untested`, HAL-pack-gated).
+  all three surfaces (all `⏳ untested`; GPU2D + SecAES HAL-pack-gated,
+  ISP blocked for the different reasons in the *Silicon scope — which
+  E-part has what* section above).
 - [ADR 0008](adr/0008-gpu2d-portable-shim.md) — why GPU2D ships as a
   portable shim even on single-silicon.
 - [`include/alp/gpu2d.h`](../include/alp/gpu2d.h) /
