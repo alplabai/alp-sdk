@@ -7,6 +7,25 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — `pr-bitbake` never triggered on the example source its recipes compile
+
+- `pr-bitbake.yml` filtered `examples/**/board.yaml` but not example **source**,
+  so a Yocto-breaking edit to a file a recipe actually compiles landed with **no
+  bake at all**. Found the hard way: #818 fixed `alp-lvgl-dashboard`'s
+  `do_compile`, and merging it triggered nothing — `lvgl-dashboard-x-evk/CMakeLists.txt`,
+  the exact file the recipe builds, matched none of the filters. The gap was never
+  lvgl-specific: **all three** Yocto-compiled examples were uncovered
+  (`edgeai-vision-aen`, `lvgl-dashboard-x-evk`, `v2n-m1-ros-perception`).
+- Added those three source trees to the `paths:` filters, for `pull_request` and
+  `push` both. Deliberately NOT a blanket `examples/**`: a bake is hours long and
+  runs on the bench host, so a Zephyr-only example edit must not trigger one.
+- That precision is exactly what rots, and silently — so
+  `tests/scripts/test_bitbake_paths_cover_recipe_sources.py` derives the truth from
+  the **recipes** (every `S = ${WORKDIR}/git/examples/...` in `meta-alp-sdk/**.bb`)
+  and fails if any is unmatched, in either filter, or if the two lists drift apart.
+  The oracle is the recipe set, never a hand-typed list. Verified sensitive: it
+  fails on the pre-fix workflow, naming all three examples.
+
 ### Fixed — `alp-lvgl-dashboard` recipe `do_compile`: `lv_conf.h` not found + missing libdrm link
 
 - With #817's pseudo fix, the `e1m-v2n101-a55` bake now reaches deep enough
