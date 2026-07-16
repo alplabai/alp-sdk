@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "common/alp_checked_arith.h"
+
 /*
  * Narrow a size_t element count to the uint32_t block size the CMSIS-DSP
  * f32 kernels (arm_mean_f32 / arm_rms_f32 / ...) accept.
@@ -27,16 +29,15 @@
  * size_t == uint32_t so SIZE_MAX == UINT32_MAX and the bound folds away
  * (no truncation is possible there); the check only bites a host whose
  * size_t is wider (native_sim / desktop, or a mocked-CMSIS test).
+ *
+ * Delegates to the shared alp_size_to_u32() helper
+ * (src/common/alp_checked_arith.h, #743) -- this wrapper keeps its own
+ * name/doc so call sites still read "narrow to a CMSIS block size", but no
+ * longer carries a second copy of the SIZE_MAX-guarded narrowing logic.
  */
 static inline bool alp_dsp_cmsis_block_len(size_t n, uint32_t *block_out)
 {
-#if SIZE_MAX > UINT32_MAX
-	if (n > (size_t)UINT32_MAX) {
-		return false;
-	}
-#endif
-	*block_out = (uint32_t)n;
-	return true;
+	return alp_size_to_u32(n, block_out);
 }
 
 #endif /* ALP_DSP_RANGE_H */

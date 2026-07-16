@@ -178,6 +178,25 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	return h;
 }
 
+/* Test-only line-config interception (default NULL: real
+ * ioctl(GPIO_V2_LINE_SET_CONFIG_IOCTL)).  Every SET_CONFIG call this
+ * backend makes -- alp_gpio_configure, the irq_enable edge-reconfigure,
+ * its rollback, and irq_disable's rollback -- already funnels through
+ * this one chokepoint, so pointing it at a canned responder lets
+ * tests/yocto/peripheral_gpio_irq_rollback.c (which #includes this .c
+ * file directly) drive alp_gpio_irq_enable()'s #746 rollback path and
+ * observe the exact flags each call requested, without a real
+ * /dev/gpiochipN line (touching one on a dev host risks a real,
+ * non-alp-sdk-target ACPI/EC GPIO). */
+static int (*g_gpio_test_set_config_hook)(int                               line_fd,
+                                          const struct gpio_v2_line_config *cfg) = NULL;
+
+static int _gpio_set_config(int line_fd, const struct gpio_v2_line_config *cfg)
+{
+	if (g_gpio_test_set_config_hook != NULL) return g_gpio_test_set_config_hook(line_fd, cfg);
+	return ioctl(line_fd, GPIO_V2_LINE_SET_CONFIG_IOCTL, cfg);
+}
+
 alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 {
 	if (pin == NULL || !pin->in_use) {
@@ -190,7 +209,7 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
 	} else {
 		cfg.flags |= GPIO_V2_LINE_FLAG_INPUT;
 	}
-	if (ioctl(pin->line_fd, GPIO_V2_LINE_SET_CONFIG_IOCTL, &cfg) < 0) {
+	if (_gpio_set_config(pin->line_fd, &cfg) < 0) {
 		return alp_status_from_posix_errno(errno);
 	}
 	pin->is_output = (dir == ALP_GPIO_OUTPUT);
@@ -348,14 +367,33 @@ static void *irq_dispatcher(void *arg)
 	}
 }
 
+/* Test-only dispatcher-start failure injection (default 0: no
+ * injection, real eventfd()+pthread_create()).  1 forces the eventfd()
+ * failure point, 2 forces the pthread_create() failure point --
+ * issue #746's two documented injection points.  Touching a live
+ * /dev/gpiochipN on a dev host to exhaust real fd/thread limits would
+ * risk a real (non-alp-sdk-target) GPIO line, so
+ * tests/yocto/peripheral_gpio_irq_rollback.c (which #includes this .c
+ * file directly) drives this seam instead.  Not part of any public
+ * header. */
+static int g_gpio_test_fail_dispatcher_start; /* 0=off, 1=eventfd, 2=pthread_create */
+
 static alp_status_t irq_start_dispatcher_locked(void)
 {
 	if (g_irq.started) {
 		return ALP_OK;
 	}
+	if (g_gpio_test_fail_dispatcher_start == 1) {
+		return alp_status_from_posix_errno(EMFILE);
+	}
 	g_irq.wake_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
 	if (g_irq.wake_fd < 0) {
 		return alp_status_from_posix_errno(errno);
+	}
+	if (g_gpio_test_fail_dispatcher_start == 2) {
+		(void)close(g_irq.wake_fd);
+		g_irq.wake_fd = -1;
+		return alp_status_from_posix_errno(EAGAIN);
 	}
 	int rc = pthread_create(&g_irq.thread, NULL, irq_dispatcher, NULL);
 	if (rc != 0) {
@@ -403,7 +441,7 @@ alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, voi
      * edge-detect flags are mutually exclusive at the kernel layer. */
 	struct gpio_v2_line_config cfg = { 0 };
 	cfg.flags                      = GPIO_V2_LINE_FLAG_INPUT | edge_flags;
-	if (ioctl(pin->line_fd, GPIO_V2_LINE_SET_CONFIG_IOCTL, &cfg) < 0) {
+	if (_gpio_set_config(pin->line_fd, &cfg) < 0) {
 		return alp_status_from_posix_errno(errno);
 	}
 
@@ -411,6 +449,15 @@ alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, voi
 	alp_status_t rc = irq_start_dispatcher_locked();
 	if (rc != ALP_OK) {
 		pthread_mutex_unlock(&g_irq.mu);
+		/* Roll back the edge-detect reconfigure above (#746): the
+         * dispatcher never started, so nothing will ever read/clear
+         * events off this line, and the line must not be left
+         * edge-configured while irq_enabled stays false.  Best-effort
+         * (the original dispatcher-start error always wins) -- restore
+         * plain input, matching irq_disable's own rollback below. */
+		struct gpio_v2_line_config rollback_cfg = { 0 };
+		rollback_cfg.flags                      = GPIO_V2_LINE_FLAG_INPUT;
+		(void)_gpio_set_config(pin->line_fd, &rollback_cfg);
 		return rc;
 	}
 	pin->irq_cb      = cb;
@@ -441,7 +488,7 @@ alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin)
      * pin. */
 	struct gpio_v2_line_config cfg = { 0 };
 	cfg.flags                      = GPIO_V2_LINE_FLAG_INPUT;
-	(void)ioctl(pin->line_fd, GPIO_V2_LINE_SET_CONFIG_IOCTL, &cfg);
+	(void)_gpio_set_config(pin->line_fd, &cfg);
 	return ALP_OK;
 }
 

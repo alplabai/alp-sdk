@@ -15,11 +15,10 @@ isn't documented in a stable form as of 2026-05.  ROM bootloader
 protocol is documented (SWRU626 §6) but the canonical host-side
 wrapper -- ``cc3501e-flasher`` -- isn't on a public TI mirror yet.
 
-This backend's surface (name, requires, flash_args contract) is the
-final shape per the §5.7 host integration plan in
-``docs/cc3501e-integration-plan.md``; the body raises
-``NotImplementedError`` with the TODO reference so a caller routing
-through here gets an honest signal rather than a fake "ok".
+This backend's surface (name, requires, flash_args contract -- see
+below) is final shape; the body raises ``NotImplementedError`` with a
+TODO reference so a caller routing through here gets an honest signal
+rather than a fake "ok".
 
 Dry-runs still work: when ``ctx.dry_run`` is True the backend prints
 the command it WOULD issue once the upstream CLI lands, which is
@@ -101,8 +100,10 @@ class Cc3501eUsbBootloaderFlash:
                     "cc3501e_usb_bootloader: no CC3501E host tool on "
                     "PATH.  Looked for: "
                     + ", ".join(_CANDIDATE_TOOLS)
-                    + ".  See docs/cc3501e-integration-plan.md §5.7 "
-                      "for the bring-up procedure once TI publishes the CLI."
+                    + ".  TI has not published the cc3501e-flasher CLI yet; "
+                      "until it ships, flash the part with the bench "
+                      "warm-program recipe in docs/cc3501e-production.md "
+                      "(\"Bench warm-program (validation flash)\")."
                 ),
             )
 
@@ -130,12 +131,13 @@ class Cc3501eUsbBootloaderFlash:
                 command=list(cmd),
             )
 
-        # The CLI shape above is the intended one per the §5.7 design
-        # doc, but the upstream tool isn't shipping yet.  Return a
-        # clean failure rather than raising so west alp-flash can
-        # report the skip gracefully instead of crashing.
+        # The CLI shape above is the intended one (see the module
+        # docstring's flash_args contract), but the upstream tool isn't
+        # shipping yet.  Return a clean failure rather than raising so
+        # west alp-flash can report the skip gracefully instead of
+        # crashing.
         #
-        # TODO(cc3501e §5.7): once TI ships cc3501e-flasher and the
+        # TODO(cc3501e): once TI ships cc3501e-flasher and the
         # wire-level CLI shape is validated, drop this early return and
         # let the subprocess.run path live.
         return FlashResult(
@@ -143,8 +145,8 @@ class Cc3501eUsbBootloaderFlash:
             elapsed_s=time.monotonic() - start,
             message=("cc3501e-flasher CLI is not yet public; this backend "
                      "lands when the upstream tool stabilises.  Use the "
-                     "manual SWD path documented in docs/bring-up-aen.md "
-                     "for now."),
+                     "bench warm-program recipe in "
+                     "docs/cc3501e-production.md for now."),
         )
 
 

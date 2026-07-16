@@ -49,23 +49,35 @@
 LOG_MODULE_REGISTER(uhc_xhci_alif, CONFIG_UHC_DRIVER_LOG_LEVEL);
 
 /* The xHCI DMA master is a SYSTOP system-bus master: it CANNOT reach the M55's
- * local TCM aliases (DTCM @ 0x20000000, ITCM @ 0x0).  Every DMA structure the CPU
- * allocates in TCM (DCBAA, command/event rings, ERST, scratchpad) must be handed
- * to the controller -- and referenced from INSIDE the structures (Link TRB,
- * DCBAA[0], ERST base, scratchpad-array entry) -- by its GLOBAL alias.  Same
- * remap as hal_alif local_to_global() (soc_memory_map.h): DTCM 0x20000000 ->
- * 0x58800000, ITCM 0x0 -> 0x58000000.  Addresses already global pass through. */
+ * local TCM aliases.  Every DMA structure the CPU allocates in TCM (DCBAA,
+ * command/event rings, ERST, scratchpad) must be handed to the controller --
+ * and referenced from INSIDE the structures (Link TRB, DCBAA[0], ERST base,
+ * scratchpad-array entry) -- by its GLOBAL alias.  Addresses already global
+ * pass through.
+ *
+ * The alias window is PER-CORE (issue #752): M55-HP's ITCM/DTCM alias at
+ * 0x50000000/0x50800000, M55-HE's at 0x58000000/0x58800000 -- see the board
+ * DTS `&itcm`/`&dtcm` `global_base` overrides (e.g.
+ * boards/alp/e1m_aen401_m55_hp/..._rtss_hp.dts, boards/alp/e1m_aen801_m55_he/
+ * ..._rtss_he.dts), which are themselves transcribed from the Alif DFP /
+ * zephyr_alif fork ensemble_rtss_hp.dtsi / ensemble_rtss_he.dtsi.  Never
+ * hardcode one core's aliases here -- resolve the ACTIVE core's own
+ * itcm/dtcm DT nodes (same source hal_alif's local_to_global(),
+ * soc_memory_map.h, reads via DT_NODELABEL(itcm)/DT_NODELABEL(dtcm)) and feed
+ * them into the arch-neutral, host-unit-tested xhci_local_to_global()
+ * (xhci_core.c). */
+static const struct xhci_tcm_map xhci_tcm = {
+	.itcm_base        = DT_REG_ADDR(DT_NODELABEL(itcm)),
+	.itcm_size        = DT_REG_SIZE(DT_NODELABEL(itcm)),
+	.itcm_global_base = DT_PROP(DT_NODELABEL(itcm), global_base),
+	.dtcm_base        = DT_REG_ADDR(DT_NODELABEL(dtcm)),
+	.dtcm_size        = DT_REG_SIZE(DT_NODELABEL(dtcm)),
+	.dtcm_global_base = DT_PROP(DT_NODELABEL(dtcm), global_base),
+};
+
 static uint64_t xhci_l2g(const void *p)
 {
-	uintptr_t a = (uintptr_t)p;
-
-	if (a >= 0x20000000u && a < 0x20100000u) {
-		return (uint64_t)(a - 0x20000000u + 0x58800000u);
-	}
-	if (a < 0x00100000u) {
-		return (uint64_t)(a + 0x58000000u);
-	}
-	return (uint64_t)a;
+	return xhci_local_to_global(&xhci_tcm, p);
 }
 
 /* ---------------------------------------------------------------------------

@@ -159,17 +159,22 @@ right now" status is one scroll away from the v0.4 gate list:
 
 The 2026-05-12 AEN feature audit surfaced three on-die AEN-family
 accelerator blocks with no portable / vendor-ext surface.  Each
-header + stub landed in v0.5 ahead of the Alif HAL pack: every
-function returns `ALP_ERR_NOSUPPORT` until the matching vendor pack
-ships, so these rows are **gated on the vendor HAL pack and stay
-`⏳ untested` until first silicon** (no SoM in scope ships the HAL
-pack today).  Design captured in
+header + stub landed in v0.5 ahead of a real body: every function
+returns `ALP_ERR_NOSUPPORT` until one lands, so all three rows stay
+`⏳ untested` until first silicon.  For GPU2D and Inline-AES that real
+body is **gated on the vendor HAL pack** (no SoM in scope ships the
+D/AVE 2D or SecAES pack today).  The ISP row is different: its
+`isp_wrapper` HAL pack is already vendored, and its real body is
+blocked instead by four independent reasons plus a deliberate AWB
+policy hold — see that row and
+[`src/backends/ext/alif/camera.c`](../src/backends/ext/alif/camera.c).
+Design captured in
 [`docs/aen-accelerator-backends-design.md`](aen-accelerator-backends-design.md).
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
 | GPU2D (D/AVE 2D) portable surface | `src/backends/gpu2d/sw_fallback.c` (real CPU path) + `src/backends/gpu2d/alif_dave2d.c` (D/AVE 2D real backend, bench-unverified, issue #24) | ✅ sw_fallback unit-tested / ⏳ D/AVE 2D untested | sw_fallback `fill_rect` / `blit` / `blend` produce exact pixels asserted in `tests/unit/gpu2d_registry` on native_sim; the D/AVE 2D backend produces the same pixels on a real E1M-AEN EVK | `tests/unit/gpu2d_registry` pixel ZTESTs green in `pr-twister`; **HAL-backed pixel assertion via `nightly-aen-hil`** — gated on the Alif D/AVE 2D vendor pack | sw_fallback v0.x (tested), D/AVE 2D bench-gated |
-| ISP (VeriSilicon ISP Pico (vsi,isp-pico)) vendor-ext surface | `src/backends/ext/alif/camera.c` + `<alp/ext/alif/camera.h>`. **The ISP Pico backend registers `priority = 100` on `silicon_ref = "alif:ensemble:e8"` only** (`src/backends/camera/alif_isp_pico.c`) — E4/E6 carry the ISP in silicon but get no backend registration today, and every `ext/alif/camera.c` entry point returns `ALP_ERR_NOSUPPORT` | ⏳ untested | 3A window / per-channel gain LUT / LSC MESH LUT take effect on real ISP Pico silicon (the ISP is present on E4/E6/E8 — **not E7** — though only E8 is wired up); non-Alif handle returns `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister`; **HAL-backed ISP statistics readback** on ISP Pico silicon — gated on the Alif ISP Pico HAL pack | v0.5 (header+stub), real bodies gate v0.x |
+| ISP (VeriSilicon ISP Pico (vsi,isp-pico)) vendor-ext surface | `src/backends/ext/alif/camera.c` + `<alp/ext/alif/camera.h>`. **The ISP Pico backend registers `priority = 100` on `silicon_ref = "alif:ensemble:e8"` only** (`src/backends/camera/alif_isp_pico.c`) — E4/E6 carry the ISP in silicon but get no backend registration today, and every `ext/alif/camera.c` entry point returns `ALP_ERR_NOSUPPORT` | ⏳ untested | 3A window / per-channel gain LUT / LSC MESH LUT take effect on real ISP Pico silicon (the ISP is present on E4/E6/E8 — **not E7** — though only E8 is wired up); non-Alif handle returns `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister`; **HAL-backed ISP statistics readback** on ISP Pico silicon — AE is declared in the vendored `isp_wrapper` headers but undefined in its archive (no Expm symbol), AF and LSC are absent from that archive outright (no header, no symbol), and, for an additional, independent reason, the gain path is contract-absent (see `src/backends/ext/alif/camera.c`) | v0.5 (header+stub), real bodies gate v0.x |
 | Inline-AES (OSPI SecAES) vendor-ext surface | `src/backends/ext/alif/storage.c` + `<alp/ext/alif/storage.h>` | ⏳ untested | SecAES key-provision binds a slot and encrypted XIP executes from OctalSPI on real ISP-Pico-tier silicon (E4/E6/E8); status read-back reports `ENGAGED` before XIP is trusted | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister`; **encrypted-XIP boot + status readback** on silicon — gated on the Alif SecAES HAL pack | v0.5 (header+stub), real bodies gate v0.x |
 
 ## v0.6.0 — V2N GD32-bridge silicon campaign (verified on the bench)

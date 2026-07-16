@@ -3,7 +3,7 @@
 # this file directly -- their own board.yaml either points at it
 # via `preset: e1m-x-evk` (for demo apps targeting the stock E1M-X
 # EVK) or carries the same fields inline at the top level (for
-# custom boards).  See docs/board-config.md.
+# custom boards).  See docs/board-config-schema.md.
 #
 # Reference board for the renesas-rzv2n SoM family (E1M-V2N /
 # E1M-V2M SKUs).  The

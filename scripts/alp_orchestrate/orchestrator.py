@@ -27,7 +27,8 @@ from .carveout import resolve_carve_outs
 from .manifest import _helper_mcus, emit_system_manifest
 from .models import BoardProject, OrchestratorError, Slice, SystemManifest
 from .paths import REPO
-from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
+from .secure import (emit_sysbuild_conf, emit_tfm_sysbuild_conf,
+                      sysbuild_family_base_conf)
 
 
 # metadata/sdk_version.yaml is the single source of the SDK's own
@@ -529,25 +530,52 @@ def _slice_command(
         # ADR 0014 Phase-3 conf->build: wire the generated sysbuild
         # overlays into the build command itself.  `_shared_artefacts`
         # emits the top-level overlay at build_root/alp_sysbuild.conf and
-        # the TF-M child overlay at build_root/sysbuild/tfm/tfm.conf; the
-        # command runs with cwd=build_dir (build/<core>-<os>), so the
-        # top-level overlay is one directory up.  Pass --sysbuild whenever
-        # a sysbuild child image is configured (a `boot:` or `security.psa:`
-        # block), and --sysbuild-config only when the top-level overlay is
-        # non-empty (the TF-M overlay is picked up by sysbuild convention
-        # from its sysbuild/tfm/ path).  Absent both, the stock per-family
-        # sysbuild defaults apply and no flag is added.
-        if emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project):
-            cmd.append("--sysbuild")
-            if emit_sysbuild_conf(project):
-                cmd += ["--sysbuild-config", "../alp_sysbuild.conf"]
+        # the TF-M child overlay at build_root/sysbuild/tfm/tfm.conf.
+        # Pass --sysbuild whenever a sysbuild child image is configured (a
+        # `boot:` or `security.psa:` block), and point sysbuild at the
+        # top-level overlay only when it is non-empty (the TF-M overlay is
+        # picked up by sysbuild convention from its sysbuild/tfm/ path).
+        # Absent both, the stock per-family sysbuild defaults apply.
+        #
         # Zephyr normally derives Python3_EXECUTABLE from the interpreter
         # that launched west (WEST_PYTHON). A pre-existing CMake cache can
         # already define Python3_EXECUTABLE, however, which prevents that
         # hand-off and can select a host Python without the west package.
         # The orchestrator itself runs under the intended workspace Python,
         # so pin it as an explicit CMake cache override (issue #787).
-        cmd += ["--", f"-DPython3_EXECUTABLE={sys.executable}"]
+        defines = [f"-DPython3_EXECUTABLE={sys.executable}"]
+        if emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project):
+            cmd.append("--sysbuild")
+            if emit_sysbuild_conf(project):
+                # SB_CONF_FILE is the only supported way to name a
+                # non-default top-level sysbuild overlay: `west build` is a
+                # ZEPHYR extension command, and no Zephyr has ever had a
+                # `--sysbuild-config` flag -- west forwarded the unknown
+                # argument to CMake, which failed the configure step with
+                # `Unknown argument --sysbuild-config` (issue #805).
+                #
+                # The path must be ABSOLUTE.  sysbuild resolves a relative
+                # SB_CONF_FILE against APP_DIR, not the command's cwd
+                # (share/sysbuild/cmake/modules/sysbuild_kconfig.cmake),
+                # so the cwd-relative form this used to emit would silently
+                # look for the overlay under the application's source dir.
+                sb_conf = (Path(slice_.build_dir).parent
+                           / "alp_sysbuild.conf").resolve()
+                # LAYER, don't replace: SB_CONF_FILE accepts a `;`-joined
+                # list, and sysbuild merges every listed file in order
+                # (later files win on a repeated symbol).  When the SoM
+                # family ships a curated zephyr/sysbuild/<family>/
+                # sysbuild.conf, put it FIRST so the customer's `boot:`
+                # overlay lands as deltas on top of the curated base
+                # instead of forking family boot policy into two
+                # divergent places (issue #807).
+                family_base = sysbuild_family_base_conf(project)
+                sb_conf_files = (
+                    [str(family_base), str(sb_conf)] if family_base
+                    else [str(sb_conf)]
+                )
+                defines.append(f"-DSB_CONF_FILE={';'.join(sb_conf_files)}")
+        cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":
         # `image:` always names a real recipe (e.g. `alp-image-edge`) --

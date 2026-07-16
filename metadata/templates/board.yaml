@@ -14,7 +14,7 @@
 # right fix is to extend the schema -- file an issue.
 #
 # See docs/heterogeneous-builds.md for the per-core walk-through
-# and docs/board-config.md for the schema reference.
+# and docs/board-config-schema.md for the schema reference.
 #
 # Validated against metadata/schemas/board.schema.json.
 
@@ -53,7 +53,7 @@ som:
   # falls back to the SKU preset's `default_hw_rev`.  Validated
   # against metadata/e1m_modules/<family>/hw-revisions.yaml at
   # build time + against the on-module BOARD_ID ADC channel at
-  # runtime.  See docs/board-config.md "Hardware revision tracking".
+  # runtime.  See docs/board-config-hardware.md "Hardware revision tracking".
   #
   # hw_rev: r1
 
@@ -97,7 +97,7 @@ cores:
     # Open-set escape hatch for libraries the SDK doesn't curate.
     # Each entry MUST declare exactly one of `kconfig:` (inline
     # fragment) or `profile:` (hw-backends.yaml-style file).  See
-    # docs/board-config.md `extra_libraries:` for the full reference.
+    # docs/board-config-schema.md `extra_libraries:` for the full reference.
     #
     # extra_libraries:
     #   - name: zforce

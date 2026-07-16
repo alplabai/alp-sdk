@@ -32,6 +32,33 @@ ZTEST(alp_chips, test_optiga_trust_m_init_null_args)
 	alp_i2c_close(bus);
 }
 
+/* #739: no fixed strap range is documented for Trust M (provisioning-
+ * defined address), so only the generic 7-bit domain bound applies;
+ * 0 stays the documented "use provisioned default" sentinel. */
+ZTEST(alp_chips, test_optiga_trust_m_init_validates_7bit_address_bound)
+{
+	optiga_trust_m_t ctx;
+	alp_i2c_t       *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	zassert_not_equal(optiga_trust_m_init(&ctx, bus, 0x00u),
+	                  ALP_ERR_INVAL,
+	                  "addr=0 is the documented default-address sentinel, must not be INVAL");
+	zassert_not_equal(optiga_trust_m_init(&ctx, bus, 0x7Fu),
+	                  ALP_ERR_INVAL,
+	                  "0x7F is the last valid 7-bit address");
+
+	zassert_equal(
+	    optiga_trust_m_init(&ctx, bus, 0x80u), ALP_ERR_INVAL, "0x80 exceeds 7-bit domain");
+	zassert_equal(
+	    optiga_trust_m_init(&ctx, bus, 0xFFu), ALP_ERR_INVAL, "0xFF exceeds 7-bit domain");
+
+	alp_i2c_close(bus);
+}
+
 ZTEST(alp_chips, test_optiga_trust_m_calls_reject_uninitialised)
 {
 	optiga_trust_m_t              ctx = { 0 };

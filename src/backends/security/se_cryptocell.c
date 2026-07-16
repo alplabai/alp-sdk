@@ -96,6 +96,7 @@
 #include <alp/peripheral.h>
 #include <alp/security.h>
 
+#include "alp_checked_arith.h"
 #include "security_ops.h"
 
 #if defined(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL)
@@ -404,12 +405,15 @@ static alp_status_t se_hash_update(alp_hash_backend_state_t *state, const uint8_
 	if (be->delegated) {
 		return be->psa_ops->hash_update(&be->psa_state, data, len);
 	}
-	if (be->used + len > sizeof(be->buf)) {
-		/* Input exceeds the single-shot SE SHA buffer.  The SE public
-		 * client exposes no streaming starts/update/finish service, and
-		 * the dispatcher already bound this backend at hash_open, so
-		 * migrate the handle to the portable PSA backend in place (it
-		 * replays the buffered bytes) and feed this chunk through it. */
+	if (!alp_size_range_valid(be->used, len, sizeof(be->buf))) {
+		/* Issue #737: alp_size_range_valid() never computes `be->used +
+		 * len`, so unlike the naive `be->used + len > sizeof(be->buf)`
+		 * it replaced, a size_t wrap in that sum cannot defeat it (see
+		 * src/common/alp_checked_arith.h for the general argument).
+		 * Input exceeds the single-shot SE SHA buffer; migrate the
+		 * handle to the portable PSA backend in place (it replays the
+		 * buffered bytes) and feed this chunk through it -- unchanged
+		 * from before #737. */
 		alp_status_t s = se_hash_delegate(state, be);
 		if (s != ALP_OK) {
 			return s;
