@@ -121,6 +121,23 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   map — `tests/unit/xhci_core` covers the HP and HE maps, the pass-through path
   and the `NULL` rejection.
 
+### Fixed — Alif PDM FIR coefficient bank written through `sys_write32` (#758)
+
+- `pdm_channel_config()` stored the FIR coefficients into the peripheral's
+  register bank with a plain `*ptr++ = value` walk over a **non-volatile**
+  `uint32_t *`. A plain pointer store carries no volatile or ordering
+  guarantee, so the compiler may reorder, merge or elide writes to what it
+  sees as an ordinary object. At `-O3` the original loop merges pairs into
+  `8x strd` (64-bit double-word MMIO stores) plus an alias-check branch against
+  the `FIR_COEF`/`IIR_COEF_SEL` split. No in-tree build reaches `-O3` today, so
+  this was a latent correctness risk rather than a live failure.
+- Each coefficient now goes through `sys_write32()`, Zephyr's volatile MMIO
+  accessor, indexed off a `uintptr_t` base.
+- `zephyr/drivers/audio/alif_pdm.c` is vendored from the fork, so the
+  divergence is recorded in the file's provenance header with a note to reapply
+  it on any re-sync (ADR 0017). The file stays `vendor-ext`,
+  `BENCH-UNVERIFIED`.
+
 ### Fixed — pure-C review of `dev`: overflow, contract and rollback defects (#732 #735 #736 #737 #738 #739 #740 #742 #743 #744 #745 #746 #747 #748 #749 #750 #753 #757 #759 #760)
 
 - **Checked arithmetic.** New private `src/common/alp_checked_arith.h`
