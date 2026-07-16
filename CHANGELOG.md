@@ -7,6 +7,46 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — #807's `SB_CONFIG_*` class gate now actually runs, and the last `--sysbuild-config` copy-paste is gone
+
+- **The class gate was green-by-skip on every PR.** #814 added
+  `test_emitted_sb_config_symbols_exist_in_pinned_zephyr` — the gate that makes
+  #807's defect class (invented sysbuild Kconfig symbol names) impossible by
+  asserting every emitted `SB_CONFIG_<X>` names a real `config <X>` in the
+  *pinned* Zephyr's `share/sysbuild/**/Kconfig*`. It resolves that oracle from
+  `$ZEPHYR_BASE` / the west topdir and `pytest.skip`s when neither exists. No job
+  satisfied the precondition: the only two running `tests/scripts/`
+  (`cross-platform-zephyr.yml:156`, `pr-metadata-validate.yml:385`) are
+  pure-Python checkouts with zero `west init` / `ZEPHYR_BASE`, while the jobs
+  that DO carry a workspace (`pr-twister.yml`, `pr-tier-a-libraries.yml`,
+  `nightly-aen-hil.yml`) never ran `tests/scripts/`. So the gate shipped, skipped
+  everywhere, and reported green while enforcing nothing — the same
+  "test agrees with itself" failure #807 was about, one level up.
+  `pr-twister.yml` now runs it on shard 1 (that job already `west init`s the
+  pinned v4.4.0, so the oracle is free there; shard 1 only, since the 4-way
+  matrix would otherwise repeat it identically).
+- **A skip can no longer hide.** `ALP_REQUIRE_ZEPHYR_ORACLE=1` turns the gate's
+  skip into a hard failure: a job that sets it has *promised* the workspace, so
+  an unresolvable one is a bug in the job, not an environment fact to skip past.
+  The bare skip stays correct for pure-Python jobs (python-smoke has no Zephyr
+  tree). Without this, the next gate needing a workspace repeats the same silent
+  no-op.
+- **`--sysbuild-config` survived #805 in seven places.** #805 removed the
+  nonexistent flag from the emitter, but every doc still told customers to type
+  it: `zephyr/sysbuild/aen/{sysbuild.conf,README.md}`, `docs/secure-boot.md`
+  (×3), `docs/tutorials/10-secure-boot-signing.md` (×2),
+  `docs/{bring-up-aen,aen-provisioning,_aen-runbook-section}.md`,
+  `examples/aen/aen-mcuboot-smoke/sysbuild.conf`, and
+  `metadata/emit-registry-v1.json`'s `consumer_hint`. All were copy-paste that
+  cannot work — `west build` is a Zephyr extension command, west forwards the
+  unknown argument to CMake and the configure dies with
+  `Unknown argument --sysbuild-config`. Now all say
+  `-- -DSB_CONF_FILE=<abs path>`, with the absolute-path requirement noted
+  (sysbuild resolves a relative `SB_CONF_FILE` against `APP_DIR`, not the
+  command's cwd). Historical mentions in `CHANGELOG.md`, `docs/adr/0014` and
+  `tests/scripts/test_orchestrate_buildplan.py` are left alone — they correctly
+  record the flag in the past tense.
+
 ### Fixed — ABI snapshot gate stopped regenerating the FROZEN v0.9 baseline against HEAD (#803)
 
 - `scripts/test-all.sh` hardcoded `docs/abi/v0.9-snapshot.json` as "the

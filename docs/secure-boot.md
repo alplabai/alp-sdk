@@ -48,7 +48,7 @@ The recommended path is the top-level `boot:` block in your
 project's `board.yaml` -- the loader (`scripts/alp_orchestrate/`)
 emits the matching `SB_CONFIG_*` overlay (sysbuild Kconfig) into
 `build/alp_sysbuild.conf` and passes it via
-`--sysbuild-config`.  No hand-edited sysbuild.conf.
+`-DSB_CONF_FILE`.  No hand-edited sysbuild.conf.
 
 ```yaml
 # board.yaml
@@ -81,11 +81,11 @@ explicit.
    west build -b alp_e1m_evk_aen \
        path/to/app \
        --sysbuild \
-       --sysbuild-config alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
+       -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
    ```
    (Or, if your `board.yaml` carries a `boot:` block, the loader's
    emitted overlay at `build/alp_sysbuild.conf` is the canonical
-   `--sysbuild-config` path.)
+   `-DSB_CONF_FILE` path.)
 4. `build/zephyr/zephyr.signed.bin` is your signed image.
 5. Flash both the MCUboot bootloader and the signed app:
    ```bash

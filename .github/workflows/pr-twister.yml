@@ -152,6 +152,31 @@ jobs:
             --inline-logs \
             --no-detailed-test-id
 
+      # The SB_CONFIG_* class gate (#807 / #814) asserts every symbol
+      # emit_sysbuild_conf() produces names a real `config` in the
+      # PINNED Zephyr's share/sysbuild/**/Kconfig* -- so it needs a
+      # Zephyr workspace as its oracle.  It shipped with no job that
+      # had one: the only two jobs running tests/scripts/ (python-smoke
+      # in cross-platform-zephyr.yml, pr-metadata-validate.yml) are
+      # pure-Python checkouts, so the gate pytest.skip'd on every PR
+      # and reported green while enforcing nothing.
+      #
+      # This job already west-init'd the pinned v4.4.0 tree above, so
+      # the oracle is free here -- run it on shard 1 only (the matrix
+      # would otherwise run it 4x identically).  ALP_REQUIRE_ZEPHYR_ORACLE=1
+      # turns the gate's skip into a hard failure: this job PROMISES
+      # the workspace, so an unresolvable one is a bug in the job, not
+      # an environment fact to skip past.
+      - name: check · SB_CONFIG_* symbols exist in pinned Zephyr (#807 class gate)
+        if: matrix.shard == 1
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ALP_REQUIRE_ZEPHYR_ORACLE: '1'
+        run: |
+          python3 -m pytest tests/scripts/test_hil_blocks_coverage.py -q \
+            -k test_emitted_sb_config_symbols_exist_in_pinned_zephyr
+
       # Persist the twister REPORTS (json/xml/log) regardless of
       # pass/fail.  Do NOT upload the whole twister-out/ tree: the
       # per-test build directories grew past 2 GB with the v0.6

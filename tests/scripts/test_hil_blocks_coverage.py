@@ -351,12 +351,31 @@ def test_emitted_sb_config_symbols_exist_in_pinned_zephyr(
     configure (issue #807)."""
     symbols = _pinned_zephyr_sysbuild_kconfig_symbols()
     if symbols is None:
+        # A skip is correct on a pure-Python job (python-smoke has no
+        # Zephyr checkout) but it is ALSO how this gate silently stopped
+        # gating: #814 shipped it, and for a while NO job satisfied its
+        # precondition, so it skipped on every PR and reported green
+        # while enforcing nothing -- the same "test agrees with itself"
+        # failure #807 was about, one level up.  A job that intends to
+        # run this gate sets ALP_REQUIRE_ZEPHYR_ORACLE=1; there, an
+        # unresolvable workspace is a BUG IN THE JOB, not an
+        # environment fact, so fail loudly instead of skipping green.
+        if os.environ.get("ALP_REQUIRE_ZEPHYR_ORACLE") == "1":
+            pytest.fail(
+                "ALP_REQUIRE_ZEPHYR_ORACLE=1 but no pinned Zephyr "
+                "workspace resolved ($ZEPHYR_BASE / west-workspace "
+                "zephyr/ matching west.yml's pin).  This job promised "
+                "the oracle and did not deliver it -- fix the job's "
+                "west init / ZEPHYR_BASE, do not drop the flag."
+            )
         pytest.skip(
             "pinned Zephyr workspace not resolvable in this environment "
             "(no $ZEPHYR_BASE / west-workspace zephyr/ checkout matching "
             "this repo's west.yml pin) -- not a west/toolchain job, skip "
             "rather than hard-fail (python-smoke runs pure-Python, no "
-            "Zephyr checkout)."
+            "Zephyr checkout).  Set ALP_REQUIRE_ZEPHYR_ORACLE=1 in a job "
+            "that DOES provide the workspace to turn this skip into a "
+            "failure."
         )
     boot: dict = {"method": method}
     if method == "mcuboot":
