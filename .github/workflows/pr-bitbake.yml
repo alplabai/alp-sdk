@@ -32,6 +32,19 @@ on:
       - 'metadata/**'
       - 'scripts/**'
       - 'examples/**/board.yaml'
+      # The example SOURCE that meta-alp-sdk recipes actually compile.  Listed
+      # explicitly rather than as a blanket `examples/**`: a bake is hours long
+      # and runs on the bench host, so a Zephyr-only example edit must not
+      # trigger one.  Kept honest by tests/scripts/test_bitbake_paths_cover_recipe_sources.py,
+      # which fails if a recipe's `S = ...examples/...` is not matched here --
+      # otherwise adding a recipe silently drops it from CI.
+      #
+      # Why this exists: #818 fixed alp-lvgl-dashboard's do_compile, and its
+      # merge triggered NO bake, because CMakeLists.txt -- the very file the
+      # recipe compiles -- matched none of these paths.  Only board.yaml did.
+      - 'examples/aen/edgeai-vision-aen/**'
+      - 'examples/display/lvgl-dashboard-x-evk/**'
+      - 'examples/v2n/v2n-m1-ros-perception/**'
       - 'src/**'
       - 'meta-alp-sdk/**'
       - '.github/workflows/pr-bitbake.yml'
@@ -41,8 +54,13 @@ on:
       - 'metadata/**'
       - 'scripts/**'
       - 'examples/**/board.yaml'
+      # Keep in lockstep with the pull_request list above.
+      - 'examples/aen/edgeai-vision-aen/**'
+      - 'examples/display/lvgl-dashboard-x-evk/**'
+      - 'examples/v2n/v2n-m1-ros-perception/**'
       - 'src/**'
       - 'meta-alp-sdk/**'
+      - '.github/workflows/pr-bitbake.yml'
   workflow_dispatch:
 
 concurrency:
