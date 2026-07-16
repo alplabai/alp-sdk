@@ -7,6 +7,51 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — `alp-lvgl-dashboard` recipe `do_compile`: `lv_conf.h` not found + missing libdrm link
+
+- With #817's pseudo fix, the `e1m-v2n101-a55` bake now reaches deep enough
+  (9272 tasks attempted, 5256 cached) to hit a real, unrelated failure:
+  `alp-lvgl-dashboard do_compile` fatal-erroring on
+  `recipe-sysroot/usr/include/lvgl/src/lv_conf_internal.h:59:18: fatal error:
+  ../../lv_conf.h: No such file or directory`. Invisible for 9 days only
+  because nothing had gotten past `base-files` before.
+- Root cause: `examples/display/lvgl-dashboard-x-evk/CMakeLists.txt` linked
+  the distro's shared LVGL via a bare `find_library(LVGL_LIB lvgl)`, with no
+  `target_include_directories` and no `LV_CONF_INCLUDE_SIMPLE` define.
+  meta-oe's `lvgl.pc` stages `lv_conf.h` at `include/lvgl/lv_conf.h` and
+  carries the `-I` for it, but LVGL only uses that path when
+  `LV_CONF_INCLUDE_SIMPLE` is defined; without it, `lv_conf_internal.h`
+  falls through to `#include "../../lv_conf.h"` (relative to
+  `include/lvgl/src/`), which resolves to `/usr/lv_conf.h` and doesn't
+  exist.
+- Fixed by consuming LVGL via `pkg_check_modules(... IMPORTED_TARGET lvgl)`
+  so the `-I` comes from `lvgl.pc` itself, plus
+  `target_compile_definitions(... LV_CONF_INCLUDE_SIMPLE)` on the example
+  target (not `EXTRA_OECMAKE` in the recipe, so the documented standalone
+  `-DCMAKE_TOOLCHAIN_FILE=<sysroot>/toolchain.cmake` cross-compile path also
+  gets it). Kept a `find_library` fallback behind `if(NOT LVGL_FOUND)` for
+  sysroots/toolchains without pkg-config wired up, so that documented path
+  isn't silently broken.
+- Getting past the header uncovered a second, previously-unreachable defect:
+  `liblvgl.so` calls into libdrm (`lv_linux_drm.c`, built in per the existing
+  `PACKAGECONFIG = "drm"` requirement) but neither declares libdrm in
+  `lvgl.pc` nor links it into the `.so` itself (`readelf -d` shows only
+  `libc.so.6` / `ld-linux-aarch64.so.1` as `NEEDED`) — so poky's default
+  `--no-allow-shlib-undefined` leaves `drmMode*`/`drmIoctl` unresolved at our
+  final link. Linked `libdrm` explicitly (pkg-config, with a `find_library`
+  fallback) rather than relying on it arriving transitively via LVGL.
+- Checked the other three LVGL examples (`lvgl-benchmark`, `lvgl-widgets-demo`,
+  `lvgl-music-player`): they're Zephyr targets pulling LVGL in via
+  `ZEPHYR_LVGL_MODULE_DIR` (the Zephyr `lvgl` module), not this raw
+  `find_library` pattern — not affected, no follow-up needed there.
+- Verified against real bitbake, not just a CMake configure: pointed
+  `EXTERNALSRC:pn-alp-lvgl-dashboard` at this branch in
+  `build-e1m-v2n101-a55/conf/local.conf` (build-dir-local override, not
+  committed — the recipe's `SRCREV = "${AUTOREV}"` on `branch=dev` won't see
+  this fix until merged) and ran `bitbake -c compile -f alp-lvgl-dashboard`:
+  `do_compile` now succeeds end-to-end and produces a linked
+  `ELF 64-bit ... ARM aarch64 ... pie executable`.
+
 ### Fixed — bitbake `base-files do_package` EFAULT on GNU tar 1.35 / pseudo openat2 (alplabai/alp-sdk-internal#24)
 
 - Every A-cluster MACHINE's bitbake CI died at `base-files do_package` with
