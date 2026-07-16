@@ -2847,7 +2847,7 @@
           "kind": "fnptr"
         },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; cc3501e_event_cb_t event_cb; void *event_user; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; cc3501e_event_cb_t event_cb; void *event_user; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "alp_spi_t *bus",
@@ -2857,9 +2857,15 @@
             "cc3501e_event_cb_t event_cb",
             "void *event_user",
             "uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]",
-            "uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]"
+            "uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]",
+            "uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]",
+            "uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]",
+            "uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]",
+            "bool wifi_scan_busy",
+            "bool ble_scan_busy",
+            "bool evt_busy"
           ],
-          "hash": "6ffdf3be3ab26de4",
+          "hash": "f21bf2fc8bd4f83d",
           "kind": "struct"
         }
       },
@@ -3093,6 +3099,18 @@
         "CC3501E_SSID_MAX": {
           "hash": "7429591951fba979",
           "value": "32u"
+        },
+        "CC3501E_WIFI_CONNECT_SEC_OPEN": {
+          "hash": "c29ae8a1c13cbe91",
+          "value": "((uint8_t)0u)"
+        },
+        "CC3501E_WIFI_CONNECT_SEC_WPA2_PSK": {
+          "hash": "8ee47afcb4ccf41d",
+          "value": "((uint8_t)1u)"
+        },
+        "CC3501E_WIFI_CONNECT_SEC_WPA3_SAE": {
+          "hash": "c14a0768fe43559f",
+          "value": "((uint8_t)2u)"
         }
       },
       "typedefs": {
@@ -7220,6 +7238,10 @@
         }
       },
       "macros": {
+        "TCAL9538_I2C_ADDR_ALT_BASE": {
+          "hash": "c6fab2ccae63eba0",
+          "value": "0x20u"
+        },
         "TCAL9538_I2C_ADDR_BASE": {
           "hash": "cd4562ddb3e3ff28",
           "value": "0x70u"

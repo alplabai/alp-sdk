@@ -111,7 +111,6 @@ _DOC_SUBDIRS = ("tutorials", "soms", "boards")
 # excluded from the dead-symbol scan (like docs/superpowers/).  They
 # REMAIN required in the docs index (check b) -- they are real docs.
 _SCAN_EXCLUDE_DOCS = {
-    "cc3501e-integration-plan.md",   # CC3501E integration *plan* (proposed API)
     "v0.6-tbd-and-assumptions.md",   # in-flight v0.6 TBDs / assumptions
 }
 

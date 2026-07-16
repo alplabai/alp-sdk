@@ -22,19 +22,17 @@ boot:
   signing:
     algorithm: ecdsa_p256
     key_file:  keys/prod_ecdsa_p256.pub.pem
-  slots:
-    primary:   { size_kib: 1024 }
-    secondary: { size_kib: 1024 }
-  swap_algorithm:   scratch
-  scratch_size_kib: 64
-  anti_rollback:    true
+  swap_algorithm: scratch
 ```
 
 Drives sysbuild's MCUboot child image. ECDSA-P256 ties to the
-OPTIGA Trust M production key (see `iot-fleet-ota`).
-`anti_rollback: true` enables monotonic image counters -- this
-requires OTP fuse provisioning at factory test (one-way; cannot
-be backed out in the field).
+OPTIGA Trust M production key (see `iot-fleet-ota`). Slot/scratch
+partition *sizes* aren't a `boot:` field -- MCUboot takes its
+geometry from the board DT `partitions {}` node; this example
+declares the layout explicitly via `storage:` below instead.
+Downgrade prevention is the `ota.rollback.min_version` software
+floor below; a hardware anti-rollback counter tier (OPTIGA/OTP
+fuse) isn't built yet, so this skeleton doesn't claim one.
 
 ### `ota:` -- Mender HTTPS poll + A/B rollback
 
@@ -90,8 +88,9 @@ storage:
   - { name: app_data,          fs: littlefs, size_kib:  256, flash_device: mram_main, mount: /lfs/app }
 ```
 
-The MCUboot slots are explicit (matching `boot.slots:` sizes);
-Zephyr's settings subsystem gets its own littlefs partition;
+The MCUboot slots are explicit here -- this is the only place their
+size is declared, since `boot:` has no slot-size field; Zephyr's
+settings subsystem gets its own littlefs partition;
 app-managed runtime data gets its own. Adds to ~2.4 MiB of the
 AEN E8's 5.5 MiB MRAM -- the rest stays free for code + MCUboot
 itself + TF-M's secure partition. The orchestrator emits a

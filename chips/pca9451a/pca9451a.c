@@ -186,7 +186,12 @@ static alp_status_t uv_to_vsel(rail_kind_t kind, int32_t uv, uint8_t *code)
 
 alp_status_t pca9451a_init_at(pca9451a_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 {
-	if (ctx == NULL || bus == NULL || addr_7bit == 0) return ALP_ERR_INVAL;
+	/* addr_7bit == 0 has no fallback meaning for this driver (unlike
+	 * ina236/tcal9538) -- callers wanting the POR default use
+	 * pca9451a_init(); reject it here alongside the generic 7-bit
+	 * domain bound (OTP reprogramming has no fixed strap range this
+	 * driver can assert further). */
+	if (ctx == NULL || bus == NULL || addr_7bit == 0 || addr_7bit > 0x7Fu) return ALP_ERR_INVAL;
 
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->bus  = bus;

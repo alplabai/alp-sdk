@@ -246,7 +246,7 @@
     "boot": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Optional bootloader + image-signing configuration.  When absent, SDK defaults apply (AEN-Zephyr: MCUboot + ECDSA-P256 + swap-using-scratch + 480 KiB slots; Yocto SoMs: U-Boot inherited from machine.conf).  Project-wide (not per-core): the bootloader is a device-level artifact, not a per-OS choice.  See docs/secure-boot.md.",
+      "description": "Optional bootloader + image-signing configuration.  When absent, SDK defaults apply (AEN-Zephyr: MCUboot + ECDSA-P256 + swap-using-scratch; Yocto SoMs: U-Boot inherited from machine.conf).  Project-wide (not per-core): the bootloader is a device-level artifact, not a per-OS choice.  Slot/scratch partition *sizes* are NOT configurable here -- MCUboot takes slot geometry from the board DT partitions (an SDK build-policy choice, not a per-project field; see `storage:` to declare the actual partition table), and `anti_rollback` was removed because only SW downgrade prevention (`ota.rollback.min_version`) is wired today -- the OPTIGA/OTP HW counter tier is unbuilt, so the field promised a security guarantee the SDK didn't deliver.  See docs/secure-boot.md.",
       "properties": {
         "method": {
           "type": "string",
@@ -262,7 +262,7 @@
             "algorithm": {
               "type": "string",
               "enum": ["ecdsa_p256", "rsa2048", "rsa3072", "ed25519"],
-              "description": "Image signature algorithm.  Must match the SoM's hardware constraints (e.g. OPTIGA Trust M slot type on AEN)."
+              "description": "Image signature algorithm.  Must match the SoM's hardware constraints (e.g. OPTIGA Trust M slot type on AEN).  For `method: mcuboot`: sysbuild's BOOT_SIGNATURE_TYPE choice has no RSA key-length knob, so `rsa3072` is rejected at emit time until a per-image sysbuild/mcuboot.conf overlay seam ships -- use `rsa2048` (mcuboot's RSA default length) or ecdsa_p256/ed25519.  rsa2048/rsa3072 remain load-bearing for the Renesas RZ/V2N and NXP i.MX 9 U-Boot/FIT signing paths, which don't go through sysbuild."
             },
             "key_file": {
               "type": "string",
@@ -270,32 +270,11 @@
             }
           }
         },
-        "slots": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["primary", "secondary"],
-          "description": "Dual-bank image partition layout.  Sizes validated against the SoM preset's `memory_map:` at load time.",
-          "properties": {
-            "primary":   { "type": "object", "additionalProperties": false, "required": ["size_kib"], "properties": { "size_kib": { "type": "integer", "minimum": 32 } } },
-            "secondary": { "type": "object", "additionalProperties": false, "required": ["size_kib"], "properties": { "size_kib": { "type": "integer", "minimum": 32 } } }
-          }
-        },
         "swap_algorithm": {
           "type": "string",
           "enum": ["scratch", "move", "overwrite"],
           "default": "scratch",
           "description": "MCUboot swap strategy.  `scratch` (crash-safe, needs scratch partition), `move` (more erases, no scratch), `overwrite` (no rollback)."
-        },
-        "scratch_size_kib": {
-          "type": "integer",
-          "minimum": 16,
-          "default": 32,
-          "description": "Scratch partition size (only when swap_algorithm is `scratch`)."
-        },
-        "anti_rollback": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable monotonic image counters.  Requires OTP fuse provisioning at production time (see docs/secure-boot.md §anti-rollback)."
         },
         "build_type": {
           "type": "string",

@@ -7,6 +7,443 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — `packagegroup-alp-display` allarch/libdrm RDEPENDS error
+
+- A full `alp-image-edge` bake for `e1m-v2n101-a55` now completes
+  (11168/11168 tasks, all succeeded — the pseudo/openat2 and lvgl fixes
+  landed as #817/#818), but the cooker log carried one non-fatal ERROR:
+  `packagegroup-alp-display-1.0-r0 do_package_write_rpm: An allarch
+  packagegroup shouldn't depend on packages which are dynamically renamed
+  (libdrm to libdrm2)`. `inherit packagegroup` makes the group allarch, and
+  `libdrm` is dynamically renamed per-arch to `libdrm2`
+  (`debian.bbclass`) — an allarch package RDEPENDing on an arch-renamed name
+  is invalid. Pre-existing since `a290b9f3` (#435); unrelated to #818's
+  libdrm *link* in the lvgl example's CMakeLists.
+- Dropped the explicit `libdrm` line from
+  `packagegroup-alp-display`'s `RDEPENDS`. Verified via
+  `weston_13.0.1.bb` and the built `pkgdata` that this is redundant, not a
+  behaviour change: `weston` RDEPENDS on `libweston-13`, and
+  `libweston-13`'s `drm-backend.so` / `libweston-13.so.0.0.1` link
+  `libdrm.so.2` directly, so BitBake's shlibs mechanism already emits an
+  automatic `RDEPENDS:libweston-13: ... libdrm (>= 2.4.120) ...` — the
+  packagegroup's explicit line was a redundant, and now illegal, restatement
+  of a dependency weston already carries transitively.
+- Verified against a real rebuild of the failing task (isolated build dir,
+  `EXTERNALSRC` pointed at the fix branch): `bitbake -c package_write_rpm
+  packagegroup-alp-display -f` — `do_package_write_rpm: Succeeded`, the
+  allarch/libdrm ERROR is gone (only the expected "tainted from a forced
+  run" WARNING remains), and `tmp/pkgdata/.../runtime/libweston-13` still
+  shows `libdrm (>= 2.4.120)` in its (arch-specific, legal) `RDEPENDS`, so
+  `libdrm2` still reaches any image that installs `packagegroup-alp-display`.
+
+### Fixed — `pr-bitbake` never triggered on the example source its recipes compile
+
+- `pr-bitbake.yml` filtered `examples/**/board.yaml` but not example **source**,
+  so a Yocto-breaking edit to a file a recipe actually compiles landed with **no
+  bake at all**. Found the hard way: #818 fixed `alp-lvgl-dashboard`'s
+  `do_compile`, and merging it triggered nothing — `lvgl-dashboard-x-evk/CMakeLists.txt`,
+  the exact file the recipe builds, matched none of the filters. The gap was never
+  lvgl-specific: **all three** Yocto-compiled examples were uncovered
+  (`edgeai-vision-aen`, `lvgl-dashboard-x-evk`, `v2n-m1-ros-perception`).
+- Added those three source trees to the `paths:` filters, for `pull_request` and
+  `push` both. Deliberately NOT a blanket `examples/**`: a bake is hours long and
+  runs on the bench host, so a Zephyr-only example edit must not trigger one.
+- That precision is exactly what rots, and silently — so
+  `tests/scripts/test_bitbake_paths_cover_recipe_sources.py` derives the truth from
+  the **recipes** (every `S = ${WORKDIR}/git/examples/...` in `meta-alp-sdk/**.bb`)
+  and fails if any is unmatched, in either filter, or if the two lists drift apart.
+  The oracle is the recipe set, never a hand-typed list. Verified sensitive: it
+  fails on the pre-fix workflow, naming all three examples.
+
+### Fixed — `alp-lvgl-dashboard` recipe `do_compile`: `lv_conf.h` not found + missing libdrm link
+
+- With #817's pseudo fix, the `e1m-v2n101-a55` bake now reaches deep enough
+  (9272 tasks attempted, 5256 cached) to hit a real, unrelated failure:
+  `alp-lvgl-dashboard do_compile` fatal-erroring on
+  `recipe-sysroot/usr/include/lvgl/src/lv_conf_internal.h:59:18: fatal error:
+  ../../lv_conf.h: No such file or directory`. Invisible for 9 days only
+  because nothing had gotten past `base-files` before.
+- Root cause: `examples/display/lvgl-dashboard-x-evk/CMakeLists.txt` linked
+  the distro's shared LVGL via a bare `find_library(LVGL_LIB lvgl)`, with no
+  `target_include_directories` and no `LV_CONF_INCLUDE_SIMPLE` define.
+  meta-oe's `lvgl.pc` stages `lv_conf.h` at `include/lvgl/lv_conf.h` and
+  carries the `-I` for it, but LVGL only uses that path when
+  `LV_CONF_INCLUDE_SIMPLE` is defined; without it, `lv_conf_internal.h`
+  falls through to `#include "../../lv_conf.h"` (relative to
+  `include/lvgl/src/`), which resolves to `/usr/lv_conf.h` and doesn't
+  exist.
+- Fixed by consuming LVGL via `pkg_check_modules(... IMPORTED_TARGET lvgl)`
+  so the `-I` comes from `lvgl.pc` itself, plus
+  `target_compile_definitions(... LV_CONF_INCLUDE_SIMPLE)` on the example
+  target (not `EXTRA_OECMAKE` in the recipe, so the documented standalone
+  `-DCMAKE_TOOLCHAIN_FILE=<sysroot>/toolchain.cmake` cross-compile path also
+  gets it). Kept a `find_library` fallback behind `if(NOT LVGL_FOUND)` for
+  sysroots/toolchains without pkg-config wired up, so that documented path
+  isn't silently broken.
+- Getting past the header uncovered a second, previously-unreachable defect:
+  `liblvgl.so` calls into libdrm (`lv_linux_drm.c`, built in per the existing
+  `PACKAGECONFIG = "drm"` requirement) but neither declares libdrm in
+  `lvgl.pc` nor links it into the `.so` itself (`readelf -d` shows only
+  `libc.so.6` / `ld-linux-aarch64.so.1` as `NEEDED`) — so poky's default
+  `--no-allow-shlib-undefined` leaves `drmMode*`/`drmIoctl` unresolved at our
+  final link. Linked `libdrm` explicitly (pkg-config, with a `find_library`
+  fallback) rather than relying on it arriving transitively via LVGL.
+- Checked the other three LVGL examples (`lvgl-benchmark`, `lvgl-widgets-demo`,
+  `lvgl-music-player`): they're Zephyr targets pulling LVGL in via
+  `ZEPHYR_LVGL_MODULE_DIR` (the Zephyr `lvgl` module), not this raw
+  `find_library` pattern — not affected, no follow-up needed there.
+- Verified against real bitbake, not just a CMake configure: pointed
+  `EXTERNALSRC:pn-alp-lvgl-dashboard` at this branch in
+  `build-e1m-v2n101-a55/conf/local.conf` (build-dir-local override, not
+  committed — the recipe's `SRCREV = "${AUTOREV}"` on `branch=dev` won't see
+  this fix until merged) and ran `bitbake -c compile -f alp-lvgl-dashboard`:
+  `do_compile` now succeeds end-to-end and produces a linked
+  `ELF 64-bit ... ARM aarch64 ... pie executable`.
+
+### Fixed — bitbake `base-files do_package` EFAULT on GNU tar 1.35 / pseudo openat2 (alplabai/alp-sdk-internal#24)
+
+- Every A-cluster MACHINE's bitbake CI died at `base-files do_package` with
+  `tar: ./var/lib: Cannot mkdir: Bad address`, 0/200 runs. Root cause: GNU tar
+  1.35 (Ubuntu 24.04 stock) creates its directory fd via the `openat2(2)`
+  syscall, which vendored pseudo 1.9.0 does not wrap — the fd's path is never
+  tracked, so pseudo's `mkdirat()` wrapper forwards a NULL path to the kernel,
+  which correctly EFAULTs it. Proven by strace under a virgin
+  `PSEUDO_LOCALSTATEDIR`. Not a kernel bug and not fixed by containerizing on
+  24.04 (same tar either way).
+- Added `meta-alp-sdk/recipes-devtools/pseudo/pseudo_git.bbappend`, bumping
+  pseudo-native to the SRCREV/PV upstream poky's scarthgap branch already
+  carries (which implements the `openat2` wrapper), dropping the two local
+  patches that landed upstream in the interim, and shipping upstream's
+  already-rebased copy of the one remaining native-only patch so it still
+  applies against the new source. The vendored poky snapshot itself is left
+  untouched (ADR 0017) — this bbappend is deletable once the vendor BSP ships
+  a poky that already pins the fixed pseudo.
+- Verified end-to-end, not just parsed: built `pseudo-native` and confirmed
+  the `openat2` wrapper is present in the compiled `libpseudo.so`; reproduced
+  the original EFAULT with the old pseudo under a virgin
+  `PSEUDO_LOCALSTATEDIR` and confirmed the same `tar -cf - | tar -xf -`
+  sequence now succeeds under the new one; then ran the real
+  `bitbake base-files -c package` for `e1m-v2m101-a55` (the exact failing
+  task) to completion.
+
+### Fixed — #807's `SB_CONFIG_*` class gate now actually runs, and the last `--sysbuild-config` copy-paste is gone
+
+- **The class gate was green-by-skip on every PR.** #814 added
+  `test_emitted_sb_config_symbols_exist_in_pinned_zephyr` — the gate that makes
+  #807's defect class (invented sysbuild Kconfig symbol names) impossible by
+  asserting every emitted `SB_CONFIG_<X>` names a real `config <X>` in the
+  *pinned* Zephyr's `share/sysbuild/**/Kconfig*`. It resolves that oracle from
+  `$ZEPHYR_BASE` / the west topdir and `pytest.skip`s when neither exists. No job
+  satisfied the precondition: the only two running `tests/scripts/`
+  (`cross-platform-zephyr.yml:156`, `pr-metadata-validate.yml:385`) are
+  pure-Python checkouts with zero `west init` / `ZEPHYR_BASE`, while the jobs
+  that DO carry a workspace (`pr-twister.yml`, `pr-tier-a-libraries.yml`,
+  `nightly-aen-hil.yml`) never ran `tests/scripts/`. So the gate shipped, skipped
+  everywhere, and reported green while enforcing nothing — the same
+  "test agrees with itself" failure #807 was about, one level up.
+  `pr-twister.yml` now runs it on shard 1 (that job already `west init`s the
+  pinned v4.4.0, so the oracle is free there; shard 1 only, since the 4-way
+  matrix would otherwise repeat it identically).
+- **A skip can no longer hide.** `ALP_REQUIRE_ZEPHYR_ORACLE=1` turns the gate's
+  skip into a hard failure: a job that sets it has *promised* the workspace, so
+  an unresolvable one is a bug in the job, not an environment fact to skip past.
+  The bare skip stays correct for pure-Python jobs (python-smoke has no Zephyr
+  tree). Without this, the next gate needing a workspace repeats the same silent
+  no-op.
+- **`--sysbuild-config` survived #805 in seven places.** #805 removed the
+  nonexistent flag from the emitter, but every doc still told customers to type
+  it: `zephyr/sysbuild/aen/{sysbuild.conf,README.md}`, `docs/secure-boot.md`
+  (×3), `docs/tutorials/10-secure-boot-signing.md` (×2),
+  `docs/{bring-up-aen,aen-provisioning,_aen-runbook-section}.md`,
+  `examples/aen/aen-mcuboot-smoke/sysbuild.conf`, and
+  `metadata/emit-registry-v1.json`'s `consumer_hint`. All were copy-paste that
+  cannot work — `west build` is a Zephyr extension command, west forwards the
+  unknown argument to CMake and the configure dies with
+  `Unknown argument --sysbuild-config`. Now all say
+  `-- -DSB_CONF_FILE=<abs path>`, with the absolute-path requirement noted
+  (sysbuild resolves a relative `SB_CONF_FILE` against `APP_DIR`, not the
+  command's cwd). Historical mentions in `CHANGELOG.md`, `docs/adr/0014` and
+  `tests/scripts/test_orchestrate_buildplan.py` are left alone — they correctly
+  record the flag in the past tense.
+
+### Fixed — ABI snapshot gate stopped regenerating the FROZEN v0.9 baseline against HEAD (#803)
+
+- `scripts/test-all.sh` hardcoded `docs/abi/v0.9-snapshot.json` as "the
+  current snapshot" in both `stage_abi_strict` and `stage_generated_files`,
+  even though `metadata/sdk_version.yaml` had moved to `0.10.1` and
+  `docs/abi/v0.10-snapshot.json` was the real current snapshot. Every local
+  run (and every PR author who ran the reproduction script) regenerated the
+  frozen v0.9 release fingerprint against today's headers, reported the
+  result as drift, and was told to commit it -- the `generated-files` stage
+  had been red for exactly this reason on every PR. Added an
+  `abi_current_snapshot()` helper that derives the path from
+  `metadata/sdk_version.yaml` (`0.10.1` -> `docs/abi/v0.10-snapshot.json`) so
+  both stages -- and the next release cut -- always target the real current
+  snapshot instead of a version literal someone forgot to bump.
+- `scripts/abi_snapshot.py --output` now refuses to write a snapshot whose
+  `--version` doesn't match `metadata/sdk_version.yaml`'s declared current
+  release, so even a caller that still names an old/frozen version by hand
+  (a forgotten-to-update CI step, a stale local script) gets a loud failure
+  instead of silently corrupting a snapshot that is supposed to be frozen.
+  This is the guard that makes the whole bug class impossible, not just this
+  occurrence of it.
+- The corruption turned out to be recursive: `docs/abi/v0.8-snapshot.json`
+  (25 commits) and `docs/abi/v0.9-snapshot.json` (24 commits) had each kept
+  drifting for as long as the hardcoded literal pointed at them, well past
+  the release that should have frozen them -- v0.8 rotted while v0.9 was
+  "current"; v0.9 rotted once v0.10 was cut. Restored `docs/abi/v0.6-`,
+  `v0.7-`, `v0.8-`, and `v0.9-snapshot.json` from their release tags
+  (`v0.6.0`, `v0.7.0`, `v0.8.0`, `v0.9.0` -- `v0.8.0` and `v0.8.1` produced
+  byte-identical fingerprints, so `v0.8` is sourced from `v0.8.0`). A frozen
+  snapshot that keeps tracking `HEAD` defeats its entire purpose per
+  `docs/abi/README.md`: it makes a real ABI regression against that release
+  invisible, because the baseline moves with the change that broke it.
+  `v0.1`/`v0.3`/`v0.5` predate the `vX.Y.Z` release-tag convention (no
+  matching git tag exists) and were left as committed rather than
+  force-restored against nothing.
+- `docs/abi/README.md` now says plainly that exactly one snapshot is current
+  at any time and every other one is frozen forever, and fills in the
+  `v0.7`-`v0.10` rows the "Versions on file" table had never gained.
+
+### Fixed — `boot:` sysbuild emit no longer aborts every MCUboot configure (#807)
+
+- `scripts/alp_orchestrate/secure.py::emit_sysbuild_conf()` was emitting six
+  `SB_CONFIG_*` symbols that exist nowhere in Zephyr 4.4.0's sysbuild Kconfig
+  tree (`MCUBOOT_MODE_SWAP_USING_SCRATCH`, three invented
+  `MCUBOOT_SIGNATURE_TYPE_*` names, and two invented partition-size symbols)
+  plus one real symbol emitted into the wrong Kconfig namespace
+  (`SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA_LEN` -- the real
+  `BOOT_SIGNATURE_TYPE_RSA_LEN` is an mcuboot-image `CONFIG_`, not a sysbuild
+  `SB_CONFIG_`). sysbuild treats an undefined-symbol warning as FATAL, so any
+  `board.yaml` `boot:` block aborted the whole sysbuild configure. Fixed the
+  real symbol names (`MCUBOOT_MODE_SWAP_SCRATCH`,
+  `BOOT_SIGNATURE_TYPE_{ECDSA_P256,RSA,ED25519}`) and dropped the invented
+  emits entirely -- slot/scratch partition *sizes* have no sysbuild
+  expression at all; MCUboot takes its geometry from the board DT
+  `partitions {}` node, not a Kconfig symbol.
+- `boot.signing.algorithm: rsa3072` now hard-errors in the `mcuboot` path
+  (sysbuild's `BOOT_SIGNATURE_TYPE_RSA` choice has no key-length knob --
+  that's a different, mcuboot-image-only Kconfig namespace) instead of
+  silently emitting `rsa2048`'s default length. `rsa2048` maps to
+  `SB_CONFIG_BOOT_SIGNATURE_TYPE_RSA=y`. `rsa2048`/`rsa3072` remain valid
+  schema values -- they're load-bearing for the Renesas RZ/V2N and NXP
+  i.MX 9 U-Boot/FIT signing paths, which never reach this emitter.
+- Removed the `boot.slots` (primary/secondary `size_kib`),
+  `boot.scratch_size_kib`, and `boot.anti_rollback` `board.yaml` schema
+  fields (no legacy shim -- no active customers). Slot/scratch sizes were
+  already documented as an SDK build-policy generator constant
+  (`scripts/gen_zephyr_board.py`), not a per-project fact, and the schema's
+  480/32 KiB defaults had drifted from both the generator constant (64 KiB
+  scratch) and the committed AEN board DT (2688 KiB slots). `anti_rollback`
+  promised an OTP-fused hardware counter tier that was never built -- only
+  software downgrade prevention (`ota.rollback.min_version`) is wired
+  today, so the field was a security claim the SDK didn't deliver.
+- The `boot:` sysbuild overlay now LAYERS over the curated
+  `zephyr/sysbuild/<family>/sysbuild.conf` (today: `aen`) instead of
+  replacing it: `-DSB_CONF_FILE=<curated>;<customer overlay>` when a
+  curated per-family file exists, verified against Zephyr 4.4.0's
+  `SB_CONF_FILE` (accepts a `;`-joined list; confirmed both structurally in
+  `sysbuild_kconfig.cmake` and empirically via a `native_sim` sysbuild
+  configure merging two listed files into one `.config`) so a customer's
+  `boot:` block no longer forks family boot policy into two divergent
+  places.
+- `tests/scripts/test_hil_blocks_coverage.py` previously asserted the
+  emitter's output against hardcoded strings the test's author typed --
+  including the invented symbols above -- so CI stayed green while the
+  feature was broken end to end. Replaced the hand-picked assertions with
+  a class gate that drives `emit_sysbuild_conf()` across the full `boot:`
+  enum cross-product and checks every emitted `SB_CONFIG_<stem>` against a
+  real `config <stem>` in the pinned Zephyr's `share/sysbuild/**/Kconfig*`
+  (resolved from the west workspace / `west.yml` pin, never a hardcoded
+  developer path; skips cleanly, never hard-fails, when no matching
+  checkout is resolvable). Also fixed the matching stale comments in
+  `tests/hil/_common/boot_mcuboot.yaml`.
+- Doc sweep for the removed fields: `docs/board-config-features.md`,
+  `docs/secure-boot.md`, `docs/tutorials/10-secure-boot-signing.md`,
+  `examples/connectivity/production-deployment/{board.yaml,README.md}`,
+  `examples/connectivity/iot-fleet-ota/board.yaml`.
+
+### Changed — `board-config.md` split into a landing page + four references (#464)
+
+- `docs/board-config.md` had grown to ~1500 lines covering the quick
+  start, the whole field-by-field schema, every emit backend, hardware
+  revisions and all the feature blocks in one scroll. It is now a
+  249-line landing page (quick start, the single-source-of-truth model,
+  file location, cross-field validation, versioning) that links four
+  focused references:
+  - `docs/board-config-schema.md` — the `board.yaml` field reference:
+    the `som:` / board split, inline vs. `preset:` mode, `pins:`, pin
+    direction, the EVK-as-reference-design workflow, stock presets, and
+    the `libraries:` block (ADR 0018).
+  - `docs/board-config-emit.md` — how the loader compiles the file:
+    `west alp-build`, the Zephyr `alp.conf` overlay, plain CMake, Yocto
+    `local.conf`, `west.yml` auto-pin, `hw-info-h`, and the DTS overlay.
+  - `docs/board-config-hardware.md` — hardware revision tracking
+    (build-time + runtime) and modular SoM chip populations.
+  - `docs/board-config-features.md` — the build-system integration
+    knobs: `hw_info.eeprom`, per-slice memory/power, log levels,
+    `boot:`, `ota:`, `storage:`, and `security.psa:`.
+- Every in-repo reference that pointed at a section now living on one of
+  the four new pages was repointed to it — narrative docs, the tutorials,
+  `README.md`, `llms.txt`, the example `README.md`/`board.yaml` comments,
+  the board presets and template under `metadata/`, and the
+  `scripts/alp_orchestrate/models.py` docstring. The prose is a move, not a
+  rewrite: all 50 original sections survive and no field reference changed
+  meaning. The only deliberate edits are the intra-document "see below"
+  pointers, which became cross-page links now that the target sections live
+  on another page.
+
+### Removed — CC3501E integration plan retired (#464)
+
+- `docs/cc3501e-integration-plan.md` is **deleted**. It was the May-2026
+  pre-implementation plan for the CC3501E bridge, written before host or
+  firmware code existed; the bridge has since shipped (2026-07-05,
+  silicon-proven) and in places shipped differently from the plan (e.g.
+  `POWER_POLICY` landed at opcode `0x62`, not the proposed `0x04`; the
+  handshake became hardware SS0 chip-select + per-phase READY, not a
+  polled `busy_pin` GPIO). It was research-only and never a released
+  surface, so it goes cleanly rather than living on as a redirect — git
+  history has the original if anyone needs it. Its still-relevant
+  survivors moved into `docs/cc3501e-bridge.md`: the open items (errata
+  SWRZ167; CAN/I2S/PDM/SDMMC not evaluated) as a new "Open questions"
+  section, plus a new "Peripherals not proxied today" section
+  (DMA/UART/ADC/Timers/I2C). Current CC3501E reference material is
+  `docs/cc3501e-bridge.md`, `-production.md`, `-companion-commands.md`
+  and `-gpio-bench.md`.
+- Bare "§N.N" cross-references into the retired plan are gone from the
+  live tree: `include/alp/protocol/cc3501e.h` (the `§5.4` and `§5.7`
+  comments on `CMD_GET_DIAG_INFO` / `CMD_POWER_POLICY` — the most-read
+  surface that carried them) and `tests/zephyr/peripheral/src/main.c`
+  (`§5.5`) now state the intent instead of a section number that no
+  longer resolves. Historical `CHANGELOG.md` / `VERSIONS.md` rows keep
+  theirs: they record what was true when written.
+- `scripts/flash_backends/cc3501e_usb_bootloader.py` and
+  `docs/v0.6-tbd-and-assumptions.md` cited the plan's "§5.7" for the
+  USB-bootloader `flash_args` contract — already wrong (§5.7 was the
+  power-policy opcode section, not USB bootloader). Repointed to the
+  module's own docstring, and the operator-facing "no tool on PATH"
+  message now names the bench warm-program recipe in
+  `docs/cc3501e-production.md` rather than a manual SWD path that does
+  not flash this part.
+- `scripts/check_doc_drift.py` — removed the now-stale
+  `cc3501e-integration-plan.md` dead-symbol-scan exemption, which existed
+  to let that doc name a proposed API that was never implemented. Its
+  test moves onto `v0.6-tbd-and-assumptions.md`, the remaining
+  forward-looking doc the exemption is for.
+- `docs/cc3501e-bridge.md` gained a "Link speed" section documenting what
+  the link actually runs at, replacing the retired plan's open 8 MHz vs.
+  26 MHz question. The four AEN bridge examples request 14 MHz, just under
+  the ~15 MHz CC35 slave ceiling — so 26 MHz was never reachable by host
+  tuning, and the remaining question is a slave-side limit, not a host one.
+  Reaching that rate required `RX_SAMPLE_DLY = 6` on the master (`spi_dw`
+  defaults it to 0, and the MISO round-trip over the on-SoM traces
+  mis-samples at 8 MHz and above); that value is silicon-tuned, not
+  derived, and the link does not work at the higher clock without it.
+  Silicon-validated cold and warm on the E1M-AEN801 EVK, concurrently with
+  Wi-Fi/BLE traffic.
+- The actual SCLK is stated as ~14.3 MHz, derived from the driver's own
+  arithmetic (`SPI_DW_CLK_DIVIDER` truncates 200 MHz / 14 MHz to a divider
+  of 14, giving 200/14). The examples' `cc3501e_bridge.h` claims 14.8 MHz
+  "(BAUDR = 400 MHz AHB / 27)", which cannot be right on two counts: the
+  overlay records the real SSI functional clock as 200 MHz and marks the
+  400 MHz figure as mis-set and disproven, and 400/14 truncates to 28 in
+  any case, never 27. The doc now says the figure is derived rather than
+  measured — no captured SCLK exists in-tree. Correcting the example
+  headers is left to the follow-up that owns the stale-speed sites.
+- Known inconsistency, tracked separately: four sites still state 8 MHz or
+  1 MHz — the chip header's `@code` example, `max_clock_hz` in
+  `metadata/chips/cc3501e.yaml`, the bring-up example's README, and the
+  `alp-console` example's 1 MHz bridge header (plus its dead
+  `CC3501E_SPI_FREQ_HZ` macro in `main.c`). Until that lands,
+  `max_clock_hz` (the metadata single source of truth for that hardware
+  fact) contradicts this doc. They are deferred here because correcting
+  them touches metadata and a public header rather than docs.
+
+### Fixed — xHCI DMA translates M55-HP TCM through the active core's DT alias (#752)
+
+- The Alif xHCI UHC driver turned CPU-local TCM pointers into the global bus
+  aliases its DMA master needs by adding a **hardcoded M55-HE offset**. The
+  M55-HP and M55-HE each own a *separate* ITCM/DTCM global alias window, so on
+  HP every translated address landed in HE's window and the xHC DMA'd against
+  memory that was not the driver's buffer. There is no "the" TCM alias.
+- New `xhci_local_to_global(map, p)` takes an explicit `struct xhci_tcm_map`
+  the caller fills from the **active** core's DT (`itcm`/`dtcm` `reg` +
+  `global_base`). ITCM and DTCM are checked as separate explicit windows rather
+  than assuming a zero base; addresses outside both (already-global SRAM, or an
+  already-translated alias) pass through unchanged; `NULL` is rejected rather
+  than translated (every known map has `itcm_base == 0`, so `NULL` would
+  otherwise alias into a plausible-looking global ITCM address).
+- The helper is pure and arch-neutral, so it host-unit-tests against any core's
+  map — `tests/unit/xhci_core` covers the HP and HE maps, the pass-through path
+  and the `NULL` rejection.
+
+### Fixed — Alif PDM FIR coefficient bank written through `sys_write32` (#758)
+
+- `pdm_channel_config()` stored the FIR coefficients into the peripheral's
+  register bank with a plain `*ptr++ = value` walk over a **non-volatile**
+  `uint32_t *`. A plain pointer store carries no volatile or ordering
+  guarantee, so the compiler may reorder, merge or elide writes to what it
+  sees as an ordinary object. At `-O3` the original loop merges pairs into
+  `8x strd` (64-bit double-word MMIO stores) plus an alias-check branch against
+  the `FIR_COEF`/`IIR_COEF_SEL` split. No in-tree build reaches `-O3` today, so
+  this was a latent correctness risk rather than a live failure.
+- Each coefficient now goes through `sys_write32()`, Zephyr's volatile MMIO
+  accessor, indexed off a `uintptr_t` base.
+- `zephyr/drivers/audio/alif_pdm.c` is vendored from the fork, so the
+  divergence is recorded in the file's provenance header with a note to reapply
+  it on any re-sync (ADR 0017). The file stays `vendor-ext`,
+  `BENCH-UNVERIFIED`.
+
+### Fixed — pure-C review of `dev`: overflow, contract and rollback defects (#732 #735 #736 #737 #738 #739 #740 #742 #743 #744 #745 #746 #747 #748 #749 #750 #753 #757 #759 #760)
+
+- **Checked arithmetic.** New private `src/common/alp_checked_arith.h`
+  (`alp_size_range_valid` / `alp_size_to_u32` / `alp_u32_add_checked` + 64-bit
+  siblings): subtraction-based range checks that never evaluate `offset + len`
+  before proving it representable, and narrowing helpers that leave `*out`
+  untouched on rejection (#743). Storage and DSP range checks migrate to it;
+  the CryptoCell hash staging buffer (#737), EEPROM 24C128 range checks (#738),
+  CC3501E OTA length/offset narrowing (#732) and the Yocto UIO MHU kick-slot
+  MMIO arithmetic (#735) now use it instead of overflow-prone hand-rolled forms.
+- **Contract violations.** AEAD decrypt now wipes the plaintext output on
+  authentication failure, per `<alp/security.h>` (#750). SPI NULL-buffer
+  validation and ADC last-error behaviour align with their documented
+  contracts (#749). The update-log append path no longer trusts stale metadata,
+  which could durably break a write-once chain (#759).
+- **Undefined behaviour.** BME280 calibration/compensation no longer
+  left-shifts negative signed values (#753); ADC, INA236 and DA9292 numeric
+  edges are hardened against wrap and UB (#757). Chip configuration APIs reject
+  invalid enum values instead of masking them into reserved register encodings
+  (`bmp581`, `bme280` — #736; the remaining drivers are tracked in #790).
+- **Silicon-facing correctness.** The A55 OpenAMP notify path takes a release
+  barrier before the MHU doorbell (#745). xHCI DMA and the Alif PDM coefficient
+  bank fixes (#752, #758) are held on a separate branch pending bench time.
+- **I2C addressing.** Chip drivers validate 7-bit addresses (#739). The
+  TCAL9538 driver additionally accepts the register-compatible TCA6408A
+  alt-strap (0x20..0x21) it is documented to drive — a range check limited to
+  0x70..0x73 would have silently reported "IOEXP absent" on every
+  TCA6408A-populated EVK.
+- **Reentrancy.** CC3501E scan/event APIs use per-context payload buffers
+  instead of shared statics (#740); the Wi-Fi security selection is
+  conversion-clean and gated by a check-only target (#742).
+- **Yocto rollback paths.** PWM close no longer unexports or disables a channel
+  it did not itself export (#744); a failed GPIO IRQ setup no longer leaves the
+  line edge-configured (#746); watchdog failure rollback no longer leaves an
+  armed device, and timeout rounding no longer overflows (#760). RPMsg
+  failed-open paths destroy the pthread primitives they initialized (#747).
+- **Build.** Restored the strict-C warning gate: literal glob text inside block
+  comments tripped `-Wcomment`, breaking `ALP_SDK_WERROR=ON` on both the
+  bare-metal and Yocto profiles (#748).
+
+### Fixed — orchestrated Zephyr builds pin the workspace Python (#787)
+
+- Zephyr slice commands now pass
+  `-DPython3_EXECUTABLE=<orchestrator interpreter>` through west's CMake
+  argument separator. This overrides a stale `Python3_EXECUTABLE` cache entry
+  that could otherwise select a macOS Framework Python without the `west`
+  package, despite `WEST_PYTHON` pointing at the correctly bootstrapped
+  workspace venv. The emitted `build-plan` command arguments carry the same
+  override for CLI and IDE consumers.
+
 ## [v0.10.1] - 2026-07-14
 
 ### Fixed — `west alp-build` unknown after bootstrap (#769)

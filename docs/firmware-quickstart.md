@@ -80,7 +80,7 @@ diagnostics:
 
 `west alp-build` validates this, fans out into per-core slices, and
 emits `build/system-manifest.yaml`.  See
-[`docs/board-config.md`](board-config.md) for the full schema and
+[`docs/board-config-schema.md`](board-config-schema.md) for the full schema and
 [`docs/heterogeneous-builds.md`](heterogeneous-builds.md) for the
 multi-core flagship walkthrough.
 
@@ -297,7 +297,7 @@ hardware-free environment triage.  Verb reference:
 |--------------------------------------------------|---------------------------------------------------|
 | Workspace + tooling deep-dive                    | [`docs/getting-started.md`](getting-started.md)   |
 | `alp` CLI verb reference                         | [`docs/cli.md`](cli.md)                           |
-| `board.yaml` schema reference                    | [`docs/board-config.md`](board-config.md)         |
+| `board.yaml` schema reference                    | [`docs/board-config-schema.md`](board-config-schema.md) |
 | Architecture (modules, wrappers, codegen split)  | [`docs/architecture.md`](architecture.md)         |
 | SoM bring-up procedures                          | [`docs/bring-up-v2n.md`](bring-up-v2n.md), [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) |
 | GD32 bridge wire protocol                        | [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) |

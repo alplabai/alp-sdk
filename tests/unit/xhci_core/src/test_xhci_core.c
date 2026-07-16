@@ -82,3 +82,88 @@ ZTEST(alp_xhci_core, test_init_sequence_writes_expected_regs)
 	zassert_equal(op.crcr_hi, 0u, "CRCR high");
 	zassert_true((op.usbcmd & 1u) != 0, "USBCMD.R/S set");
 }
+
+/* issue #752: xHCI DMA must translate a CPU-local TCM pointer through the
+ * ACTIVE core's own global alias window, never a hardcoded one.  M55-HP and
+ * M55-HE have DIFFERENT alias windows for the identical local offset (Alif
+ * DFP / zephyr_alif fork ensemble_rtss_hp.dtsi / ensemble_rtss_he.dtsi, also
+ * transcribed into the board DTS `&itcm`/`&dtcm` `global_base` overrides):
+ *   M55-HP: ITCM 0x00000000/256KiB -> global 0x50000000; DTCM 0x20000000/1MiB -> 0x50800000
+ *   M55-HE: ITCM 0x00000000/256KiB -> global 0x58000000; DTCM 0x20000000/256KiB -> 0x58800000
+ * These two maps are the regression case: reusing the HE map (or any single
+ * hardcoded map) for an HP pointer would silently mistranslate it. */
+static const struct xhci_tcm_map hp_map = {
+	.itcm_base        = 0x00000000u,
+	.itcm_size        = 256u * 1024u,
+	.itcm_global_base = 0x50000000u,
+	.dtcm_base        = 0x20000000u,
+	.dtcm_size        = 1024u * 1024u,
+	.dtcm_global_base = 0x50800000u,
+};
+
+static const struct xhci_tcm_map he_map = {
+	.itcm_base        = 0x00000000u,
+	.itcm_size        = 256u * 1024u,
+	.itcm_global_base = 0x58000000u,
+	.dtcm_base        = 0x20000000u,
+	.dtcm_size        = 256u * 1024u,
+	.dtcm_global_base = 0x58800000u,
+};
+
+ZTEST(alp_xhci_core, test_local_to_global_itcm_uses_the_active_core_map)
+{
+	/* Same local ITCM offset (0x40), two different core maps -> two
+	 * different global aliases. Neither may equal the other core's alias. */
+	uint64_t hp_g = xhci_local_to_global(&hp_map, (const void *)(uintptr_t)0x00000040u);
+	uint64_t he_g = xhci_local_to_global(&he_map, (const void *)(uintptr_t)0x00000040u);
+
+	zassert_equal(hp_g, 0x50000040ull, "HP ITCM+0x40 -> HP global alias");
+	zassert_equal(he_g, 0x58000040ull, "HE ITCM+0x40 -> HE global alias (NOT the HP one)");
+	zassert_true(hp_g != he_g, "HP and HE aliases must never collide");
+}
+
+ZTEST(alp_xhci_core, test_local_to_global_dtcm_uses_the_active_core_map)
+{
+	uint64_t hp_g = xhci_local_to_global(&hp_map, (const void *)(uintptr_t)0x20001000u);
+	uint64_t he_g = xhci_local_to_global(&he_map, (const void *)(uintptr_t)0x20001000u);
+
+	zassert_equal(hp_g, 0x50801000ull, "HP DTCM+0x1000 -> HP global alias");
+	zassert_equal(he_g, 0x58801000ull, "HE DTCM+0x1000 -> HE global alias (NOT the HP one)");
+}
+
+ZTEST(alp_xhci_core, test_local_to_global_dtcm_upper_boundary)
+{
+	/* Last valid HE DTCM byte (base+size-1) still translates ... */
+	uintptr_t last_valid = 0x20000000u + (256u * 1024u) - 1u;
+	uint64_t  g_in       = xhci_local_to_global(&he_map, (const void *)last_valid);
+
+	zassert_equal(g_in, 0x58800000ull + (256u * 1024u) - 1u, "last in-range byte translates");
+
+	/* ... the first byte past the HE DTCM window (which IS still inside the
+	 * larger HP DTCM window) must NOT alias into DTCM under the HE map --
+	 * it is outside HE's window and passes through unchanged (not global
+	 * SRAM/TCM on this core). */
+	uintptr_t just_past = 0x20000000u + (256u * 1024u);
+	uint64_t  g_out     = xhci_local_to_global(&he_map, (const void *)just_past);
+
+	zassert_equal(g_out, (uint64_t)just_past, "one past DTCM end passes through unchanged");
+}
+
+ZTEST(alp_xhci_core, test_local_to_global_passthrough_for_non_tcm_address)
+{
+	/* An address already outside both TCM windows (e.g. SRAM0 0x02000000) is
+	 * already a global/system-bus address -- pass through unchanged. */
+	uint64_t g = xhci_local_to_global(&hp_map, (const void *)(uintptr_t)0x02000000u);
+
+	zassert_equal(g, 0x02000000ull, "non-TCM address passes through unchanged");
+}
+
+ZTEST(alp_xhci_core, test_local_to_global_null_pointer_rejected)
+{
+	/* itcm_base is 0 on every known map, so NULL falls inside the ITCM
+	 * window unless explicitly rejected -- it must NOT silently become a
+	 * plausible-looking global ITCM address. */
+	zassert_equal(
+	    xhci_local_to_global(&hp_map, NULL), 0ull, "NULL never aliases into ITCM, on HP...");
+	zassert_equal(xhci_local_to_global(&he_map, NULL), 0ull, "...or HE");
+}

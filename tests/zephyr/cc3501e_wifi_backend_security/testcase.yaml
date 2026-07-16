@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Native-sim end-to-end test for issue #742 (CC3501E Wi-Fi security
+# selection): drives the real <alp/iot.h> Wi-Fi dispatcher + CC3501E backend
+# + chip driver against a software model of the firmware SPI slave.  Lives
+# under tests/zephyr/ (not tests/unit/) so the pr-twister gate runs it
+# (tests/unit/ is not yet in any twister root -- issue #90).
+
+tests:
+  alp_sdk.cc3501e.wifi_backend_security:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - cc3501e
+      - wifi

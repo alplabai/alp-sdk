@@ -104,6 +104,9 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
     assert m33["buildDir"] == "build/m33_sm-zephyr"
     assert m33["command"]["tool"] == "west"
     assert m33["command"]["args"][:2] == ["build", "-b"]
+    assert m33["command"]["args"][-2:] == [
+        "--", f"-DPython3_EXECUTABLE={sys.executable}",
+    ]
     assert m33["command"]["cwd"] == m33["buildDir"]
     assert m33["env"]["ALP_SDK_ROOT"]
     confs = {a["path"]: a["contents"] for a in m33["configArtefacts"]}
@@ -287,10 +290,14 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
 
 def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     """ADR 0014 Phase-3: a `boot:` block (-> build/alp_sysbuild.conf) makes
-    the Zephyr slice command pass `--sysbuild --sysbuild-config
-    ../alp_sysbuild.conf` (the overlay sits one dir up from the slice's
-    cwd=build/<core>-<os>); a project without one adds no flag and keeps
-    the bare `west build -b <board> <app>` shape."""
+    the Zephyr slice command pass `--sysbuild` plus a `-DSB_CONF_FILE=`
+    define naming that overlay; a project without one adds no sysbuild flag.
+
+    SB_CONF_FILE must be ABSOLUTE and must sit after west's `--` separator:
+    sysbuild resolves a relative SB_CONF_FILE against APP_DIR rather than the
+    slice's cwd (issue #805).  Both shapes also pin CMake to the
+    orchestrator's Python so a stale cache cannot select a west-less
+    interpreter."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 
@@ -303,7 +310,17 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     args = z["command"]["args"]
     assert args[:2] == ["build", "-b"]
     assert "--sysbuild" in args
-    assert args[args.index("--sysbuild-config") + 1] == "../alp_sysbuild.conf"
+
+    sb_conf = (Path("build") / "alp_sysbuild.conf").resolve()
+    assert args[-3:] == [
+        "--",
+        f"-DPython3_EXECUTABLE={sys.executable}",
+        f"-DSB_CONF_FILE={sb_conf}",
+    ]
+    # The overlay define is a CMake define, never a west flag: it has to
+    # land AFTER `--`, and the path has to be absolute.
+    assert args.index("--sysbuild") < args.index("--")
+    assert sb_conf.is_absolute()
 
     # Without boot: -> no sysbuild overlay -> no flag, bare command.
     path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
@@ -312,7 +329,59 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     z2 = next(s for s in plan2["slices"]
               if s["backend"] == "zephyr" and s["command"])
     assert "--sysbuild" not in z2["command"]["args"]
-    assert "--sysbuild-config" not in z2["command"]["args"]
+    assert not any(a.startswith("-DSB_CONF_FILE=")
+                   for a in z2["command"]["args"])
+    assert z2["command"]["args"][-2:] == [
+        "--", f"-DPython3_EXECUTABLE={sys.executable}",
+    ]
+
+
+# Every option the emitter is allowed to hand to `west build`: the exact set
+# Zephyr 4.4's scripts/west_commands/build.py defines, plus the `--no-sysbuild`
+# that argparse.BooleanOptionalAction derives from `--sysbuild`.
+#
+# `west build` is a ZEPHYR EXTENSION command -- the west package ships no
+# build command at all -- so this set tracks the Zephyr revision in west.yml,
+# NOT the west version (issue #805).
+WEST_BUILD_FLAGS = {
+    "-b", "--board", "-d", "--build-dir", "-t", "--target",
+    "-p", "--pristine", "-c", "--cmake", "--cmake-only", "--cmake-opt",
+    "-n", "--just-print", "--dry-run", "--recon",
+    "-o", "--build-opt", "-S", "--snippet", "-s", "--source-dir",
+    "-T", "--test-item", "--sysbuild", "--no-sysbuild", "--domain",
+    "--shield", "--extra-conf", "--extra-dtc-overlay",
+}
+
+
+def test_zephyr_slice_command_invents_no_west_flags(tmp_path: Path) -> None:
+    """Every `--flag` the plan emits before west's `--` separator must be one
+    Zephyr's `west build` actually defines.
+
+    The suite only ever inspects the emitted plan STRING -- nothing here runs
+    `west build` -- so an invented flag used to sail through the gate and fail
+    only on a real configure, which is exactly how `--sysbuild-config` shipped
+    (issue #805): west forwarded the unknown argument to CMake, which died
+    with `Unknown argument --sysbuild-config`.  Anything past `--` is a CMake
+    define and is deliberately not checked here."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    for src, name in ((V2N_BOOT_MCUBOOT, "board-boot.yaml"),
+                      (V2N_HAPPY, "board-noboot.yaml")):
+        path = _write_board(tmp_path, src, name=name)
+        plan = _json.loads(emit_build_plan(
+            load_board_yaml(path), board_yaml=path,
+            build_root=Path("build")))
+        for slice_ in plan["slices"]:
+            if slice_["backend"] != "zephyr" or not slice_["command"]:
+                continue
+            args = slice_["command"]["args"]
+            west_args = args[:args.index("--")] if "--" in args else args
+            bogus = [a for a in west_args
+                     if a.startswith("-") and a not in WEST_BUILD_FLAGS]
+            assert not bogus, (
+                f"{name}: emitted west build option(s) Zephyr does not "
+                f"define: {bogus}")
 
 
 def test_cli_emit_build_plan(tmp_path: Path, capsys, monkeypatch) -> None:
@@ -371,7 +440,8 @@ def test_emit_build_plan_app_paths_independent_of_cwd(
     m33 = next(s for s in plan_other_dir["slices"] if s["coreId"] == "m33_sm")
     # Correctly anchored on the project dir -- NOT the unrelated CWD, and
     # NOT the repo root (the historical parent-CMakeLists.txt fallback trap).
-    assert m33["command"]["args"][-1] == str(project_dir / "m33")
+    args = m33["command"]["args"]
+    assert args[args.index("--") - 1] == str(project_dir / "m33")
     assert m33["appDir"] == (project_dir / "m33").as_posix()
 
 

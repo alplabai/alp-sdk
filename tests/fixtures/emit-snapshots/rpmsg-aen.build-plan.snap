@@ -80,7 +80,9 @@
           "build",
           "-b",
           "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he",
-          "<SDK_ROOT>/firmware/alp-stock-shim"
+          "<SDK_ROOT>/firmware/alp-stock-shim",
+          "--",
+          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>"
         ],
         "cwd": "build/m55_he-zephyr"
       },
@@ -123,7 +125,9 @@
           "build",
           "-b",
           "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp",
-          "<SDK_ROOT>/examples/multicore/rpmsg-aen/m55_hp"
+          "<SDK_ROOT>/examples/multicore/rpmsg-aen/m55_hp",
+          "--",
+          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>"
         ],
         "cwd": "build/m55_hp-zephyr"
       },

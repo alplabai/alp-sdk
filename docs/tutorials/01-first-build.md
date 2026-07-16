@@ -123,7 +123,7 @@ LED goes dark.
 ## See also
 
 * [`examples/peripheral-io/gpio-button-led/`](../../examples/peripheral-io/gpio-button-led/)
-* [`docs/board-config.md`](../board-config.md) -- the `board.yaml`
+* [`docs/board-config-schema.md`](../board-config-schema.md) -- the `board.yaml`
   schema reference.
 * [`<alp/peripheral.h>`](../../include/alp/peripheral.h) -- API
   surface this example uses.

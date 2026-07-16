@@ -92,7 +92,7 @@ signs your image into slot0:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
-    --sysbuild --sysbuild-config <alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
 export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped
 export SE_UART=<your-serial-device>               # the SE-UART (host-specific)
 west flash      # -> alif_flash runner -> SETOOLS over the SE-UART

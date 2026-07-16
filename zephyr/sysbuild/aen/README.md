@@ -41,7 +41,7 @@ out-of-box and customers `west flash` into slot0 (see
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     path/to/app \
     --sysbuild \
-    --sysbuild-config alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
+    -- -DSB_CONF_FILE=/abs/path/to/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
 
 # Produces:
 #   build/zephyr/zephyr.signed.bin     -- signed application image

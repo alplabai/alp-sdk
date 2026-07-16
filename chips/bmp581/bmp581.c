@@ -84,6 +84,31 @@ alp_status_t bmp581_set_sampling(bmp581_t     *dev,
                                  bmp581_mode_t mode)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+
+	/* OSR and mode are contiguous encodings spanning their whole field
+     * width, so an upper-bound check is sufficient. */
+	if ((unsigned)press_osr > BMP581_OSR_X128) return ALP_ERR_INVAL;
+	if ((unsigned)temp_osr > BMP581_OSR_X128) return ALP_ERR_INVAL;
+	if ((unsigned)mode > BMP581_MODE_CONTINUOUS) return ALP_ERR_INVAL;
+
+	/* ODR is sparse -- BST-BMP581-DS004 defines all 32 codes of the
+     * 5-bit field, but bmp581_odr_t only declares a curated subset
+     * (0x00, 0x01, 0x07, 0x0E, 0x14, 0x17, 0x1C).  An upper-bound / mask
+     * check would silently admit an undeclared-but-real ODR the API
+     * doesn't expose, so switch-validate against the declared set. */
+	switch (odr) {
+	case BMP581_ODR_240_HZ:
+	case BMP581_ODR_120_HZ:
+	case BMP581_ODR_50_HZ:
+	case BMP581_ODR_25_HZ:
+	case BMP581_ODR_10_HZ:
+	case BMP581_ODR_5_HZ:
+	case BMP581_ODR_1_HZ:
+		break;
+	default:
+		return ALP_ERR_INVAL;
+	}
+
 	/* OSR_CONFIG: PRESS_EN[6] | OSR_P[5:3] | OSR_T[2:0].
      * Always enable pressure -- v0.2 doesn't expose temperature-only
      * mode (the chip can do it but apps that need just temperature

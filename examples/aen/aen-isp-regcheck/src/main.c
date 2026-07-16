@@ -32,14 +32,17 @@
  *   isp_pico.c links the hal_alif libisp wrapper (the Vivante ISP BLOB, opt-in
  *   via USE_ALIF_ISP_LIB).  The locally vendored 2025 hal_alif wrapper
  *   (modules/hal/alif/drivers/isp/isp_wrapper) is OLDER than this 2026
- *   isp_pico.c and is API-incompatible in three ways, so the driver does NOT
- *   even COMPILE+LINK against it:
+ *   isp_pico.c and is API-incompatible in two ways, so the driver does NOT
+ *   even COMPILE against it:
  *     (a) isp_pico.c (and isp_pico.h) #include <zephyr/drivers/video/isp-vsi.h>,
  *         which the local wrapper does NOT ship -- it ships isp_conf.h /
  *         isp_param_conf.h instead.  So the TU fails to COMPILE.
  *     (b) the wrapper's isp_vsi_bottom_half() is 2-arg (init_cfg, mi_mis); this
- *         driver calls the 3-arg (dev, init_cfg, mi_mis) form (isp_pico.c:272).
- *     (c) the wrapper exports no isp_vsi_set_param / isp_vsi_get_param.
+ *         driver calls the 3-arg (dev, init_cfg, mi_mis) form, at isp_pico.c's
+ *         isp_vsi_bottom_half() call site.
+ *   (The wrapper also exports no isp_vsi_set_param / isp_vsi_get_param, but
+ *   the v4.4 port dropped their only callers, so that is not a third
+ *   incompatibility -- not referenced either way.)
  *   Fixing this is an EXTERNAL hal_alif change (bump the libisp wrapper), NOT an
  *   alp-sdk change -- so CONFIG_VIDEO_ISP_VSI stays default n and this regcheck
  *   keeps the build green.  The DT-bind PASS gate below is reachable WITHOUT the

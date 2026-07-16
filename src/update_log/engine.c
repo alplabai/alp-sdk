@@ -232,6 +232,25 @@ static void kbuf(char *out, size_t cap, uint64_t seq)
  * inherent to what the underlying tier allows, not something the engine
  * can paper over.
  *
+ * ulog_recover() only ever examines meta when an entry already sits at the
+ * frontier (the torn-append shape above); when nothing is there -- the
+ * ordinary steady-state case on every append -- it returns ALP_OK having
+ * never looked at meta at all. ulog_engine_append() therefore cannot treat
+ * "ulog_recover() said OK" as a green light to trust ulog.meta's cached
+ * head_hash for the entry it is about to write (issue #759): a stale
+ * meta.count or a malformed/mismatched head_hash from any prior partial
+ * write, direct store tampering, or a bug elsewhere would otherwise chain
+ * the new entry from the wrong prev_hash, and on a write-once tier that
+ * damage can never be un-written once put() lands. append() instead
+ * independently re-derives the expected prev_hash by hashing the actual
+ * committed entry at hw-1 -- exactly the way ulog_recover() already does
+ * for its own validation -- and additionally requires meta.count == hw and
+ * meta.head_hash to agree with that independently-derived hash before the
+ * append proceeds. Any disagreement (a stale count, a mismatched or
+ * missing head hash, or meta missing outright) is refused as corruption
+ * (ALP_ERR_IO) before store->put() is ever attempted, rather than trusted
+ * and durably written.
+ *
  * g_engine_lock serializes every call below across append/verify/count
  * (and, without needing counter access, get()) so two concurrent callers
  * can never interleave the three mutations, and a reader can never
@@ -321,6 +340,30 @@ static void ulog_engine_unlock(void)
 }
 #endif
 
+/* Independently derive the prev_hash that entry `seq` must chain from, by
+ * hashing the actual durably-committed entry at seq-1 -- never by trusting
+ * ulog.meta, which is a DERIVED cache and never a second independent
+ * authority (see the block comment above). seq == 0 has no predecessor:
+ * prev_hash_out is left as the all-zero hash and this always succeeds.
+ * Propagates the predecessor lookup's status otherwise (in particular
+ * ALP_ERR_NOT_FOUND when entry seq-1 is missing). */
+static alp_status_t ulog_prev_hash_of_predecessor(const alp_secure_store_if *store,
+                                                  uint64_t                   seq,
+                                                  uint8_t                    prev_hash_out[32])
+{
+	memset(prev_hash_out, 0, 32);
+	if (seq == 0) return ALP_OK;
+
+	char    pkey[24];
+	uint8_t pwire[ULOG_ENTRY_WIRE_LEN];
+	size_t  pn = 0;
+	kbuf(pkey, sizeof(pkey), seq - 1);
+	alp_status_t rc = store->get(store->ctx, pkey, pwire, sizeof(pwire), &pn);
+	if (rc != ALP_OK) return rc;
+	ulog_sha256(pwire, pn, prev_hash_out);
+	return ALP_OK;
+}
+
 /* Re-derive meta + the counter from the newest committed entry,
  * forward-committing AT MOST ONE interrupted append (never loops -- see
  * the block comment above for why a second orphan must be left for
@@ -358,17 +401,9 @@ static alp_status_t ulog_recover(const alp_secure_store_if      *store,
 	}
 
 	uint8_t expect_prev[32];
-	memset(expect_prev, 0, sizeof(expect_prev));
-	if (hw > 0) {
-		char    pkey[24];
-		uint8_t pwire[ULOG_ENTRY_WIRE_LEN];
-		size_t  pn = 0;
-		kbuf(pkey, sizeof(pkey), hw - 1);
-		rc = store->get(store->ctx, pkey, pwire, sizeof(pwire), &pn);
-		if (rc == ALP_ERR_NOT_FOUND) return ALP_OK; /* truncated tail: not our case */
-		if (rc != ALP_OK) return rc;
-		ulog_sha256(pwire, pn, expect_prev);
-	}
+	rc = ulog_prev_hash_of_predecessor(store, hw, expect_prev);
+	if (rc == ALP_ERR_NOT_FOUND) return ALP_OK; /* truncated tail: not our case */
+	if (rc != ALP_OK) return rc;
 	if (memcmp(got_prev, expect_prev, 32) != 0) {
 		/* Doesn't chain from the actual preceding entry either: real
 		 * corruption, not a torn append. Leave for verify(). */
@@ -418,17 +453,35 @@ alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
 		return ALP_ERR_NOMEM;
 	}
 
+	/* Never trust ulog.meta on its own (issue #759): it is a DERIVED cache,
+	 * not a second independent authority, and ulog_recover() above only
+	 * repairs the single torn-append shape where an entry already sits at
+	 * the frontier -- when nothing is there (the ordinary case) it returns
+	 * ALP_OK without ever having examined meta, so a stale meta.count or a
+	 * malformed/mismatched head_hash would otherwise sail straight
+	 * through untouched. Independently re-derive the prev_hash by hashing
+	 * the actual committed entry at hw-1 -- the only true authority -- and
+	 * require the cached meta to agree with both hw and that hash before
+	 * this append is even attempted. On a write-once tier a wrong
+	 * prev_hash can never be undone once put() lands, so any disagreement
+	 * (including missing meta) is treated as corruption and refused
+	 * up front, rather than trusted and durably written. */
 	uint8_t prev[32];
-	memset(prev, 0, sizeof(prev));
+	rc = ulog_prev_hash_of_predecessor(store, hw, prev);
+	if (rc != ALP_OK) {
+		/* hw > 0 means entry hw-1 must exist in a healthy chain; its
+		 * absence is corruption the caller must be told about, not an
+		 * ordinary I/O miss to pass through silently. */
+		ulog_engine_unlock();
+		return (rc == ALP_ERR_NOT_FOUND) ? ALP_ERR_IO : rc;
+	}
 	if (hw > 0) {
-		/* Recovery above guarantees meta already agrees with hw, so this
-		 * cached head hash is trustworthy here. */
 		uint8_t metabuf[ULOG_META_WIRE_LEN];
 		size_t  mlen = 0;
 		rc           = store->get(store->ctx, "ulog.meta", metabuf, sizeof(metabuf), &mlen);
 		if (rc != ALP_OK) {
 			ulog_engine_unlock();
-			return rc;
+			return (rc == ALP_ERR_NOT_FOUND) ? ALP_ERR_IO : rc;
 		}
 		struct ulog_meta m;
 		rc = ulog_meta_decode(metabuf, mlen, &m);
@@ -436,7 +489,12 @@ alp_status_t ulog_engine_append(const alp_secure_store_if      *store,
 			ulog_engine_unlock();
 			return rc;
 		}
-		memcpy(prev, m.head_hash, 32);
+		if (m.count != hw || memcmp(m.head_hash, prev, 32) != 0) {
+			/* Stale count or a head hash that doesn't match the actual
+			 * predecessor: never chain the new entry from it. */
+			ulog_engine_unlock();
+			return ALP_ERR_IO;
+		}
 	}
 
 	alp_update_log_entry_t e = *entry;

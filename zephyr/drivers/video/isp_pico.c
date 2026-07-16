@@ -49,16 +49,18 @@
  * !!! HAL_ALIF VERSION MISMATCH (FLAGGED) !!!
  * This 2026 isp_pico.c was authored against a NEWER hal_alif libisp wrapper than
  * the one vendored locally (modules/hal/alif/drivers/isp/isp_wrapper, 2025).
- * The local wrapper (isp_api_wrapper.c) exports
+ * isp_pico.h #includes <zephyr/drivers/video/isp-vsi.h>, which the local
+ * wrapper does NOT ship (it ships isp_conf.h / isp_param_conf.h instead) --
+ * so the TU fails to COMPILE outright; it never reaches the linker.  Behind
+ * that: the local wrapper (isp_api_wrapper.c) exports
  * isp_vsi_init/update_cfg/uninit/bottom_half/start/stop/enqueue/dequeue but DOES
  * NOT export isp_vsi_set_param / isp_vsi_get_param (called by the fork's ctrl
  * path -- now dropped in the v4.4 port, so no longer referenced) and its
  * isp_vsi_bottom_half() is 2-arg `(init_cfg, mi_mis)` whereas this driver calls
- * the 3-arg `(dev, init_cfg, mi_mis)`.  It also #includes
- * <zephyr/drivers/video/isp-vsi.h>, which the local wrapper does NOT ship (it
- * ships isp_conf.h / isp_param_conf.h instead).  Consequently
- * CONFIG_VIDEO_ISP_VSI is opt-in default n: the driver compiles-but-WILL-NOT-
- * LINK against the local hal_alif until the wrapper is bumped to the matching
+ * the 3-arg `(dev, init_cfg, mi_mis)` -- a further incompatibility, moot until
+ * isp-vsi.h exists to let the TU compile in the first place.  Consequently
+ * CONFIG_VIDEO_ISP_VSI is opt-in default n: the driver fails to COMPILE
+ * against the local hal_alif until the wrapper is bumped to the matching
  * version.  Do NOT fabricate the missing API.
  * vendor-ext, BENCH-UNVERIFIED, ISP=Vivante blob (opt-in).
  */

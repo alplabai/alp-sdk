@@ -27,6 +27,8 @@
 #include <alp/cap_instance.h>
 #include <alp/storage.h>
 
+#include "alp_checked_arith.h"
+
 typedef struct alp_storage_ops alp_storage_ops_t;
 
 typedef struct alp_storage_backend_state {
@@ -85,19 +87,16 @@ struct alp_storage {
  * values near UINT64_MAX.  The naive `offset + len > capacity` test can
  * wrap the sum and let an out-of-range request through, after which the
  * backend narrows `offset` to off_t and issues out-of-bounds flash I/O.
- * Headroom is therefore computed by subtraction only.  Because a valid
+ * Headroom is therefore computed by subtraction only -- delegated to the
+ * shared alp_u64_range_valid() helper (src/common/alp_checked_arith.h,
+ * #743) so this backend-specific wrapper stays a thin, reviewable alias
+ * instead of a second copy of the subtraction logic.  Because a valid
  * offset is then <= capacity (which fits the backend's off_t), the
  * narrowing casts at the call site are safe.
  */
 static inline bool alp_storage_range_in_capacity(uint64_t offset, uint64_t len, uint64_t capacity)
 {
-	if (offset > capacity) {
-		return false;
-	}
-	if (len > capacity - offset) {
-		return false;
-	}
-	return true;
+	return alp_u64_range_valid(offset, len, capacity);
 }
 
 #endif /* ALP_BACKENDS_STORAGE_OPS_H */

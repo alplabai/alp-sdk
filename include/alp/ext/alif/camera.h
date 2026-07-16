@@ -36,11 +36,17 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      Header lands ahead of the vendor pack body; every function
- *      returns @ref ALP_ERR_NOSUPPORT until the Alif HAL ISP Pico
- *      integration lands (same pattern as the OSPI SecAES and
- *      FlexSPI OTFAD precedents from Slice 6).  Promotes to
- *      [ABI-STABLE] when three vendor families ship extensions.
+ *      Every function returns @ref ALP_ERR_NOSUPPORT today, but not
+ *      for one reason: AE is declared in the vendored isp_wrapper
+ *      headers but undefined in its archive; AF
+ *      and LSC are absent from that archive outright (no header, no
+ *      symbol); AWB is reachable in the archive but deliberately
+ *      withheld so AE/AF can't silently stay unset while AWB moves
+ *      alone.  The gain-table load fails for an additional,
+ *      independent reason -- a symbol exists but its struct can't
+ *      carry this call's contract -- see the per-entry detail in
+ *      `src/backends/ext/alif/camera.c`.  Promotes to [ABI-STABLE]
+ *      when three vendor families ship extensions.
  */
 
 #ifndef ALP_EXT_ALIF_CAMERA_H
@@ -104,8 +110,13 @@ typedef struct {
  *         @ref ALP_ERR_INVAL on NULL handle / NULL rect /
  *           zero-sized rect;
  *         @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC on non-Alif backend;
- *         @ref ALP_ERR_NOSUPPORT until the Alif HAL ISP Pico
- *           integration lands.
+ *         @ref ALP_ERR_NOSUPPORT today for every region, but not for
+ *           one shared reason: AE is declared-but-undefined in the
+ *           vendored archive, AF is absent from it outright, and AWB
+ *           is technically reachable (the archive defines the call)
+ *           but deliberately withheld so AE/AF can't silently stay
+ *           unset while AWB moves alone -- see the file-header
+ *           ABI-status note above.
  */
 alp_status_t alp_alif_camera_isp_3a_window_set(alp_camera_t                 *camera,
                                                alp_alif_camera_3a_region_t   region,

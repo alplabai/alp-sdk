@@ -35,9 +35,21 @@ static alp_status_t select_page(tas2563_t *ctx, uint8_t page)
 	return reg_write(ctx, TAS2563_REG_PAGE, page);
 }
 
+/* Table 7-3: only five 7-bit addresses are wired -- the four
+ * AD0/SPICLK strap options plus the global broadcast address.
+ * Anything else (including an out-of-range/8-bit-encoded value)
+ * cannot correspond to a real strap and is rejected before any bus
+ * access. */
+static bool addr_is_valid(uint8_t addr)
+{
+	return addr == TAS2563_I2C_ADDR_BROADCAST ||
+	       (addr >= TAS2563_I2C_ADDR_GND_DIRECT && addr <= TAS2563_I2C_ADDR_VDD_DIRECT);
+}
+
 alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n)
 {
 	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
+	if (!addr_is_valid(addr_7bit)) return ALP_ERR_INVAL;
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->bus  = bus;
 	ctx->addr = addr_7bit;

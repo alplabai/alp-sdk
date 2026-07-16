@@ -11,8 +11,9 @@ stay byte-identical.  This gate pins them.
 
 For each (board.yaml, emit-mode) case it runs the emitter and compares the
 output, byte-for-byte, to a committed golden under
-`tests/fixtures/emit-snapshots/`.  Machine-specific absolute paths (the SDK
-checkout root) are normalised to `<SDK_ROOT>` so the goldens are portable.
+`tests/fixtures/emit-snapshots/`. Machine-specific absolute paths (the SDK
+checkout root and orchestrator Python) are normalised so the goldens are
+portable.
 
 This is the explicit behaviour-pin the #285 extractions land against: an
 extraction that moves code but keeps `--emit` identical is green here; one
@@ -87,8 +88,19 @@ for _bid, _board in _PROJ_BOARDS:
             CASES.append((f"proj-{_bid}.{_mode}", PROJ, _board, _mode))
 
 
-def _normalize_root(text: str, repo: str) -> str:
-    """Replace every rendering of the SDK checkout root with ``<SDK_ROOT>``.
+def _normalize_path(text: str, path: str, token: str) -> str:
+    """Replace raw, JSON-escaped, and forward-slash forms of one path."""
+    for variant in (
+        path.replace("\\", "\\\\"),  # JSON-escaped Windows path (do first)
+        path,                            # raw path (POSIX / Windows)
+        path.replace("\\", "/"),      # forward-slash Windows path
+    ):
+        text = text.replace(variant, token)
+    return text
+
+
+def _normalize_host_paths(text: str, repo: str, python: str) -> str:
+    """Replace host-specific SDK and Python paths with stable tokens.
 
     ``build-plan`` output is JSON, so a Windows checkout root
     (``C:\\Users\\...\\alp-sdk``) appears with its backslashes doubled inside
@@ -96,16 +108,12 @@ def _normalize_root(text: str, repo: str) -> str:
     JSON-escaped absolute paths in the emitted snapshot, which breaks the
     byte-for-byte gate on Windows even though the committed goldens use
     ``<SDK_ROOT>``.  Cover the JSON-escaped form and the forward-slash form as
-    well as the raw path.  On POSIX all three variants collapse to ``repo``,
-    so the Linux output is unchanged.
+    well as the raw path. The Python executable added to Zephyr commands by
+    issue #787 needs the same treatment. On POSIX the variants collapse to
+    their raw paths, so the Linux output is unchanged apart from tokenisation.
     """
-    for variant in (
-        repo.replace("\\", "\\\\"),  # JSON-escaped Windows path (do first)
-        repo,                        # raw path (POSIX, or unescaped Windows)
-        repo.replace("\\", "/"),     # forward-slash Windows path
-    ):
-        text = text.replace(variant, "<SDK_ROOT>")
-    return text
+    text = _normalize_path(text, repo, "<SDK_ROOT>")
+    return _normalize_path(text, python, "<PYTHON_EXECUTABLE>")
 
 
 def _emit(tool: Path, board: str, mode: str) -> str:
@@ -122,7 +130,7 @@ def _emit(tool: Path, board: str, mode: str) -> str:
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
                          f"--emit {mode} (rc={rv.returncode}):\n{rv.stderr}")
-    return _normalize_root(rv.stdout, str(REPO))
+    return _normalize_host_paths(rv.stdout, str(REPO), sys.executable)
 
 
 def main() -> int:
