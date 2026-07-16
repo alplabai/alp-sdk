@@ -94,19 +94,27 @@ boot:
   signing:
     algorithm: ecdsa_p256        # ecdsa_p256 | rsa2048 | rsa3072 | ed25519
     key_file: keys/prod_ecdsa_p256.pub.pem
-  slots:
-    primary:   { size_kib: 480 }
-    secondary: { size_kib: 480 }
   swap_algorithm: scratch        # scratch | move | overwrite
-  scratch_size_kib: 32
-  anti_rollback: false
 ```
 
 Project-wide (one bootloader per device).  The loader emits a
 sysbuild.conf overlay with the corresponding `SB_CONFIG_*` lines
-(MCUboot signature type, slot sizes, swap algorithm, scratch size,
-anti-rollback counter).  See `docs/secure-boot.md` for the
-underlying secure-boot contract.
+(MCUboot signature type, swap algorithm).  See `docs/secure-boot.md`
+for the underlying secure-boot contract.
+
+There is no `slots:` / `scratch_size_kib:` / `anti_rollback:` field.
+Slot and scratch partition *sizes* are an SDK build-policy choice, not
+a per-project field -- MCUboot takes its geometry from the board DT
+`partitions {}` node (declare the actual layout via `storage:` below
+if you want it explicit in your `board.yaml`); sysbuild has no
+`SB_CONFIG_*` symbol for a partition size at all.  `anti_rollback` was
+removed rather than fixed: only software downgrade prevention
+(`ota.rollback.min_version`) is wired today, and the field's own
+description promised the OTP-fused hardware-counter tier, which
+isn't built -- a silent SW substitute would have shipped weaker
+security than the schema claimed.  For `method: mcuboot`, `rsa3072`
+is rejected at emit time (sysbuild's RSA choice has no key-length
+knob); use `rsa2048` or `ecdsa_p256`/`ed25519`.
 
 ### OTA (`ota:` -- Mender / MCUmgr)
 

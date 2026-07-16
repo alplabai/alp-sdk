@@ -11,7 +11,51 @@ imports later.
 
 from __future__ import annotations
 
-from .models import BoardProject
+from pathlib import Path
+from typing import Optional
+
+from .models import BoardProject, OrchestratorError
+from .paths import REPO
+
+# SoM-preset `family:` (metadata/e1m_modules/*.yaml, e.g.
+# "alif-ensemble") -> the short slug the curated
+# zephyr/sysbuild/<slug>/sysbuild.conf directory uses.  Mirrors the
+# alif-ensemble / renesas-rzv2n family-token `startswith` match already
+# duplicated in kconfig.py / validate.py.  Only families that actually
+# ship a curated file are listed -- renesas-rzv2n / nxp-imx9 boot via
+# U-Boot/Yocto, not sysbuild, so they have none today; adding one is a
+# metadata-only change (drop the file under zephyr/sysbuild/<slug>/),
+# no code change needed here.
+_FAMILY_SYSBUILD_DIRS: dict[str, str] = {
+    "alif-ensemble": "aen",
+}
+
+
+def sysbuild_family_base_conf(project: BoardProject) -> Optional[Path]:
+    """Path to the curated `zephyr/sysbuild/<family>/sysbuild.conf` for
+    this project's SoM family, or None when the family has no curated
+    profile on disk.
+
+    This is the LAYERING base (issue #807): a customer `boot:` overlay
+    from `emit_sysbuild_conf` builds ON TOP of this file via a
+    semicolon-separated `SB_CONF_FILE` list rather than replacing it,
+    so a `boot:` block no longer forks family boot policy into two
+    divergent places.  Verified against the pinned Zephyr 4.4.0's
+    `share/sysbuild/cmake/modules/sysbuild_kconfig.cmake`: `SB_CONF_FILE`
+    accepts a CMake list (`foreach(conf_file ${conf_file_expanded})`
+    splits on the list separator) and every listed file lands in the
+    merged sysbuild `.config`, later files winning on a repeated
+    symbol -- confirmed empirically via a `native_sim` sysbuild
+    configure with two `;`-joined conf files, both symbols present in
+    the merged `.config`.
+    """
+    family = (project.som_preset.get("family") or "").lower()
+    slug = next((v for k, v in _FAMILY_SYSBUILD_DIRS.items()
+                 if family.startswith(k)), None)
+    if slug is None:
+        return None
+    base = REPO / "zephyr" / "sysbuild" / slug / "sysbuild.conf"
+    return base if base.is_file() else None
 
 
 def emit_sysbuild_conf(project: BoardProject) -> str:
@@ -22,6 +66,17 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     -- -DSB_CONF_FILE=<abs path>`).  Returns an empty string when the project
     does not declare a `boot:` block (the SDK's stock per-family
     defaults at zephyr/sysbuild/<family>/sysbuild.conf apply).
+
+    Every `SB_CONFIG_*` symbol emitted here MUST exist in the pinned
+    Zephyr's `share/sysbuild/**/Kconfig*` -- sysbuild treats an
+    undefined-symbol warning as FATAL, so one invented name aborts the
+    whole `boot:` configure (issue #807).  Slot/scratch partition
+    *sizes* have no sysbuild expression at all: MCUboot takes slot
+    geometry from the board DT partitions, per the Zephyr 4.4 Kconfig
+    help text on every `MCUBOOT_MODE_*` choice -- that's also why
+    `boot.slots` / `boot.scratch_size_kib` were dropped from the
+    schema rather than fixed (see board.schema.json for the full
+    rationale).
     """
     boot = project.boot or {}
     if not boot:
@@ -43,38 +98,39 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     ]
     sign = boot.get("signing") or {}
     algo = (sign.get("algorithm") or "").lower()
+    if algo == "rsa3072":
+        # sysbuild's BOOT_SIGNATURE_TYPE_RSA choice has no key-length
+        # knob -- length is an mcuboot-image CONFIG_BOOT_SIGNATURE_
+        # TYPE_RSA_LEN symbol (bootloader/mcuboot/boot/zephyr/Kconfig),
+        # a different Kconfig namespace sysbuild never forwards into.
+        # Until a per-image `sysbuild/mcuboot.conf` overlay seam exists
+        # (see docs/secure-boot.md), rsa3072 has no honest emit -- fail
+        # loud rather than silently ship rsa2048's default length.
+        raise OrchestratorError(
+            "boot.signing.algorithm: rsa3072 has no sysbuild "
+            "expression yet -- SB_CONFIG_BOOT_SIGNATURE_TYPE_RSA has "
+            "no key-length knob (that's an mcuboot-image CONFIG_BOOT_"
+            "SIGNATURE_TYPE_RSA_LEN symbol, a different Kconfig "
+            "namespace sysbuild doesn't forward).  Use rsa2048 (mcuboot's "
+            "RSA default length) or ecdsa_p256/ed25519 until a per-image "
+            "sysbuild/mcuboot.conf overlay seam ships.")
     algo_kc = {
-        "ecdsa_p256": "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256=y",
-        "rsa2048":    "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA=y\n"
-                      "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA_LEN=2048",
-        "rsa3072":    "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA=y\n"
-                      "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA_LEN=3072",
-        "ed25519":    "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ED25519=y",
+        "ecdsa_p256": "SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y",
+        "rsa2048":    "SB_CONFIG_BOOT_SIGNATURE_TYPE_RSA=y",
+        "ed25519":    "SB_CONFIG_BOOT_SIGNATURE_TYPE_ED25519=y",
     }.get(algo)
     if algo_kc:
         lines.append(algo_kc)
     if sign.get("key_file"):
         lines.append(f'SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{sign["key_file"]}"')
-    slots = boot.get("slots") or {}
-    primary = (slots.get("primary") or {}).get("size_kib")
-    secondary = (slots.get("secondary") or {}).get("size_kib")
-    if primary:
-        lines.append(f"SB_CONFIG_BOOT_PRIMARY_PARTITION_SIZE={int(primary) * 1024}")
-    if secondary:
-        lines.append(f"SB_CONFIG_BOOT_SECONDARY_PARTITION_SIZE={int(secondary) * 1024}")
     swap = (boot.get("swap_algorithm") or "scratch").lower()
     swap_kc = {
-        "scratch":   "SB_CONFIG_MCUBOOT_MODE_SWAP_USING_SCRATCH=y",
+        "scratch":   "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y",
         "move":      "SB_CONFIG_MCUBOOT_MODE_SWAP_USING_MOVE=y",
         "overwrite": "SB_CONFIG_MCUBOOT_MODE_OVERWRITE_ONLY=y",
     }.get(swap)
     if swap_kc:
         lines.append(swap_kc)
-    if swap == "scratch" and boot.get("scratch_size_kib"):
-        lines.append(f"SB_CONFIG_BOOT_SCRATCH_PARTITION_SIZE="
-                     f"{int(boot['scratch_size_kib']) * 1024}")
-    if boot.get("anti_rollback"):
-        lines.append("SB_CONFIG_BOOT_COUNTERS_MCUBOOT=y")
     return "\n".join(lines) + "\n"
 
 

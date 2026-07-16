@@ -100,11 +100,12 @@ boot:
   signing:
     algorithm: ecdsa_p256
     key_file: keys/prod_ecdsa_p256.pub.pem
-  slots:
-    primary:   { size_kib: 480 }
-    secondary: { size_kib: 480 }
   swap_algorithm: scratch
 ```
+
+(Slot/scratch partition *sizes* aren't a `boot:` field -- MCUboot
+takes its geometry from the board DT `partitions {}` node; declare an
+explicit layout via `storage:` if you need one in your `board.yaml`.)
 
 The loader emits the matching `SB_CONFIG_*` overlay; `west alp-build`
 passes it as `--sysbuild-config build/alp_sysbuild.conf`
