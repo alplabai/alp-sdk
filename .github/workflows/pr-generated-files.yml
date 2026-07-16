@@ -168,19 +168,20 @@ jobs:
       - name: Regenerate error catalog from headers + diagnostic docs
         run: python3 scripts/gen_error_catalog.py
 
-      - name: Regenerate ABI snapshot (current = v0.10)
-        # The committed v0.10 snapshot is the CURRENT working snapshot
-        # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 + v0.8 are FROZEN historical records --
+      - name: Regenerate ABI snapshot (current = v0.11)
+        # The committed v0.11 snapshot is the CURRENT working snapshot
+        # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 + v0.8 + v0.9 + v0.10 are FROZEN historical
+        # records --
         # the in-tree convention per docs/abi-markers.md).  Regenerate
-        # v0.10 from the current headers and compare.
+        # v0.11 from the current headers and compare.
         #
         # The snapshot's `generated` field is a date stamp; re-running
         # on the same headers always changes that one line, so the
         # diff below masks it with --ignore-matching-lines.
         run: |
           python3 scripts/abi_snapshot.py \
-              --version v0.10 \
-              --output docs/abi/v0.10-snapshot.json
+              --version v0.11 \
+              --output docs/abi/v0.11-snapshot.json
 
       - name: Fail if generated files differ from committed copies
         run: |
@@ -188,7 +189,7 @@ jobs:
           # else must match.
           if ! git diff --exit-code \
                   --ignore-matching-lines='"generated":' \
-                  -- include/alp/soc_caps.h docs/abi/v0.10-snapshot.json \
+                  -- include/alp/soc_caps.h docs/abi/v0.11-snapshot.json \
                      include/alp/cap.h \
                      src/cap.c \
                      src/status_strings.c \
@@ -207,7 +208,7 @@ jobs:
             echo "::error::  python3 scripts/gen_portability_matrix.py"
             echo "::error::  python3 scripts/gen_catalog.py"
             echo "::error::  python3 scripts/gen_error_catalog.py"
-            echo "::error::  python3 scripts/abi_snapshot.py --version v0.10 --output docs/abi/v0.10-snapshot.json"
+            echo "::error::  python3 scripts/abi_snapshot.py --version v0.11 --output docs/abi/v0.11-snapshot.json"
             echo "::error::and commit the result."
             exit 1
           fi
