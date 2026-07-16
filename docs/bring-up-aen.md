@@ -154,7 +154,7 @@ against the SKU's `som.yaml` preset.
    ```bash
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        examples/peripheral-io/gpio-button-led \
-       --sysbuild --sysbuild-config zephyr/sysbuild/aen/sysbuild.conf
+       --sysbuild -- -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf
    west flash
    ```
 

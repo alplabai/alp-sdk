@@ -108,7 +108,7 @@ takes its geometry from the board DT `partitions {}` node; declare an
 explicit layout via `storage:` if you need one in your `board.yaml`.)
 
 The loader emits the matching `SB_CONFIG_*` overlay; `west alp-build`
-passes it as `--sysbuild-config build/alp_sysbuild.conf`
+passes it as `-DSB_CONF_FILE=<abs>/build/alp_sysbuild.conf`
 automatically.  Without a `boot:` block the SDK's stock profile
 above is used unchanged.
 
@@ -118,7 +118,7 @@ Direct build (without `west alp-build` orchestration):
 west build -b alif_e7_dk_rtss_he \
     examples/peripheral-io/gpio-button-led \
     --sysbuild \
-    --sysbuild-config alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
+    -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
 ```
 
 Output artefacts under `build/`:

@@ -373,7 +373,7 @@
         "media": "kconfig-conf",
         "schema_id": null,
         "path": "build/sysbuild/tfm/tfm.conf",
-        "consumer_hint": "TF-M sysbuild child image (west build --sysbuild --sysbuild-config), present only when security.psa.tfm is set"
+        "consumer_hint": "TF-M sysbuild child image (west build --sysbuild -- -DSB_CONF_FILE=<abs>), present only when security.psa.tfm is set"
       }
     },
     {
