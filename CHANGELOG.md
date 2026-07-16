@@ -9,6 +9,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [v0.11.0] - 2026-07-16
 
+### Fixed — the ABI freeze gate's own tests broke on every release bump (#826)
+
+- **`current_snapshot_version()` bound its default at import time.** The
+  signature was `def current_snapshot_version(sdk_version_yaml: Path =
+  SDK_VERSION_YAML)`, which captures the module-level `Path` when the
+  function is *defined*. `abi_snapshot.main()` calls it with no argument,
+  so it always read the real `metadata/sdk_version.yaml` — a test that
+  rebinds `abi_snapshot.SDK_VERSION_YAML` was silently ignored. The
+  default now resolves at call time.
+- **The freeze-gate tests were therefore coupled to the checkout's own
+  version.** `test_main_allows_writing_the_current_version` writes a temp
+  `sdk_version.yaml` declaring `0.10.1` and asks for `v0.10`; that passed
+  only because the repo happened to declare `0.10.x`. Bumping to `0.11.0`
+  turned it red with `refusing to write a snapshot labelled 'v0.10' ...
+  declares the current release as v0.11` — the guard working correctly on
+  a test that could not see its own fixture. Its sibling
+  `test_main_refuses_older_version` was passing for the wrong reason, on
+  the real version rather than the fixture's.
+- Caught by `python-smoke` on all three platforms plus
+  `validate · soc-spec-v1` during the v0.11.0 bump. Every future minor
+  bump would have hit the same wall.
+
 ### Fixed — `packagegroup-alp-display` allarch/libdrm RDEPENDS error
 
 - A full `alp-image-edge` bake for `e1m-v2n101-a55` now completes
