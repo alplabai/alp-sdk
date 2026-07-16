@@ -119,6 +119,13 @@ const char *cc3501e_wifi_sec_name(uint16_t security_info);
  * @param count       Receives the number of records parsed (may be NULL).
  * @param timeout_ms  Upper bound on the poll-by-repeat budget.
  * @return ALP_OK once the scan completed (even with zero records);
+ *         @ref ALP_ERR_NOT_READY if @p ctx is NULL or not initialised;
+ *         @ref ALP_ERR_BUSY if a scan is already decoding on this SAME
+ *         @p ctx (issue #740) -- a plain, non-atomic same-call-stack
+ *         reentrancy guard (see @ref cc3501e_poll_events's concurrency
+ *         warning; a caller polling one @p ctx from multiple threads must
+ *         serialize its own calls). A different @p ctx has entirely
+ *         separate storage and may always scan concurrently;
  *         ALP_ERR_TIMEOUT if the firmware stayed busy; mapped error otherwise.
  *
  * @note WIRE: the protocol header defines @ref alp_cc3501e_scan_result_t but
@@ -147,6 +154,19 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);
 
 /**
+ * @brief Named security selectors for @ref cc3501e_wifi_connect /
+ *        @ref cc3501e_wifi_ap_start's @c sec_type parameter (matches
+ *        @ref alp_cc3501e_wifi_connect_t::security on the wire).
+ *
+ * Typed @c uint8_t (not a bare enum) so a caller-side conditional picking
+ * between them (e.g. "open if no PSK, else WPA2-PSK") assigns cleanly to a
+ * @c uint8_t with no implicit-int narrowing conversion -- see issue #742.
+ */
+#define CC3501E_WIFI_CONNECT_SEC_OPEN     ((uint8_t)0u)
+#define CC3501E_WIFI_CONNECT_SEC_WPA2_PSK ((uint8_t)1u)
+#define CC3501E_WIFI_CONNECT_SEC_WPA3_SAE ((uint8_t)2u)
+
+/**
  * @brief Associate with a Wi-Fi AP (WIFI_CONNECT_STA, opcode 0x12).
  *
  * Submits the SSID / security / passphrase as the on-wire
@@ -157,8 +177,9 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);
  *
  * @param ctx         Initialised driver context.
  * @param ssid        NUL-terminated SSID (<= 32 bytes; longer is rejected).
- * @param sec_type    Security: 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE
- *                    (matches @ref alp_cc3501e_wifi_connect_t::security).
+ * @param sec_type    Security selector -- @ref CC3501E_WIFI_CONNECT_SEC_OPEN /
+ *                    _WPA2_PSK / _WPA3_SAE (matches
+ *                    @ref alp_cc3501e_wifi_connect_t::security on the wire).
  * @param pass        NUL-terminated passphrase (may be NULL/"" for open).
  * @param timeout_ms  Upper bound on the connect poll budget.
  * @return ALP_OK once associated; ALP_ERR_TIMEOUT if still associating at
@@ -198,8 +219,9 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  *
  * @param ctx         Initialised driver context.
  * @param ssid        NUL-terminated AP SSID (<= 32 bytes; longer is rejected).
- * @param sec_type    Security: 0 = open, 1 = WPA2-PSK, 2 = WPA3-SAE
- *                    (matches @ref alp_cc3501e_wifi_connect_t::security).
+ * @param sec_type    Security selector -- @ref CC3501E_WIFI_CONNECT_SEC_OPEN /
+ *                    _WPA2_PSK / _WPA3_SAE (matches
+ *                    @ref alp_cc3501e_wifi_connect_t::security on the wire).
  * @param pass        NUL-terminated passphrase (may be NULL/"" for an open AP).
  * @param timeout_ms  Upper bound on the AP-start poll budget (floored to the
  *                    radio down-window).

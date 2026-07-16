@@ -13,7 +13,7 @@
  * Backends that do real work (currently `src/zephyr/`) override
  * selectively via per-class Kconfig and CMake gating; backends
  * without a working impl yet (`src/baremetal/`, `src/yocto/`)
- * compile the full `src/common/stub/*.c` source set so the
+ * compile the full set of `src/common/stub/` sources so the
  * resulting library is link-complete.
  */
 

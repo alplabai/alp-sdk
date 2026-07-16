@@ -5,6 +5,14 @@ cmake_minimum_required(VERSION 3.20)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(alp_sdk_chips_test LANGUAGES C)
 
+# da9292_internal.h (chips/da9292/) is deliberately NOT installed / not
+# part of <alp/chips/da9292.h>'s public surface -- it exists only so
+# test_power.c can directly exercise da9292_poll_budget_step(), the
+# #757 poll-budget boundary logic the I2C test double's address-keyed
+# (not per-register) canned-response model can't reach end-to-end.
+target_include_directories(app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/da9292)
+
 target_sources(app PRIVATE
     src/main.c
     src/test_accelerators.c

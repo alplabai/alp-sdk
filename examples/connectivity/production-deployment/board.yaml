@@ -7,7 +7,8 @@
 # Demonstrates EVERY v0.6 declarative block applied at production
 # stance:
 #
-#   - `boot:`              MCUboot + ECDSA-P256, anti-rollback armed
+#   - `boot:`              MCUboot + ECDSA-P256 (slot geometry lives
+#                           in `storage:` + the board DT, not `boot:`)
 #   - `ota:`               Mender HTTPS-poll, A/B rootfs (for the
 #                           Linux-fork variant) + MCUboot slots
 #                           (Zephyr side)
@@ -82,21 +83,20 @@ chips:
 # ----------------------------------------------------------------
 # Bootloader (project-wide).
 # ----------------------------------------------------------------
-# MCUboot + ECDSA-P256 with explicit slot geometry + anti-rollback.
-# `anti_rollback: true` enables monotonic image counters --
-# requires OTP fuse provisioning at factory test (one-way; see
-# docs/secure-boot.md "anti-rollback").
+# MCUboot + ECDSA-P256.  Slot/scratch partition sizes are declared
+# explicitly below under `storage:` (mcuboot_primary / mcuboot_secondary
+# / mcuboot_scratch) -- MCUboot itself takes its slot geometry from
+# the board DT `partitions {}` node, not from a `boot:` field; there
+# is no sysbuild knob for a partition size.  Downgrade prevention is
+# `ota.rollback.min_version` below (software floor); a hardware
+# anti-rollback counter tier (OPTIGA/OTP fuse) isn't built yet, so
+# this board.yaml doesn't claim one.
 boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
     key_file:  keys/prod_ecdsa_p256.pub.pem
-  slots:
-    primary:   { size_kib: 1024 }
-    secondary: { size_kib: 1024 }
-  swap_algorithm:   scratch
-  scratch_size_kib: 64
-  anti_rollback:    true
+  swap_algorithm: scratch
 
 # ----------------------------------------------------------------
 # OTA (project-wide).

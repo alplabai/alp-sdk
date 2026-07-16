@@ -122,6 +122,39 @@ target_include_directories(alp_sdk PRIVATE
 
 if(ALP_SOM STREQUAL "aen")
     add_subdirectory(${_alp_sdk_root}/vendors/alif vendors_alif)
+    # The CC3501E Wi-Fi backend (src/backends/wifi/cc3501e.c) is otherwise
+    # reachable ONLY through zephyr/CMakeLists.txt's
+    # CONFIG_ALP_SDK_WIFI_CC3501E-gated build, which the plain-CMake
+    # strict-warnings job (.github/workflows/pr-plain-cmake.yml) never
+    # compiles -- so a narrowing bug like issue #742 (an unsigned-to-uint8_t
+    # conversion) had no -Wconversion gate anywhere.
+    #
+    # Compiling the TU straight into `alp_sdk` (a prior fix round did this)
+    # is the wrong fix: it makes alp_wifi_cc3501e_attach() a real linkable
+    # symbol in the SHIPPED baremetal-aen libalp_sdk.a even though nothing
+    # else in a plain-CMake build (no CONFIG_*, no chip driver compiled in,
+    # no dispatcher routing) makes wifi.h's documented "after a successful
+    # attach, alp_wifi_open routes through the CC3501E backend" contract
+    # true there -- a consumer can link, call attach, get ALP_OK, and then
+    # silently get NULL/ALP_ERR_NOSUPPORT back from alp_wifi_open().  That
+    # false contract is a worse defect than the ungated -Wconversion this
+    # exists to close.
+    #
+    # Instead compile the TU into its own check-only OBJECT library:
+    # add_library() puts it in the default `all` target (so it still gets
+    # built -- and, under -DALP_SDK_STRICT_WARNINGS=ON -DALP_SDK_WERROR=ON,
+    # still fails the build on any -Wconversion diagnostic -- every time the
+    # baremetal-aen strict-warnings matrix entry runs), but it is never
+    # target_link_libraries()'d into `alp_sdk` or anything else, so none of
+    # its object code or symbols reach libalp_sdk.a.  The file needs only
+    # alp_sdk_headers (public <alp/*.h> + the co-located "wifi_ops.h", found
+    # via the compiler's usual quoted-include-relative-to-source search --
+    # no extra include dir required), matching how the file already builds
+    # standalone under the Zephyr module gate.
+    add_library(alp_sdk_wifi_cc3501e_conversion_check OBJECT
+        ${_alp_sdk_root}/src/backends/wifi/cc3501e.c)
+    target_link_libraries(alp_sdk_wifi_cc3501e_conversion_check PRIVATE
+        alp_sdk_headers alp_sdk_warnings)
 elseif(ALP_SOM STREQUAL "v2n")
     add_subdirectory(${_alp_sdk_root}/vendors/renesas-rzv2n vendors_renesas_rzv2n)
 endif()

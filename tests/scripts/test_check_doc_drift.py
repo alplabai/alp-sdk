@@ -184,10 +184,11 @@ def test_dual_namespace_pinout_guidance_passes(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_forward_looking_plan_doc_excluded(tmp_path):
-    # cc3501e-integration-plan.md documents a proposed API by intent;
-    # a "dead" symbol there must NOT fail the scan.  (It is still index-linked.)
-    _scaffold(tmp_path, docs={"cc3501e-integration-plan.md": "proposed `alp_sdio_open`\n"})
+def test_forward_looking_tbd_doc_excluded(tmp_path):
+    # v0.6-tbd-and-assumptions.md documents in-flight TBDs / proposed APIs
+    # by intent; a "dead" symbol there must NOT fail the scan.  (It is
+    # still index-linked.)
+    _scaffold(tmp_path, docs={"v0.6-tbd-and-assumptions.md": "proposed `alp_sdio_open`\n"})
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
 

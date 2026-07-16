@@ -7,6 +7,8 @@
  * (24Cxx EEPROM), tcal9538 (8-channel I/O expander).
  */
 
+#include <math.h>
+
 #include <zephyr/ztest.h>
 
 #include "alp/chips/eeprom_24c128.h"
@@ -136,6 +138,61 @@ ZTEST(alp_chips, test_ina236_init_null_args)
 	alp_i2c_close(bus);
 }
 
+/* #739: address must fall inside the INA236A/B strap ranges (0x40..0x43,
+ * 0x48..0x4B); 0 is the documented "use default" sentinel and stays
+ * legal.  #757: NaN/Inf shunt_ohms / max_current_a must be rejected
+ * instead of silently passing the old `<= 0.0f` check (NaN compares
+ * false against every relop) and landing in the CALIBRATION register
+ * cast. */
+ZTEST(alp_chips, test_ina236_init_validates_address_and_numeric_edges)
+{
+	extern alp_status_t ina236_init(ina236_t * ctx,
+	                                alp_i2c_t * bus,
+	                                uint8_t           addr_7bit,
+	                                float             shunt_ohms,
+	                                float             max_current_a,
+	                                ina236_adcrange_t adcrange);
+	ina236_t            ctx;
+	alp_i2c_t          *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	/* addr_7bit == 0 must stay legal (falls back to 0x40). */
+	zassert_not_equal(ina236_init(&ctx, bus, 0x00u, 0.010f, 1.0f, INA236_ADCRANGE_81MV),
+	                  ALP_ERR_INVAL,
+	                  "addr=0 is the documented default sentinel, must not be INVAL");
+
+	/* Boundary probes: 0x7F, 0x80, 0xFF and the gap between the two
+	 * strap bands (0x44..0x47) are all out of range. */
+	const uint8_t bad_addr[] = { 0x44u, 0x47u, 0x7Fu, 0x80u, 0xFFu };
+	for (size_t i = 0; i < ARRAY_SIZE(bad_addr); ++i) {
+		zassert_equal(ina236_init(&ctx, bus, bad_addr[i], 0.010f, 1.0f, INA236_ADCRANGE_81MV),
+		              ALP_ERR_INVAL,
+		              "addr 0x%02x must be rejected",
+		              bad_addr[i]);
+	}
+
+	/* NaN / Inf numeric edges. */
+	const float nan_v = NAN;
+	const float inf_v = INFINITY;
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, nan_v, 1.0f, INA236_ADCRANGE_81MV),
+	              ALP_ERR_INVAL,
+	              "NaN shunt_ohms must be rejected");
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, inf_v, 1.0f, INA236_ADCRANGE_81MV),
+	              ALP_ERR_INVAL,
+	              "Inf shunt_ohms must be rejected");
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.010f, nan_v, INA236_ADCRANGE_81MV),
+	              ALP_ERR_INVAL,
+	              "NaN max_current_a must be rejected");
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.010f, inf_v, INA236_ADCRANGE_81MV),
+	              ALP_ERR_INVAL,
+	              "Inf max_current_a must be rejected");
+
+	alp_i2c_close(bus);
+}
+
 /* ------------------------------------------------------------------ */
 /* eeprom_24c128 -- generic 24Cxx I2C EEPROM                          */
 /* ------------------------------------------------------------------ */
@@ -202,6 +259,67 @@ ZTEST(alp_chips, test_tcal9538_init_null_args)
 
 	zassert_equal(tcal9538_init(NULL, bus, TCAL9538_I2C_ADDR_BASE), ALP_ERR_INVAL);
 	zassert_equal(tcal9538_init(&ctx, NULL, TCAL9538_I2C_ADDR_BASE), ALP_ERR_INVAL);
+
+	alp_i2c_close(bus);
+}
+
+/* #739: address must fall inside either the TCA9538/TCAL9538 A1A0
+ * strap range (0x70..0x73) or the register-compatible TCA6408A/
+ * PCA9538 alt-part's single-A0 strap range (0x20..0x21 -- E1M EVK's
+ * TCA6408A alt-population, EVK_I2C_ADDR_TCA6408A_MAIN); 0 is the
+ * documented "use base" sentinel and stays legal. */
+ZTEST(alp_chips, test_tcal9538_init_validates_address_strap_range)
+{
+	tcal9538_t ctx;
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	zassert_not_equal(tcal9538_init(&ctx, bus, 0x00u),
+	                  ALP_ERR_INVAL,
+	                  "addr=0 is the documented base-address sentinel, must not be INVAL");
+
+	const uint8_t bad_addr[] = { 0x1Fu, 0x22u, 0x6Fu, 0x74u, 0x7Fu, 0x80u, 0xFFu };
+	for (size_t i = 0; i < ARRAY_SIZE(bad_addr); ++i) {
+		zassert_equal(tcal9538_init(&ctx, bus, bad_addr[i]),
+		              ALP_ERR_INVAL,
+		              "addr 0x%02x must be rejected",
+		              bad_addr[i]);
+	}
+
+	alp_i2c_close(bus);
+}
+
+/* Regression for the reviewed fix: a strap-range check that only
+ * admits 0x70..0x73 silently breaks every E1M EVK assembled with the
+ * TCA6408A alt-population (EVK_I2C_ADDR_TCA6408A_MAIN = 0x20, bench-
+ * confirmed) -- the exact case examples/peripheral-io/i2c-device-hub
+ * probes. This bus is backed by native_sim's i2c-emul controller with
+ * no fake TCA6408A/TCAL9538 target attached, so init() can't reach
+ * ALP_OK here (reg_read fails past the address check, same as every
+ * other post-init-transfer case in this file -- e.g.
+ * test_pca9451a_post_init_calls_reject_uninitialised); what this test
+ * pins is that the address itself is NOT rejected as ALP_ERR_INVAL,
+ * i.e. it clears the strap-range guard this fix widens. Before the
+ * fix, tcal9538_init() returns ALP_ERR_INVAL for 0x20/0x21 before
+ * ever reaching the bus -- that's exactly what regresses. */
+ZTEST(alp_chips, test_tcal9538_init_accepts_tca6408a_alt_strap)
+{
+	tcal9538_t ctx;
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	zassert_not_equal(tcal9538_init(&ctx, bus, TCAL9538_I2C_ADDR_ALT_BASE),
+	                  ALP_ERR_INVAL,
+	                  "0x20 (TCA6408A alt-strap, A0=0) must not be rejected as an invalid address");
+	zassert_not_equal(tcal9538_init(&ctx, bus, (uint8_t)(TCAL9538_I2C_ADDR_ALT_BASE + 1u)),
+	                  ALP_ERR_INVAL,
+	                  "0x21 (TCA6408A alt-strap, A0=1) must not be rejected as an invalid address");
 
 	alp_i2c_close(bus);
 }

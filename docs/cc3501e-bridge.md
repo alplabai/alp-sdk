@@ -99,6 +99,36 @@ The hardware CS edge re-frames every transaction, so the link cannot lose
 byte-alignment across a busy radio op — it survives long-running radio
 work (see "Bench-validated" below) with no settle-gap dependence.
 
+#### Link speed
+
+The four AEN bridge examples request **14 MHz**, which is just under the
+**CC35 slave ceiling of ~15 MHz**.  Silicon-validated cold + warm on the
+E1M-AEN801 EVK, concurrently with Wi-Fi/BLE traffic.
+
+The actual SCLK is the request quantised by the BAUDR divider, which
+`spi_dw` computes as an integer truncation of the SSI functional clock
+over the requested rate (`SPI_DW_CLK_DIVIDER`).  The overlay sets that
+functional clock to 200 MHz, so a 14 MHz request divides to 14 and the
+link runs at 200/14 ≈ **14.3 MHz** — slightly *above* the request, because
+truncating the divider rounds the clock up.  Treat that as derived from
+the driver's arithmetic, not as a scope measurement: no captured SCLK
+figure is recorded in-tree.
+
+Reaching that rate required tuning the master, not the slave: `spi_dw`
+leaves `RX_SAMPLE_DLY = 0`, and at 8 MHz and above the MISO round-trip
+over the on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY = 6` shifts
+the capture point past the round-trip, and the link then samples clean up
+to the slave ceiling — roughly 14× the throughput of the original 1 MHz
+bring-up setting.  The value is silicon-tuned, not derived; see
+`CC3501E_BRIDGE_SPI_FREQ_HZ` and the `RX_SAMPLE_DLY` note in the AEN
+bridge examples' `cc3501e_bridge.h` (e.g.
+[`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h`](../examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h)).
+The `alp-console` example is not one of them — it still requests 1 MHz
+(see [`docs/console.md`](console.md)).
+
+Payload reliability additionally depends on the inter-phase settle
+(`CC3501E_PHASE_SETTLE_US`) applied in `cc3501e_request`.
+
 A host-IRQ line remains a useful future addition for async events
 (`EVT_WIFI_*`, `EVT_BLE_*`, `EVT_GPIO_INTERRUPT`) with the 5–10 ms latency
 budgets above: the Alif is SPI master, so the CC3501E cannot initiate, and
@@ -368,6 +398,34 @@ that ISOLATE all the downstream buses:
 
 The Alif's bring-up code then sequences enables once it's ready.
 
+## Peripherals not proxied today
+
+Beyond the wire-protocol surfaces above (Wi-Fi, BLE, GPIO proxy, OTA), the
+CC3501E exposes several on-chip peripherals that are **not** reachable
+through `<alp/protocol/cc3501e.h>` and have no host-visible surface. None
+of these has an allocated opcode group; if a future board variant needs
+one, add it under the reserved `0x80..0xFF` range.
+
+- **DMA** — 14 independent host-DMA channels (2 promotable to
+  high-priority, remaining round-robin), job size up to 16 KB, 8/16/32-bit
+  words. 100% firmware-internal: the host driver never mentions DMA
+  channels and the wire protocol has no DMA opcode.
+- **UART** — 3 on-chip UARTs (up to 4 Mbps, LIN support). None is exposed
+  as a proxied peripheral. `M2E_UART_WAKE` (see "Firmware-side GPIO
+  behaviour contract" above) is a GPIO wake signal, not a UART
+  pass-through.
+- **ADC** — a 12-bit SAR ADC with 12 channels: 8 external plus 4
+  internal. (SWRS343 markets it as "8-channel", counting only the
+  external ones; SWRU626 §24.1 gives the full 12.) Not proxied: no
+  E1M-AEN board variant routes an analog
+  signal to a CC3501E ADC pin today (`from-cc3501e.tsv` routes those
+  GPIOs to the SPI1 secondary mux instead).
+- **Timers / PWM** — 8 GPT/PWM channels. Not routed to any external pad
+  on E1M-AEN; the Alif has its own timer/PWM surface via `<alp/pwm.h>`.
+- **I2C** — 2 on-chip I2C controllers. Not proxied: the E1M-AEN module's
+  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112, EEPROM N24S128; see
+  `docs/soms/aen.md`) hang off the Alif's own LPI2C, not the CC3501E's.
+
 ## OTA
 
 The bridge carries the CC3501E's own firmware update: the Alif host
@@ -437,6 +495,21 @@ server is a separate repo.
 | OTA over the bridge (§ "OTA" above)              | `firmware/cc3501e/` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
 | Full feature parity with `<alp/iot.h>` /
   `<alp/ble.h>`                                    | Remaining v1.0 work: HOST_IRQ async-event delivery and full runtime GATT/event parity |
+
+## Open questions
+
+- **CC35xx errata SWRZ167** — not yet folded into the firmware or this
+  doc. When it is reviewed, update the firmware-side checklist and this
+  doc with any host-visible errata items.
+- **CAN, I2S, PDM, SDMMC** — the CC3501E has all four on-die per SWRS343,
+  but none is routed to an E1M pad or proxied through the wire protocol
+  today. Recommendation: stay off the wire protocol unless a future
+  E1M-AEN revision routes one of them; reserve a low-priority opcode
+  range only if/when needed.
+- **Link speed headroom above ~15 MHz** — the link already runs at the
+  CC35 slave ceiling (see "Link speed" above), so there is no host-side
+  tier left to unlock. Going faster needs a different slave-side limit,
+  not host tuning.
 
 ## See also
 

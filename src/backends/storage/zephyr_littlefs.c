@@ -38,6 +38,7 @@
 #include <alp/soc_caps.h>
 #include <alp/storage.h>
 
+#include "alp_checked_arith.h"
 #include "storage_ops.h"
 
 typedef struct lfs_state {
@@ -110,14 +111,20 @@ static alp_status_t _errno_to_alp(int err)
  * [offset, offset+len) range that wraps or does not round-trip through
  * off_t before touching the file.  littlefs grows on write, so there is
  * no fixed capacity to bound against -- only representability matters.
+ *
+ * The wrap check is the shared alp_u64_add_checked() helper
+ * (src/common/alp_checked_arith.h, #743) rather than a local
+ * `len > UINT64_MAX - offset` copy; the off_t round-trip below is
+ * specific to this backend's fs_seek() narrowing and has no shared
+ * counterpart.
  */
 static bool _lfs_range_representable(uint64_t offset, uint64_t len)
 {
-	if (len > UINT64_MAX - offset) {
+	uint64_t end;
+	if (!alp_u64_add_checked(offset, len, &end)) {
 		return false; /* offset + len wraps */
 	}
-	uint64_t end = offset + len;
-	off_t    oe  = (off_t)end;
+	off_t oe = (off_t)end;
 	if (oe < 0 || (uint64_t)oe != end) {
 		return false; /* end not representable as off_t */
 	}

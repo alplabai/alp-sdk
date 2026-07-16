@@ -143,7 +143,7 @@ stays the same.
 
 ## Reference
 
-- [`docs/board-config.md`](../../../docs/board-config.md)
+- [`docs/board-config-features.md`](../../../docs/board-config-features.md)
   "Per-slice power-management profile" -- the schema reference.
 - [`examples/connectivity/production-deployment`](../production-deployment/)
   -- the application-core counterpart (sleep_mode: standby with

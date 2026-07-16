@@ -214,6 +214,12 @@ if(ALP_BUILD_CHIPS_ONLY)
     add_library(alp_chips STATIC)
     target_link_libraries(alp_chips PUBLIC alp_sdk_headers)
     target_link_libraries(alp_chips PRIVATE alp_sdk_warnings)
+    # Private-only src/common/ helpers (e.g. alp_checked_arith.h, #743) that a
+    # chips/<part>/<part>.c core may reach for overflow-safe range checks
+    # (#738) -- mirrors src/common/CMakeLists.txt's identical PRIVATE include
+    # for alp_sdk itself.  Not a public/installed include dir: chips headers
+    # stay limited to <alp/chips/*.h>.
+    target_include_directories(alp_chips PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/common)
     set(_alp_chips_enabled "")
     foreach(_chip IN LISTS ALP_SDK_CHIP_LIST)
         string(TOUPPER "${_chip}" _chip_uc)

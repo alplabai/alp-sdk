@@ -286,7 +286,7 @@ ZTEST(alp_peripheral, test_storage_configure_inline_aes_bad_key_bytes_returns_in
 /* ------------------------------------------------------------------ */
 /* alp_delay_us / alp_delay_ms portable busy-wait + sleep primitives  */
 /*                                                                    */
-/* These are foundational helpers (CC3501E §5.5 reset-timing needs    */
+/* These are foundational helpers (the CC3501E reset timing needs     */
 /* them; deepx_dxm1_bring_up also calls in).  Tests verify the 0=no-op */
 /* contract and that non-zero delays actually elapse at least the     */
 /* requested wall-clock time.                                         */

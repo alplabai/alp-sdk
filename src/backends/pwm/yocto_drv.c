@@ -91,7 +91,25 @@ typedef struct {
 	char dir[64]; /* "/sys/class/pwm/pwmchip<chip>/pwm<ch>" */
 	int  chip;    /* pwmchip number */
 	int  channel; /* sysfs channel index */
+	/* Ownership (#744): true only if THIS handle's export write
+	 * actually claimed the channel (rc == ALP_OK, not EBUSY).  Only an
+	 * owning handle may unexport on error-rollback / close -- a
+	 * channel this handle merely reused (already exported by another
+	 * process) belongs to that other owner, and stealing it back would
+	 * disable/release a channel someone else is still using. */
+	bool owns_export;
 } y_pwm_data_t;
+
+/* Test-only sysfs-write interception (default NULL: real file I/O via
+ * open()+write()+close()).  Every attribute write this backend performs
+ * -- export, unexport, period, duty_cycle, polarity, enable -- already
+ * funnels through this single chokepoint, so pointing it at a canned
+ * responder lets a test drive the full y_open()/y_close() control flow
+ * (already-exported/EBUSY, post-export failure, ownership-conditioned
+ * unexport) deterministically, without a real pwmchip sysfs node.  Not
+ * part of any public header; only tests/yocto/peripheral_pwm.c (which
+ * #includes this .c file directly) sets it. */
+static alp_status_t (*g_pwm_test_sysfs_write_hook)(const char *path, const char *val) = NULL;
 
 /**
  * @brief Write @p val (a NUL-terminated string) to a sysfs attribute.
@@ -104,6 +122,8 @@ typedef struct {
  */
 static alp_status_t _sysfs_write(const char *path, const char *val)
 {
+	if (g_pwm_test_sysfs_write_hook != NULL) return g_pwm_test_sysfs_write_hook(path, val);
+
 	int fd = open(path, O_WRONLY | O_CLOEXEC);
 	if (fd < 0) return alp_status_from_posix_errno(errno);
 
@@ -144,6 +164,10 @@ static alp_status_t _write_ns(const y_pwm_data_t *d, const char *attr, uint32_t 
  * Writes @p channel to the chip's unexport attribute so the channel can
  * be re-acquired cleanly.  Used both on the y_open() error paths (after
  * a successful export) and from y_close(); all errors are swallowed.
+ *
+ * Callers MUST gate this on @c d->owns_export (#744) -- unconditionally
+ * unexporting here would disable/release a channel this handle merely
+ * reused because another process already had it exported.
  */
 static void _unexport_chip(int chip, int channel)
 {
@@ -153,6 +177,14 @@ static void _unexport_chip(int chip, int channel)
 	int  m = snprintf(idx, sizeof(idx), "%d", channel);
 	if (n > 0 && (size_t)n < sizeof(unexp) && m > 0 && (size_t)m < sizeof(idx)) {
 		(void)_sysfs_write(unexp, idx);
+	}
+}
+
+/** @brief Unexport, but only if this handle is the one that exported it. */
+static void _unexport_if_owned(const y_pwm_data_t *d)
+{
+	if (d->owns_export) {
+		_unexport_chip(d->chip, d->channel);
 	}
 }
 
@@ -166,6 +198,13 @@ static void _unexport_chip(int chip, int channel)
  *
  * Note the ABI ordering constraint: duty_cycle must be <= period, so
  * period is written first and duty_cycle is left at 0 here.
+ *
+ * @par Ownership (#744)
+ *      `d->owns_export` records whether THIS call is the one that
+ *      claimed the channel (export returned ALP_OK) versus reused an
+ *      already-exported one (EBUSY).  Every rollback / close path below
+ *      routes through @ref _unexport_if_owned so a handle that merely
+ *      reused someone else's export never disables or releases it.
  */
 static alp_status_t
 y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
@@ -209,6 +248,10 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 		free(d);
 		return rc;
 	}
+	/* ALP_OK: this handle claimed the channel and owns the export.
+	 * ALP_ERR_BUSY: already exported by someone else -- reuse it
+	 * without claiming ownership (#744). */
+	d->owns_export = (rc == ALP_OK);
 
 	struct alp_pwm *h = ALP_PWM_HANDLE_OF(st);
 	h->channel        = cfg->channel_id;
@@ -226,19 +269,20 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	}
 
 	/* period before duty_cycle (ABI: duty_cycle <= period).  On any
-     * post-export failure, unexport the channel (best-effort) before
-     * returning so a later retry does not inherit a half-configured
-     * channel (period set but never enabled, or stale duty); see
-     * _unexport_chip() / y_close()'s unexport. */
+     * post-export failure, unexport the channel (best-effort, and only
+     * if this handle owns the export -- #744) before returning so a
+     * later retry does not inherit a half-configured channel (period
+     * set but never enabled, or stale duty); see _unexport_if_owned() /
+     * y_close()'s unexport. */
 	rc = _write_ns(d, "period", h->period_ns);
 	if (rc != ALP_OK) {
-		_unexport_chip(d->chip, d->channel);
+		_unexport_if_owned(d);
 		free(d);
 		return rc;
 	}
 	rc = _write_ns(d, "duty_cycle", 0u);
 	if (rc != ALP_OK) {
-		_unexport_chip(d->chip, d->channel);
+		_unexport_if_owned(d);
 		free(d);
 		return rc;
 	}
@@ -250,7 +294,7 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	if (n > 0 && (size_t)n < sizeof(en_path)) {
 		rc = _sysfs_write(en_path, "1");
 		if (rc != ALP_OK) {
-			_unexport_chip(d->chip, d->channel);
+			_unexport_if_owned(d);
 			free(d);
 			return rc;
 		}
@@ -361,24 +405,34 @@ static void y_capture_close(alp_pwm_backend_state_t *st)
 }
 
 /**
- * @brief Disable the channel, unexport it, and free the per-handle box.
+ * @brief Disable and unexport the channel if owned; always free the per-handle box.
  *
- * Best-effort: writes "0" to enable, then the channel index to
- * pwmchip<chip>/unexport so the channel can be re-acquired cleanly,
- * then frees the heap box.  Errors are swallowed -- close has no return.
+ * Best-effort, and both the "0" write to enable and the unexport are
+ * gated on @c d->owns_export (#744): only a handle that actually claimed
+ * the channel (export returned ALP_OK, not EBUSY) may stop or release
+ * it -- closing does not unexport or disable a channel this handle did
+ * not itself export.  This is a release-side guarantee only: y_open()
+ * still programs polarity/period/duty_cycle/enable on a reused (EBUSY)
+ * channel per alp_pwm_open()'s documented contract (it primes the
+ * hardware with the requested period unconditionally), so a reused
+ * channel's configuration is NOT left as the other owner set it up --
+ * only its liveness (export + enable state) survives this handle's
+ * close().  Errors are swallowed -- close has no return.
  */
 static void y_close(alp_pwm_backend_state_t *st)
 {
 	y_pwm_data_t *d = (y_pwm_data_t *)st->be_data;
 	if (d == NULL) return;
 
-	char path[96];
-	int  n = snprintf(path, sizeof(path), "%s/enable", d->dir);
-	if (n > 0 && (size_t)n < sizeof(path)) {
-		(void)_sysfs_write(path, "0");
+	if (d->owns_export) {
+		char path[96];
+		int  n = snprintf(path, sizeof(path), "%s/enable", d->dir);
+		if (n > 0 && (size_t)n < sizeof(path)) {
+			(void)_sysfs_write(path, "0");
+		}
 	}
 
-	_unexport_chip(d->chip, d->channel);
+	_unexport_if_owned(d);
 
 	free(d);
 	st->be_data = NULL;
