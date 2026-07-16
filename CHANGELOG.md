@@ -7,6 +7,32 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — bitbake `base-files do_package` EFAULT on GNU tar 1.35 / pseudo openat2 (alplabai/alp-sdk-internal#24)
+
+- Every A-cluster MACHINE's bitbake CI died at `base-files do_package` with
+  `tar: ./var/lib: Cannot mkdir: Bad address`, 0/200 runs. Root cause: GNU tar
+  1.35 (Ubuntu 24.04 stock) creates its directory fd via the `openat2(2)`
+  syscall, which vendored pseudo 1.9.0 does not wrap — the fd's path is never
+  tracked, so pseudo's `mkdirat()` wrapper forwards a NULL path to the kernel,
+  which correctly EFAULTs it. Proven by strace under a virgin
+  `PSEUDO_LOCALSTATEDIR`. Not a kernel bug and not fixed by containerizing on
+  24.04 (same tar either way).
+- Added `meta-alp-sdk/recipes-devtools/pseudo/pseudo_git.bbappend`, bumping
+  pseudo-native to the SRCREV/PV upstream poky's scarthgap branch already
+  carries (which implements the `openat2` wrapper), dropping the two local
+  patches that landed upstream in the interim, and shipping upstream's
+  already-rebased copy of the one remaining native-only patch so it still
+  applies against the new source. The vendored poky snapshot itself is left
+  untouched (ADR 0017) — this bbappend is deletable once the vendor BSP ships
+  a poky that already pins the fixed pseudo.
+- Verified end-to-end, not just parsed: built `pseudo-native` and confirmed
+  the `openat2` wrapper is present in the compiled `libpseudo.so`; reproduced
+  the original EFAULT with the old pseudo under a virgin
+  `PSEUDO_LOCALSTATEDIR` and confirmed the same `tar -cf - | tar -xf -`
+  sequence now succeeds under the new one; then ran the real
+  `bitbake base-files -c package` for `e1m-v2m101-a55` (the exact failing
+  task) to completion.
+
 ### Fixed — #807's `SB_CONFIG_*` class gate now actually runs, and the last `--sysbuild-config` copy-paste is gone
 
 - **The class gate was green-by-skip on every PR.** #814 added
