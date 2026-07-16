@@ -7,6 +7,35 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — `packagegroup-alp-display` allarch/libdrm RDEPENDS error
+
+- A full `alp-image-edge` bake for `e1m-v2n101-a55` now completes
+  (11168/11168 tasks, all succeeded — the pseudo/openat2 and lvgl fixes
+  landed as #817/#818), but the cooker log carried one non-fatal ERROR:
+  `packagegroup-alp-display-1.0-r0 do_package_write_rpm: An allarch
+  packagegroup shouldn't depend on packages which are dynamically renamed
+  (libdrm to libdrm2)`. `inherit packagegroup` makes the group allarch, and
+  `libdrm` is dynamically renamed per-arch to `libdrm2`
+  (`debian.bbclass`) — an allarch package RDEPENDing on an arch-renamed name
+  is invalid. Pre-existing since `a290b9f3` (#435); unrelated to #818's
+  libdrm *link* in the lvgl example's CMakeLists.
+- Dropped the explicit `libdrm` line from
+  `packagegroup-alp-display`'s `RDEPENDS`. Verified via
+  `weston_13.0.1.bb` and the built `pkgdata` that this is redundant, not a
+  behaviour change: `weston` RDEPENDS on `libweston-13`, and
+  `libweston-13`'s `drm-backend.so` / `libweston-13.so.0.0.1` link
+  `libdrm.so.2` directly, so BitBake's shlibs mechanism already emits an
+  automatic `RDEPENDS:libweston-13: ... libdrm (>= 2.4.120) ...` — the
+  packagegroup's explicit line was a redundant, and now illegal, restatement
+  of a dependency weston already carries transitively.
+- Verified against a real rebuild of the failing task (isolated build dir,
+  `EXTERNALSRC` pointed at the fix branch): `bitbake -c package_write_rpm
+  packagegroup-alp-display -f` — `do_package_write_rpm: Succeeded`, the
+  allarch/libdrm ERROR is gone (only the expected "tainted from a forced
+  run" WARNING remains), and `tmp/pkgdata/.../runtime/libweston-13` still
+  shows `libdrm (>= 2.4.120)` in its (arch-specific, legal) `RDEPENDS`, so
+  `libdrm2` still reaches any image that installs `packagegroup-alp-display`.
+
 ### Fixed — `alp-lvgl-dashboard` recipe `do_compile`: `lv_conf.h` not found + missing libdrm link
 
 - With #817's pseudo fix, the `e1m-v2n101-a55` bake now reaches deep enough
