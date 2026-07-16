@@ -15,8 +15,21 @@
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
- * Vendored from the fork with only this provenance header added; the register
- * map lives in the companion alif_pdm_reg.h.  vendor-ext, BENCH-UNVERIFIED.
+ * Vendored from the fork with this provenance header added, plus one
+ * documented divergence below; the register map lives in the companion
+ * alif_pdm_reg.h.  vendor-ext, BENCH-UNVERIFIED.
+ *
+ * ------------------------- alp-sdk divergence -------------------------
+ * pdm_channel_config()'s FIR-coefficient store loop (issue #758) was
+ * changed from the fork's raw `*ptr++ = value` walk to sys_write32() per
+ * word. A plain pointer store gives the compiler no volatile/ordering
+ * guarantee for a peripheral register bank; at -O3 the fork's original
+ * loop merges pairs of writes into 8x strd (64-bit double-word MMIO
+ * stores) plus an alias-check branch against the FIR_COEF/IIR_COEF_SEL
+ * split -- a correctness risk even though no in-tree build currently
+ * reaches -O3. Reapply this divergence if the file is ever re-synced
+ * from the fork.
+ * -------------------------------------------------------------------------
  */
 
 #define DT_DRV_COMPAT alif_alif_pdm
@@ -116,13 +129,16 @@ void pdm_channel_config(const struct device *dev, struct pdm_ch_config *cnfg)
 {
 	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
 	uint8_t i;
-	uint32_t *ch_n_fir_coef_0 =
-		(uint32_t *)(reg_base + PDM_CH_FIR_COEF + (cnfg->ch_num * PDM_CH_OFFSET));
+	uintptr_t ch_n_fir_coef_0 = reg_base + PDM_CH_FIR_COEF + (cnfg->ch_num * PDM_CH_OFFSET);
 
-	/* Store the FIR coefficient values */
+	/* Store the FIR coefficient values. Each write goes through sys_write32()
+	 * (a volatile MMIO accessor) rather than a plain pointer store: the
+	 * compiler is otherwise free to reorder, combine or elide stores to a
+	 * non-volatile object, which would silently corrupt the coefficient bank.
+	 */
 	for (i = 0; i < PDM_MAX_FIR_COEFFICIENT; i++) {
-		*(ch_n_fir_coef_0) = cnfg->ch_fir_coef[i];
-		ch_n_fir_coef_0++;
+		sys_write32(cnfg->ch_fir_coef[i],
+			    ch_n_fir_coef_0 + ((uintptr_t)i * sizeof(uint32_t)));
 	}
 
 	uintptr_t ch_n_iir_coef = (reg_base + PDM_CH_IIR_COEF_SEL + (cnfg->ch_num * PDM_CH_OFFSET));
