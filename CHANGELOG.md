@@ -46,6 +46,64 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   at any time and every other one is frozen forever, and fills in the
   `v0.7`-`v0.10` rows the "Versions on file" table had never gained.
 
+### Fixed — `boot:` sysbuild emit no longer aborts every MCUboot configure (#807)
+
+- `scripts/alp_orchestrate/secure.py::emit_sysbuild_conf()` was emitting six
+  `SB_CONFIG_*` symbols that exist nowhere in Zephyr 4.4.0's sysbuild Kconfig
+  tree (`MCUBOOT_MODE_SWAP_USING_SCRATCH`, three invented
+  `MCUBOOT_SIGNATURE_TYPE_*` names, and two invented partition-size symbols)
+  plus one real symbol emitted into the wrong Kconfig namespace
+  (`SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_RSA_LEN` -- the real
+  `BOOT_SIGNATURE_TYPE_RSA_LEN` is an mcuboot-image `CONFIG_`, not a sysbuild
+  `SB_CONFIG_`). sysbuild treats an undefined-symbol warning as FATAL, so any
+  `board.yaml` `boot:` block aborted the whole sysbuild configure. Fixed the
+  real symbol names (`MCUBOOT_MODE_SWAP_SCRATCH`,
+  `BOOT_SIGNATURE_TYPE_{ECDSA_P256,RSA,ED25519}`) and dropped the invented
+  emits entirely -- slot/scratch partition *sizes* have no sysbuild
+  expression at all; MCUboot takes its geometry from the board DT
+  `partitions {}` node, not a Kconfig symbol.
+- `boot.signing.algorithm: rsa3072` now hard-errors in the `mcuboot` path
+  (sysbuild's `BOOT_SIGNATURE_TYPE_RSA` choice has no key-length knob --
+  that's a different, mcuboot-image-only Kconfig namespace) instead of
+  silently emitting `rsa2048`'s default length. `rsa2048` maps to
+  `SB_CONFIG_BOOT_SIGNATURE_TYPE_RSA=y`. `rsa2048`/`rsa3072` remain valid
+  schema values -- they're load-bearing for the Renesas RZ/V2N and NXP
+  i.MX 9 U-Boot/FIT signing paths, which never reach this emitter.
+- Removed the `boot.slots` (primary/secondary `size_kib`),
+  `boot.scratch_size_kib`, and `boot.anti_rollback` `board.yaml` schema
+  fields (no legacy shim -- no active customers). Slot/scratch sizes were
+  already documented as an SDK build-policy generator constant
+  (`scripts/gen_zephyr_board.py`), not a per-project fact, and the schema's
+  480/32 KiB defaults had drifted from both the generator constant (64 KiB
+  scratch) and the committed AEN board DT (2688 KiB slots). `anti_rollback`
+  promised an OTP-fused hardware counter tier that was never built -- only
+  software downgrade prevention (`ota.rollback.min_version`) is wired
+  today, so the field was a security claim the SDK didn't deliver.
+- The `boot:` sysbuild overlay now LAYERS over the curated
+  `zephyr/sysbuild/<family>/sysbuild.conf` (today: `aen`) instead of
+  replacing it: `-DSB_CONF_FILE=<curated>;<customer overlay>` when a
+  curated per-family file exists, verified against Zephyr 4.4.0's
+  `SB_CONF_FILE` (accepts a `;`-joined list; confirmed both structurally in
+  `sysbuild_kconfig.cmake` and empirically via a `native_sim` sysbuild
+  configure merging two listed files into one `.config`) so a customer's
+  `boot:` block no longer forks family boot policy into two divergent
+  places.
+- `tests/scripts/test_hil_blocks_coverage.py` previously asserted the
+  emitter's output against hardcoded strings the test's author typed --
+  including the invented symbols above -- so CI stayed green while the
+  feature was broken end to end. Replaced the hand-picked assertions with
+  a class gate that drives `emit_sysbuild_conf()` across the full `boot:`
+  enum cross-product and checks every emitted `SB_CONFIG_<stem>` against a
+  real `config <stem>` in the pinned Zephyr's `share/sysbuild/**/Kconfig*`
+  (resolved from the west workspace / `west.yml` pin, never a hardcoded
+  developer path; skips cleanly, never hard-fails, when no matching
+  checkout is resolvable). Also fixed the matching stale comments in
+  `tests/hil/_common/boot_mcuboot.yaml`.
+- Doc sweep for the removed fields: `docs/board-config-features.md`,
+  `docs/secure-boot.md`, `docs/tutorials/10-secure-boot-signing.md`,
+  `examples/connectivity/production-deployment/{board.yaml,README.md}`,
+  `examples/connectivity/iot-fleet-ota/board.yaml`.
+
 ### Changed — `board-config.md` split into a landing page + four references (#464)
 
 - `docs/board-config.md` had grown to ~1500 lines covering the quick

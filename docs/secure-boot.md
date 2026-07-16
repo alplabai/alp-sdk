@@ -57,18 +57,17 @@ boot:
   signing:
     algorithm: ecdsa_p256
     key_file: keys/prod_ecdsa_p256.pub.pem
-  slots:
-    primary:   { size_kib: 480 }
-    secondary: { size_kib: 480 }
   swap_algorithm: scratch
-  scratch_size_kib: 32
-  anti_rollback: false
 ```
 
 See [`docs/board-config-features.md` §Bootloader](board-config-features.md#bootloader-boot----mcuboot)
-for the full field reference.  Omit the block to inherit the SDK's
-stock per-family defaults (AEN-Zephyr: MCUboot + ECDSA-P256 +
-swap-using-scratch + 480 KiB slots).
+for the full field reference (including why there is no
+`slots:` / `scratch_size_kib:` / `anti_rollback:` field).  Omit the
+block to inherit the SDK's stock per-family defaults (AEN-Zephyr:
+MCUboot + ECDSA-P256 + swap-using-scratch).  Slot/scratch partition
+*sizes* come from the board DT `partitions {}` node, not from
+`boot:` -- declare the actual layout via `storage:` if you want it
+explicit.
 
 ## Signing key lifecycle
 
