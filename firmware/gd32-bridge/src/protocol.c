@@ -518,6 +518,56 @@ static gd32_bridge_status_t handle_adc_stream_read(const uint8_t *req,
 	return STATUS_OK;
 }
 
+/* CMD_ADC_SPECTRUM_READ (#496): one chunk of the latest FFT frame for an
+ * FFT-terminal chain.  req: stream_id:u8 bin_offset:u16(LE) max_bins:u8.
+ * reply (fixed 7 + max_bins*4): seq:u32 total_bins:u16 got:u8 bins[]
+ * (float32 LE, zero-padded past `got`). */
+static gd32_bridge_status_t handle_adc_spectrum_read(const uint8_t *req,
+                                                     size_t         req_len,
+                                                     uint8_t       *reply,
+                                                     size_t         reply_cap,
+                                                     size_t        *reply_len)
+{
+	if (req_len != 4u) return STATUS_INVAL;
+	const uint8_t  stream_id  = req[0];
+	const uint16_t bin_offset = (uint16_t)(req[1] | ((uint16_t)req[2] << 8));
+	const uint8_t  max_bins   = req[3];
+	if (stream_id >= GD32_BRIDGE_ADC_STREAM_COUNT) return STATUS_INVAL;
+	if (max_bins == 0u) return STATUS_INVAL;
+	if (max_bins > GD32_BRIDGE_ADC_SPECTRUM_READ_MAX) return STATUS_OUT_OF_RANGE;
+
+	float     bins[GD32_BRIDGE_ADC_SPECTRUM_READ_MAX];
+	uint32_t  seq   = 0u;
+	uint16_t  total = 0u;
+	uint8_t   got   = 0u;
+	const int rv =
+	    bridge_hw_adc_spectrum_read(stream_id, bin_offset, max_bins, &seq, &total, &got, bins);
+	if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT; /* not FFT-bound */
+	if (rv == BRIDGE_HW_ERR_IO) return STATUS_BUSY;           /* no frame yet -> poll */
+	if (rv < 0) return STATUS_IO;
+	if (got > max_bins) return STATUS_IO; /* HAL contract violation */
+
+	const size_t need = 7u + (size_t)max_bins * 4u;
+	if (reply_cap < need) return STATUS_NOMEM;
+	reply[0] = (uint8_t)(seq & 0xFFu);
+	reply[1] = (uint8_t)((seq >> 8) & 0xFFu);
+	reply[2] = (uint8_t)((seq >> 16) & 0xFFu);
+	reply[3] = (uint8_t)((seq >> 24) & 0xFFu);
+	reply[4] = (uint8_t)(total & 0xFFu);
+	reply[5] = (uint8_t)((total >> 8) & 0xFFu);
+	reply[6] = got;
+	for (uint8_t i = 0u; i < max_bins; ++i) {
+		uint32_t w = 0u;
+		if (i < got) memcpy(&w, &bins[i], sizeof(w)); /* float32 -> LE bytes */
+		reply[7u + i * 4u]      = (uint8_t)(w & 0xFFu);
+		reply[7u + i * 4u + 1u] = (uint8_t)((w >> 8) & 0xFFu);
+		reply[7u + i * 4u + 2u] = (uint8_t)((w >> 16) & 0xFFu);
+		reply[7u + i * 4u + 3u] = (uint8_t)((w >> 24) & 0xFFu);
+	}
+	*reply_len = need;
+	return STATUS_OK;
+}
+
 static gd32_bridge_status_t handle_adc_stream_end(const uint8_t *req,
                                                   size_t         req_len,
                                                   uint8_t       *reply,
@@ -886,6 +936,9 @@ gd32_bridge_status_t protocol_dispatch(uint8_t        cmd,
 		break;
 	case CMD_ADC_STREAM_END:
 		h = handle_adc_stream_end;
+		break;
+	case CMD_ADC_SPECTRUM_READ:
+		h = handle_adc_spectrum_read;
 		break;
 	case CMD_TRNG_READ:
 		h = handle_trng_read;

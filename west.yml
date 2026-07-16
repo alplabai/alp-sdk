@@ -81,8 +81,6 @@ manifest:
       url-base: https://github.com/olikraus
     - name: obgm               # libcoap
       url-base: https://github.com/obgm
-    - name: vshymanskyy        # TinyGSM
-      url-base: https://github.com/vshymanskyy
     - name: warmcat            # libwebsockets
       url-base: https://github.com/warmcat
     - name: zserge             # jsmn
@@ -91,8 +89,6 @@ manifest:
       url-base: https://github.com/lieff
     - name: xiph               # opus
       url-base: https://github.com/xiph
-    - name: ultraembedded      # libhelix-mp3 (real Helix fixed-point MP3
-      url-base: https://github.com/ultraembedded   # decoder; xiph has no libhelix)
     - name: catchorg           # Catch2
       url-base: https://github.com/catchorg
     - name: stephane           # libmodbus
@@ -131,10 +127,10 @@ manifest:
   #                    framing).  Deferred / interim as of v0.9 --
   #                    no committed release swaps this group on; see
   #                    vendors/lwrb/README.md + vendors/nanopb/README.md.
-  # `extras-tier1`   - upstream pins for the 14 Tier 1 §D.lib batch
+  # `extras-tier1`   - upstream pins for the Tier 1 §D.lib batch
   #                    libraries that aren't in Zephyr's modules
-  #                    tree (u8g2, libcoap, tinygsm, libwebsockets,
-  #                    jsmn, bearssl, minimp3, opus, libhelix,
+  #                    tree (u8g2, libcoap, libwebsockets,
+  #                    jsmn, bearssl, minimp3, opus,
   #                    catch2, libmodbus, madgwick_ahrs,
   #                    coremqtt_sn).  Disabled by default so v0.5
   #                    workspaces stay light; customers flip via
@@ -300,10 +296,10 @@ manifest:
       path: modules/lib/micro_ros_zephyr_module
 
     # ---------------------------------------------------------------
-    # extras-tier1 -- §D.lib batch.  14 libraries that aren't in
+    # extras-tier1 -- §D.lib batch.  Libraries that aren't in
     # Zephyr's modules tree, pinned to maintainer-verified tagged
     # releases (or `main` where upstream has no semver releases --
-    # bearssl, minimp3, libhelix).  Disabled by default; consumers
+    # bearssl, minimp3).  Disabled by default; consumers
     # flip via `west update --group-filter +extras-tier1` when their
     # board.yaml's `libraries:` lists any of these.  Each library
     # ships its compile-time profile + HW-accelerator binding under
@@ -321,13 +317,6 @@ manifest:
       repo-path: libcoap
       revision: v4.3.5            # Mar 2024.
       path: modules/lib/libcoap
-      groups:
-        - extras-tier1
-    - name: TinyGSM
-      remote: vshymanskyy
-      repo-path: TinyGSM
-      revision: v0.11.7            # Apr 2024.
-      path: modules/lib/tinygsm
       groups:
         - extras-tier1
     - name: libwebsockets
@@ -358,23 +347,6 @@ manifest:
       repo-path: opus
       revision: v1.5.2            # Apr 2024 stable.
       path: modules/lib/opus
-      groups:
-        - extras-tier1
-    - name: libhelix
-      remote: ultraembedded
-      repo-path: libhelix-mp3     # Real Helix fixed-point MP3 decoder. The
-                                  # old `xiph/libhelix` pin was an empty repo;
-                                  # ultraembedded/libhelix-mp3 is the canonical
-                                  # community source (RealNetworks RCSL/RPSL
-                                  # licence -- source-available, NOT Apache; a
-                                  # west *reference* only, never vendored into
-                                  # this tree).  It ships ARM/x86 fixed-point
-                                  # kernels via real/assembly.h and #errors on
-                                  # generic hosts, so it builds on ARM targets,
-                                  # not native_sim -- see
-                                  # examples/audio/libhelix-decode/README.md.
-      revision: 0a0e0673f82bc6804e5a3ddb15fb6efdcde747cd
-      path: modules/lib/libhelix
       groups:
         - extras-tier1
     - name: Catch2

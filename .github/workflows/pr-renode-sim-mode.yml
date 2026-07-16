@@ -22,19 +22,17 @@
 
 name: pr-renode-sim-mode
 
+# The trigger is INTENTIONALLY unfiltered on paths.  This gate is a REQUIRED
+# status check on dev/main, and a path-filtered `pull_request` trigger leaves
+# the required check permanently in the "expected" state on any PR that doesn't
+# touch a renode path -- GitHub then BLOCKS the PR forever (a never-posted
+# required check can't be cleared, not even by --admin).  Instead we always run
+# a cheap `detect` job and let the heavy `renode-sim-mode` job SKIP when no
+# renode-relevant path changed: GitHub counts a skipped required check as
+# passing, so the contract still posts on every PR without a 40-min boot.
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'metadata/renode/renesas_rzv2n.*'
-      - 'scripts/west_commands/alp_renode.py'
-      - 'tests/scripts/test_alp_renode_sim.py'
-      - 'tests/renode/v2n_m33_ramconsole.conf'
-      - 'tests/renode/aen_m55_itcm_run.overlay'
-      - 'tests/renode/aen_m55_sim.conf'
-      - 'metadata/renode/alif_ensemble_e8.*'
-      - 'examples/aen/aen-sim-vision/**'
-      - '.github/workflows/pr-renode-sim-mode.yml'
   workflow_dispatch:
 
 concurrency:
@@ -42,8 +40,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap path detector -- NOT a required context itself.  Always succeeds fast;
+  # its output gates the heavy boot below.
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      renode: ${{ steps.filter.outputs.renode }}
+    steps:
+      - name: Detect renode-relevant changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            renode:
+              - 'metadata/renode/renesas_rzv2n.*'
+              - 'scripts/west_commands/alp_renode.py'
+              - 'tests/scripts/test_alp_renode_sim.py'
+              - 'tests/renode/v2n_m33_ramconsole.conf'
+              - 'tests/renode/aen_m55_itcm_run.overlay'
+              - 'tests/renode/aen_m55_sim.conf'
+              - 'metadata/renode/alif_ensemble_e8.*'
+              - 'examples/aen/aen-sim-vision/**'
+              - '.github/workflows/pr-renode-sim-mode.yml'
+
   renode-sim-mode:
     name: renode · V2N101 --sim-mode socket contract
+    needs: detect
+    # Skipped (== passing, for branch protection) unless a renode path changed
+    # or the run was dispatched by hand.
+    if: needs.detect.outputs.renode == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 40
 

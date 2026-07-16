@@ -12,7 +12,7 @@
 # In practice a customer with a custom board puts these same
 # fields INLINE at the top level of their project's board.yaml --
 # no separate shared file is needed when only one firmware project
-# targets the board.  See docs/board-config.md for the inline form.
+# targets the board.  See docs/board-config-schema.md for the inline form.
 
 name: custom-example
 display_name: "Custom sensor board (E1M-AEN derivative)"

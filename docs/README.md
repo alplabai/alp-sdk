@@ -44,14 +44,27 @@ into the topic-specific docs.
 - [architecture.md](architecture.md) — SDK overview, repository
   layout, per-core slice fan-out, sparse capabilities flow,
   on_module: auto-enable, generators inventory.
-- [board-config.md](board-config.md) — `board.yaml` v2 reference.
+- [board-config.md](board-config.md) — `board.yaml` v2 reference
+  (landing page: quick start, single-source-of-truth model, file
+  location, cross-field validation, versioning).
+- [board-config-schema.md](board-config-schema.md) — `board.yaml`
+  field-by-field schema reference.
+- [board-config-emit.md](board-config-emit.md) — how the loader
+  compiles `board.yaml` into per-backend build artefacts.
+- [board-config-hardware.md](board-config-hardware.md) — hardware
+  revision tracking + modular SoM chip populations.
+- [board-config-features.md](board-config-features.md) —
+  `board.yaml` build-system integration knobs (`boot:`, `ota:`,
+  `storage:`, `security.psa:`, ...).
 - [e1m-pinout.md](e1m-pinout.md) — E1M form-factor pinout reference.
 - [board-id.md](board-id.md) — boot-time board identification:
   SoM EEPROM manifest + BOARD_ID ADC cross-check.
 - [aen-accelerator-backends-design.md](aen-accelerator-backends-design.md)
   — integration design for the Alif Ensemble accelerator surfaces
   (GPU2D / VeriSilicon ISP Pico (vsi,isp-pico) / SecAES / aiPM), each
-  silicon + HAL-pack gated.
+  silicon-gated; GPU2D and SecAES are also HAL-pack gated, ISP Pico's
+  pack has already landed and is blocked by other reasons (see that
+  doc's *Silicon scope — which E-part has what* section).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
   index (17 ADRs).
@@ -92,9 +105,6 @@ into the topic-specific docs.
   ADC/rising-path latency.
 - [cc3501e-bridge.md](cc3501e-bridge.md) — AEN's on-module Wi-Fi
   coprocessor.
-- [cc3501e-integration-plan.md](cc3501e-integration-plan.md) —
-  SWRU626 deep-dive informing the CC3501E host + firmware wire
-  protocol (research-only).
 - [cc3501e-production.md](cc3501e-production.md) — building,
   signing, and provisioning a shippable CC3501E coprocessor image.
 - [cc3501e-gpio-bench.md](cc3501e-gpio-bench.md) — warm-boot bench

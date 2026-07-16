@@ -15,6 +15,11 @@
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
 
+/* Not part of the public da9292 API -- see chips/da9292/da9292_internal.h
+ * for why the CH2_PG poll-budget decision is tested directly here rather
+ * than through da9292_v2n_m1_enable_deepx_rail(). */
+#include "da9292_internal.h"
+
 /* ------------------------------------------------------------------ */
 /* act8760 -- ACT88760 primary PMIC on V2N BRD_I2C                    */
 /* ------------------------------------------------------------------ */
@@ -101,6 +106,61 @@ ZTEST(alp_chips, test_da9292_set_voltage_range_validation)
 	zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 2000u), ALP_ERR_INVAL);
 }
 
+/* #757 regression: da9292_v2n_m1_enable_deepx_rail's CH2_PG poll loop
+ * must actually time out for a bounded budget, and never infinite-loop
+ * (or wrongly succeed) at timeout_us == UINT32_MAX -- the pathological
+ * "wait forever" caller value.  The I2C test double can't drive the
+ * end-to-end path (see the include comment above), so this exercises
+ * the exact boundary function the loop calls every pass. */
+ZTEST(alp_chips, test_da9292_poll_budget_step_boundaries)
+{
+	/* Budget exactly covers one more slice: this IS still a valid pass
+	 * (poll_us fits, so keep polling once more), landing *remaining_us
+	 * at exactly 0. */
+	uint32_t remaining_us = 100u;
+	zassert_true(da9292_poll_budget_step(&remaining_us, 100u),
+	             "remaining_us == poll_us must still cover one more pass");
+	zassert_equal(remaining_us, 0u, "must decrement to exactly 0, not underflow");
+
+	/* *Next* pass has nothing left -- must report "stop" (timeout)
+	 * without touching *remaining_us. */
+	zassert_false(da9292_poll_budget_step(&remaining_us, 100u), "remaining_us == 0 must time out");
+	zassert_equal(remaining_us, 0u, "timeout return must not mutate *remaining_us");
+
+	/* One tick short of a full slice: also times out immediately. */
+	remaining_us = 99u;
+	zassert_false(da9292_poll_budget_step(&remaining_us, 100u));
+
+	/* Comfortably above one slice: keeps polling and decrements. */
+	remaining_us = 250u;
+	zassert_true(da9292_poll_budget_step(&remaining_us, 100u),
+	             "must keep polling with budget left");
+	zassert_equal(remaining_us, 150u);
+	zassert_true(da9292_poll_budget_step(&remaining_us, 100u));
+	zassert_equal(remaining_us, 50u);
+	zassert_false(da9292_poll_budget_step(&remaining_us, 100u),
+	              "final slice must time out, not underflow");
+	zassert_equal(remaining_us, 50u, "still not mutated on the timing-out call");
+
+	/* #757's named pathological input: timeout_us == UINT32_MAX must
+	 * still strictly decrease every pass (no wrap, no infinite loop)
+	 * and eventually reach the timeout branch in a bounded number of
+	 * iterations -- it must never silently report "keep waiting"
+	 * forever nor claim success. Walk enough iterations to prove the
+	 * budget is monotonically decreasing, not that it's fully spent
+	 * (that would take ~43M iterations at poll_us=100). */
+	remaining_us     = UINT32_MAX;
+	uint32_t poll_us = 100u;
+	uint32_t prev    = remaining_us;
+	for (int i = 0; i < 1000; i++) {
+		bool keep_polling = da9292_poll_budget_step(&remaining_us, poll_us);
+		zassert_true(keep_polling, "UINT32_MAX budget must not time out this early");
+		zassert_true(remaining_us < prev, "budget must strictly decrease every pass (no wrap)");
+		prev = remaining_us;
+	}
+	zassert_equal(remaining_us, UINT32_MAX - 1000u * poll_us);
+}
+
 ZTEST(alp_chips, test_da9292_get_fault_pins)
 {
 	uint8_t flags = 0xAAu;
@@ -144,6 +204,26 @@ ZTEST(alp_chips, test_pca9451a_init_null_args)
 	zassert_equal(
 	    pca9451a_init_at(&ctx, NULL, PCA9451A_I2C_ADDR), ALP_ERR_INVAL, "NULL bus must be invalid");
 	zassert_equal(pca9451a_init_at(&ctx, bus, 0u), ALP_ERR_INVAL, "addr=0 must be invalid");
+
+	alp_i2c_close(bus);
+}
+
+/* #739: OTP reprogramming has no fixed strap range this driver can
+ * assert, so only the generic 7-bit domain bound applies (addr=0 is
+ * NOT a fallback here -- see the addr=0 case above). */
+ZTEST(alp_chips, test_pca9451a_init_at_validates_7bit_address_bound)
+{
+	pca9451a_t ctx;
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	zassert_not_equal(
+	    pca9451a_init_at(&ctx, bus, 0x7Fu), ALP_ERR_INVAL, "0x7F is the last valid 7-bit address");
+	zassert_equal(pca9451a_init_at(&ctx, bus, 0x80u), ALP_ERR_INVAL, "0x80 exceeds 7-bit domain");
+	zassert_equal(pca9451a_init_at(&ctx, bus, 0xFFu), ALP_ERR_INVAL, "0xFF exceeds 7-bit domain");
 
 	alp_i2c_close(bus);
 }

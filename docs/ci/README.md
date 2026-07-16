@@ -21,6 +21,7 @@ reference.
 | [`pr-metadata-validate.yml`](../../.github/workflows/pr-metadata-validate.yml)    | PR + push (paths)| active     | Validates every `metadata/socs/**/*.json` against the schema via `scripts/validate_metadata.py` + smoke-tests `scripts/alp_project.py` against `metadata/templates/board.yaml.example`. |
 | [`pr-doxygen.yml`](../../.github/workflows/pr-doxygen.yml)                        | PR + push (paths)| active     | Generates Doxygen HTML from `include/alp/**`.  Runs with `FAIL_ON_WARNINGS=YES` — zero warnings required; PR fails on any warning. |
 | [`coverity.yml`](../../.github/workflows/coverity.yml)                            | weekly + manual  | active     | Coverity Scan submission against <https://scan.coverity.com/projects/alplabai-alp-sdk>.  Secrets (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; project name in the `COVERITY_PROJECT` Actions variable.       |
+| [`issue-auto-label.yml`](../../.github/workflows/issue-auto-label.yml)            | issues + PRs + manual | active | Auto-triages issues and pull requests with the existing `bug` / `enhancement` / `documentation` / `question` labels from title, body, and doc-only PR paths; `workflow_dispatch` can re-run the classifier on demand. |
 | [`nightly-aen-hil.yml`](../../.github/workflows/nightly-aen-hil.yml)              | nightly + manual | **skeleton**| HW-in-loop on a real E1M-AEN dev kit.  Runs only when a self-hosted runner with the `hil-aen` label is online — see [`HW-IN-LOOP.md`](HW-IN-LOOP.md).             |
 
 ## Workflows planned

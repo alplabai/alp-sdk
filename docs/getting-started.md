@@ -38,7 +38,7 @@ If you'd rather skim, the fastest path is:
 git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
-export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+export ZEPHYR_BASE="$PWD/../zephyr"
 west alp-build -b native_sim/native/64 examples/peripheral-io/gpio-button-led
 west build -d build -t run
 # expect: [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
@@ -235,7 +235,7 @@ What the flags mean:
 - `alp-sdk/examples/peripheral-io/gpio-button-led` — the application directory.
   Each example under `examples/` ships a `board.yaml` + an empty
   `prj.conf` + a CMakeLists.txt that invokes the loader at
-  configure time.  See [`docs/board-config.md`](board-config.md)
+  configure time.  See [`docs/board-config-schema.md`](board-config-schema.md)
   for the schema.
 
 `west alp-build` walks four steps under the hood:
@@ -459,6 +459,25 @@ Zephyr's module organisation.  The Alif vendor-licensed pieces
 distinct from the Apache-2.0 `hal_alif` -- they're only
 fetched when a customer opts in to the `vendor-sdks` group.
 
+## Reproducing a build with alp.lock
+
+`west alp-lock` writes `alp.lock` — a deterministic, public-safe record of the
+workspace's SDK revision, west project pins, curated library versions, Python
+requirements, and metadata digests. Commit it. `west alp-lock --check` (run in
+CI) fails with a field-level diagnostic when any locked input drifts, so an old
+release can be rebuilt against its exact declared inputs. It contains no local
+paths or credentials. The recorded `sdk.revision` is **provenance** (which SDK
+commit generated the lock) and is not frozen-verified — committing the lock
+advances the repo's own HEAD past it, so `--check` reports it but never fails on
+it; `sdk.version` and the west pins lock the SDK identity you build against. It
+does not yet pin resolved commit SHAs or toolchain container identities (tracked
+follow-ups).
+
+Because `alp.lock` hashes `metadata/**` and pins the west/library/Python inputs,
+**re-run `west alp-lock` and commit the updated `alp.lock` in the same PR**
+whenever you touch `west.yml`, `metadata/**`, `scripts/requirements.txt`, or
+`scripts/alp_cli/__init__.py` — otherwise the `alp.lock in sync` CI check reds.
+
 ## 9. SoC capability validation
 
 The SoC choice flows from `board.yaml`'s `som.sku` field
@@ -513,11 +532,13 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 
 ## 11. Where to go next
 
-- **[`docs/board-config.md`](board-config.md)** -- the authoritative
-  `board.yaml` schema reference + recipe table for every loader
-  emit mode (`zephyr-conf`, `cmake-args`, `yocto-conf`,
-  `dts-overlay`, `hw-info-h`, `west-libraries`).  Start here when
+- **[`docs/board-config-schema.md`](board-config-schema.md)** -- the
+  authoritative `board.yaml` schema reference.  Start here when
   you're ready to write your own app's `board.yaml`.
+- **[`docs/board-config-emit.md`](board-config-emit.md)** -- the
+  recipe table for every loader emit mode (`zephyr-conf`,
+  `cmake-args`, `yocto-conf`, `dts-overlay`, `hw-info-h`,
+  `west-libraries`).
 - **Per-peripheral examples**: [`examples/`](../examples/README.md)
   -- 11 minimal apps, one per `<alp/*.h>` class, each driven by a
   matching `board.yaml`.

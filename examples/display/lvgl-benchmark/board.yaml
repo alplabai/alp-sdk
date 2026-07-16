@@ -5,6 +5,10 @@
 #   - GPU2D / DAVE2D HW acceleration (E4 / E6 / E8) vs pure-C blit (E3 / E5)
 #   - DMA2D framebuffer push vs sync SPI push
 #   - Native_sim baseline (CPU-only) vs SoM hardware path
+libraries:
+  - name: lvgl
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801           # E8 has GPU2D + DAVE2D + DMA2D populated.
 
@@ -18,9 +22,6 @@ cores:
     os: "off"
   m55_hp:
     app: ./src
-    libraries:
-      - lvgl                  # Pulls in CONFIG_ALP_LVGL_GPU2D=y / DMA2D=y
-                               # on AEN401 / AEN601 / AEN801 via the §D.lib loader.
     peripherals:
       - spi
       - gpio

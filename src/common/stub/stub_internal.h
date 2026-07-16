@@ -2,8 +2,8 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Private cross-TU contract for the split stub backend
- * (src/common/stub/*.c -- one translation unit per public API
+ * Private cross-TU contract for the split stub backend (the
+ * src/common/stub/ sources -- one translation unit per public API
  * class, replacing the single src/common/stub_backend.c monolith;
  * see issue #673).
  *

@@ -112,6 +112,24 @@ int bridge_hw_adc_stream_end(uint8_t stream_id)
 	return BRIDGE_HW_ERR_NOTIMPL;
 }
 
+int bridge_hw_adc_spectrum_read(uint8_t   stream_id,
+                                uint16_t  bin_offset,
+                                uint8_t   max_bins,
+                                uint32_t *seq_out,
+                                uint16_t *total_bins_out,
+                                uint8_t  *got_bins_out,
+                                float    *bins_out)
+{
+	(void)stream_id;
+	(void)bin_offset;
+	(void)max_bins;
+	(void)seq_out;
+	(void)total_bins_out;
+	(void)bins_out;
+	if (got_bins_out != 0) *got_bins_out = 0u;
+	return BRIDGE_HW_ERR_NOTIMPL;
+}
+
 int bridge_hw_trng_read(uint8_t *dest, size_t len)
 {
 	if (dest != 0) {

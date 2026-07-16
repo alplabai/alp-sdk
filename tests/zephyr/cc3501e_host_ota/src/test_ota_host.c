@@ -25,6 +25,7 @@
  * payload's first byte is the response status (ALP_CC3501E_RESP_*).
  */
 
+#include <stdint.h>
 #include <string.h>
 #include <zephyr/ztest.h>
 
@@ -100,7 +101,13 @@ static void slave_dispatch(void)
 		const uint16_t data_len = (uint16_t)(slave.req_len - 4u);
 		if (slave.fail_next_write) {
 			slave.fail_next_write = false;
-			stage_status(ALP_CC3501E_RESP_ERR_INTERNAL);
+			/* NOT_READY (not INTERNAL/RADIO/PROTOCOL, which resp_to_status maps
+			 * to ALP_ERR_IO) -- poll_by_repeat retries ALP_ERR_BUSY/ALP_ERR_IO
+			 * transparently, which would silently self-heal a one-shot INTERNAL
+			 * on its own next attempt and defeat this fault injection. NOT_READY
+			 * is final on the first try, exactly like the real "one lost reply"
+			 * case cc3501e_ota_update's recovery path exists for. */
+			stage_status(ALP_CC3501E_RESP_ERR_NOT_READY);
 			break;
 		}
 		if (slave.ota_state != ALP_CC3501E_OTA_STATE_WRITING || offset != slave.ota_cursor) {
@@ -364,5 +371,54 @@ ZTEST(cc3501e_host_ota, test_update_null_image_invalid)
 	static const uint8_t one = 0u;
 	zassert_equal(cc3501e_ota_update(&fw, &one, 0u, 100u), ALP_ERR_INVAL, "zero len -> INVAL");
 }
+
+/* #732 boundary coverage: OTA_BEGIN's total_len is a wire LE32
+ * (<alp/protocol/cc3501e.h>), so UINT32_MAX is the only device/slot maximum
+ * knowable in-tree -- the CC3501E chip manifest
+ * (metadata/chips/cc3501e.yaml) publishes no smaller vendor-slot capacity.
+ * "one byte over that maximum" and "UINT32_MAX + 1" are therefore the SAME
+ * boundary value for this driver; both prompts collapse into one test.
+ * Only reachable where size_t is wider than 32 bit (native_sim/native/64,
+ * any 64-bit host) -- on a 32-bit size_t target the value isn't even
+ * representable, so the guard is unreachable and the case is skipped. */
+#if SIZE_MAX > UINT32_MAX
+
+/* Pre-#732, the host silently narrowed (uint32_t)len: (size_t)UINT32_MAX + 1
+ * wraps to 0, so BEGIN(0) went out over the wire instead of a rejection.
+ * slave.fail_next_write is armed as a belt-and-braces safety net so this
+ * test cannot run away over a real 4 GiB buffer even if run against a
+ * driver that is missing the pre-flight guard entirely: if the update ever
+ * gets past BEGIN, the very first (and only) WRITE it attempts is made to
+ * fail, so the update aborts after one 256 B chunk no matter what -- `buf`
+ * only needs to be chunk-sized, never `len`-sized. */
+ZTEST(cc3501e_host_ota, test_update_len_over_uint32_max_rejected_by_host)
+{
+	static uint8_t buf[256];
+	slave.fail_next_write = true;
+	zassert_equal(cc3501e_ota_update(&fw, buf, (size_t)UINT32_MAX + 1u, 100u),
+	              ALP_ERR_INVAL,
+	              "len > UINT32_MAX -> INVAL BEFORE any transfer (host-side guard)");
+	zassert_equal(slave.cmd, 0u, "no transfer was clocked -- rejected pre-flight");
+}
+
+/* UINT32_MAX itself round-trips through the wire field, so the guard must
+ * NOT reject it: this is the "max supported image size" boundary.  Same
+ * fail_next_write technique as above keeps `buf` chunk-sized: the point is
+ * only to prove BEGIN carries the FULL untruncated length, not to stream a
+ * real 4 GiB image. */
+ZTEST(cc3501e_host_ota, test_update_len_exactly_uint32_max_accepted_by_host)
+{
+	static uint8_t buf[256];
+	slave.fail_next_write = true;
+	alp_status_t s        = cc3501e_ota_update(&fw, buf, (size_t)UINT32_MAX, 100u);
+	zassert_not_equal(s, ALP_ERR_INVAL, "UINT32_MAX is IN-range -- must not be host-rejected");
+	zassert_equal(
+	    slave.ota_total, (uint32_t)UINT32_MAX, "BEGIN declared the FULL untruncated length");
+	zassert_equal(slave.ota_state,
+	              ALP_CC3501E_OTA_STATE_IDLE,
+	              "proceeded past BEGIN, hit the injected WRITE failure, and aborted");
+}
+
+#endif /* SIZE_MAX > UINT32_MAX */
 
 ZTEST_SUITE(cc3501e_host_ota, NULL, NULL, reset_before, NULL, NULL);

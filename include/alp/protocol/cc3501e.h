@@ -114,7 +114,7 @@ typedef enum {
 	ALP_CC3501E_CMD_GET_VERSION = 0x01,
 	ALP_CC3501E_CMD_RESET       = 0x02,
 	ALP_CC3501E_CMD_GET_MAC     = 0x03,
-	/* §5.4 -- extended diagnostics.  Reply payload is
+	/* Extended diagnostics.  Reply payload is
      * @ref alp_cc3501e_diag_info_t.  Adds firmware-side context
      * (reset cause, current role, uptime, free heap, last error)
      * beyond what GET_VERSION returns.  v2-firmware-only; v1
@@ -217,7 +217,7 @@ typedef enum {
      * enable pins (CAM_EN_LDO0/1) per the inter-chip TSV. */
 	ALP_CC3501E_CMD_CAM_ENABLE  = 0x60,
 	ALP_CC3501E_CMD_CAM_DISABLE = 0x61,
-	/* §5.7 -- system-wide power policy for the CC3501E itself.
+	/* System-wide power policy for the CC3501E itself.
      * Request payload is @ref alp_cc3501e_power_policy_t.  Lets
      * the host hint at how aggressively the CC3501E firmware
      * should idle between Wi-Fi / BLE events.  v2-firmware-only. */
@@ -704,6 +704,88 @@ typedef struct {
 	uint8_t  reserved[2];
 	uint32_t timestamp_us;
 } alp_cc3501e_gpio_event_t;
+
+/* ------------------------------------------------------------------ */
+/* Wire-layout guards (#733)                                          */
+/*                                                                    */
+/* Two categories of struct live in this header:                     */
+/*                                                                    */
+/*  (A) DIRECTLY SERIALIZED -- the host builds the struct and hands   */
+/*      its raw address to the SPI DMA, and the firmware casts the    */
+/*      received wire buffer straight back to the struct type.  Its   */
+/*      in-memory layout IS the wire format, so ANY tail/interior     */
+/*      padding silently corrupts the frame.  These are padding-free  */
+/*      TODAY only because every field is uint8_t; adding a wider     */
+/*      field would reintroduce the alp_cc3501e_ble_adv_start_t       */
+/*      7-vs-8 gap.  The asserts below make that a BUILD failure      */
+/*      instead of a field-shift on the wire -- keep these all-       */
+/*      uint8_t, or switch the op to a hand-packed codec before       */
+/*      widening a field.                                             */
+/*                                                                    */
+/*  (B) WIRE-SCHEMA -- documentary layout only.  Both sides encode/   */
+/*      decode these field-by-field with explicit little-endian byte  */
+/*      access (never memcpy / pointer-cast), so compiler padding is  */
+/*      irrelevant to the wire.  Where the firmware still uses        */
+/*      sizeof(T) as the expected payload length (the socket ops),    */
+/*      the size is pinned below so a field reorder can't drift that  */
+/*      length constant out from under the byte-offset parser.        */
+/* ------------------------------------------------------------------ */
+
+/* (A) Directly-serialized command payloads -- struct-punned on both   */
+/*     sides (chips/cc3501e/cc3501e.c hands &struct to the SPI DMA;    */
+/*     firmware/cc3501e/src/protocol.c casts the wire buffer to T*).   */
+_Static_assert(sizeof(alp_cc3501e_gpio_configure_t) == 4u,
+               "gpio_configure wire header must stay 4 bytes / padding-free");
+_Static_assert(offsetof(alp_cc3501e_gpio_configure_t, cc3501e_gpio) == 0u, "gpio_configure @0");
+_Static_assert(offsetof(alp_cc3501e_gpio_configure_t, direction) == 1u,
+               "gpio_configure.direction @1");
+_Static_assert(offsetof(alp_cc3501e_gpio_configure_t, pull) == 2u, "gpio_configure.pull @2");
+
+_Static_assert(sizeof(alp_cc3501e_gpio_write_t) == 4u,
+               "gpio_write wire header must stay 4 bytes / padding-free");
+_Static_assert(offsetof(alp_cc3501e_gpio_write_t, cc3501e_gpio) == 0u, "gpio_write @0");
+_Static_assert(offsetof(alp_cc3501e_gpio_write_t, level) == 1u, "gpio_write.level @1");
+
+_Static_assert(sizeof(alp_cc3501e_gpio_set_interrupt_t) == 4u,
+               "gpio_set_interrupt wire header must stay 4 bytes / padding-free");
+_Static_assert(offsetof(alp_cc3501e_gpio_set_interrupt_t, cc3501e_gpio) == 0u, "gpio_irq @0");
+_Static_assert(offsetof(alp_cc3501e_gpio_set_interrupt_t, edge) == 1u, "gpio_irq.edge @1");
+_Static_assert(offsetof(alp_cc3501e_gpio_set_interrupt_t, enabled) == 2u, "gpio_irq.enabled @2");
+
+_Static_assert(sizeof(alp_cc3501e_wifi_connect_t) == 4u,
+               "wifi_connect wire header must stay 4 bytes / padding-free");
+_Static_assert(offsetof(alp_cc3501e_wifi_connect_t, ssid_len) == 0u, "wifi_connect.ssid_len @0");
+_Static_assert(offsetof(alp_cc3501e_wifi_connect_t, psk_len) == 1u, "wifi_connect.psk_len @1");
+_Static_assert(offsetof(alp_cc3501e_wifi_connect_t, security) == 2u, "wifi_connect.security @2");
+
+/* gpio_event is wire-shaped (async EVT_GPIO_INTERRUPT payload) and has a
+ * uint32_t, so alignment -- not just tail padding -- pins its layout.
+ * End-to-end async delivery is not wired yet (#130); guard it now so the
+ * layout is locked when it is. */
+_Static_assert(sizeof(alp_cc3501e_gpio_event_t) == 8u, "gpio_event payload must stay 8 bytes");
+_Static_assert(offsetof(alp_cc3501e_gpio_event_t, timestamp_us) == 4u,
+               "gpio_event.timestamp_us @4");
+
+/* (B) Schema structs whose sizeof() is the firmware's expected payload
+ *     length for the socket ops (protocol.c handle_sock_*).  Field access
+ *     is byte-offset on both sides; pin the size so a reorder can't move
+ *     the length constant without failing the build. */
+_Static_assert(sizeof(alp_cc3501e_sock_open_t) == 4u, "sock_open wire length");
+_Static_assert(sizeof(alp_cc3501e_sock_handle_t) == 4u, "sock_handle wire length");
+_Static_assert(sizeof(alp_cc3501e_sock_connect_t) == 24u, "sock_connect wire length");
+_Static_assert(sizeof(alp_cc3501e_sock_send_t) == 8u, "sock_send wire header length");
+_Static_assert(sizeof(alp_cc3501e_sock_recv_t) == 4u, "sock_recv wire length");
+_Static_assert(sizeof(alp_cc3501e_sock_recv_resp_t) == 24u, "sock_recv_resp wire header length");
+_Static_assert(sizeof(alp_cc3501e_sock_close_t) == 4u, "sock_close wire length");
+_Static_assert(sizeof(alp_cc3501e_sock_addr_t) == 20u, "sock_addr wire length");
+
+/* The canonical 7-byte-wire / 8-byte-struct case the issue calls out
+ * (#733): alp_cc3501e_ble_adv_start_t is hand-packed to 7 bytes on both
+ * sides PRECISELY because its C sizeof is 8 (tail pad after adv_data_len).
+ * Assert the 8 so nobody "optimises" the hand-packing into a memcpy that
+ * would ship the pad byte. */
+_Static_assert(sizeof(alp_cc3501e_ble_adv_start_t) == 8u,
+               "ble_adv_start struct is 8 bytes; wire header is hand-packed to 7 -- do NOT memcpy");
 
 /* ---- OTA firmware update (over-the-bridge PSA-FWU streaming) ---------------- */
 

@@ -204,9 +204,14 @@ alp_status_t alp_aead_encrypt(alp_aead_t    *a,
  *                         the tag check completes) -- treat any bytes
  *                         observed there before this function returns as
  *                         unauthenticated, which matters for AMP shared-
- *                         memory buffers another core could poll.  On any
- *                         non-@c ALP_OK return the whole buffer is wiped
- *                         per the discard contract below.
+ *                         memory buffers another core could poll.  Once
+ *                         the backend has been invoked, any non-@c ALP_OK
+ *                         return wipes the whole buffer per the discard
+ *                         contract below.  Early parameter-validation
+ *                         failures (@c ALP_ERR_INVAL / @c ALP_ERR_NOT_READY,
+ *                         returned before the backend is ever called)
+ *                         leave @p plain_out untouched -- there is nothing
+ *                         of ours to discard in that case.
  * @return ALP_OK on success;
  *         ALP_ERR_IO on tag-mismatch (the message has been tampered
  *         with — @p plain_out content is undefined and MUST be discarded);

@@ -23,7 +23,9 @@ LVGL dashboard on a 240×320 ST7789.
   consumer lands, so generated config emits the pure-C fallback
   instead of claiming CryptoCell / OPTIGA acceleration.
 - **LVGL** composes the dashboard layout with sparkline chart +
-  status strip.
+  status strip, bound to the panel via `<alp/display.h>` +
+  `alp_gui_lvgl_attach()` (`<alp/gui.h>`) -- no direct
+  `<zephyr/drivers/display.h>` calls in app code.
 
 ## Build
 

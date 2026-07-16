@@ -5,7 +5,323 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.10.0 candidate
+## [Unreleased] - v0.11.0 candidate
+
+### Changed — `board-config.md` split into a landing page + four references (#464)
+
+- `docs/board-config.md` had grown to ~1500 lines covering the quick
+  start, the whole field-by-field schema, every emit backend, hardware
+  revisions and all the feature blocks in one scroll. It is now a
+  249-line landing page (quick start, the single-source-of-truth model,
+  file location, cross-field validation, versioning) that links four
+  focused references:
+  - `docs/board-config-schema.md` — the `board.yaml` field reference:
+    the `som:` / board split, inline vs. `preset:` mode, `pins:`, pin
+    direction, the EVK-as-reference-design workflow, stock presets, and
+    the `libraries:` block (ADR 0018).
+  - `docs/board-config-emit.md` — how the loader compiles the file:
+    `west alp-build`, the Zephyr `alp.conf` overlay, plain CMake, Yocto
+    `local.conf`, `west.yml` auto-pin, `hw-info-h`, and the DTS overlay.
+  - `docs/board-config-hardware.md` — hardware revision tracking
+    (build-time + runtime) and modular SoM chip populations.
+  - `docs/board-config-features.md` — the build-system integration
+    knobs: `hw_info.eeprom`, per-slice memory/power, log levels,
+    `boot:`, `ota:`, `storage:`, and `security.psa:`.
+- Every in-repo reference that pointed at a section now living on one of
+  the four new pages was repointed to it — narrative docs, the tutorials,
+  `README.md`, `llms.txt`, the example `README.md`/`board.yaml` comments,
+  the board presets and template under `metadata/`, and the
+  `scripts/alp_orchestrate/models.py` docstring. The prose is a move, not a
+  rewrite: all 50 original sections survive and no field reference changed
+  meaning. The only deliberate edits are the intra-document "see below"
+  pointers, which became cross-page links now that the target sections live
+  on another page.
+
+### Removed — CC3501E integration plan retired (#464)
+
+- `docs/cc3501e-integration-plan.md` is **deleted**. It was the May-2026
+  pre-implementation plan for the CC3501E bridge, written before host or
+  firmware code existed; the bridge has since shipped (2026-07-05,
+  silicon-proven) and in places shipped differently from the plan (e.g.
+  `POWER_POLICY` landed at opcode `0x62`, not the proposed `0x04`; the
+  handshake became hardware SS0 chip-select + per-phase READY, not a
+  polled `busy_pin` GPIO). It was research-only and never a released
+  surface, so it goes cleanly rather than living on as a redirect — git
+  history has the original if anyone needs it. Its still-relevant
+  survivors moved into `docs/cc3501e-bridge.md`: the open items (errata
+  SWRZ167; CAN/I2S/PDM/SDMMC not evaluated) as a new "Open questions"
+  section, plus a new "Peripherals not proxied today" section
+  (DMA/UART/ADC/Timers/I2C). Current CC3501E reference material is
+  `docs/cc3501e-bridge.md`, `-production.md`, `-companion-commands.md`
+  and `-gpio-bench.md`.
+- Bare "§N.N" cross-references into the retired plan are gone from the
+  live tree: `include/alp/protocol/cc3501e.h` (the `§5.4` and `§5.7`
+  comments on `CMD_GET_DIAG_INFO` / `CMD_POWER_POLICY` — the most-read
+  surface that carried them) and `tests/zephyr/peripheral/src/main.c`
+  (`§5.5`) now state the intent instead of a section number that no
+  longer resolves. Historical `CHANGELOG.md` / `VERSIONS.md` rows keep
+  theirs: they record what was true when written.
+- `scripts/flash_backends/cc3501e_usb_bootloader.py` and
+  `docs/v0.6-tbd-and-assumptions.md` cited the plan's "§5.7" for the
+  USB-bootloader `flash_args` contract — already wrong (§5.7 was the
+  power-policy opcode section, not USB bootloader). Repointed to the
+  module's own docstring, and the operator-facing "no tool on PATH"
+  message now names the bench warm-program recipe in
+  `docs/cc3501e-production.md` rather than a manual SWD path that does
+  not flash this part.
+- `scripts/check_doc_drift.py` — removed the now-stale
+  `cc3501e-integration-plan.md` dead-symbol-scan exemption, which existed
+  to let that doc name a proposed API that was never implemented. Its
+  test moves onto `v0.6-tbd-and-assumptions.md`, the remaining
+  forward-looking doc the exemption is for.
+- `docs/cc3501e-bridge.md` gained a "Link speed" section documenting what
+  the link actually runs at, replacing the retired plan's open 8 MHz vs.
+  26 MHz question. The four AEN bridge examples request 14 MHz, just under
+  the ~15 MHz CC35 slave ceiling — so 26 MHz was never reachable by host
+  tuning, and the remaining question is a slave-side limit, not a host one.
+  Reaching that rate required `RX_SAMPLE_DLY = 6` on the master (`spi_dw`
+  defaults it to 0, and the MISO round-trip over the on-SoM traces
+  mis-samples at 8 MHz and above); that value is silicon-tuned, not
+  derived, and the link does not work at the higher clock without it.
+  Silicon-validated cold and warm on the E1M-AEN801 EVK, concurrently with
+  Wi-Fi/BLE traffic.
+- The actual SCLK is stated as ~14.3 MHz, derived from the driver's own
+  arithmetic (`SPI_DW_CLK_DIVIDER` truncates 200 MHz / 14 MHz to a divider
+  of 14, giving 200/14). The examples' `cc3501e_bridge.h` claims 14.8 MHz
+  "(BAUDR = 400 MHz AHB / 27)", which cannot be right on two counts: the
+  overlay records the real SSI functional clock as 200 MHz and marks the
+  400 MHz figure as mis-set and disproven, and 400/14 truncates to 28 in
+  any case, never 27. The doc now says the figure is derived rather than
+  measured — no captured SCLK exists in-tree. Correcting the example
+  headers is left to the follow-up that owns the stale-speed sites.
+- Known inconsistency, tracked separately: four sites still state 8 MHz or
+  1 MHz — the chip header's `@code` example, `max_clock_hz` in
+  `metadata/chips/cc3501e.yaml`, the bring-up example's README, and the
+  `alp-console` example's 1 MHz bridge header (plus its dead
+  `CC3501E_SPI_FREQ_HZ` macro in `main.c`). Until that lands,
+  `max_clock_hz` (the metadata single source of truth for that hardware
+  fact) contradicts this doc. They are deferred here because correcting
+  them touches metadata and a public header rather than docs.
+
+### Fixed — pure-C review of `dev`: overflow, contract and rollback defects (#732 #735 #736 #737 #738 #739 #740 #742 #743 #744 #745 #746 #747 #748 #749 #750 #753 #757 #759 #760)
+
+- **Checked arithmetic.** New private `src/common/alp_checked_arith.h`
+  (`alp_size_range_valid` / `alp_size_to_u32` / `alp_u32_add_checked` + 64-bit
+  siblings): subtraction-based range checks that never evaluate `offset + len`
+  before proving it representable, and narrowing helpers that leave `*out`
+  untouched on rejection (#743). Storage and DSP range checks migrate to it;
+  the CryptoCell hash staging buffer (#737), EEPROM 24C128 range checks (#738),
+  CC3501E OTA length/offset narrowing (#732) and the Yocto UIO MHU kick-slot
+  MMIO arithmetic (#735) now use it instead of overflow-prone hand-rolled forms.
+- **Contract violations.** AEAD decrypt now wipes the plaintext output on
+  authentication failure, per `<alp/security.h>` (#750). SPI NULL-buffer
+  validation and ADC last-error behaviour align with their documented
+  contracts (#749). The update-log append path no longer trusts stale metadata,
+  which could durably break a write-once chain (#759).
+- **Undefined behaviour.** BME280 calibration/compensation no longer
+  left-shifts negative signed values (#753); ADC, INA236 and DA9292 numeric
+  edges are hardened against wrap and UB (#757). Chip configuration APIs reject
+  invalid enum values instead of masking them into reserved register encodings
+  (`bmp581`, `bme280` — #736; the remaining drivers are tracked in #790).
+- **Silicon-facing correctness.** The A55 OpenAMP notify path takes a release
+  barrier before the MHU doorbell (#745). xHCI DMA and the Alif PDM coefficient
+  bank fixes (#752, #758) are held on a separate branch pending bench time.
+- **I2C addressing.** Chip drivers validate 7-bit addresses (#739). The
+  TCAL9538 driver additionally accepts the register-compatible TCA6408A
+  alt-strap (0x20..0x21) it is documented to drive — a range check limited to
+  0x70..0x73 would have silently reported "IOEXP absent" on every
+  TCA6408A-populated EVK.
+- **Reentrancy.** CC3501E scan/event APIs use per-context payload buffers
+  instead of shared statics (#740); the Wi-Fi security selection is
+  conversion-clean and gated by a check-only target (#742).
+- **Yocto rollback paths.** PWM close no longer unexports or disables a channel
+  it did not itself export (#744); a failed GPIO IRQ setup no longer leaves the
+  line edge-configured (#746); watchdog failure rollback no longer leaves an
+  armed device, and timeout rounding no longer overflows (#760). RPMsg
+  failed-open paths destroy the pthread primitives they initialized (#747).
+- **Build.** Restored the strict-C warning gate: literal glob text inside block
+  comments tripped `-Wcomment`, breaking `ALP_SDK_WERROR=ON` on both the
+  bare-metal and Yocto profiles (#748).
+
+### Fixed — orchestrated Zephyr builds pin the workspace Python (#787)
+
+- Zephyr slice commands now pass
+  `-DPython3_EXECUTABLE=<orchestrator interpreter>` through west's CMake
+  argument separator. This overrides a stale `Python3_EXECUTABLE` cache entry
+  that could otherwise select a macOS Framework Python without the `west`
+  package, despite `WEST_PYTHON` pointing at the correctly bootstrapped
+  workspace venv. The emitted `build-plan` command arguments carry the same
+  override for CLI and IDE consumers.
+
+## [v0.10.1] - 2026-07-14
+
+### Fixed — `west alp-build` unknown after bootstrap (#769)
+
+- `scripts/bootstrap.sh` created the workspace with the plain upstream Zephyr
+  manifest, so alp-sdk was never a manifest project and west never discovered
+  its `self.west-commands` — `west alp-build` (+ `alp-flash`/`alp-image`/
+  `alp-clean`/`alp-renode`) were "unknown command". Bootstrap now inits from
+  alp-sdk's own `west.yml` (`west init -l <alp-sdk>`): alp-sdk becomes the
+  manifest repo (topdir = its parent), and its extension commands register in
+  the workspace. Adds a reuse-guard (only reuse a workspace whose manifest is
+  alp-sdk's) and a post-init legibility guard. `alp doctor` + the getting-
+  started/contribution/testing docs move to the topdir-is-parent layout.
+
+### Changed — single-source the SDK version; de-version README/docs (#445)
+
+- The version lives in `metadata/sdk_version.yaml` alone; `alp_cli.__version__`
+  reads it, and README/docs no longer hard-code a version label (they derive
+  it). `scripts/bump_version.py` + `scripts/check_version_doc_sync.py`
+  simplified to that single source.
+
+## [v0.10.0] - 2026-07-14
+
+### Changed — Display/LVGL examples migrated off direct Zephyr `display_*` APIs (issue #520)
+
+- `lvgl-widgets-demo`, `lvgl-benchmark`, `lvgl-music-player`,
+  `iot-dashboard`, `ai-camera-viewer`, and `drone-hud` now open their panel
+  through `<alp/display.h>`'s `alp_display_open()` and bind it to LVGL via
+  `<alp/gui.h>`'s `alp_gui_lvgl_attach()` (issue #23), instead of
+  `DEVICE_DT_GET(DT_CHOSEN(zephyr_display))` + `display_blanking_off()` +
+  Zephyr's own `lvgl` module auto-init. Each app now sets
+  `CONFIG_LV_Z_AUTO_INIT=n` (so Zephyr's `lvgl` module doesn't also create
+  a competing `lv_display_t`) and owns the full sequence itself: open the
+  panel, `lv_init()`, `lv_tick_set_cb(k_uptime_get_32)` (Zephyr's own tick
+  registration lives behind the same auto-init hook this turns off), then
+  `alp_gui_lvgl_attach()`. Each example's `boards/native_sim_native_64.overlay`
+  gains an `alp-display0` alias alongside the existing `zephyr,display`
+  chosen node (both point at the same dummy display device); each
+  `native_sim.conf` adds `CONFIG_SDL_DISPLAY=n` (native_sim's DTS also
+  carries a `zephyr,sdl-dc` node that `CONFIG_DISPLAY=y` pulls in by
+  default, and its GL/EGL init segfaults on a headless runner).
+- New portability lint: `scripts/check_example_portability.py` rejects a
+  direct `#include <zephyr/drivers/...>` in any example with a
+  `board.yaml`, with an explicit, reasoned allowlist
+  (`_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`) for the handful of examples that
+  have no portable `<alp/*.h>` surface to route through yet
+  (`multicore/rpmsg-v2n`'s AMP mailbox transport, `peripheral-io/alp-console`'s
+  status-LED PWM + the on-module bridge's own HAL, `v2n/v2n-ethernet-dual`'s
+  MDIO PHY diagnostics, `v2n/v2n-xspi-flash-readwrite`'s raw flash driver).
+  Zephyr-specific register/bench tools with no `board.yaml` (e.g.
+  `examples/aen/*-regcheck/`) are outside this check's scope by
+  construction. See `docs/portability.md` §4.4.
+
+
+### Fixed — GD32 bridge OTA Path-A hardening
+
+`ota_slot_base_checked()` rejects any slot that is not A/B instead of silently
+mapping it to slot A (#741); `ota_image_bootable()` rejects a CRC-valid but
+truncated/vector-less image at COMMIT and before the bootloader jump (#755);
+the bootloader now orders both metadata records newest-first and falls back to
+an older bootable record when the newest fails validation (#754); the host
+gates OTA on protocol minor >= 6 so a current host cannot corrupt a pre-v0.6
+bridge via the v0.6 chunk-length reframing (#751); and `OTA_BEGIN` no longer
+erases the 236 KB slot synchronously (which stalled the SPI reply and hung the
+host) — it arms a background erase pumped from `bridge_hw_tick` and acks
+immediately (#770). Boot-select, dual-bank erase, and the background-erase path
+are silicon-validated on the GD32.
+
+### Added — GD32 bridge ADC/PWM/DSP
+
+ADC oversample + resolution control (#494), PWM center-aligned mode (#495), and
+ADC DSP runtime dispatch — FAC FIR/IIR filtering plus a hardware FFT spectrum
+path (#496).
+
+### Fixed — portable DSP + protocol layout guards
+
+`alp_dsp_stats_f32`'s CMSIS path rejects `size_t` lengths beyond the uint32_t
+block size instead of silently truncating (#734); compile-time `_Static_assert`
+layout guards protect the memcpy-serialized CC3501E protocol payloads and the
+GD32 OTA on-flash structs against silent padding/offset drift (#733).
+
+### Added — reproducible release: SBOM + deterministic tarball (#610 §7 slice 2)
+
+- `scripts/gen_sbom.py` emits a deterministic CycloneDX 1.5 SBOM from `alp.lock`
+  (stable, lock-derived serial number, no wall-clock). `release.yml` now builds
+  a byte-reproducible source tarball (`gzip -n`) and attaches the SBOM. Closes
+  the §7 "reproducible release artifacts" criterion (build-receipt schema landed
+  in slice 1).
+### Added — `west alp-quality` profile runner (#610 §5 slice 2)
+
+- Runs `metadata/quality-tasks-v1.json` for a named profile (quick/pr/full/
+  release) and emits a human summary + JSON + JUnit + SARIF. The `pr` profile
+  selects exactly the gates CI runs (one source of truth). Completes the §5
+  "one quality definition drives local + CI, emits machine artifacts" criterion.
+
+### Added — quality-task registry (`metadata/quality-tasks-v1.json`, #610 §5)
+
+- Single source of truth for the SDK's `check_*.py` quality gates: which exist,
+  whether each is a hard CI gate or informational, and which profiles run it.
+  `scripts/check_quality_registry.py` keeps it == `scripts/check_*.py` on disk;
+  `scripts/test-all.sh` now derives its `REQUIRED_GATE_SCRIPTS` from the
+  registry (via `quality_tasks.py --gate-scripts`) instead of a hand-maintained
+  bash array — closing the local-vs-CI gate drift #608 flagged. `alp quality`
+  profile runner + JSON/SARIF emission land in later §5 slices.
+
+### Added — build-receipt-v1 (`metadata/schemas/build-receipt-v1.schema.json`, #610 §7)
+
+- A deterministic, machine-readable receipt for a release build — SDK source
+  revision, board.yaml/lock/build-plan digests, toolchain identity, per-image
+  hashes — composed from existing inputs (`scripts/build_receipt.py`), carrying
+  no wall-clock field so identical inputs yield an identical receipt.
+  `check_build_receipt.py` guards the schema. Wiring into `release.yml`,
+  deterministic packaging, and SBOM generation land in later §7 slices.
+### Removed — `tinygsm` + `libhelix` dropped from the curated library set (#610 WS6-c)
+
+- Maintainer legal-review decision: `tinygsm` (LGPL-3.0) and `libhelix`
+  (RPSL-1.0) are copyleft/source-available licences unwanted in a SoM
+  manufacturer's firmware distribution, and are removed entirely — the
+  `west.yml` pins + remotes, the `cores.<id>.libraries` schema enum tokens,
+  the `metadata/libraries/{tinygsm,libhelix}.yaml` manifests +
+  `metadata/library-profiles/{tinygsm,libhelix}/` HW-backend profiles, the
+  `examples/connectivity/tinygsm-modem-at` and `examples/audio/libhelix-decode`
+  teaching examples, and every Kconfig / loader / test reference. No ABI
+  shim or compat alias survives (per #610 §6, curated tokens carry no
+  back-compat once retired).
+- `catch2` (BSL-1.0, Boost) and `minimp3` (CC0-1.0, public-domain-equivalent)
+  are permissive and stay; `metadata/schemas/library-v1.schema.json`'s
+  `license` enum grows `BSL-1.0` + `CC0-1.0` to accommodate them. LGPL-3.0
+  and RPSL-1.0 are deliberately NOT added to the allowlist.
+
+### Added — `west alp-migrate` board.yaml migration engine (#610 WS6-b)
+
+- `board.yaml` may carry an optional top-level `schemaVersion`. Versioning is
+  **lazy**: an absent key IS version 1 (the floor), so hand-written and
+  external projects keep loading unchanged and are never "drift" — the key
+  only appears in a file once a migration has bumped it to v2+. `west
+  alp-migrate --check/--preview/--apply` versions and migrates a `board.yaml`
+  byte-faithfully (comments, flow style, indentation preserved) with a
+  `diagnostic-v1` JSON report. The migration registry
+  (`scripts/alp_migrate/migrations/`) is empty until the first real schema
+  change; `check_board_schema_version.py` is the gate that will enforce
+  migration once one lands.
+
+### Added — real `alp_gui_lvgl_attach()` LVGL v9 bridge (`<alp/gui.h>`, issue #23)
+
+- `src/gui_lvgl.c` (renamed from `gui_lvgl_stub.c`) now compiles a real LVGL
+  v9 hand-off under `ALP_HAS_LVGL`: creates an `lv_display_t` sized to the
+  `alp_display_t`'s reported geometry, maps `alp_pixfmt_t` to
+  `lv_color_format_t` (RGB565 / RGB888 / ARGB8888; `MONO_VLSB` has no LVGL v9
+  equivalent and returns `ALP_ERR_NOSUPPORT`), allocates a persistent
+  partial-refresh draw buffer (`CONFIG_ALP_GUI_LVGL_BUF_LINES` on Zephyr,
+  default 16 lines), and wires LVGL's flush callback straight to
+  `alp_display_blit()`. The non-LVGL guard clause (NULL → `ALP_ERR_INVAL`,
+  else → `ALP_ERR_NOSUPPORT`) is unchanged and still compiles when no build
+  wires LVGL in.  The public signature and `[ABI-STABLE]` marker are
+  unchanged.
+- Zephyr wiring: `CONFIG_ALP_SDK_HAS_LVGL` (now `depends on LVGL`, still
+  `default y if LVGL`) mirrors into the `ALP_HAS_LVGL` compile define
+  app-wide via `zephyr_compile_definitions_ifdef`, so any Zephyr app with
+  `CONFIG_LVGL=y` gets the real bridge automatically — no per-app wiring
+  needed. Plain-CMake / Yocto builds keep the existing `-DALP_HAS_LVGL=ON`
+  option path (caller supplies the LVGL include path).
+- New hermetic native_sim twister suite `tests/zephyr/gui_lvgl/`: a
+  priority-255 test-double display backend proves a forced LVGL refresh
+  reaches `alp_display_blit()`, plus NULL / unsupported-pixel-format /
+  no-LVGL-build degrade coverage.
+- `docs/os-support-matrix.md` gains a "GUI/LVGL bridge" row (code-complete,
+  native_sim-tested; real-panel bench run still pending) — issue #23's
+  display-side bench legs (V2N DSI/parallel-RGB, Alif LCD-IF) remain open.
 
 ### Added — portable AHRS sensor-fusion surface (`<alp/ahrs.h>`)
 

@@ -541,6 +541,13 @@ def _slice_command(
             cmd.append("--sysbuild")
             if emit_sysbuild_conf(project):
                 cmd += ["--sysbuild-config", "../alp_sysbuild.conf"]
+        # Zephyr normally derives Python3_EXECUTABLE from the interpreter
+        # that launched west (WEST_PYTHON). A pre-existing CMake cache can
+        # already define Python3_EXECUTABLE, however, which prevents that
+        # hand-off and can select a host Python without the west package.
+        # The orchestrator itself runs under the intended workspace Python,
+        # so pin it as an explicit CMake cache override (issue #787).
+        cmd += ["--", f"-DPython3_EXECUTABLE={sys.executable}"]
         return cmd
     if slice_.os == "yocto":
         # `image:` always names a real recipe (e.g. `alp-image-edge`) --

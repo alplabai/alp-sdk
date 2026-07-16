@@ -1,0 +1,63 @@
+# u8g2 -- monochrome display graphics library (ADR 0018 library manifest;
+# WS6-c Phase-1 canonical manifest for the legacy per-core token `u8g2`;
+# name is already canonical -- no hyphenation change).
+#
+# Grounding (this checkout):
+#   * scripts/alp_project_emit/__init__.py:236-242 (_LIBRARY_KCONFIG) --
+#     "CONFIG_ALP_U8G2_SW_BLIT=y" (always-on SW fallback marker) +
+#     "CONFIG_ALP_SDK_U8G2_VENDORED_CORE=y" (gates compiling
+#     vendors/u8g2/csrc/ into the build per zephyr/CMakeLists.txt) -- both
+#     real CONFIG_ lines, copied verbatim.
+#   * west.yml:312-319 -- west module `u8g2`, remote olikraus,
+#     repo-path u8g2, revision 2.36.5 (Apr 2024), path modules/lib/u8g2,
+#     group `extras-tier1` (disabled by default; the build resolves against
+#     the vendored copy under vendors/u8g2/, not this west pin -- matches
+#     the etl.yaml precedent).
+#   * licence BSD-2-Clause (vendors/u8g2/LICENSE: "licensed under the terms
+#     of the new-bsd license (two-clause bsd license)").
+#   * upstream https://github.com/olikraus/u8g2
+#
+# HW-backends: metadata/library-profiles/u8g2/hw-backends.yaml carries
+# per-accelerator priority binding (DMA2D/TMU-FAC blit offload, bus-DMA
+# push); folded in WS6-c Phase 3 (needs library-v1 schema extension).
+#
+# No `requires:` -- display-agnostic like LVGL (drives whatever bus/panel
+# the board wires up); CONFIG_ALP_U8G2_SW_BLIT=y is the always-available
+# floor, so there is no hard capability/core-class/RAM requirement to name.
+#
+# `tier: B` for this Phase-1 pass: u8g2 is NOT listed in
+# metadata/registries/tier-a-library-ci.json's hostBuild.libraries or
+# excludedLibraries, even though it already has a real teaching example
+# (examples/display/u8g2-oled-draw, native_sim green). Promotion to Tier A
+# is a named follow-up (add the CI-contract entry).
+schema_version: 1
+name: u8g2
+description: "u8g2 -- monochrome OLED/LCD graphics library with software-rendered fonts and shapes."
+tier: B
+version: "2.36.5"
+license: BSD-2-Clause
+
+integration:
+  zephyr:
+    module: u8g2
+    kconfig:
+      - CONFIG_ALP_U8G2_SW_BLIT=y
+      - CONFIG_ALP_SDK_U8G2_VENDORED_CORE=y
+    hw_backends:
+      class: graphics
+      upstream_source: "github.com/olikraus/u8g2"
+      accelerators:
+        - class: gpu_2d
+          priority:
+            - { requires_cap: dma2d,   backend: dma2d, kconfig: CONFIG_ALP_U8G2_DMA2D=y }
+            - { requires_cap: tmu_fac, backend: tmu,   kconfig: CONFIG_ALP_U8G2_TMU=y }
+        - class: dma
+          priority:
+            - { backend: spi_i2c_dma_push, kconfig: CONFIG_ALP_U8G2_BUS_DMA=y }
+      sw_fallback:
+        required: true
+        kconfig: CONFIG_ALP_U8G2_SW_BLIT=y
+
+      verification:
+        hil_silicon: untested        # paper-correct only until v1.0 verification sweep.
+        smoke_tests: build_only

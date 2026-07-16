@@ -69,10 +69,16 @@ topology:
     toolchain: poky-glibc
   m55_hp:
     app: alp-stock-shim
-    board: alp_e1m_aen601_m55_hp        # Zephyr board target
+    # Qualified Zephyr board target (multi-cluster Ensemble die) -- see the
+    # E1M-AEN801 topology for the full rationale (#720).  Matches the
+    # generated board tree zephyr/boards/alp/e1m_aen601_m55_hp/...
+    board: alp_e1m_aen601_m55_hp/ae612fa0e5597ls0/rtss_hp
     toolchain: arm-zephyr-eabi
   m55_he:
     app: alp-stock-shim
+    # Bare: no generated board tree for the HE cluster yet, so there is
+    # nothing to qualify against.  Qualify (like m55_hp above) once
+    # zephyr/boards/alp/e1m_aen601_m55_he exists.
     board: alp_e1m_aen601_m55_he        # Zephyr board target
     toolchain: arm-zephyr-eabi
 

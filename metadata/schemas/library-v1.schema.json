@@ -32,8 +32,8 @@
     },
     "license": {
       "type": "string",
-      "enum": ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "Zlib", "MIT-0"],
-      "description": "SPDX licence identifier of the upstream library.  Validated against this permissive allowlist; a GPL-family or proprietary licence is rejected so a copyleft surprise cannot ride in through a `libraries:` selection (ADR 0018 non-goal).  Extending this allowlist is a deliberate human decision (legal review), not a metadata edit -- add the id here AND in metadata/libraries/README.md's allowlist rationale in the same change."
+      "enum": ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "Zlib", "MIT-0", "BSL-1.0", "CC0-1.0"],
+      "description": "SPDX licence identifier of the upstream library.  Validated against this permissive allowlist; a GPL-family or proprietary licence is rejected so a copyleft surprise cannot ride in through a `libraries:` selection (ADR 0018 non-goal).  Extending this allowlist is a deliberate human decision (legal review), not a metadata edit -- add the id here AND in metadata/libraries/README.md's allowlist rationale in the same change.  BSL-1.0 (Boost licence) and CC0-1.0 (public-domain-equivalent) were added by the #610 WS6-c maintainer legal-review decision, which covers two permissive curated-library manifests; that same review dropped two other curated tokens for carrying non-permissive copyleft/source-available licences instead of admitting those into this allowlist."
     },
     "requires": {
       "type": "object",
@@ -125,6 +125,103 @@
                   "type": "string",
                   "pattern": "^modules/lib/[A-Za-z0-9_./+-]+$",
                   "description": "Workspace path where west should place the project."
+                }
+              }
+            },
+            "hw_backends": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Per-library hardware-accelerator binding model (WS6-c #610 §6).  Folded VERBATIM from the retired metadata/library-profiles/<token>/hw-backends.yaml, this is the single source of truth for which accelerator backend a library binds to on a given SoM and its pure-software floor.  The resolver (`scripts/alp_project.py --emit zephyr-conf`, via `_emit_library_hw_backends`) walks each accelerator class top-down, picks the FIRST implemented `priority:` entry whose `silicon`/`soc_family`/`requires_cap` matchers all satisfy the active SoM, and emits its `kconfig:` line; the `sw_fallback:` knob is the always-available SW floor emitted next to the library-enable line.  `status: planned`/`stub` entries are roadmap metadata and are never emitted as active build claims.",
+              "properties": {
+                "class": {
+                  "type": "string",
+                  "description": "Coarse library class descriptor (e.g. `graphics`, `DSP / math`, `serialization`).  Documentation only; not emitted."
+                },
+                "upstream_source": {
+                  "type": "string",
+                  "description": "Where the upstream library ships from (e.g. its Zephyr west.yml entry).  Documentation only; not emitted."
+                },
+                "accelerators": {
+                  "type": "array",
+                  "description": "Ordered accelerator classes.  For each, the resolver emits the FIRST implemented matching priority entry's `kconfig:` line.  An empty array means the library is pure-SW (only `sw_fallback:` applies).",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["class", "priority"],
+                    "properties": {
+                      "class": {
+                        "type": "string",
+                        "description": "Accelerator class the priority list resolves within (e.g. `gpu_2d`, `simd`, `cordic`, `fft`, `dma`, `crypto`)."
+                      },
+                      "priority": {
+                        "type": "array",
+                        "description": "Candidate backends in preference order.  First implemented entry whose matchers all satisfy the active SoM wins.",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["backend", "kconfig"],
+                          "properties": {
+                            "requires_cap": {
+                              "type": "string",
+                              "description": "Capability key (from the merged SoC+SoM `capabilities:`) that must resolve truthy for this entry to match."
+                            },
+                            "silicon": {
+                              "type": "string",
+                              "description": "Exact `silicon:` ref (e.g. `alif:ensemble:e8`) this entry is pinned to; must equal the SoM's silicon ref to match."
+                            },
+                            "soc_family": {
+                              "type": "string",
+                              "description": "SoC family token (e.g. `alif_ensemble`, `renesas_rzv2n`) this entry applies to; must equal the SoM's family token to match."
+                            },
+                            "backend": {
+                              "type": "string",
+                              "description": "Backend identifier this entry selects.  Documentation/traceability; not emitted."
+                            },
+                            "kconfig": {
+                              "type": "string",
+                              "pattern": "^CONFIG_[A-Z0-9_]+=[A-Za-z0-9_\"-]+$",
+                              "description": "Kconfig assignment emitted when this entry is the first implemented match for its class."
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["implemented", "planned", "stub"],
+                              "description": "Roadmap state.  `planned`/`stub` entries are retained for traceability but never emitted as active build claims; absent means `implemented`."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "sw_fallback": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "The always-available pure-software floor for the library.",
+                  "properties": {
+                    "required": {
+                      "type": "boolean",
+                      "description": "Whether a SW floor is mandatory (true for every curated library)."
+                    },
+                    "kconfig": {
+                      "type": "string",
+                      "description": "The SW-floor knob emitted next to the library-enable line.  A `# ...`-prefixed comment for a header-only library with no Kconfig knob."
+                    }
+                  }
+                },
+                "verification": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "Verification status of the accelerator bindings.  Documentation only; not emitted.",
+                  "properties": {
+                    "hil_silicon": {
+                      "type": "string",
+                      "description": "Hardware-in-the-loop silicon verification status."
+                    },
+                    "smoke_tests": {
+                      "type": "string",
+                      "description": "Smoke-test coverage status."
+                    }
+                  }
                 }
               }
             }

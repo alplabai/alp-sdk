@@ -153,9 +153,9 @@ void drone_sensors_run_slow_loop(drone_telemetry_t *telem)
 		}
 
 		/* GPS NMEA -- read one line, parse later.  Real NMEA
-         * decode lives in tinygsm or libnmea; the demo just
-         * surfaces the line count + sat count so customers see
-         * the path is live. */
+         * decode lives in an app-level library (e.g. libnmea); the
+         * demo just surfaces the line count + sat count so
+         * customers see the path is live. */
 		if (s_gps_uart != NULL) {
 			size_t got = 0;
 			if (ublox_neo_m9n_read_nmea_line(&s_gps,

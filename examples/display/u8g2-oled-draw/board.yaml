@@ -8,6 +8,10 @@
 # carries NO panel peripheral: no i2c/spi, no chips entry. Swapping
 # in a real OLED means adding `peripherals: [i2c]` (or `spi`) here
 # and a `chips: [ssd1306]` entry -- see README.md "HW swap".
+libraries:
+  - name: u8g2
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -24,8 +28,6 @@ cores:
     # separate `default y` fallback-capability marker, true for every
     # build regardless of this slice -- it does NOT gate compiled
     # sources; see zephyr/CMakeLists.txt for why.)
-    libraries:
-      - u8g2
     peripherals: []
 
 diagnostics:

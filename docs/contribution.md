@@ -37,7 +37,7 @@ signatures), if you have one.
 4. Run the full local matrix before opening a PR:
    ```bash
    bash scripts/bootstrap.sh                    # one-time fresh-clone setup
-   export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+   export ZEPHYR_BASE="$PWD/../zephyr"
    bash scripts/test-all.sh                     # ctest + twister + format + Doxygen
    ```
    `test-all.sh` accepts `--quick` (skip twister + Doxygen),

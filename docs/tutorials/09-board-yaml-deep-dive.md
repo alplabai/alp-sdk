@@ -300,20 +300,26 @@ and runtime hand-off (`wpa-supplicant`, BlueZ, MQTT/security
 kernel modules and firmware.  TLS pinning lives in application code
 -- see Tutorial [11: MQTT-TLS publish](11-mqtt-tls-publish.md).
 
-### `cores.<id>.libraries`
+### `libraries` (top-level, `{name, cores?}`)
 
 ```yaml
+libraries:
+  - name: etl                 # project-wide (no cores: -> every core)
+  - name: fmt
+    cores: [m55_hp]           # scoped to one core
+  - name: lvgl
+    cores: [m55_hp]
+
 cores:
   m55_hp:
     app: ./src
-    libraries:
-      - etl
-      - fmt
-      - lvgl
 ```
 
-Per-core under v2 -- different slices can pull in different
-library sets (lvgl on the UI core, cmsis_dsp on the DSP core).
+Curated libraries are declared once, at the top level, as a single
+list of `{name, cores?}` objects: omit `cores:` for a project-wide
+selection, or list core ids to scope a library to specific slices
+(lvgl on the UI core, cmsis-dsp on the DSP core).  A bare name is
+shorthand for a project-wide `{name}`.
 User-facing libraries the SDK threads through to the build.
 Apps use these through their **native API** -- no
 `<alp/...>` wrapping.  Allowed values (with their natural
@@ -358,7 +364,7 @@ cores:
 Loader rules: exactly-one of `kconfig`/`profile`, names globally
 unique across every core's `extra_libraries:`, no collisions with
 the curated `libraries:` enum, and `profile:` paths must resolve
-to a real file.  See `docs/board-config.md` §`extra_libraries:`
+to a real file.  See `docs/board-config-schema.md` §`extra_libraries:`
 for the full reference + the cross-field validator pass.
 
 ### `chips` (top-level, opt-in chip drivers)
@@ -500,11 +506,16 @@ populated:
 # + devicetree overlays; see the `### board` section above
 # for the contract.  board.yaml itself stays declarative.
 
+libraries:
+  - name: lvgl
+    cores: [m55_hp]
+  - name: mbedtls
+    cores: [m55_hp]
+
 cores:
   m55_hp:
     app: ./src        # os: omitted -- M-cores default to zephyr per topology
     peripherals: [i2c, spi, gpio]
-    libraries:   [lvgl, mbedtls]
     inference:   { default_arena_kib: 256 }   # arena tuning only
     iot:
       wifi: true
@@ -548,7 +559,7 @@ orchestrator consistency error.
 
 ## See also
 
-- [`docs/board-config.md`](../board-config.md) -- the schema
+- [`docs/board-config-schema.md`](../board-config-schema.md) -- the schema
   reference (this tutorial is the worked-example companion).
 - [`scripts/validate_board_yaml.py`](../../scripts/validate_board_yaml.py)
   -- the customer-side linter.

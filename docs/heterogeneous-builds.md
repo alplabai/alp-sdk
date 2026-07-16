@@ -87,7 +87,7 @@ split is opt-in per project.
 
 ## 4. The `cores:` block, walked through
 
-Here's a complete V2N `board.yaml` v2:
+Here's a complete V2N `board.yaml`:
 
 ```yaml
 som:
@@ -95,17 +95,24 @@ som:
   hw_rev: r1
 
 preset: e1m-x-evk
+
+libraries:
+  - name: mbedtls
+    cores: [a55_cluster]
+  - name: nlohmann-json
+    cores: [a55_cluster]
+  - name: cmsis-dsp
+    cores: [m33_sm]
+
 cores:
   a55_cluster:
     app: ./linux         # os: omitted -- A-cores default to yocto per SoM topology
     image: alp-image-edge
     peripherals: [ethernet, usb, emmc]
-    libraries:   [mbedtls, nlohmann_json]
     iot:         { wifi: true, mqtt: true }
   m33_sm:
     app: ./m33_sm        # os: omitted -- M-cores default to zephyr per SoM topology
     peripherals: [adc, pwm, i2c, gpio]
-    libraries:   [cmsis_dsp]
     inference:   { default_arena_kib: 64 }
 
 ipc:
@@ -347,6 +354,32 @@ enforces for the manifest above.  Validate a real plan with:
 ```bash
 python3 scripts/check_build_plan.py --plan build-plan.json
 ```
+
+### Build receipts (`build-receipt-v1`)
+
+A **build receipt** is deterministic provenance for a release build: given
+the same board.yaml, build-plan, and produced images, `scripts/build_receipt.py`
+composes the same receipt byte-for-byte — no wall-clock timestamp, and every
+path is stored repo-relative so the receipt doesn't change just because it
+was built from a different checkout location. It's a pure composer over
+inputs that already exist (the build-plan, `board.yaml`, and each core's
+output image), not a new build step.
+
+The top-level fields:
+
+- `source` — the SDK's git revision and whether the tree was dirty.
+- `config` — the resolved `boardYaml` path + its digest, the `sku`, and the
+  build-plan's digest (plus the lockfile digest, if supplied).
+- `toolchain` — the toolchain identity recorded by the build-plan.
+- `images` — one entry per core: its build path, sha256, and size in bytes.
+- `provenance` — placeholders (`sbomRef`, `attestationRef`) for later slices.
+
+Its shape is pinned by
+[`metadata/schemas/build-receipt-v1.schema.json`](../metadata/schemas/build-receipt-v1.schema.json);
+`scripts/check_build_receipt.py` validates that schema stays closed and
+well-formed. Wiring a receipt into `release.yml` and populating the SBOM /
+attestation refs are later #610 §7 slices — this slice only pins the shape
+and the composer.
 
 ### Iterating on one slice
 

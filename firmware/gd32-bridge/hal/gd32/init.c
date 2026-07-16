@@ -107,8 +107,14 @@
  *                               validates completeness + ordering
  *                               rules (FFT terminal, WINDOW preceding
  *                               FFT) and stores the binding on both
- *                               sides; runtime FFT/FAC dispatch inside
- *                               stream_read follows in a later commit.
+ *                               sides.  Runtime dispatch (#496) now
+ *                               LANDED: a base-level pump routes bound
+ *                               FIR/IIR chains through the FAC (filtered
+ *                               STREAM_READ) and FFT chains through the
+ *                               FFT block (CMD_ADC_SPECTRUM_READ; a plain
+ *                               STREAM_READ answers NOSUPPORT).  One FAC
+ *                               + one FFT block -> one filter + one FFT
+ *                               stream at a time.
  *
  * Each follow-up commit replaces ONE hook's stub body with a real
  * implementation and updates this header comment + the CHANGELOG.
@@ -347,7 +353,9 @@ void bridge_hw_init(void)
 	(void)adc_periph_init(ADC2);
 	(void)adc_periph_init(ADC3);
 	for (size_t i = 0; i < ADC_CHANNEL_MAP_COUNT; ++i) {
-		adc_sample_cycles_cache[i] = ADC_DEFAULT_SAMPLE_CYCLES;
+		adc_sample_cycles_cache[i]    = ADC_DEFAULT_SAMPLE_CYCLES;
+		adc_resolution_bits_cache[i]  = ADC_RES_BITS_DEFAULT;
+		adc_oversample_ratio_cache[i] = 1u; /* no oversampling */
 	}
 
 	/* Quadrature encoder bring-up: TIMER1..4 host the four E1M
@@ -369,9 +377,19 @@ void bridge_hw_init(void)
  * PMIC.  When a future HW rev mirrors the fault nets onto GD32
  * inputs, this hook samples them and updates the byte returned by
  * bridge_hw_da9292_status_cached(). */
+/* Base-level DSP pump (#496): drains each bound FIR/IIR stream's raw
+ * samples through the FAC into its processed ring.  Runs here, off the
+ * main WFI loop -- never in the CS-EXTI stream_read path. */
+extern void bridge_hw_dsp_pump(void);
+/* Background OTA slot-erase pump (#770): advances a BEGIN-armed erase one
+ * page-region per tick so BEGIN never blocks the SPI reply inline.  No-op
+ * in the OTA-inert build. */
+extern void ota_erase_tick(void);
+
 void bridge_hw_tick(void)
 {
-	/* No-op on this HW rev (nothing to sample). */
+	bridge_hw_dsp_pump();
+	ota_erase_tick();
 }
 
 /* ----------------------------------------------------------------- */

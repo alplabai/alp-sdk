@@ -9,6 +9,10 @@
 # is empty, so `src/main.c` does not `#include` any coreMQTT-SN
 # header.  It instead implements the identical OASIS MQTT-SN v1.2
 # PUBLISH wire format by hand so the round-trip still builds and runs.
+libraries:
+  - name: coremqtt-sn
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -17,8 +21,6 @@ preset: e1m-evk
 cores:
   m55_hp:
     app: ./src
-    libraries:
-      - coremqtt_sn
     # No transport, no peripheral: this is a buffer-only serializer
     # round trip, the same shape a customer would unit-test the real
     # library's encoder/decoder with before wiring it to a UDP/BLE/

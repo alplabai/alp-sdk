@@ -231,4 +231,8 @@ jobs:
           out="$(LD_LIBRARY_PATH="$RUNNER_TEMP/alp-prefix/lib" \
               ./build/consumer-findpkg/find_package_smoke)"
           echo "$out"
-          echo "$out" | grep -qx "alp-sdk version: 0.9.0"
+          # Derive the expected version from the single source of truth so
+          # this smoke check never goes stale on a release bump.
+          ver="$(sed -n 's/^version:[[:space:]]*//p' metadata/sdk_version.yaml | head -1 | awk '{print $1}')"
+          echo "expected: alp-sdk version: $ver"
+          echo "$out" | grep -qx "alp-sdk version: $ver"

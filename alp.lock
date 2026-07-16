@@ -1,0 +1,391 @@
+{
+  "digests": {
+    "metadata": "sha256:85465613e4c35677bd2ae6ffb036256c2782cc044efb98ed2afe3548e2c605df",
+    "schemas": "sha256:cd8eb4313ed437d2d76aad751e194301c37461d486d260a933769c4cac500200"
+  },
+  "generatedBy": "west alp-lock",
+  "libraries": [
+    {
+      "license": "Apache-2.0",
+      "name": "aws-iot",
+      "revision": "v3.1.5",
+      "version": "v3.1.5"
+    },
+    {
+      "license": "MIT",
+      "name": "azure-iot",
+      "revision": "1.5.0",
+      "version": "1.5.0"
+    },
+    {
+      "license": "MIT",
+      "name": "bearssl",
+      "revision": null,
+      "version": "master"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "canopennode",
+      "revision": "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd",
+      "version": "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd"
+    },
+    {
+      "license": "BSL-1.0",
+      "name": "catch2",
+      "revision": null,
+      "version": "3.7.1"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "cmsis-dsp",
+      "revision": null,
+      "version": "97512610ec92058f0119450b9e743eeb7e95b5c8"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "cmsis-nn",
+      "revision": null,
+      "version": "d20117c9e88cf9018d6fa06744dddac700c3e3a1"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "coap",
+      "revision": null,
+      "version": "4.4.0"
+    },
+    {
+      "license": "MIT",
+      "name": "coremqtt-sn",
+      "revision": null,
+      "version": "v1.0.1"
+    },
+    {
+      "license": "MIT",
+      "name": "doctest",
+      "revision": null,
+      "version": "2.4.11"
+    },
+    {
+      "license": "MIT",
+      "name": "etl",
+      "revision": null,
+      "version": "20.39.4"
+    },
+    {
+      "license": "MIT",
+      "name": "fmt",
+      "revision": null,
+      "version": "11.0.2"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "gfx-compat",
+      "revision": null,
+      "version": "1a7b16034ec123e92c25e9ec13fb3508e7041a23"
+    },
+    {
+      "license": "MIT",
+      "name": "jsmn",
+      "revision": null,
+      "version": "1.1.0"
+    },
+    {
+      "license": "MIT",
+      "name": "libwebsockets",
+      "revision": null,
+      "version": "v4.3.4"
+    },
+    {
+      "license": "BSD-3-Clause",
+      "name": "littlefs",
+      "revision": null,
+      "version": "2.11"
+    },
+    {
+      "license": "MIT",
+      "name": "lvgl",
+      "revision": null,
+      "version": "9.5.0"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "lwm2m",
+      "revision": null,
+      "version": "4.4.0"
+    },
+    {
+      "license": "MIT",
+      "name": "madgwick-ahrs",
+      "revision": null,
+      "version": "unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "mbedtls",
+      "revision": null,
+      "version": "4.1.0"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "micro-ros",
+      "revision": null,
+      "version": "humble"
+    },
+    {
+      "license": "MIT",
+      "name": "micropython",
+      "revision": "v1.24.1",
+      "version": "v1.24.1"
+    },
+    {
+      "license": "CC0-1.0",
+      "name": "minimp3",
+      "revision": null,
+      "version": "master"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "modbus",
+      "revision": null,
+      "version": "4.4.0"
+    },
+    {
+      "license": "Zlib",
+      "name": "nanopb",
+      "revision": null,
+      "version": "0.4.9.1"
+    },
+    {
+      "license": "MIT",
+      "name": "nlohmann-json",
+      "revision": null,
+      "version": "3.11.3"
+    },
+    {
+      "license": "BSD-3-Clause",
+      "name": "opus",
+      "revision": null,
+      "version": "v1.5.2"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "pid",
+      "revision": null,
+      "version": "0.9.0"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "ros2",
+      "revision": null,
+      "version": "humble"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "tflite-micro",
+      "revision": null,
+      "version": "fcc760af130f3a595b5802cdebcc77461e54f382"
+    },
+    {
+      "license": "BSD-2-Clause",
+      "name": "u8g2",
+      "revision": null,
+      "version": "2.36.5"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "zcbor",
+      "revision": null,
+      "version": "0.9.1"
+    }
+  ],
+  "lockVersion": 1,
+  "python": {
+    "requirements": [
+      {
+        "hash": null,
+        "name": "cbor2",
+        "version": null
+      }
+    ]
+  },
+  "resolution": {
+    "board": null,
+    "groupsEnabled": []
+  },
+  "sdk": {
+    "revision": "a6354dad7fc397046e046b832778e6c33975e0d5",
+    "version": "0.10.1"
+  },
+  "west": {
+    "groupFilter": [
+      "-extras-lwrb-nanopb",
+      "-extras-tier1",
+      "-extras-cpp",
+      "-vendor-sdks"
+    ],
+    "projects": [
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "BearSSL",
+        "revision": "master"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "Catch2",
+        "revision": "v3.7.1"
+      },
+      {
+        "groups": [
+          "vendor-sdks"
+        ],
+        "name": "alif_dave2d-driver",
+        "revision": "d667a8e47f13e2f39bc724d66def5230827b2808"
+      },
+      {
+        "groups": [
+          "vendor-sdks"
+        ],
+        "name": "alif_image-processing-lib",
+        "revision": "b4444c0504be3a1eed4a0655c9a95fe343706dcb"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "coreMQTT-SN",
+        "revision": "v1.0.1"
+      },
+      {
+        "groups": [
+          "extras-cpp"
+        ],
+        "name": "doctest",
+        "revision": "v2.4.11"
+      },
+      {
+        "groups": [
+          "extras-cpp"
+        ],
+        "name": "etl",
+        "revision": "20.39.4"
+      },
+      {
+        "groups": [
+          "extras-cpp"
+        ],
+        "name": "fmt",
+        "revision": "11.0.2"
+      },
+      {
+        "groups": [],
+        "name": "hal_alif",
+        "revision": "v2.2.0"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "jsmn",
+        "revision": "v1.1.0"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "libcoap",
+        "revision": "v4.3.5"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "libmodbus",
+        "revision": "v3.1.10"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "libwebsockets",
+        "revision": "v4.3.4"
+      },
+      {
+        "groups": [
+          "extras-lwrb-nanopb"
+        ],
+        "name": "lwrb",
+        "revision": "v3.2.0"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "madgwick_ahrs",
+        "revision": "main"
+      },
+      {
+        "groups": [
+          "vendor-sdks"
+        ],
+        "name": "mcuxsdk-manifests",
+        "revision": "v26.03.00"
+      },
+      {
+        "groups": [],
+        "name": "micro_ros_zephyr_module",
+        "revision": "cfbddc5e4334317a1036e883ce8f6af12b1da66a"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "minimp3",
+        "revision": "main"
+      },
+      {
+        "groups": [
+          "extras-lwrb-nanopb"
+        ],
+        "name": "nanopb",
+        "revision": "nanopb-0.4.9"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "opus",
+        "revision": "v1.5.2"
+      },
+      {
+        "groups": [
+          "vendor-sdks"
+        ],
+        "name": "rzv-fsp",
+        "revision": "v3.1.0"
+      },
+      {
+        "groups": [
+          "vendor-sdks"
+        ],
+        "name": "sdk-alif",
+        "revision": "zas-v2.0.0-rc1"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "u8g2",
+        "revision": "2.36.5"
+      },
+      {
+        "groups": [],
+        "name": "zephyr",
+        "revision": "v4.4.0"
+      }
+    ]
+  }
+}

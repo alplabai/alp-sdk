@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/quality-tasks-v1.schema.json",
+  "title": "ALP Quality Task Registry v1",
+  "description": "Validates metadata/quality-tasks-v1.json -- the single source of truth for the SDK's quality tasks (which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles run it). scripts/check_quality_registry.py validates against this schema AND asserts the check-script set equals scripts/check_*.py on disk. Stability: schemaVersion 1 is additive-only; a breaking change ships as schemaVersion 2.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "description", "tasks"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "description": { "type": "string" },
+    "tasks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/task" },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "runner", "gate", "profiles", "output"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "description": { "type": "string" },
+        "runner": { "enum": ["check-script", "shell", "twister", "cmake", "build"] },
+        "script": { "type": "string", "pattern": "^scripts/check_[a-z0-9_]+\\.py$" },
+        "command": { "type": "string" },
+        "gate": { "type": "boolean" },
+        "profiles": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "enum": ["quick", "pr", "full", "release"] }
+        },
+        "output": { "enum": ["none", "junit", "sarif", "json"] },
+        "ci": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        { "if": { "properties": { "runner": { "const": "check-script" } }, "required": ["runner"] },
+          "then": { "required": ["script"] } }
+      ]
+    }
+  }
+}

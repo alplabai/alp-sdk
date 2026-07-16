@@ -231,13 +231,6 @@
       },
       {
         "board": "e1m-evk",
-        "name": "libhelix-decode",
-        "path": "examples/audio/libhelix-decode",
-        "som": "E1M-AEN801",
-        "summary": "Demonstrates the [Helix](https://en.wikipedia.org/wiki/Helix_(codec)) fixed-point MP3 decoder workflow: MP3 frame synchronisation, header parsing, and (on ARM silicon) fixed-point PCM decode."
-      },
-      {
-        "board": "e1m-evk",
         "name": "minimp3-decode",
         "path": "examples/audio/minimp3-decode",
         "som": "E1M-AEN801",
@@ -323,13 +316,6 @@
         "path": "examples/connectivity/production-deployment",
         "som": "E1M-AEN801",
         "summary": "The v1.0 reference application for a field-deployable IoT product. Demonstrates the full manufactured -> deployed -> updated -> attested lifecycle on a single app, so customers see how the SDK's secure-boot, OTA, EEPROM-provisioning, and remote-attestation pieces fit together."
-      },
-      {
-        "board": "e1m-evk",
-        "name": "tinygsm-modem-at",
-        "path": "examples/connectivity/tinygsm-modem-at",
-        "som": "E1M-AEN801",
-        "summary": "Runs the cellular-modem AT bring-up flow [TinyGSM](https://github.com/vshymanskyy/TinyGSM) drives -- an `AT` liveness probe, then `ATI` / `AT+CGMI` / `AT+GMM` for `getModemInfo()` -- against a mock AT-transcript `Stream`, and prints the assembled modem info. No real UART or cellular modem required."
       },
       {
         "board": "e1m-evk",
@@ -865,8 +851,16 @@
   },
   "gates": [
     {
+      "purpose": "Fail if any repo board.yaml has an outstanding schema migration.",
+      "script": "scripts/check_board_schema_version.py"
+    },
+    {
       "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json).",
       "script": "scripts/check_build_plan.py"
+    },
+    {
+      "purpose": "Validate the build-receipt-v1 schema is well-formed (#610 §7).",
+      "script": "scripts/check_build_receipt.py"
     },
     {
       "purpose": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
@@ -925,6 +919,10 @@
       "script": "scripts/check_inference_backend_parity.py"
     },
     {
+      "purpose": "Assert the library alias table covers every curated token and resolves to real manifests (WS6-c #610 §6).",
+      "script": "scripts/check_library_registry.py"
+    },
+    {
       "purpose": "CI gate: no hard-coded home-directory paths in executable / build files.",
       "script": "scripts/check_local_paths.py"
     },
@@ -943,6 +941,14 @@
     {
       "purpose": "Public/private classifier gate for the public alp-sdk repository.",
       "script": "scripts/check_public_private.py"
+    },
+    {
+      "purpose": "Keep metadata/quality-tasks-v1.json == the SDK's real quality gates.",
+      "script": "scripts/check_quality_registry.py"
+    },
+    {
+      "purpose": "CI gate: gen_sbom.py produces a valid, deterministic CycloneDX SBOM (#610 §7).",
+      "script": "scripts/check_sbom.py"
     },
     {
       "purpose": "Validate SoM-release bundle manifests against the public metadata/schemas/som-release-bundle-v1.schema.json contract.",
@@ -1568,7 +1574,7 @@
         },
         "m55_hp": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen401_m55_hp",
+          "board": "alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }
@@ -1687,7 +1693,7 @@
         },
         "m55_hp": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen601_m55_hp",
+          "board": "alp_e1m_aen601_m55_hp/ae612fa0e5597ls0/rtss_hp",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }
@@ -1803,13 +1809,13 @@
         },
         "m55_he": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen801_m55_he",
+          "board": "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         },
         "m55_hp": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen801_m55_hp",
+          "board": "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }

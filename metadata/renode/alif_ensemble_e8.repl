@@ -10,6 +10,15 @@
 // the Ethos-U NPUs, and the rest of the peripheral set are
 // deliberately absent.
 //
+// The Ethos-U NPUs are absent BY NECESSITY, not just minimalism: Renode
+// ships no functional Ethos-U model (no peripheral executes the Vela
+// command stream to real output tensors), and Arm's Ethos-U RTL + command
+// -stream format are closed, so neither a Verilator co-sim nor a faithful
+// re-model is possible.  A register-only stub would raise the "done" IRQ
+// without computing -- the firmware would read garbage output.  So the sim
+// runs inference in SOFTWARE on the M55 (TFLM); the real NPU dispatch is a
+// bench/HIL concern.  See examples/aen/aen-sim-vision/README.md (#687).
+//
 // !! VALIDATION STATUS: UNVERIFIED on a real Renode at authoring time.
 //    Every address below is sourced from alp-sdk metadata / the
 //    upstream Zephyr Alif devicetree (cited inline), but this .repl

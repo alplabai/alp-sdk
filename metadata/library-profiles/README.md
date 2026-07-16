@@ -128,7 +128,7 @@ active `CONFIG_*=y` line.
 
 - [`docs/recommended-libraries.md`](../../docs/recommended-libraries.md)
   -- the Tier 1 library list these profiles cover.
-- [`docs/board-config.md`](../../docs/board-config.md)
+- [`docs/board-config-schema.md`](../../docs/board-config-schema.md)
   -- the `board.yaml` `libraries:` section.
 - [`metadata/templates/board.yaml`](../templates/board.yaml) -- where
   consumers list which libraries to enable.

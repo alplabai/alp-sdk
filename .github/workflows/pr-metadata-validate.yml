@@ -39,6 +39,11 @@ on:
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
+      - 'west.yml'
+      - 'metadata/libraries/**'
+      - 'scripts/requirements.txt'
+      - 'scripts/alp_cli/__init__.py'
+      - 'alp.lock'
   push:
     branches: [main, dev]
     paths:
@@ -63,6 +68,11 @@ on:
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
+      - 'west.yml'
+      - 'metadata/libraries/**'
+      - 'scripts/requirements.txt'
+      - 'scripts/alp_cli/__init__.py'
+      - 'alp.lock'
   workflow_dispatch:
 
 concurrency:
@@ -342,6 +352,12 @@ jobs:
 
       - name: Gate — chip header driver-status labels match metadata
         run: python3 scripts/check_chip_header_status.py
+
+      - name: Gate — quality-task registry matches scripts/check_*.py on disk
+        run: python3 scripts/check_quality_registry.py
+
+      - name: alp.lock in sync
+        run: python3 scripts/west_commands/alp_lock.py --workspace . --check
 
       # Validate every HiL smoke spec under tests/hil/ parses against
       # its board's _runner.yaml.  Cheap host-side check (no hardware

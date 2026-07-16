@@ -347,11 +347,14 @@ def test_per_key_merge_app_overrides_topology(tmp_path: Path) -> None:
         som:
           sku: E1M-V2N101
 
+        libraries:
+          - name: cmsis-dsp
+            cores: [m33_sm]
+
         cores:
           m33_sm:
             app: ./my_custom_dir
             peripherals: [adc]
-            libraries: [cmsis_dsp]
     """
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
@@ -359,7 +362,7 @@ def test_per_key_merge_app_overrides_topology(tmp_path: Path) -> None:
     # Customer-supplied:
     assert slice_.app == "./my_custom_dir"
     assert slice_.peripherals == ["adc"]
-    assert slice_.libraries == ["cmsis_dsp"]
+    assert slice_.libraries == ["cmsis-dsp"]
     # Topology-supplied:
     assert slice_.os == "zephyr"
     assert slice_.board == "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"

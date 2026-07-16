@@ -8,7 +8,7 @@
 [![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.0-blue)](docs/zephyr-version-policy.md)
 
 > [!WARNING]
-> **Partially silicon-verified (`v0.9`):** every chip driver, peripheral wrapper, and
+> **Partially silicon-verified:** every chip driver, peripheral wrapper, and
 > example builds clean and passes its CI tests on `native_sim`. Two SoM
 > families now carry silicon evidence: the E1M-X V2N (GD32-bridge stack,
 > verified v0.6) and E1M-AEN801 (peripheral matrix, NPU inference, cc3501e
@@ -136,7 +136,7 @@ indexes the common ones with fixes.
 
 ## 30-second quick start
 
-A v0.9 project is **one declarative file** plus per-core app
+An Alp SDK project is **one declarative file** plus per-core app
 directories.  Drop a `board.yaml` at your app root:
 
 ```yaml
@@ -144,19 +144,25 @@ som:
   sku: E1M-V2N101      # your MPN -- the SDK ships presets for supported SoMs
   hw_rev: r1
 
-preset: e1m-x-evk      # or write your board out inline -- see docs/board-config.md
+preset: e1m-x-evk      # or write your board out inline -- see docs/board-config-schema.md
+
+libraries:                         # one top-level list, each {name, cores?}
+  - name: mbedtls
+    cores: [a55_cluster]
+  - name: nlohmann-json
+    cores: [a55_cluster]
+  - name: cmsis-dsp
+    cores: [m33_sm]
 
 cores:
   a55_cluster:
     app: ./linux                   # os: omitted -- A-cores default to yocto per topology
     image: alp-image-edge
     peripherals: [ethernet, usb, emmc]
-    libraries:   [mbedtls, nlohmann_json]
     iot:         { wifi: true, mqtt: true }
   m33_sm:
     app: ./m33                     # os: omitted -- M-cores default to zephyr per topology
     peripherals: [adc, pwm, i2c, gpio]
-    libraries:   [cmsis_dsp]
 
 ipc:
   - kind: rpmsg
@@ -215,7 +221,7 @@ to hand-edit:
 | `storage:` + `security.psa:` | DTS partitions + TF-M sysbuild (v0.6 emit) |
 | `pins: [{e1m, macro, doc}]` | None — surfaces the subset of pads each project actually uses |
 
-See [`docs/board-config.md`](docs/board-config.md) for the full
+See [`docs/board-config-schema.md`](docs/board-config-schema.md) for the full
 schema reference and
 [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md) for
 the dual-app project walk-through.
@@ -266,7 +272,7 @@ by upstream `bitbake` / OE-core constraint.  Codified in
 
 ## Status
 
-**v0.9 ramp — paper-correct, mostly pre-HIL; partial silicon-verified additions** — recorded in
+**Current ramp — paper-correct, mostly pre-HIL; partial silicon-verified additions** — recorded in
 [`metadata/sdk_version.yaml`](metadata/sdk_version.yaml).  Surface
 landed; runtime implementations fill in across point releases.  Code
 merged ≠ verified — every claim is tracked in
@@ -393,7 +399,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate/        │
-  │ (v0.9)        │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
+  │               │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
   │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
@@ -447,7 +453,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the per-library
-design, [`docs/board-config.md`](docs/board-config.md) for the
+design, [`docs/board-config-schema.md`](docs/board-config-schema.md) for the
 `board.yaml` schema reference, and
 [`docs/zephyr-version-policy.md`](docs/zephyr-version-policy.md) for
 how we pin Zephyr LTS + when bumps drive new alp-sdk releases.
@@ -523,7 +529,7 @@ manifest:
   projects:
     - name: alp-sdk
       url: https://github.com/alplabai/alp-sdk
-      revision: main        # pin to a release tag — v0.9.0 is the latest; `main` tracks the next candidate
+      revision: main        # pin to a release tag (see GitHub Releases); `main` tracks the next candidate
       path: modules/lib/alp-sdk
 ```
 
@@ -554,7 +560,7 @@ cmake -B build -DALP_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-# Zephyr (heterogeneous slice, v0.9 flow)
+# Zephyr (heterogeneous slice)
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
 west alp-build examples/multicore/rpmsg-v2n
@@ -581,7 +587,7 @@ alp-sdk/
 ```
 
 See [`docs/porting-new-som.md`](docs/porting-new-som.md) for adding a
-new E1M variant and [`docs/board-config.md`](docs/board-config.md) for
+new E1M variant and [`docs/board-config-schema.md`](docs/board-config-schema.md) for
 the `board.yaml` schema reference.
 
 ## License

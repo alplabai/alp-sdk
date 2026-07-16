@@ -11,6 +11,10 @@
 # (pure-C SW fallback is the floor; DSP/SIMD backends are selected
 # automatically when the SoM capability is present -- irrelevant here
 # since we never touch a real I2S peripheral).
+libraries:
+  - name: minimp3
+    cores: [m55_hp]
+
 som:
   sku: E1M-AEN801
 
@@ -24,8 +28,6 @@ cores:
     # stream mp3dec_decode_frame()'s PCM output to BOARD_I2S_AUDIO
     # (see examples/audio/i2s-tone).
     peripherals: []
-    libraries:
-      - minimp3
 
 diagnostics:
   log_level: info

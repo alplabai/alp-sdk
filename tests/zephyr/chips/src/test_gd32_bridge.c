@@ -264,6 +264,14 @@ ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
 	zassert_equal(gd32g553_adc_dsp_chain_open(&ctx, &chain_id), ALP_ERR_NOT_READY);
 	zassert_equal(gd32g553_adc_dsp_stage_push(&ctx, 0u, 0u, 0u, NULL, 0u), ALP_ERR_NOT_READY);
 	zassert_equal(gd32g553_adc_dsp_chain_bind(&ctx, 0u, 0u), ALP_ERR_NOT_READY);
+	/* spectrum_read (#496) honours the same NOT_READY short-circuit. */
+	uint32_t sp_seq;
+	uint16_t sp_total;
+	uint8_t  sp_got;
+	float    sp_bins[4];
+	zassert_equal(
+	    gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 1u, &sp_seq, &sp_total, &sp_got, sp_bins),
+	    ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
@@ -320,4 +328,71 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
 	zassert_equal(gd32g553_adc_dsp_chain_bind(&ctx, 0u, GD32G553_BRIDGE_ADC_STREAM_COUNT),
 	              ALP_ERR_INVAL);
 	zassert_equal(gd32g553_adc_dsp_chain_bind(&ctx, 0u, 99u), ALP_ERR_INVAL);
+
+	/* spectrum_read (#496) rejects NULL out-params, max_bins == 0, and
+	 * an out-of-range stream_id before it serialises a wire request. */
+	{
+		uint32_t seq;
+		uint16_t total;
+		uint8_t  got;
+		float    bins[4];
+		zassert_equal(gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 1u, NULL, &total, &got, bins),
+		              ALP_ERR_INVAL);
+		zassert_equal(gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 1u, &seq, &total, &got, NULL),
+		              ALP_ERR_INVAL);
+		zassert_equal(gd32g553_adc_spectrum_read(&ctx, 0u, 0u, 0u, &seq, &total, &got, bins),
+		              ALP_ERR_INVAL);
+		zassert_equal(gd32g553_adc_spectrum_read(
+		                  &ctx, GD32G553_BRIDGE_ADC_STREAM_COUNT, 0u, 1u, &seq, &total, &got, bins),
+		              ALP_ERR_INVAL);
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* #751 -- OTA protocol-minor gate                                     */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_ota_supported_gate)
+{
+	/* NULL / uninitialised are never OTA-capable. */
+	zassert_false(gd32g553_ota_supported(NULL), "NULL ctx must not be OTA-capable");
+	gd32g553_t uninit = { 0 };
+	zassert_false(gd32g553_ota_supported(&uninit), "uninitialised ctx must not be OTA-capable");
+
+	/* v0.5 peer: the chunk wire format predates the length byte, so the
+	 * host refuses -- a v0.6 host driving v0.5 firmware would otherwise
+	 * program the length byte into the image (#751). */
+	gd32g553_t v05 = { .initialised = true, .version = { .major = 0u, .minor = 5u, .patch = 0u } };
+	zassert_false(gd32g553_ota_supported(&v05), "v0.5 peer must be rejected");
+
+	/* v0.6 peer: first minor that carries the explicit chunk length. */
+	gd32g553_t v06 = { .initialised = true, .version = { .major = 0u, .minor = 6u, .patch = 0u } };
+	zassert_true(gd32g553_ota_supported(&v06), "v0.6 peer must be accepted");
+
+	/* Current host minor (>= 6) is accepted too. */
+	gd32g553_t vcur = {
+		.initialised = true,
+		.version     = { .major = 0u, .minor = GD32G553_OTA_MIN_PROTOCOL_MINOR + 3u, .patch = 0u }
+	};
+	zassert_true(gd32g553_ota_supported(&vcur), "current-minor peer must be accepted");
+}
+
+ZTEST(alp_chips, test_gd32g553_ota_ops_reject_pre_v06_peer)
+{
+	/* An initialised-but-v0.5 ctx must have its flash-touching OTA ops
+	 * short-circuit with NOSUPPORT -- BEFORE any erase/program.  The gate
+	 * sits after arg validation, so pass otherwise-valid arguments. */
+	gd32g553_t v05 = { .initialised = true, .version = { .major = 0u, .minor = 5u, .patch = 0u } };
+
+	uint16_t            chunk_max = 0u;
+	gd32g553_ota_slot_t slot      = (gd32g553_ota_slot_t)0;
+	zassert_equal(gd32g553_ota_begin(&v05, 4096u, 0xdeadbeefu, NULL, &chunk_max, &slot),
+	              ALP_ERR_NOSUPPORT,
+	              "ota_begin must refuse a v0.5 peer");
+
+	const uint8_t data[4] = { 1u, 2u, 3u, 4u };
+	uint32_t      rx      = 0u;
+	zassert_equal(gd32g553_ota_write_chunk(&v05, 0u, data, sizeof(data), &rx),
+	              ALP_ERR_NOSUPPORT,
+	              "ota_write_chunk must refuse a v0.5 peer");
 }

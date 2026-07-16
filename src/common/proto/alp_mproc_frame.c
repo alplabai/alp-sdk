@@ -15,6 +15,7 @@
 
 #include <string.h>
 
+#include "alp_checked_arith.h"
 #include "proto/alp_mproc_frame.h"
 
 static void put_u32_le(uint8_t *dst, uint32_t v)
@@ -47,16 +48,21 @@ alp_status_t alp_mproc_frame_encode(uint32_t    sequence,
 	if (payload == NULL && payload_len > 0) {
 		return ALP_ERR_INVAL;
 	}
-	if (payload_len > UINT32_MAX) {
+	uint32_t payload_len_u32;
+	if (!alp_size_to_u32(payload_len, &payload_len_u32)) {
 		return ALP_ERR_INVAL;
 	}
-	size_t framed = (size_t)ALP_MPROC_FRAME_HEADER_BYTES + payload_len;
-	if (framed > out_cap) {
+	/* Never compute header + payload_len before proving it fits: the
+	 * sum wraps for payload_len within HEADER_BYTES of SIZE_MAX, which
+	 * would turn an oversize frame into a tiny one and sail past a
+	 * plain `framed > out_cap` check straight into the memcpy below. */
+	if (!alp_size_range_valid(ALP_MPROC_FRAME_HEADER_BYTES, payload_len, out_cap)) {
 		return ALP_ERR_NOMEM;
 	}
+	size_t framed = (size_t)ALP_MPROC_FRAME_HEADER_BYTES + payload_len;
 	put_u32_le(out + 0, ALP_MPROC_FRAME_MAGIC);
 	put_u32_le(out + 4, sequence);
-	put_u32_le(out + 8, (uint32_t)payload_len);
+	put_u32_le(out + 8, payload_len_u32);
 	if (payload_len > 0) {
 		memcpy(out + ALP_MPROC_FRAME_HEADER_BYTES, payload, payload_len);
 	}
