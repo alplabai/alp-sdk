@@ -11,6 +11,17 @@ RAM console; **regcheck/staging** apps prove a driver binds + programs its
 registers (often bind-only where external wiring is HW-blocked); the rest are
 full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 
+### Cortex-A32 Linux (Yocto)
+
+Linux/Yocto userspace apps that run on the A32 cluster of the E1M-AEN801.
+Build inside a Yocto SDK environment (sourced `environment-setup-*` script)
+or let the `aen-a32-carrier-bringup` Bitbake recipe bake the binary directly
+into the `alif-tiny-image`.
+
+| Directory                                                          | What it shows                                                                        |
+|--------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| [`aen-a32-carrier-bringup`](aen-a32-carrier-bringup/)             | A32 Linux E1M-EVK carrier bring-up: i2c-dev bus scan + tcal9538 IO-expander toggle + bmi323/icm42670 IMU chip-id (runtime-detected) + gpiochip LED drive + INT read. Portable `alp_*` surface over Linux userspace ABIs. |
+
 ### Flagship + system
 
 | Directory                                          | What it shows                                                                |

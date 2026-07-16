@@ -385,11 +385,15 @@ def resolve_memory_map(
          shared across every core declared in the variant's parent
          SoC `cores[]` list.
 
+      3. SoC-level `memory_regions:` entries then override matching
+         derived regions by name and append any new fixed regions.
+         This lets a SoC file ground a partial map (for example one
+         SRAM base address) without dropping variant-derived regions
+         that still have useful size/access metadata.
+
     The returned dicts have the keys defined by the memory_region
     schema: `name`, `size_kib`, `accessible_from`, `cacheable` (plus
-    optional `base` only when the SoM preset's override declares one
-    -- silicon-default bases stay unset, so downstream emitters know
-    to use the silicon's defaults).
+    optional `base` only when metadata declares one).
 
     Returns an empty list when the silicon_variant cannot be resolved
     (e.g. NX9101's `silicon_variant: TBD`) -- callers should treat
@@ -416,15 +420,8 @@ def resolve_memory_map(
     soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
     soc_cores = [c.get("id") for c in soc_spec.get("cores", []) if c.get("id")]
 
-    regions: list[dict[str, Any]] = []
-
-    # Prefer SoC-level fixed memory_regions when present — these carry
-    # authoritative base addresses (e.g. RZ/V2N OCRAM at 0x00010000).
-    soc_memory_regions = soc_spec.get("memory_regions")
-    if soc_memory_regions:
-        return list(soc_memory_regions)
-
     # MRAM as one region (size in KiB; mram_mb -> *1024).
+    regions: list[dict[str, Any]] = []
     mram_mb = variant.get("mram_mb")
     if isinstance(mram_mb, (int, float)) and mram_mb > 0:
         regions.append({
@@ -455,6 +452,23 @@ def resolve_memory_map(
             "accessible_from": accessible,
             "cacheable": not is_tcm,
         })
+
+    # SoC-level fixed memory_regions carry authoritative facts such as
+    # base addresses (e.g. RZ/V2N OCRAM at 0x00010000).  Overlay them
+    # onto the derived variant list by name instead of replacing the
+    # whole list; E8 currently grounds only sram0's base, but storage
+    # partition validation still needs the variant-derived mram_main
+    # size while its base remains unknown.
+    soc_memory_regions = soc_spec.get("memory_regions") or []
+    if soc_memory_regions:
+        merged_by_name = {region["name"]: region for region in regions}
+        ordered_names = [region["name"] for region in regions]
+        for fixed_region in soc_memory_regions:
+            name = fixed_region["name"]
+            if name not in merged_by_name:
+                ordered_names.append(name)
+            merged_by_name[name] = fixed_region
+        return [dict(merged_by_name[name]) for name in ordered_names]
 
     return regions
 

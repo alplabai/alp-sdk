@@ -112,6 +112,11 @@
       "items": { "$ref": "#/$defs/npu" }
     },
 
+    "linux_phys_addr_bits": {
+      "type": "integer",
+      "enum": [32, 64],
+      "description": "Physical-address width of the SoC's Linux-running A-cluster; sets the reserved-memory DT #address-cells/#size-cells (bits/32). Optional; defaults to 64 when absent."
+    },
     "soc_ram_kb":  {
       "type": "integer",
       "description": "Maximum on-die SRAM in KB across all variants. Per-variant overrides go into variants[].sram_kb."

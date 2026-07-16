@@ -17,13 +17,12 @@ import sys
 import textwrap
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import REPO, V2N_HAPPY, _write_board  # noqa: E402
 
 from alp_orchestrate import (                       # noqa: E402
+    emit_dts_reservations,
     load_board_yaml,
     resolve_carve_outs,
 )
@@ -74,7 +73,13 @@ ipc:
 """
 
 
-AEN801_UNMAPPED = """
+# AEN801's mailbox controller (alif_mhuv2) is resolved -- and, unlike
+# AEN701, its E8 SoC JSON now carries a grounded per-region `base` for
+# sram0 (0x02000000, from the Alif kernel fork DTS ensemble-ex.dtsi
+# memory1@2000000, checked 2026-06-26).  So the M55-HP<->M55-HE rpmsg
+# channel RESOLVES rather than blocking (see
+# test_resolve_carve_outs_aen801_m55_ipc_resolves below).
+AEN801_M55_IPC = """
 som:
   sku: E1M-AEN801
 
@@ -148,30 +153,63 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     assert "E1M-NX9101" in entry.reason
 
 
-@pytest.mark.parametrize(
-    "body, sku",
-    [
-        (AEN701_UNMAPPED, "E1M-AEN701"),
-        (AEN801_UNMAPPED, "E1M-AEN801"),
-    ],
-)
-def test_resolve_carve_outs_blocks_on_unmapped_base(
-    tmp_path: Path, body: str, sku: str
-) -> None:
-    """AEN presets have a RESOLVED mailbox controller (alif_mhuv2), so
-    they proceed past the controller-TBD guard into the region allocator.
-    Their stock memory maps are still base-unmapped, so resolve_carve_outs
-    MUST emit a blocked carve-out rather than crash with `KeyError:
-    'base'`."""
-    path = _write_board(tmp_path, body)
+def test_resolve_carve_outs_blocks_on_unmapped_base(tmp_path: Path) -> None:
+    """AEN701 has a RESOLVED mailbox controller (alif_mhuv2), so it
+    proceeds past the controller-TBD guard into the region allocator.
+    Its E7 SoC JSON carries no `memory_regions` (unlike AEN801's
+    grounded sram0 base), so resolve_carve_outs MUST emit a blocked
+    carve-out rather than crash with `KeyError: 'base'`."""
+    path = _write_board(tmp_path, AEN701_UNMAPPED)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)        # must not raise
     assert len(resolved) == 1
     entry = resolved[0]
     assert entry.status == "blocked"
     assert entry.reason is not None
-    assert sku in entry.reason
+    assert "E1M-AEN701" in entry.reason
     assert "HW-mapped" in entry.reason
+
+
+def test_resolve_carve_outs_aen801_m55_ipc_resolves(tmp_path: Path) -> None:
+    """AEN801's E8 SoC JSON now carries a grounded per-region `base`
+    for sram0 (0x02000000, from the Alif kernel fork DTS).  The
+    M55-HP<->M55-HE rpmsg channel must RESOLVE (status='ok', base
+    allocated from sram0) rather than crash or block.
+
+    Renamed/split out of test_resolve_carve_outs_blocks_on_unmapped_base
+    when the E8 memory map was grounded; the no-crash guarantee is still
+    provided by the `resolved = resolve_carve_outs(project)` call."""
+    path = _write_board(tmp_path, AEN801_M55_IPC)
+    project = load_board_yaml(path)
+    resolved = resolve_carve_outs(project)        # must not raise
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "ok", (
+        f"AEN801 M55-HP<->M55-HE carveout should resolve after grounding "
+        f"the E8 memory bases; got status={entry.status!r}, "
+        f"reason={entry.reason!r}"
+    )
+    assert entry.base is not None
+    # Exact base: sram0 top (0x02400000) minus 64 KiB (0x10000),
+    # verified against resolve_carve_outs output for this fixture.
+    assert entry.base == 0x023F0000, (
+        f"expected sram0 top-down base 0x023F0000 (37683200); got {entry.base:#010x}"
+    )
+    assert entry.size == 64 * 1024
+
+
+def test_emit_dts_reservations_aarch32_cells(tmp_path: Path) -> None:
+    """E1M-AEN801 is AArch32 (linux_phys_addr_bits=32) so the
+    reserved-memory node must use single-cell addressing (a two-cell base+size
+    reg), matching the base ensemble-ex.dtsi #address-cells = <1>."""
+    path = _write_board(tmp_path, AEN801_M55_IPC)
+    out = emit_dts_reservations(load_board_yaml(path))
+    assert "#address-cells = <1>;" in out
+    assert "#size-cells = <1>;" in out
+    # 1-cell reg: base + size as two 32-bit words (base 0x023f0000, 64 KiB).
+    assert "reg = <0x023f0000 0x00010000>;" in out
+    # The 2-cell 4-word form must NOT appear for this AArch32 target.
+    assert "#address-cells = <2>;" not in out
 
 
 # ---------------------------------------------------------------------

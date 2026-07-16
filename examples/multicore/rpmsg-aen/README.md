@@ -1,15 +1,16 @@
 # rpmsg-aen
 
 > `[UNTESTED]` -- v0.6 structural draft.  Board.yaml + sources are
-> shape-correct, but the end-to-end RPMsg path still needs AEN801
-> bench validation.
+> shape-correct.  AEN801 (the default) resolves its RPMsg carve-out
+> from sram0 (0x02000000); the full west build is pending silicon
+> bring-up of the MHUv2 mailbox driver.
 
 Heterogeneous compute on **E1M-AEN801** (Alif Ensemble E8):
 
 - The 2-core **Cortex-A32 cluster** boots Yocto Linux from MRAM and
   runs the consumer under `linux/`.
 - The **Cortex-M55 HP** core boots from MRAM, reads the board's
-  on-board LSM6DSO IMU + BMP581 barometer, and publishes one
+  on-board BMI323 IMU + BMP581 barometer, and publishes one
   `imu_sample` event per second over `<alp/rpc.h>`.
 - The **Cortex-M55 HE** core stays at the SoM topology default
   (stock-shim Zephyr image) -- alive for future low-power offload,
@@ -17,7 +18,7 @@ Heterogeneous compute on **E1M-AEN801** (Alif Ensemble E8):
 
 ```
 examples/multicore/rpmsg-aen/
-├── board.yaml          (v2; declares a32_cluster + m55_hp + ipc)
+├── board.yaml          (AEN801 default; declares a32_cluster + m55_hp + ipc)
 ├── README.md           (this file)
 ├── CMakeLists.txt      (multi-slice project marker)
 ├── linux/              (a32_cluster's Yocto slice)
@@ -29,18 +30,16 @@ examples/multicore/rpmsg-aen/
     └── src/main.c      (producer reading sensors + publishing)
 ```
 
-## Memory Map
+## Memory map
 
-The AEN801 preset resolves the mailbox controller and derives the
-memory envelope from the E8 SoC variant.  The `alp_default_rpmsg`
-carve-out lands in `mram_main` (cacheable, accessible from all three
-cores). Spec §6.8 dictates AEN defaults to cacheable carve-outs
-because the M55 cores have caches enabled.
+The AEN801 resolves its `alp_default_rpmsg` carve-out from sram0
+(0x02000000, 4096 KiB, accessible from all three cores, cacheable).
+The 256 KiB carve-out is placed at 0x023c0000 by the top-down allocator.
 
-| Range                     | Owner                  | Notes                                                |
-|---------------------------|------------------------|------------------------------------------------------|
-| `mram_main`              | All cores              | On-die MRAM, cacheable. Holds the RPMsg carve-out.   |
-| `sram_main`              | All cores              | On-die SRAM, non-cacheable scratch.                  |
+| Range                        | Owner      | Notes                                        |
+|------------------------------|------------|----------------------------------------------|
+| `sram0` (0x02000000, 4 MiB)  | All cores  | On-die SRAM, cacheable.  Holds RPMsg carve-out. |
+| `mram_main` (base TBD)       | All cores  | On-die MRAM; base not yet grounded in e8.json. |
 
 ## Boot order
 
@@ -50,17 +49,16 @@ running on M55-HP.  RPMsg name-service handshake completes once
 the A32 has reached the Linux user-space stage and opened its
 side of `alp_default_rpmsg`.
 
-| Stage | Core         | Action                              |
+| Stage | Core         | Action                               |
 |-------|--------------|--------------------------------------|
 | 1     | m55_hp       | Reset, run Zephyr early-boot         |
 | 2     | m55_he       | Stock-shim Zephyr (idle wait)        |
 | 3     | a32_cluster  | M55-HP-driven A32 bootloader → Linux |
 | 4     | RPMsg        | Name-service handshake on both sides |
 
-(Recorded verbatim into `system-manifest.yaml` once the SoM preset
-ships the authoritative `boot_order:` block.)
-
 ## Build
+
+Default (AEN801):
 
 ```bash
 cd alp-workspace
@@ -77,6 +75,26 @@ Iterate on the M-side only:
 ```bash
 west alp-build alp-sdk/examples/multicore/rpmsg-aen --core m55_hp
 ```
+
+### Manual M55-HP build (without the orchestrator)
+
+The M55-HP slice can be built standalone using `west` from a Zephyr 4.4+
+workspace with the Zephyr SDK (`arm-zephyr-eabi`) installed:
+
+```bash
+cd ~/zephyrproject          # west workspace containing zephyr 4.4+
+ZEPHYR_TOOLCHAIN_VARIANT=zephyr \
+EXTRA_ZEPHYR_MODULES=/path/to/alp-sdk \
+west build -b 'alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp' \
+  /path/to/alp-sdk/examples/multicore/rpmsg-aen/m55_hp -p always
+```
+
+The board qualifier uses Zephyr 4.x slash format (`board/soc/variant`).  The
+build emits orphan-section warnings for `alp_backends_*`; these are benign --
+GNU ld auto-emits `__start_`/`__stop_` bracket symbols for the C-identifier-
+named sections, so all backends register correctly.  See
+`meta-alp-sdk/recipes-firmware/aen-m55-hp-fw/aen-m55-hp-fw_0.6.bb` for the
+recipe that packages the resulting ELF for remoteproc.
 
 ## Reference
 

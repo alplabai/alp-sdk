@@ -1,0 +1,220 @@
+// SPDX-License-Identifier: (GPL-2.0+)
+/*
+ * Copyright (c) 2026 Alp Lab AB -- E1M-AEN801 on the E1M-EVK carrier.
+ * Copyright (C) 2025 Alif Semiconductor (SoC dtsi + DCT defines, consumed).
+ *
+ * Alif Ensemble E8 (AE822) A32-cluster Linux carrier DTS.  The peripheral
+ * selection is transcribed from the AUTHORITATIVE routing -- the SoM E1M-pad ->
+ * Alif-instance map (metadata/e1m_modules/aen/from-alif.tsv) + the carrier
+ * E1M-pad -> board-feature map (metadata/boards/e1m-evk.yaml):
+ *
+ *   console (EVK_UART_PORT_DEBUG)  E1M_UART0 -> Alif UART5  P3_5/P3_4
+ *   sensors (EVK_I2C_BUS_SENSORS)  E1M_I2C0  -> Alif I2C2   P5_6/P5_7
+ *   disp/cam (EVK_I2C_BUS_DSI_CSI) E1M_I2C1  -> Alif I2C1   P3_7/P7_2
+ *
+ * Builds via the Alif dct-kernel flow (DTS_MACRO_FILE); validated by bake (dtb
+ * compiles for MACHINE=e1m-aen801-a32, no board).  On-bus I2C device nodes are
+ * grounded from board header (bmi323@0x68, icm42670@0x69, bmp581@0x47,
+ * ina236@0x40-0x42 + 0x49-0x4B, tcal9538@0x72).
+ */
+/dts-v1/;
+
+#include "../common/ensemble-ex.dtsi"
+#include "e1m_dct_defines.h"
+
+/ {
+	model = "ALP E1M-AEN801 on E1M-EVK (Alif Ensemble E8 / AE822)";
+	compatible = "alp,e1m-aen801-evk", "alif,ensemble";
+
+	aliases {
+		serial0 = &uart5;
+	};
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8 \
+		root=mtd:physmap-flash.0 \
+		rootfstype=cramfs ro loglevel=7";
+	};
+
+	/* Carrier fixed rails (3.3 V / 1.8 V). */
+	reg_3p3v: regulator-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-3.3V";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+	reg_1p8v: regulator-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-1.8V";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
+};
+
+/* SMP + on-die / OSPI memory, per the common DCT defines. */
+&cpu1 {
+	status = CPU1_STATUS;
+};
+
+&mem_stitch {
+	status = MEM_STITCH_STATUS;
+};
+
+&mem_hyperam {
+	status = MEM_HYPER_STATUS;
+};
+
+&mem_hyp_stitch {
+	status = MEM_HYP_STITCH_STATUS;
+};
+
+/* Console -- E1M_UART0 = Alif UART5 (P3_5 TX / P3_4 RX). */
+&uart5 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_uart5>;
+	status = UART5_STATUS;
+};
+
+/* Sensors bus -- E1M_I2C0 = Alif I2C2 (P5_6 SCL / P5_7 SDA).
+ * EVK_I2C_BUS_SENSORS: bmi323, icm42670, bmp581, ina236 x6 (0x40-0x42 + 0x49-0x4B), tcal9538. */
+&i2c2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	status = I2C2_STATUS;
+
+	/*
+	 * On-bus EVK-carrier devices (addresses from
+	 * include/alp/boards/alp_e1m_evk.h).  Nodes whose Alif-kernel
+	 * driver is absent simply don't bind -- harmless; the Linux
+	 * userspace alp_i2c (/dev/i2c-N) path is unaffected.  Confirm the
+	 * exact `compatible` strings the booted kernel binds at bench.
+	 */
+	imu_bmi323: imu@68 {
+		compatible = "bosch,bmi323";
+		reg = <0x68>;
+	};
+
+	imu_icm42670: imu@69 {
+		compatible = "invensense,icm42670p";
+		reg = <0x69>;
+	};
+
+	baro_bmp581: barometer@47 {
+		compatible = "bosch,bmp581";
+		reg = <0x47>;
+	};
+
+	pmon_3v3: power-monitor@40 {
+		compatible = "ti,ina236";
+		reg = <0x40>;
+	};
+	pmon_1v8: power-monitor@41 {
+		compatible = "ti,ina236";
+		reg = <0x41>;
+	};
+	pmon_vio: power-monitor@42 {
+		compatible = "ti,ina236";
+		reg = <0x42>;
+	};
+	pmon_vcam1: power-monitor@49 {
+		compatible = "ti,ina236";
+		reg = <0x49>;
+	};
+	pmon_5v: power-monitor@4a {
+		compatible = "ti,ina236";
+		reg = <0x4a>;
+	};
+	/* VCAM0: 0x4B post-respin (A0=SCL); pre-respin 0x48 collides with the TAS2563 broadcast. */
+	pmon_vcam0: power-monitor@4b {
+		compatible = "ti,ina236";
+		reg = <0x4b>;
+	};
+
+	ioexp_tcal9538: gpio@72 {
+		compatible = "ti,tca9538";
+		reg = <0x72>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
+};
+
+/* Display / camera control bus -- E1M_I2C1 = Alif I2C1 (P3_7 SCL / P7_2 SDA). */
+&i2c1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c1>;
+	status = I2C1_STATUS;
+};
+
+/* Pinmux groups -- pins + functions transcribed from from-alif.tsv. */
+&pinmux {
+	pinctrl_uart5: uart5grp {
+		pinmux = <
+			PIN_P3_5__UART5_TX_A	0x23
+			PIN_P3_4__UART5_RX_A	0x23
+		>;
+	};
+
+	pinctrl_i2c2: i2c2grp {
+		pinmux = <
+			PIN_P5_6__I2C2_SCL_C	0x23
+			PIN_P5_7__I2C2_SDA_C	0x23
+		>;
+	};
+
+	pinctrl_i2c1: i2c1grp {
+		pinmux = <
+			PIN_P3_7__I2C1_SCL_B	0x23
+			PIN_P7_2__I2C1_SDA_C	0x23
+		>;
+	};
+};
+
+/* AEN801 multicore: rpmsg over MHUv2 to M55-HP.
+ *
+ * Carveout -- generated from examples/multicore/rpmsg-aen/board.yaml
+ * (alp_default_rpmsg at sram0+0x1c0000, 256 KiB); do not hand-edit.
+ *
+ * MHU nodes -- transcribed verbatim from the Alif linux_alif fork
+ * (arch/arm/boot/dts/alif/ensemble/common/ensemble-ex.dtsi, 6.12+git,
+ * checked 2026-06-26):
+ *   mbox_m55_hp_mhu0_tx  reg=0x1b000000  IRQ SPI 11  (arm,mhuv2-tx)
+ *   mbox_m55_hp_mhu0_rx  reg=0x1b010000  IRQ SPI 12  (arm,mhuv2-rx)
+ * Both carry #mbox-cells = <2>; the consumer passes <channel ring_mode>.
+ *
+ * Remoteproc -- the alifsemi/linux_alif fork (6.12+git) carries NO
+ * Alif-specific remoteproc driver or DT binding; the compatible below is
+ * a PLACEHOLDER marked TODO(aen-memory-map).  Replace once Alif ships a
+ * Linux M55 remoteproc driver. */
+#include "aen801-dts-reservations.dtsi"	/* generated reserved-memory carveout */
+
+/* Enable HP-MHU0 TX + RX (grounded from ensemble-ex.dtsi; parent dtsi
+ * declares both with status = "disabled"). */
+&mbox_m55_hp_mhu0_tx {
+	status = "okay";
+};
+
+&mbox_m55_hp_mhu0_rx {
+	status = "okay";
+};
+
+/ {
+	remoteproc_m55_hp: remoteproc-m55-hp {
+		/* TODO(aen-memory-map): no Alif remoteproc driver/binding found in
+		 * alifsemi/linux_alif (6.12+git, grepped drivers/remoteproc + DT
+		 * bindings 2026-06-26); "alif,ensemble-m55-rproc" is a placeholder.
+		 * Validate and replace at bring-up once the driver lands upstream. */
+		compatible = "alif,ensemble-m55-rproc";
+		mboxes = <&mbox_m55_hp_mhu0_tx 0 0>,
+			 <&mbox_m55_hp_mhu0_rx 0 0>;
+		mbox-names = "tx", "rx";
+		memory-region = <&alp_default_rpmsg>;
+		firmware-name = "alp/E1M-AEN801/m55_hp.elf";
+		status = "okay";
+	};
+};

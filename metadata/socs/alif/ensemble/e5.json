@@ -72,6 +72,7 @@
   "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,
   "always_on_sram_kb": 4,
+  "linux_phys_addr_bits": 32,
   "peripherals": {
     "i2c": 4,
     "i2c_lp": 1,

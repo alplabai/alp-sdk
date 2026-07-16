@@ -1,4 +1,4 @@
-# board.yaml -- rpmsg-aen
+# board.yaml -- rpmsg-aen  (AEN801 default)
 #
 # Heterogeneous compute demo for E1M-AEN801 (Alif Ensemble E8).  The
 # E8 die carries a 2-core Cortex-A32 cluster plus 2 Cortex-M55 cores
@@ -18,9 +18,10 @@
 # `examples/multicore/rpmsg-v2n/` example is the canonical V2N counterpart of
 # this AEN setup.
 #
-# AEN801's SoC variant supplies the memory envelope and the SoM
-# preset supplies the mailbox controller, so the orchestrator can
-# allocate the RPMsg carve-out without app-specific SoC knowledge.
+# AEN801 uses the E8 silicon variant (AE822FA0E5597LS0) whose sram0
+# base is grounded (0x02000000); the `alp_default_rpmsg` carve-out
+# resolves from that region.  The mailbox controller is `alif_mhuv2`
+# (ARM MHUv2, bench-unverified on silicon but not TBD).
 
 libraries:
   - name: mbedtls
@@ -49,10 +50,9 @@ cores:
     peripherals: [i2c]
 
 # Cross-core RPMsg carve-out.  The orchestrator allocates from
-# E1M-AEN801's `memory_map:` -- once the user supplies authoritative
-# AEN memory-map addresses, the carve-out lands in mram_main (the
-# only region accessible from all three cores; spec §6.8 flips to
-# cacheable: true on AEN by default because the M55 cache is on).
+# E1M-AEN801's sram0 region (0x02000000, 4096 KiB, accessible from
+# all three cores; cacheable: true on AEN by default because the M55
+# cache is on).
 ipc:
   - kind: rpmsg
     endpoints: [a32_cluster, m55_hp]
