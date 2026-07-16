@@ -91,4 +91,23 @@ void xhci_init_sequence(struct xhci_op_regs *op,
                         uint64_t             cmd_ring_phys,
                         uint32_t             max_slots);
 
+/* CPU-local TCM -> system-bus global-alias map (one per M55 core: HP and HE
+ * each have their OWN ITCM/DTCM global alias window -- see xhci_local_to_global()
+ * below). Callers fill this from the active core's DT (itcm/dtcm `reg` +
+ * `global_base`), never from a hardcoded core's aliases. */
+struct xhci_tcm_map {
+	uintptr_t itcm_base;
+	uintptr_t itcm_size;
+	uint64_t  itcm_global_base;
+	uintptr_t dtcm_base;
+	uintptr_t dtcm_size;
+	uint64_t  dtcm_global_base;
+};
+
+/* Translate a CPU-local pointer (ITCM/DTCM) into the global bus alias the xHCI
+ * DMA master must be handed, per `map`. Addresses outside both TCM windows
+ * (e.g. already-global SRAM) pass through unchanged. Pure/arch-neutral so it is
+ * host-unit-testable against ANY core's map -- there is no "the" TCM alias. */
+uint64_t xhci_local_to_global(const struct xhci_tcm_map *map, const void *p);
+
 #endif /* ALP_XHCI_CORE_H */
