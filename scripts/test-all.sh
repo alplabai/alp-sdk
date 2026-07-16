@@ -485,14 +485,42 @@ EOF
     fi
 }
 
+# Single source: metadata/sdk_version.yaml declares MAJOR.MINOR.PATCH;
+# the ABI snapshot files are named vMAJOR.MINOR (docs/abi/README.md).
+# Deriving the path HERE -- instead of a hardcoded literal that some
+# past release cut forgot to bump -- is what makes it impossible for
+# this gate to keep regenerating a FROZEN historical snapshot against
+# today's headers (issue #803): the path always tracks whatever
+# metadata/sdk_version.yaml declares as current, this run and every
+# run after the next release.  Prints nothing and returns nonzero if
+# sdk_version.yaml is missing/unparsable; callers treat that as
+# "prerequisite not available" (stage SKIP), same as a missing tool.
+abi_current_snapshot() {
+    command -v python3 >/dev/null 2>&1 || return 1
+    python3 - <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path("metadata/sdk_version.yaml").read_text(encoding="utf-8")
+m = re.search(r"^version:\s*(\d+)\.(\d+)\.(\d+)\s*$", text, re.MULTILINE)
+if not m:
+    sys.exit(1)
+print(f"docs/abi/v{m.group(1)}.{m.group(2)}-snapshot.json")
+PY
+}
+
 # Main-only strict ABI gate (pr-abi-snapshot.yml triggers on main +
 # release/** only): fail if the working headers drift from the committed
-# CURRENT snapshot (v0.9; older are frozen).  This is the release-grade
-# check the `--target main` profile adds on top of the dev set.
+# CURRENT snapshot (derived from metadata/sdk_version.yaml; older
+# snapshots are frozen historical records, see docs/abi/README.md).
+# This is the release-grade check the `--target main` profile adds on
+# top of the dev set.
 stage_abi_strict() {
     command -v python3 >/dev/null 2>&1 || return 99
     [ -f scripts/abi_snapshot.py ] || return 99
-    local snap="docs/abi/v0.9-snapshot.json"
+    local snap
+    snap=$(abi_current_snapshot) || return 99
     [ -f "${snap}" ] || return 99
     if ! python3 scripts/abi_snapshot.py --diff "${snap}"; then
         echo "ABI drift vs ${snap} -- regen + commit (bump snapshot after a release)"
@@ -516,10 +544,16 @@ stage_generated_files() {
         [ -f "scripts/${g}.py" ] || continue
         python3 "scripts/${g}.py" >/dev/null 2>&1 || { echo "scripts/${g}.py failed"; return 1; }
     done
-    # ABI snapshot -- current working snapshot is v0.9 (older are frozen).
+    # ABI snapshot -- current working snapshot is derived from
+    # metadata/sdk_version.yaml (older snapshots are frozen).
     if [ -f scripts/abi_snapshot.py ]; then
-        python3 scripts/abi_snapshot.py --version v0.9 \
-            --output docs/abi/v0.9-snapshot.json >/dev/null 2>&1 || true
+        local abi_snap abi_ver
+        abi_snap=$(abi_current_snapshot) || abi_snap=""
+        if [ -n "${abi_snap}" ]; then
+            abi_ver=$(basename "${abi_snap}" -snapshot.json)
+            python3 scripts/abi_snapshot.py --version "${abi_ver}" \
+                --output "${abi_snap}" >/dev/null 2>&1 || true
+        fi
     fi
     # Ignore only the snapshot's "generated" date line, like the CI gate.
     if ! git diff --quiet --ignore-matching-lines='"generated":' -- \
