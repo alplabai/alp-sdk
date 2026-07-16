@@ -7,6 +7,45 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — ABI snapshot gate stopped regenerating the FROZEN v0.9 baseline against HEAD (#803)
+
+- `scripts/test-all.sh` hardcoded `docs/abi/v0.9-snapshot.json` as "the
+  current snapshot" in both `stage_abi_strict` and `stage_generated_files`,
+  even though `metadata/sdk_version.yaml` had moved to `0.10.1` and
+  `docs/abi/v0.10-snapshot.json` was the real current snapshot. Every local
+  run (and every PR author who ran the reproduction script) regenerated the
+  frozen v0.9 release fingerprint against today's headers, reported the
+  result as drift, and was told to commit it -- the `generated-files` stage
+  had been red for exactly this reason on every PR. Added an
+  `abi_current_snapshot()` helper that derives the path from
+  `metadata/sdk_version.yaml` (`0.10.1` -> `docs/abi/v0.10-snapshot.json`) so
+  both stages -- and the next release cut -- always target the real current
+  snapshot instead of a version literal someone forgot to bump.
+- `scripts/abi_snapshot.py --output` now refuses to write a snapshot whose
+  `--version` doesn't match `metadata/sdk_version.yaml`'s declared current
+  release, so even a caller that still names an old/frozen version by hand
+  (a forgotten-to-update CI step, a stale local script) gets a loud failure
+  instead of silently corrupting a snapshot that is supposed to be frozen.
+  This is the guard that makes the whole bug class impossible, not just this
+  occurrence of it.
+- The corruption turned out to be recursive: `docs/abi/v0.8-snapshot.json`
+  (25 commits) and `docs/abi/v0.9-snapshot.json` (24 commits) had each kept
+  drifting for as long as the hardcoded literal pointed at them, well past
+  the release that should have frozen them -- v0.8 rotted while v0.9 was
+  "current"; v0.9 rotted once v0.10 was cut. Restored `docs/abi/v0.6-`,
+  `v0.7-`, `v0.8-`, and `v0.9-snapshot.json` from their release tags
+  (`v0.6.0`, `v0.7.0`, `v0.8.0`, `v0.9.0` -- `v0.8.0` and `v0.8.1` produced
+  byte-identical fingerprints, so `v0.8` is sourced from `v0.8.0`). A frozen
+  snapshot that keeps tracking `HEAD` defeats its entire purpose per
+  `docs/abi/README.md`: it makes a real ABI regression against that release
+  invisible, because the baseline moves with the change that broke it.
+  `v0.1`/`v0.3`/`v0.5` predate the `vX.Y.Z` release-tag convention (no
+  matching git tag exists) and were left as committed rather than
+  force-restored against nothing.
+- `docs/abi/README.md` now says plainly that exactly one snapshot is current
+  at any time and every other one is frozen forever, and fills in the
+  `v0.7`-`v0.10` rows the "Versions on file" table had never gained.
+
 ### Changed — `board-config.md` split into a landing page + four references (#464)
 
 - `docs/board-config.md` had grown to ~1500 lines covering the quick
