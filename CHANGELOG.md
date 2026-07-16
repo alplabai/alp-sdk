@@ -103,6 +103,24 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   fact) contradicts this doc. They are deferred here because correcting
   them touches metadata and a public header rather than docs.
 
+### Fixed — xHCI DMA translates M55-HP TCM through the active core's DT alias (#752)
+
+- The Alif xHCI UHC driver turned CPU-local TCM pointers into the global bus
+  aliases its DMA master needs by adding a **hardcoded M55-HE offset**. The
+  M55-HP and M55-HE each own a *separate* ITCM/DTCM global alias window, so on
+  HP every translated address landed in HE's window and the xHC DMA'd against
+  memory that was not the driver's buffer. There is no "the" TCM alias.
+- New `xhci_local_to_global(map, p)` takes an explicit `struct xhci_tcm_map`
+  the caller fills from the **active** core's DT (`itcm`/`dtcm` `reg` +
+  `global_base`). ITCM and DTCM are checked as separate explicit windows rather
+  than assuming a zero base; addresses outside both (already-global SRAM, or an
+  already-translated alias) pass through unchanged; `NULL` is rejected rather
+  than translated (every known map has `itcm_base == 0`, so `NULL` would
+  otherwise alias into a plausible-looking global ITCM address).
+- The helper is pure and arch-neutral, so it host-unit-tests against any core's
+  map — `tests/unit/xhci_core` covers the HP and HE maps, the pass-through path
+  and the `NULL` rejection.
+
 ### Fixed — Alif PDM FIR coefficient bank written through `sys_write32` (#758)
 
 - `pdm_channel_config()` stored the FIR coefficients into the peripheral's
