@@ -37,10 +37,7 @@
         "name": "aen-a32-carrier-bringup",
         "path": "examples/aen/aen-a32-carrier-bringup",
         "som": "E1M-AEN801",
-        "summary": "Bring-up smoke test for the **E1M-EVK** carrier peripherals, run from a Linux/Yocto user-space app on the **E1M-AEN801 Cortex-A32**. It walks the portable `alp_*` surface over the Linux userspace ABIs:",
-        "supported_boards": [
-          "e1m-evk"
-        ]
+        "summary": "Bring-up smoke test for the **E1M-EVK** carrier peripherals, run from a Linux/Yocto user-space app on the **E1M-AEN801 Cortex-A32**. It walks the portable `alp_*` surface over the Linux userspace ABIs:"
       },
       {
         "board": "e1m-evk",

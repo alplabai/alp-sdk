@@ -54,15 +54,15 @@
 static int g_pass;
 static int g_fail;
 
-#define STEP_OK(msg)                                                                               \
-	do {                                                                                           \
-		printf("[ OK ] %s\n", (msg));                                                              \
-		g_pass++;                                                                                  \
+#define STEP_OK(msg) \
+	do { \
+		printf("[ OK ] %s\n", (msg)); \
+		g_pass++; \
 	} while (0)
-#define STEP_FAIL(msg)                                                                             \
-	do {                                                                                           \
-		printf("[FAIL] %s\n", (msg));                                                              \
-		g_fail++;                                                                                  \
+#define STEP_FAIL(msg) \
+	do { \
+		printf("[FAIL] %s\n", (msg)); \
+		g_fail++; \
 	} while (0)
 
 static void bus_scan(alp_i2c_t *bus)

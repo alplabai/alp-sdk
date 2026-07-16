@@ -12,9 +12,13 @@
 som:
   sku: E1M-AEN801
 
+# No `supported_boards:` — it defaults to the single `preset:` above, which
+# is exactly this app's scope.  Spelling it out would be a no-op that also
+# demands a Twister scenario per entry, and Twister is Zephyr-only: this app
+# is Linux/Yocto A32 userspace built by CMake against the Yocto SDK, so it has
+# no Zephyr build to scenario-ize.  Every other Linux-side example (the v2n-m1-*
+# and aen-* Yocto apps) omits it for the same reason.
 preset: e1m-evk
-supported_boards:
-  - e1m-evk
 
 # E1M pads this app uses (subset of the EVK preset's e1m_routes:).
 pins:
