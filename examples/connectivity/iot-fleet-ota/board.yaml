@@ -73,7 +73,6 @@ boot:
     algorithm: ecdsa_p256
     key_file:  keys/prod_ecdsa_p256.pub.pem
   swap_algorithm: scratch
-  anti_rollback:  false
 
 # ----------------------------------------------------------------
 # OTA (project-wide, board.yaml v0.6 `ota:` block).

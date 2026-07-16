@@ -7,10 +7,11 @@
 # into a sysbuild.conf overlay carrying:
 #
 #   SB_CONFIG_BOOTLOADER_MCUBOOT=y
-#   SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256=y
-#   SB_CONFIG_BOOT_PRIMARY_PARTITION_SIZE=<bytes>
-#   SB_CONFIG_BOOT_SECONDARY_PARTITION_SIZE=<bytes>
-#   SB_CONFIG_MCUBOOT_MODE_SWAP_USING_SCRATCH=y   (or _MOVE / OVERWRITE)
+#   SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y
+#   SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y   (or _USING_MOVE / _OVERWRITE_ONLY)
+#
+# (No slot/scratch-size symbols -- MCUboot takes slot geometry from
+# the board DT partitions, not from a sysbuild Kconfig; see issue #807.)
 #
 # This spec asserts those CONFIG_* lines actually reach real silicon:
 # MCUboot must be the first boot stage on the device's serial output,

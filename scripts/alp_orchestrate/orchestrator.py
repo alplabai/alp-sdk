@@ -27,7 +27,8 @@ from .carveout import resolve_carve_outs
 from .manifest import _helper_mcus, emit_system_manifest
 from .models import BoardProject, OrchestratorError, Slice, SystemManifest
 from .paths import REPO
-from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
+from .secure import (emit_sysbuild_conf, emit_tfm_sysbuild_conf,
+                      sysbuild_family_base_conf)
 
 
 # metadata/sdk_version.yaml is the single source of the SDK's own
@@ -560,7 +561,20 @@ def _slice_command(
                 # look for the overlay under the application's source dir.
                 sb_conf = (Path(slice_.build_dir).parent
                            / "alp_sysbuild.conf").resolve()
-                defines.append(f"-DSB_CONF_FILE={sb_conf}")
+                # LAYER, don't replace: SB_CONF_FILE accepts a `;`-joined
+                # list, and sysbuild merges every listed file in order
+                # (later files win on a repeated symbol).  When the SoM
+                # family ships a curated zephyr/sysbuild/<family>/
+                # sysbuild.conf, put it FIRST so the customer's `boot:`
+                # overlay lands as deltas on top of the curated base
+                # instead of forking family boot policy into two
+                # divergent places (issue #807).
+                family_base = sysbuild_family_base_conf(project)
+                sb_conf_files = (
+                    [str(family_base), str(sb_conf)] if family_base
+                    else [str(sb_conf)]
+                )
+                defines.append(f"-DSB_CONF_FILE={';'.join(sb_conf_files)}")
         cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":
