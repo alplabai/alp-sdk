@@ -21,7 +21,7 @@
 # unless burst compute is needed.
 #
 # This example is the reference for the v0.6 `cores.<id>.power:`
-# declarative block.  See docs/board-config.md
+# declarative block.  See docs/board-config-features.md
 # "Per-slice power-management profile".
 som:
   sku: E1M-AEN301              # small AEN, lower-power profile

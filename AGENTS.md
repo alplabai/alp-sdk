@@ -1,9 +1,10 @@
 # AGENTS.md — working in alp-sdk as an AI agent
 
 Vendor-neutral guidance for **any** coding agent (Cursor, Codex, Copilot,
-Claude, …) editing this repo. Read it before generating code. It is the
-cross-tool companion to `CLAUDE.md` (Claude-Code-specific tooling lives there;
-see the note at the bottom).
+Claude, …) editing this repo. Read it before generating code. **This file is
+the authoritative agent guide** — it is self-contained and assumes no tooling
+beyond a checkout (see the note at the bottom for the optional Claude Code
+extras).
 
 ## What the SDK is
 
@@ -115,8 +116,10 @@ report.
 
 ## A note for Claude Code users
 
-This repo also carries `CLAUDE.md`, which adds Claude-Code-specific tooling: a
-set of `.claude/skills/` workflow procedures and a `code-review-graph` MCP
-server for structural code queries. Those are Claude-Code conveniences — every
-fact an agent needs is reachable from this file and the `docs/` it points to.
-Other agents should use **this** file; the two are complementary, not redundant.
+Alp Lab's own Claude Code checkouts carry a local, untracked `CLAUDE.md` that
+wires up two **internal-only** conveniences: a workflow-procedure skills plugin
+and a `code-review-graph` MCP server for structural code queries. Both live in
+Alp Lab's private tooling and are **not distributed with this repo** — if you
+are reading this from a public checkout, you do not have them and do not need
+them. Nothing in this repo depends on either: every fact an agent needs is
+reachable from **this** file and the `docs/` it points to.

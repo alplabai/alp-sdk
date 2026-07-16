@@ -61,7 +61,7 @@ needs to change.
 - [`<alp/e1m_pinout.h>`](../../../include/alp/e1m_pinout.h) -- the
   `ALP_E1M_GPIO_<class><N>` pin-as-GPIO indices + the positional
   pin-array invariant.
-- [`docs/board-config.md`](../../../docs/board-config.md) -- the
-  authoritative reference for `board.yaml`.
+- [`docs/board-config-schema.md`](../../../docs/board-config-schema.md)
+  -- the authoritative field reference for `board.yaml`.
 - [`scripts/alp_project.py`](../../../scripts/alp_project.py) -- the
   loader this example's `CMakeLists.txt` invokes.

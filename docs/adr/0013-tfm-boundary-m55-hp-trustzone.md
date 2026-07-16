@@ -96,7 +96,7 @@ justify the cross-cutting cost.
   cross-core trust-boundary framing this ADR refines.
 - [`docs/security-audit-plan.md`](../security-audit-plan.md) — audit
   scope including the TF-M build flow.
-- [`docs/board-config.md`](../board-config.md) §PSA Crypto + TF-M —
+- [`docs/board-config-features.md`](../board-config-features.md) §PSA Crypto + TF-M —
   the customer-facing `security.psa:` reference.
 - [Armv8-M Security Extension](https://developer.arm.com/documentation/100690/0201/Memory-protection-unit-MPU--and-Security-Attribution-Unit--SAU--) —
   upstream reference for the TrustZone-M split.

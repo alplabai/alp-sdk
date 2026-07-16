@@ -53,8 +53,15 @@ static alp_status_t cc35_connect(alp_wifi_backend_state_t     *state,
 	/* The portable v0.x credential shape has no security enum.  Keep open
 	 * networks open, and use the CC3501E firmware's WPA2-PSK path when a PSK is
 	 * supplied.  WPA3 remains available through the chip diagnostic API and the
-	 * console command until the portable surface grows a security selector. */
-	uint8_t     sec  = (creds->psk == NULL || creds->psk[0] == '\0') ? 0u : 1u;
+	 * console command until the portable surface grows a security selector.
+	 *
+	 * Named, correctly-typed (uint8_t) selectors -- not raw 0u/1u -- so this
+	 * conditional assigns with no implicit-int narrowing under -Wconversion
+	 * (issue #742): the ternary's raw-literal form promotes both `unsigned
+	 * int` operands to `int` before assigning to `sec`, which -Wconversion
+	 * flags even though the values are in-range. */
+	uint8_t sec = (creds->psk == NULL || creds->psk[0] == '\0') ? CC3501E_WIFI_CONNECT_SEC_OPEN
+	                                                            : CC3501E_WIFI_CONNECT_SEC_WPA2_PSK;
 	const char *pass = (creds->psk != NULL) ? creds->psk : "";
 	return cc3501e_wifi_connect(ctx, creds->ssid, sec, pass, timeout_ms);
 }

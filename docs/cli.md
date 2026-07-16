@@ -505,7 +505,7 @@ orchestrator run behaves identically to a west one.
 - [getting-started.md](getting-started.md) -- install + first build.
 - [heterogeneous-builds.md](heterogeneous-builds.md) -- the
   orchestrated multi-core pipeline `alp build` fronts.
-- [board-config.md](board-config.md) -- the `board.yaml` v2 reference
-  `alp validate` enforces.
+- [board-config-schema.md](board-config-schema.md) -- the `board.yaml`
+  field reference `alp validate` enforces.
 - [troubleshooting.md](troubleshooting.md) -- when `alp doctor`
   isn't enough.

@@ -235,7 +235,7 @@ What the flags mean:
 - `alp-sdk/examples/peripheral-io/gpio-button-led` — the application directory.
   Each example under `examples/` ships a `board.yaml` + an empty
   `prj.conf` + a CMakeLists.txt that invokes the loader at
-  configure time.  See [`docs/board-config.md`](board-config.md)
+  configure time.  See [`docs/board-config-schema.md`](board-config-schema.md)
   for the schema.
 
 `west alp-build` walks four steps under the hood:
@@ -532,11 +532,13 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 
 ## 11. Where to go next
 
-- **[`docs/board-config.md`](board-config.md)** -- the authoritative
-  `board.yaml` schema reference + recipe table for every loader
-  emit mode (`zephyr-conf`, `cmake-args`, `yocto-conf`,
-  `dts-overlay`, `hw-info-h`, `west-libraries`).  Start here when
+- **[`docs/board-config-schema.md`](board-config-schema.md)** -- the
+  authoritative `board.yaml` schema reference.  Start here when
   you're ready to write your own app's `board.yaml`.
+- **[`docs/board-config-emit.md`](board-config-emit.md)** -- the
+  recipe table for every loader emit mode (`zephyr-conf`,
+  `cmake-args`, `yocto-conf`, `dts-overlay`, `hw-info-h`,
+  `west-libraries`).
 - **Per-peripheral examples**: [`examples/`](../examples/README.md)
   -- 11 minimal apps, one per `<alp/*.h>` class, each driven by a
   matching `board.yaml`.

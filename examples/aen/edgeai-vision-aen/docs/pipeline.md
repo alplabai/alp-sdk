@@ -44,11 +44,16 @@ on the same SoC.
 - Bus: MIPI CSI-2, 2 lanes, ~480 Mbps/lane → 1.92 Gbps usable.
 - Resolution: 224 × 224 RGB888 for MobileNetV2 / 320 × 320 RGB888
   for YOLOv8-nano.  E8 ships the on-die **VeriSilicon ISP Pico
-  (`vsi,isp-pico`)**, so the v0.2 path can offload debayer /
-  format-convert / 3A to the ISP Pico once the Alif HAL pack lands (the
-  `<alp/ext/alif/camera.h>` vendor surface is a NOSUPPORT stub today — see
-  [`docs/aen-accelerator-backends-design.md`](../../../../docs/aen-accelerator-backends-design.md)).
-  Until then the SDK configures the ARX3A0 to emit RGB888 directly via
+  (`vsi,isp-pico`)**, so the v0.2 path can eventually offload debayer /
+  format-convert / 3A to it — but the vendored `isp_wrapper` HAL pack
+  landing was never the blocker: debayer/format-convert hit a driver-compile
+  version mismatch, and AE / AF / LSC and per-channel gain hit gaps in
+  the vendored archive (AWB is a deliberate hold, not a gap) — the
+  `<alp/ext/alif/camera.h>` vendor surface is a NOSUPPORT stub today —
+  see the *Silicon scope — which E-part has what* section of
+  [`docs/aen-accelerator-backends-design.md`](../../../../docs/aen-accelerator-backends-design.md)
+  for the per-reason detail.
+  Today the SDK configures the ARX3A0 to emit RGB888 directly via
   the `<alp/camera.h>` config and resizes on the M55.
 - API: `alp_camera_open` / `alp_camera_capture` / `alp_camera_release`.
 

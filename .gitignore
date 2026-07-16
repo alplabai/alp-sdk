@@ -3,6 +3,7 @@ build/
 build_*/
 out/
 cmake-build-*/
+bwdt/
 
 # IDE
 .vscode/*

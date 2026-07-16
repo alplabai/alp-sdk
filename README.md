@@ -144,7 +144,7 @@ som:
   sku: E1M-V2N101      # your MPN -- the SDK ships presets for supported SoMs
   hw_rev: r1
 
-preset: e1m-x-evk      # or write your board out inline -- see docs/board-config.md
+preset: e1m-x-evk      # or write your board out inline -- see docs/board-config-schema.md
 
 libraries:                         # one top-level list, each {name, cores?}
   - name: mbedtls
@@ -221,7 +221,7 @@ to hand-edit:
 | `storage:` + `security.psa:` | DTS partitions + TF-M sysbuild (v0.6 emit) |
 | `pins: [{e1m, macro, doc}]` | None — surfaces the subset of pads each project actually uses |
 
-See [`docs/board-config.md`](docs/board-config.md) for the full
+See [`docs/board-config-schema.md`](docs/board-config-schema.md) for the full
 schema reference and
 [`docs/heterogeneous-builds.md`](docs/heterogeneous-builds.md) for
 the dual-app project walk-through.
@@ -453,7 +453,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for the per-library
-design, [`docs/board-config.md`](docs/board-config.md) for the
+design, [`docs/board-config-schema.md`](docs/board-config-schema.md) for the
 `board.yaml` schema reference, and
 [`docs/zephyr-version-policy.md`](docs/zephyr-version-policy.md) for
 how we pin Zephyr LTS + when bumps drive new alp-sdk releases.
@@ -587,7 +587,7 @@ alp-sdk/
 ```
 
 See [`docs/porting-new-som.md`](docs/porting-new-som.md) for adding a
-new E1M variant and [`docs/board-config.md`](docs/board-config.md) for
+new E1M variant and [`docs/board-config-schema.md`](docs/board-config-schema.md) for
 the `board.yaml` schema reference.
 
 ## License

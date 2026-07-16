@@ -31,8 +31,11 @@ Run locally:
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -45,6 +48,7 @@ import run_smoke                                       # noqa: E402
 
 from alp_orchestrate import (                          # noqa: E402
     BoardProject,
+    OrchestratorError,
     Slice,
     _slice_alp_conf,
     emit_sysbuild_conf,
@@ -172,24 +176,228 @@ def _make_slice(
 def test_boot_block_emits_mcuboot_config() -> None:
     """`boot:` -> emit_sysbuild_conf() carries SB_CONFIG_BOOTLOADER_MCUBOOT
     + the matching signature-type line.  The boot_mcuboot.yaml HiL
-    spec asserts those CONFIG_* lines reach real silicon."""
+    spec asserts those CONFIG_* lines reach real silicon.
+
+    The symbol names asserted here are the REAL sysbuild names
+    (`SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256`,
+    `SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH`) -- issue #807 found this
+    test previously hardcoded invented names
+    (`SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256`,
+    `SB_CONFIG_BOOT_{PRIMARY,SECONDARY}_PARTITION_SIZE`) that don't
+    exist anywhere in Zephyr's Kconfig, so this test stayed green
+    while sysbuild's FATAL undefined-symbol check aborted every real
+    `boot:` configure.  `test_emitted_sb_config_symbols_exist_in_
+    pinned_zephyr` below is the class gate that catches a future
+    invented name generically, against the pinned Zephyr's actual
+    Kconfig tree rather than a string someone typed."""
     project = _make_project(boot={
         "method": "mcuboot",
         "signing": {"algorithm": "ecdsa_p256",
                     "key_file": "keys/dev_ecdsa_p256.pem"},
-        "slots": {"primary": {"size_kib": 480},
-                  "secondary": {"size_kib": 480}},
         "swap_algorithm": "scratch",
     })
     sysbuild = emit_sysbuild_conf(project)
     assert "SB_CONFIG_BOOTLOADER_MCUBOOT=y" in sysbuild, (
         "boot:.method=mcuboot must emit SB_CONFIG_BOOTLOADER_MCUBOOT=y"
     )
-    assert "SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256=y" in sysbuild, (
+    assert "SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y" in sysbuild, (
         "boot:.signing.algorithm=ecdsa_p256 must emit the matching SB_CONFIG_*"
     )
-    assert "SB_CONFIG_BOOT_PRIMARY_PARTITION_SIZE=" in sysbuild
-    assert "SB_CONFIG_BOOT_SECONDARY_PARTITION_SIZE=" in sysbuild
+    assert "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y" in sysbuild, (
+        "boot:.swap_algorithm=scratch must emit the matching SB_CONFIG_*"
+    )
+    # No slot/scratch-size symbols -- sysbuild has none; MCUboot takes
+    # slot geometry from the board DT partitions.
+    assert "PARTITION_SIZE" not in sysbuild
+    assert "SB_CONFIG_BOOT_COUNTERS_MCUBOOT" not in sysbuild
+
+
+def test_rsa3072_hard_errors_in_mcuboot_path() -> None:
+    """sysbuild's BOOT_SIGNATURE_TYPE choice has no RSA key-length
+    knob (that lives in mcuboot-image's own CONFIG_BOOT_SIGNATURE_
+    TYPE_RSA_LEN, a different Kconfig namespace sysbuild never
+    forwards into).  Silently emitting rsa2048's default length for
+    an rsa3072-declared key would ship a signature the customer never
+    asked for -- this MUST raise, not silently degrade."""
+    project = _make_project(boot={
+        "method": "mcuboot",
+        "signing": {"algorithm": "rsa3072",
+                    "key_file": "keys/dev_rsa3072.pem"},
+    })
+    with pytest.raises(OrchestratorError, match="rsa3072"):
+        emit_sysbuild_conf(project)
+
+
+# ---------------------------------------------------------------------
+# 1b. Class gate (#807): every SB_CONFIG_* emit_sysbuild_conf() ever
+#     produces must exist in the PINNED Zephyr's own sysbuild Kconfig
+#     tree -- the oracle is the consumer's namespace, never a string
+#     the emitter's author typed.  A hand-picked regression assert
+#     (see test_boot_block_emits_mcuboot_config above) only catches
+#     the one case someone thought to type; this crosses the full
+#     boot: enum so an invented name ANYWHERE in the matrix is caught.
+#
+#     Same bug class as the CONFIG_PM_DEVICE_WAKE_ regression further
+#     down this file (~§ power block) -- that one only got a
+#     name-specific `assert "CONFIG_PM_DEVICE_WAKE_" not in conf`,
+#     not a class gate.  This test is the class gate for the SB_CONFIG_
+#     surface so the same defect shape doesn't recur a third time.
+# ---------------------------------------------------------------------
+
+
+_SB_CONFIG_ASSIGN_RE = re.compile(r"^(SB_CONFIG_[A-Za-z0-9_]+)=", re.MULTILINE)
+_KCONFIG_SYMBOL_RE = re.compile(r"^\s*config\s+([A-Za-z0-9_]+)\s*$", re.MULTILINE)
+
+
+def _zephyr_pin_major_minor() -> Optional[tuple[int, int]]:
+    """(MAJOR, MINOR) of the `zephyr:` revision pinned in this repo's
+    west.yml, or None if west.yml is missing/unparseable."""
+    try:
+        text = (REPO / "west.yml").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = re.search(r"-\s+name:\s+zephyr\s*\n\s+revision:\s+v?(\d+)\.(\d+)", text)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _pinned_zephyr_sysbuild_kconfig_symbols() -> Optional[set[str]]:
+    """Every `config <SYMBOL>` under the pinned Zephyr's
+    `share/sysbuild/**/Kconfig*`, resolved from the west workspace --
+    NEVER a hardcoded developer checkout path (a local tree can drift
+    to a stale pin, e.g. v3.7.0 while the repo pins v4.4.0).
+
+    Resolution order: `$ZEPHYR_BASE` (the workspace convention every
+    `west` command + `scripts/alp_cli/doctor.py` use), falling back to
+    the west-workspace topdir's conventional `zephyr/` project
+    directory (`scripts/bootstrap.sh` does `west init -l <alp-sdk>`,
+    so alp-sdk's parent is the topdir and `<topdir>/zephyr` is the
+    manifest project's checkout path).  Returns None -- skip, never
+    hard-fail -- when no candidate resolves to an actual Zephyr tree,
+    or when the resolved tree's own VERSION doesn't match this repo's
+    pinned MAJOR.MINOR (a stale checkout is as unresolvable as no
+    checkout: asserting against the wrong Kconfig tree would be
+    worse than not asserting at all).
+    """
+    pin = _zephyr_pin_major_minor()
+    if pin is None:
+        return None
+
+    candidates = []
+    env_base = os.environ.get("ZEPHYR_BASE")
+    if env_base:
+        candidates.append(Path(env_base))
+    candidates.append(REPO.parent / "zephyr")
+
+    for base in candidates:
+        version_file = base / "VERSION"
+        if not version_file.is_file():
+            continue
+        try:
+            text = version_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        major = minor = None
+        for line in text.splitlines():
+            if line.startswith("VERSION_MAJOR"):
+                m = re.search(r"(\d+)", line)
+                major = int(m.group(1)) if m else major
+            elif line.startswith("VERSION_MINOR"):
+                m = re.search(r"(\d+)", line)
+                minor = int(m.group(1)) if m else minor
+        if (major, minor) != pin:
+            continue  # stale/mismatched checkout -- not a usable oracle
+
+        sysbuild_dir = base / "share" / "sysbuild"
+        if not sysbuild_dir.is_dir():
+            continue
+        symbols: set[str] = set()
+        for kconfig_file in sysbuild_dir.rglob("Kconfig*"):
+            if not kconfig_file.is_file():
+                continue
+            try:
+                ktext = kconfig_file.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            symbols.update(_KCONFIG_SYMBOL_RE.findall(ktext))
+        if symbols:
+            return symbols
+    return None
+
+
+# The full `boot:` enum cross-product (method x algorithm x
+# swap_algorithm) -- small enough to exhaustively drive through
+# emit_sysbuild_conf() and check every emitted symbol against the
+# pinned Zephyr's real Kconfig tree.  rsa3072 is excluded here (it
+# hard-errors -- see test_rsa3072_hard_errors_in_mcuboot_path).
+_BOOT_ALGORITHMS = ("ecdsa_p256", "rsa2048", "ed25519")
+_BOOT_SWAP_ALGORITHMS = ("scratch", "move", "overwrite")
+_BOOT_MATRIX = (
+    [("none", None, None)]
+    + [("mcuboot", algo, swap)
+       for algo in _BOOT_ALGORITHMS
+       for swap in _BOOT_SWAP_ALGORITHMS]
+)
+
+
+@pytest.mark.parametrize("method,algorithm,swap", _BOOT_MATRIX)
+def test_emitted_sb_config_symbols_exist_in_pinned_zephyr(
+    method: str, algorithm: Optional[str], swap: Optional[str],
+) -> None:
+    """Every `SB_CONFIG_*=` line emit_sysbuild_conf() produces, for
+    every point in the `boot:` enum cross-product, must name a real
+    `config` in the pinned Zephyr's `share/sysbuild/**/Kconfig*` --
+    sysbuild treats an undefined-symbol warning as FATAL, so one
+    invented name anywhere in this matrix aborts the whole `boot:`
+    configure (issue #807)."""
+    symbols = _pinned_zephyr_sysbuild_kconfig_symbols()
+    if symbols is None:
+        # A skip is correct on a pure-Python job (python-smoke has no
+        # Zephyr checkout) but it is ALSO how this gate silently stopped
+        # gating: #814 shipped it, and for a while NO job satisfied its
+        # precondition, so it skipped on every PR and reported green
+        # while enforcing nothing -- the same "test agrees with itself"
+        # failure #807 was about, one level up.  A job that intends to
+        # run this gate sets ALP_REQUIRE_ZEPHYR_ORACLE=1; there, an
+        # unresolvable workspace is a BUG IN THE JOB, not an
+        # environment fact, so fail loudly instead of skipping green.
+        if os.environ.get("ALP_REQUIRE_ZEPHYR_ORACLE") == "1":
+            pytest.fail(
+                "ALP_REQUIRE_ZEPHYR_ORACLE=1 but no pinned Zephyr "
+                "workspace resolved ($ZEPHYR_BASE / west-workspace "
+                "zephyr/ matching west.yml's pin).  This job promised "
+                "the oracle and did not deliver it -- fix the job's "
+                "west init / ZEPHYR_BASE, do not drop the flag."
+            )
+        pytest.skip(
+            "pinned Zephyr workspace not resolvable in this environment "
+            "(no $ZEPHYR_BASE / west-workspace zephyr/ checkout matching "
+            "this repo's west.yml pin) -- not a west/toolchain job, skip "
+            "rather than hard-fail (python-smoke runs pure-Python, no "
+            "Zephyr checkout).  Set ALP_REQUIRE_ZEPHYR_ORACLE=1 in a job "
+            "that DOES provide the workspace to turn this skip into a "
+            "failure."
+        )
+    boot: dict = {"method": method}
+    if method == "mcuboot":
+        boot["signing"] = {"algorithm": algorithm,
+                            "key_file": "keys/dev.pem"}
+        boot["swap_algorithm"] = swap
+    project = _make_project(boot=boot)
+    sysbuild = emit_sysbuild_conf(project)
+    emitted = _SB_CONFIG_ASSIGN_RE.findall(sysbuild)
+    assert emitted, f"boot={boot!r} emitted no SB_CONFIG_* at all"
+    for stem in emitted:
+        # sysbuild's Kconfig namespace prefix (`set(KCONFIG_NAMESPACE
+        # SB_CONFIG)` in sysbuild_kconfig.cmake) means `SB_CONFIG_<X>`
+        # is real iff `config <X>` exists in the sysbuild Kconfig tree
+        # -- the prefix itself is never part of the `config` name.
+        bare = stem.removeprefix("SB_CONFIG_")
+        assert bare in symbols, (
+            f"emit_sysbuild_conf() produced {stem}=... for boot={boot!r}, "
+            f"but no `config {bare}` exists anywhere under the pinned "
+            f"Zephyr's share/sysbuild/**/Kconfig* -- this is the "
+            f"undefined-symbol class sysbuild treats as FATAL (#807)."
+        )
 
 
 def test_memory_block_emits_stack_heap_isr_config() -> None:

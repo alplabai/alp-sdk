@@ -114,7 +114,7 @@ typedef enum {
 	ALP_CC3501E_CMD_GET_VERSION = 0x01,
 	ALP_CC3501E_CMD_RESET       = 0x02,
 	ALP_CC3501E_CMD_GET_MAC     = 0x03,
-	/* §5.4 -- extended diagnostics.  Reply payload is
+	/* Extended diagnostics.  Reply payload is
      * @ref alp_cc3501e_diag_info_t.  Adds firmware-side context
      * (reset cause, current role, uptime, free heap, last error)
      * beyond what GET_VERSION returns.  v2-firmware-only; v1
@@ -217,7 +217,7 @@ typedef enum {
      * enable pins (CAM_EN_LDO0/1) per the inter-chip TSV. */
 	ALP_CC3501E_CMD_CAM_ENABLE  = 0x60,
 	ALP_CC3501E_CMD_CAM_DISABLE = 0x61,
-	/* §5.7 -- system-wide power policy for the CC3501E itself.
+	/* System-wide power policy for the CC3501E itself.
      * Request payload is @ref alp_cc3501e_power_policy_t.  Lets
      * the host hint at how aggressively the CC3501E firmware
      * should idle between Wi-Fi / BLE events.  v2-firmware-only. */

@@ -55,7 +55,7 @@ ota:
     total_size_mb: 4096
 ```
 
-See [`docs/board-config.md` §OTA](board-config.md#ota-ota----mender--mcumgr)
+See [`docs/board-config-features.md` §OTA](board-config-features.md#ota-ota----mender--mcumgr)
 for the full field reference.  The emitted `local.conf` uses `?=`
 (weak) assignments so hand-edits in the build directory still win
 if a developer wants to override per-tree.

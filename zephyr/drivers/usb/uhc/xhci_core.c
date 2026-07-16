@@ -81,3 +81,32 @@ void xhci_init_sequence(struct xhci_op_regs *op,
 	op->crcr_hi   = (uint32_t)(cmd_ring_phys >> 32);
 	op->usbcmd |= XHCI_USBCMD_RS;
 }
+
+uint64_t xhci_local_to_global(const struct xhci_tcm_map *map, const void *p)
+{
+	uintptr_t a = (uintptr_t)p;
+
+	/* A NULL DMA pointer must never be handed to the xHC as a "translated"
+	 * address: on every known map itcm_base == 0, so without this guard
+	 * NULL would silently alias into a plausible-looking global ITCM
+	 * address (0 falls inside [itcm_base, itcm_base+itcm_size)) instead of
+	 * being caught by the caller. Every real caller (uhc_xhci_alif.c's
+	 * xhci_l2g()) always passes a live buffer address, so this only ever
+	 * fires on a programming error. */
+	if (p == NULL) {
+		return 0;
+	}
+
+	/* DTCM and ITCM windows never overlap; check both explicitly rather than
+	 * assuming a base of 0 (a hardcoded-base bug is exactly what this
+	 * function replaces -- see uhc_xhci_alif.c's xhci_l2g()). */
+	if (a >= map->dtcm_base && a < map->dtcm_base + map->dtcm_size) {
+		return (uint64_t)(a - map->dtcm_base) + map->dtcm_global_base;
+	}
+	if (a >= map->itcm_base && a < map->itcm_base + map->itcm_size) {
+		return (uint64_t)(a - map->itcm_base) + map->itcm_global_base;
+	}
+	/* Already outside both local TCM windows (e.g. SRAM, or already a global
+	 * alias) -- the xHC's system-bus master reaches it unchanged. */
+	return (uint64_t)a;
+}

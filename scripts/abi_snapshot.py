@@ -81,6 +81,9 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 INCLUDE_ROOT = REPO / "include" / "alp"
+SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
+
+_SDK_VERSION_RE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)\s*$", re.MULTILINE)
 
 # ---------------------------------------------------------------------
 # Tokenisation helpers
@@ -581,6 +584,28 @@ def build_snapshot(version: str, include_root: Path) -> dict[str, Any]:
     }
 
 
+def current_snapshot_version(sdk_version_yaml: Path = SDK_VERSION_YAML) -> str | None:
+    """
+    Return the "vMAJOR.MINOR" label the CURRENT snapshot must carry,
+    derived from `metadata/sdk_version.yaml` (the single source for
+    the released MAJOR.MINOR.PATCH).  Snapshot files are named
+    MAJOR.MINOR (docs/abi/README.md); the PATCH component never
+    appears in a snapshot filename or `version` field.
+
+    Returns None if sdk_version.yaml is missing or unparsable (e.g. a
+    caller running the script outside a full checkout) -- callers
+    treat that as "can't verify, don't block".
+    """
+    try:
+        text = sdk_version_yaml.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = _SDK_VERSION_RE.search(text)
+    if not m:
+        return None
+    return f"v{m.group(1)}.{m.group(2)}"
+
+
 def _field_diff(
     header: str, sym: str, prev_rec: dict[str, Any], curr_rec: dict[str, Any]
 ) -> list[str]:
@@ -648,6 +673,33 @@ def main() -> int:
         help="Compare against a prior snapshot file and print a per-symbol diff.",
     )
     args = parser.parse_args()
+
+    if args.output is not None:
+        # Refuse to WRITE a snapshot labelled anything other than the
+        # current release -- this is the guard that makes issue #803's
+        # bug class impossible, not just this occurrence of it.  A
+        # snapshot's whole job is to fingerprint the public surface
+        # "at a specific release tag" (docs/abi/README.md); silently
+        # writing today's headers under an OLDER version label turns a
+        # frozen historical baseline into one that tracks HEAD, which
+        # makes a real ABI regression against that release invisible.
+        # Older snapshots are restored from their release tag (`git
+        # show vX.Y.Z:docs/abi/vX.Y-snapshot.json`), never regenerated
+        # by this script again.
+        current = current_snapshot_version()
+        if current is not None and args.version != current:
+            print(
+                f"error: refusing to write a snapshot labelled "
+                f"{args.version!r} to {args.output} -- "
+                f"metadata/sdk_version.yaml declares the current "
+                f"release as {current}. Older snapshots are frozen "
+                f"historical records (docs/abi/README.md) and must "
+                f"never be regenerated against today's headers; if "
+                f"you are cutting a release, bump "
+                f"metadata/sdk_version.yaml first.",
+                file=sys.stderr,
+            )
+            return 2
 
     try:
         snapshot = build_snapshot(args.version, INCLUDE_ROOT)
