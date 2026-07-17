@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Getting-started onboarding fixture: assembles a workspace exactly as
+# docs/getting-started.md instructs a brand-new customer to, then runs
+# the doc's LITERAL section-7 AEN801 real-silicon build command.  This
+# is a hosted BUILD only (no bench, no flash) -- it exists so the
+# onboarding path is an executable fixture: if a future change breaks
+# `scripts/bootstrap.sh`, renames the AEN801 board target, or moves
+# the gpio-button-led example, this workflow goes red instead of a new
+# customer silently hitting a dead quickstart.
+#
+# Steps mirror docs/getting-started.md verbatim:
+#   1. `bash scripts/bootstrap.sh`               (doc's quickstart, §fast path)
+#   2. Zephyr SDK (arm-zephyr-eabi only, ~1.5 GB) -- needed for the
+#      real-silicon Cortex-M55 build; not required for the doc's
+#      native_sim quickstart, but IS required for this doc's §7 command.
+#      Install recipe mirrors docs/local-ci.md Path B (Windows) §5,
+#      translated to the Linux SDK-ng release layout.
+#   3. The doc's literal §7 command:
+#        west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+#            alp-sdk/examples/peripheral-io/gpio-button-led
+#
+name: pr-getting-started-aen801
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'docs/getting-started.md'
+      - 'scripts/bootstrap.sh'
+      - 'west.yml'
+      - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
+      - 'zephyr/module.yml'
+      - 'examples/peripheral-io/gpio-button-led/**'
+      - '.github/workflows/pr-getting-started-aen801.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'docs/getting-started.md'
+      - 'scripts/bootstrap.sh'
+      - 'west.yml'
+      - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
+      - 'zephyr/module.yml'
+      - 'examples/peripheral-io/gpio-button-led/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # docs/getting-started.md §7's literal AEN801 board target + example
+  # path (E1M-AEN801, Alif Ensemble E8, Cortex-M55 HE) -- keep this in
+  # sync with the doc; a mismatch here is exactly the drift this
+  # workflow exists to catch.
+  AEN801_BOARD_TARGET: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+  AEN801_EXAMPLE_PATH: alp-sdk/examples/peripheral-io/gpio-button-led
+  # docs/getting-started.md §1 prerequisites table + docs/local-ci.md
+  # Path B §5 pin -- the Zephyr SDK release matching the v4.4.0 Zephyr
+  # pin in west.yml.
+  ZEPHYR_SDK_VERSION: "1.0.1"
+
+jobs:
+  aen801-build:
+    name: getting-started · AEN801 real-silicon build (docs §7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # Checked out under alp-sdk/ so the workspace layout matches
+      # docs/getting-started.md exactly: <workspace root>/alp-sdk,
+      # with Zephyr + modules landing as siblings via bootstrap.sh's
+      # `west init -l alp-sdk`.
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: alp-sdk/.python-version
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              ninja-build gperf ccache dfu-util device-tree-compiler \
+              python3-dev python3-pip python3-setuptools python3-wheel \
+              libffi-dev libssl-dev xz-utils file make wget
+
+      - name: Cache Zephyr workspace (modules + zephyr)
+        uses: actions/cache@v5
+        with:
+          path: |
+            zephyr
+            modules
+          key: getting-started-aen801-zephyr-v4.4.0-${{ runner.os }}
+
+      - name: Cache Zephyr SDK
+        uses: actions/cache@v5
+        with:
+          path: zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
+          key: getting-started-aen801-sdk-${{ env.ZEPHYR_SDK_VERSION }}-arm-zephyr-eabi-${{ runner.os }}
+
+      # docs/getting-started.md's quickstart step 2: "bash
+      # scripts/bootstrap.sh" -- creates the workspace venv, runs
+      # `west init -l` + `west update --narrow` (fetching zephyr +
+      # hal_alif per west.yml), and installs the Zephyr + SDK Python
+      # deps.  Run exactly as the doc tells a fresh clone to.
+      - name: Assemble the workspace (scripts/bootstrap.sh)
+        working-directory: alp-sdk
+        run: bash scripts/bootstrap.sh
+
+      # Real-silicon (non-native_sim) targets need the Zephyr SDK's
+      # arm-zephyr-eabi cross toolchain -- Ubuntu's apt gcc-arm-none-eabi
+      # predates Cortex-M55/Helium support.  Recipe mirrors
+      # docs/local-ci.md Path B §5 (there documented for Windows;
+      # this is the Linux SDK-ng release layout), minimal + a single
+      # toolchain to stay well inside the runner's disk budget (~1.5 GB,
+      # vs. ~17 GB for the full zephyrprojectrtos/ci image -- see
+      # pr-twister.yml's comment on why that image isn't used here either).
+      - name: Install Zephyr SDK (arm-zephyr-eabi only)
+        run: |
+          if [ ! -x "zephyr-sdk-${ZEPHYR_SDK_VERSION}/setup.sh" ]; then
+            wget -q "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz"
+            tar xf "zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz"
+          fi
+          zephyr-sdk-${ZEPHYR_SDK_VERSION}/setup.sh -t arm-zephyr-eabi -h -c
+
+      # The doc's literal §7 command (see the AEN801_BOARD_TARGET /
+      # AEN801_EXAMPLE_PATH comment above) -- run from the workspace
+      # root, one level above alp-sdk/, exactly as docs/getting-started.md
+      # writes it (`alp-sdk/examples/...`, not a bare `examples/...`).
+      - name: west build (docs/getting-started.md §7 AEN801 command)
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+          ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
+          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+        run: |
+          source .venv/bin/activate
+          west build -b "${AEN801_BOARD_TARGET}" "${AEN801_EXAMPLE_PATH}"

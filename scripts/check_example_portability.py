@@ -74,6 +74,19 @@ The lint enforces two invariants:
       `examples/aen/*-regcheck/`) are out of this check's scope
       entirely -- see the example-enumeration walk in `main()`.
 
+  (f) HARD ERROR: every `examples/**/boards/<name>.overlay` and
+      `tests/**/boards/<name>.overlay` must name a board that actually
+      exists -- either a real in-tree target (a
+      `zephyr/boards/alp/<dir>/board.yml`'s `board: name:` field) or a
+      recognised upstream/host board (`native_sim`).  Zephyr resolves
+      an overlay by the bare board name OR by board+qualifiers joined
+      with underscores (e.g. `alp_e1m_aen801_m55_he_ae822fa0e5597ls0_
+      rtss_he.overlay`), so a stem is valid if it equals a known name
+      or starts with `<name>_`.  This check runs regardless of whether
+      the example/test carries a `board.yaml` -- unlike (a)-(e) above,
+      it is not scoped to `board.yaml`-bearing examples, so it also
+      catches a dead overlay in a bare-Zephyr regcheck/test dir.
+
 Run from the alp-sdk repo root:
 
     python3 scripts/check_example_portability.py
@@ -328,6 +341,74 @@ def check_no_zephyr_driver_includes(example_dir: pathlib.Path,
                 "_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST in "
                 f"{pathlib.Path(__file__).name} with why."
             )
+    return errors
+
+
+# Upstream/host Zephyr boards this SDK's examples/tests build against
+# that ship in the Zephyr tree itself, not zephyr/boards/alp/ -- today
+# that's just native_sim (native_sim/native/64), the CI/host simulation
+# target every example builds against.
+_UPSTREAM_BOARD_NAMES = {"native_sim"}
+
+
+def load_real_board_names() -> set[str]:
+    """Return every real Zephyr board target name shipped in-tree,
+    read from each zephyr/boards/alp/<dir>/board.yml's `board: name:`
+    field -- board EXISTENCE, not naming shape, is what makes a board
+    name real; a stale overlay can name a board that was renamed (or
+    never landed) before it shipped and still match the alp_e1m_*
+    naming convention."""
+    names: set[str] = set()
+    boards_dir = ROOT / "zephyr" / "boards" / "alp"
+    if not boards_dir.is_dir():
+        return names
+    for board_yml in sorted(boards_dir.glob("*/board.yml")):
+        with board_yml.open(encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+        name = (doc.get("board") or {}).get("name")
+        if isinstance(name, str):
+            names.add(name)
+    return names
+
+
+def overlay_board_name_error(overlay: pathlib.Path,
+                             real_boards: set[str]) -> Optional[str]:
+    """Return a hard-error string if `overlay`'s board-name stem names
+    no real/known board, else None."""
+    stem = overlay.stem
+    known = real_boards | _UPSTREAM_BOARD_NAMES
+    if stem in known:
+        return None
+    if any(stem.startswith(f"{name}_") for name in known):
+        return None
+    rel = overlay.relative_to(ROOT).as_posix()
+    return (
+        f"{rel}: overlay names unknown board '{stem}' -- not a real "
+        f"zephyr/boards/alp/ board and not a recognised upstream/"
+        f"native_sim board"
+    )
+
+
+def check_dead_board_overlays(real_boards: set[str]) -> list[str]:
+    """Return hard errors for every examples/**/boards/*.overlay and
+    tests/**/boards/*.overlay naming a board that doesn't exist.
+
+    Runs independent of check_example()'s board.yaml-scoped walk --
+    every overlay under a `boards/` dir counts, including the
+    board.yaml-less regcheck/test scenarios that (a)-(e) above skip.
+    """
+    errors: list[str] = []
+    for root_name in ("examples", "tests"):
+        base = ROOT / root_name
+        if not base.is_dir():
+            continue
+        for overlay in sorted(base.glob("**/boards/*.overlay")):
+            rel_parts = overlay.relative_to(ROOT).parts
+            if any(part in _SOURCE_SKIP_DIRS for part in rel_parts):
+                continue
+            error = overlay_board_name_error(overlay, real_boards)
+            if error:
+                errors.append(error)
     return errors
 
 
@@ -648,6 +729,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             hard_errors_total += 1
         for n in notes:
             print(f"NOTE  {ex.name}: {n}")
+
+    real_boards = load_real_board_names()
+    for e in check_dead_board_overlays(real_boards):
+        print(f"FAIL  {e}", file=sys.stderr)
+        hard_errors_total += 1
 
     if not args.quiet:
         print()
