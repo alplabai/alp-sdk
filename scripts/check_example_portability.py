@@ -437,46 +437,61 @@ def load_board_qualified_names() -> dict[str, set[str]]:
     return out
 
 
-def check_customer_overlay_qualified(
-        example_dir: pathlib.Path,
-        board_qualified_names: dict[str, set[str]]) -> list[str]:
-    """HARD ERROR: a customer-facing (board.yaml-bearing) example's
-    `boards/*.overlay` or `boards/*.conf` must not name a bare board
-    that has a fully-qualified sibling -- Zephyr only auto-applies the
+def check_overlay_qualified(
+        board_qualified_names: dict[str, set[str]],
+        bases: Optional[list[pathlib.Path]] = None) -> list[str]:
+    """HARD ERROR: any examples/** or tests/** `boards/*.overlay` or
+    `boards/*.conf` must not name a bare board that has a
+    fully-qualified sibling -- Zephyr only auto-applies the
     overlay/`.conf` named after the FULLY-QUALIFIED board id on `west
-    build -b <bare>/<soc>/<core>` (the customer invocation for a
-    catalog example); a `boards/<bare-name>.overlay` or `.conf`
-    silently drops with no build error.  4 customer AEN examples hit
-    exactly this before being renamed to the qualified form (both the
-    overlay and, separately, a board-scoped `.conf` carry the same
-    bare/qualified match rule).
+    build -b <bare>/<soc>/<core>`; a `boards/<bare-name>.overlay` or
+    `.conf` silently drops with no build error.
 
-    Internal bench/regcheck examples carry no board.yaml and are out of
-    scope here -- scripts/bench/aen/build.sh force-applies the
-    bare-name overlay/.conf itself via -DEXTRA_DTC_OVERLAY_FILE (and
-    its own board-name match for the .conf) and is unaffected by
-    Zephyr's board-target auto-apply rule.
+    Applies to EVERY example, not just board.yaml-bearing (customer-
+    facing) ones: scripts/bench/aen/build.sh builds the
+    fully-qualified $AEN_BOARD target directly and relies on the same
+    Zephyr name-match auto-apply rule -- it does not force-apply
+    anything itself, so an internal bench/regcheck example with a
+    bare-name overlay/.conf would silently drop it too.  4 customer
+    AEN examples hit exactly this before being renamed to the
+    qualified form (both the overlay and, separately, a board-scoped
+    `.conf` carry the same bare/qualified match rule).
+
+    A file whose stem isn't an exact bare board id (e.g. a
+    `..._firewall_probe.conf` variant, or an already fully-qualified
+    name) has no entry in `board_qualified_names` and is skipped --
+    only an exact bare-board-id stem with a real qualified sibling is
+    flagged.
     """
-    boards_dir = example_dir / "boards"
-    if not boards_dir.is_dir():
-        return []
+    if bases is None:
+        bases = [ROOT / "examples", ROOT / "tests"]
     errors: list[str] = []
-    for pattern, kind in (("*.overlay", "overlay"), ("*.conf", "board Kconfig .conf")):
-        for path in sorted(boards_dir.glob(pattern)):
-            qualified = board_qualified_names.get(path.stem)
-            if not qualified:
-                continue
-            try:
-                rel = path.relative_to(ROOT).as_posix()
-            except ValueError:
-                rel = path.as_posix()
-            errors.append(
-                f"{rel}: {kind} names bare board '{path.stem}' but this "
-                "example has a board.yaml (customer-facing) -- Zephyr only "
-                f"auto-applies the fully-qualified {kind} on `west build -b "
-                f"{path.stem}/<soc>/<core>`; rename to one of "
-                f"{sorted(qualified)}"
-            )
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for pattern, kind in (("**/boards/*.overlay", "overlay"),
+                              ("**/boards/*.conf", "board Kconfig .conf")):
+            for path in sorted(base.glob(pattern)):
+                try:
+                    rel_parts = path.relative_to(ROOT).parts
+                except ValueError:
+                    rel_parts = path.parts
+                if any(part in _SOURCE_SKIP_DIRS for part in rel_parts):
+                    continue
+                qualified = board_qualified_names.get(path.stem)
+                if not qualified:
+                    continue
+                try:
+                    rel = path.relative_to(ROOT).as_posix()
+                except ValueError:
+                    rel = path.as_posix()
+                errors.append(
+                    f"{rel}: {kind} names bare board '{path.stem}' but a "
+                    f"fully-qualified sibling exists -- Zephyr only "
+                    f"auto-applies the fully-qualified {kind} on `west "
+                    f"build -b {path.stem}/<soc>/<core>`; rename to one of "
+                    f"{sorted(qualified)}"
+                )
     return errors
 
 
@@ -689,13 +704,10 @@ def check_example(example_dir: pathlib.Path,
                   chip_families: dict[str, list[str]],
                   som_optional: dict[str, set[str]],
                   board_host_families: Optional[dict[str, set[str]]] = None,
-                  board_qualified_names: Optional[dict[str, set[str]]] = None
                   ) -> tuple[str, list[str], list[str]]:
     """Return (classification, hard-error list, info-level note list)."""
     if board_host_families is None:
         board_host_families = load_board_host_families()
-    if board_qualified_names is None:
-        board_qualified_names = load_board_qualified_names()
     board_yaml = example_dir / "board.yaml"
     if not board_yaml.exists():
         return "no-board-yaml", [], []
@@ -772,8 +784,6 @@ def check_example(example_dir: pathlib.Path,
         # raising.
         example_key = example_dir.name
     errors.extend(check_no_zephyr_driver_includes(example_dir, example_key))
-    errors.extend(check_customer_overlay_qualified(example_dir,
-                                                   board_qualified_names))
 
     ring = classify(chip_families, chips, family,
                     doc.get("supported_boards"), board_host_families)
@@ -819,8 +829,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     for ex in examples:
         ring, errors, notes = check_example(ex, chip_families, som_optional,
-                                            board_host_families,
-                                            board_qualified_names)
+                                            board_host_families)
         classification.setdefault(ring, []).append(ex.name)
         for e in errors:
             print(f"FAIL  {ex.name}: {e}", file=sys.stderr)
@@ -830,6 +839,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     real_boards = load_real_board_names()
     for e in check_dead_board_overlays(real_boards):
+        print(f"FAIL  {e}", file=sys.stderr)
+        hard_errors_total += 1
+
+    for e in check_overlay_qualified(board_qualified_names):
         print(f"FAIL  {e}", file=sys.stderr)
         hard_errors_total += 1
 
