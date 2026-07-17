@@ -52,6 +52,13 @@ def run(args) -> int:
             for d in drifts:
                 print(f"alp-lock: {d.path}: locked {d.locked!r} != actual {d.actual!r}",
                       file=sys.stderr)
+            # Nothing regenerates alp.lock on a metadata/schema change, so the
+            # drift is almost always "someone edited metadata/ and never
+            # re-locked".  Name the fix here: without it the message states a
+            # digest mismatch and leaves the reader to find the writer.
+            print("alp-lock: regenerate with `west alp-lock` "
+                  "(or `python3 scripts/west_commands/alp_lock.py --workspace .`) "
+                  "and commit the result.", file=sys.stderr)
             return 1
         print(f"alp-lock: {lock_path} matches the workspace.")
         return 0

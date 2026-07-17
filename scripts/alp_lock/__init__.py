@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Optional
 
 import yaml
@@ -115,7 +115,19 @@ def _python_hashes(root: Path) -> dict:
 def _dir_digest(root: Path, rel: str, glob: str) -> str:
     d = root / rel
     h = hashlib.sha256()
-    for p in sorted(d.glob(glob)) if d.is_dir() else []:
+    # Order by the relative path's POSIX *parts*, never by the Path objects.
+    # `sorted(Path)` compares pathlib's case-normalised form, which on Windows is
+    # lower-cased and backslash-separated -- a different order than POSIX's, so
+    # the same tree digested to a different sha on Windows than on CI.  A Windows
+    # checkout thus false-reported drift, and re-locking there would have
+    # committed a Windows-ordered digest that reds CI for everyone.
+    # Key on `.parts` (not the joined string): pathlib orders component-wise, so
+    # "a/b" sorts before "a-x/c" while a plain string compare flips them ('-' <
+    # '/').  Parts therefore reproduce the existing POSIX order exactly -- the
+    # committed digests stay valid and no re-lock is needed.
+    for p in sorted(d.glob(glob),
+                    key=lambda q: PurePosixPath(q.relative_to(root).as_posix()).parts) \
+            if d.is_dir() else []:
         h.update(p.relative_to(root).as_posix().encode())
         h.update(b"\0")
         h.update(hashlib.sha256(p.read_bytes()).hexdigest().encode())

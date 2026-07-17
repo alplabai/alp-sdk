@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import sys
@@ -153,3 +154,47 @@ def test_cli_check_fails_on_drift(tmp_path):
     r = _run_cli(ws, "--check")
     assert r.returncode == 1
     assert "west.projects[hal_alif].revision" in (r.stdout + r.stderr)
+
+
+def test_dir_digest_orders_by_posix_parts(tmp_path):
+    """The digest's file order must be POSIX component-wise, host-independent.
+
+    `sorted(Path)` compares pathlib's case-normalised form: on Windows that is
+    lower-cased and backslash-separated, so the same tree hashed to a different
+    digest there than on Linux CI.  A Windows checkout then false-reported
+    drift, and re-locking there would have committed a Windows-ordered digest
+    that reds CI for everyone.
+
+    The fixture is chosen so the intended order differs from BOTH plausible
+    wrong keys: a plain string sort (puts "a-x/c" before "a/b", since '-' <
+    '/') and a Windows-normcase sort (lower-cases, so "B.yaml" sorts last).  A
+    string-key regression fails this on any host.  The Windows-normcase
+    regression is only observable when this test itself runs on Windows --
+    which is precisely where that bug lives.
+    """
+    from alp_lock import _dir_digest
+
+    d = tmp_path / "metadata"
+    (d / "a").mkdir(parents=True)
+    (d / "a-x").mkdir(parents=True)
+    (d / "B.yaml").write_bytes(b"B\n")
+    (d / "a.yaml").write_bytes(b"a\n")
+    (d / "a" / "b.yaml").write_bytes(b"b\n")
+    (d / "a-x" / "c.yaml").write_bytes(b"c\n")
+
+    # Hard-coded intended order -- stated independently of the implementation.
+    expected_order = [
+        "metadata/B.yaml",
+        "metadata/a/b.yaml",
+        "metadata/a-x/c.yaml",
+        "metadata/a.yaml",
+    ]
+    h = hashlib.sha256()
+    for rel in expected_order:
+        h.update(rel.encode())
+        h.update(b"\0")
+        h.update(hashlib.sha256((tmp_path / rel).read_bytes()).hexdigest().encode())
+        h.update(b"\n")
+    expected = "sha256:" + h.hexdigest()
+
+    assert _dir_digest(tmp_path, "metadata", "**/*.yaml") == expected
