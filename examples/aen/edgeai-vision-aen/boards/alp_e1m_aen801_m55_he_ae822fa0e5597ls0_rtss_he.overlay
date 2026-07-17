@@ -84,6 +84,19 @@
 };
 
 / {
+    /* Link into ITCM (reset vector 0x0000xxxx) so the skeleton is a
+     * J-Link RAM-run target (Flow C) -- same as aen-analog-validate and
+     * aen-secure-element-sign.  Without this the image links at the MRAM
+     * base (0x8000xxxx), which neither Flow C (needs 0x0) nor an SES
+     * slot0 boot (needs 0x8001xxxx) can launch, so it would build but
+     * never run.  A persistent slot0 build instead would use
+     * CONFIG_FLASH_LOAD_OFFSET=0x10000 (see aen-eeprom-manifest); this
+     * demo is RAM-run only. */
+    chosen {
+        zephyr,flash = &itcm;
+        /delete-property/ zephyr,code-partition;
+    };
+
     aliases {
         alp-i2c0 = &i2c2;        /* EVK sensor bus (LSM6DSO, SSD1306, ...) */
     };
