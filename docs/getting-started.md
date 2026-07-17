@@ -521,14 +521,20 @@ boards, libraries; inline diagnostics from `validate_board_yaml.py`
 in the Problems panel), a GUI configurator panel with dropdowns
 for supported SoM presets + boards, west wrappers (build / flash /
 run native_sim), per-OS dependency bootstrap, and a one-keypress
-*Alp: Generate all* command for the six loader emit modes.  Build
-+ install locally:
+*Alp: Generate all* command for the four emit modes (`zephyr-conf`,
+`dts-overlay`, `cmake-args`, `yocto-conf`).  Install from the
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=alplabai.alp-sdk)
+for normal use.  To build from source instead (a separate repo --
+there is no `vscode/` directory in alp-sdk itself):
 
 ```bash
-cd vscode
-npm install && npm run package
+git clone https://github.com/alplabai/alp-sdk-vscode && cd alp-sdk-vscode
+pnpm install && pnpm run package
 code --install-extension alp-sdk-*.vsix
 ```
+
+Note: this is a **pnpm workspace, not npm** -- don't run `npm install` /
+`npm run package` against it.
 
 Key tasks (Command Palette → **Tasks: Run Task**):
 
