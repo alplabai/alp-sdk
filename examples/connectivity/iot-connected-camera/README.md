@@ -39,7 +39,7 @@ iot-connected-camera/
 ├── prj.conf                      # SDK + chips + IoT + camera + GUI toggles
 ├── testcase.yaml                 # twister: compile + smoke under native_sim
 ├── boards/
-│   ├── alp_e1m_v2n101_m33_sm.overlay   # V2N EVK pinout (HIL scenario parked)
+│   ├── alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.overlay   # V2N EVK pinout (HIL scenario parked)
 │   └── native_sim_native_64.overlay
 ├── src/
 │   └── main.c                    # skeleton with v0.1 init + v0.2/v0.3 stubs
