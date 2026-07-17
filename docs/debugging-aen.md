@@ -23,9 +23,10 @@ itself, so you don't need to pick a device manually. This needs no MRAM
 write and does not go through SETOOLS.
 
 Prefer `west attach` over `west debug` on a board that's already running:
-a J-Link reset asserts `AIRCR.SYSRESETREQ`, which reboots the Secure
-Enclave (SES), not just the M55 — `west debug` resets before attaching,
-so it takes that reboot; `west attach` does not.
+a J-Link `reset` can perturb the SES / boot state (the exact
+`AIRCR.SYSRESETREQ` reset scope — SES vs. M55-only — is unresolved, see
+[`aen-bench-bringup.md`](aen-bench-bringup.md)) — `west debug` resets
+before attaching, so it risks that disturbance; `west attach` does not.
 
 ## 2. The Alif part-number device vs. the generic device
 
