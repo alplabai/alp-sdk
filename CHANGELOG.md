@@ -7,6 +7,31 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Fixed — three gates passed on CI but false-failed on a Windows checkout (#829)
+
+- **`alp.lock`'s digest was host-dependent.** `alp_lock._dir_digest` ordered
+  files with `sorted(Path)`, which compares pathlib's case-normalised form —
+  lower-cased and backslash-separated on Windows. The same tree therefore
+  digested to a different sha on Windows than on Linux CI, so `alp-lock
+  --check` false-reported `digests.metadata` drift there. The dangerous half:
+  "fixing" that drift with `west alp-lock` on Windows would have committed a
+  Windows-ordered digest that reds CI for everyone. Now keyed on the relative
+  path's POSIX `.parts`. Parts — not the joined string — reproduce the existing
+  POSIX order exactly (`a/b` sorts before `a-x/c`, whereas a string compare
+  flips them since `-` < `/`), so the committed digests stay valid and no
+  re-lock is needed. `tests/scripts/test_alp_lock.py` pins the ordering against
+  a fixture whose intended order differs from both a string-sort and a
+  Windows-normcase sort.
+- **`check_emit_snapshots` normalised only the head of a path.** The checkout
+  root became `<SDK_ROOT>`, but the tail kept the host separator, so Windows
+  produced `"<SDK_ROOT>\\firmware\\x"` against a golden of
+  `"<SDK_ROOT>/firmware/x"` and all four `build-plan` cases DIFFed. Separators
+  are now rewritten inside token-led runs only, leaving JSON escapes elsewhere
+  untouched; POSIX output is unchanged. (`--update` on Windows would have
+  written Windows-flavoured goldens that break Linux CI.)
+- **`alp-lock --check` named the mismatch but not the remedy** — it now prints
+  the `west alp-lock` regenerate command.
+
 ## [v0.11.0] - 2026-07-16
 
 ### Fixed — the ABI freeze gate's own tests broke on every release bump (#826)
